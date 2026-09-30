@@ -1,10 +1,15 @@
-.PHONY: check build dev
+.PHONY: check check-contracts build dev
 
 # Compile, vet and unit-test. Calls no paid model and touches no testnet.
 check:
 	go vet ./...
 	go test ./... -count=1
 	go build ./...
+
+# Go contracts and independent display-adapter vectors share fixed fixtures.
+check-contracts:
+	go test ./internal/contracts/... -count=1
+	node scripts/check-contract-vectors.mjs
 
 build:
 	go build -o bin/demo ./cmd/demo

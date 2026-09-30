@@ -2,7 +2,7 @@
 
 建立在 x402 之上的 Agent 付款授權與證據層：Agent 可以提出付款，但不能自己批准，也不能自己簽名。
 
-> **目前狀態：只有開發骨架（任務 B1-01）。** 可以啟動一個只綁 loopback 的本機服務、回應 health、跑測試。
+> **目前狀態：B1-00／01 已驗收；B1-02 共用契約已開始實作，待契約 review。** 可啟動 loopback 服務、回應 health、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md)。
 > 尚未實作：商店與 402、Claude Code wrapper、policy 裁決、事件、展示層、任何付款或簽章。
 > 第一個里程碑 M1 的終點是 **請購與 Ask／Deny**，沒有真付款。邊界見 [docs/m1-boundaries.md](docs/m1-boundaries.md)。
 
@@ -12,6 +12,7 @@
 |---|---|---|
 | Go | 1.26 以上（以 1.26.4 驗證） | 編譯與測試 |
 | make | 系統內建即可 | `make check`、`make dev` |
+| Node.js | 20 以上 | 僅 `make check-contracts` 的獨立展示端向量檢查；啟動 Go 服務不需要 |
 
 只 checkout 這個 repo 就能安裝、啟動與測試。不需要其他 repo、submodule、symlink 或 local module replace，目前也沒有任何第三方 Go 套件。
 
@@ -91,6 +92,9 @@ cmd/demo/          本機服務進入點與 health endpoint
 internal/config/   環境變數載入與驗證
 docs/              M1 邊界說明
 scripts/           可重跑的驗收腳本
+internal/contracts/ M1 fixture 契約與語意驗證
+schemas/           JSON Schema
+testdata/contracts/ 固定測試向量與待 reviewer 接受的事前案例
 ```
 
 ## 在受限沙箱裡跑測試

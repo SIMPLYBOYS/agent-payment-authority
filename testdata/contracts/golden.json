@@ -1,0 +1,7 @@
+{
+  "resource_hash":"sha256:c88c855ee14b57dffe362e0c7b6ec0adde73f0aa18fb7276ea903ac38e6281cb",
+  "payment_requirement_hash":"sha256:4cac4dea09321551d5a6139c0e0e321a1813e7ff15678bee420ec737583cc4a3",
+  "intent_hash":"sha256:1d5af731c2823b4210dfcf3441c6872c337c4708d8527293b37b098a008cb3ba",
+  "canonical_intent":"{\"agent_id\":\"agent-a\",\"amount\":\"500000\",\"asset_contract\":\"0x4444444444444444444444444444444444444444\",\"chain_id\":\"84532\",\"consumer_id\":\"consumer-a\",\"domain\":\"agent-payment-authority/m1-fixture/v1/verifier-not-deployed\",\"eip3009_nonce\":\"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"from\":\"0x1111111111111111111111111111111111111111\",\"http_method\":\"GET\",\"pay_to\":\"0x3333333333333333333333333333333333333333\",\"payment_requirement_hash\":\"sha256:4cac4dea09321551d5a6139c0e0e321a1813e7ff15678bee420ec737583cc4a3\",\"purchase_order_id\":\"po-a-1\",\"resource_hash\":\"sha256:c88c855ee14b57dffe362e0c7b6ec0adde73f0aa18fb7276ea903ac38e6281cb\",\"resource_url\":\"http://127.0.0.1:8402/resources/kr-market?edition=1\",\"scheme\":\"exact\",\"task_id\":\"task-a\",\"valid_after\":1790726400,\"valid_before\":1790727000,\"version\":\"apa.m1.v1\",\"wallet_id\":\"wallet-a\",\"x402_version\":2}",
+  "canonical_cases":[{"input":{"z":1,"a":"資料 & terms","b":[true,null,"😀"]},"canonical":"{\"a\":\"資料 \\u0026 terms\",\"b\":[true,null,\"😀\"],\"z\":1}"}]
+}
