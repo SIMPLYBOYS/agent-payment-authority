@@ -1,5 +1,6 @@
-// Command demo runs the local M1 demo server. It binds loopback only, has no
-// payment capability, and never starts the live Claude Code CLI.
+// Command demo runs the local M1 demo server: health and the fixture data shop
+// (catalog and HTTP 402). It binds loopback only, has no payment capability,
+// and never starts the live Claude Code CLI.
 package main
 
 import (
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/config"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 )
 
 func main() {
@@ -47,7 +49,14 @@ func run(ctx context.Context, getenv func(string) string, ready chan<- string) e
 		return fmt.Errorf("refusing to serve on non-loopback address %s", ln.Addr())
 	}
 
-	srv := &http.Server{Handler: newMux(), ReadHeaderTimeout: 5 * time.Second}
+	// The shop states URLs on the address actually bound, never on the Host
+	// header a client sends.
+	shop, err := merchant.New("http://" + ln.Addr().String())
+	if err != nil {
+		ln.Close()
+		return err
+	}
+	srv := &http.Server{Handler: newMux(shop), ReadHeaderTimeout: 5 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	log.Printf("listening on http://%s (fixture mode, live CLI off, no payment capability)", ln.Addr())
@@ -65,9 +74,10 @@ func run(ctx context.Context, getenv func(string) string, ready chan<- string) e
 	return srv.Shutdown(shutdownCtx)
 }
 
-func newMux() *http.ServeMux {
+func newMux(shop *merchant.Merchant) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealth)
+	shop.Register(mux)
 	return mux
 }
 

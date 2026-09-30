@@ -1,0 +1,368 @@
+package merchant
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
+)
+
+// The expected wire fixtures are written for this base URL; the handler is
+// served on a random loopback port, which the base URL does not depend on.
+const base = "http://127.0.0.1:8402"
+const resourcePath = "/resources/kr-market?edition=1"
+const canary = "APA-PROTECTED"
+
+func shop(t *testing.T) *httptest.Server {
+	t.Helper()
+	m, err := New(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	m.Register(mux)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func golden(t *testing.T, name string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile("../../testdata/merchant/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := contracts.Canonical(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+type reply struct {
+	status   int
+	header   http.Header
+	body     string
+	required x402.PaymentRequired
+	rawPR    []byte // canonical decoded PAYMENT-REQUIRED, nil if absent
+}
+
+// get sends one request and checks what every response must satisfy: no
+// protected content in the body or any header (decoded PAYMENT-REQUIRED
+// included) and no settlement header.
+func get(t *testing.T, srv *httptest.Server, method, path string, header http.Header) reply {
+	t.Helper()
+	req, err := http.NewRequest(method, srv.URL+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if header != nil {
+		req.Header = header
+	}
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	r := reply{status: resp.StatusCode, header: resp.Header, body: string(body)}
+	if h := resp.Header.Get(x402.HeaderPaymentRequired); h != "" {
+		if err := x402.Decode(h, &r.required); err != nil {
+			t.Fatalf("PAYMENT-REQUIRED does not decode: %v", err)
+		}
+		raw, _ := base64.StdEncoding.DecodeString(h)
+		r.rawPR, _ = contracts.Canonical(raw)
+	}
+	all := r.body + string(r.rawPR) + fmt.Sprint(resp.Header)
+	if strings.Contains(all, canary) || strings.Contains(all, "Synthetic fixture text") {
+		t.Fatalf("%s %s leaked protected content: %s", method, path, all)
+	}
+	if resp.Header.Get("PAYMENT-RESPONSE") != "" {
+		t.Fatalf("%s %s sent PAYMENT-RESPONSE; M1 settles nothing", method, path)
+	}
+	return r
+}
+
+func TestProtectedContentExists(t *testing.T) {
+	// The leak checks only mean something if there is content to leak.
+	if !strings.Contains(products[0].content, canary) {
+		t.Fatal("fixture content lost its canary")
+	}
+}
+
+func TestCatalog(t *testing.T) {
+	srv := shop(t)
+	r := get(t, srv, "GET", "/catalog", nil)
+	if r.status != 200 || r.header.Get("Content-Type") != "application/json" {
+		t.Fatalf("catalog: %d %q", r.status, r.header.Get("Content-Type"))
+	}
+	got, err := contracts.Canonical([]byte(r.body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := golden(t, "catalog.json"); string(got) != string(want) {
+		t.Fatalf("catalog\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestPaymentRequired(t *testing.T) {
+	srv := shop(t)
+	r := get(t, srv, "GET", resourcePath, nil)
+	if r.status != http.StatusPaymentRequired {
+		t.Fatalf("status = %d, want 402", r.status)
+	}
+	if want := golden(t, "payment-required.json"); string(r.rawPR) != string(want) {
+		t.Fatalf("PAYMENT-REQUIRED\n got %s\nwant %s", r.rawPR, want)
+	}
+	if err := r.required.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.body, "PAYMENT-SIGNATURE header is required") {
+		t.Fatalf("body = %s", r.body)
+	}
+
+	// The stated URL comes from the configured base, never from the request.
+	spoof := get(t, srv, "GET", resourcePath, http.Header{"X-Forwarded-Host": {"evil.example"}})
+	req, _ := http.NewRequest("GET", srv.URL+resourcePath, nil)
+	req.Host = "evil.example"
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	var hosted x402.PaymentRequired
+	if err := x402.Decode(resp.Header.Get(x402.HeaderPaymentRequired), &hosted); err != nil {
+		t.Fatal(err)
+	}
+	for _, url := range []string{spoof.required.Resource.URL, hosted.Resource.URL} {
+		if url != base+resourcePath {
+			t.Fatalf("resource URL %q follows the request, want %q", url, base+resourcePath)
+		}
+	}
+}
+
+// The 402 quote must plug into the accepted B1-02 contract unchanged: a
+// purchase order built from it validates, including ownership for task-a.
+func TestQuoteBindsIntoPurchaseOrder(t *testing.T) {
+	srv := shop(t)
+	pr := get(t, srv, "GET", resourcePath, nil).required
+	quote, err := pr.Quote(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqHash, err := quote.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req x402.Requirement
+	if err := json.Unmarshal(quote.SelectedRequirement, &req); err != nil {
+		t.Fatal(err)
+	}
+	reg := registry(t)
+	task, wallet, err := reg.Binding("task-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resHash, err := contracts.ResourceHash("GET", pr.Resource.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	po := contracts.PurchaseOrder{
+		Version:   contracts.Version,
+		RequestID: "request-1",
+		Quote:     quote,
+		Intent: contracts.AuthorizationIntent{
+			Version: contracts.Version, Domain: contracts.FixtureDomain,
+			ConsumerID: task.ConsumerID, AgentID: task.AgentID, WalletID: wallet.WalletID, TaskID: task.TaskID,
+			PurchaseOrderID: "po-a-1", ResourceHash: resHash, HTTPMethod: "GET", ResourceURL: pr.Resource.URL,
+			X402Version: pr.X402Version, Scheme: req.Scheme, PaymentRequirementHash: reqHash,
+			ChainID: strings.TrimPrefix(req.Network, "eip155:"), AssetContract: req.Asset,
+			From: wallet.From, PayTo: req.PayTo, Amount: req.Amount,
+			ValidAfter: 1790726400, ValidBefore: 1790727000, EIP3009Nonce: "0x" + strings.Repeat("a", 64),
+		},
+	}
+	session := contracts.Session{ConsumerID: task.ConsumerID, AgentID: task.AgentID, TaskID: task.TaskID}
+	if err := reg.ValidatePurchase(session, po); err != nil {
+		t.Fatalf("purchase order built from the 402 quote: %v", err)
+	}
+	if _, err := po.Intent.Hash(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func registry(t *testing.T) *contracts.Registry {
+	t.Helper()
+	raw, err := os.ReadFile("../../testdata/contracts/registry.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c contracts.RegistryConfig
+	if err := contracts.Decode(raw, &c); err != nil {
+		t.Fatal(err)
+	}
+	r, err := contracts.NewRegistry(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// The shop's fixture must agree with the host-trusted registry and with its
+// own displayed prices, or Policy would judge a quote the catalog misstates.
+func TestFixtureMatchesRegistry(t *testing.T) {
+	raw, err := os.ReadFile("../../testdata/contracts/registry.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c contracts.RegistryConfig
+	if err := contracts.Decode(raw, &c); err != nil {
+		t.Fatal(err)
+	}
+	reg := registry(t)
+	for _, p := range products {
+		q := p.Requirement
+		if q.PayTo != c.MerchantPayTo {
+			t.Errorf("%s payTo %s, registry merchant %s", p.ID, q.PayTo, c.MerchantPayTo)
+		}
+		asset, ok := reg.TrustedAsset(strings.TrimPrefix(q.Network, "eip155:"), q.Asset)
+		if !ok || q.Extra["name"] != asset.EIP712Name || q.Extra["version"] != asset.EIP712Version {
+			t.Fatalf("%s asset %s on %s is not the trusted asset %+v", p.ID, q.Asset, q.Network, asset)
+		}
+		units, err := q.Amount.Units()
+		if err != nil {
+			t.Fatal(err)
+		}
+		one := uint64(1)
+		for range asset.Decimals {
+			one *= 10
+		}
+		if got := fmt.Sprintf("%d.%02d test USDC", units/one, units%one*100/one); got != p.AssetDisplay {
+			t.Errorf("%s shows %q, amount is %s", p.ID, p.AssetDisplay, got)
+		}
+		fiat, _ := contracts.Amount(p.FiatAmount).Units()
+		rate, _ := contracts.Amount(p.FXRate).Units()
+		if fiat*one != units*rate {
+			t.Errorf("%s: %s %s at %s per unit is not %s", p.ID, p.FiatAmount, p.FiatCurrency, p.FXRate, p.AssetDisplay)
+		}
+	}
+}
+
+func TestWrongResourceIsNotFound(t *testing.T) {
+	srv := shop(t)
+	paid := http.Header{x402.HeaderPaymentSignature: {signature(t, nil)}}
+	for _, path := range []string{"/resources/kr-market", "/resources/kr-market?edition=2", resourcePath + "&x=1", "/resources/other?edition=1", "/resources/", "/fetch?url=https://example.com"} {
+		for _, h := range []http.Header{nil, paid} {
+			if r := get(t, srv, "GET", path, h); r.status != 404 || r.rawPR != nil {
+				t.Errorf("GET %s (signature %v): %d, PAYMENT-REQUIRED %s; want 404 without a quote", path, h != nil, r.status, r.rawPR)
+			}
+		}
+	}
+	for _, path := range []string{resourcePath, "/catalog"} {
+		if r := get(t, srv, "POST", path, paid); r.status != http.StatusMethodNotAllowed {
+			t.Errorf("POST %s: %d, want 405", path, r.status)
+		}
+	}
+}
+
+// signature builds a well-formed PaymentPayload for the offer; mutate edits it.
+func signature(t *testing.T, mutate func(p map[string]any)) string {
+	t.Helper()
+	var pr map[string]any
+	if err := json.Unmarshal(golden(t, "payment-required.json"), &pr); err != nil {
+		t.Fatal(err)
+	}
+	p := map[string]any{
+		"x402Version": 2,
+		"resource":    pr["resource"],
+		"accepted":    pr["accepts"].([]any)[0],
+		"payload": map[string]any{
+			"signature": "0x" + strings.Repeat("ab", 65),
+			"authorization": map[string]any{
+				"from": "0x1111111111111111111111111111111111111111", "to": "0x3333333333333333333333333333333333333333",
+				"value": "500000", "validAfter": "1790726400", "validBefore": "1790727000", "nonce": "0x" + strings.Repeat("a", 64),
+			},
+		},
+	}
+	if mutate != nil {
+		mutate(p)
+	}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(raw)
+}
+
+func accepted(field string, v any) func(map[string]any) {
+	return func(p map[string]any) { p["accepted"].(map[string]any)[field] = v }
+}
+
+// No PAYMENT-SIGNATURE, however well-formed, gets the resource in M1.
+// Malformed or mismatched ones are 400 and well-formed ones 402, as the
+// spec's HTTP error mapping says.
+func TestPaymentSignatureNeverDelivers(t *testing.T) {
+	srv := shop(t)
+	b64 := base64.StdEncoding.EncodeToString
+	valid := signature(t, nil)
+	cases := []struct {
+		name   string
+		values []string
+		status int
+		code   string
+	}{
+		{"well-formed for this offer", []string{valid}, 402, "M1_PAYMENT_UNAVAILABLE"},
+		{"well-formed without resource", []string{signature(t, func(p map[string]any) { delete(p, "resource") })}, 402, "M1_PAYMENT_UNAVAILABLE"},
+		{"plain word", []string{"paid"}, 400, x402.ErrInvalidPayload},
+		{"empty value", []string{""}, 400, x402.ErrInvalidPayload},
+		{"two headers", []string{valid, valid}, 400, x402.ErrInvalidPayload},
+		{"base64 of non-JSON", []string{b64([]byte("settled=true"))}, 400, x402.ErrInvalidPayload},
+		{"duplicate member", []string{b64([]byte(`{"x402Version":2,"x402Version":2,"accepted":{},"payload":{}}`))}, 400, x402.ErrInvalidPayload},
+		{"unknown member", []string{signature(t, func(p map[string]any) { p["settled"] = true })}, 400, x402.ErrInvalidPayload},
+		{"missing payload", []string{signature(t, func(p map[string]any) { delete(p, "payload") })}, 400, x402.ErrInvalidPayload},
+		{"payload not an object", []string{signature(t, func(p map[string]any) { p["payload"] = "0xsig" })}, 400, x402.ErrInvalidPayload},
+		{"float amount", []string{signature(t, accepted("amount", 0.5))}, 400, x402.ErrInvalidPayload},
+		{"oversized", []string{b64([]byte(`{"x402Version":2,"pad":"` + strings.Repeat("x", contracts.MaxJSONBytes) + `"}`))}, 400, x402.ErrInvalidPayload},
+		{"version 1", []string{signature(t, func(p map[string]any) { p["x402Version"] = 1 })}, 400, x402.ErrInvalidVersion},
+		{"other resource", []string{signature(t, func(p map[string]any) { p["resource"] = map[string]any{"url": "https://evil.example/data"} })}, 400, x402.ErrInvalidPayload},
+		{"scheme upto", []string{signature(t, accepted("scheme", "upto"))}, 400, x402.ErrInvalidScheme},
+		{"mainnet network", []string{signature(t, accepted("network", "eip155:8453"))}, 400, x402.ErrInvalidNetwork},
+		{"lower amount", []string{signature(t, accepted("amount", "1"))}, 400, x402.ErrInvalidRequirements},
+		{"other payTo", []string{signature(t, accepted("payTo", "0x1111111111111111111111111111111111111111"))}, 400, x402.ErrInvalidRequirements},
+		{"extra transfer method", []string{signature(t, func(p map[string]any) {
+			p["accepted"].(map[string]any)["extra"].(map[string]any)["assetTransferMethod"] = "permit2"
+		})}, 400, x402.ErrInvalidRequirements},
+		{"case-variant key", []string{signature(t, accepted("PayTo", "0x1111111111111111111111111111111111111111"))}, 400, x402.ErrInvalidRequirements},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := get(t, srv, "GET", resourcePath, http.Header{x402.HeaderPaymentSignature: c.values})
+			var body problem
+			if err := json.Unmarshal([]byte(r.body), &body); err != nil {
+				t.Fatalf("body %q: %v", r.body, err)
+			}
+			if r.status != c.status || body.Error != c.code {
+				t.Fatalf("got %d %q (%s), want %d %q", r.status, body.Error, body.Message, c.status, c.code)
+			}
+			// Every rejection restates the offer so a client can retry correctly.
+			if r.required.Error != body.Message || len(r.required.Accepts) != 1 {
+				t.Fatalf("PAYMENT-REQUIRED = %s", r.rawPR)
+			}
+		})
+	}
+}
+
+func TestNewRejectsBadBaseURL(t *testing.T) {
+	for _, b := range []string{"", "127.0.0.1:8402", "ftp://127.0.0.1", "http://", "http://127.0.0.1:8402/", "http://127.0.0.1:8402/shop", "http://u@127.0.0.1", "http://127.0.0.1?x=1", "http://127.0.0.1#f"} {
+		if _, err := New(b); err == nil {
+			t.Errorf("New(%q) accepted", b)
+		}
+	}
+}

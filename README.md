@@ -2,8 +2,8 @@
 
 建立在 x402 之上的 Agent 付款授權與證據層：Agent 可以提出付款，但不能自己批准，也不能自己簽名。
 
-> **目前狀態：B1-00～02 已驗收（B1-02 共用契約 `apa.m1.v2` fixture，10/1 於 `2dc8d93` 結案）；B1-03 已解鎖，B1-05 待 B1-03。** 可啟動 loopback 服務、回應 health、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md)。
-> 尚未實作：商店與 402、Claude Code wrapper、policy 裁決、事件、展示層、任何付款或簽章。
+> **目前狀態：B1-00～02 已驗收（B1-02 共用契約 `apa.m1.v2` fixture，10/1 於 `2dc8d93` 結案）；B1-03 最小資料商店（目錄＋402）已實作，待 review；B1-05 待 B1-03。** 可啟動 loopback 服務、回應 health、提供商品目錄與 HTTP 402 報價、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md) 與 [docs/merchant.md](docs/merchant.md)。
+> 尚未實作：Claude Code wrapper、policy 裁決、事件、展示層、任何付款、簽章或付費內容交付。
 > 第一個里程碑 M1 的終點是 **請購與 Ask／Deny**，沒有真付款。邊界見 [docs/m1-boundaries.md](docs/m1-boundaries.md)。
 
 ## 需求
@@ -35,6 +35,15 @@ curl http://127.0.0.1:8402/healthz
 ```json
 {"status":"ok","mode":"fixture","live_cli":false,"claude_login":"not_checked","payment_capability":"unavailable"}
 ```
+
+商店（fixture 資料，沒有付款能力）：
+
+```sh
+curl http://127.0.0.1:8402/catalog                                  # 200，商品目錄，不含付費內容
+curl -i 'http://127.0.0.1:8402/resources/kr-market?edition=1'      # 402，報價在 PAYMENT-REQUIRED header（base64 JSON）
+```
+
+帶任何 `PAYMENT-SIGNATURE` 都拿不到內容：格式不對回 400，格式正確也只回 402，因為 M1 無法驗證或結算付款。細節見 [docs/merchant.md](docs/merchant.md)。
 
 **停止**：在執行 `make dev` 的終端按 `Ctrl-C`（或對該行程送 `SIGTERM`）。服務會關閉 listener 後結束，port 隨即釋放，可以直接再啟動一次。
 
@@ -103,15 +112,19 @@ sh scripts/verify/container-verify.sh --inject-export truncate  # 匯出故障�
 ## 目錄
 
 ```text
-cmd/demo/          本機服務進入點與 health endpoint
+cmd/demo/          本機服務進入點：health 與商店路由
 internal/config/   環境變數載入與驗證
 docs/              M1 邊界說明
 scripts/           可重跑的驗收腳本；scripts/verify/ 為容器隔離驗證（僅供驗證）
 internal/contracts/ M1 fixture 契約與語意驗證
 schemas/           JSON Schema
 testdata/contracts/ 固定測試向量與已接受的事前案例（cases.json）
+internal/merchant/ fixture 資料商店：目錄、受保護資源與 402
+internal/x402/     x402 v2 HTTP header 編解碼（不驗證、不結算）
+testdata/merchant/ 商店的預期 wire 輸出（手寫）
+testdata/x402/     x402 規格原文的範例 header（互通向量）
 ```
 
 ## 在受限沙箱裡跑測試
 
-`cmd/demo` 的測試會在 loopback 上開臨時 port。若執行環境禁止本機綁定 port，會看到 `bind: operation not permitted`，這是環境限制，不是測試失敗。
+`cmd/demo` 與 `internal/merchant` 的測試會在 loopback 上開臨時 port。若執行環境禁止本機綁定 port，會看到 `bind: operation not permitted`，這是環境限制，不是測試失敗。

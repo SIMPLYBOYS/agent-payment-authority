@@ -1,0 +1,21 @@
+{
+  "x402Version": 2,
+  "error": "PAYMENT-SIGNATURE header is required",
+  "resource": {
+    "url": "http://127.0.0.1:8402/resources/kr-market?edition=1",
+    "description": "Korean market brief, edition 1 (fixture)",
+    "mimeType": "application/json"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:84532",
+      "amount": "500000",
+      "asset": "0x4444444444444444444444444444444444444444",
+      "payTo": "0x3333333333333333333333333333333333333333",
+      "maxTimeoutSeconds": 60,
+      "extra": {"name": "USDC", "version": "2"}
+    }
+  ],
+  "extensions": {}
+}

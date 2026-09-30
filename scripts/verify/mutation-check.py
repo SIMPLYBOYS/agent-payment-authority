@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mutation check for the B1-02 regression tests (round 2).
+"""Mutation check for the B1-02 and B1-03 regression tests.
 
 For one commit, export it with git archive into a throwaway directory per
 mutation, re-introduce one review finding with an exact text replacement, and
@@ -91,7 +91,39 @@ MUTATIONS = [
      "TestDeadlineManifestConsistency"),
     ("R3 deadline off by one (elapsed > deadline)", "internal/contracts/evidence.go",
      "if elapsed >= deadline {", "if elapsed > deadline {", "TestDeadlineManifestConsistency"),
+    # B1-03: the shop never delivers, states only configured URLs, and the
+    # x402 codec fails closed. Tests run in the mutated file's own package.
+    ("B1-03 content served for a well-formed signature", "internal/merchant/merchant.go",
+     "\tw.WriteHeader(status)\n\tjson.NewEncoder(w).Encode(body)",
+     "\tif body.Error == \"M1_PAYMENT_UNAVAILABLE\" {\n\t\tw.WriteHeader(200)\n\t\tw.Write([]byte(o.content))\n\t\treturn\n\t}\n\tw.WriteHeader(status)\n\tjson.NewEncoder(w).Encode(body)",
+     "TestPaymentSignatureNeverDelivers"),
+    ("B1-03 resource URL taken from the Host header", "internal/merchant/merchant.go",
+     "\tpr := o.required\n", "\tpr := o.required\n\tpr.Resource.URL = \"http://\" + r.Host + o.Path + \"?\" + o.Query\n", "TestPaymentRequired"),
+    ("B1-03 any accepted requirement allowed", "internal/merchant/merchant.go",
+     "if !bytes.Equal(p.Accepted, o.accepts) {", "if false && !bytes.Equal(p.Accepted, o.accepts) {", "TestPaymentSignatureNeverDelivers"),
+    ("B1-03 payload for another resource allowed", "internal/merchant/merchant.go",
+     "p.Resource != nil && p.Resource.URL != o.url", "false", "TestPaymentSignatureNeverDelivers"),
+    ("B1-03 query not matched", "internal/merchant/merchant.go",
+     'o, ok := m.offers[r.URL.Path+"?"+r.URL.RawQuery]', 'o, ok := m.offers[r.URL.Path+"?edition=1"]', "TestWrongResourceIsNotFound"),
+    ("B1-03 payload version not checked", "internal/merchant/merchant.go",
+     "if p.X402Version != x402.Version {", "if false {", "TestPaymentSignatureNeverDelivers"),
+    ("B1-03 non-object payload allowed", "internal/merchant/merchant.go",
+     "if p.Payload[0] != '{' {", "if false {", "TestPaymentSignatureNeverDelivers"),
+    ("B1-03 repeated PAYMENT-SIGNATURE allowed", "internal/merchant/merchant.go",
+     "if len(values) != 1 {", "if len(values) == 0 {", "TestPaymentSignatureNeverDelivers"),
+    ("B1-03 fixture price drifts from its golden and display", "internal/merchant/merchant.go",
+     'Amount:            "500000",', 'Amount:            "400000",', "TestCatalog|TestPaymentRequired|TestFixtureMatchesRegistry"),
+    ("B1-03 lenient base64", "internal/x402/x402.go",
+     "base64.StdEncoding.Strict().DecodeString(header)", "base64.StdEncoding.DecodeString(header)", "TestDecodeFailsClosed"),
+    ("B1-03 extensions dropped from the quote", "internal/x402/x402.go",
+     "Extensions: ext}", "Extensions: json.RawMessage(`{}`)}", "TestQuote"),
+    ("B1-03 offer version not checked", "internal/x402/x402.go",
+     "if p.X402Version != Version {", "if false {", "TestQuote"),
 ]
+
+
+def pkg(rel):
+    return "./" + str(pathlib.PurePosixPath(rel).parent) + "/"
 
 
 def run(cmd, cwd):
@@ -123,7 +155,7 @@ def main():
 
     with tempfile.TemporaryDirectory() as tmp:
         export(root, sha, tmp)
-        rc, log = run(["go", "test", "./internal/contracts/", "-count=1"], tmp)
+        rc, log = run(["go", "test", *sorted({pkg(m[1]) for m in MUTATIONS}), "-count=1"], tmp)
         (out / "baseline.log").write_text(log)
         lines.append(f"baseline (no mutation): {'PASS' if rc == 0 else 'FAIL'}")
         ok = ok and rc == 0
@@ -144,7 +176,7 @@ def main():
                 ok = False
                 continue
             path.write_text(mutated)
-            rc, log = run(["go", "test", "./internal/contracts/", "-run", test, "-count=1"], tmp)
+            rc, log = run(["go", "test", pkg(rel), "-run", test, "-count=1"], tmp)
             (out / f"mutation-{n:02d}.log").write_text(log)
             killed = rc != 0 and "--- FAIL" in log
             verdict = "KILLED" if killed else ("BUILD?" if rc != 0 else "SURVIVED")

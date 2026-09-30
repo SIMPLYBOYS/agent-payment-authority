@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
 
 func envAddr(addr string) func(string) string {
@@ -52,7 +55,11 @@ func start(t *testing.T, addr string) (string, func() error) {
 }
 
 func TestHealthHandler(t *testing.T) {
-	srv := httptest.NewServer(newMux())
+	shop, err := merchant.New("http://127.0.0.1:8402")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(newMux(shop))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/healthz")
@@ -96,6 +103,7 @@ func TestRunServesAndReleasesPort(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
+	checkShop(t, addr)
 	if err := stop(); err != nil {
 		t.Fatalf("run returned %v after cancel, want nil", err)
 	}
@@ -134,5 +142,41 @@ func TestRunMissingConfig(t *testing.T) {
 	err := run(context.Background(), envAddr(""), nil)
 	if err == nil || !strings.Contains(err.Error(), "APA_ADDR is required") {
 		t.Fatalf("run error = %v, want one containing %q", err, "APA_ADDR is required")
+	}
+}
+
+// checkShop walks the real server the way a buyer would: catalog, then the
+// resource URL it lists, which must name the bound address and answer 402.
+func checkShop(t *testing.T, addr string) {
+	t.Helper()
+	resp, err := http.Get("http://" + addr + "/catalog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var catalog struct {
+		Products []struct {
+			ResourceURL string `json:"resource_url"`
+		} `json:"products"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&catalog)
+	resp.Body.Close()
+	if err != nil || resp.StatusCode != http.StatusOK || len(catalog.Products) == 0 {
+		t.Fatalf("catalog: %d, %v, %+v", resp.StatusCode, err, catalog)
+	}
+	url := catalog.Products[0].ResourceURL
+	if !strings.HasPrefix(url, "http://"+addr+"/") {
+		t.Fatalf("resource_url %q is not on the bound address %s", url, addr)
+	}
+	resp, err = http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	var pr x402.PaymentRequired
+	if resp.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("GET %s: %d, want 402", url, resp.StatusCode)
+	}
+	if err := x402.Decode(resp.Header.Get(x402.HeaderPaymentRequired), &pr); err != nil || pr.Resource.URL != url {
+		t.Fatalf("PAYMENT-REQUIRED: %v, resource %q, want %q", err, pr.Resource.URL, url)
 	}
 }

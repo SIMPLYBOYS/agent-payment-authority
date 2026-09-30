@@ -1,0 +1,22 @@
+{
+  "merchant": "APA fixture data shop",
+  "evidence_mode": "fixture",
+  "price_note": "Catalog prices are informational. The binding quote is the PAYMENT-REQUIRED header of the HTTP 402 from resource_url.",
+  "products": [
+    {
+      "product_id": "kr-market",
+      "title": "Korean market brief, edition 1 (fixture)",
+      "summary": "Synthetic sample: sector moves and FX notes. The catalog carries no paid content.",
+      "http_method": "GET",
+      "resource_url": "http://127.0.0.1:8402/resources/kr-market?edition=1",
+      "price": {
+        "asset_amount": "500000",
+        "asset_display": "0.50 test USDC",
+        "fiat_amount": "700",
+        "fiat_currency": "KRW",
+        "fx_rate": "1400",
+        "fx_source": "fixture, not live FX"
+      }
+    }
+  ]
+}
