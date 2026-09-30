@@ -1,6 +1,7 @@
 """Negative tests for evidence_import.py. Run from the repo root:
 python3 -m unittest discover -s scripts/verify -p 'test_*.py'
 """
+import errno
 import hashlib
 import io
 import pathlib
@@ -8,6 +9,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import evidence_import as ei  # noqa: E402
@@ -169,6 +171,44 @@ class ImportTest(unittest.TestCase):
         self.assertEqual((status, count), ("aborted by the isolation self-check", 2))
 
 
+class BrokenSink:
+    """Stand-in for a destination file whose write, flush or close fails."""
+
+    def __init__(self, real, fail):
+        self.real, self.fail = real, fail
+
+    def write(self, data):
+        if self.fail == "write":
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return self.real.write(data)
+
+    def flush(self):
+        if self.fail == "flush":
+            raise OSError(errno.EIO, "Input/output error")
+        self.real.flush()
+
+    def close(self):
+        self.real.close()
+        if self.fail == "close":
+            raise OSError(errno.EIO, "Input/output error")
+
+
+def broken_open(target, fail):
+    """An open() whose file named `target` fails at `fail`; others are real."""
+    real_open = open
+
+    def fake(path, mode="r", *args, **kwargs):
+        f = real_open(path, mode, *args, **kwargs)
+        return BrokenSink(f, fail) if pathlib.Path(path).name == target else f
+
+    return fake
+
+
+# The child writes to both streams and exits 0, so only a capture I/O error
+# can make the result non-zero.
+BOTH_STREAMS_OK = "import sys; sys.stdout.write('123'); sys.stderr.write('log'); sys.exit(0)"
+
+
 class CaptureTest(unittest.TestCase):
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
@@ -191,6 +231,36 @@ class CaptureTest(unittest.TestCase):
 
     def test_timeout_fails(self):
         self.assertEqual(self.capture("import time; time.sleep(30)", timeout=1), 91)
+
+    def test_destination_cannot_be_opened(self):
+        # Codex's reproduction: stderr's directory is missing, the child exits
+        # 0 and stdout would be saved; the capture must still fail.
+        for stream in ("out", "err"):
+            with self.subTest(stream=stream):
+                paths = {"out": self.tmp / f"out-{stream}", "err": self.tmp / f"err-{stream}"}
+                paths[stream] = self.tmp / "missing" / stream
+                rc = ei.do_capture([sys.executable, "-c", BOTH_STREAMS_OK], paths["out"], paths["err"], 1000, 1000, 30)
+                self.assertEqual(rc, 92)
+
+    def test_write_flush_close_failures(self):
+        for stream in ("out", "err"):
+            for fail in ("write", "flush", "close"):
+                with self.subTest(stream=stream, fail=fail):
+                    tmp = pathlib.Path(tempfile.mkdtemp())
+                    with mock.patch.object(ei, "open", broken_open(stream, fail), create=True):
+                        rc = ei.do_capture([sys.executable, "-c", BOTH_STREAMS_OK], tmp / "out", tmp / "err", 1000, 1000, 30)
+                    self.assertEqual(rc, 92)
+                    other = "err" if stream == "out" else "out"
+                    self.assertEqual((tmp / other).read_bytes(), b"log" if other == "err" else b"123",
+                                     "the other stream is saved normally")
+
+    def test_failing_stream_does_not_leave_the_child_blocked(self):
+        # The child floods stderr beyond the pipe buffer; saving stderr fails at
+        # once, so nothing drains it. The child must be killed, not time out.
+        flood = "import sys\nfor _ in range(200): sys.stderr.write('x' * 65536)\nsys.exit(0)"
+        with mock.patch.object(ei, "open", broken_open("err", "write"), create=True):
+            rc = self.capture(flood, max_err=64 * 1024 * 1024, timeout=30)
+        self.assertEqual(rc, 92)
 
 
 if __name__ == "__main__":

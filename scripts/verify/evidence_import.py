@@ -6,8 +6,10 @@ passed.
 
   capture --out F --err F --max-out N --max-err N --timeout S -- CMD...
       Runs CMD, keeps at most N bytes of stdout/stderr. Exceeding a cap or the
-      timeout kills CMD and exits 90 (overflow) or 91 (timeout); otherwise
-      exits with CMD's code.
+      timeout kills CMD and exits 90 (overflow) or 91 (timeout). Any I/O error
+      while saving either stream (open, read, write, flush, close) kills CMD
+      and exits 92, even if CMD itself succeeded. Otherwise exits with CMD's
+      code.
 
   import --archive F --dest DIR --staging DIR --mode MODE
       Validates the archive and, only if it is valid, copies the files to DIR
@@ -150,22 +152,51 @@ def do_import(archive, dest, staging, mode):
 
 
 def do_capture(cmd, out, err, max_out, max_err, timeout):
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    overflow = []
+    # Open both destinations before starting CMD: a destination that cannot be
+    # opened fails the capture without running anything.
+    sinks = []
+    try:
+        for path in (out, err):
+            sinks.append(open(path, "xb"))
+    except OSError as e:
+        for f in sinks:
+            f.close()
+        print(f"capture: cannot open output: {e}", file=sys.stderr)
+        return 92
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as e:
+        for f in sinks:
+            f.close()
+        print(f"capture: cannot start command: {e}", file=sys.stderr)
+        return 92
+    overflow, errors = [], []
 
-    def pump(src, path, limit, label):
+    # pump runs in a thread; every exception is handed back through errors and
+    # kills CMD, so a stream that stops being drained cannot block it forever.
+    def pump(src, f, limit, label):
         n = 0
-        with open(path, "xb") as f:
+        try:
             while chunk := src.read(65536):
                 if n + len(chunk) > limit:
                     f.write(chunk[: limit - n])
                     overflow.append(label)
                     p.kill()
-                    return
+                    break
                 f.write(chunk)
                 n += len(chunk)
+            f.flush()
+        except BaseException as e:  # noqa: BLE001 - any failure must reach the caller
+            errors.append(f"{label}: {e!r}")
+            p.kill()
+        finally:
+            try:
+                f.close()
+            except BaseException as e:  # noqa: BLE001
+                errors.append(f"{label} close: {e!r}")
+                p.kill()
 
-    threads = [threading.Thread(target=pump, args=a) for a in ((p.stdout, out, max_out, "stdout"), (p.stderr, err, max_err, "stderr"))]
+    threads = [threading.Thread(target=pump, args=a) for a in ((p.stdout, sinks[0], max_out, "stdout"), (p.stderr, sinks[1], max_err, "stderr"))]
     for t in threads:
         t.start()
     timed_out = False
@@ -179,6 +210,9 @@ def do_capture(cmd, out, err, max_out, max_err, timeout):
         t.join()
     p.stdout.close()
     p.stderr.close()
+    if errors:
+        print(f"capture: saving output failed ({'; '.join(errors)}); command killed", file=sys.stderr)
+        return 92
     if overflow:
         print(f"capture: {', '.join(overflow)} exceeded its limit; command killed", file=sys.stderr)
         return 90
