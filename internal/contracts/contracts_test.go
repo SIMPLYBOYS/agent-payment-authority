@@ -3,6 +3,7 @@ package contracts
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -45,6 +46,7 @@ func mustPass(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+// rehash is used by the review probes in artifacts/b1-02-review/_probe.
 func rehash(t *testing.T, p *PurchaseOrder) {
 	t.Helper()
 	h, err := p.Quote.Hash()
@@ -76,8 +78,21 @@ func TestGoldenVectors(t *testing.T) {
 			Input     json.RawMessage `json:"input"`
 			Canonical string          `json:"canonical"`
 		} `json:"canonical_cases"`
+		Genesis     string   `json:"event_genesis_task_a"`
+		EventHashes []string `json:"event_hashes"`
 	}
 	fixture(t, "golden.json", &g)
+	genesis, err := GenesisHash("task-a")
+	mustPass(t, err)
+	events := chainFixture(t)
+	if genesis != g.Genesis || len(events) != len(g.EventHashes) {
+		t.Fatal("event genesis or chain length changed")
+	}
+	for i, e := range events {
+		if h, err := EventHash(e); err != nil || h != g.EventHashes[i] {
+			t.Fatalf("event %s hash changed", e.EventID)
+		}
+	}
 	rh, err := ResourceHash(p.Intent.HTTPMethod, p.Intent.ResourceURL)
 	mustPass(t, err)
 	qh, err := p.Quote.Hash()
@@ -264,7 +279,9 @@ func event(t *testing.T) (AuditEvent, PurchaseOrder, *Registry) {
 	r, _ := registry(t)
 	h, err := p.Intent.Hash()
 	mustPass(t, err)
-	return AuditEvent{Version: Version, EventID: "event-1", EventType: "POLICY_DECIDED", Scope: &EventScope{"consumer-a", "agent-a", "wallet-a", "task-a", "po-a-1", h}, Sequence: 1, Payload: EventPayload{Decision: &PolicyDecision{Version, h, "Ask", "pending", "unavailable", "HUMAN_APPROVAL_REQUIRED"}}, EvidenceMode: "fixture", Source: "policy", ObservedAt: 1790726450}, p, r
+	genesis, err := GenesisHash("task-a")
+	mustPass(t, err)
+	return AuditEvent{Version: Version, EventID: "event-1", EventType: "POLICY_DECIDED", Scope: &EventScope{"consumer-a", "agent-a", "wallet-a", "task-a", "po-a-1", h}, Sequence: 1, PrevEventHash: genesis, Payload: EventPayload{Decision: &PolicyDecision{Version, h, "Ask", "pending", "unavailable", "HUMAN_APPROVAL_REQUIRED"}}, EvidenceMode: "fixture", Source: "policy", ObservedAt: 1790726450}, p, r
 }
 func TestEventAndStateBoundaries(t *testing.T) {
 	e, p, r := event(t)
@@ -284,15 +301,11 @@ func TestEventAndStateBoundaries(t *testing.T) {
 	mustFail(t, r.ValidateEvent(e, &p))
 	e.Payload = EventPayload{Code: "EXIT_0"}
 	mustPass(t, r.ValidateEvent(e, &p))
-	e.EventID = "event-2"
-	e.Sequence = 2
-	first, _, _ := event(t)
-	mustPass(t, ValidateEventOrder([]AuditEvent{first, e}))
-	mustFail(t, ValidateEventOrder([]AuditEvent{e, first}))
-	mustFail(t, ValidateEventOrder([]AuditEvent{first, first}))
+	// Stream order and the hash chain are covered by TestEventChain and
+	// TestEventTransitionRules.
 	system := AuditEvent{Version: Version, EventID: "system-1", EventType: "SYSTEM_READY", EvidenceMode: "fixture", Source: "host", ObservedAt: 1790726450}
 	mustPass(t, r.ValidateEvent(system, nil))
-	system.Scope = first.Scope
+	system.Scope = e.Scope
 	mustFail(t, r.ValidateEvent(system, nil))
 }
 
@@ -311,7 +324,7 @@ func TestManifestReviewGate(t *testing.T) {
 	m.Reviewer = "test-reviewer"
 	h, err := m.Hash()
 	mustPass(t, err)
-	r := RunManifest{Version: Version, RunID: "fixture-run", CodeCommit: "97ef4e9", DirtyPatchDigest: "sha256:" + strings.Repeat("0", 64), ConfigDigest: "sha256:" + strings.Repeat("1", 64), CaseManifestDigest: h, Versions: map[string]string{"go": "test"}, Commands: []CommandResult{{"test", 0}}, NotEvaluated: []string{"signer", "zk", "settlement"}}
+	r := RunManifest{Version: Version, RunID: "fixture-run", CodeCommit: "97ef4e9", DirtyPatchDigest: "sha256:" + strings.Repeat("0", 64), ConfigDigest: "sha256:" + strings.Repeat("1", 64), CaseManifestDigest: h, Versions: map[string]string{"go": "test"}, Commands: []CommandResult{{"test", 0}}, NotEvaluated: slices.Clone(CapabilityIDs)}
 	for _, c := range m.Cases {
 		r.Results = append(r.Results, ClaimResult{c.CaseID, "INCONCLUSIVE", []string{}, "not executed"})
 	}
@@ -337,11 +350,22 @@ func TestContractCasesFromManifest(t *testing.T) {
 			r, _ := registry(t)
 			result := ""
 			var err error
+			accept := func(e error) {
+				err, result = e, "accept"
+				if e != nil {
+					result = "reject"
+				}
+			}
 			switch c.Operation {
 			case "compare-retry":
 				incoming := p
-				if c.Parameters["mutation"] == "nonce" {
+				switch c.Parameters["mutation"] {
+				case "nonce":
 					incoming.Intent.EIP3009Nonce = "0x" + strings.Repeat("b", 64)
+				case "request_id":
+					incoming.RequestID = "request-2"
+				case "other_consumer":
+					incoming = asB(p) // same request_id, other consumer
 				}
 				result, err = CompareRetry(p, incoming)
 				if err != nil {
@@ -355,28 +379,32 @@ func TestContractCasesFromManifest(t *testing.T) {
 				if c.Parameters["purchase"] == "b" {
 					p = asB(p)
 				}
-				err = r.ValidatePurchase(s, p)
-				result = "accept"
-				if err != nil {
-					result = "reject"
+				b := asB(p)
+				switch c.Parameters["mutation"] {
+				case "wallet_b":
+					p.Intent.WalletID = b.Intent.WalletID
+				case "from_b":
+					p.Intent.From = b.Intent.From
+				case "consumer_b":
+					p.Intent.ConsumerID = b.Intent.ConsumerID
+				case "agent_b":
+					p.Intent.AgentID = b.Intent.AgentID
 				}
+				accept(r.ValidatePurchase(s, p))
 			case "validate-decision":
 				h, e := p.Intent.Hash()
 				mustPass(t, e)
-				d := PolicyDecision{Version, h, "Ask", "pending", c.Parameters["payment_status"], "HUMAN_APPROVAL_REQUIRED"}
-				err = d.Validate()
-				result = "accept"
-				if err != nil {
-					result = "reject"
-				}
+				accept(PolicyDecision{Version, h, "Ask", "pending", c.Parameters["payment_status"], "HUMAN_APPROVAL_REQUIRED"}.Validate())
+			case "validate-purchase":
+				accept(mutatePurchase(t, p, c.Parameters["mutation"]).Validate())
 			default:
 				t.Fatalf("unimplemented contract case operation %s", c.Operation)
 			}
 			if result != c.Expected.Result {
 				t.Fatalf("got %s, expected %s (%v)", result, c.Expected.Result, err)
 			}
-			if err != nil && (c.Expected.Reason == "IDEMPOTENCY_CONFLICT" || c.Expected.Reason == "OWNERSHIP_MISMATCH") && !strings.Contains(err.Error(), c.Expected.Reason) {
-				t.Fatalf("unexpected reason %v", err)
+			if err != nil && ErrorCode(err) != c.Expected.Reason {
+				t.Fatalf("reason code %q, expected %q (%v)", ErrorCode(err), c.Expected.Reason, err)
 			}
 		})
 	}

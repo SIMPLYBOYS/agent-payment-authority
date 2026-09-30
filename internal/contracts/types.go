@@ -2,10 +2,13 @@ package contracts
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
+	"strings"
 )
 
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
@@ -13,6 +16,41 @@ var addressPattern = regexp.MustCompile(`^0x[0-9a-f]{40}$`)
 var noncePattern = regexp.MustCompile(`^0x[0-9a-f]{64}$`)
 var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 var decimalPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
+
+// CodedError carries a stable reason code. Callers and the B1-07 checker
+// compare Code, never the message text.
+type CodedError struct{ Code, Detail string }
+
+func (e *CodedError) Error() string { return e.Code + ": " + e.Detail }
+func coded(code, detail string) error { return &CodedError{code, detail} }
+
+// ErrorCode returns the stable code carried by err, or "" when it has none.
+func ErrorCode(err error) string {
+	var c *CodedError
+	if errors.As(err, &c) {
+		return c.Code
+	}
+	return ""
+}
+
+// ReasonCodes is the closed M1 v2 list of outcome and rejection reasons used by
+// decisions, events and expected case outcomes. Adding one needs a new version.
+var ReasonCodes = []string{
+	// Policy outcomes.
+	"HUMAN_APPROVAL_REQUIRED", "INSUFFICIENT_BUDGET", "MERCHANT_NOT_ALLOWED", "AUTHORIZATION_EXPIRED",
+	"CONFIG_MISSING", "APPROVER_UNAVAILABLE", "ASSET_NOT_ALLOWED", "TASK_NOT_ACTIVE", "PAYMENT_CAPABILITY_UNAVAILABLE",
+	// Approval and task lifecycle.
+	"APPROVAL_TIMEOUT", "HOST_CANCELLED", "CLI_TIMEOUT", "PERSISTED_BINDING",
+	// Contract guards.
+	"SAME_PAYLOAD", "NEW_REQUEST", "IDEMPOTENCY_CONFLICT", "VALID_BINDING", "OWNERSHIP_MISMATCH",
+	"VALID_DECISION", "M1_PAYMENT_UNAVAILABLE", "INVALID_DECISION", "VALID_PURCHASE",
+	"UNSUPPORTED_TRANSFER_METHOD", "AMBIGUOUS_KEY", "INVALID_EVENT_ORDER", "EVENT_CHAIN_BROKEN",
+}
+
+var policyVerdicts = []string{"Ask", "Deny", "Allow"}
+var approvalStatuses = []string{"pending", "not_requested", "expired", "withdrawn"}
+var evidenceModes = []string{"fixture", "live", "replay"}
+var denyReasons = []string{"INSUFFICIENT_BUDGET", "MERCHANT_NOT_ALLOWED", "AUTHORIZATION_EXPIRED", "CONFIG_MISSING", "APPROVER_UNAVAILABLE", "ASSET_NOT_ALLOWED", "TASK_NOT_ACTIVE"}
 
 // Amount is an unsigned uint64 base-unit quantity serialized ONLY as a string.
 // USDC fixture precision is six decimals. It is not a uint256 wire codec.
@@ -104,6 +142,10 @@ type PurchaseOrder struct {
 	Intent    AuthorizationIntent `json:"intent"`
 	Quote     Quote               `json:"quote"`
 }
+
+// PolicyDecision records the policy's verdict. An Ask keeps its verdict for
+// life; expired/withdrawn close its approval request in a later event
+// (APPROVAL_EXPIRED / APPROVAL_WITHDRAWN) without rewriting the original.
 type PolicyDecision struct {
 	Version        string `json:"version"`
 	IntentHash     string `json:"intent_hash"`
@@ -123,6 +165,9 @@ func ids(values ...string) bool {
 }
 func timestamp(v uint64) bool { return v > 0 && v <= 253402300799 }
 func chain(v string) bool     { a, err := Amount(v).Units(); return err == nil && a > 0 }
+
+// object canonicalizes a raw quote part, requires a JSON object and rejects
+// keys that differ only by case anywhere inside it.
 func object(raw []byte) error {
 	c, err := Canonical(raw)
 	if err != nil {
@@ -130,6 +175,39 @@ func object(raw []byte) error {
 	}
 	if len(c) == 0 || c[0] != '{' {
 		return fmt.Errorf("expected JSON object")
+	}
+	var v any
+	if err := json.Unmarshal(c, &v); err != nil {
+		return err
+	}
+	return foldUnique(v)
+}
+
+// foldUnique rejects "payTo" next to "payto": encoding/json matches struct
+// fields case-insensitively, so a later wire decoder could read a different
+// value than the one this contract checked.
+// ponytail: pairwise EqualFold per object is O(n²) keys; quote objects are small.
+func foldUnique(v any) error {
+	switch x := v.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k, child := range x {
+			for _, seen := range keys {
+				if strings.EqualFold(k, seen) {
+					return coded("AMBIGUOUS_KEY", fmt.Sprintf("keys %q and %q differ only by case", seen, k))
+				}
+			}
+			keys = append(keys, k)
+			if err := foldUnique(child); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, child := range x {
+			if err := foldUnique(child); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -158,8 +236,9 @@ func (i AuthorizationIntent) Validate() error {
 	if i.HTTPMethod != "GET" && i.HTTPMethod != "POST" {
 		return fmt.Errorf("unsupported method")
 	}
+	// Any '#' is refused: url.Parse reports an empty fragment ("…#") as none.
 	u, err := url.Parse(i.ResourceURL)
-	if err != nil || u.Hostname() == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
+	if err != nil || u.Hostname() == "" || u.User != nil || strings.Contains(i.ResourceURL, "#") || (u.Scheme != "http" && u.Scheme != "https") {
 		return fmt.Errorf("invalid resource URL")
 	}
 	rh, err := ResourceHash(i.HTTPMethod, i.ResourceURL)
@@ -187,6 +266,10 @@ func (i AuthorizationIntent) Hash() (string, error) {
 	}
 	return digestValue(i.Domain+"/intent", i)
 }
+
+// Validate checks shape, quote/intent consistency and the transfer path. It
+// says nothing about Policy: an unlisted asset or payee still passes here and
+// must reach the deterministic Deny in B1-05.
 func (p PurchaseOrder) Validate() error {
 	if p.Version != Version || !ids(p.RequestID) {
 		return fmt.Errorf("invalid purchase order")
@@ -195,7 +278,10 @@ func (p PurchaseOrder) Validate() error {
 		return err
 	}
 	h, err := p.Quote.Hash()
-	if err != nil || h != p.Intent.PaymentRequirementHash || p.Quote.X402Version != p.Intent.X402Version {
+	if err != nil {
+		return err
+	}
+	if h != p.Intent.PaymentRequirementHash || p.Quote.X402Version != p.Intent.X402Version {
 		return fmt.Errorf("requirement hash mismatch")
 	}
 	var req map[string]json.RawMessage
@@ -209,25 +295,42 @@ func (p PurchaseOrder) Validate() error {
 			return fmt.Errorf("requirement %s mismatch", k)
 		}
 	}
+	// x402 picks the transfer path from extra.assetTransferMethod (default
+	// eip3009). An M1 intent carries an EIP-3009 nonce, so any other path fails.
+	if raw, ok := req["extra"]; ok {
+		var extra map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &extra); err != nil {
+			return coded("UNSUPPORTED_TRANSFER_METHOD", "requirement extra must be an object")
+		}
+		if m, ok := extra["assetTransferMethod"]; ok {
+			var method string
+			if json.Unmarshal(m, &method) != nil || method != "eip3009" {
+				return coded("UNSUPPORTED_TRANSFER_METHOD", "M1 accepts only assetTransferMethod eip3009 or none")
+			}
+		}
+	}
 	return nil
 }
 func (d PolicyDecision) Validate() error {
-	if d.Version != Version || !digestPattern.MatchString(d.IntentHash) || !ids(d.Reason) || d.PaymentStatus != "unavailable" {
-		return fmt.Errorf("invalid M1 decision")
+	if d.Version != Version || !digestPattern.MatchString(d.IntentHash) {
+		return coded("INVALID_DECISION", "version or intent hash")
 	}
+	if d.PaymentStatus != "unavailable" {
+		return coded("M1_PAYMENT_UNAVAILABLE", "M1 cannot pay; payment_status must be unavailable")
+	}
+	ok := false
 	switch d.PolicyVerdict {
 	case "Ask":
-		if d.ApprovalStatus == "pending" {
-			return nil
-		}
+		ok = d.ApprovalStatus == "pending" && d.Reason == "HUMAN_APPROVAL_REQUIRED" ||
+			d.ApprovalStatus == "expired" && d.Reason == "APPROVAL_TIMEOUT" ||
+			d.ApprovalStatus == "withdrawn" && d.Reason == "HOST_CANCELLED"
 	case "Deny":
-		if d.ApprovalStatus == "not_requested" {
-			return nil
-		}
+		ok = d.ApprovalStatus == "not_requested" && slices.Contains(denyReasons, d.Reason)
 	case "Allow":
-		if d.ApprovalStatus == "not_requested" && d.Reason == "PAYMENT_CAPABILITY_UNAVAILABLE" {
-			return nil
-		}
+		ok = d.ApprovalStatus == "not_requested" && d.Reason == "PAYMENT_CAPABILITY_UNAVAILABLE"
 	}
-	return fmt.Errorf("invalid verdict/approval combination; M1 cannot approve or settle")
+	if !ok {
+		return coded("INVALID_DECISION", "verdict, approval status and reason do not form an M1 decision; M1 cannot approve or settle")
+	}
+	return nil
 }

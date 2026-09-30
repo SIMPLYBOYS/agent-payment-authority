@@ -1,5 +1,5 @@
 {
-  "version": "apa.m1.v1",
+  "version": "apa.m1.v2",
   "consumers": [
     {"consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a"},
     {"consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b"}
@@ -8,10 +8,13 @@
     {"wallet_id":"wallet-a","chain_id":"84532","from":"0x1111111111111111111111111111111111111111","evidence_mode":"fixture"},
     {"wallet_id":"wallet-b","chain_id":"84532","from":"0x2222222222222222222222222222222222222222","evidence_mode":"fixture"}
   ],
+  "assets": [
+    {"asset_id":"fixture-usdc","chain_id":"84532","asset_contract":"0x4444444444444444444444444444444444444444","decimals":6,"eip712_name":"USDC","eip712_version":"2"}
+  ],
   "tasks": [
-    {"version":"apa.m1.v1","task_id":"task-a","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790726400},
-    {"version":"apa.m1.v1","task_id":"task-a-next","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790726500},
-    {"version":"apa.m1.v1","task_id":"task-b","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790726400}
+    {"version":"apa.m1.v2","task_id":"task-a","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790726400},
+    {"version":"apa.m1.v2","task_id":"task-a-next","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790726500},
+    {"version":"apa.m1.v2","task_id":"task-b","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790726400}
   ],
   "merchant_pay_to":"0x3333333333333333333333333333333333333333"
 }

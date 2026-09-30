@@ -1,6 +1,10 @@
 package contracts
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"slices"
+)
 
 type EventScope struct {
 	ConsumerID      string `json:"consumer_id"`
@@ -17,36 +21,59 @@ type EventPayload struct {
 	Code     string          `json:"code,omitempty"`
 	Decision *PolicyDecision `json:"decision,omitempty"`
 }
+
+// AuditEvent is one link of its task's hash chain. PrevEventHash is the
+// EventHash of the previous event of the same task, or GenesisHash(task) for
+// sequence 1; SYSTEM_READY has no task and no chain. An event never carries
+// its own hash.
 type AuditEvent struct {
-	Version      string       `json:"version"`
-	EventID      string       `json:"event_id"`
-	EventType    string       `json:"event_type"`
-	Scope        *EventScope  `json:"scope,omitempty"`
-	Sequence     uint64       `json:"sequence"`
-	Payload      EventPayload `json:"payload"`
-	EvidenceMode string       `json:"evidence_mode"`
-	Source       string       `json:"source"`
-	ObservedAt   uint64       `json:"observed_at"`
+	Version       string       `json:"version"`
+	EventID       string       `json:"event_id"`
+	EventType     string       `json:"event_type"`
+	Scope         *EventScope  `json:"scope,omitempty"`
+	Sequence      uint64       `json:"sequence"`
+	PrevEventHash string       `json:"prev_event_hash,omitempty"`
+	Payload       EventPayload `json:"payload"`
+	EvidenceMode  string       `json:"evidence_mode"`
+	Source        string       `json:"source"`
+	ObservedAt    uint64       `json:"observed_at"`
 }
 
+// M1 event types. There is no APPROVED, GRANT_ISSUED, SETTLED or
+// RESOURCE_DELIVERED: M1 cannot approve, grant, settle or deliver.
+var eventTypes = []string{"SYSTEM_READY", "TASK_STARTED", "PURCHASE_PROPOSED", "POLICY_DECIDED", "APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN", "TASK_CANCELLED", "TASK_TIMED_OUT", "CLI_EXITED"}
+
+// Approval states each decision-carrying event may record.
+var decisionApprovals = map[string][]string{
+	"POLICY_DECIDED":     {"pending", "not_requested"},
+	"APPROVAL_EXPIRED":   {"expired"},
+	"APPROVAL_WITHDRAWN": {"withdrawn"},
+}
+
+// Lifecycle events and their required code ("" = any ID). TASK_TIMED_OUT is
+// the CLI/task timeout only; an approval timeout is APPROVAL_EXPIRED.
+var lifecycleCodes = map[string]string{"TASK_CANCELLED": "HOST_CANCELLED", "TASK_TIMED_OUT": "CLI_TIMEOUT", "CLI_EXITED": ""}
+
+// ValidateEvent checks one event's shape and bindings. It ignores the task's
+// current status, so events of a cancelled or failed task remain verifiable.
 func (r *Registry) ValidateEvent(e AuditEvent, order *PurchaseOrder) error {
 	if e.Version != Version || !ids(e.EventID, e.Source) || !timestamp(e.ObservedAt) || e.Sequence > MaxSafeInteger {
 		return fmt.Errorf("invalid event metadata")
 	}
-	if e.EvidenceMode != "fixture" && e.EvidenceMode != "live" && e.EvidenceMode != "replay" {
+	if !slices.Contains(evidenceModes, e.EvidenceMode) {
 		return fmt.Errorf("missing/invalid evidence mode")
 	}
 	if e.Payload.Code != "" && !ids(e.Payload.Code) {
 		return fmt.Errorf("invalid event code")
 	}
 	if e.EventType == "SYSTEM_READY" {
-		if e.Scope != nil || e.Sequence != 0 || e.Payload.Decision != nil || order != nil {
-			return fmt.Errorf("system event must not invent task/intent")
+		if e.Scope != nil || e.Sequence != 0 || e.PrevEventHash != "" || e.Payload.Decision != nil || order != nil {
+			return fmt.Errorf("system event must not invent task, chain or intent")
 		}
 		return nil
 	}
-	if e.Scope == nil || e.Sequence == 0 {
-		return fmt.Errorf("task event needs scope and positive sequence")
+	if e.Scope == nil || e.Sequence == 0 || !digestPattern.MatchString(e.PrevEventHash) {
+		return fmt.Errorf("task event needs scope, positive sequence and prev_event_hash")
 	}
 	s := e.Scope
 	t, _, err := r.Binding(s.TaskID)
@@ -54,7 +81,7 @@ func (r *Registry) ValidateEvent(e AuditEvent, order *PurchaseOrder) error {
 		return err
 	}
 	if s.ConsumerID != t.ConsumerID || s.AgentID != t.AgentID || s.WalletID != t.WalletID {
-		return fmt.Errorf("event ownership mismatch")
+		return coded("OWNERSHIP_MISMATCH", "event scope does not match the task binding")
 	}
 	if s.PurchaseOrderID == "" {
 		if s.IntentHash != "" || order != nil {
@@ -72,29 +99,33 @@ func (r *Registry) ValidateEvent(e AuditEvent, order *PurchaseOrder) error {
 			return fmt.Errorf("event intent mismatch")
 		}
 	}
+	d := e.Payload.Decision
 	switch e.EventType {
 	case "TASK_STARTED":
-		if s.PurchaseOrderID != "" || e.Payload.Decision != nil {
+		if s.PurchaseOrderID != "" || d != nil {
 			return fmt.Errorf("task start cannot imply purchase")
 		}
 	case "PURCHASE_PROPOSED":
-		if s.PurchaseOrderID == "" || e.Payload.Decision != nil {
+		if s.PurchaseOrderID == "" || d != nil {
 			return fmt.Errorf("invalid purchase event")
 		}
-	case "POLICY_DECIDED":
-		if s.PurchaseOrderID == "" || e.Payload.Decision == nil {
-			return fmt.Errorf("missing policy decision")
+	case "POLICY_DECIDED", "APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN":
+		if s.PurchaseOrderID == "" || d == nil {
+			return fmt.Errorf("%s needs a purchase and a decision", e.EventType)
 		}
-		d := e.Payload.Decision
 		if err := d.Validate(); err != nil {
 			return err
 		}
 		if d.IntentHash != s.IntentHash {
 			return fmt.Errorf("decision intent mismatch")
 		}
+		if !slices.Contains(decisionApprovals[e.EventType], d.ApprovalStatus) {
+			return coded("INVALID_DECISION", e.EventType+" cannot record approval_status "+d.ApprovalStatus)
+		}
 	case "TASK_CANCELLED", "TASK_TIMED_OUT", "CLI_EXITED":
-		if e.Payload.Code == "" || e.Payload.Decision != nil {
-			return fmt.Errorf("lifecycle event cannot approve/settle")
+		want := lifecycleCodes[e.EventType]
+		if e.Payload.Code == "" || (want != "" && e.Payload.Code != want) || d != nil {
+			return fmt.Errorf("%s needs code %s and cannot approve/settle", e.EventType, want)
 		}
 	default:
 		return fmt.Errorf("unsupported M1 event; cannot approve, grant, settle or deliver")
@@ -102,23 +133,97 @@ func (r *Registry) ValidateEvent(e AuditEvent, order *PurchaseOrder) error {
 	return nil
 }
 
-// ValidateEventOrder checks complete streams starting at sequence 1 per task.
-// Per-event metadata/binding validation must be performed separately above.
+// EventHash is the value the next event of the same task stores as
+// prev_event_hash: a fixture-domain digest of the whole canonical event,
+// including its own prev_event_hash.
+func EventHash(e AuditEvent) (string, error) {
+	return digestValue(FixtureDomain+"/event", e)
+}
+
+// GenesisHash is prev_event_hash for sequence 1. Binding it to the task ID
+// stops a chain prefix from being replayed under another task.
+func GenesisHash(taskID string) (string, error) {
+	return digestValue(FixtureDomain+"/event-genesis", map[string]string{"task_id": taskID})
+}
+
+type chainState struct {
+	next             uint64
+	prev             string
+	ended            bool
+	proposed, closed map[string]bool
+	verdict          map[string]string
+}
+
+// ValidateEventOrder checks complete per-task streams: IDs unique, sequence
+// contiguous from 1, the prev_event_hash chain, and the M1 transition rules
+// (docs/contracts.md). It is pure: it cannot see a truncated tail or a fully
+// recomputed chain without an external checkpoint, and it persists nothing.
+// Run ValidateEvent on each event separately.
 func ValidateEventOrder(events []AuditEvent) error {
-	idsSeen, next := map[string]bool{}, map[string]uint64{}
+	seen, tasks := map[string]bool{}, map[string]*chainState{}
 	for _, e := range events {
-		if idsSeen[e.EventID] {
-			return fmt.Errorf("duplicate event ID")
+		if seen[e.EventID] {
+			return coded("INVALID_EVENT_ORDER", "duplicate event ID "+e.EventID)
 		}
-		idsSeen[e.EventID] = true
+		seen[e.EventID] = true
 		if e.Scope == nil {
 			continue
 		}
-		key := e.Scope.TaskID
-		if e.Sequence != next[key]+1 {
-			return fmt.Errorf("event sequence gap/reorder")
+		task := e.Scope.TaskID
+		st := tasks[task]
+		if st == nil {
+			genesis, err := GenesisHash(task)
+			if err != nil {
+				return err
+			}
+			st = &chainState{prev: genesis, proposed: map[string]bool{}, closed: map[string]bool{}, verdict: map[string]string{}}
+			tasks[task] = st
 		}
-		next[key] = e.Sequence
+		if e.Sequence != st.next+1 {
+			return coded("INVALID_EVENT_ORDER", fmt.Sprintf("task %s: sequence %d after %d", task, e.Sequence, st.next))
+		}
+		if e.PrevEventHash != st.prev {
+			return coded("EVENT_CHAIN_BROKEN", fmt.Sprintf("task %s: event %s does not link to the previous event", task, e.EventID))
+		}
+		if err := st.apply(e); err != nil {
+			return coded("INVALID_EVENT_ORDER", fmt.Sprintf("task %s: event %s: %v", task, e.EventID, err))
+		}
+		h, err := EventHash(e)
+		if err != nil {
+			return err
+		}
+		st.next, st.prev = e.Sequence, h
+	}
+	return nil
+}
+
+// apply enforces the transition table for one task-scoped event.
+func (st *chainState) apply(e AuditEvent) error {
+	po := e.Scope.PurchaseOrderID
+	if (st.next == 0) != (e.EventType == "TASK_STARTED") {
+		return errors.New("TASK_STARTED must be the first event and appear once")
+	}
+	switch e.EventType {
+	case "PURCHASE_PROPOSED":
+		if st.ended || st.proposed[po] {
+			return errors.New("no purchase after the task ended, and one proposal per purchase")
+		}
+		st.proposed[po] = true
+	case "POLICY_DECIDED":
+		if st.ended || !st.proposed[po] || st.verdict[po] != "" || e.Payload.Decision == nil {
+			return errors.New("a decision needs an earlier proposal, comes once per purchase and not after the task ended")
+		}
+		st.verdict[po] = e.Payload.Decision.PolicyVerdict
+	case "APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN":
+		if st.verdict[po] != "Ask" || st.closed[po] {
+			return errors.New("only an open Ask can expire or be withdrawn, once")
+		}
+		st.closed[po] = true
+	case "TASK_CANCELLED", "TASK_TIMED_OUT":
+		if st.ended {
+			return errors.New("task already ended")
+		}
+		st.ended = true
 	}
 	return nil
 }

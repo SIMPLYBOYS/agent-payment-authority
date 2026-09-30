@@ -3,7 +3,7 @@
 狀態：S4-A 研究草稿第二版，待 Aaron 或指定 reviewer 接受。**不代表採用任何候選。** 本輪沒有 PoC、部署、注資或交易。
 
 - 查核日期：2026-09-30。
-- 契約審查對象：`57791d1`（分支 `b1-02-contracts`）。
+- 契約審查對象：`57791d1` 初審；B1-02 升版為 `apa.m1.v2` 後重核，契約影響見 contracts.md 文末一節。
 - 決策草案見 [ADR：付款帳戶模型](../adr/payment-account-model.md)，契約影響見 [contracts.md 文末一節](../contracts.md#s4-a-契約影響與遷移邊界)。
 
 每項陳述標明依據：
@@ -103,9 +103,9 @@ ERC-8126 沒有定義、而 ERC-8196 強制依賴的部分：
 | B2 PoC | 3–6 個工作天 | validator 自寫或採用；夾帶 typed-data 的簽章格式與 client 配合 |
 | C PoC | 5–10 個工作天以上 | 模組本體、ERC-20 calldata 檢查、8126 provider 或 fixture、8004 註冊、x402 adapter 都要做 |
 
-## 7. 暫定研究排序（供 ADR）
+## 7. 暫定研究順序（Aaron 9/30 接受為研究順序）
 
-依目前證據與成本排序，不是採用決定：
+依目前證據與成本排序，不是採用決定。各候選的實際結算相容性仍須驗證；不自動自建 facilitator；ZK 與 `intent_hash` 綁定要求不刪除。S4-B 與 testnet 操作本輪未核准，須另提範圍、測試帳戶、資產與 gas 上限及停止條件。
 
 1. **A 維持基線**。
 2. **B1 先做**：enforcers 現成，直接回答 T2；第一步查 facilitator 支援。

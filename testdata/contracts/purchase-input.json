@@ -1,20 +1,20 @@
 {
-  "version":"apa.m1.v1",
+  "version":"apa.m1.v2",
   "request_id":"request-1",
   "intent":{
-    "version":"apa.m1.v1",
-    "domain":"agent-payment-authority/m1-fixture/v1/verifier-not-deployed",
+    "version":"apa.m1.v2",
+    "domain":"agent-payment-authority/m1-fixture/v2/verifier-not-deployed",
     "consumer_id":"consumer-a",
     "agent_id":"agent-a",
     "wallet_id":"wallet-a",
     "task_id":"task-a",
     "purchase_order_id":"po-a-1",
-    "resource_hash":"sha256:c88c855ee14b57dffe362e0c7b6ec0adde73f0aa18fb7276ea903ac38e6281cb",
+    "resource_hash":"sha256:51824b6f5747bf9b2171bd3969e72f74ff27b60c02b3fd0b0ccbc7893c2c7476",
     "http_method":"GET",
     "resource_url":"http://127.0.0.1:8402/resources/kr-market?edition=1",
     "x402_version":2,
     "scheme":"exact",
-    "payment_requirement_hash":"sha256:4cac4dea09321551d5a6139c0e0e321a1813e7ff15678bee420ec737583cc4a3",
+    "payment_requirement_hash":"sha256:489288a7b372fc16f288f7473896e42dd032d473ca4efc52fbe4e2a9d9324c8d",
     "chain_id":"84532",
     "asset_contract":"0x4444444444444444444444444444444444444444",
     "from":"0x1111111111111111111111111111111111111111",
@@ -31,7 +31,7 @@
       "asset":"0x4444444444444444444444444444444444444444",
       "payTo":"0x3333333333333333333333333333333333333333",
       "amount":"500000","maxTimeoutSeconds":60,
-      "extra":{"fixture":true,"future_term":{"revision":1,"label":"資料 & terms"}}
+      "extra":{"name":"USDC","version":"2","fixture":true,"future_term":{"revision":1,"label":"資料 & terms"}}
     },
     "extensions":{"fixture-pricing":{"currency":"KRW","amount":"700","rate":"1400"}}
   }

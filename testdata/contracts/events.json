@@ -1,0 +1,94 @@
+[
+  {
+    "version": "apa.m1.v2",
+    "event_id": "evt-a-1",
+    "event_type": "TASK_STARTED",
+    "scope": {
+      "consumer_id": "consumer-a",
+      "agent_id": "agent-a",
+      "wallet_id": "wallet-a",
+      "task_id": "task-a"
+    },
+    "sequence": 1,
+    "prev_event_hash": "sha256:1c780be64573e68aa0493ba80eb9ce67d4ab8b5f383cd3501457396261eab1eb",
+    "payload": {},
+    "evidence_mode": "fixture",
+    "source": "host",
+    "observed_at": 1790726400
+  },
+  {
+    "version": "apa.m1.v2",
+    "event_id": "evt-a-2",
+    "event_type": "PURCHASE_PROPOSED",
+    "scope": {
+      "consumer_id": "consumer-a",
+      "agent_id": "agent-a",
+      "wallet_id": "wallet-a",
+      "task_id": "task-a",
+      "purchase_order_id": "po-a-1",
+      "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1"
+    },
+    "sequence": 2,
+    "prev_event_hash": "sha256:a91f6a818ee1a27288e4da43164e79807a958829136c50c06d4b9dedfe9687dc",
+    "payload": {},
+    "evidence_mode": "fixture",
+    "source": "wrapper",
+    "observed_at": 1790726420
+  },
+  {
+    "version": "apa.m1.v2",
+    "event_id": "evt-a-3",
+    "event_type": "POLICY_DECIDED",
+    "scope": {
+      "consumer_id": "consumer-a",
+      "agent_id": "agent-a",
+      "wallet_id": "wallet-a",
+      "task_id": "task-a",
+      "purchase_order_id": "po-a-1",
+      "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1"
+    },
+    "sequence": 3,
+    "prev_event_hash": "sha256:825c1ca405f92158de40c55f6b7965c990c61cd40b2a23ed7a8f310c827a61ce",
+    "payload": {
+      "decision": {
+        "version": "apa.m1.v2",
+        "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+        "policy_verdict": "Ask",
+        "approval_status": "pending",
+        "payment_status": "unavailable",
+        "reason": "HUMAN_APPROVAL_REQUIRED"
+      }
+    },
+    "evidence_mode": "fixture",
+    "source": "policy",
+    "observed_at": 1790726421
+  },
+  {
+    "version": "apa.m1.v2",
+    "event_id": "evt-a-4",
+    "event_type": "APPROVAL_EXPIRED",
+    "scope": {
+      "consumer_id": "consumer-a",
+      "agent_id": "agent-a",
+      "wallet_id": "wallet-a",
+      "task_id": "task-a",
+      "purchase_order_id": "po-a-1",
+      "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1"
+    },
+    "sequence": 4,
+    "prev_event_hash": "sha256:419ae4a7cacc93bbaa2ba015470a846ce45d9b9c8418daa12dba90528965c4eb",
+    "payload": {
+      "decision": {
+        "version": "apa.m1.v2",
+        "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+        "policy_verdict": "Ask",
+        "approval_status": "expired",
+        "payment_status": "unavailable",
+        "reason": "APPROVAL_TIMEOUT"
+      }
+    },
+    "evidence_mode": "fixture",
+    "source": "policy",
+    "observed_at": 1790726452
+  }
+]

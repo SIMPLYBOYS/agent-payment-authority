@@ -1,10 +1,10 @@
 # ADR：付款帳戶模型與受限付款路徑
 
-- **狀態**：Proposed（S4-A 草案，第二版，待 Aaron 核准）。未採用任何候選。
+- **狀態**：Proposed（S4-A 草案，第三版）。Aaron 9/30 接受下方的**暫定研究順序**，但不是正式採用決策；未採用任何候選。S4-B 與 testnet 操作本輪未核准。
 - **日期**：2026-09-30
 - **決策者**：Aaron
 - **依據**：[相容性盤點](../spikes/payment-policy-compatibility.md)（含固定 commit 的來源查核）、[契約影響與遷移邊界](../contracts.md#s4-a-契約影響與遷移邊界)；vault 執行計畫 §1-septies、§3.5、§10，PRD §12、§14，任務清單 S4-A／S4-B。
-- **契約審查對象**：`57791d1`（分支 `b1-02-contracts`）。
+- **契約審查對象**：`57791d1` 初審；B1-02 升版為 `apa.m1.v2` 後依會合規則重核，與 v2 修正同一 commit 交付（分支 `b1-02-contracts`）。M1 v1、v2 都是 fixture 契約；正式付款契約另行命名。
 
 ## 範圍
 
@@ -72,9 +72,9 @@ T3 在所有選項下都沒有鏈上防線。B 類選項的潛在好處是：每
 - **x402 整合**：x402 exact 規格沒有呼叫 `executeAction` 的路徑，整合需要自訂 adapter 或 facilitator 擴充。這是成本，不代表無法整合。
 - **待定語意**：ERC-8126 的分數時效、查詢失敗與撤銷沒有定義，本案須自訂 fail-closed 規則；最底層 ERC-8004 仍是 Draft。
 
-## 暫定研究排序（依目前證據與成本，待核准）
+## 暫定研究順序（Aaron 9/30 接受為研究順序，非採用決策）
 
-這是研究順序，不是採用決定。
+這是研究順序，不是採用決定。各候選的實際結算相容性仍須驗證；不得自動自建 facilitator；既定的 ZK 與 `intent_hash` 綁定要求不因任何候選而刪除。
 
 1. **A 維持基線**，也是正式付款模組的預設路徑，直到 S4-B 有證據。
 2. **S4-B 先做 B1**：受限權限由現成的 enforcers 在鏈上強制，最直接回答 T2（repo 附 `audits/` 資料夾，涵蓋哪些版本與合約未查）。第一步先查 facilitator 對 `erc7710` 的支援；若沒有支援，暫停並回報。
@@ -84,7 +84,9 @@ T3 在所有選項下都沒有鏈上防線。B 類選項的潛在好處是：每
 
 ## S4-B 驗收設計（以 B1 為例，B2 比照）
 
-前置：Aaron 另行核准與 testnet opt-in；固定版本或 commit（DeleGator、Delegation Manager、enforcers、x402 client、facilitator、USDC 合約）；A、B、M 為專用測試帳戶；每個案例記錄 tx hash 或 revert reason。
+**本輪未核准 S4-B 或任何 testnet 操作。** 申請時須另提：範圍、專用測試帳戶（A、B、M）、資產與 gas 上限、停止條件，經 Aaron 核准並 testnet opt-in 後才執行。
+
+執行時的前置：固定版本或 commit（DeleGator、Delegation Manager、enforcers、x402 client、facilitator、USDC 合約）；每個案例記錄 tx hash 或 revert reason。
 
 受測對象固定為**一份有效受限權限 P_A**（A 委派；限制代幣為 USDC、方法為 `transfer`、收款人為 M、金額上限、時窗、使用次數），以及**一個合法執行身份 E**（被允許 redeem 的地址）。
 
@@ -102,14 +104,14 @@ T3 在所有選項下都沒有鏈上防線。B 類選項的潛在好處是：每
 1. facilitator（x402.org 或其他）是否支援 `erc7710`；不支援時是否值得自建，由 Aaron 決定。x402 規格自列 `erc7710` 的競態風險：client 可能在模擬與實際執行之間作廢 delegation，S4-B 要記錄所選 facilitator 如何處理。
 2. enforcer 能否表達「單筆金額等於報價、收款人等於 M」，同時不在鏈上公開 task 額度（period cap 是明文）。
 3. B2 的 validator 要自寫還是採用現成方案；現成方案的稽核範圍未查。
-4. `intent_hash` 是 SHA-256 的 256 bits，超過 BN254 scalar field，作 Groth16 public input 需拆 limb 或改用 field hash（交 S3 與 v2 契約）。
+4. `intent_hash` 是 SHA-256 的 256 bits，超過 BN254 scalar field，作 Groth16 public input 需拆 limb 或改用 field hash（交 S3 與正式付款契約）。
 5. EIP-3009 與 ERC-7710 都還是 Draft；USDC 已實作 3009 是事實，7710 靠 MetaMask 實作。
 
 ## 後果
 
 - **維持 A**：現有計畫不變；README 與面試說法不得宣稱鏈上錢包政策保障。
-- **採用 B1 或 B2**：正式付款派工前，同步 PRD（FR-4／7／11／13–15／19／24）、契約 v2、Signer 職責、狀態機、驗收與圖表，並重估工時（PRD §12）。
-- **不論選哪個**：契約 v1 的 fixture digest 不得作為任何鏈上、EIP-712 或 ZK 值；正式路徑用 v2 契約與新的 golden vectors。
+- **採用 B1 或 B2**：正式付款派工前，同步 PRD（FR-4／7／11／13–15／19／24）、正式付款契約、Signer 職責、狀態機、驗收與圖表，並重估工時（PRD §12）。
+- **不論選哪個**：M1 契約（`apa.m1.v1`、`apa.m1.v2`）的 fixture digest 不得作為任何鏈上、EIP-712 或 ZK 值；正式路徑用另行命名的正式付款契約與新的 golden vectors，不與 M1 v2 混用。
 
 ## 證據等級
 

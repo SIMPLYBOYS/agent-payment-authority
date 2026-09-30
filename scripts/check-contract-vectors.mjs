@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = name => JSON.parse(readFileSync(resolve(root, 'testdata/contracts', name), 'utf8'));
-const domain = 'agent-payment-authority/m1-fixture/v1/verifier-not-deployed';
+const domain = 'agent-payment-authority/m1-fixture/v2/verifier-not-deployed';
 export function canonical(value) {
   if (value === null || typeof value === 'boolean') return JSON.stringify(value);
   if (typeof value === 'number') {
@@ -40,5 +40,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   assert.equal(canonical(p.intent), v.canonical_intent);
   assert.equal(digest('intent', p.intent), v.intent_hash);
   for (const vector of v.canonical_cases) assert.equal(canonical(vector.input), vector.canonical);
+  // Event chain: each prev_event_hash is the previous event's hash, the first
+  // is the task genesis; an event's own hash covers its prev_event_hash.
+  let prev = digest('event-genesis', {task_id: 'task-a'});
+  assert.equal(prev, v.event_genesis_task_a);
+  read('events.json').forEach((event, i) => {
+    assert.equal(event.prev_event_hash, prev);
+    prev = digest('event', event);
+    assert.equal(prev, v.event_hashes[i]);
+  });
   console.log('PASS: display-adapter probe matches committed Go fixture vectors');
 }

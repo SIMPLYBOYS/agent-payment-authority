@@ -14,9 +14,12 @@ import (
 	"unicode/utf8"
 )
 
-const Version = "apa.m1.v1"
-const FixtureDomain = "agent-payment-authority/m1-fixture/v1/verifier-not-deployed"
+// Version names the M1 fixture contract. v2 supersedes the never-accepted v1
+// (57791d1); a production payment contract gets its own name, never apa.m1.*.
+const Version = "apa.m1.v2"
+const FixtureDomain = "agent-payment-authority/m1-fixture/v2/verifier-not-deployed"
 const MaxJSONBytes = 65536
+const MaxJSONDepth = 32 // nested objects/arrays; scalars do not add a level
 const MaxSafeInteger = 9007199254740991
 
 // Canonical uses the documented APA JSON subset, NOT RFC 8785 or EIP-712.
@@ -38,15 +41,15 @@ func Canonical(raw []byte) ([]byte, error) {
 }
 
 func readValue(d *json.Decoder, depth int) (any, error) {
-	if depth > 32 {
-		return nil, fmt.Errorf("JSON depth exceeded")
-	}
 	t, err := d.Token()
 	if err != nil {
 		return nil, err
 	}
 	switch v := t.(type) {
 	case json.Delim:
+		if depth >= MaxJSONDepth {
+			return nil, fmt.Errorf("JSON nesting exceeds %d levels", MaxJSONDepth)
+		}
 		switch v {
 		case '{':
 			m := map[string]any{}
@@ -159,12 +162,18 @@ func requiredFields(raw []byte, typ reflect.Type) error {
 				name = field.Name
 			}
 			allowed[name] = true
+			optional := len(tag) > 1 && tag[1] == "omitempty"
 			value, ok := fields[name]
 			if !ok {
-				if len(tag) > 1 && tag[1] == "omitempty" {
+				if optional {
 					continue
 				}
 				return fmt.Errorf("missing required field %s", name)
+			}
+			// An optional string is either absent or meaningful; "" would pass
+			// here but fail the schema's patterns, so reject it the same way.
+			if optional && field.Type.Kind() == reflect.String && string(value) == `""` {
+				return fmt.Errorf("empty optional field %s must be omitted", name)
 			}
 			if err := requiredFields(value, field.Type); err != nil {
 				return fmt.Errorf("%s: %w", name, err)

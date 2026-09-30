@@ -2,7 +2,7 @@
 
 建立在 x402 之上的 Agent 付款授權與證據層：Agent 可以提出付款，但不能自己批准，也不能自己簽名。
 
-> **目前狀態：B1-00／01 已驗收；B1-02 共用契約已開始實作，待契約 review。** 可啟動 loopback 服務、回應 health、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md)。
+> **目前狀態：B1-00／01 已驗收；B1-02 共用契約 `apa.m1.v2`（fixture）已修正 review 發現，待 Aaron 驗收。** 可啟動 loopback 服務、回應 health、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md)。
 > 尚未實作：商店與 402、Claude Code wrapper、policy 裁決、事件、展示層、任何付款或簽章。
 > 第一個里程碑 M1 的終點是 **請購與 Ask／Deny**，沒有真付款。邊界見 [docs/m1-boundaries.md](docs/m1-boundaries.md)。
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -15,7 +16,7 @@ func TestSchemaTracksWireFields(t *testing.T) {
 	var schema map[string]any
 	mustPass(t, json.Unmarshal(raw, &schema))
 	defs := schema["$defs"].(map[string]any)
-	for _, value := range []any{Consumer{}, WalletRef{}, Task{}, RegistryConfig{}, AuthorizationIntent{}, Quote{}, PurchaseOrder{}, PolicyDecision{}, EventScope{}, EventPayload{}, AuditEvent{}, ExpectedOutcome{}, AcceptanceCase{}, CaseManifest{}, CommandResult{}, EvidenceRef{}, ClaimResult{}, RunManifest{}} {
+	for _, value := range []any{Consumer{}, WalletRef{}, Asset{}, Task{}, RegistryConfig{}, AuthorizationIntent{}, Quote{}, PurchaseOrder{}, PolicyDecision{}, EventScope{}, EventPayload{}, AuditEvent{}, ExpectedOutcome{}, AcceptanceCase{}, CaseManifest{}, CommandResult{}, EvidenceRef{}, ClaimResult{}, RunManifest{}} {
 		typ := reflect.TypeOf(value)
 		t.Run(typ.Name(), func(t *testing.T) {
 			def := defs[typ.Name()].(map[string]any)
@@ -80,4 +81,45 @@ func TestDecodeRequiredAndCaseSensitiveFields(t *testing.T) {
 	mustPass(t, err)
 	var parsed AuditEvent
 	mustFail(t, Decode(raw, &parsed))
+}
+
+// Closed vocabularies are defined once in Go; the schema must list the same
+// values (C9: the field-name check above does not compare enums).
+func TestSchemaEnumsTrackGo(t *testing.T) {
+	raw, err := os.ReadFile("../../schemas/m1.schema.json")
+	mustPass(t, err)
+	var schema map[string]any
+	mustPass(t, json.Unmarshal(raw, &schema))
+	at := func(path ...string) any {
+		var v any = schema["$defs"]
+		for _, k := range path {
+			v = v.(map[string]any)[k]
+		}
+		return v
+	}
+	strs := func(v any) []string {
+		var out []string
+		for _, x := range v.([]any) {
+			out = append(out, x.(string))
+		}
+		return slices.Sorted(slices.Values(out))
+	}
+	sorted := func(v []string) []string { return slices.Sorted(slices.Values(v)) }
+	for name, pair := range map[string][2][]string{
+		"task status":      {strs(at("Task", "properties", "status", "enum")), sorted(taskStatuses)},
+		"event type":       {strs(at("AuditEvent", "properties", "event_type", "enum")), sorted(eventTypes)},
+		"evidence mode":    {strs(at("Mode", "enum")), sorted(evidenceModes)},
+		"approval status":  {strs(at("ApprovalStatus", "enum")), sorted(approvalStatuses)},
+		"policy verdict":   {strs(at("PolicyDecision", "properties", "policy_verdict", "enum")), sorted(policyVerdicts)},
+		"operation":        {strs(at("AcceptanceCase", "properties", "operation", "enum")), keysOf(operations)},
+		"defaults":         {strs(at("CaseManifest", "properties", "defaults", "required")), keysOf(policyParams)},
+		"defaults entries": {keysOf(at("CaseManifest", "properties", "defaults", "properties").(map[string]any)), keysOf(policyParams)},
+	} {
+		if !slices.Equal(pair[0], pair[1]) {
+			t.Fatalf("%s drift: schema %v, Go %v", name, pair[0], pair[1])
+		}
+	}
+	if at("Version", "const") != Version || at("AuthorizationIntent", "properties", "domain", "const") != FixtureDomain {
+		t.Fatal("schema version or fixture domain drift")
+	}
 }
