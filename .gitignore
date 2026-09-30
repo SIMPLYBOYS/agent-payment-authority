@@ -1,0 +1,37 @@
+# Local settings and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.keystore
+keys/
+secrets/
+credentials/
+
+# Build output and runtime data
+bin/
+var/
+artifacts/
+*.log
+
+# Raw Claude Code CLI output (only masked, typed events may be kept)
+cli-raw/
+*.cli-raw.*
+
+# Audio and biometric samples
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.webm
+
+# Licensed LimeZu assets stay local; placeholders are tracked elsewhere
+assets/limezu/
+**/limezu/
+
+# Versioned, non-sensitive fixtures live in testdata/ and stay tracked.
+
+.DS_Store
