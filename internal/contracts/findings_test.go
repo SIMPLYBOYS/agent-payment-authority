@@ -255,17 +255,20 @@ func TestC2EventTransitionRules(t *testing.T) {
 // C3: purchase_order_id is unique per task and the EIP-3009 nonce per payer
 // and asset, across request IDs.
 func TestC3RetryUniqueness(t *testing.T) {
+	// Each case isolates one rule, so neither can mask the other.
 	p := purchase(t)
+	fresh := "0x" + strings.Repeat("b", 64)
 	q := p
-	q.RequestID = "request-2"
+	q.RequestID, q.Intent.EIP3009Nonce = "request-2", fresh // same order, fresh nonce
 	_, err := CompareRetry(p, q)
 	wantCode(t, err, "IDEMPOTENCY_CONFLICT")
 
-	q.Intent.PurchaseOrderID = "po-a-2" // new order, same payer, asset and nonce
+	q = p
+	q.RequestID, q.Intent.PurchaseOrderID = "request-2", "po-a-2" // new order, same nonce
 	_, err = CompareRetry(p, q)
 	wantCode(t, err, "IDEMPOTENCY_CONFLICT")
 
-	q.Intent.EIP3009Nonce = "0x" + strings.Repeat("b", 64)
+	q.Intent.EIP3009Nonce = fresh
 	if out, err := CompareRetry(p, q); err != nil || out != "new" {
 		t.Fatalf("fresh order and nonce: %s %v", out, err)
 	}
