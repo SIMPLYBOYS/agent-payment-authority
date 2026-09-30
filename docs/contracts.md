@@ -99,7 +99,7 @@ M1 event type：SYSTEM_READY、TASK_STARTED、PURCHASE_PROPOSED、POLICY_DECIDED
 - POLICY_DECIDED：須有同一請購較早的 PURCHASE_PROPOSED；每個請購只有一個；task 結束後不得出現（包含其他 purchase_order_id）。
 - **Deny 終止 task**：M1 中 Deny 後客人離場，該 task 不再接受任何請購或裁決；registry 或執行期的 task 狀態為 `denied`。已存在的 pending Ask 仍可依下條收尾，不會產生核准或付款能力。
 - APPROVAL_EXPIRED／APPROVAL_WITHDRAWN：只能結束一個仍開著的 Ask，且只有一次；task 結束後仍可出現（例如另一筆請購被 Deny、CLI 逾時或主持人取消後，待決的核准到期或被撤回）。
-- TASK_CANCELLED／TASK_TIMED_OUT：每個 task 最多一個；可以出現在 Deny 之後（記錄 CLI 逾時或主持人取消，不改變任何裁決）。
+- TASK_CANCELLED／TASK_TIMED_OUT：每個 task 最多一個；可以出現在 Deny 之後，只作收尾紀錄（CLI 逾時或主持人取消），不改變任何裁決。**後續的 task 狀態與展示投影必須保留原本的 Deny 與其 reason**，不得因收尾事件改顯示為 cancelled／failed 而抹掉 Deny 原因；此投影由 B1-05／B1-06 實作，B1-07 檢查。
 - 取消時若有待決的 Ask，最終應出現 APPROVAL_WITHDRAWN；前綴檢查無法強制「最終一定出現」，由 B1-05 與 B1-07 負責。
 - 歷史事件不以 task 目前狀態否定：已 denied／cancelled 的 task，其合法歷史仍能通過 `ValidateEvent` 與 `ValidateEventOrder`。
 
@@ -119,13 +119,14 @@ payload 只開放 code／decision，不接受 raw CLI output、私鑰或生物�
 
 `cases.json` 的 defaults 與每個案例一起參與 manifest hash。defaults 恰為八個 key：remaining＝5000000、allow_max＝100000、merchant＝allowed、credential＝valid、required_config＝present、mode＝interactive、clock＝1790726450、asset＝`fixture-usdc`（registry 的 asset_id）。parameters 是相對基線的單案例覆蓋；amount 覆蓋要同時更新 trusted quote／intent 並重算 hash，不由 LLM 改寫。cancel／timeout 為各自獨立案例，不接續其他案例執行。
 
-**approval deadline 邊界（修訂提案，待 Aaron／reviewer 接受，尚未核准）**：
+**approval deadline 邊界（Codex review 9/30 建議接受；待 Aaron 最終確認，尚未核准）**：
 
-- 計時起點：該請購 `POLICY_DECIDED`（Ask，approval pending）事件的 `observed_at`，即核准請求發出的時刻。
+- 計時起點：**可信 host 記錄的 Ask 時間**，即該請購 `POLICY_DECIDED`（Ask，approval pending）事件由 host 寫入的 `observed_at`。不採用模型、CLI 或前端提供的時間。
 - 時間單位：整數 Unix 秒；`approval_deadline_seconds` 為正整數秒。
-- `elapsed = now − Ask 的 observed_at`；提案規則為 **`elapsed >= approval_deadline_seconds` 即 expired**（取代前版「恰好到期仍 pending」的寫法，前版由實作者寫定、未獲接受）。
+- `elapsed = now − Ask 的 observed_at`；規則為 **`elapsed >= approval_deadline_seconds` 即 expired**（取代前版「恰好到期仍 pending」的寫法，前版由實作者寫定、未獲接受）。
 - 三個預期案例：`approval-deadline-before`（29 秒，pending）、`approval-deadline-exact`（30 秒，expired）、`approval-timeout`（31 秒，expired）。`advance_seconds` 即評估當下的 `elapsed`。
-- 契約不實作計時器；B1-05 依接受後的規則實作。規則未接受前，`CaseManifest.Validate` 不檢查 `advance_seconds` 與 result 的算術一致性，接受後再補。
+- `CaseManifest.Validate` 依此規則檢查 `advance-clock` 案例：`advance_seconds` 與 result 不一致即 `CONTRADICTORY_EXPECTATION`。若 Aaron 不接受此規則，需同時修改 `deadlineResult` 與這三個案例。
+- 契約不實作計時器；B1-05 依確認後的規則實作。
 
 `CaseManifest.Validate` 的規則（違反時的 reason code）：
 
@@ -134,7 +135,7 @@ payload 只開放 code／decision，不接受 raw CLI output、私鑰或生物�
 | operation 屬於封閉清單且 layer 相符（contracts：compare-retry、binding、validate-decision、validate-purchase；integration：policy、cancel、advance-clock、cli-timeout、restart-and-new-task） | `UNKNOWN_OPERATION` |
 | 參數名稱屬於該 operation 的允許集合；defaults 恰為八個 key | `UNKNOWN_PARAMETER` |
 | 參數值在值域內、必填參數齊全 | `INVALID_PARAMETER` |
-| expected 一致：result 屬於該 operation、reason 屬於該 result 允許的代碼、approval_status 與 result 及參數相符、payment_status＝unavailable、`budget_deducted`＝"0"、四種禁止事件齊全 | `CONTRADICTORY_EXPECTATION` |
+| expected 一致：result 屬於該 operation、reason 屬於該 result 允許的代碼、approval_status 與 result 及參數相符、payment_status＝unavailable、`budget_deducted`＝"0"、四種禁止事件齊全；`advance-clock` 的 result 符合 deadline 規則 | `CONTRADICTORY_EXPECTATION` |
 | case ID 不重複、不與 capability ID 相同 | `INVALID_MANIFEST` |
 
 `ValidateRefs(registry)` 另核對 defaults 與案例引用的 asset_id、consumer 存在於 registry。
@@ -218,3 +219,5 @@ Schema 的本機測試檢查 JSON 可解析、所有 `$ref` 可解析、Go 型�
 - 沒有改動 `AuthorizationIntent`、`eip3009_nonce`、fixture domain、registry `assets` 或付款路徑規則，四個候選（A、B1、B2、C）的對應欄位不受影響。
 - intent 固定強化了「同一請購的事件引用同一 intent」這條稽核連結，方向與遷移邊界的「完整密碼學綁定」一致；正式付款契約屬另一套命名，不承接 M1 的事件規則。
 - Deny 終止 task 與 deadline 提案是 M1 流程語意，不涉及帳戶模型、delegation 或結算；deadline 規則被接受後由 B1-05 實作，不擴大 S4-A 研究或採用範圍。
+
+**第三輪收尾後重核（9/30）**：新增 `advance-clock` 案例的 deadline 一致性檢查，以及「收尾事件不得抹掉 Deny 原因」的投影規則。兩者都只作用於 M1 案例清單與狀態投影，沒有改動 intent、nonce、domain、資產或付款路徑，影響表同樣不需變動。

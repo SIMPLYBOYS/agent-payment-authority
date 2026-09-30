@@ -107,6 +107,21 @@ var outcomes = map[string][]string{
 	"validate-purchase/reject":         {"UNSUPPORTED_TRANSFER_METHOD", "AMBIGUOUS_KEY"},
 }
 
+// deadlineResult applies the approval deadline rule (recommended by review,
+// pending Aaron's final confirmation; see docs/contracts.md) to an
+// advance-clock case:
+// elapsed (advance_seconds, whole seconds since the host-recorded Ask time)
+// >= approval_deadline_seconds means expired ("denied"), else "pending".
+// Parameters are already validated as positive integers.
+func deadlineResult(p map[string]string) string {
+	elapsed, _ := Amount(p["advance_seconds"]).Units()
+	deadline, _ := Amount(p["approval_deadline_seconds"]).Units()
+	if elapsed >= deadline {
+		return "denied"
+	}
+	return "pending"
+}
+
 // approvalFor is the only approval_status an expected outcome may state.
 func approvalFor(c AcceptanceCase) string {
 	switch {
@@ -167,6 +182,9 @@ func (m CaseManifest) Validate() error {
 		missing := slices.ContainsFunc(forbiddenEarly, func(f string) bool { return !slices.Contains(e.ForbiddenEvents, f) })
 		if !ok || !slices.Contains(reasons, e.Reason) || e.ApprovalStatus != approvalFor(c) || e.PaymentStatus != "unavailable" || e.BudgetDeducted != "0" || missing {
 			return coded("CONTRADICTORY_EXPECTATION", "case "+c.CaseID)
+		}
+		if c.Operation == "advance-clock" && e.Result != deadlineResult(c.Parameters) {
+			return coded("CONTRADICTORY_EXPECTATION", "case "+c.CaseID+": result contradicts elapsed >= deadline")
 		}
 	}
 	return nil

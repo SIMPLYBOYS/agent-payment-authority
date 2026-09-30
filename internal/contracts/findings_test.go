@@ -695,5 +695,52 @@ func TestDenyEndsTask(t *testing.T) {
 	wantCode(t, CheckTaskActive("denied"), "TASK_NOT_ACTIVE")
 }
 
+// Round 3: advance-clock expectations must follow elapsed >= deadline. Each
+// edit keeps result, reason and approval consistent with one another, so only
+// the deadline arithmetic can reject it.
+func TestDeadlineManifestConsistency(t *testing.T) {
+	load := func() CaseManifest {
+		var m CaseManifest
+		fixture(t, "cases.json", &m)
+		return m
+	}
+	byID := func(m CaseManifest, id string) *AcceptanceCase {
+		for i := range m.Cases {
+			if m.Cases[i].CaseID == id {
+				return &m.Cases[i]
+			}
+		}
+		t.Fatalf("no case %s", id)
+		return nil
+	}
+	pending := func(c *AcceptanceCase) {
+		c.Expected.Result, c.Expected.Reason, c.Expected.ApprovalStatus = "pending", "HUMAN_APPROVAL_REQUIRED", "pending"
+	}
+	expired := func(c *AcceptanceCase) {
+		c.Expected.Result, c.Expected.Reason, c.Expected.ApprovalStatus = "denied", "APPROVAL_TIMEOUT", "expired"
+	}
+	m := load()
+	mustPass(t, m.Validate())
+	for _, id := range []string{"approval-deadline-before", "approval-deadline-exact", "approval-timeout"} {
+		c := byID(m, id)
+		if got := deadlineResult(c.Parameters); got != c.Expected.Result {
+			t.Fatalf("%s: fixture says %s, rule says %s", id, c.Expected.Result, got)
+		}
+	}
+	for name, edit := range map[string]func(CaseManifest){
+		"30 of 30 seconds written as pending": func(m CaseManifest) { pending(byID(m, "approval-deadline-exact")) },
+		"29 of 30 seconds written as expired": func(m CaseManifest) { expired(byID(m, "approval-deadline-before")) },
+		"31 changed to 29, still expired":     func(m CaseManifest) { byID(m, "approval-timeout").Parameters["advance_seconds"] = "29" },
+	} {
+		m := load()
+		edit(m)
+		err := m.Validate()
+		if ErrorCode(err) != "CONTRADICTORY_EXPECTATION" || !strings.Contains(err.Error(), "elapsed >= deadline") {
+			t.Fatalf("%s: got %v", name, err)
+		}
+		t.Logf("%s: guard hit: %v", name, err)
+	}
+}
+
 // keysOf is a sorted key list for comparing Go tables with schema enums.
 func keysOf[V any](m map[string]V) []string { return slices.Sorted(maps.Keys(m)) }
