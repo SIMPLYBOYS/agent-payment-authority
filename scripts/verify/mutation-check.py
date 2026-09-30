@@ -123,6 +123,10 @@ MUTATIONS = [
 
 
 def pkg(rel):
+    """The package whose tests must kill a mutation of rel. Fixture files
+    (testdata/contracts/) have no package; the contracts tests read them."""
+    if not rel.endswith(".go"):
+        return "./internal/contracts/"
     return "./" + str(pathlib.PurePosixPath(rel).parent) + "/"
 
 
