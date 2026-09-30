@@ -19,7 +19,7 @@
 
 ## 1. 查核範圍與固定 commit
 
-原始碼與標準原文以 `artifacts/s4-a-sources/check-sources.sh` 依下列 commit 抓取並檢查，輸出在 `artifacts/s4-a-sources/runs/20260930T074537Z/findings.txt`（repo 內被 Git 忽略，只存在本機，可重跑）。
+原始碼與標準原文以 `artifacts/s4-a-sources/check-sources.sh` 依下列 commit 抓取並檢查，輸出在 `artifacts/s4-a-sources/runs/20260930T080431Z/findings.txt`（repo 內被 Git 忽略，只存在本機，可重跑；每次寫新目錄，較早的 `runs/20260930T074537Z/` 保留，少了 x402 規格的 gas、預設路徑與競態風險幾行）。
 
 | repo | commit | commit 時間 | 查核內容 |
 |---|---|---|---|
@@ -38,7 +38,7 @@
 | 項目 | 狀態 | 與本案有關的內容 |
 |---|---|---|
 | EIP-3009 | Draft（ERCs `5993dff`）【官方】 | 代幣合約須自行實作；nonce 為每個授權者唯一的隨機 32 bytes；合約呼叫端應用 `receiveWithAuthorization` 防搶跑；有 `cancelAuthorization`【官方】。Base Sepolia USDC 實作此介面，是 x402 的預設路徑 |
-| x402 exact EVM 規格 | x402 `6b6ee91`【官方】 | `assetTransferMethod` 有 `eip3009`、`permit2`、`erc7710`，放在 requirements 的 `extra`，未指定時預設 `eip3009`；`erc7710` 的 payload 為 `delegationManager`、`permissionContext`、`delegator`，驗證靠模擬 `redeemDelegations`，gas 由 facilitator 付；`erc7710` 一節未明寫重播保護 |
+| x402 exact EVM 規格 | x402 `6b6ee91`【官方】 | `assetTransferMethod` 有 `eip3009`、`permit2`、`erc7710`，放在 requirements 的 `extra`，未指定時預設 `eip3009`（第 15 行）；facilitator 付 gas（第 5 行）；3009 需要 `extra.name`／`version`（第 72–73 行）；`erc7710` 的 payload 為 `delegationManager`、`permissionContext`、`delegator`，驗證靠模擬 `redeemDelegations`；`erc7710` 一節（約第 260–330 行）沒有提到 nonce 或 replay，並自列競態風險：client 可能在模擬與實際執行之間作廢 delegation（第 309 行） |
 | x402 官方 SDK 的 EVM exact | x402 `6b6ee91`【官方】 | ts、go、python 三個 exact 機制目錄中，未見 `7710`、`redeemDelegations` 或 `delegationManager`；整個 repo 沒有以 7710 命名的檔案；v2 TS facilitator 只有 `eip3009`、`permit2`、`erc20approval` |
 | x402 對 7702 帳戶的處理 | x402 `6b6ee91`【官方】 | 有 `examples/typescript/clients/erc7702/`：7702 帳戶的 client 設定與一般 EOA 相同。facilitator `eip3009.ts` 第 182–185 行：地址沒有 code 用 ecrecover，有 code 用 strict EIP-1271；註解說明不做 ECDSA fallback，原因已在 Base Sepolia 實際確認。是否接受簽章取決於 delegate 的 validator |
 | MetaMask smart-accounts-kit | `555dd20`【第三方】 | `packages/x402` 有 `x402Client.ts` 與 `x402ExactEvmErc7710ServerScheme.ts`；client 只處理 `assetTransferMethod` 為 `erc7710` 的報價（第 93、108 行）。issue #301（2026-09-10）指出文件未寫明賣方須宣告此值 |

@@ -99,7 +99,7 @@ T3 在所有選項下都沒有鏈上防線。B 類選項的潛在好處是：每
 
 ## 未解問題
 
-1. facilitator（x402.org 或其他）是否支援 `erc7710`；不支援時是否值得自建，由 Aaron 決定。
+1. facilitator（x402.org 或其他）是否支援 `erc7710`；不支援時是否值得自建，由 Aaron 決定。x402 規格自列 `erc7710` 的競態風險：client 可能在模擬與實際執行之間作廢 delegation，S4-B 要記錄所選 facilitator 如何處理。
 2. enforcer 能否表達「單筆金額等於報價、收款人等於 M」，同時不在鏈上公開 task 額度（period cap 是明文）。
 3. B2 的 validator 要自寫還是採用現成方案；現成方案的稽核範圍未查。
 4. `intent_hash` 是 SHA-256 的 256 bits，超過 BN254 scalar field，作 Groth16 public input 需拆 limb 或改用 field hash（交 S3 與 v2 契約）。
