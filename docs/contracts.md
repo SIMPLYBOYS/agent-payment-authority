@@ -91,7 +91,7 @@ Schema 的本機測試檢查 JSON 可解析、所有 `$ref` 可解析，以及 G
 
 ## S4-A 契約影響與遷移邊界
 
-> 2026-09-30 S4-A 草案，待 Aaron 接受。審查對象 `57791d1`。本節只新增在文末，不改上文；B1-02 修正後依第 5 小節重新核對。依據見 [ADR](adr/payment-account-model.md) 與[相容性盤點](spikes/payment-policy-compatibility.md)；C1～C10 見 vault 的 B1-02 契約 Review。
+> 2026-09-30 S4-A 草案第二版，待 Aaron 接受。審查對象 `57791d1`。本節只新增在文末，不改上文；B1-02 修正後依第 5 小節重新核對。依據見 [ADR](adr/payment-account-model.md) 與[相容性盤點](spikes/payment-policy-compatibility.md)；C1～C10 見 vault 的 B1-02 契約 Review。候選代號沿用 ADR：A 基線、B1 7702＋7710、B2 7702＋EIP-3009 經 ERC-1271、C ERC-8196。
 
 ### 1. 結論
 
@@ -101,8 +101,8 @@ Schema 的本機測試檢查 JSON 可解析、所有 `$ref` 可解析，以及 G
 
 | 項目 | v1 現況 | 候選路徑的影響 | 處置 |
 |---|---|---|---|
-| 業務 intent 與付款授權 | 單一 `AuthorizationIntent` 同時含業務欄位與 `eip3009_nonce` | `erc7710` 沒有 3009 nonce，改帶 `delegationManager`、`permissionContext`、`delegator`；ERC-8196 用 `policyHash` 與自己的 nonce | v1 保留。v2 拆成業務 intent＋`payment_binding{method, 路徑欄位}`，`intent_hash` 涵蓋兩者 |
-| 付款路徑 | 沒有檢查 `extra.assetTransferMethod`；`permit2`、`erc7710` 報價配 3009 nonce 也能通過（SA1，實測） | x402 以此欄位選路徑，未指定時預設 `eip3009` | **現在改**：未指定或 `eip3009` 才接受，其餘拒絕，reason `UNSUPPORTED_TRANSFER_METHOD` |
+| 業務 intent 與付款授權 | 單一 `AuthorizationIntent` 同時含業務欄位與 `eip3009_nonce` | B1 沒有 3009 nonce，改帶 `delegationManager`、`permissionContext`、`delegator`；B2 仍用 3009 欄位，但簽章改為 delegate 接受的格式；C 用 `policyHash` 與自己的 nonce | v1 保留。v2 拆成業務 intent＋`payment_binding{method, 路徑欄位}`，`intent_hash` 涵蓋兩者 |
+| 付款路徑 | 沒有檢查 `extra.assetTransferMethod`；`permit2`、`erc7710` 報價配 3009 nonce 也能通過（SA1，實測） | x402 以此欄位選路徑，未指定時預設 `eip3009`；B2 不需要新值，由 facilitator 依地址是否有 code 改用 EIP-1271 驗簽 | **現在改**：未指定或 `eip3009` 才接受，其餘拒絕，reason `UNSUPPORTED_TRANSFER_METHOD` |
 | `eip3009_nonce` 與 action nonce | 格式檢查；唯一性未定義（C3） | EIP-3009 的 nonce 在「代幣＋授權者」範圍內唯一；`erc7710` 的重播保護靠 enforcer 與 Delegation Manager | **現在定**：唯一範圍 `(chain_id, asset_contract, from, eip3009_nonce)`；原子唯一索引交 B1-05 |
 | 內部 `agent_id` 與鏈上身份 | 內部字串 ID | ERC-8004 `agentId` 是各 registry 的 uint256，命名空間 `eip155:{chainId}:{registry}` | v1 保留。若日後需要，在可信 registry 加可選的 `agent_registry_ref`，由主持人設定，不由模型或請購填寫 |
 | 簽章 domain | fixture SHA-256 domain | 3009 用代幣的 EIP-712 domain（`extra.name`／`version`）；7710 用 Delegation Manager 的 EIP-712；ERC-8196 用 `AgentAction` typehash | v1 digest 不得作任何鏈上簽章。v2 定義含 `chain_id` 與 verifying contract 的 domain，重產 golden vectors |
@@ -123,18 +123,19 @@ Schema 的本機測試檢查 JSON 可解析、所有 `$ref` 可解析，以及 G
 | C5 資產 | 可信資產設定欄位、reason `ASSET_NOT_ALLOWED`、預期案例 | Policy 實際比對 | 資產設定放 registry 或 policy defaults |
 | C6 案例缺口 | 補歸屬與取消／逾時案例 | — | 接受 `cases.json` |
 | C7 原因代碼 | 穩定的 reason code | — | — |
-| C8 manifest | 在本文件定義必列的 not_evaluated 清單 | B1-07 強制檢查 | — |
+| C8 manifest | 定義封閉清單（operation 與各自的參數、reason code、capability claim ID）與驗證規則：未知 operation、錯誤參數名稱或值、矛盾的 expected outcome、未列或未知的 not_evaluated 都拒絕，並有負向測試；規格見 B1-02 Review C8 | B1-06 產出 run manifest；B1-07 依證據判定 claim | capability 清單內容與 `cases.json` |
 | C9 schema 差異 | 空字串一致處理 | 外部 validator | — |
 | C10 文件差異 | 修正文件 | — | — |
 | SA1 付款路徑 | 拒絕非 `eip3009` 報價 | — | — |
 
-另待 Aaron 決定：B1-02 修正是原地改 v1 還是升版（見 B1-02 契約 Review §5）、`prev_event_hash` 的時機、S4-B 候選。
+另待 Aaron 決定：B1-02 修正是原地改 v1 還是升版（見 B1-02 契約 Review §5）、`prev_event_hash` 的時機、ADR 的暫定研究排序。
 
 ### 4. 遷移邊界
 
 - v1 的所有 digest 只屬 fixture domain，不得作為鏈上值、EIP-712 digest 或 ZK public input。
 - 正式付款模組開工前須備齊：Aaron 核准的 ADR、v2 契約（業務 intent 與 `payment_binding` 拆分、domain、路徑綁定）、新的 golden vectors 與回歸測試。
-- 若選 `erc7710`：`payment_binding` 至少含 `delegation_manager`、`delegator`、`permission_context` 的 hash，且與 `from` 對應同一位消費者。
+- 若走 B1：`payment_binding` 至少含 `delegation_manager`、`delegator`、`permission_context` 的 hash，且與 `from` 對應同一位消費者。
+- 若走 B2：`payment_binding` 保留 3009 欄位，另記錄 delegate 位址與簽章格式版本，避免換 delegate 後舊簽章語意改變。
 - 無論選哪條路徑：完整 requirement、task、消費者、付款地址、資產、金額、效期與實際執行內容都要有密碼學綁定，不為了可替換性刪除約束。
 
 ### 5. 會合規則
