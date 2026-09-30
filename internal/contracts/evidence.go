@@ -107,9 +107,8 @@ var outcomes = map[string][]string{
 	"validate-purchase/reject":         {"UNSUPPORTED_TRANSFER_METHOD", "AMBIGUOUS_KEY"},
 }
 
-// deadlineResult applies the approval deadline rule (recommended by review,
-// pending Aaron's final confirmation; see docs/contracts.md) to an
-// advance-clock case:
+// deadlineResult applies the approval deadline rule (accepted by Aaron on
+// 2026-09-30; see docs/contracts.md) to an advance-clock case:
 // elapsed (advance_seconds, whole seconds since the host-recorded Ask time)
 // >= approval_deadline_seconds means expired ("denied"), else "pending".
 // Parameters are already validated as positive integers.

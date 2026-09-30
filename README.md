@@ -81,6 +81,18 @@ sh scripts/verify-b1-01.sh
 
 每項檢查印出 `PASS` 或 `FAIL`。全部通過才以 0 結束；任何一項失敗以 1 結束；無法建立暫存副本以 2 結束。預期被拒絕的案例若意外啟動了服務，會在期限後被終止並記為失敗。要保留輸出時自行導向 `artifacts/`（不進版控）。
 
+## 隔離驗證（僅供驗證）
+
+`scripts/verify/` 在 Linux 容器裡重跑全部檢查與 mutation tests。**Docker 只是驗證工具，不是 demo 的執行相依**：`make check`、`make dev` 都不需要 Docker。
+
+```sh
+sh scripts/verify/build-image.sh                        # 準備階段：以固定 digest 拉取基礎映像並建置（可連網）
+sh scripts/verify/container-verify.sh                   # 測試階段：--network none、唯讀原始碼、資源硬限制
+sh scripts/verify/container-verify.sh --inject-failure  # 自我測試：必須以非零結束
+```
+
+隔離設定寫在 `container-verify.sh` 開頭，每次實際使用的 `docker run` 參數也會存進結果目錄。結果寫入新的 `artifacts/verify-container/runs/<commit>-<時間>/`，不覆寫舊證據。
+
 ## 不進版控的東西
 
 `.env`、`bin/`、`var/`（執行資料）、`artifacts/`（驗收輸出）、憑證與金鑰檔、Claude Code CLI 原始輸出、音檔、LimeZu 授權素材。規則在 `.gitignore`。不含敏感資料的測試 fixture 之後放 `testdata/`，會進版控。
@@ -91,10 +103,10 @@ sh scripts/verify-b1-01.sh
 cmd/demo/          本機服務進入點與 health endpoint
 internal/config/   環境變數載入與驗證
 docs/              M1 邊界說明
-scripts/           可重跑的驗收腳本
+scripts/           可重跑的驗收腳本；scripts/verify/ 為容器隔離驗證（僅供驗證）
 internal/contracts/ M1 fixture 契約與語意驗證
 schemas/           JSON Schema
-testdata/contracts/ 固定測試向量與待 reviewer 接受的事前案例
+testdata/contracts/ 固定測試向量與已接受的事前案例（cases.json）
 ```
 
 ## 在受限沙箱裡跑測試

@@ -80,8 +80,18 @@ func TestGoldenVectors(t *testing.T) {
 		} `json:"canonical_cases"`
 		Genesis     string   `json:"event_genesis_task_a"`
 		EventHashes []string `json:"event_hashes"`
+		// Digest of the case manifest Aaron accepted (cases of b57b585,
+		// review_status accepted). Any edit to cases.json must fail here and
+		// needs a new acceptance.
+		AcceptedCases string `json:"accepted_case_manifest_digest"`
 	}
 	fixture(t, "golden.json", &g)
+	var m CaseManifest
+	fixture(t, "cases.json", &m)
+	mustPass(t, m.RequireAccepted())
+	if h, err := m.Hash(); err != nil || h != g.AcceptedCases || m.Reviewer != "aaron" {
+		t.Fatalf("cases.json differs from the accepted manifest %s (got %s, %v)", g.AcceptedCases, h, err)
+	}
 	genesis, err := GenesisHash("task-a")
 	mustPass(t, err)
 	events := chainFixture(t)
@@ -313,15 +323,17 @@ func TestManifestReviewGate(t *testing.T) {
 	var m CaseManifest
 	fixture(t, "cases.json", &m)
 	mustPass(t, m.Validate())
-	mustFail(t, m.RequireAccepted())
+	// Aaron accepted the manifest on 2026-09-30 (pinned by TestGoldenVectors).
+	// A pending copy must still fail the gate.
+	mustPass(t, m.RequireAccepted())
+	pending := m
+	pending.ReviewStatus, pending.Reviewer = "pending", ""
+	mustFail(t, pending.RequireAccepted())
 	for _, c := range m.Cases {
 		if _, err := os.Stat("../../testdata/contracts/" + c.InputRef); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// Synthetic accepted copy tests the index validator, NOT actual reviewer approval.
-	m.ReviewStatus = "accepted"
-	m.Reviewer = "test-reviewer"
 	h, err := m.Hash()
 	mustPass(t, err)
 	r := RunManifest{Version: Version, RunID: "fixture-run", CodeCommit: "97ef4e9", DirtyPatchDigest: "sha256:" + strings.Repeat("0", 64), ConfigDigest: "sha256:" + strings.Repeat("1", 64), CaseManifestDigest: h, Versions: map[string]string{"go": "test"}, Commands: []CommandResult{{"test", 0}}, NotEvaluated: slices.Clone(CapabilityIDs)}

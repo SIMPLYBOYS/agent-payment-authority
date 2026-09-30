@@ -1,0 +1,75 @@
+#!/bin/sh
+# Isolated verification in a Linux container. Docker is a verification tool
+# only; the demo does not need it.
+# Usage: sh scripts/verify/container-verify.sh [--inject-failure] [commit]
+#   (default HEAD). Build the image first with build-image.sh.
+#   --inject-failure runs a deliberate failing step next to a passing one; the
+#   script must then exit non-zero.
+#
+# Test-phase isolation (every flag is recorded in docker-run.txt):
+# - --network none: own network namespace with only lo, no external network.
+# - --read-only root filesystem; the commit is a clone bind-mounted read-only
+#   at /src; the only writable place is a 3 GB tmpfs at /scratch.
+# - Hard limits: --memory 3g (no extra swap), --pids-limit 512, --cpus 2,
+#   ulimits for open files, CPU seconds and file size; wall time 90 minutes.
+# - --user 10001, --cap-drop ALL, no-new-privileges; not privileged, not host
+#   network; no host home, credentials or Docker socket are mounted; only the
+#   variables listed below are set.
+# Results go to a new artifacts/verify-container/runs/<commit12>-<UTC time>/.
+set -eu
+
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+IMAGE=${APA_VERIFY_IMAGE:-apa-verify:b1-02}
+INJECT=0
+if [ "${1:-}" = "--inject-failure" ]; then
+	INJECT=1
+	shift
+fi
+SHA=$(git -C "$ROOT" rev-parse "${1:-HEAD}^{commit}")
+RUN="$ROOT/artifacts/verify-container/runs/$(printf '%.12s' "$SHA")-$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$(dirname "$RUN")"
+mkdir "$RUN"
+
+BASE=$(mktemp -d "${TMPDIR:-/tmp}/apa-ctr.XXXXXX")
+NAME="apa-verify-$$"
+cleanup() {
+	docker rm -f "$NAME" >/dev/null 2>&1 || true
+	chmod -R u+w "$BASE" 2>/dev/null || true
+	rm -rf "$BASE"
+}
+trap cleanup EXIT INT TERM
+
+git clone --quiet --no-hardlinks "$ROOT" "$BASE/src"
+git -C "$BASE/src" checkout --quiet --detach "$SHA"
+chmod -R a-w "$BASE/src"
+IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE")
+
+set -- docker run --name "$NAME" --rm \
+	--network none --read-only \
+	--tmpfs /scratch:rw,exec,nosuid,nodev,size=3g,mode=1777 \
+	--mount "type=bind,source=$BASE/src,target=/src,readonly" \
+	--user 10001:10001 --cap-drop ALL --security-opt no-new-privileges \
+	--memory 3g --memory-swap 3g --pids-limit 512 --cpus 2 \
+	--ulimit nofile=4096:4096 --ulimit cpu=3600:3600 --ulimit fsize=1073741824:1073741824 \
+	--env HOME=/scratch/home --env TMPDIR=/scratch/tmp \
+	--env GOCACHE=/scratch/cache/go-build --env GOMODCACHE=/scratch/cache/mod --env GOPATH=/scratch/cache/gopath \
+	--env GOPROXY=off --env GOSUMDB=off --env GOTOOLCHAIN=local --env GOFLAGS=-mod=readonly \
+	--env GIT_CONFIG_NOSYSTEM=1 --env GIT_CONFIG_COUNT=1 --env GIT_CONFIG_KEY_0=safe.directory --env GIT_CONFIG_VALUE_0=/src \
+	--env PYTHONDONTWRITEBYTECODE=1 --env APA_INJECT_FAIL="$INJECT" \
+	--workdir /src "$IMAGE_ID" sh /src/scripts/verify/container-inner.sh "$SHA"
+printf '%s\n' "$*" >"$RUN/docker-run.txt"
+
+rc=0
+# Wall-time guard for the whole run: SIGALRM ends the client, cleanup removes
+# the container.
+perl -e 'alarm shift; exec @ARGV or die "exec: $!"' 5400 "$@" >"$BASE/out.tar" 2>"$RUN/container-stderr.log" || rc=$?
+tar -xf "$BASE/out.tar" -C "$RUN" 2>>"$RUN/container-stderr.log" || true
+{
+	echo "commit: $SHA"
+	echo "image: $IMAGE ($IMAGE_ID)"
+	echo "mode: $([ "$INJECT" = 1 ] && echo 'self-test with an injected failure' || echo 'full verification')"
+	echo "container exit: $rc"
+} >"$RUN/run.txt"
+cat "$RUN/run.txt"
+echo "run directory: $RUN"
+exit "$rc"

@@ -49,5 +49,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     prev = digest('event', event);
     assert.equal(prev, v.event_hashes[i]);
   });
+  // The accepted case manifest (Aaron, 2026-09-30) must be byte-for-byte the
+  // one whose digest was recorded.
+  assert.equal(digest('cases', read('cases.json')), v.accepted_case_manifest_digest);
   console.log('PASS: display-adapter probe matches committed Go fixture vectors');
 }

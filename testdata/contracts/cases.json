@@ -1,5 +1,5 @@
 {
-  "version":"apa.m1.v2","manifest_id":"m1-cases-v2","review_status":"pending","reviewer":"",
+  "version":"apa.m1.v2","manifest_id":"m1-cases-v2","review_status":"accepted","reviewer":"aaron",
   "defaults":{"remaining":"5000000","allow_max":"100000","merchant":"allowed","credential":"valid","required_config":"present","mode":"interactive","clock":"1790726450","asset":"fixture-usdc"},
   "cases":[
     {"case_id":"ask","layer":"integration","input_ref":"purchase-input.json","operation":"policy","parameters":{},"expected":{"result":"Ask","reason":"HUMAN_APPROVAL_REQUIRED","approval_status":"pending","payment_status":"unavailable","budget_deducted":"0","forbidden_events":["APPROVED","GRANT_ISSUED","SETTLED","RESOURCE_DELIVERED"]}},

@@ -1,6 +1,8 @@
 # M1 共用資料契約
 
-B1-02 交付 `apa.m1.v2` 的 Go 型別、JSON Schema、固定測試向量與事前案例清單。範圍只到請購／Ask／Deny；沒有 policy engine、HTTP 工具認證、持久化事件服務、Signer 或付款。契約與 `cases.json` 待 Aaron 或指定 reviewer 接受，不能因測試綠燈直接開始 B1-03／05。
+B1-02 交付 `apa.m1.v2` 的 Go 型別、JSON Schema、固定測試向量與事前案例清單。範圍只到請購／Ask／Deny；沒有 policy engine、HTTP 工具認證、持久化事件服務、Signer 或付款。
+
+**狀態（2026-09-30）**：**規格已接受**：Aaron 接受 approval deadline 規則，以及 `b57b585` 的 `cases.json` 案例與預期結果（見「事前案例與證據索引」）。**整體驗收待完成**：B1-02 仍待獨立 review，整合測試尚未執行，不能因測試綠燈直接開始 B1-03／05。
 
 **版本**：`apa.m1.v2` 取代從未驗收的 v1（`57791d1`）。v1 的 commit、golden vectors 與 review 證據都保留，v2 不接受 v1 文件。兩版都是 **M1 fixture 契約**；正式付款契約另行命名，不使用 `apa.m1.*`，也不與本版混用。
 
@@ -10,7 +12,7 @@ B1-02 交付 `apa.m1.v2` 的 Go 型別、JSON Schema、固定測試向量與事�
 - `schemas/m1.schema.json`：JSON Schema 2020-12，`$defs` 定義每個型別。Schema 管形狀；Go 再驗整數上限、報價一致性、歸屬、事件鏈、狀態轉移等跨欄位條件。列舉值由測試對照 Go 的清單。
 - `testdata/contracts/registry.json`：A／B／商家三個不同地址、一筆可信資產；同一 A 的兩個 task 共用 Wallet A。全部地址均為合成 fixture，沒有私鑰或資產；不是真 token 部署地址。
 - `purchase-input.json`／`events.json`／`golden.json`：固定請購、固定事件鏈與預期 canonical bytes／digest；Go 與 `scripts/check-contract-vectors.mjs` 使用同一份檔案。
-- `cases.json`：在 Policy 實作前手寫的 expected outcomes，分 contracts／integration。`review_status=pending`，沒有呼叫 Policy 函式產生答案。
+- `cases.json`：在 Policy 實作前手寫的 expected outcomes，分 contracts／integration，沒有呼叫 Policy 函式產生答案。Aaron 於 2026-09-30 接受（`review_status=accepted`，`reviewer=aaron`）；接受紀錄見下方「案例清單接受紀錄」。
 
 可信 host 設定 → `NewRegistry` → 已認證 wrapper 建立 `Session` → `Decode` 請購 → `ValidatePurchase` → 計算 retry key 與 intent hash → B1-05 才做 `CheckTaskActive`、Policy 與原子持久化。**不可以把 Session 從模型送來的同一份 JSON 反序列化。** 函式參數叫 Session 不表示已實作身分認證。
 
@@ -119,13 +121,13 @@ payload 只開放 code／decision，不接受 raw CLI output、私鑰或生物�
 
 `cases.json` 的 defaults 與每個案例一起參與 manifest hash。defaults 恰為八個 key：remaining＝5000000、allow_max＝100000、merchant＝allowed、credential＝valid、required_config＝present、mode＝interactive、clock＝1790726450、asset＝`fixture-usdc`（registry 的 asset_id）。parameters 是相對基線的單案例覆蓋；amount 覆蓋要同時更新 trusted quote／intent 並重算 hash，不由 LLM 改寫。cancel／timeout 為各自獨立案例，不接續其他案例執行。
 
-**approval deadline 邊界（Codex review 9/30 建議接受；待 Aaron 最終確認，尚未核准）**：
+**approval deadline 邊界（Aaron 2026-09-30 接受）**：
 
 - 計時起點：**可信 host 記錄的 Ask 時間**，即該請購 `POLICY_DECIDED`（Ask，approval pending）事件由 host 寫入的 `observed_at`。不採用模型、CLI 或前端提供的時間。
 - 時間單位：整數 Unix 秒；`approval_deadline_seconds` 為正整數秒。
 - `elapsed = now − Ask 的 observed_at`；規則為 **`elapsed >= approval_deadline_seconds` 即 expired**（取代前版「恰好到期仍 pending」的寫法，前版由實作者寫定、未獲接受）。
 - 三個預期案例：`approval-deadline-before`（29 秒，pending）、`approval-deadline-exact`（30 秒，expired）、`approval-timeout`（31 秒，expired）。`advance_seconds` 即評估當下的 `elapsed`。
-- `CaseManifest.Validate` 依此規則檢查 `advance-clock` 案例：`advance_seconds` 與 result 不一致即 `CONTRADICTORY_EXPECTATION`。若 Aaron 不接受此規則，需同時修改 `deadlineResult` 與這三個案例。
+- `CaseManifest.Validate` 依此規則檢查 `advance-clock` 案例：`advance_seconds` 與 result 不一致即 `CONTRADICTORY_EXPECTATION`。
 - 契約不實作計時器；B1-05 依確認後的規則實作。
 
 `CaseManifest.Validate` 的規則（違反時的 reason code）：
@@ -161,7 +163,19 @@ JavaScript probe 需要 Node.js 20 以上，只讀 fixture、不連網、不建�
 
 Schema 的本機測試檢查 JSON 可解析、所有 `$ref` 可解析、Go 型別與 schema 的 properties／required 一致，以及列舉值（task 狀態、事件型別、evidence mode、approval 狀態、裁決、operation、defaults）與 Go 清單一致；目前環境未安裝完整 JSON Schema validator，未宣稱通過外部 meta-schema 驗證。實際 ingress 仍由嚴格 Decode＋語意驗證把關。
 
-剩餘驗收：Aaron 或獨立 reviewer 確認 encoding／schema／case manifest／expected outcomes；本次實作者不自行把 B1-02 標 Done。B1-03／05 暫不解鎖。
+### 案例清單接受紀錄
+
+| 項目 | 值 |
+|---|---|
+| 接受者與日期 | Aaron，2026-09-30 |
+| 接受的版本 | commit `b57b585` 的 `testdata/contracts/cases.json`（31 個案例）；檔案 SHA-256 `f2c9d448235734a08708de39181a54aa878d227050ca266873d5003839dc49ef`，當時 `review_status=pending`，manifest digest `sha256:927fceb7b784ba835e64291908e44db8fdf034768d1dce2a4c0ede476dfe5399` |
+| 記錄接受後的檔案 | 案例內容不變，只把 `review_status` 改為 `accepted`、`reviewer` 改為 `aaron`；manifest digest `sha256:d8b740748cdb7fcf7e88ff877b508b8459c6046675d2aef19246dc1124b8d51d` |
+| 固定方式 | `golden.json` 的 `accepted_case_manifest_digest`，由 Go（`TestGoldenVectors`）與 JavaScript probe 各自重算比對；修改任何案例都會失敗，須重新接受 |
+| 範圍 | 只代表案例與預期結果被接受。整合測試（integration 層案例）尚未執行，B1-02 整體驗收仍待完成。`RequireAccepted` 是流程 guard，不是數位簽章 |
+
+### 剩餘驗收
+
+B1-02 待獨立 review（含 Linux 容器隔離驗證的結果）；本次實作者不自行把 B1-02 標 Done。B1-03／05 暫不解鎖。
 
 ## S4-A 契約影響與遷移邊界
 
