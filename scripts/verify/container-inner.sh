@@ -27,7 +27,15 @@ probe() {
 	probe net-external-https denied curl -sS --max-time 8 https://example.com
 	probe net-external-ip denied curl -sS --max-time 8 http://1.1.1.1
 	probe dns-lookup denied python3 -c 'import socket; socket.getaddrinfo("example.com", 80)'
-	probe only-loopback-interface allowed sh -c 'test "$(ls /sys/class/net)" = lo'
+	# The kernel adds dormant tunnel devices (gre0, tunl0, sit0, ...) to every
+	# namespace; the check is that only lo is up and nothing routes elsewhere.
+	probe only-loopback-up allowed python3 -c '
+import os
+up = [n for n in os.listdir("/sys/class/net") if os.path.isdir("/sys/class/net/" + n)
+      and int(open("/sys/class/net/" + n + "/flags").read(), 16) & 1]
+assert up == ["lo"], up
+assert len(open("/proc/net/route").read().splitlines()) == 1, "IPv4 routes present"
+assert all(l.split()[-1] == "lo" for l in open("/proc/net/ipv6_route") if l.strip()), "IPv6 route off lo"'
 	probe loopback-listen allowed python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen()'
 	probe write-source denied touch /src/iso-probe
 	probe write-rootfs denied touch /iso-probe
