@@ -2,7 +2,9 @@
 
 B1-02 交付 `apa.m1.v2` 的 Go 型別、JSON Schema、固定測試向量與事前案例清單。範圍只到請購／Ask／Deny；沒有 policy engine、HTTP 工具認證、持久化事件服務、Signer 或付款。
 
-**狀態（2026-09-30）**：**規格已接受**：Aaron 接受 approval deadline 規則，以及 `b57b585` 的 `cases.json` 案例與預期結果（見「事前案例與證據索引」）。**整體驗收待完成**：B1-02 仍待獨立 review，整合測試尚未執行，不能因測試綠燈直接開始 B1-03／05。
+**狀態（2026-10-01）**：**B1-02 已結案（Done）**，Aaron 10/1 決定，驗收 commit `2dc8d93`。範圍是本份規格、已接受的 `cases.json`、契約層回歸測試與 Linux 容器驗證工具；integration 層案例屬 B1-05／B1-06，尚未執行。B1-03 已解鎖，B1-05 仍待 B1-03。
+
+9/30 紀錄：Aaron 接受 approval deadline 規則，以及 `b57b585` 的 `cases.json` 案例與預期結果（見「事前案例與證據索引」）。
 
 **版本**：`apa.m1.v2` 取代從未驗收的 v1（`57791d1`）。v1 的 commit、golden vectors 與 review 證據都保留，v2 不接受 v1 文件。兩版都是 **M1 fixture 契約**；正式付款契約另行命名，不使用 `apa.m1.*`，也不與本版混用。
 
@@ -171,15 +173,25 @@ Schema 的本機測試檢查 JSON 可解析、所有 `$ref` 可解析、Go 型�
 | 接受的版本 | commit `b57b585` 的 `testdata/contracts/cases.json`（31 個案例）；檔案 SHA-256 `f2c9d448235734a08708de39181a54aa878d227050ca266873d5003839dc49ef`，當時 `review_status=pending`，manifest digest `sha256:927fceb7b784ba835e64291908e44db8fdf034768d1dce2a4c0ede476dfe5399` |
 | 記錄接受後的檔案 | 案例內容不變，只把 `review_status` 改為 `accepted`、`reviewer` 改為 `aaron`；manifest digest `sha256:d8b740748cdb7fcf7e88ff877b508b8459c6046675d2aef19246dc1124b8d51d` |
 | 固定方式 | `golden.json` 的 `accepted_case_manifest_digest`，由 Go（`TestGoldenVectors`）與 JavaScript probe 各自重算比對；修改任何案例都會失敗，須重新接受 |
-| 範圍 | 只代表案例與預期結果被接受。整合測試（integration 層案例）尚未執行，B1-02 整體驗收仍待完成。`RequireAccepted` 是流程 guard，不是數位簽章 |
+| 範圍 | 只代表案例與預期結果被接受。整合測試（integration 層案例）尚未執行，屬 B1-05／B1-06。`RequireAccepted` 是流程 guard，不是數位簽章 |
 
-### 剩餘驗收
+### 結案
 
-B1-02 待獨立 review（含 Linux 容器隔離驗證的結果）；本次實作者不自行把 B1-02 標 Done。B1-03／05 暫不解鎖。
+B1-02 於 2026-10-01 由 Aaron 決定結案，驗收 commit `2dc8d93`（獨立 review 與 Linux 容器隔離驗證均已通過）。B1-03 解鎖；B1-05 依賴 B1-02 與 B1-03，仍待 B1-03。
 
 ## S4-A 契約影響與遷移邊界
 
-> 2026-09-30 S4-A 第三版，待 Aaron 接受。初審對象 `57791d1`；依會合規則，本版已對照 B1-02 v2 修正後的契約重新核對（同一 commit 交付）。依據見 [ADR](adr/payment-account-model.md) 與[相容性盤點](spikes/payment-policy-compatibility.md)；C1～C10 見 vault 的 B1-02 契約 Review。候選代號沿用 ADR：A 基線、B1 7702＋7710、B2 7702＋EIP-3009 經 ERC-1271、C ERC-8196。
+> **狀態（2026-10-01，Aaron 確認）**：
+>
+> | 項目 | 狀態 |
+> |---|---|
+> | B1-02＋S4-A 的 M1 契約影響審查 | 已接受，基準 `2dc8d93` |
+> | S4-A 帳戶方案選型／ADR | 仍待決，維持 Proposed |
+> | S4-B、testnet 操作 | 未核准 |
+>
+> 接受契約影響審查，代表目前 fixture 契約與下方遷移邊界足以繼續 M1，**不是採用 ERC-8196、7702 或 7710**。
+
+> 2026-09-30 S4-A 第三版。初審對象 `57791d1`；依會合規則，本版已對照 B1-02 v2 修正後的契約重新核對（同一 commit 交付）。依據見 [ADR](adr/payment-account-model.md) 與[相容性盤點](spikes/payment-policy-compatibility.md)；C1～C10 見 vault 的 B1-02 契約 Review。候選代號沿用 ADR：A 基線、B1 7702＋7710、B2 7702＋EIP-3009 經 ERC-1271、C ERC-8196。
 
 ### 1. 結論
 
@@ -209,7 +221,7 @@ B1-02 待獨立 review（含 Linux 容器隔離驗證的結果）；本次實作
 | C3 唯一性 | purchase_order_id（task 內）與 nonce（付款人＋資產內）唯一 | 原子唯一索引與並行重入 |
 | C4 大小寫重複 key | 報價物件拒絕 | wire 解析用精確大小寫 |
 | C5 資產 | registry `assets`、`TrustedAsset`、`ASSET_NOT_ALLOWED`、`deny-asset` 案例 | Policy 實際比對 |
-| C6 案例缺口 | 補歸屬、取消、逾時、邊界、資產案例（共 30 案） | reviewer 接受 `cases.json` |
+| C6 案例缺口 | 補歸屬、取消、逾時、邊界、資產案例（共 31 案） | —（Aaron 9/30 已接受 `cases.json`） |
 | C7 原因代碼 | 封閉 `ReasonCodes`、`CodedError`、`ErrorCode` | — |
 | C8 manifest | 封閉 operation／參數／outcome 表、七個 capability claim、`ValidateRefs`、負向測試 | B1-06 產出 run manifest；B1-07 依證據判定 |
 | C9 schema 差異 | 空字串拒絕；列舉值對照測試 | 外部 validator |
