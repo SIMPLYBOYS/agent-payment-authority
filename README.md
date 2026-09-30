@@ -89,7 +89,10 @@ sh scripts/verify-b1-01.sh
 sh scripts/verify/build-image.sh                        # 準備階段：以固定 digest 拉取基礎映像並建置（可連網）
 sh scripts/verify/container-verify.sh                   # 測試階段：--network none、唯讀原始碼、資源硬限制
 sh scripts/verify/container-verify.sh --inject-failure  # 自我測試：必須以非零結束
+sh scripts/verify/container-verify.sh --inject-export truncate  # 匯出故障自我測試（pack-fail／truncate／missing／oversize），必須以非零結束
 ```
+
+主機端需要 `python3`（`scripts/verify/evidence_import.py`）。容器輸出的 archive 視為不可信：主機端限制總量，在暫存區驗證（檔案白名單、拒絕連結與特殊檔案、路徑越界、大小上限、manifest hash、必要檔案）後才寫入 `<run>/container/`；被拒的 archive 不解開、原樣留存。打包、傳輸、驗證、保存任一步失敗，腳本都以非零結束。
 
 隔離設定寫在 `container-verify.sh` 開頭，每次實際使用的 `docker run` 參數也會存進結果目錄。結果寫入新的 `artifacts/verify-container/runs/<commit>-<時間>/`，不覆寫舊證據。
 
