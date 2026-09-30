@@ -90,15 +90,18 @@ M1 event type：SYSTEM_READY、TASK_STARTED、PURCHASE_PROPOSED、POLICY_DECIDED
 | 歷史事件驗證 | `ValidateEvent` 只驗歸屬、intent 綁定與事件格式，**不看 task 目前狀態**，已結束 task 的事件仍可驗證 | 契約 |
 | 狀態轉移 | 對整條串流套用下表 | 契約：`ValidateEventOrder` |
 
-`ValidateEventOrder` 對每個 task 的串流檢查（違反時 reason `INVALID_EVENT_ORDER`，鏈斷時 `EVENT_CHAIN_BROKEN`）：
+`ValidateEventOrder` 對每個 task 的串流檢查（違反時 reason `INVALID_EVENT_ORDER`，鏈斷時 `EVENT_CHAIN_BROKEN`，請購 intent 改變時 `PURCHASE_INTENT_CHANGED`）。下文「task 結束」指出現 Deny 裁決、TASK_CANCELLED 或 TASK_TIMED_OUT 之一：
 
 - event ID 不重複；sequence 從 1 連續；`prev_event_hash` 連成鏈（見下節）。
 - 第一個事件必須是 TASK_STARTED，且只出現一次。
-- PURCHASE_PROPOSED：task 結束後不得出現；同一請購只能提出一次。
-- POLICY_DECIDED：須有同一請購較早的 PURCHASE_PROPOSED；每個請購只有一個；task 結束後不得出現。因此 Deny 之後不能再出現 Ask，Ask 之後也不能再出現 Allow。
-- APPROVAL_EXPIRED／APPROVAL_WITHDRAWN：只能結束一個仍開著的 Ask，且只有一次；task 結束後仍可出現（例如 CLI 逾時後核准仍會到期，取消後撤回待決的核准）。
-- TASK_CANCELLED／TASK_TIMED_OUT：每個 task 只能有一個結束事件。
+- **intent 固定**：每個 `(task_id, purchase_order_id)` 以首次 PURCHASE_PROPOSED 的 `intent_hash` 為準；之後同一請購的 POLICY_DECIDED、APPROVAL_EXPIRED、APPROVAL_WITHDRAWN 必須引用相同 `intent_hash`，否則 `PURCHASE_INTENT_CHANGED`。即使每個事件都附上本身合法的請購快照，也不能中途換成另一份內容。
+- PURCHASE_PROPOSED：task 結束後不得出現（包含其他 purchase_order_id）；同一請購只能提出一次。
+- POLICY_DECIDED：須有同一請購較早的 PURCHASE_PROPOSED；每個請購只有一個；task 結束後不得出現（包含其他 purchase_order_id）。
+- **Deny 終止 task**：M1 中 Deny 後客人離場，該 task 不再接受任何請購或裁決；registry 或執行期的 task 狀態為 `denied`。已存在的 pending Ask 仍可依下條收尾，不會產生核准或付款能力。
+- APPROVAL_EXPIRED／APPROVAL_WITHDRAWN：只能結束一個仍開著的 Ask，且只有一次；task 結束後仍可出現（例如另一筆請購被 Deny、CLI 逾時或主持人取消後，待決的核准到期或被撤回）。
+- TASK_CANCELLED／TASK_TIMED_OUT：每個 task 最多一個；可以出現在 Deny 之後（記錄 CLI 逾時或主持人取消，不改變任何裁決）。
 - 取消時若有待決的 Ask，最終應出現 APPROVAL_WITHDRAWN；前綴檢查無法強制「最終一定出現」，由 B1-05 與 B1-07 負責。
+- 歷史事件不以 task 目前狀態否定：已 denied／cancelled 的 task，其合法歷史仍能通過 `ValidateEvent` 與 `ValidateEventOrder`。
 
 payload 只開放 code／decision，不接受 raw CLI output、私鑰或生物資料欄位。這是型別限制，不能取代 B1-04／05 的 redaction 與事件來源認證。live／fixture／replay 表示該事件來源，不能整個任務因此冒充 live payment。
 
@@ -114,7 +117,15 @@ payload 只開放 code／decision，不接受 raw CLI output、私鑰或生物�
 
 ## 事前案例與證據索引
 
-`cases.json` 的 defaults 與每個案例一起參與 manifest hash。defaults 恰為八個 key：remaining＝5000000、allow_max＝100000、merchant＝allowed、credential＝valid、required_config＝present、mode＝interactive、clock＝1790726450、asset＝`fixture-usdc`（registry 的 asset_id）。parameters 是相對基線的單案例覆蓋；amount 覆蓋要同時更新 trusted quote／intent 並重算 hash，不由 LLM 改寫。cancel／timeout 為各自獨立案例，不接續其他案例執行。approval 等待上限 30 秒時，第 30 秒仍 pending，第 31 秒 expired。
+`cases.json` 的 defaults 與每個案例一起參與 manifest hash。defaults 恰為八個 key：remaining＝5000000、allow_max＝100000、merchant＝allowed、credential＝valid、required_config＝present、mode＝interactive、clock＝1790726450、asset＝`fixture-usdc`（registry 的 asset_id）。parameters 是相對基線的單案例覆蓋；amount 覆蓋要同時更新 trusted quote／intent 並重算 hash，不由 LLM 改寫。cancel／timeout 為各自獨立案例，不接續其他案例執行。
+
+**approval deadline 邊界（修訂提案，待 Aaron／reviewer 接受，尚未核准）**：
+
+- 計時起點：該請購 `POLICY_DECIDED`（Ask，approval pending）事件的 `observed_at`，即核准請求發出的時刻。
+- 時間單位：整數 Unix 秒；`approval_deadline_seconds` 為正整數秒。
+- `elapsed = now − Ask 的 observed_at`；提案規則為 **`elapsed >= approval_deadline_seconds` 即 expired**（取代前版「恰好到期仍 pending」的寫法，前版由實作者寫定、未獲接受）。
+- 三個預期案例：`approval-deadline-before`（29 秒，pending）、`approval-deadline-exact`（30 秒，expired）、`approval-timeout`（31 秒，expired）。`advance_seconds` 即評估當下的 `elapsed`。
+- 契約不實作計時器；B1-05 依接受後的規則實作。規則未接受前，`CaseManifest.Validate` 不檢查 `advance_seconds` 與 result 的算術一致性，接受後再補。
 
 `CaseManifest.Validate` 的規則（違反時的 reason code）：
 
@@ -201,3 +212,9 @@ Schema 的本機測試檢查 JSON 可解析、所有 `$ref` 可解析、Go 型�
 ### 5. 會合規則
 
 初審對象 `57791d1`，本版已依 B1-02 v2 修正重核並與之同一 commit 交付。之後任一方再改契約，另一方須重核，兩者再以同一 commit 驗收。
+
+**B1-02 第二輪修正後重核（9/30）**：本輪變更為事件串流的 intent 固定（`PURCHASE_INTENT_CHANGED`）、Deny 終止 task，以及 approval deadline 邊界的修訂提案。上方影響表**不需變動**，理由：
+
+- 沒有改動 `AuthorizationIntent`、`eip3009_nonce`、fixture domain、registry `assets` 或付款路徑規則，四個候選（A、B1、B2、C）的對應欄位不受影響。
+- intent 固定強化了「同一請購的事件引用同一 intent」這條稽核連結，方向與遷移邊界的「完整密碼學綁定」一致；正式付款契約屬另一套命名，不承接 M1 的事件規則。
+- Deny 終止 task 與 deadline 提案是 M1 流程語意，不涉及帳戶模型、delegation 或結算；deadline 規則被接受後由 B1-05 實作，不擴大 S4-A 研究或採用範圍。

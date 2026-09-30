@@ -146,12 +146,16 @@ func GenesisHash(taskID string) (string, error) {
 	return digestValue(FixtureDomain+"/event-genesis", map[string]string{"task_id": taskID})
 }
 
+// chainState is one task's position in its stream. stopped: no new purchase
+// or decision (after Deny, cancel or timeout). lifecycleEnded: the single
+// TASK_CANCELLED / TASK_TIMED_OUT has been recorded. intent pins each
+// purchase_order_id to the intent_hash of its first PURCHASE_PROPOSED.
 type chainState struct {
-	next             uint64
-	prev             string
-	ended            bool
-	proposed, closed map[string]bool
-	verdict          map[string]string
+	next                    uint64
+	prev                    string
+	stopped, lifecycleEnded bool
+	proposed, closed        map[string]bool
+	verdict, intent         map[string]string
 }
 
 // ValidateEventOrder checks complete per-task streams: IDs unique, sequence
@@ -176,7 +180,7 @@ func ValidateEventOrder(events []AuditEvent) error {
 			if err != nil {
 				return err
 			}
-			st = &chainState{prev: genesis, proposed: map[string]bool{}, closed: map[string]bool{}, verdict: map[string]string{}}
+			st = &chainState{prev: genesis, proposed: map[string]bool{}, closed: map[string]bool{}, verdict: map[string]string{}, intent: map[string]string{}}
 			tasks[task] = st
 		}
 		if e.Sequence != st.next+1 {
@@ -186,7 +190,12 @@ func ValidateEventOrder(events []AuditEvent) error {
 			return coded("EVENT_CHAIN_BROKEN", fmt.Sprintf("task %s: event %s does not link to the previous event", task, e.EventID))
 		}
 		if err := st.apply(e); err != nil {
-			return coded("INVALID_EVENT_ORDER", fmt.Sprintf("task %s: event %s: %v", task, e.EventID, err))
+			code, detail := "INVALID_EVENT_ORDER", err.Error()
+			var c *CodedError
+			if errors.As(err, &c) {
+				code, detail = c.Code, c.Detail
+			}
+			return coded(code, fmt.Sprintf("task %s: event %s: %s", task, e.EventID, detail))
 		}
 		h, err := EventHash(e)
 		if err != nil {
@@ -197,33 +206,53 @@ func ValidateEventOrder(events []AuditEvent) error {
 	return nil
 }
 
-// apply enforces the transition table for one task-scoped event.
+// apply enforces the transition table for one task-scoped event. Each guard
+// has its own message so tests can show which one fired.
 func (st *chainState) apply(e AuditEvent) error {
 	po := e.Scope.PurchaseOrderID
 	if (st.next == 0) != (e.EventType == "TASK_STARTED") {
 		return errors.New("TASK_STARTED must be the first event and appear once")
 	}
+	// A purchase keeps the intent it was proposed with: later decisions and
+	// approval closures must reference the same intent_hash.
+	if pinned := st.intent[po]; pinned != "" && e.Scope.IntentHash != pinned {
+		return coded("PURCHASE_INTENT_CHANGED", fmt.Sprintf("purchase %s was proposed with %s, not %s", po, pinned, e.Scope.IntentHash))
+	}
 	switch e.EventType {
 	case "PURCHASE_PROPOSED":
-		if st.ended || st.proposed[po] {
-			return errors.New("no purchase after the task ended, and one proposal per purchase")
+		if st.stopped {
+			return errors.New("no new purchase after the task ended (Deny, cancel or timeout)")
 		}
-		st.proposed[po] = true
+		if st.proposed[po] {
+			return errors.New("one proposal per purchase")
+		}
+		st.proposed[po], st.intent[po] = true, e.Scope.IntentHash
 	case "POLICY_DECIDED":
-		if st.ended || !st.proposed[po] || st.verdict[po] != "" || e.Payload.Decision == nil {
-			return errors.New("a decision needs an earlier proposal, comes once per purchase and not after the task ended")
+		if st.stopped {
+			return errors.New("no decision after the task ended (Deny, cancel or timeout)")
+		}
+		if !st.proposed[po] || e.Payload.Decision == nil {
+			return errors.New("a decision needs an earlier proposal of the same purchase")
+		}
+		if st.verdict[po] != "" {
+			return errors.New("one decision per purchase")
 		}
 		st.verdict[po] = e.Payload.Decision.PolicyVerdict
+		// M1: after a Deny the customer leaves; the task takes no new purchase
+		// or decision. An Ask already open may still expire or be withdrawn.
+		if st.verdict[po] == "Deny" {
+			st.stopped = true
+		}
 	case "APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN":
 		if st.verdict[po] != "Ask" || st.closed[po] {
 			return errors.New("only an open Ask can expire or be withdrawn, once")
 		}
 		st.closed[po] = true
 	case "TASK_CANCELLED", "TASK_TIMED_OUT":
-		if st.ended {
-			return errors.New("task already ended")
+		if st.lifecycleEnded {
+			return errors.New("one TASK_CANCELLED or TASK_TIMED_OUT per task")
 		}
-		st.ended = true
+		st.lifecycleEnded, st.stopped = true, true
 	}
 	return nil
 }

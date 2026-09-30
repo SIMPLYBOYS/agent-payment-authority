@@ -349,7 +349,7 @@ func TestC6ManifestCoversRequiredCases(t *testing.T) {
 	for _, c := range m.Cases {
 		got = append(got, c.CaseID)
 	}
-	for _, id := range []string{"cross-consumer", "cross-consumer-wallet", "cross-consumer-payer", "altered-consumer-id", "altered-agent-id", "retry-same-request-id-a-b", "retry-new-request-same-order", "cancel-pending", "cancel-no-purchase", "approval-timeout", "approval-deadline-boundary", "cli-timeout", "cli-timeout-pending", "deny-asset", "restart"} {
+	for _, id := range []string{"cross-consumer", "cross-consumer-wallet", "cross-consumer-payer", "altered-consumer-id", "altered-agent-id", "retry-same-request-id-a-b", "retry-new-request-same-order", "cancel-pending", "cancel-no-purchase", "approval-deadline-before", "approval-deadline-exact", "approval-timeout", "cli-timeout", "cli-timeout-pending", "deny-asset", "restart"} {
 		if !slices.Contains(got, id) {
 			t.Fatalf("manifest lacks case %s", id)
 		}
@@ -550,6 +550,149 @@ func TestEventChain(t *testing.T) {
 	mustFail(t, r.ValidateEvent(noPrev, &p))
 	system := AuditEvent{Version: Version, EventID: "system-1", EventType: "SYSTEM_READY", EvidenceMode: "fixture", Source: "host", ObservedAt: 1790726450, PrevEventHash: ga}
 	mustFail(t, r.ValidateEvent(system, nil))
+}
+
+// variant is a valid copy of the fixture purchase with another order ID and
+// nonce; the quote is unchanged, so its snapshot validates on its own.
+func variant(t *testing.T, p PurchaseOrder, po, nonce string) PurchaseOrder {
+	t.Helper()
+	p.Intent.PurchaseOrderID, p.Intent.EIP3009Nonce = po, nonce
+	mustPass(t, p.Validate())
+	return p
+}
+
+// orderEvent is taskEvent for purchase p (its order ID) under intent h.
+func orderEvent(p PurchaseOrder, h, id, typ string, d *PolicyDecision) AuditEvent {
+	e := taskEvent(h, id, typ, "", d)
+	e.Scope.PurchaseOrderID = p.Intent.PurchaseOrderID
+	return e
+}
+
+// validEach requires every event to pass ValidateEvent with the snapshot of
+// the intent it names, so a stream failure can only come from ordering rules.
+func validEach(t *testing.T, r *Registry, events []AuditEvent, snapshots map[string]*PurchaseOrder) {
+	t.Helper()
+	for _, e := range events {
+		var order *PurchaseOrder
+		if e.Scope.PurchaseOrderID != "" {
+			order = snapshots[e.Scope.IntentHash]
+		}
+		if err := r.ValidateEvent(e, order); err != nil {
+			t.Fatalf("event %s is not valid on its own: %v", e.EventID, err)
+		}
+	}
+}
+
+// Round 2 (1): each purchase keeps the intent_hash of its first proposal.
+func TestIntentBindingAcrossEvents(t *testing.T) {
+	r, _ := registry(t)
+	p1 := purchase(t)
+	p1b := variant(t, p1, "po-a-1", "0x"+strings.Repeat("b", 64)) // same order, other content
+	h1, h2 := intentHash(t, p1), intentHash(t, p1b)
+	snapshots := map[string]*PurchaseOrder{h1: &p1, h2: &p1b}
+	start := taskEvent(h1, "e1", "TASK_STARTED", "", nil)
+	prop := taskEvent(h1, "e2", "PURCHASE_PROPOSED", "", nil)
+	ask := func(h string) AuditEvent {
+		return taskEvent(h, "e3", "POLICY_DECIDED", "", decision(h, "Ask", "pending", "HUMAN_APPROVAL_REQUIRED"))
+	}
+	expired := func(h string) AuditEvent {
+		return taskEvent(h, "e4", "APPROVAL_EXPIRED", "", decision(h, "Ask", "expired", "APPROVAL_TIMEOUT"))
+	}
+	withdrawn := func(h string) AuditEvent {
+		return taskEvent(h, "e4", "APPROVAL_WITHDRAWN", "", decision(h, "Ask", "withdrawn", "HOST_CANCELLED"))
+	}
+	for _, ok := range [][]AuditEvent{{start, prop, ask(h1), expired(h1)}, {start, prop, ask(h1), withdrawn(h1)}} {
+		events := linked(t, ok...)
+		validEach(t, r, events, snapshots)
+		mustPass(t, ValidateEventOrder(events))
+	}
+	for _, bad := range []struct {
+		name   string
+		events []AuditEvent
+	}{
+		{"proposal H1, decision H2", []AuditEvent{start, prop, ask(h2)}},
+		{"proposal H1, Ask H1, expired H2", []AuditEvent{start, prop, ask(h1), expired(h2)}},
+		{"proposal H1, Ask H1, withdrawn H2", []AuditEvent{start, prop, ask(h1), withdrawn(h2)}},
+	} {
+		events := linked(t, bad.events...)
+		validEach(t, r, events, snapshots)
+		mustPass(t, ValidateEventOrder(events[:len(events)-1])) // prefix and chain are valid
+		err := ValidateEventOrder(events)
+		wantCode(t, err, "PURCHASE_INTENT_CHANGED")
+		t.Logf("%s: guard hit: %v", bad.name, err)
+	}
+}
+
+// Round 2 (2): a Deny ends the task. No purchase or decision follows; an Ask
+// already open may still expire or be withdrawn; history stays verifiable.
+func TestDenyEndsTask(t *testing.T) {
+	r, c := registry(t)
+	p1 := purchase(t)
+	p2 := variant(t, p1, "po-a-2", "0x"+strings.Repeat("c", 64)) // another order, new nonce
+	h1, h2 := intentHash(t, p1), intentHash(t, p2)
+	snapshots := map[string]*PurchaseOrder{h1: &p1, h2: &p2}
+	start := taskEvent(h1, "e1", "TASK_STARTED", "", nil)
+	prop := func(p PurchaseOrder, h, id string) AuditEvent { return orderEvent(p, h, id, "PURCHASE_PROPOSED", nil) }
+	decide := func(p PurchaseOrder, h, id, verdict, approval, reason string) AuditEvent {
+		return orderEvent(p, h, id, "POLICY_DECIDED", decision(h, verdict, approval, reason))
+	}
+	deny := func(p PurchaseOrder, h, id string) AuditEvent {
+		return decide(p, h, id, "Deny", "not_requested", "INSUFFICIENT_BUDGET")
+	}
+	askOpen := decide(p1, h1, "e3", "Ask", "pending", "HUMAN_APPROVAL_REQUIRED")
+
+	for _, bad := range []struct {
+		name, guard string
+		events      []AuditEvent
+	}{
+		{"proposal of another order after Deny", "no new purchase after the task ended",
+			[]AuditEvent{start, prop(p1, h1, "e2"), deny(p1, h1, "e3"), prop(p2, h2, "e4")}},
+		{"Ask on another order after Deny", "no decision after the task ended",
+			[]AuditEvent{start, prop(p1, h1, "e2"), prop(p2, h2, "e3"), deny(p1, h1, "e4"), decide(p2, h2, "e5", "Ask", "pending", "HUMAN_APPROVAL_REQUIRED")}},
+		{"Deny on another order after Deny", "no decision after the task ended",
+			[]AuditEvent{start, prop(p1, h1, "e2"), prop(p2, h2, "e3"), deny(p1, h1, "e4"), deny(p2, h2, "e5")}},
+	} {
+		events := linked(t, bad.events...)
+		validEach(t, r, events, snapshots)
+		mustPass(t, ValidateEventOrder(events[:len(events)-1]))
+		err := ValidateEventOrder(events)
+		if ErrorCode(err) != "INVALID_EVENT_ORDER" || !strings.Contains(err.Error(), bad.guard) {
+			t.Fatalf("%s: got %v, want guard %q", bad.name, err, bad.guard)
+		}
+		t.Logf("%s: guard hit: %v", bad.name, err)
+	}
+
+	// The Ask on po-a-1 was open when po-a-2 was denied: it can still close.
+	closings := []AuditEvent{
+		orderEvent(p1, h1, "e6", "APPROVAL_EXPIRED", decision(h1, "Ask", "expired", "APPROVAL_TIMEOUT")),
+		orderEvent(p1, h1, "e6", "APPROVAL_WITHDRAWN", decision(h1, "Ask", "withdrawn", "HOST_CANCELLED")),
+	}
+	for _, closing := range closings {
+		events := linked(t, start, prop(p1, h1, "e2"), askOpen, prop(p2, h2, "e4"), deny(p2, h2, "e5"), closing)
+		validEach(t, r, events, snapshots)
+		mustPass(t, ValidateEventOrder(events))
+	}
+
+	// A CLI timeout after the Deny is still recorded once (it changes no verdict).
+	timeout := taskEvent(h1, "e4", "TASK_TIMED_OUT", "CLI_TIMEOUT", nil)
+	cancel := taskEvent(h1, "e5", "TASK_CANCELLED", "HOST_CANCELLED", nil)
+	denied := linked(t, start, prop(p1, h1, "e2"), deny(p1, h1, "e3"), timeout)
+	mustPass(t, ValidateEventOrder(denied))
+	err := ValidateEventOrder(linked(t, start, prop(p1, h1, "e2"), deny(p1, h1, "e3"), timeout, cancel))
+	if ErrorCode(err) != "INVALID_EVENT_ORDER" || !strings.Contains(err.Error(), "one TASK_CANCELLED or TASK_TIMED_OUT per task") {
+		t.Fatalf("second lifecycle end: %v", err)
+	}
+
+	// History of the denied task validates against a registry that now says so.
+	for i := range c.Tasks {
+		if c.Tasks[i].TaskID == "task-a" {
+			c.Tasks[i].Status = "denied"
+		}
+	}
+	rDenied, err := NewRegistry(c)
+	mustPass(t, err)
+	validEach(t, rDenied, denied, snapshots)
+	wantCode(t, CheckTaskActive("denied"), "TASK_NOT_ACTIVE")
 }
 
 // keysOf is a sorted key list for comparing Go tables with schema enums.
