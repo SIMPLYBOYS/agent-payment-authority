@@ -2,7 +2,9 @@
 # Isolated verification in a Linux container. Docker is a verification tool
 # only; the demo does not need it.
 # Usage: sh scripts/verify/container-verify.sh [--inject-failure | --inject-export KIND] [commit]
-#   (default HEAD). Build the image first with build-image.sh. Needs python3
+#   (default HEAD). Build the image first with build-image.sh for a commit
+#   with the same go.mod and go.sum; the run refuses an image whose recorded
+#   hashes differ. Needs python3
 #   on the host for scripts/verify/evidence_import.py.
 #   --inject-failure runs a deliberate failing step next to a passing one.
 #   --inject-export KIND (pack-fail | truncate | missing | oversize) breaks the
@@ -19,7 +21,8 @@
 # Test-phase isolation (every flag is recorded in docker-run.txt):
 # - --network none: own network namespace with only lo, no external network.
 # - --read-only root filesystem; the commit is a clone bind-mounted read-only
-#   at /src; the only writable place is a 3 GB tmpfs at /scratch.
+#   at /src; the only writable place is a 3 GB tmpfs at /scratch. Go modules
+#   come from the image's read-only cache (/opt/apa/gomodcache).
 # - Hard limits: --memory 3g (no extra swap), --pids-limit 512, --cpus 2,
 #   ulimits for open files, CPU seconds and file size; wall time 90 minutes.
 # - --user 10001, --cap-drop ALL, no-new-privileges; not privileged, not host
@@ -29,7 +32,7 @@
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-IMAGE=${APA_VERIFY_IMAGE:-apa-verify:b1-02}
+IMAGE=${APA_VERIFY_IMAGE:-apa-verify:b1-05}
 INJECT=0 EXPORT_FAULT="" MODE=full
 case "${1:-}" in
 --inject-failure)
@@ -66,6 +69,17 @@ git -C "$BASE/src" checkout --quiet --detach "$SHA"
 chmod -R a-w "$BASE/src"
 IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE")
 
+# The image's preloaded modules must be exactly the tested commit's go.mod and
+# go.sum; otherwise the offline build would test something else or fail.
+want=$(cd "$BASE/src" && shasum -a 256 go.mod go.sum)
+have=$(docker run --rm --network none "$IMAGE_ID" cat /opt/apa/deps.sha256)
+printf 'commit:\n%s\nimage:\n%s\n' "$want" "$have" >"$RUN/deps.txt"
+if [ "$want" != "$have" ]; then
+	echo "image $IMAGE was built for another go.mod/go.sum; rebuild: sh scripts/verify/build-image.sh $SHA" >&2
+	cat "$RUN/deps.txt" >&2
+	exit 65
+fi
+
 set -- docker run --name "$NAME" --rm \
 	--network none --read-only \
 	--tmpfs /scratch:rw,exec,nosuid,nodev,size=3g,mode=1777 \
@@ -74,7 +88,7 @@ set -- docker run --name "$NAME" --rm \
 	--memory 3g --memory-swap 3g --pids-limit 512 --cpus 2 \
 	--ulimit nofile=4096:4096 --ulimit cpu=3600:3600 --ulimit fsize=1073741824:1073741824 \
 	--env HOME=/scratch/home --env TMPDIR=/scratch/tmp \
-	--env GOCACHE=/scratch/cache/go-build --env GOMODCACHE=/scratch/cache/mod --env GOPATH=/scratch/cache/gopath \
+	--env GOCACHE=/scratch/cache/go-build --env GOMODCACHE=/opt/apa/gomodcache --env GOPATH=/scratch/cache/gopath \
 	--env GOPROXY=off --env GOSUMDB=off --env GOTOOLCHAIN=local --env GOFLAGS=-mod=readonly \
 	--env GIT_CONFIG_NOSYSTEM=1 --env GIT_CONFIG_COUNT=1 --env GIT_CONFIG_KEY_0=safe.directory --env GIT_CONFIG_VALUE_0=/src \
 	--env PYTHONDONTWRITEBYTECODE=1 --env APA_INJECT_FAIL="$INJECT" --env APA_INJECT_EXPORT="$EXPORT_FAULT" \
@@ -102,6 +116,7 @@ rc=$crc
 {
 	echo "commit: $SHA"
 	echo "image: $IMAGE ($IMAGE_ID)"
+	echo "go.mod/go.sum: match the image (deps.txt)"
 	case "$MODE" in
 	inject) echo "mode: self-test with an injected failing step" ;;
 	export-fault) echo "mode: self-test with export fault '$EXPORT_FAULT'" ;;

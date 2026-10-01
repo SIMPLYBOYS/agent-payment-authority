@@ -60,6 +60,7 @@ assert all(l.split()[-1] == "lo" for l in open("/proc/net/ipv6_route") if l.stri
 	probe write-source denied touch /src/iso-probe
 	probe write-rootfs denied touch /iso-probe
 	probe write-toolchain denied touch /usr/local/go/iso-probe
+	probe write-module-cache denied touch /opt/apa/gomodcache/iso-probe
 	probe write-scratch allowed touch /scratch/tmp/iso-probe
 	probe no-docker-socket allowed sh -c '! test -e /var/run/docker.sock'
 	probe no-host-home-mount allowed sh -c '! grep -qE " /(Users|home)" /proc/mounts'

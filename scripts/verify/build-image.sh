@@ -1,20 +1,35 @@
 #!/bin/sh
 # Preparation phase: builds the verification image. Network is allowed here
-# (pulling the pinned base images) and only here; the test phase runs with
-# --network none. Usage: sh scripts/verify/build-image.sh
-# Records the image ID and tool versions in a new
+# and only here: pulling the pinned base images and downloading the Go modules
+# listed in the commit's go.mod/go.sum (proxy.golang.org, checked against
+# sum.golang.org). The test phase runs with --network none.
+# Usage: sh scripts/verify/build-image.sh [commit]   (default HEAD)
+# The build context is a temporary directory holding only the Dockerfile and
+# the commit's go.mod and go.sum, taken from git, not the working tree.
+# Records the image ID, dependency hashes and tool versions in a new
 # artifacts/verify-container/image/<UTC time>/ directory.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-TAG=${APA_VERIFY_IMAGE:-apa-verify:b1-02}
+TAG=${APA_VERIFY_IMAGE:-apa-verify:b1-05}
+SHA=$(git -C "$ROOT" rev-parse "${1:-HEAD}^{commit}")
 OUT="$ROOT/artifacts/verify-container/image/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$(dirname "$OUT")"
 mkdir "$OUT"
+CTX=$(mktemp -d "${TMPDIR:-/tmp}/apa-image.XXXXXX")
+trap 'rm -rf "$CTX"' EXIT INT TERM
+cp "$ROOT/scripts/verify/Dockerfile" "$CTX/"
+git -C "$ROOT" show "$SHA:go.mod" >"$CTX/go.mod"
+git -C "$ROOT" show "$SHA:go.sum" >"$CTX/go.sum"
+ls -A "$CTX" >"$OUT/build-context.txt"
 
-docker build --quiet -t "$TAG" "$ROOT/scripts/verify" >"$OUT/build.log" 2>&1
+docker build --quiet -t "$TAG" "$CTX" >"$OUT/build.log" 2>&1
 {
 	echo "tag: $TAG"
+	echo "dependencies from commit: $SHA"
+	echo "build context: $(tr '\n' ' ' <"$OUT/build-context.txt")"
+	echo "go.mod/go.sum recorded in the image:"
+	docker run --rm --network none "$TAG" cat /opt/apa/deps.sha256 | sed 's/^/  /'
 	docker image inspect --format 'image id: {{.Id}}' "$TAG"
 	echo "base images (pinned in scripts/verify/Dockerfile):"
 	grep '^FROM' "$ROOT/scripts/verify/Dockerfile" | sed 's/^/  /'
