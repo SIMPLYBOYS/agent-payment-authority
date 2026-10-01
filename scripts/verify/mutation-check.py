@@ -205,13 +205,13 @@ MUTATIONS = [
     ("B1-05 store: budget not verified", "internal/store/verify.go",
      "if row.BudgetRemaining != string(tm.BudgetInitial) {", "if false {", "TestRecoveryRefusesCorruption"),
     ("B1-05 store: decision columns not verified", "internal/store/verify.go",
-     "if !ok || *d.Payload.Decision != p.Decision || d.ObservedAt != p.DecidedAt {", "if !ok {", "TestRecoveryRefusesCorruption"),
+     "if !ok || *d.Payload.Decision != p.Decision || d.ObservedAt != p.DecidedAt {", "if !ok || false && (*d.Payload.Decision != p.Decision || d.ObservedAt != p.DecidedAt) {", "TestRecoveryRefusesCorruption"),
     ("B1-05 store: projection not verified", "internal/store/verify.go",
      'if status != row.Status || reason != row.DenyReason.String || (reason == "") == row.DenyReason.Valid {', 'if false && (status != row.Status || reason != row.DenyReason.String || (reason == "") == row.DenyReason.Valid) {', "TestRecoveryRefusesCorruption"),
     ("B1-05 store: chain head not verified", "internal/store/verify.go",
      "if row.ChainHead != head || row.NextSeq != last.Sequence+1 {", "if false && (row.ChainHead != head || row.NextSeq != last.Sequence+1) {", "TestRecoveryRefusesCorruption"),
     ("B1-05 store: stored event hash not verified", "internal/store/verify.go",
-     "herr != nil || eh != hash ||", "herr != nil ||", "TestRecoveryRefusesCorruption"),
+     "herr != nil || eh != hash ||", "herr != nil || false && eh != hash ||", "TestRecoveryRefusesCorruption"),
 ]
 
 
