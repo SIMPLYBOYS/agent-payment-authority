@@ -125,9 +125,9 @@ MUTATIONS = [
     ("B1-05 missing credential not treated as missing config", "internal/policy/policy.go",
      "case p == nil || in.Credential == nil:", "case p == nil:", "TestDenyPrecedence"),
     ("B1-05 asset not checked", "internal/policy/policy.go",
-     "case !trusted || asset.AssetID != p.AssetID:", "case false:", "TestAcceptedPolicyCases"),
+     "case !trusted || asset.AssetID != p.AssetID:", "case false && (!trusted || asset.AssetID != p.AssetID):", "TestAcceptedPolicyCases"),
     ("B1-05 trusted asset outside the profile allowed", "internal/policy/policy.go",
-     "case !trusted || asset.AssetID != p.AssetID:", "case !trusted:", "TestBoundaries"),
+     "case !trusted || asset.AssetID != p.AssetID:", "case !trusted || false && asset.AssetID != p.AssetID:", "TestBoundaries"),
     ("B1-05 merchant not checked", "internal/policy/policy.go",
      "case !slices.Contains(p.Merchants, i.PayTo):", "case false:", "TestAcceptedPolicyCases"),
     ("B1-05 credential expiry not checked", "internal/policy/policy.go",
@@ -157,7 +157,7 @@ MUTATIONS = [
     ("B1-05 remaining above the task cap accepted", "internal/policy/policy.go",
      "remaining > limit {", "remaining > 2*limit {", "TestRefusalsWithoutDecision"),
     ("B1-05 profile allow_max above task cap accepted", "internal/policy/policy.go",
-     " || allow > limit:", ":", "TestLoadProfile"),
+     " || allow > limit:", " || false && allow > limit:", "TestLoadProfile"),
 ]
 
 
