@@ -16,11 +16,14 @@ COPY go.mod go.sum /opt/apa/deps/
 # The hashes are taken before the download, and the build fails if the
 # download changed either file: `go mod download all` would add go.sum lines
 # for modules outside this build, so only go.mod's requirements are fetched.
+# The second download runs with GOPROXY=off to prove the cache serves every
+# requirement offline. (go list -m all would also need go.mod files of
+# graph-only modules that this build never reads.)
 RUN cd /opt/apa/deps \
  && sha256sum go.mod go.sum >/opt/apa/deps.sha256 \
  && GOMODCACHE=/opt/apa/gomodcache GOTOOLCHAIN=local GOFLAGS=-mod=readonly go mod download \
  && sha256sum -c /opt/apa/deps.sha256 \
- && GOMODCACHE=/opt/apa/gomodcache GOTOOLCHAIN=local GOFLAGS=-mod=readonly GOPROXY=off go list -m all >/dev/null \
+ && GOMODCACHE=/opt/apa/gomodcache GOTOOLCHAIN=local GOFLAGS=-mod=readonly GOPROXY=off go mod download \
  && chmod -R a+rX,a-w /opt/apa
 LABEL org.opencontainers.image.title="apa-verify" \
       org.opencontainers.image.description="Isolated verification of agent-payment-authority; not a runtime image"
