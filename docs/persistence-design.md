@@ -1,67 +1,87 @@
 # B1-05 節點 2 設計：持久化與事件查詢
 
-**狀態（2026-10-01）**：設計待 review，**尚未實作**。本文件不安裝 driver、不改依賴、不啟動服務；文中需要下載或重建映像的步驟都待核准後才執行。
+**狀態（2026-10-01）**：第二版設計，待獨立 review，**尚未實作**。第一版（`c9199e7`）的 review 要求補齊狀態投影（D1）、時間與到期時序（D2）、恢復驗證範圍（D3）與報價的安全保存（D4），本版逐項修訂，對照見第 13 節。本文件不安裝 driver、不改依賴、不啟動服務；設計通過與下載依賴、重建映像的核准是分開的兩件事。
 
-範圍是把節點 1 的 `policy.Decide` 接到持久化：請購去重與衝突拒絕、原子寫入、事件與 hash chain、取消／CLI 逾時／approval 逾時、重啟恢復、A／B 隔離與事件查詢。不改已接受的契約、schema 與 `cases.json`，不新增事件型別。
+範圍是把節點 1 的 `policy.Decide` 接到持久化：請購去重與衝突拒絕、原子寫入、事件與 hash chain、取消／CLI 逾時／approval 逾時、重啟恢復、A／B 隔離與受 session 限制的查詢。不改節點 1 的 Policy 行為、已接受的契約、schema、`cases.json` 與 golden vectors，不新增事件型別。
 
-## 1. 儲存選擇
+本文的「儲存層錯誤」（例如 `CLOCK_REGRESSION`、`QUOTE_NOT_OFFERED`）只是 Store 回給呼叫端的錯誤，**不是**契約的 reason code，不寫入任何事件。
 
-**SQLite 是唯一的持久化來源**；JSONL 只當日後的匯出格式，本節點不實作。
+## 1. 儲存、driver 與執行環境
 
-理由：請購、去重索引、裁決、事件與 task 狀態必須一起成功或一起失敗。SQLite 的交易在當機或斷電時仍是全有或全無（[Atomic Commit In SQLite](https://www.sqlite.org/atomiccommit.html)、[transactional](https://www.sqlite.org/transactional.html)），唯一索引由資料庫強制。但資料庫**不會**替本專案做授權隔離、事件驗證或決定交易邊界，這些在下文逐項說明。
+### 1.1 選擇
 
-### 1.1 Go driver
+**SQLite 是唯一的持久化來源**；JSONL 只當日後的匯出格式，本節點不實作。請購、去重索引、裁決、事件與 task 狀態放在同一個交易，當機或斷電時全有或全無（[Atomic Commit In SQLite](https://www.sqlite.org/atomiccommit.html)）。資料庫**不會**替本專案做授權隔離、事件驗證或決定交易邊界，這些在下文逐項說明。
 
-| 候選 | 版本（2026-10-01 查 proxy.golang.org） | 需要 CGO | 授權 | 備註 |
-|---|---|---|---|---|
-| **`modernc.org/sqlite`（建議）** | v1.60.1（2026-09-29）；前一版 v1.60.0 | 否（「CGo-free port of the C SQLite3 library」） | BSD-3-Clause | 內含 SQLite 3.53.4；`database/sql` driver 名稱 `sqlite`；DSN 支援 `_txlock=immediate` 與 `_pragma` |
-| `github.com/ncruces/go-sqlite3` | v0.35.6（2026-09-23） | 否（Wasm 版 SQLite 經 wasm2go 轉成 Go） | MIT | 必要依賴只有 Go 與 `x/sys`；仍是 v0.x |
-| `github.com/mattn/go-sqlite3` | v1.14.52（2026-09-05） | **是**（需 `CGO_ENABLED=1` 與 gcc） | MIT | 驗證映像雖有 gcc，但 CGO 讓建置依賴 C 工具鏈，不採用 |
+### 1.2 Driver
 
-建議 `modernc.org/sqlite`：v1 穩定 API、標準 `database/sql`、不需 CGO，交易鎖模式可在 DSN 指定。代價是傳遞依賴較多（v1.60.1 的 go.mod：`modernc.org/libc`、`mathutil`、`memory`、`fileutil`、`golang.org/x/sys`、`github.com/google/pprof`、`dustin/go-humanize`、`google/uuid`、`mattn/go-isatty`、`ncruces/go-strftime`、`remyoudompheng/bigfft`）。`modernc.org/sqlite` 與 `modernc.org/libc` 在 pkg.go.dev 標示 BSD-3-Clause；其餘傳遞依賴的授權在實際加入時逐一列入 `go.sum` 對照紀錄。
+採用 **`modernc.org/sqlite v1.60.1`**，固定版本：
 
-**待決**：v1.60.1 發布僅兩天。若 reviewer 偏好較長的實際使用期，改釘較早的 v1 版本；版本在實作 commit 內固定，`go.sum` 一併提交。
+- 不需 CGO（官方文件：「CGo-free port of the C SQLite3 library」），BSD-3-Clause，內含 SQLite 3.53.4，`database/sql` driver 名稱 `sqlite`，DSN 支援 `_txlock` 與 `_pragma`（[pkg.go.dev](https://pkg.go.dev/modernc.org/sqlite@v1.60.1)）。
+- 依 [changelog](https://gitlab.com/cznic/sqlite/-/raw/v1.60.1/CHANGELOG.md)：v1.60.0 起需要 Go 1.26（本專案為 1.26.4），釘 `modernc.org/libc v1.77.1`，且「downstream `go.mod` files must pin the same `modernc.org/libc` version」；本專案的 `go.mod` 會同時釘 `modernc.org/libc v1.77.1`。
+- 不退版：v1.60.0 修正了「讀取 WAL 資料庫的記憶體映射 `-shm` 檔出錯時讓行程當掉」的問題，本設計正好使用 WAL。
+- 相容性尚未驗證（未下載）；獲准後才以實際建置與測試確認，不宣稱已驗過。
 
-### 1.2 對隔離驗證與建置的影響
+比較過的替代：`github.com/ncruces/go-sqlite3` v0.35.6（不需 CGO、MIT，仍是 v0.x）、`github.com/mattn/go-sqlite3` v1.14.52（需 CGO 與 gcc），不採用。
 
-這是專案第一個第三方 Go 依賴。目前容器驗證以 `--network none`、`GOPROXY=off`、空的 `GOMODCACHE` 執行，加入依賴後**現行映像會建置失敗**。
+### 1.3 連線與 PRAGMA
 
-| 方案 | 做法 | 取捨 |
-|---|---|---|
-| **A. 映像內預載模組（建議）** | `build-image.sh` 的準備階段（已允許網路拉取 base image）把 `go.mod`／`go.sum` 複製進 Dockerfile，`go mod download` 並以 `sum.golang.org` 驗證；模組放在映像的唯讀路徑，測試階段複製到 `/scratch` 使用，仍 `--network none`、`GOPROXY=off`、`-mod=readonly`。新映像標籤 `apa-verify:b1-05`；`container-verify.sh` 比對映像記錄的 `go.sum` 雜湊與受測 commit 一致，不一致即失敗 | 測試階段維持斷網；每次依賴變動都要重建映像 |
-| B. 提交 `vendor/` | `go mod vendor`，`-mod=vendor` | 不需改映像，但 repo 體積會明顯增加（`modernc.org/sqlite` 含多平台產生碼，實際大小需實測），review diff 很大 |
-| C. 掛載主機模組快取 | — | 違反「不掛載主機家目錄」，不採用 |
+PRAGMA 多數是**每條連線**各自生效，不能在連線池任一條連線執行一次就視為全域。做法：
 
-主機端：第一次 `make check` 需連 `proxy.golang.org`／`sum.golang.org` 下載模組。README「沒有任何第三方 Go 套件」的敘述屆時更新。
+- 兩個 `*sql.DB`：**寫入 handle**（`_txlock=immediate`，`SetMaxOpenConns(1)`）與**讀取 handle**（預設 deferred，`query_only=1`）。
+- 每條連線需要的 PRAGMA 都寫在 DSN 的 `_pragma`，由 driver 在建立每條新連線時執行：`foreign_keys(1)`、`busy_timeout(5000)`、`synchronous(FULL)`；讀取 handle 另加 `query_only(1)`。
+- `journal_mode=WAL` 存在資料庫檔本身，開檔時設定一次並讀回確認。
+- 不只相信設定：測試同時開出多條連線，逐條讀回上述 PRAGMA 值。
+- DSN 由程式以 `file:` URI 組成並跳脫路徑；設定只接受檔案路徑，不接受任何 DSN 或 URI 參數。
 
-**待核准的操作**（本輪都未執行）：`go get modernc.org/sqlite@<版本>`、修改 `go.mod`／`go.sum`、修改 `scripts/verify/Dockerfile` 與 `build-image.sh`、重建驗證映像（會拉取已釘 digest 的 base image 並下載模組）。
+WAL 下 `synchronous=FULL` 才保證已提交交易在斷電後仍在（[PRAGMA synchronous](https://www.sqlite.org/pragma.html#pragma_synchronous)）；`BEGIN IMMEDIATE` 一開始就取得寫鎖（[BEGIN](https://www.sqlite.org/lang_transaction.html)）。
+
+### 1.4 隔離驗證映像
+
+這是專案第一個第三方 Go 依賴；現行容器驗證以 `--network none`、`GOPROXY=off` 與空的模組快取執行，加入依賴後**現行映像會建置失敗**。採用「映像內預載模組」：
+
+- **準備階段**（已允許網路拉取 base image）：`build-image.sh` 把受測 commit 的 `go.mod` 與 `go.sum` 複製到一個暫時的 build context（只有這兩個檔與 Dockerfile，不是整個工作區，`.env` 不會進入），在映像內 `go mod download` 並以 `sum.golang.org` 驗證，模組放在映像的唯讀路徑。映像記錄 `go.mod` 與 `go.sum` 兩者的 SHA-256。新標籤 `apa-verify:b1-05`。
+- **測試階段**：維持 `--network none`、`GOPROXY=off`、`-mod=readonly` 與既有隔離限制；模組由映像路徑複製到 `/scratch` 使用。`container-verify.sh` 比對映像記錄的 `go.mod`、`go.sum` 雜湊與受測 commit **兩者**都一致，否則失敗。
+- **主機端**：第一次 `make check` 需連 `proxy.golang.org`／`sum.golang.org` 下載模組。README「沒有任何第三方 Go 套件」的敘述屆時更新。
+
+**待核准的操作**（本輪都未執行）：`go get modernc.org/sqlite@v1.60.1`、修改 `go.mod`／`go.sum`、修改 `scripts/verify/Dockerfile` 與 `build-image.sh`、重建驗證映像。
+
+### 1.5 第三方元件與授權
+
+`go.sum` 是模組校驗資料，**不是**授權清單。加入依賴的同一個 commit 另建 `docs/third-party.md`，逐一列出每個模組（含傳遞依賴）的版本、授權與來源連結。v1.60.1 的 go.mod 列出：`modernc.org/libc`、`mathutil`、`memory`、`fileutil`、`golang.org/x/sys`、`github.com/google/pprof`、`dustin/go-humanize`、`google/uuid`、`mattn/go-isatty`、`ncruces/go-strftime`、`remyoudompheng/bigfft`。目前只確認 `modernc.org/sqlite` 與 `modernc.org/libc` 在 pkg.go.dev 標示 BSD-3-Clause，其餘待實際加入時核對。
+
+### 1.6 資料庫路徑與權限
+
+- `APA_DB_PATH`，預設 `var/apa.db`。這是可信 Host 設定；agent 沒有任何途徑指定路徑。
+- 相對路徑以**行程啟動時的工作目錄**為基準，啟動時轉成絕對路徑並記錄在啟動 log；`make dev` 在 repo 根目錄啟動，所以預設落在 `<repo>/var/apa.db`（`var/` 已在 `.gitignore`）。
+- 資料庫所在目錄以 `0700` 建立；目錄已存在但權限比 `0700` 寬、或資料庫路徑是 symlink 或非一般檔案時拒絕啟動。目錄權限同時保護資料庫、`-wal` 與 `-shm` 三個檔；實作時以測試讀回三者與目錄的權限。
 
 ## 2. 資料表
 
-全部用 `STRICT` 表。schema 版本記在 `PRAGMA user_version`；migration 以 Go 內嵌、只往前、在單一交易內套用。開檔時版本比程式新或未知就拒絕開啟，不嘗試降版。
+全部用 `STRICT` 表。schema 版本記在 `PRAGMA user_version`；migration 以 Go 內嵌、只往前、在單一交易內套用；開檔時版本比程式新或未知就拒絕開啟。
 
 ```sql
--- 可信設定快照：只存公開或已遮罩的欄位，以型別化 struct 重新序列化，不存原始設定檔
+-- 可信設定快照：由型別化 struct 重新序列化，不存原始設定檔
 CREATE TABLE config_snapshots (
-  snapshot_hash TEXT PRIMARY KEY,           -- sha256 of canonical body（儲存層內部用，不是契約 digest）
-  kind          TEXT NOT NULL CHECK (kind IN ('registry', 'profile', 'credential')),
+  snapshot_hash TEXT PRIMARY KEY,           -- "sha256:" + hex(sha256(body))；儲存層內部用，不是契約 digest
+  kind          TEXT NOT NULL CHECK (kind IN ('registry', 'profile', 'credential', 'terms')),
   body          TEXT NOT NULL,              -- canonical JSON
   recorded_at   INTEGER NOT NULL
 ) STRICT;
+-- terms：{task_id, budget_initial, asset_id, approval_deadline_seconds}，每個 task 一份
 
 CREATE TABLE tasks (
   task_id             TEXT PRIMARY KEY,
   consumer_id         TEXT NOT NULL,
   agent_id            TEXT NOT NULL,
   wallet_id           TEXT NOT NULL,
+  payer               TEXT NOT NULL,                        -- 錢包的 from，同一 consumer 沿用
   registry_snapshot   TEXT NOT NULL REFERENCES config_snapshots,
   profile_snapshot    TEXT REFERENCES config_snapshots,     -- NULL＝缺設定（CONFIG_MISSING）
   credential_snapshot TEXT REFERENCES config_snapshots,     -- NULL＝缺設定
-  asset_id            TEXT,                                 -- 計價資產（來自 profile）
-  budget_initial      TEXT NOT NULL,                        -- 最小單位十進位字串
-  budget_remaining    TEXT NOT NULL,                        -- M1 永遠等於 budget_initial
-  status              TEXT NOT NULL,                        -- running / awaiting_approval / denied / cancelled / failed
-  deny_reason         TEXT,                                 -- 第一個 Deny 寫入後不再改
+  terms_snapshot      TEXT NOT NULL REFERENCES config_snapshots,
+  budget_remaining    TEXT NOT NULL,                        -- M1 永遠等於 terms.budget_initial
+  status              TEXT NOT NULL,                        -- 由第 4 節的投影寫入
+  deny_reason         TEXT,                                 -- 由第 4 節的投影寫入
   next_sequence       INTEGER NOT NULL,
   chain_head          TEXT NOT NULL,                        -- 最後一個事件的 EventHash
   started_at          INTEGER NOT NULL
@@ -70,19 +90,20 @@ CREATE TABLE tasks (
 CREATE TABLE purchases (
   task_id           TEXT NOT NULL REFERENCES tasks,
   purchase_order_id TEXT NOT NULL,
+  request_id        TEXT NOT NULL,
   retry_key         TEXT NOT NULL UNIQUE,   -- PurchaseOrder.RetryKey()：(consumer, task, wallet, request_id)
   chain_id          TEXT NOT NULL,
   asset_contract    TEXT NOT NULL,
   payer             TEXT NOT NULL,
   eip3009_nonce     TEXT NOT NULL,
-  body              TEXT NOT NULL,          -- canonical PurchaseOrder
+  body              TEXT NOT NULL,          -- canonical PurchaseOrder，原樣保存（第 6 節）
   intent_hash       TEXT NOT NULL,
   policy_verdict    TEXT NOT NULL,          -- 原始裁決，寫入後不改
   approval_status   TEXT NOT NULL,
   reason            TEXT NOT NULL,
-  decided_at        INTEGER NOT NULL,       -- POLICY_DECIDED 的 observed_at（Ask 計時起點）
+  decided_at        INTEGER NOT NULL,       -- 等於 POLICY_DECIDED 的 observed_at（Ask 計時起點）
   approval_closed   TEXT,                   -- NULL / expired / withdrawn
-  closed_at         INTEGER,
+  closed_at         INTEGER,                -- 等於收尾事件的 observed_at
   PRIMARY KEY (task_id, purchase_order_id),
   UNIQUE (chain_id, asset_contract, payer, eip3009_nonce)
 ) STRICT;
@@ -93,124 +114,281 @@ CREATE TABLE events (
   event_id          TEXT NOT NULL UNIQUE,
   event_type        TEXT NOT NULL,
   purchase_order_id TEXT,
+  observed_at       INTEGER NOT NULL,
   body              TEXT NOT NULL,          -- canonical AuditEvent
   event_hash        TEXT NOT NULL,          -- contracts.EventHash(body)
-  PRIMARY KEY (task_id, sequence)
+  PRIMARY KEY (task_id, sequence),
+  FOREIGN KEY (task_id, purchase_order_id) REFERENCES purchases
 ) STRICT;
+
+-- 防線：每個請購最多一個裁決與一個 approval 收尾；每個 task 最多一個生命週期結束事件
+CREATE UNIQUE INDEX one_decision ON events (task_id, purchase_order_id) WHERE event_type = 'POLICY_DECIDED';
+CREATE UNIQUE INDEX one_closure  ON events (task_id, purchase_order_id) WHERE event_type IN ('APPROVAL_EXPIRED', 'APPROVAL_WITHDRAWN');
+CREATE UNIQUE INDEX one_end      ON events (task_id) WHERE event_type IN ('TASK_CANCELLED', 'TASK_TIMED_OUT');
 ```
 
-唯一範圍完全沿用 B1-02：retry key（同 scope）、`(task_id, purchase_order_id)`、`(chain_id, asset_contract, from, eip3009_nonce)`。語意判定一律呼叫 `contracts.CompareRetry`；資料庫唯一索引只是最後防線，違反時同樣回 `IDEMPOTENCY_CONFLICT` 並回滾。
+唯一範圍完全沿用 B1-02：retry key（同 scope）、`(task_id, purchase_order_id)`、`(chain_id, asset_contract, from, eip3009_nonce)`。語意判定一律呼叫 `contracts.CompareRetry`；資料庫唯一索引只是最後防線，違反時同樣回 `IDEMPOTENCY_CONFLICT` 並回滾。`event_id` 由 `task_id` 與 sequence 決定性產生（雜湊後截短，符合 ID 格式）。事件 `source` 為 host，`evidence_mode` 為 `fixture`。
 
-原始裁決存在 `purchases` 且不回寫；approval 結束另記在 `approval_closed`，事件串流仍保有原本的 Ask。`event_id` 由 `task_id` 與 sequence 決定性產生（雜湊後截短，符合 ID 格式），重算與比對不依賴隨機值。事件 `source` 為 host，`evidence_mode` 為 `fixture`。
+## 3. 時間、鎖與操作時序（D2）
 
-## 3. 寫入流程與交易邊界
+### 3.1 可信時鐘
 
-連線設定：`journal_mode=WAL`、`synchronous=FULL`（WAL 下 FULL 才保證已提交交易在斷電後仍在；[PRAGMA synchronous](https://www.sqlite.org/pragma.html#pragma_synchronous)）、`foreign_keys=ON`、`busy_timeout`。所有寫入交易以 `BEGIN IMMEDIATE` 開始（DSN `_txlock=immediate`），一開始就取得寫鎖（[BEGIN IMMEDIATE](https://www.sqlite.org/lang_transaction.html)）。**判定所需的可信狀態都在同一個交易內讀取**，沒有交易外的先查後寫；同一個檔案被另一個行程開啟時，也由 SQLite 的檔案鎖序列化。
+- Store 開啟時由 Host 注入時鐘（正式為 `time.Now().Unix()`，測試為可控的假時鐘）。**任何操作都不從呼叫端接受 `now`。**
+- 每個寫入交易只取樣一次時鐘，時點是 `BEGIN IMMEDIATE` 成功取得寫鎖**之後**；同一交易內所有事件的 `observed_at` 與 `Decide` 都用這個值。等鎖期間不會沿用排隊前的時間。
+- 讀取交易不取樣時鐘。
 
-### 3.1 提交請購 `Submit(session, purchase, now)`
+### 3.2 寫入交易的共同骨架
 
-交易外（純函式、無狀態）：`contracts.Decode` 解析請購。session 由呼叫端傳入，**不可從請購內容建立**。
+每個寫入操作都是一個交易，依序：
 
-交易內，依序：
+1. `BEGIN IMMEDIATE`（等寫鎖，受 `busy_timeout` 限制）。
+2. `now` ← 時鐘。
+3. 時鐘檢查：`now` 不得小於資料庫目前記錄的最大時間（所有事件的 `observed_at` 與快照的 `recorded_at`），否則以 `CLOCK_REGRESSION` 中止（3.5）。
+4. **授權**：session 操作在這裡驗 task 屬於 session（Submit 另以該 task 的 registry 快照執行 `ValidatePurchase`）；Host 操作驗 task 存在。授權失敗即回滾，**之前沒有任何寫入**，所以跨 consumer 或未認證的請求不可能經由到期處理修改別人的 task。
+5. **到期處理**：只處理這個操作的目標 task（3.4）。
+6. 操作本身的邏輯。
+7. 追加事件；以第 4 節的共同規則重算投影；`ValidateEvent`＋`ValidateEventOrder` 驗新串流；投影欄位與規則結果一致才寫入。
+8. `COMMIT`。任何一步失敗都 `ROLLBACK`，**包含第 5 步的到期事件**。
 
-1. 讀 task 列；不存在或 `consumer_id／agent_id` 與 session 不符 → 拒絕。
-2. 以該 task 的 registry 快照執行 `Registry.ValidatePurchase(session, purchase)`：**先驗可信歸屬**（`OWNERSHIP_MISMATCH`）。
-3. 以 retry key 查既有請購：
-   - 存在 → `CompareRetry`：`replay` 就回傳既有原始裁決與目前 approval 狀態，**不呼叫 Policy、不寫事件**，即使 task 已結束也能取得；內容不同 → `IDEMPOTENCY_CONFLICT`。
-4. 以 `(task_id, purchase_order_id)` 與 nonce 查既有請購 → 用 `CompareRetry` 判定，衝突即 `IDEMPOTENCY_CONFLICT`。
-5. 確定是新請購後才套用 `contracts.CheckTaskActive(task.status)`（`TASK_NOT_ACTIVE`）。
-6. 先處理該 task 已到期的 Ask（見 3.3），再以快照組出 `policy.Input`（profile／credential 快照、`Budget{task_id, budget_remaining}`、`now`）呼叫 `policy.Decide`。
-7. 寫入 `purchases`、`PURCHASE_PROPOSED` 與 `POLICY_DECIDED` 兩個事件（sequence、`prev_event_hash` 取自 `tasks.next_sequence`／`chain_head`），更新 task 狀態：Ask → `awaiting_approval`；Deny → `denied` 並寫 `deny_reason`；Allow → 維持 `running`。
-8. 寫入前以 `ValidateEvent` 驗每個新事件，並對「既有串流＋新事件」執行 `ValidateEventOrder`；不通過就回滾。
+到期事件隨回滾消失沒有語意問題：下一個寫入操作或 Host 的 `ExpireDue` 會在自己的交易裡重新判定。Ask 的收尾結果只取決於「第一個成功收尾它的交易所取樣的 `now`」是否已達期限（3.4），記錄時間較晚只代表觀測較晚。
 
-任何一步失敗都回滾，不留下半份請購、孤立事件或只更新一半的 task。M1 不扣 `budget_remaining`。
+### 3.3 各操作
 
-### 3.2 生命週期
+| 操作 | 呼叫者 | 歸屬驗證 | 到期處理 | 交易 | 失敗或回滾 |
+|---|---|---|---|---|---|
+| 啟動 | Host | — | 恢復驗證（第 8 節，讀交易）通過後，Host 立即執行 `ExpireDue`，之後才開始服務 | 驗證：單一讀交易；到期：每個 task 一個寫交易 | 驗證失敗就拒絕服務，不寫任何東西 |
+| `StartTask` | Host | task 在 registry 且尚未開始；同一 consumer 沿用既有錢包（5.3） | 無（新 task） | 單一寫交易 | 全部回滾 |
+| `Submit`（新請購） | session | 第 4 步：task 屬於 session，再 `ValidatePurchase` | 只處理該 task | 同一交易：到期 → 分類 → 新請購才 `CheckTaskActive` → `Decide` → 寫入 | 全部回滾，含到期 |
+| `Submit`（合法 replay） | session | 同上，**先驗歸屬再辨識 replay** | 同上 | 同一交易；replay 不重跑 Policy、不寫請購或裁決事件；唯一可能的寫入是該 task 已到期 Ask 的 `APPROVAL_EXPIRED`，沒有到期就不寫任何列 | — |
+| `Submit`（衝突） | session | 同上 | 同上 | 回 `IDEMPOTENCY_CONFLICT` | 回滾，到期由之後的交易重新判定 |
+| `Task`／`Events` | session | 讀交易內驗 task 屬於 session | **不處理** | 唯讀交易（WAL 下為一致快照） | — |
+| `Cancel` | Host（主持人） | task 存在，尚無生命週期結束事件 | 只處理該 task | 同一交易：到期 → 撤回仍開著的 Ask（`APPROVAL_WITHDRAWN`）→ `TASK_CANCELLED` | 全部回滾 |
+| `CLITimeout` | Host（wrapper 監控 CLI） | 同上 | 只處理該 task | 同一交易：到期 → `TASK_TIMED_OUT`；**不撤回** Ask（案例 `cli-timeout-pending`） | 全部回滾 |
+| `ExpireDue` | Host（啟動時與定時） | 不接受外部請求 | 每個 task 各自 | 每個 task 一個寫交易 | 只回滾該 task |
 
-| 操作 | 交易內寫入 | task 狀態 |
-|---|---|---|
-| `StartTask(session, now)` | 記錄 registry／profile／credential 快照與初始額度，寫 `TASK_STARTED` | `running` |
-| `Cancel(session, now)` | 每個仍開著的 Ask 先寫 `APPROVAL_WITHDRAWN`，再寫 `TASK_CANCELLED`（`HOST_CANCELLED`） | `cancelled`；若已 `denied` 則保持 `denied` 與原 `deny_reason` |
-| `CLITimeout(session, now)` | 寫 `TASK_TIMED_OUT`（`CLI_TIMEOUT`）；**不撤回** 開著的 Ask（案例 `cli-timeout-pending` 預期 approval 仍為 pending） | `failed`；若已 `denied` 則保持 |
+`Cancel`、`CLITimeout`、`ExpireDue` 是 Host 能力，不經 B1-04 的工具橋接暴露給 agent；`Submit`、`Task`、`Events` 是 session 能力。
 
-每個 task 最多一個 `TASK_CANCELLED`／`TASK_TIMED_OUT`，由 `ValidateEventOrder` 強制。收尾事件不改寫任何裁決，task 投影保留原本的 Deny 與原因。
+**查詢的時間語意**：`Task`／`Events` 回傳「該 task 最後一次提交的寫入交易」時的一致快照，附 `as_of_sequence` 與 `as_of_observed_at`。開著的 Ask 附 `deadline_at`（`decided_at + approval_deadline_seconds`，理論到期點）。回應不宣稱已依現在時間更新；已過 `deadline_at` 但尚未寫入 `APPROVAL_EXPIRED` 的 Ask 仍顯示為 pending，**不**顯示成已收尾。落後的上限由 Host 的 `ExpireDue` 週期決定（待確認，建議 1 秒），且服務一啟動就先執行一次。
 
-### 3.3 Ask 到期
+**replay 承諾的修訂**：第一版寫「replay 不寫事件」，精確版本是：replay 不重跑 Policy、不新增請購或原始裁決；交易骨架第 5 步可能為同一 task 寫入 `APPROVAL_EXPIRED`，這是生命週期推進，責任在 Store；回傳的 approval 狀態是該交易提交後的狀態。
 
-規則沿用已接受的語意：計時起點是 host 寫入的 Ask `observed_at`（`purchases.decided_at`），`now - decided_at >= approval_deadline_seconds` 即到期。到期在下列時機於同一個寫入交易內處理：該 task 的任何寫入操作之前，以及 host 定期呼叫的 `ExpireDue(now)`。到期寫 `APPROVAL_EXPIRED`（`APPROVAL_TIMEOUT`），`approval_closed = expired`。依契約，approval 逾時不算 task 結束；沒有其他開著的 Ask 時 task 回到 `running`。
+### 3.4 到期規則與收尾的先後
 
-重啟不會重新計時：起點存在資料庫，重新開啟後照原起點判定。既有裁決也不會因重新載入而重跑 Policy。
+- Ask 的起點 `D = decided_at`（POLICY_DECIDED 的 `observed_at`），期限 `W` 取自該 task 的 terms 快照。**`now ≥ D` 且 `now − D ≥ W` 即到期**；沿用已接受的 `elapsed >= deadline` 規則。
+- 到期事件的 `observed_at` 是交易實際取樣的 `now`，不倒填理論到期點 `D + W`。
+- 交易骨架的第 5 步一定先於操作本身。因此在取樣的 `now ≥ D + W` 時，Ask 只能以 expired 收尾；只有 `now < D + W` 時 `Cancel` 才會撤回它。**不變式：Ask 以 expired 收尾，若且唯若第一個收尾它的交易取樣到 `now ≥ D + W`。**
+- 到期只追加一次：寫入前在交易內確認 `approval_closed IS NULL`，部分唯一索引 `one_closure` 是最後防線。
+- 重啟不重新計時：`D` 在資料庫裡，重新開啟後照原起點判定。
 
-## 4. 可信狀態與隔離
+與已接受案例對照：`cancel-pending`（取消時尚未到期）→ withdrawn；`approval-deadline-before`（29 秒）→ pending；`approval-deadline-exact`（30 秒）、`approval-timeout`（31 秒）→ expired；`cli-timeout-pending` → task failed、Ask 仍 pending。案例都不需要修改。
 
-- **快照**：開始 task 時記錄 registry、profile（含版本 `profile_id`）、credential 條件與初始額度的快照，該 task 之後都用自己的快照。重啟後換了設定檔，既有 task 與既有結果不變；新 task 才用新設定。
-- **快照只存必要欄位**：由型別化 struct 重新序列化（`Credential` 只有 `consumer_id`、`valid_until`、`evidence_mode`），設定檔多出的欄位在載入時就被 `contracts.Decode` 拒絕，不會經由快照保存隱藏欄位或秘密。
-- **額度綁定 task 與計價資產**：`budget_remaining` 屬於該 task 與 `asset_id`；`Decide` 已拒絕不同 task 的額度與非計價資產。
-- **A／B 隔離**：所有讀寫都以 session 的 `consumer_id`＋`task_id` 限定；A 讀寫 B 的 task 直接拒絕。retry key 含 consumer／task／wallet，同名 request ID 不會互相命中。
-- **可信 session 的來源**：B1-04 完成前，節點 2 的測試直接在程式內建立 `contracts.Session`，這是**測試用可信 context**，不代表真實登入或 caller 認證已完成。節點 2 不提供任何以 HTTP 寫入的端點。
+### 3.5 時鐘倒退
 
-## 5. 事件查詢
+- 寫入交易取樣到的 `now` 小於資料庫記錄的最大時間 → 以 `CLOCK_REGRESSION` 中止：不處理到期、不寫事件、不改任何歷史時間。讀取照常服務。
+- 到期判定先確認 `now ≥ D` 才計算 `now − D`；加上第 3 步的檢查，不會發生無號減法下溢。
+- 已終止的 task 不會因時鐘倒退復活：狀態只由事件推導（第 4 節），倒退時不寫任何事件。
+- 恢復方式是主持人修正主機時鐘；Store 不自動調整。
+
+### 3.6 邊界情境
+
+| 情境 | 結果 |
+|---|---|
+| 停機期間跨越 deadline，重啟 | 恢復驗證通過後先執行 `ExpireDue`：寫 `APPROVAL_EXPIRED`，`observed_at` 為重啟後的時間；服務在這之後才開始，所以重啟後第一次查詢就看到 expired；第一次 replay 也在第 5 步看到已收尾的結果 |
+| 恰好 deadline 時 `Cancel` 與 `ExpireDue` 競爭 | 寫鎖序列化。先取得鎖的交易若取樣到 `now ≥ D + W`，結果一律是 Ask expired，接著（或之後的 `Cancel`）只寫 `TASK_CANCELLED`，task 為 cancelled，沒有 `APPROVAL_WITHDRAWN`；若 `Cancel` 取得鎖時 `now < D + W`，則 Ask withdrawn，之後的 `ExpireDue` 找不到開著的 Ask |
+| 恰好 deadline 時 `CLITimeout` 與 `ExpireDue` 競爭 | Ask expired，`TASK_TIMED_OUT`，task failed |
+| 多個 worker 同時到期同一 Ask | 寫鎖序列化；第二個交易看到 `approval_closed` 已有值，不寫；`one_closure` 索引兜底 |
+| 等寫鎖期間跨越 deadline | 以取得鎖後的 `now` 判定：先寫 `APPROVAL_EXPIRED`，再進行原操作 |
+| 等寫鎖期間跨越請購的 `valid_before` | `Decide` 以取得鎖後的 `now` 判定，回 Deny `AUTHORIZATION_EXPIRED`，依契約 Deny 終止 task（待確認，見第 12 節） |
+| 時鐘倒退 | 寫入以 `CLOCK_REGRESSION` 中止，不下溢、不改歷史、終止的 task 不復活 |
+
+## 4. task 狀態投影（D1）
+
+一個共同的純函式 `project(events)`，供寫入、查詢與重啟驗證共用，不各自實作：
+
+1. **終止**：依 sequence 找第一個終止事件——`POLICY_DECIDED` 且為 Deny、`TASK_CANCELLED` 或 `TASK_TIMED_OUT`。Deny → `denied`，`deny_reason` 為該裁決的 reason；`TASK_CANCELLED` → `cancelled`；`TASK_TIMED_OUT` → `failed`。依契約，task 結束後不會再有裁決，所以若同時有 Deny 與收尾事件，Deny 一定在前，狀態保持 `denied` 與原 Deny 原因。
+2. **未終止**且仍有任何開著的 Ask（`POLICY_DECIDED` Ask，之後沒有同一請購的 `APPROVAL_EXPIRED`／`APPROVAL_WITHDRAWN`）→ `awaiting_approval`。
+3. **未終止**且沒有開著的 Ask → `running`。
+4. 請購的原始裁決與目前狀態分開：原始裁決存在 `purchases` 與 `POLICY_DECIDED` 事件，永不改寫；目前狀態由收尾事件推導。Ask 到期後仍是 Ask，以 expired／`APPROVAL_TIMEOUT` 表達請購收尾，不變成新的 Policy Deny，也不重新核准或重跑 Policy。
+
+| 情境 | 結果 |
+|---|---|
+| Ask A 開著，請購 B 為 Allow | `awaiting_approval`，A 仍開著 |
+| Ask A 開著，請購 B 為 Deny，之後 A 到期 | `denied`，`deny_reason` 為 B 的原因；A 為 Ask＋expired |
+| Ask A 開著，CLI 逾時，之後 A 到期 | `failed`；A 為 Ask＋expired；新請購 `TASK_NOT_ACTIVE` |
+| 同一 task 兩個 Ask 開著，只到期其中一個 | `awaiting_approval` |
+| 未終止 task 的最後一個 Ask 到期 | `running`；原請購為 Ask＋expired |
+| Deny 後主持人取消 | `denied`，原 Deny 原因不變 |
+| 尚無請購就取消 | `cancelled` |
+| 只有 Allow | `running` |
+
+**投影如何與事件一致**：`ValidateEventOrder` 只驗事件串流本身是否合法，不能代替投影欄位的核對。每個寫入交易在第 7 步對「既有事件＋新事件」重新執行 `project`，把結果寫入 `tasks.status`／`deny_reason`；重啟驗證也以同一個函式重算並比對（第 8 節）。M1 的事件量小，每次寫入重算整條串流可以接受（日後量大再改成增量）。
+
+## 5. 可信狀態、快照與隔離
+
+### 5.1 快照
+
+`StartTask` 記錄 registry、profile、credential 與 terms 四種快照，該 task 之後都用自己的快照；重啟後換了設定檔，既有 task 與既有結果不變，只有新 task 用新設定。快照以型別化 struct 重新序列化：`Credential` 只有 `consumer_id`、`valid_until`、`evidence_mode`；設定檔多出的欄位在載入時就被 `contracts.Decode` 拒絕，不會經由快照保存隱藏欄位或秘密。
+
+### 5.2 額度、期限與 fixture 憑證
+
+- **terms 快照**：`budget_initial`、`asset_id`（取自 profile 的計價資產）與 `approval_deadline_seconds`（預設 30 秒）。期限放在 task 的 terms 快照，**不改 profile**：`policy.Decide` 不使用期限，節點 1 的 Profile、`m1-demo-v1` fixture、已接受案例與契約版本都不必變動。若 reviewer 偏好把期限放進 profile，遷移方式是新增 `m1-demo-v2` fixture 並保留 v1，本輪不動任何程式或 fixture。
+- **額度**：`budget_initial` 預設等於 profile 的 task cap；可信 fixture 可以給較低的值（例如超額案例的 0.25），**不會被重設成 task cap**；開始時檢查 `budget_initial ≤ task_cap`。M1 不扣款，`budget_remaining` 永遠等於 `budget_initial`。額度綁定 task 與計價資產，`Decide` 已拒絕其他 task 的額度與非計價資產。
+- **fixture 憑證效期**：測試用固定時間。demo 在建立新 task 時由 Host 產生明標 `fixture` 的絕對 `valid_until`（`started_at` 加上 Host 設定的有效長度）並存入快照；重啟不續期，既有 task 不受之後的設定影響。
+
+### 5.3 錢包沿用與 A／B 隔離
+
+- 同一 consumer 的所有 task 沿用同一個 `wallet_id` 與 `payer`。`StartTask` 時若該 consumer 已有 task，新的 registry 快照對這個 consumer 的錢包必須與既有 task 相同，否則以 `WALLET_BINDING_CHANGED` 拒絕，不在重新載入設定時默默更換。
+- 所有 session 操作都以 session 的 `consumer_id`＋`task_id` 限定；A 讀寫 B 的 task 直接拒絕。retry key 含 consumer／task／wallet，同名 request ID 不會互相命中。
+- **可信 session 的來源**：B1-04 完成前，節點 2 的測試直接在程式內建立 `contracts.Session`，這是**測試用可信 context**，不代表真實登入或 caller 認證已完成。節點 2 不提供任何 HTTP 寫入端點。
+
+## 6. 報價的接受、保存與展示（D4）
+
+`Quote.SelectedRequirement` 與 `Quote.Extensions` 是 `json.RawMessage`，可以承載任意巢狀欄位；型別化的 credential 保證不適用於報價。規則如下，不改 B1-02 契約。
+
+### 6.1 接受範圍：只收可信報價簿裡的報價
+
+- Store 開啟時由 Host 提供**可信報價簿**：每個 `(http_method, resource_url)` 對應的報價。M1 的報價簿就是 B1-03 商店自己產生的報價（內容由本專案撰寫）。
+- 入口規則：請購的 `Quote`（`x402_version`、`selected_requirement`、`extensions`）必須與報價簿中同一 method＋URL 的某一份報價 **canonical 完全相同**。這同時把報價綁定到商店實際提供的資源。
+- 通過的請購**原樣**保存 canonical body，requirement hash 保持可重算，不刪減、不遮罩後再沿用原 hash。
+- 案例測試：`cases.json` 文件已規定 amount／asset 覆蓋要「同時更新 trusted quote」，所以各案例的可信報價簿就是該案例的報價（包含 B1-02 golden 輸入裡的 `extra.future_term`、`extensions.fixture-pricing` 等欄位）。
+
+**為何不用欄位白名單**：已接受的 golden 輸入 `purchase-input.json`（8 個 policy 案例的 input）含 `extra.fixture`、巢狀的 `extra.future_term` 與 `extensions.fixture-pricing`。只允許固定欄位的白名單會在入口拒收已接受案例的輸入；用樣式辨識秘密又無法對任意自由文字給出保證。因此 M1 以**來源**（可信報價簿）限制輸入範圍，而不是掃描內容。
+
+### 6.2 落盤前拒收
+
+- 不在報價簿裡的報價一律在第 4 步之後、任何寫入之前拒收，回 `QUOTE_NOT_OFFERED`，不寫任何列或事件。這涵蓋未知的擴充欄位、多出來的 `extra` 欄位、假 token、類似私鑰的欄位、巢狀敏感欄位與惡意 HTML。
+- 錯誤訊息與 log 只含 code 與已驗證格式的 ID（`request_id`、`purchase_order_id`），**不含**被拒報價的任何鍵名或值。
+- 影響：在 M1 裡，報價簿以外的商家報價於入口拒收，而不是成為 Policy 的 `MERCHANT_NOT_ALLOWED`。報價簿內的商家若不在 profile 白名單，仍由 Policy 判 Deny `MERCHANT_NOT_ALLOWED`（已接受案例 `deny-merchant` 不受影響）。這項語意調整待確認（第 12 節）。
+
+### 6.3 查詢與展示
+
+- 原始報價（`purchases.body`）不進一般 log，也不出現在任何查詢或展示回應。
+- `Task`／`Events` 只回白名單投影：`purchase_order_id`、`request_id`、`http_method`、`resource_url`、`chain_id`、`asset_contract` 與對應的 `asset_id`、`pay_to`、`amount`、`intent_hash`、`payment_requirement_hash`、原始裁決（verdict／approval／reason）、`decided_at`、`deadline_at`、收尾狀態與 `closed_at`，以及型別化的事件。這些值都已通過契約的格式檢查（ID、地址、金額、列舉、URL）。
+- JSON 輸出由 `encoding/json` 跳脫 `<`、`>`、`&`。**這只解決輸出編碼**，不是秘密遮罩，也不保證前端以 `innerHTML` 插入仍然安全；B1-06 必須以文字方式呈現。
+- 本設計不宣稱能從任意自由文字辨識所有秘密；M1 的保證來自限制可接受的資料範圍。
+
+## 7. 查詢介面
 
 | 介面 | 呼叫者 | 範圍 |
 |---|---|---|
-| `Store.Task(session, task_id)`、`Store.Events(session, task_id)` | wrapper（B1-04）與測試 | 只能讀 session 自己的 task |
-| 主持人檢視（例如 loopback 的 `GET /host/tasks/{task_id}/events`） | 展示層（B1-06） | 主持人可看所有 task；**不得**經由 B1-04 的工具橋接暴露給 agent |
+| `Store.Task(session, task_id)`、`Store.Events(session, task_id)` | wrapper（B1-04）與測試 | 只能讀 session 自己的 task；時間語意見 3.3 |
 
-讀取在唯讀交易內完成，回傳 canonical JSON，以 `encoding/json` 輸出（`<`、`>`、`&` 會跳脫）。**待決**：主持人檢視的 HTTP 端點放在節點 2 還是 B1-06，以及它在 M1 是否需要額外的本機 token。
+主持人檢視所有 task 的 HTTP 端點建議移到 B1-06，與展示認證一起完成（第 10 節）。loopback 不是免認證的理由。
 
-## 6. 遮罩與注入
+## 8. 開檔恢復驗證（D3）
 
-- 事件 payload 依契約只有 code／decision，沒有自由文字欄位；scope 的 ID 都受 ID 格式限制。
-- 商家提供的字串只會出現在 `purchases.body` 的報價裡，當資料保存，不進 log。log 只記 ID、事件型別與 reason code，不記原始請購或報價。
-- 不寫入 credential 隱藏欄位、token 或私鑰：型別上就沒有這些欄位。
-- HTML 的跳脫屬展示層（B1-06）；節點 2 確保 JSON 輸出不會讓惡意字串變成可執行內容，並以測試檢查。
+開檔時、接受任何操作之前，在讀取 handle 上以**單一讀交易**完成全部檢查（WAL 下整個交易看到同一個一致快照），其他連線同時提交也不會讓不同時點的合法資料被誤判為損壞。
 
-## 7. 重啟恢復與損壞處理
+1. `PRAGMA integrity_check`（不用 `quick_check`：它不驗 UNIQUE 與索引內容一致性）與 `PRAGMA foreign_key_check`（`integrity_check` 不檢查外鍵）；`user_version` 等於程式支援的版本（[pragma 文件](https://www.sqlite.org/pragma.html#pragma_integrity_check)）。
+2. **設定快照**：重算 `snapshot_hash`；body 是 canonical 且能以 `contracts.Decode` 嚴格解碼成對應 kind 的型別（registry 另以 `NewRegistry` 驗證，profile 以 `Validate`，credential 須為 `fixture`）；task 引用的快照 kind 正確；credential 的 `consumer_id` 等於 task 的 consumer；terms 的 `task_id` 等於 task。
+3. **task 與錢包**：task 的 consumer／agent／wallet／payer 等於其 registry 快照的 `Binding(task_id)`；同一 consumer 的所有 task 使用同一個 wallet 與 payer。
+4. **額度**：`budget_remaining == budget_initial`；`budget_initial ≤` profile 的 task cap；terms 的 `asset_id` 等於 profile 的計價資產。
+5. **請購**：body 是 canonical 且能嚴格解碼；`Intent.Hash()` 等於 `intent_hash`；`RetryKey()` 等於 `retry_key`；`request_id`、`chain_id`、`asset_contract`、`payer`、`eip3009_nonce`、`purchase_order_id` 等索引欄位等於 body；以 task 的 registry 快照執行 `ValidatePurchase`；報價仍可重算出 `payment_requirement_hash`。
+6. **裁決與 approval**：裁決欄位等於對應 `POLICY_DECIDED` 的 decision；`decided_at` 等於該事件的 `observed_at`；`approval_closed`／`closed_at` 與收尾事件的型別和 `observed_at` 一致，沒有收尾事件時兩者為 NULL。
+7. **事件**：body 是 canonical 且能嚴格解碼；索引欄位（task、sequence、event_id、type、purchase_order_id、observed_at）等於 body；`event_id` 等於決定性產生的值；`event_hash` 等於重算的 `EventHash`；sequence 從 1 連續，`prev_event_hash` 連成鏈，`chain_head`／`next_sequence` 等於最後一個事件；`ValidateEvent`（對照 registry 快照與請購）與 `ValidateEventOrder` 通過；每筆請購都有 `PURCHASE_PROPOSED` 與 `POLICY_DECIDED`，沒有孤立的請購或事件。
+8. **投影**：以第 4 節的 `project` 重算，等於 `tasks.status` 與 `deny_reason`。
 
-開檔時，在接受任何操作之前：
+**任何不一致都拒絕整個資料庫的服務**，回報檢查名稱與 task，不自動修補、不覆寫證據。
 
-1. `PRAGMA quick_check` 與 `user_version` 檢查。
-2. 每個 task：依 sequence 讀出事件，以 `contracts.Decode` 解析，重算 `EventHash` 與 `prev_event_hash` 連結，對整條串流執行 `ValidateEvent`（對照該 task 的 registry 快照與請購）與 `ValidateEventOrder`。
-3. 核對 `tasks.chain_head`、`next_sequence` 與最後一個事件一致；每筆請購都有對應的 `PURCHASE_PROPOSED`／`POLICY_DECIDED`，intent hash 與裁決相符；由事件重算的 task 狀態與 `deny_reason` 等於存放值。
+**威脅模型限制**：這些檢查能發現不一致，但能任意改寫整個資料庫的人，可以同步修改快照、索引、事件與鏈頭，讓結果仍然一致。只改尾端事件與鏈頭時，仍可能被請購、approval 或投影等其他一致性檢查發現；但沒有外部 checkpoint 時**無法保證**偵測尾端截斷或整條鏈重算。「無法保證偵測」不等於所有尾端修改都會通過驗證。
 
-任何不一致都**拒絕服務**並回報是哪個 task、哪項檢查，不自動修補、不宣稱恢復成功。**待決**：整個資料庫拒絕開啟（建議，M1 最簡單也最保守），或只隔離出問題的 task。
+## 9. 測試計畫
 
-**限制**：鏈頭與事件放在同一個資料庫。可以偵測中段修改、刪除、插入與重排，也能發現只刪了尾端事件卻沒同步改鏈頭的不一致；但能同時改寫事件與 `chain_head` 的人可以截斷尾端或重算整條鏈而不被發現。沒有外部 checkpoint 前，不宣稱能偵測這兩種情況。
+全部以 `go test -race` 執行。並行測試開多個 `Store`（各自的連線）指向同一個資料庫檔並重複多輪；時鐘一律注入假時鐘。寫入中途失敗用測試專用注入點（`export_test.go` 設定，正式程式不可開啟）；當機以子行程在交易中途 `os.Exit` 模擬，再由父行程重新開檔。
 
-## 8. 測試計畫
-
-全部以 `go test -race` 執行；並行測試開多個 `Store`（各自的連線）指向同一個資料庫檔，模擬跨連線競爭並重複多輪。寫入中途失敗用測試專用的注入點（`export_test.go` 設定，正式程式不可開啟）；當機以子行程在交易中途 `os.Exit` 模擬，再由父行程重新開檔檢查。
+### 9.1 基本（沿用第一版 1～11，依本版修訂）
 
 | # | 情境 | 預期 | 驗證方式 |
 |---|---|---|---|
-| 1 | 相同請購循序與並行重送 | 只有一列請購、一組 `PURCHASE_PROPOSED`／`POLICY_DECIDED`；其餘呼叫拿到 `replay` 與相同裁決 | 多 goroutine／多 Store 同時送出，查列數與事件數 |
-| 2 | 同 key 不同內容、purchase ID 重用、nonce 重用 | `IDEMPOTENCY_CONFLICT`，資料表與事件不變 | 衝突前後比對全部列數與 `chain_head` |
-| 3 | task 結束後的合法 replay | 先驗歸屬，再回傳原結果；新的請購 `TASK_NOT_ACTIVE`；別人的 session 重送同一筆 → `OWNERSHIP_MISMATCH` | Deny 後重送原請購與新請購 |
-| 4 | Deny 與新請購並行 | 串流仍通過 `ValidateEventOrder`；Deny 之後沒有新的裁決 | 並行多輪，每輪檢查不變式（不假設先後） |
-| 5 | 寫入中途失敗與當機 | 不留下半份請購或孤立事件；重新開檔通過第 7 節檢查 | 注入點在每個寫入步驟後失敗；子行程在提交前結束 |
-| 6 | Ask 在 deadline 前、恰好、超過，以及跨重啟 | 29 秒 pending、30／31 秒 expired；重啟後依原起點判定 | 注入時鐘；在 deadline 前關閉、到期後重新開檔 |
-| 7 | Deny 後取消、Deny 後 CLI 逾時 | 收尾事件寫入，task 投影仍為 denied 與原 reason，裁決未改 | 讀 task 投影與事件 |
-| 8 | A／B 隔離 | 同名 request ID 各自是新請購；A 讀寫 B 的 task 被拒；切換 profile 並重啟後既有 task 不變 | 以兩個 session 交叉操作 |
-| 9 | 事件鏈竄改 | 中段修改、刪除、插入 → 開檔失敗；同時改寫尾端與 `chain_head` → **不偵測**，以測試記錄這個限制 | 直接以 SQL 修改資料庫檔後重新開檔 |
-| 10 | 遮罩與注入 | 報價含 `<script>`、換行、U+2028 時，JSON 輸出已跳脫、log 不含原文；設定檔多出秘密欄位 → 載入失敗 | 檢查輸出位元組與擷取的 log |
+| 1 | 相同請購循序與並行重送 | 只有一列請購、一組 `PURCHASE_PROPOSED`／`POLICY_DECIDED`；其餘拿到 replay 與相同原始裁決 | 多 goroutine／多 Store 同時送出，查列數與事件數 |
+| 2 | 同 key 不同內容、purchase ID 重用、nonce 重用 | `IDEMPOTENCY_CONFLICT`，資料表、事件、`chain_head` 都不變 | 衝突前後比對 |
+| 3 | task 結束後的合法 replay | 先驗歸屬再回傳原結果；新請購 `TASK_NOT_ACTIVE`；別人的 session 重送 → `OWNERSHIP_MISMATCH`，而且不觸發任何到期寫入 | Deny 後重送原請購、新請購與跨 session 重送 |
+| 4 | Deny 與新請購並行 | 串流通過 `ValidateEventOrder`，Deny 之後沒有新裁決 | 並行多輪檢查不變式，不假設先後 |
+| 5 | 寫入中途失敗與當機 | 沒有半份請購或孤立事件；重新開檔通過第 8 節全部檢查 | 每個寫入步驟後注入失敗；子行程在提交前結束 |
+| 6 | Ask 在 29、30、31 秒 | pending、expired、expired | 假時鐘 |
+| 7 | Deny 後取消、Deny 後 CLI 逾時 | 收尾事件寫入，`denied` 與原 reason 不變 | 讀投影與事件 |
+| 8 | A／B 隔離 | 同名 request ID 各自是新請購；A 讀寫 B 被拒；切換 profile 並重啟後既有 task 不變 | 兩個 session 交叉操作 |
+| 9 | 事件鏈竄改 | 中段修改、刪除、插入 → 開檔失敗；同時改寫尾端事件與 `chain_head` 的情況依第 8 節的限制記錄，不宣稱一定偵測 | 以 SQL 修改資料庫檔後重新開檔 |
+| 10 | 遮罩與注入 | 見 9.5 | — |
 | 11 | M1 無付款能力 | `budget_remaining` 不變；沒有 APPROVED／GRANT_ISSUED／SETTLED／RESOURCE_DELIVERED；credential 快照為 `fixture` | 每個情境結束時檢查 |
 
-另以 `cases.json` 的 16 個 integration 案例在儲存層執行（不含真實 CLI）：8 個 policy 案例、取消兩案、approval 逾時三案、CLI 逾時兩案、重啟後同一 consumer 的新 task 沿用同一錢包。這是儲存層證據；端到端執行仍屬 B1-06。新增的 mutation 會覆蓋交易內的歸屬、replay、衝突、active-task 檢查、到期與收尾規則。
+另以 `cases.json` 的 16 個 integration 案例在儲存層執行（不含真實 CLI）：8 個 policy 案例、取消兩案、approval 逾時三案、CLI 逾時兩案、重啟後同一 consumer 的新 task 沿用同一錢包。這是儲存層證據；端到端仍屬 B1-06。
 
-## 9. 最小可驗收範圍
+### 9.2 狀態投影（D1）
 
-- `internal/audit`（或 `internal/store`）的 `Store`：`Open`、`StartTask`、`Submit`、`Cancel`、`CLITimeout`、`ExpireDue`、`Task`、`Events`，以及第 7 節的開檔驗證。
-- 第 8 節的 11 項測試與 16 個 integration 案例在儲存層通過；mutation 與容器驗證更新後通過。
-- 不含：JSONL 匯出、B1-04 的 caller 認證、外部 checkpoint、主持人檢視 HTTP 端點（視待決事項）。
+`project` 的表格測試涵蓋第 4 節表中全部 8 個情境；同樣 8 個情境也經由 Store 的實際寫入執行，比對資料庫欄位、事件與 `project` 結果三者一致。
 
-## 10. 待決事項
+### 9.3 時序與時鐘（D2）
 
-1. **Driver 與版本**：`modernc.org/sqlite` v1.60.1 或較早的 v1 版本；或改用 `ncruces/go-sqlite3`。
-2. **驗證映像**：方案 A（映像內預載模組）或 B（`vendor/`）；核准後才下載依賴與重建映像。
-3. **approval deadline 設定**：目前 profile 沒有這個欄位。建議加 `approval_deadline_seconds` 並把 profile 升為 `m1-demo-v2`；demo 數值待定（案例以 30 秒驗證邊界）。這是 profile 變更，不是契約變更。
-4. **資料庫路徑**：建議 `APA_DB_PATH`，預設 `var/apa.db`（`var/` 已在 `.gitignore`）；選填，不影響 B1-01 的啟動檢查。
-5. **fixture 憑證與額度來源**：建議新增 `testdata/policy/m1-demo-credentials.json`。demo 若以真實時鐘執行，固定的 `valid_until` 會過期，需要決定用遠期值還是啟動時設定。
-6. **開檔驗證失敗時**：整個資料庫拒絕開啟（建議），或只隔離問題 task。
-7. **主持人檢視 HTTP 端點**：放在節點 2 或 B1-06，以及 M1 是否加本機 token。
-8. **APPROVAL_EXPIRED 的 `observed_at`**：建議用 host 實際寫入的時間，不回填理論到期時刻。
-9. **approval 逾時後的 task 狀態**：契約不把 approval 逾時算成 task 結束；本設計在沒有其他開著的 Ask 時讓 task 回到 `running`，可再提出新請購。這是實作者的選擇，請確認。
+| 情境 | 預期 |
+|---|---|
+| 停機跨越 deadline，重啟後第一次查詢與第一次 replay | 都看到 expired；`observed_at` 為重啟後時間；只有一個 `APPROVAL_EXPIRED` |
+| 恰好 deadline 時 `Cancel` 與 `ExpireDue` 競爭（兩種先後各跑多輪） | 都是 expired＋`TASK_CANCELLED`，沒有 `APPROVAL_WITHDRAWN` |
+| deadline 前一秒 `Cancel` | withdrawn＋`TASK_CANCELLED` |
+| 恰好 deadline 時 `CLITimeout` 與 `ExpireDue` 競爭 | expired＋`TASK_TIMED_OUT`，`failed` |
+| deadline 前 `CLITimeout`，之後到期 | `failed`；Ask 由 pending 轉為 expired；不開放新請購 |
+| 多個 worker 同時 `ExpireDue` 同一 Ask | 只有一個 `APPROVAL_EXPIRED` |
+| 等寫鎖期間跨越 deadline 或 `valid_before` | 依取得鎖後的時間判定（測試持有寫鎖、推進假時鐘、再釋放） |
+| replay 時有到期 | 只多一個 `APPROVAL_EXPIRED`，沒有新的請購或裁決事件；回傳 expired |
+| 衝突請購時有到期 | 回滾後沒有 `APPROVAL_EXPIRED`；下一次 `ExpireDue` 寫入 |
+| 時鐘倒退 | 寫入回 `CLOCK_REGRESSION`；沒有下溢；終止的 task 不復活；讀取照常 |
+| 查詢時已過 deadline 但尚未到期處理 | 仍顯示 pending 並附 `deadline_at`，不顯示成已收尾 |
+
+### 9.4 恢復驗證（D3）
+
+對第 8 節每一項，各準備一個「只改一個欄位」的破壞：快照的 body、hash、kind；task 的 status、deny_reason、next_sequence、chain_head、budget_remaining、wallet／payer；請購的 body、intent_hash、retry_key、payer、nonce、裁決欄位、decided_at、approval_closed、closed_at；事件的 body、event_hash、sequence、observed_at、event_type、purchase_order_id；再加上刪除請購（留下孤立事件）、刪除事件（留下孤立請購）與外鍵斷裂。每一種都必須讓開檔失敗並指出正確的檢查名稱。另測：恢復驗證進行時另一個連線持續提交合法寫入，驗證不得誤判。
+
+### 9.5 報價保存（D4）
+
+| 情境 | 預期 |
+|---|---|
+| 報價的 `extra` 或 `extensions` 加入假 bearer token、`privateKey` 類欄位、巢狀敏感欄位、`<script>` 與換行字串（不在報價簿） | `QUOTE_NOT_OFFERED`；資料表列數不變；擷取的 log 與錯誤訊息都不含這些字串或鍵名 |
+| 報價簿內的 golden 報價（含 `資料 & terms`） | 原樣保存；重新開檔後重算的 requirement hash 等於 intent 的 `payment_requirement_hash` |
+| 查詢與展示回應 | 不含原始報價、`extra` 或 `extensions` 的任何內容；只有 6.3 的白名單欄位 |
+| 每條連線的 PRAGMA | 多條連線逐一讀回 `foreign_keys`、`busy_timeout`、`synchronous`；讀取 handle 為 `query_only` |
+
+## 10. 最小交付範圍
+
+**節點 2 交付**：Store 的 `Open`（含第 8 節驗證與啟動時 `ExpireDue`）、`StartTask`、`Submit`、`Cancel`、`CLITimeout`、`ExpireDue`、`Task`、`Events`；第 9 節全部測試與 16 個 integration 案例在儲存層通過；新增的 mutation 與容器驗證（新映像）通過；`docs/third-party.md`。
+
+**不含**：JSONL 匯出、B1-04 的 caller 認證、外部 checkpoint、主持人檢視 HTTP 端點、多行程部署（除 SQLite 檔案鎖以外的協調）。
+
+**HTTP 範圍調整提案**（待確認）：B1-05 任務卡的「事件讀取 endpoint」移到 B1-06，與展示認證一起完成；B1-05 節點 2 交付受 session 限制的 Store 查詢（`Task`／`Events`）。任務清單建議同步文字：
+
+> B1-05 交付清單中的「事件讀取 endpoint」移至 B1-06，與主持人展示認證一起完成；B1-05 節點 2 交付受 session 限制的 Store 查詢（Task／Events）。此調整待確認；未交付的 HTTP 端點不記為已驗收。
+
+## 11. 九項建議的採納情形
+
+| 項目 | 採納情形 |
+|---|---|
+| 1. Driver／版本 | **採納**：`modernc.org/sqlite v1.60.1`，`modernc.org/libc v1.77.1` 與其 go.mod 一致；changelog 的 WAL `-shm` 修正也支持不退版（1.2） |
+| 2. 驗證映像 | **採納**：預載模組，綁定 `go.mod` 與 `go.sum` 兩者；build context 只有這兩個檔與 Dockerfile（1.4） |
+| 3. Approval deadline | **採納並調整位置**：預設 30 秒，存在每個 task 的 terms 快照，不必把 profile 升版；Profile、v1 fixture、案例與契約都不動。若偏好 profile v2，遷移方式已寫明（5.2） |
+| 4. DB 路徑 | **採納**：`APA_DB_PATH`，預設 `var/apa.db`，相對路徑以啟動時工作目錄為基準，目錄 `0700`，不接受 DSN（1.6） |
+| 5. Fixture 來源 | **採納**：測試固定時間；demo 建 task 時產生 fixture 絕對效期並保存，重啟不續期；較低額度不重設成 task cap（5.2） |
+| 6. 恢復失敗 | **採納**：整個資料庫拒絕服務，不自動修補（第 8 節） |
+| 7. 主持人 HTTP | **採納為提案，待確認**：移到 B1-06，節點 2 交付 session 查詢（第 10 節） |
+| 8. 到期事件時間 | **採納**：用取得寫鎖後取樣的 Host 時間，不倒填（3.1、3.4） |
+| 9. 到期後 task | **採納**：只有未終止且沒有其他開著的 Ask 才回 `running`（第 4 節） |
+
+沒有提出異議。
+
+## 12. 仍待確認
+
+1. **以可信報價簿限制入口**（6.1、6.2）：報價簿以外的商家報價在入口拒收（`QUOTE_NOT_OFFERED`），不成為 Policy Deny。
+2. **到期優先於取消／CLI 逾時**（3.4）：恰好 deadline 時一律 expired。已接受案例沒有涵蓋這個邊界，這是由 `elapsed >= deadline` 推出的選擇。
+3. **等鎖跨越 `valid_before` 產生 Deny 並終止 task**（3.6）：依取得鎖後的時間判定是一致的語意，但後果較重。
+4. **時鐘倒退時全資料庫拒絕寫入**（3.5），由主持人修正時鐘後恢復。
+5. **`ExpireDue` 週期**：建議 1 秒，決定查詢最多落後多久。
+6. **主持人 HTTP 端點移到 B1-06**（第 10 節）。
+7. **期限放在 terms 快照而非 profile v2**（5.2）。
+8. **錢包改變時 `StartTask` 拒絕**（5.3）。
+
+## 13. 本版修訂對照
+
+| 項目 | 修改位置 | 設計決定 | 新增測試 |
+|---|---|---|---|
+| D1 狀態投影 | 第 4 節；3.2 第 7 步；第 8 節第 8 項 | 單一 `project` 函式：第一個終止事件決定終止狀態，否則依是否有開著的 Ask；原始裁決與請購目前狀態分開；寫入與恢復都以它重算比對 | 9.2：8 個交錯情境，函式與實際寫入兩層 |
+| D2 時間與時序 | 第 3 節全部；7 | 時鐘由 Host 注入、取得寫鎖後取樣；共同交易骨架，先授權再到期；到期與操作同一交易、一起回滾；查詢為已提交快照並附 `deadline_at`；啟動先 `ExpireDue`；時鐘倒退拒絕寫入 | 9.3：11 個時序與時鐘情境 |
+| D3 恢復驗證 | 第 8 節；2 的欄位與索引 | 單一讀交易；`integrity_check`＋`foreign_key_check`；快照、task、錢包、額度、請購、approval、事件、投影共 8 類檢查；任何不一致整庫拒絕；威脅模型與尾端限制的精確表述 | 9.4：逐欄位破壞與並行提交下不誤判 |
+| D4 報價保存 | 第 6 節；1.3 | 以可信報價簿限制入口並原樣保存；落盤前拒收且不回顯內容；查詢只回白名單投影；JSON 跳脫不等於遮罩 | 9.5：敏感與惡意報價、合法報價的 hash 重算、展示白名單、逐連線 PRAGMA |
