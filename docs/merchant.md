@@ -1,6 +1,12 @@
 # M1 最小資料商店：目錄＋402
 
-B1-03 交付 `internal/merchant/`（商店）與 `internal/x402/`（x402 v2 HTTP header 編解碼），由 `cmd/demo` 啟動。範圍是**本機真 HTTP＋fixture 商業資料**：商品目錄、一份受保護資料、HTTP 402 報價。沒有 settlement adapter、Signer、facilitator 或鏈上交易，不是 FR-13 驗收 7 的外部 live 證據。
+B1-03 交付 `internal/merchant/`（商店）與 `internal/x402/`（x402 v2 HTTP header 編解碼），由 `cmd/demo` 啟動。
+
+**狀態（2026-10-01）**：**B1-03 已結案（Done）**，驗收 commit `ebd3f44`。範圍：商品目錄、x402 v2 的 402 報價、與 B1-02 共用契約對接、`PaymentPayload.extensions` 格式檢查、HEAD 行為，以及 M1 不交付受保護內容。**不包含**簽章驗證、付款結算、Signer 或鏈上交易。
+
+驗收證據：Codex 獨立重跑全部 Go race 測試、`extensions` 與方法測試、JavaScript 契約向量，全部通過；43／43 突變由 Claude Code 執行（`scripts/verify/mutation-check.py`，含 Linux 容器驗證），Codex 核對紀錄，不是 Codex 獨立重跑。
+
+商店範圍是**本機真 HTTP＋fixture 商業資料**：商品目錄、一份受保護資料、HTTP 402 報價。沒有 settlement adapter、Signer、facilitator 或鏈上交易，不是 FR-13 驗收 7 的外部 live 證據。
 
 ## 規格依據
 
