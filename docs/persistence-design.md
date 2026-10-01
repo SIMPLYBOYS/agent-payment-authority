@@ -1,6 +1,6 @@
 # B1-05 節點 2 設計：持久化與事件查詢
 
-**狀態（2026-10-01）**：第二版設計，待獨立 review，**尚未實作**。第一版（`c9199e7`）的 review 要求補齊狀態投影（D1）、時間與到期時序（D2）、恢復驗證範圍（D3）與報價的安全保存（D4），本版逐項修訂，對照見第 13 節。本文件不安裝 driver、不改依賴、不啟動服務；設計通過與下載依賴、重建映像的核准是分開的兩件事。
+**狀態（2026-10-01）**：第三版設計，待獨立 review，**尚未實作**。第二版（`adad831`）的 review 保留 D1～D4 的方向，要求局部修訂三項：歷史請購的 replay 不受目前報價簿影響（R1）、缺 profile 是合法的 `CONFIG_MISSING` 情境（R2）、`ExpireDue` 週期不是延遲上限（C1），對照見第 13 節。第一版（`c9199e7`）到第二版的 D1～D4 修訂對照保留在同一節。本文件不安裝 driver、不改依賴、不啟動服務；設計通過與下載依賴、重建映像的核准是分開的兩件事。
 
 範圍是把節點 1 的 `policy.Decide` 接到持久化：請購去重與衝突拒絕、原子寫入、事件與 hash chain、取消／CLI 逾時／approval 逾時、重啟恢復、A／B 隔離與受 session 限制的查詢。不改節點 1 的 Policy 行為、已接受的契約、schema、`cases.json` 與 golden vectors，不新增事件型別。
 
@@ -67,7 +67,8 @@ CREATE TABLE config_snapshots (
   body          TEXT NOT NULL,              -- canonical JSON
   recorded_at   INTEGER NOT NULL
 ) STRICT;
--- terms：{task_id, budget_initial, asset_id, approval_deadline_seconds}，每個 task 一份
+-- terms：{task_id, profile_state, credential_state, budget_initial, asset_id, approval_deadline_seconds}，每個 task 一份
+--   profile_state／credential_state 為 "present" 或 "absent"，由可信 Host 明確宣告（5.2）
 
 CREATE TABLE tasks (
   task_id             TEXT PRIMARY KEY,
@@ -76,8 +77,8 @@ CREATE TABLE tasks (
   wallet_id           TEXT NOT NULL,
   payer               TEXT NOT NULL,                        -- 錢包的 from，同一 consumer 沿用
   registry_snapshot   TEXT NOT NULL REFERENCES config_snapshots,
-  profile_snapshot    TEXT REFERENCES config_snapshots,     -- NULL＝缺設定（CONFIG_MISSING）
-  credential_snapshot TEXT REFERENCES config_snapshots,     -- NULL＝缺設定
+  profile_snapshot    TEXT REFERENCES config_snapshots,     -- NULL 只在 terms.profile_state = absent 時合法（CONFIG_MISSING）
+  credential_snapshot TEXT REFERENCES config_snapshots,     -- NULL 只在 terms.credential_state = absent 時合法
   terms_snapshot      TEXT NOT NULL REFERENCES config_snapshots,
   budget_remaining    TEXT NOT NULL,                        -- M1 永遠等於 terms.budget_initial
   status              TEXT NOT NULL,                        -- 由第 4 節的投影寫入
@@ -146,7 +147,7 @@ CREATE UNIQUE INDEX one_end      ON events (task_id) WHERE event_type IN ('TASK_
 3. 時鐘檢查：`now` 不得小於資料庫目前記錄的最大時間（所有事件的 `observed_at` 與快照的 `recorded_at`），否則以 `CLOCK_REGRESSION` 中止（3.5）。
 4. **授權**：session 操作在這裡驗 task 屬於 session（Submit 另以該 task 的 registry 快照執行 `ValidatePurchase`）；Host 操作驗 task 存在。授權失敗即回滾，**之前沒有任何寫入**，所以跨 consumer 或未認證的請求不可能經由到期處理修改別人的 task。
 5. **到期處理**：只處理這個操作的目標 task（3.4）。
-6. 操作本身的邏輯。
+6. 操作本身的邏輯（`Submit` 的分類順序見 3.3 之後的說明）。
 7. 追加事件；以第 4 節的共同規則重算投影；`ValidateEvent`＋`ValidateEventOrder` 驗新串流；投影欄位與規則結果一致才寫入。
 8. `COMMIT`。任何一步失敗都 `ROLLBACK`，**包含第 5 步的到期事件**。
 
@@ -158,9 +159,10 @@ CREATE UNIQUE INDEX one_end      ON events (task_id) WHERE event_type IN ('TASK_
 |---|---|---|---|---|---|
 | 啟動 | Host | — | 恢復驗證（第 8 節，讀交易）通過後，Host 立即執行 `ExpireDue`，之後才開始服務 | 驗證：單一讀交易；到期：每個 task 一個寫交易 | 驗證失敗就拒絕服務，不寫任何東西 |
 | `StartTask` | Host | task 在 registry 且尚未開始；同一 consumer 沿用既有錢包（5.3） | 無（新 task） | 單一寫交易 | 全部回滾 |
-| `Submit`（新請購） | session | 第 4 步：task 屬於 session，再 `ValidatePurchase` | 只處理該 task | 同一交易：到期 → 分類 → 新請購才 `CheckTaskActive` → `Decide` → 寫入 | 全部回滾，含到期 |
-| `Submit`（合法 replay） | session | 同上，**先驗歸屬再辨識 replay** | 同上 | 同一交易；replay 不重跑 Policy、不寫請購或裁決事件；唯一可能的寫入是該 task 已到期 Ask 的 `APPROVAL_EXPIRED`，沒有到期就不寫任何列 | — |
-| `Submit`（衝突） | session | 同上 | 同上 | 回 `IDEMPOTENCY_CONFLICT` | 回滾，到期由之後的交易重新判定 |
+| `Submit`（新請購） | session | 第 4 步：task 屬於 session，再 `ValidatePurchase` | 只處理該 task | 同一交易：到期 → 分類 → 新請購才檢查**目前**報價簿 → `CheckTaskActive` → `Decide` → 寫入 | 全部回滾，含到期 |
+| `Submit`（合法 replay） | session | 同上，**先驗歸屬再辨識 replay** | 同上 | 同一交易；只以已保存的 canonical 請購比對；**不檢查目前報價簿**、不套用 active-task、不重跑 Policy、不寫請購或裁決事件；唯一可能的寫入是該 task 已到期 Ask 的 `APPROVAL_EXPIRED`，沒有到期就不寫任何列 | — |
+| `Submit`（衝突） | session | 同上 | 同上 | 回 `IDEMPOTENCY_CONFLICT`；不論新內容是否在目前報價簿，都不改回 `QUOTE_NOT_OFFERED` | 回滾，到期由之後的交易重新判定 |
+| `Submit`（新請購的報價不在目前報價簿） | session | 同上 | 同上 | 回 `QUOTE_NOT_OFFERED` | 回滾，含到期；不寫任何列 |
 | `Task`／`Events` | session | 讀交易內驗 task 屬於 session | **不處理** | 唯讀交易（WAL 下為一致快照） | — |
 | `Cancel` | Host（主持人） | task 存在，尚無生命週期結束事件 | 只處理該 task | 同一交易：到期 → 撤回仍開著的 Ask（`APPROVAL_WITHDRAWN`）→ `TASK_CANCELLED` | 全部回滾 |
 | `CLITimeout` | Host（wrapper 監控 CLI） | 同上 | 只處理該 task | 同一交易：到期 → `TASK_TIMED_OUT`；**不撤回** Ask（案例 `cli-timeout-pending`） | 全部回滾 |
@@ -168,9 +170,24 @@ CREATE UNIQUE INDEX one_end      ON events (task_id) WHERE event_type IN ('TASK_
 
 `Cancel`、`CLITimeout`、`ExpireDue` 是 Host 能力，不經 B1-04 的工具橋接暴露給 agent；`Submit`、`Task`、`Events` 是 session 能力。
 
-**查詢的時間語意**：`Task`／`Events` 回傳「該 task 最後一次提交的寫入交易」時的一致快照，附 `as_of_sequence` 與 `as_of_observed_at`。開著的 Ask 附 `deadline_at`（`decided_at + approval_deadline_seconds`，理論到期點）。回應不宣稱已依現在時間更新；已過 `deadline_at` 但尚未寫入 `APPROVAL_EXPIRED` 的 Ask 仍顯示為 pending，**不**顯示成已收尾。落後的上限由 Host 的 `ExpireDue` 週期決定（待確認，建議 1 秒），且服務一啟動就先執行一次。
+**查詢的時間語意**：`Task`／`Events` 回傳「該 task 最後一次提交的寫入交易」時的一致快照，附 `as_of_sequence` 與 `as_of_observed_at`。開著的 Ask 附 `deadline_at`（`decided_at + approval_deadline_seconds`，理論到期點）。回應不宣稱已依現在時間更新；已過 `deadline_at` 但尚未寫入 `APPROVAL_EXPIRED` 的 Ask 仍顯示為 pending，**不**顯示成已收尾。
+
+Host 以 1 秒為目標週期執行 `ExpireDue`；這**不是**最多延遲 1 秒的保證。鎖等待、排程延遲、交易回滾、掃描執行時間或錯誤都可能使處理落後。查詢回傳已提交的一致快照，保留 `as_of_sequence`、`as_of_observed_at` 與 `deadline_at`，不宣稱資料已依現在時間更新。服務啟動時先執行一次 `ExpireDue` 的設計不變；本設計不提供任何即時性或延遲上限的保證。
 
 **replay 承諾的修訂**：第一版寫「replay 不寫事件」，精確版本是：replay 不重跑 Policy、不新增請購或原始裁決；交易骨架第 5 步可能為同一 task 寫入 `APPROVAL_EXPIRED`，這是生命週期推進，責任在 Store；回傳的 approval 狀態是該交易提交後的狀態。
+
+**`Submit` 的分類順序（第三版，R1）**：在 3.2 的骨架內依序：
+
+1. 交易外：`contracts.Decode` 嚴格解析請購（格式）。
+2. 第 4 步授權：task 存在且屬於 session，再以該 task 的 registry 快照執行 `ValidatePurchase`（形狀、報價與 intent 一致、歸屬）。**請購已存在也不能跳過這一步**；失敗即回滾，不回傳任何既有請購的內容，也不觸發第 5 步。
+3. 第 5 步：只處理該 task 已到期的 Ask。
+4. 以 retry key 查既有請購；存在就以**已保存的完整 canonical 請購**與 `contracts.CompareRetry` 比對：
+   - 相同內容 → 合法 replay：回傳原始裁決與（第 3 步之後的）目前 approval 狀態。不檢查目前報價簿、不套用 active-task、不重跑 Policy、不新增邏輯請購或原始裁決。
+   - 不同內容 → `IDEMPOTENCY_CONFLICT`，回滾；不論新內容是否在目前報價簿。
+5. retry key 不存在：以 `(task_id, purchase_order_id)` 與 `(chain_id, asset_contract, from, eip3009_nonce)` 查既有請購，用 `CompareRetry` 判定；衝突即 `IDEMPOTENCY_CONFLICT`，回滾。唯一範圍沿用 B1-02。
+6. 確定是新請購：先檢查**目前**可信報價簿（6.1），不在其中即 `QUOTE_NOT_OFFERED`，回滾；再 `CheckTaskActive`；再 `Decide`；再寫入。
+
+未授權、衝突與拒收都整個回滾，不留下部分寫入（含第 3 步的到期事件）。合法 replay 的交易只可能提交第 3 步的 `APPROVAL_EXPIRED`。
 
 ### 3.4 到期規則與收尾的先後
 
@@ -231,8 +248,17 @@ CREATE UNIQUE INDEX one_end      ON events (task_id) WHERE event_type IN ('TASK_
 
 ### 5.2 額度、期限與 fixture 憑證
 
-- **terms 快照**：`budget_initial`、`asset_id`（取自 profile 的計價資產）與 `approval_deadline_seconds`（預設 30 秒）。期限放在 task 的 terms 快照，**不改 profile**：`policy.Decide` 不使用期限，節點 1 的 Profile、`m1-demo-v1` fixture、已接受案例與契約版本都不必變動。若 reviewer 偏好把期限放進 profile，遷移方式是新增 `m1-demo-v2` fixture 並保留 v1，本輪不動任何程式或 fixture。
-- **額度**：`budget_initial` 預設等於 profile 的 task cap；可信 fixture 可以給較低的值（例如超額案例的 0.25），**不會被重設成 task cap**；開始時檢查 `budget_initial ≤ task_cap`。M1 不扣款，`budget_remaining` 永遠等於 `budget_initial`。額度綁定 task 與計價資產，`Decide` 已拒絕其他 task 的額度與非計價資產。
+- **terms 快照**：`profile_state`、`credential_state`、`budget_initial`、`asset_id` 與 `approval_deadline_seconds`（預設 30 秒），都由可信 Host／fixture 提供，**不從請購推導**。期限放在 task 的 terms 快照，**不改 profile**：`policy.Decide` 不使用期限，節點 1 的 Profile、`m1-demo-v1` fixture、已接受案例與契約版本都不必變動。若 reviewer 偏好把期限放進 profile，遷移方式是新增 `m1-demo-v2` fixture 並保留 v1，本輪不動任何程式或 fixture。
+- **profile 的三種情況**（R2）：
+
+  | 情況 | `StartTask` | terms | 開檔恢復 |
+  |---|---|---|---|
+  | **存在** | 以 `Profile.Validate` 驗證後保存快照 | `profile_state = present`；`asset_id` 必須等於 profile 的計價資產；`budget_initial` 預設等於 task cap，可信 fixture 可給較低值（例如超額案例的 0.25），**不會被重設成 task cap**，且須 `≤ task_cap` | 快照存在、kind 正確、可解碼、`Validate` 通過；cap 與計價資產比對 |
+  | **刻意缺失**（可信 Host／fixture 明確宣告） | `profile_snapshot` 保持 NULL；**不補預設 profile** | `profile_state = absent`；`budget_initial` 與 `asset_id` 由可信 fixture 明確提供（案例沿用 `cases.json` defaults 的 `remaining` 與 `asset`），`asset_id` 必須是該 task registry 快照中的可信資產 | NULL 合法；不做 cap 與計價資產比對；其餘檢查照做 |
+  | **引用損壞或內容非法** | Host 提供的 profile 不合法 → `StartTask` 拒絕，不轉成缺設定 | — | 引用的快照不存在、kind 不對、無法解碼、`Validate` 失敗，或 `profile_state` 與欄位不一致（present 卻是 NULL，absent 卻有值）→ 拒絕服務 |
+
+  缺 profile 的 task 以 `Profile=nil` 原樣傳給節點 1 的 `policy.Decide`，得到既有的 Deny `CONFIG_MISSING`，不新增 reason code。credential 用同一套 `credential_state` 區分合法缺失（`Credential=nil` → `CONFIG_MISSING`）與損壞引用。
+- **額度**：M1 不扣款，`budget_remaining` 永遠等於 `budget_initial`，不論 profile 是否存在。額度綁定 task 與計價資產，`Decide` 已拒絕其他 task 的額度與非計價資產。
 - **fixture 憑證效期**：測試用固定時間。demo 在建立新 task 時由 Host 產生明標 `fixture` 的絕對 `valid_until`（`started_at` 加上 Host 設定的有效長度）並存入快照；重啟不續期，既有 task 不受之後的設定影響。
 
 ### 5.3 錢包沿用與 A／B 隔離
@@ -248,7 +274,8 @@ CREATE UNIQUE INDEX one_end      ON events (task_id) WHERE event_type IN ('TASK_
 ### 6.1 接受範圍：只收可信報價簿裡的報價
 
 - Store 開啟時由 Host 提供**可信報價簿**：每個 `(http_method, resource_url)` 對應的報價。M1 的報價簿就是 B1-03 商店自己產生的報價（內容由本專案撰寫）。
-- 入口規則：請購的 `Quote`（`x402_version`、`selected_requirement`、`extensions`）必須與報價簿中同一 method＋URL 的某一份報價 **canonical 完全相同**。這同時把報價綁定到商店實際提供的資源。
+- 入口規則（**只適用於新請購**，順序見 3.3 之後的說明）：請購的 `Quote`（`x402_version`、`selected_requirement`、`extensions`）必須與**目前**報價簿中同一 method＋URL 的某一份報價 **canonical 完全相同**。這同時把報價綁定到商店實際提供的資源。
+- **歷史請購不受目前報價簿影響**（R1）：報價簿可以在重啟時更新（改價、下架）。已接受的請購以保存的完整 canonical 內容辨識 replay 與衝突，不重新要求原報價仍在報價簿；但原報價下架後，引用它的**新**請購仍會被拒收，不能藉歷史請購重新開放舊報價。
 - 通過的請購**原樣**保存 canonical body，requirement hash 保持可重算，不刪減、不遮罩後再沿用原 hash。
 - 案例測試：`cases.json` 文件已規定 amount／asset 覆蓋要「同時更新 trusted quote」，所以各案例的可信報價簿就是該案例的報價（包含 B1-02 golden 輸入裡的 `extra.future_term`、`extensions.fixture-pricing` 等欄位）。
 
@@ -256,7 +283,7 @@ CREATE UNIQUE INDEX one_end      ON events (task_id) WHERE event_type IN ('TASK_
 
 ### 6.2 落盤前拒收
 
-- 不在報價簿裡的報價一律在第 4 步之後、任何寫入之前拒收，回 `QUOTE_NOT_OFFERED`，不寫任何列或事件。這涵蓋未知的擴充欄位、多出來的 `extra` 欄位、假 token、類似私鑰的欄位、巢狀敏感欄位與惡意 HTML。
+- 新請購的報價不在目前報價簿，就在提交前拒收，回 `QUOTE_NOT_OFFERED`，整個交易回滾，不寫任何列或事件。這涵蓋未知的擴充欄位、多出來的 `extra` 欄位、假 token、類似私鑰的欄位、巢狀敏感欄位與惡意 HTML。
 - 錯誤訊息與 log 只含 code 與已驗證格式的 ID（`request_id`、`purchase_order_id`），**不含**被拒報價的任何鍵名或值。
 - 影響：在 M1 裡，報價簿以外的商家報價於入口拒收，而不是成為 Policy 的 `MERCHANT_NOT_ALLOWED`。報價簿內的商家若不在 profile 白名單，仍由 Policy 判 Deny `MERCHANT_NOT_ALLOWED`（已接受案例 `deny-merchant` 不受影響）。這項語意調整待確認（第 12 節）。
 
@@ -279,14 +306,18 @@ CREATE UNIQUE INDEX one_end      ON events (task_id) WHERE event_type IN ('TASK_
 
 開檔時、接受任何操作之前，在讀取 handle 上以**單一讀交易**完成全部檢查（WAL 下整個交易看到同一個一致快照），其他連線同時提交也不會讓不同時點的合法資料被誤判為損壞。
 
+恢復驗證只用已保存的資料、快照、hash 與事件，**不查目前的可信報價簿**，也不以它否定先前已接受的報價（R1）；已保存報價的格式、canonical 形式、hash 與一致性檢查照做。
+
 1. `PRAGMA integrity_check`（不用 `quick_check`：它不驗 UNIQUE 與索引內容一致性）與 `PRAGMA foreign_key_check`（`integrity_check` 不檢查外鍵）；`user_version` 等於程式支援的版本（[pragma 文件](https://www.sqlite.org/pragma.html#pragma_integrity_check)）。
-2. **設定快照**：重算 `snapshot_hash`；body 是 canonical 且能以 `contracts.Decode` 嚴格解碼成對應 kind 的型別（registry 另以 `NewRegistry` 驗證，profile 以 `Validate`，credential 須為 `fixture`）；task 引用的快照 kind 正確；credential 的 `consumer_id` 等於 task 的 consumer；terms 的 `task_id` 等於 task。
+2. **設定快照**（無條件）：重算 `snapshot_hash`；body 是 canonical 且能以 `contracts.Decode` 嚴格解碼成對應 kind 的型別（registry 另以 `NewRegistry` 驗證，profile 以 `Validate`，credential 須為 `fixture`）；task 引用的快照存在且 kind 正確；terms 的 `task_id` 等於 task，`approval_deadline_seconds` 為正整數。**profile／credential 的狀態**：terms 的 `profile_state`／`credential_state` 與對應欄位一致——`present` 時欄位必須引用合法快照（credential 的 `consumer_id` 等於 task 的 consumer），`absent` 時欄位必須為 NULL；不一致即損壞，不當成合法缺設定。
 3. **task 與錢包**：task 的 consumer／agent／wallet／payer 等於其 registry 快照的 `Binding(task_id)`；同一 consumer 的所有 task 使用同一個 wallet 與 payer。
-4. **額度**：`budget_remaining == budget_initial`；`budget_initial ≤` profile 的 task cap；terms 的 `asset_id` 等於 profile 的計價資產。
+4. **額度**：無條件——`budget_initial` 是合法金額、`budget_remaining == budget_initial`、terms 的 `asset_id` 是該 task registry 快照中的可信資產。僅在 profile 存在時——`budget_initial ≤` profile 的 task cap、`asset_id` 等於 profile 的計價資產。
 5. **請購**：body 是 canonical 且能嚴格解碼；`Intent.Hash()` 等於 `intent_hash`；`RetryKey()` 等於 `retry_key`；`request_id`、`chain_id`、`asset_contract`、`payer`、`eip3009_nonce`、`purchase_order_id` 等索引欄位等於 body；以 task 的 registry 快照執行 `ValidatePurchase`；報價仍可重算出 `payment_requirement_hash`。
 6. **裁決與 approval**：裁決欄位等於對應 `POLICY_DECIDED` 的 decision；`decided_at` 等於該事件的 `observed_at`；`approval_closed`／`closed_at` 與收尾事件的型別和 `observed_at` 一致，沒有收尾事件時兩者為 NULL。
 7. **事件**：body 是 canonical 且能嚴格解碼；索引欄位（task、sequence、event_id、type、purchase_order_id、observed_at）等於 body；`event_id` 等於決定性產生的值；`event_hash` 等於重算的 `EventHash`；sequence 從 1 連續，`prev_event_hash` 連成鏈，`chain_head`／`next_sequence` 等於最後一個事件；`ValidateEvent`（對照 registry 快照與請購）與 `ValidateEventOrder` 通過；每筆請購都有 `PURCHASE_PROPOSED` 與 `POLICY_DECIDED`，沒有孤立的請購或事件。
 8. **投影**：以第 4 節的 `project` 重算，等於 `tasks.status` 與 `deny_reason`。
+
+registry、consumer／wallet 歸屬、請購格式與 hash、事件與投影一致性（第 3、5～8 項）一律檢查，**不因缺 profile 或缺 credential 而跳過**。
 
 **任何不一致都拒絕整個資料庫的服務**，回報檢查名稱與 task，不自動修補、不覆寫證據。
 
@@ -347,6 +378,30 @@ CREATE UNIQUE INDEX one_end      ON events (task_id) WHERE event_type IN ('TASK_
 | 查詢與展示回應 | 不含原始報價、`extra` 或 `extensions` 的任何內容；只有 6.3 的白名單欄位 |
 | 每條連線的 PRAGMA | 多條連線逐一讀回 `foreign_keys`、`busy_timeout`、`synchronous`；讀取 handle 為 `query_only` |
 
+### 9.6 歷史請購 replay 與目前報價簿（R1）
+
+| 情境 | 預期 |
+|---|---|
+| 接受 P1 後，報價改價並重啟，再重送 P1 | replay；原始裁決、intent hash 與原報價不變 |
+| 接受 P1 後，原報價／商品移除並重啟，再重送 P1 | 開檔恢復成功（不查報價簿）；replay |
+| task 已結束、原報價也移除，再重送相同 P1 | 合法 replay；不重新檢查 active-task、不新增裁決 |
+| 同一 retry key 改內容，且新內容不在報價簿 | `IDEMPOTENCY_CONFLICT`（不是 `QUOTE_NOT_OFFERED`）；沒有部分寫入 |
+| 不同的新請購引用已移除的 Q1，且無其他衝突 | `QUOTE_NOT_OFFERED`；不能藉歷史請購重新開放舊報價 |
+| A 嘗試重送 B 已接受的 P1 | 歸屬拒絕；回應不含 B 的原裁決；B 的 task 沒有任何到期寫入 |
+
+### 9.7 缺 profile 與損壞引用（R2）
+
+主要流程：可信 fixture 明確不提供 profile → `StartTask` 成功保存 `profile_state = absent` 與有效 terms → `Submit` 得到 Deny `CONFIG_MISSING` → 原裁決與事件保存 → 關閉並重新開啟 Store → 恢復成功，仍是同一個 Deny `CONFIG_MISSING` → 相同請購合法 replay，沒有新裁決。
+
+| 情境 | 預期 |
+|---|---|
+| profile 存在但內容不合法（`StartTask` 時） | 拒絕，不轉成合法缺設定 |
+| profile 存在、資料庫中被引用的快照遭刪除或 kind／body 被改 | 開檔拒絕服務 |
+| `profile_state = present` 但 `profile_snapshot` 被改成 NULL | 開檔拒絕服務（不當成缺設定） |
+| profile 缺失，但 terms 的格式、task 綁定、金額或 `asset_id` 錯誤 | `StartTask` 拒絕；若在資料庫中被改則開檔拒絕服務 |
+| credential 明確缺失 | Deny `CONFIG_MISSING`，重啟後相同 |
+| `credential_state = present` 但引用的 credential 快照損壞 | 開檔拒絕服務 |
+
 ## 10. 最小交付範圍
 
 **節點 2 交付**：Store 的 `Open`（含第 8 節驗證與啟動時 `ExpireDue`）、`StartTask`、`Submit`、`Cancel`、`CLITimeout`、`ExpireDue`、`Task`、`Events`；第 9 節全部測試與 16 個 integration 案例在儲存層通過；新增的 mutation 與容器驗證（新映像）通過；`docs/third-party.md`。
@@ -375,16 +430,28 @@ CREATE UNIQUE INDEX one_end      ON events (task_id) WHERE event_type IN ('TASK_
 
 ## 12. 仍待確認
 
-1. **以可信報價簿限制入口**（6.1、6.2）：報價簿以外的商家報價在入口拒收（`QUOTE_NOT_OFFERED`），不成為 Policy Deny。
+1. **以可信報價簿限制入口**（6.1、6.2）：報價簿以外的商家報價在入口拒收（`QUOTE_NOT_OFFERED`），不成為 Policy Deny；只適用於新請購，歷史請購的 replay 與恢復不查目前報價簿（R1）。
 2. **到期優先於取消／CLI 逾時**（3.4）：恰好 deadline 時一律 expired。已接受案例沒有涵蓋這個邊界，這是由 `elapsed >= deadline` 推出的選擇。
 3. **等鎖跨越 `valid_before` 產生 Deny 並終止 task**（3.6）：依取得鎖後的時間判定是一致的語意，但後果較重。
 4. **時鐘倒退時全資料庫拒絕寫入**（3.5），由主持人修正時鐘後恢復。
-5. **`ExpireDue` 週期**：建議 1 秒，決定查詢最多落後多久。
+5. **`ExpireDue` 目標週期**：建議 1 秒；只是目標週期，不是延遲上限（C1）。
 6. **主持人 HTTP 端點移到 B1-06**（第 10 節）。
 7. **期限放在 terms 快照而非 profile v2**（5.2）。
 8. **錢包改變時 `StartTask` 拒絕**（5.3）。
+9. **新請購的拒收順序**（3.3 之後的說明，第三版新增）：先檢查目前報價簿，再檢查 active-task。新請購同時不在報價簿、task 也已結束時，回 `QUOTE_NOT_OFFERED`。兩者都整個回滾、不回顯內容，差別只在錯誤代碼。
+10. **terms 明確記錄 `profile_state`／`credential_state`**（5.2，第三版新增）：用來區分合法缺設定與損壞引用；這是 terms 快照的欄位，不是 profile 或契約的變更。
 
-## 13. 本版修訂對照
+## 13. 修訂對照
+
+### 第三版（針對 `adad831` 的 review：R1、R2、C1）
+
+| 項目 | 修改位置 | 採用規則 | 新增測試 |
+|---|---|---|---|
+| R1 報價簿與歷史 replay | 3.3 操作表與其後的「`Submit` 的分類順序」；6.1、6.2；第 8 節前言；第 12 節第 1、9 項 | 先驗歸屬與格式，再以 retry key 與已保存的 canonical 請購分類；replay 與衝突不查目前報價簿；只有新請購才查目前報價簿，再查 active-task；恢復不查報價簿 | 9.6：6 個情境 |
+| R2 缺 profile | 第 2 節 terms 與欄位註解；5.2 三種情況表；第 8 節第 2、4 項與「不因缺設定而跳過」；第 12 節第 10 項 | terms 明確記錄 `profile_state`／`credential_state`；刻意缺失時 NULL 合法、terms 由可信 fixture 提供；cap 與計價資產比對只在 profile 存在時；其餘一律檢查；`Profile=nil` 原樣交給 Policy | 9.7：主要流程＋6 個反向與 credential 情境 |
+| C1 `ExpireDue` 週期 | 3.3「查詢的時間語意」；第 12 節第 5 項 | 1 秒是目標週期，不是延遲上限；查詢保留 `as_of_sequence`、`as_of_observed_at`、`deadline_at`；未寫入到期事件就不顯示成已收尾 | 不新增（既有 9.3 末列沿用） |
+
+### 第二版（針對 `c9199e7` 的 review：D1～D4）
 
 | 項目 | 修改位置 | 設計決定 | 新增測試 |
 |---|---|---|---|
