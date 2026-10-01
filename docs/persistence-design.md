@@ -1,6 +1,8 @@
 # B1-05 節點 2 設計：持久化與事件查詢
 
-**狀態（2026-10-01）**：第三版設計，待獨立 review，**尚未實作**。第二版（`adad831`）的 review 保留 D1～D4 的方向，要求局部修訂三項：歷史請購的 replay 不受目前報價簿影響（R1）、缺 profile 是合法的 `CONFIG_MISSING` 情境（R2）、`ExpireDue` 週期不是延遲上限（C1），對照見第 13 節。第一版（`c9199e7`）到第二版的 D1～D4 修訂對照保留在同一節。本文件不安裝 driver、不改依賴、不啟動服務；設計通過與下載依賴、重建映像的核准是分開的兩件事。
+**狀態（2026-10-02）**：第三版設計（`f8bb427`）通過技術審查（reviewer 結論，不是 Aaron 另外的產品決定）；依此實作於 `internal/store`，**待 Codex 獨立 review**，B1-05 整體未完成。實作與設計的對照見第 14 節。主持人事件檢視 HTTP 端點移到 B1-06 的提案仍待確認，本節點未實作 HTTP。
+
+第三版的修訂內容：第二版（`adad831`）的 review 保留 D1～D4 的方向，要求局部修訂三項：歷史請購的 replay 不受目前報價簿影響（R1）、缺 profile 是合法的 `CONFIG_MISSING` 情境（R2）、`ExpireDue` 週期不是延遲上限（C1），對照見第 13 節。第一版（`c9199e7`）到第二版的 D1～D4 修訂對照保留在同一節。
 
 範圍是把節點 1 的 `policy.Decide` 接到持久化：請購去重與衝突拒絕、原子寫入、事件與 hash chain、取消／CLI 逾時／approval 逾時、重啟恢復、A／B 隔離與受 session 限制的查詢。不改節點 1 的 Policy 行為、已接受的契約、schema、`cases.json` 與 golden vectors，不新增事件型別。
 
@@ -459,3 +461,31 @@ registry、consumer／wallet 歸屬、請購格式與 hash、事件與投影一�
 | D2 時間與時序 | 第 3 節全部；7 | 時鐘由 Host 注入、取得寫鎖後取樣；共同交易骨架，先授權再到期；到期與操作同一交易、一起回滾；查詢為已提交快照並附 `deadline_at`；啟動先 `ExpireDue`；時鐘倒退拒絕寫入 | 9.3：11 個時序與時鐘情境 |
 | D3 恢復驗證 | 第 8 節；2 的欄位與索引 | 單一讀交易；`integrity_check`＋`foreign_key_check`；快照、task、錢包、額度、請購、approval、事件、投影共 8 類檢查；任何不一致整庫拒絕；威脅模型與尾端限制的精確表述 | 9.4：逐欄位破壞與並行提交下不誤判 |
 | D4 報價保存 | 第 6 節；1.3 | 以可信報價簿限制入口並原樣保存；落盤前拒收且不回顯內容；查詢只回白名單投影；JSON 跳脫不等於遮罩 | 9.5：敏感與惡意報價、合法報價的 hash 重算、展示白名單、逐連線 PRAGMA |
+
+## 14. 實作對照（2026-10-02）
+
+套件選 `internal/store`。
+
+| 設計 | 實作 | 測試 |
+|---|---|---|
+| 1.2 driver | `modernc.org/sqlite v1.60.1`、`modernc.org/libc v1.77.1`（`go.mod`）；授權 `docs/third-party.md` | `go mod verify` |
+| 1.3 連線與 PRAGMA | `store.go` `Open`：寫入 handle（`_txlock=immediate`、單一連線）、讀取 handle（`query_only`），PRAGMA 寫在 DSN、每條連線套用；WAL | `TestPragmasOnEveryConnection` |
+| 1.4 驗證映像 | `scripts/verify/Dockerfile`、`build-image.sh`、`container-verify.sh`、`container-inner.sh` | 容器驗證、`write-module-cache` 探測 |
+| 1.6 路徑 | `dbPath`：只收檔案路徑、相對路徑以工作目錄為基準、目錄 `0700`、拒絕 symlink | `TestPathRules`、`TestRelativePath` |
+| 2 資料表 | `schema` 常數，`user_version = 1` | 全部 |
+| 3.2 交易骨架 | `write`：鎖 → 時鐘 → 倒退檢查 → 操作 → 提交 | `TestClockSampledAfterLock`、`TestClockRegression`、`TestWriteFailureRollsBack`、`TestCrashBeforeCommit` |
+| 3.3 Submit 順序 | `Submit`：解析 → 歸屬 → 到期 → retry key 與 `CompareRetry` → 報價簿 → active-task → `policy.Decide` → 寫入；唯一索引違反對應 `IDEMPOTENCY_CONFLICT` | `TestReplay*`、`TestConflictsWriteNothing`、`TestUniqueIndexBackstop`、`TestExpiryAroundReplayAndConflict` |
+| 3.3 Host 操作 | `Cancel`、`CLITimeout`、`ExpireDue`（每個 task 一個交易）、`RunExpiry` | `TestCloseAtDeadline`、`TestCLITimeoutThenExpiry`、`TestConcurrentExpiryOnce`、`TestRunExpiryStops` |
+| 3.4～3.6 到期與時鐘 | `expire`：先確認 `now ≥ decided_at` 再相減 | `TestAskDeadline`、`TestRestartAcrossDeadline`、`TestClockRegression` |
+| 4 投影 | `project` | `TestProjectionInterleavings` |
+| 5 快照、額度、隔離 | `StartTask`、`buildTerms`、`terms.validate`；缺 profile／credential 須明確宣告 | `TestStartTask`、`TestWalletBindingKept`、`TestIsolationAB`、`TestMissingProfileLifecycle` |
+| 6 報價 | `offered`；`contractRefusal` 只留 code；Store 不寫 log | `TestQuoteSafety`、`TestStoreDoesNotLog` |
+| 7 查詢 | `Task`、`Events`：唯讀交易、session 限定、`as_of_*`、`deadline_at` | `TestQueryIsCommittedSnapshot` |
+| 8 恢復驗證 | `verify.go`：單一讀交易，依序 integrity、foreign_keys、schema、snapshot、task、budget、purchase、event、chain、decision、projection | `TestRecoveryRefusesCorruption`（33 項）、`TestRecoveryTailLimits`、`TestRecoveryUnderConcurrentWrites` |
+| 9.1 integration 案例 | — | `TestAcceptedIntegrationCases`（16 個，預期值直接讀 `cases.json`） |
+
+與設計文字的細部差異（不改語意）：
+
+- 唯一索引違反在 `Submit` 寫入請購時對應 `IDEMPOTENCY_CONFLICT`。在寫鎖下 `CompareRetry` 的查詢會先回答，所以這是備援路徑；測試只直接證明索引本身會拒絕重複，並沒有走到 `Submit` 的這個分支。
+- 恢復驗證的檢查名稱：`integrity`、`foreign_keys`、`schema`、`snapshot`、`task`（含錢包）、`budget`、`purchase`、`event`、`chain`、`decision`（含 approval 收尾）、`projection`。
+- `go mod tidy` 沒有執行：離線時它要解析 `libc` 自己的測試依賴（`modernc.org/ccgo`），本模組不建置這些套件。`go build`、`go test` 與 `go mod verify` 都能以提交的 `go.sum` 離線通過。

@@ -2,8 +2,8 @@
 
 建立在 x402 之上的 Agent 付款授權與證據層：Agent 可以提出付款，但不能自己批准，也不能自己簽名。
 
-> **目前狀態：B1-00～03 已驗收（B1-02 共用契約 `apa.m1.v2` fixture，10/1 於 `2dc8d93` 結案；B1-03 最小資料商店（目錄＋402），10/1 於 `ebd3f44` 結案）；B1-05 進行中：節點 1（確定性 Policy）於 `61b3652` 通過 review，節點 2（持久化與事件查詢）設計待 review（[docs/persistence-design.md](docs/persistence-design.md)），尚未實作；B1-04 已解鎖，尚未開始。** 可啟動 loopback 服務、回應 health、提供商品目錄與 HTTP 402 報價、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md)、[docs/merchant.md](docs/merchant.md) 與 [docs/policy.md](docs/policy.md)。
-> 尚未實作：Claude Code wrapper、請購持久化與去重、事件、展示層、任何付款、簽章或付費內容交付。
+> **目前狀態：B1-00～03 已驗收（B1-02 共用契約 `apa.m1.v2` fixture，10/1 於 `2dc8d93` 結案；B1-03 最小資料商店（目錄＋402），10/1 於 `ebd3f44` 結案）；B1-05 進行中：節點 1（確定性 Policy）於 `61b3652` 通過 review，節點 2（持久化與事件查詢）依 `f8bb427` 設計實作於 `internal/store`，待 review（[docs/persistence-design.md](docs/persistence-design.md)）；B1-04 已解鎖，尚未開始。** 可啟動 loopback 服務、回應 health、提供商品目錄與 HTTP 402 報價、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md)、[docs/merchant.md](docs/merchant.md) 與 [docs/policy.md](docs/policy.md)。
+> 尚未實作：Claude Code wrapper、主持人事件檢視的 HTTP 端點、展示層、任何付款、簽章或付費內容交付。`cmd/demo` 尚未開啟 Store。
 > 第一個里程碑 M1 的終點是 **請購與 Ask／Deny**，沒有真付款。邊界見 [docs/m1-boundaries.md](docs/m1-boundaries.md)。
 
 ## 需求
@@ -14,7 +14,7 @@
 | make | 系統內建即可 | `make check`、`make dev` |
 | Node.js | 20 以上 | 僅 `make check-contracts` 的獨立展示端向量檢查；啟動 Go 服務不需要 |
 
-只 checkout 這個 repo 就能安裝、啟動與測試。不需要其他 repo、submodule、symlink 或 local module replace，目前也沒有任何第三方 Go 套件。
+只 checkout 這個 repo 就能安裝、啟動與測試。不需要其他 repo、submodule、symlink 或 local module replace。唯一的第三方 Go 套件是 SQLite driver `modernc.org/sqlite`（不需 CGO），第一次建置時由 `proxy.golang.org` 下載並以 `go.sum` 核對；授權見 [docs/third-party.md](docs/third-party.md)。
 
 現階段**不需要**也不會使用：Claude Code CLI、模型服務、RPC、facilitator、testnet 帳戶。後續 live 模式才需要官方 Claude Code CLI 與本人的官方登入；登入由使用者自己透過官方流程完成，這個 repo 不讀取、不複製也不保存登入憑證。
 
@@ -125,6 +125,7 @@ testdata/merchant/ 商店的預期 wire 輸出（手寫）
 testdata/x402/     x402 規格原文的範例 header（互通向量）
 internal/policy/   確定性 Policy：Ask／Deny／Allow（M1 無法付款）
 testdata/policy/   M1 demo policy profile（fixture）
+internal/store/    B1-05 持久化：SQLite、事件鏈、重送、到期、恢復驗證
 ```
 
 ## 在受限沙箱裡跑測試
