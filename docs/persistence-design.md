@@ -1,6 +1,6 @@
 # B1-05 節點 2 設計：持久化與事件查詢
 
-**狀態（2026-10-02）**：第三版設計（`f8bb427`）通過技術審查（reviewer 結論，不是 Aaron 另外的產品決定）；依此實作於 `internal/store`（`64f247c`）。`64f247c` 的獨立 review 要求兩項修正（REV1 恢復讀取錯誤、REV2 跨 consumer 錢包歸屬），**已修正完成，待 Codex 獨立 review**，B1-05 整體未完成。實作對照見第 14 節，本輪修正見第 15 節。主持人事件檢視 HTTP 端點移到 B1-06 的提案仍待確認，本節點未實作 HTTP。
+**狀態（2026-10-02）**：節點 2 的 Store 實作於 `cb33768` **通過 Codex 獨立技術 review**（REV1、REV2 已關閉，驗收紀錄見第 16 節）。B1-05 整體待主持人 HTTP 範圍與結案確認，尚未標 Done、未合併 main。設計歷程：第三版設計 `f8bb427` 通過技術審查（reviewer 結論，不是 Aaron 另外的產品決定）；實作 `64f247c` 經 review 修正 REV1／REV2 為 `cb33768`。實作對照見第 14 節，修正見第 15 節。主持人事件檢視 HTTP 端點移到 B1-06 的提案仍待 Aaron 確認，本節點未實作 HTTP。
 
 第三版的修訂內容：第二版（`adad831`）的 review 保留 D1～D4 的方向，要求局部修訂三項：歷史請購的 replay 不受目前報價簿影響（R1）、缺 profile 是合法的 `CONFIG_MISSING` 情境（R2）、`ExpireDue` 週期不是延遲上限（C1），對照見第 13 節。第一版（`c9199e7`）到第二版的 D1～D4 修訂對照保留在同一節。
 
@@ -503,3 +503,39 @@ registry、consumer／wallet 歸屬、請購格式與 hash、事件與投影一�
 **恢復測試如何避免被其他守衛提早擋下**：歷史衝突無法再經由公開 `StartTask` 建立，所以測試先在主資料庫以第一版 registry 建立 task-a，再在另一個空白資料庫以交接後的 registry 用真正的 `StartTask` 建立 task-b，兩者各自都能通過恢復驗證；之後以 SQLite `ATTACH` 把 task-b 的快照、task 與事件原樣併入。每一列都由正式程式寫出、hash 與事件鏈完整，所以只有新的 `wallet` 檢查會拒絕，測試也核對檢查名稱與 task。正式程式沒有為此加任何旁路。
 
 **突變**：新增 12 項（REV1 8 項：`drained` 本身與七段讀取各自的錯誤檢查；REV2 4 項：建立時與恢復時的 payer、wallet_id），共 99 項。原有 87 項的比對文字全部仍然吻合，沒有改動。
+
+## 16. 驗收紀錄（2026-10-02，`cb33768`）
+
+| 項目 | 狀態 |
+|---|---|
+| B1-05 節點 1 確定性 Policy | 已通過，驗收基準 `61b3652`，不重開 |
+| B1-05 節點 2 Store | 已通過技術 review，驗收基準 `cb33768d527a706ba2ae7a3daa11d1d49cea608f` |
+| REV1 恢復讀取錯誤 | 已關閉：讀取失敗不再當成正常讀完，失敗時拒絕開檔 |
+| REV2 跨 consumer 錢包歸屬 | 已關閉：建立與恢復都拒絕跨 consumer 共用已保存的 `wallet_id`／`payer`；同一 consumer 跨 task 沿用仍合法 |
+| B1-05 整體 | 技術部分已通過，待 HTTP 範圍與結案確認；未標 Done |
+| 主持人事件 HTTP 移至 B1-06 | 待 Aaron 明確確認；未核准、未實作 |
+| main 合併 | 未執行，須另獲 Aaron 核准 |
+
+**通過範圍**：SQLite 持久化、可信快照、請購去重與衝突、原子事件與投影、取消與逾時、重啟恢復、A／B 隔離、受可信 session 限制的 Store 查詢，以及 REV1、REV2 兩項修正。
+
+**不包含**：真實 caller 認證、Claude Code Buyer wrapper（B1-04）、主持人 HTTP 端點、展示層與端到端整合（B1-06）、`cmd/demo` 的 Store 設定與生命週期接線、Signer、付款或 testnet。儲存層的 16 個 integration 案例不是 B1-06 端到端通過的證據。沒有外部 checkpoint 時事件鏈的尾端限制仍保留（第 8 節）。
+
+**證據歸屬**
+
+*Codex 獨立重跑*（`cb33768` 的暫存副本，既有 Linux 容器映像內；斷網、非 root、唯讀來源與工具鏈、scratch 寫入，有 CPU／記憶體／程序數／檔案與時間限制；沒有下載依賴、修改 repo 或重建映像）：
+
+- `go test -race -cover ./... -count=1 -skip "^TestReview"` 通過；排除的只有 Codex 另外加入的探測，不是專案原有測試；Store 覆蓋率 81.9%。
+- `node scripts/check-contract-vectors.mjs` 通過。
+- `go test -race ./internal/store -run "TestRecoveryReadFailures|TestWalletOwnership|TestReview" -count=1 -v` 全部通過。
+- REV1 的 13 個正式故障注入案例通過；Codex 原始重現的 task、快照、外鍵讀取失敗都被正確拒絕，並保留原始錯誤原因。
+- REV2 的建立、恢復與競爭測試通過；Codex 另外確認原擁有者的 task 為進行中或已結束時，重新分配付款地址都回 `PAYER_IN_USE`，拒絕後沒有部分寫入。
+- 探測原始碼在 Codex 的暫存目錄，輸出記錄在 Codex 的工具結果中；不是本 repo 的 artifacts run 目錄，正式測試也不依賴它。
+
+*Claude Code 執行、Codex 核對紀錄*（不是 Codex 全數獨立重跑）：
+
+- 最終 commit 的完整容器驗證：7 個步驟全部 exit 0；99／99 突變被測試抓到（原有 87 項加本輪 12 項）；17 項隔離探測與 19 項證據匯入測試通過。
+- 本機檢查：`artifacts/b1-05/cb33768d527a-20261001T184802Z/`。
+- 容器驗證：`artifacts/verify-container/runs/cb33768d527a-20261001T184940Z/`（目錄名稱是 UTC 時間，保持原樣）。
+- 驗證映像：`sha256:78258368de0907e58498095c327a6ee4edbe75421d18e524bd00661c3749b6d0`。
+
+`64f247c` 等先前版本的證據保留。本節之後的文件 commit 只改文件，沒有在其上重跑上述驗證；上述結果屬於 `cb33768`。

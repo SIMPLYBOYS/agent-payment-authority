@@ -76,6 +76,6 @@ M1 的終點是 **請購與 Ask／Deny**。M1 沒有 Signer、沒有結算、沒
 | 停止時釋放 port，可立即再啟動 | 已實作，有測試。目前沒有子行程 |
 | `.env` 有不支援的行就不啟動，不使用部分載入的設定 | 已實作，由 `scripts/verify-b1-01.sh` 檢查 |
 | 商店目錄與 402；任何 `PAYMENT-SIGNATURE` 都不交付受保護資料；只陳述設定的 URL、不抓取外部 URL | 已實作，有測試（B1-03，10/1 於 `ebd3f44` 結案；見 [merchant.md](merchant.md)） |
-| 確定性 Policy：Ask／Deny／Allow-unavailable，不扣預算、不發 grant、不付款 | 已實作，有測試（B1-05 節點 1，10/1 於 `61b3652` 通過 review；B1-05 整體未完成；見 [policy.md](policy.md)） |
-| 請購持久化與去重、事件 hash chain、取消／CLI 逾時／approval 到期、重啟恢復與驗證、A／B 隔離（Store 層，以 session 限制的查詢） | 已實作，有測試（B1-05 節點 2，待 review；見 [persistence-design.md](persistence-design.md)） |
+| 確定性 Policy：Ask／Deny／Allow-unavailable，不扣預算、不發 grant、不付款 | 已實作，有測試（B1-05 節點 1，10/1 於 `61b3652` 通過 review；B1-05 待範圍與結案確認；見 [policy.md](policy.md)） |
+| 請購持久化與去重、事件 hash chain、取消／CLI 逾時／approval 到期、重啟恢復與驗證、A／B 隔離（Store 層，以 session 限制的查詢） | 已實作，有測試（B1-05 節點 2，10/2 於 `cb33768` 通過技術 review；尚未接到 `cmd/demo`；見 [persistence-design.md](persistence-design.md)） |
 | 工具入口、主持人事件檢視 HTTP 端點、展示層、驗收器 | 尚未實作 |

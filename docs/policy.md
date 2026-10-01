@@ -1,6 +1,6 @@
 # M1 確定性 Policy（B1-05 節點 1）
 
-**狀態（2026-10-01）**：節點 1 於 `61b3652` 通過獨立 review，沒有阻擋驗收的程式問題。B1-05 整體仍在進行中（節點 2 持久化與事件查詢：設計 `f8bb427` 通過技術審查，實作於 `internal/store`，待 review；見 [persistence-design.md](persistence-design.md)），未合併 main。證據：Codex 在斷網、唯讀原始碼、有資源限制的 Linux 容器中獨立重跑 `go test -race -cover ./... -count=1`（Policy 覆蓋率 96.4%）、`go test ./internal/policy -count=1 -v` 與 `node scripts/check-contract-vectors.mjs`，全部通過；61／61 突變由 Claude Code 執行，Codex 核對紀錄與腳本，未獨立重跑。
+**狀態（2026-10-02）**：節點 1 於 `61b3652` 通過獨立 review，沒有阻擋驗收的程式問題。B1-05 整體尚未結案：節點 2 持久化與事件查詢已於 `cb33768` 通過技術 review（見 [persistence-design.md](persistence-design.md) 第 16 節），B1-05 待 HTTP 範圍與結案確認，未合併 main。證據：Codex 在斷網、唯讀原始碼、有資源限制的 Linux 容器中獨立重跑 `go test -race -cover ./... -count=1`（Policy 覆蓋率 96.4%）、`go test ./internal/policy -count=1 -v` 與 `node scripts/check-contract-vectors.mjs`，全部通過；61／61 突變由 Claude Code 執行，Codex 核對紀錄與腳本，未獨立重跑。
 
 `internal/policy` 的 `Decide` 是純函式：輸入一筆請購、可信設定、可信狀態與外部注入的時間，回傳 Ask、Deny 或 Allow（M1 無法付款）。它不扣預算、不發 grant、不付款，也不讀時鐘、檔案或網路，不保存狀態。請購去重、衝突拒絕、持久化、事件、取消／逾時與重啟恢復屬 B1-05 節點 2。
 
