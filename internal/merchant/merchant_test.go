@@ -265,10 +265,68 @@ func TestWrongResourceIsNotFound(t *testing.T) {
 			}
 		}
 	}
-	for _, path := range []string{resourcePath, "/catalog"} {
-		if r := get(t, srv, "POST", path, paid); r.status != http.StatusMethodNotAllowed {
-			t.Errorf("POST %s: %d, want 405", path, r.status)
+}
+
+// HEAD is served like GET without a body (net/http's GET routes include it);
+// every other method is refused.
+func TestMethods(t *testing.T) {
+	srv := shop(t)
+	cat := get(t, srv, "HEAD", "/catalog", nil)
+	if cat.status != 200 || cat.body != "" || cat.header.Get("Content-Type") != "application/json" {
+		t.Errorf("HEAD /catalog: %d %q, body %q; want 200 application/json, no body", cat.status, cat.header.Get("Content-Type"), cat.body)
+	}
+	res := get(t, srv, "HEAD", resourcePath, nil)
+	if res.status != http.StatusPaymentRequired || res.body != "" {
+		t.Errorf("HEAD %s: %d, body %q; want 402, no body", resourcePath, res.status, res.body)
+	}
+	if want := golden(t, "payment-required.json"); string(res.rawPR) != string(want) {
+		t.Errorf("HEAD PAYMENT-REQUIRED\n got %s\nwant %s (the GET quote)", res.rawPR, want)
+	}
+	paid := http.Header{x402.HeaderPaymentSignature: {signature(t, nil)}}
+	for _, method := range []string{"POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
+		for _, path := range []string{resourcePath, "/catalog"} {
+			if r := get(t, srv, method, path, paid); r.status != http.StatusMethodNotAllowed || r.rawPR != nil {
+				t.Errorf("%s %s: %d, PAYMENT-REQUIRED %s; want 405 without a quote", method, path, r.status, r.rawPR)
+			}
 		}
+	}
+}
+
+// extensions may be omitted but must be an object when present; the other
+// fields stay valid, so a 400 can only come from extensions.
+func TestPaymentPayloadExtensions(t *testing.T) {
+	srv := shop(t)
+	const notObject = "extensions must be an object"
+	const notPayload = "PAYMENT-SIGNATURE is not a valid x402 v2 PaymentPayload"
+	cases := []struct {
+		name    string
+		mutate  func(map[string]any)
+		status  int
+		code    string
+		message string
+	}{
+		{"string", func(p map[string]any) { p["extensions"] = "not-an-object" }, 400, x402.ErrInvalidPayload, notObject},
+		{"array", func(p map[string]any) { p["extensions"] = []any{} }, 400, x402.ErrInvalidPayload, notObject},
+		{"boolean", func(p map[string]any) { p["extensions"] = true }, 400, x402.ErrInvalidPayload, notObject},
+		{"integer", func(p map[string]any) { p["extensions"] = 1 }, 400, x402.ErrInvalidPayload, notObject},
+		{"null", func(p map[string]any) { p["extensions"] = nil }, 400, x402.ErrInvalidPayload, notPayload},
+		{"omitted", nil, 402, "M1_PAYMENT_UNAVAILABLE", ""},
+		{"empty object", func(p map[string]any) { p["extensions"] = map[string]any{} }, 402, "M1_PAYMENT_UNAVAILABLE", ""},
+		{"extension object", func(p map[string]any) {
+			p["extensions"] = map[string]any{"fixture-ext": map[string]any{"info": map[string]any{"k": "v"}, "schema": map[string]any{"type": "object"}}}
+		}, 402, "M1_PAYMENT_UNAVAILABLE", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := get(t, srv, "GET", resourcePath, http.Header{x402.HeaderPaymentSignature: {signature(t, c.mutate)}})
+			var body problem
+			if err := json.Unmarshal([]byte(r.body), &body); err != nil {
+				t.Fatalf("body %q: %v", r.body, err)
+			}
+			if r.status != c.status || body.Error != c.code || (c.message != "" && body.Message != c.message) {
+				t.Fatalf("got %d %q %q, want %d %q %q", r.status, body.Error, body.Message, c.status, c.code, c.message)
+			}
+		})
 	}
 }
 

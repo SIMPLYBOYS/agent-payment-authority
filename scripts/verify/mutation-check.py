@@ -109,6 +109,8 @@ MUTATIONS = [
      "if p.X402Version != x402.Version {", "if false {", "TestPaymentSignatureNeverDelivers"),
     ("B1-03 non-object payload allowed", "internal/merchant/merchant.go",
      "if p.Payload[0] != '{' {", "if false {", "TestPaymentSignatureNeverDelivers"),
+    ("B1-03 non-object extensions allowed", "internal/merchant/merchant.go",
+     "if p.Extensions != nil && p.Extensions[0] != '{' {", "if false {", "TestPaymentPayloadExtensions"),
     ("B1-03 repeated PAYMENT-SIGNATURE allowed", "internal/merchant/merchant.go",
      "if len(values) != 1 {", "if len(values) == 0 {", "TestPaymentSignatureNeverDelivers"),
     ("B1-03 fixture price drifts from its golden and display", "internal/merchant/merchant.go",

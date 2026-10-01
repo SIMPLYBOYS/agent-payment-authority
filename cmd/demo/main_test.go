@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -178,5 +179,17 @@ func checkShop(t *testing.T, addr string) {
 	}
 	if err := x402.Decode(resp.Header.Get(x402.HeaderPaymentRequired), &pr); err != nil || pr.Resource.URL != url {
 		t.Fatalf("PAYMENT-REQUIRED: %v, resource %q, want %q", err, pr.Resource.URL, url)
+	}
+
+	// HEAD gets the same quote with no body.
+	head, err := http.Head(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(head.Body)
+	head.Body.Close()
+	if head.StatusCode != http.StatusPaymentRequired || len(body) != 0 || head.Header.Get(x402.HeaderPaymentRequired) != resp.Header.Get(x402.HeaderPaymentRequired) {
+		t.Fatalf("HEAD %s: %d, %d body bytes, same quote %v; want 402, no body, same quote", url, head.StatusCode, len(body),
+			head.Header.Get(x402.HeaderPaymentRequired) == resp.Header.Get(x402.HeaderPaymentRequired))
 	}
 }

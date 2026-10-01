@@ -186,6 +186,10 @@ func (o offer) judge(values []string) (int, problem) {
 	if p.Payload[0] != '{' {
 		return bad(x402.ErrInvalidPayload, "payload must be an object")
 	}
+	// Optional, but an object when present (spec 5.2.2); null already failed Decode.
+	if p.Extensions != nil && p.Extensions[0] != '{' {
+		return bad(x402.ErrInvalidPayload, "extensions must be an object")
+	}
 	if p.Resource != nil && p.Resource.URL != o.url {
 		return bad(x402.ErrInvalidPayload, "resource does not match this endpoint")
 	}

@@ -19,8 +19,12 @@ B1-03 交付 `internal/merchant/`（商店）與 `internal/x402/`（x402 v2 HTTP
 |---|---|
 | `GET /catalog` | 200，商品目錄（JSON）。只有標題、摘要、價格與 `resource_url`，不含付費內容 |
 | `GET /resources/kr-market?edition=1` | 402，`PAYMENT-REQUIRED` header 帶報價；body 是 `{"error","message"}` |
+| `HEAD /catalog` | 200，與 GET 相同的 header，沒有 body |
+| `HEAD /resources/kr-market?edition=1` | 402，沒有 body；`PAYMENT-REQUIRED` 與 GET 的報價相同 |
 | 其他路徑或 query（含 `?edition=2`、多一個參數） | 404，不帶報價 |
-| 對上述路徑用 GET 以外的方法 | 405 |
+| 對上述路徑用 GET、HEAD 以外的方法（POST、PUT、PATCH、DELETE、OPTIONS 等） | 405，不帶報價 |
+
+HEAD 是 Go `net/http` 的 GET 路由本來就涵蓋的行為（同一個 handler，伺服器丟棄 body），沒有另外的處理邏輯。
 
 受保護資源以**路徑＋原始 query 完全比對**，不正規化 query。商店不抓取任何外部 URL，也沒有代理或轉址功能。
 
@@ -49,6 +53,7 @@ M1 沒有驗證或結算能力，**任何請求都拿不到受保護資料**，�
 |---|---|---|
 | 沒有 header | 402 | （無） |
 | 多個 header、非標準 base64、非 JSON、重複或未知欄位、缺 `payload`、`payload` 非物件、浮點數、超過 64 KiB | 400 | `invalid_payload` |
+| `extensions` 出現但不是物件（字串、陣列、布林、數字、`null`） | 400 | `invalid_payload` |
 | `resource.url` 不是這個端點 | 400 | `invalid_payload` |
 | `x402Version` 不是 2 | 400 | `invalid_x402_version` |
 | `accepted.scheme` 不是 `exact` | 400 | `invalid_scheme` |
@@ -56,7 +61,7 @@ M1 沒有驗證或結算能力，**任何請求都拿不到受保護資料**，�
 | `accepted` 其他地方與報價不同（金額、收款人、`extra`、大小寫變體的 key 等） | 400 | `invalid_payment_requirements` |
 | 格式正確且與報價完全相同 | 402 | `M1_PAYMENT_UNAVAILABLE` |
 
-`accepted` 以 canonical JSON 逐位元組比對報價。簽章本身不解析也不驗證：M1 不宣稱任何簽章有效或無效。所有 400／402 都附上 `PAYMENT-REQUIRED`（`error` 欄位說明原因），方便客戶端重新取得報價。
+`extensions` 可以省略；出現時必須是物件（規格 5.2.2），內容不解析，省略、`{}` 或任何擴充物件都照常進入後續比對。`accepted` 以 canonical JSON 逐位元組比對報價。簽章本身不解析也不驗證：M1 不宣稱任何簽章有效或無效。所有 400／402 都附上 `PAYMENT-REQUIRED`（`error` 欄位說明原因），方便客戶端重新取得報價。
 
 ## 與共用契約對接
 
