@@ -1,6 +1,6 @@
 # B1-05 節點 2 設計：持久化與事件查詢
 
-**狀態（2026-10-02）**：第三版設計（`f8bb427`）通過技術審查（reviewer 結論，不是 Aaron 另外的產品決定）；依此實作於 `internal/store`，**待 Codex 獨立 review**，B1-05 整體未完成。實作與設計的對照見第 14 節。主持人事件檢視 HTTP 端點移到 B1-06 的提案仍待確認，本節點未實作 HTTP。
+**狀態（2026-10-02）**：第三版設計（`f8bb427`）通過技術審查（reviewer 結論，不是 Aaron 另外的產品決定）；依此實作於 `internal/store`（`64f247c`）。`64f247c` 的獨立 review 要求兩項修正（REV1 恢復讀取錯誤、REV2 跨 consumer 錢包歸屬），**已修正完成，待 Codex 獨立 review**，B1-05 整體未完成。實作對照見第 14 節，本輪修正見第 15 節。主持人事件檢視 HTTP 端點移到 B1-06 的提案仍待確認，本節點未實作 HTTP。
 
 第三版的修訂內容：第二版（`adad831`）的 review 保留 D1～D4 的方向，要求局部修訂三項：歷史請購的 replay 不受目前報價簿影響（R1）、缺 profile 是合法的 `CONFIG_MISSING` 情境（R2）、`ExpireDue` 週期不是延遲上限（C1），對照見第 13 節。第一版（`c9199e7`）到第二版的 D1～D4 修訂對照保留在同一節。
 
@@ -266,6 +266,7 @@ Host 以 1 秒為目標週期執行 `ExpireDue`；這**不是**最多延遲 1 �
 ### 5.3 錢包沿用與 A／B 隔離
 
 - 同一 consumer 的所有 task 沿用同一個 `wallet_id` 與 `payer`。`StartTask` 時若該 consumer 已有 task，新的 registry 快照對這個 consumer 的錢包必須與既有 task 相同，否則以 `WALLET_BINDING_CHANGED` 拒絕，不在重新載入設定時默默更換。
+- **反方向（REV2，2026-10-02 補）**：不同 consumer 不得使用另一個 consumer 在任何已保存 task（包含已結束的 task）用過的 `wallet_id` 或 `payer`，不論目前 registry 怎麼寫。每份 registry 快照各自合法時，仍可能把同一個錢包先後配給兩個 consumer；`StartTask` 在同一個持有寫鎖的交易內查核，衝突時分別以 `WALLET_ID_IN_USE`、`PAYER_IN_USE` 拒絕並整個回滾。這兩個是 Store 錯誤，不是契約的 reason code，也不寫成 Policy 裁決。`tasks.wallet_id`／`tasks.payer` **不加**全域 UNIQUE，因為同一 consumer 跨 task 重複使用是合法的。沿用 M1 registry 既有的地址與 ID 唯一語意，不新增多鏈地址重用、錢包轉讓或輪替。
 - 所有 session 操作都以 session 的 `consumer_id`＋`task_id` 限定；A 讀寫 B 的 task 直接拒絕。retry key 含 consumer／task／wallet，同名 request ID 不會互相命中。
 - **可信 session 的來源**：B1-04 完成前，節點 2 的測試直接在程式內建立 `contracts.Session`，這是**測試用可信 context**，不代表真實登入或 caller 認證已完成。節點 2 不提供任何 HTTP 寫入端點。
 
@@ -308,11 +309,13 @@ Host 以 1 秒為目標週期執行 `ExpireDue`；這**不是**最多延遲 1 �
 
 開檔時、接受任何操作之前，在讀取 handle 上以**單一讀交易**完成全部檢查（WAL 下整個交易看到同一個一致快照），其他連線同時提交也不會讓不同時點的合法資料被誤判為損壞。
 
+**讀取失敗不等於讀完**（REV1，2026-10-02 補）：每個逐列讀取在迴圈結束後都檢查 `Rows.Err()` 與關閉錯誤；`Rows.Next` 回 false 可能是讀完，也可能是讀取失敗。任何查詢、讀列或結束讀取的錯誤都回 `ReadError`（包著原始錯誤，註明檢查與 task），不說成資料已損壞，但同樣拒絕服務：`Open` 不回傳 Store、不執行 `ExpireDue`、不修補資料。內容不一致才是 `CorruptError`。
+
 恢復驗證只用已保存的資料、快照、hash 與事件，**不查目前的可信報價簿**，也不以它否定先前已接受的報價（R1）；已保存報價的格式、canonical 形式、hash 與一致性檢查照做。
 
 1. `PRAGMA integrity_check`（不用 `quick_check`：它不驗 UNIQUE 與索引內容一致性）與 `PRAGMA foreign_key_check`（`integrity_check` 不檢查外鍵）；`user_version` 等於程式支援的版本（[pragma 文件](https://www.sqlite.org/pragma.html#pragma_integrity_check)）。
 2. **設定快照**（無條件）：重算 `snapshot_hash`；body 是 canonical 且能以 `contracts.Decode` 嚴格解碼成對應 kind 的型別（registry 另以 `NewRegistry` 驗證，profile 以 `Validate`，credential 須為 `fixture`）；task 引用的快照存在且 kind 正確；terms 的 `task_id` 等於 task，`approval_deadline_seconds` 為正整數。**profile／credential 的狀態**：terms 的 `profile_state`／`credential_state` 與對應欄位一致——`present` 時欄位必須引用合法快照（credential 的 `consumer_id` 等於 task 的 consumer），`absent` 時欄位必須為 NULL；不一致即損壞，不當成合法缺設定。
-3. **task 與錢包**：task 的 consumer／agent／wallet／payer 等於其 registry 快照的 `Binding(task_id)`；同一 consumer 的所有 task 使用同一個 wallet 與 payer。
+3. **task 與錢包**：task 的 consumer／agent／wallet／payer 等於其 registry 快照的 `Binding(task_id)`；同一 consumer 的所有 task 使用同一個 wallet 與 payer；並以所有已保存 task 建立 `wallet_id`→consumer 與 `payer`→consumer 的反向對應，同一個 wallet 或 payer 屬於兩個 consumer 時以檢查名稱 `wallet` 拒絕（REV2）。不因目前 registry 與歷史快照不同就拒絕開檔；歷史 task 仍各自以自己的快照驗證。
 4. **額度**：無條件——`budget_initial` 是合法金額、`budget_remaining == budget_initial`、terms 的 `asset_id` 是該 task registry 快照中的可信資產。僅在 profile 存在時——`budget_initial ≤` profile 的 task cap、`asset_id` 等於 profile 的計價資產。
 5. **請購**：body 是 canonical 且能嚴格解碼；`Intent.Hash()` 等於 `intent_hash`；`RetryKey()` 等於 `retry_key`；`request_id`、`chain_id`、`asset_contract`、`payer`、`eip3009_nonce`、`purchase_order_id` 等索引欄位等於 body；以 task 的 registry 快照執行 `ValidatePurchase`；報價仍可重算出 `payment_requirement_hash`。
 6. **裁決與 approval**：裁決欄位等於對應 `POLICY_DECIDED` 的 decision；`decided_at` 等於該事件的 `observed_at`；`approval_closed`／`closed_at` 與收尾事件的型別和 `observed_at` 一致，沒有收尾事件時兩者為 NULL。
@@ -487,5 +490,16 @@ registry、consumer／wallet 歸屬、請購格式與 hash、事件與投影一�
 與設計文字的細部差異（不改語意）：
 
 - 唯一索引違反在 `Submit` 寫入請購時對應 `IDEMPOTENCY_CONFLICT`。在寫鎖下 `CompareRetry` 的查詢會先回答，所以這是備援路徑；測試只直接證明索引本身會拒絕重複，並沒有走到 `Submit` 的這個分支。
-- 恢復驗證的檢查名稱：`integrity`、`foreign_keys`、`schema`、`snapshot`、`task`（含錢包）、`budget`、`purchase`、`event`、`chain`、`decision`（含 approval 收尾）、`projection`。
+- 恢復驗證的檢查名稱：`integrity`、`foreign_keys`、`schema`、`snapshot`、`task`、`wallet`（跨 consumer 歸屬，REV2 新增）、`budget`、`purchase`、`event`、`chain`、`decision`（含 approval 收尾）、`projection`。讀取失敗以 `ReadError` 回報同一組檢查名稱（REV1）。
 - `go mod tidy` 沒有執行：離線時它要解析 `libc` 自己的測試依賴（`modernc.org/ccgo`），本模組不建置這些套件。`go build`、`go test` 與 `go mod verify` 都能以提交的 `go.sum` 離線通過。
+
+## 15. 實作修正（2026-10-02，針對 `64f247c` 的 review）
+
+| 項目 | 修改位置 | 守住的不變式 | 正式測試 |
+|---|---|---|---|
+| REV1 恢復讀取錯誤 | `store.go`：`ReadError`、`readErr`、`drained`（`Rows.Err()` 加關閉錯誤）、測試用的 `openReader`；`verify.go`：integrity、foreign_key_check、user_version、快照、task、請購、事件每一段讀取；`ops.go`：`openTask` 的事件與請購讀取、`decodeSnapshot`、`scanPurchase` | 讀取失敗永遠不被當成讀完；回傳包著原始錯誤的 `ReadError`；`Open` 不回傳 Store、不執行到期處理、不寫任何資料 | `TestRecoveryReadFailures`：外鍵、快照、task、task 載入的事件與請購、請購、事件共 13 個注入點，可多列的掃描分別測第一列失敗與讀到部分資料後失敗；每個案例確認注入確實命中、`errors.Is` 為注入的錯誤、`ReadError.Check` 正確、資料庫沒有任何變更；同一測試也確認無注入時正常開檔並處理到期、空資料庫可開 |
+| REV2 跨 consumer 錢包歸屬 | `ops.go` `StartTask`：寫鎖交易內查核其他 consumer 是否已用過此 `wallet_id`／`payer`；`verify.go`：所有 task 的反向對應，檢查名稱 `wallet` | 同一 consumer 可沿用；不同 consumer 不得使用已被他人保存使用的 `wallet_id` 或 `payer`，包含已結束的 task；不加全域 UNIQUE | `TestWalletOwnershipAtStart`（payer 與 wallet_id 分開，各只觸發一條規則，核對錯誤代碼、欄位與擁有者，且沒有部分寫入；並確認合法情況仍可建立）、`TestWalletOwnershipAtRecovery`（見下）、`TestWalletOwnershipRace`（兩個 Store 各持一份合法但互相衝突的 registry 同時建立，至多一方成功，另一方 `PAYER_IN_USE`）；原有 `TestWalletBindingKept` 保留 |
+
+**恢復測試如何避免被其他守衛提早擋下**：歷史衝突無法再經由公開 `StartTask` 建立，所以測試先在主資料庫以第一版 registry 建立 task-a，再在另一個空白資料庫以交接後的 registry 用真正的 `StartTask` 建立 task-b，兩者各自都能通過恢復驗證；之後以 SQLite `ATTACH` 把 task-b 的快照、task 與事件原樣併入。每一列都由正式程式寫出、hash 與事件鏈完整，所以只有新的 `wallet` 檢查會拒絕，測試也核對檢查名稱與 task。正式程式沒有為此加任何旁路。
+
+**突變**：新增 12 項（REV1 8 項：`drained` 本身與七段讀取各自的錯誤檢查；REV2 4 項：建立時與恢復時的 payer、wallet_id），共 99 項。原有 87 項的比對文字全部仍然吻合，沒有改動。
