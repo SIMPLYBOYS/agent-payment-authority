@@ -64,12 +64,48 @@ func Code(err error) string {
 	return contracts.ErrorCode(err)
 }
 
-// CorruptError is a failed recovery check. The Store then refuses service.
-type CorruptError struct{ Check, TaskID, Detail string }
+// CorruptError is a failed recovery check on stored content. The Store then
+// refuses service. Err, when set, is the underlying decode or validation error.
+type CorruptError struct {
+	Check, TaskID, Detail string
+	Err                   error
+}
 
 func (e *CorruptError) Error() string {
 	return fmt.Sprintf("store corrupt: %s check failed for task %q: %s", e.Check, e.TaskID, e.Detail)
 }
+func (e *CorruptError) Unwrap() error { return e.Err }
+
+// ReadError is a database read that failed (a query, a row or the end of a
+// result set), so the Store cannot tell whether what it would have checked is
+// sound. Recovery refuses service on it, as on corruption, without claiming
+// the data is damaged.
+type ReadError struct {
+	Check, TaskID string
+	Err           error
+}
+
+func (e *ReadError) Error() string {
+	return fmt.Sprintf("store read failed during the %s check for task %q: %v", e.Check, e.TaskID, e.Err)
+}
+func (e *ReadError) Unwrap() error { return e.Err }
+
+func readErr(check, task string, err error) error {
+	var re *ReadError
+	if errors.As(err, &re) {
+		return err
+	}
+	return &ReadError{Check: check, TaskID: task, Err: err}
+}
+
+// drained reports a result set's iteration error together with its close
+// error: rows.Next returning false ends the loop on EOF and on a failed read
+// alike, and only Err tells them apart.
+func drained(rows *sql.Rows) error { return errors.Join(rows.Err(), rows.Close()) }
+
+// openReader opens the recovery and query handle. Tests replace it to inject
+// read failures; nothing outside the package can.
+var openReader = func(dsn string) (*sql.DB, error) { return sql.Open("sqlite", dsn) }
 
 type Store struct {
 	w, r     *sql.DB
@@ -120,7 +156,7 @@ func Open(cfg Config) (*Store, error) {
 		return nil, err
 	}
 	s.w.SetMaxOpenConns(1)
-	if s.r, err = sql.Open("sqlite", path+common+"&_pragma=query_only(1)"); err != nil {
+	if s.r, err = openReader(path + common + "&_pragma=query_only(1)"); err != nil {
 		s.w.Close()
 		return nil, err
 	}

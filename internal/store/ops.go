@@ -52,7 +52,7 @@ func scanPurchase(row interface{ Scan(...any) error }) (purchaseRow, error) {
 	var p purchaseRow
 	d := &p.Decision
 	if err := row.Scan(&p.Body, &d.IntentHash, &d.PolicyVerdict, &d.ApprovalStatus, &d.Reason, &p.DecidedAt, &p.ApprovalClosed, &p.ClosedAt); err != nil {
-		return p, err
+		return p, readErr("purchase", "", err)
 	}
 	d.Version, d.PaymentStatus = contracts.Version, "unavailable"
 	return p, contracts.Decode([]byte(p.Body), &p.Order)
@@ -62,8 +62,10 @@ func decodeSnapshot(q interface {
 	QueryRow(string, ...any) *sql.Row
 }, hash, kind string, dst any) error {
 	var k, body string
-	if err := q.QueryRow(`SELECT kind, body FROM config_snapshots WHERE snapshot_hash = ?`, hash).Scan(&k, &body); err != nil {
-		return err
+	if err := q.QueryRow(`SELECT kind, body FROM config_snapshots WHERE snapshot_hash = ?`, hash).Scan(&k, &body); errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("snapshot %s does not exist", hash)
+	} else if err != nil {
+		return readErr("snapshot", "", err)
 	}
 	if k != kind {
 		return fmt.Errorf("snapshot %s is %s, not %s", hash, k, kind)
@@ -90,7 +92,7 @@ func (s *Store) openTask(tx *sql.Tx, now uint64, taskID string) (*taskTx, error)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, refuse("UNKNOWN_TASK", "no such task has been started")
 	} else if err != nil {
-		return nil, err
+		return nil, readErr("task", taskID, err)
 	}
 	t := &taskTx{tx: tx, now: now, row: row, purchases: map[string]*purchaseRow{}}
 	if err := decodeSnapshot(tx, row.RegistrySnap, "registry", &t.regCfg); err != nil {
@@ -104,24 +106,27 @@ func (s *Store) openTask(tx *sql.Tx, now uint64, taskID string) (*taskTx, error)
 	}
 	rows, err := tx.Query(`SELECT body FROM events WHERE task_id = ? ORDER BY sequence`, taskID)
 	if err != nil {
-		return nil, err
+		return nil, readErr("task", taskID, err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var body string
 		var e contracts.AuditEvent
 		if err := rows.Scan(&body); err != nil {
-			return nil, err
+			return nil, readErr("task", taskID, err)
 		}
 		if err := contracts.Decode([]byte(body), &e); err != nil {
 			return nil, err
 		}
 		t.events = append(t.events, e)
 	}
+	if err := drained(rows); err != nil {
+		return nil, readErr("task", taskID, err)
+	}
 	t.stored = len(t.events)
 	prow, err := tx.Query(`SELECT purchase_order_id, `+purchaseCols+` FROM purchases WHERE task_id = ?`, taskID)
 	if err != nil {
-		return nil, err
+		return nil, readErr("task", taskID, err)
 	}
 	defer prow.Close()
 	for prow.Next() {
@@ -132,7 +137,10 @@ func (s *Store) openTask(tx *sql.Tx, now uint64, taskID string) (*taskTx, error)
 		}
 		t.purchases[po] = &p
 	}
-	return t, errors.Join(rows.Err(), prow.Err())
+	if err := drained(prow); err != nil {
+		return nil, readErr("task", taskID, err)
+	}
+	return t, nil
 }
 
 type scanFunc func(...any) error
@@ -326,6 +334,21 @@ func (s *Store) StartTask(setup TaskSetup) error {
 			return refuse("WALLET_BINDING_CHANGED", "consumer "+task.ConsumerID+" already uses another wallet")
 		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
+		}
+		// The other direction: a wallet or payer another consumer has used, in
+		// any stored task (ended ones too), is not available, whatever the
+		// current registry says. Checked under the write lock with the insert.
+		for _, c := range []struct{ col, value, code string }{
+			{"wallet_id", wallet.WalletID, "WALLET_ID_IN_USE"},
+			{"payer", wallet.From, "PAYER_IN_USE"},
+		} {
+			var owner string
+			err := tx.QueryRow(`SELECT consumer_id FROM tasks WHERE `+c.col+` = ? AND consumer_id != ? LIMIT 1`, c.value, task.ConsumerID).Scan(&owner)
+			if err == nil {
+				return refuse(c.code, c.col+" "+c.value+" already belongs to consumer "+owner)
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
 		}
 		tm, err := s.buildTerms(setup)
 		if err != nil {

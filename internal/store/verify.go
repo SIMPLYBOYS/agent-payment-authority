@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -14,7 +15,9 @@ import (
 // serves anything. Everything is read in one read transaction, so commits
 // from other connections cannot make two points in time look inconsistent.
 // It uses only what is stored: never the current offer book or registry
-// config. Any mismatch is a *CorruptError; nothing is repaired.
+// config. A content mismatch is a *CorruptError; a read that fails (a query,
+// a row, or the end of a result set) is a *ReadError, never taken for the
+// end of the data. Either way nothing is repaired and Open serves nothing.
 //
 // It finds inconsistency. It cannot stop someone who rewrites snapshots,
 // rows, events and chain head together, and without an external checkpoint
@@ -28,32 +31,47 @@ func (s *Store) verify() error {
 	bad := func(check, task, format string, a ...any) error {
 		return &CorruptError{Check: check, TaskID: task, Detail: fmt.Sprintf(format, a...)}
 	}
+	// classify keeps a failed read a read failure and wraps anything else as
+	// corruption of the content being checked.
+	classify := func(check, task string, err error, what string) error {
+		var re *ReadError
+		if errors.As(err, &re) {
+			return readErr(check, task, err)
+		}
+		return &CorruptError{Check: check, TaskID: task, Detail: fmt.Sprintf("%s: %v", what, err), Err: err}
+	}
 
 	// 1. SQLite structure (integrity_check, not quick_check, which skips UNIQUE
 	// and index content), foreign keys (integrity_check does not look) and
 	// schema version.
 	var ok string
-	if err := tx.QueryRow(`PRAGMA integrity_check`).Scan(&ok); err != nil || ok != "ok" {
-		return bad("integrity", "", "integrity_check: %s %v", ok, err)
+	if err := tx.QueryRow(`PRAGMA integrity_check`).Scan(&ok); err != nil {
+		return readErr("integrity", "", err)
+	} else if ok != "ok" {
+		return bad("integrity", "", "integrity_check: %s", ok)
 	}
 	fk, err := tx.Query(`PRAGMA foreign_key_check`)
 	if err != nil {
-		return err
+		return readErr("foreign_keys", "", err)
 	}
 	violated := fk.Next()
-	fk.Close()
+	if err := drained(fk); err != nil {
+		return readErr("foreign_keys", "", err)
+	}
 	if violated {
 		return bad("foreign_keys", "", "foreign_key_check reports a broken reference")
 	}
 	var version int
-	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != schemaVersion {
+	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return readErr("schema", "", err)
+	} else if version != schemaVersion {
 		return bad("schema", "", "schema version %d is not %d", version, schemaVersion)
 	}
 
 	// 2. Snapshots: hash, canonical body and a strict decode as their kind.
 	snaps, err := tx.Query(`SELECT snapshot_hash, kind, body FROM config_snapshots`)
 	if err != nil {
-		return err
+		return readErr("snapshot", "", err)
 	}
 	type snap struct{ kind, body string }
 	all := map[string]snap{}
@@ -62,11 +80,13 @@ func (s *Store) verify() error {
 		var sn snap
 		if err := snaps.Scan(&h, &sn.kind, &sn.body); err != nil {
 			snaps.Close()
-			return err
+			return readErr("snapshot", "", err)
 		}
 		all[h] = sn
 	}
-	snaps.Close()
+	if err := drained(snaps); err != nil {
+		return readErr("snapshot", "", err)
+	}
 	for h, sn := range all {
 		c, err := contracts.Canonical([]byte(sn.body))
 		if err != nil || !bytes.Equal(c, []byte(sn.body)) || digest(c) != h {
@@ -100,24 +120,27 @@ func (s *Store) verify() error {
 
 	rows, err := tx.Query(`SELECT ` + taskCols + ` FROM tasks ORDER BY task_id`)
 	if err != nil {
-		return err
+		return readErr("task", "", err)
 	}
 	var tasks []taskRow
 	for rows.Next() {
 		t, err := scanTask(rows)
 		if err != nil {
 			rows.Close()
-			return err
+			return readErr("task", "", err)
 		}
 		tasks = append(tasks, t)
 	}
-	rows.Close()
+	if err := drained(rows); err != nil {
+		return readErr("task", "", err)
+	}
 	wallets := map[string][2]string{}
+	walletOwner, payerOwner := map[string]string{}, map[string]string{}
 	for _, row := range tasks {
 		id := row.TaskID
 		t, err := s.openTask(tx, 0, id)
 		if err != nil {
-			return bad("task", id, "task does not load: %v", err)
+			return classify("task", id, err, "task does not load")
 		}
 
 		// 2b. References: terms bound to this task; present/absent agrees
@@ -130,13 +153,15 @@ func (s *Store) verify() error {
 		if row.ProfileSnap.Valid {
 			profile = new(policy.Profile)
 			if err := decodeSnapshot(tx, row.ProfileSnap.String, "profile", profile); err != nil {
-				return bad("snapshot", id, "profile reference: %v", err)
+				return classify("snapshot", id, err, "profile reference")
 			}
 		}
 		if row.CredentialSnap.Valid {
 			var cr policy.Credential
-			if err := decodeSnapshot(tx, row.CredentialSnap.String, "credential", &cr); err != nil || cr.ConsumerID != row.ConsumerID {
-				return bad("snapshot", id, "credential reference is broken or belongs to another consumer")
+			if err := decodeSnapshot(tx, row.CredentialSnap.String, "credential", &cr); err != nil {
+				return classify("snapshot", id, err, "credential reference")
+			} else if cr.ConsumerID != row.ConsumerID {
+				return bad("snapshot", id, "credential belongs to another consumer")
 			}
 		}
 		if err := tm.validate(t.regCfg, profile); err != nil {
@@ -153,6 +178,16 @@ func (s *Store) verify() error {
 			return bad("task", id, "consumer %s uses two wallets", row.ConsumerID)
 		}
 		wallets[row.ConsumerID] = w
+		// Each task matches its own registry snapshot, so two snapshots can
+		// hand one wallet to two consumers; ownership is checked across all
+		// stored tasks, ended ones included.
+		if owner, seen := walletOwner[row.WalletID]; seen && owner != row.ConsumerID {
+			return bad("wallet", id, "wallet_id %s also belongs to consumer %s", row.WalletID, owner)
+		}
+		if owner, seen := payerOwner[row.Payer]; seen && owner != row.ConsumerID {
+			return bad("wallet", id, "payer %s also belongs to consumer %s", row.Payer, owner)
+		}
+		walletOwner[row.WalletID], payerOwner[row.Payer] = row.ConsumerID, row.ConsumerID
 
 		// 4. Budget: M1 deducts nothing.
 		if row.BudgetRemaining != string(tm.BudgetInitial) {
@@ -162,13 +197,13 @@ func (s *Store) verify() error {
 		// 5. Purchases: canonical body, hashes and index columns.
 		prow, err := tx.Query(`SELECT purchase_order_id, request_id, retry_key, chain_id, asset_contract, payer, eip3009_nonce, body, intent_hash FROM purchases WHERE task_id = ?`, id)
 		if err != nil {
-			return err
+			return readErr("purchase", id, err)
 		}
 		for prow.Next() {
 			var po, req, key, chain, asset, payer, nonce, body, intent string
 			if err := prow.Scan(&po, &req, &key, &chain, &asset, &payer, &nonce, &body, &intent); err != nil {
 				prow.Close()
-				return err
+				return readErr("purchase", id, err)
 			}
 			p := t.purchases[po]
 			c, cerr := contracts.Canonical([]byte(body))
@@ -186,13 +221,15 @@ func (s *Store) verify() error {
 				return bad("purchase", id, "purchase %s: %v", po, err)
 			}
 		}
-		prow.Close()
+		if err := drained(prow); err != nil {
+			return readErr("purchase", id, err)
+		}
 
 		// 7. Events: canonical body, index columns, ids and hashes, then the
 		// chain and the contract's order rules.
 		erow, err := tx.Query(`SELECT sequence, event_id, event_type, purchase_order_id, observed_at, body, event_hash FROM events WHERE task_id = ? ORDER BY sequence`, id)
 		if err != nil {
-			return err
+			return readErr("event", id, err)
 		}
 		n := 0
 		for erow.Next() {
@@ -201,7 +238,7 @@ func (s *Store) verify() error {
 			var po sql.NullString
 			if err := erow.Scan(&seq, &eid, &typ, &po, &observed, &body, &hash); err != nil {
 				erow.Close()
-				return err
+				return readErr("event", id, err)
 			}
 			e := t.events[n]
 			n++
@@ -222,7 +259,9 @@ func (s *Store) verify() error {
 				return bad("event", id, "event %d: %v", seq, err)
 			}
 		}
-		erow.Close()
+		if err := drained(erow); err != nil {
+			return readErr("event", id, err)
+		}
 		if len(t.events) == 0 {
 			return bad("chain", id, "task has no events")
 		}
