@@ -2,8 +2,8 @@
 
 建立在 x402 之上的 Agent 付款授權與證據層：Agent 可以提出付款，但不能自己批准，也不能自己簽名。
 
-> **目前狀態：B1-00～03 已驗收（B1-02 共用契約 `apa.m1.v2` fixture，10/1 於 `2dc8d93` 結案；B1-03 最小資料商店（目錄＋402），10/1 於 `ebd3f44` 結案）；B1-04、B1-05 已解鎖，尚未開始。** 可啟動 loopback 服務、回應 health、提供商品目錄與 HTTP 402 報價、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md) 與 [docs/merchant.md](docs/merchant.md)。
-> 尚未實作：Claude Code wrapper、policy 裁決、事件、展示層、任何付款、簽章或付費內容交付。
+> **目前狀態：B1-00～03 已驗收（B1-02 共用契約 `apa.m1.v2` fixture，10/1 於 `2dc8d93` 結案；B1-03 最小資料商店（目錄＋402），10/1 於 `ebd3f44` 結案）；B1-05 節點 1（確定性 Policy）已實作，待 review；B1-04 已解鎖，尚未開始。** 可啟動 loopback 服務、回應 health、提供商品目錄與 HTTP 402 報價、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md)、[docs/merchant.md](docs/merchant.md) 與 [docs/policy.md](docs/policy.md)。
+> 尚未實作：Claude Code wrapper、請購持久化與去重、事件、展示層、任何付款、簽章或付費內容交付。
 > 第一個里程碑 M1 的終點是 **請購與 Ask／Deny**，沒有真付款。邊界見 [docs/m1-boundaries.md](docs/m1-boundaries.md)。
 
 ## 需求
@@ -123,6 +123,8 @@ internal/merchant/ fixture 資料商店：目錄、受保護資源與 402
 internal/x402/     x402 v2 HTTP header 編解碼（不驗證、不結算）
 testdata/merchant/ 商店的預期 wire 輸出（手寫）
 testdata/x402/     x402 規格原文的範例 header（互通向量）
+internal/policy/   確定性 Policy：Ask／Deny／Allow（M1 無法付款）
+testdata/policy/   M1 demo policy profile（fixture）
 ```
 
 ## 在受限沙箱裡跑測試

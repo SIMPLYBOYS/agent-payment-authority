@@ -76,4 +76,5 @@ M1 的終點是 **請購與 Ask／Deny**。M1 沒有 Signer、沒有結算、沒
 | 停止時釋放 port，可立即再啟動 | 已實作，有測試。目前沒有子行程 |
 | `.env` 有不支援的行就不啟動，不使用部分載入的設定 | 已實作，由 `scripts/verify-b1-01.sh` 檢查 |
 | 商店目錄與 402；任何 `PAYMENT-SIGNATURE` 都不交付受保護資料；只陳述設定的 URL、不抓取外部 URL | 已實作，有測試（B1-03，10/1 於 `ebd3f44` 結案；見 [merchant.md](merchant.md)） |
-| 工具入口、policy、事件、取消與重啟行為、展示層、驗收器 | 尚未實作 |
+| 確定性 Policy：Ask／Deny／Allow-unavailable，不扣預算、不發 grant、不付款 | 已實作，有測試（B1-05 節點 1，待 review；見 [policy.md](policy.md)） |
+| 工具入口、請購持久化與去重、事件、取消與重啟行為、展示層、驗收器 | 尚未實作 |

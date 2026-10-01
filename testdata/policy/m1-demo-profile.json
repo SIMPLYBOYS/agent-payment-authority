@@ -1,0 +1,9 @@
+{
+  "profile_id": "m1-demo-v1",
+  "evidence_mode": "fixture",
+  "asset_id": "fixture-usdc",
+  "allow_max": "100000",
+  "task_cap": "5000000",
+  "merchants": ["0x3333333333333333333333333333333333333333"],
+  "mode": "interactive"
+}
