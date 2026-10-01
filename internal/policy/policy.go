@@ -33,8 +33,9 @@ type Credential struct {
 	EvidenceMode string `json:"evidence_mode"`
 }
 
-// Budget is what the task may still spend, from trusted state. M1 spends
-// nothing, so it stays at the profile's task cap.
+// Budget is what the task may still spend, from trusted state. It defaults to
+// the profile's task cap; a trusted fixture may set it lower for a test
+// scenario. M1 decisions never deduct from it.
 type Budget struct {
 	TaskID    string
 	Remaining contracts.Amount

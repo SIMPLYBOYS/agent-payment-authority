@@ -1,5 +1,7 @@
 # M1 確定性 Policy（B1-05 節點 1）
 
+**狀態（2026-10-01）**：節點 1 於 `61b3652` 通過獨立 review，沒有阻擋驗收的程式問題。B1-05 整體仍在進行中（節點 2 持久化與事件查詢尚未實作），未合併 main。證據：Codex 在斷網、唯讀原始碼、有資源限制的 Linux 容器中獨立重跑 `go test -race -cover ./... -count=1`（Policy 覆蓋率 96.4%）、`go test ./internal/policy -count=1 -v` 與 `node scripts/check-contract-vectors.mjs`，全部通過；61／61 突變由 Claude Code 執行，Codex 核對紀錄與腳本，未獨立重跑。
+
 `internal/policy` 的 `Decide` 是純函式：輸入一筆請購、可信設定、可信狀態與外部注入的時間，回傳 Ask、Deny 或 Allow（M1 無法付款）。它不扣預算、不發 grant、不付款，也不讀時鐘、檔案或網路，不保存狀態。請購去重、衝突拒絕、持久化、事件、取消／逾時與重啟恢復屬 B1-05 節點 2。
 
 ## 輸入
@@ -11,7 +13,7 @@
 | `TaskStatus` | 執行期狀態（節點 2 持久化） | 不是 registry 的設定快照 |
 | `Profile` | 可信設定：`testdata/policy/m1-demo-profile.json` | `nil` 視為缺設定 |
 | `Credential` | consumer 的授權條件（M1 為 fixture） | `nil` 視為缺設定；不代表 BBS+ 已驗證 |
-| `Budget` | 可信狀態：此 task 剩餘額度 | M1 不扣款，等於 task cap |
+| `Budget` | 可信狀態：此 task 剩餘額度 | 預設剩餘額度等於 task cap；測試情境可由可信 fixture 提供較低額度。M1 裁決不扣減該額度 |
 | `Now` | 可信 host 時鐘（Unix 秒） | 0 表示沒有時鐘 |
 
 demo profile `m1-demo-v1`：資產 `fixture-usdc`，單筆 Allow 上限 0.10（`100000`），task cap 5（`5000000`），商家白名單只有 registry 的 `merchant_pay_to`，互動模式。這只是版本化的 demo 設定，不替第二批 Signer 的 `allow_max` ADR 定案。測試核對它等於 `cases.json` 的 defaults 與 registry。
@@ -36,7 +38,7 @@ Deny 優先，真人不能覆蓋。依序檢查，第一個不通過的項目決
 | 4 | 憑證已過期（`now >= valid_until`），或 `now` 不在請購效期內 | Deny `AUTHORIZATION_EXPIRED` |
 | 5 | 金額大於剩餘額度 | Deny `INSUFFICIENT_BUDGET` |
 | 6 | 金額不超過 `allow_max` | Allow `PAYMENT_CAPABILITY_UNAVAILABLE` |
-| 7 | profile 為 unattended（沒有核准人） | Deny `APPROVER_UNAVAILABLE` |
+| 7 | profile 為 unattended（沒有核准人），且原本需要 Ask | Deny `APPROVER_UNAVAILABLE`（限額內的 Allow 不受影響，M1 的 Allow 仍不能付款） |
 | 8 | 其他 | Ask `HUMAN_APPROVAL_REQUIRED`，approval `pending` |
 
 邊界：金額等於剩餘額度仍可；等於 `allow_max` 為 Allow；憑證在 `now < valid_until` 時有效；請購效期依 EIP-3009 為 `valid_after < now < valid_before`（兩端都不含）。每個裁決都通過 `PolicyDecision.Validate`，`payment_status` 一律 `unavailable`，帶請購的 `intent_hash`。
@@ -58,14 +60,18 @@ Deny 優先，真人不能覆蓋。依序檢查，第一個不通過的項目決
 
 測試遇到沒有對應的參數會直接失敗，不會默默略過。
 
-## 待 review 確認的設計選擇
+## Reviewer 接受的設計選擇（2026-10-01）
 
-已接受的案例每個只有一個 Deny 條件，以下幾點由實作者決定，請 reviewer 確認：
+已接受的案例每個只有一個 Deny 條件，以下四點原由實作者決定，節點 1 review 時由 reviewer 接受（不是 Aaron 另外作出的決定）：
 
-1. **多個 Deny 條件同時成立時的順序**（上表 1～5）。
-2. **請購尚未生效**（`now <= valid_after`）也回 `AUTHORIZATION_EXPIRED`：封閉的原因清單沒有「尚未生效」，新增代碼需要升版。
-3. **`TASK_NOT_ACTIVE` 以拒收（錯誤）處理**，不產生 Deny 裁決，理由見上。
-4. **資產必須是 profile 的計價資產**：額度以單一資產的最小單位計，不能拿另一種代幣的金額來比。
+| 項目 | 接受的語意 |
+|---|---|
+| 多重 Deny 條件 | 固定順序：缺設定 → 資產 → 商家 → 效期 → 額度；都先於 Allow／Ask |
+| 尚未生效的請購 | 沿用 `AUTHORIZATION_EXPIRED`，限 M1 相容處理；展示文案用「授權不在有效期間」，不把尚未生效寫成已過期 |
+| 已結束 task | 拒收新請購，不新增 Deny 裁決，維持既有事件順序規則 |
+| 計價資產 | 請購資產必須符合 profile 的計價資產，不直接比較不同資產的最小單位金額 |
+
+效期 `valid_after < now < valid_before` 與 EIP-3009 參考實作一致；把「尚未生效」與「已過期」合併成同一個 reason code 是本專案的 M1 選擇，不是協議要求。
 
 ## 不在節點 1
 
