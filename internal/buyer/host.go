@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
@@ -95,7 +97,7 @@ type RunResult struct {
 	Calls        []toolbridge.CallRecord
 	Attempts     int    // tool calls that reached the budget, refused ones included
 	NotReady     int    // business calls refused before the run was armed
-	Model        string // as the passed init stated it, cleaned
+	Model        string // as the passed init stated it, if name-shaped; else "unrecognized"
 	TaskStarted  bool   // Prepare succeeded: the task exists in the Store
 	PrepareError error  // Prepare ran and failed
 	StoreEnd     string // TASK_TIMED_OUT or TASK_CANCELLED when the run recorded one
@@ -209,17 +211,21 @@ func (h *Host) Run(ctx context.Context, taskID, prompt string, prepare Prepare) 
 	if end != nil {
 		res.StoreEnd, res.EndError = "", store.Code(end)
 	}
-	res.Trace, err = h.trace(b, prompt, capability, started, gateCode, res)
+	res.Trace, err = h.trace(b, prompt, started, gateCode, res)
 	return res, err
 }
 
-// initModel is the model the init names, cleaned; "" if none.
+// modelName is what a model name may look like in the trace; anything else
+// is CLI free text and is not kept.
+var modelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@/\[\]-]{0,79}$`)
+
+// initModel is the model the init names, if it looks like a model name.
 func initModel(line []byte) string {
-	var m struct {
-		Model string `json:"model"`
+	var model string
+	if f, err := objectFields(line); err == nil && field(f, "model", &model) == nil && modelName.MatchString(model) {
+		return model
 	}
-	json.Unmarshal(line, &m)
-	return toolbridge.Clean(m.Model, 80)
+	return "unrecognized"
 }
 
 // usageCounts keeps the numeric token counts of a result's usage and
@@ -243,10 +249,11 @@ func usageCounts(raw json.RawMessage) any {
 }
 
 // trace writes the run trace: one JSON object per line, kept apart from the
-// AuditEvent chain. It holds whitelisted diagnostics only: no raw stream,
-// capability, environment, stderr content, prompt text or authentication
-// value; the CLI's result text is cleaned, bounded and marked untrusted.
-func (h *Host) trace(b *toolbridge.Binding, prompt, capability string, started time.Time, gateCode string, res RunResult) (string, error) {
+// AuditEvent chain. It holds structured diagnostics only: host codes,
+// counts, validated names. No free text from the CLI is kept (its result
+// may echo the prompt or anything else), nor the raw stream, capability,
+// environment, stderr content, prompt text or authentication value.
+func (h *Host) trace(b *toolbridge.Binding, prompt string, started time.Time, gateCode string, res RunResult) (string, error) {
 	if err := os.MkdirAll(h.TraceDir, 0o700); err != nil {
 		return "", err
 	}
@@ -254,9 +261,6 @@ func (h *Host) trace(b *toolbridge.Binding, prompt, capability string, started t
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return "", err
-	}
-	scrub := func(s string, max int) string {
-		return toolbridge.Clean(strings.ReplaceAll(s, capability, "[capability]"), max)
 	}
 	prepareError := ""
 	if res.PrepareError != nil {
@@ -272,7 +276,7 @@ func (h *Host) trace(b *toolbridge.Binding, prompt, capability string, started t
 		"limits": map[string]any{"line_bytes": h.Limits.Line, "stdout_bytes": h.Limits.Stdout, "stderr_bytes": h.Limits.Stderr,
 			"total_seconds": h.Limits.Total.Seconds(), "assistant_messages": h.Limits.Assistant, "tool_calls": toolbridge.MaxCalls},
 	}), enc.Encode(map[string]any{
-		"event": "init", "gate": gateCode, "model": scrub(res.Model, 80), "task_started": res.TaskStarted, "prepare_error": prepareError,
+		"event": "init", "gate": gateCode, "model": res.Model, "task_started": res.TaskStarted, "prepare_error": prepareError,
 	})}
 	for _, c := range res.Calls {
 		errs = append(errs, enc.Encode(map[string]any{"event": "tool_call", "tool": c.Tool, "product_id": c.ProductID, "outcome": c.Outcome}))
@@ -283,7 +287,7 @@ func (h *Host) trace(b *toolbridge.Binding, prompt, capability string, started t
 		"usage": usageCounts(res.Report.Usage), "stderr_bytes": res.Report.StderrBytes,
 		"tool_attempts": res.Attempts, "not_ready_refusals": res.NotReady,
 		"store_end": res.StoreEnd, "store_end_error": res.EndError,
-		"untrusted_cli_result": scrub(res.Report.Result, 2000),
+		"result_chars": utf8.RuneCountInString(res.Report.Result), // the text itself is never kept
 	}), f.Close())
 	return path, errors.Join(errs...)
 }

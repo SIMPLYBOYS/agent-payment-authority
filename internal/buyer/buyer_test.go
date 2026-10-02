@@ -392,8 +392,9 @@ func TestHostMainLine(t *testing.T) {
 		t.Errorf("run left %v behind", left)
 	}
 	trace, _ := os.ReadFile(res.Trace)
-	if !strings.Contains(string(trace), `"untrusted_cli_result":"Paid and downloaded the Korean market brief."`) || strings.Contains(string(trace), "Buy the brief") ||
-		!strings.Contains(string(trace), `"gate":"passed"`) {
+	if strings.Contains(string(trace), "Paid and downloaded") || strings.Contains(string(trace), "Buy the brief") ||
+		!strings.Contains(string(trace), `"gate":"passed"`) || !strings.Contains(string(trace), `"model":"sonnet"`) ||
+		!strings.Contains(string(trace), fmt.Sprintf(`"result_chars":%d`, len("Paid and downloaded the Korean market brief."))) {
 		t.Errorf("trace: %s", trace)
 	}
 }
@@ -448,13 +449,17 @@ func TestHostInitGate(t *testing.T) {
 		"duplicate key": {fakecli.Scenario{ManualInit: true, Steps: []fakecli.Step{
 			{Do: "tool", Tool: "list_products"},
 			{Do: "raw", Text: `{"type":"system","subtype":"init","tools":` + tools3 + `,"tools":` + tools3 + `,"mcp_servers":[{"name":"apa","status":"connected"}],"permissionMode":"dontAsk","apiKeySource":"` + fakecli.AuthSource + `","claude_code_version":"` + fakecli.InitVersion + `"}` + "\n"},
-			{Do: "tool", Tool: "list_products"}, {Do: "result", Text: "done"}}}, "init_malformed"},
+			{Do: "tool", Tool: "list_products"}, {Do: "result", Text: "done"}}}, "ambiguous_json"}, // stopped by the reader, before the gate
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newHost(t)
 			res := e.runWith(context.Background(), "task-a", genScenario(t, c.sc), e.prepare("task-a"))
-			if res.Report.Outcome != ConfigMismatch || res.Report.Detail != c.code {
-				t.Fatalf("outcome %s %q, want config_mismatch %q", res.Report.Outcome, res.Report.Detail, c.code)
+			want := ConfigMismatch
+			if c.code == "ambiguous_json" {
+				want = ParseError
+			}
+			if res.Report.Outcome != want || res.Report.Detail != c.code {
+				t.Fatalf("outcome %s %q, want %s %q", res.Report.Outcome, res.Report.Detail, want, c.code)
 			}
 			if e.prepared.Load() != 0 || res.TaskStarted || len(res.Calls) != 0 || res.NotReady == 0 {
 				t.Errorf("prepared %d, task %v, records %v, not ready %d", e.prepared.Load(), res.TaskStarted, res.Calls, res.NotReady)
@@ -479,9 +484,10 @@ func TestHostInitSequence(t *testing.T) {
 		t.Fatalf("hook before init: %+v", res)
 	}
 
-	// Late init: the run times out at 300 ms; the fake ignores SIGTERM and
-	// prints a valid init at 800 ms, before SIGKILL at 2.3 s.
-	e.h.Limits.Total, e.h.Limits.Grace = 300*time.Millisecond, 2*time.Second
+	// Late init: the run times out at 300 ms; the fake ignores SIGTERM from
+	// its start and prints a valid init 800 ms after its MCP handshake,
+	// well before SIGKILL at 5.3 s, even under -race on a loaded machine.
+	e.h.Limits.Total, e.h.Limits.Grace = 300*time.Millisecond, 5*time.Second
 	res = e.run(context.Background(), "task-a", "init-late")
 	if res.Report.Outcome != Timeout || e.prepared.Load() != 0 || res.TaskStarted || res.StoreEnd != "" || len(res.Calls) != 0 {
 		t.Fatalf("late init: %+v prepared %d", res, e.prepared.Load())
@@ -585,7 +591,7 @@ func TestHostTraceWhitelist(t *testing.T) {
 	e := newHost(t)
 	e.h.Gate.AcceptAuth = []string{"MARK-AUTH-7f3a"}
 	sc := fakecli.Scenario{ManualInit: true, Steps: []fakecli.Step{
-		{Do: "init", Init: map[string]json.RawMessage{"apiKeySource": json.RawMessage(`"MARK-AUTH-7f3a"`)}},
+		{Do: "init", Init: map[string]json.RawMessage{"apiKeySource": json.RawMessage(`"MARK-AUTH-7f3a"`), "model": json.RawMessage(`"MARK-MODEL-7f3a echo of the prompt"`)}},
 		{Do: "stderr", Text: "MARK-STDERR-7f3a"},
 		{Do: "text", Text: "MARK-ASSISTANT-7f3a"},
 		{Do: "tool", Tool: "request_purchase", Args: json.RawMessage(`{"product_id":"kr-market"}`)},
@@ -605,8 +611,104 @@ func TestHostTraceWhitelist(t *testing.T) {
 	if strings.Contains(string(trace), "MARK-") || strings.Contains(string(trace), "7f3a") {
 		t.Fatalf("a mark reached the trace: %s", trace)
 	}
-	if !strings.Contains(string(trace), `"usage":{"input_tokens":5,"output_tokens":7}`) {
-		t.Errorf("usage counts missing: %s", trace)
+	if !strings.Contains(string(trace), `"usage":{"input_tokens":5,"output_tokens":7}`) || !strings.Contains(string(trace), `"model":"unrecognized"`) {
+		t.Errorf("usage counts or model label missing: %s", trace)
+	}
+
+	// R1 (ca46cab review): a CLI that echoes the prompt in its result. The
+	// prompt stays out of the trace; only the result's length is kept.
+	echo := fakecli.Scenario{Steps: []fakecli.Step{
+		{Do: "tool", Tool: "list_products"},
+		{Do: "result", Text: "You asked: $PROMPT"},
+	}}
+	e2 := newHost(t)
+	e2.h.Env = CLIEnv(os.Getenv, scenario(genScenario(t, echo)))
+	const prompt = "MARK-PROMPT-91c2 Buy the Korean market brief for task-a."
+	res, err = e2.h.Run(context.Background(), "task-a", prompt, e2.prepare("task-a"))
+	if err != nil || res.Report.Outcome != OK || !strings.Contains(res.Report.Result, prompt) {
+		t.Fatalf("the fake did not echo the prompt (the check below would prove nothing): %+v %v", res.Report, err)
+	}
+	trace, _ = os.ReadFile(res.Trace)
+	if strings.Contains(string(trace), "MARK-PROMPT-91c2") || strings.Contains(string(trace), "Korean market brief") {
+		t.Fatalf("the echoed prompt reached the trace: %s", trace)
+	}
+	if !strings.Contains(string(trace), fmt.Sprintf(`"result_chars":%d`, len("You asked: ")+len(prompt))) {
+		t.Errorf("result length missing: %s", trace)
+	}
+}
+
+// R2 (ca46cab review): the reader refuses any message whose objects name a
+// member twice, exactly or up to case, before it is classified or checked;
+// fields are then read by exact name only.
+func TestObjectFields(t *testing.T) {
+	for _, c := range []struct {
+		line string
+		err  error
+	}{
+		{`{"type":"system","subtype":"init"}`, nil},
+		{`{"type":"system","subtype":"hook_started","subtype":"status"}`, errAmbiguous},
+		{`{"type":"system","subtype":"status","Subtype":"hook_started"}`, errAmbiguous},
+		{`{"permissionMode":"default","PermissionMode":"dontAsk"}`, errAmbiguous},
+		{`{"kind":1,"\u212aind":2}`, errAmbiguous}, // Kelvin sign: encoding/json folds it to k
+		{`{"a":[{"name":"apa","NAME":"x"}]}`, errAmbiguous},
+		{`{"a":{"b":{"c":1,"c":2}}}`, errAmbiguous},
+		{`{"a":[{"x":1},{"x":2}]}`, nil}, // the same name in sibling objects is fine
+		{`["type"]`, errNotObject},
+		{`{"type":"x"} trailing`, errNotObject},
+	} {
+		if _, err := objectFields([]byte(c.line)); err != c.err {
+			t.Errorf("%s: %v, want %v", c.line, err, c.err)
+		}
+	}
+	// Exact names only: a case variant alone is not the field.
+	f, _ := objectFields([]byte(`{"PermissionMode":"dontAsk"}`))
+	var perm *string
+	if field(f, "permissionMode", &perm); perm != nil {
+		t.Error("a case variant was read as permissionMode")
+	}
+}
+
+func TestHostAmbiguousMessages(t *testing.T) {
+	const tools3 = `["mcp__apa__list_products","mcp__apa__get_quote","mcp__apa__request_purchase"]`
+	initWith := func(perm string) string {
+		return `{"type":"system","subtype":"init","tools":` + tools3 + `,"mcp_servers":[{"name":"apa","status":"connected"}],` + perm +
+			`,"apiKeySource":"` + fakecli.AuthSource + `","claude_code_version":"` + fakecli.InitVersion + `"}` + "\n"
+	}
+	purchase := fakecli.Step{Do: "tool", Tool: "request_purchase", Args: json.RawMessage(`{"product_id":"kr-market"}`)}
+	for name, sc := range map[string]fakecli.Scenario{
+		// The review's first case, and its exact-duplicate twin.
+		"init case variant": {ManualInit: true, Steps: []fakecli.Step{{Do: "raw", Text: initWith(`"permissionMode":"default","PermissionMode":"dontAsk"`)}, purchase, {Do: "result", Text: "done"}}},
+		"init duplicate":    {ManualInit: true, Steps: []fakecli.Step{{Do: "raw", Text: initWith(`"permissionMode":"default","permissionMode":"dontAsk"`)}, purchase, {Do: "result", Text: "done"}}},
+		// The review's second case, before the init.
+		"hook subtype twice": {ManualInit: true, Steps: []fakecli.Step{{Do: "raw", Text: `{"type":"system","subtype":"hook_started","subtype":"status"}` + "\n"}, {Do: "init"}, purchase, {Do: "result", Text: "done"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newHost(t)
+			res := e.runWith(context.Background(), "task-a", genScenario(t, sc), e.prepare("task-a"))
+			if res.Report.Outcome != ParseError || res.Report.Detail != "ambiguous_json" || e.prepared.Load() != 0 || res.TaskStarted || len(res.Calls) != 0 {
+				t.Fatalf("%+v prepared %d %s", res.Report, e.prepared.Load(), outcomes(res.Calls))
+			}
+			if _, err := e.st.Task(e.session("task-a")); err == nil {
+				t.Error("a task was started")
+			}
+		})
+	}
+	// The review's second case after the init: the run stops at the
+	// ambiguous hook line, and the purchase sent after it is not recorded.
+	e := newHost(t)
+	sc := fakecli.Scenario{Steps: []fakecli.Step{
+		{Do: "tool", Tool: "list_products"},
+		{Do: "raw", Text: `{"type":"system","subtype":"status","Subtype":"hook_started"}` + "\n"},
+		{Do: "sleep", MS: 500},
+		purchase,
+		{Do: "result", Text: "done"},
+	}}
+	res := e.runWith(context.Background(), "task-a", genScenario(t, sc), e.prepare("task-a"))
+	if res.Report.Outcome != ParseError || res.Report.Detail != "ambiguous_json" || outcomes(res.Calls) != "list_products:ok" {
+		t.Fatalf("%+v %s", res.Report, outcomes(res.Calls))
+	}
+	if v := e.task(e.session("task-a")); len(v.Purchases) != 0 {
+		t.Fatalf("a purchase after the ambiguous line: %+v", v)
 	}
 }
 
@@ -727,7 +829,7 @@ func TestHostCapabilityLifetime(t *testing.T) {
 		t.Fatal("the scenario did not leak the capability; the trace check below would prove nothing")
 	}
 	trace, _ := os.ReadFile(res.Trace)
-	if strings.Contains(string(trace), string(capability)) || !strings.Contains(string(trace), "the capability is [capability]") {
+	if strings.Contains(string(trace), string(capability)) || strings.Contains(string(trace), "the capability is") {
 		t.Fatalf("trace: %s", trace)
 	}
 	// Late: after the run, the capability opens nothing.

@@ -52,6 +52,7 @@ const (
 type Scenario struct {
 	Description string `json:"description"`
 	ManualInit  bool   `json:"manual_init,omitempty"`
+	IgnoreTerm  bool   `json:"ignore_term,omitempty"` // from process start: only SIGKILL ends the fake
 	Steps       []Step `json:"steps"`
 }
 
@@ -61,7 +62,8 @@ type Scenario struct {
 //	text    print an assistant text message
 //	claim   print an assistant tool_use for Tool without calling MCP
 //	result  print the result message (IsError, Subtype; default success);
-//	        $CAPABILITY in Text becomes the run's capability (a leaking CLI)
+//	        $CAPABILITY and $PROMPT in Text become the run's capability and
+//	        the -p prompt (a CLI that leaks or echoes them)
 //	retry   print system/api_retry with Error
 //	raw     write Text to stdout as is
 //	split   write Text to stdout in Bytes-sized chunks, 10 ms apart
@@ -105,6 +107,7 @@ type run struct {
 	capability string
 	tools      []string
 	model      string
+	prompt     string
 	permission string
 	initDone   bool
 }
@@ -136,8 +139,11 @@ func Main(args []string, getenv func(string) string, stdout, stderr io.Writer) i
 		fmt.Fprintln(stderr, "fake-claude: bad scenario:", err)
 		return 1
 	}
+	if sc.IgnoreTerm {
+		signal.Ignore(syscall.SIGTERM)
+	}
 	r := &run{out: stdout, errw: stderr, enc: json.NewEncoder(stdout), getenv: getenv, session: fmt.Sprintf("fake-%d", os.Getpid()),
-		model: opts["--model"], permission: opts["--permission-mode"]}
+		model: opts["--model"], prompt: opts["-p"], permission: opts["--permission-mode"]}
 	if r.server, r.capability, err = startServer(opts["--mcp-config"]); err != nil {
 		fmt.Fprintln(stderr, "fake-claude: mcp server:", err)
 		return 1
@@ -261,7 +267,8 @@ func (r *run) step(s Step) (code int, done bool) {
 				sub = "error_during_execution"
 			}
 		}
-		r.emit(map[string]any{"type": "result", "subtype": sub, "is_error": s.IsError, "result": strings.ReplaceAll(s.Text, "$CAPABILITY", r.capability),
+		text := strings.NewReplacer("$CAPABILITY", r.capability, "$PROMPT", r.prompt).Replace(s.Text)
+		r.emit(map[string]any{"type": "result", "subtype": sub, "is_error": s.IsError, "result": text,
 			"num_turns": r.turns, "session_id": r.session, "duration_ms": 1})
 	case "retry":
 		r.emit(map[string]any{"type": "system", "subtype": "api_retry", "attempt": 1, "max_retries": 1, "retry_delay_ms": 1, "error": s.Error})

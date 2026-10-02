@@ -350,16 +350,24 @@ func readStream(r io.Reader, s Spec, st *stream) error {
 		if strings.TrimSpace(string(line)) == "" {
 			continue
 		}
-		var m struct {
-			Type     string          `json:"type"`
-			Subtype  string          `json:"subtype"`
-			IsError  bool            `json:"is_error"`
-			Result   *string         `json:"result"`
-			NumTurns int             `json:"num_turns"`
-			Usage    json.RawMessage `json:"usage"`
-			Error    string          `json:"error"`
+		// One strict reading serves the classification below, the
+		// assistant bound, Watch and the gate alike (objectFields).
+		f, err := objectFields(line)
+		if errors.Is(err, errAmbiguous) {
+			return &stopErr{ParseError, "ambiguous_json"}
 		}
-		if json.Unmarshal(line, &m) != nil || m.Type == "" {
+		var m struct {
+			Type, Subtype, Error string
+			IsError              bool
+			Result               *string
+			NumTurns             int
+			Usage                json.RawMessage
+		}
+		if err == nil {
+			err = errors.Join(field(f, "type", &m.Type), field(f, "subtype", &m.Subtype), field(f, "is_error", &m.IsError),
+				field(f, "result", &m.Result), field(f, "num_turns", &m.NumTurns), field(f, "usage", &m.Usage), field(f, "error", &m.Error))
+		}
+		if err != nil || m.Type == "" {
 			return errParse
 		}
 		st.messages++
