@@ -57,7 +57,7 @@ var _ Executor = (*Shop)(nil)
 func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (ToolResult, CallRecord) {
 	rec := CallRecord{Tool: tool, ProductID: product}
 	fail := func(code, msg string) (ToolResult, CallRecord) {
-		if b.Ended() { // the run ended mid-call: that, not the symptom, is the outcome
+		if b.Stopped() { // the run stopped mid-call: that, not the symptom, is the outcome
 			code, msg = "RUN_NOT_ACTIVE", "this run has ended"
 		}
 		rec.Outcome = code
@@ -109,6 +109,9 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 	})
 	if errors.Is(err, ErrRunEnded) {
 		return fail("RUN_NOT_ACTIVE", "this run has ended")
+	}
+	if errors.Is(err, ErrNotReady) {
+		return fail("RUN_NOT_READY", "the host has not finished starting this run")
 	}
 	if err != nil {
 		return fail(store.Code(err), "the host refused the purchase request")

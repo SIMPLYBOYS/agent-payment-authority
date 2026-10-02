@@ -1,0 +1,2 @@
+{"description":"A hook message before the init (SDK subtype hook_started): the run stops with no Store write.","manual_init":true,
+ "steps":[{"do":"raw","text":"{\"type\":\"system\",\"subtype\":\"hook_started\",\"hook_event\":\"SessionStart\",\"hook_name\":\"user-hook\"}\n"},{"do":"init"},{"do":"tool","tool":"request_purchase","args":{"product_id":"kr-market"}},{"do":"result","text":"done"}]}

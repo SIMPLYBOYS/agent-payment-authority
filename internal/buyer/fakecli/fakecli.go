@@ -29,17 +29,29 @@ import (
 // mistake in fake mode.
 const Version = "0.0.0 (fake-claude: no model, no network, not Claude Code)"
 
+// InitVersion and AuthSource are the fake's own values for its init's
+// claude_code_version and apiKeySource. They are labels of this fake, not
+// values any real CLI is known to send.
+const (
+	InitVersion = "0.0.0" // the first field of Version, as a live gate derives it
+	AuthSource  = "fake-claude-no-auth"
+)
+
 // Env names. Only the scenario is set in normal use; the other two let
-// tests observe processes and capabilities.
+// tests observe processes and capabilities. Without EnvScenario the fake
+// reads <its argv[0]>.scenario.json, so a test can run it with the exact
+// environment a live run gets.
 const (
 	EnvScenario = "APA_FAKE_CLI_SCENARIO"
 	EnvPIDFile  = "APA_FAKE_CLI_PIDFILE"
 	EnvCapFile  = "APA_FAKE_CLI_CAPFILE"
 )
 
-// Scenario is one scripted run.
+// Scenario is one scripted run. The init message is printed after the MCP
+// handshake unless ManualInit, in which case only "init" steps print it.
 type Scenario struct {
 	Description string `json:"description"`
+	ManualInit  bool   `json:"manual_init,omitempty"`
 	Steps       []Step `json:"steps"`
 }
 
@@ -57,23 +69,30 @@ type Scenario struct {
 //	stderr  write Bytes bytes (or Text) to stderr
 //	sleep   wait MS milliseconds
 //	hang    block forever; IgnoreTerm ignores SIGTERM first
+//	ignore_term  ignore SIGTERM from now on (only SIGKILL ends the fake)
 //	holder  start a grandchild that holds stdout and stderr open (Detach: new session)
 //	leak    print the run's capability in an assistant message
 //	savecap write the capability to $APA_FAKE_CLI_CAPFILE
+//	init    print the init message; Init members replace the defaults (null removes one)
 //	exit    exit with Code now
+//
+// After the init is printed, a tool call refused with RUN_NOT_READY is sent
+// again every 20 ms for up to 5 s, as a real CLI's first model round trip
+// would give the host time to get ready.
 type Step struct {
-	Do         string          `json:"do"`
-	Tool       string          `json:"tool,omitempty"`
-	Args       json.RawMessage `json:"args,omitempty"`
-	Text       string          `json:"text,omitempty"`
-	IsError    bool            `json:"is_error,omitempty"`
-	Subtype    string          `json:"subtype,omitempty"`
-	Error      string          `json:"error,omitempty"`
-	Bytes      int             `json:"bytes,omitempty"`
-	MS         int             `json:"ms,omitempty"`
-	Code       int             `json:"code,omitempty"`
-	IgnoreTerm bool            `json:"ignore_term,omitempty"`
-	Detach     bool            `json:"detach,omitempty"`
+	Do         string                     `json:"do"`
+	Tool       string                     `json:"tool,omitempty"`
+	Args       json.RawMessage            `json:"args,omitempty"`
+	Text       string                     `json:"text,omitempty"`
+	IsError    bool                       `json:"is_error,omitempty"`
+	Subtype    string                     `json:"subtype,omitempty"`
+	Error      string                     `json:"error,omitempty"`
+	Bytes      int                        `json:"bytes,omitempty"`
+	MS         int                        `json:"ms,omitempty"`
+	Code       int                        `json:"code,omitempty"`
+	IgnoreTerm bool                       `json:"ignore_term,omitempty"`
+	Detach     bool                       `json:"detach,omitempty"`
+	Init       map[string]json.RawMessage `json:"init,omitempty"`
 }
 
 type run struct {
@@ -84,7 +103,10 @@ type run struct {
 	turns      int
 	server     *server
 	capability string
-	sawResult  bool
+	tools      []string
+	model      string
+	permission string
+	initDone   bool
 }
 
 // Main is the fake CLI's main; it returns the exit code.
@@ -93,12 +115,16 @@ func Main(args []string, getenv func(string) string, stdout, stderr io.Writer) i
 		fmt.Fprintln(stdout, Version)
 		return 0
 	}
-	cfgPath, err := parseArgs(args)
+	opts, err := parseArgs(args)
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	raw, err := os.ReadFile(getenv(EnvScenario))
+	scenarioPath := getenv(EnvScenario)
+	if scenarioPath == "" {
+		scenarioPath = os.Args[0] + ".scenario.json"
+	}
+	raw, err := os.ReadFile(scenarioPath)
 	if err != nil {
 		fmt.Fprintln(stderr, "fake-claude: no scenario:", EnvScenario)
 		return 1
@@ -110,19 +136,20 @@ func Main(args []string, getenv func(string) string, stdout, stderr io.Writer) i
 		fmt.Fprintln(stderr, "fake-claude: bad scenario:", err)
 		return 1
 	}
-	r := &run{out: stdout, errw: stderr, enc: json.NewEncoder(stdout), getenv: getenv, session: fmt.Sprintf("fake-%d", os.Getpid())}
-	if r.server, r.capability, err = startServer(cfgPath); err != nil {
+	r := &run{out: stdout, errw: stderr, enc: json.NewEncoder(stdout), getenv: getenv, session: fmt.Sprintf("fake-%d", os.Getpid()),
+		model: opts["--model"], permission: opts["--permission-mode"]}
+	if r.server, r.capability, err = startServer(opts["--mcp-config"]); err != nil {
 		fmt.Fprintln(stderr, "fake-claude: mcp server:", err)
 		return 1
 	}
 	defer r.server.close()
-	tools, err := r.server.handshake()
-	if err != nil {
+	if r.tools, err = r.server.handshake(); err != nil {
 		fmt.Fprintln(stderr, "fake-claude: mcp handshake:", err)
 		return 1
 	}
-	r.emit(map[string]any{"type": "system", "subtype": "init", "session_id": r.session, "model": "fake", "tools": tools,
-		"mcp_servers": []any{map[string]any{"name": "apa", "status": "connected"}}, "permissionMode": "dontAsk", "apiKeySource": "none"})
+	if !sc.ManualInit {
+		r.init(nil)
+	}
 	for i, s := range sc.Steps {
 		if code, done := r.step(s); done {
 			return code
@@ -134,12 +161,12 @@ func Main(args []string, getenv func(string) string, stdout, stderr io.Writer) i
 	return 0
 }
 
-// parseArgs accepts the host's argv and nothing else, and returns the MCP
-// config path. Unknown flags fail like the real CLI's option parser.
-func parseArgs(args []string) (string, error) {
-	want := map[string]string{"--output-format": "stream-json", "--permission-mode": "dontAsk", "--tools": ""}
-	valued := map[string]bool{"-p": true, "--mcp-config": true, "--allowedTools": true, "--setting-sources": true}
-	flags := map[string]bool{"--verbose": true, "--strict-mcp-config": true, "--no-session-persistence": true, "--disable-slash-commands": true}
+// parseArgs accepts the host's argv and nothing else, and returns the
+// values given. Unknown flags fail like the real CLI's option parser.
+func parseArgs(args []string) (map[string]string, error) {
+	want := map[string]string{"--output-format": "stream-json", "--permission-mode": "dontAsk", "--tools": "", "--permission-prompts": "none"}
+	valued := map[string]bool{"-p": true, "--mcp-config": true, "--allowedTools": true, "--model": true, "--effort": true}
+	flags := map[string]bool{"--verbose": true, "--strict-mcp-config": true, "--restricted": true, "--no-session-persistence": true, "--disable-slash-commands": true}
 	seen := map[string]string{}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -149,25 +176,43 @@ func parseArgs(args []string) (string, error) {
 			seen[a] = ""
 		case isWant || valued[a]:
 			if i+1 >= len(args) {
-				return "", fmt.Errorf("option '%s' argument missing", a)
+				return nil, fmt.Errorf("option '%s' argument missing", a)
 			}
 			i++
 			seen[a] = args[i]
 		default:
-			return "", fmt.Errorf("unknown option '%s'", a)
+			return nil, fmt.Errorf("unknown option '%s'", a)
 		}
 	}
 	for k, v := range want {
 		if got, ok := seen[k]; !ok || got != v {
-			return "", fmt.Errorf("fake-claude needs %s %q", k, v)
+			return nil, fmt.Errorf("fake-claude needs %s %q", k, v)
 		}
 	}
-	for _, k := range []string{"-p", "--mcp-config", "--verbose", "--strict-mcp-config"} {
+	for _, k := range []string{"-p", "--mcp-config", "--verbose", "--strict-mcp-config", "--restricted"} {
 		if _, ok := seen[k]; !ok {
-			return "", fmt.Errorf("fake-claude needs %s", k)
+			return nil, fmt.Errorf("fake-claude needs %s", k)
 		}
 	}
-	return seen["--mcp-config"], nil
+	return seen, nil
+}
+
+// init prints the init message: the fake's defaults, with overrides
+// replacing members (a JSON null removes one). Field names follow the Agent
+// SDK reference; the values are this fake's.
+func (r *run) init(overrides map[string]json.RawMessage) {
+	m := map[string]any{"type": "system", "subtype": "init", "session_id": r.session, "model": r.model, "tools": r.tools,
+		"mcp_servers": []any{map[string]any{"name": "apa", "status": "connected"}}, "permissionMode": r.permission,
+		"apiKeySource": AuthSource, "claude_code_version": InitVersion, "slash_commands": []any{}, "cwd": ".", "output_style": "default"}
+	for k, v := range overrides {
+		if string(v) == "null" {
+			delete(m, k)
+		} else {
+			m[k] = v
+		}
+	}
+	r.emit(m)
+	r.initDone = true
 }
 
 func (r *run) emit(v any) { r.enc.Encode(v) }
@@ -192,8 +237,14 @@ func (r *run) step(s Step) (code int, done bool) {
 			return 0, false // printed only; never sent to the bridge
 		}
 		content, isError := r.server.callTool(s.Tool, input)
+		for wait := 0; r.initDone && isError && notReady(content) && wait < 250; wait++ {
+			time.Sleep(20 * time.Millisecond)
+			content, isError = r.server.callTool(s.Tool, input)
+		}
 		r.emit(map[string]any{"type": "user", "session_id": r.session, "message": map[string]any{"role": "user",
 			"content": []any{map[string]any{"type": "tool_result", "tool_use_id": id, "content": content, "is_error": isError}}}})
+	case "init":
+		r.init(s.Init)
 	case "text":
 		r.assistant(map[string]any{"type": "text", "text": s.Text})
 	case "leak":
@@ -241,6 +292,8 @@ func (r *run) step(s Step) (code int, done bool) {
 		for { // not select{}: the runtime would end a goroutine-free block as a deadlock
 			time.Sleep(time.Hour)
 		}
+	case "ignore_term":
+		signal.Ignore(syscall.SIGTERM)
 	case "holder":
 		return r.holder(s.Detach), false
 	case "exit":
@@ -250,6 +303,12 @@ func (r *run) step(s Step) (code int, done bool) {
 		return 1, true
 	}
 	return 0, false
+}
+
+// notReady reports a tool result refused with RUN_NOT_READY.
+func notReady(content any) bool {
+	b, _ := json.Marshal(content)
+	return strings.Contains(string(b), `RUN_NOT_READY`)
 }
 
 // holder starts a grandchild that inherits stdout and stderr and sleeps, the

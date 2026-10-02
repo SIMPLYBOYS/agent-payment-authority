@@ -3,6 +3,7 @@ package buyer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -66,7 +67,10 @@ func fake(t *testing.T) string {
 }
 
 func scenario(name string) string {
-	p, _ := filepath.Abs(filepath.Join("../../testdata/cli", name+".json"))
+	p := name + ".json"
+	if !filepath.IsAbs(name) {
+		p, _ = filepath.Abs(filepath.Join("../../testdata/cli", p))
+	}
 	return fakecli.EnvScenario + "=" + p
 }
 
@@ -219,32 +223,46 @@ func TestRunnerTimeoutCancelAndCleanup(t *testing.T) {
 func TestArgvAndEnv(t *testing.T) {
 	a := Argv("PROMPT", "/cfg.json")
 	want := []string{"-p", "PROMPT", "--output-format", "stream-json", "--verbose", "--mcp-config", "/cfg.json", "--strict-mcp-config",
-		"--tools", "", "--allowedTools", "mcp__apa__list_products,mcp__apa__get_quote,mcp__apa__request_purchase",
-		"--permission-mode", "dontAsk", "--setting-sources", "project", "--no-session-persistence", "--disable-slash-commands"}
+		"--restricted", "--tools", "", "--permission-mode", "dontAsk", "--permission-prompts", "none",
+		"--allowedTools", "mcp__apa__list_products,mcp__apa__get_quote,mcp__apa__request_purchase",
+		"--model", "sonnet", "--effort", "low", "--no-session-persistence", "--disable-slash-commands"}
 	if !slices.Equal(a, want) {
 		t.Errorf("argv %q", a)
 	}
-	parent := map[string]string{"HOME": "/h", "PATH": "/bin", "ANTHROPIC_API_KEY": "sk-x", "CLAUDE_CODE_USE_BEDROCK": "1",
-		"HTTPS_PROXY": "http://p", "AWS_SECRET_ACCESS_KEY": "k", toolbridge.EnvCapability: "c", "APA_DB_PATH": "/db"}
+	if i := slices.Index(a, "--tools"); a[i+1] != "" {
+		t.Errorf("--tools value %q is not the empty string", a[i+1])
+	}
+	for _, banned := range []string{"--bare", "--safe-mode", "--dangerously-skip-permissions", "bypassPermissions", "--setting-sources"} {
+		if slices.Contains(a, banned) {
+			t.Errorf("argv has %s", banned)
+		}
+	}
+	parent := map[string]string{"HOME": "/h", "PATH": "/bin", "ANTHROPIC_API_KEY": "sk-x", "ANTHROPIC_AUTH_TOKEN": "t", "CLAUDE_CODE_OAUTH_TOKEN": "o",
+		"ANTHROPIC_PROFILE": "p", "CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CONFIG_DIR": "/c", "HTTPS_PROXY": "http://p",
+		"AWS_SECRET_ACCESS_KEY": "k", toolbridge.EnvCapability: "c", "APA_DB_PATH": "/db"}
 	env := CLIEnv(func(k string) string { return parent[k] }, "EXTRA=1")
-	if !slices.Equal(env, []string{"HOME=/h", "PATH=/bin", "EXTRA=1"}) {
+	if !slices.Equal(env, []string{"HOME=/h", "PATH=/bin", "DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "EXTRA=1"}) {
 		t.Errorf("env %q", env)
 	}
 }
 
 // hostEnv is a full host: shop over HTTP, Store file, bridge, fake CLI.
+// Prepare starts the run's task on first use (a test convenience: the
+// command's own Prepare opens the Store and refuses an existing task).
 type hostEnv struct {
-	t    *testing.T
-	now  atomic.Uint64
-	reg  contracts.RegistryConfig
-	st   *store.Store
-	h    *Host
-	prof policy.Profile
+	t         *testing.T
+	now       atomic.Uint64
+	reg       contracts.RegistryConfig
+	st        *store.Store
+	h         *Host
+	prof      policy.Profile
+	noProfile map[string]bool
+	prepared  atomic.Int32
 }
 
 func newHost(t *testing.T) *hostEnv {
 	t.Helper()
-	e := &hostEnv{t: t}
+	e := &hostEnv{t: t, noProfile: map[string]bool{}}
 	e.now.Store(t0)
 	raw, _ := os.ReadFile("../../testdata/contracts/registry.json")
 	if err := contracts.Decode(raw, &e.reg); err != nil {
@@ -276,36 +294,51 @@ func newHost(t *testing.T) *hostEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { bridge.Close() })
-	e.h = &Host{Store: e.st, Registry: reg, Bridge: bridge, CLI: fake(t), BridgeCmd: []string{self(t), "mcp-bridge"},
-		Limits: testLimits, TraceDir: filepath.Join(t.TempDir(), "runs")}
+	e.h = &Host{Registry: reg, Bridge: bridge, CLI: fake(t), BridgeCmd: []string{self(t), "mcp-bridge"},
+		Limits: testLimits, Gate: Gate{CLIVersion: fakecli.InitVersion, AcceptAuth: []string{fakecli.AuthSource}},
+		TraceDir: filepath.Join(t.TempDir(), "runs")}
 	return e
 }
 
-func (e *hostEnv) start(task string, withProfile bool) contracts.Session {
-	e.t.Helper()
+func (e *hostEnv) session(task string) contracts.Session {
 	reg, _ := contracts.NewRegistry(e.reg)
 	tk, _, _ := reg.Binding(task)
-	cred := policy.Credential{ConsumerID: tk.ConsumerID, ValidUntil: t0 + 86400, EvidenceMode: "fixture"}
-	setup := store.TaskSetup{TaskID: task, Credential: &cred, ProfileAbsent: true, BudgetInitial: "5000000", AssetID: "fixture-usdc"}
-	if withProfile {
-		setup = store.TaskSetup{TaskID: task, Credential: &cred}
-		p := e.prof
-		setup.Profile = &p
-	}
-	if err := e.st.StartTask(setup); err != nil {
-		e.t.Fatal(err)
-	}
 	return contracts.Session{ConsumerID: tk.ConsumerID, AgentID: tk.AgentID, TaskID: task}
 }
 
-func (e *hostEnv) run(ctx context.Context, task, scen string, env ...string) RunResult {
+// prepare starts task unless it already exists.
+func (e *hostEnv) prepare(task string) Prepare {
+	return func() (*store.Store, error) {
+		e.prepared.Add(1)
+		sess := e.session(task)
+		if _, err := e.st.Task(sess); err == nil {
+			return e.st, nil
+		}
+		cred := policy.Credential{ConsumerID: sess.ConsumerID, ValidUntil: t0 + 86400, EvidenceMode: "fixture"}
+		setup := store.TaskSetup{TaskID: task, Credential: &cred}
+		if e.noProfile[task] {
+			setup.ProfileAbsent, setup.BudgetInitial, setup.AssetID = true, "5000000", "fixture-usdc"
+		} else {
+			p := e.prof
+			setup.Profile = &p
+		}
+		return e.st, e.st.StartTask(setup)
+	}
+}
+
+func (e *hostEnv) runWith(ctx context.Context, task, scen string, prepare Prepare, env ...string) RunResult {
 	e.t.Helper()
 	e.h.Env = CLIEnv(os.Getenv, append(env, scenario(scen))...)
-	res, err := e.h.Run(ctx, task, "Buy the brief.")
+	res, err := e.h.Run(ctx, task, "Buy the brief.", prepare)
 	if err != nil {
 		e.t.Fatal(err)
 	}
 	return res
+}
+
+func (e *hostEnv) run(ctx context.Context, task, scen string, env ...string) RunResult {
+	e.t.Helper()
+	return e.runWith(ctx, task, scen, e.prepare(task), env...)
 }
 
 func (e *hostEnv) task(sess contracts.Session) store.TaskView {
@@ -336,11 +369,11 @@ func outcomes(calls []toolbridge.CallRecord) string {
 
 func TestHostMainLine(t *testing.T) {
 	e := newHost(t)
-	sess := e.start("task-a", true)
+	sess := e.session("task-a")
 	tmp := t.TempDir()
 	t.Setenv("TMPDIR", tmp) // after the bridge is up: the run's own directory lands here
 	res := e.run(context.Background(), "task-a", "ask-mainline")
-	if res.Report.Outcome != OK || res.StoreEnd != "" {
+	if res.Report.Outcome != OK || res.StoreEnd != "" || !res.TaskStarted || e.prepared.Load() != 1 {
 		t.Fatalf("%+v", res)
 	}
 	if got := outcomes(res.Calls); got != "list_products:ok get_quote:ok request_purchase:Ask" {
@@ -359,14 +392,227 @@ func TestHostMainLine(t *testing.T) {
 		t.Errorf("run left %v behind", left)
 	}
 	trace, _ := os.ReadFile(res.Trace)
-	if !strings.Contains(string(trace), `"untrusted_cli_result":"Paid and downloaded the Korean market brief."`) || strings.Contains(string(trace), "Buy the brief") {
+	if !strings.Contains(string(trace), `"untrusted_cli_result":"Paid and downloaded the Korean market brief."`) || strings.Contains(string(trace), "Buy the brief") ||
+		!strings.Contains(string(trace), `"gate":"passed"`) {
 		t.Errorf("trace: %s", trace)
+	}
+}
+
+// genScenario writes a scenario to a temp file and returns its name for runWith.
+func genScenario(t *testing.T, sc fakecli.Scenario) string {
+	t.Helper()
+	raw, _ := json.Marshal(sc)
+	p := filepath.Join(t.TempDir(), "scenario.json")
+	os.WriteFile(p, raw, 0o600)
+	return strings.TrimSuffix(p, ".json") // scenario() adds the directory only to bare names
+}
+
+func badInit(over map[string]string) fakecli.Scenario {
+	init := map[string]json.RawMessage{}
+	for k, v := range over {
+		init[k] = json.RawMessage(v)
+	}
+	return fakecli.Scenario{ManualInit: true, Steps: []fakecli.Step{
+		{Do: "tool", Tool: "list_products"},
+		{Do: "init", Init: init},
+		{Do: "tool", Tool: "request_purchase", Args: json.RawMessage(`{"product_id":"kr-market"}`)},
+		{Do: "result", Text: "done"},
+	}}
+}
+
+// Stage A, A2: every init the gate refuses ends the run before Prepare, with
+// no business tool run.
+func TestHostInitGate(t *testing.T) {
+	const tools3 = `["mcp__apa__list_products","mcp__apa__get_quote","mcp__apa__request_purchase"]`
+	for name, c := range map[string]struct {
+		sc   fakecli.Scenario
+		code string
+	}{
+		"tool added":        {badInit(map[string]string{"tools": `["mcp__apa__list_products","mcp__apa__get_quote","mcp__apa__request_purchase","Bash"]`}), "tools"},
+		"tool missing":      {badInit(map[string]string{"tools": `["mcp__apa__list_products","mcp__apa__get_quote"]`}), "tools"},
+		"tool repeated":     {badInit(map[string]string{"tools": `["mcp__apa__list_products","mcp__apa__list_products","mcp__apa__get_quote"]`}), "tools"},
+		"prefix only":       {badInit(map[string]string{"tools": `["mcp__apa__list_products","mcp__apa__get_quote","mcp__apa__request_purchases"]`}), "tools"},
+		"extra server":      {badInit(map[string]string{"mcp_servers": `[{"name":"apa","status":"connected"},{"name":"gmail","status":"connected"}]`}), "mcp_servers"},
+		"server not ready":  {badInit(map[string]string{"mcp_servers": `[{"name":"apa","status":"pending"}]`}), "mcp_servers"},
+		"permission mode":   {badInit(map[string]string{"permissionMode": `"default"`}), "permission_mode"},
+		"auth none":         {badInit(map[string]string{"apiKeySource": `"none"`}), "auth_unconfirmed"},
+		"auth api key":      {badInit(map[string]string{"apiKeySource": `"ANTHROPIC_API_KEY"`}), "auth_unconfirmed"},
+		"auth missing":      {badInit(map[string]string{"apiKeySource": `null`}), "auth_missing"},
+		"auth not a string": {badInit(map[string]string{"apiKeySource": `true`}), "init_malformed"},
+		"tools not strings": {badInit(map[string]string{"tools": `[1,2,3]`}), "init_malformed"},
+		"servers object":    {badInit(map[string]string{"mcp_servers": `{"name":"apa"}`}), "init_malformed"},
+		"plugins loaded":    {badInit(map[string]string{"plugins": `[{"name":"x","path":"/p"}]`}), "plugins"},
+		"agents listed":     {badInit(map[string]string{"agents": `[{"name":"general-purpose","description":"","source":"built-in"}]`}), "agents"},
+		"skills wrong type": {badInit(map[string]string{"skills": `"all"`}), "init_malformed"},
+		"other version":     {badInit(map[string]string{"claude_code_version": `"2.1.288"`}), "cli_version"},
+		"duplicate key": {fakecli.Scenario{ManualInit: true, Steps: []fakecli.Step{
+			{Do: "tool", Tool: "list_products"},
+			{Do: "raw", Text: `{"type":"system","subtype":"init","tools":` + tools3 + `,"tools":` + tools3 + `,"mcp_servers":[{"name":"apa","status":"connected"}],"permissionMode":"dontAsk","apiKeySource":"` + fakecli.AuthSource + `","claude_code_version":"` + fakecli.InitVersion + `"}` + "\n"},
+			{Do: "tool", Tool: "list_products"}, {Do: "result", Text: "done"}}}, "init_malformed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newHost(t)
+			res := e.runWith(context.Background(), "task-a", genScenario(t, c.sc), e.prepare("task-a"))
+			if res.Report.Outcome != ConfigMismatch || res.Report.Detail != c.code {
+				t.Fatalf("outcome %s %q, want config_mismatch %q", res.Report.Outcome, res.Report.Detail, c.code)
+			}
+			if e.prepared.Load() != 0 || res.TaskStarted || len(res.Calls) != 0 || res.NotReady == 0 {
+				t.Errorf("prepared %d, task %v, records %v, not ready %d", e.prepared.Load(), res.TaskStarted, res.Calls, res.NotReady)
+			}
+			if _, err := e.st.Task(e.session("task-a")); store.Code(err) != "OWNERSHIP_MISMATCH" {
+				t.Errorf("task exists: %v", err)
+			}
+		})
+	}
+}
+
+// Stage A: a missing init, a hook message before it, an init that arrives
+// once the run is stopping, and a second init: none prepares or re-arms.
+func TestHostInitSequence(t *testing.T) {
+	e := newHost(t)
+	res := e.run(context.Background(), "task-a", "init-missing")
+	if res.Report.Outcome != ConfigMismatch || res.Report.Detail != "init_missing" || e.prepared.Load() != 0 || res.NotReady != 3 || len(res.Calls) != 0 {
+		t.Fatalf("missing: %+v", res)
+	}
+	res = e.run(context.Background(), "task-a", "hook-before-init")
+	if res.Report.Outcome != ConfigMismatch || res.Report.Detail != "hook_message" || e.prepared.Load() != 0 {
+		t.Fatalf("hook before init: %+v", res)
+	}
+
+	// Late init: the run times out at 300 ms; the fake ignores SIGTERM and
+	// prints a valid init at 800 ms, before SIGKILL at 2.3 s.
+	e.h.Limits.Total, e.h.Limits.Grace = 300*time.Millisecond, 2*time.Second
+	res = e.run(context.Background(), "task-a", "init-late")
+	if res.Report.Outcome != Timeout || e.prepared.Load() != 0 || res.TaskStarted || res.StoreEnd != "" || len(res.Calls) != 0 {
+		t.Fatalf("late init: %+v prepared %d", res, e.prepared.Load())
+	}
+	trace, _ := os.ReadFile(res.Trace)
+	if !strings.Contains(string(trace), `"gate":"passed"`) {
+		t.Errorf("the late init was not read (the test would prove nothing): %s", trace)
+	}
+	e.h.Limits = testLimits
+
+	// A second init after a legitimate purchase stops the run; the purchase
+	// stays and the gate does not open again.
+	sess := e.session("task-a")
+	res = e.run(context.Background(), "task-a", "init-duplicate")
+	if res.Report.Outcome != ConfigMismatch || res.Report.Detail != "init_duplicate" || outcomes(res.Calls) != "request_purchase:Ask" || res.StoreEnd != "" {
+		t.Fatalf("duplicate: %+v", res)
+	}
+	if v := e.task(sess); len(v.Purchases) != 1 || v.Status != "awaiting_approval" {
+		t.Fatalf("store after duplicate init: %+v", v)
+	}
+}
+
+// A hook message after a legitimate purchase keeps the purchase and stops
+// all later submissions.
+func TestHostHookAfterPurchase(t *testing.T) {
+	e := newHost(t)
+	sess := e.session("task-a")
+	res := e.run(context.Background(), "task-a", "hook-after-purchase")
+	if res.Report.Outcome != ConfigMismatch || res.Report.Detail != "hook_message" || outcomes(res.Calls) != "request_purchase:Ask" {
+		t.Fatalf("%+v %s", res.Report, outcomes(res.Calls))
+	}
+	if v := e.task(sess); len(v.Purchases) != 1 || v.Purchases[0].ApprovalClosed != "" {
+		t.Fatalf("store: %+v", v)
+	}
+	if got := strings.Join(e.eventTypes(sess), ","); got != "TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED" {
+		t.Errorf("events %s", got)
+	}
+}
+
+// Init passed but Prepare failed: no tool runs, nothing is recorded.
+func TestHostPrepareFails(t *testing.T) {
+	e := newHost(t)
+	failing := func() (*store.Store, error) { e.prepared.Add(1); return nil, errors.New("store unavailable") }
+	res := e.runWith(context.Background(), "task-a", "ask-mainline", failing)
+	if res.Report.Outcome != StoreUnavailable || res.PrepareError == nil || res.TaskStarted || len(res.Calls) != 0 || e.prepared.Load() != 1 {
+		t.Fatalf("%+v", res)
+	}
+	if _, err := e.st.Task(e.session("task-a")); err == nil {
+		t.Error("a task exists")
+	}
+}
+
+// Init and cancel race: cancelled while Prepare runs, the run waits for
+// Prepare, never arms, and records the cancel on the task Prepare made.
+func TestHostCancelDuringPrepare(t *testing.T) {
+	e := newHost(t)
+	inside, release := make(chan struct{}), make(chan struct{})
+	slow := func() (*store.Store, error) {
+		close(inside)
+		<-release
+		return e.prepare("task-a")()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan RunResult)
+	go func() { done <- e.runWith(ctx, "task-a", "ask-mainline", slow) }()
+	<-inside
+	cancel()
+	select {
+	case <-done:
+		t.Fatal("the run ended while Prepare was still running")
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(release)
+	res := <-done
+	sess := e.session("task-a")
+	if res.Report.Outcome != Cancelled || !res.TaskStarted || res.StoreEnd != "TASK_CANCELLED" || len(res.Calls) != 0 {
+		t.Fatalf("%+v %s", res, outcomes(res.Calls))
+	}
+	if v := e.task(sess); len(v.Purchases) != 0 || v.Status != "cancelled" {
+		t.Fatalf("store: %+v", v)
+	}
+}
+
+// The assistant bound: 10 complete messages pass, the 11th stops the run;
+// user, stream_event and system messages do not count.
+func TestAssistantLimit(t *testing.T) {
+	lim := testLimits
+	lim.Assistant = 10
+	if r := Run(context.Background(), runnerSpec(t, "assistant-10", lim)); r.Outcome != OK || r.Assistant != 10 {
+		t.Errorf("10: %+v", r)
+	}
+	if r := Run(context.Background(), runnerSpec(t, "assistant-11", lim)); r.Outcome != TurnLimit || r.Detail != "assistant_messages" || r.Assistant != 11 {
+		t.Errorf("11: %+v", r)
+	}
+}
+
+// The trace keeps whitelisted diagnostics only: marks placed in the auth
+// value, stderr, assistant text, prompt, environment and capability never
+// reach it.
+func TestHostTraceWhitelist(t *testing.T) {
+	e := newHost(t)
+	e.h.Gate.AcceptAuth = []string{"MARK-AUTH-7f3a"}
+	sc := fakecli.Scenario{ManualInit: true, Steps: []fakecli.Step{
+		{Do: "init", Init: map[string]json.RawMessage{"apiKeySource": json.RawMessage(`"MARK-AUTH-7f3a"`)}},
+		{Do: "stderr", Text: "MARK-STDERR-7f3a"},
+		{Do: "text", Text: "MARK-ASSISTANT-7f3a"},
+		{Do: "tool", Tool: "request_purchase", Args: json.RawMessage(`{"product_id":"kr-market"}`)},
+		{Do: "raw", Text: `{"type":"result","subtype":"success","is_error":false,"result":"ok","num_turns":1,"usage":{"input_tokens":5,"output_tokens":7,"note":"MARK-USAGE-7f3a"}}` + "\n"},
+	}}
+	e.h.Env = CLIEnv(func(k string) string {
+		if k == "HOME" {
+			return filepath.Join(t.TempDir(), "MARK-HOME-7f3a")
+		}
+		return os.Getenv(k)
+	}, scenario(genScenario(t, sc)))
+	res, err := e.h.Run(context.Background(), "task-a", "MARK-PROMPT-7f3a", e.prepare("task-a"))
+	if err != nil || res.Report.Outcome != OK || outcomes(res.Calls) != "request_purchase:Ask" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	trace, _ := os.ReadFile(res.Trace)
+	if strings.Contains(string(trace), "MARK-") || strings.Contains(string(trace), "7f3a") {
+		t.Fatalf("a mark reached the trace: %s", trace)
+	}
+	if !strings.Contains(string(trace), `"usage":{"input_tokens":5,"output_tokens":7}`) {
+		t.Errorf("usage counts missing: %s", trace)
 	}
 }
 
 func TestHostForgedAndUnauthenticatedRequests(t *testing.T) {
 	e := newHost(t)
-	sess := e.start("task-a", true)
+	sess := e.session("task-a")
 	res := e.run(context.Background(), "task-a", "forged-args")
 	want := "request_purchase:INVALID_ARGUMENTS request_purchase:INVALID_ARGUMENTS get_quote:INVALID_ARGUMENTS " +
 		"get_quote:INVALID_ARGUMENTS get_quote:INVALID_ARGUMENTS get_quote:UNKNOWN_PRODUCT"
@@ -385,7 +631,7 @@ func TestHostForgedAndUnauthenticatedRequests(t *testing.T) {
 
 func TestHostRetryAndCallBudget(t *testing.T) {
 	e := newHost(t)
-	sess := e.start("task-a", true)
+	sess := e.session("task-a")
 	res := e.run(context.Background(), "task-a", "retry-same")
 	if outcomes(res.Calls) != "request_purchase:Ask request_purchase:Ask" || len(e.task(sess).Purchases) != 1 {
 		t.Fatalf("%s", outcomes(res.Calls))
@@ -411,7 +657,7 @@ func TestHostEndings(t *testing.T) {
 	e.h.Limits.Total = 3 * time.Second // room for the purchase to land first, even under -race
 
 	// CLI timeout: TASK_TIMED_OUT, the Ask stays pending.
-	sess := e.start("task-a", true)
+	sess := e.session("task-a")
 	res := e.run(context.Background(), "task-a", "hang")
 	v := e.task(sess)
 	if res.Report.Outcome != Timeout || res.StoreEnd != "TASK_TIMED_OUT" || !slices.Contains(e.eventTypes(sess), "TASK_TIMED_OUT") || v.Purchases[0].ApprovalClosed != "" {
@@ -424,7 +670,7 @@ func TestHostEndings(t *testing.T) {
 	}
 
 	// Host cancel: TASK_CANCELLED, the open Ask is withdrawn.
-	sessB := e.start("task-b", true)
+	sessB := e.session("task-b")
 	e.h.Limits.Total = 10 * time.Second
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { waitPurchase(t, e, sessB); cancel() }()
@@ -437,17 +683,26 @@ func TestHostEndings(t *testing.T) {
 	// A Deny stays the status and the reason through a later timeout.
 	e2 := newHost(t)
 	e2.h.Limits.Total = 3 * time.Second
-	sess = e2.start("task-a", false)
+	e2.noProfile["task-a"] = true
 	res = e2.run(context.Background(), "task-a", "hang")
-	v = e2.task(sess)
+	v = e2.task(e2.session("task-a"))
 	if outcomes(res.Calls) != "request_purchase:Deny" || res.StoreEnd != "TASK_TIMED_OUT" || v.Status != "denied" || v.DenyReason != "CONFIG_MISSING" {
 		t.Fatalf("deny: %+v %+v", res, v)
+	}
+
+	// A timeout before any task exists records nothing: no task is created
+	// to note a failure.
+	e3 := newHost(t)
+	e3.h.Limits.Total, e3.h.Limits.Grace = 300*time.Millisecond, 500*time.Millisecond
+	res = e3.run(context.Background(), "task-a", "init-late")
+	if res.Report.Outcome != Timeout || res.TaskStarted || res.StoreEnd != "" || res.EndError != "" {
+		t.Fatalf("timeout before a task: %+v", res)
 	}
 }
 
 func TestHostAskExpires(t *testing.T) {
 	e := newHost(t)
-	sess := e.start("task-a", true)
+	sess := e.session("task-a")
 	e.run(context.Background(), "task-a", "ask-mainline")
 	p := e.task(sess).Purchases[0]
 	e.now.Store(p.DeadlineAt)
@@ -461,7 +716,7 @@ func TestHostAskExpires(t *testing.T) {
 
 func TestHostCapabilityLifetime(t *testing.T) {
 	e := newHost(t)
-	sessA := e.start("task-a", true)
+	sessA := e.session("task-a")
 	capFile := filepath.Join(t.TempDir(), "cap")
 	res := e.run(context.Background(), "task-a", "leak-capability", fakecli.EnvCapFile+"="+capFile)
 	capability, _ := os.ReadFile(capFile)
@@ -482,7 +737,7 @@ func TestHostCapabilityLifetime(t *testing.T) {
 		t.Fatalf("late call: %+v %v", r, err)
 	}
 	// Cross-run: while B's run is active, A's old capability still opens nothing.
-	sessB := e.start("task-b", true)
+	sessB := e.session("task-b")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan RunResult)
 	go func() { done <- e.run(ctx, "task-b", "hang") }()
@@ -497,17 +752,13 @@ func TestHostCapabilityLifetime(t *testing.T) {
 
 func TestHostNotInstalled(t *testing.T) {
 	e := newHost(t)
-	sess := e.start("task-a", true)
 	e.h.CLI = filepath.Join(t.TempDir(), "claude")
 	res := e.run(context.Background(), "task-a", "ask-mainline")
-	if res.Report.Outcome != NotInstalled || res.StoreEnd != "" || e.task(sess).Status != "running" {
+	if res.Report.Outcome != NotInstalled || res.StoreEnd != "" || res.TaskStarted || e.prepared.Load() != 0 {
 		t.Fatalf("%+v", res)
 	}
-	if _, err := e.h.Run(context.Background(), "task-unknown", "x"); err == nil {
+	if _, err := e.h.Run(context.Background(), "task-unknown", "x", e.prepare("task-unknown")); err == nil {
 		t.Error("unknown task ran")
-	}
-	if _, err := e.h.Run(context.Background(), "task-a-next", "x"); err == nil {
-		t.Error("unstarted task ran")
 	}
 }
 

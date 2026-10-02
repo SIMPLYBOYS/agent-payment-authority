@@ -1,0 +1,2 @@
+{"description":"No init message at all: business calls are refused before it, and the run ends as a config mismatch without opening the Store.","manual_init":true,
+ "steps":[{"do":"tool","tool":"request_purchase","args":{"product_id":"kr-market"}},{"do":"tool","tool":"list_products"},{"do":"tool","tool":"get_quote","args":{"product_id":"kr-market"}},{"do":"result","text":"done"}]}

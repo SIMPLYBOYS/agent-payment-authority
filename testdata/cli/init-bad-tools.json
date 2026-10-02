@@ -1,0 +1,2 @@
+{"description":"An init that lists a built-in tool besides the three: the gate stops the run before the Store is opened.","manual_init":true,
+ "steps":[{"do":"init","init":{"tools":["mcp__apa__list_products","mcp__apa__get_quote","mcp__apa__request_purchase","Bash"]}},{"do":"tool","tool":"request_purchase","args":{"product_id":"kr-market"}},{"do":"result","text":"done"}]}

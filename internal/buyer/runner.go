@@ -42,6 +42,10 @@ const (
 	MissingResult  Outcome = "missing_result"
 	CLIError       Outcome = "cli_error"
 	Orphaned       Outcome = "orphaned_output" // a process outside the group kept a pipe open
+	// Run diagnostics of the host's own checks; none is an apa.m1.v2 code.
+	ConfigMismatch   Outcome = "config_mismatch"   // the CLI's init (or a hook message) is not what the host configured
+	TurnLimit        Outcome = "turn_limit"        // more assistant messages than Limits.Assistant
+	StoreUnavailable Outcome = "store_unavailable" // init passed but the host could not prepare the Store or task
 )
 
 // Limits bound one run. Every limit ends the run when crossed.
@@ -49,12 +53,16 @@ type Limits struct {
 	Line   int           // bytes in one stdout line (one stream-json message)
 	Stdout int           // bytes of stdout in total
 	Stderr int           // bytes of stderr in total; stderr content is never kept
-	Total  time.Duration // wall time of the run
+	Total  time.Duration // wall time of the run from the CLI's start, waiting for init included
 	Grace  time.Duration // SIGTERM to SIGKILL, and the wait for pipes once the CLI is gone
+	// Complete type=assistant messages; the next one stops the run. An
+	// output-message bound, not a count of model requests. 0: no bound.
+	Assistant int
 }
 
-// DefaultLimits are the host's limits for a live run.
-var DefaultLimits = Limits{Line: 1 << 20, Stdout: 8 << 20, Stderr: 1 << 20, Total: 5 * time.Minute, Grace: 3 * time.Second}
+// DefaultLimits are the host's limits for a run. Cleanup after a stop takes
+// up to two Grace periods more than Total.
+var DefaultLimits = Limits{Line: 1 << 20, Stdout: 8 << 20, Stderr: 1 << 20, Total: 3 * time.Minute, Grace: 3 * time.Second, Assistant: 10}
 
 // Spec is one process to run. The host builds every field; nothing comes
 // from the model.
@@ -64,19 +72,37 @@ type Spec struct {
 	Dir    string
 	Env    []string // the whole environment
 	Limits Limits
+	// Watch sees every stream-json message, in order, on the reader before
+	// the next line is read. A non-empty outcome stops the run with it and
+	// detail, a host-defined code. It may block (the CLI then waits on its
+	// pipe); the run does not end before it returns.
+	Watch func(typ, subtype string, line []byte) (Outcome, string)
+	// Stopping is called once, from the run loop, when the run starts to
+	// stop for any reason, the CLI's own exit included.
+	Stopping func()
 }
 
 // Report is what the host learns from the CLI's own output. Result and
 // Usage are untrusted CLI/model output.
 type Report struct {
 	Outcome     Outcome
-	ExitCode    int // -1: killed, or never started
-	Messages    int // stream-json messages read
+	Detail      string // host-defined code for Watch and limit stops
+	ExitCode    int    // -1: killed, or never started
+	Messages    int    // stream-json messages read
 	Result      string
 	NumTurns    int
 	Usage       json.RawMessage // nil: unknown
 	StderrBytes int
+	Assistant   int // complete assistant messages read
 }
+
+// stopErr ends a stream read with the outcome to report.
+type stopErr struct {
+	outcome Outcome
+	detail  string
+}
+
+func (e *stopErr) Error() string { return string(e.outcome) + ": " + e.detail }
 
 var (
 	errOverflow = errors.New("output limit crossed")
@@ -92,18 +118,20 @@ type stream struct {
 	subtype            string
 	usage              json.RawMessage
 	authFailed, rate   bool
+	assistant          int
 }
 
 // Run starts the CLI and reads its stream-json under the limits (execute).
 func Run(ctx context.Context, s Spec) Report {
 	var st stream
-	fault, exit, stderrBytes := execute(ctx, s, func(r io.Reader) error { return readStream(r, s.Limits, &st) })
-	r := Report{Outcome: fault, ExitCode: exit, StderrBytes: stderrBytes, Messages: st.messages, NumTurns: st.numTurns, Usage: st.usage}
+	x := execute(ctx, s, func(r io.Reader) error { return readStream(r, s, &st) })
+	r := Report{Outcome: x.fault, Detail: x.detail, ExitCode: x.exit, StderrBytes: x.stderrBytes, Messages: st.messages,
+		NumTurns: st.numTurns, Usage: st.usage, Assistant: st.assistant}
 	if st.result != nil {
 		r.Result = *st.result
 	}
-	if fault == "" {
-		r.Outcome = classify(exit, &st)
+	if x.fault == "" {
+		r.Outcome = classify(x.exit, &st)
 	}
 	return r
 }
@@ -113,7 +141,7 @@ func Run(ctx context.Context, s Spec) Report {
 // bytes is an error; so is a ctx that ended meanwhile.
 func Version(ctx context.Context, path string, env []string, lim Limits) (string, error) {
 	var out string
-	fault, exit, _ := execute(ctx, Spec{Path: path, Args: []string{"--version"}, Dir: os.TempDir(), Env: env, Limits: lim}, func(r io.Reader) error {
+	x := execute(ctx, Spec{Path: path, Args: []string{"--version"}, Dir: os.TempDir(), Env: env, Limits: lim}, func(r io.Reader) error {
 		b, err := io.ReadAll(io.LimitReader(r, int64(lim.Stdout)+1))
 		if err != nil {
 			return err
@@ -125,10 +153,10 @@ func Version(ctx context.Context, path string, env []string, lim Limits) (string
 		return nil
 	})
 	switch {
-	case fault != "":
-		return "", fmt.Errorf("%s --version: %s", path, fault)
-	case exit != 0:
-		return "", fmt.Errorf("%s --version: exit %d", path, exit)
+	case x.fault != "":
+		return "", fmt.Errorf("%s --version: %s", path, x.fault)
+	case x.exit != 0:
+		return "", fmt.Errorf("%s --version: exit %d", path, x.exit)
 	case ctx.Err() != nil:
 		return "", ctx.Err()
 	}
@@ -141,20 +169,36 @@ func Version(ctx context.Context, path string, env []string, lim Limits) (string
 // kills the whole group; processes outside the group are never signalled.
 // fault is "" when nothing stopped the process; exit is -1 when it was
 // killed or never started.
-func execute(ctx context.Context, s Spec, consume func(io.Reader) error) (fault Outcome, exit, stderrBytes int) {
-	exit = -1
+type execResult struct {
+	fault       Outcome
+	detail      string
+	exit        int
+	stderrBytes int
+}
+
+func execute(ctx context.Context, s Spec, consume func(io.Reader) error) (x execResult) {
+	x.exit = -1
 	ctx, cancel := context.WithTimeout(ctx, s.Limits.Total)
 	defer cancel()
+	notified := false
+	notify := func() {
+		if !notified && s.Stopping != nil {
+			s.Stopping()
+		}
+		notified = true
+	}
 
 	outR, outW, err := os.Pipe()
 	if err != nil {
-		return StartFailed, exit, 0
+		notify()
+		return execResult{fault: StartFailed, exit: -1}
 	}
 	errR, errW, err := os.Pipe()
 	if err != nil {
 		outR.Close()
 		outW.Close()
-		return StartFailed, exit, 0
+		notify()
+		return execResult{fault: StartFailed, exit: -1}
 	}
 	cmd := &exec.Cmd{
 		Path: s.Path, Args: append([]string{s.Path}, s.Args...), Dir: s.Dir, Env: s.Env,
@@ -167,10 +211,11 @@ func execute(ctx context.Context, s Spec, consume func(io.Reader) error) (fault 
 	if err != nil {
 		outR.Close()
 		errR.Close()
+		notify()
 		if errors.Is(err, fs.ErrNotExist) {
-			return NotInstalled, exit, 0
+			return execResult{fault: NotInstalled, exit: -1}
 		}
-		return StartFailed, exit, 0
+		return execResult{fault: StartFailed, exit: -1}
 	}
 	pgid := cmd.Process.Pid
 	group := func(sig syscall.Signal) { syscall.Kill(-pgid, sig) }
@@ -179,7 +224,7 @@ func execute(ctx context.Context, s Spec, consume func(io.Reader) error) (fault 
 	go func() { outc <- consume(outR) }()
 	go func() {
 		n, err := io.Copy(io.Discard, io.LimitReader(errR, int64(s.Limits.Stderr)+1))
-		stderrBytes = int(n)
+		x.stderrBytes = int(n)
 		if err == nil && n > int64(s.Limits.Stderr) {
 			err = errOverflow
 		}
@@ -193,10 +238,11 @@ func execute(ctx context.Context, s Spec, consume func(io.Reader) error) (fault 
 		escalate, abandon <-chan time.Time
 		stopping          bool
 	)
-	stop := func(o Outcome) {
-		if fault == "" {
-			fault = o
+	stop := func(o Outcome, detail string) {
+		if x.fault == "" {
+			x.fault, x.detail = o, detail
 		}
+		notify()
 		if !stopping && waitc != nil {
 			stopping = true
 			group(syscall.SIGTERM)
@@ -208,30 +254,34 @@ func execute(ctx context.Context, s Spec, consume func(io.Reader) error) (fault 
 		case <-done:
 			done = nil
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				stop(Timeout)
+				stop(Timeout, "")
 			} else {
-				stop(Cancelled)
+				stop(Cancelled, "")
 			}
 		case err := <-outc:
 			outc = nil
+			var se *stopErr
 			switch {
+			case errors.As(err, &se):
+				stop(se.outcome, se.detail)
 			case errors.Is(err, os.ErrClosed):
-				stop(Orphaned)
+				stop(Orphaned, "")
 			case errors.Is(err, errOverflow), errors.Is(err, toolbridge.ErrTooLong):
-				stop(OutputOverflow)
+				stop(OutputOverflow, "")
 			case err != nil:
-				stop(ParseError)
+				stop(ParseError, "")
 			}
 		case err := <-errc:
 			errc = nil
 			switch {
 			case errors.Is(err, os.ErrClosed):
-				stop(Orphaned)
+				stop(Orphaned, "")
 			case err != nil:
-				stop(OutputOverflow)
+				stop(OutputOverflow, "")
 			}
 		case exitErr = <-waitc:
 			waitc, escalate = nil, nil
+			notify() // the CLI is gone: nothing it could still ask for may start
 			// The leader is reaped. Whatever is left in its group is ours and
 			// can only hold pipes open: kill it, then give the pipes Grace.
 			// ponytail: the group ID is the leader's PID, reaped a moment
@@ -253,11 +303,11 @@ func execute(ctx context.Context, s Spec, consume func(io.Reader) error) (fault 
 
 	var ee *exec.ExitError
 	if errors.As(exitErr, &ee) {
-		exit = ee.ExitCode()
+		x.exit = ee.ExitCode()
 	} else if exitErr == nil {
-		exit = 0
+		x.exit = 0
 	}
-	return fault, exit, stderrBytes
+	return x
 }
 
 // classify judges a run that ended on its own. Exit 0 alone proves nothing:
@@ -281,8 +331,9 @@ func classify(exit int, st *stream) Outcome {
 }
 
 // readStream reads stream-json: one JSON object with a string "type" per
-// line. Anything else ends the run.
-func readStream(r io.Reader, lim Limits, st *stream) error {
+// line. Anything else ends the run, as do the assistant bound and Watch.
+func readStream(r io.Reader, s Spec, st *stream) error {
+	lim := s.Limits
 	br := bufio.NewReaderSize(r, 64<<10)
 	total := 0
 	for {
@@ -312,6 +363,16 @@ func readStream(r io.Reader, lim Limits, st *stream) error {
 			return errParse
 		}
 		st.messages++
+		if m.Type == "assistant" {
+			if st.assistant++; lim.Assistant > 0 && st.assistant > lim.Assistant {
+				return &stopErr{TurnLimit, "assistant_messages"}
+			}
+		}
+		if s.Watch != nil {
+			if o, d := s.Watch(m.Type, m.Subtype, line); o != "" {
+				return &stopErr{o, d}
+			}
+		}
 		switch {
 		case m.Type == "system" && m.Subtype == "api_retry":
 			st.authFailed = st.authFailed || m.Error == "authentication_failed"

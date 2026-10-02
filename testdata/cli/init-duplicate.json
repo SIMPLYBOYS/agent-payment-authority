@@ -1,0 +1,2 @@
+{"description":"A second init after a legitimate purchase: the run stops and the gate does not open again; the purchase stays.",
+ "steps":[{"do":"tool","tool":"request_purchase","args":{"product_id":"kr-market"}},{"do":"init"},{"do":"tool","tool":"list_products"},{"do":"result","text":"done"}]}

@@ -1,0 +1,2 @@
+{"description":"A hook message after a legitimate purchase: the purchase stays, the run stops, and nothing more is submitted.",
+ "steps":[{"do":"tool","tool":"request_purchase","args":{"product_id":"kr-market"}},{"do":"raw","text":"{\"type\":\"system\",\"subtype\":\"hook_response\",\"hook_event\":\"PostToolUse\",\"hook_name\":\"user-hook\"}\n"},{"do":"tool","tool":"request_purchase","args":{"product_id":"kr-market"}},{"do":"result","text":"done"}]}

@@ -21,33 +21,44 @@ import (
 // model as mcp__apa__<tool>.
 const MCPServer = "apa"
 
-// Argv is the CLI's whole argv after the program name. Flags were checked
-// against `claude --help` of CLI 2.1.287; docs/cli-poc.md lists which ones
-// are only documented. The prompt is the host's, never the model's.
+// Model and Effort are the candidate model settings (Aaron, 2026-10-03),
+// to be confirmed against the CLI version before a live run.
+const (
+	Model  = "sonnet"
+	Effort = "low"
+)
+
+// Argv is the CLI's whole argv after the program name. Every flag is in
+// `claude --help` of CLI 2.1.287; what each does is the help text's word,
+// not yet observed in a live run (docs/cli-poc.md section 6). The prompt is
+// the host's, never the model's.
 func Argv(prompt, mcpConfig string) []string {
-	allowed := make([]string, len(toolbridge.Tools))
-	for i, t := range toolbridge.Tools {
-		allowed[i] = "mcp__" + MCPServer + "__" + t.Name
-	}
 	return []string{
 		"-p", prompt,
 		"--output-format", "stream-json", "--verbose",
 		"--mcp-config", mcpConfig, "--strict-mcp-config",
-		"--tools", "", // no built-in tools at all
-		"--allowedTools", strings.Join(allowed, ","),
+		"--restricted", // ignores user, project and local settings files
+		"--tools", "",  // no built-in tools at all
 		"--permission-mode", "dontAsk",
-		"--setting-sources", "project", // the working directory is empty
+		"--permission-prompts", "none", // anything that would prompt is denied
+		"--allowedTools", strings.Join(initTools(), ","),
+		"--model", Model, "--effort", Effort,
 		"--no-session-persistence",
 		"--disable-slash-commands",
 	}
 }
 
-// envAllowlist is all the CLI inherits: no API keys, cloud-provider or
-// proxy settings, and nothing of the host's own.
+// envAllowlist is all the CLI inherits: no API keys, tokens, profiles,
+// cloud-provider or proxy settings, and nothing of the host's own.
 var envAllowlist = []string{"HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG", "LC_ALL", "TERM"}
 
+// fixedEnv (Aaron, 2026-10-03) asks the CLI for fewer updates and less
+// nonessential traffic, per the env-vars reference; local help does not
+// list them. It is not a firewall.
+var fixedEnv = []string{"DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"}
+
 // CLIEnv is the CLI's whole environment: the allowlisted variables from
-// getenv, then extra.
+// getenv, the fixed ones, then extra.
 func CLIEnv(getenv func(string) string, extra ...string) []string {
 	var env []string
 	for _, k := range envAllowlist {
@@ -55,36 +66,49 @@ func CLIEnv(getenv func(string) string, extra ...string) []string {
 			env = append(env, k+"="+v)
 		}
 	}
+	env = append(env, fixedEnv...)
 	return append(env, extra...)
 }
 
 // Host runs task runs. One run is one CLI process bound to one task.
 type Host struct {
-	Store     *store.Store
 	Registry  *contracts.Registry
 	Bridge    *toolbridge.Server
 	CLI       string   // executable, absolute; fixed by the operator
 	BridgeCmd []string // executable and args that start the MCP bridge
 	Env       []string // the CLI's whole environment (CLIEnv)
 	Limits    Limits
+	Gate      Gate
 	TraceDir  string
 }
+
+// Prepare opens what the run's tools need: the Store and the run's task.
+// The host calls it at most once per run, only after the CLI's init passed
+// the Gate and only while the run is still going; nothing opens the Store
+// before. The run does not end before Prepare returns.
+type Prepare func() (*store.Store, error)
 
 // RunResult is the host's account of one run. The Store holds the
 // purchases; nothing here comes from the CLI's word alone except Report.
 type RunResult struct {
-	Report   Report
-	Calls    []toolbridge.CallRecord
-	Attempts int    // tool calls tried, refused ones included
-	StoreEnd string // TASK_TIMED_OUT or TASK_CANCELLED when the run recorded one
-	EndError string // the Store's refusal code when recording the end failed
-	Trace    string
+	Report       Report
+	Calls        []toolbridge.CallRecord
+	Attempts     int    // tool calls that reached the budget, refused ones included
+	NotReady     int    // business calls refused before the run was armed
+	Model        string // as the passed init stated it, cleaned
+	TaskStarted  bool   // Prepare succeeded: the task exists in the Store
+	PrepareError error  // Prepare ran and failed
+	StoreEnd     string // TASK_TIMED_OUT or TASK_CANCELLED when the run recorded one
+	EndError     string // the Store's refusal code when recording the end failed
+	Trace        string
 }
 
-// Run starts one CLI process for taskID, a task the host has already
-// started in the Store. The run's capability is revoked as soon as the
-// process is gone, before anything is recorded.
-func (h *Host) Run(ctx context.Context, taskID, prompt string) (RunResult, error) {
+// Run starts one CLI process for taskID. The run is registered idle: the
+// bridge answers the CLI's MCP handshake, but business tools are refused
+// until the CLI's single system/init passes the Gate and Prepare succeeds.
+// Any stop disarms the run at once; it is revoked as soon as the process is
+// gone, before anything is recorded.
+func (h *Host) Run(ctx context.Context, taskID, prompt string, prepare Prepare) (RunResult, error) {
 	var res RunResult
 	task, wallet, err := h.Registry.Binding(taskID)
 	if err != nil {
@@ -93,9 +117,6 @@ func (h *Host) Run(ctx context.Context, taskID, prompt string) (RunResult, error
 	b := &toolbridge.Binding{
 		Session:  contracts.Session{ConsumerID: task.ConsumerID, AgentID: task.AgentID, TaskID: task.TaskID},
 		WalletID: wallet.WalletID, From: wallet.From,
-	}
-	if _, err := h.Store.Task(b.Session); err != nil {
-		return res, fmt.Errorf("task %s is not started in the Store: %s", taskID, store.Code(err))
 	}
 
 	dir, err := os.MkdirTemp("", "apa-run-") // 0700
@@ -121,33 +142,111 @@ func (h *Host) Run(ctx context.Context, taskID, prompt string) (RunResult, error
 		return res, err
 	}
 
+	// watch runs on the stream reader, one message at a time; Run returns
+	// only after it, so res and st are settled when read below.
+	var (
+		initSeen bool
+		gateCode string
+		st       *store.Store
+	)
+	watch := func(typ, subtype string, line []byte) (Outcome, string) {
+		switch {
+		case typ == "system" && strings.Contains(subtype, "hook"):
+			return ConfigMismatch, "hook_message"
+		case typ != "system" || subtype != "init":
+			return "", ""
+		case initSeen:
+			return ConfigMismatch, "init_duplicate"
+		}
+		initSeen = true
+		if gateCode = h.Gate.check(line); gateCode != "" {
+			return ConfigMismatch, gateCode
+		}
+		gateCode = "passed"
+		res.Model = initModel(line)
+		if b.Stopped() {
+			return "", "" // the run is stopping: no Store work starts
+		}
+		s, err := prepare()
+		if err != nil {
+			res.PrepareError = err
+			return StoreUnavailable, "prepare_failed"
+		}
+		st, res.TaskStarted = s, true
+		b.Arm() // fails if the run began stopping meanwhile; then no tool ever runs
+		return "", ""
+	}
+
 	started := time.Now()
-	res.Report = Run(ctx, Spec{Path: h.CLI, Args: Argv(prompt, cfgPath), Dir: work, Env: h.Env, Limits: h.Limits})
+	res.Report = Run(ctx, Spec{Path: h.CLI, Args: Argv(prompt, cfgPath), Dir: work, Env: h.Env, Limits: h.Limits,
+		Watch: watch, Stopping: b.Disarm})
+	if !initSeen {
+		gateCode = "init_missing"
+		if res.Report.Detail == "" {
+			res.Report.Detail = gateCode
+		}
+		if res.Report.Outcome == OK {
+			res.Report.Outcome = ConfigMismatch
+		}
+	}
 	// Revoke returns once the run's calls in flight have finished; after it
 	// nothing more is written for this run and its records are complete.
 	h.Bridge.Revoke(capability)
-	res.Calls, res.Attempts = b.Calls(), b.Attempts()
+	res.Calls, res.Attempts, res.NotReady = b.Calls(), b.Attempts(), b.NotReady()
 
-	// Only these two outcomes have Store semantics; other failures leave the
-	// task as it is, with the diagnosis in the run trace.
+	// Only these two outcomes have Store semantics, and only for a task the
+	// run started; no task is created to record a failure. Other failures
+	// end the run alone, with the diagnosis in the run trace.
 	var end error
-	switch res.Report.Outcome {
-	case Timeout:
-		res.StoreEnd, end = "TASK_TIMED_OUT", h.Store.CLITimeout(taskID)
-	case Cancelled:
-		res.StoreEnd, end = "TASK_CANCELLED", h.Store.Cancel(taskID)
+	if st != nil {
+		switch res.Report.Outcome {
+		case Timeout:
+			res.StoreEnd, end = "TASK_TIMED_OUT", st.CLITimeout(taskID)
+		case Cancelled:
+			res.StoreEnd, end = "TASK_CANCELLED", st.Cancel(taskID)
+		}
 	}
 	if end != nil {
 		res.StoreEnd, res.EndError = "", store.Code(end)
 	}
-	res.Trace, err = h.trace(b, prompt, capability, started, res)
+	res.Trace, err = h.trace(b, prompt, capability, started, gateCode, res)
 	return res, err
 }
 
+// initModel is the model the init names, cleaned; "" if none.
+func initModel(line []byte) string {
+	var m struct {
+		Model string `json:"model"`
+	}
+	json.Unmarshal(line, &m)
+	return toolbridge.Clean(m.Model, 80)
+}
+
+// usageCounts keeps the numeric token counts of a result's usage and
+// nothing else; "unknown" when the CLI reported none.
+func usageCounts(raw json.RawMessage) any {
+	if raw == nil {
+		return "unknown"
+	}
+	var u map[string]json.RawMessage
+	if json.Unmarshal(raw, &u) != nil {
+		return "unparseable"
+	}
+	out := map[string]int64{}
+	for _, k := range []string{"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"} {
+		var n int64
+		if v, ok := u[k]; ok && json.Unmarshal(v, &n) == nil {
+			out[k] = n
+		}
+	}
+	return out
+}
+
 // trace writes the run trace: one JSON object per line, kept apart from the
-// AuditEvent chain. It holds no capability, environment, stderr content or
-// prompt text; CLI text is cleaned and marked untrusted.
-func (h *Host) trace(b *toolbridge.Binding, prompt, capability string, started time.Time, res RunResult) (string, error) {
+// AuditEvent chain. It holds whitelisted diagnostics only: no raw stream,
+// capability, environment, stderr content, prompt text or authentication
+// value; the CLI's result text is cleaned, bounded and marked untrusted.
+func (h *Host) trace(b *toolbridge.Binding, prompt, capability string, started time.Time, gateCode string, res RunResult) (string, error) {
 	if err := os.MkdirAll(h.TraceDir, 0o700); err != nil {
 		return "", err
 	}
@@ -159,27 +258,30 @@ func (h *Host) trace(b *toolbridge.Binding, prompt, capability string, started t
 	scrub := func(s string, max int) string {
 		return toolbridge.Clean(strings.ReplaceAll(s, capability, "[capability]"), max)
 	}
-	sum := sha256.Sum256([]byte(prompt))
-	usage := any("unknown")
-	if res.Report.Usage != nil {
-		usage = json.RawMessage(scrub(string(res.Report.Usage), 4096))
-		if !json.Valid(usage.(json.RawMessage)) {
-			usage = "unparseable"
+	prepareError := ""
+	if res.PrepareError != nil {
+		if prepareError = store.Code(res.PrepareError); prepareError == "" {
+			prepareError = "error"
 		}
 	}
+	sum := sha256.Sum256([]byte(prompt))
 	enc := json.NewEncoder(f)
 	errs := []error{enc.Encode(map[string]any{
 		"event": "run_start", "at": started.Unix(), "task_id": b.Session.TaskID, "consumer_id": b.Session.ConsumerID,
 		"cli": filepath.Base(h.CLI), "prompt_sha256": hex.EncodeToString(sum[:]),
 		"limits": map[string]any{"line_bytes": h.Limits.Line, "stdout_bytes": h.Limits.Stdout, "stderr_bytes": h.Limits.Stderr,
-			"total_seconds": h.Limits.Total.Seconds(), "tool_calls": toolbridge.MaxCalls},
+			"total_seconds": h.Limits.Total.Seconds(), "assistant_messages": h.Limits.Assistant, "tool_calls": toolbridge.MaxCalls},
+	}), enc.Encode(map[string]any{
+		"event": "init", "gate": gateCode, "model": scrub(res.Model, 80), "task_started": res.TaskStarted, "prepare_error": prepareError,
 	})}
 	for _, c := range res.Calls {
 		errs = append(errs, enc.Encode(map[string]any{"event": "tool_call", "tool": c.Tool, "product_id": c.ProductID, "outcome": c.Outcome}))
 	}
 	errs = append(errs, enc.Encode(map[string]any{
-		"event": "run_end", "outcome": res.Report.Outcome, "exit_code": res.Report.ExitCode, "messages": res.Report.Messages,
-		"num_turns": res.Report.NumTurns, "usage": usage, "stderr_bytes": res.Report.StderrBytes, "tool_attempts": res.Attempts,
+		"event": "run_end", "outcome": res.Report.Outcome, "detail": res.Report.Detail, "exit_code": res.Report.ExitCode,
+		"messages": res.Report.Messages, "assistant_messages": res.Report.Assistant, "num_turns": res.Report.NumTurns,
+		"usage": usageCounts(res.Report.Usage), "stderr_bytes": res.Report.StderrBytes,
+		"tool_attempts": res.Attempts, "not_ready_refusals": res.NotReady,
 		"store_end": res.StoreEnd, "store_end_error": res.EndError,
 		"untrusted_cli_result": scrub(res.Report.Result, 2000),
 	}), f.Close())

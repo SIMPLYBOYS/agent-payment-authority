@@ -26,64 +26,122 @@ const callTimeout = 20 * time.Second
 // Binding is one run's trusted identity, fixed by the host before the CLI
 // starts. The model never supplies any of it.
 //
-// It is also the run's authority: once the run ends, no call starts, calls
-// in flight are cancelled and waited for, and Commit refuses every write.
+// It is also the run's authority, which only moves forward:
+//
+//	idle     the CLI is starting; business tools are refused (RUN_NOT_READY)
+//	armed    the host has checked the CLI's init and prepared the Store
+//	stopped  the run is stopping; nothing new starts or commits
+//	ended    revoked; calls in flight were cancelled and waited for
 type Binding struct {
 	Session  contracts.Session
 	WalletID string
 	From     string
 
 	mu       sync.Mutex // guards the fields below and is held across a Commit
-	calls    int        // attempts, refused ones included
+	state    runState
+	calls    int // attempts that reached the budget, refused ones included
+	notReady int // business calls refused before the run was armed
 	log      []CallRecord
-	ended    bool
-	ctx      context.Context // cancelled when the run ends
+	ctx      context.Context // cancelled when the run stops
 	stop     context.CancelFunc
 	inflight sync.WaitGroup
 }
 
-// ErrRunEnded is Commit's refusal once the run has ended.
-var ErrRunEnded = errors.New("run has ended")
+type runState int
 
-// begin admits one call while the run is active; done must follow.
-func (b *Binding) begin() (context.Context, bool) {
+const (
+	idle runState = iota
+	armed
+	stopped
+	ended
+)
+
+var (
+	// ErrRunEnded is Commit's refusal once the run is stopping or has ended.
+	ErrRunEnded = errors.New("run has ended")
+	// ErrNotReady is Commit's refusal before the run is armed.
+	ErrNotReady = errors.New("run is not ready")
+)
+
+// Arm lets business tools run. It fails, and changes nothing, unless the
+// run is still idle: a stopping or ended run is never armed again.
+func (b *Binding) Arm() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.ended || b.ctx == nil {
-		return nil, false
+	if b.state != idle {
+		return false
 	}
-	b.inflight.Add(1) // never after end has started waiting: ended is set under mu first
-	return b.ctx, true
+	b.state = armed
+	return true
+}
+
+// Disarm stops the run for good: no new call starts, no write commits, and
+// calls in flight are cancelled. It waits for a write in progress (Commit
+// holds the lock); Revoke later waits for the calls themselves.
+func (b *Binding) Disarm() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.state < stopped {
+		b.state = stopped
+	}
+	if b.stop != nil {
+		b.stop()
+	}
+}
+
+// begin admits one call; done must follow when it is admitted.
+func (b *Binding) begin() (context.Context, string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	switch {
+	case b.ctx == nil || b.state >= stopped:
+		return nil, "RUN_NOT_ACTIVE"
+	case b.state == idle:
+		b.notReady++
+		return nil, "RUN_NOT_READY"
+	}
+	b.inflight.Add(1) // never after end has started waiting: the state moves first, under mu
+	return b.ctx, ""
 }
 
 // Commit runs write, a call's one durable effect, only while the run is
-// active. end takes the same lock, so a run either ends before the write
-// starts (and nothing is written) or after it has finished.
+// armed. Disarm and end take the same lock, so a run either stops before
+// the write starts (and nothing is written) or after it has finished.
 func (b *Binding) Commit(write func() error) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.ended {
+	switch b.state {
+	case idle:
+		return ErrNotReady
+	case stopped, ended:
 		return ErrRunEnded
 	}
 	return write()
 }
 
-// Ended reports whether the run has ended.
-func (b *Binding) Ended() bool {
+// Stopped reports whether the run is stopping or has ended.
+func (b *Binding) Stopped() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.ended
+	return b.state >= stopped
 }
 
 // end stops the run and returns once every call it admitted has finished.
 func (b *Binding) end() {
 	b.mu.Lock()
-	b.ended = true
+	b.state = ended
 	if b.stop != nil {
 		b.stop()
 	}
 	b.mu.Unlock()
 	b.inflight.Wait()
+}
+
+// NotReady is the number of business calls refused before the run was armed.
+func (b *Binding) NotReady() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.notReady
 }
 
 // Attempts is the number of tool calls the run tried, refused ones included.
@@ -188,6 +246,7 @@ func (s *Server) Register(b *Binding) (string, error) {
 // Revoke ends the capability's run: later calls are refused, calls in
 // flight are cancelled, and Revoke returns only once they have finished, so
 // the run's records are complete and nothing more can be written for it.
+// A registered run starts idle; the host arms it (Binding.Arm).
 func (s *Server) Revoke(capability string) {
 	s.mu.Lock()
 	b := s.runs[capKey(capability)]
@@ -250,9 +309,12 @@ func (s *Server) serve(req relayRequest) ToolResult {
 	if b == nil {
 		return refusal("RUN_NOT_ACTIVE", "this run has ended or was never started")
 	}
-	runCtx, ok := b.begin()
-	if !ok {
-		return refusal("RUN_NOT_ACTIVE", "this run has ended or was never started")
+	runCtx, refused := b.begin()
+	switch refused {
+	case "RUN_NOT_ACTIVE":
+		return refusal(refused, "this run has ended or was never started")
+	case "RUN_NOT_READY": // not recorded and not on the budget; counted (NotReady)
+		return refusal(refused, "the host has not finished starting this run")
 	}
 	defer b.inflight.Done()
 	name := req.Tool // traced, so only ever a known name

@@ -38,7 +38,7 @@ func Load(getenv func(string) string) (Config, error) {
 		}
 		// ponytail: no LiveCLI field until a reviewed live run exists to consume it.
 		if live {
-			return Config{}, errors.New("APA_LIVE_CLI=true is not available: the buyer wrapper runs in fake mode only until a live run is reviewed (docs/cli-poc.md); unset it or set it to false")
+			return Config{}, errors.New("APA_LIVE_CLI=true is not available to the demo server: live runs go through apa-buyer run --live (docs/cli-poc.md); unset it or set it to false")
 		}
 	}
 	return Config{Addr: addr}, nil

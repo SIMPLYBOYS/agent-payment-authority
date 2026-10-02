@@ -1,0 +1,2 @@
+{"description":"The init arrives only after the host has begun stopping the run (the fake ignores SIGTERM): no Store work starts.","manual_init":true,
+ "steps":[{"do":"ignore_term"},{"do":"sleep","ms":800},{"do":"init"},{"do":"tool","tool":"request_purchase","args":{"product_id":"kr-market"}},{"do":"hang"}]}

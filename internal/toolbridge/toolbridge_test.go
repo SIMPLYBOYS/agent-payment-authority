@@ -111,7 +111,9 @@ func (e *env) start(task string) *Binding {
 	if err := e.st.StartTask(store.TaskSetup{TaskID: task, Profile: &p, Credential: &cred}); err != nil {
 		e.t.Fatal(err)
 	}
-	return &Binding{Session: contracts.Session{ConsumerID: tk.ConsumerID, AgentID: tk.AgentID, TaskID: task}, WalletID: w.WalletID, From: w.From}
+	b := &Binding{Session: contracts.Session{ConsumerID: tk.ConsumerID, AgentID: tk.AgentID, TaskID: task}, WalletID: w.WalletID, From: w.From}
+	b.Arm() // the host arms a run once init passed and the Store is ready
+	return b
 }
 
 func (e *env) setTamper(f func(http.ResponseWriter, *http.Request) bool) { e.tamper.Store(&f) }
@@ -322,6 +324,8 @@ func TestRelayIdentity(t *testing.T) {
 	b := &Binding{Session: sessB}
 	capA, _ := srv.Register(a)
 	capB, _ := srv.Register(b)
+	a.Arm()
+	b.Arm()
 	args := json.RawMessage(`{"product_id":"kr-market"}`)
 
 	for c, want := range map[string]string{capA: "task-a", capB: "task-b"} {
@@ -340,7 +344,9 @@ func TestRelayIdentity(t *testing.T) {
 	}
 	// A revoked capability stays dead, including after a new run starts.
 	srv.Revoke(capA)
-	capA2, _ := srv.Register(&Binding{Session: sessA})
+	a2 := &Binding{Session: sessA}
+	capA2, _ := srv.Register(a2)
+	a2.Arm()
 	if r, _ := Dial(ctx, srv.SocketPath(), capA, "request_purchase", args); refusedCode(t, r) != "RUN_NOT_ACTIVE" {
 		t.Errorf("revoked capability replayed: %v", r)
 	}
@@ -514,6 +520,7 @@ func Test402Tampering(t *testing.T) {
 			t.Errorf("%s: request_purchase %v", name, rec)
 		}
 		b = &Binding{Session: b.Session, WalletID: b.WalletID, From: b.From} // fresh call budget; same identity
+		b.Arm()
 	}
 	if ps := e.purchases(sessA); len(ps) != 0 {
 		t.Fatalf("a tampered 402 produced a purchase: %+v", ps)
@@ -637,6 +644,7 @@ func TestIdentityIsolation(t *testing.T) {
 		"A claims B's wallet": {Session: next.Session, WalletID: bb.WalletID, From: bb.From},
 		"A claims B's payer":  {Session: next.Session, WalletID: a.WalletID, From: bb.From},
 	} {
+		forged.Arm()
 		if _, rec := e.sh.Call(context.Background(), forged, "request_purchase", "kr-market"); rec.Outcome != "OWNERSHIP_MISMATCH" {
 			t.Errorf("%s: %v", name, rec)
 		}
@@ -797,8 +805,9 @@ func TestCommitGate(t *testing.T) {
 	// End waits for a call in flight and cancels its context.
 	b2 := &Binding{Session: sessB}
 	cap2, _ := srv.Register(b2)
-	ctx, ok := b2.begin()
-	if !ok {
+	b2.Arm()
+	ctx, refused := b2.begin()
+	if refused != "" {
 		t.Fatal("call not admitted")
 	}
 	ended := make(chan struct{})
@@ -815,13 +824,14 @@ func TestCommitGate(t *testing.T) {
 	}
 	b2.inflight.Done()
 	<-ended
-	if _, ok := b2.begin(); ok {
+	if _, refused := b2.begin(); refused != "RUN_NOT_ACTIVE" {
 		t.Error("a call was admitted after the end")
 	}
 
 	// End waits for a write in progress; after it, writes are refused.
 	b3 := &Binding{Session: sessB}
 	cap3, _ := srv.Register(b3)
+	b3.Arm()
 	inside, hold := make(chan struct{}), make(chan struct{})
 	go b3.Commit(func() error { close(inside); <-hold; return nil })
 	<-inside
@@ -849,11 +859,65 @@ func TestCallRecordsBounded(t *testing.T) {
 	defer srv.Close()
 	b := &Binding{Session: sessA}
 	capability, _ := srv.Register(b)
+	b.Arm()
 	for range 100 {
 		Dial(context.Background(), srv.SocketPath(), capability, "list_products", nil)
 	}
 	calls := b.Calls()
 	if len(calls) != MaxCalls+1 || calls[MaxCalls].Outcome != "TOO_MANY_CALLS" || b.Attempts() != 100 {
 		t.Errorf("%d records, %d attempts: %+v", len(calls), b.Attempts(), calls)
+	}
+}
+
+// Stage A: a registered run is idle until the host arms it; business calls
+// before that are refused without touching the budget or the records, and a
+// stopped run is never armed again.
+func TestNotReadyUntilArmed(t *testing.T) {
+	x := &recordExec{}
+	srv, err := Listen(x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	b := &Binding{Session: sessA}
+	capability, _ := srv.Register(b)
+	args := json.RawMessage(`{"product_id":"kr-market"}`)
+	for _, tool := range []string{"list_products", "get_quote", "request_purchase"} {
+		a := args
+		if tool == "list_products" {
+			a = nil
+		}
+		if r, _ := Dial(context.Background(), srv.SocketPath(), capability, tool, a); refusedCode(t, r) != "RUN_NOT_READY" {
+			t.Errorf("%s before arming: %+v", tool, r)
+		}
+	}
+	if x.calls.Load() != 0 || len(b.Calls()) != 0 || b.Attempts() != 0 || b.NotReady() != 3 {
+		t.Fatalf("before arming: %d executed, %d records, %d attempts, %d not ready", x.calls.Load(), len(b.Calls()), b.Attempts(), b.NotReady())
+	}
+	if err := b.Commit(func() error { t.Error("write before arming"); return nil }); err != ErrNotReady {
+		t.Errorf("commit before arming: %v", err)
+	}
+	if !b.Arm() {
+		t.Fatal("arm failed")
+	}
+	if r, _ := Dial(context.Background(), srv.SocketPath(), capability, "list_products", nil); r.IsError {
+		t.Errorf("after arming: %+v", r)
+	}
+	b.Disarm()
+	if b.Arm() {
+		t.Error("a stopped run was armed again")
+	}
+	if r, _ := Dial(context.Background(), srv.SocketPath(), capability, "list_products", nil); refusedCode(t, r) != "RUN_NOT_ACTIVE" {
+		t.Errorf("after disarm: %+v", r)
+	}
+	if err := b.Commit(func() error { t.Error("write after disarm"); return nil }); err != ErrRunEnded {
+		t.Errorf("commit after disarm: %v", err)
+	}
+	// Disarm before Arm: never armed.
+	b2 := &Binding{Session: sessB}
+	srv.Register(b2)
+	b2.Disarm()
+	if b2.Arm() {
+		t.Error("armed after an early stop")
 	}
 }
