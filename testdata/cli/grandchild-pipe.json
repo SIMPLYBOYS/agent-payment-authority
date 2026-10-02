@@ -1,0 +1,1 @@
+{"description":"Leaves a grandchild holding stdout and stderr, then exits after a result.","steps":[{"do":"holder"},{"do":"result","text":"done"}]}

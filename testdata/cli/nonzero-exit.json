@@ -1,0 +1,1 @@
+{"description":"A crash after a success result: the exit code still fails the run.","steps":[{"do":"result","text":"done"},{"do":"exit","code":3}]}

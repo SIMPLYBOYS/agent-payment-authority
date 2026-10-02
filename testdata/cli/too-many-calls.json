@@ -1,0 +1,5 @@
+{"description":"More tool calls than a run allows.","steps":[
+ {"do":"tool","tool":"list_products"},{"do":"tool","tool":"list_products"},{"do":"tool","tool":"list_products"},
+ {"do":"tool","tool":"list_products"},{"do":"tool","tool":"list_products"},{"do":"tool","tool":"list_products"},
+ {"do":"tool","tool":"list_products"},{"do":"tool","tool":"list_products"},{"do":"tool","tool":"list_products"},
+ {"do":"result","text":"done"}]}

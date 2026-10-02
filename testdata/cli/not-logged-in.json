@@ -1,0 +1,1 @@
+{"description":"Shape of a missing login as documented: an error result naming /login. Not recorded from a live failure.","steps":[{"do":"result","is_error":true,"text":"Not logged in · Please run /login"},{"do":"exit","code":1}]}

@@ -1,0 +1,6 @@
+{"description":"The same purchase requested twice: one logical purchase, the second call reports it.",
+ "steps":[
+  {"do":"tool","tool":"request_purchase","args":{"product_id":"kr-market"}},
+  {"do":"tool","tool":"request_purchase","args":{"product_id":"kr-market"}},
+  {"do":"result","text":"requested"}
+ ]}

@@ -1,0 +1,1 @@
+{"description":"Ignores SIGTERM and hangs; only SIGKILL ends it.","steps":[{"do":"hang","ignore_term":true}]}

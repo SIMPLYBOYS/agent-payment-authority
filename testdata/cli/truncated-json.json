@@ -1,0 +1,1 @@
+{"description":"Output cut mid-message, then exit 0.","steps":[{"do":"raw","text":"{\"type\":\"assistant\",\"message\":{\"conte"},{"do":"exit","code":0}]}

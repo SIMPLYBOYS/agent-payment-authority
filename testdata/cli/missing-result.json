@@ -1,0 +1,1 @@
+{"description":"Exit 0 with no result message.","steps":[{"do":"text","text":"working"},{"do":"exit","code":0}]}

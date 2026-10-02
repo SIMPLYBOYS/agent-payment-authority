@@ -1,0 +1,1 @@
+{"description":"A rate-limit retry notice, then an error result.","steps":[{"do":"retry","error":"rate_limit"},{"do":"result","is_error":true,"text":"API Error: Request rejected (429)"},{"do":"exit","code":1}]}

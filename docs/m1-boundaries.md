@@ -33,7 +33,7 @@ M1 的終點是 **請購與 Ask／Deny**。M1 沒有 Signer、沒有結算、沒
 | 授權條件 | 明標 fixture 的授權條件 | BBS+ 憑證已驗證 |
 | 消費者與錢包 | Consumer A／B 各自不同的 wallet reference 與 `from`，商家另有 `payTo` | 已建立錢包、持有金鑰、有鏈上資產 |
 | 餘額 | fixture 或 unknown，與 task 額度分開顯示 | live 餘額 |
-| CLI | fake runner 用於錯誤情境測試 | live CLI 已驗收 |
+| CLI | fake CLI（`cmd/fake-claude`）：真子程序與真 MCP 橋接，但不跑模型，stream-json 依文件形狀產生 | live CLI 已驗收、真實模型能完成請購 |
 
 真實的部分另外標示：真實模型（僅在明確 opt-in 的 live CLI 執行時）與真實的本機 HTTP。
 
@@ -78,4 +78,7 @@ M1 的終點是 **請購與 Ask／Deny**。M1 沒有 Signer、沒有結算、沒
 | 商店目錄與 402；任何 `PAYMENT-SIGNATURE` 都不交付受保護資料；只陳述設定的 URL、不抓取外部 URL | 已實作，有測試（B1-03，10/1 於 `ebd3f44` 結案；見 [merchant.md](merchant.md)） |
 | 確定性 Policy：Ask／Deny／Allow-unavailable，不扣預算、不發 grant、不付款 | 已實作，有測試（B1-05，10/2 結案，Policy 驗收基準 `61b3652`；見 [policy.md](policy.md)） |
 | 請購持久化與去重、事件 hash chain、取消／CLI 逾時／approval 到期、重啟恢復與驗證、A／B 隔離（Store 層，以 session 限制的查詢） | 已實作，有測試（B1-05，10/2 結案，驗收基準 `cb33768`；尚未接到 `cmd/demo`，接線與設定載入屬後續整合；見 [persistence-design.md](persistence-design.md)） |
-| 工具入口（B1-04）、主持人事件檢視 HTTP 端點與展示層（B1-06）、驗收器（B1-07） | 尚未實作 |
+| Buyer wrapper fake 模式（B1-04 首個交付點）：受限 MCP 工具、capability 綁定 run、402 嚴格檢查、Host 組裝請購寫入 Store、程序群組回收與輸出上限 | 已實作，有測試（Claude Code 執行，待 Codex 獨立 review；見 [cli-poc.md](cli-poc.md)） |
+| Store 接線（fake 命令）：設定來源、Store 開檔、RunExpiry 啟停、關閉順序 | 已實作於 `cmd/apa-buyer`，有測試；`cmd/demo` 尚未接線（B1-06） |
+| live Claude Code 執行 | 未實作、未驗證；本輪未執行任何真實推論 |
+| 主持人事件檢視 HTTP 端點與展示層（B1-06）、驗收器（B1-07） | 尚未實作 |

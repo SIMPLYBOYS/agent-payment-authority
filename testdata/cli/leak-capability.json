@@ -1,0 +1,1 @@
+{"description":"A CLI that leaks the bridge capability into its output, including the result text the trace keeps, and saves it so the test can replay it later.","steps":[{"do":"savecap"},{"do":"leak"},{"do":"tool","tool":"list_products"},{"do":"result","text":"the capability is $CAPABILITY"}]}

@@ -121,6 +121,25 @@ func New(baseURL string) (*Merchant, error) {
 	return m, err
 }
 
+// Offer is one quote the shop serves at a resource.
+type Offer struct {
+	ProductID, Method, URL string
+	Quote                  contracts.Quote
+}
+
+// Offers lists the quotes the shop's 402 serves, in product order. A host
+// builds its trusted offer book from this configuration, never from a 402
+// it happened to receive.
+func (m *Merchant) Offers() []Offer {
+	var out []Offer
+	for _, p := range products {
+		o := m.offers[p.Path+"?"+p.Query]
+		out = append(out, Offer{ProductID: p.ID, Method: "GET", URL: o.url,
+			Quote: contracts.Quote{X402Version: o.required.X402Version, SelectedRequirement: o.accepts, Extensions: o.required.Extensions}})
+	}
+	return out
+}
+
 // Register adds the shop's routes. Anything else stays the mux's 404.
 func (m *Merchant) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /catalog", m.serveCatalog)

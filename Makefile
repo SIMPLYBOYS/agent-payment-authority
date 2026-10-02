@@ -1,4 +1,4 @@
-.PHONY: check check-contracts build dev
+.PHONY: check check-contracts build dev demo-fake
 
 # Compile, vet and unit-test. Calls no paid model and touches no testnet.
 check:
@@ -32,3 +32,12 @@ dev: build
 		set -a; . ./.env; set +a; \
 	fi; \
 	exec ./bin/demo
+
+# FAKE MODE ONLY: the fake CLI runs no model and makes no network request.
+# Real subprocesses, a real loopback HTTP 402 and a real SQLite Store at
+# APA_DB_PATH (default var/apa-fake.db). A task runs once per database; pick
+# another with TASK=task-a-next or set APA_DB_PATH to a new file.
+demo-fake:
+	go build -o bin/apa-buyer ./cmd/apa-buyer
+	go build -o bin/fake-claude ./cmd/fake-claude
+	./bin/apa-buyer run --fake-cli bin/fake-claude --scenario testdata/cli/ask-mainline.json --task $(or $(TASK),task-a)

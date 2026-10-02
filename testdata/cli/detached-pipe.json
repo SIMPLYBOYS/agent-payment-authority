@@ -1,0 +1,1 @@
+{"description":"Leaves a grandchild in a new session holding the pipes: outside the process group, so the host abandons the pipes instead of killing it.","steps":[{"do":"holder","detach":true},{"do":"result","text":"done"}]}

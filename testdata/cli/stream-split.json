@@ -1,0 +1,6 @@
+{"description":"Stream edge cases that are still valid: a message split across writes, two messages in one write, blank lines, unknown message types.",
+ "steps":[
+  {"do":"split","bytes":7,"text":"{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"split\"}]}}\n"},
+  {"do":"raw","text":"{\"type\":\"stream_event\",\"event\":{}}\n\n{\"type\":\"assistant\",\"message\":{\"content\":[]}}\n"},
+  {"do":"result","text":"done"}
+ ]}

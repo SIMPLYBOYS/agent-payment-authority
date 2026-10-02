@@ -36,9 +36,9 @@ func Load(getenv func(string) string) (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("APA_LIVE_CLI %q must be true or false", v)
 		}
-		// ponytail: no LiveCLI field until the Buyer wrapper (B1-04) exists to consume it.
+		// ponytail: no LiveCLI field until a reviewed live run exists to consume it.
 		if live {
-			return Config{}, errors.New("APA_LIVE_CLI=true is not available: this build has no Claude Code wrapper (B1-04); unset it or set it to false")
+			return Config{}, errors.New("APA_LIVE_CLI=true is not available: the buyer wrapper runs in fake mode only until a live run is reviewed (docs/cli-poc.md); unset it or set it to false")
 		}
 	}
 	return Config{Addr: addr}, nil

@@ -1,0 +1,1 @@
+{"description":"Never finishes; the host's time limit or cancel must end it.","steps":[{"do":"tool","tool":"request_purchase","args":{"product_id":"kr-market"}},{"do":"hang"}]}
