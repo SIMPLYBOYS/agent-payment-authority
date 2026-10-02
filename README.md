@@ -2,7 +2,7 @@
 
 建立在 x402 之上的 Agent 付款授權與證據層：Agent 可以提出付款，但不能自己批准，也不能自己簽名。
 
-> **目前狀態：B1-00～03 已驗收（B1-02 共用契約 `apa.m1.v2` fixture，10/1 於 `2dc8d93` 結案；B1-03 最小資料商店（目錄＋402），10/1 於 `ebd3f44` 結案）；B1-05 確定性 Policy＋Store（`internal/policy`、`internal/store`）10/2 結案，程式驗收基準 `cb33768`，main 已 fast-forward 至 `7ad304a`（[docs/persistence-design.md](docs/persistence-design.md)）；主持人事件 HTTP 端點移至 B1-06；B1-04 Buyer wrapper 10/2 開始（分支 `b1-04-buyer`）：**fake 首個交付點 10/3 於 `b3c66f6` 通過技術 review**；B1-04 整體 InProgress，live 未執行，最小驗證方案待核准。M1 尚未完成。** 可啟動 loopback 服務、回應 health、提供商品目錄與 HTTP 402 報價、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md)、[docs/merchant.md](docs/merchant.md) 與 [docs/policy.md](docs/policy.md)。
+> **目前狀態：B1-00～03 已驗收（B1-02 共用契約 `apa.m1.v2` fixture，10/1 於 `2dc8d93` 結案；B1-03 最小資料商店（目錄＋402），10/1 於 `ebd3f44` 結案）；B1-05 確定性 Policy＋Store（`internal/policy`、`internal/store`）10/2 結案，程式驗收基準 `cb33768`，main 已 fast-forward 至 `7ad304a`（[docs/persistence-design.md](docs/persistence-design.md)）；主持人事件 HTTP 端點移至 B1-06；B1-04 Buyer wrapper 10/2 開始（分支 `b1-04-buyer`）：**fake 首個交付點 10/3 於 `b3c66f6` 通過技術 review**；**live 階段 A（開關、init 閘門、fake 驗證）10/3 核准並實作，待 review**；階段 B／C 未執行，沒有任何真實推論。B1-04 整體 InProgress。M1 尚未完成。** 可啟動 loopback 服務、回應 health、提供商品目錄與 HTTP 402 報價、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md)、[docs/merchant.md](docs/merchant.md) 與 [docs/policy.md](docs/policy.md)。
 > 尚未實作：真實 Claude Code（live）執行、真實 caller 認證、主持人事件檢視的 HTTP 端點、展示層與端到端整合、任何付款、簽章或付費內容交付。`cmd/demo` 尚未開啟 Store，啟動 demo 不會使用持久化；fake 模式的 `cmd/apa-buyer` 已接 Store（設定載入、到期處理啟停、關閉順序），見 [docs/cli-poc.md](docs/cli-poc.md)。
 > 第一個里程碑 M1 的終點是 **請購與 Ask／Deny**，沒有真付款。邊界見 [docs/m1-boundaries.md](docs/m1-boundaries.md)。
 
@@ -51,7 +51,7 @@ curl -i 'http://127.0.0.1:8402/resources/kr-market?edition=1'      # 402，報�
 APA_DB_PATH=var/apa-fake.db make demo-fake
 ```
 
-**只有 fake 模式**：`bin/fake-claude` 不跑模型、不連網，不需要 Claude Code CLI 或登入；Go 依賴需已下載（首次建置會連 `proxy.golang.org`，之後可離線）。它是真的子程序，透過 MCP bridge 呼叫三個受限工具（目錄、報價、請購）；host 對本機商店發真 HTTP 取得 402，把請購寫進真的 SQLite Store。主商品得到 Ask，沒有付款、沒有內容交付；CLI 說「已付款」也不會改變任何紀錄。同一個 DB 裡 task 只能啟動一次，重跑請用 `TASK=task-a-next` 或新的 `APA_DB_PATH`，不會刪除舊紀錄。live 模式尚未實作與驗證；橋接方式、信任邊界、上限與 CLI 相容性見 [docs/cli-poc.md](docs/cli-poc.md)。
+**只有 fake 模式**：`bin/fake-claude` 不跑模型、不連網，不需要 Claude Code CLI 或登入；Go 依賴需已下載（首次建置會連 `proxy.golang.org`，之後可離線）。它是真的子程序，透過 MCP bridge 呼叫三個受限工具（目錄、報價、請購）；host 對本機商店發真 HTTP 取得 402，把請購寫進真的 SQLite Store。主商品得到 Ask，沒有付款、沒有內容交付；CLI 說「已付款」也不會改變任何紀錄。Store 只在 CLI 的 init 通過 host 檢查之後才開，之前的業務工具呼叫一律拒絕；fake 拿到的是空的暫存 HOME。同一個 DB 裡 task 只能啟動一次，重跑請用 `TASK=task-a-next` 或新的 `APA_DB_PATH`，不會刪除舊紀錄。live 模式尚未實作與驗證；橋接方式、信任邊界、上限與 CLI 相容性見 [docs/cli-poc.md](docs/cli-poc.md)。
 
 **停止**：在執行 `make dev` 的終端按 `Ctrl-C`（或對該行程送 `SIGTERM`）。服務會關閉 listener 後結束，port 隨即釋放，可以直接再啟動一次。
 
@@ -68,8 +68,8 @@ dev: .env line(s) 2 are not plain KEY=VALUE (no spaces, quotes or shell syntax);
 | 變數 | 必填 | 說明 |
 |---|---|---|
 | `APA_ADDR` | 是 | 服務位址，必須是 loopback IP 與 port，例如 `127.0.0.1:8402` 或 `[::1]:8402`。不接受 `0.0.0.0`、LAN IP 或主機名稱。`8123` 保留給 WebAuthn 驗證頁，請勿使用 |
-| `APA_LIVE_CLI` | 否 | 預設 `false`。目前設為 `true` 會拒絕啟動：wrapper 只有 fake 模式，live 尚未經 review |
-| `APA_DB_PATH` | 否 | 只有 `apa-buyer run`（fake 模式）使用：Store 檔案路徑，不接受 DSN，目錄須為 0700；未設定時為 `var/apa-fake.db` |
+| `APA_LIVE_CLI` | 否 | 預設 `false`。`make dev`（demo）設為 `true` 會拒絕啟動。`apa-buyer run --live` 需要它為 `true`，另需絕對路徑的 `--cli` 與核准版本 `2.1.287 (Claude Code)`；目前 live 的認證接受清單為空，任何 live run 都會停在 init 閘門（見 [docs/cli-poc.md](docs/cli-poc.md) 第 7 節） |
+| `APA_DB_PATH` | 否 | 只有 `apa-buyer run` 使用：Store 檔案路徑，不接受 DSN，目錄須為 0700；未設定時 fake 為 `var/apa-fake.db`、live 為 `var/apa-live.db`（demo 的預設 `var/apa.db` 不受影響） |
 
 缺少或不合法的設定會在啟動時以一行訊息說明原因並結束，例如：
 

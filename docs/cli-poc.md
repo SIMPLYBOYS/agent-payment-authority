@@ -1,13 +1,13 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-03）**：**fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review**（第 10 節；`ba0b440` 的 R1／R2 修正見第 9 節）。B1-04 整體仍 InProgress，未標 Done、未合併 main。fake 模式已實作並有測試：真子程序、真 loopback HTTP 402、真 SQLite Store。**真實模型推論尚未執行**；live 模式在這個版本不可啟用。fake 成功只證明 wrapper／bridge／Store 的行為，不證明真實 Claude 能完成請購。B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-03）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）經 Aaron 核准並已實作，待 Codex 獨立 review**（第 7、11 節）；階段 B、C **未執行**，沒有任何真實推論、登入檢查或 `claude -p`。B1-04 整體仍 InProgress，未標 Done、未合併 main。fake 成功只證明 wrapper／bridge／Store 的行為，不證明真實 Claude 能完成請購；B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
 ```text
 主持人 ── apa-buyer run ──┬─ fixture 商店（127.0.0.1:隨機 port，真 HTTP）
-                          ├─ Store（SQLite，APA_DB_PATH）＋ RunExpiry
-                          ├─ toolbridge.Server（Unix socket，0700 私有目錄）
+                          ├─ toolbridge.Server（Unix socket，0700 私有目錄；run 先 idle）
+                          ├─ Store（SQLite，APA_DB_PATH）＋ RunExpiry：init 通過後才開
                           └─ CLI 子程序（固定 executable＋argv，獨立 process group）
                                  └─ MCP server：apa-buyer mcp-bridge（stdio）
                                         └─ 每次工具呼叫：連 socket，附本 run 的 capability
@@ -16,12 +16,13 @@
 | 部分 | 位置 | 職責 |
 |---|---|---|
 | runner | `internal/buyer/runner.go` | 啟動、process group、stdout／stderr 上限、stream-json 解析、結果分類、逾時／取消、回收 |
+| init 閘門 | `internal/buyer/gate.go` | 核對 `system/init`：三個完整工具名、只有 `apa` 且已連線、`dontAsk`、CLI 版本、plugins／skills／agents、認證來源（第 7.3 節） |
 | host 編排 | `internal/buyer/host.go` | 由 registry 綁定身分、發 capability、寫 MCP 設定、組 argv／env、timeout／cancel 對應 Store、run trace |
 | MCP adapter | `internal/toolbridge/mcp.go` | JSON-RPC 2.0、一行一訊息（MCP 2025-06-18 stdio），只服務 `initialize`、`ping`、`tools/list`、`tools/call` |
 | 工具定義與參數 | `internal/toolbridge/tools.go` | 三個工具；參數只接受 `product_id`（`^[a-z0-9-]{1,64}$`），拒絕重複 key 與任何其他欄位 |
 | 身分綁定與 relay | `internal/toolbridge/relay.go` | capability → `Binding`；撤銷、每 run 呼叫上限；bridge 程序端 `RunBridge`／`Dial` |
 | 402 檢查與請購 | `internal/toolbridge/shop.go` | 目錄白名單、402 嚴格檢查、由可信資料組裝 PurchaseOrder、`Store.Submit`、白名單投影 |
-| Store 接線 | `cmd/apa-buyer/main.go` | 設定來源、Store 開檔、StartTask、RunExpiry 啟停、關閉順序 |
+| Store 接線與 live 開關 | `cmd/apa-buyer/main.go` | 設定來源；Store 開檔、StartTask、RunExpiry 都在 init 通過後的 `prepare`；關閉順序；live 雙重 opt-in 與版本檢查 |
 | fake CLI | `internal/buyer/fakecli/`、`cmd/fake-claude/` | 接受 host 的 argv、依 `--mcp-config` 啟動 MCP server 並以 MCP 呼叫工具、輸出 stream-json、可注入故障 |
 | 情境 | `testdata/cli/*.json` | 主線、重送、偽造參數、串流邊界、CLI 故障、清理情境 |
 
@@ -63,25 +64,37 @@ MCP 直接以標準庫實作，沒有新增第三方依賴。fake CLI 走的是�
 | 單行 stdout（一則 stream-json） | 1 MiB | 同 | `output_overflow`，終止 |
 | stdout 總量 | 8 MiB | 同 | `output_overflow`，終止 |
 | stderr 總量（只計數，內容不保存） | 1 MiB | 同 | `output_overflow`，終止 |
-| 總執行時間 | 5 分鐘 | 60 秒 | `timeout` → `Store.CLITimeout` |
-| SIGTERM → SIGKILL、程序結束後等 pipe | 3 秒 | 同 | — |
-| 工具呼叫次數／run | 8 | 同 | `TOO_MANY_CALLS` |
+| 總執行時間（自 CLI 啟動起，含等待 init） | 3 分鐘 | 同 | `timeout`；task 已建立才 `Store.CLITimeout` |
+| SIGTERM → SIGKILL、程序結束後等 pipe | 3 秒 | 同 | 清理寬限另計：停止後最多再約兩個寬限期，不宣稱全部清理都在 3 分鐘內完成 |
+| 完整 `type=assistant` 訊息 | 10 則 | 同 | 第 11 則即停止，`turn_limit`（輸出訊息上限，不是十次模型推論、API 請求或計費輪次）；user、stream_event、system 訊息不計 |
+| 工具呼叫次數／run | 8 | 同 | `TOO_MANY_CALLS`；紀錄最多 9 筆 |
+| init 前的業務工具呼叫 | 一律拒絕 | 同 | `RUN_NOT_READY`；不執行、不留紀錄、不計入工具次數，只計次（`not_ready_refusals`）；MCP 握手與列工具不受影響 |
 | MCP 單則訊息、relay 單則訊息 | 64 KiB | 同 | 結束該 session／拒絕 |
 | 單次工具呼叫 | 20 秒 | 同 | 該呼叫失敗 |
 
 - 固定 executable 與 argv，`exec` 直接啟動，不經 shell。
 - 工作目錄是空的私有暫存目錄；MCP 設定在它之外。
-- 環境只帶 `HOME USER LOGNAME PATH TMPDIR LANG LC_ALL TERM`，加上 fake 模式的情境路徑；API key、雲端供應商、代理與 host 自己的設定都不傳。
-- `--version` 檢查（fake 命令確認 `--fake-cli` 確實是 fake）也走同一套程序規則：獨立 process group、輸出 4 KiB、stderr 4 KiB、5 秒，結束時回收整個 group。逾時、取消、超量或非零退出都視為失敗，不啟動 task；啟動 task 前再確認一次未被取消。
+- 環境只帶 `HOME USER LOGNAME PATH TMPDIR LANG LC_ALL TERM`，加上固定的 `DISABLE_AUTOUPDATER=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`（Aaron 10/3 同意；依官方 env-vars 文件，本機 help 未列；用來減少更新與非必要流量，不是防火牆），fake 模式再加情境路徑。API key、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_OAUTH_TOKEN`、`ANTHROPIC_PROFILE`、雲端供應商、代理、`CLAUDE_CONFIG_DIR` 與 host 自己的設定都不傳。fake 模式的 `HOME` 換成每次新建的空目錄，fake 不會靠近使用者的登入。
+- `--version` 檢查（fake 命令確認 `--fake-cli` 確實是 fake；live 要求輸出恰為核准版本 `2.1.287 (Claude Code)`）也走同一套程序規則：獨立 process group、輸出 4 KiB、stderr 4 KiB、5 秒，結束時回收整個 group。逾時、取消、超量或非零退出都視為失敗，不啟動 task；啟動 task 前再確認一次未被取消。
 - 子程序在自己的 process group。任何停止都對整個 group 送 SIGTERM，期限後 SIGKILL；程序自行結束後也立即 SIGKILL 該 group，回收仍握著 pipe 的子孫。
 - 已離開 group（例如 `setsid`）的程序不會被送信號：等候期限後放棄 pipe，結果標 `orphaned_output`。這是已知限制，見第 8 節。
-- 不使用 `--dangerously-skip-permissions`，也不使用 `--bare`。
+- 不使用 `--dangerously-skip-permissions`、`--bare`、`--safe-mode` 或 `bypassPermissions`。
 
-**結果分類**：`ok` 必須同時有程序 exit 0、恰好一則 `result` 訊息、`subtype: success` 且 `is_error: false`。exit 0 不足以判定成功。其他：`not_installed`、`start_failed`、`not_logged_in`、`rate_limited`、`timeout`、`cancelled`、`output_overflow`、`parse_error`（非 JSON 行、截斷、缺 `type`、第二則 result）、`nonzero_exit`、`missing_result`、`cli_error`、`orphaned_output`。
+**結果分類**：`ok` 必須同時有程序 exit 0、恰好一則 `result` 訊息、`subtype: success` 且 `is_error: false`。exit 0 不足以判定成功。其他：`not_installed`、`start_failed`、`not_logged_in`、`rate_limited`、`timeout`、`cancelled`、`output_overflow`、`parse_error`（非 JSON 行、截斷、缺 `type`、第二則 result）、`nonzero_exit`、`missing_result`、`cli_error`、`orphaned_output`，以及 host 自己檢查的 run 診斷：`config_mismatch`（init 缺漏、不符、格式錯、重複，或出現 hook 訊息；`detail` 欄位說明是哪一項）、`turn_limit`、`store_unavailable`（init 通過但 Store 或 task 準備失敗）。這些都只是 run 診斷，不是 `apa.m1.v2` 的 reason code 或事件。
 
-**Store 語意**：只有 `timeout`（`TASK_TIMED_OUT`，Ask 保留待到期）與 `cancelled`（`TASK_CANCELLED`，Ask 撤回）寫 Store；其他失敗不新增契約事件，診斷留在 run trace。既有 Deny 的狀態與理由不被後續結束事件覆蓋。task 已結束時 Store 拒絕第二次結束，回報 `TASK_ALREADY_ENDED`。結束後才到達的請購同樣由 Store 拒絕。
+**Store 寫入界線（階段 A，A1）**：
 
-**run trace**（`--trace-dir`，預設 `var/runs/`，檔案 0600）：與 AuditEvent 鏈分開的 JSONL。內容是 task、consumer、CLI 檔名、prompt 的 SHA-256（不存 prompt）、上限、每次工具呼叫（工具名、驗過的商品 ID、結果碼）、結果分類、exit code、訊息數、usage（沒有就 `unknown`，不補零）、stderr 位元組數，以及清理後的 CLI 結果文字，欄位名 `untrusted_cli_result`。不含 capability、環境變數、stderr 內容或認證資料。
+| 時點 | Host 對 Store 做的事 |
+|---|---|
+| init 通過前（含缺 init、init 不符、init 前的 hook 訊息、版本或 opt-in 不符） | 不開啟、不建立目標 SQLite DB，不建立 task，不執行到期寫入。只寫 run trace。這不保證 CLI 自己不寫 `~/.claude` 或其他主機檔案 |
+| init 通過、run 仍有效 | `prepare`：開 Store（migration、恢復驗證、補記到期，照已驗收的 Store 行為）→ StartTask → RunExpiry；成功後才放行業務工具 |
+| `prepare` 失敗（含 task 已存在） | 不放行工具、不新增請購，依 Store 規則回錯，不刪檔、不修復。task 已存在時，CLI 已經啟動，live 下可能已有用量 |
+| 已有合法請購後才出現 hook 訊息、第二則 init、訊息超限、解析失敗等 | 合法請購保留；run 立即停用（之後的提交都被拒），撤銷並等待進行中的呼叫結束 |
+| run 停止後才讀到的 init | 不開 Store、不放行；`prepare` 若已開始，run 等它結束才算結束 |
+
+只有 `timeout`（`TASK_TIMED_OUT`，Ask 保留待到期）與 `cancelled`（`TASK_CANCELLED`，Ask 撤回）寫 Store，且只在本 run 已建立 task 時；沒有 task 時不為記錄失敗而建立 task。其他失敗不新增契約事件，診斷留在 run trace。既有 Deny 的狀態與理由不被後續結束事件覆蓋。task 已結束時 Store 拒絕第二次結束，回報 `TASK_ALREADY_ENDED`。結束後才到達的請購同樣由 Store 拒絕。
+
+**run trace**（`--trace-dir`，預設 `var/runs/`，檔案 0600）：與 AuditEvent 鏈分開的 JSONL，只有白名單化的診斷：task、consumer、CLI 檔名、prompt 的 SHA-256（不存 prompt）、上限、init 閘門結果碼、init 所列 model（清理後）、task 是否建立、prepare 失敗代碼、每次工具呼叫（工具名、驗過的商品 ID、結果碼）、結果分類與 `detail`、exit code、訊息數、assistant 訊息數、usage 的四個 token 計數（沒有就 `unknown`，不補零）、工具嘗試次數、init 前拒絕次數、stderr 位元組數，以及清理、截斷後的 CLI 結果文字（欄位名 `untrusted_cli_result`）。不含原始 stream、capability、環境變數、stderr 內容、`apiKeySource` 的值或其他認證資料；測試以識別標記確認。
 
 ## 4 從乾淨環境重跑 fake 流程
 
@@ -96,7 +109,7 @@ APA_DB_PATH=var/apa-fake.db make demo-fake
 - DB 路徑遵守 `APA_DB_PATH`；未設定時 fake 命令用 `var/apa-fake.db`，不寫進 demo 預設的 `var/apa.db`。目錄須為 0700。
 - 同一 DB 中 task 只會啟動一次。重跑同一 task 會清楚回報並結束，不刪除任何紀錄。可改用 `TASK=task-a-next make demo-fake`，或把 `APA_DB_PATH` 指到新檔。
 - 命令會先執行 `--fake-cli --version`，輸出不含 `fake-claude` 就拒絕。誤把真實 `claude` 當成 fake 也不會跑推論。
-- 不帶 `--fake-cli` 時直接拒絕：這個版本沒有 live 模式。
+- 不帶 `--fake-cli` 也沒有 `--live` 時直接拒絕。fake 命令走與 live 相同的 init 閘門、`prepare`、relay、真 HTTP 402 與 Store 路徑；閘門接受的是 fake 自己標示的值（`claude_code_version` `0.0.0`、`apiKeySource` `fake-claude-no-auth`），不是任何真實 CLI 的值。
 
 測試：
 
@@ -106,21 +119,28 @@ go test ./internal/buyer/... ./internal/toolbridge/... ./cmd/apa-buyer/ -count=1
 
 測試二進位同時扮演 fake CLI（經名為 `fake-claude` 的 symlink）與 MCP bridge（argv `mcp-bridge`），所以每個測試都啟動真實子程序。
 
+只重跑階段 A 的編排（只用 fake CLI；live 路徑的測試以 fake 頂替 `--cli`，注入 fake 的版本與認證標示值，scratch HOME，不會從 PATH 找任何 CLI）：
+
+```sh
+go test ./internal/toolbridge/ ./internal/buyer/ ./cmd/apa-buyer/ -count=1 \
+  -run 'NotReady|Init|Hook|Prepare|Assistant|Trace|Live|NoStore|StoreUnavailable|ArgvAndEnv|Commit|Revoke'
+```
+
 ## 5 Store 接線（由 B1-06 移來的部分）
 
 這次承接、已在 `cmd/apa-buyer` 實作：
 
 - 設定來源：registry `testdata/contracts/registry.json`、profile `testdata/policy/m1-demo-profile.json`（皆 fixture，可用旗標指定）。credential 是啟動時以 host clock 產生的 M1 fixture，有效 24 小時，不驗證 BBS+。budget 預設為 profile 的 task cap。報價簿由商店設定 `merchant.Offers()` 建立。
 - 可信 host clock（Unix 秒）；測試用固定時鐘。
-- 啟動順序：商店 → Store 開檔（含恢復驗證與補記到期）→ StartTask → RunExpiry → bridge。前面任何一步失敗都不開 bridge。
+- 啟動順序（階段 A 起）：商店 → bridge（run 為 idle）→ CLI → `system/init` 通過閘門 → `prepare`：Store 開檔（含恢復驗證與補記到期）→ StartTask → RunExpiry → 放行業務工具。init 通過前不開 Store。
 - RunExpiry 每秒一次；錯誤寫到 stderr，報告列出次數，不吞掉。
 - 關閉順序：run 結束（取消時先回收 CLI）→ 關 bridge → 停 RunExpiry 並等它結束 → 關 Store → 關商店。
 
 仍屬 B1-06：`cmd/demo` 尚未開啟 Store；主持人事件 HTTP 端點、展示層、完整服務接線、live opt-in 指令與 M1 端到端驗收。
 
-## 6 CLI 相容性（本機 2.1.287，2026-10-02）
+## 6 CLI 相容性（本機 2.1.287，2026-10-02；10/3 補 help 細節與文件查閱）
 
-只執行了 `claude --version` 與 `--help`／`auth --help`，沒有送出推論請求，也沒有執行 `claude auth status`。
+只執行了 `claude --version` 與 `--help`／`auth --help`，沒有送出推論請求，也沒有執行 `claude auth status`。階段 A 起 argv 改為第 7.3 節所列；下表保留首輪的核對紀錄。
 
 | 項目 | 本機 `--help` 已確認 | 僅依官方文件 |
 |---|---|---|
@@ -132,114 +152,106 @@ go test ./internal/buyer/... ./internal/toolbridge/... ./cmd/apa-buyer/ -count=1
 | `--tools ""` | 有：`""` 停用所有內建工具 | — |
 | `--allowedTools` | 有（免提示規則） | MCP 工具名為 `mcp__<server>__<tool>`；這不是隔離機制 |
 | `--permission-mode dontAsk` | 有（choices 含 dontAsk） | 不在允許清單內的工具直接拒絕、不提示 |
-| `--setting-sources project` | 有：`user, project, local` | **未驗證**：只載 project 是否會略過使用者層 hooks、CLAUDE.md 與記憶 |
+| `--setting-sources project` | 有：`user, project, local` | 階段 A 起改用 `--restricted`，不再傳 |
+| `--restricted` | 有：移除會執行程式的內建工具與 WebFetch，忽略 user／project／local 設定檔（managed settings 與 `--settings` 仍適用） | 未以真實 run 驗證；help 沒提 CLAUDE.md |
+| `--permission-prompts none` | 有：會提示的動作自動拒絕 | 未以真實 run 驗證 |
+| `--model`、`--effort` | 有（`sonnet` 為別名；effort 有 `low`） | 候選值 `sonnet`／`low`，階段 C 前要確認版本支援與實際模型 |
+| `--max-budget-usd` | 有（僅 `--print`） | 不使用，不宣稱為訂閱用量上限 |
 | `--no-session-persistence` | 有 | — |
 | `--disable-slash-commands` | 有 | — |
-| `--max-turns` | **本機 help 沒有** | 不使用；以工具次數與總時間限制 |
+| `--max-turns` | **本機 help 沒有** | 官方 CLI 參考有列；保留版本差異，不假定支援、不以推論試跑；改由 host 計 assistant 訊息 |
 | `--bare` | 有：不讀 OAuth／keychain | 不使用（會改走 API key） |
 | exit code、登入失敗與限流的輸出 | — | 分類規則（`authentication_failed`、`rate_limit`、結果文字含 `/login`、`Not logged in`、`rate limit`）**未以實際失敗驗證** |
 
 fake CLI 的 stream-json 依文件形狀產生，**不是真實 CLI 的錄製**；它也不模擬 CLI 的權限層（每個腳本化的工具呼叫都會送到 bridge，以測 host 自己的檢查）。
 
-本機 help 另有 `--restricted`（移除會執行程式的內建工具、忽略 user／project／local 設定檔）與 `--permission-prompts none`（會提示的動作自動拒絕）。兩者可能比 `--setting-sources project` 更貼近需求，但本輪沒有採用：語意尚未驗證，也還沒確認它們與訂閱登入能否並用。列入 live 提案待決。
+**init 訊息的依據（10/3 查閱 Agent SDK TypeScript 參考）**：init 的欄位有 `apiKeySource`、`tools`（字串陣列）、`mcp_servers`（`name`、`status`，status 為 `"connected" | "disconnected" | "error"`）、`model`、`permissionMode`（含 `"dontAsk"`）、`claude_code_version`、`cwd`，以及選填的 `skills`、`plugins`、`agents`（`AgentInfo` 為 `name`、`description`、`source`）；hook 相關 system 訊息的 subtype 為 `hook_started`、`hook_progress`、`hook_response`。**`apiKeySource` 的可能值未能確認**：同一頁第一次摘要列出一組值，要求逐字複製時卻找不到該型別定義，因此不採用任何值。這是 SDK 文件，不是 CLI 2.1.287 實際 init 的錄製。
 
-## 7 最小 live 驗證方案（2026-10-03 擬定；待 Aaron 核准，未執行）
+**認證判定的依據（10/3 查閱官方認證文件）**：認證優先順序為雲端供應商、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`apiKeyHelper`、`CLAUDE_CODE_OAUTH_TOKEN`、Anthropic profile 與 federation 憑證，最後才是 `/login` 的訂閱 OAuth；Console 也可不建 API key 登入。因此「沒有 API key」或 `apiKeySource` 為 `none` 都不能推定為訂閱。環境 allowlist 已排除前述環境變數，但 managed settings 的 `apiKeyHelper`、keychain 中舊 Console 登入的 API key、`~/.config/anthropic` 的 profile（`oidc_federation` 的 active profile 排在 `/login` 之前）host 無法從 init 排除。
 
-目標只有一個：用本人登入的官方 CLI 跑**一次**真實 run，取得 CLI → 402 → 結構化請購的 trace，驗證第 2、3 節的邊界在真實 CLI 下仍成立。這不是擴大範圍或壓測。以下每個階段都需 Aaron 明確核准才開始；本節完成時沒有任何推論被執行。
+## 7 最小 live 驗證方案（2026-10-03 擬定；階段 A 已核准並實作、待 review；B、C 未執行）
+
+目標只有一個：用本人登入的官方 CLI 跑**一次**真實 run，取得 CLI → 402 → 結構化請購的 trace，驗證第 2、3 節的邊界在真實 CLI 下仍成立。這不是擴大範圍或壓測。
 
 ### 7.1 階段
 
-| 階段 | 內容 | 推論 | 需要的核准 |
+| 階段 | 內容 | 推論 | 狀態 |
 |---|---|---|---|
-| A 實作 live 開關與閘門 | 下面 7.3 的程式變更，以 fake CLI 測試每個閘門；交 Codex review | 無 | Aaron 核准本方案後開始 |
-| B 執行前檢查 | Aaron 本人執行 `claude --version` 與 `claude auth status`，只回報版本與「已登入／未登入」；repo 與 Claude 不讀取該輸出 | 無 | A 通過 review |
-| C 單次 live run | 7.2 的一條命令、一個 task、一次；任何失敗即停，不重跑 | **一次 run（數個模型輪次）** | Aaron 對這一次 run 明確核准 |
-| D 證據整理 | 只保留遮罩後的 typed 事件與 run trace；交 Codex review；是否滿足 B1-04 live 驗收由 review 判定 | 無 | — |
+| A 實作 live 開關與閘門 | 7.3 的程式變更，以 fake CLI 測試每個閘門 | 無 | **Aaron 10/3 核准；已實作，待 Codex review**（第 11 節） |
+| B 執行前確認 | Aaron 本人確認 `claude --version`、是否已登入，以及非敏感的認證方式／訂閱確認（例如是 claude.ai 訂閱登入，且沒有 API key、token、profile 或 apiKeyHelper 在用），要對應預定的 CLI 與設定環境。不貼整份 JSON、email、帳號 ID、token 或 keychain 內容；repo 與 Claude 不讀取該輸出 | 無 | 未執行；A 通過 review 後 |
+| C 單次 live run | 7.2 的一條命令、一個 task、一次；任何失敗即停，不重跑 | **有**（次數無硬保證，見 7.3） | **未核准**；需 Aaron 對這一次另行明確同意 |
+| D 證據整理 | 只保留白名單化的診斷與 run trace；交 Codex review | 無 | 沒有 live 結果，不得預先宣稱 live 證據成立 |
 
-### 7.2 階段 C 的命令（形態；階段 A 實作後才存在）
+### 7.2 階段 C 的命令（已實作，但尚無法通過閘門；本輪未執行）
 
 ```sh
 APA_LIVE_CLI=true APA_DB_PATH=var/apa-live.db \
   ./bin/apa-buyer run --live --cli /Users/mac/.local/bin/claude --task task-a
 ```
 
-- live 只有在 `APA_LIVE_CLI=true` 與 `--live` 同時存在時才可用。`--cli` 必須是絕對路徑，`--version` 必須等於核准時記錄的版本（目前 `2.1.287 (Claude Code)`）。不符合就拒絕，不自動升級、不改走其他 CLI。
-- 獨立資料庫 `var/apa-live.db`，與 fake 或 demo 分開；task 已存在就照現有規則拒絕，不刪紀錄。
-- 不設 `ANTHROPIC_API_KEY` 等變數（環境 allowlist 本來就不傳），不使用 `--bare`。若 init 顯示不是訂閱登入，就停止。
+- `APA_LIVE_CLI=true` 與 `--live` 必須同時存在（`APA_LIVE_CLI` 依 `strconv.ParseBool`，其他值視為未開啟）；`--live` 不得與 `--fake-cli`／`--scenario` 併用，`--cli` 只限 `--live`。`--cli` 必須是絕對路徑，不查 PATH、不 fallback。`--version` 必須恰為 `2.1.287 (Claude Code)`；不符就停止，不升級、不降級。以上任何一項不符：不執行 CLI 的推論、不開 Store。
+- 資料庫預設 `var/apa-live.db`（`APA_DB_PATH` 可覆寫，規則同既有）；fake 預設 `var/apa-fake.db`、demo 預設 `var/apa.db` 不變。task 已存在就照既有規則拒絕，不刪紀錄。
+- **目前 live 的認證接受清單是空的**（`liveAcceptAuth`），所以任何 live init 都會在 `auth_unconfirmed`／`auth_missing` 停下，不開 Store。決定接受值、以及其文件依據，是階段 C 開跑前的待決事項；不得在第一次失敗後自動學習或放寬，trace 也不記錄 `apiKeySource` 的值。
 
-### 7.3 階段 A 的程式變更
+### 7.3 階段 A 的內容（已實作）
 
-**設定隔離**（目標：模型只看得到 3 個 `mcp__apa__*` 工具，不載入使用者層的 hooks、plugins、skills、其他 MCP server 或設定）：
+**設定**：argv 為 `-p <host prompt> --output-format stream-json --verbose --mcp-config <cfg> --strict-mcp-config --restricted --tools "" --permission-mode dontAsk --permission-prompts none --allowedTools mcp__apa__list_products,mcp__apa__get_quote,mcp__apa__request_purchase --model sonnet --effort low --no-session-persistence --disable-slash-commands`。`--tools` 的值是空字串本身。模型不能更動 executable、flags、cwd、server 或環境。環境見第 3 節。
 
-- argv 改為：`--restricted --strict-mcp-config --tools "" --permission-mode dontAsk --permission-prompts none --allowedTools <3 個工具> --no-session-persistence --disable-slash-commands`，加上 `-p`、stream-json、`--mcp-config`；移除 `--setting-sources project`。依據本機 help：`--restricted` 會忽略 user／project／local 設定檔，`--strict-mcp-config` 會排除其他 MCP server，`--permission-prompts none` 會把需要提示的動作直接拒絕。**這些都只來自 help 文字，尚未以真實 run 驗證。**
-- `--safe-mode`（停用 CLAUDE.md、plugins、hooks、MCP servers 等）**不建議**：help 說它停用 MCP servers，可能連 `--mcp-config` 的 bridge 也一起停用，沒有其他方法先確認。
-- 工作目錄仍是空的私有暫存目錄；MCP 設定在它之外。
+**init 閘門**：run 註冊後是 idle；MCP 握手與列工具照常，三個業務工具一律 `RUN_NOT_READY`。runner 每讀一則 stream-json 就交給 host 檢查；唯一一則 `system/init` 依序核對下列項目，通過且 run 仍有效，才執行 `prepare`（Store、task、RunExpiry），成功後放行：
 
-**init 閘門**（真實設定是否生效，只能從 run 本身看出，所以由 host 擋在任何工具呼叫之前）：
+- JSON 本身：不得有重複成員名或錯誤型別（`init_malformed`）。
+- `tools`：恰為三個完整工具名，各一次。不是只比數量或前綴，重複值不能補足缺項（`tools`）。
+- `mcp_servers`：恰一個，`name` 為 `apa`，`status` 為 `connected`（`mcp_servers`）。
+- `permissionMode` 為 `dontAsk`（`permission_mode`）。
+- `claude_code_version`：等於核准版本的版號 `2.1.287`；fake 為 `0.0.0`（`cli_version`）。
+- `plugins`、`skills`、`agents`：若出現，必須是空陣列，沒有任何項目獲准（同名代碼）。欄位不存在不證明主機沒有載入這些內容。
+- 認證：`apiKeySource` 必須是字串，且恰在接受清單內（`auth_missing`／`auth_unconfirmed`）。live 清單為空（7.2）。init 只能拒絕已知不相容或未知的來源，**不能獨自證明計費來源**，訂閱登入由階段 B 另行確認。
 
-- 每個 run 的 relay 預設不放行任何工具呼叫。runner 讀到 `system/init` 並全部檢查通過後，host 才放行。檢查項目：
-  - `tools` 恰好是 3 個 `mcp__apa__*`。
-  - `mcp_servers` 只有 `apa` 且已連線。
-  - `permissionMode` 為 `dontAsk`。
-  - `apiKeySource` 表示訂閱登入，而非 API key。確切值要等第一次 run 才知道；值不在預期集合內就視為不符。
-  - 若出現 `plugins`、`skills`、`agents` 等欄位，必須為空。
-  - 讀不到 init，或任一項不符：立即終止整個 process group，結果為 `config_mismatch`，Store 不寫入任何東西。
-- 已知代價：init 訊息與第一個模型請求之間沒有可插手的點。閘門失敗時，最多已送出一次模型請求，但它不會造成任何工具呼叫或寫入。
-- 只要出現 hook 相關的 `system` 訊息，同樣以 `config_mismatch` 終止。
+缺 init（`init_missing`）、第二則 init（`init_duplicate`）或任何 hook 相關 system 訊息（subtype 含 `hook`，`hook_message`）都停止 run，閘門不會重新開啟。這是在檢查 CLI 的自述，不是 OS 隔離，也不代表 CLI 完全可信。工具白名單維持三個，不為 `EndConversation` 開例外：依 10/3 review 查閱的官方工具頁，它不出現在非互動 `-p` 模式；若實際版本不同，停止並回報，不擴大集合。
 
-**輪次與時間**：
+**init 檢查失敗時的用量**：CLI 可能已產生模型請求與用量，請求次數沒有硬保證。Host 尚未放行本專案的業務工具；這不等於阻止 CLI 自己的網路或檔案行為。
 
-| 上限 | 值（建議） | 由誰執行 |
-|---|---|---|
-| 總時間 | 3 分鐘 | host（現有 runner） |
-| 工具呼叫 | 8 次；正常流程只需 3 次 | host relay（現有） |
-| 模型輪次 | 10 則 `assistant` 訊息 | host 計數，超過即終止（`turn_limit`）。本機 CLI 沒有 `--max-turns`，這是事後觀察，已超過的那一輪已經發生 |
-| 花費 | `--max-budget-usd`（help：僅 `--print` 適用） | CLI。訂閱登入下是否生效未驗證，所以只當額外保險，不算主要上限 |
-| 模型 | `--model` 與 `--effort` 由 Aaron 決定（例如 `sonnet`、`low` 以減少用量） | CLI |
+**上限**：見第 3 節（3 分鐘、assistant 訊息 10 則、工具 8 次、既有輸出上限）。
 
-**其他**：
-
-- 用 fake CLI 為每個閘門補測試：工具多一個、多一個 MCP server、`apiKeySource` 是 API key、缺 init、出現 hook 訊息、輪次超量。測試都應得到對應結果，且 Store 不寫入。
-- 證據不保存原始 stream（`.gitignore` 已排除 `cli-raw/`）。只抽出遮罩後的 typed 事件：init 的工具與 server 名稱、model、`permissionMode`、`apiKeySource` 類別；工具呼叫名稱與經驗證的 `product_id`；result 的 subtype、`is_error`、`num_turns`、usage。再加上第 3 節的 run trace。
-- 不傳 `DISABLE_AUTOUPDATER`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` 等未在本機 help 確認的變數。要不要加，由 Aaron 決定（見 7.6）。
+**fake 驗證**：fake 的 init 欄位名依 SDK 參考，值是 fake 自己的標示，不是真實 CLI 的錄製。fake 在印出 init 後，若業務呼叫被 `RUN_NOT_READY` 拒絕，會每 20 ms 重送、最多 5 秒，模擬真實 CLI 首輪模型往返給 host 的準備時間。live 路徑的測試只以 fake 頂替 `--cli`，fake 在 live 環境下從 `<自身路徑>.scenario.json` 讀情境，所以 live 環境不需要多帶任何變數。
 
 ### 7.4 停止條件
 
 下列任一情況都立即停止並回報，不自動重跑，也不開下一輪：
 
-- 未登入、限流、`config_mismatch`、`turn_limit`、逾時。
+- 未登入、限流、`config_mismatch`、`turn_limit`、`store_unavailable`、逾時。
 - 任何非 `ok` 的結果。
 - 版本不符。
 - Store 出現非預期事件。
 
 ### 7.5 已知的程序隔離限制（live 下仍然存在）
 
-1. **這不是作業系統沙箱。** CLI 以使用者本人的權限執行。host 能限制的是工具呼叫，限制不了 CLI 程序本身會做什麼。CLI 不載入使用者設定、沒有內建工具，都只依賴 CLI 旗標照 help 所述運作；若 CLI 行為與說明不符，host 擋不住檔案或網路存取。init 閘門只能抓到它自己看得到的不符。
-2. **HOME 會傳給 CLI**，因為 CLI 要靠它找到登入。CLI 可能在 `~/.claude` 寫入快取或紀錄（即使用了 `--no-session-persistence`），也會讀 keychain。repo 不讀、不複製這些內容。
-3. **CLI 的網路存取不受限**：它需要連 Anthropic API。模型沒有網路工具，但 CLI 自身的流量（含可能的遙測或更新檢查）host 不攔截。
+1. **這不是作業系統沙箱。** CLI 以使用者本人的權限執行。host 能限制的是工具呼叫，限制不了 CLI 程序本身會做什麼。CLI 不載入使用者設定、沒有內建工具，都只依賴 CLI 旗標照 help 所述運作；若 CLI 行為與說明不符，host 擋不住檔案或網路存取。init 閘門只能抓到 CLI 自己在 init 說出的不符。
+2. **HOME 會傳給 CLI**，因為 CLI 要靠它找到登入。CLI 可能在 `~/.claude` 寫入快取或紀錄（即使用了 `--no-session-persistence`），也會讀 keychain 與 `~/.config/anthropic`。repo 不讀、不複製這些內容。
+3. **CLI 的網路存取不受限**：它需要連 Anthropic API。模型沒有網路工具；兩個固定環境變數只是減少更新與非必要流量，不是防火牆，也不排除 plugin 或 managed 設定的副作用。
 4. **process group**：CLI 若以獨立 group 或 session 啟動子程序（例如 detached 的 MCP server 或更新程式），host 的 group kill 收不到它們。這種情況只能放棄 pipe，結果標為 `orphaned_output`。bridge 會在 stdin 關閉時結束，capability 也已撤銷。
 5. **同一 OS 使用者的其他程序**，在 run 期間可讀取 MCP 設定檔、bridge 環境變數與 socket，所以讀得到 capability。
-6. **使用者層 CLAUDE.md 可能仍會載入。** help 對 `--restricted` 只提到設定檔，沒提到 CLAUDE.md；init 也看不出有沒有載入。
-7. **輪次上限是事後觀察**（見 7.3）；花費上限在訂閱下是否生效未知。
-8. **用量只取 CLI 回報的 `result.usage`**，標為「CLI 回報」，沒有就記 `unknown`。不等於帳單，也和 test USDC、gas 分開。
+6. **使用者層 CLAUDE.md 可能仍會載入。** help 對 `--restricted` 只提到設定檔；init 也看不出有沒有載入。
+7. **init 可能列出內建 agents 等項目。** 閘門不核准任何項目，真實 CLI 若在 `--tools ""` 下仍列出內建 agents，第一次 run 會在閘門停下（fail closed）；是否核准任何項目屬階段 C 前的決定。
+8. **assistant 訊息上限是事後觀察**：超過的那一則已經發生，也不等於模型請求次數。
+9. **用量只取 CLI 回報的 `result.usage` 四個 token 計數**，標為「CLI 回報」，沒有就記 `unknown`。不等於帳單，也和 test USDC、gas 分開。
 
-### 7.6 需要 Aaron 決定
+### 7.6 仍待 Aaron 決定或確認（B、C 前）
 
-1. 是否核准階段 A（只寫程式與 fake 測試，不推論）。
-2. 隔離旗標：建議 `--restricted` 取代 `--setting-sources project`，不用 `--safe-mode`。
-3. `--model`、`--effort`，以及是否加 `--max-budget-usd`（金額）。
-4. 上限：總時間 3 分鐘、工具 8 次、模型輪次 10。
-5. 是否在 CLI 環境加入 `DISABLE_AUTOUPDATER=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`。這兩個變數依官方文件存在，但本機尚未確認。
-6. 階段 B 由 Aaron 本人執行 `claude auth status`。
-7. 階段 C 的單次 run，另行核准。
+1. 階段 B：由 Aaron 本人確認版本、登入與否、非敏感的認證方式／訂閱確認（見 7.1）。
+2. live 認證接受值：目前清單為空。要接受哪個 `apiKeySource` 值、依據為何，或維持空清單（則 live 必定停在閘門）。
+3. `--model sonnet`、`--effort low` 是否就是要用的設定；實際版本是否支援。
+4. init 若列出內建 agents 或 skills，是否核准任何項目（目前一律拒絕）。
+5. 階段 C 的單次 run，另行明確核准。
 
 本人訂閱登入官方 CLI，不代表任何第三方產品或多人服務模式已獲准。公開多人服務須另行確認條款與計費。
 
 ## 8 尚未驗證或未完成
 
 - 真實 CLI 的 stream-json 實際內容、exit code、未登入與限流的實際輸出。
-- `--setting-sources project` 是否足以略過使用者層 hooks、CLAUDE.md 與記憶；真實 CLI 下 MCP server 的程序群組與 stderr 繼承方式。
-- 最大模型輪次（本機無 `--max-turns`）。
+- `--restricted`、`--permission-prompts none` 在真實 run 下的實際效果；CLAUDE.md 是否仍載入；真實 CLI 下 MCP server 的程序群組與 stderr 繼承方式。
+- 真實 CLI 2.1.287 的 init 實際欄位、`apiKeySource` 的實際值，以及內建 agents／skills 是否出現在 init。
+- 最大模型輪次（本機無 `--max-turns`；host 以 assistant 訊息數代替）。
 - 離開 process group 的子孫程序不會被終止，只能放棄 pipe 並標 `orphaned_output`；要完整回收需作業系統層沙箱或容器。
 - 同一 OS 使用者的其他程序可讀取 run 期間的 capability（見第 2 節）。
 - CLI 正常結束或輸出解析失敗時，Store 的 task 不會結束（只有 timeout／cancel 有 Store 語意）。這個 run 之後已無法寫入（第 2 節）；同一 task 的後續 run 仍可合法提出請購。
@@ -271,3 +283,16 @@ APA_LIVE_CLI=true APA_DB_PATH=var/apa-live.db \
   - **Claude Code 執行、Codex 核對紀錄**（不是 Codex 全數重跑）：133／133 突變與容器完整驗證，見 `artifacts/verify-container/runs/b3c66f6cac36-20261002T153256Z/`；本機檢查見 `artifacts/b1-04/b3c66f6cac36-20261002T153035Z/`。
   - 首輪 review（`ba0b440`）的兩項必修與兩項調整見第 9 節。
 - `var/apa-fake.db` 與 demo 預設資料庫分開：Codex review 已接受。
+
+## 11 階段 A 實作紀錄（2026-10-03，Claude Code 執行，待 Codex 獨立 review）
+
+依 Aaron 10/3 核准的階段 A 指示（vault：`Claude-Code-B1-04-live階段A實作指示-87ce160-20261003`），起點 `87ce160`。
+
+| 項目 | 修改位置 | 不變式 | 測試 | 突變 |
+|---|---|---|---|---|
+| A1 Store 寫入界線 | `relay.go`（`Binding` 狀態 idle → armed → stopped → ended；`Arm`／`Disarm`；`Commit` 只在 armed）；`host.go`（`Prepare`、watch、`Stopping: b.Disarm`、task 存在才寫結束事件）；`cmd/apa-buyer/main.go`（Store 只在 `prepare` 開；關閉順序） | init 通過前不開／不建 DB、不建 task、不做到期寫入；init 前業務工具一律拒絕；停止中的 run 不再放行、不再提交；`prepare` 進行中時 run 等它結束 | `TestNotReadyUntilArmed`、`TestNoStoreBeforeInit`（新 DB 不建立；含到期 Ask 的既有 DB 逐位元組不變）、`TestStoreUnavailableAfterInit`、`TestHostPrepareFails`、`TestHostInitSequence`（缺 init、init 前 hook、停止後才到的 init、重複 init）、`TestHostHookAfterPurchase`、`TestHostCancelDuringPrepare`、`TestHostEndings`（無 task 時不寫結束事件），以及 R1 的 `TestRevokeWithCallInFlight`、`TestCommitGate` | #134–136、#146–151、#157 |
+| A2 認證判定與 init 閘門 | `internal/buyer/gate.go`；`cmd/apa-buyer/main.go`（`liveAcceptAuth` 為空） | 只接受明列值；未知、缺失、型別錯誤、重複成員皆拒絕；不推定訂閱 | `TestHostInitGate`（18 種 init）、`TestLivePathWithFake`（空清單時 `auth_unconfirmed` 且 Store 未開） | #137–145 |
+| A3 CLI 設定與上限 | `host.go`（argv、固定環境）、`runner.go`（`Limits.Assistant`、3 分鐘）、`cmd/apa-buyer/main.go`（雙重 opt-in、絕對路徑、核准版本、`var/apa-live.db`） | argv 固定；`--tools` 為空字串；不用 `--safe-mode`／`--bare`；環境只有 allowlist 加兩個固定值；assistant 第 11 則停止 | `TestArgvAndEnv`、`TestAssistantLimit`、`TestLiveOptIn`（各種 opt-in 缺漏不執行 CLI、不開 Store；版本不符、版本檢查逾時）、`TestLivePathWithFake`、`TestVersion`、`TestVersionCheckCancelled` | #153–156、#158–160 |
+| A4 trace 白名單 | `host.go`（usage 只留四個計數；不存 `apiKeySource`、原始 stream、stderr、prompt、環境、capability） | 識別標記不進證據 | `TestHostTraceWhitelist`、`TestHostCapabilityLifetime` | #152、#123、#125 |
+
+既有 B1-04 突變中，文字隨重構移動的 #122、#126、#127、#129、#130、#132 改指新程式碼（意圖不變）。共 160 項，原 99 項文字未動。驗證結果見 vault 任務清單的 B1-04 交付紀錄。
