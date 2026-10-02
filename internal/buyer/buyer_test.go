@@ -128,7 +128,20 @@ func TestRunnerNotInstalled(t *testing.T) {
 	}
 }
 
-func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
+// alive: the process exists and is not a zombie. A killed process whose
+// parent has exited waits as a zombie until PID 1 reaps it, and a container
+// without an init may never do so; a zombie runs nothing. (/proc is Linux
+// only; elsewhere the kill check alone decides.)
+func alive(pid int) bool {
+	if syscall.Kill(pid, 0) != nil {
+		return false
+	}
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if i := strings.LastIndexByte(string(stat), ')'); err == nil && i > 0 && i+2 < len(stat) && stat[i+2] == 'Z' {
+		return false
+	}
+	return true
+}
 
 func gone(pid int, within time.Duration) bool {
 	for end := time.Now().Add(within); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
@@ -495,5 +508,74 @@ func TestHostNotInstalled(t *testing.T) {
 	}
 	if _, err := e.h.Run(context.Background(), "task-a-next", "x"); err == nil {
 		t.Error("unstarted task ran")
+	}
+}
+
+func script(t *testing.T, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "cli")
+	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// R2: the version check runs under the runner's rules.
+func TestVersion(t *testing.T) {
+	lim := Limits{Stdout: 4 << 10, Stderr: 4 << 10, Total: 5 * time.Second, Grace: 500 * time.Millisecond}
+	env := CLIEnv(os.Getenv)
+	if v, err := Version(context.Background(), fake(t), env, lim); err != nil || !strings.Contains(v, "fake-claude") {
+		t.Fatalf("fake: %q %v", v, err)
+	}
+
+	// A descendant holding the pipe neither delays the answer nor survives it.
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	holder := script(t, "sleep 30 & echo $! > "+pidFile+"\necho fake-claude")
+	start := time.Now()
+	v, err := Version(context.Background(), holder, env, lim)
+	t.Logf("holder check took %v", time.Since(start))
+	if err != nil || !strings.Contains(v, "fake-claude") || time.Since(start) > 2*time.Second {
+		t.Errorf("holder: %q %v after %v", v, err, time.Since(start))
+	}
+	if p := pids(t, pidFile); len(p) != 1 || !gone(p[0], 3*time.Second) {
+		t.Errorf("holder %v survived", p)
+	}
+	// The same with a 150 ms context (the review's reproduction): whichever
+	// way it ends, it ends at once and leaves no holder behind.
+	pidFile2 := filepath.Join(t.TempDir(), "pid")
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	start = time.Now()
+	v, err = Version(ctx, script(t, "sleep 30 & echo $! > "+pidFile2+"\necho fake-claude"), env, lim)
+	t.Logf("150 ms holder check: %q %v after %v", v, err, time.Since(start))
+	if time.Since(start) > time.Second {
+		t.Errorf("150 ms holder check took %v", time.Since(start))
+	}
+	for _, p := range pids(t, pidFile2) {
+		if !gone(p, 3*time.Second) {
+			t.Errorf("holder %d survived", p)
+		}
+	}
+
+	// A check that outlives its context fails promptly.
+	ctx, cancel = context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	start = time.Now()
+	if v, err := Version(ctx, script(t, "sleep 5\necho fake-claude"), env, lim); err == nil || time.Since(start) > 1500*time.Millisecond {
+		t.Errorf("slow: %q %v after %v", v, err, time.Since(start))
+	}
+
+	for name, body := range map[string]string{
+		"nonzero exit": "echo fake-claude\nexit 3",
+		"flood":        "echo fake-claude\nhead -c 8192 /dev/zero",
+		"missing":      "",
+	} {
+		path := script(t, body)
+		if name == "missing" {
+			path += "-absent"
+		}
+		if v, err := Version(context.Background(), path, env, lim); err == nil {
+			t.Errorf("%s: accepted %q", name, v)
+		}
 	}
 }

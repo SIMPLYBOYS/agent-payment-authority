@@ -57,6 +57,9 @@ var _ Executor = (*Shop)(nil)
 func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (ToolResult, CallRecord) {
 	rec := CallRecord{Tool: tool, ProductID: product}
 	fail := func(code, msg string) (ToolResult, CallRecord) {
+		if b.Ended() { // the run ended mid-call: that, not the symptom, is the outcome
+			code, msg = "RUN_NOT_ACTIVE", "this run has ended"
+		}
 		rec.Outcome = code
 		return refusal(code, msg), rec
 	}
@@ -99,7 +102,14 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 		return fail("PURCHASE_REFUSED", "the purchase could not be assembled from trusted data")
 	}
 	raw, _ := json.Marshal(order)
-	res, err := s.Store.Submit(b.Session, raw)
+	var res store.Result
+	err = b.Commit(func() (err error) {
+		res, err = s.Store.Submit(b.Session, raw)
+		return err
+	})
+	if errors.Is(err, ErrRunEnded) {
+		return fail("RUN_NOT_ACTIVE", "this run has ended")
+	}
 	if err != nil {
 		return fail(store.Code(err), "the host refused the purchase request")
 	}

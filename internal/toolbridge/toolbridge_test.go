@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
@@ -721,5 +722,138 @@ func TestPurchaseAfterEnd(t *testing.T) {
 		if len(e.purchases(b.Session)) != 0 {
 			t.Errorf("%s: purchase stored after the end", task)
 		}
+	}
+}
+
+// R1: a run that ends while a purchase waits for the shop's 402 records
+// nothing, and Revoke returns only after that call has finished.
+func TestRevokeWithCallInFlight(t *testing.T) {
+	e := newEnv(t)
+	srv, err := Listen(e.sh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	b := e.start("task-a")
+	capability, _ := srv.Register(b)
+	entered, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	e.setTamper(func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path == "/resources/kr-market" {
+			close(entered)
+			select { // hold the 402 until released, or until the client gives up
+			case <-release:
+			case <-r.Context().Done():
+			}
+		}
+		return false
+	})
+	result := make(chan ToolResult, 1)
+	go func() {
+		r, _ := Dial(context.Background(), srv.SocketPath(), capability, "request_purchase", json.RawMessage(`{"product_id":"kr-market"}`))
+		result <- r
+	}()
+	<-entered
+	revoked := make(chan struct{})
+	go func() { srv.Revoke(capability); close(revoked) }()
+	select {
+	case <-revoked:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Revoke did not end the call in flight")
+	}
+	// Records are complete when Revoke returns, and nothing was written.
+	if got := b.Calls(); len(got) != 1 || got[0].Outcome != "RUN_NOT_ACTIVE" {
+		t.Errorf("records after Revoke: %+v", got)
+	}
+	if ps := e.purchases(sessA); len(ps) != 0 {
+		t.Fatalf("purchase recorded after the run ended: %+v", ps)
+	}
+	if r := <-result; refusedCode(t, r) != "RUN_NOT_ACTIVE" {
+		t.Errorf("caller saw %+v", r)
+	}
+}
+
+// R1: ending a run and committing a write exclude each other, and an ended
+// run commits nothing, whichever check a call passed before.
+func TestCommitGate(t *testing.T) {
+	e := newEnv(t)
+	srv, err := Listen(e.sh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+
+	// A call that got past every check before the run ended still cannot write.
+	b := e.start("task-a")
+	capability, _ := srv.Register(b)
+	srv.Revoke(capability)
+	if _, rec := e.sh.Call(context.Background(), b, "request_purchase", "kr-market"); rec.Outcome != "RUN_NOT_ACTIVE" {
+		t.Errorf("after the end: %v", rec)
+	}
+	if len(e.purchases(sessA)) != 0 {
+		t.Fatal("an ended run wrote a purchase")
+	}
+
+	// End waits for a call in flight and cancels its context.
+	b2 := &Binding{Session: sessB}
+	cap2, _ := srv.Register(b2)
+	ctx, ok := b2.begin()
+	if !ok {
+		t.Fatal("call not admitted")
+	}
+	ended := make(chan struct{})
+	go func() { srv.Revoke(cap2); close(ended) }()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("the call's context was not cancelled")
+	}
+	select {
+	case <-ended:
+		t.Fatal("Revoke returned with a call in flight")
+	case <-time.After(200 * time.Millisecond):
+	}
+	b2.inflight.Done()
+	<-ended
+	if _, ok := b2.begin(); ok {
+		t.Error("a call was admitted after the end")
+	}
+
+	// End waits for a write in progress; after it, writes are refused.
+	b3 := &Binding{Session: sessB}
+	cap3, _ := srv.Register(b3)
+	inside, hold := make(chan struct{}), make(chan struct{})
+	go b3.Commit(func() error { close(inside); <-hold; return nil })
+	<-inside
+	ended = make(chan struct{})
+	go func() { srv.Revoke(cap3); close(ended) }()
+	select {
+	case <-ended:
+		t.Fatal("Revoke returned during a write")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(hold)
+	<-ended
+	wrote := false
+	if err := b3.Commit(func() error { wrote = true; return nil }); err != ErrRunEnded || wrote {
+		t.Errorf("write after the end: %v %v", err, wrote)
+	}
+}
+
+// Refused calls are counted, but only the first over the budget is recorded.
+func TestCallRecordsBounded(t *testing.T) {
+	srv, err := Listen(&recordExec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	b := &Binding{Session: sessA}
+	capability, _ := srv.Register(b)
+	for range 100 {
+		Dial(context.Background(), srv.SocketPath(), capability, "list_products", nil)
+	}
+	calls := b.Calls()
+	if len(calls) != MaxCalls+1 || calls[MaxCalls].Outcome != "TOO_MANY_CALLS" || b.Attempts() != 100 {
+		t.Errorf("%d records, %d attempts: %+v", len(calls), b.Attempts(), calls)
 	}
 }

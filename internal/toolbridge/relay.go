@@ -25,14 +25,72 @@ const callTimeout = 20 * time.Second
 
 // Binding is one run's trusted identity, fixed by the host before the CLI
 // starts. The model never supplies any of it.
+//
+// It is also the run's authority: once the run ends, no call starts, calls
+// in flight are cancelled and waited for, and Commit refuses every write.
 type Binding struct {
 	Session  contracts.Session
 	WalletID string
 	From     string
 
-	mu    sync.Mutex
-	calls int
-	log   []CallRecord
+	mu       sync.Mutex // guards the fields below and is held across a Commit
+	calls    int        // attempts, refused ones included
+	log      []CallRecord
+	ended    bool
+	ctx      context.Context // cancelled when the run ends
+	stop     context.CancelFunc
+	inflight sync.WaitGroup
+}
+
+// ErrRunEnded is Commit's refusal once the run has ended.
+var ErrRunEnded = errors.New("run has ended")
+
+// begin admits one call while the run is active; done must follow.
+func (b *Binding) begin() (context.Context, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.ended || b.ctx == nil {
+		return nil, false
+	}
+	b.inflight.Add(1) // never after end has started waiting: ended is set under mu first
+	return b.ctx, true
+}
+
+// Commit runs write, a call's one durable effect, only while the run is
+// active. end takes the same lock, so a run either ends before the write
+// starts (and nothing is written) or after it has finished.
+func (b *Binding) Commit(write func() error) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.ended {
+		return ErrRunEnded
+	}
+	return write()
+}
+
+// Ended reports whether the run has ended.
+func (b *Binding) Ended() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.ended
+}
+
+// end stops the run and returns once every call it admitted has finished.
+func (b *Binding) end() {
+	b.mu.Lock()
+	b.ended = true
+	if b.stop != nil {
+		b.stop()
+	}
+	b.mu.Unlock()
+	b.inflight.Wait()
+}
+
+// Attempts is the number of tool calls the run tried, refused ones included.
+func (b *Binding) Attempts() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls
 }
 
 // CallRecord is the run trace entry for one tool call: no arguments other
@@ -43,7 +101,8 @@ type CallRecord struct {
 	Outcome   string `json:"outcome"` // a decision, "ok", or a refusal code
 }
 
-// Calls returns a copy of the run's tool calls so far.
+// Calls returns a copy of the run's call records: at most MaxCalls+1, the
+// last one TOO_MANY_CALLS; later attempts are only counted (Attempts).
 func (b *Binding) Calls() []CallRecord {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -117,21 +176,38 @@ func (s *Server) Register(b *Binding) (string, error) {
 		return "", err
 	}
 	capability := hex.EncodeToString(raw)
+	b.mu.Lock()
+	b.ctx, b.stop = context.WithCancel(context.Background())
+	b.mu.Unlock()
 	s.mu.Lock()
 	s.runs[capKey(capability)] = b
 	s.mu.Unlock()
 	return capability, nil
 }
 
-// Revoke stops a capability; later calls with it are refused.
+// Revoke ends the capability's run: later calls are refused, calls in
+// flight are cancelled, and Revoke returns only once they have finished, so
+// the run's records are complete and nothing more can be written for it.
 func (s *Server) Revoke(capability string) {
 	s.mu.Lock()
+	b := s.runs[capKey(capability)]
 	delete(s.runs, capKey(capability))
 	s.mu.Unlock()
+	if b != nil {
+		b.end()
+	}
 }
 
-// Close stops accepting, waits for calls in flight and removes the socket.
+// Close ends every run, stops accepting, waits for calls in flight and
+// removes the socket.
 func (s *Server) Close() error {
+	s.mu.Lock()
+	runs := s.runs
+	s.runs = map[string]*Binding{}
+	s.mu.Unlock()
+	for _, b := range runs {
+		b.end()
+	}
 	err := s.ln.Close()
 	s.wg.Wait()
 	return errors.Join(err, os.RemoveAll(s.dir))
@@ -174,16 +250,23 @@ func (s *Server) serve(req relayRequest) ToolResult {
 	if b == nil {
 		return refusal("RUN_NOT_ACTIVE", "this run has ended or was never started")
 	}
+	runCtx, ok := b.begin()
+	if !ok {
+		return refusal("RUN_NOT_ACTIVE", "this run has ended or was never started")
+	}
+	defer b.inflight.Done()
 	name := req.Tool // traced, so only ever a known name
 	if !known(name) {
 		name = "unknown"
 	}
 	b.mu.Lock()
 	b.calls++
-	over := b.calls > MaxCalls
+	n := b.calls
 	b.mu.Unlock()
-	if over {
-		b.record(CallRecord{Tool: name, Outcome: "TOO_MANY_CALLS"})
+	if n > MaxCalls {
+		if n == MaxCalls+1 { // one record says the budget ran out; the rest are only counted
+			b.record(CallRecord{Tool: name, Outcome: "TOO_MANY_CALLS"})
+		}
 		return refusal("TOO_MANY_CALLS", "this run has used all its tool calls")
 	}
 	if name == "unknown" {
@@ -195,7 +278,7 @@ func (s *Server) serve(req relayRequest) ToolResult {
 		b.record(CallRecord{Tool: name, Outcome: "INVALID_ARGUMENTS"})
 		return refusal("INVALID_ARGUMENTS", err.Error())
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	ctx, cancel := context.WithTimeout(runCtx, callTimeout)
 	defer cancel()
 	result, rec := s.exec.Call(ctx, b, name, product)
 	b.record(rec)

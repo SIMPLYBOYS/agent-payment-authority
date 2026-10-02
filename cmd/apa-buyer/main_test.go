@@ -183,3 +183,20 @@ func TestShutdownMidRun(t *testing.T) {
 		t.Fatalf("after shutdown: %+v", v)
 	}
 }
+
+// R2: a version check cut short by cancellation starts nothing.
+func TestVersionCheckCancelled(t *testing.T) {
+	f := newFixture(t)
+	slow := filepath.Join(t.TempDir(), "fake-claude")
+	os.WriteFile(slow, []byte("#!/bin/sh\nsleep 5\necho fake-claude\n"), 0o755)
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := f.run(ctx, slow, "ask-mainline", nil)
+	if err == nil || !strings.Contains(err.Error(), "is not the fake CLI") || time.Since(start) > 2*time.Second {
+		t.Fatalf("%v after %v", err, time.Since(start))
+	}
+	if _, err := os.Stat(f.db); !os.IsNotExist(err) {
+		t.Error("the database was created")
+	}
+}

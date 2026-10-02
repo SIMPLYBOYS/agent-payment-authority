@@ -51,7 +51,7 @@ curl -i 'http://127.0.0.1:8402/resources/kr-market?edition=1'      # 402，報�
 APA_DB_PATH=var/apa-fake.db make demo-fake
 ```
 
-**只有 fake 模式**：`bin/fake-claude` 不跑模型、不連網，不需要 Claude Code CLI 或登入。它是真的子程序，透過 MCP bridge 呼叫三個受限工具（目錄、報價、請購）；host 對本機商店發真 HTTP 取得 402，把請購寫進真的 SQLite Store。主商品得到 Ask，沒有付款、沒有內容交付；CLI 說「已付款」也不會改變任何紀錄。同一個 DB 裡 task 只能啟動一次，重跑請用 `TASK=task-a-next` 或新的 `APA_DB_PATH`，不會刪除舊紀錄。live 模式尚未實作與驗證；橋接方式、信任邊界、上限與 CLI 相容性見 [docs/cli-poc.md](docs/cli-poc.md)。
+**只有 fake 模式**：`bin/fake-claude` 不跑模型、不連網，不需要 Claude Code CLI 或登入；Go 依賴需已下載（首次建置會連 `proxy.golang.org`，之後可離線）。它是真的子程序，透過 MCP bridge 呼叫三個受限工具（目錄、報價、請購）；host 對本機商店發真 HTTP 取得 402，把請購寫進真的 SQLite Store。主商品得到 Ask，沒有付款、沒有內容交付；CLI 說「已付款」也不會改變任何紀錄。同一個 DB 裡 task 只能啟動一次，重跑請用 `TASK=task-a-next` 或新的 `APA_DB_PATH`，不會刪除舊紀錄。live 模式尚未實作與驗證；橋接方式、信任邊界、上限與 CLI 相容性見 [docs/cli-poc.md](docs/cli-poc.md)。
 
 **停止**：在執行 `make dev` 的終端按 `Ctrl-C`（或對該行程送 `SIGTERM`）。服務會關閉 listener 後結束，port 隨即釋放，可以直接再啟動一次。
 

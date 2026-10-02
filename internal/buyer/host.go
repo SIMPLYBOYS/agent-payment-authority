@@ -75,6 +75,7 @@ type Host struct {
 type RunResult struct {
 	Report   Report
 	Calls    []toolbridge.CallRecord
+	Attempts int    // tool calls tried, refused ones included
 	StoreEnd string // TASK_TIMED_OUT or TASK_CANCELLED when the run recorded one
 	EndError string // the Store's refusal code when recording the end failed
 	Trace    string
@@ -122,8 +123,10 @@ func (h *Host) Run(ctx context.Context, taskID, prompt string) (RunResult, error
 
 	started := time.Now()
 	res.Report = Run(ctx, Spec{Path: h.CLI, Args: Argv(prompt, cfgPath), Dir: work, Env: h.Env, Limits: h.Limits})
+	// Revoke returns once the run's calls in flight have finished; after it
+	// nothing more is written for this run and its records are complete.
 	h.Bridge.Revoke(capability)
-	res.Calls = b.Calls()
+	res.Calls, res.Attempts = b.Calls(), b.Attempts()
 
 	// Only these two outcomes have Store semantics; other failures leave the
 	// task as it is, with the diagnosis in the run trace.
@@ -176,7 +179,7 @@ func (h *Host) trace(b *toolbridge.Binding, prompt, capability string, started t
 	}
 	errs = append(errs, enc.Encode(map[string]any{
 		"event": "run_end", "outcome": res.Report.Outcome, "exit_code": res.Report.ExitCode, "messages": res.Report.Messages,
-		"num_turns": res.Report.NumTurns, "usage": usage, "stderr_bytes": res.Report.StderrBytes,
+		"num_turns": res.Report.NumTurns, "usage": usage, "stderr_bytes": res.Report.StderrBytes, "tool_attempts": res.Attempts,
 		"store_end": res.StoreEnd, "store_end_error": res.EndError,
 		"untrusted_cli_result": scrub(res.Report.Result, 2000),
 	}), f.Close())

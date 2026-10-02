@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -93,26 +94,67 @@ type stream struct {
 	authFailed, rate   bool
 }
 
-// Run starts the process in its own process group, reads it under the
-// limits and returns once the process has exited and both pipes are closed,
-// or the pipes were abandoned after Grace. Every stop kills the whole group;
-// processes outside the group are never signalled.
+// Run starts the CLI and reads its stream-json under the limits (execute).
 func Run(ctx context.Context, s Spec) Report {
-	r := Report{ExitCode: -1}
+	var st stream
+	fault, exit, stderrBytes := execute(ctx, s, func(r io.Reader) error { return readStream(r, s.Limits, &st) })
+	r := Report{Outcome: fault, ExitCode: exit, StderrBytes: stderrBytes, Messages: st.messages, NumTurns: st.numTurns, Usage: st.usage}
+	if st.result != nil {
+		r.Result = *st.result
+	}
+	if fault == "" {
+		r.Outcome = classify(exit, &st)
+	}
+	return r
+}
+
+// Version runs `path --version` under the same process rules as a run and
+// returns its output. Any fault, a nonzero exit or more than Limits.Stdout
+// bytes is an error; so is a ctx that ended meanwhile.
+func Version(ctx context.Context, path string, env []string, lim Limits) (string, error) {
+	var out string
+	fault, exit, _ := execute(ctx, Spec{Path: path, Args: []string{"--version"}, Dir: os.TempDir(), Env: env, Limits: lim}, func(r io.Reader) error {
+		b, err := io.ReadAll(io.LimitReader(r, int64(lim.Stdout)+1))
+		if err != nil {
+			return err
+		}
+		if len(b) > lim.Stdout {
+			return errOverflow
+		}
+		out = string(b)
+		return nil
+	})
+	switch {
+	case fault != "":
+		return "", fmt.Errorf("%s --version: %s", path, fault)
+	case exit != 0:
+		return "", fmt.Errorf("%s --version: exit %d", path, exit)
+	case ctx.Err() != nil:
+		return "", ctx.Err()
+	}
+	return out, nil
+}
+
+// execute starts the process in its own process group, hands stdout to
+// consume, counts stderr, and returns once the process has exited and both
+// pipes are closed, or the pipes were abandoned after Grace. Every stop
+// kills the whole group; processes outside the group are never signalled.
+// fault is "" when nothing stopped the process; exit is -1 when it was
+// killed or never started.
+func execute(ctx context.Context, s Spec, consume func(io.Reader) error) (fault Outcome, exit, stderrBytes int) {
+	exit = -1
 	ctx, cancel := context.WithTimeout(ctx, s.Limits.Total)
 	defer cancel()
 
 	outR, outW, err := os.Pipe()
 	if err != nil {
-		r.Outcome = StartFailed
-		return r
+		return StartFailed, exit, 0
 	}
 	errR, errW, err := os.Pipe()
 	if err != nil {
 		outR.Close()
 		outW.Close()
-		r.Outcome = StartFailed
-		return r
+		return StartFailed, exit, 0
 	}
 	cmd := &exec.Cmd{
 		Path: s.Path, Args: append([]string{s.Path}, s.Args...), Dir: s.Dir, Env: s.Env,
@@ -125,21 +167,19 @@ func Run(ctx context.Context, s Spec) Report {
 	if err != nil {
 		outR.Close()
 		errR.Close()
-		r.Outcome = StartFailed
 		if errors.Is(err, fs.ErrNotExist) {
-			r.Outcome = NotInstalled
+			return NotInstalled, exit, 0
 		}
-		return r
+		return StartFailed, exit, 0
 	}
 	pgid := cmd.Process.Pid
 	group := func(sig syscall.Signal) { syscall.Kill(-pgid, sig) }
 
-	var st stream
 	outc, errc, waitc := make(chan error, 1), make(chan error, 1), make(chan error, 1)
-	go func() { outc <- readStream(outR, s.Limits, &st) }()
+	go func() { outc <- consume(outR) }()
 	go func() {
 		n, err := io.Copy(io.Discard, io.LimitReader(errR, int64(s.Limits.Stderr)+1))
-		r.StderrBytes = int(n)
+		stderrBytes = int(n)
 		if err == nil && n > int64(s.Limits.Stderr) {
 			err = errOverflow
 		}
@@ -148,7 +188,6 @@ func Run(ctx context.Context, s Spec) Report {
 	go func() { waitc <- cmd.Wait() }()
 
 	var (
-		fault             Outcome
 		exitErr           error
 		done              = ctx.Done()
 		escalate, abandon <-chan time.Time
@@ -212,21 +251,13 @@ func Run(ctx context.Context, s Spec) Report {
 	outR.Close()
 	errR.Close()
 
-	r.Messages, r.NumTurns, r.Usage = st.messages, st.numTurns, st.usage
-	if st.result != nil {
-		r.Result = *st.result
-	}
 	var ee *exec.ExitError
 	if errors.As(exitErr, &ee) {
-		r.ExitCode = ee.ExitCode()
+		exit = ee.ExitCode()
 	} else if exitErr == nil {
-		r.ExitCode = 0
+		exit = 0
 	}
-	r.Outcome = fault
-	if fault == "" {
-		r.Outcome = classify(r.ExitCode, &st)
-	}
-	return r
+	return fault, exit, stderrBytes
 }
 
 // classify judges a run that ended on its own. Exit 0 alone proves nothing:

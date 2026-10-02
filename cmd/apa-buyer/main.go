@@ -22,7 +22,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -173,6 +172,9 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 	// The credential is an M1 fixture made at start, valid for a day of host
 	// time; nothing verifies a BBS+ proof.
 	cred := policy.Credential{ConsumerID: task.ConsumerID, ValidUntil: d.clock() + 86400, EvidenceMode: "fixture"}
+	if ctx.Err() != nil {
+		return errors.New("cancelled before the task started; nothing was recorded")
+	}
 	if err := st.StartTask(store.TaskSetup{TaskID: task.TaskID, Profile: &profile, Credential: &cred}); err != nil {
 		if store.Code(err) == "TASK_ALREADY_STARTED" {
 			return fmt.Errorf("task %s already exists in %s; nothing was changed or deleted. Run another task (--task task-a-next) or set APA_DB_PATH to a new file", task.TaskID, dbPath)
@@ -241,14 +243,12 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 }
 
 // checkFake refuses a --fake-cli that is not the fake: the real CLI would
-// run a model.
+// run a model. The check runs under the runner's rules (process group,
+// output limits, cleanup), so a slow or noisy executable cannot hold it up.
 func checkFake(ctx context.Context, path string, getenv func(string) string) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, path, "--version")
-	cmd.Env = buyer.CLIEnv(getenv)
-	out, err := cmd.Output()
-	if err != nil || !strings.Contains(string(out), "fake-claude") {
+	lim := buyer.Limits{Stdout: 4 << 10, Stderr: 4 << 10, Total: 5 * time.Second, Grace: time.Second}
+	out, err := buyer.Version(ctx, path, buyer.CLIEnv(getenv), lim)
+	if err != nil || !strings.Contains(out, "fake-claude") {
 		return fmt.Errorf("--fake-cli %s is not the fake CLI (its --version must name fake-claude); refusing to run it", path)
 	}
 	return nil
