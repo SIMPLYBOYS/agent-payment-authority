@@ -1,6 +1,6 @@
 # B1-05 節點 2 設計：持久化與事件查詢
 
-**狀態（2026-10-02）**：節點 2 的 Store 實作於 `cb33768` **通過 Codex 獨立技術 review**（REV1、REV2 已關閉，驗收紀錄見第 16 節）。B1-05 整體待主持人 HTTP 範圍與結案確認，尚未標 Done、未合併 main。設計歷程：第三版設計 `f8bb427` 通過技術審查（reviewer 結論，不是 Aaron 另外的產品決定）；實作 `64f247c` 經 review 修正 REV1／REV2 為 `cb33768`。實作對照見第 14 節，修正見第 15 節。主持人事件檢視 HTTP 端點移到 B1-06 的提案仍待 Aaron 確認，本節點未實作 HTTP。
+**狀態（2026-10-02）**：**B1-05 已結案（Done）**，範圍是已驗收的確定性 Policy（`61b3652`）＋Store（程式驗收基準 `cb33768`），Aaron 2026-10-02 確認；main 由 `adda78e` fast-forward 至 `7ad304a`。主持人事件檢視 HTTP 端點移至 B1-06（未實作，保留認證、A／B 隔離與整合測試要求）。結案不代表 M1 或端到端整合完成。驗收與結案紀錄見第 16 節。設計歷程：第三版設計 `f8bb427` 通過技術審查；實作 `64f247c` 經 review 修正 REV1／REV2 為 `cb33768`；實作對照見第 14 節，修正見第 15 節。
 
 第三版的修訂內容：第二版（`adad831`）的 review 保留 D1～D4 的方向，要求局部修訂三項：歷史請購的 replay 不受目前報價簿影響（R1）、缺 profile 是合法的 `CONFIG_MISSING` 情境（R2）、`ExpireDue` 週期不是延遲上限（C1），對照見第 13 節。第一版（`c9199e7`）到第二版的 D1～D4 修訂對照保留在同一節。
 
@@ -512,9 +512,9 @@ registry、consumer／wallet 歸屬、請購格式與 hash、事件與投影一�
 | B1-05 節點 2 Store | 已通過技術 review，驗收基準 `cb33768d527a706ba2ae7a3daa11d1d49cea608f` |
 | REV1 恢復讀取錯誤 | 已關閉：讀取失敗不再當成正常讀完，失敗時拒絕開檔 |
 | REV2 跨 consumer 錢包歸屬 | 已關閉：建立與恢復都拒絕跨 consumer 共用已保存的 `wallet_id`／`payer`；同一 consumer 跨 task 沿用仍合法 |
-| B1-05 整體 | 技術部分已通過，待 HTTP 範圍與結案確認；未標 Done |
-| 主持人事件 HTTP 移至 B1-06 | 待 Aaron 明確確認；未核准、未實作 |
-| main 合併 | 未執行，須另獲 Aaron 核准 |
+| B1-05 整體 | 技術部分已通過；**10/2 經 Aaron 確認結案（Done）**，見下方結案紀錄 |
+| 主持人事件 HTTP 移至 B1-06 | **10/2 Aaron 確認移至 B1-06**；未實作，列為 B1-06 未完成工作 |
+| main 合併 | **10/2 經 Aaron 核准**，main 由 `adda78e` fast-forward 至 `7ad304a` |
 
 **通過範圍**：SQLite 持久化、可信快照、請購去重與衝突、原子事件與投影、取消與逾時、重啟恢復、A／B 隔離、受可信 session 限制的 Store 查詢，以及 REV1、REV2 兩項修正。
 
@@ -539,3 +539,20 @@ registry、consumer／wallet 歸屬、請購格式與 hash、事件與投影一�
 - 驗證映像：`sha256:78258368de0907e58498095c327a6ee4edbe75421d18e524bd00661c3749b6d0`。
 
 `64f247c` 等先前版本的證據保留。本節之後的文件 commit 只改文件，沒有在其上重跑上述驗證；上述結果屬於 `cb33768`。
+
+**結案紀錄（2026-10-02，Aaron 確認）**
+
+上表為驗收當時的狀態，三項待確認事項其後由 Aaron 明確同意並執行：
+
+1. **主持人事件 HTTP 端點移至 B1-06**：是責任轉移，不是刪除需求，也不算已完成。B1-06 須完成：主持人與展示端的認證、以 Store 查詢的白名單投影為資料來源、A／B 隔離、HTTP 與 UI 的整合測試。loopback 不是免認證的理由。
+2. **B1-05 標 Done**：範圍是已驗收的確定性 Policy（`61b3652`）加 Store（程式驗收基準 `cb33768`）。不代表 M1、B1-06 端到端整合或真實 caller 認證完成。
+3. **main 合併**：合併前核對 main 為 `adda78e`、工作區乾淨、`7ad304a` 相對 `cb33768` 只多文件變更；以 fast-forward 將 main 由 `adda78e` 前進到 `7ad304a`，`2a264c4` 至 `7ad304a` 的 16 個 commit 與 SHA 全部保留，`cb33768` 在 main 歷史中。未推送、未刪任何分支（`b1-05-policy` 保留在 `7ad304a`）。
+
+**後續待辦（不因 Done 而消失）**：
+
+- `cmd/demo`（或其他 host）開啟 Store：`APA_DB_PATH` 等設定載入、可信 registry／profile／credential／報價簿的來源。
+- `RunExpiry` 的啟動、停止與錯誤處理，以及服務關閉時的 Store 關閉。
+- B1-04 以已認證的 wrapper context 建立 session 並呼叫 `Submit`／`Task`／`Events`。
+- B1-06 的主持人 HTTP 端點（上列要求）。
+
+本結案紀錄由 main 上的文件 commit 記錄，沒有改寫已驗收的 commit。
