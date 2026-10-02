@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-03）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）經 Aaron 核准並已實作，待 Codex 獨立 review**（第 7、11 節）；階段 B、C **未執行**，沒有任何真實推論、登入檢查或 `claude -p`。B1-04 整體仍 InProgress，未標 Done、未合併 main。fake 成功只證明 wrapper／bridge／Store 的行為，不證明真實 Claude 能完成請購；B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-03）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）經 Aaron 核准並已實作；`ca46cab` 經 review 需修 R1、R2，已修正，待 Codex 再 review**（第 7、11、12 節）；階段 B、C **未執行**，沒有任何真實推論、登入檢查或 `claude -p`。B1-04 整體仍 InProgress，未標 Done、未合併 main。fake 成功只證明 wrapper／bridge／Store 的行為，不證明真實 Claude 能完成請購；B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -94,7 +94,7 @@ MCP 直接以標準庫實作，沒有新增第三方依賴。fake CLI 走的是�
 
 只有 `timeout`（`TASK_TIMED_OUT`，Ask 保留待到期）與 `cancelled`（`TASK_CANCELLED`，Ask 撤回）寫 Store，且只在本 run 已建立 task 時；沒有 task 時不為記錄失敗而建立 task。其他失敗不新增契約事件，診斷留在 run trace。既有 Deny 的狀態與理由不被後續結束事件覆蓋。task 已結束時 Store 拒絕第二次結束，回報 `TASK_ALREADY_ENDED`。結束後才到達的請購同樣由 Store 拒絕。
 
-**run trace**（`--trace-dir`，預設 `var/runs/`，檔案 0600）：與 AuditEvent 鏈分開的 JSONL，只有白名單化的診斷：task、consumer、CLI 檔名、prompt 的 SHA-256（不存 prompt）、上限、init 閘門結果碼、init 所列 model（清理後）、task 是否建立、prepare 失敗代碼、每次工具呼叫（工具名、驗過的商品 ID、結果碼）、結果分類與 `detail`、exit code、訊息數、assistant 訊息數、usage 的四個 token 計數（沒有就 `unknown`，不補零）、工具嘗試次數、init 前拒絕次數、stderr 位元組數，以及清理、截斷後的 CLI 結果文字（欄位名 `untrusted_cli_result`）。不含原始 stream、capability、環境變數、stderr 內容、`apiKeySource` 的值或其他認證資料；測試以識別標記確認。
+**run trace**（`--trace-dir`，預設 `var/runs/`，檔案 0600）：與 AuditEvent 鏈分開的 JSONL，只有結構化的診斷：task、consumer、CLI 檔名、prompt 的 SHA-256（不存 prompt）、上限、init 閘門結果碼、init 所列 model（只在符合模型名稱格式時保存，否則記 `unrecognized`）、task 是否建立、prepare 失敗代碼、每次工具呼叫（工具名、驗過的商品 ID、結果碼）、結果分類與 `detail`、exit code、訊息數、assistant 訊息數、usage 的四個 token 計數（沒有就 `unknown`，不補零）、工具嘗試次數、init 前拒絕次數、stderr 位元組數、CLI 結果文字的字數（`result_chars`）。**CLI 的自由文字一律不保存**（結果可能回顯 prompt 或其他內容；`ca46cab` review R1）。也不含原始 stream、capability、環境變數、stderr 內容或 `apiKeySource` 的值；測試以識別標記與回顯 prompt 的 fake 確認。
 
 ## 4 從乾淨環境重跑 fake 流程
 
@@ -199,7 +199,8 @@ APA_LIVE_CLI=true APA_DB_PATH=var/apa-live.db \
 
 **init 閘門**：run 註冊後是 idle；MCP 握手與列工具照常，三個業務工具一律 `RUN_NOT_READY`。runner 每讀一則 stream-json 就交給 host 檢查；唯一一則 `system/init` 依序核對下列項目，通過且 run 仍有效，才執行 `prepare`（Store、task、RunExpiry），成功後放行：
 
-- JSON 本身：不得有重複成員名或錯誤型別（`init_malformed`）。
+- 讀取規則（`ca46cab` review R2）：每一則 stream-json 在分類（`type`／`subtype`）與任何檢查之前，先以同一個嚴格規則讀取。任何層級的物件只要有成員名重複，不論完全相同，或依 Unicode 簡單大小寫折疊後相同（涵蓋 `encoding/json` 會視為同一欄位的拼法），整則訊息即為 `parse_error`（`detail` 為 `ambiguous_json`），run 停止。之後只依確切欄位名讀取，大小寫不同的拼法不算該欄位。閘門用的是同一個讀取函式。
+- JSON 型別錯誤（例如 `tools` 不是字串陣列）：`init_malformed`。
 - `tools`：恰為三個完整工具名，各一次。不是只比數量或前綴，重複值不能補足缺項（`tools`）。
 - `mcp_servers`：恰一個，`name` 為 `apa`，`status` 為 `connected`（`mcp_servers`）。
 - `permissionMode` 為 `dontAsk`（`permission_mode`）。
@@ -296,3 +297,14 @@ APA_LIVE_CLI=true APA_DB_PATH=var/apa-live.db \
 | A4 trace 白名單 | `host.go`（usage 只留四個計數；不存 `apiKeySource`、原始 stream、stderr、prompt、環境、capability） | 識別標記不進證據 | `TestHostTraceWhitelist`、`TestHostCapabilityLifetime` | #152、#123、#125 |
 
 既有 B1-04 突變中，文字隨重構移動的 #122、#126、#127、#129、#130、#132 改指新程式碼（意圖不變）。共 160 項，原 99 項文字未動。驗證結果見 vault 任務清單的 B1-04 交付紀錄。
+
+## 12 `ca46cab` review 修正（2026-10-03，Claude Code 執行，待 Codex 獨立 review）
+
+Codex 以 fake CLI 在隔離容器重現兩項問題（沒有執行真實推論）。live 認證清單維持空白。
+
+| 項目 | review 發現 | 修正 | 回歸測試 |
+|---|---|---|---|
+| R1 | trace 仍保存 `untrusted_cli_result`；只替換 capability、去除控制字元與截短，不是遮罩。fake 在結果回顯完整 prompt，三輪都原文進 trace | `host.go`：trace 不再保存任何 CLI 自由文字，只記結果字數 `result_chars`；init 的 model 只在符合模型名稱格式時保存，否則 `unrecognized`；移除 capability 替換（已無自由文字可替換） | `TestHostTraceWhitelist`：fake 在結果回顯 prompt（先確認回顯確實發生），trace 不含 prompt 任一片段，只有字數；model 帶 prompt 片段時記為 `unrecognized`。`TestHostMainLine`、`TestHostCapabilityLifetime` 確認結果文字與 capability 都不在 trace |
+| R2 | stream 先用一般 JSON 解碼判斷種類，重複欄位檢查只在辨識為 init 後執行，也未處理大小寫別名。`"permissionMode":"default"` 加 `"PermissionMode":"dontAsk"` 通過閘門並產生 Ask；`"subtype":"hook_started"` 加 `"subtype":"status"` 未觸發 hook 停止 | `gate.go`：新增 `objectFields`（任何層級的重複成員名，含 Unicode 簡單大小寫折疊後相同者，一律拒絕；之後依確切名稱讀取）與 `field`；閘門改用它。`runner.go`：每則訊息先經 `objectFields`，歧義即 `parse_error`／`ambiguous_json`，之後的分類、assistant 計數、Watch 與閘門都讀同一份結果 | `TestObjectFields`（完全重複、大小寫別名、Kelvin 符號、巢狀與陣列中的物件、非物件、尾隨資料；大小寫不同的拼法不算該欄位）；`TestHostAmbiguousMessages`（review 的兩案及其變體：init 的 `permissionMode` 大小寫別名與完全重複、hook subtype 重複於 init 前，以及 init 後的大小寫別名 hook 訊息，其後的請購不會落帳）；`TestHostInitGate` 的重複成員案例改由讀取端以 `ambiguous_json` 擋下 |
+
+突變：#123 改為「CLI 結果文字寫入 trace」（原 capability 替換已移除）；#145 改指共用的 `objectFields` 歧義檢查（讀取端與閘門同一處）；#139–142、#144 因閘門改以確切欄位讀取而改指新程式碼（意圖不變）；新增 #161（成員名不做大小寫折疊）、#162（model 自由文字進 trace）。共 162 項，原 99 項文字未動。
