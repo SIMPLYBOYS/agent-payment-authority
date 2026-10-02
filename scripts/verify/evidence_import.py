@@ -48,7 +48,7 @@ ALLOWED_FILES = [re.compile(p) for p in (
     r"exit-codes\.txt",
     r"iso-[a-z0-9-]{1,40}\.log",
     r"(%s)\.log" % "|".join(map(re.escape, STEP_NAMES)),
-    r"mutation/%s/(summary\.txt|baseline\.log|mutation-[0-9]{2}\.log)" % RUN_DIR,
+    r"mutation/%s/(summary\.txt|baseline\.log|mutation-[0-9]{2,3}\.log)" % RUN_DIR,  # mutation-check.py: {n:02d}, past 99 three digits
 )]
 ALLOWED_DIRS = re.compile(r"mutation(/%s)?" % RUN_DIR)
 

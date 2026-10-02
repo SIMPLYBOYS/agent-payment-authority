@@ -104,6 +104,17 @@ class ImportTest(unittest.TestCase):
         build(self.archive, GOOD, extra=[(d, None)])
         self.assertRejected("unexpected directory")
 
+    def test_mutation_log_numbers(self):
+        # mutation-check.py names logs {n:02d}: two digits, three past 99.
+        run = "mutation/e47711201637-20261002T050459Z/"
+        for n, ok in (("01", True), ("99", True), ("100", True), ("999", True), ("1", False), ("1000", False)):
+            build(self.archive, dict(GOOD, **{run + f"mutation-{n}.log": b"ok\n"}))
+            if ok:
+                ei.do_import(self.archive, self.tmp / ("dest" + n), self.tmp / ("staging" + n), "export-fault")
+                self.assertTrue((self.tmp / ("dest" + n) / run / f"mutation-{n}.log").exists())
+            else:
+                self.assertRejected("not an expected evidence file")
+
     def test_duplicate_member(self):
         info = tarfile.TarInfo("./check-contracts.log")
         info.size = 3
