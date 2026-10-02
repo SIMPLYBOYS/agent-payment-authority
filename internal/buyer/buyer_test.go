@@ -359,6 +359,22 @@ func (e *hostEnv) eventTypes(sess contracts.Session) []string {
 	return out
 }
 
+// refusedAfter: the run's records begin with first, and every record after
+// it is a call the stop refused. A call the CLI sent just after the
+// stopping line may reach the relay before the host has read that line; it
+// is then admitted and cancelled by the stop (RUN_NOT_ACTIVE), never run.
+func refusedAfter(calls []toolbridge.CallRecord, first string) bool {
+	if len(calls) == 0 || calls[0].Tool+":"+calls[0].Outcome != first {
+		return false
+	}
+	for _, c := range calls[1:] {
+		if c.Outcome != "RUN_NOT_ACTIVE" {
+			return false
+		}
+	}
+	return true
+}
+
 func outcomes(calls []toolbridge.CallRecord) string {
 	var s []string
 	for _, c := range calls {
@@ -502,7 +518,7 @@ func TestHostInitSequence(t *testing.T) {
 	// stays and the gate does not open again.
 	sess := e.session("task-a")
 	res = e.run(context.Background(), "task-a", "init-duplicate")
-	if res.Report.Outcome != ConfigMismatch || res.Report.Detail != "init_duplicate" || outcomes(res.Calls) != "request_purchase:Ask" || res.StoreEnd != "" {
+	if res.Report.Outcome != ConfigMismatch || res.Report.Detail != "init_duplicate" || !refusedAfter(res.Calls, "request_purchase:Ask") || res.StoreEnd != "" {
 		t.Fatalf("duplicate: %+v", res)
 	}
 	if v := e.task(sess); len(v.Purchases) != 1 || v.Status != "awaiting_approval" {
@@ -516,7 +532,7 @@ func TestHostHookAfterPurchase(t *testing.T) {
 	e := newHost(t)
 	sess := e.session("task-a")
 	res := e.run(context.Background(), "task-a", "hook-after-purchase")
-	if res.Report.Outcome != ConfigMismatch || res.Report.Detail != "hook_message" || outcomes(res.Calls) != "request_purchase:Ask" {
+	if res.Report.Outcome != ConfigMismatch || res.Report.Detail != "hook_message" || !refusedAfter(res.Calls, "request_purchase:Ask") {
 		t.Fatalf("%+v %s", res.Report, outcomes(res.Calls))
 	}
 	if v := e.task(sess); len(v.Purchases) != 1 || v.Purchases[0].ApprovalClosed != "" {
@@ -704,7 +720,7 @@ func TestHostAmbiguousMessages(t *testing.T) {
 		{Do: "result", Text: "done"},
 	}}
 	res := e.runWith(context.Background(), "task-a", genScenario(t, sc), e.prepare("task-a"))
-	if res.Report.Outcome != ParseError || res.Report.Detail != "ambiguous_json" || outcomes(res.Calls) != "list_products:ok" {
+	if res.Report.Outcome != ParseError || res.Report.Detail != "ambiguous_json" || !refusedAfter(res.Calls, "list_products:ok") {
 		t.Fatalf("%+v %s", res.Report, outcomes(res.Calls))
 	}
 	if v := e.task(e.session("task-a")); len(v.Purchases) != 0 {
