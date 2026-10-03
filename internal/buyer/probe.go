@@ -204,6 +204,23 @@ func observe(m map[string]json.RawMessage, version string) *InitObservation {
 	return o
 }
 
+// apiRetryCode maps a system/api_retry message to a fixed code by its
+// error category; the category's text is not kept.
+func apiRetryCode(line []byte) string {
+	var e string
+	if f, err := objectFields(line); err == nil {
+		field(f, "error", &e)
+	}
+	switch e {
+	case "authentication_failed":
+		return "api_retry_auth"
+	case "rate_limit":
+		return "api_retry_rate_limit"
+	default:
+		return "api_retry"
+	}
+}
+
 // refuseAll is the probe bridge's executor. The probe never arms its run,
 // so the relay refuses business calls first; if this is ever reached, it
 // refuses too, and the count shows it.
@@ -264,6 +281,11 @@ func Probe(ctx context.Context, p ProbeSpec) (ProbeResult, error) {
 			}
 			obs = observe(f, p.CLIVersion)
 			return InitObserved, "init"
+		case typ == "system" && subtype == "api_retry":
+			// The CLI is already talking to the API and failing: stop now, so
+			// a later init can neither turn this into a success nor leave it
+			// to the wait limit. Only a fixed code is kept, never its text.
+			return CLIError, apiRetryCode(line)
 		case typ == "system":
 			return "", "" // other system notices: keep waiting
 		default:

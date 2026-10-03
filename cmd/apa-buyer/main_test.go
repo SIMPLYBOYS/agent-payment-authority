@@ -446,6 +446,15 @@ func TestProbeOptIn(t *testing.T) {
 	if _, err := f.probeExec(ctx, []string{"--cli", slow}, map[string]string{"APA_LIVE_CLI": "true"}, deps{}); err == nil || !strings.Contains(err.Error(), "version check") {
 		t.Errorf("cancelled version check: %v", err)
 	}
+	// Cancelled before anything: not even the version check runs.
+	done, stop := context.WithCancel(context.Background())
+	stop()
+	if _, err := f.probeExec(done, []string{"--cli", cli}, map[string]string{"APA_LIVE_CLI": "true"}, deps{}); err == nil || !strings.Contains(err.Error(), "cancelled before the version check") {
+		t.Errorf("cancelled probe: %v", err)
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Fatal("a cancelled probe executed the CLI")
+	}
 	if _, err := os.Stat(f.traceDir); !os.IsNotExist(err) {
 		t.Error("a refused probe wrote a trace")
 	}

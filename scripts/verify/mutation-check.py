@@ -405,6 +405,17 @@ MUTATIONS = [
      "\tres, err := buyer.Probe(ctx, buyer.ProbeSpec{", "\tif d.openStore != nil {\n\t\td.openStore(store.Config{})\n\t}\n\tres, err := buyer.Probe(ctx, buyer.ProbeSpec{", "TestProbeCommand"),
     ("B1-04 C0 command: the version error repeats the CLI's text", "cmd/apa-buyer/main.go",
      "return fmt.Errorf(\"%s reports a version other than the approved %q; nothing was started or upgraded\", path, want)", "return fmt.Errorf(\"%s reports %q, a version other than the approved %q; nothing was started or upgraded\", path, got, want)", "TestLiveOptIn"),
+    # B1-04 C0 review (71f222a): api_retry stops the probe; cancel checked before any start.
+    ("B1-04 C0 R: api_retry does not stop the probe", "internal/buyer/probe.go",
+     "\t\t\treturn CLIError, apiRetryCode(line)", "\t\t\treturn \"\", \"\"", "TestProbeAPIRetry"),
+    ("B1-04 C0 R: authentication_failed retry not told apart", "internal/buyer/probe.go",
+     "\t\treturn \"api_retry_auth\"", "\t\treturn \"api_retry\"", "TestProbeAPIRetry"),
+    ("B1-04 C0 R: rate_limit retry not told apart", "internal/buyer/probe.go",
+     "\t\treturn \"api_retry_rate_limit\"", "\t\treturn \"api_retry\"", "TestProbeAPIRetry"),
+    ("B1-04 C1 runner: a cancelled run still starts its process", "internal/buyer/runner.go",
+     "\tif ctx.Err() != nil { // cancelled or out of time before the start", "\tif false && ctx.Err() != nil { // cancelled or out of time before the start", "TestRunnerCancelledBeforeStart"),
+    ("B1-04 C1 command: a cancelled probe still runs the version check", "cmd/apa-buyer/main.go",
+     "\tif ctx.Err() != nil {\n\t\treturn errors.New(\"cancelled before the version check; the probe was not started\")", "\tif false && ctx.Err() != nil {\n\t\treturn errors.New(\"cancelled before the version check; the probe was not started\")", "TestProbeOptIn"),
 ]
 
 

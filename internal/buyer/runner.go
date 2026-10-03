@@ -167,6 +167,10 @@ func Version(ctx context.Context, path string, env []string, lim Limits) (string
 	return out, nil
 }
 
+// started is called after each successful process start. Tests replace it
+// to count starts; nothing outside the package can.
+var started = func() {}
+
 // execute starts the process in its own process group, hands stdout to
 // consume, counts stderr, and returns once the process has exited and both
 // pipes are closed, or the pipes were abandoned after Grace. Every stop
@@ -223,7 +227,18 @@ func execute(ctx context.Context, s Spec, consume func(io.Reader) error) (x exec
 		defer inR.Close()
 		defer inW.Close() // held, never written: the process sees no input and no EOF while it runs
 	}
+	if ctx.Err() != nil { // cancelled or out of time before the start: start nothing
+		outR.Close()
+		outW.Close()
+		errR.Close()
+		errW.Close()
+		notify()
+		return execResult{fault: Cancelled, exit: -1}
+	}
 	err = cmd.Start()
+	if err == nil {
+		started()
+	}
 	outW.Close()
 	errW.Close()
 	if err != nil {

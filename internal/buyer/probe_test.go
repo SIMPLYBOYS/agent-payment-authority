@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -254,5 +255,68 @@ func TestProbeNoLeak(t *testing.T) {
 	}
 	if res.Observation.Model != "other" || res.Observation.AuthSource != "other" || res.Observation.ExtraMembers != 1 {
 		t.Errorf("observation %+v", res.Observation)
+	}
+}
+
+// api_retry before the init stops the probe at once with a fixed code: a
+// later init does not turn it into an observation, and it is not left to
+// the wait limit. The retry's error text is never kept.
+func TestProbeAPIRetry(t *testing.T) {
+	const mark = "MARKRETRY5c0a"
+	retry := func(e string) fakecli.Step { return fakecli.Step{Do: "retry", Error: e} }
+	for name, c := range map[string]struct {
+		sc   fakecli.Scenario
+		code string
+	}{
+		"auth, then init":       {manual(retry("authentication_failed"), fakecli.Step{Do: "init"}, fakecli.Step{Do: "hang"}), "api_retry_auth"},
+		"auth, no init":         {manual(retry("authentication_failed"), fakecli.Step{Do: "hang"}), "api_retry_auth"},
+		"rate limit, then init": {manual(retry("rate_limit"), fakecli.Step{Do: "init"}, fakecli.Step{Do: "hang"}), "api_retry_rate_limit"},
+		"rate limit, no init":   {manual(retry("rate_limit"), fakecli.Step{Do: "hang"}), "api_retry_rate_limit"},
+		"unknown error text":    {manual(retry(mark), fakecli.Step{Do: "init"}, fakecli.Step{Do: "hang"}), "api_retry"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newProbe(t, genScenario(t, c.sc), 10*time.Second)
+			res, took := p.run(context.Background())
+			if res.Status != ProbeFailed || res.Code != c.code || res.Observation != nil || took > 3*time.Second {
+				t.Fatalf("%s %s observation %v after %v", res.Status, res.Code, res.Observation, took)
+			}
+			if p.stdinBytes() != "0" || res.CallsExecuted != 0 {
+				t.Errorf("stdin %s, executed %d", p.stdinBytes(), res.CallsExecuted)
+			}
+			out, _ := json.Marshal(res)
+			trace, _ := os.ReadFile(res.Trace)
+			if strings.Contains(string(out)+string(trace), mark) {
+				t.Fatalf("retry text kept: %s %s", out, trace)
+			}
+		})
+	}
+}
+
+// A run cancelled before its process starts starts nothing.
+func TestRunnerCancelledBeforeStart(t *testing.T) {
+	var starts atomic.Int32
+	started = func() { starts.Add(1) }
+	defer func() { started = func() {} }()
+	ran := filepath.Join(t.TempDir(), "ran")
+	cli := script(t, "touch "+ran+"\necho fake-claude")
+	if _, err := Version(context.Background(), cli, CLIEnv(os.Getenv), testLimits); err != nil || starts.Load() != 1 {
+		t.Fatalf("control: %v, starts %d", err, starts.Load()) // the counter sees a start
+	}
+	os.Remove(ran)
+	starts.Store(0)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if r := Run(ctx, Spec{Path: cli, Dir: t.TempDir(), Env: CLIEnv(os.Getenv), Limits: testLimits}); r.Outcome != Cancelled || r.ExitCode != -1 {
+		t.Errorf("run: %+v", r)
+	}
+	if _, err := Version(ctx, cli, CLIEnv(os.Getenv), testLimits); err == nil {
+		t.Error("version check passed")
+	}
+	if starts.Load() != 0 {
+		t.Fatalf("%d processes were started", starts.Load())
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, err := os.Stat(ran); !os.IsNotExist(err) {
+		t.Fatal("the process ran")
 	}
 }

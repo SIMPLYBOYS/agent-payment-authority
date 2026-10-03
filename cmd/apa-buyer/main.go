@@ -168,6 +168,9 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 		}
 		want := cmp(d.liveVersion, approvedCLIVersion)
 		cli, env = *cliPath, buyer.CLIEnv(d.getenv)
+		if ctx.Err() != nil {
+			return errors.New("cancelled before the version check; nothing was started")
+		}
 		if err := checkLive(ctx, cli, env, want); err != nil {
 			return err
 		}
@@ -420,6 +423,9 @@ func probe(ctx context.Context, args []string, d deps) error {
 	}
 	want := cmp(d.liveVersion, approvedCLIVersion)
 	env := buyer.CLIEnv(d.getenv)
+	if ctx.Err() != nil {
+		return errors.New("cancelled before the version check; the probe was not started")
+	}
 	if err := checkLive(ctx, *cliPath, env, want); err != nil {
 		return err
 	}
