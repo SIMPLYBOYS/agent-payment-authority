@@ -547,3 +547,20 @@ echo "exit=$?"
 - 交付給 review 的是：終端 JSON、trace 檔、exit code、執行時的 commit。整份標為「Claude Code（或 Aaron）執行，待 Codex review」。
 - 執行後即停止，等 review 與 Aaron 的下一步決定。
 
+## 21 真實 C0 執行紀錄（2026-10-04，Claude Code 執行，待 Codex review）
+
+依 Aaron 10/4 的核准，**只執行一次**；核准範圍不含 C0′、階段 C 或其他模型任務。
+
+- 前置：HEAD `fd7b338cfe4acfd8a88e5b89df00900fdd83bf32`，工作區乾淨。`bin/apa-buyer` 是當場由該 commit 建置，`go version -m` 顯示 `vcs.revision=fd7b338…`、`vcs.modified=false`。
+- 命令：`APA_LIVE_CLI=true ./bin/apa-buyer probe-init --cli /Users/mac/.local/bin/claude --trace-dir <證據目錄>/runs`，只跑一次。
+- 版本：命令內建的版本檢查通過；若版本不是 `2.1.288 (Claude Code)`，命令會在啟動前就拒絕並輸出錯誤，而這次確實進入了探測。版本字串本身沒有另外保存。
+- 時間：2026-10-03T18:45:31Z 至 18:46:02Z（UTC），約 31 秒。
+- 結果：**exit 3，`no_init_before_input`**。runner 結果是 `timeout`：30 秒內 CLI 沒有送出 `system/init`，被 SIGTERM 結束（CLI exit 143）。`stdin_bytes_written` 0，業務呼叫拒絕 0、執行 0，`usage` 為 `unknown`，沒有觀測資料。
+- 事後檢查：沒有殘留的 CLI 或 bridge 程序；探測用的暫存目錄已移除。Store 未開啟，商店與 task 都沒有啟動。
+- 保存：`artifacts/b1-04/c0-real-20261003T184531Z/`（本機，`artifacts/` 不進版控）。內容只有 `commit.txt`、`binary-vcs.txt`、開始與結束時間、`exit-code.txt`、`stdout.json`（白名單 JSON）、`stderr.txt`（apa-buyer 自己的固定代碼行）與 `runs/` 的 trace。沒有任何 CLI 文字。
+- 解讀（待 Codex review）：
+  - 在零使用者輸入、`--input-format stream-json` 下，CLI 2.1.288 在 30 秒內沒有送出 init，符合第 15.2 節預想的情況之一：init 可能要等到第一則使用者訊息才送出。
+  - 這次**沒有**取得 `apiKeySource`、model、agents／skills 等任何 init 資訊，所以第 7.6 節第 2–4 項仍無資料可據。
+  - 程式能保證沒有寫入任何 stdin 位元組；但無法保證 CLI 內部沒有背景連線或推論，用量仍記 `unknown`。
+- 依核准條件，執行後即停止：不重跑、不放寬任何清單、不轉往 C0′。下一步（是否、以及如何取得 init 資訊）待 Codex review 與 Aaron 決定。
+
