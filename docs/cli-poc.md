@@ -75,7 +75,7 @@ MCP 直接以標準庫實作，沒有新增第三方依賴。fake CLI 走的是�
 - 固定 executable 與 argv，`exec` 直接啟動，不經 shell。
 - 工作目錄是空的私有暫存目錄；MCP 設定在它之外。
 - 環境只帶 `HOME USER LOGNAME PATH TMPDIR LANG LC_ALL TERM`，加上固定的 `DISABLE_AUTOUPDATER=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`（Aaron 10/3 同意；依官方 env-vars 文件，本機 help 未列；用來減少更新與非必要流量，不是防火牆），fake 模式再加情境路徑。API key、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_OAUTH_TOKEN`、`ANTHROPIC_PROFILE`、雲端供應商、代理、`CLAUDE_CONFIG_DIR` 與 host 自己的設定都不傳。fake 模式的 `HOME` 換成每次新建的空目錄，fake 不會靠近使用者的登入。
-- `--version` 檢查（fake 命令確認 `--fake-cli` 確實是 fake；live 要求輸出恰為核准版本 `2.1.287 (Claude Code)`）也走同一套程序規則：獨立 process group、輸出 4 KiB、stderr 4 KiB、5 秒，結束時回收整個 group。逾時、取消、超量或非零退出都視為失敗，不啟動 task；啟動 task 前再確認一次未被取消。
+- `--version` 檢查（fake 命令確認 `--fake-cli` 確實是 fake；live 要求輸出恰為核准版本 `2.1.288 (Claude Code)`，10/3 前為 2.1.287）也走同一套程序規則：獨立 process group、輸出 4 KiB、stderr 4 KiB、5 秒，結束時回收整個 group。逾時、取消、超量或非零退出都視為失敗，不啟動 task；啟動 task 前再確認一次未被取消。
 - 子程序在自己的 process group。任何停止都對整個 group 送 SIGTERM，期限後 SIGKILL；程序自行結束後也立即 SIGKILL 該 group，回收仍握著 pipe 的子孫。
 - 已離開 group（例如 `setsid`）的程序不會被送信號：等候期限後放棄 pipe，結果標 `orphaned_output`。這是已知限制，見第 8 節。
 - 不使用 `--dangerously-skip-permissions`、`--bare`、`--safe-mode` 或 `bypassPermissions`。
@@ -189,7 +189,7 @@ APA_LIVE_CLI=true APA_DB_PATH=var/apa-live.db \
   ./bin/apa-buyer run --live --cli /Users/mac/.local/bin/claude --task task-a
 ```
 
-- `APA_LIVE_CLI=true` 與 `--live` 必須同時存在（`APA_LIVE_CLI` 依 `strconv.ParseBool`，其他值視為未開啟）；`--live` 不得與 `--fake-cli`／`--scenario` 併用，`--cli` 只限 `--live`。`--cli` 必須是絕對路徑，不查 PATH、不 fallback。`--version` 必須恰為 `2.1.287 (Claude Code)`；不符就停止，不升級、不降級。以上任何一項不符：不執行 CLI 的推論、不開 Store。
+- `APA_LIVE_CLI=true` 與 `--live` 必須同時存在（`APA_LIVE_CLI` 依 `strconv.ParseBool`，其他值視為未開啟）；`--live` 不得與 `--fake-cli`／`--scenario` 併用，`--cli` 只限 `--live`。`--cli` 必須是絕對路徑，不查 PATH、不 fallback。`--version` 必須恰為 `2.1.288 (Claude Code)`（10/3 由 2.1.287 改，見第 15.6 節）；不符就停止，不升級、不降級。以上任何一項不符：不執行 CLI 的推論、不開 Store。
 - 資料庫預設 `var/apa-live.db`（`APA_DB_PATH` 可覆寫，規則同既有）；fake 預設 `var/apa-fake.db`、demo 預設 `var/apa.db` 不變。task 已存在就照既有規則拒絕，不刪紀錄。
 - **目前 live 的認證接受清單是空的**（`liveAcceptAuth`），所以任何 live init 都會在 `auth_unconfirmed`／`auth_missing` 停下，不開 Store。決定接受值、以及其文件依據，是階段 C 開跑前的待決事項；不得在第一次失敗後自動學習或放寬，trace 也不記錄 `apiKeySource` 的值。
 
@@ -204,7 +204,7 @@ APA_LIVE_CLI=true APA_DB_PATH=var/apa-live.db \
 - `tools`：恰為三個完整工具名，各一次。不是只比數量或前綴，重複值不能補足缺項（`tools`）。
 - `mcp_servers`：恰一個，`name` 為 `apa`，`status` 為 `connected`（`mcp_servers`）。
 - `permissionMode` 為 `dontAsk`（`permission_mode`）。
-- `claude_code_version`：等於核准版本的版號 `2.1.287`；fake 為 `0.0.0`（`cli_version`）。
+- `claude_code_version`：等於核准版本的版號 `2.1.288`；fake 為 `0.0.0`（`cli_version`）。
 - `plugins`、`skills`、`agents`：若出現，必須是空陣列，沒有任何項目獲准（同名代碼）。欄位不存在不證明主機沒有載入這些內容。
 - 認證：`apiKeySource` 必須是字串，且恰在接受清單內（`auth_missing`／`auth_unconfirmed`）。live 清單為空（7.2）。init 只能拒絕已知不相容或未知的來源，**不能獨自證明計費來源**，訂閱登入由階段 B 另行確認。
 
@@ -251,7 +251,7 @@ APA_LIVE_CLI=true APA_DB_PATH=var/apa-live.db \
 
 - 真實 CLI 的 stream-json 實際內容、exit code、未登入與限流的實際輸出。
 - `--restricted`、`--permission-prompts none` 在真實 run 下的實際效果；CLAUDE.md 是否仍載入；真實 CLI 下 MCP server 的程序群組與 stderr 繼承方式。
-- 真實 CLI 2.1.287 的 init 實際欄位、`apiKeySource` 的實際值，以及內建 agents／skills 是否出現在 init。
+- 真實 CLI（核准版本 2.1.288）的 init 實際欄位、`apiKeySource` 的實際值，以及內建 agents／skills 是否出現在 init。
 - 最大模型輪次（本機無 `--max-turns`；host 以 assistant 訊息數代替）。
 - 離開 process group 的子孫程序不會被終止，只能放棄 pipe 並標 `orphaned_output`；要完整回收需作業系統層沙箱或容器。
 - 同一 OS 使用者的其他程序可讀取 run 期間的 capability（見第 2 節）。
@@ -343,7 +343,7 @@ R2 已由 review 關閉。R1 仍有一個缺口：model 只檢查名稱格式，
 | 7.6 項目 | 目前狀態 | 缺什麼 |
 |---|---|---|
 | 1 階段 B：版本、登入與否、非敏感的認證方式／訂閱確認 | 未執行。就算登入成功，也只證明機器上有一個可用憑證，不證明某次 run 實際用哪個憑證、怎麼計費 | Aaron 本人回報 `claude --version`，以及 `claude auth status --text` 中「登入方式／方案類型」一行（不貼其他內容）。另只回報「有／無」：shell 是否設了 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_OAUTH_TOKEN`、`ANTHROPIC_PROFILE`、`CLAUDE_CODE_USE_*`；是否有 managed settings 檔；`~/.config/anthropic` 是否有 active profile。這些是 host 環境 allowlist 擋不到、卻排在訂閱登入之前的來源 |
-| 2 `apiKeySource` 接受值 | 清單為空；文件無法確認值域；從未見過 2.1.287 真實 init 的值 | **真實 init 的值**，加上第 1 項的證據，兩者都有才可能支持一個接受值。單獨任何一項都不夠 |
+| 2 `apiKeySource` 接受值 | 清單為空；文件無法確認值域；從未見過真實 init 的值（2.1.287、2.1.288 皆未見） | **真實 init 的值**，加上第 1 項的證據，兩者都有才可能支持一個接受值。單獨任何一項都不夠 |
 | 3 `--model sonnet`、`--effort low` | 只是候選；本機 help 有這兩個旗標 | 真實 init 回報的 model ID；CLI 是否接受 `--effort low`（不接受時的行為未知） |
 | 4 init 中的 agents／skills | 一律拒絕；真實 init 會不會列出內建項目未知 | **真實 init 的內容** |
 | 5 階段 C 單次 run | 未核准 | 1–4 完成後另行核准 |
@@ -357,7 +357,7 @@ R2 已由 review 關閉。R1 仍有一個缺口：model 只檢查名稱格式，
 
 **做法（需先實作並經 Codex review，再經 Aaron 核准才執行一次）**：
 
-- 新子命令 `apa-buyer probe-init --cli <絕對路徑>`：需要 `APA_LIVE_CLI=true`，`--version` 須恰為 `2.1.287 (Claude Code)`。
+- 新子命令 `apa-buyer probe-init --cli <絕對路徑>`：需要 `APA_LIVE_CLI=true`，`--version` 須恰為核准版本 `2.1.288 (Claude Code)`。
 - 環境 allowlist、固定環境變數、私有空工作目錄、MCP 設定與 bridge 都與階段 C 相同，讓 `mcp_servers` 的狀態是真的。run 註冊後保持 idle、永不放行；不開 Store，也不使用任何 DB 路徑。
 - argv 與階段 C 相同，只差兩點：`-p` 不帶 prompt，並加上 `--input-format stream-json`。stdin 保持開啟，**從頭到尾不寫入任何使用者訊息**。
 - 最多等 30 秒。收到 `system/init`，或逾時，就關閉 stdin，並用既有的 runner 清理整個 process group。
@@ -374,7 +374,7 @@ R2 已由 review 關閉。R1 仍有一個缺口：model 只檢查名稱格式，
 **可能用量**：
 
 - **設計上不應有任何模型推論**：沒有使用者訊息，模型就沒有可以回應的回合。
-- **未驗證**：2.1.287 在 stream-json 輸入模式下，會不會在收到第一則使用者訊息之前就送出 init。若不會，探測在 30 秒時以「init 未在輸入前出現」結束；仍然沒有送出訊息，預期沒有推論，但這次就拿不到 init。
+- **未驗證**：核准版本 2.1.288 在 stream-json 輸入模式下，會不會在收到第一則使用者訊息之前就送出 init。若不會，探測在 30 秒時以「init 未在輸入前出現」結束；仍然沒有送出訊息，預期沒有推論，但這次就拿不到 init。
 - **無法完全排除**：CLI 自己的帳號、認證或背景連線。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 只是減少，不是保證。沒有 result 訊息，所以 usage 只能記 `unknown`，不會補零。
 
 **C0 的備案 C0′（只在 C0 拿不到 init 時，另行核准）**：寫入一則最短的使用者訊息，一收到 init 就終止。可能用量是**最多一次模型請求**：輸入是 CLI 的系統提示、三個工具定義與一句話，輸出會被中斷；次數沒有硬保證，用量記 `unknown`。
@@ -410,3 +410,4 @@ R2 已由 review 關閉。R1 仍有一個缺口：model 只檢查名稱格式，
   2. 或維持 `2.1.287`，由 Aaron 自行還原 CLI 版本（repo 不做這件事）。
   3. 在 C0 或 C 期間，是否由 Aaron 自行暫停平時 CLI 的自動更新，以免版本在核准與執行之間再變。這是 Aaron 環境的設定，repo 不更動。
 - 這只涵蓋第 15.1 節第 1 項的「版本」部分；登入方式／方案類型與各憑證來源的有／無尚未回報。
+- **10/3 決定（Aaron）**：核准版本改為 `2.1.288 (Claude Code)`。程式 `cmd/apa-buyer` 的 `approvedCLIVersion` 已改；閘門由它推得 `claude_code_version` `2.1.288`。測試改以該常數為準，另以舊版 `2.1.287` 驗證「其他版本被拒」，並直接確認 `2.1.288` 通過版本檢查（`TestLiveOptIn`）。第 6 節與本節前段保留 2.1.287 時的歷史紀錄。上面第 2、3 項因此不再適用；第 3 項（執行期間暫停平時 CLI 的自動更新）仍待 Aaron 決定。這次只改版本釘選，沒有執行 CLI 推論、登入檢查或 C0；live 認證清單維持空白。

@@ -150,7 +150,7 @@ func TestFakeMainLine(t *testing.T) {
 func TestRefusals(t *testing.T) {
 	f := newFixture(t)
 	real := filepath.Join(t.TempDir(), "claude")
-	os.WriteFile(real, []byte("#!/bin/sh\necho '2.1.287 (Claude Code)'\n"), 0o755)
+	os.WriteFile(real, []byte("#!/bin/sh\necho '"+approvedCLIVersion+"'\n"), 0o755)
 	for name, c := range map[string]struct {
 		args []string
 		want string
@@ -245,7 +245,7 @@ func marker(t *testing.T, version string) (path, ran string) {
 // Store. Only scripts and the fake are ever executed here.
 func TestLiveOptIn(t *testing.T) {
 	f := newFixture(t)
-	cli, ran := marker(t, "2.1.287 (Claude Code)")
+	cli, ran := marker(t, approvedCLIVersion)
 	for name, c := range map[string]struct {
 		args []string
 		env  map[string]string
@@ -271,7 +271,7 @@ func TestLiveOptIn(t *testing.T) {
 
 	// The approved version is required exactly; the check itself runs the
 	// CLI with --version only.
-	other, ran2 := marker(t, "2.1.288 (Claude Code)")
+	other, ran2 := marker(t, "2.1.287 (Claude Code)") // the version approved before 2026-10-03
 	_, err := f.exec(context.Background(), []string{"run", "--live", "--cli", other}, map[string]string{"APA_LIVE_CLI": "true"}, deps{})
 	if err == nil || !strings.Contains(err.Error(), "not the approved") {
 		t.Errorf("other version: %v", err)
@@ -281,7 +281,7 @@ func TestLiveOptIn(t *testing.T) {
 	}
 	// A cancelled or timed-out version check stops too.
 	slow := filepath.Join(t.TempDir(), "claude")
-	os.WriteFile(slow, []byte("#!/bin/sh\nsleep 5\necho '2.1.287 (Claude Code)'\n"), 0o755)
+	os.WriteFile(slow, []byte("#!/bin/sh\nsleep 5\necho '"+approvedCLIVersion+"'\n"), 0o755)
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	start := time.Now()
@@ -291,6 +291,15 @@ func TestLiveOptIn(t *testing.T) {
 	}
 	if _, err := os.Stat(f.db); !os.IsNotExist(err) {
 		t.Error("a refused live start created the database")
+	}
+
+	// The pin itself (Aaron, 2026-10-03): exactly 2.1.288 passes the version
+	// check, and the init gate then expects claude_code_version 2.1.288.
+	if approvedCLIVersion != "2.1.288 (Claude Code)" || strings.Fields(approvedCLIVersion)[0] != "2.1.288" {
+		t.Fatalf("approved version %q", approvedCLIVersion)
+	}
+	if err := checkLive(context.Background(), cli, buyer.CLIEnv(os.Getenv), approvedCLIVersion); err != nil {
+		t.Errorf("the approved version was refused: %v", err)
 	}
 }
 

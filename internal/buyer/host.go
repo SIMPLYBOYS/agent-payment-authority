@@ -31,7 +31,7 @@ const (
 )
 
 // Argv is the CLI's whole argv after the program name. Every flag is in
-// `claude --help` of CLI 2.1.287; what each does is the help text's word,
+// `claude --help` of CLI 2.1.287 and 2.1.288; what each does is the help text's word,
 // not yet observed in a live run (docs/cli-poc.md section 6). The prompt is
 // the host's, never the model's.
 func Argv(prompt, mcpConfig string) []string {

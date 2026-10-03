@@ -68,7 +68,7 @@ dev: .env line(s) 2 are not plain KEY=VALUE (no spaces, quotes or shell syntax);
 | 變數 | 必填 | 說明 |
 |---|---|---|
 | `APA_ADDR` | 是 | 服務位址，必須是 loopback IP 與 port，例如 `127.0.0.1:8402` 或 `[::1]:8402`。不接受 `0.0.0.0`、LAN IP 或主機名稱。`8123` 保留給 WebAuthn 驗證頁，請勿使用 |
-| `APA_LIVE_CLI` | 否 | 預設 `false`。`make dev`（demo）設為 `true` 會拒絕啟動。`apa-buyer run --live` 需要它為 `true`，另需絕對路徑的 `--cli` 與核准版本 `2.1.287 (Claude Code)`；目前 live 的認證接受清單為空，任何 live run 都會停在 init 閘門（見 [docs/cli-poc.md](docs/cli-poc.md) 第 7 節） |
+| `APA_LIVE_CLI` | 否 | 預設 `false`。`make dev`（demo）設為 `true` 會拒絕啟動。`apa-buyer run --live` 需要它為 `true`，另需絕對路徑的 `--cli` 與核准版本 `2.1.288 (Claude Code)`；目前 live 的認證接受清單為空，任何 live run 都會停在 init 閘門（見 [docs/cli-poc.md](docs/cli-poc.md) 第 7 節） |
 | `APA_DB_PATH` | 否 | 只有 `apa-buyer run` 使用：Store 檔案路徑，不接受 DSN，目錄須為 0700；未設定時 fake 為 `var/apa-fake.db`、live 為 `var/apa-live.db`（demo 的預設 `var/apa.db` 不受影響） |
 
 缺少或不合法的設定會在啟動時以一行訊息說明原因並結束，例如：
