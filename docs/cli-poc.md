@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-04）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測已實作（第 17 節；`71f222a` review 修正見第 18 節），待 Codex 獨立 review，未執行**。階段 B、C **未執行**，沒有任何真實推論、登入檢查或 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節），尚未對真實 CLI 執行**；執行一次的確認清單見第 20 節，待 Aaron 核准。階段 B、C **未執行**，沒有任何真實推論、登入檢查或 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -491,3 +491,59 @@ APA_LIVE_CLI=true ./bin/apa-buyer probe-init --cli /Users/mac/.local/bin/claude 
 | C1（建議） | 取消只在版本檢查之後才檢查；底層直接呼叫 `cmd.Start()` | `cmd/apa-buyer`：live 與 probe 都在版本檢查前先檢查 context；`runner.go`：啟動程序前檢查 context，已取消或逾時就不啟動（`Version` 與 `Run` 共用）；並加一個只供測試替換的啟動計數掛鉤 | `TestRunnerCancelledBeforeStart`（正向對照：計數看得到一次啟動；已取消時 `Run` 與 `Version` 都是 0 次）；`TestProbeOptIn`（已取消的 probe 連版本檢查都不執行，CLI 未被呼叫） | #181、#182 |
 
 Codex 對 C1 的說明：這是程式碼觀察，三輪共 300 次測試沒有觀察到 fake 寫入副作用，不列為已動態重現的問題。共 182 項突變，原 99 項文字未動。
+
+## 19 驗收紀錄：C0 實作與 fake 驗證於 `5f34a7b` 通過技術 review（2026-10-04）
+
+- 結果：`5f34a7b` 通過 Codex 獨立技術 review。R1（api_retry）關閉，C1（提前檢查取消）完成，沒有新的阻擋問題。Codex 確認了 review 轉交截斷時，本輪對四種回歸情境的解讀是正確的。
+- **通過的是 C0 的實作與 fake 驗證**。不代表真實 CLI 的行為、登入方式或用量已驗證。B1-04 整體仍 InProgress，未標 Done、未合併 main；live 認證接受清單維持空白。真實 C0、C0′ 與階段 B／C 都未核准、未執行。
+- 證據歸屬：
+  - **Codex 獨立重跑**：R1 原先失敗的四種情境各三輪（全部立即回報失敗；不被後續 init 覆蓋、不等到逾時；stdin 與業務工具執行均為零）；C1（已取消、已逾時的 context 都不啟動程序，正向對照確認啟動計數有效）；全套 race／coverage；C0 相關回歸三輪；JS 契約向量；20 項證據匯入測試。全部通過。
+  - **Claude Code 執行、Codex 核對紀錄**（不是 Codex 獨立重跑）：182／182 突變、完整容器驗證七步、17 項隔離檢查，見 `artifacts/verify-container/runs/5f34a7b65949-20261003T175144Z/`；本機檢查見 `artifacts/b1-04/5f34a7b65949-20261003T174835Z/`。
+- 歷程：`71f222a`（首次交付）→ `5f34a7b`（api_retry 修正與取消檢查；通過）。
+
+## 20 執行一次真實 C0 的確認清單（2026-10-04 擬定；待 Aaron 核准，未執行）
+
+本節只是清單。**沒有 Aaron 對「執行一次 C0」的明確核准，就不執行**；執行後不論結果，都不會自動轉往 C0′ 或階段 C。
+
+### 20.1 執行前，由 Aaron 確認（不貼敏感內容）
+
+1. **核准**：明確同意執行**一次** C0。結果不理想不會重跑；要重跑必須再次核准。
+2. **CLI**：`claude --version` 恰為 `2.1.288 (Claude Code)`，路徑是 `/Users/mac/.local/bin/claude`（10/2 記錄的位置；若已不同，要回報新路徑）。版本若已變，就停止並重新核准釘選。
+3. **自動更新**：決定執行期間是否暫停平時 CLI 的自動更新（Aaron 自己的環境設定，repo 不更動）。host 傳給 CLI 的 `DISABLE_AUTOUPDATER=1` 只作用於這一次啟動。
+4. **登入與憑證來源**（階段 B，第 15.1 節第 1 項）：`claude auth status --text` 中「登入方式／方案」那一行；以及只答「有／無／不確定」：managed settings 檔、settings 檔的 `apiKeyHelper`、keychain 裡先前 Console 登入的 API key、`~/.config/anthropic` 的 active profile。這不阻擋 C0 執行，但 C0 的結果要搭配這些資訊才能解讀；**兩者都不能單獨證明計費方式**。
+5. **接受的風險**：
+   - CLI 以 Aaron 本人的權限、HOME 與網路執行，會使用 `~/.claude` 與 keychain；host 不讀取、不複製這些內容。
+   - 程式保證不送任何使用者訊息，但**不保證** CLI 內部沒有背景連線、帳號查詢或推論。
+   - 用量記為 `unknown`，可能不是零。
+   - 不是作業系統沙箱；離開 process group 的子程序收不回來。
+6. **停止與 C0 拿不到 init 時的處理**：若結果是 `no_init_before_input`（CLI 要等使用者訊息才送 init），不轉往 C0′；是否接受 C0′ 或其他做法，另行決定。
+
+### 20.2 命令（由 Claude Code 在 Aaron 核准後執行，或由 Aaron 自己執行）
+
+```sh
+cd /Users/mac/Documents/OpenSourceProjects/agent-payment-authority
+git status --short && git rev-parse HEAD        # 工作區乾淨，HEAD 為通過 review 的 5f34a7b（或之後只改文件的 commit）
+go build -o bin/apa-buyer ./cmd/apa-buyer
+APA_LIVE_CLI=true ./bin/apa-buyer probe-init --cli /Users/mac/.local/bin/claude --trace-dir var/runs
+echo "exit=$?"
+```
+
+- 只跑這一條。啟動前，命令會再做一次 opt-in、絕對路徑與版本檢查，任何一項不符就不啟動。
+- 最多等 init 30 秒；停止後的清理另需最多約 6 秒（兩個寬限期）。
+- 不開 Store，不使用 `APA_DB_PATH`，不建立 task，不連商店，不執行任何業務工具。
+
+### 20.3 結果怎麼讀
+
+| exit | status | 意思 | 之後 |
+|---|---|---|---|
+| 0 | `observed` | 拿到一則可嚴格讀取、版本相符的 init；觀測資料是白名單投影 | 把觀測資料（第 17.3 節的欄位）和 20.1 第 4 項一起交 Codex review，再決定 `apiKeySource` 接受值、model／effort、agents／skills 怎麼處理。**不會自動放寬任何清單** |
+| 3 | `no_init_before_input` | 30 秒內沒有 init，CLI 可能要等使用者訊息才送 | 停止。C0′（送一則訊息）或其他做法另行決定 |
+| 1 | `failed` 與代碼 | `api_retry_auth`（認證失敗）、`api_retry_rate_limit`（限流）、`init_cli_version`、`ambiguous_json`、`hook_message`、`unexpected_message`、程序失敗等 | 停止，回報代碼，不重試 |
+| 1（無 JSON） | — | 啟動前就被拒絕（opt-in、路徑、版本、取消） | 修正前提後再次核准 |
+
+### 20.4 保存與交付
+
+- 終端輸出與 `var/runs/probe-<時間>.jsonl` 都只有白名單投影；不保存原始 init、CLI 文字、prompt、環境變數值或 capability。
+- 交付給 review 的是：終端 JSON、trace 檔、exit code、執行時的 commit。整份標為「Claude Code（或 Aaron）執行，待 Codex review」。
+- 執行後即停止，等 review 與 Aaron 的下一步決定。
+
