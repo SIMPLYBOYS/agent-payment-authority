@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-03）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。階段 B、C **未執行**，沒有任何真實推論、登入檢查或 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測已實作（第 17 節），待 Codex 獨立 review，未執行**。階段 B、C **未執行**，沒有任何真實推論、登入檢查或 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -167,7 +167,7 @@ fake CLI 的 stream-json 依文件形狀產生，**不是真實 CLI 的錄製**�
 
 **init 訊息的依據（10/3 查閱 Agent SDK TypeScript 參考）**：init 的欄位有 `apiKeySource`、`tools`（字串陣列）、`mcp_servers`（`name`、`status`，status 為 `"connected" | "disconnected" | "error"`）、`model`、`permissionMode`（含 `"dontAsk"`）、`claude_code_version`、`cwd`，以及選填的 `skills`、`plugins`、`agents`（`AgentInfo` 為 `name`、`description`、`source`）；hook 相關 system 訊息的 subtype 為 `hook_started`、`hook_progress`、`hook_response`。**`apiKeySource` 的可能值未能確認**：同一頁第一次摘要列出一組值，要求逐字複製時卻找不到該型別定義，因此不採用任何值。這是 SDK 文件，不是 CLI 2.1.287 實際 init 的錄製。
 
-**認證判定的依據（10/3 查閱官方認證文件）**：認證優先順序為雲端供應商、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`apiKeyHelper`、`CLAUDE_CODE_OAUTH_TOKEN`、Anthropic profile 與 federation 憑證，最後才是 `/login` 的訂閱 OAuth；Console 也可不建 API key 登入。因此「沒有 API key」或 `apiKeySource` 為 `none` 都不能推定為訂閱。環境 allowlist 已排除前述環境變數，但 managed settings 的 `apiKeyHelper`、keychain 中舊 Console 登入的 API key、`~/.config/anthropic` 的 profile（`oidc_federation` 的 active profile 排在 `/login` 之前）host 無法從 init 排除。
+**認證判定的依據（10/3 查閱官方認證文件）**：該文件所載的認證優先順序為雲端供應商、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`apiKeyHelper`、`CLAUDE_CODE_OAUTH_TOKEN`、Anthropic profile 與 federation 憑證，最後才是 `/login` 的訂閱 OAuth；Console 也可不建 API key 登入。這是文件的說法，**未在本機或真實 run 驗證**。因此「沒有 API key」或 `apiKeySource` 為 `none` 都不能推定為訂閱。兩件事要分開：(1) 前述環境變數，`CLIEnv` 的 allowlist 本來就不傳給 host 啟動的 CLI；(2) CLI 透過 HOME 或其他設定來源可能取得的憑證（managed settings 或 settings 檔的 `apiKeyHelper`、keychain 中先前 Console 登入留下的 API key、`~/.config/anthropic` 的 profile），環境 allowlist 管不到，host 也無法從 init 排除。
 
 ## 7 最小 live 驗證方案（2026-10-03 擬定；階段 A 於 `e8f6719` 通過技術 review；B、C 未執行）
 
@@ -342,7 +342,7 @@ R2 已由 review 關閉。R1 仍有一個缺口：model 只檢查名稱格式，
 
 | 7.6 項目 | 目前狀態 | 缺什麼 |
 |---|---|---|
-| 1 階段 B：版本、登入與否、非敏感的認證方式／訂閱確認 | 未執行。就算登入成功，也只證明機器上有一個可用憑證，不證明某次 run 實際用哪個憑證、怎麼計費 | Aaron 本人回報 `claude --version`，以及 `claude auth status --text` 中「登入方式／方案類型」一行（不貼其他內容）。另只回報「有／無」：shell 是否設了 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_OAUTH_TOKEN`、`ANTHROPIC_PROFILE`、`CLAUDE_CODE_USE_*`；是否有 managed settings 檔；`~/.config/anthropic` 是否有 active profile。這些是 host 環境 allowlist 擋不到、卻排在訂閱登入之前的來源 |
+| 1 階段 B：版本、登入與否、非敏感的認證方式／訂閱確認 | 未執行。就算登入成功，也只證明機器上有一個可用憑證，不證明某次 run 實際用哪個憑證、怎麼計費 | Aaron 本人回報 `claude --version`，以及 `claude auth status --text` 中「登入方式／方案類型」一行（不貼其他內容）。另只回報「有／無／不確定」：是否有 managed settings 檔、settings 檔是否設定 `apiKeyHelper`、keychain 是否留有先前 Console 登入的 API key、`~/.config/anthropic` 是否有 active profile。這些是 CLI 可能經由 HOME 或設定檔取得的憑證來源，環境 allowlist 管不到；至於 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_OAUTH_TOKEN`、`ANTHROPIC_PROFILE`、`CLAUDE_CODE_USE_*` 等環境變數，`CLIEnv` 已不傳給 host 啟動的 CLI（10/4 依 C0 指示校正：原文誤寫為 allowlist 擋不到）。它們在文件中的優先順序未經驗證，不寫成事實 |
 | 2 `apiKeySource` 接受值 | 清單為空；文件無法確認值域；從未見過真實 init 的值（2.1.287、2.1.288 皆未見） | **真實 init 的值**，加上第 1 項的證據，兩者都有才可能支持一個接受值。單獨任何一項都不夠 |
 | 3 `--model sonnet`、`--effort low` | 只是候選；本機 help 有這兩個旗標 | 真實 init 回報的 model ID；CLI 是否接受 `--effort low`（不接受時的行為未知） |
 | 4 init 中的 agents／skills | 一律拒絕；真實 init 會不會列出內建項目未知 | **真實 init 的內容** |
@@ -420,3 +420,65 @@ R2 已由 review 關閉。R1 仍有一個缺口：model 只檢查名稱格式，
   - **Claude Code 執行、Codex 核對紀錄**（不是 Codex 獨立重跑）：完整容器驗證七步、164／164 突變、17 項隔離檢查，見 `artifacts/verify-container/runs/14ceccbd7fe9-20261003T145344Z/`；本機檢查見 `artifacts/b1-04/14ceccbd7fe9-20261003T145020Z/`。
 - review 指出的兩處文件修正已處理：§15.6 不再同時寫「不再適用」與「仍待決」；C0′ 的用量（§15.2、§15.5）改為「只送一則使用者訊息；實際模型請求次數與用量沒有硬上限保證」。
 - B1-04 整體仍 InProgress，未合併 main。C0 的實作與執行仍需 Aaron 另行核准；本輪未執行登入檢查或推論，live 認證清單維持空白。
+
+## 17 C0 init 探測：實作（2026-10-04，Claude Code 執行，待 Codex 獨立 review）
+
+依 Aaron 10/3 核准的 C0 實作指示（vault：`Claude-Code-B1-04-C0實作指示-24393fa-20261003`），起點 `24393fa`。**本輪只有程式、fake 測試與文件**；沒有執行真實 CLI、`claude --version`、`claude auth status`、`claude -p`、C0、C0′ 或任何推論。真實執行一次 C0 需 Aaron 另行核准。
+
+### 17.1 命令
+
+```sh
+APA_LIVE_CLI=true ./bin/apa-buyer probe-init --cli /Users/mac/.local/bin/claude   # 本輪未執行
+```
+
+| 結果 | `status` | exit code |
+|---|---|---|
+| 觀測到可嚴格讀取、且 `claude_code_version` 等於核准版號的 init | `observed`（`code` `init_observed`） | 0 |
+| 等待上限內沒有 init（例如 CLI 等使用者訊息才送） | `no_init_before_input` | 3 |
+| 其他：init 版號不符（`init_cli_version`）、JSON 歧義（`ambiguous_json`）、非 JSON（`parse_error`）、init 前出現 hook（`hook_message`）或 assistant／user／result 等訊息（`unexpected_message`）、輸出超量（`output_overflow`）、程序異常退出（`nonzero_exit`、`missing_result`）、取消（`cancelled`）等 | `failed` | 1 |
+| 啟動前拒絕：缺 `APA_LIVE_CLI=true`、`--cli` 非絕對路徑、版本不符、版本檢查逾時或取消 | 不執行探測，印錯誤 | 1 |
+
+`observed` 只代表拿到了觀測資料，**不代表**通過正式 Gate、認證已確認或可以付款；`no_init_before_input` 與 `failed` 都不是成功。
+
+### 17.2 執行界線與實作位置
+
+| 界線 | 實作 | 測試 | 突變 |
+|---|---|---|---|
+| 明確 opt-in：`APA_LIVE_CLI=true`、絕對路徑、`--version` 恰為核准值；沿用版本檢查的程序清理與輸出上限；取消後不啟動 | `cmd/apa-buyer/main.go` `probe`、`checkLive`；`internal/buyer/probe.go` 開頭的取消檢查 | `TestProbeOptIn`（各種缺漏時 CLI 未執行、未寫 trace；舊版；版本檢查逾時）、`TestProbeCancel`（已取消則 CLI 不執行） | #174、#175 |
+| 零輸入：`-p` 不帶 prompt、`--input-format stream-json`；stdin 是 host 保持開啟、從不寫入的 pipe（不送換行、空白或初始化訊息，逾時後也不補送） | `ProbeArgv`；`runner.go` 的 `Spec.HoldStdin` | `TestProbeArgv`；`TestProbeInitFirst`／`TestProbeWaitsForInput`（fake 自己計數，收到 0 位元組）；`TestFakeCountsStdin`（正向對照：給 3 位元組，計數為 3，且等輸入的 fake 隨即送出 init） | #165、#166 |
+| 零業務執行：MCP 初始化與列工具照常；run 註冊後一直 idle，不 arm；觀測到 init 也不放行 | `Probe`（`toolbridge.Binding` 從不 `Arm`；bridge 的 executor 為 `refuseAll`，並計數） | `TestProbeInitFirst`：fake 在 init 前後都直接經 MCP 呼叫業務工具（`silent_tool`，不經模型），全被拒，`business_calls_executed` 為 0 | #167 |
+| 零 Store 存取：不載入、不開啟 Store，不建 DB／task，不做 migration、到期或結束事件 | `probe` 不碰 `APA_DB_PATH`、不呼叫 Store | `TestProbeCommand`：Store 開啟 hook 從未被呼叫（同一 hook 在一般 run 會被呼叫，作正向對照）；含到期 Ask 的既有 DB 在兩次 probe 後逐位元組不變 | #176 |
+| 有限執行：最長等 init 30 秒；收到 init、錯誤或取消即停止；沿用既有輸出上限與 process group 清理 | `ProbeTimeout`；`Probe` 的 watch；runner | `TestProbeWaitsForInput`、`TestProbeFailures`（輸出超量、stderr 洪水、異常退出、握 pipe 的子孫被回收） | #168、#172 |
+| 嚴格解析：沿用 `objectFields`（巢狀重複欄位、大小寫別名一律拒收）；init 前的 hook、assistant／user／result 訊息以固定代碼停止 | runner 的讀取；`Probe` 的 watch | `TestProbeFailures`（重複 init 欄位、巢狀歧義、非 JSON、hook、assistant、result） | #169、#170 |
+| 不自動重試：任何結果都不放寬、不重試、不改走 C0′；結束時撤銷 capability、等待進行中的呼叫 | `Probe` 只執行一次；`bridge.Revoke` | 程式中沒有重試路徑；`TestProbeFailures`、`TestProbeWaitsForInput` 各只啟動 CLI 一次 | — |
+| init 版號須等於核准值；舊版 init 拒收（`--version` 為新版亦同） | `Probe` 的分類 | `TestProbeFailures`「old init version」：`init_cli_version`，觀測資料中版本記為 `other` | #171 |
+
+附帶校正：共用讀取函式原本把非 JSON 也報為 `ambiguous_json`。現在只把「合法 JSON 但成員名重複」報為 `ambiguous_json`，非 JSON 報為 `parse_error`。拒收行為不變，只是代碼更準確。
+
+### 17.3 輸出白名單
+
+終端、probe trace（`var/runs/probe-<時間>.jsonl`）與錯誤訊息都使用同一個 `ProbeResult` 投影。原始 init、stdout／stderr 文字、prompt、環境變數值與 capability 都不保存。
+
+- `fields`：已知 init 成員（依 SDK 參考）各記「absent」或 JSON 型別；其他成員只計數（`extra_members`）。
+- `tools_count`、`tools_expected`（三個 apa 工具出現幾個）、`tools_other`；`mcp_servers_count`；`apa_server_status`（SDK 狀態 `connected`／`disconnected`／`error`，否則 `other`）。
+- `permission_mode`（SDK 列舉，否則 `other`）；`cli_version`（`approved`／`other`）；`model`（`sonnet`、`claude-sonnet-5-5`，否則 `other`）。
+- `auth_source`：只在顯示候選清單 `none`、`environment`、`keychain`、`claude_app`、`claude_app_org` 之內才顯示，否則記 `other` 與字數。**這份候選清單的來源是 10/3 對 SDK 參考頁的第一次摘要；要求逐字複製時找不到該型別，所以每個值都未確認**。它只決定能不能顯示，與正式的 `liveAcceptAuth` 分開，後者仍是空的；執行時不會把任何值加入清單。
+- `plugins_count`、`skills_count`、`agents_count`：只記數量。沒有可靠的類別清單，所以不顯示類別。
+- 版本檢查的錯誤訊息也不再重複 CLI 輸出的版本文字（live 與 probe 共用）。
+
+測試：`TestProbeNoLeak`（把該次 fake 的 capability 與合成標記放進 model、auth source、工具名、server 名稱與狀態、權限模式、agents／skills／plugins、cwd、session_id、額外成員名稱與值），以及 `TestProbeCommand`（終端輸出、錯誤與 trace），兩者都確認沒有洩漏；`TestProbeUnknownValues` 確認未知列舉與錯誤型別都投影成固定標籤。突變 #173、#177。
+
+### 17.4 fake 與限制
+
+- fake 的兩種行為：`probe-init-first`（不等輸入就送 init）與 `probe-wait-input`（等到使用者訊息才送）。兩者都是測試資料，**不是**從真實 CLI 擷取的 fixture。新增的 fake 步驟：`wait_input`、`silent_tool`；stdin 位元組計數檔 `APA_FAKE_CLI_STDINFILE`；live／probe 環境下，capability 存到 `<自身路徑>.cap`。
+- 「沒有使用者訊息」是程式能保證的界線，**不等於**保證 CLI 內部沒有背景連線或推論。沒有 result 訊息，用量記 `unknown`，不補零。不宣稱用了幾次模型請求，也不宣稱確認了訂閱計費。
+- 真實 CLI 2.1.288 在 `--input-format stream-json` 下，會不會在收到輸入前送出 init，**未驗證**；這正是 C0 要觀測的事。
+- 已知限制照舊：離開 process group 的子孫程序收不回來；CLI 以使用者權限執行、使用 HOME 與網路；30 秒是等待上限，停止後的清理寬限另計（最多約兩個寬限期）。
+
+### 17.5 執行一次 C0 前還需要
+
+1. Codex 通過本實作的 review。
+2. Aaron 核准**執行一次** C0，並再次確認：真實 CLI 的路徑與版本、HOME 與網路的界線、可能用量（設計上沒有使用者訊息，但無法保證 CLI 內部沒有連線或推論）、停止條件。
+3. 階段 B 的其餘回報（第 15.1 節第 1 項）不阻擋 C0 實作，但仍未完成。
+4. 執行期間是否暫停平時 CLI 的自動更新；版本一變就停止，需重新核准。
+5. C0 沒拿到 init 時怎麼處理另行決定：C0′ 與階段 C 都未核准，C0 失敗不會自動升級到它們。

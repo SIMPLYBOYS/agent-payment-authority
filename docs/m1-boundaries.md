@@ -81,5 +81,6 @@ M1 的終點是 **請購與 Ask／Deny**。M1 沒有 Signer、沒有結算、沒
 | Buyer wrapper fake 模式（B1-04 首個交付點）：受限 MCP 工具、capability 綁定 run、402 嚴格檢查、Host 組裝請購寫入 Store、程序群組回收與輸出上限 | 已實作，有測試；**`b3c66f6` 通過 Codex 獨立技術 review**（10/3；見 [cli-poc.md](cli-poc.md) 第 10 節）。B1-04 整體仍 InProgress |
 | Store 接線（fake 命令）：設定來源、Store 開檔、RunExpiry 啟停、關閉順序 | 已實作於 `cmd/apa-buyer`，有測試；`cmd/demo` 尚未接線（B1-06） |
 | live 開關與 init 閘門（階段 A）：`--live`＋`APA_LIVE_CLI=true`、絕對路徑與核准版本、init 檢查通過前不開 Store、assistant 訊息與時間上限 | 已實作，以 fake 測試；**`e8f6719` 通過 Codex 獨立技術 review**（10/3；[cli-poc.md](cli-poc.md) 第 14 節）。不代表真實 CLI 的登入、模型或計費已驗證 |
+| C0 init 探測（`probe-init`）：零輸入、零業務執行、零 Store 存取、白名單輸出 | 已實作，以 fake 測試；待 Codex 獨立 review；**未對真實 CLI 執行**（[cli-poc.md](cli-poc.md) 第 17 節） |
 | live Claude Code 執行（階段 B／C） | 未執行、未驗證，沒有任何真實推論或登入檢查；live 認證接受清單為空，任何 live run 都會停在閘門 |
 | 主持人事件檢視 HTTP 端點與展示層（B1-06）、驗收器（B1-07） | 尚未實作 |
