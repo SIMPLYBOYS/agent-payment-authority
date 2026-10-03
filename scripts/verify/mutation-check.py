@@ -370,8 +370,13 @@ MUTATIONS = [
     # trace, R2 one strict reading of every stream message.
     ("B1-04 A R2 parser: member names compared without case folding", "internal/buyer/gate.go",
      "\t\t\tlow = min(low, f)\n", "\t\t\t_ = f\n", "TestObjectFields|TestHostAmbiguousMessages"),
-    ("B1-04 A R1 host: free-text model name kept in the trace", "internal/buyer/host.go",
-     "field(f, \"model\", &model) == nil && modelName.MatchString(model) {", "field(f, \"model\", &model) == nil {", "TestHostTraceWhitelist"),
+    ("B1-04 A R1 host: CLI model kept without the listed-name check", "internal/buyer/host.go",
+     "field(f, \"model\", &model) == nil && slices.Contains(knownModels, model) {", "field(f, \"model\", &model) == nil && (true || slices.Contains(knownModels, model)) {", "TestHostTraceKeepsOnlyListedNames|TestHostTraceWhitelist"),
+    # B1-04 stage A follow-up (59da5d9 review): only listed names in the trace.
+    ("B1-04 A R1 bridge: a well-formed but unoffered product ID recorded", "internal/toolbridge/shop.go",
+     "if _, ok := s.Products[product]; ok {\n\t\trec.ProductID = product", "if true {\n\t\trec.ProductID = product", "TestPurchaseIntegrity"),
+    ("B1-04 A R1 host: requested model missing from the trace", "internal/buyer/host.go",
+     "\"requested_model\": Model, ", "", "TestHostMainLine|TestHostTraceKeepsOnlyListedNames"),
 ]
 
 

@@ -549,8 +549,11 @@ func Test402Tampering(t *testing.T) {
 func TestPurchaseIntegrity(t *testing.T) {
 	e := newEnv(t)
 	b := e.start("task-a")
-	if _, rec := e.call(b, "get_quote", "no-such-product"); rec.Outcome != "UNKNOWN_PRODUCT" {
-		t.Errorf("unknown product: %v", rec)
+	if _, rec := e.call(b, "get_quote", "no-such-product"); rec.Outcome != "UNKNOWN_PRODUCT" || rec.ProductID != "" {
+		t.Errorf("unknown product: %v", rec) // a well-formed ID the CLI chose is not recorded
+	}
+	if _, rec := e.call(b, "get_quote", "kr-market"); rec.ProductID != "kr-market" {
+		t.Errorf("offered product not recorded: %v", rec)
 	}
 	first, rec := e.call(b, "request_purchase", "kr-market")
 	if rec.Outcome != "Ask" {

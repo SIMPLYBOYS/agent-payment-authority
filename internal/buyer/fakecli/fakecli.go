@@ -61,9 +61,7 @@ type Scenario struct {
 //	tool    call Tool (bare MCP name) with Args over MCP; print tool_use/tool_result
 //	text    print an assistant text message
 //	claim   print an assistant tool_use for Tool without calling MCP
-//	result  print the result message (IsError, Subtype; default success);
-//	        $CAPABILITY and $PROMPT in Text become the run's capability and
-//	        the -p prompt (a CLI that leaks or echoes them)
+//	result  print the result message (IsError, Subtype; default success)
 //	retry   print system/api_retry with Error
 //	raw     write Text to stdout as is
 //	split   write Text to stdout in Bytes-sized chunks, 10 ms apart
@@ -77,6 +75,10 @@ type Scenario struct {
 //	savecap write the capability to $APA_FAKE_CLI_CAPFILE
 //	init    print the init message; Init members replace the defaults (null removes one)
 //	exit    exit with Code now
+//
+// $CAPABILITY and $PROMPT in a result's Text, a tool's Args or an init
+// override become the run's capability and the -p prompt (a CLI that leaks
+// or echoes them).
 //
 // After the init is printed, a tool call refused with RUN_NOT_READY is sent
 // again every 20 ms for up to 5 s, as a real CLI's first model round trip
@@ -214,7 +216,7 @@ func (r *run) init(overrides map[string]json.RawMessage) {
 		if string(v) == "null" {
 			delete(m, k)
 		} else {
-			m[k] = v
+			m[k] = json.RawMessage(r.subst(string(v)))
 		}
 	}
 	r.emit(m)
@@ -234,7 +236,7 @@ func (r *run) step(s Step) (code int, done bool) {
 	switch s.Do {
 	case "tool", "claim":
 		id := fmt.Sprintf("toolu_fake_%d", r.turns+1)
-		input := s.Args
+		input := json.RawMessage(r.subst(string(s.Args)))
 		if len(input) == 0 {
 			input = json.RawMessage(`{}`)
 		}
@@ -267,7 +269,7 @@ func (r *run) step(s Step) (code int, done bool) {
 				sub = "error_during_execution"
 			}
 		}
-		text := strings.NewReplacer("$CAPABILITY", r.capability, "$PROMPT", r.prompt).Replace(s.Text)
+		text := r.subst(s.Text)
 		r.emit(map[string]any{"type": "result", "subtype": sub, "is_error": s.IsError, "result": text,
 			"num_turns": r.turns, "session_id": r.session, "duration_ms": 1})
 	case "retry":
@@ -310,6 +312,12 @@ func (r *run) step(s Step) (code int, done bool) {
 		return 1, true
 	}
 	return 0, false
+}
+
+// subst puts the run's capability and prompt where a scenario says
+// $CAPABILITY or $PROMPT: a CLI that leaks or echoes them.
+func (r *run) subst(s string) string {
+	return strings.NewReplacer("$CAPABILITY", r.capability, "$PROMPT", r.prompt).Replace(s)
 }
 
 // notReady reports a tool result refused with RUN_NOT_READY.

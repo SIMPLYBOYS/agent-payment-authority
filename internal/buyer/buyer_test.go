@@ -410,6 +410,7 @@ func TestHostMainLine(t *testing.T) {
 	trace, _ := os.ReadFile(res.Trace)
 	if strings.Contains(string(trace), "Paid and downloaded") || strings.Contains(string(trace), "Buy the brief") ||
 		!strings.Contains(string(trace), `"gate":"passed"`) || !strings.Contains(string(trace), `"model":"sonnet"`) ||
+		!strings.Contains(string(trace), `"requested_model":"sonnet"`) ||
 		!strings.Contains(string(trace), fmt.Sprintf(`"result_chars":%d`, len("Paid and downloaded the Korean market brief."))) {
 		t.Errorf("trace: %s", trace)
 	}
@@ -947,4 +948,55 @@ func TestVersion(t *testing.T) {
 			t.Errorf("%s: accepted %q", name, v)
 		}
 	}
+}
+
+// R1 follow-up (59da5d9 review): a CLI puts the run's own capability, or a
+// name-shaped secret, where the trace keeps names: the init's model and a
+// well-formed product_id. Only listed models and offered products are
+// recorded, so neither reaches the trace.
+func TestHostTraceKeepsOnlyListedNames(t *testing.T) {
+	for name, c := range map[string]struct {
+		model, product, secret string
+	}{
+		"capability as model":      {`"$CAPABILITY"`, "kr-market", ""},
+		"name-shaped secret model": {`"MARKSECRET9f3a"`, "kr-market", "MARKSECRET9f3a"},
+		"capability as product_id": {`"sonnet"`, "$CAPABILITY", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newHost(t)
+			capFile := filepath.Join(t.TempDir(), "cap")
+			sc := fakecli.Scenario{ManualInit: true, Steps: []fakecli.Step{
+				{Do: "savecap"},
+				{Do: "init", Init: map[string]json.RawMessage{"model": json.RawMessage(c.model)}},
+				{Do: "tool", Tool: "request_purchase", Args: json.RawMessage(`{"product_id":"` + c.product + `"}`)},
+				{Do: "result", Text: "done"},
+			}}
+			res := e.runWith(context.Background(), "task-a", genScenario(t, sc), e.prepare("task-a"), fakecli.EnvCapFile+"="+capFile)
+			capability, _ := os.ReadFile(capFile)
+			if len(capability) != 64 || res.Report.Outcome != OK || !res.TaskStarted || len(res.Calls) != 1 {
+				t.Fatalf("setup: cap %d bytes, %+v %s", len(capability), res.Report, outcomes(res.Calls))
+			}
+			if c.product == "$CAPABILITY" && (res.Calls[0].Outcome != "UNKNOWN_PRODUCT" || res.Calls[0].ProductID != "") {
+				t.Errorf("record for an unoffered product: %+v", res.Calls[0])
+			}
+			if c.model != `"sonnet"` && res.Model != "unrecognized" {
+				t.Errorf("model kept as %q", res.Model)
+			}
+			trace, _ := os.ReadFile(res.Trace)
+			secret := cmpSecret(c.secret, string(capability))
+			if strings.Contains(string(trace), secret) || strings.Contains(string(trace), string(capability)) {
+				t.Fatalf("a CLI-chosen secret reached the trace: %s", trace)
+			}
+			if !strings.Contains(string(trace), `"requested_model":"sonnet"`) {
+				t.Errorf("requested model missing: %s", trace)
+			}
+		})
+	}
+}
+
+func cmpSecret(secret, capability string) string {
+	if secret == "" {
+		return capability
+	}
+	return secret
 }

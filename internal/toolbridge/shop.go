@@ -55,7 +55,12 @@ var _ Executor = (*Shop)(nil)
 // Call runs one tool for b. Refusals carry a code and fixed text, never
 // shop or request content.
 func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (ToolResult, CallRecord) {
-	rec := CallRecord{Tool: tool, ProductID: product}
+	// The record names a product only when the host offers it: a well-formed
+	// ID the CLI chose is still CLI text (a 64-hex capability is well-formed).
+	rec := CallRecord{Tool: tool}
+	if _, ok := s.Products[product]; ok {
+		rec.ProductID = product
+	}
 	fail := func(code, msg string) (ToolResult, CallRecord) {
 		if b.Stopped() { // the run stopped mid-call: that, not the symptom, is the outcome
 			code, msg = "RUN_NOT_ACTIVE", "this run has ended"

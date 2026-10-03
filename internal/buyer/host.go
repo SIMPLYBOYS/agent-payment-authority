@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -97,7 +97,7 @@ type RunResult struct {
 	Calls        []toolbridge.CallRecord
 	Attempts     int    // tool calls that reached the budget, refused ones included
 	NotReady     int    // business calls refused before the run was armed
-	Model        string // as the passed init stated it, if name-shaped; else "unrecognized"
+	Model        string // as the passed init stated it, if a known name; else "unrecognized"
 	TaskStarted  bool   // Prepare succeeded: the task exists in the Store
 	PrepareError error  // Prepare ran and failed
 	StoreEnd     string // TASK_TIMED_OUT or TASK_CANCELLED when the run recorded one
@@ -215,14 +215,16 @@ func (h *Host) Run(ctx context.Context, taskID, prompt string, prepare Prepare) 
 	return res, err
 }
 
-// modelName is what a model name may look like in the trace; anything else
-// is CLI free text and is not kept.
-var modelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@/\[\]-]{0,79}$`)
+// knownModels are the only init model names the trace keeps: the alias the
+// host asks for and the model it names (2026 model list). Any other value
+// is recorded as "unrecognized"; a name-shaped string is no safer than
+// free text (a 64-hex capability is name-shaped).
+var knownModels = []string{Model, "claude-sonnet-5-5"}
 
-// initModel is the model the init names, if it looks like a model name.
+// initModel is the model the init names, if it is a known model name.
 func initModel(line []byte) string {
 	var model string
-	if f, err := objectFields(line); err == nil && field(f, "model", &model) == nil && modelName.MatchString(model) {
+	if f, err := objectFields(line); err == nil && field(f, "model", &model) == nil && slices.Contains(knownModels, model) {
 		return model
 	}
 	return "unrecognized"
@@ -276,7 +278,7 @@ func (h *Host) trace(b *toolbridge.Binding, prompt string, started time.Time, ga
 		"limits": map[string]any{"line_bytes": h.Limits.Line, "stdout_bytes": h.Limits.Stdout, "stderr_bytes": h.Limits.Stderr,
 			"total_seconds": h.Limits.Total.Seconds(), "assistant_messages": h.Limits.Assistant, "tool_calls": toolbridge.MaxCalls},
 	}), enc.Encode(map[string]any{
-		"event": "init", "gate": gateCode, "model": res.Model, "task_started": res.TaskStarted, "prepare_error": prepareError,
+		"event": "init", "gate": gateCode, "requested_model": Model, "model": res.Model, "task_started": res.TaskStarted, "prepare_error": prepareError,
 	})}
 	for _, c := range res.Calls {
 		errs = append(errs, enc.Encode(map[string]any{"event": "tool_call", "tool": c.Tool, "product_id": c.ProductID, "outcome": c.Outcome}))
