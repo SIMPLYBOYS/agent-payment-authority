@@ -82,5 +82,6 @@ M1 的終點是 **請購與 Ask／Deny**。M1 沒有 Signer、沒有結算、沒
 | Store 接線（fake 命令）：設定來源、Store 開檔、RunExpiry 啟停、關閉順序 | 已實作於 `cmd/apa-buyer`，有測試；`cmd/demo` 尚未接線（B1-06） |
 | live 開關與 init 閘門（階段 A）：`--live`＋`APA_LIVE_CLI=true`、絕對路徑與核准版本、init 檢查通過前不開 Store、assistant 訊息與時間上限 | 已實作，以 fake 測試；**`e8f6719` 通過 Codex 獨立技術 review**（10/3；[cli-poc.md](cli-poc.md) 第 14 節）。不代表真實 CLI 的登入、模型或計費已驗證 |
 | C0 init 探測（`probe-init`）：零輸入、零業務執行、零 Store 存取、白名單輸出 | 已實作，以 fake 測試；**`5f34a7b` 通過 Codex 獨立技術 review**（10/4）；**10/4 對真實 CLI 執行一次，30 秒內逾時，未取得 init**；未送使用者訊息，背景行為與用量未知；不代表真實 CLI 行為、登入方式或用量已驗證（[cli-poc.md](cli-poc.md) 第 17–21 節） |
+| C0′ 單訊息探測（`probe-init --send-one-message`）：只寫入一則固定訊息、寫入一次、停止後不再寫，零業務執行、零 Store 存取、白名單輸出 | 已實作，以 fake 測試；待 Codex 獨立 review；**未對真實 CLI 執行**（[cli-poc.md](cli-poc.md) 第 22 節） |
 | live Claude Code 執行（階段 B／C） | 未執行、未驗證；沒有執行登入檢查，也沒有送出任何使用者訊息（唯一的真實執行是上列 C0，其背景行為與用量未知）；live 認證接受清單為空，任何 live run 都會停在閘門 |
 | 主持人事件檢視 HTTP 端點與展示層（B1-06）、驗收器（B1-07） | 尚未實作 |

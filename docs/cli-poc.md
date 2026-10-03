@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-04）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）**：未送任何使用者訊息，CLI 的背景行為與用量未知。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試，待 Codex 獨立 review，未對真實 CLI 執行**（第 22 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -563,4 +563,58 @@ echo "exit=$?"
   - 這次**沒有**取得 `apiKeySource`、model、agents／skills 等任何 init 資訊，所以第 7.6 節第 2–4 項仍無資料可據。
   - 程式能保證沒有寫入任何 stdin 位元組；但無法保證 CLI 內部沒有背景連線或推論，用量仍記 `unknown`。
 - 依核准條件，執行後即停止：不重跑、不放寬任何清單、不轉往 C0′。下一步（是否、以及如何取得 init 資訊）待 Codex review 與 Aaron 決定。
+
+## 22 C0′ 單訊息探測：實作（2026-10-04，Claude Code 執行，待 Codex 獨立 review；未對真實 CLI 執行）
+
+依 Aaron 核准的 C0′ 實作指示（vault：`Claude-Code-B1-04-C0prime實作指示-8ff5705-20261004`），起點 `8ff5705`。本輪只有程式、fake 測試與文件；沒有執行真實 CLI（包含 `--version`、登入檢查、C0 重跑或 C0′）與任何推論。
+
+### 22.1 命令與結果
+
+```sh
+APA_LIVE_CLI=true ./bin/apa-buyer probe-init --cli /Users/mac/.local/bin/claude --send-one-message   # 本輪未執行
+```
+
+- `--send-one-message` 是進入 C0′ 的唯一方式。沒有這個旗標就是原本的 C0，從頭到尾寫入 0 位元組。C0 逾時或失敗不會自動改走 C0′。opt-in、絕對路徑、版本與取消的檢查都和 C0 相同。
+- 輸出新增 `mode`（`c0`／`c0_prime`）、`input_status`、`input_message_bytes`（預定大小，C0 為 0）、`stdin_bytes_written`。最後一項是 host **實際**寫入的位元組數，不再是固定的 0，也不是預定大小。
+
+| 結果 | `status`／`code` | exit code |
+|---|---|---|
+| 取得可嚴格讀取且版本相符的 init | `observed`／`init_observed` | 0 |
+| C0：等待上限內沒有 init | `no_init_before_input` | 3（不變） |
+| C0′：訊息已完整寫入，等待上限內仍沒有 init | `no_init_after_message` | 4（新增） |
+| C0′：逾時，且訊息沒有完整寫入 | `failed`／`input_not_started`、`input_partial`、`input_failed` | 1 |
+| 其他失敗（api_retry、JSON 歧義、hook、模型回覆等非預期訊息、版本、程序、取消） | `failed`，代碼同 C0 | 1 |
+
+`input_status` 的值：`none`（C0，不寫）、`not_started`（run 已在停止，或啟動前已取消或啟動失敗，所以沒有開始寫）、`complete`（全部寫入）、`partial`（寫了一部分就失敗）、`failed`（一個位元組都沒寫進去，例如 pipe 已斷或逾時）。
+
+### 22.2 訊息與格式依據
+
+- 固定文字 `Reply only OK.`（程式常數 `OneMessageText`）。不能透過參數、檔案或 stdin 轉送指定別的內容；不含購物任務、商品、使用者內容或憑證。
+- 一行 stream-json：`{"type":"user","message":{"role":"user","content":"Reply only OK."},"parent_tool_use_id":null}` 加換行，共 95 位元組。
+- 依據：Agent SDK TypeScript 參考的 `SDKUserMessage` 型別（10/4 查閱）。必填欄位是 `type: "user"`、`message`（Anthropic SDK 的 `MessageParam`，即 role 與 content）、`parent_tool_use_id: string | null`；其餘欄位都是選填。SDK 串流輸入頁的範例也是同一形狀。CLI 參考列有 `--input-format stream-json`，但只說是 realtime streaming input。
+- **缺口**：沒有任何一手文件逐字寫出 CLI stdin 的線上格式（每行一個 JSON 物件）。這是從 `--output-format stream-json` 為換行分隔 JSON 所做的推論；真實 CLI 從未收過這一行。fake 能接受，不代表真實 CLI 能接受。依指示不以真實 CLI 試誤。
+
+### 22.3 寫入界線（實作與測試）
+
+| 界線 | 實作 | 測試 | 突變 |
+|---|---|---|---|
+| C0 預設不送輸入；C0′ 需額外 opt-in | `ProbeSpec.SendOneMessage` 只由 `--send-one-message` 設定 | `TestProbeInitFirst`／`TestProbeWaitsForInput`（C0：mode `c0`、`input_status none`、host 與 fake 都是 0 位元組）；`TestProbeOneMessageCommand`（缺 opt-in 或相對路徑時 CLI 未被執行；不帶旗標時同一個 fake 得到 C0 的 exit 3） | #165、#186、#190 |
+| 只寫一次、固定內容 | runner 的 `stdinWriter.write` 只呼叫一次 | `TestOneMessageLine`；`TestProbeOneMessage`（fake 收到恰好一行、恰好一則使用者訊息、內容雜湊相符，host 寫入數等於 fake 接收數） | #185、#189 |
+| 停止後不開始寫；如實記錄 | writer 持鎖寫入；run 一開始停止就 `stop()`；寫入期限為清理寬限（3 秒）；寫入後即關閉 parent 的讀端，子程序關閉 stdin 時會得到 broken pipe，不會塞滿 buffer | `TestStdinWriter`（先停止則 `not_started`、pipe 中 0 位元組；正常為 `complete`；讀端已關閉則 `failed`）；`TestProbeOneMessageInterleaving`（init 先到、取消與寫入交錯、不讀 stdin、關閉 stdin、提前退出：記錄與實際一致，fake 最多收到一行，都在上限內結束） | #183、#184、#188 |
+| 不等待模型回答、不開第二輪 | watch 收到 init 或任何 assistant／result 訊息即停止 | `TestProbeOneMessageStops`「model replies」「result before init」 | （沿用 #170） |
+| 停止條件不退化 | 同 C0 | `TestProbeOneMessageStops`：api_retry（認證、限流，各接後續 init 或不接，加未知錯誤文字）、hook、JSON 歧義、舊版 init 都立即停止；fake 都只收到一則訊息 | （沿用 #169–#180） |
+| C0′ 逾時不誤標為 C0 的零輸入 | 分類依 mode 與 `input_status` | `TestProbeOneMessageNoInit`（`no_init_after_message`，exit 4） | #187 |
+| 零 Store、零業務執行 | 同 C0 | `TestProbeOneMessage`（init 前後經 MCP 直接呼叫業務工具皆拒，執行 0）；`TestProbeOneMessageCommand`（Store 開啟 hook 為 0、未建立資料庫） | （沿用 #167、#176） |
+| 白名單輸出 | 結果與 trace 只有固定代碼與計數；不存訊息文字 | `TestProbeOneMessage`、`TestProbeOneMessageStops`「marks in the init」等：結果與 trace 不含 `Reply only`、標記或 capability | （沿用 #173） |
+
+fake 新增（測試資料，不是真實 CLI 錄製）：`wait_message` 步驟（等到一則完整的 stdin 行才繼續）、`close_stdin` 步驟、情境選項 `no_stdin_read`、計數檔 `APA_FAKE_CLI_STDINMSGFILE`（行數、符合 `SDKUserMessage` 形狀的訊息數、第一則內容的 SHA-256）。情境檔 `probe1-wait-message.json`、`probe1-message-no-init.json`。
+
+### 22.4 限制
+
+- 「一則訊息」是 host 能控制的輸入上限，**不是**一次模型請求或固定用量的保證。用量記 `unknown`。收到 init 後終止程序，也撤回不了已送往服務端的請求或用量。
+- 真實 2.1.288 會不會接受這一行、送入後會不會產生 init，都**未驗證**。
+- 寫入在程序啟動後立即進行。若真實 CLI 在 init 之前就開始處理訊息，模型回覆會讓 probe 以 `unexpected_message` 停止，而不是等它答完。
+- 其餘真實執行的限制（HOME、keychain、網路、離開 process group 的子孫程序）與 C0 相同。
+
+突變：新增 8 項（#183–190）；#165、#172 因所指的程式行改寫而改指新位置（意圖不變）。共 190 項，原 99 項文字未動。
 
