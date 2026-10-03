@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-03）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）經 Aaron 核准並已實作；`ca46cab` 的 R2 已於 `59da5d9` review 關閉，R1 的 model 缺口已修正，待 Codex 再 review**（第 7、11、12、13 節）；階段 B、C **未執行**，沒有任何真實推論、登入檢查或 `claude -p`。B1-04 整體仍 InProgress，未標 Done、未合併 main。fake 成功只證明 wrapper／bridge／Store 的行為，不證明真實 Claude 能完成請購；B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-03）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。階段 B、C **未執行**，沒有任何真實推論、登入檢查或 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -169,7 +169,7 @@ fake CLI 的 stream-json 依文件形狀產生，**不是真實 CLI 的錄製**�
 
 **認證判定的依據（10/3 查閱官方認證文件）**：認證優先順序為雲端供應商、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`apiKeyHelper`、`CLAUDE_CODE_OAUTH_TOKEN`、Anthropic profile 與 federation 憑證，最後才是 `/login` 的訂閱 OAuth；Console 也可不建 API key 登入。因此「沒有 API key」或 `apiKeySource` 為 `none` 都不能推定為訂閱。環境 allowlist 已排除前述環境變數，但 managed settings 的 `apiKeyHelper`、keychain 中舊 Console 登入的 API key、`~/.config/anthropic` 的 profile（`oidc_federation` 的 active profile 排在 `/login` 之前）host 無法從 init 排除。
 
-## 7 最小 live 驗證方案（2026-10-03 擬定；階段 A 已核准並實作、待 review；B、C 未執行）
+## 7 最小 live 驗證方案（2026-10-03 擬定；階段 A 於 `e8f6719` 通過技術 review；B、C 未執行）
 
 目標只有一個：用本人登入的官方 CLI 跑**一次**真實 run，取得 CLI → 402 → 結構化請購的 trace，驗證第 2、3 節的邊界在真實 CLI 下仍成立。這不是擴大範圍或壓測。
 
@@ -177,7 +177,7 @@ fake CLI 的 stream-json 依文件形狀產生，**不是真實 CLI 的錄製**�
 
 | 階段 | 內容 | 推論 | 狀態 |
 |---|---|---|---|
-| A 實作 live 開關與閘門 | 7.3 的程式變更，以 fake CLI 測試每個閘門 | 無 | **Aaron 10/3 核准；已實作，待 Codex review**（第 11 節） |
+| A 實作 live 開關與閘門 | 7.3 的程式變更，以 fake CLI 測試每個閘門 | 無 | **Aaron 10/3 核准；`e8f6719` 通過 Codex 獨立技術 review**（第 14 節） |
 | B 執行前確認 | Aaron 本人確認 `claude --version`、是否已登入，以及非敏感的認證方式／訂閱確認（例如是 claude.ai 訂閱登入，且沒有 API key、token、profile 或 apiKeyHelper 在用），要對應預定的 CLI 與設定環境。不貼整份 JSON、email、帳號 ID、token 或 keychain 內容；repo 與 Claude 不讀取該輸出 | 無 | 未執行；A 通過 review 後 |
 | C 單次 live run | 7.2 的一條命令、一個 task、一次；任何失敗即停，不重跑 | **有**（次數無硬保證，見 7.3） | **未核准**；需 Aaron 對這一次另行明確同意 |
 | D 證據整理 | 只保留白名單化的診斷與 run trace；交 Codex review | 無 | 沒有 live 結果，不得預先宣稱 live 證據成立 |
@@ -321,3 +321,15 @@ R2 已由 review 關閉。R1 仍有一個缺口：model 只檢查名稱格式，
 | 同類缺口一併修：工具呼叫紀錄的 `product_id` 原本只驗格式（`^[a-z0-9-]{1,64}$`，capability 也符合），改為只記 host 提供的商品 | `internal/toolbridge/shop.go` | `TestHostTraceKeepsOnlyListedNames`（capability 當 `product_id`：`UNKNOWN_PRODUCT`，紀錄不帶 ID，trace 不含）；`TestPurchaseIntegrity` | #163 |
 
 逐一檢查 trace 其餘欄位：task、consumer、CLI 檔名、上限來自 host 設定；閘門、結果、`detail`、prepare 與 Store 代碼都是 host 定義的代碼；工具名只有三個已知名稱或 `unknown`；其餘是數字或布林。沒有其他由 CLI 決定內容的字串。共 164 項突變，原 99 項文字未動。
+
+## 14 驗收紀錄：live 階段 A 於 `e8f6719` 通過技術 review（2026-10-03）
+
+- 結果：`e8f6719` 通過 Codex 獨立技術 review，階段 A 的 R1、R2 關閉，本次檢查範圍內沒有新的阻擋問題。
+  - model 修正通過：把通行碼塞進 model 的探測連跑三輪，trace 都沒有洩漏。
+  - `product_id` 延伸修正可接受：屬同一個紀錄邊界問題；未知商品不保留 ID，合法商品的請購與重送測試仍通過。
+  - R2 未退化：JSON 重複欄位與大小寫歧義的原始探測三輪皆通過。
+- **通過的是階段 A 的技術驗收**：live 開關、init 閘門、init 通過前不寫 Store、上限與 trace 白名單，全部以 fake CLI 驗證。B1-04 整體仍 InProgress，未標 Done、未合併 main。live 認證接受清單維持空白；階段 B、C 仍需 Aaron 另行核准。這次通過**不代表**真實 Claude 的登入、模型或計費方式已驗證。
+- 證據歸屬：
+  - **Codex 獨立重跑**：斷網隔離容器內全套 race／coverage；相關回歸三輪；四項原始探測各三輪（prompt 回顯、init 大小寫歧義、hook subtype 重複、model 夾帶通行碼）；JS 契約向量；20 項證據匯入測試。全部通過。
+  - **Claude Code 執行、Codex 核對紀錄**（不是 Codex 獨立重跑）：164／164 突變、完整容器驗證七步、17 項隔離檢查，見 `artifacts/verify-container/runs/e8f67192ca7c-20261003T033120Z/`；本機檢查見 `artifacts/b1-04/e8f67192ca7c-20261003T032813Z/`。
+- 歷程：`ca46cab`（首次交付；R1、R2）→ `59da5d9`（R2 關閉；R1 的 model 缺口）→ `e8f6719`（通過）。修正內容見第 12、13 節。
