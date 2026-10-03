@@ -333,3 +333,69 @@ R2 已由 review 關閉。R1 仍有一個缺口：model 只檢查名稱格式，
   - **Codex 獨立重跑**：斷網隔離容器內全套 race／coverage；相關回歸三輪；四項原始探測各三輪（prompt 回顯、init 大小寫歧義、hook subtype 重複、model 夾帶通行碼）；JS 契約向量；20 項證據匯入測試。全部通過。
   - **Claude Code 執行、Codex 核對紀錄**（不是 Codex 獨立重跑）：164／164 突變、完整容器驗證七步、17 項隔離檢查，見 `artifacts/verify-container/runs/e8f67192ca7c-20261003T033120Z/`；本機檢查見 `artifacts/b1-04/e8f67192ca7c-20261003T032813Z/`。
 - 歷程：`ca46cab`（首次交付；R1、R2）→ `59da5d9`（R2 關閉；R1 的 model 缺口）→ `e8f6719`（通過）。修正內容見第 12、13 節。
+
+## 15 第 7.6 節前置條件比對與「真實 init 最小驗證」提案（2026-10-03；提案，未核准、未實作、未執行）
+
+原則（Aaron 10/3）：**登入成功不等於已證明訂閱計費，也不能據此放寬 `apiKeySource` 清單。** 本節只比對與提案；沒有執行登入檢查、`claude auth status`、`claude -p` 或任何推論。這次只讀了本機 `claude auth status --help`（有 `--json`（預設）與 `--text`）與 `claude --help` 的 `--input-format`（`-p` 模式可用 `stream-json` 輸入）。
+
+### 15.1 比對
+
+| 7.6 項目 | 目前狀態 | 缺什麼 |
+|---|---|---|
+| 1 階段 B：版本、登入與否、非敏感的認證方式／訂閱確認 | 未執行。就算登入成功，也只證明機器上有一個可用憑證，不證明某次 run 實際用哪個憑證、怎麼計費 | Aaron 本人回報 `claude --version`，以及 `claude auth status --text` 中「登入方式／方案類型」一行（不貼其他內容）。另只回報「有／無」：shell 是否設了 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_OAUTH_TOKEN`、`ANTHROPIC_PROFILE`、`CLAUDE_CODE_USE_*`；是否有 managed settings 檔；`~/.config/anthropic` 是否有 active profile。這些是 host 環境 allowlist 擋不到、卻排在訂閱登入之前的來源 |
+| 2 `apiKeySource` 接受值 | 清單為空；文件無法確認值域；從未見過 2.1.287 真實 init 的值 | **真實 init 的值**，加上第 1 項的證據，兩者都有才可能支持一個接受值。單獨任何一項都不夠 |
+| 3 `--model sonnet`、`--effort low` | 只是候選；本機 help 有這兩個旗標 | 真實 init 回報的 model ID；CLI 是否接受 `--effort low`（不接受時的行為未知） |
+| 4 init 中的 agents／skills | 一律拒絕；真實 init 會不會列出內建項目未知 | **真實 init 的內容** |
+| 5 階段 C 單次 run | 未核准 | 1–4 完成後另行核准 |
+| （附）init 欄位形狀 | 只依 SDK 文件（`mcp_servers.status`、`claude_code_version` 格式、`tools` 內容） | **真實 init 的內容** |
+
+結論：2、3、4 都缺真實 init 的資訊。現在照第 7.2 節跑階段 C，必定在 `auth_unconfirmed` 停下（設計如此），而 trace 依規定不保存 init 的值，所以那次 run 會花掉用量卻得不到需要的資訊。因此先提下面的 C0。
+
+### 15.2 提案 C0：真實 init 探測
+
+目標：取得第 2–4 項需要的真實 init 事實。全程不執行任何工具、不開 Store、不送任何使用者訊息。
+
+**做法（需先實作並經 Codex review，再經 Aaron 核准才執行一次）**：
+
+- 新子命令 `apa-buyer probe-init --cli <絕對路徑>`：需要 `APA_LIVE_CLI=true`，`--version` 須恰為 `2.1.287 (Claude Code)`。
+- 環境 allowlist、固定環境變數、私有空工作目錄、MCP 設定與 bridge 都與階段 C 相同，讓 `mcp_servers` 的狀態是真的。run 註冊後保持 idle、永不放行；不開 Store，也不使用任何 DB 路徑。
+- argv 與階段 C 相同，只差兩點：`-p` 不帶 prompt，並加上 `--input-format stream-json`。stdin 保持開啟，**從頭到尾不寫入任何使用者訊息**。
+- 最多等 30 秒。收到 `system/init`，或逾時，就關閉 stdin，並用既有的 runner 清理整個 process group。
+- 輸出到終端與 run trace，只含白名單化的事實，原始 init 不保存：
+  - 各欄位是否存在、型別是否正確。
+  - `tools` 是否恰為三個工具，多出幾個、少了幾個（不列名稱）。
+  - `mcp_servers`：數量；`apa` 的 status 在已知值集合內才顯示，否則記 `other`。
+  - `permissionMode`：在 SDK 列舉內才顯示。
+  - `claude_code_version`：等於核准版號才顯示。
+  - `model`：在 `sonnet`、`claude-sonnet-5-5` 內才顯示，否則 `other`。
+  - `apiKeySource`：只在一份候選詞彙內才顯示，否則記 `other` 與字數。候選詞彙取自 SDK 頁的第一次摘要，**明確標示為未確認**；它只決定能不能顯示，不代表被接受。
+  - plugins／skills／agents：數量，以及 agents 的 `source` 類別（在已知類別內才顯示）。
+
+**可能用量**：
+
+- **設計上不應有任何模型推論**：沒有使用者訊息，模型就沒有可以回應的回合。
+- **未驗證**：2.1.287 在 stream-json 輸入模式下，會不會在收到第一則使用者訊息之前就送出 init。若不會，探測在 30 秒時以「init 未在輸入前出現」結束；仍然沒有送出訊息，預期沒有推論，但這次就拿不到 init。
+- **無法完全排除**：CLI 自己的帳號、認證或背景連線。`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 只是減少，不是保證。沒有 result 訊息，所以 usage 只能記 `unknown`，不會補零。
+
+**C0 的備案 C0′（只在 C0 拿不到 init 時，另行核准）**：寫入一則最短的使用者訊息，一收到 init 就終止。可能用量是**最多一次模型請求**：輸入是 CLI 的系統提示、三個工具定義與一句話，輸出會被中斷；次數沒有硬保證，用量記 `unknown`。
+
+**停止條件**：opt-in 或版本不符、逾時、任何錯誤，都立即停止，不重試，也不改走 C0′；C0′ 必須另外核准。
+
+**實作與測試範圍**：fake 需支援兩種行為（不等輸入就先送 init；等到輸入才送 init），各補測試；確認探測模式不開 Store、不放行工具、不送使用者訊息（以 fake 記錄 stdin 是否收到任何位元組）；輸出白名單的識別標記測試；加上對應突變。
+
+### 15.3 C0 之後怎麼決定 `apiKeySource` 接受值
+
+- 必須兩者都有：第 1 項的階段 B 證據（訂閱登入方式，且沒有排在它前面的其他憑證來源），加上 C0 看到的值。兩者一致，才由 Aaron 決定是否把**那一個值**列入清單，並記錄依據。不會在任何一次失敗後自動放寬。
+- 即使列入，init 仍不能證明計費。最強的事後證據是：階段 C 結束後，由 Aaron 確認該時段在 Console／API 帳單上沒有對應用量（若有 Console 帳號）。這一步列為選做，由 Aaron 決定。
+- 第 3、4 項（model／effort、agents／skills）也依 C0 的事實另行決定。
+
+### 15.4 階段 C 本身的可能用量（供日後核准參考）
+
+主流程需要 `list_products`、`get_quote`、`request_purchase`，通常是三到四次模型請求：每次工具結果回來，就再發一次請求。每次請求都帶 CLI 的系統提示、工具定義與累積的對話。上限是 10 則 assistant 訊息與 3 分鐘。確切 token 數未知；result 若有 usage 就原樣記錄，標為「CLI 回報」。
+
+### 15.5 待 Aaron 決定
+
+1. 是否核准**實作** C0（程式、fake 測試、Codex review；不執行）。
+2. 實作通過 review 後，是否核准**執行一次** C0。
+3. C0 拿不到 init 時，是否接受 C0′（最多一次模型請求），或改用其他方式。
+4. 階段 B 是否照 15.1 第 1 項的方式回報（只回報登入方式／方案類型一行與各項有／無）。
