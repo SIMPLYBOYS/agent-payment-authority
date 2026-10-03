@@ -1,0 +1,2 @@
+{"description":"C0′ probe, fake that sends its init only after one complete user message line arrives on stdin (fake data, not a recording of the real CLI). Business tool calls outside any model turn, before and after the init, must be refused.","manual_init":true,
+ "steps":[{"do":"silent_tool","tool":"list_products"},{"do":"wait_message"},{"do":"init"},{"do":"silent_tool","tool":"request_purchase","args":{"product_id":"kr-market"}},{"do":"hang"}]}

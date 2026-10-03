@@ -29,10 +29,44 @@ const ProbeTimeout = 30 * time.Second
 
 // Probe statuses and the command's exit codes.
 const (
-	ProbeObserved = "observed"             // a strictly readable init stating the approved version (exit 0)
-	ProbeNoInit   = "no_init_before_input" // none came before the wait ended (exit 3)
-	ProbeFailed   = "failed"               // parse, version, process or host failure (exit 1)
+	ProbeObserved         = "observed"              // a strictly readable init stating the approved version (exit 0)
+	ProbeNoInit           = "no_init_before_input"  // C0: none came before the wait ended (exit 3)
+	ProbeNoInitAfterInput = "no_init_after_message" // C0′: the one message was written, still no init (exit 4)
+	ProbeFailed           = "failed"                // parse, version, process, input or host failure (exit 1)
 )
+
+// Probe modes.
+const (
+	ModeC0      = "c0"       // no input at all
+	ModeC0Prime = "c0_prime" // one fixed user message
+)
+
+// OneMessageText is C0′'s whole user input: fixed, not sensitive, no task.
+const OneMessageText = "Reply only OK."
+
+// oneMessage is OneMessageText as one stream-json input line. The shape is
+// the Agent SDK's SDKUserMessage (type "user", message {role, content},
+// parent_tool_use_id null; TypeScript reference read 2026-10-04). That the
+// CLI reads such objects one per line on stdin is inferred from the
+// newline-delimited stream-json output; no page states it verbatim, and no
+// real CLI has been given this line.
+var oneMessage = func() []byte {
+	b, err := json.Marshal(struct {
+		Type    string `json:"type"`
+		Message struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"message"`
+		ParentToolUseID *string `json:"parent_tool_use_id"`
+	}{Type: "user", Message: struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}{"user", OneMessageText}})
+	if err != nil {
+		panic(err)
+	}
+	return append(b, '\n')
+}()
 
 // InitObserved stops a probe run on its init; it is the probe's own stop,
 // not a contract code.
@@ -53,17 +87,23 @@ type ProbeSpec struct {
 	Limits     Limits   // Total is the wait for the init
 	CLIVersion string   // approved claude_code_version, e.g. "2.1.288"
 	TraceDir   string
+	// SendOneMessage selects C0′: the one fixed message is written once.
+	// Only an explicit opt-in sets it; nothing switches to it on its own.
+	SendOneMessage bool
 }
 
 // ProbeResult is all the probe reports, to the terminal and the trace.
 // Every string is a fixed code or comes from a fixed list.
 type ProbeResult struct {
+	Mode          string           `json:"mode"` // c0 | c0_prime
 	Status        string           `json:"status"`
 	Code          string           `json:"code"`
 	Outcome       Outcome          `json:"runner_outcome"`
 	Detail        string           `json:"runner_detail"`
 	ExitCode      int              `json:"cli_exit_code"`
-	StdinWritten  int              `json:"stdin_bytes_written"` // by construction 0: nothing writes to it
+	InputStatus   string           `json:"input_status"`        // Input* constant, as the host's writer saw it
+	InputSize     int              `json:"input_message_bytes"` // the one message's size; 0 for C0
+	StdinWritten  int              `json:"stdin_bytes_written"` // bytes the host actually wrote
 	CallsRefused  int              `json:"business_calls_refused"`
 	CallsExecuted int64            `json:"business_calls_executed"` // must stay 0
 	Usage         string           `json:"usage"`
@@ -235,7 +275,12 @@ func (r *refuseAll) Call(_ context.Context, _ *toolbridge.Binding, tool, _ strin
 // Probe runs the C0 probe once. It never retries, never sends input and
 // never widens a check.
 func Probe(ctx context.Context, p ProbeSpec) (ProbeResult, error) {
-	res := ProbeResult{Usage: "unknown"}
+	res := ProbeResult{Usage: "unknown", Mode: ModeC0}
+	var input []byte
+	if p.SendOneMessage {
+		res.Mode, input = ModeC0Prime, oneMessage
+		res.InputSize = len(input)
+	}
 	if ctx.Err() != nil {
 		return res, errors.New("cancelled before the probe started; the CLI was not run")
 	}
@@ -296,9 +341,10 @@ func Probe(ctx context.Context, p ProbeSpec) (ProbeResult, error) {
 	lim.Assistant = 0 // any assistant message already stops the probe
 	started := time.Now()
 	rep := Run(ctx, Spec{Path: p.CLI, Args: ProbeArgv(cfgPath), Dir: work, Env: p.Env, Limits: lim,
-		Watch: watch, Stopping: b.Disarm, HoldStdin: true})
+		Watch: watch, Stopping: b.Disarm, HoldStdin: true, Input: input})
 	bridge.Revoke(capability) // waits for calls in flight
 	res.Outcome, res.Detail, res.ExitCode = rep.Outcome, rep.Detail, rep.ExitCode
+	res.InputStatus, res.StdinWritten = rep.InputStatus, rep.InputBytes
 	res.CallsRefused, res.CallsExecuted = b.NotReady()+b.Attempts(), exec.calls.Load()
 	res.Observation = obs
 
@@ -307,8 +353,12 @@ func Probe(ctx context.Context, p ProbeSpec) (ProbeResult, error) {
 		res.Status, res.Code = ProbeObserved, "init_observed"
 	case rep.Outcome == InitObserved:
 		res.Status, res.Code = ProbeFailed, "init_cli_version"
-	case rep.Outcome == Timeout:
+	case rep.Outcome == Timeout && res.Mode == ModeC0:
 		res.Status, res.Code = ProbeNoInit, "no_init_before_input"
+	case rep.Outcome == Timeout && rep.InputStatus == InputComplete:
+		res.Status, res.Code = ProbeNoInitAfterInput, "no_init_after_message"
+	case rep.Outcome == Timeout:
+		res.Status, res.Code = ProbeFailed, "input_"+rep.InputStatus // the one message did not go out whole
 	case rep.Detail != "":
 		res.Status, res.Code = ProbeFailed, rep.Detail
 	default:

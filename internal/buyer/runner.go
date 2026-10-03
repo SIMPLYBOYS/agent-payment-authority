@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -80,10 +81,66 @@ type Spec struct {
 	// Stopping is called once, from the run loop, when the run starts to
 	// stop for any reason, the CLI's own exit included.
 	Stopping func()
-	// HoldStdin gives the process a pipe as stdin and keeps it open, never
-	// writing a byte, until the process is gone (C0 probe). Otherwise stdin
-	// is the null device.
+	// HoldStdin gives the process a pipe as stdin and keeps it open until
+	// the process is gone (C0 probe). Otherwise stdin is the null device.
 	HoldStdin bool
+	// Input, with HoldStdin, is written to that pipe once, right after the
+	// start, unless the run is already stopping (C0′). Nothing else is ever
+	// written. nil: nothing is written.
+	Input []byte
+}
+
+// Input statuses of a run's stdin (Report.InputStatus).
+const (
+	InputNone       = "none"        // nothing to write (C0, or no held stdin)
+	InputNotStarted = "not_started" // the run was stopping before the write began
+	InputComplete   = "complete"    // every byte was written
+	InputPartial    = "partial"     // some bytes were written, then the write failed
+	InputFailed     = "failed"      // no byte was written (closed pipe, deadline)
+)
+
+// stdinWriter writes a run's one input, at most once, and never after the
+// run began to stop. The write holds the lock, so stop waits for a write in
+// progress; a deadline bounds that wait.
+type stdinWriter struct {
+	mu      sync.Mutex
+	stopped bool
+	w       *os.File
+	n       int
+	status  string
+	done    chan struct{}
+}
+
+func newStdinWriter(w *os.File) *stdinWriter {
+	return &stdinWriter{w: w, status: InputNone, done: make(chan struct{})}
+}
+
+func (iw *stdinWriter) stop() {
+	iw.mu.Lock()
+	iw.stopped = true
+	iw.mu.Unlock()
+}
+
+// write writes msg once; bound limits how long a blocked write may take.
+func (iw *stdinWriter) write(msg []byte, bound time.Duration) {
+	defer close(iw.done)
+	iw.mu.Lock()
+	defer iw.mu.Unlock()
+	if iw.stopped {
+		iw.status = InputNotStarted
+		return
+	}
+	iw.w.SetWriteDeadline(time.Now().Add(bound))
+	n, err := iw.w.Write(msg)
+	iw.n = n
+	switch {
+	case n == len(msg) && err == nil:
+		iw.status = InputComplete
+	case n > 0:
+		iw.status = InputPartial
+	default:
+		iw.status = InputFailed
+	}
 }
 
 // Report is what the host learns from the CLI's own output. Result and
@@ -97,7 +154,9 @@ type Report struct {
 	NumTurns    int
 	Usage       json.RawMessage // nil: unknown
 	StderrBytes int
-	Assistant   int // complete assistant messages read
+	Assistant   int    // complete assistant messages read
+	InputBytes  int    // stdin bytes actually written (Spec.Input)
+	InputStatus string // Input* constant
 }
 
 // stopErr ends a stream read with the outcome to report.
@@ -130,7 +189,7 @@ func Run(ctx context.Context, s Spec) Report {
 	var st stream
 	x := execute(ctx, s, func(r io.Reader) error { return readStream(r, s, &st) })
 	r := Report{Outcome: x.fault, Detail: x.detail, ExitCode: x.exit, StderrBytes: x.stderrBytes, Messages: st.messages,
-		NumTurns: st.numTurns, Usage: st.usage, Assistant: st.assistant}
+		NumTurns: st.numTurns, Usage: st.usage, Assistant: st.assistant, InputBytes: x.inputBytes, InputStatus: x.inputStatus}
 	if st.result != nil {
 		r.Result = *st.result
 	}
@@ -182,14 +241,20 @@ type execResult struct {
 	detail      string
 	exit        int
 	stderrBytes int
+	inputBytes  int
+	inputStatus string
 }
 
 func execute(ctx context.Context, s Spec, consume func(io.Reader) error) (x execResult) {
-	x.exit = -1
+	x.exit, x.inputStatus = -1, InputNone
 	ctx, cancel := context.WithTimeout(ctx, s.Limits.Total)
 	defer cancel()
+	var iw *stdinWriter
 	notified := false
 	notify := func() {
+		if iw != nil {
+			iw.stop() // no write begins once the run is stopping
+		}
 		if !notified && s.Stopping != nil {
 			s.Stopping()
 		}
@@ -224,20 +289,45 @@ func execute(ctx context.Context, s Spec, consume func(io.Reader) error) (x exec
 			return execResult{fault: StartFailed, exit: -1}
 		}
 		cmd.Stdin = inR
-		defer inR.Close()
-		defer inW.Close() // held, never written: the process sees no input and no EOF while it runs
+		defer inR.Close() // also closed right after the start: the child holds the only read end
+		defer inW.Close() // held: the process sees no EOF while it runs; written only with Spec.Input
+		iw = newStdinWriter(inW)
+		defer func() { // the writer is done before the result is read
+			<-iw.done
+			x.inputBytes, x.inputStatus = iw.n, iw.status
+		}()
 	}
 	if ctx.Err() != nil { // cancelled or out of time before the start: start nothing
 		outR.Close()
 		outW.Close()
 		errR.Close()
 		errW.Close()
+		if iw != nil {
+			if s.Input != nil {
+				iw.status = InputNotStarted
+			}
+			close(iw.done) // nothing was written
+		}
 		notify()
 		return execResult{fault: Cancelled, exit: -1}
 	}
 	err = cmd.Start()
 	if err == nil {
 		started()
+	}
+	if iw != nil {
+		if r, ok := cmd.Stdin.(*os.File); ok {
+			r.Close() // a child that closes its stdin now breaks the pipe instead of filling it
+		}
+		switch {
+		case err == nil && s.Input != nil:
+			go iw.write(s.Input, s.Limits.Grace)
+		case s.Input != nil: // the start failed
+			iw.status = InputNotStarted
+			close(iw.done)
+		default:
+			close(iw.done)
+		}
 	}
 	outW.Close()
 	errW.Close()

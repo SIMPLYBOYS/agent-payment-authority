@@ -522,3 +522,45 @@ func TestProbeCommand(t *testing.T) {
 		t.Error("the live auth list is not empty")
 	}
 }
+
+// C0′ through the command: the flag is the only way in; the same opt-in,
+// path and version checks apply; exit 0 on an init after the message, 4
+// when none came; the Store is never touched and C0 stays input-free.
+func TestProbeOneMessageCommand(t *testing.T) {
+	f := newFixture(t)
+	cli, ran := marker(t, approvedCLIVersion)
+	if _, err := f.probeExec(context.Background(), []string{"--cli", cli, "--send-one-message"}, nil, deps{}); err == nil || !strings.Contains(err.Error(), "needs APA_LIVE_CLI=true") {
+		t.Fatalf("no opt-in: %v", err)
+	}
+	if _, err := f.probeExec(context.Background(), []string{"--cli", "claude", "--send-one-message"}, map[string]string{"APA_LIVE_CLI": "true"}, deps{}); err == nil {
+		t.Fatal("relative path accepted")
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Fatal("a refused C0′ ran the CLI")
+	}
+	opened := 0
+	d := deps{liveVersion: fakecli.Version, openStore: func(c store.Config) (*store.Store, error) { opened++; return store.Open(c) }}
+	env := map[string]string{"APA_LIVE_CLI": "true"}
+
+	out, err := f.probeExec(context.Background(), []string{"--cli", liveFake(t, f, "probe1-wait-message"), "--send-one-message"}, env, d)
+	if err != nil || !strings.HasPrefix(out, "PROBE MODE (C0′):") || !strings.Contains(out, `"mode": "c0_prime"`) ||
+		!strings.Contains(out, `"input_status": "complete"`) || !strings.Contains(out, `"status": "observed"`) || strings.Contains(out, "Reply only") {
+		t.Fatalf("observed: %v\n%s", err, out)
+	}
+	out, err = f.probeExec(context.Background(), []string{"--cli", liveFake(t, f, "probe1-message-no-init"), "--send-one-message"}, env, d)
+	var ec exitCode
+	if !errors.As(err, &ec) || ec != 4 || !strings.Contains(out, `"status": "no_init_after_message"`) {
+		t.Fatalf("no init: %v\n%s", err, out)
+	}
+	// Without the flag the same fake gets no input and no init: C0's exit 3.
+	out, err = f.probeExec(context.Background(), []string{"--cli", liveFake(t, f, "probe1-message-no-init")}, env, d)
+	if !errors.As(err, &ec) || ec != 3 || !strings.Contains(out, `"mode": "c0"`) || !strings.Contains(out, `"stdin_bytes_written": 0`) {
+		t.Fatalf("C0: %v\n%s", err, out)
+	}
+	if opened != 0 {
+		t.Fatalf("the probe opened the Store %d times", opened)
+	}
+	if _, err := os.Stat(f.db); !os.IsNotExist(err) {
+		t.Error("the probe created the database")
+	}
+}

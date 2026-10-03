@@ -2,7 +2,7 @@
 //
 //	apa-buyer run --fake-cli PATH --scenario FILE [--task ID]
 //	apa-buyer run --live --cli ABSOLUTE-PATH [--task ID]   (also needs APA_LIVE_CLI=true)
-//	apa-buyer probe-init --cli ABSOLUTE-PATH                (also needs APA_LIVE_CLI=true)
+//	apa-buyer probe-init --cli ABSOLUTE-PATH [--send-one-message]  (also needs APA_LIVE_CLI=true)
 //	apa-buyer mcp-bridge
 //
 // run starts the fixture shop on a loopback port and the CLI with the MCP
@@ -22,6 +22,9 @@
 // waits up to 30 seconds for the init, and prints a whitelisted account of
 // it. It opens no Store, runs no tool and never retries. Exit 0: init
 // observed; 3: no init came before the wait ended; 1: anything else.
+// --send-one-message selects C0′ (section 22): the same, but one fixed user
+// message is written once; exit 4: no init came after the message was
+// written whole. Nothing switches from C0 to C0′ on its own.
 //
 // mcp-bridge is started by the CLI from the host's MCP config, never by hand.
 package main
@@ -409,6 +412,7 @@ func probe(ctx context.Context, args []string, d deps) error {
 	fs.SetOutput(io.Discard)
 	cliPath := fs.String("cli", "", "absolute path of the approved Claude Code executable")
 	traceDir := fs.String("trace-dir", "var/runs", "where the probe trace is written")
+	oneMessage := fs.Bool("send-one-message", false, "C0′: write one fixed user message (needs its own approval to run)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -437,9 +441,13 @@ func probe(ctx context.Context, args []string, d deps) error {
 	if d.limits != nil {
 		lim = *d.limits
 	}
-	fmt.Fprintf(d.out, "PROBE MODE (C0): %s; no user message is sent, no tool runs, no Store is opened.\n", *cliPath)
+	if *oneMessage {
+		fmt.Fprintf(d.out, "PROBE MODE (C0′): %s; one fixed user message is written once, no tool runs, no Store is opened.\n", *cliPath)
+	} else {
+		fmt.Fprintf(d.out, "PROBE MODE (C0): %s; no user message is sent, no tool runs, no Store is opened.\n", *cliPath)
+	}
 	res, err := buyer.Probe(ctx, buyer.ProbeSpec{CLI: *cliPath, BridgeCmd: []string{d.self, "mcp-bridge"}, Env: env,
-		Limits: lim, CLIVersion: strings.Fields(want)[0], TraceDir: *traceDir})
+		Limits: lim, CLIVersion: strings.Fields(want)[0], TraceDir: *traceDir, SendOneMessage: *oneMessage})
 	if err != nil {
 		return err
 	}
@@ -453,6 +461,8 @@ func probe(ctx context.Context, args []string, d deps) error {
 		return nil
 	case buyer.ProbeNoInit:
 		return fmt.Errorf("probe: %s: %w", res.Code, exitCode(3))
+	case buyer.ProbeNoInitAfterInput:
+		return fmt.Errorf("probe: %s: %w", res.Code, exitCode(4))
 	default:
 		return fmt.Errorf("probe: %s: %w", res.Code, exitCode(1))
 	}

@@ -1,0 +1,2 @@
+{"description":"C0′ probe, fake that reads the one message but never sends an init (fake data). The probe must end at its wait limit without sending anything more.","manual_init":true,
+ "steps":[{"do":"wait_message"},{"do":"hang"}]}

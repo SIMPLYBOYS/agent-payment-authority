@@ -380,7 +380,7 @@ MUTATIONS = [
     # B1-04 C0 probe: zero input, never armed, stops on init, whitelist,
     # opt-in and version, no Store, no CLI text in errors.
     ("B1-04 C0 runner: a byte written to the held stdin", "internal/buyer/runner.go",
-     "\t\tdefer inW.Close() // held, never written", "\t\tinW.Write([]byte(\"\\n\"))\n\t\tdefer inW.Close() // held, never written", "TestProbeInitFirst|TestProbeWaitsForInput"),
+     "\t\tiw = newStdinWriter(inW)", "\t\tinW.Write([]byte(\"\\n\"))\n\t\tiw = newStdinWriter(inW)", "TestProbeInitFirst|TestProbeWaitsForInput"),
     ("B1-04 C0 runner: stdin not held open (null device)", "internal/buyer/runner.go",
      "\tif s.HoldStdin {", "\tif false && s.HoldStdin {", "TestProbeWaitsForInput"),
     ("B1-04 C0 probe: the run is armed", "internal/buyer/probe.go",
@@ -394,7 +394,7 @@ MUTATIONS = [
     ("B1-04 C0 probe: an init of another version counted as observed", "internal/buyer/probe.go",
      "case rep.Outcome == InitObserved && obs != nil && obs.CLIVersion == \"approved\":", "case rep.Outcome == InitObserved && obs != nil:", "TestProbeFailures"),
     ("B1-04 C0 probe: no init reported as a failure", "internal/buyer/probe.go",
-     "\tcase rep.Outcome == Timeout:\n\t\tres.Status, res.Code = ProbeNoInit", "\tcase false:\n\t\tres.Status, res.Code = ProbeNoInit", "TestProbeWaitsForInput"),
+     "\tcase rep.Outcome == Timeout && res.Mode == ModeC0:\n\t\tres.Status, res.Code = ProbeNoInit", "\tcase false:\n\t\tres.Status, res.Code = ProbeNoInit", "TestProbeWaitsForInput"),
     ("B1-04 C0 probe: unlisted init strings shown as is", "internal/buyer/probe.go",
      "\treturn \"other\", len(v)", "\treturn v, len(v)", "TestProbeNoLeak|TestProbeUnknownValues"),
     ("B1-04 C0 command: probe without APA_LIVE_CLI", "cmd/apa-buyer/main.go",
@@ -416,6 +416,23 @@ MUTATIONS = [
      "\tif ctx.Err() != nil { // cancelled or out of time before the start", "\tif false && ctx.Err() != nil { // cancelled or out of time before the start", "TestRunnerCancelledBeforeStart"),
     ("B1-04 C1 command: a cancelled probe still runs the version check", "cmd/apa-buyer/main.go",
      "\tif ctx.Err() != nil {\n\t\treturn errors.New(\"cancelled before the version check; the probe was not started\")", "\tif false && ctx.Err() != nil {\n\t\treturn errors.New(\"cancelled before the version check; the probe was not started\")", "TestProbeOptIn"),
+    # B1-04 C0′: one fixed message, written once, never after a stop, reported as written.
+    ("B1-04 C0′ writer: writes after the run began stopping", "internal/buyer/runner.go",
+     "\tif iw.stopped {\n\t\tiw.status = InputNotStarted", "\tif false {\n\t\tiw.status = InputNotStarted", "TestStdinWriter"),
+    ("B1-04 C0′ writer: a failed write reported complete", "internal/buyer/runner.go",
+     "\tdefault:\n\t\tiw.status = InputFailed", "\tdefault:\n\t\tiw.status = InputComplete", "TestStdinWriter"),
+    ("B1-04 C0′ writer: the message written twice", "internal/buyer/runner.go",
+     "\tn, err := iw.w.Write(msg)", "\tiw.w.Write(msg)\n\tn, err := iw.w.Write(msg)", "TestProbeOneMessage"),
+    ("B1-04 C0′ probe: C0 sends the message too", "internal/buyer/probe.go",
+     "\tif p.SendOneMessage {", "\tif true {", "TestProbeInitFirst|TestProbeWaitsForInput"),
+    ("B1-04 C0′ probe: no init after the message reported as C0's", "internal/buyer/probe.go",
+     "\tcase rep.Outcome == Timeout && res.Mode == ModeC0:", "\tcase rep.Outcome == Timeout:", "TestProbeOneMessageNoInit"),
+    ("B1-04 C0′ probe: planned size reported as written", "internal/buyer/probe.go",
+     "res.InputStatus, res.StdinWritten = rep.InputStatus, rep.InputBytes", "res.InputStatus, res.StdinWritten = rep.InputStatus, res.InputSize", "TestProbeOneMessageInterleaving"),
+    ("B1-04 C0′ probe: the message text changed", "internal/buyer/probe.go",
+     "const OneMessageText = \"Reply only OK.\"", "const OneMessageText = \"Reply only OK!\"", "TestOneMessageLine|TestProbeOneMessage"),
+    ("B1-04 C0′ command: --send-one-message ignored", "cmd/apa-buyer/main.go",
+     "SendOneMessage: *oneMessage})", "SendOneMessage: false})", "TestProbeOneMessageCommand"),
 ]
 
 

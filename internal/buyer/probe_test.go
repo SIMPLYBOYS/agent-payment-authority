@@ -20,6 +20,7 @@ import (
 type probeEnv struct {
 	t     *testing.T
 	stdin string // file the fake keeps its received stdin byte count in
+	msgs  string // file the fake keeps its count of complete stdin lines in
 	cap   string // file the fake saves the run's capability to (savecap)
 	spec  ProbeSpec
 }
@@ -27,7 +28,7 @@ type probeEnv struct {
 func newProbe(t *testing.T, scen string, total time.Duration) *probeEnv {
 	t.Helper()
 	dir := t.TempDir()
-	p := &probeEnv{t: t, stdin: filepath.Join(dir, "stdin-count"), cap: filepath.Join(dir, "cap")}
+	p := &probeEnv{t: t, stdin: filepath.Join(dir, "stdin-count"), msgs: filepath.Join(dir, "stdin-msgs"), cap: filepath.Join(dir, "cap")}
 	home := filepath.Join(dir, "home")
 	getenv := func(k string) string {
 		if k == "HOME" {
@@ -38,7 +39,8 @@ func newProbe(t *testing.T, scen string, total time.Duration) *probeEnv {
 	lim := testLimits
 	lim.Total = total
 	p.spec = ProbeSpec{CLI: fake(t), BridgeCmd: []string{self(t), "mcp-bridge"},
-		Env:    CLIEnv(getenv, scenario(scen), fakecli.EnvStdinFile+"="+p.stdin, fakecli.EnvCapFile+"="+p.cap),
+		Env: CLIEnv(getenv, scenario(scen), fakecli.EnvStdinFile+"="+p.stdin, fakecli.EnvStdinMsgFile+"="+p.msgs,
+			fakecli.EnvCapFile+"="+p.cap),
 		Limits: lim, CLIVersion: fakecli.InitVersion, TraceDir: filepath.Join(dir, "runs")}
 	return p
 }
@@ -88,8 +90,8 @@ func TestProbeInitFirst(t *testing.T) {
 	if res.Status != ProbeObserved || res.Code != "init_observed" || took > 5*time.Second {
 		t.Fatalf("%+v after %v", res, took)
 	}
-	if p.stdinBytes() != "0" || res.StdinWritten != 0 {
-		t.Errorf("stdin bytes %s", p.stdinBytes())
+	if p.stdinBytes() != "0" || res.StdinWritten != 0 || res.Mode != ModeC0 || res.InputStatus != InputNone || res.InputSize != 0 {
+		t.Errorf("C0 input: fake %s bytes, host %+v", p.stdinBytes(), res)
 	}
 	if res.CallsExecuted != 0 || res.CallsRefused < 1 {
 		t.Errorf("business calls: executed %d, refused %d", res.CallsExecuted, res.CallsRefused)
@@ -109,7 +111,8 @@ func TestProbeInitFirst(t *testing.T) {
 func TestProbeWaitsForInput(t *testing.T) {
 	p := newProbe(t, "probe-wait-input", 1500*time.Millisecond)
 	res, took := p.run(context.Background())
-	if res.Status != ProbeNoInit || res.Code != "no_init_before_input" || res.Observation != nil || took > 6*time.Second {
+	if res.Status != ProbeNoInit || res.Code != "no_init_before_input" || res.Observation != nil || took > 6*time.Second ||
+		res.Mode != ModeC0 || res.InputStatus != InputNone || res.StdinWritten != 0 {
 		t.Fatalf("%+v after %v", res, took)
 	}
 	if p.stdinBytes() != "0" || res.CallsExecuted != 0 {

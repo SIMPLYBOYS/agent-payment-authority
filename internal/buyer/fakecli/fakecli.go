@@ -12,6 +12,8 @@ package fakecli
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,6 +50,10 @@ const (
 	// EnvStdinFile, when set, names a file that always holds the number of
 	// stdin bytes the fake has received so far (C0: proof of zero input).
 	EnvStdinFile = "APA_FAKE_CLI_STDINFILE"
+	// EnvStdinMsgFile, when set, names a file holding what the fake made of
+	// the complete stdin lines received so far: "lines=N user_messages=M
+	// content_sha256=<hex of the first message's content>" (C0′).
+	EnvStdinMsgFile = "APA_FAKE_CLI_STDINMSGFILE"
 )
 
 // Scenario is one scripted run. The init message is printed after the MCP
@@ -55,7 +61,8 @@ const (
 type Scenario struct {
 	Description string `json:"description"`
 	ManualInit  bool   `json:"manual_init,omitempty"`
-	IgnoreTerm  bool   `json:"ignore_term,omitempty"` // from process start: only SIGKILL ends the fake
+	IgnoreTerm  bool   `json:"ignore_term,omitempty"`   // from process start: only SIGKILL ends the fake
+	NoStdinRead bool   `json:"no_stdin_read,omitempty"` // never read stdin: a CLI that ignores its input
 	Steps       []Step `json:"steps"`
 }
 
@@ -81,6 +88,8 @@ type Scenario struct {
 //	init    print the init message; Init members replace the defaults (null removes one)
 //	wait_input  block until stdin delivers a byte (then go on) or ends (then exit 0
 //	        without output): a CLI that waits for a user message before its init
+//	wait_message  the same, but until one complete stdin line has arrived
+//	close_stdin  close stdin (a CLI that closes its input)
 //	exit    exit with Code now
 //
 // $CAPABILITY and $PROMPT in a result's Text, a tool's Args or an init
@@ -116,6 +125,7 @@ type run struct {
 	capability string
 	tools      []string
 	input      <-chan struct{} // closed when stdin delivers its first byte
+	message    <-chan struct{} // closed when stdin delivers its first complete line
 	inputEnd   <-chan struct{} // closed when stdin ends
 	model      string
 	prompt     string
@@ -155,7 +165,14 @@ func Main(args []string, getenv func(string) string, stdout, stderr io.Writer) i
 	}
 	r := &run{out: stdout, errw: stderr, enc: json.NewEncoder(stdout), getenv: getenv, session: fmt.Sprintf("fake-%d", os.Getpid()),
 		model: opts["--model"], prompt: opts["prompt"], permission: opts["--permission-mode"]}
-	r.input, r.inputEnd = watchStdin(getenv(EnvStdinFile))
+	if sc.NoStdinRead {
+		r.input, r.message, r.inputEnd = make(chan struct{}), make(chan struct{}), make(chan struct{})
+		if f := getenv(EnvStdinFile); f != "" {
+			os.WriteFile(f, []byte("0"), 0o600)
+		}
+	} else {
+		r.input, r.message, r.inputEnd = watchStdin(getenv(EnvStdinFile), getenv(EnvStdinMsgFile))
+	}
 	if r.server, r.capability, err = startServer(opts["--mcp-config"]); err != nil {
 		fmt.Fprintln(stderr, "fake-claude: mcp server:", err)
 		return 1
@@ -287,6 +304,18 @@ func (r *run) step(s Step) (code int, done bool) {
 				return 0, true
 			}
 		}
+	case "wait_message":
+		select {
+		case <-r.message:
+		case <-r.inputEnd:
+			select {
+			case <-r.message:
+			default:
+				return 0, true
+			}
+		}
+	case "close_stdin":
+		os.Stdin.Close()
 	case "text":
 		r.assistant(map[string]any{"type": "text", "text": s.Text})
 	case "leak":
@@ -354,16 +383,23 @@ func (r *run) step(s Step) (code int, done bool) {
 
 // watchStdin reads stdin for the whole run, counting bytes into file (if
 // set) after every read, starting with 0.
-func watchStdin(file string) (<-chan struct{}, <-chan struct{}) {
-	first, end := make(chan struct{}), make(chan struct{})
+func watchStdin(file, msgFile string) (<-chan struct{}, <-chan struct{}, <-chan struct{}) {
+	first, firstLine, end := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	record := func(n int) {
 		if file != "" {
 			os.WriteFile(file, []byte(fmt.Sprint(n)), 0o600)
 		}
 	}
+	lines, users, digest := 0, 0, ""
+	recordLines := func() {
+		if msgFile != "" {
+			os.WriteFile(msgFile, []byte(fmt.Sprintf("lines=%d user_messages=%d content_sha256=%s", lines, users, digest)), 0o600)
+		}
+	}
 	record(0)
+	recordLines()
 	go func() {
-		total, buf := 0, make([]byte, 4096)
+		total, buf, pending := 0, make([]byte, 4096), []byte{}
 		for {
 			n, err := os.Stdin.Read(buf)
 			if n > 0 {
@@ -372,6 +408,27 @@ func watchStdin(file string) (<-chan struct{}, <-chan struct{}) {
 				}
 				total += n
 				record(total)
+				pending = append(pending, buf[:n]...)
+				for {
+					i := strings.IndexByte(string(pending), '\n')
+					if i < 0 {
+						break
+					}
+					line := pending[:i]
+					pending = pending[i+1:]
+					if lines == 0 {
+						close(firstLine)
+					}
+					lines++
+					if content, ok := userMessage(line); ok {
+						if users == 0 {
+							sum := sha256.Sum256([]byte(content))
+							digest = hex.EncodeToString(sum[:])
+						}
+						users++
+					}
+					recordLines()
+				}
 			}
 			if err != nil {
 				close(end)
@@ -379,7 +436,25 @@ func watchStdin(file string) (<-chan struct{}, <-chan struct{}) {
 			}
 		}
 	}()
-	return first, end
+	return first, firstLine, end
+}
+
+// userMessage reports whether line is a stream-json user message of the
+// SDKUserMessage shape (type "user", message.role "user", a string
+// content, parent_tool_use_id present and null), and its content.
+func userMessage(line []byte) (string, bool) {
+	var m struct {
+		Type    string `json:"type"`
+		Message *struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"message"`
+		Parent json.RawMessage `json:"parent_tool_use_id"`
+	}
+	if json.Unmarshal(line, &m) != nil || m.Type != "user" || m.Message == nil || m.Message.Role != "user" || string(m.Parent) != "null" {
+		return "", false
+	}
+	return m.Message.Content, true
 }
 
 // subst puts the run's capability and prompt where a scenario says
