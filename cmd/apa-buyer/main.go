@@ -2,6 +2,7 @@
 //
 //	apa-buyer run --fake-cli PATH --scenario FILE [--task ID]
 //	apa-buyer run --live --cli ABSOLUTE-PATH [--task ID]   (also needs APA_LIVE_CLI=true)
+//	apa-buyer probe-init --cli ABSOLUTE-PATH                (also needs APA_LIVE_CLI=true)
 //	apa-buyer mcp-bridge
 //
 // run starts the fixture shop on a loopback port and the CLI with the MCP
@@ -15,6 +16,12 @@
 // APA_LIVE_CLI=true, an absolute --cli path and the approved version, and
 // its auth check accepts no value yet (docs/cli-poc.md section 7), so no
 // live run can pass the gate in this build.
+//
+// probe-init is the C0 probe (docs/cli-poc.md section 17): it starts the
+// approved CLI with no prompt and stream-json input it never writes to,
+// waits up to 30 seconds for the init, and prints a whitelisted account of
+// it. It opens no Store, runs no tool and never retries. Exit 0: init
+// observed; 3: no init came before the wait ended; 1: anything else.
 //
 // mcp-bridge is started by the CLI from the host's MCP config, never by hand.
 package main
@@ -63,9 +70,18 @@ func main() {
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "apa-buyer:", err)
+		var ec exitCode
+		if errors.As(err, &ec) {
+			os.Exit(int(ec))
+		}
 		os.Exit(1)
 	}
 }
+
+// exitCode is an error that sets the process exit code.
+type exitCode int
+
+func (e exitCode) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
 
 func wallClock() uint64 { return uint64(time.Now().Unix()) }
 
@@ -86,9 +102,10 @@ type deps struct {
 	out         io.Writer
 	clock       store.Clock
 	limits      *buyer.Limits
-	liveVersion string             // "" means approvedCLIVersion
-	liveAuth    []string           // nil means liveAcceptAuth
-	onStore     func(*store.Store) // after the task started, before the tools are armed
+	liveVersion string                                   // "" means approvedCLIVersion
+	liveAuth    []string                                 // nil means liveAcceptAuth
+	onStore     func(*store.Store)                       // after the task started, before the tools are armed
+	openStore   func(store.Config) (*store.Store, error) // nil means store.Open
 }
 
 // prompt is the host's fixed instruction; the model never edits it.
@@ -105,8 +122,11 @@ func defaultDB(live bool) string {
 }
 
 func run(ctx context.Context, args []string, d deps) (err error) {
+	if len(args) > 0 && args[0] == "probe-init" {
+		return probe(ctx, args[1:], d)
+	}
 	if len(args) == 0 || args[0] != "run" {
-		return errors.New("usage: apa-buyer run --fake-cli PATH --scenario FILE [--task ID] | run --live --cli ABSOLUTE-PATH [--task ID]  (or: apa-buyer mcp-bridge)")
+		return errors.New("usage: apa-buyer run --fake-cli PATH --scenario FILE [--task ID] | run --live --cli ABSOLUTE-PATH [--task ID] | probe-init --cli ABSOLUTE-PATH  (or: apa-buyer mcp-bridge)")
 	}
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -258,7 +278,11 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 		if ctx.Err() != nil {
 			return nil, errors.New("cancelled before the task started; nothing was recorded")
 		}
-		s, err := store.Open(store.Config{Path: dbPath, Registry: regCfg, Offers: offers, Clock: d.clock})
+		open := store.Open
+		if d.openStore != nil {
+			open = d.openStore
+		}
+		s, err := open(store.Config{Path: dbPath, Registry: regCfg, Offers: offers, Clock: d.clock})
 		if err != nil {
 			return nil, err
 		}
@@ -368,9 +392,64 @@ func checkLive(ctx context.Context, path string, env []string, want string) erro
 		return fmt.Errorf("version check of %s failed (%v); nothing was started", path, err)
 	}
 	if got := strings.TrimSpace(out); got != want {
-		return fmt.Errorf("%s reports version %q, not the approved %q; nothing was started or upgraded", path, toolbridge.Clean(got, 100), want)
+		// The CLI's output is not repeated: it is CLI text.
+		return fmt.Errorf("%s reports a version other than the approved %q; nothing was started or upgraded", path, want)
 	}
 	return nil
+}
+
+// probe runs the C0 init probe once. It needs APA_LIVE_CLI=true, an
+// absolute --cli and the approved version, exactly as a live run; it opens
+// no Store and starts no shop or task.
+func probe(ctx context.Context, args []string, d deps) error {
+	fs := flag.NewFlagSet("probe-init", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	cliPath := fs.String("cli", "", "absolute path of the approved Claude Code executable")
+	traceDir := fs.String("trace-dir", "var/runs", "where the probe trace is written")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	if on, perr := strconv.ParseBool(d.getenv("APA_LIVE_CLI")); perr != nil || !on {
+		return errors.New("probe-init needs APA_LIVE_CLI=true; nothing was started")
+	}
+	if !filepath.IsAbs(*cliPath) {
+		return errors.New("probe-init needs --cli with the absolute path of the approved Claude Code executable; no PATH lookup is done")
+	}
+	want := cmp(d.liveVersion, approvedCLIVersion)
+	env := buyer.CLIEnv(d.getenv)
+	if err := checkLive(ctx, *cliPath, env, want); err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
+		return errors.New("cancelled after the version check; the probe was not started")
+	}
+	lim := buyer.DefaultLimits
+	lim.Total = buyer.ProbeTimeout
+	if d.limits != nil {
+		lim = *d.limits
+	}
+	fmt.Fprintf(d.out, "PROBE MODE (C0): %s; no user message is sent, no tool runs, no Store is opened.\n", *cliPath)
+	res, err := buyer.Probe(ctx, buyer.ProbeSpec{CLI: *cliPath, BridgeCmd: []string{d.self, "mcp-bridge"}, Env: env,
+		Limits: lim, CLIVersion: strings.Fields(want)[0], TraceDir: *traceDir})
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(d.out)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(res); err != nil {
+		return err
+	}
+	switch res.Status {
+	case buyer.ProbeObserved:
+		return nil
+	case buyer.ProbeNoInit:
+		return fmt.Errorf("probe: %s: %w", res.Code, exitCode(3))
+	default:
+		return fmt.Errorf("probe: %s: %w", res.Code, exitCode(1))
+	}
 }
 
 var versionLimits = buyer.Limits{Stdout: 4 << 10, Stderr: 4 << 10, Total: 5 * time.Second, Grace: time.Second}

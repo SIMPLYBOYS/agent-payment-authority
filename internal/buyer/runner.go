@@ -80,6 +80,10 @@ type Spec struct {
 	// Stopping is called once, from the run loop, when the run starts to
 	// stop for any reason, the CLI's own exit included.
 	Stopping func()
+	// HoldStdin gives the process a pipe as stdin and keeps it open, never
+	// writing a byte, until the process is gone (C0 probe). Otherwise stdin
+	// is the null device.
+	HoldStdin bool
 }
 
 // Report is what the host learns from the CLI's own output. Result and
@@ -204,6 +208,20 @@ func execute(ctx context.Context, s Spec, consume func(io.Reader) error) (x exec
 		Path: s.Path, Args: append([]string{s.Path}, s.Args...), Dir: s.Dir, Env: s.Env,
 		Stdout: outW, Stderr: errW, // os.Files: no copying goroutines for Wait to hang on
 		SysProcAttr: &syscall.SysProcAttr{Setpgid: true},
+	}
+	if s.HoldStdin {
+		inR, inW, perr := os.Pipe()
+		if perr != nil {
+			outR.Close()
+			outW.Close()
+			errR.Close()
+			errW.Close()
+			notify()
+			return execResult{fault: StartFailed, exit: -1}
+		}
+		cmd.Stdin = inR
+		defer inR.Close()
+		defer inW.Close() // held, never written: the process sees no input and no EOF while it runs
 	}
 	err = cmd.Start()
 	outW.Close()

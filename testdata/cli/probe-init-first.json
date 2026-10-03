@@ -1,0 +1,2 @@
+{"description":"C0 probe, fake that sends its init without waiting for input (fake data, not a recording of the real CLI). It also calls business tools over MCP outside any model turn, before and after the init; both must be refused.","manual_init":true,
+ "steps":[{"do":"silent_tool","tool":"list_products"},{"do":"init"},{"do":"silent_tool","tool":"request_purchase","args":{"product_id":"kr-market"}},{"do":"hang"}]}

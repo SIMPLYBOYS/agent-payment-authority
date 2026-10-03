@@ -118,6 +118,9 @@ var (
 // (encoding/json would match either spelling to the same field, keeping
 // the last), and returns the top-level members by exact name.
 func objectFields(raw []byte) (map[string]json.RawMessage, error) {
+	if !json.Valid(raw) {
+		return nil, errNotObject // not JSON at all: a plain parse error
+	}
 	if ambiguous(raw) {
 		return nil, errAmbiguous
 	}

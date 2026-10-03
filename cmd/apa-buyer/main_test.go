@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -273,8 +274,8 @@ func TestLiveOptIn(t *testing.T) {
 	// CLI with --version only.
 	other, ran2 := marker(t, "2.1.287 (Claude Code)") // the version approved before 2026-10-03
 	_, err := f.exec(context.Background(), []string{"run", "--live", "--cli", other}, map[string]string{"APA_LIVE_CLI": "true"}, deps{})
-	if err == nil || !strings.Contains(err.Error(), "not the approved") {
-		t.Errorf("other version: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "other than the approved") || strings.Contains(err.Error(), "2.1.287") {
+		t.Errorf("other version: %v", err) // the CLI's own version text is not repeated
 	}
 	if _, err := os.Stat(ran2); err != nil {
 		t.Error("the version check did not run")
@@ -394,5 +395,121 @@ func TestStoreUnavailableAfterInit(t *testing.T) {
 	}
 	if _, err := os.Stat(f.db); !os.IsNotExist(err) {
 		t.Error("the database was created")
+	}
+}
+
+// probeExec runs `apa-buyer probe-init` with the fixture's scratch HOME.
+func (f *fixture) probeExec(ctx context.Context, args []string, env map[string]string, d deps) (string, error) {
+	base := map[string]string{"PATH": os.Getenv("PATH"), "HOME": f.home, "APA_DB_PATH": f.db}
+	for k, v := range env {
+		base[k] = v
+	}
+	var out bytes.Buffer
+	lim := buyer.Limits{Line: 64 << 10, Stdout: 1 << 20, Stderr: 64 << 10, Total: 3 * time.Second, Grace: 500 * time.Millisecond}
+	d.getenv, d.self, d.out, d.clock, d.limits = func(k string) string { return base[k] }, f.self, &out, func() uint64 { return f.now }, &lim
+	err := run(ctx, append([]string{"probe-init", "--trace-dir", f.traceDir}, args...), d)
+	return out.String(), err
+}
+
+// C0: the same opt-in as live; nothing runs when any part is missing.
+func TestProbeOptIn(t *testing.T) {
+	f := newFixture(t)
+	cli, ran := marker(t, approvedCLIVersion)
+	for name, c := range map[string]struct {
+		args []string
+		env  map[string]string
+		want string
+	}{
+		"env unset":    {[]string{"--cli", cli}, nil, "needs APA_LIVE_CLI=true"},
+		"env false":    {[]string{"--cli", cli}, map[string]string{"APA_LIVE_CLI": "0"}, "needs APA_LIVE_CLI=true"},
+		"relative cli": {[]string{"--cli", "bin/claude"}, map[string]string{"APA_LIVE_CLI": "true"}, "absolute path"},
+		"no cli":       {nil, map[string]string{"APA_LIVE_CLI": "true"}, "absolute path"},
+		"stray arg":    {[]string{"--cli", cli, "extra"}, map[string]string{"APA_LIVE_CLI": "true"}, "unexpected argument"},
+	} {
+		if _, err := f.probeExec(context.Background(), c.args, c.env, deps{}); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Fatal("a refused probe executed the CLI")
+	}
+	// Old version, and a version check that is cancelled: no probe.
+	old, _ := marker(t, "2.1.287 (Claude Code)")
+	if _, err := f.probeExec(context.Background(), []string{"--cli", old}, map[string]string{"APA_LIVE_CLI": "true"}, deps{}); err == nil ||
+		!strings.Contains(err.Error(), "other than the approved") {
+		t.Errorf("old version: %v", err)
+	}
+	slow := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(slow, []byte("#!/bin/sh\nsleep 5\necho '"+approvedCLIVersion+"'\n"), 0o755)
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	if _, err := f.probeExec(ctx, []string{"--cli", slow}, map[string]string{"APA_LIVE_CLI": "true"}, deps{}); err == nil || !strings.Contains(err.Error(), "version check") {
+		t.Errorf("cancelled version check: %v", err)
+	}
+	if _, err := os.Stat(f.traceDir); !os.IsNotExist(err) {
+		t.Error("a refused probe wrote a trace")
+	}
+}
+
+// C0 through the command with the fake: the right exit codes, the Store
+// never opened (the hook is never called, and an existing database with a
+// due Ask is unchanged byte for byte), and the terminal output free of the
+// run's capability and planted marks.
+func TestProbeCommand(t *testing.T) {
+	f := newFixture(t)
+	if out, err := f.run(context.Background(), f.fake, "ask-mainline", nil); err != nil { // a database with an Ask
+		t.Fatalf("%v\n%s", err, out)
+	}
+	before := dirState(t, filepath.Dir(f.db))
+	f.now = t0 + 100 // past the Ask's deadline: opening the Store would expire it
+	opened := 0
+	d := deps{liveVersion: fakecli.Version, openStore: func(c store.Config) (*store.Store, error) { opened++; return store.Open(c) }}
+	env := map[string]string{"APA_LIVE_CLI": "true"}
+
+	cli := liveFake(t, f, "probe-init-first")
+	out, err := f.probeExec(context.Background(), []string{"--cli", cli}, env, d)
+	if err != nil || !strings.HasPrefix(out, "PROBE MODE (C0):") || !strings.Contains(out, `"status": "observed"`) {
+		t.Fatalf("observed: %v\n%s", err, out)
+	}
+	cli = liveFake(t, f, "probe-wait-input")
+	out, err = f.probeExec(context.Background(), []string{"--cli", cli}, env, d)
+	var ec exitCode
+	if !errors.As(err, &ec) || ec != 3 || !strings.Contains(out, `"status": "no_init_before_input"`) {
+		t.Fatalf("no init: %v\n%s", err, out)
+	}
+	if opened != 0 {
+		t.Fatalf("the probe opened the Store %d times", opened)
+	}
+	if after := dirState(t, filepath.Dir(f.db)); !maps.Equal(before, after) {
+		t.Fatal("the probe changed the database")
+	}
+	// Positive control: the same hook sees an ordinary run open the Store.
+	if _, err := f.exec(context.Background(), []string{"run", "--fake-cli", f.fake, "--scenario", "../../testdata/cli/ask-mainline.json", "--task", "task-a-next"}, nil, deps{openStore: d.openStore}); err != nil || opened != 1 {
+		t.Fatalf("control run: %v, opened %d", err, opened)
+	}
+
+	// Leaks: capability and marks in the init's strings stay out of the
+	// terminal, the error and the trace.
+	const mark = "MARKCMD4b2f"
+	capFile := f.fake + ".cap" // the live environment has no room for a test variable
+	sc := `{"manual_init":true,"steps":[{"do":"savecap"},{"do":"init","init":{"model":"$CAPABILITY","apiKeySource":"` + mark +
+		`","claude_code_version":"$CAPABILITY","agents":[{"name":"` + mark + `"}]}},{"do":"hang"}]}`
+	os.WriteFile(f.fake+".scenario.json", []byte(sc), 0o600)
+	out, err = f.probeExec(context.Background(), []string{"--cli", f.fake}, env, d)
+	capability, _ := os.ReadFile(capFile)
+	if len(capability) != 64 || !errors.As(err, &ec) || ec != 1 || !strings.Contains(err.Error(), "init_cli_version") {
+		t.Fatalf("leak setup: cap %d bytes, %v\n%s", len(capability), err, out)
+	}
+	traces, _ := os.ReadDir(f.traceDir)
+	all := out + err.Error()
+	for _, e := range traces {
+		raw, _ := os.ReadFile(filepath.Join(f.traceDir, e.Name()))
+		all += string(raw)
+	}
+	if strings.Contains(all, mark) || strings.Contains(all, string(capability)) {
+		t.Fatalf("leak: %s", all)
+	}
+	if liveAcceptAuth != nil {
+		t.Error("the live auth list is not empty")
 	}
 }

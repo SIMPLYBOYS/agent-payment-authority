@@ -1,0 +1,2 @@
+{"description":"C0 probe, fake that sends its init only after a user message arrives on stdin (fake data). The probe never writes one, so no init comes. A business tool call made meanwhile is refused.","manual_init":true,
+ "steps":[{"do":"silent_tool","tool":"list_products"},{"do":"wait_input"},{"do":"init"},{"do":"hang"}]}

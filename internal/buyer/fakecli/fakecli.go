@@ -45,6 +45,9 @@ const (
 	EnvScenario = "APA_FAKE_CLI_SCENARIO"
 	EnvPIDFile  = "APA_FAKE_CLI_PIDFILE"
 	EnvCapFile  = "APA_FAKE_CLI_CAPFILE"
+	// EnvStdinFile, when set, names a file that always holds the number of
+	// stdin bytes the fake has received so far (C0: proof of zero input).
+	EnvStdinFile = "APA_FAKE_CLI_STDINFILE"
 )
 
 // Scenario is one scripted run. The init message is printed after the MCP
@@ -61,6 +64,8 @@ type Scenario struct {
 //	tool    call Tool (bare MCP name) with Args over MCP; print tool_use/tool_result
 //	text    print an assistant text message
 //	claim   print an assistant tool_use for Tool without calling MCP
+//	silent_tool  call Tool over MCP without printing anything (a CLI that
+//	        calls tools on its own, outside any model turn)
 //	result  print the result message (IsError, Subtype; default success)
 //	retry   print system/api_retry with Error
 //	raw     write Text to stdout as is
@@ -74,6 +79,8 @@ type Scenario struct {
 //	leak    print the run's capability in an assistant message
 //	savecap write the capability to $APA_FAKE_CLI_CAPFILE
 //	init    print the init message; Init members replace the defaults (null removes one)
+//	wait_input  block until stdin delivers a byte (then go on) or ends (then exit 0
+//	        without output): a CLI that waits for a user message before its init
 //	exit    exit with Code now
 //
 // $CAPABILITY and $PROMPT in a result's Text, a tool's Args or an init
@@ -108,6 +115,8 @@ type run struct {
 	server     *server
 	capability string
 	tools      []string
+	input      <-chan struct{} // closed when stdin delivers its first byte
+	inputEnd   <-chan struct{} // closed when stdin ends
 	model      string
 	prompt     string
 	permission string
@@ -145,7 +154,8 @@ func Main(args []string, getenv func(string) string, stdout, stderr io.Writer) i
 		signal.Ignore(syscall.SIGTERM)
 	}
 	r := &run{out: stdout, errw: stderr, enc: json.NewEncoder(stdout), getenv: getenv, session: fmt.Sprintf("fake-%d", os.Getpid()),
-		model: opts["--model"], prompt: opts["-p"], permission: opts["--permission-mode"]}
+		model: opts["--model"], prompt: opts["prompt"], permission: opts["--permission-mode"]}
+	r.input, r.inputEnd = watchStdin(getenv(EnvStdinFile))
 	if r.server, r.capability, err = startServer(opts["--mcp-config"]); err != nil {
 		fmt.Fprintln(stderr, "fake-claude: mcp server:", err)
 		return 1
@@ -173,8 +183,8 @@ func Main(args []string, getenv func(string) string, stdout, stderr io.Writer) i
 // values given. Unknown flags fail like the real CLI's option parser.
 func parseArgs(args []string) (map[string]string, error) {
 	want := map[string]string{"--output-format": "stream-json", "--permission-mode": "dontAsk", "--tools": "", "--permission-prompts": "none"}
-	valued := map[string]bool{"-p": true, "--mcp-config": true, "--allowedTools": true, "--model": true, "--effort": true}
-	flags := map[string]bool{"--verbose": true, "--strict-mcp-config": true, "--restricted": true, "--no-session-persistence": true, "--disable-slash-commands": true}
+	valued := map[string]bool{"--mcp-config": true, "--allowedTools": true, "--model": true, "--effort": true, "--input-format": true}
+	flags := map[string]bool{"-p": true, "--verbose": true, "--strict-mcp-config": true, "--restricted": true, "--no-session-persistence": true, "--disable-slash-commands": true}
 	seen := map[string]string{}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -182,6 +192,11 @@ func parseArgs(args []string) (map[string]string, error) {
 		switch {
 		case flags[a]:
 			seen[a] = ""
+		case !strings.HasPrefix(a, "-"): // the prompt, as the CLI takes it after -p
+			if _, dup := seen["prompt"]; dup {
+				return nil, fmt.Errorf("unexpected argument '%s'", a)
+			}
+			seen["prompt"] = a
 		case isWant || valued[a]:
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("option '%s' argument missing", a)
@@ -196,6 +211,9 @@ func parseArgs(args []string) (map[string]string, error) {
 		if got, ok := seen[k]; !ok || got != v {
 			return nil, fmt.Errorf("fake-claude needs %s %q", k, v)
 		}
+	}
+	if f, ok := seen["--input-format"]; ok && f != "stream-json" {
+		return nil, fmt.Errorf("fake-claude takes --input-format stream-json only")
 	}
 	for _, k := range []string{"-p", "--mcp-config", "--verbose", "--strict-mcp-config", "--restricted"} {
 		if _, ok := seen[k]; !ok {
@@ -251,14 +269,34 @@ func (r *run) step(s Step) (code int, done bool) {
 		}
 		r.emit(map[string]any{"type": "user", "session_id": r.session, "message": map[string]any{"role": "user",
 			"content": []any{map[string]any{"type": "tool_result", "tool_use_id": id, "content": content, "is_error": isError}}}})
+	case "silent_tool":
+		input := json.RawMessage(r.subst(string(s.Args)))
+		if len(input) == 0 {
+			input = json.RawMessage(`{}`)
+		}
+		r.server.callTool(s.Tool, input)
 	case "init":
 		r.init(s.Init)
+	case "wait_input":
+		select {
+		case <-r.input:
+		case <-r.inputEnd:
+			select {
+			case <-r.input: // input came, then the end
+			default:
+				return 0, true
+			}
+		}
 	case "text":
 		r.assistant(map[string]any{"type": "text", "text": s.Text})
 	case "leak":
 		r.assistant(map[string]any{"type": "text", "text": "capability " + r.capability})
-	case "savecap":
-		if err := os.WriteFile(r.getenv(EnvCapFile), []byte(r.capability), 0o600); err != nil {
+	case "savecap": // to $APA_FAKE_CLI_CAPFILE, or <argv[0]>.cap where the environment is a live run's
+		file := r.getenv(EnvCapFile)
+		if file == "" {
+			file = os.Args[0] + ".cap"
+		}
+		if err := os.WriteFile(file, []byte(r.capability), 0o600); err != nil {
 			return 1, false
 		}
 	case "result":
@@ -312,6 +350,36 @@ func (r *run) step(s Step) (code int, done bool) {
 		return 1, true
 	}
 	return 0, false
+}
+
+// watchStdin reads stdin for the whole run, counting bytes into file (if
+// set) after every read, starting with 0.
+func watchStdin(file string) (<-chan struct{}, <-chan struct{}) {
+	first, end := make(chan struct{}), make(chan struct{})
+	record := func(n int) {
+		if file != "" {
+			os.WriteFile(file, []byte(fmt.Sprint(n)), 0o600)
+		}
+	}
+	record(0)
+	go func() {
+		total, buf := 0, make([]byte, 4096)
+		for {
+			n, err := os.Stdin.Read(buf)
+			if n > 0 {
+				if total == 0 {
+					close(first)
+				}
+				total += n
+				record(total)
+			}
+			if err != nil {
+				close(end)
+				return
+			}
+		}
+	}()
+	return first, end
 }
 
 // subst puts the run's capability and prompt where a scenario says
