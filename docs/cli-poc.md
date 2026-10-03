@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-04）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節），尚未對真實 CLI 執行**；執行一次的確認清單見第 20 節，待 Aaron 核准。階段 B、C **未執行**，沒有任何真實推論、登入檢查或 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）**：未送任何使用者訊息，CLI 的背景行為與用量未知。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -516,7 +516,7 @@ Codex 對 C1 的說明：這是程式碼觀察，三輪共 300 次測試沒有�
    - 程式保證不送任何使用者訊息，但**不保證** CLI 內部沒有背景連線、帳號查詢或推論。
    - 用量記為 `unknown`，可能不是零。
    - 不是作業系統沙箱；離開 process group 的子程序收不回來。
-6. **停止與 C0 拿不到 init 時的處理**：若結果是 `no_init_before_input`（CLI 要等使用者訊息才送 init），不轉往 C0′；是否接受 C0′ 或其他做法，另行決定。
+6. **停止與 C0 拿不到 init 時的處理**：若結果是 `no_init_before_input`（等待時間內沒有收到 init；原因可能是 CLI 要等使用者訊息才送 init，但單憑這個結果無法確定），不轉往 C0′；是否接受 C0′ 或其他做法，另行決定。
 
 ### 20.2 命令（由 Claude Code 在 Aaron 核准後執行，或由 Aaron 自己執行）
 
