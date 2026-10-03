@@ -399,3 +399,14 @@ R2 已由 review 關閉。R1 仍有一個缺口：model 只檢查名稱格式，
 2. 實作通過 review 後，是否核准**執行一次** C0。
 3. C0 拿不到 init 時，是否接受 C0′（最多一次模型請求），或改用其他方式。
 4. 階段 B 是否照 15.1 第 1 項的方式回報（只回報登入方式／方案類型一行與各項有／無）。
+
+### 15.6 CLI 版本變動（2026-10-03）
+
+- Aaron 回報本機 CLI 為 `2.1.288 (Claude Code)`；`claude --version` 本機重查結果相同。10/2 記錄並寫進程式的核准版本是 `2.1.287 (Claude Code)`（`cmd/apa-buyer` 的 `approvedCLIVersion`，閘門由它推得 `claude_code_version` `2.1.287`）。所以**目前的 live 與擬議的 C0 都會在版本檢查停下**，不執行 CLI 的推論，也不開 Store。這是預期的行為，不自動升級或降級。
+- 本機 `--help` 重查（只讀說明文字）：argv 與 C0 會用到的旗標都還在，選項與說明文字都與 2.1.287 時的紀錄相同，包括 `-p`、`--output-format`、`--verbose`、`--mcp-config`、`--strict-mcp-config`、`--restricted`（全文相同）、`--tools ""`、`--permission-mode`（含 `dontAsk`）、`--permission-prompts`（含 `none`）、`--allowedTools`、`--model`、`--effort`（含 `low`）、`--no-session-persistence`、`--disable-slash-commands`、`--input-format`（含 `stream-json`）；`claude auth status` 仍有 `--json`／`--text`。`--max-turns` 仍不在本機 help。這只比對了說明文字，**不證明行為沒變**。
+- 版本在 10/2 到 10/3 之間變動，多半是 Aaron 平時互動使用時的自動更新。host 傳給 CLI 的 `DISABLE_AUTOUPDATER=1` 只作用於 host 啟動的那次 run，不影響平時的使用；在階段 B 確認之後、C0 或 C 執行之前，版本可能再變。版本檢查會讓 run 停下（fail closed），但每次變動都需要重新核准。
+- 待 Aaron 決定：
+  1. 是否把核准版本改為 `2.1.288 (Claude Code)`。這要改 `approvedCLIVersion` 並更新文件，屬程式變更，需經 Codex review。
+  2. 或維持 `2.1.287`，由 Aaron 自行還原 CLI 版本（repo 不做這件事）。
+  3. 在 C0 或 C 期間，是否由 Aaron 自行暫停平時 CLI 的自動更新，以免版本在核准與執行之間再變。這是 Aaron 環境的設定，repo 不更動。
+- 這只涵蓋第 15.1 節第 1 項的「版本」部分；登入方式／方案類型與各憑證來源的有／無尚未回報。
