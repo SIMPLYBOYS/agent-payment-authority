@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-03）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）經 Aaron 核准並已實作；`ca46cab` 經 review 需修 R1、R2，已修正，待 Codex 再 review**（第 7、11、12 節）；階段 B、C **未執行**，沒有任何真實推論、登入檢查或 `claude -p`。B1-04 整體仍 InProgress，未標 Done、未合併 main。fake 成功只證明 wrapper／bridge／Store 的行為，不證明真實 Claude 能完成請購；B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-03）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）經 Aaron 核准並已實作；`ca46cab` 的 R2 已於 `59da5d9` review 關閉，R1 的 model 缺口已修正，待 Codex 再 review**（第 7、11、12、13 節）；階段 B、C **未執行**，沒有任何真實推論、登入檢查或 `claude -p`。B1-04 整體仍 InProgress，未標 Done、未合併 main。fake 成功只證明 wrapper／bridge／Store 的行為，不證明真實 Claude 能完成請購；B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -94,7 +94,7 @@ MCP 直接以標準庫實作，沒有新增第三方依賴。fake CLI 走的是�
 
 只有 `timeout`（`TASK_TIMED_OUT`，Ask 保留待到期）與 `cancelled`（`TASK_CANCELLED`，Ask 撤回）寫 Store，且只在本 run 已建立 task 時；沒有 task 時不為記錄失敗而建立 task。其他失敗不新增契約事件，診斷留在 run trace。既有 Deny 的狀態與理由不被後續結束事件覆蓋。task 已結束時 Store 拒絕第二次結束，回報 `TASK_ALREADY_ENDED`。結束後才到達的請購同樣由 Store 拒絕。
 
-**run trace**（`--trace-dir`，預設 `var/runs/`，檔案 0600）：與 AuditEvent 鏈分開的 JSONL，只有結構化的診斷：task、consumer、CLI 檔名、prompt 的 SHA-256（不存 prompt）、上限、init 閘門結果碼、init 所列 model（只在符合模型名稱格式時保存，否則記 `unrecognized`）、task 是否建立、prepare 失敗代碼、每次工具呼叫（工具名、驗過的商品 ID、結果碼）、結果分類與 `detail`、exit code、訊息數、assistant 訊息數、usage 的四個 token 計數（沒有就 `unknown`，不補零）、工具嘗試次數、init 前拒絕次數、stderr 位元組數、CLI 結果文字的字數（`result_chars`）。**CLI 的自由文字一律不保存**（結果可能回顯 prompt 或其他內容；`ca46cab` review R1）。也不含原始 stream、capability、環境變數、stderr 內容或 `apiKeySource` 的值；測試以識別標記與回顯 prompt 的 fake 確認。
+**run trace**（`--trace-dir`，預設 `var/runs/`，檔案 0600）：與 AuditEvent 鏈分開的 JSONL，只有結構化的診斷：task、consumer、CLI 檔名、prompt 的 SHA-256（不存 prompt）、上限、init 閘門結果碼、host 要求的 model（`requested_model`）、init 所列 model（只在明列名稱 `sonnet`、`claude-sonnet-5-5` 之內時保存，否則記 `unrecognized`；格式像名稱不等於安全，64 位十六進位的 capability 也像名稱）、task 是否建立、prepare 失敗代碼、每次工具呼叫（工具名、host 提供的商品 ID；CLI 選的 ID 即使格式合法、但不是提供的商品就不記，結果碼）、結果分類與 `detail`、exit code、訊息數、assistant 訊息數、usage 的四個 token 計數（沒有就 `unknown`，不補零）、工具嘗試次數、init 前拒絕次數、stderr 位元組數、CLI 結果文字的字數（`result_chars`）。**CLI 的自由文字一律不保存**（結果可能回顯 prompt 或其他內容；`ca46cab` review R1）。也不含原始 stream、capability、環境變數、stderr 內容或 `apiKeySource` 的值；測試以識別標記與回顯 prompt 的 fake 確認。
 
 ## 4 從乾淨環境重跑 fake 流程
 
@@ -310,3 +310,14 @@ Codex 以 fake CLI 在隔離容器重現兩項問題（沒有執行真實推論�
 測試時序：容器驗證中，重複 init 案例在 init 之後緊接送出的工具呼叫，曾在 host 讀到該行之前抵達 relay，被放行後隨即因停止而取消（記為 `RUN_NOT_ACTIVE`），而測試要求之後完全沒有紀錄。產品行為正確（沒有新請購，之後的呼叫都被拒），是測試過嚴：情境在停止行之後暫停 500 ms，斷言改為「請購不變，停止後的紀錄都是 `RUN_NOT_ACTIVE`」，hook 與歧義訊息的同類案例一併處理。
 
 突變：#123 改為「CLI 結果文字寫入 trace」（原 capability 替換已移除）；#145 改指共用的 `objectFields` 歧義檢查（讀取端與閘門同一處）；#139–142、#144 因閘門改以確切欄位讀取而改指新程式碼（意圖不變）；新增 #161（成員名不做大小寫折疊）、#162（model 自由文字進 trace）。共 162 項，原 99 項文字未動。
+
+## 13 `59da5d9` review 修正：trace 只保存明列名稱（2026-10-03，Claude Code 執行，待 Codex 獨立 review）
+
+R2 已由 review 關閉。R1 仍有一個缺口：model 只檢查名稱格式，64 位十六進位的 capability 也符合格式；Codex 讓假 CLI 把該 run 的假通行碼放進 init 的 `model`，三輪都寫進了 trace（未涉及真實登入憑證）。因此「已無自由文字，可移除 capability 替換」的判斷不成立。
+
+| 修改 | 位置 | 回歸測試 | 突變 |
+|---|---|---|---|
+| trace 保存 host 設定的 `requested_model`；CLI 回報的 model 只在明列集合（`sonnet`、`claude-sonnet-5-5`）內才保存，其他一律 `unrecognized` | `internal/buyer/host.go` | `TestHostTraceKeepsOnlyListedNames`（capability 當 model、符合名稱格式的敏感標記當 model：皆記 `unrecognized`，trace 不含）；Codex 的探測程式在暫存副本上重跑三輪通過 | #162（改指新程式碼）、#164 |
+| 同類缺口一併修：工具呼叫紀錄的 `product_id` 原本只驗格式（`^[a-z0-9-]{1,64}$`，capability 也符合），改為只記 host 提供的商品 | `internal/toolbridge/shop.go` | `TestHostTraceKeepsOnlyListedNames`（capability 當 `product_id`：`UNKNOWN_PRODUCT`，紀錄不帶 ID，trace 不含）；`TestPurchaseIntegrity` | #163 |
+
+逐一檢查 trace 其餘欄位：task、consumer、CLI 檔名、上限來自 host 設定；閘門、結果、`detail`、prepare 與 Store 代碼都是 host 定義的代碼；工具名只有三個已知名稱或 `unknown`；其餘是數字或布林。沒有其他由 CLI 決定內容的字串。共 164 項突變，原 99 項文字未動。
