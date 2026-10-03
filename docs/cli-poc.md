@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-04）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測已實作（第 17 節），待 Codex 獨立 review，未執行**。階段 B、C **未執行**，沒有任何真實推論、登入檢查或 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測已實作（第 17 節；`71f222a` review 修正見第 18 節），待 Codex 獨立 review，未執行**。階段 B、C **未執行**，沒有任何真實推論、登入檢查或 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -435,7 +435,7 @@ APA_LIVE_CLI=true ./bin/apa-buyer probe-init --cli /Users/mac/.local/bin/claude 
 |---|---|---|
 | 觀測到可嚴格讀取、且 `claude_code_version` 等於核准版號的 init | `observed`（`code` `init_observed`） | 0 |
 | 等待上限內沒有 init（例如 CLI 等使用者訊息才送） | `no_init_before_input` | 3 |
-| 其他：init 版號不符（`init_cli_version`）、JSON 歧義（`ambiguous_json`）、非 JSON（`parse_error`）、init 前出現 hook（`hook_message`）或 assistant／user／result 等訊息（`unexpected_message`）、輸出超量（`output_overflow`）、程序異常退出（`nonzero_exit`、`missing_result`）、取消（`cancelled`）等 | `failed` | 1 |
+| 其他：init 版號不符（`init_cli_version`）、JSON 歧義（`ambiguous_json`）、非 JSON（`parse_error`）、init 前出現 hook（`hook_message`）、`system/api_retry`（`api_retry_auth`、`api_retry_rate_limit`、其他為 `api_retry`；只記代碼，不保存錯誤文字）或 assistant／user／result 等訊息（`unexpected_message`）、輸出超量（`output_overflow`）、程序異常退出（`nonzero_exit`、`missing_result`）、取消（`cancelled`）等 | `failed` | 1 |
 | 啟動前拒絕：缺 `APA_LIVE_CLI=true`、`--cli` 非絕對路徑、版本不符、版本檢查逾時或取消 | 不執行探測，印錯誤 | 1 |
 
 `observed` 只代表拿到了觀測資料，**不代表**通過正式 Gate、認證已確認或可以付款；`no_init_before_input` 與 `failed` 都不是成功。
@@ -482,3 +482,12 @@ APA_LIVE_CLI=true ./bin/apa-buyer probe-init --cli /Users/mac/.local/bin/claude 
 3. 階段 B 的其餘回報（第 15.1 節第 1 項）不阻擋 C0 實作，但仍未完成。
 4. 執行期間是否暫停平時 CLI 的自動更新；版本一變就停止，需重新核准。
 5. C0 沒拿到 init 時怎麼處理另行決定：C0′ 與階段 C 都未核准，C0 失敗不會自動升級到它們。
+
+## 18 `71f222a` review 修正：api_retry 立即停止、啟動前檢查取消（2026-10-04，Claude Code 執行，待 Codex 獨立 review）
+
+| 項目 | review 發現 | 修正 | 測試 | 突變 |
+|---|---|---|---|---|
+| R（必修） | probe 把 `system/api_retry` 當成一般通知繼續等待：之後若來 init，會被記為 `observed`；若沒有 init，則要等到逾時才回「沒有 init」 | `probe.go`：`api_retry` 立即停止 run，依錯誤類別記固定代碼 `api_retry_auth`（`authentication_failed`）、`api_retry_rate_limit`（`rate_limit`）、其他 `api_retry`；錯誤文字不保存 | `TestProbeAPIRetry`：認證失敗或限流，各接「之後送 init」與「之後不送」四種情境，加上未知錯誤文字（含標記）一案。全部 `failed`、代碼正確、沒有觀測資料、遠早於等待上限結束、stdin 0 位元組、沒有執行工具，結果與 trace 都不含錯誤文字。正向對照照舊：`TestProbeInitFirst`（正常 init 成功）、`TestProbeWaitsForInput`（純等待輸入逾時） | #178–180 |
+| C1（建議） | 取消只在版本檢查之後才檢查；底層直接呼叫 `cmd.Start()` | `cmd/apa-buyer`：live 與 probe 都在版本檢查前先檢查 context；`runner.go`：啟動程序前檢查 context，已取消或逾時就不啟動（`Version` 與 `Run` 共用）；並加一個只供測試替換的啟動計數掛鉤 | `TestRunnerCancelledBeforeStart`（正向對照：計數看得到一次啟動；已取消時 `Run` 與 `Version` 都是 0 次）；`TestProbeOptIn`（已取消的 probe 連版本檢查都不執行，CLI 未被呼叫） | #181、#182 |
+
+Codex 對 C1 的說明：這是程式碼觀察，三輪共 300 次測試沒有觀察到 fake 寫入副作用，不列為已動態重現的問題。共 182 項突變，原 99 項文字未動。
