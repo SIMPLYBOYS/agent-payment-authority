@@ -302,4 +302,5 @@ demo 的 HTTP 讀取與 fake run 的寫入用同一個 `*store.Store`，不會�
     - `84cdf5c`（4 CPU、四條線）：overall exit 0，222／222，562 秒（第 8.6 節）。
     - Codex 檢查時，`f2d63fb` 的完整紀錄還沒產生，所以**不能寫成 Codex 已核對該輪全套通過**。
 - **範圍**：只有交付點 1。沒有 UI，沒有真實模型請購；B1-06 的完整完成仍需 opt-in live trace。
-- **狀態**：B1-04、B1-06 都維持 InProgress，未合併 main、未標 Done。交付點 2（Dashboard／placeholder 商店）可作為下一批派工，尚未開始。
+- **獨立待辦（非阻擋）**：`84cdf5c` 的四線突變是新的驗證工具變更，尚未經 Codex review，**不包含在 `f2d63fb` 的驗收結論中**。這項不阻擋交付點 2 的開發。
+- **狀態**：B1-04、B1-06 都維持 InProgress，未合併 main、未標 Done。交付點 2（Dashboard／placeholder 商店）可以準備進入（10/5，建議範圍見 vault 任務清單），尚未開始；不恢復 plugins 調查。
