@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），已通過 Codex 限定範圍 review（第 29 節）。10/4 經 Aaron 核准再執行一次真實 C0′：exit 0，取得真實 init，Codex 已核對證據（第 30、31 節）。正式 live 仍不能放行：plugins 2、agents 5 會先被 Gate 拒絕，`apiKeySource` = `none` 也不在接受清單；plugins／agents 的釐清方案待 Aaron 核准（第 31 節）。10/4 依核准完成 A 官方文件查證與 B 身分觀測（程式 `4e709ab`、`8da15dd`），待 Codex 限定範圍 review；未執行真實 CLI（第 32 節）。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），已通過 Codex 限定範圍 review（第 29 節）。10/4 經 Aaron 核准再執行一次真實 C0′：exit 0，取得真實 init，Codex 已核對證據（第 30、31 節）。正式 live 仍不能放行：plugins 2、agents 5 會先被 Gate 拒絕，`apiKeySource` = `none` 也不在接受清單；plugins／agents 的釐清方案待 Aaron 核准（第 31 節）。10/4 依核准完成 A 官方文件查證與 B 身分觀測（程式 `4e709ab`、`8da15dd`），review 指出 `null` 判斷問題，已修正於 `b46e332`，待 Codex review；未執行真實 CLI（第 32、33 節）。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -879,18 +879,19 @@ echo "exit=$?"
 
 - 2 個 plugins 的名稱與來源，以及 5 個 agents 的名稱。
 - `--safe-mode` 是否也會停用 `--mcp-config` 指定的 apa bridge。文件只寫 MCP servers 不載入，沒區分命令列提供的。
-- `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` 能否讓這次 init 的 agents 變成空清單。只有 5 個都是內建時才會。
+- **名稱符合內建清單，只能確認名稱相符；來源仍未確認。** 官方 Subagents 文件明載，自訂的同名 `Explore` 可以覆寫內建 agent（10/4 依 Codex review 修正）。
+- 停用內建 agents 的環境變數（`CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`）是否足以清空這次 init 的 agents 清單，仍需另行核准並驗證。
 - managed settings 的 `enabledPlugins` 是不是來源。要確認得讀本機檔案，尚未獲准。
 
 ### 32.5 建議的最小方案
 
 1. **A 不能回答身分問題，所以 B 有必要**。已實作，見 32.6。
 2. **下一次真實觀測**（需另行核准）用 B 的投影可以得到：
-   - agents 是否都是 6 個內建名稱；
-   - 每個 plugin 的名稱長度與路徑分類（synced／cache／其他 plugins 目錄／skills／工作目錄／其他）。
+   - agents 的名稱是否與 6 個內建名稱相符。名稱相符不代表來源是內建。
+   - 每個 plugin 的名稱長度與路徑分類（synced／cache／其他 plugins 目錄／skills／工作目錄／其他）。路徑分類只是對 CLI 回報文字的分類，不是來源認證。
    - plugin 名稱沒有候選依據，仍只會顯示 `other`。若要顯示，需要 Aaron 提供名稱，或核准讀取下列檔案的鍵名。
 3. **限制參數提案**（只是提案；現行啟動參數不變，待確認採用）：
-   - **agents**：若觀測確認 5 個都是內建名稱，提案在 CLI 環境固定加入 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`。文件明載它在 `-p` 生效，本專案也用 `-p`；文件沒有提到它影響 MCP。
+   - **agents**：可提案在 CLI 環境加入 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`。文件明載它在 `-p` 生效，本專案也用 `-p`；文件沒有提到它影響 MCP。但名稱相符不能確認來源，這個變數是否足以清空清單，**仍需另行核准並驗證**（10/4 依 Codex review 修正）。
    - **plugins，若來自 managed settings 的強制啟用**：使用者端無法以 `--settings` 覆寫。有文件依據的停用方式都不適用：`--safe-mode` 同時停用 MCP servers，可能包含 apa bridge（未確認）；`--bare` 不能用訂閱登入。這時只能由 Aaron 調整受管設定（本輪不改），或另行評估是否逐一允許。
    - **plugins，若來自 skills-dir 或 marketplace**：可提案用 `--settings` 傳入 `{"enabledPlugins":{"<id>":false}}`（flag 來源，只對這次 session 有效），但要先知道 id。
 4. **讀取本機檔案的請求**（待 Aaron 確認後才讀；只讀下列欄位，不讀其他內容）：
@@ -934,3 +935,28 @@ echo "exit=$?"
   - `artifacts/b1-04/4e709aba45af-20261004T062856Z/`：B1-01 exit 1，原因是 0 秒取消的測試時序（`8da15dd` 已修）。其他四項 exit 0。
   - `artifacts/b1-04/8da15dd7ee03-20261004T063517Z/`：B1-01 exit 1。`cmd/apa-buyer` 的 `TestLiveOptIn` 在全套並行測試負載下，代用 shell 腳本的 `--version` 超過 5 秒上限、沒有執行。這個測試自 `1f0b260` 起未改；容器內與之後的本機重跑都通過。判斷是本機的時序問題，未修改程式。其他四項 exit 0。
 - **未執行**：任何真實 CLI 命令、真實觀測、正式 live。
+
+## 33 review 修正：`null` 判為 `not_string`；名稱相符不等於來源（2026-10-04；Claude Code 執行，待 Codex review）
+
+- **依據**：Codex 對 `8da15dd`／`8d2baaf` 的 review（Aaron 於對話中轉交）。
+  - Codex 在斷網容器獨立執行：buyer、apa-buyer 的 race 測試通過；相關回歸三輪通過；新增的 `null` 探測失敗，確認了問題。
+  - 201 項突變屬 Claude Code 執行、Codex 核對紀錄。
+  - 結論：這是觀測正確性問題，**沒有重現資料外洩或 Gate 繞過**。
+- **問題**：`json.Unmarshal` 會把 JSON `null` 解成空字串而不報錯，所以 `name: null` 被顯示成 `other`、長度 0，`path: null` 被分類成 `relative`。
+- **修正**（`b46e332`）：
+  - 共用的 `pick` 先檢查 JSON 型別，`null` 一律為 `not_string`。經 `pick` 的欄位都套用同一規則：元素名稱、apa server status、`permissionMode`、`claude_code_version`、`model`、`apiKeySource`。
+  - plugin 的 `path` 同樣處理。
+  - 缺欄位仍為 `absent`。正式 Gate 未改。
+- **測試**：
+  - `TestProbeEntries` 新增 `name`／`path` 為 `null`，以及 agents 元素為 `null`、`{"name":null}`、`{}` 的情況。
+  - 新增 `TestProbeNullStrings`，檢查頂層欄位為 `null`。這裡用 raw init 行，因為 fake 的 init 覆寫會把 `null` 當成移除。
+  - 突變 #202、#203，共 203 項；提交前預檢都被斷言抓到。
+- **文件**：第 32.4–32.5 節改為：
+  - 名稱符合內建清單，只能確認名稱相符，來源仍未確認。依據是官方 Subagents 文件：自訂的同名 `Explore` 可以覆寫內建 agent。
+  - 停用內建 agents 的環境變數是否足以清空清單，仍需另行核准並驗證。
+  - 路徑分類只是對 CLI 回報文字的分類，不是來源認證。
+- **驗證**（Claude Code 執行，待 Codex 獨立 review；`b46e332`）：
+  - 本機 `artifacts/b1-04/b46e332e0997-20261004T074250Z/`：make check、check-contracts、race／coverage、B1-01、20 項證據匯入測試全部 exit 0。覆蓋率 buyer 92.8%、toolbridge 91.8%、apa-buyer 81.7%；demo-fake 0／2／0。
+  - 容器完整驗證（既有映像 sha256:78258368…）：overall exit 0，七步驟全過；baseline PASS、203／203 突變；17 項隔離檢查 ok。證據在 `artifacts/verify-container/runs/b46e332e0997-20261004T071959Z/`。
+  - 失敗嘗試（保留，附 FAILED-NOTE）：`artifacts/b1-04/b46e332e0997-20261004T073843Z/` 的 make check exit 2。原因是 `TestVersion` 的 holder 檢查在並行負載下花了 2.056 秒，超過 2 秒上限；該測試自 `b3c66f6` 起未改，同一次 race 步驟與容器都通過，重跑也通過。
+- 本輪沒有重做 A 查證，沒有執行真實 CLI，沒有讀受管設定，也沒有放寬任何清單。
