@@ -584,16 +584,17 @@ def main():
         verdict = "KILLED" if killed else ("BUILD?" if rc != 0 else "SURVIVED")
         return f"{n:02d} {verdict:8s}{finding}  [{rel}; -run {test}]  [{time.monotonic() - t0:.0f}s]", killed
 
-    # Two lanes run at once, each in its own fixed tree: internal/buyer's
-    # mutations (its tests time processes, so they do not share a lane with
-    # each other) and all others. The two lanes take about the same time.
+    # Four lanes run at once (the container has 4 CPUs), each in its own
+    # fixed tree: internal/buyer's mutations alternate between two lanes,
+    # all others between the other two, so the groups stay balanced.
     def lane(name, items):
         tree = pathlib.Path(work) / name
         return [(n, *mutate(tree, n, *m)) for n, m in items]
 
     numbered = list(enumerate(MUTATIONS, 1))
-    lanes = {"lane-buyer": [x for x in numbered if pkg(x[1][1]) == "./internal/buyer/"],
-             "lane-other": [x for x in numbered if pkg(x[1][1]) != "./internal/buyer/"]}
+    buyer = [x for x in numbered if pkg(x[1][1]) == "./internal/buyer/"]
+    other = [x for x in numbered if pkg(x[1][1]) != "./internal/buyer/"]
+    lanes = {"lane-buyer-1": buyer[0::2], "lane-buyer-2": buyer[1::2], "lane-other-1": other[0::2], "lane-other-2": other[1::2]}
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(lanes)) as pool:
         done = [r for f in [pool.submit(lane, k, v) for k, v in lanes.items()] for r in f.result()]
     for n, line, killed in sorted(done):
