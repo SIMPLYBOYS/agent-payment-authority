@@ -272,13 +272,16 @@ func TestLiveOptIn(t *testing.T) {
 
 	// The approved version is required exactly; the check itself runs the
 	// CLI with --version only.
-	other, ran2 := marker(t, "2.1.287 (Claude Code)") // the version approved before 2026-10-03
-	_, err := f.exec(context.Background(), []string{"run", "--live", "--cli", other}, map[string]string{"APA_LIVE_CLI": "true"}, deps{})
-	if err == nil || !strings.Contains(err.Error(), "other than the approved") || strings.Contains(err.Error(), "2.1.287") {
-		t.Errorf("other version: %v", err) // the CLI's own version text is not repeated
-	}
-	if _, err := os.Stat(ran2); err != nil {
-		t.Error("the version check did not run")
+	// 2.1.288 and 2.1.287 are the earlier pins; 2.1.290 a later version.
+	for _, v := range []string{"2.1.288", "2.1.287", "2.1.290"} {
+		other, ran2 := marker(t, v+" (Claude Code)")
+		_, err := f.exec(context.Background(), []string{"run", "--live", "--cli", other}, map[string]string{"APA_LIVE_CLI": "true"}, deps{})
+		if err == nil || !strings.Contains(err.Error(), "other than the approved") || strings.Contains(err.Error(), v) {
+			t.Errorf("version %s: %v", v, err) // the CLI's own version text is not repeated
+		}
+		if _, err := os.Stat(ran2); err != nil {
+			t.Errorf("version %s: the version check did not run", v)
+		}
 	}
 	// A cancelled or timed-out version check stops too.
 	slow := filepath.Join(t.TempDir(), "claude")
@@ -286,7 +289,7 @@ func TestLiveOptIn(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	_, err = f.exec(ctx, []string{"run", "--live", "--cli", slow}, map[string]string{"APA_LIVE_CLI": "true"}, deps{})
+	_, err := f.exec(ctx, []string{"run", "--live", "--cli", slow}, map[string]string{"APA_LIVE_CLI": "true"}, deps{})
 	if err == nil || !strings.Contains(err.Error(), "version check") || time.Since(start) > 2*time.Second {
 		t.Errorf("slow version: %v after %v", err, time.Since(start))
 	}
@@ -294,9 +297,10 @@ func TestLiveOptIn(t *testing.T) {
 		t.Error("a refused live start created the database")
 	}
 
-	// The pin itself (Aaron, 2026-10-03): exactly 2.1.288 passes the version
-	// check, and the init gate then expects claude_code_version 2.1.288.
-	if approvedCLIVersion != "2.1.288 (Claude Code)" || strings.Fields(approvedCLIVersion)[0] != "2.1.288" {
+	// The pin itself (Aaron, 2026-10-04): exactly 2.1.289 passes the version
+	// check, and the init gate then expects claude_code_version 2.1.289
+	// (TestApprovedVersionInit).
+	if approvedCLIVersion != "2.1.289 (Claude Code)" || strings.Fields(approvedCLIVersion)[0] != "2.1.289" {
 		t.Fatalf("approved version %q", approvedCLIVersion)
 	}
 	if err := checkLive(context.Background(), cli, buyer.CLIEnv(os.Getenv), approvedCLIVersion); err != nil {
@@ -434,10 +438,12 @@ func TestProbeOptIn(t *testing.T) {
 		t.Fatal("a refused probe executed the CLI")
 	}
 	// Old version, and a version check that is cancelled: no probe.
-	old, _ := marker(t, "2.1.287 (Claude Code)")
-	if _, err := f.probeExec(context.Background(), []string{"--cli", old}, map[string]string{"APA_LIVE_CLI": "true"}, deps{}); err == nil ||
-		!strings.Contains(err.Error(), "other than the approved") {
-		t.Errorf("old version: %v", err)
+	for _, v := range []string{"2.1.288", "2.1.287"} {
+		old, _ := marker(t, v+" (Claude Code)")
+		if _, err := f.probeExec(context.Background(), []string{"--cli", old}, map[string]string{"APA_LIVE_CLI": "true"}, deps{}); err == nil ||
+			!strings.Contains(err.Error(), "other than the approved") {
+			t.Errorf("old version %s: %v", v, err)
+		}
 	}
 	slow := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(slow, []byte("#!/bin/sh\nsleep 5\necho '"+approvedCLIVersion+"'\n"), 0o755)
@@ -562,5 +568,30 @@ func TestProbeOneMessageCommand(t *testing.T) {
 	}
 	if _, err := os.Stat(f.db); !os.IsNotExist(err) {
 		t.Error("the probe created the database")
+	}
+}
+
+// The pin end to end, with no version override (deps{}): a CLI whose
+// --version is exactly the pin passes, and its init must then state the
+// pin's version number. Earlier pins and the fake's own number stop at
+// init_cli_version, the version shown only as "other". The CLI is a script that
+// answers --version itself and hands everything else to the fake.
+func TestApprovedVersionInit(t *testing.T) {
+	for v, want := range map[string]string{"2.1.289": "", "2.1.288": "init_cli_version", "2.1.287": "init_cli_version", fakecli.InitVersion: "init_cli_version"} {
+		f := newFixture(t)
+		os.WriteFile(f.fake+".scenario.json", []byte(`{"manual_init":true,"steps":[{"do":"init","init":{"claude_code_version":"`+v+`"}},{"do":"hang"}]}`), 0o600)
+		cli := filepath.Join(t.TempDir(), "claude")
+		os.WriteFile(cli, []byte("#!/bin/sh\nif [ \"$*\" = --version ]; then echo '"+approvedCLIVersion+"'; exit 0; fi\nexec "+f.fake+" \"$@\"\n"), 0o755)
+		out, err := f.probeExec(context.Background(), []string{"--cli", cli}, map[string]string{"APA_LIVE_CLI": "true"}, deps{})
+		if want == "" {
+			if err != nil || !strings.Contains(out, `"status": "observed"`) || !strings.Contains(out, `"cli_version": "approved"`) {
+				t.Errorf("init %s: %v\n%s", v, err, out)
+			}
+			continue
+		}
+		var ec exitCode
+		if !errors.As(err, &ec) || ec != 1 || !strings.Contains(out, `"code": "`+want+`"`) || !strings.Contains(out, `"cli_version": "other"`) {
+			t.Errorf("init %s: %v\n%s", v, err, out)
+		}
 	}
 }

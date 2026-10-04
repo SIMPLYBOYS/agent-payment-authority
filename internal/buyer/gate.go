@@ -19,7 +19,7 @@ import (
 // (name, status "connected"), permissionMode, apiKeySource,
 // claude_code_version, and the optional plugins, skills and agents, as the
 // Agent SDK reference documents the init message (read 2026-10-03). No
-// recording of a real CLI init (2.1.287 or 2.1.288) has been checked against it.
+// recording of a real CLI init (2.1.287, 2.1.288 or 2.1.289) has been checked against it.
 type Gate struct {
 	// CLIVersion is the claude_code_version the init must state.
 	CLIVersion string

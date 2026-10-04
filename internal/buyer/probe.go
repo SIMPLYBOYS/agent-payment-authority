@@ -85,7 +85,7 @@ type ProbeSpec struct {
 	BridgeCmd  []string // starts the MCP bridge
 	Env        []string // the CLI's whole environment (CLIEnv)
 	Limits     Limits   // Total is the wait for the init
-	CLIVersion string   // approved claude_code_version, e.g. "2.1.288"
+	CLIVersion string   // approved claude_code_version, e.g. "2.1.289"
 	TraceDir   string
 	// SendOneMessage selects C0′: the one fixed message is written once.
 	// Only an explicit opt-in sets it; nothing switches to it on its own.

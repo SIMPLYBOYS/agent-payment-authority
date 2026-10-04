@@ -90,8 +90,9 @@ func wallClock() uint64 { return uint64(time.Now().Unix()) }
 
 // approvedCLIVersion is the `claude --version` output a live run requires
 // (2.1.287 recorded 2026-10-02; Aaron re-approved 2.1.288 on 2026-10-03
-// after a local update). Another version stops the run; nothing upgrades.
-const approvedCLIVersion = "2.1.288 (Claude Code)"
+// and 2.1.289 on 2026-10-04, each after a local update). Another version
+// stops the run; nothing upgrades.
+const approvedCLIVersion = "2.1.289 (Claude Code)"
 
 // liveAcceptAuth is the apiKeySource values a live init may state. Empty:
 // no documented value proves a subscription login, so every live init
