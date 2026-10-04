@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），已通過 Codex 限定範圍 review（第 29 節）；再執行一次真實 C0′ 待 Aaron 另行核准，未執行。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），已通過 Codex 限定範圍 review（第 29 節）。10/4 經 Aaron 核准再執行一次真實 C0′：exit 0，取得 init（`apiKeySource` 為 `none`、plugins 2、agents 5），待 Codex review（第 30 節）。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -743,3 +743,26 @@ echo "exit=$?"
   - **Claude Code 執行、Codex 核對紀錄**：完整容器驗證七步、196／196 突變、17 項隔離檢查（`artifacts/verify-container/runs/1f0b260ae3e9-20261004T045259Z/`）；本機檢查 `artifacts/b1-04/1f0b260ae3e9-20261004T044907Z/`。
 - 範圍：**只有版本釘選**。不代表真實 CLI 2.1.289 的相容性、旗標（`--help` 未比對）、init 格式、訊息格式、登入或用量已驗證。不需要新增實作。
 - 下一步：依第 26 節（版本 2.1.289、HEAD `1f0b260` 或之後只改文件的 commit）執行一次真實 C0′，**待 Aaron 核准，未執行**。B1-04 整體仍 InProgress，未標 Done、未合併 main；live 認證接受清單維持空白。
+
+## 30 真實 C0′ 執行一次：取得 init（2026-10-04；Claude Code 執行，待 Codex review）
+
+- 核准：Aaron 10/4 核准依第 26 節執行一次 `probe-init --send-one-message`，版本須為 `2.1.289 (Claude Code)`；接受 CLI 使用本人 HOME、網路與登入憑證及未知用量；不重試、不改訊息格式、不放寬清單、不轉往階段 C、不開 Store 或執行業務工具。
+- 前置核對：HEAD `d30170e`、工作區乾淨；相對 `1f0b260` 只改 README 與 docs；重新建置，二進位 `vcs.revision=d30170e…`、`vcs.modified=false`。
+- 結果：**exit 0，`observed`／`init_observed`**。版本檢查通過（`cli_version` = `approved`）。訊息完整寫入一次（`input_status` = `complete`，95 位元組）。業務呼叫拒絕 0、執行 0；Store 未開。CLI 在 init 後由 host 以 SIGTERM 結束（`cli_exit_code` 143）。起訖 05:47:35Z–05:47:37Z，用量 `unknown`。
+- 觀測資料（白名單投影，原始 init 未保存）：
+  - 工具 3／預期 3，其他 0；MCP server 1，`apa` 為 connected；`permissionMode` 為 `dontAsk`；model 為 `claude-sonnet-5-5`。
+  - **`apiKeySource` 為 `none`**（顯示候選值之一）。
+  - **plugins 2、agents 5**、skills 0。
+  - 白名單外的 init 成員 7 個（名稱與內容未記錄）。
+  - 欄位型別：`uuid`、`output_style`、`capabilities` 皆存在；`plugins`、`agents`、`skills` 為陣列。
+- 事後檢查：沒有殘留的 CLI 或 bridge 程序，也沒有 probe 的 `apa-bridge-*` 暫存目錄。
+- 證據：`artifacts/b1-04/c0prime-real-20261004T054735Z/`，內容為 commit、binary-vcs、起訖時間、exit code、stdout 白名單結果、`runs/` 的 trace；stderr 為空。
+- **這次證明與未證明的事**：
+  - 證明：真實 2.1.289 在 stream-json 輸入模式下送出了 init，且接受了 C0′ 送的那一行（沒有解析錯誤）。
+  - 推測，未驗證：C0 零輸入 30 秒內沒有 init（第 21 節），這次送出訊息後約 2 秒內就有，所以 init 很可能要等到第一則使用者訊息才送出。
+  - 未證明：沒有證明模型是否已處理這則訊息、請求次數或用量；送出後的請求不能撤回。
+- **對正式 Gate 的影響，待 Codex review 與 Aaron 決定，本輪不改任何清單**：
+  1. `apiKeySource` = `none`：在正式 Gate 是 `auth_unconfirmed`，認證接受清單仍為空。`none` 本身不證明是訂閱登入或任何計費方式；要不要接受、靠什麼佐證，需配合階段 B 的登入方式回報，由 Aaron 決定。
+  2. plugins 2、agents 5：正式 Gate 要求 plugins 與 agents 為空（第 7 節），所以以目前限制參數啟動的 live run 會在 init 閘門停下。是要調整啟動參數讓它們不載入，還是重新評估允許範圍，需另行設計與核准。
+  3. 白名單外成員 7 個：依設計不記錄；是否需要逐一列名，另行決定。
+- 依核准條件已停止：不重跑、不放寬清單、不轉往階段 C。B1-04 整體仍 InProgress，未標 Done、未合併 main。
