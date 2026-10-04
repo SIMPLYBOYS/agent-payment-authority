@@ -264,4 +264,8 @@ demo 的 HTTP 讀取與 fake run 的寫入用同一個 `*store.Store`，不會�
   - 本機不再另跑一整套與容器相同的命令（make check、race、B1-01、匯入測試），完整檢查只在最終 commit 的斷網容器跑一次。
   - 本機只跑本輪相關測試、review 指定的命令，以及受影響突變的預檢。
   - 若 Codex 或 Aaron 仍要求本機全套，再恢復。
-- **最終容器驗證**：**尚未完成**。10/5 對 `8dfa317` 啟動時 Docker daemon 沒有在執行（`Cannot connect to the Docker daemon`），2 秒即結束，沒有任何檢查執行（紀錄 `artifacts/b1-06/container-8dfa317.log`）。依授權規則，不自行啟動 Docker；待 Docker 啟動後再跑一次。因此本輪的容器結果、222 項突變與隔離檢查**都還沒有**，不能標為全綠。
+- **最終容器驗證**（`7a7747d`，Docker 啟動後重跑；既有映像 sha256:78258368…，未重建）：overall exit 0，七步驟全過；baseline PASS、222／222 突變；17 項隔離檢查 ok。
+  - 證據：`artifacts/verify-container/runs/7a7747d39d95-20261004T163317Z/`；主機端輸出 `artifacts/b1-06/container-7a7747d.log`。
+  - 總耗時 952 秒，之前同類執行為 1154／1245 秒。
+  - 各步驟：check-contracts 21、check 91、race-cover 196、verify-b1-01 45、guards 1、evidence-import-tests 1、mutation 580 秒（其中 baseline 37 秒）。
+  - 10/5 先前一次因 Docker daemon 未執行而沒有跑到任何檢查（`artifacts/b1-06/container-8dfa317.log`）。
