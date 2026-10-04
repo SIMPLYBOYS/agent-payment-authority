@@ -1,0 +1,6 @@
+{
+  "name": "APA.Editor",
+  "references": ["APA.Runtime"],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": false
+}

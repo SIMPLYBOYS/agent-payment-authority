@@ -1,0 +1,21 @@
+# LimeZu files this shop uses (B1-06 delivery 2, docs/demo-ui.md).
+# key <TAB> path under the LimeZu folder <TAB> rect (x,y,w,h in pixels from the top left; "-" = whole file)
+# The images are not in git (LimeZu licence: use allowed, distribution not;
+# credit limezu.itch.io). scripts/unity/import-limezu.sh copies exactly
+# these files into Assets/LimeZu/ (ignored) and records their sha256.
+license	Modern_Interiors_v41.4/LICENSE.txt	-
+floor	Modern_Interiors_v41.4/1_Interiors/32x32/Room_Bulder_subfiles_32x32/Room_Builder_Floors_32x32.png	288,1056,32,32
+wall	Modern_Interiors_v41.4/1_Interiors/32x32/Room_Bulder_subfiles_32x32/Room_Builder_Walls_32x32.png	32,64,32,64
+shelf-1	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_98.png	-
+shelf-2	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_99.png	-
+shelf-3	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_113.png	-
+shelf-4	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_114.png	-
+fridge-1	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_56.png	-
+fridge-2	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_61.png	-
+counter	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_171.png	-
+counter-2	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_170.png	-
+sign-open	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_2.png	-
+cart	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_4.png	-
+fruit	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_427.png	-
+customer-a	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_01.png	sheet
+customer-b	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_05.png	sheet

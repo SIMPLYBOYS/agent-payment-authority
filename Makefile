@@ -6,10 +6,12 @@ check:
 	go test ./... -count=1
 	go build ./...
 
-# Go contracts and independent display-adapter vectors share fixed fixtures.
+# Go contracts and independent display-adapter vectors share fixed fixtures;
+# the Dashboard's event adapter is tested against the same accepted cases.
 check-contracts:
 	go test ./internal/contracts/... -count=1
 	node scripts/check-contract-vectors.mjs
+	node --test web/test/adapter.test.mjs  # Dashboard adapter (docs/demo-ui.md); the same Node
 
 build:
 	go build -o bin/demo ./cmd/demo

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>APA Demo Dashboard</title>
+<link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+<header class="top">
+  <strong class="badge">M1／fake agent／不付款</strong>
+  <span class="sub">模擬 Agent、fixture 資料、未付款；不會成功取貨，也沒有鏈上交易</span>
+</header>
+
+<section class="auth" aria-label="viewer 認證">
+  <form id="auth-form" autocomplete="off">
+    <label for="token">viewer token（本機 demo capability，不是使用者登入）</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false" inputmode="text">
+    <button type="submit">驗證</button>
+    <button type="button" id="switch">清除／切換 consumer</button>
+  </form>
+  <p>目前 viewer：<span id="viewer">未驗證</span></p>
+  <form id="task-form" hidden autocomplete="off">
+    <span id="task-pick"></span>
+    <label for="task-id">或輸入 task ID</label>
+    <input id="task-id" spellcheck="false">
+    <button type="submit">開啟</button>
+    <button type="button" id="replay" disabled>歷史展示回放（唯讀）</button>
+  </form>
+  <p id="status" data-kind="idle"></p>
+</section>
+
+<main class="grid">
+  <section class="shop" aria-label="商店場景">
+    <h2>商店（Unity）</h2>
+    <canvas id="unity-canvas" width="768" height="512"></canvas>
+    <p id="unity-status" data-state="loading">Unity 場景載入中…</p>
+    <div id="scene-text"></div>
+    <p class="credit">像素素材：LimeZu（limezu.itch.io）；素材未接入時為 placeholder</p>
+  </section>
+  <section aria-label="Inspector">
+    <h2>Inspector</h2>
+    <div id="inspector"></div>
+  </section>
+  <section aria-label="Timeline">
+    <h2>Timeline</h2>
+    <div id="timeline"></div>
+  </section>
+</main>
+<script type="module" src="/ui/app.js"></script>
+</body>
+</html>

@@ -95,6 +95,7 @@ type api struct {
 	tokens []demoToken
 	addr   string // the bound address, the only Host and Origin accepted
 	clock  store.Clock
+	unity  *os.Root // the Unity Web build's Build/ directory; nil without a build
 }
 
 func (a *api) register(mux *http.ServeMux) {

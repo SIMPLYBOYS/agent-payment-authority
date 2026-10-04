@@ -95,6 +95,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	registryPath := fs.String("registry", "testdata/contracts/registry.json", "trusted registry fixture")
 	profilePath := fs.String("profile", "testdata/policy/m1-demo-profile.json", "consumer profile fixture")
 	traceDir := fs.String("trace-dir", "var/runs", "where fake run traces are written")
+	unityDir := fs.String("unity-build", "unity/AgentPaymentAuthority/Build/WebGL/Build", "the Unity Web build's Build directory (served as /unity/)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -207,7 +208,15 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	}
 
 	mux := newMux(shop)
-	(&api{st: st, tokens: tokens, addr: addr, clock: d.clock}).register(mux)
+	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock}
+	if root, err := os.OpenRoot(*unityDir); err == nil {
+		ui.unity = root
+		defer root.Close()
+	} else {
+		fmt.Fprintln(d.out, "demo: no Unity Web build at", *unityDir, "- the page will say the scene is not ready")
+	}
+	ui.register(mux)
+	ui.registerUI(mux)
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
