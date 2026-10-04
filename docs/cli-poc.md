@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），已通過 Codex 限定範圍 review（第 29 節）。10/4 經 Aaron 核准再執行一次真實 C0′：exit 0，取得 init（`apiKeySource` 為 `none`、plugins 2、agents 5），待 Codex review（第 30 節）。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），已通過 Codex 限定範圍 review（第 29 節）。10/4 經 Aaron 核准再執行一次真實 C0′：exit 0，取得真實 init，Codex 已核對證據（第 30、31 節）。正式 live 仍不能放行：plugins 2、agents 5 會先被 Gate 拒絕，`apiKeySource` = `none` 也不在接受清單；plugins／agents 的釐清方案待 Aaron 核准（第 31 節）。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -758,11 +758,63 @@ echo "exit=$?"
 - 事後檢查：沒有殘留的 CLI 或 bridge 程序，也沒有 probe 的 `apa-bridge-*` 暫存目錄。
 - 證據：`artifacts/b1-04/c0prime-real-20261004T054735Z/`，內容為 commit、binary-vcs、起訖時間、exit code、stdout 白名單結果、`runs/` 的 trace；stderr 為空。
 - **這次證明與未證明的事**：
-  - 證明：真實 2.1.289 在 stream-json 輸入模式下送出了 init，且接受了 C0′ 送的那一行（沒有解析錯誤）。
+  - 已觀測（10/4 依 Codex 核對修正措辭）：Host 完整寫入 95 位元組，停止前取得 init，未觀測到解析錯誤；**尚未證明 CLI 已解析或處理該訊息**。
   - 推測，未驗證：C0 零輸入 30 秒內沒有 init（第 21 節），這次送出訊息後約 2 秒內就有，所以 init 很可能要等到第一則使用者訊息才送出。
   - 未證明：沒有證明模型是否已處理這則訊息、請求次數或用量；送出後的請求不能撤回。
 - **對正式 Gate 的影響，待 Codex review 與 Aaron 決定，本輪不改任何清單**：
-  1. `apiKeySource` = `none`：在正式 Gate 是 `auth_unconfirmed`，認證接受清單仍為空。`none` 本身不證明是訂閱登入或任何計費方式；要不要接受、靠什麼佐證，需配合階段 B 的登入方式回報，由 Aaron 決定。
-  2. plugins 2、agents 5：正式 Gate 要求 plugins 與 agents 為空（第 7 節），所以以目前限制參數啟動的 live run 會在 init 閘門停下。是要調整啟動參數讓它們不載入，還是重新評估允許範圍，需另行設計與核准。
-  3. 白名單外成員 7 個：依設計不記錄；是否需要逐一列名，另行決定。
+  1. **依目前檢查順序，正式 Gate 會先因非空的 `plugins` 拒絕**（版本之後依序檢查 plugins、skills、agents，認證最後）。這是依程式推導，並非跑過正式 live。
+  2. **即使 plugins／agents 都解決，`apiKeySource` = `none` 仍不在認證接受清單內**（清單為空），會停在 `auth_unconfirmed`。`none` 本身不證明是訂閱登入或任何計費方式；要不要接受、靠什麼佐證，需配合階段 B 的登入方式回報，由 Aaron 決定。plugins 與 agents 非空的處理見第 31 節的釐清方案。
+  3. 白名單外成員 7 個：依設計不記錄；暫不擴大收集。
 - 依核准條件已停止：不重跑、不放寬清單、不轉往階段 C。B1-04 整體仍 InProgress，未標 Done、未合併 main。
+
+## 31 驗收紀錄：真實 C0′ 取得 init；plugins／agents 釐清方案（2026-10-04；方案待 Aaron 核准，未執行）
+
+### 31.1 驗收
+
+- 結果：Codex 核對 `d30170e` 的二進位資訊、stdout 與 trace，紀錄一致：95 位元組寫入完成、業務呼叫 0、取得 init、用量 unknown。**「取得真實 init」的目標已完成。**
+- 證據歸屬：**Claude Code 執行、Codex 核對證據**，不是 Codex 獨立重跑。
+- 第 30 節已依核對意見修正兩處：只寫「已觀測」，不寫「CLI 接受了該行」；Gate 的兩個阻擋原因分開寫。
+- **正式 live 請購仍不能放行。** 不重跑、不放寬清單、不進階段 C；B1-04 仍 InProgress。
+- 暫不擴大收集白名單外的 7 個成員。
+
+### 31.2 目前已知與未知（plugins 2、agents 5）
+
+- 已知：這次 init 的 `plugins` 有 2 個元素、`agents` 有 5 個；`tools` 正好是預期的 3 個、其他 0，所以這些 plugins 沒有在工具清單中多出可用工具；停止前沒有觀測到 hook 訊息。啟動參數含 `--restricted`（依 help 說明會忽略 user／project／local 設定檔），工作目錄是 probe 新建的暫存目錄。
+- 未知：它們的名稱、來源與是否執行過。**出現在 init 只代表 CLI 列出它們，不代表已執行**；但也不能據此證明背景沒有執行，例如 plugin 的 hook 或 MCP 以外的行為。
+- 推測，未驗證：5 個 agents 可能是 CLI 內建的那組（本機使用者自訂 agents 數量遠多於 5，像是沒被載入）；2 個 plugins 的來源可能不在 `--restricted` 涵蓋範圍內（例如受管設定或已安裝 plugin 的狀態）。**兩項都只是推測，不能據此允許。**
+
+### 31.3 最小釐清方案（每一步都待 Aaron 核准；目前都未執行）
+
+**A．不執行 CLI 的查證**（先做；不用模型、不送訊息）
+
+1. Aaron 提供只含名稱的摘要，不貼內容、路徑細節或憑證：
+   - 本機已安裝或啟用的 plugins 名稱；
+   - `~/.claude/agents` 自訂 agents 的數量；
+   - 是否有受管設定檔（`/Library/Application Support/ClaudeCode/managed-settings.json`），以及其中是否啟用 plugins（有／無／不確定）。
+   - 也可以改為核准 Claude Code 只讀這幾個非憑證檔案的名稱或鍵名。
+2. Claude Code 查一手文件，不執行 CLI，整理依據與缺口：
+   - init 的 `plugins`、`agents` 元素是什麼格式，有哪些欄位；
+   - 內建 agents 清單；
+   - `--restricted` 是否涵蓋 plugins 和受管設定；
+   - 是否有正式的旗標或設定可以不載入 plugins／agents。
+
+**B．程式與 fake：只看身分，不放寬**（需核准實作，交 Codex review）
+
+- probe 觀測資料新增 plugins／agents 的身分投影，比照 `apiKeySource` 的做法：
+  - 名稱在 Host 固定的候選清單內（來自 A 的結果）才顯示原名，否則顯示 `other` 與長度；
+  - agents 的來源只在文件列出的固定值內才顯示；
+  - plugin 路徑只分類（在 `~/.claude/plugins` 下、在 probe 工作目錄下、其他），不保存原始路徑；
+  - 不保存 description 等自由文字。
+- Gate 不變，仍拒絕非空的 plugins／agents。只跑 fake 測試與突變，白名單不開旁路。
+
+**C．再執行一次真實 C0′，取得名稱與來源**（需另行核准）
+
+- 同第 26 節：會再送一則固定訊息，可能產生用量，請求次數沒有保證。
+- 目前已知只有送出使用者訊息後才會出現 init（第 21、30 節），所以沒有不送訊息就取得 init 的辦法。
+- A 只能提出推測，要確認身分仍需 C 的實際 init。
+
+**D．決定（C 之後，由 Aaron 決定）**
+
+- 優先：若 A 找到有文件依據的方法，調整啟動參數讓 plugins／agents 不載入，讓 init 回到空清單，Gate 不變。這需要實作、fake 測試、review，再做一次真實驗證。
+- 其次：只允許經確認的特定名稱與來源，不是全部允許；需要把 Gate 改成名稱清單，並另行 review。
+- 認證（`none`）另依階段 B 摘要處理，與 plugins／agents 分開決定。
