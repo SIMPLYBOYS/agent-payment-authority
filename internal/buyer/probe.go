@@ -128,7 +128,34 @@ type InitObservation struct {
 	Plugins        *int              `json:"plugins_count"`                // nil: absent or not an array
 	Skills         *int              `json:"skills_count"`
 	Agents         *int              `json:"agents_count"`
+	// The first maxEntries elements of plugins and agents, each projected
+	// alone; nil when the member is absent or not an array.
+	PluginEntries []EntryObservation `json:"plugins_entries"`
+	AgentEntries  []EntryObservation `json:"agents_entries"`
 }
+
+// EntryObservation is one element of the init's plugins or agents. The
+// name is printed only when it equals an entry of a fixed display list;
+// a plugin's path only as a class. Display lists are never accepted: the
+// Gate still refuses any non-empty plugins or agents.
+type EntryObservation struct {
+	Name       string `json:"name"`                  // listed name | other | not_string | absent | malformed
+	NameLength int    `json:"name_length,omitempty"` // only for "other"
+	Path       string `json:"path,omitempty"`        // plugins only: a pathClasses value
+}
+
+// maxEntries bounds the per-element lists; the counts above stay exact.
+const maxEntries = 16
+
+// Display lists for plugins and agents (docs read 2026-10-04, see
+// docs/cli-poc.md section 32). agentDisplayCandidates are the built-in
+// subagents named on the subagents page; the init's agents member is a
+// list of names (string[] in SDKSystemMessage). No plugin name has a
+// source yet, so every plugin name prints as "other".
+var (
+	agentDisplayCandidates  = []string{"Explore", "Plan", "general-purpose", "claude", "statusline-setup", "claude-code-guide"}
+	pluginDisplayCandidates []string
+)
 
 // initMembers are the init members the probe reports on (Agent SDK
 // reference, read 2026-10-03).
@@ -180,6 +207,78 @@ func pick(m map[string]json.RawMessage, k string, list []string) (string, int) {
 	return "other", len(v)
 }
 
+// pathRoots are the directories a plugin path is classed against: the
+// CLI's HOME and the probe's own working directory.
+type pathRoots struct{ home, work string }
+
+// pathClass classes a plugin path by the plugin directories the plugins
+// page names under ~/.claude, by its text alone: nothing is read from disk.
+func pathClass(p string, r pathRoots) string {
+	if !filepath.IsAbs(p) {
+		return "relative"
+	}
+	p = filepath.Clean(p)
+	under := func(root string) bool {
+		if root == "" || !filepath.IsAbs(root) {
+			return false
+		}
+		root = filepath.Clean(root)
+		return p == root || strings.HasPrefix(p, root+string(filepath.Separator))
+	}
+	plugins := filepath.Join(r.home, ".claude", "plugins")
+	switch {
+	case r.home != "" && under(filepath.Join(plugins, "synced")):
+		return "home_plugins_synced"
+	case r.home != "" && under(filepath.Join(plugins, "cache")):
+		return "home_plugins_cache"
+	case r.home != "" && under(plugins):
+		return "home_plugins_other"
+	case r.home != "" && under(filepath.Join(r.home, ".claude", "skills")):
+		return "home_skills"
+	case under(r.work):
+		return "work_dir"
+	}
+	return "other"
+}
+
+// entries projects the first maxEntries elements of a plugins or agents
+// member. An element is a name string or an object whose name member is a
+// string (read strictly); a plugin's path member is classed, and nothing
+// else of an element is looked at.
+func entries(m map[string]json.RawMessage, k string, names []string, r *pathRoots) []EntryObservation {
+	var list []json.RawMessage
+	if raw, ok := m[k]; !ok || json.Unmarshal(raw, &list) != nil || list == nil {
+		return nil
+	}
+	out := []EntryObservation{}
+	for _, raw := range list[:min(len(list), maxEntries)] {
+		e := EntryObservation{}
+		var f map[string]json.RawMessage
+		if jsonType(raw) == "string" {
+			f = map[string]json.RawMessage{"name": raw}
+		} else if obj, err := objectFields(raw); err == nil {
+			f = obj
+		} else {
+			out = append(out, EntryObservation{Name: "malformed"})
+			continue
+		}
+		e.Name, e.NameLength = pick(f, "name", names)
+		if r != nil {
+			var path string
+			switch raw, ok := f["path"]; {
+			case !ok:
+				e.Path = "absent"
+			case json.Unmarshal(raw, &path) != nil:
+				e.Path = "not_string"
+			default:
+				e.Path = pathClass(path, *r)
+			}
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 func count(m map[string]json.RawMessage, k string) *int {
 	var list []json.RawMessage
 	if raw, ok := m[k]; !ok || json.Unmarshal(raw, &list) != nil || list == nil {
@@ -191,7 +290,7 @@ func count(m map[string]json.RawMessage, k string) *int {
 
 // observe projects an init read by objectFields. No string of the init is
 // copied out unless it equals an entry of a fixed list.
-func observe(m map[string]json.RawMessage, version string) *InitObservation {
+func observe(m map[string]json.RawMessage, version string, roots pathRoots) *InitObservation {
 	o := &InitObservation{Fields: map[string]string{}}
 	for _, k := range initMembers {
 		if raw, ok := m[k]; ok {
@@ -241,6 +340,8 @@ func observe(m map[string]json.RawMessage, version string) *InitObservation {
 	o.Model, _ = pick(m, "model", knownModels)
 	o.AuthSource, o.AuthSourceLen = pick(m, "apiKeySource", authDisplayCandidates)
 	o.Plugins, o.Skills, o.Agents = count(m, "plugins"), count(m, "skills"), count(m, "agents")
+	o.PluginEntries = entries(m, "plugins", pluginDisplayCandidates, &roots)
+	o.AgentEntries = entries(m, "agents", agentDisplayCandidates, nil)
 	return o
 }
 
@@ -314,6 +415,12 @@ func Probe(ctx context.Context, p ProbeSpec) (ProbeResult, error) {
 		return res, err
 	}
 
+	roots := pathRoots{work: work}
+	for _, kv := range p.Env {
+		if v, ok := strings.CutPrefix(kv, "HOME="); ok {
+			roots.home = v
+		}
+	}
 	var obs *InitObservation
 	watch := func(typ, subtype string, line []byte) (Outcome, string) {
 		switch {
@@ -324,7 +431,7 @@ func Probe(ctx context.Context, p ProbeSpec) (ProbeResult, error) {
 			if err != nil {
 				return ParseError, "init_malformed"
 			}
-			obs = observe(f, p.CLIVersion)
+			obs = observe(f, p.CLIVersion, roots)
 			return InitObserved, "init"
 		case typ == "system" && subtype == "api_retry":
 			// The CLI is already talking to the API and failing: stop now, so

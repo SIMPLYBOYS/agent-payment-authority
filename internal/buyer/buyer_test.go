@@ -460,6 +460,7 @@ func TestHostInitGate(t *testing.T) {
 		"tools not strings": {badInit(map[string]string{"tools": `[1,2,3]`}), "init_malformed"},
 		"servers object":    {badInit(map[string]string{"mcp_servers": `{"name":"apa"}`}), "init_malformed"},
 		"plugins loaded":    {badInit(map[string]string{"plugins": `[{"name":"x","path":"/p"}]`}), "plugins"},
+		"built-in agent":    {badInit(map[string]string{"agents": `["Explore"]`}), "agents"}, // a display candidate is not accepted
 		"agents listed":     {badInit(map[string]string{"agents": `[{"name":"general-purpose","description":"","source":"built-in"}]`}), "agents"},
 		"skills wrong type": {badInit(map[string]string{"skills": `"all"`}), "init_malformed"},
 		"other version":     {badInit(map[string]string{"claude_code_version": `"2.1.288"`}), "cli_version"},

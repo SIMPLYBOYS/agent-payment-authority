@@ -239,9 +239,10 @@ func TestProbeNoLeak(t *testing.T) {
 		"model": json.RawMessage(`"$CAPABILITY"`), "apiKeySource": json.RawMessage(`"` + mark + `"`),
 		"tools":          json.RawMessage(`["mcp__apa__list_products","` + mark + `","$CAPABILITY"]`),
 		"mcp_servers":    json.RawMessage(`[{"name":"apa","status":"` + mark + `"},{"name":"$CAPABILITY","status":"connected"}]`),
-		"permissionMode": json.RawMessage(`"$CAPABILITY"`), "agents": json.RawMessage(`[{"name":"` + mark + `","source":"$CAPABILITY"}]`),
-		"skills": json.RawMessage(`[{"name":"$CAPABILITY"}]`), "plugins": json.RawMessage(`[{"name":"` + mark + `"}]`),
-		"cwd": json.RawMessage(`"/` + mark + `"`), "session_id": json.RawMessage(`"$CAPABILITY"`), mark: json.RawMessage(`"$CAPABILITY"`),
+		"permissionMode": json.RawMessage(`"$CAPABILITY"`), "agents": json.RawMessage(`[{"name":"` + mark + `","source":"$CAPABILITY"},"$CAPABILITY","` + mark + `"]`),
+		"skills":  json.RawMessage(`[{"name":"$CAPABILITY"}]`),
+		"plugins": json.RawMessage(`[{"name":"` + mark + `","path":"/$CAPABILITY/` + mark + `"},{"name":"$CAPABILITY","path":"$CAPABILITY"}]`),
+		"cwd":     json.RawMessage(`"/` + mark + `"`), "session_id": json.RawMessage(`"$CAPABILITY"`), mark: json.RawMessage(`"$CAPABILITY"`),
 	}}, fakecli.Step{Do: "hang"})
 	p := newProbe(t, genScenario(t, sc), 5*time.Second)
 	res, _ := p.run(context.Background())
@@ -255,6 +256,9 @@ func TestProbeNoLeak(t *testing.T) {
 		if strings.Contains(s, mark) || strings.Contains(s, string(capability)) {
 			t.Fatalf("leak: %s", s)
 		}
+	}
+	if o := res.Observation; len(o.PluginEntries) != 2 || len(o.AgentEntries) != 3 || o.PluginEntries[1].Name != "other" || o.PluginEntries[1].Path != "relative" {
+		t.Errorf("entries: %+v %+v", o.PluginEntries, o.AgentEntries) // the marks were seen, as lengths and classes only
 	}
 	if res.Observation.Model != "other" || res.Observation.AuthSource != "other" || res.Observation.ExtraMembers != 1 {
 		t.Errorf("observation %+v", res.Observation)
@@ -321,5 +325,87 @@ func TestRunnerCancelledBeforeStart(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if _, err := os.Stat(ran); !os.IsNotExist(err) {
 		t.Fatal("the process ran")
+	}
+}
+
+// plugins and agents, element by element: a name is printed only when it
+// is on its display list, a plugin path only as a class; anything else is
+// a fixed label, and the per-element lists stop at maxEntries.
+func TestProbeEntries(t *testing.T) {
+	p := newProbe(t, "probe-init-first", 5*time.Second)
+	var home string
+	for _, kv := range p.spec.Env {
+		if v, ok := strings.CutPrefix(kv, "HOME="); ok {
+			home = v
+		}
+	}
+	plugins, _ := json.Marshal([]any{
+		map[string]any{"name": "mkt-plugin", "path": home + "/.claude/plugins/cache/mkt/mkt-plugin/1.0.0"},
+		map[string]any{"name": "synced-plugin", "path": home + "/.claude/plugins/synced/synced-plugin"},
+		map[string]any{"name": "dir-plugin", "path": home + "/.claude/skills/dir-plugin"},
+		map[string]any{"name": "rel", "path": "plugins/rel"},
+		map[string]any{"name": 5, "path": 7},
+		map[string]any{"path": "/opt/elsewhere"},
+		"bare-string", 3,
+	})
+	many := make([]string, maxEntries+4)
+	for i := range many {
+		many[i] = "Plan"
+	}
+	manyRaw, _ := json.Marshal(many)
+	for name, c := range map[string]struct {
+		init    map[string]json.RawMessage
+		plugins []EntryObservation
+		agents  []EntryObservation
+	}{
+		"mixed": {map[string]json.RawMessage{"plugins": plugins, "agents": json.RawMessage(`["Explore","general-purpose","my-agent",4,{"name":"Plan","description":"free text"}]`)},
+			[]EntryObservation{{"other", 10, "home_plugins_cache"}, {"other", 13, "home_plugins_synced"}, {"other", 10, "home_skills"},
+				{"other", 3, "relative"}, {"not_string", 0, "not_string"}, {"absent", 0, "other"}, {"other", 11, "absent"}, {Name: "malformed"}},
+			[]EntryObservation{{Name: "Explore"}, {Name: "general-purpose"}, {"other", 8, ""}, {Name: "malformed"}, {Name: "Plan"}}},
+		"empty":       {map[string]json.RawMessage{"plugins": json.RawMessage(`[]`), "agents": json.RawMessage(`[]`)}, []EntryObservation{}, []EntryObservation{}},
+		"absent":      {map[string]json.RawMessage{"plugins": nil, "agents": nil}, nil, nil},
+		"wrong types": {map[string]json.RawMessage{"plugins": json.RawMessage(`"all"`), "agents": json.RawMessage(`{"name":"Plan"}`)}, nil, nil},
+		"over the cap": {map[string]json.RawMessage{"agents": manyRaw, "plugins": json.RawMessage(`[]`)}, []EntryObservation{},
+			slices.Repeat([]EntryObservation{{Name: "Plan"}}, maxEntries)},
+	} {
+		p.spec.Env = append(slices.DeleteFunc(slices.Clone(p.spec.Env), func(kv string) bool { return strings.HasPrefix(kv, fakecli.EnvScenario+"=") }),
+			scenario(genScenario(t, manual(fakecli.Step{Do: "init", Init: c.init}, fakecli.Step{Do: "hang"}))))
+		res, _ := p.run(context.Background())
+		o := res.Observation
+		if res.Status != ProbeObserved || o == nil {
+			t.Fatalf("%s: %+v", name, res)
+		}
+		if !slices.Equal(o.PluginEntries, c.plugins) || !slices.Equal(o.AgentEntries, c.agents) {
+			t.Errorf("%s:\nplugins %+v\nagents  %+v", name, o.PluginEntries, o.AgentEntries)
+		}
+		if name == "over the cap" && (o.Agents == nil || *o.Agents != maxEntries+4) {
+			t.Errorf("the count is not exact: %v", o.Agents)
+		}
+	}
+}
+
+// pathClass reads only the path's text, and a root is matched whole.
+func TestPathClass(t *testing.T) {
+	r := pathRoots{home: "/h/u", work: "/tmp/apa-probe-1/work"}
+	for p, want := range map[string]string{
+		"/h/u/.claude/plugins/synced/a":        "home_plugins_synced",
+		"/h/u/.claude/plugins/cache/m/a/1":     "home_plugins_cache",
+		"/h/u/.claude/plugins/data/a":          "home_plugins_other",
+		"/h/u/.claude/plugins":                 "home_plugins_other",
+		"/h/u/.claude/pluginsX/a":              "other",
+		"/h/u/.claude/plugins/../../x":         "other",
+		"/h/u/.claude/plugins/cache/../synced": "home_plugins_synced",
+		"/h/u/.claude/skills/p":                "home_skills",
+		"/tmp/apa-probe-1/work/p":              "work_dir",
+		"/tmp/apa-probe-1/workshop":            "other",
+		"h/u/.claude/plugins/cache/a":          "relative",
+		"":                                     "relative",
+	} {
+		if got := pathClass(p, r); got != want {
+			t.Errorf("%q: %s, want %s", p, got, want)
+		}
+	}
+	if got := pathClass("/.claude/plugins/cache/a", pathRoots{}); got != "other" {
+		t.Errorf("no HOME: %s", got)
 	}
 }

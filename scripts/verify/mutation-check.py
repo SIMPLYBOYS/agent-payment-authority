@@ -447,6 +447,17 @@ MUTATIONS = [
      "\tif rep.Outcome == InitObserved && !inputBroken {", "\tif rep.Outcome == InitObserved {", "TestProbeOneMessageWriteFailureAfterInit"),
     ("B1-04 pin 2.1.289: the probe's init version not taken from the pin", "cmd/apa-buyer/main.go",
      "Limits: lim, CLIVersion: strings.Fields(want)[0], TraceDir", "Limits: lim, CLIVersion: \"2.1.288\", TraceDir", "TestApprovedVersionInit"),
+    ("B1-04 plugins/agents: an element's name copied out, not only a listed one", "internal/buyer/probe.go",
+     "\t\te.Name, e.NameLength = pick(f, \"name\", names)\n", "\t\te.Name, e.NameLength = pick(f, \"name\", names)\n\t\tjson.Unmarshal(f[\"name\"], &e.Name)\n",
+     "TestProbeNoLeak|TestProbeEntries"),
+    ("B1-04 plugins/agents: a plugin's path copied out, not its class", "internal/buyer/probe.go",
+     "\t\t\t\te.Path = pathClass(path, *r)", "\t\t\t\te.Path = path", "TestProbeNoLeak|TestProbeEntries"),
+    ("B1-04 plugins/agents: a root matched as a bare prefix", "internal/buyer/probe.go",
+     "return p == root || strings.HasPrefix(p, root+string(filepath.Separator))", "return strings.HasPrefix(p, root)", "TestPathClass"),
+    ("B1-04 plugins/agents: a plugin path classed before cleaning", "internal/buyer/probe.go",
+     "LINE:\tp = filepath.Clean(p)", "", "TestPathClass"),
+    ("B1-04 plugins/agents: the per-element list not bounded", "internal/buyer/probe.go",
+     "range list[:min(len(list), maxEntries)]", "range list", "TestProbeEntries"),
 ]
 
 
