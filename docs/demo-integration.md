@@ -129,3 +129,36 @@ demo 的 HTTP 讀取與 fake run 的寫入用同一個 `*store.Store`，不會�
 - 沒有 task 清單路由；UI 需要時另行設計，仍依相同權限模型。
 - 「到期」只在 worker 寫入後出現；worker 週期是目標值。
 - 本輪沒有 UI，也沒有真實模型請購。
+
+## 7 驗證紀錄（Claude Code 執行，待 Codex 獨立 review）
+
+程式 `4599d9c`，文件 `1f4d681`。以下都在 `1f4d681` 上執行；相對基準 `05bb1fe` 的差異是這兩個 commit。
+
+**測試與驗收點對應**（`cmd/demo/integration_test.go`；真實 HTTP、SQLite，fake CLI 為子程序；預期值來自 `testdata/contracts/cases.json`，不由 Policy 產生）：
+
+| 驗收點 | 測試 |
+|---|---|
+| Ask／Deny（402、請購、Policy、Store、HTTP 對得上） | `TestIntegrationAskDenyAndAccess/ask_and_deny`：對照案例 `ask`、`deny-budget`，以及商店自己 402 的 URL 與金額 |
+| 身分、主持人權限、Host／Origin | `.../identity` |
+| 唯讀查詢 | `.../read_only`；`TestIntegrationExpiryOnlyByWorker`：截止時間已過，GET 仍不寫到期，worker 寫入後才出現，對照案例 `approval-deadline-exact` |
+| 投影安全與無付款 | `.../projection`：fake 宣稱付款的文字、合成標記、bridge capability、token 都不出現在 API 或 log；沒有 Approved／Settled 等事件 |
+| 到期與取消、重送與恢復、子程序回收 | `TestIntegrationEndsRestartAndReplay`：Deny 後 CLI 逾時與 Ask 後主持人停止，都不改寫原裁決（對照 `cancel-pending`）；fake 的孫程序被回收；重啟後紀錄仍在；已記錄的 task 不重跑；`task-a-next` 沿用 wallet-a；同一請購重送只有一筆裁決 |
+| 啟動失敗不假裝 ready | `TestIntegrationStartRefusals`：資料庫損壞（不修改原檔、不發 token）、非 fake CLI（只被呼叫 `--version`）、同一資料庫第二個 host、計畫檔錯誤 |
+| 獨立性 | 以上都只用本 repo、fake 執行檔與暫存 HOME，不經 PATH 找 `claude` |
+
+突變 #204–#215：Host、Origin、token 比對、viewer 範圍、grant、未開始 task 的 404、GET 觸發到期、關閉前未等 run、資料庫鎖、計畫未知欄位、非 fake CLI、已記錄 task 重跑。全部由測試斷言抓到；提交前預檢時有 4 項起初編譯失敗或掛住，改寫後通過。
+
+**結果**：
+
+- **本機**（`artifacts/b1-06/1f4d681c6a95-20261004T091254Z/`）：make check、check-contracts、`go test -race -cover ./... -count=1`、B1-01、20 項證據匯入測試全部 exit 0。
+  - 覆蓋率：cmd/demo 81.6%、buyer 92.8%、toolbridge 91.8%、apa-buyer 81.7%。
+  - 乾淨匯出 demo-fake：0／2／0。
+  - 本機檢查總耗時 217 秒。
+- **手動執行一次**（`artifacts/b1-06/manual-20261004T091726Z/`）：`bin/demo --fake-cli bin/fake-claude --plan testdata/demo/fake-plan.json`。
+  - task-a 為 Ask／pending，task-b 為 Deny／`INSUFFICIENT_BUDGET`，各 3 個事件；viewer A 讀 task-b 得 404，沒有 token 得 401；SIGINT 後 exit 0。
+  - 證據不含 token 值。
+  - 建置、啟動到兩個 run 都記錄完約 6 秒。
+- **容器完整驗證**（既有映像 sha256:78258368…，未重建、無新依賴）：overall exit 0，七步驟全過；baseline PASS、215／215 突變；17 項隔離檢查 ok。
+  - 證據在 `artifacts/verify-container/runs/1f4d681c6a95-20261004T091745Z/`。
+  - 總耗時 1154 秒。容器內各步驟的耗時無法從現有證據區分（匯入後時間戳相同），本輪不改驗證工具。
+- 本輪沒有出現時序測試失敗。
