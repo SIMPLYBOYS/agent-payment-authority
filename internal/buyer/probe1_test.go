@@ -172,7 +172,17 @@ func TestProbeOneMessageInterleaving(t *testing.T) {
 			p := newProbe1(t, genScenario(t, sc), 10*time.Second)
 			ctx, cancel := context.WithCancel(context.Background())
 			time.AfterFunc(d, cancel)
-			res, took := p.run(ctx)
+			start := time.Now()
+			res, err := Probe(ctx, p.spec)
+			took := time.Since(start)
+			if err != nil {
+				// The cancel won the race to Probe's first check: nothing
+				// may have started, and nothing was written.
+				if _, serr := os.Stat(p.stdin); !strings.Contains(err.Error(), "cancelled before the probe started") || serr == nil || res.StdinWritten != 0 {
+					t.Fatalf("%v; fake started: %v; %+v", err, serr == nil, res)
+				}
+				return
+			}
 			if res.Status != ProbeFailed || res.Code != "cancelled" {
 				t.Fatalf("%+v", res)
 			}
