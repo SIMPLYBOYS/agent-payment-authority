@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），已通過 Codex 限定範圍 review（第 29 節）。10/4 經 Aaron 核准再執行一次真實 C0′：exit 0，取得真實 init，Codex 已核對證據（第 30、31 節）。正式 live 仍不能放行：plugins 2、agents 5 會先被 Gate 拒絕，`apiKeySource` = `none` 也不在接受清單；plugins／agents 的釐清方案待 Aaron 核准（第 31 節）。10/4 依核准完成 A 官方文件查證與 B 身分觀測（程式 `4e709ab`、`8da15dd`），review 指出 `null` 判斷問題，已修正於 `b46e332`，待 Codex review；未執行真實 CLI（第 32、33 節）。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），已通過 Codex 限定範圍 review（第 29 節）。10/4 經 Aaron 核准再執行一次真實 C0′：exit 0，取得真實 init，Codex 已核對證據（第 30、31 節）。正式 live 仍不能放行：plugins 2、agents 5 會先被 Gate 拒絕，`apiKeySource` = `none` 也不在接受清單；plugins／agents 的釐清方案待 Aaron 核准（第 31 節）。10/4 依核准完成 A 官方文件查證與 B 身分觀測（程式 `4e709ab`、`8da15dd`），review 指出 `null` 判斷問題，已修正於 `b46e332`；10/4 依 Aaron 指示同步本輪驗收（第 34 節）。未執行真實 CLI；真實 C0′、受管設定讀取與清單調整仍須 Aaron 另行核准（第 32–34 節）。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -960,3 +960,42 @@ echo "exit=$?"
   - 容器完整驗證（既有映像 sha256:78258368…）：overall exit 0，七步驟全過；baseline PASS、203／203 突變；17 項隔離檢查 ok。證據在 `artifacts/verify-container/runs/b46e332e0997-20261004T071959Z/`。
   - 失敗嘗試（保留，附 FAILED-NOTE）：`artifacts/b1-04/b46e332e0997-20261004T073843Z/` 的 make check exit 2。原因是 `TestVersion` 的 holder 檢查在並行負載下花了 2.056 秒，超過 2 秒上限；該測試自 `b3c66f6` 起未改，同一次 race 步驟與容器都通過，重跑也通過。
 - 本輪沒有重做 A 查證，沒有執行真實 CLI，沒有讀受管設定，也沒有放寬任何清單。
+
+## 34 驗收紀錄：plugins／agents 身分觀測（`b46e332`）；非阻擋待辦：重複出現的時序測試失敗（2026-10-04）
+
+### 34.1 驗收
+
+- 依 Aaron 10/4 指示，同步本輪驗收：
+  - A 官方文件查證（第 32 節）；
+  - B 只顯示身分的觀測（`4e709ab`、測試修正 `8da15dd`）；
+  - `null` 判為 `not_string` 的修正（`b46e332`）；
+  - 對應文件（`8d2baaf`、`d739952`）。
+- **證據歸屬**：
+  - **Codex 獨立執行**（斷網容器，針對 `8da15dd`，見第 33 節）：buyer、apa-buyer 的 race 測試；相關回歸三輪；`null` 探測。`null` 探測當時失敗，促成 `b46e332`。
+  - **對 `b46e332` 本身**：對話中沒有轉交 Codex 逐項重跑的內容，所以這裡不把任何項目記為 Codex 獨立重跑。
+  - **Claude Code 執行**：`b46e332` 的本機檢查與容器完整驗證，包括 203／203 突變與 17 項隔離檢查（第 33 節）。
+- **範圍**：
+  - 只有觀測的正確性與文件。正式 Gate、認證接受清單與真實啟動參數都沒改。
+  - 名稱與內建清單相符，只能確認名稱；路徑分類不是來源認證。
+  - **2 個 plugins、5 個 agents 的身分與來源仍未確認。**
+- **仍須 Aaron 另行核准**：真實 C0′（以新的觀測取得身分）、讀取受管設定（第 32.5 節列出的路徑與欄位）、任何清單調整。
+- B1-04 整體仍 InProgress；未標 Done、未合併 main。live 認證接受清單維持空白。
+
+### 34.2 非阻擋待辦：重複出現的時序測試失敗（未調查，未改逾時）
+
+本輪在 macOS 本機驗證中出現下列失敗。每次同一 commit 的容器驗證都通過，本機重跑也通過：
+
+| 首次出現 | 測試 | 情形 | 上限 |
+|---|---|---|---|
+| `8da15dd` 的 B1-01 | `cmd/apa-buyer` `TestLiveOptIn`（2.1.288 子案例） | 代用 shell 腳本的 `--version` 沒有在上限內執行，連標記檔都沒建立 | 正式版本檢查 5 秒（`versionLimits`） |
+| `b46e332` 的 make check | `internal/buyer` `TestVersion`（holder 檢查） | 花了 2.056 秒 | 測試自訂 2 秒 |
+
+- **相關但不同**：
+  - `4e709ab` 的 `TestProbeOneMessageInterleaving/cancel_after_0s` 已找到原因：測試沒有考慮 0 秒取消可能搶在 Probe 的啟動前檢查之前。已在 `8da15dd` 修正測試，不列入本待辦。
+  - 第 24 節也記過 Codex 的重現程式在本機需要把 1 秒的等待放寬為 5 秒。
+- **原因未確認**：「並行測試負載下，本機啟動新程序或新建立的腳本變慢」只是推測，沒有量測。
+- **本輪不做**：不調整正式逾時（`versionLimits` 等）或測試上限，也不以反覆重跑取代調查。上表的通過紀錄都來自另一次執行，不能證明原因。
+- **待辦**（非阻擋，未排程）：
+  1. 在本機量測並行 `go test` 時，啟動 shell 腳本的延遲分布；與容器內比較。
+  2. 確認失敗是否集中在新建立的腳本第一次執行。
+  3. 依量測結果，再決定是改測試的等待方式，還是需要 Aaron 決定調整正式上限。
