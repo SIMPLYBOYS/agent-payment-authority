@@ -503,23 +503,27 @@ func TestHostInitSequence(t *testing.T) {
 	}
 
 	// Late init: the run is stopped (cancelled) only once the fake shows it
-	// ignores SIGTERM: it writes its stdin counter right after installing
-	// the ignore. It then prints a valid init 800 ms after its MCP
-	// handshake, inside the 5 s grace before SIGKILL. (A fixed 300 ms time
-	// limit raced the fake's own start under -race: a SIGTERM before the
-	// ignore killed it and no init was read; docs/demo-integration.md 8.4.)
+	// ignores SIGTERM and has finished its MCP handshake: its first step,
+	// savecap, writes the capability file, and steps run only after both.
+	// It then prints a valid init 800 ms later, inside the 5 s grace before
+	// SIGKILL. (A fixed 300 ms time limit raced the fake's own start under
+	// -race: a SIGTERM before the ignore killed it and no init was read;
+	// stopping before the handshake made the bridge refuse it, and the fake
+	// exited; docs/demo-integration.md 8.4.)
 	e.h.Limits.Total, e.h.Limits.Grace = 30*time.Second, 5*time.Second
-	ignoring := filepath.Join(t.TempDir(), "stdin-count")
+	ready := filepath.Join(t.TempDir(), "cap")
+	late := genScenario(t, fakecli.Scenario{ManualInit: true, IgnoreTerm: true, Steps: []fakecli.Step{{Do: "savecap"}, {Do: "sleep", MS: 800},
+		{Do: "init"}, {Do: "tool", Tool: "request_purchase", Args: json.RawMessage(`{"product_id":"kr-market"}`)}, {Do: "hang"}}})
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(5 * time.Millisecond) {
-			if _, err := os.Stat(ignoring); err == nil {
+			if _, err := os.Stat(ready); err == nil {
 				break
 			}
 		}
 		cancel()
 	}()
-	res = e.run(ctx, "task-a", "init-late", fakecli.EnvStdinFile+"="+ignoring)
+	res = e.run(ctx, "task-a", late, fakecli.EnvCapFile+"="+ready)
 	cancel()
 	if res.Report.Outcome != Cancelled || e.prepared.Load() != 0 || res.TaskStarted || res.StoreEnd != "" || len(res.Calls) != 0 {
 		t.Fatalf("late init: %+v prepared %d", res, e.prepared.Load())
