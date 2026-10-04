@@ -2,7 +2,7 @@
 
 建立在 x402 之上的 Agent 付款授權與證據層：Agent 可以提出付款，但不能自己批准，也不能自己簽名。
 
-> **目前狀態：B1-00～03 已驗收（B1-02 共用契約 `apa.m1.v2` fixture，10/1 於 `2dc8d93` 結案；B1-03 最小資料商店（目錄＋402），10/1 於 `ebd3f44` 結案）；B1-05 確定性 Policy＋Store（`internal/policy`、`internal/store`）10/2 結案，程式驗收基準 `cb33768`，main 已 fast-forward 至 `7ad304a`（[docs/persistence-design.md](docs/persistence-design.md)）；主持人事件 HTTP 端點移至 B1-06；B1-04 Buyer wrapper 10/2 開始（分支 `b1-04-buyer`）：**fake 首個交付點 10/3 於 `b3c66f6` 通過技術 review**；**live 階段 A（開關、init 閘門、fake 驗證）10/3 於 `e8f6719` 通過技術 review**；C0 init 探測（`apa-buyer probe-init`，不送任何使用者訊息、不開 Store）10/4 於 `5f34a7b` 通過技術 review；**10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init**（未送任何使用者訊息；CLI 的背景行為與用量未知）。C0′（`probe-init --send-one-message`，只送一則固定訊息）10/4 已實作，fake 驗證於 `05e03e2` 通過技術 review；10/4 經核准執行一次，在版本檢查即停止、未送出訊息，核准版本隨後改為 `2.1.289 (Claude Code)`，`1f0b260` 通過限定範圍 review；10/4 再經核准執行一次，取得真實 init（Codex 已核對證據）；正式 live 仍不能放行（plugins 2、agents 5 會被 Gate 拒絕，`apiKeySource` 為 `none` 也不在接受清單），plugins／agents 的官方文件查證與只顯示身分的觀測已完成並驗收（程式 `b46e332`；正式 Gate 不變）；未執行真實 CLI，真實 C0′、受管設定讀取與清單調整仍須另行核准。階段 B／C 未執行，live 認證接受清單為空。B1-04 整體 InProgress；真實 Claude 的登入、模型與計費方式都還沒驗證。M1 尚未完成。** 可啟動 loopback 服務、回應 health、提供商品目錄與 HTTP 402 報價、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md)、[docs/merchant.md](docs/merchant.md) 與 [docs/policy.md](docs/policy.md)。
+> **目前狀態：B1-00～03 已驗收（B1-02 共用契約 `apa.m1.v2` fixture，10/1 於 `2dc8d93` 結案；B1-03 最小資料商店（目錄＋402），10/1 於 `ebd3f44` 結案）；B1-05 確定性 Policy＋Store（`internal/policy`、`internal/store`）10/2 結案，程式驗收基準 `cb33768`，main 已 fast-forward 至 `7ad304a`（[docs/persistence-design.md](docs/persistence-design.md)）；主持人事件 HTTP 端點移至 B1-06；B1-04 Buyer wrapper 10/2 開始（分支 `b1-04-buyer`）：**fake 首個交付點 10/3 於 `b3c66f6` 通過技術 review**；**live 階段 A（開關、init 閘門、fake 驗證）10/3 於 `e8f6719` 通過技術 review**；C0 init 探測（`apa-buyer probe-init`，不送任何使用者訊息、不開 Store）10/4 於 `5f34a7b` 通過技術 review；**10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init**（未送任何使用者訊息；CLI 的背景行為與用量未知）。C0′（`probe-init --send-one-message`，只送一則固定訊息）10/4 已實作，fake 驗證於 `05e03e2` 通過技術 review；10/4 經核准執行一次，在版本檢查即停止、未送出訊息，核准版本隨後改為 `2.1.289 (Claude Code)`，`1f0b260` 通過限定範圍 review；10/4 再經核准執行一次，取得真實 init（Codex 已核對證據）；正式 live 仍不能放行（plugins 2、agents 5 會被 Gate 拒絕，`apiKeySource` 為 `none` 也不在接受清單），plugins／agents 的官方文件查證與只顯示身分的觀測已完成並驗收（程式 `b46e332`；正式 Gate 不變）；未執行真實 CLI，真實 C0′、受管設定讀取與清單調整仍須另行核准。階段 B／C 未執行，live 認證接受清單為空。B1-04 整體 InProgress；真實 Claude 的登入、模型與計費方式都還沒驗證。**B1-06 交付點 1（Store 接線、已認證唯讀事件 HTTP、fake 端到端整合）已實作，待 Codex review；尚無 UI、尚無真實模型請購。** M1 尚未完成。** 可啟動 loopback 服務、回應 health、提供商品目錄與 HTTP 402 報價、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md)、[docs/merchant.md](docs/merchant.md) 與 [docs/policy.md](docs/policy.md)。
 > 尚未實作：真實 Claude Code（live）執行、真實 caller 認證、主持人事件檢視的 HTTP 端點、展示層與端到端整合、任何付款、簽章或付費內容交付。`cmd/demo` 尚未開啟 Store，啟動 demo 不會使用持久化；fake 模式的 `cmd/apa-buyer` 已接 Store（設定載入、到期處理啟停、關閉順序），見 [docs/cli-poc.md](docs/cli-poc.md)。
 > 第一個里程碑 M1 的終點是 **請購與 Ask／Deny**，沒有真付款。邊界見 [docs/m1-boundaries.md](docs/m1-boundaries.md)。
 
@@ -25,6 +25,8 @@ cp .env.example .env
 make check    # go vet + go test + go build，不呼叫付費模型、不連 testnet
 make dev      # 先 build，再於前景啟動
 ```
+
+`make dev` 會開啟 Store（`APA_DB_PATH`，預設 `var/apa-demo-fake.db`；恢復驗證失敗就不啟動、不修補），並把本次啟動的 demo token 寫到 `var/demo-tokens.json`（0600）。不帶 fake 計畫時只提供既有紀錄的查詢，不啟動任何 run。
 
 啟動後：
 
@@ -53,6 +55,24 @@ APA_DB_PATH=var/apa-fake.db make demo-fake
 
 **只有 fake 模式**：`bin/fake-claude` 不跑模型、不連網，不需要 Claude Code CLI 或登入；Go 依賴需已下載（首次建置會連 `proxy.golang.org`，之後可離線）。它是真的子程序，透過 MCP bridge 呼叫三個受限工具（目錄、報價、請購）；host 對本機商店發真 HTTP 取得 402，把請購寫進真的 SQLite Store。主商品得到 Ask，沒有付款、沒有內容交付；CLI 說「已付款」也不會改變任何紀錄。Store 只在 CLI 的 init 通過 host 檢查之後才開，之前的業務工具呼叫一律拒絕；fake 拿到的是空的暫存 HOME。同一個 DB 裡 task 只能啟動一次，重跑請用 `TASK=task-a-next` 或新的 `APA_DB_PATH`，不會刪除舊紀錄。live 模式尚未實作與驗證；橋接方式、信任邊界、上限與 CLI 相容性見 [docs/cli-poc.md](docs/cli-poc.md)。
 
+## B1-06 交付點 1：fake 端到端整合
+
+```sh
+make demo-integration     # 建置 bin/demo、bin/fake-claude；APA_ADDR 預設 127.0.0.1:8402
+```
+
+同一個 demo 程序負責商店（真 HTTP 402）、Store 與到期 worker、已認證的唯讀 API，並依可信計畫 `testdata/demo/fake-plan.json` 跑 fake buyer：`task-a`（consumer-a）得到 Ask；`task-b`（consumer-b）由 Host 設定較低預算，得到 Deny（`INSUFFICIENT_BUDGET`）。fake 不跑模型、拿空的暫存 HOME，不找 PATH 上的 `claude`。
+
+查詢（token 從 0600 的 token 檔讀，每次啟動重新產生；viewer 只能看自己 consumer 的 task，host 可看全部）：
+
+```sh
+TOKEN=$(python3 -c 'import json;print([t["token"] for t in json.load(open("var/demo-tokens.json"))["tokens"] if t["role"]=="host"][0])')
+curl -sS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8402/api/tasks/task-a
+curl -sS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8402/api/tasks/task-b/events
+```
+
+停止：`Ctrl-C`。關閉順序是先取消 fake run、停 HTTP、等 run 記錄結束，再停到期 worker、關 bridge，最後關 Store。重啟同一個資料庫會保留紀錄；已存在的 task 不會再跑，要新的 run 請改計畫用 `task-a-next` 或設新的 `APA_DB_PATH`。這是 demo 認證（不是使用者登入），沒有 UI，也沒有真實模型或付款。路由、回應欄位、權限與限制見 [docs/demo-integration.md](docs/demo-integration.md)。
+
 **停止**：在執行 `make dev` 的終端按 `Ctrl-C`（或對該行程送 `SIGTERM`）。服務會關閉 listener 後結束，port 隨即釋放，可以直接再啟動一次。
 
 ## 設定
@@ -69,7 +89,8 @@ dev: .env line(s) 2 are not plain KEY=VALUE (no spaces, quotes or shell syntax);
 |---|---|---|
 | `APA_ADDR` | 是 | 服務位址，必須是 loopback IP 與 port，例如 `127.0.0.1:8402` 或 `[::1]:8402`。不接受 `0.0.0.0`、LAN IP 或主機名稱。`8123` 保留給 WebAuthn 驗證頁，請勿使用 |
 | `APA_LIVE_CLI` | 否 | 預設 `false`。`make dev`（demo）設為 `true` 會拒絕啟動。`apa-buyer run --live` 需要它為 `true`，另需絕對路徑的 `--cli` 與核准版本 `2.1.289 (Claude Code)`（10/4 起）；目前 live 的認證接受清單為空，任何 live run 都會停在 init 閘門（見 [docs/cli-poc.md](docs/cli-poc.md) 第 7 節） |
-| `APA_DB_PATH` | 否 | 只有 `apa-buyer run` 使用：Store 檔案路徑，不接受 DSN，目錄須為 0700；未設定時 fake 為 `var/apa-fake.db`、live 為 `var/apa-live.db`（demo 的預設 `var/apa.db` 不受影響） |
+| `APA_DB_PATH` | 否 | Store 檔案路徑，不接受 DSN，目錄須為 0700。`cmd/demo`（`make dev`、`make demo-integration`）未設定時為 `var/apa-demo-fake.db`；`apa-buyer run` 未設定時 fake 為 `var/apa-fake.db`、live 為 `var/apa-live.db`。不要讓 `apa-buyer` 指向 demo 的資料庫（各自有到期 worker） |
+| `APA_DEMO_TOKEN_FILE` | 否 | `cmd/demo` 寫入 demo token 的檔案，預設 `var/demo-tokens.json`；目錄須為 0700，檔案 0600，每次啟動重新產生 |
 
 缺少或不合法的設定會在啟動時以一行訊息說明原因並結束，例如：
 
@@ -121,7 +142,7 @@ sh scripts/verify/container-verify.sh --inject-export truncate  # 匯出故障�
 ## 目錄
 
 ```text
-cmd/demo/          本機服務進入點：health 與商店路由
+cmd/demo/          demo host：health、商店、Store 與到期 worker、已認證唯讀 API、fake run
 internal/config/   環境變數載入與驗證
 docs/              M1 邊界說明
 scripts/           可重跑的驗收腳本；scripts/verify/ 為容器隔離驗證（僅供驗證）
@@ -140,6 +161,7 @@ cmd/fake-claude/   fake CLI：不跑模型，依情境輸出 stream-json
 internal/buyer/    CLI 程序生命週期、串流解析、結果分類、run trace
 internal/toolbridge/ MCP adapter、capability relay、402 檢查與請購組裝
 testdata/cli/      fake CLI 情境（主線與故障）
+testdata/demo/     demo host 的可信 fake 計畫
 ```
 
 ## 在受限沙箱裡跑測試

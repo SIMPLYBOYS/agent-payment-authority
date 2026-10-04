@@ -77,11 +77,12 @@ M1 的終點是 **請購與 Ask／Deny**。M1 沒有 Signer、沒有結算、沒
 | `.env` 有不支援的行就不啟動，不使用部分載入的設定 | 已實作，由 `scripts/verify-b1-01.sh` 檢查 |
 | 商店目錄與 402；任何 `PAYMENT-SIGNATURE` 都不交付受保護資料；只陳述設定的 URL、不抓取外部 URL | 已實作，有測試（B1-03，10/1 於 `ebd3f44` 結案；見 [merchant.md](merchant.md)） |
 | 確定性 Policy：Ask／Deny／Allow-unavailable，不扣預算、不發 grant、不付款 | 已實作，有測試（B1-05，10/2 結案，Policy 驗收基準 `61b3652`；見 [policy.md](policy.md)） |
-| 請購持久化與去重、事件 hash chain、取消／CLI 逾時／approval 到期、重啟恢復與驗證、A／B 隔離（Store 層，以 session 限制的查詢） | 已實作，有測試（B1-05，10/2 結案，驗收基準 `cb33768`；尚未接到 `cmd/demo`，接線與設定載入屬後續整合；見 [persistence-design.md](persistence-design.md)） |
+| 請購持久化與去重、事件 hash chain、取消／CLI 逾時／approval 到期、重啟恢復與驗證、A／B 隔離（Store 層，以 session 限制的查詢） | 已實作，有測試（B1-05，10/2 結案，驗收基準 `cb33768`；B1-06 交付點 1 已接到 `cmd/demo`，見 [demo-integration.md](demo-integration.md)；見 [persistence-design.md](persistence-design.md)） |
 | Buyer wrapper fake 模式（B1-04 首個交付點）：受限 MCP 工具、capability 綁定 run、402 嚴格檢查、Host 組裝請購寫入 Store、程序群組回收與輸出上限 | 已實作，有測試；**`b3c66f6` 通過 Codex 獨立技術 review**（10/3；見 [cli-poc.md](cli-poc.md) 第 10 節）。B1-04 整體仍 InProgress |
-| Store 接線（fake 命令）：設定來源、Store 開檔、RunExpiry 啟停、關閉順序 | 已實作於 `cmd/apa-buyer`，有測試；`cmd/demo` 尚未接線（B1-06） |
+| Store 接線（fake 命令）：設定來源、Store 開檔、RunExpiry 啟停、關閉順序 | 已實作於 `cmd/apa-buyer`，有測試；`cmd/demo` 的接線見下一列（B1-06 交付點 1） |
+| B1-06 交付點 1：`cmd/demo` 單一組合根管理 Store、到期 worker 與 fake run；已認證唯讀 HTTP（`/api/tasks/{id}`、`/events`；demo capability，viewer 只看自己 consumer，主持人獨立權限；Host／Origin 檢查）；fake 端到端（真 402 → 請購 → Policy → Store → HTTP） | 已實作，以真實 HTTP／SQLite／fake CLI 子程序測試；**待 Codex review**。demo 認證不是使用者登入；沒有 UI（交付點 2）；沒有真實模型請購（B1-04 live 暫緩）；B1-06 完整完成仍需 opt-in live trace（[demo-integration.md](demo-integration.md)） |
 | live 開關與 init 閘門（階段 A）：`--live`＋`APA_LIVE_CLI=true`、絕對路徑與核准版本、init 檢查通過前不開 Store、assistant 訊息與時間上限 | 已實作，以 fake 測試；**`e8f6719` 通過 Codex 獨立技術 review**（10/3；[cli-poc.md](cli-poc.md) 第 14 節）。不代表真實 CLI 的登入、模型或計費已驗證 |
 | C0 init 探測（`probe-init`）：零輸入、零業務執行、零 Store 存取、白名單輸出 | 已實作，以 fake 測試；**`5f34a7b` 通過 Codex 獨立技術 review**（10/4）；**10/4 對真實 CLI 執行一次，30 秒內逾時，未取得 init**；未送使用者訊息，背景行為與用量未知；不代表真實 CLI 行為、登入方式或用量已驗證（[cli-poc.md](cli-poc.md) 第 17–21 節） |
 | C0′ 單訊息探測（`probe-init --send-one-message`）：只寫入一則固定訊息、寫入一次、停止後不再寫，零業務執行、零 Store 存取、白名單輸出 | 已實作，以 fake 測試；**`05e03e2` 通過 Codex 獨立技術 review**（10/4）；10/4 核准執行一次，在版本檢查即停止，**訊息未送出**；核准版本隨後改為 2.1.289，`1f0b260` 通過 Codex 限定範圍 review；10/4 再經核准執行一次，取得真實 init，Codex 已核對證據；plugins／agents 與認證仍會被正式 Gate 擋下，官方文件查證與只顯示身分的觀測已完成並驗收（`b46e332`），正式 Gate 不變（第 30–34 節）。不代表訊息格式、登入方式或用量已驗證（[cli-poc.md](cli-poc.md) 第 22–28 節） |
-| live Claude Code 執行（階段 B／C） | 未執行、未驗證；沒有執行登入檢查，也沒有送出任何使用者訊息（唯一的真實執行是上列 C0，其背景行為與用量未知）；live 認證接受清單為空，任何 live run 都會停在閘門 |
-| 主持人事件檢視 HTTP 端點與展示層（B1-06）、驗收器（B1-07） | 尚未實作 |
+| live Claude Code 執行（階段 B／C） | 未執行、未驗證；沒有執行登入檢查。真實執行只有上列 C0 與 C0′（C0′ 送出一則固定訊息，用量未知）；live 認證接受清單為空，任何 live run 都會停在閘門 |
+| 展示層／Dashboard（B1-06 交付點 2）、驗收器（B1-07） | 尚未實作 |
