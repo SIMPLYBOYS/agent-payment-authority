@@ -280,3 +280,9 @@ demo 的 HTTP 讀取與 fake run 的寫入用同一個 `*store.Store`，不會�
   - 總計 746 秒（兩線 2 CPU 時 844、單線 2 CPU 時 952）。
   - 各步驟：check-contracts 20、check 86、race-cover 158、verify-b1-01 52、mutation 410 秒（baseline 37）。
   - 突變步驟沒有再變快：兩條線各自累計約 282 秒（buyer）與 328 秒（其他），時間主要在等測試本身，不是 CPU。
+- **突變分四條線**（`84cdf5c`，依 Aaron 指示）：buyer 的突變輪流分到兩條線，其餘的輪流分到另外兩條線。
+  - 容器驗證（`artifacts/verify-container/runs/84cdf5cac20d-20261004T172902Z/`）：overall exit 0，七步驟全過，222／222 突變，判定與單線那次完全相同，17 項隔離檢查 ok。
+  - 突變 265 秒（四條線各累計約 192／144／208／207 秒），總計 **562 秒**（最初 952 秒）。
+  - 各步驟：check-contracts 15、check 77、race-cover 154、verify-b1-01 40、mutation 265 秒（baseline 33）。
+  - 有 8 項突變明顯變慢，最多從 3 秒變 7 秒（#80–#85、#117、#151、#152），推測是四條線搶 CPU；判定都沒有變。
+  - 誤判風險同兩條線的說明：搶 CPU 可能讓時序測試誤失敗。
