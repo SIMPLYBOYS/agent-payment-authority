@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-04）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` review 的寫入失敗處理已修正（第 23 節），待 Codex 再 review，未對真實 CLI 執行**（第 22 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），待 Codex 再 review，未對真實 CLI 執行**（第 22 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -632,4 +632,15 @@ fake 新增（測試資料，不是真實 CLI 錄製）：`wait_message` 步驟�
 Codex 回報首次連續執行回歸時曾出現一次子程序非零退出，新容器中未重現，原因未確定，不列為已確認的缺陷；本輪也未觀察到。
 
 共 193 項突變，原 99 項文字未動。訊息格式對真實 CLI 的相容性仍未驗證。
+
+## 24 `38eb2ba` review 修正：結果不依賴通知先後（2026-10-04，Claude Code 執行，待 Codex 獨立 review）
+
+- 發現：寫入結果與 init 幾乎同時就緒時，主迴圈可能先處理 init；runner 只保留第一個停止原因，之後的寫入失敗無法更正結果。Codex 在斷網容器內三輪都重現了 `observed`／`init_observed`，而 `input_status` 卻是 `failed`、0 位元組、有觀測資料。
+- 修正（`probe.go`）：`Run` 回傳前一定等寫入結束，所以分類時寫入狀態已是最終值。分類**先看寫入狀態**：`failed`／`partial` 一律判為 `failed`（`input_failed`／`input_partial`），不保存觀測資料，與 run 先停在哪個原因無關。init 先到、寫入確實未開始的 `not_started` 仍可判為 `observed`。runner 的停止規則（第一個原因保留）不變，第 23 節的立即停止也保留。
+- 回歸測試 `TestProbeOneMessageWriteFailureAfterInit`，不靠延遲：
+  - CLI 先關閉 stdin 並印出 init；啟動掛鉤當屏障，確認這些都發生在寫入之前，所以寫入必定遇到 broken pipe。
+  - 新增只供測試替換的 `afterWrite` 掛鉤：寫入釋放鎖之後、送出完成通知之前，等到 run 已因 init 開始停止，才交出結果。這正好是之前會出錯的先後順序。
+  - 測試先確認 run 確實先停在 init（`runner_outcome` 為 `init_observed`）、寫入確實是 `failed`，再要求結果為 `failed`／`input_failed` 且沒有觀測資料。
+- Codex 的重現程式（每輪 100 次）在暫存副本上重跑三輪通過。此機器上需把其中等待子程序就緒的屏障由 1 秒放寬為 5 秒：本機啟動新 shell 腳本有時超過 1 秒，原值會在屏障處失敗，與修正無關。只改屏障時間，判定條件不變。
+- 突變：#192 因所指程式行改寫而改指新位置；新增 #194（寫入失敗輸給 init 停止）、#195（寫入失敗後仍保留觀測資料）。共 195 項，原 99 項文字未動。
 
