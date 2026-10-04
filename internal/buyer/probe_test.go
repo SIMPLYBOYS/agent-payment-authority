@@ -362,7 +362,10 @@ func TestProbeEntries(t *testing.T) {
 			[]EntryObservation{{"other", 10, "home_plugins_cache"}, {"other", 13, "home_plugins_synced"}, {"other", 10, "home_skills"},
 				{"other", 3, "relative"}, {"not_string", 0, "not_string"}, {"absent", 0, "other"}, {"other", 11, "absent"}, {Name: "malformed"}},
 			[]EntryObservation{{Name: "Explore"}, {Name: "general-purpose"}, {"other", 8, ""}, {Name: "malformed"}, {Name: "Plan"}}},
-		"empty":       {map[string]json.RawMessage{"plugins": json.RawMessage(`[]`), "agents": json.RawMessage(`[]`)}, []EntryObservation{}, []EntryObservation{}},
+		"empty": {map[string]json.RawMessage{"plugins": json.RawMessage(`[]`), "agents": json.RawMessage(`[]`)}, []EntryObservation{}, []EntryObservation{}},
+		"null name and path": {map[string]json.RawMessage{"plugins": json.RawMessage(`[{"name":null,"path":null},{"name":"p"}]`), "agents": json.RawMessage(`[null,{"name":null},{}]`)},
+			[]EntryObservation{{"not_string", 0, "not_string"}, {"other", 1, "absent"}},
+			[]EntryObservation{{Name: "malformed"}, {Name: "not_string"}, {Name: "absent"}}},
 		"absent":      {map[string]json.RawMessage{"plugins": nil, "agents": nil}, nil, nil},
 		"wrong types": {map[string]json.RawMessage{"plugins": json.RawMessage(`"all"`), "agents": json.RawMessage(`{"name":"Plan"}`)}, nil, nil},
 		"over the cap": {map[string]json.RawMessage{"agents": manyRaw, "plugins": json.RawMessage(`[]`)}, []EntryObservation{},
@@ -407,5 +410,23 @@ func TestPathClass(t *testing.T) {
 	}
 	if got := pathClass("/.claude/plugins/cache/a", pathRoots{}); got != "other" {
 		t.Errorf("no HOME: %s", got)
+	}
+}
+
+// A null where a string belongs is not_string, not an empty "other": the
+// same rule for every member the observation picks from a list.
+func TestProbeNullStrings(t *testing.T) {
+	// A raw line: the fake's init overrides treat null as "remove".
+	sc := manual(fakecli.Step{Do: "raw", Text: `{"type":"system","subtype":"init","model":null,"permissionMode":null,"apiKeySource":null,` +
+		`"mcp_servers":[{"name":"apa","status":null}],"claude_code_version":"` + fakecli.InitVersion + `"}` + "\n"}, fakecli.Step{Do: "hang"})
+	p := newProbe(t, genScenario(t, sc), 5*time.Second)
+	res, _ := p.run(context.Background())
+	o := res.Observation
+	if res.Status != ProbeObserved || o == nil {
+		t.Fatalf("%+v", res)
+	}
+	if o.Model != "not_string" || o.PermissionMode != "not_string" || o.AuthSource != "not_string" || o.AuthSourceLen != 0 || o.APAServer != "not_string" ||
+		o.Fields["model"] != "null" {
+		t.Errorf("observation %+v", o)
 	}
 }

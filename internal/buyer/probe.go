@@ -198,7 +198,7 @@ func pick(m map[string]json.RawMessage, k string, list []string) (string, int) {
 		return "absent", 0
 	}
 	var v string
-	if json.Unmarshal(raw, &v) != nil {
+	if jsonType(raw) != "string" || json.Unmarshal(raw, &v) != nil { // null would unmarshal to ""
 		return "not_string", 0
 	}
 	if slices.Contains(list, v) {
@@ -268,7 +268,7 @@ func entries(m map[string]json.RawMessage, k string, names []string, r *pathRoot
 			switch raw, ok := f["path"]; {
 			case !ok:
 				e.Path = "absent"
-			case json.Unmarshal(raw, &path) != nil:
+			case jsonType(raw) != "string" || json.Unmarshal(raw, &path) != nil: // null would unmarshal to ""
 				e.Path = "not_string"
 			default:
 				e.Path = pathClass(path, *r)

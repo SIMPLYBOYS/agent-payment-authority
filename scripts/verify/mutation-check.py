@@ -458,6 +458,10 @@ MUTATIONS = [
      "LINE:\tp = filepath.Clean(p)", "", "TestPathClass"),
     ("B1-04 plugins/agents: the per-element list not bounded", "internal/buyer/probe.go",
      "range list[:min(len(list), maxEntries)]", "range list", "TestProbeEntries"),
+    ("B1-04 null: a null picked as an empty \"other\" string", "internal/buyer/probe.go",
+     "\tif jsonType(raw) != \"string\" || json.Unmarshal(raw, &v) != nil {", "\tif json.Unmarshal(raw, &v) != nil {", "TestProbeNullStrings|TestProbeEntries"),
+    ("B1-04 null: a null plugin path classed as a path", "internal/buyer/probe.go",
+     "case jsonType(raw) != \"string\" || json.Unmarshal(raw, &path) != nil:", "case json.Unmarshal(raw, &path) != nil:", "TestProbeEntries"),
 ]
 
 
