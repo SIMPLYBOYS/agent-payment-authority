@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-04）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），待 Codex 再 review，未對真實 CLI 執行**（第 22 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節，待 Aaron 核准，未執行。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -638,10 +638,76 @@ Codex 回報首次連續執行回歸時曾出現一次子程序非零退出，�
 - 發現：寫入結果與 init 幾乎同時就緒時，主迴圈可能先處理 init；runner 只保留第一個停止原因，之後的寫入失敗無法更正結果。Codex 在斷網容器內三輪都重現了 `observed`／`init_observed`，而 `input_status` 卻是 `failed`、0 位元組、有觀測資料。
 - 修正（`probe.go`）：`Run` 回傳前一定等寫入結束，所以分類時寫入狀態已是最終值。分類**先看寫入狀態**：`failed`／`partial` 一律判為 `failed`（`input_failed`／`input_partial`），不保存觀測資料，與 run 先停在哪個原因無關。init 先到、寫入確實未開始的 `not_started` 仍可判為 `observed`。runner 的停止規則（第一個原因保留）不變，第 23 節的立即停止也保留。
 - 回歸測試 `TestProbeOneMessageWriteFailureAfterInit`，不靠延遲：
-  - CLI 先關閉 stdin 並印出 init；啟動掛鉤當屏障，確認這些都發生在寫入之前，所以寫入必定遇到 broken pipe。
-  - 新增只供測試替換的 `afterWrite` 掛鉤：寫入釋放鎖之後、送出完成通知之前，等到 run 已因 init 開始停止，才交出結果。這正好是之前會出錯的先後順序。
+  - CLI 先關閉 stdin；啟動掛鉤當屏障，確認這發生在寫入之前，所以寫入必定遇到 broken pipe。
+  - 新增只供測試替換的 `afterWrite` 掛鉤，在寫入釋放鎖之後、送出完成通知之前執行：先建立信號檔，通知 CLI 寫入已失敗、這時才印出 init；再等到 run 已因該 init 開始停止，才交出寫入結果。先後是「寫入失敗 → CLI 印出 init → run 停在 init → 交出寫入結果」，正好是之前會出錯的順序。
   - 測試先確認 run 確實先停在 init（`runner_outcome` 為 `init_observed`）、寫入確實是 `failed`，再要求結果為 `failed`／`input_failed` 且沒有觀測資料。
-  - 第一版測試（`751887a`）的先後還不夠固定：在較快的 Linux 容器中，init 在寫入開始前就讓 run 停止，寫入成了 `not_started`，測試在自身的前提檢查處失敗（沒有假通過）。現在 CLI 要等 `afterWrite` 掛鉤確認寫入已失敗、建立信號檔之後才印出 init，先後完全由交握決定。該次失敗的容器紀錄保留於 `artifacts/verify-container/runs/751887a2a15d-20261004T032619Z/`（`FAILED-NOTE.txt`）。
+  - 第一版測試（`751887a`）讓 CLI 一關閉 stdin 就印出 init，先後不夠固定：在較快的 Linux 容器中，init 在寫入開始前就讓 run 停止，寫入成了 `not_started`，測試在自身的前提檢查處失敗（沒有假通過）。`05e03e2` 改為上述交握。該次失敗的容器紀錄保留於 `artifacts/verify-container/runs/751887a2a15d-20261004T032619Z/`（`FAILED-NOTE.txt`）。
 - Codex 的重現程式（每輪 100 次）在暫存副本上重跑三輪通過。此機器上需把其中等待子程序就緒的屏障由 1 秒放寬為 5 秒：本機啟動新 shell 腳本有時超過 1 秒，原值會在屏障處失敗，與修正無關。只改屏障時間，判定條件不變。
 - 突變：#192 因所指程式行改寫而改指新位置；新增 #194（寫入失敗輸給 init 停止）、#195（寫入失敗後仍保留觀測資料）。共 195 項，原 99 項文字未動。
+
+## 25 驗收紀錄：C0′ 實作及 fake 驗證於 `05e03e2` 通過技術 review（2026-10-04）
+
+- 結果：`05e03e2` 通過 Codex 獨立技術 review。C0′ 的寫入失敗與競態問題關閉，本次範圍內沒有新的阻擋問題。
+- **通過的是 C0′ 的實作與 fake 驗證**。不代表真實 CLI 的訊息格式、登入方式或用量已驗證。B1-04 整體仍 InProgress，未標 Done、未合併 main；live 認證接受清單維持空白。真實 C0′ 未執行。
+- 證據歸屬：
+  - **Codex 獨立重跑**（斷網容器）：全套 race／coverage；C0／C0′ 相關回歸三輪，含「init 先到、尚未寫入」的合法路徑；原始 broken-pipe 探測三輪；上輪競態重現每輪 100 次、共三輪；JS 契約向量；20 項證據匯入測試。全部通過。
+  - **Claude Code 執行、Codex 核對紀錄**（不是 Codex 全部重跑）：195／195 突變、完整容器驗證七步、17 項隔離檢查，見 `artifacts/verify-container/runs/05e03e29e846-20261004T034851Z/`；本機檢查見 `artifacts/b1-04/05e03e29e846-20261004T034505Z/`。
+- 歷程：`cf97c87`（首次交付）→ `38eb2ba`（寫入失敗立即停止）→ `05e03e2`（結果不依賴通知先後；通過）。修正內容見第 23、24 節。
+
+## 26 執行一次真實 C0′ 的確認清單（2026-10-04 擬定；待 Aaron 核准，未執行）
+
+本節只是清單。**沒有 Aaron 對「執行一次 C0′」的明確核准就不執行**；執行後不論結果，都不重跑、不放寬任何清單，也不轉往階段 C。
+
+### 26.1 與 C0 的差別
+
+C0′ 會送出**一則**使用者訊息，所以和 C0 不同：設計上就預期可能產生模型請求與用量。程式只保證不會送第二則，也不會等模型回答；**不保證只有一次模型請求，也無法撤回已送出的請求**。
+
+### 26.2 固定內容
+
+- 訊息文字：`Reply only OK.`（程式常數，不能改）。
+- 送出的那一行 stream-json：`{"type":"user","message":{"role":"user","content":"Reply only OK."},"parent_tool_use_id":null}` 加換行，共 95 位元組。只寫一次，在 CLI 啟動後立即寫入。
+- 格式依據是 Agent SDK 的 `SDKUserMessage` 型別。**缺口**：沒有一手文件逐字寫出 CLI stdin 的線上格式，「每行一個 JSON 物件」是推論，真實 CLI 從未收過這一行（第 22.2 節）。
+
+### 26.3 執行前，由 Aaron 確認
+
+1. **核准**：明確同意執行**一次** C0′。核准範圍不含階段 C、帶購物 prompt 的 run、其他模型任務或 C0 重跑。
+2. **CLI**：路徑 `/Users/mac/.local/bin/claude`；版本必須是 `2.1.288 (Claude Code)`。命令會先自行檢查版本，不符就停止，不升降版。若版本已變，需要重新核准釘選。
+3. **自動更新**：維持程序層的 `DISABLE_AUTOUPDATER=1`，不改全域設定；是否另外暫停平時的自動更新，由 Aaron 決定。
+4. **接受的風險**：
+   - CLI 以 Aaron 本人的 HOME、網路與登入憑證執行，會使用 `~/.claude` 與 keychain；這不是作業系統沙箱。
+   - 送出訊息後，可能產生一次或多次模型請求與用量，次數沒有硬上限保證；用量記為 `unknown`。
+   - 若格式不被 CLI 接受，結果可能是解析錯誤、非預期訊息或逾時；這些都是可接受的結果，不會重試。
+5. **登入與憑證來源**（階段 B，第 15.1 節第 1 項）：不阻擋 C0′ 執行，但解讀 `apiKeySource` 需要它。回報方式同前：登入方式／方案一行，以及各來源有／無／不確定；不貼 token、完整帳戶輸出或認證檔。
+
+### 26.4 命令（核准後才執行）
+
+```sh
+cd /Users/mac/Documents/OpenSourceProjects/agent-payment-authority
+git status --short && git rev-parse HEAD     # 工作區乾淨；HEAD 為通過 review 的 05e03e2，或之後只改文件的 commit
+go build -o bin/apa-buyer ./cmd/apa-buyer
+go version -m bin/apa-buyer | grep vcs       # vcs.revision 等於 HEAD、vcs.modified=false
+APA_LIVE_CLI=true ./bin/apa-buyer probe-init --cli /Users/mac/.local/bin/claude --send-one-message --trace-dir <新證據目錄>/runs
+echo "exit=$?"
+```
+
+- 只跑這一條；不帶 `--send-one-message` 就是 C0，不能混用。
+- 最多等 init 30 秒；停止後清理最多約 6 秒（兩個寬限期）。版本檢查另計，最多 5 秒。
+- 不開 Store、不使用 `APA_DB_PATH`、不建立 task、不連商店、不執行任何業務工具。
+
+### 26.5 結果怎麼讀
+
+| exit | status／code | 意思 | 之後 |
+|---|---|---|---|
+| 0 | `observed`／`init_observed` | 拿到一則可嚴格讀取、版本相符的 init；觀測資料是白名單投影 | 把觀測資料（第 17.3 節的欄位）與階段 B 回報一起交 Codex review，再由 Aaron 決定 `apiKeySource` 接受值、model／effort、agents／skills。**不會自動放寬任何清單** |
+| 4 | `no_init_after_message` | 訊息已完整寫入，30 秒內仍沒有 init | 停止；原因不確定（格式可能不被接受，或 init 不會出現在此模式），另行決定 |
+| 1 | `failed`／`input_failed`、`input_partial`、`input_not_started` | 訊息沒有完整寫入 | 停止，回報代碼，不重試 |
+| 1 | `failed`／`api_retry_auth`、`api_retry_rate_limit`、`api_retry` | CLI 呼叫 API 失敗（認證、限流或其他） | 停止，不重試；認證失敗的原因由 Aaron 判斷 |
+| 1 | `failed`／`unexpected_message`、`hook_message`、`ambiguous_json`、`parse_error`、`init_cli_version` 等 | 模型先回覆、出現 hook、歧義或非 JSON 輸出、版本不符等 | 停止，回報代碼 |
+| 1（無 JSON） | — | 啟動前就被拒絕（opt-in、路徑、版本、取消） | 修正前提後再次核准 |
+
+### 26.6 保存與交付
+
+- 終端輸出與 trace 都只有白名單投影：模式、狀態與代碼、寫入狀態與位元組數、計數、觀測資料的固定標籤。不保存訊息文字、原始 init、CLI 文字、stdout／stderr、prompt、環境變數值或 capability。
+- 另存：執行時的 commit、二進位的 vcs 資訊、起訖時間與 exit code。標為「Claude Code（或 Aaron）執行，待 Codex review」。
+- 執行後即停止，等 review 與 Aaron 的下一步決定。
 
