@@ -4,7 +4,7 @@
 
 **本輪有什麼**：真實的本機商店 HTTP 402、Host 組裝請購、Policy、SQLite Store、到期 worker，以及已認證的唯讀 HTTP 查詢，全部在同一個程序裡。模型行為由 fake CLI 替身產生。
 
-**本輪沒有什麼**：沒有 UI／Dashboard（交付點 2）、沒有真實 Claude CLI 請購（B1-04 live 暫緩）、沒有登入產品（只有 demo 用的 capability）、沒有付款、grant、Signer 或鏈上操作。B1-06 的完整完成門檻仍包含至少一次 opt-in live trace。
+**本輪沒有什麼**：沒有 UI／Dashboard（交付點 2，見 [demo-ui.md](demo-ui.md)）、沒有真實 Claude CLI 請購（B1-04 live 暫緩）、沒有登入產品（只有 demo 用的 capability）、沒有付款、grant、Signer 或鏈上操作。B1-06 的完整完成門檻仍包含至少一次 opt-in live trace。
 
 ## 1 服務生命週期（`cmd/demo`）
 
@@ -303,4 +303,5 @@ demo 的 HTTP 讀取與 fake run 的寫入用同一個 `*store.Store`，不會�
     - Codex 檢查時，`f2d63fb` 的完整紀錄還沒產生，所以**不能寫成 Codex 已核對該輪全套通過**。
 - **範圍**：只有交付點 1。沒有 UI，沒有真實模型請購；B1-06 的完整完成仍需 opt-in live trace。
 - **獨立待辦（非阻擋）**：`84cdf5c` 的四線突變是新的驗證工具變更，尚未經 Codex review，**不包含在 `f2d63fb` 的驗收結論中**。這項不阻擋交付點 2 的開發。
+- **後續（10/5）**：交付點 2（Unity＋LimeZu 商店與 Dashboard）已實作於 `417f104`，待 Codex review，見 [demo-ui.md](demo-ui.md)。
 - **狀態**：B1-04、B1-06 都維持 InProgress，未合併 main、未標 Done。交付點 2（Dashboard／placeholder 商店）可以準備進入（10/5，建議範圍見 vault 任務清單），尚未開始；不恢復 plugins 調查。

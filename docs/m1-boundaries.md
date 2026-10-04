@@ -85,4 +85,5 @@ M1 的終點是 **請購與 Ask／Deny**。M1 沒有 Signer、沒有結算、沒
 | C0 init 探測（`probe-init`）：零輸入、零業務執行、零 Store 存取、白名單輸出 | 已實作，以 fake 測試；**`5f34a7b` 通過 Codex 獨立技術 review**（10/4）；**10/4 對真實 CLI 執行一次，30 秒內逾時，未取得 init**；未送使用者訊息，背景行為與用量未知；不代表真實 CLI 行為、登入方式或用量已驗證（[cli-poc.md](cli-poc.md) 第 17–21 節） |
 | C0′ 單訊息探測（`probe-init --send-one-message`）：只寫入一則固定訊息、寫入一次、停止後不再寫，零業務執行、零 Store 存取、白名單輸出 | 已實作，以 fake 測試；**`05e03e2` 通過 Codex 獨立技術 review**（10/4）；10/4 核准執行一次，在版本檢查即停止，**訊息未送出**；核准版本隨後改為 2.1.289，`1f0b260` 通過 Codex 限定範圍 review；10/4 再經核准執行一次，取得真實 init，Codex 已核對證據；plugins／agents 與認證仍會被正式 Gate 擋下，官方文件查證與只顯示身分的觀測已完成並驗收（`b46e332`），正式 Gate 不變（第 30–34 節）。不代表訊息格式、登入方式或用量已驗證（[cli-poc.md](cli-poc.md) 第 22–28 節） |
 | live Claude Code 執行（階段 B／C） | 未執行、未驗證；沒有執行登入檢查。真實執行只有上列 C0 與 C0′（C0′ 送出一則固定訊息，用量未知）；live 認證接受清單為空，任何 live run 都會停在閘門 |
-| 展示層／Dashboard（B1-06 交付點 2）、驗收器（B1-07） | 尚未實作 |
+| B1-06 交付點 2：Unity＋LimeZu 商店（Unity 6000.5.3f1，獨立於 pixel-office）與網頁 Dashboard（Inspector、Timeline、白名單 JSON），同一份投影；viewer token 只在頁面記憶體；`GET /api/viewer` | 已實作，以 JS adapter、Unity EditMode／PlayMode、HTTP 與實際瀏覽器（本機 Chrome＋真 Unity Web 建置）測試；**待 Codex review**。只有 fake 資料鏈；LimeZu 素材與建置不進 git、不發布（[demo-ui.md](demo-ui.md)） |
+| 驗收器（B1-07） | 尚未實作 |
