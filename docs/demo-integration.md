@@ -269,3 +269,9 @@ demo 的 HTTP 讀取與 fake run 的寫入用同一個 `*store.Store`，不會�
   - 總耗時 952 秒，之前同類執行為 1154／1245 秒。
   - 各步驟：check-contracts 21、check 91、race-cover 196、verify-b1-01 45、guards 1、evidence-import-tests 1、mutation 580 秒（其中 baseline 37 秒）。
   - 10/5 先前一次因 Docker daemon 未執行而沒有跑到任何檢查（`artifacts/b1-06/container-8dfa317.log`）。
+- **突變分兩條線並行**（`e8b75a9`，依 Aaron 指示）：internal/buyer 一條，其餘一條，各用自己的固定路徑。baseline 仍單獨先跑，判定方式不變。
+  - 容器驗證（`e8b75a9`，`artifacts/verify-container/runs/e8b75a90a4b2-20261004T165254Z/`）：overall exit 0，七步驟全過，222／222 突變，17 項隔離檢查 ok。
+  - 突變步驟 411 秒（前次 580 秒），總計 844 秒（前次 952 秒）。
+  - 與前次相比，每一項突變的判定都相同；兩項明顯變慢（#100：1→5 秒，#108：1→6 秒），推測是兩條線搶 CPU。
+  - 這次其他步驟也比前次慢（check 91→115、race 196→233、check-contracts 21→27 秒）。它們沒有改動、依序執行，所以差異來自主機負載；兩次之間的比較只能當參考。
+  - **風險**：兩條線在 2 顆 CPU 上同時跑，對時序敏感的測試可能因搶 CPU 而失敗，讓存活的突變被誤判為 KILLED。這次判定與單線完全一致，但不能證明以後都不會發生。
