@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），已通過 Codex 限定範圍 review（第 29 節）。10/4 經 Aaron 核准再執行一次真實 C0′：exit 0，取得真實 init，Codex 已核對證據（第 30、31 節）。正式 live 仍不能放行：plugins 2、agents 5 會先被 Gate 拒絕，`apiKeySource` = `none` 也不在接受清單；plugins／agents 的釐清方案待 Aaron 核准（第 31 節）。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），已通過 Codex 限定範圍 review（第 29 節）。10/4 經 Aaron 核准再執行一次真實 C0′：exit 0，取得真實 init，Codex 已核對證據（第 30、31 節）。正式 live 仍不能放行：plugins 2、agents 5 會先被 Gate 拒絕，`apiKeySource` = `none` 也不在接受清單；plugins／agents 的釐清方案待 Aaron 核准（第 31 節）。10/4 依核准完成 A 官方文件查證與 B 身分觀測（程式 `4e709ab`、`8da15dd`），待 Codex 限定範圍 review；未執行真實 CLI（第 32 節）。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -781,7 +781,7 @@ echo "exit=$?"
 
 - 已知：這次 init 的 `plugins` 有 2 個元素、`agents` 有 5 個；`tools` 正好是預期的 3 個、其他 0，所以這些 plugins 沒有在工具清單中多出可用工具；停止前沒有觀測到 hook 訊息。啟動參數含 `--restricted`（依 help 說明會忽略 user／project／local 設定檔），工作目錄是 probe 新建的暫存目錄。
 - 未知：它們的名稱、來源與是否執行過。**出現在 init 只代表 CLI 列出它們，不代表已執行**；但也不能據此證明背景沒有執行，例如 plugin 的 hook 或 MCP 以外的行為。
-- 推測，未驗證：5 個 agents 可能是 CLI 內建的那組（本機使用者自訂 agents 數量遠多於 5，像是沒被載入）；2 個 plugins 的來源可能不在 `--restricted` 涵蓋範圍內（例如受管設定或已安裝 plugin 的狀態）。**兩項都只是推測，不能據此允許。**
+- 推測，未驗證：5 個 agents 可能是 CLI 內建的那組（官方文件列出 6 個內建名稱，見第 32 節；10/4 修正：原句以本機自訂 agents 數量推論，並無依據，已刪除）；2 個 plugins 的來源可能不在 `--restricted` 涵蓋範圍內（例如受管設定或已安裝 plugin 的狀態）。**兩項都只是推測，不能據此允許。**
 
 ### 31.3 最小釐清方案（每一步都待 Aaron 核准；目前都未執行）
 
@@ -810,7 +810,7 @@ echo "exit=$?"
 **C．再執行一次真實 C0′，取得名稱與來源**（需另行核准）
 
 - 同第 26 節：會再送一則固定訊息，可能產生用量，請求次數沒有保證。
-- 目前已知只有送出使用者訊息後才會出現 init（第 21、30 節），所以沒有不送訊息就取得 init 的辦法。
+- 目前兩次觀測如此：C0 零輸入 30 秒內未取得 init（第 21 節），C0′ 送出訊息後取得（第 30 節）；其他零輸入方式尚未確認（10/4 修正原本的絕對敘述）。
 - A 只能提出推測，要確認身分仍需 C 的實際 init。
 
 **D．決定（C 之後，由 Aaron 決定）**
@@ -818,3 +818,119 @@ echo "exit=$?"
 - 優先：若 A 找到有文件依據的方法，調整啟動參數讓 plugins／agents 不載入，讓 init 回到空清單，Gate 不變。這需要實作、fake 測試、review，再做一次真實驗證。
 - 其次：只允許經確認的特定名稱與來源，不是全部允許；需要把 Gate 改成名稱清單，並另行 review。
 - 認證（`none`）另依階段 B 摘要處理，與 plugins／agents 分開決定。
+
+## 32 plugins／agents 釐清：A 查證與 B 身分觀測（2026-10-04；Claude Code 執行，待 Codex 限定範圍 review）
+
+依據：vault 筆記 `Claude-Code-B1-04-plugins-agents釐清指示-92a3b77-20261004`（Aaron 核准第 2 節），起點 `92a3b77`。本輪沒有執行真實 CLI（含 `--help`、`--version`），沒有讀本機設定或 plugin／agent 內容，沒有改正式 Gate、認證接受清單或真實啟動參數。
+
+### 32.1 官方來源
+
+2026-10-04（UTC）查閱，以各頁的 `.md` 原文核對；需要時引用原文：
+
+- Agent SDK TypeScript 參考（`SDKSystemMessage`、`ApiKeySource`）：https://code.claude.com/docs/en/agent-sdk/typescript
+- CLI 參考（`--restricted`、`--bare`、`--safe-mode`、`--setting-sources`、`--settings`、`--plugin-dir`）：https://code.claude.com/docs/en/cli-reference
+- Subagents（內建清單、範圍優先順序、停用方式）：https://code.claude.com/docs/en/sub-agents
+- 環境變數（`CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS`、`CLAUDE_CODE_SAFE_MODE`）：https://code.claude.com/docs/en/env-vars
+- Plugin 載入（來源、synced plugins、`enabledPlugins` 的來源、磁碟位置）：https://code.claude.com/docs/en/plugins/loading
+- 設定參考（`syncClaudeAiPlugins`、`enabledPlugins`）：https://code.claude.com/docs/en/settings-reference
+- Headless（bare mode）：https://code.claude.com/docs/en/headless
+- 受管設定（macOS 位置）：https://code.claude.com/docs/en/managed-settings
+
+**版本差距**：這些是線上最新文件，不分版本；頁中提到的最高版本是 v2.1.288，**沒有提到 2.1.289**。以下各點是否完全適用於 2.1.289，未確認。
+
+### 32.2 已確認（文件明載）
+
+1. **init 結構**：`agents?: string[]`，只有名稱；`plugins: { name: string; path: string }[]`；`skills: string[]`；另有可選的 `plugin_errors`。
+2. **內建 subagents** 共 6 個名稱：`Explore`、`Plan`、`general-purpose`、`claude`、`statusline-setup`、`claude-code-guide`。
+3. **`--restricted`**：「loads only managed settings and `--settings`」；移除執行命令或程式碼的內建工具與 WebFetch；把檔案工具限制在工作目錄；拒絕 `bypassPermissions`。**沒有提到 plugins 或 agents。**
+4. **plugin 來源**：
+   - id 後綴有 `@<marketplace>`、`@inline`、`@skills-dir`（`~/.claude/skills/` 下含 manifest 的目錄）、`@synced`。
+   - `enabledPlugins` 可來自 `--add-dir`、user、project、local、flag（`--settings`）、managed。
+   - managed 的 `true` 強制啟用、`false` 封鎖，其他來源都不能覆寫。
+5. **synced plugins 不下載也不載入的情況**：
+   - 以 `ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_OAUTH_TOKEN` 或 `apiKeyHelper` 取代登入時；
+   - 不從 Anthropic 擷取 feature flags 的 session，例如設了 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`；
+   - `--bare`、`--safe-mode`；
+   - `--setting-sources` 不含 `user`。
+6. **內建 agents 的停用方式**：
+   - 在 `-p` 模式設 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`，會移除全部內建類型，含 `general-purpose`。
+   - `CLAUDE_CODE_DISABLE_EXPLORE_PLAN_AGENTS=1` 只移除 Explore 與 Plan。
+   - `permissions.deny` 的 `Agent(<name>)` 會阻擋使用。
+7. **`--safe-mode`**：
+   - 不載入 plugins、MCP servers、custom agents 等；managed plugins 也不載入；
+   - **MCP servers 同樣不載入**。
+8. **`--bare`**：
+   - 略過 plugins、subagents 等自動探索，只連命令列提供的 MCP；
+   - 但「never reads OAuth credentials or the system keychain」，需要 `ANTHROPIC_API_KEY` 或 `apiKeyHelper`。
+9. **`ApiKeySource`**：CLI 只回報四個值之一。`none` 是「No API key. The session authenticates another way, such as a claude.ai login, a bearer token, or a cloud provider」。
+
+### 32.3 推論與推測（未驗證）
+
+- **plugins 不太像 synced 來的**：本專案固定設 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`（`host.go` 的 `fixedEnv`）。依第 5 點，若文件適用於 2.1.289，那 2 個 plugins 應該不是 synced plugins。
+- **可能的來源**：
+  - 已排除的部分：`--restricted` 不讀 user／project／local，所以 user 的 `enabledPlugins` 不適用；工作目錄是空的暫存目錄；環境白名單不傳 `CLAUDE_CODE_PLUGIN_DIRS`。
+  - 剩下文件提到的來源：managed settings（Aaron 表示「受管設定：有」），以及 `~/.claude/skills/` 下的 skills-dir plugin（`--restricted` 是否影響它，未確認）。
+  - **來源仍未確認。**
+- **5 個 agents**：比文件列的 6 個內建名稱少一個。可能是內建名稱的子集，也可能含 managed 或 plugin 定義的 agent。**未確認。**
+- **`none`**：和 claude.ai 登入相符，但文件也列了 bearer token 與雲端供應商。環境白名單不傳 `CLAUDE_CODE_OAUTH_TOKEN`（Aaron 表示有設這個變數）和雲端變數，所以這次較可能是 claude.ai 登入。這只是推測；認證另行決定，本輪不改任何清單。
+- **init 列出 ≠ 已執行**：init 列出 plugins／agents，只代表 CLI 這樣自述，不代表它們已執行。工具清單只有 3 個，也不能推論沒有其他背景行為。
+
+### 32.4 未確認
+
+- 2 個 plugins 的名稱與來源，以及 5 個 agents 的名稱。
+- `--safe-mode` 是否也會停用 `--mcp-config` 指定的 apa bridge。文件只寫 MCP servers 不載入，沒區分命令列提供的。
+- `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` 能否讓這次 init 的 agents 變成空清單。只有 5 個都是內建時才會。
+- managed settings 的 `enabledPlugins` 是不是來源。要確認得讀本機檔案，尚未獲准。
+
+### 32.5 建議的最小方案
+
+1. **A 不能回答身分問題，所以 B 有必要**。已實作，見 32.6。
+2. **下一次真實觀測**（需另行核准）用 B 的投影可以得到：
+   - agents 是否都是 6 個內建名稱；
+   - 每個 plugin 的名稱長度與路徑分類（synced／cache／其他 plugins 目錄／skills／工作目錄／其他）。
+   - plugin 名稱沒有候選依據，仍只會顯示 `other`。若要顯示，需要 Aaron 提供名稱，或核准讀取下列檔案的鍵名。
+3. **限制參數提案**（只是提案；現行啟動參數不變，待確認採用）：
+   - **agents**：若觀測確認 5 個都是內建名稱，提案在 CLI 環境固定加入 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`。文件明載它在 `-p` 生效，本專案也用 `-p`；文件沒有提到它影響 MCP。
+   - **plugins，若來自 managed settings 的強制啟用**：使用者端無法以 `--settings` 覆寫。有文件依據的停用方式都不適用：`--safe-mode` 同時停用 MCP servers，可能包含 apa bridge（未確認）；`--bare` 不能用訂閱登入。這時只能由 Aaron 調整受管設定（本輪不改），或另行評估是否逐一允許。
+   - **plugins，若來自 skills-dir 或 marketplace**：可提案用 `--settings` 傳入 `{"enabledPlugins":{"<id>":false}}`（flag 來源，只對這次 session 有效），但要先知道 id。
+4. **讀取本機檔案的請求**（待 Aaron 確認後才讀；只讀下列欄位，不讀其他內容）：
+   - `/Library/Application Support/ClaudeCode/managed-settings.json`：`enabledPlugins` 的鍵名（plugin id）與值；頂層是否有 `syncClaudeAiPlugins`、`strictPluginOnlyCustomization` 及其值；`agents` 相關鍵是否存在。
+   - `/Library/Application Support/ClaudeCode/managed-settings.d/`：檔名，以及每個檔案的相同欄位。
+   - macOS 設定描述檔 `com.anthropic.claudecode` 也可能提供受管設定；是否查看、用什麼方式查看，由 Aaron 決定。
+
+### 32.6 B 實作（`4e709ab`；測試修正 `8da15dd`）
+
+- `internal/buyer/probe.go`：
+  - 觀測資料新增 `plugins_entries`、`agents_entries`，各取前 16 個元素；`*_count` 維持精確數量。
+  - **名稱**：只有在固定顯示清單內才顯示原名，否則顯示 `other` 與長度。agents 清單是 32.2 第 2 點的 6 個內建名稱；plugins 清單為空，因為目前沒有官方依據或 Aaron 提供的名稱。
+  - **其他標籤**：`not_string`、`absent`、`malformed`。元素可以是字串，或用嚴格 reader 讀出、`name` 為字串的物件。除了 `name` 與 plugin 的 `path`，元素的其他內容一律不看，例如 description。
+  - **plugin 路徑只輸出分類**：依 CLI 的 HOME 與 probe 工作目錄，分成 `home_plugins_synced`、`home_plugins_cache`、`home_plugins_other`、`home_skills`、`work_dir`、`other`、`relative`、`absent`、`not_string`。
+  - 分類只看路徑文字：先 `Clean`，根目錄須整段相符，不讀磁碟、不跟隨連結。
+  - **已知限制**：路徑若以 symlink 後的形式出現（例如 `/private/var` 與 `/var`），工作目錄會被分到 `other`。
+  - **顯示清單不是接受清單**：正式 Gate 不變，仍拒絕非空的 plugins／agents；認證接受清單仍為空。
+- 測試：
+  - `TestProbeEntries`：已知名稱、未知名稱、缺欄位、型別錯誤、超過 16 個的上限（計數仍精確）。
+  - `TestPathClass`：各分類、根目錄整段相符（`pluginsX`、`workshop` 不算）、`..` 先清理、沒有 HOME 的情況。
+  - `TestProbeNoLeak`：把合成標記與 fake capability 放進 plugin／agent 的名稱與路徑，都不會進入結果或 trace。
+  - `TestHostInitGate` 新增：agents 只有 `["Explore"]` 時，Gate 仍拒絕（`agents`）。
+  - 既有的 C0′ 停止、寫入失敗、競態與「init 先到、尚未寫入」回歸照舊。
+- 突變 #197–#201：
+  - 名稱原樣輸出；
+  - 路徑原樣輸出；
+  - 根目錄只比對前綴；
+  - 不先 `Clean`；
+  - 取消 16 個的上限。
+  - 共 201 項，原有項目文字未動；提交前預檢 #197–#201 都被斷言抓到。
+- `8da15dd` 只改測試：`TestProbeOneMessageInterleaving/cancel_after_0s` 在 `4e709ab` 的 B1-01 回歸中失敗一次。原因是 0 秒的取消搶在 Probe 自身的啟動前檢查之前，Probe 依設計拒絕啟動並回錯誤，測試卻把這當成失敗。現在接受這個結果，但前提是 fake 從未啟動、沒有寫入；連跑 30 次通過。
+
+### 32.7 驗證（Claude Code 執行，待 Codex 獨立 review；最終程式 `8da15dd`）
+
+- **本機**（`artifacts/b1-04/8da15dd7ee03-20261004T065920Z/`）：make check、check-contracts、`go test -race -cover ./... -count=1`、B1-01、20 項證據匯入測試全部 exit 0。
+  - 覆蓋率：buyer 92.7%、toolbridge 91.8%、apa-buyer 81.7%。
+  - 乾淨匯出 demo-fake：0／2／0（同一 task 的第二次依設計 exit 2）。
+- **容器完整驗證**（`8da15dd`，沿用既有映像 sha256:78258368…，未重建、無新依賴）：overall exit 0，七步驟全過；baseline PASS、201／201 突變被抓到；17 項隔離檢查 ok。
+  - 證據：`artifacts/verify-container/runs/8da15dd7ee03-20261004T063954Z/`；主機端輸出 `artifacts/b1-04/container-8da15dd.log`。
+- **失敗嘗試**（保留，各附 FAILED-NOTE.txt，不算證據）：
+  - `artifacts/b1-04/4e709aba45af-20261004T062856Z/`：B1-01 exit 1，原因是 0 秒取消的測試時序（`8da15dd` 已修）。其他四項 exit 0。
+  - `artifacts/b1-04/8da15dd7ee03-20261004T063517Z/`：B1-01 exit 1。`cmd/apa-buyer` 的 `TestLiveOptIn` 在全套並行測試負載下，代用 shell 腳本的 `--version` 超過 5 秒上限、沒有執行。這個測試自 `1f0b260` 起未改；容器內與之後的本機重跑都通過。判斷是本機的時序問題，未修改程式。其他四項 exit 0。
+- **未執行**：任何真實 CLI 命令、真實觀測、正式 live。
