@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節，待 Aaron 核准，未執行。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -711,3 +711,11 @@ echo "exit=$?"
 - 另存：執行時的 commit、二進位的 vcs 資訊、起訖時間與 exit code。標為「Claude Code（或 Aaron）執行，待 Codex review」。
 - 執行後即停止，等 review 與 Aaron 的下一步決定。
 
+## 27 真實 C0′ 執行一次：版本檢查即停止（2026-10-04；Claude Code 執行，待 Codex review）
+
+- 核准：Aaron 10/4 核准依第 26 節執行一次 `probe-init --send-one-message`；版本不符即停止，不自行更新或調整核准版本，不重試。
+- 前置核對：HEAD `dcca26f`、工作區乾淨；重新建置，二進位 `vcs.revision=dcca26f…`、`vcs.modified=false`。
+- 結果：exit 1。`/Users/mac/.local/bin/claude --version` 的輸出不等於 `2.1.288 (Claude Code)`，`apa-buyer` 在版本檢查處停止（`cmd/apa-buyer/main.go` 的 `checkLive`）。依程式設計不重複 CLI 文字，所以**實際版本未記錄**。
+- 因此：probe 未啟動，stdin 0 位元組，C0′ 訊息未送出；執行過的只有 `--version`（在程序層停用自動更新的環境下）。Store 未開，業務呼叫 0，無觀測資料，無 trace 檔。起訖 04:32:52Z–04:32:54Z。
+- 證據：`artifacts/b1-04/c0prime-real-20261004T043252Z/`（commit、binary-vcs、起訖時間、exit code、stderr 的固定訊息；stdout 與 `runs/` 為空）。
+- 依核准條件已停止：不重跑、不更新 CLI、不改核准版本、不放寬清單、不轉往階段 C 或 C0。**C0′ 的目標（取得 init）未達成，這次不是 C0′ 的有效結果。** 之後要由 Aaron 自行確認本機 CLI 版本（Claude Code 未獲准執行 `--version` 以外的檢查，也不另外執行）；若版本已變，需重新決定釘選與是否再核准一次 C0′。
