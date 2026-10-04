@@ -735,23 +735,74 @@ func (s *Store) read(sess contracts.Session, fn func(t *taskTx) error) error {
 	return fn(t)
 }
 
+func (t *taskTx) taskView() TaskView {
+	v := TaskView{TaskID: t.row.TaskID, Status: t.row.Status, DenyReason: t.row.DenyReason.String, Purchases: []PurchaseView{}}
+	if n := len(t.events); n > 0 {
+		v.AsOfSequence, v.AsOfObservedAt = t.events[n-1].Sequence, t.events[n-1].ObservedAt
+	}
+	for _, p := range t.purchases {
+		v.Purchases = append(v.Purchases, t.view(p))
+	}
+	sort.Slice(v.Purchases, func(i, j int) bool {
+		return v.Purchases[i].DecidedAt < v.Purchases[j].DecidedAt || v.Purchases[i].DecidedAt == v.Purchases[j].DecidedAt && v.Purchases[i].PurchaseOrderID < v.Purchases[j].PurchaseOrderID
+	})
+	return v
+}
+
 // Task returns the session's task as last committed.
 func (s *Store) Task(sess contracts.Session) (TaskView, error) {
 	var v TaskView
-	err := s.read(sess, func(t *taskTx) error {
-		v = TaskView{TaskID: t.row.TaskID, Status: t.row.Status, DenyReason: t.row.DenyReason.String, Purchases: []PurchaseView{}}
-		if n := len(t.events); n > 0 {
-			v.AsOfSequence, v.AsOfObservedAt = t.events[n-1].Sequence, t.events[n-1].ObservedAt
-		}
-		for _, p := range t.purchases {
-			v.Purchases = append(v.Purchases, t.view(p))
-		}
-		sort.Slice(v.Purchases, func(i, j int) bool {
-			return v.Purchases[i].DecidedAt < v.Purchases[j].DecidedAt || v.Purchases[i].DecidedAt == v.Purchases[j].DecidedAt && v.Purchases[i].PurchaseOrderID < v.Purchases[j].PurchaseOrderID
-		})
-		return nil
-	})
+	err := s.read(sess, func(t *taskTx) error { v = t.taskView(); return nil })
 	return v, err
+}
+
+// TaskBinding is the identity a task was started with, as stored with it:
+// never the host's current registry. WalletEvidenceMode comes from the
+// task's own registry snapshot.
+type TaskBinding struct {
+	TaskID             string `json:"task_id"`
+	ConsumerID         string `json:"consumer_id"`
+	AgentID            string `json:"agent_id"`
+	WalletID           string `json:"wallet_id"`
+	Payer              string `json:"payer"`
+	WalletEvidenceMode string `json:"wallet_evidence_mode"`
+}
+
+// TaskRecord is one read transaction's account of a stored task: its
+// binding, its projection and its events, all as of the same commit.
+type TaskRecord struct {
+	Binding TaskBinding
+	Task    TaskView
+	Events  []contracts.AuditEvent
+}
+
+// ReadTask is the host's read of a stored task for a caller whose trusted
+// grant is visible: it is asked with the task's stored consumer, never a
+// value from the request. An unknown task and one the caller may not see
+// are the same OWNERSHIP_MISMATCH. A task whose snapshot no longer holds
+// its stored wallet is refused as corrupt, never filled from elsewhere.
+// Nothing is expired or written.
+func (s *Store) ReadTask(taskID string, visible func(consumerID string) bool) (TaskRecord, error) {
+	tx, err := s.r.Begin()
+	if err != nil {
+		return TaskRecord{}, err
+	}
+	defer tx.Rollback()
+	t, err := s.openTask(tx, 0, taskID)
+	if Code(err) == "UNKNOWN_TASK" || err == nil && !visible(t.row.ConsumerID) {
+		return TaskRecord{}, refuse("OWNERSHIP_MISMATCH", "no such task for this caller")
+	} else if err != nil {
+		return TaskRecord{}, err
+	}
+	task, w, err := t.reg.Binding(taskID)
+	if err != nil || task.ConsumerID != t.row.ConsumerID || task.AgentID != t.row.AgentID || w.WalletID != t.row.WalletID || w.From != t.row.Payer {
+		return TaskRecord{}, &CorruptError{Check: "binding", TaskID: taskID, Detail: "the task's registry snapshot does not hold its stored binding"}
+	}
+	return TaskRecord{
+		Binding: TaskBinding{TaskID: t.row.TaskID, ConsumerID: t.row.ConsumerID, AgentID: t.row.AgentID, WalletID: t.row.WalletID,
+			Payer: t.row.Payer, WalletEvidenceMode: w.EvidenceMode},
+		Task: t.taskView(), Events: t.events,
+	}, nil
 }
 
 // Events returns the session's task events as last committed.

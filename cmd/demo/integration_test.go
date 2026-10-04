@@ -55,7 +55,9 @@ type hostOpts struct {
 	expiryEvery time.Duration
 	limits      *buyer.Limits
 	fakeEnv     []string
-	fakeCLI     string // "" means the test binary as fake-claude
+	fakeCLI     string       // "" means the test binary as fake-claude
+	args        []string     // more serve flags, e.g. --registry
+	stage       func(string) // the stop steps
 }
 
 type host struct {
@@ -114,7 +116,7 @@ func mainline(t *testing.T) string {
 }
 
 func serveArgs(t *testing.T, o hostOpts, dir string) []string {
-	args := []string{"--trace-dir", filepath.Join(dir, "runs")}
+	args := append([]string{"--trace-dir", filepath.Join(dir, "runs")}, o.args...)
 	if o.runs == nil {
 		return args
 	}
@@ -163,7 +165,7 @@ func startHost(t *testing.T, o hostOpts) *host {
 	done := make(chan error, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	d := deps{getenv: hostEnv(dir, "127.0.0.1:0"), self: exe, out: h.out, clock: clock, ready: ready, expiryEvery: o.expiryEvery,
-		limits: o.limits, fakeEnv: o.fakeEnv, onStore: func(s *store.Store) { h.st = s }, runsDone: h.runs}
+		limits: o.limits, fakeEnv: o.fakeEnv, onStore: func(s *store.Store) { h.st = s }, runsDone: h.runs, stage: o.stage}
 	args := serveArgs(t, o, dir)
 	go func() { done <- serve(ctx, args, d) }()
 	h.stop = func() error {

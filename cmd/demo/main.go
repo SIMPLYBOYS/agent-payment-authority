@@ -69,6 +69,7 @@ type deps struct {
 	limits      *buyer.Limits       // nil means buyer.DefaultLimits
 	fakeEnv     []string            // extra fake CLI variables (tests: pid and capability files)
 	onStore     func(*store.Store)  // after the Store opened, before serving
+	stage       func(string)        // tests: each stop step, in the order it happens
 	runsDone    chan<- []runOutcome // receives the fake runs' outcomes when all ended
 }
 
@@ -110,6 +111,11 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	}
 	dbPath := cmp(d.getenv("APA_DB_PATH"), "var/apa-demo-fake.db")
 	tokenPath := cmp(d.getenv("APA_DEMO_TOKEN_FILE"), "var/demo-tokens.json")
+	// Before any lock, Store or token write: the token file must never
+	// replace the database or one of its files.
+	if err := checkTokenPath(dbPath, tokenPath); err != nil {
+		return err
+	}
 	var regCfg contracts.RegistryConfig
 	if err := decodeFile(*registryPath, &regCfg); err != nil {
 		return fmt.Errorf("registry: %w", err)
@@ -171,11 +177,11 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		// Recovery failed: nothing is served, repaired or rebuilt.
 		return fmt.Errorf("store %s: %w", dbPath, err)
 	}
-	defer func() { err = errors.Join(err, st.Close()) }() // last: after runs, expiry and the bridge
+	defer func() { err = errors.Join(err, st.Close()); d.at("store_closed") }() // last: after runs, expiry and the bridge
 	if d.onStore != nil {
 		d.onStore(st)
 	}
-	tokens, err := newTokens(regCfg, tokenPath)
+	tokens, err := newTokens(regCfg, tokenPath, dbPath)
 	if err != nil {
 		return err
 	}
@@ -189,7 +195,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	expiry.Go(func() {
 		st.RunExpiry(expiryCtx, every, func(err error) { fmt.Fprintln(d.out, "demo: expiry:", store.Code(err)) })
 	})
-	defer func() { stopExpiry(); expiry.Wait() }()
+	defer func() { stopExpiry(); expiry.Wait(); d.at("expiry_stopped") }()
 
 	var bridge *toolbridge.Server
 	if fake != nil {
@@ -197,11 +203,11 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		if bridge, err = toolbridge.Listen(tools); err != nil {
 			return err
 		}
-		defer func() { err = errors.Join(err, bridge.Close()) }()
+		defer func() { err = errors.Join(err, bridge.Close()); d.at("bridge_closed") }()
 	}
 
 	mux := newMux(shop)
-	(&api{st: st, reg: reg, tokens: tokens, addr: addr, clock: d.clock}).register(mux)
+	(&api{st: st, tokens: tokens, addr: addr, clock: d.clock}).register(mux)
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
@@ -227,13 +233,22 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	case <-ctx.Done():
 	}
 	// Stop order: no new runs, no new requests, wait for the runs (they may
-	// still record their end), then expiry, the bridge and the Store (deferred).
+	// still record their end), then the bridge, expiry and the Store (deferred,
+	// so they run in that order on every return after they started).
 	cancelRuns()
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err = errors.Join(err, ignoreClosed(srv.Shutdown(sctx)))
+	d.at("http_stopped")
 	runs.Wait()
+	d.at("runs_ended")
 	return err
+}
+
+func (d deps) at(stage string) {
+	if d.stage != nil {
+		d.stage(stage)
+	}
 }
 
 func ignoreClosed(err error) error {
@@ -241,6 +256,59 @@ func ignoreClosed(err error) error {
 		return nil
 	}
 	return err
+}
+
+var errTokenPath = errors.New("APA_DEMO_TOKEN_FILE must not name the database or one of its files (-wal, -shm, .lock); nothing was started or changed")
+
+// dbFiles are the database's own files: the database, its WAL and
+// shared-memory files, and the demo's lock.
+func dbFiles(db string) []string { return []string{db, db + "-wal", db + "-shm", db + ".lock"} }
+
+// canonicalPath is p made absolute and clean, with its nearest existing
+// ancestor resolved through symlinks, so a relative and an absolute
+// spelling, "." and ".." steps, or a symlinked parent name one place.
+func canonicalPath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	dir, rest := abs, ""
+	for {
+		if real, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(real, rest), nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return abs, nil
+		}
+		rest, dir = filepath.Join(filepath.Base(dir), rest), parent
+	}
+}
+
+// checkTokenPath refuses a token path that names one of the database's
+// files, by canonical path and, for files that exist, by identity (which
+// also catches a spelling a case-insensitive file system treats as the
+// same name). ponytail: a configuration check, not a guard against another
+// local user racing renames; newTokens repeats it before its rename.
+func checkTokenPath(db, token string) error {
+	t, err := canonicalPath(token)
+	if err != nil {
+		return err
+	}
+	ti, terr := os.Stat(t)
+	for _, f := range dbFiles(db) {
+		c, err := canonicalPath(f)
+		if err != nil {
+			return err
+		}
+		if c == t {
+			return errTokenPath
+		}
+		if fi, err := os.Stat(c); err == nil && terr == nil && os.SameFile(fi, ti) {
+			return errTokenPath
+		}
+	}
+	return nil
 }
 
 // lockDB keeps a second demo process off the same database: each would run

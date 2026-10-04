@@ -502,12 +502,26 @@ func TestHostInitSequence(t *testing.T) {
 		t.Fatalf("hook before init: %+v", res)
 	}
 
-	// Late init: the run times out at 300 ms; the fake ignores SIGTERM from
-	// its start and prints a valid init 800 ms after its MCP handshake,
-	// well before SIGKILL at 5.3 s, even under -race on a loaded machine.
-	e.h.Limits.Total, e.h.Limits.Grace = 300*time.Millisecond, 5*time.Second
-	res = e.run(context.Background(), "task-a", "init-late")
-	if res.Report.Outcome != Timeout || e.prepared.Load() != 0 || res.TaskStarted || res.StoreEnd != "" || len(res.Calls) != 0 {
+	// Late init: the run is stopped (cancelled) only once the fake shows it
+	// ignores SIGTERM: it writes its stdin counter right after installing
+	// the ignore. It then prints a valid init 800 ms after its MCP
+	// handshake, inside the 5 s grace before SIGKILL. (A fixed 300 ms time
+	// limit raced the fake's own start under -race: a SIGTERM before the
+	// ignore killed it and no init was read; docs/demo-integration.md 8.4.)
+	e.h.Limits.Total, e.h.Limits.Grace = 30*time.Second, 5*time.Second
+	ignoring := filepath.Join(t.TempDir(), "stdin-count")
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(5 * time.Millisecond) {
+			if _, err := os.Stat(ignoring); err == nil {
+				break
+			}
+		}
+		cancel()
+	}()
+	res = e.run(ctx, "task-a", "init-late", fakecli.EnvStdinFile+"="+ignoring)
+	cancel()
+	if res.Report.Outcome != Cancelled || e.prepared.Load() != 0 || res.TaskStarted || res.StoreEnd != "" || len(res.Calls) != 0 {
 		t.Fatalf("late init: %+v prepared %d", res, e.prepared.Load())
 	}
 	trace, _ := os.ReadFile(res.Trace)

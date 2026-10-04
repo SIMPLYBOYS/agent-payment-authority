@@ -32,7 +32,9 @@ type demoToken struct {
 // newTokens makes a fresh token per registry consumer (viewer) and one for
 // the host, and writes them to path (directory 0700, file 0600) by a rename,
 // so no reader sees half a file. Tokens never go to the terminal or a log.
-func newTokens(cfg contracts.RegistryConfig, path string) ([]demoToken, error) {
+// The rename never replaces one of db's files: checked again just before
+// it, when the database, its WAL and the lock exist.
+func newTokens(cfg contracts.RegistryConfig, path, db string) ([]demoToken, error) {
 	var out []demoToken
 	add := func(g grant) error {
 		b := make([]byte, 32)
@@ -77,6 +79,9 @@ func newTokens(cfg contracts.RegistryConfig, path string) ([]demoToken, error) {
 	if err := tmp.Close(); err != nil {
 		return nil, err
 	}
+	if err := checkTokenPath(db, abs); err != nil {
+		return nil, err
+	}
 	if err := os.Rename(tmp.Name(), abs); err != nil { // CreateTemp made it 0600
 		return nil, err
 	}
@@ -87,7 +92,6 @@ func newTokens(cfg contracts.RegistryConfig, path string) ([]demoToken, error) {
 // Store only: no StartTask, Submit, Cancel or ExpireDue.
 type api struct {
 	st     *store.Store
-	reg    *contracts.Registry
 	tokens []demoToken
 	addr   string // the bound address, the only Host and Origin accepted
 	clock  store.Clock
@@ -135,38 +139,37 @@ func (a *api) authorize(w http.ResponseWriter, r *http.Request) (grant, bool) {
 	return grant{}, false
 }
 
-// lookup resolves the path's task through the trusted registry and the
-// caller's grant. Unknown, not visible and not started all answer the same
-// 404, so a viewer learns nothing about another consumer's tasks.
-func (a *api) lookup(w http.ResponseWriter, r *http.Request) (contracts.Task, contracts.WalletRef, contracts.Session, bool) {
+// record reads the path's task as stored, for the caller's grant. The
+// grant is applied to the task's stored consumer, so a task the current
+// registry no longer lists stays readable by the host and by its own
+// consumer's viewer only. Unknown, not visible and not started all answer
+// the same 404, so a viewer learns nothing about another consumer's tasks.
+func (a *api) record(w http.ResponseWriter, r *http.Request) (store.TaskRecord, bool) {
 	g, ok := a.authorize(w, r)
 	if !ok {
-		return contracts.Task{}, contracts.WalletRef{}, contracts.Session{}, false
+		return store.TaskRecord{}, false
 	}
-	task, wallet, err := a.reg.Binding(r.PathValue("task_id"))
-	if err != nil || !g.sees(task.ConsumerID) {
-		fail(w, http.StatusNotFound, "not_found")
-		return contracts.Task{}, contracts.WalletRef{}, contracts.Session{}, false
+	rec, err := a.st.ReadTask(r.PathValue("task_id"), g.sees)
+	if err != nil {
+		if store.Code(err) == "OWNERSHIP_MISMATCH" {
+			fail(w, http.StatusNotFound, "not_found")
+		} else { // its text stays here
+			fail(w, http.StatusServiceUnavailable, "store_unavailable")
+		}
+		return store.TaskRecord{}, false
 	}
-	return task, wallet, contracts.Session{ConsumerID: task.ConsumerID, AgentID: task.AgentID, TaskID: task.TaskID}, true
+	return rec, true
 }
 
-// storeFail maps a Store read error to a fixed answer; its text stays here.
-func storeFail(w http.ResponseWriter, err error) {
-	if store.Code(err) == "OWNERSHIP_MISMATCH" { // the task has not started in this Store
-		fail(w, http.StatusNotFound, "not_found")
-		return
-	}
-	fail(w, http.StatusServiceUnavailable, "store_unavailable")
-}
-
-// taskReply is GET /api/tasks/{task_id}: the registry's binding, the
-// Store's committed projection, and fixed statements of what M1 cannot do.
+// taskReply is GET /api/tasks/{task_id}: the task's stored binding and its
+// committed projection, from one read, and fixed statements of what M1
+// cannot do. Nothing comes from the current registry.
 type taskReply struct {
 	TaskID             string               `json:"task_id"`
 	ConsumerID         string               `json:"consumer_id"`
 	AgentID            string               `json:"agent_id"`
 	WalletID           string               `json:"wallet_id"`
+	Payer              string               `json:"payer"`
 	WalletEvidenceMode string               `json:"wallet_evidence_mode"` // fixture: a reference, not a key
 	Status             string               `json:"status"`
 	DenyReason         string               `json:"deny_reason,omitempty"`
@@ -178,17 +181,13 @@ type taskReply struct {
 }
 
 func (a *api) task(w http.ResponseWriter, r *http.Request) {
-	task, wallet, sess, ok := a.lookup(w, r)
+	rec, ok := a.record(w, r)
 	if !ok {
 		return
 	}
-	v, err := a.st.Task(sess)
-	if err != nil {
-		storeFail(w, err)
-		return
-	}
-	reply(w, http.StatusOK, taskReply{TaskID: task.TaskID, ConsumerID: task.ConsumerID, AgentID: task.AgentID, WalletID: wallet.WalletID,
-		WalletEvidenceMode: wallet.EvidenceMode, Status: v.Status, DenyReason: v.DenyReason, AsOfSequence: v.AsOfSequence,
+	b, v := rec.Binding, rec.Task
+	reply(w, http.StatusOK, taskReply{TaskID: b.TaskID, ConsumerID: b.ConsumerID, AgentID: b.AgentID, WalletID: b.WalletID, Payer: b.Payer,
+		WalletEvidenceMode: b.WalletEvidenceMode, Status: v.Status, DenyReason: v.DenyReason, AsOfSequence: v.AsOfSequence,
 		AsOfObservedAt: v.AsOfObservedAt, ServedAt: a.clock(), Purchases: v.Purchases, PaymentCapability: "unavailable"})
 }
 
@@ -215,17 +214,12 @@ type eventsReply struct {
 }
 
 func (a *api) events(w http.ResponseWriter, r *http.Request) {
-	task, _, sess, ok := a.lookup(w, r)
+	rec, ok := a.record(w, r)
 	if !ok {
 		return
 	}
-	evs, err := a.st.Events(sess)
-	if err != nil {
-		storeFail(w, err)
-		return
-	}
-	out := eventsReply{TaskID: task.TaskID, Events: []eventView{}}
-	for _, e := range evs {
+	out := eventsReply{TaskID: rec.Binding.TaskID, Events: []eventView{}}
+	for _, e := range rec.Events {
 		v := eventView{EventID: e.EventID, EventType: e.EventType, Sequence: e.Sequence, PrevEventHash: e.PrevEventHash,
 			Code: e.Payload.Code, Decision: e.Payload.Decision, EvidenceMode: e.EvidenceMode, Source: e.Source, ObservedAt: e.ObservedAt}
 		if e.Scope != nil {
