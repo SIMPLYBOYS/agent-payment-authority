@@ -11,6 +11,7 @@ Writes <out>/<commit12>-<UTC time>/ (never reused). Exit 0 only if the
 baseline passes and every mutation is killed.
 """
 import argparse
+import concurrent.futures
 import datetime
 import os
 import pathlib
@@ -545,22 +546,23 @@ def main():
     # per mutation rebuilt every package of the module each time.
     started = time.monotonic()
     work = tempfile.mkdtemp()
-    tree = pathlib.Path(work) / "src"
 
-    def fresh():
+    def fresh(tree):
         shutil.rmtree(tree, ignore_errors=True)
         tree.mkdir()
         export(root, sha, tree)
 
-    fresh()
+    base = pathlib.Path(work) / "base"
+    fresh(base)
     t0 = time.monotonic()
-    rc, log = run(["go", "test", *sorted({pkg(m[1]) for m in MUTATIONS}), "-count=1"], tree)
+    rc, log = run(["go", "test", *sorted({pkg(m[1]) for m in MUTATIONS}), "-count=1"], base)
     (out / "baseline.log").write_text(log)
     lines.append(f"baseline (no mutation): {'PASS' if rc == 0 else 'FAIL'}  [{time.monotonic() - t0:.0f}s]")
     ok = ok and rc == 0
 
-    for n, (finding, rel, old, new, test) in enumerate(MUTATIONS, 1):
-        fresh()  # one fresh tree per mutation, as before
+    def mutate(tree, n, finding, rel, old, new, test):
+        """One mutation in a fresh tree: (summary line, killed)."""
+        fresh(tree)
         t0 = time.monotonic()
         path = tree / rel
         text = path.read_text()
@@ -571,19 +573,32 @@ def main():
         else:
             count, mutated = text.count(old), text.replace(old, new)
         if count != 1:
-            lines.append(f"{n:02d} ERROR   {finding}: mutation text found {count} times in {rel}")
-            ok = False
-            continue
+            return f"{n:02d} ERROR   {finding}: mutation text found {count} times in {rel}", False
         path.write_text(mutated)
-        # A hang fails this mutation in 5 minutes instead of using up
-        # the whole step: a timed-out test prints no "--- FAIL", so it
-        # can only read as BUILD?, never as KILLED.
+        # A hang fails this mutation in 5 minutes instead of using up the
+        # whole step: a timed-out test prints no "--- FAIL", so it can only
+        # read as BUILD?, never as KILLED.
         rc, log = run(["go", "test", pkg(rel), "-run", test, "-count=1", "-timeout", "300s"], tree)
         (out / f"mutation-{n:02d}.log").write_text(log)
         killed = rc != 0 and "--- FAIL" in log and "panic: test timed out" not in log
         verdict = "KILLED" if killed else ("BUILD?" if rc != 0 else "SURVIVED")
+        return f"{n:02d} {verdict:8s}{finding}  [{rel}; -run {test}]  [{time.monotonic() - t0:.0f}s]", killed
+
+    # Two lanes run at once, each in its own fixed tree: internal/buyer's
+    # mutations (its tests time processes, so they do not share a lane with
+    # each other) and all others. The two lanes take about the same time.
+    def lane(name, items):
+        tree = pathlib.Path(work) / name
+        return [(n, *mutate(tree, n, *m)) for n, m in items]
+
+    numbered = list(enumerate(MUTATIONS, 1))
+    lanes = {"lane-buyer": [x for x in numbered if pkg(x[1][1]) == "./internal/buyer/"],
+             "lane-other": [x for x in numbered if pkg(x[1][1]) != "./internal/buyer/"]}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(lanes)) as pool:
+        done = [r for f in [pool.submit(lane, k, v) for k, v in lanes.items()] for r in f.result()]
+    for n, line, killed in sorted(done):
+        lines.append(line)
         ok = ok and killed
-        lines.append(f"{n:02d} {verdict:8s}{finding}  [{rel}; -run {test}]  [{time.monotonic() - t0:.0f}s]")
 
     shutil.rmtree(work, ignore_errors=True)
     lines.append(f"total: {time.monotonic() - started:.0f}s")
