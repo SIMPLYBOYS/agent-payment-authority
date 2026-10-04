@@ -92,14 +92,16 @@ fi
 cd /src || exit 2
 : >"$O/exit-codes.txt"
 FAILED=0
-# step NAME SECONDS CMD...: logs to NAME.log, records the exit code, and marks
-# the run failed on any non-zero exit (the final exit reports it).
+# step NAME SECONDS CMD...: logs to NAME.log, records the exit code and the
+# wall time, and marks the run failed on any non-zero exit (the final exit
+# reports it). The importer reads only the name before " exit=".
 step() {
 	name=$1 secs=$2
 	shift 2
+	t0=$(date +%s)
 	timeout -k 10 "$secs" "$@" >"$O/$name.log" 2>&1
 	rc=$?
-	echo "$name exit=$rc" >>"$O/exit-codes.txt"
+	echo "$name exit=$rc seconds=$(($(date +%s) - t0))" >>"$O/exit-codes.txt"
 	[ "$rc" = 0 ] || FAILED=1
 }
 if [ "${APA_INJECT_FAIL:-0}" = 1 ]; then

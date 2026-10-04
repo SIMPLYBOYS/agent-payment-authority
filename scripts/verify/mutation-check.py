@@ -14,9 +14,11 @@ import argparse
 import datetime
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -538,36 +540,53 @@ def main():
     lines = [f"commit: {sha}", f"run_at: {stamp}", run(["go", "version"], root)[1].strip()]
     ok = True
 
-    with tempfile.TemporaryDirectory() as tmp:
-        export(root, sha, tmp)
-        rc, log = run(["go", "test", *sorted({pkg(m[1]) for m in MUTATIONS}), "-count=1"], tmp)
-        (out / "baseline.log").write_text(log)
-        lines.append(f"baseline (no mutation): {'PASS' if rc == 0 else 'FAIL'}")
-        ok = ok and rc == 0
+    # Every run starts from a fresh export, always at the same path: Go's
+    # build cache is keyed on the source directory too, so a new directory
+    # per mutation rebuilt every package of the module each time.
+    started = time.monotonic()
+    work = tempfile.mkdtemp()
+    tree = pathlib.Path(work) / "src"
+
+    def fresh():
+        shutil.rmtree(tree, ignore_errors=True)
+        tree.mkdir()
+        export(root, sha, tree)
+
+    fresh()
+    t0 = time.monotonic()
+    rc, log = run(["go", "test", *sorted({pkg(m[1]) for m in MUTATIONS}), "-count=1"], tree)
+    (out / "baseline.log").write_text(log)
+    lines.append(f"baseline (no mutation): {'PASS' if rc == 0 else 'FAIL'}  [{time.monotonic() - t0:.0f}s]")
+    ok = ok and rc == 0
 
     for n, (finding, rel, old, new, test) in enumerate(MUTATIONS, 1):
-        with tempfile.TemporaryDirectory() as tmp:
-            export(root, sha, tmp)
-            path = pathlib.Path(tmp) / rel
-            text = path.read_text()
-            if old.startswith("LINE:"):
-                marker = old[5:]
-                kept = [l for l in text.splitlines(keepends=True) if marker not in l]
-                count, mutated = len(text.splitlines()) - len(kept), "".join(kept)
-            else:
-                count, mutated = text.count(old), text.replace(old, new)
-            if count != 1:
-                lines.append(f"{n:02d} ERROR   {finding}: mutation text found {count} times in {rel}")
-                ok = False
-                continue
-            path.write_text(mutated)
-            rc, log = run(["go", "test", pkg(rel), "-run", test, "-count=1"], tmp)
-            (out / f"mutation-{n:02d}.log").write_text(log)
-            killed = rc != 0 and "--- FAIL" in log
-            verdict = "KILLED" if killed else ("BUILD?" if rc != 0 else "SURVIVED")
-            ok = ok and killed
-            lines.append(f"{n:02d} {verdict:8s}{finding}  [{rel}; -run {test}]")
+        fresh()  # one fresh tree per mutation, as before
+        t0 = time.monotonic()
+        path = tree / rel
+        text = path.read_text()
+        if old.startswith("LINE:"):
+            marker = old[5:]
+            kept = [l for l in text.splitlines(keepends=True) if marker not in l]
+            count, mutated = len(text.splitlines()) - len(kept), "".join(kept)
+        else:
+            count, mutated = text.count(old), text.replace(old, new)
+        if count != 1:
+            lines.append(f"{n:02d} ERROR   {finding}: mutation text found {count} times in {rel}")
+            ok = False
+            continue
+        path.write_text(mutated)
+        # A hang fails this mutation in 5 minutes instead of using up
+        # the whole step: a timed-out test prints no "--- FAIL", so it
+        # can only read as BUILD?, never as KILLED.
+        rc, log = run(["go", "test", pkg(rel), "-run", test, "-count=1", "-timeout", "300s"], tree)
+        (out / f"mutation-{n:02d}.log").write_text(log)
+        killed = rc != 0 and "--- FAIL" in log and "panic: test timed out" not in log
+        verdict = "KILLED" if killed else ("BUILD?" if rc != 0 else "SURVIVED")
+        ok = ok and killed
+        lines.append(f"{n:02d} {verdict:8s}{finding}  [{rel}; -run {test}]  [{time.monotonic() - t0:.0f}s]")
 
+    shutil.rmtree(work, ignore_errors=True)
+    lines.append(f"total: {time.monotonic() - started:.0f}s")
     lines.append("result: " + ("all mutations killed by a failing test" if ok else "NOT OK"))
     (out / "summary.txt").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
