@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），待 Codex 限定範圍 review；再執行 C0′ 需另行核准。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），已通過 Codex 限定範圍 review（第 29 節）；再執行一次真實 C0′ 待 Aaron 另行核准，未執行。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -683,7 +683,7 @@ C0′ 會送出**一則**使用者訊息，所以和 C0 不同：設計上就預
 
 ```sh
 cd /Users/mac/Documents/OpenSourceProjects/agent-payment-authority
-git status --short && git rev-parse HEAD     # 工作區乾淨；HEAD 為版本釘選改為 2.1.289 且通過 review 的 commit（1f0b260 待 review），或之後只改文件的 commit
+git status --short && git rev-parse HEAD     # 工作區乾淨；HEAD 為通過 review 的 1f0b260（版本釘選 2.1.289），或之後只改文件的 commit
 go build -o bin/apa-buyer ./cmd/apa-buyer
 go version -m bin/apa-buyer | grep vcs       # vcs.revision 等於 HEAD、vcs.modified=false
 APA_LIVE_CLI=true ./bin/apa-buyer probe-init --cli /Users/mac/.local/bin/claude --send-one-message --trace-dir <新證據目錄>/runs
@@ -720,7 +720,7 @@ echo "exit=$?"
 - 證據：`artifacts/b1-04/c0prime-real-20261004T043252Z/`（commit、binary-vcs、起訖時間、exit code、stderr 的固定訊息；stdout 與 `runs/` 為空）。
 - 依核准條件已停止：不重跑、不更新 CLI、不改核准版本、不放寬清單、不轉往階段 C 或 C0。**C0′ 的目標（取得 init）未達成，這次不是 C0′ 的有效結果。** 之後要由 Aaron 自行確認本機 CLI 版本（Claude Code 未獲准執行 `--version` 以外的檢查，也不另外執行）；若版本已變，需重新決定釘選與是否再核准一次 C0′。
 
-## 28 核准版本改為 2.1.289（`1f0b260`；Claude Code 執行，待 Codex 限定範圍 review）
+## 28 核准版本改為 2.1.289（`1f0b260`；交付時待 Codex 限定範圍 review，已通過，見第 29 節）
 
 - 決定（Aaron，2026-10-04）：核准版本由 `2.1.288 (Claude Code)` 改為 `2.1.289 (Claude Code)`。原因是第 27 節那次 C0′ 在版本檢查即停止。只改版本釘選；不執行真實 CLI、登入檢查或 C0′，不改認證接受清單（仍為空）。
 - 程式（`1f0b260`）：
@@ -734,3 +734,12 @@ echo "exit=$?"
   - 本機 `artifacts/b1-04/1f0b260ae3e9-20261004T044907Z/`：make check、check-contracts、`go test -race -cover ./... -count=1`、B1-01、20 項證據匯入測試全部 exit 0；覆蓋率 buyer 91.9%、toolbridge 91.8%、apa-buyer 81.7%；乾淨匯出 demo-fake 0／2／0（同一 task 第二次依設計 exit 2）。
   - 容器完整驗證（既有映像 sha256:78258368…，未重建、無新依賴）：overall exit 0；七步驟全過；baseline PASS、196／196 突變；17 項隔離檢查 ok。`artifacts/verify-container/runs/1f0b260ae3e9-20261004T045259Z/`；主機端輸出 `artifacts/b1-04/container-1f0b260.log`。
 - 範圍外：這不代表真實 CLI 2.1.289 的相容性、旗標、init 格式、登入或用量已驗證。真實 C0′ 要等本次 review 通過後，再由 Aaron 另行核准。歷史紀錄（第 15–27 節）保留當時的版本。
+
+## 29 驗收紀錄：版本釘選 2.1.289 通過限定範圍 review（2026-10-04）
+
+- 結果：程式 `1f0b260`、文件 `651ace0` 通過 Codex 限定範圍 review，沒有阻擋問題。確認核准版本為 `2.1.289 (Claude Code)`，舊版與其他版本仍被拒絕；init 必須符合新版本；認證接受清單仍為空；目前操作文件已更新，歷史版本紀錄保留。
+- 證據歸屬：
+  - **Codex 獨立重跑**（斷網容器）：`cmd/apa-buyer` 全套 race 測試；版本檢查、init 版本與 C0′ 命令測試三輪；init 閘門及寫入失敗／競態回歸三輪。全部通過。
+  - **Claude Code 執行、Codex 核對紀錄**：完整容器驗證七步、196／196 突變、17 項隔離檢查（`artifacts/verify-container/runs/1f0b260ae3e9-20261004T045259Z/`）；本機檢查 `artifacts/b1-04/1f0b260ae3e9-20261004T044907Z/`。
+- 範圍：**只有版本釘選**。不代表真實 CLI 2.1.289 的相容性、旗標（`--help` 未比對）、init 格式、訊息格式、登入或用量已驗證。不需要新增實作。
+- 下一步：依第 26 節（版本 2.1.289、HEAD `1f0b260` 或之後只改文件的 commit）執行一次真實 C0′，**待 Aaron 核准，未執行**。B1-04 整體仍 InProgress，未標 Done、未合併 main；live 認證接受清單維持空白。
