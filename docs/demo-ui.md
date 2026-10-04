@@ -170,6 +170,13 @@ UI 上的選擇不構成授權，伺服器仍依 token 與 task 已保存的歸�
 | 9 | Unity ready 前後、載入失敗、重送、切換世代、舊動畫回呼 | PlayMode 與 EditMode；瀏覽器：沒有建置時顯示「Unity 場景未就緒」並截圖 | unity 與 ui 證據 |
 | 10 | Unity 與 Dashboard 顯示相同 task、序號、裁決；缺素材時標示 placeholder | 瀏覽器：Unity 回報的序號與 phase 與 Dashboard 相同；`ready` 回報區分 limezu 與 placeholder，本次為 limezu | 同上 |
 
+容器（Go／JS 與 fake 回歸，Unity 不在映像內）：`024b2cf` 完整容器驗證 overall exit 0、七步驟全過（check-contracts 內含 adapter 9 項）、222／222 突變、17 項隔離檢查，672 秒；證據在 `artifacts/verify-container/runs/024b2cf144f0-20261004T193404Z/`。Unity（`417f104`）：EditMode 6／6、PlayMode 3／3、WebGL 建置成功（`artifacts/b1-06/unity-417f10497fdd-20261004T192855Z/`）。
+
+失敗嘗試（保留）：
+- 第一次 EditMode 5／6。不合法、但世代較新的訊息會先清空畫面才被拒；已改為先檢查整則訊息再重置。
+- 第一次 Web 建置後的場景框線與標籤重疊，調整後重建。
+- 一次 Unity 測試結果 XML 寫進了專案目錄（相對路徑），已改為絕對路徑並移回證據目錄。
+
 截圖：
 
 - `desktop-task-a-ask.png`：1280×900，task-a，序號 3，Ask；
