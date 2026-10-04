@@ -314,3 +314,43 @@ func TestProbeOneMessageInitBeforeWrite(t *testing.T) {
 		t.Fatalf("%+v, fake %s bytes", res, p.stdinBytes())
 	}
 }
+
+// Both ready at once, in the order that used to win: the CLI has closed
+// stdin and printed its init; the write fails on the broken pipe, and the
+// afterWrite hook delivers that result only once the run has already
+// stopped on the init. The result must still be the write failure, with no
+// observation. Nothing here waits on a fixed delay.
+func TestProbeOneMessageWriteFailureAfterInit(t *testing.T) {
+	ready := filepath.Join(t.TempDir(), "ready")
+	cli := script(t, "exec 0<&-\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"claude_code_version\":\""+fakecli.InitVersion+"\"}'\n: > "+ready+"\nsleep 30\n")
+	barrier, held := false, false
+	started = func() { // the CLI closed stdin and printed the init before the write
+		for until := time.Now().Add(5 * time.Second); time.Now().Before(until); time.Sleep(time.Millisecond) {
+			if _, err := os.Stat(ready); err == nil {
+				barrier = true
+				return
+			}
+		}
+	}
+	afterWrite = func(iw *stdinWriter) { // deliver the write result after the init stop
+		for until := time.Now().Add(5 * time.Second); time.Now().Before(until); time.Sleep(time.Millisecond) {
+			iw.mu.Lock()
+			stopped := iw.stopped
+			iw.mu.Unlock()
+			if stopped {
+				held = true
+				return
+			}
+		}
+	}
+	defer func() { started, afterWrite = func() {}, func(*stdinWriter) {} }()
+	p := newProbe1(t, "probe1-wait-message", 10*time.Second)
+	p.spec.CLI = cli
+	res, err := Probe(context.Background(), p.spec)
+	if err != nil || !barrier || !held || res.InputStatus != InputFailed || res.Outcome != InitObserved {
+		t.Fatalf("setup (the init must have stopped the run first): %v barrier %v held %v %+v", err, barrier, held, res)
+	}
+	if res.Status != ProbeFailed || res.Code != "input_failed" || res.Observation != nil {
+		t.Fatalf("a failed write reported as %s %s, observation %v", res.Status, res.Code, res.Observation != nil)
+	}
+}

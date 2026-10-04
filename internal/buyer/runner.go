@@ -127,8 +127,13 @@ func (iw *stdinWriter) stop() {
 // order the write against a stop; nothing outside the package can.
 var beforeWrite = func(*stdinWriter) {}
 
+// afterWrite runs after the write released the lock and before it signals
+// done. Tests replace it to deliver the result after another stop.
+var afterWrite = func(*stdinWriter) {}
+
 func (iw *stdinWriter) write(msg []byte, bound time.Duration) {
 	defer close(iw.done)
+	defer func() { afterWrite(iw) }()
 	beforeWrite(iw)
 	iw.mu.Lock()
 	defer iw.mu.Unlock()

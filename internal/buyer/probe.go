@@ -346,11 +346,17 @@ func Probe(ctx context.Context, p ProbeSpec) (ProbeResult, error) {
 	res.Outcome, res.Detail, res.ExitCode = rep.Outcome, rep.Detail, rep.ExitCode
 	res.InputStatus, res.StdinWritten = rep.InputStatus, rep.InputBytes
 	res.CallsRefused, res.CallsExecuted = b.NotReady()+b.Attempts(), exec.calls.Load()
-	if rep.Outcome == InitObserved {
-		res.Observation = obs // only the init the run stopped on; one read after a failure is not kept
+	// The writer has finished before Run returns, so its status is final
+	// here. A failed or partial write decides the result whatever stopped
+	// the run first: no ordering of notifications can turn it into success.
+	inputBroken := rep.InputStatus == InputFailed || rep.InputStatus == InputPartial
+	if rep.Outcome == InitObserved && !inputBroken {
+		res.Observation = obs // only the init the run stopped on; none after a broken write
 	}
 
 	switch {
+	case inputBroken:
+		res.Status, res.Code = ProbeFailed, "input_"+rep.InputStatus
 	case rep.Outcome == InitObserved && obs != nil && obs.CLIVersion == "approved":
 		res.Status, res.Code = ProbeObserved, "init_observed"
 	case rep.Outcome == InitObserved:
