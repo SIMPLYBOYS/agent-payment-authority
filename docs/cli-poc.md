@@ -989,6 +989,7 @@ echo "exit=$?"
 |---|---|---|---|
 | `8da15dd` 的 B1-01 | `cmd/apa-buyer` `TestLiveOptIn`（2.1.288 子案例） | 代用 shell 腳本的 `--version` 沒有在上限內執行，連標記檔都沒建立 | 正式版本檢查 5 秒（`versionLimits`） |
 | `b46e332` 的 make check | `internal/buyer` `TestVersion`（holder 檢查） | 花了 2.056 秒 | 測試自訂 2 秒 |
+| `7267f91`（B1-06 修正）的 make check | `cmd/apa-buyer` `TestLiveOptIn`（2.1.288 子案例），第二次出現 | 同第一列：代用腳本未在上限內執行；只重跑 make check 一次即通過（`artifacts/b1-06/7267f91a3fd5-20261004T103039Z/`） | 正式版本檢查 5 秒 |
 
 - **相關但不同**：
   - `4e709ab` 的 `TestProbeOneMessageInterleaving/cancel_after_0s` 已找到原因：測試沒有考慮 0 秒取消可能搶在 Probe 的啟動前檢查之前。已在 `8da15dd` 修正測試，不列入本待辦。
