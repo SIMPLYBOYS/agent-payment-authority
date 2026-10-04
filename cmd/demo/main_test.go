@@ -7,18 +7,63 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer/fakecli"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/toolbridge"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
 
+// testRoot holds every test database and token file: no test touches the
+// repository's var/.
+var testRoot string
+
+// TestMain also lets the test binary stand in for the fake CLI (when started
+// as fake-claude) and the MCP bridge, as the demo starts them. Tests run
+// from the repository root, where the default fixture paths resolve.
+func TestMain(m *testing.M) {
+	switch {
+	case filepath.Base(os.Args[0]) == "fake-claude":
+		os.Exit(fakecli.Main(os.Args[1:], os.Getenv, os.Stdout, os.Stderr))
+	case len(os.Args) > 1 && os.Args[1] == "mcp-bridge":
+		if err := toolbridge.RunBridge(context.Background(), os.Stdin, os.Stdout, os.Getenv); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	if err := os.Chdir("../.."); err != nil {
+		panic(err)
+	}
+	dir, err := os.MkdirTemp("", "apa-demo-test-")
+	if err != nil {
+		panic(err)
+	}
+	testRoot = dir
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// envAddr is the environment of one server: its address, and a database and
+// token file of its own in a private directory.
 func envAddr(addr string) func(string) string {
+	dir, err := os.MkdirTemp(testRoot, "srv-")
+	if err != nil {
+		panic(err)
+	}
 	return func(k string) string {
-		if k == "APA_ADDR" {
+		switch k {
+		case "APA_ADDR":
 			return addr
+		case "APA_DB_PATH":
+			return filepath.Join(dir, "demo.db")
+		case "APA_DEMO_TOKEN_FILE":
+			return filepath.Join(dir, "tokens.json")
 		}
 		return ""
 	}

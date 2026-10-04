@@ -1,4 +1,4 @@
-.PHONY: check check-contracts build dev demo-fake
+.PHONY: check check-contracts build dev demo-fake demo-integration
 
 # Compile, vet and unit-test. Calls no paid model and touches no testnet.
 check:
@@ -41,3 +41,13 @@ demo-fake:
 	go build -o bin/apa-buyer ./cmd/apa-buyer
 	go build -o bin/fake-claude ./cmd/fake-claude
 	./bin/apa-buyer run --fake-cli bin/fake-claude --scenario testdata/cli/ask-mainline.json --task $(or $(TASK),task-a)
+
+# B1-06 delivery 1, FAKE MODE ONLY: one demo host process runs the shop
+# (HTTP 402), the Store (APA_DB_PATH, default var/apa-demo-fake.db), its
+# expiry worker, the authenticated read-only task API and the fake buyer
+# for each task of the trusted plan. Demo tokens: var/demo-tokens.json
+# (0600, new at each start). See docs/demo-integration.md.
+demo-integration:
+	go build -o bin/demo ./cmd/demo
+	go build -o bin/fake-claude ./cmd/fake-claude
+	APA_ADDR=$(or $(APA_ADDR),127.0.0.1:8402) ./bin/demo --fake-cli bin/fake-claude --plan testdata/demo/fake-plan.json

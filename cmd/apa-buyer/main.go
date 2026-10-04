@@ -113,8 +113,7 @@ type deps struct {
 }
 
 // prompt is the host's fixed instruction; the model never edits it.
-const prompt = "You are the buyer agent for one task. Use only the apa tools: list the products, get the quote for the Korean market brief, then request its purchase. " +
-	"You cannot pay and will not receive the content; the host records the request and a human decides."
+const prompt = buyer.Prompt
 
 // defaultDB keeps fake and live records apart from each other and from the
 // demo's var/apa.db.

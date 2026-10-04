@@ -50,6 +50,11 @@ func Argv(prompt, mcpConfig string) []string {
 	}
 }
 
+// Prompt is the host's fixed instruction for a buyer run; the model never
+// edits it. apa-buyer and the demo host both use it.
+const Prompt = "You are the buyer agent for one task. Use only the apa tools: list the products, get the quote for the Korean market brief, then request its purchase. " +
+	"You cannot pay and will not receive the content; the host records the request and a human decides."
+
 // envAllowlist is all the CLI inherits: no API keys, tokens, profiles,
 // cloud-provider or proxy settings, and nothing of the host's own.
 var envAllowlist = []string{"HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG", "LC_ALL", "TERM"}

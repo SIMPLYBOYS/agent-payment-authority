@@ -1,0 +1,7 @@
+{
+  "description": "Trusted host test configuration for the B1-06 fake demo (docs/demo-integration.md section 4). Not a policy change and not agent input: budget_initial is the host's task budget, set before the task starts. The fake CLI runs no model.",
+  "runs": [
+    {"task_id": "task-a", "scenario": "testdata/cli/ask-mainline.json", "note": "consumer-a: main product, Ask (accepted case ask)"},
+    {"task_id": "task-b", "scenario": "testdata/cli/ask-mainline.json", "budget_initial": "250000", "note": "consumer-b: same product, budget below the price, Deny INSUFFICIENT_BUDGET (accepted case deny-budget, remaining 250000)"}
+  ]
+}
