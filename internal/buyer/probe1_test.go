@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -251,5 +252,65 @@ func TestProbeOneMessageStops(t *testing.T) {
 				t.Fatalf("leak: %s", all)
 			}
 		})
+	}
+}
+
+// A write that fails is final: the probe stops at once, before the wait
+// limit, and an init the CLI prints afterwards does not make it a success.
+// The started hook is only a barrier: the CLI has closed its stdin before
+// the write begins, so the write meets a broken pipe every time.
+func TestProbeOneMessageWriteFailure(t *testing.T) {
+	for _, laterInit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("later init %v", laterInit), func(t *testing.T) {
+			ready := filepath.Join(t.TempDir(), "stdin-closed")
+			body := "exec 0<&-\n: > " + ready + "\n"
+			if laterInit { // ignores SIGTERM, so the init is printed, and read, after the stop
+				body = "trap '' TERM\n" + body + "sleep 0.3\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"claude_code_version\":\"" + fakecli.InitVersion + "\"}'\n"
+			}
+			body += "sleep 30\n"
+			barrier := false
+			started = func() {
+				for until := time.Now().Add(5 * time.Second); time.Now().Before(until); time.Sleep(time.Millisecond) {
+					if _, err := os.Stat(ready); err == nil {
+						barrier = true
+						return
+					}
+				}
+			}
+			defer func() { started = func() {} }()
+			p := newProbe1(t, "probe1-wait-message", 10*time.Second)
+			p.spec.CLI = script(t, body)
+			start := time.Now()
+			res, err := Probe(context.Background(), p.spec)
+			took := time.Since(start)
+			if err != nil || !barrier || res.InputStatus != InputFailed || res.StdinWritten != 0 {
+				t.Fatalf("setup: %v barrier %v %+v", err, barrier, res)
+			}
+			if res.Status != ProbeFailed || res.Code != "input_failed" || res.Observation != nil || took > 7*time.Second {
+				t.Fatalf("%s %s observation %v after %v", res.Status, res.Code, res.Observation != nil, took)
+			}
+		})
+	}
+}
+
+// The legitimate early path: the init comes first, the run stops, and the
+// write that had not begun never does. That is an observation, not a
+// failure. The beforeWrite hook holds the write until the run is stopping.
+func TestProbeOneMessageInitBeforeWrite(t *testing.T) {
+	beforeWrite = func(iw *stdinWriter) {
+		for until := time.Now().Add(5 * time.Second); time.Now().Before(until); time.Sleep(time.Millisecond) {
+			iw.mu.Lock()
+			stopped := iw.stopped
+			iw.mu.Unlock()
+			if stopped {
+				return
+			}
+		}
+	}
+	defer func() { beforeWrite = func(*stdinWriter) {} }()
+	p := newProbe1(t, "probe-init-first", 10*time.Second)
+	res, _ := p.run(context.Background())
+	if res.Status != ProbeObserved || res.InputStatus != InputNotStarted || res.StdinWritten != 0 || p.stdinBytes() != "0" || res.Observation == nil {
+		t.Fatalf("%+v, fake %s bytes", res, p.stdinBytes())
 	}
 }

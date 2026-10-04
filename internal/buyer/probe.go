@@ -346,7 +346,9 @@ func Probe(ctx context.Context, p ProbeSpec) (ProbeResult, error) {
 	res.Outcome, res.Detail, res.ExitCode = rep.Outcome, rep.Detail, rep.ExitCode
 	res.InputStatus, res.StdinWritten = rep.InputStatus, rep.InputBytes
 	res.CallsRefused, res.CallsExecuted = b.NotReady()+b.Attempts(), exec.calls.Load()
-	res.Observation = obs
+	if rep.Outcome == InitObserved {
+		res.Observation = obs // only the init the run stopped on; one read after a failure is not kept
+	}
 
 	switch {
 	case rep.Outcome == InitObserved && obs != nil && obs.CLIVersion == "approved":

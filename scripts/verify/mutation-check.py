@@ -433,6 +433,13 @@ MUTATIONS = [
      "const OneMessageText = \"Reply only OK.\"", "const OneMessageText = \"Reply only OK!\"", "TestOneMessageLine|TestProbeOneMessage"),
     ("B1-04 C0′ command: --send-one-message ignored", "cmd/apa-buyer/main.go",
      "SendOneMessage: *oneMessage})", "SendOneMessage: false})", "TestProbeOneMessageCommand"),
+    # B1-04 C0′ review (cf97c87): a failed write stops the run and stays a failure; init first stays valid.
+    ("B1-04 C0′ R: a failed write does not stop the run", "internal/buyer/runner.go",
+     "\t\t\tif st := iw.status; st == InputFailed || st == InputPartial {", "\t\t\tif st := iw.status; false && (st == InputFailed || st == InputPartial) {", "TestProbeOneMessageWriteFailure"),
+    ("B1-04 C0′ R: an init read after the stop is kept", "internal/buyer/probe.go",
+     "\tif rep.Outcome == InitObserved {\n\t\tres.Observation = obs", "\tif true {\n\t\tres.Observation = obs", "TestProbeOneMessageWriteFailure"),
+    ("B1-04 C0′ R: init before the write is not an observation", "internal/buyer/probe.go",
+     "\tcase rep.Outcome == InitObserved && obs != nil && obs.CLIVersion == \"approved\":", "\tcase rep.Outcome == InitObserved && obs != nil && obs.CLIVersion == \"approved\" && (res.Mode == ModeC0 || rep.InputStatus == InputComplete):", "TestProbeOneMessageInitBeforeWrite"),
 ]
 
 

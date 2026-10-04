@@ -44,6 +44,7 @@ const (
 	CLIError       Outcome = "cli_error"
 	Orphaned       Outcome = "orphaned_output" // a process outside the group kept a pipe open
 	// Run diagnostics of the host's own checks; none is an apa.m1.v2 code.
+	InputError       Outcome = "input_error"       // the one stdin write failed (detail input_failed or input_partial)
 	ConfigMismatch   Outcome = "config_mismatch"   // the CLI's init (or a hook message) is not what the host configured
 	TurnLimit        Outcome = "turn_limit"        // more assistant messages than Limits.Assistant
 	StoreUnavailable Outcome = "store_unavailable" // init passed but the host could not prepare the Store or task
@@ -122,8 +123,13 @@ func (iw *stdinWriter) stop() {
 }
 
 // write writes msg once; bound limits how long a blocked write may take.
+// beforeWrite runs just before a write takes the lock. Tests replace it to
+// order the write against a stop; nothing outside the package can.
+var beforeWrite = func(*stdinWriter) {}
+
 func (iw *stdinWriter) write(msg []byte, bound time.Duration) {
 	defer close(iw.done)
+	beforeWrite(iw)
 	iw.mu.Lock()
 	defer iw.mu.Unlock()
 	if iw.stopped {
@@ -355,6 +361,10 @@ func execute(ctx context.Context, s Spec, consume func(io.Reader) error) (x exec
 	}()
 	go func() { waitc <- cmd.Wait() }()
 
+	var writeDone <-chan struct{} // the one stdin write has finished
+	if iw != nil && s.Input != nil {
+		writeDone = iw.done
+	}
 	var (
 		exitErr           error
 		done              = ctx.Done()
@@ -419,6 +429,13 @@ func execute(ctx context.Context, s Spec, consume func(io.Reader) error) (x exec
 			abandon = nil
 			outR.Close() // wakes the readers; a process that left the group holds the other end
 			errR.Close()
+		case <-writeDone:
+			writeDone = nil
+			// A write that failed is final: stop now, before anything the CLI
+			// prints later (an init included) can be taken for success.
+			if st := iw.status; st == InputFailed || st == InputPartial {
+				stop(InputError, "input_"+st)
+			}
 		}
 	}
 	outR.Close()
