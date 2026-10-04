@@ -315,16 +315,21 @@ func TestProbeOneMessageInitBeforeWrite(t *testing.T) {
 	}
 }
 
-// Both ready at once, in the order that used to win: the CLI has closed
-// stdin and printed its init; the write fails on the broken pipe, and the
-// afterWrite hook delivers that result only once the run has already
-// stopped on the init. The result must still be the write failure, with no
-// observation. Nothing here waits on a fixed delay.
+// Both ready at once, in the order that used to win: the write fails on
+// the broken pipe first, then the CLI prints its init, the run stops on it,
+// and only then is the write result delivered. The order is fixed by
+// handshakes, not delays: the CLI has closed stdin before the write (start
+// hook as barrier); the afterWrite hook signals the CLI to print its init
+// only once the write has failed, then holds the result until the run has
+// stopped on that init. The result must still be the write failure, with
+// no observation.
 func TestProbeOneMessageWriteFailureAfterInit(t *testing.T) {
-	ready := filepath.Join(t.TempDir(), "ready")
-	cli := script(t, "exec 0<&-\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"claude_code_version\":\""+fakecli.InitVersion+"\"}'\n: > "+ready+"\nsleep 30\n")
+	dir := t.TempDir()
+	ready, written := filepath.Join(dir, "ready"), filepath.Join(dir, "written")
+	cli := script(t, "exec 0<&-\n: > "+ready+"\nwhile [ ! -f "+written+" ]; do sleep 0.01; done\n"+
+		"printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"claude_code_version\":\""+fakecli.InitVersion+"\"}'\nsleep 30\n")
 	barrier, held := false, false
-	started = func() { // the CLI closed stdin and printed the init before the write
+	started = func() { // the CLI has closed stdin before the write
 		for until := time.Now().Add(5 * time.Second); time.Now().Before(until); time.Sleep(time.Millisecond) {
 			if _, err := os.Stat(ready); err == nil {
 				barrier = true
@@ -332,12 +337,13 @@ func TestProbeOneMessageWriteFailureAfterInit(t *testing.T) {
 			}
 		}
 	}
-	afterWrite = func(iw *stdinWriter) { // deliver the write result after the init stop
+	afterWrite = func(iw *stdinWriter) {
+		os.WriteFile(written, nil, 0o600) // the write is over: let the CLI print its init
 		for until := time.Now().Add(5 * time.Second); time.Now().Before(until); time.Sleep(time.Millisecond) {
 			iw.mu.Lock()
 			stopped := iw.stopped
 			iw.mu.Unlock()
-			if stopped {
+			if stopped { // the run has stopped on the init
 				held = true
 				return
 			}
@@ -348,7 +354,7 @@ func TestProbeOneMessageWriteFailureAfterInit(t *testing.T) {
 	p.spec.CLI = cli
 	res, err := Probe(context.Background(), p.spec)
 	if err != nil || !barrier || !held || res.InputStatus != InputFailed || res.Outcome != InitObserved {
-		t.Fatalf("setup (the init must have stopped the run first): %v barrier %v held %v %+v", err, barrier, held, res)
+		t.Fatalf("setup (write failed, then the init stopped the run): %v barrier %v held %v %+v", err, barrier, held, res)
 	}
 	if res.Status != ProbeFailed || res.Code != "input_failed" || res.Observation != nil {
 		t.Fatalf("a failed write reported as %s %s, observation %v", res.Status, res.Code, res.Observation != nil)
