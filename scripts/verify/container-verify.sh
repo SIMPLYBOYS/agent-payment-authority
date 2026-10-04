@@ -23,7 +23,9 @@
 # - --read-only root filesystem; the commit is a clone bind-mounted read-only
 #   at /src; the only writable place is a 3 GB tmpfs at /scratch. Go modules
 #   come from the image's read-only cache (/opt/apa/gomodcache).
-# - Hard limits: --memory 3g (no extra swap), --pids-limit 512, --cpus 2,
+# - Hard limits: --memory 3g (no extra swap), --pids-limit 512, --cpus 4
+#   (2 until 2026-10-05; raised on Aaron's decision for the two mutation
+#   lanes and the race step),
 #   ulimits for open files, CPU seconds and file size; wall time 90 minutes.
 # - --user 10001, --cap-drop ALL, no-new-privileges; not privileged, not host
 #   network; no host home, credentials or Docker socket are mounted; only the
@@ -85,7 +87,7 @@ set -- docker run --name "$NAME" --rm \
 	--tmpfs /scratch:rw,exec,nosuid,nodev,size=3g,mode=1777 \
 	--mount "type=bind,source=$BASE/src,target=/src,readonly" \
 	--user 10001:10001 --cap-drop ALL --security-opt no-new-privileges \
-	--memory 3g --memory-swap 3g --pids-limit 512 --cpus 2 \
+	--memory 3g --memory-swap 3g --pids-limit 512 --cpus 4 \
 	--ulimit nofile=4096:4096 --ulimit cpu=3600:3600 --ulimit fsize=1073741824:1073741824 \
 	--env HOME=/scratch/home --env TMPDIR=/scratch/tmp \
 	--env GOCACHE=/scratch/cache/go-build --env GOMODCACHE=/opt/apa/gomodcache --env GOPATH=/scratch/cache/gopath \
