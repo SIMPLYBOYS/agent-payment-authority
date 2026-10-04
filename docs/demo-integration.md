@@ -1,6 +1,6 @@
 # B1-06 交付點 1：Store 接線、已認證唯讀事件 HTTP、fake 端到端整合
 
-狀態（2026-10-04）：Claude Code 實作，待 Codex review。這份文件記錄整合決定，依據是 vault 筆記 `Claude-Code-B1-06-主線整合實作指示-20261004`，開工基準 `05bb1fe`（分支 `b1-06-demo-integration`，堆疊在 B1-04 之上，未合併 main）。
+狀態（2026-10-05）：**交付點 1 的程式修正於 `f2d63fb` 通過 Codex 限定範圍 review，R1、R2 關閉**（第 9 節）。B1-06 整體仍 InProgress。以下第 1–8 節保留當時的寫法，「待 review」是寫作當時的狀態。這份文件記錄整合決定，依據是 vault 筆記 `Claude-Code-B1-06-主線整合實作指示-20261004`，開工基準 `05bb1fe`（分支 `b1-06-demo-integration`，堆疊在 B1-04 之上，未合併 main）。
 
 **本輪有什麼**：真實的本機商店 HTTP 402、Host 組裝請購、Policy、SQLite Store、到期 worker，以及已認證的唯讀 HTTP 查詢，全部在同一個程序裡。模型行為由 fake CLI 替身產生。
 
@@ -286,3 +286,20 @@ demo 的 HTTP 讀取與 fake run 的寫入用同一個 `*store.Store`，不會�
   - 各步驟：check-contracts 15、check 77、race-cover 154、verify-b1-01 40、mutation 265 秒（baseline 33）。
   - 有 8 項突變明顯變慢，最多從 3 秒變 7 秒（#80–#85、#117、#151、#152），推測是四條線搶 CPU；判定都沒有變。
   - 誤判風險同兩條線的說明：搶 CPU 可能讓時序測試誤失敗。
+
+## 9 驗收紀錄：交付點 1 修正通過限定範圍 review（2026-10-05）
+
+- **結果**：Codex 以 `f2d63fb` 為檢查基準，交付點 1 的程式修正通過限定範圍 review，沒有新的阻擋問題。
+  - **R1**：token 不能覆蓋 DB、WAL、SHM 或鎖檔，拒絕發生在 Store 開啟前，原資料與鎖都保持有效。
+  - **R2**：更新 registry 並重啟後，舊 task 仍用原錢包、payer 與 intent，A／B 權限隔離正常。
+  - **關閉順序**：程式與文件一致，Store 最後關閉。
+  - **late-init**：同步方式已修正，沒有放寬產品逾時。
+- **證據歸屬**（分開記錄）：
+  - **Codex 獨立執行**（斷網容器，約 365 秒，含編譯）：demo、apa-buyer、buyer、store 四個套件的 race 測試；修正項目的回歸測試三輪；late-init 三輪；原問題的三個探測各三輪。全部通過。
+  - **Claude Code 執行、Codex 核對紀錄**：`e8b75a9` 的完整容器驗證與 222 項突變（第 8.6 節）。
+  - **Claude Code 執行、Codex 尚未核對**：
+    - `f2d63fb`（4 CPU、兩條線）的完整容器驗證：overall exit 0，222／222，746 秒；
+    - `84cdf5c`（4 CPU、四條線）：overall exit 0，222／222，562 秒（第 8.6 節）。
+    - Codex 檢查時，`f2d63fb` 的完整紀錄還沒產生，所以**不能寫成 Codex 已核對該輪全套通過**。
+- **範圍**：只有交付點 1。沒有 UI，沒有真實模型請購；B1-06 的完整完成仍需 opt-in live trace。
+- **狀態**：B1-04、B1-06 都維持 InProgress，未合併 main、未標 Done。交付點 2（Dashboard／placeholder 商店）可作為下一批派工，尚未開始。
