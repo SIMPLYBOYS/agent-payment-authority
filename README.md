@@ -2,7 +2,7 @@
 
 建立在 x402 之上的 Agent 付款授權與證據層：Agent 可以提出付款，但不能自己批准，也不能自己簽名。
 
-> **目前狀態：B1-00～03 已驗收（B1-02 共用契約 `apa.m1.v2` fixture，10/1 於 `2dc8d93` 結案；B1-03 最小資料商店（目錄＋402），10/1 於 `ebd3f44` 結案）；B1-05 確定性 Policy＋Store（`internal/policy`、`internal/store`）10/2 結案，程式驗收基準 `cb33768`，main 已 fast-forward 至 `7ad304a`（[docs/persistence-design.md](docs/persistence-design.md)）；主持人事件 HTTP 端點移至 B1-06；B1-04 Buyer wrapper 10/2 開始（分支 `b1-04-buyer`）：**fake 首個交付點 10/3 於 `b3c66f6` 通過技術 review**；**live 階段 A（開關、init 閘門、fake 驗證）10/3 於 `e8f6719` 通過技術 review**；C0 init 探測（`apa-buyer probe-init`，不送任何使用者訊息、不開 Store）10/4 於 `5f34a7b` 通過技術 review；**10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init**（未送任何使用者訊息；CLI 的背景行為與用量未知）。C0′（`probe-init --send-one-message`，只送一則固定訊息）10/4 已實作，fake 驗證於 `05e03e2` 通過技術 review；未對真實 CLI 執行，執行一次需 Aaron 另行核准。階段 B／C 未執行，live 認證接受清單為空。B1-04 整體 InProgress；真實 Claude 的登入、模型與計費方式都還沒驗證。M1 尚未完成。** 可啟動 loopback 服務、回應 health、提供商品目錄與 HTTP 402 報價、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md)、[docs/merchant.md](docs/merchant.md) 與 [docs/policy.md](docs/policy.md)。
+> **目前狀態：B1-00～03 已驗收（B1-02 共用契約 `apa.m1.v2` fixture，10/1 於 `2dc8d93` 結案；B1-03 最小資料商店（目錄＋402），10/1 於 `ebd3f44` 結案）；B1-05 確定性 Policy＋Store（`internal/policy`、`internal/store`）10/2 結案，程式驗收基準 `cb33768`，main 已 fast-forward 至 `7ad304a`（[docs/persistence-design.md](docs/persistence-design.md)）；主持人事件 HTTP 端點移至 B1-06；B1-04 Buyer wrapper 10/2 開始（分支 `b1-04-buyer`）：**fake 首個交付點 10/3 於 `b3c66f6` 通過技術 review**；**live 階段 A（開關、init 閘門、fake 驗證）10/3 於 `e8f6719` 通過技術 review**；C0 init 探測（`apa-buyer probe-init`，不送任何使用者訊息、不開 Store）10/4 於 `5f34a7b` 通過技術 review；**10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init**（未送任何使用者訊息；CLI 的背景行為與用量未知）。C0′（`probe-init --send-one-message`，只送一則固定訊息）10/4 已實作，fake 驗證於 `05e03e2` 通過技術 review；10/4 經核准執行一次，在版本檢查即停止、未送出訊息，核准版本隨後改為 `2.1.289 (Claude Code)`（待 review）；再執行需 Aaron 另行核准。階段 B／C 未執行，live 認證接受清單為空。B1-04 整體 InProgress；真實 Claude 的登入、模型與計費方式都還沒驗證。M1 尚未完成。** 可啟動 loopback 服務、回應 health、提供商品目錄與 HTTP 402 報價、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md)、[docs/merchant.md](docs/merchant.md) 與 [docs/policy.md](docs/policy.md)。
 > 尚未實作：真實 Claude Code（live）執行、真實 caller 認證、主持人事件檢視的 HTTP 端點、展示層與端到端整合、任何付款、簽章或付費內容交付。`cmd/demo` 尚未開啟 Store，啟動 demo 不會使用持久化；fake 模式的 `cmd/apa-buyer` 已接 Store（設定載入、到期處理啟停、關閉順序），見 [docs/cli-poc.md](docs/cli-poc.md)。
 > 第一個里程碑 M1 的終點是 **請購與 Ask／Deny**，沒有真付款。邊界見 [docs/m1-boundaries.md](docs/m1-boundaries.md)。
 
@@ -68,7 +68,7 @@ dev: .env line(s) 2 are not plain KEY=VALUE (no spaces, quotes or shell syntax);
 | 變數 | 必填 | 說明 |
 |---|---|---|
 | `APA_ADDR` | 是 | 服務位址，必須是 loopback IP 與 port，例如 `127.0.0.1:8402` 或 `[::1]:8402`。不接受 `0.0.0.0`、LAN IP 或主機名稱。`8123` 保留給 WebAuthn 驗證頁，請勿使用 |
-| `APA_LIVE_CLI` | 否 | 預設 `false`。`make dev`（demo）設為 `true` 會拒絕啟動。`apa-buyer run --live` 需要它為 `true`，另需絕對路徑的 `--cli` 與核准版本 `2.1.288 (Claude Code)`；目前 live 的認證接受清單為空，任何 live run 都會停在 init 閘門（見 [docs/cli-poc.md](docs/cli-poc.md) 第 7 節） |
+| `APA_LIVE_CLI` | 否 | 預設 `false`。`make dev`（demo）設為 `true` 會拒絕啟動。`apa-buyer run --live` 需要它為 `true`，另需絕對路徑的 `--cli` 與核准版本 `2.1.289 (Claude Code)`（10/4 起）；目前 live 的認證接受清單為空，任何 live run 都會停在 init 閘門（見 [docs/cli-poc.md](docs/cli-poc.md) 第 7 節） |
 | `APA_DB_PATH` | 否 | 只有 `apa-buyer run` 使用：Store 檔案路徑，不接受 DSN，目錄須為 0700；未設定時 fake 為 `var/apa-fake.db`、live 為 `var/apa-live.db`（demo 的預設 `var/apa.db` 不受影響） |
 
 缺少或不合法的設定會在啟動時以一行訊息說明原因並結束，例如：
