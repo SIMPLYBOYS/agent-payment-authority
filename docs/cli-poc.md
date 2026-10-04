@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **狀態（2026-10-04）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試，待 Codex 獨立 review，未對真實 CLI 執行**（第 22 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
+> **狀態（2026-10-04）**：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` review 的寫入失敗處理已修正（第 23 節），待 Codex 再 review，未對真實 CLI 執行**（第 22 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
 
@@ -582,6 +582,7 @@ APA_LIVE_CLI=true ./bin/apa-buyer probe-init --cli /Users/mac/.local/bin/claude 
 | 取得可嚴格讀取且版本相符的 init | `observed`／`init_observed` | 0 |
 | C0：等待上限內沒有 init | `no_init_before_input` | 3（不變） |
 | C0′：訊息已完整寫入，等待上限內仍沒有 init | `no_init_after_message` | 4（新增） |
+| C0′：寫入失敗或只寫了一部分（立即停止，不等逾時；之後讀到的 init 不算數） | `failed`／`input_failed`、`input_partial` | 1 |
 | C0′：逾時，且訊息沒有完整寫入 | `failed`／`input_not_started`、`input_partial`、`input_failed` | 1 |
 | 其他失敗（api_retry、JSON 歧義、hook、模型回覆等非預期訊息、版本、程序、取消） | `failed`，代碼同 C0 | 1 |
 
@@ -617,4 +618,18 @@ fake 新增（測試資料，不是真實 CLI 錄製）：`wait_message` 步驟�
 - 其餘真實執行的限制（HOME、keychain、網路、離開 process group 的子孫程序）與 C0 相同。
 
 突變：新增 8 項（#183–190）；#165、#172 因所指的程式行改寫而改指新位置（意圖不變）。共 190 項，原 99 項文字未動。
+
+## 23 `cf97c87` review 修正：寫入失敗立即停止且不被後續 init 覆蓋（2026-10-04，Claude Code 執行，待 Codex 獨立 review）
+
+| 項目 | review 發現 | 修正 | 測試 | 突變 |
+|---|---|---|---|---|
+| 1 | 寫入失敗只記在結果裡，run 要等到總逾時才結束 | `runner.go`：寫入一結束，主事件迴圈就檢查結果；`failed` 或 `partial` 立即停止 run（runner 結果 `input_error`，代碼 `input_failed`／`input_partial`），照常清理 | `TestProbeOneMessageWriteFailure`「later init false」：CLI 先關閉 stdin，寫入必定遇到 broken pipe。結果立即為 `failed`／`input_failed`，遠早於 10 秒等待上限 | #191 |
+| 2 | 確認的寫入失敗之後若讀到 init，會被記為成功 | 第一個停止原因不會被之後的事件取代；`probe.go` 只在 run 確實停在 init 時保存觀測資料，停止後才讀到的 init 一律不保存 | 同上「later init true」：CLI 忽略 SIGTERM，在停止後仍印出 init 並被讀到；結果仍是 `failed`，沒有觀測資料 | #191、#192 |
+| 3 | 不能一律要求 `InputComplete` | 「init 先到、run 停止、寫入未開始」仍是合法的 `observed` | `TestProbeOneMessageInitBeforeWrite`：只供測試替換的 `beforeWrite` 掛鉤讓寫入等到 run 開始停止，結果為 `observed`、`input_status not_started`、0 位元組 | #193 |
+
+兩個受控時序都不靠運氣：失敗案例用既有的啟動計數掛鉤當屏障，等 CLI 關閉 stdin 之後才開始寫；init 先到案例用新增的 `beforeWrite` 掛鉤，等 run 開始停止之後才進入寫入。Codex 的獨立探測程式（未加入 repo）在暫存副本上重跑三輪，兩案都以 `input_failed` 在 1 秒內結束、沒有觀測資料。
+
+Codex 回報首次連續執行回歸時曾出現一次子程序非零退出，新容器中未重現，原因未確定，不列為已確認的缺陷；本輪也未觀察到。
+
+共 193 項突變，原 99 項文字未動。訊息格式對真實 CLI 的相容性仍未驗證。
 
