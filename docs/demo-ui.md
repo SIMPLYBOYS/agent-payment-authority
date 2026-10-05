@@ -1,6 +1,8 @@
 # B1-06 交付點 2：Unity＋LimeZu 商店與 Dashboard
 
-狀態（2026-10-05）：**Codex 對 `9d3c4e4` 的 review 指出兩處待修（Unity 呈現文字殘留、測試把 zombie 判為存活），修正於 `6aee7f0`，Claude Code 執行，待 Codex 獨立 review**（第 10 節）。之前：交付點 2 修正（R1～R3）完成於 `eda6469`（第 9 節）。依據 vault 筆記 `Claude-Code-B1-06-交付點2修正指示-21db978-20261005`，修正基準 `21db978`。Codex 對 `21db978` 的限定 review 判定交付點 2 暫不通過，B1-04／B1-06 仍 InProgress。
+狀態（2026-10-05）：**B1-06 交付點 2 於 `6aee7f0` 通過 Codex 限定範圍技術 review**（文件 `eb97e61`；第 11 節）。R1～R3 與第二輪兩項修正關閉，未發現新的阻擋問題。通過的是 Unity＋LimeZu 與 Dashboard 的 fake 展示資料鏈，不代表真實模型請購、付款或整體 M1 完成。B1-04／B1-06 整體仍 InProgress，未合併 main、未標 Done；素材與 Web 建置公開發布仍未核准。第 7–10 節保留當時的寫法，「待 review」是寫作當時的狀態。
+
+歷程：Codex 對 `21db978` 的限定 review 判定暫不通過；依 vault 筆記 `Claude-Code-B1-06-交付點2修正指示-21db978-20261005` 修正 R1～R3 於 `eda6469`（第 9 節）；Codex 對 `9d3c4e4` 的 review 指出兩處待修，修正於 `6aee7f0`（第 10 節）。
 
 原交付：Claude Code 實作，依據 vault 筆記 `Claude-Code-B1-06-交付點2-Dashboard與商店實作指示-20261005`（新版：商店固定為 Unity＋LimeZu，獨立於 pixel-office），開工基準 `837f667`，分支 `b1-06-demo-integration`（未合併 main）。第 7 節是當時的紀錄。
 
@@ -372,3 +374,42 @@ Unity C# 與建置都沒有變更（`eda6469..6aee7f0` 沒有改到 `unity/`）�
 - 取消、CLI 逾時與 Allow 仍未在瀏覽器觸發；
 - 只用 Chrome；
 - 晚到回報用注入模擬，不是由 Unity 真的延遲產生。
+
+## 11 驗收紀錄：交付點 2 於 `6aee7f0` 通過限定範圍技術 review（2026-10-05）
+
+依據：Codex 對 `6aee7f0`（文件 `eb97e61`）的限定範圍 review，由 Aaron 於對話中轉交。
+
+**結果**：
+
+- R1、R2、R3（第 9 節）關閉；
+- 第二輪兩項修正關閉（第 10 節）：Unity 呈現文字殘留、測試把 zombie 判為存活；
+- 未發現新的阻擋問題；
+- B1-06 交付點 2 的 fake UI 資料鏈通過技術 review。
+
+**證據歸屬**：
+
+| 類別 | 內容 |
+|---|---|
+| Codex 獨立執行（斷網容器） | adapter 11／11；JS 狀態探測三輪：切換身分、task、回放時清除舊資料，晚到的舊世代回報不會恢復；`cmd/demo`、`internal/store` 全套 race 測試；zombie 單元測試與關閉／重啟整合測試各三輪；全部通過 |
+| Claude Code 執行、Codex 核對紀錄 | 64 項真實瀏覽器檢查（`ui-6aee7f0f541b-20261005T043115Z`）、222 項突變、完整容器七步與 17 項隔離檢查（`6aee7f0f541b-20261005T043523Z`）；WebGL 四個建置檔雜湊與上一輪一致 |
+| Claude Code 執行、本次 review 未個別提及 | Unity EditMode 6／6、PlayMode 3／3、WebGL 建置（`eda6469`；Unity 之後未變更）；反向驗證（`reversal-eda646904e66`、`reversal-6aee7f0f541b`、`zombie-20261005T042225Z`） |
+
+- Codex 判斷：原本的 zombie 整合失敗不必每次重現；新測試直接建立 zombie、驗證判斷機制，足以支持這次修正。
+
+**保留**：
+
+- 失敗嘗試：見第 9、10 節，包含 `eda6469` 第一次容器因主機負載失敗，以及第一次 zombie 反向替換未生效。
+- 未測：
+  - 取消、CLI 逾時與 Allow 未在瀏覽器觸發；
+  - 只用 Chrome；
+  - 晚到回報以注入模擬；
+  - Unity 不在容器內。
+- 待決：LimeZu 素材與 Web 建置的公開散布未核准。
+
+**範圍**：這次通過不代表以下任何一項完成：
+
+- 真實模型請購；
+- 付款；
+- 整體 M1。
+
+B1-06 的完整完成仍需至少一次核准的真實 CLI trace。B1-04／B1-06 維持 InProgress；不合併、不標 Done、不啟動真實 CLI。
