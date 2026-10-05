@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-05）：**第三版控制與持久化設計（第 13 節）：R1–R4 已關閉；13.9 新增的 `detail` 規則與現有的 `prepare_failed:<Store 代碼>` 不相容，依 Codex 對 `795cc30` 的 review 修正於第 13.10 節，待 Codex 限定 review，尚未核准實作。** 同一 SQLite 內保存場次協調資料的方向已獲接受，取代第 4 節未接受的 JSONL 場次日誌。切片 3.1 已於 `b2b7daa` 通過 Codex 限定範圍技術 review（第 12.7 節）。3.2–3.5 未開始。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節保留當時的寫法，「待 review」是寫作當時的狀態。
+狀態（2026-10-05）：**第三版控制與持久化設計（第 13 節）：R1–R4 已關閉；`detail` 大小寫問題已解決（13.10）。Codex 對 `35b1e2e` 的 review 指出兩組新問題（未列名內容改送 log、SQLite 唯讀與 WAL 測試前提），修正於第 13.11 節，待 Codex 限定 review，尚未核准實作。** 同一 SQLite 內保存場次協調資料的方向已獲接受，取代第 4 節未接受的 JSONL 場次日誌。切片 3.1 已於 `b2b7daa` 通過 Codex 限定範圍技術 review（第 12.7 節）。3.2–3.5 未開始。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節保留當時的寫法，「待 review」是寫作當時的狀態。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -1054,7 +1054,7 @@ review 結論：原本的 R1、R2 缺口可關閉。13.9.1 新增的 `detail` �
 | host 的固定代碼 | `cmd/demo` | `host_error`、`scratch_home_failed`、`task_reserved_by_run`（3.2 新增） |
 | buyer 的固定代碼 | `buyer.Report.Detail` | `ambiguous_json`、`assistant_messages`、`input_failed`、`input_partial`、`hook_message`、`init_duplicate`、`init_malformed`、`unexpected_message`、`prepare_failed` |
 | `prepare_failed:<代碼>` | `fakeruns.go` 用 `store.Code(err)` 組成 | `<代碼>` 必須是 Store 或契約的固定錯誤代碼（`*store.Error` 或 `contracts` 的代碼清單）。`store.Code` 回空字串時（沒有代碼的錯誤）寫成 `prepare_failed:STORE_ERROR`，原文只留在 host 的 log |
-| `detail_unlisted` | host 正規化 | buyer 回了不在清單內的代碼時，host 改記這個固定值，並在 log 記下原代碼。不把未列名的字串存進資料表 |
+| `detail_unlisted` | host 正規化（已由第 13.11.1 節修訂：在 buyer 來源處正規化，原代碼不進 log） | buyer 回了不在清單內的代碼時，host 改記這個固定值，並在 log 記下原代碼。不把未列名的字串存進資料表 |
 
 規則：
 
@@ -1086,14 +1086,169 @@ review 結論：原本的 R1、R2 缺口可關閉。13.9.1 新增的 `detail` �
 
 **實作注意事項**（review 提出，納入 3.2 驗收）：
 
-- **`--verify-db` 走獨立的唯讀入口**（`store.VerifyFile`）：只用 `query_only` 連線，不經過會遷移、建表、執行 `ExpireDue` 的 `Store.Open`；不寫入任何檔案，也不 checkpoint。測試斷言執行前後的主檔、`-wal`、`-shm` 位元組都不變。
+- （已由第 13.11.2 節修訂：`query_only` 不保證檔案不變，改為只讀檔案位元組並在拋棄式副本上驗證）**`--verify-db` 走獨立的唯讀入口**（`store.VerifyFile`）：只用 `query_only` 連線，不經過會遷移、建表、執行 `ExpireDue` 的 `Store.Open`；不寫入任何檔案，也不 checkpoint。測試斷言執行前後的主檔、`-wal`、`-shm` 位元組都不變。
 - **恢復測試的比對基準與 WAL**：
   - 基準時間點定為「停止服務完成後」：host 程序結束、`.lock` 已釋放、所有連線關閉之後。此時記錄失敗資料庫的主檔、`-wal`、`-shm` 的位元組與大小作為基準，恢復步驟完成後再比對一次。
   - 測試要先確認殘留 WAL 真的存在，不能空過：基準時 `-wal` 必須存在且大小大於 0；且升級前寫入的一筆資料，在只讀主檔時（以不套用 WAL 的方式另行比對）不在主檔中，表示它確實還在 WAL 裡。不符合就讓測試失敗，而不是略過。
-  - 製造殘留 WAL 的方式：測試在升級前的寫入連線上關閉自動 checkpoint（`PRAGMA wal_autocheckpoint = 0`），並在關閉前保持另一條讀取連線開著，避免最後一條連線關閉時自動 checkpoint 清空 WAL。
+  - （已由第 13.11.3 節修訂：保留第二條連線與「連線全關後取基準」互相矛盾，改用隔離子程序與非正常退出）製造殘留 WAL 的方式：測試在升級前的寫入連線上關閉自動 checkpoint（`PRAGMA wal_autocheckpoint = 0`），並在關閉前保持另一條讀取連線開著，避免最後一條連線關閉時自動 checkpoint 清空 WAL。
 
 **驗收條件修正**：第 12 條改為：
 
 > `host_runs` 每一種狀態的必填與留空欄位、合法代碼（`outcome` 與 `detail` 都依固定清單，`detail` 包含 `prepare_failed:<Store 代碼>`）與組合規則，在資料表約束、寫入與恢復驗證三處都檢查。合法的失敗結果能保存並在重啟後讀回；不完整、矛盾或自由文字的值無法寫入，也無法通過開檔驗證。
 
 需要 Aaron 決定：與第 13.8.6 節相同，沒有新增事項。
+
+### 13.11 修正：未列名內容不改送 log；SQLite 唯讀與 WAL 測試方法（依 Codex 對 `35b1e2e` 的 review；設計提案，待 Codex 限定 review）
+
+review 結論：`detail` 大小寫不相容已解決；R1–R4 不重開。本節只修兩組問題。
+
+#### 13.11.1 未列名內容不改送到任何輸出
+
+**問題**：13.10 要求把未列名的 buyer 代碼記到 log。這等於讓「不保存未知文字」的限制，在另一個輸出位置失效。同樣，13.10 說無代碼錯誤的「原文只留在 host 的 log」，也是這種情況。
+
+已核對的事實：3.1 的 `cmd/demo/status.go` 註解寫「its text stays in the host's log」，但 `main.go` 實際只印 `store.Code(err)`，沒有代碼時印出空字串，並沒有印出原文。這個註解不正確，在 3.2 一併改正（見下方檔案清單）。
+
+**規則**：
+
+- 範圍：場次結果的每一個輸出位置：
+  - `host_runs` 資料表；
+  - buyer 的 run trace（`var/runs/*.jsonl`）；
+  - demo host 的 stdout／stderr（含 `demo: fake run …` 那一行與到期錯誤那一行）；
+  - HTTP 回應（status、場次）；
+  - 瀏覽器畫面與證據檔。
+- 這些位置**只出現固定值**：清單內的代碼、`detail_unlisted`、`prepare_failed:<清單內的 Store 代碼>`、`prepare_failed:STORE_ERROR`、`STORE_ERROR`。
+- 不保存、不印出：
+  - 未知字串、錯誤原文（`err.Error()`）、Store 錯誤的 `Detail` 欄位、CLI 輸出；
+  - 也不記「原代碼」。要查原因，只能依時間與 task 在本機重現，不從輸出取得。
+
+**正規化的位置**：在 buyer 產生 `Report.Detail` 的地方，也就是 trace 與回傳值之前，就比對清單：
+
+- 不在清單 → `detail_unlisted`。所以 trace、`runOutcome`、stdout 與資料表看到的是同一個固定值。
+- `cmd/demo` 再比對一次清單（第二層），不在清單同樣換成固定值。
+
+**錯誤代碼統一**：
+
+- `store.Code(err)` 回空字串的地方，一律寫 `STORE_ERROR`。這包括：
+  - `fakeruns.go` 的 `prepare_failed:`；
+  - buyer trace 的 `prepare_error`（目前寫 `error`）；
+  - `main.go` 的 `demo: expiry:` 那一行（目前印空字串）；
+  - `status.go` 的 `last_error`（已是 `STORE_ERROR`）。
+- 以上都不附原文。
+
+**buyer 代碼清單補齊**：13.10 的 buyer 清單缺了 `Gate.check()` 與 host 補上的代碼。完整清單：
+
+| 來源 | 代碼 |
+|---|---|
+| runner 的停止原因 | `ambiguous_json`、`assistant_messages`、`input_failed`、`input_partial` |
+| host 的 Watch | `hook_message`、`init_duplicate`、`unexpected_message`、`prepare_failed` |
+| `Gate.check()` | `init_malformed`、`tools`、`mcp_servers`、`permission_mode`、`cli_version`、`plugins`、`skills`、`agents`（迴圈依鍵名回傳）、`auth_missing`、`auth_unconfirmed` |
+| host 補上 | `init_missing` |
+
+`passed` 只出現在 trace 的 `gate` 欄位，不是 `detail`；同步測試同時涵蓋 `gate` 欄位的固定值。
+
+**清單同步測試**：
+
+- 用 Go 的 `go/ast` 掃描 `internal/buyer` 與 `cmd/demo` 中：
+  - `stop(…, "…")`、`stopErr{…, "…"}`；
+  - Watch 與 `Gate.check()` 的 `return "…"`、`return X, "…"`；
+  - 迴圈中以清單字面值回傳的鍵（`plugins`、`skills`、`agents`）；
+  - `"input_"+…` 的組合，以 `InputFailed`、`InputPartial` 展開。
+- 掃到但清單沒有的代碼，測試失敗。清單有、程式已不再產生的代碼也報出，避免清單過寬。
+- 反向驗證：從清單刪去 `auth_unconfirmed`，測試失敗。
+
+**合成敏感標記測試**：
+
+標記 `APA-SECRET-MARK-7f3c`（測試專用的合成字串，不是真實憑證）以三種方式注入：
+
+1. **buyer 未列名代碼**：測試用的 Watch 回傳 `(ConfigMismatch, "x_" + 標記)`。
+2. **無代碼的建立失敗**：測試替身的 `prepare` 回傳 `errors.New("… " + 標記)`，`store.Code` 為空。
+3. **無代碼的到期錯誤**：Store 測試掛鉤讓 `ExpireDue` 回傳含標記的非代碼錯誤。
+
+斷言：
+
+- 場次正常結束；
+- `detail` 依序是 `detail_unlisted`、`prepare_failed:STORE_ERROR`；status 的 `last_error` 是 `STORE_ERROR`。
+
+接著逐一搜尋下列輸出，**都不含標記**：
+
+- host 的 stdout／stderr 緩衝；
+- trace 目錄下所有檔案；
+- 資料庫主檔與 `-wal` 的位元組；
+- 所有 HTTP 回應本文（status、場次、task、events）；
+- 瀏覽器測試的畫面文字與證據目錄（3.2 的瀏覽器段落使用第 1 種注入）。
+
+反向驗證：讓 `fakeruns.go` 改回附上原文，標記測試失敗。
+
+#### 13.11.2 `VerifyFile`：真正不碰來源檔
+
+**問題**：
+
+- SQLite 的 `query_only` 不等於檔案唯讀，官方說明它仍允許 checkpoint，不能據此保證主檔、`-wal`、`-shm` 不變。
+- 一般的唯讀連線（`mode=ro`）仍可能寫入 `-shm` 的 wal-index。
+- `immutable=1` 會忽略 WAL，驗證結果會漏掉尚未 checkpoint 的資料。
+
+**修正**：`VerifyFile` 不讓 SQLite 開啟來源檔，只用一般檔案讀取取得位元組，驗證在拋棄式副本上進行。
+
+1. **確認沒有程序正在使用**：取得 `<db>.lock` 的排他鎖（非阻塞），整個過程持有。取不到就拒絕：「資料庫正被使用」。
+   - 鎖檔不存在時，只在唯讀檢查專用的暫存目錄建立替代鎖，不在來源目錄建立任何檔案；但若同目錄有 `-wal` 且無法確認沒有寫入者，同樣拒絕。
+2. **讀取前記錄**：主檔與 `-wal` 的大小、修改時間、sha256。`-shm` 是可重建的索引，不複製，但同樣記錄它的狀態。
+3. **複製**：以一般讀檔把主檔與 `-wal`（若存在）複製到 0700 的新暫存目錄，檔名維持 `x.db`、`x.db-wal` 的對應。不複製 `-shm`，讓 SQLite 在副本上從 WAL 重建索引。
+4. **讀取後再記錄一次**。與第 2 步任何一項不同，就丟棄副本並拒絕：「來源在讀取期間改變」。
+5. **在副本上驗證**：依副本的 `user_version` 套用版本 1 或 2 的規則（`integrity_check`、`foreign_key_check`、既有恢復檢查、`host_runs` 規則）。副本可被 SQLite 正常開啟與 checkpoint，因為它是拋棄式的。
+6. 刪除副本，回報版本與結果。
+
+**不退回可寫模式**：任何一步失敗都只回報拒絕，不改用 `Store.Open`、不在來源上開任何 SQLite 連線。來源檔只被讀取，因此主檔、`-wal`、`-shm` 必然不變；測試仍逐位元組比對加以確認。
+
+R2 的「遷移前驗證」（13.8 第 1 步）是 host 本身持有鎖、準備寫入時的正常開檔驗證，與 `--verify-db` 不同，不受這一節影響。
+
+#### 13.11.3 殘留 WAL 測試：隔離子程序與非正常退出
+
+**問題**：13.10 用「保留第二條連線」製造殘留 WAL，又要求「連線全部關閉後才取基準」，兩者互相矛盾。而且最後一條連線正常關閉時，仍可能 checkpoint 並清掉 WAL；只停用自動 checkpoint 擋不住這一步。
+
+**修正**：用隔離的測試子程序產生殘留 WAL，讓它非正常退出，不經過正常關閉。
+
+1. **準備版本 1 的資料庫**（測試輔助）：
+   - 以版本 2 的 Store 正常寫入 task 與事件後關閉；
+   - 在拋棄式副本上刪除 `host_runs` 並把 `user_version` 設回 1（兩版只差這張表）；
+   - 再用版本 1 的規則以 `VerifyFile` 確認它是合法的版本 1 資料庫。
+2. **子程序升級**：測試以自己的測試二進位重新執行（`TestMain` 依環境變數進入子程序模式），對這份資料庫執行 `--upgrade-db` 的開檔流程：
+   - 遷移前驗證 → `VACUUM INTO` 備份 → 遷移交易提交（寫進 WAL）→ 遷移後驗證；
+   - 遷移後驗證被測試掛鉤設為失敗。
+   - 掛鉤在**關閉任何連線之前**，於 stdout 印出確認行 `UPGRADE_FAILED_READY`，然後阻塞。
+3. **非正常退出**：父程序讀到確認行後，對子程序送 SIGKILL，等它結束（`Wait` 回來），確認 `.lock` 已釋放（父程序能取得排他鎖後再放開）。
+4. **取基準**：此時才記錄失敗資料庫的主檔、`-wal`、`-shm` 的大小與 sha256。這就是「停止服務完成後」的基準。
+5. **確認殘留 WAL 真的存在，不能空過**：
+   - `-wal` 存在且大小大於 0；
+   - 把**只有主檔**複製到拋棄式目錄並開啟：`user_version` 仍是 1，沒有 `host_runs`，表示遷移只在 WAL 裡；
+   - 把主檔＋`-wal` 一起複製到另一個拋棄式目錄並開啟：`user_version` 是 2。
+   - 任何一項不符，測試**失敗**，不略過。檢查只在副本上進行，原證據不動。
+6. **依 13.9.2 恢復**：
+   - 把備份複製到新路徑（目標不存在）；
+   - 對新路徑執行 `VerifyFile`：版本 1，通過；
+   - task 與事件和第 1 步完全相同。
+7. **再比對一次基準**：失敗資料庫的主檔、`-wal`、`-shm` 的大小與 sha256 都與第 4 步相同。過程中也對失敗資料庫本身執行一次 `VerifyFile`（預期回報版本 2、遷移後驗證的同一失敗），以確認唯讀檢查不改變來源。
+
+**其他 `VerifyFile` 測試**：
+
+- 鎖被另一程序持有 → 拒絕，來源不變；
+- 讀取期間來源被改動（測試掛鉤在複製後、第二次記錄前追加一個位元組）→ 拒絕；
+- 目標路徑已存在、`-wal` 或 `-shm` 已存在 → 恢復步驟拒絕複製（沿用 13.9.2）。
+
+#### 13.11.4 驗收條件與 3.2 檔案增補
+
+**驗收條件**：第 12 條增補，並新增第 14、15 條：
+
+- 12（增補）：未列名代碼與錯誤原文不出現在資料表、trace、stdout／stderr、HTTP 回應或證據中，只出現固定值；以合成標記測試確認。
+- 14：`VerifyFile` 只以一般讀檔取得來源位元組，在拋棄式副本上驗證；無法保證來源不變時拒絕，不退回可寫開啟；來源三個檔案逐位元組不變。
+- 15：殘留 WAL 測試以隔離子程序的非正常退出產生 WAL，在程序結束後取基準，並斷言 WAL 存在且含尚未進入主檔的遷移；不符合時測試失敗。
+
+**3.2 檔案增補**：
+
+- `internal/buyer`：`detail` 清單與在產生處正規化，trace 的 `prepare_error` 改用 `STORE_ERROR`；
+- `cmd/demo/fakeruns.go`：第二層清單比對，`prepare_failed:STORE_ERROR`；
+- `cmd/demo/main.go`：`demo: expiry:` 那一行用 `STORE_ERROR`；
+- `cmd/demo/status.go`：改正註解（3.1 的註解寫「原文留在 log」，與實際不符）；
+- `internal/store`：`VerifyFile` 的位元組複製流程與鎖，子程序測試模式（測試檔）；
+- `internal/buyer` 與 `cmd/demo` 的同步測試（`go/ast` 掃描）。
+
+既有展示資料庫仍預設不升級（13.8.6），沒有新增需要 Aaron 決定的事項。
