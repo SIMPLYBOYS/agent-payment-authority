@@ -67,7 +67,9 @@ type runView struct {
 	RecordError   string `json:"record_error,omitempty"` // the run's end could not be recorded (code)
 }
 
-// view merges the stored run with what this process knows. c.mu is held.
+// view merges the stored run with what this process knows. c.mu is held,
+// and r was read under it: runOne records the end and updates memory under
+// c.mu too, so a view never mixes an older row with a newer end.
 func (c *control) view(r store.Run) runView {
 	v := runView{RunID: r.RunID, RequestID: r.RequestID, Scenario: r.Scenario, TaskID: r.TaskID, ConsumerID: r.ConsumerID,
 		State: r.State, AcceptedAt: r.AcceptedAt, InterruptedAt: r.InterruptedAt, EndedAt: r.EndedAt}
@@ -214,11 +216,14 @@ func (c *control) lookup(w http.ResponseWriter, requestID string) (store.Run, bo
 }
 
 // answer answers a known run: 200 with it, or 409 when the request ID named
-// another scenario. c.mu is held.
+// another scenario. c.mu is held; the row is read again under it.
 func (c *control) answer(w http.ResponseWriter, run store.Run, scenarioName string) {
 	if run.Scenario != scenarioName {
 		fail(w, http.StatusConflict, "request_id_conflict")
 		return
+	}
+	if fresh, found, err := c.st.GetRun(run.RunID); err == nil && found {
+		run = fresh
 	}
 	reply(w, http.StatusOK, c.view(run))
 }
@@ -231,8 +236,8 @@ func (c *control) runOne(ctx context.Context, lr *liveRun, sc *scenario) {
 	defer lr.cancel()
 	o := c.fake.runOne(ctx, c.st, c.bridge, planRun{TaskID: lr.run.TaskID, Scenario: sc.Scenario, BudgetInitial: sc.BudgetInitial})
 	end := runEnd(o)
+	c.mu.Lock() // the end's record and this process's view of it change together
 	err := c.st.EndRun(lr.run.RunID, end)
-	c.mu.Lock()
 	lr.state, lr.end = "ended", &end
 	if err != nil {
 		lr.recordErr = store.CodeOf(err)
@@ -302,16 +307,19 @@ func (c *control) get(w http.ResponseWriter, r *http.Request, a *api) {
 	if !reader(w, r, a) {
 		return
 	}
+	c.mu.Lock()
 	run, found, err := c.st.GetRun(r.PathValue("run_id"))
+	var v runView
+	if err == nil && found {
+		v = c.view(run)
+	}
+	c.mu.Unlock()
 	switch {
 	case err != nil:
 		reply(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable", "code": store.CodeOf(err)})
 	case !found:
 		fail(w, http.StatusNotFound, "not_found")
 	default:
-		c.mu.Lock()
-		v := c.view(run)
-		c.mu.Unlock()
 		reply(w, http.StatusOK, v)
 	}
 }
@@ -321,17 +329,17 @@ func (c *control) list(w http.ResponseWriter, r *http.Request, a *api) {
 	if !reader(w, r, a) {
 		return
 	}
-	runs, err := c.st.Runs(20)
-	if err != nil {
-		reply(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable", "code": store.CodeOf(err)})
-		return
-	}
 	c.mu.Lock()
+	runs, err := c.st.Runs(20)
 	out := make([]runView, 0, len(runs))
 	for _, run := range runs {
 		out = append(out, c.view(run))
 	}
 	c.mu.Unlock()
+	if err != nil {
+		reply(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable", "code": store.CodeOf(err)})
+		return
+	}
 	reply(w, http.StatusOK, map[string]any{"runs": out})
 }
 
@@ -345,13 +353,13 @@ func (c *control) summary() map[string]any {
 	}
 	slices.SortFunc(scs, func(a, b map[string]string) int { return strings.Compare(a["id"], b["id"]) })
 	out := map[string]any{"scenarios": scs, "active": nil, "interrupted": []map[string]string{}}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	runs, err := c.st.Runs(20)
 	if err != nil {
 		out["error"] = store.CodeOf(err)
 		return out
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.active != nil {
 		out["active"] = map[string]string{"run_id": c.active.run.RunID, "task_id": c.active.run.TaskID, "live": c.active.state}
 	}

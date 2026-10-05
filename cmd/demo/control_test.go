@@ -501,3 +501,40 @@ func TestHostDetailsListed(t *testing.T) {
 		}
 	}
 }
+
+// A run view never mixes an older stored row with a newer end held in
+// memory: whenever live is ended, the row is ended too or the record error
+// is shown (container run of c5bf8c2). The race is timing dependent, so
+// this polls tightly over several runs; it cannot prove its absence.
+func TestRunViewConsistent(t *testing.T) {
+	h := controlHost(t, hostOpts{expiryEvery: time.Hour})
+	defer h.stop()
+	op := h.tokens["operator"]
+	bad := func(v map[string]any) bool {
+		return v["live"] == "ended" && v["state"] != "ended" && v["record_error"] == nil
+	}
+	for i := range 12 {
+		_, a := h.post("/api/host/runs", op, startBody("req-view-"+strings.Repeat("0", 10)+string(rune('a'+i)), "ask"))
+		id, _ := a["run_id"].(string)
+		if id == "" {
+			t.Fatalf("start %d: %v", i, a)
+		}
+		for end := time.Now().Add(30 * time.Second); time.Now().Before(end); {
+			v := h.run(id)
+			if bad(v) {
+				t.Fatalf("mixed view: %v", v)
+			}
+			_, body, _ := h.get("/api/host/runs", op)
+			var list struct{ Runs []map[string]any }
+			json.Unmarshal(body, &list)
+			for _, r := range list.Runs {
+				if bad(r) {
+					t.Fatalf("mixed view in the list: %v", r)
+				}
+			}
+			if v["state"] == "ended" && v["live"] == "ended" {
+				break
+			}
+		}
+	}
+}
