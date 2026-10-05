@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-05）：**切片 3.1 於 `b2b7daa` 通過 Codex 限定範圍技術 review，R1～R3 關閉，未發現新的阻擋問題（第 12.7 節）。** 3.1 的設計經 Codex 對 `7d11894` 的 review 通過，Aaron 10/5 核准實作。**3.2–3.4 的控制、恢復與場次持久化仍待設計修訂與 review，未開始**：第 4 節的場次日誌（JSONL）未通過 review，見該節標註。3.5 未啟動。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節保留當時的寫法，「待 review」是寫作當時的狀態。
+狀態（2026-10-05）：**第三版控制與持久化設計（第 13 節）待 Codex review，尚未核准實作。** 它取代第 4 節未接受的 JSONL 場次日誌，改用同一個 SQLite 檔內的協調資料表，並列出 3.2 的最小切片。切片 3.1 已於 `b2b7daa` 通過 Codex 限定範圍技術 review（第 12.7 節）。3.3–3.5 未開始。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節保留當時的寫法，「待 review」是寫作當時的狀態。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -101,6 +101,8 @@ make demo                         (一個指令：檢查 → 編譯 Go → 啟�
 - 第一場很快結束、回覆遺失、主持人再送一次：仍是同一個 ID，所以拿回同一場，不會建立第二場。按鈕停用只是輔助。
 - 頁面重新整理會失去 request ID，下一次按鈕就是新的操作。為了避免主持人不知道上一場已建立，主持人頁面一律列出最近場次（`GET /api/host/runs`），開始前先看得到上一場。
 
+> **已由第 13 節取代**：第三版改用 SQLite 協調資料表 `host_runs`，見第 13.2–13.4 節。
+>
 > **待修（Codex 對 `7d11894` 的 review）**：本段的 JSONL 場次日誌未通過 review，不得據此實作。原因有二：
 > 1. 「只追加」「不修補」「略過不完整尾行後繼續服務」互相衝突：半行留著，再追加就會黏在一起。
 > 2. SQLite 與日誌缺少配對與恢復規則：日誌遺失或只還原資料庫時，request ID 的去重會消失；`ended` 寫入失敗也還沒有定義。
@@ -298,6 +300,8 @@ token 不寫入 localStorage、sessionStorage、cookie、URL、console 或 Unity
 
 ## 7 錯誤呈現（§4.5）
 
+> 本節的「host 異常終止 → `unknown`（依日誌判斷）」一列由第 13.4、13.5 節取代；其他規則保留。
+
 **三種狀態分開判斷**：
 
 - **場次**（程序）：`running`、`stopping`、`ended`、`unknown`（結果不明）。來源是 host 記憶體與場次日誌。
@@ -338,7 +342,7 @@ token 不寫入 localStorage、sessionStorage、cookie、URL、console 或 Unity
 | 切片 | 修改的檔案與元件 | 使用者看到的結果 | 驗收測試 | 相依 |
 |---|---|---|---|---|
 | **3.1 一鍵啟動與就緒** | `Makefile`（`demo`）、`scripts/demo/start.sh`；`cmd/demo`：`GET /api/host/status`（host 唯讀）、記住最近一筆到期錯誤、`GET /host` 靜態頁；`web/`：`host.html`、就緒面板、token 檔載入與第 6.3 節的清除規則 | 一個指令啟動；`/host` 列出 HTTP／Store／fake CLI／Unity 建置／LimeZu 是否就緒；選一次檔案就能在 A／B 之間切換查看，不用複製 token | 腳本：缺建置、缺匯入、埠佔用、鎖住時的訊息與 exit code。HTTP：status 依第 6.1 節的權限（viewer 403、無 token 401、Host／Origin），回覆不含 token 或路徑。JS 單元：第 6.3 節每一條檔案檢查各有一個拒絕案例（過大、非 JSON、多餘的鍵、未知角色、格式不符、重複、兩個 host、沒有 viewer）。瀏覽器（真 Unity 建置）：選檔後選檔欄位為空；storage／cookie／URL／console 都沒有 token；A↔B 切換後畫面不殘留；清除全部、載入新檔、手動 viewer 模式、重啟服務後的 401 都清掉舊憑證與舊畫面；舊檔案在重啟後被拒絕；`/` 頁沒有載入 token 檔的入口 | 無（不需新控制 API、新角色或伺服器端認證變更） |
-| **3.2 主持人控制及權限** | `cmd/demo`：operator 角色、`scenarios.json`、場次日誌、`POST /api/host/runs`（request ID）、`…/stop`、`GET /api/host/runs*`、單場鎖、讀取端點拒絕 operator；`testdata/demo/scenarios.json`、`testdata/demo/registry.json`；`web/`：`/host` 的主持人面板、最近場次清單、token 檔接受 operator | 選情境按「開始」，fake 客人進店到 Ask 或 Deny；重送與連點都不重複；執行中可停止 | HTTP：第 6.1 節整張權限表；第 6.2 節的請求防護；request ID 的四種情況（新、重送同情境、重送不同情境、有進行中的場次）；第一場已結束後同 ID 重送仍回同一場；日誌寫入失敗不配發。整合：開始後 Store 有新 task，事件序列與 `ask`／`deny-budget` 案例一致；停止要等收尾寫入才 `ended`，寫入失敗（測試替身）不顯示已停止；重啟後同 ID 回「結果不明」的同一場，配發跳過日誌提過的 task；demo registry 與契約 fixture 一致 | 3.1 |
+| **3.2 主持人控制及權限**（第二版；已由第 13.6 節取代） | `cmd/demo`：operator 角色、`scenarios.json`、場次日誌、`POST /api/host/runs`（request ID）、`…/stop`、`GET /api/host/runs*`、單場鎖、讀取端點拒絕 operator；`testdata/demo/scenarios.json`、`testdata/demo/registry.json`；`web/`：`/host` 的主持人面板、最近場次清單、token 檔接受 operator | 選情境按「開始」，fake 客人進店到 Ask 或 Deny；重送與連點都不重複；執行中可停止 | HTTP：第 6.1 節整張權限表；第 6.2 節的請求防護；request ID 的四種情況（新、重送同情境、重送不同情境、有進行中的場次）；第一場已結束後同 ID 重送仍回同一場；日誌寫入失敗不配發。整合：開始後 Store 有新 task，事件序列與 `ask`／`deny-budget` 案例一致；停止要等收尾寫入才 `ended`，寫入失敗（測試替身）不顯示已停止；重啟後同 ID 回「結果不明」的同一場，配發跳過日誌提過的 task；demo registry 與契約 fixture 一致 | 3.1 |
 | **3.3 新一場 task 與 UI 選擇** | Store 唯讀清單查詢；`GET /api/tasks`；`web/adapter.js` 移除 `FIXTURE_TASKS`；開始後自動切 viewer 並開啟新 task | 每場是新 task；清單顯示該 consumer 的所有場次；舊場次可回放 | HTTP：viewer 只看到自己的 task（含 registry 移除後的舊 task 規則）；瀏覽器：連續兩場是兩個 task、前一場仍在清單且可回放；回放不寫資料 | 3.2 |
 | **3.4 停止、錯誤、重啟恢復** | `cmd/demo`：`POST /api/host/tasks/{id}/cancel`（第 6.1 節規則）、場次結果對照；`web/`：第 7 節的狀態文字 | 每種結果都如實顯示，並列出可採取的操作；結果不明與未收尾的 task 可以取消 | HTTP：取消的每一列（404、409 run_active、重複取消 200 already、已逾時 409、Deny 409 not_eligible、成功）與並行兩個取消只寫一次；整合：fake 逾時、Store 寫入失敗、host 正常關閉與異常終止後重啟；Ask 到期後的 `running` 不被標成異常；每種都沒有成功字樣 | 3.2 |
 | **3.5 實際瀏覽器操作驗收** | `scripts/verify/browser-ui.mjs` 新增操作流程段 | 一次跑完主持人實際會做的操作 | 真 Unity Web 建置：`make demo` 等同的啟動 → 選檔 → Ask 一場 → Deny 一場 → 中途停止一場 → 連點開始 → 重啟後清單與狀態；截圖；證據不含 token | 3.1–3.4（每個切片也各自補自己的瀏覽器檢查，3.5 是整體串接） |
@@ -568,3 +572,193 @@ review 結論：3.1 暫不通過，需修三處，不只是補跑容器。Codex 
 - 第二版的 JSONL 方案未獲接受；不因 3.1 通過而實作 JSONL 或新增 SQLite 協調表。
 
 B1-04／B1-06 整體維持 InProgress。交付點 3.1 標為技術 review 通過；不合併、不標 Done、不開始 3.2。
+
+## 13 第三版：主持人控制、新場次與場次協調（設計提案，待 Codex review；尚未核准實作）
+
+依據：Aaron 10/5 指示，以 `901f600` 為文件基準修訂。範圍限於：主持人控制、新場次、持久化與恢復、狀態分離、3.2 最小切片。只改設計，未新增資料表、未遷移資料庫、未寫控制 API。
+
+**本節取代的未接受提案**：
+
+| 原提案 | 狀態 | 由本節取代為 |
+|---|---|---|
+| 第 4 節「場次日誌」：`<APA_DB_PATH>.runs.jsonl` 與它的讀回、損壞、配發規則 | 未通過 review（`7d11894`） | 第 13.2 節：同一個 SQLite 檔內的 `host_runs` 協調資料表 |
+| 第 4 節「開始的重複請求」中「依日誌判斷已見過的 ID」 | 隨日誌一起取代 | 第 13.3 節：以 `host_runs.request_id` 的 UNIQUE 與同一交易判斷 |
+| 第 7 節表格「host 異常終止 → unknown（日誌有 accepted 沒有 ended）」 | 隨日誌一起取代 | 第 13.4 節：啟動時把沒有結束紀錄的場次標為 `interrupted` |
+| 第 8 節 3.2 列 | 範圍與測試改寫 | 第 13.6 節 |
+
+**保留不變**：
+
+- 第 4 節的情境目錄、停止與取消分開、Ask 不自動核准；
+- 第 5 節的 demo registry 與每位 consumer 20 個展示 task（M1 暫時限制）；
+- 第 6.1 節的權限表（viewer／host 唯讀、operator 控制）；
+- 第 6.2 節的請求防護；
+- 第 7 節「Ask 到期後 task 也是 `running`，不能據此判斷當機」的規則。
+
+**不重開**：Policy 裁決、Store 的事件、到期、取消、逾時與 task 狀態投影（`project()`）都不改。協調資料表不寫任何事件，也不參與 task 狀態。
+
+### 13.1 主持人控制
+
+| 操作 | 誰可以 | 端點 | 作用對象 | 切片 |
+|---|---|---|---|---|
+| 開始 | operator | `POST /api/host/runs` `{"request_id","scenario"}` | 新場次、新 task | 3.2 |
+| 停止 | operator | `POST /api/host/runs/{run_id}/stop` | 進行中場次的程序；buyer host 依既有規則寫 `TASK_CANCELLED` | 3.2 |
+| 查場次 | operator、host（唯讀） | `GET /api/host/runs`（最近 20 場）、`GET /api/host/runs/{run_id}` | 場次紀錄 | 3.2 |
+| 取消 task | operator | `POST /api/host/tasks/{task_id}/cancel` | Store 的 task，不涉及程序；規則同第 6.1 節 | 3.4 |
+
+- viewer 與 host 維持唯讀：所有 POST 對 viewer、host 都回 403。
+- operator 不能讀 task 內容：`/api/tasks/*` 對 operator 回 403。
+- token 檔多一個 operator（啟動時產生，0600，不進 log）；`/host` 頁在 3.2 起接受恰好一個 operator。
+
+**主持人頁的操作流程（3.2）**：
+
+1. 選情境，按「開始」。頁面產生 request ID（`crypto.randomUUID()`，只在記憶體），送出。
+2. 收到 `run_id` 與 `task_id` 前，網路錯誤或逾時的重送都用同一個 ID。
+3. 收到後，頁面用該場 consumer 的 viewer token（來自已載入的檔案）切換 viewer，開啟該 task。這沿用 3.1 的 `useViewer` 與既有的手動輸入 task ID 流程，不需要 3.3 的清單 API。
+4. 場次 `running` 時可按「停止」；場次結束後停止鈕停用。
+5. 最近場次清單一律顯示，開始前看得到上一場。
+
+### 13.2 協調資料表 `host_runs`（取代 JSONL）
+
+放在既有資料庫檔案內，由 Store 套件提供只碰這張表的函式。schema 版本 1 → 2，**純新增**，不改任何既有資料表：
+
+```sql
+CREATE TABLE host_runs (
+  run_id          TEXT PRIMARY KEY,
+  request_id      TEXT NOT NULL UNIQUE,
+  scenario        TEXT NOT NULL,
+  consumer_id     TEXT NOT NULL,
+  task_id         TEXT NOT NULL UNIQUE,      -- 配發即保留；不設外鍵，task 可能從未建立
+  state           TEXT NOT NULL CHECK (state IN ('accepted', 'ended', 'interrupted')),
+  accepted_at     INTEGER NOT NULL,
+  ended_at        INTEGER,
+  outcome         TEXT,                      -- runOutcome 的固定代碼
+  detail          TEXT,
+  task_started    INTEGER CHECK (task_started IN (0, 1)),
+  store_end       TEXT,                      -- TASK_CANCELLED／TASK_TIMED_OUT／空
+  store_end_error TEXT,                      -- 收尾寫入失敗的 Store 代碼
+  CHECK ((state = 'ended') = (ended_at IS NOT NULL))
+) STRICT;
+```
+
+**為什麼用 SQLite，不用 JSONL**：
+
+- 協調紀錄與 task 在同一個檔案、同一個 WAL，備份或還原一起進退，不會出現「只還原資料庫，去重紀錄消失」。
+- 每次寫入都是完整交易，沒有半行，也沒有「略過損壞尾行再追加」的問題。
+- request ID 與 task 保留由 UNIQUE 約束保證，是第二層保護；第一層是 host 鎖內的判斷。
+- 資料庫已有單一 host 鎖（`.lock`），同一時間只有一個程序寫這張表。
+
+這**不是**宣稱問題自動解決。仍需要下面的交易邊界與恢復規則，因為建立 task、啟動程序、寫收尾紀錄本來就是分開的交易或動作。
+
+**遷移**：
+
+- `migrate()` 在一個交易內處理：版本 0 → 建立全部（含 `host_runs`）並設為 2；版本 1 → 只 `CREATE TABLE host_runs` 並設為 2；版本 2 → 不動；其他版本照舊拒絕。
+- 失敗就整個回滾，資料庫仍是版本 1。
+- 舊程式碰到版本 2 的資料庫會拒絕開啟（既有規則：版本不是 1 就拒絕）。不支援降版；換回舊版請用新的 `APA_DB_PATH`。
+- `verify()` 現有的 `integrity_check` 與 `foreign_key_check` 自動涵蓋新表；另加檢查：`state` 與 `ended_at` 一致，且 `task_id` 必須在 demo registry 或已在 `tasks` 中。
+
+### 13.3 交易邊界
+
+一場的實際順序（`buyer.Host.Run`）：受理 → 啟動 fake 程序 → init 通過 Gate → `prepare()` 呼叫 `StartTask` 建立 task → 工具呼叫與裁決 → 程序結束 → 收尾紀錄（只有逾時或取消才寫）→ 場次結束紀錄。
+
+| 交易 | 何時 | 內容 | 不做的事 |
+|---|---|---|---|
+| T1 受理 | `POST /api/host/runs`，在 host 鎖內 | ① 查 `request_id`：已存在且情境相同 → 不寫，回原場；情境不同 → 不寫，409。② 有進行中的場次（記憶體）→ 409 `run_active`。③ 配發：該 consumer 依編號第一個「不在 `tasks`、也不在 `host_runs.task_id`」的展示 task；沒有就 409 `no_free_task`。④ 插入 `state='accepted'` 的一列。⑤ commit 後才啟動程序並回 202 | 不寫事件，不建立 task |
+| T2 建立 task | init 通過後 | 既有 `StartTask`，語意不變 | 不碰 `host_runs` |
+| T3 收尾 | 程序因逾時或取消結束 | 既有 `CLITimeout`／`Cancel`，語意不變 | 不碰 `host_runs` |
+| T4 場次結束 | `runOne` 返回後 | 把該列改為 `state='ended'`，寫入 `ended_at`、`outcome`、`detail`、`task_started`、`store_end`、`store_end_error`；條件是 `state='accepted'` | 不寫事件 |
+| R 恢復 | host 啟動、Store 開啟後、開始服務前 | 把所有 `state='accepted'` 改為 `interrupted`（單一 host 鎖保證它們都屬於上一個程序） | 不寫事件，不自動取消 task |
+
+- T1 到 T4 都經過 Store 既有的 `write()`：BEGIN IMMEDIATE、鎖內取時鐘。`host_runs` 的時間只供顯示，不加入時鐘倒退檢查的高水位查詢，所以不影響既有的 `CLOCK_REGRESSION` 語意。
+- 「程序已啟動」不另寫一筆紀錄：恢復時只需要知道 task 是否建立，這直接查 `tasks` 即可。
+
+### 13.4 各階段中斷後如何恢復
+
+| 中斷點 | 重啟後的資料 | 場次顯示 | 同一 request ID 重送 | 主持人可做 |
+|---|---|---|---|---|
+| T1 commit 前（含 host 當機） | 沒有紀錄 | 無 | 當成新請求（之前什麼都沒執行） | 重送或重按 |
+| T1 commit 後、回覆送達前 | `accepted`（若 host 仍在）或 `interrupted`（若 host 已重啟） | 照實 | 回同一場，不重新執行 | 看清單 |
+| T1 後、`StartTask` 前（程序未啟動或 init 前） | `interrupted`；`tasks` 沒有該 task | 「場次中斷：未建立 task」 | 回同一場（`interrupted`） | 開始下一場（新 ID、新 task）；該 task 名額保留不重用 |
+| `StartTask` 後、程序結束前 | `interrupted`；task 存在，可能 `running`、`awaiting_approval` 或 `denied`，沒有收尾事件 | 「場次中斷」，另列 task 狀態與最後事件 | 回同一場 | 依第 6.1 節規則「取消 task」（3.4）；Ask 仍由到期 worker 收尾 |
+| 程序結束、T3 收尾寫入失敗 | 若 T4 成功：`ended`，帶 `store_end_error` | 「程序已停止，但取消（或逾時）紀錄寫入失敗（代碼）；task 尚未收尾」 | 回同一場 | 「取消 task」重試（3.4）；Store 持續失敗就停止 host、查 stderr |
+| 程序結束、T4 寫入失敗 | 記憶體：場次已結束但紀錄未寫入；資料庫仍是 `accepted`，重啟後變 `interrupted` | 「程序已結束，但場次紀錄寫入失敗（代碼）」，不顯示完成 | 回同一場（記憶體或資料庫） | 可開始下一場（程序確已結束；若 Store 仍失敗，T1 也會失敗） |
+| host 正常關閉時有場次在跑 | 既有關閉順序：取消場次 → buyer 寫 `TASK_CANCELLED` → T4 → 關 Store | `ended`（`cancelled`） | 回同一場 | 開始下一場 |
+
+**孤兒程序**：host 被 kill -9 時，fake 程序可能比 host 晚結束，但工具橋接與 Store 都在 host 程序內，孤兒程序無法再寫入任何紀錄。
+
+### 13.5 狀態分離與畫面文字
+
+三層分開取得、分開顯示：
+
+| 層 | 來源 | 值 |
+|---|---|---|
+| 場次程序 | host 記憶體（進行中）＋`host_runs`（持久） | `running`、`stopping`（記憶體）；`accepted`、`ended`、`interrupted`（資料表） |
+| task | Store 投影（既有，經 viewer API 讀取） | `running`、`awaiting_approval`、`denied`、`cancelled`、`failed`，或尚未建立 |
+| 請購收尾 | 事件（`APPROVAL_EXPIRED`／`WITHDRAWN`、`TASK_CANCELLED`／`TIMED_OUT`）與 `store_end`／`store_end_error` | 各自如實顯示 |
+
+**「完整」文字的條件**：
+
+- 「已停止，取消已記錄」：場次 `ended`，**且** `store_end = TASK_CANCELLED`，**且** T4 已寫入。
+- 「場次完成：等待核准／Ask 已到期／Deny」：場次 `ended` 且 T4 已寫入；後半句依 task 事件。
+- 任何一層缺紀錄或寫入失敗，就改用第 13.4 節的「但…失敗」或「中斷」文字。不顯示完成，也不顯示付款或取貨。
+
+### 13.6 切片 3.2 的最小實作範圍（供派工）
+
+**範圍**：operator、開始、停止、查場次、`host_runs` 與恢復、情境目錄、demo registry、`/host` 的控制面板。**不含**：取消 task（3.4）、`GET /api/tasks` 清單（3.3）、核准、付款、真實 CLI。
+
+| 檔案 | 修改 |
+|---|---|
+| `internal/store/store.go` | `schemaVersion = 2`；`migrate()` 處理 0 → 2 與 1 → 2（單一交易、純新增）；`verify()` 加 `host_runs` 一致性檢查 |
+| `internal/store/runs.go`（新） | `AcceptRun`（T1，含 request ID 判斷與配發，候選 task 由呼叫者給）、`EndRun`（T4）、`InterruptOpenRuns`（R）、`Run`、`Runs(limit)`。只碰 `host_runs`，讀 `tasks` 只用來判斷配發 |
+| `internal/store/recovery_test.go` | 「schema version」案例改為未知版本 3（版本 2 自此合法） |
+| `cmd/demo/api.go` | token 檔加 operator；`record()` 與 `/api/viewer` 拒絕 operator（403） |
+| `cmd/demo/control.go`（新） | 控制端點、host 鎖、記憶體中的 `running`／`stopping`、停止（取消該場 context）、第 6.2 節的 POST 防護 |
+| `cmd/demo/scenarios.go`（新）、`main.go`、`fakeruns.go` | `--scenarios`（與 `--plan` 互斥）；啟動時呼叫 `InterruptOpenRuns`；`runOne` 結束後呼叫 `EndRun` |
+| `cmd/demo/status.go` | status 加 `runs`：進行中與中斷的場次（只有 ID、task、狀態代碼） |
+| `testdata/demo/scenarios.json`、`testdata/demo/registry.json`（新） | 情境 `ask`、`deny-budget`；契約 fixture 的超集（每位 consumer 20 個 `show-*` task） |
+| `scripts/demo/start.sh` | 改用 `--scenarios` 與 demo registry，啟動時不再自動跑場次 |
+| `web/hostcreds.js`、`web/host.js`、`web/host.html` | 接受 operator；控制面板（情境、開始、停止、最近場次、第 13.5 節的文字）；request ID 只在記憶體 |
+| `scripts/verify/browser-ui.mjs` | 第 3.2 段 |
+| `scripts/verify/mutation-check.py` | 新增突變：request ID 去重、單場鎖、配發跳過已保留 task、恢復標 `interrupted`、operator 讀 task 被拒、T4 寫入失敗仍顯示完成 |
+
+**測試**：
+
+- **Store**（`runs_test.go`）：
+  - 版本 1 的資料庫遷移到 2：原資料不變、`verify` 通過；未知版本 3 仍拒絕。
+  - `AcceptRun`：同 ID 同情境回原場；同 ID 不同情境拒絕；配發跳過 `tasks` 與已保留的 task；名額用完回 `no_free_task`；UNIQUE 第二層保護。
+  - 用 Store 既有的測試掛鉤在 T1 commit 前、後中斷，以及 T4 失敗；之後 `InterruptOpenRuns` 把 `accepted` 標為 `interrupted`。
+  - 所有 `host_runs` 操作前後，`events` 與 `tasks` 不變。
+- **HTTP**（`cmd/demo`）：
+  - 第 6.1 節權限表中 3.2 的列（viewer／host 不能 POST、operator 不能讀 task）；
+  - POST 防護：缺 Origin、外站 Origin、錯 Content-Type、超過 1 KiB、多餘欄位；
+  - 回應碼：202、200（重送）、409 `request_id_conflict`／`run_active`／`no_free_task`／`run_not_running`、400 `unknown_scenario`、503。
+- **整合**：
+  - 開始 `ask` → 新 task `show-a-01` 的事件序列對應已接受案例 `ask`；`deny-budget` → `show-b-01` 對應 `deny-budget`；
+  - 第一場結束後同 ID 重送 → 同一場、沒有新 task；兩個同 ID 的請求同時到達 → 一場；
+  - 停止 hang 情境 → `stopping` → `ended`，帶 `TASK_CANCELLED`；
+  - 用 Store 掛鉤讓 T3 失敗 → `store_end_error`，不顯示已停止；讓 T4 失敗 → 「場次紀錄寫入失敗」；
+  - 重啟（同資料庫）→ 中斷的場次標為 `interrupted`，同 ID 重送回它，不重跑；
+  - Ask 到期後 task 回到 `running` 不被當成中斷。
+- **瀏覽器**（真 Unity Web 建置）：
+  - 載入含 operator 的 token 檔；開始 Ask → 自動切到 consumer-a 並在 Unity 看到新 task；
+  - 連點只有一場；扣住第一次開始的回覆後重送 → 同一場；
+  - 停止進行中的場次；重啟 host 後清單顯示中斷，沒有自動重跑；
+  - operator token 不出現在 viewer 請求、storage、URL、console 或證據；viewer 頁 `/` 不受影響。
+- **容器**：完整驗證一次（含新突變）；Unity 不變則沿用建置並記錄雜湊。
+
+**驗收條件**：
+
+1. 每場一個新 task；已建立或已保留的 task 不重跑、不重用。
+2. 同一 request ID 不論何時重送（包括重啟後），都只對應一場、不重複執行。
+3. 受理、建立 task、程序、收尾、場次結束各階段中斷後，都能依第 13.4 節顯示，並給出可採取的操作。
+4. 程序停止但任何紀錄寫入失敗時，畫面不顯示完整成功。
+5. viewer／host 唯讀不變；operator 不能讀 task 內容。
+6. Policy、Store 的事件與狀態語意不變（既有測試全過，`host_runs` 操作不改 `events`、`tasks`）。
+7. 不執行真實 CLI、不付款；`make demo` 啟動後不自動跑場次。
+
+**相依**：3.1（已通過）。3.3（清單 API）與 3.4（取消 task、錯誤文字補齊）在 3.2 之後。
+
+### 13.7 需要 Aaron 決定的事項
+
+無。
+
+需要知道的一點：3.2 實作後，第一次啟動會把本機 demo 資料庫（例如 `var/apa-demo-fake.db`）單向升級到 schema 版本 2。既有的 task 與事件不變，但舊版程式之後無法開啟它。要保留舊版可開的資料庫，可以先複製一份，或在 3.2 改用新的 `APA_DB_PATH`。
