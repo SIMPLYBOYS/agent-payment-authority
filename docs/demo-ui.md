@@ -1,6 +1,6 @@
 # B1-06 交付點 2：Unity＋LimeZu 商店與 Dashboard
 
-狀態（2026-10-05）：**交付點 2 修正（R1～R3）完成於 `eda6469`，Claude Code 執行，待 Codex 獨立 review**（第 9 節）。依據 vault 筆記 `Claude-Code-B1-06-交付點2修正指示-21db978-20261005`，修正基準 `21db978`。Codex 對 `21db978` 的限定 review 判定交付點 2 暫不通過，B1-04／B1-06 仍 InProgress。
+狀態（2026-10-05）：**Codex 對 `9d3c4e4` 的 review 指出兩處待修（Unity 呈現文字殘留、測試把 zombie 判為存活），修正於 `6aee7f0`，Claude Code 執行，待 Codex 獨立 review**（第 10 節）。之前：交付點 2 修正（R1～R3）完成於 `eda6469`（第 9 節）。依據 vault 筆記 `Claude-Code-B1-06-交付點2修正指示-21db978-20261005`，修正基準 `21db978`。Codex 對 `21db978` 的限定 review 判定交付點 2 暫不通過，B1-04／B1-06 仍 InProgress。
 
 原交付：Claude Code 實作，依據 vault 筆記 `Claude-Code-B1-06-交付點2-Dashboard與商店實作指示-20261005`（新版：商店固定為 Unity＋LimeZu，獨立於 pixel-office），開工基準 `837f667`，分支 `b1-06-demo-integration`（未合併 main）。第 7 節是當時的紀錄。
 
@@ -131,6 +131,11 @@
   - 回放唯讀：不送出請購、不重啟 task、不改時間、不寫事件。
 - **展開的 JSON**（修正 R3）：以 `event_id` 記住使用者展開的事件。重繪（輪詢、新事件、暫時讀取失敗）時保留展開與收合；手動收合的不會被自動展開。切換 consumer 或 task 時清除。
 - Unity 的 `rendered` 回報帶 `phase|task|verdict|reason`。頁面把它寫在 `#unity-status` 的 `data-*` 屬性上，只供觀測，不含 token，也不是業務控制入口。
+- 清除身分、切換 task 或 consumer、task 找不到時，`#unity-status` 的文字與 `data-*`（世代、序號、task、phase、verdict、reason）立即清除：
+  - 沒有 task 時顯示「Unity 場景就緒（…）：等待選擇 task」；
+  - 開啟中的 task 尚未呈現時顯示「Unity 同步中」；
+  - 載入中或未就緒的狀態不變。
+  - 舊世代晚到的 `rendered` 回報由 `unity.js` 丟棄（只接受最後送出的世代），不會恢復上一筆內容。
 
 ## 5 操作
 
@@ -293,3 +298,77 @@ Web 建置的 C# 與先前一次建置相同，所以 wasm 沒有重新產生，
 
 - LimeZu 素材與 Web 建置的公開散布仍未決。
 - `pixel-office/limezu` 記為例外（第 2 節）。
+
+## 10 第二輪修正：Unity 呈現文字、zombie 判斷（Claude Code 執行，待 Codex 獨立 review；程式 `6aee7f0`）
+
+依據：Codex 對 `9d3c4e4` 的 review（Aaron 於對話中轉交）。
+
+**Codex 獨立執行**：
+
+- adapter 11／11；
+- JS 狀態探測三輪，確認 R1、R3、回放恢復主流程；
+- Store race 通過。
+
+**Claude 執行、Codex 核對紀錄**：Unity、55 項瀏覽器檢查、222 項突變與完整容器結果。
+
+`cmd/demo` race 有 zombie 判斷失敗，不能記為全套通過。下面兩處是這次 review 要求修正的。
+
+**1. Unity 呈現文字殘留**（`web/app.js`）
+
+問題：清除身分或切換 task／consumer 時，商店已清空，但 `#unity-status` 仍寫著上一筆的「Unity 已呈現 task-a #4 expired（HUMAN_APPROVAL_REQUIRED）」與對應的 `data-*`。
+
+修正：
+
+- 新增 `shopReset()`，在 `forget()`、`openTask()`、回放、恢復以及 task 找不到時呼叫，清除文字與屬性，改顯示當下狀態（第 4 節）。
+- 原本的 `shopSync()` 併入。
+
+瀏覽器測試新增 9 項（共 64 項）：
+
+- **task 切換**：
+  - 點擊當下，狀態是 `syncing`，沒有 task-a 的任何內容；
+  - task-b 找不到後，顯示「等待選擇 task」；
+  - 注入 task-a 舊世代的 `rendered` 回報（與 jslib 相同的入口 `window.apaUnityReport`），內容仍不恢復。
+- **consumer 切換**：
+  - 切換前確認 Unity 顯示 task-a #4；
+  - 切換後沒有 task、序號、裁決或原因，顯示「等待選擇 task」；
+  - 舊世代回報不恢復。
+- **回放中切換**：
+  - 切換前確認 Unity 已呈現 task-b 的回放步驟；
+  - 4 秒觀察期後，沒有 task-b、Deny 或 `INSUFFICIENT_BUDGET`；
+  - 注入回放世代的晚到回報，仍不恢復。
+
+這一項取代原本只比對「世代沒變」的檢查。
+
+反向驗證：用 `eda6469` 的 `app.js` 跑新測試，7 項 FAIL，都是斷言失敗，例如 `[rendered|Unity 已呈現 task-a #4 expired（HUMAN_APPROVAL_REQUIRED）]`。證據在 `artifacts/b1-06/reversal-6aee7f0f541b/`。
+
+**2. 測試把 zombie 判為存活**（`cmd/demo/integration_test.go`）
+
+修正：
+
+- `alive()` 改用 Buyer 測試（`internal/buyer/buyer_test.go`）的判斷：`kill(pid, 0)` 成功，且 `/proc/<pid>/stat` 的狀態不是 `Z`。
+- 正式程序清理邏輯與「fake grandchild survived」斷言都沒改。
+- 新增 `TestAliveTreatsZombieAsGone`：建立一個被殺掉、尚未回收的子程序，確認 `alive` 回 false；沒有 `/proc` 的平台略過（macOS 為 SKIP）。
+
+Linux 驗證：驗證映像，斷網、唯讀原始碼、uid 10001、4 CPU、只跑這兩個測試；證據在 `artifacts/b1-06/zombie-20261005T042225Z/`。
+
+- 修正版：`-race -count=3` 全過。
+- 放回舊 `alive`：`TestAliveTreatsZombieAsGone` 三次都失敗（`a zombie reads as alive`）。
+- 同一環境下，`TestIntegrationEndsRestartAndReplay` 在舊 helper 下三次都通過，**沒有重現** Codex 看到的那次失敗。孤兒程序何時被回收取決於環境；機制由新測試證明。
+- 第一次反向嘗試的替換沒有生效，實際跑的是新程式，已在 log 標明，重做後才是上面的結果。
+
+**命令與結果**（`6aee7f0`）：
+
+| 命令 | exit | 時間 | 證據 |
+|---|---|---|---|
+| `node --test web/test/adapter.test.mjs`（11／11） | 0 | 1 秒內 | `artifacts/b1-06/checks-6aee7f0f541b-20261005T043415Z/` |
+| `go test -race -count=1 -v ./cmd/demo ./internal/store`（macOS；zombie 測試 SKIP） | 0 | 61 秒 | 同上 |
+| `node scripts/verify/browser-ui.mjs`（64 PASS） | 0 | 83 秒 | `artifacts/b1-06/ui-6aee7f0f541b-20261005T043115Z/` |
+| `sh scripts/verify/container-verify.sh 6aee7f0…`（Go／JS＋fake 回歸，Unity 不在映像內；主機無其他負載） | 0 | 605 秒 | `artifacts/verify-container/runs/6aee7f0f541b-20261005T043523Z/`（`artifacts/b1-06/container-6aee7f0.log`）；七步全過（check-contracts 18、check 86、race-cover 159、verify-b1-01 41、mutation 285 秒），adapter 11／11，222／222 突變，17 項隔離 ok |
+
+Unity C# 與建置都沒有變更（`eda6469..6aee7f0` 沒有改到 `unity/`）。瀏覽器載入的建置檔 sha256 與 `eda6469` 那次建置相同（`webgl-loaded.sha256`），所以沒有重跑 Unity 測試或重建。
+
+**未測**：
+
+- 取消、CLI 逾時與 Allow 仍未在瀏覽器觸發；
+- 只用 Chrome；
+- 晚到回報用注入模擬，不是由 Unity 真的延遲產生。
