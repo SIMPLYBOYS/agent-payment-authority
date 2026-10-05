@@ -35,30 +35,36 @@ let polls = 0;          // completed polls, for the browser test
 const expanded = new Set(); // event_ids whose JSON the viewer opened (R3)
 const rendered = [];    // waiting for Unity's report of (gen, seq)
 
+const SHOWN = ["gen", "seq", "phase", "task", "verdict", "reason"];
+const art = () => unity.art === "limezu" ? "LimeZu 素材" : "placeholder，LimeZu 待接入";
+
 const unity = new UnityHost($("unity-canvas"), (s, detail) => {
   const box = $("unity-status");
-  box.dataset.state = s;
   if (s === "rendered") {
-    // detail: what the shop says it shows, for the generation it was sent.
+    // detail: what the shop says it shows, for the generation last sent
+    // (unity.js drops older reports, so a late one cannot bring back a
+    // previous task, verdict or reason).
+    box.dataset.state = s;
     Object.assign(box.dataset, { gen: String(detail.gen), seq: String(detail.seq), phase: detail.phase, task: detail.task, verdict: detail.verdict, reason: detail.reason });
     box.textContent = "Unity 已呈現 " + detail.task + " #" + detail.seq + " " + detail.phase + (detail.reason ? "（" + detail.reason + "）" : "");
     for (let i = rendered.length - 1; i >= 0; i--) if (rendered[i].gen === detail.gen && rendered[i].seq === detail.seq) rendered.splice(i, 1)[0].done(true);
     return;
   }
-  box.textContent = {
-    loading: "Unity 場景載入中…",
-    ready: detail === "limezu" ? "Unity 場景就緒（LimeZu 素材）" : "Unity 場景就緒（placeholder，LimeZu 待接入）",
-    failed: "Unity 場景未就緒",
-    syncing: "Unity 同步中（等待最新快照）",
-  }[s] || "Unity 場景未就緒";
+  if (s === "ready") return shopReset(state.taskId ? "syncing" : "ready");
+  box.dataset.state = s;
+  box.textContent = s === "loading" ? "Unity 場景載入中…" : "Unity 場景未就緒";
 });
 
-// shopSync marks the shop as not yet showing the current generation.
-function shopSync() {
+// shopReset drops what the shop last reported (generation, sequence, task,
+// phase, verdict, reason) and says what it waits for now: ready (no task
+// chosen) or syncing (the current generation is not shown yet). Loading and
+// failed stay as they are.
+function shopReset(waiting) {
   const box = $("unity-status");
-  if (box.dataset.state === "failed" || box.dataset.state === "loading") return;
-  box.dataset.state = "syncing";
-  box.textContent = "Unity 同步中（等待最新快照）";
+  for (const k of SHOWN) delete box.dataset[k];
+  if (!unity.ready) return;
+  box.dataset.state = waiting;
+  box.textContent = waiting === "ready" ? "Unity 場景就緒（" + art() + "）：等待選擇 task" : "Unity 同步中（等待最新快照）";
 }
 
 // renderedBy waits for Unity's report of (gen, seq), at most ms.
@@ -110,6 +116,7 @@ function forget(message) {
   const gen = A.reset(state);
   shownSeq = -1;
   unity.send(A.clearMessage(gen));
+  shopReset("ready");
   $("viewer").textContent = "未驗證";
   $("task-pick").replaceChildren();
   $("task-form").hidden = true;
@@ -167,6 +174,7 @@ function openTask(id) {
   const gen = A.reset(state, consumer, id);
   shownSeq = -1;
   unity.send(A.clearMessage(gen));
+  shopReset("syncing");
   draw();
   setStatus("讀取 " + id + "…", "loading");
   poll(true);
@@ -217,6 +225,7 @@ function show(first) {
       break;
     case "not_found":
       setStatus("找不到這個 task，或你沒有查看權限", "error");
+      shopReset("ready");
       break;
     default:
       setStatus("離線／更新失敗；最後快照時間 " + (state.lastGoodServedAt ? new Date(state.lastGoodServedAt * 1000).toISOString() : "無"), "error");
@@ -243,7 +252,7 @@ async function replay() {
   const snap = state.snapshot;
   const gen = A.bump(state);
   unity.send(A.clearMessage(gen));
-  shopSync();
+  shopReset("syncing");
   setStatus("歷史展示回放（唯讀，不重跑 task、不改事件）", "replay");
   for (let i = 0; i < snap.events.length; i++) {
     if (run !== replayRun) return;
@@ -268,7 +277,7 @@ function restore(run) {
   A.bump(state);
   shownSeq = -1;
   unity.send(A.clearMessage(state.gen));
-  shopSync();
+  shopReset("syncing");
   setStatus("回放結束，讀取最新快照…", "loading");
   poll(true);
 }

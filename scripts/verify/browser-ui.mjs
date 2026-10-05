@@ -149,6 +149,12 @@ function unityShows(b, w, ms = 20000) {
   if (w.afterGen !== undefined) cond.push(`Number(${uKey("gen")}) > ${w.afterGen}`);
   return b.waitFor(cond.join(" && "), ms);
 }
+// Nothing of a previous task on #unity-status: no data-*, none of words in its text.
+const unityCleared = (words) => `(() => { const e = document.getElementById("unity-status"), d = e.dataset;
+  return !d.gen && !d.seq && !d.task && !d.phase && !d.verdict && !d.reason && ${JSON.stringify(words)}.every((w) => !e.textContent.includes(w)); })()`;
+const unityText = (b) => b.evaluate(`document.getElementById("unity-status").dataset.state + "|" + document.getElementById("unity-status").textContent`);
+// A late "rendered" report of an old generation, delivered as the jslib does.
+const lateReport = (gen, seq, detail) => `(window.apaUnityReport("rendered", ${gen}, ${seq}, ${JSON.stringify(detail)}), true)`;
 const unityGen = (b) => b.evaluate(`Number(${uKey("gen")} || -1)`);
 const pollCount = (b) => b.evaluate(`Number(document.getElementById("status").dataset.polls || 0)`);
 async function waitPolls(b, n) { const p0 = await pollCount(b); return b.waitFor(`Number(document.getElementById("status").dataset.polls || 0) >= ${p0 + n}`, 20000); }
@@ -243,16 +249,28 @@ try {
   await waitPolls(b, 2);
   check("R3: a closed event is not reopened by later polls", !(await b.evaluate(visible('#timeline li[data-seq="2"] .event-json'))) && (await b.evaluate(visible('#timeline li[data-seq="3"] .event-json'))));
 
-  // A cannot read B's task.
-  await b.evaluate(`document.getElementById("task-id").value = "task-b"; document.querySelector("#task-form button[type=submit]").click()`);
+  // A cannot read B's task. Switching task clears what Unity showed of task-a.
+  check("before the task switch Unity shows task-a #4", await unityShows(b, { task: "task-a", seq: 4, phase: "expired" }));
+  const genTaskA = await unityGen(b);
+  const atTaskSwitch = await b.evaluate(`(() => { document.getElementById("task-id").value = "task-b"; document.querySelector("#task-form button[type=submit]").click();
+    return document.getElementById("unity-status").dataset.state + "|" + ${unityCleared(["task-a", "HUMAN_APPROVAL_REQUIRED", "expired"])}; })()`);
+  check("task switch: at once Unity says 同步中 and holds nothing of task-a", atTaskSwitch === "syncing|true", atTaskSwitch);
   check("viewer A on task-b: same not-found answer", await b.waitFor(`${text("#status")}.includes("找不到這個 task，或你沒有查看權限")`));
   check("viewer A on task-b: nothing of B shown", !(await b.evaluate(`document.body.innerText`)).includes("wallet-b"));
+  check("task switch: Unity waits for a task, nothing of task-a", await b.evaluate(unityCleared(["task-a", "HUMAN_APPROVAL_REQUIRED", "expired"])) && (await unityText(b)).startsWith("ready|") && (await unityText(b)).includes("等待選擇 task"), await unityText(b));
+  await b.evaluate(lateReport(genTaskA, 4, "expired|task-a|Ask|HUMAN_APPROVAL_REQUIRED"));
+  check("task switch: a late report of task-a's generation does not bring it back", await b.evaluate(unityCleared(["task-a", "HUMAN_APPROVAL_REQUIRED", "expired"])), await unityText(b));
   await openFixture(b, "task-a");
   check("R3: opening another task cleared the opened events", (await b.evaluate(`[...document.querySelectorAll("#timeline .event-json")].filter(e => !e.hidden).length`)) === 0);
 
-  // Switch to B: everything of A goes at once.
+  // Switch to B: everything of A goes at once, the shop's status too.
+  check("before the consumer switch Unity shows task-a #4", await unityShows(b, { task: "task-a", seq: 4, phase: "expired" }));
+  const genA = await unityGen(b);
   await b.evaluate(`document.getElementById("switch").click()`);
   check("switch clears viewer, Inspector and Timeline", await b.waitFor(`${text("#viewer")} === "未驗證" && ${text("#inspector")} === "尚無資料" && ${text("#timeline")} === "尚無事件"`));
+  check("consumer switch: Unity waits for a task, nothing of task-a", await b.evaluate(unityCleared(["task-a", "HUMAN_APPROVAL_REQUIRED", "expired"])) && (await unityText(b)).startsWith("ready|") && (await unityText(b)).includes("等待選擇 task"), await unityText(b));
+  await b.evaluate(lateReport(genA, 4, "expired|task-a|Ask|HUMAN_APPROVAL_REQUIRED"));
+  check("consumer switch: a late report of A's generation does not bring task-a back", await b.evaluate(unityCleared(["task-a", "HUMAN_APPROVAL_REQUIRED", "expired"])), await unityText(b));
   await signIn(b, tok.b);
   await b.waitFor(`${text("#viewer")}.startsWith("consumer-b")`);
   await b.evaluate(`[...document.querySelectorAll("#task-pick button")].find(x => x.textContent.startsWith("task-b（"))?.click()`);
@@ -273,13 +291,17 @@ try {
   check("R2: replay wrote nothing (task-b events unchanged)", (await hostGet(addr, tok.host, "/api/tasks/task-b/events")).text === eventsBefore);
 
   // R2: a replay interrupted by a switch of viewer leaves nothing behind.
+  const gR0 = await unityGen(b);
   await b.evaluate(`document.getElementById("replay").click()`);
   await b.waitFor(`document.getElementById("status").dataset.mode === "replay"`);
+  check("R2: a replay step of task-b is shown before the switch", await b.waitFor(`Number(${uKey("gen")}) > ${gR0} && ${uKey("task")} === "task-b"`, 20000));
+  const genReplay = await unityGen(b);
   await b.evaluate(`document.getElementById("switch").click()`);
-  const genAtSwitch = await unityGen(b);
-  await sleep(4000);
+  await sleep(4000); // an observation window longer than a replay step (at most 6 s plus 0.4 s; steps here take about 1 s)
   check("R2: after a switch mid-replay: live, no replay note, signed out", (await b.evaluate(`document.getElementById("status").dataset.mode === "live" && !${visible("#replay-note")} && ${text("#viewer")} === "未驗證"`)));
-  check("R2: no late replay step reached Unity after the switch", (await unityGen(b)) === genAtSwitch);
+  check("R2: after the switch the Unity status holds nothing of task-b (no late replay step)", await b.evaluate(unityCleared(["task-b", "INSUFFICIENT_BUDGET", "Deny", "denied"])) && (await unityText(b)).startsWith("ready|"), await unityText(b));
+  await b.evaluate(lateReport(genReplay, 3, "denied|task-b|Deny|INSUFFICIENT_BUDGET"));
+  check("R2: a late replay report of the old generation does not restore task-b", await b.evaluate(unityCleared(["task-b", "INSUFFICIENT_BUDGET", "Deny", "denied"])), await unityText(b));
 
   // R2: replay started twice, and visibility changes: one polling loop.
   await signIn(b, tok.a);

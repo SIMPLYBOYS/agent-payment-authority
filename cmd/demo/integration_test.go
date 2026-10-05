@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -540,7 +541,47 @@ func TestIntegrationExpiryOnlyByWorker(t *testing.T) {
 	}
 }
 
-func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
+// alive: the process exists and is not a zombie, as internal/buyer's
+// buyer_test.go decides it. A killed grandchild whose parent has exited
+// waits as a zombie until PID 1 reaps it, and a container without an init
+// may never do so; a zombie runs nothing. (/proc is Linux only; elsewhere
+// the kill check alone decides.)
+func alive(pid int) bool {
+	if syscall.Kill(pid, 0) != nil {
+		return false
+	}
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if i := strings.LastIndexByte(string(stat), ')'); err == nil && i > 0 && i+2 < len(stat) && stat[i+2] == 'Z' {
+		return false
+	}
+	return true
+}
+
+// A killed child not yet reaped is a zombie: alive says no, as the
+// grandchildren's check above needs in a container without an init.
+func TestAliveTreatsZombieAsGone(t *testing.T) {
+	if _, err := os.Stat("/proc/self/stat"); err != nil {
+		t.Skip("no /proc: the kill check alone decides here")
+	}
+	c := exec.Command("sleep", "30")
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Wait()
+	if !alive(c.Process.Pid) {
+		t.Fatal("a running child reads as gone")
+	}
+	c.Process.Kill()
+	for end := time.Now().Add(3 * time.Second); syscall.Kill(c.Process.Pid, 0) == nil && time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
+		if b, _ := os.ReadFile(fmt.Sprintf("/proc/%d/stat", c.Process.Pid)); strings.Contains(string(b), ") Z ") {
+			if alive(c.Process.Pid) {
+				t.Fatal("a zombie reads as alive")
+			}
+			return
+		}
+	}
+	t.Fatal("the child never became a zombie")
+}
 
 // Cancel and CLI timeout record their end without rewriting a decision;
 // shutdown reaps the fake's process group; a restart serves the same
