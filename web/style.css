@@ -43,3 +43,9 @@ h2 { margin: 0 0 8px; font-size: 15px; color: var(--accent); }
 .readiness tr[data-state="ok"] td { color: var(--ok); }
 .readiness tr[data-state="error"] td, .readiness tr[data-state="failed"] td, .readiness tr[data-state="missing"] td { color: var(--err); }
 .readiness tr[data-state="unconfirmed"] td, .readiness tr[data-state="loading"] td { color: var(--warn); }
+.host-control { margin: 8px 0; padding: 8px 0; border-top: 1px solid #2c2f3a; }
+.host-control h3 { margin: 6px 0 2px; font-size: 13px; color: var(--muted); }
+.runs { margin: 0; padding-left: 20px; }
+.runs li { margin: 2px 0; }
+#run-status[data-state="error"] { color: var(--err); }
+#run-status[data-state="ok"] { color: var(--ok); }

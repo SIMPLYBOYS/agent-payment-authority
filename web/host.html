@@ -10,7 +10,7 @@
 <body>
 <header class="top">
   <strong class="badge">M1／fake agent／不付款</strong>
-  <span class="sub">主持人本機頁（唯讀）：模擬 Agent、fixture 資料、未付款；場次仍由啟動時的固定計畫自動執行</span>
+  <span class="sub">主持人本機頁：模擬 Agent、fixture 資料、未付款；選情境按「開始」建立新場次</span>
 </header>
 
 <section class="auth host-panel" aria-label="主持人憑證與就緒">
@@ -22,6 +22,14 @@
   <p id="creds" data-mode="none">尚未載入 token 檔</p>
   <div id="consumer-pick" class="host-row" aria-label="切換 consumer"></div>
   <table id="readiness" class="readiness" aria-label="就緒狀態"></table>
+  <section id="control" class="host-control" aria-label="主持人控制" hidden>
+    <h2>主持人控制（fake 展示；不付款）</h2>
+    <p class="scene-note">M1 無核准能力：Ask 停在等待，30 秒後由後端記錄到期。開始只會建立新的 task，不重跑已有的 task。</p>
+    <div id="run-scenarios" class="host-row"></div>
+    <p id="run-status" data-state="idle"></p>
+    <h3>最近場次</h3>
+    <ol id="runs" class="runs"></ol>
+  </section>
 
   <form id="auth-form" autocomplete="off">
     <label for="token">手動 viewer 模式：貼上一個 viewer token（會先清除已載入的 token 檔）</label>

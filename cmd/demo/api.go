@@ -15,22 +15,26 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 )
 
-// grant is what a demo token may read: one consumer's tasks, or every task
-// for the host role. It is the host's mapping, never a request's claim.
+// grant is what a demo token may do: read one consumer's tasks (viewer),
+// read every task (host), or control runs and read no task (operator,
+// docs/demo-operation-design.md section 13.1). It is the host's mapping,
+// never a request's claim.
 type grant struct {
-	Role       string `json:"role"`                  // viewer | host
+	Role       string `json:"role"`                  // viewer | host | operator
 	ConsumerID string `json:"consumer_id,omitempty"` // viewers only
 }
 
-func (g grant) sees(consumerID string) bool { return g.Role == "host" || g.ConsumerID == consumerID }
+func (g grant) sees(consumerID string) bool {
+	return g.Role == "host" || g.Role == "viewer" && g.ConsumerID == consumerID
+}
 
 type demoToken struct {
 	grant
 	Token string `json:"token"`
 }
 
-// newTokens makes a fresh token per registry consumer (viewer) and one for
-// the host, and writes them to path (directory 0700, file 0600) by a rename,
+// newTokens makes a fresh token per registry consumer (viewer), one for the
+// host and one for the operator, and writes them to path (directory 0700, file 0600) by a rename,
 // so no reader sees half a file. Tokens never go to the terminal or a log.
 // The rename never replaces one of db's files: checked again just before
 // it, when the database, its WAL and the lock exist.
@@ -50,6 +54,9 @@ func newTokens(cfg contracts.RegistryConfig, path, db string) ([]demoToken, erro
 		}
 	}
 	if err := add(grant{Role: "host"}); err != nil {
+		return nil, err
+	}
+	if err := add(grant{Role: "operator"}); err != nil {
 		return nil, err
 	}
 	abs, err := filepath.Abs(path)
@@ -91,13 +98,14 @@ func newTokens(cfg contracts.RegistryConfig, path, db string) ([]demoToken, erro
 // api is the authenticated read-only task API. Every handler reads the
 // Store only: no StartTask, Submit, Cancel or ExpireDue.
 type api struct {
-	st     *store.Store
-	tokens []demoToken
-	addr   string // the bound address, the only Host and Origin accepted
-	clock  store.Clock
-	unity  *os.Root // the Unity Web build's Build/ directory; nil without a build
-	expiry *expiryHealth
-	fake   bool // a fake CLI passed its --version check at start
+	st      *store.Store
+	tokens  []demoToken
+	addr    string // the bound address, the only Host and Origin accepted
+	clock   store.Clock
+	unity   *os.Root // the Unity Web build's Build/ directory; nil without a build
+	expiry  *expiryHealth
+	fake    bool     // a fake CLI passed its --version check at start
+	control *control // host-started runs (--scenarios); nil otherwise
 }
 
 func (a *api) register(mux *http.ServeMux) {
@@ -150,6 +158,10 @@ func (a *api) authorize(w http.ResponseWriter, r *http.Request) (grant, bool) {
 func (a *api) record(w http.ResponseWriter, r *http.Request) (store.TaskRecord, bool) {
 	g, ok := a.authorize(w, r)
 	if !ok {
+		return store.TaskRecord{}, false
+	}
+	if g.Role == "operator" { // controls runs, reads no task content
+		fail(w, http.StatusForbidden, "forbidden_role")
 		return store.TaskRecord{}, false
 	}
 	rec, err := a.st.ReadTask(r.PathValue("task_id"), g.sees)

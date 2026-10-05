@@ -24,8 +24,9 @@ export const MESSAGES = {
 };
 
 // parseTokenFile checks the text of var/demo-tokens.json and returns
-// { host, viewers: Map(consumer_id -> token) }, or null when anything is off.
-// Only host and viewer roles are accepted (operator comes with slice 3.2).
+// { host, operator, viewers: Map(consumer_id -> token) }, or null when
+// anything is off: exactly one host, exactly one operator (slice 3.2), at
+// least one viewer, no other role.
 export function parseTokenFile(text) {
   let doc;
   try { doc = JSON.parse(text); } catch { return null; }
@@ -34,6 +35,7 @@ export function parseTokenFile(text) {
   if (doc.note !== undefined && typeof doc.note !== "string") return null;
   if (!Array.isArray(doc.tokens)) return null;
   let host = null;
+  let operator = null;
   const viewers = new Map();
   const seen = new Set();
   for (const t of doc.tokens) {
@@ -41,9 +43,9 @@ export function parseTokenFile(text) {
     if (Object.keys(t).some((k) => k !== "role" && k !== "token" && k !== "consumer_id")) return null;
     if (typeof t.token !== "string" || !TOKEN.test(t.token) || seen.has(t.token)) return null;
     seen.add(t.token);
-    if (t.role === "host") {
-      if (host !== null || "consumer_id" in t) return null;
-      host = t.token;
+    if (t.role === "host" || t.role === "operator") {
+      if ((t.role === "host" ? host : operator) !== null || "consumer_id" in t) return null;
+      if (t.role === "host") host = t.token; else operator = t.token;
     } else if (t.role === "viewer") {
       if (typeof t.consumer_id !== "string" || !CONSUMER.test(t.consumer_id) || viewers.has(t.consumer_id)) return null;
       viewers.set(t.consumer_id, t.token);
@@ -51,13 +53,14 @@ export function parseTokenFile(text) {
       return null;
     }
   }
-  if (host === null || viewers.size === 0) return null;
-  return { host, viewers };
+  if (host === null || operator === null || viewers.size === 0) return null;
+  return { host, operator, viewers };
 }
 
-// createHostCreds: call(token, path, signal) -> Promise<{ status, body }>
-// does one GET; onChange(view) is told after every change.
-export function createHostCreds({ call, onChange }) {
+// createHostCreds: call(token, path, signal, post) -> Promise<{ status, body }>
+// does one GET (or a JSON POST of post.body); onChange(view) is told after
+// every change. newId makes a request ID; wait(ms) pauses between resends.
+export function createHostCreds({ call, onChange, newId = () => crypto.randomUUID(), wait = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
   let gen = 0;
   let abort = new AbortController();
   let held = null; // { host, viewers } of the current generation, once verified
@@ -109,9 +112,13 @@ export function createHostCreds({ call, onChange }) {
     text = null;
     if (!parsed) return fail("bad_file");
     try {
-      const st = await call(parsed.host, "/api/host/status", signal);
-      if (g !== gen) return;
-      if (st.status !== 200) return fail("mismatch");
+      // The host and operator tokens must each be what the server says
+      // they are (caller_role), not just accepted somewhere.
+      for (const [token, role] of [[parsed.host, "host"], [parsed.operator, "operator"]]) {
+        const st = await call(token, "/api/host/status", signal);
+        if (g !== gen) return;
+        if (st.status !== 200 || !st.body || st.body.caller_role !== role) return fail("mismatch");
+      }
       for (const [consumer, token] of parsed.viewers) {
         const v = await call(token, "/api/viewer", signal);
         if (g !== gen) return;
@@ -124,7 +131,7 @@ export function createHostCreds({ call, onChange }) {
     held = parsed;
     mode = "file";
     fileName = typeof file.name === "string" ? file.name.slice(0, 80) : "";
-    message = "已載入 token 檔：host 與 " + parsed.viewers.size + " 位 viewer";
+    message = "已載入 token 檔：host、operator 與 " + parsed.viewers.size + " 位 viewer";
     changed();
   }
 
@@ -149,8 +156,69 @@ export function createHostCreds({ call, onChange }) {
     return { status: r.body };
   }
 
+  // operatorCall sends one control request of generation g; null when the
+  // generation changed (the reply is dropped) or on a 401 (applied).
+  async function operatorCall(g, path, post, timeoutMs) {
+    if (!held || g !== gen) return null;
+    const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(timeoutMs)]);
+    const r = await call(held.operator, path, signal, post);
+    if (g !== gen) return null;
+    if (r.status === 401) { unauthorized(g); return null; }
+    return r;
+  }
+
+  // startRun is one start operation (section 13.8 R4): one request ID, made
+  // here and kept in memory; a network error or timeout resends the same ID
+  // within the same generation only. A reply of an older generation is
+  // dropped: nothing switches, signs in or opens. Clearing the credentials
+  // does not withdraw a run the server accepted, and never resends it.
+  async function startRun(scenario) {
+    if (!held) return null;
+    const g = gen;
+    const requestId = newId();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (g !== gen) return null;
+      let r;
+      try {
+        r = await operatorCall(g, "/api/host/runs", { body: { request_id: requestId, scenario } }, 8000);
+      } catch {
+        if (g !== gen) return null;
+        await wait(500);
+        continue;
+      }
+      if (!r) return null;
+      return { gen: g, requestId, status: r.status, body: r.body };
+    }
+    return g === gen ? { gen: g, requestId, error: "unreachable" } : null;
+  }
+
+  // stopRun stops a running run's process; the reply counts only in its
+  // own generation. No resend: a lost reply shows in the runs list.
+  async function stopRun(runId) {
+    if (!held) return null;
+    const g = gen;
+    try {
+      const r = await operatorCall(g, "/api/host/runs/" + encodeURIComponent(runId) + "/stop", { body: {} }, 8000);
+      return r && { gen: g, status: r.status, body: r.body };
+    } catch {
+      return g === gen ? { gen: g, error: "unreachable" } : null;
+    }
+  }
+
+  // runs reads the latest runs (operator token), same generation rule.
+  async function runs() {
+    if (!held) return null;
+    const g = gen;
+    try {
+      const r = await operatorCall(g, "/api/host/runs", undefined, 8000);
+      return r && r.status === 200 ? { gen: g, runs: r.body.runs } : r && { gen: g, error: "status_" + r.status };
+    } catch {
+      return g === gen ? { gen: g, error: "unreachable" } : null;
+    }
+  }
+
   return {
-    load, clearAll, manual, unauthorized, readiness,
+    load, clearAll, manual, unauthorized, readiness, startRun, stopRun, runs,
     viewerToken: (consumer) => (held ? held.viewers.get(consumer) || null : null),
     get gen() { return gen; },
     view,

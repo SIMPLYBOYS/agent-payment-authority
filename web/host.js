@@ -7,16 +7,27 @@
 // are always read with the chosen consumer's viewer token (app.js). Every
 // change of credentials starts a new generation in hostcreds.js, and the
 // Dashboard is cleared with it, so no late step shows an old identity.
-// Read-only: nothing here starts, stops or changes a task.
+//
+// Slice 3.2 (section 13): the operator token starts and stops fake runs
+// and reads the runs list. A start reply of the current generation opens
+// the new task with that consumer's viewer token; a reply of an older one
+// does nothing. Clearing the page does not withdraw a run the host accepted.
 
-import { forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo } from "./app.js";
+import { forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
 
 const $ = (id) => document.getElementById(id);
 const READY_MS = 5000; // readiness is read every 5 s while the page is visible
 
-async function call(token, path, signal) {
-  const res = await fetch(path, { headers: { Authorization: "Bearer " + token }, cache: "no-store", credentials: "omit", signal });
+async function call(token, path, signal, post) {
+  const headers = { Authorization: "Bearer " + token };
+  const init = { headers, cache: "no-store", credentials: "omit", signal };
+  if (post) { // a control request: same-origin JSON POST (the browser adds Origin)
+    init.method = "POST";
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(post.body);
+  }
+  const res = await fetch(path, init);
   let body = null;
   try { body = await res.json(); } catch { /* not JSON: status alone decides */ }
   return { status: res.status, body };
@@ -26,6 +37,10 @@ let shownGen = -1;  // the generation the Dashboard was last cleared for
 let viewerGen = -1; // the generation whose viewer token the Dashboard uses
 let readyTimer = null;
 let lastReady = null;
+let runsTimer = null;
+let lastRuns = null; // { gen, runs } of the current generation
+let starting = false;
+const RUNS_MS = 2000;
 
 const creds = createHostCreds({ call, onChange: render });
 
@@ -38,7 +53,11 @@ function render(v) {
     shownGen = v.gen;
     forget(v.message || "請載入 token 檔或手動輸入 viewer token");
     lastReady = null;
+    lastRuns = null;
+    starting = false;
     clearTimeout(readyTimer);
+    clearTimeout(runsTimer);
+    setRunStatus("", "idle");
   }
   const box = $("creds");
   box.dataset.mode = v.mode;
@@ -56,7 +75,8 @@ function render(v) {
     pick.append(b);
   }
   renderReadiness();
-  if (v.hasHost) pollReadiness();
+  renderControl();
+  if (v.hasHost) { pollReadiness(); pollRuns(); }
 }
 
 // switchTo uses a loaded viewer token; app.js clears the previous viewer's
@@ -79,7 +99,7 @@ async function pollReadiness() {
   try {
     if (!document.hidden) {
       const r = await creds.readiness();
-      if (r && g === creds.gen) { lastReady = r; renderReadiness(); }
+      if (r && g === creds.gen) { lastReady = r; renderReadiness(); renderControl(); }
     }
   } finally {
     polling = false;
@@ -140,6 +160,134 @@ function renderReadiness() {
   }));
 }
 
+// ---- host control (slice 3.2) ----
+
+function setRunStatus(text, state) {
+  const p = $("run-status");
+  p.textContent = text;
+  p.dataset.state = state;
+}
+
+const ERRORS = {
+  run_active: "上一場尚未結束；請先等它結束或停止它",
+  no_free_task: "展示 task 已用完：請設定新的 APA_DB_PATH 後重啟，或擴充 demo registry",
+  request_id_conflict: "請求編號與另一個情境衝突，未開始",
+  unknown_scenario: "沒有這個情境",
+  store_unavailable: "Store 不可用，未開始",
+  run_not_running: "這一場已不在執行中",
+};
+
+// runText is section 13.5: the run's process, its end record and the
+// failures, kept apart. "Complete" words only when every record was written.
+function runText(r) {
+  if (r.live === "running") return "進行中";
+  if (r.live === "stopping") return "停止中…";
+  if (r.record_error) return "程序已結束，但場次紀錄寫入失敗（" + r.record_error + "）";
+  if (r.state === "interrupted") return "場次中斷（上一個 host 未正常結束；結果以 task 為準）";
+  if (r.state !== "ended") return "已受理";
+  if (r.store_end_error) return "程序已停止，但" + (r.outcome === "timeout" ? "逾時" : "取消") + "紀錄寫入失敗（" + r.store_end_error + "）；task 尚未收尾";
+  if (r.outcome === "cancelled" && r.store_end === "TASK_CANCELLED") return "已停止，取消已記錄";
+  if (r.outcome === "timeout" && r.store_end === "TASK_TIMED_OUT") return "CLI 逾時，已記錄";
+  if (r.outcome === "skipped") return "未啟動（" + r.detail + "）";
+  if (r.detail && r.detail.startsWith("prepare_failed")) return "未建立 task（" + r.detail + "）";
+  if (r.outcome === "ok") return "場次完成；task 結果見 Inspector／Timeline";
+  return "場次結束：" + r.outcome + (r.detail ? "（" + r.detail + "）" : "");
+}
+
+function renderControl() {
+  const v = creds.view();
+  const box = $("control");
+  box.hidden = v.mode !== "file";
+  const pick = $("run-scenarios");
+  const scenarios = (lastReady && lastReady.status && lastReady.status.runs && lastReady.status.runs.scenarios) || [];
+  const runs = (lastRuns && lastRuns.gen === creds.gen && lastRuns.runs) || [];
+  const active = runs.some((r) => r.live === "running" || r.live === "stopping");
+  pick.replaceChildren(...scenarios.map((sc) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.scenario = sc.id;
+    b.textContent = "開始：" + sc.label + "（" + sc.consumer_id + "）";
+    b.disabled = starting || active;
+    b.addEventListener("click", () => start(sc));
+    return b;
+  }));
+  $("runs").replaceChildren(...runs.map((r) => {
+    const li = document.createElement("li");
+    li.dataset.run = r.run_id;
+    li.dataset.state = r.state;
+    li.dataset.live = r.live || "";
+    li.textContent = r.task_id + "（" + r.consumer_id + "，" + r.scenario + "）：" + runText(r);
+    if (r.live === "running") {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "run-stop";
+      b.textContent = "停止";
+      b.addEventListener("click", () => stop(r.run_id));
+      li.append(" ", b);
+    }
+    return li;
+  }));
+}
+
+// start: one start operation; only a reply of this generation acts.
+async function start(sc) {
+  if (starting) return; // one start operation at a time (a second click, even on a re-rendered button, does nothing)
+  const g = creds.gen;
+  starting = true;
+  renderControl();
+  setRunStatus("開始中…", "busy");
+  const r = await creds.startRun(sc.id);
+  if (g !== creds.gen || !r || r.gen !== creds.gen) return; // cleared or replaced: nothing acts
+  starting = false;
+  renderControl();
+  if (r.error) setRunStatus("沒有收到回覆，無法確認是否已受理；請看最近場次（不會自動重新開始）", "error");
+  else if (r.status === 202 || r.status === 200) {
+    setRunStatus((r.status === 202 ? "已開始 " : "已受理（同一請求）") + r.body.task_id, "ok");
+    await openRun(r.body, g);
+  } else setRunStatus(ERRORS[r.body && r.body.error] || "未開始（" + r.status + "）", "error");
+  pollRuns();
+}
+
+// openRun shows the new task with its consumer's viewer token, while the
+// generation is still the one the start belonged to.
+async function openRun(run, g) {
+  const token = creds.viewerToken(run.consumer_id);
+  if (!token || g !== creds.gen) return;
+  viewerGen = g;
+  const signedIn = await useViewer(token);
+  if (signedIn !== true || g !== creds.gen) return;
+  openTask(run.task_id);
+}
+
+async function stop(runId) {
+  const g = creds.gen;
+  setRunStatus("停止中…", "busy");
+  const r = await creds.stopRun(runId);
+  if (!r || r.gen !== creds.gen || g !== creds.gen) return;
+  if (r.error) setRunStatus("沒有收到回覆；請看最近場次", "error");
+  else if (r.status === 202) setRunStatus("停止中…（等收尾紀錄寫入後才顯示已停止）", "busy");
+  else setRunStatus(ERRORS[r.body && r.body.error] || "未停止（" + r.status + "）", "error");
+  pollRuns();
+}
+
+// pollRuns: one loop at a time, like the readiness poll.
+let runsPolling = false;
+async function pollRuns() {
+  clearTimeout(runsTimer);
+  if (runsPolling) return;
+  runsPolling = true;
+  const g = creds.gen;
+  try {
+    if (!document.hidden) {
+      const r = await creds.runs();
+      if (r && r.gen === creds.gen && r.runs) { lastRuns = r; renderControl(); }
+    }
+  } finally {
+    runsPolling = false;
+  }
+  if (creds.view().hasHost) runsTimer = setTimeout(pollRuns, g === creds.gen ? RUNS_MS : 0);
+}
+
 $("token-file").addEventListener("change", (ev) => {
   const input = ev.target;
   const file = input.files && input.files[0];
@@ -155,10 +303,10 @@ onTypedSignIn(() => {
 });
 // 「清除目前 viewer」 keeps the loaded file; app.js clears the viewer only.
 new MutationObserver(renderReadiness).observe($("unity-status"), { attributes: true, attributeFilter: ["data-state"] });
-document.addEventListener("visibilitychange", () => { if (!document.hidden && creds.view().hasHost) pollReadiness(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && creds.view().hasHost) { pollReadiness(); pollRuns(); } });
 // Leaving the page: drop every credential, stop polling, end every step in
 // flight; app.js clears the Dashboard and the shop. Nothing returns on a
 // restored page: the file has to be chosen again.
-window.addEventListener("pagehide", () => { clearTimeout(readyTimer); creds.clearAll("已離開頁面：憑證已清除，請重新載入 token 檔"); });
+window.addEventListener("pagehide", () => { clearTimeout(readyTimer); clearTimeout(runsTimer); creds.clearAll("已離開頁面：憑證已清除，請重新載入 token 檔"); });
 
 render(creds.view());

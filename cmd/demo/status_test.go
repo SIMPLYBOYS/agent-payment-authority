@@ -53,6 +53,7 @@ func TestHostStatusAccess(t *testing.T) {
 		"viewer A":              {h.tokens["viewer:consumer-a"], nil, 403},
 		"viewer B":              {h.tokens["viewer:consumer-b"], nil, 403},
 		"host":                  {h.tokens["host"], nil, 200},
+		"operator (3.2)":        {h.tokens["operator"], nil, 200},
 		"host, foreign Host":    {h.tokens["host"], func(r *http.Request) { r.Host = "evil.example:8402" }, 403},
 		"host, foreign Origin":  {h.tokens["host"], func(r *http.Request) { r.Header.Set("Origin", "http://evil.example") }, 403},
 		"host token in the URL": {"", func(r *http.Request) { r.URL.RawQuery = "token=" + h.tokens["host"] }, 401},
@@ -78,7 +79,7 @@ func TestHostStatusAccess(t *testing.T) {
 	}
 	var fields map[string]any
 	json.Unmarshal(body, &fields)
-	if len(fields) != 7 {
+	if len(fields) != 8 || fields["caller_role"] != "host" { // 3.2 added caller_role
 		t.Errorf("status fields %v", fields)
 	}
 }

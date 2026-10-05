@@ -159,7 +159,7 @@ func TestWalletOwnershipRace(t *testing.T) {
 		case errA != nil && Code(errA) != "PAYER_IN_USE", errB != nil && Code(errB) != "PAYER_IN_USE":
 			t.Fatalf("round %d: unexpected refusal %v / %v", round, errA, errB)
 		}
-		if err := s1.verify(); err != nil {
+		if err := s1.verify(schemaVersion); err != nil {
 			t.Fatalf("round %d: %v", round, err)
 		}
 	}

@@ -55,8 +55,9 @@ demo-integration:
 	go build -o bin/fake-claude ./cmd/fake-claude
 	APA_ADDR=$(or $(APA_ADDR),127.0.0.1:8402) ./bin/demo --fake-cli bin/fake-claude --plan testdata/demo/fake-plan.json
 
-# B1-06 slice 3.1: the fake demo in one command, with checks of the Unity
-# build and the LimeZu import; the host's page is http://127.0.0.1:8402/host.
-# Same fixed plan as demo-integration. See docs/demo-operation-design.md.
+# B1-06 slices 3.1/3.2: the fake demo in one command, with checks of the
+# Unity build and the LimeZu import; the host's page is
+# http://127.0.0.1:8402/host, where runs are started (scenario catalog, demo
+# registry, its own new database). See docs/demo-operation-design.md.
 demo:
 	sh scripts/demo/start.sh

@@ -284,7 +284,7 @@ func consistent(t *testing.T, s *Store, sess contracts.Session) {
 	if v := task(t, s, sess); v.Status != status || v.DenyReason != reason {
 		t.Fatalf("stored %s/%s, events give %s/%s", v.Status, v.DenyReason, status, reason)
 	}
-	if err := s.verify(); err != nil {
+	if err := s.verify(schemaVersion); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
 }

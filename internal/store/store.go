@@ -18,13 +18,14 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 	_ "modernc.org/sqlite" // CGo-free SQLite; pinned with modernc.org/libc in go.mod
 )
 
-const schemaVersion = 1
+const schemaVersion = 2    // 1: tasks, purchases, events, snapshots; 2 adds host_runs (docs/demo-operation-design.md section 13)
 const defaultDeadline = 30 // seconds an Ask waits for approval
 
 // Clock is the trusted host clock in Unix seconds; never a caller's value.
@@ -43,6 +44,10 @@ type Config struct {
 	Registry contracts.RegistryConfig
 	Offers   OfferBook
 	Clock    Clock
+	// UpgradeSchema1 lets Open migrate a schema 1 database to 2 (demo
+	// --upgrade-db): verify as 1, back up with VACUUM INTO, migrate, verify
+	// as 2. Without it a schema 1 database is refused and left untouched.
+	UpgradeSchema1 bool
 }
 
 // Error is a refused operation. Code is the contract reason when a contract
@@ -107,7 +112,20 @@ func drained(rows *sql.Rows) error { return errors.Join(rows.Err(), rows.Close()
 // read failures; nothing outside the package can.
 var openReader = func(dsn string) (*sql.DB, error) { return sql.Open("sqlite", dsn) }
 
+// upgradeHook runs at each step of a schema 1 upgrade (tests only; nil in
+// production): "verified1", "backed-up", "migrate" (before commit),
+// "verified2". An error fails that step as a real failure would.
+var upgradeHook func(stage string) error
+
+func upgradeAt(stage string) error {
+	if upgradeHook == nil {
+		return nil
+	}
+	return upgradeHook(stage)
+}
+
 type Store struct {
+	path     string // the database file, absolute
 	w, r     *sql.DB
 	registry *contracts.Registry
 	regBody  []byte
@@ -136,7 +154,7 @@ func Open(cfg Config) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{registry: reg, regBody: regBody, offers: map[OfferKey][][]byte{}, clock: cfg.Clock}
+	s := &Store{path: path, registry: reg, regBody: regBody, offers: map[OfferKey][][]byte{}, clock: cfg.Clock}
 	for k, quotes := range cfg.Offers {
 		for _, q := range quotes {
 			if _, err := q.Hash(); err != nil {
@@ -160,11 +178,11 @@ func Open(cfg Config) (*Store, error) {
 		s.w.Close()
 		return nil, err
 	}
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(cfg.UpgradeSchema1); err != nil {
 		s.Close()
 		return nil, err
 	}
-	if err := s.verify(); err != nil {
+	if err := s.verify(schemaVersion); err != nil {
 		s.Close()
 		return nil, err
 	}
@@ -268,27 +286,76 @@ CREATE UNIQUE INDEX one_closure  ON events (task_id, purchase_order_id) WHERE ev
 CREATE UNIQUE INDEX one_end      ON events (task_id) WHERE event_type IN ('TASK_CANCELLED', 'TASK_TIMED_OUT');
 `
 
-// migrate sets WAL (a property of the file) and creates the schema once, in
-// one transaction. A newer or unknown version is refused, never downgraded.
-func (s *Store) migrate() error {
-	var mode string
-	if err := s.w.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode); err != nil || mode != "wal" {
-		return fmt.Errorf("journal_mode WAL not set (%q, %v)", mode, err)
-	}
-	tx, err := s.w.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+// runsSchema is schema 2's addition: the demo host's run coordination
+// (docs/demo-operation-design.md sections 13.2, 13.8, 13.9). It never holds
+// events and takes no part in a task's status. The binding and scenario are
+// the trusted values at acceptance, so nothing here needs the current
+// registry. The CHECKs give each state's shape; the lists of codes and the
+// combinations are checked in Go (validRun), on write and on open.
+const runsSchema = `
+CREATE TABLE host_runs (
+  run_id          TEXT PRIMARY KEY,
+  request_id      TEXT NOT NULL UNIQUE,
+  scenario        TEXT NOT NULL,
+  scenario_digest TEXT NOT NULL,
+  budget_initial  TEXT NOT NULL,
+  task_id         TEXT NOT NULL UNIQUE,
+  consumer_id     TEXT NOT NULL,
+  agent_id        TEXT NOT NULL,
+  wallet_id       TEXT NOT NULL,
+  payer           TEXT NOT NULL,
+  state           TEXT NOT NULL CHECK (state IN ('accepted', 'interrupted', 'ended')),
+  accepted_at     INTEGER NOT NULL,
+  interrupted_at  INTEGER,
+  ended_at        INTEGER,
+  outcome         TEXT,
+  detail          TEXT,
+  task_started    INTEGER CHECK (task_started IN (0, 1)),
+  store_end       TEXT CHECK (store_end IN ('', 'TASK_CANCELLED', 'TASK_TIMED_OUT')),
+  store_end_error TEXT,
+  CHECK ((state = 'interrupted') = (interrupted_at IS NOT NULL)),
+  CHECK ((state = 'ended') = (ended_at IS NOT NULL)),
+  CHECK (state = 'ended' OR (outcome IS NULL AND detail IS NULL AND task_started IS NULL AND store_end IS NULL AND store_end_error IS NULL)),
+  CHECK (state <> 'ended' OR (outcome IS NOT NULL AND detail IS NOT NULL AND task_started IS NOT NULL AND store_end IS NOT NULL))
+) STRICT;
+`
+
+// migrate sets WAL (a property of the file) and brings the schema to the
+// current version, never down. A new file gets schema 2 in one transaction.
+// A schema 1 file is refused untouched unless upgrade is set; then
+// upgradeSchema1 runs. Any other version is refused.
+func (s *Store) migrate(upgrade bool) error {
 	var v int
-	if err := tx.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+	if err := s.w.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
 		return err
 	}
 	switch v {
 	case schemaVersion:
-		return nil
 	case 0:
-		if _, err := tx.Exec(schema); err != nil {
+	case 1:
+		if !upgrade {
+			return refuse("SCHEMA_UPGRADE_REQUIRED", fmt.Sprintf("database %s is schema 1 and this version needs schema 2: use a new APA_DB_PATH, or back it up and start with --upgrade-db; nothing was changed", s.path))
+		}
+	default:
+		return &CorruptError{Check: "schema", Detail: fmt.Sprintf("schema version %d is not %d", v, schemaVersion)}
+	}
+	var mode string
+	if err := s.w.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode); err != nil || mode != "wal" {
+		return fmt.Errorf("journal_mode WAL not set (%q, %v)", mode, err)
+	}
+	switch v {
+	case 1:
+		return s.upgradeSchema1()
+	case 0:
+		tx, err := s.w.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if err := tx.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 0 {
+			return fmt.Errorf("schema changed while opening (%d, %v)", v, err)
+		}
+		if _, err := tx.Exec(schema + runsSchema); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
@@ -296,7 +363,56 @@ func (s *Store) migrate() error {
 		}
 		return tx.Commit()
 	}
-	return &CorruptError{Check: "schema", Detail: fmt.Sprintf("schema version %d is not %d", v, schemaVersion)}
+	return nil
+}
+
+// upgradeSchema1 is --upgrade-db (section 13.8 R2): verify as schema 1
+// (read only), back up with VACUUM INTO, add host_runs in one transaction,
+// verify as schema 2. A failure before the commit leaves schema 1 and keeps
+// the backup; a failure of the last verify leaves schema 2 and Open serves
+// nothing: restore the backup to a NEW path (section 13.14.1).
+func (s *Store) upgradeSchema1() error {
+	if err := s.verify(1); err != nil {
+		return err
+	}
+	if err := upgradeAt("verified1"); err != nil {
+		return err
+	}
+	backup := fmt.Sprintf("%s.schema1-%s.bak", s.path, time.Now().UTC().Format("20060102T150405Z"))
+	if _, err := s.w.Exec(`VACUUM INTO ?`, backup); err != nil {
+		return fmt.Errorf("backup %s before the upgrade: %w; nothing was changed", backup, err)
+	}
+	if err := os.Chmod(backup, 0o600); err != nil {
+		return err
+	}
+	if err := upgradeAt("backed-up"); err != nil {
+		return err
+	}
+	tx, err := s.w.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var v int
+	if err := tx.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 1 {
+		return fmt.Errorf("schema changed during the upgrade (%d, %v)", v, err)
+	}
+	if _, err := tx.Exec(runsSchema); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+		return err
+	}
+	if err := upgradeAt("migrate"); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if err := s.verify(schemaVersion); err != nil {
+		return fmt.Errorf("schema 2 check failed after the upgrade (backup %s; restore it to a new path): %w", backup, err)
+	}
+	return upgradeAt("verified2")
 }
 
 func canonical(v any) ([]byte, error) {

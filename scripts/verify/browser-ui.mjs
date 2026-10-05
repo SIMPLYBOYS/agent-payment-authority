@@ -62,7 +62,7 @@ function startDemo(state, plan, build, extra = [], addr = "127.0.0.1:0") {
     tokens() {
       const t = JSON.parse(readFileSync(join(state, "tokens.json"))).tokens;
       const get = (role, c) => t.find((x) => x.role === role && (x.consumer_id || "") === c).token;
-      return { a: get("viewer", "consumer-a"), b: get("viewer", "consumer-b"), host: get("host", "") };
+      return { a: get("viewer", "consumer-a"), b: get("viewer", "consumer-b"), host: get("host", ""), op: get("operator", "") };
     },
     async stop() { p.kill("SIGINT"); await new Promise((r) => p.once("exit", r)); },
   };
@@ -111,7 +111,11 @@ async function startChrome() {
     for (const end = Date.now() + ms; Date.now() < end; await sleep(100)) if (await evaluate(expr).catch(() => false)) return true;
     return false;
   };
-  const on = (method, fn) => listeners.set(method, [...(listeners.get(method) || []), fn]);
+  // on adds a handler and returns its removal.
+  const on = (method, fn) => {
+    listeners.set(method, [...(listeners.get(method) || []), fn]);
+    return () => listeners.set(method, (listeners.get(method) || []).filter((f) => f !== fn));
+  };
   return { c, send, evaluate, waitFor, on, consoleText, close: () => { ws.close(); c.kill(); } };
 }
 
@@ -185,7 +189,7 @@ try {
   demo = startDemo(state, join(repo, "testdata/demo/fake-plan.json"), unityBuild);
   const addr = await demo.ready("task-b");
   let tok = demo.tokens();
-  allTokens.push(tok.a, tok.b, tok.host);
+  allTokens.push(tok.a, tok.b, tok.host, tok.op);
   log("demo at " + addr + " (fake plan: task-a Ask, task-b Deny)");
   browser = await startChrome();
   const b = browser;
@@ -364,7 +368,7 @@ try {
   demo = startDemo(state, restartPlan, unityBuild);
   const addr2 = await demo.ready("task-a-next");
   tok = demo.tokens();
-  allTokens.push(tok.a, tok.b, tok.host);
+  allTokens.push(tok.a, tok.b, tok.host, tok.op);
   check("restart: recorded task-a not rerun", demo.log().includes('fake run task-a: skipped="task_already_recorded"'));
   await b.send("Page.navigate", { url: "http://" + addr2 + "/" });
   await b.waitFor(`document.readyState === "complete"`);
@@ -386,7 +390,7 @@ try {
   const sd = startDemo(seeded, null, unityBuild);
   const addr4 = await sd.ready();
   const st = sd.tokens();
-  allTokens.push(st.a, st.b, st.host);
+  allTokens.push(st.a, st.b, st.host, st.op);
   await b.send("Page.navigate", { url: "http://" + addr4 + "/" });
   await b.waitFor(`document.readyState === "complete"`);
   await b.waitFor(`["ready","rendered"].includes(document.getElementById("unity-status").dataset.state)`, 90000);
@@ -410,7 +414,7 @@ try {
   let hd = startDemo(hostState, join(repo, "testdata/demo/fake-plan.json"), unityBuild);
   const hAddr = await hd.ready("task-b");
   let ht = hd.tokens();
-  allTokens.push(ht.a, ht.b, ht.host);
+  allTokens.push(ht.a, ht.b, ht.host, ht.op);
   const goodFile = join(tmp, "tokens-current.json");
   writeFileSync(goodFile, readFileSync(join(hostState, "tokens.json")));
   const staleFile = join(tmp, "tokens-stale.json"); // a previous start's tokens (the seeded host above)
@@ -502,7 +506,7 @@ try {
   // Interleavings, with the verification requests really held by the browser.
   let holdNext = 0;
   const held = [];
-  b.on("Fetch.requestPaused", (p) => {
+  const offHold = b.on("Fetch.requestPaused", (p) => {
     if (holdNext > 0) { holdNext--; held.push(p.requestId); } else b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {});
   });
   await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/host/status*" }, { urlPattern: "*/api/viewer*" }] });
@@ -549,13 +553,15 @@ try {
   check("3.1 pagehide: tokens dropped, Dashboard and shop cleared; the late poll restores nothing", (await credsMode()) === "none" && (await b.evaluate(`${text("#viewer")} === "未驗證"`)) && (await noTaskShown()), await credsView());
   holdNext = 0;
   let polled = 0;
-  b.on("Fetch.requestPaused", () => { polled++; });
+  const offPolled = b.on("Fetch.requestPaused", () => { polled++; });
   await sleep(6000);
   check("3.1 pagehide: no more polling after leaving", polled === 0, polled + " requests");
   await b.evaluate(`window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })), true`);
   await sleep(500);
   check("3.1 pageshow: nothing comes back by itself", (await credsMode()) === "none" && (await b.evaluate(`${text("#viewer")} === "未驗證"`)));
   await b.send("Fetch.disable");
+  offHold();
+  offPolled();
 
   // R1 on /host: the old viewer's JSON completes after a switch, a clear, pagehide.
   await chooseFile(goodFile);
@@ -617,7 +623,7 @@ try {
   hd = startDemo(hostState, null, unityBuild, [], hAddr);
   await hd.ready();
   ht = hd.tokens();
-  allTokens.push(ht.a, ht.b, ht.host);
+  allTokens.push(ht.a, ht.b, ht.host, ht.op);
   check("3.1: after a restart the page's 401 clears every credential", await b.waitFor(`document.getElementById("creds").dataset.mode === "none" && document.getElementById("creds").textContent.includes("服務已重啟")`, 20000) && (await noTaskShown()), await credsView());
   await chooseFile(goodFile); // the file as it was before the restart
   check("3.1: the pre-restart file is refused", await b.waitFor(`document.getElementById("creds").textContent.includes("與目前服務不符")`));
@@ -643,6 +649,114 @@ try {
   check("3.1-R2 /: a typed token still signs in", await b.waitFor(`${text("#viewer")}.startsWith("consumer-b")`));
 
   await hd.stop();
+
+  // ---- B1-06 slice 3.2: host control (docs/demo-operation-design.md section 13) ----
+  // A host in scenario mode on a new database: the demo registry, a catalog
+  // with ask, deny-budget and hang. Nothing runs at start.
+  const hangScenario = join(tmp, "hang.json");
+  writeFileSync(hangScenario, JSON.stringify({ steps: [{ do: "tool", tool: "request_purchase", args: { product_id: "kr-market" } }, { do: "hang" }] }));
+  const catalog = join(tmp, "scenarios.json");
+  writeFileSync(catalog, JSON.stringify({ description: "browser test", scenarios: [
+    { id: "ask", consumer_id: "consumer-a", scenario: join(repo, "testdata/cli/ask-mainline.json"), label: "Ask" },
+    { id: "deny-budget", consumer_id: "consumer-b", scenario: join(repo, "testdata/cli/ask-mainline.json"), budget_initial: "250000", label: "Deny" },
+    { id: "hang", consumer_id: "consumer-a", scenario: hangScenario, label: "Hang" },
+  ] }));
+  const ctlState = join(tmp, "state-control");
+  const ctlArgs = ["--fake-cli", join(bin, "fake-claude"), "--scenarios", catalog, "--registry", join(repo, "testdata/demo/registry.json")];
+  let cd = startDemo(ctlState, null, unityBuild, ctlArgs);
+  const cAddr = await cd.ready();
+  let ct = cd.tokens();
+  allTokens.push(ct.a, ct.b, ct.host, ct.op);
+  check("3.2: nothing runs at start", !cd.log().includes("demo: run "));
+  const ctlFile = join(tmp, "tokens-control.json");
+  writeFileSync(ctlFile, readFileSync(join(ctlState, "tokens.json")));
+  await b.send("Page.navigate", { url: "http://" + cAddr + "/host" });
+  await b.waitFor(`document.readyState === "complete"`);
+  await b.waitFor(`["ready","rendered","failed"].includes(document.getElementById("unity-status").dataset.state)`, 90000);
+  await chooseFile(ctlFile);
+  check("3.2: the token file with the operator loads", await b.waitFor(`document.getElementById("creds").dataset.mode === "file" && document.getElementById("creds").textContent.includes("operator")`));
+  check("3.2: the control panel offers the catalog's scenarios", await b.waitFor(`!document.getElementById("control").hidden && document.querySelectorAll("#run-scenarios button").length === 3`, 15000));
+  const runsOf = async () => (await hostGet(cAddr, ct.op, "/api/host/runs")).json.runs;
+  // clickScenario waits until the scenario's button is enabled (no run active, no start in flight), then clicks it.
+  const clickScenario = async (id) => {
+    const sel = `document.querySelector('#run-scenarios button[data-scenario="${id}"]')`;
+    if (!(await b.waitFor(`!!${sel} && !${sel}.disabled`, 20000))) throw new Error("scenario button " + id + " never enabled");
+    return b.evaluate(`${sel}.click()`);
+  };
+  const runItem = (task) => `[...document.querySelectorAll("#runs li")].find((l) => l.textContent.startsWith(${JSON.stringify(task)}))?.textContent || ""`;
+
+  // Normal flow: start Ask, the page switches to consumer-a and opens the new task.
+  await clickScenario("ask");
+  check("3.2: start Ask opens show-a-01 for consumer-a", await b.waitFor(`${text("#viewer")}.startsWith("consumer-a") && document.getElementById("status").dataset.kind === "ok"`, 20000)
+    && await unityShows(b, { task: "show-a-01", phase: "waiting", verdict: "Ask" }), await b.evaluate(text("#unity-status")));
+  check("3.2: the run ends and the list says so without claiming payment", await b.waitFor(`${runItem("show-a-01")}.includes("場次完成")`, 20000) && !(await b.evaluate(`document.body.innerText`)).match(/付款成功|已付款|取貨成功/));
+  await shot(b, "desktop-host-control", 1280, 900, false);
+
+  // Double click: one run.
+  const n0 = (await runsOf()).length;
+  await b.evaluate(`(() => { const x = document.querySelector('#run-scenarios button[data-scenario="ask"]'); x.click(); x.click(); return true; })()`);
+  await b.waitFor(`${runItem("show-a-02")}.includes("場次完成")`, 20000);
+  await sleep(1000);
+  check("3.2: a double click starts one run", (await runsOf()).length === n0 + 1, String((await runsOf()).length - n0));
+
+  // A lost reply: the server accepts, the browser loses the response; the
+  // page resends the same request ID and gets the same run, not a new one.
+  let failNextStart = 0, holdNextStart = 0;
+  const heldStarts = [];
+  const offStarts = b.on("Fetch.requestPaused", (p) => {
+    if (p.request.method === "POST" && p.request.url.endsWith("/api/host/runs") && p.responseStatusCode) {
+      if (failNextStart > 0) { failNextStart--; b.send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionReset" }).catch(() => {}); return; }
+      if (holdNextStart > 0) { holdNextStart--; heldStarts.push(p.requestId); return; }
+    }
+    b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {});
+  });
+  await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/host/runs", requestStage: "Response" }] });
+  const n1 = (await runsOf()).length;
+  failNextStart = 1;
+  await clickScenario("deny-budget");
+  check("3.2: after a lost reply the same request ID returns the same run", await b.waitFor(`document.getElementById("run-status").textContent.includes("已受理（同一請求）")`, 20000)
+    && (await runsOf()).length === n1 + 1, await b.evaluate(text("#run-status")));
+  check("3.2: and the page opens it (consumer-b, show-b-01 Deny)", await unityShows(b, { task: "show-b-01", phase: "denied" }));
+
+  // Held reply, then 清除全部: the run stands on the server, the page does nothing with it.
+  holdNextStart = 1;
+  await clickScenario("ask");
+  for (let i = 0; i < 200 && heldStarts.length === 0; i++) await sleep(50);
+  check("3.2: a start reply is held (the server accepted it)", heldStarts.length === 1);
+  await b.evaluate(`document.getElementById("clear-all").click()`);
+  for (const id of heldStarts.splice(0)) await b.send("Fetch.continueRequest", { requestId: id }).catch(() => {});
+  await sleep(1500);
+  check("3.2: the late start reply after 清除全部 signs nobody in and opens nothing", (await b.evaluate(`${text("#viewer")} === "未驗證" && document.getElementById("creds").dataset.mode === "none" && document.getElementById("control").hidden`)), await b.evaluate(text("#viewer")));
+  const accepted = (await runsOf()).find((r) => r.task_id === "show-a-03");
+  check("3.2: clearing the page did not withdraw the accepted run", !!accepted, JSON.stringify((await runsOf()).map((r) => r.task_id)));
+  await chooseFile(ctlFile);
+  await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`);
+  check("3.2: reloading the file lists that run without switching to it", await b.waitFor(`${runItem("show-a-03")} !== ""`, 10000) && (await b.evaluate(`${text("#viewer")} === "未驗證"`)));
+  await b.send("Fetch.disable");
+  offStarts();
+
+  // Stop a hanging run: stopping, then stopped with the cancel recorded.
+  await clickScenario("hang");
+  check("3.2: the hanging run is running with a stop button", await b.waitFor(`${runItem("show-a-04")}.includes("進行中") && !!document.querySelector('#runs li[data-live="running"] .run-stop')`, 20000), await b.evaluate(runItem("show-a-04")));
+  check("3.2: no other start while a run is active", await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].every((x) => x.disabled)`));
+  await b.evaluate(`document.querySelector('#runs li[data-live="running"] .run-stop').click()`);
+  check("3.2: stopped only after the cancel was recorded", await b.waitFor(`${runItem("show-a-04")}.includes("已停止，取消已記錄")`, 20000), await b.evaluate(runItem("show-a-04")));
+
+  // Nothing of the operator leaves page memory.
+  const keptCtl = await b.evaluate(`JSON.stringify({ ls: localStorage.length, ss: sessionStorage.length, cookie: document.cookie, url: location.href })`);
+  const htmlCtl = await b.evaluate(`document.documentElement.outerHTML`);
+  check("3.2: no token (operator included) in storage, cookie, URL, page or console", !/"ls":[1-9]|"ss":[1-9]|"cookie":"[^"]/.test(keptCtl) && [ct.op, ct.host, ct.a, ct.b].every((t) => !keptCtl.includes(t) && !htmlCtl.includes(t) && !b.consoleText.join("\n").includes(t)));
+
+  // Restart on the same database and address: the runs stay, nothing reruns.
+  const before = (await runsOf()).map((r) => r.run_id + r.state).sort().join();
+  await cd.stop();
+  cd = startDemo(ctlState, null, unityBuild, ctlArgs, cAddr);
+  await cd.ready();
+  ct = cd.tokens();
+  allTokens.push(ct.a, ct.b, ct.host, ct.op);
+  check("3.2: after a restart the page's credentials are cleared (401)", await b.waitFor(`document.getElementById("creds").dataset.mode === "none"`, 20000));
+  check("3.2: after a restart the runs are kept and nothing reruns", (await runsOf()).map((r) => r.run_id + r.state).sort().join() === before && !cd.log().includes("demo: run "));
+  await cd.stop();
 
   // No Unity build: the page says so and shows no other shop.
   const bare = startDemo(join(tmp, "state-bare"), null, join(tmp, "no-build"));

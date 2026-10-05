@@ -58,6 +58,7 @@ type hostOpts struct {
 	fakeEnv     []string
 	fakeCLI     string       // "" means the test binary as fake-claude
 	args        []string     // more serve flags, e.g. --registry
+	scenarios   string       // a scenario catalog: host-started runs (with the fake CLI)
 	stage       func(string) // the stop steps
 }
 
@@ -118,6 +119,13 @@ func mainline(t *testing.T) string {
 
 func serveArgs(t *testing.T, o hostOpts, dir string) []string {
 	args := append([]string{"--trace-dir", filepath.Join(dir, "runs")}, o.args...)
+	if o.scenarios != "" {
+		cli := o.fakeCLI
+		if cli == "" {
+			cli = fakeBinary(t)
+		}
+		return append(args, "--fake-cli", cli, "--scenarios", o.scenarios)
+	}
 	if o.runs == nil {
 		return args
 	}

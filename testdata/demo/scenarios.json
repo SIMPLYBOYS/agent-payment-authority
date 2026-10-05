@@ -1,0 +1,18 @@
+{
+  "description": "Trusted host scenario catalog for host-started fake runs (docs/demo-operation-design.md sections 4 and 13). Not a policy change and not agent input: a start request names an id only; consumer, scenario file and budget_initial come from here. The fake CLI runs no model.",
+  "scenarios": [
+    {
+      "id": "ask",
+      "consumer_id": "consumer-a",
+      "scenario": "testdata/cli/ask-mainline.json",
+      "label": "主商品，Ask（等待核准）"
+    },
+    {
+      "id": "deny-budget",
+      "consumer_id": "consumer-b",
+      "scenario": "testdata/cli/ask-mainline.json",
+      "budget_initial": "250000",
+      "label": "預算不足，Deny"
+    }
+  ]
+}

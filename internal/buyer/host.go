@@ -114,6 +114,9 @@ type RunResult struct {
 // bridge answers the CLI's MCP handshake, but business tools are refused
 // until the CLI's single system/init passes the Gate and Prepare succeeds.
 // Any stop disarms the run at once; it is revoked as soon as the process is
+// watchHook lets tests stop a run with any outcome and detail; nil otherwise.
+var watchHook func(typ, subtype string) (Outcome, string)
+
 // gone, before anything is recorded.
 func (h *Host) Run(ctx context.Context, taskID, prompt string, prepare Prepare) (RunResult, error) {
 	var res RunResult
@@ -157,6 +160,11 @@ func (h *Host) Run(ctx context.Context, taskID, prompt string, prepare Prepare) 
 		st       *store.Store
 	)
 	watch := func(typ, subtype string, line []byte) (Outcome, string) {
+		if watchHook != nil { // tests only: inject a stop, e.g. an unlisted detail
+			if o, d := watchHook(typ, subtype); o != "" {
+				return o, d
+			}
+		}
 		switch {
 		case typ == "system" && strings.Contains(subtype, "hook"):
 			return ConfigMismatch, "hook_message"
@@ -214,7 +222,13 @@ func (h *Host) Run(ctx context.Context, taskID, prompt string, prepare Prepare) 
 		}
 	}
 	if end != nil {
-		res.StoreEnd, res.EndError = "", store.Code(end)
+		res.StoreEnd, res.EndError = "", store.CodeOf(end)
+	}
+	// Only listed codes leave the run, in the trace and the result alike: an
+	// unlisted one becomes detail_unlisted and is not kept anywhere
+	// (docs/demo-operation-design.md section 13.11.1).
+	if !store.ValidDetail(res.Report.Detail) {
+		res.Report.Detail = "detail_unlisted"
 	}
 	res.Trace, err = h.trace(b, prompt, started, gateCode, res)
 	return res, err
@@ -271,9 +285,7 @@ func (h *Host) trace(b *toolbridge.Binding, prompt string, started time.Time, ga
 	}
 	prepareError := ""
 	if res.PrepareError != nil {
-		if prepareError = store.Code(res.PrepareError); prepareError == "" {
-			prepareError = "error"
-		}
+		prepareError = store.CodeOf(res.PrepareError) // STORE_ERROR when it has no code; never its text
 	}
 	sum := sha256.Sum256([]byte(prompt))
 	enc := json.NewEncoder(f)

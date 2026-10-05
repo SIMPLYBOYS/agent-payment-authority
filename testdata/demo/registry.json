@@ -1,0 +1,60 @@
+{
+  "version": "apa.m1.v2",
+  "consumers": [
+    {"consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a"},
+    {"consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b"}
+  ],
+  "wallets": [
+    {"wallet_id":"wallet-a","chain_id":"84532","from":"0x1111111111111111111111111111111111111111","evidence_mode":"fixture"},
+    {"wallet_id":"wallet-b","chain_id":"84532","from":"0x2222222222222222222222222222222222222222","evidence_mode":"fixture"}
+  ],
+  "assets": [
+    {"asset_id":"fixture-usdc","chain_id":"84532","asset_contract":"0x4444444444444444444444444444444444444444","decimals":6,"eip712_name":"USDC","eip712_version":"2"}
+  ],
+  "tasks": [
+    {"version":"apa.m1.v2","task_id":"task-a","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790726400},
+    {"version":"apa.m1.v2","task_id":"task-a-next","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790726500},
+    {"version":"apa.m1.v2","task_id":"task-b","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790726400},
+    {"version":"apa.m1.v2","task_id":"show-a-01","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727001},
+    {"version":"apa.m1.v2","task_id":"show-a-02","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727002},
+    {"version":"apa.m1.v2","task_id":"show-a-03","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727003},
+    {"version":"apa.m1.v2","task_id":"show-a-04","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727004},
+    {"version":"apa.m1.v2","task_id":"show-a-05","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727005},
+    {"version":"apa.m1.v2","task_id":"show-a-06","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727006},
+    {"version":"apa.m1.v2","task_id":"show-a-07","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727007},
+    {"version":"apa.m1.v2","task_id":"show-a-08","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727008},
+    {"version":"apa.m1.v2","task_id":"show-a-09","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727009},
+    {"version":"apa.m1.v2","task_id":"show-a-10","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727010},
+    {"version":"apa.m1.v2","task_id":"show-a-11","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727011},
+    {"version":"apa.m1.v2","task_id":"show-a-12","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727012},
+    {"version":"apa.m1.v2","task_id":"show-a-13","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727013},
+    {"version":"apa.m1.v2","task_id":"show-a-14","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727014},
+    {"version":"apa.m1.v2","task_id":"show-a-15","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727015},
+    {"version":"apa.m1.v2","task_id":"show-a-16","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727016},
+    {"version":"apa.m1.v2","task_id":"show-a-17","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727017},
+    {"version":"apa.m1.v2","task_id":"show-a-18","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727018},
+    {"version":"apa.m1.v2","task_id":"show-a-19","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727019},
+    {"version":"apa.m1.v2","task_id":"show-a-20","consumer_id":"consumer-a","agent_id":"agent-a","wallet_id":"wallet-a","status":"created","created_at":1790727020},
+    {"version":"apa.m1.v2","task_id":"show-b-01","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728001},
+    {"version":"apa.m1.v2","task_id":"show-b-02","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728002},
+    {"version":"apa.m1.v2","task_id":"show-b-03","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728003},
+    {"version":"apa.m1.v2","task_id":"show-b-04","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728004},
+    {"version":"apa.m1.v2","task_id":"show-b-05","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728005},
+    {"version":"apa.m1.v2","task_id":"show-b-06","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728006},
+    {"version":"apa.m1.v2","task_id":"show-b-07","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728007},
+    {"version":"apa.m1.v2","task_id":"show-b-08","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728008},
+    {"version":"apa.m1.v2","task_id":"show-b-09","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728009},
+    {"version":"apa.m1.v2","task_id":"show-b-10","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728010},
+    {"version":"apa.m1.v2","task_id":"show-b-11","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728011},
+    {"version":"apa.m1.v2","task_id":"show-b-12","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728012},
+    {"version":"apa.m1.v2","task_id":"show-b-13","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728013},
+    {"version":"apa.m1.v2","task_id":"show-b-14","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728014},
+    {"version":"apa.m1.v2","task_id":"show-b-15","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728015},
+    {"version":"apa.m1.v2","task_id":"show-b-16","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728016},
+    {"version":"apa.m1.v2","task_id":"show-b-17","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728017},
+    {"version":"apa.m1.v2","task_id":"show-b-18","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728018},
+    {"version":"apa.m1.v2","task_id":"show-b-19","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728019},
+    {"version":"apa.m1.v2","task_id":"show-b-20","consumer_id":"consumer-b","agent_id":"agent-b","wallet_id":"wallet-b","status":"created","created_at":1790728020}
+  ],
+  "merchant_pay_to":"0x3333333333333333333333333333333333333333"
+}

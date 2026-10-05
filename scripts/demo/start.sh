@@ -3,14 +3,16 @@
 # docs/demo-operation-design.md section 3). It checks the Unity Web build and
 # the LimeZu import (missing ones are reported, the demo still starts and the
 # page says the scene is not ready), builds the two Go binaries (Go's build
-# cache; seconds) and runs the demo host with the fixed fake plan, exactly as
-# make demo-integration: task-a and task-b run once at start. It never builds
+# cache; seconds) and runs the demo host with the trusted scenario catalog
+# and the demo registry (slice 3.2): nothing runs at start; the host starts
+# runs from /host, one new task each. It never builds
 # Unity, runs tests, starts Docker, runs the real Claude Code CLI or prints a
 # token. A refused start (address in use, database locked, not the fake CLI,
 # Store recovery) ends with the host's own message and its exit code.
 #
-# Environment: APA_ADDR (default 127.0.0.1:8402), APA_DB_PATH,
-# APA_DEMO_TOKEN_FILE (as the host reads them); APA_UNITY_PROJECT (default
+# Environment: APA_ADDR (default 127.0.0.1:8402), APA_DB_PATH (default
+# var/apa-demo-host-runs.db, a schema 2 database of its own: the schema 1
+# var/apa-demo-fake.db is never upgraded by default), APA_DEMO_TOKEN_FILE; APA_UNITY_PROJECT (default
 # unity/AgentPaymentAuthority); APA_DEMO_BIN, a directory with demo and
 # fake-claude already built (tests), skips the build.
 set -u
@@ -36,5 +38,8 @@ else
 	go build -o bin/fake-claude ./cmd/fake-claude || exit $?
 fi
 addr=${APA_ADDR:-127.0.0.1:8402}
+APA_DB_PATH=${APA_DB_PATH:-var/apa-demo-host-runs.db}
+export APA_DB_PATH
 echo "demo: 啟動中。主持人頁 http://${addr}/host（一般 viewer 頁 http://${addr}/）；token 檔 ${APA_DEMO_TOKEN_FILE:-var/demo-tokens.json}，本腳本不印 token" >&2
-APA_ADDR=$addr exec "$bin/demo" --fake-cli "$bin/fake-claude" --plan testdata/demo/fake-plan.json --unity-build "$build"
+APA_ADDR=$addr exec "$bin/demo" --fake-cli "$bin/fake-claude" --scenarios testdata/demo/scenarios.json \
+	--registry testdata/demo/registry.json --unity-build "$build"

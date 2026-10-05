@@ -58,22 +58,26 @@ type fakeRunner struct {
 
 var versionLimits = buyer.Limits{Stdout: 4 << 10, Stderr: 4 << 10, Total: 5 * time.Second, Grace: time.Second}
 
-// newFakeRunner reads the plan strictly and checks the fake before anything
-// binds: every task is in the trusted registry, every scenario exists, and
-// the executable's --version names fake-claude (the real CLI would run a
-// model). The check runs with a scratch HOME, by absolute path.
+// newFakeRunner reads the plan strictly (none in scenario mode: planPath
+// "") and checks the fake before anything binds: every task is in the
+// trusted registry, every scenario exists, and the executable's --version
+// names fake-claude (the real CLI would run a model). The check runs with a
+// scratch HOME, by absolute path.
 func newFakeRunner(ctx context.Context, cliPath, planPath, traceDir string, reg *contracts.Registry,
 	profile policy.Profile, d deps) (*fakeRunner, error) {
-	raw, err := os.ReadFile(planPath)
-	if err != nil {
-		return nil, err
-	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
 	var p plan
-	if err := dec.Decode(&p); err != nil || dec.More() {
-		return nil, fmt.Errorf("plan %s: not a plan file", planPath)
+	if planPath != "" {
+		raw, err := os.ReadFile(planPath)
+		if err != nil {
+			return nil, err
+		}
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&p); err != nil || dec.More() {
+			return nil, fmt.Errorf("plan %s: not a plan file", planPath)
+		}
 	}
+	var err error
 	seen := map[string]bool{}
 	for i, r := range p.Runs {
 		if _, _, err := reg.Binding(r.TaskID); err != nil || seen[r.TaskID] {
@@ -128,7 +132,13 @@ func (f *fakeRunner) runAll(ctx context.Context, st *store.Store, bridge *toolbr
 			out = append(out, runOutcome{TaskID: r.TaskID, Skipped: "host_stopping"})
 			continue
 		}
-		o := f.runOne(ctx, st, bridge, r)
+		var o runOutcome
+		if reserved, err := st.TaskReserved(r.TaskID); err != nil || reserved {
+			// a host run has reserved this task (docs/demo-operation-design.md 13.8 R1)
+			o = runOutcome{TaskID: r.TaskID, Skipped: "task_reserved_by_run"}
+		} else {
+			o = f.runOne(ctx, st, bridge, r)
+		}
 		out = append(out, o)
 		fmt.Fprintf(f.d.out, "demo: fake run %s: skipped=%q outcome=%q detail=%q task_started=%t store_end=%q\n",
 			o.TaskID, o.Skipped, o.Outcome, o.Detail, o.TaskStarted, o.StoreEnd)
@@ -174,7 +184,7 @@ func (f *fakeRunner) runOne(ctx context.Context, st *store.Store, bridge *toolbr
 		o.Detail = res.Report.Detail
 	}
 	if res.PrepareError != nil {
-		o.Detail = "prepare_failed:" + store.Code(res.PrepareError)
+		o.Detail = "prepare_failed:" + store.CodeOf(res.PrepareError) // STORE_ERROR without a code; never its text
 	}
 	return o
 }

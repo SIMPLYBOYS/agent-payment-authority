@@ -22,7 +22,9 @@ import (
 // It finds inconsistency. It cannot stop someone who rewrites snapshots,
 // rows, events and chain head together, and without an external checkpoint
 // it cannot guarantee to notice a truncated tail or a recomputed chain.
-func (s *Store) verify() error {
+// version is the schema the file must have: 1 when checking before an
+// upgrade, otherwise schemaVersion; host_runs is checked from 2 on.
+func (s *Store) verify(version int) error {
 	tx, err := s.r.Begin()
 	if err != nil {
 		return err
@@ -61,11 +63,11 @@ func (s *Store) verify() error {
 	if violated {
 		return bad("foreign_keys", "", "foreign_key_check reports a broken reference")
 	}
-	var version int
-	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+	var got int
+	if err := tx.QueryRow(`PRAGMA user_version`).Scan(&got); err != nil {
 		return readErr("schema", "", err)
-	} else if version != schemaVersion {
-		return bad("schema", "", "schema version %d is not %d", version, schemaVersion)
+	} else if got != version {
+		return bad("schema", "", "schema version %d is not %d", got, version)
 	}
 
 	// 2. Snapshots: hash, canonical body and a strict decode as their kind.
@@ -313,6 +315,9 @@ func (s *Store) verify() error {
 		if status != row.Status || reason != row.DenyReason.String || (reason == "") == row.DenyReason.Valid {
 			return bad("projection", id, "status %s/%s is not what the events give (%s/%s)", row.Status, row.DenyReason.String, status, reason)
 		}
+	}
+	if version >= 2 {
+		return verifyRuns(tx)
 	}
 	return nil
 }

@@ -155,7 +155,8 @@ async function signIn(ev) {
   return useViewer(typed);
 }
 
-// useViewer signs in as the viewer of token, typed or handed over by /host.
+// useViewer signs in as the viewer of token, typed or handed over by /host;
+// true when it did (and nothing newer replaced it meanwhile).
 export async function useViewer(typed) {
   forget("驗證中…");
   if (!typed) return setStatus("請輸入 viewer token", "idle");
@@ -182,12 +183,15 @@ export async function useViewer(typed) {
     }
     $("task-form").hidden = false;
     setStatus("請選擇或輸入 task", "idle");
+    return true; // signed in as v.consumer_id, in this generation
   } catch {
     if (gen === state.gen) forget("無法連線到 demo host");
   }
 }
 
-function openTask(id) {
+// openTask opens a task for the signed-in viewer (also used by /host after
+// a run it started: section 13.1).
+export function openTask(id) {
   if (!token || !/^[A-Za-z0-9._-]{1,64}$/.test(id)) return setStatus("task ID 格式不正確", "error");
   replayRun++;
   setMode("live");
