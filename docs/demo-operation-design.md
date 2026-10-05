@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-05）：**第三版控制與持久化設計（第 13 節）與其修訂（第 13.8 節，依 Codex 對 `838de81` 的 review 補 R1–R4）待 Codex review，尚未核准實作。** 同一 SQLite 內保存場次協調資料的方向已獲 review 接受；它取代第 4 節未接受的 JSONL 場次日誌。切片 3.1 已於 `b2b7daa` 通過 Codex 限定範圍技術 review（第 12.7 節）。3.2–3.5 未開始。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節保留當時的寫法，「待 review」是寫作當時的狀態。
+狀態（2026-10-05）：**第三版控制與持久化設計（第 13 節）經兩輪 review：R3、R4 已關閉；R1、R2 依 Codex 對 `a976fb9` 的 review 補充於第 13.9 節，待 Codex 限定 review，尚未核准實作。** 同一 SQLite 內保存場次協調資料的方向已獲接受，取代第 4 節未接受的 JSONL 場次日誌。切片 3.1 已於 `b2b7daa` 通過 Codex 限定範圍技術 review（第 12.7 節）。3.2–3.5 未開始。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節保留當時的寫法，「待 review」是寫作當時的狀態。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -624,6 +624,7 @@ B1-04／B1-06 整體維持 InProgress。交付點 3.1 標為技術 review 通過
 放在既有資料庫檔案內，由 Store 套件提供只碰這張表的函式。schema 版本 1 → 2，**純新增**，不改任何既有資料表：
 
 ```sql
+-- 欄位要求已由第 13.8 節 R1（綁定欄位）與第 13.9.1 節（狀態與欄位）修訂
 CREATE TABLE host_runs (
   run_id          TEXT PRIMARY KEY,
   request_id      TEXT NOT NULL UNIQUE,
@@ -827,7 +828,7 @@ review 接受的方向不變：同一 SQLite 保存場次協調資料、三層�
 1. **遷移前驗證**：以版本 1 的規則完整執行既有 `verify()`（唯讀）。失敗 → 不遷移、不寫入，仍是版本 1，拒絕開啟（與現在的損壞處理相同）。
 2. **備份**：`VACUUM INTO '<db>.schema1-<UTC 時間>.bak'`，在同一把資料庫鎖內，產生一致的單檔快照（權限 0600）。失敗 → 不遷移，仍是版本 1，拒絕開啟。
 3. **遷移交易**：`CREATE TABLE host_runs`，`user_version = 2`，一次提交。失敗 → 回滾，仍是版本 1，拒絕開啟；備份檔保留。**提交時點**就在這一步結束。
-4. **遷移後驗證**：以版本 2 的規則執行 `verify()`。失敗 → 資料庫已是版本 2，拒絕服務。恢復方式是由人工把第 2 步的備份檔換回原路徑（文件寫明命令），程式不自動還原、不降版。因為遷移只新增一張空表，第 1 步已通過時第 4 步理論上不會失敗，但仍明定處理。
+4. **遷移後驗證**：以版本 2 的規則執行 `verify()`。失敗 → 資料庫已是版本 2，拒絕服務。（恢復方式已由第 13.9.2 節修訂：不把備份換回原路徑，改複製到新路徑）恢復方式是由人工把第 2 步的備份檔換回原路徑（文件寫明命令），程式不自動還原、不降版。因為遷移只新增一張空表，第 1 步已通過時第 4 步理論上不會失敗，但仍明定處理。
 
 **3.2 開發與測試**一律使用新的資料庫。既有展示資料庫（例如 `var/apa-demo-fake.db`）的升級由 Aaron 另行確認，不默認執行（13.8.6）。
 
@@ -945,3 +946,98 @@ review 接受的方向不變：同一 SQLite 保存場次協調資料、三層�
   - 若要升級：由 Aaron 確認後，以 `--upgrade-db` 執行一次，並保留自動產生的備份檔。
   - 這不阻擋 3.2 的開發與測試。
 - 其他：無。
+
+### 13.9 R1、R2 補充（依 Codex 對 `a976fb9` 的 review；設計提案，待 Codex 限定 review）
+
+review 結論：R3、R4 關閉；R1、R2 方向正確，各補一處。本節只補這兩處，不改其他設計。
+
+#### 13.9.1 R1：狀態與欄位要求
+
+**問題**：第 13.2 節的表定義允許 `task_started` 為 NULL，而 13.8 的一致性規則只處理 0 或 1。所以 `state = ended`、`ended_at` 有值、`task_started = NULL`、`outcome = NULL` 這類不完整紀錄沒有明確的拒絕規則。
+
+**欄位要求**（「必填」＝NOT NULL 且合法；「留空」＝必須是 NULL）：
+
+| 欄位 | `accepted` | `interrupted` | `ended` |
+|---|---|---|---|
+| `run_id`、`request_id`、`scenario`、`scenario_digest`、`budget_initial`、`task_id`、`consumer_id`、`agent_id`、`wallet_id`、`payer`、`accepted_at` | 必填 | 必填 | 必填 |
+| `interrupted_at`（新增欄位） | 留空 | 必填 | 留空 |
+| `ended_at` | 留空 | 留空 | 必填，且 ≥ `accepted_at` |
+| `outcome` | 留空 | 留空 | 必填，必須是合法代碼（見下） |
+| `detail` | 留空 | 留空 | 必填，可以是空字串；只能是代碼字元 `^[a-z0-9_:]{0,64}$`，不含 CLI 文字 |
+| `task_started` | 留空 | 留空 | 必填，0 或 1 |
+| `store_end` | 留空 | 留空 | 必填：`''`、`TASK_CANCELLED` 或 `TASK_TIMED_OUT` |
+| `store_end_error` | 留空 | 留空 | 留空，或 Store 代碼 `^[A-Z_]{1,64}$` |
+
+- `interrupted` 的結果欄位一律留空，因為結果不明；畫面改由 task 與事件判讀（第 13.4 節）。
+- **合法的 `outcome`**：buyer 的固定代碼 `ok`、`not_installed`、`start_failed`、`not_logged_in`、`rate_limited`、`timeout`、`cancelled`、`output_overflow`、`parse_error`、`nonzero_exit`、`missing_result`、`cli_error`、`orphaned_output`、`input_error`、`config_mismatch`、`turn_limit`、`store_unavailable`，加上 `skipped`（程序沒有啟動，例如暫存 HOME 建立失敗；這時 `detail` 是略過原因）。
+  - 清單只放在 Go 程式中的一份常數（與 `buyer.Outcome` 對照），寫入與驗證共用。
+  - 不寫進 SQLite 的 CHECK，避免日後新增代碼就得遷移。
+
+**組合規則**（13.8 R1 表的增補）：
+
+| 規則 | 條件 |
+|---|---|
+| 程序沒啟動 | `outcome = skipped` ⇒ `task_started = 0`，且 `store_end = ''` |
+| 收尾成功與失敗互斥 | `store_end_error` 不為空 ⇒ `store_end = ''`（沿用） |
+| 收尾只對應取消或逾時 | `store_end = TASK_CANCELLED` ⇒ `outcome = cancelled`；`store_end = TASK_TIMED_OUT` ⇒ `outcome = timeout` |
+| 取消或逾時一定有收尾結果 | `outcome` 為 `cancelled` 或 `timeout`，且 `task_started = 1` ⇒ `store_end` 與 `store_end_error` 恰好一個不為空（沿用） |
+| 狀態轉換 | 只允許 `accepted → ended`（T4）與 `accepted → interrupted`（R）；`ended`、`interrupted` 是終態 |
+
+**三處都檢查**：
+
+1. **資料表約束**：SQLite 的 CHECK 只表達上表的「必填／留空」形狀，以及 `state`、`store_end`、`task_started` 的列舉。寫錯形狀的列無法寫入。
+2. **寫入**：
+   - `EndRun`（T4）在交易前，用與驗證相同的函式 `validRunRow` 檢查整列（形狀、`outcome` 清單、組合規則），不合法就回 `INVALID_RUN_RECORD`，什麼都不寫。
+   - 更新條件是 `WHERE run_id = ? AND state = 'accepted'`；影響 0 列就回 `RUN_NOT_OPEN`，不覆寫終態。
+   - `InterruptOpenRuns`（R）同樣只改 `accepted` 的列，並填 `interrupted_at`。
+3. **恢復驗證**：`verify()` 對每一列執行 `validRunRow`，加上 13.8 R1 與 task／事件的對照。不合法就是 `CorruptError(host_runs)`，不開始服務。這也涵蓋檔案在程式之外被修改、繞過 CHECK 的情況。
+
+**增補測試**（`runs_test.go`）：
+
+- 寫入路徑：
+  - `EndRun` 傳入缺欄位、`task_started` 為 NULL、未知 `outcome`、未知 `store_end`、`store_end` 與 `store_end_error` 同時有值、`skipped` 卻 `task_started = 1`、`cancelled` 配 `TASK_TIMED_OUT`、`detail` 含非代碼字元：每一種都回 `INVALID_RUN_RECORD`，資料表不變。
+  - 對 `ended` 或 `interrupted` 的列呼叫 `EndRun` 或 `InterruptOpenRuns`：不覆寫，前者回 `RUN_NOT_OPEN`。
+- 約束：直接以 SQL 插入「`ended` 但 `task_started` 為 NULL」「`ended` 但 `outcome` 為 NULL」「`accepted` 但 `ended_at` 有值」「`interrupted` 但 `outcome` 有值」，都被 CHECK 擋下。
+- 恢復驗證：用測試連線開啟 `PRAGMA ignore_check_constraints = ON`，寫入上面各種不完整、矛盾或未知代碼的列（包括 review 舉的 `ended`／`ended_at` 有值／`task_started` NULL／`outcome` NULL）。重新開啟後每一種都是 `CorruptError(host_runs)`，並指出該列。
+
+#### 13.9.2 R2：遷移後驗證失敗的恢復程序
+
+**問題**：只寫「把備份換回原路徑」沒有交代原資料庫的 `-wal`／`-shm`。WAL 是 SQLite 持久狀態的一部分，只替換主檔可能讓舊 WAL 套用到備份上，或混用兩份狀態。
+
+**修訂**：不換回原路徑，改用新路徑恢復，原檔全部保留作為證據。
+
+1. **停止服務**：結束 demo host（Ctrl-C 或 SIGTERM），確認 `<db>.lock` 已釋放，沒有其他程序開著這個資料庫。
+2. **保留失敗的資料庫**：`<db>`、`<db>-wal`、`<db>-shm`、`<db>.lock` 都不改名、不刪除、不覆寫，也不對它執行 checkpoint 或 VACUUM。
+3. **複製備份到全新、未使用的路徑**：例如 `var/restore-<UTC 時間>/demo.db`。目錄新建、權限 0700，目標檔與 `-wal`／`-shm` 都必須原本不存在。
+   - 備份是 `VACUUM INTO` 產生的單一完整檔，沒有 WAL。
+   - 用 3.2 新增的唯讀檢查命令驗證這份副本：`bin/demo --verify-db <新路徑>`。它只讀不寫：回報 schema 版本（必須是 1），並以版本 1 的規則執行 `integrity_check`、`foreign_key_check` 與既有的全部恢復檢查。不通過就停止，換用其他備份。
+4. **用相容的舊版程式指向恢復副本**：以 3.2 之前的程式（例如 `b2b7daa` 建置的 `bin/demo`），設定 `APA_DB_PATH=<新路徑>` 啟動。舊路徑不再使用。
+
+程式不自動還原、不降版，也不修改失敗的資料庫。
+
+**3.2 檔案增補**：
+
+- `cmd/demo/main.go`：`--verify-db PATH`，唯讀，不取資料庫鎖以外的任何寫入，結束時回報版本與結果；
+- `internal/store`：唯讀驗證入口（`VerifyFile`），依檔案的 schema 版本套用版本 1 或 2 的規則。
+
+**增補測試**：
+
+- 「舊路徑留有 WAL」：
+  - 建立版本 1 的資料庫，寫入 task 與事件，讓 `-wal` 留有未 checkpoint 的頁（開著第二條連線並停用自動 checkpoint）；
+  - 以 `--upgrade-db` 升級，並用測試掛鉤讓遷移後驗證失敗；
+  - 依上面的四步恢復。
+- 斷言：
+  - 失敗的 `<db>`、`<db>-wal`、`<db>-shm` 在整個恢復過程中位元組不變；
+  - 新路徑原本不存在；`--verify-db` 回報版本 1 並通過；
+  - 新路徑上的 task、事件與升級前（含當時仍在 WAL 中的寫入）相同；
+  - 若新路徑已存在檔案，或已存在 `-wal`／`-shm`，恢復步驟拒絕複製。
+- 用舊版程式開啟恢復副本是手動步驟，列在操作文件中；自動測試以版本 1 規則的 `--verify-db` 代替，並明寫兩者不同。
+
+#### 13.9.3 驗收條件與需要 Aaron 決定的事項
+
+驗收條件增補（接在第 13.8.5 節的 8–11 之後）：
+
+12. `host_runs` 每一種狀態的必填與留空欄位、合法代碼與組合規則，在資料表約束、寫入與恢復驗證三處都檢查；不完整或矛盾的列無法寫入，也無法通過開檔驗證。
+13. 遷移後驗證失敗時，失敗的資料庫與其 WAL、SHM 都不被修改；恢復一律使用新的路徑，先通過唯讀驗證，再由相容程式開啟。
+
+需要 Aaron 決定：與第 13.8.6 節相同（既有展示資料庫是否升級，預設不升級），沒有新增事項。
