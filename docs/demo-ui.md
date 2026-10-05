@@ -272,7 +272,7 @@ Web 建置的 C# 與先前一次建置相同，所以 wasm 沒有重新產生，
   - 失敗都是逾時：`TestApprovedVersionInit`（fake CLI 版本檢查與 init）、`TestIntegrationEndsRestartAndReplay`（HTTP 用戶端逾時）、`TestRunnerOutcomes/not-logged-in`。
   - 該步開始於 03:39:38Z，正好與 Claude Code 在主機上同時跑的四次反向驗證瀏覽器測試（Chrome＋SwiftShader＋Go 編譯，約 03:35–03:46Z）重疊。
   - 同一份 `make check` 在同一輪較早的 `check` 步驟 exit 0。
-  - 判斷：主機負載造成的時序失敗，與既有的「時序測試偶發失敗」非阻擋待辦同類，不是本輪程式造成。這只是推論，沒有另外證明。
+  - 判斷：第一次容器驗證有三項逾時，與瀏覽器反向驗證同時執行；疑似主機負載影響，原因未獨立證實。停止其他工作後重跑通過，原失敗紀錄保留。
 - **重跑一次**（主機上不跑其他東西）：overall exit 0，七步全過，925 秒。
   - 各步：check-contracts 19、check 120、race-cover 260、verify-b1-01 52、mutation 453 秒。
   - check-contracts 內含 adapter 11／11；突變 222／222 KILLED；17 項隔離檢查都 ok。
@@ -398,7 +398,7 @@ Unity C# 與建置都沒有變更（`eda6469..6aee7f0` 沒有改到 `unity/`）�
 
 **保留**：
 
-- 失敗嘗試：見第 9、10 節，包含 `eda6469` 第一次容器因主機負載失敗，以及第一次 zombie 反向替換未生效。
+- 失敗嘗試：見第 9、10 節，包含 `eda6469` 的第一次容器驗證有三項逾時，與瀏覽器反向驗證同時執行；疑似主機負載影響，原因未獨立證實。停止其他工作後重跑通過，原失敗紀錄保留；以及第一次 zombie 反向替換未生效。
 - 未測：
   - 取消、CLI 逾時與 Allow 未在瀏覽器觸發；
   - 只用 Chrome；
