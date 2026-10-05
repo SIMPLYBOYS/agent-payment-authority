@@ -114,12 +114,16 @@ async function call(path, gen) {
 }
 
 let unauthorized = null; // set by /host: a 401 of the current generation clears all its credentials
+let beforeTyped = null;   // set by /host: a typed viewer token replaces its loaded file
 
 export function onUnauthorized(fn) { unauthorized = fn; }
+export function onTypedSignIn(fn) { beforeTyped = fn; }
 
-// forget drops the viewer: token, task, panels, the shop's customer.
+// forget drops the viewer: token (also one typed but not yet submitted),
+// task, panels, the shop's customer.
 export function forget(message) {
   token = null;
+  $("token").value = "";
   replayRun++;
   setMode("live");
   stopPolling();
@@ -146,7 +150,8 @@ async function signIn(ev) {
   ev.preventDefault();
   const input = $("token");
   const typed = input.value.trim();
-  input.value = ""; // read once, then cleared
+  input.value = ""; // read once, then cleared; only then may /host clear its file (forget empties the field)
+  if (beforeTyped) beforeTyped();
   return useViewer(typed);
 }
 
@@ -163,6 +168,7 @@ export async function useViewer(typed) {
     if (res.status === 403) return forget("此 token 不是 viewer token（主持人 token 不用於此頁）");
     if (!res.ok) return forget("token 無效或已過期（每次啟動 demo host 都會換新）");
     const v = await res.json();
+    if (gen !== state.gen) return; // the body came after a switch, a clear or pagehide: shows nothing
     state.consumer = v.consumer_id;
     $("viewer").textContent = v.consumer_id + "（demo viewer，不是使用者登入）";
     const pick = $("task-pick");

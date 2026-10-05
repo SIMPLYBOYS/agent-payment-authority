@@ -441,6 +441,22 @@ try {
   }
   const noTaskShown = () => b.evaluate(`${text("#inspector")} === "尚無資料" && ${text("#timeline")} === "尚無事件" && ${unityCleared(["task-a", "task-b", "HUMAN_APPROVAL_REQUIRED", "INSUFFICIENT_BUDGET"])}`);
 
+  // R1 (review of 0252ceb): a viewer's /api/viewer JSON that completes late.
+  // The page's fetch is wrapped so the body of the next /api/viewer reply is
+  // held until released; the real app.js then reads it after a switch.
+  const holdJson = `(() => { if (!window.__jsonHold) { window.__jsonHold = { n: 0, held: [] }; const orig = window.fetch.bind(window);
+    window.fetch = async (url, opts) => { const res = await orig(url, opts);
+      if (String(url) === "/api/viewer" && window.__jsonHold.n > 0) { window.__jsonHold.n--; const body = await res.json();
+        return { status: res.status, ok: res.ok, json: () => new Promise((r) => window.__jsonHold.held.push(() => r(body))) }; }
+      return res; }; }
+    window.__jsonHold.n = 1; return true; })()`;
+  const jsonHeld = () => b.waitFor(`window.__jsonHold && window.__jsonHold.held.length === 1`, 10000);
+  const releaseJson = async () => { await b.evaluate(`(window.__jsonHold.held.splice(0).forEach((f) => f()), true)`); await sleep(500); };
+  const noViewer = () => b.evaluate(`${text("#viewer")} === "未驗證" && document.getElementById("task-form").hidden && document.querySelectorAll("#task-pick button").length === 0`);
+  // R2: a token typed but not submitted.
+  const typeOnly = async (t) => { await b.evaluate(`document.getElementById("token").focus()`); await b.send("Input.insertText", { text: t }); };
+  const tokenFieldEmpty = () => b.evaluate(`document.getElementById("token").value === ""`);
+
   // Load the current file: the field is emptied, both consumers offered.
   await chooseFile(goodFile);
   check("3.1: the token file loads (host + two viewers confirmed by the server)", await b.waitFor(`document.getElementById("creds").dataset.mode === "file" && document.getElementById("creds").dataset.consumers === "consumer-a,consumer-b"`), await credsView());
@@ -541,6 +557,47 @@ try {
   check("3.1 pageshow: nothing comes back by itself", (await credsMode()) === "none" && (await b.evaluate(`${text("#viewer")} === "未驗證"`)));
   await b.send("Fetch.disable");
 
+  // R1 on /host: the old viewer's JSON completes after a switch, a clear, pagehide.
+  await chooseFile(goodFile);
+  await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`);
+  await b.evaluate(holdJson);
+  await b.evaluate(`document.querySelector('#consumer-pick button[data-consumer="consumer-a"]').click()`);
+  check("3.1-R1: viewer A's JSON held", await jsonHeld());
+  await b.evaluate(`document.querySelector('#consumer-pick button[data-consumer="consumer-b"]').click()`);
+  await b.waitFor(`${text("#viewer")}.startsWith("consumer-b")`);
+  await releaseJson();
+  check("3.1-R1: A's late JSON after switching to B: identity and task list stay B's",
+    (await b.evaluate(`${text("#viewer")}.startsWith("consumer-b") && [...document.querySelectorAll("#task-pick button")].every((x) => !x.textContent.startsWith("task-a"))`)), await b.evaluate(text("#viewer")));
+  await b.evaluate(holdJson);
+  await b.evaluate(`document.querySelector('#consumer-pick button[data-consumer="consumer-a"]').click()`);
+  await jsonHeld();
+  await b.evaluate(`document.getElementById("clear-all").click()`);
+  await releaseJson();
+  check("3.1-R1: A's late JSON after 清除全部: no identity, no task list", await noViewer(), await b.evaluate(text("#viewer")));
+  await chooseFile(goodFile);
+  await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`);
+  await b.evaluate(holdJson);
+  await b.evaluate(`document.querySelector('#consumer-pick button[data-consumer="consumer-a"]').click()`);
+  await jsonHeld();
+  await b.evaluate(`window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })), true`);
+  await releaseJson();
+  check("3.1-R1: A's late JSON after pagehide: no identity, no task list", await noViewer(), await b.evaluate(text("#viewer")));
+
+  // R2 on /host: a typed, unsubmitted token goes with 清除全部 and pagehide;
+  // a typed token still signs in (manual mode reads the field first).
+  await typeOnly(ht.a);
+  await b.evaluate(`document.getElementById("clear-all").click()`);
+  check("3.1-R2: 清除全部 empties a typed, unsubmitted token", await tokenFieldEmpty());
+  await typeOnly(ht.a);
+  await b.evaluate(`window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })), true`);
+  check("3.1-R2: pagehide empties a typed, unsubmitted token", await tokenFieldEmpty());
+  await chooseFile(goodFile);
+  await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`);
+  await signIn(b, ht.a);
+  check("3.1-R2: a typed token still signs in on /host (manual mode after reading the field)",
+    await b.waitFor(`${text("#viewer")}.startsWith("consumer-a") && document.getElementById("creds").dataset.mode === "manual"`) && (await tokenFieldEmpty()));
+  await b.evaluate(`document.getElementById("clear-all").click()`);
+
   // Leave for real and come back (bfcache or reload): still nothing held.
   await chooseFile(goodFile);
   await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`);
@@ -567,6 +624,24 @@ try {
   writeFileSync(goodFile, readFileSync(join(hostState, "tokens.json")));
   await chooseFile(goodFile);
   check("3.1: the new file loads", await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`));
+  // R1 and R2 on the viewer page /.
+  await b.send("Page.navigate", { url: "http://" + hAddr + "/" });
+  await b.waitFor(`document.readyState === "complete"`);
+  await b.evaluate(holdJson);
+  await signIn(b, ht.a);
+  check("3.1-R1 /: viewer A's JSON held", await jsonHeld());
+  await b.evaluate(`document.getElementById("switch").click()`);
+  await releaseJson();
+  check("3.1-R1 /: A's late JSON after 清除／切換: no identity, no task list", await noViewer(), await b.evaluate(text("#viewer")));
+  await typeOnly(ht.a);
+  await b.evaluate(`document.getElementById("switch").click()`);
+  check("3.1-R2 /: 清除／切換 empties a typed, unsubmitted token", await tokenFieldEmpty());
+  await typeOnly(ht.a);
+  await b.evaluate(`window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })), true`);
+  check("3.1-R2 /: pagehide empties a typed, unsubmitted token", await tokenFieldEmpty());
+  await signIn(b, ht.b);
+  check("3.1-R2 /: a typed token still signs in", await b.waitFor(`${text("#viewer")}.startsWith("consumer-b")`));
+
   await hd.stop();
 
   // No Unity build: the page says so and shows no other shop.

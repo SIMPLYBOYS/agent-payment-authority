@@ -9,7 +9,7 @@
 // Dashboard is cleared with it, so no late step shows an old identity.
 // Read-only: nothing here starts, stops or changes a task.
 
-import { forget, useViewer, onUnauthorized, unityInfo } from "./app.js";
+import { forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
 
 const $ = (id) => document.getElementById(id);
@@ -147,13 +147,12 @@ $("token-file").addEventListener("change", (ev) => {
   if (file) creds.load(file);
 });
 $("clear-all").addEventListener("click", () => creds.clearAll("已清除全部憑證"));
-// Manual viewer mode: before app.js reads the typed token, every loaded
-// token goes (capture phase on document runs before the form's handler).
-document.addEventListener("submit", (ev) => {
-  if (ev.target.id !== "auth-form") return;
+// Manual viewer mode: app.js has read and emptied the typed token; every
+// loaded token goes before it signs in with it.
+onTypedSignIn(() => {
   creds.manual();
   viewerGen = creds.gen;
-}, true);
+});
 // 「清除目前 viewer」 keeps the loaded file; app.js clears the viewer only.
 new MutationObserver(renderReadiness).observe($("unity-status"), { attributes: true, attributeFilter: ["data-state"] });
 document.addEventListener("visibilitychange", () => { if (!document.hidden && creds.view().hasHost) pollReadiness(); });

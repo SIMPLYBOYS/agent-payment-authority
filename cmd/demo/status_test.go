@@ -229,13 +229,32 @@ func scriptBin(t *testing.T) string {
 func startScript(t *testing.T, bin string, env ...string) (*exec.Cmd, *lockedBuffer) {
 	t.Helper()
 	dir, _ := os.MkdirTemp(testRoot, "script-")
+	// The child's temporary files (fake HOME, bridge socket) go to a
+	// directory of this test under the test process's own temporary
+	// directory (the container's scratch), never /tmp. Kept short: a Unix
+	// socket path must fit in about 100 bytes.
+	scratch, err := os.MkdirTemp("", "apa-s-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(scratch) })
 	c := exec.Command("sh", "scripts/demo/start.sh")
-	c.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "APA_DEMO_BIN=" + bin,
+	c.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "TMPDIR=" + scratch, "APA_DEMO_BIN=" + bin,
 		"APA_DB_PATH=" + filepath.Join(dir, "demo.db"), "APA_DEMO_TOKEN_FILE=" + filepath.Join(dir, "tokens.json"),
 		"APA_UNITY_PROJECT=" + t.TempDir()}, env...)
 	out := &lockedBuffer{}
 	c.Stdout, c.Stderr = out, out
 	return c, out
+}
+
+// envOf is the value of name in the script's environment.
+func envOf(c *exec.Cmd, name string) string {
+	for _, kv := range c.Env {
+		if v, ok := strings.CutPrefix(kv, name+"="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 func TestStartScript(t *testing.T) {
@@ -260,7 +279,7 @@ func TestStartScript(t *testing.T) {
 	})
 	t.Run("database locked by another demo process", func(t *testing.T) {
 		c, out := startScript(t, bin, "APA_ADDR=127.0.0.1:0")
-		db := strings.TrimPrefix(c.Env[3], "APA_DB_PATH=")
+		db := envOf(c, "APA_DB_PATH")
 		os.MkdirAll(filepath.Dir(db), 0o700)
 		f, err := os.OpenFile(db+".lock", os.O_RDWR|os.O_CREATE, 0o600)
 		if err != nil {
@@ -299,7 +318,7 @@ func TestStartScript(t *testing.T) {
 		if resp != nil {
 			resp.Body.Close()
 		}
-		raw, _ := os.ReadFile(strings.TrimPrefix(c.Env[4], "APA_DEMO_TOKEN_FILE="))
+		raw, _ := os.ReadFile(envOf(c, "APA_DEMO_TOKEN_FILE"))
 		var file struct{ Tokens []demoToken }
 		json.Unmarshal(raw, &file)
 		if len(file.Tokens) == 0 {
