@@ -413,3 +413,5 @@ Unity C# 與建置都沒有變更（`eda6469..6aee7f0` 沒有改到 `unity/`）�
 - 整體 M1。
 
 B1-06 的完整完成仍需至少一次核准的真實 CLI trace。B1-04／B1-06 維持 InProgress；不合併、不標 Done、不啟動真實 CLI。
+
+**10/5 後續**：Aaron 實際操作過交付點 2，初步接受目前的 fake 展示資料鏈，可以繼續開發。這不是真實模型、付款或整體 M1 的驗收。下一批的展示操作流程設計見 [demo-operation-design.md](demo-operation-design.md)，待 Codex review。
