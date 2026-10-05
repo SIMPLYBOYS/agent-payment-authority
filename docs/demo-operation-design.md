@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-06）：**切片 3.2 依 Codex review 修正 R1（未核准升級前不以可寫連線接觸來源）、R2（EndRun 在寫入交易內核對 task／事件）；容器驗證又發現兩處並修正（`migrate` 第二層的突變存活、場次檢視的競態）。最終程式 `c0d4c96`；Claude Code 執行，待 Codex 獨立 review（第 13.17 節）。** 3.2 首次實作於 `718aa91`（第 13.16 節）。第三版設計（第 13 節）於 `a845dcb` 通過 Codex 限定設計 review（第 13.15 節）。切片 3.1 已於 `b2b7daa` 通過（第 12.7 節）。3.3–3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節與第 13.1–13.16 節保留當時的寫法。
+狀態（2026-10-06）：**切片 3.2：review 指出 `answer()` 重新讀取失敗時仍以舊資料回 200，修正於 `69ae9b2`（第 13.18 節）；之前的 R1、R2 與容器發現的兩處修正見第 13.17 節（`c0d4c96`，完整容器通過）。Claude Code 執行，待 Codex 獨立 review。** 第三版設計於 `a845dcb` 通過 Codex 限定設計 review（第 13.15 節）。切片 3.1 已於 `b2b7daa` 通過（第 12.7 節）。3.3–3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節與第 13.1–13.17 節保留當時的寫法。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -1627,3 +1627,34 @@ review 的獨立結果：
 | 完整容器（Go／JS＋fake 回歸；主機無其他負載） | 0 | 693 秒 | `artifacts/verify-container/runs/c0d4c96eb42a-20261005T175916Z/`（`artifacts/b1-06/container-c0d4c96.log`）：七步全過（check-contracts 19、check 85、race-cover 185、verify-b1-01 43、mutation 344 秒），check-contracts 含 adapter 11／11 與 hostcreds 19／19，235／235 突變，17 項隔離 ok |
 
 另一次容器紀錄：`c5bf8c2` 的執行在 `artifacts/verify-container/runs/c5bf8c294ecc-20261005T173542Z/`（`artifacts/b1-06/container-c5bf8c2.log`）。
+
+### 13.18 `answer()` 重新讀取失敗不再沿用舊資料（依 Codex 對 `fb6fdf3` 的 review；Claude Code 執行，待 Codex 獨立 review；程式 `69ae9b2`）
+
+**review 的證據**：
+
+- Codex 獨立通過：Store 與 demo 全套 race、Node 30 項、R1／R2 原始探測與修正回歸各三輪、場次一致性回歸三輪。
+- Claude 執行、Codex 核對：完整容器七步、235／235 突變、17 項隔離、瀏覽器紀錄。
+- 新的探測：`answer()` 在鎖內重新讀取，失敗時卻忽略錯誤，以第一次查詢的舊資料回 `200`（`state=accepted`、`live=ended`、沒有 `record_error`），三輪都重現。這是錯誤處理問題，不是已證明的權限繞過。
+
+**修正**（只這一處；鎖順序、R1／R2 與既有語意不變）：
+
+- 鎖內 `GetRun` 失敗：回 `503 store_unavailable`，代碼是固定值（沒有代碼的錯誤寫 `STORE_ERROR`），立即返回。
+- 原本存在的場次重新讀取卻不存在：回 `503 store_unavailable`，代碼 `RUN_NOT_FOUND`。`host_runs` 的列不會被刪除，這代表 Store 異常；不回舊資料，也不重新建立場次。
+- 只有這次讀到的列才會組成 `200` 的回應。
+
+**回歸**：
+
+- `TestAnswerRereadsOrFails` 確定地觸發三種情況：
+  - 關閉 Store 後重新讀取失敗：`503 STORE_ERROR`，回應中沒有任何場次欄位；
+  - 不存在的場次：`503 RUN_NOT_FOUND`；
+  - 正向對照：拿著舊的 `accepted` 列重送，回應是最新的 `ended`。
+- 新增突變「重新讀取失敗時仍用舊資料」，本機確認被抓到；突變共 236 項。
+
+**命令與結果**（`69ae9b2`；Claude Code 執行）：
+
+| 命令 | exit | 時間 | 證據 |
+|---|---|---|---|
+| `go test -race -count=1 -v ./cmd/demo ./internal/store` | 0 | 106 秒 | `artifacts/b1-06/checks-69ae9b2ff237-20261005T183015Z/` |
+| `go test -race -count=3 -run TestAnswerRereadsOrFails ./cmd/demo`（3 次皆通過） | 0 | 5 秒 | 同上 `answer-x3.log` |
+
+依 review 指示，本輪只交定向回歸。網頁與 Unity 都沒有修改，所以沒有重跑瀏覽器或 Unity。完整容器驗證沒有對 `69ae9b2` 重跑；最近一次通過的是 `c0d4c96`，它與 `69ae9b2` 只差 `control.go` 的 `answer()`、它的測試，以及一項突變。
