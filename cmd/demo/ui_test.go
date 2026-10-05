@@ -61,7 +61,7 @@ func TestDashboardRoutes(t *testing.T) {
 	t.Run("nothing else is served", func(t *testing.T) {
 		for _, p := range []string{"/ui/embed.go", "/ui/index.html", "/ui/test", "/ui/..%2fembed.go", "/ui/package.json", "/web/app.js",
 			"/tokens.json", "/demo.db", "/var/demo-tokens.json", "/unity/index.html", "/unity/..%2f..%2fdemo.db", "/unity/WebGL.data",
-			"/unity/Shop.unity", "/README.md", "/.git/config", "/api/tasks"} {
+			"/unity/Shop.unity", "/README.md", "/.git/config"} { // /api/tasks is served since slice 3.3 (TestTaskList)
 			code, body, _ := h.get(p, h.tokens["host"])
 			if code == 200 || bytes.Contains(body, []byte("SECRET-OUTSIDE")) || bytes.Contains(body, []byte("SQLite")) || bytes.Contains(body, []byte(h.tokens["host"])) {
 				t.Errorf("%s: %d %.80s", p, code, body)

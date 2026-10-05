@@ -37,6 +37,10 @@ let mode = "live";      // live | replay
 let replayRun = 0;      // bumped to end the current replay run
 let polls = 0;          // completed polls, for the browser test
 const expanded = new Set(); // event_ids whose JSON the viewer opened (R3)
+const LIST_MS = 5000;   // the task list is read again every 5 s (section 14)
+let idGen = 0;          // bumped whenever the viewer identity goes: an old list reply is dropped
+let listTimer = null;
+let listAbort = null;
 const rendered = [];    // waiting for Unity's report of (gen, seq)
 
 const SHOWN = ["gen", "seq", "phase", "task", "verdict", "reason"];
@@ -123,6 +127,9 @@ export function onTypedSignIn(fn) { beforeTyped = fn; }
 // task, panels, the shop's customer.
 export function forget(message) {
   token = null;
+  idGen++;
+  clearTimeout(listTimer);
+  if (listAbort) listAbort.abort();
   $("token").value = "";
   replayRun++;
   setMode("live");
@@ -171,22 +178,65 @@ export async function useViewer(typed) {
     const v = await res.json();
     if (gen !== state.gen) return; // the body came after a switch, a clear or pagehide: shows nothing
     state.consumer = v.consumer_id;
+    const listed = await refreshList(); // the list is on the page before the sign-in is reported
+    if (gen !== state.gen) return;
     $("viewer").textContent = v.consumer_id + "（demo viewer，不是使用者登入）";
-    const pick = $("task-pick");
-    pick.replaceChildren();
-    for (const id of A.FIXTURE_TASKS[v.consumer_id] || []) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = id + "（demo fixture）";
-      b.addEventListener("click", () => openTask(id));
-      pick.append(b);
-    }
     $("task-form").hidden = false;
-    setStatus("請選擇或輸入 task", "idle");
+    setStatus(listed ? "請選擇或輸入 task" : "task 清單讀取失敗；可直接輸入 task ID", listed ? "idle" : "warn");
     return true; // signed in as v.consumer_id, in this generation
   } catch {
     if (gen === state.gen) forget("無法連線到 demo host");
   }
+}
+
+// refreshList reads GET /api/tasks for this viewer (its stored tasks,
+// newest first) and shows them as buttons; true when it did. A reply that
+// comes after the identity changed shows nothing. It schedules the next
+// read while the identity stays. A choice in the list is not an
+// authorization: the server decides by the token and the task's owner.
+async function refreshList() {
+  clearTimeout(listTimer);
+  if (!token) return false;
+  const g = idGen;
+  if (listAbort) listAbort.abort();
+  listAbort = new AbortController();
+  let ok = false;
+  try {
+    if (!document.hidden) {
+      const res = await fetch("/api/tasks", { headers: { Authorization: "Bearer " + token }, cache: "no-store", signal: listAbort.signal, credentials: "omit" });
+      if (g !== idGen) return false;
+      if (res.status === 401) { unauthorized ? unauthorized() : forget("token 已失效，請重新輸入"); return false; }
+      if (res.ok) {
+        const body = await res.json();
+        if (g !== idGen) return false;
+        renderList(body.tasks || []);
+        ok = true;
+      }
+    }
+  } catch {
+    if (g !== idGen) return false;
+  }
+  if (g === idGen && token) listTimer = setTimeout(refreshList, LIST_MS);
+  return ok;
+}
+
+function renderList(tasks) {
+  const pick = $("task-pick");
+  if (tasks.length === 0) {
+    const none = document.createElement("span");
+    none.className = "empty";
+    none.textContent = "尚無 task";
+    return pick.replaceChildren(none);
+  }
+  pick.replaceChildren(...tasks.map((t) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.task = t.task_id;
+    b.dataset.status = t.status;
+    b.textContent = t.task_id + "（" + (A.STATUS_LABELS[t.status] || t.status) + "）";
+    b.addEventListener("click", () => openTask(t.task_id));
+    return b;
+  }));
 }
 
 // openTask opens a task for the signed-in viewer (also used by /host after
@@ -314,7 +364,7 @@ $("task-form").addEventListener("submit", (ev) => { ev.preventDefault(); const f
 $("switch").addEventListener("click", () => forget("已清除，請輸入另一位 consumer 的 viewer token"));
 $("replay").addEventListener("click", replay);
 $("replay-stop").addEventListener("click", () => restore(replayRun));
-document.addEventListener("visibilitychange", () => { if (!document.hidden && mode === "live") poll(false); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && mode === "live") poll(false); if (!document.hidden && token) refreshList(); });
 // Leaving the page drops the token and the panels and stops polling;
 // nothing comes back on return (a restored page asks again).
 window.addEventListener("pagehide", () => forget());

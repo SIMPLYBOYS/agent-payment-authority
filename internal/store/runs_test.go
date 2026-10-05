@@ -854,3 +854,31 @@ func TestMigrateRefusesSchema1(t *testing.T) {
 		t.Fatal("migrate changed a schema 1 file without the upgrade")
 	}
 }
+
+func TestListTasks(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	e.start(s, "task-a")
+	e.clock.Add(5)
+	e.start(s, "task-b")
+	e.clock.Add(5)
+	e.start(s, "task-a-next")
+	before := fingerprint(t, e.path)
+	all, err := s.ListTasks("", 10)
+	if err != nil || len(all) != 3 || all[0].TaskID != "task-a-next" || all[2].TaskID != "task-a" {
+		t.Fatalf("all: %+v %v", all, err)
+	}
+	a, _ := s.ListTasks("consumer-a", 10)
+	if len(a) != 2 || a[0].TaskID != "task-a-next" || a[1].TaskID != "task-a" || a[0].ConsumerID != "consumer-a" || a[0].Status != "running" {
+		t.Fatalf("consumer-a: %+v", a)
+	}
+	if one, _ := s.ListTasks("consumer-a", 1); len(one) != 1 || one[0].TaskID != "task-a-next" {
+		t.Fatalf("limit: %+v", one)
+	}
+	if none, _ := s.ListTasks("consumer-z", 10); len(none) != 0 {
+		t.Fatalf("unknown consumer: %+v", none)
+	}
+	if fingerprint(t, e.path) != before {
+		t.Fatal("listing wrote")
+	}
+}

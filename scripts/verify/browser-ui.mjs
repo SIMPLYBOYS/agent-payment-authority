@@ -14,6 +14,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { request as httpRequest } from "node:http";
 
 const repo = resolve(new URL("../..", import.meta.url).pathname);
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
@@ -140,6 +141,23 @@ async function shot(b, name, width, height, mobile) {
 async function hostEvents(addr, host, task) {
   const r = await fetch("http://" + addr + "/api/tasks/" + task + "/events", { headers: { Authorization: "Bearer " + host } });
   return (await r.json()).as_of_sequence;
+}
+
+// hostPost is a same-origin JSON POST as the page sends it (node:http, so
+// Origin can be set); the token stays in this process.
+function hostPost(addr, token, path, body) {
+  return new Promise((resolve, reject) => {
+    const [hostname, port] = addr.split(":");
+    const data = JSON.stringify(body);
+    const req = httpRequest({ hostname, port, path, method: "POST", headers: { Authorization: "Bearer " + token, Origin: "http://" + addr,
+      "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, (res) => {
+      let text = "";
+      res.on("data", (c) => { text += c; });
+      res.on("end", () => resolve({ status: res.statusCode, json: JSON.parse(text || "{}") }));
+    });
+    req.on("error", reject);
+    req.end(data);
+  });
 }
 
 async function hostGet(addr, host, path) {
@@ -772,6 +790,48 @@ try {
   check("3.2: after a restart the page's credentials are cleared (401)", await b.waitFor(`document.getElementById("creds").dataset.mode === "none"`, 20000));
   const after = (await runsOf()).map((r) => r.run_id + r.state).sort().join();
   check("3.2: after a restart the runs are kept and nothing reruns", after === before && !cd.log().includes("demo: run "), before + " -> " + after + (cd.log().includes("demo: run ") ? " (a run started)" : ""));
+  // ---- B1-06 slice 3.3: the task list comes from the Store (docs/demo-operation-design.md section 14) ----
+  const listIds = () => b.evaluate(`JSON.stringify([...document.querySelectorAll("#task-pick button")].map((x) => x.dataset.task))`).then(JSON.parse);
+  await b.send("Page.navigate", { url: "http://" + cAddr + "/" });
+  await b.waitFor(`document.readyState === "complete"`);
+  await signIn(b, ct.a);
+  await b.waitFor(`${text("#viewer")}.startsWith("consumer-a")`);
+  const aList = await listIds();
+  check("3.3: viewer A's list is A's stored tasks, newest first, none of B's", aList.join() === "show-a-05,show-a-04,show-a-03,show-a-02,show-a-01", aList.join());
+  const started = await hostPost(cAddr, ct.op, "/api/host/runs", { request_id: "req-list-0000000001", scenario: "ask" });
+  check("3.3: a run started meanwhile (host side)", started.status === 202 && started.json.task_id === "show-a-06", JSON.stringify(started.json));
+  check("3.3: the open page lists the new task without a reload", await b.waitFor(`[...document.querySelectorAll("#task-pick button")].some((x) => x.dataset.task === "show-a-06")`, 15000), (await listIds()).join());
+  const evBefore = (await hostGet(cAddr, ct.host, "/api/tasks/show-a-01/events")).text;
+  await b.evaluate(`document.querySelector('#task-pick button[data-task="show-a-01"]').click()`);
+  check("3.3: an older run's task opens from the list", await b.waitFor(`document.getElementById("status").dataset.kind === "ok" && ${text("#inspector")}.includes("show-a-01")`, 15000));
+  await b.evaluate(`document.getElementById("replay").click()`);
+  await b.waitFor(`document.getElementById("status").dataset.mode === "replay"`);
+  check("3.3: its replay ends and the list stays", await b.waitFor(`document.getElementById("status").dataset.mode === "live" && document.getElementById("status").dataset.kind === "ok"`, 40000) && (await listIds()).includes("show-a-06"));
+  check("3.3: the replay wrote nothing", (await hostGet(cAddr, ct.host, "/api/tasks/show-a-01/events")).text === evBefore);
+  // A's list reply arrives after the switch to B: it shows nothing.
+  let holdList = false;
+  const heldList = [];
+  const offList = b.on("Fetch.requestPaused", (p) => {
+    if (holdList && p.request.url.endsWith("/api/tasks") && p.responseStatusCode) { holdList = false; heldList.push(p.requestId); return; }
+    b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {});
+  });
+  await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/tasks", requestStage: "Response" }] });
+  await b.evaluate(`document.getElementById("switch").click()`);
+  holdList = true;
+  await signIn(b, ct.a);
+  for (let i = 0; i < 200 && heldList.length === 0; i++) await sleep(50);
+  check("3.3: viewer A's list reply is held", heldList.length === 1);
+  await b.evaluate(`document.getElementById("switch").click()`);
+  await signIn(b, ct.b);
+  await b.waitFor(`${text("#viewer")}.startsWith("consumer-b")`);
+  for (const id of heldList.splice(0)) await b.send("Fetch.continueRequest", { requestId: id }).catch(() => {});
+  await sleep(1000);
+  const bList = await listIds();
+  check("3.3: A's late list reply leaves B's list and identity", bList.join() === "show-b-01" && (await b.evaluate(`${text("#viewer")}.startsWith("consumer-b")`)), bList.join());
+  await b.send("Fetch.disable");
+  offList();
+  check("3.3: no fixed fixture names remain on the page", !(await b.evaluate(`document.body.innerText`)).includes("demo fixture"));
+
   await cd.stop();
 
   // No Unity build: the page says so and shows no other shop.

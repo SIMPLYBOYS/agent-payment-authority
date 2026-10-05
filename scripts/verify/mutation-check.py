@@ -535,6 +535,11 @@ MUTATIONS = [
     # B1-06 slice 3.2 review (answer's re-read).
     ('B1-06 3.2: answer shows the older row when the re-read fails', 'cmd/demo/control.go',
      '\tcase err != nil:\n\t\treply(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable", "code": store.CodeOf(err)})\n\t\treturn\n\tcase !found:\n\t\treply(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable", "code": "RUN_NOT_FOUND"})\n\t\treturn\n\t}\n\treply(w, http.StatusOK, c.view(fresh))', '\tcase err == nil && found:\n\t\trun = fresh\n\t}\n\treply(w, http.StatusOK, c.view(run))', 'TestAnswerRereadsOrFails'),
+    # B1-06 slice 3.3 (docs/demo-operation-design.md section 14): the task list.
+    ("B1-06 3.3: a viewer lists every consumer's tasks", 'internal/store/tasklist.go',
+     "WHERE ? = '' OR consumer_id = ? ORDER BY", "WHERE ? = '' OR consumer_id = ? OR 1 ORDER BY", 'TestListTasks'),
+    ('B1-06 3.3: the operator lists tasks', 'cmd/demo/api.go',
+     '\tdefault:\n\t\tfail(w, http.StatusForbidden, "forbidden_role")\n\t\treturn\n\t}\n\tlist, err := a.st.ListTasks', '\tdefault:\n\t}\n\tlist, err := a.st.ListTasks', 'TestTaskList'),
 ]
 
 

@@ -5,12 +5,10 @@
 
 export const UNKNOWN = "未知／未提供";
 
-// The fixture tasks the demo registry gives each consumer. A choice in the
-// page is not an authorization: the server decides by the token and the
-// task's stored owner.
-export const FIXTURE_TASKS = {
-  "consumer-a": ["task-a", "task-a-next"],
-  "consumer-b": ["task-b"],
+// Task status codes as the task list shows them (GET /api/tasks, section 14
+// of docs/demo-operation-design.md); an unknown code is shown as it is.
+export const STATUS_LABELS = {
+  created: "已建立", running: "執行中", awaiting_approval: "等待核准", denied: "Deny", cancelled: "已取消", failed: "CLI 逾時",
 };
 
 // A Dashboard state. gen counts consumer switches and task changes: a reply

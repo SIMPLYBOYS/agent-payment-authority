@@ -109,6 +109,7 @@ type api struct {
 }
 
 func (a *api) register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/tasks", a.tasks)
 	mux.HandleFunc("GET /api/tasks/{task_id}", a.task)
 	mux.HandleFunc("GET /api/tasks/{task_id}/events", a.events)
 }
@@ -244,4 +245,40 @@ func (a *api) events(w http.ResponseWriter, r *http.Request) {
 		out.AsOfSequence = e.Sequence
 	}
 	reply(w, http.StatusOK, out)
+}
+
+// tasksReply is GET /api/tasks: the caller's visible tasks, newest first
+// (docs/demo-operation-design.md section 14). A viewer gets its own
+// consumer's tasks by their stored consumer; the host gets all; the
+// operator, which reads no task, is refused.
+type tasksReply struct {
+	Tasks    []store.TaskSummary `json:"tasks"`
+	ServedAt uint64              `json:"served_at"`
+}
+
+const taskListLimit = 50 // ponytail: newest 50, no paging; page when a demo keeps more
+
+func (a *api) tasks(w http.ResponseWriter, r *http.Request) {
+	g, ok := a.authorize(w, r)
+	if !ok {
+		return
+	}
+	consumer := ""
+	switch g.Role {
+	case "viewer":
+		if consumer = g.ConsumerID; consumer == "" { // "" would list every consumer's
+			fail(w, http.StatusForbidden, "forbidden_role")
+			return
+		}
+	case "host":
+	default:
+		fail(w, http.StatusForbidden, "forbidden_role")
+		return
+	}
+	list, err := a.st.ListTasks(consumer, taskListLimit)
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "store_unavailable")
+		return
+	}
+	reply(w, http.StatusOK, tasksReply{Tasks: list, ServedAt: a.clock()})
 }
