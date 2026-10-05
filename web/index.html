@@ -27,6 +27,7 @@
     <input id="task-id" spellcheck="false">
     <button type="submit">開啟</button>
     <button type="button" id="replay" disabled>歷史展示回放（唯讀）</button>
+    <button type="button" id="replay-stop" hidden>停止回放並恢復最新狀態</button>
   </form>
   <p id="status" data-kind="idle"></p>
 </section>
@@ -34,6 +35,7 @@
 <main class="grid">
   <section class="shop" aria-label="商店場景">
     <h2>商店（Unity）</h2>
+    <p id="replay-note" class="replay-note" hidden>歷史展示回放中：商店正在重演保存的事件；Inspector 與 Timeline 仍是最新快照，與商店不是同一時刻。</p>
     <canvas id="unity-canvas" width="768" height="512"></canvas>
     <p id="unity-status" data-state="loading">Unity 場景載入中…</p>
     <div id="scene-text"></div>

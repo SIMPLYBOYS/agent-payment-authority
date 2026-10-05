@@ -40,13 +40,14 @@ public class ShopSceneTests
         while (view.Moving("consumer-a") && t < 10f) { t += Time.deltaTime; yield return null; }
         Assert.IsFalse(view.Moving("consumer-a"));
         Assert.Greater(view.PositionOf("consumer-a").x, 7f, "Ask: waiting at the counter");
-        Assert.That(bridge.reports, Has.Some.StartsWith("rendered:1:3:waiting"));
+        Assert.That(bridge.reports, Has.Some.EqualTo("rendered:1:3:waiting|task-a||"));
         Assert.AreEqual("empty", view.PhaseOf("consumer-b"), "B is not moved by A's task");
 
         bridge.Receive("{\"v\":1,\"gen\":2,\"clear\":true}");
         Assert.AreEqual("empty", view.PhaseOf("consumer-a"), "a new generation clears the old customer at once");
-        bridge.Receive(Msg(2, "consumer-b", "task-b", 3, "denied", false));
+        bridge.Receive("{\"v\":1,\"gen\":2,\"consumer\":\"consumer-b\",\"task_id\":\"task-b\",\"seq\":3,\"phase\":\"denied\",\"verdict\":\"Deny\",\"reason\":\"INSUFFICIENT_BUDGET\",\"animate\":false}");
         Assert.AreEqual("denied", view.PhaseOf("consumer-b"));
+        Assert.That(bridge.reports, Has.Some.EqualTo("rendered:2:3:denied|task-b|Deny|INSUFFICIENT_BUDGET"), "the reason the shop shows is reported");
         Assert.Less(view.PositionOf("consumer-b").x, 0f, "Deny: outside, leaving");
         Assert.AreEqual("empty", view.PhaseOf("consumer-a"));
     }

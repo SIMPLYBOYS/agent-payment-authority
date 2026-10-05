@@ -22,8 +22,11 @@ export function renderInspector(root, rows) {
   root.append(dl);
 }
 
-// renderTimeline lists the events; each opens to its whitelisted JSON, as text.
-export function renderTimeline(root, rows) {
+// renderTimeline lists the events; each opens to its whitelisted JSON, as
+// text. expanded holds the event_ids the viewer opened: a redraw (a poll, a
+// new event, a failed read) keeps them open and keeps closed ones closed;
+// the caller clears the set when the viewer or task changes.
+export function renderTimeline(root, rows, expanded = new Set()) {
   root.replaceChildren();
   if (rows.length === 0) {
     root.append(el("p", "empty", "尚無事件"));
@@ -37,9 +40,14 @@ export function renderTimeline(root, rows) {
     head.type = "button";
     head.append(el("span", "seq", "#" + r.seq), el("span", "type", r.type), el("span", "detail", r.detail), el("span", "time", r.time), el("span", "source", r.source));
     const body = el("div", "event-json");
-    body.hidden = true;
+    body.hidden = !expanded.has(r.id);
     body.append(el("p", "json-note", "API 白名單 JSON（不是 CLI 原始輸出，也不是完整未遮罩 raw log）"), el("pre", null, r.json));
-    head.addEventListener("click", () => { body.hidden = !body.hidden; });
+    head.setAttribute("aria-expanded", String(!body.hidden));
+    head.addEventListener("click", () => {
+      body.hidden = !body.hidden;
+      if (body.hidden) expanded.delete(r.id); else expanded.add(r.id);
+      head.setAttribute("aria-expanded", String(!body.hidden));
+    });
     li.append(head, body);
     ol.append(li);
   }

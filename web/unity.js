@@ -42,7 +42,9 @@ export class UnityHost {
       this.onStatus("ready", this.art);
       this.flush();
     } else if (kind === "rendered" && gen === this.gen) {
-      this.onStatus("rendered", "#" + seq + " " + detail); // display confirmation only
+      // display confirmation only: what the shop shows, for this generation
+      const [phase = "", task = "", verdict = "", reason = ""] = detail.split("|");
+      this.onStatus("rendered", { gen, seq, phase, task, verdict, reason });
     }
   }
 

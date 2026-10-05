@@ -43,10 +43,12 @@ namespace APA
                     if (state.Gen == m.gen && m.seq >= 0)
                     {
                         int gen = m.gen, seq = m.seq;
+                        // What the shop shows: phase, task, verdict and reason code.
+                        string shown = state.Phase + "|" + m.task_id + "|" + (m.verdict ?? "") + "|" + (m.reason ?? "");
                         view.Show(m.consumer, state.Phase, m.verdict, m.reason, animate, gen, g =>
                         {
                             // A late callback of an older generation is dropped.
-                            if (g == state.Gen) Report("rendered", g, seq, state.Phase);
+                            if (g == state.Gen) Report("rendered", g, seq, shown);
                         });
                     }
                     break;

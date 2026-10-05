@@ -21,6 +21,7 @@ h2 { margin: 0 0 8px; font-size: 15px; color: var(--accent); }
 .scene-label { font-weight: bold; margin: 6px 0 2px; }
 .scene-note { color: var(--warn); margin: 0; }
 .credit { color: var(--muted); font-size: 12px; }
+.replay-note { color: var(--warn); font-weight: bold; margin: 0 0 6px; }
 .inspector { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 0; }
 .inspector dt { color: var(--muted); }
 .inspector dd { margin: 0; overflow-wrap: anywhere; }

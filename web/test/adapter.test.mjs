@@ -27,8 +27,9 @@ function snapshot(taskId, events, purchases = [], extra = {}) {
 
 const ask = expected("ask");
 const deny = expected("deny-budget");
-const askEvents = () => [ev(1, "TASK_STARTED"), ev(2, "PURCHASE_PROPOSED"), decided(3, "Ask", ask.reason, ask.approval_status)];
-const denyEvents = () => [ev(1, "TASK_STARTED"), ev(2, "PURCHASE_PROPOSED"), decided(3, "Deny", deny.reason, deny.approval_status)];
+const PO = { purchase_order_id: "po-1" };
+const askEvents = () => [ev(1, "TASK_STARTED"), ev(2, "PURCHASE_PROPOSED", PO), decided(3, "Ask", ask.reason, ask.approval_status)];
+const denyEvents = () => [ev(1, "TASK_STARTED"), ev(2, "PURCHASE_PROPOSED", PO), decided(3, "Deny", deny.reason, deny.approval_status)];
 
 test("commits only a consistent pair, for the current generation", () => {
   const s = A.newState();
@@ -88,7 +89,7 @@ test("a reached deadline with no closing event only says so; the closing event d
   const sc = A.scene({ task: after.task, events: after.events.events });
   assert.equal(sc.phase, "waiting", "the browser never decides an expiry");
   assert.ok(sc.notes.includes("已達期限，等待後端確認"));
-  const closed = snapshot("task-a", [...askEvents(), ev(4, "APPROVAL_EXPIRED")], [{ ...p, approval_closed: "expired" }], { served_at: 1790726490 });
+  const closed = snapshot("task-a", [...askEvents(), ev(4, "APPROVAL_EXPIRED", PO)], [{ ...p, approval_closed: "expired" }], { served_at: 1790726490 });
   assert.equal(A.scene({ task: closed.task, events: closed.events.events }).phase, "expired");
   assert.equal(expected("approval-deadline-exact").approval_status, "expired");
 });
@@ -100,7 +101,7 @@ test("cancel and CLI timeout after a Deny keep the Deny and its reason", () => {
     assert.equal(sc.phase, "denied");
     assert.equal(sc.reason, deny.reason);
   }
-  const w = snapshot("task-a", [...askEvents(), ev(4, "APPROVAL_WITHDRAWN"), ev(5, "TASK_CANCELLED", { code: "HOST_CANCELLED" })]);
+  const w = snapshot("task-a", [...askEvents(), ev(4, "APPROVAL_WITHDRAWN", PO), ev(5, "TASK_CANCELLED", { code: "HOST_CANCELLED" })]);
   assert.equal(A.scene({ task: w.task, events: w.events.events }).phase, "withdrawn");
   assert.equal(expected("cancel-pending").approval_status, "withdrawn");
 });
@@ -139,4 +140,42 @@ test("amount keeps the integer string", () => {
   assert.equal(A.amount("500000"), "500000");
   assert.equal(A.amount("0.5"), A.UNKNOWN);
   assert.equal(A.amount(500000), A.UNKNOWN);
+});
+
+// R1: purchase events are tied to their own purchase. The two histories
+// below were written through the real Store (internal/store/
+// display_history_test.go): purchase 1 Ask then expired, purchase 2 Ask, in
+// both orders. Purchase 2 is still waiting in both.
+const histories = JSON.parse(readFileSync(new URL("../../testdata/demo/display-histories.json", import.meta.url)));
+const fromStore = (name) => ({ task: histories[name].task, events: histories[name].events.events });
+
+test("R1: an older purchase's expiry does not move the newer Ask (Store-built, both orders)", () => {
+  for (const name of ["expired_then_ask", "ask_ask_then_expire"]) {
+    const snap = fromStore(name);
+    assert.equal(snap.task.status, "awaiting_approval", name);
+    const sc = A.scene(snap);
+    assert.equal(sc.phase, "waiting", name + ": the shown purchase is still an open Ask");
+    assert.equal(sc.po, "po-task-a-2", name);
+    assert.equal(sc.verdict, "Ask", name);
+    assert.equal(sc.reason, ask.reason, name);
+    const s = A.newState();
+    const gen = A.reset(s, "consumer-a", "task-a");
+    assert.equal(A.commit(s, gen, histories[name].task, histories[name].events), "ok");
+    const m = A.projection(s, false);
+    assert.deepEqual([m.phase, m.verdict, m.reason], ["waiting", "Ask", ask.reason], name + ": the projection is the shown purchase's");
+    assert.equal(A.inspector(snap).filter(([k]) => k === "— 請購").length, 2, "the Inspector still lists both purchases");
+  }
+});
+
+test("R1: the shown purchase's own closing decides; unknown links never close anything", () => {
+  const base = fromStore("expired_then_ask");
+  const last = base.events[base.events.length - 1].sequence;
+  const withEvent = (e) => ({ task: base.task, events: [...base.events, e] });
+  assert.equal(A.scene(withEvent(ev(last + 1, "APPROVAL_EXPIRED", { purchase_order_id: "po-task-a-2" }))).phase, "expired");
+  assert.equal(A.scene(withEvent(ev(last + 1, "APPROVAL_WITHDRAWN", { purchase_order_id: "po-task-a-2" }))).phase, "withdrawn");
+  assert.equal(A.scene(withEvent(ev(last + 1, "APPROVAL_EXPIRED"))).phase, "waiting", "a closing without a purchase id is ignored");
+  assert.equal(A.scene(withEvent(ev(last + 1, "APPROVAL_EXPIRED", { purchase_order_id: "po-unknown" }))).phase, "waiting", "a closing of another purchase is ignored");
+  const orphan = { task: base.task, events: [ev(1, "TASK_STARTED"), decided(2, "Allow", "x", "not_requested")] };
+  orphan.events[1].purchase_order_id = undefined;
+  assert.equal(A.scene(orphan).phase, "unknown", "a decision with no purchase is not guessed into a purchase");
 });

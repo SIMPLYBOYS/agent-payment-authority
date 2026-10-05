@@ -1,0 +1,322 @@
+{
+  "ask_ask_then_expire": {
+    "note": "written through the Store by internal/store/display_history_test.go",
+    "task": {
+      "task_id": "task-a",
+      "consumer_id": "consumer-a",
+      "agent_id": "agent-a",
+      "wallet_id": "wallet-a",
+      "payer": "0x1111111111111111111111111111111111111111",
+      "wallet_evidence_mode": "fixture",
+      "status": "awaiting_approval",
+      "as_of_sequence": 6,
+      "as_of_observed_at": 1790726481,
+      "served_at": 1790726481,
+      "purchases": [
+        {
+          "purchase_order_id": "po-a-1",
+          "request_id": "request-1",
+          "http_method": "GET",
+          "resource_url": "http://127.0.0.1:8402/resources/kr-market?edition=1",
+          "chain_id": "84532",
+          "asset_contract": "0x4444444444444444444444444444444444444444",
+          "asset_id": "fixture-usdc",
+          "pay_to": "0x3333333333333333333333333333333333333333",
+          "amount": "500000",
+          "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+          "payment_requirement_hash": "sha256:489288a7b372fc16f288f7473896e42dd032d473ca4efc52fbe4e2a9d9324c8d",
+          "decision": {
+            "version": "apa.m1.v2",
+            "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+            "policy_verdict": "Ask",
+            "approval_status": "pending",
+            "payment_status": "unavailable",
+            "reason": "HUMAN_APPROVAL_REQUIRED"
+          },
+          "decided_at": 1790726450,
+          "deadline_at": 1790726480,
+          "approval_closed": "expired",
+          "closed_at": 1790726481
+        },
+        {
+          "purchase_order_id": "po-task-a-2",
+          "request_id": "request-2",
+          "http_method": "GET",
+          "resource_url": "http://127.0.0.1:8402/resources/kr-market?edition=1",
+          "chain_id": "84532",
+          "asset_contract": "0x4444444444444444444444444444444444444444",
+          "asset_id": "fixture-usdc",
+          "pay_to": "0x3333333333333333333333333333333333333333",
+          "amount": "500000",
+          "intent_hash": "sha256:b35e480415c6246cea09d1aef7b204557a119381be60d662d07eb518fc8ee8a0",
+          "payment_requirement_hash": "sha256:489288a7b372fc16f288f7473896e42dd032d473ca4efc52fbe4e2a9d9324c8d",
+          "decision": {
+            "version": "apa.m1.v2",
+            "intent_hash": "sha256:b35e480415c6246cea09d1aef7b204557a119381be60d662d07eb518fc8ee8a0",
+            "policy_verdict": "Ask",
+            "approval_status": "pending",
+            "payment_status": "unavailable",
+            "reason": "HUMAN_APPROVAL_REQUIRED"
+          },
+          "decided_at": 1790726470,
+          "deadline_at": 1790726500
+        }
+      ],
+      "payment_capability": "unavailable"
+    },
+    "events": {
+      "task_id": "task-a",
+      "as_of_sequence": 6,
+      "events": [
+        {
+          "event_id": "evt-39937f395ada6bb8d397d47606f27f13",
+          "event_type": "TASK_STARTED",
+          "sequence": 1,
+          "prev_event_hash": "sha256:1c780be64573e68aa0493ba80eb9ce67d4ab8b5f383cd3501457396261eab1eb",
+          "evidence_mode": "fixture",
+          "source": "host",
+          "observed_at": 1790726450
+        },
+        {
+          "event_id": "evt-864bcc7b8ad877efb49b739f3eb0df4c",
+          "event_type": "PURCHASE_PROPOSED",
+          "sequence": 2,
+          "prev_event_hash": "sha256:87343dd44b065ce874bcb5641bc2decd9bd39c21a3471a97c6cc0adae8bf6c0f",
+          "purchase_order_id": "po-a-1",
+          "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+          "evidence_mode": "fixture",
+          "source": "host",
+          "observed_at": 1790726450
+        },
+        {
+          "event_id": "evt-194fba6bedef2d1a38e68c9542435363",
+          "event_type": "POLICY_DECIDED",
+          "sequence": 3,
+          "prev_event_hash": "sha256:d64d281e93611bb062b7c527c30345530078915640778e3cd661152a10bfa6ea",
+          "purchase_order_id": "po-a-1",
+          "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+          "decision": {
+            "version": "apa.m1.v2",
+            "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+            "policy_verdict": "Ask",
+            "approval_status": "pending",
+            "payment_status": "unavailable",
+            "reason": "HUMAN_APPROVAL_REQUIRED"
+          },
+          "evidence_mode": "fixture",
+          "source": "host",
+          "observed_at": 1790726450
+        },
+        {
+          "event_id": "evt-0e933c9d64ef380edf47eed0823f5fc8",
+          "event_type": "PURCHASE_PROPOSED",
+          "sequence": 4,
+          "prev_event_hash": "sha256:8d7bea7128f4019c4b4bf47ded60bebe3f07cbe1cf69fbb1049f3ef88b76c0cc",
+          "purchase_order_id": "po-task-a-2",
+          "intent_hash": "sha256:b35e480415c6246cea09d1aef7b204557a119381be60d662d07eb518fc8ee8a0",
+          "evidence_mode": "fixture",
+          "source": "host",
+          "observed_at": 1790726470
+        },
+        {
+          "event_id": "evt-967d19b124b071272d4773ff6d24491f",
+          "event_type": "POLICY_DECIDED",
+          "sequence": 5,
+          "prev_event_hash": "sha256:2209e5f9b9c250a6ff20ed7aa136fb92be4e8567f89197ed702a8b571ad8700c",
+          "purchase_order_id": "po-task-a-2",
+          "intent_hash": "sha256:b35e480415c6246cea09d1aef7b204557a119381be60d662d07eb518fc8ee8a0",
+          "decision": {
+            "version": "apa.m1.v2",
+            "intent_hash": "sha256:b35e480415c6246cea09d1aef7b204557a119381be60d662d07eb518fc8ee8a0",
+            "policy_verdict": "Ask",
+            "approval_status": "pending",
+            "payment_status": "unavailable",
+            "reason": "HUMAN_APPROVAL_REQUIRED"
+          },
+          "evidence_mode": "fixture",
+          "source": "host",
+          "observed_at": 1790726470
+        },
+        {
+          "event_id": "evt-83233d90c6adbbc4e7db308d571b8d9b",
+          "event_type": "APPROVAL_EXPIRED",
+          "sequence": 6,
+          "prev_event_hash": "sha256:299d00dc440f362057560fc1970a9037814a04223360c09a72cbd1f9a0754108",
+          "purchase_order_id": "po-a-1",
+          "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+          "decision": {
+            "version": "apa.m1.v2",
+            "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+            "policy_verdict": "Ask",
+            "approval_status": "expired",
+            "payment_status": "unavailable",
+            "reason": "APPROVAL_TIMEOUT"
+          },
+          "evidence_mode": "fixture",
+          "source": "host",
+          "observed_at": 1790726481
+        }
+      ]
+    }
+  },
+  "expired_then_ask": {
+    "note": "written through the Store by internal/store/display_history_test.go",
+    "task": {
+      "task_id": "task-a",
+      "consumer_id": "consumer-a",
+      "agent_id": "agent-a",
+      "wallet_id": "wallet-a",
+      "payer": "0x1111111111111111111111111111111111111111",
+      "wallet_evidence_mode": "fixture",
+      "status": "awaiting_approval",
+      "as_of_sequence": 6,
+      "as_of_observed_at": 1790726481,
+      "served_at": 1790726481,
+      "purchases": [
+        {
+          "purchase_order_id": "po-a-1",
+          "request_id": "request-1",
+          "http_method": "GET",
+          "resource_url": "http://127.0.0.1:8402/resources/kr-market?edition=1",
+          "chain_id": "84532",
+          "asset_contract": "0x4444444444444444444444444444444444444444",
+          "asset_id": "fixture-usdc",
+          "pay_to": "0x3333333333333333333333333333333333333333",
+          "amount": "500000",
+          "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+          "payment_requirement_hash": "sha256:489288a7b372fc16f288f7473896e42dd032d473ca4efc52fbe4e2a9d9324c8d",
+          "decision": {
+            "version": "apa.m1.v2",
+            "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+            "policy_verdict": "Ask",
+            "approval_status": "pending",
+            "payment_status": "unavailable",
+            "reason": "HUMAN_APPROVAL_REQUIRED"
+          },
+          "decided_at": 1790726450,
+          "deadline_at": 1790726480,
+          "approval_closed": "expired",
+          "closed_at": 1790726481
+        },
+        {
+          "purchase_order_id": "po-task-a-2",
+          "request_id": "request-2",
+          "http_method": "GET",
+          "resource_url": "http://127.0.0.1:8402/resources/kr-market?edition=1",
+          "chain_id": "84532",
+          "asset_contract": "0x4444444444444444444444444444444444444444",
+          "asset_id": "fixture-usdc",
+          "pay_to": "0x3333333333333333333333333333333333333333",
+          "amount": "500000",
+          "intent_hash": "sha256:b35e480415c6246cea09d1aef7b204557a119381be60d662d07eb518fc8ee8a0",
+          "payment_requirement_hash": "sha256:489288a7b372fc16f288f7473896e42dd032d473ca4efc52fbe4e2a9d9324c8d",
+          "decision": {
+            "version": "apa.m1.v2",
+            "intent_hash": "sha256:b35e480415c6246cea09d1aef7b204557a119381be60d662d07eb518fc8ee8a0",
+            "policy_verdict": "Ask",
+            "approval_status": "pending",
+            "payment_status": "unavailable",
+            "reason": "HUMAN_APPROVAL_REQUIRED"
+          },
+          "decided_at": 1790726481,
+          "deadline_at": 1790726511
+        }
+      ],
+      "payment_capability": "unavailable"
+    },
+    "events": {
+      "task_id": "task-a",
+      "as_of_sequence": 6,
+      "events": [
+        {
+          "event_id": "evt-39937f395ada6bb8d397d47606f27f13",
+          "event_type": "TASK_STARTED",
+          "sequence": 1,
+          "prev_event_hash": "sha256:1c780be64573e68aa0493ba80eb9ce67d4ab8b5f383cd3501457396261eab1eb",
+          "evidence_mode": "fixture",
+          "source": "host",
+          "observed_at": 1790726450
+        },
+        {
+          "event_id": "evt-864bcc7b8ad877efb49b739f3eb0df4c",
+          "event_type": "PURCHASE_PROPOSED",
+          "sequence": 2,
+          "prev_event_hash": "sha256:87343dd44b065ce874bcb5641bc2decd9bd39c21a3471a97c6cc0adae8bf6c0f",
+          "purchase_order_id": "po-a-1",
+          "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+          "evidence_mode": "fixture",
+          "source": "host",
+          "observed_at": 1790726450
+        },
+        {
+          "event_id": "evt-194fba6bedef2d1a38e68c9542435363",
+          "event_type": "POLICY_DECIDED",
+          "sequence": 3,
+          "prev_event_hash": "sha256:d64d281e93611bb062b7c527c30345530078915640778e3cd661152a10bfa6ea",
+          "purchase_order_id": "po-a-1",
+          "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+          "decision": {
+            "version": "apa.m1.v2",
+            "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+            "policy_verdict": "Ask",
+            "approval_status": "pending",
+            "payment_status": "unavailable",
+            "reason": "HUMAN_APPROVAL_REQUIRED"
+          },
+          "evidence_mode": "fixture",
+          "source": "host",
+          "observed_at": 1790726450
+        },
+        {
+          "event_id": "evt-0e933c9d64ef380edf47eed0823f5fc8",
+          "event_type": "APPROVAL_EXPIRED",
+          "sequence": 4,
+          "prev_event_hash": "sha256:8d7bea7128f4019c4b4bf47ded60bebe3f07cbe1cf69fbb1049f3ef88b76c0cc",
+          "purchase_order_id": "po-a-1",
+          "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+          "decision": {
+            "version": "apa.m1.v2",
+            "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+            "policy_verdict": "Ask",
+            "approval_status": "expired",
+            "payment_status": "unavailable",
+            "reason": "APPROVAL_TIMEOUT"
+          },
+          "evidence_mode": "fixture",
+          "source": "host",
+          "observed_at": 1790726481
+        },
+        {
+          "event_id": "evt-967d19b124b071272d4773ff6d24491f",
+          "event_type": "PURCHASE_PROPOSED",
+          "sequence": 5,
+          "prev_event_hash": "sha256:528b95db6f5c87a4582f907cbea217b7cf5ed79d3aa6b97f5dd198200183699b",
+          "purchase_order_id": "po-task-a-2",
+          "intent_hash": "sha256:b35e480415c6246cea09d1aef7b204557a119381be60d662d07eb518fc8ee8a0",
+          "evidence_mode": "fixture",
+          "source": "host",
+          "observed_at": 1790726481
+        },
+        {
+          "event_id": "evt-83233d90c6adbbc4e7db308d571b8d9b",
+          "event_type": "POLICY_DECIDED",
+          "sequence": 6,
+          "prev_event_hash": "sha256:ed6ded1d66b0a73353a3a6714e09a4e75fc2cc10294e026d55bdbe94c3a134a2",
+          "purchase_order_id": "po-task-a-2",
+          "intent_hash": "sha256:b35e480415c6246cea09d1aef7b204557a119381be60d662d07eb518fc8ee8a0",
+          "decision": {
+            "version": "apa.m1.v2",
+            "intent_hash": "sha256:b35e480415c6246cea09d1aef7b204557a119381be60d662d07eb518fc8ee8a0",
+            "policy_verdict": "Ask",
+            "approval_status": "pending",
+            "payment_status": "unavailable",
+            "reason": "HUMAN_APPROVAL_REQUIRED"
+          },
+          "evidence_mode": "fixture",
+          "source": "host",
+          "observed_at": 1790726481
+        }
+      ]
+    }
+  }
+}

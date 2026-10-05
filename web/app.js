@@ -3,6 +3,17 @@
 // Authorization: Bearer, never stored, logged, put in a URL or given to
 // Unity. Every switch of viewer or task starts a new generation: old
 // requests are aborted and late replies dropped.
+//
+// Two modes. live: polling keeps the shop and the panels on the latest
+// consistent snapshot. replay: polling is stopped and the shop replays the
+// stored events (read-only); ending or stopping it starts a new generation
+// and restores the latest snapshot in full. A new replay, a switch of task
+// or viewer, or leaving the page ends a replay run; its late timers and
+// Unity reports do nothing.
+//
+// The data-* attributes on #status and #unity-status are read-only
+// observations for the browser test: counts, mode, generation, sequence,
+// phase, task, verdict and reason codes; never a token.
 
 import * as A from "./adapter.js";
 import { renderInspector, renderTimeline, renderSceneText } from "./render.js";
@@ -18,22 +29,66 @@ let timer = null;
 let inFlight = false;
 const state = A.newState();
 let shownSeq = -1;
+let mode = "live";      // live | replay
+let replayRun = 0;      // bumped to end the current replay run
+let polls = 0;          // completed polls, for the browser test
+const expanded = new Set(); // event_ids whose JSON the viewer opened (R3)
+const rendered = [];    // waiting for Unity's report of (gen, seq)
 
 const unity = new UnityHost($("unity-canvas"), (s, detail) => {
   const box = $("unity-status");
   box.dataset.state = s;
+  if (s === "rendered") {
+    // detail: what the shop says it shows, for the generation it was sent.
+    Object.assign(box.dataset, { gen: String(detail.gen), seq: String(detail.seq), phase: detail.phase, task: detail.task, verdict: detail.verdict, reason: detail.reason });
+    box.textContent = "Unity 已呈現 " + detail.task + " #" + detail.seq + " " + detail.phase + (detail.reason ? "（" + detail.reason + "）" : "");
+    for (let i = rendered.length - 1; i >= 0; i--) if (rendered[i].gen === detail.gen && rendered[i].seq === detail.seq) rendered.splice(i, 1)[0].done(true);
+    return;
+  }
   box.textContent = {
     loading: "Unity 場景載入中…",
     ready: detail === "limezu" ? "Unity 場景就緒（LimeZu 素材）" : "Unity 場景就緒（placeholder，LimeZu 待接入）",
     failed: "Unity 場景未就緒",
-    rendered: "Unity 已呈現 " + detail,
+    syncing: "Unity 同步中（等待最新快照）",
   }[s] || "Unity 場景未就緒";
 });
+
+// shopSync marks the shop as not yet showing the current generation.
+function shopSync() {
+  const box = $("unity-status");
+  if (box.dataset.state === "failed" || box.dataset.state === "loading") return;
+  box.dataset.state = "syncing";
+  box.textContent = "Unity 同步中（等待最新快照）";
+}
+
+// renderedBy waits for Unity's report of (gen, seq), at most ms.
+function renderedBy(gen, seq, ms) {
+  return new Promise((done) => {
+    const w = { gen, seq, done };
+    rendered.push(w);
+    setTimeout(() => { const i = rendered.indexOf(w); if (i >= 0) { rendered.splice(i, 1); done(false); } }, ms);
+  });
+}
 
 function setStatus(text, kind) {
   const s = $("status");
   s.textContent = text;
   s.dataset.kind = kind;
+  s.dataset.mode = mode;
+}
+
+function stopPolling() {
+  clearTimeout(timer);
+  timer = null;
+  if (abort) abort.abort();
+  abort = new AbortController();
+}
+
+function setMode(m) {
+  mode = m;
+  $("replay-note").hidden = m !== "replay";
+  $("replay-stop").hidden = m !== "replay";
+  $("status").dataset.mode = m;
 }
 
 async function call(path, gen) {
@@ -48,9 +103,10 @@ async function call(path, gen) {
 // forget drops the viewer: token, task, panels, the shop's customer.
 function forget(message) {
   token = null;
-  if (abort) abort.abort();
-  abort = new AbortController();
-  clearTimeout(timer);
+  replayRun++;
+  setMode("live");
+  stopPolling();
+  expanded.clear();
   const gen = A.reset(state);
   shownSeq = -1;
   unity.send(A.clearMessage(gen));
@@ -64,8 +120,8 @@ function forget(message) {
 
 function draw() {
   renderInspector($("inspector"), A.inspector(state.snapshot));
-  renderTimeline($("timeline"), A.timeline(state.snapshot));
-  renderSceneText($("scene-text"), A.scene(state.snapshot));
+  renderTimeline($("timeline"), A.timeline(state.snapshot), expanded);
+  if (mode === "live") renderSceneText($("scene-text"), A.scene(state.snapshot));
 }
 
 async function signIn(ev) {
@@ -103,9 +159,10 @@ async function signIn(ev) {
 
 function openTask(id) {
   if (!token || !/^[A-Za-z0-9._-]{1,64}$/.test(id)) return setStatus("task ID 格式不正確", "error");
-  if (abort) abort.abort();
-  abort = new AbortController();
-  clearTimeout(timer);
+  replayRun++;
+  setMode("live");
+  stopPolling();
+  expanded.clear();
   const consumer = state.consumer;
   const gen = A.reset(state, consumer, id);
   shownSeq = -1;
@@ -119,7 +176,7 @@ function openTask(id) {
 // MAX_REREAD times; then keeps the last good snapshot and says "updating".
 async function poll(first) {
   clearTimeout(timer);
-  if (!token || !state.taskId) return;
+  if (!token || !state.taskId || mode !== "live") return; // a replay owns the shop; it restores when it ends
   if (document.hidden || inFlight) { timer = setTimeout(() => poll(false), POLL_MS); return; }
   inFlight = true;
   const gen = state.gen;
@@ -140,8 +197,11 @@ async function poll(first) {
   } finally {
     inFlight = false;
   }
-  if (gen !== state.gen) return;
+  if (gen !== state.gen || mode !== "live") return;
+  polls++;
+  $("status").dataset.polls = String(polls);
   show(first);
+  clearTimeout(timer); // one loop only
   timer = setTimeout(() => poll(false), POLL_MS);
 }
 
@@ -169,30 +229,57 @@ function show(first) {
   }
 }
 
-// replay plays the stored events again, read-only: a new generation for the
-// shop, one step per event, nothing fetched or written for it.
+// replay plays the stored events again, read-only: polling stops, the shop
+// gets a new generation and one step per stored event, each with that step's
+// verdict and reason; the panels keep the latest snapshot and say so. Each
+// step waits for Unity's report of it (or a short limit when Unity is not
+// ready). Nothing is fetched, submitted or written for it.
 async function replay() {
-  if (!state.snapshot) return;
-  const steps = A.replay(state.snapshot);
-  const gen = A.bump(state);
+  if (!state.snapshot || !token) return;
+  const run = ++replayRun;
+  setMode("replay");
+  stopPolling();
+  inFlight = false;
   const snap = state.snapshot;
+  const gen = A.bump(state);
   unity.send(A.clearMessage(gen));
+  shopSync();
   setStatus("歷史展示回放（唯讀，不重跑 task、不改事件）", "replay");
-  for (let i = 0; i < steps.length; i++) {
-    if (gen !== state.gen) return;
+  for (let i = 0; i < snap.events.length; i++) {
+    if (run !== replayRun) return;
+    const sc = A.scene({ task: snap.task, events: snap.events.slice(0, i + 1) });
+    const seq = snap.events[i].sequence;
     unity.send({ v: A.BRIDGE_VERSION, gen, clear: false, consumer: snap.task.consumer_id, task_id: snap.task.task_id,
-      seq: snap.events[i].sequence, phase: steps[i], verdict: "", reason: "", animate: true });
-    await new Promise((r) => setTimeout(r, 1500));
+      seq, phase: sc.phase, verdict: sc.verdict, reason: sc.reason || "", animate: true });
+    renderSceneText($("scene-text"), { ...sc, label: "回放 #" + seq + "：" + sc.label });
+    await renderedBy(gen, seq, 6000);
+    await new Promise((r) => setTimeout(r, 400));
   }
-  if (gen === state.gen) poll(false); // the polling loop (stopped by the new generation) resumes
+  if (run === replayRun) restore(run);
+}
+
+// restore ends a replay: a new generation for the shop and a fresh read of
+// the latest consistent snapshot, shown without animation. A stopped or
+// superseded run does not restore.
+function restore(run) {
+  if (run !== replayRun || mode !== "replay") return;
+  replayRun++;
+  setMode("live");
+  A.bump(state);
+  shownSeq = -1;
+  unity.send(A.clearMessage(state.gen));
+  shopSync();
+  setStatus("回放結束，讀取最新快照…", "loading");
+  poll(true);
 }
 
 $("auth-form").addEventListener("submit", signIn);
 $("task-form").addEventListener("submit", (ev) => { ev.preventDefault(); const f = $("task-id"); openTask(f.value.trim()); });
 $("switch").addEventListener("click", () => forget("已清除，請輸入另一位 consumer 的 viewer token"));
 $("replay").addEventListener("click", replay);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(false); });
-window.addEventListener("pagehide", () => { clearTimeout(timer); if (abort) abort.abort(); token = null; });
+$("replay-stop").addEventListener("click", () => restore(replayRun));
+document.addEventListener("visibilitychange", () => { if (!document.hidden && mode === "live") poll(false); });
+window.addEventListener("pagehide", () => { replayRun++; clearTimeout(timer); if (abort) abort.abort(); token = null; });
 
 forget();
 unity.load();
