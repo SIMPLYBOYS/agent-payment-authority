@@ -193,8 +193,14 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	if every == 0 {
 		every = time.Second
 	}
+	health := &expiryHealth{targetEvery: every.Seconds()}
 	expiry.Go(func() {
-		st.RunExpiry(expiryCtx, every, func(err error) { fmt.Fprintln(d.out, "demo: expiry:", store.Code(err)) })
+		st.RunExpiryReporting(expiryCtx, every, func(err error) {
+			health.observe(d.clock(), err)
+			if err != nil {
+				fmt.Fprintln(d.out, "demo: expiry:", store.Code(err))
+			}
+		})
 	})
 	defer func() { stopExpiry(); expiry.Wait(); d.at("expiry_stopped") }()
 
@@ -208,7 +214,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	}
 
 	mux := newMux(shop)
-	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock}
+	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: fake != nil}
 	if root, err := os.OpenRoot(*unityDir); err == nil {
 		ui.unity = root
 		defer root.Close()

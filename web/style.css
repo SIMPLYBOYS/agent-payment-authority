@@ -35,3 +35,11 @@ h2 { margin: 0 0 8px; font-size: 15px; color: var(--accent); }
 .json-note { color: var(--warn); font-size: 12px; margin: 4px 0; }
 .empty { color: var(--muted); }
 @media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.host-panel .host-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+#creds[data-mode="file"] { color: var(--ok); }
+.readiness { border-collapse: collapse; margin: 6px 0; }
+.readiness th { text-align: left; color: var(--muted); font-weight: normal; padding: 2px 12px 2px 0; vertical-align: top; }
+.readiness td { padding: 2px 0; overflow-wrap: anywhere; }
+.readiness tr[data-state="ok"] td { color: var(--ok); }
+.readiness tr[data-state="error"] td, .readiness tr[data-state="failed"] td, .readiness tr[data-state="missing"] td { color: var(--err); }
+.readiness tr[data-state="unconfirmed"] td, .readiness tr[data-state="loading"] td { color: var(--warn); }

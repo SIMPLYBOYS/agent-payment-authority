@@ -657,6 +657,17 @@ func (s *Store) ExpireDue() error {
 // onErr. The period is a target; lock waits, scheduling and errors can make
 // expiry later.
 func (s *Store) RunExpiry(ctx context.Context, every time.Duration, onErr func(error)) {
+	s.RunExpiryReporting(ctx, every, func(err error) {
+		if err != nil && onErr != nil {
+			onErr(err)
+		}
+	})
+}
+
+// RunExpiryReporting is RunExpiry reporting every completed ExpireDue, nil
+// on success, so a host can say when expiry last ran and how. It is an
+// observation only: the same single loop, nothing else is called.
+func (s *Store) RunExpiryReporting(ctx context.Context, every time.Duration, report func(error)) {
 	tick := time.NewTicker(every)
 	defer tick.Stop()
 	for {
@@ -664,8 +675,9 @@ func (s *Store) RunExpiry(ctx context.Context, every time.Duration, onErr func(e
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			if err := s.ExpireDue(); err != nil && onErr != nil {
-				onErr(err)
+			err := s.ExpireDue()
+			if report != nil {
+				report(err)
 			}
 		}
 	}

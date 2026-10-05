@@ -96,6 +96,8 @@ type api struct {
 	addr   string // the bound address, the only Host and Origin accepted
 	clock  store.Clock
 	unity  *os.Root // the Unity Web build's Build/ directory; nil without a build
+	expiry *expiryHealth
+	fake   bool // a fake CLI passed its --version check at start
 }
 
 func (a *api) register(mux *http.ServeMux) {

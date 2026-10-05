@@ -6,14 +6,16 @@ package web
 
 import "embed"
 
-//go:embed index.html style.css app.js adapter.js render.js unity.js
+//go:embed index.html host.html style.css app.js adapter.js render.js unity.js host.js hostcreds.js
 var FS embed.FS
 
 // Assets are the files served under /ui/, by name, with their media type.
 var Assets = map[string]string{
-	"style.css":  "text/css; charset=utf-8",
-	"app.js":     "text/javascript; charset=utf-8",
-	"adapter.js": "text/javascript; charset=utf-8",
-	"render.js":  "text/javascript; charset=utf-8",
-	"unity.js":   "text/javascript; charset=utf-8",
+	"style.css":    "text/css; charset=utf-8",
+	"app.js":       "text/javascript; charset=utf-8",
+	"adapter.js":   "text/javascript; charset=utf-8",
+	"render.js":    "text/javascript; charset=utf-8",
+	"unity.js":     "text/javascript; charset=utf-8",
+	"host.js":      "text/javascript; charset=utf-8",
+	"hostcreds.js": "text/javascript; charset=utf-8",
 }

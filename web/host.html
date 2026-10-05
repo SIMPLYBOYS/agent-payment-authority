@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>APA Demo 主持人頁</title>
+<link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+<header class="top">
+  <strong class="badge">M1／fake agent／不付款</strong>
+  <span class="sub">主持人本機頁（唯讀）：模擬 Agent、fixture 資料、未付款；場次仍由啟動時的固定計畫自動執行</span>
+</header>
+
+<section class="auth host-panel" aria-label="主持人憑證與就緒">
+  <div class="host-row">
+    <label for="token-file">載入本機 token 檔（var/demo-tokens.json，只留在本頁記憶體）</label>
+    <input id="token-file" type="file" accept=".json,application/json">
+    <button type="button" id="clear-all">清除全部憑證</button>
+  </div>
+  <p id="creds" data-mode="none">尚未載入 token 檔</p>
+  <div id="consumer-pick" class="host-row" aria-label="切換 consumer"></div>
+  <table id="readiness" class="readiness" aria-label="就緒狀態"></table>
+
+  <form id="auth-form" autocomplete="off">
+    <label for="token">手動 viewer 模式：貼上一個 viewer token（會先清除已載入的 token 檔）</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false" inputmode="text">
+    <button type="submit">驗證</button>
+    <button type="button" id="switch">清除目前 viewer</button>
+  </form>
+  <p>目前 viewer：<span id="viewer">未驗證</span></p>
+  <form id="task-form" hidden autocomplete="off">
+    <span id="task-pick"></span>
+    <label for="task-id">或輸入 task ID</label>
+    <input id="task-id" spellcheck="false">
+    <button type="submit">開啟</button>
+    <button type="button" id="replay" disabled>歷史展示回放（唯讀）</button>
+    <button type="button" id="replay-stop" hidden>停止回放並恢復最新狀態</button>
+  </form>
+  <p id="status" data-kind="idle"></p>
+</section>
+
+<main class="grid">
+  <section class="shop" aria-label="商店場景">
+    <h2>商店（Unity）</h2>
+    <p id="replay-note" class="replay-note" hidden>歷史展示回放中：商店正在重演保存的事件；Inspector 與 Timeline 仍是最新快照，與商店不是同一時刻。</p>
+    <canvas id="unity-canvas" width="768" height="512"></canvas>
+    <p id="unity-status" data-state="loading">Unity 場景載入中…</p>
+    <div id="scene-text"></div>
+    <p class="credit">像素素材：LimeZu（limezu.itch.io）；素材未接入時為 placeholder</p>
+  </section>
+  <section aria-label="Inspector">
+    <h2>Inspector</h2>
+    <div id="inspector"></div>
+  </section>
+  <section aria-label="Timeline">
+    <h2>Timeline</h2>
+    <div id="timeline"></div>
+  </section>
+</main>
+<script type="module" src="/ui/host.js"></script>
+</body>
+</html>

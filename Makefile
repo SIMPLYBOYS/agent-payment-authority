@@ -1,4 +1,4 @@
-.PHONY: check check-contracts build dev demo-fake demo-integration
+.PHONY: check check-contracts build dev demo-fake demo-integration demo
 
 # Compile, vet and unit-test. Calls no paid model and touches no testnet.
 check:
@@ -12,6 +12,7 @@ check-contracts:
 	go test ./internal/contracts/... -count=1
 	node scripts/check-contract-vectors.mjs
 	node --test web/test/adapter.test.mjs  # Dashboard adapter (docs/demo-ui.md); the same Node
+	node --test web/test/hostcreds.test.mjs  # /host credentials (docs/demo-operation-design.md 6.3)
 
 build:
 	go build -o bin/demo ./cmd/demo
@@ -53,3 +54,9 @@ demo-integration:
 	go build -o bin/demo ./cmd/demo
 	go build -o bin/fake-claude ./cmd/fake-claude
 	APA_ADDR=$(or $(APA_ADDR),127.0.0.1:8402) ./bin/demo --fake-cli bin/fake-claude --plan testdata/demo/fake-plan.json
+
+# B1-06 slice 3.1: the fake demo in one command, with checks of the Unity
+# build and the LimeZu import; the host's page is http://127.0.0.1:8402/host.
+# Same fixed plan as demo-integration. See docs/demo-operation-design.md.
+demo:
+	sh scripts/demo/start.sh

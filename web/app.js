@@ -14,6 +14,10 @@
 // The data-* attributes on #status and #unity-status are read-only
 // observations for the browser test: counts, mode, generation, sequence,
 // phase, task, verdict and reason codes; never a token.
+//
+// The host's page /host (host.js) uses the same module: it hands a viewer
+// token from its loaded file to useViewer, clears with forget, and is told
+// of a 401 of the current generation through onUnauthorized.
 
 import * as A from "./adapter.js";
 import { renderInspector, renderTimeline, renderSceneText } from "./render.js";
@@ -54,6 +58,9 @@ const unity = new UnityHost($("unity-canvas"), (s, detail) => {
   box.dataset.state = s;
   box.textContent = s === "loading" ? "Unity 場景載入中…" : "Unity 場景未就緒";
 });
+
+// unityInfo: whether the shop is ready and which art it uses, for /host.
+export const unityInfo = () => ({ ready: unity.ready, art: unity.art });
 
 // shopReset drops what the shop last reported (generation, sequence, task,
 // phase, verdict, reason) and says what it waits for now: ready (no task
@@ -106,8 +113,12 @@ async function call(path, gen) {
   return res.json();
 }
 
+let unauthorized = null; // set by /host: a 401 of the current generation clears all its credentials
+
+export function onUnauthorized(fn) { unauthorized = fn; }
+
 // forget drops the viewer: token, task, panels, the shop's customer.
-function forget(message) {
+export function forget(message) {
   token = null;
   replayRun++;
   setMode("live");
@@ -136,6 +147,11 @@ async function signIn(ev) {
   const input = $("token");
   const typed = input.value.trim();
   input.value = ""; // read once, then cleared
+  return useViewer(typed);
+}
+
+// useViewer signs in as the viewer of token, typed or handed over by /host.
+export async function useViewer(typed) {
   forget("驗證中…");
   if (!typed) return setStatus("請輸入 viewer token", "idle");
   token = typed;
@@ -143,6 +159,7 @@ async function signIn(ev) {
   try {
     const res = await fetch("/api/viewer", { headers: { Authorization: "Bearer " + token }, cache: "no-store", signal: abort.signal, credentials: "omit" });
     if (gen !== state.gen) return;
+    if (res.status === 401 && unauthorized) return unauthorized();
     if (res.status === 403) return forget("此 token 不是 viewer token（主持人 token 不用於此頁）");
     if (!res.ok) return forget("token 無效或已過期（每次啟動 demo host 都會換新）");
     const v = await res.json();
@@ -199,7 +216,7 @@ async function poll(first) {
     if (result === "inconsistent") A.fail(state, gen, "updating");
   } catch (e) {
     if (gen === state.gen) {
-      if (e.code === "unauthenticated") { inFlight = false; return forget("token 已失效，請重新輸入"); }
+      if (e.code === "unauthenticated") { inFlight = false; return unauthorized ? unauthorized() : forget("token 已失效，請重新輸入"); }
       A.fail(state, gen, e.code === "not_found" ? "not_found" : "offline");
     }
   } finally {
@@ -288,7 +305,9 @@ $("switch").addEventListener("click", () => forget("已清除，請輸入另一�
 $("replay").addEventListener("click", replay);
 $("replay-stop").addEventListener("click", () => restore(replayRun));
 document.addEventListener("visibilitychange", () => { if (!document.hidden && mode === "live") poll(false); });
-window.addEventListener("pagehide", () => { replayRun++; clearTimeout(timer); if (abort) abort.abort(); token = null; });
+// Leaving the page drops the token and the panels and stops polling;
+// nothing comes back on return (a restored page asks again).
+window.addEventListener("pagehide", () => forget());
 
 forget();
 unity.load();

@@ -6,8 +6,9 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/web"
 )
 
-// The Dashboard (docs/demo-ui.md): the page at /, its listed assets under
-// /ui/, and GET /api/viewer. Nothing else is served from disk: the files
+// The Dashboard (docs/demo-ui.md): the viewer page at /, the host's local
+// page at /host (docs/demo-operation-design.md section 6.3), their listed
+// assets under /ui/, GET /api/viewer and GET /api/host/status. Nothing else is served from disk: the files
 // are embedded, so no request can reach the repository, var/, the
 // database, the token file or a trace.
 
@@ -24,7 +25,9 @@ func pageHeaders(h http.Header, contentType string) {
 }
 
 func (a *api) registerUI(mux *http.ServeMux) {
-	mux.HandleFunc("GET /{$}", a.page)
+	mux.HandleFunc("GET /{$}", a.page("index.html"))
+	mux.HandleFunc("GET /host", a.page("host.html"))
+	mux.HandleFunc("GET /api/host/status", a.hostStatus)
 	mux.HandleFunc("GET /ui/{name}", a.asset)
 	mux.HandleFunc("GET /unity/{name}", a.unityFile)
 	mux.HandleFunc("GET /api/viewer", a.viewer)
@@ -76,17 +79,19 @@ func (a *api) hostOK(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-func (a *api) page(w http.ResponseWriter, r *http.Request) {
-	if !a.hostOK(w, r) {
-		return
+func (a *api) page(name string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !a.hostOK(w, r) {
+			return
+		}
+		body, err := web.FS.ReadFile(name)
+		if err != nil {
+			fail(w, http.StatusInternalServerError, "page_unavailable")
+			return
+		}
+		pageHeaders(w.Header(), "text/html; charset=utf-8")
+		w.Write(body)
 	}
-	body, err := web.FS.ReadFile("index.html")
-	if err != nil {
-		fail(w, http.StatusInternalServerError, "page_unavailable")
-		return
-	}
-	pageHeaders(w.Header(), "text/html; charset=utf-8")
-	w.Write(body)
 }
 
 func (a *api) asset(w http.ResponseWriter, r *http.Request) {
