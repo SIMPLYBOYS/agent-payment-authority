@@ -1,6 +1,8 @@
 # B1-06 交付點 2：Unity＋LimeZu 商店與 Dashboard
 
-狀態（2026-10-05）：Claude Code 實作，待 Codex 獨立 review。依據 vault 筆記 `Claude-Code-B1-06-交付點2-Dashboard與商店實作指示-20261005`（新版：商店固定為 Unity＋LimeZu，獨立於 pixel-office），開工基準 `837f667`，分支 `b1-06-demo-integration`（未合併 main）。
+狀態（2026-10-05）：**交付點 2 修正（R1～R3）完成於 `eda6469`，Claude Code 執行，待 Codex 獨立 review**（第 9 節）。依據 vault 筆記 `Claude-Code-B1-06-交付點2修正指示-21db978-20261005`，修正基準 `21db978`。Codex 對 `21db978` 的限定 review 判定交付點 2 暫不通過，B1-04／B1-06 仍 InProgress。
+
+原交付：Claude Code 實作，依據 vault 筆記 `Claude-Code-B1-06-交付點2-Dashboard與商店實作指示-20261005`（新版：商店固定為 Unity＋LimeZu，獨立於 pixel-office），開工基準 `837f667`，分支 `b1-06-demo-integration`（未合併 main）。第 7 節是當時的紀錄。
 
 **這一輪完成的是 fake UI 資料鏈**：本機商店 HTTP 402 → fake Buyer → Store → 已認證 HTTP → JavaScript adapter 的同一份投影 → Unity 商店與網頁 Inspector／Timeline。真實模型請購、付款與整體 M1 都沒有被證明；B1-06 的完整完成仍需至少一次核准的真實 CLI trace。
 
@@ -23,10 +25,19 @@
 | `POLICY_DECIDED` Ask | 在櫃檯等待人工核准（M1 無法核准） |
 | `POLICY_DECIDED` Deny | 離店 |
 | `POLICY_DECIDED` Allow | 櫃檯，標示「M1 無付款能力」 |
-| `APPROVAL_EXPIRED`／`APPROVAL_WITHDRAWN` | Ask 已到期（後端已記錄）／已撤回，離店 |
+| `APPROVAL_EXPIRED`／`APPROVAL_WITHDRAWN` | **場景顯示的那筆請購**的 Ask 已到期（後端已記錄）／已撤回，離店 |
 | `TASK_CANCELLED`／`TASK_TIMED_OUT` | 只加註；Deny 之後發生時不改變原 Deny 與原因 |
 
 不會出現付款成功、成功取貨或鏈上完成。
+
+**場景顯示哪一筆請購**（`web/adapter.js` 的 `scene()`，修正 R1）：
+
+- `PURCHASE_PROPOSED`、`POLICY_DECIDED`、`APPROVAL_EXPIRED`、`APPROVAL_WITHDRAWN` 以 `purchase_order_id` 歸到各自的請購，沒有整個 task 共用的收尾旗標。
+- 場景顯示**事件序號最大的 `POLICY_DECIDED` 所屬的請購**；還沒有任何裁決時，顯示最新提出的請購。
+- 場景的 verdict、reason、approval 收尾與期限判斷都取自這一筆。舊請購的到期或撤回不改變它。
+- 沒有 `purchase_order_id`、或對不上任何請購的收尾事件，一律不採用；沒有對應提出事件的裁決顯示 unknown。不會自行拼出到期或成功。
+- Deny 後的取消／CLI 逾時仍只加註，不覆蓋 Deny 原因。
+- Inspector 照舊列出每筆請購與 task 狀態；task 有多筆請購時，場景文字註明「此 task 有 N 筆請購；場景顯示最近裁決的 po」。
 
 ## 2 Unity 環境與 LimeZu 素材
 
@@ -34,6 +45,7 @@
 - **套件**：`Packages/manifest.json` 只用 editor 內建的套件：`com.unity.2d.sprite` 1.0.0、`com.unity.test-framework` 1.7.0，以及 imageconversion、imgui、jsonserialize 模組。沒有從網路下載套件。
 - **LimeZu 來源**：Aaron 10/5 指定的素材包位置 `…/pixel-office/limezu`，使用其中的 **Modern_Interiors_v41.4**。
   - 只複製檔案，不引用 pixel-office 的程式、場景或 Library；本專案也不依賴那個目錄的其他內容。
+  - 紀錄：派工筆記原本要求不依賴 pixel-office。10/5 Claude Code 在交付點 2 實作中詢問素材位置，Aaron 回答 `/Users/mac/Documents/OpenSourceProjects/pixel-office/limezu`（Claude Code 對話紀錄 `b6b47224-92d2-4202-a040-e6fd70ed9470`）。這記為原禁止事項的例外，範圍只是一次性把清單內的檔案複製到本專案，執行時不依賴該目錄。這個指定只說明素材從哪裡來，不證明授權範圍，也不構成發布核准。
 - **授權**（`Modern_Interiors_v41.4/LICENSE.txt`）：
   - 可：編輯並用於商業或非商業專案；
   - 不可：轉售或散布素材；
@@ -105,6 +117,20 @@
 - 期限已過但收尾事件尚未提交時，只顯示「已達期限，等待後端確認」，以 Store 的 `served_at` 判斷，不用瀏覽器時鐘。
 - Ask 原裁決與 approval 收尾分開顯示；Deny 之後的取消或 CLI 逾時不覆蓋原 Deny 原因。fake 宣稱已付款的文字不是事件，不會出現在畫面上。
 - token 只在 `app.js` 的記憶體，請求只用 `Authorization: Bearer`。不放 URL、cookie、localStorage、sessionStorage、console、Unity 或截圖。輸入欄位有遮罩，讀取後清空；重新整理後要重新輸入。
+- **兩種模式**（修正 R2）：
+  - **live**：輪詢讓商店與兩個面板維持最新一致快照。只有一個輪詢迴圈：每次排程前先清掉舊 timer。
+  - **replay**（歷史展示回放）：
+    - 進入時停止輪詢 timer、中止進行中的讀取，並開新的頁面世代。
+    - 回放期間輪詢、`visibilitychange` 與舊回應都不改寫畫面。狀態列保持「歷史展示回放」，商店上方註明 Inspector 與 Timeline 仍是最新快照，與商店不是同一時刻。
+    - 每一步用該事件前綴算出的 phase、verdict 與 reason；等 Unity 回報這一步已呈現（最多 6 秒）再走下一步。
+  - **恢復**：回放結束或按「停止回放並恢復最新狀態」時：
+    - 再開一個新世代，先清空商店；
+    - 重新讀取一致的最新 task／events；
+    - 不帶動畫送出完整快照。即使序號與回放最後一步相同，Unity 也會因世代較新而接受，不放寬舊序號規則。
+  - 新回放、切換 task 或 consumer、`pagehide` 都會讓目前的回放失效；晚到的 timer 與 Unity 回呼不做任何事。恢復中的商店顯示「Unity 同步中」，讀取失敗沿用「離線／更新失敗」，不拿舊的 Unity 回報當成功。
+  - 回放唯讀：不送出請購、不重啟 task、不改時間、不寫事件。
+- **展開的 JSON**（修正 R3）：以 `event_id` 記住使用者展開的事件。重繪（輪詢、新事件、暫時讀取失敗）時保留展開與收合；手動收合的不會被自動展開。切換 consumer 或 task 時清除。
+- Unity 的 `rendered` 回報帶 `phase|task|verdict|reason`。頁面把它寫在 `#unity-status` 的 `data-*` 屬性上，只供觀測，不含 token，也不是業務控制入口。
 
 ## 5 操作
 
@@ -140,16 +166,17 @@ UI 上的選擇不構成授權，伺服器仍依 token 與 task 已保存的歸�
 
 - **首次載入**：fake run 在服務就緒後就跑完了，頁面顯示**保存的快照**，不演動畫，不假裝剛發生。
 - **重新整理**：token 消失，需要重新驗證；之後從 Store 還原同一份狀態。
-- **歷史展示回放（唯讀）**：用新的頁面世代，依保存的事件逐步重演商店畫面。不重跑 task、不改事件或時間、不寫任何資料（瀏覽器測試會比對前後的事件序號）。
+- **歷史展示回放（唯讀）**：用新的頁面世代，依保存的事件逐步重演商店畫面；回放期間停止輪詢，Inspector／Timeline 保留最新快照並標示與商店不同時刻。結束或按「停止回放並恢復最新狀態」後，重新讀取並完整恢復最新狀態（第 4 節）。不重跑 task、不改事件或時間、不寫任何資料（瀏覽器測試會比對前後的事件內容與序號）。
 - **新 task**：重新展示不需要刪除資料。重啟服務時，已保存的 task 不會重跑；要新的 run，請在計畫裡改用 `task-a-next`（同 consumer、同錢包），或設定新的 `APA_DB_PATH`。不要把刪除資料庫當成預設的重跑步驟。
 
 ## 6 測試
 
 | 層 | 命令 | 涵蓋 |
 |---|---|---|
-| JS adapter | `node --test web/test/adapter.test.mjs`（也在 `make check-contracts`） | 一致性、舊世代、舊快照、去重、Ask／Deny／Allow、期限未提交、取消／逾時保留 Deny、惡意字串、投影欄位；預期值取自 `cases.json` |
+| JS adapter | `node --test web/test/adapter.test.mjs`（也在 `make check-contracts`） | 一致性、舊世代、舊快照、去重、Ask／Deny／Allow、期限未提交、取消／逾時保留 Deny、惡意字串、投影欄位；預期值取自 `cases.json`。R1：Store 建立的兩種多請購歷史、只有自己的到期／撤回才離店、不明關聯不收尾（11 項） |
+| Store 歷史 | `go test ./internal/store -run TestDisplayHistories` | 用正式 Store 寫出「請購 1 到期後請購 2 Ask」與「兩筆 Ask 後請購 1 到期」，存成 `testdata/demo/display-histories.json`（API 回應的形狀），adapter 測試讀它；`-update-histories` 重產。`TestSeedDisplayDB` 只在設定 `APA_SEED_DB` 時寫入瀏覽器測試用的資料庫 |
 | Unity EditMode | `sh scripts/unity/unity.sh test OUT` | `ProjectionState`：去重與單次動畫、首次載入、舊世代／舊序號、世代清空、單 task、不合法輸入 |
-| Unity PlayMode | 同上 | 真場景經由 Bridge：Ask 走到櫃檯且重複不重播、Deny 離場、切換世代清空、舊世代回呼與訊息丟棄、LimeZu／placeholder 標示 |
+| Unity PlayMode | 同上 | 真場景經由 Bridge：Ask 走到櫃檯且重複不重播、Deny 離場、切換世代清空、舊世代回呼與訊息丟棄、LimeZu／placeholder 標示；`rendered` 回報帶 task、verdict 與 reason |
 | HTTP | `go test ./cmd/demo -run TestDashboard` | 頁面與資產、CSP／Host、只提供列名檔案（DB、token、repo、建置目錄其他檔、外連 symlink 都拒絕）、`/api/viewer`（host 403、MCP 401、無 token 401、Host／Origin、token 放 URL 無效）、載入頁面不寫事件、沒有建置時 404 |
 | 實際瀏覽器 | `node scripts/verify/browser-ui.mjs` | 本機 Chrome（headless、拋棄式 profile、SwiftShader），經 DevTools protocol 操作，不用套件、不錄 HAR／trace；完整清單見第 7 節 |
 
@@ -189,7 +216,80 @@ UI 上的選擇不構成授權，伺服器仍依 token 與 task 已保存的歸�
 
 - 本輪場景是一間店、固定路點；沒有尋路、多場景或遊戲經濟。Unity 內的文字只用 ASCII（內建字型沒有中文），中文說明在 Dashboard。
 - 金額只顯示基本單位整數字串（API 沒有資產精度），不做小數換算。
-- 到期、取消、逾時與 Allow 的畫面，只在 adapter／Unity 單元層與後端整合測試驗證；瀏覽器沒有實際觸發這些狀態。
+- 取消、CLI 逾時與 Allow 的畫面，只在 adapter／Unity 單元層與後端整合測試驗證；瀏覽器沒有實際觸發這些狀態。Ask 到期與多請購狀態自 `eda6469` 起由瀏覽器實際驗證（第 9 節）。
 - 瀏覽器測試使用本機 Chrome 的 SwiftShader 繪圖；沒有在其他瀏覽器驗證。
 - Web 建置與 LimeZu 素材不發布；建置輸出能否公開，待 Aaron 確認授權範圍。
 - `84cdf5c` 的四線突變 runner 仍是獨立、未 review 的待辦，與本輪 UI 驗證無關。
+
+## 9 修正 R1～R3（Claude Code 執行，待 Codex 獨立 review；程式 `eda6469`）
+
+依據：vault 筆記 `Claude-Code-B1-06-交付點2修正指示-21db978-20261005`。Codex 對 `21db978` 的限定 review 重現了三個問題：
+
+- **R1**：舊請購的到期蓋過新請購的 Ask。
+- **R2**：回放時輪詢仍在跑；回放結束後 Unity 沒有恢復，Deny 的原因可能遺失。
+- **R3**：輪詢重繪時，展開的 JSON 被收起。
+
+規則見第 1 節（場景顯示哪一筆請購）與第 4 節（兩種模式、展開的 JSON）。
+
+| 項 | 修改位置 | 測試 | 結果 |
+|---|---|---|---|
+| R1 | `web/adapter.js` `scene()`、`projection()` | adapter 測試 10：以正式 Store 寫出的兩種歷史（請購 1 到期後請購 2 Ask；兩筆 Ask 後請購 1 到期），兩者都應 waiting／Ask，投影一致，Inspector 列出 2 筆。adapter 測試 11：只有自己的到期／撤回才離店、不明關聯不收尾、孤立裁決 unknown。測試 5、6：Deny 後取消／逾時保留原因。瀏覽器：種子資料庫 task-a 有兩筆請購（一筆到期、一筆 pending）→ Dashboard waiting、Unity 回報 `task-a #6 waiting Ask` | PASS |
+| R2 | `web/app.js`（`poll`、`replay`、`restore`、`forget`、`openTask`、事件處理）、`web/unity.js`、`ShopBridge.cs`、`index.html`、`style.css` | 瀏覽器：在一次輪詢完成後立刻回放，12 次取樣都沒有變回「已同步」；回放期間後端新增到期事件（3→4），恢復後 Unity 在比回放更新的世代回報 `task-a #4 expired Ask HUMAN_APPROVAL_REQUIRED`，Dashboard 同步；Deny 回放恢復為 `task-b #3 denied Deny INSUFFICIENT_BUDGET`，事件 JSON 前後相同；回放中切換 viewer 後 4 秒內 Unity 世代不變；連續兩次回放仍正確恢復；頁面隱藏再顯示後 5 秒內 3～7 次輪詢（只有一個迴圈）。PlayMode：`rendered` 回報帶 task、verdict、reason | PASS |
+| R3 | `web/render.js` `renderTimeline()`、`web/app.js` | 瀏覽器（斷言實際可見）：展開 #2 後經兩次已完成的輪詢仍可見；新事件 #4 加入後仍可見；手動收合後不會被自動展開；開啟另一個 task 後全部清除 | PASS |
+
+**反向驗證**（每次放回一個舊行為，確認測試以斷言失敗，不是編譯失敗；證據在 `artifacts/b1-06/reversal-eda646904e66/`，包含 diff 與輸出）：
+
+- R1：用 `21db978` 的 `adapter.js` 跑新測試，測試 10、11 失敗（expected waiting，actual expired）。
+- R3：展開狀態不保留，3 項 FAIL。
+- R2 恢復：不開新世代、`shownSeq` 不重設，2 項 FAIL（Ask 與 Deny 的恢復）。
+- R2 輪詢：
+  - 只拿掉輪詢裡的 mode 判斷時，仍 55 PASS。原因是 `replay()` 的 `stopPolling()` 與新世代是另一層保護。
+  - 同時拿掉 `stopPolling()`（即 `21db978` 的 timer 繼續跑）後，「回放中被改回已同步」FAIL。
+
+**命令與結果**（全部在 `eda6469`）：
+
+| 命令 | exit | 時間 | 證據 |
+|---|---|---|---|
+| `node --test web/test/adapter.test.mjs`（11／11） | 0 | 1 秒 | `artifacts/b1-06/checks-eda646904e66-20261005T032955Z/` |
+| `go test -race -count=1 -v ./cmd/demo ./internal/store` | 0 | 81 秒 | 同上 |
+| `sh scripts/unity/unity.sh test OUT`（EditMode 6／6、PlayMode 3／3） | 0 | 12＋10＋22 秒 | `artifacts/b1-06/unity-eda646904e66-20261005T032644Z/` |
+| `sh scripts/unity/unity.sh webgl OUT` | 0 | 20 秒 | 同上；`webgl-build.txt` 記錄 commit、editor 與四個建置檔的 sha256，瀏覽器測試載入的就是這份建置 |
+| `node scripts/verify/browser-ui.mjs`（55 PASS） | 0 | 90 秒 | `artifacts/b1-06/ui-eda646904e66-20261005T032813Z/` |
+| `sh scripts/verify/container-verify.sh eda6469…`（Go／JS＋fake 回歸，Unity 不在映像內） | 第一次 1；重跑 0 | 1070 秒；925 秒 | 第一次 `artifacts/verify-container/runs/eda646904e66-20261005T033127Z/`（`artifacts/b1-06/container-eda6469.log`）；重跑 `artifacts/verify-container/runs/eda646904e66-20261005T035016Z/`（`artifacts/b1-06/container-eda6469-rerun.log`） |
+
+Web 建置的 C# 與先前一次建置相同，所以 wasm 沒有重新產生，只有 `WebGL.data` 更新。
+
+容器（Claude Code 執行，待 Codex 獨立 review）：
+
+- **第一次失敗（保留）**：overall exit 1。七步中只有 `verify-b1-01` exit 1，其餘六步 exit 0，突變 222／222。
+  - 失敗都是逾時：`TestApprovedVersionInit`（fake CLI 版本檢查與 init）、`TestIntegrationEndsRestartAndReplay`（HTTP 用戶端逾時）、`TestRunnerOutcomes/not-logged-in`。
+  - 該步開始於 03:39:38Z，正好與 Claude Code 在主機上同時跑的四次反向驗證瀏覽器測試（Chrome＋SwiftShader＋Go 編譯，約 03:35–03:46Z）重疊。
+  - 同一份 `make check` 在同一輪較早的 `check` 步驟 exit 0。
+  - 判斷：主機負載造成的時序失敗，與既有的「時序測試偶發失敗」非阻擋待辦同類，不是本輪程式造成。這只是推論，沒有另外證明。
+- **重跑一次**（主機上不跑其他東西）：overall exit 0，七步全過，925 秒。
+  - 各步：check-contracts 19、check 120、race-cover 260、verify-b1-01 52、mutation 453 秒。
+  - check-contracts 內含 adapter 11／11；突變 222／222 KILLED；17 項隔離檢查都 ok。
+  - 隔離設定與 runner 都沒改。
+
+**失敗嘗試（保留）**：
+
+- adapter 舊測試 5、6 在 R1 改寫後失敗。它們的收尾事件沒帶 `purchase_order_id`，新規則故意不採用；已補上 po，斷言不變。
+- `TestSeedDisplayDB` 失敗兩次：
+  - 第一次：憑證期限固定在測試時鐘起點後一天，請購 1 被 Deny `AUTHORIZATION_EXPIRED`。已改為跟著時鐘設定。
+  - 第二次：fixture 的 EIP-3009 授權窗在過去。已改為每筆種子請購使用自己的 600 秒窗，只在種子 helper 內。
+- 第一次瀏覽器測試在種子步驟失敗（exit 1，49 PASS；`artifacts/b1-06/ui-21db9782e125-20261005T031945Z/`，未提交的程式）。
+- 回放世代的檢查原本可能空過（畫面原本就是同一狀態）。已改為點擊前先記錄世代，等待嚴格更新的世代。
+- R2 輪詢的第一次反向驗證沒有失敗（見上）。已補做完整的舊行為反向。
+
+**未測**：
+
+- 取消、CLI 逾時與 Allow 仍沒有在瀏覽器觸發。
+- 只用 Chrome＋SwiftShader。
+- Unity 不在容器內。
+- reviewer 的暫存探測沒有沿用，依筆記的重現條件重建。
+- `gofmt -l` 列出 `internal/contracts` 三個檔案的既有格式差異，最後修改是 `4d52f44`。不是本輪的修改，契約也不改，所以未處理。
+
+**待 Aaron**：
+
+- LimeZu 素材與 Web 建置的公開散布仍未決。
+- `pixel-office/limezu` 記為例外（第 2 節）。
