@@ -532,6 +532,9 @@ MUTATIONS = [
      '\tcase v == 1 && !cfg.UpgradeSchema1:\n', '\tcase false:\n', 'TestRefusedSchema1KeepsWAL'),
     ('B1-06 3.2 review R2: EndRun writes what the recovery would refuse', 'internal/store/runs.go',
      'if why, err := runVsStore(tx, w.r); err != nil {', 'if why, err := "", error(nil); err != nil {', 'TestEndRunChecksTheStore'),
+    # B1-06 slice 3.2 review (answer's re-read).
+    ('B1-06 3.2: answer shows the older row when the re-read fails', 'cmd/demo/control.go',
+     '\tcase err != nil:\n\t\treply(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable", "code": store.CodeOf(err)})\n\t\treturn\n\tcase !found:\n\t\treply(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable", "code": "RUN_NOT_FOUND"})\n\t\treturn\n\t}\n\treply(w, http.StatusOK, c.view(fresh))', '\tcase err == nil && found:\n\t\trun = fresh\n\t}\n\treply(w, http.StatusOK, c.view(run))', 'TestAnswerRereadsOrFails'),
 ]
 
 

@@ -14,6 +14,7 @@ import (
 	"go/parser"
 	"go/token"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -537,4 +538,66 @@ func TestRunViewConsistent(t *testing.T) {
 			}
 		}
 	}
+}
+
+// answer shows only the row it read under the lock: a failed read or a run
+// that is gone answers 503 with a fixed code, never the older row; a normal
+// re-read shows the latest state (review of fb6fdf3).
+func TestAnswerRereadsOrFails(t *testing.T) {
+	var regCfg contracts.RegistryConfig
+	raw, _ := os.ReadFile("testdata/demo/registry.json")
+	contracts.Decode(raw, &regCfg)
+	open := func(t *testing.T) (*store.Store, store.Run) {
+		dir, _ := os.MkdirTemp(testRoot, "answer-")
+		st, err := store.Open(store.Config{Path: filepath.Join(dir, "demo.db"), Registry: regCfg, Clock: wallClock})
+		if err != nil {
+			t.Fatal(err)
+		}
+		run, _, err := st.AcceptRun(store.RunRequest{RequestID: "req-answer-000000001", Scenario: "ask", ScenarioDigest: "sha256:x",
+			ConsumerID: "consumer-a", Candidates: []string{"show-a-01"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st, run
+	}
+	answer := func(c *control, run store.Run) (int, map[string]any) {
+		rec := httptest.NewRecorder()
+		c.mu.Lock()
+		c.answer(rec, run, "ask")
+		c.mu.Unlock()
+		var out map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	t.Run("the re-read fails", func(t *testing.T) {
+		st, run := open(t)
+		c := &control{st: st, ended: map[string]*liveRun{run.RunID: {run: run, state: "ended", end: &store.RunEnd{Outcome: "ok"}}}}
+		st.Close() // every read now fails
+		code, out := answer(c, run)
+		if code != 503 || out["error"] != "store_unavailable" || out["code"] != "STORE_ERROR" || out["run_id"] != nil || out["state"] != nil {
+			t.Fatalf("%d %v", code, out)
+		}
+	})
+	t.Run("the run is gone", func(t *testing.T) {
+		st, run := open(t)
+		defer st.Close()
+		gone := run
+		gone.RunID = "run-not-there"
+		code, out := answer(&control{st: st, ended: map[string]*liveRun{}}, gone)
+		if code != 503 || out["code"] != "RUN_NOT_FOUND" || out["run_id"] != nil {
+			t.Fatalf("%d %v", code, out)
+		}
+	})
+	t.Run("a normal re-read shows the latest row", func(t *testing.T) {
+		st, run := open(t)
+		defer st.Close()
+		stale := run // read while accepted
+		if err := st.EndRun(run.RunID, store.RunEnd{Outcome: "start_failed"}); err != nil {
+			t.Fatal(err)
+		}
+		code, out := answer(&control{st: st, ended: map[string]*liveRun{}}, stale)
+		if code != 200 || out["state"] != "ended" || out["outcome"] != "start_failed" {
+			t.Fatalf("%d %v", code, out)
+		}
+	})
 }

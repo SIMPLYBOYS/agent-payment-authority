@@ -216,16 +216,24 @@ func (c *control) lookup(w http.ResponseWriter, requestID string) (store.Run, bo
 }
 
 // answer answers a known run: 200 with it, or 409 when the request ID named
-// another scenario. c.mu is held; the row is read again under it.
+// another scenario. c.mu is held; the row is read again under it, and only
+// that read is shown: if it fails, or the run is gone (host_runs rows are
+// never deleted), the answer is 503 with a fixed code, never the older row.
 func (c *control) answer(w http.ResponseWriter, run store.Run, scenarioName string) {
 	if run.Scenario != scenarioName {
 		fail(w, http.StatusConflict, "request_id_conflict")
 		return
 	}
-	if fresh, found, err := c.st.GetRun(run.RunID); err == nil && found {
-		run = fresh
+	fresh, found, err := c.st.GetRun(run.RunID)
+	switch {
+	case err != nil:
+		reply(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable", "code": store.CodeOf(err)})
+		return
+	case !found:
+		reply(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable", "code": "RUN_NOT_FOUND"})
+		return
 	}
-	reply(w, http.StatusOK, c.view(run))
+	reply(w, http.StatusOK, c.view(fresh))
 }
 
 // runOne runs the accepted run's process to its end and records the end
