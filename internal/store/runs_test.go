@@ -580,6 +580,16 @@ func walChild(c, path string) int {
 	clock := func() uint64 { return t0 + 60 }
 	block := func(line string) { fmt.Println(line); os.Stdout.Sync(); select {} }
 	switch c {
+	case "V1WAL": // writes into a schema 1 file's WAL with checkpoints off, then dies
+		db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=wal_autocheckpoint(0)")
+		if err == nil {
+			_, err = db.Exec(`PRAGMA journal_mode = WAL; CREATE TABLE wal_probe (x INTEGER); INSERT INTO wal_probe VALUES (1)`)
+		}
+		if err != nil {
+			fmt.Println("CHILD_WRITE_FAILED", err)
+			return 2
+		}
+		block("V1_WAL_READY")
 	case "A":
 		upgradeHook = func(stage string) error {
 			if stage == "verified2" {
@@ -745,4 +755,85 @@ func TestLeftoverWALCaseB(t *testing.T) {
 	if stamps(t, e.path) != base {
 		t.Fatal("VerifyFile changed the source")
 	}
+}
+
+// existence and bytes of every file next to the database, and the
+// directory's entries: a refused open must leave all of them as they were.
+func dirState(t *testing.T, path string) string {
+	t.Helper()
+	return dirList(t, filepath.Dir(path)) + "\n" + stamps(t, path)
+}
+
+// Review R1 (3.2): a schema 1 file is refused before any SQLite
+// connection touches it, also when a crash left a WAL to replay.
+func TestRefusedSchema1KeepsWAL(t *testing.T) {
+	e := newEnv(t)
+	schema1(t, e)
+	killedChild(t, "V1WAL", e.path)
+	leftoverWAL(t, e.path)
+	if v := throwaway(t, e.path, false, `SELECT count(*) FROM sqlite_master WHERE name = 'wal_probe'`); v != "0" {
+		t.Fatal("the child's write is in the main file: the WAL proves nothing")
+	}
+	before := dirState(t, e.path)
+	_, err := openOpt(e, false)
+	wantCode(t, err, "SCHEMA_UPGRADE_REQUIRED")
+	if after := dirState(t, e.path); after != before {
+		t.Fatalf("the refused file changed:\n%s\n->\n%s", before, after)
+	}
+	// Without a WAL the header alone decides; nothing changes either.
+	e2 := newEnv(t)
+	schema1(t, e2)
+	before = dirState(t, e2.path)
+	_, err = openOpt(e2, false)
+	wantCode(t, err, "SCHEMA_UPGRADE_REQUIRED")
+	if dirState(t, e2.path) != before {
+		t.Fatal("the refused file (no WAL) changed")
+	}
+}
+
+// Review R2 (3.2): EndRun checks the stored task and events in its own
+// write transaction, with the recovery's rules; a contradiction is refused
+// and nothing is written, so a reopen never meets a record it refuses.
+func TestEndRunChecksTheStore(t *testing.T) {
+	for name, c := range map[string]struct {
+		startTask, cancel bool
+		end               RunEnd
+	}{
+		"task_started without a task":      {false, false, RunEnd{Outcome: "ok", TaskStarted: true}},
+		"a task, task_started false":       {true, false, RunEnd{Outcome: "start_failed"}},
+		"TASK_CANCELLED without the event": {true, false, RunEnd{Outcome: "cancelled", TaskStarted: true, StoreEnd: "TASK_CANCELLED"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			s := e.open()
+			r, _, _ := s.AcceptRun(runReq("a", "consumer-a", "task-a"))
+			if c.startTask {
+				e.start(s, "task-a")
+			}
+			wantCode(t, s.EndRun(r.RunID, c.end), "INVALID_RUN_RECORD")
+			if got, _, _ := s.GetRun(r.RunID); got.State != "accepted" {
+				t.Fatalf("written: %+v", got)
+			}
+			s.Close()
+			if _, err := openOpt(e, false); err != nil {
+				t.Fatalf("reopen: %v", err)
+			}
+		})
+	}
+	t.Run("the same end after the cancel event is accepted", func(t *testing.T) {
+		e := newEnv(t)
+		s := e.open()
+		r, _, _ := s.AcceptRun(runReq("a", "consumer-a", "task-a"))
+		e.start(s, "task-a")
+		if err := s.Cancel("task-a"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.EndRun(r.RunID, RunEnd{Outcome: "cancelled", TaskStarted: true, StoreEnd: "TASK_CANCELLED"}); err != nil {
+			t.Fatal(err)
+		}
+		s.Close()
+		if _, err := openOpt(e, false); err != nil {
+			t.Fatalf("reopen: %v", err)
+		}
+	})
 }

@@ -10,10 +10,12 @@ package store
 import (
 	"crypto/sha256"
 	"database/sql"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -167,6 +169,19 @@ func Open(cfg Config) (*Store, error) {
 			s.offers[k] = append(s.offers[k], c)
 		}
 	}
+	// The version decides before any SQLite connection touches the file: a
+	// writable connection would replay and, on close, checkpoint a leftover
+	// WAL, so a refused schema 1 file would not be left as it was.
+	v, err := fileVersion(path)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case v == 1 && !cfg.UpgradeSchema1:
+		return nil, refuse("SCHEMA_UPGRADE_REQUIRED", fmt.Sprintf("database %s is schema 1 and this version needs schema 2: use a new APA_DB_PATH, or back it up and start with --upgrade-db; nothing was changed", path))
+	case v < 0 || v > schemaVersion:
+		return nil, &CorruptError{Check: "schema", Detail: fmt.Sprintf("schema version %d is not %d", v, schemaVersion)}
+	}
 	// Each _pragma runs on every new connection (driver: applyQueryParams in
 	// newConn), so no pooled connection misses one.
 	const common = "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(FULL)"
@@ -194,6 +209,52 @@ func Open(cfg Config) (*Store, error) {
 }
 
 func (s *Store) Close() error { return errors.Join(s.r.Close(), s.w.Close()) }
+
+// fileVersion is the schema version of the database at path, read without
+// SQLite opening it: from the header (user_version, bytes 60-63) when no
+// WAL waits to be replayed, otherwise from a throwaway copy of the database
+// and its WAL (whose frames may hold a newer header). 0 for a missing or
+// empty file.
+func fileVersion(path string) (int, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	} else if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	h := make([]byte, 100)
+	n, err := io.ReadFull(f, h)
+	if n == 0 && (err == io.EOF || err == io.ErrUnexpectedEOF) {
+		return 0, nil
+	}
+	if err != nil || string(h[:16]) != "SQLite format 3\x00" {
+		return 0, &CorruptError{Check: "schema", Detail: "not an SQLite database"}
+	}
+	if fi, err := os.Stat(path + "-wal"); err != nil || fi.Size() == 0 {
+		return int(int32(binary.BigEndian.Uint32(h[60:64]))), nil
+	}
+	tmp, err := os.MkdirTemp("", "apa-version-")
+	if err != nil {
+		return 0, err
+	}
+	defer os.RemoveAll(tmp)
+	cp := filepath.Join(tmp, "x.db")
+	if err := copyFile(path, cp); err != nil {
+		return 0, err
+	}
+	if err := copyFile(path+"-wal", cp+"-wal"); err != nil {
+		return 0, err
+	}
+	db, err := sql.Open("sqlite", cp)
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+	var v int
+	err = db.QueryRow(`PRAGMA user_version`).Scan(&v)
+	return v, err
+}
 
 // dbPath accepts a file path only (never a DSN), resolves a relative one
 // against the working directory, and keeps the database in a private

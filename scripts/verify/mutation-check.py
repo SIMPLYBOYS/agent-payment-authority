@@ -527,6 +527,11 @@ MUTATIONS = [
      '\tif !store.ValidDetail(res.Report.Detail) {', '\tif false {', 'TestNoUnlistedTextLeaves'),
     ('B1-06 3.2: a schema 1 database upgraded without --upgrade-db', 'internal/store/store.go',
      '\t\tif !upgrade {', '\t\tif false {', 'TestSchemaNewAndRefusedUpgrade'),
+    # B1-06 slice 3.2 review (R1, R2).
+    ('B1-06 3.2 review R1: a refused schema 1 file opened before the version check', 'internal/store/store.go',
+     '\tcase v == 1 && !cfg.UpgradeSchema1:\n', '\tcase false:\n', 'TestRefusedSchema1KeepsWAL'),
+    ('B1-06 3.2 review R2: EndRun writes what the recovery would refuse', 'internal/store/runs.go',
+     'if why, err := runVsStore(tx, w.r); err != nil {', 'if why, err := "", error(nil); err != nil {', 'TestEndRunChecksTheStore'),
 ]
 
 

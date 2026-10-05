@@ -206,32 +206,48 @@ func verifyRuns(tx *sql.Tx) error {
 		if why := validRun(w); why != "" {
 			return bad("%s", why)
 		}
-		var consumer, agent, wallet, payer string
-		err := tx.QueryRow(`SELECT consumer_id, agent_id, wallet_id, payer FROM tasks WHERE task_id = ?`, r.TaskID).Scan(&consumer, &agent, &wallet, &payer)
-		exists := err == nil
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		why, err := runVsStore(tx, r)
+		if err != nil {
 			return readErr("host_runs", r.TaskID, err)
 		}
-		if exists && (consumer != r.ConsumerID || agent != r.AgentID || wallet != r.WalletID || payer != r.Payer) {
-			return bad("binding differs from the stored task")
-		}
-		if r.State != "ended" {
-			continue
-		}
-		if r.TaskStarted != exists {
-			return bad("task_started is %t but the task %s", r.TaskStarted, map[bool]string{true: "exists", false: "does not exist"}[exists])
-		}
-		if r.StoreEnd != "" {
-			var n int
-			if err := tx.QueryRow(`SELECT count(*) FROM events WHERE task_id = ? AND event_type = ?`, r.TaskID, r.StoreEnd).Scan(&n); err != nil {
-				return readErr("host_runs", r.TaskID, err)
-			}
-			if n != 1 {
-				return bad("store_end %s has no matching event", r.StoreEnd)
-			}
+		if why != "" {
+			return bad("%s", why)
 		}
 	}
 	return nil
+}
+
+// runVsStore is the one rule set between a run and the stored task and
+// events (section 13.8 R1), for the recovery check and for EndRun inside
+// its write transaction: the binding equals the stored task's; an ended
+// run's task_started says whether the task exists; a store_end has its
+// event. It returns "" or what is wrong; err is a failed read.
+func runVsStore(tx *sql.Tx, r Run) (string, error) {
+	var consumer, agent, wallet, payer string
+	err := tx.QueryRow(`SELECT consumer_id, agent_id, wallet_id, payer FROM tasks WHERE task_id = ?`, r.TaskID).Scan(&consumer, &agent, &wallet, &payer)
+	exists := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	if exists && (consumer != r.ConsumerID || agent != r.AgentID || wallet != r.WalletID || payer != r.Payer) {
+		return "binding differs from the stored task", nil
+	}
+	if r.State != "ended" {
+		return "", nil
+	}
+	if r.TaskStarted != exists {
+		return fmt.Sprintf("task_started is %t but the task %s", r.TaskStarted, map[bool]string{true: "exists", false: "does not exist"}[exists]), nil
+	}
+	if r.StoreEnd != "" {
+		var n int
+		if err := tx.QueryRow(`SELECT count(*) FROM events WHERE task_id = ? AND event_type = ?`, r.TaskID, r.StoreEnd).Scan(&n); err != nil {
+			return "", err
+		}
+		if n != 1 {
+			return "store_end " + r.StoreEnd + " has no matching event", nil
+		}
+	}
+	return "", nil
 }
 
 // RunByRequest finds the run of requestID with a read only query: no write
@@ -296,7 +312,8 @@ func (s *Store) AcceptRun(req RunRequest) (run Run, created bool, err error) {
 }
 
 // EndRun is T4: an accepted run ends with its result. The result is checked
-// with the recovery rules first; nothing is written if it is not valid, and
+// with the recovery rules first (the row's own rules and runVsStore against
+// the task and events, inside the write); nothing is written if it is not valid, and
 // a run that is no longer accepted (ended, interrupted) is never rewritten.
 func (s *Store) EndRun(runID string, e RunEnd) error {
 	return s.write(func(tx *sql.Tx, now uint64) error {
@@ -320,6 +337,13 @@ func (s *Store) EndRun(runID string, e RunEnd) error {
 		w.taskStarted, w.storeEnd = sql.NullInt64{Int64: started, Valid: true}, sql.NullString{String: e.StoreEnd, Valid: true}
 		w.storeEndError = sql.NullString{String: e.StoreEndError, Valid: e.StoreEndError != ""}
 		if why := validRun(w); why != "" {
+			return refuse("INVALID_RUN_RECORD", why)
+		}
+		// The same check against the stored task and events as on open, in
+		// this transaction: a record the recovery would refuse is never written.
+		if why, err := runVsStore(tx, w.r); err != nil {
+			return err
+		} else if why != "" {
 			return refuse("INVALID_RUN_RECORD", why)
 		}
 		res, err := tx.Exec(`UPDATE host_runs SET state = 'ended', ended_at = ?, outcome = ?, detail = ?, task_started = ?, store_end = ?, store_end_error = ?
