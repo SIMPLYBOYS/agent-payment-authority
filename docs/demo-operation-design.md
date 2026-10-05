@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-05）：**第三版控制與持久化設計（第 13 節）經兩輪 review：R3、R4 已關閉；R1、R2 依 Codex 對 `a976fb9` 的 review 補充於第 13.9 節，待 Codex 限定 review，尚未核准實作。** 同一 SQLite 內保存場次協調資料的方向已獲接受，取代第 4 節未接受的 JSONL 場次日誌。切片 3.1 已於 `b2b7daa` 通過 Codex 限定範圍技術 review（第 12.7 節）。3.2–3.5 未開始。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節保留當時的寫法，「待 review」是寫作當時的狀態。
+狀態（2026-10-05）：**第三版控制與持久化設計（第 13 節）：R1–R4 已關閉；13.9 新增的 `detail` 規則與現有的 `prepare_failed:<Store 代碼>` 不相容，依 Codex 對 `795cc30` 的 review 修正於第 13.10 節，待 Codex 限定 review，尚未核准實作。** 同一 SQLite 內保存場次協調資料的方向已獲接受，取代第 4 節未接受的 JSONL 場次日誌。切片 3.1 已於 `b2b7daa` 通過 Codex 限定範圍技術 review（第 12.7 節）。3.2–3.5 未開始。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節保留當時的寫法，「待 review」是寫作當時的狀態。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -963,7 +963,7 @@ review 結論：R3、R4 關閉；R1、R2 方向正確，各補一處。本節只
 | `interrupted_at`（新增欄位） | 留空 | 必填 | 留空 |
 | `ended_at` | 留空 | 留空 | 必填，且 ≥ `accepted_at` |
 | `outcome` | 留空 | 留空 | 必填，必須是合法代碼（見下） |
-| `detail` | 留空 | 留空 | 必填，可以是空字串；只能是代碼字元 `^[a-z0-9_:]{0,64}$`，不含 CLI 文字 |
+| `detail` | 留空 | 留空 | 必填，可以是空字串。（格式規則已由第 13.10 節修訂：原本只收小寫，會拒絕合法的 `prepare_failed:<Store 代碼>`）只能是代碼字元 `^[a-z0-9_:]{0,64}$`，不含 CLI 文字 |
 | `task_started` | 留空 | 留空 | 必填，0 或 1 |
 | `store_end` | 留空 | 留空 | 必填：`''`、`TASK_CANCELLED` 或 `TASK_TIMED_OUT` |
 | `store_end_error` | 留空 | 留空 | 留空，或 Store 代碼 `^[A-Z_]{1,64}$` |
@@ -1041,3 +1041,59 @@ review 結論：R3、R4 關閉；R1、R2 方向正確，各補一處。本節只
 13. 遷移後驗證失敗時，失敗的資料庫與其 WAL、SHM 都不被修改；恢復一律使用新的路徑，先通過唯讀驗證，再由相容程式開啟。
 
 需要 Aaron 決定：與第 13.8.6 節相同（既有展示資料庫是否升級，預設不升級），沒有新增事項。
+
+### 13.10 `detail` 規則修正（依 Codex 對 `795cc30` 的 review；設計提案，待 Codex 限定 review）
+
+review 結論：原本的 R1、R2 缺口可關閉。13.9.1 新增的 `detail` 格式 `^[a-z0-9_:]{0,64}$` 只收小寫，但 `cmd/demo/fakeruns.go` 會產生 `prepare_failed:` 加上大寫 Store 代碼（例如 `prepare_failed:WALLET_BINDING_CHANGED`，現有測試也用到）。照原規則，這類合法的失敗結果會被 `EndRun` 拒絕，留下未完成的場次紀錄。
+
+**修正：`detail` 改為「固定來源＋清單」，不只看字元格式。** `ended` 列的 `detail` 必須是下列其中一種，長度不超過 64：
+
+| 形式 | 來源 | 內容 |
+|---|---|---|
+| 空字串 | — | 沒有補充代碼 |
+| host 的固定代碼 | `cmd/demo` | `host_error`、`scratch_home_failed`、`task_reserved_by_run`（3.2 新增） |
+| buyer 的固定代碼 | `buyer.Report.Detail` | `ambiguous_json`、`assistant_messages`、`input_failed`、`input_partial`、`hook_message`、`init_duplicate`、`init_malformed`、`unexpected_message`、`prepare_failed` |
+| `prepare_failed:<代碼>` | `fakeruns.go` 用 `store.Code(err)` 組成 | `<代碼>` 必須是 Store 或契約的固定錯誤代碼（`*store.Error` 或 `contracts` 的代碼清單）。`store.Code` 回空字串時（沒有代碼的錯誤）寫成 `prepare_failed:STORE_ERROR`，原文只留在 host 的 log |
+| `detail_unlisted` | host 正規化 | buyer 回了不在清單內的代碼時，host 改記這個固定值，並在 log 記下原代碼。不把未列名的字串存進資料表 |
+
+規則：
+
+- **不接受任意來源的文字**：
+  - 寫入時，host 只會把上表的來源填進 `detail`，不會放 CLI 輸出、錯誤訊息原文或 Store 錯誤的 `Detail` 欄位；
+  - `validRunRow` 依清單比對，不是只檢查字元。
+  - 例如 `prepare_failed:` 後面接的字串即使全是大寫字母，只要不在代碼清單內就拒絕。
+- 這三份清單（host、buyer、Store／契約代碼）都是 Go 常數，寫入與恢復驗證共用；`outcome` 清單也一樣（13.9.1）。
+- **清單與程式同步**：一個測試掃描 `internal/buyer` 與 `cmd/demo` 中產生 detail 的位置，以及 `internal/store`、`internal/contracts` 中的錯誤代碼。程式新增代碼而清單沒更新，測試就失敗。這樣正規化成 `detail_unlisted` 只是保險，不會成為常態。
+- 其他欄位要求與組合規則不變。
+
+**測試計畫增補**（`runs_test.go`、`cmd/demo` 整合測試）：
+
+- **合法結果能保存並讀回**：
+  - `EndRun` 寫入 `prepare_failed:WALLET_BINDING_CHANGED`、`prepare_failed:STORE_ERROR`、`input_partial`、`assistant_messages`、空字串、`detail_unlisted`，都成功；
+  - 關閉後重新開啟（含恢復驗證），`Run` 讀回的值相同。
+  - 整合測試：沿用現有的錢包綁定變更情境，讓 3.2 的場次以 `prepare_failed:WALLET_BINDING_CHANGED` 結束，重啟 host 後場次為 `ended`，`detail` 相同。
+- **非法內容仍被拒絕**：
+  - 寫入路徑：`EndRun` 傳入下列任一種，都回 `INVALID_RUN_RECORD`，資料表不變：
+    - CLI 風格的自由文字（`Error: rate limited, retry later`）；
+    - 不在清單的小寫代碼；
+    - `prepare_failed:` 加上不在清單的大寫字串（`prepare_failed:NOT_A_CODE`）；
+    - `prepare_failed:` 後面是空字串或小寫；
+    - 含空白或換行；
+    - 超過 64 字元。
+  - 恢復驗證：以 `ignore_check_constraints` 直接寫入上述各種值，重新開啟時為 `CorruptError(host_runs)`。
+- **正規化**：buyer 回報不在清單的代碼時（測試替身），資料表存 `detail_unlisted`，log 有原代碼，場次照常 `ended`。
+- **同步測試**：在清單中刪去一個 buyer 代碼，掃描測試失敗（反向驗證）。
+
+**實作注意事項**（review 提出，納入 3.2 驗收）：
+
+- **`--verify-db` 走獨立的唯讀入口**（`store.VerifyFile`）：只用 `query_only` 連線，不經過會遷移、建表、執行 `ExpireDue` 的 `Store.Open`；不寫入任何檔案，也不 checkpoint。測試斷言執行前後的主檔、`-wal`、`-shm` 位元組都不變。
+- **恢復測試的比對基準與 WAL**：
+  - 基準時間點定為「停止服務完成後」：host 程序結束、`.lock` 已釋放、所有連線關閉之後。此時記錄失敗資料庫的主檔、`-wal`、`-shm` 的位元組與大小作為基準，恢復步驟完成後再比對一次。
+  - 測試要先確認殘留 WAL 真的存在，不能空過：基準時 `-wal` 必須存在且大小大於 0；且升級前寫入的一筆資料，在只讀主檔時（以不套用 WAL 的方式另行比對）不在主檔中，表示它確實還在 WAL 裡。不符合就讓測試失敗，而不是略過。
+  - 製造殘留 WAL 的方式：測試在升級前的寫入連線上關閉自動 checkpoint（`PRAGMA wal_autocheckpoint = 0`），並在關閉前保持另一條讀取連線開著，避免最後一條連線關閉時自動 checkpoint 清空 WAL。
+
+**驗收條件修正**：第 12 條改為：
+
+> `host_runs` 每一種狀態的必填與留空欄位、合法代碼（`outcome` 與 `detail` 都依固定清單，`detail` 包含 `prepare_failed:<Store 代碼>`）與組合規則，在資料表約束、寫入與恢復驗證三處都檢查。合法的失敗結果能保存並在重啟後讀回；不完整、矛盾或自由文字的值無法寫入，也無法通過開檔驗證。
+
+需要 Aaron 決定：與第 13.8.6 節相同，沒有新增事項。
