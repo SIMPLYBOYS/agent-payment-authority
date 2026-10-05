@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-06）：**B1-06 交付點 3.2（主持人控制與場次持久化）於 `69ae9b2` 通過 Codex 限定範圍技術 review，`answer()` 問題關閉，未發現新的阻擋項目（第 13.19 節）。** 最近一次完整容器驗證屬 `c0d4c96`（235／235 突變），不是 `69ae9b2`。第三版設計於 `a845dcb` 通過 Codex 限定設計 review（第 13.15 節）。切片 3.1 已於 `b2b7daa` 通過（第 12.7 節）。3.3–3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節與第 13.1–13.18 節保留當時的寫法，「待 review」是寫作當時的狀態。
+狀態（2026-10-06）：**切片 3.3（動態 task 清單與新場次選擇）經 Aaron 核准，實作於 `843ca4a`；Claude Code 執行，待 Codex 獨立 review（第 14 節）。** 切片 3.2 已於 `69ae9b2` 通過 Codex 限定範圍技術 review（第 13.19 節；最近完整容器屬 `c0d4c96`）。切片 3.1 已於 `b2b7daa` 通過（第 12.7 節）。3.4、3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12、13 節保留當時的寫法。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -1689,3 +1689,74 @@ review 的獨立結果：
 **下一步**：可安排 3.3（動態 task 清單與新場次選擇），尚未核准、未開始。
 
 B1-04／B1-06 整體維持 InProgress；不合併、不標整卡 Done。
+
+## 14 切片 3.3：動態 task 清單與新場次選擇（Claude Code 執行，待 Codex 獨立 review；程式 `843ca4a`）
+
+依據：第 5 節「頁面的 task 清單」與第 8 節的 3.3 列；Aaron 10/6 核准「可以安排 3.3」。3.3 在設計中只有一段簡短描述。本節是實作時具體採用的決定，一併交 review；若需調整，依 review 修改。「開始一場後自動開啟新 task」已在 3.2 完成，本切片不重做。
+
+### 14.1 決定
+
+| 項目 | 決定 |
+|---|---|
+| 端點 | `GET /api/tasks`，唯讀 |
+| 誰看到什麼 | viewer：自己 consumer 的 task，依 Store **保存的** consumer 判斷（與 `ReadTask` 相同；目前 registry 已移除的 task 仍列給它自己的 consumer）。host：全部。operator：403（它不讀 task）。無 token：401。沿用 Host／Origin 檢查，URL 中的 token 無效。consumer 為空的 viewer token 一律 403，避免空字串被當成「全部」 |
+| 內容 | 每筆只有 `task_id`、`consumer_id`、`status`、`deny_reason`（若有）、`started_at`，加上 `served_at`；沒有請購、事件或綁定細節 |
+| 順序與數量 | `started_at` 由新到舊，同時間時以 `task_id` 由大到小；最多 50 筆，不分頁（`ponytail:` 上限；需要時再加分頁） |
+| Store | `ListTasks(consumerID, limit)`：唯讀查詢 `tasks` 表，不改 schema、寫入規則、事件或契約 |
+| 頁面（`/` 與 `/host`） | 移除固定的 `FIXTURE_TASKS`。登入成功時先讀到清單、畫面已顯示後才回報登入完成；之後每 5 秒、頁面可見時重新讀取 |
+| 清單的世代 | 每次身分改變（清除、切換、`pagehide`），身分世代就加一並中止進行中的清單請求。身分改變後才到的回覆不顯示；401 沿用既有規則 |
+| 顯示 | `task_id（狀態）`。狀態以中文標示：已建立、執行中、等待核准、Deny、已取消、CLI 逾時；未知代碼原樣顯示。手動輸入 task ID 保留 |
+| 舊場次 | 從清單開啟任何一個舊 task，沿用既有的唯讀歷史回放 |
+
+### 14.2 測試與證據（Claude Code 執行，待 Codex 獨立 review；`843ca4a`）
+
+| 項目 | 命令 | exit | 時間 | 證據 |
+|---|---|---|---|---|
+| Node 30 項（未變） | `node --test …` | 0 | 1 秒 | `artifacts/b1-06/checks-843ca4abb480-20261005T190251Z/` |
+| Go 全部套件 race（含 `TestListTasks`、`TestTaskList`） | `go test -race -count=1 -v ./...` | 0 | 115 秒 | 同上 |
+| 真實瀏覽器 139 項（3.3 新增 9 項） | `node scripts/verify/browser-ui.mjs` | 0 | 149 秒 | `artifacts/b1-06/ui-843ca4abb480-20261005T190448Z/` |
+| 瀏覽器反向：拿掉清單的身分世代 | 同上，在拋棄式 worktree | 1（預期） | 155 秒 | `artifacts/b1-06/reversal-843ca4abb480/` |
+| 完整容器（Go／JS＋fake 回歸；主機無其他負載） | `sh scripts/verify/container-verify.sh 843ca4a…` | 0 | 629 秒 | `artifacts/verify-container/runs/843ca4abb480-20261005T191312Z/`（`artifacts/b1-06/container-843ca4a.log`）：七步全過（check-contracts 14、check 74、race-cover 174、verify-b1-01 41、mutation 313 秒），adapter 11／11、hostcreds 19／19，238／238 突變，17 項隔離 ok |
+
+**測試內容**：
+
+- `TestListTasks`（Store）：
+  - 依 consumer 篩選；
+  - 由新到舊；
+  - 數量上限；
+  - 未知 consumer 回空清單；
+  - 讀取不寫入。
+- `TestTaskList`（HTTP）：
+  - viewer A／B 各只看到自己的 task；host 看到全部；operator 403；無 token 401；URL 中的 token 401；外站 Origin 403；
+  - 列出 20 次後，事件不變；
+  - 重啟後新 task 排在前面；
+  - registry 移除 `task-a-next` 後，它仍列給 consumer-a，不列給 B。
+- 瀏覽器（3.2 段落的重啟之後）：
+  - viewer A 的清單是 A 已保存的 `show-a-05…01`，由新到舊，沒有 B 的 task；
+  - 伺服器端新開一場後，已開著的頁面不必重新整理，就在清單看到 `show-a-06`；
+  - 從清單開啟較舊的 `show-a-01` 並回放，回放後清單仍在，事件沒有被寫入；
+  - viewer A 的清單回覆被扣住，切換到 B 之後才放行：B 的清單與身分不變；
+  - viewer B 的清單只有 `show-b-01`；
+  - 頁面不再出現「demo fixture」字樣。
+- 新增突變 2 項（共 238），本機先逐項確認被抓到：
+  - 清單 SQL 拿掉 consumer 篩選；
+  - operator 可讀清單。
+
+**反向驗證**：
+
+- 拿掉清單的身分世代檢查、但保留 `forget()` 中止請求時，反向仍是 139 PASS：被扣住的請求在切換時已被真的中止，這一層就擋住了舊回覆。
+- 一併拿掉中止後，「A 的晚到回覆」才以斷言失敗，B 的清單被換成 A 的。和 3.1、3.2 一樣，這裡有兩層防護。
+
+### 14.3 失敗嘗試（保留）
+
+- **交付點 2 的路由測試**：它把 `/api/tasks` 列為「不應提供」的路徑。3.3 依核准範圍新增這個端點，所以從清單移除，並加註由 `TestTaskList` 涵蓋。
+- **測試本身的錯誤**：
+  - HTTP 測試的解碼結構缺 JSON 標籤，第一次讀不到任何 task；
+  - 瀏覽器的 3.3 段落第一次放在 3.2 重啟比對之前，它自己開的新場次讓比對失敗，已移到重啟之後。
+- **第一次反向沒有失敗**：見 14.2 的反向驗證。
+
+### 14.4 未做
+
+- 3.4（取消 task、錯誤文字補齊）、3.5（整體操作驗收）。
+- 清單不分頁，最多 50 筆。
+- 只用 Chrome。
