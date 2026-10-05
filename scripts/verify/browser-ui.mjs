@@ -732,15 +732,29 @@ try {
   await chooseFile(ctlFile);
   await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`);
   check("3.2: reloading the file lists that run without switching to it", await b.waitFor(`${runItem("show-a-03")} !== ""`, 10000) && (await b.evaluate(`${text("#viewer")} === "未驗證"`)));
+
+  // Held reply, then the same file loaded again: a new generation holding
+  // the same tokens. The old reply must still switch nothing and open nothing.
+  holdNextStart = 1;
+  await clickScenario("ask");
+  for (let i = 0; i < 200 && heldStarts.length === 0; i++) await sleep(50);
+  check("3.2: a second start reply is held", heldStarts.length === 1);
+  await chooseFile(ctlFile);
+  await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`);
+  for (const id of heldStarts.splice(0)) await b.send("Fetch.continueRequest", { requestId: id }).catch(() => {});
+  await sleep(1500);
+  check("3.2: the old reply after loading the file again switches no consumer and opens no task",
+    (await b.evaluate(`${text("#viewer")} === "未驗證" && ${text("#inspector")} === "尚無資料"`)), await b.evaluate(text("#viewer")));
+  check("3.2: that run stands on the server too", await b.waitFor(`${runItem("show-a-04")} !== ""`, 10000));
   await b.send("Fetch.disable");
   offStarts();
 
   // Stop a hanging run: stopping, then stopped with the cancel recorded.
   await clickScenario("hang");
-  check("3.2: the hanging run is running with a stop button", await b.waitFor(`${runItem("show-a-04")}.includes("進行中") && !!document.querySelector('#runs li[data-live="running"] .run-stop')`, 20000), await b.evaluate(runItem("show-a-04")));
+  check("3.2: the hanging run is running with a stop button", await b.waitFor(`${runItem("show-a-05")}.includes("進行中") && !!document.querySelector('#runs li[data-live="running"] .run-stop')`, 20000), await b.evaluate(runItem("show-a-05")));
   check("3.2: no other start while a run is active", await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].every((x) => x.disabled)`));
   await b.evaluate(`document.querySelector('#runs li[data-live="running"] .run-stop').click()`);
-  check("3.2: stopped only after the cancel was recorded", await b.waitFor(`${runItem("show-a-04")}.includes("已停止，取消已記錄")`, 20000), await b.evaluate(runItem("show-a-04")));
+  check("3.2: stopped only after the cancel was recorded", await b.waitFor(`${runItem("show-a-05")}.includes("已停止，取消已記錄")`, 20000), await b.evaluate(runItem("show-a-05")));
 
   // Nothing of the operator leaves page memory.
   const keptCtl = await b.evaluate(`JSON.stringify({ ls: localStorage.length, ss: sessionStorage.length, cookie: document.cookie, url: location.href })`);
