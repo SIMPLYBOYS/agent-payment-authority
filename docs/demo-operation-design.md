@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-06）：**切片 3.2（主持人控制與場次持久化）依 `a845dcb` 的已審查設計實作完成，程式 `718aa91`，測試修正 `d128b79`、`28aae6e`；Claude Code 執行，待 Codex 獨立 review（第 13.16 節）。** Aaron 10/5 核准實作 3.2。第三版設計（第 13 節）於 `a845dcb` 通過 Codex 限定設計 review（第 13.15 節）。切片 3.1 已於 `b2b7daa` 通過 Codex 限定範圍技術 review（第 12.7 節）。3.3–3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節與第 13.1–13.14 節保留當時的寫法。
+狀態（2026-10-06）：**切片 3.2 依 Codex review 修正 R1（未核准升級前不以可寫連線接觸來源）、R2（EndRun 在寫入交易內核對 task／事件）；容器驗證又發現兩處並修正（`migrate` 第二層的突變存活、場次檢視的競態）。最終程式 `c0d4c96`；Claude Code 執行，待 Codex 獨立 review（第 13.17 節）。** 3.2 首次實作於 `718aa91`（第 13.16 節）。第三版設計（第 13 節）於 `a845dcb` 通過 Codex 限定設計 review（第 13.15 節）。切片 3.1 已於 `b2b7daa` 通過（第 12.7 節）。3.3–3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節與第 13.1–13.16 節保留當時的寫法。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -1579,3 +1579,51 @@ Unity 沒有修改，瀏覽器載入的建置檔 sha256 與 `eda6469` 建置相�
 - 只用 Chrome（SwiftShader）。
 - 既有展示資料庫沒有升級；用舊版程式開啟恢復副本是手動步驟，未自動測試。
 - 不執行真實 CLI、不付款。
+
+### 13.17 依 Codex 對 `2162f2f` 的 review 修正 R1、R2，及容器驗證發現的兩處（Claude Code 執行，待 Codex 獨立 review；最終程式 `c0d4c96`）
+
+review 的獨立結果：
+
+- Codex 在斷網容器內執行 `internal/store`、`internal/buyer`、`cmd/demo` 的 race 測試與 Node 30 項，全部通過；
+- 額外探測重現了下列兩項問題；
+- Claude 的瀏覽器通過紀錄與反向失敗紀錄已由 Codex 核對；Codex 沒有重跑瀏覽器或完整突變套件。
+
+| 項 | 問題 | 修正 | 回歸測試 | 反向（突變，本機先確認被抓到） |
+|---|---|---|---|---|
+| R1 | 未帶 `--upgrade-db` 時，Store 先以可寫的 SQLite 連線讀取版本，再拒絕 schema 1。若非正常關閉後留有 WAL，這條連線會重播 WAL，關閉時還可能 checkpoint 並刪除它，「拒絕且不改變」並不成立 | `Open` 在開啟任何連線之前判斷版本：沒有待重播的 WAL 時，讀檔頭的 `user_version`（第 60–63 位元組）；有 WAL 時，把主檔與 WAL 以位元組複製到拋棄式目錄，在副本上讀版本。schema 1 且沒有升級指示就在此拒絕，來源不被 SQLite 開啟。`migrate()` 原有的拒絕保留為第二層 | `TestRefusedSchema1KeepsWAL`：<br>• 子程序對 schema 1 檔寫入（關閉自動 checkpoint）後被 SIGKILL，留下真實 WAL，並先確認那筆寫入只在 WAL 中；<br>• 拒絕前後，目錄清單、主檔、`-wal`、`-shm`、`.lock` 的存在、大小與 sha256 都相同；<br>• 沒有 WAL 的 schema 1 檔同樣不變 | 拿掉開檔前的版本檢查 → 測試失敗 |
+| R2 | `EndRun` 只檢查列本身的規則，沒有核對實際的 task 與事件。task 不存在卻寫入 `task_started=true`、task 已存在卻寫入 `task_started=false`、沒有取消事件卻寫入 `store_end=TASK_CANCELLED`，三者都回成功，重新開啟時才得到 `CorruptError(host_runs)`。這是 Store API 的完整性缺口，**尚未證明可直接從 HTTP 觸發** | 把「場次與已存 task／事件」的規則抽成 `runVsStore`，恢復驗證與 `EndRun` 共用。`EndRun` 在同一個寫入交易內呼叫它，矛盾就回 `INVALID_RUN_RECORD` 並回滾 | `TestEndRunChecksTheStore`：<br>• 三種重現情況都被拒絕，列仍是 `accepted`，重新開啟沒有錯誤；<br>• 正向對照：先記錄取消事件，同樣的結束就被接受 | 拿掉 `EndRun` 中的核對 → 測試失敗 |
+
+突變共 235 項（新增 2 項）。
+
+**容器驗證發現的兩處**（都已修正，失敗紀錄保留）：
+
+| 容器執行 | 結果 | 原因 | 修正 |
+|---|---|---|---|
+| `7869964` | overall exit 1：只有突變步驟失敗，234／235 被抓到，一項存活（「schema 1 未帶 `--upgrade-db` 就升級」）；其他六步通過 | R1 讓 `Open` 在 `migrate()` 之前就拒絕 schema 1，`migrate()` 原有的拒絕成為第二層，一般路徑已走不到，所以拿掉它沒有測試會失敗 | 第二層保留，另加 `TestMigrateRefusesSchema1` 直接驗證它；該突變改為同時指名兩個測試（`c5bf8c2`） |
+| `c5bf8c2` | overall exit 1：只有 race-cover 失敗，`TestControlRuns` 看到 `live: ended`、`state: accepted`、沒有 `record_error`；235／235 突變全數被抓到，其他步驟通過 | **場次檢視的競態**：讀取路徑先讀資料表列（還是 `accepted`），之後 `runOne` 寫入結束並更新記憶體，讀取路徑才在鎖內組回覆，把舊的列和新的記憶體狀態混在一起。畫面上會短暫顯示「已受理」，而不是結束狀態 | `runOne` 在 `c.mu` 內寫入結束並更新記憶體；所有組成場次檢視的讀取都在 `c.mu` 內讀資料表列。鎖的順序仍是先 `c.mu` 再 SQLite（`start` 原本就如此），不會死鎖。`TestRunViewConsistent` 在 12 場內緊密輪詢；用舊程式跑 3 次，每次都抓到混合的檢視（`c0d4c96`） |
+
+這個競態只能以機率方式偵測，回歸測試無法證明它不存在。
+
+**命令與結果**（R1、R2 修正後的 `7869964`；最終 `c0d4c96` 的結果在本節末）：
+
+| 命令 | exit | 時間 | 證據 |
+|---|---|---|---|
+| `node --test web/test/adapter.test.mjs web/test/hostcreds.test.mjs`（30 項） | 0 | 1 秒內 | `artifacts/b1-06/checks-78699641b042-20261005T171719Z/` |
+| `go test -race -count=1 -v ./...` 第一次 | **1** | 131 秒 | 同上 `go-test-race.log`：`cmd/apa-buyer`、`cmd/demo`、`internal/buyer` 失敗，都是 fake CLI 的 `--version` 逾時（`TestApprovedVersionInit`、`TestIntegrationStartRefusals`、`TestVersion`、`TestProbeOneMessageStops`）；其他 7 個套件通過，包括本輪唯一修改的 `internal/store` |
+| 同上，只重跑那三個套件一次 | 0 | 113 秒 | 同上 `go-test-race-rerun-3pkgs.log` |
+| `node scripts/verify/browser-ui.mjs`（130 項） | 0 | 138 秒 | `artifacts/b1-06/ui-78699641b042-20261005T171931Z/` |
+| 完整容器 | 1（見上：突變一項存活） | 621 秒 | `artifacts/verify-container/runs/78699641b042-20261005T172421Z/`（`artifacts/b1-06/container-7869964.log`） |
+
+- 第一次 race 失敗時，主機的 load average 是 13–20。那三個套件在這次 commit 沒有修改，修正前同樣的全套也通過，推論是主機負載造成的時序失敗，與既有的「時序測試偶發失敗」非阻擋待辦同類，原因未獨立證實。失敗紀錄保留，只重跑一次。
+- Unity 未修改，建置雜湊相同。
+
+**最終程式 `c0d4c96` 的結果**：
+
+| 命令 | exit | 時間 | 證據 |
+|---|---|---|---|
+| `node --test …`（30 項） | 0 | 1 秒內 | `artifacts/b1-06/checks-c0d4c96eb42a-20261005T175458Z/` |
+| `go test -race -count=1 -v ./...`（10 個套件） | 0 | 110 秒 | 同上 |
+| `node scripts/verify/browser-ui.mjs`（130 項） | 0 | 142 秒 | `artifacts/b1-06/ui-c0d4c96eb42a-20261005T175648Z/` |
+| 完整容器（Go／JS＋fake 回歸；主機無其他負載） | 0 | 693 秒 | `artifacts/verify-container/runs/c0d4c96eb42a-20261005T175916Z/`（`artifacts/b1-06/container-c0d4c96.log`）：七步全過（check-contracts 19、check 85、race-cover 185、verify-b1-01 43、mutation 344 秒），check-contracts 含 adapter 11／11 與 hostcreds 19／19，235／235 突變，17 項隔離 ok |
+
+另一次容器紀錄：`c5bf8c2` 的執行在 `artifacts/verify-container/runs/c5bf8c294ecc-20261005T173542Z/`（`artifacts/b1-06/container-c5bf8c2.log`）。
