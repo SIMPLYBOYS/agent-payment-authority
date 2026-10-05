@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-05）：**第三版控制與持久化設計（第 13 節）待 Codex review，尚未核准實作。** 它取代第 4 節未接受的 JSONL 場次日誌，改用同一個 SQLite 檔內的協調資料表，並列出 3.2 的最小切片。切片 3.1 已於 `b2b7daa` 通過 Codex 限定範圍技術 review（第 12.7 節）。3.3–3.5 未開始。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節保留當時的寫法，「待 review」是寫作當時的狀態。
+狀態（2026-10-05）：**第三版控制與持久化設計（第 13 節）與其修訂（第 13.8 節，依 Codex 對 `838de81` 的 review 補 R1–R4）待 Codex review，尚未核准實作。** 同一 SQLite 內保存場次協調資料的方向已獲 review 接受；它取代第 4 節未接受的 JSONL 場次日誌。切片 3.1 已於 `b2b7daa` 通過 Codex 限定範圍技術 review（第 12.7 節）。3.2–3.5 未開始。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節保留當時的寫法，「待 review」是寫作當時的狀態。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -575,6 +575,8 @@ B1-04／B1-06 整體維持 InProgress。交付點 3.1 標為技術 review 通過
 
 ## 13 第三版：主持人控制、新場次與場次協調（設計提案，待 Codex review；尚未核准實作）
 
+> **修訂**：Codex 對 `838de81` 的 review 接受同一 SQLite 內保存場次協調資料的方向，要求補四處（R1–R4）。修訂見第 13.8 節；本節中被修訂的段落已加註，原文保留。
+
 依據：Aaron 10/5 指示，以 `901f600` 為文件基準修訂。範圍限於：主持人控制、新場次、持久化與恢復、狀態分離、3.2 最小切片。只改設計，未新增資料表、未遷移資料庫、未寫控制 API。
 
 **本節取代的未接受提案**：
@@ -651,10 +653,10 @@ CREATE TABLE host_runs (
 
 **遷移**：
 
-- `migrate()` 在一個交易內處理：版本 0 → 建立全部（含 `host_runs`）並設為 2；版本 1 → 只 `CREATE TABLE host_runs` 並設為 2；版本 2 → 不動；其他版本照舊拒絕。
+- （已由第 13.8 節 R2 修訂：遷移前先驗證、既有資料庫不預設升級）`migrate()` 在一個交易內處理：版本 0 → 建立全部（含 `host_runs`）並設為 2；版本 1 → 只 `CREATE TABLE host_runs` 並設為 2；版本 2 → 不動；其他版本照舊拒絕。
 - 失敗就整個回滾，資料庫仍是版本 1。
 - 舊程式碰到版本 2 的資料庫會拒絕開啟（既有規則：版本不是 1 就拒絕）。不支援降版；換回舊版請用新的 `APA_DB_PATH`。
-- `verify()` 現有的 `integrity_check` 與 `foreign_key_check` 自動涵蓋新表；另加檢查：`state` 與 `ended_at` 一致，且 `task_id` 必須在 demo registry 或已在 `tasks` 中。
+- （已由第 13.8 節 R1 修訂：不依賴目前的 registry）`verify()` 現有的 `integrity_check` 與 `foreign_key_check` 自動涵蓋新表；另加檢查：`state` 與 `ended_at` 一致，且 `task_id` 必須在 demo registry 或已在 `tasks` 中。
 
 ### 13.3 交易邊界
 
@@ -662,7 +664,7 @@ CREATE TABLE host_runs (
 
 | 交易 | 何時 | 內容 | 不做的事 |
 |---|---|---|---|
-| T1 受理 | `POST /api/host/runs`，在 host 鎖內 | ① 查 `request_id`：已存在且情境相同 → 不寫，回原場；情境不同 → 不寫，409。② 有進行中的場次（記憶體）→ 409 `run_active`。③ 配發：該 consumer 依編號第一個「不在 `tasks`、也不在 `host_runs.task_id`」的展示 task；沒有就 409 `no_free_task`。④ 插入 `state='accepted'` 的一列。⑤ commit 後才啟動程序並回 202 | 不寫事件，不建立 task |
+| T1 受理（已由第 13.8 節 R3 修訂：先唯讀查詢，再寫入） | `POST /api/host/runs`，在 host 鎖內 | ① 查 `request_id`：已存在且情境相同 → 不寫，回原場；情境不同 → 不寫，409。② 有進行中的場次（記憶體）→ 409 `run_active`。③ 配發：該 consumer 依編號第一個「不在 `tasks`、也不在 `host_runs.task_id`」的展示 task；沒有就 409 `no_free_task`。④ 插入 `state='accepted'` 的一列。⑤ commit 後才啟動程序並回 202 | 不寫事件，不建立 task |
 | T2 建立 task | init 通過後 | 既有 `StartTask`，語意不變 | 不碰 `host_runs` |
 | T3 收尾 | 程序因逾時或取消結束 | 既有 `CLITimeout`／`Cancel`，語意不變 | 不碰 `host_runs` |
 | T4 場次結束 | `runOne` 返回後 | 把該列改為 `state='ended'`，寫入 `ended_at`、`outcome`、`detail`、`task_started`、`store_end`、`store_end_error`；條件是 `state='accepted'` | 不寫事件 |
@@ -702,6 +704,8 @@ CREATE TABLE host_runs (
 - 任何一層缺紀錄或寫入失敗，就改用第 13.4 節的「但…失敗」或「中斷」文字。不顯示完成，也不顯示付款或取貨。
 
 ### 13.6 切片 3.2 的最小實作範圍（供派工）
+
+> 檔案、測試與驗收條件的增補見第 13.8 節的 R1–R4 與 13.8.5。
 
 **範圍**：operator、開始、停止、查場次、`host_runs` 與恢復、情境目錄、demo registry、`/host` 的控制面板。**不含**：取消 task（3.4）、`GET /api/tasks` 清單（3.3）、核准、付款、真實 CLI。
 
@@ -759,6 +763,185 @@ CREATE TABLE host_runs (
 
 ### 13.7 需要 Aaron 決定的事項
 
+> 已由第 13.8 節 R2 修訂：既有展示資料庫不預設升級，改為需要 Aaron 另行確認，見 13.8.6。
+
 無。
 
 需要知道的一點：3.2 實作後，第一次啟動會把本機 demo 資料庫（例如 `var/apa-demo-fake.db`）單向升級到 schema 版本 2。既有的 task 與事件不變，但舊版程式之後無法開啟它。要保留舊版可開的資料庫，可以先複製一份，或在 3.2 改用新的 `APA_DB_PATH`。
+
+### 13.8 第三版修訂（依 Codex 對 `838de81` 的 review；設計提案，待 Codex review）
+
+review 接受的方向不變：同一 SQLite 保存場次協調資料、三層狀態分離、既有 Policy／Store 語意。本節只補 R1–R4 與測試計畫。仍不新增資料表、不跑容器、不開始實作。
+
+#### R1：歷史場次不依賴目前的設定
+
+**問題**：13.2 要求 `task_id` 在目前的 registry 或 `tasks` 中。若場次已受理、task 尚未建立就中斷，之後 registry 移除該 task，資料庫就打不開。
+
+**修訂**：
+
+1. **受理時保存可信綁定**。`host_runs` 在 T1 寫入當時由可信設定得到的完整綁定，以及情境快照：
+
+   | 欄位 | 來源（T1 當時） |
+   |---|---|
+   | `task_id`、`consumer_id`、`agent_id`、`wallet_id`、`payer` | demo registry 的 `Binding(task_id)` |
+   | `scenario`、`scenario_digest` | 情境目錄中該項的 id，與其內容（含 `budget_initial` 與 scenario 檔內容）的 sha256 |
+   | `budget_initial` | 情境目錄 |
+
+   恢復、顯示與驗證只用這些已存欄位，**不讀目前的 registry 或情境目錄**。
+
+2. **task 已存在時核對綁定**。`tasks` 有同一個 `task_id` 時，`consumer_id`、`agent_id`、`wallet_id`、`payer` 必須與場次列相同（`tasks` 的值本身也是當初存下的，不讀目前 registry）。
+
+3. **與實際 task／事件的一致性規則**，在 `verify()` 中逐列檢查，任一不符即視為損壞（`CorruptError`，check 名 `host_runs`），不開始服務：
+
+   | 規則 | 條件 |
+   |---|---|
+   | 綁定一致 | 同上 |
+   | 已結束且 `task_started = 1` | `tasks` 必須有該 task |
+   | 已結束且 `task_started = 0` | `tasks` 不得有該 task（名額已保留，其他路徑不得建立它，見下方） |
+   | `store_end` 不為空 | `task_started = 1`，且該 task 的事件中有對應的 `TASK_CANCELLED` 或 `TASK_TIMED_OUT` |
+   | `store_end_error` 不為空 | `store_end` 必須為空 |
+   | `outcome` 為 `cancelled` 或 `timeout`，且 `task_started = 1` | `store_end` 與 `store_end_error` 恰好一個不為空 |
+   | `interrupted` 或 `accepted` | 只檢查綁定；task 可有可無 |
+
+   `store_end` 為空不代表不得有結束事件：之後的「取消 task」（3.4）可能補上 `TASK_CANCELLED`。
+
+   SQLite 的 `integrity_check`／`foreign_key_check` 只保證結構，**不能取代**這些規則。
+4. **保留的名額不被其他路徑使用**。`--plan` 模式（3.1 起的固定計畫）若點到 `host_runs` 已保留的 task，`runOne` 回報 `task_reserved_by_run` 並略過，不建立它。
+
+#### R2：遷移失敗與開檔失敗分開
+
+**問題**：Store 目前的順序是先提交遷移，再執行 `verify()`。所以「失敗就回滾、仍是版本 1」只涵蓋遷移交易本身，不涵蓋之後的驗證失敗。
+
+**修訂**：
+
+| 情況 | 處理 |
+|---|---|
+| 新資料庫（版本 0） | 一個交易建立版本 2 的全部結構，然後 `verify()`。驗證失敗就拒絕服務，資料庫是版本 2 的空庫，刪除或換路徑即可 |
+| 版本 2 | 照常：`verify()` 後服務 |
+| 版本 1，**沒有**明確的升級指示（預設） | **不遷移**，拒絕開啟：「資料庫是 schema 1；3.2 需要 schema 2。請改用新的 `APA_DB_PATH`，或備份後以 `--upgrade-db` 升級」。不寫任何東西 |
+| 版本 1，帶 `--upgrade-db` | 依下面四步 |
+| 其他版本 | 照舊拒絕 |
+
+**升級的四步與失敗後的狀態**：
+
+1. **遷移前驗證**：以版本 1 的規則完整執行既有 `verify()`（唯讀）。失敗 → 不遷移、不寫入，仍是版本 1，拒絕開啟（與現在的損壞處理相同）。
+2. **備份**：`VACUUM INTO '<db>.schema1-<UTC 時間>.bak'`，在同一把資料庫鎖內，產生一致的單檔快照（權限 0600）。失敗 → 不遷移，仍是版本 1，拒絕開啟。
+3. **遷移交易**：`CREATE TABLE host_runs`，`user_version = 2`，一次提交。失敗 → 回滾，仍是版本 1，拒絕開啟；備份檔保留。**提交時點**就在這一步結束。
+4. **遷移後驗證**：以版本 2 的規則執行 `verify()`。失敗 → 資料庫已是版本 2，拒絕服務。恢復方式是由人工把第 2 步的備份檔換回原路徑（文件寫明命令），程式不自動還原、不降版。因為遷移只新增一張空表，第 1 步已通過時第 4 步理論上不會失敗，但仍明定處理。
+
+**3.2 開發與測試**一律使用新的資料庫。既有展示資料庫（例如 `var/apa-demo-fake.db`）的升級由 Aaron 另行確認，不默認執行（13.8.6）。
+
+#### R3：重送查詢與寫入分開
+
+**問題**：T1 經過既有 `write()`，而 `write()` 在查 request ID 之前就做時鐘檢查。時鐘倒退時，連重送既有請求都會被拒絕。
+
+**修訂後的 `POST /api/host/runs` 處理順序**：
+
+1. 認證（operator）與第 6.2 節的請求防護；body 格式檢查：`request_id` 符合格式，`scenario` 符合 `^[a-z0-9-]{1,32}$`。這一步只檢查格式，**不檢查情境是否在目前目錄中**。
+2. **唯讀查詢**（Store 的讀取連線，不經 `write()`、不做時鐘檢查）：依 `request_id` 找場次。
+   - 找到、情境 id 相同 → 回 200 與原場次（含持久狀態與記憶體狀態）。**即使該情境已從目前目錄下架**，也照樣查回，不重新執行。
+   - 找到、情境 id 不同 → 409 `request_id_conflict`，不寫入。
+3. 沒找到，才適用目前的設定：
+   - 情境不在目前目錄 → 400 `unknown_scenario`；
+   - host 記憶體中有進行中的場次 → 409 `run_active`。
+4. **寫入交易**（經 `write()`，含時鐘檢查）：在交易內**再查一次** `request_id`。若已存在（並發的同 ID 請求先寫入了），就不寫，依第 2 步的規則回應。否則配發 task、插入列、提交。時鐘倒退 → 503 `store_unavailable`（代碼 `CLOCK_REGRESSION`），什麼都沒寫。
+5. 提交後才啟動程序，回 202。
+
+`GET /api/host/runs/{run_id}` 與清單也是唯讀查詢，不受時鐘檢查影響。
+
+#### R4：控制請求延續 3.1 的世代規則
+
+**operator 的角色驗證**：
+
+- `GET /api/host/status` 的回覆加上 `caller_role`（`host` 或 `operator`），只表示呼叫者自己的角色，不含 token。
+- 載入檔案時：
+  - host token 必須得到 `caller_role = host`；
+  - operator token 必須得到 `caller_role = operator`；
+  - 每個 viewer token 照 3.1 的方式驗證。
+- 角色對不上就整個檔案不採用。operator token 只用於 `/api/host/status` 與 `/api/host/runs*`。
+
+**開始／停止回應的世代檢查**（`hostcreds` 的世代，與 3.1 相同）：
+
+| 規則 | 內容 |
+|---|---|
+| 記下世代 | 送出開始或停止時，記下當時的世代 `g` 與 request ID |
+| 回應不屬於目前世代 | 丟棄：不切換 consumer、不登入 viewer、不開啟 task、不更新場次面板、不顯示「已開始」 |
+| 401 | 只在屬於目前世代時才清除全部憑證（與 3.1 相同） |
+| 重送 | 只在同一世代內、用同一個 request ID；世代一變就停止重送，**不會**把它重送成新場次 |
+| 新 request ID | 只在主持人按下新的「開始」時產生 |
+
+**清除瀏覽器憑證不等於撤回伺服器已受理的場次**：
+
+- 伺服器上的場次照常執行到結束（或由主持人重新載入憑證後按「停止」）。
+- 重新載入檔案後，最近場次清單照實列出它，但頁面**不會**自動切換過去；只有目前世代收到的開始回應，才會自動開啟新 task。
+
+**正常的自動開啟流程**（目前世代）：
+
+1. 開始回應 202（或重送得到 200）且世代相同；
+2. 以該場 consumer 的 viewer token 呼叫 `useViewer`；
+3. viewer 確認後（`app.js` 自己的世代仍相同），開啟 `task_id`；
+4. 任何一步發現世代改變就停止。
+
+#### 13.8.5 增補的測試計畫
+
+**Store**（`runs_test.go`、`recovery_test.go`）：
+
+- R1：
+  - 場次已受理、task 未建立、之後換掉 registry（移除該 task）→ 仍可開啟，場次顯示中斷，綁定取自場次列；
+  - 綁定不一致（偽造 `tasks` 或場次列）→ `CorruptError(host_runs)`；
+  - 第 13.8 節 R1 表格的每一條規則各一個反例；
+  - `--plan` 點到已保留的 task 被略過。
+- R2：
+  - 版本 1 沒有升級指示 → 拒絕，且檔案位元組不變；
+  - 遷移前驗證失敗 → 不遷移，仍是版本 1；
+  - 備份失敗 → 不遷移；
+  - 遷移交易失敗（掛鉤）→ 回滾，仍是版本 1，備份保留；
+  - 遷移後驗證失敗（掛鉤）→ 版本 2、拒絕服務，備份可換回並以版本 1 程式路徑驗證通過；
+  - 新資料庫直接是版本 2。
+- R3：
+  - 時鐘倒退時，既有 request ID 的重送仍回 200 與原場次，新 ID 回 503 且什麼都沒寫；
+  - 情境下架後，既有 ID 仍查回原場次，新 ID 用下架的情境回 400；
+  - 兩個同 ID 的請求並發，只有一列、一個程序（交易內二次確認）。
+
+**HTTP**：`caller_role` 的四種 token（無、viewer、host、operator）；operator 呼叫 `/api/viewer` 與 `/api/tasks/*` 回 403。
+
+**Node**（`hostcreds.test.mjs` 擴充）：
+
+- 含 operator 的檔案：角色對不上（host 與 operator 互換）→ 不採用；
+- 開始已送出 → 清除全部 → 回應才到：沒有切換 consumer、沒有登入、沒有開啟 task、面板不變；
+- 開始已送出 → 載入新檔 B → 舊回應才到：B 的狀態不變；
+- 舊世代控制請求的 401 不清除新憑證；
+- 世代改變後不再重送，也沒有產生新的 request ID；
+- 正常流程：目前世代的 202 → `useViewer` → 開啟 task；兩步之間世代改變則停止。
+
+**瀏覽器**（真 Unity Web 建置）：
+
+- 正常流程：開始 Ask → 自動切到 consumer-a，Unity 顯示新 task；
+- 用 `Fetch` 在**回應階段**扣住開始的回覆（伺服器已受理）→ 清除全部 → 放行：頁面沒有切換、沒有登入；
+- 重新載入檔案：清單列出那一場、沒有新場次、不自動切換；
+- 同樣的扣住 → 載入新檔 → 放行：新檔的狀態不變；
+- 重送（同 ID）得到同一場；
+- 停止回應的世代規則同上。
+
+**驗收條件增補**（接在第 13.6 節的 1–7 之後）：
+
+8. 恢復與驗證不依賴目前的 registry 或情境目錄；場次與 task 的綁定與收尾一致性有逐條檢查。
+9. 既有資料庫不會在沒有明確指示時被升級；遷移前驗證、備份、提交、遷移後驗證各階段失敗時，版本與恢復方式如上表。
+10. 既有 request ID 的查詢不受時鐘檢查與情境下架影響；新 ID 才套用目前設定與寫入檢查，交易內再次去重。
+11. 舊世代的控制回應不重新登入、不切換 consumer、不恢復畫面、不重送成新場次；正常流程會自動開啟新 task。
+
+**3.2 檔案增補**：
+
+- `internal/store/store.go`：遷移前驗證、`VACUUM INTO` 備份、`--upgrade-db` 的開檔選項；
+- `cmd/demo/main.go`：`--upgrade-db` 旗標，預設關閉；
+- `cmd/demo/status.go`：`caller_role`；
+- `cmd/demo/fakeruns.go`：`task_reserved_by_run`；
+- `web/hostcreds.js`：控制請求的世代與重送。
+
+#### 13.8.6 需要 Aaron 決定的事項
+
+- **既有展示資料庫是否升級到 schema 2**：例如 `var/apa-demo-fake.db`。
+  - 預設：不升級，3.2 使用新的 `APA_DB_PATH`；
+  - 若要升級：由 Aaron 確認後，以 `--upgrade-db` 執行一次，並保留自動產生的備份檔。
+  - 這不阻擋 3.2 的開發與測試。
+- 其他：無。
