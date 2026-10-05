@@ -683,7 +683,7 @@ try {
     if (!(await b.waitFor(`!!${sel} && !${sel}.disabled`, 20000))) throw new Error("scenario button " + id + " never enabled");
     return b.evaluate(`${sel}.click()`);
   };
-  const runItem = (task) => `[...document.querySelectorAll("#runs li")].find((l) => l.textContent.startsWith(${JSON.stringify(task)}))?.textContent || ""`;
+  const runItem = (task) => `([...document.querySelectorAll("#runs li")].find((l) => l.textContent.startsWith(${JSON.stringify(task)}))?.textContent || "")`;
 
   // Normal flow: start Ask, the page switches to consumer-a and opens the new task.
   await clickScenario("ask");
@@ -749,13 +749,15 @@ try {
 
   // Restart on the same database and address: the runs stay, nothing reruns.
   const before = (await runsOf()).map((r) => r.run_id + r.state).sort().join();
+  log("  runs before the restart: " + (await runsOf()).map((r) => r.task_id + "/" + r.state + "/" + (r.live || "-") + "/" + (r.outcome || "-")).join(" "));
   await cd.stop();
   cd = startDemo(ctlState, null, unityBuild, ctlArgs, cAddr);
   await cd.ready();
   ct = cd.tokens();
   allTokens.push(ct.a, ct.b, ct.host, ct.op);
   check("3.2: after a restart the page's credentials are cleared (401)", await b.waitFor(`document.getElementById("creds").dataset.mode === "none"`, 20000));
-  check("3.2: after a restart the runs are kept and nothing reruns", (await runsOf()).map((r) => r.run_id + r.state).sort().join() === before && !cd.log().includes("demo: run "));
+  const after = (await runsOf()).map((r) => r.run_id + r.state).sort().join();
+  check("3.2: after a restart the runs are kept and nothing reruns", after === before && !cd.log().includes("demo: run "), before + " -> " + after + (cd.log().includes("demo: run ") ? " (a run started)" : ""));
   await cd.stop();
 
   // No Unity build: the page says so and shows no other shop.
