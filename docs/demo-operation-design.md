@@ -510,30 +510,61 @@ review 結論：3.1 暫不通過，需修三處，不只是補跑容器。Codex 
 
 ### 12.7 驗收紀錄：切片 3.1 於 `b2b7daa` 通過限定範圍技術 review（2026-10-05）
 
-依據：Codex 對 `b2b7daa` 的限定範圍 review，由 Aaron 於對話中轉交。
+依據：Codex 對 `b2b7daa` 的限定範圍 review（Aaron 於對話中轉交），以及 vault 筆記 `Claude-Code-B1-06-交付點3.1驗收文件同步指示-b2b7daa-20261005`。
 
-**結果**：
+**結論**：B1-06 交付點 3.1 於 `b2b7daa` 通過 Codex 限定範圍技術 review，R1～R3 關閉，未發現新的阻擋問題。
 
-- R1（舊 viewer JSON 晚到）、R2（未送出的 token 未清除）、R3（腳本測試缺 TMPDIR）關閉；
-- 未發現新的阻擋問題；
-- B1-06 交付點 3.1（一鍵啟動、主持人唯讀頁、token 檔載入、就緒面板）通過技術 review。
+- 通過範圍：一鍵啟動、主持人唯讀頁、token 檔載入、憑證清除與世代控制、就緒面板。
+- 此結論不代表 B1-06、M1 或真實模型／付款流程整體完成。
+
+**關閉理由**：
+
+| 項 | 已確認的修正 |
+|---|---|
+| R1 舊 viewer JSON 覆蓋新身分 | `useViewer()` 讀完 JSON 後再次核對世代；切換、清除或 `pagehide` 後的舊結果不再提交到畫面。這是前端身分殘留，沒有證據顯示後端跨 consumer 授權被繞過 |
+| R2 尚未送出的 token 未清除 | `forget()` 清空輸入欄位；手動登入先取出並清空輸入值，再清除主持人頁載入的憑證，最後登入。正常登入仍可用 |
+| R3 腳本測試漏掉 TMPDIR | 子程序使用測試自己的短暫存路徑；在唯讀容器內可正常執行，不需開放 `/tmp` 或放寬檔案系統限制 |
 
 **證據歸屬**：
 
-| 類別 | 內容 |
-|---|---|
-| Codex 獨立執行（斷網、唯讀容器） | 舊 JSON、憑證清除、手動登入探測各三輪；JS 測試 24 項；`cmd/demo`、`internal/store` race 測試；啟動腳本、就緒端點與到期觀測回歸三輪；全部通過 |
-| Claude Code 執行、Codex 核對紀錄 | 108 項真實瀏覽器檢查（`ui-b2b7daa6c02d-20261005T093935Z`）、完整容器七步、222／222 突變與 17 項隔離檢查（`b2b7daa6c02d-20261005T095032Z`）、反向驗證（`reversal-b2b7daa6c02d`、`reversal-0252ceb13c30`、`checks-0252ceb13c30-…/hostcreds-reversal.*`） |
+**Codex 獨立執行**：在斷網、唯讀容器內，用 `b2b7daa` 的乾淨暫存副本執行；使用 fixture，不執行真實 CLI。
 
-這些 Claude Code 執行的項目**不是** Codex 重跑的。
+- 受控 JS 探測各三輪：舊 JSON 在切換 consumer、清除與 `pagehide` 之後才完成，不恢復舊身分或選單。
+- 未送出 token 的清除與 `pagehide` 探測各三輪，以及清除主持人憑證後仍能手動登入的正向對照，全部通過。
+- `node --test web/test/hostcreds.test.mjs web/test/adapter.test.mjs`：24 項通過。
+- `go test -race ./cmd/demo ./internal/store -count=1 -timeout=240s`：兩個套件通過。
+- `go test -race ./cmd/demo -run 'TestStartScript|TestHostStatus|TestExpiryHealth' -count=3 -timeout=180s`：三輪通過。
+- 這些 JS 探測使用 DOM 與非同步回呼的替身，不等於 Codex 獨立操作真實瀏覽器。reviewer 的探測沒有加入正式 repo。
 
-**保留**：
+**Claude Code 執行、Codex 核對紀錄**（**不是** Codex 重跑）：
 
-- 失敗嘗試：見第 12.5、12.6 節。
-- 未測：
-  - 只用 Chrome；
-  - `pagehide` 後的晚到回應以事件模擬；
-  - Unity 不在容器內。
-- 限制：場次仍依啟動時的固定計畫自動執行；開始／停止控制、新場次配發與場次持久化屬 3.2–3.4，尚未開始。
+- 真實瀏覽器 108 項檢查：`artifacts/b1-06/ui-b2b7daa6c02d-20261005T093935Z/`。
+- 完整容器七步全部 exit 0、222／222 突變被測試抓到、17 項隔離檢查：`artifacts/verify-container/runs/b2b7daa6c02d-20261005T095032Z/`。
+- Node 與 Go race 測試：`artifacts/b1-06/checks-b2b7daa6c02d-20261005T093834Z/`。
+- R1～R3 的反向驗證：`artifacts/b1-06/reversal-b2b7daa6c02d/`。
+  - R1 四項失敗；
+  - R2 六項失敗，其中兩項是連帶的登入失敗；
+  - R3 舊版三個案例失敗、修正版通過。
+- `0252ceb` 實作時的反向驗證：`artifacts/b1-06/reversal-0252ceb13c30/`、`checks-0252ceb13c30-20261005T090324Z/hostcreds-reversal.*`。
 
-B1-04／B1-06 整體維持 InProgress；不合併、不標 Done、不開始 3.2。
+**Unity**：本輪沒有修改，也沒有重建。瀏覽器沿用 `eda6469` 那次建置（雜湊相同），不算新一輪的 Unity 驗證。
+
+**歷史保留**：
+
+- `0252ceb` 當時 Docker 未啟動，沒有完成完整容器驗證。這筆紀錄保留；後來的通過結果屬於 `b2b7daa`，不倒填到 `0252ceb`。
+- 第 12.1–12.6 節的「待 review」是寫作當時的狀態；失敗嘗試見第 12.5、12.6 節。
+
+**保留的限制**：
+
+- 一個指令 `make demo` 啟動，再到 `/host` 載入本機 token 檔；不必每次重建 Unity 或跑驗證容器。
+- 仍使用 fake CLI，啟動時依固定計畫自動執行 task-a／task-b；沒有主持人「開始」控制，也不能連續配發新場次。
+- 不代表真實模型請購、付款、WebAuthn 或整體 M1 已完成。
+- 只在 Chrome 驗證。晚到回應與 `pagehide` 的部分情境用受控模擬（事件模擬、扣住的請求或 JSON）；真實離開再返回另有一項檢查。兩者分開記錄。
+- Unity 不在容器內。
+
+**下一步**：
+
+- 3.2–3.4 的控制與持久化設計仍待修訂及 review，未核准實作。
+- 第二版的 JSONL 方案未獲接受；不因 3.1 通過而實作 JSONL 或新增 SQLite 協調表。
+
+B1-04／B1-06 整體維持 InProgress。交付點 3.1 標為技術 review 通過；不合併、不標 Done、不開始 3.2。
