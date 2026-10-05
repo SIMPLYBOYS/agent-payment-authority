@@ -837,3 +837,20 @@ func TestEndRunChecksTheStore(t *testing.T) {
 		}
 	})
 }
+
+// migrate's own refusal of schema 1 is the second layer behind Open's
+// version check (review R1): reached directly here, since Open stops first.
+func TestMigrateRefusesSchema1(t *testing.T) {
+	e := newEnv(t)
+	schema1(t, e)
+	db, err := sql.Open("sqlite", e.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{path: e.path, w: db}
+	defer db.Close()
+	wantCode(t, s.migrate(false), "SCHEMA_UPGRADE_REQUIRED")
+	if userVersion(t, e.path) != 1 || count(t, e.path, "sqlite_master", "name = 'host_runs'") != 0 {
+		t.Fatal("migrate changed a schema 1 file without the upgrade")
+	}
+}
