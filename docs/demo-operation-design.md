@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-05）：**第二版設計提案，待 Codex review；尚未核准實作。** 第一版 `7bb4695` 經 Codex review：方向可行，需補四處——開始的重複請求、程序／task／收尾三種狀態、3.1 的 token 細節、取消端點權限。本版依此修訂：第 4、6、7、8 節改寫，新增第 6.3 節（3.1 細部規格），修訂紀錄見第 11 節。設計基準 `7bb4695`，程式基準仍是已驗收的 `6aee7f0`。
+狀態（2026-10-05）：**切片 3.1 已實作於 `0252ceb`（Claude Code 執行，待 Codex 獨立 review；實作紀錄見第 12 節）。** 3.1 的設計經 Codex 對 `7d11894` 的 review 通過，Aaron 10/5 核准實作（vault 筆記 `Claude-Code-B1-06-交付點3.1設計驗收與實作指示-7d11894-20261005`）。**3.2–3.4 的控制、恢復與場次持久化仍待設計修訂與 review**：第 4 節的場次日誌（JSONL）未通過 review，見該節標註。3.5 未啟動。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -100,6 +100,12 @@ make demo                         (一個指令：檢查 → 編譯 Go → 啟�
   - 新 ID、沒有進行中的場次：配發 task，寫日誌 `accepted`，然後才啟動。日誌寫不進去就回 `503 run_journal_unavailable`，不配發、不啟動。
 - 第一場很快結束、回覆遺失、主持人再送一次：仍是同一個 ID，所以拿回同一場，不會建立第二場。按鈕停用只是輔助。
 - 頁面重新整理會失去 request ID，下一次按鈕就是新的操作。為了避免主持人不知道上一場已建立，主持人頁面一律列出最近場次（`GET /api/host/runs`），開始前先看得到上一場。
+
+> **待修（Codex 對 `7d11894` 的 review）**：本段的 JSONL 場次日誌未通過 review，不得據此實作。原因有二：
+> 1. 「只追加」「不修補」「略過不完整尾行後繼續服務」互相衝突：半行留著，再追加就會黏在一起。
+> 2. SQLite 與日誌缺少配對與恢復規則：日誌遺失或只還原資料庫時，request ID 的去重會消失；`ended` 寫入失敗也還沒有定義。
+>
+> 建議方向是在既有 SQLite 中另設獨立的協調資料表，但仍要先提出一致性與恢復設計。這只是後續設計方向，不是新增資料表的授權。以下保留第二版原文作為歷史。
 
 **場次日誌**（新，host 自己的檔案，不在 Store 內，不改 Store 語意）：
 
@@ -265,7 +271,7 @@ token 不寫入 localStorage、sessionStorage、cookie、URL、console 或 Unity
 
 在 `/host` 上，viewer 的 401 也一律清除全部憑證：同一個檔案裡的其他 token 也已過期。`/` 頁維持現有行為，只清除那位 viewer。
 
-**就緒端點 `GET /api/host/status`（3.1，host 唯讀）的回覆**只有固定欄位，不含 token、檔案路徑或 CLI 文字：
+**就緒端點 `GET /api/host/status`（3.1，host 唯讀）的回覆**只有固定欄位，不含 token、檔案路徑或 CLI 文字。下例是第二版的草案；實作的欄位以第 12 節為準（Store 的狀態改為 `unconfirmed`／`ok`／`error`，fake CLI 不回版本文字）：
 
 ```json
 {"http":"ok","store":{"state":"ok","last_expiry_error":""},"fake_cli":{"state":"ok","version":"fake-claude …"},
@@ -386,3 +392,91 @@ token 不寫入 localStorage、sessionStorage、cookie、URL、console 或 Unity
 - demo registry 與契約 fixture 分開；
 - 每位 consumer 20 個 task，是 M1 暫時限制；
 - 正常展示不跑 Docker、不重建 Unity。
+
+## 12 切片 3.1 實作紀錄（Claude Code 執行，待 Codex 獨立 review；程式 `0252ceb`）
+
+依據：第 3、6.3 節，加上實作指示的三項條件：非同步世代控制、`pagehide` 主動清除、就緒不假設成功。
+
+### 12.1 如何操作
+
+```sh
+make demo        # 檢查 Unity 建置與 LimeZu 匯入 → 編譯 Go → 啟動 host；印出 http://127.0.0.1:8402/host
+```
+
+1. 開啟 `http://127.0.0.1:8402/host`，按「載入本機 token 檔」，選 `var/demo-tokens.json`。
+2. 就緒面板顯示各項狀態；按「以 consumer-a 查看」或「以 consumer-b 查看」切換 viewer，再選 task。
+3. 「清除全部憑證」丟掉所有 token 與畫面；在下方貼一個 viewer token，即進入手動 viewer 模式，會先清除已載入的檔案。
+
+**限制**：
+
+- 啟動時仍依固定計畫自動跑 task-a（Ask）、task-b（Deny），與 `make demo-integration` 相同。
+- 沒有「開始」按鈕，也不能連續建立新場次；那是 3.2／3.3 的範圍。
+- `/host` 是唯讀頁，不能啟動、停止或改動 task。
+
+### 12.2 修改
+
+| 檔案 | 內容 |
+|---|---|
+| `Makefile`、`scripts/demo/start.sh` | `make demo`。缺建置或缺匯入只提示、不中止；`go build` 兩個二進位，再 `exec` host（同一份計畫）。不建 Unity、不跑測試或 Docker、不印 token；啟動被拒時保留 host 的訊息與 exit code。`APA_DEMO_BIN`、`APA_UNITY_PROJECT` 供測試使用 |
+| `internal/store/ops.go` | 新增 `RunExpiryReporting`：同一個迴圈，每完成一次 `ExpireDue` 就回報結果（成功為 nil）。`RunExpiry` 改為呼叫它，只在錯誤時轉給原本的 `onErr`，行為不變。沒有第二個 worker，也沒有新的寫入 |
+| `cmd/demo/status.go`、`main.go`、`api.go`、`ui.go` | `GET /api/host/status`（只接受 host token；viewer 403、無 token 401，沿用 Host／Origin 檢查）；`GET /host` 頁；記錄 worker 結果的 `expiryHealth` |
+| `web/host.html`、`web/host.js` | 主持人頁：同一套 Dashboard 與 Unity 商店，加上 token 檔、consumer 切換、清除全部、手動 viewer 模式、就緒面板（每 5 秒，頁面可見時） |
+| `web/hostcreds.js` | 不含 DOM 的憑證與世代邏輯：檔案檢查、向伺服器確認、世代、401 的套用規則、就緒讀取 |
+| `web/app.js` | 匯出 `forget`、`useViewer`、`onUnauthorized`、`unityInfo` 給 `/host`；`pagehide` 改為呼叫 `forget()`（清 token、停輪詢、作廢回放、清畫面與 Unity）。`/` 頁的行為除此之外不變 |
+| `web/style.css`、`web/embed.go` | 主持人頁樣式；嵌入並列名 `host.html`、`host.js`、`hostcreds.js` |
+
+### 12.3 就緒狀態的定義（條件三）
+
+`store` 欄位：
+
+| 欄位 | 意義 |
+|---|---|
+| `state` | **最近一次完成的到期檢查**的結果：`unconfirmed`（還沒有任何一次完成，不顯示成功）、`ok`、`error` |
+| `checked_at` | 那一次完成的時間（Store 時鐘） |
+| `last_error`、`last_error_at` | 曾經發生過的最近一次錯誤代碼與時間。之後成功，`state` 會回到 `ok`，但這兩欄保留，頁面寫「之後已恢復」 |
+| `target_period_seconds` | worker 的目標週期（預設 1）；頁面註明這不是延遲保證 |
+
+- 沒有 Store 代碼的錯誤記成固定代碼 `STORE_ERROR`；原文仍只寫在 host 的 log。
+- `GET /api/host/status` 只讀記憶體中的紀錄、檢查四個建置檔是否存在，不呼叫 Store 的任何方法，所以不會觸發到期或寫入。
+- `fake_cli` 只回 `ok`／`off`（啟動時 `--version` 檢查通過與否），不回版本文字，以免把 CLI 輸出放進回覆。
+
+### 12.4 非同步世代與 pagehide（條件一、二）
+
+- 每次載入、清除全部、手動 viewer 模式、`pagehide`，`hostcreds` 都開新世代，並中止上一世代的請求。
+- 讀檔、每一個確認請求、就緒讀取，在提交結果前都核對世代。
+- 401 只在屬於目前世代時才清除全部，所以舊請求的 401 清不掉新憑證。
+- Dashboard 的 viewer 請求本來就有 `app.js` 自己的世代；每次憑證換世代時，`host.js` 也會呼叫 `forget()` 清掉畫面。
+- `pagehide`：
+  - `host.js` 清除全部憑證、停止就緒輪詢；`app.js` 清除 viewer token、停止 task 輪詢、作廢回放、清除 Dashboard 與 Unity。
+  - 回到頁面（bfcache 或重新載入）不會自動恢復，要重新選檔。
+  - 這是應用程式不再持有或使用憑證；不宣稱瀏覽器記憶體被安全覆寫。
+
+### 12.5 測試與證據（Claude Code 執行，待 Codex 獨立 review；全部在 `0252ceb`）
+
+| 驗收點 | 測試 | 命令 | exit | 時間 | 證據 |
+|---|---|---|---|---|---|
+| 檔案檢查（大小、格式、角色、重複、伺服器確認、清空欄位）；世代：A 載入中清除、讀檔未完成時清除、A／B 交錯（晚到成功與晚到 401）、B 成功後舊 A 的 401、手動模式後舊驗證完成、舊就緒讀取、目前世代的 401、pagehide 後的晚到驗證 | `web/test/hostcreds.test.mjs` 13 項（另含 adapter 11 項） | `node --test web/test/adapter.test.mjs web/test/hostcreds.test.mjs`（已加入 `make check-contracts`） | 0 | 1 秒內 | `artifacts/b1-06/checks-0252ceb13c30-20261005T090324Z/` |
+| status 權限、回覆不含 token 與路徑、建置檔狀態、`unconfirmed`／`ok`／`error`／恢復、worker 未跑時 `unconfirmed`、50 次查詢不改事件與資料庫檔案、`/host` 頁與 `/` 沒有選檔、腳本（埠佔用、資料庫鎖住、缺建置與匯入的訊息、啟動後不印 token、SIGTERM 結束） | `cmd/demo/status_test.go` | `go test -race -count=1 -v ./cmd/demo ./internal/store` | 0 | 53 秒 | 同上 |
+| 實際瀏覽器（真 Unity Web 建置）：第 6.3 節與三項條件，共 31 項 3.1 檢查。用 CDP `DOM.setFileInputFiles` 選檔，用 `Fetch.requestPaused` 真的扣住確認請求來製造交錯；真的重啟 host（同一位址）造成 401；`pagehide` 用事件模擬，加上真的離開後返回 | `scripts/verify/browser-ui.mjs`（全部 96 項） | `node scripts/verify/browser-ui.mjs` | 0 | 119 秒 | `artifacts/b1-06/ui-0252ceb13c30-20261005T090424Z/`（含 `desktop-host-ready.png`） |
+| 反向驗證 | 拿掉 `hostcreds` 的世代檢查：Node 13 項中 8 項失敗；瀏覽器 3 項 FAIL（B 被清掉、手動模式被覆寫）。`pagehide` 改回舊行為、`/host` 不處理：瀏覽器 3 項 FAIL（離開後仍持有 token 與畫面、仍在輪詢、返回時仍在） | 同上，在拋棄式 worktree | 1（預期） | — | `artifacts/b1-06/checks-0252ceb13c30-20261005T090324Z/hostcreds-reversal.*`、`artifacts/b1-06/reversal-0252ceb13c30/` |
+| Unity | 未修改（`6aee7f0..0252ceb` 沒有改到 `unity/`）；瀏覽器載入的建置檔 sha256 與 `eda6469` 那次建置相同，所以沒有重建或重跑 Unity 測試 | — | — | — | `checks-…/webgl-loaded.sha256` |
+| 完整容器（Go／JS＋fake 回歸） | **尚未執行**：Docker daemon 未啟動。開啟 Docker 後對 `0252ceb` 補跑一次，結果補記於此 | `sh scripts/verify/container-verify.sh 0252ceb…` | 1（未啟動） | 2 秒 | `artifacts/b1-06/container-0252ceb.log` |
+
+說明：
+
+- 瀏覽器反向驗證中，「A 載入中按清除全部」這一項在拿掉世代檢查後仍通過。原因是瀏覽器真的中止了 A 的請求，結果和清除一樣。這種情況由 Node 測試證明：那裡的晚到回覆無法被中止，拿掉檢查就失敗。
+- `go test -race -count=1 ./...` 全部套件在本機也通過（108 秒，未另存證據）。
+
+**失敗嘗試（保留）**：
+
+- `start.sh` 第一版的 `"$missing）"`：shell 把全形括號當成變數名稱的一部分，`set -u` 下中止。所有變數已改用 `${…}`。
+- `TestExpiryHealth` 第一次失敗：`store.Code` 對沒有 Store 代碼的錯誤回空字串，最近錯誤會變成空白。已改為記 `STORE_ERROR`。
+- 腳本測試第一次的呼叫參數錯置：測試本身的錯誤，已修正。
+- hostcreds 測試 12 第一次失敗：模擬重啟時沒有讓舊 token 失效，伺服器替身回了 403 而不是 401。這是測試本身的錯誤。
+- 容器驗證第一次沒有執行：Docker daemon 未啟動（`artifacts/b1-06/container-0252ceb.log`）。
+
+**未測**：
+
+- 只用 Chrome（SwiftShader）。
+- `pagehide` 的晚到回應用事件模擬；真的離開與返回只確認不會自動恢復。
+- 腳本的 Store 恢復失敗情境只沿用 host 既有測試，腳本本身只原樣轉出 exit code。
