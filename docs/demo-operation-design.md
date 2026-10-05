@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-05）：**VerifyFile 鎖規則補充完成（第 13.13 節）；注入失敗與持久資料不一致已於 §13.12 分開記錄。兩項設計修訂均已交付，待 Codex 限定 review；尚未核准 3.2 實作。** 第三版控制與持久化設計（第 13 節）的 R1–R4 已關閉。同一 SQLite 內保存場次協調資料的方向已獲接受，取代第 4 節未接受的 JSONL 場次日誌。切片 3.1 已於 `b2b7daa` 通過 Codex 限定範圍技術 review（第 12.7 節）。3.2–3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節保留當時的寫法，「待 review」是寫作當時的狀態。
+狀態（2026-10-05）：**VerifyFile 共同鎖設計已獲接受；恢復命令範例與案例 B 的驗證預期已修訂（第 13.14 節），待 Codex 限定 review。3.2 尚未核准實作。** 第三版控制與持久化設計（第 13 節）的 R1–R4 已關閉；注入失敗與持久資料不一致已於 §13.12 分開記錄。同一 SQLite 內保存場次協調資料的方向已獲接受，取代第 4 節未接受的 JSONL 場次日誌。切片 3.1 已於 `b2b7daa` 通過 Codex 限定範圍技術 review（第 12.7 節）。3.2–3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節保留當時的寫法，「待 review」是寫作當時的狀態。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -998,7 +998,7 @@ review 結論：R3、R4 關閉；R1、R2 方向正確，各補一處。本節只
   - `EndRun` 傳入缺欄位、`task_started` 為 NULL、未知 `outcome`、未知 `store_end`、`store_end` 與 `store_end_error` 同時有值、`skipped` 卻 `task_started = 1`、`cancelled` 配 `TASK_TIMED_OUT`、`detail` 含非代碼字元：每一種都回 `INVALID_RUN_RECORD`，資料表不變。
   - 對 `ended` 或 `interrupted` 的列呼叫 `EndRun` 或 `InterruptOpenRuns`：不覆寫，前者回 `RUN_NOT_OPEN`。
 - 約束：直接以 SQL 插入「`ended` 但 `task_started` 為 NULL」「`ended` 但 `outcome` 為 NULL」「`accepted` 但 `ended_at` 有值」「`interrupted` 但 `outcome` 有值」，都被 CHECK 擋下。
-- 恢復驗證：用測試連線開啟 `PRAGMA ignore_check_constraints = ON`，寫入上面各種不完整、矛盾或未知代碼的列（包括 review 舉的 `ended`／`ended_at` 有值／`task_started` NULL／`outcome` NULL）。重新開啟後每一種都是 `CorruptError(host_runs)`，並指出該列。
+- 恢復驗證：用測試連線開啟 `PRAGMA ignore_check_constraints = ON`，寫入上面各種不完整、矛盾或未知代碼的列（包括 review 舉的 `ended`／`ended_at` 有值／`task_started` NULL／`outcome` NULL）。重新開啟後每一種都是 `CorruptError(host_runs)`，並指出該列。（已由第 13.14.2 節修訂：違反 CHECK／NOT NULL 形狀的列可能先被 `integrity_check` 拒絕，預期改為「結構檢查拒絕」，不指定 `host_runs`；只有通過 CHECK、但違反清單或組合規則的列才預期 `CorruptError(host_runs)`）
 
 #### 13.9.2 R2：遷移後驗證失敗的恢復程序
 
@@ -1080,7 +1080,7 @@ review 結論：原本的 R1、R2 缺口可關閉。13.9.1 新增的 `detail` �
     - `prepare_failed:` 後面是空字串或小寫；
     - 含空白或換行；
     - 超過 64 字元。
-  - 恢復驗證：以 `ignore_check_constraints` 直接寫入上述各種值，重新開啟時為 `CorruptError(host_runs)`。
+  - 恢復驗證：以 `ignore_check_constraints` 直接寫入上述各種值，重新開啟時為 `CorruptError(host_runs)`。（已由第 13.14.2 節修訂：`detail` 的清單不在 CHECK 中，這些值不必略過 CHECK，直接寫入即可）
 - **正規化**：buyer 回報不在清單的代碼時（測試替身），資料表存 `detail_unlisted`，log 有原代碼，場次照常 `ended`。
 - **同步測試**：在清單中刪去一個 buyer 代碼，掃描測試失敗（反向驗證）。
 
@@ -1285,6 +1285,8 @@ R2 的「遷移前驗證」（13.8 第 1 步）是 host 本身持有鎖、準備
 
 #### 案例 B：持久資料真的不一致
 
+> **已由第 13.14.2 節修訂**：下面以 NULL 欄位作為反例，但違反 NOT NULL／CHECK 的列可能先被 `integrity_check` 拒絕（check 名為 `integrity`），無法保證命中 `host_runs` 檢查。改用結構合法、只有 `outcome` 不在清單內的反例。原文保留為歷史。
+
 1. **另一份拋棄式資料**，與案例 A 的檔案分開，不修改案例 A 的任何檔案：
    - 依案例 A 的第 1 步準備，但子程序的遷移後驗證**不注入失敗**；
    - 子程序在提交遷移後，用測試連線開啟 `PRAGMA ignore_check_constraints = ON`，寫入一筆明確違反恢復規則的 `host_runs` 列：`state = 'ended'`、`ended_at` 有值、`task_started` 為 NULL、`outcome` 為 NULL（§13.9.1 表格的反例）。
@@ -1309,7 +1311,7 @@ R2 的「遷移前驗證」（13.8 第 1 步）是 host 本身持有鎖、準備
 
 > 15：殘留 WAL 測試以隔離子程序的非正常退出產生 WAL，在程序結束後取基準；兩個案例都斷言 WAL 存在，且含有尚未進入主檔的內容，不符合時測試失敗。
 > - 案例 A：注入的遷移後驗證失敗，持久資料完整；重新驗證時不安裝掛鉤，`VerifyFile` 回報 schema 2 並通過，來源不變。
-> - 案例 B：另一份資料真的違反恢復規則；正式的 `VerifyFile` 以 `CorruptError(host_runs)` 拒絕並指出該列，來源不變。
+> - 案例 B：另一份資料真的違反恢復規則；正式的 `VerifyFile` 以 `CorruptError(host_runs)` 拒絕並指出該列（案例 B 的輸入與前置確認已由第 13.14.2 節修訂），來源不變。
 
 **實作注意**：
 
@@ -1353,15 +1355,11 @@ R2 的「遷移前驗證」（13.8 第 1 步）是 host 本身持有鎖、準備
 - 失敗資料庫的主檔、`-wal`、`-shm` 與原鎖檔都不修改。
 - 新副本的共同鎖若已被持有（例如有人已用它啟動 demo），`VerifyFile` 照樣拒絕，不因為它是恢復副本而略過。
 
-操作說明中的指令（範例）：
+操作說明中的指令範例：**已移除**（依 Codex 對 `67f63e3` 的 review，見第 13.14.1 節）。
 
-```sh
-d=var/restore-$(date -u +%Y%m%dT%H%M%SZ)            # 必須是新目錄
-mkdir -m 700 "$d"
-cp <備份檔> "$d/demo.db" && chmod 600 "$d/demo.db"
-: > "$d/demo.db.lock" && chmod 600 "$d/demo.db.lock"   # 新副本的共同鎖
-bin/demo --verify-db "$d/demo.db"
-```
+原範例逐行執行 `mkdir`、`cp`、建立鎖檔與驗證，但沒有在每一步失敗時中止。目錄已存在時，後續命令仍可能覆寫既有的資料庫或截斷鎖檔，與本節「目標已存在就拒絕、不覆寫」互相矛盾。
+
+3.2 實作後，才提供經測試驗證的操作命令。在那之前，恢復步驟以第 13.14.1 節的文字為準。
 
 #### 13.13.4 合作式鎖的限制
 
@@ -1394,3 +1392,76 @@ bin/demo --verify-db "$d/demo.db"
 > - 文件寫明合作式鎖的限制。
 
 其他設計（R1–R4、案例 A／B、`detail` 清單、全輸出固定值、SQLite 架構、Policy）不變。既有展示資料庫預設不升級（13.8.6），沒有新增需要 Aaron 決定的事項。
+
+### 13.14 恢復步驟與案例 B 修訂（依 vault 筆記 `Claude-Code-B1-06-恢復範例與案例B修訂指示-67f63e3-20261005`；設計提案，待 Codex 限定 review）
+
+review 結論：§13.13 的共同鎖規則已接受。本節只修兩處，不重做鎖規則與案例 A。
+
+#### 13.14.1 恢復副本的建立步驟（取代 §13.13.3 已移除的命令範例）
+
+原本的 shell 範例沒有在每一步失敗時中止，已整段移除，不保留可直接複製執行的命令。3.2 實作後才提供經測試驗證的操作命令。
+
+**步驟**（依序執行，任何一步失敗就**立即停止**，不做後面的步驟，也不啟動服務）：
+
+1. **建立全新的私有目錄**（權限 0700）。目錄已存在或建立失敗 → 停止，不沿用既有目錄。
+2. **檢查目標**：新路徑的主檔、`-wal`、`-shm`、`.lock` 任一已存在 → 拒絕，不覆寫、不截斷。
+3. **複製備份**到新路徑的主檔，並設權限 0600。複製或設權限失敗 → 停止。
+4. **建立新副本的共同鎖** `<新路徑>.lock`：以「必須是新檔」的方式建立（檔案已存在就失敗，不截斷），權限 0600。失敗 → 停止。
+5. **只有第 1–4 步全部成功**，才對新路徑執行 `VerifyFile`（§13.13.2 的流程）。
+6. `VerifyFile` 通過後，才可用相容的舊版程式把 `APA_DB_PATH` 指向新路徑（§13.9.2 第 4 步）。
+
+- 整個過程中，原失敗資料庫的主檔、`-wal`、`-shm` 與原鎖檔都不修改。
+- 部分完成的新副本（例如已複製、但鎖檔建立失敗）**不得**顯示或回報為恢復成功；它留在原處作為未完成的紀錄，由操作者判斷是否刪除。
+
+**測試計畫**（本輪只寫計畫，未執行）：恢復步驟在測試中以一個函式實作（3.2），以測試掛鉤注入失敗。
+
+| # | 情境 | 預期 |
+|---|---|---|
+| R-1 | 目標目錄已存在（時間戳碰撞） | 停止；`VerifyFile` 未被呼叫；既有目錄內所有檔案的內容與 sha256 不變 |
+| R-2 | 備份複製失敗（掛鉤讓複製回錯誤） | 停止；`VerifyFile` 未被呼叫；不回報成功 |
+| R-3 | 鎖檔建立失敗（掛鉤，或目標已有 `.lock`） | 停止；`VerifyFile` 未被呼叫；預先存在的 `.lock` 內容不變（沒有被截斷） |
+| R-4 | 目標已有主檔、`-wal` 或 `-shm` | 拒絕；這些檔案的內容不變 |
+| R-5 | 全部成功 | `VerifyFile` 被呼叫一次並通過；原失敗資料庫的三個檔案與原鎖檔不變 |
+
+「`VerifyFile` 未被呼叫」以測試替身計數確認。
+
+#### 13.14.2 案例 B：改用結構合法、業務代碼不合法的反例
+
+**問題**：§13.12 案例 B 用 `ignore_check_constraints` 寫入 `ended` 但 `task_started`、`outcome` 為 NULL 的列，卻要求預期是 `CorruptError(host_runs)`。
+
+- 現行 `internal/store/verify.go` 先執行 `PRAGMA integrity_check`；失敗就回 check 名為 `integrity` 的 `CorruptError`，不會繼續到後面的業務一致性檢查。
+- SQLite 官方說明 `integrity_check` 也會檢查 CHECK 與 NOT NULL 的違反。
+- 所以這個輸入可能先被結構檢查拒絕，無法證明命中了 `host_runs` 檢查。
+
+**修訂後的案例 B**（取代 §13.12 案例 B 的第 1–4 步；案例 A 不變）：
+
+1. **案例 B 自己的拋棄式資料**：依案例 A 的第 1 步準備版本 1 的資料庫，子程序以 `--upgrade-db` 升級，遷移後驗證**不注入失敗**。接著子程序以 3.2 的正式路徑完成一場合法的場次：
+   - 受理（T1），task 由 `StartTask` 建立，事件正常；
+   - 以 `EndRun`（T4）寫成 `ended`，`outcome = ok`，其餘欄位、綁定、task 與事件全部一致。
+2. **只改一個值**：子程序以測試連線把這一列的 `outcome` 更新為清單外的固定測試值 `review_invalid_outcome`。
+   - `outcome` 的清單不在 SQLite 的 CHECK 中（§13.9.1），這個值符合 CHECK 與 NOT NULL，所以**不需要** `ignore_check_constraints`。
+   - 子程序印出確認行 `INVALID_OUTCOME_READY` 後阻塞；父程序 SIGKILL，等它結束、確認鎖已釋放，再取基準。
+3. **殘留 WAL 的有效性斷言**（不得略過，條件不成立就失敗）：
+   - `-wal` 存在且大小大於 0；
+   - 只有主檔的拋棄式副本**沒有** `review_invalid_outcome`；
+   - 主檔＋`-wal` 的拋棄式副本**有** `review_invalid_outcome`。
+4. **前置確認**：在主檔＋`-wal` 的拋棄式副本上執行 `PRAGMA integrity_check` 與 `PRAGMA foreign_key_check`，必須通過。這確保拒絕不是來自結構檢查。
+5. **正式驗證**：以沒有任何失敗掛鉤的 `VerifyFile` 驗證來源。
+6. **預期**：
+   - `CorruptError`，check 為 `host_runs`；
+   - 指出該 `run_id` 與不合法的 `outcome`；
+   - 來源主檔、`-wal`、`-shm` 的大小與 sha256 與第 2 步的基準相同；
+   - 案例 A 的資料與證據不動。
+
+**不為了命中預期而改動驗證**：不關閉正式的 `integrity_check`、不重排既有驗證順序、不擴大修改 Store。
+
+**NULL 等形狀違反的反例**：保留在形狀／結構的拒絕測試中，預期是「被拒絕、不開始服務」，check 為 `integrity`；不要求它命中 `host_runs`。§13.9.1 與 §13.10 中相關的現行測試文字已加註同樣的修訂：
+
+- 違反 CHECK 或 NOT NULL 的列 → 預期結構檢查拒絕；
+- 通過 CHECK、但違反清單或組合規則的列 → 直接寫入，不必略過 CHECK，預期 `CorruptError(host_runs)`。
+
+**驗收條件 15 中案例 B 的條文改為**：
+
+> - 案例 B：另一份拋棄式資料中一筆結構合法、只有 `outcome` 不在清單內的 `ended` 列，只存在於 WAL；前置確認 `integrity_check` 與 `foreign_key_check` 通過；正式的 `VerifyFile` 以 `CorruptError(host_runs)` 拒絕並指出該列與不合法的 `outcome`；來源不變。
+
+其他設計（R1–R4、鎖規則、案例 A、`detail` 清單、全輸出固定值、SQLite 架構、Policy）不變。既有展示資料庫預設不升級（13.8.6），沒有新增需要 Aaron 決定的事項。
