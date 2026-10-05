@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-05）：**第三版控制與持久化設計（第 13 節，含 13.8–13.14 的修訂）於 `a845dcb` 通過 Codex 限定設計 review，沒有新增阻擋項目（第 13.15 節）。這是設計驗收，不是程式驗收；3.2 實作待 Aaron 核准。** 同一 SQLite 內保存場次協調資料的方向取代第 4 節未接受的 JSONL 場次日誌。切片 3.1 已於 `b2b7daa` 通過 Codex 限定範圍技術 review（第 12.7 節）。3.2–3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節與第 13.1–13.14 節保留當時的寫法，「待 review」是寫作當時的狀態。
+狀態（2026-10-06）：**切片 3.2（主持人控制與場次持久化）依 `a845dcb` 的已審查設計實作完成，程式 `718aa91`，測試修正 `d128b79`、`28aae6e`；Claude Code 執行，待 Codex 獨立 review（第 13.16 節）。** Aaron 10/5 核准實作 3.2。第三版設計（第 13 節）於 `a845dcb` 通過 Codex 限定設計 review（第 13.15 節）。切片 3.1 已於 `b2b7daa` 通過 Codex 限定範圍技術 review（第 12.7 節）。3.3–3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12.1–12.6 節與第 13.1–13.14 節保留當時的寫法。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -1495,3 +1495,87 @@ review 結論：§13.13 的共同鎖規則已接受。本節只修兩處，不�
 - 實作時，開發與測試使用新資料庫，不升級既有展示資料庫（13.8.6）；不啟動真實 CLI、不付款、不擴大到 3.3／3.4。
 
 B1-04／B1-06 整體維持 InProgress；不合併 main、不標 Done。
+
+### 13.16 切片 3.2 實作紀錄（Claude Code 執行，待 Codex 獨立 review；程式 `718aa91`，測試 `d128b79`、`28aae6e`）
+
+依據：第 13 節（含 13.8–13.14），於 `a845dcb` 通過限定設計 review；Aaron 10/6 核准實作。
+
+#### 13.16.1 如何操作
+
+```sh
+make demo                    # 情境目錄＋demo registry＋自己的新資料庫 var/apa-demo-host-runs.db；啟動時不跑任何場次
+```
+
+1. 開啟 `http://127.0.0.1:8402/host`，載入 `var/demo-tokens.json`（3.2 起含 operator）。
+2. 「主持人控制」列出情境（ask、deny-budget）。按「開始」後：
+   - 頁面自動切到該場 consumer，並開啟新的 `show-*` task；
+   - 「最近場次」分開列出程序、收尾紀錄與失敗。
+3. 場次進行中可按「停止」。畫面要等收尾紀錄寫入後，才顯示「已停止，取消已記錄」。
+4. 既有的 `var/apa-demo-fake.db` 是 schema 1，不會被升級。要升級需另行確認（13.8.6），以 `--upgrade-db` 執行。
+
+**資料庫的單次命令**（經 3.2 測試驗證；執行前先停止所有可能寫入該資料庫的工具）：
+
+```sh
+bin/demo --verify-db PATH                              # 唯讀檢查，取該資料庫的 <db>.lock；不改來源
+bin/demo --restore-copy BACKUP --restore-dir NEWDIR    # 在新目錄建立恢復副本與其鎖，通過唯讀檢查才回報成功
+```
+
+`<db>.lock` 是合作式鎖，只約束使用同一路徑、同一鎖檔的程序；取得鎖不能證明沒有其他 SQLite 寫入者（13.13.4）。
+
+#### 13.16.2 修改
+
+| 範圍 | 檔案 | 內容 |
+|---|---|---|
+| Store | `internal/store/store.go`、`verify.go`、`runs.go`（新）、`verifyfile.go`（新） | schema 2（`host_runs`）；版本 1 預設拒絕，`--upgrade-db` 走遷移前驗證 → `VACUUM INTO` 備份 → 遷移 → 遷移後驗證；`validRun`（形狀、清單、組合）在寫入與開檔驗證共用；`AcceptRun`／`RunByRequest`（唯讀）／`EndRun`／`InterruptOpenRuns`／`GetRun`／`Runs`／`TaskReserved`；`VerifyFile`、`RestoreCopy`；`CodeOf`、`ValidDetail` 與三份代碼清單 |
+| buyer | `internal/buyer/host.go` | `Report.Detail` 在產生處正規化為清單值；`EndError` 與 trace 的 `prepare_error` 用 `STORE_ERROR`；測試用 `watchHook` |
+| demo host | `cmd/demo/control.go`（新）、`scenarios.go`（新）、`api.go`、`main.go`、`fakeruns.go`、`status.go` | operator；控制端點與 POST 防護；單場鎖與記憶體中的進行狀態；情境目錄與 digest；啟動時標記中斷；`--scenarios`、`--upgrade-db`、`--verify-db`、`--restore-copy`／`--restore-dir`；`--plan` 略過已保留的 task；status 的 `caller_role` 與 `runs`；到期錯誤的 log 改印固定代碼 |
+| 頁面 | `web/hostcreds.js`、`host.js`、`host.html`、`app.js`、`style.css` | token 檔需恰好一個 operator，以 `caller_role` 確認角色；開始／停止／清單，都依世代規則；控制面板與第 13.5 節的文字 |
+| 設定與工具 | `testdata/demo/scenarios.json`、`testdata/demo/registry.json`（新）、`scripts/demo/start.sh`、`Makefile`、`scripts/verify/mutation-check.py` | 情境目錄；契約 fixture 的超集；`make demo` 改用情境模式與新資料庫；新增 11 項突變，兩項既有突變改指向改寫後的程式（同一缺陷） |
+
+#### 13.16.3 與設計的差異（請 review 判斷）
+
+1. **`unexpected_message` 移出清單**：13.11.1 把它列為 host Watch 的代碼，但它只出現在 C0 init 探測（`probe.go`），不會出現在 `Host.Run`。這是設計錯誤，由同步測試抓到。
+2. **status 的 `runs` 多了 `scenarios`**（id、consumer、label）。主持人頁需要它來產生按鈕；label 是可信的情境目錄文字，不是 CLI 輸出。
+3. **場次完成時只寫「場次完成；task 結果見 Inspector／Timeline」**，沒有把「等待核准／Ask 已到期／Deny」放進場次清單。operator 不能讀 task，這些內容由同頁的 Dashboard（viewer token）顯示。
+4. **鎖被持有的測試**：用同一個測試程序中的另一個檔案描述子持有 `flock`，而不是另一個程序。`flock` 以開啟的檔案描述為單位，效果相同。實際的另一個 demo 程序持有鎖，在手動驗證中以 `--verify-db` 確認（拒絕「in use」）。
+5. **合成標記測試的注入位置**：
+   - 未列名代碼（`watchHook`）與無代碼的建立失敗，在 buyer 層注入，檢查 trace 檔與回傳值；
+   - 無代碼的到期錯誤，在 `expiryHealth` 單元測試注入；
+   - `cmd/demo` 的 `runEnd` 正規化另有單元測試。
+   - 沒有經由執行中的 demo host 或瀏覽器注入標記。
+6. **備份失敗**以第 2 步之後的掛鉤代表，沒有另外製造 `VACUUM INTO` 本身失敗。恢復步驟的 R-4（目標已有檔案）因目錄必須是新建，實際上走不到；程式仍檢查。
+7. **收尾寫入失敗（T3）**以時鐘倒退製造，T3 與 T4 會同時失敗；只有 T4 失敗的情況，以執行中把該列改成中斷來製造（`RUN_NOT_OPEN`）。
+
+#### 13.16.4 測試與證據（Claude Code 執行，待 Codex 獨立 review）
+
+| 項目 | 命令 | exit | 時間 | 證據 |
+|---|---|---|---|---|
+| Node（adapter 11＋hostcreds 19，其中控制請求的世代 6 項） | `node --test web/test/adapter.test.mjs web/test/hostcreds.test.mjs` | 0 | 1 秒內 | `artifacts/b1-06/checks-718aa9160b3b-20261005T161732Z/` |
+| Go 全部套件 race | `go test -race -count=1 -v ./...` | 0 | 107 秒 | 同上 |
+| Store：遷移、升級各失敗點、`AcceptRun`／`EndRun`、列規則（CHECK 形狀與 `host_runs` 規則分開）、綁定、registry 移除後仍可開、`VerifyFile` 的鎖、恢復步驟、殘留 WAL 案例 A／B（隔離子程序 SIGKILL） | 同上（`internal/store`） | 0 | — | 同上 |
+| 代碼清單同步（`go/ast`）：buyer 的 outcome 與 detail、Store 代碼、host 代碼 | 同上 | 0 | — | 同上 |
+| 控制：權限表、POST 防護、202／200／409／400／404／503、雙重並發、停止、時鐘倒退、收尾失敗、重啟後中斷、`--plan` 略過保留、名額用完、情境目錄、demo registry 超集 | 同上（`cmd/demo`） | 0 | — | 同上 |
+| 真實瀏覽器 130 項（3.2 新增 22 項） | `node scripts/verify/browser-ui.mjs` | 0 | 146 秒 | `artifacts/b1-06/ui-28aae6e32602-20261005T163729Z/`（含 `desktop-host-control.png`） |
+| 突變 | 11 項新增（含 `mutation-check.py`），本機先逐項確認以測試失敗被抓到；兩項既有突變改指向後確認仍被抓到 | — | — | 完整結果見容器 |
+| 瀏覽器反向：拿掉開始回覆的世代檢查（三層：`hostcreds`、`start`、`openRun`） | 同上，在拋棄式 worktree | 1（預期） | 143 秒 | `artifacts/b1-06/reversal-28aae6e32602/` |
+| 完整容器（Go／JS＋fake 回歸，含新突變） | `sh scripts/verify/container-verify.sh 28aae6e…` | **未執行**（Docker daemon 未啟動） | 1 秒 | `artifacts/b1-06/container-28aae6e.log`；開啟 Docker 後對 `28aae6e` 補跑一次，結果補記於此 |
+
+Unity 沒有修改，瀏覽器載入的建置檔 sha256 與 `eda6469` 建置相同（`checks-…/webgl-loaded.sha256`）。
+
+#### 13.16.5 失敗嘗試（保留）
+
+- **兩項既有突變失效**：`verify()` 加了版本參數、`grant.sees` 改寫後，兩項既有突變比對不到原文字，容器的突變步驟會失敗。已改指向新程式（注入同一缺陷），並確認仍以測試失敗被抓到。
+- **`unexpected_message`**：見 13.16.3 第 1 點。
+- **雙擊建立兩次開始**：瀏覽器測試對同一個元素按兩下，第一下重建了按鈕，第二下打在已移除的舊按鈕上，仍觸發一次開始，送出兩個不同的 request ID。伺服器正確地只受理一場，但頁面不應送出第二次。已在 `start()` 加上進行中即返回。
+- **開始結束後按鈕未立即恢復**：要等下一次清單輪詢才重繪，導致下一次點擊落在停用的按鈕上。已在開始結束時立即重繪；測試改為等按鈕可用才點擊，是明確的就緒條件。
+- **場次清單檢查空過**：測試中 `runItem` 的運算式缺少括號，`x || "".includes(…)` 使三項檢查在項目出現時就成立。停止的檢查因此在場次仍「停止中」時就通過，進而讓重啟比對失敗。已修正於 `d128b79`。
+- **瀏覽器反向一度沒有失敗**：拿掉開始回覆的世代檢查後，原本的「清除全部後放行」案例仍通過，因為清除後頁面不再持有任何 token。已補上「重新載入同一檔案後放行」的案例（新世代、相同 token），於 `28aae6e` 加入後反向即失敗。
+- **測試本身的錯誤**：一個測試對同一 host 停止兩次（等滿 30 秒）；hostcreds 測試的假伺服器缺 operator 與 `caller_role`；`openErr` 與既有輔助函式同名。都已修正。
+
+#### 13.16.6 未測與限制
+
+- 取消 task（3.4）、task 清單 API（3.3）、整體操作驗收（3.5）未做。
+- 中斷的場次目前只能看到狀態；要收尾需要 3.4 的「取消 task」。
+- 只用 Chrome（SwiftShader）。
+- 既有展示資料庫沒有升級；用舊版程式開啟恢復副本是手動步驟，未自動測試。
+- 不執行真實 CLI、不付款。

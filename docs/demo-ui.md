@@ -158,7 +158,7 @@ sh scripts/unity/unity.sh webgl artifacts/b1-06/unity-local
 
 # 2 啟動 fake demo：商店、Store、到期 worker、API、Dashboard，以及 task-a／task-b 的 fake run
 make demo-integration                      # http://127.0.0.1:8402/
-# 或：make demo（交付點 3.1）——同一份計畫，另檢查建置與素材；主持人頁 http://127.0.0.1:8402/host 可載入 token 檔，見 docs/demo-operation-design.md 第 12 節
+# 或：make demo（交付點 3.1／3.2）——另檢查建置與素材；3.2 起用情境目錄與新資料庫，啟動時不跑場次，在主持人頁 http://127.0.0.1:8402/host 按「開始」，見 docs/demo-operation-design.md 第 12、13.16 節
 
 # 3 取得自己的 viewer token（只印 consumer-a 的那一個；不要放進 URL 或分享）
 python3 -c 'import json;print([t["token"] for t in json.load(open("var/demo-tokens.json"))["tokens"] if t.get("consumer_id")=="consumer-a"][0])'
