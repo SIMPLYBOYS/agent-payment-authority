@@ -39,6 +39,7 @@ let polls = 0;          // completed polls, for the browser test
 const expanded = new Set(); // event_ids whose JSON the viewer opened (R3)
 const LIST_MS = 5000;   // the task list is read again every 5 s (section 14)
 let idGen = 0;          // bumped whenever the viewer identity goes: an old list reply is dropped
+let listSeq = 0;        // bumped by every list request: only the latest one of this identity acts
 let listTimer = null;
 let listAbort = null;
 const rendered = [];    // waiting for Unity's report of (gen, seq)
@@ -141,6 +142,7 @@ export function forget(message) {
   shopReset("ready");
   $("viewer").textContent = "未驗證";
   $("task-pick").replaceChildren();
+  delete $("task-pick").dataset.state;
   $("task-form").hidden = true;
   $("replay").disabled = true;
   draw();
@@ -178,7 +180,11 @@ export async function useViewer(typed) {
     const v = await res.json();
     if (gen !== state.gen) return; // the body came after a switch, a clear or pagehide: shows nothing
     state.consumer = v.consumer_id;
-    const listed = await refreshList(); // the list is on the page before the sign-in is reported
+    $("task-pick").dataset.state = "loading";
+    // The viewer is verified: signed in. The list has its own state; its
+    // first read is tried before the sign-in is reported, and a failure
+    // leaves manual task IDs open while the timer tries again.
+    const listed = await refreshList();
     if (gen !== state.gen) return;
     $("viewer").textContent = v.consumer_id + "（demo viewer，不是使用者登入）";
     $("task-form").hidden = false;
@@ -190,38 +196,59 @@ export async function useViewer(typed) {
 }
 
 // refreshList reads GET /api/tasks for this viewer (its stored tasks,
-// newest first) and shows them as buttons; true when it did. A reply that
-// comes after the identity changed shows nothing. It schedules the next
-// read while the identity stays. A choice in the list is not an
-// authorization: the server decides by the token and the task's owner.
+// newest first) and shows them; true when it did. Only the current request
+// acts: the identity is the same (idGen) and no newer list request started
+// (listSeq). A superseded or aborted request updates nothing, handles no
+// error or 401 and schedules no timer, so there is one list timer at most.
+// A choice in the list is not an authorization: the server decides by the
+// token and the task's owner.
 async function refreshList() {
   clearTimeout(listTimer);
   if (!token) return false;
   const g = idGen;
+  const seq = ++listSeq;
+  const current = () => g === idGen && seq === listSeq;
   if (listAbort) listAbort.abort();
   listAbort = new AbortController();
   let ok = false;
   try {
     if (!document.hidden) {
       const res = await fetch("/api/tasks", { headers: { Authorization: "Bearer " + token }, cache: "no-store", signal: listAbort.signal, credentials: "omit" });
-      if (g !== idGen) return false;
+      if (!current()) return false;
       if (res.status === 401) { unauthorized ? unauthorized() : forget("token 已失效，請重新輸入"); return false; }
       if (res.ok) {
         const body = await res.json();
-        if (g !== idGen) return false;
+        if (!current()) return false;
         renderList(body.tasks || []);
         ok = true;
+      } else {
+        listFailed();
       }
     }
   } catch {
-    if (g !== idGen) return false;
+    if (!current()) return false;
+    listFailed();
   }
-  if (g === idGen && token) listTimer = setTimeout(refreshList, LIST_MS);
+  if (current() && token) listTimer = setTimeout(refreshList, LIST_MS);
   return ok;
+}
+
+// listFailed marks the list as not loaded (its own state, apart from the
+// sign-in); the shown buttons stay, the next refresh tries again.
+function listFailed() {
+  const pick = $("task-pick");
+  pick.dataset.state = "error";
+  if (!pick.querySelector("button")) {
+    const note = document.createElement("span");
+    note.className = "empty";
+    note.textContent = "task 清單讀取失敗；可直接輸入 task ID";
+    pick.replaceChildren(note);
+  }
 }
 
 function renderList(tasks) {
   const pick = $("task-pick");
+  pick.dataset.state = "ok";
   if (tasks.length === 0) {
     const none = document.createElement("span");
     none.className = "empty";

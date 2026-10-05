@@ -801,6 +801,50 @@ try {
   const started = await hostPost(cAddr, ct.op, "/api/host/runs", { request_id: "req-list-0000000001", scenario: "ask" });
   check("3.3: a run started meanwhile (host side)", started.status === 202 && started.json.task_id === "show-a-06", JSON.stringify(started.json));
   check("3.3: the open page lists the new task without a reload", await b.waitFor(`[...document.querySelectorAll("#task-pick button")].some((x) => x.dataset.task === "show-a-06")`, 15000), (await listIds()).join());
+  // Review of 843ca4a: only the latest list request of an identity acts.
+  // The page's fetch is wrapped: list requests are counted and one reply's
+  // JSON can be held, so an older reply really arrives after a newer one.
+  await b.evaluate(`(() => { if (!window.__listProbe) { window.__listProbe = { calls: 0, hold: 0, held: [] }; const orig = window.fetch.bind(window);
+    window.fetch = async (url, opts) => { const isList = String(url) === "/api/tasks"; if (isList) window.__listProbe.calls++;
+      const res = await orig(url, opts);
+      if (isList && window.__listProbe.hold > 0) { window.__listProbe.hold--; const body = await res.json();
+        return { status: res.status, ok: res.ok, json: () => new Promise((r) => window.__listProbe.held.push(() => r(body))) }; }
+      return res; }; } return true; })()`);
+  const wake = `(document.dispatchEvent(new Event("visibilitychange")), true)`;
+  await b.evaluate(`(window.__listProbe.hold = 1, true)`);
+  await b.evaluate(wake); // refresh 1: its JSON is held
+  check("3.3 seq: an older list reply is held", await b.waitFor(`window.__listProbe.held.length === 1`, 10000));
+  const newer = await hostPost(cAddr, ct.op, "/api/host/runs", { request_id: "req-list-0000000002", scenario: "ask" });
+  for (let i = 0; i < 100 && (await hostGet(cAddr, ct.host, "/api/host/runs")).json.runs.some((r) => r.live === "running"); i++) await sleep(100);
+  await b.evaluate(wake); // refresh 2: sees the newer task
+  check("3.3 seq: the newer list shows the new task", await b.waitFor(`[...document.querySelectorAll("#task-pick button")].some((x) => x.dataset.task === ${JSON.stringify(newer.json.task_id)})`, 10000), (await listIds()).join());
+  await b.evaluate(`(window.__listProbe.held.splice(0).forEach((f) => f()), true)`);
+  await sleep(1000);
+  check("3.3 seq: the older reply, released last, does not overwrite the newer list", (await listIds()).includes(newer.json.task_id), (await listIds()).join());
+  await b.evaluate(`(window.__listProbe.calls = 0, true)`);
+  await sleep(11000);
+  const listCalls = await b.evaluate(`window.__listProbe.calls`);
+  check("3.3 seq: one list timer (about one read per 5 s over 11 s)", listCalls >= 1 && listCalls <= 3, listCalls + " reads");
+
+  // A failed list read does not fail the sign-in: the list has its own
+  // state, manual task IDs stay open, and the next refresh recovers.
+  let failLists = 0;
+  const offFail = b.on("Fetch.requestPaused", (p) => {
+    if (failLists > 0 && p.request.url.endsWith("/api/tasks")) { failLists--; b.send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 503, body: Buffer.from("{}").toString("base64") }).catch(() => {}); return; }
+    b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {});
+  });
+  await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/tasks", requestStage: "Request" }] });
+  await b.evaluate(`document.getElementById("switch").click()`);
+  failLists = 1;
+  await signIn(b, ct.a);
+  check("3.3 fallback: the viewer is signed in although the list failed", await b.waitFor(`${text("#viewer")}.startsWith("consumer-a")`, 10000)
+    && (await b.evaluate(`document.getElementById("task-pick").dataset.state === "error" && ${text("#status")}.includes("清單讀取失敗")`)), await b.evaluate(text("#status")));
+  await b.evaluate(`document.getElementById("task-id").value = "show-a-01"; document.querySelector("#task-form button[type=submit]").click()`);
+  check("3.3 fallback: a task ID typed by hand still opens", await b.waitFor(`document.getElementById("status").dataset.kind === "ok" && ${text("#inspector")}.includes("show-a-01")`, 15000));
+  check("3.3 fallback: the next refresh loads the list", await b.waitFor(`document.getElementById("task-pick").dataset.state === "ok" && document.querySelectorAll("#task-pick button").length > 0`, 12000));
+  await b.send("Fetch.disable");
+  offFail();
+
   const evBefore = (await hostGet(cAddr, ct.host, "/api/tasks/show-a-01/events")).text;
   await b.evaluate(`document.querySelector('#task-pick button[data-task="show-a-01"]').click()`);
   check("3.3: an older run's task opens from the list", await b.waitFor(`document.getElementById("status").dataset.kind === "ok" && ${text("#inspector")}.includes("show-a-01")`, 15000));
