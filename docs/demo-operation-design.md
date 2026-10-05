@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-05）：**切片 3.1 已實作於 `0252ceb`（Claude Code 執行，待 Codex 獨立 review；實作紀錄見第 12 節）。** 3.1 的設計經 Codex 對 `7d11894` 的 review 通過，Aaron 10/5 核准實作（vault 筆記 `Claude-Code-B1-06-交付點3.1設計驗收與實作指示-7d11894-20261005`）。**3.2–3.4 的控制、恢復與場次持久化仍待設計修訂與 review**：第 4 節的場次日誌（JSONL）未通過 review，見該節標註。3.5 未啟動。
+狀態（2026-10-05）：**切片 3.1 已實作於 `0252ceb`；Codex 限定 review 判定暫不通過（R1～R3），已修正於 `b2b7daa`（Claude Code 執行，待 Codex 獨立 review；第 12.6 節）。** 3.1 的設計經 Codex 對 `7d11894` 的 review 通過，Aaron 10/5 核准實作（vault 筆記 `Claude-Code-B1-06-交付點3.1設計驗收與實作指示-7d11894-20261005`）。**3.2–3.4 的控制、恢復與場次持久化仍待設計修訂與 review**：第 4 節的場次日誌（JSONL）未通過 review，見該節標註。3.5 未啟動。第 12.1–12.5 節是 `0252ceb` 當時的紀錄。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -480,3 +480,30 @@ make demo        # 檢查 Unity 建置與 LimeZu 匯入 → 編譯 Go → 啟動
 - 只用 Chrome（SwiftShader）。
 - `pagehide` 的晚到回應用事件模擬；真的離開與返回只確認不會自動恢復。
 - 腳本的 Store 恢復失敗情境只沿用 host 既有測試，腳本本身只原樣轉出 exit code。
+
+### 12.6 依 Codex 對 `0252ceb` 的 review 修正（Claude Code 執行，待 Codex 獨立 review；程式 `b2b7daa`）
+
+review 結論：3.1 暫不通過，需修三處，不只是補跑容器。Codex 的獨立結果：JS 24 項通過、Store race 通過；`cmd/demo` race 因 R3 失敗；沒有重跑完整七步、突變或真實瀏覽器。
+
+| 項 | 問題 | 修正 | 回歸測試 | 反向驗證 |
+|---|---|---|---|---|
+| R1 | `useViewer()` 在 `fetch` 回來後核對了世代，但 `await res.json()` 之後沒有再核對。舊 viewer 的 JSON 晚到時，會覆蓋畫面上的身分與 task 選單（前端身分殘留；**沒有證明後端跨 consumer 授權被繞過**） | `web/app.js`：讀完 JSON 後再核對一次世代，不符就什麼都不顯示 | 瀏覽器：把頁面的 `fetch` 包一層，扣住下一個 `/api/viewer` 回覆的 JSON，在 `/host` 上分別經過切換 consumer、清除全部、`pagehide`，在 `/` 上經過「清除／切換」，再放行。斷言身分與 task 選單 | 拿掉這次核對：4 項 FAIL（畫面變回 consumer-a） |
+| R2 | 手動輸入、尚未按驗證的 token，`forget()` 與 `pagehide` 都沒清掉 | `forget()` 一併清空 token 欄位。順序調整：`signIn` 先讀取並清空欄位，再呼叫 `/host` 註冊的 `onTypedSignIn` 清除已載入的檔案，最後登入。原本在 document 捕捉階段先切換手動模式的做法已移除 | 瀏覽器：兩個頁面上，輸入後按清除，或觸發 `pagehide`，欄位都變空；輸入後按驗證仍能登入（`/host` 進入手動模式） | 拿掉清空：6 項 FAIL。其中「仍能登入」失敗是連帶的：舊 token 留在欄位，新輸入接在後面，變成無效 token |
+| R3 | `TestStartScript` 自己建立子程序環境，漏了 `TMPDIR`。唯讀容器中子程序寫 `/tmp` 失敗（`mkdir /tmp/apa-fake-home-…: read-only file system`） | 測試替子程序指定 `TMPDIR`：測試程序自己暫存目錄下的新目錄（容器中即 `/scratch/tmp`），測試結束刪除。路徑保持短，bridge 的 Unix socket 路徑有長度上限。容器限制未放寬 | 同一測試 | 在與完整驗證相同的唯讀容器設定下只跑這個測試：`0252ceb` 三個案例都失敗（與 Codex 相同的錯誤），`b2b7daa` 三個都通過 |
+
+**命令與結果**（全部在 `b2b7daa`）：
+
+| 命令 | exit | 時間 | 證據 |
+|---|---|---|---|
+| `node --test web/test/adapter.test.mjs web/test/hostcreds.test.mjs`（24 項） | 0 | 1 秒內 | `artifacts/b1-06/checks-b2b7daa6c02d-20261005T093834Z/` |
+| `go test -race -count=1 -v ./cmd/demo ./internal/store` | 0 | 61 秒 | 同上 |
+| `node scripts/verify/browser-ui.mjs`（108 項，新增 12 項 `3.1-R1`／`3.1-R2`） | 0 | 158 秒 | `artifacts/b1-06/ui-b2b7daa6c02d-20261005T093935Z/` |
+| 反向驗證（瀏覽器 R1、R2；唯讀容器 R3） | 1（預期）／見上 | — | `artifacts/b1-06/reversal-b2b7daa6c02d/` |
+| `sh scripts/verify/container-verify.sh b2b7daa…`（Go／JS＋fake 回歸，Unity 不在映像內；主機無其他負載） | 0 | 681 秒 | `artifacts/verify-container/runs/b2b7daa6c02d-20261005T095032Z/`（`artifacts/b1-06/container-b2b7daa.log`）：七步全過（check-contracts 19、check 84、race-cover 150、verify-b1-01 42、mutation 361 秒），check-contracts 含 adapter 11／11 與 hostcreds 13／13，`cmd/demo` race 通過（覆蓋率 85.3%），222／222 突變，17 項隔離 ok |
+
+- Unity 未修改，建置 sha256 與 `eda6469` 那次建置相同（`checks-…/webgl-loaded.sha256`）。
+- `go test -race -count=1 ./...` 全部套件在本機也通過，未另存證據。
+
+**失敗嘗試**：第一次修 R3 時，把 `TMPDIR` 設在測試資料目錄下的深層路徑。bridge 的 Unix socket 路徑因此超過長度上限，host 啟動失敗，測試等滿 60 秒。已改用短路徑。
+
+**容器**：`0252ceb` 的第一次容器驗證因 Docker daemon 未啟動而沒有執行（`artifacts/b1-06/container-0252ceb.log`）；之後改為驗證修正後的 `b2b7daa`，沒有對 `0252ceb` 補跑。
