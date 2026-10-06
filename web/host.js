@@ -336,7 +336,9 @@ async function stop(runId) {
   const r = await creds.stopRun(runId);
   if (!r || r.gen !== creds.gen || g !== creds.gen) return;
   if (r.error) setRunStatus("沒有收到回覆；請看最近場次", "error");
-  else if (r.status === 202) setRunStatus("停止中…（等收尾紀錄寫入後才顯示已停止）", "busy");
+  // 202 means accepted, not done: a neutral notice, no longer busy; the
+  // committed result is the runs list's (review of 31cc6c7).
+  else if (r.status === 202) setRunStatus("場次 " + runId + " 的停止請求已受理；最終結果請看最近場次。", "idle");
   else setRunStatus(ERRORS[r.body && r.body.error] || "未停止（" + r.status + "）", "error");
   pollRuns();
 }

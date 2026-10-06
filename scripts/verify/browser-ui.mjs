@@ -1290,6 +1290,10 @@ try {
     await views("running", waitRun.task_id, "waiting", "Ask", "POLICY_DECIDED", ["Ask", "pending"]);
     await b.evaluate(`document.querySelector('#runs li[data-live="running"] .run-stop').click()`);
     check("3.5 stop: 已停止，取消已記錄 (after the record was written)", await lineHas(waitRun.task_id, ["已停止，取消已記錄"], false, 20000), await b.evaluate(seenLine(waitRun.task_id)));
+    // Review of 31cc6c7: after the 202 the line above is a neutral notice, not a lasting 停止中 nor a claim of the result.
+    const stopNote = await b.evaluate(`JSON.stringify({ text: document.getElementById("run-status").innerText, state: document.getElementById("run-status").dataset.state })`);
+    check("3.5 stop: after the 202 a neutral notice (accepted; see the runs list), not 停止中 and not a claimed result",
+      stopNote === JSON.stringify({ text: "場次 " + waitRun.run_id + " 的停止請求已受理；最終結果請看最近場次。", state: "idle" }) && !/停止中|已停止|已取消|取消已記錄/.test(JSON.parse(stopNote).text), stopNote);
     await views("stop", waitRun.task_id, "withdrawn", "Ask", "TASK_CANCELLED", ["cancelled", "withdrawn"]);
     await record("stop", waitRun.task_id);
     await shot(b, "desktop-acceptance-stop", 1280, 900, false);
