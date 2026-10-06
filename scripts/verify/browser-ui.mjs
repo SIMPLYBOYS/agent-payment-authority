@@ -1042,8 +1042,13 @@ try {
   check("3.4: a replay after the cancel sends no cancel and adds no event", (await b.evaluate(`window.__cancelProbe.posts`)) === 0 && (await xEvents(live)).length === liveEvents);
 
   // A lost cancel reply: the server committed; the page says "not confirmed", resends nothing.
-  let failCancel = 0, failHostRead = 0, cancel503 = 0;
+  let failCancel = 0, failHostRead = 0, cancel503 = 0, refuse503 = 0;
   const offLost = b.on("Fetch.requestPaused", (p) => {
+    if (refuse503 > 0 && !p.responseStatusCode && p.request.url.endsWith("/cancel")) { // never reaches the server
+      refuse503--;
+      b.send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 503, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from('{"error":"store_unavailable","code":"STORE_ERROR"}').toString("base64") }).catch(() => {});
+      return;
+    }
     if (cancel503 > 0 && p.responseStatusCode && p.request.url.endsWith("/cancel")) {
       cancel503--;
       b.send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 503, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from('{"error":"store_unavailable","code":"STORE_ERROR"}').toString("base64") }).catch(() => {});
@@ -1053,7 +1058,7 @@ try {
     if (failHostRead > 0 && !p.responseStatusCode && /\/api\/tasks\/show-a-\d+$/.test(p.request.url) && p.request.headers.Authorization === "Bearer " + xt.host) { failHostRead--; b.send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionRefused" }).catch(() => {}); return; }
     b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {});
   });
-  await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/cancel", requestStage: "Response" }, { urlPattern: "*/api/tasks/*", requestStage: "Request" }] });
+  await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/cancel", requestStage: "Response" }, { urlPattern: "*/cancel", requestStage: "Request" }, { urlPattern: "*/api/tasks/*", requestStage: "Request" }] });
   const lost = await askEnded();
   failCancel = 1;
   await b.evaluate(`${cancelBtn(lost)}.click()`);
@@ -1076,6 +1081,13 @@ try {
   check("3.4 R3: a 503 after a committed cancel: 取消結果尚未確認, not 未取消", await b.waitFor(`document.getElementById("run-status").innerText.includes("取消結果尚未確認")`, 15000)
     && !/未取消|取消未完成/.test(await runSeen()) && (await xEvents(late503)).filter((e) => e.event_type === "TASK_CANCELLED").length === 1, await runSeen());
   check("3.4 R3: the re-read shows the committed state: task 現已取消", await lineHas(late503, ["task 現已取消"], false), await b.evaluate(seenLine(late503)));
+  // A 503 with nothing committed (the request never reaches the server): the same words, and the task is still waiting.
+  const none503 = await askEnded();
+  refuse503 = 1;
+  await b.evaluate(`${cancelBtn(none503)}.click()`);
+  check("3.4 R3: a 503 with nothing committed: the same 取消結果尚未確認, no claim either way", await b.waitFor(`document.getElementById("run-status").innerText.includes("取消結果尚未確認")`, 15000)
+    && !/未取消|取消未完成|已取消/.test(await runSeen()) && !(await xEvents(none503)).some((e) => e.event_type === "TASK_CANCELLED"), await runSeen());
+  check("3.4 R3: the re-read shows the true state: the Ask still waits, cancel still offered", await lineHas(none503, ["Ask 等待中；task 可由主持人取消"], true), await b.evaluate(seenLine(none503)));
   await b.send("Fetch.disable");
   offLost();
 
