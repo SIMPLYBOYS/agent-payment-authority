@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-06）：**切片 3.4（取消 task、錯誤呈現與中斷收尾）實作於 `d61771c`；Claude Code 執行，待 Codex 獨立 review（第 15 節）。** 切片 3.3 已於 `2c55835` 通過 Codex 限定範圍技術 review（第 14.7 節；最近完整容器屬 `843ca4a`）。切片 3.2 已於 `69ae9b2` 通過（第 13.19 節）；切片 3.1 已於 `b2b7daa` 通過（第 12.7 節）。3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12–14 節保留當時的寫法。
+狀態（2026-10-06）：**切片 3.4（取消 task、錯誤呈現與中斷收尾）實作於 `d61771c`；Codex review 的 R1～R3 已修正於 `3a6af59`（測試補充 `3b24cd4`），三項修正完成，Claude Code 執行，待 Codex 獨立 review（第 15、15.7 節）。** 切片 3.3 已於 `2c55835` 通過 Codex 限定範圍技術 review（第 14.7 節；最近完整容器屬 `843ca4a`）。切片 3.2 已於 `69ae9b2` 通過（第 13.19 節）；切片 3.1 已於 `b2b7daa` 通過（第 12.7 節）。3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12–14 節保留當時的寫法。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -2028,3 +2028,38 @@ APA_DB_PATH=var/apa-demo-34-check.db make demo   # 新資料庫；印出 http://
 - **人工操作**：本輪沒有以 `make demo` 人工操作。
 - **既有展示資料庫**：沒有被操作或升級。
 - **其他**：沒有執行真實 CLI、付款、testnet、Signer。
+
+### 15.7 review 後修正 R1～R3（Claude Code 執行，待 Codex 獨立 review；程式 `3a6af59`，測試補充 `3b24cd4`）
+
+依據：Codex 對 `d61771c` 的 review，完整內容見 vault〈Claude-Code-B1-06-交付點3.4修正指示-d61771c-20261006〉。`d61771c` 尚未通過。最初轉貼的內容被截斷，缺少 R1；R2、R3 先修、未提交，取得完整指示後補上 R1，三項一起提交。
+
+| 項目 | 問題 | 修正 | 測試 |
+|---|---|---|---|
+| R1 請求 body | 共用的 `postGuard` 把 body 解碼進 struct：`null` 不會出錯；`More()` 也不代表 body 已結束。`null`、`{}]`、`{} }` 都能取消 task（Codex 探測） | `cmd/demo/control.go` 的 `postGuard`（開始、停止、取消共用）：<br>• 先讀完整個 body（仍限 1 KiB）；<br>• 去掉 JSON 空白後，第一個字元必須是 `{`；<br>• 嚴格解碼；<br>• 之後 `Token()` 必須回 `io.EOF`，只允許空白。<br>拒絕一律回 `400 bad_request`，不回傳原始輸入。Store、Policy、契約都未改 | `TestCancelBody`：16 種不合法 body，各用一個獨立且等待中的 task，都回 400；事件逐筆（JSON）、task 狀態、場次清單都不變。`{}` 與前後有空白的 `{ }` 可以取消，重送回 `already`，不重複寫入。<br>`TestControlBodyShape`：開始的 `null`、物件後接 `]`／`}`、第二個值、陣列都回 400 且不建立場次；前後有空白的合法開始仍回 202。停止的不合法 body 回 400，程序仍在跑；` {}\n` 可以停止，收尾為 `TASK_CANCELLED` |
+| R2 未取得詳情 | 詳情讀取 503，或超過每輪 5 筆的上限時，畫面顯示「無未決 Ask」 | `web/host.js` 的 `taskNow`：沒有詳情時顯示「Ask 狀態未確認（task 詳情未取得）」（逾時的 task 前面仍保留「CLI 已逾時」）。只有取得詳情後，才判斷未決、已到期或確定沒有。5 筆上限保留 | 瀏覽器：<br>• show-a-01 的詳情以 CDP 回 503，該行顯示「未確認」，沒有「無未決 Ask」；恢復讀取後回到「Ask 已依原到期機制到期」；<br>• 竄改清單，讓 14 筆都成為 `failed`，第 6 筆起共 9 行顯示「未確認」，且這些行都沒有「無未決 Ask」 |
+| R3 503 文字 | 「Store 不可用，取消未完成」：另一個寫入者可能已提交取消（重讀失敗時也會回 503） | 改為「Store 不可用，取消結果尚未確認（可能已由其他寫入完成）；請看最近場次重新讀取的目前狀態」，附代碼。不當成已取消，也不當成未取消，不自動重送；場次清單重新讀取 Store。「已收到 200、之後畫面讀取失敗」的文字保留 | Go：`TestCancelStoreFaults` 的「重讀失敗」案例加斷言：資料庫恰好一筆 `TASK_CANCELLED`，task 為 `cancelled`。<br>瀏覽器：<br>• 伺服器已提交後以 503 取代回覆：固定的不確定文字，沒有「未取消」或「取消未完成」，恰好一筆 `TASK_CANCELLED`，之後該行為「task 現已取消」；<br>• 請求不到伺服器就回 503（`3b24cd4`）：同樣文字，沒有任何結論字樣，沒有 `TASK_CANCELLED`，該行仍是「Ask 等待中；task 可由主持人取消」，按鈕還在 |
+
+**證據**（Claude Code 執行，待 Codex 獨立 review）：
+
+| 項目 | 命令 | exit | 時間 | 證據 |
+|---|---|---|---|---|
+| vet、gofmt | `go vet ./cmd/demo`；`gofmt -l cmd/demo`（無輸出） | 0 | 2 秒 | `artifacts/b1-06/checks-3a6af595101f-20261006T065209Z/` |
+| `cmd/demo` 全部 race | `go test -race -count=1 ./cmd/demo` | 0 | 250 秒 | 同上 |
+| R1 回歸 race ×3 | `go test -race -count=1 -run 'TestCancelBody\|TestControlBodyShape' -v ./cmd/demo` | 0／0／0 | 57／60／58 秒 | 同上 |
+| 取消與控制回歸 race | `go test -race -count=1 -run 'TestCancel\|TestControl' -v ./cmd/demo` | 0 | 135 秒 | 同上 |
+| Node 34 項與語法檢查 | `make check-contracts`；`node --check` | 0 | 3 秒 | 同上 |
+| 真實瀏覽器 202 項（本輪新增 7 項） | `node scripts/verify/browser-ui.mjs`，在 `3b24cd4` 執行 | 0 | 243 秒 | `artifacts/b1-06/ui-3b24cd4d10be-20261006T070202Z/` |
+| R1 反向（2 項突變） | 拿掉物件型別檢查；拿掉 EOF 檢查 | 兩項都以 `--- FAIL` 抓到 | — | `artifacts/b1-06/reversal-3a6af595101f/r1-mutations.out` |
+| R2／R3 反向 | `web/host.js` 換回 `d61771c` 版 | 1（預期，197 PASS／3 FAIL，正是當時 3 項 R2／R3 檢查） | 332 秒 | `artifacts/b1-06/reversal-3a6af595101f/r2-r3-old-host-js.out` |
+
+- `3a6af59` 與 `3b24cd4` 的產品程式相同，只差 `browser-ui.mjs`。Go 與 Node 的結果在 `3a6af59` 取得，適用於兩者。
+- R2／R3 反向在提交前的工作區執行。`web/host.js` 已用 `cmp` 確認與 `3a6af59` 相同，當時的瀏覽器測試只缺 `3b24cd4` 新增的檢查。真正的執行基準記在該目錄的 `BASELINE.txt`。
+- 突變清單新增 R1 的 2 項，共 247 項。依指示，本輪沒有在容器重跑全部突變，也沒有重建 Unity。
+- `d61771c` 的完整容器七步、245 項突變與 17 項隔離，只屬於 `d61771c`，不是修正後程式的結果。
+
+**失敗與未測**（保留）：
+- **反向的附帶失敗**：R1 反向拿掉物件型別檢查時，`TestControlBodyShape` 的停止案例在 `null` 被接受後，程序已在停止中，後續停止案例也連帶失敗。這是反向的連鎖結果，不是另外的問題。
+- **R2／R3 的 Node 測試**：沒有。`host.js` 依賴 DOM，所以只由瀏覽器檢查。
+- **既有回放時序檢查**：維持待辦（15.4）。
+- **確認對話框**：沒有加，依 review 不是必修。
+- **其他**：只用 Chrome；3.5 未開始；既有展示資料庫沒有被操作。
