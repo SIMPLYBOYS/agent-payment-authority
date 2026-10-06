@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-06）：**切片 3.4（取消 task、錯誤呈現與中斷收尾）於 `3a6af59` 通過 Codex 限定範圍技術 review，R1～R3 關閉（第 15.8 節；瀏覽器測試補充 `3b24cd4`；最近完整容器屬 `d61771c`，修正後未重跑）。** 下一步為另行派工的 3.5 整體操作驗收。 切片 3.3 已於 `2c55835` 通過 Codex 限定範圍技術 review（第 14.7 節；最近完整容器屬 `843ca4a`）。切片 3.2 已於 `69ae9b2` 通過（第 13.19 節）；切片 3.1 已於 `b2b7daa` 通過（第 12.7 節）。3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12–14 節保留當時的寫法。
+狀態（2026-10-06）：**切片 3.5（fake 展示流程整體操作驗收）的自動化部分完成於 `667e933`；Claude Code 執行，待 Codex 獨立 review（第 16 節）。人工操作驗收待 Aaron 執行（16.3）。** 切片 3.4 已於 `3a6af59` 通過 Codex 限定範圍技術 review（第 15.8 節）；3.1–3.3 已通過（第 12.7、13.19、14.7 節）。既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress；3.5 通過只代表 fake 展示操作流程，不代表真實 Agent、付款、ZK 或 M1 完成。第 12–15 節保留當時的寫法。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -2103,3 +2103,143 @@ APA_DB_PATH=var/apa-demo-34-check.db make demo   # 新資料庫；印出 http://
 **下一步**：3.5（整體操作驗收），待另行派工，尚未開始。
 
 B1-04／B1-06 整體維持 InProgress；不合併、不推送、不標整卡 Done。
+
+## 16 切片 3.5：fake 展示流程整體操作驗收（Claude Code 執行，待 Codex 獨立 review；程式與測試 `667e933`）
+
+依據：Aaron 轉交的〈B1-06 交付點 3.5 實作與驗收指示〉（vault，`6e2cbb9` 基準，2026-10-06）。
+
+開工核對：
+- 分支 `b1-06-demo-integration`，HEAD `6e2cbb9`，main `5391373`。
+- 工作區只有未追蹤的 `demo` 執行檔，不處理、不提交。本輪建置都指定輸出位置。
+
+本輪沒有修改產品程式（`cmd/`、`internal/`、`web/` 的非測試檔）、Unity、契約或 Store。只新增測試、驗收用情境目錄與文件。
+
+### 16.1 回放時序測試的修正
+
+- **對象**：既有檢查「R2: the backend added an event during the replay」（`/` 頁，固定計畫的 task-a）。
+- **原因判斷**：
+  - 舊的就緒條件只等到「期限前 1 秒」，之後還要等一次輪詢；到期 worker 約每秒一次，在期限後就會寫入。
+  - 所以「回放先開始」還是「到期先寫入」要靠運氣。3.4 反向執行時曾失敗一次：開始回放時序號已是 4（15.4）。
+  - 這是依程式行為推斷，並未在失敗當下另外取證。
+- **修正**（只改 `scripts/verify/browser-ui.mjs`）：
+  1. 依伺服器時鐘（`served_at`），等到 task-a 期限前 8 秒內，必須仍在期限前 4 秒以上，且序號為 3。不成立就是失敗。
+  2. 在頁面安裝一個測試專用掛鉤：包裝 `window.apaUnityReport`，回放第 2 步起先扣住 Unity 的「已呈現」回報。每步最多等 6 秒（既有 `renderedBy` 上限），所以回放至少持續約 13 秒。
+  3. 點回放，確認頁面進入回放，並同時讀到伺服器序號仍為 3：確認回放早於到期寫入。
+  4. 輪詢伺服器，直到序號變成 4，並在那一刻確認頁面模式仍是 `replay`：確認到期是在回放期間寫入。
+  5. 期間取樣狀態列，不得出現「已同步」。之後放行扣住的回報，回放結束，再核對 Unity 與 Dashboard 都是最新的 #4 expired。
+- **順序證據**：每次執行都記在 `browser-test.log`。例如 `ui-667e933d0e25-20261006T085612Z`：「replay entered at 1791276999 with task-a #3; deadline 1791277007; #4 (APPROVAL_EXPIRED) committed, seen at 1791277007 in mode replay; 25 samples during the replay」。
+- **反向**：
+  - 不扣住任何回報（`__holdFrom = Infinity`）時，回放先結束；序號 4 是在 `live` 模式下看到的。「R2 order: the backend commits #4 while the page is still in replay」以斷言失敗，另兩項回放中的檢查也失敗。
+  - 結果：exit 1，244 PASS／3 FAIL。
+  - 證據：`artifacts/b1-06/reversal-667e933d0e25/`。
+- **沒有改的**：沒有新增正式環境可呼叫的入口，沒有改 Policy、期限、Store 或回放語意。掛鉤只存在測試注入的頁面腳本中。
+
+### 16.2 整體流程（自動化，同一個 host）
+
+- **環境**：真實 `bin/demo` 與 `fake-claude`，demo registry，全新的拋棄式資料庫（路徑記在 log），之後在同一個資料庫重啟。
+- **驗收用情境目錄 `testdata/demo/scenarios-acceptance.json`**：
+  - 內容是出貨目錄的 `ask`、`deny-budget` 原樣，加上 `ask-wait`（`testdata/cli/hang.json`：Ask 後等待，直到停止或 fake CLI 的 3 分鐘時限）。
+  - `make demo` 仍用 `testdata/demo/scenarios.json`，沒有改。
+  - 加這個目錄的原因：出貨目錄的場次都會立刻結束，主持人無法示範「執行中停止」。
+  - 這是測試與驗收資料，不是產品功能；請 review 決定是否接受，或改為併入出貨目錄。`TestLoadScenarios` 已加入它的載入檢查。
+
+| 步驟 | 自動化檢查（每個情境都核對 Unity、Dashboard 場景、Inspector、Timeline 的 task、序號與結果） |
+|---|---|
+| 1 啟動、就緒 | 新資料庫，啟動時不跑任何場次；就緒面板 HTTP、Store、fake CLI、Unity 建置都是 ok；真實 CLI 與付款為 off |
+| 2 token 檔 | 選檔欄位清空；storage、cookie、URL 都沒有 token |
+| 3 Ask | 自動切到 consumer-a 並開啟 show-a-01；#3 waiting、Ask `HUMAN_APPROVAL_REQUIRED` pending、未付款；該行「場次完成；Ask 等待中；task 可由主持人取消」 |
+| 4 Deny | 自動切到 consumer-b 並開啟 show-b-01；#3 denied、`INSUFFICIENT_BUDGET`；該行「場次完成；Deny：INSUFFICIENT_BUDGET」，沒有取消按鈕 |
+| 4 停止 | `ask-wait` 的 show-a-02 進行中，只有「停止」。按下後顯示「已停止，取消已記錄」；#5 withdrawn，Timeline 有 `APPROVAL_WITHDRAWN`、`TASK_CANCELLED` |
+| 4 取消 | show-a-03 場次結束後取消：「task show-a-03 已取消」、「task 現已取消」；#5 withdrawn |
+| 4 到期 | show-a-01 在伺服器時鐘到期時由後端寫入 `APPROVAL_EXPIRED`；該行「Ask 已到期；task 仍可由主持人取消」；#4 expired |
+| 5 切換與回放 | 切到 consumer-b 後畫面不留 consumer-a 的任何內容；切回後回放唯讀，事件數不變，結束後回到 #4 expired |
+| 6 錯誤與恢復 | CDP 在瀏覽器網路層模擬（不是真實 Store 故障）：<br>• 詳情讀取回 503 時顯示「Ask 狀態未確認」，恢復後回到實際狀態；<br>• 取消請求在到達伺服器前回 503：顯示「取消結果尚未確認」，沒有寫入；<br>• 再按一次真正取消：「task show-a-01 已取消」；#5，expired 後 cancelled |
+| 7 重啟 | 先留一個等待中的 Ask（show-a-04）與一個執行中的場次（show-a-05），再正常關閉，用同一個資料庫重啟：<br>• 頁面憑證被清除（舊 token 401）；<br>• 沒有重跑、沒有中斷；<br>• 場次與事件相同，只追加了 show-a-05 的關閉取消（以及 show-a-04 可能的到期）；<br>• show-a-05 的行為「已停止，取消已記錄」；歷史各行文字不變；<br>• show-a-04 之後依規則取消成功，四處一致 |
+
+場次、task 與事件的對照（`ui-667e933d0e25-20261006T085612Z/browser-test.log` 的 run／task／events 段，每次執行的 run_id 不同）：
+
+| 情境 | task | 事件 |
+|---|---|---|
+| Ask | show-a-01 | #3：TASK_STARTED、PURCHASE_PROPOSED、POLICY_DECIDED |
+| Deny | show-b-01 | #3：同上（Deny） |
+| 停止 | show-a-02 | #5：…、APPROVAL_WITHDRAWN、TASK_CANCELLED |
+| 取消 | show-a-03 | #5：…、APPROVAL_WITHDRAWN、TASK_CANCELLED |
+| 到期，之後取消 | show-a-01 | #4 APPROVAL_EXPIRED → #5 TASK_CANCELLED |
+| 重啟：關閉時的取消 | show-a-05 | #5：…、APPROVAL_WITHDRAWN、TASK_CANCELLED |
+| 重啟後取消 | show-a-04 | #5：…、APPROVAL_WITHDRAWN（或期限已到則為 EXPIRED）、TASK_CANCELLED |
+
+截圖：`desktop-acceptance-ready`、`-ask`、`-deny`、`-stop`、`-cancel`、`-expired`、`-restart`.png。每張拍攝前都檢查 token 欄位為空；證據目錄另做 token 掃描。
+
+### 16.3 Aaron 人工驗收清單（待 Aaron 執行）
+
+自動化瀏覽器通過不能代替人工驗收。以下每步都還沒有替 Aaron 執行，也沒有勾選。
+
+**啟動**：使用新資料庫，不刪舊檔。以下命令不含 token；token 只在 `var/demo-tokens.json`。
+
+```sh
+go build -o bin/demo ./cmd/demo && go build -o bin/fake-claude ./cmd/fake-claude
+APA_ADDR=127.0.0.1:8402 APA_DB_PATH=var/apa-demo-35-acceptance.db APA_DEMO_TOKEN_FILE=var/demo-tokens.json \
+  ./bin/demo --fake-cli bin/fake-claude --scenarios testdata/demo/scenarios-acceptance.json \
+  --registry testdata/demo/registry.json --unity-build unity/AgentPaymentAuthority/Build/WebGL/Build
+```
+
+`var/apa-demo-35-acceptance.db` 若已存在（例如做過一次），請換一個新檔名，不要刪除舊檔。正常展示不需要重建 Unity、跑測試、改 SQLite 或刪資料庫。
+
+| # | 操作 | 預期畫面 | 不符合時 |
+|---|---|---|---|
+| 1 | 執行上面的命令 | 終端機出現 `listening on http://127.0.0.1:8402`，沒有任何 `demo: run` 行 | 停止，回報終端機訊息（不附 token 檔） |
+| 2 | 開 `http://127.0.0.1:8402/host`，按「載入本機 token 檔」，選 `var/demo-tokens.json` | 「已載入 token 檔：host、operator 與 2 位 viewer」。就緒面板：HTTP、Store、fake CLI、Unity 建置為就緒，真實 CLI 未啟用，付款為無付款能力 | 截圖（確認畫面沒有 token）後回報 |
+| 3 | 按「開始：主商品，Ask（等待核准）」 | 頁面切到 consumer-a 並開啟 show-a-01；商店顯示 Ask 等待人工核准；Inspector 顯示 Ask、`HUMAN_APPROVAL_REQUIRED`、pending、未付款；Timeline #1–#3；最近場次「場次完成；Ask 等待中；task 可由主持人取消」。記下時間：約 30 秒後到期 | 回報 task ID 與畫面 |
+| 4 | 按「開始：預算不足，Deny」 | 切到 consumer-b、show-b-01；商店顯示 Deny 離店；最近場次「Deny：INSUFFICIENT_BUDGET」，沒有取消按鈕 | 同上 |
+| 5 | 按「開始：Ask 後等待（可按停止…）」，在 3 分鐘內按該行的「停止」 | 停止前該行為「進行中」，只有「停止」；按下後顯示「已停止，取消已記錄」，商店顯示 Ask 已撤回，Timeline 出現 `APPROVAL_WITHDRAWN`、`TASK_CANCELLED` | 若超過 3 分鐘，該行會顯示「CLI 已逾時」，這也是正確行為；請記下來再做一次 |
+| 6 | 按「開始：主商品，Ask」，場次完成後按該行的「取消 task show-a-NN」 | 「task show-a-NN 已取消」，該行「task 現已取消」；商店與 Timeline 同步顯示撤回與取消 | 回報 |
+| 7 | 步驟 3 過 30 秒後看 show-a-01 那一行；再按「以 consumer-a 查看」，輸入 show-a-01 開啟 | 該行「Ask 已到期；task 仍可由主持人取消」；商店「Ask 已到期（後端已記錄）：離店」；Timeline #4 `APPROVAL_EXPIRED` | 回報 |
+| 8 | 按「歷史展示回放（唯讀）」 | 出現回放說明；商店重演 #1–#4；結束後回到最新狀態；事件數不變 | 回報 |
+| 9 | 按「以 consumer-b 查看」 | 畫面不留 consumer-a 的 task、商店或面板內容 | 回報 |
+| 10 | 終端機按 Ctrl-C，再執行同一個命令（同一個資料庫） | 頁面顯示憑證已失效；重新載入 `var/demo-tokens.json`（已是新 token）後，最近場次保留，沒有任何場次重跑，各行文字與重啟前相同 | 回報；不刪資料庫 |
+| 11 | （可選）按 show-a-01 的「取消 task」 | 「task show-a-01 已取消」，該行「task 現已取消」 | 回報 |
+
+**任何時候出現以下情況，就停止並回報**（附截圖、時間與 task ID，不附 token 檔）：
+- 頁面出現付款成功、交付成功字樣；
+- 畫面出現 token；
+- 停止或取消後，商店與 Timeline 不一致；
+- 重啟後有場次重跑。
+
+結果：**待 Aaron 執行**。
+
+### 16.4 驗證（Claude Code 執行，待 Codex 獨立 review；全部在 `667e933`）
+
+| 項目 | 命令 | exit | 時間 | 證據 |
+|---|---|---|---|---|
+| `make check` | | 0 | 50 秒 | `artifacts/b1-06/checks-667e933d0e25-20261006T085130Z/` |
+| `make check-contracts`（Node 34） | | 0 | 2 秒 | 同上 |
+| race | `go test -race -count=1 ./cmd/demo ./internal/store` | 0 | 225 秒 | 同上 |
+| Unity 建置 | 未重建；4 個檔案的 hash 與 `843ca4a`／`d61771c` 證據相同 | — | — | 同上 `webgl-loaded.sha256` |
+| 真實瀏覽器 247 項（本輪新增 45 項：回放順序 3、3.5 段落 35、截圖 7） | `node scripts/verify/browser-ui.mjs` | 0 | 311 秒 | `artifacts/b1-06/ui-667e933d0e25-20261006T085612Z/` |
+| 回放時序反向 | 同上，只改一行後還原 | 1（預期） | 301 秒 | `artifacts/b1-06/reversal-667e933d0e25/` |
+| 完整斷網容器與全部突變 | `sh scripts/verify/container-verify.sh 667e933…` | 0 | 812 秒 | `artifacts/verify-container/runs/667e933d0e25-20261006T090222Z/`（`artifacts/b1-06/container-667e933.log`）：七步全過（check-contracts 31、check 92、race-cover 274、verify-b1-01 43、mutation 342 秒），adapter 11／11、hostcreds 23／23，**247／247 突變**，17 項隔離 ok；與瀏覽器循序執行，主機上沒有同時執行瀏覽器或 Unity |
+
+- **突變**：本輪沒有新增或調整，仍是 247 項。本輪只改測試、驗收資料與文件，沒有新的產品程式分支需要突變。
+- **開發中的執行**（工作區，未提交，不算證據）：
+  - 回放修正後第一次完整瀏覽器 205 PASS；
+  - 加入 3.5 段落後 247 PASS。
+
+### 16.5 失敗嘗試（保留）
+
+- **容器第一次執行**（`667e933`）：背景執行時，`docker image inspect` 回「No such image: apa-verify:b1-05」，沒有執行任何步驟。證據：`artifacts/b1-06/container-667e933-attempt1-no-image.log`；log 中的 `elapsed` 數值無意義，因為計時在失敗前尚未開始。
+  - 前景立即確認：映像存在（`sha256:78258368…`），兩個 Docker context 指向同一個 daemon。
+  - 推測：當時有其他程序在變動映像（daemon 的映像數由 36 變成 32），屬暫時性，未證實。
+  - 那次 `container-verify.sh` 本身也在映像檢查時停止，留下近乎空的目錄 `artifacts/verify-container/runs/667e933d0e25-20261006T090131Z/`；保留，不是通過紀錄。
+  - 映像、限制與命令都不變，重跑一次即通過（16.4）。
+- **既有回放檢查**：3.4 反向中失敗過一次，原因與修正見 16.1。
+
+### 16.6 未做與未測
+
+- **人工操作驗收**：待 Aaron 執行（16.3）。
+- **CLI 逾時的瀏覽器畫面**：只有 3.4 的種子資料庫（`ask-wait` 等 3 分鐘才逾時，自動化流程不等）。
+- **異常終止（kill -9）**：自動化流程沒有做；中斷場次由 3.4 的種子資料庫與 Go 測試涵蓋。整體流程的重啟是正常關閉。
+- **其他**：
+  - 只用 Chrome；
+  - 沒有確認對話框；
+  - 沒有執行真實 CLI、付款、testnet、Signer、ZK；
+  - 既有展示資料庫沒有被操作。
