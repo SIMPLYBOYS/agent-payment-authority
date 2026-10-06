@@ -414,6 +414,11 @@ func TestLoadScenarios(t *testing.T) {
 	if s, err := loadScenarios("testdata/demo/scenarios.json", reg, regCfg); err != nil || len(s) != 2 || len(s["ask"].candidates) != 20 || s["ask"].digest == "" {
 		t.Fatalf("the shipped catalog: %v %v", s, err)
 	}
+	// The acceptance catalog (slice 3.5): the shipped two, unchanged, and a run that waits.
+	if s, err := loadScenarios("testdata/demo/scenarios-acceptance.json", reg, regCfg); err != nil || len(s) != 3 || s["ask-wait"] == nil ||
+		s["ask-wait"].ConsumerID != "consumer-a" || s["deny-budget"].BudgetInitial != "250000" {
+		t.Fatalf("the acceptance catalog: %v %v", s, err)
+	}
 	for name, body := range map[string]string{
 		"unknown field":         `{"scenarios":[{"id":"ask","consumer_id":"consumer-a","scenario":"testdata/cli/ask-mainline.json","label":"x","extra":1}]}`,
 		"bad id":                `{"scenarios":[{"id":"Ask!","consumer_id":"consumer-a","scenario":"testdata/cli/ask-mainline.json","label":"x"}]}`,

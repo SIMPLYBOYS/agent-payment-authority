@@ -249,18 +249,44 @@ try {
   // R2: a replay that starts right after a poll (its timer pending) and
   // spans task-a's approval deadline, so the backend's expiry adds event #4
   // during the replay. The replay keeps its mode; the restore shows #4.
-  const pa = (await hostGet(addr, tok.host, "/api/tasks/task-a")).json.purchases[0];
-  for (let t = (await hostGet(addr, tok.host, "/api/tasks/task-a")).json.served_at; t < pa.deadline_at - 1; t = (await hostGet(addr, tok.host, "/api/tasks/task-a")).json.served_at) await sleep(250);
-  const seqAtStart = await hostEvents(addr, tok.host, "task-a");
+  // B1-06 3.5: the order is made explicit, not left to timing. The replay
+  // starts 4–8 s before the deadline (the server's clock), with task-a at
+  // #3; from replay step 2 on, Unity's reports are held by a test-only page
+  // hook, so the steps wait (6 s each at most) and the replay is still on
+  // when the expiry worker commits #4. Each readiness condition fails the
+  // check when it does not hold; nothing is skipped or slept away.
+  const taskA = async () => (await hostGet(addr, tok.host, "/api/tasks/task-a")).json;
+  const pa = (await taskA()).purchases[0];
+  let nowA = (await taskA()).served_at;
+  while (nowA < pa.deadline_at - 8) { await sleep(250); nowA = (await taskA()).served_at; }
+  const ready = nowA <= pa.deadline_at - 4 && (await hostEvents(addr, tok.host, "task-a")) === 3;
+  check("R2 order: before the replay, task-a is at #3 and its deadline is 4–8 s ahead (server time)", ready, "served_at " + nowA + ", deadline " + pa.deadline_at);
+  await b.evaluate(`(() => { const orig = window.apaUnityReport; window.__heldReports = []; window.__holdFrom = Infinity;
+    window.apaUnityReport = (kind, gen, seq, detail) => { if (kind === "rendered" && seq >= window.__holdFrom) { window.__heldReports.push([kind, gen, seq, detail]); return; } return orig(kind, gen, seq, detail); };
+    window.__releaseReports = () => { window.__holdFrom = Infinity; window.apaUnityReport = orig; window.__heldReports.splice(0).forEach((a) => orig(...a)); return true; };
+    return true; })()`);
   await waitPolls(b, 1); // a poll just completed: its next timer is pending
   const g0A = await unityGen(b);
-  await b.evaluate(`document.getElementById("replay").click()`);
-  let replaySamples = [];
-  for (let i = 0; i < 12; i++) { await sleep(250); replaySamples.push(await b.evaluate(`document.getElementById("status").dataset.mode + "|" + document.getElementById("status").textContent`)); }
-  check("R2: during the replay nothing switches back to 已同步", replaySamples.every((x) => x.startsWith("replay|") && !x.includes("已同步")), replaySamples[replaySamples.length - 1]);
-  check("R2: replay note says the panels are not the shop's moment", await b.evaluate(visible("#replay-note")));
+  await b.evaluate(`(window.__holdFrom = 2, document.getElementById("replay").click(), true)`);
+  const inReplay = await b.waitFor(`document.getElementById("status").dataset.mode === "replay"`, 5000);
+  const seqAtStart = await hostEvents(addr, tok.host, "task-a");
+  const replayAt = (await taskA()).served_at;
+  check("R2 order: the page is in replay while task-a is still #3 (no expiry committed yet)", inReplay && seqAtStart === 3 && replayAt < pa.deadline_at, "seq " + seqAtStart + " at " + replayAt + ", deadline " + pa.deadline_at);
   check("R2: Unity reports a replay step in a new generation", await b.waitFor(`Number(${uKey("gen")}) > ${g0A}`, 20000));
   const replayGenA = await unityGen(b);
+  let replaySamples = [];
+  let seqDuring = seqAtStart, modeAtCommit = "", commitAt = 0;
+  for (let i = 0; i < 80 && seqDuring === seqAtStart; i++) {
+    await sleep(250);
+    replaySamples.push(await b.evaluate(`document.getElementById("status").dataset.mode + "|" + document.getElementById("status").textContent`));
+    seqDuring = await hostEvents(addr, tok.host, "task-a");
+    if (seqDuring !== seqAtStart) { modeAtCommit = await b.evaluate(`document.getElementById("status").dataset.mode`); commitAt = (await taskA()).served_at; }
+  }
+  check("R2 order: the backend commits #4 while the page is still in replay", seqDuring === 4 && modeAtCommit === "replay", "seq " + seqDuring + " seen at " + commitAt + " in mode " + modeAtCommit);
+  log("  replay order (server time): replay entered at " + replayAt + " with task-a #" + seqAtStart + "; deadline " + pa.deadline_at + "; #" + seqDuring + " (APPROVAL_EXPIRED) committed, seen at " + commitAt + " in mode " + modeAtCommit + "; " + replaySamples.length + " samples during the replay");
+  check("R2: during the replay nothing switches back to 已同步", replaySamples.length > 0 && replaySamples.every((x) => x.startsWith("replay|") && !x.includes("已同步")), replaySamples[replaySamples.length - 1]);
+  check("R2: replay note says the panels are not the shop's moment", await b.evaluate(visible("#replay-note")));
+  await b.evaluate(`window.__releaseReports()`);
   check("R2: replay ends and polling resumes", await b.waitFor(`document.getElementById("status").dataset.mode === "live" && document.getElementById("status").dataset.kind === "ok"`, 40000));
   const seqAfter = await hostEvents(addr, tok.host, "task-a");
   check("R2: the backend added an event during the replay", seqAtStart === 3 && seqAfter === 4, "as_of_sequence " + seqAtStart + " -> " + seqAfter);
@@ -1171,6 +1197,198 @@ try {
   const keptX = await b.evaluate(`JSON.stringify({ ls: localStorage.length, ss: sessionStorage.length, cookie: document.cookie, url: location.href })`);
   check("3.4: no token in storage, cookie, URL, page or console", !/"ls":[1-9]|"ss":[1-9]|"cookie":"[^"]/.test(keptX) && [xt.op, xt.host, xt.a, xt.b].every((t) => !keptX.includes(t) && !b.consoleText.join("\n").includes(t)));
   await xd.stop();
+
+  // ---- B1-06 slice 3.5: the whole fake demo, in order, on one host (docs/demo-operation-design.md section 16) ----
+  // The binary and catalog the manual acceptance uses (testdata/demo/
+  // scenarios-acceptance.json: ask, deny-budget, ask-wait), a new database,
+  // then a restart on that same database. Each scenario is a new run and
+  // task; every one is checked in Unity, the Dashboard, Inspector and
+  // Timeline, and logged with its run, task and event sequence.
+  {
+    const accState = join(tmp, "state-acceptance");
+    const accArgs = ["--fake-cli", join(bin, "fake-claude"), "--scenarios", join(repo, "testdata/demo/scenarios-acceptance.json"), "--registry", join(repo, "testdata/demo/registry.json")];
+    let ad = startDemo(accState, null, unityBuild, accArgs);
+    const aAddr = await ad.ready();
+    let at = ad.tokens();
+    allTokens.push(at.a, at.b, at.host, at.op);
+    log("  3.5 acceptance host at " + aAddr + ", new database " + join(accState, "demo.db") + " (throwaway), catalog testdata/demo/scenarios-acceptance.json");
+    check("3.5: a new database, nothing runs at start", !ad.log().includes("demo: run ") && !ad.log().includes("marked interrupted"));
+    const aFile = join(tmp, "tokens-acceptance.json");
+    writeFileSync(aFile, readFileSync(join(accState, "tokens.json")));
+    const aRuns = async () => (await hostGet(aAddr, at.op, "/api/host/runs")).json.runs;
+    const aEvents = async (task) => (await hostGet(aAddr, at.host, "/api/tasks/" + task + "/events")).json.events.map((e) => e.event_type);
+    const aTask = async (task) => (await hostGet(aAddr, at.host, "/api/tasks/" + task)).json;
+    const mapping = [];
+    const record = async (what, task) => { const r = (await aRuns()).find((x) => x.task_id === task); const ev = await aEvents(task); mapping.push(what + ": run " + (r ? r.run_id : "-") + " task " + task + " #" + ev.length + " [" + ev.join(",") + "]"); };
+    const startNew = async (scenario) => {
+      const n = (await aRuns()).length;
+      await clickScenario(scenario);
+      for (let i = 0; i < 200 && (await aRuns()).length === n; i++) await sleep(100);
+      return (await aRuns())[0];
+    };
+    // views: the four panels show this task with this phase, verdict and last event.
+    const views = async (label, task, phase, verdict, lastEvent, inspectorWords) => {
+      const ev = await aEvents(task);
+      const u = await unityShows(b, { task, seq: ev.length, phase, verdict }, 30000);
+      const d = await b.waitFor(`document.getElementById("scene-text").dataset.phase === ${JSON.stringify(phase)} && document.querySelectorAll("#timeline li").length === ${ev.length}`, 15000);
+      const tl = await b.evaluate(`document.getElementById("timeline").innerText`);
+      const ins = await b.evaluate(`document.getElementById("inspector").innerText`);
+      check("3.5 " + label + ": Unity, Dashboard, Inspector and Timeline agree on " + task + " #" + ev.length + " " + phase,
+        u && d && ev.at(-1) === lastEvent && tl.includes(lastEvent) && ins.includes(task) && inspectorWords.every((w) => ins.includes(w)),
+        "unity " + (await b.evaluate(text("#unity-status"))) + " / events " + ev.join(","));
+    };
+
+    // 1–2. Start, readiness, the token file in page memory only.
+    await b.send("Page.navigate", { url: "http://" + aAddr + "/host" });
+    await b.waitFor(`document.readyState === "complete"`);
+    await b.waitFor(`["ready","rendered","failed"].includes(document.getElementById("unity-status").dataset.state)`, 90000);
+    await chooseFile(aFile);
+    const rowState = (k) => `(document.querySelector('#readiness tr[data-item="${k}"]')?.dataset.state || "")`;
+    check("3.5: readiness: HTTP, Store, fake CLI and the Unity build ready; real CLI and payment off",
+      await b.waitFor(`${rowState("HTTP")} === "ok" && ${rowState("Store")} === "ok" && ${rowState("fake CLI")} === "ok" && ${rowState("Unity 建置")} === "ok" && ${rowState("真實 CLI")} === "off" && ${rowState("付款")} === "off"`, 20000),
+      await b.evaluate(`[...document.querySelectorAll("#readiness tr")].map((r) => r.dataset.item + "=" + r.dataset.state).join(" ")`));
+    const keptA = await b.evaluate(`JSON.stringify({ ls: localStorage.length, ss: sessionStorage.length, cookie: document.cookie, url: location.href, field: document.getElementById("token-file").value })`);
+    check("3.5: the token file is in page memory only (field emptied; no storage, cookie or URL)", /"ls":0,"ss":0,"cookie":"","url":"[^"]*\/host","field":""/.test(keptA) && [at.op, at.host, at.a, at.b].every((t) => !keptA.includes(t)), keptA.slice(0, 120));
+    await shot(b, "desktop-acceptance-ready", 1280, 900, false);
+
+    // 3. Ask: a new run, the page switches to consumer-a and opens its task.
+    const askRun = await startNew("ask");
+    check("3.5 Ask: the page switches to consumer-a and opens the new task", await b.waitFor(`${text("#viewer")}.startsWith("consumer-a") && ${text("#inspector")}.includes(${JSON.stringify(askRun.task_id)})`, 20000), askRun.task_id);
+    await views("Ask", askRun.task_id, "waiting", "Ask", "POLICY_DECIDED", ["Ask", "HUMAN_APPROVAL_REQUIRED", "pending", "未付款"]);
+    check("3.5 Ask: its line: 場次完成；Ask 等待中, cancel offered", await lineHas(askRun.task_id, ["場次完成", "Ask 等待中；task 可由主持人取消"], true, 20000), await b.evaluate(seenLine(askRun.task_id)));
+    const askDeadline = (await aTask(askRun.task_id)).purchases[0].deadline_at;
+    await record("Ask", askRun.task_id);
+    await shot(b, "desktop-acceptance-ask", 1280, 900, false);
+
+    // 4. Deny: consumer-b, the reason kept apart from the run's history.
+    const denyRun = await startNew("deny-budget");
+    check("3.5 Deny: the page switches to consumer-b", await b.waitFor(`${text("#viewer")}.startsWith("consumer-b") && ${text("#inspector")}.includes(${JSON.stringify(denyRun.task_id)})`, 20000), denyRun.task_id);
+    await views("Deny", denyRun.task_id, "denied", "Deny", "POLICY_DECIDED", ["Deny", "INSUFFICIENT_BUDGET"]);
+    check("3.5 Deny: its line: 場次完成；Deny：INSUFFICIENT_BUDGET, no cancel", await lineHas(denyRun.task_id, ["場次完成", "Deny：INSUFFICIENT_BUDGET"], false, 20000), await b.evaluate(seenLine(denyRun.task_id)));
+    await record("Deny", denyRun.task_id);
+    await shot(b, "desktop-acceptance-deny", 1280, 900, false);
+
+    // 4. Stop a running run (ask-wait): 停止 only, then its own cancel.
+    const waitRun = await startNew("ask-wait");
+    check("3.5 stop: a running run offers 停止, not 取消 task", await b.waitFor(`${seenLine(waitRun.task_id)}.includes("進行中") && !!document.querySelector('#runs li[data-live="running"] .run-stop') && !${cancelBtn(waitRun.task_id)}`, 20000), await b.evaluate(seenLine(waitRun.task_id)));
+    await views("running", waitRun.task_id, "waiting", "Ask", "POLICY_DECIDED", ["Ask", "pending"]);
+    await b.evaluate(`document.querySelector('#runs li[data-live="running"] .run-stop').click()`);
+    check("3.5 stop: 已停止，取消已記錄 (after the record was written)", await lineHas(waitRun.task_id, ["已停止，取消已記錄"], false, 20000), await b.evaluate(seenLine(waitRun.task_id)));
+    await views("stop", waitRun.task_id, "withdrawn", "Ask", "TASK_CANCELLED", ["cancelled", "withdrawn"]);
+    await record("stop", waitRun.task_id);
+    await shot(b, "desktop-acceptance-stop", 1280, 900, false);
+
+    // 4. Cancel a task after its run ended.
+    const cRun = await startNew("ask");
+    await lineHas(cRun.task_id, ["場次完成", "Ask 等待中；task 可由主持人取消"], true, 20000);
+    await b.evaluate(`${cancelBtn(cRun.task_id)}.click()`);
+    check("3.5 cancel: task 已取消, its line task 現已取消", await b.waitFor(`document.getElementById("run-status").innerText === ${JSON.stringify("task " + cRun.task_id + " 已取消")}`, 15000) && await lineHas(cRun.task_id, ["task 現已取消"], false), await runSeen());
+    await views("cancel", cRun.task_id, "withdrawn", "Ask", "TASK_CANCELLED", ["cancelled", "withdrawn"]);
+    await record("cancel", cRun.task_id);
+    await shot(b, "desktop-acceptance-cancel", 1280, 900, false);
+
+    // 4. The first Ask reaches its deadline (30 s, the server's clock): the backend records the expiry.
+    let expired = false;
+    for (let i = 0; i < 200 && !expired; i++) { expired = (await aEvents(askRun.task_id)).includes("APPROVAL_EXPIRED"); if (!expired) await sleep(250); }
+    const expiredAt = (await aTask(askRun.task_id)).served_at;
+    check("3.5 expiry: the backend recorded APPROVAL_EXPIRED at or after the deadline", expired && expiredAt >= askDeadline, "deadline " + askDeadline + ", seen at " + expiredAt);
+    check("3.5 expiry: its line: Ask 已到期；task 仍可由主持人取消", await lineHas(askRun.task_id, ["Ask 已到期；task 仍可由主持人取消"], true, 15000), await b.evaluate(seenLine(askRun.task_id)));
+    // 5. Switch consumer and task, then a replay.
+    await b.evaluate(`document.querySelector('#consumer-pick button[data-consumer="consumer-a"]').click()`);
+    await b.waitFor(`${text("#viewer")}.startsWith("consumer-a")`, 10000);
+    await b.evaluate(`document.getElementById("task-id").value = ${JSON.stringify(askRun.task_id)}; document.querySelector("#task-form button[type=submit]").click()`);
+    await views("expiry", askRun.task_id, "expired", "Ask", "APPROVAL_EXPIRED", ["expired"]);
+    await record("expiry", askRun.task_id);
+    await shot(b, "desktop-acceptance-expired", 1280, 900, false);
+    await b.evaluate(`document.querySelector('#consumer-pick button[data-consumer="consumer-b"]').click()`);
+    check("3.5 switch: consumer-b shows nothing of consumer-a", await b.waitFor(`${text("#viewer")}.startsWith("consumer-b") && !${text("#inspector")}.includes(${JSON.stringify(askRun.task_id)})`, 10000)
+      && !(await b.evaluate(`[...document.querySelectorAll("#task-pick button")].some((x) => x.dataset.task.startsWith("show-a"))`)));
+    await b.evaluate(`document.querySelector('#consumer-pick button[data-consumer="consumer-a"]').click()`);
+    await b.waitFor(`${text("#viewer")}.startsWith("consumer-a")`, 10000);
+    await b.evaluate(`document.getElementById("task-id").value = ${JSON.stringify(askRun.task_id)}; document.querySelector("#task-form button[type=submit]").click()`);
+    await b.waitFor(`document.getElementById("status").dataset.kind === "ok" && ${text("#inspector")}.includes(${JSON.stringify(askRun.task_id)})`, 15000);
+    const beforeReplay = (await aEvents(askRun.task_id)).length;
+    await b.evaluate(`document.getElementById("replay").click()`);
+    check("3.5 replay: read only, then back to the latest snapshot", await b.waitFor(`document.getElementById("status").dataset.mode === "replay"`, 5000)
+      && await b.waitFor(`document.getElementById("status").dataset.mode === "live" && document.getElementById("status").dataset.kind === "ok"`, 60000)
+      && (await aEvents(askRun.task_id)).length === beforeReplay);
+    await views("after replay", askRun.task_id, "expired", "Ask", "APPROVAL_EXPIRED", ["expired"]);
+
+    // 6. Errors: a failed detail read is unconfirmed (CDP: the browser's network layer answers 503;
+    // a simulation, not a Store fault), then the real state; a cancel answered 503 before it reaches
+    // the server claims nothing; the next cancel reads the committed state.
+    let failAccDetail = false, refuseAcc = 0;
+    const offAcc = b.on("Fetch.requestPaused", (p) => {
+      const fake503 = () => b.send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 503, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from('{"error":"store_unavailable","code":"STORE_ERROR"}').toString("base64") }).catch(() => {});
+      if (failAccDetail && p.request.url.endsWith("/api/tasks/" + askRun.task_id) && p.request.headers.Authorization === "Bearer " + at.host) return fake503();
+      if (refuseAcc > 0 && p.request.url.endsWith("/cancel")) { refuseAcc--; return fake503(); }
+      b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {});
+    });
+    await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/tasks/*", requestStage: "Request" }, { urlPattern: "*/cancel", requestStage: "Request" }] });
+    failAccDetail = true;
+    check("3.5 error: a failed detail read: Ask 狀態未確認", await lineHas(askRun.task_id, ["Ask 狀態未確認（task 詳情未取得）"], true, 15000), await b.evaluate(seenLine(askRun.task_id)));
+    failAccDetail = false;
+    check("3.5 error: recovered: the real state again", await lineHas(askRun.task_id, ["Ask 已到期；task 仍可由主持人取消"], true, 15000), await b.evaluate(seenLine(askRun.task_id)));
+    refuseAcc = 1;
+    await b.evaluate(`${cancelBtn(askRun.task_id)}.click()`);
+    check("3.5 error: a cancel answered 503: 取消結果尚未確認, nothing claimed, nothing written", await b.waitFor(`document.getElementById("run-status").innerText.includes("取消結果尚未確認")`, 15000)
+      && !(await aEvents(askRun.task_id)).includes("TASK_CANCELLED") && await lineHas(askRun.task_id, ["Ask 已到期；task 仍可由主持人取消"], true), await runSeen());
+    await b.send("Fetch.disable");
+    offAcc();
+    await b.evaluate(`${cancelBtn(askRun.task_id)}.click()`);
+    check("3.5 error: then a cancel through: task 已取消, read from the Store", await b.waitFor(`document.getElementById("run-status").innerText === ${JSON.stringify("task " + askRun.task_id + " 已取消")}`, 15000) && await lineHas(askRun.task_id, ["task 現已取消"], false), await runSeen());
+    await views("expired then cancelled", askRun.task_id, "expired", "Ask", "TASK_CANCELLED", ["expired", "cancelled"]);
+    await record("expired then cancelled", askRun.task_id);
+
+    // 7. Restart on the same database: one Ask left waiting, one run still running (the orderly
+    // shutdown cancels it). Afterwards the history and tasks stay, nothing reruns, and the waiting
+    // Ask is cancelled under the usual rules.
+    const pending = await startNew("ask");
+    await lineHas(pending.task_id, ["Ask 等待中；task 可由主持人取消"], true, 20000);
+    const running = await startNew("ask-wait");
+    await b.waitFor(`${seenLine(running.task_id)}.includes("進行中")`, 20000);
+    await b.waitFor(`document.getElementById("status").dataset.kind === "ok" && ${text("#inspector")}.includes(${JSON.stringify(running.task_id)})`, 20000);
+    const beforeRestart = {};
+    for (const r of await aRuns()) beforeRestart[r.task_id] = await aEvents(r.task_id);
+    const runsBefore = (await aRuns()).map((r) => r.run_id).join();
+    await ad.stop();
+    ad = startDemo(accState, null, unityBuild, accArgs, aAddr);
+    await ad.ready();
+    at = ad.tokens();
+    allTokens.push(at.a, at.b, at.host, at.op);
+    check("3.5 restart: the page's credentials are cleared (old tokens 401)", await b.waitFor(`document.getElementById("creds").dataset.mode === "none"`, 20000));
+    check("3.5 restart: nothing reruns, no run interrupted (an orderly shutdown)", !ad.log().includes("demo: run ") && !ad.log().includes("marked interrupted"), ad.log().split("\n").filter((l) => l.includes("run")).join(" | ").slice(0, 200));
+    writeFileSync(aFile, readFileSync(join(accState, "tokens.json")));
+    await chooseFile(aFile);
+    await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`);
+    const runsAfter = (await aRuns()).map((r) => r.run_id).join();
+    let kept = runsAfter === runsBefore;
+    // The running run's task gets its shutdown cancel; the waiting Ask may meet its deadline: both only append.
+    for (const [task, ev] of Object.entries(beforeRestart)) {
+      const now = await aEvents(task);
+      if (task === running.task_id || task === pending.task_id ? now.slice(0, ev.length).join() !== ev.join() : now.join() !== ev.join()) kept = false;
+    }
+    check("3.5 restart: the same runs and the same events (only the running run's cancel or the waiting Ask's expiry appended)", kept, runsBefore + " -> " + runsAfter);
+    check("3.5 restart: the run that was running ended with its cancel at the shutdown", await lineHas(running.task_id, ["已停止，取消已記錄"], false, 20000) && (await aEvents(running.task_id)).at(-1) === "TASK_CANCELLED", await b.evaluate(seenLine(running.task_id)));
+    check("3.5 restart: the history lines read as before", await lineHas(denyRun.task_id, ["場次完成", "Deny：INSUFFICIENT_BUDGET"], false) && await lineHas(waitRun.task_id, ["已停止，取消已記錄"], false)
+      && await lineHas(cRun.task_id, ["task 現已取消"], false) && await lineHas(askRun.task_id, ["task 現已取消"], false));
+    await b.evaluate(`${cancelBtn(pending.task_id)}.click()`);
+    check("3.5 restart: the Ask left waiting is cancelled afterwards", await b.waitFor(`document.getElementById("run-status").innerText === ${JSON.stringify("task " + pending.task_id + " 已取消")}`, 15000) && await lineHas(pending.task_id, ["task 現已取消"], false), await runSeen());
+    await b.evaluate(`document.querySelector('#consumer-pick button[data-consumer="consumer-a"]').click()`);
+    await b.waitFor(`${text("#viewer")}.startsWith("consumer-a")`, 10000);
+    await b.evaluate(`document.getElementById("task-id").value = ${JSON.stringify(pending.task_id)}; document.querySelector("#task-form button[type=submit]").click()`);
+    const pendingEv = await aEvents(pending.task_id);
+    await views("after restart", pending.task_id, pendingEv.includes("APPROVAL_EXPIRED") ? "expired" : "withdrawn", "Ask", "TASK_CANCELLED", ["cancelled"]);
+    await record("restart: shutdown cancel", running.task_id);
+    await record("restart: cancelled afterwards", pending.task_id);
+    await shot(b, "desktop-acceptance-restart", 1280, 900, false);
+    check("3.5: nothing on the page claims payment or delivery", !(await b.evaluate(`document.body.innerText`)).match(/付款成功|已付款|取貨成功|交付成功|Settled|RESOURCE_DELIVERED/));
+    const keptEnd = await b.evaluate(`JSON.stringify({ ls: localStorage.length, ss: sessionStorage.length, cookie: document.cookie, url: location.href })`);
+    check("3.5: no token in storage, cookie, URL or console", !/"ls":[1-9]|"ss":[1-9]|"cookie":"[^"]/.test(keptEnd) && allTokens.every((t) => !keptEnd.includes(t) && !b.consoleText.join("\n").includes(t)));
+    log("  3.5 run / task / events:");
+    for (const m of mapping) log("    " + m);
+    await ad.stop();
+  }
 
   // No Unity build: the page says so and shows no other shop.
   const bare = startDemo(join(tmp, "state-bare"), null, join(tmp, "no-build"));

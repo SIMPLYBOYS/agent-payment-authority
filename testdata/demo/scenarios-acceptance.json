@@ -1,0 +1,24 @@
+{
+  "description": "Trusted host scenario catalog for the slice 3.5 acceptance run (docs/demo-operation-design.md section 16): the shipped catalog's two scenarios and one that waits after its Ask until it is stopped (or the fake CLI's time limit ends it), so a running run can be stopped. Test and acceptance data only: make demo keeps testdata/demo/scenarios.json. Not a policy change and not agent input; the fake CLI runs no model.",
+  "scenarios": [
+    {
+      "id": "ask",
+      "consumer_id": "consumer-a",
+      "scenario": "testdata/cli/ask-mainline.json",
+      "label": "主商品，Ask（等待核准）"
+    },
+    {
+      "id": "deny-budget",
+      "consumer_id": "consumer-b",
+      "scenario": "testdata/cli/ask-mainline.json",
+      "budget_initial": "250000",
+      "label": "預算不足，Deny"
+    },
+    {
+      "id": "ask-wait",
+      "consumer_id": "consumer-a",
+      "scenario": "testdata/cli/hang.json",
+      "label": "Ask 後等待（可按停止；3 分鐘後 CLI 逾時）"
+    }
+  ]
+}
