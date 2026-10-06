@@ -39,6 +39,8 @@ function server(valid) {
       return { status: 202, body: run };
     }
     if (path === "/api/host/runs") return role ? { status: 200, body: { runs } } : { status: valid.all.has(token) ? 403 : 401, body: null };
+    if (path.endsWith("/cancel") && post) return role === "operator" ? { status: 200, body: { state: "cancelled" } } : { status: valid.all.has(token) ? 403 : 401, body: null };
+    if (path === "/api/tasks" || path.startsWith("/api/tasks/")) return role === "host" ? { status: 200, body: { tasks: [] } } : { status: valid.all.has(token) ? 403 : 401, body: null };
     if (path.endsWith("/stop") && post) return role === "operator" ? { status: 202, body: { live: "stopping" } } : { status: valid.all.has(token) ? 403 : 401, body: null };
     if (path === "/api/viewer") {
       const c = valid.viewers.get(token);
@@ -345,4 +347,78 @@ test("stopRun and runs follow the same generation rule", async () => {
   await srv.releaseAll();
   assert.equal(await p, null);
   assert.equal(await creds.runs(), null, "no credentials, no request");
+});
+
+// Slice 3.4: one cancel request, never resent; its reply and a host read
+// count only in their own generation, and only a current 401 clears.
+test("cancelTask: one request with the operator token; a lost reply is unconfirmed, not resent", async () => {
+  const srv = server(valid(H, A, B));
+  const { creds } = setup(srv);
+  await creds.load(asFile(fileDoc(H, A, B)));
+  const ok = await creds.cancelTask("show-a-01");
+  assert.deepEqual([ok.status, ok.body.state, ok.gen], [200, "cancelled", creds.gen]);
+  srv.fail(1);
+  const lost = await creds.cancelTask("show-a-02");
+  assert.deepEqual(lost, { gen: creds.gen, error: "unreachable" });
+  assert.equal(srv.calls.filter((c) => c.endsWith("/cancel")).length, 2, "no resend");
+  assert.equal(srv.calls.at(-1), "POST /api/host/tasks/show-a-02/cancel");
+});
+
+test("cancelTask sent, then 清除全部 or a new file, then the old reply: dropped, nothing changes", async () => {
+  for (const next of ["clear", "file"]) {
+    const live = valid(H, A, B);
+    const srv = server(live);
+    const { creds } = setup(srv);
+    await creds.load(asFile(fileDoc(H, A, B)));
+    srv.hold();
+    const p = creds.cancelTask("show-a-01");
+    await flush();
+    if (next === "clear") creds.clearAll("cleared");
+    else {
+      Object.assign(live, valid(H2, A2, B2));
+      await creds.load(asFile(fileDoc(H2, A2, B2), "b.json"));
+    }
+    const before = holds(creds);
+    await srv.releaseAll();
+    assert.equal(await p, null, next);
+    assert.deepEqual(holds(creds), before, next + ": the old reply changed the credentials");
+  }
+});
+
+test("a cancel's 401 clears only in its own generation", async () => {
+  const live = valid(H, A, B);
+  const srv = server(live);
+  const { creds } = setup(srv);
+  await creds.load(asFile(fileDoc(H, A, B)));
+  live.operator = "x"; // the host restarted: the operator token is refused
+  live.all = new Set([H, A, B]);
+  assert.equal(await creds.cancelTask("show-a-01"), null);
+  assert.equal(creds.view().mode, "none", "a current 401 clears all");
+  assert.equal(creds.view().message, MESSAGES.stale);
+  live.operator = OP[H]; live.all = new Set([H, OP[H], A, B]);
+  await creds.load(asFile(fileDoc(H, A, B)));
+  live.operator = "x";
+  srv.hold();
+  const p = creds.cancelTask("show-a-01");
+  await flush();
+  live.operator = OP[H];
+  await creds.load(asFile(fileDoc(H, A, B), "again.json"));
+  await srv.releaseAll();
+  assert.equal(await p, null);
+  assert.equal(creds.view().mode, "file", "the stale 401 cleared nothing");
+});
+
+test("hostRead uses the host token, with the same generation rule", async () => {
+  const srv = server(valid(H, A, B));
+  const { creds } = setup(srv);
+  assert.equal(await creds.hostRead("/api/tasks"), null, "no credentials, no request");
+  await creds.load(asFile(fileDoc(H, A, B)));
+  const r = await creds.hostRead("/api/tasks");
+  assert.deepEqual([r.status, r.body.tasks], [200, []]);
+  srv.hold();
+  const p = creds.hostRead("/api/tasks/show-a-01");
+  await flush();
+  creds.clearAll("cleared");
+  await srv.releaseAll();
+  assert.equal(await p, null);
 });

@@ -65,6 +65,18 @@ const unity = new UnityHost($("unity-canvas"), (s, detail) => {
   box.textContent = s === "loading" ? "Unity 場景載入中…" : "Unity 場景未就緒";
 });
 
+// viewKey names what the Dashboard shows (identity and task): /host keeps
+// it with a control step and drops the step's reply once it changed.
+export const viewKey = () => idGen + ":" + (state.taskId || "");
+
+// refreshNow reads the list and the open task again at once (after a
+// cancel on /host); the usual polling goes on as before.
+export function refreshNow() {
+  if (!token) return;
+  refreshList();
+  if (mode === "live") poll(false);
+}
+
 // unityInfo: whether the shop is ready and which art it uses, for /host.
 export const unityInfo = () => ({ ready: unity.ready, art: unity.art });
 

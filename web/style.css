@@ -51,3 +51,4 @@ h2 { margin: 0 0 8px; font-size: 15px; color: var(--accent); }
 .runs li { margin: 2px 0; }
 #run-status[data-state="error"] { color: var(--err); }
 #run-status[data-state="ok"] { color: var(--ok); }
+#run-status[data-state="warn"] { color: var(--warn); }

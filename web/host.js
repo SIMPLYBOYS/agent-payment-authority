@@ -12,8 +12,16 @@
 // and reads the runs list. A start reply of the current generation opens
 // the new task with that consumer's viewer token; a reply of an older one
 // does nothing. Clearing the page does not withdraw a run the host accepted.
+//
+// Slice 3.4: a run's line keeps its history (what the process and its end
+// records did then) apart from the task's current state, read with the
+// read-only host token. 「取消 task」 is offered for a task that is not
+// running and not ended; the server decides again. A cancel reply counts
+// only while the credentials and the Dashboard's view are the ones of the
+// click: a clear, a new file, the manual mode, pagehide, or a switch of
+// consumer or task drops it; nothing is opened or signed in for it.
 
-import { forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask } from "./app.js";
+import { forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
 
 const $ = (id) => document.getElementById(id);
@@ -40,7 +48,10 @@ let lastReady = null;
 let runsTimer = null;
 let lastRuns = null; // { gen, runs } of the current generation
 let starting = false;
+let cancelling = false;
+let lastTasks = null; // { gen, list: Map(task_id -> summary), details: Map(task_id -> task) } or { gen, error }
 const RUNS_MS = 2000;
+const DETAILS_MAX = 5; // ponytail: task reads per poll for the Ask notes; more runs waiting would read in turn
 
 const creds = createHostCreds({ call, onChange: render });
 
@@ -54,7 +65,9 @@ function render(v) {
     forget(v.message || "請載入 token 檔或手動輸入 viewer token");
     lastReady = null;
     lastRuns = null;
+    lastTasks = null;
     starting = false;
+    cancelling = false;
     clearTimeout(readyTimer);
     clearTimeout(runsTimer);
     setRunStatus("", "idle");
@@ -177,22 +190,66 @@ const ERRORS = {
   run_not_running: "這一場已不在執行中",
 };
 
+// CANCEL_ERRORS: a refused cancel; the task's record stays as it was.
+const CANCEL_ERRORS = {
+  not_found: "Store 沒有這個 task（未建立），未取消",
+  run_active: "這個 task 的場次仍在執行：請用「停止」，未取消",
+  already_ended: "task 已因 CLI 逾時結束，未取消；原紀錄保留",
+  not_eligible: "task 已是 Deny（終態），未取消；Deny 原因保留",
+  store_unavailable: "Store 不可用，取消未完成",
+};
+
 // runText is section 13.5: the run's process, its end record and the
-// failures, kept apart. "Complete" words only when every record was written.
+// failures, kept apart: the run's history, as it was then. "Complete"
+// words only when every record was written. The task's state now is
+// taskNow's.
 function runText(r) {
   if (r.live === "running") return "進行中";
   if (r.live === "stopping") return "停止中…";
   if (r.record_error) return "程序已結束，但場次紀錄寫入失敗（" + r.record_error + "）";
-  if (r.state === "interrupted") return "場次中斷（上一個 host 未正常結束；結果以 task 為準）";
+  if (r.state === "interrupted") return "場次曾中斷（上一個 host 未正常結束）";
   if (r.state !== "ended") return "已受理";
-  if (r.store_end_error) return "程序已停止，但" + (r.outcome === "timeout" ? "逾時" : "取消") + "紀錄寫入失敗（" + r.store_end_error + "）；task 尚未收尾";
+  if (r.store_end_error) return "程序已停止；當時" + (r.outcome === "timeout" ? "逾時" : "取消") + "紀錄寫入失敗（" + r.store_end_error + "）";
   if (r.outcome === "cancelled" && r.store_end === "TASK_CANCELLED") return "已停止，取消已記錄";
-  if (r.outcome === "timeout" && r.store_end === "TASK_TIMED_OUT") return "CLI 逾時，已記錄";
+  if (r.outcome === "timeout" && r.store_end === "TASK_TIMED_OUT") return "CLI 已逾時（已記錄）";
   if (r.outcome === "skipped") return "未啟動（" + r.detail + "）";
   if (r.detail && r.detail.startsWith("prepare_failed")) return "未建立 task（" + r.detail + "）";
-  if (r.outcome === "ok") return "場次完成；task 結果見 Inspector／Timeline";
+  if (r.outcome === "ok") return "場次完成";
   return "場次結束：" + r.outcome + (r.detail ? "（" + r.detail + "）" : "");
 }
+
+const asks = (d) => ((d && d.purchases) || []).filter((p) => p.decision && p.decision.policy_verdict === "Ask");
+
+// taskNow is the task's state now, from the host's task reads; null when
+// the run's line needs none (its process is running, or no task was made).
+function taskNow(r) {
+  if (r.live === "running" || r.live === "stopping") return null;
+  if (!lastTasks || lastTasks.gen !== creds.gen) return "目前 task 狀態：讀取中（未確認）";
+  if (lastTasks.error) return "目前 task 狀態：讀取失敗（" + lastTasks.error + "），未確認";
+  const t = lastTasks.list.get(r.task_id);
+  if (!t) return r.outcome === "skipped" || (r.detail || "").startsWith("prepare_failed") ? null : "目前 task：Store 沒有此 task";
+  const d = lastTasks.details.get(r.task_id);
+  const open = asks(d).some((p) => !p.approval_closed);
+  const expired = asks(d).some((p) => p.approval_closed === "expired");
+  const wasOpen = r.state === "interrupted" || r.record_error || r.store_end_error || r.store_end !== "TASK_CANCELLED";
+  switch (t.status) {
+    case "cancelled":
+      if (!wasOpen) return null; // the stop's own cancel: the history says it
+      return r.store_end_error ? "後續已成功取消 task" : "task 現已取消";
+    case "denied": return "Deny：" + (t.deny_reason || "原因未知");
+    case "failed":
+      return (r.outcome === "timeout" && r.store_end === "TASK_TIMED_OUT" ? "" : "task 已結束（CLI 逾時）；") +
+        (open ? "未決 Ask 仍依原到期機制處理" : expired ? "Ask 已依原到期機制到期" : "無未決 Ask");
+    case "awaiting_approval": return "Ask 等待中；task 可由主持人取消";
+    case "running": return d ? (expired ? "Ask 已到期；task 仍可由主持人取消" : "task 未收尾；可由主持人取消") : "task 未收尾（讀取 Ask 中）；可由主持人取消";
+    default: return "目前 task：" + t.status;
+  }
+}
+
+const cancellable = (r) => {
+  const t = r.live !== "running" && r.live !== "stopping" && lastTasks && lastTasks.gen === creds.gen && lastTasks.list && lastTasks.list.get(r.task_id);
+  return !!t && (t.status === "awaiting_approval" || t.status === "running");
+};
 
 function renderControl() {
   const v = creds.view();
@@ -216,7 +273,18 @@ function renderControl() {
     li.dataset.run = r.run_id;
     li.dataset.state = r.state;
     li.dataset.live = r.live || "";
-    li.textContent = r.task_id + "（" + r.consumer_id + "，" + r.scenario + "）：" + runText(r);
+    const now = taskNow(r);
+    li.textContent = r.task_id + "（" + r.consumer_id + "，" + r.scenario + "）：" + runText(r) + (now ? "；" + now : "");
+    if (cancellable(r)) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "task-cancel";
+      b.dataset.task = r.task_id;
+      b.textContent = "取消 task " + r.task_id;
+      b.disabled = cancelling;
+      b.addEventListener("click", () => cancel(r.task_id));
+      li.append(" ", b);
+    }
     if (r.live === "running") {
       const b = document.createElement("button");
       b.type = "button";
@@ -270,6 +338,64 @@ async function stop(runId) {
   pollRuns();
 }
 
+// cancel is one cancel operation (section 6.1); a lost reply is "not
+// confirmed", never a failure or a success, and nothing is resent.
+async function cancel(taskId) {
+  if (cancelling) return;
+  const g = creds.gen;
+  const key = viewKey();
+  const current = () => g === creds.gen && key === viewKey();
+  cancelling = true;
+  renderControl();
+  setRunStatus("取消 task " + taskId + " 中…", "busy");
+  const r = await creds.cancelTask(taskId);
+  if (g !== creds.gen) return; // cleared or replaced: render() has reset everything
+  cancelling = false;
+  renderControl();
+  if (!r) return;
+  if (!current()) { // a switch of consumer or task: the old reply is not shown; the runs list reads the Store again
+    setRunStatus("取消 task " + taskId + " 的回覆未套用（畫面已切換）；結果以最近場次的目前狀態為準", "idle");
+    return pollRuns();
+  }
+  if (r.error) {
+    setRunStatus("取消 task " + taskId + "：結果尚未確認（沒有收到回覆）；請看最近場次的目前狀態，需要時再按一次（伺服器不會重複寫入）", "warn");
+  } else if (r.status === 200) {
+    const already = r.body && r.body.already === true;
+    setRunStatus("取消已記錄：task " + taskId + "，更新畫面中…", "busy");
+    refreshNow();
+    const t = await creds.hostRead("/api/tasks/" + encodeURIComponent(taskId));
+    if (!current()) return;
+    if (t && t.status === 200 && t.body && t.body.status === "cancelled") {
+      setRunStatus("task " + taskId + " 已取消" + (already ? "（先前已取消，未重複寫入）" : ""), "ok");
+    } else {
+      setRunStatus("取消已記錄；畫面更新失敗（task " + taskId + " 未能重新讀取，畫面可能不是最新）", "warn");
+    }
+  } else {
+    const code = r.body && r.body.error;
+    setRunStatus("task " + taskId + "：" + (CANCEL_ERRORS[code] || "未取消（" + r.status + "）") + (code === "store_unavailable" && r.body.code ? "（" + r.body.code + "）" : ""), "error");
+  }
+  pollRuns();
+}
+
+// readTasks reads the task list with the host token, and each listed
+// task of a run whose Ask matters to its line (running or failed).
+async function readTasks(runs) {
+  const g = creds.gen;
+  const l = await creds.hostRead("/api/tasks");
+  if (!l || g !== creds.gen) return null;
+  if (l.error || l.status !== 200 || !l.body) return { gen: g, error: l.error || "status_" + l.status };
+  const list = new Map(l.body.tasks.map((t) => [t.task_id, t]));
+  const details = new Map();
+  const want = [...new Set(runs.filter((r) => r.live !== "running" && r.live !== "stopping").map((r) => r.task_id))]
+    .filter((id) => list.has(id) && ["running", "failed"].includes(list.get(id).status)).slice(0, DETAILS_MAX);
+  for (const id of want) {
+    const d = await creds.hostRead("/api/tasks/" + encodeURIComponent(id));
+    if (!d || g !== creds.gen) return null;
+    if (d.status === 200 && d.body) details.set(id, d.body);
+  }
+  return { gen: g, list, details };
+}
+
 // pollRuns: one loop at a time, like the readiness poll.
 let runsPolling = false;
 async function pollRuns() {
@@ -280,7 +406,10 @@ async function pollRuns() {
   try {
     if (!document.hidden) {
       const r = await creds.runs();
-      if (r && r.gen === creds.gen && r.runs) { lastRuns = r; renderControl(); }
+      if (r && r.gen === creds.gen && r.runs) {
+        const t = await readTasks(r.runs);
+        if (g === creds.gen) { lastRuns = r; if (t) lastTasks = t; renderControl(); }
+      }
     }
   } finally {
     runsPolling = false;

@@ -96,6 +96,7 @@ func (c *control) register(mux *http.ServeMux, a *api) {
 	mux.HandleFunc("GET /api/host/runs/{run_id}", func(w http.ResponseWriter, r *http.Request) { c.get(w, r, a) })
 	mux.HandleFunc("POST /api/host/runs", func(w http.ResponseWriter, r *http.Request) { c.start(w, r, a) })
 	mux.HandleFunc("POST /api/host/runs/{run_id}/stop", func(w http.ResponseWriter, r *http.Request) { c.stop(w, r, a) })
+	mux.HandleFunc("POST /api/host/tasks/{task_id}/cancel", func(w http.ResponseWriter, r *http.Request) { c.cancelTask(w, r, a) })
 }
 
 // reader admits the host (read only) and the operator.

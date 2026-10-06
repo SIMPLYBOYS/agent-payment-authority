@@ -916,6 +916,190 @@ try {
 
   await cd.stop();
 
+  // ---- B1-06 slice 3.4: cancel a task, errors, runs of a previous host (docs/demo-operation-design.md section 15) ----
+  // A database written through the host's own runs (cmd/demo
+  // TestSeedCancelDisplay), ten minutes back so every Ask is past its
+  // deadline: show-a-01 CLI timeout, show-a-02 Ask, show-b-01 Deny,
+  // show-a-03 a failed cancel record, show-a-04 both records failed.
+  const seedState = join(tmp, "state-cancel");
+  mkdirSync(seedState, { recursive: true, mode: 0o700 });
+  execFileSync("go", ["test", "./cmd/demo", "-run", "TestSeedCancelDisplay", "-count=1"], { cwd: repo, env: { ...process.env, APA_SEED_CANCEL_DIR: seedState }, stdio: "ignore" });
+  const xd = startDemo(seedState, null, unityBuild, ctlArgs);
+  const xAddr = await xd.ready();
+  const xt = xd.tokens();
+  allTokens.push(xt.a, xt.b, xt.host, xt.op);
+  check("3.4: the previous host's open run is marked interrupted; nothing reruns", xd.log().includes("1 run(s) of a previous host marked interrupted") && !xd.log().includes("demo: run "));
+  const xFile = join(tmp, "tokens-cancel.json");
+  writeFileSync(xFile, readFileSync(join(seedState, "tokens.json")));
+  await b.send("Page.navigate", { url: "http://" + xAddr + "/host" });
+  await b.waitFor(`document.readyState === "complete"`);
+  await b.waitFor(`["ready","rendered","failed"].includes(document.getElementById("unity-status").dataset.state)`, 90000);
+  await chooseFile(xFile);
+  await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`);
+  // What the host sees: a run's line (innerText of a shown element) and its buttons.
+  const seenLine = (task) => `(([...document.querySelectorAll("#runs li")].find((l) => l.textContent.startsWith(${JSON.stringify(task + "（")})) || {}).innerText || "")`;
+  const cancelBtn = (task) => `document.querySelector('#runs .task-cancel[data-task="${task}"]')`;
+  const runSeen = () => b.evaluate(`document.getElementById("run-status").innerText`);
+  const lineHas = (task, parts, button, ms = 15000) => b.waitFor(`(() => { const l = ${seenLine(task)}; return ${JSON.stringify(parts)}.every((p) => l.includes(p)) && !!${cancelBtn(task)} === ${button}; })()`, ms);
+  const xRuns = async () => (await hostGet(xAddr, xt.op, "/api/host/runs")).json.runs;
+  const xEvents = async (task) => (await hostGet(xAddr, xt.host, "/api/tasks/" + task + "/events")).json.events;
+  check("3.4: CLI timeout: its history, the Ask left to its deadline, no cancel offered", await lineHas("show-a-01", ["CLI 已逾時（已記錄）", "Ask 已依原到期機制到期"], false), await b.evaluate(seenLine("show-a-01")));
+  check("3.4: Deny: its original reason, no cancel offered", await lineHas("show-b-01", ["場次完成", "Deny：INSUFFICIENT_BUDGET"], false), await b.evaluate(seenLine("show-b-01")));
+  check("3.4: an expired Ask: the task can still be cancelled", await lineHas("show-a-02", ["場次完成", "Ask 已到期；task 仍可由主持人取消"], true), await b.evaluate(seenLine("show-a-02")));
+  check("3.4: a failed cancel record: that history, and the task can be cancelled", await lineHas("show-a-03", ["程序已停止；當時取消紀錄寫入失敗（CLOCK_REGRESSION）", "Ask 已到期；task 仍可由主持人取消"], true), await b.evaluate(seenLine("show-a-03")));
+  check("3.4: an interrupted run: that history, and the task can be cancelled", await lineHas("show-a-04", ["場次曾中斷（上一個 host 未正常結束）", "Ask 已到期；task 仍可由主持人取消"], true), await b.evaluate(seenLine("show-a-04")));
+  const runsHistory = JSON.stringify(await xRuns());
+
+  // The button is only a hint: a forged task list offers cancel for the Deny
+  // and the timed-out task; the server refuses both and writes nothing.
+  let forge = false;
+  const offForge = b.on("Fetch.requestPaused", async (p) => {
+    if (forge && p.responseStatusCode === 200 && p.request.url.endsWith("/api/tasks") && p.request.headers.Authorization === "Bearer " + xt.host) {
+      try {
+        const r = await b.send("Fetch.getResponseBody", { requestId: p.requestId });
+        const doc = JSON.parse(r.base64Encoded ? Buffer.from(r.body, "base64").toString() : r.body);
+        for (const t of doc.tasks) if (t.task_id === "show-b-01" || t.task_id === "show-a-01") t.status = "running";
+        await b.send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from(JSON.stringify(doc)).toString("base64") });
+      } catch { b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {}); }
+      return;
+    }
+    b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {});
+  });
+  await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/tasks", requestStage: "Response" }] });
+  const refused = { "show-b-01": "task 已是 Deny（終態），未取消；Deny 原因保留", "show-a-01": "task 已因 CLI 逾時結束，未取消；原紀錄保留" };
+  for (const [task, words] of Object.entries(refused)) {
+    const evs = (await xEvents(task)).length;
+    forge = true;
+    await b.waitFor(`!!${cancelBtn(task)} && !${cancelBtn(task)}.disabled`, 15000);
+    await b.evaluate(`${cancelBtn(task)}.click()`);
+    check("3.4: a forged hint for " + task + ": the server refuses, the page says so", await b.waitFor(`document.getElementById("run-status").innerText === ${JSON.stringify("task " + task + "：" + words)}`, 10000), await runSeen());
+    forge = false;
+    check("3.4: " + task + " unchanged, its line back to the Store's state", (await xEvents(task)).length === evs
+      && await lineHas(task, task === "show-b-01" ? ["Deny：INSUFFICIENT_BUDGET"] : ["CLI 已逾時（已記錄）"], false), await b.evaluate(seenLine(task)));
+  }
+  await b.send("Fetch.disable");
+  offForge();
+
+  // Cancel the expired Ask, the interrupted run's task and the one whose cancel record failed.
+  const cancelBy = async (task) => { await b.waitFor(`!!${cancelBtn(task)} && !${cancelBtn(task)}.disabled`, 15000); await b.evaluate(`${cancelBtn(task)}.click()`); return b.waitFor(`document.getElementById("run-status").innerText === ${JSON.stringify("task " + task + " 已取消")}`, 15000); };
+  check("3.4: an expired Ask's task is cancelled", await cancelBy("show-a-02") && await lineHas("show-a-02", ["場次完成", "task 現已取消"], false), await runSeen());
+  let ev2 = (await xEvents("show-a-02")).map((e) => e.event_type);
+  check("3.4: its events: the expiry, then the cancel, no withdrawal", ev2.at(-1) === "TASK_CANCELLED" && ev2.filter((t) => t === "APPROVAL_EXPIRED").length === 1 && !ev2.includes("APPROVAL_WITHDRAWN"), ev2.join());
+  check("3.4: the interrupted run: 場次曾中斷；task 現已取消", await cancelBy("show-a-04") && await lineHas("show-a-04", ["場次曾中斷（上一個 host 未正常結束）；task 現已取消"], false), await b.evaluate(seenLine("show-a-04")));
+  check("3.4: the failed record: 當時取消紀錄寫入失敗；後續已成功取消 task", await cancelBy("show-a-03") && await lineHas("show-a-03", ["當時取消紀錄寫入失敗（CLOCK_REGRESSION）；後續已成功取消 task"], false), await b.evaluate(seenLine("show-a-03")));
+  check("3.4: the cancels left every run's history as it was", JSON.stringify(await xRuns()) === runsHistory);
+  await shot(b, "desktop-host-cancel", 1280, 900, false);
+
+  // A live Ask: start, cancel; the Dashboard, its Timeline and Inspector and Unity agree.
+  const newRun = async (scenario) => {
+    const n = (await xRuns()).length;
+    await clickScenario(scenario);
+    for (let i = 0; i < 200 && (await xRuns()).length === n; i++) await sleep(100);
+    return (await xRuns())[0];
+  };
+  const askEnded = async () => { const r = await newRun("ask"); await lineHas(r.task_id, ["場次完成", "Ask 等待中；task 可由主持人取消"], true, 20000); return r.task_id; };
+  const live = await askEnded();
+  check("3.4: a new Ask waits, the Dashboard shows it", await unityShows(b, { task: live, phase: "waiting", verdict: "Ask" }), await b.evaluate(text("#unity-status")));
+  check("3.4: cancel while the Ask waits", await cancelBy(live) && await lineHas(live, ["task 現已取消"], false), await runSeen());
+  check("3.4: Unity shows the same task withdrawn", await unityShows(b, { task: live, phase: "withdrawn", verdict: "Ask" }), await b.evaluate(text("#unity-status")));
+  const tl = await b.evaluate(`document.getElementById("timeline").innerText`), insp = await b.evaluate(`document.getElementById("inspector").innerText`);
+  check("3.4: Timeline and Inspector show the same cancel", tl.includes("APPROVAL_WITHDRAWN") && tl.includes("TASK_CANCELLED") && insp.includes(live) && insp.includes("cancelled") && insp.includes("withdrawn"),
+    (tl.match(/TASK_CANCELLED|APPROVAL_WITHDRAWN/g) || []).join() + " / " + (insp.match(/cancelled|withdrawn/g) || []).join());
+  check("3.4: nothing claims payment or delivery", !(await b.evaluate(`document.body.innerText`)).match(/付款成功|已付款|取貨成功|交付成功/));
+  await shot(b, "desktop-host-cancel-live", 1280, 900, false);
+
+  // The replay after a cancel is read only: no cancel is sent, no event added.
+  await b.evaluate(`(() => { if (!window.__cancelProbe) { window.__cancelProbe = { posts: 0, hold: 0, held: [] }; const orig = window.fetch.bind(window);
+    window.fetch = async (url, opts) => { const isCancel = String(url).endsWith("/cancel") && opts && opts.method === "POST"; if (isCancel) window.__cancelProbe.posts++;
+      const res = await orig(url, opts);
+      if (isCancel && window.__cancelProbe.hold > 0) { window.__cancelProbe.hold--; const body = await res.json();
+        return { status: res.status, ok: res.ok, json: () => new Promise((r) => window.__cancelProbe.held.push(() => r(body))) }; }
+      return res; }; } return true; })()`);
+  const liveEvents = (await xEvents(live)).length;
+  await b.evaluate(`document.getElementById("replay").click()`);
+  await b.waitFor(`document.getElementById("status").dataset.mode === "replay"`);
+  await b.waitFor(`document.getElementById("status").dataset.mode === "live" && document.getElementById("status").dataset.kind === "ok"`, 60000);
+  check("3.4: a replay after the cancel sends no cancel and adds no event", (await b.evaluate(`window.__cancelProbe.posts`)) === 0 && (await xEvents(live)).length === liveEvents);
+
+  // A lost cancel reply: the server committed; the page says "not confirmed", resends nothing.
+  let failCancel = 0, failHostRead = 0;
+  const offLost = b.on("Fetch.requestPaused", (p) => {
+    if (failCancel > 0 && p.responseStatusCode && p.request.url.endsWith("/cancel")) { failCancel--; b.send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionReset" }).catch(() => {}); return; }
+    if (failHostRead > 0 && !p.responseStatusCode && /\/api\/tasks\/show-a-\d+$/.test(p.request.url) && p.request.headers.Authorization === "Bearer " + xt.host) { failHostRead--; b.send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionRefused" }).catch(() => {}); return; }
+    b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {});
+  });
+  await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/cancel", requestStage: "Response" }, { urlPattern: "*/api/tasks/*", requestStage: "Request" }] });
+  const lost = await askEnded();
+  failCancel = 1;
+  await b.evaluate(`${cancelBtn(lost)}.click()`);
+  check("3.4: a lost reply: 結果尚未確認, neither success nor failure", await b.waitFor(`document.getElementById("run-status").innerText.includes("結果尚未確認")`, 15000)
+    && !(await runSeen()).includes("已取消") && !(await runSeen()).includes("未取消"), await runSeen());
+  const lostEv = (await xEvents(lost)).map((e) => e.event_type);
+  check("3.4: the server did cancel it once; the page sent one request", lostEv.filter((t) => t === "TASK_CANCELLED").length === 1 && (await b.evaluate(`window.__cancelProbe.posts`)) === 1, lostEv.join());
+  check("3.4: the runs list then reads the Store: task 現已取消", await lineHas(lost, ["task 現已取消"], false), await b.evaluate(seenLine(lost)));
+  // Committed, then the follow-up read fails: 取消已記錄；畫面更新失敗.
+  const reread = await askEnded();
+  failHostRead = 1;
+  await b.evaluate(`${cancelBtn(reread)}.click()`);
+  check("3.4: committed but the follow-up read fails: 取消已記錄；畫面更新失敗", await b.waitFor(`document.getElementById("run-status").innerText.startsWith("取消已記錄；畫面更新失敗")`, 15000)
+    && (await xEvents(reread)).at(-1).event_type === "TASK_CANCELLED", await runSeen());
+  await b.send("Fetch.disable");
+  offLost();
+
+  // Held replies (the server committed; the page's fetch holds the JSON, so
+  // an abort cannot end it): a switch of task or consumer, 清除全部 or a new
+  // file before the reply. The old reply opens, signs in and shows nothing.
+  const holdCancel = async (task) => {
+    await b.evaluate(`(window.__cancelProbe.hold = 1, true)`);
+    await b.evaluate(`${cancelBtn(task)}.click()`);
+    return b.waitFor(`window.__cancelProbe.held.length === 1`, 15000);
+  };
+  const releaseCancel = async () => { await b.evaluate(`(window.__cancelProbe.held.splice(0).forEach((f) => f()), true)`); await sleep(1500); };
+  const notOld = (task) => `!document.getElementById("run-status").textContent.includes("task ${task} 已取消") && !document.getElementById("run-status").textContent.includes("取消已記錄")`;
+  // A switch of task.
+  const sw = await askEnded();
+  check("3.4 held: a cancel reply is held after the server committed", await holdCancel(sw) && (await xEvents(sw)).at(-1).event_type === "TASK_CANCELLED");
+  await b.evaluate(`document.getElementById("task-id").value = "show-a-02"; document.querySelector("#task-form button[type=submit]").click()`);
+  await b.waitFor(`document.getElementById("status").dataset.kind === "ok" && ${text("#inspector")}.includes("show-a-02")`, 15000);
+  await releaseCancel();
+  check("3.4 held: after a switch of task the old reply shows no result and opens nothing", await b.evaluate(notOld(sw)) && (await b.evaluate(`${text("#inspector")}.includes("show-a-02") && !${text("#inspector")}.includes(${JSON.stringify(sw)})`))
+    && await unityShows(b, { task: "show-a-02" }, 5000), await runSeen());
+  check("3.4 held: the runs list still reads the Store: that task 現已取消", await lineHas(sw, ["task 現已取消"], false), await b.evaluate(seenLine(sw)));
+  // A switch of consumer.
+  const swc = await askEnded();
+  await holdCancel(swc);
+  await b.evaluate(`document.querySelector('#consumer-pick button[data-consumer="consumer-b"]').click()`);
+  await b.waitFor(`${text("#viewer")}.startsWith("consumer-b")`, 10000);
+  await releaseCancel();
+  check("3.4 held: after a switch of consumer the old reply shows no result and switches nothing back", await b.evaluate(notOld(swc)) && (await b.evaluate(`${text("#viewer")}.startsWith("consumer-b")`)) && !(await b.evaluate(text("#inspector"))).includes(swc), await runSeen());
+  // 清除全部.
+  const clr = await askEnded();
+  await holdCancel(clr);
+  await b.evaluate(`document.getElementById("clear-all").click()`);
+  await releaseCancel();
+  check("3.4 held: after 清除全部 the old reply restores nothing", await b.evaluate(`${notOld(clr)} && document.getElementById("creds").dataset.mode === "none" && document.getElementById("control").hidden && ${text("#viewer")} === "未驗證"`), await b.evaluate(text("#run-status")));
+  check("3.4 held: clearing did not withdraw the server's cancel", (await xEvents(clr)).at(-1).event_type === "TASK_CANCELLED");
+  await chooseFile(xFile);
+  await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`);
+  check("3.4 held: loading the file again shows that task cancelled, from the Store", await lineHas(clr, ["task 現已取消"], false), await b.evaluate(seenLine(clr)));
+  // A new file (the same tokens, a new generation).
+  const nf = await askEnded();
+  await holdCancel(nf);
+  await chooseFile(xFile);
+  await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`);
+  await releaseCancel();
+  check("3.4 held: after loading the file again the old reply shows nothing and opens nothing",
+    await b.evaluate(`${notOld(nf)} && ${text("#viewer")} === "未驗證" && ${text("#inspector")} === "尚無資料"`), await runSeen());
+
+  // A running run offers its stop, never 取消 task.
+  const hang = await newRun("hang");
+  check("3.4: a running run offers 停止, not 取消 task", await b.waitFor(`${seenLine(hang.task_id)}.includes("進行中") && !!document.querySelector('#runs li[data-live="running"] .run-stop') && !${cancelBtn(hang.task_id)}`, 20000), await b.evaluate(seenLine(hang.task_id)));
+  await b.evaluate(`document.querySelector('#runs li[data-live="running"] .run-stop').click()`);
+  check("3.4: stopped with its own cancel; no 取消 task afterwards", await lineHas(hang.task_id, ["已停止，取消已記錄"], false, 20000), await b.evaluate(seenLine(hang.task_id)));
+  const keptX = await b.evaluate(`JSON.stringify({ ls: localStorage.length, ss: sessionStorage.length, cookie: document.cookie, url: location.href })`);
+  check("3.4: no token in storage, cookie, URL, page or console", !/"ls":[1-9]|"ss":[1-9]|"cookie":"[^"]/.test(keptX) && [xt.op, xt.host, xt.a, xt.b].every((t) => !keptX.includes(t) && !b.consoleText.join("\n").includes(t)));
+  await xd.stop();
+
   // No Unity build: the page says so and shows no other shop.
   const bare = startDemo(join(tmp, "state-bare"), null, join(tmp, "no-build"));
   const addr3 = await bare.ready();

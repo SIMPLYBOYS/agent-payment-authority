@@ -540,6 +540,21 @@ MUTATIONS = [
      "WHERE ? = '' OR consumer_id = ? ORDER BY", "WHERE ? = '' OR consumer_id = ? OR 1 ORDER BY", 'TestListTasks'),
     ('B1-06 3.3: the operator lists tasks', 'cmd/demo/api.go',
      '\tdefault:\n\t\tfail(w, http.StatusForbidden, "forbidden_role")\n\t\treturn\n\t}\n\tlist, err := a.st.ListTasks', '\tdefault:\n\t}\n\tlist, err := a.st.ListTasks', 'TestTaskList'),
+    # B1-06 slice 3.4 (docs/demo-operation-design.md section 15): cancel a task.
+    ('B1-06 3.4: a host token cancels a task', 'cmd/demo/cancel.go',
+     '\tif !postGuard(w, r, a, &empty) {', '\tif _ = empty; !reader(w, r, a) {', 'TestCancelAccessAndGuards'),
+    ('B1-06 3.4: a task cancelled while its run is active', 'cmd/demo/cancel.go',
+     'if c.active != nil && c.active.run.TaskID == id {', 'if false {', 'TestCancelWhileRunning'),
+    ('B1-06 3.4: a repeated cancel not answered from the stored cancel', 'cmd/demo/cancel.go',
+     '\t\tcase "TASK_CANCELLED":\n', '\t\tcase "TASK_CANCELLED_X":\n', 'TestCancelRows|TestCancelConcurrent'),
+    ('B1-06 3.4: a Deny cancelled', 'cmd/demo/cancel.go',
+     'if rec.Task.Status == "denied" {', 'if false {', 'TestCancelRows'),
+    ('B1-06 3.4: a refused cancel write answered as success', 'cmd/demo/cancel.go',
+     '\tdefault:\n\t\tstoreDown(w, store.CodeOf(err))\n\t\treturn\n\t}\n\trec, err = c.readForCancel', '\tdefault:\n\t\treply(w, http.StatusOK, map[string]any{"state": "cancelled"})\n\t\treturn\n\t}\n\trec, err = c.readForCancel', 'TestCancelRows'),
+    ('B1-06 3.4: TASK_ALREADY_ENDED taken as cancelled', 'cmd/demo/cancel.go',
+     '\tcase "TASK_ALREADY_ENDED": // ended by another writer meanwhile: answer what was committed\n', '\tcase "TASK_ALREADY_ENDED":\n\t\treply(w, http.StatusOK, map[string]any{"state": "cancelled", "already": true})\n\t\treturn\n', 'TestCancelStoreFaults'),
+    ('B1-06 3.4: a failed re-read answered as cancelled', 'cmd/demo/cancel.go',
+     '\tcase err != nil:\n\t\tstoreDown(w, store.CodeOf(err))\n\tcase !answerEnded', '\tcase err != nil:\n\t\treply(w, http.StatusOK, map[string]any{"state": "cancelled", "already": true})\n\tcase !answerEnded', 'TestCancelStoreFaults'),
 ]
 
 

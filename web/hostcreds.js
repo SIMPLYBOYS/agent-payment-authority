@@ -205,6 +205,32 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
     }
   }
 
+  // cancelTask asks the server to cancel a stored task (slice 3.4). No
+  // resend: a lost reply is "not confirmed", and a second click is a new
+  // request the server answers once (already: true). Same generation rule.
+  async function cancelTask(taskId) {
+    if (!held) return null;
+    const g = gen;
+    try {
+      const r = await operatorCall(g, "/api/host/tasks/" + encodeURIComponent(taskId) + "/cancel", { body: {} }, 8000);
+      return r && { gen: g, status: r.status, body: r.body };
+    } catch {
+      return g === gen ? { gen: g, error: "unreachable" } : null;
+    }
+  }
+
+  // hostRead is a GET with the read-only host token (the task list and a
+  // task: what the host may read anyway); same generation and 401 rules.
+  async function hostRead(path) {
+    if (!held) return null;
+    const g = gen;
+    let r;
+    try { r = await call(held.host, path, abort.signal); } catch { return g === gen ? { gen: g, error: "unreachable" } : null; }
+    if (g !== gen) return null;
+    if (r.status === 401) { unauthorized(g); return null; }
+    return { gen: g, status: r.status, body: r.body };
+  }
+
   // runs reads the latest runs (operator token), same generation rule.
   async function runs() {
     if (!held) return null;
@@ -218,7 +244,7 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
   }
 
   return {
-    load, clearAll, manual, unauthorized, readiness, startRun, stopRun, runs,
+    load, clearAll, manual, unauthorized, readiness, startRun, stopRun, cancelTask, hostRead, runs,
     viewerToken: (consumer) => (held ? held.viewers.get(consumer) || null : null),
     get gen() { return gen; },
     view,
