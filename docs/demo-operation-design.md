@@ -2168,7 +2168,7 @@ B1-04／B1-06 整體維持 InProgress；不合併、不推送、不標整卡 Don
 | 重啟：關閉時的取消 | show-a-05 | #5：…、APPROVAL_WITHDRAWN、TASK_CANCELLED |
 | 重啟後取消 | show-a-04 | #5：…、APPROVAL_WITHDRAWN（或期限已到則為 EXPIRED）、TASK_CANCELLED |
 
-截圖：`desktop-acceptance-ready`、`-ask`、`-deny`、`-stop`、`-cancel`、`-expired`、`-restart`.png。每張拍攝前都檢查 token 欄位為空；證據目錄另做 token 掃描。
+截圖：`desktop-acceptance-ready`、`-ask`、`-deny`、`-stop`、`-cancel`、`-expired`、`-restart`.png。每張拍攝前都檢查 token 欄位為空；證據目錄另做 token 掃描。這幾張主要是上方控制區；含 Unity、Inspector、Timeline 的全頁截圖見 16.7。
 
 ### 16.3 Aaron 人工驗收清單（待 Aaron 執行）
 
@@ -2177,13 +2177,27 @@ B1-04／B1-06 整體維持 InProgress；不合併、不推送、不標整卡 Don
 **啟動**：使用新資料庫，不刪舊檔。以下命令不含 token；token 只在 `var/demo-tokens.json`。
 
 ```sh
-go build -o bin/demo ./cmd/demo && go build -o bin/fake-claude ./cmd/fake-claude
-APA_ADDR=127.0.0.1:8402 APA_DB_PATH=var/apa-demo-35-acceptance.db APA_DEMO_TOKEN_FILE=var/demo-tokens.json \
+cd /Users/mac/Documents/OpenSourceProjects/agent-payment-authority && \
+  go build -o bin/demo ./cmd/demo && \
+  go build -o bin/fake-claude ./cmd/fake-claude && \
+  APA_ADDR=127.0.0.1:8402 APA_DB_PATH=var/apa-demo-35-acceptance.db APA_DEMO_TOKEN_FILE=var/demo-tokens.json \
   ./bin/demo --fake-cli bin/fake-claude --scenarios testdata/demo/scenarios-acceptance.json \
   --registry testdata/demo/registry.json --unity-build unity/AgentPaymentAuthority/Build/WebGL/Build
 ```
 
+整條是同一個成功鏈（`&&`）：進入 repo 或任一個建置失敗時，就不會啟動，也不會用到舊的 `bin/demo`。建置失敗時，終端機會顯示 Go 的錯誤，請停止並回報。
+
 `var/apa-demo-35-acceptance.db` 若已存在（例如做過一次），請換一個新檔名，不要刪除舊檔。正常展示不需要重建 Unity、跑測試、改 SQLite 或刪資料庫。
+
+**兩個時限不要混淆**：
+- **Ask 期限是 30 秒**（從裁決起算，後端記錄到期）。
+- **fake CLI 上限是 3 分鐘**（只對「Ask 後等待」的場次有意義）。
+
+停止或取消時，結果取決於 Ask 是否已到期：
+- **期限前**：`APPROVAL_WITHDRAWN` → `TASK_CANCELLED`，商店顯示「Ask 已撤回（task 取消）：離店」。
+- **已到期後**：保留 `APPROVAL_EXPIRED`，再記 `TASK_CANCELLED`（不會再有撤回），商店仍顯示「Ask 已到期（後端已記錄）：離店」。
+
+兩種都是正確結果。
 
 | # | 操作 | 預期畫面 | 不符合時 |
 |---|---|---|---|
@@ -2191,8 +2205,8 @@ APA_ADDR=127.0.0.1:8402 APA_DB_PATH=var/apa-demo-35-acceptance.db APA_DEMO_TOKEN
 | 2 | 開 `http://127.0.0.1:8402/host`，按「載入本機 token 檔」，選 `var/demo-tokens.json` | 「已載入 token 檔：host、operator 與 2 位 viewer」。就緒面板：HTTP、Store、fake CLI、Unity 建置為就緒，真實 CLI 未啟用，付款為無付款能力 | 截圖（確認畫面沒有 token）後回報 |
 | 3 | 按「開始：主商品，Ask（等待核准）」 | 頁面切到 consumer-a 並開啟 show-a-01；商店顯示 Ask 等待人工核准；Inspector 顯示 Ask、`HUMAN_APPROVAL_REQUIRED`、pending、未付款；Timeline #1–#3；最近場次「場次完成；Ask 等待中；task 可由主持人取消」。記下時間：約 30 秒後到期 | 回報 task ID 與畫面 |
 | 4 | 按「開始：預算不足，Deny」 | 切到 consumer-b、show-b-01；商店顯示 Deny 離店；最近場次「Deny：INSUFFICIENT_BUDGET」，沒有取消按鈕 | 同上 |
-| 5 | 按「開始：Ask 後等待（可按停止…）」，在 3 分鐘內按該行的「停止」 | 停止前該行為「進行中」，只有「停止」；按下後顯示「已停止，取消已記錄」，商店顯示 Ask 已撤回，Timeline 出現 `APPROVAL_WITHDRAWN`、`TASK_CANCELLED` | 若超過 3 分鐘，該行會顯示「CLI 已逾時」，這也是正確行為；請記下來再做一次 |
-| 6 | 按「開始：主商品，Ask」，場次完成後按該行的「取消 task show-a-NN」 | 「task show-a-NN 已取消」，該行「task 現已取消」；商店與 Timeline 同步顯示撤回與取消 | 回報 |
+| 5 | 按「開始：Ask 後等待（可按停止…）」，在 3 分鐘內按該行的「停止」 | 停止前該行為「進行中」，只有「停止」；按下後顯示「已停止，取消已記錄」。<br>• 開始後 30 秒內按：Timeline 為 `APPROVAL_WITHDRAWN`、`TASK_CANCELLED`，商店顯示撤回。<br>• 超過 30 秒才按（例如第 60 秒）：Timeline 為 `APPROVAL_EXPIRED`、`TASK_CANCELLED`，商店顯示到期 | 超過 3 分鐘時該行會顯示「CLI 已逾時（已記錄）」，這也是正確行為（Ask 依 30 秒期限另行到期）；請記下來再做一次 |
+| 6 | 按「開始：主商品，Ask」，場次完成後按該行的「取消 task show-a-NN」 | 「task show-a-NN 已取消」，該行「task 現已取消」。<br>• 30 秒內取消：Timeline 為 `APPROVAL_WITHDRAWN`、`TASK_CANCELLED`，商店顯示撤回。<br>• 已到期後取消：Timeline 為 `APPROVAL_EXPIRED`、`TASK_CANCELLED`，商店顯示到期 | 回報 |
 | 7 | 步驟 3 過 30 秒後看 show-a-01 那一行；再按「以 consumer-a 查看」，輸入 show-a-01 開啟 | 該行「Ask 已到期；task 仍可由主持人取消」；商店「Ask 已到期（後端已記錄）：離店」；Timeline #4 `APPROVAL_EXPIRED` | 回報 |
 | 8 | 按「歷史展示回放（唯讀）」 | 出現回放說明；商店重演 #1–#4；結束後回到最新狀態；事件數不變 | 回報 |
 | 9 | 按「以 consumer-b 查看」 | 畫面不留 consumer-a 的 task、商店或面板內容 | 回報 |
@@ -2243,3 +2257,27 @@ APA_ADDR=127.0.0.1:8402 APA_DB_PATH=var/apa-demo-35-acceptance.db APA_DEMO_TOKEN
   - 沒有確認對話框；
   - 沒有執行真實 CLI、付款、testnet、Signer、ZK；
   - 既有展示資料庫沒有被操作。
+
+### 16.7 review 後補正：人工清單與截圖（Claude Code 執行，待 Codex 獨立 review；測試 `31cc6c7`）
+
+依據：Codex 對 `667e933`／`824308f` 的 review。3.5 自動化部分可以接受，沒有發現新的產品程式缺陷。`scenarios-acceptance.json` 保留為獨立驗收資料，不併入預設情境目錄。人工驗收前，需要補正下列三項。
+
+1. **期限判斷**（16.3 步驟 5、6）：
+   - 原本一律寫「撤回」。現在區分 Ask 期限前（`APPROVAL_WITHDRAWN` → `TASK_CANCELLED`）與已到期後（保留 `APPROVAL_EXPIRED`，再記 `TASK_CANCELLED`）。
+   - 寫明 30 秒是 Ask 期限、3 分鐘是 CLI 上限。例如第 60 秒才按停止，出現「到期＋取消」也是正確結果。
+2. **啟動命令**：先 `cd` 到 repo，兩個 `go build` 與啟動串成同一條 `&&` 成功鏈。建置失敗時不會啟動舊執行檔。
+3. **截圖**：
+   - 原本 7 張 `desktop-acceptance-*` 主要是上方控制區，保留不刪。
+   - 每張另補一張全頁的 `full-acceptance-*`：測試時把 viewport 暫時調成頁面高度後拍攝，所以 Unity 畫面、Inspector、Timeline 都在圖內；拍完恢復 1280×900。
+   - 沒有改版面，也沒有重建 Unity。
+   - 每張全頁截圖都在 `browser-test.log` 記下當時 Unity 回報（task、序號、場景）、狀態列與 Timeline 序號，可以和事件對照。例如 `full-acceptance-stop.png`：「Unity 已呈現 show-a-02 #5 withdrawn」，Timeline 1–5；`full-acceptance-expired.png`：「show-a-01 #4 expired」，Timeline 1–4。
+
+| 項目 | 命令 | exit | 時間 | 證據 |
+|---|---|---|---|---|
+| 真實瀏覽器 254 項（新增 7 項：全頁截圖前的 token 欄位檢查） | `node scripts/verify/browser-ui.mjs`，在 `31cc6c7` 執行 | 0 | 307 秒 | `artifacts/b1-06/ui-31cc6c75bc79-20261006T102131Z/`（`full-acceptance-*.png` 7 張） |
+
+- `31cc6c7` 只改 `scripts/verify/browser-ui.mjs`（測試），產品程式與 `667e933` 相同。
+- 依 review 指示，沒有重跑完整容器、全部突變或 Unity 建置。16.4 的容器與 247 項突變結果屬於 `667e933`。
+- **觀察（未修，交 review）**：`full-acceptance-stop.png` 中，最近場次該行已是「已停止，取消已記錄」，但其上的狀態列仍是按下停止時的「停止中…（等收尾紀錄寫入後才顯示已停止）」。這是 3.2 起的既有行為：停止的提示不會回頭更新，實際結果以最近場次為準。人工驗收時可能會覺得前後不一致，所以先記下來。本輪沒有改產品程式。
+
+人工驗收仍**待 Aaron 執行**。
