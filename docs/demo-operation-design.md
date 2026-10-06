@@ -2,7 +2,9 @@
 
 狀態（2026-10-06）：**切片 3.5（fake 展示流程整體操作驗收）的自動化部分完成於 `667e933`；Claude Code 執行，待 Codex 獨立 review（第 16 節）。人工操作驗收待 Aaron 執行（16.3）。** 切片 3.4 已於 `3a6af59` 通過 Codex 限定範圍技術 review（第 15.8 節）；3.1–3.3 已通過（第 12.7、13.19、14.7 節）。既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress；3.5 通過只代表 fake 展示操作流程，不代表真實 Agent、付款、ZK 或 M1 完成。第 12–15 節保留當時的寫法。
 
-**下一步設計（2026-10-07）**：商店展示深化設計見 [`docs/demo-presentation-design.md`](demo-presentation-design.md)（Claude Code 撰寫，待 Codex review，尚未核准實作）。
+**3.5 現況（2026-10-07）**：已通過 Codex 技術 review（最近的產品修正為 `d18efa2`）；Aaron 已實際操作並初步確認基本操作可用，16.3 完整人工清單未逐項確認。B1-04／B1-06 仍 InProgress。
+
+**下一步設計（2026-10-07）**：商店展示深化設計見 [`docs/demo-presentation-design.md`](demo-presentation-design.md)（依 Codex review 補正後待複核，尚未核准實作）。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 

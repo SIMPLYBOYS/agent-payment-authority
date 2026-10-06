@@ -1,6 +1,6 @@
 # B1-06 商店展示深化設計（fake 展示模式）
 
-狀態（2026-10-07）：**設計提案，Claude Code 撰寫，待 Codex review。尚未核准實作。** 本文件不修改產品程式、契約、Store、Policy、Gate 或 Unity，也不核准真實 CLI、付款、testnet、ZK 或素材公開發布。
+狀態（2026-10-07）：**設計提案，Claude Code 撰寫；依 Codex 10/7 review 補正 R2 與狀態文字（第 14 節），待 Codex 複核。尚未核准實作。** 本文件不修改產品程式、契約、Store、Policy、Gate 或 Unity，也不核准真實 CLI、付款、testnet、ZK 或素材公開發布。
 
 - **依據**：Aaron 轉交的〈B1-06 商店展示深化設計指示〉（vault，2026-10-07）。
 - **Aaron 的回饋**：已實際操作目前 demo，初步確認基本展示可用，未發現重大問題；現有情境仍然陽春，同意往展示內容深化推進。這不是 `docs/demo-operation-design.md` 16.3 人工清單逐項完成的聲明。
@@ -129,7 +129,15 @@
 
 這是 Inspector 的摘要層。完整 Inspector 欄位（任務清單 L199、PRD L163）仍保留在「技術詳情」與查證面板，不減少。
 
-- **選取單位**：一筆 `purchase_order_id`。預設是場景正在顯示的那筆（`adapter.scene()` 選出的最新裁決）。同一 task 有多筆請購時，用「其他請購 ▾」切換；切換只改卡片與查證面板，不改 Unity 的場景。若選的不是場景顯示的那筆，要標出「場景顯示的是 po-…」。
+- **選取單位**：一筆 `purchase_order_id`。要分清兩個概念：
+  - **場景呈現的請購**：網頁送給 Unity 的投影所依據的那筆，也就是 `adapter.scene()` 選出的最新裁決（沒有裁決時是最新的提案）。
+  - **選取的請購**：卡片與查證面板正在顯示的那筆。
+- **預設跟隨場景**：沒有手動選取時，選取的請購就是場景呈現的請購；新快照讓場景改成另一筆時，卡片跟著換。
+- **手動選舊請購**：同一 task 有多筆請購時，可用「其他請購 ▾」選另一筆。
+  - 只改卡片與查證面板，不改 Unity 的場景，也不送新的投影。
+  - 卡片頂端固定顯示「你正在查看 po-X；商店場景呈現的是 po-Y」，並提供「回到場景這筆」。
+  - 這是選取不同，不是同步失敗：不顯示「Unity 同步中」或任何錯誤。同步狀態只比較場景呈現的那筆（第 7 節「場景對應」頁）。
+  - 切換 consumer、切換 task、清除或世代改變時，手動選取一律重設為跟隨場景。
 - **步驟條 ①–⑥**：沒有獨立事件的步驟（② 選商品、③ 報價時刻）用空心圈，註明「無獨立事件」。只有在已提交事件到達時，才點亮 ④、⑤、⑥。
 - **金額**：分開顯示 402 綁定的 amount（基本單位與 0.50 test USDC）和目錄的 KRW 700（fixture，不綁定）。不使用同一個「金額」欄位代表兩者（執行計畫 L413、PRD L167）。
 - **期限**：顯示 `deadline_at`，並標明 Store 時間。前端倒數到 0 時只顯示「已達期限，等待後端確認」（現有 `adapter.scene()` 行為）。直到 `APPROVAL_EXPIRED` 寫入，才顯示「已到期」。
@@ -170,7 +178,7 @@
 4. **不冒充推論**：fake 模式不顯示任何「思考」字幕。步驟②只標「無獨立事件（fake 腳本）」。
 5. **未取得詳情就是未確認**：沿用 3.4 R2 的規則，套用到卡片。
 6. **倒數不等於後端到期**：沿用現有的「已達期限，等待後端確認」。到期只關閉該筆 Ask，task 仍可取消。
-7. **依 `purchase_order_id` 對齊**：卡片、查證面板與場景都以 po 為單位（`adapter.scene()` 已如此）。
+7. **依 `purchase_order_id` 對齊**：卡片、查證面板與場景都以 po 為單位（`adapter.scene()` 已如此）。選取的請購與場景呈現的請購可以不同，畫面必須明示（4.4）。
 8. **場次停止 ≠ task 取消**：最近場次維持「當時」與「目前」分開（3.4）；Deny 原因不被覆蓋。
 9. **世代與晚到防護**：卡片與查證面板掛在 app.js 的同一個世代（`state.gen`、`idGen`、`listSeq`），清除或切換時一起清空。Unity 的選取回報也要帶 gen，舊 gen 一律丟棄（D3）。
 10. **Unity 不碰 token**：選取只用 `APA_Report("select", gen, seq, "consumer|task")` 回報 Unity 自己已知的值；網頁再檢查權限後，用既有的認證讀取。
@@ -200,7 +208,7 @@
 | 請購 | `purchase_order_id`、`request_id`、`intent_hash`、`payment_requirement_hash`、`PURCHASE_PROPOSED` 的序號與 `observed_at`（Store） | 「`intent_hash` 為 fixture domain（`agent-payment-authority/m1-fixture/v2/verifier-not-deployed`），不是真實付款綁定」（`docs/contracts.md:49`） |
 | 裁決 | `policy_verdict`、`reason`、`approval_status`、`payment_status`、`decided_at`、`deadline_at`、`approval_closed`、`closed_at`（Store） | 固定原因代碼，附中文說明 |
 | Store 事件 | 該 po 的事件，以及 task 層事件（TASK_*）：序號、類型、`observed_at`、`prev_event_hash`、`evidence_mode`、`source`（Store） | 「hash chain 只表示這份事件序列前後相連，不是 ZKP，也不是 B1-07 獨立驗證」；單一事件 JSON 按需展開（現有，PRD L314） |
-| 場景對應 | Unity 最後回報的 gen、seq、phase、task（瀏覽器觀測）對照快照的 `as_of_sequence`、phase（API） | 不一致時顯示「Unity 同步中」，不判定成功 |
+| 場景對應 | Unity 最後回報的 gen、seq、phase、task、verdict、reason（瀏覽器觀測；`web/unity.js:44` 的 `rendered`，沒有 `purchase_order_id`），對照網頁送出的投影（gen、task、seq、phase）與當時 `scene().po`（網頁推導） | 請購關聯是**網頁推導**：網頁記住每個送出投影的 gen、task、seq 與 po，Unity 回報相同的 gen 與 seq 時，標「Unity 已呈現 task X #seq（phase）；對應請購 po-Y 由網頁依送出的投影推導，不是 Unity 獨立確認」。gen 或 seq 不一致時顯示「Unity 同步中」，不判定成功。只比較場景呈現的請購；手動選取的另一筆不列入同步判斷 |
 
 **輸出限制**
 - 只顯示授權可見、白名單或遮罩後的欄位，沿用 `render.js` 只用 `textContent` 的做法。
@@ -237,7 +245,7 @@
   - 主持人一列按鈕完成開始、停止、取消；
   - 「查證這筆」打開五頁證據，每個欄位都有來源標籤；
   - 能力條直接說明哪些還沒做。
-- **場景與證據的對應**：卡片的 task、po、phase 與 Unity 回報的 task、seq、phase 對照，顯示在「場景對應」頁。
+- **場景與證據的對應**：顯示在「場景對應」頁。Unity 回報的 task、seq、phase 與網頁送出的投影對照；po 的關聯由網頁依送出的 gen、task、seq 與投影推導，並標為網頁推導。**D1 不改 bridge**：Unity 端的 message 欄位與回報格式都不變，不需要重建。
 - **相依**：3.1–3.5 的既有行為與測試。
 - **回歸風險**：
   - DOM 重排會影響既有 255 項瀏覽器檢查的選擇器。保留既有 id（`#status`、`#inspector`、`#timeline`、`#run-status`、`#runs`、`#task-pick`、`#list-note`、`#readiness`、`#creds`）。
@@ -245,7 +253,13 @@
 - **失敗呈現**：沿用既有的未確認、離線、503 文字，並加到卡片上。收合狀態的摘要列一定顯示錯誤數。
 - **驗收條件**：
   1. 1280×900 的 `/host` 與 `/`，Unity canvas 完整落在第一個 viewport 內（以 `getBoundingClientRect` 斷言）。開始、停止、取消也在第一個 viewport。
-  2. Ask 流程中，卡片、查證面板、Inspector 全欄位、Timeline 與 Unity 回報的 task、po、序號、phase 一致。`intent_hash` 與 `payment_requirement_hash` 與 API 相同。
+  2. **預設一致**（沒有手動選取）：Ask 流程中，卡片、查證面板、Inspector 全欄位、Timeline 與場景投影的 task、po、序號、phase 一致；Unity 回報的 task、seq、phase 與送出的投影一致；「場景對應」頁的 po 標為網頁推導。`intent_hash` 與 `payment_requirement_hash` 與 API 相同。
+  2b. **手動選取不同**：在有兩筆請購的 task（可沿用 `TestSeedDisplayDB` 種子的 task-a：一筆已到期、一筆等待中）手動選舊的那筆：
+     - 卡片與查證面板顯示舊筆的裁決、原因、期限，不混入新筆；
+     - 卡片頂端顯示「你正在查看 po-X；商店場景呈現的是 po-Y」；
+     - Unity 的場景與回報不變，且不出現「Unity 同步中」或錯誤；
+     - 按「回到場景這筆」後回到預設一致；
+     - 切換 task 或 consumer 後，手動選取重設。
   3. 金額分兩行（402 綁定、目錄 fixture），沒有單一混合金額。
   4. 所有區塊收合時，fake、回放、未確認、清單更新失敗、就緒未確認仍然可見（以可見文字斷言，不只看 `data-*`）。
   5. 切換 consumer、task 或清除時，卡片與查證面板立刻清空；晚到的回覆不恢復舊內容（沿用世代測試手法）。
@@ -267,7 +281,7 @@
   - 真實瀏覽器：既有 Unity 斷言全過，回放順序檢查（`docs/demo-operation-design.md` 16.1）仍通過。
 - **驗證層級**：Unity 測試＋建置＋瀏覽器。Unity 有變動時，最終 commit 跑完整容器（容器不含 Unity，但要確認沒有連帶影響）。
 
-### D3 點選客人（選取意圖）
+### D3 點選客人（選取意圖；Codex 建議列入近期，D1 版面完成後另行派工）
 
 - **對應**：PRD L158「角色點選等互動待另行派工」；任務清單 L201「UI 只讀展示 endpoint」。
 - **修改**：
@@ -286,7 +300,7 @@
     - 切換後沒有殘留。
 - **驗證層級**：Unity＋建置＋瀏覽器。
 
-### D4 請購當時報價的白名單欄位（需核准 API 擴充）
+### D4 請購當時報價的白名單欄位（需核准 API 擴充；Codex 建議暫緩）
 
 - **對應**：FR-4（`payment_requirement_hash` 綁定）、PRD L163 的商家與報價欄位。
 - **修改**：`internal/store`（從 `purchases.body` 讀出的白名單）、`cmd/demo/api.go`、adapter 與查證面板。
@@ -294,7 +308,7 @@
 - **驗收**：Go（白名單、權限、重算一致、未知欄位不外洩）、adapter、瀏覽器。
 - **驗證層級**：Go 變更，最終 commit 跑完整容器與突變。
 
-### D5 Allow 路徑可示範（需 Aaron 決定，見第 10 節）
+### D5 Allow 路徑可示範（Codex 建議採低價 fixture 商品；不阻擋 D1）
 
 - **對應**：PRD 止損「一間商店三條路徑」（L359）、`docs/m1-boundaries.md:20`。
 - 依決定改 fixture 或 profile，加入第三個情境；驗收：Allow 只顯示「政策允許，M1 未付款」，沒有付款或取貨。
@@ -315,6 +329,8 @@
 
 ## 10 待 Aaron 決定
 
+Codex 10/7 review 已對三項提出建議（第 14 節）。下列選項保留原文，最終仍由 Aaron 確認。
+
 1. **Allow 路徑是否要能示範**（D5）。目前 fixture 下不可能出現 Allow。選項：
    - **a. 新增一個低價 fixture 商品**（例如 0.10 test USDC，等於 `allow_max`）：改商店 fixture 與 registry 報價，不改 Policy。代價是多一個商品與 402。
    - **b. 新增一個 `allow_max` 較高的 demo profile**：改 Policy 的可信設定，會影響既有 Ask 情境的語意，不建議。
@@ -333,13 +349,13 @@
 | PRD §5 L163、任務清單 L199 的 Inspector 欄位 | 本設計新增的卡片是摘要，欄位較少 | 完整欄位保留在「技術詳情」與查證面板，不降低要求 |
 | PRD §5 L164「Timeline 預設顯示人讀得懂的事件」 | 本設計讓 Timeline 可收成 3 列 | 預設展開（3 列以上），收合時錯誤列仍顯示；不預設隱藏 |
 | 執行計畫 L677、L704–705（W12–W13 完整三區 UI） | 本設計提前改善展示層 | 本設計屬 B1-06 的展示投影深化，不宣稱 W12–W13 的完整 UI 或安全回歸完成 |
-| 任務清單狀態表 L65（B1-06 列） | 列中只寫到 3.1 通過；3.2–3.4 已通過、3.5 自動化部分待 review 的紀錄在「目前下一步」與交付紀錄中 | 本輪只指出差異，不改狀態表；建議下次驗收同步時一併更新 |
+| 任務清單狀態表 L65（B1-06 列） | 列中只寫到 3.1 通過；3.2–3.5 的結論（3.5 技術 review 通過、人工清單未逐項確認）記在「目前下一步」與交付紀錄中 | 本輪只指出差異，不改狀態表；建議下次驗收同步時一併更新 |
 
 ## 12 仍未完成的主線（分開報告）
 
 | 主線 | 狀態 |
 |---|---|
-| 視覺與操作（fake 展示） | 3.1–3.4 已通過限定 review；3.5 自動化部分待 review，人工清單待 Aaron；本文件是下一步設計 |
+| 視覺與操作（fake 展示） | 3.1–3.4 已通過限定 review；3.5 已通過 Codex 技術 review（最近的產品修正為 `d18efa2`），Aaron 已實際操作並初步確認基本操作可用，但 16.3 完整人工清單未逐項確認；本文件是下一步設計 |
 | 真實 Agent（真實 CLI 請購） | 未啟用；B1-04 InProgress，真實 CLI 執行未核准 |
 | 鏈上支付（Signer、預留、x402 settle） | 未實作（M2） |
 | 憑證與 ZK（BBS+、gnark） | 未實作（spikes 另計） |
@@ -349,3 +365,29 @@
 
 - 只做閱讀、`git` 狀態核對與文件連結檢查。沒有執行產品測試、Unity、容器或突變，也沒有拿舊測試結果當成本輪結果。
 - 本文件引用的程式行號，以 `17efeac` 的檔案為準。
+
+## 14 review 紀錄與補正
+
+### 14.1 Codex 10/7 review（`9de6a7b`）
+
+依據：Codex 對 `9de6a7b` 的靜態核對（文件與程式，沒有執行測試），由 Aaron 轉交。轉交的內容從 R2 開始；本輪只依轉交的內容補正。
+
+**R2：區分「選取的請購」與「場景正在呈現的請購」**
+- **問題**：原 §4.4 允許選舊請購而不改 Unity，D1 驗收卻要求所有區塊的請購一致，兩者矛盾。此外，Unity 的回報（`web/unity.js:44`）沒有 `purchase_order_id`，不能宣稱 Unity 自己確認了某筆請購。
+- **補正**：
+  - §4.4：預設跟隨場景；手動選舊請購時明示兩者不同，而且不算同步失敗。
+  - §6 第 7 條：註明兩者可以不同。
+  - §7「場景對應」：po 的關聯標為網頁推導，依送出投影的 gen、task、seq 建立，不是 Unity 獨立驗證。
+  - D1：不改 bridge；驗收分成「預設一致」（第 2 項）與「手動選取不同」（第 2b 項）。
+
+**狀態文字**：§11、§12 改為：3.5 已通過 Codex 技術 review；Aaron 已實際操作並初步確認基本操作可用；16.3 完整人工清單未逐項確認。B1-04／B1-06 仍為 InProgress。
+
+**三個待決事項的建議**（Codex），第 10 節選項保留：
+
+| 項目 | 建議 | 對切片的影響 |
+|---|---|---|
+| Allow 情境 | 後續採低價 fixture 商品，不調整既有 Ask 的上限 | D5 採選項 a；不阻擋 D1 |
+| D4 報價 API | 暫緩 | D1 的報價頁只用 PurchaseView 既有欄位與 hash；完整 402 欄位顯示「未提供」 |
+| D3 角色點選 | 列入近期，但在 D1 版面完成後另行派工 | D1 的選取由網頁操作；場景只用亮度區分 |
+
+D1 的實作核准不需等 D2–D6 全部定案。本輪只補文件，沒有修改產品程式，也沒有執行測試、Unity 或容器。
