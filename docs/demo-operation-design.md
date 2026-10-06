@@ -2205,7 +2205,7 @@ cd /Users/mac/Documents/OpenSourceProjects/agent-payment-authority && \
 | 2 | 開 `http://127.0.0.1:8402/host`，按「載入本機 token 檔」，選 `var/demo-tokens.json` | 「已載入 token 檔：host、operator 與 2 位 viewer」。就緒面板：HTTP、Store、fake CLI、Unity 建置為就緒，真實 CLI 未啟用，付款為無付款能力 | 截圖（確認畫面沒有 token）後回報 |
 | 3 | 按「開始：主商品，Ask（等待核准）」 | 頁面切到 consumer-a 並開啟 show-a-01；商店顯示 Ask 等待人工核准；Inspector 顯示 Ask、`HUMAN_APPROVAL_REQUIRED`、pending、未付款；Timeline #1–#3；最近場次「場次完成；Ask 等待中；task 可由主持人取消」。記下時間：約 30 秒後到期 | 回報 task ID 與畫面 |
 | 4 | 按「開始：預算不足，Deny」 | 切到 consumer-b、show-b-01；商店顯示 Deny 離店；最近場次「Deny：INSUFFICIENT_BUDGET」，沒有取消按鈕 | 同上 |
-| 5 | 按「開始：Ask 後等待（可按停止…）」，在 3 分鐘內按該行的「停止」 | 停止前該行為「進行中」，只有「停止」；按下後顯示「已停止，取消已記錄」。<br>• 開始後 30 秒內按：Timeline 為 `APPROVAL_WITHDRAWN`、`TASK_CANCELLED`，商店顯示撤回。<br>• 超過 30 秒才按（例如第 60 秒）：Timeline 為 `APPROVAL_EXPIRED`、`TASK_CANCELLED`，商店顯示到期 | 超過 3 分鐘時該行會顯示「CLI 已逾時（已記錄）」，這也是正確行為（Ask 依 30 秒期限另行到期）；請記下來再做一次 |
+| 5 | 按「開始：Ask 後等待（可按停止…）」，在 3 分鐘內按該行的「停止」 | 停止前該行為「進行中」，只有「停止」。按下後，上方顯示「場次 run-… 的停止請求已受理；最終結果請看最近場次。」（只是受理通知，不代表已完成）；該行隨後變成「已停止，取消已記錄」。<br>• 開始後 30 秒內按：Timeline 為 `APPROVAL_WITHDRAWN`、`TASK_CANCELLED`，商店顯示撤回。<br>• 超過 30 秒才按（例如第 60 秒）：Timeline 為 `APPROVAL_EXPIRED`、`TASK_CANCELLED`，商店顯示到期 | 超過 3 分鐘時該行會顯示「CLI 已逾時（已記錄）」，這也是正確行為（Ask 依 30 秒期限另行到期）；請記下來再做一次 |
 | 6 | 按「開始：主商品，Ask」，場次完成後按該行的「取消 task show-a-NN」 | 「task show-a-NN 已取消」，該行「task 現已取消」。<br>• 30 秒內取消：Timeline 為 `APPROVAL_WITHDRAWN`、`TASK_CANCELLED`，商店顯示撤回。<br>• 已到期後取消：Timeline 為 `APPROVAL_EXPIRED`、`TASK_CANCELLED`，商店顯示到期 | 回報 |
 | 7 | 步驟 3 過 30 秒後看 show-a-01 那一行；再按「以 consumer-a 查看」，輸入 show-a-01 開啟 | 該行「Ask 已到期；task 仍可由主持人取消」；商店「Ask 已到期（後端已記錄）：離店」；Timeline #4 `APPROVAL_EXPIRED` | 回報 |
 | 8 | 按「歷史展示回放（唯讀）」 | 出現回放說明；商店重演 #1–#4；結束後回到最新狀態；事件數不變 | 回報 |
@@ -2278,6 +2278,28 @@ cd /Users/mac/Documents/OpenSourceProjects/agent-payment-authority && \
 
 - `31cc6c7` 只改 `scripts/verify/browser-ui.mjs`（測試），產品程式與 `667e933` 相同。
 - 依 review 指示，沒有重跑完整容器、全部突變或 Unity 建置。16.4 的容器與 247 項突變結果屬於 `667e933`。
-- **觀察（未修，交 review）**：`full-acceptance-stop.png` 中，最近場次該行已是「已停止，取消已記錄」，但其上的狀態列仍是按下停止時的「停止中…（等收尾紀錄寫入後才顯示已停止）」。這是 3.2 起的既有行為：停止的提示不會回頭更新，實際結果以最近場次為準。人工驗收時可能會覺得前後不一致，所以先記下來。本輪沒有改產品程式。
+- **觀察（已由 16.8 修正）**：`full-acceptance-stop.png` 中，最近場次該行已是「已停止，取消已記錄」，但其上的狀態列仍是按下停止時的「停止中…（等收尾紀錄寫入後才顯示已停止）」。這是 3.2 起的既有行為：停止的提示不會回頭更新，實際結果以最近場次為準。人工驗收時可能會覺得前後不一致，所以先記下來。本輪沒有改產品程式。
 
 人工驗收仍**待 Aaron 執行**。
+
+### 16.8 review 後修正：停止的 202 不再留下「停止中」（Claude Code 執行，待 Codex 獨立 review；程式與測試 `d18efa2`）
+
+依據：Codex 對 `31cc6c7`／`1f491d5` 的 review。三項補正（16.7）已關閉；停止後「停止中」一直殘留，是實際的畫面矛盾，需在人工驗收前做最小修正。
+
+- **修正**（`web/host.js` 的 `stop()`）：
+  - 請求送出、還沒回覆時，仍顯示「停止中…」。
+  - 收到 202 後，改為中性的受理通知「場次 〈run ID〉 的停止請求已受理；最終結果請看最近場次。」，狀態為 `idle`，不再是 `busy`。
+  - 不宣稱已停止或已取消，最終結果仍由最近場次的已提交紀錄呈現。
+  - 世代保護與錯誤處理不變，沒有新增輪詢，也沒有改 Store。
+- **瀏覽器回歸**（3.5 段落）：按停止、收到 202 之後，最近場次該行為「已停止，取消已記錄」。上方文字必須正好是那句受理通知，`data-state` 為 `idle`，不含「停止中」「已停止」「已取消」「取消已記錄」。
+- **截圖**：補拍 `full-acceptance-stop.png`。上方是受理通知，該行為「已停止，取消已記錄」，Unity、Inspector、Timeline 一致（show-a-02 #5 withdrawn）。
+- 人工清單 16.3 步驟 5 已同步改寫預期畫面。
+
+| 項目 | 命令 | exit | 時間 | 證據 |
+|---|---|---|---|---|
+| Node 34 項、語法檢查 | `node --test web/test/adapter.test.mjs web/test/hostcreds.test.mjs`；`node --check` | 0 | 1 秒內 | （命令輸出，未另存目錄） |
+| 真實瀏覽器 255 項（新增 1 項） | `node scripts/verify/browser-ui.mjs`，在 `d18efa2` 執行 | 0 | 305 秒 | `artifacts/b1-06/ui-d18efa270912-20261006T103714Z/` |
+
+- 依 review 指示，沒有重跑完整容器、全部突變或 Unity 建置。
+- 容器 247／247 屬 `667e933`。`d18efa2` 改了 `web/host.js`（產品前端），沒有完整容器結果。
+- 人工驗收仍**待 Aaron 執行**。
