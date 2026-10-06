@@ -138,6 +138,19 @@ async function shot(b, name, width, height, mobile) {
   log("  screenshot " + name + ".png viewport " + width + "x" + height);
 }
 
+// shotFull keeps the whole page in one image (review of 667e933): the
+// viewport is made as tall as the page, so the Unity canvas, Inspector and
+// Timeline are in it, then set back. It logs what the shop, the status line
+// and the Timeline say, so the image can be matched to the task's events.
+async function shotFull(b, name) {
+  const h = Math.min(4000, await b.evaluate(`Math.ceil(document.documentElement.scrollHeight)`));
+  await shot(b, name, 1280, h, false);
+  const said = await b.evaluate(`JSON.stringify({ unity: document.getElementById("unity-status").textContent, status: document.getElementById("status").textContent,
+    timeline: [...document.querySelectorAll("#timeline li")].map((li) => li.dataset.seq).join(","), runStatus: (document.getElementById("run-status") || {}).textContent || "" })`);
+  log("  " + name + ".png (full page): " + said);
+  await b.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+}
+
 async function hostEvents(addr, host, task) {
   const r = await fetch("http://" + addr + "/api/tasks/" + task + "/events", { headers: { Authorization: "Bearer " + host } });
   return (await r.json()).as_of_sequence;
@@ -1250,6 +1263,7 @@ try {
     const keptA = await b.evaluate(`JSON.stringify({ ls: localStorage.length, ss: sessionStorage.length, cookie: document.cookie, url: location.href, field: document.getElementById("token-file").value })`);
     check("3.5: the token file is in page memory only (field emptied; no storage, cookie or URL)", /"ls":0,"ss":0,"cookie":"","url":"[^"]*\/host","field":""/.test(keptA) && [at.op, at.host, at.a, at.b].every((t) => !keptA.includes(t)), keptA.slice(0, 120));
     await shot(b, "desktop-acceptance-ready", 1280, 900, false);
+    await shotFull(b, "full-acceptance-ready");
 
     // 3. Ask: a new run, the page switches to consumer-a and opens its task.
     const askRun = await startNew("ask");
@@ -1259,6 +1273,7 @@ try {
     const askDeadline = (await aTask(askRun.task_id)).purchases[0].deadline_at;
     await record("Ask", askRun.task_id);
     await shot(b, "desktop-acceptance-ask", 1280, 900, false);
+    await shotFull(b, "full-acceptance-ask");
 
     // 4. Deny: consumer-b, the reason kept apart from the run's history.
     const denyRun = await startNew("deny-budget");
@@ -1267,6 +1282,7 @@ try {
     check("3.5 Deny: its line: 場次完成；Deny：INSUFFICIENT_BUDGET, no cancel", await lineHas(denyRun.task_id, ["場次完成", "Deny：INSUFFICIENT_BUDGET"], false, 20000), await b.evaluate(seenLine(denyRun.task_id)));
     await record("Deny", denyRun.task_id);
     await shot(b, "desktop-acceptance-deny", 1280, 900, false);
+    await shotFull(b, "full-acceptance-deny");
 
     // 4. Stop a running run (ask-wait): 停止 only, then its own cancel.
     const waitRun = await startNew("ask-wait");
@@ -1277,6 +1293,7 @@ try {
     await views("stop", waitRun.task_id, "withdrawn", "Ask", "TASK_CANCELLED", ["cancelled", "withdrawn"]);
     await record("stop", waitRun.task_id);
     await shot(b, "desktop-acceptance-stop", 1280, 900, false);
+    await shotFull(b, "full-acceptance-stop");
 
     // 4. Cancel a task after its run ended.
     const cRun = await startNew("ask");
@@ -1286,6 +1303,7 @@ try {
     await views("cancel", cRun.task_id, "withdrawn", "Ask", "TASK_CANCELLED", ["cancelled", "withdrawn"]);
     await record("cancel", cRun.task_id);
     await shot(b, "desktop-acceptance-cancel", 1280, 900, false);
+    await shotFull(b, "full-acceptance-cancel");
 
     // 4. The first Ask reaches its deadline (30 s, the server's clock): the backend records the expiry.
     let expired = false;
@@ -1300,6 +1318,7 @@ try {
     await views("expiry", askRun.task_id, "expired", "Ask", "APPROVAL_EXPIRED", ["expired"]);
     await record("expiry", askRun.task_id);
     await shot(b, "desktop-acceptance-expired", 1280, 900, false);
+    await shotFull(b, "full-acceptance-expired");
     await b.evaluate(`document.querySelector('#consumer-pick button[data-consumer="consumer-b"]').click()`);
     check("3.5 switch: consumer-b shows nothing of consumer-a", await b.waitFor(`${text("#viewer")}.startsWith("consumer-b") && !${text("#inspector")}.includes(${JSON.stringify(askRun.task_id)})`, 10000)
       && !(await b.evaluate(`[...document.querySelectorAll("#task-pick button")].some((x) => x.dataset.task.startsWith("show-a"))`)));
@@ -1382,6 +1401,7 @@ try {
     await record("restart: shutdown cancel", running.task_id);
     await record("restart: cancelled afterwards", pending.task_id);
     await shot(b, "desktop-acceptance-restart", 1280, 900, false);
+    await shotFull(b, "full-acceptance-restart");
     check("3.5: nothing on the page claims payment or delivery", !(await b.evaluate(`document.body.innerText`)).match(/付款成功|已付款|取貨成功|交付成功|Settled|RESOURCE_DELIVERED/));
     const keptEnd = await b.evaluate(`JSON.stringify({ ls: localStorage.length, ss: sessionStorage.length, cookie: document.cookie, url: location.href })`);
     check("3.5: no token in storage, cookie, URL or console", !/"ls":[1-9]|"ss":[1-9]|"cookie":"[^"]/.test(keptEnd) && allTokens.every((t) => !keptEnd.includes(t) && !b.consoleText.join("\n").includes(t)));
