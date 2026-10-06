@@ -196,7 +196,7 @@ const CANCEL_ERRORS = {
   run_active: "這個 task 的場次仍在執行：請用「停止」，未取消",
   already_ended: "task 已因 CLI 逾時結束，未取消；原紀錄保留",
   not_eligible: "task 已是 Deny（終態），未取消；Deny 原因保留",
-  store_unavailable: "Store 不可用，取消未完成",
+  store_unavailable: "Store 不可用，取消結果尚未確認（可能已由其他寫入完成）；請看最近場次重新讀取的目前狀態",
 };
 
 // runText is section 13.5: the run's process, its end record and the
@@ -218,6 +218,9 @@ function runText(r) {
   return "場次結束：" + r.outcome + (r.detail ? "（" + r.detail + "）" : "");
 }
 
+// A task whose details were not read (a failed read, or beyond
+// DETAILS_MAX): its Asks are unknown, never taken as none.
+const UNCONFIRMED = "Ask 狀態未確認（task 詳情未取得）";
 const asks = (d) => ((d && d.purchases) || []).filter((p) => p.decision && p.decision.policy_verdict === "Ask");
 
 // taskNow is the task's state now, from the host's task reads; null when
@@ -239,9 +242,9 @@ function taskNow(r) {
     case "denied": return "Deny：" + (t.deny_reason || "原因未知");
     case "failed":
       return (r.outcome === "timeout" && r.store_end === "TASK_TIMED_OUT" ? "" : "task 已結束（CLI 逾時）；") +
-        (open ? "未決 Ask 仍依原到期機制處理" : expired ? "Ask 已依原到期機制到期" : "無未決 Ask");
+        (!d ? UNCONFIRMED : open ? "未決 Ask 仍依原到期機制處理" : expired ? "Ask 已依原到期機制到期" : "無未決 Ask");
     case "awaiting_approval": return "Ask 等待中；task 可由主持人取消";
-    case "running": return d ? (expired ? "Ask 已到期；task 仍可由主持人取消" : "task 未收尾；可由主持人取消") : "task 未收尾（讀取 Ask 中）；可由主持人取消";
+    case "running": return d ? (expired ? "Ask 已到期；task 仍可由主持人取消" : "task 未收尾；可由主持人取消") : "task 未收尾（" + UNCONFIRMED + "）；可由主持人取消";
     default: return "目前 task：" + t.status;
   }
 }

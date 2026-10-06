@@ -555,6 +555,11 @@ MUTATIONS = [
      '\tcase "TASK_ALREADY_ENDED": // ended by another writer meanwhile: answer what was committed\n', '\tcase "TASK_ALREADY_ENDED":\n\t\treply(w, http.StatusOK, map[string]any{"state": "cancelled", "already": true})\n\t\treturn\n', 'TestCancelStoreFaults'),
     ('B1-06 3.4: a failed re-read answered as cancelled', 'cmd/demo/cancel.go',
      '\tcase err != nil:\n\t\tstoreDown(w, store.CodeOf(err))\n\tcase !answerEnded', '\tcase err != nil:\n\t\treply(w, http.StatusOK, map[string]any{"state": "cancelled", "already": true})\n\tcase !answerEnded', 'TestCancelStoreFaults'),
+    # Review of d61771c, R1: a control body is one JSON object and nothing after it.
+    ('B1-06 3.4 R1: a control body need not be an object (null cancels)', 'cmd/demo/control.go',
+     ' || !bytes.HasPrefix(bytes.TrimLeft(body, " \\t\\r\\n"), []byte("{")) {', ' {', 'TestCancelBody|TestControlBodyShape'),
+    ('B1-06 3.4 R1: a control body may go on after its object', 'cmd/demo/control.go',
+     '\tif _, err := dec.Token(); err != io.EOF {', '\tif false {', 'TestCancelBody|TestControlBodyShape'),
 ]
 
 

@@ -8,6 +8,7 @@ package main
 // Cancel, CLITimeout), and host_runs holds the coordination record.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -113,8 +114,11 @@ func reader(w http.ResponseWriter, r *http.Request, a *api) bool {
 }
 
 // postGuard admits the operator only, on a same-origin JSON POST (section
-// 6.2): Origin must be present and this host's own; the body is JSON of at
-// most 1 KiB, decoded strictly into dst.
+// 6.2): Origin must be present and this host's own; the whole body is at
+// most 1 KiB and is exactly one JSON object (JSON white space around it
+// allowed), decoded strictly into dst. A null decodes into a struct
+// without an error and More() does not mean the end of the body, so the
+// object type and the true end are checked apart (review of d61771c, R1).
 func postGuard(w http.ResponseWriter, r *http.Request, a *api, dst any) bool {
 	g, ok := a.authorize(w, r)
 	if !ok {
@@ -132,9 +136,18 @@ func postGuard(w http.ResponseWriter, r *http.Request, a *api, dst any) bool {
 		fail(w, http.StatusBadRequest, "bad_request")
 		return false
 	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1024))
+	if err != nil || !bytes.HasPrefix(bytes.TrimLeft(body, " \t\r\n"), []byte("{")) {
+		fail(w, http.StatusBadRequest, "bad_request")
+		return false
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil || dec.More() {
+	if err := dec.Decode(dst); err != nil {
+		fail(w, http.StatusBadRequest, "bad_request")
+		return false
+	}
+	if _, err := dec.Token(); err != io.EOF { // only white space may follow the object
 		fail(w, http.StatusBadRequest, "bad_request")
 		return false
 	}

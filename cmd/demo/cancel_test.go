@@ -370,8 +370,11 @@ func TestCancelStoreFaults(t *testing.T) {
 		}
 		code, v := h.cancel(id)
 		cancelFault = nil
-		if code != 503 || v["code"] != "STORE_ERROR" || v["state"] != nil || strings.Contains(fmt.Sprint(v), mark) {
-			t.Fatalf("%d %v", code, v)
+		// The cancel is committed (by the other writer) and yet the answer
+		// is 503: a 503 says "not confirmed", never "not cancelled" (review R3).
+		if code != 503 || v["code"] != "STORE_ERROR" || v["state"] != nil || strings.Contains(fmt.Sprint(v), mark) ||
+			count(h.events(id), "TASK_CANCELLED") != 1 || h.task(id).Status != "cancelled" {
+			t.Fatalf("%d %v %v", code, v, eventTypes(h.events(id)))
 		}
 	})
 
@@ -623,5 +626,86 @@ func TestSeedCancelDisplay(t *testing.T) {
 	clk.behind.Store(false)
 	if r["task_id"] != "show-a-04" || v["state"] != "accepted" || v["record_error"] != "CLOCK_REGRESSION" {
 		t.Fatalf("both records failed: %v", v)
+	}
+}
+
+// Review of d61771c (R1): a cancel body is exactly one empty JSON object.
+// null, an object followed by ] or }, and every other shape are 400 with
+// nothing written; each refused body meets its own waiting task, so one
+// wrongly accepted body cannot hide the next.
+func TestCancelBody(t *testing.T) {
+	h := controlHost(t, hostOpts{expiryEvery: time.Hour})
+	defer h.stop()
+	op := h.tokens["operator"]
+	runs := func() string { _, b, _ := h.get("/api/host/runs", op); return string(b) }
+	for name, body := range map[string]string{
+		"null":                 `null`,
+		"object then ]":        `{}]`,
+		"object then }":        `{} }`,
+		"an array":             `[]`,
+		"a string":             `"{}"`,
+		"a boolean":            `true`,
+		"a number":             `0`,
+		"a non-empty object":   `{"task_id":"x"}`,
+		"an empty body":        ``,
+		"white space only":     "  \n",
+		"incomplete":           `{`,
+		"a second value":       `{}{}`,
+		"a second null":        `{} null`,
+		"trailing junk":        `{} x`,
+		"over 1 KiB of space":  `{}` + strings.Repeat(" ", 1100),
+		"over 1 KiB before it": strings.Repeat(" ", 1100) + `{}`,
+	} {
+		id := h.startRun("ask")["task_id"].(string)
+		events, task, before := h.events(id), h.task(id), runs()
+		code, v := h.post("/api/host/tasks/"+id+"/cancel", op, body)
+		if code != 400 || v["error"] != "bad_request" || !keys(v, "error") {
+			t.Errorf("%s: %d %v", name, code, v)
+		}
+		if !sameJSON(h.events(id), events) || h.task(id).Status != task.Status || task.Status != "awaiting_approval" || runs() != before {
+			t.Errorf("%s: something was written: %v", name, eventTypes(h.events(id)))
+		}
+	}
+	for name, body := range map[string]string{"{}": `{}`, "white space around": " \t{ }\r\n"} {
+		id := h.startRun("ask")["task_id"].(string)
+		if code, v := h.post("/api/host/tasks/"+id+"/cancel", op, body); code != 200 || v["state"] != "cancelled" || v["already"] != nil {
+			t.Fatalf("%s: %d %v", name, code, v)
+		}
+		n := len(h.events(id).Events)
+		if code, v := h.post("/api/host/tasks/"+id+"/cancel", op, body); code != 200 || v["already"] != true || len(h.events(id).Events) != n || count(h.events(id), "TASK_CANCELLED") != 1 {
+			t.Fatalf("%s again: %d %v", name, code, v)
+		}
+	}
+}
+
+// The start and stop share the decoding: their bodies get the same object
+// and end checks, and their valid bodies still work.
+func TestControlBodyShape(t *testing.T) {
+	h := controlHost(t, hostOpts{expiryEvery: time.Hour})
+	defer h.stop()
+	op := h.tokens["operator"]
+	nRuns := func() int { _, b, _ := h.get("/api/host/runs", op); return strings.Count(string(b), `"run_id"`) }
+	valid := startBody("req-shape-0000000001", "hang")
+	for name, body := range map[string]string{"null": `null`, "object then ]": valid + `]`, "object then }": valid + ` }`, "a second value": valid + `{}`, "an array": `[` + valid + `]`} {
+		if code, v := h.post("/api/host/runs", op, body); code != 400 || v["error"] != "bad_request" || nRuns() != 0 {
+			t.Errorf("start, %s: %d %v, %d runs", name, code, v, nRuns())
+		}
+	}
+	code, run := h.post("/api/host/runs", op, " "+valid+"\n")
+	if code != 202 {
+		t.Fatalf("a valid start with white space: %d %v", code, run)
+	}
+	id := run["run_id"].(string)
+	h.waitFor(run["task_id"].(string), func(v taskReply) bool { return len(v.Purchases) == 1 })
+	for name, body := range map[string]string{"null": `null`, "object then ]": `{}]`, "object then }": `{} }`, "a field": `{"x":1}`} {
+		if code, v := h.post("/api/host/runs/"+id+"/stop", op, body); code != 400 || h.run(id)["live"] != "running" {
+			t.Errorf("stop, %s: %d %v, %v", name, code, v, h.run(id)["live"])
+		}
+	}
+	if code, v := h.post("/api/host/runs/"+id+"/stop", op, " {}\n"); code != 202 {
+		t.Fatalf("a valid stop: %d %v", code, v)
+	}
+	if v := h.waitRun(id, ended); v["store_end"] != "TASK_CANCELLED" {
+		t.Fatalf("stopped: %v", v)
 	}
 }

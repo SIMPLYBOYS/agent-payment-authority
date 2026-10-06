@@ -950,6 +950,26 @@ try {
   check("3.4: an interrupted run: that history, and the task can be cancelled", await lineHas("show-a-04", ["場次曾中斷（上一個 host 未正常結束）", "Ask 已到期；task 仍可由主持人取消"], true), await b.evaluate(seenLine("show-a-04")));
   const runsHistory = JSON.stringify(await xRuns());
 
+  // Review of d61771c (R2): a task whose details were not read is not a
+  // task without Asks. Its detail read answers 503 here (show-a-01's
+  // expired Ask is in the Store); the line says it is not confirmed.
+  let failDetail = false;
+  const offDetail = b.on("Fetch.requestPaused", (p) => {
+    if (failDetail && p.request.url.endsWith("/api/tasks/show-a-01") && p.request.headers.Authorization === "Bearer " + xt.host) {
+      b.send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 503, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from('{"error":"store_unavailable"}').toString("base64") }).catch(() => {});
+      return;
+    }
+    b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {});
+  });
+  await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/tasks/*", requestStage: "Request" }] });
+  failDetail = true;
+  check("3.4 R2: a failed detail read shows the Asks unconfirmed, not none", await lineHas("show-a-01", ["CLI 已逾時（已記錄）；Ask 狀態未確認（task 詳情未取得）"], false)
+    && !(await b.evaluate(seenLine("show-a-01"))).includes("無未決 Ask"), await b.evaluate(seenLine("show-a-01")));
+  failDetail = false;
+  check("3.4 R2: the next good read confirms the expiry again", await lineHas("show-a-01", ["Ask 已依原到期機制到期"], false), await b.evaluate(seenLine("show-a-01")));
+  await b.send("Fetch.disable");
+  offDetail();
+
   // The button is only a hint: a forged task list offers cancel for the Deny
   // and the timed-out task; the server refuses both and writes nothing.
   let forge = false;
@@ -1022,8 +1042,13 @@ try {
   check("3.4: a replay after the cancel sends no cancel and adds no event", (await b.evaluate(`window.__cancelProbe.posts`)) === 0 && (await xEvents(live)).length === liveEvents);
 
   // A lost cancel reply: the server committed; the page says "not confirmed", resends nothing.
-  let failCancel = 0, failHostRead = 0;
+  let failCancel = 0, failHostRead = 0, cancel503 = 0;
   const offLost = b.on("Fetch.requestPaused", (p) => {
+    if (cancel503 > 0 && p.responseStatusCode && p.request.url.endsWith("/cancel")) {
+      cancel503--;
+      b.send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 503, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from('{"error":"store_unavailable","code":"STORE_ERROR"}').toString("base64") }).catch(() => {});
+      return;
+    }
     if (failCancel > 0 && p.responseStatusCode && p.request.url.endsWith("/cancel")) { failCancel--; b.send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionReset" }).catch(() => {}); return; }
     if (failHostRead > 0 && !p.responseStatusCode && /\/api\/tasks\/show-a-\d+$/.test(p.request.url) && p.request.headers.Authorization === "Bearer " + xt.host) { failHostRead--; b.send("Fetch.failRequest", { requestId: p.requestId, errorReason: "ConnectionRefused" }).catch(() => {}); return; }
     b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {});
@@ -1043,6 +1068,14 @@ try {
   await b.evaluate(`${cancelBtn(reread)}.click()`);
   check("3.4: committed but the follow-up read fails: 取消已記錄；畫面更新失敗", await b.waitFor(`document.getElementById("run-status").innerText.startsWith("取消已記錄；畫面更新失敗")`, 15000)
     && (await xEvents(reread)).at(-1).event_type === "TASK_CANCELLED", await runSeen());
+  // Review of d61771c (R3): the server committed the cancel, the page gets
+  // a 503 (as when a re-read fails): not confirmed, never "not cancelled".
+  const late503 = await askEnded();
+  cancel503 = 1;
+  await b.evaluate(`${cancelBtn(late503)}.click()`);
+  check("3.4 R3: a 503 after a committed cancel: 取消結果尚未確認, not 未取消", await b.waitFor(`document.getElementById("run-status").innerText.includes("取消結果尚未確認")`, 15000)
+    && !/未取消|取消未完成/.test(await runSeen()) && (await xEvents(late503)).filter((e) => e.event_type === "TASK_CANCELLED").length === 1, await runSeen());
+  check("3.4 R3: the re-read shows the committed state: task 現已取消", await lineHas(late503, ["task 現已取消"], false), await b.evaluate(seenLine(late503)));
   await b.send("Fetch.disable");
   offLost();
 
@@ -1090,6 +1123,33 @@ try {
   await releaseCancel();
   check("3.4 held: after loading the file again the old reply shows nothing and opens nothing",
     await b.evaluate(`${notOld(nf)} && ${text("#viewer")} === "未驗證" && ${text("#inspector")} === "尚無資料"`), await runSeen());
+
+  // Review of d61771c (R2): beyond DETAILS_MAX (5) a task's details are
+  // not read in that poll; a forged list marks every task failed, and each
+  // line past the fifth says unconfirmed, never 無未決 Ask.
+  let forgeAll = false;
+  const offAll = b.on("Fetch.requestPaused", async (p) => {
+    if (forgeAll && p.responseStatusCode === 200 && p.request.url.endsWith("/api/tasks") && p.request.headers.Authorization === "Bearer " + xt.host) {
+      try {
+        const r = await b.send("Fetch.getResponseBody", { requestId: p.requestId });
+        const doc = JSON.parse(r.base64Encoded ? Buffer.from(r.body, "base64").toString() : r.body);
+        for (const t of doc.tasks) t.status = "failed";
+        await b.send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from(JSON.stringify(doc)).toString("base64") });
+      } catch { b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {}); }
+      return;
+    }
+    b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {});
+  });
+  await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/tasks", requestStage: "Response" }] });
+  forgeAll = true;
+  const nRuns = (await xRuns()).length;
+  const capOk = await b.waitFor(`[...document.querySelectorAll("#runs li")].filter((l) => l.innerText.includes(${JSON.stringify("Ask 狀態未確認（task 詳情未取得）")})).length === ${nRuns - 5}`, 15000);
+  const capLines = await b.evaluate(`JSON.stringify([...document.querySelectorAll("#runs li")].map((l) => l.innerText))`);
+  check("3.4 R2: past the 5 detail reads the lines say unconfirmed (" + (nRuns - 5) + " of " + nRuns + ")", capOk
+    && JSON.parse(capLines).filter((l) => l.includes("Ask 狀態未確認（task 詳情未取得）")).every((l) => !l.includes("無未決 Ask")), capLines.slice(0, 300));
+  forgeAll = false;
+  await b.send("Fetch.disable");
+  offAll();
 
   // A running run offers its stop, never 取消 task.
   const hang = await newRun("hang");
