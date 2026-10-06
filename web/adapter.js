@@ -229,3 +229,218 @@ export function bump(state) {
   state.seen = new Set();
   return state.gen;
 }
+
+// ---- D1: the purchase card, the replay step and the evidence panel ----
+// (docs/demo-presentation-design.md sections 4.4, 4.5, 6.2, 7). Every
+// value comes from the snapshot, the replayed events or the shop's catalog,
+// and says where it came from; nothing is inferred from time or animation.
+
+// project derives a task's status from its events, by the Store's own rule
+// (internal/store project): the first ending event decides, a Deny keeps
+// its reason, an open Ask means awaiting_approval.
+export function project(events) {
+  const open = new Set();
+  for (const e of events) {
+    const po = e.purchase_order_id || "";
+    switch (e.event_type) {
+      case "POLICY_DECIDED": {
+        const v = e.decision && e.decision.policy_verdict;
+        if (v === "Deny") return { status: "denied", reason: (e.decision && e.decision.reason) || "" };
+        if (v === "Ask") open.add(po);
+        break;
+      }
+      case "APPROVAL_EXPIRED": case "APPROVAL_WITHDRAWN": open.delete(po); break;
+      case "TASK_CANCELLED": return { status: "cancelled", reason: "" };
+      case "TASK_TIMED_OUT": return { status: "failed", reason: "" };
+    }
+  }
+  return { status: open.size ? "awaiting_approval" : "running", reason: "" };
+}
+
+// The purchase fields fixed when it was proposed (the intent is pinned to
+// its first PURCHASE_PROPOSED): safe to show at any replay step after it.
+const FIXED = ["purchase_order_id", "request_id", "http_method", "resource_url", "chain_id", "asset_contract", "asset_id", "pay_to", "amount", "intent_hash", "payment_requirement_hash"];
+
+// stepView is the replay step n of a stored snapshot, shaped as a snapshot:
+// only events with sequence <= n; a purchase only once proposed, with its
+// fixed fields; its verdict from the replayed POLICY_DECIDED event and its
+// closing from the replayed closing event, never from the final record's
+// decision or approval_closed; a deadline only once its Ask is decided. The
+// task status is derived from those events (derived: true). There is no
+// served_at, so nothing compares a past deadline with the present.
+export function stepView(snapshot, n) {
+  if (!snapshot) return null;
+  const { task, events } = snapshot;
+  const prefix = events.filter((e) => e.sequence <= n);
+  const stored = new Map((task.purchases || []).map((p) => [p.purchase_order_id, p]));
+  const shown = new Map();
+  for (const e of prefix) {
+    const po = typeof e.purchase_order_id === "string" ? e.purchase_order_id : "";
+    if (e.event_type === "PURCHASE_PROPOSED" && stored.has(po) && !shown.has(po)) {
+      const p = {};
+      for (const k of FIXED) if (stored.get(po)[k] !== undefined) p[k] = stored.get(po)[k];
+      shown.set(po, p);
+      continue;
+    }
+    const p = shown.get(po);
+    if (!p) continue;
+    if (e.event_type === "POLICY_DECIDED" && e.decision) {
+      p.decision = e.decision;
+      p.decided_at = e.observed_at;
+      if (e.decision.policy_verdict === "Ask") p.deadline_at = stored.get(po).deadline_at;
+    }
+    if (e.event_type === "APPROVAL_EXPIRED") { p.approval_closed = "expired"; p.closed_at = e.observed_at; }
+    if (e.event_type === "APPROVAL_WITHDRAWN") { p.approval_closed = "withdrawn"; p.closed_at = e.observed_at; }
+  }
+  const pr = project(prefix);
+  return {
+    task: {
+      task_id: task.task_id, consumer_id: task.consumer_id, agent_id: task.agent_id, wallet_id: task.wallet_id, payer: task.payer,
+      wallet_evidence_mode: task.wallet_evidence_mode, payment_capability: task.payment_capability,
+      status: pr.status, deny_reason: pr.reason, as_of_sequence: n, purchases: [...shown.values()], derived: true,
+    },
+    events: prefix,
+  };
+}
+
+// Plain words for the fixed reason codes; an unknown code is shown as it is.
+export const REASONS = {
+  HUMAN_APPROVAL_REQUIRED: "需要人工核准（M1 無核准能力）", INSUFFICIENT_BUDGET: "預算不足", APPROVAL_TIMEOUT: "核准期限已到",
+  HOST_CANCELLED: "主持人取消", PAYMENT_CAPABILITY_UNAVAILABLE: "M1 無付款能力", APPROVER_UNAVAILABLE: "沒有核准人",
+  CLI_TIMEOUT: "CLI 逾時",
+};
+const reasonText = (r) => (typeof r === "string" && r !== "" ? r + (REASONS[r] ? "（" + REASONS[r] + "）" : "") : UNKNOWN);
+const hhmmss = (s) => (typeof s === "number" ? new Date(s * 1000).toISOString().slice(11, 19) + " UTC" : UNKNOWN);
+const CUSTOMER = { "consumer-a": "A", "consumer-b": "B" };
+
+// catalogFor finds the shop catalog's entry for a purchase's resource.
+function catalogFor(catalog, p) {
+  const list = catalog && Array.isArray(catalog.products) ? catalog.products : [];
+  return list.find((x) => x && p && x.resource_url === p.resource_url && x.price) || null;
+}
+
+function purchaseStatus(p, live, servedAt) {
+  if (!p) return "此 task 尚無請購";
+  const d = p.decision;
+  if (!d) return "已提出請購，尚無裁決";
+  if (d.policy_verdict === "Deny") return "Deny：" + reasonText(d.reason);
+  if (d.policy_verdict === "Allow") return "Allow：政策允許，M1 未付款（PAYMENT_CAPABILITY_UNAVAILABLE）";
+  if (d.policy_verdict !== "Ask") return "未知裁決：" + str(d.policy_verdict);
+  if (p.approval_closed === "expired") return "Ask 已到期（後端已記錄）";
+  if (p.approval_closed === "withdrawn") return "Ask 已撤回（task 取消）";
+  const reached = live && typeof servedAt === "number" && typeof p.deadline_at === "number" && servedAt >= p.deadline_at;
+  return "Ask：等待人工核准（M1 無核准能力）" + (reached ? "；已達期限，等待後端確認" : "");
+}
+
+// card is the purchase card's model for a snapshot (live) or a stepView
+// (replay). chosen is a purchase picked by hand (live only; null follows
+// the scene). ctx: { mode: "live"|"replay", n, m, catalog, catalogAt }.
+export function card(view, chosen, ctx) {
+  if (!view) return null;
+  const live = ctx.mode !== "replay";
+  const t = view.task;
+  const sc = scene(view);
+  const purchases = t.purchases || [];
+  const ids = purchases.map((p) => p.purchase_order_id);
+  const po = live && chosen && ids.includes(chosen) ? chosen : sc.po;
+  const p = purchases.find((x) => x.purchase_order_id === po) || null;
+  const evs = view.events;
+  const at = (type) => evs.find((e) => e.event_type === type && (e.purchase_order_id || "") === (po || "-"));
+  const ended = evs.find((e) => e.event_type === "TASK_CANCELLED" || e.event_type === "TASK_TIMED_OUT");
+  const later = live ? "尚未發生" : "尚未發生（回放位置 #" + ctx.n + "）";
+  const step = (label, ev, note) => ({ label, state: ev ? "done" : "future", note: ev ? "#" + ev.sequence + (note ? " " + note : "") : later });
+  const closing = p && (at("APPROVAL_EXPIRED") || at("APPROVAL_WITHDRAWN"));
+  const waiting = p && p.decision && p.decision.policy_verdict === "Ask" && !p.approval_closed;
+  const steps = [
+    step("進店", evs.find((e) => e.event_type === "TASK_STARTED"), "TASK_STARTED"),
+    { label: "選商品", state: "none", note: "無獨立事件（fake 腳本）" },
+    { label: "報價", state: "none", note: "無獨立事件；402 以 hash 綁定在請購" },
+    step("請購", p && at("PURCHASE_PROPOSED"), "PURCHASE_PROPOSED"),
+    step("裁決", p && at("POLICY_DECIDED"), p && p.decision ? str(p.decision.policy_verdict) : ""),
+    closing || ended ? step("收尾", closing || ended, (closing || ended).event_type)
+      : waiting ? { label: "收尾", state: "wait", note: "等待中（M1 無核准能力）" }
+      : p && p.decision && p.decision.policy_verdict === "Deny" ? { label: "收尾", state: "none", note: "Deny 即結束；沒有收尾事件" }
+      : p && p.decision && p.decision.policy_verdict === "Allow" ? { label: "收尾", state: "none", note: "M1 無付款；沒有後續事件" }
+      : step("收尾", null),
+  ];
+  const cat = catalogFor(ctx.catalog, p);
+  const rows = [];
+  if (p) {
+    rows.push(["402 綁定金額", amount(p.amount) + "（基本單位，" + str(p.asset_id) + "）", "Store"]);
+    rows.push(["目錄標示", cat ? str(cat.price.asset_display) + "；" + str(cat.price.fiat_amount) + " " + str(cat.price.fiat_currency) + "（FX " + str(cat.price.fx_rate) + "，" + str(cat.price.fx_source) + "）" : "目錄未取得",
+      "商店 HTTP /catalog（fixture，不綁定此請購" + (ctx.catalogAt ? "；瀏覽器讀取 " + ctx.catalogAt : "") + "）"]);
+    if (p.decision) {
+      rows.push(["裁決", str(p.decision.policy_verdict), live ? "Store" : "Store 事件（回放）"]);
+      rows.push(["原因", reasonText(p.decision.reason), live ? "Store" : "Store 事件（回放）"]);
+    }
+    if (typeof p.deadline_at === "number") rows.push(["期限", hhmmss(p.deadline_at), "Store 時間；裁決時決定"]);
+    rows.push(["付款", "未付款（payment_status：" + str(p.decision ? p.decision.payment_status : "unavailable") + "）", "Store"]);
+  }
+  return {
+    mode: live ? "live" : "replay", n: ctx.n, m: ctx.m,
+    title: "客人 " + (CUSTOMER[t.consumer_id] || str(t.consumer_id)) + " · " + str(t.consumer_id) + " · " + str(t.task_id),
+    po: po || null, scenePo: sc.po || null, differs: !!(po && sc.po && po !== sc.po), options: live ? ids : [],
+    steps, status: purchaseStatus(p, live, t.served_at),
+    task: "task 狀態：" + (STATUS_LABELS[t.status] || str(t.status)) + (t.deny_reason ? "（" + t.deny_reason + "）" : "") + (t.derived ? "（依已回放事件推導，網頁）" : "（Store）")
+      + (ended ? "；" + (ended.event_type === "TASK_CANCELLED" ? "task 已取消" : "CLI 逾時") : ""),
+    rows,
+  };
+}
+
+const short = (h) => (typeof h === "string" && h.length > 22 ? h.slice(0, 22) + "…" : str(h));
+
+// evidence is the evidence panel for one purchase of the full stored
+// snapshot (never a replay step). In a replay it says so and marks the
+// events the replay has not reached. ctx adds sent (the projection the page
+// sent to Unity, with the purchase the page derived for it) and report (what
+// Unity last reported: it carries no purchase_order_id).
+export function evidence(snapshot, po, ctx) {
+  if (!snapshot) return null;
+  const replay = ctx.mode === "replay";
+  const t = snapshot.task;
+  const p = (t.purchases || []).find((x) => x.purchase_order_id === po) || null;
+  const evs = snapshot.events;
+  const mine = evs.filter((e) => !e.purchase_order_id || e.purchase_order_id === po);
+  const proposed = evs.find((e) => e.event_type === "PURCHASE_PROPOSED" && e.purchase_order_id === po);
+  const cat = catalogFor(ctx.catalog, p);
+  const d = (p && p.decision) || {};
+  const sections = [
+    { title: "報價", note: "402 的報價以 payment_requirement_hash 綁定在請購上；目錄價格只是說明，不與此請購綁定。", rows: p ? [
+      ["資源", str(p.http_method) + " " + str(p.resource_url), "Store"], ["amount（基本單位）", amount(p.amount), "Store"],
+      ["asset", str(p.asset_id), "Store"], ["network（chain）", str(p.chain_id), "Store"], ["payTo", str(p.pay_to), "Store"],
+      ["payment_requirement_hash", str(p.payment_requirement_hash), "Store"],
+      ["目錄價格", cat ? str(cat.price.asset_display) + "；" + str(cat.price.fiat_amount) + " " + str(cat.price.fiat_currency) : "目錄未取得", "商店 HTTP /catalog" + (ctx.catalogAt ? "（瀏覽器讀取 " + ctx.catalogAt + "）" : "")],
+      ["FX", cat ? str(cat.price.fx_rate) + "（" + str(cat.price.fx_source) + "）" : "目錄未取得", "商店 HTTP /catalog"],
+      ["完整 402 內容", "未提供（API 未開放；D4 暫緩）", "—"],
+    ] : [] },
+    { title: "請購", note: "intent_hash 為 fixture domain（agent-payment-authority/m1-fixture/v2/verifier-not-deployed），不是真實付款綁定。", rows: p ? [
+      ["purchase_order_id", str(p.purchase_order_id), "Store"], ["request_id", str(p.request_id), "Store"],
+      ["intent_hash", str(p.intent_hash), "Store"], ["payment_requirement_hash", str(p.payment_requirement_hash), "Store"],
+      ["PURCHASE_PROPOSED", proposed ? "#" + proposed.sequence + " · " + hhmmss(proposed.observed_at) : UNKNOWN, "Store 事件"],
+    ] : [] },
+    { title: "裁決", note: "固定原因代碼；M1 沒有核准、付款或交付。", rows: p ? [
+      ["verdict", str(d.policy_verdict), "Store"], ["reason", reasonText(d.reason), "Store"], ["approval_status", str(d.approval_status), "Store"],
+      ["payment_status", str(d.payment_status), "Store"], ["decided_at", hhmmss(p.decided_at), "Store 時間"],
+      ["deadline_at", typeof p.deadline_at === "number" ? hhmmss(p.deadline_at) : "—（非 Ask）", "Store 時間"],
+      ["收尾", p.approval_closed ? str(p.approval_closed) + " · " + hhmmss(p.closed_at) : "尚未收尾", "Store"],
+    ] : [] },
+    { title: "Store 事件", note: "hash chain 只表示這份事件序列前後相連，不是 ZKP，也不是 B1-07 獨立驗證。", rows: mine.map((e) => [
+      "#" + e.sequence + " " + str(e.event_type),
+      hhmmss(e.observed_at) + " · " + str(e.source) + "/" + str(e.evidence_mode) + " · prev " + short(e.prev_event_hash) + (replay && e.sequence > ctx.n ? " · 回放尚未到此" : ""),
+      "Store",
+    ]) },
+  ];
+  const sent = ctx.sent, rep = ctx.report;
+  const same = !!(sent && rep && rep.gen === sent.gen && rep.seq === sent.seq);
+  sections.push({ title: "場景對應", note: "Unity 的回報沒有 purchase_order_id；請購關聯由網頁依送出的投影推導，不是 Unity 獨立確認。", rows: [
+    ["送出投影", sent ? (replay ? "回放 · " : "") + "gen " + sent.gen + " · " + str(sent.task) + " #" + sent.seq + " " + str(sent.phase) : "尚未送出", "網頁"],
+    ["對應請購", sent && sent.po ? sent.po + "（網頁推導）" : "—", "網頁推導"],
+    ["Unity 回報", rep ? "gen " + rep.gen + " · " + str(rep.task) + " #" + rep.seq + " " + str(rep.phase) : "尚未回報", "瀏覽器觀測"],
+    ["同步", same ? "Unity 已呈現 " + str(rep.task) + " #" + rep.seq + "（" + str(rep.phase) + "）" : "Unity 同步中", "網頁比較"],
+    ...(sent && sent.po && po && po !== sent.po ? [["選取", "你正在查看 " + po + "；商店場景呈現的是 " + sent.po + "（選取不同，不是同步失敗）", "網頁"]] : []),
+  ] });
+  return {
+    banner: replay ? "完整紀錄，非回放當步（回放位置 #" + ctx.n + "／共 " + ctx.m + "）" : "即時：最新一致快照 #" + t.as_of_sequence,
+    po: po || null, sections,
+  };
+}

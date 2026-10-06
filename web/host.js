@@ -21,7 +21,7 @@
 // click: a clear, a new file, the manual mode, pagehide, or a switch of
 // consumer or task drops it; nothing is opened or signed in for it.
 
-import { forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow } from "./app.js";
+import { forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, setAlert } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
 
 const $ = (id) => document.getElementById(id);
@@ -72,6 +72,11 @@ function render(v) {
     clearTimeout(runsTimer);
     setRunStatus("", "idle");
   }
+  // D1: the credentials fold once a file is loaded; the status bar keeps a
+  // way to load one (section 4.1).
+  $("creds-box").open = v.mode !== "file";
+  $("load-file").hidden = v.mode === "file";
+  $("creds-summary").textContent = "憑證與就緒：" + (v.mode === "file" ? "已載入 token 檔" : v.mode === "manual" ? "手動 viewer 模式" : "尚未載入 token 檔");
   const box = $("creds");
   box.dataset.mode = v.mode;
   box.dataset.gen = String(v.gen);
@@ -160,6 +165,9 @@ function renderReadiness() {
     rows.push(["檢查時間", "info", time(st.served_at) + "（Store 時間）"]);
   }
   rows.push(["Unity 場景", scene[0], scene[1]]);
+  const bad = rows.filter(([, state]) => !["ok", "off", "info"].includes(state));
+  setAlert("ready", bad.length ? "就緒：" + bad.length + " 項未確認或錯誤（" + bad.map(([k]) => k).join("、") + "）" : "",
+    bad.some(([, state]) => ["error", "failed", "missing"].includes(state)) ? "error" : "warn");
   table.replaceChildren(...rows.map(([k, state, text]) => {
     const tr = document.createElement("tr");
     tr.dataset.item = k;
@@ -271,6 +279,33 @@ function renderControl() {
     b.addEventListener("click", () => start(sc));
     return b;
   }));
+  // The row under the shop: the running run's stop and the Dashboard's
+  // task's cancel, the same operations as in the runs list (section 4.1).
+  const now = [];
+  const act = runs.find((r) => r.live === "running");
+  if (act) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "row-stop";
+    b.textContent = "停止 " + act.task_id;
+    b.addEventListener("click", () => stop(act.run_id));
+    now.push(b);
+  }
+  const cur = currentTask();
+  const curRun = cur && runs.find((r) => r.task_id === cur);
+  if (curRun && cancellable(curRun)) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "row-cancel";
+    b.dataset.task = cur;
+    b.textContent = "取消 task " + cur;
+    b.disabled = cancelling;
+    b.addEventListener("click", () => cancel(cur));
+    now.push(b);
+  }
+  $("control-now").replaceChildren(...now);
+  const odd = runs.filter((r) => r.state === "interrupted" || r.record_error || r.store_end_error).length;
+  $("runs-summary").textContent = "最近場次（" + runs.length + " 場" + (odd ? "；需注意 " + odd + " 場：中斷或紀錄寫入失敗" : "") + "）";
   $("runs").replaceChildren(...runs.map((r) => {
     const li = document.createElement("li");
     li.dataset.run = r.run_id;
@@ -429,6 +464,8 @@ $("token-file").addEventListener("change", (ev) => {
   if (file) creds.load(file);
 });
 $("clear-all").addEventListener("click", () => creds.clearAll("已清除全部憑證"));
+$("load-file").addEventListener("click", () => $("token-file").click());
+document.addEventListener("apa:view", renderControl);
 // Manual viewer mode: app.js has read and emptied the typed token; every
 // loaded token goes before it signs in with it.
 onTypedSignIn(() => {

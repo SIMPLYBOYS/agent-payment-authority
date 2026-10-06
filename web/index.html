@@ -7,50 +7,68 @@
 <title>APA Demo Dashboard</title>
 <link rel="stylesheet" href="/ui/style.css">
 </head>
-<body>
+<body data-page="viewer">
 <header class="top">
   <strong class="badge">M1／fake agent／不付款</strong>
-  <span class="sub">模擬 Agent、fixture 資料、未付款；不會成功取貨，也沒有鏈上交易</span>
+  <span id="mode-chip" class="chip" data-mode="live">即時</span>
+  <span id="current" class="chip">目前：未選擇 task</span>
+  <span class="caps">能力：真實 Agent 未啟用 · 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行</span>
+  <span id="alerts"></span>
+  <p id="status" data-kind="idle"></p>
 </header>
 
-<section class="auth" aria-label="viewer 認證">
-  <form id="auth-form" autocomplete="off">
-    <label for="token">viewer token（本機 demo capability，不是使用者登入）</label>
-    <input id="token" type="password" autocomplete="off" spellcheck="false" inputmode="text">
-    <button type="submit">驗證</button>
-    <button type="button" id="switch">清除／切換 consumer</button>
-  </form>
-  <p>目前 viewer：<span id="viewer">未驗證</span></p>
-  <form id="task-form" hidden autocomplete="off">
-    <span id="task-pick"></span>
-    <span id="list-note" role="status"></span>
-    <label for="task-id">或輸入 task ID</label>
-    <input id="task-id" spellcheck="false">
-    <button type="submit">開啟</button>
-    <button type="button" id="replay" disabled>歷史展示回放（唯讀）</button>
-    <button type="button" id="replay-stop" hidden>停止回放並恢復最新狀態</button>
-  </form>
-  <p id="status" data-kind="idle"></p>
-</section>
-
-<main class="grid">
+<main class="stage">
   <section class="shop" aria-label="商店場景">
     <h2>商店（Unity）</h2>
-    <p id="replay-note" class="replay-note" hidden>歷史展示回放中：商店正在重演保存的事件；Inspector 與 Timeline 仍是最新快照，與商店不是同一時刻。</p>
+    <p id="replay-note" class="replay-note" hidden>歷史展示回放中：商店與「這筆請購」是回放當步；Timeline、查證面板與 Inspector 是完整紀錄，非回放當步。</p>
     <canvas id="unity-canvas" width="768" height="512"></canvas>
     <p id="unity-status" data-state="loading">Unity 場景載入中…</p>
     <div id="scene-text"></div>
     <p class="credit">像素素材：LimeZu（limezu.itch.io）；素材未接入時為 placeholder</p>
   </section>
-  <section aria-label="Inspector">
-    <h2>Inspector</h2>
-    <div id="inspector"></div>
-  </section>
-  <section aria-label="Timeline">
-    <h2>Timeline</h2>
-    <div id="timeline"></div>
-  </section>
+  <aside class="card" aria-label="這筆請購">
+    <h2>這筆請購</h2>
+    <div id="card"></div>
+    <details id="evidence-box">
+      <summary>查證這筆 ▸</summary>
+      <div id="evidence"></div>
+    </details>
+  </aside>
 </main>
+
+<section class="timeline-box" aria-label="Timeline">
+  <h2>Timeline</h2>
+  <div id="timeline"></div>
+</section>
+
+<section class="below">
+  <details id="auth-box" open>
+    <summary>viewer 驗證（目前 viewer：<span id="viewer">未驗證</span>）</summary>
+    <form id="auth-form" autocomplete="off">
+      <label for="token">viewer token（本機 demo capability，不是使用者登入）</label>
+      <input id="token" type="password" autocomplete="off" spellcheck="false" inputmode="text">
+      <button type="submit">驗證</button>
+      <button type="button" id="switch">清除／切換 consumer</button>
+    </form>
+  </details>
+  <details id="tasks-box" open>
+    <summary>task 清單與回放</summary>
+    <form id="task-form" hidden autocomplete="off">
+      <span id="task-pick"></span>
+      <span id="list-note" role="status"></span>
+      <label for="task-id">或輸入 task ID</label>
+      <input id="task-id" spellcheck="false">
+      <button type="submit">開啟</button>
+      <button type="button" id="replay" disabled>歷史展示回放（唯讀）</button>
+      <button type="button" id="replay-stop" hidden>停止回放並恢復最新狀態</button>
+    </form>
+  </details>
+  <details id="inspector-box" open>
+    <summary>技術詳情：Inspector 全欄位（完整紀錄）</summary>
+    <p id="inspector-note" class="full-note" hidden></p>
+    <div id="inspector"></div>
+  </details>
+</section>
 <script type="module" src="/ui/app.js"></script>
 </body>
 </html>

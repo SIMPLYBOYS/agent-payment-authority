@@ -30,6 +30,8 @@ const expect = (id) => cases.cases.find((c) => c.case_id === id).expected;
 const lines = [];
 let failures = 0;
 function log(s) { lines.push(s); console.log(s); }
+const started = Date.now();
+const mark = (name) => log("  [" + Math.round((Date.now() - started) / 1000) + " s] " + name); // where the time goes
 function check(name, ok, detail = "") { log((ok ? "PASS " : "FAIL ") + name + (detail ? "  [" + detail + "]" : "")); if (!ok) failures++; }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -74,6 +76,7 @@ async function startChrome() {
   const profile = join(tmp, "chrome-profile");
   const c = spawn(CHROME, ["--headless=new", "--user-data-dir=" + profile, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check",
     "--disable-extensions", "--disable-sync", "--disable-background-networking", "--disable-component-update", "--use-angle=swiftshader",
+    "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
     "--enable-unsafe-swiftshader", "about:blank"], { stdio: "ignore" });
   let port;
   for (let i = 0; i < 100 && !port; i++) {
@@ -123,7 +126,8 @@ async function startChrome() {
 const text = (sel) => `(document.querySelector(${JSON.stringify(sel)})?.textContent || "")`;
 
 async function signIn(b, token) {
-  await b.evaluate(`document.getElementById("token").focus()`);
+  // D1: the viewer form may sit in a folded section; a user opens it first.
+  await b.evaluate(`(document.getElementById("token").closest("details")?.setAttribute("open", ""), document.getElementById("token").focus())`);
   await b.send("Input.insertText", { text: token }); // typed into the masked field; never in an expression or a log
   await b.evaluate(`document.querySelector("#auth-form button[type=submit]").click()`);
 }
@@ -438,6 +442,7 @@ try {
   await demo.stop();
   demo = null;
 
+  mark("delivery 2 R1 seeded two purchases");
   // R1: a task with two purchases, written through the real Store
   // (internal/store TestSeedDisplayDB): purchase 1 Ask then expired,
   // purchase 2 an open Ask. The scene follows purchase 2.
@@ -462,9 +467,86 @@ try {
     await unityShows(b, { task: "task-a", seq: seededSeq, phase: "waiting", verdict: "Ask", reason: ask.reason }), await b.evaluate(text("#unity-status")));
   await shot(b, "desktop-r1-two-purchases", 1280, 900, false);
   log("  task-a seq " + seededSeq + " (two purchases; the newer an open Ask) shown in desktop-r1-two-purchases.png");
+  // ---- B1-06 D1 (docs/demo-presentation-design.md 4.4, 4.5, 6.2, 7, 8 D1) on the seeded two-purchase task ----
+  mark('B1-06 D1');
+  // task-a: #1 TASK_STARTED, #2 po-A proposed, #3 po-A Ask, #4 po-A expired, #5 po-B proposed, #6 po-B Ask (open).
+  // Assertions read what a viewer sees (innerText of shown elements).
+  {
+    const shownText = (sel) => `((document.querySelector(${JSON.stringify(sel)}) || {}).innerText || "")`;
+    const pv = (await hostGet(addr4, st.host, "/api/tasks/task-a")).json.purchases;
+    const poA = pv.find((p) => p.approval_closed === "expired").purchase_order_id, poB = pv.find((p) => !p.approval_closed).purchase_order_id;
+    const lastSeq = await hostEvents(addr4, st.host, "task-a");
+    await b.evaluate(`(window.scrollTo(0, 0), true)`);
+    const inView = (sel) => `(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && r.width > 0; })()`;
+    check("D1: on / at 1280×900 the Unity shop is wholly in the first viewport", await b.evaluate(inView("#unity-canvas")));
+    // Default: the card follows the scene's purchase; every panel names the same one.
+    await b.evaluate(`(document.getElementById("evidence-box").open = true, true)`);
+    const api = pv.find((p) => p.purchase_order_id === poB);
+    check("D1 default: the card shows the scene's purchase (po-B, the open Ask)", await b.waitFor(`document.getElementById("card").dataset.po === ${JSON.stringify(poB)} && ${shownText(".card-status")} === "Ask：等待人工核准（M1 無核准能力）"`, 10000), await b.evaluate(shownText("#card")));
+    check("D1 default: Inspector, evidence and the card name the same purchase and intent hash",
+      (await b.evaluate(shownText("#inspector"))).includes(poB) && (await b.evaluate(shownText('.evidence-page[data-page="請購"]'))).includes(api.intent_hash)
+      && (await b.evaluate(shownText('.evidence-page[data-page="請購"]'))).includes(api.payment_requirement_hash));
+    check("D1 default: Unity's report matches the projection sent; the purchase link says it is the page's own",
+      await b.waitFor(`${shownText('.evidence-page[data-page="場景對應"]')}.includes("Unity 已呈現 task-a #${lastSeq}") && ${shownText('.evidence-page[data-page="場景對應"]')}.includes(${JSON.stringify(poB + "（網頁推導）")})`, 15000),
+      await b.evaluate(shownText('.evidence-page[data-page="場景對應"]')));
+    check("D1 default: the bound amount is its own row, apart from any catalog price", (await b.evaluate(shownText("#card"))).includes("402 綁定金額") && (await b.evaluate(shownText("#card"))).includes("目錄標示"));
+    // By hand: the older purchase; the scene stays, and that is no sync failure.
+    const unityBefore = await b.evaluate(`document.getElementById("unity-status").dataset.seq + "|" + document.getElementById("unity-status").dataset.phase`);
+    await b.evaluate(`(() => { const s = document.querySelector("#card .po-pick"); s.value = ${JSON.stringify(poA)}; s.dispatchEvent(new Event("change")); return true; })()`);
+    check("D1 by hand: the card shows po-A and says the scene shows po-B",
+      await b.waitFor(`${shownText(".card-differs")}.includes(${JSON.stringify("你正在查看 " + poA + "；商店場景呈現的是 " + poB)}) && ${shownText(".card-status")} === "Ask 已到期（後端已記錄）"`, 5000), await b.evaluate(shownText("#card")));
+    check("D1 by hand: Unity unchanged, no 同步中, and the evidence says it is a different pick, not a sync failure",
+      (await b.evaluate(`document.getElementById("unity-status").dataset.seq + "|" + document.getElementById("unity-status").dataset.phase`)) === unityBefore
+      && !(await b.evaluate(shownText('.evidence-page[data-page="場景對應"]'))).includes("同步中") && (await b.evaluate(shownText('.evidence-page[data-page="場景對應"]'))).includes("選取不同，不是同步失敗"));
+    await b.evaluate(`document.querySelector("#card .card-back").click()`);
+    check("D1 by hand: 回到場景這筆 returns to the scene's purchase", await b.waitFor(`document.getElementById("card").dataset.po === ${JSON.stringify(poB)} && !document.querySelector(".card-differs")`, 5000));
+    // Replay, held step by step (Unity's reports are held by a test-only page hook, so each step lasts its 6 s limit).
+    await b.evaluate(`(() => { window.__d1Orig = window.__d1Orig || window.apaUnityReport; window.__d1Held = []; window.apaUnityReport = (kind, gen, seq, detail) => { if (kind === "rendered") { window.__d1Held.push([kind, gen, seq, detail]); return; } return window.__d1Orig(kind, gen, seq, detail); }; return true; })()`);
+    const releaseD1 = () => b.evaluate(`(() => { window.apaUnityReport = window.__d1Orig; window.__d1Held.splice(0).forEach((a) => window.__d1Orig(...a)); return true; })()`);
+    await b.evaluate(`(() => { window.__d1Writes = 0; if (!window.__d1Fetch) { window.__d1Fetch = window.fetch.bind(window); window.fetch = (u, o) => { if (o && o.method && o.method !== "GET") window.__d1Writes++; return window.__d1Fetch(u, o); }; } return true; })()`);
+    await b.evaluate(`document.getElementById("replay").click()`);
+    const at = (n) => b.waitFor(`${shownText(".card-replay")} === ${JSON.stringify("回放當步 #" + n + "／共 " + lastSeq + "（唯讀）")}`, 15000);
+    const fullNote = (n) => "完整紀錄，非回放當步（回放位置 #" + n + "／共 " + lastSeq + "）";
+    const labelled = async (n) => (await b.evaluate(shownText("#inspector-note"))) === fullNote(n) && (await b.evaluate(shownText("#timeline .full-note"))) === fullNote(n)
+      && (await b.evaluate(shownText(".evidence-banner"))) === fullNote(n) && (await b.evaluate(`document.querySelectorAll('#timeline li[data-ahead="1"]').length`)) === lastSeq - n
+      && (await b.evaluate(shownText("#mode-chip"))) === "回放中 #" + n + "／共 " + lastSeq + "（唯讀）" && !(await b.evaluate(`!!document.querySelector("#card .po-pick")`));
+    check("D1 replay #1: no purchase yet; the full record says it is not the step", await at(1) && (await b.evaluate(shownText(".card-status"))) === "此 task 尚無請購" && await labelled(1), await b.evaluate(shownText("#card")));
+    check("D1 replay #2: po-A and its fixed fields only: no Ask, reason or expiry", await at(2) && (await b.evaluate(`document.getElementById("card").dataset.po`)) === poA
+      && (await b.evaluate(shownText(".card-status"))) === "已提出請購，尚無裁決" && !/Ask|HUMAN_APPROVAL|到期|期限/.test(await b.evaluate(shownText("#card"))) && await labelled(2), await b.evaluate(shownText("#card")));
+    check("D1 replay #3: Ask waiting, though the record says expired and the browser's clock is long past the deadline", await at(3)
+      && (await b.evaluate(shownText(".card-status"))) === "Ask：等待人工核准（M1 無核准能力）" && !/已到期|已達期限/.test(await b.evaluate(shownText("#card")))
+      && (await b.evaluate(shownText("#card"))).includes("依已回放事件推導") && await labelled(3), await b.evaluate(shownText("#card")));
+    check("D1 replay #4: only now expired; po-B is not in the step", await at(4) && (await b.evaluate(shownText(".card-status"))) === "Ask 已到期（後端已記錄）"
+      && !(await b.evaluate(shownText("#card"))).includes(poB) && await labelled(4), await b.evaluate(shownText("#card")));
+    check("D1 replay #6: po-B's Ask", await at(6) && (await b.evaluate(`document.getElementById("card").dataset.po`)) === poB && await labelled(6), await b.evaluate(shownText("#card")));
+    await releaseD1();
+    check("D1 replay end: back to live, the latest snapshot, no replay labels", await b.waitFor(`document.getElementById("status").dataset.mode === "live" && document.getElementById("status").dataset.kind === "ok" && document.getElementById("card").dataset.mode === "live"`, 40000)
+      && (await b.evaluate(`document.getElementById("card").dataset.po`)) === poB && (await b.evaluate(`document.getElementById("inspector-note").hidden && !document.querySelector("#timeline .full-note")`)));
+    check("D1 replay: nothing written, no request other than reads", (await hostEvents(addr4, st.host, "task-a")) === lastSeq && (await b.evaluate(`window.__d1Writes`)) === 0);
+    // A switch mid-replay: the old replay's reports, released late, restore no card.
+    await b.evaluate(`(() => { window.__d1Held = []; window.apaUnityReport = (kind, gen, seq, detail) => { if (kind === "rendered") { window.__d1Held.push([kind, gen, seq, detail]); return; } return window.__d1Orig(kind, gen, seq, detail); }; return true; })()`);
+    await b.evaluate(`document.getElementById("replay").click()`);
+    await at(2);
+    await b.evaluate(`document.getElementById("switch").click()`);
+    await releaseD1();
+    await sleep(1500);
+    check("D1 replay switched away: the late reports bring back no card, no replay", (await b.evaluate(shownText("#card"))) === "尚未選擇 task" && (await b.evaluate(shownText("#mode-chip"))) === "即時"
+      && (await b.evaluate(`document.getElementById("replay-note").hidden`)), await b.evaluate(shownText("#card")));
+    // Everything folded: the status bar still says fake, unpaid and what is not built.
+    await b.evaluate(`(document.querySelectorAll("details").forEach((d) => { d.open = false; }), true)`);
+    const bar = await b.evaluate(shownText("header.top"));
+    check("D1: with every section folded the status bar still says fake, no payment and what is not built",
+      ["M1／fake agent／不付款", "真實 Agent 未啟用", "付款 未實作", "憑證／ZK 未實作", "B1-07 獨立驗證 未執行"].every((w) => bar.includes(w)) && !/付款成功|已驗證|通過/.test(bar), bar.slice(0, 200));
+    // Narrow: the shop, then the card; no sideways scroll.
+    await b.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await sleep(800);
+    check("D1 narrow (390×844): shop above the card, no horizontal scroll", await b.evaluate(`(() => { const s = document.querySelector(".shop").getBoundingClientRect(), c = document.querySelector("aside.card").getBoundingClientRect(); return s.top < c.top && document.documentElement.scrollWidth <= innerWidth; })()`));
+    await b.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  }
   await sd.stop();
 
   // ---- B1-06 slice 3.1: the host's page /host (docs/demo-operation-design.md 6.3) ----
+  mark('B1-06 slice 3.1');
   // A fresh host with the fixed plan (task-a Ask, task-b Deny) on a fixed
   // address, so a restart on the same address makes the page's tokens 401.
   const hostState = join(tmp, "state-host");
@@ -665,8 +747,15 @@ try {
   await chooseFile(goodFile);
   await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`);
   await b.send("Page.navigate", { url: "about:blank" });
-  await sleep(500);
-  const hist = await b.send("Page.getNavigationHistory");
+  // Ready when the page is at about:blank and its history can be read (the
+  // renderer may be swapped meanwhile); a fixed pause was not a condition.
+  let hist = null;
+  for (let i = 0; i < 100 && !hist; i++) {
+    hist = await b.send("Page.getNavigationHistory").catch(() => null);
+    if (hist && hist.entries[hist.currentIndex].url !== "about:blank") hist = null;
+    if (!hist) await sleep(100);
+  }
+  if (!hist) throw new Error("about:blank never became the current history entry");
   await b.send("Page.navigateToHistoryEntry", { entryId: hist.entries[hist.currentIndex - 1].id });
   await sleep(1500);
   check("3.1: after leaving and returning, no credentials and no identity", (await b.evaluate(`location.pathname`)) === "/host" && (await credsMode()) === "none" && (await b.evaluate(`${text("#viewer")} === "未驗證" && document.querySelectorAll("#consumer-pick button").length === 0`)), await credsView());
@@ -708,6 +797,7 @@ try {
   await hd.stop();
 
   // ---- B1-06 slice 3.2: host control (docs/demo-operation-design.md section 13) ----
+  mark('B1-06 slice 3.2');
   // A host in scenario mode on a new database: the demo registry, a catalog
   // with ask, deny-budget and hang. Nothing runs at start.
   const hangScenario = join(tmp, "hang.json");
@@ -830,6 +920,7 @@ try {
   const after = (await runsOf()).map((r) => r.run_id + r.state).sort().join();
   check("3.2: after a restart the runs are kept and nothing reruns", after === before && !cd.log().includes("demo: run "), before + " -> " + after + (cd.log().includes("demo: run ") ? " (a run started)" : ""));
   // ---- B1-06 slice 3.3: the task list comes from the Store (docs/demo-operation-design.md section 14) ----
+  mark('B1-06 slice 3.3');
   const listIds = () => b.evaluate(`JSON.stringify([...document.querySelectorAll("#task-pick button")].map((x) => x.dataset.task))`).then(JSON.parse);
   await b.send("Page.navigate", { url: "http://" + cAddr + "/" });
   await b.waitFor(`document.readyState === "complete"`);
@@ -956,6 +1047,7 @@ try {
   await cd.stop();
 
   // ---- B1-06 slice 3.4: cancel a task, errors, runs of a previous host (docs/demo-operation-design.md section 15) ----
+  mark('B1-06 slice 3.4');
   // A database written through the host's own runs (cmd/demo
   // TestSeedCancelDisplay), ten minutes back so every Ask is past its
   // deadline: show-a-01 CLI timeout, show-a-02 Ask, show-b-01 Deny,
@@ -1212,6 +1304,7 @@ try {
   await xd.stop();
 
   // ---- B1-06 slice 3.5: the whole fake demo, in order, on one host (docs/demo-operation-design.md section 16) ----
+  mark('B1-06 slice 3.5');
   // The binary and catalog the manual acceptance uses (testdata/demo/
   // scenarios-acceptance.json: ask, deny-budget, ask-wait), a new database,
   // then a restart on that same database. Each scenario is a new run and
@@ -1229,7 +1322,7 @@ try {
     const aFile = join(tmp, "tokens-acceptance.json");
     writeFileSync(aFile, readFileSync(join(accState, "tokens.json")));
     const aRuns = async () => (await hostGet(aAddr, at.op, "/api/host/runs")).json.runs;
-    const aEvents = async (task) => (await hostGet(aAddr, at.host, "/api/tasks/" + task + "/events")).json.events.map((e) => e.event_type);
+    const aEvents = async (task) => ((await hostGet(aAddr, at.host, "/api/tasks/" + task + "/events")).json.events || []).map((e) => e.event_type); // [] before the task is stored
     const aTask = async (task) => (await hostGet(aAddr, at.host, "/api/tasks/" + task)).json;
     const mapping = [];
     const record = async (what, task) => { const r = (await aRuns()).find((x) => x.task_id === task); const ev = await aEvents(task); mapping.push(what + ": run " + (r ? r.run_id : "-") + " task " + task + " #" + ev.length + " [" + ev.join(",") + "]"); };
@@ -1241,7 +1334,9 @@ try {
     };
     // views: the four panels show this task with this phase, verdict and last event.
     const views = async (label, task, phase, verdict, lastEvent, inspectorWords) => {
-      const ev = await aEvents(task);
+      // Ready when the Store has the expected last event (a run's task is stored a moment after it starts).
+      let ev = await aEvents(task);
+      for (let i = 0; i < 100 && ev.at(-1) !== lastEvent; i++) { await sleep(200); ev = await aEvents(task); }
       const u = await unityShows(b, { task, seq: ev.length, phase, verdict }, 30000);
       const d = await b.waitFor(`document.getElementById("scene-text").dataset.phase === ${JSON.stringify(phase)} && document.querySelectorAll("#timeline li").length === ${ev.length}`, 15000);
       const tl = await b.evaluate(`document.getElementById("timeline").innerText`);
@@ -1255,6 +1350,14 @@ try {
     await b.send("Page.navigate", { url: "http://" + aAddr + "/host" });
     await b.waitFor(`document.readyState === "complete"`);
     await b.waitFor(`["ready","rendered","failed"].includes(document.getElementById("unity-status").dataset.state)`, 90000);
+    const shown = (sel) => `((document.querySelector(${JSON.stringify(sel)}) || {}).innerText || "")`;
+    const inView = (sel) => `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return false; const r = e.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && r.width > 0; })()`;
+    // D1: everything folded, before a file: the status bar still says readiness is not confirmed.
+    await b.evaluate(`(window.__wasOpen = [...document.querySelectorAll("details")].map((d) => d.open), document.querySelectorAll("details").forEach((d) => { d.open = false; }), true)`);
+    const barA = await b.evaluate(shown("header.top"));
+    await b.evaluate(`([...document.querySelectorAll("details")].forEach((d, i) => { d.open = window.__wasOpen[i]; }), true)`); // opened again, as a user would
+    check("D1 /host folded: the status bar says fake, no payment, readiness not confirmed, and offers the file", barA.includes("M1／fake agent／不付款") && barA.includes("就緒：") && barA.includes("未確認")
+      && barA.includes("付款 未實作") && (await b.evaluate(`!document.getElementById("load-file").hidden`)), barA.slice(0, 200));
     await chooseFile(aFile);
     const rowState = (k) => `(document.querySelector('#readiness tr[data-item="${k}"]')?.dataset.state || "")`;
     check("3.5: readiness: HTTP, Store, fake CLI and the Unity build ready; real CLI and payment off",
@@ -1262,6 +1365,8 @@ try {
       await b.evaluate(`[...document.querySelectorAll("#readiness tr")].map((r) => r.dataset.item + "=" + r.dataset.state).join(" ")`));
     const keptA = await b.evaluate(`JSON.stringify({ ls: localStorage.length, ss: sessionStorage.length, cookie: document.cookie, url: location.href, field: document.getElementById("token-file").value })`);
     check("3.5: the token file is in page memory only (field emptied; no storage, cookie or URL)", /"ls":0,"ss":0,"cookie":"","url":"[^"]*\/host","field":""/.test(keptA) && [at.op, at.host, at.a, at.b].every((t) => !keptA.includes(t)), keptA.slice(0, 120));
+    await b.evaluate(`(window.scrollTo(0, 0), true)`);
+    check("D1 /host at 1280×900: the shop and the start buttons are in the first viewport", await b.evaluate(inView("#unity-canvas")) && await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].every((x) => { const r = x.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })`));
     await shot(b, "desktop-acceptance-ready", 1280, 900, false);
     await shotFull(b, "full-acceptance-ready");
 
@@ -1271,6 +1376,11 @@ try {
     await views("Ask", askRun.task_id, "waiting", "Ask", "POLICY_DECIDED", ["Ask", "HUMAN_APPROVAL_REQUIRED", "pending", "未付款"]);
     check("3.5 Ask: its line: 場次完成；Ask 等待中, cancel offered", await lineHas(askRun.task_id, ["場次完成", "Ask 等待中；task 可由主持人取消"], true, 20000), await b.evaluate(seenLine(askRun.task_id)));
     const askDeadline = (await aTask(askRun.task_id)).purchases[0].deadline_at;
+    const cardAsk = await b.evaluate(shown("#card"));
+    check("D1 card: the 402 amount and the catalog's fixture price are two rows; the catalog is marked not bound", cardAsk.includes("402 綁定金額") && cardAsk.includes("500000（基本單位，fixture-usdc）")
+      && cardAsk.includes("700 KRW") && cardAsk.includes("不綁定此請購") && !/付款成功|已驗證|通過/.test(cardAsk), cardAsk.slice(0, 300));
+    await b.evaluate(`(window.scrollTo(0, 0), true)`);
+    check("D1 host row: 取消 task for the open task is in the first viewport", await b.waitFor(`!!document.querySelector('.row-cancel[data-task="${askRun.task_id}"]')`, 10000) && await b.evaluate(inView(`.row-cancel[data-task="${askRun.task_id}"]`)));
     await record("Ask", askRun.task_id);
     await shot(b, "desktop-acceptance-ask", 1280, 900, false);
     await shotFull(b, "full-acceptance-ask");
@@ -1306,6 +1416,17 @@ try {
     check("3.5 cancel: task 已取消, its line task 現已取消", await b.waitFor(`document.getElementById("run-status").innerText === ${JSON.stringify("task " + cRun.task_id + " 已取消")}`, 15000) && await lineHas(cRun.task_id, ["task 現已取消"], false), await runSeen());
     await views("cancel", cRun.task_id, "withdrawn", "Ask", "TASK_CANCELLED", ["cancelled", "withdrawn"]);
     await record("cancel", cRun.task_id);
+    // D1 replay of the cancelled task (#4 withdrawn, #5 cancelled), held step by step: nothing early.
+    await b.evaluate(`(() => { window.__d1Orig = window.__d1Orig || window.apaUnityReport; window.__d1Held = []; window.apaUnityReport = (kind, gen, seq, detail) => { if (kind === "rendered") { window.__d1Held.push([kind, gen, seq, detail]); return; } return window.__d1Orig(kind, gen, seq, detail); }; return true; })()`);
+    await b.evaluate(`document.getElementById("replay").click()`);
+    const stepAt = (n) => b.waitFor(`${shown(".card-replay")} === "回放當步 #${n}／共 5（唯讀）"`, 15000);
+    check("D1 replay #3 (cancelled task): Ask waiting; no withdrawal, no cancel yet", await stepAt(3) && (await b.evaluate(shown(".card-status"))) === "Ask：等待人工核准（M1 無核准能力）"
+      && !/撤回|已取消/.test(await b.evaluate(shown("#card"))), await b.evaluate(shown("#card")));
+    check("D1 replay #4: withdrawn; the task not yet cancelled", await stepAt(4) && (await b.evaluate(shown(".card-status"))) === "Ask 已撤回（task 取消）"
+      && !(await b.evaluate(shown(".card-task"))).includes("task 已取消"), await b.evaluate(shown("#card")));
+    check("D1 replay #5: now the task is cancelled", await stepAt(5) && (await b.evaluate(shown(".card-task"))).includes("task 已取消"), await b.evaluate(shown("#card")));
+    await b.evaluate(`(() => { window.apaUnityReport = window.__d1Orig; window.__d1Held.splice(0).forEach((a) => window.__d1Orig(...a)); return true; })()`);
+    await b.waitFor(`document.getElementById("status").dataset.mode === "live" && document.getElementById("status").dataset.kind === "ok"`, 40000);
     await shot(b, "desktop-acceptance-cancel", 1280, 900, false);
     await shotFull(b, "full-acceptance-cancel");
 
@@ -1430,6 +1551,7 @@ try {
 }
 
 // Evidence: the assertions and screenshots. No token may be in any of them.
+mark("end");
 log("result: " + (failures === 0 ? "PASS" : failures + " FAILED"));
 writeFileSync(join(out, "browser-test.log"), lines.join("\n") + "\n");
 const leaks = readdirSync(out).filter((f) => { const s = readFileSync(join(out, f)).toString("latin1"); return allTokens.some((t) => t && s.includes(t)); });

@@ -20,7 +20,7 @@
 // of a 401 of the current generation through onUnauthorized.
 
 import * as A from "./adapter.js";
-import { renderInspector, renderTimeline, renderSceneText } from "./render.js";
+import { renderInspector, renderTimeline, renderSceneText, renderCard, renderEvidence } from "./render.js";
 import { UnityHost } from "./unity.js";
 
 const $ = (id) => document.getElementById(id);
@@ -46,6 +46,20 @@ let listAbort = null;
 const rendered = [];    // waiting for Unity's report of (gen, seq)
 
 const SHOWN = ["gen", "seq", "phase", "task", "verdict", "reason"];
+
+// D1 (docs/demo-presentation-design.md 4.4, 4.5, 6.2, 7): the purchase card
+// and the evidence panel. chosenPo is a purchase picked by hand (live only;
+// null follows the scene); replayPos the replay step { n, m }; sent the last
+// projection sent to Unity with the purchase the page derived for it;
+// lastReport what Unity last reported (it carries no purchase_order_id).
+let chosenPo = null;
+let replayPos = null;
+let sent = null;
+let lastReport = null;
+let catalog = null;   // the shop's /catalog (fixture prices), read once, no token
+let catalogAt = "";   // the browser's time of that read
+let shownCard = "";   // what the card and the evidence panel last showed
+let shownEvidence = "";
 const art = () => unity.art === "limezu" ? "LimeZu 素材" : "placeholder，LimeZu 待接入";
 
 const unity = new UnityHost($("unity-canvas"), (s, detail) => {
@@ -58,6 +72,8 @@ const unity = new UnityHost($("unity-canvas"), (s, detail) => {
     Object.assign(box.dataset, { gen: String(detail.gen), seq: String(detail.seq), phase: detail.phase, task: detail.task, verdict: detail.verdict, reason: detail.reason });
     box.textContent = "Unity 已呈現 " + detail.task + " #" + detail.seq + " " + detail.phase + (detail.reason ? "（" + detail.reason + "）" : "");
     for (let i = rendered.length - 1; i >= 0; i--) if (rendered[i].gen === detail.gen && rendered[i].seq === detail.seq) rendered.splice(i, 1)[0].done(true);
+    lastReport = { gen: detail.gen, seq: detail.seq, phase: detail.phase, task: detail.task };
+    renderPanels();
     return;
   }
   if (s === "ready") return shopReset(state.taskId ? "syncing" : "ready");
@@ -117,6 +133,7 @@ function stopPolling() {
 
 function setMode(m) {
   mode = m;
+  if (m !== "replay") replayPos = null;
   $("replay-note").hidden = m !== "replay";
   $("replay-stop").hidden = m !== "replay";
   $("status").dataset.mode = m;
@@ -160,14 +177,53 @@ export function forget(message) {
   listNote("", "");
   $("task-form").hidden = true;
   $("replay").disabled = true;
+  chosenPo = null;
+  sent = null;
+  lastReport = null;
+  if (document.body.dataset.page === "viewer") $("auth-box").open = true;
   draw();
   setStatus(message || "請輸入 viewer token", "idle");
+  viewChanged();
 }
 
 function draw() {
+  const rp = mode === "replay" ? replayPos : null;
   renderInspector($("inspector"), A.inspector(state.snapshot));
-  renderTimeline($("timeline"), A.timeline(state.snapshot), expanded);
+  $("inspector-note").hidden = !rp;
+  $("inspector-note").textContent = rp ? "完整紀錄，非回放當步（回放位置 #" + rp.n + "／共 " + rp.m + "）" : "";
+  renderTimeline($("timeline"), A.timeline(state.snapshot), expanded, rp);
   if (mode === "live") renderSceneText($("scene-text"), A.scene(state.snapshot));
+  renderPanels();
+}
+
+// renderPanels draws the purchase card, the evidence panel and the status
+// bar. In a replay the card is the replay step (A.stepView: only the events
+// replayed so far), and the evidence panel is the full record, labelled.
+function renderPanels() {
+  const snap = state.snapshot;
+  const rp = mode === "replay" ? replayPos : null;
+  const view = snap ? (rp ? A.stepView(snap, rp.n) : snap) : null;
+  const ctx = { mode: rp ? "replay" : "live", n: rp && rp.n, m: rp && rp.m, catalog, catalogAt };
+  const c = A.card(view, rp ? null : chosenPo, ctx);
+  const e = snap ? A.evidence(snap, c && c.po, { ...ctx, sent, report: lastReport }) : null;
+  // Rebuilt only when what they say changed: a poll or a Unity report that
+  // changes nothing leaves the DOM (and an open menu or a scroll) alone.
+  const cKey = JSON.stringify(c), eKey = JSON.stringify(e);
+  if (cKey !== shownCard) {
+    shownCard = cKey;
+    renderCard($("card"), c, {
+      pick: (po) => { chosenPo = c && po === c.scenePo ? null : po; renderPanels(); },
+      back: () => { chosenPo = null; renderPanels(); },
+    });
+  }
+  if (eKey !== shownEvidence) {
+    shownEvidence = eKey;
+    renderEvidence($("evidence"), e);
+  }
+  const chip = $("mode-chip");
+  chip.dataset.mode = rp ? "replay" : "live";
+  chip.textContent = rp ? "回放中 #" + rp.n + "／共 " + rp.m + "（唯讀）" : mode === "replay" ? "回放中（唯讀）" : "即時";
+  $("current").textContent = c ? "目前：" + c.title.replace(/^客人 /, "") + " · " + (c.scenePo || "尚無請購") + (rp ? "（回放當步）" : "") : "目前：未選擇 task";
 }
 
 async function signIn(ev) {
@@ -255,7 +311,26 @@ function listNote(text, kind) {
   const n = $("list-note");
   n.textContent = text;
   if (kind) n.dataset.kind = kind; else delete n.dataset.kind;
+  setAlert("list", kind === "warn" ? text : "");
 }
+
+// setAlert keeps a short warning in the status bar, which never folds:
+// what a folded section would otherwise hide (section 4.1). "" removes it.
+const alerts = new Map();
+export function setAlert(key, text, kind = "warn") {
+  if (text) alerts.set(key, [text, kind]); else alerts.delete(key);
+  $("alerts").replaceChildren(...[...alerts.values()].map(([t, k]) => {
+    const n = document.createElement("span");
+    n.textContent = t;
+    n.dataset.kind = k;
+    return n;
+  }));
+}
+
+// currentTask is the Dashboard's task, for /host's row of controls; a view
+// change is announced with the apa:view event.
+export const currentTask = () => state.taskId;
+const viewChanged = () => document.dispatchEvent(new Event("apa:view"));
 
 // listFailed marks the list as not loaded; the next refresh tries again.
 // After a good read the shown list stays, marked with that read's time;
@@ -301,10 +376,14 @@ export function openTask(id) {
   const consumer = state.consumer;
   const gen = A.reset(state, consumer, id);
   shownSeq = -1;
+  chosenPo = null;
+  sent = null;
+  lastReport = null;
   unity.send(A.clearMessage(gen));
   shopReset("syncing");
   draw();
   setStatus("讀取 " + id + "…", "loading");
+  viewChanged();
   poll(true);
 }
 
@@ -362,7 +441,10 @@ function show(first) {
   const fresh = A.fresh(state, first);
   if (state.snapshot && t.as_of_sequence !== shownSeq) {
     shownSeq = t.as_of_sequence;
-    unity.send(A.projection(state, !first && fresh.length > 0));
+    const msg = A.projection(state, !first && fresh.length > 0);
+    sent = { gen: msg.gen, task: msg.task_id, seq: msg.seq, phase: msg.phase, po: A.scene(state.snapshot).po };
+    unity.send(msg);
+    renderPanels();
   }
 }
 
@@ -379,16 +461,23 @@ async function replay() {
   inFlight = false;
   const snap = state.snapshot;
   const gen = A.bump(state);
+  chosenPo = null; // a replay follows its own step (section 4.5)
   unity.send(A.clearMessage(gen));
   shopReset("syncing");
   setStatus("歷史展示回放（唯讀，不重跑 task、不改事件）", "replay");
+  const last = snap.events.length ? snap.events[snap.events.length - 1].sequence : 0;
   for (let i = 0; i < snap.events.length; i++) {
     if (run !== replayRun) return;
-    const sc = A.scene({ task: snap.task, events: snap.events.slice(0, i + 1) });
     const seq = snap.events[i].sequence;
+    // The step view has only the events replayed so far and no served_at:
+    // nothing of a later verdict, closing or the present time reaches it.
+    const sc = A.scene(A.stepView(snap, seq));
+    replayPos = { n: seq, m: last };
+    sent = { gen, task: snap.task.task_id, seq, phase: sc.phase, po: sc.po };
     unity.send({ v: A.BRIDGE_VERSION, gen, clear: false, consumer: snap.task.consumer_id, task_id: snap.task.task_id,
       seq, phase: sc.phase, verdict: sc.verdict, reason: sc.reason || "", animate: true });
     renderSceneText($("scene-text"), { ...sc, label: "回放 #" + seq + "：" + sc.label });
+    draw();
     await renderedBy(gen, seq, 6000);
     await new Promise((r) => setTimeout(r, 400));
   }
@@ -404,6 +493,9 @@ function restore(run) {
   setMode("live");
   A.bump(state);
   shownSeq = -1;
+  chosenPo = null;
+  sent = null;
+  draw();
   unity.send(A.clearMessage(state.gen));
   shopReset("syncing");
   setStatus("回放結束，讀取最新快照…", "loading");
@@ -419,6 +511,14 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && mo
 // Leaving the page drops the token and the panels and stops polling;
 // nothing comes back on return (a restored page asks again).
 window.addEventListener("pagehide", () => forget());
+
+// The shop's catalog: fixture prices, informational, read once without a
+// token; shown with the time of this read, never as the bound quote.
+fetch("/catalog", { cache: "no-store", credentials: "omit" }).then((r) => (r.ok ? r.json() : null)).then((c) => {
+  catalog = c;
+  catalogAt = c ? new Date().toTimeString().slice(0, 8) : "";
+  renderPanels();
+}).catch(() => {});
 
 forget();
 unity.load();
