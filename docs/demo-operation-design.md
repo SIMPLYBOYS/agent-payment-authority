@@ -1,6 +1,6 @@
 # B1-06 展示操作流程設計（fake 展示模式）
 
-狀態（2026-10-06）：**切片 3.3（動態 task 清單與新場次選擇）經 Aaron 核准，實作於 `843ca4a`；Claude Code 執行，待 Codex 獨立 review（第 14 節）。** 切片 3.2 已於 `69ae9b2` 通過 Codex 限定範圍技術 review（第 13.19 節；最近完整容器屬 `c0d4c96`）。切片 3.1 已於 `b2b7daa` 通過（第 12.7 節）。3.4、3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12、13 節保留當時的寫法。
+狀態（2026-10-06）：**切片 3.4（取消 task、錯誤呈現與中斷收尾）實作於 `d61771c`；Claude Code 執行，待 Codex 獨立 review（第 15 節）。** 切片 3.3 已於 `2c55835` 通過 Codex 限定範圍技術 review（第 14.7 節；最近完整容器屬 `843ca4a`）。切片 3.2 已於 `69ae9b2` 通過（第 13.19 節）；切片 3.1 已於 `b2b7daa` 通過（第 12.7 節）。3.5 未開始；既有展示資料庫預設不升級。B1-04／B1-06 整體仍 InProgress。第 12–14 節保留當時的寫法。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 
@@ -1908,3 +1908,123 @@ B1-04／B1-06 整體維持 InProgress；不合併、不標整卡 Done。
 **下一步**：3.4（取消 task、錯誤呈現與中斷收尾），待另行派工，尚未開始。
 
 B1-04／B1-06 整體維持 InProgress；不合併、不推送、不標整卡 Done。
+
+## 15 切片 3.4：取消 task、錯誤呈現與中斷收尾（Claude Code 執行，待 Codex 獨立 review；程式 `d61771c`）
+
+依據：
+- Aaron 轉交的〈B1-06 交付點 3.4 實作指示〉（vault，`12a3325` 基準，2026-10-06）。
+- 本文件第 6.1、6.2、7 節、第 8 節 3.4 列，以及第 13 節。
+
+開工核對：分支 `b1-06-demo-integration`，HEAD `12a3325`，工作區乾淨，main `5391373`。
+
+### 15.1 決定
+
+| 項目 | 決定 |
+|---|---|
+| 端點 | `POST /api/host/tasks/{task_id}/cancel`（`cmd/demo/cancel.go`）。沿用 `postGuard`：只有 operator；Host 檢查；必要且同源的 Origin；`application/json`；1 KiB；body 只能是嚴格的 `{}`。task ID 格式不符回 `400 bad_request` |
+| 判斷順序（第 6.1 節） | 在 `control.mu` 內先讀 task（`ReadTask`），然後依序：<br>① 不存在 → `404 not_found`<br>② 該 task 的場次在 `running`／`stopping`（`c.active`）→ `409 run_active`<br>③ 已有 `TASK_CANCELLED` → `200 {"state":"cancelled","already":true}`<br>④ 已有 `TASK_TIMED_OUT` → `409 already_ended {"end":"TASK_TIMED_OUT"}`<br>⑤ `denied` → `409 not_eligible {"status":"denied"}`<br>⑥ 其他 → `Store.Cancel`，提交成功才回 `200 {"state":"cancelled"}` |
+| `TASK_ALREADY_ENDED` | 重新讀取，依③–⑤回應。重讀後仍不是終態屬異常，回 `503`、代碼 `TASK_ALREADY_ENDED` |
+| Store 錯誤 | 讀取、寫入、重讀失敗一律回 `503 store_unavailable`，代碼用 `store.CodeOf`（無代碼時為 `STORE_ERROR`）。先前確認存在的 task 在寫入或重讀時不見，回 `503`、代碼 `TASK_NOT_FOUND`（tasks 不會被刪除，這代表 Store 異常）。新增的兩個代碼集中定義在 `cancel.go`，不加入契約 reason code |
+| 鎖 | 從第一次讀取到回應都持有 `control.mu`，與「開始」相同。Store 呼叫不需要這把鎖，所以不會在持鎖時等待需要同一把鎖的程序。開始新場次只會配發新 task，碰不到這個 task。場次結束時，`runOne` 也在同一把鎖內清掉 `c.active` |
+| 回應內容 | 只有固定欄位（`state`、`already`、`error`、`end`、`status`、`code`），不帶 task 詳情、請購或事件 |
+| Store 語意 | 只呼叫既有的 `Store.Cancel`：到期的 Ask 先到期，其餘撤回，再寫 `TASK_CANCELLED`。不改 Policy、期限、Deny 保留規則或 schema，不新增資料表 |
+| 歷史與現況 | `host_runs` 和場次 view 不因取消而改寫：`interrupted` 仍是 `interrupted`，`store_end_error` 保留 |
+| `/host` 場次行 | 分成兩段：<br>① **當時**：`runText`，例如「程序已停止；當時取消紀錄寫入失敗（代碼）」「場次曾中斷（上一個 host 未正常結束）」「CLI 已逾時（已記錄）」。<br>② **目前**：`taskNow`，用 host 唯讀 token 讀 `GET /api/tasks`；`running`／`failed` 的 task 另讀 `GET /api/tasks/{id}`，判斷 Ask 是否到期或仍未決（每輪最多 5 筆，`ponytail:` 上限）。<br>不擴大 operator 的讀取權限；讀取失敗時顯示「讀取失敗，未確認」 |
+| 現況文字 | 「Ask 等待中；task 可由主持人取消」「Ask 已到期；task 仍可由主持人取消」「task 現已取消」「後續已成功取消 task」（當時的取消紀錄寫入失敗）「Deny：原因」「未決 Ask 仍依原到期機制處理」／「Ask 已依原到期機制到期」（CLI 逾時） |
+| 取消按鈕 | 「取消 task <ID>」只在場次不是 `running`／`stopping`，且 task 現況是 `awaiting_approval` 或 `running` 時出現。執行中的場次只有「停止」。按鈕只是提示，伺服器會重查 |
+| 送出期間 | 一次只能有一個取消，送出期間所有取消按鈕停用。不自動重送，不新增輪詢迴圈：task 讀取併入既有的 2 秒場次輪詢 |
+| 回覆的世代 | 回覆讀完後，憑證世代與 Dashboard 的 `viewKey()`（身分世代＋task）都要與按下時相同，才更新畫面。<br>清除全部、換檔、手動模式、`pagehide` 時，hostcreds 的世代檢查與 `host.js` 的檢查都會丟棄回覆。<br>切換 consumer 或 task 時，只顯示「回覆未套用（畫面已切換）；結果以最近場次的目前狀態為準」。<br>不登入、不開 task、不恢復舊憑證。清除憑證不撤銷伺服器已受理的取消 |
+| 200 之後 | 呼叫 `refreshNow()`（Dashboard 的清單與開著的 task 立即重讀），再用 host token 讀該 task。讀到 `cancelled` 時顯示「task X 已取消」；讀取失敗時顯示「取消已記錄；畫面更新失敗」，不宣稱取消失敗 |
+| 回覆遺失 | 顯示「結果尚未確認（沒有收到回覆）；請看最近場次的目前狀態，需要時再按一次（伺服器不會重複寫入）」 |
+| 拒絕的文字 | `not_found`、`run_active`（請用「停止」）、`already_ended`（原紀錄保留）、`not_eligible`（Deny 原因保留）、`store_unavailable`（附代碼）各有固定文字，都寫在 `#run-status`（可見文字，不只 `data-*`） |
+
+### 15.2 實際操作
+
+使用新的測試資料庫，不刪舊檔：
+
+```sh
+APA_DB_PATH=var/apa-demo-34-check.db make demo   # 新資料庫；印出 http://127.0.0.1:8402/host
+```
+
+1. 開啟 `/host`，按「載入本機 token 檔」，選 `var/demo-tokens.json`。
+2. 按「開始：主商品，Ask（等待核准）（consumer-a）」。頁面切到 consumer-a 並開啟新 task，商店顯示 Ask 等待。
+3. 「最近場次」該行顯示「場次完成；Ask 等待中；task 可由主持人取消」和「取消 task show-a-NN」按鈕。按下後顯示「task show-a-NN 已取消」，該行改為「task 現已取消」。
+4. Dashboard 的 Timeline 出現 `APPROVAL_WITHDRAWN`、`TASK_CANCELLED`，Inspector 的 task 狀態為 `cancelled`，商店顯示「Ask 已撤回（task 取消）：離店」。
+5. 不按取消、等 30 秒，Ask 會由到期規則記錄；之後該行顯示「Ask 已到期；task 仍可由主持人取消」。
+6. 執行中的場次只有「停止」；Deny 與 CLI 逾時的 task 沒有取消按鈕。
+
+本輪 Claude Code 沒有啟動 `make demo` 做人工操作。上列步驟對應的流程，由真實瀏覽器測試在新的拋棄式資料庫上執行（15.3）。
+
+### 15.3 指示第 6 節與測試對照（Claude Code 執行，待 Codex 獨立 review）
+
+| 指示 | 測試 |
+|---|---|
+| HTTP 1：權限矩陣與防護；被拒不寫事件 | `TestCancelAccessAndGuards`：無 token／錯誤 token 401；viewer、host 403；無 Origin、外站 Origin、別的 Host、表單 Content-Type、無 body、超過 1 KiB、未知欄位、兩個 JSON 值、陣列、格式錯誤、URL 中的 token 都被拒；task ID 格式錯誤 400。被拒後事件數不變，operator 的 200 只有 `state` |
+| HTTP 2：第 3 節每一列；期限前、恰好、之後 | `TestCancelRows`：<br>• 404（未儲存的 `show-a-20` 與任意 ID）；<br>• Ask 等待中取消，事件與 `cancel-pending` 案例一致，重複取消回 `already` 且不寫；<br>• Deny 409，原因保留；<br>• 第 29 秒取消：先撤回，再 `cancel-pending`；<br>• 恰好第 30 秒：先到期，再 `approval-deadline-exact`；<br>• 到期 worker 處理後（`running`）可取消，只有 EXPIRED、沒有 WITHDRAWN；<br>• 時鐘落後時寫入被拒，回 503 `CLOCK_REGRESSION`，不寫，恢復後可取消。<br>`TestCancelAfterCLITimeout`：逾時後 Ask 仍 pending（`cli-timeout-pending`），取消回 409 `already_ended`；Ask 之後照常到期，仍是 409，沒有 `TASK_CANCELLED` |
+| HTTP 3：並行只一個取消、每筆 Ask 收尾一次、重開一致 | `TestCancelConcurrent`：3 個 task 各 6 個並行取消，另加到期 worker，都在恰好期限時。每個 task 只有 1 個非 already 的 200、1 個 `TASK_CANCELLED`、1 個收尾事件；重啟後事件逐筆相同（JSON 比對） |
+| HTTP 4：執行中被拒；停止與取消交錯 | `TestCancelWhileRunning`：執行中 409 `run_active` 且不寫。停止與 8 個取消交錯時，答案只有 `409 run_active` 或 `200 already`。最後 1 個 `TASK_CANCELLED`、1 個撤回、1 個請購，`TASK_CANCELLED` 之後沒有任何事件 |
+| HTTP 5：讀取、重讀、寫入失敗不回成功 | `TestCancelStoreFaults`（未匯出的測試掛鉤 `cancelFault`，不是公開 API）：<br>• 讀取失敗 → 503 `STORE_ERROR`，不含錯誤文字；<br>• 讀取與寫入之間另一個寫入者已取消 → 依已提交狀態回 `already`，只有一個 `TASK_CANCELLED`；<br>• 另一個寫入者記了逾時 → 409 `already_ended`，沒有取消；<br>• 重讀失敗 → 503，不回 `state`；<br>• 重讀時 task 不見 → 503 `TASK_NOT_FOUND`。<br>寫入失敗見 HTTP 2 的時鐘案例 |
+| HTTP 6：正常關閉、異常終止後重啟 | `TestCancelAfterRestart`：<br>• 正常關閉時在跑的場次，重啟後為 ended、`TASK_CANCELLED`，取消回 `already`；<br>• 兩筆紀錄都寫入失敗 → 重啟後 interrupted，task 可取消；<br>• 有 run、沒有 task（只寫了 `host_runs`）→ interrupted，取消回 404；<br>• 沒有自動重跑（場次數不變） |
+| HTTP 7：補取消後歷史不變、重開通過恢復 | 同上：<br>• 取消前後 `GET /api/host/runs` 完全相同，`store_end_error` 仍是 `CLOCK_REGRESSION`，interrupted 仍是 interrupted；<br>• 關閉後 `store.VerifyFile` 通過，再開一次仍相同 |
+| Node | `web/test/hostcreds.test.mjs` 新增 4 項，共 34 項（含 adapter）：<br>• `cancelTask` 只送一次、回覆遺失不重送；<br>• 送出後清除全部或換檔，舊回覆丟棄、憑證不變（測試替身不理會 abort，所以驗的是世代檢查）；<br>• 401 只在自己的世代清除；<br>• `hostRead` 用 host token，同一世代規則 |
+| 瀏覽器 1：Ask 等待取消，四處一致 | 新開 Ask 後取消：可見文字「task show-a-05 已取消」、該行「task 現已取消」；Unity 回報同一 task 的 `withdrawn`；Timeline 有 `APPROVAL_WITHDRAWN`、`TASK_CANCELLED`；Inspector 有 `cancelled`、`withdrawn`；全頁沒有付款或交付成功字樣 |
+| 瀏覽器 2：到期後可取消；逾時與 Deny 被拒、原因不消失 | 種子資料庫（`TestSeedCancelDisplay`，經 host 自己的場次寫入）：<br>• 到期 Ask 的行顯示「Ask 已到期；task 仍可由主持人取消」，取消後事件為 EXPIRED → CANCELLED；<br>• 逾時與 Deny 的行沒有取消按鈕；<br>• 以 CDP 竄改 host 的 `/api/tasks` 回覆，讓按鈕出現：伺服器回 409，頁面顯示固定文字，事件數不變，下一輪恢復「Deny：INSUFFICIENT_BUDGET」與「CLI 已逾時（已記錄）」 |
+| 瀏覽器 3：中斷後與收尾失敗後補取消 | 重啟時標記 1 個 interrupted，沒有重跑：<br>• 中斷場次的行由「場次曾中斷…；Ask 已到期；task 仍可由主持人取消」變成「場次曾中斷（上一個 host 未正常結束）；task 現已取消」；<br>• 收尾失敗的行由「程序已停止；當時取消紀錄寫入失敗（CLOCK_REGRESSION）；…」變成「…；後續已成功取消 task」；<br>• 三次取消後，場次歷史 JSON 不變 |
+| 瀏覽器 4：已提交後扣住回覆，再切換或清除；區分世代與 abort | 在頁面包裝 `fetch`：取消的回覆在伺服器提交後才扣住 JSON，abort 結束不了它。分四種情況：<br>• 切換 task；<br>• 切換 consumer；<br>• 清除全部；<br>• 重新載入檔案。<br>放行後都沒有顯示舊結果，不開舊 task、不切回舊 consumer、不恢復憑證；伺服器的取消仍在，重新載入後由 Store 顯示「task 現已取消」 |
+| 瀏覽器 5：取消後讀取失敗、POST 回覆遺失 | • CDP 在回應階段讓取消回覆失敗：顯示「結果尚未確認」，不含「已取消」也不含「未取消」；伺服器只有一個 `TASK_CANCELLED`，頁面只送一次。<br>• CDP 讓 200 之後的 host 讀取失敗：顯示「取消已記錄；畫面更新失敗」 |
+| 瀏覽器 6：回放唯讀 | 取消後回放：沒有送出取消，事件數不變 |
+| 其他 | 執行中的場次只有「停止」；停止後為「已停止，取消已記錄」，沒有取消按鈕。storage、cookie、URL、console 都沒有 token |
+
+### 15.4 測試與證據（Claude Code 執行，待 Codex 獨立 review；全部在 `d61771c`）
+
+| 項目 | 命令 | exit | 時間 | 證據 |
+|---|---|---|---|---|
+| `make check` | `go vet`、`go test ./...`、`go build` | 0 | 58 秒 | `artifacts/b1-06/checks-d61771c86c67-20261006T050106Z/` |
+| `make check-contracts`（含 Node 34 項） | | 0 | 2 秒 | 同上 |
+| 相關套件 race | `go test -race -count=1 ./cmd/demo ./internal/store` | 0 | 181 秒 | 同上 |
+| 取消測試 race ×3 | `go test -race -count=1 -run TestCancel -v ./cmd/demo` | 0／0／0 | 59／59／57 秒 | 同上 |
+| Unity 建置 | 未重建；4 個檔案的 hash 與 `843ca4a` 證據相同 | — | — | 同上 `webgl-loaded.sha256` |
+| 真實瀏覽器 195 項（3.4 新增 38 項） | `node scripts/verify/browser-ui.mjs` | 0 | 290 秒 | `artifacts/b1-06/ui-d61771c86c67-20261006T050809Z/` |
+| 瀏覽器反向：拿掉 `viewKey()` 檢查 | 同上，工作區暫改後還原 | 1（預期） | 296 秒 | `artifacts/b1-06/reversal-d61771c86c67/` |
+| 完整斷網容器 | `sh scripts/verify/container-verify.sh d61771c…` | 0 | 906 秒 | `artifacts/verify-container/runs/d61771c86c67-20261006T052031Z/`（`artifacts/b1-06/container-d61771c.log`）：七步全過（check-contracts 27、check 112、race-cover 246、verify-b1-01 47、mutation 454 秒），adapter 11／11、hostcreds 23／23，245／245 突變，17 項隔離 ok；主機上沒有同時執行瀏覽器或 Unity |
+
+**突變**：新增 7 項（共 245），本機逐項確認都以斷言失敗被抓到（`--- FAIL`），不是編譯失敗：
+- host token 可取消；
+- 拿掉 `run_active` 檢查；
+- 重複取消不再依已存的 `TASK_CANCELLED` 回答；
+- Deny 被取消；
+- 寫入被拒卻回 200；
+- `TASK_ALREADY_ENDED` 直接當成已取消；
+- 重讀失敗卻回已取消。
+
+**瀏覽器反向**：`current()` 只留憑證世代、拿掉 `viewKey()` 後，「切換 task」「切換 consumer」兩項以斷言失敗：舊回覆顯示「task show-a-08 已取消」「task show-a-09 已取消」。清除全部與換檔兩項仍通過，因為由世代檢查擋下，與 Node 測試涵蓋的層相同。
+
+同一次反向另有一項既有檢查失敗：「R2: the backend added an event during the replay」（`as_of_sequence 4 -> 4`）。原因與 `host.js` 無關：
+- 它屬於交付點 2 的 `/` 頁段落，就緒條件依時間而定（等到期限前 1 秒、再等一次輪詢）。
+- 這次到期在回放開始前就已寫入，所以起點已是 4。
+- 本輪提交後的完整執行中，它通過。
+- 記錄為既有檢查的時間敏感問題，本輪不修（不在 3.4 範圍）。
+
+### 15.5 失敗嘗試（保留）
+
+- **測試錯誤**：
+  - 第一版 `TestCancelConcurrent` 用 `fmt.Sprint` 比對事件。事件含 `Decision` 指標，位址不同，誤判為不一致；改為 JSON 比對。
+  - `fmt.Sprint` 的空白規則讓「停止與取消交錯」的答案字串不如預期；改用 `Sprintf`。
+  - `TestCancelAfterRestart` 第一版連開兩個 hang，第二個必然 409；已移除。
+- **命名衝突**：
+  - `cancel.go` 的 `ended` 與測試輔助函式 `ended` 同名，改為 `answerEnded`。
+  - 瀏覽器段落的 `release` 與既有變數同名，改為 `releaseCancel`。
+- **容器第一次執行**：12 秒即失敗，訊息為 `No such image: apa-verify:b1-05`（`artifacts/b1-06/container-d61771c-attempt1-no-image.log`）。
+  - 當時是背景執行，使用預設 Docker context（另一個 daemon）；前景用 Docker Desktop context 時，映像存在。
+  - 第二次明確設定 `DOCKER_CONTEXT=desktop-linux`，映像與限制不變。第一次留下的空目錄 `artifacts/verify-container/runs/d61771c86c67-20261006T051933Z/` 保留，不是通過紀錄。
+- **反向中的既有時間敏感檢查**：見 15.4。
+
+### 15.6 未做與未測
+
+- 3.5（整體操作驗收）。
+- 只用 Chrome。
+- **CLI 逾時後 Ask 仍未決的畫面文字**：「未決 Ask 仍依原到期機制處理」只在 Go 測試驗證伺服器行為。瀏覽器的種子資料庫為了讓到期確定，時鐘提前 10 分鐘，所以畫面上看到的是「Ask 已依原到期機制到期」。
+- **確認對話框**：取消前沒有對話框。按鈕文字含 task ID，伺服器重查；如需對話框，請 review 指示。
+- **人工操作**：本輪沒有以 `make demo` 人工操作。
+- **既有展示資料庫**：沒有被操作或升級。
+- **其他**：沒有執行真實 CLI、付款、testnet、Signer。
