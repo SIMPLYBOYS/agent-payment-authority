@@ -828,20 +828,58 @@ try {
 
   // A failed list read does not fail the sign-in: the list has its own
   // state, manual task IDs stay open, and the next refresh recovers.
-  let failLists = 0;
+  // Assertions read the text a viewer sees (innerText of a shown element).
+  const seen = (sel) => `(${visible(sel)} ? document.querySelector(${JSON.stringify(sel)}).innerText.trim() : "")`;
+  let failLists = 0, failHow = "503";
   const offFail = b.on("Fetch.requestPaused", (p) => {
-    if (failLists > 0 && p.request.url.endsWith("/api/tasks")) { failLists--; b.send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 503, body: Buffer.from("{}").toString("base64") }).catch(() => {}); return; }
+    if (failLists > 0 && p.request.url.endsWith("/api/tasks")) {
+      failLists--;
+      const done = failHow === "503"
+        ? b.send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 503, body: Buffer.from("{}").toString("base64") })
+        : b.send("Fetch.failRequest", { requestId: p.requestId, errorReason: "InternetDisconnected" });
+      done.catch(() => {});
+      return;
+    }
     b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {});
   });
   await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/tasks", requestStage: "Request" }] });
+  const noteBefore = await b.evaluate(seen("#list-note"));
   await b.evaluate(`document.getElementById("switch").click()`);
+  check("3.3 note: a switch clears the list note", noteBefore.startsWith("清單更新於 ") && (await b.evaluate(`document.getElementById("list-note").textContent === ""`)), noteBefore);
   failLists = 1;
   await signIn(b, ct.a);
   check("3.3 fallback: the viewer is signed in although the list failed", await b.waitFor(`${text("#viewer")}.startsWith("consumer-a")`, 10000)
-    && (await b.evaluate(`document.getElementById("task-pick").dataset.state === "error" && ${text("#status")}.includes("清單讀取失敗")`)), await b.evaluate(text("#status")));
+    && (await b.evaluate(`document.getElementById("task-pick").dataset.state === "error"`)), await b.evaluate(text("#status")));
+  check("3.3 fallback: a visible note says no list yet (not 尚無 task)", await b.evaluate(`${seen("#list-note")} === "清單尚未取得，可手動輸入 task ID" && !document.getElementById("task-pick").innerText.includes("尚無 task") && ${seen("#status")}.includes("清單尚未取得")`), await b.evaluate(seen("#list-note")));
   await b.evaluate(`document.getElementById("task-id").value = "show-a-01"; document.querySelector("#task-form button[type=submit]").click()`);
   check("3.3 fallback: a task ID typed by hand still opens", await b.waitFor(`document.getElementById("status").dataset.kind === "ok" && ${text("#inspector")}.includes("show-a-01")`, 15000));
   check("3.3 fallback: the next refresh loads the list", await b.waitFor(`document.getElementById("task-pick").dataset.state === "ok" && document.querySelectorAll("#task-pick button").length > 0`, 12000));
+  check("3.3 fallback: the recovered list shows its update time", await b.waitFor(`/^清單更新於 \\d{2}:\\d{2}:\\d{2}$/.test(${seen("#list-note")})`, 5000), await b.evaluate(seen("#list-note")));
+
+  // Review of 0818db8 (R1): after a good, non-empty list, a later failed
+  // update (503, then a dropped connection) is visible as text, with the
+  // time of the data still shown; the next good read clears it. The open
+  // task's status and Inspector are left alone.
+  for (const how of ["503", "disconnect"]) {
+    const good = await b.evaluate(seen("#list-note"));
+    const at = good.replace("清單更新於 ", "");
+    const shownIds = await listIds();
+    // The task's own polling keeps running: its Store time may move, the rest may not.
+    const steady = (sel) => b.evaluate(seen(sel)).then((t) => t.replace(/\d{4}-\d\d-\d\dT[\d:.]+Z/g, "<time>"));
+    const statusBefore = await steady("#status"), inspBefore = await steady("#inspector");
+    failHow = how === "503" ? "503" : "net";
+    failLists = 1;
+    await b.evaluate(wake);
+    check(`3.3 R1 ${how}: a later failed update is visible, with the shown data's time`,
+      await b.waitFor(`${seen("#list-note")} === ${JSON.stringify("更新失敗，以下為上次成功資料（" + at + "）")}`, 10000), await b.evaluate(seen("#list-note")));
+    check(`3.3 R1 ${how}: the last good list stays visible`, JSON.stringify(await listIds()) === JSON.stringify(shownIds) && shownIds.length > 0
+      && (await b.evaluate(`${seen("#task-pick")}.includes(${JSON.stringify(shownIds[0])})`)), (await listIds()).join());
+    check(`3.3 R1 ${how}: the open task's status and Inspector are untouched`,
+      (await steady("#status")) === statusBefore && (await steady("#inspector")) === inspBefore && statusBefore.includes("show-a-01"), statusBefore);
+    await b.evaluate(wake);
+    check(`3.3 R1 ${how}: the next good read clears the error and shows a new time`,
+      await b.waitFor(`/^清單更新於 \\d{2}:\\d{2}:\\d{2}$/.test(${seen("#list-note")}) && document.getElementById("task-pick").dataset.state === "ok"`, 10000), await b.evaluate(seen("#list-note")));
+  }
   await b.send("Fetch.disable");
   offFail();
 

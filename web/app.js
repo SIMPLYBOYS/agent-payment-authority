@@ -40,6 +40,7 @@ const expanded = new Set(); // event_ids whose JSON the viewer opened (R3)
 const LIST_MS = 5000;   // the task list is read again every 5 s (section 14)
 let idGen = 0;          // bumped whenever the viewer identity goes: an old list reply is dropped
 let listSeq = 0;        // bumped by every list request: only the latest one of this identity acts
+let listAt = "";        // local time of this identity's last good list read; "" before one
 let listTimer = null;
 let listAbort = null;
 const rendered = [];    // waiting for Unity's report of (gen, seq)
@@ -143,6 +144,8 @@ export function forget(message) {
   $("viewer").textContent = "未驗證";
   $("task-pick").replaceChildren();
   delete $("task-pick").dataset.state;
+  listAt = "";
+  listNote("", "");
   $("task-form").hidden = true;
   $("replay").disabled = true;
   draw();
@@ -181,6 +184,7 @@ export async function useViewer(typed) {
     if (gen !== state.gen) return; // the body came after a switch, a clear or pagehide: shows nothing
     state.consumer = v.consumer_id;
     $("task-pick").dataset.state = "loading";
+    listNote("清單讀取中…", "");
     // The viewer is verified: signed in. The list has its own state; its
     // first read is tried before the sign-in is reported, and a failure
     // leaves manual task IDs open while the timer tries again.
@@ -188,7 +192,7 @@ export async function useViewer(typed) {
     if (gen !== state.gen) return;
     $("viewer").textContent = v.consumer_id + "（demo viewer，不是使用者登入）";
     $("task-form").hidden = false;
-    setStatus(listed ? "請選擇或輸入 task" : "task 清單讀取失敗；可直接輸入 task ID", listed ? "idle" : "warn");
+    setStatus(listed ? "請選擇或輸入 task" : "清單尚未取得，可手動輸入 task ID", listed ? "idle" : "warn");
     return true; // signed in as v.consumer_id, in this generation
   } catch {
     if (gen === state.gen) forget("無法連線到 demo host");
@@ -233,22 +237,30 @@ async function refreshList() {
   return ok;
 }
 
-// listFailed marks the list as not loaded (its own state, apart from the
-// sign-in); the shown buttons stay, the next refresh tries again.
+// The list's own visible note (#list-note), apart from #status, the
+// Inspector and replay: it never touches them.
+function listNote(text, kind) {
+  const n = $("list-note");
+  n.textContent = text;
+  if (kind) n.dataset.kind = kind; else delete n.dataset.kind;
+}
+
+// listFailed marks the list as not loaded; the next refresh tries again.
+// After a good read the shown list stays, marked with that read's time;
+// before one there is no list, and task IDs can still be typed.
 function listFailed() {
   const pick = $("task-pick");
   pick.dataset.state = "error";
-  if (!pick.querySelector("button")) {
-    const note = document.createElement("span");
-    note.className = "empty";
-    note.textContent = "task 清單讀取失敗；可直接輸入 task ID";
-    pick.replaceChildren(note);
-  }
+  if (listAt) return listNote("更新失敗，以下為上次成功資料（" + listAt + "）", "warn");
+  pick.replaceChildren();
+  listNote("清單尚未取得，可手動輸入 task ID", "warn");
 }
 
 function renderList(tasks) {
   const pick = $("task-pick");
   pick.dataset.state = "ok";
+  listAt = new Date().toTimeString().slice(0, 8); // local HH:MM:SS
+  listNote("清單更新於 " + listAt, "");
   if (tasks.length === 0) {
     const none = document.createElement("span");
     none.className = "empty";
