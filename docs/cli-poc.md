@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 §39.3 變數名稱修正（Claude Code 執行最小分支測試，待 Codex review）**：三處緊接全形字元的變數改為 `${BR}`、`${PROBE_EXIT}`（兩處）。最小分支測試不含 CLI、建置或刪除命令，涵蓋正常回報、前置拒絕與證據保存失敗；在 bash 3.2、四種 locale 下 16／16 PASS（第 39.15 節）。版本釘選未改，C0′ 未重跑。
+>
 > **10/8 診斷型 C0′ 第二次核准執行（Claude Code 執行，待 Codex review）**：Aaron 核准一次；前置步驟 1～5 全部通過（基準 `9fcd105`，`vcs.modified=false`）。**apa-buyer 的版本檢查拒絕**：`/Users/mac/.local/bin/claude` 回報的版本不是核准的 `2.1.289 (Claude Code)`。probe 會話沒有啟動、沒有送出訊息、沒有 trace，plugins／agents 仍未知。另發現 §39.3 腳本最後一行在 bash 3.2 下觸發 `unbound variable`，腳本以 1 結束；證據已保存（第 39.14 節）。依核准不重試、不更新 CLI。
 >
 > **10/8 診斷型 C0′ 執行（Claude Code 執行，待 Codex review）**：依 Aaron 核准執行一次 §39.3 腳本，**在前置檢查第 5 步停止（exit 2），probe 未啟動**：建置出的二進位讀不到 `vcs.revision`／`vcs.modified`（兩者皆空）。沒有啟動 probe 會話、沒有送出訊息、沒有 trace；plugins／agents **未取得觀測，仍是未知**。依核准不重試（第 39.11 節）。
@@ -1206,7 +1208,7 @@ die() {
 # 1. 工作目錄與分支
 cd "$REPO" || die "無法進入 $REPO"
 BR=$(git branch --show-current) || die "git branch 失敗"
-[ "$BR" = b1-04-live ] || die "分支是「$BR」，不是 b1-04-live"
+[ "$BR" = b1-04-live ] || die "分支是「${BR}」，不是 b1-04-live"
 
 # 2. 工作區：只容許未追蹤的 demo（或完全乾淨）
 ST=$(git status --porcelain --untracked-files=all) || die "git status 失敗"
@@ -1257,10 +1259,10 @@ echo "exit=$PROBE_EXIT" > "$EV/exit-code.txt" || SAVED=
 date -u +%FT%TZ > "$EV/ended-utc.txt" || SAVED=
 rm -rf "$WT" || echo "暫存目錄未能移除：$WT" >&2   # 清理照常嘗試
 if [ -z "$SAVED" ]; then
-  echo "執行已嘗試，證據不完整：probe exit=$PROBE_EXIT；exit-code.txt 或 ended-utc.txt 未能寫入；目錄：$EV" >&2
+  echo "執行已嘗試，證據不完整：probe exit=${PROBE_EXIT}；exit-code.txt 或 ended-utc.txt 未能寫入；目錄：$EV" >&2
   exit 5
 fi
-echo "probe exit=$PROBE_EXIT；證據：$EV"
+echo "probe exit=${PROBE_EXIT}；證據：${EV}"
 exit "$PROBE_EXIT"
 ```
 
@@ -1510,3 +1512,40 @@ Codex 以文件與原始碼靜態核對 `ff094f5`，接受前置工作區、程�
 3. 任何新的診斷型 C0′ 嘗試，須 Aaron 另行核准。
 
 本輪沒有修改 Gate、認證接受清單、啟動參數或產品程式；L1-b 不標完成；B1-04 仍 InProgress。
+
+### 39.15 §39.3 變數名稱修正與最小分支測試（2026-10-08；待 Codex review）
+
+> 第 39.14 節的失敗紀錄保留不變。本節只修正腳本文字並做最小分支測試；**沒有執行完整診斷腳本、CLI、建置或 C0′，也沒有修改版本釘選。**
+
+- **證據歸屬（分開寫）**：
+  - 第 39.14 節的真實執行：Claude Code 執行，Codex 核對紀錄。
+  - `unbound variable` 的 bash 最小重現：Codex 獨立執行。
+  - 本節的修正與分支測試（含對舊文字的對照）：Claude Code 執行，待 Codex review。
+- **CLI 版本**：Aaron 表示目前的 Claude CLI 版本應為 `2.1.291`。這與第 39.14 節「回報版本不是 `2.1.289`」一致。apa-buyer 不輸出實際版本字串，本輪也沒有查詢，所以只記錄為 Aaron 的說明。釘選（`approvedCLIVersion`）沒有修改。
+- **修正**（§39.3 bash 區塊，只改這三處）：
+  - `die "分支是「$BR」…"` → `"分支是「${BR}」…"`
+  - 證據不完整分支 `probe exit=$PROBE_EXIT；…` → `probe exit=${PROBE_EXIT}；…`
+  - 最後一行 `echo "probe exit=$PROBE_EXIT；證據：$EV"` → `echo "probe exit=${PROBE_EXIT}；證據：${EV}"`
+  - 修正後，區塊中已沒有「`$名稱` 緊接非 ASCII 字元」的寫法（以 `grep '\$[A-Za-z_][A-Za-z0-9_]*[^ -~]'` 核對，無結果）。
+- **最小分支測試**：
+  - 測試從 `docs/cli-poc.md` 的 bash 區塊原樣取出 `die()`、步驟 1 的分支判斷行、步驟 7（`SAVED=1` 到 `exit`）。在 `/bin/bash`（GNU bash 3.2.57）中以 `set -u` 執行。
+  - 不含 CLI、建置；`rm` 以只記錄參數的 shell 函式替代，所以不刪除任何檔案。probe 退出碼以 `( exit N )` 模擬。
+  - 四個案例各在 locale 未指定（沿用環境）、`C`、`en_US.UTF-8`、`zh_TW.UTF-8` 下執行：
+    - 正常回報，probe 為 0：exit `0`，`exit-code.txt` 為 `exit=0`
+    - 正常回報，probe 為 4：exit `4`，`exit-code.txt` 為 `exit=4`
+    - 前置拒絕（分支為 `main`）：exit `2`；`precheck-stop.txt` 以「分支是「main」」開頭；`die` 之後的行沒有執行
+    - 證據保存失敗（證據目錄不存在）：exit `5`；訊息含 `probe exit=3；exit-code.txt`
+  - 判定條件：退出碼符合、訊息正確、沒有 `unbound`。
+  - **結果**：修正後的文字 16／16 PASS。對照組是 `d124d8e` 的舊文字：`C` locale 下 4 個 PASS，其他三種 locale 下 12 個 FAIL（`PROBE_EXIT�`／`BR�: unbound variable`，以 `bash -c` 執行時 exit `127`）。這與第 39.14 節的現象一致：真實執行是以檔案執行，exit 為 `1`。
+- **證據**（`artifacts/b1-04/script-branch-check-20261007T182433Z/`，`artifacts/` 不進版控）：
+  - `branch-check.py`（測試本體）
+  - `branch-check-fixed.txt`、`branch-check-old.txt`（兩次輸出）
+  - `doc-base.txt`（`d124d8e`，修正前的 HEAD）
+  - `doc-under-test.sha256`（測試當下的 `docs/cli-poc.md`；之後只在檔尾與開頭追加紀錄，bash 區塊沒有再改）
+
+**待決定**：
+1. Codex review 本節修正與測試。
+2. CLI 版本：改回 `2.1.289`，或評估 `2.1.291` 並修改釘選（程式變更，須設計與 review）。
+3. 任何新的診斷型 C0′ 嘗試，須 Aaron 另行核准。
+
+本輪沒有修改 Gate、認證接受清單、啟動參數、版本釘選或產品程式；L1-b 不標完成；B1-04 仍 InProgress。
