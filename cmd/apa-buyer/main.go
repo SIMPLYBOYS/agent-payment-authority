@@ -89,10 +89,11 @@ func (e exitCode) Error() string { return fmt.Sprintf("exit status %d", int(e)) 
 func wallClock() uint64 { return uint64(time.Now().Unix()) }
 
 // approvedCLIVersion is the `claude --version` output a live run requires
-// (2.1.287 recorded 2026-10-02; Aaron re-approved 2.1.288 on 2026-10-03
-// and 2.1.289 on 2026-10-04, each after a local update). Another version
-// stops the run; nothing upgrades.
-const approvedCLIVersion = "2.1.289 (Claude Code)"
+// (2.1.287 recorded 2026-10-02; Aaron re-approved 2.1.288 on 2026-10-03,
+// 2.1.289 on 2026-10-04 and 2.1.293 on 2026-10-08, each after a local
+// update; 2.1.293 is the version Aaron gave, not one this repo queried).
+// Another version stops the run; nothing upgrades.
+const approvedCLIVersion = "2.1.293 (Claude Code)"
 
 // liveAcceptAuth is the apiKeySource values a live init may state. Empty:
 // no documented value proves a subscription login, so every live init
