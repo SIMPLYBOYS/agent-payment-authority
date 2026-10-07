@@ -641,7 +641,7 @@ D1 的實作核准不需等 D2–D6 全部定案。本輪只補文件，沒有�
   - 獨立 CDP 探測（載入檔案、切換、開 task、手動 viewer、Fetch 攔截、截圖尺寸切換、開著 task 觀察 60 秒）都沒有重現；
   - 沒有 JS 例外，Chrome 記錄沒有 GPU 崩潰，螢幕沒有休眠；
   - 視窗狀態是 normal；`Page.bringToFront`、捲動、改尺寸、隱藏卡片，都不能讓它恢復 visible。
-- **判斷**：觸發與卡片的呈現有關，但頁面程式無法設定 `visibilityState`。根因在 Chrome 端，推測與 macOS 上 headless 視窗的遮蔽或背景化判斷有關，**未證實**。
+- **判斷**：觸發與卡片的呈現有關，但頁面程式無法設定 `visibilityState`。**根因未確認**（推測與 macOS 上 headless Chrome 的遮蔽或背景化判斷有關，未證實；依 Codex 對 `7ffc45d` 的 review C1 修正用語）。
 - **處置**：
   - Chrome 啟動參數加上 `--disable-backgrounding-occluded-windows`、`--disable-renderer-backgrounding`。這是 Puppeteer、Playwright 的預設自動化參數。之後既有 255 項全部通過。
   - 頁面在 hidden 時的行為（暫停輪詢、恢復時立即輪詢），仍由既有以 `visibilitychange` 與 hidden 覆寫驗證的檢查涵蓋。
@@ -663,3 +663,51 @@ D1 的實作核准不需等 D2–D6 全部定案。本輪只補文件，沒有�
 - 查證面板沒有「當步版」（§7.2 的最小方案）。
 - 卡片不以 Unity 點選觸發（D3）。
 - 只用 Chrome。人工操作未做。
+
+### 15.6 review 後修正 R1、R2、C1（Claude Code 執行，待 Codex 獨立 review；程式與測試 `6338fd2`）
+
+依據：Codex 對 `7ffc45d` 的 review，由 Aaron 轉交。轉交內容從 R1 的中段開始，R1 前段缺漏，本輪依可見的要求修正：
+- 不符時明示尚未一致，不能當成同步完成；
+- 補錯 task、錯 phase、舊序號與完全一致的測試；
+- 請購關聯維持網頁推導，不改 bridge。
+
+**R1：場景對應的「同步」必須完全一致**（`web/adapter.js` 的 `evidence()`）
+- 原本只比較世代與序號。現在 Unity 回報與送出投影的世代、task、序號、phase 全部相同，才顯示「Unity 已呈現 …」。
+- 任何不同時，顯示「Unity 尚未一致：<原因>（不是同步完成）」。原因包括世代不同、task 不同、序號較舊、序號不同、phase 不同。沒有回報時顯示「Unity 尚未回報：尚未一致」。
+- 請購關聯仍標「網頁推導」，bridge 不變。
+- Node 新增一組案例：完全一致、錯 task、錯 phase、舊序號、錯世代、無回報、請購關聯仍為網頁推導。原有回放案例的期望值改為「尚未一致」。
+
+**R2：收合最近場次後，錯誤仍看得見**（`web/host.js`）
+- 「最近場次」的收合摘要與頂端警示分成兩類：
+  - 歷史：「歷史：N 場中斷或紀錄寫入失敗」，警示為「場次歷史：…」。
+  - 目前：場次清單讀取失敗（顯示上次資料）、task 狀態讀取失敗（未確認）、N 場的 Ask 狀態未確認。警示為「最近場次目前：…」，錯誤色。
+- 原本場次清單讀取失敗時，錯誤被丟棄；現在會記錄。
+- 換世代（清除、換檔、手動模式、pagehide）時清空，恢復讀取後重新計算，不殘留。
+
+**C1：持續 hidden 與不帶新參數的 Chrome**
+- **持續 hidden → visible 檢查**（3.5 段落）：
+  - 以測試覆寫 `document.hidden` 為 true 並維持 7 秒：task 輪詢次數、`/api/host/status` 讀取次數、`/api/host/runs` 讀取次數都不增加；這段期間伺服器新開的一場也還沒出現。
+  - 恢復 visible 後 3 秒內，三者都立即讀取；新場次出現在最近場次，就緒的「檢查時間」更新。
+  - 這驗證的是頁面對 hidden 與 visible 的反應，不是瀏覽器自己的可見性判斷。
+- **不帶兩個新參數的 Chrome smoke**（`node scripts/verify/browser-ui.mjs --smoke-plain`）：
+  - 流程：新資料庫、`/host`、載入 token 檔、開一場 Ask、卡片與 Unity 與 Timeline 一致、觀察 20 秒、回放一次。
+  - 結果：PASS。開發中 47 秒；在 `6338fd2` 上 43 秒（`artifacts/b1-06/smoke-plain-6338fd214467-20261007T031110Z/`）。可見性取樣全部 visible，20 秒內約每秒輪詢一次。
+  - 限制：這是短流程。原本的 hidden 只在長流程的 3.1 段落後出現，**沒有在不帶參數的 Chrome 重跑長流程**。一般瀏覽器在長時間操作下的行為，仍未驗證。
+
+**證據**（Claude Code 執行，待 Codex 獨立 review；全部在 `6338fd2`；Go、Unity、bridge 未改，`cmd/`、`internal/`、`unity/`、`testdata/` 自 `7ffc45d` 起 0 變動）：
+
+| 項目 | 命令 | exit | 時間 | 證據 |
+|---|---|---|---|---|
+| Node 41 項（新增 1 組 R1 案例）、契約檢查、語法 | `make check-contracts`；`node --check` | 0 | 4 秒 | `artifacts/b1-06/checks-6338fd214467-20261007T030345Z/` |
+| R1 反向（Node） | `same` 改回只比較世代與序號 | 1（預期：新的 R1 案例失敗，其餘通過） | 1 秒內 | 同上 `r1-node-reversal.log`（提交前工作區，`adapter.js` 其餘相同） |
+| 真實瀏覽器 289 項（新增 9 項：R2 5、C1 4） | `node scripts/verify/browser-ui.mjs` | 0 | 427 秒 | `artifacts/b1-06/ui-6338fd214467-20261007T030403Z/` |
+| 不帶兩個新參數的 Chrome smoke | `node scripts/verify/browser-ui.mjs --smoke-plain` | 0 | 43 秒 | `artifacts/b1-06/smoke-plain-6338fd214467-20261007T031110Z/` |
+| R2、C1 反向（瀏覽器） | `host.js` 拿掉場次警示與摘要分類、輪詢在 hidden 時仍讀場次清單 | 1（預期，283 PASS／6 FAIL） | — | `artifacts/b1-06/reversal-6338fd214467/` |
+
+- 瀏覽器反向的 6 項失敗：R2 的收合歷史、目前讀取失敗、恢復、重新載入檔案後歷史回來，共 4 項；C1 的「7 秒 hidden 不讀取」與「hidden 期間新場次尚未顯示」，共 2 項。後者在 hidden 時仍讀了 3 次場次清單。
+- 「清除全部後不殘留」在反向下仍通過，因為反向版本本來就沒有警示。
+- 開發中另有兩次完整執行，都是 289 PASS／0 FAIL（443、439 秒），在提交前的工作區執行，不作為證據。
+- 依 review 指示，沒有跑完整容器、247 項突變，也沒有重建 Unity。
+
+**更正一則過程中的誤判**：其中一次完整執行，我一度以為中途中斷。原因是在不同的暫存目錄讀到舊的輸出檔。實際上那次已正常完成（289／0），沒有任何執行被丟棄或重跑來湊結果。
+
