@@ -1039,3 +1039,46 @@ echo "exit=$?"
 - **範圍**：只證明固定環境變數的傳遞與 fake 回歸，**不證明真實 CLI 的 agents 已清空**（那是 L1-c）。init 閘門、認證接受清單、plugin 參數都未變。
 - **下一步**：L1-b（plugin 來源釐清）仍需 Aaron 另行核准。B1-04 仍 InProgress；未標 Done、未合併 main。
 
+## 37 L1-b 資料釐清：受管設定檔讀取結果（2026-10-08；Claude Code 執行，待 Codex review）
+
+- **依據**：Aaron 10/8 核准 L1-b 的資料釐清部分：只讀第 32.5 節第 4 點核准的 plugin 相關鍵名與值，不輸出整份設定或憑證；資料不足時列為未確認，不擴大讀取。
+- **讀取範圍**（以只輸出核准欄位的腳本執行，`python3 -I`）：
+  - `/Library/Application Support/ClaudeCode/managed-settings.json`：`enabledPlugins` 的鍵名與值、`syncClaudeAiPlugins`、`strictPluginOnlyCustomization`、`agents` 相關鍵是否存在；
+  - `/Library/Application Support/ClaudeCode/managed-settings.d/`：檔名與每個檔案的相同欄位。
+  - **未讀**：第 32.5 節第 4 點的第三項 macOS 設定描述檔 `com.anthropic.claudecode`（該項明載「是否查看、用什麼方式查看，由 Aaron 決定」，本次核准沒有包含）；也沒有讀 HOME、`~/.claude`、keychain 或其他設定。
+- **結果**：兩個路徑都**不存在**。對這兩個確切路徑做 `stat`，在沙箱內外都得到 `FileNotFoundError`（errno 2），不是權限問題。沒有列出該目錄的其他內容。
+
+### 37.1 兩個 plugins 的來源：**未確認**
+
+- **可以排除的**：檔案型受管設定（上述兩個路徑不存在），所以 plugins 不是來自這兩個檔案的 `enabledPlugins`。
+- **與既有紀錄的落差**：第 32.3 節記錄 Aaron 表示「受管設定：有」。若屬實，來源只能是本次沒有讀的管道，例如 macOS 設定描述檔；依官方文件也可能有其他受管設定的提供方式（本次未查證，不列為依據）。
+- **仍未排除的來源**（依第 32.2、32.3 節的文件整理，都未確認）：
+  - macOS 設定描述檔（未讀）；
+  - `~/.claude/skills/` 下帶 manifest 的 skills-dir plugin（`--restricted` 是否影響它，文件未說明）；
+  - 其他文件列出的來源：依文件，`--restricted` 不讀 user／project／local 設定，固定的 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 使 synced plugins 不載入，工作目錄是空的暫存目錄、未傳 `CLAUDE_CODE_PLUGIN_DIRS`——這些是依文件推論的排除，未在 2.1.289 實際驗證。
+- **能確認身分的方式**（都需另行核准，本次未做）：
+  1. Aaron 決定是否查看 macOS 設定描述檔、用什麼方式；
+  2. Aaron 提供只含名稱的 plugin 摘要；
+  3. L1-c 的一次 C0′ 觀測：第 32.6 節的身分投影會給出每個 plugin 的名稱長度與路徑分類（synced／cache／其他 plugins 目錄／skills／工作目錄／其他），可以區分 skills-dir 與 plugins 目錄，但仍不是來源認證；名稱沒有候選依據時只顯示 `other`。
+
+### 37.2 是否有只影響 demo 該次啟動的停用方式
+
+依第 32.2 節的官方文件（10/4 查證；本次沒有重新查證，也沒有在 2.1.289 實測）：
+
+| 方式 | 只影響該次啟動 | 能否用於本專案 |
+|---|---|---|
+| `--settings '{"enabledPlugins":{"<id>":false}}'`（flag 來源） | 是 | **要先知道 plugin id**；若該 plugin 由受管設定強制啟用（`true`），flag 來源不能覆寫 |
+| `--safe-mode` | 是 | 不載入 plugins、MCP servers、custom agents；是否也停用 `--mcp-config` 指定的 apa bridge **未確認**，若停用則 demo 無法運作 |
+| `--bare` | 是 | 需要 `ANTHROPIC_API_KEY` 或 `apiKeyHelper`，不讀 OAuth 或 keychain，**不能用本人訂閱登入** |
+| `--setting-sources` 不含 `user` | 是 | 只影響 synced plugins；固定的非必要流量變數依文件已使其不載入 |
+
+**結論**：有文件依據、只影響該次啟動、又保留 MCP 的方式只有 `--settings` 的 flag 來源，但它需要 plugin id，且對受管設定強制啟用的 plugin 無效。目前 id 與來源都未確認，所以**還不能決定 L1-b 的實作內容**；本次也沒有加任何參數。
+
+### 37.3 下一步（待 Aaron 決定，均未開始）
+
+- 是否查看 macOS 設定描述檔（以及方式），或由 Aaron 提供 plugin 名稱摘要；
+- 或者跳到 L1-c，以一次 C0′ 觀測取得名稱長度與路徑分類（需執行核准）；
+- 取得 id 後，若可在 session 層停用，再另開 L1-b 的實作與 fake 驗證停止點。
+
+本次沒有修改設定、程式、plugin 參數或認證接受清單；沒有執行真實 CLI、登入檢查或 C0′。B1-04 仍 InProgress。
+
