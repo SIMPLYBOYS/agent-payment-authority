@@ -20,11 +20,13 @@ import (
 
 // pluginScript is a CLI that writes what it sees of its plugin root to out:
 // the value, how many times the variable is set, the mode and the entry count.
+// The mode comes from ls -ld, which reads the same on macOS and Linux; stat's
+// flags differ between the two (the 086f640 container run failed on that).
 func pluginScript(t *testing.T, out string) string {
 	t.Helper()
 	cli := script(t, `d="${`+EnvPluginRoot+`-unset}"
 n=$(env | grep -c '^`+EnvPluginRoot+`=')
-m=$(stat -f %Lp "$d" 2>/dev/null || stat -c %a "$d" 2>/dev/null)
+m=$(ls -ld "$d" 2>/dev/null | cut -c1-10)
 c=$(ls -A "$d" 2>/dev/null | wc -l | tr -d ' ')
 printf '%s|%s|%s|%s\n' "$d" "$n" "$m" "$c" > '`+out+`'`)
 	// Ready first, as in TestCLIEnvReachesChild: a new script can take
@@ -62,8 +64,8 @@ func checkSeen(t *testing.T, out, runPrefix, home, elsewhere string) string {
 		t.Fatalf("seen %q", raw)
 	}
 	d := f[0]
-	if f[1] != "1" || f[2] != "700" || f[3] != "0" {
-		t.Errorf("root %s: set %s times, mode %s, %s entries; want once, 700, empty", d, f[1], f[2], f[3])
+	if f[1] != "1" || f[2] != "drwx------" || f[3] != "0" {
+		t.Errorf("root %s: set %s times, mode %s, %s entries; want once, drwx------, empty", d, f[1], f[2], f[3])
 	}
 	if filepath.Base(d) != "plugins" || !strings.HasPrefix(filepath.Base(filepath.Dir(d)), runPrefix) ||
 		d == elsewhere || strings.HasPrefix(d, home) {
