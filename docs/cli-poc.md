@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **10/7 L1-a**：分支 `b1-04-live` 以固定環境變數 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` 停用內建 agents，只有 fake 驗證（`79a4a5f`、測試修正 `418f0de`；第 35 節），Claude Code 執行，待 Codex review；未執行真實 CLI，閘門與認證接受清單未變。
+> **10/7 L1-a**：分支 `b1-04-live` 以固定環境變數 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` 停用內建 agents（`79a4a5f`、測試修正 `418f0de`；第 35 節）。**10/8 於 `418f0de` 通過 Codex 限定範圍技術 review，L1-a 關閉**（第 36 節）；只證明固定環境變數的傳遞與 fake 回歸，**不證明真實 CLI 的 agents 已清空**。未執行真實 CLI，閘門與認證接受清單未變。B1-04 仍 InProgress；L1-b 需 Aaron 另行核准。
 >
 > **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），已通過 Codex 限定範圍 review（第 29 節）。10/4 經 Aaron 核准再執行一次真實 C0′：exit 0，取得真實 init，Codex 已核對證據（第 30、31 節）。正式 live 仍不能放行：plugins 2、agents 5 會先被 Gate 拒絕，`apiKeySource` = `none` 也不在接受清單；plugins／agents 的釐清方案待 Aaron 核准（第 31 節）。10/4 依核准完成 A 官方文件查證與 B 身分觀測（程式 `4e709ab`、`8da15dd`），review 指出 `null` 判斷問題，已修正於 `b46e332`；10/4 依 Aaron 指示同步本輪驗收（第 34 節）。未執行真實 CLI；真實 C0′、受管設定讀取與清單調整仍須 Aaron 另行核准（第 32–34 節）。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
@@ -1026,3 +1026,16 @@ echo "exit=$?"
   - **第二次**（Aaron 啟動 Docker 後補跑一次）：overall exit 0。七步全過：check-contracts 16 秒（adapter 26／26、hostcreds 23／23）、check 74、race-cover 270（apa-buyer 81.7％、buyer 92.9％）、verify-b1-01 43、guards、evidence-import-tests、mutation 346 秒——**248／248 突變全數被殺**，#248（拿掉停用內建 agents 的變數）由 `TestArgvAndEnv|TestCLIEnvReachesChild` 抓到；隔離自檢 17 項 ok。容器內 `TestLiveOptIn`、`TestVersion` 都通過。證據：`artifacts/verify-container/runs/418f0de1506d-20261007T160539Z/`、`artifacts/b1-04/container-418f0de-attempt2.log`。
   - `2593487` 只改註解與文件，未另跑容器。
 - **仍須 Aaron 另行核准**：L1-b（plugin 來源確認方式；若需參數，另一個實作停止點）、L1-c（一次 C0′ 觀測）、L1-d（階段 B 與認證接受值）、L1-e（一次階段 C）。B1-04 仍 InProgress；未標 Done、未合併 main。
+
+## 36 驗收紀錄：L1-a 於 `418f0de` 通過限定範圍技術 review（2026-10-08）
+
+- **結論**（Codex）：L1-a 於 `418f0de` 通過限定範圍技術 review，切片關閉；不需要再跑容器。
+- **Codex 確認**：
+  - 完整容器七步全部 exit 0；
+  - 248／248 突變被抓到，#248 是測試斷言失敗，不是編譯失敗；
+  - 17 項隔離檢查通過，證據 manifest 雜湊核對通過；
+  - `418f0de` 之後的差異（`2593487`、`b58f163` 等）只有文件與測試註解，沒有產品邏輯變更。
+- **證據歸屬**：Codex 前輪獨立重跑定向 race 測試；完整容器（`artifacts/verify-container/runs/418f0de1506d-20261007T160539Z/`）由 Claude Code 執行、Codex 本輪核對紀錄，未重跑。
+- **範圍**：只證明固定環境變數的傳遞與 fake 回歸，**不證明真實 CLI 的 agents 已清空**（那是 L1-c）。init 閘門、認證接受清單、plugin 參數都未變。
+- **下一步**：L1-b（plugin 來源釐清）仍需 Aaron 另行核准。B1-04 仍 InProgress；未標 Done、未合併 main。
+
