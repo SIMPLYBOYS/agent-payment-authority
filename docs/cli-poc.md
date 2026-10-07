@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 L1-b 第一段**：probe 的 plugins 顯示候選加入三個名稱（完全相符才顯示），只有 fake 驗證（`e99f389`；第 38 節），Claude Code 執行，待 Codex review；閘門、認證清單與啟動參數未變，來源仍未確認。
+>
 > **10/7 L1-a**：分支 `b1-04-live` 以固定環境變數 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` 停用內建 agents（`79a4a5f`、測試修正 `418f0de`；第 35 節）。**10/8 於 `418f0de` 通過 Codex 限定範圍技術 review，L1-a 關閉**（第 36 節）；只證明固定環境變數的傳遞與 fake 回歸，**不證明真實 CLI 的 agents 已清空**。未執行真實 CLI，閘門與認證接受清單未變。B1-04 仍 InProgress；L1-b 需 Aaron 另行核准。
 >
 > **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），已通過 Codex 限定範圍 review（第 29 節）。10/4 經 Aaron 核准再執行一次真實 C0′：exit 0，取得真實 init，Codex 已核對證據（第 30、31 節）。正式 live 仍不能放行：plugins 2、agents 5 會先被 Gate 拒絕，`apiKeySource` = `none` 也不在接受清單；plugins／agents 的釐清方案待 Aaron 核准（第 31 節）。10/4 依核准完成 A 官方文件查證與 B 身分觀測（程式 `4e709ab`、`8da15dd`），review 指出 `null` 判斷問題，已修正於 `b46e332`；10/4 依 Aaron 指示同步本輪驗收（第 34 節）。未執行真實 CLI；真實 C0′、受管設定讀取與清單調整仍須 Aaron 另行核准（第 32–34 節）。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
@@ -1109,4 +1111,18 @@ echo "exit=$?"
   1. **probe 顯示候選修正＋fake 測試**：把 37.5 的三個名稱加入 probe 的 plugins 顯示候選清單；只有完全相符才顯示名稱，其餘維持 `other`；不新增原始路徑或設定內容的輸出；正式閘門、認證清單與啟動參數全部不變；測試後交 Codex review。
   2. 通過後，另行核准一次**診斷型 C0′**：觀測 APA 實際列出哪些候選、路徑分類，以及 L1-a 之後的 agents 清單；目標是辨識，不預設 plugins 已清空，也不等於 L1-c 的清空條件通過；結果仍為 `other` 就停止回報，不擴大收集或重試。
 - 顯示名稱不等於允許執行；名稱吻合也不能單靠它認定來源或組出停用 id。
+
+## 38 L1-b 第一段：probe 顯示候選修正＋fake 測試（2026-10-08；Claude Code 執行，待 Codex review）
+
+- **依據**：Aaron 10/8 核准「probe 顯示候選修正＋fake 測試」：只把 `cc-plugin-agents-md`、`cc-plugin-telemetry`、`cc-plugin-plugin-authoring` 加入顯示候選清單，完全相符才顯示，其他維持 `other`。
+- **不做**：不改認證清單或啟動參數；不讀設定與憑證；不執行真實 CLI 或 C0′。診斷型 C0′ 另行核准。
+- **程式**（`e99f389`）：`internal/buyer/probe.go` 的 `pluginDisplayCandidates` 由空清單改為上述三個名稱；比對沿用既有的 `pick`（`slices.Contains`，完全相符）。註解寫明這是另一個環境的候選，不是已確認的來源或 id；顯示清單不是接受清單。路徑仍只輸出分類。
+- **測試**：
+  - `TestProbePluginCandidates`：三個名稱完全相符時顯示原名；近似或未知名稱——加 `@marketplace` 後綴、大小寫不同、尾端空白、候選的前綴（`cc-plugin-agents`）、以候選結尾的名稱、未知名稱——都只顯示 `other` 與長度；以標記字串檢查這些近似名稱與原始路徑（含 HOME）都不會出現在結果或 trace 中，路徑只剩分類（`home_plugins_cache`、`home_skills`、`other`、`relative`）。
+  - `TestHostInitGate` 新增兩案：plugins 恰為候選名稱（一個、三個）時，閘門仍以 `plugins` 拒絕。
+  - 既有的 `TestProbeEntries`、`TestProbeNoLeak` 照舊通過（其他 plugin 名稱仍為 `other`）。
+  - 突變 #249（清空候選清單）、#250（名稱改為前綴比對）：提交前預檢都由 `TestProbePluginCandidates` 的斷言抓到，不是編譯失敗。共 250 項。
+- **本機驗證**（Claude Code 執行，待 Codex review；`e99f389`，`artifacts/b1-04/e99f389777ad-20261007T164822Z/`）：make check、check-contracts、`go test -race -cover ./... -count=1`、B1-01、20 項證據匯入測試全部 exit 0；覆蓋率 buyer 92.9%、apa-buyer 81.7%。這次本機沒有出現第 34.2 節的計時失敗。
+- **容器完整驗證**（Claude Code 執行，待 Codex 核對紀錄；`e99f389`，斷網容器，映像 `sha256:78258368…b6d0`）：overall exit 0；七步全過（check-contracts 17 秒、check 79、race-cover 277、verify-b1-01 42、guards、evidence-import-tests、mutation 335 秒）；**250／250 突變全數被殺**，#249、#250 由 `TestProbePluginCandidates` 抓到，#248 照舊；隔離自檢 17 項 ok。證據：`artifacts/verify-container/runs/e99f389777ad-20261007T165410Z/`、`artifacts/b1-04/container-e99f389.log`。
+- **範圍**：顯示名稱不等於允許執行；名稱吻合也不能單靠它認定來源或組出停用 id。來源仍未確認；L1-b 的停用參數仍未決定。B1-04 仍 InProgress。
 
