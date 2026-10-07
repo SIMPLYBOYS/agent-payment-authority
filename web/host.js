@@ -49,7 +49,8 @@ let runsTimer = null;
 let lastRuns = null; // { gen, runs } of the current generation
 let starting = false;
 let cancelling = false;
-let lastTasks = null; // { gen, list: Map(task_id -> summary), details: Map(task_id -> task) } or { gen, error }
+let lastTasks = null;
+let lastRunsError = null; // the runs read of this generation failed: the list shown is the last good one // { gen, list: Map(task_id -> summary), details: Map(task_id -> task) } or { gen, error }
 const RUNS_MS = 2000;
 const DETAILS_MAX = 5; // ponytail: task reads per poll for the Ask notes; more runs waiting would read in turn
 
@@ -66,6 +67,7 @@ function render(v) {
     lastReady = null;
     lastRuns = null;
     lastTasks = null;
+    lastRunsError = null;
     starting = false;
     cancelling = false;
     clearTimeout(readyTimer);
@@ -304,8 +306,23 @@ function renderControl() {
     now.push(b);
   }
   $("control-now").replaceChildren(...now);
+  // What the folded runs list would hide stays in its summary and in the
+  // status bar: the runs' history (interrupted, a record not written) apart
+  // from what cannot be read now (review of 7ffc45d, R2).
   const odd = runs.filter((r) => r.state === "interrupted" || r.record_error || r.store_end_error).length;
-  $("runs-summary").textContent = "最近場次（" + runs.length + " 場" + (odd ? "；需注意 " + odd + " 場：中斷或紀錄寫入失敗" : "") + "）";
+  const issues = [];
+  if (v.mode === "file") {
+    if (lastRunsError) issues.push("場次清單讀取失敗（" + lastRunsError + "），顯示上次資料");
+    if (lastTasks && lastTasks.gen === creds.gen && lastTasks.error) issues.push("task 狀態讀取失敗（" + lastTasks.error + "），未確認");
+    else if (lastTasks && lastTasks.gen === creds.gen && lastTasks.list) {
+      const unknown = runs.filter((r) => r.live !== "running" && r.live !== "stopping" && lastTasks.list.has(r.task_id)
+        && ["running", "failed"].includes(lastTasks.list.get(r.task_id).status) && !lastTasks.details.has(r.task_id)).length;
+      if (unknown) issues.push(unknown + " 場的 Ask 狀態未確認");
+    }
+  }
+  $("runs-summary").textContent = "最近場次（" + runs.length + " 場" + (odd ? "；歷史：" + odd + " 場中斷或紀錄寫入失敗" : "") + (issues.length ? "；目前：" + issues.join("、") : "") + "）";
+  setAlert("runs-history", odd ? "場次歷史：" + odd + " 場中斷或紀錄寫入失敗" : "", "warn");
+  setAlert("runs-now", issues.length ? "最近場次目前：" + issues.join("、") : "", "error");
   $("runs").replaceChildren(...runs.map((r) => {
     const li = document.createElement("li");
     li.dataset.run = r.run_id;
@@ -448,7 +465,10 @@ async function pollRuns() {
       const r = await creds.runs();
       if (r && r.gen === creds.gen && r.runs) {
         const t = await readTasks(r.runs);
-        if (g === creds.gen) { lastRuns = r; if (t) lastTasks = t; renderControl(); }
+        if (g === creds.gen) { lastRuns = r; lastRunsError = null; if (t) lastTasks = t; renderControl(); }
+      } else if (r && r.gen === creds.gen && r.error) {
+        lastRunsError = r.error;
+        renderControl();
       }
     }
   } finally {

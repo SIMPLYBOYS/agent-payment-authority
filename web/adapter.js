@@ -430,13 +430,26 @@ export function evidence(snapshot, po, ctx) {
       "Store",
     ]) },
   ];
+  // In step only when Unity's report names the projection sent: the same
+  // generation, task, sequence and phase. Anything else is "not yet in
+  // step", never a completed sync (review of 7ffc45d, R1).
   const sent = ctx.sent, rep = ctx.report;
-  const same = !!(sent && rep && rep.gen === sent.gen && rep.seq === sent.seq);
+  const diffs = [];
+  if (sent && rep) {
+    if (rep.gen !== sent.gen) diffs.push("世代不同（Unity gen " + rep.gen + "）");
+    if (rep.task !== sent.task) diffs.push("task 不同（Unity " + str(rep.task) + "）");
+    if (rep.seq < sent.seq) diffs.push("序號較舊（Unity #" + rep.seq + "，送出 #" + sent.seq + "）");
+    else if (rep.seq !== sent.seq) diffs.push("序號不同（Unity #" + rep.seq + "）");
+    if (rep.phase !== sent.phase) diffs.push("phase 不同（Unity " + str(rep.phase) + "）");
+  }
+  const same = !!(sent && rep) && diffs.length === 0;
+  const sync = !sent ? "尚未送出投影" : !rep ? "Unity 尚未回報：尚未一致" : same ? "Unity 已呈現 " + str(rep.task) + " #" + rep.seq + "（" + str(rep.phase) + "）"
+    : "Unity 尚未一致：" + diffs.join("、") + "（不是同步完成）";
   sections.push({ title: "場景對應", note: "Unity 的回報沒有 purchase_order_id；請購關聯由網頁依送出的投影推導，不是 Unity 獨立確認。", rows: [
     ["送出投影", sent ? (replay ? "回放 · " : "") + "gen " + sent.gen + " · " + str(sent.task) + " #" + sent.seq + " " + str(sent.phase) : "尚未送出", "網頁"],
     ["對應請購", sent && sent.po ? sent.po + "（網頁推導）" : "—", "網頁推導"],
     ["Unity 回報", rep ? "gen " + rep.gen + " · " + str(rep.task) + " #" + rep.seq + " " + str(rep.phase) : "尚未回報", "瀏覽器觀測"],
-    ["同步", same ? "Unity 已呈現 " + str(rep.task) + " #" + rep.seq + "（" + str(rep.phase) + "）" : "Unity 同步中", "網頁比較"],
+    ["同步", sync, "網頁比較"],
     ...(sent && sent.po && po && po !== sent.po ? [["選取", "你正在查看 " + po + "；商店場景呈現的是 " + sent.po + "（選取不同，不是同步失敗）", "網頁"]] : []),
   ] });
   return {

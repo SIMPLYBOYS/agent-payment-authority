@@ -24,6 +24,10 @@ const commit = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"]).toString()
 const out = resolve(arg("--out", join(repo, "artifacts/b1-06", "ui-" + commit.slice(0, 12) + "-" + stamp)));
 mkdirSync(out, { recursive: true });
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+// --smoke-plain: a short flow only, in a Chrome started WITHOUT the two flags
+// added for D1 (review of 7ffc45d, C1): whether Chrome's own backgrounding
+// hides the page in that flow is recorded, not assumed.
+const SMOKE = process.argv.includes("--smoke-plain");
 const cases = JSON.parse(readFileSync(join(repo, "testdata/contracts/cases.json")));
 const expect = (id) => cases.cases.find((c) => c.case_id === id).expected;
 
@@ -76,7 +80,7 @@ async function startChrome() {
   const profile = join(tmp, "chrome-profile");
   const c = spawn(CHROME, ["--headless=new", "--user-data-dir=" + profile, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check",
     "--disable-extensions", "--disable-sync", "--disable-background-networking", "--disable-component-update", "--use-angle=swiftshader",
-    "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
+    ...(SMOKE ? [] : ["--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding"]),
     "--enable-unsafe-swiftshader", "about:blank"], { stdio: "ignore" });
   let port;
   for (let i = 0; i < 100 && !port; i++) {
@@ -218,6 +222,44 @@ async function replayAndRestore(b, label) {
 let demo, browser;
 const allTokens = [];
 try {
+full: {
+  if (SMOKE) {
+    log("commit " + commit + " (smoke, Chrome without --disable-backgrounding-occluded-windows / --disable-renderer-backgrounding)");
+    const st = join(tmp, "state-smoke");
+    demo = startDemo(st, null, unityBuild, ["--fake-cli", join(bin, "fake-claude"), "--scenarios", join(repo, "testdata/demo/scenarios-acceptance.json"), "--registry", join(repo, "testdata/demo/registry.json")]);
+    const sAddr = await demo.ready();
+    const stok = demo.tokens();
+    allTokens.push(stok.a, stok.b, stok.host, stok.op);
+    browser = await startChrome();
+    const b = browser;
+    await b.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    await b.send("Page.navigate", { url: "http://" + sAddr + "/host" });
+    await b.waitFor(`document.readyState === "complete"`);
+    check("smoke: the Unity build loads", await b.waitFor(`["ready","rendered"].includes(document.getElementById("unity-status").dataset.state)`, 90000));
+    const vis = [];
+    const sample = async (tag) => vis.push(tag + ":" + (await b.evaluate("document.visibilityState")));
+    await sample("loaded");
+    const sFile = join(tmp, "tokens-smoke.json");
+    writeFileSync(sFile, readFileSync(join(st, "tokens.json")));
+    const doc = await b.send("DOM.getDocument", {});
+    const q = await b.send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: "#token-file" });
+    await b.send("DOM.setFileInputFiles", { nodeId: q.nodeId, files: [sFile] });
+    check("smoke: the token file loads", await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`, 20000));
+    await b.waitFor(`!!document.querySelector('#run-scenarios button[data-scenario="ask"]:not([disabled])')`, 20000);
+    await b.evaluate(`document.querySelector('#run-scenarios button[data-scenario="ask"]').click()`);
+    check("smoke: an Ask opens; card, Unity and Timeline agree", await b.waitFor(`document.getElementById("card").dataset.po !== "" && (document.querySelector(".card-status") || {}).innerText === "Ask：等待人工核准（M1 無核准能力）"
+      && document.getElementById("unity-status").dataset.phase === "waiting" && document.querySelectorAll("#timeline li").length === 3`, 30000), await b.evaluate(text("#unity-status")));
+    await sample("ask");
+    const p0 = await pollCount(b);
+    for (let i = 0; i < 20; i++) { await sleep(1000); if (i % 5 === 4) await sample("t" + (i + 1)); }
+    const polled = (await pollCount(b)) - p0;
+    await b.evaluate(`document.getElementById("replay").click()`);
+    const replayed = await b.waitFor(`document.getElementById("status").dataset.mode === "replay"`, 5000) && await b.waitFor(`document.getElementById("status").dataset.mode === "live" && document.getElementById("status").dataset.kind === "ok"`, 60000);
+    await sample("after-replay");
+    log("  smoke visibility samples: " + vis.join(" ") + "; task polls over 20 s: " + polled);
+    check("smoke: the page stayed visible and kept polling (about one poll a second), the replay returned to live", vis.every((x) => x.endsWith(":visible")) && polled >= 12 && replayed, vis.join(" ") + " / " + polled + " polls");
+    break full;
+  }
   log("commit " + commit);
   log("unity build " + unityBuild + (existsSync(join(unityBuild, "WebGL.loader.js")) ? "" : " (MISSING)"));
   const state = join(tmp, "state");
@@ -495,9 +537,9 @@ try {
     await b.evaluate(`(() => { const s = document.querySelector("#card .po-pick"); s.value = ${JSON.stringify(poA)}; s.dispatchEvent(new Event("change")); return true; })()`);
     check("D1 by hand: the card shows po-A and says the scene shows po-B",
       await b.waitFor(`${shownText(".card-differs")}.includes(${JSON.stringify("你正在查看 " + poA + "；商店場景呈現的是 " + poB)}) && ${shownText(".card-status")} === "Ask 已到期（後端已記錄）"`, 5000), await b.evaluate(shownText("#card")));
-    check("D1 by hand: Unity unchanged, no 同步中, and the evidence says it is a different pick, not a sync failure",
+    check("D1 by hand: Unity unchanged, no 尚未一致, and the evidence says it is a different pick, not a sync failure",
       (await b.evaluate(`document.getElementById("unity-status").dataset.seq + "|" + document.getElementById("unity-status").dataset.phase`)) === unityBefore
-      && !(await b.evaluate(shownText('.evidence-page[data-page="場景對應"]'))).includes("同步中") && (await b.evaluate(shownText('.evidence-page[data-page="場景對應"]'))).includes("選取不同，不是同步失敗"));
+      && !(await b.evaluate(shownText('.evidence-page[data-page="場景對應"]'))).includes("尚未一致") && (await b.evaluate(shownText('.evidence-page[data-page="場景對應"]'))).includes("選取不同，不是同步失敗"));
     await b.evaluate(`document.querySelector("#card .card-back").click()`);
     check("D1 by hand: 回到場景這筆 returns to the scene's purchase", await b.waitFor(`document.getElementById("card").dataset.po === ${JSON.stringify(poB)} && !document.querySelector(".card-differs")`, 5000));
     // Replay, held step by step (Unity's reports are held by a test-only page hook, so each step lasts its 6 s limit).
@@ -1081,6 +1123,40 @@ try {
   check("3.4: an interrupted run: that history, and the task can be cancelled", await lineHas("show-a-04", ["場次曾中斷（上一個 host 未正常結束）", "Ask 已到期；task 仍可由主持人取消"], true), await b.evaluate(seenLine("show-a-04")));
   const runsHistory = JSON.stringify(await xRuns());
 
+  // Review of 7ffc45d (R2): with the runs list folded, its history and what
+  // cannot be read now stay visible, apart, in its summary and the status bar.
+  {
+    const vis = (sel) => `((document.querySelector(${JSON.stringify(sel)}) || {}).innerText || "")`;
+    await b.evaluate(`(document.getElementById("runs-box").open = false, true)`);
+    check("R2 folded: the runs summary and the status bar keep the history (2 runs interrupted or with a failed record)",
+      await b.waitFor(`${vis("#runs-summary")}.includes("歷史：2 場中斷或紀錄寫入失敗") && ${vis("header.top")}.includes("場次歷史：2 場中斷或紀錄寫入失敗")`, 10000),
+      await b.evaluate(vis("#runs-summary")) + " / " + await b.evaluate(vis("#alerts")));
+    let fail503 = false;
+    const off503 = b.on("Fetch.requestPaused", (p) => {
+      if (fail503 && p.request.url.endsWith("/api/tasks") && p.request.headers.Authorization === "Bearer " + xt.host) {
+        b.send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 503, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from('{"error":"store_unavailable"}').toString("base64") }).catch(() => {});
+        return;
+      }
+      b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {});
+    });
+    await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/tasks", requestStage: "Request" }] });
+    fail503 = true;
+    check("R2 folded: a failed task read shows now, apart from the history", await b.waitFor(`${vis("#runs-summary")}.includes("目前：task 狀態讀取失敗（status_503），未確認") && ${vis("header.top")}.includes("最近場次目前：task 狀態讀取失敗")`, 10000)
+      && (await b.evaluate(vis("#runs-summary"))).includes("歷史：2 場"), await b.evaluate(vis("#runs-summary")));
+    fail503 = false;
+    check("R2 folded: after recovery the current warning goes, the history stays", await b.waitFor(`!${vis("header.top")}.includes("最近場次目前") && !${vis("#runs-summary")}.includes("目前：") && ${vis("header.top")}.includes("場次歷史")`, 10000),
+      await b.evaluate(vis("#alerts")));
+    await b.send("Fetch.disable");
+    off503();
+    await b.evaluate(`document.getElementById("clear-all").click()`);
+    check("R2: 清除全部 leaves no runs warning behind", await b.waitFor(`!${vis("header.top")}.includes("場次歷史") && !${vis("header.top")}.includes("最近場次目前")`, 5000), await b.evaluate(vis("#alerts")));
+    await chooseFile(xFile);
+    await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`);
+    check("R2: loading the file again brings the history back from the server", await b.waitFor(`${vis("header.top")}.includes("場次歷史：2 場中斷或紀錄寫入失敗")`, 10000));
+    await b.evaluate(`(document.getElementById("runs-box").open = true, true)`);
+    await lineHas("show-a-02", ["Ask 已到期；task 仍可由主持人取消"], true);
+  }
+
   // Review of d61771c (R2): a task whose details were not read is not a
   // task without Asks. Its detail read answers 503 here (show-a-01's
   // expired Ask is in the Store); the line says it is not confirmed.
@@ -1484,6 +1560,26 @@ try {
     await views("expired then cancelled", askRun.task_id, "expired", "Ask", "TASK_CANCELLED", ["expired", "cancelled"]);
     await record("expired then cancelled", askRun.task_id);
 
+    // Review of 7ffc45d (C1): a page that stays hidden polls nothing (task,
+    // readiness, runs); made visible again it reads at once and shows what
+    // changed meanwhile. document.hidden is overridden by the test (the
+    // browser's own visibility is not what is under test here).
+    await b.evaluate(`(() => { window.__hid = false; Object.defineProperty(document, "hidden", { configurable: true, get: () => window.__hid === true }); window.__hc = { status: 0, runs: 0 }; const f = window.fetch.bind(window);
+      window.fetch = (u, o) => { const s = String(u); if (s === "/api/host/status") window.__hc.status++; if (s === "/api/host/runs" && !(o && o.method === "POST")) window.__hc.runs++; return f(u, o); }; return true; })()`);
+    await b.evaluate(`(window.__hid = true, document.dispatchEvent(new Event("visibilitychange")), true)`);
+    await sleep(2500); // anything in flight ends
+    const h0 = JSON.parse(await b.evaluate(`JSON.stringify({ polls: Number(document.getElementById("status").dataset.polls || 0), ...window.__hc, checked: (document.querySelector('#readiness tr[data-item="檢查時間"] td') || {}).textContent })`));
+    const whileHidden = await hostPost(aAddr, at.op, "/api/host/runs", { request_id: "req-hidden-0000000001", scenario: "ask" });
+    await sleep(7000);
+    const h1 = JSON.parse(await b.evaluate(`JSON.stringify({ polls: Number(document.getElementById("status").dataset.polls || 0), ...window.__hc })`));
+    check("C1 hidden: 7 s hidden, no task poll, no readiness read, no runs read", h1.polls === h0.polls && h1.status === h0.status && h1.runs === h0.runs, JSON.stringify([h0, h1]));
+    check("C1 hidden: the run started meanwhile is not shown yet", !(await b.evaluate(`[...document.querySelectorAll("#runs li")].some((l) => l.textContent.startsWith(${JSON.stringify(whileHidden.json.task_id + "（")}))`)));
+    await b.evaluate(`(window.__hid = false, document.dispatchEvent(new Event("visibilitychange")), true)`);
+    check("C1 visible again: task, readiness and runs are read at once", await b.waitFor(`Number(document.getElementById("status").dataset.polls || 0) > ${h0.polls} && window.__hc.status > ${h0.status} && window.__hc.runs > ${h0.runs}`, 3000),
+      await b.evaluate(`JSON.stringify(window.__hc)`));
+    check("C1 visible again: what changed meanwhile shows (the new run, a new readiness time)", await b.waitFor(`[...document.querySelectorAll("#runs li")].some((l) => l.textContent.startsWith(${JSON.stringify(whileHidden.json.task_id + "（")})) && (document.querySelector('#readiness tr[data-item="檢查時間"] td') || {}).textContent !== ${JSON.stringify(h0.checked)}`, 5000));
+    await b.waitFor(`${seenLine(whileHidden.json.task_id)}.includes("場次完成")`, 20000);
+
     // 7. Restart on the same database: one Ask left waiting, one run still running (the orderly
     // shutdown cancels it). Afterwards the history and tasks stay, nothing reruns, and the waiting
     // Ask is cancelled under the usual rules.
@@ -1510,7 +1606,7 @@ try {
     // The running run's task gets its shutdown cancel; the waiting Ask may meet its deadline: both only append.
     for (const [task, ev] of Object.entries(beforeRestart)) {
       const now = await aEvents(task);
-      if (task === running.task_id || task === pending.task_id ? now.slice(0, ev.length).join() !== ev.join() : now.join() !== ev.join()) kept = false;
+      if (task === running.task_id || task === pending.task_id || task === whileHidden.json.task_id ? now.slice(0, ev.length).join() !== ev.join() : now.join() !== ev.join()) kept = false;
     }
     check("3.5 restart: the same runs and the same events (only the running run's cancel or the waiting Ask's expiry appended)", kept, runsBefore + " -> " + runsAfter);
     check("3.5 restart: the run that was running ended with its cancel at the shutdown", await lineHas(running.task_id, ["已停止，取消已記錄"], false, 20000) && (await aEvents(running.task_id)).at(-1) === "TASK_CANCELLED", await b.evaluate(seenLine(running.task_id)));
@@ -1543,6 +1639,7 @@ try {
   await shot(b, "desktop-unity-missing", 1280, 900, false);
   await bare.stop();
   allTokens.push(...Object.values(bare.tokens()));
+}
 } catch (e) {
   check("browser test ran to the end", false, String(e && e.message || e).slice(0, 300));
 } finally {

@@ -283,7 +283,7 @@ test("D1 evidence: the full record in a replay says so and marks what is not rea
   const rows = e.sections.find((x) => x.title === "Store 事件").rows;
   assert.ok(rows.find(([k]) => k.startsWith("#4"))[1].includes("回放尚未到此"));
   assert.ok(!rows.find(([k]) => k.startsWith("#2"))[1].includes("回放尚未到此"));
-  assert.ok(e.sections.find((x) => x.title === "場景對應").rows.some(([k, v]) => k === "同步" && v === "Unity 同步中"));
+  assert.ok(e.sections.find((x) => x.title === "場景對應").rows.some(([k, v]) => k === "同步" && v.startsWith("Unity 尚未一致：序號較舊") && v.endsWith("（不是同步完成）")));
   for (const sec of e.sections) for (const r of sec.rows) assert.equal(r.length, 3, "every row names its source");
   const cat = { products: [{ resource_url: "http://127.0.0.1:1/resources/kr-market?edition=1", price: { asset_display: "0.50 test USDC", fiat_amount: "700", fiat_currency: "KRW", fx_rate: "1400", fx_source: "fixture, not live FX" } }] };
   const c = A.card(snap, null, { mode: "live", catalog: cat, catalogAt: "12:00:00" });
@@ -297,4 +297,22 @@ test("D1 project derives the status by the Store's rule: a Deny stays after a ca
   const evs = [ev(1, "TASK_STARTED"), ev(2, "PURCHASE_PROPOSED", { purchase_order_id: "po-1" }), decided(3, "Deny", "INSUFFICIENT_BUDGET", "not_requested"), ev(4, "TASK_CANCELLED")];
   assert.deepEqual(A.project(evs), { status: "denied", reason: "INSUFFICIENT_BUDGET" });
   assert.deepEqual(A.project(evs.slice(0, 2)), { status: "running", reason: "" });
+});
+
+// Review of 7ffc45d, R1: in step only when Unity names the projection sent.
+test("D1 evidence: Unity is in step only for the same generation, task, sequence and phase", () => {
+  const snap = expiredAsk();
+  const sent = { gen: 7, task: "task-a", seq: 4, phase: "expired", po: "po-1" };
+  const sync = (report) => A.evidence(snap, "po-1", { mode: "live", catalog: null, sent, report }).sections.find((x) => x.title === "場景對應").rows.find(([k]) => k === "同步")[1];
+  assert.equal(sync({ gen: 7, task: "task-a", seq: 4, phase: "expired" }), "Unity 已呈現 task-a #4（expired）");
+  const wrongTask = sync({ gen: 7, task: "task-b", seq: 4, phase: "expired" });
+  assert.ok(wrongTask.startsWith("Unity 尚未一致") && wrongTask.includes("task 不同（Unity task-b）") && wrongTask.endsWith("（不是同步完成）"), wrongTask);
+  const wrongPhase = sync({ gen: 7, task: "task-a", seq: 4, phase: "waiting" });
+  assert.ok(wrongPhase.startsWith("Unity 尚未一致") && wrongPhase.includes("phase 不同（Unity waiting）"), wrongPhase);
+  const older = sync({ gen: 7, task: "task-a", seq: 3, phase: "waiting" });
+  assert.ok(older.includes("序號較舊（Unity #3，送出 #4）") && !older.includes("已呈現"), older);
+  assert.ok(sync({ gen: 6, task: "task-a", seq: 4, phase: "expired" }).includes("世代不同"));
+  assert.equal(sync(null), "Unity 尚未回報：尚未一致");
+  assert.ok(A.evidence(snap, "po-1", { mode: "live", catalog: null, sent, report: { gen: 7, task: "task-a", seq: 4, phase: "expired" } })
+    .sections.find((x) => x.title === "場景對應").rows.some(([k, v, src]) => k === "對應請購" && v === "po-1（網頁推導）" && src === "網頁推導"), "the purchase link stays the page's own");
 });
