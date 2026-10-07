@@ -496,6 +496,8 @@
 > **進度（10/7）**：Aaron 核准 L1-a；已在分支 `b1-04-live` 實作（`79a4a5f`、測試修正 `418f0de`；`docs/cli-poc.md` 第 35 節）；**10/8 於 `418f0de` 通過 Codex 限定範圍技術 review，L1-a 關閉**（第 36 節），只證明變數傳遞與 fake 回歸，不證明真實 CLI 的 agents 已清空。L1-b～L1-e 未核准、未開始。
 >
 > **進度（10/8，L1-b）**：plugin 來源調查依 Aaron 決定暫緩，來源未確認保留為已知限制。正式 Gate 維持不變。下一步為整理一次診斷型 C0′ 清單，確認目前 plugins／agents 是否仍非空；待 Codex review 與 Aaron 另行核准，尚未執行（`docs/cli-poc.md` 第 39.7 節）。L1-b 不標通過或 Done。**診斷型 C0′ 清單於 `d12adcc` 通過限定文件 review，R1／R2 關閉**（Codex 靜態核對，不是測試通過；第 39.10 節）；真實執行仍待 Aaron 另行核准。plugin 觀測以 APA wrapper 當次 runtime 的 init 為準，pixel-office 名稱僅為顯示候選，不作為允許依據。
+>
+> **進度（10/8，診斷型 C0′）**：核准版本改為 `2.1.293`（`bd29a4e`）後執行一次，取得 init：**plugins 非空（2 個）**、agents 明確為空。依結果分支記錄執行阻擋並停止；最小隔離或停用方案待另提與核准（`docs/cli-poc.md` 第 41 節，待 Codex review）。
 
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。

@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 診斷型 C0′ 執行結果（Claude Code 執行，待 Codex review）**：取得 init（exit `0`，`observed`，版本為核准的 `2.1.293`）。**plugins 非空（2 個：`cc-plugin-agents-md`、`cc-plugin-plugin-authoring`）**；agents 明確為空（`agents_count` 0）；skills 0。依 39.7.3：**記錄執行阻擋並停止**，不追查來源、不改允許清單、不重試。正式 Gate 仍會拒絕這次 init（第 41 節）。
+>
 > **10/8 核准 CLI 版本改為 `2.1.293 (Claude Code)`（Claude Code 執行 fake 驗證，待 Codex 限定 review）**：版本由 Aaron 提供，不是 Claude Code 或 Codex 查詢所得。程式 `bd29a4e`；新版通過、舊版與其他版本被拒、init 須為 `2.1.293`；定向 fake 回歸全部通過（第 40 節）。**程式 `bd29a4e` 通過 Codex 限定 review**；§39.3 產品基準與 §3、§7.3、§39.7.4 的版本說明已補正（第 40.1 節）。**`3d74230` 通過限定文件複核，R1 關閉**（第 40.2 節）。可提出下一次診斷型 C0′ 執行核准；review 不等於執行核准。新版真實 runtime 的行為仍待觀測，plugins／agents 仍未知。
 >
 > **10/8 §39.3 變數名稱修正（Claude Code 執行最小分支測試，待 Codex review）**：三處緊接全形字元的變數改為 `${BR}`、`${PROBE_EXIT}`（兩處）。最小分支測試不含 CLI、建置或刪除命令，涵蓋正常回報、前置拒絕與證據保存失敗；在 bash 3.2、四種 locale 下 16／16 PASS（第 39.15 節）。版本釘選未改，C0′ 未重跑。**10/8 `90d6e2f` 通過 Codex 限定 review，bash 變數名稱問題關閉**（第 39.16 節）。剩下的阻擋是 CLI 版本與釘選不符。
@@ -1630,3 +1632,60 @@ Codex 以文件與原始碼靜態核對 `ff094f5`，接受前置工作區、程�
   - 已可提出下一次診斷型 C0′ 的執行核准；本次 review 不等於執行核准。
   - plugins／agents 仍未知；L1-b 未完成。
 - 本輪只同步紀錄：沒有再跑驗證、測試、腳本、真實 CLI 或 C0′。B1-04 仍 InProgress。
+
+## 41 診斷型 C0′ 執行紀錄（2026-10-08；Claude Code 執行，待 Codex review）
+
+> **結果：取得 init。plugins 非空，agents 明確為空。** 依 39.7.3「取得 init，但 plugins 或 agents 非空」：**記錄執行阻擋並停止**。不追查來源、不改允許清單、不重試；最小隔離或停用方案另提，其設計、實作與真實驗證都須另行核准。
+
+- **核准**：Aaron 10/8 核准依 §39.3 執行一次。執行基準為 `b2cee13` 或其後只改文件的 commit，產品基準維持 `bd29a4e`，CLI 必須是 `2.1.293 (Claude Code)`。核准接受既有 HOME、網路、登入環境，以及可能產生、無法確認的用量。
+- **開工核對**：分支 `b1-04-live`，HEAD `b2cee13`；工作區只有 `?? demo`。`bd29a4e` 之後沒有非文件差異。
+- **執行方式**：§39.3 的 bash 區塊原樣抽出，以 `bash` 執行一次。在 Claude Code 沙箱外執行，依核准使用既有環境；腳本沒有修改。腳本 exit `0`，訊息為 `probe exit=0；證據：…`。
+- **前置**：步驟 1～5 通過；二進位 `vcs.revision=b2cee130c6e3f4c405dd907def398eb815ab6a04`、`vcs.modified=false`。版本檢查通過，代表 CLI `--version` 輸出等於 `2.1.293 (Claude Code)`；這是本次 runtime 的結果，不是另外的版本查詢。
+- **時間**：`started-utc` `2026-10-07T18:48:54Z`，`ended-utc` `2026-10-07T18:48:57Z`。
+
+**白名單觀測**（`stdout.txt` 的 JSON 投影；trace 的 `result` 與它相同，trace 只是不含 `trace` 路徑欄位）：
+
+| 項目 | 值 |
+|---|---|
+| status／code | `observed`／`init_observed`；`runner_outcome` `init_observed` |
+| `cli_exit_code` | `143`：取得 init 後由 Host 停止 CLI（SIGTERM），不是 CLI 自己失敗 |
+| 寫入 | `input_status` `complete`；`stdin_bytes_written` 95；`input_message_bytes` 95 |
+| 用量 | `usage` `unknown`：訊息已完整送出，可能產生了模型請求，無法確認 |
+| 業務工具 | `business_calls_refused` 0、`business_calls_executed` 0 |
+| `cli_version` | `approved`（init 的 `claude_code_version` 等於 `2.1.293`） |
+| **plugins** | `fields.plugins` `array`；**`plugins_count` 2**；entries：`cc-plugin-agents-md`（path `relative`）、`cc-plugin-plugin-authoring`（path `relative`） |
+| **agents** | `fields.agents` `array`；**`agents_count` 0**；`agents_entries` `[]`：依 39.7.2，**明確為空** |
+| skills | `skills_count` 0 |
+| tools | `tools_count` 3、`tools_expected` 3、`tools_other` 0 |
+| MCP | `mcp_servers_count` 1；`apa_server_status` `connected` |
+| `permission_mode` | `dontAsk` |
+| `model` | `claude-sonnet-5-5` |
+| `auth_source` | `none`：不能證明登入方式或計費來源 |
+| `extra_members` | 6（白名單以外的成員數；名稱不收集） |
+
+**解讀**（照 39.5、39.7 預先列出的規則，不額外推論）：
+- **plugins 非空 → 執行阻擋仍在。** 正式 Gate 要求 plugins 為空，所以這次 init 會被拒，live 請購無法進行。
+- 兩個名稱都完全符合顯示候選：只記「名稱相符，來源未確認」。
+  - 第三個候選 `cc-plugin-telemetry` 這次沒有出現。這不代表任何來源結論。
+  - path `relative` 只是對 CLI 回報文字的分類，不是來源認證。
+- **agents 明確為空**：只證明在 L1-a 的 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` 下，這次 runtime 回報為空，不外推到其他環境。是否據此支持 L1-c 的 agents 部分，由 Codex review 判斷。
+- `auth_source` `none`、`model`、`permission_mode` 只是觀測值；認證接受清單仍為空，認證決策另行處理。
+- 與 pixel-office 的名稱或數量相符與否，都不據此認定兩者設定來源相同。
+
+**證據**（`artifacts/b1-04/c0prime-diag-20261007T184850Z/`，`artifacts/` 不進版控）：
+- `commit.txt`、`binary-vcs.txt`、`go-version-build.txt`
+- `started-utc.txt`、`ended-utc.txt`、`exit-code.txt`（`exit=0`）
+- `stdout.txt`（模式提示行加 JSON 投影）
+- `apa-buyer-error.txt`（0 位元組）
+- `runs/probe-1791398935849317000.jsonl`（1 行，`event: probe`）
+
+暫存目錄已由腳本刪除；repo 工作區仍只有 `?? demo`。
+
+**沒有做的事**：沒有第二次嘗試、C0 重跑、登入檢查或來源調查；沒有開 Store、建 task 或執行業務工具；沒有修改 Gate、認證接受清單、啟動參數、版本釘選或產品程式；沒有進入正式請購。
+
+**待決定**：
+1. Codex review 本次證據與解讀。
+2. 是否請 Claude Code 提出 plugins 的最小隔離或停用方案（只提方案；設計、實作與真實驗證都另行核准，不追查來源）。
+3. agents 為空的觀測能否支持 L1-c 的對應部分，由 review 判斷。
+
+L1-b 不標完成；B1-04 仍 InProgress；不合併、不推送、不標 Done。
