@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **10/8 L1-b 來源調查暫緩**：plugin 來源調查依 Aaron 決定暫緩，來源未確認保留為已知限制。正式 Gate 維持不變。下一步為整理一次診斷型 C0′ 清單，確認目前 plugins／agents 是否仍非空；待 Codex review 與 Aaron 另行核准，尚未執行（第 39.7 節）。暫緩調查不是解除阻擋：真實 CLI 若仍載入 plugins，現有閘門的執行阻擋仍在。**診斷型 C0′ 清單 R1／R2 文件修訂完成，待 Codex 限定複核；真實執行仍待 Aaron 另行核准，尚未執行**（第 39.8 節；`ff094f5` 複核後的兩處補正見第 39.9 節）。
+> **10/8 L1-b 來源調查暫緩**：plugin 來源調查依 Aaron 決定暫緩，來源未確認保留為已知限制。正式 Gate 維持不變。下一步為整理一次診斷型 C0′ 清單，確認目前 plugins／agents 是否仍非空；待 Codex review 與 Aaron 另行核准，尚未執行（第 39.7 節）。暫緩調查不是解除阻擋：真實 CLI 若仍載入 plugins，現有閘門的執行阻擋仍在。**診斷型 C0′ 清單於 `d12adcc` 通過限定文件 review，R1／R2 關閉**（Codex 靜態核對，不是測試通過；第 39.10 節）。真實執行仍待 Aaron 另行核准，尚未執行。
 >
 > **10/8 L1-b 第一段**：probe 的 plugins 顯示候選加入三個名稱（完全相符才顯示），只有 fake 驗證（`e99f389`；第 38 節）。**probe 顯示候選修正於 `e99f389` 通過限定範圍技術 review**（第 38.1 節）；只關閉這項修正，**L1-b 的 plugin 來源仍未確認**。閘門、認證清單與啟動參數未變。
 >
@@ -1145,6 +1145,8 @@ echo "exit=$?"
 >
 > **10/8 修訂**：plugin 來源調查暫緩後，診斷重點與結果分支以第 39.7 節為準：39.1 第 1、2 項（名稱、路徑分類）改為既有輸出的附帶資訊；39.5「plugins／agents 非空」的處理改依 39.7.3。39.2～39.4 的執行邊界不變。
 >
+> **10/8 驗收**：清單於 `d12adcc` 通過限定文件 review，R1／R2 關閉（第 39.10 節）；真實執行仍未核准。
+>
 > **10/8 R1／R2 修訂**：39.3 命令改為 bash 失敗即停止流程、stdout 改存 `stdout.txt`；39.4、39.7.3 的 `not_started` 與 `orphaned_output` 說明更正。原文與對照見第 39.8 節。
 
 - **依據**：vault〈Claude-Code-B1-04-診斷型C0prime執行清單整理指示-1395a1f-20261008〉。本節與該筆記都**不構成真實執行核准**。
@@ -1272,7 +1274,7 @@ exit "$PROBE_EXIT"
 | `0` | `observed`／`init_observed`，`input_status=not_started` | init 在訊息寫入前就先到，probe 停止、不再寫入；**實際寫入 0 位元組仍是有效觀測**（`probe.go` 最終判定只有 `failed`／`partial` 會排除觀測） |
 | `4` | `no_init_after_message` | 訊息完整送出（`input_status=complete`），30 秒內沒有 init |
 | `1`（有 JSON） | `failed`／固定代碼 | 其他失敗，回報固定代碼（見下） |
-| `1`（無 JSON，已確認的前置拒絕） | — | `stdout.txt` **沒有**模式提示行，且錯誤行是 `main.go` `probe` 在印出提示前的拒絕訊息：`APA_LIVE_CLI`、`--cli` 非絕對路徑、多餘參數、版本檢查失敗或逾時、版本不符、版本檢查前後取消（訊息含 `nothing was started` 或 `the probe was not started`）。probe 會話沒有啟動、沒有 trace；但版本檢查本身會執行一次 CLI 版本查詢 |
+| `1`（無 JSON，已確認的前置拒絕） | — | `stdout.txt` **沒有**模式提示行，且錯誤行是 `main.go` `probe` 在印出提示前的拒絕訊息：`APA_LIVE_CLI`、`--cli` 非絕對路徑、多餘參數、版本檢查失敗或逾時、版本不符、版本檢查前後取消（訊息含 `nothing was started` 或 `the probe was not started`）。probe 會話沒有啟動、沒有 trace。若流程已進入版本檢查，可能已執行 CLI 版本查詢；更早的拒絕（`APA_LIVE_CLI`、`--cli`、多餘參數、版本檢查前取消）不會執行 |
 | `1`（無 JSON，probe 或輸出保存失敗） | — | `stdout.txt` 有模式提示行但沒有 JSON，或無法歸入上一列（例如 `Probe` 回傳錯誤、trace 無法寫入、JSON 輸出失敗）。**可能已執行 CLI 並送出訊息**；不能據此宣稱零輸入、零用量或沒有 trace。照實保存 `stdout.txt`、錯誤行與 `runs/` 內實際存在的檔案，交 Codex 判斷 |
 
 `exit 1` 的固定代碼（依原始碼，任一出現即停止）：
@@ -1341,6 +1343,8 @@ exit "$PROBE_EXIT"
 
 這仍只是取得啟動觀測資料，不是正式 AI 請購或 live 閘門驗收。plugins 或 agents 非空，也是有效的診斷結果。
 
+**plugin 觀測的依據**：以 APA wrapper 當次 runtime 的 init 為準。pixel-office 的名稱只是 probe 的顯示候選，**不作為允許依據**；名稱相符不代表允許執行，也不代表兩邊來源相同。
+
 #### 39.7.3 結果分支
 
 | 結果 | 怎麼辨認（39.4） | 後續處理 |
@@ -1396,3 +1400,13 @@ Codex 以文件與原始碼靜態核對 `ff094f5`，接受前置工作區、程�
 | R2 無 JSON 的解讀 | 「`1`（無 JSON）」一律解讀為啟動前被拒 | 分成兩列：已確認的前置拒絕（沒有模式提示行，錯誤行是提示前的拒絕訊息；版本檢查本身仍會執行一次 CLI 版本查詢）；probe 或輸出保存失敗（可能已執行 CLI 並送出訊息，不能宣稱零輸入、零用量或沒有 trace） | 39.4、39.7.3 |
 
 依閱讀核對 `cmd/apa-buyer/main.go`（`main`、`probe`、`checkLive`）與 `internal/buyer/probe.go`（`Probe` 的錯誤回傳、`probeTrace`）。本輪沒有執行腳本、`bash -n`、測試、容器、真實 CLI、版本查詢、登入檢查或 C0′；沒有改產品程式、Gate、接受清單或啟動參數，也沒有調查 plugin 來源。L1-b 不標通過；B1-04 仍 InProgress。
+
+### 39.10 驗收紀錄：診斷型 C0′ 清單於 `d12adcc` 通過限定文件 review（2026-10-08）
+
+> **診斷型 C0′ 清單於 `d12adcc` 通過限定文件 review，R1／R2 關閉。** 真實執行仍待 Aaron 另行核准，尚未執行。
+
+- **證據歸屬**：Codex 對文件與原始碼的**靜態核對**（`5ed66f1` 的 R1／R2、`ff094f5` 的兩處補正、`d12adcc`）。**不是測試通過**：Codex 與 Claude Code 都沒有執行腳本、`bash -n`、測試、容器、真實 CLI 或 C0′。
+- **通過範圍**：只是 §39 執行清單的文件內容（前置檢查的失敗停止、probe 只呼叫一次與退出碼保存、證據保存失敗回報、`stdout.txt` 格式、`not_started`、`orphaned_output`、無 JSON 的兩種解讀、結果分支）。不代表診斷已執行、plugins／agents 已清空、L1-b 或 L1-c 通過，也不構成執行核准。
+- **同步時的非阻擋文案修正**（Codex 指示）：39.4「已確認的前置拒絕」列，原寫「版本檢查本身會執行一次 CLI 版本查詢」，改為「若流程已進入版本檢查，可能已執行 CLI 版本查詢；更早的拒絕不會執行」。39.9 表格保留 `d12adcc` 時的原文。
+- **加註**（39.7.2）：plugin 觀測以 APA wrapper 當次 runtime 的 init 為準；pixel-office 名稱僅為顯示候選，不作為允許依據。
+- 本輪只同步文件：沒有重跑驗證、調查 plugin 來源或執行 C0′；沒有改產品程式、Gate、接受清單或啟動參數。L1-b 不標完成；B1-04 仍 InProgress。
