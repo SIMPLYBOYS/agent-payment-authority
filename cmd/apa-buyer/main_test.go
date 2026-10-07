@@ -319,6 +319,60 @@ func liveFake(t *testing.T, f *fixture, scen string) string {
 	return f.fake
 }
 
+// L1-a: every CLI process the live paths start (the version check, the run,
+// the C0 and C0′ probes) gets CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1, even
+// when the parent sets it otherwise. A wrapper records the value it was
+// started with and then becomes the fake (exec keeps the process, and the
+// fake still reads <fake>.scenario.json).
+func TestLiveEnvDisablesBuiltinAgents(t *testing.T) {
+	wrap := func(t *testing.T, f *fixture, scen string) (string, string) {
+		fake := liveFake(t, f, scen)
+		dir := t.TempDir()
+		seen := filepath.Join(dir, "seen")
+		cli := filepath.Join(dir, "claude")
+		body := "#!/bin/sh\nprintf '%s\\n' \"${CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS-unset}\" >> '" + seen + "'\nexec '" + fake + "' \"$@\"\n"
+		if err := os.WriteFile(cli, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return cli, seen
+	}
+	values := func(t *testing.T, seen string) []string {
+		b, err := os.ReadFile(seen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Fields(string(b))
+	}
+	env := map[string]string{"APA_LIVE_CLI": "true", "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "0"}
+
+	f := newFixture(t)
+	cli, seen := wrap(t, f, "ask-mainline")
+	out, err := f.exec(context.Background(), []string{"run", "--live", "--cli", cli}, env,
+		deps{liveVersion: fakecli.Version, liveAuth: []string{fakecli.AuthSource}})
+	if err != nil {
+		t.Fatalf("live run: %v\n%s", err, out)
+	}
+	if v := values(t, seen); len(v) != 2 || v[0] != "1" || v[1] != "1" { // --version, then the run
+		t.Fatalf("live run: the CLI processes saw %q", v)
+	}
+
+	for _, args := range [][]string{nil, {"--send-one-message"}} {
+		f := newFixture(t)
+		scen := "probe-init-first"
+		if args != nil {
+			scen = "probe1-wait-message"
+		}
+		cli, seen := wrap(t, f, scen)
+		out, err := f.probeExec(context.Background(), append([]string{"--cli", cli}, args...), env, deps{liveVersion: fakecli.Version})
+		if err != nil || !strings.Contains(out, `"status": "observed"`) {
+			t.Fatalf("probe %v: %v\n%s", args, err, out)
+		}
+		if v := values(t, seen); len(v) != 2 || v[0] != "1" || v[1] != "1" {
+			t.Fatalf("probe %v: the CLI processes saw %q", args, v)
+		}
+	}
+}
+
 // Stage A: the live path, run with the fake only: the same gate, relay,
 // HTTP 402 and Store as a live run, ending in an Ask.
 func TestLivePathWithFake(t *testing.T) {

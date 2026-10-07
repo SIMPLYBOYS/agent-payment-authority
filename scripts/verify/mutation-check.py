@@ -560,6 +560,9 @@ MUTATIONS = [
      ' || !bytes.HasPrefix(bytes.TrimLeft(body, " \\t\\r\\n"), []byte("{")) {', ' {', 'TestCancelBody|TestControlBodyShape'),
     ('B1-06 3.4 R1: a control body may go on after its object', 'cmd/demo/control.go',
      '\tif _, err := dec.Token(); err != io.EOF {', '\tif false {', 'TestCancelBody|TestControlBodyShape'),
+    # B1-04 L1-a: the CLI's fixed environment disables the built-in agents.
+    ('B1-04 L1-a: built-in agents switch dropped from the CLI environment', 'internal/buyer/host.go',
+     ', "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1"}', '}', 'TestArgvAndEnv|TestCLIEnvReachesChild'),
 ]
 
 

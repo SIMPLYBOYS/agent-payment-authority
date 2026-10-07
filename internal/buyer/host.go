@@ -62,7 +62,13 @@ var envAllowlist = []string{"HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG",
 // fixedEnv (Aaron, 2026-10-03) asks the CLI for fewer updates and less
 // nonessential traffic, per the env-vars reference; local help does not
 // list them. It is not a firewall.
-var fixedEnv = []string{"DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"}
+//
+// CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1 (L1-a, Aaron 2026-10-07): the
+// official docs say that in -p mode it removes all built-in subagent types
+// (docs/cli-poc.md 32.2 item 6). Whether it empties the agents list a real
+// 2.1.289 init reports is not verified (that is L1-c); the init gate still
+// refuses any agent. Like the others, a parent value cannot replace it.
+var fixedEnv = []string{"DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1"}
 
 // CLIEnv is the CLI's whole environment: the allowlisted variables from
 // getenv, the fixed ones, then extra.

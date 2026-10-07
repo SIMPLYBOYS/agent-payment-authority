@@ -241,8 +241,19 @@ func TestArgvAndEnv(t *testing.T) {
 		"ANTHROPIC_PROFILE": "p", "CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CONFIG_DIR": "/c", "HTTPS_PROXY": "http://p",
 		"AWS_SECRET_ACCESS_KEY": "k", toolbridge.EnvCapability: "c", "APA_DB_PATH": "/db"}
 	env := CLIEnv(func(k string) string { return parent[k] }, "EXTRA=1")
-	if !slices.Equal(env, []string{"HOME=/h", "PATH=/bin", "DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "EXTRA=1"}) {
+	if !slices.Equal(env, []string{"HOME=/h", "PATH=/bin", "DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1", "EXTRA=1"}) {
 		t.Errorf("env %q", env)
+	}
+}
+
+// L1-a: the built-in agents switch reaches the CLI process as 1, whatever
+// the parent environment says (the parent's value is not allowlisted).
+func TestCLIEnvReachesChild(t *testing.T) {
+	cli := script(t, `printf '%s|%s\n' "${CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS-unset}" "${CLAUDE_CODE_OAUTH_TOKEN-unset}"`)
+	parent := map[string]string{"PATH": os.Getenv("PATH"), "HOME": t.TempDir(), "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "0", "CLAUDE_CODE_OAUTH_TOKEN": "o"}
+	out, err := Version(context.Background(), cli, CLIEnv(func(k string) string { return parent[k] }), testLimits)
+	if err != nil || out != "1|unset\n" {
+		t.Fatalf("child saw %q (%v)", out, err)
 	}
 }
 
