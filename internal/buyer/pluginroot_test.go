@@ -82,6 +82,18 @@ func checkGone(t *testing.T, root, elsewhere string) {
 	}
 }
 
+// The environment handed to the runner names the root once, last: os/exec
+// would also keep only the last of two, so the end-to-end tests below
+// cannot see a duplicate; this one does.
+func TestWithPluginRoot(t *testing.T) {
+	dir := t.TempDir()
+	env, err := withPluginRoot([]string{"HOME=/h", EnvPluginRoot + "=/elsewhere", "PATH=/bin"}, dir)
+	want := []string{"HOME=/h", "PATH=/bin", EnvPluginRoot + "=" + filepath.Join(dir, "plugins")}
+	if err != nil || strings.Join(env, "\n") != strings.Join(want, "\n") {
+		t.Errorf("env %q (%v)", env, err)
+	}
+}
+
 func TestPluginRootLive(t *testing.T) {
 	e := newHost(t)
 	out := filepath.Join(t.TempDir(), "seen")
