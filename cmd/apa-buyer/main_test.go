@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -330,9 +331,22 @@ func TestLiveEnvDisablesBuiltinAgents(t *testing.T) {
 		dir := t.TempDir()
 		seen := filepath.Join(dir, "seen")
 		cli := filepath.Join(dir, "claude")
-		body := "#!/bin/sh\nprintf '%s\\n' \"${CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS-unset}\" >> '" + seen + "'\nexec '" + fake + "' \"$@\"\n"
+		// APA_WARM is not in the CLI's allowlist, so only the readiness run
+		// below carries it; the paths under test cannot.
+		body := "#!/bin/sh\n[ \"$APA_WARM\" = 1 ] && exit 0\nprintf '%s\\n' \"${CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS-unset}\" >> '" + seen + "'\nexec '" + fake + "' \"$@\"\n"
 		if err := os.WriteFile(cli, []byte(body), 0o755); err != nil {
 			t.Fatal(err)
+		}
+		// Ready first: a script created a moment ago can take seconds to
+		// start once under a loaded go test run (docs/cli-poc.md 34.2), and
+		// the version check has a 5 s limit. This test is about the
+		// environment, so the script runs once, untimed, before it.
+		ready, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		warm := exec.CommandContext(ready, cli)
+		warm.Env = append(os.Environ(), "APA_WARM=1")
+		if err := warm.Run(); err != nil {
+			t.Fatalf("the wrapper does not start: %v", err)
 		}
 		return cli, seen
 	}

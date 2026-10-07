@@ -250,6 +250,15 @@ func TestArgvAndEnv(t *testing.T) {
 // the parent environment says (the parent's value is not allowlisted).
 func TestCLIEnvReachesChild(t *testing.T) {
 	cli := script(t, `printf '%s|%s\n' "${CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS-unset}" "${CLAUDE_CODE_OAUTH_TOKEN-unset}"`)
+	// Ready first: a script created a moment ago can take seconds to start
+	// once under a loaded go test run (docs/cli-poc.md 34.2). This test is
+	// about the environment, not about that limit, so the script runs once,
+	// untimed, before the limited call.
+	ready, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if err := exec.CommandContext(ready, cli).Run(); err != nil {
+		t.Fatalf("the script does not start: %v", err)
+	}
 	parent := map[string]string{"PATH": os.Getenv("PATH"), "HOME": t.TempDir(), "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "0", "CLAUDE_CODE_OAUTH_TOKEN": "o"}
 	out, err := Version(context.Background(), cli, CLIEnv(func(k string) string { return parent[k] }), testLimits)
 	if err != nil || out != "1|unset\n" {
