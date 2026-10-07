@@ -1021,5 +1021,8 @@ echo "exit=$?"
 - **本機驗證**（Claude Code 執行，待 Codex 獨立 review；`418f0de`，`artifacts/b1-04/418f0de1506d-20261007T111449Z/`）：
   - check-contracts、`go test -race -cover ./... -count=1`、20 項證據匯入測試：exit 0。覆蓋率 buyer 92.9%、apa-buyer 81.7%、toolbridge 91.8%。
   - `make check` exit 2、B1-01 exit 1（34 項 PASS、1 項 FAIL，即其中的 `make check`）：失敗的只有 `TestLiveOptIn`（`make check` 與 B1-01 兩次）與 `TestVersion`（B1-01 中一次），都是第 34.2 節列出的既有計時失敗，本輪沒有改這兩個測試；同一 commit 的 race 步驟跑同樣的測試則通過。新的三個測試在兩次執行中都通過。主機負載仍高（另有非本工作的長時間程序）。
-- **容器完整驗證：未完成。** 第一次嘗試（`418f0de`，`artifacts/verify-container/runs/418f0de1506d-20261007T112159Z/`、`artifacts/b1-04/container-418f0de-attempt1-terminated.log`）在 Claude Code session 結束時被終止（exit 143，證據匯入無檔案），沒有結果；之後 Docker daemon 未在執行，未重跑。突變 #248 因此只有提交前的本機預檢，尚無容器內的 248 項突變結果；最近一次完整容器仍屬 `d7070af`（247 項）。需要時請啟動 Docker 後對 `418f0de` 補跑。
+- **容器完整驗證**（Claude Code 執行，待 Codex 核對紀錄；`418f0de`，斷網容器，映像 `sha256:78258368…b6d0`，以全名 `docker.io/library/apa-verify:b1-05` 指定）：
+  - **第一次（保留）**：在 Claude Code session 結束時被終止（exit 143，證據匯入無檔案），沒有結果。`artifacts/verify-container/runs/418f0de1506d-20261007T112159Z/`（附 `INTERRUPTED-NOTE.txt`）、`artifacts/b1-04/container-418f0de-attempt1-terminated.log`。
+  - **第二次**（Aaron 啟動 Docker 後補跑一次）：overall exit 0。七步全過：check-contracts 16 秒（adapter 26／26、hostcreds 23／23）、check 74、race-cover 270（apa-buyer 81.7％、buyer 92.9％）、verify-b1-01 43、guards、evidence-import-tests、mutation 346 秒——**248／248 突變全數被殺**，#248（拿掉停用內建 agents 的變數）由 `TestArgvAndEnv|TestCLIEnvReachesChild` 抓到；隔離自檢 17 項 ok。容器內 `TestLiveOptIn`、`TestVersion` 都通過。證據：`artifacts/verify-container/runs/418f0de1506d-20261007T160539Z/`、`artifacts/b1-04/container-418f0de-attempt2.log`。
+  - `2593487` 只改註解與文件，未另跑容器。
 - **仍須 Aaron 另行核准**：L1-b（plugin 來源確認方式；若需參數，另一個實作停止點）、L1-c（一次 C0′ 觀測）、L1-d（階段 B 與認證接受值）、L1-e（一次階段 C）。B1-04 仍 InProgress；未標 Done、未合併 main。
