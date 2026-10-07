@@ -1017,7 +1017,7 @@ echo "exit=$?"
   - `TestLiveEnvDisablesBuiltinAgents`：以包裝腳本記錄啟動時的值，再 `exec` 成 fake；live run（版本檢查＋run）、C0 probe、C0′ probe 的每個 CLI 程序都看到 `1`。
   - 既有的 `TestHostInitGate` 仍拒絕 `agents: ["Explore"]`。
   - 突變 #248：從 `fixedEnv` 拿掉這個變數。提交前預檢：`TestArgvAndEnv`、`TestCLIEnvReachesChild` 失敗；另以同樣改法確認 `TestLiveEnvDisablesBuiltinAgents` 失敗（看到 `unset`）。
-- **失敗與修正**（保留紀錄）：`79a4a5f` 的本機 `make check` 中，新的 `TestCLIEnvReachesChild` 失敗：剛建立的腳本在高負載的全套測試裡 10 秒內沒有回應 `--version`，與第 34.2 節的待辦同一症狀（原因未確認）。這個測試要驗的是環境，不是該上限，所以 `418f0de` 讓兩個新測試在受限呼叫前先以不限時（上限一分鐘）的方式執行一次新腳本；包裝腳本遇到 `APA_WARM=1` 立即結束，而 CLI 的 allowlist 不會傳這個變數。正式上限未改。紀錄：`artifacts/b1-04/79a4a5ff204c-20261007T110623Z/`（附 `FAILED-NOTE.txt`）。
+- **失敗與修正**（保留紀錄）：`79a4a5f` 的本機 `make check` 中，新的 `TestCLIEnvReachesChild` 失敗：剛建立的腳本在高負載的全套測試裡 10 秒內沒有回應 `--version`，與第 34.2 節的待辦同一症狀（原因未確認）。這個測試要驗的是環境，不是該上限，所以 `418f0de` 讓兩個新測試在受限呼叫前先預跑一次新腳本：預跑上限 60 秒，不套用正式版本檢查的 5 秒限制（`TestCLIEnvReachesChild` 之後的受限呼叫用的是測試的 10 秒上限）。10/8 用語更正：原寫「不限時」，實際一直有 60 秒上限；`418f0de` 的 commit 訊息中的 "untimed" 同此更正，歷史不改寫；包裝腳本遇到 `APA_WARM=1` 立即結束，而 CLI 的 allowlist 不會傳這個變數。正式上限未改。紀錄：`artifacts/b1-04/79a4a5ff204c-20261007T110623Z/`（附 `FAILED-NOTE.txt`）。
 - **本機驗證**（Claude Code 執行，待 Codex 獨立 review；`418f0de`，`artifacts/b1-04/418f0de1506d-20261007T111449Z/`）：
   - check-contracts、`go test -race -cover ./... -count=1`、20 項證據匯入測試：exit 0。覆蓋率 buyer 92.9%、apa-buyer 81.7%、toolbridge 91.8%。
   - `make check` exit 2、B1-01 exit 1（34 項 PASS、1 項 FAIL，即其中的 `make check`）：失敗的只有 `TestLiveOptIn`（`make check` 與 B1-01 兩次）與 `TestVersion`（B1-01 中一次），都是第 34.2 節列出的既有計時失敗，本輪沒有改這兩個測試；同一 commit 的 race 步驟跑同樣的測試則通過。新的三個測試在兩次執行中都通過。主機負載仍高（另有非本工作的長時間程序）。

@@ -340,7 +340,8 @@ func TestLiveEnvDisablesBuiltinAgents(t *testing.T) {
 		// Ready first: a script created a moment ago can take seconds to
 		// start once under a loaded go test run (docs/cli-poc.md 34.2), and
 		// the version check has a 5 s limit. This test is about the
-		// environment, so the script runs once, untimed, before it.
+		// environment, so the script first runs once in a warm-up capped at
+		// 60 s, without the formal version check's 5 s limit.
 		ready, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		warm := exec.CommandContext(ready, cli)

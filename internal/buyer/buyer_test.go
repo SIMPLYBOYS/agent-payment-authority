@@ -252,8 +252,9 @@ func TestCLIEnvReachesChild(t *testing.T) {
 	cli := script(t, `printf '%s|%s\n' "${CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS-unset}" "${CLAUDE_CODE_OAUTH_TOKEN-unset}"`)
 	// Ready first: a script created a moment ago can take seconds to start
 	// once under a loaded go test run (docs/cli-poc.md 34.2). This test is
-	// about the environment, not about that limit, so the script runs once,
-	// untimed, before the limited call.
+	// about the environment, not about that limit, so the script first runs
+	// once in a warm-up capped at 60 s, without the 10 s test limit of the
+	// limited call below.
 	ready, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	if err := exec.CommandContext(ready, cli).Run(); err != nil {
