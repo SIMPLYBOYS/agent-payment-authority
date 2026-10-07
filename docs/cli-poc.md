@@ -1137,3 +1137,105 @@ echo "exit=$?"
 - **範圍**：**L1-b 的 plugin 來源仍未確認。** 名稱相符不代表來源可信、完整 plugin ID 已確認，或允許執行。
 - **未做**：沒有修改停用參數或認證清單；沒有執行診斷型 C0′。真實執行仍需 Aaron 另行核准；B1-04 仍 InProgress，未標 Done、未合併 main。
 
+## 39 診斷型 C0′ 執行確認清單（2026-10-08 整理；待 Codex review 與 Aaron 另行核准；尚未執行）
+
+> **狀態**：診斷型 C0′ 執行確認清單已整理，待 Codex review 與 Aaron 另行核准；尚未執行。
+
+- **依據**：vault〈Claude-Code-B1-04-診斷型C0prime執行清單整理指示-1395a1f-20261008〉。本節與該筆記都**不構成真實執行核准**。
+- **開工核對**：分支 `b1-04-live`，HEAD `1395a1f`；工作區只有未追蹤的 `demo`（不動）。程式基準是 `e99f389`；其後 `0958725`、`70bde1e`、`1395a1f` 只改 `docs/cli-poc.md`（`git diff --stat e99f389 1395a1f` 只有這個檔案）。
+- **現行行為依原始碼核對，未執行任何 CLI**：`cmd/apa-buyer/main.go` 的 `probe`、`checkLive`、`versionLimits`；`internal/buyer/probe.go` 的 `ProbeTimeout`、`Probe`、`watch`、`observe`、`ProbeResult`；`internal/buyer/runner.go` 的 `DefaultLimits`、`Outcome`、`Input*`；`internal/buyer/host.go` 的 `CLIEnv`／`fixedEnv`。
+- 現況：L1-a 已通過限定範圍技術 review；probe 顯示候選修正於 `e99f389` 通過。**L1-b 的 plugin 來源仍未確認**。本清單不重開已關閉的修正，也不代表 L1-b 全部完成。
+
+### 39.1 診斷目的（三項分開）
+
+1. **plugin 名稱**：這次 APA 啟動的 init 所回報的 plugins，是否**完全符合**三個顯示候選 `cc-plugin-agents-md`、`cc-plugin-telemetry`、`cc-plugin-plugin-authoring`（`plugins_entries[].name`；不符者只會是 `other`＋長度）。
+2. **plugin 路徑分類**：`plugins_entries[].path` 的既有分類（`home_plugins_synced`／`home_plugins_cache`／`home_plugins_other`／`home_skills`／`work_dir`／`other`／`relative`／`absent`／`not_string`）；不收集原始路徑。
+3. **agents**：在 L1-a 的 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` 之下，`agents_count` 與 `agents_entries` 是否為空。probe 的 CLI 環境經 `CLIEnv`，含這個固定變數。
+
+這是**診斷，不是正式 live 放行驗收**：
+- plugins 或 agents 非空，也是有效的診斷結果。
+- 名稱相符不證明來源、完整 plugin ID 或可信程度；路徑分類只是對 CLI 回報文字的分類，不是來源認證。
+- 不因觀測結果自動修改閘門、認證接受清單或停用參數。
+- 不直接當成路線 L1-c「確認 plugins／agents 清空」的驗收通過；若結果可支持後續判斷，仍須另行 review。
+
+### 39.2 待 Aaron 核准的執行範圍（未勾選，待核准）
+
+- [ ] 只核准**一次**診斷型 C0′ 執行嘗試。版本檢查失敗、解析錯誤或逾時，都停止，不重試。
+- [ ] CLI 路徑 `/Users/mac/.local/bin/claude`；程式釘選 `2.1.289 (Claude Code)`（`cmd/apa-buyer/main.go` 的 `approvedCLIVersion`）。本輪不執行版本查詢；執行時命令會先自行檢查，不符就停止，不自行更新 CLI 或修改釘選。
+- [ ] 沿用既有的程序層 `DISABLE_AUTOUPDATER=1`（`fixedEnv`），不改全域設定。
+- [ ] 只送一次固定訊息 `Reply only OK.`（`OneMessageText`）；依程式記錄實際寫入結果 `input_status` 與位元組數 `stdin_bytes_written`。95 位元組是完整封裝 `input_message_bytes` 的預期大小，**不可代替實際寫入量**。
+- [ ] 一則訊息不等於一次模型請求；可能產生用量，無法確認時記為 `unknown`（`usage`）；停止 CLI 不能撤回已送出的請求。
+- [ ] CLI 會使用既有 HOME、網路與登入環境（含 `~/.claude` 與 keychain）；這**不是作業系統沙箱**（第 7.5 節）。Claude Code 不另外讀取設定、憑證或 keychain 內容。
+- [ ] 不開 Store、不建 task、不執行業務工具（`business_calls_executed` 必須為 0），不進入階段 C。
+
+### 39.3 命令（僅供未來核准後使用；本輪不得執行，包括不建置、不查詢真實 CLI 版本）
+
+```sh
+# 僅供未來核准後使用；本輪不得執行。任一步失敗即停止，不使用舊二進位。
+cd /Users/mac/Documents/OpenSourceProjects/agent-payment-authority
+git status --short                         # 只允許 `?? demo`；有其他差異就停止
+BASE=$(git rev-parse HEAD); echo "$BASE"   # 執行基準（記錄）
+git diff --stat e99f389 "$BASE" -- . ':(exclude)docs' ':(exclude)README.md'   # 必須沒有輸出：程式基準 e99f389 之後只改文件
+EV="$PWD/artifacts/b1-04/c0prime-diag-$(date -u +%Y%m%dT%H%M%SZ)"; mkdir -p "$EV"; echo "$BASE" > "$EV/commit.txt"
+WT=$(mktemp -d "${TMPDIR:-/tmp}/apa-c0p.XXXXXX")
+git worktree add --detach "$WT/src" "$BASE"                    # 乾淨工作樹：不動 repo 根目錄的 demo
+(cd "$WT/src" && go build -o "$WT/apa-buyer" ./cmd/apa-buyer)
+go version -m "$WT/apa-buyer" | grep -E 'vcs\.(revision|modified)' | tee "$EV/binary-vcs.txt"
+#   須為 vcs.revision=$BASE、vcs.modified=false；否則停止
+date -u +%FT%TZ > "$EV/started-utc.txt"
+APA_LIVE_CLI=true "$WT/apa-buyer" probe-init \
+  --cli /Users/mac/.local/bin/claude \
+  --send-one-message \
+  --trace-dir "$EV/runs" > "$EV/result.json" 2> "$EV/apa-buyer-error.txt"
+echo "exit=$?" | tee "$EV/exit-code.txt"
+date -u +%FT%TZ > "$EV/ended-utc.txt"
+git worktree remove "$WT/src"
+```
+
+- **為什麼用暫時工作樹**：先前幾次真實執行都要求工作區乾淨（第 27、30 節），現在 repo 根目錄有未追蹤的 `demo`（不得刪除或搬動）。Go 判斷 `vcs.modified` 時，依其實作也會把未追蹤檔算進去，所以直接在 repo 建置預期會得到 `vcs.modified=true`。這是依 Go 行為的推論，本輪沒有建置驗證；若執行時仍不是 `false`，就停止。
+- `result.json` 是 probe 的白名單投影（與 trace 相同）；`apa-buyer-error.txt` 只有 apa-buyer 自己的錯誤行，不含 CLI 的 stdout／stderr 文字。
+- **時間上限**（依原始碼）：
+  - 版本檢查：`versionLimits` 最多 5 秒，加 1 秒清理寬限；**不算在 init 等待內**。
+  - init 等待：`ProbeTimeout` 30 秒，從 CLI 程序啟動起算（`Limits.Total`）。
+  - 停止後清理：最多兩個寬限期，`DefaultLimits.Grace` 3 秒，約 6 秒；不算在 init 等待內。
+  - 不為取得更多資訊延長等待，也不等模型回答。
+
+### 39.4 結果怎麼讀（exit code 依 `probe`；`3` 只屬 C0，這裡不會出現）
+
+| exit | status／code | 意思 |
+|---|---|---|
+| `0` | `observed`／`init_observed` | 取得 init（版本欄位為核准值），只代表取得觀測資料，**不代表正式閘門通過** |
+| `4` | `no_init_after_message` | 訊息完整送出（`input_status=complete`），30 秒內沒有 init |
+| `1`（有 JSON） | `failed`／固定代碼 | 其他失敗，回報固定代碼（見下） |
+| `1`（無 JSON） | — | 啟動前被拒（`APA_LIVE_CLI`、`--cli` 非絕對路徑、版本檢查失敗或逾時、版本不符、取消）；只有 apa-buyer 的錯誤行，沒有 trace |
+
+`exit 1` 的固定代碼（依原始碼，任一出現即停止）：
+- 寫入：`input_failed`、`input_partial`、`input_not_started`（訊息沒有完整寫入；即使同時取得 init，也不採用觀測）。
+- init：`init_cli_version`（版本欄位不是核准值）、`init_malformed`。
+- API：`api_retry_auth`、`api_retry_rate_limit`、`api_retry`（init 前出現 `api_retry`；只記代碼，不記錯誤文字）。
+- 訊息：`hook_message`、`unexpected_message`（init 前出現 assistant、user、result 等）。
+- 解讀：`ambiguous_json`（成員重複或大小寫折疊後重複）、`parse_error`。
+- 程序：`cancelled`、`output_overflow`、`nonzero_exit`、`start_failed`、`not_installed`、`orphaned_output`、`cli_error` 等 runner 結果。
+
+**任何結果都停止**：不追加第二次觀測、不自動改用其他參數、不轉往 C0 重跑或正式購物流程。程序清理沿用既有方式（process group 結束、寬限期後 SIGKILL）；**不保證能回收脫離 process group 的子程序**，那種情況記為 `orphaned_output`（第 7.5 節第 4 點）。
+
+### 39.5 證據與解讀
+
+- **只保存**：既有白名單輸出（`result.json`）與 trace、exit code、執行 commit、二進位 vcs 資訊、起訖時間。不擴大收集原始 init、未知欄位名稱、原始路徑或 CLI 錯誤文字。
+- 若在版本檢查等前置步驟就停止而沒有 trace，**照實記錄不存在**，不補造檔案或觀測資料。
+- 未來的證據先標「Claude Code 執行，待 Codex review」，不預寫為已驗收。
+- **預先列出的解讀**：
+  - 候選名稱相符：只記「名稱相符，來源未確認」。
+  - 顯示 `other`：維持未知，不猜名稱或完整 ID。
+  - agents 為空：只證明這次條件下回報為空，不外推到其他環境。
+  - plugins／agents 非空：保留觀測，交 Codex review；不自動放寬閘門。
+  - `apiKeySource`（`auth_source`）為 `none`：不解讀成已確認訂閱或計費方式。
+  - 與 pixel-office 的名稱或數量相符：不據此認定兩者設定來源相同。
+
+### 39.6 尚待核准
+
+- 這一次診斷型 C0′ 的執行（39.2 全部項目）；
+- 執行後的任何下一步（停用參數、認證接受值、階段 B、L1-c、L1-d、L1-e）都另行決定。
+
+本輪沒有跑測試、容器、真實 CLI、登入檢查或 C0′；沒有修改程式、接受清單或啟動參數。B1-04 仍 InProgress。
+
