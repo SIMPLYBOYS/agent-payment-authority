@@ -1,6 +1,6 @@
 # B1-06 商店展示深化設計（fake 展示模式）
 
-狀態（2026-10-07）：**D1 於 `6338fd2` 通過 Codex 限定範圍技術 review；R1、R2、C1 關閉。通過範圍為 fake 展示的網頁呈現與相關修正，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成。B1-04／B1-06 整體維持 InProgress。**（§15.7）**D2 第三輪設計補正完成（§16、§16.12–§16.14），待 Codex 限定 review；尚未核准實作。** D3–D6 未開始。D1 實作於 `7ffc45d`，review 後修正於 `6338fd2`；設計於 `15d705a` 通過（§14.3）。
+狀態（2026-10-07）：**D1 於 `6338fd2` 通過 Codex 限定範圍技術 review；R1、R2、C1 關閉。通過範圍為 fake 展示的網頁呈現與相關修正，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成。B1-04／B1-06 整體維持 InProgress。**（§15.7）**D2 設計（§16，`9b70c0c`）經 Aaron 10/7 核准實作：程式與測試 `bc79677`，計時修正 `d7070af`；Claude Code 執行，待 Codex 獨立 review（§17）。不合併、不推送、不標 Done。** D3–D6 未開始。D1 實作於 `7ffc45d`，review 後修正於 `6338fd2`；設計於 `15d705a` 通過（§14.3）。
 
 - **依據**：Aaron 轉交的〈B1-06 商店展示深化設計指示〉（vault，2026-10-07）。
 - **Aaron 的回饋**：已實際操作目前 demo，初步確認基本展示可用，未發現重大問題；現有情境仍然陽春，同意往展示內容深化推進。這不是 `docs/demo-operation-design.md` 16.3 人工清單逐項完成的聲明。
@@ -753,7 +753,7 @@ D1 的實作核准不需等 D2–D6 全部定案。本輪只補文件，沒有�
 
 B1-04／B1-06 整體維持 InProgress；不合併、不推送、不標 Done。
 
-## 16 D2 場景動畫深化設計（提案；Claude Code 撰寫；依 Codex 對 `e61d801` 的 review 修訂，見 16.12；待 Codex 限定 review；尚未核准實作）
+## 16 D2 場景動畫深化設計（Claude Code 撰寫；經三輪補正，`9b70c0c`；Aaron 10/7 同意 16.10 五項建議並核准實作，實作紀錄見 §17）
 
 依據：Aaron 10/7「下一步建議進入 D2 場景動畫深化的設計確認」。目標是讓觀眾看懂 Agent 從選商品、提出請購，到 Ask／Deny／到期／撤回的過程，每段動畫都對應可查證的資料；沒有事件支持的動作，明示為展示動畫。
 
@@ -1074,3 +1074,127 @@ D2 尚未通過完整設計 review，也尚未核准實作。
 | 測試計畫 | 第 11、12 項 | 新增第 13 項：`0 → 3 → 6`、`3 → 0 → 3`，以及過場中發生時不提前回報、不延長期限 |
 
 本輪沒有修改產品程式，也沒有執行測試、容器或 Unity 建置。D2 仍待 Codex 限定 review，尚未核准實作。
+
+## 17 D2 實作紀錄（Claude Code 執行，待 Codex 獨立 review；程式與測試 `bc79677`）
+
+依據：Aaron 10/7 同意 16.10 的五項建議（貨架短暫停留並標示展示動畫；Ask 未決時 CLI 逾時仍留在櫃檯；D2 先於 D5；Unity 英文短標籤搭配網頁中文；接受 `cause_seq`、`task_end` 兩個選填欄位），並核准依 `9b70c0c` 的已審查設計實作 D2a／D2b。本輪不合併、不推送、不標 Done；B1-04／B1-06 維持 InProgress。D3–D6 未開始。
+
+Store、Policy、契約、API、事件與資料表都沒有改。Go 只改了一個測試檔（見 17.1 測試資料）。
+
+### 17.1 修改
+
+**bridge（D2a／D2b 共同）**
+- 投影新增兩個選填欄位，`v` 仍為 1：
+  - `cause_seq`：網頁由 `scene()` 推導（`entered` → `TASK_STARTED`；`quoted` → 場景請購的 `PURCHASE_PROPOSED`；`waiting`／`denied`／`allowed_unpaid` → 其 `POLICY_DECIDED`；`expired`／`withdrawn` → 該請購的收尾事件；其他 0），只送 0 < c ≤ `seq`，否則 0。
+  - `task_end`：第一個 `TASK_CANCELLED` 或 `TASK_TIMED_OUT`。
+- Unity 的 `ProjectionState.Parse`：`JsonUtility` 會把 `"3"`、`3.5` 讀成 3，所以兩個欄位只在原始 JSON 中**恰好出現一次**、且分別是整數字面值與 `"cancelled"`／`"timed_out"` 時才採用；其他一律當成未知（0／""），訊息仍照常顯示（方案 A 行為）。這是實作時發現的，設計沒有預先寫到。
+
+**轉換表**（16.4 第 1–4 條）
+- C# `SceneRules`（`Projection.cs`）與 JS `transition()`（`web/adapter.js`）各一份，以共用測試向量 `testdata/demo/scene-transitions.json`（20 個案例、39 步）核對：EditMode 與 Node 都讀同一檔，比對規則號、是否播「選商品」與標籤。
+- `ProjectionState` 持有目標 T（phase、正規化的 `cause_seq`、`task_end`、最新 `seq`、verdict、reason）；新訊息一律與 T 比較。
+- `browse`（是否播放 `[anim] browsing`）：第 2 條一律播；第 1 條在進入櫃檯類 phase 時播，除非上一個目標是 `quoted`（已選過商品），或上一個目標也是櫃檯類而 `cause_seq` 不是「都有效且不同」；進入 `quoted` 時播。
+
+**Unity 場景**（`ShopView.cs`、`ShopBridge.cs`、`ShopBuilder.cs`）
+- 路徑：16.3 的八個點（店外、店外列、門口、通道口、貨架前、轉角、櫃檯前、櫃檯）與其間的水平／垂直線段；兩點之間取最短的通道（八個點的 Floyd–Warshall，不是自由尋路）。走到一半換目標時，從目前所在的線段兩端擇近者接回通道。
+- **道具調整**：以道具圖片的**實際不透明像素**計算，16.3 的上方通道（y = 3.2）會穿過水果台的圖（不透明範圍 y 1.77–3.84），垂直通道（x = 1.5）會碰到推車左緣（1.91，角色腳寬 ±0.44）。設計只看了水果台的放置點。依 16.9「必要時調整 `ShopBuilder.cs`」，水果台由 (5.0, 1.4) 移到 (5.0, 0.4)，推車由 (2.6, 0.4) 移到 (2.8, 0.4)；路徑與站點不變。
+- 角色占用範圍：腳下 28 × 8 px（LimeZu 每一格影格最下 8 列的最寬範圍），即 ±0.44 × 0.25 單位。
+- 步調：4.5 單位／秒；貨架停 0.6 秒；Deny 在櫃檯停 0.8 秒後離店；單次過場超過 2.5 秒時速度與停留等比例加快；另有 2.5 秒期限，到期直接移到終點。
+- 追上（16.5）：
+  1. `animate=false`：直接到終點；
+  2. 新路線就是剩餘路線的開頭：沿原路以 2 倍速、取消剩餘停留；
+  3. 其他：從目前位置依通道重新規劃，正常步調；
+  4. 期限只在第 1、2 條時重新起算；第 3、4 條（`Relabel`）不碰期限；
+  5. 被取代的過場、清除或換世代時的完成回呼都不呼叫。
+- 目標與已呈現：`Go`（第 1、2 條）開始新過場；`Relabel`（第 3、4 條）只更新 T 與標籤，已到達時才立即回報。`rendered` 在到達時對**當下 T 的最新 `seq`** 回報一次（`ShopBridge.Rendered`）。
+- 新世代即使沒有先收到 `clear`，畫面也會先清空（狀態原本就會清；畫面原本可能讓另一位客人繼續走）。
+- 四向影格：走路用 LimeZu 的右、上、左、下；站立面向下，在櫃檯面向右。
+- 標籤（ASCII，頭上兩行：名字＋標籤）：`entered (#1)`、`request proposed (#2)`、`[anim] browsing - no event`、`[anim] to counter - quote bound in request`、`ASK (#3) - waiting for a human`、`CLI timeout - ask still pending`、`DENY (#3, INSUFFICIENT_BUDGET) - leaving`、`ask expired (#4) - leaving`、`ask withdrawn (#4) - leaving`、`ALLOW - no payment capability`。reason 只顯示固定代碼（A–Z、0–9、_），其他不顯示。
+  - **與設計文字的差異（請 review）**：16.2 寫的是 `[anim] to counter - quote bound in #2`，但 16.4 規定 Unity 標籤的 `#n` 一律是 `cause_seq`，而櫃檯段的 `cause_seq` 是裁決序號（#3）。Store 雖然在同一交易連續寫入 `PURCHASE_PROPOSED`、`POLICY_DECIDED`（`internal/store/ops.go` L538–541），但讓 Unity 自行用 `cause_seq − 1` 推算會是 bridge 以外的推論，所以 Unity 標籤不帶序號，#2 由網頁文字與查證面板提供。
+  - 標籤錨點依客人在左半或右半房間改為向右或向左延伸，避免在店外時超出畫面。
+- 測試用的 `Pace`（不序列化，預設 1）：只為了讓 PlayMode 測試能觸發 2.5 秒期限；正常步調下過場本來就會在期限內到達。
+
+**網頁**（`web/adapter.js`、`web/app.js`、`web/render.js`）
+- `scene()` 多回傳 `cause`、`end`；`projection()` 送出兩個欄位；回放每一步改用 `projection({gen, snapshot: stepView(...)})`，與即時共用同一個推導。
+- `transition()` 與 `shopLabel()`：與 Unity 同一張表，另產生中文說明，例如「展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #3 記錄」「新的一筆請購：…」「不移動，只換標籤：CLI 逾時，同一筆 Ask 仍未決」「不移動、不重播：場景的請購未變（快照 #n）」。
+- `app.js` 在每個世代記住送給 Unity 的目標與最近一次真正的移動（第 1、2 條或首次載入）：
+  - 首次載入：場景文字加「首次載入為保存的快照，未觀測進店過程」；
+  - 移動中（送出到收到該序號的 `rendered`）：「Unity 補間中：」＋說明；Unity 未就緒時改為「Unity 未就緒；過場說明：」；
+  - `#scene-text` 的 `data-motion`（first／moving／shown／waiting）供瀏覽器測試讀取。
+- 查證面板「場景對應」頁新增「這次過場」列：說明＋規則號，來源「網頁依轉換表推導」。
+- `docs/demo-ui.md` §3 補上兩個選填欄位與轉換規則的說明。
+
+**測試資料**
+- `testdata/demo/scene-transitions.json`：共用向量。
+- `testdata/cli/ask-slow.json`、`testdata/demo/scenarios-d2.json`：進店後停 8 秒再請購，只供 D2 瀏覽器檢查（不改 `scenarios-acceptance.json`，它的 3 個情境數由 Go 測試與 3.2 檢查固定）。
+- `internal/store/display_history_test.go` 的 `TestSeedDisplayDB` 加 `APA_SEED_ORDER=ask_ask_then_expire`：寫入「請購 1 Ask → 請購 2 Ask → 請購 1 到期」，與既有歷史 `ask_ask_then_expire` 同順序。只是測試檔，Store 程式未改；預設行為不變。
+- 修正 `d7070af`（見 17.3）：2.5 秒期限改用真實時間（`Time.realtimeSinceStartup`），走路用 `Time.unscaledDeltaTime`。
+
+### 17.2 測試與證據（Claude Code 執行，待 Codex 獨立 review；全部在 `d7070af`，另列 `bc79677` 的失敗紀錄）
+
+| 項目 | 命令 | 結果 | 證據 |
+|---|---|---|---|
+| Node（adapter 與 hostcreds） | `node --test web/test/*.test.mjs`（於 `d7070af` 的 `git archive` 匯出目錄執行） | 47／47 | `artifacts/b1-06/d2-checks-d7070afdc0bd/node.txt` |
+| Unity EditMode | `sh scripts/unity/unity.sh test OUT` | 10／10（新增 4：共用向量 20 案例 39 步、缺欄位與非法值、錯誤 JSON 型別、ASCII 標籤） | 同目錄 `unity-test/` |
+| Unity PlayMode | 同上 | 12／12（新增 9，見下） | 同上 |
+| WebGL 重建 | `sh scripts/unity/unity.sh webgl OUT` | exit 0，314 秒 | `webgl-sha256.txt` |
+| 真實瀏覽器全套（預設兩個 Chrome 參數） | `node scripts/verify/browser-ui.mjs` | **309 PASS／1 FAIL**，837 秒 | `artifacts/b1-06/ui-d7070afdc0bd-20261007T054900Z/` |
+| 完整容器（七步、突變） | `container-verify.sh d7070af`（見 17.4） | exit 0，七步全過，247／247 突變 | `artifacts/verify-container/runs/d7070afdc0bd-20261007T063755Z/` |
+
+WebGL（`d7070af`，未提交，`Build/WebGL` 由 git 忽略）的 SHA-256：
+- `WebGL.data` `d8f79c299814dcad149d6d608f15c9f9b2eb053306a9498250656ca3f5f206dc`
+- `WebGL.framework.js` `3c7d6ab5547a85de82e08400bfd63520ba9c2f50c098eff05074a6a010e65666`
+- `WebGL.loader.js` `9284bfdd99f31d36511799a1584b662a295238e14a9395a2a0494bdc1c7e6a42`
+- `WebGL.wasm` `9a18e8cc36253ed20f2f2b3a11a0f8b330cdc42a0229a00124057d11ef60a757`
+
+**PlayMode 新增案例**（對應 16.9）
+- 第 9 項：`RoutesKeepClearOfPropsInFourDirectionsWithAsciiLabels`：兩位客人走過進店、選商品、到櫃檯、到期、第二筆請購、Deny 離店、撤回等 15 則訊息；每次過場開始時，以腳下範圍沿**整段路線**掃過（解析計算），走路中每一幀再檢查一次，對 11 個道具的不透明像素範圍都不重疊；四個方向都出現；所有標籤是 ASCII，展示段落以 `[anim] ` 開頭。
+- 第 7 項（16.5 第 1–5 條）：`NotAnimatedJumpsAndTheReplacedMoveNeverReports`（1）、`AnEndAheadOnTheWayIsReachedAtTwiceTheSpeed`（2，並確認期限重新起算）、`AnEndOffTheWayTakesTheCorridorAgain`（3，新路線也掃過避障）、`TheLimitIsKeptWhateverUpdatesComeOnTheWay`（4，以 `Pace = 0.2` 讓過場來不及，於 2.5 ± 0.15 秒跳到終點）、`TheLongestMoveArrivesWithinTheLimit`（最長路線 ≤ 2.5 秒）、`TheLimitHoldsOnSlowFrames`（每幀 200 ms、`deltaTime` 上限 50 ms，仍在真實 2.95 秒內到達）。
+- 第 12、13 項：`TheSameTargetOnTheWayAndAfterArriving`（途中 `3 → 0 → 3` 只更新 T、不重播、不提前回報，到達後只回報 #5；到達後 #6、#7 立即回報、不移動；CLI 逾時留在櫃檯換標籤）、`ZeroThreeSixOnTheWay`（途中 `0 → 3` 不重播，`3 → 6` 重播，只回報 #6）。
+- 既有兩案例保留：Ask 走到櫃檯、重送不重播、Deny 在店外；舊世代的晚到回呼與訊息丟棄。
+
+**瀏覽器 D2 段**（`browser-ui.mjs` 的「B1-06 D2」，頁面內記錄器保存每次場景文字變化與 Unity 回報的時間，以回報時間區分「沒有移動」與「走了一段」）
+- 第 1 項：種子資料庫（Store 已有 #1–#6）開啟 task：Unity 在首次載入文字出現後 800 ms 內回報 #6 waiting（沒有過場）；場景文字與查證面板「這次過場」都寫「首次載入為保存的快照，未觀測進店過程」。
+- 第 3、8 項（回放 `ask_ask_then_expire`）：#2「展示動畫：選商品（沒有獨立事件）；請購已在 #2 記錄」；#3「展示動畫：到櫃檯…裁決已在 #3 記錄」；#4、#6（其他請購的事件）Unity 立即回報、沒有「補間中」；#5（新的一筆請購）顯示「Unity 補間中：新的一筆請購：展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #5 記錄」，查證面板同文並標（規則 2）、來源「網頁依轉換表推導」，Unity 走完才回報。實測（ms，步驟文字到 Unity 回報）：`{"1":2031,"2":1596,"3":1596,"4":-1,"5":2194,"6":-1}`。
+- 第 2 項（即時，`ask-slow`）：伺服器端開始場次，確認 Store 只有 #1 才在頁面開啟；頁面首個快照是 #1（不成立即判失敗，不略過）；#3 到達時卡片已顯示 Ask，而 Unity 仍回報 #1、場景文字為「Unity 補間中：展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #3 記錄」；之後 Unity 回報 #3。實測走路 2865 ms。
+- 第 7 項的上限在瀏覽器中為 2.5 秒＋700 ms（一個慢幀與回報路徑）。
+- 截圖 `d2-live-browsing.png`、`d2-live-to-counter.png` 本意是過場中的畫面，但這台機器負載很高，CDP 呼叫延遲，兩張實際都在到達之後才拍到；不能當作過場中的畫面證據。`d2-live-at-counter.png` 為到達後。
+
+### 17.3 失敗與修正：`bc79677` 的瀏覽器全套（保留紀錄）
+
+`bc79677`（第一個實作 commit）：Unity EditMode 10／10、PlayMode 11／11、WebGL 建置成功；**瀏覽器 304 PASS／6 FAIL**（`artifacts/b1-06/ui-bc7967775a0b-20261007T052440Z/`）：
+- D2 四項：回放各步實測 `{"1":2964,"2":4224,"3":3970,"4":-1,"5":6191,"6":-1}` ms，即時走路 5397 ms，超過 2.5 秒；另一項是延遲讀取場景文字時過場已結束。
+  - 原因：無頭 Chrome（SwiftShader）在高負載下幀很慢，Unity 會把每幀的 `deltaTime` 截到上限，遊戲時間落後真實時間；期限用 `Time.time` 判斷，所以在慢瀏覽器裡不成立。這是產品缺陷，不只是測試問題：一般瀏覽器在慢機器上也會發生。
+  - 修正（`d7070af`）：期限改用真實時間；新增 `TheLimitHoldsOnSlowFrames` 重現慢幀；瀏覽器檢查改從記錄器讀「走路期間」頁面說了什麼，上限加入 700 ms。
+- 既有兩項 `R2 order`（前置條件：回放前期限需在 4–8 秒後；實際只剩 1 秒），屬既有計時前置條件，本輪未改；`d7070af` 的全套中通過。
+
+`d7070af` 唯一的失敗 `3.1 pagehide: a readiness poll is held`：該檢查等待 8 秒內出現下一次 5 秒一次的就緒輪詢；3.1 與 `web/host.js` 本輪都沒有改，同一段之後的「late poll restores nothing」「no more polling after leaving」都通過；`bc79677` 的全套中這項通過。判斷為高負載下的計時失敗，未修改該檢查，也沒有為了轉綠重跑；請 review 判斷是否需要重跑。
+
+### 17.4 反向驗證、容器與 Go（Claude Code 執行，待 Codex 獨立 review）
+
+每項只改一處、跑測試、再以位元組比對還原（`artifacts/b1-06/d2-checks-d7070afdc0bd/unity-reversals.py`）。
+
+| 反向 | 改法 | 結果 |
+|---|---|---|
+| U1 | 水果台放回 (5.0, 1.4) | PlayMode 2 項失敗：`RoutesKeepClear…`、`AnEndOffTheWay…`（路線掃過水果台） |
+| U2 | `Relabel` 一律回傳「已到達」（途中就回報） | PlayMode 3 項失敗：`TheLimitIsKept…`、`TheSameTarget…`、`ZeroThreeSix…` |
+| U3 | 拿掉第 2 條 | EditMode 共用向量、PlayMode `ZeroThreeSix…` 失敗 |
+| U4 | `Parse` 不檢查 `cause_seq` 的 JSON 型別 | EditMode `WrongTypesAreUnknownNeverANumber` 失敗 |
+| U5 | 第 3、4 條更新時重設期限 | PlayMode `TheLimitIsKept…` 失敗 |
+| U6 | `rendered` 回報過場開始時的序號 | PlayMode `TheLimitIsKept…`、`TheSameTarget…` 失敗（第一次的改法有語法錯誤，編譯失敗不算數，保留於 `U6-first-try-compile-error/`，加上大括號後重跑） |
+| U7 | 期限與走路改回遊戲時間（`Time.time`、`deltaTime`） | PlayMode `TheLimitHoldsOnSlowFrames`、`TheLimitIsKept…` 失敗 |
+| N1–N4（Node，於 `bc79677`；`d7070af` 未改 web） | 拿掉第 2 條／標籤序號改用快照序號／`task_end` 改取最後一個／未知序號也算新請購 | 各自讓共用向量、投影或回放序列的測試失敗（`node-reversals-bc79677.txt`） |
+| N5（瀏覽器，於 `d7070af`） | `app.js` 不標首次載入 | 305 PASS／5 FAIL：D2 第 1 項三項、第 2 項「as a first load」一項，另一項為既有的 `R2 order` 前置條件（見 17.3）（`artifacts/b1-06/reversal-d7070afdc0bd-first-load/`） |
+
+**完整容器**（`d7070af`，`APA_VERIFY_IMAGE=docker.io/library/apa-verify:b1-05 DOCKER_CONTEXT=desktop-linux sh scripts/verify/container-verify.sh d7070af`，exit 0）：映像 `sha256:78258368…b6d0`（與既有紀錄同一映像）；七步全過：check-contracts 126 秒（adapter 24／24、hostcreds 23／23）、check 416、race-cover 894（`cmd/apa-buyer`、`cmd/demo` 85.5％、`internal/buyer` 都通過）、verify-b1-01 262、guards 11、evidence-import-tests 3、mutation 2558 秒 **247／247 全數被殺**；隔離自檢 17 項 ok。主機高負載，所以比以往（約 11 分鐘）慢很多。證據：`artifacts/verify-container/runs/d7070afdc0bd-20261007T063755Z/`、`artifacts/b1-06/container-d7070af.log`。
+- 前三次嘗試失敗、未執行：daemon 對短名 `apa-verify:b1-05` 回「No such image」，但 `docker images` 列得出、全名 `docker.io/library/apa-verify:b1-05` 可解析到同一個 ID；改以 `APA_VERIFY_IMAGE` 指定全名後執行。紀錄在 `artifacts/b1-06/d2-checks-d7070afdc0bd/container-attempt1.txt`。
+
+**本機 Go**（`bc79677`，`go test ./... -count=1`，非沙箱）：599 passed、4 failed、3 skipped。失敗都在 `cmd/apa-buyer`（`TestLiveOptIn`、`TestProbeOptIn`、`TestApprovedVersionInit`）與 `internal/buyer`（`TestVersion`：「holder check took 2.69s」）的版本檢查計時；這兩個套件本輪沒有改。當時主機負載平均約 175（另有長時間執行中的 Python 程序，不屬本工作，未處理），閒置後重跑兩個套件仍失敗（負載未下降）。同樣的測試在容器（4 CPU 隔離）中通過。本輪唯一的 Go 變更是 `internal/store` 的測試檔，該套件通過。
+
+### 17.5 未做與限制
+
+- Unity 標籤的 #2（見 17.1 與設計文字的差異）。
+- 瀏覽器只能讀網頁文字與 Unity 的回報，看不到畫布裡的標籤；Unity 標籤與位置由 PlayMode 驗證。過場中的截圖在本次高負載下沒有拍到（17.2）。
+- 即時「新的一筆請購」：fake CLI 同一商品重送只算一筆請購（`retry-same.json`），所以第 2 條的瀏覽器驗證用 Store 寫入的歷史回放（16.9 第 3 項允許）；即時模式由 PlayMode 與 Node 覆蓋。CLI 逾時的 Unity 行為由 PlayMode 與 Node 覆蓋，瀏覽器未另測。
+- 一般 Chrome（不帶兩個參數）長流程的可見性限制沿用 §15.7，本輪未跑 `--smoke-plain`。
+- 高負載下的計時：`R2 order`（`bc79677` 與反向執行各一次）、`3.1 pagehide`（`d7070af` 一次）失敗；兩者都不是本輪的變更，未修改。
+- 不合併、不推送、不標 Done；D3–D6 未開始。
