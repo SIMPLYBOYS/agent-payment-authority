@@ -1129,9 +1129,10 @@ echo "exit=$?"
 ### 38.1 驗收紀錄：probe 顯示候選修正於 `e99f389` 通過限定範圍技術 review（2026-10-08）
 
 - **結論**：probe 顯示候選修正於 `e99f389` 通過限定範圍技術 review，**只關閉這項修正**。
-- **證據歸屬**：
-  - Claude Code 執行：本機 make check、check-contracts、race／coverage、B1-01、證據匯入（`artifacts/b1-04/e99f389777ad-20261007T164822Z/`）；斷網容器七步與 250 項突變、17 項隔離（`artifacts/verify-container/runs/e99f389777ad-20261007T165410Z/`）。
-  - Codex：限定範圍技術 review 通過。轉交的指示沒有列出 Codex 自行重跑的項目，所以這裡不記任何 Codex 獨立重跑。
+- **證據歸屬**（10/8 依 Codex 提供的內容補正；原寫「轉交指示沒有列出 Codex 自行重跑的項目」）：
+  - **Codex 獨立執行**：以 `e99f389` 的暫存匯出副本為基準，本機定向 race 測試各三輪，全部通過——`GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -race -p 1 ./internal/buyer -run '^(TestProbePluginCandidates|TestProbeEntries|TestProbeNoLeak|TestProbeNullStrings|TestPathClass|TestHostInitGate)$' -count=3 -timeout=180s`，exit 0，套件耗時 15.905 秒。只用 fake CLI，沒有執行真實 CLI。這是本機定向重跑，不是容器驗證；結果在 Codex 的工具輸出中，未另存 log，所以這裡沒有證據路徑。
+  - **Claude Code 執行、Codex 核對紀錄**：`e99f389` 的斷網容器七步、250／250 突變、17 項隔離檢查（`artifacts/verify-container/runs/e99f389777ad-20261007T165410Z/`）。Codex 另外核對 manifest 的 278 個項目，雜湊全部相符；並確認 #249、#250 由測試斷言抓到，不是編譯失敗。Codex 沒有重跑完整容器。
+  - **Claude Code 執行，維持原歸屬**：本機 make check、check-contracts、race／coverage、B1-01、證據匯入（`artifacts/b1-04/e99f389777ad-20261007T164822Z/`）；這些不寫成 Codex 已全部核對。
   - 本次同步沒有重跑測試。
 - **範圍**：**L1-b 的 plugin 來源仍未確認。** 名稱相符不代表來源可信、完整 plugin ID 已確認，或允許執行。
 - **未做**：沒有修改停用參數或認證清單；沒有執行診斷型 C0′。真實執行仍需 Aaron 另行核准；B1-04 仍 InProgress，未標 Done、未合併 main。
