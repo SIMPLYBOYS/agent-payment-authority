@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **10/8 L1-b 第一段**：probe 的 plugins 顯示候選加入三個名稱（完全相符才顯示），只有 fake 驗證（`e99f389`；第 38 節），Claude Code 執行，待 Codex review；閘門、認證清單與啟動參數未變，來源仍未確認。
+> **10/8 L1-b 第一段**：probe 的 plugins 顯示候選加入三個名稱（完全相符才顯示），只有 fake 驗證（`e99f389`；第 38 節）。**probe 顯示候選修正於 `e99f389` 通過限定範圍技術 review**（第 38.1 節）；只關閉這項修正，**L1-b 的 plugin 來源仍未確認**。閘門、認證清單與啟動參數未變。
 >
 > **10/7 L1-a**：分支 `b1-04-live` 以固定環境變數 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` 停用內建 agents（`79a4a5f`、測試修正 `418f0de`；第 35 節）。**10/8 於 `418f0de` 通過 Codex 限定範圍技術 review，L1-a 關閉**（第 36 節）；只證明固定環境變數的傳遞與 fake 回歸，**不證明真實 CLI 的 agents 已清空**。未執行真實 CLI，閘門與認證接受清單未變。B1-04 仍 InProgress；L1-b 需 Aaron 另行核准。
 >
@@ -1112,7 +1112,7 @@ echo "exit=$?"
   2. 通過後，另行核准一次**診斷型 C0′**：觀測 APA 實際列出哪些候選、路徑分類，以及 L1-a 之後的 agents 清單；目標是辨識，不預設 plugins 已清空，也不等於 L1-c 的清空條件通過；結果仍為 `other` 就停止回報，不擴大收集或重試。
 - 顯示名稱不等於允許執行；名稱吻合也不能單靠它認定來源或組出停用 id。
 
-## 38 L1-b 第一段：probe 顯示候選修正＋fake 測試（2026-10-08；Claude Code 執行，待 Codex review）
+## 38 L1-b 第一段：probe 顯示候選修正＋fake 測試（2026-10-08；Claude Code 執行；於 `e99f389` 通過限定範圍技術 review，見 38.1）
 
 - **依據**：Aaron 10/8 核准「probe 顯示候選修正＋fake 測試」：只把 `cc-plugin-agents-md`、`cc-plugin-telemetry`、`cc-plugin-plugin-authoring` 加入顯示候選清單，完全相符才顯示，其他維持 `other`。
 - **不做**：不改認證清單或啟動參數；不讀設定與憑證；不執行真實 CLI 或 C0′。診斷型 C0′ 另行核准。
@@ -1125,4 +1125,14 @@ echo "exit=$?"
 - **本機驗證**（Claude Code 執行，待 Codex review；`e99f389`，`artifacts/b1-04/e99f389777ad-20261007T164822Z/`）：make check、check-contracts、`go test -race -cover ./... -count=1`、B1-01、20 項證據匯入測試全部 exit 0；覆蓋率 buyer 92.9%、apa-buyer 81.7%。這次本機沒有出現第 34.2 節的計時失敗。
 - **容器完整驗證**（Claude Code 執行，待 Codex 核對紀錄；`e99f389`，斷網容器，映像 `sha256:78258368…b6d0`）：overall exit 0；七步全過（check-contracts 17 秒、check 79、race-cover 277、verify-b1-01 42、guards、evidence-import-tests、mutation 335 秒）；**250／250 突變全數被殺**，#249、#250 由 `TestProbePluginCandidates` 抓到，#248 照舊；隔離自檢 17 項 ok。證據：`artifacts/verify-container/runs/e99f389777ad-20261007T165410Z/`、`artifacts/b1-04/container-e99f389.log`。
 - **範圍**：顯示名稱不等於允許執行；名稱吻合也不能單靠它認定來源或組出停用 id。來源仍未確認；L1-b 的停用參數仍未決定。B1-04 仍 InProgress。
+
+### 38.1 驗收紀錄：probe 顯示候選修正於 `e99f389` 通過限定範圍技術 review（2026-10-08）
+
+- **結論**：probe 顯示候選修正於 `e99f389` 通過限定範圍技術 review，**只關閉這項修正**。
+- **證據歸屬**：
+  - Claude Code 執行：本機 make check、check-contracts、race／coverage、B1-01、證據匯入（`artifacts/b1-04/e99f389777ad-20261007T164822Z/`）；斷網容器七步與 250 項突變、17 項隔離（`artifacts/verify-container/runs/e99f389777ad-20261007T165410Z/`）。
+  - Codex：限定範圍技術 review 通過。轉交的指示沒有列出 Codex 自行重跑的項目，所以這裡不記任何 Codex 獨立重跑。
+  - 本次同步沒有重跑測試。
+- **範圍**：**L1-b 的 plugin 來源仍未確認。** 名稱相符不代表來源可信、完整 plugin ID 已確認，或允許執行。
+- **未做**：沒有修改停用參數或認證清單；沒有執行診斷型 C0′。真實執行仍需 Aaron 另行核准；B1-04 仍 InProgress，未標 Done、未合併 main。
 
