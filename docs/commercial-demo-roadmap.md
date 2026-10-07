@@ -499,7 +499,7 @@
 >
 > **進度（10/8，診斷型 C0′）**：核准版本改為 `2.1.293`（`bd29a4e`）後執行一次，取得 init：**plugins 非空（2 個）**、agents 明確為空。依結果分支記錄執行阻擋並停止；最小隔離或停用方案待另提與核准（`docs/cli-poc.md` 第 41 節）。**Codex 核對完成（第 41.1 節）**：agents 結果可作為 L1-c 對應觀測項目的證據；L1-b、L1-c 整體不標通過；正式請購阻擋仍在。下一步建議為 plugins 最小隔離或停用方案的設計提案，待 Aaron 核准派工。
 >
-> **進度（10/8，plugins 方案）**：plugins 最小隔離或停用方案：設計提案完成，待 Codex review；未核准實作或真實驗證（`docs/cli-poc.md` 第 42 節）。第一個實作候選是 APA 子程序專用的空 plugin 根目錄（`CLAUDE_CODE_PLUGIN_CACHE_DIR`）。它不涵蓋 skills-dir 或 managed 強制啟用的來源，效果須一次真實診斷確認；無效時須 Aaron 在「提供完整 id／調整受管設定／以 `--safe-mode` 只驗 MCP」中擇一。
+> **進度（10/8，plugins 方案）**：plugins 方案 R1、R2 設計補正完成，待 Codex 限定複核；方案 A 保留為受控實驗候選，尚未核准實作或真實驗證（`docs/cli-poc.md` 第 42 節，修訂紀錄 42.8）。方案 A 在 APA 子程序設專用暫存 plugin 根目錄（`CLAUDE_CODE_PLUGIN_CACHE_DIR`）；它改的是儲存根目錄，不是停用開關，可能在背景被重新填入，也不涵蓋 skills-dir 或 managed 強制啟用的來源。結果非空只代表未達目標，不推論來源；未達目標時，須 Aaron 在「提供完整 id／調整受管設定／以 `--safe-mode` 只驗 MCP」中擇一。
 
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。
