@@ -277,7 +277,10 @@ namespace APA
             if (!animate || plan.Count == 0) { Finish(c); return; } // 16.5 rule 1: a stored snapshot is not news
             c.seg = plan[0].seg;
             AnimationsStarted++;
-            c.deadline = Time.time + MaxTransition; // 16.5 rule 4, from the message that set this target
+            // 16.5 rule 4, from the message that set this target, on the real
+            // clock: Unity caps a slow frame's deltaTime, so in a slow browser
+            // game time falls behind and only a real-time limit holds.
+            c.deadline = Time.realtimeSinceStartup + MaxTransition;
             c.speed = Walk;
             c.pauseScale = 1f;
             if (ahead)
@@ -378,12 +381,12 @@ namespace APA
 
         void Update()
         {
-            foreach (var c in customers.Values) if (c.route != null) Advance(c, Time.deltaTime);
+            foreach (var c in customers.Values) if (c.route != null) Advance(c, Time.unscaledDeltaTime);
         }
 
         void Advance(Customer c, float dt)
         {
-            if (Time.time >= c.deadline) { Finish(c); return; } // 16.5 rule 4: never over 2.5 s
+            if (Time.realtimeSinceStartup >= c.deadline) { Finish(c); return; } // 16.5 rule 4: never over 2.5 s
             while (c.at < c.route.Count)
             {
                 var s = c.route[c.at];

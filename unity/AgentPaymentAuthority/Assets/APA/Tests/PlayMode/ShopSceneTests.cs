@@ -202,11 +202,11 @@ public class ShopSceneTests
         {
             int gen = who == "consumer-a" ? 1 : 2;
             bridge.Receive("{\"v\":1,\"gen\":" + gen + ",\"clear\":true}");
-            float start = Time.time;
+            float start = Time.realtimeSinceStartup;
             bridge.Receive(D2(gen, who, 3, "waiting", 3));
             var want = "rendered:" + gen + ":3:waiting|task-" + who.Substring(9) + "||";
             yield return Until(() => bridge.reports.Contains(want), who + " rendered", 4f);
-            float took = Time.time - start;
+            float took = Time.realtimeSinceStartup - start;
             Assert.LessOrEqual(took, 2.5f + 0.1f, who + " took " + took);
             Assert.Greater(took, 1.5f, who + ": walked, not jumped");
             Assert.AreEqual(ShopView.Point(who, ShopView.Counter), view.PositionOf(who));
@@ -240,11 +240,11 @@ public class ShopSceneTests
         var route = view.RouteOf("consumer-a");
         float len = 0;
         for (int i = 1; i < route.Count; i++) len += (route[i] - route[i - 1]).magnitude;
-        float dl = view.DeadlineOf("consumer-a"), start = Time.time;
+        float dl = view.DeadlineOf("consumer-a"), start = Time.realtimeSinceStartup;
         bridge.Receive(D2(1, "consumer-a", 4, "allowed_unpaid", 0)); // another phase, its cause unknown: no new purchase
         Assert.Greater(view.DeadlineOf("consumer-a"), dl, "a new target starts its own 2.5 s");
         yield return Arrive("consumer-a");
-        float took = Time.time - start;
+        float took = Time.realtimeSinceStartup - start;
         Assert.Less(took, len / (ShopView.Walk * 1.5f), "twice the walking speed over " + len + " units, took " + took);
         Assert.AreEqual("ALLOW - no payment capability", view.LabelOf("consumer-a"));
         Assert.AreEqual(new[] { "rendered:1:1:entered|task-a||", "rendered:1:4:allowed_unpaid|task-a||" }, Rendered().ToArray());
@@ -258,13 +258,13 @@ public class ShopSceneTests
         bridge.Receive(D2(1, "consumer-b", 3, "waiting", 3));
         yield return Until(() => view.LabelOf("consumer-b").StartsWith("[anim] to counter"), "on the way to the counter");
         yield return new WaitForSeconds(0.2f);
-        float start = Time.time;
+        float start = Time.realtimeSinceStartup;
         bridge.Receive(D2(1, "consumer-b", 4, "expired", 4));
         var route = view.RouteOf("consumer-b");
         CheckRoute("expired on the way", route, props);
         Assert.AreEqual(ShopView.Point("consumer-b", ShopView.Out), route.Last());
         yield return Arrive("consumer-b");
-        Assert.LessOrEqual(Time.time - start, 2.5f + 0.1f);
+        Assert.LessOrEqual(Time.realtimeSinceStartup - start, 2.5f + 0.1f);
         Assert.AreEqual(new[] { "rendered:1:4:expired|task-b||" }, Rendered().ToArray(), "only the newest, never the replaced #3");
     }
 
@@ -277,7 +277,7 @@ public class ShopSceneTests
         view.Pace = 0.2f;
         try
         {
-            float start = Time.time;
+            float start = Time.realtimeSinceStartup;
             bridge.Receive(D2(1, "consumer-a", 3, "waiting", 3));
             float dl = view.DeadlineOf("consumer-a");
             Assert.AreEqual(start + ShopView.MaxTransition, dl, 0.05f);
@@ -287,7 +287,7 @@ public class ShopSceneTests
             Assert.AreEqual(dl, view.DeadlineOf("consumer-a"), "updates keep the limit");
             Assert.IsEmpty(Rendered(), "not reported on the way");
             yield return Arrive("consumer-a");
-            float took = Time.time - start;
+            float took = Time.realtimeSinceStartup - start;
             Assert.AreEqual(2.5f, took, 0.15f, "jumped at the limit");
             Assert.AreEqual(ShopView.Point("consumer-a", ShopView.Counter), view.PositionOf("consumer-a"));
             Assert.AreEqual(new[] { "rendered:1:5:waiting|task-a||" }, Rendered().ToArray(), "once, for the newest sequence");
@@ -345,5 +345,31 @@ public class ShopSceneTests
         yield return Arrive("consumer-b");
         Assert.AreEqual("ASK (#6) - waiting for a human", view.LabelOf("consumer-b"));
         Assert.AreEqual(new[] { "rendered:1:6:waiting|task-b||" }, Rendered().ToArray());
+    }
+
+    // A slow browser: Unity caps a frame's deltaTime, so game time falls
+    // behind the real clock (seen in headless Chrome under load, bc79677).
+    // The 2.5 s limit is on the real clock and still holds.
+    [UnityTest]
+    public IEnumerator TheLimitHoldsOnSlowFrames()
+    {
+        float cap = Time.maximumDeltaTime;
+        Time.maximumDeltaTime = 0.05f;
+        try
+        {
+            float start = Time.realtimeSinceStartup;
+            bridge.Receive(D2(1, "consumer-a", 3, "waiting", 3));
+            for (int i = 0; i < 40 && view.Moving("consumer-a"); i++)
+            {
+                System.Threading.Thread.Sleep(200); // a 200 ms frame; deltaTime says 50 ms
+                yield return null;
+            }
+            float took = Time.realtimeSinceStartup - start;
+            Assert.IsFalse(view.Moving("consumer-a"));
+            Assert.LessOrEqual(took, 2.5f + 0.45f, "real seconds, frames of 200 ms");
+            Assert.AreEqual(ShopView.Point("consumer-a", ShopView.Counter), view.PositionOf("consumer-a"));
+            Assert.AreEqual(new[] { "rendered:1:3:waiting|task-a||" }, Rendered().ToArray());
+        }
+        finally { Time.maximumDeltaTime = cap; }
     }
 }
