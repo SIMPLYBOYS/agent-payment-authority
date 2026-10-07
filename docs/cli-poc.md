@@ -2,6 +2,8 @@
 
 > **10/8 診斷型 C0′ 執行（Claude Code 執行，待 Codex review）**：依 Aaron 核准執行一次 §39.3 腳本，**在前置檢查第 5 步停止（exit 2），probe 未啟動**：建置出的二進位讀不到 `vcs.revision`／`vcs.modified`（兩者皆空）。沒有啟動 probe 會話、沒有送出訊息、沒有 trace；plugins／agents **未取得觀測，仍是未知**。依核准不重試（第 39.11 節）。
 >
+> **10/8 建置前置流程修正與驗證（Claude Code 執行，待 Codex review）**：§39.3 改在全新暫存目錄中以一般本機 clone 建置（`d61c838`）。只執行步驟 1～5 的建置前置驗證，結果 PASS：`vcs.revision` 等於 `d61c838…`、`vcs.modified=false`。沒有執行產物、真實 CLI 或 C0′（第 39.12 節）。新的 C0′ 嘗試仍須 Aaron 另行核准。
+>
 > **10/8 L1-b 來源調查暫緩**：plugin 來源調查依 Aaron 決定暫緩，來源未確認保留為已知限制。正式 Gate 維持不變。下一步為整理一次診斷型 C0′ 清單，確認目前 plugins／agents 是否仍非空；待 Codex review 與 Aaron 另行核准，尚未執行（第 39.7 節）。暫緩調查不是解除阻擋：真實 CLI 若仍載入 plugins，現有閘門的執行阻擋仍在。**診斷型 C0′ 清單於 `d12adcc` 通過限定文件 review，R1／R2 關閉**（Codex 靜態核對，不是測試通過；第 39.10 節）。真實執行仍待 Aaron 另行核准，尚未執行。
 >
 > **10/8 L1-b 第一段**：probe 的 plugins 顯示候選加入三個名稱（完全相符才顯示），只有 fake 驗證（`e99f389`；第 38 節）。**probe 顯示候選修正於 `e99f389` 通過限定範圍技術 review**（第 38.1 節）；只關閉這項修正，**L1-b 的 plugin 來源仍未確認**。閘門、認證清單與啟動參數未變。
@@ -1441,3 +1443,26 @@ Codex 以文件與原始碼靜態核對 `ff094f5`，接受前置工作區、程�
   區分這三者需要另行核准的唯讀檢查（例如對留下的二進位執行 `go version -m`、查看 `go env GOFLAGS`），本輪沒有做。
 
 **待決定**：是否核准上述唯讀檢查；依原因修正 §39.3 後須再經 review；任何新的執行嘗試都須 Aaron 另行核准。本輪沒有修改 Gate、認證接受清單、啟動參數或產品程式；L1-b 不標完成；B1-04 仍 InProgress。
+
+### 39.12 建置前置流程修正與驗證（2026-10-08；Claude Code 執行，待 Codex review）
+
+> **結果：PASS。** 修訂後的 §39.3 步驟 1～5 在同一環境建出的二進位，`vcs.revision` 等於指定 commit，`vcs.modified=false`。只建置並以 `go version -m` 讀取產物；**沒有執行產物、真實 Claude CLI 或 C0′**。第 39.11 節的失敗紀錄保留不變。
+
+- **依據**：Aaron 指示先修正並驗證建置前置流程，不重跑整份診斷腳本。
+- **§39.3 修訂**（`d61c838`）：
+  - 第 4 步：`git worktree add` 改為 `mktemp -d` 全新暫存目錄中的 `git clone --quiet --no-hardlinks --no-checkout "$REPO"`，再 `checkout --detach "$BASE"`。新增兩項檢查：`.git` 必須是目錄，clone 的 HEAD 必須等於基準，不符就 `die`。clone 來源是本機路徑，不經網路；原 repo 不新增工作樹，原工作區不變。
+  - 第 5 步：另存 `go version -m` 的原始 `build` 行（`go-version-build.txt`），供核對解析。VCS 嚴格檢查不變：空值、缺失或不符都停止，不以手動填寫的 SHA 代替。
+  - 清理：`die` 與第 7 步改為 `rm -rf "$WT"`，只刪本次 `mktemp` 建立的目錄。
+- **驗證方式**：把 §39.3 bash 區塊中「`# 6. 唯一一次 probe`」之前的內容（步驟 1～5）原樣抽出。只做兩處更動：證據目錄前綴 `c0prime-diag-` 改為 `build-precheck-`；結尾加上寫 `result.txt`、刪暫存目錄、`exit 0`。抽出的內容不含 probe 呼叫；變數 `CLI` 有定義，但沒有被使用。
+  - 以 `bash` 執行一次，在 Claude Code 沙箱外執行，與第 39.11 節的執行環境相同。
+- **結果**（`artifacts/b1-04/build-precheck-20261007T181522Z/`，`artifacts/` 不進版控）：
+  - `commit.txt`：`d61c838584a059f8421f95b0b6082acbe086fb83`
+  - `binary-vcs.txt`：`vcs.revision=d61c838584a059f8421f95b0b6082acbe086fb83`、`vcs.modified=false`
+  - `go-version-build.txt`：14 行 `build` 設定，含 `vcs=git`、`vcs.revision`、`vcs.time`、`vcs.modified=false`（格式為 tab 分隔的 `build<TAB>key=value`）
+  - `result.txt`：`PASS`；腳本 exit `0`。
+  - 暫存目錄已刪除；`git worktree list` 只有主工作樹；repo 工作區仍只有 `?? demo`。
+- **對第 39.11 節原因候選的意義**（推論，不是重現驗證）：同一環境、同一段 `awk` 解析能讀到兩個欄位。這排除了「`awk` 解析與輸出格式不符」，也排除了「環境 `GOFLAGS` 停用 VCS」。「連結工作樹中建置未嵌入 VCS」是剩下最可能的原因，但本輪**沒有**在 worktree 中重現，不寫成已證實。
+- **留存**：第 39.11 節那次建出的二進位仍在 `$TMPDIR/apa-c0p.WpXh56/`，本輪沒有檢查或刪除。
+- **注意**：下次正式執行時，基準是當時的 HEAD（本節之後的文件提交），而不是 `d61c838`。腳本會在當時重新 clone、建置、核對 VCS；本節的 PASS 只證明流程可行，不代替當次的檢查。
+
+**待決定**：Codex review 本節與 §39.3 修訂；任何新的診斷型 C0′ 嘗試都須 Aaron 另行核准。本輪沒有修改 Gate、認證接受清單、啟動參數或產品程式；L1-b 不標完成；B1-04 仍 InProgress。
