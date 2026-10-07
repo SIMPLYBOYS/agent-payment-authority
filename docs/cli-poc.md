@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **10/8 L1-b 來源調查暫緩**：plugin 來源調查依 Aaron 決定暫緩，來源未確認保留為已知限制。正式 Gate 維持不變。下一步為整理一次診斷型 C0′ 清單，確認目前 plugins／agents 是否仍非空；待 Codex review 與 Aaron 另行核准，尚未執行（第 39.7 節）。暫緩調查不是解除阻擋：真實 CLI 若仍載入 plugins，現有閘門的執行阻擋仍在。
+> **10/8 L1-b 來源調查暫緩**：plugin 來源調查依 Aaron 決定暫緩，來源未確認保留為已知限制。正式 Gate 維持不變。下一步為整理一次診斷型 C0′ 清單，確認目前 plugins／agents 是否仍非空；待 Codex review 與 Aaron 另行核准，尚未執行（第 39.7 節）。暫緩調查不是解除阻擋：真實 CLI 若仍載入 plugins，現有閘門的執行阻擋仍在。**診斷型 C0′ 清單 R1／R2 文件修訂完成，待 Codex 限定複核；真實執行仍待 Aaron 另行核准，尚未執行**（第 39.8 節）。
 >
 > **10/8 L1-b 第一段**：probe 的 plugins 顯示候選加入三個名稱（完全相符才顯示），只有 fake 驗證（`e99f389`；第 38 節）。**probe 顯示候選修正於 `e99f389` 通過限定範圍技術 review**（第 38.1 節）；只關閉這項修正，**L1-b 的 plugin 來源仍未確認**。閘門、認證清單與啟動參數未變。
 >
@@ -1144,6 +1144,8 @@ echo "exit=$?"
 > **狀態**：診斷型 C0′ 執行確認清單已整理，待 Codex review 與 Aaron 另行核准；尚未執行。
 >
 > **10/8 修訂**：plugin 來源調查暫緩後，診斷重點與結果分支以第 39.7 節為準：39.1 第 1、2 項（名稱、路徑分類）改為既有輸出的附帶資訊；39.5「plugins／agents 非空」的處理改依 39.7.3。39.2～39.4 的執行邊界不變。
+>
+> **10/8 R1／R2 修訂**：39.3 命令改為 bash 失敗即停止流程、stdout 改存 `stdout.txt`；39.4、39.7.3 的 `not_started` 與 `orphaned_output` 說明更正。原文與對照見第 39.8 節。
 
 - **依據**：vault〈Claude-Code-B1-04-診斷型C0prime執行清單整理指示-1395a1f-20261008〉。本節與該筆記都**不構成真實執行核准**。
 - **開工核對**：分支 `b1-04-live`，HEAD `1395a1f`；工作區只有未追蹤的 `demo`（不動）。程式基準是 `e99f389`；其後 `0958725`、`70bde1e`、`1395a1f` 只改 `docs/cli-poc.md`（`git diff --stat e99f389 1395a1f` 只有這個檔案）。
@@ -1174,30 +1176,82 @@ echo "exit=$?"
 
 ### 39.3 命令（僅供未來核准後使用；本輪不得執行，包括不建置、不查詢真實 CLI 版本）
 
-```sh
-# 僅供未來核准後使用；本輪不得執行。任一步失敗即停止，不使用舊二進位。
-cd /Users/mac/Documents/OpenSourceProjects/agent-payment-authority
-git status --short                         # 只允許 `?? demo`；有其他差異就停止
-BASE=$(git rev-parse HEAD); echo "$BASE"   # 執行基準（記錄）
-git diff --stat e99f389 "$BASE" -- . ':(exclude)docs' ':(exclude)README.md'   # 必須沒有輸出：程式基準 e99f389 之後只改文件
-EV="$PWD/artifacts/b1-04/c0prime-diag-$(date -u +%Y%m%dT%H%M%SZ)"; mkdir -p "$EV"; echo "$BASE" > "$EV/commit.txt"
-WT=$(mktemp -d "${TMPDIR:-/tmp}/apa-c0p.XXXXXX")
-git worktree add --detach "$WT/src" "$BASE"                    # 乾淨工作樹：不動 repo 根目錄的 demo
-(cd "$WT/src" && go build -o "$WT/apa-buyer" ./cmd/apa-buyer)
-go version -m "$WT/apa-buyer" | grep -E 'vcs\.(revision|modified)' | tee "$EV/binary-vcs.txt"
-#   須為 vcs.revision=$BASE、vcs.modified=false；否則停止
-date -u +%FT%TZ > "$EV/started-utc.txt"
+適用 shell：**bash**（macOS 內建 3.2 即可）。把下列內容存成一個檔案，以 `bash 檔名` 整個執行；**不要逐行貼到互動 shell**（zsh 或互動 bash 中，`exit` 會關掉終端機，且貼上時不保證停在失敗處）。
+
+```bash
+#!/bin/bash
+# 僅供未來核准後使用；本輪不得執行。
+# 前置步驟任一失敗 → die：記錄原因、清掉自己建立的工作樹，以 exit 2 結束，不會到達 probe。
+# probe 只在檔案末端呼叫一次；它的非零退出碼是診斷結果，照樣保存，不重試。
+set -u
+REPO=/Users/mac/Documents/OpenSourceProjects/agent-payment-authority
+CLI=/Users/mac/.local/bin/claude
+PRODUCT_BASE=e99f389
+EV_OWNED=; WT_ADDED=
+die() {
+  echo "STOP（probe 未啟動）：$*" >&2
+  if [ -n "$EV_OWNED" ]; then echo "$*" > "$EV/precheck-stop.txt"; fi   # 只寫入本次自己建立的證據目錄
+  if [ -n "$WT_ADDED" ]; then git -C "$REPO" worktree remove "$WT/src" || echo "工作樹未能移除：$WT/src" >&2; fi
+  exit 2
+}
+
+# 1. 工作目錄與分支
+cd "$REPO" || die "無法進入 $REPO"
+BR=$(git branch --show-current) || die "git branch 失敗"
+[ "$BR" = b1-04-live ] || die "分支是「$BR」，不是 b1-04-live"
+
+# 2. 工作區：只容許未追蹤的 demo（或完全乾淨）
+ST=$(git status --porcelain --untracked-files=all) || die "git status 失敗"
+[ -z "$ST" ] || [ "$ST" = "?? demo" ] || die "工作區有 demo 以外的差異"
+
+# 3. 執行基準：相對產品基準 e99f389 只能有文件差異
+BASE=$(git rev-parse --verify 'HEAD^{commit}') || die "git rev-parse 失敗"
+git merge-base --is-ancestor "$PRODUCT_BASE" "$BASE" || die "$PRODUCT_BASE 不是 $BASE 的祖先，或 git 失敗"
+DIFF=$(git diff --name-only "$PRODUCT_BASE" "$BASE" -- . ':(exclude)docs' ':(exclude)README.md') || die "git diff 失敗"
+[ -z "$DIFF" ] || die "$PRODUCT_BASE 之後有非文件差異"
+
+# 4. 證據目錄（不加 -p：已存在就停止，不覆寫）、暫時工作樹與建置
+mkdir -p "$REPO/artifacts/b1-04" || die "無法建立 artifacts/b1-04"
+EV="$REPO/artifacts/b1-04/c0prime-diag-$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir "$EV" || die "證據目錄已存在或無法建立：$EV"
+EV_OWNED=1
+echo "$BASE" > "$EV/commit.txt" || die "無法寫入 commit.txt"
+WT=$(mktemp -d "${TMPDIR:-/tmp}/apa-c0p.XXXXXX") || die "mktemp 失敗"
+git worktree add --detach "$WT/src" "$BASE" || die "git worktree add 失敗"
+WT_ADDED=1
+(cd "$WT/src" && go build -o "$WT/apa-buyer" ./cmd/apa-buyer) || die "建置失敗"   # $WT 是新建的空目錄，不可能拿到舊二進位
+[ -x "$WT/apa-buyer" ] || die "建置後沒有可執行檔"
+
+# 5. 二進位 VCS：revision 必須等於 BASE，modified 必須為 false；欄位缺失、重複或不符都停止
+VM=$(go version -m "$WT/apa-buyer") || die "go version -m 失敗"
+REV=$(printf '%s\n' "$VM" | awk '$1 == "build" && $2 ~ /^vcs\.revision=/ { sub(/^vcs\.revision=/, "", $2); print $2 }')
+MOD=$(printf '%s\n' "$VM" | awk '$1 == "build" && $2 ~ /^vcs\.modified=/ { sub(/^vcs\.modified=/, "", $2); print $2 }')
+printf 'vcs.revision=%s\nvcs.modified=%s\n' "$REV" "$MOD" > "$EV/binary-vcs.txt" || die "無法寫入 binary-vcs.txt"
+[ "$REV" = "$BASE" ] || die "vcs.revision 缺失或不是 $BASE"
+[ "$MOD" = false ] || die "vcs.modified 缺失或不是 false"
+
+# 6. 唯一一次 probe（版本檢查由 apa-buyer 自己做，不符時 exit 1、沒有 JSON）
+date -u +%FT%TZ > "$EV/started-utc.txt" || die "無法寫入 started-utc.txt"
 APA_LIVE_CLI=true "$WT/apa-buyer" probe-init \
-  --cli /Users/mac/.local/bin/claude \
+  --cli "$CLI" \
   --send-one-message \
-  --trace-dir "$EV/runs" > "$EV/result.json" 2> "$EV/apa-buyer-error.txt"
-echo "exit=$?" | tee "$EV/exit-code.txt"
+  --trace-dir "$EV/runs" > "$EV/stdout.txt" 2> "$EV/apa-buyer-error.txt"
+PROBE_EXIT=$?
+
+# 7. 不論 PROBE_EXIT 為何都走到這裡；之後的命令不改變 PROBE_EXIT，也不再呼叫 probe
+echo "exit=$PROBE_EXIT" > "$EV/exit-code.txt"
 date -u +%FT%TZ > "$EV/ended-utc.txt"
-git worktree remove "$WT/src"
+git -C "$REPO" worktree remove "$WT/src" || echo "工作樹未能移除：$WT/src（不影響已保存的結果）" >&2
+echo "probe exit=$PROBE_EXIT；證據：$EV"
+exit "$PROBE_EXIT"
 ```
 
+- **每條失敗路徑（依閱讀核對，本輪未執行、未做語法檢查）**：第 1～6 步的每個命令與條件都接 `|| die`；`die` 以 `exit 2` 結束整個 bash 程序，之後的行都不會執行。probe 只在第 6 步出現一次，在它之前沒有任何不經判斷就繼續的步驟。`set -u` 只防未定義變數，不代替上述條件（沒有用 `set -e`，避免 probe 的非零退出碼中斷第 7 步的保存）。
+- **退出碼**：`exit 2` 只來自 `die`（前置停止，probe 未啟動，若證據目錄已建立則有 `precheck-stop.txt`）；`0`／`1`／`4` 是 probe 自己的退出碼（39.4）。`PROBE_EXIT` 在 probe 結束後立即保存，寫檔、時間、移除工作樹都不會改變它；腳本最後以它結束。
+- **工作區規則**：`git status --porcelain --untracked-files=all` 只容許空輸出或恰為 `?? demo`；被 `.gitignore` 忽略的檔案（例如 `artifacts/`、`var/`）不算在內。
+
 - **為什麼用暫時工作樹**：先前幾次真實執行都要求工作區乾淨（第 27、30 節），現在 repo 根目錄有未追蹤的 `demo`（不得刪除或搬動）。Go 判斷 `vcs.modified` 時，依其實作也會把未追蹤檔算進去，所以直接在 repo 建置預期會得到 `vcs.modified=true`。這是依 Go 行為的推論，本輪沒有建置驗證；若執行時仍不是 `false`，就停止。
-- `result.json` 是 probe 的白名單投影（與 trace 相同）；`apa-buyer-error.txt` 只有 apa-buyer 自己的錯誤行，不含 CLI 的 stdout／stderr 文字。
+- `stdout.txt` 是 apa-buyer 的 stdout 原樣保存，**不是單一 JSON 文件**：第一行是 Host 的模式提示（`PROBE MODE (C0′): …`，含 CLI 路徑），之後才是縮排的 JSON 白名單投影（與 trace 相同的投影）；版本檢查等啟動前拒絕時兩部分都沒有；`Probe` 本身回傳錯誤（例如 trace 無法寫入）時只有提示行。不要把整份檔案直接當 JSON 解析；trace（`runs/probe-*.jsonl`）維持原格式。`apa-buyer-error.txt` 只有 apa-buyer 自己的錯誤行，不含 CLI 的 stdout／stderr 文字。
 - **時間上限**（依原始碼）：
   - 版本檢查：`versionLimits` 最多 5 秒，加 1 秒清理寬限；**不算在 init 等待內**。
   - init 等待：`ProbeTimeout` 30 秒，從 CLI 程序啟動起算（`Limits.Total`）。
@@ -1209,23 +1263,27 @@ git worktree remove "$WT/src"
 | exit | status／code | 意思 |
 |---|---|---|
 | `0` | `observed`／`init_observed` | 取得 init（版本欄位為核准值），只代表取得觀測資料，**不代表正式閘門通過** |
+| `0` | `observed`／`init_observed`，`input_status=not_started` | init 在訊息寫入前就先到，probe 停止、不再寫入；**實際寫入 0 位元組仍是有效觀測**（`probe.go` 最終判定只有 `failed`／`partial` 會排除觀測） |
 | `4` | `no_init_after_message` | 訊息完整送出（`input_status=complete`），30 秒內沒有 init |
 | `1`（有 JSON） | `failed`／固定代碼 | 其他失敗，回報固定代碼（見下） |
 | `1`（無 JSON） | — | 啟動前被拒（`APA_LIVE_CLI`、`--cli` 非絕對路徑、版本檢查失敗或逾時、版本不符、取消）；只有 apa-buyer 的錯誤行，沒有 trace |
 
 `exit 1` 的固定代碼（依原始碼，任一出現即停止）：
-- 寫入：`input_failed`、`input_partial`、`input_not_started`（訊息沒有完整寫入；即使同時取得 init，也不採用觀測）。
+- 寫入：
+  - `input_failed`、`input_partial`：寫入失敗或只寫一部分；**即使同時取得 init，也判失敗、不採用觀測**。
+  - `input_not_started`：只在**沒有取得 init**（逾時）且訊息未開始寫入時出現。`not_started` 本身不必然失敗：init 先到時是上表的 `observed`、exit `0`。
+  - 不要求成功觀測一定寫滿 95 位元組；以 `input_status` 與 `stdin_bytes_written` 照實記錄。
 - init：`init_cli_version`（版本欄位不是核准值）、`init_malformed`。
 - API：`api_retry_auth`、`api_retry_rate_limit`、`api_retry`（init 前出現 `api_retry`；只記代碼，不記錯誤文字）。
 - 訊息：`hook_message`、`unexpected_message`（init 前出現 assistant、user、result 等）。
 - 解讀：`ambiguous_json`（成員重複或大小寫折疊後重複）、`parse_error`。
 - 程序：`cancelled`、`output_overflow`、`nonzero_exit`、`start_failed`、`not_installed`、`orphaned_output`、`cli_error` 等 runner 結果。
 
-**任何結果都停止**：不追加第二次觀測、不自動改用其他參數、不轉往 C0 重跑或正式購物流程。程序清理沿用既有方式（process group 結束、寬限期後 SIGKILL）；**不保證能回收脫離 process group 的子程序**，那種情況記為 `orphaned_output`（第 7.5 節第 4 點）。
+**任何結果都停止**：不追加第二次觀測、不自動改用其他參數、不轉往 C0 重跑或正式購物流程。程序清理沿用既有方式（process group 結束、寬限期後 SIGKILL）；**不保證能回收脫離 process group 的子程序**（第 7.5 節第 4 點）。`orphaned_output` 只是既有管線在等候期限後仍未正常關閉等情況的訊號（例如脫離 group 的程序仍握著 stdout／stderr）；**沒有這個代碼，不代表已證明沒有殘留程序**，本清單也不另做程序掃描。
 
 ### 39.5 證據與解讀
 
-- **只保存**：既有白名單輸出（`result.json`）與 trace、exit code、執行 commit、二進位 vcs 資訊、起訖時間。不擴大收集原始 init、未知欄位名稱、原始路徑或 CLI 錯誤文字。
+- **只保存**：apa-buyer 的 stdout（`stdout.txt`，含模式提示與 JSON 白名單投影）與 trace、exit code、執行 commit、二進位 vcs 資訊、起訖時間。不擴大收集原始 init、未知欄位名稱、原始路徑或 CLI 錯誤文字。
 - 若在版本檢查等前置步驟就停止而沒有 trace，**照實記錄不存在**，不補造檔案或觀測資料。
 - 未來的證據先標「Claude Code 執行，待 Codex review」，不預寫為已驗收。
 - **預先列出的解讀**：
@@ -1265,7 +1323,7 @@ git worktree remove "$WT/src"
 
 1. 這次 init 的 plugins 是否為空？
 2. 在 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`（L1-a，經 `CLIEnv`）之下，agents 是否為空？
-3. 其他既有白名單觀測值是什麼（`result.json` 的其餘欄位，如 `cli_version`、`auth_source`、`permission_mode`、`tools_count`、`mcp_servers_count`、`apa_server_status`、`skills_count`、`extra_members`）？
+3. 其他既有白名單觀測值是什麼（`stdout.txt` 中 JSON 投影／trace 的其餘欄位，如 `cli_version`、`auth_source`、`permission_mode`、`tools_count`、`mcp_servers_count`、`apa_server_status`、`skills_count`、`extra_members`）？
 
 39.1 的候選名稱與路徑分類照常隨既有輸出保存，但**不追加調查，也不以查明來源為成功條件**。
 
@@ -1283,7 +1341,7 @@ git worktree remove "$WT/src"
 | 取得 init，plugins／agents 均明確為空 | exit `0`，且符合 39.7.2 的判定 | 交 Codex 核對。其他閘門條件（版本、工具、MCP、權限模式、hook、skills 等）仍須確認，再處理階段 B 與認證接受值。**不得直接啟動真實請購。** |
 | 取得 init，但 plugins 或 agents 非空 | exit `0`，`plugins_count` 或 `agents_count` 大於 `0` | **記錄執行阻擋並停止。** 另提最小隔離或停用方案；不自動追查來源、不改允許清單、不重試。方案的實作與真實驗證仍須另行核准；在 Aaron 核准方案前，路線文件「來源不明時不先實作 plugin 停用方式」仍適用。 |
 | plugins／agents 資料缺失、型別錯誤或無法判定 | exit `0`，但不符合為空、也不是明確非空（如 `count` 為 `null`） | 如實記為未確認，交 Codex 核對；不猜測已清空、不放行。 |
-| 版本不符、逾時、解析錯誤或其他失敗 | exit `4`、exit `1`（有 JSON 的固定代碼，或無 JSON 的啟動前拒絕） | 保存既有白名單證據與固定代碼後停止；不重跑、不自行修改版本或參數。寫入未完整（`input_*`）時即使同時取得 init，也不採用觀測。 |
+| 版本不符、逾時、解析錯誤或其他失敗 | exit `4`、exit `1`（有 JSON 的固定代碼，或無 JSON 的啟動前拒絕） | 保存既有白名單證據與固定代碼後停止；不重跑、不自行修改版本或參數。`input_failed`／`input_partial` 時即使同時取得 init，也不採用觀測；`not_started` 但 init 先到而成功（exit `0`）的情況屬上面三列，依 plugins／agents 判定。 |
 
 各分支都不自動執行下一次 CLI、不放寬閘門。`auth_source` 為 `none` 仍不能證明登入方式或計費來源，認證決策另行處理；名稱相符不證明來源可信或完整 plugin ID 已確認；路徑分類不是來源認證。
 
@@ -1300,3 +1358,23 @@ git worktree remove "$WT/src"
 - 執行後的下一步依 39.7.3 分流，各自另行決定：均為空時的其他閘門條件、階段 B 與認證接受值；非空時的最小隔離或停用方案（設計、實作、真實驗證）。
 
 本輪只改文件：沒有跑測試、容器、真實 CLI、版本查詢、登入檢查或 C0′；沒有修改程式、設定、接受清單或啟動參數；沒有讀取受管設定、HOME、keychain 或 pixel-office。L1-b 不標通過或 Done；B1-04 仍 InProgress。
+
+### 39.8 修訂紀錄：依 Codex 對 `5ed66f1` 的 R1／R2（2026-10-08；待 Codex 限定複核；尚未執行）
+
+> 診斷型 C0′ 清單 R1／R2 文件修訂完成，待 Codex 限定複核；真實執行仍待 Aaron 另行核准，尚未執行。
+
+- **依據**：vault〈Claude-Code-B1-04-診斷型C0prime清單R1-R2修訂指示-5ed66f1-20261008〉。Codex 的 review 只閱讀文件、原始碼與 vault 提交，沒有執行測試或真實 CLI；本節不是新一輪測試結果。
+- **開工核對**：分支 `b1-04-live`，HEAD `5ed66f1`；工作區只有未追蹤的 `demo`（不動）。`e99f389` 之後仍只有文件提交。
+- **核對方式**：只閱讀原始碼（`cmd/apa-buyer/main.go` 的 `main`、`probe`；`internal/buyer/probe.go` 的最終判定；`internal/buyer/runner.go` 的 `stdinWriter.write`、`Orphaned`）。命令沒有執行，沒有建置、沒有建立工作樹，也沒有做 `bash -n` 語法檢查。
+
+| 項目 | 原寫法（`5ed66f1`） | 現行 | 位置 |
+|---|---|---|---|
+| R1 前置失敗停止 | `git status`、`git diff --stat`、`go version -m … \| grep \| tee` 只印出結果，以註解要求操作者停止；整段貼上時 probe 仍會啟動；各命令失敗處理不一致 | bash 腳本整檔執行；分支、工作區（只容許空或 `?? demo`）、`e99f389` 為祖先且非文件差異為空、證據目錄（不加 `-p`，已存在即停）、暫時工作樹、建置、`vcs.revision`＝基準、`vcs.modified=false` 各有 `\|\| die`；`die` 以 exit 2 結束，不到達 probe；probe 只呼叫一次 | 39.3 |
+| R1 probe 退出碼 | `echo "exit=$?" \| tee`；之後的命令可能影響整段結果 | `PROBE_EXIT=$?` 立即保存；不用 `set -e`，非零也照樣寫 `exit-code.txt`、結束時間，再移除工作樹；腳本以 `PROBE_EXIT` 結束，不重試 | 39.3 |
+| R2 stdout 格式 | `> result.json`，稱為「白名單投影」 | `> stdout.txt`；說明含 `PROBE MODE` 提示行與其後的 JSON 投影，不能整份當 JSON 解析；trace 格式不變 | 39.3、39.5、39.7.2 |
+| R2 `not_started` | 「`input_not_started`（訊息沒有完整寫入；即使同時取得 init，也不採用觀測）」；39.7.3「寫入未完整（`input_*`）時即使同時取得 init，也不採用觀測」 | `failed`／`partial` 即使有 init 也判失敗；`not_started` 時若 init 先到，是 `observed`、exit 0、寫入 0 位元組；`input_not_started` 只在逾時且未取得 init 時出現；不要求寫滿 95 位元組 | 39.4、39.7.3 |
+| R2 `orphaned_output` | 「不保證能回收脫離 process group 的子程序，那種情況記為 `orphaned_output`」 | 清理不保證回收；`orphaned_output` 只是管線未正常關閉等情況的訊號，沒有這個代碼不代表沒有殘留程序；不新增程序掃描 | 39.4 |
+
+**不變**：plugin 來源調查暫緩；正式 Gate、認證接受清單與啟動參數；空／非空／未知的分開處理（未知不當作空）；非空時另提方案、設計實作與真實驗證另行核准；結果能否支持 L1-c 由後續 review 判斷；已關閉的 probe 顯示候選修正與 L1-a 不重開。沒有擴大任何權限或真實執行範圍。
+
+本輪只改文件：沒有改產品程式、建置、跑測試或容器、執行命令範例、真實 CLI、版本查詢、登入檢查或 C0′；沒有讀設定或憑證。L1-b 不標通過；B1-04 仍 InProgress。
