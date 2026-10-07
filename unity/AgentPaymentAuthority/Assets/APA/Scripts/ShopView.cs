@@ -3,7 +3,6 @@
 // was sent, and an animation never feeds back into a decision.
 // Art is LimeZu (limezu.itch.io) when the files were imported; any missing
 // file is a plain placeholder, and the scene then says so.
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -21,36 +20,86 @@ namespace APA
         public const int PPU = 32;
         public bool UsingPlaceholders { get; private set; }
         public int AnimationsStarted { get; private set; } // tests: one per animated sequence
+        [System.NonSerialized] public float Pace = 1f; // tests only: below 1 slows the walk, so the 2.5 s limit snaps it
 
-        // Fixed points of the room (units of one 32 px tile; the room is 12 x 8).
-        static readonly Dictionary<string, Vector2> Spot = new Dictionary<string, Vector2>
+        // D2 pacing (docs/demo-presentation-design.md 16.5).
+        public const float Walk = 4.5f, BrowsePause = 0.6f, DenyPause = 0.8f, MaxTransition = 2.5f;
+
+        // The corridor (16.3): fixed points joined by horizontal and vertical
+        // lines that keep clear of the props. A customer only walks along it.
+        // Units are 32 px tiles; the room is 12 x 8.
+        public const int Out = 0, OutRow = 1, Door = 2, Aisle = 3, Shelf = 4, Bend = 5, Front = 6, Counter = 7;
+        static readonly int[,] Lines = { { Out, OutRow }, { OutRow, Door }, { Door, Aisle }, { OutRow, Aisle }, { Aisle, Shelf }, { Shelf, Bend }, { Bend, Front }, { Front, Counter } };
+
+        // Each customer waits, and leaves to, its own row outside the door.
+        public static Vector2 Point(string consumer, int n)
         {
-            { "door", new Vector2(1.5f, 1.2f) }, { "aisle", new Vector2(4.5f, 3.2f) }, { "counter", new Vector2(8.5f, 1.6f) },
-        };
-
-        // Each customer waits, and leaves to, its own place outside the door.
-        static Vector2 Outside(string consumer) => consumer == "consumer-b" ? new Vector2(-1.3f, 0.2f) : new Vector2(-1.3f, 3.0f);
-
-        static string SpotFor(string phase)
-        {
-            switch (phase)
+            float row = consumer == "consumer-b" ? 0.2f : 3.0f;
+            switch (n)
             {
-                case "entered": return "door";
-                case "quoted": case "unknown": return "aisle";
-                case "waiting": case "allowed_unpaid": return "counter";
-                default: return "outside"; // also denied, expired, withdrawn: back out of the shop
+                case Out: return new Vector2(-1.3f, row);
+                case OutRow: return new Vector2(1.5f, row);
+                case Door: return new Vector2(1.5f, 1.2f);
+                case Aisle: return new Vector2(1.5f, 3.2f);
+                case Shelf: return new Vector2(4.5f, 3.2f);
+                case Bend: return new Vector2(7.5f, 3.2f);
+                case Front: return new Vector2(7.5f, 1.6f);
+                default: return new Vector2(8.5f, 1.6f);
             }
         }
 
+        // Shortest ways between the eight points (Floyd-Warshall).
+        static void Ways(string consumer, out float[,] d, out int[,] next)
+        {
+            const int N = 8;
+            d = new float[N, N];
+            next = new int[N, N];
+            for (int i = 0; i < N; i++) for (int j = 0; j < N; j++) { d[i, j] = i == j ? 0f : float.MaxValue; next[i, j] = j; }
+            for (int e = 0; e < Lines.GetLength(0); e++)
+            {
+                int a = Lines[e, 0], b = Lines[e, 1];
+                d[a, b] = d[b, a] = (Point(consumer, a) - Point(consumer, b)).magnitude;
+            }
+            for (int k = 0; k < N; k++) for (int i = 0; i < N; i++) for (int j = 0; j < N; j++)
+                if (d[i, k] < float.MaxValue && d[k, j] < float.MaxValue && d[i, k] + d[k, j] < d[i, j]) { d[i, j] = d[i, k] + d[k, j]; next[i, j] = next[i, k]; }
+        }
+
+        // Where a phase ends (a Deny ends outside, after the counter).
+        static int Station(string phase)
+        {
+            switch (phase)
+            {
+                case "entered": return Door;
+                case "quoted": case "unknown": return Shelf;
+                case "waiting": case "allowed_unpaid": return Counter;
+                default: return Out;
+            }
+        }
+
+        // One leg of a route: walk to a point, then wait there. seg names the
+        // label while on it: browse, counter (both [anim]) or final.
+        class Step { public Vector2 to; public int node; public string seg; public float pause; }
+
         class Customer
         {
+            public string id, name;
             public GameObject go;
             public SpriteRenderer body;
             public TextMesh tag;
-            public Sprite[] idle, walkRight, walkLeft;
-            public Coroutine move;
-            public string phase = "empty";
+            public Sprite idleDown, idleRight;
+            public Sprite[][] walk;          // right, up, left, down
+            public int facing = 3;
+            public Target target = new Target(); // what it is to show (T)
+            // The running transition; null once arrived (then P is T).
+            public List<Step> route;
+            public int at, from = Out, to = Out, frame, gen;
+            public bool arrived;
+            public float wait, speed, pauseScale, deadline, tick;
+            public string seg = "final";
+            public System.Action<int> done;
         }
+
+        static readonly string[] Facings = { "right", "up", "left", "down" };
 
         readonly Dictionary<string, Customer> customers = new Dictionary<string, Customer>();
         TextMesh status, banner;
@@ -126,19 +175,21 @@ namespace APA
             {
                 // Premade LimeZu sheet, 32 x 64 frames: row 1 idle, row 2
                 // walk; in each row right 0-5, up 6-11, left 12-17, down 18-23.
-                c.idle = Frames(sheet, 64, 18);
-                c.walkRight = Frames(sheet, 128, 0);
-                c.walkLeft = Frames(sheet, 128, 12);
+                c.idleRight = Frames(sheet, 64, 0)[0];
+                c.idleDown = Frames(sheet, 64, 18)[0];
+                c.walk = new[] { Frames(sheet, 128, 0), Frames(sheet, 128, 6), Frames(sheet, 128, 12), Frames(sheet, 128, 18) };
             }
             else
             {
                 var p = new[] { Placeholder(tint, 20, 40) };
-                c.idle = c.walkRight = c.walkLeft = p;
+                c.idleRight = c.idleDown = p[0];
+                c.walk = new[] { p, p, p, p };
             }
-            c.body.sprite = c.idle[0];
+            c.id = id;
+            c.name = label;
+            c.body.sprite = c.idleDown;
             c.tag = MakeText(id + "-tag", Vector2.zero, 0.07f, tint);
             c.tag.transform.SetParent(c.go.transform, false);
-            c.tag.transform.localPosition = new Vector3(0f, 2.2f, 0f);
             c.tag.text = label;
             return c;
         }
@@ -167,87 +218,264 @@ namespace APA
         }
 
         // ResetAll: a new viewer or task. Both customers go back outside at
-        // once, every running animation is stopped and the status is cleared.
+        // once, every running transition is dropped (its done is never
+        // called) and the status is cleared.
         public void ResetAll()
         {
             foreach (var c in customers.Values)
             {
-                if (c.move != null) StopCoroutine(c.move);
-                c.move = null;
-                c.phase = "empty";
-                c.go.transform.localPosition = Outside(c.go.name);
-                c.body.sprite = c.idle[0];
+                c.route = null;
+                c.done = null;
+                c.target = new Target();
+                c.from = c.to = Out;
+                c.go.transform.localPosition = Point(c.id, Out);
                 c.body.color = new Color(1f, 1f, 1f, 0.45f);
+                Idle(c);
+                ShowLabel(c);
             }
             if (status != null) status.text = "No task shown";
         }
 
-        public string PhaseOf(string consumer) => customers.TryGetValue(consumer, out var c) ? c.phase : null;
+        // For the PlayMode tests: observations only.
+        public string PhaseOf(string consumer) => customers.TryGetValue(consumer, out var c) ? c.target.Phase : null;
         public Vector2 PositionOf(string consumer) => customers.TryGetValue(consumer, out var c) ? (Vector2)c.go.transform.localPosition : Vector2.zero;
-        public bool Moving(string consumer) => customers.TryGetValue(consumer, out var c) && c.move != null;
-
-        // Show places the consumer's customer for the phase. Only that customer
-        // moves; the other stays outside. done(gen) is called when the move
-        // has finished, with the generation it was started for.
-        public void Show(string consumer, string phase, string verdict, string reason, bool animate, int gen, System.Action<int> done)
+        public bool Moving(string consumer) => customers.TryGetValue(consumer, out var c) && c.route != null;
+        public string LabelOf(string consumer) => customers.TryGetValue(consumer, out var c) ? LabelNow(c) : null;
+        public string FacingOf(string consumer) => customers.TryGetValue(consumer, out var c) ? Facings[c.facing] : null;
+        public float DeadlineOf(string consumer) => customers.TryGetValue(consumer, out var c) && c.route != null ? c.deadline : -1f;
+        public string StatusText => status.text;
+        // The points still to walk, from where the customer stands.
+        public List<Vector2> RouteOf(string consumer)
         {
-            foreach (var kv in customers)
-            {
-                var c = kv.Value;
-                bool active = kv.Key == consumer;
-                c.body.color = new Color(1f, 1f, 1f, active ? 1f : 0.45f);
-                if (!active) continue;
-                c.phase = phase;
-                var spot = SpotFor(phase);
-                var target = spot == "outside" ? Outside(kv.Key) : Spot[spot];
-                if (c.move != null) StopCoroutine(c.move);
-                c.move = null;
-                if (animate)
-                {
-                    AnimationsStarted++;
-                    c.move = StartCoroutine(Walk(c, target, gen, done));
-                }
-                else
-                {
-                    c.go.transform.localPosition = target;
-                    c.body.sprite = c.idle[0];
-                    done?.Invoke(gen);
-                }
-            }
-            status.text = StatusLine(consumer, phase, verdict, reason);
+            var pts = new List<Vector2>();
+            if (!customers.TryGetValue(consumer, out var c)) return pts;
+            pts.Add(c.go.transform.localPosition);
+            if (c.route != null) for (int i = c.at; i < c.route.Count; i++) pts.Add(c.route[i].to);
+            return pts;
         }
 
-        static string StatusLine(string consumer, string phase, string verdict, string reason)
+        void Activate(string consumer)
         {
-            var who = consumer == "consumer-a" ? "A" : "B";
-            switch (phase)
+            foreach (var kv in customers) kv.Value.body.color = new Color(1f, 1f, 1f, kv.Key == consumer ? 1f : 0.45f);
+        }
+
+        // Go: a new target (16.4 rules 1 and 2). done(gen) is called once,
+        // when the customer has arrived and shows the target; a transition
+        // replaced by a newer one, or dropped by ResetAll, never calls it.
+        public void Go(string consumer, Target t, bool browse, bool animate, int gen, System.Action<int> done)
+        {
+            if (!customers.TryGetValue(consumer, out var c)) return;
+            Activate(consumer);
+            c.target = t;
+            var plan = Plan(c, t, browse, out bool ahead);
+            c.route = plan;
+            c.at = 0;
+            c.arrived = false;
+            c.wait = 0f;
+            c.gen = gen;
+            c.done = done;
+            if (!animate || plan.Count == 0) { Finish(c); return; } // 16.5 rule 1: a stored snapshot is not news
+            c.seg = plan[0].seg;
+            AnimationsStarted++;
+            c.deadline = Time.time + MaxTransition; // 16.5 rule 4, from the message that set this target
+            c.speed = Walk;
+            c.pauseScale = 1f;
+            if (ahead)
             {
-                case "waiting": return who + ": ASK - waiting for a human (M1 cannot approve or pay)";
-                case "denied": return who + ": DENY (" + reason + ") - leaving";
-                case "allowed_unpaid": return who + ": ALLOW - but M1 has no payment capability";
-                case "expired": return who + ": ask expired (recorded by the backend) - leaving";
-                case "withdrawn": return who + ": ask withdrawn (task cancelled) - leaving";
-                case "quoted": return who + ": got a quote";
-                case "entered": return who + ": entered the shop";
-                default: return who + ": " + phase;
+                // 16.5 rule 2: the new end lies ahead on the way already
+                // taken: the same way at twice the speed, no more waiting.
+                foreach (var s in plan) s.pause = 0f;
+                c.speed = 2f * Walk;
+            }
+            else
+            {
+                // 16.5 rule 3 (or a first move): the corridor at the usual
+                // pace, sped up evenly when it would take over 2.5 s.
+                float len = 0f, rest = 0f;
+                var p = (Vector2)c.go.transform.localPosition;
+                foreach (var s in plan) { len += (s.to - p).magnitude; p = s.to; rest += s.pause; }
+                float k = (len / Walk + rest) / MaxTransition;
+                if (k > 1f) { c.speed = Walk * k; c.pauseScale = 1f / k; }
+            }
+            ShowLabel(c);
+        }
+
+        // Plan: the route from where the customer stands to the target;
+        // ahead when its points are the next points of the running route.
+        List<Step> Plan(Customer c, Target t, bool browse, out bool ahead)
+        {
+            var steps = new List<Step>();
+            var p = (Vector2)c.go.transform.localPosition;
+            int a = c.from, b = c.to;
+            if (browse)
+            {
+                Leg(c.id, ref p, ref a, ref b, Shelf, "browse", steps);
+                steps.Add(new Step { to = p, node = Shelf, seg = "browse", pause = BrowsePause });
+            }
+            if (SceneRules.Counter(t.Phase))
+            {
+                Leg(c.id, ref p, ref a, ref b, Counter, "counter", steps);
+                if (t.Phase == "denied")
+                {
+                    steps.Add(new Step { to = p, node = Counter, seg = "final", pause = DenyPause });
+                    Leg(c.id, ref p, ref a, ref b, Out, "final", steps);
+                }
+            }
+            else if (!(browse && t.Phase == "quoted")) Leg(c.id, ref p, ref a, ref b, Station(t.Phase), "final", steps);
+            ahead = false;
+            if (c.route != null && steps.Count > 0)
+            {
+                var here = (Vector2)c.go.transform.localPosition;
+                var left = Points(c.route, c.at, here);
+                var mine = Points(steps, 0, here);
+                ahead = mine.Count <= left.Count;
+                for (int i = 0; ahead && i < mine.Count; i++) ahead = (mine[i] - left[i]).sqrMagnitude < 1e-6f;
+            }
+            return steps;
+        }
+
+        // Points: the places a route still goes through from step i, once
+        // each, leaving out where the customer stands now.
+        static List<Vector2> Points(List<Step> route, int i, Vector2 here)
+        {
+            var pts = new List<Vector2>();
+            for (; i < route.Count; i++)
+            {
+                var last = pts.Count > 0 ? pts[pts.Count - 1] : here;
+                if ((route[i].to - last).sqrMagnitude > 1e-6f) pts.Add(route[i].to);
+            }
+            return pts;
+        }
+
+        // Leg: the corridor from p (on the line a-b) to goal.
+        static void Leg(string consumer, ref Vector2 p, ref int a, ref int b, int goal, string seg, List<Step> steps)
+        {
+            Ways(consumer, out var d, out var next);
+            int via = a;
+            if (b != a && (p - Point(consumer, b)).magnitude + d[b, goal] < (p - Point(consumer, a)).magnitude + d[a, goal]) via = b;
+            if ((p - Point(consumer, via)).sqrMagnitude > 1e-6f) steps.Add(new Step { to = Point(consumer, via), node = via, seg = seg });
+            for (int n = via; n != goal;)
+            {
+                n = next[n, goal];
+                steps.Add(new Step { to = Point(consumer, n), node = n, seg = seg });
+            }
+            p = Point(consumer, goal);
+            a = b = goal;
+        }
+
+        // Relabel: the same target place (16.4 rules 3 and 4). The customer
+        // keeps its place and any running transition, its time limit
+        // included; only the label and the target's data change. True when
+        // it has arrived, so the newest sequence can be reported at once.
+        public bool Relabel(string consumer, Target t)
+        {
+            if (!customers.TryGetValue(consumer, out var c)) return false;
+            Activate(consumer);
+            c.target = t;
+            ShowLabel(c);
+            return c.route == null;
+        }
+
+        void Update()
+        {
+            foreach (var c in customers.Values) if (c.route != null) Advance(c, Time.deltaTime);
+        }
+
+        void Advance(Customer c, float dt)
+        {
+            if (Time.time >= c.deadline) { Finish(c); return; } // 16.5 rule 4: never over 2.5 s
+            while (c.at < c.route.Count)
+            {
+                var s = c.route[c.at];
+                c.seg = s.seg;
+                c.to = s.node;
+                if (!c.arrived)
+                {
+                    var p = (Vector2)c.go.transform.localPosition;
+                    float d = (s.to - p).magnitude;
+                    if (d > 1e-4f)
+                    {
+                        var dir = s.to - p;
+                        c.facing = Mathf.Abs(dir.x) >= Mathf.Abs(dir.y) ? (dir.x > 0 ? 0 : 2) : (dir.y > 0 ? 1 : 3);
+                        float v = c.speed * Pace;
+                        if (v * dt < d)
+                        {
+                            c.go.transform.localPosition = p + dir * (v * dt / d);
+                            c.tick += dt;
+                            if (c.tick > 0.1f) { c.tick = 0f; c.frame = (c.frame + 1) % 6; }
+                            c.body.sprite = c.walk[c.facing][c.frame];
+                            ShowLabel(c);
+                            return;
+                        }
+                        dt -= d / v;
+                    }
+                    c.go.transform.localPosition = s.to;
+                    c.from = s.node;
+                    c.arrived = true;
+                    c.wait = s.pause * c.pauseScale;
+                }
+                if (c.wait > 0f)
+                {
+                    Idle(c);
+                    ShowLabel(c);
+                    if (dt < c.wait) { c.wait -= dt; return; }
+                    dt -= c.wait;
+                    c.wait = 0f;
+                }
+                c.at++;
+                c.arrived = false;
+            }
+            Finish(c);
+        }
+
+        // Finish: at the target's place, showing it (P = T); then done.
+        void Finish(Customer c)
+        {
+            if (c.route.Count > 0)
+            {
+                var last = c.route[c.route.Count - 1];
+                c.go.transform.localPosition = last.to;
+                c.from = c.to = last.node;
+            }
+            c.route = null;
+            c.seg = "final";
+            Idle(c);
+            ShowLabel(c);
+            var done = c.done;
+            c.done = null;
+            done?.Invoke(c.gen);
+        }
+
+        // Standing still faces down; at the counter it faces the counter.
+        void Idle(Customer c)
+        {
+            bool atCounter = ((Vector2)c.go.transform.localPosition - Point(c.id, Counter)).sqrMagnitude < 1e-4f;
+            c.facing = atCounter ? 0 : 3;
+            c.body.sprite = atCounter ? c.idleRight : c.idleDown;
+        }
+
+        // LabelNow: the label of the segment on now; a display-only segment
+        // says [anim] and that no event of its own stands behind it.
+        static string LabelNow(Customer c)
+        {
+            switch (c.seg)
+            {
+                case "browse": return "[anim] browsing - no event";
+                case "counter": return "[anim] to counter - quote bound in request";
+                default: return c.target.Label;
             }
         }
 
-        IEnumerator Walk(Customer c, Vector2 target, int gen, System.Action<int> done)
+        void ShowLabel(Customer c)
         {
-            var frames = target.x >= c.go.transform.localPosition.x ? c.walkRight : c.walkLeft;
-            int f = 0;
-            float tick = 0f;
-            while (((Vector2)c.go.transform.localPosition - target).sqrMagnitude > 0.0004f)
-            {
-                c.go.transform.localPosition = Vector2.MoveTowards(c.go.transform.localPosition, target, 3f * Time.deltaTime);
-                tick += Time.deltaTime;
-                if (tick > 0.1f) { tick = 0f; f = (f + 1) % frames.Length; c.body.sprite = frames[f]; }
-                yield return null;
-            }
-            c.body.sprite = c.idle[0];
-            c.move = null;
-            done?.Invoke(gen);
+            var label = LabelNow(c);
+            c.tag.text = label == "" ? c.name : c.name + "\n" + label;
+            // Kept inside the view: to the right of a customer on the left
+            // half of the room, to the left on the right half.
+            bool left = c.go.transform.localPosition.x < 6f;
+            c.tag.anchor = left ? TextAnchor.LowerLeft : TextAnchor.LowerRight;
+            c.tag.transform.localPosition = new Vector3(left ? -0.4f : 0.4f, 2.05f, 0f);
+            if (status != null && c.body.color.a > 0.9f) status.text = (c.id == "consumer-a" ? "A" : "B") + ": " + (label == "" ? c.target.Phase : label);
         }
     }
 }

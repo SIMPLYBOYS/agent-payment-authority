@@ -60,9 +60,10 @@ export function renderTimeline(root, rows, expanded = new Set(), at = null) {
 
 // renderScene writes the shop status line under the Unity canvas: the
 // committed phase label and its notes, never a claim of payment.
-export function renderSceneText(root, sc) {
+export function renderSceneText(root, sc, motion = "") {
   root.replaceChildren(el("p", "scene-label", sc.label));
   root.dataset.phase = sc.phase;
+  root.dataset.motion = motion; // first | moving | shown | waiting | "" (D2, for the browser test)
   for (const n of sc.notes) root.append(el("p", "scene-note", n));
 }
 

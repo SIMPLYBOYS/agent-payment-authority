@@ -1,0 +1,103 @@
+// EditMode tests of the D2 transition table (docs/demo-presentation-design.md
+// 16.4, 16.9 items 5, 10, 11, 13). The cases are the shared vectors that
+// web/adapter.js is tested with too, so the two tables cannot drift apart.
+using System;
+using System.IO;
+using APA;
+using NUnit.Framework;
+using UnityEngine;
+
+public class SceneRulesTests
+{
+    [Serializable] public class VMsg { public string phase; public int cause_seq; public string task_end; public int seq; public string reason; }
+    [Serializable] public class VStep { public VMsg m; public int rule; public bool browse; public string label; }
+    [Serializable] public class VCase { public string name; public VStep[] steps; }
+    [Serializable] public class VFile { public VCase[] cases; }
+
+    static string Json(int seq, string phase, string extra) =>
+        "{\"v\":1,\"gen\":1,\"consumer\":\"consumer-a\",\"task_id\":\"task-a\",\"seq\":" + seq + ",\"phase\":\"" + phase + "\",\"verdict\":\"Ask\",\"reason\":\"HUMAN_APPROVAL_REQUIRED\",\"animate\":true" + extra + "}";
+
+    [Test]
+    public void SharedVectorsGiveTheSameRulesAndLabels()
+    {
+        var path = Path.Combine(Application.dataPath, "../../../testdata/demo/scene-transitions.json");
+        var file = JsonUtility.FromJson<VFile>(File.ReadAllText(path));
+        Assert.Greater(file.cases.Length, 10);
+        int steps = 0;
+        foreach (var c in file.cases)
+        {
+            var s = new ProjectionState();
+            foreach (var st in c.steps)
+            {
+                var m = new ProjectionMessage { v = 1, gen = 1, consumer = "consumer-a", task_id = "task-a", seq = st.m.seq, phase = st.m.phase, cause_seq = st.m.cause_seq, task_end = st.m.task_end, reason = st.m.reason, animate = true };
+                Assert.AreEqual(Outcome.Applied, s.Apply(m, out _), c.name);
+                Assert.AreEqual(st.rule, s.Rule, c.name + " #" + st.m.seq + " rule");
+                Assert.AreEqual(st.browse, s.Browse, c.name + " #" + st.m.seq + " browse");
+                Assert.AreEqual(st.label, s.T.Label, c.name + " #" + st.m.seq + " label");
+                steps++;
+            }
+        }
+        Debug.Log("APA SceneRulesTests: " + file.cases.Length + " cases, " + steps + " steps");
+    }
+
+    // Item 5: without the two fields, or with bad ones, the shop falls back
+    // to plan A: the same phase never browses again and no number is shown.
+    [Test]
+    public void MissingOrBadFieldsAreUnknown()
+    {
+        var s = new ProjectionState();
+        Assert.AreEqual(Outcome.Applied, s.Apply(ProjectionState.Parse(Json(3, "waiting", "")), out _), "an old page's message");
+        Assert.AreEqual(0, s.T.Cause);
+        Assert.AreEqual("", s.T.End);
+        Assert.AreEqual("ASK - waiting for a human", s.T.Label);
+        string[] bad = { ",\"cause_seq\":-1", ",\"cause_seq\":99", ",\"cause_seq\":0", ",\"task_end\":\"paid\"", ",\"task_end\":\"\"" };
+        int seq = 3;
+        foreach (var extra in bad)
+        {
+            Assert.AreEqual(Outcome.Applied, s.Apply(ProjectionState.Parse(Json(++seq, "waiting", extra)), out _), extra);
+            Assert.AreEqual(4, s.Rule, extra + ": the same place, nothing played again");
+            Assert.AreEqual(0, s.T.Cause, extra);
+            Assert.AreEqual("", s.T.End, extra);
+            Assert.AreEqual("ASK - waiting for a human", s.T.Label, extra);
+        }
+    }
+
+    // A value of the wrong JSON type, or written twice: JsonUtility would
+    // read "3" or 3.5 as 3; Parse keeps neither, so no number shows that was
+    // not sent as an integer, and the message is still shown (plan A).
+    [Test]
+    public void WrongTypesAreUnknownNeverANumber()
+    {
+        string[] wrong = { ",\"cause_seq\":\"3\"", ",\"cause_seq\":3.5", ",\"cause_seq\":3e0", ",\"cause_seq\":true", ",\"cause_seq\":[3]",
+            ",\"cause_seq\":3,\"cause_seq\":4", ",\"task_end\":5", ",\"task_end\":[\"timed_out\"]", ",\"task_end\":\"timed_out\",\"task_end\":\"\"",
+            ",\"note\":\"\\\"cause_seq\\\":3\"" };
+        foreach (var extra in wrong)
+        {
+            var s = new ProjectionState();
+            var m = ProjectionState.Parse(Json(5, "waiting", extra));
+            Assert.NotNull(m, extra);
+            Assert.AreEqual(Outcome.Applied, s.Apply(m, out _), extra);
+            Assert.AreEqual(0, s.T.Cause, extra);
+            Assert.AreEqual("", s.T.End, extra);
+            Assert.AreEqual("ASK - waiting for a human", s.T.Label, extra);
+        }
+        var ok = new ProjectionState();
+        ok.Apply(ProjectionState.Parse(Json(5, "waiting", ",\"cause_seq\": 3 ,\"task_end\": \"timed_out\"")), out _);
+        Assert.AreEqual(3, ok.T.Cause);
+        Assert.AreEqual("CLI timeout - ask still pending", ok.T.Label);
+    }
+
+    [Test]
+    public void LabelsAreAsciiAndDisplaySegmentsAreMarked()
+    {
+        string[] phases = { "entered", "quoted", "waiting", "denied", "allowed_unpaid", "expired", "withdrawn", "unknown" };
+        foreach (var p in phases)
+            foreach (var end in new[] { "", "cancelled", "timed_out" })
+            {
+                var l = SceneRules.Label(p, 3, end, "INSUFFICIENT_BUDGET");
+                foreach (var ch in l) Assert.Less((int)ch, 128, l);
+                StringAssert.DoesNotContain("paid", l.ToLowerInvariant().Replace("unpaid", ""));
+                Assert.IsFalse(l.StartsWith("[anim]"), "an event's label is not a display segment: " + l);
+            }
+    }
+}

@@ -123,7 +123,9 @@ test("the Unity projection carries no token and follows the committed snapshot",
   const { task, events } = snapshot("task-a", askEvents());
   A.commit(s, gen, task, events);
   const m = A.projection(s, false);
-  assert.deepEqual(Object.keys(m).sort(), ["animate", "clear", "consumer", "gen", "phase", "reason", "seq", "task_id", "v", "verdict"]);
+  assert.deepEqual(Object.keys(m).sort(), ["animate", "cause_seq", "clear", "consumer", "gen", "phase", "reason", "seq", "task_end", "task_id", "v", "verdict"]);
+  assert.equal(m.cause_seq, 3, "the Ask's POLICY_DECIDED");
+  assert.equal(m.task_end, "");
   assert.equal(m.v, A.BRIDGE_VERSION);
   assert.equal(m.gen, gen);
   assert.equal(m.seq, 3);
@@ -315,4 +317,104 @@ test("D1 evidence: Unity is in step only for the same generation, task, sequence
   assert.equal(sync(null), "Unity 尚未回報：尚未一致");
   assert.ok(A.evidence(snap, "po-1", { mode: "live", catalog: null, sent, report: { gen: 7, task: "task-a", seq: 4, phase: "expired" } })
     .sections.find((x) => x.title === "場景對應").rows.some(([k, v, src]) => k === "對應請購" && v === "po-1（網頁推導）" && src === "網頁推導"), "the purchase link stays the page's own");
+});
+
+// ---- D2 (docs/demo-presentation-design.md 16.4, 16.9 items 3, 4, 5, 10, 11, 13) ----
+
+const vectors = JSON.parse(readFileSync(new URL("../../testdata/demo/scene-transitions.json", import.meta.url)));
+
+test("D2 transition: the shared vectors give the same rules and labels as Unity's", () => {
+  let steps = 0;
+  for (const c of vectors.cases) {
+    let t = null;
+    for (const st of c.steps) {
+      const tr = A.transition(t, st.m);
+      assert.equal(tr.rule, st.rule, c.name + " #" + st.m.seq + " rule");
+      assert.equal(tr.browse, st.browse, c.name + " #" + st.m.seq + " browse");
+      assert.equal(tr.target.label, st.label, c.name + " #" + st.m.seq + " label");
+      t = tr.target;
+      steps++;
+    }
+  }
+  assert.ok(vectors.cases.length > 10 && steps > 20);
+});
+
+test("D2 projection: cause_seq names the event behind the phase; task_end the first ending", () => {
+  const msg = (events) => {
+    const s = A.newState();
+    const gen = A.reset(s, "consumer-a", "task-a");
+    const { task, events: e } = snapshot("task-a", events);
+    assert.equal(A.commit(s, gen, task, e), "ok");
+    return A.projection(s, true);
+  };
+  const at = (m) => [m.phase, m.cause_seq, m.task_end, m.seq];
+  assert.deepEqual(at(msg([ev(1, "TASK_STARTED")])), ["entered", 1, "", 1]);
+  assert.deepEqual(at(msg([ev(1, "TASK_STARTED"), ev(2, "PURCHASE_PROPOSED", PO)])), ["quoted", 2, "", 2]);
+  assert.deepEqual(at(msg(denyEvents())), ["denied", 3, "", 3]);
+  assert.deepEqual(at(msg([...askEvents(), ev(4, "TASK_TIMED_OUT")])), ["waiting", 3, "timed_out", 4], "11.1: the Ask stays pending");
+  const expiredThenCancelled = [...askEvents(), ev(4, "APPROVAL_EXPIRED", PO), ev(5, "TASK_CANCELLED")];
+  assert.deepEqual(at(msg(expiredThenCancelled)), ["expired", 4, "cancelled", 5], "item 4: the expiry's number, not the cancel's");
+  assert.deepEqual(at(msg([...askEvents(), ev(4, "APPROVAL_WITHDRAWN", PO), ev(5, "TASK_CANCELLED")])), ["withdrawn", 4, "cancelled", 5]);
+  assert.deepEqual(at(msg([...denyEvents(), ev(4, "TASK_TIMED_OUT"), ev(5, "TASK_CANCELLED")])), ["denied", 3, "timed_out", 5], "the first ending");
+  const orphan = [ev(1, "TASK_STARTED"), ev(2, "POLICY_DECIDED", { decision: { policy_verdict: "Ask" } })];
+  assert.deepEqual(at(msg(orphan)), ["unknown", 0, "", 2], "no purchase: no number");
+  assert.equal(A.shopLabel("expired", 4, "cancelled", ""), "ask expired (#4) - leaving");
+  assert.equal(A.shopLabel("waiting", 0, "", ""), "ASK - waiting for a human", "unknown: no number");
+});
+
+test("D2 projection: every replay step of the Store-built histories sends fields in range", () => {
+  for (const name of Object.keys(histories)) {
+    const snap = fromStore(name);
+    for (const e of snap.events) {
+      const m = A.projection({ gen: 1, snapshot: A.stepView(snap, e.sequence) }, true);
+      assert.equal(m.seq, e.sequence, name);
+      assert.ok(Number.isInteger(m.cause_seq) && m.cause_seq >= 0 && m.cause_seq <= m.seq, name + " #" + e.sequence + " cause " + m.cause_seq);
+      assert.ok(["", "cancelled", "timed_out"].includes(m.task_end), name);
+    }
+  }
+});
+
+test("D2 replay of a Store-built history: a second decision browses again, another purchase's expiry does not", () => {
+  const steps = (name) => {
+    const snap = fromStore(name);
+    let t = null;
+    return snap.events.map((e) => {
+      const m = A.projection({ gen: 1, snapshot: A.stepView(snap, e.sequence) }, true);
+      const tr = A.transition(t, m);
+      t = tr.target;
+      return [e.sequence, m.phase, m.cause_seq, tr.rule, tr.browse];
+    });
+  };
+  assert.deepEqual(steps("ask_ask_then_expire"), [
+    [1, "entered", 1, 1, false], [2, "quoted", 2, 1, true], [3, "waiting", 3, 1, false],
+    [4, "waiting", 3, 4, false],  // purchase 2 proposed: the scene still shows purchase 1's Ask
+    [5, "waiting", 5, 2, true],   // purchase 2's Ask: a new purchase
+    [6, "waiting", 5, 4, false],  // purchase 1 expires: another purchase's event
+  ]);
+  assert.deepEqual(steps("expired_then_ask"), [
+    [1, "entered", 1, 1, false], [2, "quoted", 2, 1, true], [3, "waiting", 3, 1, false], [4, "expired", 4, 1, false],
+    [5, "expired", 4, 4, false],  // purchase 2 proposed: the scene keeps the latest decision's purchase
+    [6, "waiting", 6, 1, true],   // purchase 2's Ask: back in from outside, browsing
+  ]);
+});
+
+test("D2 transition text: display segments say so and name the recorded event", () => {
+  const ask3 = { phase: "waiting", cause_seq: 3, seq: 3, task_end: "", reason: "HUMAN_APPROVAL_REQUIRED" };
+  assert.equal(A.transition({ phase: "entered", cause: 1, end: "" }, ask3).text, "展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #3 記錄");
+  assert.equal(A.transition({ phase: "quoted", cause: 2, end: "" }, ask3).text, "展示動畫：到櫃檯（沒有獨立事件）；裁決已在 #3 記錄");
+  const t3 = A.transition(null, ask3).target;
+  assert.equal(A.transition(t3, { ...ask3, cause_seq: 6, seq: 6 }).text, "新的一筆請購：展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #6 記錄");
+  assert.equal(A.transition(t3, { ...ask3, seq: 4, task_end: "timed_out" }).text, "不移動，只換標籤：CLI 逾時，同一筆 Ask 仍未決");
+  assert.equal(A.transition(t3, { ...ask3, seq: 4 }).text, "不移動、不重播：場景的請購未變（快照 #4）");
+  assert.equal(A.transition(t3, { phase: "expired", cause_seq: 4, seq: 4, task_end: "" }).text, "離店；到期已在 #4 記錄");
+  assert.equal(A.transition(null, { phase: "entered", cause_seq: 1, seq: 1, task_end: "" }).text, "進店；進店事件已在 #1 記錄");
+  assert.equal(A.transition(null, { ...ask3, cause_seq: 0 }).text, "展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已記錄（序號未知）");
+});
+
+test("D2 evidence: the scene page lists this move, derived by the page from the transition table", () => {
+  const snap = { task: snapshot("task-a", askEvents(), [P("po-1", { decision: askOf("po-1") })]).task, events: askEvents() };
+  const row = (motion) => A.evidence(snap, "po-1", { ...ctxLive, sent: null, report: null, motion }).sections.find((x) => x.title === "場景對應").rows.find(([k]) => k === "這次過場");
+  assert.deepEqual(row(null), ["這次過場", "—", "網頁依轉換表推導"]);
+  const tr = A.transition({ phase: "entered", cause: 1, end: "" }, A.projection({ gen: 1, snapshot: snap }, true));
+  assert.deepEqual(row({ rule: tr.rule, text: tr.text }), ["這次過場", "展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #3 記錄（規則 1）", "網頁依轉換表推導"]);
 });

@@ -3,6 +3,7 @@
 // The shop holds no token and reads no API: it only shows what it is sent.
 // Nothing here can decide, pay, expire or record anything.
 using System;
+using System.Text.RegularExpressions;
 using UnityEngine;
 
 namespace APA
@@ -20,6 +21,78 @@ namespace APA
         public string verdict;   // Ask | Deny | Allow | "" (display only)
         public string reason;
         public bool animate;     // false for a first load: a stored snapshot is not news
+        // Optional (D2, docs/demo-presentation-design.md 16.4); v stays 1.
+        // A missing or bad value is unknown: 0 and "".
+        public int cause_seq;    // the event that set the phase; shown as #n
+        public string task_end;  // "" | cancelled | timed_out
+    }
+
+    // Target: what the shop is to show for a customer (16.4 "T"). The page's
+    // adapter.js keeps the same rules (shared vectors in
+    // testdata/demo/scene-transitions.json).
+    public class Target
+    {
+        public string Phase = "empty";
+        public int Cause;            // 0: unknown
+        public string End = "";
+        public int Seq = -1;         // the latest snapshot sequence taken
+        public string Verdict = "", Reason = "";
+        public string Label => SceneRules.Label(Phase, Cause, End, Reason);
+    }
+
+    // SceneRules: the transition table (16.4), first match wins:
+    // 1 another phase; 2 the same counter phase, both causes valid and
+    // different (a new purchase); 3 only the label kind changed; 4 the same.
+    public static class SceneRules
+    {
+        public static bool Counter(string phase) => phase == "waiting" || phase == "denied" || phase == "allowed_unpaid";
+        public static int Cause(int cause, int seq) => cause > 0 && cause <= seq ? cause : 0;
+        public static string End(string end) => end == "cancelled" || end == "timed_out" ? end : "";
+        // Only a waiting Ask says the CLI timed out; a Deny, an expiry or a
+        // withdrawal keeps its own label.
+        static string Kind(string phase, string end) => phase == "waiting" && end == "timed_out" ? "waiting/timed_out" : phase;
+
+        public static int Rule(Target t, string phase, int cause, string end)
+        {
+            if (t.Phase != phase) return 1;
+            if (Counter(phase) && t.Cause > 0 && cause > 0 && t.Cause != cause) return 2;
+            return Kind(t.Phase, t.End) != Kind(phase, end) ? 3 : 4;
+        }
+
+        // Browse: whether the move plays "[anim] browsing" at the shelf.
+        public static bool Browse(Target t, int rule, string phase, int cause)
+        {
+            if (rule == 2) return true;
+            if (rule != 1) return false;
+            if (phase == "quoted") return true;
+            if (!Counter(phase) || t.Phase == "quoted") return false;
+            if (Counter(t.Phase)) return t.Cause > 0 && cause > 0 && t.Cause != cause;
+            return true;
+        }
+
+        // Code keeps a fixed reason code (A-Z, 0-9, _) and drops anything else.
+        static string Code(string r) => !string.IsNullOrEmpty(r) && r.Length <= 40 && Regex.IsMatch(r, "^[A-Z0-9_]+$") ? r : "";
+
+        // Label: the customer's ASCII label. #n is always the cause, never
+        // the snapshot sequence; an unknown cause shows no number.
+        public static string Label(string phase, int cause, string end, string reason)
+        {
+            var n = cause > 0 ? " (#" + cause + ")" : "";
+            switch (phase)
+            {
+                case "empty": return "";
+                case "entered": return "entered" + n;
+                case "quoted": return "request proposed" + n;
+                case "waiting": return end == "timed_out" ? "CLI timeout - ask still pending" : "ASK" + n + " - waiting for a human";
+                case "denied":
+                    var why = (cause > 0 ? "#" + cause : "") + (cause > 0 && Code(reason) != "" ? ", " : "") + Code(reason);
+                    return "DENY" + (why != "" ? " (" + why + ")" : "") + " - leaving";
+                case "allowed_unpaid": return "ALLOW - no payment capability";
+                case "expired": return "ask expired" + n + " - leaving";
+                case "withdrawn": return "ask withdrawn" + n + " - leaving";
+                default: return "unknown state" + n;
+            }
+        }
     }
 
     public enum Outcome { Applied, Cleared, Duplicate, Stale, Older, Invalid }
@@ -35,20 +108,36 @@ namespace APA
         public int Gen { get; private set; } = -1;
         public string Consumer { get; private set; }
         public string TaskId { get; private set; }
-        public int Seq { get; private set; } = -1;
-        public string Phase { get; private set; } = "empty";
+        public Target T { get; private set; } = new Target();
+        public int Seq => T.Seq;
+        public string Phase => T.Phase;
         public int AnimatedSeq { get; private set; } = -1;
+        public int Rule { get; private set; }     // of the last Applied message
+        public bool Browse { get; private set; }
+
+        // JsonUtility turns "3" or 3.5 into 3: the two optional fields are
+        // taken only when written once, as an integer and as one of the two
+        // ending words; anything else is unknown (16.4).
+        static readonly Regex CauseKey = new Regex("[{,]\\s*\"cause_seq\"\\s*:"), CauseInt = new Regex("[{,]\\s*\"cause_seq\"\\s*:\\s*-?[0-9]+\\s*[,}]");
+        static readonly Regex EndKey = new Regex("[{,]\\s*\"task_end\"\\s*:"), EndWord = new Regex("[{,]\\s*\"task_end\"\\s*:\\s*\"(cancelled|timed_out)\"\\s*[,}]");
 
         // Parse reads a message as data only; anything malformed is Invalid.
         public static ProjectionMessage Parse(string json)
         {
             if (string.IsNullOrEmpty(json) || json.Length > 4096) return null;
-            try { return JsonUtility.FromJson<ProjectionMessage>(json); }
+            ProjectionMessage m;
+            try { m = JsonUtility.FromJson<ProjectionMessage>(json); }
             catch (ArgumentException) { return null; }
+            if (m == null) return null;
+            if (CauseKey.Matches(json).Count != 1 || !CauseInt.IsMatch(json)) m.cause_seq = 0;
+            if (EndKey.Matches(json).Count != 1 || !EndWord.IsMatch(json)) m.task_end = "";
+            return m;
         }
 
         // Apply takes one message. animate is true only for an event sequence
-        // not animated before in this generation.
+        // not animated before in this generation. An Applied message is
+        // always compared with the target T, never with what was last
+        // shown; Rule and Browse say what it changes.
         public Outcome Apply(ProjectionMessage m, out bool animate)
         {
             animate = false;
@@ -60,7 +149,7 @@ namespace APA
             if (m.gen > Gen)
             {
                 // A new viewer or task: forget everything of the old one first.
-                Gen = m.gen; Consumer = null; TaskId = null; Seq = -1; Phase = "empty"; AnimatedSeq = -1;
+                Gen = m.gen; Consumer = null; TaskId = null; T = new Target(); AnimatedSeq = -1;
                 if (m.clear) return Outcome.Cleared;
             }
             else if (m.clear) return Outcome.Duplicate;
@@ -68,7 +157,12 @@ namespace APA
             if (m.seq < Seq) return Outcome.Older;
             var phase = Array.IndexOf(Phases, m.phase) >= 0 ? m.phase : "unknown";
             if (m.seq == Seq && phase == Phase) return Outcome.Duplicate;
-            Consumer = m.consumer; TaskId = m.task_id; Seq = m.seq; Phase = phase;
+            int cause = SceneRules.Cause(m.cause_seq, m.seq);
+            var end = SceneRules.End(m.task_end);
+            Rule = SceneRules.Rule(T, phase, cause, end);
+            Browse = SceneRules.Browse(T, Rule, phase, cause);
+            Consumer = m.consumer; TaskId = m.task_id;
+            T = new Target { Phase = phase, Cause = cause, End = end, Seq = m.seq, Verdict = m.verdict ?? "", Reason = m.reason ?? "" };
             if (m.animate && m.seq > AnimatedSeq) animate = true;
             if (m.seq > AnimatedSeq) AnimatedSeq = m.seq; // never animate the same sequence twice
             return Outcome.Applied;

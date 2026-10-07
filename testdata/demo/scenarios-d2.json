@@ -1,0 +1,11 @@
+{
+  "description": "Trusted host scenario catalog for the D2 browser check only (docs/demo-presentation-design.md 16.9): the main line with a pause after the task starts, so a task can be opened while the Store has only #1. Test data: make demo keeps testdata/demo/scenarios.json. Not a policy change and not agent input; the fake CLI runs no model.",
+  "scenarios": [
+    {
+      "id": "ask-slow",
+      "consumer_id": "consumer-a",
+      "scenario": "testdata/cli/ask-slow.json",
+      "label": "主商品，進店後停 8 秒再請購（Ask）"
+    }
+  ]
+}

@@ -85,7 +85,8 @@
 
 - `v`、`gen`（頁面世代）、`clear`；
 - `consumer`、`task_id`、`seq`（快照的 `as_of_sequence`）；
-- `phase`、`verdict`、`reason`、`animate`。
+- `phase`、`verdict`、`reason`、`animate`；
+- D2 起兩個選填欄位（`v` 仍為 1，見 `docs/demo-presentation-design.md` §16.4、§17）：`cause_seq`（決定目前 phase 的事件序號，0 為未知）與 `task_end`（`""`／`cancelled`／`timed_out`）。缺少或不合法時，Unity 視為未知，退回「同 phase 不重播、不顯示事件序號」。
 
 沒有 token、API 位址或自由文字，金額不經過 Unity。Unity 對訊息的處理（`ProjectionState`，有 EditMode 測試）：
 
@@ -93,6 +94,7 @@
 - 較舊世代：丟棄（Stale）。較新世代：先清空舊客人，再顯示。
 - 同一世代只能有一個 task，序號不能倒退（Older），同序號同 phase 不重播（Duplicate）。
 - 每個序號只演一次動畫；首次載入不演動畫（保存的快照不是新事件）。
+- D2：新訊息與目標 T 比較，依轉換表（§16.4 的四條規則）決定移動、重播選商品或只更新標籤；`rendered` 只在到達後對最新序號回報。
 - 舊世代的動畫回呼與訊息都丟棄。
 - Unity 未就緒時，頁面只保留最新一則訊息，就緒後送出，不無限排隊。
 - 載入或啟動失敗時顯示「Unity 場景未就緒」，不換成其他商店。

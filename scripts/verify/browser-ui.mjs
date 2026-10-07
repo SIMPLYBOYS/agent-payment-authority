@@ -587,6 +587,131 @@ full: {
   }
   await sd.stop();
 
+  // ---- B1-06 D2: scene transitions (docs/demo-presentation-design.md 16.9) ----
+  // Unity's own moves and labels are its PlayMode tests; here the page's
+  // words, the data-first order and Unity's reports in a real browser. A
+  // recorder in the page keeps every scene-text change and Unity report with
+  // the page's clock, so "no move" and "a walk" are told apart by when Unity
+  // reported, not by a fixed wait.
+  mark('B1-06 D2');
+  {
+    const shownText = (sel) => `((document.querySelector(${JSON.stringify(sel)}) || {}).innerText || "")`;
+    const FIRST = "首次載入為保存的快照，未觀測進店過程";
+    const record = `(() => { window.__d2 = []; const s = document.getElementById("scene-text");
+      if (!window.__d2Obs) { window.__d2Obs = new MutationObserver(() => window.__d2.push({ t: performance.now(), motion: s.dataset.motion || "", text: s.innerText }));
+        window.__d2Obs.observe(s, { childList: true, subtree: true, characterData: true, attributes: true }); }
+      if (!window.__d2Orig) { window.__d2Orig = window.apaUnityReport;
+        window.apaUnityReport = (kind, gen, seq, detail) => { window.__d2.push({ t: performance.now(), kind: String(kind), gen: Number(gen), seq: Number(seq), detail: String(detail) }); return window.__d2Orig(kind, gen, seq, detail); }; }
+      return true; })()`;
+    const recorded = async () => JSON.parse(await b.evaluate(`JSON.stringify(window.__d2)`));
+    const snapNow = async (name) => { // the viewport as it is, at once (shot() waits 1.5 s)
+      const png = await b.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+      writeFileSync(join(out, name + ".png"), Buffer.from(png.data, "base64"));
+      log("  screenshot " + name + ".png (at once): " + JSON.stringify(await b.evaluate(`[document.getElementById("unity-status").textContent, document.getElementById("scene-text").innerText]`)));
+    };
+    const sceneEvidence = () => b.evaluate(shownText('.evidence-page[data-page="場景對應"]'));
+
+    // Store-built: purchase 1 Ask, purchase 2 Ask, then purchase 1 expires
+    // (internal/store TestSeedDisplayDB, APA_SEED_ORDER=ask_ask_then_expire).
+    const seeded2 = join(tmp, "state-seeded-d2");
+    mkdirSync(seeded2, { recursive: true, mode: 0o700 });
+    execFileSync("go", ["test", "./internal/store", "-run", "TestSeedDisplayDB", "-count=1"], { cwd: repo, env: { ...process.env, APA_SEED_DB: join(seeded2, "demo.db"), APA_SEED_ORDER: "ask_ask_then_expire" }, stdio: "ignore" });
+    const s2 = startDemo(seeded2, null, unityBuild);
+    const addr5 = await s2.ready();
+    const t2 = s2.tokens();
+    allTokens.push(t2.a, t2.b, t2.host, t2.op);
+    await b.send("Page.navigate", { url: "http://" + addr5 + "/" });
+    await b.waitFor(`document.readyState === "complete"`);
+    await b.waitFor(`["ready","rendered"].includes(document.getElementById("unity-status").dataset.state)`, 90000);
+    await b.evaluate(record);
+    await signIn(b, t2.a);
+    await b.waitFor(`${text("#viewer")}.startsWith("consumer-a")`);
+    const events2 = (await hostGet(addr5, t2.host, "/api/tasks/task-a/events")).json.events.map((e) => e.sequence + " " + e.event_type);
+    check("D2 seeded: the Store already has all six events before the task is opened (#3 first: the decided Ask is stored)",
+      events2.join(",") === "1 TASK_STARTED,2 PURCHASE_PROPOSED,3 POLICY_DECIDED,4 PURCHASE_PROPOSED,5 POLICY_DECIDED,6 APPROVAL_EXPIRED", events2.join(","));
+    await b.evaluate(`(window.__d2 = [], document.getElementById("evidence-box").open = true, true)`);
+    await openFixture(b, "task-a");
+    check("D2 item 1: a first snapshot shows Unity at the counter (task-a #6 waiting)", await unityShows(b, { task: "task-a", seq: 6, phase: "waiting" }, 15000));
+    {
+      const r = await recorded();
+      const firstAt = (r.find((x) => x.text !== undefined && x.text.includes(FIRST)) || {}).t, renderedAt = (r.find((x) => x.kind === "rendered" && x.seq === 6) || {}).t;
+      check("D2 item 1: no move: Unity reported #6 within 800 ms of the first-load text", firstAt !== undefined && renderedAt !== undefined && renderedAt - firstAt < 800, "first-load text " + firstAt + " ms, rendered " + renderedAt + " ms");
+      check("D2 item 1: the scene text says it is a stored snapshot, not an observed walk-in",
+        (await b.evaluate(`document.getElementById("scene-text").dataset.motion`)) === "first" && (await b.evaluate(shownText("#scene-text"))).includes(FIRST));
+      check("D2 item 1: the evidence's scene page says so too, derived by the page",
+        await b.waitFor(`${shownText('.evidence-page[data-page="場景對應"]')}.includes(${JSON.stringify(FIRST + "（不播放過場）（規則 1）")})`, 5000), (await sceneEvidence()).slice(0, 300));
+    }
+    // Replay: one step per stored event through the page's own projection.
+    await b.evaluate(`(window.__d2 = [], true)`);
+    await b.evaluate(`document.getElementById("replay").click()`);
+    const rule2 = "Unity 補間中：新的一筆請購：展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #5 記錄";
+    check("D2 item 3 (replay #5): a new purchase is said to browse again, while it walks",
+      await b.waitFor(`${shownText("#scene-text")}.includes(${JSON.stringify(rule2)}) && document.getElementById("scene-text").dataset.motion === "moving"`, 40000), await b.evaluate(shownText("#scene-text")));
+    check("D2 item 3 (replay #5): the evidence names this move and where it comes from",
+      (await sceneEvidence()).includes("新的一筆請購：展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #5 記錄（規則 2）") && (await sceneEvidence()).includes("網頁依轉換表推導"), (await sceneEvidence()).slice(0, 400));
+    check("D2 replay ends and the latest snapshot is back", await b.waitFor(`document.getElementById("status").dataset.mode === "live" && document.getElementById("status").dataset.kind === "ok"`, 60000));
+    {
+      const r = await recorded();
+      const gen = Math.max(...r.filter((x) => x.kind === "rendered" && x.seq === 1).map((x) => x.gen));
+      const sentAt = (n) => (r.find((x) => x.text !== undefined && x.text.startsWith("回放 #" + n + "：")) || {}).t;
+      const doneAt = (n) => (r.find((x) => x.kind === "rendered" && x.gen === gen && x.seq === n) || {}).t;
+      const took = Object.fromEntries([1, 2, 3, 4, 5, 6].map((n) => [n, Math.round(doneAt(n) - sentAt(n))]));
+      log("  D2 replay: ms from each step's text to Unity's report: " + JSON.stringify(took));
+      const texts = (n) => r.filter((x) => x.text !== undefined && x.text.startsWith("回放 #" + n + "：")).map((x) => x.text).join(" / ");
+      check("D2 item 8 (replay #2): the browse is called a display animation, with the request's event", texts(2).includes("Unity 補間中：展示動畫：選商品（沒有獨立事件）；請購已在 #2 記錄"), texts(2).slice(0, 200));
+      check("D2 item 8 (replay #3): to the counter, display animation, the decision's event", texts(3).includes("Unity 補間中：展示動畫：到櫃檯（沒有獨立事件）；裁決已在 #3 記錄"), texts(3).slice(0, 200));
+      check("D2 item 3 (replay #4, #6): another purchase's event: no move, Unity reports at once", took[4] < 600 && took[6] < 600 && !texts(4).includes("補間中") && !texts(6).includes("補間中"), JSON.stringify(took));
+      check("D2 item 3 (replay #5): the new purchase walks (Unity reports after a move, within 2.5 s + 400 ms)", took[5] > 1500 && took[5] < 2900, JSON.stringify(took));
+      check("D2 item 7: no replay step's move took over 2.5 s (+ 400 ms page slack)", Object.values(took).every((v) => v < 2900), JSON.stringify(took));
+    }
+    await s2.stop();
+
+    // Live: a task opened while the Store has only #1 (ask-slow pauses 8 s
+    // after the task starts), then #2 and #3 arrive together.
+    const d2State = join(tmp, "state-d2");
+    const d2 = startDemo(d2State, null, unityBuild, ["--fake-cli", join(bin, "fake-claude"), "--scenarios", join(repo, "testdata/demo/scenarios-d2.json"), "--registry", join(repo, "testdata/demo/registry.json")]);
+    const addr6 = await d2.ready();
+    const t3 = d2.tokens();
+    allTokens.push(t3.a, t3.b, t3.host, t3.op);
+    await b.send("Page.navigate", { url: "http://" + addr6 + "/" });
+    await b.waitFor(`document.readyState === "complete"`);
+    await b.waitFor(`["ready","rendered"].includes(document.getElementById("unity-status").dataset.state)`, 90000);
+    await b.evaluate(record);
+    await signIn(b, t3.a);
+    await b.waitFor(`${text("#viewer")}.startsWith("consumer-a")`);
+    const run = await hostPost(addr6, t3.op, "/api/host/runs", { request_id: "req-d2-slow-00000001", scenario: "ask-slow" });
+    const tid = run.json.task_id;
+    check("D2 live: the slow run started (host side)", run.status === 202 && typeof tid === "string", JSON.stringify(run.json));
+    let atOpen = 0;
+    for (let i = 0; i < 100 && atOpen < 1; i++) { atOpen = (await hostEvents(addr6, t3.host, tid).catch(() => 0)) || 0; if (atOpen < 1) await sleep(100); }
+    await b.evaluate(`(window.__d2 = [], document.getElementById("evidence-box").open = true, document.getElementById("task-id").value = ${JSON.stringify(tid)}, document.querySelector("#task-form button[type=submit]").click(), true)`);
+    const firstSeq1 = await b.waitFor(`document.getElementById("status").dataset.kind === "ok" && ${text("#status")}.includes("快照序號 1（")`, 5000);
+    const storeStill1 = (await hostEvents(addr6, t3.host, tid)) === 1;
+    check("D2 item 2: the Store had only #1 when the task was opened and the page's first snapshot is #1 (else this check fails; it is never skipped)",
+      atOpen === 1 && firstSeq1 && storeStill1, "Store at open " + atOpen + ", page: " + (await b.evaluate(text("#status"))));
+    check("D2 item 2: Unity shows #1 entered, as a first load", await unityShows(b, { task: tid, seq: 1, phase: "entered" }, 10000)
+      && (await b.evaluate(`document.getElementById("scene-text").dataset.motion`)) === "first");
+    await b.evaluate(`(window.__d2 = [], true)`);
+    check("D2 item 2: data first: the card says Ask while Unity is still on its way from #1",
+      await b.waitFor(`${shownText(".card-status")} === "Ask：等待人工核准（M1 無核准能力）" && document.getElementById("scene-text").dataset.motion === "moving" && ${uKey("seq")} === "1"`, 20000),
+      await b.evaluate(shownText(".card-status")) + " | " + await b.evaluate(uKey("seq")));
+    await sleep(300);
+    await snapNow("d2-live-browsing");
+    check("D2 item 2: the scene text says browse and counter are a display animation, the decision in #3",
+      (await b.evaluate(shownText("#scene-text"))).includes("Unity 補間中：展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #3 記錄"), await b.evaluate(shownText("#scene-text")));
+    await sleep(900);
+    await snapNow("d2-live-to-counter");
+    check("D2 item 2: then Unity reports #3 waiting, and the text no longer says it is moving",
+      await unityShows(b, { task: tid, seq: 3, phase: "waiting" }, 10000) && await b.waitFor(`document.getElementById("scene-text").dataset.motion === "shown"`, 5000));
+    {
+      const r = await recorded();
+      const movingAt = (r.find((x) => x.motion === "moving") || {}).t, renderedAt = (r.find((x) => x.kind === "rendered" && x.seq === 3) || {}).t;
+      check("D2 item 7: the walk to the counter took between 1 s and 2.5 s (+ 200 ms)", renderedAt - movingAt > 1000 && renderedAt - movingAt < 2700, Math.round(renderedAt - movingAt) + " ms");
+    }
+    await shot(b, "d2-live-at-counter", 1280, 900, false);
+    await d2.stop();
+  }
+
   // ---- B1-06 slice 3.1: the host's page /host (docs/demo-operation-design.md 6.3) ----
   mark('B1-06 slice 3.1');
   // A fresh host with the fixed plan (task-a Ask, task-b Deny) on a fixed

@@ -147,7 +147,9 @@ func TestDisplayHistories(t *testing.T) {
 
 // TestSeedDisplayDB writes task-a with purchase 1 expired and purchase 2 an
 // open Ask (approval deadline 600 s, purchase 2 decided 79 s ago), for the
-// browser test. It runs only with APA_SEED_DB set. The fixture purchase's
+// browser test. It runs only with APA_SEED_DB set. APA_SEED_ORDER=
+// ask_ask_then_expire submits purchase 2 (150 s ago) before purchase 1
+// expires (80 s ago), as in the history of that name (the D2 replay check). The fixture purchase's
 // EIP-3009 window (valid_after..valid_before, 600 s) is fixed in the past, so
 // each purchase gets a window of the same width around the time it is
 // submitted; nothing else of the fixture changes.
@@ -178,13 +180,24 @@ func TestSeedDisplayDB(t *testing.T) {
 	if r := submit(t, s, sessA, window(e.base, now-700)); r.Purchase.Decision.PolicyVerdict != "Ask" {
 		t.Fatalf("purchase 1: %+v", r.Purchase.Decision)
 	}
-	e.clock.Set(now - 80) // past purchase 1's deadline (now - 81)
-	if err := s.ExpireDue(); err != nil {
-		t.Fatal(err)
-	}
-	e.clock.Set(now - 79)
-	if r := submit(t, s, sessA, window(variant(t, e.base, 2), now-100)); r.Purchase.Decision.PolicyVerdict != "Ask" {
-		t.Fatalf("purchase 2: %+v", r.Purchase.Decision)
+	if os.Getenv("APA_SEED_ORDER") == "ask_ask_then_expire" {
+		e.clock.Set(now - 150)
+		if r := submit(t, s, sessA, window(variant(t, e.base, 2), now-160)); r.Purchase.Decision.PolicyVerdict != "Ask" {
+			t.Fatalf("purchase 2: %+v", r.Purchase.Decision)
+		}
+		e.clock.Set(now - 80) // past purchase 1's deadline (now - 81) only
+		if err := s.ExpireDue(); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		e.clock.Set(now - 80) // past purchase 1's deadline (now - 81)
+		if err := s.ExpireDue(); err != nil {
+			t.Fatal(err)
+		}
+		e.clock.Set(now - 79)
+		if r := submit(t, s, sessA, window(variant(t, e.base, 2), now-100)); r.Purchase.Decision.PolicyVerdict != "Ask" {
+			t.Fatalf("purchase 2: %+v", r.Purchase.Decision)
+		}
 	}
 	if v := task(t, s, sessA); v.Status != "awaiting_approval" || len(v.Purchases) != 2 || v.Purchases[0].ApprovalClosed != "expired" {
 		t.Fatalf("seeded: %+v", v)

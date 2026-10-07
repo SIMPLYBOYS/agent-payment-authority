@@ -19,13 +19,15 @@ namespace APA.EditorTools
         public const string ScenePath = "Assets/Scenes/Shop.unity";
         const string LimeZuRoot = "Assets/LimeZu/";
 
-        // Where each prop stands (tile units; the room is 12 x 8).
+        // Where each prop stands (tile units; the room is 12 x 8). The cart
+        // and the fruit stand keep clear of the customers' corridor
+        // (ShopView.Point; docs/demo-presentation-design.md 16.3, 17).
         static readonly (string key, Vector2 at)[] Props =
         {
             ("shelf-1", new Vector2(2.5f, 4.2f)), ("shelf-2", new Vector2(3.5f, 4.2f)), ("shelf-3", new Vector2(5.5f, 4.2f)),
             ("shelf-4", new Vector2(6.5f, 4.2f)), ("fridge-1", new Vector2(9.0f, 5.3f)), ("fridge-2", new Vector2(10.2f, 5.3f)),
             ("counter", new Vector2(10.3f, 1.0f)), ("counter-2", new Vector2(10.3f, 2.4f)), ("sign-open", new Vector2(1.5f, 7.3f)),
-            ("cart", new Vector2(2.6f, 0.4f)), ("fruit", new Vector2(5.0f, 1.4f)),
+            ("cart", new Vector2(2.8f, 0.4f)), ("fruit", new Vector2(5.0f, 0.4f)),
         };
 
         static Dictionary<string, string> Manifest()

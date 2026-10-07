@@ -1,0 +1,8 @@
+{"description":"The main line after a pause: the task is started (TASK_STARTED #1) and nothing else happens for 8 s, then catalog, quote, purchase request and the host's Ask. For the D2 browser check that opens a task while it is still at #1 (docs/demo-presentation-design.md 16.9).",
+ "steps":[
+  {"do":"sleep","ms":8000},
+  {"do":"tool","tool":"list_products"},
+  {"do":"tool","tool":"get_quote","args":{"product_id":"kr-market"}},
+  {"do":"tool","tool":"request_purchase","args":{"product_id":"kr-market"}},
+  {"do":"result","text":"Requested the Korean market brief."}
+ ]}

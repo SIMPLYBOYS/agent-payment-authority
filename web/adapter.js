@@ -74,30 +74,34 @@ const DECISION_PHASE = { Ask: "waiting", Deny: "denied", Allow: "allowed_unpaid"
 // the latest POLICY_DECIDED (by sequence), else the latest proposed one; its
 // verdict, reason, closing and deadline all come from that purchase. A Deny
 // stays the scene's decision whatever ends the task later; an event without
-// a purchase_order_id is never guessed into a purchase.
+// a purchase_order_id is never guessed into a purchase. cause is the
+// sequence of the event that set the phase (D2, 16.4), 0 when none; end is
+// the first TASK_CANCELLED or TASK_TIMED_OUT ("" before one).
 export function scene(snapshot) {
-  if (!snapshot) return { phase: "empty", label: "尚無資料", notes: [], po: null, verdict: "", reason: null };
+  if (!snapshot) return { phase: "empty", label: "尚無資料", notes: [], po: null, verdict: "", reason: null, cause: 0, end: "" };
   const { task, events } = snapshot;
-  const purchases = new Map(); // po -> { proposedSeq, decision, decidedSeq, closed }
+  const purchases = new Map(); // po -> { proposedSeq, decision, decidedSeq, closed, closedSeq }
   const of = (po) => {
-    if (!purchases.has(po)) purchases.set(po, { proposedSeq: -1, decision: null, decidedSeq: -1, closed: null });
+    if (!purchases.has(po)) purchases.set(po, { proposedSeq: -1, decision: null, decidedSeq: -1, closed: null, closedSeq: -1 });
     return purchases.get(po);
   };
   let started = false;
+  let startedSeq = 0;
   let end = null;
+  let firstEnd = "";
   let orphanDecision = false;
   for (const e of events) {
     const po = typeof e.purchase_order_id === "string" && e.purchase_order_id !== "" ? e.purchase_order_id : null;
     switch (e.event_type) {
-      case "TASK_STARTED": started = true; break;
+      case "TASK_STARTED": if (!started) startedSeq = e.sequence; started = true; break;
       case "PURCHASE_PROPOSED": if (po) of(po).proposedSeq = e.sequence; break;
       case "POLICY_DECIDED":
         if (po) { const p = of(po); p.decision = e.decision || null; p.decidedSeq = e.sequence; } else orphanDecision = true;
         break;
-      case "APPROVAL_EXPIRED": if (po) of(po).closed = "expired"; break;
-      case "APPROVAL_WITHDRAWN": if (po) of(po).closed = "withdrawn"; break;
-      case "TASK_CANCELLED": end = "cancelled"; break;
-      case "TASK_TIMED_OUT": end = "timed_out"; break;
+      case "APPROVAL_EXPIRED": if (po) Object.assign(of(po), { closed: "expired", closedSeq: e.sequence }); break;
+      case "APPROVAL_WITHDRAWN": if (po) Object.assign(of(po), { closed: "withdrawn", closedSeq: e.sequence }); break;
+      case "TASK_CANCELLED": end = "cancelled"; firstEnd = firstEnd || end; break;
+      case "TASK_TIMED_OUT": end = "timed_out"; firstEnd = firstEnd || end; break;
     }
   }
   // The shown purchase: latest decision; else latest proposal.
@@ -129,7 +133,10 @@ export function scene(snapshot) {
     withdrawn: "Ask 已撤回（task 取消）：離店", unknown: "未知裁決",
   };
   const d = cur && cur.decision ? cur.decision : null;
-  return { phase, label: labels[phase] || UNKNOWN, notes, po: shown, verdict: d ? d.policy_verdict || "" : "", reason: d ? d.reason || null : null };
+  const cause = { entered: startedSeq, quoted: cur && cur.proposedSeq, waiting: cur && cur.decidedSeq, denied: cur && cur.decidedSeq,
+    allowed_unpaid: cur && cur.decidedSeq, expired: cur && cur.closedSeq, withdrawn: cur && cur.closedSeq }[phase];
+  return { phase, label: labels[phase] || UNKNOWN, notes, po: shown, verdict: d ? d.policy_verdict || "" : "", reason: d ? d.reason || null : null,
+    cause: Number.isInteger(cause) && cause > 0 ? cause : 0, end: firstEnd };
 }
 
 // fresh returns the sequences not seen before and marks them seen: an event
@@ -205,16 +212,78 @@ export function timeline(snapshot) {
 // no free text beyond fixed codes. It shows; it never decides.
 export const BRIDGE_VERSION = 1;
 
-// projection is the message for the committed snapshot, or null.
+// projection is the message for the committed snapshot (or a replay step
+// shaped as one, stepView), or null. cause_seq and task_end are D2's two
+// optional fields (16.4): cause_seq is sent only within 0 < cause_seq <= seq,
+// else 0 (unknown).
 export function projection(state, animate) {
   if (!state.snapshot) return null;
   const { task, events } = state.snapshot;
   const sc = scene(state.snapshot);
   const last = events.length ? events[events.length - 1].sequence : 0;
+  const seq = Math.max(task.as_of_sequence, last);
   return {
     v: BRIDGE_VERSION, gen: state.gen, clear: false, consumer: task.consumer_id, task_id: task.task_id,
-    seq: Math.max(task.as_of_sequence, last), phase: sc.phase, verdict: sc.verdict, reason: sc.reason || "", animate: !!animate,
+    seq, phase: sc.phase, verdict: sc.verdict, reason: sc.reason || "", animate: !!animate,
+    cause_seq: sc.cause > 0 && sc.cause <= seq ? sc.cause : 0, task_end: sc.end,
   };
+}
+
+// ---- D2: the shop's transition table (docs/demo-presentation-design.md 16.4) ----
+// The same table as Unity's SceneRules (Projection.cs); both are tested with
+// testdata/demo/scene-transitions.json. The page uses it only to explain the
+// move in words; Unity decides its own moves from the message.
+const COUNTER = new Set(["waiting", "denied", "allowed_unpaid"]);
+const labelKind = (phase, end) => (phase === "waiting" && end === "timed_out" ? "waiting/timed_out" : phase);
+const fixedCode = (r) => (typeof r === "string" && /^[A-Z0-9_]{1,40}$/.test(r) ? r : "");
+
+// shopLabel is the customer's ASCII label in Unity: #n is the cause, never
+// the snapshot sequence; an unknown cause (0) shows no number.
+export function shopLabel(phase, cause, end, reason) {
+  const n = cause > 0 ? " (#" + cause + ")" : "";
+  switch (phase) {
+    case "empty": return "";
+    case "entered": return "entered" + n;
+    case "quoted": return "request proposed" + n;
+    case "waiting": return end === "timed_out" ? "CLI timeout - ask still pending" : "ASK" + n + " - waiting for a human";
+    case "denied": {
+      const why = [cause > 0 ? "#" + cause : "", fixedCode(reason)].filter(Boolean).join(", ");
+      return "DENY" + (why ? " (" + why + ")" : "") + " - leaving";
+    }
+    case "allowed_unpaid": return "ALLOW - no payment capability";
+    case "expired": return "ask expired" + n + " - leaving";
+    case "withdrawn": return "ask withdrawn" + n + " - leaving";
+    default: return "unknown state" + n;
+  }
+}
+
+const BASIS = { entered: "進店事件", quoted: "請購", waiting: "裁決", denied: "裁決", allowed_unpaid: "裁決", expired: "到期", withdrawn: "撤回" };
+
+// transition compares a projection m with the target t the shop was last
+// given (null: nothing yet), first match wins: 1 another phase; 2 the same
+// counter phase with both causes valid and different (a new purchase);
+// 3 only the label kind changed; 4 the same place. browse: the move plays
+// the "[anim] browsing" segment. text says it in words for the page.
+export function transition(t, m) {
+  t = t || { phase: "empty", cause: 0, end: "" };
+  const phase = m.phase;
+  const cause = Number.isInteger(m.cause_seq) && m.cause_seq > 0 && m.cause_seq <= m.seq ? m.cause_seq : 0;
+  const end = m.task_end === "cancelled" || m.task_end === "timed_out" ? m.task_end : "";
+  const newPurchase = t.cause > 0 && cause > 0 && t.cause !== cause;
+  const rule = t.phase !== phase ? 1 : COUNTER.has(phase) && newPurchase ? 2 : labelKind(t.phase, t.end) !== labelKind(phase, end) ? 3 : 4;
+  const browse = rule === 2 || (rule === 1 && (phase === "quoted" || (COUNTER.has(phase) && t.phase !== "quoted" && (!COUNTER.has(t.phase) || newPurchase))));
+  const target = { phase, cause, end, seq: m.seq, label: shopLabel(phase, cause, end, m.reason) };
+  let text;
+  if (rule === 3) text = "不移動，只換標籤" + (labelKind(phase, end) === "waiting/timed_out" ? "：CLI 逾時，同一筆 Ask 仍未決" : "");
+  else if (rule === 4) text = "不移動、不重播：場景的請購未變（快照 #" + m.seq + "）";
+  else {
+    const anim = [...(browse ? ["選商品"] : []), ...(COUNTER.has(phase) ? ["到櫃檯"] : [])];
+    const parts = [...(anim.length ? ["展示動畫：" + anim.join(" → ") + "（沒有獨立事件）"] : []),
+      ...(phase === "entered" ? ["進店"] : []), ...(["denied", "expired", "withdrawn"].includes(phase) ? ["離店"] : [])];
+    const basis = BASIS[phase] ? BASIS[phase] + (cause ? "已在 #" + cause + " 記錄" : "已記錄（序號未知）") : "未知狀態";
+    text = (rule === 2 ? "新的一筆請購：" : "") + (parts.length ? parts.join(" → ") + "；" : "") + basis;
+  }
+  return { rule, browse, target, text };
 }
 
 export function clearMessage(gen) {
@@ -392,8 +461,9 @@ const short = (h) => (typeof h === "string" && h.length > 22 ? h.slice(0, 22) + 
 // evidence is the evidence panel for one purchase of the full stored
 // snapshot (never a replay step). In a replay it says so and marks the
 // events the replay has not reached. ctx adds sent (the projection the page
-// sent to Unity, with the purchase the page derived for it) and report (what
-// Unity last reported: it carries no purchase_order_id).
+// sent to Unity, with the purchase the page derived for it), report (what
+// Unity last reported: it carries no purchase_order_id) and motion (the
+// page's account of the shop's last move, D2: { rule, text }).
 export function evidence(snapshot, po, ctx) {
   if (!snapshot) return null;
   const replay = ctx.mode === "replay";
@@ -448,6 +518,7 @@ export function evidence(snapshot, po, ctx) {
   sections.push({ title: "場景對應", note: "Unity 的回報沒有 purchase_order_id；請購關聯由網頁依送出的投影推導，不是 Unity 獨立確認。", rows: [
     ["送出投影", sent ? (replay ? "回放 · " : "") + "gen " + sent.gen + " · " + str(sent.task) + " #" + sent.seq + " " + str(sent.phase) : "尚未送出", "網頁"],
     ["對應請購", sent && sent.po ? sent.po + "（網頁推導）" : "—", "網頁推導"],
+    ["這次過場", ctx.motion ? ctx.motion.text + "（規則 " + ctx.motion.rule + "）" : "—", "網頁依轉換表推導"],
     ["Unity 回報", rep ? "gen " + rep.gen + " · " + str(rep.task) + " #" + rep.seq + " " + str(rep.phase) : "尚未回報", "瀏覽器觀測"],
     ["同步", sync, "網頁比較"],
     ...(sent && sent.po && po && po !== sent.po ? [["選取", "你正在查看 " + po + "；商店場景呈現的是 " + sent.po + "（選取不同，不是同步失敗）", "網頁"]] : []),

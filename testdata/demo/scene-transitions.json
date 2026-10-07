@@ -1,0 +1,573 @@
+{
+ "description": "Shared test vectors for the shop scene's transition rules (docs/demo-presentation-design.md 16.4, 16.9 items 11-13). web/adapter.js (Node) and Unity SceneRules (EditMode) must both give these results. Each case starts from nothing shown (phase empty); every step is one projection compared with the target the step before left. rule: 1 another phase, 2 a new purchase at the counter, 3 only the label kind, 4 the same place. browse: the move plays the [anim] browsing segment. label: the customer's ASCII label for the target after the step.",
+ "cases": [
+  {
+   "name": "an Ask from nothing shown",
+   "steps": [
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 3,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ASK (#3) - waiting for a human"
+    }
+   ]
+  },
+  {
+   "name": "entered, then the Ask",
+   "steps": [
+    {
+     "m": {
+      "phase": "entered",
+      "cause_seq": 1,
+      "task_end": "",
+      "seq": 1,
+      "reason": ""
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "entered (#1)"
+    },
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 3,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ASK (#3) - waiting for a human"
+    }
+   ]
+  },
+  {
+   "name": "a request proposed, then its Ask: browsed already",
+   "steps": [
+    {
+     "m": {
+      "phase": "entered",
+      "cause_seq": 1,
+      "task_end": "",
+      "seq": 1,
+      "reason": ""
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "entered (#1)"
+    },
+    {
+     "m": {
+      "phase": "quoted",
+      "cause_seq": 2,
+      "task_end": "",
+      "seq": 2,
+      "reason": ""
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "request proposed (#2)"
+    },
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 3,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "ASK (#3) - waiting for a human"
+    }
+   ]
+  },
+  {
+   "name": "11.1 a waiting Ask, then a CLI timeout",
+   "steps": [
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 3,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ASK (#3) - waiting for a human"
+    },
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "timed_out",
+      "seq": 4,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 3,
+     "browse": false,
+     "label": "CLI timeout - ask still pending"
+    }
+   ]
+  },
+  {
+   "name": "11.1 the timed-out Ask expires later",
+   "steps": [
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "timed_out",
+      "seq": 4,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "CLI timeout - ask still pending"
+    },
+    {
+     "m": {
+      "phase": "expired",
+      "cause_seq": 5,
+      "task_end": "timed_out",
+      "seq": 5,
+      "reason": "APPROVAL_TIMEOUT"
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "ask expired (#5) - leaving"
+    }
+   ]
+  },
+  {
+   "name": "11.2 a Deny, then a CLI timeout",
+   "steps": [
+    {
+     "m": {
+      "phase": "denied",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 3,
+      "reason": "INSUFFICIENT_BUDGET"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "DENY (#3, INSUFFICIENT_BUDGET) - leaving"
+    },
+    {
+     "m": {
+      "phase": "denied",
+      "cause_seq": 3,
+      "task_end": "timed_out",
+      "seq": 4,
+      "reason": "INSUFFICIENT_BUDGET"
+     },
+     "rule": 4,
+     "browse": false,
+     "label": "DENY (#3, INSUFFICIENT_BUDGET) - leaving"
+    }
+   ]
+  },
+  {
+   "name": "11.3 an expired Ask, then a CLI timeout",
+   "steps": [
+    {
+     "m": {
+      "phase": "expired",
+      "cause_seq": 4,
+      "task_end": "",
+      "seq": 4,
+      "reason": "APPROVAL_TIMEOUT"
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "ask expired (#4) - leaving"
+    },
+    {
+     "m": {
+      "phase": "expired",
+      "cause_seq": 4,
+      "task_end": "timed_out",
+      "seq": 5,
+      "reason": "APPROVAL_TIMEOUT"
+     },
+     "rule": 4,
+     "browse": false,
+     "label": "ask expired (#4) - leaving"
+    }
+   ]
+  },
+  {
+   "name": "11.3 a withdrawn Ask, then a CLI timeout",
+   "steps": [
+    {
+     "m": {
+      "phase": "withdrawn",
+      "cause_seq": 4,
+      "task_end": "",
+      "seq": 4,
+      "reason": "HOST_CANCELLED"
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "ask withdrawn (#4) - leaving"
+    },
+    {
+     "m": {
+      "phase": "withdrawn",
+      "cause_seq": 4,
+      "task_end": "timed_out",
+      "seq": 5,
+      "reason": "HOST_CANCELLED"
+     },
+     "rule": 4,
+     "browse": false,
+     "label": "ask withdrawn (#4) - leaving"
+    }
+   ]
+  },
+  {
+   "name": "16.4 an expiry, then the task cancelled: the label keeps the expiry's number",
+   "steps": [
+    {
+     "m": {
+      "phase": "expired",
+      "cause_seq": 4,
+      "task_end": "",
+      "seq": 4,
+      "reason": "APPROVAL_TIMEOUT"
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "ask expired (#4) - leaving"
+    },
+    {
+     "m": {
+      "phase": "expired",
+      "cause_seq": 4,
+      "task_end": "cancelled",
+      "seq": 5,
+      "reason": "APPROVAL_TIMEOUT"
+     },
+     "rule": 4,
+     "browse": false,
+     "label": "ask expired (#4) - leaving"
+    }
+   ]
+  },
+  {
+   "name": "11.4 3 -> 0: no new purchase, no stale number",
+   "steps": [
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 3,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ASK (#3) - waiting for a human"
+    },
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 0,
+      "task_end": "",
+      "seq": 4,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 4,
+     "browse": false,
+     "label": "ASK - waiting for a human"
+    }
+   ]
+  },
+  {
+   "name": "11.4 0 -> 3: filled in, no new purchase",
+   "steps": [
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 0,
+      "task_end": "",
+      "seq": 3,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ASK - waiting for a human"
+    },
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 4,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 4,
+     "browse": false,
+     "label": "ASK (#3) - waiting for a human"
+    }
+   ]
+  },
+  {
+   "name": "11.5 two valid decisions: a new purchase browses again",
+   "steps": [
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 3,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ASK (#3) - waiting for a human"
+    },
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 6,
+      "task_end": "",
+      "seq": 6,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 2,
+     "browse": true,
+     "label": "ASK (#6) - waiting for a human"
+    }
+   ]
+  },
+  {
+   "name": "13.1 0 -> 3 -> 6",
+   "steps": [
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 0,
+      "task_end": "",
+      "seq": 3,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ASK - waiting for a human"
+    },
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 4,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 4,
+     "browse": false,
+     "label": "ASK (#3) - waiting for a human"
+    },
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 6,
+      "task_end": "",
+      "seq": 6,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 2,
+     "browse": true,
+     "label": "ASK (#6) - waiting for a human"
+    }
+   ]
+  },
+  {
+   "name": "13.2 3 -> 0 -> 3",
+   "steps": [
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 3,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ASK (#3) - waiting for a human"
+    },
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 0,
+      "task_end": "",
+      "seq": 4,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 4,
+     "browse": false,
+     "label": "ASK - waiting for a human"
+    },
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 5,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 4,
+     "browse": false,
+     "label": "ASK (#3) - waiting for a human"
+    }
+   ]
+  },
+  {
+   "name": "another purchase's event, the shown purchase unchanged",
+   "steps": [
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 3,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ASK (#3) - waiting for a human"
+    },
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 4,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 4,
+     "browse": false,
+     "label": "ASK (#3) - waiting for a human"
+    }
+   ]
+  },
+  {
+   "name": "a second purchase denied after an Ask: another phase, browses again",
+   "steps": [
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 3,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ASK (#3) - waiting for a human"
+    },
+    {
+     "m": {
+      "phase": "denied",
+      "cause_seq": 6,
+      "task_end": "",
+      "seq": 6,
+      "reason": "INSUFFICIENT_BUDGET"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "DENY (#6, INSUFFICIENT_BUDGET) - leaving"
+    }
+   ]
+  },
+  {
+   "name": "invalid values are unknown: a cause above seq, an unknown task_end",
+   "steps": [
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 9,
+      "task_end": "paid",
+      "seq": 5,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ASK - waiting for a human"
+    }
+   ]
+  },
+  {
+   "name": "a valid cause after an invalid one is no new purchase",
+   "steps": [
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": -2,
+      "task_end": "",
+      "seq": 3,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ASK - waiting for a human"
+    },
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 4,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 4,
+     "browse": false,
+     "label": "ASK (#3) - waiting for a human"
+    }
+   ]
+  },
+  {
+   "name": "a reason that is not a fixed code is not shown",
+   "steps": [
+    {
+     "m": {
+      "phase": "denied",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 3,
+      "reason": "<b>x</b>"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "DENY (#3) - leaving"
+    }
+   ]
+  },
+  {
+   "name": "an Allow at the counter",
+   "steps": [
+    {
+     "m": {
+      "phase": "allowed_unpaid",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 3,
+      "reason": "PAYMENT_CAPABILITY_UNAVAILABLE"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ALLOW - no payment capability"
+    }
+   ]
+  }
+ ]
+}

@@ -60,6 +60,14 @@ let catalog = null;   // the shop's /catalog (fixture prices), read once, no tok
 let catalogAt = "";   // the browser's time of that read
 let shownCard = "";   // what the card and the evidence panel last showed
 let shownEvidence = "";
+// D2 (16.4, 16.5): target is what the shop was last given in this
+// generation (A.transition's target); motion the last real move (rules 1, 2)
+// or first load, in words, with the newest sequence sent since: done once
+// Unity reports that sequence. replaySc is the replay step's scene.
+let target = null;
+let motion = null;
+let replaySc = null;
+const FIRST_LOAD = "首次載入為保存的快照，未觀測進店過程";
 const art = () => unity.art === "limezu" ? "LimeZu 素材" : "placeholder，LimeZu 待接入";
 
 const unity = new UnityHost($("unity-canvas"), (s, detail) => {
@@ -73,6 +81,8 @@ const unity = new UnityHost($("unity-canvas"), (s, detail) => {
     box.textContent = "Unity 已呈現 " + detail.task + " #" + detail.seq + " " + detail.phase + (detail.reason ? "（" + detail.reason + "）" : "");
     for (let i = rendered.length - 1; i >= 0; i--) if (rendered[i].gen === detail.gen && rendered[i].seq === detail.seq) rendered.splice(i, 1)[0].done(true);
     lastReport = { gen: detail.gen, seq: detail.seq, phase: detail.phase, task: detail.task };
+    if (motion && motion.gen === detail.gen && detail.seq >= motion.seq) motion.done = true;
+    drawScene();
     renderPanels();
     return;
   }
@@ -180,6 +190,7 @@ export function forget(message) {
   chosenPo = null;
   sent = null;
   lastReport = null;
+  target = motion = null;
   if (document.body.dataset.page === "viewer") $("auth-box").open = true;
   draw();
   setStatus(message || "請輸入 viewer token", "idle");
@@ -192,8 +203,36 @@ function draw() {
   $("inspector-note").hidden = !rp;
   $("inspector-note").textContent = rp ? "完整紀錄，非回放當步（回放位置 #" + rp.n + "／共 " + rp.m + "）" : "";
   renderTimeline($("timeline"), A.timeline(state.snapshot), expanded, rp);
-  if (mode === "live") renderSceneText($("scene-text"), A.scene(state.snapshot));
+  drawScene();
   renderPanels();
+}
+
+// sendShop sends a projection and keeps the page's account of the move:
+// the same transition table as Unity (A.transition), in words.
+function sendShop(msg) {
+  const tr = A.transition(target && target.gen === msg.gen ? target : null, msg);
+  target = { ...tr.target, gen: msg.gen };
+  if (tr.rule <= 2 || !motion || motion.gen !== msg.gen) {
+    motion = { gen: msg.gen, seq: msg.seq, rule: tr.rule, browse: tr.browse, text: tr.text, first: !msg.animate && mode === "live", done: false };
+  } else if (!motion.done) {
+    motion.seq = msg.seq; // still on its way: Unity reports only the newest sequence once there
+  }
+  unity.send(msg);
+  drawScene();
+}
+
+// drawScene: the scene text (live: the latest snapshot; replay: the step),
+// with what the shop is doing now. A display segment is called one.
+function drawScene() {
+  const sc = mode === "replay" ? replaySc : A.scene(state.snapshot);
+  if (!sc) return;
+  const mo = motion && motion.gen === state.gen ? motion : null;
+  const notes = [...sc.notes];
+  let now = "";
+  if (mo && mo.first) { now = "first"; notes.unshift(FIRST_LOAD); }
+  else if (mo && mo.rule <= 2 && !mo.done) { now = "moving"; notes.unshift((unity.ready ? "Unity 補間中：" : "Unity 未就緒；過場說明：") + mo.text); }
+  else if (mo) now = mo.done ? "shown" : "waiting";
+  renderSceneText($("scene-text"), { ...sc, notes }, now);
 }
 
 // renderPanels draws the purchase card, the evidence panel and the status
@@ -205,7 +244,8 @@ function renderPanels() {
   const view = snap ? (rp ? A.stepView(snap, rp.n) : snap) : null;
   const ctx = { mode: rp ? "replay" : "live", n: rp && rp.n, m: rp && rp.m, catalog, catalogAt };
   const c = A.card(view, rp ? null : chosenPo, ctx);
-  const e = snap ? A.evidence(snap, c && c.po, { ...ctx, sent, report: lastReport }) : null;
+  const mo = motion && motion.gen === state.gen ? motion : null;
+  const e = snap ? A.evidence(snap, c && c.po, { ...ctx, sent, report: lastReport, motion: mo && { rule: mo.rule, text: mo.first ? FIRST_LOAD + "（不播放過場）" : mo.text } }) : null;
   // Rebuilt only when what they say changed: a poll or a Unity report that
   // changes nothing leaves the DOM (and an open menu or a scroll) alone.
   const cKey = JSON.stringify(c), eKey = JSON.stringify(e);
@@ -379,6 +419,7 @@ export function openTask(id) {
   chosenPo = null;
   sent = null;
   lastReport = null;
+  target = motion = null;
   unity.send(A.clearMessage(gen));
   shopReset("syncing");
   draw();
@@ -443,7 +484,7 @@ function show(first) {
     shownSeq = t.as_of_sequence;
     const msg = A.projection(state, !first && fresh.length > 0);
     sent = { gen: msg.gen, task: msg.task_id, seq: msg.seq, phase: msg.phase, po: A.scene(state.snapshot).po };
-    unity.send(msg);
+    sendShop(msg);
     renderPanels();
   }
 }
@@ -462,6 +503,7 @@ async function replay() {
   const snap = state.snapshot;
   const gen = A.bump(state);
   chosenPo = null; // a replay follows its own step (section 4.5)
+  target = motion = null;
   unity.send(A.clearMessage(gen));
   shopReset("syncing");
   setStatus("歷史展示回放（唯讀，不重跑 task、不改事件）", "replay");
@@ -471,12 +513,12 @@ async function replay() {
     const seq = snap.events[i].sequence;
     // The step view has only the events replayed so far and no served_at:
     // nothing of a later verdict, closing or the present time reaches it.
-    const sc = A.scene(A.stepView(snap, seq));
+    const step = A.stepView(snap, seq);
+    const sc = A.scene(step);
     replayPos = { n: seq, m: last };
+    replaySc = { ...sc, label: "回放 #" + seq + "：" + sc.label };
     sent = { gen, task: snap.task.task_id, seq, phase: sc.phase, po: sc.po };
-    unity.send({ v: A.BRIDGE_VERSION, gen, clear: false, consumer: snap.task.consumer_id, task_id: snap.task.task_id,
-      seq, phase: sc.phase, verdict: sc.verdict, reason: sc.reason || "", animate: true });
-    renderSceneText($("scene-text"), { ...sc, label: "回放 #" + seq + "：" + sc.label });
+    sendShop(A.projection({ gen, snapshot: step }, true));
     draw();
     await renderedBy(gen, seq, 6000);
     await new Promise((r) => setTimeout(r, 400));
@@ -495,6 +537,7 @@ function restore(run) {
   shownSeq = -1;
   chosenPo = null;
   sent = null;
+  target = motion = replaySc = null;
   draw();
   unity.send(A.clearMessage(state.gen));
   shopReset("syncing");
