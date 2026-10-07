@@ -1185,17 +1185,17 @@ echo "exit=$?"
 ```bash
 #!/bin/bash
 # 僅供未來核准後使用；本輪不得執行。
-# 前置步驟任一失敗 → die：記錄原因、清掉自己建立的工作樹，以 exit 2 結束，不會到達 probe。
+# 前置步驟任一失敗 → die：記錄原因、刪除自己建立的暫存目錄，以 exit 2 結束，不會到達 probe。
 # probe 只在檔案末端呼叫一次；它的非零退出碼是診斷結果，照樣保存，不重試。
 set -u
 REPO=/Users/mac/Documents/OpenSourceProjects/agent-payment-authority
 CLI=/Users/mac/.local/bin/claude
 PRODUCT_BASE=e99f389
-EV_OWNED=; WT_ADDED=
+EV_OWNED=; WT_MADE=
 die() {
   echo "STOP（probe 未啟動）：$*" >&2
   if [ -n "$EV_OWNED" ]; then echo "$*" > "$EV/precheck-stop.txt"; fi   # 只寫入本次自己建立的證據目錄
-  if [ -n "$WT_ADDED" ]; then git -C "$REPO" worktree remove "$WT/src" || echo "工作樹未能移除：$WT/src" >&2; fi
+  if [ -n "$WT_MADE" ]; then rm -rf "$WT" || echo "暫存目錄未能移除：$WT" >&2; fi   # 只刪本次 mktemp 建立的目錄
   exit 2
 }
 
@@ -1214,20 +1214,24 @@ git merge-base --is-ancestor "$PRODUCT_BASE" "$BASE" || die "$PRODUCT_BASE 不�
 DIFF=$(git diff --name-only "$PRODUCT_BASE" "$BASE" -- . ':(exclude)docs' ':(exclude)README.md') || die "git diff 失敗"
 [ -z "$DIFF" ] || die "$PRODUCT_BASE 之後有非文件差異"
 
-# 4. 證據目錄（不加 -p：已存在就停止，不覆寫）、暫時工作樹與建置
+# 4. 證據目錄（不加 -p：已存在就停止，不覆寫）、全新暫存目錄中的一般本機 clone 與建置
 mkdir -p "$REPO/artifacts/b1-04" || die "無法建立 artifacts/b1-04"
 EV="$REPO/artifacts/b1-04/c0prime-diag-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir "$EV" || die "證據目錄已存在或無法建立：$EV"
 EV_OWNED=1
 echo "$BASE" > "$EV/commit.txt" || die "無法寫入 commit.txt"
 WT=$(mktemp -d "${TMPDIR:-/tmp}/apa-c0p.XXXXXX") || die "mktemp 失敗"
-git worktree add --detach "$WT/src" "$BASE" || die "git worktree add 失敗"
-WT_ADDED=1
+WT_MADE=1
+git clone --quiet --no-hardlinks --no-checkout "$REPO" "$WT/src" || die "本機 clone 失敗"   # 本機路徑，不經網路；不改原工作區
+git -C "$WT/src" checkout --quiet --detach "$BASE" || die "checkout $BASE 失敗"
+[ -d "$WT/src/.git" ] || die "clone 的 .git 不是目錄"
+[ "$(git -C "$WT/src" rev-parse --verify 'HEAD^{commit}')" = "$BASE" ] || die "clone 的 HEAD 不是 $BASE"
 (cd "$WT/src" && go build -o "$WT/apa-buyer" ./cmd/apa-buyer) || die "建置失敗"   # $WT 是新建的空目錄，不可能拿到舊二進位
 [ -x "$WT/apa-buyer" ] || die "建置後沒有可執行檔"
 
 # 5. 二進位 VCS：revision 必須等於 BASE，modified 必須為 false；欄位缺失、重複或不符都停止
 VM=$(go version -m "$WT/apa-buyer") || die "go version -m 失敗"
+printf '%s\n' "$VM" | awk '$1 == "build"' > "$EV/go-version-build.txt" || die "無法寫入 go-version-build.txt"   # 原始 build 行，供核對解析
 REV=$(printf '%s\n' "$VM" | awk '$1 == "build" && $2 ~ /^vcs\.revision=/ { sub(/^vcs\.revision=/, "", $2); print $2 }')
 MOD=$(printf '%s\n' "$VM" | awk '$1 == "build" && $2 ~ /^vcs\.modified=/ { sub(/^vcs\.modified=/, "", $2); print $2 }')
 printf 'vcs.revision=%s\nvcs.modified=%s\n' "$REV" "$MOD" > "$EV/binary-vcs.txt" || die "無法寫入 binary-vcs.txt"
@@ -1247,7 +1251,7 @@ PROBE_EXIT=$?
 SAVED=1
 echo "exit=$PROBE_EXIT" > "$EV/exit-code.txt" || SAVED=
 date -u +%FT%TZ > "$EV/ended-utc.txt" || SAVED=
-git -C "$REPO" worktree remove "$WT/src" || echo "工作樹未能移除：$WT/src" >&2   # 清理照常嘗試
+rm -rf "$WT" || echo "暫存目錄未能移除：$WT" >&2   # 清理照常嘗試
 if [ -z "$SAVED" ]; then
   echo "執行已嘗試，證據不完整：probe exit=$PROBE_EXIT；exit-code.txt 或 ended-utc.txt 未能寫入；目錄：$EV" >&2
   exit 5
@@ -1260,7 +1264,8 @@ exit "$PROBE_EXIT"
 - **退出碼**：`exit 2` 只來自 `die`（前置停止，probe 未啟動，若證據目錄已建立則有 `precheck-stop.txt`）；`exit 5` 只來自第 7 步（**probe 已嘗試，但 `exit-code.txt` 或 `ended-utc.txt` 未能寫入，證據不完整**；probe 的退出碼印在 stderr 那一行）；其餘 `0`／`1`／`4` 是 probe 自己的退出碼（39.4），只在第 7 步保存都成功時回傳。`PROBE_EXIT` 在 probe 結束後立即保存；「probe 退出碼」與「證據是否保存成功」（`SAVED`）分開記錄，寫檔、時間、移除工作樹都不會改變 `PROBE_EXIT`。保存失敗不呼叫 `die`（它會誤寫「probe 未啟動」），不重試 probe，工作樹清理照常嘗試。
 - **工作區規則**：`git status --porcelain --untracked-files=all` 只容許空輸出或恰為 `?? demo`；被 `.gitignore` 忽略的檔案（例如 `artifacts/`、`var/`）不算在內。
 
-- **為什麼用暫時工作樹**：先前幾次真實執行都要求工作區乾淨（第 27、30 節），現在 repo 根目錄有未追蹤的 `demo`（不得刪除或搬動）。Go 判斷 `vcs.modified` 時，依其實作也會把未追蹤檔算進去，所以直接在 repo 建置預期會得到 `vcs.modified=true`。這是依 Go 行為的推論，本輪沒有建置驗證；若執行時仍不是 `false`，就停止。
+- **為什麼用暫存目錄中的一般本機 clone**（10/8 修訂，原為 `git worktree add`）：`git worktree add` 的連結工作樹中 `.git` 是檔案；10/8 的執行在該流程下建出的二進位讀不到 VCS 欄位（第 39.11 節）。改為 `git clone --no-hardlinks --no-checkout` 原 repo 的本機路徑，再 `checkout --detach` 執行基準：`.git` 是目錄，不經網路、不在原 repo 新增工作樹，也不改原工作區。VCS 嚴格檢查不變：`vcs.revision` 必須等於基準、`vcs.modified` 必須為 `false`，空值或缺失都停止，不以手動填寫的 SHA 代替。此流程的建置前置驗證見第 39.12 節。
+- **原理由（保留）**：先前幾次真實執行都要求工作區乾淨（第 27、30 節），現在 repo 根目錄有未追蹤的 `demo`（不得刪除或搬動）。Go 判斷 `vcs.modified` 時，依其實作也會把未追蹤檔算進去，所以直接在 repo 建置預期會得到 `vcs.modified=true`。這是依 Go 行為的推論，本輪沒有建置驗證；若執行時仍不是 `false`，就停止。
 - `stdout.txt` 是 apa-buyer 的 stdout 原樣保存，**不是單一 JSON 文件**：第一行是 Host 的模式提示（`PROBE MODE (C0′): …`，含 CLI 路徑），之後才是縮排的 JSON 白名單投影（與 trace 相同的投影）；版本檢查等啟動前拒絕時兩部分都沒有；`Probe` 本身回傳錯誤（例如 trace 無法寫入）時只有提示行。不要把整份檔案直接當 JSON 解析；trace（`runs/probe-*.jsonl`）維持原格式。`apa-buyer-error.txt` 只有 apa-buyer 自己的錯誤行，不含 CLI 的 stdout／stderr 文字。
 - **時間上限**（依原始碼）：
   - 版本檢查：`versionLimits` 最多 5 秒，加 1 秒清理寬限；**不算在 init 等待內**。
