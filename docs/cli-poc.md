@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **10/8 核准 CLI 版本改為 `2.1.293 (Claude Code)`（Claude Code 執行 fake 驗證，待 Codex 限定 review）**：版本由 Aaron 提供，不是 Claude Code 或 Codex 查詢所得。程式 `bd29a4e`；新版通過、舊版與其他版本被拒、init 須為 `2.1.293`；定向 fake 回歸全部通過（第 40 節）。新版真實 runtime 的行為仍待觀測；下一次 C0′ 須在 review 通過後另行核准。
+> **10/8 核准 CLI 版本改為 `2.1.293 (Claude Code)`（Claude Code 執行 fake 驗證，待 Codex 限定 review）**：版本由 Aaron 提供，不是 Claude Code 或 Codex 查詢所得。程式 `bd29a4e`；新版通過、舊版與其他版本被拒、init 須為 `2.1.293`；定向 fake 回歸全部通過（第 40 節）。**程式 `bd29a4e` 通過 Codex 限定 review**；§39.3 產品基準與 §3、§7.3、§39.7.4 的版本說明已補正（第 40.1 節），待 Codex 複核。新版真實 runtime 的行為仍待觀測；下一次 C0′ 須另行核准。
 >
 > **10/8 §39.3 變數名稱修正（Claude Code 執行最小分支測試，待 Codex review）**：三處緊接全形字元的變數改為 `${BR}`、`${PROBE_EXIT}`（兩處）。最小分支測試不含 CLI、建置或刪除命令，涵蓋正常回報、前置拒絕與證據保存失敗；在 bash 3.2、四種 locale 下 16／16 PASS（第 39.15 節）。版本釘選未改，C0′ 未重跑。**10/8 `90d6e2f` 通過 Codex 限定 review，bash 變數名稱問題關閉**（第 39.16 節）。剩下的阻擋是 CLI 版本與釘選不符。
 >
@@ -91,7 +91,7 @@ MCP 直接以標準庫實作，沒有新增第三方依賴。fake CLI 走的是�
 - 固定 executable 與 argv，`exec` 直接啟動，不經 shell。
 - 工作目錄是空的私有暫存目錄；MCP 設定在它之外。
 - 環境只帶 `HOME USER LOGNAME PATH TMPDIR LANG LC_ALL TERM`，加上固定的 `DISABLE_AUTOUPDATER=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`（Aaron 10/3 同意；依官方 env-vars 文件，本機 help 未列；用來減少更新與非必要流量，不是防火牆），以及 10/7 起的 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`（L1-a，見第 35 節；依官方文件在 `-p` 模式移除內建 subagent 類型，對真實 init 的效果未驗證），fake 模式再加情境路徑。API key、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_OAUTH_TOKEN`、`ANTHROPIC_PROFILE`、雲端供應商、代理、`CLAUDE_CONFIG_DIR` 與 host 自己的設定都不傳。fake 模式的 `HOME` 換成每次新建的空目錄，fake 不會靠近使用者的登入。
-- `--version` 檢查（fake 命令確認 `--fake-cli` 確實是 fake；live 要求輸出恰為核准版本 `2.1.289 (Claude Code)`；10/3 前為 2.1.287，10/3–10/4 為 2.1.288，第 28 節）也走同一套程序規則：獨立 process group、輸出 4 KiB、stderr 4 KiB、5 秒，結束時回收整個 group。逾時、取消、超量或非零退出都視為失敗，不啟動 task；啟動 task 前再確認一次未被取消。
+- `--version` 檢查（fake 命令確認 `--fake-cli` 確實是 fake；live 要求輸出恰為核准版本 `2.1.293 (Claude Code)`；10/3 前為 2.1.287，10/3–10/4 為 2.1.288，10/4–10/8 為 2.1.289，第 28、40 節）也走同一套程序規則：獨立 process group、輸出 4 KiB、stderr 4 KiB、5 秒，結束時回收整個 group。逾時、取消、超量或非零退出都視為失敗，不啟動 task；啟動 task 前再確認一次未被取消。
 - 子程序在自己的 process group。任何停止都對整個 group 送 SIGTERM，期限後 SIGKILL；程序自行結束後也立即 SIGKILL 該 group，回收仍握著 pipe 的子孫。
 - 已離開 group（例如 `setsid`）的程序不會被送信號：等候期限後放棄 pipe，結果標 `orphaned_output`。這是已知限制，見第 8 節。
 - 不使用 `--dangerously-skip-permissions`、`--bare`、`--safe-mode` 或 `bypassPermissions`。
@@ -220,7 +220,7 @@ APA_LIVE_CLI=true APA_DB_PATH=var/apa-live.db \
 - `tools`：恰為三個完整工具名，各一次。不是只比數量或前綴，重複值不能補足缺項（`tools`）。
 - `mcp_servers`：恰一個，`name` 為 `apa`，`status` 為 `connected`（`mcp_servers`）。
 - `permissionMode` 為 `dontAsk`（`permission_mode`）。
-- `claude_code_version`：等於核准版本的版號 `2.1.289`（10/4 前為 `2.1.288`）；fake 為 `0.0.0`（`cli_version`）。
+- `claude_code_version`：等於核准版本的版號 `2.1.293`（10/4 前為 `2.1.288`，10/4–10/8 為 `2.1.289`）；fake 為 `0.0.0`（`cli_version`）。
 - `plugins`、`skills`、`agents`：若出現，必須是空陣列，沒有任何項目獲准（同名代碼）。欄位不存在不證明主機沒有載入這些內容。
 - 認證：`apiKeySource` 必須是字串，且恰在接受清單內（`auth_missing`／`auth_unconfirmed`）。live 清單為空（7.2）。init 只能拒絕已知不相容或未知的來源，**不能獨自證明計費來源**，訂閱登入由階段 B 另行確認。
 
@@ -1198,7 +1198,7 @@ echo "exit=$?"
 set -u
 REPO=/Users/mac/Documents/OpenSourceProjects/agent-payment-authority
 CLI=/Users/mac/.local/bin/claude
-PRODUCT_BASE=e99f389
+PRODUCT_BASE=bd29a4ed503b5fc43a8d300de22e57bcf83b3318   # 已 review 的產品基準（10/8 版本釘選 2.1.293；原為 e99f389）
 EV_OWNED=; WT_MADE=
 die() {
   echo "STOP（probe 未啟動）：$*" >&2
@@ -1216,7 +1216,7 @@ BR=$(git branch --show-current) || die "git branch 失敗"
 ST=$(git status --porcelain --untracked-files=all) || die "git status 失敗"
 [ -z "$ST" ] || [ "$ST" = "?? demo" ] || die "工作區有 demo 以外的差異"
 
-# 3. 執行基準：相對產品基準 e99f389 只能有文件差異
+# 3. 執行基準：產品基準必須是祖先，且之後只能有文件差異
 BASE=$(git rev-parse --verify 'HEAD^{commit}') || die "git rev-parse 失敗"
 git merge-base --is-ancestor "$PRODUCT_BASE" "$BASE" || die "$PRODUCT_BASE 不是 $BASE 的祖先，或 git 失敗"
 DIFF=$(git diff --name-only "$PRODUCT_BASE" "$BASE" -- . ':(exclude)docs' ':(exclude)README.md') || die "git diff 失敗"
@@ -1373,7 +1373,7 @@ exit "$PROBE_EXIT"
 
 #### 39.7.4 執行邊界（不變）
 
-指示第 5 節列出的條件都已在 39.2～39.5，本次不改：CLI 路徑與 `2.1.289 (Claude Code)` 釘選、不符就停止、本輪不查詢版本（39.2）；一次嘗試、版本檢查失敗也不再執行（39.2、39.4）；只送一次 `Reply only OK.`，記錄 `input_status` 與 `stdin_bytes_written`（39.2）；可能產生用量，一則訊息不等於一次請求，無法確認記 `unknown`（39.2）；沿用既有 HOME、網路、登入環境與程序清理限制（39.2、39.4）；不開 Store、不建 task、不執行業務工具（39.2）；等待上限、停止條件與白名單證據保存（39.3～39.5）；沿用程序層 `DISABLE_AUTOUPDATER=1`，不改全域設定（39.2）。
+指示第 5 節列出的條件都已在 39.2～39.5，本次不改：CLI 路徑與 `2.1.293 (Claude Code)` 釘選（10/8 由 `2.1.289` 更新，第 40 節）、不符就停止、本輪不查詢版本（39.2）；一次嘗試、版本檢查失敗也不再執行（39.2、39.4）；只送一次 `Reply only OK.`，記錄 `input_status` 與 `stdin_bytes_written`（39.2）；可能產生用量，一則訊息不等於一次請求，無法確認記 `unknown`（39.2）；沿用既有 HOME、網路、登入環境與程序清理限制（39.2、39.4）；不開 Store、不建 task、不執行業務工具（39.2）；等待上限、停止條件與白名單證據保存（39.3～39.5）；沿用程序層 `DISABLE_AUTOUPDATER=1`，不改全域設定（39.2）。
 
 補明一點：核准後的 CLI 仍可能自行使用登入資料，**不保證沒有背景活動**（第 7.5 節）。
 
@@ -1600,3 +1600,18 @@ Codex 以文件與原始碼靜態核對 `ff094f5`，接受前置工作區、程�
 - **證據歸屬**：程式修改與上述測試由 Claude Code 執行，待 Codex 限定 review；版本值由 Aaron 提供。
 
 **範圍與待決定**：只有版本釘選。不代表 `2.1.293` 真實 CLI 的旗標、init 格式、plugins／agents、登入或用量已驗證。下一次診斷型 C0′ 須在本次 review 通過後，由 Aaron 另行核准。B1-04 仍 InProgress；L1-b 不標完成；不合併、不推送、不標 Done。
+
+### 40.1 程式 `bd29a4e` 通過限定 review；操作文件 R1 補正（2026-10-08；待 Codex 複核）
+
+> **程式 `bd29a4e` 的版本釘選通過 Codex 限定 review。** 操作文件的 R1 已補正，待 Codex 複核；複核通過前不執行 C0′。
+
+- **證據歸屬**：
+  - **Codex 獨立執行**：在 `bd29a4e` 的暫存匯出副本中，重跑一次定向 fake race 測試；`cmd/apa-buyer`、`internal/buyer`、`cmd/demo` 都通過。
+  - **Claude Code 執行、Codex 核對紀錄**：第 40 節的定向回歸，以及把 init 版本改回 `2.1.289` 的突變（確認是測試斷言失敗）。
+  - 沒有重跑完整容器、全部突變或全套測試；沒有執行真實 CLI。
+- **Codex 確認**：新版通過、其他版本被拒、init 跟隨新釘選；認證接受清單仍為空。
+- **R1 補正（只改文件）**：
+  - **§39.3 腳本**：`PRODUCT_BASE` 由 `e99f389` 改為已 review 的 `bd29a4ed503b5fc43a8d300de22e57bcf83b3318`；步驟 3 的註解改為不寫死 commit。若不改，版本更新會被判成「基準之後有非文件差異」，在 probe 前停止。祖先檢查、非文件差異檢查與二進位 VCS 檢查都保留，沒有移除任何保護。
+  - **現行版本說明改為 `2.1.293`**：§3（`--version` 檢查）、§7.3（`claude_code_version`）、§39.7.4（執行邊界），並補上 `2.1.289` 的期間。
+  - 歷史執行紀錄保持原樣。§39 其他小節裡「程式基準 `e99f389`」的開工核對，是當時的紀錄，也不改。
+- 本輪沒有重跑 Go 測試、沒有執行 C0′ 或真實 CLI；沒有修改程式、Gate、認證接受清單或 plugin 參數。真實執行須另行核准。L1-b 不標完成；B1-04 仍 InProgress。
