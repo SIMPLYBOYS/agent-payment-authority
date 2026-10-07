@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 方案 A 實作（Claude Code 執行，待 Codex review）**：程式 `6caba93`，測試補正 `086f640`、`40bd263`。本機定向 fake 測試通過。**核准的那一次完整斷網容器驗證（`086f640`）失敗**，原因是測試腳本在 Linux 上讀錯權限欄位（`stat -f` 是 macOS 寫法），不是產品行為；已在 `40bd263` 修正，只改測試。修正後**尚未在容器中驗證**，再跑一次須 Aaron 核准（第 43 節）。plugins 是否真的停用仍未驗證。
+>
 > **10/8 plugins 方案於 `14eb7b5` 通過限定設計複核，R1、R2 關閉**（第 42 節，修訂紀錄 42.8，驗收紀錄 42.9）。通過範圍是受控實驗的設計，不代表 plugins 已停用或正式請購可放行。等待 Aaron 核准方案 A 的實作、fake 測試與一次完整斷網容器驗證；真實診斷須在實作 review 通過後另行核准。依官方文件，沒有任何候選方案能同時保證四件事：清空 plugins、保留 APA MCP、不改登入、不需要完整 plugin ID。方案 A（APA 專用暫存 plugin 根目錄）是受控實驗，不是停用保證：空根目錄可能在背景被重新填入；結果非空只代表未達目標，不推論來源。
 >
 > **10/8 診斷型 C0′ 執行結果（Claude Code 執行，待 Codex review）**：取得 init（exit `0`，`observed`，版本為核准的 `2.1.293`）。**plugins 非空（2 個：`cc-plugin-agents-md`、`cc-plugin-plugin-authoring`）**；agents 明確為空（`agents_count` 0）；skills 0。依 39.7.3：**記錄執行阻擋並停止**，不追查來源、不改允許清單、不重試。正式 Gate 仍會拒絕這次 init（第 41 節）。**10/8 Codex 核對完成**：本次 agents／skills 明確為空，plugins 非空，正式請購阻擋仍在；agents 結果可作為 L1-c 對應觀測項目的證據，L1-b、L1-c 整體不標通過。下一步建議為 plugins 最小隔離或停用方案的設計提案，待 Aaron 核准派工（第 41.1 節）。
@@ -1896,3 +1898,71 @@ L1-b 不標完成；B1-04 仍 InProgress；不合併、不推送、不標 Done�
   - 等待 Aaron 核准方案 A 的實作、fake 測試與一次完整斷網容器驗證。
   - 真實診斷須在實作 review 通過後另行核准。
 - 本輪只同步紀錄：沒有改程式、Gate、認證接受清單、版本釘選或啟動參數；沒有執行測試、容器或真實 CLI。L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
+
+## 43 方案 A 實作與 fake 驗證（2026-10-08；Claude Code 執行，待 Codex review）
+
+> **方案 A 已實作；本機定向 fake 測試通過。核准的一次完整斷網容器驗證失敗（測試在 Linux 上的寫法問題），修正後尚未在容器中驗證。** fake 測試不能證明真實 plugins 已停用；沒有執行真實 CLI。
+
+- **核准**：Aaron 10/8 核准方案 A 的實作、fake 測試，以及一次完整斷網容器驗證。真實診斷須在實作 review 通過後另行核准。
+- **開工核對**：分支 `b1-04-live`，HEAD `71e9017`；工作區只有 `?? demo`。
+
+### 43.1 程式（`6caba93`）
+
+- `internal/buyer/host.go`：
+  - 新增 `EnvPluginRoot`（`CLAUDE_CODE_PLUGIN_CACHE_DIR`）與 `withPluginRoot(env, dir)`。它建立 `dir/plugins`（0700，空目錄），移除 env 中原有的同名值，再在最後加上唯一一個指向它的值。建立失敗就回傳錯誤，不退回其他根目錄。
+  - `pluginMkdir`（預設 `os.Mkdir`）讓測試可以替換，與既有的 `watchHook` 同樣作法。
+  - `Host.Run` 在建立工作目錄之後、啟動 CLI 之前呼叫它，並把結果交給 `Run`。
+- `internal/buyer/probe.go`：`Probe` 用同一個函式。
+- **清理**：沿用既有的 `defer os.RemoveAll(dir)`。根目錄在該次的 `apa-run-*`／`apa-probe-*` 暫存目錄裡，正常結束、取消、啟動失敗都會一併刪除，不碰其他目錄。
+- **沒有改**：`CLIEnv` 白名單、`Argv`／`ProbeArgv`、`--version` 檢查、Gate、`liveAcceptAuth`（空）、版本釘選、plugin 顯示候選。demo 的 fake run 經同一個 `Host.Run`，也會拿到這個變數；fake CLI 不讀它。
+
+### 43.2 測試（`internal/buyer/pluginroot_test.go`；`6caba93`、`086f640`、`40bd263`）
+
+| 測試 | 對應 42.5 | 內容 |
+|---|---|---|
+| `TestWithPluginRoot` | 2 | 交給 runner 的 env 中，原有的值被移除，根目錄只出現一次且在最後。os/exec 對重複的鍵只保留最後一個，端到端測試看不到重複，所以直接檢查 slice。 |
+| `TestPluginRootLive`、`TestPluginRootProbe` | 1、2、3、8 | 用腳本 CLI 記錄它看到的值：只設一次、權限 `drwx------`、空目錄、位於 `apa-run-*`／`apa-probe-*` 之下、不是父環境的值、不在 HOME 下。執行後該目錄已刪除，父環境的目錄沒被碰到。 |
+| `TestPluginRootFailureStartsNoCLI` | 7 | 建立根目錄失敗時，live 與 probe 都回傳錯誤；腳本 CLI 的啟動標記不存在。 |
+| `TestPluginRootCleanup` | 8 | live 與 probe 各兩種情況：建立後隨即取消，以及 CLI 不存在而無法啟動。兩種都確認根目錄已刪除，其他目錄不受影響。 |
+| 既有 `TestArgvAndEnv`、`TestHostInitGate` | 4、5 | 沒有改動，照常通過（參數不變；Gate 仍拒絕非空 plugins）。 |
+
+**突變**（`scripts/verify/mutation-check.py`，由 250 項增為 255 項）：
+- live 改回原環境；probe 改回原環境；
+- 保留原有的同名值；
+- 父環境的值勝出（根目錄放在最前面）；
+- 建立失敗仍繼續執行。
+
+**本機驗證**（Claude Code 執行；macOS，`go1.26.4`；在沙箱外執行，因為沙箱禁止 socket bind）：
+- `6caba93` 提交前：`go test -race -count=1 ./internal/buyer/ ./cmd/apa-buyer/ ./cmd/demo/` 全部 ok。
+- 突變試跑：在匯出副本上逐一套用新增的突變。
+  - 第一次試跑：live／probe 兩項因「`env` 宣告未使用」**編譯失敗**，不算被抓到；「保留原有同名值」**存活**，原因是 os/exec 的重複鍵規則。
+  - 修正於 `086f640`：突變改成能編譯；新增 `TestWithPluginRoot`；新增「父環境勝出」突變。
+  - 第二次試跑：5 項都以測試斷言失敗被抓到。
+- `40bd263` 之後：`-race` 跑 plugin root 相關測試通過。另在副本把權限改成 0755，`TestPluginRootLive` 會失敗，確認新的權限檢查有效。
+
+### 43.3 完整斷網容器驗證（核准的一次；**失敗**，保留紀錄）
+
+- **commit**：`086f640`；映像 `docker.io/library/apa-verify:b1-05`（`sha256:78258368…b6d0`）。
+- **結果**：overall exit `1`。證據在 `artifacts/verify-container/runs/086f6401c320-20261007T192704Z/`（匯入完整，284 個檔案）。
+
+| 步驟 | 結果 |
+|---|---|
+| check-contracts | exit 0 |
+| check（make） | exit 2：`TestPluginRootLive`、`TestPluginRootProbe` 失敗 |
+| race-cover | exit 1：同上兩項 |
+| verify-b1-01 | exit 1：同上兩項 |
+| guards、evidence-import-tests | exit 0 |
+| mutation | exit 1：baseline 失敗（同上兩項），整體 NOT OK；255 項都列為 KILLED，但 baseline 失敗時這些結果不能採用 |
+| 隔離自檢 | 17 項全部符合預期 |
+
+- **原因**：測試腳本用 `stat -f %Lp` 讀權限。這是 macOS 的寫法；在 Linux 上 `-f` 代表檔案系統狀態，輸出的是檔案系統資訊，權限欄位不符而失敗。日誌中的值仍可看到根目錄位置、只設一次、空目錄。這是**測試的可攜性問題，不是產品行為**；失敗的其他四個步驟都出自這兩個測試。
+- **修正**：`40bd263` 改用 `ls -ld | cut -c1-10`，比對 `drwx------`，macOS 與 Linux 輸出相同。只改測試。
+- **沒有重跑**：核准範圍是一次容器驗證，已經用掉。修正後的 `40bd263` **還沒有容器結果**；在 Linux 上是否通過，目前只能推論。
+
+### 43.4 尚待核准
+
+1. **再跑一次完整斷網容器驗證**（`40bd263` 或其後只改文件的 commit），須 Aaron 核准。
+2. Codex review 實作、測試、突變與這次失敗紀錄。
+3. 實作 review 通過後，一次真實診斷（42.6），另行核准。
+
+本輪沒有執行真實 CLI；沒有改 Gate、認證接受清單、版本釘選或啟動參數。L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
