@@ -1,6 +1,6 @@
 # B1-06 商店展示深化設計（fake 展示模式）
 
-狀態（2026-10-07）：**D1 於 `6338fd2` 通過 Codex 限定範圍技術 review；R1、R2、C1 關閉。通過範圍為 fake 展示的網頁呈現與相關修正，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成。B1-04／B1-06 整體維持 InProgress。**（§15.7）**D2 設計（§16，`9b70c0c`）經 Aaron 10/7 核准實作：程式與測試 `bc79677`，計時修正 `d7070af`；依 Codex 對 `d7070af` 的 review 修正於 `78cb2cc`、測試補充 `6137708`（§17.6）；Claude Code 執行，待 Codex 獨立 review。不合併、不推送、不標 Done。** D3–D6 未開始。D1 實作於 `7ffc45d`，review 後修正於 `6338fd2`；設計於 `15d705a` 通過（§14.3）。
+狀態（2026-10-07）：**D1 於 `6338fd2` 通過 Codex 限定範圍技術 review；R1、R2、C1 關閉。通過範圍為 fake 展示的網頁呈現與相關修正，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成。B1-04／B1-06 整體維持 InProgress。**（§15.7）**D2 設計（§16，`9b70c0c`）經 Aaron 10/7 核准實作：程式與測試 `bc79677`，計時修正 `d7070af`；依 Codex 對 `d7070af` 的 review 修正於 `78cb2cc`、測試補充 `6137708`（§17.6）；**於 `6137708`（程式 `78cb2cc`）通過 Codex 限定範圍 review**（§17.7），通過範圍為 fake 場景動畫與網頁呈現，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成。`R2 order` 測試穩定性另行派工。不合併、不推送、不標 Done。** D3–D6 未開始。D1 實作於 `7ffc45d`，review 後修正於 `6338fd2`；設計於 `15d705a` 通過（§14.3）。
 
 - **依據**：Aaron 轉交的〈B1-06 商店展示深化設計指示〉（vault，2026-10-07）。
 - **Aaron 的回饋**：已實際操作目前 demo，初步確認基本展示可用，未發現重大問題；現有情境仍然陽春，同意往展示內容深化推進。這不是 `docs/demo-operation-design.md` 16.3 人工清單逐項完成的聲明。
@@ -1206,7 +1206,7 @@ WebGL（`d7070af`，未提交，`Build/WebGL` 由 git 忽略）的 SHA-256：
 1. **「補間中」提前結束**（`web/app.js:84`）：原本只比對世代與 `回報序號 >= 目標序號`，錯的 task、錯的 phase、未送出的較大序號都會結束提示。
    - 改為 `adapter.sameShown`：與最後送出的投影 gen、task、seq、phase 全部一致才結束；與查證面板「同步」同一規則。bridge 不變。
    - Node：`sameShown` 的正例與五個反例（另一 task、另一 phase、未送出的較大序號、較舊序號、另一世代）；另以 Codex 探測的方式執行 `app.js` 自己的回報處理，反例都不結束、完全一致才結束。
-   - 瀏覽器（D2 即時段）：以頁面測試鉤子扣住 Unity 真正的 `rendered`，確定 Unity 仍在路上時餵入三則不符的回報，`data-motion` 三次都仍是 `moving`；放行真正的 #3 後才變成 `shown`。走路時間改以鉤子收到回報的時間計算。
+   - 瀏覽器（D2 即時段）：以頁面測試鉤子扣住 Unity 真正的 `rendered`，在**網頁尚未收到完成回報**時餵入三則不符的回報（用語依 §17.7 更正：扣住通知不代表 Unity 尚未走完），`data-motion` 三次都仍是 `moving`；放行真正的 #3 後才變成 `shown`。走路時間改以鉤子收到回報的時間計算。
 2. **清除或換客人後殘留 `[anim]` 標籤**（Codex 探測 `ClearDuringBrowseMustClearVisibleLabel`、`ConsumerSwitchDuringBrowseMustClearInactiveLabel`）：`ShopView.ResetAll` 沒有重設目前段落，選商品途中清除或換世代後，客人頭上仍是 `[anim] browsing - no event`。改為一併重設；新增兩個 PlayMode 案例。
 3. **C1 `3.1 pagehide`**：原檢查等 8 秒內下一次 5 秒輪詢，扣住第一個符合 `status` 或 `viewer` 的請求。改為共用的 `pagehideCheck`，兩種方式：
    - **network**：以 `visibilitychange` 主動觸發一次就緒輪詢，瀏覽器只扣住那一個 `GET /api/host/status`；觸發 pagehide 後放行，並等網路層確認該請求結束，才檢查憑證、畫面、輪詢。**實測發現**：頁面在 pagehide 時 abort，請求被取消（`Invalid InterceptionId`；`loadingFailed`、canceled），回覆無法再放行。
@@ -1239,3 +1239,21 @@ WebGL（`d7070af`，未提交，`Build/WebGL` 由 git 忽略）的 SHA-256：
 **`R2 order` 前置條件（第三次出現）**：這項要求進入回放時，task-a 的核准期限還在 4–8 秒後。期限在 fake plan 開始時就固定，之前的步驟在高負載下變慢，到這裡時已不足 4 秒。`78cb2cc` 這次只有前置條件失敗，之後「回放時仍是 #3」「回放中提交 #4」都通過；`bc79677` 那次「回放時仍是 #3」也失敗。這是本輪沒有改的區段，`6137708` 的全套中通過。建議另行改成與前面步驟耗時無關的設定（例如在這一段才開始的 task），本輪未改，請 review 決定。
 
 **限制**：同 17.5。主機負載仍高；D2 回放 #5 的實測值為 3192 ms（`78cb2cc`，上限 3200 ms）與 2193 ms（`6137708`），在慢機器上接近上限。
+
+### 17.7 驗收紀錄：D2 於 `6137708`（程式 `78cb2cc`）通過 Codex 限定範圍 review（2026-10-07）
+
+依據：Aaron 轉交的 Codex review。轉貼內容從「給 Claude Code 的下一步」開始，其中提到的「上述基準、通過範圍及證據歸屬」本身不在轉貼內，vault 中也沒有完整筆記；以下只記錄可見的內容，缺漏處標明。
+
+- **基準**：程式 `78cb2cc`、測試補充 `6137708`、文件 `60e695c`（送審的 commit；轉貼中沒有寫出 Codex 採用的基準字樣）。WebGL 建置的 hash 見 §17.6。
+- **通過範圍**：fake 場景動畫與網頁呈現。不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 已完成。Codex 對兩件道具移位與櫃檯標籤不帶 #2 沒有提出退回（上一輪 review）。
+- **證據歸屬**：
+  - Codex 獨立執行：上一輪 review（`d7070af`）時，Node 47／47、兩項 Unity 殘留探測、`app.js` 回報處理的 JS 探測；完整容器七步與 247 項突變當時只核對 Claude Code 的紀錄。本輪 Codex 的暫存目錄 `/private/tmp/apa-d2-review.G02d78/unity-fixed-review.xml` 有一次 2026-10-07 09:45Z 的 Unity 執行，16／16 通過（本 repo 的 14 個 PlayMode 案例加 Codex 的 2 項探測）；這是從檔案看到的結果，Codex 對本輪自行執行項目的說明不在轉貼內。
+  - Claude Code 執行、待 Codex 核對：§17.6 全部（Node 49／49；Unity 10／10、14／14；WebGL 重建；定向 pagehide 30／30 與 55／55；全套 312 PASS／1 FAIL 與 317 PASS／0 FAIL；反向）。
+- **用語更正**：§17.6 原寫「扣住 Unity 的回報，確定 Unity 仍在路上」，改為「網頁尚未收到完成回報」。扣住的是給網頁的通知，Unity 那時可能已經走完。同樣的說法也出現在測試腳本的註解與檢查名稱（`scripts/verify/browser-ui.mjs` 的 D2 即時段：「"Unity is still on its way" is a fact」與兩個檢查名稱中的 "Unity is (still) on its way"）；本輪只改文件，這些留待下一次改測試程式時一併更正，檢查本身的條件不受影響。
+- **保留的紀錄**（不刪除、不改寫）：`78cb2cc` 全套 312 PASS／1 FAIL（`R2 order` 前置條件）；反向改法未套用成功、實際等於未改動的定向重跑（55／55）；拿掉就緒世代檢查的反向仍 55／55 通過（只能證明「什麼都沒恢復」，不能單獨證明世代檢查）。
+- **`R2 order`**：Codex 建議值得修，但另列為**測試穩定性工作**，不重新打開本次 D2 修正。方向：在該測試段開始時才建立專用的新 task，避免期限被前面的步驟耗掉；仍須證明：
+  1. 回放開始時只有事件 #3；
+  2. 到期事件 #4 確實在回放期間提交；
+  3. 回放結束後，Unity 與 Dashboard 恢復到 #4。
+  不能只加長等待、刪除前置條件，或重跑到通過。另行派工，本輪未開始。
+- B1-04／B1-06 維持 InProgress；不合併、不推送、不標 Done；D3–D6 未開始。
