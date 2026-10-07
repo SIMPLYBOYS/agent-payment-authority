@@ -2,7 +2,7 @@
 
 > **10/8 診斷型 C0′ 執行（Claude Code 執行，待 Codex review）**：依 Aaron 核准執行一次 §39.3 腳本，**在前置檢查第 5 步停止（exit 2），probe 未啟動**：建置出的二進位讀不到 `vcs.revision`／`vcs.modified`（兩者皆空）。沒有啟動 probe 會話、沒有送出訊息、沒有 trace；plugins／agents **未取得觀測，仍是未知**。依核准不重試（第 39.11 節）。
 >
-> **10/8 建置前置流程修正與驗證（Claude Code 執行，待 Codex review）**：§39.3 改在全新暫存目錄中以一般本機 clone 建置（`d61c838`）。只執行步驟 1～5 的建置前置驗證，結果 PASS：`vcs.revision` 等於 `d61c838…`、`vcs.modified=false`。沒有執行產物、真實 CLI 或 C0′（第 39.12 節）。新的 C0′ 嘗試仍須 Aaron 另行核准。
+> **10/8 建置前置流程修正與驗證（Claude Code 執行，待 Codex review）**：§39.3 改在全新暫存目錄中以一般本機 clone 建置（`d61c838`）。只執行步驟 1～5 的建置前置驗證，結果 PASS：`vcs.revision` 等於 `d61c838…`、`vcs.modified=false`。沒有執行產物、真實 CLI 或 C0′（第 39.12 節）。**10/8 建置前置流程於 `d61c838` 通過 Codex 限定 review**（驗證紀錄 `1c9f03c`；第 39.13 節）。可進入「另行核准一次診斷型 C0′」階段；尚未取得新的 runtime 觀測，plugins／agents 仍未知；review 不代替執行核准。
 >
 > **10/8 L1-b 來源調查暫緩**：plugin 來源調查依 Aaron 決定暫緩，來源未確認保留為已知限制。正式 Gate 維持不變。下一步為整理一次診斷型 C0′ 清單，確認目前 plugins／agents 是否仍非空；待 Codex review 與 Aaron 另行核准，尚未執行（第 39.7 節）。暫緩調查不是解除阻擋：真實 CLI 若仍載入 plugins，現有閘門的執行阻擋仍在。**診斷型 C0′ 清單於 `d12adcc` 通過限定文件 review，R1／R2 關閉**（Codex 靜態核對，不是測試通過；第 39.10 節）。真實執行仍待 Aaron 另行核准，尚未執行。
 >
@@ -1461,8 +1461,18 @@ Codex 以文件與原始碼靜態核對 `ff094f5`，接受前置工作區、程�
   - `go-version-build.txt`：14 行 `build` 設定，含 `vcs=git`、`vcs.revision`、`vcs.time`、`vcs.modified=false`（格式為 tab 分隔的 `build<TAB>key=value`）
   - `result.txt`：`PASS`；腳本 exit `0`。
   - 暫存目錄已刪除；`git worktree list` 只有主工作樹；repo 工作區仍只有 `?? demo`。
-- **對第 39.11 節原因候選的意義**（推論，不是重現驗證）：同一環境、同一段 `awk` 解析能讀到兩個欄位。這排除了「`awk` 解析與輸出格式不符」，也排除了「環境 `GOFLAGS` 停用 VCS」。「連結工作樹中建置未嵌入 VCS」是剩下最可能的原因，但本輪**沒有**在 worktree 中重現，不寫成已證實。
+- **對第 39.11 節原因候選的意義**（推論，不是重現驗證）：同一段 `awk` 解析能讀到兩個欄位，排除「`awk` 解析與輸出格式不符」。本次建置未被停用 VCS；沒有保存前次建置環境，因此不能單靠本次結果排除前次環境差異（10/8 依 Codex 修正文案，原寫「也排除了環境 `GOFLAGS` 停用 VCS」）。「連結工作樹中建置未嵌入 VCS」是候選之一，本輪**沒有**在 worktree 中重現，不寫成已證實；也不再重現。
 - **留存**：第 39.11 節那次建出的二進位仍在 `$TMPDIR/apa-c0p.WpXh56/`，本輪沒有檢查或刪除。
 - **注意**：下次正式執行時，基準是當時的 HEAD（本節之後的文件提交），而不是 `d61c838`。腳本會在當時重新 clone、建置、核對 VCS；本節的 PASS 只證明流程可行，不代替當次的檢查。
 
 **待決定**：Codex review 本節與 §39.3 修訂；任何新的診斷型 C0′ 嘗試都須 Aaron 另行核准。本輪沒有修改 Gate、認證接受清單、啟動參數或產品程式；L1-b 不標完成；B1-04 仍 InProgress。
+
+### 39.13 驗收紀錄：建置前置流程於 `d61c838` 通過限定 review（2026-10-08）
+
+> **建置前置流程以 `d61c838` 為基準，通過 Codex 限定 review；驗證紀錄為 `1c9f03c`。**
+
+- **證據歸屬**：Claude Code 執行建置前置驗證（第 39.12 節）；Codex 核對文件、原始 build 紀錄及解析結果。**Codex 未重新建置或執行腳本。**
+- **Codex 確認**：一般本機 clone、指定 commit 與 `.git` 目錄檢查符合要求；清理目標是本次 `mktemp` 建立的暫存目錄；原始 build 紀錄包含正確的 `vcs.revision` 與 `vcs.modified=false`；VCS 嚴格檢查沒有放寬；產品程式未變。
+- **非阻擋文案修正**（已同步到 39.12）：「排除 GOFLAGS 停用 VCS」改為「本次建置未被停用 VCS；沒有保存前次建置環境，因此不能單靠本次結果排除前次環境差異」。不再重現前次失敗。
+- **現況**：可以進入「另行核准一次診斷型 C0′」的階段。尚未取得新的 runtime 觀測，plugins／agents 仍未知；本次 review 不代替執行核准。
+- 本輪只同步紀錄：沒有重跑驗證、建置、真實 CLI 或 C0′；沒有修改 Gate、認證接受清單、啟動參數或產品程式。L1-b 不標完成；B1-04 仍 InProgress。
