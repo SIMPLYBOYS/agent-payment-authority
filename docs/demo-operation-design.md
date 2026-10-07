@@ -4,7 +4,7 @@
 
 **3.5 現況（2026-10-07）**：已通過 Codex 技術 review（最近的產品修正為 `d18efa2`）；Aaron 已實際操作並初步確認基本操作可用，16.3 完整人工清單未逐項確認。B1-04／B1-06 仍 InProgress。
 
-**下一步設計（2026-10-07）**：商店展示深化設計見 [`docs/demo-presentation-design.md`](demo-presentation-design.md)：D1 設計於 `15d705a` 通過 Codex 限定 review（R1、R2 關閉）；Aaron 核准後，D1 實作於 `7ffc45d`，**於 `6338fd2` 通過 Codex 限定範圍技術 review，R1、R2、C1 關閉**（該文件 §15.7）。通過範圍為 fake 展示的網頁呈現與相關修正，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成。一般 Chrome 長流程的可見性問題仍未確認。D2 經 Aaron 核准後依 `9b70c0c` 的設計實作（程式與測試 `bc79677`、計時修正 `d7070af`，依 review 修正 `78cb2cc`／`6137708`），**於 `6137708` 通過 Codex 限定範圍 review**（該文件 §17.7；範圍為 fake 場景動畫與網頁呈現）；本文件 16.1 的 `R2 order` 測試穩定性另行派工；D3–D6 未開始。
+**下一步設計（2026-10-07）**：商店展示深化設計見 [`docs/demo-presentation-design.md`](demo-presentation-design.md)：D1 設計於 `15d705a` 通過 Codex 限定 review（R1、R2 關閉）；Aaron 核准後，D1 實作於 `7ffc45d`，**於 `6338fd2` 通過 Codex 限定範圍技術 review，R1、R2、C1 關閉**（該文件 §15.7）。通過範圍為 fake 展示的網頁呈現與相關修正，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成。一般 Chrome 長流程的可見性問題仍未確認。D2 經 Aaron 核准後依 `9b70c0c` 的設計實作（程式與測試 `bc79677`、計時修正 `d7070af`，依 review 修正 `78cb2cc`／`6137708`），於產品程式 `78cb2cc`、瀏覽器測試補充 `6137708` 通過 Codex 限定範圍技術 review，R1、R2、C1 關閉（該文件 §17.7；範圍為 fake 場景動畫與網頁呈現）；本文件 16.1 的 `R2 order` 測試穩定性另行派工；D3–D6 未開始。
 
 本文件只規劃 fake 展示模式。不啟用真實 CLI、核准、grant、Signer 或付款；不修改 B1-02 契約、已接受的 `cases.json`、Policy 或到期規則。提出設計不等於獲准實作。
 

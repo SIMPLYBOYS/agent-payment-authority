@@ -1,6 +1,6 @@
 # B1-06 商店展示深化設計（fake 展示模式）
 
-狀態（2026-10-07）：**D1 於 `6338fd2` 通過 Codex 限定範圍技術 review；R1、R2、C1 關閉。通過範圍為 fake 展示的網頁呈現與相關修正，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成。B1-04／B1-06 整體維持 InProgress。**（§15.7）**D2 設計（§16，`9b70c0c`）經 Aaron 10/7 核准實作：程式與測試 `bc79677`，計時修正 `d7070af`；依 Codex 對 `d7070af` 的 review 修正於 `78cb2cc`、測試補充 `6137708`（§17.6）；**於 `6137708`（程式 `78cb2cc`）通過 Codex 限定範圍 review**（§17.7），通過範圍為 fake 場景動畫與網頁呈現，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成。`R2 order` 測試穩定性另行派工。不合併、不推送、不標 Done。** D3–D6 未開始。D1 實作於 `7ffc45d`，review 後修正於 `6338fd2`；設計於 `15d705a` 通過（§14.3）。
+狀態（2026-10-07）：**D1 於 `6338fd2` 通過 Codex 限定範圍技術 review；R1、R2、C1 關閉。通過範圍為 fake 展示的網頁呈現與相關修正，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成。B1-04／B1-06 整體維持 InProgress。**（§15.7）**D2 設計（§16，`9b70c0c`）經 Aaron 10/7 核准實作：程式與測試 `bc79677`，計時修正 `d7070af`；依 Codex 對 `d7070af` 的 review 修正於 `78cb2cc`、測試補充 `6137708`（§17.6）；D2a／D2b 於產品程式 `78cb2cc`、瀏覽器測試補充 `6137708` 通過 Codex 限定範圍技術 review，上一輪 R1、R2、C1 關閉（§17.7），通過範圍為 fake 場景動畫與網頁呈現，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成。`R2 order` 測試穩定性另行派工。不合併、不推送、不標 Done。** D3–D6 未開始。D1 實作於 `7ffc45d`，review 後修正於 `6338fd2`；設計於 `15d705a` 通過（§14.3）。
 
 - **依據**：Aaron 轉交的〈B1-06 商店展示深化設計指示〉（vault，2026-10-07）。
 - **Aaron 的回饋**：已實際操作目前 demo，初步確認基本展示可用，未發現重大問題；現有情境仍然陽春，同意往展示內容深化推進。這不是 `docs/demo-operation-design.md` 16.3 人工清單逐項完成的聲明。
@@ -1240,20 +1240,51 @@ WebGL（`d7070af`，未提交，`Build/WebGL` 由 git 忽略）的 SHA-256：
 
 **限制**：同 17.5。主機負載仍高；D2 回放 #5 的實測值為 3192 ms（`78cb2cc`，上限 3200 ms）與 2193 ms（`6137708`），在慢機器上接近上限。
 
-### 17.7 驗收紀錄：D2 於 `6137708`（程式 `78cb2cc`）通過 Codex 限定範圍 review（2026-10-07）
+### 17.7 驗收紀錄：D2a／D2b 於產品程式 `78cb2cc`、瀏覽器測試補充 `6137708` 通過 Codex 限定範圍技術 review（2026-10-07）
 
-依據：Aaron 轉交的 Codex review。轉貼內容從「給 Claude Code 的下一步」開始，其中提到的「上述基準、通過範圍及證據歸屬」本身不在轉貼內，vault 中也沒有完整筆記；以下只記錄可見的內容，缺漏處標明。
+> **依完整筆記補正（2026-10-07）**：本節初版（`2f0720f`）寫於 Codex review 只轉來後半段時（轉貼從「給 Claude Code 的下一步」開始，所指的基準、結論與證據歸屬不在其中，vault 當時也沒有完整筆記），因此初版只記錄可見內容並標明缺漏。之後依 vault〈Claude-Code-B1-06-D2驗收紀錄補正指示-2f0720f-20261007〉的完整內容改寫如下；初版的缺漏是當時的事實，不倒填為當時已收到完整說明。
 
-- **基準**：程式 `78cb2cc`、測試補充 `6137708`、文件 `60e695c`（送審的 commit；轉貼中沒有寫出 Codex 採用的基準字樣）。WebGL 建置的 hash 見 §17.6。
-- **通過範圍**：fake 場景動畫與網頁呈現。不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 已完成。Codex 對兩件道具移位與櫃檯標籤不帶 #2 沒有提出退回（上一輪 review）。
-- **證據歸屬**：
-  - Codex 獨立執行：上一輪 review（`d7070af`）時，Node 47／47、兩項 Unity 殘留探測、`app.js` 回報處理的 JS 探測；完整容器七步與 247 項突變當時只核對 Claude Code 的紀錄。本輪 Codex 的暫存目錄 `/private/tmp/apa-d2-review.G02d78/unity-fixed-review.xml` 有一次 2026-10-07 09:45Z 的 Unity 執行，16／16 通過（本 repo 的 14 個 PlayMode 案例加 Codex 的 2 項探測）；這是從檔案看到的結果，Codex 對本輪自行執行項目的說明不在轉貼內。
-  - Claude Code 執行、待 Codex 核對：§17.6 全部（Node 49／49；Unity 10／10、14／14；WebGL 重建；定向 pagehide 30／30 與 55／55；全套 312 PASS／1 FAIL 與 317 PASS／0 FAIL；反向）。
-- **用語更正**：§17.6 原寫「扣住 Unity 的回報，確定 Unity 仍在路上」，改為「網頁尚未收到完成回報」。扣住的是給網頁的通知，Unity 那時可能已經走完。同樣的說法也出現在測試腳本的註解與檢查名稱（`scripts/verify/browser-ui.mjs` 的 D2 即時段：「"Unity is still on its way" is a fact」與兩個檢查名稱中的 "Unity is (still) on its way"）；本輪只改文件，這些留待下一次改測試程式時一併更正，檢查本身的條件不受影響。
-- **保留的紀錄**（不刪除、不改寫）：`78cb2cc` 全套 312 PASS／1 FAIL（`R2 order` 前置條件）；反向改法未套用成功、實際等於未改動的定向重跑（55／55）；拿掉就緒世代檢查的反向仍 55／55 通過（只能證明「什麼都沒恢復」，不能單獨證明世代檢查）。
-- **`R2 order`**：Codex 建議值得修，但另列為**測試穩定性工作**，不重新打開本次 D2 修正。方向：在該測試段開始時才建立專用的新 task，避免期限被前面的步驟耗掉；仍須證明：
-  1. 回放開始時只有事件 #3；
-  2. 到期事件 #4 確實在回放期間提交；
-  3. 回放結束後，Unity 與 Dashboard 恢復到 #4。
-  不能只加長等待、刪除前置條件，或重跑到通過。另行派工，本輪未開始。
-- B1-04／B1-06 維持 InProgress；不合併、不推送、不標 Done；D3–D6 未開始。
+**結論**（Codex 原文）：D2a／D2b 於產品程式 `78cb2cc`、瀏覽器測試補充 `6137708` 通過 Codex 限定範圍技術 review。上一輪 R1、R2 與 C1 已關閉。通過範圍為 fake 場景動畫與網頁呈現，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 已完成。
+
+- `60e695c` 是送審時的文件 commit，不是另一份產品程式驗收基準；`2f0720f` 是之後的驗收同步文件 commit。
+- 本次交付涵蓋上一輪的完整要求，沒有其他漏傳的必修項目。兩件道具移位與櫃檯標籤不硬填 `#2`，沒有新增退回要求。
+
+**上一輪三項的關閉理由**（Codex 的編號；§17.6 的 1、2、3 依序對應 R2、R1、C1）
+1. **R1 Unity 清除後殘留過場標籤**：`ResetAll()` 一併重設段落；清除場景或切換 consumer 後，原角色不再留下 `[anim] browsing - no event`。Codex 原始的兩項重現探測在修正後都通過。
+2. **R2 網頁提前結束補間提示**：只有 Unity 回報的 `gen`、`task`、`seq`、`phase` 與對應投影完全一致，才確認該過場完成；錯 task、錯 phase、較大或較舊序號、錯世代都不能確認完成。
+3. **C1 pagehide 驗證**：測試分開涵蓋「網路請求被取消」與「回覆內容在 pagehide 後才交付」，證明憑證、畫面與輪詢都沒有恢復；不宣稱這些案例能單獨證明每一層世代防護的必要性。
+
+**證據歸屬**
+
+- **Codex 本輪獨立執行**（從 `6137708` 匯出到 review 暫存副本；產品程式與 `78cb2cc` 相同）：
+  - Node：`node --test web/test/adapter.test.mjs web/test/hostcreds.test.mjs`，49／49 通過；包含 `sameShown` 正反例，以及取自 `app.js` 的回報處理函式測試（使用替身，不等於真實瀏覽器操作）。工具輸出確認通過，未另存本輪 Node log。
+  - Unity PlayMode（`6000.5.3f1`）：16／16 通過，即 repo 的 14 個 PlayMode 案例加上 Codex 上一輪的兩項原始探測 `ClearDuringBrowseMustClearVisibleLabel`、`ConsumerSwitchDuringBrowseMustClearInactiveLabel`。結果 `/private/tmp/apa-d2-review.G02d78/unity-fixed-review.xml`，log 同目錄 `unity-fixed-review.log`。
+  - 以 SHA-256 核對本機 WebGL 的四個檔案，都與 §17.6 的交付雜湊一致。這是雜湊核對，不是 Codex 重建 WebGL。
+- **Claude Code 執行，Codex 已核對紀錄**（不是 Codex 獨立重跑瀏覽器）：
+  - `6137708` 瀏覽器全套 317 PASS／0 FAIL：`artifacts/b1-06/ui-613770850fab-20261007T091325Z/browser-test.log`。
+  - `6137708` pagehide 定向，network 與 reply 各 5 輪，55／55：`artifacts/b1-06/pagehide-613770850fab/browser-test.log`。
+  - `78cb2cc` WebGL 交付雜湊紀錄，並與目前檔案的實際雜湊比對：`artifacts/b1-06/d2r-checks-78cb2ccec4b1/webgl-sha256.txt`。
+- **Claude Code 執行，維持原歸屬**：§17.6 其餘項目（`78cb2cc` 的 Node 與 Unity EditMode／PlayMode、WebGL 重建、定向 pagehide 30／30、全套 312 PASS／1 FAIL、各項反向）。不概括為已由 Codex 逐項核對或重跑。
+- **歷史證據與本輪未重跑的範圍**：
+  - Node 47／47 屬上一輪對 `d7070af` 的 review，不是本輪修正後的結果。
+  - 上一輪兩項 Unity 標籤探測是以斷言失敗**重現缺陷**，不能列為上一輪通過；本輪修正後才通過。
+  - 上一輪 JS 探測重現了錯誤回報會提前完成；本輪的反例已由 Node 回歸確認會被拒絕。
+  - 最近的完整容器七步與 247 項突變屬 `d7070af`，Codex 上一輪只核對紀錄；不改掛到 `78cb2cc` 或 `6137708`。
+  - Codex 本輪沒有獨立執行瀏覽器、EditMode、WebGL 建置、完整容器或全部突變。
+
+**用語**：維持「網頁尚未收到完成回報」（§17.6 已更正）；扣住通知不能證明角色仍在移動。測試腳本註解與檢查名稱中的同樣說法（`scripts/verify/browser-ui.mjs` D2 即時段）留待下一次測試維護，本輪不修改腳本。
+
+**保留的紀錄**（不改寫成通過）
+- `78cb2cc` 瀏覽器全套 312 PASS／1 FAIL（`R2 order` 前置條件）。
+- 反向修改未套用成功、實際等於未改動重跑的 55／55。
+- 拿掉就緒世代檢查後仍 55／55 通過：不能單獨證明該防護的效果。
+- 主機高負載；D2 回放 #5 實測 3192 ms，接近 3200 ms 的容許上限；§17.5 列出的未測範圍。
+
+**後續（另行派工，本輪未開始）**：`R2 order` 值得另修，屬測試穩定性工作，不重新打開本次 D2 修正，也不因本紀錄而獲准開工。建議在該測試段開始時才建立專用的新 task，避免期限被前面的步驟耗掉；仍須證明：
+1. 回放開始時只有事件 #3；
+2. 事件 #4 在回放期間提交；
+3. 回放結束後，Unity 與 Dashboard 恢復到 #4。
+
+不得只加長等待、刪除前置條件或重跑到通過。
+
+B1-04／B1-06 維持 InProgress；不合併、不推送、不標 Done；不開始 R2 order、D3–D6、真實 CLI、付款、Signer、testnet 或 ZK 工作。
