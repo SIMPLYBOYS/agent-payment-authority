@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **10/8 L1-b 來源調查暫緩**：plugin 來源調查依 Aaron 決定暫緩，來源未確認保留為已知限制。正式 Gate 維持不變。下一步為整理一次診斷型 C0′ 清單，確認目前 plugins／agents 是否仍非空；待 Codex review 與 Aaron 另行核准，尚未執行（第 39.7 節）。暫緩調查不是解除阻擋：真實 CLI 若仍載入 plugins，現有閘門的執行阻擋仍在。**診斷型 C0′ 清單 R1／R2 文件修訂完成，待 Codex 限定複核；真實執行仍待 Aaron 另行核准，尚未執行**（第 39.8 節）。
+> **10/8 L1-b 來源調查暫緩**：plugin 來源調查依 Aaron 決定暫緩，來源未確認保留為已知限制。正式 Gate 維持不變。下一步為整理一次診斷型 C0′ 清單，確認目前 plugins／agents 是否仍非空；待 Codex review 與 Aaron 另行核准，尚未執行（第 39.7 節）。暫緩調查不是解除阻擋：真實 CLI 若仍載入 plugins，現有閘門的執行阻擋仍在。**診斷型 C0′ 清單 R1／R2 文件修訂完成，待 Codex 限定複核；真實執行仍待 Aaron 另行核准，尚未執行**（第 39.8 節；`ff094f5` 複核後的兩處補正見第 39.9 節）。
 >
 > **10/8 L1-b 第一段**：probe 的 plugins 顯示候選加入三個名稱（完全相符才顯示），只有 fake 驗證（`e99f389`；第 38 節）。**probe 顯示候選修正於 `e99f389` 通過限定範圍技術 review**（第 38.1 節）；只關閉這項修正，**L1-b 的 plugin 來源仍未確認**。閘門、認證清單與啟動參數未變。
 >
@@ -1238,16 +1238,22 @@ APA_LIVE_CLI=true "$WT/apa-buyer" probe-init \
   --trace-dir "$EV/runs" > "$EV/stdout.txt" 2> "$EV/apa-buyer-error.txt"
 PROBE_EXIT=$?
 
-# 7. 不論 PROBE_EXIT 為何都走到這裡；之後的命令不改變 PROBE_EXIT，也不再呼叫 probe
-echo "exit=$PROBE_EXIT" > "$EV/exit-code.txt"
-date -u +%FT%TZ > "$EV/ended-utc.txt"
-git -C "$REPO" worktree remove "$WT/src" || echo "工作樹未能移除：$WT/src（不影響已保存的結果）" >&2
+# 7. 不論 PROBE_EXIT 為何都走到這裡；之後的命令不改變 PROBE_EXIT，也不再呼叫 probe。
+#    證據保存是否成功另外記在 SAVED；失敗不呼叫 die（probe 已啟動），也不重試 probe。
+SAVED=1
+echo "exit=$PROBE_EXIT" > "$EV/exit-code.txt" || SAVED=
+date -u +%FT%TZ > "$EV/ended-utc.txt" || SAVED=
+git -C "$REPO" worktree remove "$WT/src" || echo "工作樹未能移除：$WT/src" >&2   # 清理照常嘗試
+if [ -z "$SAVED" ]; then
+  echo "執行已嘗試，證據不完整：probe exit=$PROBE_EXIT；exit-code.txt 或 ended-utc.txt 未能寫入；目錄：$EV" >&2
+  exit 5
+fi
 echo "probe exit=$PROBE_EXIT；證據：$EV"
 exit "$PROBE_EXIT"
 ```
 
 - **每條失敗路徑（依閱讀核對，本輪未執行、未做語法檢查）**：第 1～6 步的每個命令與條件都接 `|| die`；`die` 以 `exit 2` 結束整個 bash 程序，之後的行都不會執行。probe 只在第 6 步出現一次，在它之前沒有任何不經判斷就繼續的步驟。`set -u` 只防未定義變數，不代替上述條件（沒有用 `set -e`，避免 probe 的非零退出碼中斷第 7 步的保存）。
-- **退出碼**：`exit 2` 只來自 `die`（前置停止，probe 未啟動，若證據目錄已建立則有 `precheck-stop.txt`）；`0`／`1`／`4` 是 probe 自己的退出碼（39.4）。`PROBE_EXIT` 在 probe 結束後立即保存，寫檔、時間、移除工作樹都不會改變它；腳本最後以它結束。
+- **退出碼**：`exit 2` 只來自 `die`（前置停止，probe 未啟動，若證據目錄已建立則有 `precheck-stop.txt`）；`exit 5` 只來自第 7 步（**probe 已嘗試，但 `exit-code.txt` 或 `ended-utc.txt` 未能寫入，證據不完整**；probe 的退出碼印在 stderr 那一行）；其餘 `0`／`1`／`4` 是 probe 自己的退出碼（39.4），只在第 7 步保存都成功時回傳。`PROBE_EXIT` 在 probe 結束後立即保存；「probe 退出碼」與「證據是否保存成功」（`SAVED`）分開記錄，寫檔、時間、移除工作樹都不會改變 `PROBE_EXIT`。保存失敗不呼叫 `die`（它會誤寫「probe 未啟動」），不重試 probe，工作樹清理照常嘗試。
 - **工作區規則**：`git status --porcelain --untracked-files=all` 只容許空輸出或恰為 `?? demo`；被 `.gitignore` 忽略的檔案（例如 `artifacts/`、`var/`）不算在內。
 
 - **為什麼用暫時工作樹**：先前幾次真實執行都要求工作區乾淨（第 27、30 節），現在 repo 根目錄有未追蹤的 `demo`（不得刪除或搬動）。Go 判斷 `vcs.modified` 時，依其實作也會把未追蹤檔算進去，所以直接在 repo 建置預期會得到 `vcs.modified=true`。這是依 Go 行為的推論，本輪沒有建置驗證；若執行時仍不是 `false`，就停止。
@@ -1266,7 +1272,8 @@ exit "$PROBE_EXIT"
 | `0` | `observed`／`init_observed`，`input_status=not_started` | init 在訊息寫入前就先到，probe 停止、不再寫入；**實際寫入 0 位元組仍是有效觀測**（`probe.go` 最終判定只有 `failed`／`partial` 會排除觀測） |
 | `4` | `no_init_after_message` | 訊息完整送出（`input_status=complete`），30 秒內沒有 init |
 | `1`（有 JSON） | `failed`／固定代碼 | 其他失敗，回報固定代碼（見下） |
-| `1`（無 JSON） | — | 啟動前被拒（`APA_LIVE_CLI`、`--cli` 非絕對路徑、版本檢查失敗或逾時、版本不符、取消）；只有 apa-buyer 的錯誤行，沒有 trace |
+| `1`（無 JSON，已確認的前置拒絕） | — | `stdout.txt` **沒有**模式提示行，且錯誤行是 `main.go` `probe` 在印出提示前的拒絕訊息：`APA_LIVE_CLI`、`--cli` 非絕對路徑、多餘參數、版本檢查失敗或逾時、版本不符、版本檢查前後取消（訊息含 `nothing was started` 或 `the probe was not started`）。probe 會話沒有啟動、沒有 trace；但版本檢查本身會執行一次 CLI 版本查詢 |
+| `1`（無 JSON，probe 或輸出保存失敗） | — | `stdout.txt` 有模式提示行但沒有 JSON，或無法歸入上一列（例如 `Probe` 回傳錯誤、trace 無法寫入、JSON 輸出失敗）。**可能已執行 CLI 並送出訊息**；不能據此宣稱零輸入、零用量或沒有 trace。照實保存 `stdout.txt`、錯誤行與 `runs/` 內實際存在的檔案，交 Codex 判斷 |
 
 `exit 1` 的固定代碼（依原始碼，任一出現即停止）：
 - 寫入：
@@ -1341,7 +1348,7 @@ exit "$PROBE_EXIT"
 | 取得 init，plugins／agents 均明確為空 | exit `0`，且符合 39.7.2 的判定 | 交 Codex 核對。其他閘門條件（版本、工具、MCP、權限模式、hook、skills 等）仍須確認，再處理階段 B 與認證接受值。**不得直接啟動真實請購。** |
 | 取得 init，但 plugins 或 agents 非空 | exit `0`，`plugins_count` 或 `agents_count` 大於 `0` | **記錄執行阻擋並停止。** 另提最小隔離或停用方案；不自動追查來源、不改允許清單、不重試。方案的實作與真實驗證仍須另行核准；在 Aaron 核准方案前，路線文件「來源不明時不先實作 plugin 停用方式」仍適用。 |
 | plugins／agents 資料缺失、型別錯誤或無法判定 | exit `0`，但不符合為空、也不是明確非空（如 `count` 為 `null`） | 如實記為未確認，交 Codex 核對；不猜測已清空、不放行。 |
-| 版本不符、逾時、解析錯誤或其他失敗 | exit `4`、exit `1`（有 JSON 的固定代碼，或無 JSON 的啟動前拒絕） | 保存既有白名單證據與固定代碼後停止；不重跑、不自行修改版本或參數。`input_failed`／`input_partial` 時即使同時取得 init，也不採用觀測；`not_started` 但 init 先到而成功（exit `0`）的情況屬上面三列，依 plugins／agents 判定。 |
+| 版本不符、逾時、解析錯誤或其他失敗 | exit `4`、exit `1`（有 JSON 的固定代碼；無 JSON 時分「已確認的前置拒絕」與「probe 或輸出保存失敗」兩種，見 39.4）、腳本 exit `5`（證據不完整） | 保存既有白名單證據與固定代碼後停止；不重跑、不自行修改版本或參數。`input_failed`／`input_partial` 時即使同時取得 init，也不採用觀測；`not_started` 但 init 先到而成功（exit `0`）的情況屬上面三列，依 plugins／agents 判定。 |
 
 各分支都不自動執行下一次 CLI、不放寬閘門。`auth_source` 為 `none` 仍不能證明登入方式或計費來源，認證決策另行處理；名稱相符不證明來源可信或完整 plugin ID 已確認；路徑分類不是來源認證。
 
@@ -1378,3 +1385,14 @@ exit "$PROBE_EXIT"
 **不變**：plugin 來源調查暫緩；正式 Gate、認證接受清單與啟動參數；空／非空／未知的分開處理（未知不當作空）；非空時另提方案、設計實作與真實驗證另行核准；結果能否支持 L1-c 由後續 review 判斷；已關閉的 probe 顯示候選修正與 L1-a 不重開。沒有擴大任何權限或真實執行範圍。
 
 本輪只改文件：沒有改產品程式、建置、跑測試或容器、執行命令範例、真實 CLI、版本查詢、登入檢查或 C0′；沒有讀設定或憑證。L1-b 不標通過；B1-04 仍 InProgress。
+
+### 39.9 補正紀錄：依 Codex 對 `ff094f5` 的複核（2026-10-08；待 Codex 複核；尚未執行）
+
+Codex 以文件與原始碼靜態核對 `ff094f5`，接受前置工作區、程式差異、建置與 VCS 判斷，以及 stdout 格式、`not_started`、`orphaned_output` 的修訂；另提兩處小缺口。本節只補這兩處。
+
+| 項目 | 原寫法（`ff094f5`） | 現行 | 位置 |
+|---|---|---|---|
+| R1 證據保存失敗 | 第 7 步不檢查 `exit-code.txt`、`ended-utc.txt` 的寫入；寫入失敗時仍以 probe 的 `0` 結束並印出證據位置 | 兩個寫入各自 `\|\| SAVED=`；保存失敗時 stderr 印「執行已嘗試，證據不完整」與 probe 退出碼，腳本以 `exit 5` 結束，不回傳成功；不呼叫 `die`、不重試 probe，工作樹清理照常嘗試 | 39.3 第 7 步、退出碼說明 |
+| R2 無 JSON 的解讀 | 「`1`（無 JSON）」一律解讀為啟動前被拒 | 分成兩列：已確認的前置拒絕（沒有模式提示行，錯誤行是提示前的拒絕訊息；版本檢查本身仍會執行一次 CLI 版本查詢）；probe 或輸出保存失敗（可能已執行 CLI 並送出訊息，不能宣稱零輸入、零用量或沒有 trace） | 39.4、39.7.3 |
+
+依閱讀核對 `cmd/apa-buyer/main.go`（`main`、`probe`、`checkLive`）與 `internal/buyer/probe.go`（`Probe` 的錯誤回傳、`probeTrace`）。本輪沒有執行腳本、`bash -n`、測試、容器、真實 CLI、版本查詢、登入檢查或 C0′；沒有改產品程式、Gate、接受清單或啟動參數，也沒有調查 plugin 來源。L1-b 不標通過；B1-04 仍 InProgress。
