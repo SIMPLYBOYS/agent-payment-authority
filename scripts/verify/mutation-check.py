@@ -568,6 +568,15 @@ MUTATIONS = [
      'pluginDisplayCandidates = []string{"cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"}', 'pluginDisplayCandidates []string', 'TestProbePluginCandidates'),
     ('B1-04 L1-b: display names matched by prefix', 'internal/buyer/probe.go',
      '\tif slices.Contains(list, v) {', '\tif slices.ContainsFunc(list, func(c string) bool { return strings.HasPrefix(v, c) }) {', 'TestProbePluginCandidates|TestProbeEntries'),
+    # B1-04 plugins option A (docs/cli-poc.md section 42): the run's own plugin root.
+    ('B1-04 plugins A: live run keeps the plain environment', 'internal/buyer/host.go',
+     'Dir: work, Env: env, Limits: h.Limits', 'Dir: work, Env: h.Env, Limits: h.Limits', 'TestPluginRootLive'),
+    ('B1-04 plugins A: probe keeps the plain environment', 'internal/buyer/probe.go',
+     'Dir: work, Env: env, Limits: lim', 'Dir: work, Env: p.Env, Limits: lim', 'TestPluginRootProbe'),
+    ('B1-04 plugins A: an earlier plugin root value kept', 'internal/buyer/host.go',
+     '\t\tif !strings.HasPrefix(kv, EnvPluginRoot+"=") {', '\t\tif true {', 'TestPluginRootLive|TestPluginRootProbe'),
+    ('B1-04 plugins A: no root made, the run goes on', 'internal/buyer/host.go',
+     '\tif err := pluginMkdir(root, 0o700); err != nil {\n\t\treturn nil, err', '\tif err := pluginMkdir(root, 0o700); err != nil {\n\t\treturn env, nil', 'TestPluginRootFailureStartsNoCLI'),
 ]
 
 

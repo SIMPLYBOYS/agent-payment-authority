@@ -406,6 +406,10 @@ func Probe(ctx context.Context, p ProbeSpec) (ProbeResult, error) {
 	if err := os.Mkdir(work, 0o700); err != nil {
 		return res, err
 	}
+	env, err := withPluginRoot(p.Env, dir)
+	if err != nil {
+		return res, err
+	}
 	b := &toolbridge.Binding{Session: contracts.Session{}} // no task: the probe buys nothing
 	capability, err := bridge.Register(b)                  // idle, and never armed
 	if err != nil {
@@ -453,7 +457,7 @@ func Probe(ctx context.Context, p ProbeSpec) (ProbeResult, error) {
 	lim := p.Limits
 	lim.Assistant = 0 // any assistant message already stops the probe
 	started := time.Now()
-	rep := Run(ctx, Spec{Path: p.CLI, Args: ProbeArgv(cfgPath), Dir: work, Env: p.Env, Limits: lim,
+	rep := Run(ctx, Spec{Path: p.CLI, Args: ProbeArgv(cfgPath), Dir: work, Env: env, Limits: lim,
 		Watch: watch, Stopping: b.Disarm, HoldStdin: true, Input: input})
 	bridge.Revoke(capability) // waits for calls in flight
 	res.Outcome, res.Detail, res.ExitCode = rep.Outcome, rep.Detail, rep.ExitCode

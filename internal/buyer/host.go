@@ -70,6 +70,32 @@ var envAllowlist = []string{"HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG",
 // refuses any agent. Like the others, a parent value cannot replace it.
 var fixedEnv = []string{"DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1"}
 
+// EnvPluginRoot names the CLI's plugin root (option A, docs/cli-poc.md
+// section 42). Each run points it at a new empty directory of its own. It
+// moves where plugins are stored; it is not a switch that stops them from
+// loading, and the CLI may fill the directory in the background.
+const EnvPluginRoot = "CLAUDE_CODE_PLUGIN_CACHE_DIR"
+
+// pluginMkdir creates the run's plugin root; tests replace it.
+var pluginMkdir = os.Mkdir
+
+// withPluginRoot creates dir/plugins (0700, empty) and returns env with
+// exactly one EnvPluginRoot, naming it: any earlier value is dropped. On an
+// error the caller starts no CLI; nothing falls back to another root.
+func withPluginRoot(env []string, dir string) ([]string, error) {
+	root := filepath.Join(dir, "plugins")
+	if err := pluginMkdir(root, 0o700); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, EnvPluginRoot+"=") {
+			out = append(out, kv)
+		}
+	}
+	return append(out, EnvPluginRoot+"="+root), nil
+}
+
 // CLIEnv is the CLI's whole environment: the allowlisted variables from
 // getenv, the fixed ones, then extra.
 func CLIEnv(getenv func(string) string, extra ...string) []string {
@@ -144,6 +170,10 @@ func (h *Host) Run(ctx context.Context, taskID, prompt string, prepare Prepare) 
 	if err := os.Mkdir(work, 0o700); err != nil {
 		return res, err
 	}
+	env, err := withPluginRoot(h.Env, dir)
+	if err != nil {
+		return res, err
+	}
 	capability, err := h.Bridge.Register(b)
 	if err != nil {
 		return res, err
@@ -199,7 +229,7 @@ func (h *Host) Run(ctx context.Context, taskID, prompt string, prepare Prepare) 
 	}
 
 	started := time.Now()
-	res.Report = Run(ctx, Spec{Path: h.CLI, Args: Argv(prompt, cfgPath), Dir: work, Env: h.Env, Limits: h.Limits,
+	res.Report = Run(ctx, Spec{Path: h.CLI, Args: Argv(prompt, cfgPath), Dir: work, Env: env, Limits: h.Limits,
 		Watch: watch, Stopping: b.Disarm})
 	if !initSeen {
 		gateCode = "init_missing"
