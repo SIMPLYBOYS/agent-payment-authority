@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 診斷型 C0′ 第二次核准執行（Claude Code 執行，待 Codex review）**：Aaron 核准一次；前置步驟 1～5 全部通過（基準 `9fcd105`，`vcs.modified=false`）。**apa-buyer 的版本檢查拒絕**：`/Users/mac/.local/bin/claude` 回報的版本不是核准的 `2.1.289 (Claude Code)`。probe 會話沒有啟動、沒有送出訊息、沒有 trace，plugins／agents 仍未知。另發現 §39.3 腳本最後一行在 bash 3.2 下觸發 `unbound variable`，腳本以 1 結束；證據已保存（第 39.14 節）。依核准不重試、不更新 CLI。
+>
 > **10/8 診斷型 C0′ 執行（Claude Code 執行，待 Codex review）**：依 Aaron 核准執行一次 §39.3 腳本，**在前置檢查第 5 步停止（exit 2），probe 未啟動**：建置出的二進位讀不到 `vcs.revision`／`vcs.modified`（兩者皆空）。沒有啟動 probe 會話、沒有送出訊息、沒有 trace；plugins／agents **未取得觀測，仍是未知**。依核准不重試（第 39.11 節）。
 >
 > **10/8 建置前置流程修正與驗證（Claude Code 執行，待 Codex review）**：§39.3 改在全新暫存目錄中以一般本機 clone 建置（`d61c838`）。只執行步驟 1～5 的建置前置驗證，結果 PASS：`vcs.revision` 等於 `d61c838…`、`vcs.modified=false`。沒有執行產物、真實 CLI 或 C0′（第 39.12 節）。**10/8 建置前置流程於 `d61c838` 通過 Codex 限定 review**（驗證紀錄 `1c9f03c`；第 39.13 節）。可進入「另行核准一次診斷型 C0′」階段；尚未取得新的 runtime 觀測，plugins／agents 仍未知；review 不代替執行核准。
@@ -1476,3 +1478,35 @@ Codex 以文件與原始碼靜態核對 `ff094f5`，接受前置工作區、程�
 - **非阻擋文案修正**（已同步到 39.12）：「排除 GOFLAGS 停用 VCS」改為「本次建置未被停用 VCS；沒有保存前次建置環境，因此不能單靠本次結果排除前次環境差異」。不再重現前次失敗。
 - **現況**：可以進入「另行核准一次診斷型 C0′」的階段。尚未取得新的 runtime 觀測，plugins／agents 仍未知；本次 review 不代替執行核准。
 - 本輪只同步紀錄：沒有重跑驗證、建置、真實 CLI 或 C0′；沒有修改 Gate、認證接受清單、啟動參數或產品程式。L1-b 不標完成；B1-04 仍 InProgress。
+
+### 39.14 執行紀錄：第二次核准的診斷型 C0′（2026-10-08；Claude Code 執行，待 Codex review）
+
+> **結果：版本檢查拒絕（已確認的前置拒絕），probe 會話未啟動。** plugins／agents 未取得觀測，仍未知。依核准不重試、不更新版本、不換參數。
+
+- **核准**：Aaron 於 10/8 核准一次診斷型 C0′（「我核准一次診斷型 C0′」）。執行條件沿用前次核准與本節清單。
+- **開工核對**：分支 `b1-04-live`，HEAD `9fcd105`；工作區只有 `?? demo`。`d61c838..9fcd105` 只改 `docs/cli-poc.md`；`e99f389` 之後沒有非文件差異。
+- **執行方式**：§39.3 bash 區塊原樣抽出，以 `bash` 執行一次。在 Claude Code 沙箱外執行，因為核准包含使用既有 HOME、網路與登入環境。腳本沒有修改。
+- **經過**：
+  - 步驟 1～5 通過：clone 基準 `9fcd105`；`vcs.revision=9fcd105e3c25cc4a2e14dece3004c87c4d84be3d`、`vcs.modified=false`。
+  - 步驟 6 啟動 apa-buyer 一次。apa-buyer 的內建版本檢查拒絕，exit `1`，沒有 JSON。錯誤行（全文）：`apa-buyer: /Users/mac/.local/bin/claude reports a version other than the approved "2.1.289 (Claude Code)"; nothing was started or upgraded`。
+  - 步驟 7 保存了 `exit-code.txt`（`exit=1`）與 `ended-utc.txt`，並刪除了暫存目錄。
+- **依 39.4 歸類**：「`1`（無 JSON，已確認的前置拒絕）」。`stdout.txt` 為 0 位元組（沒有模式提示行），錯誤行是 `checkLive` 的版本不符訊息。
+  - 流程已進入版本檢查，所以 apa-buyer 已執行一次 CLI 版本查詢，**實際回報的版本字串沒有保存**（程式不輸出它）。
+  - probe 會話沒有啟動：沒有送出 `Reply only OK.`，沒有 `runs/` trace，不會有對話用量。
+- **證據**（`artifacts/b1-04/c0prime-diag-20261007T181935Z/`，`artifacts/` 不進版控）：
+  - `commit.txt`、`binary-vcs.txt`、`go-version-build.txt`（含 `vcs.revision`、`vcs.modified=false`）
+  - `started-utc.txt`（`2026-10-07T18:19:39Z`）、`ended-utc.txt`（`2026-10-07T18:19:40Z`）
+  - `exit-code.txt`（`exit=1`）、`apa-buyer-error.txt`（上述一行）、`stdout.txt`（0 位元組）
+  - 沒有 `runs/` 與 `precheck-stop.txt`：照實記錄不存在。
+- **腳本缺陷（新發現，未修正）**：證據保存與清理之後，最後一行 `echo "probe exit=$PROBE_EXIT；證據：$EV"` 在 bash 3.2 下報 `PROBE_EXIT…: unbound variable`，`set -u` 使腳本以 `1` 結束，而不是 `exit "$PROBE_EXIT"`。這次 probe 的退出碼也是 `1`，所以數字碰巧相同；`exit-code.txt` 由 probe 退出碼寫入，內容正確。
+  - 推測原因（未驗證）：bash 3.2 在目前 locale 下，把緊接在變數名稱後的全形字元 `；` 的位元組當成名稱的一部分。
+  - 同類寫法還有兩處：`die "分支是「$BR」…"`、證據不完整分支的 `probe exit=$PROBE_EXIT；…`。
+  - 可能的修正是改成 `${BR}`、`${PROBE_EXIT}`，須另經 review；本輪沒有修改腳本。
+- **沒有做的事**：沒有另跑版本查詢、沒有更新或重裝 CLI、沒有修改釘選或參數、沒有登入檢查、沒有 C0 重跑或第二次嘗試。
+
+**待決定**：
+1. CLI 版本：由 Aaron 確認目前安裝的版本（或核准一次版本查詢），再決定是改回 `2.1.289`，還是評估新版並修改釘選。修改釘選屬於程式變更，須另經設計與 review。
+2. §39.3 腳本的變數名稱缺陷修正，須經 review。
+3. 任何新的診斷型 C0′ 嘗試，須 Aaron 另行核准。
+
+本輪沒有修改 Gate、認證接受清單、啟動參數或產品程式；L1-b 不標完成；B1-04 仍 InProgress。
