@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **10/8 診斷型 C0′ 執行結果（Claude Code 執行，待 Codex review）**：取得 init（exit `0`，`observed`，版本為核准的 `2.1.293`）。**plugins 非空（2 個：`cc-plugin-agents-md`、`cc-plugin-plugin-authoring`）**；agents 明確為空（`agents_count` 0）；skills 0。依 39.7.3：**記錄執行阻擋並停止**，不追查來源、不改允許清單、不重試。正式 Gate 仍會拒絕這次 init（第 41 節）。
+> **10/8 診斷型 C0′ 執行結果（Claude Code 執行，待 Codex review）**：取得 init（exit `0`，`observed`，版本為核准的 `2.1.293`）。**plugins 非空（2 個：`cc-plugin-agents-md`、`cc-plugin-plugin-authoring`）**；agents 明確為空（`agents_count` 0）；skills 0。依 39.7.3：**記錄執行阻擋並停止**，不追查來源、不改允許清單、不重試。正式 Gate 仍會拒絕這次 init（第 41 節）。**10/8 Codex 核對完成**：本次 agents／skills 明確為空，plugins 非空，正式請購阻擋仍在；agents 結果可作為 L1-c 對應觀測項目的證據，L1-b、L1-c 整體不標通過。下一步建議為 plugins 最小隔離或停用方案的設計提案，待 Aaron 核准派工（第 41.1 節）。
 >
 > **10/8 核准 CLI 版本改為 `2.1.293 (Claude Code)`（Claude Code 執行 fake 驗證，待 Codex 限定 review）**：版本由 Aaron 提供，不是 Claude Code 或 Codex 查詢所得。程式 `bd29a4e`；新版通過、舊版與其他版本被拒、init 須為 `2.1.293`；定向 fake 回歸全部通過（第 40 節）。**程式 `bd29a4e` 通過 Codex 限定 review**；§39.3 產品基準與 §3、§7.3、§39.7.4 的版本說明已補正（第 40.1 節）。**`3d74230` 通過限定文件複核，R1 關閉**（第 40.2 節）。可提出下一次診斷型 C0′ 執行核准；review 不等於執行核准。新版真實 runtime 的行為仍待觀測，plugins／agents 仍未知。
 >
@@ -1689,3 +1689,21 @@ Codex 以文件與原始碼靜態核對 `ff094f5`，接受前置工作區、程�
 3. agents 為空的觀測能否支持 L1-c 的對應部分，由 review 判斷。
 
 L1-b 不標完成；B1-04 仍 InProgress；不合併、不推送、不標 Done。
+
+### 41.1 驗收紀錄：本次診斷型 C0′ 結果（2026-10-08）
+
+> **本次 agents／skills 明確為空，plugins 非空，正式請購阻擋仍在。**
+
+- **證據歸屬**：
+  - Claude Code 執行。
+  - Codex 核對：commit、二進位 VCS、`stdout.txt`／trace 投影的一致性，以及 Gate 原始碼。
+  - Codex 沒有重跑真實 CLI。
+- **結論範圍**：
+  - agents 為空的結果，可作為 L1-c 對應觀測項目的證據（條件：L1-a 的 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`、CLI `2.1.293`、本次 runtime）。
+  - **L1-b、L1-c 整體都不標通過。**
+  - plugins 非空，正式 Gate 仍拒絕這次 init，live 請購的執行阻擋仍在。
+- **plugin 來源**：
+  - 來源調查繼續暫緩。
+  - 以 APA 本次 runtime 回報的 plugins 為觀測依據，但**不據此允許載入或執行**。
+- **下一步建議**：提出「plugins 最小隔離或停用方案」的設計提案，待 Aaron 核准派工。設計、實作與真實驗證都各自另行核准。
+- 本輪只同步紀錄：沒有修改參數、Gate 或認證接受清單；沒有重跑 C0′；沒有進入正式請購。B1-04 仍 InProgress。
