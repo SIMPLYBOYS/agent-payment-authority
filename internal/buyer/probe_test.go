@@ -387,6 +387,56 @@ func TestProbeEntries(t *testing.T) {
 	}
 }
 
+// L1-b: the three candidate plugin names print only on an exact match; a
+// near or unknown name stays "other" with its length, and neither it nor
+// a plugin's raw path reaches the result or the trace.
+func TestProbePluginCandidates(t *testing.T) {
+	const near, path = "MARKNEAR3e8a", "MARKPATH3e8a"
+	p := newProbe(t, "probe-init-first", 5*time.Second)
+	var home string
+	for _, kv := range p.spec.Env {
+		if v, ok := strings.CutPrefix(kv, "HOME="); ok {
+			home = v
+		}
+	}
+	cache := home + "/.claude/plugins/cache/" + path + "/"
+	plugins, _ := json.Marshal([]any{
+		map[string]any{"name": "cc-plugin-agents-md", "path": cache + "cc-plugin-agents-md/1.0.0"},
+		map[string]any{"name": "cc-plugin-telemetry", "path": cache + "cc-plugin-telemetry/1.0.0"},
+		map[string]any{"name": "cc-plugin-plugin-authoring", "path": home + "/.claude/skills/" + path},
+		map[string]any{"name": "cc-plugin-telemetry@" + near, "path": "/opt/" + path}, // a marketplace suffix
+		map[string]any{"name": "CC-PLUGIN-TELEMETRY", "path": cache + "x"},            // case
+		map[string]any{"name": "cc-plugin-telemetry ", "path": cache + "x"},           // a trailing space
+		map[string]any{"name": "cc-plugin-agents", "path": cache + "x"},               // a prefix of a candidate
+		map[string]any{"name": "x-cc-plugin-plugin-authoring", "path": cache + "x"},   // a candidate as a suffix
+		map[string]any{"name": near + "-unknown", "path": "relative/" + path},
+	})
+	p.spec.Env = append(slices.DeleteFunc(slices.Clone(p.spec.Env), func(kv string) bool { return strings.HasPrefix(kv, fakecli.EnvScenario+"=") }),
+		scenario(genScenario(t, manual(fakecli.Step{Do: "init", Init: map[string]json.RawMessage{"plugins": plugins}}, fakecli.Step{Do: "hang"}))))
+	res, _ := p.run(context.Background())
+	if res.Status != ProbeObserved || res.Observation == nil {
+		t.Fatalf("%+v", res)
+	}
+	want := []EntryObservation{
+		{Name: "cc-plugin-agents-md", Path: "home_plugins_cache"}, {Name: "cc-plugin-telemetry", Path: "home_plugins_cache"},
+		{Name: "cc-plugin-plugin-authoring", Path: "home_skills"},
+		{"other", len("cc-plugin-telemetry@" + near), "other"}, {"other", 19, "home_plugins_cache"}, {"other", 20, "home_plugins_cache"},
+		{"other", 16, "home_plugins_cache"}, {"other", 28, "home_plugins_cache"}, {"other", len(near + "-unknown"), "relative"},
+	}
+	if got := res.Observation.PluginEntries; !slices.Equal(got, want) {
+		t.Errorf("plugins\n got %+v\nwant %+v", got, want)
+	}
+	out, _ := json.Marshal(res)
+	trace, _ := os.ReadFile(res.Trace)
+	for _, s := range []string{string(out), string(trace)} {
+		for _, leak := range []string{near, path, "CC-PLUGIN", "x-cc-plugin", "cc-plugin-telemetry ", home} {
+			if strings.Contains(s, leak) {
+				t.Fatalf("%q reached the output: %s", leak, s)
+			}
+		}
+	}
+}
+
 // pathClass reads only the path's text, and a root is matched whole.
 func TestPathClass(t *testing.T) {
 	r := pathRoots{home: "/h/u", work: "/tmp/apa-probe-1/work"}

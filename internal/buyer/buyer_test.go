@@ -481,10 +481,13 @@ func TestHostInitGate(t *testing.T) {
 		"tools not strings": {badInit(map[string]string{"tools": `[1,2,3]`}), "init_malformed"},
 		"servers object":    {badInit(map[string]string{"mcp_servers": `{"name":"apa"}`}), "init_malformed"},
 		"plugins loaded":    {badInit(map[string]string{"plugins": `[{"name":"x","path":"/p"}]`}), "plugins"},
-		"built-in agent":    {badInit(map[string]string{"agents": `["Explore"]`}), "agents"}, // a display candidate is not accepted
-		"agents listed":     {badInit(map[string]string{"agents": `[{"name":"general-purpose","description":"","source":"built-in"}]`}), "agents"},
-		"skills wrong type": {badInit(map[string]string{"skills": `"all"`}), "init_malformed"},
-		"other version":     {badInit(map[string]string{"claude_code_version": `"2.1.288"`}), "cli_version"},
+		// L1-b: the probe's plugin display candidates are not accepted either.
+		"display-candidate plugin":      {badInit(map[string]string{"plugins": `[{"name":"cc-plugin-telemetry","path":"/p"}]`}), "plugins"},
+		"all display-candidate plugins": {badInit(map[string]string{"plugins": `[{"name":"cc-plugin-agents-md","path":"/p"},{"name":"cc-plugin-telemetry","path":"/p"},{"name":"cc-plugin-plugin-authoring","path":"/p"}]`}), "plugins"},
+		"built-in agent":                {badInit(map[string]string{"agents": `["Explore"]`}), "agents"}, // a display candidate is not accepted
+		"agents listed":                 {badInit(map[string]string{"agents": `[{"name":"general-purpose","description":"","source":"built-in"}]`}), "agents"},
+		"skills wrong type":             {badInit(map[string]string{"skills": `"all"`}), "init_malformed"},
+		"other version":                 {badInit(map[string]string{"claude_code_version": `"2.1.288"`}), "cli_version"},
 		"duplicate key": {fakecli.Scenario{ManualInit: true, Steps: []fakecli.Step{
 			{Do: "tool", Tool: "list_products"},
 			{Do: "raw", Text: `{"type":"system","subtype":"init","tools":` + tools3 + `,"tools":` + tools3 + `,"mcp_servers":[{"name":"apa","status":"connected"}],"permissionMode":"dontAsk","apiKeySource":"` + fakecli.AuthSource + `","claude_code_version":"` + fakecli.InitVersion + `"}` + "\n"},

@@ -150,11 +150,17 @@ const maxEntries = 16
 // Display lists for plugins and agents (docs read 2026-10-04, see
 // docs/cli-poc.md section 32). agentDisplayCandidates are the built-in
 // subagents named on the subagents page; the init's agents member is a
-// list of names (string[] in SDKSystemMessage). No plugin name has a
-// source yet, so every plugin name prints as "other".
+// list of names (string[] in SDKSystemMessage).
+//
+// pluginDisplayCandidates (L1-b, Aaron 2026-10-08) are the three names in
+// pixel-office's saved Claude Code init record (docs/cli-poc.md 37.5):
+// candidates from another environment, not a confirmed source or id. Only
+// an exact match prints; anything else, a suffix or a case change
+// included, stays "other" with its length. Like every display list, this
+// is never accepted: the Gate still refuses any non-empty plugins.
 var (
 	agentDisplayCandidates  = []string{"Explore", "Plan", "general-purpose", "claude", "statusline-setup", "claude-code-guide"}
-	pluginDisplayCandidates []string
+	pluginDisplayCandidates = []string{"cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"}
 )
 
 // initMembers are the init members the probe reports on (Agent SDK

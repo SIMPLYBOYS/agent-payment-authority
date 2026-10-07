@@ -563,6 +563,11 @@ MUTATIONS = [
     # B1-04 L1-a: the CLI's fixed environment disables the built-in agents.
     ('B1-04 L1-a: built-in agents switch dropped from the CLI environment', 'internal/buyer/host.go',
      ', "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1"}', '}', 'TestArgvAndEnv|TestCLIEnvReachesChild'),
+    # B1-04 L1-b: the probe's plugin display candidates, exact match only.
+    ('B1-04 L1-b: plugin display candidates dropped', 'internal/buyer/probe.go',
+     'pluginDisplayCandidates = []string{"cc-plugin-agents-md", "cc-plugin-telemetry", "cc-plugin-plugin-authoring"}', 'pluginDisplayCandidates []string', 'TestProbePluginCandidates'),
+    ('B1-04 L1-b: display names matched by prefix', 'internal/buyer/probe.go',
+     '\tif slices.Contains(list, v) {', '\tif slices.ContainsFunc(list, func(c string) bool { return strings.HasPrefix(v, c) }) {', 'TestProbePluginCandidates|TestProbeEntries'),
 ]
 
 
