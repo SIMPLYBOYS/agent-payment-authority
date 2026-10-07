@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 plugins 最小隔離或停用方案：設計提案完成，待 Codex review；未核准實作或真實驗證。**（第 42 節）依官方文件，沒有任何候選方案能同時保證四件事：清空 plugins、保留 APA MCP、不改登入、不需要完整 plugin ID。提案先以「APA 專用的空 plugin 根目錄」為第一個實作候選，並列出它沒有涵蓋的來源，以及缺少的資訊。
+>
 > **10/8 診斷型 C0′ 執行結果（Claude Code 執行，待 Codex review）**：取得 init（exit `0`，`observed`，版本為核准的 `2.1.293`）。**plugins 非空（2 個：`cc-plugin-agents-md`、`cc-plugin-plugin-authoring`）**；agents 明確為空（`agents_count` 0）；skills 0。依 39.7.3：**記錄執行阻擋並停止**，不追查來源、不改允許清單、不重試。正式 Gate 仍會拒絕這次 init（第 41 節）。**10/8 Codex 核對完成**：本次 agents／skills 明確為空，plugins 非空，正式請購阻擋仍在；agents 結果可作為 L1-c 對應觀測項目的證據，L1-b、L1-c 整體不標通過。下一步建議為 plugins 最小隔離或停用方案的設計提案，待 Aaron 核准派工（第 41.1 節）。
 >
 > **10/8 核准 CLI 版本改為 `2.1.293 (Claude Code)`（Claude Code 執行 fake 驗證，待 Codex 限定 review）**：版本由 Aaron 提供，不是 Claude Code 或 Codex 查詢所得。程式 `bd29a4e`；新版通過、舊版與其他版本被拒、init 須為 `2.1.293`；定向 fake 回歸全部通過（第 40 節）。**程式 `bd29a4e` 通過 Codex 限定 review**；§39.3 產品基準與 §3、§7.3、§39.7.4 的版本說明已補正（第 40.1 節）。**`3d74230` 通過限定文件複核，R1 關閉**（第 40.2 節）。可提出下一次診斷型 C0′ 執行核准；review 不等於執行核准。新版真實 runtime 的行為仍待觀測，plugins／agents 仍未知。
@@ -1707,3 +1709,134 @@ L1-b 不標完成；B1-04 仍 InProgress；不合併、不推送、不標 Done�
   - 以 APA 本次 runtime 回報的 plugins 為觀測依據，但**不據此允許載入或執行**。
 - **下一步建議**：提出「plugins 最小隔離或停用方案」的設計提案，待 Aaron 核准派工。設計、實作與真實驗證都各自另行核准。
 - 本輪只同步紀錄：沒有修改參數、Gate 或認證接受清單；沒有重跑 C0′；沒有進入正式請購。B1-04 仍 InProgress。
+
+## 42 plugins 最小隔離或停用方案：設計提案（2026-10-08；Claude Code 查證與設計，待 Codex review）
+
+> **plugins 最小隔離或停用方案：設計提案完成，待 Codex review；未核准實作或真實驗證。**
+
+- **依據**：vault〈Claude-Code-B1-04-plugins最小隔離或停用方案設計派工-04c6135-20261008〉。本輪只查證與設計。
+- **開工核對**：分支 `b1-04-live`，HEAD `04c6135`；工作區只有 `?? demo`。產品基準 `bd29a4e` 之後只有文件差異，沒有影響本設計的程式變更。
+- **本輪沒有做的事**：
+  - 沒有執行任何真實 CLI（含 `--help`、`--version`）。
+  - 沒有讀 HOME、keychain、受管設定、設定描述檔或 pixel-office。
+  - 沒有安裝、更新、移除 plugin，也沒有改任何設定。
+  - 沒有新增 probe 欄位。
+  - 沒有改產品程式、Gate、認證接受清單、版本釘選或啟動參數。
+  - 沒有跑測試或容器。
+
+### 42.1 目標與已知事實
+
+**目標**：只影響 APA 啟動的 CLI 子程序，讓後續真實觀測有機會同時做到：
+- plugins、agents、skills 明確為空；
+- APA MCP 連線；
+- 工具清單符合三個工具；
+- permission mode、版本等既有 Gate 條件不變。
+
+認證接受清單不在本輪範圍；即使 plugins 清空，也不能直接啟動正式請購。
+
+**已知事實**（第 41 節；Claude Code 執行，Codex 核對紀錄，Codex 沒有重跑真實 CLI）：
+- CLI `2.1.293`。
+- plugins：`cc-plugin-agents-md`、`cc-plugin-plugin-authoring`，path 分類都是 `relative`（不能據此判斷來源或安裝位置）。
+- agents、skills 這次為空（不代表每次都為空，也不證明因果）。
+- APA MCP `connected`；tools 3／3。
+- `auth_source=none`（不代表已確認登入或計費方式）。
+
+**現行啟動條件**（原始碼）：
+- `Argv`（`internal/buyer/host.go`）已含 `--restricted`、`--strict-mcp-config --mcp-config <檔案>`、`--tools ""`、`--permission-mode dontAsk`、`--permission-prompts none`、`--disable-slash-commands`、`--no-session-persistence`。
+- probe 用 `ProbeArgv`，是同一組參數加上 stream-json 輸入。
+- 環境（`CLIEnv`）只放白名單變數，再加固定的 `DISABLE_AUTOUPDATER=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`、`CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`。
+- live（`Host.Run`）與 probe（`Probe`）每次都建立自己的暫存目錄（`apa-run-*`／`apa-probe-*`），結束時 `RemoveAll`。
+
+### 42.2 官方依據（2026-10-08 查閱，線上最新文件）
+
+| 頁面 | 本設計用到的內容（依原文） |
+|---|---|
+| CLI 參考 https://code.claude.com/docs/en/cli-reference | `--restricted`：「loads only managed settings and `--settings`」（v2.1.248 起）。`--safe-mode`：plugins、skills、hooks、MCP servers、custom agents 等都不載入，「managed plugins … and policy-configured MCP servers do not」；「Authentication, model selection, built-in tools, and permissions work normally」。`--bare`：略過 installed plugins 等自動探索。`--settings`：只對這次 session 有效。`--setting-sources`。`--strict-mcp-config`。 |
+| Plugin 載入 https://code.claude.com/docs/en/plugins/loading | id 為 `<name>@<origin>`（`@<marketplace>`、`@inline`、`@skills-dir`、`@synced`），各自有開關方式。`enabledPlugins` 共六種來源，managed 的 `true`／`false` 不能被覆寫。「Plugins load at session start from `installed_plugins.json` and the cache without using the network」。plugin 根目錄預設 `~/.claude/plugins`，可用 `CLAUDE_CODE_PLUGIN_CACHE_DIR` 改。skills-dir plugin 在 `~/.claude/skills/` 或專案 `.claude/skills/` 原地載入。synced plugin 在設了 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`、`--safe-mode`、bare，或 `--setting-sources` 不含 `user` 時不下載也不載入。 |
+| 環境變數 https://code.claude.com/docs/en/env-vars | `CLAUDE_CODE_PLUGIN_CACHE_DIR`：「Override the plugins root directory … marketplaces and the plugin cache live in subdirectories under this path. Defaults to `~/.claude/plugins`」。`CLAUDE_CODE_SAFE_MODE` 等同 `--safe-mode`。`CLAUDE_CODE_SIMPLE`（等同 `--bare`）：「MCP tools from `--mcp-config` are still available」，但「OAuth tokens and keychain credentials are not read」。`CLAUDE_CONFIG_DIR`：設定、session、plugins 都在這個目錄下。 |
+| 認證 https://code.claude.com/docs/en/authentication | 設了 `CLAUDE_CONFIG_DIR` 時，「keys the macOS Keychain entry to that directory too, so a session with a different `CLAUDE_CONFIG_DIR` reads a different entry」；每個目錄都有自己的 claude.ai 登入。 |
+| 受管設定 https://code.claude.com/docs/en/managed-settings | managed settings 高於所有其他層級，user、project、local、`--settings` 都不能覆寫。 |
+
+**版本適用性**：這些頁面不分版本。本輪看到的最高版本註記是 v2.1.290，沒有提到 `2.1.293`。以下各方案在 `2.1.293` 上的行為，都標為「**版本適用性未確認**」。
+
+### 42.3 候選方案比較
+
+| 方案 | 使用方式 | 作用範圍 | 前置資訊 | MCP 影響 | 登入影響 | 支援依據／未驗證處 | 撤回 |
+|---|---|---|---|---|---|---|---|
+| **A（第一個實作候選）APA 專用空 plugin 根目錄** | 子程序環境加 `CLAUDE_CODE_PLUGIN_CACHE_DIR=<該次暫存目錄>/plugins`（新建的空目錄，0700，隨暫存目錄刪除） | 只有 APA 子程序；不寫日常 `~/.claude` | 不需要 plugin ID 或來源 | 文件沒有把它和 MCP 連在一起；`--mcp-config` 不經 plugin 根目錄（推論） | 文件只把 `CLAUDE_CONFIG_DIR` 和憑證連在一起，這個變數沒有（推論：不影響） | 文件明載它改 plugin 根目錄，且 plugins 從根目錄的 `installed_plugins.json` 與 cache 載入。**沒有涵蓋**：skills-dir plugin（原地載入）、managed 強制啟用的 plugin（文件說 managed `true` 會讓外部來源 plugin 被擷取，可能擷取到新根目錄）。對 `2.1.293` 的效果未驗證 | 移除該環境變數 |
+| B `--safe-mode`（或 `CLAUDE_CODE_SAFE_MODE=1`） | 子程序加參數或環境變數 | 只有 APA 子程序 | 不需要 ID | **依文件，MCP servers 不載入**，沒有寫 `--mcp-config` 例外（`--bare` 則明寫保留）→ APA bridge 很可能不載入 | 文件：認證照常 | plugins 含 managed plugins 都不載入（文件明載）。與 `--restricted` 併用的行為未說明 | 移除參數 |
+| C `--settings` 關閉指定 id | `--settings '{"enabledPlugins":{"<name>@<origin>":false}}'` | 只有這次 session | **需要完整 id**；目前只有顯示名稱，origin 未知 | 無 | 無 | 文件明載 flag 來源。但 managed 的 `true` 不能被覆寫；不得猜 id | 移除參數 |
+| D `--bare` | 子程序加 `--bare` | 只有 APA 子程序 | 不需要 ID | 文件明載保留 `--mcp-config` 的工具 | **不讀 OAuth 與 keychain**，須改用 `ANTHROPIC_API_KEY` 或 `apiKeyHelper` → 改變認證與計費 | 文件明載 | 移除參數 |
+| E 專用 `CLAUDE_CONFIG_DIR` | 子程序設為空的 APA 目錄 | 只有 APA 子程序 | 不需要 ID | 未說明 | **keychain 項目依目錄區分 → 要另外登入** | 文件明載憑證分開；skills-dir 的位置是否跟著移動，未說明 | 移除變數 |
+| F 改 HOME | 子程序 HOME 指向暫存目錄 | 只有 APA 子程序 | 不需要 ID | 未說明 | 文件沒有說明 HOME 與 keychain 的關係 → 未知 | 無直接依據 | 還原 HOME |
+| G 調整受管設定 | 由 Aaron 改本機或組織設定 | **全域**，影響日常環境 | 需要 ID | — | — | managed 優先權最高 | 再改回；不得當預設方案 |
+
+不在選項內：讓這兩個 plugins 通過 Gate，不是隔離或停用。
+
+### 42.4 推薦與理由
+
+**沒有任何方案在官方文件上同時保證四件事**：清空 plugins、保留 APA MCP、不改登入、不需要完整 ID。
+
+- **A 列為第一個實作候選**：它是唯一同時符合下列硬性條件的方案：
+  - 只影響子程序、可撤回、不改全域設定；
+  - 不需要 ID；
+  - 文件沒有指出它影響 MCP 或登入。
+
+  **它的效果有條件**：
+  - 若這兩個 plugins 來自 plugin 根目錄（marketplace 安裝的 cache 等），A 應能讓它們不載入。
+  - 若來自 skills-dir 或 managed 強制啟用，A 不會清空它們。
+  - 依 `--restricted` 只讀 managed 與 `--settings` 的文件，marketplace plugin 在現行參數下要被啟用，較可能來自 managed。這是推論，不是來源調查的結論，也不追查。
+
+  因此 A 需要一次真實診斷才知道有沒有效。
+- **B 不推薦**：依文件字面，它很可能讓 APA bridge 不載入，違反「保留 APA MCP」。除非另行核准一次只為確認 MCP 是否存活的診斷，否則不採用。
+- **C、D、E、F、G 排除為預設**：
+  - C 缺完整 id；
+  - D、E 改變登入或計費；
+  - F 沒有依據；
+  - G 是全域修改。
+
+**若 A 的真實診斷後 plugins 仍非空**：表示來源在 plugin 根目錄之外。下一步需要的資訊與最小授權（擇一，都須 Aaron 決定）：
+1. **完整 plugin id**（`<name>@<origin>`）：可由 Aaron 自行在日常環境查看後提供，Claude Code 不讀 HOME；或另行核准 Claude Code 執行一次唯讀的 plugin 清單命令。拿到 id 後評估 C；若 origin 是 managed，C 無效。
+2. **由 Aaron 決定是否調整受管設定**（G，全域）。
+3. **另行核准一次以 B 為參數的診斷**，只確認 APA MCP 是否存活。
+
+### 42.5 後續實作與 fake 驗證計畫（本輪不執行；須設計 review 與 Aaron 另行核准）
+
+- **預計修改**：
+  - `internal/buyer/host.go`：`Host.Run` 在該次暫存目錄下建立空的 `plugins`（0700），並在子程序環境加 `CLAUDE_CODE_PLUGIN_CACHE_DIR=<該路徑>`。由一個共用函式先移除環境中同名的值再加入，確保只出現一次。
+  - `internal/buyer/probe.go`：`Probe` 用同一個函式。
+  - `CLIEnv` 白名單不變（不含這個變數，父環境本來就傳不進來）。`--version` 檢查不加。`Argv`／`ProbeArgv` 不加參數。
+  - Gate、`liveAcceptAuth`（空）、版本釘選、plugin 顯示候選都不變。
+- **受影響入口**：`apa-buyer run --live`（`Host.Run`）、`apa-buyer probe-init`（`Probe`），以及使用同一個 `Host.Run` 的 demo fake run。對 fake 無害，但會一併改變它的子程序環境，須在 review 中確認。
+- **測試**（以既有 `TestCLIEnvReachesChild` 的作法，由 fake CLI 記錄自己的環境）：
+  1. live 與 probe 的子程序都看到 `CLAUDE_CODE_PLUGIN_CACHE_DIR`，指向該次暫存目錄下的空目錄，存在、權限 0700、不在 HOME 下。
+  2. 父環境設 `CLAUDE_CODE_PLUGIN_CACHE_DIR=/elsewhere` 時，子程序仍只看到 APA 的值，且只出現一次。
+  3. 執行結束後該目錄隨暫存目錄刪除。
+  4. `Argv`／`ProbeArgv` 與既有 `TestArgvAndEnv` 的期望一致（沒有新增參數）。
+  5. Gate 仍拒絕非空 plugins（既有 `TestHostInitGate`），認證接受清單仍空。
+  6. 突變：拿掉 live 的設定、拿掉 probe 的設定、讓父環境的值勝出，各自須由測試以斷言失敗抓到。
+- **容器驗證**：建議跑完整斷網容器，因為改動在 live、probe 與 demo 共用的 Host 路徑。是否需要，交 review 決定。
+- **限制**：fake 測試只能證明環境傳遞與程式行為，**不能證明真實 plugins 已停用**。
+
+### 42.6 後續一次真實診斷計畫（實作通過 review 後，另取 Aaron 的一次執行核准）
+
+- 沿用 §39.3 腳本與既有執行邊界。`PRODUCT_BASE` 改為實作通過 review 的 commit；版本、二進位基準、工作區、VCS 檢查不符就停止。
+- **同時觀測並全部符合才算成功**：
+  - `plugins_count`、`agents_count`、`skills_count` 都明確為 0（`fields` 為 `array`、entries 為空）；
+  - `apa_server_status` 為 `connected`；
+  - `tools_count` 3、`tools_expected` 3、`tools_other` 0；
+  - `permission_mode` 為 `dontAsk`；
+  - `cli_version` 為 `approved`。
+- 缺欄位、型別錯誤或未知值不能當作空。
+- **非空、未知、MCP 失聯或其他不符**：保存既有白名單證據後停止；不重試、不自動換成 B 或其他方案。
+- 不開 Store、不建 task、不執行業務工具。沿用實際輸入記錄與 `usage` unknown 的規則；不新增原始 init、路徑或設定內容的輸出。
+- **plugins 清空不代表正式請購可以放行**：其他 Gate 條件與認證接受值仍須另行處理。
+
+### 42.7 尚待 Aaron 核准
+
+1. 本設計的 Codex review。
+2. 方案 A 的實作與 fake 驗證（含是否跑完整容器）。
+3. 實作通過 review 後，一次真實診斷的執行。
+4. 若 A 無效：在 42.4 的三個下一步中擇一。
+
+本輪沒有改程式、Gate、認證接受清單、版本釘選或啟動參數；L1-b、L1-c 整體不標通過；B1-04 仍 InProgress。
