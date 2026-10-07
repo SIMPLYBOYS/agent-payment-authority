@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/7 L1-a**：分支 `b1-04-live` 以固定環境變數 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` 停用內建 agents，只有 fake 驗證（`79a4a5f`、測試修正 `418f0de`；第 35 節），Claude Code 執行，待 Codex review；未執行真實 CLI，閘門與認證接受清單未變。
+>
 > **狀態（2026-10-04）**：**C0′ 的實作及 fake 驗證於 `05e03e2` 通過 Codex 獨立技術 review（第 25 節）；真實 C0′ 的執行確認清單見第 26 節。10/4 經 Aaron 核准執行一次，在版本檢查即停止（CLI 回報的版本不是 2.1.288），probe 未啟動、訊息未送出（第 27 節）。核准版本已依 Aaron 指示改為 `2.1.289 (Claude Code)`（`1f0b260`，第 28 節），已通過 Codex 限定範圍 review（第 29 節）。10/4 經 Aaron 核准再執行一次真實 C0′：exit 0，取得真實 init，Codex 已核對證據（第 30、31 節）。正式 live 仍不能放行：plugins 2、agents 5 會先被 Gate 拒絕，`apiKeySource` = `none` 也不在接受清單；plugins／agents 的釐清方案待 Aaron 核准（第 31 節）。10/4 依核准完成 A 官方文件查證與 B 身分觀測（程式 `4e709ab`、`8da15dd`），review 指出 `null` 判斷問題，已修正於 `b46e332`；10/4 依 Aaron 指示同步本輪驗收（第 34 節）。未執行真實 CLI；真實 C0′、受管設定讀取與清單調整仍須 Aaron 另行核准（第 32–34 節）。** 以下為此前狀態：fake 首個交付點於 `b3c66f6` 通過 Codex 獨立技術 review（第 10 節）。**live 階段 A（live 開關、init 閘門、fake 驗證）於 `e8f6719` 通過 Codex 獨立技術 review，R1、R2 關閉**（第 14 節；修正歷程見第 11–13 節）。**C0 init 探測的實作與 fake 驗證於 `5f34a7b` 通過 Codex 獨立技術 review（第 19 節）；10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init（第 21 節）；該次證據已由 Codex 核對**：未送任何使用者訊息，CLI 的背景行為與用量未知。**C0′（`--send-one-message`，只送一則固定訊息）10/4 已實作並以 fake 測試；`cf97c87` 與 `38eb2ba` review 的寫入失敗處理已修正（第 23、24 節），於 `05e03e2` 通過技術 review，未對真實 CLI 執行**（第 22、25 節）。階段 B、C **未執行**，沒有執行登入檢查或帶 prompt 的 `claude -p`；live 認證接受清單維持空白。B1-04 整體仍 InProgress，未標 Done、未合併 main。這次通過不代表真實 Claude 的登入、模型或計費方式已驗證；fake 成功只證明 wrapper／bridge／Store 的行為，B1-04 的 live trace 驗收項仍保留。
 
 ## 1 流程與元件
@@ -74,7 +76,7 @@ MCP 直接以標準庫實作，沒有新增第三方依賴。fake CLI 走的是�
 
 - 固定 executable 與 argv，`exec` 直接啟動，不經 shell。
 - 工作目錄是空的私有暫存目錄；MCP 設定在它之外。
-- 環境只帶 `HOME USER LOGNAME PATH TMPDIR LANG LC_ALL TERM`，加上固定的 `DISABLE_AUTOUPDATER=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`（Aaron 10/3 同意；依官方 env-vars 文件，本機 help 未列；用來減少更新與非必要流量，不是防火牆），fake 模式再加情境路徑。API key、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_OAUTH_TOKEN`、`ANTHROPIC_PROFILE`、雲端供應商、代理、`CLAUDE_CONFIG_DIR` 與 host 自己的設定都不傳。fake 模式的 `HOME` 換成每次新建的空目錄，fake 不會靠近使用者的登入。
+- 環境只帶 `HOME USER LOGNAME PATH TMPDIR LANG LC_ALL TERM`，加上固定的 `DISABLE_AUTOUPDATER=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`（Aaron 10/3 同意；依官方 env-vars 文件，本機 help 未列；用來減少更新與非必要流量，不是防火牆），以及 10/7 起的 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`（L1-a，見第 35 節；依官方文件在 `-p` 模式移除內建 subagent 類型，對真實 init 的效果未驗證），fake 模式再加情境路徑。API key、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_OAUTH_TOKEN`、`ANTHROPIC_PROFILE`、雲端供應商、代理、`CLAUDE_CONFIG_DIR` 與 host 自己的設定都不傳。fake 模式的 `HOME` 換成每次新建的空目錄，fake 不會靠近使用者的登入。
 - `--version` 檢查（fake 命令確認 `--fake-cli` 確實是 fake；live 要求輸出恰為核准版本 `2.1.289 (Claude Code)`；10/3 前為 2.1.287，10/3–10/4 為 2.1.288，第 28 節）也走同一套程序規則：獨立 process group、輸出 4 KiB、stderr 4 KiB、5 秒，結束時回收整個 group。逾時、取消、超量或非零退出都視為失敗，不啟動 task；啟動 task 前再確認一次未被取消。
 - 子程序在自己的 process group。任何停止都對整個 group 送 SIGTERM，期限後 SIGKILL；程序自行結束後也立即 SIGKILL 該 group，回收仍握著 pipe 的子孫。
 - 已離開 group（例如 `setsid`）的程序不會被送信號：等候期限後放棄 pipe，結果標 `orphaned_output`。這是已知限制，見第 8 節。
@@ -229,7 +231,7 @@ APA_LIVE_CLI=true APA_DB_PATH=var/apa-live.db \
 
 1. **這不是作業系統沙箱。** CLI 以使用者本人的權限執行。host 能限制的是工具呼叫，限制不了 CLI 程序本身會做什麼。CLI 不載入使用者設定、沒有內建工具，都只依賴 CLI 旗標照 help 所述運作；若 CLI 行為與說明不符，host 擋不住檔案或網路存取。init 閘門只能抓到 CLI 自己在 init 說出的不符。
 2. **HOME 會傳給 CLI**，因為 CLI 要靠它找到登入。CLI 可能在 `~/.claude` 寫入快取或紀錄（即使用了 `--no-session-persistence`），也會讀 keychain 與 `~/.config/anthropic`。repo 不讀、不複製這些內容。
-3. **CLI 的網路存取不受限**：它需要連 Anthropic API。模型沒有網路工具；兩個固定環境變數只是減少更新與非必要流量，不是防火牆，也不排除 plugin 或 managed 設定的副作用。
+3. **CLI 的網路存取不受限**：它需要連 Anthropic API。模型沒有網路工具；`DISABLE_AUTOUPDATER`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` 兩個固定環境變數只是減少更新與非必要流量，不是防火牆，也不排除 plugin 或 managed 設定的副作用（第三個固定變數只關內建 agents，與網路無關）。
 4. **process group**：CLI 若以獨立 group 或 session 啟動子程序（例如 detached 的 MCP server 或更新程式），host 的 group kill 收不到它們。這種情況只能放棄 pipe，結果標為 `orphaned_output`。bridge 會在 stdin 關閉時結束，capability 也已撤銷。
 5. **同一 OS 使用者的其他程序**，在 run 期間可讀取 MCP 設定檔、bridge 環境變數與 socket，所以讀得到 capability。
 6. **使用者層 CLAUDE.md 可能仍會載入。** help 對 `--restricted` 只提到設定檔；init 也看不出有沒有載入。
@@ -1000,3 +1002,24 @@ echo "exit=$?"
   1. 在本機量測並行 `go test` 時，啟動 shell 腳本的延遲分布；與容器內比較。
   2. 確認失敗是否集中在新建立的腳本第一次執行。
   3. 依量測結果，再決定是改測試的等待方式，還是需要 Aaron 決定調整正式上限。
+
+## 35 L1-a：以固定環境變數停用內建 agents（2026-10-07；Claude Code 執行，待 Codex review）
+
+- **依據**：Aaron 10/7 核准 L1-a（`docs/commercial-demo-roadmap.md` §8）：從 `3de40b8` 建立 `b1-04-live`，只加入停用內建 agents 的固定環境變數及 fake 驗證。
+- **不做**（依核准範圍）：不執行真實 CLI（含版本、登入、help、C0／C0′）；不讀 HOME、keychain、受管設定或憑證；不加任何 plugin 參數；不改認證接受清單（仍為空）；不改 init 閘門。
+- **程式**（`79a4a5f`；測試修正 `418f0de`）：
+  - `internal/buyer/host.go` 的 `fixedEnv` 加入 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`。依據是第 32.2 節第 6 點的官方文件（`-p` 模式移除全部內建 subagent 類型，含 `general-purpose`）。
+  - buyer 啟動的每個 CLI 程序都經 `CLIEnv`：版本檢查、live 與 fake run、C0 與 C0′ probe、demo host 的 fake run。父環境的同名變數不在 allowlist，所以不能把它改掉。
+  - **效果未驗證**：它能否讓真實 2.1.289 init 的 `agents` 清單變空，要等 L1-c 的一次真實觀測。閘門照舊拒絕任何非空的 `agents`、`plugins`、`skills`；2 個 plugins 的來源仍未確認（L1-b）。
+- **測試**：
+  - `TestArgvAndEnv`：CLI 環境的完整清單（含新變數），父環境的金鑰、token、`CLAUDE_CONFIG_DIR` 等仍不傳。
+  - `TestCLIEnvReachesChild`：以腳本代替 CLI，子程序看到的值是 `1`；父環境設 `0` 也一樣；`CLAUDE_CODE_OAUTH_TOKEN` 不傳。
+  - `TestLiveEnvDisablesBuiltinAgents`：以包裝腳本記錄啟動時的值，再 `exec` 成 fake；live run（版本檢查＋run）、C0 probe、C0′ probe 的每個 CLI 程序都看到 `1`。
+  - 既有的 `TestHostInitGate` 仍拒絕 `agents: ["Explore"]`。
+  - 突變 #248：從 `fixedEnv` 拿掉這個變數。提交前預檢：`TestArgvAndEnv`、`TestCLIEnvReachesChild` 失敗；另以同樣改法確認 `TestLiveEnvDisablesBuiltinAgents` 失敗（看到 `unset`）。
+- **失敗與修正**（保留紀錄）：`79a4a5f` 的本機 `make check` 中，新的 `TestCLIEnvReachesChild` 失敗：剛建立的腳本在高負載的全套測試裡 10 秒內沒有回應 `--version`，與第 34.2 節的待辦同一症狀（原因未確認）。這個測試要驗的是環境，不是該上限，所以 `418f0de` 讓兩個新測試在受限呼叫前先以不限時（上限一分鐘）的方式執行一次新腳本；包裝腳本遇到 `APA_WARM=1` 立即結束，而 CLI 的 allowlist 不會傳這個變數。正式上限未改。紀錄：`artifacts/b1-04/79a4a5ff204c-20261007T110623Z/`（附 `FAILED-NOTE.txt`）。
+- **本機驗證**（Claude Code 執行，待 Codex 獨立 review；`418f0de`，`artifacts/b1-04/418f0de1506d-20261007T111449Z/`）：
+  - check-contracts、`go test -race -cover ./... -count=1`、20 項證據匯入測試：exit 0。覆蓋率 buyer 92.9%、apa-buyer 81.7%、toolbridge 91.8%。
+  - `make check` exit 2、B1-01 exit 1（34 項 PASS、1 項 FAIL，即其中的 `make check`）：失敗的只有 `TestLiveOptIn`（`make check` 與 B1-01 兩次）與 `TestVersion`（B1-01 中一次），都是第 34.2 節列出的既有計時失敗，本輪沒有改這兩個測試；同一 commit 的 race 步驟跑同樣的測試則通過。新的三個測試在兩次執行中都通過。主機負載仍高（另有非本工作的長時間程序）。
+- **容器完整驗證：未完成。** 第一次嘗試（`418f0de`，`artifacts/verify-container/runs/418f0de1506d-20261007T112159Z/`、`artifacts/b1-04/container-418f0de-attempt1-terminated.log`）在 Claude Code session 結束時被終止（exit 143，證據匯入無檔案），沒有結果；之後 Docker daemon 未在執行，未重跑。突變 #248 因此只有提交前的本機預檢，尚無容器內的 248 項突變結果；最近一次完整容器仍屬 `d7070af`（247 項）。需要時請啟動 Docker 後對 `418f0de` 補跑。
+- **仍須 Aaron 另行核准**：L1-b（plugin 來源確認方式；若需參數，另一個實作停止點）、L1-c（一次 C0′ 觀測）、L1-d（階段 B 與認證接受值）、L1-e（一次階段 C）。B1-04 仍 InProgress；未標 Done、未合併 main。
