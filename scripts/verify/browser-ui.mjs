@@ -227,7 +227,16 @@ async function replayAndRestore(b, label) {
 // started on purpose (visibilitychange), the browser holds that one GET
 // /api/host/status, and the request's end is seen on the network (its reply
 // delivered, or cancelled by the page's abort) before anything is checked.
-async function pagehideCheck(b, label) {
+//
+// Two ways (review of 78cb2cc's own run: the page's abort cancels a request
+// held by the browser, so its reply can never be let go):
+// - "network": the browser holds the request itself; after pagehide it must
+//   end (cancelled by the page's abort, or its reply delivered);
+// - "reply": the reply has come, but its body is held by a test-only fetch
+//   wrapper in the page (like 3.1-R1's) and handed over after pagehide.
+// Either way nothing may come back.
+async function pagehideCheck(b, label, way = "network") {
+  if (way === "reply") return pagehideReply(b, label);
   const paused = [], ended = new Map();
   let hold = true, polled = 0;
   const offPause = b.on("Fetch.requestPaused", (p) => {
@@ -262,6 +271,30 @@ async function pagehideCheck(b, label) {
   offPause(); offDone(); offFail();
   await b.send("Fetch.disable");
   await b.send("Network.disable");
+}
+
+async function pagehideReply(b, label) {
+  await b.evaluate(`(() => { if (!window.__statusHold) { window.__statusHold = { arm: false, held: [], let: [] }; const orig = window.fetch.bind(window);
+    window.fetch = async (url, opts) => { const res = await orig(url, opts);
+      if (String(url).includes("/api/host/status") && window.__statusHold.arm) { window.__statusHold.arm = false; const body = await res.json();
+        return { status: res.status, ok: res.ok, json: () => new Promise((r) => window.__statusHold.held.push(() => { window.__statusHold.let.push(true); r(body); })) }; }
+      return res; }; } window.__statusHold.arm = true; window.__statusHold.held = []; window.__statusHold.let = []; return true; })()`);
+  await b.evaluate(`(document.dispatchEvent(new Event("visibilitychange")), true)`); // polls at once, or the running poll's timer follows
+  check(label + ": a readiness reply (GET /api/host/status) has come and its body is held", await b.waitFor(`window.__statusHold.held.length === 1`, 15000));
+  await b.evaluate(`window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })), true`);
+  await b.evaluate(`(window.__statusHold.held.splice(0).forEach((f) => f()), true)`);
+  check(label + ": after pagehide the held reply was handed to the page", await b.waitFor(`window.__statusHold.let.length === 1`, 5000));
+  await b.evaluate(`new Promise((r) => setTimeout(r, 0)).then(() => true)`); // the page's await on the body has run
+  const gone = await b.evaluate(`document.getElementById("creds").dataset.mode === "none" && ${text("#viewer")} === "未驗證" && ${text("#inspector")} === "尚無資料" && ${text("#timeline")} === "尚無事件" && document.getElementById("readiness").textContent.includes("未確認")`);
+  check(label + ": the late reply restores no credential, picture or readiness", gone,
+    await b.evaluate(`JSON.stringify({ mode: document.getElementById("creds").dataset.mode, viewer: ${text("#viewer")}, readiness: document.getElementById("readiness").textContent.slice(0, 120) })`));
+  let polled = 0;
+  const off = b.on("Fetch.requestPaused", (p) => { polled++; b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {}); });
+  await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/host/*" }, { urlPattern: "*/api/viewer*" }, { urlPattern: "*/api/tasks*" }] });
+  await sleep(6000); // longer than the 5 s readiness period: any poll would show
+  check(label + ": no more requests after leaving (readiness, viewer, tasks)", polled === 0, polled + " requests in 6 s");
+  off();
+  await b.send("Fetch.disable");
 }
 
 let demo, browser;
@@ -308,7 +341,7 @@ full: {
   if (PAGEHIDE) {
     // Targeted (review of d7070af, C1): only the 3.1 pagehide check, five
     // rounds on one fake-plan host; its result is "targeted", not the suite's.
-    log("commit " + commit + " (targeted: 3.1 pagehide only, " + PAGEHIDE_ROUNDS + " rounds)");
+    log("commit " + commit + " (targeted: 3.1 pagehide only, " + PAGEHIDE_ROUNDS + " rounds each way)");
     const st = join(tmp, "state-pagehide");
     demo = startDemo(st, join(repo, "testdata/demo/fake-plan.json"), unityBuild);
     const pAddr = await demo.ready("task-b");
@@ -319,7 +352,8 @@ full: {
     browser = await startChrome();
     const b = browser;
     await b.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
-    for (let r = 1; r <= PAGEHIDE_ROUNDS; r++) {
+    for (let i = 1; i <= 2 * PAGEHIDE_ROUNDS; i++) {
+      const way = i <= PAGEHIDE_ROUNDS ? "network" : "reply", r = way + " " + (i <= PAGEHIDE_ROUNDS ? i : i - PAGEHIDE_ROUNDS);
       await b.send("Page.navigate", { url: "http://" + pAddr + "/host" });
       await b.waitFor(`document.readyState === "complete"`);
       await b.waitFor(`["ready","rendered","failed"].includes(document.getElementById("unity-status").dataset.state)`, 90000);
@@ -331,7 +365,7 @@ full: {
       await b.waitFor(`${text("#viewer")}.startsWith("consumer-a")`);
       await openFixture(b, "task-a");
       check("pagehide round " + r + ": task-a shown before leaving", await unityShows(b, { task: "task-a" }));
-      await pagehideCheck(b, "pagehide round " + r);
+      await pagehideCheck(b, "pagehide round " + r, way);
     }
     break full;
   }
@@ -944,6 +978,14 @@ full: {
   await b.send("Fetch.disable");
   offHold();
   await pagehideCheck(b, "3.1 pagehide");
+  await chooseFile(goodFile);
+  await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`);
+  await b.evaluate(`document.querySelector('#consumer-pick button[data-consumer="consumer-a"]').click()`);
+  await b.waitFor(`${text("#viewer")}.startsWith("consumer-a")`);
+  await openFixture(b, "task-a");
+  await unityShows(b, { task: "task-a" });
+  await pagehideCheck(b, "3.1 pagehide (late reply)", "reply");
+  await b.evaluate(`document.getElementById("clear-all").click()`);
 
   // R1 on /host: the old viewer's JSON completes after a switch, a clear, pagehide.
   await chooseFile(goodFile);
