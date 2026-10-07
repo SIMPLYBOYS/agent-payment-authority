@@ -1088,3 +1088,17 @@ echo "exit=$?"
 - 依核對修正兩處用語（37.1、37.2）：「兩個指定路徑在本次查詢時不存在」不能證明 10/4 取得 init 時也不存在；`--settings` 是依目前已查閱文件的已知候選，不宣稱唯一。
 - 下一步建議（Codex）：先由 Aaron 提供 plugin 名稱摘要（名稱／完整 ID；介面有顯示時附來源／marketplace 與是否啟用），不貼完整設定、路徑、token 或登入資料；名稱先當作候選，不直接認定就是 init 的那兩個。不擴大到設定描述檔調查或再跑 C0′；不修改設定、不放寬閘門、不跑容器。
 
+### 37.5 候選名稱：pixel-office 已保存的 CLI 能力紀錄（2026-10-08；Claude Code 執行，待 Codex review）
+
+- **依據**：Aaron 10/8 指示：從 pixel-office 既有、已保存的 CLI 能力紀錄，只取 plugins 名稱及該筆紀錄的時間／引擎來源；不重新啟動 Agent，不輸出原始 init、設定或憑證；未保存就直接回報。
+- **怎麼找到的**：只讀 pixel-office 程式定位紀錄（`backend/main.py`：Claude Code CLI 的 `system/init` 到達時把 plugins 的名稱存進 `cli_caps`，約 L3720–3738；存檔鍵 `cli_caps`，L6588）。之後以只輸出指定欄位的腳本讀 `backend/office_state.json` 的 `cli_caps.plugins` 與 `cli_caps.at`，沒有輸出其他內容，也沒有讀 pixel-office 的設定、憑證或 HOME。
+- **結果**：
+  - plugins（3 個，只有名稱）：`cc-plugin-agents-md`、`cc-plugin-telemetry`、`cc-plugin-plugin-authoring`。
+  - 引擎來源：Claude Code CLI 開工時自己回報的 init（pixel-office 程式中 `cli_caps` 只由 CLI 的 init 寫入）。
+  - 時間：紀錄本身的 `at` 只有時分 `12:00`、沒有日期；`office_state.json` 檔案最後存檔時間為 2026-10-08 00:38:40（本機時間），那是整份狀態檔的存檔時間，不是這筆能力紀錄的取得時間。紀錄中的 CLI 版本未保存。
+- **限制，只能當候選**：
+  - pixel-office 啟動 CLI 的參數、設定來源與工作目錄可能和 APA 不同（APA 用 `--restricted`、固定環境與空的暫存工作目錄）；這是那邊的環境回報的清單，不能直接認定就是 APA 10/4 C0′ init 列出的那兩個。
+  - 數量不同：這裡 3 個，APA 的 C0′ init 是 2 個，所以至少有一個不對應。
+  - 只有名稱，沒有 marketplace 或來源；不能據此判斷是否由受管設定強制啟用。
+- **對 L1-b 的影響**：有了候選 id 的名稱部分，但 `--settings` 的 `enabledPlugins` 需要完整 id（可能含 `@<marketplace>` 等後綴，第 32.2 節第 4 點），而且仍不知道哪兩個、來源為何。**仍不能決定停用參數**；本次沒有修改任何設定、程式、plugin 參數或認證清單，也沒有執行真實 CLI 或 C0′。
+
