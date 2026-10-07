@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 診斷型 C0′ 執行（Claude Code 執行，待 Codex review）**：依 Aaron 核准執行一次 §39.3 腳本，**在前置檢查第 5 步停止（exit 2），probe 未啟動**：建置出的二進位讀不到 `vcs.revision`／`vcs.modified`（兩者皆空）。沒有啟動 probe 會話、沒有送出訊息、沒有 trace；plugins／agents **未取得觀測，仍是未知**。依核准不重試（第 39.11 節）。
+>
 > **10/8 L1-b 來源調查暫緩**：plugin 來源調查依 Aaron 決定暫緩，來源未確認保留為已知限制。正式 Gate 維持不變。下一步為整理一次診斷型 C0′ 清單，確認目前 plugins／agents 是否仍非空；待 Codex review 與 Aaron 另行核准，尚未執行（第 39.7 節）。暫緩調查不是解除阻擋：真實 CLI 若仍載入 plugins，現有閘門的執行阻擋仍在。**診斷型 C0′ 清單於 `d12adcc` 通過限定文件 review，R1／R2 關閉**（Codex 靜態核對，不是測試通過；第 39.10 節）。真實執行仍待 Aaron 另行核准，尚未執行。
 >
 > **10/8 L1-b 第一段**：probe 的 plugins 顯示候選加入三個名稱（完全相符才顯示），只有 fake 驗證（`e99f389`；第 38 節）。**probe 顯示候選修正於 `e99f389` 通過限定範圍技術 review**（第 38.1 節）；只關閉這項修正，**L1-b 的 plugin 來源仍未確認**。閘門、認證清單與啟動參數未變。
@@ -1410,3 +1412,27 @@ Codex 以文件與原始碼靜態核對 `ff094f5`，接受前置工作區、程�
 - **同步時的非阻擋文案修正**（Codex 指示）：39.4「已確認的前置拒絕」列，原寫「版本檢查本身會執行一次 CLI 版本查詢」，改為「若流程已進入版本檢查，可能已執行 CLI 版本查詢；更早的拒絕不會執行」。39.9 表格保留 `d12adcc` 時的原文。
 - **加註**（39.7.2）：plugin 觀測以 APA wrapper 當次 runtime 的 init 為準；pixel-office 名稱僅為顯示候選，不作為允許依據。
 - 本輪只同步文件：沒有重跑驗證、調查 plugin 來源或執行 C0′；沒有改產品程式、Gate、接受清單或啟動參數。L1-b 不標完成；B1-04 仍 InProgress。
+
+### 39.11 執行紀錄：一次診斷型 C0′（2026-10-08；Claude Code 執行，待 Codex review）
+
+> **結果：前置檢查失敗，probe 未啟動。** 腳本在第 5 步（二進位 VCS 核對）以 `die` 停止，exit `2`。依核准不重試、不改參數或腳本。
+
+- **核准**：Aaron 核准依本節清單執行一次診斷型 C0′（清單 review 基準 `d12adcc`）。核准不含第二次嘗試、C0 重跑、登入檢查、停用方案實作或階段 C。
+- **開工核對**：分支 `b1-04-live`，HEAD `039dc89`；工作區只有未追蹤的 `demo`。`d12adcc..039dc89` 只改 `docs/cli-poc.md`、`docs/commercial-demo-roadmap.md`；`e99f389` 之後沒有非文件差異。
+- **執行方式**：把 §39.3 的 bash 區塊原樣抽出成暫存檔，以 `bash 檔名` 執行一次（在 Claude Code 沙箱外執行，因為核准包含 CLI 使用既有 HOME、網路與登入環境）。沒有修改腳本內容。
+- **經過**：第 1～4 步通過（分支、工作區、`e99f389` 祖先與非文件差異、證據目錄、暫時工作樹、建置）。第 5 步 `go version -m` 成功，但 `vcs.revision`、`vcs.modified` 都解析為空，`die "vcs.revision 缺失或不是 039dc896…"`，exit `2`。`die` 已移除暫時工作樹（`git worktree list` 只剩主工作樹）；repo 工作區仍只有 `?? demo`。
+- **沒有發生的事**：probe 會話沒有啟動，因此沒有版本檢查、沒有送出 `Reply only OK.`、沒有 trace、`stdout.txt`、`exit-code.txt`、`started-utc.txt`、`ended-utc.txt`。CLI 沒有被執行，不會產生模型用量。這些檔案不存在是照實紀錄，不補造。
+- **證據**（`artifacts/b1-04/c0prime-diag-20261007T181018Z/`，`artifacts/` 不進版控）：
+  - `commit.txt`：`039dc896e47a7645d70914ccd9be0b0d8d673c77`
+  - `binary-vcs.txt`：`vcs.revision=`、`vcs.modified=`（兩者皆空）
+  - `precheck-stop.txt`：`vcs.revision 缺失或不是 039dc896e47a7645d70914ccd9be0b0d8d673c77`
+  - 建置出的二進位仍留在 `$TMPDIR/apa-c0p.WpXh56/apa-buyer`（`die` 只移除工作樹，不刪這個目錄）；**本輪沒有再檢查它**。
+- **plugins／agents**：未取得 init，**未知**；不得解讀為空。依 39.7.3 屬「版本不符、逾時、解析錯誤或其他失敗」一類：保存證據後停止。
+- **原因未確認**（只列候選，均未驗證）：
+  1. 在 `git worktree add` 建立的連結工作樹中建置時，Go 沒有嵌入 VCS 資訊；
+  2. 環境中有 `GOFLAGS=-buildvcs=false` 或類似設定；
+  3. §39.3 的 `awk` 欄位解析與實際 `go version -m` 輸出格式不符。
+  
+  區分這三者需要另行核准的唯讀檢查（例如對留下的二進位執行 `go version -m`、查看 `go env GOFLAGS`），本輪沒有做。
+
+**待決定**：是否核准上述唯讀檢查；依原因修正 §39.3 後須再經 review；任何新的執行嘗試都須 Aaron 另行核准。本輪沒有修改 Gate、認證接受清單、啟動參數或產品程式；L1-b 不標完成；B1-04 仍 InProgress。
