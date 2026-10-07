@@ -229,6 +229,12 @@ export function projection(state, animate) {
   };
 }
 
+// sameShown: whether Unity's report names exactly the projection last sent:
+// the same generation, task, sequence and phase. Anything else (another
+// task or phase, an older or a later sequence) confirms nothing (review of
+// d7070af; the same rule as the evidence panel's sync, review of 7ffc45d).
+export const sameShown = (sent, rep) => !!sent && !!rep && rep.gen === sent.gen && rep.task === sent.task && rep.seq === sent.seq && rep.phase === sent.phase;
+
 // ---- D2: the shop's transition table (docs/demo-presentation-design.md 16.4) ----
 // The same table as Unity's SceneRules (Projection.cs); both are tested with
 // testdata/demo/scene-transitions.json. The page uses it only to explain the

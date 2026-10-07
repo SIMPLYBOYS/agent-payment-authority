@@ -62,8 +62,9 @@ let shownCard = "";   // what the card and the evidence panel last showed
 let shownEvidence = "";
 // D2 (16.4, 16.5): target is what the shop was last given in this
 // generation (A.transition's target); motion the last real move (rules 1, 2)
-// or first load, in words, with the newest sequence sent since: done once
-// Unity reports that sequence. replaySc is the replay step's scene.
+// or first load, in words, with the newest projection sent since (gen, task,
+// seq, phase): done once Unity reports exactly that one (A.sameShown).
+// replaySc is the replay step's scene.
 let target = null;
 let motion = null;
 let replaySc = null;
@@ -81,7 +82,7 @@ const unity = new UnityHost($("unity-canvas"), (s, detail) => {
     box.textContent = "Unity 已呈現 " + detail.task + " #" + detail.seq + " " + detail.phase + (detail.reason ? "（" + detail.reason + "）" : "");
     for (let i = rendered.length - 1; i >= 0; i--) if (rendered[i].gen === detail.gen && rendered[i].seq === detail.seq) rendered.splice(i, 1)[0].done(true);
     lastReport = { gen: detail.gen, seq: detail.seq, phase: detail.phase, task: detail.task };
-    if (motion && motion.gen === detail.gen && detail.seq >= motion.seq) motion.done = true;
+    if (motion && A.sameShown(motion, detail)) motion.done = true; // only the projection last sent ends "補間中"
     drawScene();
     renderPanels();
     return;
@@ -213,9 +214,10 @@ function sendShop(msg) {
   const tr = A.transition(target && target.gen === msg.gen ? target : null, msg);
   target = { ...tr.target, gen: msg.gen };
   if (tr.rule <= 2 || !motion || motion.gen !== msg.gen) {
-    motion = { gen: msg.gen, seq: msg.seq, rule: tr.rule, browse: tr.browse, text: tr.text, first: !msg.animate && mode === "live", done: false };
+    motion = { gen: msg.gen, task: msg.task_id, seq: msg.seq, phase: msg.phase, rule: tr.rule, browse: tr.browse, text: tr.text, first: !msg.animate && mode === "live", done: false };
   } else if (!motion.done) {
-    motion.seq = msg.seq; // still on its way: Unity reports only the newest sequence once there
+    // still on its way: Unity reports only the newest projection, once there
+    Object.assign(motion, { task: msg.task_id, seq: msg.seq, phase: msg.phase });
   }
   unity.send(msg);
   drawScene();

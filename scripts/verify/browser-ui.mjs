@@ -28,6 +28,8 @@ const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 // added for D1 (review of 7ffc45d, C1): whether Chrome's own backgrounding
 // hides the page in that flow is recorded, not assumed.
 const SMOKE = process.argv.includes("--smoke-plain");
+const PAGEHIDE = process.argv.includes("--pagehide-only"); // targeted run of the 3.1 pagehide check
+const PAGEHIDE_ROUNDS = 5;
 const cases = JSON.parse(readFileSync(join(repo, "testdata/contracts/cases.json")));
 const expect = (id) => cases.cases.find((c) => c.case_id === id).expected;
 
@@ -219,6 +221,49 @@ async function replayAndRestore(b, label) {
   return replayGen;
 }
 
+// pagehideCheck (3.1; review of d7070af, C1): a readiness request really in
+// flight, then the page is left, then the request is let go: nothing comes
+// back. The order is set by conditions, not by waiting: a readiness poll is
+// started on purpose (visibilitychange), the browser holds that one GET
+// /api/host/status, and the request's end is seen on the network (its reply
+// delivered, or cancelled by the page's abort) before anything is checked.
+async function pagehideCheck(b, label) {
+  const paused = [], ended = new Map();
+  let hold = true, polled = 0;
+  const offPause = b.on("Fetch.requestPaused", (p) => {
+    if (hold && p.request.url.includes("/api/host/status")) { hold = false; paused.push(p); return; }
+    if (!hold && paused.length) polled++;
+    b.send("Fetch.continueRequest", { requestId: p.requestId }).catch(() => {});
+  });
+  const offDone = b.on("Network.loadingFinished", (p) => ended.set(p.requestId, "reply delivered"));
+  const offFail = b.on("Network.loadingFailed", (p) => ended.set(p.requestId, "ended: " + (p.canceled ? "cancelled by the page" : p.errorText)));
+  await b.send("Network.enable");
+  await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/host/*" }, { urlPattern: "*/api/viewer*" }, { urlPattern: "*/api/tasks*" }] });
+  await b.evaluate(`(document.dispatchEvent(new Event("visibilitychange")), true)`); // polls at once, or the running poll's timer follows
+  for (const end = Date.now() + 15000; Date.now() < end && paused.length === 0; ) await sleep(50);
+  const req = paused[0];
+  check(label + ": one readiness request (GET /api/host/status) is held in flight", !!req && req.request.method === "GET", req ? req.request.url.replace(/^https?:\/\/[^/]+/, "") : "none paused within 15 s");
+  if (req) {
+    const shownBefore = await b.evaluate(`document.getElementById("creds").dataset.mode + "|" + ${text("#viewer")}`);
+    await b.evaluate(`window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })), true`);
+    const let_go = await b.send("Fetch.continueRequest", { requestId: req.requestId }).then(() => "continued", (e) => "not continued (" + e.message + ")");
+    for (const end = Date.now() + 10000; Date.now() < end && !ended.has(req.networkId); ) await sleep(50);
+    check(label + ": the held request then ended", ended.has(req.networkId), "before pagehide " + shownBefore + "; " + let_go + "; " + (ended.get(req.networkId) || "still open after 10 s"));
+    const gone = await b.evaluate(`document.getElementById("creds").dataset.mode === "none" && ${text("#viewer")} === "未驗證" && ${text("#inspector")} === "尚無資料" && ${text("#timeline")} === "尚無事件" && ${unityCleared(["task-a", "task-b", "HUMAN_APPROVAL_REQUIRED", "INSUFFICIENT_BUDGET"])}`);
+    check(label + ": tokens dropped, Dashboard and shop cleared; the late request restores nothing", gone,
+      await b.evaluate(`JSON.stringify({ mode: document.getElementById("creds").dataset.mode, viewer: ${text("#viewer")}, unity: document.getElementById("unity-status").textContent })`));
+    polled = 0;
+    await sleep(6000); // longer than the 5 s readiness period: any poll would show
+    check(label + ": no more requests after leaving (readiness, viewer, tasks)", polled === 0, polled + " requests in 6 s");
+    await b.evaluate(`window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })), true`);
+    await sleep(500);
+    check(label + ": pageshow: nothing comes back by itself", await b.evaluate(`document.getElementById("creds").dataset.mode === "none" && ${text("#viewer")} === "未驗證"`));
+  }
+  offPause(); offDone(); offFail();
+  await b.send("Fetch.disable");
+  await b.send("Network.disable");
+}
+
 let demo, browser;
 const allTokens = [];
 try {
@@ -258,6 +303,36 @@ full: {
     await sample("after-replay");
     log("  smoke visibility samples: " + vis.join(" ") + "; task polls over 20 s: " + polled);
     check("smoke: the page stayed visible and kept polling (about one poll a second), the replay returned to live", vis.every((x) => x.endsWith(":visible")) && polled >= 12 && replayed, vis.join(" ") + " / " + polled + " polls");
+    break full;
+  }
+  if (PAGEHIDE) {
+    // Targeted (review of d7070af, C1): only the 3.1 pagehide check, five
+    // rounds on one fake-plan host; its result is "targeted", not the suite's.
+    log("commit " + commit + " (targeted: 3.1 pagehide only, " + PAGEHIDE_ROUNDS + " rounds)");
+    const st = join(tmp, "state-pagehide");
+    demo = startDemo(st, join(repo, "testdata/demo/fake-plan.json"), unityBuild);
+    const pAddr = await demo.ready("task-b");
+    const ptok = demo.tokens();
+    allTokens.push(ptok.a, ptok.b, ptok.host, ptok.op);
+    const pFile = join(tmp, "tokens-pagehide.json");
+    writeFileSync(pFile, readFileSync(join(st, "tokens.json")));
+    browser = await startChrome();
+    const b = browser;
+    await b.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    for (let r = 1; r <= PAGEHIDE_ROUNDS; r++) {
+      await b.send("Page.navigate", { url: "http://" + pAddr + "/host" });
+      await b.waitFor(`document.readyState === "complete"`);
+      await b.waitFor(`["ready","rendered","failed"].includes(document.getElementById("unity-status").dataset.state)`, 90000);
+      const doc = await b.send("DOM.getDocument", {});
+      const q = await b.send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: "#token-file" });
+      await b.send("DOM.setFileInputFiles", { nodeId: q.nodeId, files: [pFile] });
+      await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`, 20000);
+      await b.evaluate(`document.querySelector('#consumer-pick button[data-consumer="consumer-a"]').click()`);
+      await b.waitFor(`${text("#viewer")}.startsWith("consumer-a")`);
+      await openFixture(b, "task-a");
+      check("pagehide round " + r + ": task-a shown before leaving", await unityShows(b, { task: "task-a" }));
+      await pagehideCheck(b, "pagehide round " + r);
+    }
     break full;
   }
   log("commit " + commit);
@@ -691,23 +766,36 @@ full: {
       atOpen === 1 && firstSeq1 && storeStill1, "Store at open " + atOpen + ", page: " + (await b.evaluate(text("#status"))));
     check("D2 item 2: Unity shows #1 entered, as a first load", await unityShows(b, { task: tid, seq: 1, phase: "entered" }, 10000)
       && (await b.evaluate(`document.getElementById("scene-text").dataset.motion`)) === "first");
-    await b.evaluate(`(window.__d2 = [], true)`);
+    // From here Unity's real "rendered" reports are held at a test-only page
+    // hook (with the time they came), so "Unity is still on its way" is a fact
+    // while reports that are not the projection sent are fed in.
+    await b.evaluate(`(() => { window.__d2 = []; window.__d2Held = []; window.__d2Pass = window.apaUnityReport;
+      window.apaUnityReport = (kind, gen, seq, detail) => { if (kind === "rendered") { window.__d2Held.push({ t: performance.now(), args: [kind, gen, seq, detail] }); return; } return window.__d2Pass(kind, gen, seq, detail); };
+      return true; })()`);
     check("D2 item 2: data first: the card says Ask while Unity is still on its way from #1",
       await b.waitFor(`${shownText(".card-status")} === "Ask：等待人工核准（M1 無核准能力）" && document.getElementById("scene-text").dataset.motion === "moving" && ${uKey("seq")} === "1"`, 20000),
       await b.evaluate(shownText(".card-status")) + " | " + await b.evaluate(uKey("seq")));
-    await sleep(300);
-    await snapNow("d2-live-browsing");
-    await sleep(900);
-    await snapNow("d2-live-to-counter");
-    check("D2 item 2: then Unity reports #3 waiting, and the text no longer says it is moving",
+    await snapNow("d2-live-on-the-way");
+    // Review of d7070af: another task, another phase, a sequence never sent:
+    // each is fed as Unity's report would come; none ends the transition.
+    const fed = await b.evaluate(`(() => { const g = Number(document.getElementById("unity-status").dataset.gen), out = [];
+      for (const [seq, d] of [[3, "waiting|task-other|Ask|HUMAN_APPROVAL_REQUIRED"], [3, "denied|${tid}|Deny|INSUFFICIENT_BUDGET"], [4, "waiting|${tid}|Ask|HUMAN_APPROVAL_REQUIRED"]]) {
+        window.__d2Pass("rendered", g, seq, d); out.push(document.getElementById("scene-text").dataset.motion); }
+      return out.join(","); })()`);
+    check("D2 (review of d7070af): reports of another task, another phase or a sequence never sent leave the page saying Unity is on its way",
+      fed === "moving,moving,moving" && (await b.evaluate(shownText("#scene-text"))).includes("Unity 補間中："), fed);
+    check("D2 item 2: Unity's own report of #3 comes (held by the hook)", await b.waitFor(`window.__d2Held.some((h) => h.args[2] === 3)`, 10000));
+    const heldAt = await b.evaluate(`window.__d2Held.find((h) => h.args[2] === 3).t`);
+    await b.evaluate(`(() => { window.apaUnityReport = window.__d2Pass; window.__d2Held.splice(0).forEach((h) => window.__d2Pass(...h.args)); return true; })()`);
+    check("D2 item 2: released, the exact report (#3 waiting of this task) ends the transition",
       await unityShows(b, { task: tid, seq: 3, phase: "waiting" }, 10000) && await b.waitFor(`document.getElementById("scene-text").dataset.motion === "shown"`, 5000));
     {
       const r = await recorded();
-      const moving = r.find((x) => x.motion === "moving") || {}, renderedAt = (r.find((x) => x.kind === "rendered" && x.seq === 3) || {}).t;
+      const moving = r.find((x) => x.motion === "moving") || {};
       // Read from the recorder: what the page said while Unity walked, not after a fixed wait.
       check("D2 item 2: while Unity walked, the scene text said browse and counter are a display animation, the decision in #3",
         (moving.text || "").includes("Unity 補間中：展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #3 記錄"), (moving.text || "").slice(0, 200));
-      check("D2 item 7: the walk to the counter took over 1 s and at most 2.5 s (+ 700 ms for a slow frame and the report)", renderedAt - moving.t > 1000 && renderedAt - moving.t < 3200, Math.round(renderedAt - moving.t) + " ms");
+      check("D2 item 7: the walk to the counter took over 1 s and at most 2.5 s (+ 700 ms for a slow frame and the report)", heldAt - moving.t > 1000 && heldAt - moving.t < 3200, Math.round(heldAt - moving.t) + " ms");
     }
     await shot(b, "d2-live-at-counter", 1280, 900, false);
     await d2.stop();
@@ -853,22 +941,9 @@ full: {
   await b.waitFor(`${text("#viewer")}.startsWith("consumer-a")`);
   await openFixture(b, "task-a");
   await unityShows(b, { task: "task-a" });
-  holdNext = 1;
-  check("3.1 pagehide: a readiness poll is held", await holdOne(8000)); // the next 5 s poll
-  await b.evaluate(`window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })), true`);
-  await release();
-  check("3.1 pagehide: tokens dropped, Dashboard and shop cleared; the late poll restores nothing", (await credsMode()) === "none" && (await b.evaluate(`${text("#viewer")} === "未驗證"`)) && (await noTaskShown()), await credsView());
-  holdNext = 0;
-  let polled = 0;
-  const offPolled = b.on("Fetch.requestPaused", () => { polled++; });
-  await sleep(6000);
-  check("3.1 pagehide: no more polling after leaving", polled === 0, polled + " requests");
-  await b.evaluate(`window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })), true`);
-  await sleep(500);
-  check("3.1 pageshow: nothing comes back by itself", (await credsMode()) === "none" && (await b.evaluate(`${text("#viewer")} === "未驗證"`)));
   await b.send("Fetch.disable");
   offHold();
-  offPolled();
+  await pagehideCheck(b, "3.1 pagehide");
 
   // R1 on /host: the old viewer's JSON completes after a switch, a clear, pagehide.
   await chooseFile(goodFile);

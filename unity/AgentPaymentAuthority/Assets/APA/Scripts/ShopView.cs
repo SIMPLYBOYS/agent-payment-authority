@@ -226,6 +226,7 @@ namespace APA
             {
                 c.route = null;
                 c.done = null;
+                c.seg = "final"; // a dropped walk's [anim] label goes too (review of d7070af)
                 c.target = new Target();
                 c.from = c.to = Out;
                 c.go.transform.localPosition = Point(c.id, Out);

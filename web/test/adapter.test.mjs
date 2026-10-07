@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import vm from "node:vm";
 import * as A from "../adapter.js";
 
 const cases = JSON.parse(readFileSync(new URL("../../testdata/contracts/cases.json", import.meta.url)));
@@ -417,4 +418,37 @@ test("D2 evidence: the scene page lists this move, derived by the page from the 
   assert.deepEqual(row(null), ["這次過場", "—", "網頁依轉換表推導"]);
   const tr = A.transition({ phase: "entered", cause: 1, end: "" }, A.projection({ gen: 1, snapshot: snap }, true));
   assert.deepEqual(row({ rule: tr.rule, text: tr.text }), ["這次過場", "展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #3 記錄（規則 1）", "網頁依轉換表推導"]);
+});
+
+// Review of d7070af: "補間中" ends only on Unity's report of exactly the
+// projection last sent. The second test runs app.js's own report handler
+// (the UnityHost callback, cut from the source as the review's probe did).
+const SENT = { gen: 4, task: "task-a", seq: 3, phase: "waiting" };
+const NOT_IT = [
+  ["another task", { ...SENT, task: "task-b" }], ["another phase", { ...SENT, phase: "denied" }],
+  ["a later sequence not sent", { ...SENT, seq: 4 }], ["an older sequence", { ...SENT, seq: 2 }], ["another generation", { ...SENT, gen: 5 }],
+];
+
+test("D2 sameShown: only the same generation, task, sequence and phase", () => {
+  assert.equal(A.sameShown(SENT, { ...SENT, verdict: "Ask", reason: "HUMAN_APPROVAL_REQUIRED" }), true);
+  for (const [name, rep] of NOT_IT) assert.equal(A.sameShown(SENT, rep), false, name);
+  assert.equal(A.sameShown(null, SENT), false);
+  assert.equal(A.sameShown(SENT, null), false);
+});
+
+test("D2 app.js: a report that is not the projection sent does not end the transition", () => {
+  const src = readFileSync(new URL("../app.js", import.meta.url), "utf8");
+  const begin = src.indexOf("const unity = new UnityHost(");
+  const handler = src.slice(begin, src.indexOf("\n});", begin) + 4);
+  assert.ok(begin > 0 && handler.includes("A.sameShown(motion, detail)"));
+  const run = (detail) => {
+    const box = { dataset: {}, textContent: "" };
+    const c = { A, $: () => box, motion: { ...SENT, done: false }, rendered: [], lastReport: null, drawScene() {}, renderPanels() {}, shopReset() {},
+      UnityHost: class { constructor(_canvas, fn) { c.report = fn; } } };
+    vm.runInNewContext(handler, c);
+    c.report("rendered", { verdict: "", reason: "", ...detail });
+    return c.motion.done;
+  };
+  for (const [name, rep] of NOT_IT) assert.equal(run(rep), false, name + ": still in transition");
+  assert.equal(run(SENT), true, "the exact report ends it");
 });

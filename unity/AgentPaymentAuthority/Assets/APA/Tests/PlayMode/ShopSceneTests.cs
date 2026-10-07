@@ -372,4 +372,35 @@ public class ShopSceneTests
         }
         finally { Time.maximumDeltaTime = cap; }
     }
+
+    // Review of d7070af: a clear, or another customer's generation, while a
+    // customer is browsing leaves no "[anim]" label behind on it.
+    [UnityTest]
+    public IEnumerator AClearDuringABrowseLeavesNoLabel()
+    {
+        bridge.Receive(D2(1, "consumer-a", 3, "waiting", 3));
+        Assert.IsTrue(view.Moving("consumer-a"));
+        StringAssert.StartsWith("[anim]", view.LabelOf("consumer-a"));
+        bridge.Receive("{\"v\":1,\"gen\":2,\"clear\":true}");
+        Assert.IsFalse(view.Moving("consumer-a"));
+        Assert.AreEqual("empty", view.PhaseOf("consumer-a"));
+        Assert.AreEqual("", view.LabelOf("consumer-a"), "no label left on the cleared customer");
+        yield return null;
+        Assert.AreEqual("", view.LabelOf("consumer-a"));
+    }
+
+    [UnityTest]
+    public IEnumerator AnotherCustomersGenerationDuringABrowseLeavesNoLabel()
+    {
+        bridge.Receive(D2(1, "consumer-a", 3, "waiting", 3));
+        StringAssert.StartsWith("[anim]", view.LabelOf("consumer-a"));
+        bridge.Receive(D2(2, "consumer-b", 3, "denied", 3, animate: false, reason: "INSUFFICIENT_BUDGET")); // no clear first
+        Assert.IsFalse(view.Moving("consumer-a"));
+        Assert.AreEqual("empty", view.PhaseOf("consumer-a"));
+        Assert.That(bridge.reports, Has.Some.StartsWith("rendered:2:3:denied"));
+        Assert.AreEqual("", view.LabelOf("consumer-a"), "the inactive customer does not say it is browsing");
+        Assert.AreEqual("DENY (#3, INSUFFICIENT_BUDGET) - leaving", view.LabelOf("consumer-b"));
+        yield return null;
+        Assert.AreEqual("", view.LabelOf("consumer-a"));
+    }
 }
