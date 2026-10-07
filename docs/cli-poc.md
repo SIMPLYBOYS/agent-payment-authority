@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 核准 CLI 版本改為 `2.1.293 (Claude Code)`（Claude Code 執行 fake 驗證，待 Codex 限定 review）**：版本由 Aaron 提供，不是 Claude Code 或 Codex 查詢所得。程式 `bd29a4e`；新版通過、舊版與其他版本被拒、init 須為 `2.1.293`；定向 fake 回歸全部通過（第 40 節）。新版真實 runtime 的行為仍待觀測；下一次 C0′ 須在 review 通過後另行核准。
+>
 > **10/8 §39.3 變數名稱修正（Claude Code 執行最小分支測試，待 Codex review）**：三處緊接全形字元的變數改為 `${BR}`、`${PROBE_EXIT}`（兩處）。最小分支測試不含 CLI、建置或刪除命令，涵蓋正常回報、前置拒絕與證據保存失敗；在 bash 3.2、四種 locale 下 16／16 PASS（第 39.15 節）。版本釘選未改，C0′ 未重跑。**10/8 `90d6e2f` 通過 Codex 限定 review，bash 變數名稱問題關閉**（第 39.16 節）。剩下的阻擋是 CLI 版本與釘選不符。
 >
 > **10/8 診斷型 C0′ 第二次核准執行（Claude Code 執行，待 Codex review）**：Aaron 核准一次；前置步驟 1～5 全部通過（基準 `9fcd105`，`vcs.modified=false`）。**apa-buyer 的版本檢查拒絕**：`/Users/mac/.local/bin/claude` 回報的版本不是核准的 `2.1.289 (Claude Code)`。probe 會話沒有啟動、沒有送出訊息、沒有 trace，plugins／agents 仍未知。另發現 §39.3 腳本最後一行在 bash 3.2 下觸發 `unbound variable`，腳本以 1 結束；證據已保存（第 39.14 節）。依核准不重試、不更新 CLI。
@@ -1177,7 +1179,7 @@ echo "exit=$?"
 ### 39.2 待 Aaron 核准的執行範圍（未勾選，待核准）
 
 - [ ] 只核准**一次**診斷型 C0′ 執行嘗試。版本檢查失敗、解析錯誤或逾時，都停止，不重試。
-- [ ] CLI 路徑 `/Users/mac/.local/bin/claude`；程式釘選 `2.1.289 (Claude Code)`（`cmd/apa-buyer/main.go` 的 `approvedCLIVersion`）。本輪不執行版本查詢；執行時命令會先自行檢查，不符就停止，不自行更新 CLI 或修改釘選。
+- [ ] CLI 路徑 `/Users/mac/.local/bin/claude`；程式釘選 `2.1.293 (Claude Code)`（`cmd/apa-buyer/main.go` 的 `approvedCLIVersion`；10/8 由 `2.1.289` 更新，第 40 節）。本輪不執行版本查詢；執行時命令會先自行檢查，不符就停止，不自行更新 CLI 或修改釘選。
 - [ ] 沿用既有的程序層 `DISABLE_AUTOUPDATER=1`（`fixedEnv`），不改全域設定。
 - [ ] 只送一次固定訊息 `Reply only OK.`（`OneMessageText`）；依程式記錄實際寫入結果 `input_status` 與位元組數 `stdin_bytes_written`。95 位元組是完整封裝 `input_message_bytes` 的預期大小，**不可代替實際寫入量**。
 - [ ] 一則訊息不等於一次模型請求；可能產生用量，無法確認時記為 `unknown`（`usage`）；停止 CLI 不能撤回已送出的請求。
@@ -1569,3 +1571,32 @@ Codex 以文件與原始碼靜態核對 `ff094f5`，接受前置工作區、程�
   - 先確認確切版本，再決定是否更新釘選。
   - 版本更新的程式 review，和下一次 C0′ 的執行核准，須分開取得。
 - 本輪只同步驗收：沒有再修這個問題、沒有重跑 C0′、沒有查詢版本；沒有修改版本釘選、Gate、認證接受清單、啟動參數或產品程式。L1-b 不標完成；B1-04 仍 InProgress。
+
+## 40 核准 CLI 版本更新為 `2.1.293 (Claude Code)`（2026-10-08；Claude Code 執行，待 Codex 限定 review）
+
+> 版本釘選由 `2.1.289 (Claude Code)` 改為 `2.1.293 (Claude Code)`。**版本資訊由 Aaron 提供**，不是 Claude Code 或 Codex 獨立查詢所得。沒有執行真實 CLI、版本查詢、登入檢查或 C0′。新版真實 runtime 的行為仍待觀測。
+
+- **版本來源**：Aaron 10/8 指示更新為 `2.1.293 (Claude Code)`。先前 Aaron 曾表示「應為 `2.1.291`」（第 39.15 節），本次以 `2.1.293` 為準；兩者都只是 Aaron 提供的值。第 39.14 節的版本檢查拒絕，與「已不是 `2.1.289`」一致，但程式不輸出實際版本字串。
+- **程式**（`bd29a4e`；與 `1f0b260` 對 `2.1.289` 的作法相同，不擴大修改其他行為）：
+  - `cmd/apa-buyer/main.go`：`approvedCLIVersion` 改為 `"2.1.293 (Claude Code)"`；註解加入 10/8 與「由 Aaron 提供」。
+  - `cmd/apa-buyer/main_test.go`：
+    - `TestLiveOptIn` 的拒絕清單改為 `2.1.289`、`2.1.288`、`2.1.287`（舊釘選）、`2.1.291`（Aaron 先前回報的值）、`2.1.294`（較新版）。
+    - 釘選斷言改為 `2.1.293`。
+    - `TestProbeOptIn` 的舊版清單加入 `2.1.289`。
+    - `TestApprovedVersionInit`：init 為 `2.1.293` 時 `observed`；`2.1.289`、`2.1.291`、`2.1.288`、`2.1.287` 與 fake 自己的 `0.0.0` 都是 `init_cli_version`。
+  - `cmd/demo/integration_test.go`：「不是 fake 的 CLI」替身的回報版本改為 `2.1.293`，維持「即使是核准版本也拒絕」的意義。
+  - `internal/buyer/probe.go`、`internal/buyer/host.go`：只改註解中的版本例子。`internal/buyer/gate.go` 的「已核對的真實 init 紀錄（2.1.287／288／289）」是歷史事實，保留。
+  - `scripts/verify/mutation-check.py`：pin 突變的標籤改為 `2.1.293`；替換值由 `"2.1.288"` 改為上一個釘選 `"2.1.289"`。
+  - 沒有改 Gate 規則、認證接受清單（仍為空）或 plugin 參數。
+- **定向 fake 回歸**（Claude Code 執行；`go1.26.4 darwin/amd64`；`-race -count=1`）：
+  - `./cmd/apa-buyer/`：`TestVersionCheckCancelled`、`TestLiveOptIn`、`TestLiveEnvDisablesBuiltinAgents`、`TestLivePathWithFake`、`TestProbeOptIn`、`TestProbeCommand`、`TestProbeOneMessageCommand`、`TestApprovedVersionInit`，8／8 PASS。
+  - `./internal/buyer/`：`-run 'TestProbe|TestHostInitGate|TestGate|TestInit'`，19 個頂層測試 PASS。
+  - `./cmd/demo/`：`TestIntegrationStartRefusals` PASS。
+  - **pin 突變**（手動一次）：在 `bd29a4e` 的 `git archive` 匯出中，把 probe 的 init 版本改成固定的 `"2.1.289"`，`TestApprovedVersionInit` 以測試失敗（`--- FAIL`，不是建置錯誤）結束，突變被抓到。完整的 `mutation-check.py`、容器驗證與全套測試**沒有執行**。
+  - **失敗紀錄保留**：第一次在 Claude Code 沙箱內執行 `./cmd/apa-buyer/` 時，5 個測試因沙箱禁止 Unix socket／TCP bind（`bind: operation not permitted`）而失敗，不是程式問題。隨後在沙箱外以相同命令重跑，結果如上；兩次輸出都保存。測試只使用 fake CLI。
+  - 測試在提交前的工作區執行，工作區內容與 `bd29a4e` 相同（提交後 `git status` 只有 `?? demo`）。
+- **證據**（`artifacts/b1-04/pin-2.1.293-20261007T183915Z/`，`artifacts/` 不進版控）：`t-apa-buyer.txt`、`t-buyer.txt`、`t-demo.txt`、`t-mutant.txt`、`t-apa-buyer-sandboxed-FAIL.txt`、`commit.txt`、`go-version.txt`。
+- **目前操作文件**：README 環境變數表、`docs/m1-boundaries.md` C0′ 列、本文件 39.2 的釘選項目都已改為 `2.1.293`。歷史執行紀錄（第 22–39.16 節等）保留原版本。
+- **證據歸屬**：程式修改與上述測試由 Claude Code 執行，待 Codex 限定 review；版本值由 Aaron 提供。
+
+**範圍與待決定**：只有版本釘選。不代表 `2.1.293` 真實 CLI 的旗標、init 格式、plugins／agents、登入或用量已驗證。下一次診斷型 C0′ 須在本次 review 通過後，由 Aaron 另行核准。B1-04 仍 InProgress；L1-b 不標完成；不合併、不推送、不標 Done。
