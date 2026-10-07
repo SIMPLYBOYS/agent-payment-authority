@@ -1,6 +1,6 @@
 # B1-06 商店展示深化設計（fake 展示模式）
 
-狀態（2026-10-07）：**D1 於 `6338fd2` 通過 Codex 限定範圍技術 review；R1、R2、C1 關閉。通過範圍為 fake 展示的網頁呈現與相關修正，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成。B1-04／B1-06 整體維持 InProgress。**（§15.7）**D2 設計（§16，`9b70c0c`）經 Aaron 10/7 核准實作：程式與測試 `bc79677`，計時修正 `d7070af`；Claude Code 執行，待 Codex 獨立 review（§17）。不合併、不推送、不標 Done。** D3–D6 未開始。D1 實作於 `7ffc45d`，review 後修正於 `6338fd2`；設計於 `15d705a` 通過（§14.3）。
+狀態（2026-10-07）：**D1 於 `6338fd2` 通過 Codex 限定範圍技術 review；R1、R2、C1 關閉。通過範圍為 fake 展示的網頁呈現與相關修正，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成。B1-04／B1-06 整體維持 InProgress。**（§15.7）**D2 設計（§16，`9b70c0c`）經 Aaron 10/7 核准實作：程式與測試 `bc79677`，計時修正 `d7070af`；依 Codex 對 `d7070af` 的 review 修正於 `78cb2cc`、測試補充 `6137708`（§17.6）；Claude Code 執行，待 Codex 獨立 review。不合併、不推送、不標 Done。** D3–D6 未開始。D1 實作於 `7ffc45d`，review 後修正於 `6338fd2`；設計於 `15d705a` 通過（§14.3）。
 
 - **依據**：Aaron 轉交的〈B1-06 商店展示深化設計指示〉（vault，2026-10-07）。
 - **Aaron 的回饋**：已實際操作目前 demo，初步確認基本展示可用，未發現重大問題；現有情境仍然陽春，同意往展示內容深化推進。這不是 `docs/demo-operation-design.md` 16.3 人工清單逐項完成的聲明。
@@ -1198,3 +1198,44 @@ WebGL（`d7070af`，未提交，`Build/WebGL` 由 git 忽略）的 SHA-256：
 - 一般 Chrome（不帶兩個參數）長流程的可見性限制沿用 §15.7，本輪未跑 `--smoke-plain`。
 - 高負載下的計時：`R2 order`（`bc79677` 與反向執行各一次）、`3.1 pagehide`（`d7070af` 一次）失敗；兩者都不是本輪的變更，未修改。
 - 不合併、不推送、不標 Done；D3–D6 未開始。
+
+### 17.6 依 Codex 對 `d7070af` 的 review 修正（Claude Code 執行，待 Codex 獨立 review；程式 `78cb2cc`、測試補充 `6137708`）
+
+依據：Aaron 轉交的 Codex review。轉貼內容從 `web/app.js:84` 一項開始（沒有編號），之前的部分可能缺漏；vault 中沒有完整筆記。Codex 暫存目錄 `/private/tmp/apa-d2-review.G02d78` 的兩項 Unity 探測失敗，判斷屬於同一份 review，一併修正（下列第 2 項）。Codex 對兩件道具移位與櫃檯標籤不帶 #2 沒有提出退回。
+
+1. **「補間中」提前結束**（`web/app.js:84`）：原本只比對世代與 `回報序號 >= 目標序號`，錯的 task、錯的 phase、未送出的較大序號都會結束提示。
+   - 改為 `adapter.sameShown`：與最後送出的投影 gen、task、seq、phase 全部一致才結束；與查證面板「同步」同一規則。bridge 不變。
+   - Node：`sameShown` 的正例與五個反例（另一 task、另一 phase、未送出的較大序號、較舊序號、另一世代）；另以 Codex 探測的方式執行 `app.js` 自己的回報處理，反例都不結束、完全一致才結束。
+   - 瀏覽器（D2 即時段）：以頁面測試鉤子扣住 Unity 真正的 `rendered`，確定 Unity 仍在路上時餵入三則不符的回報，`data-motion` 三次都仍是 `moving`；放行真正的 #3 後才變成 `shown`。走路時間改以鉤子收到回報的時間計算。
+2. **清除或換客人後殘留 `[anim]` 標籤**（Codex 探測 `ClearDuringBrowseMustClearVisibleLabel`、`ConsumerSwitchDuringBrowseMustClearInactiveLabel`）：`ShopView.ResetAll` 沒有重設目前段落，選商品途中清除或換世代後，客人頭上仍是 `[anim] browsing - no event`。改為一併重設；新增兩個 PlayMode 案例。
+3. **C1 `3.1 pagehide`**：原檢查等 8 秒內下一次 5 秒輪詢，扣住第一個符合 `status` 或 `viewer` 的請求。改為共用的 `pagehideCheck`，兩種方式：
+   - **network**：以 `visibilitychange` 主動觸發一次就緒輪詢，瀏覽器只扣住那一個 `GET /api/host/status`；觸發 pagehide 後放行，並等網路層確認該請求結束，才檢查憑證、畫面、輪詢。**實測發現**：頁面在 pagehide 時 abort，請求被取消（`Invalid InterceptionId`；`loadingFailed`、canceled），回覆無法再放行。
+   - **reply**：為了真的「放行回覆」，回覆已到但內容由頁面內的測試用 fetch 包裝扣住（同 3.1-R1 的做法），pagehide 後才交給頁面；不得恢復憑證、畫面或就緒，也不再輪詢。
+   - `--pagehide-only`：只跑這項，network 與 reply 各 5 輪（定向）。
+
+**驗證**（全部 Claude Code 執行，待 Codex 獨立 review）
+
+| 項目 | commit | 結果 | 證據 |
+|---|---|---|---|
+| Node（`git archive` 匯出） | `78cb2cc` | 49／49 | `artifacts/b1-06/d2r-checks-78cb2ccec4b1/node.txt` |
+| Unity EditMode／PlayMode | `78cb2cc` | 10／10、14／14 | 同目錄 `unity-test/` |
+| WebGL 重建 | `78cb2cc` | exit 0；hash 見下 | `webgl-sha256.txt` |
+| 定向 pagehide（network 5 輪） | `78cb2cc` | 30／30 PASS | `artifacts/b1-06/pagehide-78cb2ccec4b1/` |
+| 瀏覽器全套 | `78cb2cc` | 312 PASS／1 FAIL（`R2 order` 前置條件，見下） | `artifacts/b1-06/ui-78cb2ccec4b1-20261007T085630Z/` |
+| 定向 pagehide（network 5＋reply 5 輪） | `6137708` | 55／55 PASS | `artifacts/b1-06/pagehide-613770850fab/` |
+| 瀏覽器全套（同一 WebGL 建置；`6137708` 只改測試腳本） | `6137708` | **317 PASS／0 FAIL** | `artifacts/b1-06/ui-613770850fab-20261007T091325Z/` |
+
+- 「定向通過」與「全套通過」分開記錄：定向 `6137708` 55／55；全套 `6137708` 317／0，其中 3.1 pagehide 的 network 5 項與 reply 4 項都通過。另有一次定向執行因反向改法沒有套用成功而等於未改動的重跑（55／55），保留為 `browser-pagehide-only-2-mutation-not-applied.txt`，不算反向。
+- WebGL（`78cb2cc`，`6137708` 沿用）：`WebGL.data` `cd2321fcdb872d597755ff86ddeffc116c25f471cfdff33ee2a098f2a395ac73`、`WebGL.framework.js` `3c7d6ab5547a85de82e08400bfd63520ba9c2f50c098eff05074a6a010e65666`、`WebGL.loader.js` `77883badb548b3adab32685f56cac7e7ab4eb817fcd48f45cf7d54a6f663bc80`、`WebGL.wasm` `ac4e76c99d666a6af7303e8d100104c2a6ce50ca5fcd74c92a27916f0d704a7d`。
+- Go、Store、驗證工具未改，依 review 未重跑完整容器與 247 項突變。
+
+**反向**
+- N6（Node）：在 `sameShown` 旁加回舊的 `seq >=` 判斷：`app.js` 回報處理測試失敗（「another task: still in transition」）。
+- U8（Unity）：`ResetAll` 不重設段落：正好兩個新案例失敗。
+- 瀏覽器定向：
+  - 拿掉 `readiness()` 與 `pollReadiness` 的世代檢查：**仍 55／55 通過**。就緒面板依目前的憑證繪製，pagehide 已清空憑證，所以晚到的回覆即使被接受也沒有可顯示的內容；這項檢查驗證的是結果（什麼都沒恢復），不能單獨證明世代檢查本身。保留為 `browser-reversal-pagehide-no-gen-guards.txt`。
+  - pagehide 不清除憑證：30 PASS／25 FAIL（network 每輪 3 項、reply 每輪 2 項）。
+
+**`R2 order` 前置條件（第三次出現）**：這項要求進入回放時，task-a 的核准期限還在 4–8 秒後。期限在 fake plan 開始時就固定，之前的步驟在高負載下變慢，到這裡時已不足 4 秒。`78cb2cc` 這次只有前置條件失敗，之後「回放時仍是 #3」「回放中提交 #4」都通過；`bc79677` 那次「回放時仍是 #3」也失敗。這是本輪沒有改的區段，`6137708` 的全套中通過。建議另行改成與前面步驟耗時無關的設定（例如在這一段才開始的 task），本輪未改，請 review 決定。
+
+**限制**：同 17.5。主機負載仍高；D2 回放 #5 的實測值為 3192 ms（`78cb2cc`，上限 3200 ms）與 2193 ms（`6137708`），在慢機器上接近上限。
