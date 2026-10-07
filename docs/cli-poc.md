@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 L1-b 來源調查暫緩**：plugin 來源調查依 Aaron 決定暫緩，來源未確認保留為已知限制。正式 Gate 維持不變。下一步為整理一次診斷型 C0′ 清單，確認目前 plugins／agents 是否仍非空；待 Codex review 與 Aaron 另行核准，尚未執行（第 39.7 節）。暫緩調查不是解除阻擋：真實 CLI 若仍載入 plugins，現有閘門的執行阻擋仍在。
+>
 > **10/8 L1-b 第一段**：probe 的 plugins 顯示候選加入三個名稱（完全相符才顯示），只有 fake 驗證（`e99f389`；第 38 節）。**probe 顯示候選修正於 `e99f389` 通過限定範圍技術 review**（第 38.1 節）；只關閉這項修正，**L1-b 的 plugin 來源仍未確認**。閘門、認證清單與啟動參數未變。
 >
 > **10/7 L1-a**：分支 `b1-04-live` 以固定環境變數 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1` 停用內建 agents（`79a4a5f`、測試修正 `418f0de`；第 35 節）。**10/8 於 `418f0de` 通過 Codex 限定範圍技術 review，L1-a 關閉**（第 36 節）；只證明固定環境變數的傳遞與 fake 回歸，**不證明真實 CLI 的 agents 已清空**。未執行真實 CLI，閘門與認證接受清單未變。B1-04 仍 InProgress；L1-b 需 Aaron 另行核准。
@@ -1140,6 +1142,8 @@ echo "exit=$?"
 ## 39 診斷型 C0′ 執行確認清單（2026-10-08 整理；待 Codex review 與 Aaron 另行核准；尚未執行）
 
 > **狀態**：診斷型 C0′ 執行確認清單已整理，待 Codex review 與 Aaron 另行核准；尚未執行。
+>
+> **10/8 修訂**：plugin 來源調查暫緩後，診斷重點與結果分支以第 39.7 節為準：39.1 第 1、2 項（名稱、路徑分類）改為既有輸出的附帶資訊；39.5「plugins／agents 非空」的處理改依 39.7.3。39.2～39.4 的執行邊界不變。
 
 - **依據**：vault〈Claude-Code-B1-04-診斷型C0prime執行清單整理指示-1395a1f-20261008〉。本節與該筆記都**不構成真實執行核准**。
 - **開工核對**：分支 `b1-04-live`，HEAD `1395a1f`；工作區只有未追蹤的 `demo`（不動）。程式基準是 `e99f389`；其後 `0958725`、`70bde1e`、`1395a1f` 只改 `docs/cli-poc.md`（`git diff --stat e99f389 1395a1f` 只有這個檔案）。
@@ -1239,3 +1243,60 @@ git worktree remove "$WT/src"
 
 本輪沒有跑測試、容器、真實 CLI、登入檢查或 C0′；沒有修改程式、接受清單或啟動參數。B1-04 仍 InProgress。
 
+
+### 39.7 修訂：plugin 來源調查暫緩後的診斷重點與結果分支（2026-10-08；待 Codex review 與 Aaron 另行核准；尚未執行）
+
+> plugin 來源調查依 Aaron 決定暫緩，來源未確認保留為已知限制。正式 Gate 維持不變。下一步為整理一次診斷型 C0′ 清單，確認目前 plugins／agents 是否仍非空；待 Codex review 與 Aaron 另行核准，尚未執行。
+
+- **依據**：vault〈Claude-Code-B1-04-plugin來源調查暫緩與診斷清單修訂指示-20261008〉，更新前一份清單整理指示的診斷重點及後續分支。本節**不構成真實執行核准**。
+- **開工核對**：分支 `b1-04-live`，HEAD `de06c5a`；工作區只有未追蹤的 `demo`（不動）。程式基準仍是 `e99f389`；其後只改 `docs/cli-poc.md`（`git diff --stat e99f389 de06c5a` 只有這個檔案）。
+
+#### 39.7.1 決策與界線
+
+- **停止追加的調查**：讀取受管設定、macOS 設定描述檔、HOME 或 keychain；追查 plugin 完整 ID、安裝來源或 pixel-office 設定；為查來源而新增 probe 欄位或擴大輸出。
+- **兩件事分開記錄**：
+  1. 來源調查已暫緩；來源未確認是已知限制，不再是主線開發的前置工作。
+  2. 真實 CLI 若仍載入 plugins，現有閘門的執行阻擋仍存在。**暫緩調查不等於阻擋已解決。**
+- 這項決策不代表允許未知 plugins、不放寬閘門、不核准真實執行。閘門、認證接受清單與啟動參數維持不變。
+
+#### 39.7.2 診斷目的（取代 39.1 的主次）
+
+沿用既有 probe，不改程式。下一次診斷型 C0′ 只回答：
+
+1. 這次 init 的 plugins 是否為空？
+2. 在 `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`（L1-a，經 `CLIEnv`）之下，agents 是否為空？
+3. 其他既有白名單觀測值是什麼（`result.json` 的其餘欄位，如 `cli_version`、`auth_source`、`permission_mode`、`tools_count`、`mcp_servers_count`、`apa_server_status`、`skills_count`、`extra_members`）？
+
+39.1 的候選名稱與路徑分類照常隨既有輸出保存，但**不追加調查，也不以查明來源為成功條件**。
+
+**「明確為空」的判定**（依原始碼 `observe`／`count`；兩者都須成立）：
+- plugins：`fields.plugins` 為 `array`，`plugins_count` 為 `0`，`plugins_entries` 為空。
+- agents：`fields.agents` 為 `array`，`agents_count` 為 `0`，`agents_entries` 為空。
+- `plugins_count`／`agents_count` 為 `null`（成員缺少或不是陣列），或 `fields.plugins`／`fields.agents` 為 `absent` 或其他型別：記為**未確認**。**缺欄位、型別錯誤或未知值不得解讀成空清單。**
+
+這仍只是取得啟動觀測資料，不是正式 AI 請購或 live 閘門驗收。plugins 或 agents 非空，也是有效的診斷結果。
+
+#### 39.7.3 結果分支
+
+| 結果 | 怎麼辨認（39.4） | 後續處理 |
+|---|---|---|
+| 取得 init，plugins／agents 均明確為空 | exit `0`，且符合 39.7.2 的判定 | 交 Codex 核對。其他閘門條件（版本、工具、MCP、權限模式、hook、skills 等）仍須確認，再處理階段 B 與認證接受值。**不得直接啟動真實請購。** |
+| 取得 init，但 plugins 或 agents 非空 | exit `0`，`plugins_count` 或 `agents_count` 大於 `0` | **記錄執行阻擋並停止。** 另提最小隔離或停用方案；不自動追查來源、不改允許清單、不重試。方案的實作與真實驗證仍須另行核准；在 Aaron 核准方案前，路線文件「來源不明時不先實作 plugin 停用方式」仍適用。 |
+| plugins／agents 資料缺失、型別錯誤或無法判定 | exit `0`，但不符合為空、也不是明確非空（如 `count` 為 `null`） | 如實記為未確認，交 Codex 核對；不猜測已清空、不放行。 |
+| 版本不符、逾時、解析錯誤或其他失敗 | exit `4`、exit `1`（有 JSON 的固定代碼，或無 JSON 的啟動前拒絕） | 保存既有白名單證據與固定代碼後停止；不重跑、不自行修改版本或參數。寫入未完整（`input_*`）時即使同時取得 init，也不採用觀測。 |
+
+各分支都不自動執行下一次 CLI、不放寬閘門。`auth_source` 為 `none` 仍不能證明登入方式或計費來源，認證決策另行處理；名稱相符不證明來源可信或完整 plugin ID 已確認；路徑分類不是來源認證。
+
+#### 39.7.4 執行邊界（不變）
+
+指示第 5 節列出的條件都已在 39.2～39.5，本次不改：CLI 路徑與 `2.1.289 (Claude Code)` 釘選、不符就停止、本輪不查詢版本（39.2）；一次嘗試、版本檢查失敗也不再執行（39.2、39.4）；只送一次 `Reply only OK.`，記錄 `input_status` 與 `stdin_bytes_written`（39.2）；可能產生用量，一則訊息不等於一次請求，無法確認記 `unknown`（39.2）；沿用既有 HOME、網路、登入環境與程序清理限制（39.2、39.4）；不開 Store、不建 task、不執行業務工具（39.2）；等待上限、停止條件與白名單證據保存（39.3～39.5）；沿用程序層 `DISABLE_AUTOUPDATER=1`，不改全域設定（39.2）。
+
+補明一點：核准後的 CLI 仍可能自行使用登入資料，**不保證沒有背景活動**（第 7.5 節）。
+
+#### 39.7.5 尚待核准
+
+- 本節修訂的 Codex review；
+- 一次診斷型 C0′ 的執行（39.2 全部項目），須 Aaron 另行核准；本節、清單 review 與暫緩調查決策都不構成執行核准；
+- 執行後的下一步依 39.7.3 分流，各自另行決定：均為空時的其他閘門條件、階段 B 與認證接受值；非空時的最小隔離或停用方案（設計、實作、真實驗證）。
+
+本輪只改文件：沒有跑測試、容器、真實 CLI、版本查詢、登入檢查或 C0′；沒有修改程式、設定、接受清單或啟動參數；沒有讀取受管設定、HOME、keychain 或 pixel-office。L1-b 不標通過或 Done；B1-04 仍 InProgress。
