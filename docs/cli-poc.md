@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **現行摘要（10/8，最新）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估。** 評估見 [live-purchase-execution-decision.md](live-purchase-execution-decision.md)：**`9cf4e6a` 通過 Codex 限定文件複核，R1／R2 關閉；路線一的設計等待 Aaron 核准實作與 fake 驗證。尚未核准實作、登入、C0′ 或正式請購。**
+> **現行摘要（10/8，最新）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估。** 評估見 [live-purchase-execution-decision.md](live-purchase-execution-decision.md)：路線一決策稿 `9cf4e6a` 通過限定文件複核。**10/8 依 Aaron 核准，專用設定目錄已實作（`21560c5`、`a4e3d8e`），fake 驗證與一次完整斷網容器驗證通過（260／260 突變），Claude Code 執行，待 Codex review**（第 47 節）。登入、C0′、認證清單修改與正式請購都尚未核准。
 > - **Aaron 10/8 已選定路線一**：維持零 plugins，**保留方案 A，另加** APA 專用 `CLAUDE_CONFIG_DIR`（`~/.apa-claude`，以子程序 HOME 組成絕對路徑），須 Aaron 另外登入。階段 B（本人確認登入方式）排在 C0′ 之前。
 > - 之後的實作、登入後的 C0′、認證清單修改與正式請購，各自另行核准，互不授權。
 > - C0′ 須符合 §44.4 全部條件，才記為「本次 init 達到診斷目標」；plugins 仍非空只代表本次方案未達目標，來源仍未確認，停止後由 Aaron 決定是否評估路線二。
@@ -2622,3 +2622,73 @@ L1-b、L1-c 不標整體通過；B1-04 仍 InProgress；不合併、不推送、
     - 設計與 fake 驗證通過後，再由 Aaron 另行核准一次真實查詢。
   - 即使取得其他 ID，也不能直接認定它們對應 APA 的兩個 runtime plugins，更不能直接加入 Gate 接受清單。
 - L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
+
+## 47 路線一：APA 專用設定目錄的實作與 fake 驗證（2026-10-08；Claude Code 執行，待 Codex review）
+
+> **專用設定目錄已實作；fake 驗證與一次完整斷網容器驗證通過。** fake 只能證明環境傳遞與拒絕行為，不能證明真實 CLI 在該目錄下 plugins 為空。登入、C0′、認證清單修改、正式請購都尚未核准；沒有建立或讀取 `~/.apa-claude`，沒有執行真實 CLI。
+
+- **核准**：Aaron 10/8「核准進行專用設定目錄的實作與 fake 驗證」。範圍依 [live-purchase-execution-decision.md](live-purchase-execution-decision.md) 4.1 第 2 步與 4.2，含一次完整斷網容器。
+- **開工核對**：分支 `b1-04-live`，HEAD `eafe093`；工作區只有 `?? demo`。
+
+### 47.1 程式（`21560c5`）
+
+- `internal/buyer/host.go`：新增 `EnvConfigDir`（`CLAUDE_CONFIG_DIR`）、`ConfigDirName`（`.apa-claude`）與 `LiveEnv(getenv)`。
+  - **輸出**：`CLIEnv` 再加上**一個** `CLAUDE_CONFIG_DIR=<HOME>/.apa-claude`。路徑在每次呼叫時，從 CLI 得到的 HOME 組成；不使用 `~`，也不放進靜態的 `fixedEnv`。父環境的同名值不在白名單內，傳不進來。
+  - **拒絕條件**（「nothing was started」）：
+    - HOME 缺失或不是絕對路徑；
+    - `<HOME>/.apa-claude` 不是實體目錄（不存在、是檔案，或是 symlink；symlink 可能指回 `~/.claude`，所以以 `Lstat` 檢查）。
+  - 不建立、不刪除這個目錄，不退回日常 `~/.claude`。
+- `cmd/apa-buyer/main.go`：`run --live` 與 `probe-init` 都改用 `LiveEnv`。同一份環境也用在版本檢查（`checkLive`），所以版本查詢、診斷與 live 使用同一個目錄。
+- **沒有改**：fake 路徑仍用 `CLIEnv` 與暫存 HOME；方案 A 的每次執行 plugin 根目錄保持原狀；Gate、認證接受清單（空）、`Argv`、版本釘選都不變。
+
+### 47.2 測試（只用測試 HOME；`21560c5`、`a4e3d8e`）
+
+| 測試 | 確認 |
+|---|---|
+| `TestLiveEnv` | 值等於 `CLIEnv` 加上唯一一個 `<HOME>/.apa-claude`，父環境設 `/elsewhere` 也不影響；目錄不被刪除。HOME 缺失、相對 HOME（即使工作目錄下有 `home/.apa-claude`）都拒絕；目錄不存在、是檔案、是 symlink 都拒絕；不存在時不會被建立 |
+| `TestLiveEnvReachesChild` | 子程序看到的值正確，而且只出現一次 |
+| `TestLiveEnvDisablesBuiltinAgents`（擴充） | live 與兩種 probe：版本檢查與執行兩個子程序都收到測試 HOME 的目錄，父環境的值被忽略；目錄中的檔案在執行後仍在 |
+| `TestLiveNeedsConfigDir` | 目錄不存在、是檔案或 symlink 時，live 與 probe 都在執行任何東西之前拒絕，假 CLI 沒有被執行；目錄不會被建立 |
+| 測試夾具 | `newFixture` 在測試 HOME 下建立 `.apa-claude`，從不使用操作者的目錄 |
+
+**突變**：`mutation-check.py` 由 255 項增為 260 項：
+- live 改回 `CLIEnv`；
+- probe 改回 `CLIEnv`；
+- 不檢查目錄；
+- 以 `Stat` 跟隨 symlink；
+- 接受相對 HOME。
+
+**本機**（Claude Code 執行；沙箱外，因為需要 socket bind）：
+- 突變試跑：在 `21560c5` 的匯出副本上，前四項被抓到；「接受相對 HOME」**存活**。原因是第一版測試中，相對 HOME 的目錄本來就不存在，目錄檢查先擋下了，測不到 HOME 檢查。
+- 修正於 `a4e3d8e`：以 `t.Chdir` 到暫存目錄並建立 `home/.apa-claude`。之後這一項也被抓到。容器映像是 Go 1.26.4，支援 `t.Chdir`。
+- `go test -race -count=1 ./internal/buyer/ ./cmd/apa-buyer/ ./cmd/demo/`：全部 ok。
+
+### 47.3 完整斷網容器驗證（一次；Claude Code 執行，待 Codex 核對）
+
+- **基準**：`a4e3d8ef926d512764b68a8fa09e8de24dd1c307`；映像 `docker.io/library/apa-verify:b1-05`（`sha256:78258368…b6d0`）。沒有重建映像，go.mod／go.sum 與映像相符。
+- **命令**：`APA_VERIFY_IMAGE=docker.io/library/apa-verify:b1-05 DOCKER_CONTEXT=desktop-linux sh scripts/verify/container-verify.sh a4e3d8e`
+
+  | 步驟 | exit | 秒 |
+  |---|---|---|
+  | check-contracts | 0 | 16 |
+  | check | 0 | 81 |
+  | race-cover | 0 | 295 |
+  | verify-b1-01 | 0 | 45 |
+  | guards | 0 | 1 |
+  | evidence-import-tests | 0 | 1 |
+  | mutation | 0 | 346 |
+
+- **突變**：baseline PASS；`result: all mutations killed by a failing test`，260 項都被抓到。
+- **隔離自檢**：17 項全部符合。
+- overall exit 0。
+- **證據**：`artifacts/verify-container/runs/a4e3d8ef926d-20261008T053720Z/`（匯入完整，289 個檔案）。
+
+### 47.4 尚待（各自另行核准）
+
+1. Codex review 本次實作與驗證。
+2. Aaron 以 `CLAUDE_CONFIG_DIR=$HOME/.apa-claude` 自行登入，並完成階段 B 本人確認。
+3. 一次 C0′，逐項核對 §44.4 全部條件。
+4. 認證接受清單的修改。
+5. 正式請購。
+
+L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress；不合併、不推送、不標 Done。
