@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **現行摘要（10/8，最新）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估。** 評估見 [live-purchase-execution-decision.md](live-purchase-execution-decision.md)：**路線一決策稿 R1／R2 文件補正完成，待 Codex 限定複核；尚未核准實作或真實執行。**
+> **現行摘要（10/8，最新）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估。** 評估見 [live-purchase-execution-decision.md](live-purchase-execution-decision.md)：**`9cf4e6a` 通過 Codex 限定文件複核，R1／R2 關閉；路線一的設計等待 Aaron 核准實作與 fake 驗證。尚未核准實作、登入、C0′ 或正式請購。**
 > - **Aaron 10/8 已選定路線一**：維持零 plugins，**保留方案 A，另加** APA 專用 `CLAUDE_CONFIG_DIR`（`~/.apa-claude`，以子程序 HOME 組成絕對路徑），須 Aaron 另外登入。階段 B（本人確認登入方式）排在 C0′ 之前。
 > - 之後的實作、登入後的 C0′、認證清單修改與正式請購，各自另行核准，互不授權。
 > - C0′ 須符合 §44.4 全部條件，才記為「本次 init 達到診斷目標」；plugins 仍非空只代表本次方案未達目標，來源仍未確認，停止後由 Aaron 決定是否評估路線二。
