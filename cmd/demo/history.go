@@ -145,9 +145,17 @@ func loadHistoryTrace(path string, st *store.Store) (*historyTrace, error) {
 		if c.Tool != "request_purchase" || c.ProductID == "" {
 			continue
 		}
+		// A verdict in the trace must be the stored purchase's verdict: a
+		// trace and a Store that disagree are refused, never joined. A call
+		// that ended in an error code is shown without a purchase.
 		po := toolbridge.PurchaseOrderID(t.TaskID, c.ProductID)
-		if !slices.ContainsFunc(rec.Task.Purchases, func(p store.PurchaseView) bool { return p.PurchaseOrderID == po }) {
-			continue // a call the Store has no purchase for (e.g. refused): shown without one
+		at := slices.IndexFunc(rec.Task.Purchases, func(p store.PurchaseView) bool { return p.PurchaseOrderID == po })
+		verdict := c.Outcome == "Ask" || c.Outcome == "Deny" || c.Outcome == "Allow"
+		if verdict && (at < 0 || rec.Task.Purchases[at].Decision.PolicyVerdict != c.Outcome) {
+			return nil, errors.New("history trace and history database disagree on a request_purchase verdict; refused, neither was changed")
+		}
+		if !verdict {
+			continue
 		}
 		t.ToolCalls[i].PurchaseOrderID = po
 		for _, e := range rec.Events {
@@ -169,7 +177,14 @@ func serveHistory(ctx context.Context, dbPath, tracePath, registryPath, unityDir
 		return err
 	}
 	tokenPath := cmp(d.getenv("APA_DEMO_TOKEN_FILE"), "var/demo-tokens.json")
-	if err := checkTokenPath(dbPath, tokenPath); err != nil {
+	// The token file is written at start: it may name neither the recorded
+	// database's files nor the trace (checked here and again just before the
+	// write, in newTokens).
+	var inputs []string
+	if tracePath != "" {
+		inputs = append(inputs, tracePath)
+	}
+	if err := checkTokenPath(dbPath, tokenPath, inputs...); err != nil {
 		return err
 	}
 	var regCfg contracts.RegistryConfig
@@ -208,7 +223,7 @@ func serveHistory(ctx context.Context, dbPath, tracePath, registryPath, unityDir
 	if err != nil {
 		return err
 	}
-	tokens, err := newTokens(regCfg, tokenPath, dbPath)
+	tokens, err := newTokens(regCfg, tokenPath, dbPath, inputs...)
 	if err != nil {
 		return err
 	}

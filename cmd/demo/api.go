@@ -38,7 +38,7 @@ type demoToken struct {
 // so no reader sees half a file. Tokens never go to the terminal or a log.
 // The rename never replaces one of db's files: checked again just before
 // it, when the database, its WAL and the lock exist.
-func newTokens(cfg contracts.RegistryConfig, path, db string) ([]demoToken, error) {
+func newTokens(cfg contracts.RegistryConfig, path, db string, inputs ...string) ([]demoToken, error) {
 	var out []demoToken
 	add := func(g grant) error {
 		b := make([]byte, 32)
@@ -86,7 +86,7 @@ func newTokens(cfg contracts.RegistryConfig, path, db string) ([]demoToken, erro
 	if err := tmp.Close(); err != nil {
 		return nil, err
 	}
-	if err := checkTokenPath(db, abs); err != nil {
+	if err := checkTokenPath(db, abs, inputs...); err != nil {
 		return nil, err
 	}
 	if err := os.Rename(tmp.Name(), abs); err != nil { // CreateTemp made it 0600

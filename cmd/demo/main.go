@@ -336,6 +336,8 @@ func ignoreClosed(err error) error {
 
 var errTokenPath = errors.New("APA_DEMO_TOKEN_FILE must not name the database or one of its files (-wal, -shm, .lock); nothing was started or changed")
 
+var errTokenInput = errors.New("APA_DEMO_TOKEN_FILE must not name an input file of the demo (the history trace); nothing was started or changed")
+
 // dbFiles are the database's own files: the database, its WAL and
 // shared-memory files, and the demo's lock.
 func dbFiles(db string) []string { return []string{db, db + "-wal", db + "-shm", db + ".lock"} }
@@ -366,22 +368,27 @@ func canonicalPath(p string) (string, error) {
 // also catches a spelling a case-insensitive file system treats as the
 // same name). ponytail: a configuration check, not a guard against another
 // local user racing renames; newTokens repeats it before its rename.
-func checkTokenPath(db, token string) error {
+func checkTokenPath(db, token string, inputs ...string) error {
 	t, err := canonicalPath(token)
 	if err != nil {
 		return err
 	}
 	ti, terr := os.Stat(t)
-	for _, f := range dbFiles(db) {
+	files := dbFiles(db)
+	for i, f := range append(files, inputs...) {
 		c, err := canonicalPath(f)
 		if err != nil {
 			return err
 		}
-		if c == t {
+		same := c == t
+		if fi, err := os.Stat(c); err == nil && terr == nil && os.SameFile(fi, ti) {
+			same = true
+		}
+		if same && i < len(files) {
 			return errTokenPath
 		}
-		if fi, err := os.Stat(c); err == nil && terr == nil && os.SameFile(fi, ti) {
-			return errTokenPath
+		if same {
+			return errTokenInput
 		}
 	}
 	return nil
