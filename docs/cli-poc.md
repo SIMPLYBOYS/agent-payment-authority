@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 第一筆真實請購 trace 取得（Claude Code 執行，待 Codex 核對）**：第二次嘗試 exit `0`。開發展示例外下 Gate 通過；真實模型依序呼叫 `list_products` → `get_quote` → `request_purchase`；Policy 裁決 **Ask**（`HUMAN_APPROVAL_REQUIRED`）。Store 中同一 task 有一筆請購，以及 `TASK_STARTED`／`PURCHASE_PROPOSED`／`POLICY_DECIDED` 三個事件（第 53 節）。不付款，用量以 CLI 自報計數記錄。尚未接上 Dashboard／Unity；這不代表 plugins 的內容或行為已確認，也不代表 M1 完成。
+>
 > **10/8 第一次真實請購嘗試（Claude Code 執行，待 Codex review）**：**真實 init 第一次通過完整 Gate**（`gate_mode=dev_demo_plugins`、`init.gate=passed`，認證 `none` 被接受）。但 Store 拒絕開啟：資料庫目錄就是證據目錄，權限是 `0755`，Store 要求 `0700`。所以沒有 task、沒有工具呼叫、沒有請購；exit 1，依核准停止、不重試（第 52 節）。這是 §51 腳本的缺陷，不是產品行為；修正提案待 review 與 Aaron 另行核准。
 >
 > **10/8 開發展示例外與認證 `none` 已實作（`8976e86`、測試補正 `21090e3`；Claude Code 執行，待 Codex review）**（第 50 節）。fake 測試全部通過。**核准的那一次完整斷網容器驗證（`8976e86`）失敗**：只有一項突變沒被抓到，原因是測試放錯 package，不是產品行為；已在 `21090e3` 修正（只改測試）。**`21090e3` 通過限定範圍技術 review，開發展示例外與認證 `none` 的實作驗收**（第 50.7 節）。`8976e86` 的失敗紀錄保留。§39.3 的 `PRODUCT_BASE` 已改為 `21090e3`；一次真實請購的完整腳本見第 51 節，**待 Aaron 核准，尚未執行**。
@@ -3172,3 +3174,50 @@ L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
 
   第 52 節的失敗紀錄保留。
 - **下一步**：等待 Aaron 核准再一次真實請購嘗試。不必重跑完整容器或 C0′。能否完成請購，以實際結果為準。
+
+## 53 第一筆真實請購 trace：第二次嘗試的執行紀錄（2026-10-08；Claude Code 執行，待 Codex 核對）
+
+> **結果：§51 的成功條件全部符合。** 真實 Claude Code CLI 透過 Go wrapper 與 APA MCP，完成商品查詢、報價與請購；Host／Policy 產生 **Ask** 裁決；Store 保存同一 task 的請購與事件。這是**第一筆真實請購 trace**。
+>
+> 尚未接上 Dashboard／Unity（另一個出口）。這不代表 plugins 的內容或行為已確認，也不代表 M1 或商業展示版完成。
+
+- **核准**：Aaron 10/8「我核准 codex 上提到的部分，再執行一次真實請購嘗試」，即：完成 §51 路徑修正後執行一次；其餘範圍沿用上次核准（開發展示例外、本人專用目錄訂閱、用量可能 `unknown`、背景活動風險、合成資料、全新資料庫、不付款、不放寬上限）；失敗就保存證據後停止，不重試。
+- **開工核對**：分支 `b1-04-live`，HEAD `76f9a97`；工作區只有 `?? demo`。`21090e3` 之後只有文件差異。抽出的腳本與上次執行的版本相比，只差在已核准的資料庫路徑修正（`diff` 只有這三行）。
+- **執行方式**：以 `bash` 執行一次（在 Claude Code 沙箱外，依核准使用既有登入環境），exit `0`。
+- **前置**：步驟 1～5 通過；二進位 `vcs.revision=76f9a9731c032e3c235c0eac78bd1add91ea28ad`、`vcs.modified=false`；版本檢查通過。
+- **時間**：`started-utc` `2026-10-08T09:17:47Z`，`ended-utc` `2026-10-08T09:17:57Z`。
+
+**依 §51 成功條件逐項核對**：
+
+| 條件 | 觀測 | 結果 |
+|---|---|---|
+| exit 0 | `exit-code.txt`：`exit=0`；`apa-buyer-error.txt` 0 bytes | 符合 |
+| 例外模式、Gate 通過 | trace `run_start.gate_mode=dev_demo_plugins`；`init.gate=passed`、`task_started=true`、`prepare_error=""`；`stdout.txt` 有例外標示行 | 符合 |
+| 至少一次業務工具呼叫 | trace 的 `tool_call`：`list_products`（ok）→ `get_quote`（`kr-market`，ok）→ `request_purchase`（`kr-market`，**Ask**）；`tool_attempts=3`、`not_ready_refusals=0` | 符合 |
+| `request_purchase` 的 outcome 是 Policy 裁決 | `Ask`；`reason=HUMAN_APPROVAL_REQUIRED`、`approval_status=pending`、`payment_status=unavailable` | 符合（照既有規則，沒有修改） |
+| Store 中同一 task 有請購與事件，且與 `stdout.txt` 一致 | `db/apa-live.db`（以 `immutable=1` 唯讀讀取）：<br>- tasks：`task-a`／`consumer-a`／`awaiting_approval`；<br>- purchases：`po-task-a-kr-market`／`Ask`／`pending`／`HUMAN_APPROVAL_REQUIRED`，`intent_hash` 與 stdout 相同；<br>- events：1 `TASK_STARTED`、2 `PURCHASE_PROPOSED`、3 `POLICY_DECIDED`（stdout 的 `as_of_sequence=3`） | 符合 |
+| 只保存白名單 | stdout 的 JSON 報告與 trace 都沒有模型的 result 文字（trace 只記 `result_chars=622`） | 符合 |
+
+**其他觀測**：
+- `run_end`：`outcome=ok`、`exit_code=0`、`messages=11`、`assistant_messages=5`、`num_turns=4`。
+- `usage`：`input_tokens=8`、`output_tokens=445`、`cache_creation_input_tokens=3108`、`cache_read_input_tokens=8100`。這是 **CLI 自報的計數**，不代表計費證明；實際用量與費用仍以帳戶為準。
+- 上限沒有觸發：180 秒、10 則 assistant、8 次呼叫。
+- `db/` 權限是 `drwx------`，由 Store 建立。
+- 付款：`none; M1 cannot pay and delivers no content`；`payment_status=unavailable`。
+- 請購的 `deadline_at` 是裁決後 30 秒，依 demo profile。執行結束時仍是 `pending`；之後沒有核准者或到期處理在執行，資料庫保持執行結束時的狀態。
+
+**證據**（`artifacts/b1-04/live-purchase-20261008T091741Z/`，`artifacts/` 不進版控）：
+- `commit.txt`、`binary-vcs.txt`、`go-version-build.txt`、`started-utc.txt`、`ended-utc.txt`
+- `exit-code.txt`、`stdout.txt`、`apa-buyer-error.txt`
+- `runs/task-a-1791451068937446000.jsonl`
+- `db/apa-live.db`
+
+**解讀與限制**：
+- 這是開發展示例外下的結果：Aaron 接受了決策稿 9.1 的剩餘風險。它不代表 plugins 的內容、來源或行為已確認，也不代表嚴格模式可以通過。
+- Ask 是 demo profile 的既有規則；沒有付款、Signer 或 testnet。
+- **下一個出口**是把同一筆真實 trace 接上既有的 Dashboard／Unity 資料流（決策稿 4.1 的展示鏈），須另外派工；本次沒有進行。
+- 第 52 節的第一次嘗試（Store 目錄權限）失敗紀錄保留。
+
+**沒有做的事**：沒有重試、沒有另跑 C0′；沒有修改產品程式、Gate、認證清單或上限；沒有付款。
+
+L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress，不標 Done，等待 Codex 核對與後續決定。

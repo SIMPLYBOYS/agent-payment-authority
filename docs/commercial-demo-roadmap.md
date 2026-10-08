@@ -518,6 +518,8 @@
 > **進度（10/8，實作）**：Aaron 核准例外與認證 `none`；實作 `8976e86`、測試補正 `21090e3`，fake 測試通過。第一次容器驗證在突變步驟失敗（測試放錯 package），已修正；補跑 `21090e3` 完整斷網容器通過（266／266）。**`21090e3` 通過限定範圍技術 review，實作驗收**（`docs/cli-poc.md` 第 50.7 節）。第一筆真實請購已進入執行準備：完整腳本見 `docs/cli-poc.md` 第 51 節，待 Aaron 核准一次嘗試。真實請購尚未核准。
 >
 > **進度（10/8，第一次真實請購嘗試）**：真實 init **第一次通過完整 Gate**（開發展示例外、認證 `none`）；但 Store 因資料庫目錄權限拒絕開啟（§51 腳本把資料庫放在 `0755` 的證據目錄），沒有 task、工具呼叫或請購。已停止、不重試（`docs/cli-poc.md` 第 52 節）。Codex 核對通過，§51 已改用 `$EV/db/apa-live.db`（Store 以 0700 建立；第 52.1 節）；再試一次待 Aaron 另行核准。
+>
+> **進度（10/8，第一筆真實請購 trace）**：第二次嘗試成功（`docs/cli-poc.md` 第 53 節，待 Codex 核對）。真實 Claude Code CLI 經 Go wrapper 與 APA MCP 依序呼叫 `list_products`、`get_quote`、`request_purchase`；Policy 裁決 **Ask**（`HUMAN_APPROVAL_REQUIRED`）；Store 有同一 task 的請購與 `TASK_STARTED`、`PURCHASE_PROPOSED`、`POLICY_DECIDED`。這是開發展示例外下的結果，不付款。**真實 trace 已取得，但尚未接上 Dashboard／Unity**（下一個出口，須另外派工）。B1-04 仍 InProgress。
 
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。
