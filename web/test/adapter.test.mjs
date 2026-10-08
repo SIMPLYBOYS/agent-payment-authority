@@ -554,3 +554,30 @@ test("live: the evidence panel says what the trace shows and when; nothing reads
   // Without live mode nothing changes.
   assert.ok(!A.evidence(snap, po, { mode: "live" }).sections.some((x) => x.title.startsWith("工具呼叫")));
 });
+
+// Live mode, review R1: a failed or timed-out trace read says so; what was
+// read before stays, marked as the last result, and a last "running" never
+// reads as the CLI running now.
+test("live: a failed trace read is unconfirmed; the last reply is marked as the last one", () => {
+  const live = { record: "live_demo", label: "真實 Agent 即時展示・開發展示例外・合成資料・不付款", dev_demo_plugins: true };
+  const evs = [ev(1, "TASK_STARTED")];
+  const stored = snapshot("show-a-01", evs, []);
+  const snap = { task: stored.task, events: stored.events.events };
+  const tools = (trace, failed) => A.evidence(snap, null, { mode: "live", live, trace, traceFailed: failed }).sections.find((x) => x.title === "工具呼叫（真實 Agent trace）");
+
+  const none = tools(null, true);
+  assert.deepEqual(none.rows, [["trace 更新", "trace 更新失敗：目前未確認", "網頁"]]);
+  const wasRunning = tools({ task_id: "show-a-01", state: "running" }, true);
+  assert.equal(wasRunning.rows[0][1], "trace 更新失敗：目前未確認；以下是上次取得的結果");
+  assert.equal(wasRunning.rows[1][1], "上次結果：CLI 執行中（不代表目前仍在執行）");
+  assert.ok(wasRunning.rows[1][2].endsWith("（上次結果）"));
+  assert.ok(!JSON.stringify(wasRunning).includes("CLI 執行中：trace 在 CLI 結束後才寫出"), "no present-tense running");
+  const trace = { task_id: "show-a-01", gate_mode: "dev_demo_plugins", gate: "passed", outcome: "ok", tool_calls: [{ n: 1, tool: "list_products", product_id: "", outcome: "ok" }] };
+  const wasDone = tools({ task_id: "show-a-01", state: "available", trace }, true);
+  assert.equal(wasDone.rows[0][0], "trace 更新");
+  assert.ok(wasDone.rows.slice(1).every((r) => r[2].endsWith("（上次結果）")) && wasDone.rows[2][0] === "#1 list_products");
+  // Another task's last reply is not this task's.
+  assert.deepEqual(tools({ task_id: "show-a-02", state: "running" }, true).rows, [["trace 更新", "trace 更新失敗：目前未確認", "網頁"]]);
+  // Not failed: the reply as it is.
+  assert.ok(tools({ task_id: "show-a-01", state: "running" }, false).rows[0][1].startsWith("CLI 執行中"));
+});

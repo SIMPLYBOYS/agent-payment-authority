@@ -153,7 +153,7 @@ async function shot(b, name) {
 let browser = null;
 let host = null;
 try {
-  script(...purchaseSteps, { do: "sleep", ms: 8000 }, result); // the CLI keeps running after the Ask: the "running" state is seen
+  script(...purchaseSteps, { do: "sleep", ms: 20000 }, result); // the CLI keeps running after the Ask: the "running" state is seen
   host = startScript();
   const { addr, session } = await host.ready();
   const tokFile = join(session, "tok", "tokens.json");
@@ -178,18 +178,58 @@ try {
   check("loading the page and the token file started nothing", tracesIn(session).length === 0 && (await api(addr, hostTok, "/api/host/runs")).json.runs.length === 0);
   await shot(b, "before-start");
 
+  // Test-only wrapper of the page's fetch for GET .../trace (review of
+  // 145eb86, R1), like browser-ui.mjs's holds: "pass"; "hold" (held until
+  // released, ended by the page's own abort or timeout); "fail" (503);
+  // "late" (held, ignores the abort: a reply that comes after a switch).
+  const traceMode = (m) => b.evaluate(`(window.__tr.mode = ${JSON.stringify(m)}, true)`);
+  const heldTraces = () => b.evaluate(`window.__tr.held.length`);
+  await b.evaluate(`(() => { const orig = window.fetch.bind(window); window.__tr = { mode: "pass", held: [], pending: 0 };
+    window.fetch = (url, opts = {}) => {
+      if (!String(url).endsWith("/trace")) return orig(url, opts);
+      const tr = window.__tr;
+      if (tr.mode === "fail") return Promise.resolve(new Response('{"error":"store_unavailable"}', { status: 503, headers: { "Content-Type": "application/json" } }));
+      if (tr.mode === "hold") { tr.pending++; return new Promise((res, rej) => { tr.held.push(() => orig(url, opts).then(res, rej));
+        if (opts.signal) opts.signal.addEventListener("abort", () => rej(opts.signal.reason || new DOMException("aborted", "AbortError")), { once: true }); })
+        .finally(() => { tr.pending--; }); }
+      if (tr.mode === "late") { const plain = { headers: opts.headers, cache: "no-store", credentials: "omit" }; return new Promise((res, rej) => tr.held.push(() => orig(url, plain).then(res, rej))); }
+      return orig(url, opts);
+    }; return true; })()`);
+  const ev = text("#evidence");
+
   // ---- one run: start, the Dashboard follows the Store ----
+  await traceMode("hold"); // R1 (1): every trace read is held from the start
   await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].find((x) => x.textContent.startsWith("開始（真實 CLI）："))?.click()`);
   check("the Dashboard switches to the run's task", await b.waitFor(`${text("#current")}.includes("show-a-") && document.getElementById("status").dataset.kind === "ok"`, 30000), await b.evaluate(text("#current")));
   check("Unity reports the task at #3 waiting", await b.waitFor(`${uKey("state")} === "rendered" && ${uKey("task")}.startsWith("show-a-") && ${uKey("seq")} === "3" && ${uKey("phase")} === "waiting"`, 30000));
   await b.evaluate(`(document.getElementById("evidence-box").open = true, true)`);
-  check("while the CLI runs: the evidence says the trace comes at the end", await b.waitFor(`${text("#evidence")}.includes("CLI 執行中：trace 在 CLI 結束後才寫出")`, 10000));
+  // Read while that held read is still pending (it ends after 5 s): the
+  // main poll went on without it.
+  check("R1: while a trace read is held, the card, Timeline and Unity are already at #3", await b.waitFor(`window.__tr.pending >= 1
+    && [...document.querySelectorAll("#timeline li")].map((li) => li.dataset.seq).join(",") === "1,2,3" && ${text("#card")}.includes("Ask")
+    && ${uKey("seq")} === "3" && ${ev}.includes("讀取中（未確認）")`, 4000), "pending " + (await b.evaluate(`window.__tr.pending`)));
+  check("R1: a held trace read ends at its time limit and says so", await b.waitFor(`${ev}.includes("trace 更新失敗：目前未確認")`, 15000), (await b.evaluate(ev)).slice(-160));
+  await traceMode("pass");
+  check("while the CLI runs: the evidence says the trace comes at the end", await b.waitFor(`${ev}.includes("CLI 執行中：trace 在 CLI 結束後才寫出")`, 10000));
   const runsNow = (await api(addr, hostTok, "/api/host/runs")).json.runs;
   const r1 = runsNow[0];
   check("…and the run is still running (Ask committed before the CLI ended)", r1 && r1.live === "running", JSON.stringify(r1 && { live: r1.live, state: r1.state }));
   let r = await shot(b, "running");
   check("running: card Ask, Timeline #1-#3, label kept", r.card.includes("Ask") && r.timeline === "1,2,3" && r.badge === LABEL);
-  check("the trace is available once the CLI ended", await b.waitFor(`${text("#evidence")}.includes("#3 request_purchase") && ${text("#evidence")}.includes("input 8 · output 445（不是計費證明）")`, 30000));
+
+  // R1 (2): "running" read, then the trace reads fail: the last result is
+  // shown as the last one, and after the run has ended it never reads as running now.
+  await traceMode("fail");
+  check("R1: a failed read after running: unconfirmed, the running is the last result", await b.waitFor(`${ev}.includes("trace 更新失敗：目前未確認；以下是上次取得的結果") && ${ev}.includes("上次結果：CLI 執行中（不代表目前仍在執行）")`, 10000));
+  let ended1 = null;
+  for (let i = 0; i < 400 && !(ended1 && ended1.state === "ended"); i++, await sleep(100)) ended1 = (await api(addr, hostTok, "/api/host/runs/" + r1.run_id)).json;
+  await sleep(2500); // a few polls after the end, still failing
+  r = JSON.parse(await b.evaluate(reading));
+  check("R1: the run has ended and the failing panel does not say the CLI is running now", ended1.state === "ended" && !r.evidence.includes("CLI 執行中：trace 在 CLI 結束後才寫出")
+    && r.evidence.includes("上次結果：CLI 執行中（不代表目前仍在執行）"), ended1.state);
+  r = await shot(b, "trace-failed");
+  await traceMode("pass"); // R1 (3): back: the finished record
+  check("the trace is available once the CLI ended", await b.waitFor(`${ev}.includes("#3 request_purchase") && ${ev}.includes("input 8 · output 445（不是計費證明）") && !${ev}.includes("trace 更新失敗")`, 30000));
   const task = (await api(addr, hostTok, "/api/tasks/" + r1.task_id)).json;
   const po = task.purchases[0].purchase_order_id;
   r = await shot(b, "ended");
@@ -220,6 +260,28 @@ try {
   check("stopped: the card says cancelled", r.card.includes("取消") || r.card.includes("撤回"), r.card.slice(0, 160));
   const runs = (await api(addr, hostTok, "/api/host/runs")).json.runs;
   check("two runs, two CLI runs, both ended", runs.length === 2 && runs.every((x) => x.state === "ended") && tracesIn(session).length === 2, runs.map((x) => x.state + "/" + x.outcome).join(","));
+  // R1 (4): a late trace reply of a task left behind does not reach the new one.
+  const pick = (id) => b.evaluate(`(document.querySelector('#task-pick button[data-task="${id}"]')?.click(), true)`);
+  const r2 = runs.find((x) => x.task_id !== r1.task_id);
+  await b.waitFor(`!!document.querySelector('#task-pick button[data-task="${r1.task_id}"]')`, 20000);
+  await traceMode("late");
+  await pick(r1.task_id);
+  check("R1: the first task's trace reply is held", await b.waitFor(`window.__tr.held.length >= 1 && ${text("#current")}.includes(${JSON.stringify(r1.task_id)})`, 20000));
+  await traceMode("pass");
+  await pick(r2.task_id);
+  check("R1: the second task opens with its own trace", await b.waitFor(`${text("#current")}.includes(${JSON.stringify(r2.task_id)}) && ${ev}.includes("#3 request_purchase") && ${ev}.includes("po-" + ${JSON.stringify(r2.task_id)})`, 30000));
+  // Watch the panel from inside the page: the second task's mapping must
+  // never go, not even for a moment, when the first task's reply comes.
+  const mapped = "po-" + r2.task_id + "-kr-market（Store 事件";
+  await b.evaluate(`(() => { window.__lost = false; const box = document.getElementById("evidence");
+    window.__watch = new MutationObserver(() => { if (!box.textContent.includes(${JSON.stringify(mapped)}) || box.textContent.includes(${JSON.stringify("po-" + r1.task_id)})) window.__lost = true; });
+    window.__watch.observe(box, { childList: true, subtree: true, characterData: true }); return true; })()`);
+  await b.evaluate(`(window.__tr.held.splice(0).forEach((f) => f()), true)`);
+  await sleep(3000);
+  r = JSON.parse(await b.evaluate(reading));
+  const lost = await b.evaluate(`(window.__watch.disconnect(), window.__lost)`);
+  check("R1: the late reply of the first task changed nothing, not even for a moment", !lost && r.current.includes(r2.task_id) && r.evidence.includes(mapped) && !r.evidence.includes("po-" + r1.task_id), r.current + " lost=" + lost);
+  await shot(b, "late-reply-dropped");
   check("no token in the URL, storage, cookie or console", await b.evaluate(`JSON.stringify([location.href, document.cookie, localStorage.length, sessionStorage.length])`).then((s) => allTokens.every((tk) => !s.includes(tk)))
     && allTokens.every((tk) => !b.consoleText.join("\n").includes(tk)));
   log("host stopped (exit " + (await host.stop()) + ")");
