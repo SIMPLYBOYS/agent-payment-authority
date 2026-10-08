@@ -523,7 +523,7 @@
 
 > **進度（10/8，歷史回放）**：Aaron 核准實作；`7c1dae6` 完成「真實執行紀錄的歷史回放」（`docs/cli-poc.md` 第 54 節；Claude Code 實作，待 Codex review）。`demo --history-db <副本> --history-trace <trace>` 只讀副本，時鐘固定在最後事件，不跑 CLI 或到期；Dashboard 明標「真實執行紀錄・歷史回放・未付款・開發展示例外」，Ask 只顯示執行結束時的快照；查證面板列出工具呼叫並對應到請購與 Store 事件 #2、#3。以真實證據副本做端到端核對，原檔雜湊不變。尚未以瀏覽器或 Unity 實看，也未跑完整容器驗證。B1-04 仍 InProgress。
 
-> **進度（10/8，歷史回放驗收補齊）**：程式 `3234f4b`、測試 `e500ded`（`docs/cli-poc.md` 第 54.1 節；Claude Code 執行，待 Codex 核對）。歷史模式的控制寫入由伺服器拒絕（409）；trace 只給可讀該 task 的呼叫者；只接受離線保存的資料庫；凍結時間標為紀錄時間。以真實證據副本在真實 Chrome＋Unity Web build 完成 53 項檢查（回放 #1→#3、停止、重開頁面、主持人頁），原證據不變。**未處理**：Unity 畫布內建「M1 / fake agent / no payment」與「(sim agent)」文字，修正須改 Unity 或投影，待確認。B1-04 仍 InProgress。
+> **進度（10/8，歷史回放驗收補齊）**：程式 `3234f4b`、測試 `e500ded`（`docs/cli-poc.md` 第 54.1 節；Claude Code 執行，待 Codex 核對）。歷史模式的控制寫入由伺服器拒絕（409）；trace 只給可讀該 task 的呼叫者；只接受離線保存的資料庫；凍結時間標為紀錄時間。以真實證據副本在真實 Chrome＋Unity Web build 完成 46 項檢查（合成資料 53 項，含 7 項拒絕）（回放 #1→#3、停止、重開頁面、主持人頁），原證據不變。**未處理**：Unity 畫布內建「M1 / fake agent / no payment」與「(sim agent)」文字，修正須改 Unity 或投影，待確認。B1-04 仍 InProgress。
 
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。

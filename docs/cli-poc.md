@@ -3303,7 +3303,7 @@ B1-04／B1-06 仍 InProgress，不標 Done，等待 Codex review。
 
 ### 54.1 補齊驗收：伺服器唯讀、trace 分權、紀錄時間標示、真實瀏覽器與 Unity 畫面（2026-10-08；Claude Code 執行，待 Codex 核對）
 
-> **結果**：以第 53 節真實證據的**副本**啟動，用真實 Chrome 載入 Unity Web build，從事件 #1 回放到 #3、停止回放、重開頁面、開主持人頁，53 項檢查全部通過；原始證據與副本前後不變。
+> **結果**：以第 53 節真實證據的**副本**啟動，用真實 Chrome 載入 Unity Web build，從事件 #1 回放到 #3、停止回放、重開頁面、開主持人頁，46 項檢查全部通過（合成資料另含 7 項拒絕，共 53 項，亦全部通過）；原始證據與副本前後不變。
 >
 > 發現一個**未處理的 Unity 缺口**：商店畫布內建標題是「M1 / fake agent / no payment」，客人標籤是「(sim agent)」，寫死在 `ShopView.cs`。歷史模式下與標示矛盾。修正需要改 Unity 並重建，或在投影加欄位（屬 bridge／契約），**待確認**，本輪未改。
 >
@@ -3387,11 +3387,11 @@ APA_ADDR=127.0.0.1:8402 sh scripts/demo/history.sh artifacts/b1-04/live-purchase
   - 失敗紀錄：第一次手動 web 突變時，副本少了 `web/package.json` 與 `testdata/demo`，基準本身就失敗，結果無效。補齊後重做，先確認基準通過。其中一項突變我寫錯造成語法錯誤，更正後重做。
   - 完整容器與全部突變沒有跑（本派工未授權），不沿用舊的完整容器結果。
 - **真實瀏覽器與 Unity**：`node scripts/verify/history-ui.mjs`。用本機 Google Chrome（headless，DevTools protocol，拋棄式 profile），載入 `unity/AgentPaymentAuthority/Build/WebGL/Build`（Unity 未修改、未重建）。
-  - **合成資料**（`e500ded`，`artifacts/b1-04/history-ui-e500ded20b36-20261008T104942Z-synthetic/`）：PASS。
+  - **合成資料**（`e500ded`，`artifacts/b1-04/history-ui-e500ded20b36-20261008T104942Z-synthetic/`）：53 項 PASS。
     - 先跑一次 fake run（task-a Ask、task-b Deny），存成獨立的證據目錄。
     - 用它的拋棄式副本試腳本的 7 種拒絕，全部在提供服務前停止：沒有資料庫、旁邊有 `-wal`、兩個 trace、沒有 trace、trace 與資料庫不符、工具不在白名單、資料庫損壞。
     - 之後完整走一遍畫面檢查。
-  - **真實證據副本**（`e500ded`，`artifacts/b1-04/history-ui-e500ded20b36-20261008T105025Z-evidence/`）：53 項 PASS。
+  - **真實證據副本**（`e500ded`，`artifacts/b1-04/history-ui-e500ded20b36-20261008T105025Z-evidence/`）：46 項 PASS、0 FAIL。
     - API：副本只有 task-a 的 #1～#3；`awaiting_approval`，Ask／pending／unavailable；`served_at=1791451074` 等於 `history.as_of`。
     - 頁面（Unity 回報 task-a #3 waiting）：
       - 頂端與場景上方有固定標示，模式為「歷史紀錄（非即時）」；
