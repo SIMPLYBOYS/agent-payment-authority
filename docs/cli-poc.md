@@ -1,5 +1,12 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 單一真實 Agent 即時展示：demo host 的 live 模式已實作，fake／合成資料驗證完成，待 Codex review（第 55 節）**：
+> - 主持人按「開始（真實 CLI）」後執行一場，走與 `apa-buyer run --live` 相同的路徑；預設關閉，啟動不會執行模型。
+> - 程式 `c9acebc`／`2d4db5b`，測試 `5d43a75`／`145eb86`。
+> - 核准的那一次完整斷網容器（`5d43a75`）**失敗**（verify-b1-01 的訊息文字、5 個突變的替換文字），已修正；**`145eb86` 的完整容器重跑待 Aaron 核准**。
+> - 本輪沒有執行真實 CLI；真實執行需在 review 後另行核准（55.7）。
+> - B1-04／B1-06 維持 InProgress。
+>
 > **10/8 單筆真實請購的離線歷史回放通過限定範圍技術 review（第 54～54.3.2 節）**：
 > - 第 53 節的真實請購可用 `scripts/demo/history.sh` 以證據副本唯讀重播，明標「真實執行紀錄・歷史回放・未付款・開發展示例外」。
 > - 實作：`7c1dae6`；驗收補齊：`3234f4b`／`e500ded`；Unity 文字：`578f2c3`／`b4b0a27`（54.2.1 已關閉）；R1、R2：`b81f749`／`231f70d`（54.3.2 已關閉）。
@@ -3602,3 +3609,165 @@ B1-04／B1-06 仍 InProgress，等待 Codex review。
 - **證據歸屬**：Aaron 本人操作與判定。Claude Code 只記錄，沒有參與操作，也沒有保存這次的截圖或紀錄。
 - **範圍**：這是對「單筆真實請購的離線歷史回放」在目前階段的主觀展示體驗判定。不代表即時 Agent 展示、付款、ZK、多 Agent、M1 或商業展示版完成。
 - B1-04／B1-06 維持 InProgress。
+
+## 55 單一真實 Agent 即時展示：demo host 的 live 模式（2026-10-08；Claude Code 實作，fake／合成資料驗證，待 Codex review）
+
+> **結果**：主持人從 `/host` 按「開始（真實 CLI）」，啟動**一場**真實 Agent 請購。它走的是和 `apa-buyer run --live` 相同的 buyer host、Gate 與 live 設定。Dashboard、Unity、Inspector、Timeline 都跟著 Store 已提交的資料更新；CLI 結束後，查證面板可看到工具呼叫，並對應到請購與 Store 事件。
+>
+> 預設關閉，啟動服務不會執行模型。**本輪全部驗證都以 fake CLI 代替 Claude Code，沒有執行真實 CLI。** 在最終程式 commit 上那一次完整斷網容器驗證**失敗**（原因與修正見 55.1）；修正後的版本**尚未**再跑完整容器，需要 Aaron 核准。
+
+- **派工**：vault 筆記「Claude Code 派工：單一真實 Agent 即時展示」（Aaron「我准許開始」）。
+  - 核准：實作、fake／合成資料驗證、在最終程式 commit 上跑一次完整斷網容器驗證。
+  - 不核准：真實 CLI、登入或版本查詢、C0′、真實請購。
+- **開工核對**：分支 `b1-04-live`，HEAD `8de6ce7`，工作區只有未追蹤的 `demo`。
+- **提交**：
+  - 程式 `c9acebc`、測試 `5d43a75`；
+  - 容器失敗後的修正：程式 `2d4db5b`、測試 `145eb86`；
+  - 文件為本節所在提交。
+
+### 55.1 做了什麼（重用哪些元件）
+
+- **啟動方式**：`demo --live-cli <Claude Code 絕對路徑> [--dev-demo-plugins]`。需要同時具備：
+  - `APA_LIVE_CLI=true`；
+  - 指向本模式專用資料庫的 `APA_DB_PATH`；
+  - live 目錄 `testdata/demo/scenarios-live.json`（只有 `live-a`：consumer-a；不含腳本檔）；
+  - `--registry testdata/demo/registry.json`。
+
+  缺任何一項，或與 `--fake-cli`、`--plan`、`--upgrade-db`、`--history-db` 同時使用，都會在綁定位址前拒絕。
+- **沿用的元件，不另寫一套**：
+  - **執行**：既有的 `cliRunner.runOne` → `buyer.Host.Run`（同一個 MCP bridge 與 toolbridge、同一個 Store／Policy、同一組 `buyer.DefaultLimits`：180 秒、10 則 assistant、8 次工具呼叫）。
+  - **live 設定**：與 `apa-buyer run --live` 相同：
+    - `buyer.LiveEnv`：`CLAUDE_CONFIG_DIR=<HOME>/.apa-claude`；
+    - 版本釘選 `2.1.293 (Claude Code)`；
+    - 認證清單 `["none"]`；
+    - 開發展示例外只有加 `--dev-demo-plugins` 才開啟。
+  - **時機**：host 啟動前先檢查一次設定目錄與版本，**每一場開始前再檢查一次**（CLI 可能已自動更新）。不合格就以 `start_failed`／`host_error` 或 `cli_version` 結束，不建立 task、不執行 CLI。
+  - **控制**：既有的 operator 控制。只有 operator 能開始或停止；同時一場；request ID 冪等；每場配發新的 `show-a-*` task；停止由 buyer host 照舊記錄 `APPROVAL_WITHDRAWN`／`TASK_CANCELLED`；重啟時未結束的場次標為中斷，不會自動重開。
+  - **前端**：既有的投影、回放與 Unity bridge，Unity 沒有修改。
+- **工具呼叫**：`GET /api/tasks/{task_id}/trace`，只在 live 模式註冊。
+  - 授權沿用 task 的 `record()`：該 consumer 的 viewer 與 host 可讀；其他 viewer 得到 404；operator 得到 403。
+  - buyer host 在 **CLI 結束時才寫出 trace**，所以執行中只回 `running`，頁面明寫「CLI 執行中：trace 在 CLI 結束後才寫出，現在無法逐工具顯示」，不宣稱逐工具即時串流。
+  - 結束後用既有的 `loadTrace` 讀取白名單欄位：工具、商品、outcome、gate、usage。它沿用歷史回放已驗收的裁決一致檢查：只有 trace 與 Store 的裁決一致才建立對應，否則回 `inconsistent`、不做對應。
+  - usage 只取 CLI 自報的四個計數，缺少時標 `unknown`，並明寫「不是計費證明」。
+- **頁面**：
+  - 開始前就顯示固定標示「真實 Agent 即時展示・開發展示例外・合成資料・不付款」：頁首、場景上方說明、主持人控制區警告（會實際執行 CLI、可能使用本人訂閱、plugins 內容與行為未確認、不是嚴格零 plugin 模式、一次一場、不自動重試、清除憑證不會撤回已受理的場次）。
+  - 開始按鈕寫成「開始（真實 CLI）」。
+  - 就緒表的真實 CLI 列寫「啟用：按「開始」才執行……（啟動時已核對，每場再核對）；開發展示例外」。
+  - 開始後沿用既有流程，自動切到該 consumer 與 task。
+- **啟動腳本** `scripts/demo/live.sh`：
+  - 每次在 `var/` 下以 `mktemp -d` 建立新的 0700 場次目錄，內含新的資料庫、traces 與 token 檔；
+  - 建置後以 `exec` 啟動；
+  - 任何一步失敗都以 exit 2 停止；
+  - 不開啟既有資料庫，不刪除、不覆寫任何檔案，不印 token。
+
+### 55.2 與派工範圍的差異（請 Codex 核對）
+
+以下都是接線或局部重構，沒有改 Gate 規則、權限模型、Store 語意、事件契約、Unity bridge、Policy 或付款邊界：
+
+1. **live 設定移到 `internal/buyer/live.go`**：版本釘選、認證清單、版本檢查與其錯誤文字原本在 `cmd/apa-buyer`，搬過來讓 `apa-buyer` 與 demo host 共用同一份。值與文字都沒變。兩個相關突變改指向新位置，並在 `internal/buyer` 補 `TestCheckLiveVersion`。
+2. **`APA_LIVE_CLI=true` 的拒絕改由 demo host 判斷**：原本 `config.Load` 直接拒絕，註解寫明「等到有經 review 的 live run 才加 LiveCLI 欄位」。現在 `config.Load` 只讀出 `LiveCLI`，由 demo host 決定：
+   - 沒有 `--live-cli` 時照舊拒絕，訊息保留 B1-01 驗收腳本檢查的「APA_LIVE_CLI=true is not available」；
+   - 歷史模式也拒絕；
+   - `--live-cli` 必須搭配 `APA_LIVE_CLI=true`。
+3. **新增唯讀 API** `GET /api/tasks/{id}/trace`：只在 live 模式、沿用 task 授權、只回白名單欄位。`historyTrace` 增加 `usage`，只在 live 模式填入；歷史模式的輸出不變。
+4. **`fakeRunner` 改名為 `cliRunner`**，加上 `live` 設定。fake 的行為不變。
+
+### 55.3 操作步驟（最短）
+
+```sh
+APA_ADDR=127.0.0.1:8402 APA_LIVE_CLI=true sh scripts/demo/live.sh <Claude Code 絕對路徑> --dev-demo-plugins
+```
+
+1. 開 `http://127.0.0.1:8402/host`，載入 `<場次目錄>/tok/tokens.json`（腳本會印出場次目錄，不印 token）。
+2. 確認頂端標示、警告，以及就緒表的「真實 CLI」列。
+3. 按一次「開始（真實 CLI）：…」，Dashboard 會自動切到新 task。
+4. 展開「查證這筆」，CLI 結束後可看到工具呼叫、對應與用量。
+5. 需要時按「停止 show-a-NN」。結束時在終端按 Ctrl-C。
+
+中斷後若要重開同一個場次，命令在 `scripts/demo/live.sh` 開頭的說明中；未結束的場次會顯示為中斷，不會自動重開。
+
+### 55.4 畫面上分開的狀態
+
+| 狀況 | 畫面 |
+|---|---|
+| CLI 還在執行 | 最近場次「進行中」並有停止鈕；查證面板寫「CLI 執行中：trace 在 CLI 結束後才寫出」 |
+| CLI 已結束、Ask 仍等待 | 場次已結束，請購卡寫「Ask：等待人工核准（M1 無核准能力）」，工具呼叫與用量出現 |
+| Ask 已到期 | 既有：`APPROVAL_EXPIRED` 事件，卡片寫「Ask 已到期（後端已記錄）」 |
+| 停止已受理、收尾未確認 | 「場次 … 的停止請求已受理；最終結果請看最近場次」（既有 3.4） |
+| 取消事件已提交 | Timeline 出現 `APPROVAL_WITHDRAWN`、`TASK_CANCELLED`，卡片寫已撤回，Unity 呈現 #5 withdrawn |
+| 場次中斷或 Store 寫入失敗 | 既有：場次 interrupted 或紀錄錯誤的告警 |
+| 回覆遺失、結果未確認 | 既有：「沒有收到回覆，無法確認是否已受理；請看最近場次（不會自動重新開始）」 |
+
+Ask 不代表核准或付款；本輪沒有核准按鈕、自動核准、Signer、鏈上交易或 ZK。
+
+### 55.5 驗證（全部由 Claude Code 執行，fake CLI 代替 Claude Code）
+
+- **Go**：`go vet ./...`、`go test -race -count=1 ./...` 全部 package ok（`145eb86`，exit 0；`5d43a75` 時為 631 項）。新增的測試：
+  - `TestLiveRun`：開始前已有標示、什麼都沒執行（沒有 trace、沒有 task）；host 開始會被拒絕（403）；同一 request ID 重送得到同一場，只有一次 CLI 執行；開發展示例外通過並得到 Ask；trace 只給 A 的 viewer 與 host（B 404，operator 403）；usage 8／445；不含模型文字。
+  - `TestLiveRunRefusedByTheGate`：沒有開例外時被 Gate 拒絕（`config_mismatch plugins`），沒有 task。
+  - `TestLiveRunChecksAgainEachRun`：版本改變後該場以 `start_failed cli_version` 結束；設定目錄消失後以 `start_failed host_error` 結束；兩者都沒有 CLI 執行、沒有 task。
+  - `TestLiveRunStopAndRestart`：執行中 trace 為 `running`；停止後有 `TASK_CANCELLED`，trace 可讀；重啟後沒有自動重開。
+  - `TestLiveModeRefusals`：17 種拒絕，各自檢查拒絕原因的文字。
+  - `TestLoadLiveCLI`、`TestCheckLiveVersion`。
+- **Node**：web 51 項通過，包含 live 模式查證面板的各種狀態。
+- **反向驗證**：新增 15 個 live 突變；2 個版本相關突變隨程式移到 `internal/buyer`，共 300 個。依檢查器規則只在被改檔案的 package 內執行，全部以斷言失敗抓到，不是編譯失敗。過程中 `APA_LIVE_CLI not read` 那一項第一次寫錯，造成編譯失敗，已更正後重試。
+- **真實瀏覽器**（Chrome headless 加 Unity Web build，Unity 未修改、未重建）：
+  - `scripts/verify/live-ui.mjs`：以 `live.sh` 啟動，用包裝腳本讓 fake 回報核准版本。`145eb86` 為 28 項 PASS（`artifacts/b1-04/live-ui-145eb86e8a84-20261008T150942Z/`）。涵蓋：
+    - 開始前的標示與警告；載入頁面與 token 檔不會啟動任何執行；
+    - 開始後 Dashboard 切到 show-a-01，Unity #3 waiting；
+    - CLI 執行中（Ask 已提交、場次仍在執行）的提示；
+    - 結束後工具呼叫對應 `po-show-a-01-kr-market`（#2、#3，標為 Host 推導），usage 8／445；
+    - 第二場停止後的事件順序與 Unity #5 withdrawn；
+    - 兩場各一次 CLI 執行；沒有 token 外洩。
+  - 截圖：`before-start.png`、`running.png`、`ended.png`、`stopped.png`。
+  - 迴歸測試（`145eb86`）：
+    - fake 展示 `browser-ui.mjs` 317 PASS、0 FAIL（`artifacts/b1-06/ui-145eb86e8a84-20261008T151154Z/`）；
+    - 歷史回放真實證據副本 46 PASS（`…history-ui-145eb86e8a84-20261008T151046Z-evidence/`）；
+    - 歷史回放合成資料 53 PASS（`…-151113Z-synthetic/`）。
+  - 原始證據雜湊不變。`5d43a75` 也跑過同一組瀏覽器檢查並全部通過。
+- **瀏覽器的失敗紀錄**：
+  - live-ui 第一次執行時，「停止」的預期寫錯：我預期 4 個事件，實際是 `APPROVAL_WITHDRAWN` 與 `TASK_CANCELLED` 共 5 個，這是既有行為。改為比對 Store 回傳的事件。
+  - 停止畫面截圖前沒有等 Unity 跟上，已補上等待（`artifacts/b1-04/live-ui-8de6ce7390b9-20261008T142046Z/` 保留失敗紀錄）。
+  - 拒絕測試第一版只檢查「有錯誤」，有幾個案例其實是因為別的原因被拒；已改為逐案檢查拒絕原因的文字。
+- **完整斷網容器**（核准的一次，`5d43a75`；`artifacts/verify-container/runs/5d43a7585615-20261008T144113Z/`）：**失敗，overall exit 1**。
+  - 通過的步驟：check-contracts、check、race-cover、guards、evidence-import-tests，以及隔離自檢。
+  - 失敗的步驟與原因：
+    - **verify-b1-01**：2 項失敗。拒絕的行為相同，但訊息不再含有驗收腳本檢查的「APA_LIVE_CLI=true is not available」。修正於 `2d4db5b`：訊息保留原文字，加上「without --live-cli」。本機重跑 `sh scripts/verify-b1-01.sh` 通過。
+    - **mutation**：基準線通過；5 個突變報 ERROR（找不到要替換的文字），不是存活。
+      - 其中 2 個是 B1-06 R1 的 token 路徑保護，它們瞄準的程式碼在 **`b81f749`（R1 修正）已經改變**。那一輪沒有跑全部突變，所以當時沒發現，屬於前一輪的漏查。
+      - 另外 3 個是本輪改動的歷史模式行。
+      - 修正於 `145eb86`：5 個突變都改指向現行程式的同一個檢查，定向試跑全部抓到。另外新增 `scripts/verify/mutation-anchors.py`，不跑測試，只用檢查器的規則確認 300 個突變的替換文字都恰好出現一次。
+  - **修正後的版本沒有再跑完整容器**：派工只核准一次，所以依筆記先說明修正與重跑需求，**待 Aaron 核准一次重跑**（目標 `145eb86`）。
+
+### 55.6 fake 驗證證明了什麼，哪些仍未驗證
+
+- **已證明**：
+  - live 模式的入口、拒絕條件與每場的再檢查；
+  - 執行路徑與 `apa-buyer run --live` 相同（同一個 Gate，例外只在要求時開啟）；
+  - operator 控制、冪等、停止與重啟語意；
+  - trace 的時機與分權；
+  - 畫面標示與資料對應；
+  - fake 展示與歷史回放沒有退化。
+- **仍未驗證**：
+  - 真實 Claude Code 2.1.293 的實際 init 與工具呼叫節奏，以及在 demo host 底下（bridge 與 shop 是同一個 host）的行為；
+  - 真實的 stream-json 與 usage 欄位是否和 fake 相同；
+  - 真實用量與費用、背景活動；
+  - plugins 的實際內容與行為；
+  - 真實 CLI 在停止時的收尾時間；
+  - 中途的網路錯誤與速率限制。
+
+### 55.7 下一次真實執行的確認清單（待 Codex review 通過後，由 Aaron 另行核准）
+
+1. **程式基準**：review 通過的 commit（目前是 `145eb86`，待完整容器重跑）。啟動方式見 55.3：`APA_LIVE_CLI=true`、`--dev-demo-plugins`，以 `live.sh` 建立全新的場次目錄。
+2. **帳號**：使用既有 `~/.apa-claude` 的本人訂閱登入。本輪不代為登入，也不讀取登入資料；host 只用 `CLAUDE_CONFIG_DIR` 指向該目錄。
+3. **次數**：只按一次「開始（真實 CLI）」，一次嘗試、不自動重試。版本或設定目錄的前置拒絕，或執行失敗，都如實記錄並停止。
+4. **條件**：明確使用開發展示例外、合成資料（consumer-a、fixture 錢包與商品）、全新資料庫、不付款。
+5. **上限與風險**：
+   - 上限：180 秒、10 則 assistant、8 次工具呼叫（沿用，不放寬）。
+   - 用量：可能使用本人訂閱額度；只呈現 CLI 自報的計數，不是計費證明。
+   - 背景活動：plugins 內容與行為未確認的剩餘風險仍在（決策稿 9.1）。
+   - 證據：保存在場次目錄 `var/live-XXXXXX/`，結束後把 `db/` 與 `runs/` 複製到 `artifacts/b1-04/live-demo-<UTC>/`；`tok/` 不保存。
+
+**這次實作的核准，不代替上述真實執行的核准。**
+
+B1-04／B1-06 維持 InProgress。這個出口只完成單一真實 Agent 即時展示的實作與 fake 驗證；未完成多 Agent、Admin 營運聚合、付款、區塊鏈、ZK、M1 或商業展示版。

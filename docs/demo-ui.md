@@ -41,6 +41,8 @@
 - Deny 後的取消／CLI 逾時仍只加註，不覆蓋 Deny 原因。
 - Inspector 照舊列出每筆請購與 task 狀態；task 有多筆請購時，場景文字註明「此 task 有 N 筆請購；場景顯示最近裁決的 po」。
 
+> **live 模式**（`docs/cli-poc.md` 第 55 節）：`scripts/demo/live.sh` 以全新場次目錄啟動 demo host 的 live 模式，主持人在 `/host` 按「開始（真實 CLI）」執行一場真實 Agent 請購；頁面開始前就顯示「真實 Agent 即時展示・開發展示例外・合成資料・不付款」。fake 展示與歷史回放的操作不變。
+
 ## 2 Unity 環境與 LimeZu 素材
 
 - **Editor**：Unity **6000.5.3f1**（Unity 6.5），已安裝 WebGLSupport 模組；本機唯讀確認，未安裝或更新任何東西。專案釘選在 `unity/AgentPaymentAuthority/ProjectSettings/ProjectVersion.txt`。
