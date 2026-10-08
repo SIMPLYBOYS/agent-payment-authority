@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 路線一的 C0′（Claude Code 執行，待 Codex review）**：以專用設定目錄 `~/.apa-claude` 執行一次，取得 init（exit `0`）。**plugins 仍為 2 個**（同樣兩個名稱、`relative`）；§44.4 的其他條件都符合。依決策稿：**本次專用設定目錄方案未達目標，來源仍未確認**；保存證據後停止，交由 Aaron 決定是否評估路線二；不自動切換方案、不放寬 Gate（第 49 節）。
+>
 > **現行摘要（10/8，最新）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估。** 評估見 [live-purchase-execution-decision.md](live-purchase-execution-decision.md)：路線一決策稿 `9cf4e6a` 通過限定文件複核。**10/8 專用設定目錄的實作（`21560c5`、`a4e3d8e`）於 `a4e3d8e` 通過限定範圍技術 review，實作與 fake 驗證關閉**（第 47.5 節）。§39.3 的 `PRODUCT_BASE` 已改為 `a4e3d8e`。**Aaron 已以專用目錄登入，並本人確認為自己的訂閱帳號**（`authMethod=claude.ai`、`configDirectory` 符合；第 48.1 節）。階段 B 完成。尚未證明真實 plugins 為空；C0′、認證清單修改與正式請購各自另行核准。
 > - **Aaron 10/8 已選定路線一**：維持零 plugins，**保留方案 A，另加** APA 專用 `CLAUDE_CONFIG_DIR`（`~/.apa-claude`，以子程序 HOME 組成絕對路徑），須 Aaron 另外登入。階段 B（本人確認登入方式）排在 C0′ 之前。
 > - 之後的實作、登入後的 C0′、認證清單修改與正式請購，各自另行核准，互不授權。
@@ -2785,3 +2787,53 @@ CLAUDE_CONFIG_DIR="$HOME/.apa-claude" claude auth status
 1. 一次 C0′（§39.3，`PRODUCT_BASE=a4e3d8e`；逐項核對 §44.4 全部條件）；
 2. 認證接受清單的修改；
 3. 正式請購。
+
+## 49 路線一的診斷型 C0′ 執行紀錄（2026-10-08；Claude Code 執行，待 Codex review）
+
+> **結果：取得 init；plugins 仍非空（2 個）。** 依 [live-purchase-execution-decision.md](live-purchase-execution-decision.md) 第 3 節：只代表本次專用設定目錄方案未達目標，**來源仍未確認**。保存證據後停止，交由 Aaron 決定是否評估路線二；不得自動切換方案或放寬 Gate。正式請購的阻擋仍在。
+
+- **核准**：Aaron 10/8「我批准 C0」。Claude Code 詢問確認後，Aaron 選擇 C0′，即 §39.3 腳本：寫入一次固定訊息，可能產生用量。執行一次、失敗不重試；使用專用設定目錄。
+- **開工核對**：分支 `b1-04-live`，HEAD `f788fda`；工作區只有 `?? demo`。`PRODUCT_BASE=a4e3d8e` 之後沒有非文件差異。
+- **執行方式**：§39.3 的 bash 區塊原樣抽出，以 `bash` 執行一次（在 Claude Code 沙箱外，依核准使用既有登入環境）。腳本沒有修改，exit `0`。
+- **前置與環境**：
+  - 步驟 1～5 通過：二進位 `vcs.revision=f788fda935f9b2dc13efcf4cceaf8b7271e5d9a7`、`vcs.modified=false`。
+  - 這個二進位含 `LiveEnv`，CLI 的版本檢查與執行都帶 `CLAUDE_CONFIG_DIR=$HOME/.apa-claude`（依 §47.1 的程式行為；這次執行沒有另外記錄子程序環境）。
+  - 版本檢查通過（`2.1.293`）。
+- **時間**：`started-utc` `2026-10-08T07:07:02Z`，`ended-utc` `2026-10-08T07:07:05Z`。
+
+**依 §44.4 逐項核對**（`stdout.txt` 的 JSON 投影；trace 的 `result` 與它相同，只差 `trace` 路徑欄位）：
+
+| 項目 | 觀測 | 條件 |
+|---|---|---|
+| plugins | `fields.plugins` `array`；**`plugins_count` 2**；`cc-plugin-agents-md`（`relative`）、`cc-plugin-plugin-authoring`（`relative`） | **不符** |
+| agents | `array`；`agents_count` 0；entries `[]` | 符合 |
+| skills | `array`；`skills_count` 0 | 符合 |
+| MCP | `array`；`mcp_servers_count` 1；`apa_server_status` `connected` | 符合 |
+| 工具 | 3／3／0 | 符合 |
+| 權限與版本 | `dontAsk`；`approved` | 符合 |
+
+其他觀測：
+- `observed`／`init_observed`；`cli_exit_code` 143（取得 init 後由 Host 停止）。
+- `input_status` `complete`，寫入 95 bytes；`usage` `unknown`（可能產生了一次模型請求）。
+- 業務工具 0／0；`model` `claude-sonnet-5-5`；`auth_source` `none`；`extra_members` 6。
+
+**解讀**（照決策稿第 3 節，不額外推論）：
+- 專用設定目錄這次沒有清空 plugins：數量、名稱、路徑分類都與第 41、45 節相同。
+- **只能判定本次方案未達目標，來源仍未確認**；不推論來源在哪一層。
+- 正式 Gate 仍會在 plugins 那一條拒絕；認證接受清單也仍是空的。
+- 階段 B 登入（48.1）與本次結果互不影響：登入方式已由本人確認，但這不改變 plugins 的觀測。
+
+**證據**（`artifacts/b1-04/c0prime-diag-20261008T070655Z/`，`artifacts/` 不進版控）：
+- `commit.txt`、`binary-vcs.txt`、`go-version-build.txt`、`started-utc.txt`、`ended-utc.txt`
+- `exit-code.txt`（`exit=0`）、`stdout.txt`、`apa-buyer-error.txt`（0 bytes）
+- `runs/probe-1791443223718653000.jsonl`
+
+暫存目錄已由腳本刪除；repo 工作區只有 `?? demo`。
+
+**沒有做的事**：沒有重試、沒有改用其他參數或方案、沒有追查來源；沒有開 Store、建 task 或執行業務工具；沒有修改 Gate、認證接受清單、啟動參數、版本釘選或產品程式。
+
+**待 Aaron 決定**（不自動進行）：
+- 是否評估路線二（決策稿第 3 節）。前提是兩個 plugins 的元件清單，以及 Aaron 對內容的確認；最直接的方式是 Aaron 本人查看自己安裝的 plugins。
+- 或其他方向（例如調整受管設定，屬全域修改）。
+
+L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
