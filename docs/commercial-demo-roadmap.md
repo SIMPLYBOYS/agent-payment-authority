@@ -514,6 +514,8 @@
 > **進度（10/8，現行）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估**（`docs/live-purchase-execution-decision.md`；`9cf4e6a` 通過 Codex 限定文件複核；依 Aaron 核准，專用設定目錄已實作，於 `a4e3d8e` 通過限定範圍技術 review；Aaron 已以專用目錄登入，並本人確認為自己的訂閱帳號（`docs/cli-poc.md` 第 48.1 節），階段 B 完成。之後的一次 C0′（`docs/cli-poc.md` 第 49 節）：**plugins 仍為 2 個**，本次專用設定目錄方案未達目標，來源仍未確認；已停止，交由 Aaron 決定是否評估路線二。尚未證明真實 plugins 為空；C0′、認證清單修改、正式請購各自另行核准）。**Aaron 10/8 已選定路線一**：維持零 plugins，保留方案 A，另加 APA 專用 `CLAUDE_CONFIG_DIR`（`~/.apa-claude`，須 Aaron 另外登入）；階段 B 排在 C0′ 之前。C0′ 須符合 §44.4 全部條件；plugins 仍非空則停止，由 Aaron 決定是否評估路線二（目前尚不可採用，不會自動生效）。認證接受清單為空，是另一個獨立阻擋。實作、C0′、認證清單修改、正式請購各自另行核准，順序依該文件 §4.1。
 >
 > **進度（10/8，最新）**：開發展示執行例外提案完成，待 Codex review 與 Aaron 核准；尚未修改 Gate 或執行真實請購（`docs/live-purchase-execution-decision.md` 第 9 節）。提案內容：`--dev-demo-plugins` opt-in 只接受恰好兩個指定 plugins，預設嚴格不變；認證清單只加入 `none`；之後不另跑 C0′，直接核准一次正式請購嘗試。Aaron 須集中決定三題（剩餘風險、`none`、訂閱用量）。
+>
+> **進度（10/8，實作）**：Aaron 核准例外與認證 `none`；實作 `8976e86`、測試補正 `21090e3`，fake 測試通過。容器驗證在突變步驟失敗（一項突變沒被抓到，測試放錯 package），已修正，待核准重跑與 Codex review（`docs/cli-poc.md` 第 50 節）。真實請購尚未核准。
 
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。

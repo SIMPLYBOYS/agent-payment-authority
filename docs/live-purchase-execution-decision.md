@@ -1,6 +1,6 @@
 # 第一筆真實請購的執行路線評估
 
-> **狀態：開發展示執行例外提案完成，待 Codex review 與 Aaron 核准；尚未修改 Gate 或執行真實請購**（第 9 節）。路線一的專用設定目錄已實作，但其 C0′ 中 plugins 仍為 2 個（`docs/cli-poc.md` 第 49 節，Claude Code 執行，待 Codex 核對）。
+> **狀態：9.5 三題與實作已核准（9.6）。實作 `8976e86`、測試補正 `21090e3`，fake 測試通過；核准的一次容器驗證在突變步驟失敗（一項突變沒被抓到，測試放錯 package），已修正但尚未重跑容器，待 Aaron 核准重跑與 Codex review（`docs/cli-poc.md` 第 50 節）。真實請購尚未核准。**
 > - Aaron 已選定路線一（維持零 plugins）。專用設定目錄為 `~/.apa-claude`；階段 B 排在 C0′ 之前（第 6 節）。
 > - 2026-10-08；分支 `b1-04-live`。評估基準 HEAD `bd3ac81`（產品程式基準 `40bd263`，查詢工具 `5bab248`）；本次補正的開工基準為 `34ca9eb`。
 > - 本文件不改變現行 Gate、認證接受清單或任何執行限制，也不代表 plugins 已獲接受、零 plugins 要求已取消、來源已確認或正式請購已放行。
@@ -275,7 +275,7 @@ Codex 的前置 review 只做文件、原始碼與 Git 唯讀核對，沒有重�
 **還缺的**：沒有缺少的確認項目。只剩 9.5 第 3 題「是否接受真實請購會使用這個訂閱、用量無法確認」，由 Aaron 回答。
 
 **認證接受清單的最小變更**：`liveAcceptAuth` 由空清單改為只接受 `none`（L1-d 例外變更）。
-- 適用所有 live run，與 plugin 模式無關；嚴格模式下 plugins 仍會被拒，所以實際效果只出現在例外模式。
+- **適用所有 live run，包含嚴格模式**：嚴格模式下，只要 init 的 plugins 為空且 `apiKeySource` 為 `none`，現在也會通過認證檢查。目前觀測到的 plugins 非空，所以嚴格模式仍在 plugins 那一條被拒，但這不是認證規則本身的限制。（10/8 依 Codex 小修更正；原文寫「實際效果只出現在例外模式」，不精確。）
 - **依據**：
   - live 子程序的環境白名單不傳 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_OAUTH_TOKEN` 等憑證（`CLIEnv`）；
   - 設定目錄固定為 `~/.apa-claude`，Aaron 已確認該目錄是 claude.ai 的本人訂閱登入。
@@ -295,9 +295,10 @@ Codex 的前置 review 只做文件、原始碼與 Git 唯讀核對，沒有重�
 4. **不另跑 C0′**：請購執行本身就會經過同一個 init Gate，C0′ 不會回答任何直接阻擋請購的新問題。
 5. Aaron 另行核准**一次正式請購嘗試**。
    - **工具**：沿用 §39.3 腳本的前置步驟 1～5（分支、工作區、祖先、非文件差異、證據目錄、乾淨 clone 建置、VCS 檢查）。
-   - **第 6 步改為**：`APA_LIVE_CLI=true APA_DB_PATH="$EV/apa-live.db" "$WT/apa-buyer" run --live --dev-demo-plugins --cli /Users/mac/.local/bin/claude --task task-a --trace-dir "$EV/runs"`。
+   - **第 6 步改為**：`APA_LIVE_CLI=true APA_DB_PATH="$EV/apa-live.db" "$WT/apa-buyer" run --live --dev-demo-plugins --cli /Users/mac/.local/bin/claude --task task-a --registry "$WT/src/testdata/contracts/registry.json" --profile "$WT/src/testdata/policy/m1-demo-profile.json" --trace-dir "$EV/runs"`。
+     - registry 與 profile **明確指向乾淨 clone 中的檔案**，避免二進位來自驗收基準，資料卻讀自原工作區的相對路徑（10/8 依 Codex 小修加入）。
      - 全新測試資料庫放在證據目錄中；不操作既有的展示資料庫。
-     - 任務資料使用既有的 `testdata/contracts/registry.json` 與 `testdata/policy/m1-demo-profile.json`。
+     - 任務資料是乾淨 clone 中既有的 `testdata/contracts/registry.json` 與 `testdata/policy/m1-demo-profile.json`。
    - 不付款、不接 Signer、不用正式資產。
    - **成功**：同一個 run／task 中有：
      - `init.gate` 為 `passed`，且 `run_start.gate_mode=dev_demo_plugins`；
@@ -327,5 +328,8 @@ L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
   2. 認證接受清單只加入 `none`。
   3. 接受以 `~/.apa-claude` 的本人訂閱執行、用量可能 `unknown`、合成資料、不付款。
 - **核准實作**：依 9.2／9.3，含 fake 測試、突變、一次完整斷網容器，集中交 review。
-- **待補**：「Codex 的兩項小修」的內容不在 Claude Code 可取得的紀錄中，待 Aaron 提供後納入。
+- **兩項小修**（Codex 對 `1e7a286` 的限定設計 review；Aaron 之後轉貼）：
+  1. 9.3「實際只影響例外模式」不精確：`none` 加入所有 live run 的清單，嚴格模式在 plugins 為空時也受影響。已照實改寫，並由 `TestDevDemoGate`、`TestDevDemoPluginsCommand` 測試。
+  2. 正式請購命令的 registry／profile 明確指向乾淨 clone 的檔案。已改 9.4。
+  Codex 該次只核對文件、Git 與 Gate／trace 原始碼，沒有執行測試或 CLI；階段 B 的依據來自文件記錄的本人確認，不是 Codex 獨立查驗登入環境。
 - **不核准**：真實請購執行（實作 review 通過後另行核准一次）、恢復 plugin 調查、另跑 C0′。

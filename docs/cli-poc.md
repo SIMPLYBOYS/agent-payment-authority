@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 開發展示例外與認證 `none` 已實作（`8976e86`、測試補正 `21090e3`；Claude Code 執行，待 Codex review）**（第 50 節）。fake 測試全部通過。**核准的那一次完整斷網容器驗證（`8976e86`）失敗**：只有一項突變沒被抓到，原因是測試放錯 package，不是產品行為；已在 `21090e3` 修正（只改測試）。修正後尚未在容器中驗證，再跑須 Aaron 核准。真實請購尚未核准、未執行。
+>
 > **現行（10/8，最新）**：**開發展示執行例外提案完成，待 Codex review 與 Aaron 核准；尚未修改 Gate 或執行真實請購**（[live-purchase-execution-decision.md](live-purchase-execution-decision.md) 第 9 節）。
 > - 提案內容：預設嚴格模式維持零 plugins；`run --live --dev-demo-plugins` 明確 opt-in 時，只接受恰好兩個指定名稱；其他 Gate 條件不變；trace 標示 `gate_mode`。
 > - 認證清單提案只加入 `none`。
@@ -236,9 +238,10 @@ APA_LIVE_CLI=true APA_DB_PATH=var/apa-live.db \
   ./bin/apa-buyer run --live --cli /Users/mac/.local/bin/claude --task task-a
 ```
 
-- `APA_LIVE_CLI=true` 與 `--live` 必須同時存在（`APA_LIVE_CLI` 依 `strconv.ParseBool`，其他值視為未開啟）；`--live` 不得與 `--fake-cli`／`--scenario` 併用，`--cli` 只限 `--live`。`--cli` 必須是絕對路徑，不查 PATH、不 fallback。`--version` 必須恰為 `2.1.288 (Claude Code)`（10/3 由 2.1.287 改，見第 15.6 節）；不符就停止，不升級、不降級。以上任何一項不符：不執行 CLI 的推論、不開 Store。
+- **10/8 現行說明**：版本釘選已是 `2.1.293 (Claude Code)`（第 40 節）；CLI 使用 `CLAUDE_CONFIG_DIR=$HOME/.apa-claude`（第 47 節）。第一筆真實請購**不用**上方的 `./bin/apa-buyer`，改用乾淨 clone 建置的二進位，命令見 [live-purchase-execution-decision.md](live-purchase-execution-decision.md) 9.4；尚待核准。下列兩點中的版本與清單內容是當時的文字。
+- `APA_LIVE_CLI=true` 與 `--live` 必須同時存在（`APA_LIVE_CLI` 依 `strconv.ParseBool`，其他值視為未開啟）；`--live` 不得與 `--fake-cli`／`--scenario` 併用，`--cli` 只限 `--live`。`--cli` 必須是絕對路徑，不查 PATH、不 fallback。`--version` 必須恰為 `2.1.288 (Claude Code)`（10/3 由 2.1.287 改，見第 15.6 節；**10/8 現行為 `2.1.293`**）；不符就停止，不升級、不降級。以上任何一項不符：不執行 CLI 的推論、不開 Store。
 - 資料庫預設 `var/apa-live.db`（`APA_DB_PATH` 可覆寫，規則同既有）；fake 預設 `var/apa-fake.db`、demo 預設 `var/apa.db` 不變。task 已存在就照既有規則拒絕，不刪紀錄。
-- **目前 live 的認證接受清單是空的**（`liveAcceptAuth`），所以任何 live init 都會在 `auth_unconfirmed`／`auth_missing` 停下，不開 Store。決定接受值、以及其文件依據，是階段 C 開跑前的待決事項；不得在第一次失敗後自動學習或放寬，trace 也不記錄 `apiKeySource` 的值。
+- **（當時）目前 live 的認證接受清單是空的**（`liveAcceptAuth`），所以任何 live init 都會在 `auth_unconfirmed`／`auth_missing` 停下，不開 Store。**10/8 起改為只接受 `none`**（`8976e86`，適用所有 live run，含嚴格模式；第 50 節）。決定接受值、以及其文件依據，是階段 C 開跑前的待決事項；不得在第一次失敗後自動學習或放寬，trace 也不記錄 `apiKeySource` 的值。
 
 ### 7.3 階段 A 的內容（已實作）
 
@@ -2843,3 +2846,83 @@ CLAUDE_CONFIG_DIR="$HOME/.apa-claude" claude auth status
 - 或其他方向（例如調整受管設定，屬全域修改）。
 
 L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
+
+## 50 開發展示例外與認證 `none` 的實作（2026-10-08；Claude Code 執行，待 Codex review）
+
+> **已實作；fake 測試全部通過。核准的一次完整斷網容器驗證失敗，只有一項突變沒被抓到（測試放錯 package）；已修正，只改測試，修正後尚未在容器中驗證。** 沒有執行真實 CLI；真實請購尚未核准。
+
+- **核准**：Aaron 10/8 接受 [live-purchase-execution-decision.md](live-purchase-execution-decision.md) 9.1 的剩餘風險（限開發展示模式）、核准認證清單只加入 `none`、接受訂閱用量 `unknown` 等條件；並核准依 9.2／9.3 實作，納入 Codex 的兩項小修（9.6）。
+- **開工核對**：分支 `b1-04-live`，HEAD `918f4d7`；工作區只有 `?? demo`。
+
+### 50.1 程式（`8976e86`）
+
+- **`internal/buyer/gate.go`**：
+  - `Gate` 新增 `DevDemoPlugins`，固定清單 `devDemoPlugins`（`cc-plugin-agents-md`、`cc-plugin-plugin-authoring`），以及 `Mode()`（`strict`／`dev_demo_plugins`）。
+  - plugins 檢查在例外模式改用 `devDemoCheck`：
+    - 成員必須存在，而且恰好 2 筆；每筆是物件、`name` 為字串（以 `objectFields` 嚴格讀取）；兩個名稱各出現一次。
+    - 多出、缺少、重複、名稱不符、成員缺少 → `plugins`；元素格式異常 → `init_malformed`。
+  - 其他檢查的順序與規則都不變；嚴格模式完全沿用原邏輯。
+- **`internal/buyer/host.go`**：trace 的 `run_start` 新增 `gate_mode`。
+- **`cmd/apa-buyer/main.go`**：
+  - 新增 `run` 的 `--dev-demo-plugins` 旗標：沒有 `--live` 時拒絕；probe 沒有這個旗標。
+  - 例外模式時，LIVE 開頭行之後加印固定文字 `gate: DEV-DEMO plugin exception (2 named plugins accepted; not the strict gate)`。
+  - `liveAcceptAuth` 改為 `["none"]`，適用所有 live run，**包含嚴格模式**（Codex 小修 1）；註解寫明依據與限制。
+- **沒有改**：專用設定目錄、方案 A、身分綁定、工具授權、Policy、Store、付款、Signer、執行上限、版本釘選。
+
+### 50.2 測試
+
+| 測試 | 確認 |
+|---|---|
+| `TestDevDemoGate`（新） | 嚴格模式：兩個 plugins 仍拒絕；plugins 為空或不存在，加上 `none` 都通過（Codex 小修 1）；其他認證值拒絕。例外模式：恰好兩個（兩種順序）通過；多一個、少一個、空、重複、其他名稱、大小寫不同、成員缺少都是 `plugins`；字串陣列、`name` 非字串或缺少、不是陣列、`null`、成員名稱重複都是 `init_malformed`；skills、agents、工具、MCP、權限、版本、其他認證值、認證缺少都照樣拒絕 |
+| `TestDevDemoPluginsCommand`（新） | 以正式的認證清單，經命令執行：<br>- 例外模式加上兩個 plugins → 跑到 Ask，開頭行有例外標示，trace 為 `gate_mode=dev_demo_plugins`、`gate=passed`；<br>- 沒有旗標時同樣的 init → `config_mismatch plugins`，不開 Store，trace 為 `strict`／`plugins`；<br>- 嚴格模式、plugins 為空、`none` → 通過，沒有例外標示；<br>- fake run 加旗標被拒；probe 不接受這個旗標。 |
+| `TestTraceGateMode`（新，`21090e3`） | 在 `internal/buyer` 直接檢查兩種模式的 `run_start.gate_mode` |
+| 既有測試更新 | `TestLivePathWithFake`：正式清單改為 `["none"]` 的斷言；fake 自己的認證標籤仍被拒、不開 Store |
+
+**突變**：260 項增為 266 項：
+- 不檢查數量；
+- 不檢查名稱；
+- 嚴格模式也套用例外；
+- 例外時跳過後續檢查；
+- `gate_mode` 寫死為 `strict`；
+- 沒有 `--live` 也接受旗標。
+
+**本機**（Claude Code 執行；沙箱外）：
+- `go test -race -count=1 ./internal/buyer/ ./cmd/apa-buyer/ ./cmd/demo/`：全部 ok（提交前的工作區，內容同 `8976e86`）。
+- 第一次突變試跑：6 項都被抓到。但那次對每項都跑兩個 package，和 `mutation-check.py`「只跑被改檔案所在 package」的規則不同，**這是試跑方法的錯誤**。
+
+### 50.3 完整斷網容器驗證（核准的一次；**失敗**，保留紀錄）
+
+- **基準**：`8976e8636451fbe87456761c2c41b356dc5d2e65`；映像 `sha256:78258368…b6d0`。
+- **命令**：`APA_VERIFY_IMAGE=docker.io/library/apa-verify:b1-05 DOCKER_CONTEXT=desktop-linux sh scripts/verify/container-verify.sh 8976e86`
+
+  | 步驟 | exit |
+  |---|---|
+  | check-contracts | 0 |
+  | check | 0 |
+  | race-cover | 0 |
+  | verify-b1-01 | 0 |
+  | guards | 0 |
+  | evidence-import-tests | 0 |
+  | **mutation** | **1** |
+
+- **突變**：baseline PASS；265／266 被抓到。**#265「gate_mode 寫死為 strict」存活**：它的測試 `TestDevDemoPluginsCommand` 在 `cmd/apa-buyer`，但 checker 只在 `internal/buyer` 執行，結果是 `no tests to run`。
+- **隔離自檢**：17 項全部符合。overall exit 1。
+- **證據**：`artifacts/verify-container/runs/8976e8636451-20261008T080748Z/`（匯入完整，295 個檔案）。
+- **修正**（`21090e3`，只改測試）：在 `internal/buyer` 新增 `TestTraceGateMode`，#265 改指向它。
+  - 以 checker 的 package 規則（`pkg()`）重新試跑 6 項新突變：全部被抓到（`artifacts/b1-04/devdemo-local-20261008T082240Z/mutation-trial-checker-rule.txt`）。
+- **沒有重跑容器**：核准的一次已經用掉。修正後的 `21090e3` **還沒有容器結果**。
+
+### 50.4 文件同步（本次）
+
+- 決策稿 9.3 依 Codex 小修 1 改寫；9.4 的請購命令依小修 2，registry／profile 指向 `$WT/src/...`。
+- 決策稿 9.6 補上兩項小修的內容與歸屬。
+- README 環境變數表、`docs/m1-boundaries.md`、本文件 §7.2 中「認證清單為空」與 `2.1.288` 等過時說明已同步；歷史文字標為當時狀態。
+- §39.3 的 `PRODUCT_BASE` 仍是 `a4e3d8e`，待實作 review 通過後改為新的已 review commit。
+
+### 50.5 尚待
+
+1. **Aaron 是否核准再跑一次完整斷網容器驗證**（`21090e3` 或其後只改文件的 commit）。
+2. Codex review 實作、測試、突變，以及這次容器失敗紀錄。
+3. review 通過後：同步 §39.3 的 `PRODUCT_BASE`，並由 Aaron 另行核准一次正式請購嘗試（9.4）。
+
+不另跑 C0′，不恢復 plugin 調查。L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
