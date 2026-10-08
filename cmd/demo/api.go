@@ -98,15 +98,17 @@ func newTokens(cfg contracts.RegistryConfig, path, db string, inputs ...string) 
 // api is the authenticated read-only task API. Every handler reads the
 // Store only: no StartTask, Submit, Cancel or ExpireDue.
 type api struct {
-	st      *store.Store
-	tokens  []demoToken
-	addr    string // the bound address, the only Host and Origin accepted
-	clock   store.Clock
-	unity   *os.Root // the Unity Web build's Build/ directory; nil without a build
-	expiry  *expiryHealth
-	fake    bool         // a fake CLI passed its --version check at start
-	control *control     // host-started runs (--scenarios); nil otherwise
-	history *historyInfo // history mode (--history-db); nil otherwise
+	st       *store.Store
+	tokens   []demoToken
+	addr     string // the bound address, the only Host and Origin accepted
+	clock    store.Clock
+	unity    *os.Root // the Unity Web build's Build/ directory; nil without a build
+	expiry   *expiryHealth
+	fake     bool         // a fake CLI passed its --version check at start
+	control  *control     // host-started runs (--scenarios); nil otherwise
+	history  *historyInfo // history mode (--history-db); nil otherwise
+	live     *liveInfo    // live mode (--live-cli); nil otherwise
+	traceDir string       // live mode: where the run traces are
 }
 
 func (a *api) register(mux *http.ServeMux) {

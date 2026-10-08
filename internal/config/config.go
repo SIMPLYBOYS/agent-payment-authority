@@ -10,7 +10,8 @@ import (
 
 // Config is the validated runtime configuration.
 type Config struct {
-	Addr string // loopback ip:port the demo server binds
+	Addr    string // loopback ip:port the demo server binds
+	LiveCLI bool   // APA_LIVE_CLI=true; the demo host accepts it only with --live-cli (docs/cli-poc.md 55)
 }
 
 // Load reads settings through getenv (os.Getenv in production).
@@ -31,15 +32,11 @@ func Load(getenv func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("APA_ADDR port %q must be a number in 0-65535", port)
 	}
 
+	var live bool
 	if v := getenv("APA_LIVE_CLI"); v != "" {
-		live, err := strconv.ParseBool(v)
-		if err != nil {
+		if live, err = strconv.ParseBool(v); err != nil {
 			return Config{}, fmt.Errorf("APA_LIVE_CLI %q must be true or false", v)
 		}
-		// ponytail: no LiveCLI field until a reviewed live run exists to consume it.
-		if live {
-			return Config{}, errors.New("APA_LIVE_CLI=true is not available to the demo server: live runs go through apa-buyer run --live (docs/cli-poc.md); unset it or set it to false")
-		}
 	}
-	return Config{Addr: addr}, nil
+	return Config{Addr: addr, LiveCLI: live}, nil
 }

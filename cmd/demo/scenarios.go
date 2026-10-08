@@ -39,7 +39,11 @@ var scenarioID = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 // loadScenarios reads the catalog strictly. Each consumer must be in the
 // trusted registry and have demo tasks to allocate; each scenario file must
 // exist. The digest records exactly what a run was accepted with.
-func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.RegistryConfig) (map[string]*scenario, error) {
+//
+// In live mode (docs/cli-poc.md 55) an entry names no scenario file: the
+// real CLI runs, not a script; a live catalog with one, or a fake catalog
+// without one, is refused.
+func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.RegistryConfig, live bool) (map[string]*scenario, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -71,12 +75,19 @@ func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.Regist
 		if len(sc.candidates) == 0 {
 			return nil, fmt.Errorf("scenarios %s: %s: consumer %q has no show-* task in the registry", path, sc.ID, sc.ConsumerID)
 		}
-		if sc.Scenario, err = filepath.Abs(sc.Scenario); err != nil {
-			return nil, err
-		}
-		body, err := os.ReadFile(sc.Scenario)
-		if err != nil {
-			return nil, fmt.Errorf("scenarios %s: %s: scenario file: %w", path, sc.ID, err)
+		var body []byte
+		switch {
+		case live && sc.Scenario != "":
+			return nil, fmt.Errorf("scenarios %s: %s: a live catalog names no scenario file (the real CLI runs)", path, sc.ID)
+		case !live && sc.Scenario == "":
+			return nil, fmt.Errorf("scenarios %s: %s: no scenario file", path, sc.ID)
+		case !live:
+			if sc.Scenario, err = filepath.Abs(sc.Scenario); err != nil {
+				return nil, err
+			}
+			if body, err = os.ReadFile(sc.Scenario); err != nil {
+				return nil, fmt.Errorf("scenarios %s: %s: scenario file: %w", path, sc.ID, err)
+			}
 		}
 		entry, _ := json.Marshal(struct{ ID, ConsumerID, BudgetInitial string }{sc.ID, sc.ConsumerID, string(sc.BudgetInitial)})
 		h := sha256.New()

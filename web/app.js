@@ -29,6 +29,8 @@ const MAX_REREAD = 3;   // task and events must agree; then show "updating"
 
 let token = null;       // the viewer token, memory only
 let history = null;     // the host's history mode (a recorded real run), from /api/viewer
+let live = null;        // the host's live mode (a real Agent run the operator starts), from /api/viewer
+let liveTrace = null;   // live mode: { gen, reply } of GET /api/tasks/{id}/trace for the open task
 let abort = null;       // aborts the current generation's requests
 let timer = null;
 let inFlight = false;
@@ -192,6 +194,7 @@ export function forget(message) {
   chosenPo = null;
   sent = null;
   lastReport = null;
+  liveTrace = null;
   target = motion = null;
   if (document.body.dataset.page === "viewer") $("auth-box").open = true;
   draw();
@@ -246,7 +249,8 @@ function renderPanels() {
   const snap = state.snapshot;
   const rp = mode === "replay" ? replayPos : null;
   const view = snap ? (rp ? A.stepView(snap, rp.n) : snap) : null;
-  const ctx = { mode: rp ? "replay" : "live", n: rp && rp.n, m: rp && rp.m, catalog, catalogAt, history };
+  const ctx = { mode: rp ? "replay" : "live", n: rp && rp.n, m: rp && rp.m, catalog, catalogAt, history, live,
+    trace: live && liveTrace && liveTrace.gen === state.gen ? liveTrace.reply : null };
   const c = A.card(view, rp ? null : chosenPo, ctx);
   const mo = motion && motion.gen === state.gen ? motion : null;
   const e = snap ? A.evidence(snap, c && c.po, { ...ctx, sent, report: lastReport, motion: mo && { rule: mo.rule, text: mo.first ? FIRST_LOAD + "（不播放過場）" : mo.text } }) : null;
@@ -266,7 +270,7 @@ function renderPanels() {
   }
   const chip = $("mode-chip");
   chip.dataset.mode = rp ? "replay" : "live";
-  chip.textContent = rp ? "回放中 #" + rp.n + "／共 " + rp.m + "（唯讀）" : mode === "replay" ? "回放中（唯讀）" : history ? "歷史紀錄（非即時）" : "即時";
+  chip.textContent = rp ? "回放中 #" + rp.n + "／共 " + rp.m + "（唯讀）" : mode === "replay" ? "回放中（唯讀）" : history ? "歷史紀錄（非即時）" : live ? "即時（真實 Agent）" : "即時";
   $("current").textContent = c ? "目前：" + c.title.replace(/^客人 /, "") + " · " + (c.scenePo || "尚無請購") + (rp ? "（回放當步）" : "") : "目前：未選擇 task";
 }
 
@@ -274,9 +278,10 @@ function renderPanels() {
 // run, docs/cli-poc.md 54): the fixed label replaces the fake-agent badge
 // and capability line, and a note by the scene says the shop shows a
 // replay of that record. Nothing else changes: the data are the Store's.
-function applyHistory(h) {
+function applyHistory(h, l) {
   history = h && h.record === "live_history" ? h : null;
-  labelPage(history);
+  live = !history && l && l.record === "live_demo" ? l : null;
+  labelPage(history || live);
   shownCard = shownEvidence = ""; // relabel the card and the evidence panel
 }
 
@@ -285,13 +290,17 @@ function applyHistory(h) {
 // the label is there before a viewer is chosen.
 export function labelPage(h) {
   const history = h && h.record === "live_history" ? h : null;
+  const live = h && h.record === "live_demo" ? h : null; // live mode (docs/cli-poc.md 55)
   const badge = document.querySelector("header .badge"), caps = document.querySelector("header .caps");
-  if (badge) badge.textContent = history ? history.label : "M1／fake agent／不付款";
+  if (badge) badge.textContent = history ? history.label : live ? live.label : "M1／fake agent／不付款";
   if (caps) caps.textContent = history
     ? "能力：真實 Agent 執行紀錄（開發展示例外，非即時）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
+    : live ? "能力：真實 Agent（" + (live.dev_demo_plugins ? "開發展示例外：plugins 內容與行為未確認，不是嚴格零 plugin 模式" : "嚴格模式") + "）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
     : "能力：真實 Agent 未啟用 · 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行";
   const note = $("history-note");
   if (note) note.hidden = !history;
+  const ln = $("live-note");
+  if (ln) ln.hidden = !live;
 }
 
 async function signIn(ev) {
@@ -319,7 +328,7 @@ export async function useViewer(typed) {
     const v = await res.json();
     if (gen !== state.gen) return; // the body came after a switch, a clear or pagehide: shows nothing
     state.consumer = v.consumer_id;
-    applyHistory(v.history || null);
+    applyHistory(v.history || null, v.live || null);
     $("task-pick").dataset.state = "loading";
     listNote("清單讀取中…", "");
     // The viewer is verified: signed in. The list has its own state; its
@@ -445,6 +454,7 @@ export function openTask(id) {
   const consumer = state.consumer;
   const gen = A.reset(state, consumer, id);
   shownSeq = -1;
+  liveTrace = null;
   chosenPo = null;
   sent = null;
   lastReport = null;
@@ -474,6 +484,16 @@ async function poll(first) {
       result = A.commit(state, gen, task, events);
     }
     if (result === "inconsistent") A.fail(state, gen, "updating");
+    if (live && (!liveTrace || liveTrace.gen !== gen || liveTrace.reply.state !== "available")) {
+      // live mode: the run's tool calls, once the CLI has ended (the trace
+      // is written then); a failed read leaves the last reply, never more.
+      try {
+        const reply = await call("/api/tasks/" + id + "/trace", gen);
+        if (gen === state.gen) { liveTrace = { gen, reply }; renderPanels(); }
+      } catch (e) {
+        if (e.code === "unauthenticated") throw e;
+      }
+    }
   } catch (e) {
     if (gen === state.gen) {
       if (e.code === "unauthenticated") { inFlight = false; return unauthorized ? unauthorized() : forget("token 已失效，請重新輸入"); }

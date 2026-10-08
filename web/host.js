@@ -163,9 +163,14 @@ function renderReadiness() {
     // run; nothing expires and the time is the record's, not the present.
     const hist = st.history && st.history.record === "live_history";
     if (hist) labelPage(st.history);
+    // Live mode (docs/cli-poc.md 55): labelled before anything runs.
+    const live = st.live && st.live.record === "live_demo" ? st.live : null;
+    if (live) labelPage(live);
     rows.push(hist ? ["Store", "info", "歷史模式：唯讀副本，不執行到期檢查"] : ["Store", st.store.state, storeText(st.store)]);
     rows.push(["fake CLI", st.fake_cli.state, st.fake_cli.state === "ok" ? "就緒（fake-claude，不是 Claude Code）" : "未啟用"]);
-    rows.push(["真實 CLI", "off", hist ? "未執行（歷史模式：顯示已保存的真實執行紀錄）" : "未啟用（fake 模式）"]);
+    rows.push(live ? ["真實 CLI", "info", "啟用：按「開始」才執行真實 Claude Code CLI（" + live.cli_version + "；啟動時已核對，每場再核對）；"
+        + (live.dev_demo_plugins ? "開發展示例外（plugins 內容與行為未確認）" : "嚴格模式")]
+      : ["真實 CLI", "off", hist ? "未執行（歷史模式：顯示已保存的真實執行紀錄）" : "未啟用（fake 模式）"]);
     rows.push(["Unity 建置", st.unity_build.state, st.unity_build.state === "ok" ? "就緒（4 個建置檔）" : "缺少 " + missing.join("、") + "：請先完成首次準備"]);
     rows.push(["付款", "off", "無付款能力"]);
     rows.push(hist ? ["紀錄時間", "info", time(st.served_at) + "（凍結於最後事件，不是現在的伺服器時間）"] : ["檢查時間", "info", time(st.served_at) + "（Store 時間）"]);
@@ -276,13 +281,15 @@ function renderControl() {
   box.hidden = v.mode !== "file" || !!(lastReady && lastReady.status && lastReady.status.history);
   const pick = $("run-scenarios");
   const scenarios = (lastReady && lastReady.status && lastReady.status.runs && lastReady.status.runs.scenarios) || [];
+  const live = !!(lastReady && lastReady.status && lastReady.status.live);
+  $("live-warning").hidden = !live;
   const runs = (lastRuns && lastRuns.gen === creds.gen && lastRuns.runs) || [];
   const active = runs.some((r) => r.live === "running" || r.live === "stopping");
   pick.replaceChildren(...scenarios.map((sc) => {
     const b = document.createElement("button");
     b.type = "button";
     b.dataset.scenario = sc.id;
-    b.textContent = "開始：" + sc.label + "（" + sc.consumer_id + "）";
+    b.textContent = (live ? "開始（真實 CLI）：" : "開始：") + sc.label + "（" + sc.consumer_id + "）";
     b.disabled = starting || active;
     b.addEventListener("click", () => start(sc));
     return b;

@@ -120,6 +120,7 @@ type viewerReply struct {
 	ConsumerID string       `json:"consumer_id"`
 	Note       string       `json:"note"`
 	History    *historyInfo `json:"history,omitempty"` // history mode only
+	Live       *liveInfo    `json:"live,omitempty"`    // live mode only
 }
 
 // viewer answers GET /api/viewer for viewer tokens only: the host token is
@@ -135,5 +136,5 @@ func (a *api) viewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(w, http.StatusOK, viewerReply{Role: g.Role, ConsumerID: g.ConsumerID,
-		Note: "Local demo capability for this run of the demo host; not a user login.", History: a.historyFor(g)})
+		Note: "Local demo capability for this run of the demo host; not a user login.", History: a.historyFor(g), Live: a.live})
 }

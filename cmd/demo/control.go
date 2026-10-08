@@ -37,7 +37,7 @@ type liveRun struct {
 type control struct {
 	mu        sync.Mutex
 	st        *store.Store
-	fake      *fakeRunner
+	runner    *cliRunner
 	bridge    *toolbridge.Server
 	scenarios map[string]*scenario
 	ctx       context.Context // ends with the host
@@ -256,7 +256,7 @@ func (c *control) answer(w http.ResponseWriter, run store.Run, scenarioName stri
 // restart marks the run interrupted.
 func (c *control) runOne(ctx context.Context, lr *liveRun, sc *scenario) {
 	defer lr.cancel()
-	o := c.fake.runOne(ctx, c.st, c.bridge, planRun{TaskID: lr.run.TaskID, Scenario: sc.Scenario, BudgetInitial: sc.BudgetInitial})
+	o := c.runner.runOne(ctx, c.st, c.bridge, planRun{TaskID: lr.run.TaskID, Scenario: sc.Scenario, BudgetInitial: sc.BudgetInitial})
 	end := runEnd(o)
 	c.mu.Lock() // the end's record and this process's view of it change together
 	err := c.st.EndRun(lr.run.RunID, end)

@@ -88,21 +88,11 @@ func (e exitCode) Error() string { return fmt.Sprintf("exit status %d", int(e)) 
 
 func wallClock() uint64 { return uint64(time.Now().Unix()) }
 
-// approvedCLIVersion is the `claude --version` output a live run requires
-// (2.1.287 recorded 2026-10-02; Aaron re-approved 2.1.288 on 2026-10-03,
-// 2.1.289 on 2026-10-04 and 2.1.293 on 2026-10-08, each after a local
-// update; 2.1.293 is the version Aaron gave, not one this repo queried).
-// Another version stops the run; nothing upgrades.
-const approvedCLIVersion = "2.1.293 (Claude Code)"
+// approvedCLIVersion and liveAcceptAuth are the shared live settings
+// (internal/buyer/live.go), named here as before.
+const approvedCLIVersion = buyer.ApprovedCLIVersion
 
-// liveAcceptAuth is the apiKeySource values a live init may state, for
-// every live run, strict or the dev demo exception (Aaron 2026-10-08, L1-d;
-// docs/live-purchase-execution-decision.md 9.3). Only "none". The value
-// alone proves no login or billing: the basis is that the live environment
-// carries no API key or token (CLIEnv) and the CLI uses the APA-only
-// config directory, which Aaron confirmed is his own claude.ai
-// subscription login (docs/cli-poc.md 48.1). Nothing widens the list.
-var liveAcceptAuth = []string{"none"}
+var liveAcceptAuth = buyer.LiveAcceptAuth
 
 // deps are what tests replace.
 type deps struct {
@@ -405,17 +395,9 @@ func checkFake(ctx context.Context, path string, getenv func(string) string) err
 	return nil
 }
 
-// checkLive requires the approved version exactly, under the same rules.
+// checkLive is buyer.CheckLiveVersion.
 func checkLive(ctx context.Context, path string, env []string, want string) error {
-	out, err := buyer.Version(ctx, path, env, versionLimits)
-	if err != nil {
-		return fmt.Errorf("version check of %s failed (%v); nothing was started", path, err)
-	}
-	if got := strings.TrimSpace(out); got != want {
-		// The CLI's output is not repeated: it is CLI text.
-		return fmt.Errorf("%s reports a version other than the approved %q; nothing was started or upgraded", path, want)
-	}
-	return nil
+	return buyer.CheckLiveVersion(ctx, path, env, want)
 }
 
 // probe runs the C0 init probe once. It needs APA_LIVE_CLI=true, an
@@ -485,7 +467,7 @@ func probe(ctx context.Context, args []string, d deps) error {
 	}
 }
 
-var versionLimits = buyer.Limits{Stdout: 4 << 10, Stderr: 4 << 10, Total: 5 * time.Second, Grace: time.Second}
+var versionLimits = buyer.VersionLimits
 
 func decodeFile(path string, dst any) error {
 	raw, err := os.ReadFile(path)

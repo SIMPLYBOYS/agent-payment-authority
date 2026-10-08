@@ -79,6 +79,7 @@ type statusReply struct {
 	ServedAt          uint64           `json:"served_at"`
 	Runs              map[string]any   `json:"runs,omitempty"`    // with --scenarios: the active run and the interrupted ones
 	History           *historyInfo     `json:"history,omitempty"` // history mode only
+	Live              *liveInfo        `json:"live,omitempty"`    // live mode only
 }
 
 // hostStatus answers the host and the operator tokens
@@ -94,9 +95,12 @@ func (a *api) hostStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := statusReply{CallerRole: g.Role, HTTP: "ok", Store: a.expiry.view(), FakeCLI: stateOnly{"off"}, LiveCLI: "off",
-		UnityBuild: unityBuildStatus{State: "missing", Files: []string{}}, PaymentCapability: "unavailable", ServedAt: a.clock(), History: a.historyFor(g)}
+		UnityBuild: unityBuildStatus{State: "missing", Files: []string{}}, PaymentCapability: "unavailable", ServedAt: a.clock(), History: a.historyFor(g), Live: a.live}
 	if a.fake {
 		out.FakeCLI.State = "ok"
+	}
+	if a.live != nil {
+		out.LiveCLI = "on" // its version and config directory passed at start; each run checks them again
 	}
 	if a.unity != nil {
 		for _, name := range []string{"WebGL.data", "WebGL.framework.js", "WebGL.loader.js", "WebGL.wasm"} {

@@ -73,6 +73,7 @@ type deps struct {
 	onStore     func(*store.Store)  // after the Store opened, before serving
 	stage       func(string)        // tests: each stop step, in the order it happens
 	runsDone    chan<- []runOutcome // receives the fake runs' outcomes when all ended
+	liveVersion string              // tests: "" means buyer.ApprovedCLIVersion
 }
 
 // run serves with no fake runs; the B1-01 tests and checks use it.
@@ -105,6 +106,8 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	restoreDir := fs.String("restore-dir", "", "the new directory of --restore-copy")
 	historyDB := fs.String("history-db", "", "history mode: serve one recorded real run read only (a private copy is opened; nothing runs or expires)")
 	historyTracePath := fs.String("history-trace", "", "history mode: the recorded run trace, for its tool calls (optional)")
+	liveCLI := fs.String("live-cli", "", "live mode: absolute path of the approved Claude Code executable; a run the operator starts runs it (needs APA_LIVE_CLI=true, APA_DB_PATH and --scenarios with a live catalog; docs/cli-poc.md 55)")
+	devDemo := fs.Bool("dev-demo-plugins", false, "live mode only: the development demo plugin exception (docs/live-purchase-execution-decision.md 9)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -138,21 +141,40 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		return errors.New("--history-trace goes with --history-db")
 	}
 	if *historyDB != "" {
-		if *fakePath != "" || *planPath != "" || *scenariosPath != "" || *upgradeDB {
-			return errors.New("--history-db serves a recorded run only; it excludes --fake-cli, --plan, --scenarios and --upgrade-db")
+		if *fakePath != "" || *planPath != "" || *scenariosPath != "" || *upgradeDB || *liveCLI != "" || *devDemo {
+			return errors.New("--history-db serves a recorded run only; it excludes --fake-cli, --plan, --scenarios, --upgrade-db, --live-cli and --dev-demo-plugins")
 		}
 		return serveHistory(ctx, *historyDB, *historyTracePath, *registryPath, *unityDir, d)
 	}
 	if *planPath != "" && *scenariosPath != "" {
 		return errors.New("--plan and --scenarios exclude each other")
 	}
-	if (*fakePath == "") != (*planPath == "" && *scenariosPath == "") {
+	// Live mode (docs/cli-poc.md 55) is off unless asked for twice: the
+	// --live-cli flag and APA_LIVE_CLI=true. It runs nothing by itself: a
+	// run starts only when the operator starts one.
+	live := *liveCLI != ""
+	switch {
+	case *devDemo && !live:
+		return errors.New("--dev-demo-plugins is for live mode only (--live-cli)")
+	case live && (*fakePath != "" || *planPath != "" || *upgradeDB):
+		return errors.New("--live-cli excludes --fake-cli, --plan and --upgrade-db")
+	case live && *scenariosPath == "":
+		return errors.New("--live-cli needs --scenarios with a live catalog, e.g. testdata/demo/scenarios-live.json")
+	case !live && (*fakePath == "") != (*planPath == "" && *scenariosPath == ""):
 		return errors.New("--fake-cli goes with --plan or --scenarios")
 	}
 
 	cfg, err := config.Load(d.getenv)
 	if err != nil {
 		return err
+	}
+	switch {
+	case live && !cfg.LiveCLI:
+		return errors.New("--live-cli also needs APA_LIVE_CLI=true; nothing was started")
+	case !live && cfg.LiveCLI:
+		return errors.New("APA_LIVE_CLI=true needs --live-cli: the demo host runs the real CLI in live mode only (docs/cli-poc.md 55); unset it or set it to false")
+	case live && d.getenv("APA_DB_PATH") == "":
+		return errors.New("live mode needs APA_DB_PATH naming its own new demo database (never the fake demo's); nothing was started")
 	}
 	dbPath := cmp(d.getenv("APA_DB_PATH"), "var/apa-demo-fake.db")
 	tokenPath := cmp(d.getenv("APA_DEMO_TOKEN_FILE"), "var/demo-tokens.json")
@@ -179,13 +201,18 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	}
 	var scenarios map[string]*scenario
 	if *scenariosPath != "" {
-		if scenarios, err = loadScenarios(*scenariosPath, reg, regCfg); err != nil {
+		if scenarios, err = loadScenarios(*scenariosPath, reg, regCfg, live); err != nil {
 			return err
 		}
 	}
-	var fake *fakeRunner
-	if *fakePath != "" {
-		if fake, err = newFakeRunner(ctx, *fakePath, *planPath, *traceDir, reg, profile, d); err != nil {
+	var runner *cliRunner
+	switch {
+	case live:
+		if runner, err = newLiveRunner(ctx, *liveCLI, *traceDir, reg, profile, d, *devDemo); err != nil {
+			return err
+		}
+	case *fakePath != "":
+		if runner, err = newFakeRunner(ctx, *fakePath, *planPath, *traceDir, reg, profile, d); err != nil {
 			return err
 		}
 	}
@@ -262,7 +289,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	defer func() { stopExpiry(); expiry.Wait(); d.at("expiry_stopped") }()
 
 	var bridge *toolbridge.Server
-	if fake != nil {
+	if runner != nil {
 		tools := &toolbridge.Shop{Store: st, CatalogURL: "http://" + addr + "/catalog", Products: products, Client: toolbridge.NewClient(), Now: d.clock}
 		if bridge, err = toolbridge.Listen(tools); err != nil {
 			return err
@@ -274,9 +301,14 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	defer cancelRuns()
 	var runs sync.WaitGroup
 	mux := newMux(shop)
-	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: fake != nil}
+	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: runner != nil && !live}
+	if live {
+		ui.live = &liveInfo{Record: "live_demo", Label: liveLabel, DevDemoPlugins: *devDemo, CLIVersion: runner.live.want}
+		ui.traceDir = *traceDir
+		mux.HandleFunc("GET /api/tasks/{task_id}/trace", ui.taskTrace)
+	}
 	if scenarios != nil {
-		ui.control = &control{st: st, fake: fake, bridge: bridge, scenarios: scenarios, ctx: runCtx, wg: &runs, out: d.out, ended: map[string]*liveRun{}}
+		ui.control = &control{st: st, runner: runner, bridge: bridge, scenarios: scenarios, ctx: runCtx, wg: &runs, out: d.out, ended: map[string]*liveRun{}}
 		ui.control.register(mux, ui)
 	}
 	if root, err := os.OpenRoot(*unityDir); err == nil {
@@ -290,14 +322,19 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
-	fmt.Fprintf(d.out, "listening on http://%s (fixture mode, live CLI off, no payment capability); Store %s; demo tokens in %s\n", addr, dbPath, tokenPath)
+	if live {
+		fmt.Fprintf(d.out, "listening on http://%s (LIVE MODE: %s; a run starts only when the operator starts one, and then runs %s on the APA-only config directory, which may use your own subscription; dev demo plugin exception %t; no payment capability); Store %s; demo tokens in %s\n",
+			addr, liveLabel, *liveCLI, *devDemo, dbPath, tokenPath)
+	} else {
+		fmt.Fprintf(d.out, "listening on http://%s (fixture mode, live CLI off, no payment capability); Store %s; demo tokens in %s\n", addr, dbPath, tokenPath)
+	}
 	if d.ready != nil {
 		d.ready <- addr
 	}
 
-	if fake != nil && *planPath != "" {
+	if runner != nil && *planPath != "" {
 		runs.Go(func() {
-			out := fake.runAll(runCtx, st, bridge)
+			out := runner.runAll(runCtx, st, bridge)
 			if d.runsDone != nil {
 				d.runsDone <- out
 			}

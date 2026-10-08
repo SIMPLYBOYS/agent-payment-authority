@@ -1,0 +1,6 @@
+{
+  "description": "Trusted live catalog for the demo host's live mode (docs/cli-poc.md 55). A start request names an id; the consumer and budget come from here. No scenario file: the approved Claude Code CLI runs (APA_LIVE_CLI=true, --live-cli). Synthetic consumer, agent, wallet and products; no payment.",
+  "scenarios": [
+    {"id": "live-a", "consumer_id": "consumer-a", "label": "真實 Agent：客人 A 選購（真實 CLI）"}
+  ]
+}

@@ -41,14 +41,19 @@ type historyInfo struct {
 }
 
 // historyTrace is the whitelisted part of the recorded run trace: no
-// prompt, model text, path, token or usage.
+// prompt, model text, path or token. Usage is the CLI's own counts, read
+// for live mode only (nil: unknown).
 type historyTrace struct {
-	TaskID    string        `json:"task_id"`
-	GateMode  string        `json:"gate_mode"`
-	Gate      string        `json:"gate"`
-	Outcome   string        `json:"outcome"`
-	ToolCalls []historyCall `json:"tool_calls"`
+	TaskID    string            `json:"task_id"`
+	GateMode  string            `json:"gate_mode"`
+	Gate      string            `json:"gate"`
+	Outcome   string            `json:"outcome"`
+	ToolCalls []historyCall     `json:"tool_calls"`
+	Usage     map[string]uint64 `json:"usage,omitempty"`
 }
+
+// usageKeys are the counts a trace's run_end may carry (buyer.usageCounts).
+var usageKeys = []string{"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"}
 
 // historyCall is one recorded tool call and, for request_purchase, the
 // Store purchase and events it led to.
@@ -64,13 +69,20 @@ type historyCall struct {
 const maxTraceBytes = 1 << 20
 
 var (
-	errTrace  = errors.New("history trace is not a recorded run trace this host reads (a fixed refusal; the file is not quoted)")
-	traceWord = regexp.MustCompile(`^[A-Za-z0-9_-]{0,64}$`)
+	errTrace         = errors.New("history trace is not a recorded run trace this host reads (a fixed refusal; the file is not quoted)")
+	errTraceDisagree = errors.New("history trace and history database disagree on a request_purchase verdict; refused, neither was changed")
+	traceWord        = regexp.MustCompile(`^[A-Za-z0-9_-]{0,64}$`)
 )
 
 // loadHistoryTrace reads the recorded run trace and maps its tool calls to
 // the snapshot's purchases by the purchase order ID rule of the tools.
 func loadHistoryTrace(path string, st *store.Store) (*historyTrace, error) {
+	return loadTrace(path, st, false)
+}
+
+// loadTrace is loadHistoryTrace, with the run_end's usage counts when
+// usage is set (live mode).
+func loadTrace(path string, st *store.Store, usage bool) (*historyTrace, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -132,6 +144,18 @@ func loadHistoryTrace(path string, st *store.Store) (*historyTrace, error) {
 			if t.Outcome, ok = word(m, "outcome"); !ok {
 				return nil, errTrace
 			}
+			var u map[string]json.RawMessage
+			if usage && json.Unmarshal(m["usage"], &u) == nil { // "unknown" or absent: no counts
+				for _, k := range usageKeys {
+					var n uint64
+					if v, ok := u[k]; ok && json.Unmarshal(v, &n) == nil {
+						if t.Usage == nil {
+							t.Usage = map[string]uint64{}
+						}
+						t.Usage[k] = n
+					}
+				}
+			}
 		}
 	}
 	if sc.Err() != nil || starts != 1 || inits != 1 || ends != 1 {
@@ -152,7 +176,7 @@ func loadHistoryTrace(path string, st *store.Store) (*historyTrace, error) {
 		at := slices.IndexFunc(rec.Task.Purchases, func(p store.PurchaseView) bool { return p.PurchaseOrderID == po })
 		verdict := c.Outcome == "Ask" || c.Outcome == "Deny" || c.Outcome == "Allow"
 		if verdict && (at < 0 || rec.Task.Purchases[at].Decision.PolicyVerdict != c.Outcome) {
-			return nil, errors.New("history trace and history database disagree on a request_purchase verdict; refused, neither was changed")
+			return nil, errTraceDisagree
 		}
 		if !verdict {
 			continue
@@ -175,6 +199,9 @@ func serveHistory(ctx context.Context, dbPath, tracePath, registryPath, unityDir
 	cfg, err := config.Load(d.getenv)
 	if err != nil {
 		return err
+	}
+	if cfg.LiveCLI {
+		return errors.New("APA_LIVE_CLI=true is not for history mode: it runs no CLI; unset it or set it to false")
 	}
 	tokenPath := cmp(d.getenv("APA_DEMO_TOKEN_FILE"), "var/demo-tokens.json")
 	// The token file is written at start: it may name neither the recorded

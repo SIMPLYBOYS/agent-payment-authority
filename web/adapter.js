@@ -431,8 +431,10 @@ export function card(view, chosen, ctx) {
   const waiting = p && p.decision && p.decision.policy_verdict === "Ask" && !p.approval_closed;
   const steps = [
     step("進店", evs.find((e) => e.event_type === "TASK_STARTED"), "TASK_STARTED"),
-    { label: "選商品", state: "none", note: hist ? "無 Store 事件；工具呼叫見查證面板（真實執行 trace）" : "無獨立事件（fake 腳本）" },
-    { label: "報價", state: "none", note: hist ? "無 Store 事件；工具呼叫見查證面板（真實執行 trace）；402 以 hash 綁定在請購" : "無獨立事件；402 以 hash 綁定在請購" },
+    { label: "選商品", state: "none", note: hist ? "無 Store 事件；工具呼叫見查證面板（真實執行 trace）"
+      : ctx.live ? "無 Store 事件；工具呼叫在 CLI 結束後見查證面板（真實 Agent）" : "無獨立事件（fake 腳本）" },
+    { label: "報價", state: "none", note: (hist ? "無 Store 事件；工具呼叫見查證面板（真實執行 trace）；"
+      : ctx.live ? "無 Store 事件；工具呼叫在 CLI 結束後見查證面板（真實 Agent）；" : "無獨立事件；") + "402 以 hash 綁定在請購" },
     step("請購", p && at("PURCHASE_PROPOSED"), "PURCHASE_PROPOSED"),
     step("裁決", p && at("POLICY_DECIDED"), p && p.decision ? str(p.decision.policy_verdict) : ""),
     closing || ended ? step("收尾", closing || ended, (closing || ended).event_type)
@@ -461,10 +463,37 @@ export function card(view, chosen, ctx) {
     steps, status: hist && p && p.decision && p.decision.policy_verdict === "Ask" && !p.approval_closed
       ? "Ask：執行結束時待人工核准（歷史快照；不是仍有效的核准）" : purchaseStatus(p, live, t.served_at),
     history: hist ? hist.label : null,
+    live: ctx.live ? ctx.live.label : null,
     task: "task 狀態：" + (STATUS_LABELS[t.status] || str(t.status)) + (t.deny_reason ? "（" + t.deny_reason + "）" : "") + (t.derived ? "（依已回放事件推導，網頁）" : "（Store）")
       + (ended ? "；" + (ended.event_type === "TASK_CANCELLED" ? "task 已取消" : "CLI 逾時") : ""),
     rows,
   };
+}
+
+// liveTools is the evidence panel's tool-call section in live mode
+// (docs/cli-poc.md 55), from GET /api/tasks/{id}/trace: the buyer host
+// writes the trace when the CLI ends, so while it runs the calls are not
+// known here, and that is what is said.
+const TRACE_MISSING = {
+  no_trace: "沒有這個 task 的 trace（CLI 未在本 host 執行過此 task，或執行中斷）",
+  unreadable: "trace 無法讀取或尚未完成：不顯示任何對應",
+  inconsistent: "trace 與 Store 的裁決不一致：拒絕對應（兩者都未修改）",
+  ambiguous: "這個 task 有多份 trace：無法確定，不顯示對應",
+};
+const USAGE = [["input_tokens", "input"], ["output_tokens", "output"], ["cache_creation_input_tokens", "cache_creation"], ["cache_read_input_tokens", "cache_read"]];
+function liveTools(reply, taskId, toolRows) {
+  const title = "工具呼叫（真實 Agent trace）";
+  const note = "工具呼叫來自 CLI 結束後才寫出的白名單 trace，不是逐工具即時串流；請購與事件的對應由 Host 推導；不含模型文字。";
+  if (!reply || reply.task_id !== taskId) return { title, note, rows: [["工具呼叫", "讀取中（未確認）", "—"]] };
+  if (reply.state === "running") return { title, note, rows: [["工具呼叫", "CLI 執行中：trace 在 CLI 結束後才寫出，現在無法逐工具顯示（不代表工具尚未呼叫）", "Host"]] };
+  if (reply.state !== "available" || !reply.trace) return { title, note, rows: [["工具呼叫", TRACE_MISSING[reply.reason] || "無法取得（未確認）", "Host"]] };
+  const tr = reply.trace;
+  const u = tr.usage || null;
+  return { title, note, rows: [
+    ["Gate", "gate_mode " + str(tr.gate_mode) + " · init gate " + str(tr.gate) + " · 結果 " + str(tr.outcome), "trace"],
+    ...toolRows(tr),
+    ["用量（CLI 自報）", u ? USAGE.filter(([k]) => typeof u[k] === "number").map(([k, n]) => n + " " + u[k]).join(" · ") + "（不是計費證明）" : "unknown（CLI 未回報）", "trace"],
+  ] };
 }
 
 const short = (h) => (typeof h === "string" && h.length > 22 ? h.slice(0, 22) + "…" : str(h));
@@ -512,19 +541,24 @@ export function evidence(snapshot, po, ctx) {
       "Store",
     ]) },
   ];
+  // The tool calls of a run trace, each joined (by the Host, after a
+  // verdict check) to its purchase and Store events.
+  const toolRows = (tr) => tr.tool_calls.map((c) => [
+    "#" + c.n + " " + str(c.tool),
+    (c.product_id ? str(c.product_id) + " · " : "") + "outcome " + str(c.outcome)
+      + (c.purchase_order_id ? " → " + str(c.purchase_order_id) + "（Store 事件 " + (c.event_sequences || []).map((q) => "#" + q).join("、") + "）" : "")
+      + (replay && (c.event_sequences || []).some((q) => q > ctx.n) ? " · 回放尚未到此" : ""),
+    c.purchase_order_id ? "trace；請購與事件對應為 Host 推導" : "trace",
+  ]);
   const trace = hist && hist.trace && hist.trace.task_id === t.task_id ? hist.trace : null;
   if (hist) {
     sections.push({ title: "工具呼叫（真實執行 trace）",
       note: "來自該次真實執行的白名單 trace（gate_mode " + str(trace ? trace.gate_mode : "—") + "，init gate " + str(trace ? trace.gate : "—")
         + "）；工具呼叫本身不在 Store，對應的 Store 事件由 Host 依請購 ID 規則找出。不含模型文字。",
-      rows: trace ? trace.tool_calls.map((c) => [
-        "#" + c.n + " " + str(c.tool),
-        (c.product_id ? str(c.product_id) + " · " : "") + "outcome " + str(c.outcome)
-          + (c.purchase_order_id ? " → " + str(c.purchase_order_id) + "（Store 事件 " + (c.event_sequences || []).map((q) => "#" + q).join("、") + "）" : "")
-          + (replay && (c.event_sequences || []).some((q) => q > ctx.n) ? " · 回放尚未到此" : ""),
-        c.purchase_order_id ? "trace；請購與事件對應為 Host 推導" : "trace",
-      ]) : [["工具呼叫", hist.trace ? "這個 task 沒有 trace（trace 屬於另一個 task）"
+      rows: trace ? toolRows(trace) : [["工具呼叫", hist.trace ? "這個 task 沒有 trace（trace 屬於另一個 task）"
         : "沒有可顯示的 trace（host 未指定 --history-trace，或 trace 的 task 不在你的查看範圍）", "—"]] });
+  } else if (ctx.live) {
+    sections.push(liveTools(ctx.trace, t.task_id, toolRows));
   }
   // In step only when Unity's report names the projection sent: the same
   // generation, task, sequence and phase. Anything else is "not yet in
@@ -550,7 +584,7 @@ export function evidence(snapshot, po, ctx) {
     ...(sent && sent.po && po && po !== sent.po ? [["選取", "你正在查看 " + po + "；商店場景呈現的是 " + sent.po + "（選取不同，不是同步失敗）", "網頁"]] : []),
   ] });
   return {
-    banner: (hist ? hist.label + " · " : "") + (replay ? "完整紀錄，非回放當步（回放位置 #" + ctx.n + "／共 " + ctx.m + "）"
+    banner: (hist ? hist.label + " · " : ctx.live ? ctx.live.label + " · " : "") + (replay ? "完整紀錄，非回放當步（回放位置 #" + ctx.n + "／共 " + ctx.m + "）"
       : hist ? "歷史紀錄：執行結束時的快照 #" + t.as_of_sequence + "（非即時）" : "即時：最新一致快照 #" + t.as_of_sequence),
     po: po || null, sections,
   };
