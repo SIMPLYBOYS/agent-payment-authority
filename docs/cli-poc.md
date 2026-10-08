@@ -4,7 +4,8 @@
 > - 主持人按「開始（真實 CLI）」後執行一場，走與 `apa-buyer run --live` 相同的路徑；預設關閉，啟動不會執行模型。
 > - 程式 `c9acebc`／`2d4db5b`，測試 `5d43a75`／`145eb86`。
 > - 核准的那一次完整斷網容器（`5d43a75`）**失敗**（verify-b1-01 的訊息文字、5 個突變的替換文字），已修正。
-> - Codex review 的 R1（trace 查詢拖住即時畫面、失敗時殘留「執行中」）已修正於 `29d1cd3`／`d5bc444`（第 55.8 節）；**對最終版本 `d5bc444` 的完整容器待 Aaron 核准**。
+> - Codex review 的 R1（trace 查詢拖住即時畫面、失敗時殘留「執行中」）已修正於 `29d1cd3`／`d5bc444`（第 55.8 節）。
+> - **`d5bc444` 完整斷網容器通過**：基準線 PASS、300／300 突變被抓到、17／17 隔離自檢符合（第 55.9 節）；待 Codex 核對。
 > - 本輪沒有執行真實 CLI；真實執行需在 review 後另行核准（55.7）。
 > - B1-04／B1-06 維持 InProgress。
 >
@@ -3809,3 +3810,20 @@ B1-04／B1-06 維持 InProgress。這個出口只完成單一真實 Agent 即時
 - **失敗紀錄**：測試腳本第一版的 fetch 包裝器寫在 template literal 裡，`\/` 被吃掉，正規式變成註解，造成語法錯誤，改用 `endsWith`。另外兩項檢查在拿掉修正後仍可能通過，所以補強了：被扣住的讀取要在仍未結束時檢查畫面；晚到回覆改在頁面內全程監看，以免被 adapter 的 task 檢查掩蓋。
 - **完整斷網容器**：本輪沒有跑。最終程式為 `d5bc444`，**待 Aaron 核准對 `d5bc444` 跑一次**，用來取代 `5d43a75` 失敗的那一次。不重查 plugins、不重建 Unity、不執行真實 CLI。
 - B1-04／B1-06 維持 InProgress，整體切片待 Codex 複核。
+
+### 55.9 完整斷網容器：`d5bc444` 通過（2026-10-09；Claude Code 執行，待 Codex 核對）
+
+- **核准**：Aaron「核准對 d5bc444 補跑一次完整斷網容器驗證，包含未突變基準線、全部 300 項突變及 17 項隔離自檢」。沿用既有映像與限制；失敗則保存結果並停止，不自動重試。
+- **開跑前**：用 `python3 scripts/verify/mutation-anchors.py` 確認 300 個突變的替換文字都恰好出現一次。這一步不執行測試。
+- **命令**：`APA_VERIFY_IMAGE=docker.io/library/apa-verify:b1-05 DOCKER_CONTEXT=desktop-linux sh scripts/verify/container-verify.sh d5bc444baffce1b20376744d7e4d8768b73001ba`。只跑一次，exit 0。
+- **證據**：`artifacts/verify-container/runs/d5bc444baffc-20261008T161009Z/`。
+  - 映像：`apa-verify:b1-05`（`sha256:78258368…`），go.mod／go.sum 與映像一致。
+  - 證據匯入完整：329 個檔案。
+- **結果**：overall exit 0。
+  - check-contracts 0、check 0、race-cover 0、verify-b1-01 0、guards 0、evidence-import-tests 0、mutation 0。
+  - 突變：未突變基準線 PASS，**300／300 被失敗的測試抓到**（407 秒）。
+  - 隔離自檢：**17／17 符合預期**（對外網路、DNS、寫入原始碼與 rootfs、權限、記憶體與行程上限等）。
+- **與前一次失敗的關係**：這一次取代 `5d43a75` 那次失敗的完整容器。失敗紀錄（第 55.5 節）保留。
+- **範圍**：不重查 plugins、不重建 Unity、不執行真實 CLI。瀏覽器與 Unity 畫面驗證不在容器內，是另外在本機執行的（第 55.5、55.8 節）。
+- **證據歸屬**：Claude Code 執行；待 Codex 核對紀錄。
+- B1-04／B1-06 維持 InProgress；整體切片待 Codex 複核。真實執行在 review 通過後另行核准（第 55.7 節）。
