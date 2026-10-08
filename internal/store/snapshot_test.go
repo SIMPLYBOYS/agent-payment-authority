@@ -83,6 +83,20 @@ func TestOpenSnapshot(t *testing.T) {
 	if _, _, err := OpenSnapshot(filepath.Join(dir, "missing.db")); err == nil {
 		t.Error("a missing file was opened")
 	}
+	// A file with a -wal or -shm beside it may still be open in a Store:
+	// refused, and the side file is left as it was.
+	for _, side := range []string{"-wal", "-shm"} {
+		open := t.TempDir()
+		p := filepath.Join(open, "apa-live.db")
+		os.WriteFile(p, raw, 0o600)
+		os.WriteFile(p+side, []byte("x"), 0o600)
+		if _, _, err := OpenSnapshot(p); err == nil {
+			t.Errorf("opened with a %s beside it", side)
+		}
+		if b, _ := os.ReadFile(p + side); string(b) != "x" {
+			t.Errorf("the %s was changed", side)
+		}
+	}
 	link := filepath.Join(dir, "link.db")
 	os.Symlink(rec, link)
 	if _, _, err := OpenSnapshot(link); err == nil {

@@ -482,6 +482,9 @@ test("history: a recorded real run is labelled, its open Ask is a snapshot, its 
   const tools = e.sections.find((x) => x.title === "工具呼叫（真實執行 trace）");
   assert.equal(tools.rows.length, 3);
   assert.ok(tools.rows[2][0] === "#3 request_purchase" && tools.rows[2][1].includes(po) && tools.rows[2][1].includes("#2、#3"));
+  assert.equal(tools.rows[2][2], "trace；請購與事件對應為 Host 推導", "the mapping is derived, and says so");
+  assert.equal(tools.rows[0][2], "trace");
+  assert.equal(c.rows.find(([k]) => k === "期限")[2], "Store 時間；當時的期限，早已過，不是倒數");
   for (const sec of e.sections) for (const r of sec.rows) assert.equal(r.length, 3, "every row names its source");
 
   // In a replay, the calls whose events are not reached yet say so.
@@ -491,6 +494,8 @@ test("history: a recorded real run is labelled, its open Ask is a snapshot, its 
   // Without history mode nothing changes; a trace of another task is not shown.
   assert.ok(!A.evidence(snap, po, { mode: "live" }).sections.some((x) => x.title.startsWith("工具呼叫")));
   const other = A.evidence(snap, po, { mode: "live", history: { ...history, trace: { ...history.trace, task_id: "task-b" } } });
-  assert.equal(other.sections.find((x) => x.title.startsWith("工具呼叫")).rows[0][1], "未提供 trace（host 未指定 --history-trace）");
+  assert.equal(other.sections.find((x) => x.title.startsWith("工具呼叫")).rows[0][1], "這個 task 沒有 trace（trace 屬於另一個 task）");
+  const none = A.evidence(snap, po, { mode: "live", history: { ...history, trace: null } }); // the host gives this viewer no trace
+  assert.ok(none.sections.find((x) => x.title.startsWith("工具呼叫")).rows[0][1].startsWith("沒有可顯示的 trace"));
   assert.ok(!/付款成功|已付款|已核准|即時倒數/.test(JSON.stringify(c) + JSON.stringify(e)));
 });

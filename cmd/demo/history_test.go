@@ -187,6 +187,15 @@ func TestHistoryModeRefusals(t *testing.T) {
 	os.WriteFile(tool, []byte(strings.Replace(string(raw), `"tool":"list_products"`, `"tool":"Bash"`, 1)), 0o600)
 	mode := filepath.Join(t.TempDir(), "mode.jsonl")
 	os.WriteFile(mode, []byte(strings.Replace(string(raw), `"gate_mode":"strict"`, `"gate_mode":"lenient"`, 1)), 0o600)
+	// A database that may still be open (a -wal beside it), and a damaged
+	// one: throwaway copies, never the recorded file.
+	walDir := t.TempDir()
+	walDB := filepath.Join(walDir, "apa-live.db")
+	dbRaw, _ := os.ReadFile(db)
+	os.WriteFile(walDB, dbRaw, 0o600)
+	os.WriteFile(walDB+"-wal", nil, 0o600)
+	broken := filepath.Join(t.TempDir(), "apa-live.db")
+	os.WriteFile(broken, append(dbRaw[:len(dbRaw)/2:len(dbRaw)/2], make([]byte, len(dbRaw)-len(dbRaw)/2)...), 0o600)
 	if !strings.Contains(string(raw), `"tool":"list_products"`) || !strings.Contains(string(raw), `"gate_mode":"strict"`) {
 		t.Fatalf("the recorded trace changed shape: %s", raw)
 	}
@@ -199,10 +208,66 @@ func TestHistoryModeRefusals(t *testing.T) {
 		"trace of no task":  {"--history-db", db, "--history-trace", other},
 		"unknown tool":      {"--history-db", db, "--history-trace", tool},
 		"unknown gate mode": {"--history-db", db, "--history-trace", mode},
+		"a WAL beside it":   {"--history-db", walDB},
+		"damaged database":  {"--history-db", broken},
 	} {
 		if h, err := startHistory(t, args...); err == nil {
 			h.stop()
 			t.Errorf("%s: served", name)
 		}
+	}
+}
+
+// History mode is read only on the server, not only on the page: every
+// start, stop and cancel is refused whoever asks, there is no run, and the
+// recorded events stay the three they were. The trace goes only to a caller
+// who may read its task: consumer B's viewer and the operator get the label
+// without it.
+func TestHistoryModeReadOnly(t *testing.T) {
+	db, trace := recordRun(t)
+	h, err := startHistory(t, "--history-db", db, "--history-trace", trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.stop()
+	for _, tok := range []string{"operator", "host", "viewer:consumer-a"} {
+		for _, path := range []string{"/api/host/runs", "/api/host/runs/run-1/stop", "/api/host/tasks/task-a/cancel"} {
+			body := `{}`
+			if path == "/api/host/runs" {
+				body = startBody("req-history-00000001", "ask")
+			}
+			if code, v := h.post(path, h.tokens[tok], body); code != 409 || v["error"] != "history_read_only" {
+				t.Errorf("%s POST %s: %d %v", tok, path, code, v)
+			}
+		}
+	}
+	if code, v := h.post("/api/host/tasks/task-a/cancel", "", `{}`); code != 401 {
+		t.Errorf("no token: %d %v", code, v)
+	}
+	if code, body, _ := h.get("/api/host/runs", h.tokens["operator"]); code != 200 || strings.TrimSpace(string(body)) != `{"runs":[]}` {
+		t.Errorf("runs: %d %s", code, body)
+	}
+	if code, _, _ := h.get("/api/host/runs", h.tokens["viewer:consumer-a"]); code != 403 {
+		t.Errorf("runs as a viewer: %d", code)
+	}
+	_, body, _ := h.get("/api/tasks/task-a/events", h.tokens["host"])
+	if n := strings.Count(string(body), `"event_type"`); n != 3 {
+		t.Errorf("%d events after the refused writes: %s", n, body)
+	}
+
+	var v viewerReply
+	_, body, _ = h.get("/api/viewer", h.tokens["viewer:consumer-b"])
+	if json.Unmarshal(body, &v); v.History == nil || v.History.Label != historyLabel || v.History.Trace != nil || strings.Contains(string(body), "request_purchase") {
+		t.Errorf("consumer B's viewer: %s", body)
+	}
+	_, body, _ = h.get("/api/viewer", h.tokens["viewer:consumer-a"])
+	if json.Unmarshal(body, &v); v.History == nil || v.History.Trace == nil {
+		t.Errorf("consumer A's viewer: %s", body)
+	}
+	if _, s, _ := h.status(h.tokens["operator"]); s.History == nil || s.History.Trace != nil {
+		t.Errorf("operator status history %+v", s.History)
+	}
+	if _, s, _ := h.status(h.tokens["host"]); s.History == nil || s.History.Trace == nil {
+		t.Errorf("host status history %+v", s.History)
 	}
 }

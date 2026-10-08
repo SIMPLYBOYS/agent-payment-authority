@@ -620,6 +620,18 @@ MUTATIONS = [
      '\t\treturn nil, errors.New("history trace names a task the history database does not hold")\n', '\t\treturn t, nil\n', 'TestHistoryModeRefusals'),
     ('B1-04 history: history mode combined with an upgrade', 'cmd/demo/main.go',
      ' || *scenariosPath != "" || *upgradeDB {', ' || *scenariosPath != "" {', 'TestHistoryModeRefusals'),
+    ('B1-04 history: a database with a -wal or -shm beside it opened', 'internal/store/snapshot.go',
+     'if _, err := os.Lstat(side); !os.IsNotExist(err) {', 'if _, err := os.Lstat(side); err != nil && !os.IsNotExist(err) {', 'TestOpenSnapshot'),
+    ('B1-04 history: the trace given to every caller', 'cmd/demo/history.go',
+     'if _, err := a.st.ReadTask(h.Trace.TaskID, g.sees); err != nil {', 'if _, err := a.st.ReadTask(h.Trace.TaskID, func(string) bool { return true }); err != nil {', 'TestHistoryModeReadOnly'),
+    ('B1-04 history: the viewer reply not scoped', 'cmd/demo/ui.go',
+     'History: a.historyFor(g)})', 'History: a.history})', 'TestHistoryModeReadOnly'),
+    ('B1-04 history: the host status not scoped', 'cmd/demo/status.go',
+     'History: a.historyFor(g)}', 'History: a.history}', 'TestHistoryModeReadOnly'),
+    ('B1-04 history: a control write accepted', 'cmd/demo/history.go',
+     'fail(w, http.StatusConflict, "history_read_only")', 'reply(w, http.StatusAccepted, map[string]string{})', 'TestHistoryModeReadOnly'),
+    ('B1-04 history: the read-only control routes not registered', 'cmd/demo/history.go',
+     '\tregisterReadOnly(mux, ui)\n', '', 'TestHistoryModeReadOnly'),
 ]
 
 
