@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **10/8 方案 A 實作（Claude Code 執行，待 Codex review）**：程式 `6caba93`，測試補正 `086f640`、`40bd263`。本機定向 fake 測試通過。**核准的那一次完整斷網容器驗證（`086f640`）失敗**，原因是測試腳本在 Linux 上讀錯權限欄位（`stat -f` 是 macOS 寫法），不是產品行為；已在 `40bd263` 修正，只改測試。修正後**尚未在容器中驗證**，再跑一次須 Aaron 核准（第 43 節）。plugins 是否真的停用仍未驗證。
+> **10/8 方案 A 實作（Claude Code 執行，待 Codex review）**：程式 `6caba93`，測試補正 `086f640`、`40bd263`。本機定向 fake 測試通過。**核准的那一次完整斷網容器驗證（`086f640`）失敗**，原因是測試腳本在 Linux 上讀錯權限欄位（`stat -f` 是 macOS 寫法），不是產品行為；已在 `40bd263` 修正，只改測試。**10/8 經 Aaron 核准，對 `40bd263` 補跑一次完整斷網容器驗證：通過**（overall exit 0；基準線 PASS、255／255 突變被抓到、隔離 17 項符合；Claude Code 執行，待 Codex 核對；第 43.5 節）。`086f640` 的失敗紀錄保留。plugins 是否真的停用仍未驗證。
 >
 > **10/8 plugins 方案於 `14eb7b5` 通過限定設計複核，R1、R2 關閉**（第 42 節，修訂紀錄 42.8，驗收紀錄 42.9）。通過範圍是受控實驗的設計，不代表 plugins 已停用或正式請購可放行。等待 Aaron 核准方案 A 的實作、fake 測試與一次完整斷網容器驗證；真實診斷須在實作 review 通過後另行核准。依官方文件，沒有任何候選方案能同時保證四件事：清空 plugins、保留 APA MCP、不改登入、不需要完整 plugin ID。方案 A（APA 專用暫存 plugin 根目錄）是受控實驗，不是停用保證：空根目錄可能在背景被重新填入；結果非空只代表未達目標，不推論來源。
 >
@@ -1966,3 +1966,33 @@ L1-b 不標完成；B1-04 仍 InProgress；不合併、不推送、不標 Done�
 3. 實作 review 通過後，一次真實診斷（42.6），另行核准。
 
 本輪沒有執行真實 CLI；沒有改 Gate、認證接受清單、版本釘選或啟動參數。L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
+
+### 43.5 補跑的完整斷網容器驗證（`40bd263`；2026-10-08；Claude Code 執行，待 Codex 核對）
+
+> **結果：通過。** overall exit `0`。只代表 `40bd263` 的 fake 測試、突變與隔離檢查通過，**不代表真實 plugins 已停用**。`086f640` 的失敗紀錄（43.3）保留，新結果不回填到 `086f640`。
+
+- **核准**：Aaron 10/8 核准對 `40bd263`，或其後確認只有文件差異的 commit，補跑一次。範圍包含未突變基準線、255 項突變與隔離檢查。
+- **實際基準**：`40bd2630cbae0adf552e1dd54ae87ee4c8022cd4`。當時 HEAD 是 `0d6e443`，`40bd263..0d6e443` 只改 `docs/cli-poc.md`、`docs/commercial-demo-roadmap.md`，所以直接驗證 `40bd263`。
+- **映像與限制**：沿用 `docker.io/library/apa-verify:b1-05`（`sha256:78258368de0907e58498095c327a6ee4edbe75421d18e524bd00661c3749b6d0`）。沒有重建映像、沒有新增依賴（go.mod／go.sum 與映像相符）、沒有放寬時間限制。
+- **命令**（在 Claude Code 沙箱外執行，需要 Docker）：
+
+  ```sh
+  APA_VERIFY_IMAGE=docker.io/library/apa-verify:b1-05 DOCKER_CONTEXT=desktop-linux sh scripts/verify/container-verify.sh 40bd263
+  ```
+
+| 步驟 | exit | 秒 |
+|---|---|---|
+| check-contracts | 0 | 17 |
+| check（make） | 0 | 94 |
+| race-cover | 0 | 283 |
+| verify-b1-01 | 0 | 43 |
+| guards | 0 | 0 |
+| evidence-import-tests | 0 | 2 |
+| mutation | 0 | 372 |
+
+- **突變**：baseline（未突變）PASS；`result: all mutations killed by a failing test`，255 項都列為 KILLED，包含 5 項方案 A 突變。
+- **隔離自檢**：17 項全部符合預期，包含禁止外部網路與 DNS、根檔案系統與原始碼唯讀、非 root、沒有 capabilities、記憶體與 pids 上限。
+- **證據**：`artifacts/verify-container/runs/40bd2630cbae-20261008T020624Z/`。匯入完整，284 個檔案，332414 bytes；container／capture exit 0；evidence import exit 0。
+- **證據歸屬**：Claude Code 執行，待 Codex 核對紀錄。
+
+**尚待**：Codex review 實作、測試、突變，以及這兩次容器紀錄（`086f640` 失敗、`40bd263` 通過）。review 通過後，一次真實診斷（42.6）須另行核准。本次沒有執行真實 CLI 或 C0′；沒有改 Gate、認證接受清單；不合併、不推送、不標 Done。L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
