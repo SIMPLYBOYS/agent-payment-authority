@@ -41,6 +41,8 @@
 - Deny 後的取消／CLI 逾時仍只加註，不覆蓋 Deny 原因。
 - Inspector 照舊列出每筆請購與 task 狀態；task 有多筆請購時，場景文字註明「此 task 有 N 筆請購；場景顯示最近裁決的 po」。
 
+> **一個入口**（`docs/cli-poc.md` 第 56 節）：`make present-live`（真實 CLI，一次性設定 `var/present.conf`）或 `make present-fake`（不執行模型）。建立新場次後開啟 `/host`，在頁面輸入終端機上的一次性配對碼，按「開始」才執行一場。
+>
 > **live 模式**（`docs/cli-poc.md` 第 55 節）：`scripts/demo/live.sh` 以全新場次目錄啟動 demo host 的 live 模式，主持人在 `/host` 按「開始（真實 CLI）」執行一場真實 Agent 請購；頁面開始前就顯示「真實 Agent 即時展示・開發展示例外・合成資料・不付款」。fake 展示與歷史回放的操作不變。
 
 ## 2 Unity 環境與 LimeZu 素材

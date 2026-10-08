@@ -1,5 +1,10 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/9 展示啟動與主持人操作簡化（第 56 節；Claude Code 實作，fake 驗證，待 Codex review）**：
+> - `make present-live` 一個入口；在頁面輸入終端機上的一次性配對碼（暫定方案）；按「開始」才執行模型。
+> - 程式 `4edc830`／`7a10cad`，測試 `086e06a`；`7a10cad` 完整斷網容器通過（310／310、17／17）。
+> - 本輪未執行真實 CLI。
+>
 > **10/8 單一真實 Agent 即時展示：demo host 的 live 模式已實作，fake／合成資料驗證完成，待 Codex review（第 55 節）**：
 > - 主持人按「開始（真實 CLI）」後執行一場，走與 `apa-buyer run --live` 相同的路徑；預設關閉，啟動不會執行模型。
 > - 程式 `c9acebc`／`2d4db5b`，測試 `5d43a75`／`145eb86`。
@@ -3901,3 +3906,154 @@ B1-04／B1-06 維持 InProgress。這個出口只完成單一真實 Agent 即時
   - `vcs.modified=true` 是事實。事後 tracked 檔案乾淨，不能完全證明建置當下沒有程式修改；Claude Code 的原因說明（未追蹤的 `demo`）只作為說明，**不稱為乾淨建置**。這一點不要求重跑本次展示。
   - 這是開發展示例外下的單次結果；plugins 內容與行為未確認，也不是嚴格模式。
 - **範圍**：B1-04／B1-06 整體仍是 InProgress；多 Agent、付款、區塊鏈與 ZK 都還沒完成。這次結果不代表 M1 或商業展示版完成。
+
+## 56 展示啟動與主持人操作簡化（2026-10-09；Claude Code 實作，fake／合成資料驗證，待 Codex review）
+
+> **結果**：主持人不用記長指令、找 token 檔，也不必理解 consumer／task ID。只需要一個啟動入口、在頁面輸入一次終端機上的配對碼、按「開始」。按「開始」之前不會執行模型。
+>
+> 配對採用**短配對碼的暫定方案**：Codex 問 Aaron 偏好「一次短配對碼」還是「完全自動授權」時，Aaron 尚未回覆，依派工筆記先採最小方案，不能記成 Aaron 已選定。本輪沒有執行真實 Claude CLI。
+
+- **派工**：vault 筆記「展示啟動與主持人操作簡化派工」（Aaron 已核准實作與合成驗證）。
+- **開工核對**：分支 `b1-04-live`，HEAD `2cd1860`（技術驗收基準 `d5bc444`，之後只有文件），工作區只有未追蹤的 `demo`，vault 乾淨。
+- **提交**：
+  - 程式 `4edc830`、測試 `086e06a`；
+  - 回歸修正 `7a10cad`（見 56.6）；
+  - 文件為本節所在提交。
+
+### 56.1 主持人的最短操作清單
+
+**一次性準備**（做完之後，日常啟動不必重做）：
+1. 在本機完成 Go、Unity Web 建置（`docs/demo-ui.md`），以及 `~/.apa-claude` 的本人登入（第 48、55 節，既有的準備）。
+2. 建立 `var/present.conf`，兩行純文字（會被讀取，但不會被當成 shell 執行；也不會自動尋找 CLI）：
+   ```
+   cli=/Users/mac/.local/bin/claude
+   dev_demo_plugins=true
+   ```
+
+**每次展示**：
+1. 在 repo 根目錄輸入 **`make present-live`**（彩排用 `make present-fake`，不執行模型）。輸入 1 次。
+2. 終端機顯示一次配對碼（`XXXX-XXXX-XXXX`）；瀏覽器在服務就緒後**自動**開啟 `/host`。
+3. 在頁面的「配對碼」欄輸入配對碼，按「配對」。輸入 1 次、點擊 1 次。
+4. 按「開始（真實 CLI）：…」。點擊 1 次；Dashboard 會自動切到該場的 consumer 與 task。
+5. 需要時按「查看證據」（點擊 1 次），或按「停止 show-a-NN」（點擊 1 次）。
+6. 結束時在終端機按 Ctrl-C。本次場次目錄保留，不會自動清除。
+
+正常流程不需要選 token 檔、貼 token，也不需要選 consumer 或 task。進階區保留 token 檔、手動 viewer 模式，以及 consumer／task 切換，作為復原入口。
+
+### 56.2 實作與決定
+
+- **啟動器** `scripts/demo/present.sh live|fake`（`make present-live`／`make present-fake`）。沿用 `live.sh` 的做法：
+  - 每次在 `var/` 下建立新的 0700 場次目錄（`db/`、`runs/`、`tok/` 分開），把 host 建置到該目錄。建置失敗就停止，不啟動任何舊的程式。
+  - 把 `go version -m` 的建置紀錄（vcs revision、modified、time）存成 `build.txt`，並在終端機顯示；不手填 SHA，也不清理工作區。
+  - **就緒判定**：只有 host 自己寫出的 `--ready-file`（含位址與 **pid**）出現、且 pid 等於本次子程序時，才開啟瀏覽器；不用固定等待時間，也不以「該 port 有任何回應」判定。
+  - **異常處理**：
+    - host 在就緒前結束（版本或設定被拒、位址被占用等）就停止，不重試、不開頁面；
+    - 不碰占用該位址的其他程序；
+    - 開瀏覽器失敗時，印出不含秘密的網址與恢復方式，host 繼續服務；
+    - Ctrl-C 只停止本次啟動的 host。
+  - live 模式明確設定 `APA_LIVE_CLI=true`。開發展示例外由 `var/present.conf` 明確選擇，只在 live 模式生效。
+  - **CLI 的執行**：啟動時 host 會執行一次 `<cli> --version`。這**沒有送出模型請求，但確實執行了 CLI**；按「開始」才執行模型。
+- **配對**（`demo --pairing`，只能和 `--scenarios` 一起使用）：
+  - **配對碼**：啟動時以 crypto/rand 產生 12 個 Base32 字元（分三組顯示）。只寫到操作者的終端機（`/dev/tty`），不進 host 的 log、網址或檔案；沒有終端機就拒絕啟動。
+  - **有效範圍**：有效 5 分鐘（單調時鐘）；錯 5 次就失效；成功一次後以原子方式消耗。失效後不會自動換新碼。
+  - **兌換**：`POST /api/host/pair`。
+    - 必須是本服務的 Host 與 Origin（沒有 Origin、`null` 或其他來源一律拒絕），1 KiB 以內的嚴格 JSON，只接受 `{"code"}`。
+    - 回覆與 token 檔相同的 host、operator、viewer tokens，並設 no-store；沒有 CORS，沒有 GET。
+  - **頁面端**：沿用 token 檔的檢查與世代保護（`hostcreds.adopt`）：每個 token 都經伺服器確認後才保留。角色不變：operator 不能讀取 task，viewer 不能控制場次。
+  - **儲存**：配對碼與 token 不放進 URL、cookie 或任何瀏覽器儲存；輸入欄送出時立刻清空。清除、pagehide、切換手動模式之後才到的回覆，不會重新登入。
+  - **限制**：這是取得本次既有主持人憑證的入口，不是免驗證的控制 API。一般 viewer 頁 `/`，以及沒有加 `--pairing` 的 host，都沒有這個入口。
+- **`GET /api/mode`**（不需 token，只回模式與固定標示）：讓頁首在取得憑證前就顯示 live 或歷史，不會在 live 服務上先顯示 fake 的預設標示。
+- **主持人狀態**：新增 `build`（二進位自己記錄的 revision、modified、time）。頁面就緒表的「建置」列照實顯示，`modified=true` 寫明「不是乾淨建置」。
+- **`/host` 版面**：
+  - 頁首下方新增主持人列：未配對時是配對欄；配對後是「開始」、「停止」、「查看證據」、場次狀態與警告。這一列在 1280×900 的第一屏內。
+  - fake 的開始鈕寫「開始（fake，不執行模型）」。
+  - token 檔、consumer／task 切換收進「進階」。
+  - 頁首的模式標示、場次狀態與告警一律顯示。
+  - 「停止」與「取消 task」維持兩個不同的動作。
+- **沒有修改**：init Gate、版本釘選、認證接受值、plugin 例外的內容、Policy、Store 狀態語意、事件契約、Unity bridge（Unity 沒有修改，也沒有重建）。沒有公開部署、LAN、SSO 或帳號系統。
+
+### 56.3 配對的剩餘風險與失效、恢復
+
+- **配對碼本身就是短期憑證**：同一台機器上、5 分鐘內、看得到該終端機的人可以使用它。只有第一次兌換成功，之後即失效。
+- **不持久化**：重新整理頁面或離開（pagehide）之後，憑證會消失，用過的配對碼也不能再用。本輪**沒有**提供本機重新簽發。恢復方式是：
+  - 在「進階」載入場次目錄中的 `tok/tokens.json`；或
+  - 按 Ctrl-C 後重新 `make present-live`（會建立新的場次）。
+  - 兩者都不會自動重啟服務、取消正在執行的場次或重新執行模型。
+- **失效情況**：錯 5 次、逾時或已使用，都回 410，頁面顯示上述恢復方式。舊服務的配對碼在新服務上無效。
+- **清除不等於取消**：清除頁面憑證不會撤回伺服器已受理的場次。
+- **待決定**：若 Aaron 之後選擇「完全自動授權」，需另外調整交接方式；不會以移除驗證的方式達成自動化。
+
+### 56.4 驗證（全部由 Claude Code 執行，fake CLI 代替 Claude Code，HOME 使用測試目錄）
+
+- **Go**：在 `086e06a` 上 `go vet ./...` 與 `go test -race -count=1 ./...` 全部 package ok。新增的測試：
+  - `TestPairingWindow`：配對碼格式、一次使用、5 次失敗、可控時鐘下的 5 分鐘、50 個並行請求只有 1 個成功。
+  - `TestPairingEndpoint`：缺 Origin、Origin 為 `null`、其他來源、其他 Host、非 JSON、多餘欄位、兩個物件、過大、拿 token 冒充配對碼，全部拒絕；GET 拒絕；正確碼取得與 token 檔相同的 tokens、no-store、沒有 CORS；第二次使用回 410；角色不變；配對碼只在終端機出現一次，不在 log；另一個服務的碼無效。
+  - `TestPairingEndpointWindow`：逾時、5 次失敗、20 個並行請求只有 1 個成功。
+  - `TestPairingOffAndReadyFile`：沒有 `--pairing` 就沒有這個入口；ready file 的內容；`/api/mode`；狀態回覆中的 `build`；3 種拒絕。
+  - live 與歷史模式的 `/api/mode` 測試。
+  - 既有 `TestHostStatusAccess` 的欄位數由 8 改為 9（加上 `build`）。
+- **Node**：web 56 項通過（hostcreds 增加配對的成功、格式錯誤（不送出）、錯碼、已失效、未啟用、伺服器不確認的 token、清除或切換手動模式後才到的回覆）。
+- **反向驗證**：
+  - Go：新增 10 個突變（共 **310** 個），依檢查器規則全部以斷言失敗抓到：任何格式正確的碼都被接受、用過的碼可再用、沒有失敗次數上限、沒有時間上限、沒有 Origin 檢查、沒有 Host 檢查、沒加 `--pairing` 也開放、沒有 `--scenarios` 也接受、ready file 沒有 pid、`/api/mode` 不檢查 Host。
+  - 另外修正一個歷史突變的替換文字，`mutation-anchors.py` 確認 310 個都恰好出現一次。
+  - web（在 repo 副本中手動改 `hostcreds.js`）：格式錯誤的碼仍送出、配對取得的 token 未經確認就保留、晚到的回覆仍採用，3 項都以斷言失敗抓到。
+- **真實瀏覽器與啟動器**（`scripts/verify/present-ui.mjs`，在 `7a10cad` 上 41 PASS，`artifacts/b1-04/present-ui-7a10cadb2804-20261008T174432Z/`）。啟動器在 `script(1)` 建立的偽終端機中執行，配對碼只從該終端機讀取，不寫入紀錄。
+  - **啟動器拒絕**：缺設定、設定格式不符、建置失敗、版本不符（host 在就緒前結束）、位址被旁觀者占用（旁觀者仍在服務）。以上都沒有開頁面，也沒有重試。
+  - **開瀏覽器失敗**：網址印出且不含秘密，host 繼續服務；開頁時 host 已回 200（就緒後才開）。
+  - **場次 A**：
+    - 配對前頁首已顯示 live 標示；
+    - 錯碼會被拒絕；
+    - 配對請求已送達、回覆被扣住時按「清除全部」，之後回覆才到也沒有登入；
+    - 用過的碼回報已失效；
+    - 用進階 token 檔可以恢復；
+    - 整個過程沒有執行任何場次。
+  - **場次 B**（一般流程）：
+    - 1280×900 第一屏可見商店、配對欄與 live 說明；舊服務的碼無效；
+    - 配對一次（沒有選檔）後，狀態列顯示已配對；
+    - 開始鈕、警告與查看證據都在第一屏；就緒表的「建置」列照實顯示 `modified=true`；
+    - 配對本身沒有執行任何場次；URL、cookie、storage 都沒有秘密；
+    - 按一次開始 → 切到 show-a-01、Unity #3；
+    - 查看證據 → 工具呼叫與用量；
+    - 第二場按停止 → 停止已受理、Timeline #1～#5；
+    - 寬 420 時按鈕仍在畫面內；
+    - 重新整理 → 未配對，用過的碼已失效，沒有任何新場次；console 沒有秘密。
+  - **場次 C**（fake）：頁首為 fake，開始鈕寫「不執行模型」，`/api/mode` 回 fake。
+  - **截圖**（不含配對碼或 token）：`1-before-pairing`、`2-paired`、`3-running`、`4-evidence`（全頁）、`5-stopped`、`6-narrow`。
+- **回歸**（`7a10cad`）：
+  - fake 展示 `browser-ui.mjs` 317 PASS、0 FAIL（`artifacts/b1-06/ui-7a10cadb2804-20261008T174904Z/`）；
+  - live `live-ui.mjs` 37 PASS（舊的 `live.sh` 加 token 檔流程不變）；
+  - 歷史回放真實副本 46、合成 53 PASS；原始證據雜湊不變。
+- **完整斷網容器**（核准的一次，最終程式 `7a10cad`，`artifacts/verify-container/runs/7a10cadb2804-20261008T175643Z/`）：**通過**，overall exit 0。
+  - 七個步驟都是 0；
+  - 未突變基準線 PASS；
+  - **310／310 突變**被抓到；
+  - 17／17 隔離自檢符合；
+  - 映像與依賴一致，證據匯入 339 個檔案。
+
+### 56.5 未測試的部分
+
+- 真實 Claude CLI，以及 Aaron 本機的實際 `open`、終端機與瀏覽器（測試以替身取代開瀏覽器，以偽終端機取代真實終端機）。
+- 真實 `--version` 在 live 啟動時的行為（以包裝腳本取代）。
+- Aaron 主觀的操作體驗。
+
+### 56.6 失敗嘗試
+
+- **present-ui 第一版**：「晚到的回覆」模擬錯了：請求在送出前就被扣住，被清除時一起中止，所以配對碼沒有被消耗。改為請求先送達、只扣住回覆。
+- **畫面目視**：我目視截圖時發現兩個問題：
+  - 配對後配對欄仍然顯示：`.host-row` 的 `display` 蓋過了 `hidden`。已修正，測試也改用 computed style 判斷是否顯示。
+  - 狀態列停在「配對中…」：已改為配對成功時更新一次。
+- **全套 Go 測試**：`TestHostStatusAccess` 固定欄位數為 8，新增 `build` 後是刻意的變更，已更新測試。
+- **refusal 測試**：第一版直接呼叫 `serve`，若某個突變讓它正常服務，測試會卡住到逾時而無法計為抓到；已改為 select 寫法。
+- **一個 Go 突變**：初版因 import 未使用而編譯失敗，已改寫。
+- **fake 回歸**（`086e06a`）：316 PASS、1 FAIL。手動 viewer 模式的就緒文字被我從「需要 token 檔」改成「需要配對或 token 檔」，與既有驗收檢查不符；`7a10cad` 改回含原文字的「需要 token 檔或配對」後，317／0。
+
+### 56.7 下一次真實人工操作的確認清單（實作核准不等於真實執行核准）
+
+1. 程式基準為 review 通過的 commit；用 `make present-live` 啟動。
+2. 準備 `var/present.conf`：`cli=/Users/mac/.local/bin/claude`、`dev_demo_plugins=true`。
+3. 啟動時 host 會執行一次 `claude --version`（不送模型請求）。使用既有 `~/.apa-claude` 的本人訂閱；不代為登入，也不讀取登入資料。
+4. 在頁面配對一次，只按一次「開始（真實 CLI）」；不自動重試。前置拒絕或失敗都如實記錄並停止。
+5. 條件：開發展示例外、合成資料、全新場次資料庫、不付款；上限為 180 秒、10 則 assistant 回覆、8 次工具呼叫。
+6. 證據：結束後把場次目錄 `var/present-XXXXXX/` 的 `db/`、`runs/`、`build.txt` 複製到 `artifacts/b1-04/`；`tok/` 不保存，配對碼也不記錄。
+
+B1-04／B1-06 維持 InProgress，待 Codex review。這個切片只改善現有展示的操作；不代表商業展示版、M1、多 Agent、付款、鏈上證據或 ZK 完成。

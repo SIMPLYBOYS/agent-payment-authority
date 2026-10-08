@@ -549,6 +549,8 @@
 
 > **進度（10/9，即時展示切片告一段落）**：Codex 核對第一次真實即時展示的紀錄通過；結合 Aaron 本人判定，**單一真實 Agent 即時展示達到現階段標準**（`docs/cli-poc.md` 第 55.11.1 節）。「真實 Agent → 請購裁決 → Store → 即時展示與查證」已經走通。證據歸屬：Aaron 操作與判定；Claude Code 複製證據與事後核對；Codex 核對 Git、二進位資訊、雜湊，並在斷網唯讀容器獨立查詢，沒有重跑真實 CLI。限制：`vcs.modified=true`，不稱為乾淨建置。B1-04／B1-06 整體 InProgress；多 Agent、付款、區塊鏈與 ZK 尚未完成。
 
+> **進度（10/9，展示啟動與主持人操作簡化）**：依派工實作（程式 `4edc830`／`7a10cad`、測試 `086e06a`；`docs/cli-poc.md` 第 56 節；Claude Code 實作，fake／合成資料驗證，待 Codex review）。`make present-live`／`make present-fake` 會建立新場次並建置；host 就緒（自己的 ready file 與 pid）後才開啟 `/host`；在頁面輸入終端機上的一次性配對碼（12 字元、5 分鐘、5 次失敗、只能用一次；暫定方案，Aaron 尚未選定偏好），按「開始」才執行模型。present-ui 41、fake 317、live 37、歷史回放 46／53 通過；新增 10 個突變（共 310）；`7a10cad` 完整斷網容器通過（310／310，17／17）。B1-04／B1-06 維持 InProgress。
+
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。
 - 它是 M1 收尾的唯一外部前提（B1-04 → B1-06 live trace → B1-07）。
