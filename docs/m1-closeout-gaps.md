@@ -2,6 +2,8 @@
 
 > 2026-10-09；Claude Code 只讀核對，待 Codex review。基準 HEAD `7c853d4`。
 >
+> **修訂（依 Codex review 的 R1、R2）**：第 3 節改寫，新增 3.1、3.2 兩張表；第 4 節的 E1 改為沿用既有契約。原版內容見 git `2b4dcb7`。
+>
 > 本文件只對照文件與 repo 內容，**本輪沒有執行任何測試、CLI 或展示**。
 >
 > 依據：
@@ -17,7 +19,7 @@
   - B1-04、B1-06 的能力大多已做出並經限定 review，但都**還沒有依任務卡的形式交出出口證據**。
   - **B1-07 完全未實作**，所以 M1 目前不能結案。
 - **最短路徑**：
-  1. 固定 M1 證據包格式，以 `make m1-fixture` 產生 fixture 證據（B1-06 的出口）；
+  1. 沿用既有的證據契約（`RunManifest` 等），補齊證據檔的內容與產生流程，以 `make m1-fixture` 產生 fixture 證據（B1-06 的出口）；
   2. B1-07 只讀檢查器 `make verify-m1`；
   3. 一次 `make m1-live-cli` 真實證據包，並以 B1-07 驗證；
   4. `docs/m1-result.md` 與正式結案。
@@ -37,7 +39,7 @@
 **B1-04**
 1. 逐項核對任務卡的 8 個勾選項並附證據位置；大多已有 review 紀錄，交 Codex 判定能否勾選。
 2. 以 `make m1-live-cli`（下面的 B1-06 第 2 項）跑出一次有上限的真實請購證據包，並經 `make verify-m1` 核對。
-3. **需要決定**：M1 的 live 證據是否接受「開發展示 plugin 例外」下的結果。嚴格零 plugin 模式在 Aaron 本機至今沒有通過（決策稿 9.1）；這是範圍決定，不是工程缺陷。
+3. **需要 Aaron 決定**：M1 的 live 證據是否接受「開發展示 plugin 例外」下的結果。嚴格零 plugin 模式在 Aaron 本機至今沒有通過（決策稿 9.1）；這是範圍決定，不是工程缺陷。Codex 建議接受它作為 M1 開發展示的 live 證據條件，保留 `gate_mode=dev_demo_plugins`、剩餘風險與「嚴格模式未驗證」的註記，不再把清空 plugins 拉回主線。**這仍需要 Aaron 明確決定，Codex 沒有代為核准。**
 
 **B1-06**
 1. `make m1-fixture`：用 fake CLI 跑凍結的案例集，產生 `artifacts/m1/<run-id>/`，內容包含：
@@ -57,48 +59,102 @@
 
 ## 3 B1-07 的最小範圍
 
-**輸入**：`artifacts/m1/<run-id>/` 與凍結的 case manifest，只讀。不呼叫 `policy.Decide` 等執行器函式作為判準；可以共用 schema 與 canonical parsing；不連模型或 testnet，也不改寫輸入。
+**輸入**：`artifacts/m1/<run-id>/` 的 `RunManifest`（既有契約，見 3.3）與凍結的 `testdata/contracts/cases.json`，只讀。
+- 不呼叫 `policy.Decide` 等執行器函式作為判準；可以共用 schema 與 canonical parsing；不連模型或 testnet，也不改寫輸入。
+- 要防 symlink 逃出 run 目錄、驗證每個證據檔的 bytes digest，並對照事前的 expected outcome。
+- 既有的 `RunManifest.ValidateAgainst` 只檢查索引（案例覆蓋與 capability 規則），**不能取代 B1-07**。
 
 **必要 claim**（每項輸出 PASS／FAIL／INCONCLUSIVE、expected／observed 與證據引用）：
 
 | # | claim | FAIL 的例子 | INCONCLUSIVE 的例子 |
 |---|---|---|---|
-| V1 | 證據包有來源資訊（commit、dirty digest、版本、case 版本、run ID、命令） | — | 缺少任一項 |
-| V2 | 每個案例的請購對得上輸入（金額、收款人、asset、requirement／intent digest） | 金額或收款人不符 | 缺少請購資料 |
-| V3 | 裁決與原因等於凍結的 expected outcome | 預期 Deny 卻出現 Allow 或 Ask | — |
+| V1 | 證據包有來源資訊（commit、dirty digest、config digest、case manifest digest、版本、run ID、命令與 exit code），證據檔 digest 相符 | digest 不符、路徑逃出 run 目錄 | 缺少任一項 |
+| V2 | **依該案例的 expected 判定**（3.1）：該有請購的，請購對得上輸入（金額、收款人、asset、requirement／intent digest）；預期在入口或請購前結束的，**必須沒有請購或沒有落帳** | 金額或收款人不符；不該有請購卻有 | 該有請購的案例缺少請購資料 |
+| V3 | result、reason、approval_status 等於凍結的 expected；`payment_status=unavailable`、`budget_deducted="0"`（不扣預算） | 預期 Deny 卻出現 Allow 或 Ask；預算被扣 | 缺少可判定的證據 |
 | V4 | 事件序號連續、hash chain 相連、綁定同一 task | 中段被竄改 | 缺少結束標記或 trace |
-| V5 | 已宣告結束的 run 內沒有 Approved、Settled 或交付事件 | 出現假造的 Settled | — |
-| V6 | evidence mode 一致：fixture 不冒充 live；fake 與 live 分開驗 | fixture 標成 live | live 證據缺失 |
+| V5 | 每個案例的 `forbidden_events`（提前核准、grant、付款、交付）都沒有出現；不發 grant | 出現假造的 Settled 或 grant | — |
+| V6 | evidence mode 與執行層一致：fixture 不冒充 live；契約層證據不冒充端到端證據（3.1 的「執行層」） | fixture 標成 live；以契約測試當成 HTTP 或 UI 證據 | live 證據缺失 |
 | V7 | A／B registry snapshot：consumer、agent、task、wallet、from 一致 | 錯誤的 payer、A 的事件歸到 B | — |
 
-- **`not_evaluated`**（不得 PASS）：憑證／BBS+、WebAuthn、ZK、Signer、鏈上付款與扣款隔離、真實 key 選擇。
-- **退出碼**：必要 claim 全部 PASS → 0；FAIL 與 INCONCLUSIVE 各用不同的非零碼。
-- **驗收**：
-  - `go test ./internal/verification/...`，用 golden fixture 測檢查器本身：正常 Ask／Deny 通過；Allow 冒充、金額或收款人不符、假 Settled、中段竄改、fixture 冒充 live 應 FAIL；缺 trace 或結束標記應 INCONCLUSIVE。
-  - 從另一個終端分別對 fixture 證據包與 live 證據包執行 `make verify-m1`。
-  - 限制要寫明：沒有獨立 checkpoint 時，尾端缺漏可能無法偵測。
-- **計畫驗收 43 的 M1 子集**（合法 Ask → 受控負向輸入 → 合法 Ask，同一凍結版本、不改 policy）：可以完全用 fixture 完成，不需消耗模型額度。
+**正確拒絕且沒有落帳，可以 PASS**：不能因為沒有請購就一律判為證據不足。必要證據是「入口拒絕的結果碼」加上「Store 沒有對應的請購或事件」（3.1）。
+
+### 3.1 案例對照（case → 執行層 → 預期 → 必要證據）
+
+「執行層」是 claim 可以宣稱的最高層級：
+- **E2E**：fake CLI → wrapper → MCP／toolbridge → Store／Policy → 主持人 HTTP；
+- **Store**：Store 與 host 的整合測試；
+- **契約**：`internal/contracts` 的測試。
+
+證據只能宣稱它實際所在的層級。
+
+| 案例 | 執行層 | 預期 | 必要證據 |
+|---|---|---|---|
+| `ask` | E2E | Ask／`HUMAN_APPROVAL_REQUIRED`／pending | 請購對得上輸入；事件 #1～#3；未扣預算；沒有 forbidden 事件 |
+| `deny-budget`、`deny-merchant`、`deny-asset` | E2E（host 以可信 plan／目錄設定預算、商家或資產） | Deny 與各自的 reason | 請購與裁決事件；沒有核准、grant 或付款；未扣預算 |
+| `deny-expired`、`deny-missing-config`、`deny-unattended`、`allow-unavailable` | 需要可信設定的變體（過期憑證、缺設定、無核准者、允許額度）。host 有對應的設定入口就走 E2E，**沒有就以 Store 層證據並標示 Store**，由 E1 決定並列明 | Deny／Allow 與各自的 reason；Allow 是 `PAYMENT_CAPABILITY_UNAVAILABLE`、不付款 | 同上；Allow 另需「沒有 grant 或付款」 |
+| `cancel-pending` | E2E（主持人取消） | cancelled／`HOST_CANCELLED`；approval withdrawn | `APPROVAL_WITHDRAWN`、`TASK_CANCELLED`；Ask 不被改成核准 |
+| `cancel-no-purchase` | E2E | cancelled，**沒有請購** | `TASK_CANCELLED`，Store 沒有請購 |
+| `cli-timeout` | E2E（fake CLI 卡住） | failed／`CLI_TIMEOUT`，**請購前結束** | `TASK_TIMED_OUT`，沒有請購 |
+| `cli-timeout-pending` | E2E | failed／`CLI_TIMEOUT`；既有的 Ask 保持 pending | `TASK_TIMED_OUT`，Ask 的紀錄不變 |
+| `approval-timeout`、`approval-deadline-before`、`approval-deadline-exact` | Store（可控時鐘的到期處理）；`approval-timeout` 另可以真實時間跑 E2E | denied／pending 與各自的 reason | `APPROVAL_EXPIRED` 恰好在期限發生（或尚未發生） |
+| `restart` | E2E（重啟 host，同一位消費者開新 task） | same-wallet／`PERSISTED_BINDING` | 兩個 task 的 wallet／from 相同；重啟前後的資料庫 |
+| `retry-same`、`retry-conflict`、`retry-new-request-same-order`、`retry-same-request-id-a-b` | 契約（去重規則）；`retry-same` 另有 toolbridge 的重複請購 | replay／reject／new | 契約測試結果；在 E2E 宣稱時，要另有「沒有第二筆請購或事件」的證據 |
+| `consumer-a`、`consumer-b`、`cross-consumer*`、`altered-*` | 契約（綁定規則）；入口拒絕另有 wrapper 與 HTTP 的測試 | accept／reject（`OWNERSHIP_MISMATCH`） | 契約測試結果；E2E 宣稱另需「入口拒絕、Store 沒有落帳」 |
+| `no-premature-settlement`、`reject-erc7710-quote`、`reject-permit2-quote`、`reject-case-variant-key` | 契約（裁決與請購的驗證） | reject 與各自的 reason | 契約測試結果；**不能**當成 UI 不顯示付款成功的證據（見 3.2） |
+
+### 3.2 整合要求（不是案例 ID，要對應實際的測試）
+
+任務卡 B1-06 的必測項目中，以下各項**不能只套一個相近的 case ID**，要對應實際的測試輸出：
+
+| 要求 | 對應的既有測試（E1 匯出時列入證據） |
+|---|---|
+| 頁面重新整理後由 Store 還原 | `browser-ui.mjs`「refresh + sign-in restores task-a from the Store」 |
+| 惡意字串只當文字顯示 | `adapter.test.mjs`「hostile strings stay strings; nothing reads as paid」、`browser-ui.mjs`「hostile strings render as text only」 |
+| LLM 自稱已付款，畫面仍不顯示成功 | `browser-ui.mjs`「nothing says paid or delivered」、`TestLiveRun`（trace 回覆不含模型文字） |
+| 事件重送不重複動畫 | `adapter.test.mjs`「duplicate events are shown once and animated once」 |
+| A／B 切換不串資料 | `adapter.test.mjs`「a switch drops every late reply of the old viewer」、`TestIntegrationAskDenyAndAccess` |
+| 取消與 CLI 逾時顯示獨立狀態 | `TestCancel*`、`TestCancelAfterCLITimeout`、`browser-ui.mjs` 的 3.4 段 |
+
+### 3.3 fixture 證據包與 live 證據包分開定義
+
+- **fixture 完整案例包**（`make m1-fixture`）：
+  - 31 個 case claim 每個恰好出現一次，在 results（PASS／FAIL／INCONCLUSIVE）或 not_evaluated；
+  - 七個 capability（`credential_verification`、`webauthn`、`voice_approval`、`zk_budget_proof`、`signer_key_selection`、`cross_consumer_grant_proof`、`onchain_settlement`）全部列為 not_evaluated；
+  - 每個 claim 的證據都標明執行層（3.1）。
+- **live 單筆 Ask 包**（`make m1-live-cli`）：
+  - 只有 `ask` 一個 case claim 必須有結果，其餘 30 個列為 not_evaluated；
+  - 必須含 `gate_mode`（M1 預期是 `dev_demo_plugins`，要明列「嚴格模式未驗證」與剩餘風險）、CLI 版本、模型、usage 為自報或 unknown；
+  - **不得稱為全案例通過**。
+- 這兩個包分別以 `make verify-m1` 驗證；fixture 包通過不能掩蓋 live 包缺少證據。
 
 ## 4 建議的下一個切片
 
-**M1-E1：M1 證據包格式與 `make m1-fixture`**（B1-06 出口的第 1、3 項）。
+**M1-E1：沿用既有證據契約，補齊證據檔內容並做 `make m1-fixture`**（B1-06 出口的第 1、3 項）。
 
-- **理由**：B1-07 要讀的就是這個格式，必須先固定；而且全部用 fake CLI，可以直接實作，不需要真實執行的核准。
-- **範圍**：
-  - 證據包格式（manifest＋逐案例結果＋遮罩事件＋結束標記）與 schema 文件；
-  - `make m1-fixture` 用 fake CLI 跑必測案例，每次一個新的 run 目錄；
-  - 沿用既有的 demo host、buyer host 與 Store，不改 Policy、事件契約或 Gate。
-- **驗收**：
-  - Go 測試：證據包的欄位齊全；同一份輸入跑兩次，除了時間與 ID 以外內容一致；案例結果等於 `cases.json` 的 expected；
-  - 證據包中掃不到 token 或配對碼；
-  - 對新增的保護（例如遮罩、結束標記）做反向驗證；
-  - 交 Codex 限定 review。
-- **之後的順序**：
-  1. M1-E2：B1-07 檢查器（第 3 節）；
-  2. M1-E3：`make m1-live-cli` 一次真實證據包，需 Aaron 另行核准；
-  3. M1-E4：`docs/m1-result.md`、乾淨目錄 E2E、逐卡結案。
+**不另造格式**。既有契約（`internal/contracts/evidence.go` 的 `RunManifest`、`EvidenceRef`、`ClaimResult`、`CommandResult`；`docs/contracts.md`「Claim 分兩類」一節）已經定義：
+- run ID、code commit、dirty patch digest、config digest、case manifest digest、工具版本、命令與 exit code；
+- 證據索引（相對路徑、原始 bytes 的 `sha256:` digest、evidence mode、source）；
+- 每個 case 的 PASS／FAIL／INCONCLUSIVE 與 not_evaluated、七個必須列為 not_evaluated 的 capability。
 
-  若希望更快，也可以把 E1 與 E2 合成一個切片，但 review 範圍會變大。
+**E1 要補的部分**（逐項列明。若需要改動契約欄位，回報最小差異與理由，不另開平行格式）：
+1. **證據檔內容**：每個 task 的遮罩事件匯出（Store 的事件與請購白名單投影）、run trace 白名單、host_runs 紀錄、各層測試輸出（只取對應的案例），以及**結束標記**。
+2. **執行層標示**：用既有的 `EvidenceRef.source` 定一組封閉詞彙（例如 `host_e2e`、`store_integration`、`contracts_test`、`browser_ui`、`live_cli`）。如果現有欄位不夠用，列為契約擴充並說明理由。
+3. **「不扣預算」與「沒有 forbidden 事件」的證據**：例如任務預算的前後快照。
+4. **產生流程**：`make m1-fixture` 以 fake CLI 跑 3.1 的 E2E 案例，並收進 Store 層與契約層的測試結果；每次一個新的 run 目錄；不含 token、配對碼或 CLI 原文。
+5. **3.2 的整合要求**：把對應的測試結果一併列為證據。
+
+**驗收**：
+- 以既有的 `ValidateAgainst` 通過索引檢查（**只是索引，不是 B1-07**）；
+- Go 測試：同一份輸入跑兩次，除了時間與 ID 以外內容一致；
+- 每個案例的層級與 3.1 一致；
+- 證據包中掃不到 token 或配對碼；
+- 對遮罩、結束標記與層級標示做反向驗證；
+- 交 Codex 限定 review。
+
+**之後的順序**：
+1. M1-E2：B1-07 檢查器（第 3 節）。E1 與 E2 維持分開，先把產出格式與案例對照做紮實。
+2. M1-E3：`make m1-live-cli` 一次真實的 live 單筆 Ask 包（3.3），需 Aaron 另行核准。
+3. M1-E4：`docs/m1-result.md`、乾淨目錄 E2E、逐卡結案。
 
 ## 5 不算入 M1 的項目（後續商業展示的要求）
 
