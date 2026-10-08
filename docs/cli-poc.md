@@ -3073,7 +3073,7 @@ exit "$RUN_EXIT"
 
 **保存的證據**（`$EV`）：
 - `commit.txt`、`binary-vcs.txt`、`go-version-build.txt`、`started-utc.txt`、`ended-utc.txt`、`exit-code.txt`；
-- `stdout.txt`：LIVE 開頭行、例外標示行，以及 JSON 報告（工具呼叫紀錄、Store 的 task 檢視；**不含模型的 result 文字**）；
+- `stdout.txt`：LIVE 開頭行、例外標示行，以及 JSON 報告（工具呼叫紀錄、Store 的 task 檢視；**不含模型的 result 文字**）。**整份不是純 JSON**，判讀時先略過前兩行提示；
 - `apa-buyer-error.txt`：apa-buyer 自己的錯誤行，固定代碼，不含 CLI 文字；
 - `runs/task-a-*.jsonl`：白名單 trace，含 `run_start.gate_mode`；
 - `apa-live.db`：本次全新的測試 Store。
@@ -3087,7 +3087,7 @@ exit "$RUN_EXIT"
   - `apa-live.db` 中同一 task 有請購與事件，且與 `stdout.txt` 的 task 檢視一致。
 - **分類**（如實記錄，都停止、不重試）：
   - exit 2 前置停止；
-  - exit 1 而且沒有報告（版本檢查等啟動前的拒絕）；
+  - exit 1 而且沒有報告：**不能一律判為啟動前拒絕**。要結合 `apa-buyer-error.txt` 的錯誤訊息、`stdout.txt` 有沒有 LIVE 提示、以及 `runs/` 有沒有 trace 來判斷。若無法確認，記為「執行階段未確認」，不能宣稱 CLI 未啟動或沒有用量（10/8 依 Codex 修正）；
   - Gate 拒絕（`config_mismatch` 加代碼，例如 `plugins`、`auth_unconfirmed`）；
   - 沒有請購（模型沒有呼叫 `request_purchase`）；
   - 達到上限（`turn_limit`、時間、呼叫數）、逾時、CLI 錯誤；
