@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **10/8 plugin 查詢腳本 R1、R2、C1 已修訂，定向 fake 驗證完成，待 Codex 限定複核**（第 46 節，修訂紀錄 46.6；工具 `scripts/b1-04/plugin_id_query.py`）。真實查詢尚未核准、未執行；Gate、認證清單及產品行為不變。
+> **10/8 plugin 查詢工具第二輪 R1～R3 已修訂（`1acbf01`），定向 fake 驗證完成，待 Codex 限定複核**（第 46 節，修訂紀錄 46.7）。第一輪 R1、R2、C1 見 46.6。真實查詢尚未核准、未執行；Gate、認證清單及產品行為不變。
 >
 > **10/8 方案 A 後的診斷型 C0′（Claude Code 執行，待 Codex review）**：取得 init（exit `0`，`observed`）。**plugins 仍非空**：同樣 2 個（`cc-plugin-agents-md`、`cc-plugin-plugin-authoring`，path `relative`）。§44.4 的其他條件都符合：agents／skills 為 0，MCP 1 個且 apa connected，tools 3／3／0，`dontAsk`，`approved`。依 44.5：**方案 A 本次未達目標**，保存證據後停止；不推論來源、不自動換方案（第 45 節）。正式請購阻擋仍在。
 >
@@ -2174,24 +2174,32 @@ L1-b、L1-c 不標整體通過；B1-04 仍 InProgress；不合併、不推送、
 - marketplace plugin 有兩個名字：`marketplace.json` 的 entry name（`id` 的名稱部分），以及 manifest 的 `name`。兩者可以不同。
 - init 回報的名稱是哪一個，文件沒有說明。
 
-### 46.2 查詢工具（R1、R2、C1 修訂後；未對真實 CLI 執行）
+### 46.2 查詢工具（第二輪 R1～R3 修訂後；未對真實 CLI 執行）
 
-**現行工具**：`scripts/b1-04/plugin_id_query.py`（`53dce97`）。它取代原本的 shell 管線（原文見 46.6）。
+**現行工具**（`1acbf01`）：
+- 控制程式 `scripts/b1-04/plugin_id_query.py`；
+- 操作包裝 `scripts/b1-04/plugin-id-query.sh`。
+
+兩者取代原本的 shell 管線（原文見 46.6），以及第一輪文件中的三行包裝（見 46.7）。
 
 **操作命令**（未執行；須 Aaron 決定由誰、是否執行；一次，失敗不重試）：
 
 ```bash
-EV=artifacts/b1-04/plugin-id-query-$(date -u +%Y%m%dT%H%M%SZ); mkdir "$EV" || exit 1
-python3 -I scripts/b1-04/plugin_id_query.py --cli /Users/mac/.local/bin/claude > "$EV/result.txt"
-echo "exit=$?" > "$EV/exit-code.txt"
+bash scripts/b1-04/plugin-id-query.sh /Users/mac/.local/bin/claude
 ```
 
-存成檔案，以 `bash 檔名` 執行；不要逐行貼進互動 shell。
+**包裝是 repo 裡的檔案，整份執行，不逐行貼進互動 shell。** 它做的事（R3）：
+- 在 `artifacts/b1-04/` 下以 `mkdir`（不加 `-p`）建立新的證據目錄，已存在或無法建立就停止，不覆寫，查詢不啟動（exit 21）；再預先建立 `result.txt`，失敗也停止（exit 22）。
+- 只執行查詢一次，stdout 寫入 `result.txt`。查詢一返回，就把它的退出碼存進變數，後續命令不會改變它。
+- 核對 `result.txt` 含 `result=` 行，`exit-code.txt` 也確實寫入。任一不完整，就印「查詢已嘗試，證據不完整（不重跑）」並以 exit 23 結束；不重跑查詢補證據。
+- 證據完整時，以查詢自己的退出碼結束：成功 0、`no_match` 3、失敗 2、4～12，不會被改成 0。
+- 參數錯誤或找不到 `python3`：exit 20，查詢未啟動。
 
 **執行流程**：
 1. **前置檢查**（任一失敗，CLI 呼叫零次，exit 2）：
    - 參數必須恰為 `--cli <絕對路徑>`，路徑是可執行的一般檔案；
    - `tempfile.mkdtemp(prefix="apa-plist.")` 建立暫存目錄，其下 `plugins`、`work` 都以 0700 建立。
+   - 建立後立即開啟並保留兩個 file descriptor：上層目錄，以及本次目錄（`O_DIRECTORY|O_NOFOLLOW`）。另記下本次目錄的身分 `(st_dev, st_ino)`，清理時用它（第二輪 R1）。
 2. **環境**（與 `internal/buyer` 的 `CLIEnv` 組裝規則一致；C1）：
    - 只取白名單八項 `HOME`、`USER`、`LOGNAME`、`PATH`、`TMPDIR`、`LANG`、`LC_ALL`、`TERM`，空值略過；
    - 再加固定的 `DISABLE_AUTOUPDATER=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`、`CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`；
@@ -2204,7 +2212,10 @@ echo "exit=$?" > "$EV/exit-code.txt"
    - stdout 超過 **1 MiB**（1,048,576 bytes）就停止讀取，為 `output_overflow`。
    - 這些是本查詢的控制規則，不改產品時間限制。
 5. **停止與回收**：逾時、超量或中斷時，先對本次 process group 送 SIGTERM，等 **3 秒**，再送 SIGKILL，然後回收。正常結束後，也會對同一個 group 送一次 SIGKILL，結束殘留的子程序。只處理本次啟動的 group，不以名稱搜尋或終止其他 Claude 程序。
-   - 限制：程序群組 ID 在仍有成員時不會被重用（POSIX）；脫離 group 的程序無法回收。
+   - **中斷（第二輪 R2）**：SIGINT／SIGTERM 的處理器只記錄訊號，不拋出例外。讀取迴圈每 0.1 秒檢查一次，有訊號就以 `interrupted` 進入上述停止流程。
+   - 停止流程開始後，再收到的訊號只被記錄：不會跳過 SIGKILL、等待、回收、管線關閉或目錄清理，也不會延長或重設 3 秒寬限，不會再次啟動 CLI。
+   - 若在 CLI 啟動前就收到訊號，不啟動 CLI。
+   - 限制：程序群組 ID 在仍有成員時不會被重用（POSIX）；脫離本次 process group 的程序，無法由此機制保證回收。
 6. **解讀**（R1；只在 CLI exit 0、未逾時、未超量時進行）：
    - **頂層**：必須是 JSON 陣列。JSON 必須是嚴格 UTF-8；不接受重複成員、`NaN`、`Infinity`。
    - **每筆紀錄**：必須是物件，且 `id` 為字串，否則整份拒絕（`record_shape`）。
@@ -2222,13 +2233,25 @@ echo "exit=$?" > "$EV/exit-code.txt"
    - 不修補、不截斷、不猜測 ID。保守拒絕不代表該 ID 在 CLI 中一定無效。
    - **先驗證全部候選，再一次輸出**；任一候選不合法，就不輸出任何候選。
    - 錯誤只輸出固定代碼，不輸出原值、原始 JSON、錯誤內文或 traceback。
-7. **清理**：只刪除本次 `mkdtemp` 建立的目錄。刪除前核對它的上層是 `tempfile.gettempdir()`、名稱以 `apa-plist.` 開頭、確實是目錄，否則不刪。清理涵蓋前置失敗、正常結束、執行失敗與中斷。
+7. **清理**（第二輪 R1）：只刪除本次建立的目錄，依它的身分，不依路徑形狀。
+   1. 在上層 fd 中以名稱 `lstat`（不跟隨 symlink）。必須是實體目錄，且 `(st_dev, st_ino)` 等於建立時記下的值；symlink、被換成其他目錄或身分不符都拒絕，不刪任何東西。
+   2. 內容經由**本次目錄自己保留的 fd** 逐層刪除。子目錄以 `O_NOFOLLOW` 開啟，symlink 只移除不跟隨。所以路徑之後被換掉，也不會沿新路徑刪除。
+   3. 唯一依名稱進行的一步，是最後的非遞迴 `rmdir`。執行前再核對一次名稱仍是本次目錄；`rmdir` 只能移除空目錄。
+   4. 拒絕或失敗時回報 `dir_cleanup=failed`，保留剩下的內容，不擴大刪除範圍。
+   - 剩餘限制：在第二次核對與 `rmdir` 之間，若名稱被換成另一個**空**目錄，理論上仍可能被移除；非空目錄、symlink、其他位置都不受影響。
+   - 清理涵蓋前置失敗、正常結束、執行失敗與中斷。
 
 **輸出**：只寫到 stdout，原始 stdout 只留在記憶體。
-- 第一行固定為 `query=plugin_list v1`。
+- 第一行固定為 `query=plugin_list v2`。
 - 成功時，每個候選一行 `candidate {"id","origin","scope","enabled","errors"}`，接著 `matched=<n> entries=<m>`。
 - 失敗時只有 `reason=` 或 `reject=` 的固定代碼。
-- 最後三行固定：`result=<代碼>`、`cli=<not_started|start_failed|exit_<n>|exit_signal_<n>>`、`cleanup=<ok|failed|none>`。
+- 最後五行固定：
+  - `result=<代碼>`
+  - `cli=<not_started|start_failed|exit_<n>|exit_signal_<n>>`
+  - `cli_proc=<not_started|reaped|unknown>`：主程序是否已回收
+  - `dir_cleanup=<ok|failed|none>`：**只表示暫存目錄的清理**，不代表程序也已回收
+  - `signals=<n>`：收到的 SIGINT／SIGTERM 次數
+- `cli_proc=reaped` 只代表主程序已回收，且已對本次 group 送出 SIGKILL；脫離 group 的程序不在保證範圍內。
 
 **退出碼**：
 
@@ -2242,12 +2265,16 @@ echo "exit=$?" > "$EV/exit-code.txt"
 | 6 | `output_overflow` | stdout 超過 1 MiB |
 | 7 | `parse_error` | 非 JSON、非陣列、紀錄格式不符 |
 | 8 | `format_rejected` | 候選欄位不符規則 |
-| 9 | `cleanup_failed` | 主要作業成功，但清理失敗；不算完整成功。主要作業失敗時保留主要代碼，另以 `cleanup=failed` 標示 |
-| 10 | `interrupted` | 腳本收到 SIGINT／SIGTERM；已停止 CLI、已清理 |
+| 9 | `cleanup_failed` | 主要作業成功，但目錄清理失敗或被拒絕；不算完整成功。主要作業失敗時保留主要代碼，另以 `dir_cleanup=failed` 標示 |
+| 10 | `interrupted` | 腳本收到 SIGINT／SIGTERM。程序與目錄的實際狀態，看 `cli_proc=`、`dir_cleanup=`；不以此宣稱 CLI 已停止 |
 | 11 | （無 `result=` 行） | 報告寫出失敗 |
 | 12 | `internal_error` | 其他非預期錯誤，只輸出固定代碼 |
+| 20 | （包裝） | 參數錯誤或找不到 `python3`；查詢未啟動 |
+| 21 | （包裝） | 證據目錄已存在或無法建立；不覆寫，查詢未啟動 |
+| 22 | （包裝） | `result.txt` 無法建立；查詢未啟動 |
+| 23 | （包裝） | 查詢已嘗試，但 `result.txt` 或 `exit-code.txt` 不完整；不重跑 |
 
-- Python 自身無法執行這個檔案時也可能回 exit 2，但不會有 `result=` 行。shell 的重新導向失敗時，檔案不會被執行。
+- Python 自身無法執行控制程式時也可能回 exit 2，但 `result.txt` 不會有 `result=` 行，包裝會改回 exit 23。
 - 一次執行最多啟動 CLI 一次，任何失敗都不自動重試。只要 `cli=` 不是 `not_started`，就不能聲稱「沒有執行」或「沒有背景活動」。
 
 ### 46.3 誰執行（擇一，Aaron 決定）
@@ -2340,3 +2367,70 @@ L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
 2. 複核通過後，由 Aaron 決定甲或乙，並另行核准一次真實查詢。
 
 L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
+
+### 46.7 修訂紀錄：plugin 查詢工具第二輪 R1～R3（2026-10-08；Claude Code 執行，待 Codex 限定複核）
+
+> plugin 查詢工具第二輪 R1～R3 已修訂（`1acbf01`），定向 fake 驗證完成，待 Codex 限定複核。真實查詢尚未核准、未執行；Gate、認證清單、產品行為、方案 A 都不變。L1-b、L1-c 未標整體通過，B1-04 維持 InProgress。
+
+- **依據**：vault〈Claude-Code-B1-04-plugin查詢工具第二輪R1-R3修訂派工-9d41696-20261008〉。本輪 R1～R3 是新編號，與 46.6 的第一輪 R1、R2、C1 不同。
+- **開工核對**：分支 `b1-04-live`，HEAD `9d41696`；工作區只有 `?? demo`。工具與測試的基準是 `53dce97`，其後只有文件提交。
+
+**Codex 本次 review 的證據歸屬**（分開記錄）：
+- **Codex 獨立執行**：在斷網容器中做了本輪三項定向探測。條件：來源唯讀、非 root、空環境加合成的 HOME／TMPDIR，並有 CPU、記憶體、程序數、檔案大小與時間限制；沒有執行真實 CLI。
+  - 中斷探測的前兩次沒有到達有效檢查點，不算產品失敗；有效的 R2 結果是之後以受控注入取得。
+  - 探測輸出只在 Codex 的工具紀錄中，沒有另存成 repo 證據檔。本節不列它的 artifacts 路徑。
+- **Claude Code 執行、Codex 核對紀錄**：`artifacts/b1-04/plugin-id-query-fake-20261008T031447Z/` 中，Python 3.9、3.12 各 13 項通過的輸出與退出碼，以及 13 種故障試跑的摘要。Codex 沒有獨立重跑這套測試，也不宣稱核對過摘要沒有列出的每項故障細節。
+
+| 項目 | 原寫法（`53dce97`、`1a782a1`） | 現行（`1acbf01`） | 位置 |
+|---|---|---|---|
+| R1 目錄身分 | `remove_own(path)` 先 `realpath()`，再核對上層目錄與前綴後 `rmtree`。路徑被換成指向同前綴旁觀者的 symlink 時，會刪掉旁觀者 | `Scratch` 從建立起保留上層與本次目錄的 fd 及 `(st_dev, st_ino)`；以 `lstat` 拒絕 symlink 與身分不符；內容經由本次目錄的 fd 刪除；唯一依名稱的非遞迴 `rmdir` 前再核對一次 | `Scratch`、`clear`、`remove_own`；46.2 第 1、7 點 |
+| R2 中斷 | 處理器拋出 `Interrupted`；在終止流程中收到的訊號會跳過 SIGKILL、等待與管線關閉，報告卻仍是 `cleanup=ok` | 處理器只記錄；停止流程（SIGTERM、3 秒、SIGKILL、回收、關閉）一定完成，不被跳過或延長；報告分開列 `cli_proc=` 與 `dir_cleanup=`，並加 `signals=` | `on_signal`、`run_cli`、`main`；46.2 第 5 點、輸出、exit 10 |
+| R3 包裝退出碼 | 文件中的三行包裝以 `echo` 結束，查詢 exit 2 時整份 shell 回 0 | `scripts/b1-04/plugin-id-query.sh`：查詢一返回就保存退出碼；核對兩個證據檔；完整時 `exit` 查詢碼，否則 exit 23；證據目錄不覆寫；自有代碼 20～23 | 包裝檔；46.2 操作命令與退出碼 |
+
+**定向 fake 驗收**（`scripts/b1-04/test_plugin_id_query.py`，19 個測試；Claude Code 執行，待 Codex 核對）：
+- CLI 一律是假的 shell 腳本，每個案例最多啟動一次；不用正式 CLI 路徑、真實設定或 plugin 清單；HOME、TMPDIR 是測試建立的合成目錄。
+- R1、R2 的案例載入實際的 `plugin_id_query.py`；R3 的案例以 `/bin/bash` 執行實際的 `plugin-id-query.sh`。
+
+| 測試 | 對應 |
+|---|---|
+| `test_cleanup_identity` | **R1**，七種情況：<br>1. 原目錄未動：可清理；<br>2. 換成指向同上層、同前綴旁觀者的 symlink：拒絕，旁觀者與檔案不變；<br>3. 換成另一個同名實體目錄：拒絕，該目錄與檔案不變；<br>4. 換成指向本次（已搬走）目錄的 symlink：拒絕，且不動任何內容；<br>5. 指向 HOME、TMPDIR 本身的 symlink：拒絕；<br>6. 第一次核對通過後立刻換成 symlink：內容只經本次 fd 刪除，旁觀者不變，最後的 `rmdir` 被第二次核對擋下；<br>7. 第一次核對後換成空目錄：第二次核對擋下 `rmdir`，空目錄保留。 |
+| `test_cleanup` | 清理失敗：主要成功時 exit 9；主要失敗時保留 exit 4。另以 `dir_cleanup=failed` 標示 |
+| `test_interrupted` | **R2-1**：正常讀取期間收到 SIGTERM → exit 10，`cli_proc=reaped`，`dir_cleanup=ok`，`signals=1` |
+| `test_interrupt_in_grace` | **R2-2**：假 CLI 忽略 SIGTERM（只記錄）。以它記錄到 TERM 作為就緒條件，確認已進入寬限期，再對腳本送一次 SIGTERM。結果：仍以 SIGKILL 結束（`cli=exit_signal_9`）、已回收、目錄已清，從注入起算在寬限 2 秒加 1.5 秒內結束 |
+| `test_interrupt_burst_in_grace` | **R2-3**：寬限期間交替送 6 次 SIGTERM／SIGINT。不跳過收尾，不延長期限（同上界限），`signals=7` |
+| `test_timeout_and_overflow`、`test_leftover_child_after_normal_exit`、其他既有案例 | **R2-4**：正常、逾時、超量等原有路徑仍成立 |
+| `Wrapper.test_outcomes_kept` | **R3**：成功時外層 0；`no_match` 外層 3；已啟動後失敗外層 4；CLI 不存在（未啟動）外層 2。`exit-code.txt` 與外層一致 |
+| `Wrapper.test_evidence_not_saved` | **R3**：`result.txt` 遺失、`exit-code.txt` 無法寫入 → 外層 23，有固定提示，查詢只啟動一次 |
+| `Wrapper.test_evidence_directory` | **R3**：證據上層不存在、同名目錄已存在（既有內容不變）、上層是檔案 → 21，CLI 呼叫零次；參數錯誤 → 20 |
+
+**程序存活檢查**：以 `/bin/ps -o stat=` 區分三種狀態：已不存在（空字串）、已退出未回收（`Z`）、仍在執行。測試要求假 CLI 主程序已不存在。這需要在 Claude Code 沙箱外執行，因為沙箱禁止 `/bin/ps`。
+
+**命令與結果**（macOS；沙箱外；證據 `artifacts/b1-04/plugin-id-query-fake-r2-20261008T034502Z/`）：
+- `/usr/bin/python3 -I -m unittest discover -v -s scripts/b1-04 -p 'test_*.py'`：Python 3.9.6，19 項 OK，exit 0。
+- `python3 -I -m unittest discover -v -s scripts/b1-04 -p 'test_*.py'`：Python 3.12.6，19 項 OK，exit 0。
+- `/bin/bash` 3.2.57。證據檔中都沒有 `MARK` 標記。
+- **反向基準**（`reverse-baseline.txt`）：舊版（`53dce97` 工具、`1a782a1` 文件包裝）在合成目錄下重現了三個缺陷：
+  - R1：舊 `remove_own` 回傳 True，旁觀者目錄被刪；
+  - R2：舊版在寬限期間收到中斷，回 exit 10、`cleanup=ok`，但假 CLI 仍在執行（`Ss`）；探測後已另行終止它的 group；
+  - R3：舊包裝外層 exit 0，而 `exit-code.txt` 是 `exit=2`。
+- **故障試跑**（`fault-trials.txt`）：在新版副本中逐一放回 12 種舊缺陷或其變形。
+  - 第一次 11 種被抓到；「`lstat` 改成跟隨 symlink」沒有被抓到。
+  - 補上「指向本次目錄的 symlink」案例後，該項也被抓到。
+
+**失敗嘗試與過程**：
+- 沙箱內執行時，`/bin/ps` 被拒，兩個 R2 測試出錯（環境問題），改在沙箱外執行。
+- 第一版 `Wrapper` 繼承 `Case`，重複執行了 `Case` 的測試；已改為只沿用輔助函式。
+- `test_evidence_not_saved` 的第一版，在迴圈開始前就把第一個證據目錄的路徑寫進第二個案例，導致 `chmod` 作用在舊目錄而得到 0。已改為每個案例使用自己的證據上層。
+- 三次含 `rm -rf` 的除錯或試跑命令被權限拒絕，已改用新的暫存目錄。
+- 失敗的嘗試都沒有對真實 CLI 或真實資料執行。
+
+**仍未驗證的限制**：
+- 沒有對真實 `claude plugin list` 執行，`2.1.293` 的實際輸出與行為未知。
+- 第二次核對與 `rmdir` 之間換成**空**目錄的極小時窗（46.2 第 7 點）。
+- 脫離本次 process group 的程序。
+- 只在 macOS（bash 3.2、Python 3.9／3.12）驗證；Linux 未驗證。
+- 本輪沒有重跑產品 Go 全套、完整七步容器、255 項突變或 Unity。
+
+**待決定**：
+1. Codex 限定複核。
+2. 複核通過後，由 Aaron 決定執行者，並另行核准一次真實查詢。
