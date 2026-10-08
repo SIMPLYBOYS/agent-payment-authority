@@ -132,8 +132,10 @@ async function startChrome() {
   let id = 0;
   const waiting = new Map();
   const consoleText = [];
+  const listeners = new Map(); // CDP event -> handlers (Fetch.requestPaused)
   ws.addEventListener("message", (ev) => {
     const m = JSON.parse(ev.data);
+    if (m.method && listeners.has(m.method)) for (const fn of listeners.get(m.method)) fn(m.params);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
     if (m.method === "Runtime.consoleAPICalled") consoleText.push(m.params.args.map((a) => a.value ?? a.description ?? "").join(" "));
     if (m.method === "Runtime.exceptionThrown") consoleText.push("EXCEPTION " + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
@@ -154,7 +156,8 @@ async function startChrome() {
     for (const end = Date.now() + ms; Date.now() < end; await sleep(50)) if (await evaluate(expr).catch(() => false)) return true;
     return false;
   };
-  return { send, evaluate, waitFor, consoleText, close: () => { ws.close(); c.kill(); } };
+  const on = (method, fn) => { listeners.set(method, [...(listeners.get(method) || []), fn]); };
+  return { send, evaluate, waitFor, on, consoleText, close: () => { ws.close(); c.kill(); } };
 }
 
 const text = (sel) => `(document.querySelector(${JSON.stringify(sel)})?.textContent || "")`;
@@ -259,6 +262,59 @@ try {
   await b.send("DOM.setFileInputFiles", { nodeId: q.nodeId, files: [join(a.session, "tok", "tokens.json")] });
   check("A: recovery by the advanced token file", await b.waitFor(`document.getElementById("creds").dataset.mode === "file" && !document.getElementById("control").hidden`, 20000));
   check("A: nothing ran meanwhile", (await api(a.addr, a.tokens.find((t) => t.role === "operator").token, "/api/host/runs")).json.runs.length === 0
+    && readdirSync(join(a.session, "runs")).length === 0);
+  // ---- review R2: the mode is unknown until an answer confirms it ----
+  // GET /api/mode is intercepted in the browser (CDP Fetch): held, 503,
+  // dropped, an old "fake" answer, or passed on.
+  const modeReq = { how: "pass", held: [] };
+  b.on("Fetch.requestPaused", (p) => {
+    const id = p.requestId;
+    if (modeReq.how === "hold") modeReq.held.push(id);
+    else if (modeReq.how === "503") b.send("Fetch.fulfillRequest", { requestId: id, responseCode: 503, body: Buffer.from('{"error":"store_unavailable"}').toString("base64") }).catch(() => {});
+    else if (modeReq.how === "drop") b.send("Fetch.failRequest", { requestId: id, errorReason: "ConnectionFailed" }).catch(() => {});
+    else b.send("Fetch.continueRequest", { requestId: id }).catch(() => {});
+  });
+  await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/mode*" }] });
+  const header = `(${text("header.top")})`;
+  const loadFile = async () => {
+    const d = await b.send("DOM.getDocument", {});
+    const f = await b.send("DOM.querySelector", { nodeId: d.root.nodeId, selector: "#token-file" });
+    await b.send("DOM.setFileInputFiles", { nodeId: f.nodeId, files: [join(a.session, "tok", "tokens.json")] });
+  };
+  modeReq.how = "hold";
+  await b.send("Page.navigate", { url: a.url });
+  await b.waitFor(`document.readyState === "complete"`);
+  check("R2: the mode answer held: the header says 模式未確認, not fake", await b.waitFor(`${text("header .badge")} === "模式未確認（讀取中）"`, 10000) && modeReq.held.length >= 1
+    && !(await b.evaluate(header)).includes("M1／fake agent") && !(await b.evaluate(header)).includes("真實 Agent 未啟用") && !(await b.evaluate(visible("#live-note"))), (await b.evaluate(header)).replace(/\s+/g, " ").slice(0, 160));
+  await shot(b, "r2-mode-held");
+  for (const [how, name] of [["503", "503"], ["drop", "a dropped connection"]]) {
+    modeReq.how = how;
+    await b.send("Page.navigate", { url: a.url });
+    await b.waitFor(`document.readyState === "complete"`);
+    check("R2: " + name + ": the viewer reads 讀取失敗, never fake", await b.waitFor(`${text("header .badge")} === "模式未確認：讀取失敗（重試中）"`, 10000)
+      && !(await b.evaluate(header)).includes("M1／fake agent") && !(await b.evaluate(header)).includes("真實 Agent 未啟用") && !(await b.evaluate(visible("#live-note"))),
+      (await b.evaluate(header)).replace(/\s+/g, " ").slice(0, 160));
+    if (how === "503") await shot(b, "r2-mode-failed");
+    modeReq.how = "pass"; // the page tries again by itself
+    check("R2: after " + name + ", a good answer: the live label and its warnings", await b.waitFor(`${text("header .badge")} === ${JSON.stringify(LIVE_LABEL)} && ${visible("#live-note")}
+      && ${text("header .caps")}.includes("開發展示例外")`, 15000));
+  }
+  for (const [late, name] of [[{ responseCode: 200, body: '{"mode":"fake"}' }, "an older fake answer"], [{ responseCode: 503, body: "{}" }, "an older failure"]]) {
+    modeReq.how = "hold";
+    modeReq.held = [];
+    await b.send("Page.navigate", { url: a.url });
+    await b.waitFor(`document.readyState === "complete"`);
+    await b.waitFor(`${text("header .badge")} === "模式未確認（讀取中）"`, 10000);
+    await loadFile(); // the host status confirms live meanwhile
+    await b.waitFor(`${text("header .badge")} === ${JSON.stringify(LIVE_LABEL)}`, 20000);
+    for (const id of modeReq.held.splice(0)) await b.send("Fetch.fulfillRequest", { requestId: id, responseCode: late.responseCode, body: Buffer.from(late.body).toString("base64") }).catch(() => {});
+    modeReq.how = "pass";
+    await sleep(2500);
+    check("R2: " + name + " after the mode was confirmed changes nothing", (await b.evaluate(text("header .badge"))) === LIVE_LABEL && await b.evaluate(visible("#live-note")),
+      await b.evaluate(text("header .badge")));
+  }
+  await b.send("Fetch.disable", {});
+  check("R2: reading the mode, failing and recovering ran nothing", (await api(a.addr, a.tokens.find((t) => t.role === "operator").token, "/api/host/runs")).json.runs.length === 0
     && readdirSync(join(a.session, "runs")).length === 0);
   await A.stopHost(a.pid);
 

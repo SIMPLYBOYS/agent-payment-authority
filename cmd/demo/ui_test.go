@@ -44,7 +44,7 @@ func TestDashboardRoutes(t *testing.T) {
 
 	t.Run("page and assets", func(t *testing.T) {
 		code, body, hdr := h.get("/", "")
-		if code != 200 || !bytes.Contains(body, []byte("M1／fake agent／不付款")) || !strings.Contains(hdr.Get("Content-Security-Policy"), "script-src 'self' 'wasm-unsafe-eval'") ||
+		if code != 200 || !bytes.Contains(body, []byte("模式未確認（讀取中）")) || bytes.Contains(body, []byte("M1／fake agent")) /* docs/cli-poc.md 56.8: never fake before the mode is known */ || !strings.Contains(hdr.Get("Content-Security-Policy"), "script-src 'self' 'wasm-unsafe-eval'") ||
 			hdr.Get("X-Frame-Options") != "DENY" || hdr.Get("Cache-Control") != "no-store" || hdr.Get("Access-Control-Allow-Origin") != "" {
 			t.Fatalf("page: %d %v", code, hdr)
 		}

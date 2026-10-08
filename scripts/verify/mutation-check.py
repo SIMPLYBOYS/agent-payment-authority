@@ -693,6 +693,8 @@ MUTATIONS = [
      '\tcase *pairingOn && *scenariosPath == "":\n', '\tcase false:\n', 'TestPairingOffAndReadyFile'),
     ('launcher: the ready file names no process', 'cmd/demo/main.go',
      '"pid": os.Getpid()', '"pid": 0', 'TestPairingOffAndReadyFile'),
+    ('launcher: the ready file replaces what is there (review R1)', 'cmd/demo/main.go',
+     'if err := os.Link(tmp.Name(), path); err != nil {', 'if err := os.Rename(tmp.Name(), path); err != nil {', 'TestWriteReadyNeverReplaces'),
     ('mode: answered on another Host', 'cmd/demo/ui.go',
      '\tif r.Host != a.addr {\n\t\tfail(w, http.StatusForbidden, "forbidden_host")\n\t\treturn\n\t}\n\tswitch {', '\tswitch {', 'TestPairingOffAndReadyFile'),
 ]
