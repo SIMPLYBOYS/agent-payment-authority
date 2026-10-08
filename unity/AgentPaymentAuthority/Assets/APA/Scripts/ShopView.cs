@@ -111,10 +111,13 @@ namespace APA
             UsingPlaceholders = floorSheet == null || wallSheet == null || customerA == null || customerB == null;
             for (int i = 0; i < props.Length; i++) if (props[i] == null) UsingPlaceholders = true;
             BuildRoom();
-            customers["consumer-a"] = MakeCustomer("consumer-a", customerA, "A (sim agent)", new Color(0.55f, 0.75f, 1f));
-            customers["consumer-b"] = MakeCustomer("consumer-b", customerB, "B (sim agent)", new Color(1f, 0.7f, 0.5f));
+            customers["consumer-a"] = MakeCustomer("consumer-a", customerA, "Customer A", new Color(0.55f, 0.75f, 1f));
+            customers["consumer-b"] = MakeCustomer("consumer-b", customerB, "Customer B", new Color(1f, 0.7f, 0.5f));
             banner = MakeText("banner", new Vector2(5.6f, 9.5f), 0.1f, Color.white);
-            banner.text = "M1 / fake agent / no payment" + (UsingPlaceholders ? "   [LimeZu pending: placeholder art]" : "   Art: LimeZu (limezu.itch.io)");
+            // Neutral about where the agent's actions come from: the same build
+            // shows the fake demo and the history replay of a recorded real run
+            // (docs/cli-poc.md 54.2); the page's header says which.
+            banner.text = "M1 / no payment" + (UsingPlaceholders ? "   [LimeZu pending: placeholder art]" : "   Art: LimeZu (limezu.itch.io)");
             status = MakeText("status", new Vector2(6f, -0.6f), 0.1f, new Color(1f, 0.95f, 0.6f));
             ResetAll();
         }
