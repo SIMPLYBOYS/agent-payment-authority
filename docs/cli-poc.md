@@ -4,7 +4,7 @@
 > - `make present-live` 一個入口；在頁面輸入終端機上的一次性配對碼（暫定方案）；按「開始」才執行模型。
 > - 程式 `4edc830`／`7a10cad`，測試 `086e06a`；`7a10cad` 完整斷網容器通過（310／310、17／17）。
 > - Codex review 的 R1（ready 輸出覆寫）、R2（模式未確認時顯示 fake）已修正於 `c1768d6`／`34f3972`，限定複核通過；**展示啟動與主持人操作簡化通過限定範圍技術 review**（第 56.8、56.8.1 節）。完整容器的結果仍屬 `7a10cad`（310 個突變）。
-> - **目前下一步**：等 Aaron 另行核准實際操作新入口，確認主持人體驗。
+> - **10/8 19:15Z 新入口第一次人工操作**：Aaron 本人在自己的終端機執行 `make present-live`（Claude Code 的環境沒有終端機），判定「以手動確認過目前的版本，大致操作順利」。紀錄：一場、一份 trace、Ask、4 個事件；證據 `artifacts/b1-04/present-live-20261008T191737Z/`（第 56.9 節）；待 Codex 核對。
 > - 本輪未執行真實 CLI。
 >
 > **10/8 單一真實 Agent 即時展示：demo host 的 live 模式已實作，fake／合成資料驗證完成，待 Codex review（第 55 節）**：
@@ -4130,3 +4130,38 @@ B1-04／B1-06 維持 InProgress，待 Codex review。這個切片只改善現有
   - 沒有重跑完整容器、全部突變、Unity 或真實 CLI。**完整容器的結果仍屬 `7a10cad` 的 310 個突變**，不能改掛成新版 311 個通過；`c1768d6`／`34f3972` 只有定向與反向驗證。
 - **下一步**：等 Aaron 另行核准實際操作新入口，確認主持人體驗（確認清單見第 56.7 節）。不需要再開診斷旁線。
 - **範圍**：配對仍是短配對碼的暫定方案。這不代表商業展示版、M1、多 Agent、付款、鏈上證據或 ZK 完成。B1-04／B1-06 整體維持 InProgress。
+
+### 56.9 新入口的第一次人工操作（2026-10-08 19:15Z；Aaron 本人操作與判定，Claude Code 事前核對與事後紀錄核對，待 Codex 核對）
+
+> **Aaron 的體驗判定**（原話）：「以手動確認過目前的版本，大致操作順利」。
+>
+> Aaron 沒有逐項回報派工列出的四個確認點：不用找 token 檔、選 consumer 或 task；模式與風險清楚，配對後可直接開始；畫面自動跟到新 task、「查看證據」找得到紀錄；操作卡點。所以這裡只記錄上面這句整體判定，**不代為補寫逐項結論**。
+
+- **事前核對**（Claude Code）：
+  - 程式與已驗收的 `34f3972` 一致（`docs/` 以外沒有差異；工作區只有未追蹤的 `demo`）。
+  - `var/present.conf` 原本不存在，依約定建立：`cli=/Users/mac/.local/bin/claude`、`dev_demo_plugins=true`，權限 0600，被 git 忽略。格式符合啟動器的檢查；CLI 是可執行檔（只檢查檔案屬性，沒有執行）。沒有讀取或輸出 token。
+- **啟動方式的偏離**：派工原本寫由 Claude Code 啟動 `make present-live`。但 Claude Code 的執行環境沒有終端機（`/dev/tty` 不可用），而配對碼的設計是只寫到操作者的終端機。若改用模擬終端機，配對碼會進入工具紀錄，所以 Claude Code **沒有啟動**，改由 **Aaron 在自己的終端機執行** `make present-live`，並由他配對、按開始、停止服務。
+- **證據歸屬**：
+  - **Aaron**：啟動、配對、按一次開始、目視畫面、體驗判定、正常停止服務。
+  - **Claude Code**：事前核對；事後確認服務已停止、資料庫未被使用；只複製 `db/`、`runs/`、`build.txt`（沒有 `tok/`，不保存配對碼）；核對雜湊；以唯讀方式核對副本。Claude Code 沒有參與操作，也沒有截圖。
+  - 待 Codex 核對。
+- **證據**：`artifacts/b1-04/present-live-20261008T191737Z/`。
+  - 場次目錄 `var/present-8xlX47/`（本次唯一的 present 場次）保留未動；
+  - `source-sha256.txt`：來源雜湊；副本核對 OK，唯讀查詢後再核對仍然 OK。
+- **建置紀錄**（`build.txt`）：`vcs.revision=63c4609`（與 `34f3972` 只差文件）、`vcs.modified=true`。`modified=true` 是事實，**不是乾淨建置**；核對時 tracked 檔案沒有修改，只有未追蹤的 `demo`，這只作為說明。
+- **紀錄核對**（副本，唯讀，Claude Code）：
+  - **資料庫**：schema 2；`integrity_check` ok；`foreign_key_check` 沒有輸出。
+  - **host_runs**：一場（`live-a`）；19:15:32Z 受理、19:15:44Z 結束；`ended`／`ok`，`task_started=1`。
+  - **trace**（只有這一份，CLI 只執行了一次）：
+    - `gate_mode=dev_demo_plugins`、`init.gate=passed`、`model=claude-sonnet-5-5`；
+    - `list_products`（ok）→ `get_quote`（`kr-market`，ok）→ `request_purchase`（`kr-market`，**Ask**）；
+    - `run_end`：`ok`、`exit_code=0`、`messages=11`、`assistant_messages=5`、`num_turns=4`、`tool_attempts=3`；
+    - usage（CLI 自報，不是計費證明）：input 8、output 464、cache_creation 3114、cache_read 8100；
+    - 模型文字只記 `result_chars=709`。
+  - **Store**：task `show-a-01`／`consumer-a`；請購 `po-show-a-01-kr-market`，Ask／`HUMAN_APPROVAL_REQUIRED`；事件 1 `TASK_STARTED`、2 `PURCHASE_PROPOSED`、3 `POLICY_DECIDED`、4 `APPROVAL_EXPIRED`（裁決後 30 秒）。付款 none；上限沒有觸發。
+- **限制**：
+  - 這是開發展示例外下的單次結果，plugins 的剩餘風險不變；
+  - 畫面由 Aaron 目視，沒有自動化或截圖證據；
+  - 四個確認點沒有逐項確認；
+  - 不代表商業展示版、M1、多 Agent、付款或 ZK 完成。
+- B1-04／B1-06 整體維持 InProgress，待 Codex 核對。
