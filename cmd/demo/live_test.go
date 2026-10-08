@@ -123,6 +123,9 @@ func TestLiveRun(t *testing.T) {
 	if s.Live == nil || s.Live.Label != liveLabel || !s.Live.DevDemoPlugins || s.Live.CLIVersion != "2.1.293 (Claude Code)" || s.LiveCLI != "on" || s.FakeCLI.State != "off" {
 		t.Fatalf("status %+v live %+v", s, s.Live)
 	}
+	if code, body, _ := h.get("/api/mode", ""); code != 200 || !strings.Contains(string(body), `"mode":"live"`) || !strings.Contains(string(body), liveLabel) || strings.Contains(string(body), "token") {
+		t.Errorf("mode: %d %s", code, body)
+	}
 	var v viewerReply
 	_, body, _ := h.get("/api/viewer", h.tokens["viewer:consumer-a"])
 	if json.Unmarshal(body, &v); v.Live == nil || v.Live.Label != liveLabel {

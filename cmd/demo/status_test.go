@@ -79,7 +79,10 @@ func TestHostStatusAccess(t *testing.T) {
 	}
 	var fields map[string]any
 	json.Unmarshal(body, &fields)
-	if len(fields) != 8 || fields["caller_role"] != "host" { // 3.2 added caller_role
+	// 3.2 added caller_role; docs/cli-poc.md 56 added build (the binary's own
+	// vcs record: revision, modified, time, nothing else).
+	build, _ := fields["build"].(map[string]any)
+	if len(fields) != 9 || fields["caller_role"] != "host" || len(build) != 3 || build["revision"] == nil || build["modified"] == nil || build["time"] == nil {
 		t.Errorf("status fields %v", fields)
 	}
 }

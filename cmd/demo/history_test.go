@@ -145,6 +145,9 @@ func TestHistoryMode(t *testing.T) {
 		t.Fatalf("task %d %+v, want awaiting_approval served at %d", code, task, last)
 	}
 
+	if code, body, _ := h.get("/api/mode", ""); code != 200 || !strings.Contains(string(body), `"mode":"history"`) || !strings.Contains(string(body), historyLabel) || strings.Contains(string(body), "tool_calls") {
+		t.Errorf("mode: %d %s", code, body)
+	}
 	code, body, _ = h.get("/api/viewer", h.tokens["viewer:consumer-a"])
 	var v viewerReply
 	json.Unmarshal(body, &v)

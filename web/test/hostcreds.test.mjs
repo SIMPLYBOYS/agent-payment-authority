@@ -27,7 +27,16 @@ function server(valid) {
   let holdNext = 0;
   const calls = [];
   const runs = [];
+  const pairing = { code: "ABCDEFGHJKLM", used: false, failures: 0, off: false, tokens: null };
   const answer = (token, path, post) => {
+    if (path === "/api/host/pair" && post) { // the host's pairing (docs/cli-poc.md 56): no token is sent
+      if (pairing.off) return { status: 404, body: { error: "not_found" } };
+      if (token !== null) return { status: 400, body: { error: "bad_request" } };
+      if (pairing.used || pairing.failures >= 5) return { status: 410, body: { error: "pairing_closed" } };
+      if (post.body.code !== pairing.code) { pairing.failures++; return { status: 403, body: { error: "pairing_failed" } }; }
+      pairing.used = true;
+      return { status: 200, body: pairing.tokens };
+    }
     const role = token === valid.host ? "host" : token === valid.operator ? "operator" : null;
     if (path === "/api/host/status") return role ? { status: 200, body: { caller_role: role, http: "ok" } } : { status: valid.all.has(token) ? 403 : 401, body: null };
     if (path === "/api/host/runs" && post) {
@@ -62,7 +71,7 @@ function server(valid) {
     }
     return Promise.resolve(r);
   };
-  return { call, calls, runs, hold: (n = 1) => { holdNext += n; }, fail: (n = 1) => { failNext += n; }, releaseAll: async () => { while (held.length) held.shift()(); await flush(); } };
+  return { call, calls, runs, pairing, hold: (n = 1) => { holdNext += n; }, fail: (n = 1) => { failNext += n; }, releaseAll: async () => { while (held.length) held.shift()(); await flush(); } };
 }
 const valid = (host, a, b) => ({ host, operator: OP[host], viewers: new Map([[a, "consumer-a"], [b, "consumer-b"]]), all: new Set([host, OP[host], a, b]) });
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -421,4 +430,80 @@ test("hostRead uses the host token, with the same generation rule", async () => 
   creds.clearAll("cleared");
   await srv.releaseAll();
   assert.equal(await p, null);
+});
+
+// Pairing (docs/cli-poc.md 56): the code is checked here first, sent with
+// no token, traded once; the tokens are then confirmed and held exactly as
+// a loaded file. A late answer after a clear, the manual mode or a new
+// pairing signs nothing in; no message carries the code or a token.
+test("pair: one right code is the token file, confirmed; nothing else signs in", async () => {
+  const srv = server(valid(H, A, B));
+  srv.pairing.tokens = fileDoc(H, A, B);
+  const { creds, views } = setup(srv);
+  await creds.pair("abcd efgh-jklm"); // as typed: case, spaces and dashes
+  assert.deepEqual(holds(creds), { mode: "paired", host: true, a: A, b: B });
+  assert.ok(srv.calls.includes("POST /api/host/pair"));
+  for (const v of views) assert.ok(!JSON.stringify(v).includes("ABCDEFGHJKLM") && ![H, A, B].some((t) => JSON.stringify(v).includes(t)));
+
+  // The code is used: a second pairing is closed, and the held tokens go
+  // with the new generation it starts.
+  await creds.pair("ABCD-EFGH-JKLM");
+  assert.deepEqual(holds(creds), { mode: "none", host: false, a: null, b: null });
+  assert.equal(creds.view().message, MESSAGES.pair_closed);
+});
+
+test("pair: a malformed code sends nothing; wrong, closed and off say so and hold nothing", async () => {
+  const srv = server(valid(H, A, B));
+  srv.pairing.tokens = fileDoc(H, A, B);
+  const { creds } = setup(srv);
+  for (const typed of ["", "ABCD-EFGH-JKL", "ABCD-EFGH-JK1M", "ABCD_EFGH_JKLM", null]) {
+    await creds.pair(typed);
+    assert.equal(creds.view().message, MESSAGES.pair_format, String(typed));
+  }
+  assert.ok(!srv.calls.includes("POST /api/host/pair"), "nothing sent for a malformed code");
+  await creds.pair("ZZZZ-ZZZZ-ZZZZ");
+  assert.equal(creds.view().message, MESSAGES.pair_failed);
+  for (let i = 0; i < 4; i++) await creds.pair("ZZZZ-ZZZZ-ZZZZ");
+  await creds.pair("ABCD-EFGH-JKLM"); // five failures closed it
+  assert.equal(creds.view().message, MESSAGES.pair_closed);
+  assert.equal(creds.view().hasHost, false);
+  const off = server(valid(H, A, B));
+  off.pairing.off = true;
+  const o = setup(off);
+  await o.creds.pair("ABCD-EFGH-JKLM");
+  assert.equal(o.creds.view().message, MESSAGES.pair_off);
+  // A pairing answer that is not a token file holds nothing.
+  const odd = server(valid(H, A, B));
+  odd.pairing.tokens = { tokens: [{ role: "admin", token: H }] };
+  const d = setup(odd);
+  await d.creds.pair("ABCD-EFGH-JKLM");
+  assert.equal(d.creds.view().message, MESSAGES.bad_file);
+  assert.equal(d.creds.view().hasHost, false);
+});
+
+test("pair: a late answer after a clear or the manual mode signs nothing in", async () => {
+  for (const after of ["clearAll", "manual"]) {
+    const srv = server(valid(H, A, B));
+    srv.pairing.tokens = fileDoc(H, A, B);
+    const { creds } = setup(srv);
+    srv.hold();
+    const p = creds.pair("ABCD-EFGH-JKLM");
+    await flush();
+    if (after === "clearAll") creds.clearAll("已離開頁面"); else creds.manual();
+    await srv.releaseAll();
+    await p;
+    assert.equal(creds.view().hasHost, false, after);
+    assert.equal(creds.viewerToken("consumer-a"), null, after);
+    assert.ok(srv.pairing.used, "the server did use the code: it is gone, not reusable");
+  }
+});
+
+test("pair: tokens the server does not confirm are not held", async () => {
+  const srv = server(valid(H, A, B));
+  srv.pairing.tokens = fileDoc(H2, A2, B2); // another run's tokens
+  const { creds } = setup(srv);
+  await creds.pair("ABCD-EFGH-JKLM");
+  assert.equal(creds.view().hasHost, false);
+  assert.equal(creds.view().message, MESSAGES.mismatch);
+  assert.equal(creds.viewerToken("consumer-a"), null);
 });
