@@ -506,6 +506,8 @@
 > **進度（10/8，方案 A 驗收）**：方案 A 於 `40bd263` 通過限定範圍技術 review，關閉這項實作與 fake 驗證。只證明 APA 子程序的專用 plugin 根目錄設定、失敗處理與 fake 回歸符合要求，不代表真實 plugins 已停用，也不代表正式請購可放行。下一次診斷型 C0′ 的執行確認清單已整理（`docs/cli-poc.md` 第 44 節）。`d46ca0b` 通過 Codex 限定文件複核（Codex 只做文件差異與 Git 唯讀核對）；方案 A 的實作驗收基準為 `40bd263`；下一次診斷型 C0′ 清單已通過文件複核，尚待 Aaron 另行核准執行（第 44.7 節）。
 >
 > **進度（10/8，方案 A 後診斷）**：依 Aaron 核准執行一次診斷型 C0′，取得 init，**plugins 仍為 2 個**；agents、skills 為 0，APA MCP 與工具清單符合。方案 A 本次未達目標，正式請購阻擋仍在；不推論來源、不自動換方案（`docs/cli-poc.md` 第 45 節，待 Codex review）。下一步須 Aaron 在「提供完整 id／調整受管設定／以 `--safe-mode` 只驗 MCP」中擇一。
+>
+> **進度（10/8，plugin ID 查詢工具）**：plugin 查詢腳本 R1、R2、C1 已修訂（`scripts/b1-04/plugin_id_query.py`），定向 fake 驗證完成，待 Codex 限定複核（`docs/cli-poc.md` 第 46 節）。真實查詢尚未核准、未執行；Gate、認證清單及產品行為不變。
 
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。
