@@ -3433,3 +3433,30 @@ APA_ADDR=127.0.0.1:8402 sh scripts/demo/history.sh artifacts/b1-04/live-purchase
 - 技術驗證不取代 Aaron 的主觀展示驗收。
 
 B1-04／B1-06 仍 InProgress，不標 Done，等待 Codex review。這個出口只完成真實請購紀錄的展示，未完成即時 Agent 與場景連動、付款、ZK、多 Agent 或商業版整體驗收。
+
+### 54.2 Unity 場景文字改為中性（選項 a；2026-10-08；Claude Code 執行，待 Codex 核對）
+
+> **結果**：第 54.1 節的 Unity 缺口已處理。商店畫布不再顯示「fake agent」或「sim agent」，歷史回放與 fake 展示共用同一份建置；是 fake 還是真實紀錄，由頁首標示說明。投影、bridge 與訊息都沒有改。
+
+- **核准**：Aaron「choose option a now」，即 54.1 的選項 (a)：Unity 標題改成不提 agent 來源的中性文字，重建 WebGL，不改投影。
+- **變更**（`ShopView.cs`）：
+  - 標題「M1 / fake agent / no payment」→「M1 / no payment」（署名不變）；
+  - 客人標籤「A (sim agent)」「B (sim agent)」→「Customer A」「Customer B」（對應頁面的「客人 A／B」）。
+  - 客人標籤和標題都屬於同一個缺口，所以一起改。
+- **提交**：
+  - Unity 程式 `578f2c3`；
+  - Unity 測試 `b4b0a27`（PlayMode `SceneTextIsNeutralAboutTheAgent`：場景所有 TextMesh 都不含 fake／sim agent／real，標題以「M1 / no payment」開頭，兩位客人標籤正確）；
+  - `docs/demo-ui.md` 的客人描述與本節為文件提交。
+- **驗證**（Claude Code 執行，editor 6000.5.3f1，batch mode）：
+  - Unity 測試：EditMode 10／10、PlayMode 15／15 通過（`artifacts/b1-04/unity-neutral-20261008T105632Z/`）；場景重建後 `Shop.unity` 沒有差異。
+  - **反向驗證**：暫時把標題改回「M1 / fake agent / no payment」，只有新測試失敗（PlayMode 14 通過、1 失敗，斷言訊息：`Expected: some item String starting with "M1 / no payment"`），之後還原（`artifacts/b1-04/unity-neutral-mutation-*`）。
+  - WebGL 重建 exit 0（`artifacts/b1-04/unity-neutral-webgl-20261008T110027Z/`）：`WebGL.data` 與 `WebGL.wasm` 改變，loader 與 framework 不變。舊建置已另外備份。建置輸出不進 git。
+  - 真實證據副本的歷史回放（`b4b0a27`，`artifacts/b1-04/history-ui-b4b0a270a5c1-20261008T110214Z-evidence/`）：46 項 PASS。我目視 `end-history.png`，畫布顯示「M1 / no payment　Art: LimeZu」與「Customer B」，沒有 fake／sim 字樣。
+  - 合成資料的歷史回放（`artifacts/b1-04/history-ui-b4b0a270a5c1-20261008T110244Z-synthetic/`）：PASS。
+  - fake 展示的完整瀏覽器回歸 `scripts/verify/browser-ui.mjs`（`b4b0a27`，`artifacts/b1-06/ui-b4b0a270a5c1-20261008T110341Z/`）：317 項 PASS、0 FAIL。
+- **限制**：
+  - 畫布文字只由 Unity 測試與目視截圖確認；瀏覽器檢查讀不到 canvas 像素中的文字。
+  - fake 展示的頁首仍是「M1／fake agent／不付款」，這是頁面標示，不屬於這次的變更範圍。
+  - 完整容器驗證沒有跑。
+
+B1-04／B1-06 仍 InProgress，等待 Codex review。

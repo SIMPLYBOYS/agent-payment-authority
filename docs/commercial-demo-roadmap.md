@@ -525,6 +525,8 @@
 
 > **進度（10/8，歷史回放驗收補齊）**：程式 `3234f4b`、測試 `e500ded`（`docs/cli-poc.md` 第 54.1 節；Claude Code 執行，待 Codex 核對）。歷史模式的控制寫入由伺服器拒絕（409）；trace 只給可讀該 task 的呼叫者；只接受離線保存的資料庫；凍結時間標為紀錄時間。以真實證據副本在真實 Chrome＋Unity Web build 完成 46 項檢查（合成資料 53 項，含 7 項拒絕）（回放 #1→#3、停止、重開頁面、主持人頁），原證據不變。**未處理**：Unity 畫布內建「M1 / fake agent / no payment」與「(sim agent)」文字，修正須改 Unity 或投影，待確認。B1-04 仍 InProgress。
 
+> **進度（10/8，Unity 中性文字）**：Aaron 選擇選項 (a)。`578f2c3`／`b4b0a27`：Unity 標題改為「M1 / no payment」，客人標籤改為「Customer A／B」，不改投影；Unity 測試、反向驗證、WebGL 重建、歷史回放（真實副本 46 項）與 fake 完整瀏覽器回歸（317 項）全部通過（`docs/cli-poc.md` 第 54.2 節；Claude Code 執行，待 Codex 核對）。B1-04 仍 InProgress。
+
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。
 - 它是 M1 收尾的唯一外部前提（B1-04 → B1-06 live trace → B1-07）。

@@ -14,7 +14,7 @@
 
 | 區 | 內容 |
 |---|---|
-| 商店（Unity Web 建置） | 一間 LimeZu 雜貨店：入口、走道、貨架、冷藏櫃、櫃檯，以及 A／B 兩位像素客人（標示 sim agent）。只有目前 viewer 的客人會移動 |
+| 商店（Unity Web 建置） | 一間 LimeZu 雜貨店：入口、走道、貨架、冷藏櫃、櫃檯，以及 A／B 兩位像素客人（標示 Customer A／B；場景文字不說 agent 是 fake 或真實，由頁首標示，見 `docs/cli-poc.md` 54.2）。只有目前 viewer 的客人會移動 |
 | Inspector（網頁） | consumer、agent、wallet、wallet 證據、task、payer、task 狀態、快照序號、餘額與剩餘預算（API 未提供，明寫未知）、付款（未付款）；每筆請購的資源、payTo、amount（基本單位整數字串）、asset、chain、intent hash、裁決、reason、approval、payment_status |
 | Timeline（網頁） | 事件序號、類型、時間、裁決或固定代碼、來源與 evidence_mode；每筆可展開 API 白名單 JSON，標明「不是 CLI 原始輸出，也不是完整未遮罩 raw log」 |
 
