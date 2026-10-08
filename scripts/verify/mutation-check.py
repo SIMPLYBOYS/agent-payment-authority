@@ -579,6 +579,17 @@ MUTATIONS = [
      '\treturn append(out, EnvPluginRoot+"="+root), nil', '\treturn append([]string{EnvPluginRoot + "=" + root}, env...), nil', 'TestPluginRootLive|TestPluginRootProbe'),
     ('B1-04 plugins A: no root made, the run goes on', 'internal/buyer/host.go',
      '\tif err := pluginMkdir(root, 0o700); err != nil {\n\t\treturn nil, err', '\tif err := pluginMkdir(root, 0o700); err != nil {\n\t\treturn env, nil', 'TestPluginRootFailureStartsNoCLI'),
+    # B1-04 route 1 (docs/live-purchase-execution-decision.md 4.2): the APA-only config directory.
+    ('B1-04 route 1: live run without the APA config directory', 'cmd/apa-buyer/main.go',
+     '\t\tif env, err = buyer.LiveEnv(d.getenv); err != nil {', '\t\tif env, err = buyer.CLIEnv(d.getenv), nil; err != nil {', 'TestLiveEnvDisablesBuiltinAgents|TestLiveNeedsConfigDir'),
+    ('B1-04 route 1: probe without the APA config directory', 'cmd/apa-buyer/main.go',
+     '\tenv, err := buyer.LiveEnv(d.getenv)\n', '\tenv, err := buyer.CLIEnv(d.getenv), error(nil)\n', 'TestLiveEnvDisablesBuiltinAgents|TestLiveNeedsConfigDir'),
+    ('B1-04 route 1: config directory not checked', 'internal/buyer/host.go',
+     'if st, err := os.Lstat(dir); err != nil || !st.IsDir() {', 'if st, err := os.Lstat(dir); false && (err != nil || !st.IsDir()) {', 'TestLiveEnv|TestLiveNeedsConfigDir'),
+    ('B1-04 route 1: a symlinked config directory followed', 'internal/buyer/host.go',
+     'if st, err := os.Lstat(dir); err != nil || !st.IsDir() {', 'if st, err := os.Stat(dir); err != nil || !st.IsDir() {', 'TestLiveEnv|TestLiveNeedsConfigDir'),
+    ('B1-04 route 1: a relative HOME accepted', 'internal/buyer/host.go',
+     'if home == "" || !filepath.IsAbs(home) {', 'if home == "" {', 'TestLiveEnv'),
 ]
 
 

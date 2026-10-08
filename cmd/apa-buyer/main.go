@@ -171,7 +171,10 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 			return errors.New("--live needs --cli with the absolute path of the approved Claude Code executable; no PATH lookup is done")
 		}
 		want := cmp(d.liveVersion, approvedCLIVersion)
-		cli, env = *cliPath, buyer.CLIEnv(d.getenv)
+		cli = *cliPath
+		if env, err = buyer.LiveEnv(d.getenv); err != nil {
+			return err
+		}
 		if ctx.Err() != nil {
 			return errors.New("cancelled before the version check; nothing was started")
 		}
@@ -427,7 +430,10 @@ func probe(ctx context.Context, args []string, d deps) error {
 		return errors.New("probe-init needs --cli with the absolute path of the approved Claude Code executable; no PATH lookup is done")
 	}
 	want := cmp(d.liveVersion, approvedCLIVersion)
-	env := buyer.CLIEnv(d.getenv)
+	env, err := buyer.LiveEnv(d.getenv)
+	if err != nil {
+		return err
+	}
 	if ctx.Err() != nil {
 		return errors.New("cancelled before the version check; the probe was not started")
 	}

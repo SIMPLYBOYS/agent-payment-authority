@@ -60,6 +60,11 @@ func newFixture(t *testing.T) *fixture {
 	if err := os.Symlink(self, f.fake); err != nil {
 		t.Fatal(err)
 	}
+	// The test HOME's own APA configuration directory (route 1): live and
+	// probe runs refuse to start without it. Never the operator's.
+	if err := os.MkdirAll(filepath.Join(f.home, buyer.ConfigDirName), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	return f
 }
 
@@ -334,7 +339,8 @@ func TestLiveEnvDisablesBuiltinAgents(t *testing.T) {
 		cli := filepath.Join(dir, "claude")
 		// APA_WARM is not in the CLI's allowlist, so only the readiness run
 		// below carries it; the paths under test cannot.
-		body := "#!/bin/sh\n[ \"$APA_WARM\" = 1 ] && exit 0\nprintf '%s\\n' \"${CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS-unset}\" >> '" + seen + "'\nexec '" + fake + "' \"$@\"\n"
+		body := "#!/bin/sh\n[ \"$APA_WARM\" = 1 ] && exit 0\nprintf '%s\\n' \"${CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS-unset}\" >> '" + seen + "'\n" +
+			"printf '%s\\n' \"${CLAUDE_CONFIG_DIR-unset}\" >> '" + seen + ".cfg'\nexec '" + fake + "' \"$@\"\n"
 		if err := os.WriteFile(cli, []byte(body), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -359,9 +365,27 @@ func TestLiveEnvDisablesBuiltinAgents(t *testing.T) {
 		}
 		return strings.Fields(string(b))
 	}
-	env := map[string]string{"APA_LIVE_CLI": "true", "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "0"}
+	env := map[string]string{"APA_LIVE_CLI": "true", "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "0", "CLAUDE_CONFIG_DIR": "/elsewhere"}
+	// Route 1: the version check and the run both get the test HOME's APA
+	// config directory, once, whatever the parent sets; the run leaves the
+	// directory and what is in it alone.
+	configDir := func(t *testing.T, f *fixture, seen, what string) {
+		want := filepath.Join(f.home, buyer.ConfigDirName)
+		if v := values(t, seen+".cfg"); len(v) != 2 || v[0] != want || v[1] != want {
+			t.Fatalf("%s: CLAUDE_CONFIG_DIR seen %q, want %s twice", what, v, want)
+		}
+		if _, err := os.Stat(filepath.Join(want, "keep")); err != nil {
+			t.Fatalf("%s: the APA config directory lost its content: %v", what, err)
+		}
+	}
+	keep := func(t *testing.T, f *fixture) {
+		if err := os.WriteFile(filepath.Join(f.home, buyer.ConfigDirName, "keep"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	f := newFixture(t)
+	keep(t, f)
 	cli, seen := wrap(t, f, "ask-mainline")
 	out, err := f.exec(context.Background(), []string{"run", "--live", "--cli", cli}, env,
 		deps{liveVersion: fakecli.Version, liveAuth: []string{fakecli.AuthSource}})
@@ -371,6 +395,7 @@ func TestLiveEnvDisablesBuiltinAgents(t *testing.T) {
 	if v := values(t, seen); len(v) != 2 || v[0] != "1" || v[1] != "1" { // --version, then the run
 		t.Fatalf("live run: the CLI processes saw %q", v)
 	}
+	configDir(t, f, seen, "live run")
 
 	for _, args := range [][]string{nil, {"--send-one-message"}} {
 		f := newFixture(t)
@@ -378,6 +403,7 @@ func TestLiveEnvDisablesBuiltinAgents(t *testing.T) {
 		if args != nil {
 			scen = "probe1-wait-message"
 		}
+		keep(t, f)
 		cli, seen := wrap(t, f, scen)
 		out, err := f.probeExec(context.Background(), append([]string{"--cli", cli}, args...), env, deps{liveVersion: fakecli.Version})
 		if err != nil || !strings.Contains(out, `"status": "observed"`) {
@@ -385,6 +411,42 @@ func TestLiveEnvDisablesBuiltinAgents(t *testing.T) {
 		}
 		if v := values(t, seen); len(v) != 2 || v[0] != "1" || v[1] != "1" {
 			t.Fatalf("probe %v: the CLI processes saw %q", args, v)
+		}
+		configDir(t, f, seen, fmt.Sprintf("probe %v", args))
+	}
+}
+
+// Route 1: without the APA config directory, or with something else in its
+// place, live and probe refuse before running anything, the version check
+// included; nothing creates the directory or falls back to ~/.claude.
+func TestLiveNeedsConfigDir(t *testing.T) {
+	for _, setup := range []string{"absent", "file", "symlink"} {
+		f := newFixture(t)
+		dir := filepath.Join(f.home, buyer.ConfigDirName)
+		os.Remove(dir)
+		switch setup {
+		case "file":
+			os.WriteFile(dir, nil, 0o600)
+		case "symlink":
+			os.Symlink(t.TempDir(), dir)
+		}
+		cli, ran := marker(t, fakecli.Version)
+		_, err := f.exec(context.Background(), []string{"run", "--live", "--cli", cli}, map[string]string{"APA_LIVE_CLI": "true"},
+			deps{liveVersion: fakecli.Version, liveAuth: []string{fakecli.AuthSource}})
+		if err == nil || !strings.Contains(err.Error(), "APA configuration directory") || !strings.Contains(err.Error(), "nothing was started") {
+			t.Errorf("live, config dir %s: %v", setup, err)
+		}
+		_, perr := f.probeExec(context.Background(), []string{"--cli", cli}, map[string]string{"APA_LIVE_CLI": "true"}, deps{liveVersion: fakecli.Version})
+		if perr == nil || !strings.Contains(perr.Error(), "APA configuration directory") {
+			t.Errorf("probe, config dir %s: %v", setup, perr)
+		}
+		if _, err := os.Stat(ran); err == nil {
+			t.Errorf("config dir %s: the CLI was run", setup)
+		}
+		if setup == "absent" {
+			if _, err := os.Lstat(dir); err == nil {
+				t.Error("the run created the APA config directory")
+			}
 		}
 	}
 }

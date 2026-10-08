@@ -96,6 +96,35 @@ func withPluginRoot(env []string, dir string) ([]string, error) {
 	return append(out, EnvPluginRoot+"="+root), nil
 }
 
+// EnvConfigDir and ConfigDirName: a real CLI runs with its own Claude
+// configuration directory, <HOME>/.apa-claude (route 1, Aaron 2026-10-08;
+// docs/live-purchase-execution-decision.md 4.2), where Aaron logs in for
+// APA. It keeps the CLI off the everyday ~/.claude; it is not OS isolation
+// and does not reach managed settings.
+const (
+	EnvConfigDir  = "CLAUDE_CONFIG_DIR"
+	ConfigDirName = ".apa-claude"
+)
+
+// LiveEnv is CLIEnv for a real CLI, the version check included: it adds
+// exactly one CLAUDE_CONFIG_DIR, built from the HOME the CLI gets (the
+// parent's own value is not allowlisted). A missing or relative HOME, or a
+// config directory that is not a real directory (absent, a file, or a
+// symlink, which could lead back to ~/.claude), is refused: nothing falls
+// back to the everyday configuration, and nothing creates the directory.
+// It is persistent (it holds the APA login): no run removes it.
+func LiveEnv(getenv func(string) string) ([]string, error) {
+	home := getenv("HOME")
+	if home == "" || !filepath.IsAbs(home) {
+		return nil, errors.New("the CLI's HOME is missing or not absolute; nothing was started")
+	}
+	dir := filepath.Join(home, ConfigDirName)
+	if st, err := os.Lstat(dir); err != nil || !st.IsDir() {
+		return nil, fmt.Errorf("the APA configuration directory %s is not a directory (log in for APA with CLAUDE_CONFIG_DIR set to it first); nothing was started", dir)
+	}
+	return CLIEnv(getenv, EnvConfigDir+"="+dir), nil
+}
+
 // CLIEnv is the CLI's whole environment: the allowlisted variables from
 // getenv, the fixed ones, then extra.
 func CLIEnv(getenv func(string) string, extra ...string) []string {
