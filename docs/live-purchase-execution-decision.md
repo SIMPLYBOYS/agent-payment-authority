@@ -1,6 +1,6 @@
 # 第一筆真實請購的執行路線評估
 
-> **狀態：`9cf4e6a` 通過 Codex 限定文件複核（第 8 節）。4.1 第 2、3 步完成：實作 `21560c5`、`a4e3d8e` 於 `a4e3d8e` 通過限定範圍技術 review（`docs/cli-poc.md` 第 47.5 節）。第 4 步：Aaron 已以專用目錄登入（`authMethod=claude.ai`、`configDirectory` 符合；`docs/cli-poc.md` 第 48.1 節），本人確認的第 4 項待回答。尚未證明真實 plugins 為空；C0′、認證清單修改、正式請購各自另行核准。**
+> **狀態：`9cf4e6a` 通過 Codex 限定文件複核（第 8 節）。4.1 第 2、3 步完成：實作 `21560c5`、`a4e3d8e` 於 `a4e3d8e` 通過限定範圍技術 review（`docs/cli-poc.md` 第 47.5 節）。第 4 步完成：Aaron 已以專用目錄登入，並本人確認為自己的訂閱帳號（`authMethod=claude.ai`、`configDirectory` 符合；`docs/cli-poc.md` 第 48.1 節）。下一步是第 5 步：另行核准一次 C0′。尚未證明真實 plugins 為空；C0′、認證清單修改、正式請購各自另行核准。**
 > - Aaron 已選定路線一（維持零 plugins）。專用設定目錄為 `~/.apa-claude`；階段 B 排在 C0′ 之前（第 6 節）。
 > - 2026-10-08；分支 `b1-04-live`。評估基準 HEAD `bd3ac81`（產品程式基準 `40bd263`，查詢工具 `5bab248`）；本次補正的開工基準為 `34ca9eb`。
 > - 本文件不改變現行 Gate、認證接受清單或任何執行限制，也不代表 plugins 已獲接受、零 plugins 要求已取消、來源已確認或正式請購已放行。
