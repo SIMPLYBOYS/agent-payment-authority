@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 方案 A 驗收與下一次診斷清單**：**方案 A 於 `40bd263` 通過限定範圍技術 review，關閉這項實作與 fake 驗證。** 只證明 APA 子程序的專用 plugin 根目錄設定、失敗處理與 fake 回歸符合要求，不代表真實 plugins 已停用，也不代表正式請購可放行（第 43.6 節）。下一次診斷型 C0′ 的執行確認清單已整理（第 44 節；§39.3 的 `PRODUCT_BASE` 改為 `40bd263`），待 Codex 文件複核與 Aaron 另行核准，尚未執行。
+>
 > **10/8 方案 A 實作（Claude Code 執行，待 Codex review）**：程式 `6caba93`，測試補正 `086f640`、`40bd263`。本機定向 fake 測試通過。**核准的那一次完整斷網容器驗證（`086f640`）失敗**，原因是測試腳本在 Linux 上讀錯權限欄位（`stat -f` 是 macOS 寫法），不是產品行為；已在 `40bd263` 修正，只改測試。**10/8 經 Aaron 核准，對 `40bd263` 補跑一次完整斷網容器驗證：通過**（overall exit 0；基準線 PASS、255／255 突變被抓到、隔離 17 項符合；Claude Code 執行，待 Codex 核對；第 43.5 節）。`086f640` 的失敗紀錄保留。plugins 是否真的停用仍未驗證。
 >
 > **10/8 plugins 方案於 `14eb7b5` 通過限定設計複核，R1、R2 關閉**（第 42 節，修訂紀錄 42.8，驗收紀錄 42.9）。通過範圍是受控實驗的設計，不代表 plugins 已停用或正式請購可放行。等待 Aaron 核准方案 A 的實作、fake 測試與一次完整斷網容器驗證；真實診斷須在實作 review 通過後另行核准。依官方文件，沒有任何候選方案能同時保證四件事：清空 plugins、保留 APA MCP、不改登入、不需要完整 plugin ID。方案 A（APA 專用暫存 plugin 根目錄）是受控實驗，不是停用保證：空根目錄可能在背景被重新填入；結果非空只代表未達目標，不推論來源。
@@ -1204,7 +1206,7 @@ echo "exit=$?"
 set -u
 REPO=/Users/mac/Documents/OpenSourceProjects/agent-payment-authority
 CLI=/Users/mac/.local/bin/claude
-PRODUCT_BASE=bd29a4ed503b5fc43a8d300de22e57bcf83b3318   # 已 review 的產品基準（10/8 版本釘選 2.1.293；原為 e99f389）
+PRODUCT_BASE=40bd2630cbae0adf552e1dd54ae87ee4c8022cd4   # 已 review 的產品基準（10/8 方案 A；之前為 bd29a4e、e99f389）
 EV_OWNED=; WT_MADE=
 die() {
   echo "STOP（probe 未啟動）：$*" >&2
@@ -1996,3 +1998,91 @@ L1-b 不標完成；B1-04 仍 InProgress；不合併、不推送、不標 Done�
 - **證據歸屬**：Claude Code 執行，待 Codex 核對紀錄。
 
 **尚待**：Codex review 實作、測試、突變，以及這兩次容器紀錄（`086f640` 失敗、`40bd263` 通過）。review 通過後，一次真實診斷（42.6）須另行核准。本次沒有執行真實 CLI 或 C0′；沒有改 Gate、認證接受清單；不合併、不推送、不標 Done。L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
+
+### 43.6 驗收紀錄：方案 A 於 `40bd263` 通過限定範圍技術 review（2026-10-08）
+
+> **方案 A 於 `40bd263` 通過限定範圍技術 review，關閉這項實作與 fake 驗證。** 只證明 APA 子程序的專用 plugin 根目錄設定、失敗處理與 fake 回歸符合要求，**不代表真實 plugins 已停用，也不代表正式請購可放行**。
+
+- **依據**：vault〈Claude-Code-B1-04-方案A驗收同步與診斷清單指示-77076a8-20261008〉。
+- **證據歸屬**（分開記錄）：
+  - **Claude Code 執行、Codex 本輪核對紀錄**：完整斷網容器的七個步驟、未突變基準線、255 項突變、17 項隔離檢查（43.5）。
+  - **Codex 本輪獨立核對**：
+    - manifest 的 283 個列項雜湊全部相符。匯入的 284 個檔案包含 manifest 本身，所以雜湊核對是 283 項，不是 284 項。
+    - #251～#255 的日誌確認是測試斷言失敗，不是編譯失敗。
+    - `40bd263` 之後只有文件差異。
+  - **Codex 前輪原始碼 review**：獨立記錄，不寫成本輪重新執行測試。
+  - Codex 沒有重跑容器、fake 測試或真實 CLI。
+- **通過的證據**：`artifacts/verify-container/runs/40bd2630cbae-20261008T020624Z/`。
+- **`086f640` 的失敗紀錄保留**（43.3）：該輪未突變基準線失敗，所以那 255 項 KILLED 不算驗收通過。新結果不回填到舊 commit。
+- Gate、認證接受清單、產品程式不變；來源調查繼續暫緩。L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
+
+## 44 下一次診斷型 C0′ 執行確認清單（方案 A 之後；2026-10-08 整理；待 Codex 文件複核與 Aaron 另行核准；尚未執行）
+
+> 本清單只告知未來執行的界線與已知風險，**不構成執行核准**。文件複核通過也不等於執行核准。本輪沒有執行任何 CLI、測試、建置、容器，也沒有跑 `bash -n`。
+
+- **開工核對**：分支 `b1-04-live`，HEAD `77076a8`；工作區只有 `?? demo`。實作驗收基準 `40bd263` 之後只有文件差異。
+- **工具**：沿用 §39.3 的腳本與 §42.6 的觀測條件，不另做新的執行工具。
+
+### 44.1 相對既有腳本的變更
+
+- `PRODUCT_BASE` 由 `bd29a4ed503b5fc43a8d300de22e57bcf83b3318` 改為 `40bd2630cbae0adf552e1dd54ae87ee4c8022cd4`。只改這一行與它的註解。
+- 執行基準：腳本取核准時的 HEAD。它必須是 `40bd263` 的後代，且之後只有 `docs/`、`README.md` 的差異；腳本已用 `merge-base --is-ancestor` 與非文件差異檢查判斷，不符就以 exit 2 停止。
+- 保留的嚴格檢查：
+  - 分支；
+  - 工作區只容許空或 `?? demo`；
+  - 祖先關係與非文件差異；
+  - 證據目錄已存在就停止；
+  - 全新暫存目錄中的本機 clone、`.git` 為目錄、clone HEAD 等於基準；
+  - 二進位 `vcs.revision` 等於基準、`vcs.modified=false`。
+- CLI 路徑維持 `/Users/mac/.local/bin/claude`；版本必須是 `2.1.293 (Claude Code)`，由 apa-buyer 內建檢查。不符就停止，不自行更新 CLI 或改釘選。
+- 其他現行操作文字中已沒有失效的基準；歷史紀錄中的 `e99f389`、`bd29a4e` 保留原樣。
+
+### 44.2 待 Aaron 核准的範圍（未勾選）
+
+- [ ] **一次執行嘗試**，不是一直試到取得 init。前置檢查或版本檢查失敗也停止，不自動重試。
+- [ ] C0′ 只嘗試寫入一次固定訊息 `Reply only OK.`。依程式記錄實際的 `input_status` 與 `stdin_bytes_written`，不以預定的 95 位元組代替實際結果。
+- [ ] 一則訊息不等於一次模型請求；用量無法確認時記為 `unknown`。
+- [ ] CLI 可使用既有 HOME、網路與登入環境；Claude Code 不另外讀取或輸出憑證。
+- [ ] 不開 Store、不建 task、不執行業務工具，不進入正式請購。
+- [ ] 沿用既有等待上限（init 30 秒；版本檢查與清理另計）、停止條件、程序清理，以及證據保存失敗的處理（exit 5，不呼叫 `die`、不重試）。
+
+### 44.3 已知風險（核准前須知）
+
+- **方案 A 不是禁止載入的開關**：子程序的 `CLAUDE_CODE_PLUGIN_CACHE_DIR` 指向該次暫存目錄下的空目錄。依官方文件，CLI 可能在背景下載、寫入，並重新載入 plugins 或 marketplace。
+- 既有的 `DISABLE_AUTOUPDATER=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`，**不是禁止上述活動的保證**。
+- 方案 A 對 skills-dir plugin 與 managed 強制啟用的 plugin 沒有作用（第 42 節）。
+- Host 不主動修改日常設定，但**不能保證 CLI 不寫入其他日常狀態**。
+- 程序清理不保證回收脫離 process group 的子程序；沒有 `orphaned_output` 也不代表沒有殘留（39.4）。
+- 本清單不新增背景下載、安裝、來源追查或監看步驟。
+
+### 44.4 觀測條件（依現有投影欄位）
+
+| 項目 | 必要條件 |
+|---|---|
+| plugins | `fields.plugins == array`、`plugins_count == 0`、`plugins_entries` 為空 |
+| agents | `fields.agents == array`、`agents_count == 0`、`agents_entries` 為空 |
+| skills | `fields.skills == array`、`skills_count == 0`（不要求不存在的 `skills_entries`） |
+| MCP | `fields.mcp_servers == array`、`mcp_servers_count == 1`、`apa_server_status == connected` |
+| 工具 | `tools_count == 3`、`tools_expected == 3`、`tools_other == 0` |
+| 權限與版本 | `permission_mode == dontAsk`、`cli_version == approved` |
+
+- 缺欄位、`null`、型別錯誤不得當作空。不改 probe 的產品邏輯或退出碼。
+- **probe 的 `exit 0`／`observed` 不等於上表全部通過**，須逐項核對。
+- 認證接受清單仍為空；`auth_source=none` 不能證明登入或計費方式，也不代表認證已獲接受。
+
+### 44.5 結果分支
+
+| 結果 | 處理 |
+|---|---|
+| 取得 init，且上表全部符合 | 只表示**本次 init 達到診斷目標**。停止，交 review。不保證之後沒有背景載入；不自動修改認證清單，也不進入正式請購。 |
+| 取得 init，但非空或其他條件不符 | 保存證據後停止。不推論 plugin 來源，不自動換方案（42.4 的下一步須 Aaron 決定）。 |
+| 未取得觀測，或證據不完整 | 依 39.4、39.7.3 與 exit 2／5 的既有規則回報。不宣稱成功，不重試。 |
+
+### 44.6 證據
+
+- 維持既有白名單：`commit.txt`、`binary-vcs.txt`、`go-version-build.txt`、`started-utc.txt`、`ended-utc.txt`、`exit-code.txt`、`stdout.txt`、`apa-buyer-error.txt`、`runs/` 的 trace。
+- 不保存原始 init、CLI 原文、原始 plugin 路徑、設定內容或憑證。
+- `stdout.txt` 的格式：模式提示行之後才是 JSON 投影，整份檔案不能直接當 JSON 解析。
+- 未來的證據先標「Claude Code 執行，待 Codex review」。
+
+本輪 Gate、認證接受清單、產品程式不變；沒有讀 HOME、keychain、受管設定、設定描述檔或 pixel-office。L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
