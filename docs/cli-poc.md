@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **10/8 開發展示例外與認證 `none` 已實作（`8976e86`、測試補正 `21090e3`；Claude Code 執行，待 Codex review）**（第 50 節）。fake 測試全部通過。**核准的那一次完整斷網容器驗證（`8976e86`）失敗**：只有一項突變沒被抓到，原因是測試放錯 package，不是產品行為；已在 `21090e3` 修正（只改測試）。**經 Aaron 核准補跑：`21090e3` 完整斷網容器通過**（266／266；第 50.6 節）。`8976e86` 的失敗紀錄保留。待 Codex review；真實請購尚未核准、未執行。
+> **10/8 開發展示例外與認證 `none` 已實作（`8976e86`、測試補正 `21090e3`；Claude Code 執行，待 Codex review）**（第 50 節）。fake 測試全部通過。**核准的那一次完整斷網容器驗證（`8976e86`）失敗**：只有一項突變沒被抓到，原因是測試放錯 package，不是產品行為；已在 `21090e3` 修正（只改測試）。**`21090e3` 通過限定範圍技術 review，開發展示例外與認證 `none` 的實作驗收**（第 50.7 節）。`8976e86` 的失敗紀錄保留。§39.3 的 `PRODUCT_BASE` 已改為 `21090e3`；一次真實請購的完整腳本見第 51 節，**待 Aaron 核准，尚未執行**。
 >
 > **現行（10/8，最新）**：**開發展示執行例外提案完成，待 Codex review 與 Aaron 核准；尚未修改 Gate 或執行真實請購**（[live-purchase-execution-decision.md](live-purchase-execution-decision.md) 第 9 節）。
 > - 提案內容：預設嚴格模式維持零 plugins；`run --live --dev-demo-plugins` 明確 opt-in 時，只接受恰好兩個指定名稱；其他 Gate 條件不變；trace 標示 `gate_mode`。
@@ -1232,7 +1232,7 @@ echo "exit=$?"
 set -u
 REPO=/Users/mac/Documents/OpenSourceProjects/agent-payment-authority
 CLI=/Users/mac/.local/bin/claude
-PRODUCT_BASE=a4e3d8ef926d512764b68a8fa09e8de24dd1c307   # 已 review 的產品基準（10/8 路線一專用設定目錄；之前為 40bd263、bd29a4e、e99f389）
+PRODUCT_BASE=21090e3f046690bd17d5d13d30d37fb31030d512   # 已 review 的產品基準（10/8 開發展示例外與認證 none；之前為 a4e3d8e、40bd263、bd29a4e、e99f389）
 EV_OWNED=; WT_MADE=
 die() {
   echo "STOP（probe 未啟動）：$*" >&2
@@ -2952,3 +2952,153 @@ L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
   1. Codex review 實作、測試、突變，以及兩次容器紀錄（`8976e86` 失敗、`21090e3` 通過）；
   2. review 通過後，同步 §39.3 的 `PRODUCT_BASE`；
   3. 由 Aaron 另行核准一次正式請購嘗試。
+
+### 50.7 驗收紀錄：`21090e3` 通過限定範圍技術 review（2026-10-08）
+
+> **`21090e3` 通過本次限定範圍技術 review。開發展示例外與認證 `none` 的實作驗收**；不需要再繼續 plugin 調查。這次驗收**不代表 plugins 的內容或行為已確認**。
+
+- **確認內容**：
+  - 只有明確開啟 `--live --dev-demo-plugins`，才接受指定的兩個名稱，各一筆；
+  - 嚴格模式仍拒絕這兩個 plugins；其他 Gate 檢查不會被跳過；
+  - `none` 適用所有 live run，其他認證值仍拒絕；
+  - trace 與終端輸出能區分例外模式，不會冒充嚴格模式。
+- **證據歸屬**：
+  - **Codex 獨立執行**：在斷網、來源唯讀、使用測試 HOME 的容器內，五項定向 fake race 測試各跑三輪，全部通過、exit 0。輸出只在 Codex 的工具紀錄中，沒有另存 repo log。
+  - **Claude Code 執行、Codex 核對紀錄**：新版完整容器七步、266 項突變、17 項隔離檢查（50.6）。Codex 核對了兩次容器 manifest 的雜湊，各 294 個列項都相符；並確認舊版 #265 沒有跑到測試，新版由斷言抓到。Codex 沒有重跑完整容器。
+- `8976e86` 的失敗紀錄（50.3）保留。
+- **操作文件同步**：§39.3 的 `PRODUCT_BASE` 改為 `21090e3f046690bd17d5d13d30d37fb31030d512`；新增第 51 節的一次真實請購腳本。
+- B1-04／B1-06 仍 InProgress。
+
+## 51 第一筆真實請購：一次嘗試的完整腳本（2026-10-08 整理；待 Aaron 核准；尚未執行）
+
+> 本節只提供腳本與判讀規則，**不構成執行核准**。沒有執行腳本、C0′ 或任何真實 CLI。
+
+**來源**：腳本由 §39.3 已審查的腳本**機械地改寫**而來，所有前置檢查保持不變：分支、工作區、`PRODUCT_BASE=21090e3` 祖先與非文件差異、證據目錄不覆寫、全新暫存目錄的本機 clone、`.git` 目錄、clone HEAD、二進位 `vcs.revision`／`vcs.modified`、`die` 的 exit 2，以及退出碼與證據保存（exit 5）。只改了以下幾處：
+- 證據目錄前綴改為 `live-purchase-`；
+- 第 6 步改為 `run --live --dev-demo-plugins`：
+  - 全新測試資料庫 `$EV/apa-live.db`；若已存在就停止；
+  - `--registry`、`--profile` 明確指向乾淨 clone `$WT/src/testdata/...`；
+  - `--trace-dir "$EV/runs"`；
+- 變數名稱與訊息由 probe 改為請購（`RUN_EXIT`）。
+
+改寫時以程式核對過：腳本中沒有 `probe-init`、`--send-one-message`，也沒有變數緊接全形字元。
+
+```bash
+#!/bin/bash
+# 第一筆真實請購（一次嘗試）。僅供 Aaron 另行核准後使用；整份以 bash 執行，不逐行貼上。
+# 前置步驟任一失敗 → die：記錄原因、刪除自己建立的暫存目錄，以 exit 2 結束，不會到達請購。
+# 請購（apa-buyer run --live）只在檔案末端呼叫一次；非零退出碼照樣保存，不重試。
+set -u
+REPO=/Users/mac/Documents/OpenSourceProjects/agent-payment-authority
+CLI=/Users/mac/.local/bin/claude
+PRODUCT_BASE=21090e3f046690bd17d5d13d30d37fb31030d512   # 已 review 的產品基準（10/8 開發展示例外與認證 none；之前為 a4e3d8e、40bd263、bd29a4e、e99f389）
+EV_OWNED=; WT_MADE=
+die() {
+  echo "STOP（請購未啟動）：$*" >&2
+  if [ -n "$EV_OWNED" ]; then echo "$*" > "$EV/precheck-stop.txt"; fi   # 只寫入本次自己建立的證據目錄
+  if [ -n "$WT_MADE" ]; then rm -rf "$WT" || echo "暫存目錄未能移除：$WT" >&2; fi   # 只刪本次 mktemp 建立的目錄
+  exit 2
+}
+
+# 1. 工作目錄與分支
+cd "$REPO" || die "無法進入 $REPO"
+BR=$(git branch --show-current) || die "git branch 失敗"
+[ "$BR" = b1-04-live ] || die "分支是「${BR}」，不是 b1-04-live"
+
+# 2. 工作區：只容許未追蹤的 demo（或完全乾淨）
+ST=$(git status --porcelain --untracked-files=all) || die "git status 失敗"
+[ -z "$ST" ] || [ "$ST" = "?? demo" ] || die "工作區有 demo 以外的差異"
+
+# 3. 執行基準：產品基準必須是祖先，且之後只能有文件差異
+BASE=$(git rev-parse --verify 'HEAD^{commit}') || die "git rev-parse 失敗"
+git merge-base --is-ancestor "$PRODUCT_BASE" "$BASE" || die "$PRODUCT_BASE 不是 $BASE 的祖先，或 git 失敗"
+DIFF=$(git diff --name-only "$PRODUCT_BASE" "$BASE" -- . ':(exclude)docs' ':(exclude)README.md') || die "git diff 失敗"
+[ -z "$DIFF" ] || die "$PRODUCT_BASE 之後有非文件差異"
+
+# 4. 證據目錄（不加 -p：已存在就停止，不覆寫）、全新暫存目錄中的一般本機 clone 與建置
+mkdir -p "$REPO/artifacts/b1-04" || die "無法建立 artifacts/b1-04"
+EV="$REPO/artifacts/b1-04/live-purchase-$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir "$EV" || die "證據目錄已存在或無法建立：$EV"
+EV_OWNED=1
+echo "$BASE" > "$EV/commit.txt" || die "無法寫入 commit.txt"
+WT=$(mktemp -d "${TMPDIR:-/tmp}/apa-c0p.XXXXXX") || die "mktemp 失敗"
+WT_MADE=1
+git clone --quiet --no-hardlinks --no-checkout "$REPO" "$WT/src" || die "本機 clone 失敗"   # 本機路徑，不經網路；不改原工作區
+git -C "$WT/src" checkout --quiet --detach "$BASE" || die "checkout $BASE 失敗"
+[ -d "$WT/src/.git" ] || die "clone 的 .git 不是目錄"
+[ "$(git -C "$WT/src" rev-parse --verify 'HEAD^{commit}')" = "$BASE" ] || die "clone 的 HEAD 不是 $BASE"
+(cd "$WT/src" && go build -o "$WT/apa-buyer" ./cmd/apa-buyer) || die "建置失敗"   # $WT 是新建的空目錄，不可能拿到舊二進位
+[ -x "$WT/apa-buyer" ] || die "建置後沒有可執行檔"
+
+# 5. 二進位 VCS：revision 必須等於 BASE，modified 必須為 false；欄位缺失、重複或不符都停止
+VM=$(go version -m "$WT/apa-buyer") || die "go version -m 失敗"
+printf '%s\n' "$VM" | awk '$1 == "build"' > "$EV/go-version-build.txt" || die "無法寫入 go-version-build.txt"   # 原始 build 行，供核對解析
+REV=$(printf '%s\n' "$VM" | awk '$1 == "build" && $2 ~ /^vcs\.revision=/ { sub(/^vcs\.revision=/, "", $2); print $2 }')
+MOD=$(printf '%s\n' "$VM" | awk '$1 == "build" && $2 ~ /^vcs\.modified=/ { sub(/^vcs\.modified=/, "", $2); print $2 }')
+printf 'vcs.revision=%s\nvcs.modified=%s\n' "$REV" "$MOD" > "$EV/binary-vcs.txt" || die "無法寫入 binary-vcs.txt"
+[ "$REV" = "$BASE" ] || die "vcs.revision 缺失或不是 $BASE"
+[ "$MOD" = false ] || die "vcs.modified 缺失或不是 false"
+
+# 6. 唯一一次正式請購（版本檢查由 apa-buyer 自己做，不符時 exit 1、沒有報告）
+#    開發展示例外（--dev-demo-plugins）；全新測試資料庫在證據目錄；registry／profile 讀乾淨 clone 中的檔案
+[ ! -e "$EV/apa-live.db" ] || die "測試資料庫已存在：$EV/apa-live.db"
+date -u +%FT%TZ > "$EV/started-utc.txt" || die "無法寫入 started-utc.txt"
+APA_LIVE_CLI=true APA_DB_PATH="$EV/apa-live.db" "$WT/apa-buyer" run --live --dev-demo-plugins \
+  --cli "$CLI" --task task-a \
+  --registry "$WT/src/testdata/contracts/registry.json" \
+  --profile "$WT/src/testdata/policy/m1-demo-profile.json" \
+  --trace-dir "$EV/runs" > "$EV/stdout.txt" 2> "$EV/apa-buyer-error.txt"
+RUN_EXIT=$?
+
+# 7. 不論 RUN_EXIT 為何都走到這裡；之後的命令不改變 RUN_EXIT，也不再呼叫請購。
+#    證據保存是否成功另外記在 SAVED；失敗不呼叫 die（請購已啟動），也不重試請購。
+SAVED=1
+echo "exit=$RUN_EXIT" > "$EV/exit-code.txt" || SAVED=
+date -u +%FT%TZ > "$EV/ended-utc.txt" || SAVED=
+rm -rf "$WT" || echo "暫存目錄未能移除：$WT" >&2   # 清理照常嘗試
+if [ -z "$SAVED" ]; then
+  echo "請購已嘗試，證據不完整：run exit=${RUN_EXIT}；exit-code.txt 或 ended-utc.txt 未能寫入；目錄：$EV" >&2
+  exit 5
+fi
+echo "run exit=${RUN_EXIT}；證據：${EV}"
+exit "$RUN_EXIT"
+```
+
+**核准範圍**（待 Aaron 勾選）：
+- [ ] **一次**正式請購嘗試；任何前置失敗、版本不符或執行失敗都停止，不重試，也不另跑 C0′。
+- [ ] 開發展示例外（`--dev-demo-plugins`），依決策稿 9.1 的剩餘風險（Aaron 已接受，限開發展示模式）。
+- [ ] CLI 使用 `~/.apa-claude` 的本人訂閱登入、既有網路；用量可能 `unknown`；可能有背景活動或日常狀態寫入。
+- [ ] 合成業務資料（`task-a`、`kr-market` 等）、全新測試資料庫，不付款、不接 Signer、不使用正式資產。
+- [ ] 執行上限沿用：`Total` 3 分鐘、`Assistant` 10、`MaxCalls` 8、每次呼叫 20 秒；不放寬。
+
+**保存的證據**（`$EV`）：
+- `commit.txt`、`binary-vcs.txt`、`go-version-build.txt`、`started-utc.txt`、`ended-utc.txt`、`exit-code.txt`；
+- `stdout.txt`：LIVE 開頭行、例外標示行，以及 JSON 報告（工具呼叫紀錄、Store 的 task 檢視；**不含模型的 result 文字**）；
+- `apa-buyer-error.txt`：apa-buyer 自己的錯誤行，固定代碼，不含 CLI 文字；
+- `runs/task-a-*.jsonl`：白名單 trace，含 `run_start.gate_mode`；
+- `apa-live.db`：本次全新的測試 Store。
+
+**判讀**：
+- **成功**（全部符合才算）：
+  - exit 0；
+  - trace 的 `run_start.gate_mode=dev_demo_plugins`、`init.gate=passed`；
+  - 至少一次 `tool_call`；
+  - `request_purchase` 的 outcome 是 Policy 裁決（`Ask` 或 `Deny`，照既有規則記錄，不為展示修改）；
+  - `apa-live.db` 中同一 task 有請購與事件，且與 `stdout.txt` 的 task 檢視一致。
+- **分類**（如實記錄，都停止、不重試）：
+  - exit 2 前置停止；
+  - exit 1 而且沒有報告（版本檢查等啟動前的拒絕）；
+  - Gate 拒絕（`config_mismatch` 加代碼，例如 `plugins`、`auth_unconfirmed`）；
+  - 沒有請購（模型沒有呼叫 `request_purchase`）；
+  - 達到上限（`turn_limit`、時間、呼叫數）、逾時、CLI 錯誤；
+  - exit 5（請購已嘗試，但證據不完整）。
+  - 用量一律記 `unknown`。
+- **不代表**：plugins 的內容或行為已確認、M1 完成、或已接上 Dashboard／Unity。接上展示鏈是另一個出口。
+
+**執行前提**：
+- Aaron 核准一次嘗試；
+- 腳本執行時的 HEAD 是 `21090e3` 的後代，且之後只有文件差異；
+- 工作區只有 `?? demo`；
+- 由 Claude Code 在沙箱外執行（需要既有 HOME 與登入），或由 Aaron 自行執行。
+
+L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
