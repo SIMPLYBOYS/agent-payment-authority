@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -109,6 +110,8 @@ type api struct {
 	history  *historyInfo // history mode (--history-db); nil otherwise
 	live     *liveInfo    // live mode (--live-cli); nil otherwise
 	traceDir string       // live mode: where the run traces are
+	pairing  *pairing     // --pairing: the host page's one-time code; nil otherwise
+	out      io.Writer    // the host's log (fixed lines only)
 }
 
 func (a *api) register(mux *http.ServeMux) {

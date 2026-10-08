@@ -14,12 +14,18 @@ button:disabled { opacity: 0.5; cursor: default; }
 #status[data-kind="error"] { color: var(--err); }
 /* D1 (docs/demo-presentation-design.md 4.1-4.3): the shop first, the card
    beside it, the host's row under the shop; Timeline below; the rest folds. */
-.stage { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr); grid-template-areas: "shop card" "ops card"; gap: 12px; padding: 12px 16px 0; align-items: start; }
+.stage { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr); grid-template-areas: "shop card"; gap: 12px; padding: 12px 16px 0; align-items: start; }
+/* The host's bar (docs/cli-poc.md 56): pairing, then start, stop and the evidence. */
+.host-bar { margin: 8px 16px 0; background: var(--panel); border-radius: 6px; padding: 6px 12px; }
+.host-bar .host-row { margin: 2px 0; }
+.host-bar p { margin: 2px 0; }
+.pair-note { color: var(--muted); }
+#pair-form[hidden] { display: none; } /* .host-row's display would show it */
+.pair-note[data-kind="error"] { color: var(--err); font-weight: bold; }
+#pair-code { width: 12em; }
 .stage > section, .stage > aside, .timeline-box, .below > details { background: var(--panel); border-radius: 6px; padding: 10px 12px; min-width: 0; }
 .shop { grid-area: shop; }
 .card { grid-area: card; }
-.host-ops { grid-area: ops; }
-.host-ops:empty, .host-ops:not(:has(button)) { display: none; }
 .timeline-box { margin: 12px 16px 0; }
 .below { display: grid; gap: 10px; padding: 12px 16px 24px; }
 .below > details > summary { cursor: pointer; color: var(--accent); font-weight: bold; }
@@ -52,7 +58,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .timeline li[data-ahead="1"] { opacity: 0.45; }
 .timeline li[data-ahead="1"] .event-head .type::after { content: "（回放尚未到此）"; color: var(--warn); font-weight: normal; }
 h2 { margin: 0 0 8px; font-size: 15px; color: var(--accent); }
-#unity-canvas { width: min(100%, calc((100vh - 440px) * 1.5)); min-width: min(100%, 480px); height: auto; aspect-ratio: 3 / 2; background: #000; display: block; margin: 0 auto; image-rendering: pixelated; }
+#unity-canvas { width: min(100%, calc((100vh - 520px) * 1.5)); min-width: min(100%, 480px); height: auto; aspect-ratio: 3 / 2; background: #000; display: block; margin: 0 auto; image-rendering: pixelated; }
 #unity-status[data-state="failed"] { color: var(--err); font-weight: bold; }
 #unity-status[data-state="ready"], #unity-status[data-state="rendered"] { color: var(--ok); }
 .scene-label { font-weight: bold; margin: 6px 0 2px; }
@@ -75,7 +81,8 @@ h2 { margin: 0 0 8px; font-size: 15px; color: var(--accent); }
 #list-note { color: var(--muted); }
 #list-note[data-kind="warn"] { color: var(--warn); }
 @media (max-width: 900px) {
-  .stage { grid-template-columns: minmax(0, 1fr); grid-template-areas: "shop" "card" "ops"; padding: 12px 12px 0; }
+  .stage { grid-template-columns: minmax(0, 1fr); grid-template-areas: "shop" "card"; padding: 12px 12px 0; }
+  .host-bar { margin: 8px 12px 0; }
   .timeline-box { margin: 12px 12px 0; }
   .below { padding: 12px 12px 24px; }
   .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -31,6 +31,7 @@ func (a *api) registerUI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /ui/{name}", a.asset)
 	mux.HandleFunc("GET /unity/{name}", a.unityFile)
 	mux.HandleFunc("GET /api/viewer", a.viewer)
+	mux.HandleFunc("GET /api/mode", a.mode)
 }
 
 // unityFiles are the Web build's files the page loads, by name; nothing
@@ -137,4 +138,23 @@ func (a *api) viewer(w http.ResponseWriter, r *http.Request) {
 	}
 	reply(w, http.StatusOK, viewerReply{Role: g.Role, ConsumerID: g.ConsumerID,
 		Note: "Local demo capability for this run of the demo host; not a user login.", History: a.historyFor(g), Live: a.live})
+}
+
+// mode is GET /api/mode, the one answer without a token: which demo this
+// host is (fake, live or history) and its fixed label, as the page header
+// shows it before any credentials (docs/cli-poc.md 56). Nothing of a task,
+// a run or a token; this host's own Host only.
+func (a *api) mode(w http.ResponseWriter, r *http.Request) {
+	if r.Host != a.addr {
+		fail(w, http.StatusForbidden, "forbidden_host")
+		return
+	}
+	switch {
+	case a.history != nil:
+		reply(w, http.StatusOK, map[string]any{"mode": "history", "record": a.history.Record, "label": a.history.Label})
+	case a.live != nil:
+		reply(w, http.StatusOK, map[string]any{"mode": "live", "record": a.live.Record, "label": a.live.Label, "dev_demo_plugins": a.live.DevDemoPlugins})
+	default:
+		reply(w, http.StatusOK, map[string]any{"mode": "fake"})
+	}
 }

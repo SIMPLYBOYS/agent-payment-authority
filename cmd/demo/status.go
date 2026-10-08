@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"runtime/debug"
 	"sync"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
@@ -80,6 +81,7 @@ type statusReply struct {
 	Runs              map[string]any   `json:"runs,omitempty"`    // with --scenarios: the active run and the interrupted ones
 	History           *historyInfo     `json:"history,omitempty"` // history mode only
 	Live              *liveInfo        `json:"live,omitempty"`    // live mode only
+	Build             buildInfo        `json:"build"`             // what this binary says of its source, as Go recorded it
 }
 
 // hostStatus answers the host and the operator tokens
@@ -99,6 +101,7 @@ func (a *api) hostStatus(w http.ResponseWriter, r *http.Request) {
 	if a.fake {
 		out.FakeCLI.State = "ok"
 	}
+	out.Build = currentBuild()
 	if a.live != nil {
 		out.LiveCLI = "on" // its version and config directory passed at start; each run checks them again
 	}
@@ -116,4 +119,30 @@ func (a *api) hostStatus(w http.ResponseWriter, r *http.Request) {
 		out.Runs = a.control.summary()
 	}
 	reply(w, http.StatusOK, out)
+}
+
+// buildInfo is the binary's own record of its source (vcs.revision,
+// vcs.modified, vcs.time), shown as recorded: a modified build says so.
+// Empty when the binary carries none (go test, go run of a file).
+type buildInfo struct {
+	Revision string `json:"revision"`
+	Modified string `json:"modified"` // "true" | "false" | ""
+	Time     string `json:"time"`
+}
+
+func currentBuild() buildInfo {
+	var b buildInfo
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				b.Revision = s.Value
+			case "vcs.modified":
+				b.Modified = s.Value
+			case "vcs.time":
+				b.Time = s.Value
+			}
+		}
+	}
+	return b
 }

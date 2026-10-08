@@ -21,7 +21,13 @@ export const MESSAGES = {
   mismatch: "token 檔與目前服務不符（服務可能已重啟），請重新載入",
   unreachable: "無法連線到 demo host，token 檔未採用",
   stale: "服務已重啟或 token 失效，請重新載入 token 檔",
+  pair_format: "配對碼格式不符（12 個英數字，可含 - 或空格），沒有送出",
+  pair_failed: "配對碼不正確；連續錯 5 次後本次配對失效",
+  pair_closed: "配對碼已使用、逾時或失效：請改用「進階」的 token 檔（啟動時印出的場次目錄 tok/tokens.json），或重新啟動展示",
+  pair_off: "這個服務沒有啟用配對：請改用「進階」的 token 檔",
 };
+
+const CODE = /^[A-Z2-7]{12}$/;
 
 // parseTokenFile checks the text of var/demo-tokens.json and returns
 // { host, operator, viewers: Map(consumer_id -> token) }, or null when
@@ -64,7 +70,7 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
   let gen = 0;
   let abort = new AbortController();
   let held = null; // { host, viewers } of the current generation, once verified
-  let mode = "none"; // none | loading | file | manual
+  let mode = "none"; // none | loading | pairing | file | paired | manual
   let fileName = "";
   let message = "";
 
@@ -111,9 +117,37 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
     const parsed = parseTokenFile(text);
     text = null;
     if (!parsed) return fail("bad_file");
+    await adopt(g, signal, parsed, fail, "file", typeof file.name === "string" ? file.name.slice(0, 80) : "",
+      "已載入 token 檔：host、operator 與 " + parsed.viewers.size + " 位 viewer");
+  }
+
+  // pair trades the one-time code the host showed on its terminal for this
+  // run's tokens (POST /api/host/pair, no token sent), then confirms and
+  // holds them exactly as a loaded file. The code is checked here first
+  // (nothing is sent for a malformed one) and is never kept or shown.
+  async function pair(typed) {
+    const g = next("pairing", "配對中…");
+    const signal = abort.signal;
+    changed();
+    const fail = (code) => { if (g === gen) { next("none", MESSAGES[code]); changed(); } };
+    const code = typeof typed === "string" ? typed.replace(/[\s-]/g, "").toUpperCase() : "";
+    if (!CODE.test(code)) return fail("pair_format");
+    let r;
+    try { r = await call(null, "/api/host/pair", signal, { body: { code } }); } catch { return fail("unreachable"); }
+    if (g !== gen) return; // cleared, left or replaced meanwhile: a late answer signs nothing in
+    if (r.status === 410) return fail("pair_closed");
+    if (r.status === 404 || r.status === 405) return fail("pair_off");
+    if (r.status !== 200) return fail("pair_failed");
+    const parsed = parseTokenFile(JSON.stringify(r.body));
+    if (!parsed) return fail("bad_file");
+    await adopt(g, signal, parsed, fail, "paired", "", "已配對：本次服務的主持人憑證只在這個頁面的記憶體中（離開或清除即失效）");
+  }
+
+  // adopt confirms every token with this run of the host before keeping
+  // any: the host and operator tokens must each be what the server says
+  // they are (caller_role), not just accepted somewhere.
+  async function adopt(g, signal, parsed, fail, newMode, name, msg) {
     try {
-      // The host and operator tokens must each be what the server says
-      // they are (caller_role), not just accepted somewhere.
       for (const [token, role] of [[parsed.host, "host"], [parsed.operator, "operator"]]) {
         const st = await call(token, "/api/host/status", signal);
         if (g !== gen) return;
@@ -129,9 +163,9 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
     }
     if (g !== gen) return;
     held = parsed;
-    mode = "file";
-    fileName = typeof file.name === "string" ? file.name.slice(0, 80) : "";
-    message = "已載入 token 檔：host、operator 與 " + parsed.viewers.size + " 位 viewer";
+    mode = newMode;
+    fileName = name;
+    message = msg;
     changed();
   }
 
@@ -244,7 +278,7 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
   }
 
   return {
-    load, clearAll, manual, unauthorized, readiness, startRun, stopRun, cancelTask, hostRead, runs,
+    load, pair, clearAll, manual, unauthorized, readiness, startRun, stopRun, cancelTask, hostRead, runs,
     viewerToken: (consumer) => (held ? held.viewers.get(consumer) || null : null),
     get gen() { return gen; },
     view,

@@ -132,6 +132,12 @@ func postGuard(w http.ResponseWriter, r *http.Request, a *api, dst any) bool {
 		fail(w, http.StatusForbidden, "forbidden_role")
 		return false
 	}
+	return strictJSON(w, r, dst)
+}
+
+// strictJSON reads a JSON POST body (application/json, at most 1 KiB,
+// exactly one object, only white space after it) strictly into dst.
+func strictJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
 		fail(w, http.StatusBadRequest, "bad_request")
 		return false

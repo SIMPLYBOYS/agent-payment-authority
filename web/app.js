@@ -133,7 +133,7 @@ function renderedBy(gen, seq, ms) {
   });
 }
 
-function setStatus(text, kind) {
+export function setStatus(text, kind) {
   const s = $("status");
   s.textContent = text;
   s.dataset.kind = kind;
@@ -621,6 +621,14 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && mo
 // Leaving the page drops the token and the panels and stops polling;
 // nothing comes back on return (a restored page asks again).
 window.addEventListener("pagehide", () => forget());
+
+// The host's mode and label (GET /api/mode, no token, docs/cli-poc.md 56):
+// the header says live or history before any credentials, never the fake
+// default on a live host. A failed read leaves the default; the viewer's own
+// /api/viewer answer labels the page again when it signs in.
+fetch("/api/mode", { cache: "no-store", credentials: "omit" }).then((r) => (r.ok ? r.json() : null)).then((m) => {
+  if (m && (m.mode === "live" || m.mode === "history") && !history && !live) labelPage(m);
+}).catch(() => {});
 
 // The shop's catalog: fixture prices, informational, read once without a
 // token; shown with the time of this read, never as the bound quote.

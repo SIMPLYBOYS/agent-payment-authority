@@ -21,14 +21,14 @@
 // click: a clear, a new file, the manual mode, pagehide, or a switch of
 // consumer or task drops it; nothing is opened or signed in for it.
 
-import { labelPage, forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, setAlert } from "./app.js";
+import { labelPage, setStatus, forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, setAlert } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
 
 const $ = (id) => document.getElementById(id);
 const READY_MS = 5000; // readiness is read every 5 s while the page is visible
 
 async function call(token, path, signal, post) {
-  const headers = { Authorization: "Bearer " + token };
+  const headers = token ? { Authorization: "Bearer " + token } : {}; // pairing sends no token
   const init = { headers, cache: "no-store", credentials: "omit", signal };
   if (post) { // a control request: same-origin JSON POST (the browser adds Origin)
     init.method = "POST";
@@ -63,7 +63,7 @@ function render(v) {
   if (v.gen !== shownGen) {
     // New generation: the previous identity leaves the panels and the shop.
     shownGen = v.gen;
-    forget(v.message || "請載入 token 檔或手動輸入 viewer token");
+    forget(v.message || "請輸入啟動終端機上的配對碼（或在「進階」載入 token 檔）");
     lastReady = null;
     lastRuns = null;
     lastTasks = null;
@@ -74,11 +74,22 @@ function render(v) {
     clearTimeout(runsTimer);
     setRunStatus("", "idle");
   }
-  // D1: the credentials fold once a file is loaded; the status bar keeps a
-  // way to load one (section 4.1).
-  $("creds-box").open = v.mode !== "file";
-  $("load-file").hidden = v.mode === "file";
-  $("creds-summary").textContent = "憑證與就緒：" + (v.mode === "file" ? "已載入 token 檔" : v.mode === "manual" ? "手動 viewer 模式" : "尚未載入 token 檔");
+  // D1: the credentials fold once a file is loaded or the page paired; the
+  // status bar keeps a way to load one (section 4.1). Pairing (docs/cli-poc.md
+  // 56) is the usual way; the token file is the advanced and recovery way.
+  const held = v.mode === "file" || v.mode === "paired";
+  $("creds-box").open = !held && v.mode !== "pairing";
+  $("load-file").hidden = held;
+  $("creds-summary").textContent = "憑證與就緒（進階：token 檔）：" + (v.mode === "paired" ? "已配對" : v.mode === "file" ? "已載入 token 檔" : v.mode === "manual" ? "手動 viewer 模式" : "尚未配對或載入");
+  $("pair-form").hidden = held;
+  // A pairing adopted in this generation: the status bar says so once
+  // (it said 「配對中…」 when the generation began).
+  if (v.mode === "paired" && pairedGen !== v.gen) {
+    pairedGen = v.gen;
+    setStatus(v.message + "；按「開始」執行一場", "ok");
+  }
+  $("pair-note").textContent = v.mode === "pairing" || (v.mode === "none" && pairTried && v.message) ? v.message : PAIR_NOTE;
+  $("pair-note").dataset.kind = v.mode === "none" && pairTried && v.message ? "error" : "";
   const box = $("creds");
   box.dataset.mode = v.mode;
   box.dataset.gen = String(v.gen);
@@ -150,7 +161,7 @@ function renderReadiness() {
   const v = creds.view();
   const scene = unitySceneText();
   if (!v.hasHost) {
-    rows.push(["就緒狀態", "unconfirmed", v.mode === "manual" ? "需要 token 檔（手動 viewer 模式不讀就緒狀態）" : "未確認：請先載入 token 檔"]);
+    rows.push(["就緒狀態", "unconfirmed", v.mode === "manual" ? "需要配對或 token 檔（手動 viewer 模式不讀就緒狀態）" : "未確認：請先配對或載入 token 檔"]);
   } else if (!lastReady) {
     rows.push(["就緒狀態", "unconfirmed", "未確認：讀取中"]);
   } else if (lastReady.error) {
@@ -173,6 +184,11 @@ function renderReadiness() {
       : ["真實 CLI", "off", hist ? "未執行（歷史模式：顯示已保存的真實執行紀錄）" : "未啟用（fake 模式）"]);
     rows.push(["Unity 建置", st.unity_build.state, st.unity_build.state === "ok" ? "就緒（4 個建置檔）" : "缺少 " + missing.join("、") + "：請先完成首次準備"]);
     rows.push(["付款", "off", "無付款能力"]);
+    // The binary's own record of its source (docs/cli-poc.md 56): a dirty
+    // build is shown as such (Go counts untracked files as modified too).
+    const bi = st.build || {};
+    rows.push(["建置", "info", bi.revision ? bi.revision.slice(0, 12) + (bi.modified === "true" ? "（modified=true：建置時工作區有變更或未追蹤檔案，不是乾淨建置）"
+      : bi.modified === "false" ? "（modified=false）" : "") : "未記錄來源版本"]);
     rows.push(hist ? ["紀錄時間", "info", time(st.served_at) + "（凍結於最後事件，不是現在的伺服器時間）"] : ["檢查時間", "info", time(st.served_at) + "（Store 時間）"]);
   }
   rows.push(["Unity 場景", scene[0], scene[1]]);
@@ -278,7 +294,7 @@ function renderControl() {
   const box = $("control");
   // History mode has no control: the server refuses it (409), the page
   // does not offer it.
-  box.hidden = v.mode !== "file" || !!(lastReady && lastReady.status && lastReady.status.history);
+  box.hidden = !v.hasHost || !!(lastReady && lastReady.status && lastReady.status.history);
   const pick = $("run-scenarios");
   const scenarios = (lastReady && lastReady.status && lastReady.status.runs && lastReady.status.runs.scenarios) || [];
   const live = !!(lastReady && lastReady.status && lastReady.status.live);
@@ -289,7 +305,7 @@ function renderControl() {
     const b = document.createElement("button");
     b.type = "button";
     b.dataset.scenario = sc.id;
-    b.textContent = (live ? "開始（真實 CLI）：" : "開始：") + sc.label + "（" + sc.consumer_id + "）";
+    b.textContent = (live ? "開始（真實 CLI）：" : "開始（fake，不執行模型）：") + sc.label + "（" + sc.consumer_id + "）";
     b.disabled = starting || active;
     b.addEventListener("click", () => start(sc));
     return b;
@@ -324,7 +340,7 @@ function renderControl() {
   // from what cannot be read now (review of 7ffc45d, R2).
   const odd = runs.filter((r) => r.state === "interrupted" || r.record_error || r.store_end_error).length;
   const issues = [];
-  if (v.mode === "file") {
+  if (v.hasHost) {
     if (lastRunsError) issues.push("場次清單讀取失敗（" + lastRunsError + "），顯示上次資料");
     if (lastTasks && lastTasks.gen === creds.gen && lastTasks.error) issues.push("task 狀態讀取失敗（" + lastTasks.error + "），未確認");
     else if (lastTasks && lastTasks.gen === creds.gen && lastTasks.list) {
@@ -496,7 +512,27 @@ $("token-file").addEventListener("change", (ev) => {
   input.value = ""; // the field is emptied at once; the File object is read once below
   if (file) creds.load(file);
 });
-$("clear-all").addEventListener("click", () => creds.clearAll("已清除全部憑證"));
+$("clear-all").addEventListener("click", () => { pairTried = false; creds.clearAll("已清除全部憑證"); });
+// Pairing: the typed code is read once and the field emptied before
+// anything is sent; a late answer after a clear, a new file, the manual
+// mode or pagehide signs nothing in (a new generation, hostcreds.js).
+let pairTried = false;
+let pairedGen = -1;
+const PAIR_NOTE = "配對只取得本次服務的主持人憑證，不會執行模型；按「開始」才執行一場。";
+$("pair-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const input = $("pair-code");
+  const typed = input.value;
+  input.value = "";
+  pairTried = true;
+  creds.pair(typed);
+});
+// 查看證據: the open task's evidence panel, opened where it is.
+$("show-evidence").addEventListener("click", () => {
+  const box = $("evidence-box");
+  box.open = true;
+  box.scrollIntoView({ block: "start" });
+});
 $("load-file").addEventListener("click", () => $("token-file").click());
 document.addEventListener("apa:view", renderControl);
 // Manual viewer mode: app.js has read and emptied the typed token; every

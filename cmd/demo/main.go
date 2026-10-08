@@ -74,6 +74,8 @@ type deps struct {
 	stage       func(string)        // tests: each stop step, in the order it happens
 	runsDone    chan<- []runOutcome // receives the fake runs' outcomes when all ended
 	liveVersion string              // tests: "" means buyer.ApprovedCLIVersion
+	pairOut     io.Writer           // --pairing: where the code is shown; nil means /dev/tty
+	now         func() time.Time    // the pairing window's clock (monotonic); nil means time.Now
 }
 
 // run serves with no fake runs; the B1-01 tests and checks use it.
@@ -108,6 +110,8 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	historyTracePath := fs.String("history-trace", "", "history mode: the recorded run trace, for its tool calls (optional)")
 	liveCLI := fs.String("live-cli", "", "live mode: absolute path of the approved Claude Code executable; a run the operator starts runs it (needs APA_LIVE_CLI=true, APA_DB_PATH and --scenarios with a live catalog; docs/cli-poc.md 55)")
 	devDemo := fs.Bool("dev-demo-plugins", false, "live mode only: the development demo plugin exception (docs/live-purchase-execution-decision.md 9)")
+	pairingOn := fs.Bool("pairing", false, "with --scenarios: show a one-time code on this terminal; /host trades it once for this run's tokens (docs/cli-poc.md 56)")
+	readyFile := fs.String("ready-file", "", "write {addr, pid} here once serving (for scripts/demo/present.sh)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -141,7 +145,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		return errors.New("--history-trace goes with --history-db")
 	}
 	if *historyDB != "" {
-		if *fakePath != "" || *planPath != "" || *scenariosPath != "" || *upgradeDB || *liveCLI != "" || *devDemo {
+		if *fakePath != "" || *planPath != "" || *scenariosPath != "" || *upgradeDB || *liveCLI != "" || *devDemo || *pairingOn {
 			return errors.New("--history-db serves a recorded run only; it excludes --fake-cli, --plan, --scenarios, --upgrade-db, --live-cli and --dev-demo-plugins")
 		}
 		return serveHistory(ctx, *historyDB, *historyTracePath, *registryPath, *unityDir, d)
@@ -162,6 +166,22 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		return errors.New("--live-cli needs --scenarios with a live catalog, e.g. testdata/demo/scenarios-live.json")
 	case !live && (*fakePath == "") != (*planPath == "" && *scenariosPath == ""):
 		return errors.New("--fake-cli goes with --plan or --scenarios")
+	case *pairingOn && *scenariosPath == "":
+		return errors.New("--pairing is for a host that starts runs (--scenarios)")
+	}
+	// The pairing code goes to the operator's terminal only.
+	pairOut := d.pairOut
+	if *pairingOn && pairOut == nil {
+		tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0)
+		if err != nil {
+			return errors.New("--pairing shows its code on this terminal only, and there is no terminal (/dev/tty); use the token file instead; nothing was started")
+		}
+		defer tty.Close()
+		pairOut = tty
+	}
+	now := d.now
+	if now == nil {
+		now = time.Now
 	}
 
 	cfg, err := config.Load(d.getenv)
@@ -301,7 +321,14 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	defer cancelRuns()
 	var runs sync.WaitGroup
 	mux := newMux(shop)
-	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: runner != nil && !live}
+	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: runner != nil && !live, out: d.out}
+	var pairCode string
+	if *pairingOn {
+		if ui.pairing, pairCode, err = newPairing(now); err != nil {
+			return err
+		}
+		mux.HandleFunc("POST /api/host/pair", ui.pair)
+	}
 	if live {
 		ui.live = &liveInfo{Record: "live_demo", Label: liveLabel, DevDemoPlugins: *devDemo, CLIVersion: runner.live.want}
 		ui.traceDir = *traceDir
@@ -327,6 +354,16 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 			addr, liveLabel, *liveCLI, *devDemo, dbPath, tokenPath)
 	} else {
 		fmt.Fprintf(d.out, "listening on http://%s (fixture mode, live CLI off, no payment capability); Store %s; demo tokens in %s\n", addr, dbPath, tokenPath)
+	}
+	if *pairingOn {
+		if err := showPairingCode(pairOut, pairCode, addr); err != nil {
+			return errors.New("the pairing code could not be shown on the terminal; nothing was started")
+		}
+	}
+	if *readyFile != "" {
+		if err := writeReady(*readyFile, addr); err != nil {
+			return fmt.Errorf("ready file: %w", err)
+		}
 	}
 	if d.ready != nil {
 		d.ready <- addr
@@ -486,4 +523,15 @@ func handleHealth(w http.ResponseWriter, _ *http.Request) {
 		ClaudeLogin:       "not_checked",
 		PaymentCapability: "unavailable",
 	})
+}
+
+// writeReady tells a launcher this process serves: its address and pid, in
+// one atomic write (scripts/demo/present.sh opens the page only then).
+func writeReady(path, addr string) error {
+	tmp := path + ".tmp"
+	body, _ := json.Marshal(map[string]any{"addr": addr, "pid": os.Getpid()})
+	if err := os.WriteFile(tmp, body, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }

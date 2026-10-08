@@ -1,4 +1,4 @@
-.PHONY: check check-contracts build dev demo-fake demo-integration demo
+.PHONY: check check-contracts build dev demo-fake demo-integration demo present-live present-fake
 
 # Compile, vet and unit-test. Calls no paid model and touches no testnet.
 check:
@@ -61,3 +61,14 @@ demo-integration:
 # registry, its own new database). See docs/demo-operation-design.md.
 demo:
 	sh scripts/demo/start.sh
+
+# docs/cli-poc.md 56: one way to start a demo and open /host. A new session
+# directory each time; the host shows a one-time pairing code on this
+# terminal; a run starts only when the host presses 「開始」 on the page.
+# present-live: the real Claude Code CLI (one-time setup: var/present.conf);
+# present-fake: the fake CLI, no model.
+present-live:
+	@sh scripts/demo/present.sh live
+
+present-fake:
+	@sh scripts/demo/present.sh fake
