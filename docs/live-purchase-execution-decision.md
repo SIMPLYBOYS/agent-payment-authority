@@ -1,6 +1,6 @@
 # 第一筆真實請購的執行路線評估
 
-> **狀態：第一筆真實請購 trace 已取得**（第二次嘗試，`docs/cli-poc.md` 第 53 節；Claude Code 執行，Codex 核對通過並獨立唯讀查詢資料庫，見 53.1）：開發展示例外下 Gate 通過；真實工具呼叫三次，Policy 裁決 Ask；Store 有同一 task 的請購與三個事件。下一個出口是把這筆 trace 以「真實執行紀錄的歷史回放」接上 Dashboard／Unity：原始證據唯讀、展示用副本、`pending` 只是執行結束時的快照。歷史回放已實作（`7c1dae6`，`docs/cli-poc.md` 第 54 節），驗收補齊於 `3234f4b`／`e500ded`（第 54.1 節：真實瀏覽器與 Unity 畫面、伺服器唯讀、trace 分權；Unity 畫布的 fake agent 文字待確認），待 Codex 核對。第一次嘗試的失敗紀錄（第 52 節）保留。
+> **狀態：第一筆真實請購 trace 已取得**（第二次嘗試，`docs/cli-poc.md` 第 53 節；Claude Code 執行，Codex 核對通過並獨立唯讀查詢資料庫，見 53.1）：開發展示例外下 Gate 通過；真實工具呼叫三次，Policy 裁決 Ask；Store 有同一 task 的請購與三個事件。下一個出口是把這筆 trace 以「真實執行紀錄的歷史回放」接上 Dashboard／Unity：原始證據唯讀、展示用副本、`pending` 只是執行結束時的快照。歷史回放已實作（`7c1dae6`，`docs/cli-poc.md` 第 54 節），驗收補齊於 `3234f4b`／`e500ded`（第 54.1 節：真實瀏覽器與 Unity 畫面、伺服器唯讀、trace 分權）。Unity 場景文字中性化（`578f2c3`／`b4b0a27`）通過 Codex 限定核對，畫布誤標 fake／sim 的缺口關閉（第 54.2.1 節）；整體切片待 Codex 核對其餘實作、唯讀與權限邊界，以及證據對應。第一次嘗試的失敗紀錄（第 52 節）保留。
 > - Aaron 已選定路線一（維持零 plugins）。專用設定目錄為 `~/.apa-claude`；階段 B 排在 C0′ 之前（第 6 節）。
 > - 2026-10-08；分支 `b1-04-live`。評估基準 HEAD `bd3ac81`（產品程式基準 `40bd263`，查詢工具 `5bab248`）；本次補正的開工基準為 `34ca9eb`。
 > - 本文件不改變現行 Gate、認證接受清單或任何執行限制，也不代表 plugins 已獲接受、零 plugins 要求已取消、來源已確認或正式請購已放行。

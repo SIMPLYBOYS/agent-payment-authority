@@ -1,5 +1,12 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 真實請購歷史回放（第 54～54.2.1 節）**：
+> - 第 53 節的真實請購可用 `scripts/demo/history.sh` 以證據副本重播，明標「真實執行紀錄・歷史回放・未付款・開發展示例外」。
+> - 實作：`7c1dae6`；驗收補齊：`3234f4b`／`e500ded`；Unity 文字：`578f2c3`／`b4b0a27`。
+> - **Unity 場景文字中性化通過 Codex 限定核對**，歷史回放畫布誤標 fake／sim 的缺口關閉（第 54.2.1 節）。這不代表整個切片已通過獨立 review。
+> - **目前下一步**：整體切片待 Codex 核對其餘實作、唯讀與權限邊界，以及證據對應。不重跑真實 CLI，不追加 plugin 調查。
+> - B1-04／B1-06 維持 InProgress。
+>
 > **10/8 第一筆真實請購 trace 取得，Codex 核對通過（第 53.1 節）**：第二次嘗試 exit `0`。開發展示例外下 Gate 通過；真實模型依序呼叫 `list_products` → `get_quote` → `request_purchase`；Policy 裁決 **Ask**（`HUMAN_APPROVAL_REQUIRED`）。Store 中同一 task 有一筆請購，以及 `TASK_STARTED`／`PURCHASE_PROPOSED`／`POLICY_DECIDED` 三個事件（第 53 節）。不付款，用量以 CLI 自報計數記錄。尚未接上 Dashboard／Unity；這不代表 plugins 的內容或行為已確認，也不代表 M1 完成。
 >
 > **10/8 第一次真實請購嘗試（Claude Code 執行，待 Codex review）**：**真實 init 第一次通過完整 Gate**（`gate_mode=dev_demo_plugins`、`init.gate=passed`，認證 `none` 被接受）。但 Store 拒絕開啟：資料庫目錄就是證據目錄，權限是 `0755`，Store 要求 `0700`。所以沒有 task、沒有工具呼叫、沒有請購；exit 1，依核准停止、不重試（第 52 節）。這是 §51 腳本的缺陷，不是產品行為；修正提案待 review 與 Aaron 另行核准。
@@ -3461,16 +3468,20 @@ B1-04／B1-06 仍 InProgress，不標 Done，等待 Codex review。這個出口�
 
 B1-04／B1-06 仍 InProgress，等待 Codex review。
 
-#### 54.2.1 驗收紀錄：Unity 畫布 fake／sim 文字缺口於 `578f2c3`／`b4b0a27` 限定核對通過（2026-10-08）
+#### 54.2.1 驗收紀錄：Unity 場景文字中性化限定核對通過（2026-10-08）
 
-> **限定核對通過：Unity 畫布的 fake／sim 文字缺口關閉。** 基準是程式 `578f2c3`、測試 `b4b0a27`。
+> **Unity 場景文字中性化於產品程式 `578f2c3`、測試 `b4b0a27` 通過 Codex 限定核對。** 歷史回放畫布誤標 fake／sim 的缺口關閉；投影、bridge 與訊息未改。模式來源仍由網頁清楚標示。
 
-- **證據歸屬**：Claude Code 執行；Codex 核對了原始碼、測試與建置紀錄，並目視截圖。Codex **沒有重跑** Unity、瀏覽器、完整容器或真實 CLI。
-- **Codex 確認的內容**：
-  - 產品差異只有三處文字和一段說明註解，未改投影、bridge 或訊息；
-  - 歷史回放截圖保留完整的歷史、例外、未付款標示；fake 展示截圖仍清楚標示 fake；
-  - Unity 紀錄是 EditMode 10／10、PlayMode 15／15；反向驗證只有新增的文字測試失敗；
-  - 瀏覽器紀錄：真實證據回放 46 項、合成回放 53 項、fake 回歸 317 項，全部通過。
-- **範圍**：只關閉這個文字缺口。不代表整個歷史回放切片（第 54、54.1 節）、M1 或商業展示版通過。
-- 這次文字修正不另跑完整容器驗證（Codex 指示）。
+- 第 54.2 節的原始交付與反向驗證紀錄維持原樣，不倒填成當時已驗收。
+- **證據歸屬**：Claude Code 執行，Codex 核對紀錄：
+  - Unity EditMode 10／10、PlayMode 15／15；
+  - 反向驗證：只有新增的文字測試失敗；
+  - WebGL 重建成功；
+  - 真實證據歷史回放 46 項；
+  - 合成資料歷史回放 53 項；
+  - fake 展示瀏覽器回歸 317 項。
+- **Codex 本輪另外核對**：原始碼差異；目視歷史回放與 fake 展示的截圖，確認畫布文字中性、頁面的模式標示仍清楚。
+- Codex **沒有**重跑測試、重建 WebGL、執行完整容器或真實 CLI。
+- **範圍**：本次只關閉 Unity 文字缺口。**不代表整個歷史回放切片已通過獨立 review**，也不代表 M1 或商業展示版完成。這次文字修正不另跑完整容器。
+- **目前下一步**：真實請購歷史回放的 Unity 文字缺口已關閉；整體切片待 Codex 核對其餘實作、唯讀與權限邊界，以及證據對應。不重跑真實 CLI，不追加 plugin 調查。
 - B1-04／B1-06 維持 InProgress。
