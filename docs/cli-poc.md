@@ -3256,14 +3256,7 @@ L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress，不標 Done，�
   - 不擴大到多 Agent、付款或 ZK。
 - **開工基準**：HEAD `96ae2e7`。
 
-**用法**（先把證據複製到私有目錄，不要指向 `artifacts/` 原檔）：
-
-```sh
-W=$(mktemp -d var/history-XXXXXX); mkdir -m 700 "$W/db" "$W/tok"
-EV=artifacts/b1-04/live-purchase-20261008T091741Z
-cp "$EV/db/apa-live.db" "$W/db/"; cp "$EV"/runs/task-a-*.jsonl "$W/trace.jsonl"
-APA_DEMO_TOKEN_FILE="$W/tok/tokens.json" go run ./cmd/demo --history-db "$W/db/apa-live.db" --history-trace "$W/trace.jsonl"
-```
+**用法**：見 54.1。原本這裡的手動命令以分號串接，建立目錄或複製失敗時仍會繼續啟動，**已撤除**；改用 `scripts/demo/history.sh`，任何一步失敗都停止啟動。
 
 **行為**：
 - **Store**：`store.OpenSnapshot` 先把資料庫（與 WAL，如有）複製到新的 0700 暫存目錄。複製前後比對指紋，複製期間有變動就拒絕。副本以 `query_only` 開啟，並照一般 Store 驗證 hash chain、投影與 snapshot。
@@ -3307,3 +3300,136 @@ APA_DEMO_TOKEN_FILE="$W/tok/tokens.json" go run ./cmd/demo --history-db "$W/db/a
 - 只支援單一資料庫、單一 trace；trace 的 task 以外的 task 不顯示工具呼叫。
 
 B1-04／B1-06 仍 InProgress，不標 Done，等待 Codex review。
+
+### 54.1 補齊驗收：伺服器唯讀、trace 分權、紀錄時間標示、真實瀏覽器與 Unity 畫面（2026-10-08；Claude Code 執行，待 Codex 核對）
+
+> **結果**：以第 53 節真實證據的**副本**啟動，用真實 Chrome 載入 Unity Web build，從事件 #1 回放到 #3、停止回放、重開頁面、開主持人頁，53 項檢查全部通過；原始證據與副本前後不變。
+>
+> 發現一個**未處理的 Unity 缺口**：商店畫布內建標題是「M1 / fake agent / no payment」，客人標籤是「(sim agent)」，寫死在 `ShopView.cs`。歷史模式下與標示矛盾。修正需要改 Unity 並重建，或在投影加欄位（屬 bridge／契約），**待確認**，本輪未改。
+>
+> 本節不代表 Codex 已接受 `7c1dae6` 或本節提交；也不代替 Aaron 的展示體驗驗收。
+
+- **派工**：vault 筆記「Claude Code 真實請購歷史回放實作與驗收派工」（Aaron 核准直接實作並交 review）。
+- **開工核對**：HEAD `9381f15`（`7c1dae6` 之後只有文件），工作區只有未追蹤的 `demo`。沿用 `7c1dae6`，沒有另做一套。
+- **提交**：
+  - 程式 `3234f4b`；
+  - 測試與驗證腳本 `e500ded`；
+  - 文件為本節所在提交。
+- **證據歸屬**：以下全部由 Claude Code 執行，待 Codex 核對；Codex 沒有重跑。
+
+**相對 `7c1dae6` 的修正**（同一切片內的接線與測試修正）：
+
+| 項目 | 之前 | 現在 |
+|---|---|---|
+| 控制入口 | 歷史模式沒有註冊控制路由，請求得到 404 | 開始、停止、取消一律回 **409 `history_read_only`**（任何角色）；場次清單為空。主持人頁也隱藏控制，但守門的是伺服器 |
+| trace 分權 | `/api/viewer` 把整份 trace 給所有 viewer | 只有能讀該 task 的呼叫者拿到 trace（host，或該 consumer 的 viewer）；其他人只拿到標示與 `as_of` |
+| 資料庫來源 | 有 WAL 就一起複製 | 旁邊有 `-wal` 或 `-shm`（可能仍在使用中）就**拒絕**。只接受離線保存的單一檔案；不是線上備份工具，不取代 Store 的合作式鎖 |
+| 凍結時間 | 狀態列寫「Store 時間」；主持人頁寫「檢查時間（Store 時間）」，Store 列寫「未確認：尚未完成到期檢查」 | 改寫成「紀錄時間（凍結於最後事件，不是現在）」；Store 列寫「歷史模式：唯讀副本，不執行到期檢查」；真實 CLI 列寫「未執行」 |
+| 推導標示 | 工具呼叫列的來源只寫 `trace` | 有對應請購的列寫「trace；請購與事件對應為 Host 推導」 |
+| Ask 文字 | — | 期限列寫「當時的期限，早已過，不是倒數」；場景文字加「歷史快照：執行結束時待人工核准；期限早已過，不是即時等待」 |
+| 主持人頁標示 | 選 viewer 之前仍是「M1／fake agent／不付款」 | 讀到就緒狀態就換成固定標示 |
+| 無 trace 文字 | 一律寫「host 未指定 --history-trace」 | 依實際原因：未提供或不在你的查看範圍／trace 屬於另一個 task |
+| 啟動方式 | 手動命令（分號串接） | `scripts/demo/history.sh` |
+
+**範圍差異：Store 與其他非展示程式的變動**（請 Codex 核對；不聲稱 Store 完全沒動）：
+- `internal/store/snapshot.go`（新增，`7c1dae6`，本輪收窄）：
+  - **必要性**：一般的 `store.Open` 會取得鎖、建立 WAL，並對已過期的 Ask 寫入 `APPROVAL_EXPIRED`，不能用來展示歷史。
+  - **呼叫邊界**：`OpenSnapshot` 與 `LastObservedAt` 只在 `cmd/demo/history.go` 的 `serveHistory` 呼叫。只開私有暫存副本（`query_only`），回傳的 Store 沒有 writer、時鐘、registry 或 offers，不跑到期處理。
+  - **對原模式的影響**：無。Store 寫入、到期語意、schema、事件契約都沒改；`Store.Open` 及既有路徑沒有呼叫新函式。
+- `internal/toolbridge/shop.go`：
+  - 只把既有的 `po-<task>-<product>` 格式抽成 `PurchaseOrderID`。
+  - `Call` 產生的字串完全相同（diff 只有這一處替換）。
+- demo API：
+  - `history` 欄位只在歷史模式出現（`omitempty`；`historyFor` 在非歷史模式回傳 nil）；
+  - 唯讀控制路由只在歷史模式註冊；
+  - 既有模式的回應不變（既有 Go 測試全數通過）。
+- 沒有改 Policy、事件契約、Unity bridge、Gate、認證清單或付款邊界。
+
+**啟動**（只讀證據目錄中的兩個檔案；`APA_ADDR` 由 host 要求）：
+
+```sh
+APA_ADDR=127.0.0.1:8402 sh scripts/demo/history.sh artifacts/b1-04/live-purchase-20261008T091741Z
+```
+
+腳本依序做以下幾步，任何一步失敗都以 exit 2 停止，**不啟動** host：
+1. 確認 `db/apa-live.db` 是一般檔案且不是連結，旁邊沒有 `-wal`／`-shm`。
+2. 確認 `runs/` 恰好有一個 `.jsonl`。
+3. 在 `var/` 下以 `mktemp -d` 建立全新的 0700 目錄。
+4. 只複製這兩個檔案，並以 `cmp` 確認副本與原檔相同。
+5. 建置。
+6. 以 `exec` 啟動 host。
+
+其他行為：
+- 不覆寫既有副本，不刪除任何東西，不 chmod 原檔；中途停止留下的目錄留給操作者處理。
+- 不印 token。
+
+**驗證（Claude Code 執行）**：
+- **單元與整合測試**（`e500ded`）：`go vet ./...` 通過；`go test -race -count=1 ./...` 623 通過；`node --test` web 50 通過。新增的測試：
+  - `TestHistoryModeReadOnly`：三種寫入對 operator、host、viewer 都回 409，之後事件仍是三筆；B 的 viewer 與 operator 拿不到 trace，A 的 viewer 與 host 拿得到。
+  - `TestHistoryModeRefusals`：增加資料庫旁有 `-wal`、資料庫損壞兩項（共 10 項，都用拋棄式副本）。
+  - `TestOpenSnapshot`：旁邊有 `-wal` 或 `-shm` 時拒絕，且不改動該檔。
+  - adapter 測試：推導標示、期限文字、兩種無 trace 文字。
+- **反向驗證**：只有測試斷言失敗才算抓到，編譯失敗不算。
+  - Go：新增 6 個突變（共 280 個）。依檢查器規則，只在被改檔案的 package 內執行；本切片的 14 個歷史突變都被抓到。
+    - 開啟到 `-wal`／`-shm` 旁的檔案；
+    - trace 給所有人；
+    - viewer 回應不分權；
+    - 狀態回應不分權；
+    - 控制寫入被接受；
+    - 唯讀路由未註冊。
+  - web：檢查器只涵蓋 Go，所以在 repo 副本中逐一手動改 `adapter.js`，6 項都被 adapter 測試的斷言抓到。
+    - 歷史 Ask 狀態沒有使用；
+    - 推導標示消失；
+    - 工具呼叫的「回放尚未到此」消失；
+    - 期限文字恢復成一般模式；
+    - 顯示其他 task 的 trace；
+    - 查證標題沒有標示。
+  - 失敗紀錄：第一次手動 web 突變時，副本少了 `web/package.json` 與 `testdata/demo`，基準本身就失敗，結果無效。補齊後重做，先確認基準通過。其中一項突變我寫錯造成語法錯誤，更正後重做。
+  - 完整容器與全部突變沒有跑（本派工未授權），不沿用舊的完整容器結果。
+- **真實瀏覽器與 Unity**：`node scripts/verify/history-ui.mjs`。用本機 Google Chrome（headless，DevTools protocol，拋棄式 profile），載入 `unity/AgentPaymentAuthority/Build/WebGL/Build`（Unity 未修改、未重建）。
+  - **合成資料**（`e500ded`，`artifacts/b1-04/history-ui-e500ded20b36-20261008T104942Z-synthetic/`）：PASS。
+    - 先跑一次 fake run（task-a Ask、task-b Deny），存成獨立的證據目錄。
+    - 用它的拋棄式副本試腳本的 7 種拒絕，全部在提供服務前停止：沒有資料庫、旁邊有 `-wal`、兩個 trace、沒有 trace、trace 與資料庫不符、工具不在白名單、資料庫損壞。
+    - 之後完整走一遍畫面檢查。
+  - **真實證據副本**（`e500ded`，`artifacts/b1-04/history-ui-e500ded20b36-20261008T105025Z-evidence/`）：53 項 PASS。
+    - API：副本只有 task-a 的 #1～#3；`awaiting_approval`，Ask／pending／unavailable；`served_at=1791451074` 等於 `history.as_of`。
+    - 頁面（Unity 回報 task-a #3 waiting）：
+      - 頂端與場景上方有固定標示，模式為「歷史紀錄（非即時）」；
+      - 狀態列：「紀錄時間 2026-10-08T09:17:54Z，凍結於最後事件，不是現在」；
+      - 請購卡：「Ask：執行結束時待人工核准（歷史快照；不是仍有效的核准）」；
+      - 查證面板：三次工具呼叫，`request_purchase` → `po-task-a-kr-market`（Store 事件 #2、#3，標為 Host 推導），另有 `intent_hash` 與 `HUMAN_APPROVAL_REQUIRED`；
+      - Timeline 是 1,2,3；Inspector 是同一筆請購；
+      - 沒有倒數、到期、付款字樣。
+    - 回放：
+      - 每一步在頁面內，於 Unity 回報該步的當下讀取：#1 entered、#2 quoted、#3 waiting，頁面與 Unity 同步；
+      - #1、#2 的卡片沒有 Ask；#2 有「完整紀錄，非回放當步」，未到的事件標「回放尚未到此」；
+      - 中途停止與第二次回放後，仍是三筆事件。
+    - 重開頁面：需重新輸入 token，之後同樣是 task-a #3 與標示。
+    - 主持人頁：Store 列與紀錄時間列為歷史文字，沒有開始、停止、取消按鈕，有標示。
+    - 結束後：副本逐位元組不變且旁邊沒有其他檔案；證據的兩個檔案、`db/` 與 `runs/` 的檔名、大小、時間都不變。
+    - URL、cookie、storage、console 與保存的檔案都沒有 token。
+  - 截圖（全頁，無 token）：
+    - `end-history.png`：task-a，Unity #3 waiting，Timeline 1,2,3；
+    - `mid-replay-2.png`：回放 #2，頁面與 Unity 都在 #2 quoted；
+    - `host-history.png`：主持人頁，task-a #3。
+  - 失敗紀錄：
+    - 第一次合成資料執行時，主持人頁在選 viewer 前沒有標示。這是產品缺陷，已修正。
+    - 第二次的回放 #3 讀取漏掉時機。這是測試從外部輪詢太慢（每步約 0.4 秒），改為頁面內記錄。
+    - 我目視檢查時發現第一張「中途截圖」其實是第 3 步。原檢查在截圖完成前就讀取，所以誤判通過；改為截圖前後都讀，並在測試中暫停回放的步間計時器。
+    - 第四次的 `served_at` 檢查失敗，原因是測試假設錯誤：凍結時間是整份紀錄的最後事件，合成資料的 task-b 晚一秒。
+    - 以上都在定位原因後才修正重跑，沒有盲目重跑。
+- **原始證據雜湊**（本輪記錄，供日後比對）：
+  - `db/apa-live.db`：`3446b98c0dcf82f3a93694394556c353f98d362deadc6207c87b9a0afbae4ce3`
+  - `runs/task-a-1791451068937446000.jsonl`：`2433618a263096170d83a425ee18dee5f680f34fc05b0939fb7fe04aec4a5785`
+  - 第 54 節那次核對只記錄了「`shasum -c` OK」，沒有留下數值，所以無法和更早的值比對。本輪啟動、回放、重開與關閉前後的值都相同。
+
+**限制與待確認**：
+- **Unity 畫布文字**（`ShopView.cs:114-117`）：標題「M1 / fake agent / no payment」與客人標籤「(sim agent)」寫死，歷史模式下仍顯示。最小修正有兩種：
+  - (a) 把 Unity 標題改成不提 agent 來源的中性文字，並重建 WebGL，不改投影；
+  - (b) 在投影加歷史旗標，讓 Unity 依旗標顯示。這屬於 bridge／契約變更。
+  - 兩者都待確認；本輪沒改，所以 Unity 畫面本身**沒有**通過「不冒充 fake／即時」這一點。目前只靠頁面上的標示與說明。
+- 頁面與主持人頁的文字變更由瀏覽器檢查涵蓋。`host.js` 的就緒文字沒有 Node 單元測試（既有測試只涵蓋 adapter 與 hostcreds）。
+- 只支援單一已離線保存的紀錄；不是線上資料庫備份。
+- 技術驗證不取代 Aaron 的主觀展示驗收。
+
+B1-04／B1-06 仍 InProgress，不標 Done，等待 Codex review。這個出口只完成真實請購紀錄的展示，未完成即時 Agent 與場景連動、付款、ZK、多 Agent 或商業版整體驗收。
