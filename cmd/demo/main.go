@@ -172,7 +172,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	case live && !cfg.LiveCLI:
 		return errors.New("--live-cli also needs APA_LIVE_CLI=true; nothing was started")
 	case !live && cfg.LiveCLI:
-		return errors.New("APA_LIVE_CLI=true needs --live-cli: the demo host runs the real CLI in live mode only (docs/cli-poc.md 55); unset it or set it to false")
+		return errors.New("APA_LIVE_CLI=true is not available to the demo server without --live-cli: it runs the real CLI in live mode only (docs/cli-poc.md 55); unset it or set it to false")
 	case live && d.getenv("APA_DB_PATH") == "":
 		return errors.New("live mode needs APA_DB_PATH naming its own new demo database (never the fake demo's); nothing was started")
 	}
