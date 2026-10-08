@@ -161,7 +161,7 @@ function renderReadiness() {
   const v = creds.view();
   const scene = unitySceneText();
   if (!v.hasHost) {
-    rows.push(["就緒狀態", "unconfirmed", v.mode === "manual" ? "需要配對或 token 檔（手動 viewer 模式不讀就緒狀態）" : "未確認：請先配對或載入 token 檔"]);
+    rows.push(["就緒狀態", "unconfirmed", v.mode === "manual" ? "需要 token 檔或配對（手動 viewer 模式不讀就緒狀態）" : "未確認：請先配對或載入 token 檔"]);
   } else if (!lastReady) {
     rows.push(["就緒狀態", "unconfirmed", "未確認：讀取中"]);
   } else if (lastReady.error) {
