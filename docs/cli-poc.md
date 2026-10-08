@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 真實 plugin ID 查詢（Claude Code 執行，待 Codex 核對）**：依 Aaron 核准，在 macOS 以 §46 已審查的包裝執行一次。結果 **`no_match`**（exit 3）：`plugin list` 在該環境列出 1 筆，名稱不是兩個候選。依規則停止，不重試、不擴大查詢（第 46.10 節）。這不代表 plugin 不存在；完整 ID 仍未取得。
+>
 > **10/8 `5bab248` 通過限定範圍技術複核，一般例外下的程序收尾問題關閉**（第 46.9 節；修訂紀錄 46.8，第二輪 46.7，第一輪 46.6）。Linux 目錄清理差異、最後 `rmdir` 的時窗、脫離 process group 的程序仍是未解限制。真實查詢須 Aaron 另行指定執行者並核准一次嘗試；本次 review 不算執行核准。真實查詢尚未核准、未執行；Gate、認證清單及產品行為不變。
 >
 > **10/8 方案 A 後的診斷型 C0′（Claude Code 執行，待 Codex review）**：取得 init（exit `0`，`observed`）。**plugins 仍非空**：同樣 2 個（`cc-plugin-agents-md`、`cc-plugin-plugin-authoring`，path `relative`）。§44.4 的其他條件都符合：agents／skills 為 0，MCP 1 個且 apa connected，tools 3／3／0，`dontAsk`，`approved`。依 44.5：**方案 A 本次未達目標**，保存證據後停止；不推論來源、不自動換方案（第 45 節）。正式請購阻擋仍在。
@@ -2539,3 +2541,54 @@ L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
   - 脫離本次 process group 的程序。
 - **下一步**：真實查詢須 Aaron 另行指定執行者（46.3 的甲或乙），並核准一次嘗試；本次 review 不算執行核准。
 - 本輪只同步文件：沒有重跑這項修正的測試，沒有改程式。L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
+
+### 46.10 執行紀錄：一次真實 plugin ID 查詢（2026-10-08；Claude Code 執行，待 Codex 核對）
+
+> **結果：`no_match`（exit 3）。** CLI 正常結束，列出 1 筆，名稱不是 `cc-plugin-agents-md` 或 `cc-plugin-plugin-authoring`。依規則停止：不重試、不改成列出全部 id、不擴大候選。完整 plugin id 仍未取得。
+
+- **核准**：Aaron 10/8 核准 Claude Code 在 macOS 依 §46 的已審查包裝執行一次真實查詢。核准範圍：
+  - 允許該次 CLI 使用既有 HOME、登入與網路環境；理解可能有背景活動或日常狀態寫入；
+  - 只保存白名單過濾結果，不保存原始輸出；
+  - 失敗、逾時或零筆符合都停止，不重試、不擴大；
+  - 不修改設定、Gate、認證清單，不執行 C0′。
+- **開工核對**：分支 `b1-04-live`，HEAD `9f90e52`；工作區只有 `?? demo`。`scripts/` 自 `5bab248`（已通過複核）之後沒有變動。
+- **命令**（在 repo 根目錄執行一次；在 Claude Code 沙箱外執行，依核准使用既有環境）：
+
+  ```bash
+  bash scripts/b1-04/plugin-id-query.sh /Users/mac/.local/bin/claude
+  ```
+
+  包裝的退出碼：3。
+- **證據**（`artifacts/b1-04/plugin-id-query-20261008T043401Z/`，`artifacts/` 不進版控；只有白名單結果，沒有原始輸出）：
+  - `result.txt`（全文）：
+
+    ```text
+    query=plugin_list v3
+    matched=0 entries=1
+    result=no_match
+    cli=exit_0
+    cli_proc=reaped
+    dir_cleanup=ok
+    signals=0
+    stop_errors=0
+    ```
+
+  - `exit-code.txt`：`exit=3`。
+  - 暫存目錄（`apa-plist.*`）已刪除；repo 工作區仍只有 `?? demo`。
+
+**解讀**（照 46.2、46.4，不額外推論）：
+- `no_match` **不等於 plugin 不存在**。
+  - 查詢在 APA 子程序相同的環境組裝下執行（含方案 A 的空 plugin 根目錄），但沒有 `--restricted`，設定視角與 APA runtime 不同。
+  - `id` 的名稱部分是 marketplace entry name，init 回報的可能是 manifest name，兩者可以不同。
+- 列出的 1 筆不是候選，依規則**沒有輸出**它的 id、scope 或其他內容，本紀錄也不推測它是什麼。
+- CLI 有啟動（`cli=exit_0`），所以不能聲稱沒有執行或沒有背景活動；`cli_proc=reaped`、`stop_errors=0`、`dir_cleanup=ok`。
+- 42.4 第 1 項（取得完整 id，再評估 `--settings` 方案）在這次查詢**沒有得到結果**。
+
+**沒有做的事**：沒有重試、沒有改成列出全部 id、沒有擴大候選；沒有修改設定、Gate、認證接受清單、啟動參數或產品程式；沒有執行 C0′、版本查詢或登入檢查。
+
+**待決定**（都須 Aaron 決定；不自動進行）：
+1. Codex 核對本次紀錄。
+2. 取得完整 id 的其他方式（例如由 Aaron 在自己的環境查看，或另行核准一次範圍不同的查詢，如列出全部 id 或改變環境），須另行設計與核准。
+3. 或改評估 42.4 的第 2、3 項：調整受管設定，或以 `--safe-mode` 只驗 MCP。
+
+L1-b、L1-c 不標整體通過；B1-04 仍 InProgress；不合併、不推送、不標 Done。

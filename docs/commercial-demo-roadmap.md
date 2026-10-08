@@ -508,6 +508,8 @@
 > **進度（10/8，方案 A 後診斷）**：依 Aaron 核准執行一次診斷型 C0′，取得 init，**plugins 仍為 2 個**；agents、skills 為 0，APA MCP 與工具清單符合。方案 A 本次未達目標，正式請購阻擋仍在；不推論來源、不自動換方案（`docs/cli-poc.md` 第 45 節，待 Codex review）。下一步須 Aaron 在「提供完整 id／調整受管設定／以 `--safe-mode` 只驗 MCP」中擇一。
 >
 > **進度（10/8，plugin ID 查詢工具）**：plugin 查詢工具第二輪 R1～R3（目錄身分、中斷期間的程序清理、包裝退出碼）已修訂（`1acbf01`；`scripts/b1-04/plugin_id_query.py`、`plugin-id-query.sh`），定向 fake 驗證完成。之後補齊一般例外下的程序收尾（`5bab248`），macOS 定向 fake 驗證完成。**`5bab248` 通過限定範圍技術複核，一般例外下的程序收尾問題關閉**（`docs/cli-poc.md` 第 46.9 節）。Linux 目錄清理差異、最後 `rmdir` 的時窗、脫離 process group 的程序仍是限制。真實查詢須 Aaron 另行指定執行者並核准一次嘗試。真實查詢尚未核准、未執行；Gate、認證清單及產品行為不變。
+>
+> **進度（10/8，真實 plugin ID 查詢）**：依 Aaron 核准在 macOS 執行一次，結果 `no_match`（列出 1 筆，非兩個候選）。依規則停止，完整 id 仍未取得；`no_match` 不代表 plugin 不存在（`docs/cli-poc.md` 第 46.10 節，待 Codex 核對）。下一步須 Aaron 決定。
 
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。
