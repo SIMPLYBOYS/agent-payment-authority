@@ -3240,3 +3240,70 @@ L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress，不標 Done，�
   - 原始證據（`artifacts/b1-04/live-purchase-20261008T091741Z/`）保持唯讀，展示使用副本；
   - 明標「真實執行紀錄的歷史回放」。資料庫中的 `pending` 是執行結束時的快照，當時的 Ask 期限已過，不能呈現成仍有效的即時核准倒數。
 - B1-04／B1-06 暫時維持 InProgress。
+
+## 54 `7c1dae6` 真實執行紀錄的歷史回放（2026-10-08；Claude Code 實作，待 Codex review）
+
+> **結果**：第 53 節那筆真實請購可以在 Dashboard 與商店場景中，以「**真實執行紀錄・歷史回放・未付款・開發展示例外**」重播。回放使用證據的**副本**，Ask 只顯示當時的裁決，不顯示仍有效的倒數。
+>
+> 沒有執行真實 CLI，沒有修改 Gate、認證清單或上限，也沒有付款。
+
+- **核准**：Aaron 10/8「我核准你進行相關實作！」。範圍是第 53.1 節的下一步建議，並依 Codex 的切片要求：
+  - 原始證據保持唯讀，展示用副本；
+  - Dashboard、Unity、查證面板、時間軸對應同一筆請購與事件序號；
+  - 明標「真實執行紀錄・歷史回放・未付款・開發展示例外」；
+  - Ask 只顯示當時的裁決，不呈現即時倒數；
+  - 畫面上查得到工具呼叫、請購、Policy 裁決與 Store 事件的對應；
+  - 不擴大到多 Agent、付款或 ZK。
+- **開工基準**：HEAD `96ae2e7`。
+
+**用法**（先把證據複製到私有目錄，不要指向 `artifacts/` 原檔）：
+
+```sh
+W=$(mktemp -d var/history-XXXXXX); mkdir -m 700 "$W/db" "$W/tok"
+EV=artifacts/b1-04/live-purchase-20261008T091741Z
+cp "$EV/db/apa-live.db" "$W/db/"; cp "$EV"/runs/task-a-*.jsonl "$W/trace.jsonl"
+APA_DEMO_TOKEN_FILE="$W/tok/tokens.json" go run ./cmd/demo --history-db "$W/db/apa-live.db" --history-trace "$W/trace.jsonl"
+```
+
+**行為**：
+- **Store**：`store.OpenSnapshot` 先把資料庫（與 WAL，如有）複製到新的 0700 暫存目錄。複製前後比對指紋，複製期間有變動就拒絕。副本以 `query_only` 開啟，並照一般 Store 驗證 hash chain、投影與 snapshot。
+  - 傳入的檔案不會被鎖定，不會產生 WAL／shm，也不會被寫入到期事件。
+  - 結束時刪除副本。
+  - 只接受一般檔案，不接受 symlink；schema 必須是 2。
+- **時間**：Host 時鐘固定在最後一筆事件的 `observed_at`。`served_at` 等於該時間，所以「已達期限」的判斷永遠不會觸發。到期 worker、CLI、控制 API 都不啟動。
+- **Trace**：
+  - 讀取上限 1 MiB；`run_start`、`init`、`run_end` 必須各恰好一筆。
+  - 欄位只收 `[A-Za-z0-9_-]{0,64}`；工具名稱必須在 `toolbridge.Tools` 內；`gate_mode` 只能是 `strict` 或 `dev_demo_plugins`。
+  - trace 的 task 必須在資料庫中。
+  - `request_purchase` 依 `toolbridge.PurchaseOrderID` 對應到請購，以及該請購的 Store 事件序號。
+  - 不讀、不回傳模型文字。
+- **API**：`/api/viewer` 與 `/api/host/status` 多一個 `history`：
+  - `record=live_history`、固定標示、`as_of`；
+  - `trace`：gate 模式、init gate、各次工具呼叫及其請購與事件序號。
+- **頁面**：
+  - 頂部徽章換成固定標示；能力列改為「真實 Agent 執行紀錄（開發展示例外，非即時）」；商店場景上方有說明：「待核准」是執行結束時的快照，期限早已過。
+  - 請購卡：「選商品」「報價」兩步改指向查證面板的工具呼叫；Ask 寫成「執行結束時待人工核准（歷史快照；不是仍有效的核准）」。
+  - 查證面板：標題列加上標示；新增「工具呼叫（真實執行 trace）」區段；回放中，未到達的事件標「回放尚未到此」。
+- **互斥**：`--history-db` 不能和 `--fake-cli`、`--plan`、`--scenarios`、`--upgrade-db` 一起使用；`--history-trace` 必須搭配 `--history-db`。
+
+**驗證**（Claude Code 執行）：
+- `go vet ./...` 通過；`go test -race -count=1 ./...` 622 通過；`node --test` web 50 通過。
+- 新增測試：
+  - `TestOpenSnapshot`：時鐘晚 10 天仍讀到原樣；開啟中與關閉後，原檔旁都只有原檔；雜湊不變；副本已刪除。
+  - `TestHistoryMode`：事件仍只有 #1～#3，沒有 `APPROVAL_EXPIRED`；`served_at` 是最後事件；trace 對應 `po-task-a-kr-market` → #2、#3；原檔雜湊不變。
+  - `TestHistoryModeRefusals`：8 種拒絕情況，包括未知工具、未知 gate 模式、資料庫沒有的 task。
+  - adapter 歷史模式測試。
+- 突變：新增 8 個（共 274）。依檢查器規則，只在被改檔案的 package 內執行，8 個都被測試抓到。**本輪沒有跑完整斷網容器驗證**（未經核准）。
+- 以真實證據的副本做端到端核對（`var/` 下的私有目錄，loopback）：
+  - task `awaiting_approval`，`served_at=1791451074`；
+  - 事件 1 `TASK_STARTED`、2 `PURCHASE_PROPOSED`、3 `POLICY_DECIDED`；
+  - `history.trace`：`dev_demo_plugins`／`passed`，`list_products` → `get_quote`（kr-market）→ `request_purchase`（Ask → `po-task-a-kr-market`，#2、#3）；
+  - 頁面含歷史說明；
+  - 前後 `shasum -c` 原始資料庫與 trace 都 OK，原證據目錄沒有新增檔案。
+
+**限制**：
+- 沒有用瀏覽器或 Unity 實際看過畫面；畫面行為只由 adapter 單元測試涵蓋。
+- Unity 收到的投影沒有改變（task、序號、phase），所以商店場景本身不顯示標示；標示在頁面徽章、場景上方說明、請購卡與查證面板。
+- 只支援單一資料庫、單一 trace；trace 的 task 以外的 task 不顯示工具呼叫。
+
+B1-04／B1-06 仍 InProgress，不標 Done，等待 Codex review。

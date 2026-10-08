@@ -521,6 +521,8 @@
 >
 > **進度（10/8，第一筆真實請購 trace）**：第二次嘗試成功，**Codex 核對通過並獨立唯讀查詢資料庫**（`docs/cli-poc.md` 第 53、53.1 節）。真實 Claude Code CLI 經 Go wrapper 與 APA MCP 依序呼叫 `list_products`、`get_quote`、`request_purchase`；Policy 裁決 **Ask**（`HUMAN_APPROVAL_REQUIRED`）；Store 有同一 task 的請購與 `TASK_STARTED`、`PURCHASE_PROPOSED`、`POLICY_DECIDED`。這是開發展示例外下的結果，不付款。**真實 trace 已取得，但尚未接上 Dashboard／Unity**。下一個出口是以「真實執行紀錄的歷史回放」接上：原始證據唯讀、使用副本、不把 `pending` 呈現成即時倒數；須另外派工。B1-04 仍 InProgress。
 
+> **進度（10/8，歷史回放）**：Aaron 核准實作；`7c1dae6` 完成「真實執行紀錄的歷史回放」（`docs/cli-poc.md` 第 54 節；Claude Code 實作，待 Codex review）。`demo --history-db <副本> --history-trace <trace>` 只讀副本，時鐘固定在最後事件，不跑 CLI 或到期；Dashboard 明標「真實執行紀錄・歷史回放・未付款・開發展示例外」，Ask 只顯示執行結束時的快照；查證面板列出工具呼叫並對應到請購與 Store 事件 #2、#3。以真實證據副本做端到端核對，原檔雜湊不變。尚未以瀏覽器或 Unity 實看，也未跑完整容器驗證。B1-04 仍 InProgress。
+
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。
 - 它是 M1 收尾的唯一外部前提（B1-04 → B1-06 live trace → B1-07）。
