@@ -44,6 +44,12 @@ func TestLiveEnv(t *testing.T) {
 		t.Errorf("the config directory is gone: %v", err)
 	}
 
+	// A relative HOME is refused even when <HOME>/.apa-claude exists from
+	// the working directory: only the absolute-path check can refuse it.
+	t.Chdir(t.TempDir())
+	if err := os.MkdirAll(filepath.Join("home", ConfigDirName), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	for name, h := range map[string]string{"no HOME": "", "relative HOME": "home"} {
 		if _, err := LiveEnv(func(k string) string { return map[string]string{"HOME": h}[k] }); err == nil {
 			t.Errorf("%s: accepted", name)
