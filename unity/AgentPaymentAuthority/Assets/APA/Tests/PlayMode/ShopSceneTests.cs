@@ -52,6 +52,24 @@ public class ShopSceneTests
         Assert.That(bridge.reports, Has.Some.StartsWith("ready:"));
     }
 
+    // The scene's own text says nothing of where the agent's actions come
+    // from: the same build shows the fake demo and the history replay of a
+    // recorded real run (docs/cli-poc.md 54.2); the page says which.
+    [Test]
+    public void SceneTextIsNeutralAboutTheAgent()
+    {
+        var texts = Object.FindObjectsByType<TextMesh>(FindObjectsSortMode.None).Select(t => t.text).ToList();
+        Assert.That(texts, Has.Some.StartsWith("M1 / no payment"));
+        Assert.That(texts, Has.Some.EqualTo("Customer A"));
+        Assert.That(texts, Has.Some.EqualTo("Customer B"));
+        foreach (var t in texts)
+        {
+            StringAssert.DoesNotContain("fake", t.ToLowerInvariant());
+            StringAssert.DoesNotContain("sim agent", t.ToLowerInvariant());
+            StringAssert.DoesNotContain("real", t.ToLowerInvariant());
+        }
+    }
+
     [UnityTest]
     public IEnumerator AskWalksToTheCounterOnceAndDenyLeaves()
     {
