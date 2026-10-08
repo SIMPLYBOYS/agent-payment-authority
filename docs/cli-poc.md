@@ -1,5 +1,11 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **現行摘要（10/8，最新）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估。** 評估見 [live-purchase-execution-decision.md](live-purchase-execution-decision.md)（待 Codex review 與 Aaron 決策；未核准實作或真實執行）。
+> - 推薦路線一：維持零 plugins，改用 APA 專用 `CLAUDE_CONFIG_DIR`，須 Aaron 另外登入。備案路線二：目前尚不可採用。
+> - 第一筆真實請購目前被兩個條件擋住：plugins 非空，以及認證接受清單為空。
+> - plugin ID 查詢已執行一次，結果 `no_match`（46.10、46.11）；之後的擴大查詢與診斷工具工作暫停，不撤回已驗收的修正。
+> - 以下各條 10/8 狀態依時間由新到舊，是當時的紀錄。
+>
 > **10/8 真實 plugin ID 查詢（Claude Code 執行，待 Codex 核對）**：依 Aaron 核准，在 macOS 以 §46 已審查的包裝執行一次。結果 **`no_match`**（exit 3）：`plugin list` 在該環境列出 1 筆，名稱不是兩個候選。依規則停止，不重試、不擴大查詢（第 46.10 節）。這不代表 plugin 不存在；完整 ID 仍未取得。**Codex 核對通過**（46.11），但沒有解除正式請購的阻擋。
 >
 > **10/8 `5bab248` 通過限定範圍技術複核，一般例外下的程序收尾問題關閉**（第 46.9 節；修訂紀錄 46.8，第二輪 46.7，第一輪 46.6）。Linux 目錄清理差異、最後 `rmdir` 的時窗、脫離 process group 的程序仍是未解限制。真實查詢須 Aaron 另行指定執行者並核准一次嘗試；本次 review 不算執行核准。真實查詢尚未核准、未執行；Gate、認證清單及產品行為不變。
