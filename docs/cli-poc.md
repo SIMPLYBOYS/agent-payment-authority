@@ -6,7 +6,7 @@
 > - 核准的那一次完整斷網容器（`5d43a75`）**失敗**（verify-b1-01 的訊息文字、5 個突變的替換文字），已修正。
 > - Codex review 的 R1（trace 查詢拖住即時畫面、失敗時殘留「執行中」）已修正於 `29d1cd3`／`d5bc444`（第 55.8 節）。
 > - **`d5bc444` 完整斷網容器通過**（基準線 PASS、300／300 突變、17／17 隔離自檢；第 55.9 節），**於 `d5bc444` 通過限定範圍技術 review，R1 關閉**（第 55.10 節）。只證明實作與 fake 驗證，尚未證明真實即時展示成功。
-> - **目前下一步**：一次真實即時展示嘗試的核准（第 55.7 節）；不再做 plugin 調查或 C0′。
+> - **10/8 第一次真實即時展示**：Aaron 本人操作，判定「目前執行過程順利，我認為現階段是達到既定標準」。紀錄：真實 CLI 三次工具呼叫，Policy 裁決 Ask，Store 有 4 個事件（含到期）；證據 `artifacts/b1-04/live-demo-20261008T164351Z/`（第 55.11 節）；待 Codex 核對。
 > - 本輪沒有執行真實 CLI；真實執行需在 review 後另行核准（55.7）。
 > - B1-04／B1-06 維持 InProgress。
 >
@@ -3844,3 +3844,41 @@ B1-04／B1-06 維持 InProgress。這個出口只完成單一真實 Agent 即時
 - **範圍**：這次通過只證明實作與 fake 驗證，**尚未證明真實即時展示成功**。
 - **下一步**：可以進入一次真實即時展示嘗試的核准（確認清單見第 55.7 節，程式基準 `d5bc444`）。不需要再做 plugin 調查或 C0′。
 - B1-04／B1-06 維持 InProgress。
+
+### 55.11 第一次真實即時展示（2026-10-08 16:41Z；Aaron 本人操作與判定，Claude Code 唯讀核對紀錄，待 Codex 核對）
+
+> **結果**：Aaron 依第 55.7 節的確認清單與我提供的啟動步驟，親自啟動 live 模式，在 `/host` 按下「開始（真實 CLI）」，執行了一次真實 Agent 即時展示。
+>
+> Aaron 的判定（原話）：「目前執行過程順利，我認為現階段是達到既定標準」。
+>
+> 紀錄顯示：真實 Claude Code CLI 經 demo host 的 live 模式完成查詢、報價、請購，Policy 判定 **Ask**，Store 保存同一 task 的請購與事件；之後依既有規則記錄到期。沒有付款。
+
+- **證據歸屬**：
+  - **Aaron 本人**：啟動 host、載入 token、按下開始、觀察畫面與判定、停止 host。
+  - **Claude Code**：事後把場次目錄的 `db/` 與 `runs/` 複製到證據目錄（沒有複製 `tok/`），以 `shasum -c` 確認副本與來源相同；然後只對**副本**做唯讀核對（SQLite `immutable=1`；trace 只讀白名單欄位）。沒有讀取 token，沒有再次執行任何東西。
+  - 待 Codex 核對。
+- **程式基準**：場次的 `demo` 執行檔版本資訊為 `vcs.revision=82bd805`。`82bd805` 與 `d5bc444` 之間只有 `docs/` 差異。版本資訊另記 `vcs.modified=true`：核對時 tracked 檔案沒有修改，工作區唯一的差異是未追蹤的 `demo`（Go 的版本資訊會把未追蹤檔案也算成修改）。
+- **證據**：`artifacts/b1-04/live-demo-20261008T164351Z/`。
+  - `db/live.db`、`runs/show-a-01-1791477662875926000.jsonl`；
+  - `source-sha256.txt`：場次目錄 `var/live-NMSipK/` 的來源雜湊，副本核對 OK；
+  - 場次目錄本身保留未動，`tok/` 不在證據中。
+- **紀錄核對**（副本，唯讀）：
+  - **資料庫**：schema 2，`integrity_check` ok。
+  - **host_runs**：一場（`live-a`），2026-10-08T16:41:02Z 受理，16:41:14Z 結束；`ended`／`ok`，`task_started=1`。
+  - **trace**（只有這一份，CLI 只執行了一次）：
+    - `run_start.gate_mode=dev_demo_plugins`；`init.gate=passed`、`task_started=true`、`model=claude-sonnet-5-5`；
+    - `tool_call` 依序為 `list_products`（ok）→ `get_quote`（`kr-market`，ok）→ `request_purchase`（`kr-market`，**Ask**）；
+    - `run_end`：`outcome=ok`、`exit_code=0`、`messages=11`、`assistant_messages=5`、`num_turns=4`、`tool_attempts=3`、`not_ready_refusals=0`；
+    - `usage`（CLI 自報，不是計費證明）：`input_tokens=8`、`output_tokens=424`、`cache_creation_input_tokens=3113`、`cache_read_input_tokens=8097`；
+    - 模型文字只記 `result_chars=569`，原文不保存。
+  - **Store**：
+    - task `show-a-01`／`consumer-a`；
+    - 請購 `po-show-a-01-kr-market`，Ask／`HUMAN_APPROVAL_REQUIRED`；
+    - 事件：1 `TASK_STARTED`（16:41:04Z）、2 `PURCHASE_PROPOSED`、3 `POLICY_DECIDED`（16:41:11Z）、4 `APPROVAL_EXPIRED`（16:41:41Z，裁決後 30 秒，host 的到期 worker 依既有規則記錄）。
+    - 到期後 task 狀態為 `running`，符合既有語意。
+  - 上限沒有觸發；付款 none。
+- **限制**：
+  - 這是開發展示例外下的單次結果，不代表 plugins 的內容或行為已確認，也不代表嚴格模式可以通過。
+  - 畫面上的呈現由 Aaron 目視判定，Claude Code 沒有保存這次的截圖。
+  - 不代表多 Agent、付款、ZK、M1 或商業展示版完成。
+- B1-04／B1-06 維持 InProgress，待 Codex 核對。

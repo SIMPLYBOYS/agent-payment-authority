@@ -545,6 +545,8 @@
 
 > **進度（10/9，即時展示驗收）**：**單一真實 Agent 即時展示於 `d5bc444` 通過限定範圍技術 review，R1 關閉**（`docs/cli-poc.md` 第 55.10 節）。Codex 核對了容器七步、300 個突變的失敗紀錄、17 項隔離自檢與 manifest 328 個列項雜湊，沒有重跑；瀏覽器結果依前輪紀錄核對，不算容器內的驗證。只證明實作與 fake 驗證，尚未證明真實即時展示成功。**下一步**：一次真實即時展示嘗試的核准（第 55.7 節）；不再做 plugin 調查或 C0′。B1-04／B1-06 維持 InProgress。
 
+> **進度（10/8 16:41Z，第一次真實即時展示）**：Aaron 本人以 live 模式執行一次（程式 `82bd805`，與 `d5bc444` 只差文件），判定「目前執行過程順利，我認為現階段是達到既定標準」。紀錄（Claude Code 唯讀核對副本）：一場、一份 trace；`dev_demo_plugins`／Gate passed；`list_products` → `get_quote` → `request_purchase`（Ask）；Store 為 show-a-01 的請購 Ask 與 `TASK_STARTED`、`PURCHASE_PROPOSED`、`POLICY_DECIDED`、`APPROVAL_EXPIRED`；usage 為 CLI 自報；不付款（`docs/cli-poc.md` 第 55.11 節）。待 Codex 核對。B1-04／B1-06 維持 InProgress。
+
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。
 - 它是 M1 收尾的唯一外部前提（B1-04 → B1-06 live trace → B1-07）。
