@@ -3,6 +3,7 @@
 > **10/9 展示啟動與主持人操作簡化（第 56 節；Claude Code 實作，fake 驗證，待 Codex review）**：
 > - `make present-live` 一個入口；在頁面輸入終端機上的一次性配對碼（暫定方案）；按「開始」才執行模型。
 > - 程式 `4edc830`／`7a10cad`，測試 `086e06a`；`7a10cad` 完整斷網容器通過（310／310、17／17）。
+> - Codex review 的 R1（ready 輸出覆寫）、R2（模式未確認時顯示 fake）已修正於 `c1768d6`／`34f3972`（第 56.8 節），待 Codex 限定複核。
 > - 本輪未執行真實 CLI。
 >
 > **10/8 單一真實 Agent 即時展示：demo host 的 live 模式已實作，fake／合成資料驗證完成，待 Codex review（第 55 節）**：
@@ -4057,3 +4058,60 @@ B1-04／B1-06 維持 InProgress。這個出口只完成單一真實 Agent 即時
 6. 證據：結束後把場次目錄 `var/present-XXXXXX/` 的 `db/`、`runs/`、`build.txt` 複製到 `artifacts/b1-04/`；`tok/` 不保存，配對碼也不記錄。
 
 B1-04／B1-06 維持 InProgress，待 Codex review。這個切片只改善現有展示的操作；不代表商業展示版、M1、多 Agent、付款、鏈上證據或 ZK 完成。
+
+### 56.8 Codex review 的 R1、R2 修正（2026-10-09；Claude Code 執行，待 Codex 限定複核）
+
+> 這是修訂紀錄。第 56.1～56.7 節的原始交付、失敗嘗試與舊證據保留。依派工筆記「R1 與 R2 修正派工」只修兩個局部缺口，不重開配對架構、角色分離、Gate、Policy、Store、Unity bridge，也不重開已驗收的真實 Agent 主線。
+
+- **開工核對**：分支 `b1-04-live`，HEAD `8afd2d8`（與筆記一致；`7a10cad` 之後只有文件），工作區只有未追蹤的 `demo`。
+- **提交**：修正 `c1768d6`、測試 `34f3972`、文件為本節所在提交。
+
+**兩項修改對照**
+
+| 項目 | 修正前（`7a10cad`） | 修正後（`c1768d6`） |
+|---|---|---|
+| R1 ready 輸出 | `writeReady` 先寫入固定的 `path.tmp`，再 `Rename` 到 `path`：既有檔案會被取代；`.tmp` 若是 symlink，會沿連結寫入旁觀者的檔案 | 先寫入以 `os.CreateTemp` 新建的隨機暫存檔（獨佔建立），寫完整後以 `os.Link` 發布到 `path`。只要 `path` 已存在（檔案、目錄或 symlink，不跟隨），發布就失敗；衝突時回錯並停止啟動，不刪除、不改名、不覆寫任何東西；只刪除本次自己建立的暫存檔。啟動器仍然只會讀到完整的 JSON |
+| R2 未確認的模式 | HTML 一開始就寫死「M1／fake agent／不付款」與「真實 Agent 未啟用」，`/api/mode` 失敗就靜默忽略：live 服務在 503 或斷線時顯示成 fake | 頁首起始為「模式未確認（讀取中）」。`/api/mode`、`/api/viewer`、`/api/host/status` 各自在請求開始時取得序號，只有「開始得更晚」的成功回覆才會改變標示。尚未確認時讀取失敗，會顯示「模式未確認：讀取失敗（重試中）」，每 3 秒重試（每次上限 5 秒）。模式確認之後，晚到、較舊或失敗的回覆都不會改變標示。查詢不會開始任何場次 |
+
+**驗證**（Claude Code 執行；fake CLI、合成檔案、測試 HOME、全新測試資料庫；證據在 `artifacts/b1-04/present-r1r2-34f397247af2-20261008T183925Z/`）
+- **R1 定向測試**：`go test -race -count=1 -v ./cmd/demo/ -run 'TestWriteReadyNeverReplaces|TestPairing…'`，exit 0（`go-targeted.log`）。`TestWriteReadyNeverReplaces` 涵蓋：
+  - 目的路徑已有檔案：拒絕，內容與權限不變；
+  - 固定 `.tmp` 是指向旁觀者的 symlink：旁觀者與連結都不變；
+  - 目的路徑本身是 symlink：拒絕，連結與其目標都不變；
+  - 全新路徑：產生完整的 `{addr, pid}`，目錄中沒有殘留。
+- 既有的配對四項測試同次通過。`cmd/demo` 全套 race ok；`TestDashboardRoutes` 改為檢查伺服器送出的頁面寫「模式未確認」、不寫 fake。
+- **R2 瀏覽器**（`present-ui.mjs`，以 CDP Fetch 攔截 `/api/mode`）：
+  - 回覆被扣住時，頁首只寫「模式未確認（讀取中）」，沒有「M1／fake agent」或「真實 Agent 未啟用」，live 說明不顯示；
+  - 503 與斷線各自顯示看得到的「模式未確認：讀取失敗（重試中）」；
+  - 之後取得有效回覆，恢復 live 標示與開發展示例外說明；
+  - 模式確認後才到的較舊「fake」回覆、較舊的失敗，都不改變標示；
+  - 全程沒有開始任何場次。
+  - `34f3972` 上 present-ui 51 PASS（`artifacts/b1-04/present-ui-34f397247af2-20261008T184421Z/`，新增截圖 `r2-mode-held.png`、`r2-mode-failed.png`）。
+  - fake 與 history 的正向對照：present-ui 的場次 C（fake），以及 history-ui。
+- **反向驗證**（`reverse.py`、`summary.txt`）：
+  - R1：還原為修正前的 `writeReady`，以斷言失敗抓到（既有檔案被改寫、旁觀者被改寫）。
+  - R2：拿掉未確認處理（頁面起始為 fake、失敗時不出聲）→「the mode answer held」失敗（頁首出現 M1／fake agent）；拿掉請求順序 → 「an older fake answer…」失敗（被改成 fake）。
+  - 另外在檢查器新增 `os.Link`→`os.Rename` 的突變（共 **311** 個，定向試跑抓到）；本輪**沒有**重跑全部突變。
+- **受影響範圍的回歸**（`34f3972`；頁首標示的邏輯是所有頁面共用的）：
+  - fake 展示 `browser-ui.mjs` 317 PASS、0 FAIL（`artifacts/b1-06/ui-34f397247af2-20261008T185010Z/`）；
+  - live-ui 37 PASS；
+  - 歷史回放真實副本 46、合成 53 PASS；
+  - Node 56。
+- **失敗嘗試**：
+  - R2 瀏覽器檢查第一版要求頁首不含「fake」，但未確認狀態的說明本來就寫「不代表 fake 或真實 Agent」，所以誤判 3 項；改為只排除 fake 模式的宣稱（「M1／fake agent」「真實 Agent 未啟用」）。
+  - 我跑回歸時把歷史回放的命令和參數包在同一個引號裡，Node 找不到檔案，那一次沒有執行；單獨重跑後 46 PASS。
+- **沒有執行**：
+  - 完整斷網容器與全部 311 個突變（本輪未核准；原派工核准的那一次已用在 `7a10cad`）；
+  - 真實 Claude CLI（版本查詢、登入、C0′、真實的 `make present-live`、真實請購）；
+  - Unity 沒有修改，也沒有重建。
+
+**Codex 前輪證據**（屬於修正前的 `7a10cad`，不改掛到本版）：
+- Codex 在斷網、來源唯讀、空白名單、有資源與時間限制的容器內獨立執行：
+  - Node 56／56 通過；
+  - Go race 同次執行配對四項，既有四項無失敗；同次新加的 R1 探測兩個子案例以斷言失敗重現了覆寫，所以整條 Go 命令 exit 1，**不能**寫成整次 Go 執行通過；
+  - R2 用實際程式片段加 DOM 與網路替身探測：live 正例正確，503 與斷線仍顯示 fake，探測 exit 1。這不是瀏覽器驗證。
+- Claude Code 執行、Codex 核對紀錄：`artifacts/verify-container/runs/7a10cadb2804-20261008T175643Z/` 的七步、基準線、310 個突變與 17 項隔離自檢。Codex 核對了 338 個 manifest 列項的雜湊，全部相符（339 個匯入檔案包含 manifest 本身）；第 301～310 個突變都由測試斷言抓到，不是編譯失敗。
+- Codex 查閱了 `present-ui.log` 與配對後的截圖；那 41 項瀏覽器檢查仍屬 Claude Code 執行。
+- Codex 沒有重跑完整容器、Unity、真實瀏覽器或真實 CLI；獨立探測的輸出只在對話工具紀錄，沒有 repo 證據 log。
+
+**狀態**：展示啟動與主持人操作簡化的 R1、R2 修正完成，待 Codex 限定複核。B1-04／B1-06 維持 InProgress。
