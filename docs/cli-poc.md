@@ -2978,7 +2978,7 @@ L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
 **來源**：腳本由 §39.3 已審查的腳本**機械地改寫**而來，所有前置檢查保持不變：分支、工作區、`PRODUCT_BASE=21090e3` 祖先與非文件差異、證據目錄不覆寫、全新暫存目錄的本機 clone、`.git` 目錄、clone HEAD、二進位 `vcs.revision`／`vcs.modified`、`die` 的 exit 2，以及退出碼與證據保存（exit 5）。只改了以下幾處：
 - 證據目錄前綴改為 `live-purchase-`；
 - 第 6 步改為 `run --live --dev-demo-plugins`：
-  - 全新測試資料庫 `$EV/apa-live.db`；若已存在就停止；
+  - 全新測試資料庫 `$EV/db/apa-live.db`：`$EV/db` 不得已存在，也不得是 symlink，否則停止；目錄由 Store 依既有邏輯以 0700 建立，不另外建立或 chmod（10/8 依第 52 節修正；原為 `$EV/apa-live.db`）；
   - `--registry`、`--profile` 明確指向乾淨 clone `$WT/src/testdata/...`；
   - `--trace-dir "$EV/runs"`；
 - 變數名稱與訊息由 probe 改為請購（`RUN_EXIT`）。
@@ -3042,10 +3042,11 @@ printf 'vcs.revision=%s\nvcs.modified=%s\n' "$REV" "$MOD" > "$EV/binary-vcs.txt"
 [ "$MOD" = false ] || die "vcs.modified 缺失或不是 false"
 
 # 6. 唯一一次正式請購（版本檢查由 apa-buyer 自己做，不符時 exit 1、沒有報告）
-#    開發展示例外（--dev-demo-plugins）；全新測試資料庫在證據目錄；registry／profile 讀乾淨 clone 中的檔案
-[ ! -e "$EV/apa-live.db" ] || die "測試資料庫已存在：$EV/apa-live.db"
+#    開發展示例外（--dev-demo-plugins）；全新測試資料庫在 $EV/db/（不存在、不是 symlink；由 Store 以 0700 建立，
+#    不另外 mkdir 或 chmod）；registry／profile 讀乾淨 clone 中的檔案
+[ ! -e "$EV/db" ] && [ ! -L "$EV/db" ] || die "資料庫目錄已存在"
 date -u +%FT%TZ > "$EV/started-utc.txt" || die "無法寫入 started-utc.txt"
-APA_LIVE_CLI=true APA_DB_PATH="$EV/apa-live.db" "$WT/apa-buyer" run --live --dev-demo-plugins \
+APA_LIVE_CLI=true APA_DB_PATH="$EV/db/apa-live.db" "$WT/apa-buyer" run --live --dev-demo-plugins \
   --cli "$CLI" --task task-a \
   --registry "$WT/src/testdata/contracts/registry.json" \
   --profile "$WT/src/testdata/policy/m1-demo-profile.json" \
@@ -3078,7 +3079,7 @@ exit "$RUN_EXIT"
 - `stdout.txt`：LIVE 開頭行、例外標示行，以及 JSON 報告（工具呼叫紀錄、Store 的 task 檢視；**不含模型的 result 文字**）。**整份不是純 JSON**，判讀時先略過前兩行提示；
 - `apa-buyer-error.txt`：apa-buyer 自己的錯誤行，固定代碼，不含 CLI 文字；
 - `runs/task-a-*.jsonl`：白名單 trace，含 `run_start.gate_mode`；
-- `apa-live.db`：本次全新的測試 Store。
+- `db/apa-live.db`：本次全新的測試 Store（`db/` 由 Store 以 0700 建立）。
 
 **判讀**：
 - **成功**（全部符合才算）：
@@ -3086,7 +3087,7 @@ exit "$RUN_EXIT"
   - trace 的 `run_start.gate_mode=dev_demo_plugins`、`init.gate=passed`；
   - 至少一次 `tool_call`；
   - `request_purchase` 的 outcome 是 Policy 裁決（`Ask` 或 `Deny`，照既有規則記錄，不為展示修改）；
-  - `apa-live.db` 中同一 task 有請購與事件，且與 `stdout.txt` 的 task 檢視一致。
+  - `db/apa-live.db` 中同一 task 有請購與事件，且與 `stdout.txt` 的 task 檢視一致。
 - **分類**（如實記錄，都停止、不重試）：
   - exit 2 前置停止；
   - exit 1 而且沒有報告：**不能一律判為啟動前拒絕**。要結合 `apa-buyer-error.txt` 的錯誤訊息、`stdout.txt` 有沒有 LIVE 提示、以及 `runs/` 有沒有 trace 來判斷。若無法確認，記為「執行階段未確認」，不能宣稱 CLI 未啟動或沒有用量（10/8 依 Codex 修正）；
@@ -3145,10 +3146,29 @@ L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
 
 **沒有做的事**：沒有重試、沒有另跑 C0′、沒有改腳本或程式；沒有付款；沒有修改 Gate、認證清單或上限。
 
-**修正提案**（未套用；待 Codex review 與 Aaron 另行核准）：
+**修正提案**（10/8 已依 Codex 核對套用於 §51，見 52.1；再一次嘗試須 Aaron 另行核准）：
 - §51 第 6 步改用 `APA_DB_PATH="$EV/db/apa-live.db"`，並在之前檢查 `[ ! -e "$EV/db" ]`，存在就停止。
 - Store 的 `dbPath` 會以 `os.MkdirAll(dir, 0o700)` 建立缺少的目錄（umask 只會減少權限，不會增加），所以 `$EV/db` 會是私有目錄；腳本不需要另外 `mkdir`。
 - 其他前置檢查、退出碼保存與判讀規則都不變。
 - 修正後的再一次嘗試，須 Aaron 另行核准。
 
 L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
+
+### 52.1 核對與修正（2026-10-08）
+
+> **核對通過。** 這次卡住的是請購腳本的資料庫路徑，不是架構問題，也不需要再調整 plugins 或 Gate。
+
+- **證據歸屬**：Claude Code 執行；Codex 核對紀錄、Git 與 Store 原始碼，沒有重跑真實 CLI 或測試。
+- **Codex 確認**（與 trace、stdout、錯誤紀錄、原始碼一致）：
+  - 真實 init 通過開發展示模式的完整 Gate；
+  - Store 因父目錄為 0755 拒絕開啟；
+  - 沒有 task、工具呼叫或請購；用量仍為 `unknown`。
+- **Codex 的 review 遺漏**：Codex 表示，上一輪核對 §51 時漏看了 Store 的目錄權限要求。
+- **已套用的小修**（只改 §51 文字，不改產品程式、Gate 或上限）：
+  1. `APA_DB_PATH="$EV/db/apa-live.db"`；
+  2. 執行前確認 `$EV/db` 不存在，也不是 symlink：`[ ! -e "$EV/db" ] && [ ! -L "$EV/db" ] || die "資料庫目錄已存在"`；
+  3. 不另外建立或 chmod 任何目錄，由 Store 依既有邏輯（`MkdirAll(dir, 0o700)` 與私有檢查）建立私有子目錄；
+  4. 證據清單與成功判讀中的資料庫路徑同步改為 `db/apa-live.db`。
+
+  第 52 節的失敗紀錄保留。
+- **下一步**：等待 Aaron 核准再一次真實請購嘗試。不必重跑完整容器或 C0′。能否完成請購，以實際結果為準。
