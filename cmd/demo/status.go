@@ -77,7 +77,8 @@ type statusReply struct {
 	UnityBuild        unityBuildStatus `json:"unity_build"`
 	PaymentCapability string           `json:"payment_capability"`
 	ServedAt          uint64           `json:"served_at"`
-	Runs              map[string]any   `json:"runs,omitempty"` // with --scenarios: the active run and the interrupted ones
+	Runs              map[string]any   `json:"runs,omitempty"`    // with --scenarios: the active run and the interrupted ones
+	History           *historyInfo     `json:"history,omitempty"` // history mode only
 }
 
 // hostStatus answers the host and the operator tokens
@@ -93,7 +94,7 @@ func (a *api) hostStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := statusReply{CallerRole: g.Role, HTTP: "ok", Store: a.expiry.view(), FakeCLI: stateOnly{"off"}, LiveCLI: "off",
-		UnityBuild: unityBuildStatus{State: "missing", Files: []string{}}, PaymentCapability: "unavailable", ServedAt: a.clock()}
+		UnityBuild: unityBuildStatus{State: "missing", Files: []string{}}, PaymentCapability: "unavailable", ServedAt: a.clock(), History: a.history}
 	if a.fake {
 		out.FakeCLI.State = "ok"
 	}

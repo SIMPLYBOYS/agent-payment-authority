@@ -103,6 +103,8 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	verifyDB := fs.String("verify-db", "", "check an offline database read only, then exit")
 	restoreCopy := fs.String("restore-copy", "", "backup to restore into --restore-dir, then exit")
 	restoreDir := fs.String("restore-dir", "", "the new directory of --restore-copy")
+	historyDB := fs.String("history-db", "", "history mode: serve one recorded real run read only (a private copy is opened; nothing runs or expires)")
+	historyTracePath := fs.String("history-trace", "", "history mode: the recorded run trace, for its tool calls (optional)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -131,6 +133,15 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		}
 		fmt.Fprintf(d.out, "demo: restore copy %s: schema %d, recovery check passed; point a compatible build's APA_DB_PATH at it\n", db, v)
 		return nil
+	}
+	if *historyTracePath != "" && *historyDB == "" {
+		return errors.New("--history-trace goes with --history-db")
+	}
+	if *historyDB != "" {
+		if *fakePath != "" || *planPath != "" || *scenariosPath != "" || *upgradeDB {
+			return errors.New("--history-db serves a recorded run only; it excludes --fake-cli, --plan, --scenarios and --upgrade-db")
+		}
+		return serveHistory(ctx, *historyDB, *historyTracePath, *registryPath, *unityDir, d)
 	}
 	if *planPath != "" && *scenariosPath != "" {
 		return errors.New("--plan and --scenarios exclude each other")

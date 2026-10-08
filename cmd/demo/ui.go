@@ -116,9 +116,10 @@ func (a *api) asset(w http.ResponseWriter, r *http.Request) {
 // viewerReply is who a viewer token is: its role and consumer, nothing
 // about other consumers, tokens or the registry.
 type viewerReply struct {
-	Role       string `json:"role"`
-	ConsumerID string `json:"consumer_id"`
-	Note       string `json:"note"`
+	Role       string       `json:"role"`
+	ConsumerID string       `json:"consumer_id"`
+	Note       string       `json:"note"`
+	History    *historyInfo `json:"history,omitempty"` // history mode only
 }
 
 // viewer answers GET /api/viewer for viewer tokens only: the host token is
@@ -134,5 +135,5 @@ func (a *api) viewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(w, http.StatusOK, viewerReply{Role: g.Role, ConsumerID: g.ConsumerID,
-		Note: "Local demo capability for this run of the demo host; not a user login."})
+		Note: "Local demo capability for this run of the demo host; not a user login.", History: a.history})
 }

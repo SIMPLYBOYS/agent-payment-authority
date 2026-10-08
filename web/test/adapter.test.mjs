@@ -452,3 +452,45 @@ test("D2 app.js: a report that is not the projection sent does not end the trans
   for (const [name, rep] of NOT_IT) assert.equal(run(rep), false, name + ": still in transition");
   assert.equal(run(SENT), true, "the exact report ends it");
 });
+
+// History mode (docs/cli-poc.md 54): a recorded real run. The card and the
+// evidence carry the fixed label; the open Ask is the end-of-run snapshot,
+// never a live wait or countdown; the tool calls come from the trace with
+// the Store events they led to; nothing reads as live, paid or approved.
+test("history: a recorded real run is labelled, its open Ask is a snapshot, its tool calls map to Store events", () => {
+  const label = "真實執行紀錄・歷史回放・未付款・開發展示例外";
+  const po = "po-task-a-kr-market";
+  const evs = [ev(1, "TASK_STARTED"), ev(2, "PURCHASE_PROPOSED", { purchase_order_id: po }),
+    ev(3, "POLICY_DECIDED", { purchase_order_id: po, decision: { policy_verdict: "Ask", reason: ask.reason, approval_status: "pending", payment_status: "unavailable" } })];
+  const purchase = { purchase_order_id: po, amount: "500000", asset_id: "fixture-usdc", decided_at: 1790726453, deadline_at: 1790726483,
+    decision: { policy_verdict: "Ask", reason: ask.reason, approval_status: "pending", payment_status: "unavailable" } };
+  const stored = snapshot("task-a", evs, [purchase], { served_at: 1790726453 }); // the host's frozen clock: the last event
+  const snap = { task: stored.task, events: stored.events.events };
+  const history = { record: "live_history", label, as_of: 1790726453, trace: { task_id: "task-a", gate_mode: "dev_demo_plugins", gate: "passed", outcome: "ok",
+    tool_calls: [{ n: 1, tool: "list_products", product_id: "", outcome: "ok" }, { n: 2, tool: "get_quote", product_id: "kr-market", outcome: "ok" },
+      { n: 3, tool: "request_purchase", product_id: "kr-market", outcome: "Ask", purchase_order_id: po, event_sequences: [2, 3] }] } };
+
+  const c = A.card(snap, null, { mode: "live", history });
+  assert.equal(c.history, label);
+  assert.ok(c.status.includes("歷史快照") && !c.status.includes("已達期限"));
+  assert.ok(c.steps.find((s) => s.label === "收尾").note.includes("歷史快照"));
+  assert.ok(c.steps.find((s) => s.label === "選商品").note.includes("真實執行 trace"));
+  assert.ok(!JSON.stringify(c).includes("fake 腳本"));
+
+  const e = A.evidence(snap, po, { mode: "live", history });
+  assert.ok(e.banner.startsWith(label) && e.banner.includes("非即時"));
+  const tools = e.sections.find((x) => x.title === "工具呼叫（真實執行 trace）");
+  assert.equal(tools.rows.length, 3);
+  assert.ok(tools.rows[2][0] === "#3 request_purchase" && tools.rows[2][1].includes(po) && tools.rows[2][1].includes("#2、#3"));
+  for (const sec of e.sections) for (const r of sec.rows) assert.equal(r.length, 3, "every row names its source");
+
+  // In a replay, the calls whose events are not reached yet say so.
+  const r = A.evidence(snap, po, { ...ctxAt(2, 3), history });
+  assert.ok(r.sections.find((x) => x.title === "工具呼叫（真實執行 trace）").rows[2][1].includes("回放尚未到此"));
+
+  // Without history mode nothing changes; a trace of another task is not shown.
+  assert.ok(!A.evidence(snap, po, { mode: "live" }).sections.some((x) => x.title.startsWith("工具呼叫")));
+  const other = A.evidence(snap, po, { mode: "live", history: { ...history, trace: { ...history.trace, task_id: "task-b" } } });
+  assert.equal(other.sections.find((x) => x.title.startsWith("工具呼叫")).rows[0][1], "未提供 trace（host 未指定 --history-trace）");
+  assert.ok(!/付款成功|已付款|已核准|即時倒數/.test(JSON.stringify(c) + JSON.stringify(e)));
+});

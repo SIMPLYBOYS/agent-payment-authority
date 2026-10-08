@@ -28,6 +28,7 @@ const POLL_MS = 1000;   // a target, not a latency promise
 const MAX_REREAD = 3;   // task and events must agree; then show "updating"
 
 let token = null;       // the viewer token, memory only
+let history = null;     // the host's history mode (a recorded real run), from /api/viewer
 let abort = null;       // aborts the current generation's requests
 let timer = null;
 let inFlight = false;
@@ -244,7 +245,7 @@ function renderPanels() {
   const snap = state.snapshot;
   const rp = mode === "replay" ? replayPos : null;
   const view = snap ? (rp ? A.stepView(snap, rp.n) : snap) : null;
-  const ctx = { mode: rp ? "replay" : "live", n: rp && rp.n, m: rp && rp.m, catalog, catalogAt };
+  const ctx = { mode: rp ? "replay" : "live", n: rp && rp.n, m: rp && rp.m, catalog, catalogAt, history };
   const c = A.card(view, rp ? null : chosenPo, ctx);
   const mo = motion && motion.gen === state.gen ? motion : null;
   const e = snap ? A.evidence(snap, c && c.po, { ...ctx, sent, report: lastReport, motion: mo && { rule: mo.rule, text: mo.first ? FIRST_LOAD + "（不播放過場）" : mo.text } }) : null;
@@ -264,8 +265,24 @@ function renderPanels() {
   }
   const chip = $("mode-chip");
   chip.dataset.mode = rp ? "replay" : "live";
-  chip.textContent = rp ? "回放中 #" + rp.n + "／共 " + rp.m + "（唯讀）" : mode === "replay" ? "回放中（唯讀）" : "即時";
+  chip.textContent = rp ? "回放中 #" + rp.n + "／共 " + rp.m + "（唯讀）" : mode === "replay" ? "回放中（唯讀）" : history ? "歷史紀錄（非即時）" : "即時";
   $("current").textContent = c ? "目前：" + c.title.replace(/^客人 /, "") + " · " + (c.scenePo || "尚無請購") + (rp ? "（回放當步）" : "") : "目前：未選擇 task";
+}
+
+// applyHistory labels the page for the host's history mode (a recorded real
+// run, docs/cli-poc.md 54): the fixed label replaces the fake-agent badge
+// and capability line, and a note by the scene says the shop shows a
+// replay of that record. Nothing else changes: the data are the Store's.
+function applyHistory(h) {
+  history = h && h.record === "live_history" ? h : null;
+  const badge = document.querySelector("header .badge"), caps = document.querySelector("header .caps");
+  if (badge) badge.textContent = history ? history.label : "M1／fake agent／不付款";
+  if (caps) caps.textContent = history
+    ? "能力：真實 Agent 執行紀錄（開發展示例外，非即時）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
+    : "能力：真實 Agent 未啟用 · 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行";
+  const note = $("history-note");
+  if (note) note.hidden = !history;
+  shownCard = shownEvidence = ""; // relabel the card and the evidence panel
 }
 
 async function signIn(ev) {
@@ -293,6 +310,7 @@ export async function useViewer(typed) {
     const v = await res.json();
     if (gen !== state.gen) return; // the body came after a switch, a clear or pagehide: shows nothing
     state.consumer = v.consumer_id;
+    applyHistory(v.history || null);
     $("task-pick").dataset.state = "loading";
     listNote("清單讀取中…", "");
     // The viewer is verified: signed in. The list has its own state; its

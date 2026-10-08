@@ -104,8 +104,9 @@ type api struct {
 	clock   store.Clock
 	unity   *os.Root // the Unity Web build's Build/ directory; nil without a build
 	expiry  *expiryHealth
-	fake    bool     // a fake CLI passed its --version check at start
-	control *control // host-started runs (--scenarios); nil otherwise
+	fake    bool         // a fake CLI passed its --version check at start
+	control *control     // host-started runs (--scenarios); nil otherwise
+	history *historyInfo // history mode (--history-db); nil otherwise
 }
 
 func (a *api) register(mux *http.ServeMux) {

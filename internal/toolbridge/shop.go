@@ -26,6 +26,13 @@ type Product struct {
 	ID, URL string
 }
 
+// PurchaseOrderID is the one purchase order ID of a task and product: a
+// retried request_purchase finds it, and the demo's history replay maps a
+// recorded tool call to its purchase by it.
+func PurchaseOrderID(taskID, productID string) string {
+	return fmt.Sprintf("po-%s-%s", taskID, productID)
+}
+
 // Shop executes the three tools against the trusted shop and the Store.
 type Shop struct {
 	Store      *store.Store
@@ -93,7 +100,7 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 	// request_purchase. One logical purchase per task and product, with
 	// stable identifiers: if the Store already has it, report it and submit
 	// nothing; a retry never mints a new request or nonce.
-	po := fmt.Sprintf("po-%s-%s", b.Session.TaskID, p.ID)
+	po := PurchaseOrderID(b.Session.TaskID, p.ID)
 	if v, ok := s.stored(b, po); ok {
 		rec.Outcome = v.Decision.PolicyVerdict
 		return textResult(projection(p.ID, v, true), false), rec

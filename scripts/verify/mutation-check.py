@@ -603,6 +603,23 @@ MUTATIONS = [
      '"gate_mode": h.Gate.Mode(),', '"gate_mode": "strict",', 'TestTraceGateMode'),
     ('B1-04 dev demo: the flag taken without --live', 'cmd/apa-buyer/main.go',
      '\tcase !live && *devDemo:\n\t\treturn errors.New("--dev-demo-plugins is for live runs only (--live with APA_LIVE_CLI=true)")\n', '', 'TestDevDemoPluginsCommand'),
+    # B1-04 history replay of a recorded real run (docs/cli-poc.md 54).
+    ('B1-04 history: the snapshot opens the recorded file, not its copy', 'internal/store/snapshot.go',
+     'sql.Open("sqlite", cp+"?_pragma', 'sql.Open("sqlite", abs+"?_pragma', 'TestOpenSnapshot'),
+    ('B1-04 history: the copy not removed', 'internal/store/snapshot.go',
+     'return s, func() error { return errors.Join(db.Close(), os.RemoveAll(tmp)) }, nil', 'return s, func() error { return errors.Join(db.Close()) }, nil', 'TestOpenSnapshot'),
+    ('B1-04 history: the host clock not frozen at the last event', 'cmd/demo/history.go',
+     'frozen := func() uint64 { return asOf }', 'frozen := d.clock', 'TestHistoryMode$'),
+    ('B1-04 history: request_purchase not mapped to its purchase', 'cmd/demo/history.go',
+     '\t\tt.ToolCalls[i].PurchaseOrderID = po\n', '', 'TestHistoryMode$'),
+    ('B1-04 history: any tool name accepted', 'cmd/demo/history.go',
+     ' || !slices.ContainsFunc(toolbridge.Tools, func(x toolbridge.Tool) bool { return x.Name == c.Tool })', '', 'TestHistoryModeRefusals'),
+    ('B1-04 history: any gate mode accepted', 'cmd/demo/history.go',
+     '!ok || (t.GateMode != "strict" && t.GateMode != "dev_demo_plugins")', '!ok', 'TestHistoryModeRefusals'),
+    ('B1-04 history: a trace of a task the database lacks accepted', 'cmd/demo/history.go',
+     '\t\treturn nil, errors.New("history trace names a task the history database does not hold")\n', '\t\treturn t, nil\n', 'TestHistoryModeRefusals'),
+    ('B1-04 history: history mode combined with an upgrade', 'cmd/demo/main.go',
+     ' || *scenariosPath != "" || *upgradeDB {', ' || *scenariosPath != "" {', 'TestHistoryModeRefusals'),
 ]
 
 
