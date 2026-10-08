@@ -352,8 +352,8 @@ func TestLiveModeRefusals(t *testing.T) {
 		"history and live":                 {[]string{"--history-db", filepath.Join(dir, "x.db"), "--live-cli", l.cli}, nil, "excludes"},
 		"no config directory":              {live, map[string]string{"HOME": noHome}, ".apa-claude"},
 		"another version at start":         {live, nil, "version other than the approved"},
-		"APA_LIVE_CLI=true, no --live-cli": {[]string{}, nil, "needs --live-cli"},
-		"APA_LIVE_CLI=true, a fake host":   {[]string{"--fake-cli", l.fake, "--plan", "testdata/demo/fake-plan.json"}, nil, "needs --live-cli"},
+		"APA_LIVE_CLI=true, no --live-cli": {[]string{}, nil, "is not available to the demo server without --live-cli"},
+		"APA_LIVE_CLI=true, a fake host":   {[]string{"--fake-cli", l.fake, "--plan", "testdata/demo/fake-plan.json"}, nil, "is not available to the demo server without --live-cli"},
 		"APA_LIVE_CLI=true, history mode":  {[]string{"--history-db", filepath.Join(dir, "x.db")}, nil, "not for history mode"},
 		"a live catalog in fake mode":      {append(reg, "--fake-cli", l.fake, "--scenarios", "testdata/demo/scenarios-live.json"), map[string]string{"APA_LIVE_CLI": ""}, "no scenario file"},
 	} {
