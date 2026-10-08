@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **現行摘要（10/8，最新）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估。** 評估見 [live-purchase-execution-decision.md](live-purchase-execution-decision.md)：路線一決策稿 `9cf4e6a` 通過限定文件複核。**10/8 依 Aaron 核准，專用設定目錄已實作（`21560c5`、`a4e3d8e`），fake 驗證與一次完整斷網容器驗證通過（260／260 突變），Claude Code 執行，待 Codex review**（第 47 節）。登入、C0′、認證清單修改與正式請購都尚未核准。
+> **現行摘要（10/8，最新）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估。** 評估見 [live-purchase-execution-decision.md](live-purchase-execution-decision.md)：路線一決策稿 `9cf4e6a` 通過限定文件複核。**10/8 專用設定目錄的實作（`21560c5`、`a4e3d8e`）於 `a4e3d8e` 通過限定範圍技術 review，實作與 fake 驗證關閉**（第 47.5 節）。§39.3 的 `PRODUCT_BASE` 已改為 `a4e3d8e`。下一步是 Aaron 本人以專用目錄登入並完成階段 B（第 48 節）。尚未證明真實 plugins 為空；C0′、認證清單修改與正式請購各自另行核准。
 > - **Aaron 10/8 已選定路線一**：維持零 plugins，**保留方案 A，另加** APA 專用 `CLAUDE_CONFIG_DIR`（`~/.apa-claude`，以子程序 HOME 組成絕對路徑），須 Aaron 另外登入。階段 B（本人確認登入方式）排在 C0′ 之前。
 > - 之後的實作、登入後的 C0′、認證清單修改與正式請購，各自另行核准，互不授權。
 > - C0′ 須符合 §44.4 全部條件，才記為「本次 init 達到診斷目標」；plugins 仍非空只代表本次方案未達目標，來源仍未確認，停止後由 Aaron 決定是否評估路線二。
@@ -1221,7 +1221,7 @@ echo "exit=$?"
 set -u
 REPO=/Users/mac/Documents/OpenSourceProjects/agent-payment-authority
 CLI=/Users/mac/.local/bin/claude
-PRODUCT_BASE=40bd2630cbae0adf552e1dd54ae87ee4c8022cd4   # 已 review 的產品基準（10/8 方案 A；之前為 bd29a4e、e99f389）
+PRODUCT_BASE=a4e3d8ef926d512764b68a8fa09e8de24dd1c307   # 已 review 的產品基準（10/8 路線一專用設定目錄；之前為 40bd263、bd29a4e、e99f389）
 EV_OWNED=; WT_MADE=
 die() {
   echo "STOP（probe 未啟動）：$*" >&2
@@ -2692,3 +2692,70 @@ L1-b、L1-c 不標整體通過；B1-04 仍 InProgress；不合併、不推送、
 5. 正式請購。
 
 L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress；不合併、不推送、不標 Done。
+
+### 47.5 驗收紀錄：`a4e3d8e` 通過限定範圍技術 review（2026-10-08）
+
+> **`a4e3d8e` 通過本次限定範圍技術 review。專用設定目錄的實作與 fake 驗證關閉**，沒有發現阻擋問題。**尚未證明真實 plugins 為空。**
+
+- **確認的行為**：
+  - live、probe 與版本檢查使用同一個專用目錄，父環境不能覆寫；
+  - HOME 或目錄不合規時，在啟動 CLI 前拒絕；
+  - 不建立、不刪除專用目錄，也不退回日常設定；
+  - 方案 A、Gate、認證清單與版本釘選保持不變。
+- **證據歸屬**（分開記錄）：
+  - **Codex 獨立執行**：在斷網、來源唯讀、使用測試 HOME 的容器內，四項定向 fake race 測試各跑三輪，全部通過、exit 0。輸出在 Codex 的工具紀錄中，沒有另存 repo log。
+  - **Claude Code 執行、Codex 核對紀錄**：完整容器七步、260 項突變、17 項隔離檢查（47.3）。Codex 另外核對了 288 個 manifest 列項的雜湊，全部相符；並確認新增的 #256～#260 是斷言失敗，不是編譯失敗。Codex 沒有重跑完整驗證。
+- **同步的操作文件**：§39.3 的 `PRODUCT_BASE` 改為已驗收的完整 SHA `a4e3d8ef926d512764b68a8fa09e8de24dd1c307`。舊值 `40bd263` 會讓前置檢查以「之後有非文件差異」停止。祖先、非文件差異、二進位 VCS 等嚴格檢查全部保留；腳本沒有執行。
+- **下一步**：Aaron 本人以專用目錄登入並完成階段 B（第 48 節）。C0′、認證清單修改與正式請購仍各自核准。B1-04／B1-06 仍 InProgress。
+
+## 48 階段 B 操作說明：Aaron 本人以專用目錄登入與確認（2026-10-08；待 Aaron 執行；Claude Code 不執行）
+
+> 這一步**由 Aaron 本人在自己的終端機操作**。Claude Code 不代為登入，不讀取憑證、keychain 或 `~/.apa-claude` 的內容，也不執行以下任何命令。本節不構成 C0′、認證清單修改或正式請購的核准。
+
+**目的**：
+- 在 APA 專用設定目錄 `$HOME/.apa-claude` 建立 APA 使用的登入；
+- 由 Aaron 本人確認登入方式，作為之後認證決策的依據。
+
+日常的 `~/.claude` 登入不受影響：依官方認證文件，設定 `CLAUDE_CONFIG_DIR` 時，macOS keychain 項目以該目錄區分。
+
+**步驟**（每一行都明確帶 `CLAUDE_CONFIG_DIR`，避免確認到日常環境的登入）：
+
+```bash
+# 1. 建立專用目錄（實體目錄，不要用 symlink；APA 會拒絕 symlink）
+mkdir -m 700 "$HOME/.apa-claude"
+
+# 2. 以該目錄登入（瀏覽器流程；選 claude.ai 帳號。若想用 Console 計費才加 --console）
+CLAUDE_CONFIG_DIR="$HOME/.apa-claude" claude auth login
+
+# 3. 確認（只看下列欄位，不需要把輸出全文貼出）
+CLAUDE_CONFIG_DIR="$HOME/.apa-claude" claude auth status
+```
+
+**第 3 步要確認的欄位**（依官方 CLI 參考的 `claude auth status`）：
+- 退出碼 0：已登入；1：未登入。
+- `authMethod`：`none`、`claude.ai`、`oauth_token`、`api_key`、`api_key_helper` 或 `third_party` 之一。
+- `configDirectory`（v2.1.268 起）：必須是 `$HOME/.apa-claude`，否則表示確認到的不是專用目錄。
+
+**回報給 Claude Code／Codex 的內容**（只要這些，不要貼 email、組織、token 或其他輸出）：
+1. `auth status` 的退出碼；
+2. `authMethod` 的值；
+3. `configDirectory` 是否等於 `$HOME/.apa-claude`（是／否）；
+4. Aaron 是否確認：這是自己的訂閱帳號，也是預期的計費方式（是／否）。
+
+**失敗時**：
+- 登入失敗，或 `configDirectory` 不符，就停止。不改用日常 `~/.claude`，不複製憑證，也不把日常登入的檔案搬進專用目錄。
+- 專用目錄若已存在但不是實體目錄（例如 symlink），先處理成實體目錄，否則 APA 的 live、probe 會拒絕啟動。
+
+**風險與限制**：
+- 登入會在 keychain 新增一個以此目錄區分的項目。
+- 專用目錄不等於作業系統隔離；受管設定與背景活動不受影響。
+- 本次登入後的 CLI 版本，C0′ 會以內建檢查核對（`2.1.293 (Claude Code)`）；不符就停止。
+
+**和認證決策的關係**：
+- Gate 讀的是 init 的 `apiKeySource`（過去兩次觀測為 `none`），和 `auth status` 的 `authMethod` 是不同欄位。
+- Aaron 的確認是之後評估「是否把特定 `apiKeySource` 值加入接受清單」的依據之一，但**不自動變更清單**。清單修改須另行設計、review 並由 Aaron 核准（L1-d）。
+
+**完成後的下一步**（各自另行核准）：
+1. 一次 C0′（§39.3 腳本，`PRODUCT_BASE=a4e3d8e`；逐項核對 §44.4 全部條件）；
+2. 認證接受清單的修改；
+3. 正式請購。

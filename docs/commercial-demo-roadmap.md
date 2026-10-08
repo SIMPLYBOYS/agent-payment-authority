@@ -511,7 +511,7 @@
 >
 > **進度（10/8，真實 plugin ID 查詢）**：依 Aaron 核准在 macOS 執行一次，結果 `no_match`（列出 1 筆，非兩個候選）。依規則停止，完整 id 仍未取得；`no_match` 不代表 plugin 不存在（`docs/cli-poc.md` 第 46.10 節）。Codex 核對通過（46.11），但沒有解除正式請購的阻擋。Codex 建議的下一步是「最小擴大 ID 輸出範圍」的修訂方案，是否進行須 Aaron 決定。
 >
-> **進度（10/8，現行）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估**（`docs/live-purchase-execution-decision.md`；`9cf4e6a` 通過 Codex 限定文件複核；依 Aaron 核准，專用設定目錄已實作（`21560c5`、`a4e3d8e`），fake 驗證與完整斷網容器通過（260／260），待 Codex review；登入、C0′、認證清單修改、正式請購尚未核准）。**Aaron 10/8 已選定路線一**：維持零 plugins，保留方案 A，另加 APA 專用 `CLAUDE_CONFIG_DIR`（`~/.apa-claude`，須 Aaron 另外登入）；階段 B 排在 C0′ 之前。C0′ 須符合 §44.4 全部條件；plugins 仍非空則停止，由 Aaron 決定是否評估路線二（目前尚不可採用，不會自動生效）。認證接受清單為空，是另一個獨立阻擋。實作、C0′、認證清單修改、正式請購各自另行核准，順序依該文件 §4.1。
+> **進度（10/8，現行）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估**（`docs/live-purchase-execution-decision.md`；`9cf4e6a` 通過 Codex 限定文件複核；依 Aaron 核准，專用設定目錄已實作，於 `a4e3d8e` 通過限定範圍技術 review；下一步是 Aaron 本人登入與階段 B（`docs/cli-poc.md` 第 48 節）。尚未證明真實 plugins 為空；C0′、認證清單修改、正式請購各自另行核准）。**Aaron 10/8 已選定路線一**：維持零 plugins，保留方案 A，另加 APA 專用 `CLAUDE_CONFIG_DIR`（`~/.apa-claude`，須 Aaron 另外登入）；階段 B 排在 C0′ 之前。C0′ 須符合 §44.4 全部條件；plugins 仍非空則停止，由 Aaron 決定是否評估路線二（目前尚不可採用，不會自動生效）。認證接受清單為空，是另一個獨立阻擋。實作、C0′、認證清單修改、正式請購各自另行核准，順序依該文件 §4.1。
 
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。
