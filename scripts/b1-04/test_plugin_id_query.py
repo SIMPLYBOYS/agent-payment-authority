@@ -29,6 +29,48 @@ DRIVER = (
     "[setattr(m,k,v) for k,v in json.loads(sys.argv[2]).items()]\n"
     "sys.exit(m.main(sys.argv[3:]))\n"
 )
+# The injection driver: like DRIVER, but it makes select(), os.read() or the
+# stop's SIGTERM fail with a synthetic OSError, only once its readiness file
+# exists (the fake CLI has started and written). It counts this process's
+# open pipes before and after main() into argv[5]: the CLI's stdout is a
+# pipe; other descriptors (Python may keep /dev/urandom open once tempfile
+# has used it) are not what this checks.
+INJECT = (
+    "import importlib.util,json,os,signal,sys,time\n"
+    "s=importlib.util.spec_from_file_location('plugin_id_query',sys.argv[1])\n"
+    "m=importlib.util.module_from_spec(s);s.loader.exec_module(m)\n"
+    "[setattr(m,k,v) for k,v in json.loads(sys.argv[2]).items()]\n"
+    "mode,ready,fds=sys.argv[3],sys.argv[4],sys.argv[5]\n"
+    "def wait_ready():\n"
+    "    while not os.path.exists(ready): time.sleep(0.01)\n"
+    "class Sel:\n"
+    "    @staticmethod\n"
+    "    def select(*a):\n"
+    "        wait_ready(); raise OSError('MARK-INJECTED-SELECT')\n"
+    "class Os:\n"
+    "    def __getattr__(self,k): return getattr(os,k)\n"
+    "    @staticmethod\n"
+    "    def read(fd,n):\n"
+    "        if mode!='read': return os.read(fd,n)\n"
+    "        wait_ready(); raise OSError('MARK-INJECTED-READ')\n"
+    "    @staticmethod\n"
+    "    def killpg(pg,sig):\n"
+    "        if mode=='killpg' and sig==signal.SIGTERM: raise OSError('MARK-INJECTED-KILLPG')\n"
+    "        return os.killpg(pg,sig)\n"
+    "if mode=='select': m.select=Sel\n"
+    "elif mode in ('read','killpg'): m.os=Os()\n"
+    "import stat\n"
+    "def pipes():\n"
+    "    n=0\n"
+    "    for f in os.listdir('/dev/fd'):\n"
+    "        try: n+=stat.S_ISFIFO(os.fstat(int(f)).st_mode)\n"
+    "        except OSError: pass\n"
+    "    return n\n"
+    "before=pipes()\n"
+    "rc=m.main(sys.argv[6:])\n"
+    "open(fds,'w').write('%d %d'%(before,pipes()))\n"
+    "sys.exit(rc)\n"
+)
 SHELL_ADDED = {"PWD", "SHLVL", "_", "OLDPWD"}  # set by sh itself, not passed in
 
 
@@ -264,6 +306,58 @@ class Case(unittest.TestCase):
             if time.monotonic() > end:
                 self.fail("never reached: " + path)
             time.sleep(0.02)
+
+    def reap_fake_later(self):
+        """Whatever a case does, end the fake's group afterwards (only it)."""
+        def end():
+            try:
+                with open(os.path.join(self.d, "calls")) as f:
+                    pid = int(f.read().split()[0])
+            except (OSError, ValueError, IndexError):
+                return
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        self.addCleanup(end)
+
+    # Exception teardown: an OSError from select() or os.read() once the fake
+    # has started and written, or a failing SIGTERM step of the stop itself.
+    # The fake ignores SIGTERM, so only the SIGKILL of the stop ends it.
+    def inject(self, mode, want_rc, want_result):
+        self.reap_fake_later()
+        cli = self.fake("trap '' TERM\necho '[' ; echo ready > \"$D/ready\"\nwhile :; do /bin/sleep 0.2; done")
+        fds = os.path.join(self.d, "fds")
+        env = {"PATH": "/usr/bin:/bin", "HOME": self.home, "TMPDIR": self.tmp}
+        over = {"GRACE": 1.0, "TIMEOUT": 4.0} if mode == "killpg" else {"GRACE": 1.0}
+        p = subprocess.run([sys.executable, "-I", "-c", INJECT, SCRIPT, json.dumps(over), mode,
+                            os.path.join(self.d, "ready"), fds, "--cli", cli],
+                           env=env, capture_output=True, timeout=60)
+        out, err = p.stdout.decode(), p.stderr.decode()
+        self.assertEqual(p.returncode, want_rc, out + err)
+        self.assertIn("result=%s\ncli=exit_signal_9\ncli_proc=reaped\n" % want_result, out)
+        self.assertEqual(self.calls(), 1)
+        with open(os.path.join(self.d, "calls")) as f:
+            self.assertEqual(self.proc_state(int(f.read().split()[0])), "", "the fake CLI is still there")
+        with open(fds) as f:
+            before, after = f.read().split()
+        self.assertEqual(before, after, "the CLI's stdout pipe was left open")
+        self.check_common(out, err, p.returncode)
+        return out
+
+    def test_select_error_stops_cli(self):
+        out = self.inject("select", 12, "internal_error")
+        self.assertIn("stop_errors=0", out)
+
+    def test_read_error_stops_cli(self):
+        out = self.inject("read", 12, "internal_error")
+        self.assertIn("stop_errors=0", out)
+
+    # A failing step of the stop does not skip the rest: SIGKILL, wait and
+    # close still run, and the failure is counted, never reported as clean.
+    def test_stop_step_error_counted(self):
+        out = self.inject("killpg", 5, "timeout")
+        self.assertIn("stop_errors=1", out)
 
     # Round 2 R2: an interrupt during the bounded stop, once or as a burst of
     # SIGTERM and SIGINT, skips nothing and does not stretch the stop. The

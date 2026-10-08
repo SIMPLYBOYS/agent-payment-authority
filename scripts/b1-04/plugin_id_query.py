@@ -128,62 +128,93 @@ def kill_group(pgid, sig):
         pass
 
 
+def stop(proc, pgid):
+    """Bounded stop of this run's process group: SIGTERM, at most GRACE,
+    SIGKILL, a wait of at most GRACE, then one SIGKILL to the group and the
+    pipe closed. Every step is tried even if an earlier one failed; the
+    count of failed steps is returned. A signal that arrives meanwhile is
+    only recorded; it neither cuts nor extends this."""
+    errors = [0]
+
+    def attempt(fn, *args):
+        try:
+            fn(*args)
+        except Exception:
+            errors[0] += 1
+
+    def running():
+        try:
+            return proc.poll() is None
+        except Exception:
+            errors[0] += 1
+            return True  # unknown counts as running: the stop goes on
+
+    if running():
+        attempt(kill_group, pgid, signal.SIGTERM)
+        end = time.monotonic() + GRACE
+        while running() and time.monotonic() < end:
+            time.sleep(TICK)
+        if running():
+            attempt(kill_group, pgid, signal.SIGKILL)
+            attempt(proc.wait, GRACE)
+    # ponytail: one SIGKILL to the group for children left behind; the pgid
+    # stays ours while any member lives (POSIX does not reuse it). Processes
+    # that left the group are out of reach of this.
+    attempt(kill_group, pgid, signal.SIGKILL)
+    attempt(proc.stdout.close)
+    return errors[0]
+
+
 def run_cli(cli, env, work):
-    """Start the CLI once. Return (reason or None, stdout, status, process state)."""
+    """Start the CLI once. Return (reason or None, stdout, status, process
+    state, failed stop steps). Once the CLI has started, every path, an
+    unexpected exception included, ends in stop()."""
     try:
         proc = subprocess.Popen([cli, "plugin", "list", "--json"], cwd=work, env=env,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, start_new_session=True)
     except OSError:
-        return "cli_failed", b"", "start_failed", "not_started"
+        return "cli_failed", b"", "start_failed", "not_started", 0
     pgid = proc.pid
     deadline = time.monotonic() + TIMEOUT
     buf = bytearray()
-    reason = None
-    fd = proc.stdout.fileno()
-    while True:
-        if SIGNALS:
-            reason = "interrupted"
-            break
-        left = deadline - time.monotonic()
-        if left <= 0:
-            reason = "timeout"
-            break
-        ready, _, _ = select.select([fd], [], [], min(left, TICK))
-        if not ready:
-            continue
-        chunk = os.read(fd, 65536)
-        if not chunk:
-            break
-        buf += chunk
-        if len(buf) > MAX_OUTPUT:
-            reason = "output_overflow"
-            break
-    while reason is None and proc.poll() is None:  # stdout closed; wait for the exit
-        if SIGNALS:
-            reason = "interrupted"
-        elif time.monotonic() >= deadline:
-            reason = "timeout"
-        else:
-            time.sleep(TICK)
-    if proc.poll() is None:
-        # Bounded stop: SIGTERM, at most GRACE, then SIGKILL. A signal that
-        # arrives meanwhile is only recorded; it neither cuts nor extends this.
-        kill_group(pgid, signal.SIGTERM)
-        end = time.monotonic() + GRACE
-        while proc.poll() is None and time.monotonic() < end:
-            time.sleep(TICK)
-        if proc.poll() is None:
-            kill_group(pgid, signal.SIGKILL)
-            proc.wait()
-    # ponytail: one SIGKILL to the group for children left behind; the pgid
-    # stays ours while any member lives (POSIX does not reuse it). Processes
-    # that left the group are out of reach of this.
-    kill_group(pgid, signal.SIGKILL)
-    proc.stdout.close()
+    reason, errors = None, 0
+    try:
+        fd = proc.stdout.fileno()
+        while True:
+            if SIGNALS:
+                reason = "interrupted"
+                break
+            left = deadline - time.monotonic()
+            if left <= 0:
+                reason = "timeout"
+                break
+            ready, _, _ = select.select([fd], [], [], min(left, TICK))
+            if not ready:
+                continue
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            buf += chunk
+            if len(buf) > MAX_OUTPUT:
+                reason = "output_overflow"
+                break
+        while reason is None and proc.poll() is None:  # stdout closed; wait for the exit
+            if SIGNALS:
+                reason = "interrupted"
+            elif time.monotonic() >= deadline:
+                reason = "timeout"
+            else:
+                time.sleep(TICK)
+    except Exception:
+        reason = "internal_error"  # the cause stays private: only this fixed code
+    finally:
+        errors = stop(proc, pgid)
     rc = proc.returncode
+    if rc is None:
+        return reason or "internal_error", bytes(buf), "unknown", "not_reaped", errors
     status = "signal_%d" % -rc if rc < 0 else str(rc)
-    return reason, bytes(buf), status, "reaped"
+    return reason, bytes(buf), status, "reaped", errors
 
 
 class Scratch:
@@ -249,8 +280,9 @@ def remove_own(sc):
 def main(argv):
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
-    report = ["query=plugin_list v2"]
+    report = ["query=plugin_list v3"]
     result, cli_state, proc_state, dir_state, sc = "precheck_failed", "not_started", "not_started", "none", None
+    stop_errors = 0
     try:
         if len(argv) != 2 or argv[0] != "--cli" or not os.path.isabs(argv[1]) \
                 or not os.path.isfile(argv[1]) or not os.access(argv[1], os.X_OK):
@@ -269,7 +301,7 @@ def main(argv):
                 else:
                     env = build_env(os.environ, root)
                     cli_state, proc_state = "started", "unknown"
-                    reason, raw, status, proc_state = run_cli(argv[1], env, work)
+                    reason, raw, status, proc_state, stop_errors = run_cli(argv[1], env, work)
                     cli_state = "start_failed" if status == "start_failed" else "exit_" + status
                     if reason:
                         result = reason
@@ -286,10 +318,12 @@ def main(argv):
             dir_state = "ok" if remove_own(sc) else "failed"
     if SIGNALS and result in ("ok", "no_match"):
         result = "interrupted"  # a signal during the run: not reported as a clean result
+    if (stop_errors or proc_state == "not_reaped") and result in ("ok", "no_match"):
+        result = "internal_error"  # an incomplete stop is never a clean result
     if result == "ok" and dir_state == "failed":
         result = "cleanup_failed"
     report += ["result=" + result, "cli=" + cli_state, "cli_proc=" + proc_state,
-               "dir_cleanup=" + dir_state, "signals=%d" % len(SIGNALS)]
+               "dir_cleanup=" + dir_state, "signals=%d" % len(SIGNALS), "stop_errors=%d" % stop_errors]
     try:
         sys.stdout.write("\n".join(report) + "\n")
         sys.stdout.flush()
