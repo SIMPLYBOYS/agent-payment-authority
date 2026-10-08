@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 方案 A 後的診斷型 C0′（Claude Code 執行，待 Codex review）**：取得 init（exit `0`，`observed`）。**plugins 仍非空**：同樣 2 個（`cc-plugin-agents-md`、`cc-plugin-plugin-authoring`，path `relative`）。§44.4 的其他條件都符合：agents／skills 為 0，MCP 1 個且 apa connected，tools 3／3／0，`dontAsk`，`approved`。依 44.5：**方案 A 本次未達目標**，保存證據後停止；不推論來源、不自動換方案（第 45 節）。正式請購阻擋仍在。
+>
 > **10/8 方案 A 驗收與下一次診斷清單**：**方案 A 於 `40bd263` 通過限定範圍技術 review，關閉這項實作與 fake 驗證。** 只證明 APA 子程序的專用 plugin 根目錄設定、失敗處理與 fake 回歸符合要求，不代表真實 plugins 已停用，也不代表正式請購可放行（第 43.6 節）。下一次診斷型 C0′ 的執行確認清單已整理（第 44 節；§39.3 的 `PRODUCT_BASE` 改為 `40bd263`）。**`d46ca0b` 通過 Codex 限定文件複核**：下一次診斷型 C0′ 清單已通過文件複核，尚待 Aaron 另行核准執行（第 44.7 節）。
 >
 > **10/8 方案 A 實作（Claude Code 執行，待 Codex review）**：程式 `6caba93`，測試補正 `086f640`、`40bd263`。本機定向 fake 測試通過。**核准的那一次完整斷網容器驗證（`086f640`）失敗**，原因是測試腳本在 Linux 上讀錯權限欄位（`stat -f` 是 macOS 寫法），不是產品行為；已在 `40bd263` 修正，只改測試。**10/8 經 Aaron 核准，對 `40bd263` 補跑一次完整斷網容器驗證：通過**（overall exit 0；基準線 PASS、255／255 突變被抓到、隔離 17 項符合；Claude Code 執行，待 Codex 核對；第 43.5 節）。`086f640` 的失敗紀錄保留。plugins 是否真的停用仍未驗證。
@@ -2099,3 +2101,54 @@ L1-b 不標完成；B1-04 仍 InProgress；不合併、不推送、不標 Done�
   - 接受既有登入環境、未知用量，以及 44.3 已列明的背景活動風險。
 - **本次文件複核不是執行核准**。
 - 本輪只同步紀錄：沒有修改 §39.3 腳本、Gate、認證接受清單、版本釘選或啟動參數；沒有查詢 CLI 版本、執行 C0′、追查 plugin 來源或進入正式請購。L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
+
+## 45 方案 A 後的診斷型 C0′ 執行紀錄（2026-10-08；Claude Code 執行，待 Codex review）
+
+> **結果：取得 init，plugins 仍非空；方案 A 本次未達目標。** 依 44.5：保存證據後停止。不推論 plugin 來源，不自動換方案，不重試。正式請購的執行阻擋仍在。
+
+- **核准**：Aaron 10/8 核准「依 §39.3、§44 執行一次診斷嘗試」。核准接受既有登入環境、未知用量，以及 44.3 列明的背景活動風險。
+- **開工核對**：分支 `b1-04-live`，HEAD `55c2cac`；工作區只有 `?? demo`。產品基準 `40bd263` 之後沒有非文件差異。
+- **執行方式**：§39.3 的 bash 區塊原樣抽出（`PRODUCT_BASE=40bd263…`），以 `bash` 執行一次。在 Claude Code 沙箱外執行，依核准使用既有環境；腳本沒有修改。腳本 exit `0`。
+- **前置**：步驟 1～5 通過；二進位 `vcs.revision=55c2cacb7e8b2c36fdcdd366658c19df2c4b143d`、`vcs.modified=false`。這個 commit 含方案 A（`6caba93`）。版本檢查通過（`2.1.293 (Claude Code)`）。
+- **時間**：`started-utc` `2026-10-08T02:37:12Z`，`ended-utc` `2026-10-08T02:37:13Z`。
+
+**依 44.4 逐項核對**（`stdout.txt` 的 JSON 投影；trace 的 `result` 與它相同，只差 `trace` 路徑欄位）：
+
+| 項目 | 觀測 | 條件 |
+|---|---|---|
+| plugins | `fields.plugins` `array`；**`plugins_count` 2**；entries：`cc-plugin-agents-md`（`relative`）、`cc-plugin-plugin-authoring`（`relative`） | **不符** |
+| agents | `fields.agents` `array`；`agents_count` 0；`agents_entries` `[]` | 符合 |
+| skills | `fields.skills` `array`；`skills_count` 0 | 符合 |
+| MCP | `fields.mcp_servers` `array`；`mcp_servers_count` 1；`apa_server_status` `connected` | 符合 |
+| 工具 | `tools_count` 3、`tools_expected` 3、`tools_other` 0 | 符合 |
+| 權限與版本 | `permission_mode` `dontAsk`；`cli_version` `approved` | 符合 |
+
+其他觀測：
+- `status`／`code`：`observed`／`init_observed`；`cli_exit_code` 143（取得 init 後由 Host 停止）。
+- 寫入：`input_status` `complete`，`stdin_bytes_written` 95；`usage` `unknown`。
+- 業務工具：`business_calls_refused` 0、`business_calls_executed` 0。
+- 其他欄位：`model` `claude-sonnet-5-5`；`auth_source` `none`（不能證明登入或計費方式）；`extra_members` 6。
+
+**解讀**（照 42.4、44.5，不額外推論）：
+- 方案 A 本次未達目標：plugins 數量、名稱、路徑分類都與第 41 節相同。
+- 這**只能判定本次方案未達目標，來源仍未確認**；不得推論它們必定來自 plugin 根目錄之外。
+- agents、skills 為空，APA MCP 與工具清單也符合，但 plugins 非空，正式 Gate 仍會拒絕這次 init。
+- probe 的 `exit 0`／`observed` 不等於 44.4 全部通過。
+
+**證據**（`artifacts/b1-04/c0prime-diag-20261008T023528Z/`，`artifacts/` 不進版控）：
+- `commit.txt`、`binary-vcs.txt`、`go-version-build.txt`、`started-utc.txt`、`ended-utc.txt`
+- `exit-code.txt`（`exit=0`）、`stdout.txt`、`apa-buyer-error.txt`（0 位元組）
+- `runs/probe-1791427033287836000.jsonl`（1 行）
+
+暫存目錄已由腳本刪除；repo 工作區仍只有 `?? demo`。第 39.11 節那次留下的 `$TMPDIR/apa-c0p.WpXh56/` 不是本次產生的，仍未處理。
+
+**沒有做的事**：沒有第二次嘗試、C0 重跑、版本查詢、登入檢查或來源調查；沒有開 Store、建 task 或執行業務工具；沒有修改 Gate、認證接受清單、啟動參數、版本釘選或產品程式；沒有進入正式請購。
+
+**待決定**（42.4 列出的下一步，擇一，都須 Aaron 決定）：
+1. 提供完整 plugin id（由 Aaron 自行查看後提供，或另行核准一次唯讀的 plugin 清單命令）。拿到 id 後才能評估 `--settings` 方案；若該 id 被 managed 強制啟用，`--settings` 無法覆寫。
+2. 由 Aaron 決定是否調整受管設定（全域）。
+3. 另行核准一次以 `--safe-mode` 為參數的診斷，只確認 APA MCP 是否存活。
+
+另外也須決定：方案 A 的程式要保留還是撤回。它沒有達到目標，但也沒有影響其他觀測項目。
+
+L1-b、L1-c 不標整體通過；B1-04 仍 InProgress；不合併、不推送、不標 Done。
