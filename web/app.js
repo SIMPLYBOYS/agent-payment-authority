@@ -280,11 +280,31 @@ function renderPanels() {
 // run, docs/cli-poc.md 54): the fixed label replaces the fake-agent badge
 // and capability line, and a note by the scene says the shop shows a
 // replay of that record. Nothing else changes: the data are the Store's.
-function applyHistory(h, l) {
+function applyHistory(seq, h, l) {
   history = h && h.record === "live_history" ? h : null;
   live = !history && l && l.record === "live_demo" ? l : null;
-  labelPage(history || live);
+  confirmMode(seq, history || live);
   shownCard = shownEvidence = ""; // relabel the card and the evidence panel
+}
+
+// The host's mode (docs/cli-poc.md 56.8, review R2) is unknown until a
+// successful answer says fake, live or history: GET /api/mode, /api/viewer
+// or /api/host/status. Every such request takes a number when it starts;
+// an answer counts only if it started after the one shown, so a late or
+// older answer never relabels the page, and a failure never does once the
+// mode is known. Before that the header says 「模式未確認」 (a failure says
+// so too), never the fake label. Nothing here starts a run.
+let modeSeq = 0;     // the last mode request started
+let modeShown = 0;   // the request whose answer the header shows (0: none)
+export function nextModeSeq() { return ++modeSeq; }
+export function confirmMode(seq, info) {
+  if (seq <= modeShown) return;
+  modeShown = seq;
+  labelPage(info);
+}
+function modeUnconfirmed(seq) {
+  if (modeShown > 0 || seq < modeSeq) return; // known, or a newer request is out
+  labelPage({ record: "unknown", failed: true });
 }
 
 // labelPage sets the header and the note by the scene for history mode (h)
@@ -293,10 +313,15 @@ function applyHistory(h, l) {
 export function labelPage(h) {
   const history = h && h.record === "live_history" ? h : null;
   const live = h && h.record === "live_demo" ? h : null; // live mode (docs/cli-poc.md 55)
+  const unknown = !!h && h.record === "unknown"; // not confirmed (docs/cli-poc.md 56.8)
   const badge = document.querySelector("header .badge"), caps = document.querySelector("header .caps");
-  if (badge) badge.textContent = history ? history.label : live ? live.label : "M1／fake agent／不付款";
-  if (caps) caps.textContent = history
-    ? "能力：真實 Agent 執行紀錄（開發展示例外，非即時）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
+  if (badge) {
+    badge.textContent = unknown ? (h.failed ? "模式未確認：讀取失敗（重試中）" : "模式未確認（讀取中）")
+      : history ? history.label : live ? live.label : "M1／fake agent／不付款";
+    badge.dataset.mode = unknown ? (h.failed ? "failed" : "unknown") : history ? "history" : live ? "live" : "fake";
+  }
+  if (caps) caps.textContent = unknown ? "能力：模式未確認（不代表 fake 或真實 Agent）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
+    : history ? "能力：真實 Agent 執行紀錄（開發展示例外，非即時）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
     : live ? "能力：真實 Agent（" + (live.dev_demo_plugins ? "開發展示例外：plugins 內容與行為未確認，不是嚴格零 plugin 模式" : "嚴格模式") + "）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
     : "能力：真實 Agent 未啟用 · 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行";
   const note = $("history-note");
@@ -321,6 +346,7 @@ export async function useViewer(typed) {
   if (!typed) return setStatus("請輸入 viewer token", "idle");
   token = typed;
   const gen = state.gen;
+  const mseq = nextModeSeq();
   try {
     const res = await fetch("/api/viewer", { headers: { Authorization: "Bearer " + token }, cache: "no-store", signal: abort.signal, credentials: "omit" });
     if (gen !== state.gen) return;
@@ -330,7 +356,7 @@ export async function useViewer(typed) {
     const v = await res.json();
     if (gen !== state.gen) return; // the body came after a switch, a clear or pagehide: shows nothing
     state.consumer = v.consumer_id;
-    applyHistory(v.history || null, v.live || null);
+    applyHistory(mseq, v.history || null, v.live || null);
     $("task-pick").dataset.state = "loading";
     listNote("清單讀取中…", "");
     // The viewer is verified: signed in. The list has its own state; its
@@ -626,9 +652,21 @@ window.addEventListener("pagehide", () => forget());
 // the header says live or history before any credentials, never the fake
 // default on a live host. A failed read leaves the default; the viewer's own
 // /api/viewer answer labels the page again when it signs in.
-fetch("/api/mode", { cache: "no-store", credentials: "omit" }).then((r) => (r.ok ? r.json() : null)).then((m) => {
-  if (m && (m.mode === "live" || m.mode === "history") && !history && !live) labelPage(m);
-}).catch(() => {});
+// A failed, malformed or timed-out read says so and is tried again every
+// 3 s until some answer has confirmed the mode.
+async function queryMode() {
+  if (modeShown > 0) return;
+  const seq = nextModeSeq();
+  try {
+    const r = await fetch("/api/mode", { cache: "no-store", credentials: "omit", signal: AbortSignal.timeout(5000) });
+    const m = r.ok ? await r.json() : null;
+    if (m && m.mode === "fake") return confirmMode(seq, null);
+    if (m && ((m.mode === "live" && m.record === "live_demo") || (m.mode === "history" && m.record === "live_history")) && typeof m.label === "string") return confirmMode(seq, m);
+  } catch { /* below */ }
+  modeUnconfirmed(seq);
+  setTimeout(queryMode, 3000);
+}
+queryMode();
 
 // The shop's catalog: fixture prices, informational, read once without a
 // token; shown with the time of this read, never as the bound quote.

@@ -21,7 +21,7 @@
 // click: a clear, a new file, the manual mode, pagehide, or a switch of
 // consumer or task drops it; nothing is opened or signed in for it.
 
-import { labelPage, setStatus, forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, setAlert } from "./app.js";
+import { nextModeSeq, confirmMode, setStatus, forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, setAlert } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
 
 const $ = (id) => document.getElementById(id);
@@ -129,8 +129,14 @@ async function pollReadiness() {
   const g = creds.gen;
   try {
     if (!document.hidden) {
+      const mseq = nextModeSeq(); // the host's own status says the mode too (docs/cli-poc.md 56.8)
       const r = await creds.readiness();
-      if (r && g === creds.gen) { lastReady = r; renderReadiness(); renderControl(); }
+      if (r && g === creds.gen) {
+        lastReady = r;
+        if (r.status) confirmMode(mseq, r.status.history && r.status.history.record === "live_history" ? r.status.history : r.status.live && r.status.live.record === "live_demo" ? r.status.live : null);
+        renderReadiness();
+        renderControl();
+      }
     }
   } finally {
     polling = false;
@@ -173,10 +179,7 @@ function renderReadiness() {
     // History mode (docs/cli-poc.md 54): a read-only copy of a recorded
     // run; nothing expires and the time is the record's, not the present.
     const hist = st.history && st.history.record === "live_history";
-    if (hist) labelPage(st.history);
-    // Live mode (docs/cli-poc.md 55): labelled before anything runs.
-    const live = st.live && st.live.record === "live_demo" ? st.live : null;
-    if (live) labelPage(live);
+    const live = st.live && st.live.record === "live_demo" ? st.live : null; // live mode (docs/cli-poc.md 55)
     rows.push(hist ? ["Store", "info", "歷史模式：唯讀副本，不執行到期檢查"] : ["Store", st.store.state, storeText(st.store)]);
     rows.push(["fake CLI", st.fake_cli.state, st.fake_cli.state === "ok" ? "就緒（fake-claude，不是 Claude Code）" : "未啟用"]);
     rows.push(live ? ["真實 CLI", "info", "啟用：按「開始」才執行真實 Claude Code CLI（" + live.cli_version + "；啟動時已核對，每場再核對）；"

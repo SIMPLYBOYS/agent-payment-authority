@@ -525,13 +525,30 @@ func handleHealth(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// writeReady tells a launcher this process serves: its address and pid, in
-// one atomic write (scripts/demo/present.sh opens the page only then).
+// writeReady tells a launcher this process serves: its address and pid,
+// published whole (scripts/demo/present.sh opens the page only then). It
+// never replaces or follows anything already there (review R1, docs/cli-poc.md
+// 56.8): the JSON goes into a new temporary file of its own (CreateTemp:
+// a random name, created exclusively), then appears at path by a hard link,
+// which fails if path exists in any form (file, directory or symlink, not
+// followed). Only that temporary file is removed; on a conflict nothing else
+// is touched and the start stops.
 func writeReady(path, addr string) error {
-	tmp := path + ".tmp"
 	body, _ := json.Marshal(map[string]any{"addr": addr, "pid": os.Getpid()})
-	if err := os.WriteFile(tmp, body, 0o600); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".ready-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	defer os.Remove(tmp.Name()) // this call's own file only; path keeps the link
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Link(tmp.Name(), path); err != nil {
+		return fmt.Errorf("%s already exists or cannot be made; nothing was replaced (%w)", path, err)
+	}
+	return nil
 }
