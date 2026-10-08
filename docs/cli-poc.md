@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **10/8 第一筆真實請購 trace 取得（Claude Code 執行，待 Codex 核對）**：第二次嘗試 exit `0`。開發展示例外下 Gate 通過；真實模型依序呼叫 `list_products` → `get_quote` → `request_purchase`；Policy 裁決 **Ask**（`HUMAN_APPROVAL_REQUIRED`）。Store 中同一 task 有一筆請購，以及 `TASK_STARTED`／`PURCHASE_PROPOSED`／`POLICY_DECIDED` 三個事件（第 53 節）。不付款，用量以 CLI 自報計數記錄。尚未接上 Dashboard／Unity；這不代表 plugins 的內容或行為已確認，也不代表 M1 完成。
+> **10/8 第一筆真實請購 trace 取得，Codex 核對通過（第 53.1 節）**：第二次嘗試 exit `0`。開發展示例外下 Gate 通過；真實模型依序呼叫 `list_products` → `get_quote` → `request_purchase`；Policy 裁決 **Ask**（`HUMAN_APPROVAL_REQUIRED`）。Store 中同一 task 有一筆請購，以及 `TASK_STARTED`／`PURCHASE_PROPOSED`／`POLICY_DECIDED` 三個事件（第 53 節）。不付款，用量以 CLI 自報計數記錄。尚未接上 Dashboard／Unity；這不代表 plugins 的內容或行為已確認，也不代表 M1 完成。
 >
 > **10/8 第一次真實請購嘗試（Claude Code 執行，待 Codex review）**：**真實 init 第一次通過完整 Gate**（`gate_mode=dev_demo_plugins`、`init.gate=passed`，認證 `none` 被接受）。但 Store 拒絕開啟：資料庫目錄就是證據目錄，權限是 `0755`，Store 要求 `0700`。所以沒有 task、沒有工具呼叫、沒有請購；exit 1，依核准停止、不重試（第 52 節）。這是 §51 腳本的缺陷，不是產品行為；修正提案待 review 與 Aaron 另行核准。
 >
@@ -3221,3 +3221,22 @@ L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
 **沒有做的事**：沒有重試、沒有另跑 C0′；沒有修改產品程式、Gate、認證清單或上限；沒有付款。
 
 L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress，不標 Done，等待 Codex 核對與後續決定。
+
+### 53.1 驗收紀錄：第一筆真實請購 trace 核對通過（2026-10-08）
+
+> **核對通過：第一筆真實 Agent 請購 trace 已取得。** 資料鏈：真實 Claude Code CLI → Go wrapper → APA MCP → 查商品、取得報價、提交請購 → Policy 判定 Ask → Store 保存。
+
+- **證據歸屬**：
+  - 真實執行由 Claude Code 完成。
+  - Codex 核對了執行基準、二進位版本資訊、stdout 與 trace，並在斷網容器中**獨立唯讀查詢資料庫**：
+    - `task-a`、請購 ID、`intent_hash` 與報告一致；
+    - 三筆事件順序正確；
+    - SQLite 完整性檢查通過，查詢前後資料庫雜湊不變。
+  - Codex **沒有重跑真實 CLI**。
+- **通過範圍**：開發展示例外下的真實請購與裁決。
+  - Ask 不代表已核准或已付款。
+  - 不代表 plugins 已確認安全，也不代表 M1 或商業展示版完成。
+- **下一步建議**（另行派工）：把這筆真實 trace 接上 Dashboard／Unity，呈現可逐步查證的**歷史回放**；不再追加 plugin 調查。這個切片要守住兩點：
+  - 原始證據（`artifacts/b1-04/live-purchase-20261008T091741Z/`）保持唯讀，展示使用副本；
+  - 明標「真實執行紀錄的歷史回放」。資料庫中的 `pending` 是執行結束時的快照，當時的 Ask 期限已過，不能呈現成仍有效的即時核准倒數。
+- B1-04／B1-06 暫時維持 InProgress。
