@@ -4,7 +4,8 @@
 > - 第 53 節的真實請購可用 `scripts/demo/history.sh` 以證據副本唯讀重播，明標「真實執行紀錄・歷史回放・未付款・開發展示例外」。
 > - 實作：`7c1dae6`；驗收補齊：`3234f4b`／`e500ded`；Unity 文字：`578f2c3`／`b4b0a27`（54.2.1 已關閉）；R1、R2：`b81f749`／`231f70d`（54.3.2 已關閉）。
 > - 不代表即時 Agent 展示、付款、ZK、多 Agent 或 M1 完成。
-> - **目前下一步**：回到展示體驗，由 Aaron 實際看一次這筆真實請購在畫面與證據面板中的對應。不重跑真實 CLI，不追加 plugin 調查。
+> - Aaron 已手動操作，判定「以目前階段來講，算是合格的」（第 54.3.3 節）。
+> - **目前下一步**：待 Aaron 決定下一個展示切片；不重跑真實 CLI，不追加 plugin 調查。
 > - B1-04／B1-06 維持 InProgress。
 >
 > **10/8 第一筆真實請購 trace 取得，Codex 核對通過（第 53.1 節）**：第二次嘗試 exit `0`。開發展示例外下 Gate 通過；真實模型依序呼叫 `list_products` → `get_quote` → `request_purchase`；Policy 裁決 **Ask**（`HUMAN_APPROVAL_REQUIRED`）。Store 中同一 task 有一筆請購，以及 `TASK_STARTED`／`PURCHASE_PROPOSED`／`POLICY_DECIDED` 三個事件（第 53 節）。不付款，用量以 CLI 自報計數記錄。尚未接上 Dashboard／Unity；這不代表 plugins 的內容或行為已確認，也不代表 M1 完成。
@@ -3593,3 +3594,11 @@ B1-04／B1-06 仍 InProgress，等待 Codex review。
 - **未涵蓋**：即時 Agent 展示與場景連動、付款、ZK、多 Agent、M1 整體、商業展示版。
 - **下一步**：回到展示體驗，由 Aaron 實際看一次這筆真實請購在畫面與證據面板中如何對應。技術驗證不取代這次主觀驗收。
 - B1-04／B1-06 維持 InProgress；不合併、不推送、不標 Done。
+
+#### 54.3.3 展示體驗：Aaron 手動操作，以目前階段判定合格（2026-10-08）
+
+- **操作者**：Aaron 本人，依第 54.3.2 節的「下一步」實際操作離線歷史回放（`scripts/demo/history.sh` 以第 53 節真實證據的副本啟動）。
+- **結果**（Aaron 原話）：「以目前階段來講，算是合格的」。沒有回報需要修正的問題。
+- **證據歸屬**：Aaron 本人操作與判定。Claude Code 只記錄，沒有參與操作，也沒有保存這次的截圖或紀錄。
+- **範圍**：這是對「單筆真實請購的離線歷史回放」在目前階段的主觀展示體驗判定。不代表即時 Agent 展示、付款、ZK、多 Agent、M1 或商業展示版完成。
+- B1-04／B1-06 維持 InProgress。
