@@ -4,7 +4,8 @@
 > - 第 53 節的真實請購可用 `scripts/demo/history.sh` 以證據副本重播，明標「真實執行紀錄・歷史回放・未付款・開發展示例外」。
 > - 實作：`7c1dae6`；驗收補齊：`3234f4b`／`e500ded`；Unity 文字：`578f2c3`／`b4b0a27`。
 > - **Unity 場景文字中性化通過 Codex 限定核對**，歷史回放畫布誤標 fake／sim 的缺口關閉（第 54.2.1 節）。這不代表整個切片已通過獨立 review。
-> - **目前下一步**：整體切片待 Codex 核對其餘實作、唯讀與權限邊界，以及證據對應。不重跑真實 CLI，不追加 plugin 調查。
+> - Codex 核對其餘實作時發現 R1（token 檔可能覆寫 trace）與 R2（trace 與 Store 裁決矛盾仍被對應），切片暫不通過；兩項已修正於 `b81f749`／`8735c96`（第 54.3 節）。
+> - **目前下一步**：R1、R2 修正待 Codex 核對；不重跑真實 CLI，不追加 plugin 調查。
 > - B1-04／B1-06 維持 InProgress。
 >
 > **10/8 第一筆真實請購 trace 取得，Codex 核對通過（第 53.1 節）**：第二次嘗試 exit `0`。開發展示例外下 Gate 通過；真實模型依序呼叫 `list_products` → `get_quote` → `request_purchase`；Policy 裁決 **Ask**（`HUMAN_APPROVAL_REQUIRED`）。Store 中同一 task 有一筆請購，以及 `TASK_STARTED`／`PURCHASE_PROPOSED`／`POLICY_DECIDED` 三個事件（第 53 節）。不付款，用量以 CLI 自報計數記錄。尚未接上 Dashboard／Unity；這不代表 plugins 的內容或行為已確認，也不代表 M1 完成。
@@ -3485,3 +3486,47 @@ B1-04／B1-06 仍 InProgress，等待 Codex review。
 - **範圍**：本次只關閉 Unity 文字缺口。**不代表整個歷史回放切片已通過獨立 review**，也不代表 M1 或商業展示版完成。這次文字修正不另跑完整容器。
 - **目前下一步**：真實請購歷史回放的 Unity 文字缺口已關閉；整體切片待 Codex 核對其餘實作、唯讀與權限邊界，以及證據對應。不重跑真實 CLI，不追加 plugin 調查。
 - B1-04／B1-06 維持 InProgress。
+
+### 54.3 Codex review 的 R1、R2 修正（2026-10-08；Claude Code 執行，待 Codex 核對）
+
+> **結果**：Codex 核對其餘實作時，用合成資料重現了兩個缺口，整個切片暫不通過。兩項都已在局部修正：
+> - **R1**：token 檔可能覆寫輸入的 trace。
+> - **R2**：互相矛盾的 trace 與 Store 仍被連成證據。
+>
+> 沒有改架構，沒有重跑真實請購，沒有執行真實 CLI，沒有追加 plugin 調查。已關閉的 Unity 文字問題不重開。
+
+- **開工核對**：HEAD `4511dd3`（`8735c96` 之前最後一個提交），工作區只有未追蹤的 `demo`。
+- **提交**：
+  - 程式 `b81f749`；
+  - 測試與突變 `8735c96`；
+  - 文件為本節所在提交。
+- **R1：token 檔可能覆寫 trace**
+  - 原因：`cmd/demo/history.go` 只檢查 token 路徑是否撞到資料庫的檔案，沒有保護 trace，之後 `newTokens` 會以 rename 取代該路徑。Codex 用合成資料、合法的 0700 目錄重現了覆寫。
+  - 修正：`checkTokenPath` 與 `newTokens` 增加「輸入檔」參數，沿用既有的路徑正規化與檔案身分檢查（`canonicalPath` 與 `os.SameFile`）。
+    - 歷史模式把 trace 列為輸入檔，啟動時檢查一次，寫入 token 前（`newTokens` 內 rename 之前）再檢查一次。
+    - 衝突時以 `errTokenInput` 拒絕：沒有啟動，也沒有改動 trace。
+    - 一般模式不傳輸入檔，行為不變。
+  - `scripts/demo/history.sh` 使用分開的路徑，原本就不會觸發；修正的是程式入口本身。
+- **R2：trace 與 Store 互相矛盾仍被連成證據**
+  - 原因：`loadHistoryTrace` 只依請購 ID 找到 Store 的紀錄，沒有核對裁決。Codex 把 trace 的 `request_purchase` 結果由 Ask 改成 Deny，資料庫仍是 Ask，程式卻接受，並附上同一請購與事件序號。
+  - 修正：建立對應前，trace 的裁決（Ask／Deny／Allow）必須等於 Store 中該請購的 `policy_verdict`，而且該請購必須存在。
+    - 不一致時拒絕啟動，不回傳看似成立的對應，也不修改任何一方。
+    - 以錯誤代碼結束的呼叫沒有裁決，不連到任何請購或事件。
+  - 沒有新增簽章、鏈上證明或 plugin 追查。
+- **驗證（Claude Code 執行）**：
+  - `TestHistoryTokenFileIsNotTheTrace`：
+    - 反例：token 路徑直接是 trace、指向 trace 的 symlink、hard link、經 symlink 的父目錄、含 `..` 的寫法，都在啟動時被拒絕（`errTokenInput`）；直接呼叫 `newTokens` 也在寫入前拒絕。每次之後 trace 位元組都不變。
+    - 正例：token 檔用另一個路徑時可以啟動，trace 不變。
+  - `TestHistoryTraceVerdictMustMatchTheStore`：
+    - 反例：trace 寫 Deny 或 Allow 而 Store 是 Ask，以及 trace 寫 Ask 但請購不存在（`kr-weather`），都被拒絕，trace 與資料庫位元組都不變。
+    - 正例：一致的 trace 正常對應（既有的 `TestHistoryMode`：`po-task-a-kr-market` → #2、#3）；錯誤代碼的呼叫不連到 Store。
+  - `go vet ./...` 通過；`go test -race -count=1 ./...` 625 通過；`node --test` web 50 通過。
+  - **反向驗證**：新增 5 個突變（共 285 個），依檢查器規則只在被改檔案的 package 內執行，都被測試斷言抓到；本切片 19 個歷史突變沒有一個存活或編譯失敗。5 個新突變：
+    - R1：trace 沒列為輸入檔；輸入檔衝突沒偵測；寫入前沒再檢查；
+    - R2：只比對存在、不比對裁決；錯誤代碼的呼叫被連到 Store。
+  - 瀏覽器回歸（`8735c96`）：
+    - 真實證據副本 46 PASS／0 FAIL（`artifacts/b1-04/history-ui-8735c967b53e-20261008T114204Z-evidence/`）；
+    - 合成資料 53 PASS／0 FAIL（`…-20261008T114233Z-synthetic/`）。
+  - 原始證據雜湊仍是 54.1 記錄的值（`3446b98c…`、`2433618a…`）。
+  - 完整容器與全部突變沒有跑（未授權）。
+- **範圍**：只修正 R1、R2。整體切片仍待 Codex 核對；這不代表 M1 或商業展示版完成。B1-04／B1-06 維持 InProgress。
