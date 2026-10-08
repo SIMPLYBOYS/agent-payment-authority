@@ -499,3 +499,58 @@ test("history: a recorded real run is labelled, its open Ask is a snapshot, its 
   assert.ok(none.sections.find((x) => x.title.startsWith("工具呼叫")).rows[0][1].startsWith("沒有可顯示的 trace"));
   assert.ok(!/付款成功|已付款|已核准|即時倒數/.test(JSON.stringify(c) + JSON.stringify(e)));
 });
+
+// Live mode (docs/cli-poc.md 55): a real Agent run the operator started.
+// The label goes with the card and the evidence; the tool calls come from
+// the trace the buyer host writes when the CLI ends, so while it runs, or
+// when there is none, the panel says so and shows no mapping; a known
+// mapping is marked as the Host's; usage is the CLI's own or unknown.
+test("live: the evidence panel says what the trace shows and when; nothing reads as paid or streamed", () => {
+  const label = "真實 Agent 即時展示・開發展示例外・合成資料・不付款";
+  const live = { record: "live_demo", label, dev_demo_plugins: true, cli_version: "2.1.293 (Claude Code)" };
+  const po = "po-show-a-01-kr-market";
+  const evs = [ev(1, "TASK_STARTED"), ev(2, "PURCHASE_PROPOSED", { purchase_order_id: po }),
+    ev(3, "POLICY_DECIDED", { purchase_order_id: po, decision: { policy_verdict: "Ask", reason: ask.reason, approval_status: "pending", payment_status: "unavailable" } })];
+  const purchase = { purchase_order_id: po, amount: "500000", asset_id: "fixture-usdc", decided_at: 1790726453, deadline_at: 1790726483,
+    decision: { policy_verdict: "Ask", reason: ask.reason, approval_status: "pending", payment_status: "unavailable" } };
+  const stored = snapshot("show-a-01", evs, [purchase], { served_at: 1790726455 });
+  const snap = { task: stored.task, events: stored.events.events };
+  const section = (e) => e.sections.find((x) => x.title === "工具呼叫（真實 Agent trace）");
+  const at = (trace) => A.evidence(snap, po, { mode: "live", live, trace });
+
+  const c = A.card(snap, null, { mode: "live", live });
+  assert.equal(c.live, label);
+  assert.ok(c.steps.find((s) => s.label === "選商品").note.includes("CLI 結束後"));
+  assert.ok(!JSON.stringify(c).includes("fake 腳本"));
+  assert.ok(at(null).banner.startsWith(label));
+
+  assert.equal(section(at(null)).rows[0][1], "讀取中（未確認）");
+  const running = section(at({ task_id: "show-a-01", state: "running" }));
+  assert.ok(running.rows.length === 1 && running.rows[0][1].startsWith("CLI 執行中") && running.rows[0][1].includes("不代表工具尚未呼叫"));
+  for (const [reason, words] of [["no_trace", "沒有這個 task 的 trace"], ["inconsistent", "拒絕對應"], ["unreadable", "不顯示任何對應"], ["ambiguous", "多份 trace"]]) {
+    const r = section(at({ task_id: "show-a-01", state: "not_available", reason }));
+    assert.ok(r.rows.length === 1 && r.rows[0][1].includes(words), reason);
+  }
+  // A reply of another task (a late one) is not this task's.
+  assert.equal(section(at({ task_id: "show-a-02", state: "running" })).rows[0][1], "讀取中（未確認）");
+
+  const trace = { task_id: "show-a-01", gate_mode: "dev_demo_plugins", gate: "passed", outcome: "ok", usage: { input_tokens: 8, output_tokens: 445 },
+    tool_calls: [{ n: 1, tool: "list_products", product_id: "", outcome: "ok" }, { n: 2, tool: "get_quote", product_id: "kr-market", outcome: "ok" },
+      { n: 3, tool: "request_purchase", product_id: "kr-market", outcome: "Ask", purchase_order_id: po, event_sequences: [2, 3] }] };
+  const ok = section(at({ task_id: "show-a-01", state: "available", trace }));
+  assert.ok(ok.note.includes("不是逐工具即時串流"));
+  assert.equal(ok.rows[0][1], "gate_mode dev_demo_plugins · init gate passed · 結果 ok");
+  assert.ok(ok.rows[3][0] === "#3 request_purchase" && ok.rows[3][1].includes("#2、#3") && ok.rows[3][2] === "trace；請購與事件對應為 Host 推導");
+  assert.equal(ok.rows[4][1], "input 8 · output 445（不是計費證明）");
+  assert.equal(ok.rows[4][2], "trace");
+  const unknown = section(at({ task_id: "show-a-01", state: "available", trace: { ...trace, usage: undefined } }));
+  assert.equal(unknown.rows[4][1], "unknown（CLI 未回報）");
+  const replay = section(A.evidence(snap, po, { ...ctxAt(2, 3), live, trace: { task_id: "show-a-01", state: "available", trace } }));
+  assert.ok(replay.rows[3][1].includes("回放尚未到此"));
+  for (const e of [at(null), at({ task_id: "show-a-01", state: "available", trace })]) {
+    for (const sec of e.sections) for (const r of sec.rows) assert.equal(r.length, 3, "every row names its source");
+    assert.ok(!/付款成功|已付款|已核准|即時倒數/.test(JSON.stringify(e)));
+  }
+  // Without live mode nothing changes.
+  assert.ok(!A.evidence(snap, po, { mode: "live" }).sections.some((x) => x.title.startsWith("工具呼叫")));
+});

@@ -28,7 +28,6 @@ func TestLoad(t *testing.T) {
 		{name: "hostname", env: map[string]string{"APA_ADDR": "localhost:8402"}, wantErr: "loopback"},
 		{name: "port not numeric", env: map[string]string{"APA_ADDR": "127.0.0.1:http"}, wantErr: "port"},
 		{name: "port out of range", env: map[string]string{"APA_ADDR": "127.0.0.1:70000"}, wantErr: "port"},
-		{name: "live cli on", env: map[string]string{"APA_ADDR": "127.0.0.1:8402", "APA_LIVE_CLI": "true"}, wantErr: "APA_LIVE_CLI=true is not available"},
 		{name: "live cli garbage", env: map[string]string{"APA_ADDR": "127.0.0.1:8402", "APA_LIVE_CLI": "yes please"}, wantErr: "must be true or false"},
 	}
 	for _, tt := range tests {
@@ -50,5 +49,16 @@ func TestLoad(t *testing.T) {
 				t.Fatalf("Addr = %q, want %q", got.Addr, tt.want)
 			}
 		})
+	}
+}
+
+// APA_LIVE_CLI is read, not acted on: true is LiveCLI; the demo host
+// decides (it refuses true without --live-cli).
+func TestLoadLiveCLI(t *testing.T) {
+	for v, want := range map[string]bool{"": false, "false": false, "0": false, "true": true, "1": true} {
+		got, err := Load(env(map[string]string{"APA_ADDR": "127.0.0.1:8402", "APA_LIVE_CLI": v}))
+		if err != nil || got.LiveCLI != want {
+			t.Errorf("APA_LIVE_CLI=%q: %+v %v", v, got, err)
+		}
 	}
 }
