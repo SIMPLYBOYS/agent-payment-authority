@@ -600,7 +600,7 @@ MUTATIONS = [
     ('B1-04 dev demo: later checks skipped under the exception', 'internal/buyer/gate.go',
      '\t\t\tif code := devDemoCheck(raw, ok); code != "" {\n\t\t\t\treturn code\n\t\t\t}\n\t\t\tcontinue', '\t\t\treturn devDemoCheck(raw, ok)', 'TestDevDemoGate'),
     ('B1-04 dev demo: gate_mode written as strict', 'internal/buyer/host.go',
-     '"gate_mode": h.Gate.Mode(),', '"gate_mode": "strict",', 'TestDevDemoPluginsCommand'),
+     '"gate_mode": h.Gate.Mode(),', '"gate_mode": "strict",', 'TestTraceGateMode'),
     ('B1-04 dev demo: the flag taken without --live', 'cmd/apa-buyer/main.go',
      '\tcase !live && *devDemo:\n\t\treturn errors.New("--dev-demo-plugins is for live runs only (--live with APA_LIVE_CLI=true)")\n', '', 'TestDevDemoPluginsCommand'),
 ]

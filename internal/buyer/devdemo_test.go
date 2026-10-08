@@ -1,7 +1,10 @@
 package buyer
 
 import (
+	"context"
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -84,6 +87,28 @@ func TestDevDemoGate(t *testing.T) {
 	} {
 		if got := c.g.check(devInit(t, c.over)); got != c.code {
 			t.Errorf("%s: %q, want %q", name, got, c.code)
+		}
+	}
+}
+
+// The run trace's run_start names the gate mode, so an exception run never
+// passes for a strict one. Here, in the package of host.go, so the
+// mutation check (which runs a mutation's tests in its file's package)
+// reaches it.
+func TestTraceGateMode(t *testing.T) {
+	for _, dev := range []bool{false, true} {
+		e := newHost(t)
+		e.h.Gate.DevDemoPlugins = dev
+		res := e.run(context.Background(), "task-a", "ask-mainline")
+		raw, err := os.ReadFile(res.Trace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var start map[string]any
+		json.Unmarshal([]byte(strings.SplitN(string(raw), "\n", 2)[0]), &start)
+		want := map[bool]string{false: "strict", true: "dev_demo_plugins"}[dev]
+		if start["event"] != "run_start" || start["gate_mode"] != want {
+			t.Errorf("dev %v: run_start %v", dev, start)
 		}
 	}
 }
