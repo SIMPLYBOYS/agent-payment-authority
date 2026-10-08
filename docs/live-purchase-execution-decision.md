@@ -1,6 +1,6 @@
 # 第一筆真實請購的執行路線評估
 
-> **狀態：`9cf4e6a` 通過 Codex 限定文件複核（第 8 節）。4.1 第 2、3 步完成：實作 `21560c5`、`a4e3d8e` 於 `a4e3d8e` 通過限定範圍技術 review（`docs/cli-poc.md` 第 47.5 節）。第 4 步完成：Aaron 已以專用目錄登入，並本人確認為自己的訂閱帳號（`authMethod=claude.ai`、`configDirectory` 符合；`docs/cli-poc.md` 第 48.1 節）。第 5 步已執行（`docs/cli-poc.md` 第 49 節）：**plugins 仍為 2 個，本次專用設定目錄方案未達目標，來源仍未確認**；已停止，交由 Aaron 決定是否評估路線二。尚未證明真實 plugins 為空；C0′、認證清單修改、正式請購各自另行核准。**
+> **狀態：開發展示執行例外提案完成，待 Codex review 與 Aaron 核准；尚未修改 Gate 或執行真實請購**（第 9 節）。路線一的專用設定目錄已實作，但其 C0′ 中 plugins 仍為 2 個（`docs/cli-poc.md` 第 49 節，Claude Code 執行，待 Codex 核對）。
 > - Aaron 已選定路線一（維持零 plugins）。專用設定目錄為 `~/.apa-claude`；階段 B 排在 C0′ 之前（第 6 節）。
 > - 2026-10-08；分支 `b1-04-live`。評估基準 HEAD `bd3ac81`（產品程式基準 `40bd263`，查詢工具 `5bab248`）；本次補正的開工基準為 `34ca9eb`。
 > - 本文件不改變現行 Gate、認證接受清單或任何執行限制，也不代表 plugins 已獲接受、零 plugins 要求已取消、來源已確認或正式請購已放行。
@@ -207,3 +207,114 @@ Codex 的前置 review 只做文件、原始碼與 Git 唯讀核對，沒有重�
 - **非阻擋文字更正**（隨本次同步完成）：第 6 節「當時狀態，後續已決定」原本也涵蓋實作與執行核准，容易誤讀。已改為「目錄與排序後續已決定；實作及執行核准仍待取得」。
 - **下一步**：等待 Aaron 核准「專用設定目錄實作與 fake 驗證」（4.1 第 2 步，範圍見 4.2）。本次 review 不包含登入、C0′ 或正式請購的執行核准。
 - B1-04／B1-06 仍 InProgress。
+
+## 9 提案：開發展示執行例外與正式請購的剩餘前提（2026-10-08；待 Codex review 與 Aaron 核准）
+
+> **開發展示執行例外提案完成，待 Codex review 與 Aaron 核准；尚未修改 Gate 或執行真實請購。**
+
+- **依據**：vault〈Claude-Code-B1-04-開發展示執行例外提案派工-59c3a2d-20261008〉。開工核對：分支 `b1-04-live`，HEAD `59c3a2d`；工作區只有 `?? demo`。
+- **暫停的旁線**：清空 plugins、來源／ID／元件清單調查、C0′ 例行重跑、查詢工具與 Linux 清理，以及受管設定修改。既有工具、證據、專用設定目錄與方案 A 都保留，不撤回。
+- **路線一的最新結果**：plugins 仍為 2 個（第 49 節），維持「Claude Code 執行，待 Codex 核對」；fake review 通過不等於真實隔離有效。
+
+### 9.1 這份提案取代的前提（待核准；舊要求保留為歷史）
+
+- 第 3 節路線二原本要求「**須先取得兩個 plugins 的元件清單與 Aaron 對內容的確認**」，才可能讓 Gate 接受固定組成。
+- 本提案改為：以 **Aaron 明確接受下列剩餘風險**，取代「先取得元件清單」這個前提；只限明確 opt-in 的開發展示模式；預設嚴格模式不變。
+- 在 Aaron 核准前，第 3 節的舊要求仍有效；本提案**不代表**兩個 plugins 已被允許執行。
+
+**Aaron 須明確接受的剩餘風險**（原文）：
+
+> 名稱與數量相符，不代表 plugin 內容、來源或行為已確認。APA 對業務工具的限制，不能保證阻止 plugins 的 hooks、檔案、網路或背景活動。專用設定目錄也不是作業系統隔離。
+
+另外：使用合成業務資料、不付款，並不能消除 CLI 以本機使用者身分執行的風險。
+
+### 9.2 推薦實作（一個方案）
+
+**opt-in 方式**：在 `apa-buyer run --live` 加一個旗標 `--dev-demo-plugins`。
+- 只能與 `--live` 併用；fake、probe、demo host 都不提供。
+- 不用環境變數、不用設定檔，名稱也不可設定。沒有這個旗標，一律是嚴格模式。
+
+**最小程式差異**（預估約 60 行加測試）：
+
+| 位置 | 變更 |
+|---|---|
+| `internal/buyer/gate.go` | `Gate` 新增 `DevDemoPlugins bool`，以及固定清單 `devDemoPlugins = {"cc-plugin-agents-md", "cc-plugin-plugin-authoring"}`。<br>`check` 的 plugins 檢查：<br>- `DevDemoPlugins == false`：維持現行規則（非空即 `plugins`）；<br>- `true`：`plugins` 成員必須存在，且是恰為 2 筆的陣列。每筆必須是物件、`name` 為字串（以既有的 `objectFields` 嚴格讀取），兩個名稱各出現一次。<br>- 多出、缺少、重複、名稱不符 → `plugins`；成員缺少 → `plugins`；元素格式異常 → `init_malformed`。<br>skills、agents、工具、MCP、權限、版本、認證的檢查順序與規則都不動。 |
+| `cmd/apa-buyer/main.go` | 解析 `--dev-demo-plugins`；沒有 `--live` 時拒絕。設定 `Gate.DevDemoPlugins`。<br>LIVE MODE 開頭行加上固定文字 `gate: DEV-DEMO plugin exception (2 named plugins accepted; not the strict gate)`。 |
+| `internal/buyer/host.go` | trace 的 `run_start` 事件新增固定欄位 `"gate_mode": "strict"` 或 `"dev_demo_plugins"`。不輸出 plugin 內容、路徑、憑證或模型文字。 |
+| `internal/buyer`（`Host`） | 新增 `GateMode() string`（或由 `Gate` 提供），供 trace 使用。不改 Host 身分綁定、工具授權、Policy、Store，也不碰付款或 Signer。 |
+
+**不變**：
+- 專用設定目錄（`LiveEnv`）與方案 A（每次執行的 plugin 根目錄）保留；
+- probe 只觀測，不受旗標影響；
+- 不新增 runner 或診斷工具；
+- 執行上限照舊：`Total` 3 分鐘、`Assistant` 10、`MaxCalls` 8、每次呼叫 20 秒、輸出上限。
+
+**定向 fake 測試**（實作時一次執行；本輪不跑）：
+1. 預設模式（沒有旗標）：init 帶這兩個 plugins → 仍拒絕（`plugins`），不開 Store、不 arm。
+2. 有旗標：恰好這兩個 plugins → Gate 通過，其餘照常（Ask 路徑，`ask-mainline` 情境）。
+3. 有旗標，組成不符 → 拒絕：多一個、少一個、同名兩次、名稱不同、大小寫不同、`plugins` 成員缺少、元素不是物件、`name` 不是字串。
+4. 有旗標，但其他條件不符（非空 skills／agents、工具數、MCP、權限模式、版本、認證值）→ 照樣拒絕，代碼與嚴格模式相同。
+5. `--dev-demo-plugins` 沒有搭配 `--live`，或用在 probe → 拒絕。
+6. trace 的 `run_start.gate_mode` 與開頭行能區分兩種模式；嚴格模式的 trace 不出現例外標示。
+7. 突變：
+   - 例外清單不檢查數量；
+   - 例外清單不檢查名稱；
+   - 預設模式也套用例外；
+   - `gate_mode` 寫死；
+   - 例外時跳過後續的 auth 檢查。
+   全部要由斷言失敗抓到。
+
+另跑一次完整斷網容器，確認既有回歸仍成立。
+
+### 9.3 認證前提（一次整理）
+
+**階段 B 已有的**（第 48.1 節，Aaron 本人）：
+- 專用目錄 `loggedIn=true`、`authMethod=claude.ai`、`apiProvider=firstParty`、`configDirectory` 符合、`subscriptionType=max`；
+- Aaron 確認是本人的訂閱帳號。
+
+**還缺的**：沒有缺少的確認項目。只剩 9.5 第 3 題「是否接受真實請購會使用這個訂閱、用量無法確認」，由 Aaron 回答。
+
+**認證接受清單的最小變更**：`liveAcceptAuth` 由空清單改為只接受 `none`（L1-d 例外變更）。
+- 適用所有 live run，與 plugin 模式無關；嚴格模式下 plugins 仍會被拒，所以實際效果只出現在例外模式。
+- **依據**：
+  - live 子程序的環境白名單不傳 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_OAUTH_TOKEN` 等憑證（`CLIEnv`）；
+  - 設定目錄固定為 `~/.apa-claude`，Aaron 已確認該目錄是 claude.ai 的本人訂閱登入。
+- `none` 本身仍不能證明登入或計費方式；依據是上面這份本人確認，不是 `none` 這個值。
+- 其他值一律拒絕；清單不會自動學習或放寬。
+- 測試：`none` 被接受；`api_key`、`oauth_token`、未知值、成員缺少都被拒絕。
+
+### 9.4 從實作到第一筆真實請購（最短步驟）
+
+1. Codex review 本提案；Aaron 核准 9.5 的三題，以及實作。
+2. 實作 9.2、9.3，跑定向 fake 測試與一次完整斷網容器；集中交一次 review。
+3. 同步操作文件：
+   - §39.3 的 `PRODUCT_BASE` 改為新的已 review commit；
+   - §7.2 的版本仍寫 `2.1.288` 且使用 `./bin/apa-buyer`，改為 `2.1.293`，並以乾淨 clone 建置的二進位；
+   - README 環境變數表中「認證接受清單為空」的說明；
+   - `docs/m1-boundaries.md` 的 C0′ 列。
+4. **不另跑 C0′**：請購執行本身就會經過同一個 init Gate，C0′ 不會回答任何直接阻擋請購的新問題。
+5. Aaron 另行核准**一次正式請購嘗試**。
+   - **工具**：沿用 §39.3 腳本的前置步驟 1～5（分支、工作區、祖先、非文件差異、證據目錄、乾淨 clone 建置、VCS 檢查）。
+   - **第 6 步改為**：`APA_LIVE_CLI=true APA_DB_PATH="$EV/apa-live.db" "$WT/apa-buyer" run --live --dev-demo-plugins --cli /Users/mac/.local/bin/claude --task task-a --trace-dir "$EV/runs"`。
+     - 全新測試資料庫放在證據目錄中；不操作既有的展示資料庫。
+     - 任務資料使用既有的 `testdata/contracts/registry.json` 與 `testdata/policy/m1-demo-profile.json`。
+   - 不付款、不接 Signer、不用正式資產。
+   - **成功**：同一個 run／task 中有：
+     - `init.gate` 為 `passed`，且 `run_start.gate_mode=dev_demo_plugins`；
+     - 至少一次真實的業務工具呼叫；
+     - `request_purchase` 進入 Store，並有 Policy 裁決（Ask 或 Deny，照既有規則；不為展示修改）；
+     - Store 中有對應的 task、請購與事件；
+     - trace 只有白名單。
+   - **分類**（如實記錄）：Gate 拒絕（含代碼）、沒有請購、達到上限（turn、時間、呼叫數）、逾時、CLI 錯誤。用量記 `unknown`。
+   - **停止**：任何失敗都停止，不自動重試。
+6. 接上展示鏈（Dashboard／Unity）是另一個出口，另外派工；第 5 步完成不代表這一步完成。
+
+### 9.5 Aaron 需要決定的事（集中三題）
+
+1. **是否接受 9.1 的剩餘風險原文**，並以此取代「先取得元件清單」的前提，只限 `--dev-demo-plugins` 的開發展示模式；預設嚴格模式不變。
+2. **是否核准認證接受清單只加入 `none`**（9.3 的依據與限制）。
+3. **是否接受**：第一筆真實請購以 `~/.apa-claude` 的本人訂閱執行，用量無法確認（記 `unknown`）；使用合成資料、全新測試資料庫、不付款。
+
+以上三題，加上「核准實作」，是第一筆真實請購之前已知的全部決策；之後只剩「核准一次正式請購嘗試」。
+
+L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。

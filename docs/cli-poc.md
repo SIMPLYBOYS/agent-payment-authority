@@ -1,5 +1,11 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **現行（10/8，最新）**：**開發展示執行例外提案完成，待 Codex review 與 Aaron 核准；尚未修改 Gate 或執行真實請購**（[live-purchase-execution-decision.md](live-purchase-execution-decision.md) 第 9 節）。
+> - 提案內容：預設嚴格模式維持零 plugins；`run --live --dev-demo-plugins` 明確 opt-in 時，只接受恰好兩個指定名稱；其他 Gate 條件不變；trace 標示 `gate_mode`。
+> - 認證清單提案只加入 `none`。
+> - 清空 plugins 與診斷旁線暫停。
+> - 下列較舊的 10/8 摘要是當時的紀錄。
+>
 > **10/8 路線一的 C0′（Claude Code 執行，待 Codex review）**：以專用設定目錄 `~/.apa-claude` 執行一次，取得 init（exit `0`）。**plugins 仍為 2 個**（同樣兩個名稱、`relative`）；§44.4 的其他條件都符合。依決策稿：**本次專用設定目錄方案未達目標，來源仍未確認**；保存證據後停止，交由 Aaron 決定是否評估路線二；不自動切換方案、不放寬 Gate（第 49 節）。
 >
 > **現行摘要（10/8，最新）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估。** 評估見 [live-purchase-execution-decision.md](live-purchase-execution-decision.md)：路線一決策稿 `9cf4e6a` 通過限定文件複核。**10/8 專用設定目錄的實作（`21560c5`、`a4e3d8e`）於 `a4e3d8e` 通過限定範圍技術 review，實作與 fake 驗證關閉**（第 47.5 節）。§39.3 的 `PRODUCT_BASE` 已改為 `a4e3d8e`。**Aaron 已以專用目錄登入，並本人確認為自己的訂閱帳號**（`authMethod=claude.ai`、`configDirectory` 符合；第 48.1 節）。階段 B 完成。尚未證明真實 plugins 為空；C0′、認證清單修改與正式請購各自另行核准。
