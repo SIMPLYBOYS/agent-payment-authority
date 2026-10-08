@@ -2,6 +2,7 @@
 """One bounded `claude plugin list --json` for two plugin names (docs/cli-poc.md 46).
 
 Usage: python3 -I scripts/b1-04/plugin_id_query.py --cli /absolute/path/to/claude
+(operators run it through plugin-id-query.sh, which keeps the evidence).
 
 Starts the CLI at most once, never retries, and prints only a fixed report:
 for each candidate record its full id, origin, scope, enabled and error count;
@@ -15,8 +16,8 @@ import json
 import os
 import re
 import select
-import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -32,6 +33,7 @@ MAX_ID = 200
 TIMEOUT = 30.0       # seconds from the CLI's start until its output must be complete
 GRACE = 3.0          # after SIGTERM, before SIGKILL
 MAX_OUTPUT = 1 << 20  # bytes of stdout read; more stops the CLI
+TICK = 0.1           # how often the read loop looks for a recorded signal
 
 # internal/buyer/host.go envAllowlist and fixedEnv, in the same order.
 ALLOWLIST = ("HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG", "LC_ALL", "TERM")
@@ -39,6 +41,7 @@ FIXED = (("DISABLE_AUTOUPDATER", "1"), ("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFI
          ("CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS", "1"))
 PLUGIN_ROOT = "CLAUDE_CODE_PLUGIN_CACHE_DIR"
 PREFIX = "apa-plist."
+DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
 EXIT = {
     "ok": 0, "precheck_failed": 2, "no_match": 3, "cli_failed": 4, "timeout": 5,
@@ -46,13 +49,14 @@ EXIT = {
     "interrupted": 10, "report_failed": 11, "internal_error": 12,
 }
 
-
-class Interrupted(Exception):
-    pass
+# A signal only records itself; the control flow below finishes every step
+# it has started (stop, wait, reap, close, remove), so a second signal
+# cannot skip any of them, and no deadline is ever reset.
+SIGNALS = []
 
 
 def on_signal(signum, frame):
-    raise Interrupted()
+    SIGNALS.append(signum)
 
 
 def build_env(parent, root):
@@ -125,111 +129,167 @@ def kill_group(pgid, sig):
 
 
 def run_cli(cli, env, work):
-    """Start the CLI once. Return (reason or None, stdout bytes, exit status text)."""
+    """Start the CLI once. Return (reason or None, stdout, status, process state)."""
     try:
         proc = subprocess.Popen([cli, "plugin", "list", "--json"], cwd=work, env=env,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, start_new_session=True)
     except OSError:
-        return "cli_failed", b"", "start_failed"
+        return "cli_failed", b"", "start_failed", "not_started"
     pgid = proc.pid
     deadline = time.monotonic() + TIMEOUT
     buf = bytearray()
     reason = None
-    try:
-        fd = proc.stdout.fileno()
-        while True:
-            left = deadline - time.monotonic()
-            if left <= 0:
-                reason = "timeout"
-                break
-            ready, _, _ = select.select([fd], [], [], left)
-            if not ready:
-                continue
-            chunk = os.read(fd, 65536)
-            if not chunk:
-                break
-            buf += chunk
-            if len(buf) > MAX_OUTPUT:
-                reason = "output_overflow"
-                break
-        if reason is None:
-            try:
-                proc.wait(timeout=max(deadline - time.monotonic(), 0.001))
-            except subprocess.TimeoutExpired:
-                reason = "timeout"
-    except Interrupted:
-        reason = "interrupted"
-    finally:
+    fd = proc.stdout.fileno()
+    while True:
+        if SIGNALS:
+            reason = "interrupted"
+            break
+        left = deadline - time.monotonic()
+        if left <= 0:
+            reason = "timeout"
+            break
+        ready, _, _ = select.select([fd], [], [], min(left, TICK))
+        if not ready:
+            continue
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            break
+        buf += chunk
+        if len(buf) > MAX_OUTPUT:
+            reason = "output_overflow"
+            break
+    while reason is None and proc.poll() is None:  # stdout closed; wait for the exit
+        if SIGNALS:
+            reason = "interrupted"
+        elif time.monotonic() >= deadline:
+            reason = "timeout"
+        else:
+            time.sleep(TICK)
+    if proc.poll() is None:
+        # Bounded stop: SIGTERM, at most GRACE, then SIGKILL. A signal that
+        # arrives meanwhile is only recorded; it neither cuts nor extends this.
+        kill_group(pgid, signal.SIGTERM)
+        end = time.monotonic() + GRACE
+        while proc.poll() is None and time.monotonic() < end:
+            time.sleep(TICK)
         if proc.poll() is None:
-            kill_group(pgid, signal.SIGTERM)
-            try:
-                proc.wait(timeout=GRACE)
-            except subprocess.TimeoutExpired:
-                kill_group(pgid, signal.SIGKILL)
-                proc.wait()
-        # ponytail: one SIGKILL to the group for children left behind; the
-        # pgid stays ours while any member lives (POSIX does not reuse it).
-        kill_group(pgid, signal.SIGKILL)
-        proc.stdout.close()
+            kill_group(pgid, signal.SIGKILL)
+            proc.wait()
+    # ponytail: one SIGKILL to the group for children left behind; the pgid
+    # stays ours while any member lives (POSIX does not reuse it). Processes
+    # that left the group are out of reach of this.
+    kill_group(pgid, signal.SIGKILL)
+    proc.stdout.close()
     rc = proc.returncode
     status = "signal_%d" % -rc if rc < 0 else str(rc)
-    return reason, bytes(buf), status
+    return reason, bytes(buf), status, "reaped"
 
 
-def remove_own(tmp):
-    """Remove tmp only if it is this run's mkdtemp directory."""
-    real = os.path.realpath(tmp)
-    if (os.path.dirname(real) != os.path.realpath(tempfile.gettempdir())
-            or not os.path.basename(real).startswith(PREFIX) or not os.path.isdir(real)):
-        return False
+class Scratch:
+    """This run's mkdtemp directory, held by file descriptors from creation:
+    pfd for its parent, fd for the directory itself, ident its (dev, ino)."""
+
+    def __init__(self):
+        parent = tempfile.gettempdir()
+        self.pfd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            path = tempfile.mkdtemp(prefix=PREFIX, dir=parent)
+            self.name = os.path.basename(path)
+            self.fd = os.open(self.name, DIR_FLAGS, dir_fd=self.pfd)
+        except OSError:
+            os.close(self.pfd)
+            raise
+        st = os.fstat(self.fd)
+        self.ident = (st.st_dev, st.st_ino)
+        self.path = os.path.join(parent, self.name)
+
+    def is_ours(self):
+        """The name in the parent is a real directory, and it is ours."""
+        st = os.stat(self.name, dir_fd=self.pfd, follow_symlinks=False)
+        return stat.S_ISDIR(st.st_mode) and (st.st_dev, st.st_ino) == self.ident
+
+
+def clear(fd):
+    """Remove everything inside the directory open as fd, through fds only:
+    no path is resolved again, symlinks are removed, never followed."""
+    for e in list(os.scandir(fd)):
+        if e.is_dir(follow_symlinks=False):
+            sub = os.open(e.name, DIR_FLAGS, dir_fd=fd)
+            try:
+                clear(sub)
+            finally:
+                os.close(sub)
+            os.rmdir(e.name, dir_fd=fd)
+        else:
+            os.unlink(e.name, dir_fd=fd)
+
+
+def remove_own(sc):
+    """Remove this run's directory, or nothing. The contents go through the
+    directory's own fd, so a renamed or swapped path is never followed. The
+    one step by name, the final non-recursive rmdir, runs only after the name
+    is checked again to be this directory; rmdir removes only an empty one.
+    Refused or failed: False, and whatever is left stays."""
     try:
-        shutil.rmtree(real)
+        if not sc.is_ours():
+            return False
+        clear(sc.fd)
+        if not sc.is_ours():
+            return False
+        os.rmdir(sc.name, dir_fd=sc.pfd)
+        return True
     except OSError:
         return False
-    return not os.path.exists(real)
+    finally:
+        os.close(sc.fd)
+        os.close(sc.pfd)
 
 
 def main(argv):
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
-    report = ["query=plugin_list v1"]
-    result, cli_state, cleanup, tmp = "precheck_failed", "not_started", "none", None
+    report = ["query=plugin_list v2"]
+    result, cli_state, proc_state, dir_state, sc = "precheck_failed", "not_started", "not_started", "none", None
     try:
         if len(argv) != 2 or argv[0] != "--cli" or not os.path.isabs(argv[1]) \
                 or not os.path.isfile(argv[1]) or not os.access(argv[1], os.X_OK):
             report.append("reason=usage_or_cli")
         else:
             try:
-                tmp = tempfile.mkdtemp(prefix=PREFIX)
-                root, work = os.path.join(tmp, "plugins"), os.path.join(tmp, "work")
+                sc = Scratch()
+                root, work = os.path.join(sc.path, "plugins"), os.path.join(sc.path, "work")
                 os.mkdir(root, 0o700)
                 os.mkdir(work, 0o700)
             except OSError:
                 report.append("reason=scratch")
             else:
-                env = build_env(os.environ, root)
-                cli_state = "started"
-                reason, raw, status = run_cli(argv[1], env, work)
-                cli_state = "start_failed" if status == "start_failed" else "exit_" + status
-                if reason:
-                    result = reason
-                elif status != "0":
-                    result = "cli_failed"  # valid JSON does not hide a failed CLI
+                if SIGNALS:
+                    result = "interrupted"  # before the start: nothing was started
                 else:
-                    result, lines = judge(raw)
-                    report += lines if result in ("ok", "no_match") else lines[:1]
-                del raw
-    except Interrupted:
-        result = "interrupted"
+                    env = build_env(os.environ, root)
+                    cli_state, proc_state = "started", "unknown"
+                    reason, raw, status, proc_state = run_cli(argv[1], env, work)
+                    cli_state = "start_failed" if status == "start_failed" else "exit_" + status
+                    if reason:
+                        result = reason
+                    elif status != "0":
+                        result = "cli_failed"  # valid JSON does not hide a failed CLI
+                    else:
+                        result, lines = judge(raw)
+                        report += lines if result in ("ok", "no_match") else lines[:1]
+                    del raw
     except Exception:
         result = "internal_error"  # a fixed code, never a traceback
     finally:
-        if tmp is not None:
-            cleanup = "ok" if remove_own(tmp) else "failed"
-    if result == "ok" and cleanup == "failed":
+        if sc is not None:
+            dir_state = "ok" if remove_own(sc) else "failed"
+    if SIGNALS and result in ("ok", "no_match"):
+        result = "interrupted"  # a signal during the run: not reported as a clean result
+    if result == "ok" and dir_state == "failed":
         result = "cleanup_failed"
-    report += ["result=" + result, "cli=" + cli_state, "cleanup=" + cleanup]
+    report += ["result=" + result, "cli=" + cli_state, "cli_proc=" + proc_state,
+               "dir_cleanup=" + dir_state, "signals=%d" % len(SIGNALS)]
     try:
         sys.stdout.write("\n".join(report) + "\n")
         sys.stdout.flush()

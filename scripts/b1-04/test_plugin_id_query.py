@@ -21,6 +21,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "plugin_id_query.py")
+WRAPPER = os.path.join(HERE, "plugin-id-query.sh")
 DRIVER = (
     "import importlib.util,json,sys\n"
     "s=importlib.util.spec_from_file_location('plugin_id_query',sys.argv[1])\n"
@@ -107,7 +108,7 @@ class Case(unittest.TestCase):
         self.assertIn('candidate {"id":"cc-plugin-plugin-authoring@skills-dir","origin":"skills-dir","scope":"project","enabled":false,"errors":0}', out)
         self.assertIn("matched=2 entries=3", out)
         self.assertNotIn("other", out)
-        self.assertIn("result=ok\ncli=exit_0\ncleanup=ok", out)
+        self.assertIn("result=ok\ncli=exit_0\ncli_proc=reaped\ndir_cleanup=ok\nsignals=0", out)
         self.check_common(out, err, rc)
 
     # Non-candidates never print; zero matches is its own result.
@@ -184,7 +185,7 @@ class Case(unittest.TestCase):
                      ["--cli", cli, "extra"], ["--x", cli]):
             rc, out, err = self.run_q(args)
             self.assertEqual(rc, 2, (args, out))
-            self.assertIn("reason=usage_or_cli\nresult=precheck_failed\ncli=not_started\ncleanup=none", out)
+            self.assertIn("reason=usage_or_cli\nresult=precheck_failed\ncli=not_started\ncli_proc=not_started\ndir_cleanup=none", out)
         # mkdtemp itself fails (a prefix under a missing directory); an
         # unwritable TMPDIR would not do, as tempfile falls back to another.
         rc, out, err = self.run_q(["--cli", cli], over={"PREFIX": "no-such-dir/apa-plist."})
@@ -249,8 +250,53 @@ class Case(unittest.TestCase):
         out, err = p.communicate(timeout=20)
         out, err = out.decode(), err.decode()
         self.assertEqual(p.returncode, 10, out)
-        self.assertIn("result=interrupted\ncli=exit_signal_15", out)
+        self.assertIn("result=interrupted\ncli=exit_signal_15\ncli_proc=reaped\ndir_cleanup=ok\nsignals=1", out)
         self.check_common(out, err, p.returncode)
+
+    def proc_state(self, pid):
+        """'' gone, 'Z..' exited but not reaped, anything else still running."""
+        p = subprocess.run(["/bin/ps", "-o", "stat=", "-p", str(pid)], capture_output=True)
+        return p.stdout.decode().strip()
+
+    def wait_for(self, path, limit=20.0):
+        end = time.monotonic() + limit
+        while not os.path.exists(path):
+            if time.monotonic() > end:
+                self.fail("never reached: " + path)
+            time.sleep(0.02)
+
+    # Round 2 R2: an interrupt during the bounded stop, once or as a burst of
+    # SIGTERM and SIGINT, skips nothing and does not stretch the stop. The
+    # fake ignores SIGTERM (it only notes it), so only SIGKILL ends it.
+    def interrupt_in_grace(self, extra):
+        grace = 2.0
+        cli = self.fake("trap 'echo t >> \"$D/term\"' TERM\nwhile :; do /bin/sleep 0.2; done")
+        env = {"PATH": "/usr/bin:/bin", "HOME": self.home, "TMPDIR": self.tmp}
+        p = subprocess.Popen([sys.executable, "-I", "-c", DRIVER, SCRIPT, json.dumps({"GRACE": grace}), "--cli", cli],
+                             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.wait_for(os.path.join(self.d, "calls"))  # the fake has started
+        p.send_signal(signal.SIGTERM)                  # interrupt while reading
+        self.wait_for(os.path.join(self.d, "term"))   # the stop has begun: in the grace period
+        t0 = time.monotonic()
+        for sig in extra:
+            p.send_signal(sig)
+            time.sleep(0.05)
+        out, err = p.communicate(timeout=30)
+        took = time.monotonic() - t0
+        out, err = out.decode(), err.decode()
+        self.assertEqual(p.returncode, 10, out)
+        self.assertIn("result=interrupted\ncli=exit_signal_9\ncli_proc=reaped\ndir_cleanup=ok\nsignals=%d" % (1 + len(extra)), out)
+        self.assertLess(took, grace + 1.5, "the stop was stretched")
+        with open(os.path.join(self.d, "calls")) as f:
+            pid = int(f.read().split()[0])
+        self.assertEqual(self.proc_state(pid), "", "the fake CLI is still there")
+        self.check_common(out, err, p.returncode)
+
+    def test_interrupt_in_grace(self):
+        self.interrupt_in_grace([signal.SIGTERM])
+
+    def test_interrupt_burst_in_grace(self):
+        self.interrupt_in_grace([signal.SIGTERM, signal.SIGINT] * 3)
 
     # Cleanup: a failed removal is visible; it never hides the main result;
     # a directory that is not this run's own is never removed.
@@ -258,25 +304,113 @@ class Case(unittest.TestCase):
         lock = 'touch keep; chmod 500 .\n'
         rc, out, err = self.run_q(["--cli", self.fake(lock + '/bin/cat "$D/out.json"', [rec("cc-plugin-agents-md@m")])])
         self.assertEqual(rc, 9, out)
-        self.assertIn("result=cleanup_failed\ncli=exit_0\ncleanup=failed", out)
+        self.assertIn("result=cleanup_failed\ncli=exit_0\ncli_proc=reaped\ndir_cleanup=failed", out)
         self.setUp()
         rc, out, err = self.run_q(["--cli", self.fake(lock + "exit 4", None)])
         self.assertEqual(rc, 4, out)
-        self.assertIn("result=cli_failed\ncli=exit_4\ncleanup=failed", out)
+        self.assertIn("result=cli_failed\ncli=exit_4\ncli_proc=reaped\ndir_cleanup=failed", out)
+
+    def load(self):
         import importlib.util
-        s = importlib.util.spec_from_file_location("q", SCRIPT)
-        m = importlib.util.module_from_spec(s)
-        s.loader.exec_module(m)
-        tempfile.tempdir = self.tmp
-        try:
-            self.assertFalse(m.remove_own(self.home))
-            self.assertFalse(m.remove_own(self.tmp))
-            other = os.path.join(self.d, "apa-plist.elsewhere")
-            os.mkdir(other)
-            self.assertFalse(m.remove_own(other))
-            self.assertTrue(os.path.isdir(self.home) and os.path.isdir(other))
-        finally:
-            tempfile.tempdir = None
+        spec = importlib.util.spec_from_file_location("q", SCRIPT)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        tempfile.tempdir = self.tmp  # Scratch() makes its directory here
+        self.addCleanup(setattr, tempfile, "tempdir", None)
+        return m
+
+    def scratch(self, m):
+        sc = m.Scratch()
+        with open(os.path.join(sc.path, "own-file"), "w") as f:
+            f.write("x")
+        return sc
+
+    def keep_file(self, d):
+        with open(os.path.join(d, "keep"), "w") as f:
+            f.write("bystander")
+
+    def assert_kept(self, d):
+        with open(os.path.join(d, "keep")) as f:
+            self.assertEqual(f.read(), "bystander")
+
+    # Round 2 R1: cleanup removes this run's directory and nothing else, by
+    # the directory's identity, not by the shape of a path.
+    def test_cleanup_identity(self):
+        m = self.load()
+        sc = self.scratch(m)  # untouched: removed
+        self.assertTrue(m.remove_own(sc))
+        self.assertFalse(os.path.lexists(sc.path))
+        self.keep_file(self.bystander)
+
+        # The path is swapped for a symlink to a same-prefix bystander.
+        sc = self.scratch(m)
+        os.rename(sc.path, sc.path + ".moved")
+        os.symlink(self.bystander, sc.path)
+        self.assertFalse(m.remove_own(sc))
+        self.assert_kept(self.bystander)
+        self.assertTrue(os.path.islink(sc.path))
+
+        # The path is replaced by another real directory of the same name.
+        sc = self.scratch(m)
+        os.rename(sc.path, sc.path + ".moved")
+        os.mkdir(sc.path)
+        self.keep_file(sc.path)
+        self.assertFalse(m.remove_own(sc))
+        self.assert_kept(sc.path)
+
+        # A symlink to this run's own (moved) directory is refused before
+        # anything is touched: a symlink is never taken for the directory.
+        sc = self.scratch(m)
+        os.rename(sc.path, sc.path + ".moved")
+        os.symlink(sc.path + ".moved", sc.path)
+        self.assertFalse(m.remove_own(sc))
+        self.assertEqual(os.listdir(sc.path + ".moved"), ["own-file"])
+
+        # Symlinks to HOME and to TMPDIR itself are refused too.
+        self.keep_file(self.home)
+        for target in (self.home, self.tmp):
+            sc = self.scratch(m)
+            os.rename(sc.path, sc.path + ".moved")
+            os.symlink(target, sc.path)
+            self.assertFalse(m.remove_own(sc))
+        self.assert_kept(self.home)
+        self.assertTrue(os.path.isdir(self.tmp))
+
+        # Swapped right after a passing check: the contents still go through
+        # this directory's own fd (the moved original is emptied, the
+        # bystander kept), and the final rmdir is refused by the second check.
+        sc = self.scratch(m)
+        real_check, calls = sc.is_ours, []
+
+        def check_then_swap():
+            calls.append(1)
+            if len(calls) == 1:
+                ok = real_check()
+                os.rename(sc.path, sc.path + ".moved")
+                os.symlink(self.bystander, sc.path)
+                return ok
+            return real_check()
+        sc.is_ours = check_then_swap
+        self.assertFalse(m.remove_own(sc))
+        self.assert_kept(self.bystander)
+        self.assertEqual(os.listdir(sc.path + ".moved"), [])
+
+        # Swapped for an empty directory right after a passing check: the
+        # second check keeps the final rmdir off it.
+        sc = self.scratch(m)
+        real_check, calls = sc.is_ours, []
+
+        def check_then_empty():
+            calls.append(1)
+            if len(calls) == 1:
+                ok = real_check()
+                os.rename(sc.path, sc.path + ".moved")
+                os.mkdir(sc.path)
+                return ok
+            return real_check()
+        sc.is_ours = check_then_empty
+        self.assertFalse(m.remove_own(sc))
+        self.assertTrue(os.path.isdir(sc.path))
 
     # Environment: CLIEnv's eight variables (empty ones dropped), the three
     # fixed values and the run's own plugin root; nothing else, whatever the
@@ -319,6 +453,80 @@ class Case(unittest.TestCase):
         with open(res) as f:
             self.assertIn("result=ok", f.read())
         self.assertEqual(self.calls(), 1)
+
+
+class Wrapper(Case):
+    """Round 2 R3: the operator's wrapper itself, run from /bin/bash with an
+    evidence parent of the test and a fake CLI; its exit code is the query's,
+    or one of its own (20-23)."""
+
+    def setUp(self):
+        super().setUp()
+        self.base = os.path.join(self.d, "evidence")
+        os.mkdir(self.base)
+
+    def wrap(self, cli, base=None):
+        env = {"PATH": os.path.dirname(sys.executable) + ":/usr/bin:/bin", "HOME": self.home, "TMPDIR": self.tmp}
+        p = subprocess.run(["/bin/bash", WRAPPER, cli, base or self.base], env=env, capture_output=True, timeout=60)
+        evs = sorted(os.listdir(base or self.base)) if os.path.isdir(base or self.base) else []
+        return p.returncode, p.stdout.decode(), p.stderr.decode(), evs
+
+    def saved(self, ev, name):
+        with open(os.path.join(self.base, ev, name)) as f:
+            return f.read()
+
+    def test_outcomes_kept(self):
+        for stdout, code, want in [([rec("cc-plugin-agents-md@m")], 0, 0),  # found
+                                   ([rec("other@m")], 0, 3),               # no_match stays 3
+                                   ([rec("cc-plugin-agents-md@m")], 5, 4)]:  # started, then failed
+            self.setUp()
+            rc, out, err, evs = self.wrap(self.emit(stdout, code))
+            self.assertEqual(rc, want, out + err)
+            self.assertEqual(len(evs), 1)
+            self.assertEqual(self.saved(evs[0], "exit-code.txt"), "exit=%d\n" % want)
+            self.assertIn("result=", self.saved(evs[0], "result.txt"))
+            self.assertIn("query exit=%d" % want, out)
+            self.assertEqual(self.calls(), 1)
+        self.setUp()  # not started: the CLI does not exist
+        rc, out, err, evs = self.wrap(os.path.join(self.d, "no-such-cli"))
+        self.assertEqual(rc, 2, out + err)
+        self.assertEqual(self.saved(evs[0], "exit-code.txt"), "exit=2\n")
+        self.assertEqual(self.calls(), 0)
+
+    def test_evidence_not_saved(self):
+        for i, body in enumerate(['/bin/rm "%s"/plugin-id-query-*/result.txt',  # result.txt lost
+                                  '/bin/chmod 500 "%s"/plugin-id-query-*']):    # exit-code.txt cannot be written
+            if i:
+                self.setUp()  # a fresh evidence parent for each case
+            rc, out, err, evs = self.wrap(self.fake(body % self.base + '\n/bin/cat "$D/out.json"', [rec("cc-plugin-agents-md@m")]))
+            self.assertEqual(rc, 23, out + err)
+            self.assertIn("查詢已嘗試，證據不完整（不重跑）：query exit=0", err)
+            self.assertEqual(self.calls(), 1)
+
+    def test_evidence_directory(self):
+        cli = self.emit([rec("cc-plugin-agents-md@m")])
+        rc, out, err, _ = self.wrap(cli, base=os.path.join(self.d, "missing"))
+        self.assertEqual(rc, 21, out + err)
+        now = time.time()  # every name the next seconds could take already exists
+        for k in range(15):
+            d = os.path.join(self.base, time.strftime("plugin-id-query-%Y%m%dT%H%M%SZ", time.gmtime(now + k)))
+            os.mkdir(d)
+            self.keep_file(d)
+        rc, out, err, evs = self.wrap(cli)
+        self.assertEqual(rc, 21, out + err)
+        for ev in evs:
+            self.assertEqual(os.listdir(os.path.join(self.base, ev)), ["keep"])
+        rc, out, err, _ = self.wrap(cli, base=os.path.join(self.d, "fake-claude"))  # a file, not a directory
+        self.assertEqual(rc, 21, out + err)
+        self.assertEqual(self.calls(), 0)
+        p = subprocess.run(["/bin/bash", WRAPPER], capture_output=True)
+        self.assertEqual(p.returncode, 20)
+
+
+# Wrapper reuses Case's helpers, not its tests.
+for _name in dir(Case):
+    if _name.startswith("test_") and _name not in vars(Wrapper):
+        setattr(Wrapper, _name, None)
 
 
 if __name__ == "__main__":
