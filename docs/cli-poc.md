@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 第一次真實請購嘗試（Claude Code 執行，待 Codex review）**：**真實 init 第一次通過完整 Gate**（`gate_mode=dev_demo_plugins`、`init.gate=passed`，認證 `none` 被接受）。但 Store 拒絕開啟：資料庫目錄就是證據目錄，權限是 `0755`，Store 要求 `0700`。所以沒有 task、沒有工具呼叫、沒有請購；exit 1，依核准停止、不重試（第 52 節）。這是 §51 腳本的缺陷，不是產品行為；修正提案待 review 與 Aaron 另行核准。
+>
 > **10/8 開發展示例外與認證 `none` 已實作（`8976e86`、測試補正 `21090e3`；Claude Code 執行，待 Codex review）**（第 50 節）。fake 測試全部通過。**核准的那一次完整斷網容器驗證（`8976e86`）失敗**：只有一項突變沒被抓到，原因是測試放錯 package，不是產品行為；已在 `21090e3` 修正（只改測試）。**`21090e3` 通過限定範圍技術 review，開發展示例外與認證 `none` 的實作驗收**（第 50.7 節）。`8976e86` 的失敗紀錄保留。§39.3 的 `PRODUCT_BASE` 已改為 `21090e3`；一次真實請購的完整腳本見第 51 節，**待 Aaron 核准，尚未執行**。
 >
 > **現行（10/8，最新）**：**開發展示執行例外提案完成，待 Codex review 與 Aaron 核准；尚未修改 Gate 或執行真實請購**（[live-purchase-execution-decision.md](live-purchase-execution-decision.md) 第 9 節）。
@@ -3100,5 +3102,53 @@ exit "$RUN_EXIT"
 - 腳本執行時的 HEAD 是 `21090e3` 的後代，且之後只有文件差異；
 - 工作區只有 `?? demo`；
 - 由 Claude Code 在沙箱外執行（需要既有 HOME 與登入），或由 Aaron 自行執行。
+
+L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
+
+## 52 第一次真實請購嘗試的執行紀錄（2026-10-08；Claude Code 執行，待 Codex review）
+
+> **結果：exit 1，Store 無法開啟，沒有請購。** 真實 init **通過完整 Gate**（開發展示例外，認證 `none`）；之後 Store 以「資料庫目錄必須是私有的 0700」拒絕開啟。沒有 task 開始，沒有業務工具呼叫，沒有請購與裁決。依核准保存證據後停止，不重試、不另跑 C0′。
+
+- **核准**：Aaron 10/8 核准在完成 §51 判讀文字修正後，依 §51 執行一次真實請購嘗試；接受開發展示例外、本人專用目錄訂閱、用量可能 `unknown` 與背景活動風險；合成資料、全新資料庫、不付款、不放寬上限；任何失敗都保存證據後停止。
+- **判讀修正**：依 Codex 原文，於 `bc3334b` 完成（「exit 1、沒有報告」不能一律判為啟動前拒絕；`stdout.txt` 不是純 JSON）。腳本內容沒有改。
+- **開工核對**：分支 `b1-04-live`，HEAD `bc3334b`；工作區只有 `?? demo`。`21090e3` 之後只有文件差異。抽出的腳本與 §51 已審查的文字逐字相同（`diff` 無差異）。
+- **執行方式**：以 `bash` 執行一次，在 Claude Code 沙箱外（依核准使用既有登入環境）。腳本 exit `1`，即請購命令的退出碼。
+- **前置**：步驟 1～5 通過；二進位 `vcs.revision=bc3334b58733fbf1d353222fc2bb25554f24a157`、`vcs.modified=false`；版本檢查通過。
+- **時間**：`started-utc` `2026-10-08T09:09:40Z`，`ended-utc` `2026-10-08T09:09:41Z`。
+
+**觀測**（白名單證據）：
+- `stdout.txt`：
+  - LIVE 提示行，與例外標示行 `gate: DEV-DEMO plugin exception (...)`；
+  - JSON 報告：`mode=live`、`outcome=store_unavailable`、`detail=prepare_failed`、`exit_code=143`、`task_started=false`、`tool_calls=null`、`task=null`。
+- **trace**（`runs/task-a-1791450581097511000.jsonl`，3 行）：
+  - `run_start`：`gate_mode=dev_demo_plugins`、上限照舊（180 秒、10 則 assistant、8 次呼叫）；
+  - `init`：**`gate=passed`**、`model=claude-sonnet-5-5`、`prepare_error=STORE_ERROR`、`task_started=false`；
+  - `run_end`：`outcome=store_unavailable`、`messages=1`、`assistant_messages=0`、`tool_attempts=0`、`not_ready_refusals=0`、`usage=unknown`。
+- `apa-buyer-error.txt`（apa-buyer 自己的錯誤行）：`the run stopped before any tool ran: database directory <證據目錄> must be private (0700), is -rwxr-xr-x`。
+- `exit-code.txt`：`exit=1`。
+
+**解讀**（照 §51 的判讀規則）：
+- 這不是「exit 1、沒有報告」的情況：有 LIVE 提示、例外標示、JSON 報告與 trace。**CLI 有啟動**，而且回報了 init。
+- 分類為：**Gate 通過，Store 無法開啟（`store_unavailable`／`prepare_failed`），沒有請購**。
+- CLI 在 Store 準備失敗後由 Host 停止（`exit_code=143`）；只讀到 1 則訊息（init），沒有 assistant 訊息。是否已產生模型請求無法確認，用量記 `unknown`。
+- **第一次**有真實 init 通過完整 Gate（例外模式），包含認證 `none`。這只代表 init 的白名單條件符合，不代表 plugins 的內容或行為已確認。
+- **原因**：
+  - §51 腳本把 `APA_DB_PATH` 設為 `$EV/apa-live.db`。
+  - 證據目錄 `$EV` 是以一般 `mkdir` 建立的（`0755`），而 Store 的 `dbPath` 要求資料庫所在目錄不可讓群組或其他人存取（`internal/store/store.go`）。
+  - 這是腳本的缺陷：證據目錄與資料庫目錄的權限要求不同。產品的檢查行為正確，Gate 與 Store 都照設計拒絕。
+
+**證據**（`artifacts/b1-04/live-purchase-20261008T090934Z/`，`artifacts/` 不進版控）：
+- `commit.txt`、`binary-vcs.txt`、`go-version-build.txt`、`started-utc.txt`、`ended-utc.txt`、`exit-code.txt`、`stdout.txt`、`apa-buyer-error.txt`
+- `runs/task-a-1791450581097511000.jsonl`
+
+`apa-live.db` 沒有建立（Store 拒絕開啟）；暫存目錄已刪；repo 工作區只有 `?? demo`。
+
+**沒有做的事**：沒有重試、沒有另跑 C0′、沒有改腳本或程式；沒有付款；沒有修改 Gate、認證清單或上限。
+
+**修正提案**（未套用；待 Codex review 與 Aaron 另行核准）：
+- §51 第 6 步改用 `APA_DB_PATH="$EV/db/apa-live.db"`，並在之前檢查 `[ ! -e "$EV/db" ]`，存在就停止。
+- Store 的 `dbPath` 會以 `os.MkdirAll(dir, 0o700)` 建立缺少的目錄（umask 只會減少權限，不會增加），所以 `$EV/db` 會是私有目錄；腳本不需要另外 `mkdir`。
+- 其他前置檢查、退出碼保存與判讀規則都不變。
+- 修正後的再一次嘗試，須 Aaron 另行核准。
 
 L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
