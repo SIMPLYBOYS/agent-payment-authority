@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **10/8 開發展示例外與認證 `none` 已實作（`8976e86`、測試補正 `21090e3`；Claude Code 執行，待 Codex review）**（第 50 節）。fake 測試全部通過。**核准的那一次完整斷網容器驗證（`8976e86`）失敗**：只有一項突變沒被抓到，原因是測試放錯 package，不是產品行為；已在 `21090e3` 修正（只改測試）。修正後尚未在容器中驗證，再跑須 Aaron 核准。真實請購尚未核准、未執行。
+> **10/8 開發展示例外與認證 `none` 已實作（`8976e86`、測試補正 `21090e3`；Claude Code 執行，待 Codex review）**（第 50 節）。fake 測試全部通過。**核准的那一次完整斷網容器驗證（`8976e86`）失敗**：只有一項突變沒被抓到，原因是測試放錯 package，不是產品行為；已在 `21090e3` 修正（只改測試）。**經 Aaron 核准補跑：`21090e3` 完整斷網容器通過**（266／266；第 50.6 節）。`8976e86` 的失敗紀錄保留。待 Codex review；真實請購尚未核准、未執行。
 >
 > **現行（10/8，最新）**：**開發展示執行例外提案完成，待 Codex review 與 Aaron 核准；尚未修改 Gate 或執行真實請購**（[live-purchase-execution-decision.md](live-purchase-execution-decision.md) 第 9 節）。
 > - 提案內容：預設嚴格模式維持零 plugins；`run --live --dev-demo-plugins` 明確 opt-in 時，只接受恰好兩個指定名稱；其他 Gate 條件不變；trace 標示 `gate_mode`。
@@ -2926,3 +2926,29 @@ L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
 3. review 通過後：同步 §39.3 的 `PRODUCT_BASE`，並由 Aaron 另行核准一次正式請購嘗試（9.4）。
 
 不另跑 C0′，不恢復 plugin 調查。L1-b、L1-c 不標整體通過；B1-04／B1-06 仍 InProgress。
+
+### 50.6 補跑的完整斷網容器驗證（`21090e3`；2026-10-08；Claude Code 執行，待 Codex 核對）
+
+> **結果：通過。** overall exit `0`。只代表 fake 測試、突變與隔離檢查通過，不代表真實 plugins 的行為已確認，也不代表正式請購已核准。`8976e86` 的失敗紀錄（50.3）保留，不回填。
+
+- **核准**：Aaron 10/8「核准再跑一次完整斷網容器驗證」。
+- **基準**：`21090e3f046690bd17d5d13d30d37fb31030d512`。當時 HEAD 為 `83e7bab`，`21090e3` 之後只有文件差異。映像 `sha256:78258368…b6d0`，沒有重建；go.mod／go.sum 相符。
+- **命令**：`APA_VERIFY_IMAGE=docker.io/library/apa-verify:b1-05 DOCKER_CONTEXT=desktop-linux sh scripts/verify/container-verify.sh 21090e3`
+
+  | 步驟 | exit | 秒 |
+  |---|---|---|
+  | check-contracts | 0 | 16 |
+  | check | 0 | 79 |
+  | race-cover | 0 | 274 |
+  | verify-b1-01 | 0 | 42 |
+  | guards | 0 | 1 |
+  | evidence-import-tests | 0 | 1 |
+  | mutation | 0 | 425 |
+
+- **突變**：baseline PASS；`result: all mutations killed by a failing test`，266 項都被抓到。#261～#266（開發展示例外）都是 KILLED，包含上次存活的 #265。
+- **隔離自檢**：17 項全部符合。
+- **證據**：`artifacts/verify-container/runs/21090e3f0466-20261008T084206Z/`（匯入完整，295 個檔案）。
+- **尚待**：
+  1. Codex review 實作、測試、突變，以及兩次容器紀錄（`8976e86` 失敗、`21090e3` 通過）；
+  2. review 通過後，同步 §39.3 的 `PRODUCT_BASE`；
+  3. 由 Aaron 另行核准一次正式請購嘗試。
