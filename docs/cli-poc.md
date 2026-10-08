@@ -3,7 +3,8 @@
 > **10/8 單一真實 Agent 即時展示：demo host 的 live 模式已實作，fake／合成資料驗證完成，待 Codex review（第 55 節）**：
 > - 主持人按「開始（真實 CLI）」後執行一場，走與 `apa-buyer run --live` 相同的路徑；預設關閉，啟動不會執行模型。
 > - 程式 `c9acebc`／`2d4db5b`，測試 `5d43a75`／`145eb86`。
-> - 核准的那一次完整斷網容器（`5d43a75`）**失敗**（verify-b1-01 的訊息文字、5 個突變的替換文字），已修正；**`145eb86` 的完整容器重跑待 Aaron 核准**。
+> - 核准的那一次完整斷網容器（`5d43a75`）**失敗**（verify-b1-01 的訊息文字、5 個突變的替換文字），已修正。
+> - Codex review 的 R1（trace 查詢拖住即時畫面、失敗時殘留「執行中」）已修正於 `29d1cd3`／`d5bc444`（第 55.8 節）；**對最終版本 `d5bc444` 的完整容器待 Aaron 核准**。
 > - 本輪沒有執行真實 CLI；真實執行需在 review 後另行核准（55.7）。
 > - B1-04／B1-06 維持 InProgress。
 >
@@ -3771,3 +3772,40 @@ Ask 不代表核准或付款；本輪沒有核准按鈕、自動核准、Signer�
 **這次實作的核准，不代替上述真實執行的核准。**
 
 B1-04／B1-06 維持 InProgress。這個出口只完成單一真實 Agent 即時展示的實作與 fake 驗證；未完成多 Agent、Admin 營運聚合、付款、區塊鏈、ZK、M1 或商業展示版。
+
+### 55.8 Codex review 的 R1：trace 查詢不再拖住即時畫面（2026-10-08～09；Claude Code 執行，待 Codex 複核）
+
+> **起因**：Codex 唯讀核對 `145eb86` 時指出，`web/app.js` 在 task 與事件一致後，仍要等 `/trace` 回來才更新畫面、送出 Unity 投影並安排下一輪輪詢。
+> - trace 請求遲遲不完成時，主畫面與輪詢都會被拖住。
+> - trace 讀取失敗時錯誤被忽略，上一份 `running` 會一直顯示「CLI 執行中」。
+>
+> Codex 沒有實際重現，不是後端授權問題。整體切片暫不驗收；完整容器留到修正後的最終版本再跑。
+
+- **修正**（程式 `29d1cd3`，只改 `web/app.js` 與 `web/adapter.js`）：
+  - `refreshTrace` 與主輪詢並行，主輪詢**不再等它**：task 與事件一致後立即更新畫面並送出投影。
+  - 同一世代同時只有一個 trace 請求，最多等 5 秒（`AbortSignal.timeout` 加上該世代的 abort）。
+  - 只有同一世代、同一 task 的回覆會被採用；切換身分或 task、清除、離開頁面後，晚到的回覆一律丟棄。
+  - 讀取失敗或逾時時，顯示「trace 更新失敗：目前未確認」，保留的舊資料逐列標「（上次結果）」。上次是 `running` 時改寫成「上次結果：CLI 執行中（不代表目前仍在執行）」，不再宣稱目前仍在執行。
+- **測試**（`d5bc444`）：
+  - adapter：失敗時無舊資料、舊資料為 running、舊資料為完成、舊資料屬於另一個 task，四種情況。
+  - `live-ui.mjs`：用測試專用的 fetch 包裝器暫扣、失敗或延遲 `/trace`（與 `browser-ui.mjs` 的暫扣手法相同）：
+    1. trace 讀取被扣住、**仍未結束**時，請購卡、Timeline 與 Unity 已到 #3；
+    2. 被扣住的讀取在時限到時結束，並標「目前未確認」；
+    3. 先取得 `running`，之後都回 503：顯示上次結果；場次結束後也不說「目前仍在執行」；
+    4. 恢復後顯示完成紀錄；
+    5. 切換 task 後，前一個 task 的晚到回覆完全沒有影響新畫面（在頁面內以 MutationObserver 全程監看，「連一瞬間都沒有」）。
+- **反向驗證**（`artifacts/b1-04/live-r1-reverse-d5bc444baffc-20261008T154350Z/`）：在 repo 副本中逐項拿掉保護，再跑 `live-ui.mjs`。4 項都以 `R1:` 斷言失敗抓到：
+  - 主輪詢等待 trace → 「while a trace read is held」失敗（pending 0）；
+  - 忽略讀取失敗 → 時限檢查失敗；
+  - 沒有時限 → 時限檢查失敗；
+  - 不檢查世代與 task → 晚到回覆檢查失敗（`lost=true`）。
+
+  這次的保護在網頁上，突變檢查器只涵蓋 Go，所以沒有加進檢查器。
+- **回歸**（Claude Code 執行，`d5bc444`）：
+  - `live-ui.mjs` 37 PASS（`artifacts/b1-04/live-ui-d5bc444baffc-20261008T155218Z/`，新增截圖 `trace-failed.png`、`late-reply-dropped.png`）；
+  - fake 展示 `browser-ui.mjs` 317 PASS、0 FAIL（`artifacts/b1-06/ui-d5bc444baffc-20261008T155500Z/`）；
+  - 歷史回放真實副本 46、合成 53 PASS；
+  - Node 52；`go test -race ./cmd/demo/` ok。
+- **失敗紀錄**：測試腳本第一版的 fetch 包裝器寫在 template literal 裡，`\/` 被吃掉，正規式變成註解，造成語法錯誤，改用 `endsWith`。另外兩項檢查在拿掉修正後仍可能通過，所以補強了：被扣住的讀取要在仍未結束時檢查畫面；晚到回覆改在頁面內全程監看，以免被 adapter 的 task 檢查掩蓋。
+- **完整斷網容器**：本輪沒有跑。最終程式為 `d5bc444`，**待 Aaron 核准對 `d5bc444` 跑一次**，用來取代 `5d43a75` 失敗的那一次。不重查 plugins、不重建 Unity、不執行真實 CLI。
+- B1-04／B1-06 維持 InProgress，整體切片待 Codex 複核。
