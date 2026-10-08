@@ -1,5 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
+> **10/8 完整 plugin ID 的最小查詢方案**：已整理，**未執行任何命令、未讀設定、未改 Gate**（第 46 節）。用一條 `claude plugin list --json`，在與 APA 子程序相同的環境下執行一次，輸出只留兩個名稱的 `id`／`scope`／`enabled`。由誰執行、是否執行，待 Aaron 決定。
+>
 > **10/8 方案 A 後的診斷型 C0′（Claude Code 執行，待 Codex review）**：取得 init（exit `0`，`observed`）。**plugins 仍非空**：同樣 2 個（`cc-plugin-agents-md`、`cc-plugin-plugin-authoring`，path `relative`）。§44.4 的其他條件都符合：agents／skills 為 0，MCP 1 個且 apa connected，tools 3／3／0，`dontAsk`，`approved`。依 44.5：**方案 A 本次未達目標**，保存證據後停止；不推論來源、不自動換方案（第 45 節）。正式請購阻擋仍在。
 >
 > **10/8 方案 A 驗收與下一次診斷清單**：**方案 A 於 `40bd263` 通過限定範圍技術 review，關閉這項實作與 fake 驗證。** 只證明 APA 子程序的專用 plugin 根目錄設定、失敗處理與 fake 回歸符合要求，不代表真實 plugins 已停用，也不代表正式請購可放行（第 43.6 節）。下一次診斷型 C0′ 的執行確認清單已整理（第 44 節；§39.3 的 `PRODUCT_BASE` 改為 `40bd263`）。**`d46ca0b` 通過 Codex 限定文件複核**：下一次診斷型 C0′ 清單已通過文件複核，尚待 Aaron 另行核准執行（第 44.7 節）。
@@ -2152,3 +2154,91 @@ L1-b 不標完成；B1-04 仍 InProgress；不合併、不推送、不標 Done�
 另外也須決定：方案 A 的程式要保留還是撤回。它沒有達到目標，但也沒有影響其他觀測項目。
 
 L1-b、L1-c 不標整體通過；B1-04 仍 InProgress；不合併、不推送、不標 Done。
+
+## 46 完整 plugin ID 的最小查詢方案（2026-10-08；Claude Code 整理，未執行）
+
+> 本節只整理方案：**沒有執行任何命令（含 `claude`、`--version`、`plugin list`），沒有讀設定、HOME 或 keychain，沒有改 Gate、認證接受清單、啟動參數或產品程式。** 不構成執行核准。
+
+- **目的**：第 45 節的診斷之後，Aaron 需要在 42.4 的三個下一步中擇一。本節展開第 1 項「取得完整 plugin id」：只為那兩個 runtime 觀測到的名稱（`cc-plugin-agents-md`、`cc-plugin-plugin-authoring`），取得 `<name>@<origin>`，作為評估 `--settings` 方案（42.3 的 C）的前置資訊。
+
+### 46.1 官方依據（2026-10-08 查閱；版本適用性未確認）
+
+[Plugin 命令參考](https://code.claude.com/docs/en/plugins/cli-reference)的 `plugin list`：
+- `claude plugin list --json` 對每個安裝輸出一個物件。一定有的欄位：`id`、`version`、`scope`、`enabled`、`installPath`。
+- `id` 的形式：`name@marketplace`（安裝）、`name@inline`、`name@skills-dir`、`name@synced`。
+- `scope`：安裝為 `user`／`project`／`local`／`managed`；skills-dir 為 `user`／`project`；另有 `session`、`synced`。
+- `enabled`：「Whether the plugin is enabled in your merged settings」。
+- 其他可能出現的欄位，例如 `mcpServers`（plugin 的 MCP 定義）、`errors`、`installPath`，可能含路徑或設定內容，**不保留**。
+
+[Plugin 載入](https://code.claude.com/docs/en/plugins/loading)：
+- marketplace plugin 有兩個名字：`marketplace.json` 的 entry name（`id` 的名稱部分），以及 manifest 的 `name`。兩者可以不同。
+- init 回報的名稱是哪一個，文件沒有說明。
+
+### 46.2 查詢命令（未執行；bash；一次）
+
+- **執行位置**：全新暫存目錄中的空工作目錄，避免讀到 repo 的 `.claude/`。
+- **環境**：與 APA 子程序相同：
+  - 白名單變數（`HOME`、`USER`、`LOGNAME`、`PATH`、`TMPDIR`、`LANG`）；
+  - 固定變數 `DISABLE_AUTOUPDATER=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`、`CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`；
+  - 方案 A 的空 plugin 根目錄。
+
+  這樣列出的，最接近第 45 節 APA runtime 看到的情況。
+- **輸出**：CLI 的原始輸出只經過管線，不落地，不顯示在終端機。過濾器只印兩個名稱的 `id`、origin（`@` 之後）、`scope`、`enabled`，以及 `errors` 的筆數。stderr 丟棄，只記退出碼。
+
+```bash
+# 未執行；須 Aaron 決定由誰、是否執行。只執行一次，失敗不重試。
+R=$(mktemp -d "${TMPDIR:-/tmp}/apa-plist.XXXXXX") || exit 1
+mkdir -m 700 "$R/plugins" "$R/work" && cd "$R/work" || exit 1
+env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" PATH="$PATH" TMPDIR="$TMPDIR" LANG="${LANG:-}" \
+  DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1 \
+  CLAUDE_CODE_PLUGIN_CACHE_DIR="$R/plugins" \
+  /Users/mac/.local/bin/claude plugin list --json 2>/dev/null \
+| python3 -I -c '
+import json, sys
+names = {"cc-plugin-agents-md", "cc-plugin-plugin-authoring"}
+try:
+    rows = json.load(sys.stdin)
+except Exception:
+    print("output: not JSON"); sys.exit(0)
+if not isinstance(rows, list):
+    print("output: not a list"); sys.exit(0)
+hit = 0
+for r in rows:
+    pid = r.get("id") if isinstance(r, dict) else None
+    if isinstance(pid, str) and pid.rpartition("@")[0] in names:
+        hit += 1
+        print(json.dumps({"id": pid, "origin": pid.rpartition("@")[2], "scope": r.get("scope"),
+                          "enabled": r.get("enabled"), "errors": len(r.get("errors") or [])}))
+print("matched", hit, "of", len(rows), "entries")'
+echo "claude exit=${PIPESTATUS[0]}"
+cd / && rm -rf "$R"
+```
+
+### 46.3 誰執行（擇一，Aaron 決定）
+
+| 方式 | Claude Code 接觸的內容 | 說明 |
+|---|---|---|
+| **甲（建議）Aaron 自行執行**上面的命令，只回傳過濾後的輸出 | 只有過濾後的幾行 | Claude Code 不執行 CLI、不讀 HOME。 |
+| 乙：核准 Claude Code 執行一次 | 同上；過濾後的輸出存為證據 | 須在沙箱外執行（CLI 需要 HOME）。原始輸出不落地。 |
+
+兩種方式都只執行一次。失敗、非 JSON 或 `matched 0` 都停止，不擴大輸出，不改成列出全部 id。
+
+### 46.4 已知限制與風險
+
+- **不等於 APA 的設定視角**：APA 以 `--restricted` 啟動（只讀 managed 與 `--settings`）。`plugin list` 是否支援、是否套用 `--restricted`，文件沒有說明，所以命令不加。`enabled` 是「merged settings」，可能包含 user 設定；因此和 APA runtime 是否載入，不一定一致。
+- **名稱可能對不上**：`id` 的名稱部分是 marketplace entry name，init 的名稱可能是 manifest name。若 `matched 0`，只表示這兩個名稱沒有對上，**不代表 plugin 不存在**；不改用列出全部 id 的方式，另行決定。
+- **`scope` 不等於強制啟用的設定層**：`scope: managed` 是安裝範圍，不能直接說明是哪一層讓它啟用。若該 id 被 managed 強制啟用，`--settings` 無法覆寫（42.4）。**取得完整 id 不能證明 C 可行。**
+- **CLI 的行為**：
+  - `plugin list` 是否有網路活動、是否觸發背景 marketplace 更新、是否讀取登入資料，文件沒有說明。
+  - 空的 plugin 根目錄可能被寫入，命令結束時隨暫存目錄刪除。
+  - 不能保證 CLI 不寫入其他日常狀態。
+  - CLI 版本未另外檢查；第 45 節的 runtime 為 `2.1.293`，之後是否變動未知。
+- **輸出內容**：只有兩個名稱的 id、origin、scope、enabled、錯誤筆數。不保存 `installPath`、`mcpServers`、`errors` 內文、`version`、時間戳，也不保存其他 plugin。
+
+### 46.5 取得結果之後（另行決定，不自動進行）
+
+- 有 id，且 `enabled: true`：可以設計 C 的受控實驗。做法是在子程序加 `--settings '{"enabledPlugins":{"<id>":false}}'`，只針對這兩個 id，flag 來源只對該次 session 有效。依 42.5、42.6 的模式寫實作計畫與診斷條件，交 review，實作與真實診斷各自另行核准。
+- `scope: managed`，或有其他跡象顯示是受管設定強制啟用：C 可能無效，改由 Aaron 評估 42.4 的第 2、3 項。
+- 結果不改 Gate、不放行這兩個 plugin。
+
+L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
