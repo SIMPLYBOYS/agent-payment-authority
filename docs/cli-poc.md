@@ -1,7 +1,7 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
 > **現行摘要（10/8，最新）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估。** 評估見 [live-purchase-execution-decision.md](live-purchase-execution-decision.md)（待 Codex review 與 Aaron 決策；未核准實作或真實執行）。
-> - 推薦路線一：維持零 plugins，改用 APA 專用 `CLAUDE_CONFIG_DIR`，須 Aaron 另外登入。備案路線二：目前尚不可採用。
+> - **Aaron 10/8 決定採用路線一**：維持零 plugins，改用 APA 專用 `CLAUDE_CONFIG_DIR`，須 Aaron 另外登入。目錄位置、階段 B 排序、實作與執行的核准仍待定。備案路線二：目前尚不可採用。
 > - 第一筆真實請購目前被兩個條件擋住：plugins 非空，以及認證接受清單為空。
 > - plugin ID 查詢已執行一次，結果 `no_match`（46.10、46.11）；之後的擴大查詢與診斷工具工作暫停，不撤回已驗收的修正。
 > - 以下各條 10/8 狀態依時間由新到舊，是當時的紀錄。

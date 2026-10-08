@@ -511,7 +511,7 @@
 >
 > **進度（10/8，真實 plugin ID 查詢）**：依 Aaron 核准在 macOS 執行一次，結果 `no_match`（列出 1 筆，非兩個候選）。依規則停止，完整 id 仍未取得；`no_match` 不代表 plugin 不存在（`docs/cli-poc.md` 第 46.10 節）。Codex 核對通過（46.11），但沒有解除正式請購的阻擋。Codex 建議的下一步是「最小擴大 ID 輸出範圍」的修訂方案，是否進行須 Aaron 決定。
 >
-> **進度（10/8，現行）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估**（`docs/live-purchase-execution-decision.md`，待 Codex review 與 Aaron 決策）。推薦維持零 plugins，改用 APA 專用 `CLAUDE_CONFIG_DIR`（須 Aaron 另外登入），並以一次 C0′ 驗證；備案是接受有限組成（目前尚不可採用，缺 plugins 元件清單）。認證接受清單為空，是另一個獨立阻擋。L1-c、L1-d、L1-e 的順序依該文件 §4。
+> **進度（10/8，現行）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估**（`docs/live-purchase-execution-decision.md`）。**Aaron 10/8 決定採用路線一**：維持零 plugins，改用 APA 專用 `CLAUDE_CONFIG_DIR`（須 Aaron 另外登入），並以一次 C0′ 驗證；備案是接受有限組成（目前尚不可採用，缺 plugins 元件清單）。認證接受清單為空，是另一個獨立阻擋。L1-c、L1-d、L1-e 的順序依該文件 §4。
 
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。
