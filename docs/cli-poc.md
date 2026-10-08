@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **現行摘要（10/8，最新）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估。** 評估見 [live-purchase-execution-decision.md](live-purchase-execution-decision.md)：路線一決策稿 `9cf4e6a` 通過限定文件複核。**10/8 專用設定目錄的實作（`21560c5`、`a4e3d8e`）於 `a4e3d8e` 通過限定範圍技術 review，實作與 fake 驗證關閉**（第 47.5 節）。§39.3 的 `PRODUCT_BASE` 已改為 `a4e3d8e`。下一步是 Aaron 本人以專用目錄登入並完成階段 B（第 48 節）。尚未證明真實 plugins 為空；C0′、認證清單修改與正式請購各自另行核准。
+> **現行摘要（10/8，最新）**：**擴大 plugin ID 查詢暫停，改為真實請購執行條件評估。** 評估見 [live-purchase-execution-decision.md](live-purchase-execution-decision.md)：路線一決策稿 `9cf4e6a` 通過限定文件複核。**10/8 專用設定目錄的實作（`21560c5`、`a4e3d8e`）於 `a4e3d8e` 通過限定範圍技術 review，實作與 fake 驗證關閉**（第 47.5 節）。§39.3 的 `PRODUCT_BASE` 已改為 `a4e3d8e`。**Aaron 已以專用目錄登入**（`authMethod=claude.ai`、`configDirectory` 符合；第 48.1 節），第 4 項本人確認待回答。尚未證明真實 plugins 為空；C0′、認證清單修改與正式請購各自另行核准。
 > - **Aaron 10/8 已選定路線一**：維持零 plugins，**保留方案 A，另加** APA 專用 `CLAUDE_CONFIG_DIR`（`~/.apa-claude`，以子程序 HOME 組成絕對路徑），須 Aaron 另外登入。階段 B（本人確認登入方式）排在 C0′ 之前。
 > - 之後的實作、登入後的 C0′、認證清單修改與正式請購，各自另行核准，互不授權。
 > - C0′ 須符合 §44.4 全部條件，才記為「本次 init 達到診斷目標」；plugins 仍非空只代表本次方案未達目標，來源仍未確認，停止後由 Aaron 決定是否評估路線二。
@@ -2759,3 +2759,30 @@ CLAUDE_CONFIG_DIR="$HOME/.apa-claude" claude auth status
 1. 一次 C0′（§39.3 腳本，`PRODUCT_BASE=a4e3d8e`；逐項核對 §44.4 全部條件）；
 2. 認證接受清單的修改；
 3. 正式請購。
+
+### 48.1 階段 B 結果：Aaron 本人登入與確認（2026-10-08；Aaron 執行，Claude Code 只記錄）
+
+> Aaron 以專用目錄完成登入，並提供 `CLAUDE_CONFIG_DIR="$HOME/.apa-claude" claude auth status` 的 JSON 輸出。**下表只記錄非識別欄位**；輸出中的 email、組織 ID 與組織名稱刻意不寫入文件或 vault。
+
+| 項目 | 值 | 對照第 48 節的要求 |
+|---|---|---|
+| `loggedIn` | `true` | 已登入。退出碼沒有另外回報，但 `loggedIn: true` 與文件所述的 exit 0 一致 |
+| `authMethod` | `claude.ai` | claude.ai 登入，不是 API key、OAuth token 或第三方 |
+| `apiProvider` | `firstParty` | Anthropic 直連，不是 Bedrock、Vertex 等 |
+| `configDirectory` | `/Users/mac/.apa-claude` | **符合**：等於 `$HOME/.apa-claude`，確認到的是專用目錄而不是日常 `~/.claude` |
+| `projectsDirectory` | `/Users/mac/.apa-claude/projects` | 在專用目錄之下 |
+| `subscriptionType` | `max` | 訂閱方案 |
+| 第 4 項：Aaron 確認是本人訂閱帳號、預期計費方式 | **尚未明確表示** | 待 Aaron 回答是／否 |
+
+**解讀**（不額外推論）：
+- 這是 Aaron 本人對專用目錄登入方式的確認依據：claude.ai 帳號、first-party、`max` 訂閱。
+- 這不是 Claude Code 或 Codex 的獨立查證；Claude Code 沒有執行這些命令，也沒有讀取 `~/.apa-claude`。
+- Gate 讀的是 init 的 `apiKeySource`，與 `authMethod` 是不同欄位。過去兩次 init 觀測為 `none`；依 Agent SDK 文件，`none` 包含 claude.ai 登入，但不能單獨證明登入方式。
+- 這份確認可作為之後評估「是否把 `none` 加入接受清單」的依據之一。**接受清單沒有變更**；變更須另行設計、review 並由 Aaron 核准（L1-d）。
+- 這次登入**不證明**真實 plugins 在專用目錄下為空；那要由 C0′ 確認。
+
+**下一步**（各自另行核准）：
+1. Aaron 回答第 4 項；
+2. 一次 C0′（§39.3，`PRODUCT_BASE=a4e3d8e`；逐項核對 §44.4 全部條件）；
+3. 認證接受清單的修改；
+4. 正式請購。
