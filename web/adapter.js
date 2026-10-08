@@ -481,10 +481,19 @@ const TRACE_MISSING = {
   ambiguous: "這個 task 有多份 trace：無法確定，不顯示對應",
 };
 const USAGE = [["input_tokens", "input"], ["output_tokens", "output"], ["cache_creation_input_tokens", "cache_creation"], ["cache_read_input_tokens", "cache_read"]];
-function liveTools(reply, taskId, toolRows) {
+// failed: the latest read of the trace failed or timed out; reply is then
+// the last one this page got, shown as such, never as the present.
+function liveTools(reply, taskId, toolRows, failed) {
   const title = "工具呼叫（真實 Agent trace）";
   const note = "工具呼叫來自 CLI 結束後才寫出的白名單 trace，不是逐工具即時串流；請購與事件的對應由 Host 推導；不含模型文字。";
-  if (!reply || reply.task_id !== taskId) return { title, note, rows: [["工具呼叫", "讀取中（未確認）", "—"]] };
+  const mine = !!reply && reply.task_id === taskId;
+  if (failed) {
+    if (!mine) return { title, note, rows: [["trace 更新", "trace 更新失敗：目前未確認", "網頁"]] };
+    const last = liveTools(reply, taskId, toolRows, false).rows.map(([k, v, s]) =>
+      [k, reply.state === "running" ? "上次結果：CLI 執行中（不代表目前仍在執行）" : v, s + "（上次結果）"]);
+    return { title, note, rows: [["trace 更新", "trace 更新失敗：目前未確認；以下是上次取得的結果", "網頁"], ...last] };
+  }
+  if (!mine) return { title, note, rows: [["工具呼叫", "讀取中（未確認）", "—"]] };
   if (reply.state === "running") return { title, note, rows: [["工具呼叫", "CLI 執行中：trace 在 CLI 結束後才寫出，現在無法逐工具顯示（不代表工具尚未呼叫）", "Host"]] };
   if (reply.state !== "available" || !reply.trace) return { title, note, rows: [["工具呼叫", TRACE_MISSING[reply.reason] || "無法取得（未確認）", "Host"]] };
   const tr = reply.trace;
@@ -558,7 +567,7 @@ export function evidence(snapshot, po, ctx) {
       rows: trace ? toolRows(trace) : [["工具呼叫", hist.trace ? "這個 task 沒有 trace（trace 屬於另一個 task）"
         : "沒有可顯示的 trace（host 未指定 --history-trace，或 trace 的 task 不在你的查看範圍）", "—"]] });
   } else if (ctx.live) {
-    sections.push(liveTools(ctx.trace, t.task_id, toolRows));
+    sections.push(liveTools(ctx.trace, t.task_id, toolRows, !!ctx.traceFailed));
   }
   // In step only when Unity's report names the projection sent: the same
   // generation, task, sequence and phase. Anything else is "not yet in

@@ -30,7 +30,9 @@ const MAX_REREAD = 3;   // task and events must agree; then show "updating"
 let token = null;       // the viewer token, memory only
 let history = null;     // the host's history mode (a recorded real run), from /api/viewer
 let live = null;        // the host's live mode (a real Agent run the operator starts), from /api/viewer
-let liveTrace = null;   // live mode: { gen, reply } of GET /api/tasks/{id}/trace for the open task
+let liveTrace = null;   // live mode: { gen, task, reply, failed } of GET /api/tasks/{id}/trace for the open task
+let traceInFlight = 0;  // the generation whose trace read is in flight (0: none)
+const TRACE_MS = 5000;  // a trace read waits at most this long, then it is "未確認"
 let abort = null;       // aborts the current generation's requests
 let timer = null;
 let inFlight = false;
@@ -153,8 +155,8 @@ function setMode(m) {
   $("status").dataset.mode = m;
 }
 
-async function call(path, gen) {
-  const res = await fetch(path, { headers: { Authorization: "Bearer " + token }, cache: "no-store", signal: abort.signal, credentials: "omit" });
+async function call(path, gen, signal = abort.signal) {
+  const res = await fetch(path, { headers: { Authorization: "Bearer " + token }, cache: "no-store", signal, credentials: "omit" });
   if (gen !== state.gen) throw new Error("stale");
   if (res.status === 401) throw Object.assign(new Error("unauthenticated"), { code: "unauthenticated" });
   if (res.status === 404) throw Object.assign(new Error("not_found"), { code: "not_found" });
@@ -250,7 +252,7 @@ function renderPanels() {
   const rp = mode === "replay" ? replayPos : null;
   const view = snap ? (rp ? A.stepView(snap, rp.n) : snap) : null;
   const ctx = { mode: rp ? "replay" : "live", n: rp && rp.n, m: rp && rp.m, catalog, catalogAt, history, live,
-    trace: live && liveTrace && liveTrace.gen === state.gen ? liveTrace.reply : null };
+    trace: live && liveTrace && liveTrace.gen === state.gen ? liveTrace.reply : null, traceFailed: !!(live && liveTrace && liveTrace.gen === state.gen && liveTrace.failed) };
   const c = A.card(view, rp ? null : chosenPo, ctx);
   const mo = motion && motion.gen === state.gen ? motion : null;
   const e = snap ? A.evidence(snap, c && c.po, { ...ctx, sent, report: lastReport, motion: mo && { rule: mo.rule, text: mo.first ? FIRST_LOAD + "（不播放過場）" : mo.text } }) : null;
@@ -467,6 +469,29 @@ export function openTask(id) {
   poll(true);
 }
 
+// refreshTrace reads the open task's run trace in live mode (the buyer
+// host writes it when the CLI ends) beside the main poll, never in its
+// way: one read per generation at a time, at most TRACE_MS, and only a
+// reply of the same generation and task acts. A failed or timed-out read
+// says so; the last reply stays, shown as the last one, never as now.
+async function refreshTrace(gen, taskId) {
+  const known = liveTrace && liveTrace.gen === gen && liveTrace.task === taskId ? liveTrace : null;
+  if (traceInFlight === gen || (known && !known.failed && known.reply && known.reply.state === "available")) return;
+  traceInFlight = gen;
+  let reply = null;
+  let failed = false;
+  try {
+    reply = await call("/api/tasks/" + encodeURIComponent(taskId) + "/trace", gen, AbortSignal.any([abort.signal, AbortSignal.timeout(TRACE_MS)]));
+  } catch (e) {
+    failed = true;
+  }
+  if (traceInFlight === gen) traceInFlight = 0;
+  if (gen !== state.gen || state.taskId !== taskId) return; // switched, cleared or left: nothing acts
+  const last = liveTrace && liveTrace.gen === gen && liveTrace.task === taskId ? liveTrace.reply : null;
+  liveTrace = failed ? { gen, task: taskId, reply: last, failed: true } : { gen, task: taskId, reply, failed: false };
+  renderPanels();
+}
+
 // poll reads task, then events, until they agree (as_of_sequence), at most
 // MAX_REREAD times; then keeps the last good snapshot and says "updating".
 async function poll(first) {
@@ -484,16 +509,7 @@ async function poll(first) {
       result = A.commit(state, gen, task, events);
     }
     if (result === "inconsistent") A.fail(state, gen, "updating");
-    if (live && (!liveTrace || liveTrace.gen !== gen || liveTrace.reply.state !== "available")) {
-      // live mode: the run's tool calls, once the CLI has ended (the trace
-      // is written then); a failed read leaves the last reply, never more.
-      try {
-        const reply = await call("/api/tasks/" + id + "/trace", gen);
-        if (gen === state.gen) { liveTrace = { gen, reply }; renderPanels(); }
-      } catch (e) {
-        if (e.code === "unauthenticated") throw e;
-      }
-    }
+    if (live) refreshTrace(gen, state.taskId); // beside the main poll, never awaited by it
   } catch (e) {
     if (gen === state.gen) {
       if (e.code === "unauthenticated") { inFlight = false; return unauthorized ? unauthorized() : forget("token 已失效，請重新輸入"); }
