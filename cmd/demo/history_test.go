@@ -311,12 +311,26 @@ func TestHistoryTokenFileIsNotTheTrace(t *testing.T) {
 	os.Link(trace, hard)
 	parent := filepath.Join(testRoot, "link-"+filepath.Base(dir))
 	os.Symlink(dir, parent)
+	cwd, _ := os.Getwd()
+	rel, err := filepath.Rel(cwd, trace)
+	if err != nil || filepath.IsAbs(rel) {
+		t.Fatalf("no relative spelling of %s: %v", trace, err)
+	}
+	mode := func() os.FileMode {
+		fi, err := os.Stat(trace)
+		if err != nil {
+			t.Fatalf("the trace is gone: %v", err)
+		}
+		return fi.Mode()
+	}
+	mode0 := mode()
 	for name, tok := range map[string]string{
-		"the trace":          trace,
-		"a symlink to it":    link,
-		"a hard link to it":  hard,
-		"a symlinked parent": filepath.Join(parent, "trace.jsonl"),
-		"a dot-dot spelling": filepath.Join(dir, "sub", "..", "trace.jsonl"),
+		"a relative spelling": rel,
+		"the trace":           trace,
+		"a symlink to it":     link,
+		"a hard link to it":   hard,
+		"a symlinked parent":  filepath.Join(parent, "trace.jsonl"),
+		"a dot-dot spelling":  filepath.Join(dir, "sub", "..", "trace.jsonl"),
 	} {
 		h, err := startHistoryTokens(t, tok, "--history-db", db, "--history-trace", trace)
 		if err == nil {
@@ -325,16 +339,16 @@ func TestHistoryTokenFileIsNotTheTrace(t *testing.T) {
 		} else if !errors.Is(err, errTokenInput) {
 			t.Errorf("%s: %v, want the token-input refusal", name, err)
 		}
-		if b, _ := os.ReadFile(trace); string(b) != string(raw) {
-			t.Fatalf("%s: the trace was changed", name)
+		if b, _ := os.ReadFile(trace); string(b) != string(raw) || mode() != mode0 {
+			t.Fatalf("%s: the trace was changed (content or mode)", name)
 		}
 	}
 	// Checked again just before the write (newTokens), not only at start.
 	if _, err := newTokens(contracts.RegistryConfig{}, hard, db, trace); !errors.Is(err, errTokenInput) {
 		t.Errorf("newTokens over the trace: %v", err)
 	}
-	if b, _ := os.ReadFile(trace); string(b) != string(raw) {
-		t.Fatal("newTokens changed the trace")
+	if b, _ := os.ReadFile(trace); string(b) != string(raw) || mode() != mode0 {
+		t.Fatal("newTokens changed the trace (content or mode)")
 	}
 	h, err := startHistoryTokens(t, filepath.Join(dir, "tokens.json"), "--history-db", db, "--history-trace", trace)
 	if err != nil {
@@ -399,5 +413,21 @@ func TestHistoryTraceVerdictMustMatchTheStore(t *testing.T) {
 	}
 	if c := v.History.Trace.ToolCalls[2]; c.PurchaseOrderID != "" || len(c.EventSequences) != 0 || c.Outcome != "store_unavailable" {
 		t.Errorf("an error-code call was joined to the Store: %+v", c)
+	}
+	// A failed call for a product the Store holds no purchase of: loaded,
+	// and nothing is made up for it.
+	p = write("error-no-purchase", `"outcome":"unknown_product","product_id":"kr-weather","tool":"request_purchase"`)
+	if h, err = startHistory(t, "--history-db", db, "--history-trace", p); err != nil {
+		t.Fatal(err)
+	}
+	_, body, _ = h.get("/api/viewer", h.tokens["viewer:consumer-a"])
+	v = viewerReply{}
+	json.Unmarshal(body, &v)
+	h.stop()
+	if v.History == nil || v.History.Trace == nil || len(v.History.Trace.ToolCalls) != 3 {
+		t.Fatalf("failed call without a purchase: %s", body)
+	}
+	if c := v.History.Trace.ToolCalls[2]; c.PurchaseOrderID != "" || len(c.EventSequences) != 0 || c.Outcome != "unknown_product" || c.ProductID != "kr-weather" {
+		t.Errorf("a failed call without a purchase got one: %+v", c)
 	}
 }
