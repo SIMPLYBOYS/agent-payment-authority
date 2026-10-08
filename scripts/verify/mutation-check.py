@@ -590,6 +590,19 @@ MUTATIONS = [
      'if st, err := os.Lstat(dir); err != nil || !st.IsDir() {', 'if st, err := os.Stat(dir); err != nil || !st.IsDir() {', 'TestLiveEnv|TestLiveNeedsConfigDir'),
     ('B1-04 route 1: a relative HOME accepted', 'internal/buyer/host.go',
      'if home == "" || !filepath.IsAbs(home) {', 'if home == "" {', 'TestLiveEnv'),
+    # B1-04 development demo exception (docs/live-purchase-execution-decision.md 9).
+    ('B1-04 dev demo: plugin count not checked', 'internal/buyer/gate.go',
+     '\tif len(list) != len(devDemoPlugins) {\n\t\treturn "plugins"\n\t}\n', '', 'TestDevDemoGate'),
+    ('B1-04 dev demo: plugin names not checked', 'internal/buyer/gate.go',
+     'if !slices.Contains(devDemoPlugins, *name) || seen[*name] {', 'if seen[*name] {', 'TestDevDemoGate'),
+    ('B1-04 dev demo: the exception applied in strict mode', 'internal/buyer/gate.go',
+     'if k == "plugins" && g.DevDemoPlugins {', 'if k == "plugins" {', 'TestDevDemoGate|TestDevDemoPluginsCommand'),
+    ('B1-04 dev demo: later checks skipped under the exception', 'internal/buyer/gate.go',
+     '\t\t\tif code := devDemoCheck(raw, ok); code != "" {\n\t\t\t\treturn code\n\t\t\t}\n\t\t\tcontinue', '\t\t\treturn devDemoCheck(raw, ok)', 'TestDevDemoGate'),
+    ('B1-04 dev demo: gate_mode written as strict', 'internal/buyer/host.go',
+     '"gate_mode": h.Gate.Mode(),', '"gate_mode": "strict",', 'TestDevDemoPluginsCommand'),
+    ('B1-04 dev demo: the flag taken without --live', 'cmd/apa-buyer/main.go',
+     '\tcase !live && *devDemo:\n\t\treturn errors.New("--dev-demo-plugins is for live runs only (--live with APA_LIVE_CLI=true)")\n', '', 'TestDevDemoPluginsCommand'),
 ]
 
 

@@ -29,6 +29,53 @@ type Gate struct {
 	// live list stays empty until a value is decided with a basis. Unknown,
 	// missing and unlisted values are refused; nothing widens the list.
 	AcceptAuth []string
+	// DevDemoPlugins is the development demo exception (Aaron 2026-10-08;
+	// docs/live-purchase-execution-decision.md 9): the init's plugins must
+	// be exactly devDemoPlugins, each once, instead of none. Only an
+	// explicit `run --live --dev-demo-plugins` sets it. Matching names and
+	// a count say nothing of a plugin's content, source or behaviour.
+	DevDemoPlugins bool
+}
+
+// devDemoPlugins is the one plugin set the exception accepts. It is fixed
+// here: no flag, setting or environment variable names other plugins.
+var devDemoPlugins = []string{"cc-plugin-agents-md", "cc-plugin-plugin-authoring"}
+
+// Mode is the gate's mode as the run trace records it.
+func (g Gate) Mode() string {
+	if g.DevDemoPlugins {
+		return "dev_demo_plugins"
+	}
+	return "strict"
+}
+
+// devDemoCheck is the plugins check under the exception: the member must be
+// present and list exactly devDemoPlugins, each once, as objects with a
+// string name. Anything else is refused.
+func devDemoCheck(raw json.RawMessage, present bool) string {
+	if !present {
+		return "plugins"
+	}
+	var list []json.RawMessage
+	if json.Unmarshal(raw, &list) != nil || list == nil {
+		return "init_malformed"
+	}
+	if len(list) != len(devDemoPlugins) {
+		return "plugins"
+	}
+	seen := map[string]bool{}
+	for _, e := range list {
+		f, err := objectFields(e)
+		var name *string
+		if err != nil || field(f, "name", &name) != nil || name == nil {
+			return "init_malformed"
+		}
+		if !slices.Contains(devDemoPlugins, *name) || seen[*name] {
+			return "plugins"
+		}
+		seen[*name] = true
+	}
+	return ""
 }
 
 // initTools are the tool names init must list: these, each exactly once.
@@ -87,6 +134,12 @@ func (g Gate) check(line []byte) string {
 	}
 	for _, k := range []string{"plugins", "skills", "agents"} { // none is approved
 		raw, ok := m[k]
+		if k == "plugins" && g.DevDemoPlugins {
+			if code := devDemoCheck(raw, ok); code != "" {
+				return code
+			}
+			continue
+		}
 		if !ok {
 			continue // absent does not prove the CLI loaded none
 		}

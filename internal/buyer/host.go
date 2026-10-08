@@ -356,7 +356,7 @@ func (h *Host) trace(b *toolbridge.Binding, prompt string, started time.Time, ga
 	enc := json.NewEncoder(f)
 	errs := []error{enc.Encode(map[string]any{
 		"event": "run_start", "at": started.Unix(), "task_id": b.Session.TaskID, "consumer_id": b.Session.ConsumerID,
-		"cli": filepath.Base(h.CLI), "prompt_sha256": hex.EncodeToString(sum[:]),
+		"cli": filepath.Base(h.CLI), "prompt_sha256": hex.EncodeToString(sum[:]), "gate_mode": h.Gate.Mode(),
 		"limits": map[string]any{"line_bytes": h.Limits.Line, "stdout_bytes": h.Limits.Stdout, "stderr_bytes": h.Limits.Stderr,
 			"total_seconds": h.Limits.Total.Seconds(), "assistant_messages": h.Limits.Assistant, "tool_calls": toolbridge.MaxCalls},
 	}), enc.Encode(map[string]any{

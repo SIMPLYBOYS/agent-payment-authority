@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -471,8 +472,9 @@ func TestLivePathWithFake(t *testing.T) {
 		t.Error("default databases are not apart")
 	}
 
-	// With the production auth list (empty), no live init passes, and the
-	// Store is never opened.
+	// With the production auth list ("none" only), an init stating any other
+	// value (the fake's own label here) does not pass, and the Store is
+	// never opened.
 	f2 := newFixture(t)
 	cli = liveFake(t, f2, "ask-mainline")
 	out, err = f2.exec(context.Background(), []string{"run", "--live", "--cli", cli}, map[string]string{"APA_LIVE_CLI": "true"},
@@ -656,8 +658,8 @@ func TestProbeCommand(t *testing.T) {
 	if strings.Contains(all, mark) || strings.Contains(all, string(capability)) {
 		t.Fatalf("leak: %s", all)
 	}
-	if liveAcceptAuth != nil {
-		t.Error("the live auth list is not empty")
+	if !slices.Equal(liveAcceptAuth, []string{"none"}) {
+		t.Errorf("the live auth list is %q, not [none]", liveAcceptAuth)
 	}
 }
 
@@ -725,5 +727,96 @@ func TestApprovedVersionInit(t *testing.T) {
 		if !errors.As(err, &ec) || ec != 1 || !strings.Contains(out, `"code": "`+want+`"`) || !strings.Contains(out, `"cli_version": "other"`) {
 			t.Errorf("init %s: %v\n%s", v, err, out)
 		}
+	}
+}
+
+// The development demo exception through the command (docs/live-purchase-
+// execution-decision.md 9), with the production auth list ("none"): only
+// --live --dev-demo-plugins accepts exactly the two named plugins; without
+// it the strict gate refuses them; strict mode with no plugins and "none"
+// passes too (the auth list is for every live run). The banner and the
+// trace's run_start.gate_mode tell the modes apart.
+func TestDevDemoPluginsCommand(t *testing.T) {
+	const twoPlugins = `[{"name":"cc-plugin-agents-md","path":"p"},{"name":"cc-plugin-plugin-authoring","path":"p"}]`
+	scenario := func(t *testing.T, f *fixture, plugins string) {
+		sc := `{"manual_init":true,"steps":[{"do":"init","init":{"apiKeySource":"none","plugins":` + plugins + `}},` +
+			`{"do":"tool","tool":"list_products"},{"do":"tool","tool":"get_quote","args":{"product_id":"kr-market"}},` +
+			`{"do":"tool","tool":"request_purchase","args":{"product_id":"kr-market"}},{"do":"result","text":"done"}]}`
+		if err := os.WriteFile(f.fake+".scenario.json", []byte(sc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runStart := func(t *testing.T, f *fixture) (mode, gate string) {
+		entries, _ := os.ReadDir(f.traceDir)
+		if len(entries) != 1 {
+			t.Fatalf("%d traces", len(entries))
+		}
+		raw, _ := os.ReadFile(filepath.Join(f.traceDir, entries[0].Name()))
+		for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			var e map[string]any
+			json.Unmarshal([]byte(line), &e)
+			switch e["event"] {
+			case "run_start":
+				mode, _ = e["gate_mode"].(string)
+			case "init":
+				gate, _ = e["gate"].(string)
+			}
+		}
+		return mode, gate
+	}
+	live := map[string]string{"APA_LIVE_CLI": "true"}
+	d := deps{liveVersion: fakecli.Version} // production auth list
+	sessA := contracts.Session{ConsumerID: "consumer-a", AgentID: "agent-a", TaskID: "task-a"}
+
+	// Exception on, exactly the two plugins: the run goes through to an Ask.
+	f := newFixture(t)
+	scenario(t, f, twoPlugins)
+	out, err := f.exec(context.Background(), []string{"run", "--live", "--dev-demo-plugins", "--cli", f.fake}, live, d)
+	if err != nil || !strings.Contains(out, "gate: DEV-DEMO plugin exception") {
+		t.Fatalf("exception: %v\n%s", err, out)
+	}
+	if mode, gate := runStart(t, f); mode != "dev_demo_plugins" || gate != "passed" {
+		t.Fatalf("exception trace: gate_mode %q, gate %q", mode, gate)
+	}
+	if v := f.stored(sessA); len(v.Purchases) != 1 || v.Purchases[0].Decision.PolicyVerdict != "Ask" {
+		t.Fatalf("exception: stored %+v", v)
+	}
+
+	// Exception off, the same plugins: refused, no Store.
+	f = newFixture(t)
+	scenario(t, f, twoPlugins)
+	out, err = f.exec(context.Background(), []string{"run", "--live", "--cli", f.fake}, live, d)
+	if err == nil || !strings.Contains(err.Error(), "config_mismatch plugins") || strings.Contains(out, "DEV-DEMO") {
+		t.Fatalf("strict: %v\n%s", err, out)
+	}
+	if mode, gate := runStart(t, f); mode != "strict" || gate != "plugins" {
+		t.Fatalf("strict trace: gate_mode %q, gate %q", mode, gate)
+	}
+	if _, err := os.Stat(filepath.Dir(f.db)); !os.IsNotExist(err) {
+		t.Error("the Store was opened for a refused init")
+	}
+
+	// Strict mode, no plugins, "none": passes; the auth list is not tied to
+	// the exception.
+	f = newFixture(t)
+	scenario(t, f, `[]`)
+	out, err = f.exec(context.Background(), []string{"run", "--live", "--cli", f.fake}, live, d)
+	if err != nil || strings.Contains(out, "DEV-DEMO") {
+		t.Fatalf("strict, no plugins: %v\n%s", err, out)
+	}
+	if mode, gate := runStart(t, f); mode != "strict" || gate != "passed" {
+		t.Fatalf("strict, no plugins trace: gate_mode %q, gate %q", mode, gate)
+	}
+
+	// The flag is for live runs only.
+	f = newFixture(t)
+	if _, err := f.run(context.Background(), f.fake, "ask-mainline", nil, "--dev-demo-plugins"); err == nil || !strings.Contains(err.Error(), "live runs only") {
+		t.Errorf("fake run with the flag: %v", err)
+	}
+	if _, err := f.probeExec(context.Background(), []string{"--cli", f.fake, "--dev-demo-plugins"}, live, d); err == nil {
+		t.Error("the probe took the flag")
+	}
+	if !slices.Equal(liveAcceptAuth, []string{"none"}) {
+		t.Errorf("live auth list %q", liveAcceptAuth)
 	}
 }

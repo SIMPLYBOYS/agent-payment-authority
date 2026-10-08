@@ -95,10 +95,14 @@ func wallClock() uint64 { return uint64(time.Now().Unix()) }
 // Another version stops the run; nothing upgrades.
 const approvedCLIVersion = "2.1.293 (Claude Code)"
 
-// liveAcceptAuth is the apiKeySource values a live init may state. Empty:
-// no documented value proves a subscription login, so every live init
-// fails the auth check until one is decided with a basis before stage C.
-var liveAcceptAuth []string
+// liveAcceptAuth is the apiKeySource values a live init may state, for
+// every live run, strict or the dev demo exception (Aaron 2026-10-08, L1-d;
+// docs/live-purchase-execution-decision.md 9.3). Only "none". The value
+// alone proves no login or billing: the basis is that the live environment
+// carries no API key or token (CLIEnv) and the CLI uses the APA-only
+// config directory, which Aaron confirmed is his own claude.ai
+// subscription login (docs/cli-poc.md 48.1). Nothing widens the list.
+var liveAcceptAuth = []string{"none"}
 
 // deps are what tests replace.
 type deps struct {
@@ -137,6 +141,7 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 	fake := fs.String("fake-cli", "", "fake CLI executable")
 	scenario := fs.String("scenario", "", "fake CLI scenario, e.g. testdata/cli/ask-mainline.json")
 	liveFlag := fs.Bool("live", false, "run the approved Claude Code CLI (a real model); also needs APA_LIVE_CLI=true")
+	devDemo := fs.Bool("dev-demo-plugins", false, "live only: the development demo exception; the init may list exactly the two named plugins (docs/live-purchase-execution-decision.md 9)")
 	cliPath := fs.String("cli", "", "absolute path of the approved Claude Code executable (live only)")
 	taskID := fs.String("task", "task-a", "trusted registry task to run")
 	registryPath := fs.String("registry", "testdata/contracts/registry.json", "trusted registry fixture")
@@ -152,6 +157,8 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 	switch {
 	case live && (*fake != "" || *scenario != ""):
 		return errors.New("--live cannot be combined with --fake-cli or --scenario")
+	case !live && *devDemo:
+		return errors.New("--dev-demo-plugins is for live runs only (--live with APA_LIVE_CLI=true)")
 	case !live && *cliPath != "":
 		return errors.New("--cli is for live runs only (--live with APA_LIVE_CLI=true)")
 	case !live && *fake == "":
@@ -185,7 +192,7 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 		if d.liveAuth != nil {
 			accept = d.liveAuth
 		}
-		gate = buyer.Gate{CLIVersion: strings.Fields(want)[0], AcceptAuth: accept}
+		gate = buyer.Gate{CLIVersion: strings.Fields(want)[0], AcceptAuth: accept, DevDemoPlugins: *devDemo}
 	} else {
 		if cli, err = filepath.Abs(*fake); err != nil {
 			return err
@@ -340,6 +347,9 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 	if live {
 		mode = "live"
 		fmt.Fprintf(d.out, "LIVE MODE: %s runs a real model on your login. Shop %s, Store %s (opened only after the init check), task %s.\n", cli, ln.Addr(), dbPath, task.TaskID)
+		if gate.DevDemoPlugins {
+			fmt.Fprintln(d.out, "gate: DEV-DEMO plugin exception (2 named plugins accepted; not the strict gate)")
+		}
 	} else {
 		fmt.Fprintf(d.out, "FAKE MODE: %s runs no model. Shop %s, Store %s (opened only after the init check), task %s.\n", filepath.Base(cli), ln.Addr(), dbPath, task.TaskID)
 	}
