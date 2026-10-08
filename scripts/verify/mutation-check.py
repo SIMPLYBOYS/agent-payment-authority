@@ -632,6 +632,17 @@ MUTATIONS = [
      'fail(w, http.StatusConflict, "history_read_only")', 'reply(w, http.StatusAccepted, map[string]string{})', 'TestHistoryModeReadOnly'),
     ('B1-04 history: the read-only control routes not registered', 'cmd/demo/history.go',
      '\tregisterReadOnly(mux, ui)\n', '', 'TestHistoryModeReadOnly'),
+    # Codex review of the history slice: R1 (the token file over the trace), R2 (trace and Store verdicts).
+    ('B1-04 history R1: the trace not protected from the token file', 'cmd/demo/history.go',
+     '\t\tinputs = append(inputs, tracePath)\n', '', 'TestHistoryTokenFileIsNotTheTrace'),
+    ('B1-04 history R1: a token path naming an input accepted', 'cmd/demo/main.go',
+     '\t\tif same {\n\t\t\treturn errTokenInput\n\t\t}\n', '', 'TestHistoryTokenFileIsNotTheTrace'),
+    ('B1-04 history R1: inputs not checked again before the token write', 'cmd/demo/api.go',
+     'if err := checkTokenPath(db, abs, inputs...); err != nil {', 'if err := checkTokenPath(db, abs); err != nil {', 'TestHistoryTokenFileIsNotTheTrace'),
+    ('B1-04 history R2: a trace verdict not compared with the Store', 'cmd/demo/history.go',
+     'if verdict && (at < 0 || rec.Task.Purchases[at].Decision.PolicyVerdict != c.Outcome) {', 'if verdict && at < 0 {', 'TestHistoryTraceVerdictMustMatchTheStore'),
+    ('B1-04 history R2: an error-code call joined to the Store', 'cmd/demo/history.go',
+     '\t\tif !verdict {\n\t\t\tcontinue\n\t\t}\n', '', 'TestHistoryTraceVerdictMustMatchTheStore'),
 ]
 
 

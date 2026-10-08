@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 )
 
 // recordRun makes a recorded run the way a real one is kept: a fake run of
@@ -43,9 +46,19 @@ func recordRun(t *testing.T) (db, trace string) {
 // past every recorded deadline: anything judged against it would expire.
 func startHistory(t *testing.T, args ...string) (*host, error) {
 	t.Helper()
+	return startHistoryTokens(t, "", args...)
+}
+
+// startHistoryTokens is startHistory with APA_DEMO_TOKEN_FILE set to
+// tokenFile ("" keeps the host directory's tokens.json).
+func startHistoryTokens(t *testing.T, tokenFile string, args ...string) (*host, error) {
+	t.Helper()
 	dir, err := os.MkdirTemp(testRoot, "history-") // 0700, as the token file needs
 	if err != nil {
 		t.Fatal(err)
+	}
+	if tokenFile == "" {
+		tokenFile = filepath.Join(dir, "tokens.json")
 	}
 	exe, _ := os.Executable()
 	h := &host{t: t, dir: dir, out: &lockedBuffer{}}
@@ -53,7 +66,14 @@ func startHistory(t *testing.T, args ...string) (*host, error) {
 	done := make(chan error, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	late := func() uint64 { return wallClock() + 10*86400 }
-	d := deps{getenv: hostEnv(dir, "127.0.0.1:0"), self: exe, out: h.out, clock: late, ready: ready}
+	env := hostEnv(dir, "127.0.0.1:0")
+	getenv := func(k string) string {
+		if k == "APA_DEMO_TOKEN_FILE" {
+			return tokenFile
+		}
+		return env(k)
+	}
+	d := deps{getenv: getenv, self: exe, out: h.out, clock: late, ready: ready}
 	go func() { done <- serve(ctx, args, d) }()
 	h.stop = func() error { cancel(); return <-done }
 	select {
@@ -65,7 +85,7 @@ func startHistory(t *testing.T, args ...string) (*host, error) {
 		cancel()
 		t.Fatal("the history host never became ready")
 	}
-	raw, _ := os.ReadFile(filepath.Join(dir, "tokens.json"))
+	raw, _ := os.ReadFile(tokenFile)
 	var file struct{ Tokens []demoToken }
 	json.Unmarshal(raw, &file)
 	h.tokens = map[string]string{}
@@ -269,5 +289,115 @@ func TestHistoryModeReadOnly(t *testing.T) {
 	}
 	if _, s, _ := h.status(h.tokens["host"]); s.History == nil || s.History.Trace == nil {
 		t.Errorf("host status history %+v", s.History)
+	}
+}
+
+// R1 (Codex review of the history slice): the token file is written at
+// start, so it may not name the trace, however spelled (the same path, a
+// symlink, a hard link): refused before anything is served, the trace left
+// as it was. A token file of its own still works.
+func TestHistoryTokenFileIsNotTheTrace(t *testing.T) {
+	db, recorded := recordRun(t)
+	dir, err := os.MkdirTemp(testRoot, "history-trace-") // 0700: the token directory is valid
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := filepath.Join(dir, "trace.jsonl")
+	raw, _ := os.ReadFile(recorded)
+	os.WriteFile(trace, raw, 0o600)
+	link := filepath.Join(dir, "link.jsonl")
+	os.Symlink(trace, link)
+	hard := filepath.Join(dir, "hard.jsonl")
+	os.Link(trace, hard)
+	parent := filepath.Join(testRoot, "link-"+filepath.Base(dir))
+	os.Symlink(dir, parent)
+	for name, tok := range map[string]string{
+		"the trace":          trace,
+		"a symlink to it":    link,
+		"a hard link to it":  hard,
+		"a symlinked parent": filepath.Join(parent, "trace.jsonl"),
+		"a dot-dot spelling": filepath.Join(dir, "sub", "..", "trace.jsonl"),
+	} {
+		h, err := startHistoryTokens(t, tok, "--history-db", db, "--history-trace", trace)
+		if err == nil {
+			h.stop()
+			t.Errorf("%s: served", name)
+		} else if !errors.Is(err, errTokenInput) {
+			t.Errorf("%s: %v, want the token-input refusal", name, err)
+		}
+		if b, _ := os.ReadFile(trace); string(b) != string(raw) {
+			t.Fatalf("%s: the trace was changed", name)
+		}
+	}
+	// Checked again just before the write (newTokens), not only at start.
+	if _, err := newTokens(contracts.RegistryConfig{}, hard, db, trace); !errors.Is(err, errTokenInput) {
+		t.Errorf("newTokens over the trace: %v", err)
+	}
+	if b, _ := os.ReadFile(trace); string(b) != string(raw) {
+		t.Fatal("newTokens changed the trace")
+	}
+	h, err := startHistoryTokens(t, filepath.Join(dir, "tokens.json"), "--history-db", db, "--history-trace", trace)
+	if err != nil {
+		t.Fatalf("a token file of its own: %v", err)
+	}
+	h.stop()
+	if b, _ := os.ReadFile(trace); string(b) != string(raw) {
+		t.Fatal("the trace was changed by a normal start")
+	}
+}
+
+// R2 (Codex review of the history slice): a trace whose request_purchase
+// verdict is not the Store's, or names a verdict for a purchase the Store
+// does not hold, is refused, and neither file is changed. A matching trace
+// is mapped; a call that ended in an error code is shown without a purchase.
+func TestHistoryTraceVerdictMustMatchTheStore(t *testing.T) {
+	db, trace := recordRun(t)
+	raw, _ := os.ReadFile(trace)
+	line := `"outcome":"Ask","product_id":"kr-market","tool":"request_purchase"`
+	if !strings.Contains(string(raw), line) {
+		t.Fatalf("the recorded trace changed shape: %s", raw)
+	}
+	dbBefore, _ := os.ReadFile(db)
+	write := func(name, with string) string {
+		p := filepath.Join(t.TempDir(), name+".jsonl")
+		os.WriteFile(p, []byte(strings.Replace(string(raw), line, with, 1)), 0o600)
+		return p
+	}
+	for name, with := range map[string]string{
+		"Deny for the Store's Ask":   `"outcome":"Deny","product_id":"kr-market","tool":"request_purchase"`,
+		"Allow for the Store's Ask":  `"outcome":"Allow","product_id":"kr-market","tool":"request_purchase"`,
+		"Ask for no stored purchase": `"outcome":"Ask","product_id":"kr-weather","tool":"request_purchase"`,
+	} {
+		p := write(strings.ReplaceAll(name, " ", "-"), with)
+		before, _ := os.ReadFile(p)
+		if h, err := startHistory(t, "--history-db", db, "--history-trace", p); err == nil {
+			h.stop()
+			t.Errorf("%s: served", name)
+		} else if !strings.Contains(err.Error(), "disagree") {
+			t.Errorf("%s: %v", name, err)
+		}
+		if after, _ := os.ReadFile(p); string(after) != string(before) {
+			t.Errorf("%s: the trace was changed", name)
+		}
+	}
+	if after, _ := os.ReadFile(db); string(after) != string(dbBefore) {
+		t.Error("the database was changed")
+	}
+
+	// An error code: no verdict, so no purchase or events are joined to it.
+	p := write("error-code", `"outcome":"store_unavailable","product_id":"kr-market","tool":"request_purchase"`)
+	h, err := startHistory(t, "--history-db", db, "--history-trace", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v viewerReply
+	_, body, _ := h.get("/api/viewer", h.tokens["viewer:consumer-a"])
+	json.Unmarshal(body, &v)
+	h.stop()
+	if v.History == nil || v.History.Trace == nil || len(v.History.Trace.ToolCalls) != 3 {
+		t.Fatalf("error-code trace: %s", body)
+	}
+	if c := v.History.Trace.ToolCalls[2]; c.PurchaseOrderID != "" || len(c.EventSequences) != 0 || c.Outcome != "store_unavailable" {
+		t.Errorf("an error-code call was joined to the Store: %+v", c)
 	}
 }
