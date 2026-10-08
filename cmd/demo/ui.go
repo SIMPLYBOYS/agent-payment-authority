@@ -135,5 +135,5 @@ func (a *api) viewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(w, http.StatusOK, viewerReply{Role: g.Role, ConsumerID: g.ConsumerID,
-		Note: "Local demo capability for this run of the demo host; not a user login.", History: a.history})
+		Note: "Local demo capability for this run of the demo host; not a user login.", History: a.historyFor(g)})
 }

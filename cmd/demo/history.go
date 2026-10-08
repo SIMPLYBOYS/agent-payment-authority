@@ -223,6 +223,7 @@ func serveHistory(ctx context.Context, dbPath, tracePath, registryPath, unityDir
 	}
 	ui.register(mux)
 	ui.registerUI(mux)
+	registerReadOnly(mux, ui)
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
@@ -240,4 +241,43 @@ func serveHistory(ctx context.Context, dbPath, tracePath, registryPath, unityDir
 	err = errors.Join(err, ignoreClosed(srv.Shutdown(sctx)))
 	d.at("http_stopped")
 	return err
+}
+
+// historyFor is the history record a caller is shown: the trace only to a
+// caller who may read its task (the host, or that task's consumer's
+// viewer); every other caller gets the label and the record time alone.
+func (a *api) historyFor(g grant) *historyInfo {
+	h := a.history
+	if h == nil || h.Trace == nil {
+		return h
+	}
+	if _, err := a.st.ReadTask(h.Trace.TaskID, g.sees); err != nil {
+		c := *h
+		c.Trace = nil
+		return &c
+	}
+	return h
+}
+
+// registerReadOnly answers the control routes in history mode: the server
+// refuses every start, stop and cancel (the page hides them too, but that
+// is not the guard), and there is no run to list.
+func registerReadOnly(mux *http.ServeMux, a *api) {
+	mux.HandleFunc("GET /api/host/runs", func(w http.ResponseWriter, r *http.Request) {
+		if reader(w, r, a) {
+			reply(w, http.StatusOK, map[string]any{"runs": []runView{}})
+		}
+	})
+	mux.HandleFunc("GET /api/host/runs/{run_id}", func(w http.ResponseWriter, r *http.Request) {
+		if reader(w, r, a) {
+			fail(w, http.StatusNotFound, "not_found")
+		}
+	})
+	for _, route := range []string{"POST /api/host/runs", "POST /api/host/runs/{run_id}/stop", "POST /api/host/tasks/{task_id}/cancel"} {
+		mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
+			if _, ok := a.authorize(w, r); ok {
+				fail(w, http.StatusConflict, "history_read_only")
+			}
+		})
+	}
 }

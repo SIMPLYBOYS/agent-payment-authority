@@ -9,11 +9,15 @@ import (
 )
 
 // OpenSnapshot opens a recorded Store file for reading only, for the demo's
-// history replay of a recorded run (docs/cli-poc.md 54). The file (and its
-// WAL, if any) is copied into a new private temporary directory, checked
-// unchanged while it was copied, and the copy is verified like any Store
-// (hash chains, projections, snapshots); only the copy is ever opened, so
-// the given file gets no lock, WAL, expiry event or any other write.
+// history replay of a recorded run (docs/cli-poc.md 54). It takes an
+// offline record only: a file with a -wal or -shm beside it may still be
+// open in a Store, and is refused (an unchanged hash while copying is no
+// consistent snapshot of a database being written, so this is not a backup
+// tool and does not replace the Store's lock). The file is copied into a
+// new private temporary directory, checked unchanged while it was copied,
+// and the copy is verified like any Store (hash chains, projections,
+// snapshots); only the copy is ever opened, so the given file gets no lock,
+// WAL, expiry event or any other write.
 //
 // The Store it returns answers ReadTask, ListTasks and LastObservedAt only:
 // it has no writer, clock, registry or offers, and runs no expiry. done
@@ -26,12 +30,14 @@ func OpenSnapshot(path string) (s *Store, done func() error, err error) {
 	if fi, err := os.Lstat(abs); err != nil || !fi.Mode().IsRegular() {
 		return nil, nil, fmt.Errorf("history database %s is not a regular file", abs)
 	}
-	files := []string{abs, abs + "-wal", abs + "-shm"}
-	before := make([]fileStamp, len(files))
-	for i, f := range files {
-		if before[i], err = fingerprintOf(f); err != nil {
-			return nil, nil, err
+	for _, side := range []string{abs + "-wal", abs + "-shm"} {
+		if _, err := os.Lstat(side); !os.IsNotExist(err) {
+			return nil, nil, fmt.Errorf("%s exists: %s may still be open in a Store; a history database must be an offline record", side, abs)
 		}
+	}
+	before, err := fingerprintOf(abs)
+	if err != nil {
+		return nil, nil, err
 	}
 	tmp, err := os.MkdirTemp("", "apa-history-") // 0700
 	if err != nil {
@@ -46,19 +52,8 @@ func OpenSnapshot(path string) (s *Store, done func() error, err error) {
 	if err := copyFile(abs, cp); err != nil {
 		return nil, nil, err
 	}
-	if before[1].exists { // -shm is an index SQLite rebuilds from the WAL: not copied
-		if err := copyFile(abs+"-wal", cp+"-wal"); err != nil {
-			return nil, nil, err
-		}
-	}
-	for i, f := range files {
-		after, err := fingerprintOf(f)
-		if err != nil {
-			return nil, nil, err
-		}
-		if after != before[i] {
-			return nil, nil, fmt.Errorf("%s changed while it was copied; refused", f)
-		}
+	if after, err := fingerprintOf(abs); err != nil || after != before {
+		return nil, nil, fmt.Errorf("%s changed while it was copied; refused", abs)
 	}
 	db, err := sql.Open("sqlite", cp+"?_pragma=busy_timeout(5000)&_pragma=query_only(1)")
 	if err != nil {

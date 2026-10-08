@@ -94,7 +94,7 @@ func (a *api) hostStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := statusReply{CallerRole: g.Role, HTTP: "ok", Store: a.expiry.view(), FakeCLI: stateOnly{"off"}, LiveCLI: "off",
-		UnityBuild: unityBuildStatus{State: "missing", Files: []string{}}, PaymentCapability: "unavailable", ServedAt: a.clock(), History: a.history}
+		UnityBuild: unityBuildStatus{State: "missing", Files: []string{}}, PaymentCapability: "unavailable", ServedAt: a.clock(), History: a.historyFor(g)}
 	if a.fake {
 		out.FakeCLI.State = "ok"
 	}

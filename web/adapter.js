@@ -451,7 +451,7 @@ export function card(view, chosen, ctx) {
       rows.push(["裁決", str(p.decision.policy_verdict), live ? "Store" : "Store 事件（回放）"]);
       rows.push(["原因", reasonText(p.decision.reason), live ? "Store" : "Store 事件（回放）"]);
     }
-    if (typeof p.deadline_at === "number") rows.push(["期限", hhmmss(p.deadline_at), "Store 時間；裁決時決定"]);
+    if (typeof p.deadline_at === "number") rows.push(["期限", hhmmss(p.deadline_at), hist ? "Store 時間；當時的期限，早已過，不是倒數" : "Store 時間；裁決時決定"]);
     rows.push(["付款", "未付款（payment_status：" + str(p.decision ? p.decision.payment_status : "unavailable") + "）", "Store"]);
   }
   return {
@@ -522,8 +522,9 @@ export function evidence(snapshot, po, ctx) {
         (c.product_id ? str(c.product_id) + " · " : "") + "outcome " + str(c.outcome)
           + (c.purchase_order_id ? " → " + str(c.purchase_order_id) + "（Store 事件 " + (c.event_sequences || []).map((q) => "#" + q).join("、") + "）" : "")
           + (replay && (c.event_sequences || []).some((q) => q > ctx.n) ? " · 回放尚未到此" : ""),
-        "trace",
-      ]) : [["工具呼叫", "未提供 trace（host 未指定 --history-trace）", "—"]] });
+        c.purchase_order_id ? "trace；請購與事件對應為 Host 推導" : "trace",
+      ]) : [["工具呼叫", hist.trace ? "這個 task 沒有 trace（trace 屬於另一個 task）"
+        : "沒有可顯示的 trace（host 未指定 --history-trace，或 trace 的 task 不在你的查看範圍）", "—"]] });
   }
   // In step only when Unity's report names the projection sent: the same
   // generation, task, sequence and phase. Anything else is "not yet in

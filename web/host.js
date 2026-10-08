@@ -21,7 +21,7 @@
 // click: a clear, a new file, the manual mode, pagehide, or a switch of
 // consumer or task drops it; nothing is opened or signed in for it.
 
-import { forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, setAlert } from "./app.js";
+import { labelPage, forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, setAlert } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
 
 const $ = (id) => document.getElementById(id);
@@ -159,12 +159,16 @@ function renderReadiness() {
     const st = lastReady.status;
     const missing = ["WebGL.data", "WebGL.framework.js", "WebGL.loader.js", "WebGL.wasm"].filter((f) => !st.unity_build.files.includes(f));
     rows.push(["HTTP", st.http === "ok" ? "ok" : "error", st.http === "ok" ? "就緒" : "異常"]);
-    rows.push(["Store", st.store.state, storeText(st.store)]);
+    // History mode (docs/cli-poc.md 54): a read-only copy of a recorded
+    // run; nothing expires and the time is the record's, not the present.
+    const hist = st.history && st.history.record === "live_history";
+    if (hist) labelPage(st.history);
+    rows.push(hist ? ["Store", "info", "歷史模式：唯讀副本，不執行到期檢查"] : ["Store", st.store.state, storeText(st.store)]);
     rows.push(["fake CLI", st.fake_cli.state, st.fake_cli.state === "ok" ? "就緒（fake-claude，不是 Claude Code）" : "未啟用"]);
-    rows.push(["真實 CLI", "off", "未啟用（fake 模式）"]);
+    rows.push(["真實 CLI", "off", hist ? "未執行（歷史模式：顯示已保存的真實執行紀錄）" : "未啟用（fake 模式）"]);
     rows.push(["Unity 建置", st.unity_build.state, st.unity_build.state === "ok" ? "就緒（4 個建置檔）" : "缺少 " + missing.join("、") + "：請先完成首次準備"]);
     rows.push(["付款", "off", "無付款能力"]);
-    rows.push(["檢查時間", "info", time(st.served_at) + "（Store 時間）"]);
+    rows.push(hist ? ["紀錄時間", "info", time(st.served_at) + "（凍結於最後事件，不是現在的伺服器時間）"] : ["檢查時間", "info", time(st.served_at) + "（Store 時間）"]);
   }
   rows.push(["Unity 場景", scene[0], scene[1]]);
   const bad = rows.filter(([, state]) => !["ok", "off", "info"].includes(state));
@@ -267,7 +271,9 @@ const cancellable = (r) => {
 function renderControl() {
   const v = creds.view();
   const box = $("control");
-  box.hidden = v.mode !== "file";
+  // History mode has no control: the server refuses it (409), the page
+  // does not offer it.
+  box.hidden = v.mode !== "file" || !!(lastReady && lastReady.status && lastReady.status.history);
   const pick = $("run-scenarios");
   const scenarios = (lastReady && lastReady.status && lastReady.status.runs && lastReady.status.runs.scenarios) || [];
   const runs = (lastRuns && lastRuns.gen === creds.gen && lastRuns.runs) || [];

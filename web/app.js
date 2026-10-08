@@ -231,6 +231,7 @@ function drawScene() {
   if (!sc) return;
   const mo = motion && motion.gen === state.gen ? motion : null;
   const notes = [...sc.notes];
+  if (history && sc.phase === "waiting") notes.push("歷史快照：執行結束時待人工核准；期限早已過，不是即時等待");
   let now = "";
   if (mo && mo.first) { now = "first"; notes.unshift(FIRST_LOAD); }
   else if (mo && mo.rule <= 2 && !mo.done) { now = "moving"; notes.unshift((unity.ready ? "Unity 補間中：" : "Unity 未就緒；過場說明：") + mo.text); }
@@ -275,6 +276,15 @@ function renderPanels() {
 // replay of that record. Nothing else changes: the data are the Store's.
 function applyHistory(h) {
   history = h && h.record === "live_history" ? h : null;
+  labelPage(history);
+  shownCard = shownEvidence = ""; // relabel the card and the evidence panel
+}
+
+// labelPage sets the header and the note by the scene for history mode (h)
+// or the fake demo (null). /host calls it from its readiness poll too, so
+// the label is there before a viewer is chosen.
+export function labelPage(h) {
+  const history = h && h.record === "live_history" ? h : null;
   const badge = document.querySelector("header .badge"), caps = document.querySelector("header .caps");
   if (badge) badge.textContent = history ? history.label : "M1／fake agent／不付款";
   if (caps) caps.textContent = history
@@ -282,7 +292,6 @@ function applyHistory(h) {
     : "能力：真實 Agent 未啟用 · 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行";
   const note = $("history-note");
   if (note) note.hidden = !history;
-  shownCard = shownEvidence = ""; // relabel the card and the evidence panel
 }
 
 async function signIn(ev) {
@@ -486,7 +495,9 @@ function show(first) {
   const t = state.snapshot && state.snapshot.task;
   switch (state.status) {
     case "ok":
-      setStatus("已同步：" + t.task_id + "，快照序號 " + t.as_of_sequence + "（Store 時間 " + new Date(t.served_at * 1000).toISOString() + "）" + (first ? "，首次載入為保存的快照" : ""), "ok");
+      setStatus((history ? "歷史紀錄：" : "已同步：") + t.task_id + "，快照序號 " + t.as_of_sequence
+        + (history ? "（紀錄時間 " + new Date(t.served_at * 1000).toISOString() + "，凍結於最後事件，不是現在）" : "（Store 時間 " + new Date(t.served_at * 1000).toISOString() + "）")
+        + (first ? "，首次載入為保存的快照" : ""), "ok");
       break;
     case "updating":
       setStatus("更新中：task 與事件序號不一致，保留最後一致快照", "warn");
