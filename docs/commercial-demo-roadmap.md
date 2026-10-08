@@ -547,6 +547,8 @@
 
 > **進度（10/8 16:41Z，第一次真實即時展示）**：Aaron 本人以 live 模式執行一次（程式 `82bd805`，與 `d5bc444` 只差文件），判定「目前執行過程順利，我認為現階段是達到既定標準」。紀錄（Claude Code 唯讀核對副本）：一場、一份 trace；`dev_demo_plugins`／Gate passed；`list_products` → `get_quote` → `request_purchase`（Ask）；Store 為 show-a-01 的請購 Ask 與 `TASK_STARTED`、`PURCHASE_PROPOSED`、`POLICY_DECIDED`、`APPROVAL_EXPIRED`；usage 為 CLI 自報；不付款（`docs/cli-poc.md` 第 55.11 節）。待 Codex 核對。B1-04／B1-06 維持 InProgress。
 
+> **進度（10/9，即時展示切片告一段落）**：Codex 核對第一次真實即時展示的紀錄通過；結合 Aaron 本人判定，**單一真實 Agent 即時展示達到現階段標準**（`docs/cli-poc.md` 第 55.11.1 節）。「真實 Agent → 請購裁決 → Store → 即時展示與查證」已經走通。證據歸屬：Aaron 操作與判定；Claude Code 複製證據與事後核對；Codex 核對 Git、二進位資訊、雜湊，並在斷網唯讀容器獨立查詢，沒有重跑真實 CLI。限制：`vcs.modified=true`，不稱為乾淨建置。B1-04／B1-06 整體 InProgress；多 Agent、付款、區塊鏈與 ZK 尚未完成。
+
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。
 - 它是 M1 收尾的唯一外部前提（B1-04 → B1-06 live trace → B1-07）。
