@@ -527,6 +527,8 @@
 
 > **進度（10/8，Unity 中性文字）**：Aaron 選擇選項 (a)。`578f2c3`／`b4b0a27`：Unity 標題改為「M1 / no payment」，客人標籤改為「Customer A／B」，不改投影；Unity 測試、反向驗證、WebGL 重建、歷史回放（真實副本 46 項）與 fake 完整瀏覽器回歸（317 項）全部通過（`docs/cli-poc.md` 第 54.2 節；Claude Code 執行，待 Codex 核對）。B1-04 仍 InProgress。
 
+> **進度（10/8，Unity 文字缺口驗收）**：Codex 限定核對通過，Unity 畫布的 fake／sim 文字缺口關閉（基準 `578f2c3`／`b4b0a27`；`docs/cli-poc.md` 第 54.2.1 節）。Claude Code 執行；Codex 核對原始碼、測試、建置紀錄並目視截圖，未重跑。不代表整個歷史回放切片、M1 或商業展示版通過。B1-04／B1-06 維持 InProgress。
+
 **為什麼現在做**
 - 三條真實技術線中，只有真實 AI 的程式已大致備妥：live 開關與 init 閘門已驗收，真實 CLI 也取得過 init。剩下的是**有界的決定與一次受控執行**，不是新系統。
 - 它是 M1 收尾的唯一外部前提（B1-04 → B1-06 live trace → B1-07）。
