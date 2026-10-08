@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **10/8 plugin 查詢工具第二輪 R1～R3 已修訂（`1acbf01`），定向 fake 驗證完成，待 Codex 限定複核**（第 46 節，修訂紀錄 46.7）。第一輪 R1、R2、C1 見 46.6。真實查詢尚未核准、未執行；Gate、認證清單及產品行為不變。
+> **10/8 plugin 查詢工具例外收尾已修訂（`5bab248`），定向 fake 驗證完成（macOS），待 Codex 限定複核**（第 46 節，修訂紀錄 46.8）。第二輪 R1～R3 見 46.7，第一輪見 46.6。Linux 的目錄清理差異列為未解限制（46.8）。真實查詢尚未核准、未執行；Gate、認證清單及產品行為不變。
 >
 > **10/8 方案 A 後的診斷型 C0′（Claude Code 執行，待 Codex review）**：取得 init（exit `0`，`observed`）。**plugins 仍非空**：同樣 2 個（`cc-plugin-agents-md`、`cc-plugin-plugin-authoring`，path `relative`）。§44.4 的其他條件都符合：agents／skills 為 0，MCP 1 個且 apa connected，tools 3／3／0，`dontAsk`，`approved`。依 44.5：**方案 A 本次未達目標**，保存證據後停止；不推論來源、不自動換方案（第 45 節）。正式請購阻擋仍在。
 >
@@ -2174,9 +2174,9 @@ L1-b、L1-c 不標整體通過；B1-04 仍 InProgress；不合併、不推送、
 - marketplace plugin 有兩個名字：`marketplace.json` 的 entry name（`id` 的名稱部分），以及 manifest 的 `name`。兩者可以不同。
 - init 回報的名稱是哪一個，文件沒有說明。
 
-### 46.2 查詢工具（第二輪 R1～R3 修訂後；未對真實 CLI 執行）
+### 46.2 查詢工具（第二輪 R1～R3 與例外收尾修訂後；未對真實 CLI 執行）
 
-**現行工具**（`1acbf01`）：
+**現行工具**（`5bab248`；包裝自 `1acbf01` 起未變）：
 - 控制程式 `scripts/b1-04/plugin_id_query.py`；
 - 操作包裝 `scripts/b1-04/plugin-id-query.sh`。
 
@@ -2215,6 +2215,9 @@ bash scripts/b1-04/plugin-id-query.sh /Users/mac/.local/bin/claude
    - **中斷（第二輪 R2）**：SIGINT／SIGTERM 的處理器只記錄訊號，不拋出例外。讀取迴圈每 0.1 秒檢查一次，有訊號就以 `interrupted` 進入上述停止流程。
    - 停止流程開始後，再收到的訊號只被記錄：不會跳過 SIGKILL、等待、回收、管線關閉或目錄清理，也不會延長或重設 3 秒寬限，不會再次啟動 CLI。
    - 若在 CLI 啟動前就收到訊號，不啟動 CLI。
+   - **一般例外（例外收尾修訂）**：CLI 啟動後，讀取與等待都包在保證執行的 `finally` 收尾裡。`select()`、`os.read()` 等丟出任何例外，都改為固定代碼 `internal_error`，原始例外不輸出，然後一樣走完上述有界停止。
+   - 停止流程每一步單獨嘗試：SIGTERM、寬限、SIGKILL、最多 3 秒的等待、對 group 的 SIGKILL、關閉管線。其中一步出錯，其餘照做，出錯的步數記為 `stop_errors=`。
+   - 主程序沒有回收時記為 `cli_proc=not_reaped`，不寫 `reaped`。有任何停止錯誤或未回收時，結果不會是 `ok` 或 `no_match`，而是改為 `internal_error`。
    - 限制：程序群組 ID 在仍有成員時不會被重用（POSIX）；脫離本次 process group 的程序，無法由此機制保證回收。
 6. **解讀**（R1；只在 CLI exit 0、未逾時、未超量時進行）：
    - **頂層**：必須是 JSON 陣列。JSON 必須是嚴格 UTF-8；不接受重複成員、`NaN`、`Infinity`。
@@ -2242,15 +2245,16 @@ bash scripts/b1-04/plugin-id-query.sh /Users/mac/.local/bin/claude
    - 清理涵蓋前置失敗、正常結束、執行失敗與中斷。
 
 **輸出**：只寫到 stdout，原始 stdout 只留在記憶體。
-- 第一行固定為 `query=plugin_list v2`。
+- 第一行固定為 `query=plugin_list v3`。
 - 成功時，每個候選一行 `candidate {"id","origin","scope","enabled","errors"}`，接著 `matched=<n> entries=<m>`。
 - 失敗時只有 `reason=` 或 `reject=` 的固定代碼。
-- 最後五行固定：
+- 最後六行固定：
   - `result=<代碼>`
   - `cli=<not_started|start_failed|exit_<n>|exit_signal_<n>>`
-  - `cli_proc=<not_started|reaped|unknown>`：主程序是否已回收
+  - `cli_proc=<not_started|reaped|not_reaped>`：主程序是否已回收
   - `dir_cleanup=<ok|failed|none>`：**只表示暫存目錄的清理**，不代表程序也已回收
   - `signals=<n>`：收到的 SIGINT／SIGTERM 次數
+  - `stop_errors=<n>`：停止流程中出錯的步數
 - `cli_proc=reaped` 只代表主程序已回收，且已對本次 group 送出 SIGKILL；脫離 group 的程序不在保證範圍內。
 
 **退出碼**：
@@ -2268,7 +2272,7 @@ bash scripts/b1-04/plugin-id-query.sh /Users/mac/.local/bin/claude
 | 9 | `cleanup_failed` | 主要作業成功，但目錄清理失敗或被拒絕；不算完整成功。主要作業失敗時保留主要代碼，另以 `dir_cleanup=failed` 標示 |
 | 10 | `interrupted` | 腳本收到 SIGINT／SIGTERM。程序與目錄的實際狀態，看 `cli_proc=`、`dir_cleanup=`；不以此宣稱 CLI 已停止 |
 | 11 | （無 `result=` 行） | 報告寫出失敗 |
-| 12 | `internal_error` | 其他非預期錯誤，只輸出固定代碼 |
+| 12 | `internal_error` | 其他非預期錯誤（含讀取時的例外、停止步驟出錯、主程序未回收）。只輸出固定代碼；程序與目錄狀態看 `cli_proc=`、`stop_errors=`、`dir_cleanup=` |
 | 20 | （包裝） | 參數錯誤或找不到 `python3`；查詢未啟動 |
 | 21 | （包裝） | 證據目錄已存在或無法建立；不覆寫，查詢未啟動 |
 | 22 | （包裝） | `result.txt` 無法建立；查詢未啟動 |
@@ -2434,3 +2438,86 @@ L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
 **待決定**：
 1. Codex 限定複核。
 2. 複核通過後，由 Aaron 決定執行者，並另行核准一次真實查詢。
+
+### 46.8 修訂紀錄：plugin 查詢工具例外收尾（2026-10-08；Claude Code 執行，待 Codex 限定複核）
+
+> **一般例外下的程序收尾已補齊（`5bab248`），macOS 定向 fake 驗證完成，待 Codex 限定複核。** 真實查詢尚未核准、未執行。Linux 目錄清理差異另列為限制，不算 Linux 驗證通過。L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
+
+- **依據**：vault〈Claude-Code-B1-04-plugin查詢工具例外收尾修訂派工-30fce00-20261008〉。補的是第二輪 R2 的一般例外路徑；第二輪的目錄身分、訊號只記錄、包裝保留退出碼都保留。
+- **開工核對**：分支 `b1-04-live`，HEAD `30fce00`；工作區只有 `?? demo`。工具、包裝、測試自 `1acbf01` 起沒有變動。
+
+**Codex 本次 review 的證據歸屬**（分開記錄）：
+- **Codex 獨立執行**：在 Linux 斷網容器中執行。條件：來源唯讀、非 root、合成 HOME／TMPDIR，並有資源與時間限制。
+  - 項目：六項定向回歸、一般 I/O 例外探測、目錄列舉釐清探測。
+  - 這不是完整容器驗證，也沒有執行真實 CLI。
+  - 結果只在 Codex 的工具紀錄中，沒有 repo 證據路徑。
+- **Claude Code 執行、Codex 核對紀錄**：`artifacts/b1-04/plugin-id-query-fake-r2-20261008T034502Z/` 中，Python 3.9、3.12 各 19 項通過的輸出、退出碼，以及反向基準與故障試跑摘要。Codex 沒有獨立重跑 macOS 的 19 項，也不把故障摘要當成每項細節都已獨立驗證。
+- **Codex 重現的缺口**：在忽略 SIGTERM 的假 CLI 輸出就緒後，於讀取迴圈注入 `OSError`。結果：exit 12、`result=internal_error`、`cli=started`、`cli_proc=unknown`，假 CLI 仍在執行（`S`）；探測後由 Codex 另行終止並回收。這只證明一般例外路徑會留下程序，不代表真實 Claude CLI 發生過同類錯誤。
+
+**修正**（`5bab248`；`plugin_id_query.py`）：
+- 新增 `stop(proc, pgid)`，集中有界停止的每一步：
+  - 每步以 `attempt()` 單獨嘗試，出錯就計數、繼續下一步；
+  - `poll()` 失敗時視為仍在執行，停止流程照做；
+  - SIGKILL 後的 `wait` 也有上限（3 秒）。
+- `run_cli()`：CLI 啟動後，讀取與等待放在 `try/except Exception/finally` 中。
+  - 例外只轉為固定代碼 `internal_error`，例外內容不保存、不輸出；
+  - `finally` 一定呼叫 `stop()`；
+  - 回收後才標 `reaped`，否則為 `not_reaped`、`cli=exit_unknown`。
+- `main()`：報告新增 `stop_errors=`；有停止錯誤或未回收時，結果不得為 `ok`／`no_match`。
+- 訊號處理器仍只記錄訊號。程序回收（`cli_proc=`、`stop_errors=`）與目錄清理（`dir_cleanup=`）分開報告。
+- 只處理本次啟動的 group；脫離 group 的程序仍屬既有限制。
+
+**定向 fake 回歸**（`test_plugin_id_query.py`，22 個測試，新增 3 個；Claude Code 執行，待 Codex 核對）：
+- 新測試用的注入驅動程式，載入實際的 `plugin_id_query.py`，替換三個位置之一，讓它丟出合成的 `OSError`：`select.select`、`os.read`，或停止流程中的 SIGTERM `killpg`。
+- 只在假 CLI 已啟動並寫出就緒檔之後才丟出；假 CLI 忽略 SIGTERM。
+- 驅動程式在 `main()` 前後各數一次本程序開啟的 pipe 數。只數 pipe，因為 Python 可能在 `tempfile` 使用後保持 `/dev/urandom` 開啟，那不是 CLI 的管線。
+
+| 測試 | 確認 |
+|---|---|
+| `test_select_error_stops_cli` | 讀取時 `select()` 出錯 → exit 12、`result=internal_error`、`cli=exit_signal_9`（SIGKILL）、`cli_proc=reaped`、`stop_errors=0`。假 CLI 主程序已不存在（`ps` 區分不存在、zombie、執行中）；pipe 數前後相同；只啟動一次；沒有 traceback 或 `MARK` 內文 |
+| `test_read_error_stops_cli` | `os.read()` 出錯，確認同上 |
+| `test_stop_step_error_counted` | 逾時後的 SIGTERM 步驟出錯 → 其餘步驟照做（SIGKILL、回收、關閉）：exit 5、`cli_proc=reaped`、`stop_errors=1`，不回報成功 |
+| 既有 19 項 | 正常讀取中斷、寬限期間中斷、重複訊號、逾時、超量、目錄身分、包裝等，全部仍通過 |
+
+每個新測試都另外登記清理：測試結束時，對本案假 CLI 的 group 送 SIGKILL，只針對它。
+
+**命令與結果**（macOS；沙箱外執行，因為需要 `/bin/ps`；證據 `artifacts/b1-04/plugin-id-query-fake-r3-20261008T041832Z/`）：
+- `/usr/bin/python3 -I -m unittest discover -v -s scripts/b1-04 -p 'test_*.py'`：Python 3.9.6，22 項 OK，exit 0。
+- `python3 -I -m unittest discover -v -s scripts/b1-04 -p 'test_*.py'`：Python 3.12.6，22 項 OK，exit 0。
+- 結束後 `fake-claude` 殘留程序數為 0（`leftover-fakes.txt`）。證據中沒有 `MARK`。
+- **反向驗證**（`reverse-teardown.txt`）：在副本中拿掉修正，都以 `AssertionError` 被抓到，不是編譯或前置失敗。
+  - 拿掉保證收尾（例外跳過 `stop()`）：`test_select_error_stops_cli`、`test_read_error_stops_cli` 失敗。
+  - 拿掉逐步保護（一步出錯就跳過其餘）：`test_stop_step_error_counted` 失敗。
+
+**失敗嘗試與過程**：
+- 新測試第一版以「所有 fd 數」比較，三項都多 1。逐一檢查後，多出的是字元裝置（`S_IFCHR`），推測是 Python 保留的 `/dev/urandom`，不是管線；正常路徑的直接實驗也沒有管線殘留。檢查已改成只數 pipe，沒有放寬「管線必須關閉」的要求。
+- 第二版的注入驅動程式在 read 模式也替換了 `killpg`，使 `stop_errors=1`。這是測試錯誤，已改為每種模式只替換自己的位置。
+- 反向驗證後，第一次粗略計數殘留程序得到 8 行，那是 `grep` 與本身命令列的自我匹配。排除後的精確列表為 0，最後的證據也記為 0。
+
+**Linux 目錄清理差異**（未解，另列限制；不和上面的程序殘留混為一項）：
+- Codex 在 Linux 斷網容器重跑六項定向回歸，一項通過、五項因目錄清理結果不符而失敗：
+
+  | 測試 | 結果 |
+  |---|---|
+  | `Case.test_cleanup_identity` | 正常目錄的清理回 False |
+  | `Case.test_interrupt_in_grace` | 主程序回收符合，但 `dir_cleanup=failed` |
+  | `Case.test_interrupt_burst_in_grace` | 主程序回收與訊號數符合，但 `dir_cleanup=failed` |
+  | `Wrapper.test_outcomes_kept` | 因清理失敗回 9，不是預期的 0 |
+  | `Wrapper.test_evidence_not_saved` | 主要查詢碼為 9，不是測試預期的 0 |
+  | `Wrapper.test_evidence_directory` | 通過 |
+
+- 後續純合成目錄的探測發現，以 descriptor 和以路徑列舉目錄時結果有差異，原因尚未確認。
+- 這些結果**不算 Linux 驗證通過**，也不斷言是五個獨立的產品缺陷，或是 Docker、Python 的問題。
+- 本輪沒有為此改清理架構：沒有放寬身分檢查、沒有改回跟隨 symlink、沒有把拒絕記成成功。本輪也沒有在 Linux 重跑。真實查詢預定在 macOS 執行，但 Linux 差異仍是未解限制。
+
+**仍未驗證**：
+- 真實 `claude plugin list` 的輸出與行為。
+- Linux 上的目錄清理。
+- 第二次核對與 `rmdir` 之間換成空目錄的極小時窗。
+- 脫離本次 process group 的程序。
+- 本輪沒有重跑產品 Go 全套、完整容器、255 項突變或 Unity。
+
+**待決定**：
+1. Codex 限定複核。
+2. 是否需要另外處理 Linux 目錄清理差異。
+3. 複核通過後，由 Aaron 決定執行者，並另行核准一次真實查詢。
