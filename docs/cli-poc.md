@@ -1,6 +1,6 @@
 # B1-04 Buyer wrapper：CLI 橋接 PoC
 
-> **10/8 完整 plugin ID 的最小查詢方案**：已整理，**未執行任何命令、未讀設定、未改 Gate**（第 46 節）。用一條 `claude plugin list --json`，在與 APA 子程序相同的環境下執行一次，輸出只留兩個名稱的 `id`／`scope`／`enabled`。由誰執行、是否執行，待 Aaron 決定。
+> **10/8 plugin 查詢腳本 R1、R2、C1 已修訂，定向 fake 驗證完成，待 Codex 限定複核**（第 46 節，修訂紀錄 46.6；工具 `scripts/b1-04/plugin_id_query.py`）。真實查詢尚未核准、未執行；Gate、認證清單及產品行為不變。
 >
 > **10/8 方案 A 後的診斷型 C0′（Claude Code 執行，待 Codex review）**：取得 init（exit `0`，`observed`）。**plugins 仍非空**：同樣 2 個（`cc-plugin-agents-md`、`cc-plugin-plugin-authoring`，path `relative`）。§44.4 的其他條件都符合：agents／skills 為 0，MCP 1 個且 apa connected，tools 3／3／0，`dontAsk`，`approved`。依 44.5：**方案 A 本次未達目標**，保存證據後停止；不推論來源、不自動換方案（第 45 節）。正式請購阻擋仍在。
 >
@@ -2174,72 +2174,169 @@ L1-b、L1-c 不標整體通過；B1-04 仍 InProgress；不合併、不推送、
 - marketplace plugin 有兩個名字：`marketplace.json` 的 entry name（`id` 的名稱部分），以及 manifest 的 `name`。兩者可以不同。
 - init 回報的名稱是哪一個，文件沒有說明。
 
-### 46.2 查詢命令（未執行；bash；一次）
+### 46.2 查詢工具（R1、R2、C1 修訂後；未對真實 CLI 執行）
 
-- **執行位置**：全新暫存目錄中的空工作目錄，避免讀到 repo 的 `.claude/`。
-- **環境**：與 APA 子程序相同：
-  - 白名單變數（`HOME`、`USER`、`LOGNAME`、`PATH`、`TMPDIR`、`LANG`）；
-  - 固定變數 `DISABLE_AUTOUPDATER=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`、`CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`；
-  - 方案 A 的空 plugin 根目錄。
+**現行工具**：`scripts/b1-04/plugin_id_query.py`（`53dce97`）。它取代原本的 shell 管線（原文見 46.6）。
 
-  這樣列出的，最接近第 45 節 APA runtime 看到的情況。
-- **執行方式**：存成檔案，以 `bash 檔名` 執行；不要貼到互動 shell，因為其中的 `exit` 會關掉終端機（與 §39.3 相同）。
-- **輸出**：CLI 的原始輸出只經過管線，不落地，不顯示在終端機。過濾器只印兩個名稱的 `id`、origin（`@` 之後）、`scope`、`enabled`，以及 `errors` 的筆數。stderr 丟棄，只記退出碼。
+**操作命令**（未執行；須 Aaron 決定由誰、是否執行；一次，失敗不重試）：
 
 ```bash
-# 未執行；須 Aaron 決定由誰、是否執行。只執行一次，失敗不重試。
-R=$(mktemp -d "${TMPDIR:-/tmp}/apa-plist.XXXXXX") || exit 1
-mkdir -m 700 "$R/plugins" "$R/work" && cd "$R/work" || exit 1
-env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" PATH="$PATH" TMPDIR="$TMPDIR" LANG="${LANG:-}" \
-  DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1 \
-  CLAUDE_CODE_PLUGIN_CACHE_DIR="$R/plugins" \
-  /Users/mac/.local/bin/claude plugin list --json 2>/dev/null \
-| python3 -I -c '
-import json, sys
-names = {"cc-plugin-agents-md", "cc-plugin-plugin-authoring"}
-try:
-    rows = json.load(sys.stdin)
-except Exception:
-    print("output: not JSON"); sys.exit(0)
-if not isinstance(rows, list):
-    print("output: not a list"); sys.exit(0)
-hit = 0
-for r in rows:
-    pid = r.get("id") if isinstance(r, dict) else None
-    if isinstance(pid, str) and pid.rpartition("@")[0] in names:
-        hit += 1
-        print(json.dumps({"id": pid, "origin": pid.rpartition("@")[2], "scope": r.get("scope"),
-                          "enabled": r.get("enabled"), "errors": len(r.get("errors") or [])}))
-print("matched", hit, "of", len(rows), "entries")'
-echo "claude exit=${PIPESTATUS[0]}"
-cd / && rm -rf "$R"
+EV=artifacts/b1-04/plugin-id-query-$(date -u +%Y%m%dT%H%M%SZ); mkdir "$EV" || exit 1
+python3 -I scripts/b1-04/plugin_id_query.py --cli /Users/mac/.local/bin/claude > "$EV/result.txt"
+echo "exit=$?" > "$EV/exit-code.txt"
 ```
+
+存成檔案，以 `bash 檔名` 執行；不要逐行貼進互動 shell。
+
+**執行流程**：
+1. **前置檢查**（任一失敗，CLI 呼叫零次，exit 2）：
+   - 參數必須恰為 `--cli <絕對路徑>`，路徑是可執行的一般檔案；
+   - `tempfile.mkdtemp(prefix="apa-plist.")` 建立暫存目錄，其下 `plugins`、`work` 都以 0700 建立。
+2. **環境**（與 `internal/buyer` 的 `CLIEnv` 組裝規則一致；C1）：
+   - 只取白名單八項 `HOME`、`USER`、`LOGNAME`、`PATH`、`TMPDIR`、`LANG`、`LC_ALL`、`TERM`，空值略過；
+   - 再加固定的 `DISABLE_AUTOUPDATER=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`、`CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`；
+   - 最後加方案 A 的 `CLAUDE_CODE_PLUGIN_CACHE_DIR=<暫存目錄>/plugins`。
+
+   環境從空的 dict 組起，父環境不能覆寫固定值，也傳不進其他變數（憑證、代理、`CLAUDE_CONFIG_DIR` 等）。
+3. **啟動 CLI 一次**：`<cli> plugin list --json`；工作目錄是空的 `work`；stdin 為 `/dev/null`；stderr 丟到 `/dev/null`；以 `start_new_session` 放進自己的 process group。
+4. **有界讀取**（R2）：在讀取期間就套用上限。
+   - 從 CLI 啟動起 **30 秒**內，stdout 必須讀完、程序必須結束；否則為 `timeout`。
+   - stdout 超過 **1 MiB**（1,048,576 bytes）就停止讀取，為 `output_overflow`。
+   - 這些是本查詢的控制規則，不改產品時間限制。
+5. **停止與回收**：逾時、超量或中斷時，先對本次 process group 送 SIGTERM，等 **3 秒**，再送 SIGKILL，然後回收。正常結束後，也會對同一個 group 送一次 SIGKILL，結束殘留的子程序。只處理本次啟動的 group，不以名稱搜尋或終止其他 Claude 程序。
+   - 限制：程序群組 ID 在仍有成員時不會被重用（POSIX）；脫離 group 的程序無法回收。
+6. **解讀**（R1；只在 CLI exit 0、未逾時、未超量時進行）：
+   - **頂層**：必須是 JSON 陣列。JSON 必須是嚴格 UTF-8；不接受重複成員、`NaN`、`Infinity`。
+   - **每筆紀錄**：必須是物件，且 `id` 為字串，否則整份拒絕（`record_shape`）。
+   - **候選判定**：`id` 以第一個 `@` 分成名稱與 origin；名稱必須**完全等於** `cc-plugin-agents-md` 或 `cc-plugin-plugin-authoring`。其他紀錄整筆略過，不印、不驗證，只計入總數。
+   - 候選紀錄的驗證規則：
+
+     | 欄位 | 規則 | 拒絕代碼 |
+     |---|---|---|
+     | `id` | 全長 ≤ 200 | `reject=id` |
+     | origin | 非空，符合 `[A-Za-z0-9][A-Za-z0-9._-]{0,99}`：不含 `/`、空白、控制字元、`@` | `reject=id` |
+     | `scope` | 必須是字串，且屬於 `user`、`project`、`local`、`managed`、`session`、`synced` | `reject=scope` |
+     | `enabled` | 必須是 JSON 布林值，不轉換字串、數字或 `null` | `reject=enabled` |
+     | `errors` | 缺欄位記 0；存在時必須是字串陣列，只輸出長度；`null` 或其他型別一律拒絕 | `reject=errors` |
+
+   - 不修補、不截斷、不猜測 ID。保守拒絕不代表該 ID 在 CLI 中一定無效。
+   - **先驗證全部候選，再一次輸出**；任一候選不合法，就不輸出任何候選。
+   - 錯誤只輸出固定代碼，不輸出原值、原始 JSON、錯誤內文或 traceback。
+7. **清理**：只刪除本次 `mkdtemp` 建立的目錄。刪除前核對它的上層是 `tempfile.gettempdir()`、名稱以 `apa-plist.` 開頭、確實是目錄，否則不刪。清理涵蓋前置失敗、正常結束、執行失敗與中斷。
+
+**輸出**：只寫到 stdout，原始 stdout 只留在記憶體。
+- 第一行固定為 `query=plugin_list v1`。
+- 成功時，每個候選一行 `candidate {"id","origin","scope","enabled","errors"}`，接著 `matched=<n> entries=<m>`。
+- 失敗時只有 `reason=` 或 `reject=` 的固定代碼。
+- 最後三行固定：`result=<代碼>`、`cli=<not_started|start_failed|exit_<n>|exit_signal_<n>>`、`cleanup=<ok|failed|none>`。
+
+**退出碼**：
+
+| exit | `result=` | 意思 |
+|---|---|---|
+| 0 | `ok` | 至少一筆候選，全部合法，清理成功 |
+| 2 | `precheck_failed` | 參數或暫存目錄失敗，CLI 未啟動 |
+| 3 | `no_match` | 查詢成功但 `matched=0`：**不等於 plugin 不存在**；停止，不改成列出全部 id，不擴大候選，不重試 |
+| 4 | `cli_failed` | CLI 非零退出或無法啟動；即使 stdout 是合法 JSON 也不解讀 |
+| 5 | `timeout` | 超過 30 秒 |
+| 6 | `output_overflow` | stdout 超過 1 MiB |
+| 7 | `parse_error` | 非 JSON、非陣列、紀錄格式不符 |
+| 8 | `format_rejected` | 候選欄位不符規則 |
+| 9 | `cleanup_failed` | 主要作業成功，但清理失敗；不算完整成功。主要作業失敗時保留主要代碼，另以 `cleanup=failed` 標示 |
+| 10 | `interrupted` | 腳本收到 SIGINT／SIGTERM；已停止 CLI、已清理 |
+| 11 | （無 `result=` 行） | 報告寫出失敗 |
+| 12 | `internal_error` | 其他非預期錯誤，只輸出固定代碼 |
+
+- Python 自身無法執行這個檔案時也可能回 exit 2，但不會有 `result=` 行。shell 的重新導向失敗時，檔案不會被執行。
+- 一次執行最多啟動 CLI 一次，任何失敗都不自動重試。只要 `cli=` 不是 `not_started`，就不能聲稱「沒有執行」或「沒有背景活動」。
 
 ### 46.3 誰執行（擇一，Aaron 決定）
 
 | 方式 | Claude Code 接觸的內容 | 說明 |
 |---|---|---|
-| **甲（建議）Aaron 自行執行**上面的命令，只回傳過濾後的輸出 | 只有過濾後的幾行 | Claude Code 不執行 CLI、不讀 HOME。 |
-| 乙：核准 Claude Code 執行一次 | 同上；過濾後的輸出存為證據 | 須在沙箱外執行（CLI 需要 HOME）。原始輸出不落地。 |
-
-兩種方式都只執行一次。失敗、非 JSON 或 `matched 0` 都停止，不擴大輸出，不改成列出全部 id。
+| **甲（建議）Aaron 自行執行**操作命令，只回傳 `result.txt` 與 `exit-code.txt` | 只有固定格式的報告 | Claude Code 不執行 CLI、不讀 HOME。 |
+| 乙：核准 Claude Code 執行一次 | 同上 | 須在沙箱外執行（CLI 需要 HOME）。 |
 
 ### 46.4 已知限制與風險
 
-- **不等於 APA 的設定視角**：APA 以 `--restricted` 啟動（只讀 managed 與 `--settings`）。`plugin list` 是否支援、是否套用 `--restricted`，文件沒有說明，所以命令不加。`enabled` 是「merged settings」，可能包含 user 設定；因此和 APA runtime 是否載入，不一定一致。
-- **名稱可能對不上**：`id` 的名稱部分是 marketplace entry name，init 的名稱可能是 manifest name。若 `matched 0`，只表示這兩個名稱沒有對上，**不代表 plugin 不存在**；不改用列出全部 id 的方式，另行決定。
-- **`scope` 不等於強制啟用的設定層**：`scope: managed` 是安裝範圍，不能直接說明是哪一層讓它啟用。若該 id 被 managed 強制啟用，`--settings` 無法覆寫（42.4）。**取得完整 id 不能證明 C 可行。**
+- **設定視角不同**：環境變數的組裝規則一致，不代表查詢與 APA 使用相同的設定視角。APA 使用 `--restricted`；本查詢未確認該子命令對它的支援與行為，**不能把合併設定中的 enabled 當成 APA runtime 已載入的證據**。本輪不自行加入 `--restricted`，也不執行 help 或版本查詢。
+- **名稱可能對不上**：`id` 的名稱部分是 marketplace entry name，init 的名稱可能是 manifest name；所以 `no_match` 不代表 plugin 不存在。
+- **`scope` 不等於強制啟用的設定層**：`scope: managed` 是安裝範圍。若該 id 被 managed 強制啟用，`--settings` 無法覆寫；**取得完整 id 不能證明方案 C 可行**。
 - **CLI 的行為**：
-  - `plugin list` 是否有網路活動、是否觸發背景 marketplace 更新、是否讀取登入資料，文件沒有說明。
-  - 空的 plugin 根目錄可能被寫入，命令結束時隨暫存目錄刪除。
+  - `plugin list` 是否有網路活動、是否觸發背景 marketplace 更新、是否讀登入資料，文件沒有說明。
+  - 空的 plugin 根目錄可能被寫入，結束時隨暫存目錄刪除。
   - 不能保證 CLI 不寫入其他日常狀態。
-  - CLI 版本未另外檢查；第 45 節的 runtime 為 `2.1.293`，之後是否變動未知。
-- **輸出內容**：只有兩個名稱的 id、origin、scope、enabled、錯誤筆數。不保存 `installPath`、`mcpServers`、`errors` 內文、`version`、時間戳，也不保存其他 plugin。
+  - CLI 版本沒有另外檢查（第 45 節的 runtime 為 `2.1.293`）。
+- **官方格式依據**：[Plugin CLI reference 的 plugin list](https://code.claude.com/docs/en/plugins/cli-reference#plugin-list)。這是文件依據，不是對本機 `2.1.293` 的實測保證。
 
 ### 46.5 取得結果之後（另行決定，不自動進行）
 
 - 有 id，且 `enabled: true`：可以設計 C 的受控實驗。做法是在子程序加 `--settings '{"enabledPlugins":{"<id>":false}}'`，只針對這兩個 id，flag 來源只對該次 session 有效。依 42.5、42.6 的模式寫實作計畫與診斷條件，交 review，實作與真實診斷各自另行核准。
 - `scope: managed`，或有其他跡象顯示是受管設定強制啟用：C 可能無效，改由 Aaron 評估 42.4 的第 2、3 項。
 - 結果不改 Gate、不放行這兩個 plugin。
+
+L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
+
+### 46.6 修訂紀錄：plugin 查詢腳本 R1、R2、C1（2026-10-08；Claude Code 執行，待 Codex 限定複核）
+
+> **plugin 查詢腳本 R1、R2、C1 已修訂，定向 fake 驗證完成，待 Codex 限定複核。** 真實查詢尚未核准、未執行；Gate、認證清單及產品行為不變。L1-b、L1-c 未標整體通過，B1-04 維持 InProgress。
+
+- **依據**：vault〈Claude-Code-B1-04-plugin查詢腳本R1-R2-C1修訂派工-aeca412-20261008〉。
+- **提出修訂的 Codex review**：只核對文件、原始碼與官方文件，沒有執行查詢腳本或真實 CLI，不記為測試通過。
+- **開工核對**：分支 `b1-04-live`，HEAD `aeca412`；工作區只有 `?? demo`。產品基準 `40bd263` 之後只有文件差異。Host、Probe、Gate、認證接受清單、版本釘選、產品啟動參數都沒有修改。
+
+| 項目 | 原寫法（`46756f6`、`aeca412`） | 現行 | 位置 |
+|---|---|---|---|
+| R1 值的驗證 | 過濾器直接輸出 `r.get("scope")`、`r.get("enabled")`；`errors` 未驗型別；邊找邊印 | 候選判定、ID 長度與 origin 字元規則；`scope` 限六個官方值；`enabled` 須為布林；`errors` 須為字串陣列，缺欄位才記 0；拒絕重複成員與 NaN；先驗全部候選再一次輸出；錯誤只印固定代碼 | 46.2 第 6 點、`plugin_id_query.py` 的 `judge` |
+| R2 失敗退出 | 非 JSON、非陣列分支 `exit(0)`；只印 CLI 退出碼；`rm -rf` 可能使整體成功；沒有時間與大小上限 | 單一控制程式；固定退出碼 0、2～12；CLI 非零、解析失敗、拒絕、逾時、超量都不回成功；清理失敗另行標示，且不覆蓋主要失敗；30 秒、3 秒寬限、1 MiB，在讀取期間生效；只處理本次 process group；只刪本次已驗證的暫存目錄；最多啟動一次 | 46.2、`run_cli`、`remove_own`、`main` |
+| C1 環境 | 漏了 `LC_ALL`、`TERM`，且帶入空值；寫成「與 APA 子程序相同」 | 與 `CLIEnv` 規則一致（八項、空值略過、三個固定值），加方案 A 的根目錄；保留「組裝規則一致不代表設定視角相同」的說明 | 46.2 第 2 點、46.4、`build_env` |
+
+**定向 fake 驗收**（`scripts/b1-04/test_plugin_id_query.py`；Claude Code 執行，待 Codex 核對）：
+- **怎麼測到實際的檔案**：每個案例都載入實際的 `plugin_id_query.py` 並呼叫 `main()`，不另寫替身。
+  - 只有逾時、超量、暫存目錄失敗三類案例，會把 `TIMEOUT`／`GRACE`、`MAX_OUTPUT`、`PREFIX` 調小或改掉，讓案例快速結束。
+  - 另一案例由 `/bin/bash` 直接執行檔案本身。
+- **測試條件**：CLI 一律是暫存目錄中的假 shell 腳本，不使用正式 CLI 路徑，也不讀本機 plugin 清單。環境值全部是合成的，HOME 是測試建立的空目錄。
+
+| 測試 | 對應派工 §5 |
+|---|---|
+| `test_valid_candidate` | 合法候選；errors 只輸出筆數；`mcpServers`、`installPath` 與非候選的標記不外洩 |
+| `test_no_match` | 非候選不輸出；零筆為 `no_match`（exit 3） |
+| `test_not_json_or_not_list` | 非 JSON、非陣列、紀錄格式、重複成員、NaN、非 UTF-8 → exit 7，沒有 traceback |
+| `test_bad_types_and_ids` | scope 物件或未知值、enabled 字串／null／數字、errors 型別、空 origin、路徑、空白、控制字元、多個 `@`、過長 → exit 8 |
+| `test_no_partial_output` | 第二筆不合法時，第一筆也不輸出 |
+| 所有案例的共同檢查 | 輸出與 stderr 中找不到 `MARK` 標記；假 CLI 的 stderr 標記不出現 |
+| `test_cli_nonzero` | CLI exit 3、stdout 合法 → 仍 exit 4，不輸出候選 |
+| `test_precheck` | 七種參數錯誤與暫存目錄失敗 → exit 2，假 CLI 呼叫零次 |
+| `test_timeout_and_overflow` | 忽略 SIGTERM 的 CLI 逾時（SIGKILL）、輸出灌水超量 → exit 5／6，10 秒內結束；主程序與殘留子程序都已結束 |
+| `test_leftover_child_after_normal_exit` | 正常結束後殘留的子程序也被結束 |
+| `test_interrupted` | 對腳本送 SIGTERM → exit 10，CLI 已停、已清理 |
+| `test_cleanup` | 清理失敗 → exit 9（主要成功）或保留主要代碼 4；`remove_own` 拒絕刪除 HOME、TMPDIR 本身與其他位置的目錄；他人目錄不被刪除 |
+| `test_environment` | 八項白名單（空值略過）、三個固定值不被父環境覆寫、方案 A 根目錄、沒有憑證或其他變數；argv 固定、工作目錄為空的 `work`、呼叫一次 |
+| `test_file_from_bash` | `/bin/bash` 3.2 直接執行檔案，`$?` 為 0 |
+| 每個案例 | 假 CLI 最多被呼叫一次，沒有重試 |
+
+**結果**（macOS；證據 `artifacts/b1-04/plugin-id-query-fake-20261008T031447Z/`）：
+- 13 個測試，在 `/usr/bin/python3`（3.9.6）與 `python3`（3.12.6）下都 OK。
+- `/bin/bash` 是 3.2.57。
+- 命令：`<python> -I -m unittest discover -v -s scripts/b1-04 -p 'test_*.py'`。
+- `py39.txt`、`py312.txt`、`exit-codes.txt`、`versions.txt` 中都沒有 `MARK`。
+
+**故障試跑**（`fault-trials.txt`）：在副本中逐一植入 13 種錯誤，13 種都被測試抓到：
+- 不驗 scope、放寬 enabled、不驗 errors 型別、不驗 origin；
+- 非 JSON 當成功、忽略 CLI 退出碼、移除最後的 group SIGKILL；
+- 傳入父環境、隱藏清理失敗、`remove_own` 不檢查；
+- 關掉輸出上限、顯示 stderr、印出非候選。
+
+**失敗嘗試與過程**：
+- 第一版測試用「不可寫的 TMPDIR」模擬暫存目錄失敗，但 Python 的 `tempfile` 會改用其他可寫目錄，不能模擬。已改為讓 `mkdtemp` 本身失敗。
+- 迴圈中重複 `setUp` 會留下暫存目錄，已改為全部清理。
+- 也補上「正常結束後殘留子程序」的測試。修正前它不是一個獨立案例，故障試跑可能抓不到「移除最後的 group SIGKILL」。
+- 一次故障試跑的命令（含 `rm -rf`）被權限拒絕，改用新的 `mktemp` 目錄重跑，結果如上。
+
+**沒有做的事**：沒有執行真實 `claude plugin list`、版本查詢、C0′ 或任何真實 CLI；沒有讀 HOME、keychain、受管設定或 pixel-office；沒有重跑產品 Go 全套、容器、255 項突變或 Unity。既有結果不掛到本輪。
+
+**待決定**：
+1. Codex 限定複核本次修訂。
+2. 複核通過後，由 Aaron 決定甲或乙，並另行核准一次真實查詢。
 
 L1-b、L1-c 不標整體通過；B1-04 仍 InProgress。
