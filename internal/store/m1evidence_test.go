@@ -1,6 +1,8 @@
 package store
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"maps"
 	"slices"
@@ -70,6 +72,17 @@ func TestM1EvidenceRefusesAlteredExports(t *testing.T) {
 			x.Events = append(slices.Clone(x.Events[:n]), ev)
 		}
 	}
+	// resnap edits a snapshot and stores its new digest with it, as someone
+	// recomputing it would; only the settings check is left to catch it.
+	resnap := func(kind string, f func(map[string]any)) func(*m1evidence.Task) {
+		return func(x *m1evidence.Task) {
+			sn := x.Snapshots[kind]
+			sn.Body = edit(sn.Body, f)
+			sum := sha256.Sum256([]byte(sn.Body))
+			sn.Hash = "sha256:" + hex.EncodeToString(sum[:])
+			x.Snapshots[kind] = sn
+		}
+	}
 	for name, change := range map[string]func(*m1evidence.Task){
 		"a canonical field missing": intent(func(i map[string]any) { delete(i, "eip3009_nonce") }),
 		"the amount changed":        intent(func(i map[string]any) { i["amount"] = "400000" }),
@@ -129,6 +142,17 @@ func TestM1EvidenceRefusesAlteredExports(t *testing.T) {
 		},
 		"the last event's time changed": event(false, func(v map[string]any) { v["observed_at"] = v["observed_at"].(float64) + 1 }),
 		"the first event missing":       func(x *m1evidence.Task) { x.Events = x.Events[1:] },
+		// The profile and credential snapshots against the terms (R1-2).
+		"the profile snapshot missing":    func(x *m1evidence.Task) { delete(x.Snapshots, "profile") },
+		"the credential snapshot missing": func(x *m1evidence.Task) { delete(x.Snapshots, "credential") },
+		"both snapshots missing": func(x *m1evidence.Task) {
+			delete(x.Snapshots, "profile")
+			delete(x.Snapshots, "credential")
+		},
+		"terms say the profile is absent":    resnap("terms", func(v map[string]any) { v["profile_state"] = "absent" }),
+		"terms say the credential is absent": resnap("terms", func(v map[string]any) { v["credential_state"] = "absent" }),
+		"an invalid profile snapshot":        resnap("profile", func(v map[string]any) { v["evidence_mode"] = "live" }),
+		"another consumer's credential":      resnap("credential", func(v map[string]any) { v["consumer_id"] = "consumer-b" }),
 		"the terms changed": func(x *m1evidence.Task) {
 			tr := x.Snapshots["terms"]
 			tr.Body = edit(tr.Body, func(v map[string]any) { v["budget_initial"] = "4500000" })
@@ -150,5 +174,35 @@ func TestM1EvidenceRefusesAlteredExports(t *testing.T) {
 	}
 	if _, err := m1evidence.Export(e.path, "task-b"); err == nil {
 		t.Fatal("a task that was never started exported")
+	}
+}
+
+// A configuration the terms declare absent is legitimate: deny-missing-config
+// has no profile snapshot and checks clean.
+func TestM1EvidenceAcceptsADeclaredMissingConfig(t *testing.T) {
+	var m contracts.CaseManifest
+	readFixture(t, "testdata/contracts/cases.json", &m)
+	c := m.Cases[slices.IndexFunc(m.Cases, func(c contracts.AcceptanceCase) bool { return c.CaseID == "deny-missing-config" })]
+	e := newEnv(t)
+	params := maps.Clone(m.Defaults)
+	maps.Copy(params, c.Parameters)
+	setup, purchase := caseInputs(t, e, params)
+	e.offers = OfferBook{}
+	e.offer(purchase)
+	s := e.open()
+	if err := s.StartTask(setup); err != nil {
+		t.Fatal(err)
+	}
+	submit(t, s, sessA, purchase)
+	s.Close()
+	exported, err := m1evidence.Export(e.path, "task-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := exported[0].Snapshots["profile"]; ok || !strings.Contains(exported[0].Snapshots["terms"].Body, `"profile_state":"absent"`) {
+		t.Fatalf("the case does not declare its profile absent: %v", exported[0].Snapshots["terms"].Body)
+	}
+	if _, problems := m1evidence.CheckIntegration(c, m.Defaults, exported); len(problems) > 0 {
+		t.Fatalf("refused: %v", problems)
 	}
 }

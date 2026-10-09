@@ -9,7 +9,7 @@ D = "cmd/m1-fixture/main.go"
 E = "internal/m1evidence/m1evidence.go"
 DRV = ("./cmd/m1-fixture/", "^(TestRunSaving|TestSecretScanAndEndMarker|TestAssembleReverse|TestPassingLogsAreNotEvidence)$")
 TAMPER = ("./internal/store/", "^TestM1EvidenceRefusesAlteredExports$")
-CONTRACT = ("./internal/m1evidence/", "^TestCheckContract$")
+CONTRACT = ("./internal/m1evidence/", "^TestCheckContract")
 
 M = [
     # R2: saving and provenance
@@ -31,6 +31,12 @@ M = [
     ("R1 expected comparison", E, "if f[1] != f[2] {", "if false {", TAMPER),
     ("R1 contract rerun vs recorded", E, "if o != x.Observed {", "if false {", CONTRACT),
     ("R1 contract result vs expected", E, "if o.Result != c.Expected.Result {", "if false {", CONTRACT),
+    # 10/10 round: the case's actual inputs, the settings snapshots
+    ("R1 contract code vs expected", E, 'if o.Result == "reject" && o.Code != c.Expected.Reason {', "if false {", CONTRACT),
+    ("R1-1 inputs bound to the case", E, "problems = append(problems, inputs(c, x, trusted)...)", "_ = inputs", CONTRACT),
+    ("R1-2 present means a snapshot", E, 'if (state == "present") != has {', 'if _ = has; false {', TAMPER),
+    ("R1-2 profile snapshot valid", E, "if err := p.Validate(); err != nil {", "if err := p.Validate(); err != nil && false {", TAMPER),
+    ("R1-2 credential is the consumer's", E, 'if cr.ConsumerID != t.ConsumerID || cr.EvidenceMode != "fixture" || cr.ValidUntil == 0 {', "if false {", TAMPER),
 ]
 
 failed = 0

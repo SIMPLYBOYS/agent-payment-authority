@@ -29,15 +29,16 @@ func manifest(t *testing.T) contracts.CaseManifest {
 // clean except the cases named in bad. The real checks run on real data in
 // internal/m1evidence, internal/store and cmd/demo.
 func stubChecks(t *testing.T, bad ...string) {
-	ci, cc := checkIntegration, checkContract
-	t.Cleanup(func() { checkIntegration, checkContract = ci, cc })
+	ci, cc, lt := checkIntegration, checkContract, loadTrusted
+	t.Cleanup(func() { checkIntegration, checkContract, loadTrusted = ci, cc, lt })
+	loadTrusted = func() (m1evidence.Trusted, error) { return m1evidence.Trusted{}, nil }
 	checkIntegration = func(c contracts.AcceptanceCase, _ map[string]string, _ []m1evidence.Task) (m1evidence.Observed, []string) {
 		if slices.Contains(bad, c.CaseID) {
 			return m1evidence.Observed{}, []string{"stub problem"}
 		}
 		return m1evidence.Observed{Result: c.Expected.Result}, nil
 	}
-	checkContract = func(c contracts.AcceptanceCase, _ m1evidence.Contract) (m1evidence.ContractObserved, []string) {
+	checkContract = func(c contracts.AcceptanceCase, _ m1evidence.Contract, _ m1evidence.Trusted) (m1evidence.ContractObserved, []string) {
 		if slices.Contains(bad, c.CaseID) {
 			return m1evidence.ContractObserved{}, []string{"stub problem"}
 		}
@@ -282,6 +283,20 @@ func TestAssembleReverse(t *testing.T) {
 	os.Symlink("/etc/hosts", filepath.Join(dir, "e2e/link.json"))
 	if _, err := assemble(dir, cases, outputs, "run-1", "", "", "", "", nil, nil); err == nil {
 		t.Fatal("a symlink in the run directory was indexed")
+	}
+}
+
+// Without the trusted fixtures no contracts record can be checked: those
+// claims are INCONCLUSIVE, never PASS.
+func TestUnreadableFixturesLeaveContractsInconclusive(t *testing.T) {
+	stubChecks(t)
+	loadTrusted = func() (m1evidence.Trusted, error) { return m1evidence.Trusted{}, errors.New("no fixtures") }
+	cases := manifest(t)
+	dir, outputs := fixture(t, cases, nil)
+	for _, c := range cases.Cases {
+		if r := results(build(t, cases, dir, outputs, "run-1"))[c.CaseID]; c.Layer == "contracts" && r.Verdict != "INCONCLUSIVE" {
+			t.Errorf("%s: %s", c.CaseID, r.Verdict)
+		}
 	}
 }
 
