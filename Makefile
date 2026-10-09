@@ -1,4 +1,4 @@
-.PHONY: check check-contracts build dev demo-fake demo-integration demo present-live present-fake
+.PHONY: check check-contracts build dev demo-fake demo-integration demo present-live present-fake m1-fixture
 
 # Compile, vet and unit-test. Calls no paid model and touches no testnet.
 check:
@@ -72,3 +72,10 @@ present-live:
 
 present-fake:
 	@sh scripts/demo/present.sh fake
+
+# docs/m1-evidence.md: the M1 fixture evidence bundle, a new
+# artifacts/m1/<run-id>/ each time (manifest.json, its evidence, run-end.json).
+# Fake CLI only: no model, no testnet. M1_FIXTURE_FLAGS=-skip-browser leaves
+# out the browser checks (they then are missing from the bundle).
+m1-fixture:
+	go run ./cmd/m1-fixture $(M1_FIXTURE_FLAGS)
