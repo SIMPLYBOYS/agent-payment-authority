@@ -1,12 +1,16 @@
 package store
 
 import (
+	"encoding/json"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"testing"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/m1evidence"
 )
 
 // The 16 accepted integration cases run against the Store. Expected values
@@ -20,6 +24,11 @@ import (
 //   - cancel / cli-timeout: the task status and the lifecycle event's code,
 //     with the purchase's approval state when there is a purchase.
 //   - restart-and-new-task: the new task's wallet after a restart.
+//
+// Each case's stored tasks are then exported as stored (internal/m1evidence)
+// and recomputed against the case: digests, bindings, the event chain and
+// the outcome derived from the recorded events. With APA_M1_RUN_DIR set
+// (make m1-fixture), the export is written to <dir>/<case_id>.json.
 func TestAcceptedIntegrationCases(t *testing.T) {
 	var m contracts.CaseManifest
 	readFixture(t, "testdata/contracts/cases.json", &m)
@@ -120,6 +129,28 @@ func TestAcceptedIntegrationCases(t *testing.T) {
 				}
 			}
 			s.Close()
+			tasks := []string{"task-a"}
+			if c.Operation == "restart-and-new-task" {
+				tasks = append(tasks, "task-a-next")
+			}
+			exported, err := m1evidence.Export(e.path, tasks...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, problems := m1evidence.CheckIntegration(c, m.Defaults, exported); len(problems) > 0 {
+				t.Fatalf("the exported evidence does not show the case: %v", problems)
+			}
+			if dir := os.Getenv("APA_M1_RUN_DIR"); dir != "" {
+				body, _ := json.MarshalIndent(map[string]any{"case_id": c.CaseID, "layer": "store_integration",
+					"harness": "internal/store TestAcceptedIntegrationCases", "operation": c.Operation, "parameters": params,
+					"test_observed": map[string]string{"result": result, "reason": reason, "approval_status": approval}, "tasks": exported}, "", "  ")
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, c.CaseID+".json"), append(body, '\n'), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			e.open() // everything recorded passes recovery verification
 		})
 	}

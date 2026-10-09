@@ -17,6 +17,7 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/m1evidence"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 )
 
@@ -67,7 +68,14 @@ type m1Evidence struct {
 	Traces   map[string][]any             `json:"traces"`    // task -> its run traces through the history allow-list (loadTrace, checked against the Store)
 	HostRuns json.RawMessage              `json:"host_runs"` // GET /api/host/runs, operator token
 	Budget   map[string]map[string]string `json:"budget"`    // task -> initial, remaining (the database, read after the host stopped)
-	Verdict  string                       `json:"verdict"`
+	// The trusted settings the host was started with (the files' contents,
+	// a case's own variant included) and its tasks as the Store recorded them
+	// (internal/m1evidence), with what recomputing them against the case gives.
+	HostSettings map[string]json.RawMessage `json:"host_settings"`
+	Store        []m1evidence.Task          `json:"store"`
+	Recomputed   m1evidence.Observed        `json:"recomputed"`
+	Problems     []string                   `json:"problems"`
+	Verdict      string                     `json:"verdict"`
 }
 
 type m1Observed struct {
@@ -151,6 +159,16 @@ func TestM1FixtureCases(t *testing.T) {
 					b, _ := json.Marshal(v)
 					os.WriteFile(filepath.Join(d, name+".json"), b, 0o600)
 					o.args = append(o.args, "--"+name, filepath.Join(d, name+".json")) // the last --registry wins
+				}
+			}
+			settings := map[string]json.RawMessage{"registry": registryRaw, "profile": profileRaw}
+			for i := 0; i+1 < len(o.args); i++ { // the last of each flag, as the host reads them
+				if name, ok := strings.CutPrefix(o.args[i], "--"); ok && (name == "registry" || name == "profile") {
+					b, err := os.ReadFile(o.args[i+1])
+					if err != nil {
+						t.Fatal(err)
+					}
+					settings[name] = b
 				}
 			}
 			if c.Operation == "cli-timeout" {
@@ -349,6 +367,14 @@ func TestM1FixtureCases(t *testing.T) {
 			db.Close()
 			obs.BudgetDeducted = deducted.String()
 			ev.Observed = obs
+			ev.HostSettings = settings
+			if ev.Store, err = m1evidence.Export(filepath.Join(h.dir, "demo.db"), tasks...); err != nil {
+				t.Fatalf("export: %v", err)
+			}
+			ev.Recomputed, ev.Problems = m1evidence.CheckIntegration(c, m.Defaults, ev.Store)
+			if len(ev.Problems) > 0 {
+				t.Errorf("%s: the stored records do not show the case: %v", id, ev.Problems)
+			}
 
 			x := c.Expected
 			ok := obs.Result == x.Result && obs.Reason == x.Reason && obs.ApprovalStatus == x.ApprovalStatus &&
@@ -358,7 +384,7 @@ func TestM1FixtureCases(t *testing.T) {
 				ok = ok && obs.Purchases == 0
 			}
 			ev.Verdict = "FAIL"
-			if ok {
+			if ok && len(ev.Problems) == 0 {
 				ev.Verdict = "PASS"
 			} else {
 				t.Errorf("%s: observed %+v, expected %+v", id, obs, x)

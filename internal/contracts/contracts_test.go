@@ -3,6 +3,7 @@ package contracts
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -359,9 +360,11 @@ func TestContractCasesFromManifest(t *testing.T) {
 		}
 		t.Run(c.CaseID, func(t *testing.T) {
 			p := purchase(t)
-			r, _ := registry(t)
+			r, cfg := registry(t)
 			result := ""
 			var err error
+			// The record of what was called (M1-E1, internal/m1evidence.Contract).
+			rec := map[string]any{"case_id": c.CaseID, "layer": "contracts_test", "operation": c.Operation, "parameters": c.Parameters}
 			accept := func(e error) {
 				err, result = e, "accept"
 				if e != nil {
@@ -379,6 +382,7 @@ func TestContractCasesFromManifest(t *testing.T) {
 				case "other_consumer":
 					incoming = asB(p) // same request_id, other consumer
 				}
+				rec["purchase"], rec["incoming"] = p, incoming
 				result, err = CompareRetry(p, incoming)
 				if err != nil {
 					result = "reject"
@@ -402,15 +406,33 @@ func TestContractCasesFromManifest(t *testing.T) {
 				case "agent_b":
 					p.Intent.AgentID = b.Intent.AgentID
 				}
+				rec["registry"], rec["session"], rec["purchase"] = cfg, s, p
 				accept(r.ValidatePurchase(s, p))
 			case "validate-decision":
 				h, e := p.Intent.Hash()
 				mustPass(t, e)
-				accept(PolicyDecision{Version, h, "Ask", "pending", c.Parameters["payment_status"], "HUMAN_APPROVAL_REQUIRED"}.Validate())
+				d := PolicyDecision{Version, h, "Ask", "pending", c.Parameters["payment_status"], "HUMAN_APPROVAL_REQUIRED"}
+				rec["decision"] = d
+				accept(d.Validate())
 			case "validate-purchase":
-				accept(mutatePurchase(t, p, c.Parameters["mutation"]).Validate())
+				mp := mutatePurchase(t, p, c.Parameters["mutation"])
+				rec["purchase"] = mp
+				accept(mp.Validate())
 			default:
 				t.Fatalf("unimplemented contract case operation %s", c.Operation)
+			}
+			if dir := os.Getenv("APA_M1_RUN_DIR"); dir != "" {
+				observed := map[string]string{"result": result}
+				if code := ErrorCode(err); code != "" {
+					observed["code"] = code
+				}
+				rec["observed"] = observed
+				body, merr := json.MarshalIndent(rec, "", "  ")
+				if merr != nil {
+					t.Fatal(merr)
+				}
+				mustPass(t, os.MkdirAll(dir, 0o700))
+				mustPass(t, os.WriteFile(filepath.Join(dir, c.CaseID+".json"), append(body, '\n'), 0o600))
 			}
 			if result != c.Expected.Result {
 				t.Fatalf("got %s, expected %s (%v)", result, c.Expected.Result, err)
