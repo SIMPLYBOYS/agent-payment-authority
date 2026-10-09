@@ -14,6 +14,8 @@
 >
 > **現行狀態（10/10）**：M1-E1 於程式 `0d13255`、測試與產包基準 `0853b44` 通過限定範圍技術複核（第 14 節）。R1-1、R1-2 關閉，R2 維持關閉。這是 fixture 產生端的驗收，不代替 B1-07，也不代表 M1、B1-04 或 B1-06 整體完成。下一步 E2（B1-07 獨立證據檢查器）待另行派工。
 >
+> **E2（10/10）**：唯讀檢查器 `make verify-m1 RUN_DIR=...` 已實作（B1-07 的 fixture 子範圍），對 E1 驗收包判定 PASS（第 15 節），待 Codex 限定 review；live 包（E3）尚未支援。
+>
 > **這是產出端，不是 B1-07**。包內的 PASS／FAIL／INCONCLUSIVE 是產生程式自己的判定；`RunManifest.ValidateAgainst` 只檢查索引。獨立核對由 B1-07（`make verify-m1`，M1-E2）負責。
 
 ## 1 用法
@@ -529,7 +531,7 @@ go test -race -count=1 ./internal/store -run '^TestM1Evidence' -timeout 90s
 
 **本節是文件同步**，不是新的技術驗證：沒有改程式、`cases.json`、可信 fixture 或證據包，沒有重新產包，也沒有跑任何測試。任務狀態未改，B1-04／B1-06 維持 InProgress，B1-07 未開工。
 
-## 15 M1-E2 唯讀證據檢查器（B1-07 的 fixture 子範圍；設計簡記，實作中）
+## 15 M1-E2 唯讀證據檢查器（B1-07 的 fixture 子範圍；Claude Code 實作，待 Codex 限定 review）
 
 > 依 `Claude-Code-M1-E2唯讀證據檢查器實作派工-ce23a3b-20261010`。開工基準 `ce23a3b`（E1 驗收基準：產品 `0d13255`、測試與產包 `0853b44`，不回填）。
 
@@ -577,3 +579,111 @@ go test -race -count=1 ./internal/store -run '^TestM1Evidence' -timeout 90s
 | V5 | 無提前核准或付款 | forbidden 或未知事件、付款狀態不是 unavailable | — |
 | V6 | 模式與層級 | fixture 以外的標籤、層級冒充 | live 模式（E3 之前不支援） |
 | V7 | A／B 綁定 | 身分不一致、跨用戶 | 缺 registry |
+
+### 15.1 實作與 V1～V7 對照
+
+程式：`cmd/verify-demo/`（CLI）、`internal/verification/`（`files.go` 唯讀存取、`verify.go` V1／V6 與分派、`integration.go` 整合案例、`contract.go` 契約案例、`requirements.go` 整合要求、`report.go` 報告與三態、`trusted.go` 可信輸入）。
+
+| Claim | 實作（檢查器自己判定的部分） | 正例 | 負例（測試名稱 → 判定） |
+|---|---|---|---|
+| V1 | 盤點（lstat，symlink、FIFO、裝置一律違規）；只讀 `os.Root` 下的普通檔，以 O_NOFOLLOW＋O_NONBLOCK 開檔並比對 inode；上限 4096 檔、每檔 64 MiB、總計 1 GiB；manifest／結束標記嚴格解碼（重複成員、未知欄位、多份文件都拒）；run ID、commit、digest 格式、versions、case list digest、config digest 以 repo 的可信檔案重算；七個命令各一次且 exit 0；索引唯一、每檔 bytes digest、索引外的檔案、claim 的引用；31 案各一次、七個 capability 恰為 not_evaluated | `TestGoldenBundle` | 檔案在建索引後改動、索引沒列的檔、沒人引用的 symlink、往上爬的索引路徑（`TestSingleChecks`）→ FAIL；symlink、連到外面的目錄、FIFO（`TestPaths`）→ FAIL，且 FIFO 不會卡住；另一份 case list → INCONCLUSIVE；沒有結束標記 → INCONCLUSIVE；結束標記指向別的 manifest、claim 重複、非 0 的命令（`TestMissingAndContradictory`）→ FAIL；必要案例改列 not_evaluated、capability 自稱 PASS（`TestRequirementsAndClaims`）→ FAIL |
+| V2 | 整合案例：凍結參數（`remaining`、`allow_max`、`mode`、`required_config`、`approval_deadline_seconds`、Store 層的 `clock`、`amount`、`merchant`、`asset`、`credential`）對照 task 實際的設定與請購；請購的 intent digest、`PurchaseOrder.Validate`（requirement digest 與欄位一致）；E2E 的 host 設定檔對照 Store 快照、API 回覆的請購對照 Store。契約案例：與可信 fixture 逐欄比對，只有案例指定的欄位可以不同 | 同上 | 金額、收款人改動（`TestRecordsThatContradictTheirCase`）、Store 時鐘不是案例的（`TestSingleChecks`）→ FAIL；`consumer-a` 冒充 `consumer-b`、nonce 衝突冒充 request_id 衝突（`TestContractRecordsRelabelled`）→ FAIL，且確認它們仍得到被冒充案例的結果；重複 JSON 成員 → FAIL；截斷的紀錄 → INCONCLUSIVE |
+| V3 | 從事件推導結果（各 operation 照 `cases.json` 的寫法）；到期時間等於決策時間加 `advance_seconds`；預算（terms 初值減剩餘）；設定 present／absent 與快照一致、profile 有效、credential 屬於該 consumer、terms 的預算與資產在 profile 內；**各 reason 的必要條件**（Deny 的 reason 本身成立；Allow／Ask 需要所有 Deny 條件都不成立，再以 allow 上限與核准者決定）；契約案例以紀錄的輸入重跑純契約函式，對照凍結的 expected 與紀錄自己的 observed | 同上 | Deny 被報成 Allow、缺 profile／credential／兩者都缺、terms 與快照矛盾、**設定被一致地宣告為 absent 卻仍是 Ask**、無效 profile、別人的 credential、預算被扣、merchant 其實允許的 deny-merchant（`TestRecordsThatContradictTheirCase`）→ FAIL；別案的 Store 紀錄冒充、terms 把缺少的 profile 說成 present、到期時間不對（`TestSingleChecks`）→ FAIL；凍結 expected 不同、紀錄與自己的輸入矛盾（`TestContractOutcomes`）→ FAIL |
+| V4 | 每個事件的 `EventHash` 等於存的 hash、序號連續、`prev_event_hash` 從 genesis 串起、scope 屬於該 task、引用的請購有存、`ValidateEvent`、`ValidateEventOrder`、每筆請購恰好被提出一次；E2E 另外核對 API 的 task／events 回覆（狀態、`as_of_sequence`、事件 ID、型別、序號、prev、時間）與 Store 一致 | 同上 | 中段事件改動、序號缺口（`TestRecordsThatContradictTheirCase`）、API 的事件不是存的事件（`TestSingleChecks`）→ FAIL |
+| V5 | 只接受 M1 的事件型別；expected 的 forbidden 事件；決策與 API 的付款狀態必須是 unavailable | 同上 | 插入 SETTLED（`TestRecordsThatContradictTheirCase`）、決策記錄付款（`TestSingleChecks`）→ FAIL |
+| V6 | evidence mode 必須是 fixture；每個路徑的 source 依檢查器自己的表；紀錄的 layer；claim 必須引用它那一層的紀錄（存在卻沒引用 → FAIL；不存在 → INCONCLUSIVE）；`--mode live` 回報不支援 | 同上 | 未知 source、fixture 標成 live、契約證據標成 E2E、契約紀錄標成 E2E（`TestModesAndLayers`）→ FAIL；live 模式 → INCONCLUSIVE（exit 2） |
+| V7 | task 列、registry 快照與可信 registry 的身分一致；請購與事件的 consumer、agent、wallet、task、payer 屬於該 task；契約綁定案例的 session 與 A／B 身分 | 同上 | 錯的 payer、A 的事件放到 B（`TestRecordsThatContradictTheirCase`）、沒有請購的 task 換 payer（`TestSingleChecks`）→ FAIL |
+| R（3.2） | 檢查器自己的六項要求與測試名稱；自己解析 go test JSON、TAP、browser-ui 的行；失敗 → FAIL，缺少或略過 → INCONCLUSIVE，索引說 pass 但紀錄不是 → FAIL | 同上 | 索引 pass 但紀錄沒有該測試、索引 pass 但測試被略過（`TestRequirementsAndClaims`）、測試失敗（`TestFailingRequirementTest`）→ FAIL |
+| 結束碼 | 0／1／2／3（`cmd/verify-demo`） | `TestExitCodes`：golden → 0 | FAIL → 1、INCONCLUSIVE → 2；未給 run 目錄、目錄不存在、沒有 case list、報告寫不出、未知旗標 → 3 |
+
+- **負例的做法**：在 golden 的暫存副本上改，**同步重算**內層的 hash（快照 digest、intent digest、事件 hash 與 prev 鏈）與外層的索引 digest、結束標記；所以每個負例只能被它自己那一項檢查抓到。`TestRecordsThatContradictTheirCase` 另外確認 V1 維持 PASS。
+- **產生端的判定只拿來比對**：把正確案例的 manifest 判定改成 FAIL，檢查器仍判 PASS 並列出差異；把錯誤紀錄的 manifest 判定留在 PASS，檢查器判 FAIL（`TestProducerVerdicts`）。
+- **golden**：`testdata/verification/`，取自 E1 驗收包 `…162703Z-4ddb7a`，拿掉 24 張截圖並重建索引；預期寫在 `expected.json`，由凍結的 `cases.json` 與 E1 的層級表寫成，**不是**執行檢查器或產生端的判定得到的（見該目錄的 README）。
+
+### 15.2 共用與獨立
+
+- **共用的純函式**：如本節開頭所列。全部只用來解析與驗證：
+  - `ValidateAgainst` 只當索引檢查；
+  - `ValidateEvent`、`ValidateEventOrder` 只當事件的結構與轉移規則。
+- **檢查器自己寫的部分**：
+  - 讀檔與路徑安全、嚴格 JSON（重複成員）；
+  - 輸入綁定（整合案例的參數對照、契約案例逐欄比對，比對程式不沿用 `internal/m1evidence`）；
+  - 事件鏈的序號與 prev 串接（與 `ValidateEventOrder` 雙重檢查）、Store 與 API 的對照；
+  - 從事件推導結果、各 reason 的必要條件、expected 比對、forbidden、模式與層級、A／B 身分、整合要求的測試紀錄解析；
+  - 三態判定與結束碼。
+- **不使用**：
+  - `policy.Decide`、Store、Host、CLI runner；
+  - `internal/m1evidence` 的 `CheckIntegration`、`CheckContract`、`TestBundle`；
+  - 包內的 `observed`、`recomputed`、`problems`、`verdict`、`test_observed` 與 log 的成功字樣。
+  - 例外：E2E 紀錄自己的 `verdict` 若不是 PASS，視為矛盾而判 FAIL；它只能讓案例失敗，不能讓案例通過。
+
+### 15.3 反向驗證
+
+`python3 scripts/verify/m1-e2-reverse.py`（從 repo 根目錄執行）：
+- 一次拿掉一項關鍵核對；兩個檢查守同一件事時，兩個一起拿掉。跑 `internal/verification` 與 `cmd/verify-demo` 的測試，必須以**斷言失敗**抓到（編譯失敗不算），跑完還原檔案。
+- 共 **38 項**：
+  - V1 的 10 項：digest、索引外檔案、盤點違規、不安全讀取、結束標記 digest、缺結束標記、config digest、case list 版本、命令結束碼、claim 唯一；
+  - V2 的 4 項：契約輸入比對、請購驗證、案例參數、E2E 兩個來源；
+  - V3 的 9 項：expected、必要條件、設定 present／absent、profile、credential、預算、到期時間、契約結果、契約紀錄與重跑；
+  - V4 的 1 項：hash、序號、prev、事件規則；
+  - V5 的 2 項：forbidden 與未知事件、付款狀態；
+  - V6 的 4 項：source、mode、紀錄 layer、live 不支援；
+  - V7 的 2 項：task 綁定、事件 scope；
+  - R 的 2 項：索引與紀錄矛盾、測試失敗；
+  - 結束碼與報告的 4 項：FAIL→1、INCONCLUSIVE→2、報告寫不出、`worst` 保留 FAIL。
+- **結果：38／38 以斷言失敗抓到**。
+- 過程：
+  - **第一次**：30／38。5 項是腳本本身的問題（錨點重複、替換造成編譯錯誤），3 項是真的缺少單獨的測試（契約結果對照 expected、契約紀錄對照重跑、整合要求測試失敗而索引不說 pass）。補了 `TestContractOutcomes`、`TestFailingRequirementTest`，修好腳本。
+  - **第二次**：37／38，剩 1 項是腳本的編譯錯誤。
+  - **第三次**：38／38。
+- 在這之前，也先依各檢查補了單獨涵蓋的負例（`TestSingleChecks` 的 13 項），否則拿掉某項檢查時，會被其他檢查遮蔽。
+
+### 15.4 測試與驗收紀錄（10/10，Claude Code 執行，待 Codex review）
+
+**Commit**：
+- 開工基準 `ce23a3b`（只有未追蹤的 `demo`）；
+- 程式 `21d9d38`、測試 `296fd91`、README 與本節設計簡記 `ff776bd`；
+- 本小節的驗收紀錄另行提交。
+
+**定向回歸**：
+- `go vet ./...` 通過；
+- `go test -race -count=1 ./internal/verification/... ./cmd/verify-demo/...`：兩個套件通過。
+
+**既有包驗收**（唯讀，沒有執行任何產包命令）：
+- 證據目錄：`artifacts/m1-verify/e2-20261009T181043Z/`。這是包外的新目錄，`NOTE.txt` 說明每個檔案。
+- 輸入：`artifacts/m1/m1-fixture-20261009T162703Z-4ddb7a/`，81 個檔（79 個索引證據、manifest、結束標記），讀了 7,070,611 bytes。
+- 原包每個檔的 sha256 在執行前、兩次執行後都相同（`bundle-before.sha256`、`bundle-after.sha256`、`bundle-after-2.sha256`）。
+- 結果：
+
+  | 命令 | 結束碼 | 報告 |
+  |---|---|---|
+  | `make verify-m1 RUN_DIR=artifacts/m1/m1-fixture-20261009T162703Z-4ddb7a` | 0 | `report.json`：**被本機環境截斷**，見下方說明 |
+  | 同一個 make 目標，經 `rtk proxy make`（不過濾） | 0 | `report-make-raw.json` |
+  | `go build -o <scratch>/verify-demo-ff776bd ./cmd/verify-demo` 後直接執行 | 0（程式本身的結束碼） | `report-binary.json` |
+
+  - `report.json` 的截斷：本機 shell 掛鉤會把 `make` 改寫成 `rtk make`，長輸出被縮短（「lines truncated」），所以不是完整的 JSON。原樣保留，沒有覆寫；完整報告是後兩份。
+  - 後兩份報告除了 checker 的 build 欄位之外完全相同。
+- 報告內容：
+  - verdict **PASS**；V1～V7 與 R 都是 PASS；
+  - 31 案全部 PASS（13 案 host_e2e 各兩份紀錄、3 案 Store、15 案契約）；
+  - 七個 capability 為 not_evaluated；
+  - 與產生端沒有差異；六項整合要求都是 PASS；
+  - checker 的 build 是 `ff776bd…`，標為 `(modified)`：Go 把未追蹤的 `demo` 也算成修改，已追蹤的檔案是乾淨的（`git-status.txt`）。
+
+**判定與歸屬**：以上全部是 Claude Code 執行，待 Codex 限定 review。這不是 E1 的驗收，也不代表 B1-07 或 M1 已完成：
+- live 包（E3）尚未支援；
+- reviewer 的挑戰尚未進行。
+
+### 15.5 限制
+
+- 檢查只能看證據包裡有的東西：
+  - hash 與事件鏈從包本身重算，整份一致重造的包無法分辨，需要外部錨點；
+  - 被一致截斷的尾端也只能部分偵測：E2E 有 API 的 `as_of_sequence` 可以對照，Store 層的紀錄沒有 `chain_head`；
+  - 包裡沒有記錄的副作用，無法證明它不存在。
+- 來源資訊齊全，不等於證明了該 commit 產生了這些資料。
+- 必要條件只檢查每個 reason 所需的條件，不是完整的 Policy 引擎。時間相關的條件（credential 的 `valid_until`、intent 的有效期間），以決策事件的 `observed_at` 作為當下時間。
+- 契約案例被接受時的 reason 是案例清單的命名，沒有可觀測的 code。
+- 整合要求的 PASS 只表示包內有那些測試的通過紀錄，檢查器沒有自己操作瀏覽器。
+- live 模式回報 INCONCLUSIVE（不支援），E3 時再接上；檢查器沒有假設開發展示 plugin 例外已獲 M1 核准。
+- 經 `make` 或 `go run` 時，外層會改寫非零的結束碼。
+- 在這個環境，`make` 還會被 shell 掛鉤改寫並截斷輸出；需要完整報告時，直接執行編好的程式，或用不過濾的方式執行。
