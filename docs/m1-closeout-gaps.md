@@ -131,6 +131,11 @@
 
 **M1-E1：沿用既有證據契約，補齊證據檔內容並做 `make m1-fixture`**（B1-06 出口的第 1、3 項）。
 
+> **現況（10/9）**：E1 已實作，見 `docs/m1-evidence.md`。
+> - 依 Codex review R1、R2 修訂：claim 以可只靠證據包重算的 Store／契約結構化紀錄為依據，測試 log 只作輔助；任何保存或來源查詢失敗都標為不完整（結束碼 2）。
+> - 3.1 的實際分層：E2E 13 案、只到 Store 層 3 案、契約層 15 案。與本節原表的差異列在該文件第 4 節。
+> - 待 Codex 限定複核。
+
 **不另造格式**。既有契約（`internal/contracts/evidence.go` 的 `RunManifest`、`EvidenceRef`、`ClaimResult`、`CommandResult`；`docs/contracts.md`「Claim 分兩類」一節）已經定義：
 - run ID、code commit、dirty patch digest、config digest、case manifest digest、工具版本、命令與 exit code；
 - 證據索引（相對路徑、原始 bytes 的 `sha256:` digest、evidence mode、source）；
