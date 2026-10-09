@@ -80,7 +80,9 @@ func structured(t *testing.T, cases contracts.CaseManifest, dir, sub string) {
 		var v map[string]any
 		switch {
 		case sub == "e2e" && slices.Contains(e2eCases, c.CaseID):
-			v = map[string]any{"case_id": c.CaseID, "layer": "host_e2e", "verdict": "PASS", "store": []any{}}
+			// "tasks" are the API's replies, shaped unlike a Store export.
+			v = map[string]any{"case_id": c.CaseID, "layer": "host_e2e", "verdict": "PASS", "store": []any{},
+				"tasks": []any{map[string]any{"task_id": "show-a-01", "purchases": []any{map[string]any{"purchase_order_id": "po-1"}}}}}
 		case sub == "store" && c.Layer == "integration":
 			v = map[string]any{"case_id": c.CaseID, "layer": "store_integration", "tasks": []any{}}
 		case sub == "contracts" && c.Layer == "contracts":
