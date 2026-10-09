@@ -10,6 +10,7 @@
 package m1evidence
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -18,9 +19,14 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
+	"os"
+	"path/filepath"
+	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 	_ "modernc.org/sqlite"
 )
 
@@ -187,6 +193,9 @@ func verify(t Task) (*checked, error) {
 	if _, err := c.terms.BudgetInitial.Units(); err != nil {
 		return nil, fmt.Errorf("terms budget_initial: %w", err)
 	}
+	if err := c.settings(t, cfg); err != nil {
+		return nil, err
+	}
 	task, w, err := r.Binding(t.TaskID)
 	if err != nil {
 		return nil, err
@@ -261,6 +270,52 @@ func verify(t Task) (*checked, error) {
 		return nil, fmt.Errorf("%d purchases stored, %d proposed in the events", len(t.Purchases), c.purchases)
 	}
 	return c, nil
+}
+
+// settings checks the profile and credential snapshots against the terms,
+// as the Store's own recovery check does: a setting the terms call present
+// has its snapshot and one they call absent has none; a present profile is
+// valid and holds the task's budget and asset; a present credential is this
+// consumer's M1 fixture. A missing configuration is legitimate only where
+// the terms say absent (deny-missing-config).
+func (c *checked) settings(t Task, cfg contracts.RegistryConfig) error {
+	tm := c.terms
+	for kind, state := range map[string]string{"profile": tm.ProfileState, "credential": tm.CredentialState} {
+		_, has := t.Snapshots[kind]
+		if state != "present" && state != "absent" {
+			return fmt.Errorf("terms %s_state %q", kind, state)
+		}
+		if (state == "present") != has {
+			return fmt.Errorf("terms say the %s is %s, the snapshot is present: %v", kind, state, has)
+		}
+	}
+	if !slices.ContainsFunc(cfg.Assets, func(a contracts.Asset) bool { return a.AssetID == tm.AssetID }) {
+		return fmt.Errorf("terms asset %s is not in the registry snapshot", tm.AssetID)
+	}
+	if s, ok := t.Snapshots["profile"]; ok {
+		var p policy.Profile
+		if err := contracts.Decode([]byte(s.Body), &p); err != nil {
+			return fmt.Errorf("profile snapshot: %w", err)
+		}
+		if err := p.Validate(); err != nil {
+			return fmt.Errorf("profile snapshot: %w", err)
+		}
+		budget, _ := tm.BudgetInitial.Units()
+		limit, _ := p.TaskCap.Units()
+		if budget > limit || tm.AssetID != p.AssetID {
+			return errors.New("terms budget or asset outside the profile")
+		}
+	}
+	if s, ok := t.Snapshots["credential"]; ok {
+		var cr policy.Credential
+		if err := contracts.Decode([]byte(s.Body), &cr); err != nil {
+			return fmt.Errorf("credential snapshot: %w", err)
+		}
+		if cr.ConsumerID != t.ConsumerID || cr.EvidenceMode != "fixture" || cr.ValidUntil == 0 {
+			return errors.New("the credential snapshot is not this consumer's M1 fixture")
+		}
+	}
+	return nil
 }
 
 // outcome reads the first purchase the way the case list states it: an
@@ -460,12 +515,28 @@ func RunContract(x Contract) (ContractObserved, error) {
 	return o, nil
 }
 
-// CheckContract reruns a contracts case from its recorded inputs and
-// compares it with the expected outcome and with what the test recorded.
-// The reason of an accepted result (VALID_BINDING, SAME_PAYLOAD,
-// NEW_REQUEST) is the case list's name for it; only a rejection has a code
-// to observe.
-func CheckContract(c contracts.AcceptanceCase, x Contract) (ContractObserved, []string) {
+// Trusted are the frozen fixtures a contracts case's inputs come from
+// (testdata/contracts): the purchase every case starts from and the
+// registry that says who A and B are.
+type Trusted struct {
+	Purchase json.RawMessage
+	Registry json.RawMessage
+}
+
+// LoadTrusted reads them from the repository at root.
+func LoadTrusted(root string) (Trusted, error) {
+	p, err1 := os.ReadFile(filepath.Join(root, "testdata/contracts/purchase-input.json"))
+	r, err2 := os.ReadFile(filepath.Join(root, "testdata/contracts/registry.json"))
+	return Trusted{p, r}, errors.Join(err1, err2)
+}
+
+// CheckContract checks that a contracts case's record shows that case: the
+// recorded inputs are the trusted fixtures with exactly the changes the
+// frozen case names (inputs), the contract code rerun on them gives what
+// the test recorded, and that is the expected outcome. The reason of an
+// accepted result (VALID_BINDING, SAME_PAYLOAD, NEW_REQUEST) is the case
+// list's name for it; only a rejection has a code to observe.
+func CheckContract(c contracts.AcceptanceCase, x Contract, trusted Trusted) (ContractObserved, []string) {
 	var problems []string
 	if x.CaseID != c.CaseID || x.Operation != c.Operation || x.Layer != "contracts_test" {
 		return ContractObserved{}, []string{"the record is not this case's contracts test"}
@@ -475,6 +546,7 @@ func CheckContract(c contracts.AcceptanceCase, x Contract) (ContractObserved, []
 			problems = append(problems, fmt.Sprintf("parameter %s %q, the case says %q", k, x.Parameters[k], v))
 		}
 	}
+	problems = append(problems, inputs(c, x, trusted)...)
 	o, err := RunContract(x)
 	if err != nil {
 		return o, append(problems, "inputs: "+err.Error())
@@ -489,4 +561,206 @@ func CheckContract(c contracts.AcceptanceCase, x Contract) (ContractObserved, []
 		problems = append(problems, fmt.Sprintf("code %q, expected %q", o.Code, c.Expected.Reason))
 	}
 	return o, problems
+}
+
+// change is what one field of an input must be where the case changes it.
+type change func(v any) bool
+
+func to(want any) change { return func(v any) bool { return reflect.DeepEqual(v, want) } }
+func other(base any) change {
+	return func(v any) bool { return v != nil && !reflect.DeepEqual(v, base) }
+}
+
+// inputs compares the recorded inputs with the trusted fixtures, field by
+// field: the fields the frozen case changes must hold the change, every
+// other field must be the fixture's. The case's parameters come from the
+// frozen case, never from the record.
+func inputs(c contracts.AcceptanceCase, x Contract, trusted Trusted) []string {
+	var problems []string
+	bad := func(format string, a ...any) { problems = append(problems, fmt.Sprintf(format, a...)) }
+	var cfg contracts.RegistryConfig
+	var base contracts.PurchaseOrder
+	if err := errors.Join(contracts.Decode(trusted.Registry, &cfg), contracts.Decode(trusted.Purchase, &base)); err != nil {
+		return []string{"trusted fixtures: " + err.Error()}
+	}
+	reg, err := contracts.NewRegistry(cfg)
+	if err != nil {
+		return []string{"trusted registry: " + err.Error()}
+	}
+	baseRaw, _ := json.Marshal(base)
+	baseFlat := flatten(baseRaw)
+	// who is A's or B's identity in the trusted registry (task-a, task-b).
+	who := func(letter string) (contracts.Task, contracts.WalletRef, bool) {
+		t, w, err := reg.Binding("task-" + letter)
+		return t, w, err == nil && (letter == "a" || letter == "b")
+	}
+	// as are the changes that make the trusted purchase another identity's.
+	as := func(letter string) map[string]change {
+		t, w, ok := who(letter)
+		if !ok {
+			bad("no identity %q in the trusted registry", letter)
+			return nil
+		}
+		ch := map[string]change{}
+		for k, v := range map[string]string{"intent.consumer_id": t.ConsumerID, "intent.agent_id": t.AgentID, "intent.wallet_id": t.WalletID,
+			"intent.task_id": t.TaskID, "intent.from": w.From} {
+			if v != baseFlat[k] {
+				ch[k] = to(v)
+			}
+		}
+		if len(ch) > 0 {
+			ch["intent.purchase_order_id"] = other(baseFlat["intent.purchase_order_id"])
+		}
+		return ch
+	}
+	compare := func(name string, raw json.RawMessage, changes map[string]change) {
+		if len(raw) == 0 {
+			bad("no %s recorded", name)
+			return
+		}
+		got := flatten(raw)
+		for k := range union(got, baseFlat) {
+			if ch, ok := changes[k]; ok {
+				if !ch(got[k]) {
+					bad("%s %s is %v, not the case's change", name, k, got[k])
+				}
+			} else if !reflect.DeepEqual(got[k], baseFlat[k]) {
+				bad("%s %s is %v, the trusted fixture's is %v and the case does not change it", name, k, got[k], baseFlat[k])
+			}
+		}
+		for k, ch := range changes {
+			if _, ok := got[k]; !ok && !ch(nil) {
+				bad("%s has no %s", name, k)
+			}
+		}
+	}
+	p := c.Parameters
+	switch c.Operation {
+	case "binding":
+		t, _, ok := who(p["session"])
+		if !ok {
+			bad("session %q has no identity", p["session"])
+		} else if x.Session == nil || *x.Session != (contracts.Session{ConsumerID: t.ConsumerID, AgentID: t.AgentID, TaskID: t.TaskID}) {
+			bad("session %+v is not %s's", x.Session, p["session"])
+		}
+		changes := as(p["purchase"])
+		if m := p["mutation"]; m != "" {
+			_, wb, okB := who("b")
+			tb, _, _ := who("b")
+			field := map[string]string{"wallet_b": "intent.wallet_id", "from_b": "intent.from", "consumer_b": "intent.consumer_id", "agent_b": "intent.agent_id"}[m]
+			value := map[string]string{"wallet_b": tb.WalletID, "from_b": wb.From, "consumer_b": tb.ConsumerID, "agent_b": tb.AgentID}[m]
+			if field == "" || !okB {
+				bad("mutation %q has no derivation", m)
+			} else {
+				changes[field] = to(value)
+			}
+		}
+		compare("purchase", x.Purchase, changes)
+		if !reflect.DeepEqual(flatten(x.Registry), flatten(trusted.Registry)) {
+			bad("the recorded registry is not the trusted one")
+		}
+	case "compare-retry":
+		compare("existing purchase", x.Purchase, nil)
+		var changes map[string]change
+		switch p["mutation"] {
+		case "none":
+		case "nonce":
+			changes = map[string]change{"intent.eip3009_nonce": other(baseFlat["intent.eip3009_nonce"])}
+		case "request_id":
+			changes = map[string]change{"request_id": other(baseFlat["request_id"])}
+		case "other_consumer":
+			changes = as("b")
+		default:
+			bad("mutation %q has no derivation", p["mutation"])
+		}
+		compare("incoming purchase", x.Incoming, changes)
+	case "validate-decision":
+		h, _ := base.Intent.Hash()
+		d := x.Decision
+		if d == nil {
+			bad("no decision recorded")
+			break
+		}
+		if d.PaymentStatus != p["payment_status"] || d.IntentHash != h {
+			bad("the decision is not the trusted purchase's with payment_status %s", p["payment_status"])
+		}
+		// The named field is the only defect: with it unset, the decision is valid.
+		fixed := *d
+		fixed.PaymentStatus = "unavailable"
+		if err := fixed.Validate(); err != nil {
+			bad("the decision has another defect: %v", err)
+		}
+	case "validate-purchase":
+		req := "quote.selected_requirement."
+		var changes map[string]change
+		switch m := p["mutation"]; m {
+		case "transfer_method_erc7710", "transfer_method_permit2":
+			changes = map[string]change{req + "extra.assetTransferMethod": to(strings.TrimPrefix(m, "transfer_method_"))}
+		case "case_variant_pay_to":
+			changes = map[string]change{req + "payto": func(v any) bool { s, ok := v.(string); return ok && s != "" }}
+		default:
+			bad("mutation %q has no derivation", m)
+		}
+		if changes != nil {
+			// The requirement digest follows the quote when it can be computed.
+			changes["intent.payment_requirement_hash"] = func(v any) bool { return requirementHash(x.Purchase, v, baseFlat) }
+		}
+		compare("purchase", x.Purchase, changes)
+	default:
+		bad("operation %s has no derivation", c.Operation)
+	}
+	return problems
+}
+
+// requirementHash: the recorded payment_requirement_hash is the quote's own
+// digest when that can be computed, and the fixture's otherwise.
+func requirementHash(raw json.RawMessage, v any, baseFlat map[string]any) bool {
+	var p contracts.PurchaseOrder
+	if json.Unmarshal(raw, &p) != nil {
+		return false
+	}
+	if h, err := p.Quote.Hash(); err == nil {
+		return v == h
+	}
+	return reflect.DeepEqual(v, baseFlat["intent.payment_requirement_hash"])
+}
+
+// flatten maps a JSON document to path -> value (objects by key, arrays by
+// index); numbers stay exact. Invalid JSON flattens to nothing.
+func flatten(raw []byte) map[string]any {
+	out := map[string]any{}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	var v any
+	if d.Decode(&v) != nil {
+		return out
+	}
+	var walk func(prefix string, v any)
+	walk = func(prefix string, v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			for k, e := range t {
+				walk(prefix+k+".", e)
+			}
+		case []any:
+			for i, e := range t {
+				walk(fmt.Sprintf("%s%d.", prefix, i), e)
+			}
+		default:
+			out[strings.TrimSuffix(prefix, ".")] = v
+		}
+	}
+	walk("", v)
+	return out
+}
+
+func union(a, b map[string]any) map[string]bool {
+	out := map[string]bool{}
+	for k := range a {
+		out[k] = true
+	}
+	for k := range b {
+		out[k] = true
+	}
+	return out
 }

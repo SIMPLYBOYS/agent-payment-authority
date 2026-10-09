@@ -294,6 +294,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 var (
 	checkIntegration = m1evidence.CheckIntegration
 	checkContract    = m1evidence.CheckContract
+	loadTrusted      = func() (m1evidence.Trusted, error) { return m1evidence.LoadTrusted(".") }
 )
 
 // assemble builds the RunManifest from the run directory's files and the
@@ -349,6 +350,8 @@ func assemble(dir string, cases contracts.CaseManifest, outputs map[string][]byt
 		}
 	}
 	g := grader{ids: ids, raws: raws, tests: tests}
+	// The frozen fixtures the contracts cases' inputs must come from.
+	trusted, trustedErr := loadTrusted()
 	for _, c := range cases.Cases {
 		// integration checks an E2E or Store file: the tasks as the Store
 		// recorded them, recomputed against the case.
@@ -399,10 +402,10 @@ func assemble(dir string, cases contracts.CaseManifest, outputs map[string][]byt
 			needs = []need{{file: "contracts/" + c.CaseID + ".json", log: "tests/contracts.jsonl", test: "TestContractCasesFromManifest/" + c.CaseID,
 				check: func(raw []byte) (string, []string, error) {
 					var x m1evidence.Contract
-					if err := json.Unmarshal(raw, &x); err != nil {
+					if err := errors.Join(json.Unmarshal(raw, &x), trustedErr); err != nil {
 						return "", nil, err
 					}
-					o, problems := checkContract(c, x)
+					o, problems := checkContract(c, x, trusted)
 					return fmt.Sprintf("rerun from the recorded inputs: %s %s (contracts layer, not end-to-end)", o.Result, o.Code), problems, nil
 				}}}
 		}
