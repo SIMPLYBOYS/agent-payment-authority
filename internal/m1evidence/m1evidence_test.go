@@ -1,8 +1,11 @@
 package m1evidence
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -95,4 +98,82 @@ func TestCheckIntegrationNeedsItsTasks(t *testing.T) {
 	if _, problems := CheckIntegration(caseOf(t, "ask"), nil, []Task{{TaskID: "task-a"}}); len(problems) == 0 {
 		t.Fatal("a task without snapshots accepted")
 	}
+}
+
+// TestBundle recomputes a produced bundle (APA_M1_BUNDLE=<run directory>)
+// from its files and the frozen case list only, read only: each evidence
+// file's digest, each case's structured records and the producer's verdict
+// against the recomputation. It is the producer side's probe, not B1-07.
+func TestBundle(t *testing.T) {
+	dir := os.Getenv("APA_M1_BUNDLE")
+	if dir == "" {
+		t.Skip("APA_M1_BUNDLE not set")
+	}
+	var cases contracts.CaseManifest
+	load(t, "cases.json", &cases)
+	var m contracts.RunManifest
+	raw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil || json.Unmarshal(raw, &m) != nil {
+		t.Fatalf("manifest: %v", err)
+	}
+	if err := m.ValidateAgainst(cases); err != nil {
+		t.Fatal(err)
+	}
+	var end map[string]string
+	if b, err := os.ReadFile(filepath.Join(dir, "run-end.json")); err != nil || json.Unmarshal(b, &end) != nil || end["state"] != "complete" || end["manifest_digest"] != fileDigest(raw) {
+		t.Fatalf("end marker %v (%v)", end, err)
+	}
+	for _, e := range m.Evidence {
+		b, err := os.ReadFile(filepath.Join(dir, e.Path))
+		if err != nil || fileDigest(b) != e.Digest {
+			t.Errorf("%s: digest mismatch (%v)", e.Path, err)
+		}
+	}
+	read := func(rel string, dst any) bool {
+		b, err := os.ReadFile(filepath.Join(dir, rel))
+		if err == nil {
+			err = json.Unmarshal(b, dst)
+		}
+		if err != nil {
+			t.Errorf("%s: %v", rel, err)
+		}
+		return err == nil
+	}
+	verdicts := map[string]string{}
+	for _, r := range m.Results {
+		verdicts[r.CaseID] = r.Verdict
+	}
+	for _, c := range cases.Cases {
+		var problems []string
+		if c.Layer == "contracts" {
+			var x Contract
+			if !read("contracts/"+c.CaseID+".json", &x) {
+				continue
+			}
+			_, problems = CheckContract(c, x)
+		} else {
+			var s struct{ Tasks []Task }
+			if !read("store/"+c.CaseID+".json", &s) {
+				continue
+			}
+			_, problems = CheckIntegration(c, cases.Defaults, s.Tasks)
+			var e struct{ Store []Task }
+			if _, err := os.Stat(filepath.Join(dir, "e2e", c.CaseID+".json")); err == nil && read("e2e/"+c.CaseID+".json", &e) {
+				_, p := CheckIntegration(c, cases.Defaults, e.Store)
+				problems = append(problems, p...)
+			}
+		}
+		want := "PASS"
+		if len(problems) > 0 {
+			want = "FAIL"
+		}
+		if verdicts[c.CaseID] != want {
+			t.Errorf("%s: the bundle says %s, recomputed %s %v", c.CaseID, verdicts[c.CaseID], want, problems)
+		}
+	}
+}
+
+func fileDigest(b []byte) string {
+	h := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(h[:])
 }
