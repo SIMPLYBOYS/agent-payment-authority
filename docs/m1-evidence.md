@@ -12,6 +12,8 @@
 > - R1-2：terms 說 present 的 profile／credential 必須有快照，且快照有效（第 5.4 節）。
 > - 第 12 節保留原樣；本輪交付見第 13 節。
 >
+> **現行狀態（10/10）**：M1-E1 於程式 `0d13255`、測試與產包基準 `0853b44` 通過限定範圍技術複核（第 14 節）。R1-1、R1-2 關閉，R2 維持關閉。這是 fixture 產生端的驗收，不代替 B1-07，也不代表 M1、B1-04 或 B1-06 整體完成。下一步 E2（B1-07 獨立證據檢查器）待另行派工。
+>
 > **這是產出端，不是 B1-07**。包內的 PASS／FAIL／INCONCLUSIVE 是產生程式自己的判定；`RunManifest.ValidateAgainst` 只檢查索引。獨立核對由 B1-07（`make verify-m1`，M1-E2）負責。
 
 ## 1 用法
@@ -477,3 +479,52 @@ E2E 的路徑是：
 - E2～E4。
 
 任務狀態未改，B1-04／B1-06 維持 InProgress。
+
+## 14 限定驗收紀錄（10/10，Codex 限定技術複核；Claude Code 文件同步）
+
+**結論**（依驗收同步派工原文寫入）：
+
+> M1-E1 於程式 `0d13255`、測試與產包基準 `0853b44` 通過本次限定範圍技術複核。R1-1 實際案例輸入綁定、R1-2 必要設定快照檢查均關閉；R2 證據保存失敗處理維持前輪關閉。這是 fixture 產生端的驗收，不代替 B1-07 獨立證據檢查器，也不代表 M1、B1-04 或 B1-06 整體完成。
+
+**基準**：
+- 產品修正 `0d13255`，測試與產包基準 `0853b44`，交付文件 `6f9c338`；`0853b44..6f9c338` 只有本文件的差異；
+- 本節的文件同步不改變產品驗收基準；
+- 交付包：`artifacts/m1/m1-fixture-20261009T162703Z-4ddb7a/`。
+
+**關閉理由**：
+1. **R1-1**：實際輸入會依凍結案例與可信 fixture 核對。Codex 直接讀上一輪交付包，確認 `consumer-a` 改標 `consumer-b`、nonce 衝突改標 request_id 衝突，現在都被拒絕；兩者即使仍得到被冒充案例的契約結果，也不能冒充該案例。
+2. **R1-2**：terms 宣告 present 時不得缺對應快照。Codex 直接以舊包的 Ask 紀錄測試缺 profile、缺 credential、兩者都缺，均被拒絕；合法的 `deny-missing-config` 仍接受。
+3. **R2**：本輪沒有重開；`TestRunSaving` 隨定向回歸通過。
+
+### 14.1 證據歸屬
+
+**Codex 本輪獨立執行**：
+- 唯讀核對新包 `…162703Z-4ddb7a` 和舊包 `…154053Z-2e985f`：各 79 個證據檔的 digest，以及結束標記中的 manifest digest，均相符。
+- 讀取新包紀錄：31 PASS、七個命令 exit 0、七個 capability 為 `not_evaluated`、結束標記 complete。這部分是**核對紀錄**，不是獨立重跑這七個命令。
+- 從 `0853b44` 匯出暫存來源，在斷網容器中執行定向 race 測試。來源、新舊證據包與探測檔都以唯讀掛載，測試只在容器的 scratch 副本運作：
+
+```text
+go test -race -p 1 -count=1 ./cmd/m1-fixture ./internal/m1evidence -skip '^TestReview' -timeout 120s
+go test -race -count=1 ./internal/m1evidence -run '^TestReview' -v -timeout 60s
+go test -race -count=1 ./internal/store -run '^TestM1Evidence' -timeout 90s
+```
+
+- 第一組：兩個套件通過，包含 `TestRunSaving`、`TestBundle`；`TestBundle` 對新包唯讀重算 31 案，與包內判定一致。
+- 第二組：Codex 的**臨時探測**，直接讀舊包、只在記憶體改值，涵蓋上述兩個改標反例、三個缺快照反例，以及合法缺設定的正向對照，全部通過。`TestReview` 不在 repo 的正式測試中，無法直接從 repo 執行。
+- 第三組：Store 的定向測試通過。
+- 容器最終回報 `BASELINE_EXIT=0 PROBE_EXIT=0 STORE_EXIT=0`，整體 exit 0。
+- 映像 `sha256:78258368de0907e58498095c327a6ee4edbe75421d18e524bd00661c3749b6d0`；網路關閉、來源與證據唯讀、只有 scratch 可寫；沒有掛登入環境、憑證或 Docker socket。
+- 以上是「斷網容器內的定向複核」，**不是完整七步容器驗證**。測試輸出只在 Codex 的工具紀錄，沒有另存 repo log。
+
+**Claude Code 執行，維持原歸屬**：第 13 節的產包、22 項反向驗證、210 組改標測試、`go vet` 與各套件測試，保留原命令、基準與證據路徑。Codex 本輪重跑的是上述套件範圍，**不代表獨立重跑了原交付的全部命令或反向驗證流程**。
+
+**Codex 本輪沒有執行**：重新產包、瀏覽器、完整容器七步、全部 311 項突變、Unity 建置、真實 CLI。
+
+### 14.2 限制
+
+- 31 PASS 是 fixture 證據與凍結案例在本切片範圍內的判定，不是 B1-07 已完成。
+- hash 與事件鏈的重算不提供外部真實性錨點；整份匯出若被一致地重造，單靠該包不能分辨（第 10 節）。不擴張成簽章或鏈上驗證。
+- 七個 capability 維持 `not_evaluated`；不新增 Policy 語意檢查，也不呼叫 `policy.Decide`。E2 的獨立核對留給後續派工。
+- M1 live 是否接受開發展示 plugin 例外，仍待 Aaron 決定；不阻擋本次 E1 驗收，也不因本節自動核准。
+
+**本節是文件同步**，不是新的技術驗證：沒有改程式、`cases.json`、可信 fixture 或證據包，沒有重新產包，也沒有跑任何測試。任務狀態未改，B1-04／B1-06 維持 InProgress，B1-07 未開工。
