@@ -196,3 +196,38 @@ E2E 的判定：
   - 這是**測試設計的錯**，不是產品行為。
   - 修正：改成設定後固定不動的時鐘。三個時鐘案例以 `-race` 各重跑 5 次都通過。
   - 失敗的那次證據包原樣保留。
+
+## 11 交付紀錄（10/9，Claude Code；待 Codex 限定 review）
+
+程式 `83428a4`（`cmd/m1-fixture`、`Makefile`、本文件），測試 `cc8f698`（`cmd/m1-fixture/main_test.go`、`cmd/demo/m1_test.go`）。
+
+**證據包**：`artifacts/m1/m1-fixture-20261009T033121Z-96999c/`
+- 在 `cc8f698` 的乾淨工作樹上產生：dirty patch digest 是空 diff；untracked 只有 repo 根目錄的 `demo`，未動。
+- 7 個命令的 exit code 全部是 0。
+- 31 PASS、0 FAIL、0 INCONCLUSIVE；七個 capability 都在 not_evaluated。
+- 3.2 的檢查全部 pass；`run-end.json` 的 state 是 complete。
+- 共 48 個證據檔。
+- 另以獨立的 Python 重算：每個證據檔的 digest 都相符，結束標記的 manifest digest 也相符。
+- 層級：13 個案例是 host_e2e＋store_integration，3 個是 store_integration＋policy_test，15 個是 contracts_test。
+
+**全部 `make m1-fixture` 執行**（目錄都保留，只讀，不刪改）：
+
+| run 目錄 | 程式狀態 | 結果 |
+|---|---|---|
+| `…030831Z-c9a6dd` | 未提交 | 30 PASS、1 FAIL（`approval-deadline-before`）。測試時鐘的設計錯誤，見第 10 節；end 標記為 complete，判定原樣保留 |
+| `…031813Z-f871bc` | 未提交，時鐘已修正，當時 E2E 是 10 案 | 31 PASS |
+| `…033048Z-346e32` | 未提交 | **主動中止**：發現新檔仍是 untracked，`dirty_patch_digest` 涵蓋不到。沒有 `run-end.json`，所以是不完整的包 |
+| `…033121Z-96999c` | `cc8f698` | 交付的證據包（上述） |
+
+**另外執行的檢查**：
+- `go vet ./...`、`go test -count=1 ./...`：全部通過；
+- `TestM1FixtureCases` 以 `-race` 跑 13 案：通過；
+- 三個時鐘案例以 `-race` 重跑 5 次：通過；
+- `mutation-anchors.py`：311 項 anchor 都找到；
+- 第 2 包與交付包共有的 10 個 E2E 案例：expected、observed、budget、verdict 與 trace 工具序列都一致。
+
+**沒有執行**：
+- 真實 CLI、完整容器驗證、完整突變重跑；
+- B1-07（M1-E2）。
+
+任務狀態未改，B1-04／B1-06 維持 InProgress。
