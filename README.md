@@ -94,6 +94,22 @@ make demo        # 檢查建置與素材 → 編譯 → 啟動；不建 Unity、
 
 開 `http://127.0.0.1:8402/host`（主持人本機頁），選 `var/demo-tokens.json` 載入（只留在頁面記憶體），就緒面板列出 HTTP／Store／fake CLI／Unity 狀態。3.2 起（待 review）：啟動時不跑場次，在「主持人控制」選情境按「開始」，每場配發新的 `show-*` task，頁面自動切到該 consumer 開啟它；可停止進行中的場次。`make demo` 使用自己的新資料庫 `var/apa-demo-host-runs.db`，既有的 `var/apa-demo-fake.db` 不升級。`/` 仍是只能手動貼 token 的一般 viewer 頁。見 [docs/demo-operation-design.md](docs/demo-operation-design.md) 第 12、13.16 節。
 
+## M1 證據包與唯讀檢查
+
+```sh
+make m1-fixture                                    # M1-E1：fake CLI 產生 artifacts/m1/<run-id>/（約 8 分鐘，含瀏覽器）
+make verify-m1 RUN_DIR=artifacts/m1/<run-id>       # M1-E2：唯讀檢查一個證據包，JSON 報告寫到 stdout
+```
+
+- `verify-m1` 只讀指定的證據包，以及 repo 中凍結的 `testdata/contracts/cases.json` 與可信 fixture。它不執行 `m1-fixture`、模型或包內的命令，也不開 Store、不連網、不寫檔。
+- 檢查器本身（`go run ./cmd/verify-demo --run-dir DIR`）的結束碼：
+  - 0：PASS；
+  - 1：FAIL；
+  - 2：INCONCLUSIVE（缺資料或版本不支援）；
+  - 3：無法檢查，或報告寫不出。
+- 經 `make` 時，非 0 的結束碼會變成 make 自己的 `Error N`（結束碼 2），要看報告裡的 `verdict`。
+- 目前只支援 fixture 包；live 包是 M1-E3 的範圍。格式、V1～V7 的覆蓋、共用的依賴與限制見 [docs/m1-evidence.md](docs/m1-evidence.md) 第 15 節。
+
 ## 設定
 
 設定來自環境變數；`make dev` 會載入 `.env`（若存在），`.env` 裡的值會蓋過同名的環境變數。

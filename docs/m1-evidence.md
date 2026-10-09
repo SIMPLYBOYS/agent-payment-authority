@@ -528,3 +528,52 @@ go test -race -count=1 ./internal/store -run '^TestM1Evidence' -timeout 90s
 - M1 live 是否接受開發展示 plugin 例外，仍待 Aaron 決定；不阻擋本次 E1 驗收，也不因本節自動核准。
 
 **本節是文件同步**，不是新的技術驗證：沒有改程式、`cases.json`、可信 fixture 或證據包，沒有重新產包，也沒有跑任何測試。任務狀態未改，B1-04／B1-06 維持 InProgress，B1-07 未開工。
+
+## 15 M1-E2 唯讀證據檢查器（B1-07 的 fixture 子範圍；設計簡記，實作中）
+
+> 依 `Claude-Code-M1-E2唯讀證據檢查器實作派工-ce23a3b-20261010`。開工基準 `ce23a3b`（E1 驗收基準：產品 `0d13255`、測試與產包 `0853b44`，不回填）。
+
+**介面**：
+- `go run ./cmd/verify-demo --run-dir DIR [--repo .] [--mode fixture]`，或 `make verify-m1 RUN_DIR=DIR`；
+- 機器可讀報告（JSON）寫到 stdout，診斷寫到 stderr；不寫任何檔案，不執行包內命令，不開 Store，不連網；
+- 結束碼（`verify-demo` 程式本身）：
+  - 0：所有必要 claim PASS；
+  - 1：有 FAIL；
+  - 2：沒有 FAIL，但有 INCONCLUSIVE（缺資料、版本不支援）；
+  - 3：用法錯誤、內部錯誤或報告輸出失敗。
+- 經 `make` 或 `go run` 時，外層會改寫非零結束碼，必須看報告的 `verdict`，或直接執行編好的程式。
+
+**可信輸入**（取自 repo，不接受包內提供的替代品）：
+- `testdata/contracts/cases.json`（expected 與 parameters）；
+- `testdata/contracts/purchase-input.json`、`registry.json`（契約案例的輸入 fixture、A／B 身分）；
+- 第 3 節列的設定檔（重算 config digest）。
+- 這些與包內的 digest 不符時，回報 INCONCLUSIVE（不支援的版本），不換版本，也不要求重產舊包。
+
+**共用的純函式**（只用來解析與驗證，不用來決定 verdict）：
+- `contracts.Decode`、`Canonical`；
+- `CaseManifest.Hash`、`RequireAccepted`、`RunManifest.ValidateAgainst`（只當作索引檢查）；
+- `AuthorizationIntent.Hash`、`PurchaseOrder.Validate`、`Quote.Hash`；
+- `NewRegistry`、`Registry.Binding`／`ValidatePurchase`／`ValidateEvent`／`TrustedAsset`；
+- `EventHash`、`GenesisHash`、`ValidateEventOrder`、`PolicyDecision.Validate`、`CompareRetry`、`ErrorCode`；
+- `policy.Profile.Validate`。
+
+**不使用**：`policy.Decide`、Store、Host、CLI runner、`internal/m1evidence` 的任何判定函式、包內的 `observed`／`verdict`／`problems`／log 中的成功字樣。
+
+**由檢查器自己判定**：
+- 路徑與檔案安全、索引；
+- 案例參數與實際輸入的綁定（整合案例：可信設定與請購；契約案例：與可信 fixture 逐欄比對）；
+- 事件鏈與 Store／API 兩個來源的對照；
+- 從事件推導結果、各 reason 的必要條件、expected 比對；
+- forbidden 事件、模式與層級、A／B 綁定、整合要求的測試紀錄、最終 verdict。
+
+**判定表**：
+
+| Claim | 檢查 | FAIL | INCONCLUSIVE |
+|---|---|---|---|
+| V1 | 索引、digest、結束標記、來源資訊、命令、可信輸入的版本 | digest 不符、索引外檔案、路徑違規、資訊互相矛盾 | 缺檔、缺欄位、版本不支援 |
+| V2 | 輸入與請購：參數綁定、請購 digest、金額、資產、收款人、task | 與案例或 fixture 不符 | 缺必要紀錄 |
+| V3 | 結果、裁決、設定、預算、必要條件 | 推導結果與 expected 不同、條件不成立 | 缺快照或事件 |
+| V4 | 事件鏈 | hash、序號、prev、關係或兩個來源不一致 | 缺事件 |
+| V5 | 無提前核准或付款 | forbidden 或未知事件、付款狀態不是 unavailable | — |
+| V6 | 模式與層級 | fixture 以外的標籤、層級冒充 | live 模式（E3 之前不支援） |
+| V7 | A／B 綁定 | 身分不一致、跨用戶 | 缺 registry |
