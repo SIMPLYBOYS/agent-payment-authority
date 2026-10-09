@@ -7,9 +7,11 @@
 // Layers, as docs/m1-closeout-gaps.md 3.1 sets them: each case claim names
 // evidence of the highest layer it ran at (host_e2e, store_integration or
 // contracts_test); a contracts test is never offered as end-to-end evidence.
-// The verdicts here are the producer's own; B1-07 (make verify-m1) checks
-// the bundle independently. RunManifest.ValidateAgainst checks the index
-// only.
+// A claim rests on structured evidence the bundle itself can be recomputed
+// from (internal/m1evidence); a test log is auxiliary and never carries a
+// claim alone. The verdicts are the producer's own; B1-07 (make verify-m1)
+// checks the bundle independently. RunManifest.ValidateAgainst checks the
+// index only.
 package main
 
 import (
@@ -35,6 +37,7 @@ import (
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/m1evidence"
 )
 
 func main() {
@@ -48,17 +51,20 @@ var e2eCases = []string{"ask", "deny-budget", "deny-merchant", "deny-asset", "de
 	"cli-timeout", "cli-timeout-pending", "approval-timeout", "approval-deadline-before", "approval-deadline-exact", "restart"}
 
 // configFiles are the trusted fixture files the run depends on; their
-// digests make the config digest.
-var configFiles = []string{"testdata/contracts/cases.json", "testdata/contracts/registry.json", "testdata/demo/registry.json",
-	"testdata/policy/m1-demo-profile.json", "testdata/cli/ask-mainline.json"}
+// digests make the config digest. What each task was actually started with
+// (a case's own variant included) is in its structured evidence.
+var configFiles = []string{"testdata/contracts/cases.json", "testdata/contracts/registry.json", "testdata/contracts/purchase-input.json",
+	"testdata/demo/registry.json", "testdata/policy/m1-demo-profile.json", "testdata/cli/ask-mainline.json"}
 
 // sources is the closed list of evidence sources (EvidenceRef.source): the
 // layer a file comes from. live_cli is reserved for M1-E3.
 var sources = map[string]string{
 	"provenance/":            "provenance",
 	"tests/contracts":        "contracts_test",
+	"contracts/":             "contracts_test",
 	"tests/policy":           "policy_test",
 	"tests/store":            "store_integration",
+	"store/":                 "store_integration",
 	"tests/e2e":              "host_e2e",
 	"e2e/":                   "host_e2e",
 	"tests/requirements-go":  "host_e2e",
@@ -82,15 +88,52 @@ type step struct {
 	env  []string
 }
 
+// Exit codes: the bundle is complete and every claim and requirement
+// passed; the bundle is complete with failures in it; the bundle could not
+// be made or saved completely (its end marker says so when it can).
+const (
+	exitPass       = 0
+	exitFailures   = 1
+	exitIncomplete = 2
+)
+
+// runStep runs one command in the repository; capture runs a provenance
+// query. Tests replace both.
+var runStep = func(s step) ([]byte, int, error) {
+	c := exec.Command(s.cmd[0], s.cmd[1:]...)
+	c.Env = append(os.Environ(), s.env...)
+	var buf bytes.Buffer
+	c.Stdout, c.Stderr = &buf, &buf
+	err := c.Run()
+	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
+		return buf.Bytes(), ee.ExitCode(), nil
+	}
+	if err != nil {
+		return buf.Bytes(), -1, err
+	}
+	return buf.Bytes(), 0, nil
+}
+
+var capture = func(name string, args ...string) (string, error) {
+	out, err := exec.Command(name, args...).Output()
+	if err != nil {
+		return "", fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return string(out), nil
+}
+
 func run(args []string, stdout, stderr io.Writer) int {
 	fl := flag.NewFlagSet("m1-fixture", flag.ContinueOnError)
 	fl.SetOutput(stderr)
 	out := fl.String("out", "artifacts/m1", "where the new run directory is made")
 	skipBrowser := fl.Bool("skip-browser", false, "do not run scripts/verify/browser-ui.mjs (its integration checks are then missing from the bundle)")
 	if fl.Parse(args) != nil || fl.NArg() != 0 {
-		return 2
+		return exitIncomplete
 	}
-	fail := func(format string, a ...any) int { fmt.Fprintf(stderr, "m1-fixture: "+format+"\n", a...); return 2 }
+	fail := func(format string, a ...any) int {
+		fmt.Fprintf(stderr, "m1-fixture: "+format+"\n", a...)
+		return exitIncomplete
+	}
 	var cases contracts.CaseManifest
 	raw, err := os.ReadFile("testdata/contracts/cases.json")
 	if err != nil || json.Unmarshal(raw, &cases) != nil || cases.RequireAccepted() != nil {
@@ -110,36 +153,70 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if err := os.Mkdir(dir, 0o700); err != nil { // a new directory, never an old one
 		return fail("%v", err)
 	}
-	for _, d := range []string{"provenance", "tests", "e2e"} {
-		os.Mkdir(filepath.Join(dir, d), 0o700)
+	// incomplete stops: the bundle is not complete. The end marker says so
+	// when it can be written; stderr and the exit code say so either way.
+	// Whatever was saved stays.
+	incomplete := func(state string, err error) int {
+		fmt.Fprintf(stderr, "m1-fixture: %s: the bundle %s is INCOMPLETE (%s): %v\n", runID, dir, state, err)
+		if werr := writeEnd(dir, runID, nil, state); werr != nil {
+			fmt.Fprintf(stderr, "m1-fixture: the end marker could not be written either: %v\n", werr)
+		}
+		return exitIncomplete
 	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return incomplete("save_failed", err)
+	}
+	for _, d := range []string{"provenance", "tests", "e2e", "store", "contracts", "requirements"} {
+		if err := os.Mkdir(filepath.Join(dir, d), 0o700); err != nil {
+			return incomplete("save_failed", err)
+		}
+	}
+	save := func(rel string, b []byte) error { return os.WriteFile(filepath.Join(dir, rel), b, 0o600) }
 
-	// Provenance.
-	commit := strings.TrimSpace(capture("git", "rev-parse", "HEAD"))
-	patch := capture("git", "diff", "HEAD", "--binary")
-	status := capture("git", "status", "--porcelain")
-	os.WriteFile(filepath.Join(dir, "provenance/git-status.txt"), []byte(status), 0o600)
+	// Provenance: each query must succeed; an empty answer (no diff, a clean
+	// tree) is only trusted from a query that did.
+	q := map[string]string{}
+	for _, c := range [][]string{{"commit", "git", "rev-parse", "HEAD"}, {"patch", "git", "diff", "HEAD", "--binary"}, {"status", "git", "status", "--porcelain"},
+		{"go", "go", "version"}, {"node", "node", "--version"}} {
+		v, err := capture(c[1], c[2:]...)
+		if err != nil {
+			return incomplete("provenance_failed", err)
+		}
+		q[c[0]] = v
+	}
+	commit := strings.TrimSpace(q["commit"])
+	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(commit) {
+		return incomplete("provenance_failed", fmt.Errorf("git rev-parse HEAD gave %q", commit))
+	}
 	configs := map[string]string{}
 	var cfg strings.Builder
 	for _, f := range configFiles {
 		b, err := os.ReadFile(f)
 		if err != nil {
-			return fail("config %s: %v", f, err)
+			return incomplete("provenance_failed", err)
 		}
 		configs[f] = digest(b)
 		fmt.Fprintf(&cfg, "%s\x00%s\n", f, configs[f])
 	}
-	cj, _ := json.MarshalIndent(configs, "", "  ")
-	os.WriteFile(filepath.Join(dir, "provenance/config-files.json"), append(cj, '\n'), 0o600)
-	versions := map[string]string{"go": strings.TrimSpace(capture("go", "version")), "node": strings.TrimSpace(capture("node", "--version")),
+	cj, err := json.MarshalIndent(configs, "", "  ")
+	if err == nil {
+		err = errors.Join(save("provenance/git-status.txt", []byte(q["status"])), save("provenance/config-files.json", append(cj, '\n')))
+	}
+	if err != nil {
+		return incomplete("save_failed", err)
+	}
+	versions := map[string]string{"go": strings.TrimSpace(q["go"]), "node": strings.TrimSpace(q["node"]),
 		"os": runtime.GOOS + "/" + runtime.GOARCH, "case_manifest": cases.ManifestID, "fake_cli": "fake-claude (no model, no network)"}
 
-	// The commands, each with its exit code and output.
+	// The commands, each with its exit code and output. The case tests write
+	// their structured evidence into the run directory (APA_M1_RUN_DIR).
+	into := func(sub string) []string { return []string{"APA_M1_RUN_DIR=" + filepath.Join(abs, sub)} }
 	steps := []step{
-		{"tests/contracts.jsonl", []string{"go", "test", "-count=1", "-json", "-run", "^TestContractCasesFromManifest$", "./internal/contracts/"}, nil},
+		{"tests/contracts.jsonl", []string{"go", "test", "-count=1", "-json", "-run", "^TestContractCasesFromManifest$", "./internal/contracts/"}, into("contracts")},
 		{"tests/policy.jsonl", []string{"go", "test", "-count=1", "-json", "-run", "^TestAcceptedPolicyCases$", "./internal/policy/"}, nil},
-		{"tests/store.jsonl", []string{"go", "test", "-count=1", "-json", "-run", "^TestAcceptedIntegrationCases$", "./internal/store/"}, nil},
-		{"tests/e2e.jsonl", []string{"go", "test", "-count=1", "-json", "-run", "^TestM1FixtureCases$", "./cmd/demo/"}, []string{"APA_M1_RUN_DIR=" + mustAbs(filepath.Join(dir, "e2e"))}},
+		{"tests/store.jsonl", []string{"go", "test", "-count=1", "-json", "-run", "^TestAcceptedIntegrationCases$", "./internal/store/"}, into("store")},
+		{"tests/e2e.jsonl", []string{"go", "test", "-count=1", "-json", "-run", "^TestM1FixtureCases$", "./cmd/demo/"}, into("e2e")},
 		{"tests/requirements-go.jsonl", []string{"go", "test", "-count=1", "-json", "-run", "^(TestIntegrationAskDenyAndAccess|TestCancel.*|TestLiveRun.*)$", "./cmd/demo/"}, nil},
 		{"tests/requirements-web.tap", []string{"node", "--test", "web/test/adapter.test.mjs"}, nil},
 	}
@@ -150,68 +227,74 @@ func run(args []string, stdout, stderr io.Writer) int {
 	outputs := map[string][]byte{}
 	for _, s := range steps {
 		fmt.Fprintf(stderr, "m1-fixture: %s\n", strings.Join(s.cmd, " "))
-		c := exec.Command(s.cmd[0], s.cmd[1:]...)
-		c.Env = append(os.Environ(), s.env...)
-		var buf bytes.Buffer
-		c.Stdout, c.Stderr = &buf, &buf
-		err := c.Run()
-		code := 0
-		if err != nil {
-			code = -1
-			if ee, ok := errors.AsType[*exec.ExitError](err); ok {
-				code = ee.ExitCode()
-			}
+		b, code, err := runStep(s)
+		if err != nil { // it did not run: its claims have no evidence
+			fmt.Fprintf(stderr, "m1-fixture: %v\n", err)
 		}
 		commands = append(commands, contracts.CommandResult{Command: strings.Join(s.cmd, " "), ExitCode: code})
-		os.MkdirAll(filepath.Dir(filepath.Join(dir, s.name)), 0o700)
-		os.WriteFile(filepath.Join(dir, s.name), buf.Bytes(), 0o600)
-		outputs[s.name] = buf.Bytes()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, s.name)), 0o700); err != nil {
+			return incomplete("save_failed", err)
+		}
+		if err := save(s.name, b); err != nil {
+			return incomplete("save_failed", err)
+		}
+		outputs[s.name] = b
 	}
 
 	reqs, reqOK := requirementsIndex(outputs, *skipBrowser)
-	rj, _ := json.MarshalIndent(reqs, "", "  ")
-	os.Mkdir(filepath.Join(dir, "requirements"), 0o700)
-	os.WriteFile(filepath.Join(dir, "requirements/index.json"), append(rj, '\n'), 0o600)
-
-	m, err := assemble(dir, cases, outputs, runID, commit, digest([]byte(patch)), digest([]byte(cfg.String())), caseDigest, versions, commands)
-	if err != nil {
-		return fail("%v", err)
+	rj, err := json.MarshalIndent(reqs, "", "  ")
+	if err == nil {
+		err = save("requirements/index.json", append(rj, '\n'))
 	}
-	if leaks := scanSecrets(dir); len(leaks) > 0 {
-		writeEnd(dir, runID, nil, "secret_found")
-		return fail("a bare token-like value in %v; the bundle is marked incomplete", leaks)
+	if err != nil {
+		return incomplete("save_failed", err)
+	}
+
+	m, err := assemble(dir, cases, outputs, runID, commit, digest([]byte(q["patch"])), digest([]byte(cfg.String())), caseDigest, versions, commands)
+	if err != nil {
+		return incomplete("save_failed", err)
+	}
+	leaks, err := scanSecrets(dir)
+	if err != nil {
+		return incomplete("save_failed", err)
+	}
+	if len(leaks) > 0 {
+		return incomplete("secret_found", fmt.Errorf("a bare token-like value in %v", leaks))
 	}
 	if err := m.ValidateAgainst(cases); err != nil {
-		writeEnd(dir, runID, nil, "index_invalid")
-		return fail("the manifest index does not validate: %v", err)
+		return incomplete("index_invalid", err)
 	}
-	body, _ := json.MarshalIndent(m, "", "  ")
-	body = append(body, '\n')
-	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), body, 0o600); err != nil {
-		return fail("%v", err)
+	body, err := json.MarshalIndent(m, "", "  ")
+	if err == nil {
+		body = append(body, '\n')
+		err = save("manifest.json", body)
 	}
-	writeEnd(dir, runID, body, "complete")
+	if err != nil {
+		return incomplete("save_failed", err)
+	}
+	if err := writeEnd(dir, runID, body, "complete"); err != nil {
+		fmt.Fprintf(stderr, "m1-fixture: %s: the end marker could not be written: %v; the bundle %s is INCOMPLETE\n", runID, err, dir)
+		return exitIncomplete
+	}
 
 	n := map[string]int{}
 	for _, r := range m.Results {
 		n[r.Verdict]++
 	}
-	fmt.Fprintf(stdout, "m1-fixture: %s: %d PASS, %d FAIL, %d INCONCLUSIVE of %d cases; %d capabilities not_evaluated (the producer's own verdicts; make verify-m1 checks independently)\n",
+	fmt.Fprintf(stdout, "m1-fixture: %s (complete): %d PASS, %d FAIL, %d INCONCLUSIVE of %d cases; %d capabilities not_evaluated (the producer's own verdicts; make verify-m1 checks independently)\n",
 		dir, n["PASS"], n["FAIL"], n["INCONCLUSIVE"], len(m.Results), len(m.NotEvaluated))
 	fmt.Fprintf(stdout, "m1-fixture: integration requirements (docs/m1-closeout-gaps.md 3.2): all checks passed: %v\n", reqOK)
-	for _, c := range commands {
-		if c.ExitCode != 0 {
-			return 1
-		}
+	if !reqOK || n["FAIL"]+n["INCONCLUSIVE"] > 0 || slices.ContainsFunc(commands, func(c contracts.CommandResult) bool { return c.ExitCode != 0 }) {
+		return exitFailures
 	}
-	if !reqOK {
-		return 1
-	}
-	if n["FAIL"]+n["INCONCLUSIVE"] > 0 {
-		return 1
-	}
-	return 0
+	return exitPass
 }
+
+// The structured evidence is checked with these (tests replace them).
+var (
+	checkIntegration = m1evidence.CheckIntegration
+	checkContract    = m1evidence.CheckContract
+)
 
 // assemble builds the RunManifest from the run directory's files and the
 // test outputs; it is deterministic for the same inputs.
@@ -229,7 +312,10 @@ func assemble(dir string, cases contracts.CaseManifest, outputs map[string][]byt
 			return fmt.Errorf("a symlink in the run directory: %s", p)
 		}
 		if d.Type().IsRegular() {
-			rel, _ := filepath.Rel(dir, p)
+			rel, err := filepath.Rel(dir, p)
+			if err != nil {
+				return err
+			}
 			rel = filepath.ToSlash(rel)
 			if rel != "manifest.json" && rel != "run-end.json" {
 				files = append(files, rel)
@@ -242,6 +328,7 @@ func assemble(dir string, cases contracts.CaseManifest, outputs map[string][]byt
 	}
 	sort.Strings(files)
 	ids := map[string]string{}
+	raws := map[string][]byte{}
 	for _, f := range files {
 		src, err := sourceOf(f)
 		if err != nil {
@@ -252,7 +339,7 @@ func assemble(dir string, cases contracts.CaseManifest, outputs map[string][]byt
 			return m, err
 		}
 		id := "ev-" + regexp.MustCompile(`[^A-Za-z0-9._:-]`).ReplaceAllString(f, "-")
-		ids[f] = id
+		ids[f], raws[f] = id, b
 		m.Evidence = append(m.Evidence, contracts.EvidenceRef{EvidenceID: id, Path: f, Digest: digest(b), EvidenceMode: "fixture", Source: src})
 	}
 	tests := map[string]map[string]string{}
@@ -261,65 +348,112 @@ func assemble(dir string, cases contracts.CaseManifest, outputs map[string][]byt
 			tests[name] = subtests(out)
 		}
 	}
+	g := grader{ids: ids, raws: raws, tests: tests}
 	for _, c := range cases.Cases {
-		r := contracts.ClaimResult{CaseID: c.CaseID, EvidenceIDs: []string{}}
+		// integration checks an E2E or Store file: the tasks as the Store
+		// recorded them, recomputed against the case.
+		integration := func(layer, file, log, test string) need {
+			return need{file: file, log: log, test: test, check: func(raw []byte) (string, []string, error) {
+				var ev struct {
+					Layer   string            `json:"layer"`
+					Verdict string            `json:"verdict"` // the E2E test's own
+					Tasks   []m1evidence.Task `json:"tasks"`   // a Store file's export
+					Store   []m1evidence.Task `json:"store"`   // an E2E file's export
+				}
+				if err := json.Unmarshal(raw, &ev); err != nil || ev.Layer != layer {
+					return "", nil, fmt.Errorf("not %s evidence", layer)
+				}
+				tasks := ev.Tasks
+				if layer == "host_e2e" {
+					tasks = ev.Store
+				}
+				o, problems := checkIntegration(c, cases.Defaults, tasks)
+				if layer == "host_e2e" && ev.Verdict != "PASS" {
+					problems = append(problems, "the E2E test recorded "+ev.Verdict)
+				}
+				return fmt.Sprintf("%s/%s/%s, payment %s, budget_deducted %s, purchases %d, forbidden events %v",
+					o.Result, o.Reason, o.ApprovalStatus, o.PaymentStatus, o.BudgetDeducted, o.Purchases, o.ForbiddenEventsFound), problems, nil
+			}}
+		}
+		store := integration("store_integration", "store/"+c.CaseID+".json", "tests/store.jsonl", "TestAcceptedIntegrationCases/"+c.CaseID)
+		var needs []need
 		switch {
 		case c.Layer == "integration" && slices.Contains(e2eCases, c.CaseID):
-			r = e2eResult(c, dir, tests["tests/e2e.jsonl"]["TestM1FixtureCases/"+c.CaseID], tests["tests/store.jsonl"]["TestAcceptedIntegrationCases/"+c.CaseID], ids)
+			needs = []need{integration("host_e2e", "e2e/"+c.CaseID+".json", "tests/e2e.jsonl", "TestM1FixtureCases/"+c.CaseID), store}
 		case c.Layer == "integration":
-			st := tests["tests/store.jsonl"]["TestAcceptedIntegrationCases/"+c.CaseID]
-			r.Verdict, r.Reason = verdict(st), "store_integration only (this host has no trusted setting for the case): TestAcceptedIntegrationCases/"+c.CaseID+" "+word(st)
-			r.EvidenceIDs = []string{ids["tests/store.jsonl"]}
+			needs = []need{store}
 			if c.Operation == "policy" {
-				pt := tests["tests/policy.jsonl"]["TestAcceptedPolicyCases/"+c.CaseID]
-				r.Reason += "; policy_test: TestAcceptedPolicyCases/" + c.CaseID + " " + word(pt)
-				r.EvidenceIDs = append(r.EvidenceIDs, ids["tests/policy.jsonl"])
-				if verdict(pt) != "PASS" {
-					r.Verdict = worst(r.Verdict, verdict(pt))
-				}
+				needs = append(needs, need{log: "tests/policy.jsonl", test: "TestAcceptedPolicyCases/" + c.CaseID})
 			}
 		default:
-			ct := tests["tests/contracts.jsonl"]["TestContractCasesFromManifest/"+c.CaseID]
-			r.Verdict, r.Reason, r.EvidenceIDs = verdict(ct), "contracts_test only (not end-to-end evidence): TestContractCasesFromManifest/"+c.CaseID+" "+word(ct), []string{ids["tests/contracts.jsonl"]}
+			needs = []need{{file: "contracts/" + c.CaseID + ".json", log: "tests/contracts.jsonl", test: "TestContractCasesFromManifest/" + c.CaseID,
+				check: func(raw []byte) (string, []string, error) {
+					var x m1evidence.Contract
+					if err := json.Unmarshal(raw, &x); err != nil {
+						return "", nil, err
+					}
+					o, problems := checkContract(c, x)
+					return fmt.Sprintf("rerun from the recorded inputs: %s %s (contracts layer, not end-to-end)", o.Result, o.Code), problems, nil
+				}}}
 		}
-		r.CaseID = c.CaseID
-		if r.Verdict == "INCONCLUSIVE" {
-			r.EvidenceIDs = slices.DeleteFunc(r.EvidenceIDs, func(s string) bool { return s == "" })
-		}
-		m.Results = append(m.Results, r)
+		m.Results = append(m.Results, g.grade(c.CaseID, needs))
 	}
 	return m, nil
 }
 
-// e2eResult: PASS needs the host_e2e evidence file's own PASS, its test and
-// the case's Store test passing; a missing file or test is INCONCLUSIVE, any
-// failure FAIL.
-func e2eResult(c contracts.AcceptanceCase, dir, e2eTest, storeTest string, ids map[string]string) contracts.ClaimResult {
-	r := contracts.ClaimResult{CaseID: c.CaseID}
-	f := "e2e/" + c.CaseID + ".json"
-	var ev struct {
-		Verdict  string         `json:"verdict"`
-		Layer    string         `json:"layer"`
-		Observed map[string]any `json:"observed"`
+// need is one piece of evidence a claim rests on: a structured evidence
+// file with its check, and the test log that goes with it. A log alone is
+// auxiliary: it can fail a claim, never carry one.
+type need struct {
+	file  string
+	check func(raw []byte) (summary string, problems []string, err error)
+	log   string // tests/<x>.jsonl
+	test  string // the subtest in it
+}
+
+type grader struct {
+	ids   map[string]string
+	raws  map[string][]byte
+	tests map[string]map[string]string
+}
+
+// grade: INCONCLUSIVE when a file is missing or unreadable or a test did
+// not run; FAIL when a check finds a problem or a test failed; PASS only
+// when every file checks clean and every test passed.
+func (g grader) grade(caseID string, needs []need) contracts.ClaimResult {
+	r := contracts.ClaimResult{CaseID: caseID, Verdict: "PASS", EvidenceIDs: []string{}}
+	var reasons []string
+	for _, n := range needs {
+		if n.file != "" {
+			raw, ok := g.raws[n.file]
+			if !ok {
+				r.Verdict = worst(r.Verdict, "INCONCLUSIVE")
+				reasons = append(reasons, n.file+": missing")
+			} else {
+				r.EvidenceIDs = append(r.EvidenceIDs, g.ids[n.file])
+				summary, problems, err := n.check(raw)
+				switch {
+				case err != nil:
+					r.Verdict = worst(r.Verdict, "INCONCLUSIVE")
+					reasons = append(reasons, n.file+": unreadable: "+err.Error())
+				case len(problems) > 0:
+					r.Verdict = worst(r.Verdict, "FAIL")
+					reasons = append(reasons, n.file+": "+strings.Join(problems, "; "))
+				default:
+					reasons = append(reasons, n.file+": recomputed "+summary)
+				}
+			}
+		}
+		if n.log != "" {
+			action := g.tests[n.log][n.test]
+			r.Verdict = worst(r.Verdict, verdict(action))
+			if id := g.ids[n.log]; id != "" {
+				r.EvidenceIDs = append(r.EvidenceIDs, id)
+			}
+			reasons = append(reasons, n.test+" "+word(action))
+		}
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, f))
-	switch {
-	case err != nil || json.Unmarshal(raw, &ev) != nil || ev.Layer != "host_e2e" || ids[f] == "":
-		r.Verdict, r.Reason, r.EvidenceIDs = "INCONCLUSIVE", "host_e2e evidence "+f+" missing or unreadable; TestM1FixtureCases/"+c.CaseID+" "+word(e2eTest), []string{}
-	case ev.Verdict == "PASS" && e2eTest == "pass":
-		r.Verdict = "PASS"
-	case ev.Verdict == "FAIL" || e2eTest == "fail":
-		r.Verdict = "FAIL"
-	default: // the test not run or skipped
-		r.Verdict = "INCONCLUSIVE"
-	}
-	r.Verdict = worst(r.Verdict, verdict(storeTest)) // the claim cites the Store test too
-	if r.Reason == "" {
-		o := ev.Observed
-		r.Reason = fmt.Sprintf("host_e2e: observed %v/%v/%v, budget_deducted %v, forbidden events %v; TestM1FixtureCases/%s %s; store_integration TestAcceptedIntegrationCases/%s %s",
-			o["result"], o["reason"], o["approval_status"], o["budget_deducted"], o["forbidden_events_found"], c.CaseID, word(e2eTest), c.CaseID, word(storeTest))
-		r.EvidenceIDs = []string{ids[f], ids["tests/e2e.jsonl"], ids["tests/store.jsonl"]}
-	}
+	r.Reason = strings.Join(reasons, "; ")
 	return r
 }
 
@@ -454,46 +588,48 @@ func worst(a, b string) string {
 var tokenLike = regexp.MustCompile(`(^|[^0-9a-fA-Fx:])[0-9a-f]{64}([^0-9a-f]|$)`)
 
 // scanSecrets lists the files of the run directory holding a bare
-// token-like value; a bundle with one is never marked complete.
-func scanSecrets(dir string) []string {
+// token-like value; a bundle with one is never marked complete. A file it
+// cannot read is an error, never a clean result.
+func scanSecrets(dir string) ([]string, error) {
 	var leaks []string
-	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err == nil && d.Type().IsRegular() && !strings.HasSuffix(p, ".png") {
-			if b, err := os.ReadFile(p); err == nil && tokenLike.Match(b) {
-				rel, _ := filepath.Rel(dir, p)
-				leaks = append(leaks, rel)
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.Type().IsRegular() || strings.HasSuffix(p, ".png") {
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if tokenLike.Match(b) {
+			rel, err := filepath.Rel(dir, p)
+			if err != nil {
+				return err
 			}
+			leaks = append(leaks, rel)
 		}
 		return nil
 	})
-	return leaks
+	return leaks, err
 }
 
 // writeEnd is the end marker, written last: the run ID, the manifest's
 // file digest and whether the bundle is complete.
-func writeEnd(dir, runID string, manifest []byte, state string) {
+func writeEnd(dir, runID string, manifest []byte, state string) error {
 	end := map[string]string{"run_id": runID, "state": state}
 	if manifest != nil {
 		end["manifest_digest"] = digest(manifest)
 	}
-	b, _ := json.MarshalIndent(end, "", "  ")
-	os.WriteFile(filepath.Join(dir, "run-end.json"), append(b, '\n'), 0o600)
+	b, err := json.MarshalIndent(end, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "run-end.json"), append(b, '\n'), 0o600)
 }
 
 func digest(b []byte) string {
 	h := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(h[:])
-}
-
-func capture(name string, args ...string) string {
-	out, _ := exec.Command(name, args...).Output()
-	return string(out)
-}
-
-func mustAbs(p string) string {
-	a, err := filepath.Abs(p)
-	if err != nil {
-		panic(err)
-	}
-	return a
 }
