@@ -1,0 +1,67 @@
+{
+  "case_id": "deny-missing-config",
+  "harness": "internal/store TestAcceptedIntegrationCases",
+  "layer": "store_integration",
+  "operation": "policy",
+  "parameters": {
+    "allow_max": "100000",
+    "asset": "fixture-usdc",
+    "clock": "1790726450",
+    "credential": "valid",
+    "merchant": "allowed",
+    "mode": "interactive",
+    "remaining": "5000000",
+    "required_config": "missing"
+  },
+  "tasks": [
+    {
+      "task_id": "task-a",
+      "consumer_id": "consumer-a",
+      "agent_id": "agent-a",
+      "wallet_id": "wallet-a",
+      "payer": "0x1111111111111111111111111111111111111111",
+      "status": "denied",
+      "deny_reason": "CONFIG_MISSING",
+      "budget_remaining": "5000000",
+      "snapshots": {
+        "credential": {
+          "body": "{\"consumer_id\":\"consumer-a\",\"evidence_mode\":\"fixture\",\"valid_until\":1790812850}",
+          "hash": "sha256:e2d14c90509158aa4bd4b32d6ac6f42d50f2270feb02679dcf948b56f6adaf98"
+        },
+        "registry": {
+          "body": "{\"assets\":[{\"asset_contract\":\"0x4444444444444444444444444444444444444444\",\"asset_id\":\"fixture-usdc\",\"chain_id\":\"84532\",\"decimals\":6,\"eip712_name\":\"USDC\",\"eip712_version\":\"2\"}],\"consumers\":[{\"agent_id\":\"agent-a\",\"consumer_id\":\"consumer-a\",\"wallet_id\":\"wallet-a\"},{\"agent_id\":\"agent-b\",\"consumer_id\":\"consumer-b\",\"wallet_id\":\"wallet-b\"}],\"merchant_pay_to\":\"0x3333333333333333333333333333333333333333\",\"tasks\":[{\"agent_id\":\"agent-a\",\"consumer_id\":\"consumer-a\",\"created_at\":1790726400,\"status\":\"created\",\"task_id\":\"task-a\",\"version\":\"apa.m1.v2\",\"wallet_id\":\"wallet-a\"},{\"agent_id\":\"agent-a\",\"consumer_id\":\"consumer-a\",\"created_at\":1790726500,\"status\":\"created\",\"task_id\":\"task-a-next\",\"version\":\"apa.m1.v2\",\"wallet_id\":\"wallet-a\"},{\"agent_id\":\"agent-b\",\"consumer_id\":\"consumer-b\",\"created_at\":1790726400,\"status\":\"created\",\"task_id\":\"task-b\",\"version\":\"apa.m1.v2\",\"wallet_id\":\"wallet-b\"}],\"version\":\"apa.m1.v2\",\"wallets\":[{\"chain_id\":\"84532\",\"evidence_mode\":\"fixture\",\"from\":\"0x1111111111111111111111111111111111111111\",\"wallet_id\":\"wallet-a\"},{\"chain_id\":\"84532\",\"evidence_mode\":\"fixture\",\"from\":\"0x2222222222222222222222222222222222222222\",\"wallet_id\":\"wallet-b\"}]}",
+          "hash": "sha256:e8766668d0464ced140257b0eb6273e098eaa95d434589671f5a470fd1f56099"
+        },
+        "terms": {
+          "body": "{\"approval_deadline_seconds\":30,\"asset_id\":\"fixture-usdc\",\"budget_initial\":\"5000000\",\"credential_state\":\"present\",\"profile_state\":\"absent\",\"task_id\":\"task-a\"}",
+          "hash": "sha256:afd8fcdcf8a468603d469ffc98c8abee998ef59694365e12dc02f3dfc7c37114"
+        }
+      },
+      "purchases": {
+        "po-a-1": {
+          "body": "{\"intent\":{\"agent_id\":\"agent-a\",\"amount\":\"500000\",\"asset_contract\":\"0x4444444444444444444444444444444444444444\",\"chain_id\":\"84532\",\"consumer_id\":\"consumer-a\",\"domain\":\"agent-payment-authority/m1-fixture/v2/verifier-not-deployed\",\"eip3009_nonce\":\"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"from\":\"0x1111111111111111111111111111111111111111\",\"http_method\":\"GET\",\"pay_to\":\"0x3333333333333333333333333333333333333333\",\"payment_requirement_hash\":\"sha256:489288a7b372fc16f288f7473896e42dd032d473ca4efc52fbe4e2a9d9324c8d\",\"purchase_order_id\":\"po-a-1\",\"resource_hash\":\"sha256:51824b6f5747bf9b2171bd3969e72f74ff27b60c02b3fd0b0ccbc7893c2c7476\",\"resource_url\":\"http://127.0.0.1:8402/resources/kr-market?edition=1\",\"scheme\":\"exact\",\"task_id\":\"task-a\",\"valid_after\":1790726400,\"valid_before\":1790727000,\"version\":\"apa.m1.v2\",\"wallet_id\":\"wallet-a\",\"x402_version\":2},\"quote\":{\"extensions\":{\"fixture-pricing\":{\"amount\":\"700\",\"currency\":\"KRW\",\"rate\":\"1400\"}},\"selected_requirement\":{\"amount\":\"500000\",\"asset\":\"0x4444444444444444444444444444444444444444\",\"extra\":{\"fixture\":true,\"future_term\":{\"label\":\"資料 \\u0026 terms\",\"revision\":1},\"name\":\"USDC\",\"version\":\"2\"},\"maxTimeoutSeconds\":60,\"network\":\"eip155:84532\",\"payTo\":\"0x3333333333333333333333333333333333333333\",\"scheme\":\"exact\"},\"x402_version\":2},\"request_id\":\"request-1\",\"version\":\"apa.m1.v2\"}",
+          "hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1"
+        }
+      },
+      "events": [
+        {
+          "body": "{\"event_id\":\"evt-39937f395ada6bb8d397d47606f27f13\",\"event_type\":\"TASK_STARTED\",\"evidence_mode\":\"fixture\",\"observed_at\":1790726450,\"payload\":{},\"prev_event_hash\":\"sha256:1c780be64573e68aa0493ba80eb9ce67d4ab8b5f383cd3501457396261eab1eb\",\"scope\":{\"agent_id\":\"agent-a\",\"consumer_id\":\"consumer-a\",\"task_id\":\"task-a\",\"wallet_id\":\"wallet-a\"},\"sequence\":1,\"source\":\"host\",\"version\":\"apa.m1.v2\"}",
+          "hash": "sha256:87343dd44b065ce874bcb5641bc2decd9bd39c21a3471a97c6cc0adae8bf6c0f"
+        },
+        {
+          "body": "{\"event_id\":\"evt-864bcc7b8ad877efb49b739f3eb0df4c\",\"event_type\":\"PURCHASE_PROPOSED\",\"evidence_mode\":\"fixture\",\"observed_at\":1790726450,\"payload\":{},\"prev_event_hash\":\"sha256:87343dd44b065ce874bcb5641bc2decd9bd39c21a3471a97c6cc0adae8bf6c0f\",\"scope\":{\"agent_id\":\"agent-a\",\"consumer_id\":\"consumer-a\",\"intent_hash\":\"sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1\",\"purchase_order_id\":\"po-a-1\",\"task_id\":\"task-a\",\"wallet_id\":\"wallet-a\"},\"sequence\":2,\"source\":\"host\",\"version\":\"apa.m1.v2\"}",
+          "hash": "sha256:d64d281e93611bb062b7c527c30345530078915640778e3cd661152a10bfa6ea"
+        },
+        {
+          "body": "{\"event_id\":\"evt-194fba6bedef2d1a38e68c9542435363\",\"event_type\":\"POLICY_DECIDED\",\"evidence_mode\":\"fixture\",\"observed_at\":1790726450,\"payload\":{\"decision\":{\"approval_status\":\"not_requested\",\"intent_hash\":\"sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1\",\"payment_status\":\"unavailable\",\"policy_verdict\":\"Deny\",\"reason\":\"CONFIG_MISSING\",\"version\":\"apa.m1.v2\"}},\"prev_event_hash\":\"sha256:d64d281e93611bb062b7c527c30345530078915640778e3cd661152a10bfa6ea\",\"scope\":{\"agent_id\":\"agent-a\",\"consumer_id\":\"consumer-a\",\"intent_hash\":\"sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1\",\"purchase_order_id\":\"po-a-1\",\"task_id\":\"task-a\",\"wallet_id\":\"wallet-a\"},\"sequence\":3,\"source\":\"host\",\"version\":\"apa.m1.v2\"}",
+          "hash": "sha256:39d459900c9dd3ddcd8f5d5a21fcefaaffe52502649d05c1791ac36dc78dc4f3"
+        }
+      ]
+    }
+  ],
+  "test_observed": {
+    "approval_status": "not_requested",
+    "reason": "CONFIG_MISSING",
+    "result": "Deny"
+  }
+}

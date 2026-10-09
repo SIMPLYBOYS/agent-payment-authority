@@ -1,0 +1,751 @@
+{
+  "version": "apa.m1.v2",
+  "run_id": "m1-fixture-20261009T162703Z-4ddb7a",
+  "code_commit": "0853b44daf722066f95f06cadfed4b46e8e84d73",
+  "dirty_patch_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "config_digest": "sha256:73ad59db646473bd2c0c70d12f5d4f1bdcc3362e77976d14ed5ff8e5b804cc56",
+  "case_manifest_digest": "sha256:d8b740748cdb7fcf7e88ff877b508b8459c6046675d2aef19246dc1124b8d51d",
+  "versions": {
+    "case_manifest": "m1-cases-v2",
+    "fake_cli": "fake-claude (no model, no network)",
+    "go": "go version go1.26.4 darwin/amd64",
+    "node": "v22.22.2",
+    "os": "darwin/amd64"
+  },
+  "commands": [
+    {
+      "command": "go test -count=1 -json -run ^TestContractCasesFromManifest$ ./internal/contracts/",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -count=1 -json -run ^TestAcceptedPolicyCases$ ./internal/policy/",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -count=1 -json -run ^TestAcceptedIntegrationCases$ ./internal/store/",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -count=1 -json -run ^TestM1FixtureCases$ ./cmd/demo/",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -count=1 -json -run ^(TestIntegrationAskDenyAndAccess|TestCancel.*|TestLiveRun.*)$ ./cmd/demo/",
+      "exit_code": 0
+    },
+    {
+      "command": "node --test web/test/adapter.test.mjs",
+      "exit_code": 0
+    },
+    {
+      "command": "node scripts/verify/browser-ui.mjs --out artifacts/m1/m1-fixture-20261009T162703Z-4ddb7a/browser",
+      "exit_code": 0
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "ev-browser-browser-test.log",
+      "path": "browser/browser-test.log",
+      "digest": "sha256:ee10371b8fd7321bfe38263d844b2ffd9b9cbaa3f5eb3c99eada1515f82c8d55",
+      "evidence_mode": "fixture",
+      "source": "browser_ui"
+    },
+    {
+      "evidence_id": "ev-browser-browser-ui.out",
+      "path": "browser/browser-ui.out",
+      "digest": "sha256:c8d72f074edc3c3c86e037eff260d4ca8f4da2b4c74f6831706bf00a58dd4e71",
+      "evidence_mode": "fixture",
+      "source": "browser_ui"
+    },
+    {
+      "evidence_id": "ev-contracts-altered-agent-id.json",
+      "path": "contracts/altered-agent-id.json",
+      "digest": "sha256:b7e5aa79f8b17d76615d2c7fe8b33122092c72c2d19359b8098ebad9c6be232d",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-contracts-altered-consumer-id.json",
+      "path": "contracts/altered-consumer-id.json",
+      "digest": "sha256:f710dfc2a666344d9fbeeeefa5c9fe5fd38a767e3f73f6c882809998665a1af3",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-contracts-consumer-a.json",
+      "path": "contracts/consumer-a.json",
+      "digest": "sha256:5a9fc295b598435d5ba4559778ad060d86682b50f18b4dbb30349a41712ab778",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-contracts-consumer-b.json",
+      "path": "contracts/consumer-b.json",
+      "digest": "sha256:3864313741e5c8aadaea73e56b90f6e0c0fb42453c22500164c8043690691a71",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-contracts-cross-consumer-payer.json",
+      "path": "contracts/cross-consumer-payer.json",
+      "digest": "sha256:3b7de71711d3a6a6bf280255420767c0ec53a7df36b59b5417aafe8a927e7ee5",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-contracts-cross-consumer-wallet.json",
+      "path": "contracts/cross-consumer-wallet.json",
+      "digest": "sha256:067b06a08b265c511b18ec462139d6a2a04c109f00c182e94edb813c95ddd8cf",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-contracts-cross-consumer.json",
+      "path": "contracts/cross-consumer.json",
+      "digest": "sha256:94a691ecbe547af204633367537625afcba8a41794923e320c817cef710399c5",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-contracts-no-premature-settlement.json",
+      "path": "contracts/no-premature-settlement.json",
+      "digest": "sha256:a0f3f48ce88a2b979a98b6f8689bde90be99e52564943873b0d99e6c2aaf7fab",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-contracts-reject-case-variant-key.json",
+      "path": "contracts/reject-case-variant-key.json",
+      "digest": "sha256:c4d964e6b4b2cfb531247da01101a54686898317b5bae04670bc0421727e5d5e",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-contracts-reject-erc7710-quote.json",
+      "path": "contracts/reject-erc7710-quote.json",
+      "digest": "sha256:2c824498fbad55e8c5a93b8eb9de04ff9462421581724ee6b014f677948cf36d",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-contracts-reject-permit2-quote.json",
+      "path": "contracts/reject-permit2-quote.json",
+      "digest": "sha256:e55a8651f6a3bc38627a6eb090a107fd5e34bf51851b3818723faffbedee6d27",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-contracts-retry-conflict.json",
+      "path": "contracts/retry-conflict.json",
+      "digest": "sha256:fbf5e4e2bb9f930b3e26386426b1b817d1786a590022dcec3f2aa42c33bc6bb1",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-contracts-retry-new-request-same-order.json",
+      "path": "contracts/retry-new-request-same-order.json",
+      "digest": "sha256:8730079bbbc3355f34fd459e6b083a54b4cd253daab89b4cba5db0d96692a958",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-contracts-retry-same-request-id-a-b.json",
+      "path": "contracts/retry-same-request-id-a-b.json",
+      "digest": "sha256:ac05ce9f51ca3afca6e89f243c4bb7068ae703ee6a21a96ef499fb05f036e871",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-contracts-retry-same.json",
+      "path": "contracts/retry-same.json",
+      "digest": "sha256:843bf63d2a35bd52764d61ce7c2135b487fdc2e1003139c2b7057053146a5a74",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-e2e-approval-deadline-before.json",
+      "path": "e2e/approval-deadline-before.json",
+      "digest": "sha256:b3b7bde7e0b4b970ac618a43c67d260d358f5b5bf0c09e7adc6ea71583f781bd",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-e2e-approval-deadline-exact.json",
+      "path": "e2e/approval-deadline-exact.json",
+      "digest": "sha256:392c65fd24e0ab35e7d6ed627e82b9792311782bd18ab11cfd348aaaa2894f03",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-e2e-approval-timeout.json",
+      "path": "e2e/approval-timeout.json",
+      "digest": "sha256:6ec03dfc026204bae805ca42f4466549d4dc75f9558ed4e08a826f5059955150",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-e2e-ask.json",
+      "path": "e2e/ask.json",
+      "digest": "sha256:5ca46b8cc13a2b06d018e312d347b38e68acbbe031d6d4960db49e8a38cd677b",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-e2e-cancel-no-purchase.json",
+      "path": "e2e/cancel-no-purchase.json",
+      "digest": "sha256:979732c3a2daa519dadaa380055d07e67c3eaa0e24d1edf830c31c0564f8d701",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-e2e-cancel-pending.json",
+      "path": "e2e/cancel-pending.json",
+      "digest": "sha256:68a5321a686718d4718db02f29a5a4a9237820a262f7097406f5246fbe0d56a4",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-e2e-cli-timeout-pending.json",
+      "path": "e2e/cli-timeout-pending.json",
+      "digest": "sha256:84d4392de47df6704b7a75eb8369a2d2010e7802745a3b617ad137df64f73719",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-e2e-cli-timeout.json",
+      "path": "e2e/cli-timeout.json",
+      "digest": "sha256:e03f3a96c7b9a702968c063aa9a05dd56eac8216ed18209b0b0285038fb04fb0",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-e2e-deny-asset.json",
+      "path": "e2e/deny-asset.json",
+      "digest": "sha256:d784e273d93c5a8e04ef134d37e8fff8cac44eed65abd6ef4c7842bc74983d36",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-e2e-deny-budget.json",
+      "path": "e2e/deny-budget.json",
+      "digest": "sha256:eb79b4bf7094fbc11df8cbef7b1502284a31a18f55c8b7db19a63ce06dd602d9",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-e2e-deny-merchant.json",
+      "path": "e2e/deny-merchant.json",
+      "digest": "sha256:5ce25b81abc964ad631f74456a1f48470482ed1b596f8d317bffaa012c2ec159",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-e2e-deny-unattended.json",
+      "path": "e2e/deny-unattended.json",
+      "digest": "sha256:126f6a5aa42ebf4a3ed0e8347472f44a5911461615ff20fdb86212db848b8fd0",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-e2e-restart.json",
+      "path": "e2e/restart.json",
+      "digest": "sha256:b72dc82bd7414ffeffefecf5d1e3335bc7344de28ac201a1f44d76590defe269",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-provenance-config-files.json",
+      "path": "provenance/config-files.json",
+      "digest": "sha256:35ad485cacbef0c7e09212380f2746be8ba04a0046d8fb2398426920e210f676",
+      "evidence_mode": "fixture",
+      "source": "provenance"
+    },
+    {
+      "evidence_id": "ev-provenance-git-status.txt",
+      "path": "provenance/git-status.txt",
+      "digest": "sha256:4cf9be5e02410046a6eca4a8a6fe8c47c1a08605278d94eb26e279b15cfae805",
+      "evidence_mode": "fixture",
+      "source": "provenance"
+    },
+    {
+      "evidence_id": "ev-requirements-index.json",
+      "path": "requirements/index.json",
+      "digest": "sha256:d490e1f8617a242144fd672351b8d666845d8d112af96f10bf35d28510c55159",
+      "evidence_mode": "fixture",
+      "source": "requirements_index"
+    },
+    {
+      "evidence_id": "ev-store-allow-unavailable.json",
+      "path": "store/allow-unavailable.json",
+      "digest": "sha256:14eaaa00b36e4e4d90f7131c1b59663c8a67080f8af94a21cbd77f4e1096031d",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-approval-deadline-before.json",
+      "path": "store/approval-deadline-before.json",
+      "digest": "sha256:b15a8386aa4d4868c67c3029782b35dc706a2fd2d7723dcb8dc32fca74f627c6",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-approval-deadline-exact.json",
+      "path": "store/approval-deadline-exact.json",
+      "digest": "sha256:602c4a5ad49424e38d5f72cc7526ac1c8c9be233569cd8f8f153deb52e35e78d",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-approval-timeout.json",
+      "path": "store/approval-timeout.json",
+      "digest": "sha256:c6537eb0ba1f5acfd2cc3ca37026bfa829a60c110f14058841794c5a418b79e9",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-ask.json",
+      "path": "store/ask.json",
+      "digest": "sha256:062335b4e86daa2ac74bddb7b5275f428c3b954fd3b2a76fb0e3e7876dc43c01",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-cancel-no-purchase.json",
+      "path": "store/cancel-no-purchase.json",
+      "digest": "sha256:c49b4251621593fc12e8dc6e76161315ea4f2f357b9bf5b4856f0fe2d5e6b5c6",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-cancel-pending.json",
+      "path": "store/cancel-pending.json",
+      "digest": "sha256:cfbf4ea8860312f28e5f4a17003ee3e260f529a70cde9cb85b26ab40e370d85a",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-cli-timeout-pending.json",
+      "path": "store/cli-timeout-pending.json",
+      "digest": "sha256:d2318047f971562ba69abf00a5b5314cd089b23722de127cc1a47921b40e25ff",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-cli-timeout.json",
+      "path": "store/cli-timeout.json",
+      "digest": "sha256:084b8c2611075441aa12292f42176524884ff3dc50da2fafb5bee653fa309c81",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-deny-asset.json",
+      "path": "store/deny-asset.json",
+      "digest": "sha256:be260fc0d2fd0b846d2b571a53ab5286e78b39f5b936cd9946182dc3b1ca8352",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-deny-budget.json",
+      "path": "store/deny-budget.json",
+      "digest": "sha256:70d528600877a1fb7af0b55d9587b4fba137c0c0b6b85d938b9193a433172fb3",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-deny-expired.json",
+      "path": "store/deny-expired.json",
+      "digest": "sha256:cc027fec13468bfb00392445d013457c8041e7d6d7fb80c8e223121c50e27c67",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-deny-merchant.json",
+      "path": "store/deny-merchant.json",
+      "digest": "sha256:3c56f827718854591105cdf5d2eef859215395b7077f99cf50c6b899f8510d22",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-deny-missing-config.json",
+      "path": "store/deny-missing-config.json",
+      "digest": "sha256:222da1dd7c52a3a4ce69e56f7af4629c16a7e806d393fdf8b9386ec68a58d17d",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-deny-unattended.json",
+      "path": "store/deny-unattended.json",
+      "digest": "sha256:7a6da6402fb32c91429ac79418205bd354e66542a119c1cc29033be939b4934c",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-store-restart.json",
+      "path": "store/restart.json",
+      "digest": "sha256:7f42baa9eaf4382efbafc6f0d9c347b563c87e2e744fce62782f3780af1f65b1",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    },
+    {
+      "evidence_id": "ev-tests-contracts.jsonl",
+      "path": "tests/contracts.jsonl",
+      "digest": "sha256:1d66cc6443b9085f9abb9d671090970ef49912d91046b4abf75afb692debb5c4",
+      "evidence_mode": "fixture",
+      "source": "contracts_test"
+    },
+    {
+      "evidence_id": "ev-tests-e2e.jsonl",
+      "path": "tests/e2e.jsonl",
+      "digest": "sha256:315cffd0441f2236e2ad8c36cda2b82fcd888be78e95dea6447ac38a0c5155f0",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-tests-policy.jsonl",
+      "path": "tests/policy.jsonl",
+      "digest": "sha256:c8d7b87c2bb10cbf3a62748d8cd5707ad331e36086bd37d03f96d575064a63a2",
+      "evidence_mode": "fixture",
+      "source": "policy_test"
+    },
+    {
+      "evidence_id": "ev-tests-requirements-go.jsonl",
+      "path": "tests/requirements-go.jsonl",
+      "digest": "sha256:85b9786577a7b0b2835080ec626063327bb7952351525a8398da97febde3e37f",
+      "evidence_mode": "fixture",
+      "source": "host_e2e"
+    },
+    {
+      "evidence_id": "ev-tests-requirements-web.tap",
+      "path": "tests/requirements-web.tap",
+      "digest": "sha256:90c56dbbd79a59540a38d20e8030dd42b6e20130fee5a63a2af54b14b3f0df13",
+      "evidence_mode": "fixture",
+      "source": "web_adapter_test"
+    },
+    {
+      "evidence_id": "ev-tests-store.jsonl",
+      "path": "tests/store.jsonl",
+      "digest": "sha256:5ea3540000d33fac07a11ca996d985071bb5d07615abb50bacb7fa6ebe3f6cab",
+      "evidence_mode": "fixture",
+      "source": "store_integration"
+    }
+  ],
+  "results": [
+    {
+      "case_id": "ask",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-e2e-ask.json",
+        "ev-tests-e2e.jsonl",
+        "ev-store-ask.json",
+        "ev-tests-store.jsonl"
+      ],
+      "reason": "e2e/ask.json: recomputed Ask/HUMAN_APPROVAL_REQUIRED/pending, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestM1FixtureCases/ask passed; store/ask.json: recomputed Ask/HUMAN_APPROVAL_REQUIRED/pending, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestAcceptedIntegrationCases/ask passed"
+    },
+    {
+      "case_id": "deny-budget",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-e2e-deny-budget.json",
+        "ev-tests-e2e.jsonl",
+        "ev-store-deny-budget.json",
+        "ev-tests-store.jsonl"
+      ],
+      "reason": "e2e/deny-budget.json: recomputed Deny/INSUFFICIENT_BUDGET/not_requested, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestM1FixtureCases/deny-budget passed; store/deny-budget.json: recomputed Deny/INSUFFICIENT_BUDGET/not_requested, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestAcceptedIntegrationCases/deny-budget passed"
+    },
+    {
+      "case_id": "deny-merchant",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-e2e-deny-merchant.json",
+        "ev-tests-e2e.jsonl",
+        "ev-store-deny-merchant.json",
+        "ev-tests-store.jsonl"
+      ],
+      "reason": "e2e/deny-merchant.json: recomputed Deny/MERCHANT_NOT_ALLOWED/not_requested, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestM1FixtureCases/deny-merchant passed; store/deny-merchant.json: recomputed Deny/MERCHANT_NOT_ALLOWED/not_requested, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestAcceptedIntegrationCases/deny-merchant passed"
+    },
+    {
+      "case_id": "deny-expired",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-store-deny-expired.json",
+        "ev-tests-store.jsonl",
+        "ev-tests-policy.jsonl"
+      ],
+      "reason": "store/deny-expired.json: recomputed Deny/AUTHORIZATION_EXPIRED/not_requested, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestAcceptedIntegrationCases/deny-expired passed; TestAcceptedPolicyCases/deny-expired passed"
+    },
+    {
+      "case_id": "deny-missing-config",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-store-deny-missing-config.json",
+        "ev-tests-store.jsonl",
+        "ev-tests-policy.jsonl"
+      ],
+      "reason": "store/deny-missing-config.json: recomputed Deny/CONFIG_MISSING/not_requested, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestAcceptedIntegrationCases/deny-missing-config passed; TestAcceptedPolicyCases/deny-missing-config passed"
+    },
+    {
+      "case_id": "deny-unattended",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-e2e-deny-unattended.json",
+        "ev-tests-e2e.jsonl",
+        "ev-store-deny-unattended.json",
+        "ev-tests-store.jsonl"
+      ],
+      "reason": "e2e/deny-unattended.json: recomputed Deny/APPROVER_UNAVAILABLE/not_requested, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestM1FixtureCases/deny-unattended passed; store/deny-unattended.json: recomputed Deny/APPROVER_UNAVAILABLE/not_requested, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestAcceptedIntegrationCases/deny-unattended passed"
+    },
+    {
+      "case_id": "deny-asset",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-e2e-deny-asset.json",
+        "ev-tests-e2e.jsonl",
+        "ev-store-deny-asset.json",
+        "ev-tests-store.jsonl"
+      ],
+      "reason": "e2e/deny-asset.json: recomputed Deny/ASSET_NOT_ALLOWED/not_requested, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestM1FixtureCases/deny-asset passed; store/deny-asset.json: recomputed Deny/ASSET_NOT_ALLOWED/not_requested, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestAcceptedIntegrationCases/deny-asset passed"
+    },
+    {
+      "case_id": "allow-unavailable",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-store-allow-unavailable.json",
+        "ev-tests-store.jsonl",
+        "ev-tests-policy.jsonl"
+      ],
+      "reason": "store/allow-unavailable.json: recomputed Allow/PAYMENT_CAPABILITY_UNAVAILABLE/not_requested, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestAcceptedIntegrationCases/allow-unavailable passed; TestAcceptedPolicyCases/allow-unavailable passed"
+    },
+    {
+      "case_id": "cancel-pending",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-e2e-cancel-pending.json",
+        "ev-tests-e2e.jsonl",
+        "ev-store-cancel-pending.json",
+        "ev-tests-store.jsonl"
+      ],
+      "reason": "e2e/cancel-pending.json: recomputed cancelled/HOST_CANCELLED/withdrawn, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestM1FixtureCases/cancel-pending passed; store/cancel-pending.json: recomputed cancelled/HOST_CANCELLED/withdrawn, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestAcceptedIntegrationCases/cancel-pending passed"
+    },
+    {
+      "case_id": "cancel-no-purchase",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-e2e-cancel-no-purchase.json",
+        "ev-tests-e2e.jsonl",
+        "ev-store-cancel-no-purchase.json",
+        "ev-tests-store.jsonl"
+      ],
+      "reason": "e2e/cancel-no-purchase.json: recomputed cancelled/HOST_CANCELLED/not_requested, payment unavailable, budget_deducted 0, purchases 0, forbidden events []; TestM1FixtureCases/cancel-no-purchase passed; store/cancel-no-purchase.json: recomputed cancelled/HOST_CANCELLED/not_requested, payment unavailable, budget_deducted 0, purchases 0, forbidden events []; TestAcceptedIntegrationCases/cancel-no-purchase passed"
+    },
+    {
+      "case_id": "approval-timeout",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-e2e-approval-timeout.json",
+        "ev-tests-e2e.jsonl",
+        "ev-store-approval-timeout.json",
+        "ev-tests-store.jsonl"
+      ],
+      "reason": "e2e/approval-timeout.json: recomputed denied/APPROVAL_TIMEOUT/expired, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestM1FixtureCases/approval-timeout passed; store/approval-timeout.json: recomputed denied/APPROVAL_TIMEOUT/expired, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestAcceptedIntegrationCases/approval-timeout passed"
+    },
+    {
+      "case_id": "approval-deadline-before",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-e2e-approval-deadline-before.json",
+        "ev-tests-e2e.jsonl",
+        "ev-store-approval-deadline-before.json",
+        "ev-tests-store.jsonl"
+      ],
+      "reason": "e2e/approval-deadline-before.json: recomputed pending/HUMAN_APPROVAL_REQUIRED/pending, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestM1FixtureCases/approval-deadline-before passed; store/approval-deadline-before.json: recomputed pending/HUMAN_APPROVAL_REQUIRED/pending, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestAcceptedIntegrationCases/approval-deadline-before passed"
+    },
+    {
+      "case_id": "approval-deadline-exact",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-e2e-approval-deadline-exact.json",
+        "ev-tests-e2e.jsonl",
+        "ev-store-approval-deadline-exact.json",
+        "ev-tests-store.jsonl"
+      ],
+      "reason": "e2e/approval-deadline-exact.json: recomputed denied/APPROVAL_TIMEOUT/expired, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestM1FixtureCases/approval-deadline-exact passed; store/approval-deadline-exact.json: recomputed denied/APPROVAL_TIMEOUT/expired, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestAcceptedIntegrationCases/approval-deadline-exact passed"
+    },
+    {
+      "case_id": "cli-timeout",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-e2e-cli-timeout.json",
+        "ev-tests-e2e.jsonl",
+        "ev-store-cli-timeout.json",
+        "ev-tests-store.jsonl"
+      ],
+      "reason": "e2e/cli-timeout.json: recomputed failed/CLI_TIMEOUT/not_requested, payment unavailable, budget_deducted 0, purchases 0, forbidden events []; TestM1FixtureCases/cli-timeout passed; store/cli-timeout.json: recomputed failed/CLI_TIMEOUT/not_requested, payment unavailable, budget_deducted 0, purchases 0, forbidden events []; TestAcceptedIntegrationCases/cli-timeout passed"
+    },
+    {
+      "case_id": "cli-timeout-pending",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-e2e-cli-timeout-pending.json",
+        "ev-tests-e2e.jsonl",
+        "ev-store-cli-timeout-pending.json",
+        "ev-tests-store.jsonl"
+      ],
+      "reason": "e2e/cli-timeout-pending.json: recomputed failed/CLI_TIMEOUT/pending, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestM1FixtureCases/cli-timeout-pending passed; store/cli-timeout-pending.json: recomputed failed/CLI_TIMEOUT/pending, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestAcceptedIntegrationCases/cli-timeout-pending passed"
+    },
+    {
+      "case_id": "restart",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-e2e-restart.json",
+        "ev-tests-e2e.jsonl",
+        "ev-store-restart.json",
+        "ev-tests-store.jsonl"
+      ],
+      "reason": "e2e/restart.json: recomputed same-wallet/PERSISTED_BINDING/not_requested, payment unavailable, budget_deducted 0, purchases 1, forbidden events []; TestM1FixtureCases/restart passed; store/restart.json: recomputed same-wallet/PERSISTED_BINDING/not_requested, payment unavailable, budget_deducted 0, purchases 0, forbidden events []; TestAcceptedIntegrationCases/restart passed"
+    },
+    {
+      "case_id": "retry-same",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-retry-same.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/retry-same.json: recomputed rerun from the recorded inputs: replay  (contracts layer, not end-to-end); TestContractCasesFromManifest/retry-same passed"
+    },
+    {
+      "case_id": "retry-conflict",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-retry-conflict.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/retry-conflict.json: recomputed rerun from the recorded inputs: reject IDEMPOTENCY_CONFLICT (contracts layer, not end-to-end); TestContractCasesFromManifest/retry-conflict passed"
+    },
+    {
+      "case_id": "retry-new-request-same-order",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-retry-new-request-same-order.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/retry-new-request-same-order.json: recomputed rerun from the recorded inputs: reject IDEMPOTENCY_CONFLICT (contracts layer, not end-to-end); TestContractCasesFromManifest/retry-new-request-same-order passed"
+    },
+    {
+      "case_id": "retry-same-request-id-a-b",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-retry-same-request-id-a-b.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/retry-same-request-id-a-b.json: recomputed rerun from the recorded inputs: new  (contracts layer, not end-to-end); TestContractCasesFromManifest/retry-same-request-id-a-b passed"
+    },
+    {
+      "case_id": "consumer-a",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-consumer-a.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/consumer-a.json: recomputed rerun from the recorded inputs: accept  (contracts layer, not end-to-end); TestContractCasesFromManifest/consumer-a passed"
+    },
+    {
+      "case_id": "consumer-b",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-consumer-b.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/consumer-b.json: recomputed rerun from the recorded inputs: accept  (contracts layer, not end-to-end); TestContractCasesFromManifest/consumer-b passed"
+    },
+    {
+      "case_id": "cross-consumer",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-cross-consumer.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/cross-consumer.json: recomputed rerun from the recorded inputs: reject OWNERSHIP_MISMATCH (contracts layer, not end-to-end); TestContractCasesFromManifest/cross-consumer passed"
+    },
+    {
+      "case_id": "cross-consumer-wallet",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-cross-consumer-wallet.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/cross-consumer-wallet.json: recomputed rerun from the recorded inputs: reject OWNERSHIP_MISMATCH (contracts layer, not end-to-end); TestContractCasesFromManifest/cross-consumer-wallet passed"
+    },
+    {
+      "case_id": "cross-consumer-payer",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-cross-consumer-payer.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/cross-consumer-payer.json: recomputed rerun from the recorded inputs: reject OWNERSHIP_MISMATCH (contracts layer, not end-to-end); TestContractCasesFromManifest/cross-consumer-payer passed"
+    },
+    {
+      "case_id": "altered-consumer-id",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-altered-consumer-id.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/altered-consumer-id.json: recomputed rerun from the recorded inputs: reject OWNERSHIP_MISMATCH (contracts layer, not end-to-end); TestContractCasesFromManifest/altered-consumer-id passed"
+    },
+    {
+      "case_id": "altered-agent-id",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-altered-agent-id.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/altered-agent-id.json: recomputed rerun from the recorded inputs: reject OWNERSHIP_MISMATCH (contracts layer, not end-to-end); TestContractCasesFromManifest/altered-agent-id passed"
+    },
+    {
+      "case_id": "no-premature-settlement",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-no-premature-settlement.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/no-premature-settlement.json: recomputed rerun from the recorded inputs: reject M1_PAYMENT_UNAVAILABLE (contracts layer, not end-to-end); TestContractCasesFromManifest/no-premature-settlement passed"
+    },
+    {
+      "case_id": "reject-erc7710-quote",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-reject-erc7710-quote.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/reject-erc7710-quote.json: recomputed rerun from the recorded inputs: reject UNSUPPORTED_TRANSFER_METHOD (contracts layer, not end-to-end); TestContractCasesFromManifest/reject-erc7710-quote passed"
+    },
+    {
+      "case_id": "reject-permit2-quote",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-reject-permit2-quote.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/reject-permit2-quote.json: recomputed rerun from the recorded inputs: reject UNSUPPORTED_TRANSFER_METHOD (contracts layer, not end-to-end); TestContractCasesFromManifest/reject-permit2-quote passed"
+    },
+    {
+      "case_id": "reject-case-variant-key",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-contracts-reject-case-variant-key.json",
+        "ev-tests-contracts.jsonl"
+      ],
+      "reason": "contracts/reject-case-variant-key.json: recomputed rerun from the recorded inputs: reject AMBIGUOUS_KEY (contracts layer, not end-to-end); TestContractCasesFromManifest/reject-case-variant-key passed"
+    }
+  ],
+  "not_evaluated": [
+    "credential_verification",
+    "webauthn",
+    "voice_approval",
+    "zk_budget_proof",
+    "signer_key_selection",
+    "cross_consumer_grant_proof",
+    "onchain_settlement"
+  ]
+}

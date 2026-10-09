@@ -1,0 +1,20 @@
+{
+  "case_id": "no-premature-settlement",
+  "decision": {
+    "version": "apa.m1.v2",
+    "intent_hash": "sha256:14549836f7edd6fb97b206a117a71057a02b95f249fef663307c3e97edf4e2a1",
+    "policy_verdict": "Ask",
+    "approval_status": "pending",
+    "payment_status": "Settled",
+    "reason": "HUMAN_APPROVAL_REQUIRED"
+  },
+  "layer": "contracts_test",
+  "observed": {
+    "code": "M1_PAYMENT_UNAVAILABLE",
+    "result": "reject"
+  },
+  "operation": "validate-decision",
+  "parameters": {
+    "payment_status": "Settled"
+  }
+}

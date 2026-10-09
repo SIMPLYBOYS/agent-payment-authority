@@ -1,0 +1,184 @@
+TAP version 13
+# Subtest: commits only a consistent pair, for the current generation
+ok 1 - commits only a consistent pair, for the current generation
+  ---
+  duration_ms: 3.320133
+  type: 'test'
+  ...
+# Subtest: a switch drops every late reply of the old viewer
+ok 2 - a switch drops every late reply of the old viewer
+  ---
+  duration_ms: 0.466226
+  type: 'test'
+  ...
+# Subtest: duplicate events are shown once and animated once
+ok 3 - duplicate events are shown once and animated once
+  ---
+  duration_ms: 1.063115
+  type: 'test'
+  ...
+# Subtest: Ask waits, Deny leaves, Allow says no payment capability
+ok 4 - Ask waits, Deny leaves, Allow says no payment capability
+  ---
+  duration_ms: 0.669049
+  type: 'test'
+  ...
+# Subtest: a reached deadline with no closing event only says so; the closing event decides
+ok 5 - a reached deadline with no closing event only says so; the closing event decides
+  ---
+  duration_ms: 0.678578
+  type: 'test'
+  ...
+# Subtest: cancel and CLI timeout after a Deny keep the Deny and its reason
+ok 6 - cancel and CLI timeout after a Deny keep the Deny and its reason
+  ---
+  duration_ms: 0.304523
+  type: 'test'
+  ...
+# Subtest: hostile strings stay strings; nothing reads as paid
+ok 7 - hostile strings stay strings; nothing reads as paid
+  ---
+  duration_ms: 1.871598
+  type: 'test'
+  ...
+# Subtest: the Unity projection carries no token and follows the committed snapshot
+ok 8 - the Unity projection carries no token and follows the committed snapshot
+  ---
+  duration_ms: 0.496727
+  type: 'test'
+  ...
+# Subtest: amount keeps the integer string
+ok 9 - amount keeps the integer string
+  ---
+  duration_ms: 0.473995
+  type: 'test'
+  ...
+# Subtest: R1: an older purchase's expiry does not move the newer Ask (Store-built, both orders)
+ok 10 - R1: an older purchase's expiry does not move the newer Ask (Store-built, both orders)
+  ---
+  duration_ms: 0.941256
+  type: 'test'
+  ...
+# Subtest: R1: the shown purchase's own closing decides; unknown links never close anything
+ok 11 - R1: the shown purchase's own closing decides; unknown links never close anything
+  ---
+  duration_ms: 0.378059
+  type: 'test'
+  ...
+# Subtest: D1 stepView: a replay step shows nothing the replay has not reached (R1)
+ok 12 - D1 stepView: a replay step shows nothing the replay has not reached (R1)
+  ---
+  duration_ms: 1.826443
+  type: 'test'
+  ...
+# Subtest: D1 stepView: a withdrawal and a task cancel appear only when replayed
+ok 13 - D1 stepView: a withdrawal and a task cancel appear only when replayed
+  ---
+  duration_ms: 0.459486
+  type: 'test'
+  ...
+# Subtest: D1 stepView: a later purchase does not reach an earlier step
+ok 14 - D1 stepView: a later purchase does not reach an earlier step
+  ---
+  duration_ms: 0.570101
+  type: 'test'
+  ...
+# Subtest: D1 card (live): the scene's purchase by default; a hand pick is marked as different, not as a sync failure
+ok 15 - D1 card (live): the scene's purchase by default; a hand pick is marked as different, not as a sync failure
+  ---
+  duration_ms: 1.112386
+  type: 'test'
+  ...
+# Subtest: D1 evidence: the full record in a replay says so and marks what is not reached; sources are named
+ok 16 - D1 evidence: the full record in a replay says so and marks what is not reached; sources are named
+  ---
+  duration_ms: 0.628771
+  type: 'test'
+  ...
+# Subtest: D1 project derives the status by the Store's rule: a Deny stays after a cancel
+ok 17 - D1 project derives the status by the Store's rule: a Deny stays after a cancel
+  ---
+  duration_ms: 0.166659
+  type: 'test'
+  ...
+# Subtest: D1 evidence: Unity is in step only for the same generation, task, sequence and phase
+ok 18 - D1 evidence: Unity is in step only for the same generation, task, sequence and phase
+  ---
+  duration_ms: 1.048179
+  type: 'test'
+  ...
+# Subtest: D2 transition: the shared vectors give the same rules and labels as Unity's
+ok 19 - D2 transition: the shared vectors give the same rules and labels as Unity's
+  ---
+  duration_ms: 1.691788
+  type: 'test'
+  ...
+# Subtest: D2 projection: cause_seq names the event behind the phase; task_end the first ending
+ok 20 - D2 projection: cause_seq names the event behind the phase; task_end the first ending
+  ---
+  duration_ms: 0.566828
+  type: 'test'
+  ...
+# Subtest: D2 projection: every replay step of the Store-built histories sends fields in range
+ok 21 - D2 projection: every replay step of the Store-built histories sends fields in range
+  ---
+  duration_ms: 0.534794
+  type: 'test'
+  ...
+# Subtest: D2 replay of a Store-built history: a second decision browses again, another purchase's expiry does not
+ok 22 - D2 replay of a Store-built history: a second decision browses again, another purchase's expiry does not
+  ---
+  duration_ms: 0.47675
+  type: 'test'
+  ...
+# Subtest: D2 transition text: display segments say so and name the recorded event
+ok 23 - D2 transition text: display segments say so and name the recorded event
+  ---
+  duration_ms: 0.228386
+  type: 'test'
+  ...
+# Subtest: D2 evidence: the scene page lists this move, derived by the page from the transition table
+ok 24 - D2 evidence: the scene page lists this move, derived by the page from the transition table
+  ---
+  duration_ms: 0.396997
+  type: 'test'
+  ...
+# Subtest: D2 sameShown: only the same generation, task, sequence and phase
+ok 25 - D2 sameShown: only the same generation, task, sequence and phase
+  ---
+  duration_ms: 0.181749
+  type: 'test'
+  ...
+# Subtest: D2 app.js: a report that is not the projection sent does not end the transition
+ok 26 - D2 app.js: a report that is not the projection sent does not end the transition
+  ---
+  duration_ms: 4.856879
+  type: 'test'
+  ...
+# Subtest: history: a recorded real run is labelled, its open Ask is a snapshot, its tool calls map to Store events
+ok 27 - history: a recorded real run is labelled, its open Ask is a snapshot, its tool calls map to Store events
+  ---
+  duration_ms: 0.968701
+  type: 'test'
+  ...
+# Subtest: live: the evidence panel says what the trace shows and when; nothing reads as paid or streamed
+ok 28 - live: the evidence panel says what the trace shows and when; nothing reads as paid or streamed
+  ---
+  duration_ms: 1.24199
+  type: 'test'
+  ...
+# Subtest: live: a failed trace read is unconfirmed; the last reply is marked as the last one
+ok 29 - live: a failed trace read is unconfirmed; the last reply is marked as the last one
+  ---
+  duration_ms: 0.551263
+  type: 'test'
+  ...
+1..29
+# tests 29
+# suites 0
+# pass 29
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 163.9394

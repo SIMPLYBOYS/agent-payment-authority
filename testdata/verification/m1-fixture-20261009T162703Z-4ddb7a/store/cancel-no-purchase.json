@@ -1,0 +1,62 @@
+{
+  "case_id": "cancel-no-purchase",
+  "harness": "internal/store TestAcceptedIntegrationCases",
+  "layer": "store_integration",
+  "operation": "cancel",
+  "parameters": {
+    "allow_max": "100000",
+    "asset": "fixture-usdc",
+    "before": "no_purchase",
+    "clock": "1790726450",
+    "credential": "valid",
+    "merchant": "allowed",
+    "mode": "interactive",
+    "remaining": "5000000",
+    "required_config": "present"
+  },
+  "tasks": [
+    {
+      "task_id": "task-a",
+      "consumer_id": "consumer-a",
+      "agent_id": "agent-a",
+      "wallet_id": "wallet-a",
+      "payer": "0x1111111111111111111111111111111111111111",
+      "status": "cancelled",
+      "budget_remaining": "5000000",
+      "snapshots": {
+        "credential": {
+          "body": "{\"consumer_id\":\"consumer-a\",\"evidence_mode\":\"fixture\",\"valid_until\":1790812850}",
+          "hash": "sha256:e2d14c90509158aa4bd4b32d6ac6f42d50f2270feb02679dcf948b56f6adaf98"
+        },
+        "profile": {
+          "body": "{\"allow_max\":\"100000\",\"asset_id\":\"fixture-usdc\",\"evidence_mode\":\"fixture\",\"merchants\":[\"0x3333333333333333333333333333333333333333\"],\"mode\":\"interactive\",\"profile_id\":\"m1-demo-v1\",\"task_cap\":\"5000000\"}",
+          "hash": "sha256:0b53897c0632dd7bcdf0b10fce5c2cd13edf8661dd0ba4fc9d3bbad545c12a97"
+        },
+        "registry": {
+          "body": "{\"assets\":[{\"asset_contract\":\"0x4444444444444444444444444444444444444444\",\"asset_id\":\"fixture-usdc\",\"chain_id\":\"84532\",\"decimals\":6,\"eip712_name\":\"USDC\",\"eip712_version\":\"2\"}],\"consumers\":[{\"agent_id\":\"agent-a\",\"consumer_id\":\"consumer-a\",\"wallet_id\":\"wallet-a\"},{\"agent_id\":\"agent-b\",\"consumer_id\":\"consumer-b\",\"wallet_id\":\"wallet-b\"}],\"merchant_pay_to\":\"0x3333333333333333333333333333333333333333\",\"tasks\":[{\"agent_id\":\"agent-a\",\"consumer_id\":\"consumer-a\",\"created_at\":1790726400,\"status\":\"created\",\"task_id\":\"task-a\",\"version\":\"apa.m1.v2\",\"wallet_id\":\"wallet-a\"},{\"agent_id\":\"agent-a\",\"consumer_id\":\"consumer-a\",\"created_at\":1790726500,\"status\":\"created\",\"task_id\":\"task-a-next\",\"version\":\"apa.m1.v2\",\"wallet_id\":\"wallet-a\"},{\"agent_id\":\"agent-b\",\"consumer_id\":\"consumer-b\",\"created_at\":1790726400,\"status\":\"created\",\"task_id\":\"task-b\",\"version\":\"apa.m1.v2\",\"wallet_id\":\"wallet-b\"}],\"version\":\"apa.m1.v2\",\"wallets\":[{\"chain_id\":\"84532\",\"evidence_mode\":\"fixture\",\"from\":\"0x1111111111111111111111111111111111111111\",\"wallet_id\":\"wallet-a\"},{\"chain_id\":\"84532\",\"evidence_mode\":\"fixture\",\"from\":\"0x2222222222222222222222222222222222222222\",\"wallet_id\":\"wallet-b\"}]}",
+          "hash": "sha256:e8766668d0464ced140257b0eb6273e098eaa95d434589671f5a470fd1f56099"
+        },
+        "terms": {
+          "body": "{\"approval_deadline_seconds\":30,\"asset_id\":\"fixture-usdc\",\"budget_initial\":\"5000000\",\"credential_state\":\"present\",\"profile_state\":\"present\",\"task_id\":\"task-a\"}",
+          "hash": "sha256:8b6e8d6d542611cc6a256bc7e46f6d8726949eb9e3f7a90b3f1dd92bd86dce04"
+        }
+      },
+      "purchases": {},
+      "events": [
+        {
+          "body": "{\"event_id\":\"evt-39937f395ada6bb8d397d47606f27f13\",\"event_type\":\"TASK_STARTED\",\"evidence_mode\":\"fixture\",\"observed_at\":1790726450,\"payload\":{},\"prev_event_hash\":\"sha256:1c780be64573e68aa0493ba80eb9ce67d4ab8b5f383cd3501457396261eab1eb\",\"scope\":{\"agent_id\":\"agent-a\",\"consumer_id\":\"consumer-a\",\"task_id\":\"task-a\",\"wallet_id\":\"wallet-a\"},\"sequence\":1,\"source\":\"host\",\"version\":\"apa.m1.v2\"}",
+          "hash": "sha256:87343dd44b065ce874bcb5641bc2decd9bd39c21a3471a97c6cc0adae8bf6c0f"
+        },
+        {
+          "body": "{\"event_id\":\"evt-864bcc7b8ad877efb49b739f3eb0df4c\",\"event_type\":\"TASK_CANCELLED\",\"evidence_mode\":\"fixture\",\"observed_at\":1790726450,\"payload\":{\"code\":\"HOST_CANCELLED\"},\"prev_event_hash\":\"sha256:87343dd44b065ce874bcb5641bc2decd9bd39c21a3471a97c6cc0adae8bf6c0f\",\"scope\":{\"agent_id\":\"agent-a\",\"consumer_id\":\"consumer-a\",\"task_id\":\"task-a\",\"wallet_id\":\"wallet-a\"},\"sequence\":2,\"source\":\"host\",\"version\":\"apa.m1.v2\"}",
+          "hash": "sha256:f3e4f06d25b59f2471d1b92d33101fb2e45ceb9a316f9690f11cc044948d22e9"
+        }
+      ]
+    }
+  ],
+  "test_observed": {
+    "approval_status": "not_requested",
+    "reason": "HOST_CANCELLED",
+    "result": "cancelled"
+  }
+}

@@ -1,0 +1,60 @@
+{"Time":"2026-10-10T00:27:09.212509+08:00","Action":"start","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo"}
+{"Time":"2026-10-10T00:27:09.838501+08:00","Action":"run","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases"}
+{"Time":"2026-10-10T00:27:09.838747+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases","Output":"=== RUN   TestM1FixtureCases\n"}
+{"Time":"2026-10-10T00:27:09.841873+08:00","Action":"run","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/ask"}
+{"Time":"2026-10-10T00:27:09.841884+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/ask","Output":"=== RUN   TestM1FixtureCases/ask\n"}
+{"Time":"2026-10-10T00:27:09.988717+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/ask","Output":"--- PASS: TestM1FixtureCases/ask (0.15s)\n"}
+{"Time":"2026-10-10T00:27:09.988748+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/ask","Elapsed":0.15}
+{"Time":"2026-10-10T00:27:09.988775+08:00","Action":"run","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-budget"}
+{"Time":"2026-10-10T00:27:09.988781+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-budget","Output":"=== RUN   TestM1FixtureCases/deny-budget\n"}
+{"Time":"2026-10-10T00:27:10.133981+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-budget","Output":"--- PASS: TestM1FixtureCases/deny-budget (0.15s)\n"}
+{"Time":"2026-10-10T00:27:10.134015+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-budget","Elapsed":0.15}
+{"Time":"2026-10-10T00:27:10.134034+08:00","Action":"run","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-merchant"}
+{"Time":"2026-10-10T00:27:10.13404+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-merchant","Output":"=== RUN   TestM1FixtureCases/deny-merchant\n"}
+{"Time":"2026-10-10T00:27:10.278564+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-merchant","Output":"--- PASS: TestM1FixtureCases/deny-merchant (0.14s)\n"}
+{"Time":"2026-10-10T00:27:10.278585+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-merchant","Elapsed":0.14}
+{"Time":"2026-10-10T00:27:10.278591+08:00","Action":"run","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-asset"}
+{"Time":"2026-10-10T00:27:10.278595+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-asset","Output":"=== RUN   TestM1FixtureCases/deny-asset\n"}
+{"Time":"2026-10-10T00:27:10.421944+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-asset","Output":"--- PASS: TestM1FixtureCases/deny-asset (0.14s)\n"}
+{"Time":"2026-10-10T00:27:10.421966+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-asset","Elapsed":0.14}
+{"Time":"2026-10-10T00:27:10.421972+08:00","Action":"run","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-unattended"}
+{"Time":"2026-10-10T00:27:10.421975+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-unattended","Output":"=== RUN   TestM1FixtureCases/deny-unattended\n"}
+{"Time":"2026-10-10T00:27:10.565536+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-unattended","Output":"--- PASS: TestM1FixtureCases/deny-unattended (0.14s)\n"}
+{"Time":"2026-10-10T00:27:10.565559+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/deny-unattended","Elapsed":0.14}
+{"Time":"2026-10-10T00:27:10.565566+08:00","Action":"run","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cancel-pending"}
+{"Time":"2026-10-10T00:27:10.565569+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cancel-pending","Output":"=== RUN   TestM1FixtureCases/cancel-pending\n"}
+{"Time":"2026-10-10T00:27:10.723293+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cancel-pending","Output":"--- PASS: TestM1FixtureCases/cancel-pending (0.16s)\n"}
+{"Time":"2026-10-10T00:27:10.723314+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cancel-pending","Elapsed":0.16}
+{"Time":"2026-10-10T00:27:10.723335+08:00","Action":"run","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cancel-no-purchase"}
+{"Time":"2026-10-10T00:27:10.723339+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cancel-no-purchase","Output":"=== RUN   TestM1FixtureCases/cancel-no-purchase\n"}
+{"Time":"2026-10-10T00:27:10.866731+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cancel-no-purchase","Output":"--- PASS: TestM1FixtureCases/cancel-no-purchase (0.14s)\n"}
+{"Time":"2026-10-10T00:27:10.866754+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cancel-no-purchase","Elapsed":0.14}
+{"Time":"2026-10-10T00:27:10.86676+08:00","Action":"run","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cli-timeout"}
+{"Time":"2026-10-10T00:27:10.866764+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cli-timeout","Output":"=== RUN   TestM1FixtureCases/cli-timeout\n"}
+{"Time":"2026-10-10T00:27:13.946497+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cli-timeout","Output":"--- PASS: TestM1FixtureCases/cli-timeout (3.08s)\n"}
+{"Time":"2026-10-10T00:27:13.946536+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cli-timeout","Elapsed":3.08}
+{"Time":"2026-10-10T00:27:13.946549+08:00","Action":"run","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cli-timeout-pending"}
+{"Time":"2026-10-10T00:27:13.946581+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cli-timeout-pending","Output":"=== RUN   TestM1FixtureCases/cli-timeout-pending\n"}
+{"Time":"2026-10-10T00:27:17.026615+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cli-timeout-pending","Output":"--- PASS: TestM1FixtureCases/cli-timeout-pending (3.08s)\n"}
+{"Time":"2026-10-10T00:27:17.026637+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/cli-timeout-pending","Elapsed":3.08}
+{"Time":"2026-10-10T00:27:17.026643+08:00","Action":"run","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/approval-timeout"}
+{"Time":"2026-10-10T00:27:17.026646+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/approval-timeout","Output":"=== RUN   TestM1FixtureCases/approval-timeout\n"}
+{"Time":"2026-10-10T00:27:17.475798+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/approval-timeout","Output":"--- PASS: TestM1FixtureCases/approval-timeout (0.45s)\n"}
+{"Time":"2026-10-10T00:27:17.475833+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/approval-timeout","Elapsed":0.45}
+{"Time":"2026-10-10T00:27:17.475839+08:00","Action":"run","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/approval-deadline-before"}
+{"Time":"2026-10-10T00:27:17.475843+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/approval-deadline-before","Output":"=== RUN   TestM1FixtureCases/approval-deadline-before\n"}
+{"Time":"2026-10-10T00:27:17.924797+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/approval-deadline-before","Output":"--- PASS: TestM1FixtureCases/approval-deadline-before (0.45s)\n"}
+{"Time":"2026-10-10T00:27:17.92483+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/approval-deadline-before","Elapsed":0.45}
+{"Time":"2026-10-10T00:27:17.924838+08:00","Action":"run","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/approval-deadline-exact"}
+{"Time":"2026-10-10T00:27:17.924841+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/approval-deadline-exact","Output":"=== RUN   TestM1FixtureCases/approval-deadline-exact\n"}
+{"Time":"2026-10-10T00:27:18.373756+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/approval-deadline-exact","Output":"--- PASS: TestM1FixtureCases/approval-deadline-exact (0.45s)\n"}
+{"Time":"2026-10-10T00:27:18.373779+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/approval-deadline-exact","Elapsed":0.45}
+{"Time":"2026-10-10T00:27:18.373785+08:00","Action":"run","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/restart"}
+{"Time":"2026-10-10T00:27:18.373789+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/restart","Output":"=== RUN   TestM1FixtureCases/restart\n"}
+{"Time":"2026-10-10T00:27:18.664461+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/restart","Output":"--- PASS: TestM1FixtureCases/restart (0.29s)\n"}
+{"Time":"2026-10-10T00:27:18.664506+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases/restart","Elapsed":0.29}
+{"Time":"2026-10-10T00:27:18.666722+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases","Output":"--- PASS: TestM1FixtureCases (8.83s)\n"}
+{"Time":"2026-10-10T00:27:18.666742+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Test":"TestM1FixtureCases","Elapsed":8.83}
+{"Time":"2026-10-10T00:27:18.66675+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Output":"PASS\n"}
+{"Time":"2026-10-10T00:27:18.677664+08:00","Action":"output","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Output":"ok  \tgithub.com/SIMPLYBOYS/agent-payment-authority/cmd/demo\t9.465s\n"}
+{"Time":"2026-10-10T00:27:18.677693+08:00","Action":"pass","Package":"github.com/SIMPLYBOYS/agent-payment-authority/cmd/demo","Elapsed":9.465}

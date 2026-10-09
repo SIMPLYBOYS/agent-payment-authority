@@ -1,0 +1,305 @@
+{
+  "bundle": "m1-fixture-20261009T162703Z-4ddb7a",
+  "verdict": "PASS",
+  "exit_code": 0,
+  "claims": {
+    "V1": "PASS",
+    "V2": "PASS",
+    "V3": "PASS",
+    "V4": "PASS",
+    "V5": "PASS",
+    "V6": "PASS",
+    "V7": "PASS",
+    "R": "PASS"
+  },
+  "not_evaluated": [
+    "credential_verification",
+    "webauthn",
+    "voice_approval",
+    "zk_budget_proof",
+    "signer_key_selection",
+    "cross_consumer_grant_proof",
+    "onchain_settlement"
+  ],
+  "cases": [
+    {
+      "case_id": "ask",
+      "layer": "host_e2e",
+      "verdict": "PASS",
+      "records": 2,
+      "result": "Ask",
+      "reason": "HUMAN_APPROVAL_REQUIRED",
+      "approval_status": "pending"
+    },
+    {
+      "case_id": "deny-budget",
+      "layer": "host_e2e",
+      "verdict": "PASS",
+      "records": 2,
+      "result": "Deny",
+      "reason": "INSUFFICIENT_BUDGET",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "deny-merchant",
+      "layer": "host_e2e",
+      "verdict": "PASS",
+      "records": 2,
+      "result": "Deny",
+      "reason": "MERCHANT_NOT_ALLOWED",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "deny-expired",
+      "layer": "store_integration",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "Deny",
+      "reason": "AUTHORIZATION_EXPIRED",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "deny-missing-config",
+      "layer": "store_integration",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "Deny",
+      "reason": "CONFIG_MISSING",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "deny-unattended",
+      "layer": "host_e2e",
+      "verdict": "PASS",
+      "records": 2,
+      "result": "Deny",
+      "reason": "APPROVER_UNAVAILABLE",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "deny-asset",
+      "layer": "host_e2e",
+      "verdict": "PASS",
+      "records": 2,
+      "result": "Deny",
+      "reason": "ASSET_NOT_ALLOWED",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "allow-unavailable",
+      "layer": "store_integration",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "Allow",
+      "reason": "PAYMENT_CAPABILITY_UNAVAILABLE",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "cancel-pending",
+      "layer": "host_e2e",
+      "verdict": "PASS",
+      "records": 2,
+      "result": "cancelled",
+      "reason": "HOST_CANCELLED",
+      "approval_status": "withdrawn"
+    },
+    {
+      "case_id": "cancel-no-purchase",
+      "layer": "host_e2e",
+      "verdict": "PASS",
+      "records": 2,
+      "result": "cancelled",
+      "reason": "HOST_CANCELLED",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "approval-timeout",
+      "layer": "host_e2e",
+      "verdict": "PASS",
+      "records": 2,
+      "result": "denied",
+      "reason": "APPROVAL_TIMEOUT",
+      "approval_status": "expired"
+    },
+    {
+      "case_id": "approval-deadline-before",
+      "layer": "host_e2e",
+      "verdict": "PASS",
+      "records": 2,
+      "result": "pending",
+      "reason": "HUMAN_APPROVAL_REQUIRED",
+      "approval_status": "pending"
+    },
+    {
+      "case_id": "approval-deadline-exact",
+      "layer": "host_e2e",
+      "verdict": "PASS",
+      "records": 2,
+      "result": "denied",
+      "reason": "APPROVAL_TIMEOUT",
+      "approval_status": "expired"
+    },
+    {
+      "case_id": "cli-timeout",
+      "layer": "host_e2e",
+      "verdict": "PASS",
+      "records": 2,
+      "result": "failed",
+      "reason": "CLI_TIMEOUT",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "cli-timeout-pending",
+      "layer": "host_e2e",
+      "verdict": "PASS",
+      "records": 2,
+      "result": "failed",
+      "reason": "CLI_TIMEOUT",
+      "approval_status": "pending"
+    },
+    {
+      "case_id": "restart",
+      "layer": "host_e2e",
+      "verdict": "PASS",
+      "records": 2,
+      "result": "same-wallet",
+      "reason": "PERSISTED_BINDING",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "retry-same",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "replay",
+      "reason": "SAME_PAYLOAD",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "retry-conflict",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "reject",
+      "reason": "IDEMPOTENCY_CONFLICT",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "retry-new-request-same-order",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "reject",
+      "reason": "IDEMPOTENCY_CONFLICT",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "retry-same-request-id-a-b",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "new",
+      "reason": "NEW_REQUEST",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "consumer-a",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "accept",
+      "reason": "VALID_BINDING",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "consumer-b",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "accept",
+      "reason": "VALID_BINDING",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "cross-consumer",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "reject",
+      "reason": "OWNERSHIP_MISMATCH",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "cross-consumer-wallet",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "reject",
+      "reason": "OWNERSHIP_MISMATCH",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "cross-consumer-payer",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "reject",
+      "reason": "OWNERSHIP_MISMATCH",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "altered-consumer-id",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "reject",
+      "reason": "OWNERSHIP_MISMATCH",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "altered-agent-id",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "reject",
+      "reason": "OWNERSHIP_MISMATCH",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "no-premature-settlement",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "reject",
+      "reason": "M1_PAYMENT_UNAVAILABLE",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "reject-erc7710-quote",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "reject",
+      "reason": "UNSUPPORTED_TRANSFER_METHOD",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "reject-permit2-quote",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "reject",
+      "reason": "UNSUPPORTED_TRANSFER_METHOD",
+      "approval_status": "not_requested"
+    },
+    {
+      "case_id": "reject-case-variant-key",
+      "layer": "contracts_test",
+      "verdict": "PASS",
+      "records": 1,
+      "result": "reject",
+      "reason": "AMBIGUOUS_KEY",
+      "approval_status": "not_requested"
+    }
+  ]
+}

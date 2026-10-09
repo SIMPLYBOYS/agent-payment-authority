@@ -1,0 +1,8 @@
+{
+  "testdata/cli/ask-mainline.json": "sha256:4db70d544d71726d1e0c9fc5e63f7a155c1cccb567e238f36a1e33c0beeace59",
+  "testdata/contracts/cases.json": "sha256:429a523569a7ea28ad85de4fdd7570f7a9ac1a4924e9a51f636beae2c615f2c1",
+  "testdata/contracts/purchase-input.json": "sha256:73cd93f07674eb2cbd97b356f4c690b8301b4b0ce16fc7f53596dbab52568964",
+  "testdata/contracts/registry.json": "sha256:c4d12470754f7a35ef5d140e42458acd76f33bc7d5e5a62671b2495f9f945692",
+  "testdata/demo/registry.json": "sha256:b3ffc0037bf87e092b121c0ae9c5189249a52a3de32bb5c6e1df01bd60f58989",
+  "testdata/policy/m1-demo-profile.json": "sha256:022f2491173785531fa5c4b516f1a3252a86c1dc8ffb375a2f02a62e3768e12c"
+}

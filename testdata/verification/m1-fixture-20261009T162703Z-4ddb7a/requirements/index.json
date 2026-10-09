@@ -1,0 +1,82 @@
+[
+  {
+    "checks": [
+      {
+        "evidence": "browser/browser-ui.out",
+        "test": "refresh + sign-in restores task-a from the Store",
+        "status": "pass"
+      }
+    ],
+    "requirement": "a page refresh restores from the Store"
+  },
+  {
+    "checks": [
+      {
+        "evidence": "tests/requirements-web.tap",
+        "test": "hostile strings stay strings; nothing reads as paid",
+        "status": "pass"
+      },
+      {
+        "evidence": "browser/browser-ui.out",
+        "test": "hostile strings render as text only",
+        "status": "pass"
+      }
+    ],
+    "requirement": "hostile strings are shown as text only"
+  },
+  {
+    "checks": [
+      {
+        "evidence": "browser/browser-ui.out",
+        "test": "nothing says paid or delivered",
+        "status": "pass"
+      },
+      {
+        "evidence": "tests/requirements-go.jsonl",
+        "test": "TestLiveRun",
+        "status": "pass"
+      }
+    ],
+    "requirement": "a model saying it paid shows no success"
+  },
+  {
+    "checks": [
+      {
+        "evidence": "tests/requirements-web.tap",
+        "test": "duplicate events are shown once and animated once",
+        "status": "pass"
+      }
+    ],
+    "requirement": "a resent event is not animated twice"
+  },
+  {
+    "checks": [
+      {
+        "evidence": "tests/requirements-web.tap",
+        "test": "a switch drops every late reply of the old viewer",
+        "status": "pass"
+      },
+      {
+        "evidence": "tests/requirements-go.jsonl",
+        "test": "TestIntegrationAskDenyAndAccess",
+        "status": "pass"
+      }
+    ],
+    "requirement": "switching A/B mixes no data"
+  },
+  {
+    "checks": [
+      {
+        "evidence": "tests/requirements-go.jsonl",
+        "test": "TestCancel*",
+        "status": "pass"
+      },
+      {
+        "evidence": "browser/browser-ui.out",
+        "test": "3.4:*",
+        "status": "pass"
+      }
+    ],
+    "requirement": "cancel and CLI timeout have their own states"
+  }
+]
