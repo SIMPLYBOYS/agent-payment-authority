@@ -1,4 +1,4 @@
-.PHONY: check check-contracts build dev demo-fake demo-integration demo present-live present-fake m1-fixture
+.PHONY: check check-contracts build dev demo-fake demo-integration demo present-live present-fake m1-fixture verify-m1
 
 # Compile, vet and unit-test. Calls no paid model and touches no testnet.
 check:
@@ -79,3 +79,12 @@ present-fake:
 # out the browser checks (they then are missing from the bundle).
 m1-fixture:
 	go run ./cmd/m1-fixture $(M1_FIXTURE_FLAGS)
+
+# M1-E2 (docs/m1-evidence.md section 15): the read-only evidence checker.
+# Reads RUN_DIR and the frozen case list; never runs m1-fixture, a model or
+# the bundle's commands. The JSON report goes to stdout; the checker exits
+# 0 PASS, 1 FAIL, 2 INCONCLUSIVE, 3 not checked, which make reports as its
+# own "Error N" (exit 2): read the report's verdict.
+verify-m1:
+	@test -n "$(RUN_DIR)" || { echo "usage: make verify-m1 RUN_DIR=artifacts/m1/<run-id>" >&2; exit 2; }
+	@go run -buildvcs=true ./cmd/verify-demo --run-dir "$(RUN_DIR)"
