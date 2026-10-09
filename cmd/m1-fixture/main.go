@@ -354,19 +354,29 @@ func assemble(dir string, cases contracts.CaseManifest, outputs map[string][]byt
 		// recorded them, recomputed against the case.
 		integration := func(layer, file, log, test string) need {
 			return need{file: file, log: log, test: test, check: func(raw []byte) (string, []string, error) {
-				var ev struct {
-					Layer   string            `json:"layer"`
-					Verdict string            `json:"verdict"` // the E2E test's own
-					Tasks   []m1evidence.Task `json:"tasks"`   // a Store file's export
-					Store   []m1evidence.Task `json:"store"`   // an E2E file's export
+				// An E2E file keeps the Store export under "store" (its "tasks"
+				// are the API's replies); a Store file under "tasks".
+				var head struct {
+					Layer   string `json:"layer"`
+					Verdict string `json:"verdict"` // the E2E test's own
 				}
-				if err := json.Unmarshal(raw, &ev); err != nil || ev.Layer != layer {
-					return "", nil, fmt.Errorf("not %s evidence", layer)
+				var tasks []m1evidence.Task
+				var err error
+				if err = json.Unmarshal(raw, &head); err == nil && layer == "host_e2e" {
+					var ev struct {
+						Store []m1evidence.Task `json:"store"`
+					}
+					err, tasks = json.Unmarshal(raw, &ev), ev.Store
+				} else if err == nil {
+					var ev struct {
+						Tasks []m1evidence.Task `json:"tasks"`
+					}
+					err, tasks = json.Unmarshal(raw, &ev), ev.Tasks
 				}
-				tasks := ev.Tasks
-				if layer == "host_e2e" {
-					tasks = ev.Store
+				if err != nil || head.Layer != layer {
+					return "", nil, fmt.Errorf("not %s evidence (%v)", layer, err)
 				}
+				ev := head
 				o, problems := checkIntegration(c, cases.Defaults, tasks)
 				if layer == "host_e2e" && ev.Verdict != "PASS" {
 					problems = append(problems, "the E2E test recorded "+ev.Verdict)
