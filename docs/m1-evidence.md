@@ -7,6 +7,11 @@
 > - R2：任何保存或來源查詢失敗，都以結束碼 2 表示證據包不完整，不印完成結論（第 1、8 節）。
 > - 第 11 節是修訂前的交付紀錄，原樣保留；修訂後的交付見第 12 節。
 >
+> **10/10 補正（Codex 限定複核：R2 關閉，R1 兩個局部缺口）**：
+> - R1-1：契約紀錄的實際輸入必須是凍結案例指定的那一組（第 5.4 節）；
+> - R1-2：terms 說 present 的 profile／credential 必須有快照，且快照有效（第 5.4 節）。
+> - 第 12 節保留原樣；本輪交付見第 13 節。
+>
 > **這是產出端，不是 B1-07**。包內的 PASS／FAIL／INCONCLUSIVE 是產生程式自己的判定；`RunManifest.ValidateAgainst` 只檢查索引。獨立核對由 B1-07（`make verify-m1`，M1-E2）負責。
 
 ## 1 用法
@@ -163,7 +168,13 @@ E2E 的路徑是：
 只用證據包與凍結的 `cases.json`。共用 canonical／schema 與契約程式，**不呼叫 `policy.Decide`**。
 
 **整合案例**：
-1. 快照：每份快照原文的 sha256 等於存的快照 hash；registry 能解析；terms 屬於這個 task。
+1. 快照：
+   - 每份快照原文的 sha256 等於存的快照 hash；registry 能解析；terms 屬於這個 task；
+   - 設定狀態，依 Store 自己的復原檢查（`internal/store/verify.go`）：terms 的 `profile_state`／`credential_state` 是 `present` 時，對應快照必須存在；是 `absent` 時必須不存在；其他值不接受；
+   - 存在的 profile 要能嚴格解碼，並通過 `Profile.Validate`；terms 的預算不超過它的 task cap，資產與它相同；
+   - 存在的 credential 要是這個 consumer 的 M1 fixture（consumer 相符、evidence_mode 是 fixture、有 valid_until）；
+   - terms 的資產要在 registry 快照中；
+   - 合法的缺設定只有 terms 明說 absent 的情況（`deny-missing-config` 的 profile）。不另造規則，也不做真實憑證、BBS+、簽章或 ZK 驗證（這些仍是 not_evaluated）。
 2. 綁定：task 列的 consumer、agent、wallet、payer 與 registry 快照中這個 task 的綁定相符。
 3. 請購：
    - 原文解析後重算 intent digest，等於存的 hash；
@@ -181,7 +192,23 @@ E2E 的路徑是：
 6. 預算：terms 快照的 `budget_initial` 減去 task 列的 `budget_remaining`，加總必須是 `"0"`。
 7. 與 expected 逐欄比對：result、reason、approval_status、payment_status、budget_deducted；也不能出現 forbidden 事件。
 
-**契約案例**：用紀錄的輸入重新呼叫契約程式：
+**契約案例**：
+
+先核對**實際輸入就是這個案例的輸入**：
+- 依凍結案例的 operation 與 parameters（取自 `cases.json`，不取紀錄自己填的），對照可信 fixture（`testdata/contracts/purchase-input.json`、`registry.json`），逐欄比較；
+- 只有案例指定的欄位可以不同，而且要是指定的值；其他欄位必須與 fixture 相同。各類案例的對照：
+
+| operation | 核對 |
+|---|---|
+| `binding` | session 是 parameters 指定的 A 或 B（registry 中 `task-a`／`task-b` 的 consumer、agent、task）；purchase 是 fixture，指定為 B 時換成 B 的 consumer、agent、wallet、task、payer 與另一個 purchase_order_id；mutation 指定的那一欄是 B 的值；紀錄的 registry 等於可信 registry |
+| `compare-retry` | existing 等於 fixture；incoming 依 mutation：`none` 完全相同；`nonce` 只有 nonce 不同；`request_id` 只有 request_id 不同；`other_consumer` 只有 B 的身分欄位不同，request_id 相同 |
+| `validate-decision` | decision 綁定 fixture 的 intent hash，payment_status 是指定值；把它改回 `unavailable` 後其餘部分有效，表示指定欄位是唯一的缺陷 |
+| `validate-purchase` | 只有 quote 的指定變體不同（`extra.assetTransferMethod` 是 erc7710 或 permit2；或多了大小寫變體鍵 `payto`），requirement digest 隨 quote 變（能計算時等於 quote 的 digest，不能計算時維持 fixture 的） |
+
+- 缺少核對所需的資料（session、registry、purchase、decision，或可信 fixture 讀不到），不會 PASS：產生程式在 fixture 讀不到時判 INCONCLUSIVE，紀錄缺資料時判 FAIL；
+- 不以 expected 產生替代輸入來驗證。
+
+再用紀錄的輸入重新呼叫契約程式：
 - 結果要等於紀錄的 observed，也要等於 expected；
 - 被拒絕時，拒絕碼要等於 expected 的 reason；
 - 被接受時的 reason（`VALID_BINDING`、`SAME_PAYLOAD`、`NEW_REQUEST`）是案例清單的命名，沒有可觀測的 code。
@@ -260,6 +287,12 @@ E2E 的路徑是：
   - 完整重算並重新串鏈的偽造請購（只剩 intent 與 quote 不符）；
   - 最後一個事件的時間改動；
   - 另外，同一份 Ask 紀錄拿去對照 `deny-budget` 的 expected 必須不符，從未啟動的 task 也匯出不了。
+- 10/10 補正：
+  - `TestCheckContractBindsInputsToTheCase`：15 個契約案例各以依 fixture 建出的紀錄通過自己的案例；每一份紀錄改標成其他 14 案中的任一案（case ID、parameters、observed 都改成那一案的），共 210 組，全部被拒；
+  - `TestCheckContractReviewCounterexamples`：複核提出的兩個反例（A 的輸入標成 `consumer-b`；nonce 衝突標成 `retry-new-request-same-order`），先確認契約程式對它們給出被標案例的結果與 code，再確認被拒；
+  - `TestCheckContract` 另加：registry 改動、缺 session、purchase 的其他欄位改動、真實紀錄對照不同的 expected 結果或 code、讀不到可信 fixture；
+  - `internal/store`：Ask 缺 profile、缺 credential、兩者都缺；terms 改成 absent 並重算快照 digest；無效的 profile 快照、別的 consumer 的 credential（都重算 digest），全部被拒。`TestM1EvidenceAcceptsADeclaredMissingConfig` 確認 `deny-missing-config` 的 profile 確實宣告為 absent，且被接受；
+  - `cmd/m1-fixture`：`TestUnreadableFixturesLeaveContractsInconclusive`。
 - `internal/m1evidence` 的 `TestCheckContract`：
   - 契約紀錄的正反向：紀錄的結果與輸入不符、把 purchase 改成 A 自己的、缺少 purchase 或 registry、別的案例的紀錄、參數不符、不是契約層的紀錄；
   - `TestCheckIntegrationNeedsItsTasks`：task 數不符、沒有快照。
@@ -294,7 +327,8 @@ E2E 的路徑是：
 
 **拿掉關鍵檢查的反向驗證**（`python3 scripts/verify/m1-e1-reverse.py`，從 repo 根目錄執行）：
 - 一次拿掉一項檢查，跑涵蓋它的測試，必須以**斷言失敗**抓到；編譯失敗不算。跑完把檔案還原。
-- 共 17 項：
+- 10/10 起共 22 項：原 17 項，加上契約拒絕碼與 expected 比對、實際輸入與案例綁定、present 必有快照、profile 快照有效、credential 屬於該 consumer。
+- 10/9 的 17 項：
   - R2 的 5 項：結束標記錯誤、證據檔保存錯誤、來源查詢錯誤、`writeEnd` 吞掉錯誤、掃描的讀檔錯誤；
   - 產生程式的 2 項：只看 log 判定、缺紀錄不判 INCONCLUSIVE；
   - 重算的 10 項：快照 digest、task 列與 registry 綁定、存的 intent digest、存的 event hash、`ValidateEvent`、`ValidateEventOrder`、預算、與 expected 比對、契約重跑與紀錄比對、契約結果與 expected 比對。
@@ -310,6 +344,7 @@ E2E 的路徑是：
 - `dirty_patch_digest` 不含 untracked 檔。
 - 契約案例被接受時的 reason，是案例清單的命名，沒有可觀測的 code（第 5.4 節）。
 - forbidden 事件的檢查無法以合法事件反向驗證（第 5.5 節）。
+- 匯出若被**整份一致地**重造（快照、terms、請購、事件都重算 hash 並重新串鏈，且彼此一致），單靠證據包本身無法分辨。這需要外部的錨點（例如 B1-07 對照的另一份紀錄），和 `ValidateEventOrder` 註明的限制相同。例如把 terms 的 profile 改為 absent、同時刪掉 profile 快照並重算 terms digest：設定狀態彼此一致，但 Ask 的決策與缺設定的語意矛盾；檢查這點需要 Policy 的語意，本重算刻意不呼叫 Policy。
 - 請購本身的驗證在它的 `PURCHASE_PROPOSED` 事件做，不另外重複一次。原本重複的那次呼叫，在反向驗證時證實是多餘的，已刪除；改以「完整重算的偽造請購」測試涵蓋。
 - `cancel-no-purchase` 曾在一次完整 `-race` 執行中，host 停止時 HTTP shutdown 超過 5 秒（`context deadline exceeded`）。
   - 隔離重跑 5 次沒有重現。
@@ -398,5 +433,47 @@ E2E 的路徑是：
 - 真實 CLI、版本查詢、登入、C0′、真實請購、`make present-live`；
 - 完整斷網容器、311 項突變重跑、重建 Unity；
 - B1-07（M1-E2）。
+
+任務狀態未改，B1-04／B1-06 維持 InProgress。
+
+## 13 R1-1／R1-2 補正交付紀錄（10/10，Claude Code；待 Codex 限定複核）
+
+**開工基準**：`ee2a574`，工作區只有未追蹤的 `demo`，沒有既有的相關修正。R2 已在複核中關閉，本輪沒有改動它的處理，`TestRunSaving` 維持通過。
+
+**Commit**：
+- `0d13255`：程式（`internal/m1evidence` 的輸入綁定與設定快照檢查；產生程式讀可信 fixture）；
+- `0853b44`：測試（契約輸入矩陣與兩個反例、設定快照竄改、合法缺設定、fixture 讀不到；反向驗證增為 22 項）；
+- 文件：本節與第 5.4、9、10 節。
+
+**新證據包**：`artifacts/m1/m1-fixture-20261009T162703Z-4ddb7a/`（run ID 的時間是 UTC）
+- 在 `0853b44` 產生：tracked 乾淨，dirty patch digest 是空 diff；untracked 只有 repo 根目錄的 `demo`，不在 digest 內，未動。
+- 7 個命令的 exit code 全部是 0；`make m1-fixture` 結束碼 0。
+- 31 PASS；七個 capability 都在 not_evaluated；3.2 全部 pass；結束標記 complete。
+- 79 個證據檔；層級 13／3／15 不變。
+- 另以 Python 重算 79 個 digest 與結束標記的 manifest digest，全部相符。
+- `TestBundle` 在唯讀副本上通過：31 案以新的檢查重算，與包內判定一致。仍是產生端判定，不是 B1-07。
+- 之前的證據包（第 11、12 節所列，包含 `…154053Z-2e985f` 與 `…153139Z-d5d34a`）都保持原樣，沒有以新判定改寫。
+
+**定向回歸**（fake CLI）：
+- `go vet ./...` 通過；
+- 以 `-race` 跑：`internal/m1evidence`、`cmd/m1-fixture`（含 `TestRunSaving`、`TestBundle` 未設定時略過）、`internal/store` 的 `TestM1Evidence*` 與 `TestAcceptedIntegrationCases`、`cmd/demo` 的 `TestM1FixtureCases`，都通過；
+- `internal/contracts`、`internal/store`、`internal/policy` 全套通過。
+
+**反例與反向驗證的結果**：
+
+| 檢查 | 結果 |
+|---|---|
+| 複核的兩個反例（`TestCheckContractReviewCounterexamples`） | 先確認契約程式對它們給出被標案例的結果與 code，接著都被拒 |
+| 15 個契約案例 × 其他 14 案的改標 | 210 組全部被拒；15 案各以自己的紀錄通過 |
+| Ask 缺 profile／缺 credential／兩者都缺；terms 改 absent（重算 digest）；無效 profile、別人的 credential | 全部被拒；`deny-missing-config` 被接受 |
+| `python3 scripts/verify/m1-e1-reverse.py` | 22／22 以斷言失敗抓到，結束碼 0 |
+
+- 反向驗證第一次跑時，「契約結果與 expected 比對」沒被抓到：新的輸入綁定先擋下了原本只靠它擋的竄改。改為以「真實紀錄對照不同的 expected 結果或 code」單獨涵蓋，另加「拒絕碼與 expected 比對」一項，重跑 22／22。
+- **沒有做**：直接拿舊包 `…154053Z-2e985f` 的 `contracts/consumer-a.json`、`retry-conflict.json` 改標重跑。暫時在 repo 內建立探測檔再刪除的做法被權限擋下，所以沒有執行。兩個反例改由單元測試重現，所用的紀錄與契約測試的建法相同。
+
+**沒有執行**：
+- 真實 CLI、版本查詢、登入、C0′、真實請購；
+- 完整斷網容器、311 項突變、Unity 重建；
+- E2～E4。
 
 任務狀態未改，B1-04／B1-06 維持 InProgress。
