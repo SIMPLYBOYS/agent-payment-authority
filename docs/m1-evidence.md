@@ -356,3 +356,47 @@ E2E 的路徑是：
 - B1-07（M1-E2）。
 
 任務狀態未改，B1-04／B1-06 維持 InProgress。
+
+## 12 R1／R2 修訂交付紀錄（10/9，Claude Code；待 Codex 限定複核）
+
+**Commit**（依時間順序）：
+
+| commit | 內容 |
+|---|---|
+| `fd818a9` | 程式：`internal/m1evidence`，產生程式依結構化紀錄判定，保存與來源查詢錯誤處理 |
+| `3881a0a` | 測試：Store、E2E、契約的紀錄與重算，竄改測試，保存失敗測試，`scripts/verify/m1-e1-reverse.py` |
+| `3a8b9d2` | 測試：`TestBundle` |
+| `c705bad` | 程式：修正 E2E 紀錄的解析（見下表第 1 列） |
+| `ebf0fac` | 測試：合成的 E2E 紀錄帶有 API 形狀的 `tasks` |
+| `fb20b7a` | 文件：本文件第 1～10 節修訂、`docs/m1-closeout-gaps.md` 第 4 節的現況 |
+
+**這次的 `make m1-fixture` 執行**（目錄都保留，只讀，不刪改；第 11 節的舊包也不動）：
+
+| run 目錄 | 基準 | 結果 |
+|---|---|---|
+| `…153139Z-d5d34a` | `3881a0a`，tracked 乾淨 | 證據包完整，**18 PASS、13 INCONCLUSIVE**；程式結束碼 1（make 顯示成它自己的 2）。原因：產生程式以 Store 匯出的形狀讀 E2E 紀錄的 `tasks`（那是 API 回覆），解析失敗，13 個 E2E 案例因此判為 INCONCLUSIVE，沒有誤判成 PASS。`TestBundle` 在唯讀副本上指出同樣這 13 案：紀錄重算沒有問題，但包內判定不同。已在 `c705bad` 修正，`ebf0fac` 加回歸；拿掉修正時，回歸以斷言失敗抓到 |
+| `…154053Z-2e985f` | `fb20b7a`，tracked 乾淨（dirty patch digest 是空 diff；untracked 只有 repo 根目錄的 `demo`，不在 digest 內，未動） | **本次交付的證據包** |
+
+**交付包** `artifacts/m1/m1-fixture-20261009T154053Z-2e985f/`：
+- 7 個命令的 exit code 全部是 0；`make m1-fixture` 結束碼 0。
+- 31 PASS、0 FAIL、0 INCONCLUSIVE；七個 capability 都在 not_evaluated；3.2 的檢查全部 pass；結束標記是 complete。
+- 79 個證據檔，其中結構化紀錄：e2e 13、store 16、contracts 15。
+- 層級：
+  - 13 案是 host_e2e＋store_integration（各為紀錄＋log）；
+  - 3 案是 store_integration＋policy_test；
+  - 15 案是 contracts_test（紀錄＋log）。
+- 另以 Python 重算 79 個證據檔的 digest 與結束標記的 manifest digest，全部相符。
+- `APA_M1_BUNDLE=<唯讀副本> go test -run '^TestBundle$' ./internal/m1evidence/`：通過。只讀證據包與凍結的 `cases.json`，重算 31 案，與包內判定一致。
+
+**另外執行的檢查**：
+- `go vet ./...`、`go test -count=1 ./...`：全部通過；
+- 以 `-race` 跑：`TestM1FixtureCases`（13 案）、`TestAcceptedIntegrationCases`、`TestM1EvidenceRefusesAlteredExports`、`internal/m1evidence`、`cmd/m1-fixture`，都通過；
+- `python3 scripts/verify/m1-e1-reverse.py`：17／17 以斷言失敗抓到。在 `3881a0a` 與 `ebf0fac` 各跑一次；
+- 第一次跑反向驗證時，有一項沒被抓到：拿掉 `verify` 裡的 `ValidatePurchase` 呼叫。查證後確認是重複檢查（每筆請購都必須恰好被提出一次，並在 `ValidateEvent` 驗證），已刪除，改以「完整重算的偽造請購」與「存的 intent digest 改動」兩項竄改測試涵蓋。另有 4 項因反向驗證腳本本身的變數未使用而編譯失敗，修正腳本後重跑。
+
+**沒有執行**：
+- 真實 CLI、版本查詢、登入、C0′、真實請購、`make present-live`；
+- 完整斷網容器、311 項突變重跑、重建 Unity；
+- B1-07（M1-E2）。
+
+任務狀態未改，B1-04／B1-06 維持 InProgress。
