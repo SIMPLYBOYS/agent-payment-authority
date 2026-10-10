@@ -94,7 +94,7 @@ MUTATIONS = [
     ("R1 the stop outlasts the group leader", go("./internal/progress/", "^TestGroupMixed$", ("TestGroupMixed", r"the member is still running after Done")),
      [(G, "if !g.stopped.Load() {\n\t\treturn nil\n\t}\n\t<-g.ended", "if true {\n\t\treturn nil\n\t}\n\t<-g.ended")]),
     # R2 (closed 10/11; its items kept, each on its own test)
-    ("R2 a normal end is completed", go("./cmd/m1-live/", "^TestLiveAsk$", ("TestLiveAsk", r"run record .*Termination:outer_bound")),
+    ("R2 a normal end is completed", go("./cmd/m1-live/", "^TestLiveAsk$", ("TestLiveAsk", r'exit 1, end "complete"')),  # the producer judges the Ask failed
      [(P, 'case group.Stopped():\n\t\ttermination = "outer_bound"', 'case group.Stopped() || true:\n\t\ttermination = "outer_bound"')]),
     ("R2 checker termination and producer error", go("./internal/verification/", "^TestLiveRecordsThatContradict$/^(only_the_producer_error_says_the_wrapper_could_not_start|recorded_as_interrupted)$",
                                                      ("TestLiveRecordsThatContradict/only_the_producer_error_says_the_wrapper_could_not_start", r"no V4 FAIL finding"),
@@ -114,12 +114,12 @@ MUTATIONS = [
     ("R3 a failed summary write is reported", go("./cmd/m1-check/", "^TestSummaryNotDelivered$/^error$", ("TestSummaryNotDelivered/error", r"exit 0, 1 summaries")),
      [(C, "if n, err := stdout.Write(raw); err != nil || n != len(raw) {", "if n, err := stdout.Write(raw); false && (err != nil || n != len(raw)) {")]),
     ("R3 a short summary write is reported", go("./cmd/m1-check/", "^TestSummaryNotDelivered$/^short_write$", ("TestSummaryNotDelivered/short_write", r"exit 0, 1 summaries")),
-     [(C, "if n, err := stdout.Write(raw); err != nil || n != len(raw) {", "if n, err := stdout.Write(raw); err != nil {")]),
+     [(C, "if n, err := stdout.Write(raw); err != nil || n != len(raw) {", "if n, err := stdout.Write(raw); err != nil || n < 0 {")]),
     # R4: only the expected assertion counts
     ("R4 a panic is not caught", py("scripts/verify/m1_e3_reverse_test.py", r"a timeout panic counted as caught"),
      [(S, '\n    if "panic: " in text:', "\n    if False:")]),  # the newline and indent: the code, not this table
     ("R4 the expected assertion is required", py("scripts/verify/m1_e3_reverse_test.py", r"a failure without the expected assertion counted as caught"),
-     [(S, "\n        if not any(rx.search(line) for line in output[test]):", "\n        if False:")]),
+     [(S, "\n        if hit is None:", "\n        if False:")]),
 ]
 
 ITEM_TIMEOUT = 300  # seconds for one run of one item's test (go test gets -timeout 240s)
@@ -187,11 +187,10 @@ def classify(t, rc, text, timed_out=False):
         if test not in failed:
             return False, f"the expected test {test} did not fail"
         rx = re.compile(regex)
-        output.setdefault(test, [])
-        if not any(rx.search(line) for line in output[test]):
+        hit = next((line for line in output.get(test, []) if rx.search(line)), None)
+        if hit is None:
             return False, f"{test} failed without the expected assertion /{regex}/"
-        hit = next(l for l in output[test] if rx.search(l))
-        reasons.append(f"{test}: {hit.strip()[:120]}")
+        reasons.append(f"{test}: {(hit or '').strip()[:120]}")
     return True, "; ".join(reasons)
 
 
