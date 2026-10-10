@@ -16,6 +16,8 @@
 >
 > **E2（10/10）**：唯讀檢查器 `make verify-m1 RUN_DIR=...` 的 fixture 子範圍，於程式 `48a43bc`、測試 `973a58d` **通過 Codex 限定技術複核**（R1～R3 關閉，第 15.7 節）。B1-07 整體仍是 InProgress：live 包（E3）尚未支援，E3 待另行派工。
 >
+> **10/10 Aaron 決定**：M1 live 證據接受開發展示 plugin 例外，條件是 `gate_mode=dev_demo_plugins` 照實記錄，並明列「嚴格模式未驗證」與剩餘風險（`docs/m1-closeout-gaps.md` 第 2 節第 3 項）。E3 時，檢查器要依這個條件明確核對 live 包；不能只憑標籤就接受，也不能把例外當成嚴格模式。下方各節寫著「仍待 Aaron 決定」的段落是當時的紀錄，原樣保留。
+>
 > **這是產出端，不是 B1-07**。包內的 PASS／FAIL／INCONCLUSIVE 是產生程式自己的判定；`RunManifest.ValidateAgainst` 只檢查索引。獨立核對由 B1-07（`make verify-m1`，M1-E2）負責。
 
 ## 1 用法

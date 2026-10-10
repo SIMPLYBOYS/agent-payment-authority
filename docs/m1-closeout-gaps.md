@@ -40,6 +40,11 @@
 1. 逐項核對任務卡的 8 個勾選項並附證據位置；大多已有 review 紀錄，交 Codex 判定能否勾選。
 2. 以 `make m1-live-cli`（下面的 B1-06 第 2 項）跑出一次有上限的真實請購證據包，並經 `make verify-m1` 核對。
 3. **需要 Aaron 決定**：M1 的 live 證據是否接受「開發展示 plugin 例外」下的結果。嚴格零 plugin 模式在 Aaron 本機至今沒有通過（決策稿 9.1）；這是範圍決定，不是工程缺陷。Codex 建議接受它作為 M1 開發展示的 live 證據條件，保留 `gate_mode=dev_demo_plugins`、剩餘風險與「嚴格模式未驗證」的註記，不再把清空 plugins 拉回主線。**這仍需要 Aaron 明確決定，Codex 沒有代為核准。**
+   - **10/10 Aaron 決定：接受。** M1 的 live 證據可以是開發展示 plugin 例外（`gate_mode=dev_demo_plugins`）下的結果，條件如下：
+     - live 包必須記錄 `gate_mode=dev_demo_plugins`；
+     - 明列「嚴格零 plugin 模式未驗證」與剩餘風險；
+     - 不再把清空 plugins 拉回主線。
+   - 這是 M1 範圍的決定。它不改 Gate、認證清單、版本釘選或 plugin 設定，也不代表已核准執行 E3：真實 CLI 的執行仍需另行派工，並由 Aaron 另行核准。
 
 **B1-06**
 1. `make m1-fixture`：用 fake CLI 跑凍結的案例集，產生 `artifacts/m1/<run-id>/`，內容包含：
@@ -123,7 +128,7 @@
   - 每個 claim 的證據都標明執行層（3.1）。
 - **live 單筆 Ask 包**（`make m1-live-cli`）：
   - 只有 `ask` 一個 case claim 必須有結果，其餘 30 個列為 not_evaluated；
-  - 必須含 `gate_mode`（M1 預期是 `dev_demo_plugins`，要明列「嚴格模式未驗證」與剩餘風險）、CLI 版本、模型、usage 為自報或 unknown；
+  - 必須含 `gate_mode`（M1 預期是 `dev_demo_plugins`，10/10 經 Aaron 決定接受；要明列「嚴格模式未驗證」與剩餘風險）、CLI 版本、模型、usage 為自報或 unknown；
   - **不得稱為全案例通過**。
 - 這兩個包分別以 `make verify-m1` 驗證；fixture 包通過不能掩蓋 live 包缺少證據。
 
