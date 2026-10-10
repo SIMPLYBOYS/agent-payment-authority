@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -88,6 +91,7 @@ func setup(t *testing.T, version string, steps []map[string]any) env {
 	script := "#!/bin/sh\n" +
 		"if [ \"$1\" = \"--version\" ]; then echo version >> " + e.count + "; echo \"" + version + "\"; exit 0; fi\n" +
 		"echo run >> " + e.count + "\n" +
+		"echo $$ > " + e.count + ".pid\n" +
 		"APA_FAKE_CLI_SCENARIO=" + scen + " exec " + fakeCLI(t) + " \"$@\"\n"
 	os.WriteFile(e.cli, []byte(script), 0o700)
 	return e
@@ -107,7 +111,7 @@ func (e env) run(t *testing.T, environ []string, args ...string) (int, string, s
 	t.Helper()
 	var so, se bytes.Buffer
 	base := []string{"--repo", e.repo, "--out", e.out, "--work", e.work}
-	code := run(append(base, args...), environ, &so, &se)
+	code := run(context.Background(), append(base, args...), environ, &so, &se)
 	return code, so.String(), se.String()
 }
 
@@ -138,6 +142,23 @@ func readJSON(t *testing.T, path string, dst any) {
 	if err := json.Unmarshal(b, dst); err != nil {
 		t.Fatal(err)
 	}
+}
+
+type runRec struct {
+	Version       string         `json:"version"`
+	Termination   string         `json:"termination"`
+	ProducerError string         `json:"producer_error"`
+	ExitCode      int            `json:"apa_buyer_exit_code"`
+	GateMode      string         `json:"gate_mode"`
+	GateResult    string         `json:"gate_result"`
+	Usage         any            `json:"usage"`
+	Snapshot      map[string]any `json:"snapshot"`
+}
+
+func runRecord(t *testing.T, dir string) runRec {
+	var r runRec
+	readJSON(t, filepath.Join(dir, "live", "run.json"), &r)
+	return r
 }
 
 func manifest(t *testing.T, dir string) contracts.RunManifest {
@@ -199,15 +220,19 @@ func TestLiveAsk(t *testing.T) {
 			t.Errorf("%s: %s %s", ev.Path, ev.EvidenceMode, ev.Source)
 		}
 	}
-	var r struct {
-		GateMode   string         `json:"gate_mode"`
-		GateResult string         `json:"gate_result"`
-		Usage      any            `json:"usage"`
-		Snapshot   map[string]any `json:"snapshot"`
-	}
-	readJSON(t, filepath.Join(dir, "live", "run.json"), &r)
-	if r.GateMode != "dev_demo_plugins" || r.GateResult != "passed" || r.Usage != "unknown" || r.Snapshot["last_sequence"] != float64(3) {
+	r := runRecord(t, dir)
+	if r.GateMode != "dev_demo_plugins" || r.GateResult != "passed" || r.Usage != "unknown" || r.Snapshot["last_sequence"] != float64(3) ||
+		r.Version != "apa.m1.live.v2" || r.Termination != "completed" || r.ProducerError != "" {
 		t.Fatalf("run record %+v", r)
+	}
+	// The stages, in order, on stderr.
+	last := -1
+	for i := 1; i <= 6; i++ {
+		at := strings.Index(se, fmt.Sprintf("m1-live: [%d/6] ", i))
+		if at < last {
+			t.Fatalf("stage %d missing or out of order:\n%s", i, se)
+		}
+		last = at
 	}
 	noMarker(t, dir, so, se)
 	work, _ := os.ReadDir(e.work)
@@ -295,13 +320,14 @@ func TestFailedRuns(t *testing.T) {
 		starts  string
 		verdict string
 		trace   bool
+		term    string
 	}{
-		"another CLI version":                 {"2.1.999 (Claude Code)", mainLine(), nil, "version", "INCONCLUSIVE", false},
-		"the strict gate refuses the plugins": {approved, strictRefused, []string{"--gate", "strict"}, "version,run", "INCONCLUSIVE", true},
+		"another CLI version":                 {"2.1.999 (Claude Code)", mainLine(), nil, "version", "INCONCLUSIVE", false, "wrapper_exit_nonzero"},
+		"the strict gate refuses the plugins": {approved, strictRefused, []string{"--gate", "strict"}, "version,run", "INCONCLUSIVE", true, "wrapper_exit_nonzero"},
 		"no purchase requested": {approved, []map[string]any{{"do": "init", "init": liveInit}, {"do": "tool", "tool": "list_products"}, {"do": "result", "text": "no"}},
-			nil, "version,run", "FAIL", true},
+			nil, "version,run", "FAIL", true, "completed"},
 		"stopped by the outer bound": {approved, []map[string]any{{"do": "init", "init": liveInit}, {"do": "tool", "tool": "list_products"}, {"do": "hang"}},
-			[]string{"--wait", "4s"}, "version,run", "FAIL", true},
+			[]string{"--wait", "4s"}, "version,run", "FAIL", true, "outer_bound"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := setup(t, tc.version, tc.steps)
@@ -322,6 +348,9 @@ func TestFailedRuns(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(dir, "live", "trace.jsonl")); (err == nil) != tc.trace {
 				t.Fatalf("trace kept: %v", err == nil)
+			}
+			if r := runRecord(t, dir); r.Termination != tc.term || (r.ProducerError == "") != (tc.term == "completed" || tc.term == "wrapper_exit_nonzero") {
+				t.Fatalf("termination %q, producer error %q; want %s", r.Termination, r.ProducerError, tc.term)
 			}
 			noMarker(t, dir, so, se)
 		})
@@ -361,5 +390,165 @@ func TestScan(t *testing.T) {
 		if leaks := scan(dir); len(leaks) != 1 || leaks[0] != "x.json" {
 			t.Fatalf("%q: %v", s, leaks)
 		}
+	}
+}
+
+// The wrapper that cannot be started: recorded as such, no CLI start, no
+// success.
+func TestStartFailure(t *testing.T) {
+	e := setup(t, approved, mainLine())
+	defer func(f func(string)) { beforeRun = f }(beforeRun)
+	beforeRun = func(bin string) { os.Remove(bin) }
+	code, so, se := e.run(t, live(e), "--live", "--cli", e.cli, "--base", "HEAD", "--gate", "dev_demo_plugins")
+	dir := e.bundleDir(t)
+	if code != exitFailures || endState(t, dir) != "complete" || len(e.starts()) != 0 {
+		t.Fatalf("exit %d, end %q, starts %v\n%s\n%s", code, endState(t, dir), e.starts(), so, se)
+	}
+	if r := runRecord(t, dir); r.Termination != "start_failed" || r.ProducerError != "apa-buyer could not be started" || r.ExitCode != -1 {
+		t.Fatalf("%+v", r)
+	}
+	if m := manifest(t, dir); m.Results[0].Verdict == "PASS" {
+		t.Fatal("a run that never started is a PASS")
+	}
+}
+
+// ready waits until the one run has started: the stand-in CLI has been
+// started for the run and the Store exists (the task started).
+func ready(t *testing.T, e env) (cliPID int) {
+	t.Helper()
+	for end := time.Now().Add(60 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+		dbs, _ := filepath.Glob(filepath.Join(e.work, "*", "db", "live.db"))
+		pid, _ := os.ReadFile(e.count + ".pid")
+		if len(dbs) == 1 && strings.Contains(strings.Join(e.starts(), ","), "run") && len(bytes.TrimSpace(pid)) > 0 {
+			fmt.Sscan(string(pid), &cliPID)
+			return cliPID
+		}
+	}
+	t.Fatal("the run did not start")
+	return 0
+}
+
+// state is a process's state: "running", "zombie" or "gone" (reaped).
+func state(pid int) string {
+	out, _ := exec.Command("ps", "-o", "stat=", "-p", fmt.Sprint(pid)).Output()
+	switch s := strings.TrimSpace(string(out)); {
+	case s == "":
+		return "gone"
+	case strings.HasPrefix(s, "Z"):
+		return "zombie"
+	}
+	return "running"
+}
+
+func parent(pid int) int {
+	out, _ := exec.Command("ps", "-o", "ppid=", "-p", fmt.Sprint(pid)).Output()
+	var p int
+	fmt.Sscan(strings.TrimSpace(string(out)), &p)
+	return p
+}
+
+var hang = []map[string]any{{"do": "init", "init": liveInit}, {"do": "tool", "tool": "list_products"}, {"do": "hang"}}
+
+// An interruption (the run's context ending, in process) stops the run:
+// recorded as interrupted, no success, one run, the wrapper and the CLI
+// reaped.
+func TestInterruptInProcess(t *testing.T) {
+	e := setup(t, approved, hang)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	var so, se bytes.Buffer
+	go func() {
+		done <- run(ctx, []string{"--repo", e.repo, "--out", e.out, "--work", e.work, "--live", "--cli", e.cli, "--base", "HEAD", "--gate", "dev_demo_plugins"}, live(e), &so, &se)
+	}()
+	cli := ready(t, e)
+	wrapper := parent(cli)
+	cancel()
+	var code int
+	select {
+	case code = <-done:
+	case <-time.After(90 * time.Second):
+		t.Fatal("the producer did not end after the interruption")
+	}
+	dir := e.bundleDir(t)
+	if code != exitFailures || endState(t, dir) != "complete" || strings.Join(e.starts(), ",") != "version,run" {
+		t.Fatalf("exit %d, end %q, starts %v\n%s", code, endState(t, dir), e.starts(), se.String())
+	}
+	if r := runRecord(t, dir); r.Termination != "interrupted" || !strings.HasPrefix(r.ProducerError, "interrupted") {
+		t.Fatalf("%+v", r)
+	}
+	for _, pid := range []int{cli, wrapper} {
+		if s := state(pid); s != "gone" {
+			t.Fatalf("process %d is %s after the producer ended", pid, s)
+		}
+	}
+}
+
+// Real signals to the producer process: the wrapper and the CLI it
+// started end and are reaped; a second signal during the cleanup does not
+// cut it short; the bundle records the interruption, not a success.
+func TestSignals(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "m1-live")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	for name, sigs := range map[string][]syscall.Signal{
+		"SIGINT":  {syscall.SIGINT},
+		"SIGTERM": {syscall.SIGTERM},
+		"SIGINT, then SIGTERM during the cleanup": {syscall.SIGINT, syscall.SIGTERM},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := setup(t, approved, hang)
+			c := exec.Command(bin, "--repo", e.repo, "--out", e.out, "--work", e.work, "--live", "--cli", e.cli, "--base", "HEAD", "--gate", "dev_demo_plugins")
+			c.Env = live(e)
+			var so, se bytes.Buffer
+			c.Stdout, c.Stderr = &so, &se
+			if err := c.Start(); err != nil {
+				t.Fatal(err)
+			}
+			cli := ready(t, e)
+			wrapper := parent(cli)
+			for i, s := range sigs {
+				if i > 0 {
+					time.Sleep(100 * time.Millisecond)
+				}
+				c.Process.Signal(s)
+			}
+			waited := make(chan error, 1)
+			go func() { waited <- c.Wait() }()
+			select {
+			case <-waited:
+			case <-time.After(90 * time.Second):
+				c.Process.Kill()
+				t.Fatal("the producer did not end after the signal")
+			}
+			code := c.ProcessState.ExitCode()
+			dir := e.bundleDir(t)
+			if code != exitFailures || endState(t, dir) != "complete" || strings.Join(e.starts(), ",") != "version,run" {
+				t.Fatalf("exit %d, end %q, starts %v\n%s", code, endState(t, dir), e.starts(), se.String())
+			}
+			if r := runRecord(t, dir); r.Termination != "interrupted" {
+				t.Fatalf("termination %q", r.Termination)
+			}
+			if len(sigs) > 1 && !strings.Contains(se.String(), "already stopping") {
+				t.Fatalf("the second signal was not reported:\n%s", se.String())
+			}
+			for _, pid := range []int{cli, wrapper} {
+				if s := state(pid); s != "gone" {
+					t.Fatalf("process %d is %s after the producer ended", pid, s)
+				}
+			}
+			noMarker(t, dir, so.String(), se.String())
+		})
+	}
+}
+
+// A quiet stage reports that it is still waiting, and stops reporting when
+// it ends.
+func TestHeartbeats(t *testing.T) {
+	e := setup(t, approved, hang)
+	_, _, se := e.run(t, live(e), "--live", "--cli", e.cli, "--base", "HEAD", "--gate", "dev_demo_plugins", "--wait", "2s", "--heartbeat", "300ms")
+	beat := strings.LastIndex(se, "m1-live: ... apa-buyer: still waiting")
+	if beat < 0 || beat > strings.Index(se, "m1-live: [5/6]") || beat < strings.Index(se, "m1-live: [4/6]") {
+		t.Fatalf("no heartbeat during the wrapper run, or one after it:\n%s", se)
 	}
 }

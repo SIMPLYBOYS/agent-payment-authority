@@ -1,7 +1,7 @@
 {
   "version": "apa.m1.v2",
-  "run_id": "m1-live-20261010T041827Z-50f565",
-  "code_commit": "f0adfb318f7a0aee2b501f3d2e65ce141865c860",
+  "run_id": "m1-live-20261010T151404Z-9f8031",
+  "code_commit": "0cb0fa434066fe681b27e947c389a1d29dcb9ba9",
   "dirty_patch_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "config_digest": "sha256:73ad59db646473bd2c0c70d12f5d4f1bdcc3362e77976d14ed5ff8e5b804cc56",
   "case_manifest_digest": "sha256:d8b740748cdb7fcf7e88ff877b508b8459c6046675d2aef19246dc1124b8d51d",
@@ -14,7 +14,7 @@
   },
   "commands": [
     {
-      "command": "apa-buyer run --live --cli /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3try/claude --dev-demo-plugins --task task-a --registry /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3try/golden-work/m1-live-20261010T041827Z-50f565/build/src/testdata/contracts/registry.json --profile /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3try/golden-work/m1-live-20261010T041827Z-50f565/build/src/testdata/policy/m1-demo-profile.json --trace-dir /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3try/golden-work/m1-live-20261010T041827Z-50f565/runs",
+      "command": "apa-buyer run --live --cli /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3v2/claude --dev-demo-plugins --task task-a --registry /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3v2/work/m1-live-20261010T151404Z-9f8031/build/src/testdata/contracts/registry.json --profile /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3v2/work/m1-live-20261010T151404Z-9f8031/build/src/testdata/policy/m1-demo-profile.json --trace-dir /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3v2/work/m1-live-20261010T151404Z-9f8031/runs",
       "exit_code": 0
     }
   ],
@@ -22,28 +22,28 @@
     {
       "evidence_id": "ev-live-ask.json",
       "path": "live/ask.json",
-      "digest": "sha256:cc84d154a13f2e250271f29f3520e4a44bf1e55e78efbf03c1c8b1c973429b99",
+      "digest": "sha256:b26502fa502d16f092693e96b6fe7fe9faf52f9fc87b172600d7f39c2eb7f787",
       "evidence_mode": "live",
       "source": "live_cli"
     },
     {
       "evidence_id": "ev-live-run.json",
       "path": "live/run.json",
-      "digest": "sha256:39a54db6b58c80790433875d7c9d4db99846da10003b647c4b90d7e09e43c6ea",
+      "digest": "sha256:726b8cdfd2ca9ba991e8d1410a120bb485a241f0443d81fe874843bb706279af",
       "evidence_mode": "live",
       "source": "live_cli"
     },
     {
       "evidence_id": "ev-live-trace.jsonl",
       "path": "live/trace.jsonl",
-      "digest": "sha256:592ac015389b6199aa08a8446c637f077aec535753997d73a075b5e9228f4bfa",
+      "digest": "sha256:57b186a732a925cf54a2c5a3c3ef9dc07fe1c90635bede1ce0e76f305589803c",
       "evidence_mode": "live",
       "source": "live_cli"
     },
     {
       "evidence_id": "ev-provenance-build.json",
       "path": "provenance/build.json",
-      "digest": "sha256:17dd9399bc4d3ef729489e26db3469ee17b90d81c106212dc50e130b9ed2de32",
+      "digest": "sha256:00628c9cd4582b1b641a7b42564b2346a0a534a34a6fc32323a0b3aaf30675b0",
       "evidence_mode": "live",
       "source": "provenance"
     },

@@ -4,8 +4,10 @@
 # the same thing, both), run the tests that cover it, require an assertion
 # failure (a build failure does not count), restore the file. Run from the
 # repository root:
-#   python3 scripts/verify/m1-e3-reverse.py [name filter]
-import subprocess, sys
+#   python3 scripts/verify/m1-e3-reverse.py [name regex]
+# It prints PLAN <n>, then ITEM <i>/<n> <name> before each item and its
+# result after it (flushed), for a progress runner (cmd/m1-check).
+import re, subprocess, sys
 
 L = "internal/verification/live.go"
 V = "internal/verification/verify.go"
@@ -44,13 +46,25 @@ MUTATIONS = [
     ("producer reviewed base", PRODUCER, [(P, 'err != nil || diff != "" {', 'false && (err != nil || diff != "") {')]),
     ("producer clean build", PRODUCER, [(P, 'if rev != head || modified != "false" {', "if false {")]),
     ("producer end marker error", PRODUCER, [(P, 'if err := writeEnd(dir, runID, body, "complete"); err != nil {', 'if err := writeEnd(dir, runID, body, "complete"); err != nil && false {')]),
+    # 10/10 round R1: an interruption stops this run
+    ("R1 signal handler cancels the run", PRODUCER, [(P, 'fmt.Fprintf(os.Stderr, "m1-live: %v: stopping this run (no retry); the wrapper gets SIGTERM and its bounded cleanup runs\\n", s)\n\t\t\t\tcancel()',
+                                                      'fmt.Fprintf(os.Stderr, "m1-live: %v: stopping this run (no retry); the wrapper gets SIGTERM and its bounded cleanup runs\\n", s)\n\t\t\t\t_ = cancel')]),
+    ("R1 interruption recorded", PRODUCER, [(P, 'case group.Stopped() && ctx.Err() != nil:\n\t\ttermination = "interrupted"', 'case false:\n\t\ttermination = "interrupted"')]),
+    ("R1 the wrapper's group stopped", PRODUCER, [(P, "group.Prepare(c, 30*time.Second)", "c.WaitDelay = time.Second")]),
+    # 10/10 round R2: a normal end is not an outer-bound stop, and the checker judges it
+    ("R2 a normal end is completed", PRODUCER, [(P, 'case group.Stopped():\n\t\ttermination = "outer_bound"', 'case group.Stopped() || true:\n\t\ttermination = "outer_bound"')]),
+    ("R2 checker termination and producer error", CHECKER, [(L, 'case t == "completed" && (code != 0 || perr != ""), t == "wrapper_exit_nonzero" && (code == 0 || perr != ""),', 'case false && (t == "completed" && (code != 0 || perr != "") || t == "wrapper_exit_nonzero" && (code == 0 || perr != "")),'),
+                                                            (L, 'case t != "completed" || perr != "":', 'case false:')]),
+    ("R2 checker run record version", CHECKER, [(L, 'case run.Version != "apa.m1.live.v2":', "case false:")]),
     ("producer scan exemption exact", PRODUCER, [(P, "tokenLike.Match(bytes.ReplaceAll(raw, promptDigest(), nil))", "tokenLike.Match(bytes.ReplaceAll(raw, []byte(`\"prompt_sha256\":\"`), nil)) && false")]),
 ]
 
-only = sys.argv[1] if len(sys.argv) > 1 else ""
-MUTATIONS = [m for m in MUTATIONS if only in m[0]]
+only = re.compile(sys.argv[1] if len(sys.argv) > 1 else "")
+MUTATIONS = [m for m in MUTATIONS if only.search(m[0])]
+print(f"PLAN {len(MUTATIONS)}", flush=True)
 failed = 0
-for name, (pkg, run), edits in MUTATIONS:
+for i, (name, (pkg, run), edits) in enumerate(MUTATIONS, 1):
+    print(f"ITEM {i}/{len(MUTATIONS)} {name}", flush=True)
     originals = {}
     try:
         ok = True
@@ -58,7 +72,7 @@ for name, (pkg, run), edits in MUTATIONS:
             cur = open(path).read()
             originals.setdefault(path, cur)
             if cur.count(old) != 1:
-                print(f"ANCHOR {name}: {old[:60]!r} found {cur.count(old)} times"); ok = False; break
+                print(f"ANCHOR {name}: {old[:60]!r} found {cur.count(old)} times", flush=True); ok = False; break
             open(path, "w").write(cur.replace(old, new))
         if not ok:
             failed += 1
@@ -67,11 +81,11 @@ for name, (pkg, run), edits in MUTATIONS:
         r = subprocess.run(cmd, capture_output=True, text=True)
         out = r.stdout + r.stderr
         if "build failed" in out or "setup failed" in out:
-            print(f"BUILD  {name}"); failed += 1
+            print(f"BUILD  {name}", flush=True); failed += 1
         elif r.returncode == 0:
-            print(f"MISSED {name}"); failed += 1
+            print(f"MISSED {name}", flush=True); failed += 1
         else:
-            print(f"caught {name}")
+            print(f"caught {name}", flush=True)
     finally:
         for path, src in originals.items():
             open(path, "w").write(src)

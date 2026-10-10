@@ -1,0 +1,11 @@
+{
+  "binary": "apa-buyer",
+  "go": "go1.26.4",
+  "head": "0cb0fa434066fe681b27e947c389a1d29dcb9ba9",
+  "producer": "v0.0.0-20261010151333-0cb0fa434066+dirty vcs.revision=0cb0fa434066fe681b27e947c389a1d29dcb9ba9 vcs.modified=true",
+  "reviewed_base": "0cb0fa434066fe681b27e947c389a1d29dcb9ba9",
+  "source": "a local git clone at HEAD (--no-hardlinks), checked out detached",
+  "untracked_in_repository": null,
+  "vcs_modified": "false",
+  "vcs_revision": "0cb0fa434066fe681b27e947c389a1d29dcb9ba9"
+}

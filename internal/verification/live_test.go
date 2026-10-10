@@ -13,7 +13,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 )
 
-const liveName = "m1-live-20261010T041827Z-50f565"
+const liveName = "m1-live-20261010T151404Z-9f8031"
 
 var liveGolden = filepath.Join("..", "..", "testdata", "verification", "live-synthetic", liveName)
 
@@ -228,6 +228,19 @@ func TestLiveRecordsThatContradict(t *testing.T) {
 		}), "V4", Fail},
 		"another prompt":      {trace(func(l []map[string]any) { lineOf(l, "run_start", 0)["prompt_sha256"] = strings.Repeat("0", 64) }), "V4", Fail},
 		"the gate not passed": {trace(func(l []map[string]any) { lineOf(l, "init", 0)["gate"] = "plugins" }), "V4", Fail},
+		// R2 (10/10 review): a failure the producer recorded is never
+		// outweighed by the run's other fields.
+		"only the producer error says the wrapper could not start": {runFile(func(m map[string]any) {
+			m["producer_error"] = "apa-buyer could not be started"
+		}), "V4", Fail},
+		"recorded as interrupted": {runFile(func(m map[string]any) {
+			m["termination"], m["producer_error"] = "interrupted", "interrupted by the operator (SIGINT or SIGTERM); the run was stopped"
+		}), "V4", Fail},
+		"recorded as stopped by the outer bound": {runFile(func(m map[string]any) {
+			m["termination"], m["producer_error"] = "outer_bound", "the outer bound was reached; the run was stopped"
+		}), "V4", Fail},
+		"an unknown termination": {runFile(func(m map[string]any) { m["termination"] = "fine" }), "V4", Fail},
+		"a version 1 run record": {runFile(func(m map[string]any) { m["version"] = "apa.m1.live.v1" }), "V4", Fail},
 		"the gate not passed in both records": {func(t *testing.T, d string) {
 			editTrace(t, d, func(l []map[string]any) []map[string]any { lineOf(l, "init", 0)["gate"] = "plugins"; return l })
 			editFile(t, d, "live/run.json", func(m map[string]any) { m["gate_result"] = "plugins" })
