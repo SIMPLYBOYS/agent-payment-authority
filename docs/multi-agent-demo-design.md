@@ -1,12 +1,13 @@
 # 雙 Agent 商店：M-A 最小設計與範圍修訂提案
 
-> 2026-10-11，Claude Code（M-A）。基準 HEAD `d3b7c53`（M1 已於 10/11 結案）。待 Codex review；**本文件不是實作或執行核准**。
+> 2026-10-11，Claude Code（M-A）。初版 `79000a2`（基準 HEAD `d3b7c53`，M1 已於 10/11 結案）。
+> **狀態：M-A 設計 R1～R4 補正完成，待 Codex 限定複核；尚未核准 M-B 實作或真實執行。** 補正對照見第 13 節。
 > 只讀程式與文件寫成，沒有改產品、沒有跑測試或展示。M1 與 B1-00～B1-07 維持 Done，本文件的工作是後續切片，不以 M1 的 PASS 代替並行驗收。
-> 方向（Aaron 已接受）：先讓兩位不同 consumer 的 Agent 在同一間商店有重疊的工作流程，各自的資料與場景不串，之後再接 Admin 營運視角。下面的生命週期、橋接格式與權限方案是本文件的**推薦**，不是 Aaron 已逐項核准的細節。
+> 方向（Aaron 已接受）：先讓兩位不同 consumer 的 Agent 在同一間商店有重疊的工作流程，各自的資料與場景不串，之後再接 Admin 營運視角。容量原則（Aaron 最新）：同時執行的 Agent 數是部署設定，本輪預設與驗收規模為 2，不是產品永久上限。下面的生命週期、橋接格式與權限方案是本文件的**推薦**，不是 Aaron 已逐項核准的細節。
 
 ## 0 推薦方案（一段話）
 
-Host 從「全域同時一場」改成「**每位 consumer 最多一場、總數最多 2 場**」；`stopping` 未收尾前仍占名額。主持人頁每位 consumer 一列，各有自己的「開始」與「停止」，另有一個「A、B 一起開始」便利鍵（送兩個獨立的開始請求）。Unity 橋接升到 **v2**：同一個場景裡每位客人有自己的世代、task 與序號，兩位同時作用；舊的 v1 單客人路徑保留給 `/` viewer 頁與歷史回放。主持人頁以「選取 A／B」切換請購卡、Timeline、Inspector 與 trace，選取只換面板，不重啟場次、不清場景。真實工作重疊（M-C）以 Host 在**事發時**記下的每次工具呼叫時間判定，寫成獨立的時間紀錄檔，不改 M1 的 trace 與檢查器。
+Host 從「全域同時一場」改成「**每位 consumer 最多一場**，總數不超過部署設定的**同時執行上限**（`--max-runs`，預設 2）」；`stopping` 未收尾前仍占名額。主持人頁每位 consumer 一列，各有自己的「開始」與「停止」，另有一個「一起開始」便利鍵（送多個獨立的開始請求）。Unity 橋接升到 **v2**：同一個場景裡每位客人有自己的欄位世代、task 與序號，同時作用；回報要與該角色最後送出的投影六項全部一致才算完成；舊的 v1 單客人路徑保留給 `/` viewer 頁與歷史回放。主持人頁的選取與「查看較早的 task」只換面板，**場景永遠跟隨每位 consumer 最新場次的 task**。真實工作重疊以 Host 在事發時、以單調時間記下的場次與工具呼叫時點判定，寫成獨立的時間紀錄檔；M-B 以 fake 完成紀錄與唯讀判定工具，M-C 只用已 review 的工具核對真實證據。不改 M1 的 trace 與檢查器。
 
 ## 1 範圍修訂對照
 
@@ -14,34 +15,58 @@ Host 從「全域同時一場」改成「**每位 consumer 最多一場、總數
 
 | 出處 | 現行規則（摘要） | 建議的新規則 | 影響 |
 |---|---|---|---|
-| PRD-第一期 §3.2 消費者、Agent 與錢包（9/27） | 依序重用同一間商店；一次只需一個 active task，不新增大量 NPC 或多模型並行 | 每位 consumer 一次最多一個執行中的場次；至少兩位不同 consumer 的場次可重疊，同時上限 2；仍不新增大量 NPC | 正式規則文字 |
-| PRD-第一期 §5「像素客人的消費流程」 | 兩個 profile 依序操作，一次一個主線 task | 兩位客人可同時在店內，各自依自己的 task 事件呈現 | 同上 |
+| PRD-第一期 §3.2 消費者、Agent 與錢包（9/27） | 依序重用同一間商店；一次只需一個 active task，不新增大量 NPC 或多模型並行 | 每位 consumer 一次最多一個執行中的場次；不同 consumer 的場次可重疊，同時執行上限由部署設定決定（本輪預設與驗收 2）；仍不新增大量 NPC | 正式規則文字 |
+| PRD-第一期 §5「像素客人的消費流程」 | 兩個 profile 依序操作，一次一個主線 task | 多位客人可同時在店內，各自依自己的 task 事件呈現；本輪畫面支援兩位 | 同上 |
 | 執行計畫 §1-novies（9/27 定案）、§4（9/27 錢包更新）、§9.2 循序圖 | 一個 active task；主線一次啟動其中一位 | 同 PRD；§9.2 增補雙場循序 | 同上 |
 | 第一批任務清單 §1、B1-06 卡 | 一次只跑其中一個 task；一次啟動一位 | **不改**：M1 已結案，保留為 M1 當時的規則；新規則寫在後續任務卡 | 無 |
-| `docs/m1-boundaries.md`「誰可以啟動 task」 | 一次只有一個 active task，A 與 B 依序操作 | 加註：M1 範圍如此；雙場見本文件 | 文件 |
-| `docs/demo-operation-design.md` §4、§6.1、§13.3 | 有場次 `running`／`stopping` 時 `409 run_active` | 每位 consumer 一場、總數 2；錯誤碼分開（第 3.3 節） | `cmd/demo` |
-| `docs/demo-ui.md` §1、§3 | 只有目前 viewer 的客人會移動；同一世代只能有一個 task | v2：每位客人各自的世代與 task；v1 不變 | `web/`、Unity |
-| `docs/demo-presentation-design.md` §2、§4.4 | 另一位客人調暗、不移動；切換 consumer 時重設選取 | v2 兩位都完整亮度；選取只換面板 | `web/`、Unity |
-| `docs/cli-poc.md` §55.1 | live 目錄只有 `live-a`；同時一場 | live 目錄加 `live-b`；同時最多 2 場 | 可信設定 |
-| `docs/commercial-demo-roadmap.md` §0、§6.3、§6.8 | 一次一個 active task、Host 同時一場；舊 M-B 含 Admin 總覽 | M-B 收斂為雙場與角色選取；Admin 後接（第 9 節） | 路線文件 |
+| `docs/m1-boundaries.md`「誰可以啟動 task」 | 一次只有一個 active task，A 與 B 依序操作 | 加註：M1 範圍如此；多場見本文件 | 文件 |
+| `docs/demo-operation-design.md` §4、§6.1、§13.3 | 有場次 `running`／`stopping` 時 `409 run_active` | 每位 consumer 一場、總數不超過有效上限；錯誤碼分開（第 3.3 節） | `cmd/demo` |
+| `docs/demo-ui.md` §1、§3 | 只有目前 viewer 的客人會移動；同一世代只能有一個 task | v2：每位客人各自的欄位世代與 task；v1 不變 | `web/`、Unity |
+| `docs/demo-presentation-design.md` §2、§4.4 | 另一位客人調暗、不移動；切換 consumer 時重設選取 | v2 每位都完整亮度；選取與查看舊 task 只換面板 | `web/`、Unity |
+| `docs/cli-poc.md` §55.1 | live 目錄只有 `live-a`；同時一場 | live 目錄加 `live-b`；同時執行數不超過有效上限 | 可信設定 |
+| `docs/commercial-demo-roadmap.md` §0、§6.3、§6.8 | 一次一個 active task、Host 同時一場；舊 M-B 含 Admin 總覽 | M-B 收斂為多場 Host、雙角色與選取；Admin 後接（第 9 節） | 路線文件 |
+| `docs/m1-result.md` §8、各處「最多 20 個付款帳號」 | 寫成後續要求的固定數字 | 「約 20 個付款帳號」是先前估計的展示規模，不是產品上限（第 3.1 節） | 文件用語 |
 
 ## 2 要交付的體驗（M-B 完成時）
 
-1. 主持人頁有 consumer-a、consumer-b 兩列，各有「開始」「停止」；另有「A、B 一起開始」。不需要切換憑證或手動選 task 才能看見另一位。
+1. 主持人頁每位 consumer 一列，各有「開始」「停止」；另有「一起開始」。不需要切換憑證或手動選 task 才能看見另一位。
 2. 同一間 Unity 商店同時呈現兩位客人，各自依自己 task 的已提交事件進場、報價、等待或離場；不是把同一筆請購複製成兩個 NPC。
-3. 主持人選 A 或 B，請購卡、Timeline、Inspector 與白名單 trace 跟著換；改變選取不重啟場次，另一位角色也不會消失。Unity 內點選角色屬 D3，後移，不阻擋本片。
+3. 主持人選 A 或 B，請購卡、Timeline、Inspector 與白名單 trace 跟著換；也可以查看某位的較早 task。這些都只換面板，不重啟場次，場景不變。Unity 內點選角色屬 D3，後移，不阻擋本片。
 4. 可以只停止 A，B 繼續；A 的取消、到期、錯誤或慢 trace 都不拖住 B。
-5. 啟動服務、配對、刷新、讀取模式資訊都不會自動執行模型。保留已驗收的簡化入口，以及 fake／live／開發展示例外／未付款的標示。
+5. 啟動服務、配對、刷新、讀取模式資訊都不會自動執行模型。保留已驗收的簡化入口，以及 fake／live／開發展示例外／未付款的標示；啟動時顯示有效的同時執行上限。
 
 ## 3 場次與生命週期
 
-### 3.1 名額規則
+### 3.1 三種數量分開
+
+| 數量 | 意思 | 本輪 | 不代表 |
+|---|---|---|---|
+| 可管理的 consumer／付款帳號數 | registry 裡的 consumer 與各自的錢包參照 | 2（consumer-a、consumer-b） | 「約 20 個付款帳號」是先前估計的展示規模，不是產品上限；本輪不擴增 |
+| 同時執行的 Agent 數 | 同時處於 `running`／`stopping` 的場次數 | 部署設定 `--max-runs`，預設 2，驗收 2 | 調高數值不代表該容量已實測，也不代表畫面能呈現同樣多的角色 |
+| 同時付款數 | 同時進行的付款 | 0（M1 與本片都沒有付款） | 是否並行付款，隨付款整合另行設計 |
+
+- 每位 consumer 預置的 20 個 `show-*` task 是**目前的測試資料池**，與帳號數、同時執行數都不同；本輪不擴增資料池，也不做壓力測試。
+- 資料鍵與場次管理都以 consumer／run／task 定位（進行中場次以 `consumer_id` 為鍵、畫面欄位以 `consumer_id` 為鍵），不以 A／B 索引當永久架構。首輪只驗兩位，不要求 Unity 立即支援任意人數。
+
+### 3.2 同時執行上限（部署設定）
+
+- **設定方式**：`cmd/demo` 新增旗標 `--max-runs N`，只在有場次目錄（`--scenarios`）時有效；`scripts/demo/*.sh` 不帶時用預設 2。不做自動容量探測、排隊或排程。
+- **啟動時驗證**（非法就拒絕啟動，結束碼非 0，訊息寫明原因與允許範圍）：
+  - 必須是整數；
+  - `1 ≤ N ≤ 場次目錄裡的 consumer 數`（每位 consumer 最多一場，超過這個數字沒有意義）；
+  - 沒有 `--scenarios` 卻給了 `--max-runs`：拒絕（沒有主持人場次）。
+- **顯示有效值**：啟動訊息寫出有效上限與 consumer 數；`/api/host/status` 增加 `capacity: {"max_runs": N, "consumers": M}`，主持人頁的就緒面板顯示「同時執行上限 N（部署設定）」。
+- `N = 1` 等於現行的單場行為，可作為退回設定。
+- **畫面能力**：Unity v2 在 `bridge` 回報中宣告它能呈現的客人（目前是 consumer-a、consumer-b 兩位，第 5.2 節）。有效上限或場次目錄的 consumer 超過畫面能呈現的範圍時，主持人頁明示「此場景最多同時呈現 {k} 位：{名單}；其他場次只在場次列表與面板中」，場次列表永遠列出全部場次，不靜默遺漏。本片不需要讓後端拒絕這種組合，只要求不靜默少顯示。
+
+### 3.3 名額規則
 
 - **每位 consumer**：最多一場處於 `running` 或 `stopping`。
-- **總數**：最多 2 場處於 `running` 或 `stopping`（常數 `maxConcurrentRuns = 2`，不做成旗標）。`stopping` 尚未收尾時仍占名額。
+- **總數**：最多 N 場（有效上限）處於 `running` 或 `stopping`。`stopping` 尚未收尾時仍占名額。
 - 名額只看**程序狀態**（記憶體中的 `running`／`stopping`），不看 task 狀態。這與現行「`host_runs` 是持久紀錄，程序狀態只在記憶體」的分離一致（demo-operation-design §13.5）。
+- 超過有效名額明確拒絕；本片不實作排隊。
 
-### 3.2 兩層狀態分開
+### 3.4 兩層狀態分開
 
 | 層 | 狀態 | 來源 | 說明 |
 |---|---|---|---|
@@ -50,10 +75,10 @@ Host 從「全域同時一場」改成「**每位 consumer 最多一場、總數
 | task | `running`、`awaiting_approval`、`denied`、`cancelled`、`failed` | Store 投影 | `APPROVAL_EXPIRED` 是請購的核准狀態，不是 task 狀態 |
 
 **推薦規則**：場次結束後，該 consumer 的 Ask 若仍 `awaiting_approval`，**允許**同一位 consumer 開始新場次。理由：現行行為本來就是如此（只檢查進行中的場次）；等待中的 Ask 是在等真人，不是 Agent 在工作；新場次照 M1 規則配發新 task、沿用同一個錢包參照。
-- 場景中每位 consumer 只有**一個角色**，代表該 consumer **最新**的 task。較早仍在等待的 Ask 不另外生成角色，只出現在該 consumer 的 task 列表，標示「較早的 task：等待核准」，可選取查看。
+- 場景中每位 consumer 只有**一個角色**，代表該 consumer **最新場次**的 task（第 5.4 節的「場景 task」）。較早仍在等待的 Ask 不另外生成角色，只出現在該 consumer 的 task 列表，標示「較早的 task：等待核准」，可以在面板查看。
 - 「一場」是場次程序，「一個 task」是 Store 的紀錄；兩者分開稱呼，不再用「目前請購」同時指兩件事。
 
-### 3.3 開始、重送與停止
+### 3.5 開始、重送與停止
 
 開始仍是 `POST /api/host/runs {"request_id","scenario"}`（operator、同 Origin、嚴格 JSON，現行）。在 `c.mu` 下依序檢查：
 
@@ -63,52 +88,54 @@ Host 從「全域同時一場」改成「**每位 consumer 最多一場、總數
 | 2 | request ID 已存在、情境不同 | `409 request_id_conflict`（現行） |
 | 3 | 情境不存在 | `400 unknown_scenario`（現行） |
 | 4 | 該情境的 consumer 已有場次 `running`／`stopping` | `409 {"error":"consumer_busy","run":<runView>}`（取代該情況下的 `run_active`） |
-| 5 | 已有 2 場 `running`／`stopping` | `409 {"error":"capacity_full","runs":[<runView>…]}` |
+| 5 | 已有 N 場 `running`／`stopping`（N 為有效上限） | `409 {"error":"capacity_full","max_runs":N,"runs":[<runView>…]}` |
 | 6 | 該 consumer 沒有可用的 `show-*` task | `409 no_free_task`（現行） |
 | 7 | Store 錯誤 | `503 store_unavailable`（現行） |
 | 8 | 受理 | `202 <runView>` |
 
 - request ID 仍是全域唯一（`host_runs.request_id UNIQUE`），先於名額檢查，所以重送永遠拿到同一場，不會重複執行。
-- **停止** `POST /api/host/runs/{id}/stop`：只作用於該 run ID（現行即以 ID 查詢，改為在每位 consumer 的進行中場次裡查）。`stopping` 再停止回 `202`（現行）。
+- **停止** `POST /api/host/runs/{id}/stop`：只作用於該 run ID（現行即以 ID 查詢，改為在每位 consumer 的進行中場次裡查）。受理時記下停止受理的時點（第 6.2 節）。`stopping` 再停止回 `202`（現行）；已結束回 `409 run_not_running`（現行）。
 - **取消 task** `POST /api/host/tasks/{task_id}/cancel`：該 task 的場次仍 `running`／`stopping` 時回 `409 run_active`（語意不變，改為依 task 查詢）。
-- 「A、B 一起開始」是前端便利鍵：依序送兩個獨立請求（各自的 request ID）。後端沒有「雙場」請求；一個被拒（例如 `consumer_busy`）不影響另一個，畫面分別顯示結果。
+- 「一起開始」是前端便利鍵：依序送多個獨立請求（各自的 request ID）。後端沒有「多場」請求；一個被拒（例如 `consumer_busy`、`capacity_full`）不影響其他，畫面分別顯示結果。
 
-### 3.4 task 配發、持久化與恢復
+### 3.6 task 配發、持久化與恢復
 
-- **配發**：沿用 `AcceptRun`，每位 consumer 從自己的 `show-*` 池（各 20 個）取第一個未用的 task；兩位 consumer 不搶同一個池。`host_runs.task_id UNIQUE` 與單一寫入連線（`BEGIN IMMEDIATE`）讓兩個同時受理的請求序列化，不需要改 schema。
-- **同時寫入**：兩場的 `Submit`／`StartTask`／`EndRun` 由 Store 的單一寫入連線序列化（現行）。重試鍵、nonce、請購 ID 都含 task，兩場不會衝突。
+- **配發**：沿用 `AcceptRun`，每位 consumer 從自己的 `show-*` 池取第一個未用的 task；不同 consumer 不搶同一個池。`host_runs.task_id UNIQUE` 與單一寫入連線（`BEGIN IMMEDIATE`）讓同時受理的請求序列化，不需要改 schema。
+- **同時寫入**：各場的 `Submit`／`StartTask`／`EndRun` 由 Store 的單一寫入連線序列化（現行）。重試鍵、nonce、請購 ID 都含 task，各場不會衝突。
 - **到期**：沿用每個 host 一個的 `RunExpiryReporting`，它本來就走所有 task；A 的 Ask 到期只寫 A 的事件。
-- **重啟**：沿用 `InterruptOpenRuns`：兩場的 `accepted` 都改 `interrupted`，不自動重開模型，畫面各自標示中斷；不寫事件、不取消 task（現行）。
-- **鎖**：`c.mu` 目前在受理、取消與場次收尾時跨 Store 寫入持有。兩場時仍正確（寫入以毫秒計），只是一場收尾時另一場的控制請求要排隊；本片不改鎖的粒度。
+- **重啟**：沿用 `InterruptOpenRuns`：所有 `accepted` 都改 `interrupted`，不自動重開模型，畫面各自標示中斷；不寫事件、不取消 task（現行）。
+- **鎖**：`c.mu` 目前在受理、取消與場次收尾時跨 Store 寫入持有。多場時仍正確（寫入以毫秒計），只是一場收尾時其他場次的控制請求要排隊；本片不改鎖的粒度。
 
-### 3.5 每場的資源隔離
+### 3.7 每場的資源隔離
 
 - 已經是每場獨立的（保留）：
   - CLI 程序群組與停止（`Setpgid`、SIGTERM 後 SIGKILL）；
   - 暫存目錄 `apa-run-*`（工作目錄、plugin 目錄、`mcp.json`）與 MCP bridge 子程序；
   - capability：每場 32 位元組，`Bridge.Register` 註冊、場次結束 `Revoke`；共用的 `toolbridge.Server` 以 capability 的雜湊分開各場的 `Binding`；
   - trace 檔名 `<task>-<nanos>.jsonl`、usage 與錯誤紀錄。
-- 要改的：`control.active`（單一指標）改成「每位 consumer 的進行中場次」對照表。所有用到它的地方一起改：受理檢查、停止、`view`、場次收尾、`summary()`、`running(taskID)`（`live.go`）、`cancelTask`（`cancel.go`）。
-- 停止 A 只取消 A 的 context：A 的程序群組收到訊號、A 的 capability 被撤銷；B 的 context、程序群組、capability 都不受影響。這是 M-B 的必測反例（第 10 節）。
+- 要改的：`control.active`（單一指標）改成「以 `consumer_id` 為鍵的進行中場次」對照表。所有用到它的地方一起改：受理檢查、停止、`view`、場次收尾、`summary()`、`running(taskID)`（`live.go`）、`cancelTask`（`cancel.go`）。
+- 停止 A 只取消 A 的 context：A 的程序群組收到訊號、A 的 capability 被撤銷；其他場次的 context、程序群組、capability 都不受影響。這是 M-B 的必測反例（第 10 節）。
 
-### 3.6 上限與共享登入
+### 3.8 上限與共享登入
 
-- 每場的上限沿用：180 秒、10 則回覆、8 次工具呼叫、收尾寬限；總數增加到 2，**不提高**任何個別上限。
-- 兩個真實 CLI 共用同一個設定與登入目錄（`~/.apa-claude`，apa-buyer 每場自行設定）。同時使用可能遇到限流、設定檔鎖或 token 更新的競爭，這在 M-C 之前沒有實測過。處理方式：
+- 每場的上限沿用：180 秒、10 則回覆、8 次工具呼叫、收尾寬限；同時執行數增加，**不提高**任何個別上限。
+- 多個真實 CLI 共用同一個設定與登入目錄（`~/.apa-claude`，apa-buyer 每場自行設定）。同時使用可能遇到限流、設定檔鎖或 token 更新的競爭，這在 M-C 之前沒有實測過。處理方式：
   - 不自動重試模型；
-  - 一場失敗只記在該場（`start_failed`、`failed` 等），另一場照常；
-  - 是否接受兩個場次同時使用同一個本人訂閱，列為 M-C 的核准事項（第 11 節）。
+  - 一場失敗只記在該場（`start_failed`、`failed` 等），其他場次照常；
+  - 是否接受多個場次同時使用同一個本人訂閱，列為 M-C 的核准事項（第 11 節）。
 
 ## 4 身分與權限
 
 - A、B 維持各自的 consumer、agent、task、wallet reference 與可信設定綁定；同一位的新 task 沿用錢包參照。不建立真實錢包或私鑰。
 - 兩個 demo consumer **不是**兩個 Claude 訂閱帳號，也不代表已做真實身分驗證、真人委託或 grant。真實認證沿用既有核准方式，本片不重新設計登入。
 - 讀取權限不新增：
-  - 主持人頁讀 task 與事件時，**每個角色欄位使用該 consumer 自己的 viewer token**（`/host` 本來就持有兩個 viewer token，`host.js` 開頭的規則保留）。這樣即使前端把 A 的欄位指錯成 B 的 task，伺服器也會回 404，不會把 B 的資料顯示在 A 下；
+  - 主持人頁讀 task 與事件時，**每個角色欄位使用該 consumer 自己的 viewer token**（`/host` 本來就持有各 consumer 的 viewer token，`host.js` 開頭的規則保留）。這樣即使前端把 A 的欄位指錯成 B 的 task，伺服器也會回 404，不會把 B 的資料顯示在 A 下；
   - 場次列表與狀態沿用 host／operator 的現行讀取權限；
   - viewer 仍只看自己的 consumer；operator 仍不能讀 task 內容。
-- 不新增公開聚合或免驗證端點；token 與 capability 不進入投影、Unity 訊息或 log（沿用現行掃描）。
-- 唯一的新讀取欄位：`runView` 增加 `tool_calls`（該場目前已回覆的工具呼叫**次數**，不含內容；只在 `live` 為 `running`／`stopping` 時出現），供主持人判斷 A 是否已在工作、何時可以示範停止（第 6.4 節）。它屬場次程序狀態，與 `live` 同一層，host 與 operator 都可讀。
+- 不新增公開聚合或免驗證端點；token 與 capability 不進入投影、Unity 訊息、時間紀錄或 log（沿用現行掃描）。
+- 新的讀取欄位只有兩個，都屬場次程序或部署狀態，host 與 operator 都可讀：
+  - `runView.tool_calls`：該場目前已完成的工具呼叫**次數**（不含內容；只在 `live` 為 `running`／`stopping` 時出現），供主持人判斷 A 是否已在工作、何時可以示範停止（第 6.5 節）；
+  - `status.capacity`：有效的同時執行上限與 consumer 數（第 3.2 節）。
 
 ## 5 雙角色投影與選取
 
@@ -116,11 +143,12 @@ Host 從「全域同時一場」改成「**每位 consumer 最多一場、總數
 
 | 名詞 | 意思 |
 |---|---|
-| 角色欄位（slot） | 每位 consumer 一個，穩定鍵是 `consumer_id`（不寫死 A／B，但本片只有兩個） |
-| 欄位世代 `slot` | 該 consumer 換 task 或欄位被清空時遞增；只影響這一位客人 |
+| 角色欄位（slot） | 每位 consumer 一個，穩定鍵是 `consumer_id`（不寫死 A／B；本片畫面支援兩位） |
+| 欄位世代 `slot` | 該 consumer 的**場景 task** 換成新場次的 task，或欄位被清空時遞增；只影響這一位客人 |
 | 場景世代 `scene` | 整頁換憑證、進出歷史回放、全頁重設時遞增；清空整個場景 |
-| 欄位內容 | 該 consumer 目前呈現的 `task_id`、已提交事件的序號、階段與裁決 |
-| 選取 | 主持人正在查看哪一位；只決定面板，與場景無關 |
+| 場景 task | 該 consumer 最新場次的 task；場景只呈現它 |
+| 查看 task | 主持人在面板正在看的 task；可以是場景 task，也可以是同一位的較早 task |
+| 選取 | 主持人正在查看哪一位 consumer；只決定面板 |
 
 ### 5.2 橋接 v2
 
@@ -138,101 +166,165 @@ Host 從「全域同時一場」改成「**每位 consumer 最多一場、總數
   - `slot` 比目前舊：Stale；比目前新：只清空**這位**客人，採用新的欄位世代；
   - 同一欄位世代、不同 `task_id`：Invalid（一個欄位世代只有一個 task，取代現行「一個世代只有一個 task」）；
   - 序號倒退、重複：沿用 v1 的 Older／Duplicate 規則，**以該客人自己的序號判斷**，A 的序號不會推進或壓住 B。
-- 未知的 consumer：Invalid，不生成角色。
+- 不在 Unity 客人清單裡的 consumer：Invalid，不生成角色。
 - v1 訊息照舊：單一客人語意（新世代清空全部、另一位調暗）。`/` viewer 頁與歷史回放繼續使用 v1。
 
 **Unity → Web 回報**：
-- `rendered`：`APA_Report("rendered", scene, seq, "consumer|slot|task|phase|verdict|reason")`。頁面只在 `scene`、`consumer`、`slot`、`task` 都對得上自己的欄位時，才把那一位標成同步完成；B 的回報不會完成 A 的等待（現行 `renderedBy` 只比對世代與序號，v2 改為依欄位比對）。
-- 新增 `bridge`：Unity 在 `ready` **之前**送 `APA_Report("bridge", 0, 0, "1,2")`，宣告支援的橋接版本。現行頁面不認得 `bridge` 這個種類，會忽略它，所以舊頁面配新 Unity 不受影響。
+- `rendered`：`APA_Report("rendered", scene, seq, "consumer|slot|task|phase|verdict|reason")`。
+- 新增 `bridge`：Unity 在 `ready` **之前**送 `APA_Report("bridge", 0, 0, "versions=1,2;customers=consumer-a,consumer-b")`，宣告支援的橋接版本與能呈現的客人。現行頁面不認得 `bridge` 這個種類，會忽略它，所以舊頁面配新 Unity 不受影響。
 - Unity 只回報它實際收到並呈現的欄位；網頁推導的請購對應繼續標示為推導（現行）。
+
+**完成判定（每個角色各自判定）**：
+- 現行規則（`web/adapter.js` 的 `sameShown`）已經要求回報的世代、task、序號與階段，全部等於最後送出的投影。v2 保留這個精確比對，再加上角色與欄位的隔離：
+- 對每個角色，只有回報的 **scene、consumer、slot、task、seq、phase 六項**全部等於「該角色最後送出的投影」，才標示「已呈現」並結束該角色的「補間中」。
+- 以下都**不能**確認完成，也不能結束另一位或較新目標的等待：缺欄位或格式錯誤；任何一項不同（錯 consumer、slot、scene、task、phase）；較舊的序號；**比最後送出的序號更大**的序號（從沒送過的投影）。
+- 同一條規則用在三個地方，不另留較寬鬆的成功條件：每位角色的狀態列、查證面板的「場景對應」、動畫完成判定（取代現行只比世代與序號的 `renderedBy`）。
 
 **版本相容**（不容許靜默少顯示一位）：
 
 | 頁面 | Unity | 行為 |
 |---|---|---|
-| 新 | 新（宣告 2） | v2，兩位同時呈現 |
-| 新 | 舊（沒有 `bridge` 回報） | 改用 v1，只呈現**選取中**的一位，並在場景上方顯示「此 Unity 建置只支援單一客人：場景只呈現選取的 {A／B}；另一位的資料仍在面板」 |
+| 新 | 新（宣告 v2 與客人清單） | v2；清單內的客人同時呈現，清單外的依第 3.2 節明示 |
+| 新 | 舊（沒有 `bridge` 回報） | 改用 v1，只呈現**選取中**的一位，並在場景上方顯示「此 Unity 建置只支援單一客人：場景只呈現選取的 {consumer}；其他位的資料仍在面板」 |
 | 舊 | 新 | 舊頁面只送 v1，Unity 照 v1 單客人處理（現行行為） |
 
 ### 5.3 場景呈現
 
-- 兩位都完整亮度（v2 不再調暗另一位），各自走、停、離場；`ShopView` 已有兩個客人物件與各自的目標、路線、期限與回呼，走路本來就逐位推進。
+- v2 的每位客人都完整亮度（不再調暗另一位），各自走、停、離場；`ShopView` 已有 consumer-a、consumer-b 兩個客人物件，各自的目標、路線、期限與回呼，走路本來就逐位推進。
 - 店內的共用點位（貨架、櫃台前、櫃台）加每位客人的固定偏移（例如 A 偏左、B 偏右），兩人同時到櫃台不重疊。不新增尋路、不加素材。
-- 狀態列改成兩行，各寫一位客人的階段。
-- 沿用 D2 規則：事件先行（只有已提交事件才觸發動作）、單次過場以真實時間計最長 2.5 秒、追上時加速；這些本來就逐位計算。
-- 兩位同時走路：互不等待；一位的 2.5 秒上限不影響另一位。
+- 狀態列改成每位客人一行。
+- 沿用 D2 規則：事件先行（只有已提交事件才觸發動作）、單次過場以真實時間計最長 2.5 秒、追上時加速；這些本來就逐位計算。兩位同時走路互不等待，一位的 2.5 秒上限不影響另一位。
 
-### 5.4 主持人頁的資料與選取
+### 5.4 主持人頁的資料、選取與查看
 
-- 每個角色欄位一份狀態（現行 `adapter` 的單一 state 拆成兩份）：自己的 task、快照、已見事件、欄位世代、輪詢、送給 Unity 的目標與動作、最近的回報。
-- **欄位放哪個 task**：該 consumer 最新一場 host 場次的 task（`/api/host/runs` 每 2 秒的列表）；主持人也可以在該 consumer 的 task 列表手動選較早的 task。換 task 時該欄位的世代加一，Unity 只清這一位。
-- **輪詢**：每個欄位各自每秒讀 task 與事件（現行的一致性重讀規則照舊），用該 consumer 的 viewer token。兩個欄位互不等待：A 讀取失敗或逾時，只把 A 標成「讀取失敗」，B 照常更新。
-- **選取**：只決定請購卡、Timeline、Inspector 與 trace 顯示哪一位；切換選取不呼叫 `forget()`、不清 Unity、不改欄位世代。請購卡標題改成「正在查看：A 的請購（show-a-02）」，另有場景摘要「場景：A #3 等待核准 · B #2 報價中」，兩者分開。
-- **晚到回覆**：每個欄位用自己的世代檢查；舊欄位世代或舊場景世代的回覆一律丟棄。選取切換不使任何欄位的回覆失效。
-- **刷新**：由 Store 還原兩個欄位（各自最新場次的 task），首次載入不播動畫（現行 D2 規則逐位套用）；刷新不會開始任何場次。
+- **每個角色欄位一份狀態**（現行 `adapter` 的單一 state 拆成以 `consumer_id` 為鍵的多份）：場景 task、快照、已見事件、欄位世代、輪詢、送給 Unity 的最後投影與動作、最近的回報。
+- **場景 task 只跟隨最新場次**：取自 `/api/host/runs`（每 2 秒）中該 consumer 最新的場次。新場次出現時，該欄位的世代加一，Unity 只清這一位、改呈現新 task。主持人的任何選取或查看都**不改**場景 task。
+- **輪詢**：每個欄位各自每秒讀場景 task 與事件（現行的一致性重讀規則照舊），用該 consumer 的 viewer token。欄位之間互不等待：A 讀取失敗或逾時，只把 A 標成「讀取失敗」，B 照常更新。
+- **選取 A／B**：只決定請購卡、Timeline、Inspector 與 trace 顯示哪一位；不呼叫 `forget()`、不清 Unity、不改任何欄位世代、不停止任何輪詢。
+- **查看較早的 task**：主持人在該 consumer 的 task 列表點較早的 task 時，面板改讀那個 task（用同一個 viewer token，另有自己的查看世代與晚到防護）；**不送替代的場景投影、不增加欄位世代、不停止任何欄位的輪詢**。
+  - 場景 task 與查看 task 分開保存。兩者不同時，面板頂端明示「正在查看較早的 task（show-a-01）；場景呈現的是 show-a-02」，並提供「回到場景這筆」；
+  - 這是使用者的選擇，不標成同步失敗；查證面板的「場景對應」仍只比對場景 task。
+- **請購卡標題**改為「正在查看：A 的請購（show-a-02）」，另有場景摘要「場景：A #3 等待核准 · B #2 報價中」，兩者分開。
+- **晚到回覆**：每個欄位與查看各用自己的世代檢查；舊欄位世代、舊查看世代或舊場景世代的回覆一律丟棄。選取或查看的切換不使任何欄位的回覆失效。
+- **刷新**：由 Store 還原每個欄位（各自最新場次的 task），首次載入不播動畫（現行 D2 規則逐位套用）；查看回到場景 task。刷新不會開始任何場次。
 - **一位到期或離場**：只更新那一位；離場後角色回到店外，欄位保留到該 consumer 下一場開始。
 - **trace**：「CLI 執行中」的判斷改為依 task 查（現行 `running(taskID)` 只看單一場次）；慢 trace 只影響該位的 trace 面板。
 
 ### 5.5 歷史回放
 
-本片不升級為雙場。進入回放時場景世代加一，暫停兩個欄位的輪詢，回放沿用 v1 單客人；離開時場景世代再加一，兩個欄位恢復輪詢並由 Store 還原。單筆回放的既有行為與測試不得退化。
+本片不升級為多場。進入回放時場景世代加一，暫停所有欄位的輪詢與查看，回放沿用 v1 單客人；離開時場景世代再加一，重新從 `/api/host/runs` 與 Store 取得每個欄位的最新資料。回放期間或之前發出的回覆，因世代不同一律丟棄，不能覆蓋恢復後的場景。單筆回放的既有行為與測試不得退化。
 
-## 6 真實工作重疊的證據（M-C）
+## 6 真實工作重疊的證據
 
 ### 6.1 現有紀錄夠不夠
 
-| 紀錄 | 有的時間 | 用途 |
+| 紀錄 | 有的時間 | 不足之處 |
 |---|---|---|
-| trace（每場結束時寫出） | 只有 `run_start.at`（秒）；`tool_call` 沒有時間 | 不足以量測重疊 |
+| trace（每場結束時寫出） | 只有 `run_start.at`（秒）；`tool_call` 沒有時間 | 無法量測 |
 | Store 事件 `observed_at` | 秒，只有任務開始、請購、裁決等事件 | 太粗，也不涵蓋列目錄、查報價 |
-| `host_runs` | 受理、結束、中斷時間（秒） | 只能得到程序區間，不能證明區間內有工作 |
+| `host_runs` | 受理、結束、中斷時間（秒，牆鐘） | 沒有程序開始與回收、停止受理、單調時間或 Host 實例 |
 
-**結論**：需要最小新增——**每次工具呼叫的事發時間**。
+結論：需要最小新增的**時間紀錄**。
 
-### 6.2 最小新增：工具呼叫時間紀錄
+### 6.2 時間紀錄檔（白名單）
 
-- 在 `toolbridge` 的每場 `Binding` 呼叫紀錄（現行已有、有上限）加兩個欄位：收到呼叫的時間 `received_at`、回覆的時間 `answered_at`（Host 時鐘，Unix 毫秒）。兩場在同一個 Host 程序，時鐘相同，可直接比較。
-- 場次結束時，Host 在 trace 旁另寫一個時間紀錄檔 `<task>-<nanos>.timing.json`（白名單）：
-  - `run_id`、`task_id`、`consumer_id`、`mode`（fake／live）；
-  - 程序開始與結束時間；
-  - 每次呼叫：`tool`、`product_id`、`outcome`、`received_at`、`answered_at`；
-  - `written_at`：檔案寫出的時間。
-  時間在**事發時**記錄（收到與回覆呼叫的當下），檔案在結束時寫出；兩者分開記錄，不把寫出時間當成事發時間。
-- **不改 M1 的 trace 格式與檢查器**：M1 的 live 檢查器嚴格解碼 trace，新增欄位會被判為未知成員，所以時間紀錄寫成另一個檔案。
-- 不保存模型原文；不需要串流平台。
+場次結束時，Host 在 trace 旁另寫 `<task>-<nanos>.timing.json`。**不改 M1 的 trace 格式與檢查器**（M1 的 live 檢查器嚴格解碼 trace，新增欄位會被判為未知成員）；不保存模型原文或憑證；不需要簽章、外部錨點或串流平台。
 
-### 6.3 重疊判定
+```json
+{
+  "version": "apa.demo.timing.v1",
+  "host_instance": "<Host 啟動時產生的 128 位元亂數>",
+  "host_started_utc": "2026-10-11T08:00:00.000Z",
+  "clock": "monotonic_ms_since_host_start",
+  "run_id": "run-…", "task_id": "show-a-02", "consumer_id": "consumer-a", "mode": "live",
+  "lifecycle": {
+    "accepted_ms": 1200, "process_started_ms": 1210,
+    "stop_accepted_ms": null, "stop_accepted_from": null,
+    "process_reaped_ms": 12950, "run_ended_ms": 12990
+  },
+  "calls": [
+    {"id": 1, "tool": "list_products", "product_id": "", "started_ms": 6020, "completed_ms": 6031, "outcome": "ok"},
+    {"id": 2, "tool": "get_quote", "product_id": "kr-market", "started_ms": 8410, "completed_ms": 8450, "outcome": "ok"},
+    {"id": 3, "tool": "request_purchase", "product_id": "kr-market", "started_ms": 10870, "completed_ms": null, "outcome": "interrupted"}
+  ],
+  "written_utc": "2026-10-11T08:00:13.100Z"
+}
+```
 
-- 每場的**有效工作區間** E = [第一次工具呼叫的 `received_at`, 最後一次的 `answered_at`]，必須落在該場程序的 `running` 區間內，且至少有 2 次工具呼叫（區間長度大於 0）。這符合路線 §6.2 的定義：程序仍在執行，且區間內有該場自己的真實工具呼叫。
-- **重疊成立**的條件全部要有：
-  1. 兩場是不同 consumer、不同 run、不同 task；
-  2. 兩場都是 live 模式，在同一個 Host 程序；
-  3. E_A 與 E_B 的交集長度大於 0。
-- **只有 task 重疊**：程序區間或 Ask 等待期間重疊，但 E_A 與 E_B 沒有交集，判為「只有 task 重疊」，**不通過**。CLI 閒置、Ask 期限、回放與動畫都不算。
-- 判定由一個唯讀小工具讀兩個時間紀錄檔與 `host_runs` 完成（M-C 實作），輸出兩個區間、交集與判定；不宣稱知道模型供應商內部是否同時推論。
+- **Host 實例**：`host_instance` 在每次 Host 啟動時產生，所有場次的紀錄都帶它；兩份紀錄同一個值，才是同一個 Host 生命週期。不能只因檔案在同一個目錄就認定相同。
+- **時間基準**：`*_ms` 全部是「距 Host 啟動的單調時間」（Go 的 `time.Since(hostStart)` 使用單調時鐘），用來比較先後與區間；只有同一個 `host_instance` 的單調時間可以互相比較。UTC 時間只供閱讀，不用可跳動的牆鐘判定先後。
+- **生命週期時點**：受理、程序開始、停止受理（以及受理當時的程序狀態）、程序回收、場次結束。停止受理與程序回收分開記錄；不用秒級 Store 事件代替。
+- **工具呼叫**：每場內唯一的 `id`，`started_ms`（toolbridge 收到呼叫）與 `completed_ms`（回覆送出）配對，加上 `tool`、`product_id`、`outcome`；run／task／consumer 綁定在檔案層級（來自該場的 `Binding`）。中斷而沒有完成的呼叫，`completed_ms` 為 `null` 並標 `outcome:"interrupted"`，不補造完成時間。
+- 時點都在**事發當下**記錄；`written_utc` 是檔案寫出的時間，兩者分開，不把寫出時間當成事發時間。
 
-### 6.4 有界的開始方式與停止隔離
+### 6.3 紀錄的完整性檢查
 
-- **開始**：主持人按「A、B 一起開始」，兩個請求相隔不到一秒送出。真實的單筆 Ask 一場約 10 秒，3 次工具呼叫分散在其中，兩場同時開始時有效工作區間通常會交集。這是**一次**嘗試：沒有達到重疊就照實記為「未達目標」，不重試到通過；下一次嘗試需另行核准。不加假工具呼叫、不讓工具卡住、不加睡眠。
-- **停止隔離**（路線 §6.2 第 3 步）：主持人頁顯示每場的 `tool_calls` 次數。在 A 仍是 `running` 且已有至少 1 次工具呼叫、B 也仍是 `running` 時，才停止 A。證據：
-  - A 的時間紀錄在停止前有工具呼叫，Store 有 A 的 `TASK_CANCELLED`；
-  - B 在 A 的停止時間之後仍有 `answered_at`，並以自己的結果結束。
-  A 已結束時，不能記成「成功停止活躍的 Agent」。真實的時間窗很短，若這次沒能在條件成立時停止，照實記為「停止隔離未示範」，不重試。
-- **fake 測試**：fake CLI 加一個只在測試用的步驟 `wait_file`（等待某個檔案出現才繼續），用握手精確控制兩場交錯與停止時機。它只在 fake 情境使用，不進 live。
-- 真實執行的確認清單在 M-C 另行取得核准；本設計的 review 不代替執行核准。
+判定工具先檢查每一份紀錄，任何一項不成立就不往下判定重疊：
+
+| 問題 | 判定 |
+|---|---|
+| 缺檔、缺必要欄位、版本不認得 | `incomplete`（證據不足） |
+| 兩份紀錄的 `host_instance` 不同 | `not_comparable`（不同 Host，時間不能比較） |
+| 時間倒退：受理 > 程序開始、程序開始 > 程序回收、`started_ms` > `completed_ms` | `invalid` |
+| 工具呼叫落在該場的程序區間外 | `invalid` |
+| 呼叫 `id` 重複、或有完成卻沒有開始 | `invalid` |
+| 檔案內的 run／task／consumer 與 `host_runs` 不一致 | `invalid` |
+| `mode` 不是 `live`（M-C 時） | `not_live` |
+
+只有檔名或 `mode` 標籤，不能判 PASS。
+
+### 6.4 重疊判定（只宣稱觀測到的事）
+
+三種區間分開：
+- **程序區間** P = [`process_started_ms`, `process_reaped_ms`]：程序存活，不代表在工作；
+- **工具活動跨度** S = [第一次呼叫的 `started_ms`, 最後一次完成的 `completed_ms`]：其間可能有等待或閒置，不宣稱每一刻都在工作；
+- **已觀測的呼叫區間** C_i = [`started_ms`, `completed_ms`]：實際觀測到的工具活動。
+
+**交錯條件**（機器可判定的 operational 定義）：把兩場已完成呼叫的 `started_ms` 合併排序，存在 A、B、A、B（或 B、A、B、A）的交替順序，即：
+- 存在 a1 < b1 < a2 < b2（或 b1 < a1 < b2 < a2），其中 a 是 A 的呼叫開始、b 是 B 的呼叫開始；
+- 四個呼叫都落在各自的程序區間內；
+- 兩場都通過 6.3 的完整性檢查，是同一個 `host_instance`、不同的 consumer、run 與 task。
+
+**結論與原文**：
+
+| 結論 | 條件 | 輸出原文 |
+|---|---|---|
+| 交錯成立 | 交錯條件成立 | 「同一 Host 上，consumer-a 與 consumer-b 的真實工具呼叫交錯發生：雙方都在對方兩次呼叫之間有自己的工具呼叫。這不代表跨度內每一刻都在工作，也不代表觀測到模型供應商內部同時推論。」 |
+| 只有工具活動跨度相交 | S_A ∩ S_B 非空，但沒有交替順序 | 「兩場的工具活動跨度相交，但沒有觀測到交錯的工具呼叫；未確認兩場同時有活動。」 |
+| 只有程序存活重疊 | P_A ∩ P_B 非空，S 不相交 | 「兩場的程序同時存活，但工具活動沒有重疊；未確認同時工作。」 |
+| 只有 task 重疊 | 只有 Ask 等待期間重疊 | 「只有 task（Ask 等待）重疊，不是工作重疊。」 |
+| 不判定 | 6.3 任一問題 | 依 6.3 的判定原文，列出未確認的部分 |
+
+只有「交錯成立」算達到 M-C 的工作重疊；其他都照實回報，不寫成「已證明持續同時工作」。
+
+### 6.5 有界的開始方式與停止隔離
+
+- **開始**：主持人按「一起開始」，兩個請求相隔不到一秒送出。真實的單筆 Ask 一場約 10 秒、3 次工具呼叫，兩場同時開始時可能交錯，但不保證。這是**一次**嘗試：沒有達到交錯就照實記錄 6.4 的結論，不重試到通過；下一次嘗試需另行核准。不加假工具呼叫、不讓工具卡住、不加睡眠或延遲。
+- **停止隔離**（路線 §6.2 第 3 步）：主持人頁顯示每場的 `tool_calls` 次數。在 A 仍是 `running` 且已有至少 1 次完成的工具呼叫、B 也仍是 `running` 時，才停止 A。成立條件（全部可從時間紀錄與 Store 查證）：
+  - A 的 `stop_accepted_ms` 存在，且 `stop_accepted_from` 是 `running`；A 在這個時點之前有完成的呼叫；
+  - A 的 `process_reaped_ms` 在 `stop_accepted_ms` 之後，Store 有 A 的 `TASK_CANCELLED`；
+  - B 的程序區間包含 `stop_accepted_ms`，B 在該時點之後有自己的呼叫開始與完成，並以自己的結果結束（不是被取消）。
+  A 已結束時停止會回 `409 run_not_running`，不能記成「成功停止活躍的 Agent」。真實的時間窗很短；若這次沒能在條件成立時停止，照實記為「停止隔離未示範」，不重試。
+
+### 6.6 切片分工
+
+- **M-B**：以 fake 完成時間紀錄與**唯讀判定工具**，並以正常與反例驗證（第 10 節）。fake CLI 加一個只在測試用的步驟 `wait_file`（等待某個檔案出現才繼續），用握手精確產生交錯、不交錯、停止等情況。
+- **M-C**：只使用 M-B 已 review 的工具，核對另行核准的真實兩場證據；不在臨場修改規則來取得 PASS。真實執行的確認清單在 M-C 另行取得核准；本設計的 review 不代替執行核准。
 
 ## 7 介面變更一覽
 
 | 介面 | 變更 | 權限 | 錯誤 |
 |---|---|---|---|
-| `POST /api/host/runs` | 請求不變；名額改為每 consumer 一場、總數 2 | operator（現行） | 新增 `409 consumer_busy`（帶 `run`）、`409 capacity_full`（帶 `runs`）；其餘現行 |
-| `POST /api/host/runs/{id}/stop` | 依 run ID 在進行中的場次查找 | operator | 現行 |
+| `cmd/demo --max-runs N` | 新旗標；預設 2；`1 ≤ N ≤ consumer 數`；需要 `--scenarios` | 本機啟動 | 非整數、超出範圍或沒有 `--scenarios`：拒絕啟動，結束碼非 0 |
+| `POST /api/host/runs` | 請求不變；名額改為每 consumer 一場、總數不超過 N | operator（現行） | 新增 `409 consumer_busy`（帶 `run`）、`409 capacity_full`（帶 `max_runs` 與 `runs`）；其餘現行 |
+| `POST /api/host/runs/{id}/stop` | 依 run ID 在進行中的場次查找；記錄停止受理時點 | operator | 現行 |
 | `POST /api/host/tasks/{id}/cancel` | 依 task 查進行中的場次 | operator | 現行 |
-| `GET /api/host/status` | `runs.active` 由單一物件改為陣列 `[{run_id,task_id,consumer_id,live}]`（最多 2） | host、operator | 現行 |
+| `GET /api/host/status` | `runs.active` 由單一物件改為陣列 `[{run_id,task_id,consumer_id,live}]`（最多 N）；新增 `capacity` | host、operator | 現行 |
 | `runView` | 增加 `tool_calls`（次數；只在 `live` 為 `running`／`stopping` 時出現） | host、operator | — |
 | `GET /api/tasks/{id}/trace` | 「執行中」改依 task 判斷 | 現行 | 現行 |
-| 橋接 | v2 訊息、`bridge` 回報、`rendered` 細節帶 consumer 與欄位世代；v1 保留 | — | Invalid／Stale 規則見第 5.2 節 |
-| 時間紀錄檔 | `<task>-<nanos>.timing.json`（新） | Host 本機檔案，不經 HTTP | — |
+| 橋接 | v2 訊息；`bridge` 回報（版本與客人清單）；`rendered` 細節帶 consumer 與欄位世代；六項精確完成判定；v1 保留 | — | Invalid／Stale 規則見第 5.2 節 |
+| 時間紀錄檔 | `<task>-<nanos>.timing.json`（新，第 6.2 節） | Host 本機檔案，不經 HTTP | 判定規則見第 6.3 節 |
+| 重疊判定工具 | 唯讀，讀兩份時間紀錄與 `host_runs`，輸出 6.4 的結論與原文 | 本機 | 第 6.3、6.4 節 |
 | 可信設定 | `scenarios.json` 加 `ask-b`（consumer-b 主商品 Ask）；`scenarios-live.json` 加 `live-b` | — | — |
 
 不改事件契約、Store 的付款語意或 M1 的證據格式。
@@ -241,13 +333,14 @@ Host 從「全域同時一場」改成「**每位 consumer 最多一場、總數
 
 | 範圍 | 檔案 | 內容 |
 |---|---|---|
-| Host | `cmd/demo/control.go`、`cancel.go`、`live.go`、`main.go`（註解） | 進行中場次對照表、名額與錯誤碼、`summary`、依 task 判斷執行中 |
-| 工具橋 | `internal/toolbridge`（呼叫紀錄）、`internal/buyer/host.go`（寫時間紀錄檔） | 呼叫時間、時間紀錄檔 |
-| fake | `internal/buyer/fakecli`、`testdata/cli/` | `wait_file` 步驟與雙場測試情境 |
-| 設定 | `testdata/demo/scenarios.json`、`scenarios-live.json` | `ask-b`、`live-b` |
-| 網頁 | `web/adapter.js`、`web/app.js`、`web/host.js`、`web/host.html`、`web/unity.js` | 每 consumer 的欄位狀態與輪詢、選取、v2 投影與回報、按鈕與文字 |
-| Unity | `Projection.cs`、`ShopBridge.cs`、`ShopView.cs` | 場景世代加每位客人的欄位、v2 解析、逐位清空、偏移、兩行狀態、`bridge` 回報 |
-| 測試 | `cmd/demo/*_test.go`、`web/test/*.mjs`、Unity EditMode／PlayMode、新的雙場瀏覽器腳本 | 第 10 節 |
+| Host | `cmd/demo/main.go`（`--max-runs`、Host 實例 ID 與啟動時點、註解）、`control.go`、`cancel.go`、`live.go` | 有效上限、以 consumer 為鍵的進行中場次、名額與錯誤碼、`summary`、`capacity`、生命週期時點、依 task 判斷執行中 |
+| 工具橋 | `internal/toolbridge`（呼叫的編號與單調時點）、`internal/buyer/host.go`、`cmd/demo/fakeruns.go`（寫時間紀錄檔） | 時間紀錄 |
+| 判定工具 | 新的唯讀工具（Go 小程式或 `scripts/verify/` 下的腳本，M-B 實作時擇一） | 第 6.3、6.4 節 |
+| fake | `internal/buyer/fakecli`、`testdata/cli/` | `wait_file` 步驟與多場測試情境 |
+| 設定 | `testdata/demo/scenarios.json`、`scenarios-live.json`、`scripts/demo/*.sh`（不帶 `--max-runs` 時用預設） | `ask-b`、`live-b` |
+| 網頁 | `web/adapter.js`、`web/app.js`、`web/host.js`、`web/host.html`、`web/unity.js` | 以 consumer 為鍵的欄位狀態與輪詢、選取與查看、v2 投影、六項完成判定、容量與畫面能力的明示 |
+| Unity | `Projection.cs`、`ShopBridge.cs`、`ShopView.cs` | 場景世代加每位客人的欄位、v2 解析、逐位清空、偏移、逐位狀態列、`bridge` 回報 |
+| 測試 | `cmd/demo/*_test.go`、`internal/toolbridge` 測試、`web/test/*.mjs`、Unity EditMode／PlayMode、新的多場瀏覽器腳本 | 第 10 節 |
 | 文件 | `docs/demo-operation-design.md`、`demo-ui.md`、`demo-presentation-design.md`、`m1-boundaries.md`（加註）、README | 依第 1 節同步 |
 
 不需要改：Store schema、事件契約、Policy、Gate、認證清單、CLI 版本釘選、plugin 設定、M1 的產包器與檢查器。
@@ -256,21 +349,21 @@ Host 從「全域同時一場」改成「**每位 consumer 最多一場、總數
 
 | 片 | 內容 | 出口（可集中 review） | 核准 |
 |---|---|---|---|
-| **M-A**（本文件） | 最小設計與範圍修訂 | 本文件經 Codex review | — |
-| **M-B** | 雙場 Host、資料隔離、Unity 雙角色、最小主持人選取、時間紀錄檔；**只用 fake** | 一次集中 review：Host 名額與停止隔離、網頁與 Unity v2、時間紀錄與重疊判定工具（以 fake 握手產生的交錯資料驗證），以及第 10 節的回歸 | 設計 review 通過後核准實作 |
-| **M-C** | 兩位真實 Agent 的受控展示：重疊證據、停止隔離 | 真實執行的時間紀錄、重疊判定、兩場的結果與畫面；未達目標照實記錄 | 每次 live 執行另行核准 |
+| **M-A**（本文件） | 最小設計與範圍修訂 | 本文件經 Codex review（R1～R4 補正後限定複核） | — |
+| **M-B** | 多場 Host（有效上限、預設 2）、資料隔離、Unity 雙角色、最小主持人選取與查看、時間紀錄與唯讀判定工具；**只用 fake** | 一次集中 review：Host 名額與停止隔離、網頁與 Unity v2、時間紀錄與判定工具（以 fake 握手產生的正常與反例驗證），以及第 10 節的回歸 | 設計複核通過後核准實作 |
+| **M-C** | 兩位真實 Agent 的受控展示：以 M-B 已 review 的工具判定工作重疊與停止隔離 | 真實執行的時間紀錄、判定結論原文、兩場的結果與畫面；未達目標照實記錄 | 每次 live 執行另行核准 |
 | 後續 | Admin 活動／請購營運總覽；之後隨付款整合加入結算金額與鏈上證據 | 另行設計 | — |
 
-- 相對路線文件舊版 M-B（含 Admin 總覽），本片收斂為雙場與角色選取；主持人頁的 A／B 場次狀態是控制用途，不是營收儀表板。
-- 付款、20 個付款帳號、ZK 不是開始 M-B 的前置條件；這些最終商業展示的要求也不因此刪除。
+- 相對路線文件舊版 M-B（含 Admin 總覽），本片收斂為多場與角色選取；主持人頁的場次狀態是控制用途，不是營收儀表板。
+- 付款、約 20 個付款帳號的展示規模、ZK 不是開始 M-B 的前置條件；這些最終商業展示的要求也不因此刪除。
 - **M-B 的實作順序**（同一個 review 出口，不拆成多次審批）：
-  1. Host 名額、錯誤碼、停止與取消依場次或 task 查找，加上 Go race 測試；
-  2. 工具呼叫時間與時間紀錄檔、fake 的 `wait_file`、重疊判定工具；
+  1. Host 的 `--max-runs`、名額、錯誤碼、停止與取消依場次或 task 查找、`capacity`，加上 Go race 測試；
+  2. Host 實例、生命週期時點、工具呼叫編號與單調時點、時間紀錄檔、fake 的 `wait_file`、唯讀判定工具與其反例；
   3. Unity v2（`Projection`、`ShopBridge`、`ShopView`）與 EditMode／PlayMode 測試；
-  4. 網頁的欄位狀態、輪詢、選取與 v2 投影，加上 node 測試；
-  5. 雙場瀏覽器流程與既有流程的回歸。
-- **任務編號建議**：B1 卡都已 Done，不占用。建議新增 **B2-01 雙 Agent 商店（M-B）**、**B2-02 兩位真實 Agent 工作重疊（M-C）**，Admin 總覽之後為 B2-03。M-A／M-B／M-C 簡稱保留。若「第二批」的 B2 編號已保留給付款模組，由 Aaron 指定其他編號。
-- **分支建議**：設計 review 通過後，從本文件的 commit 開新分支（例如 `b2-dual-agent`）實作 M-B；`b1-04-live` 保留 M1 的狀態。本輪不建立分支。
+  4. 網頁的欄位狀態、輪詢、選取與查看、v2 投影、六項完成判定、容量明示，加上 node 測試；
+  5. 多場瀏覽器流程與既有流程的回歸。
+- **任務編號建議**：B1 卡都已 Done，不占用。建議新增 **B2-01 雙 Agent 商店（M-B）**、**B2-02 兩位真實 Agent 工作重疊（M-C）**，Admin 總覽之後為 B2-03。M-A／M-B／M-C 簡稱保留。若「第二批」的 B2 編號已保留給付款模組，由 Aaron 指定其他編號。本輪補正不定案編號、不開工。
+- **分支建議**：設計複核通過後，從最終設計 commit 開新分支（例如 `b2-dual-agent`）實作 M-B；`b1-04-live` 保留 M1 的狀態。本輪不建立分支。
 
 ## 10 後續驗收與測試成本
 
@@ -279,49 +372,66 @@ Host 從「全域同時一場」改成「**每位 consumer 最多一場、總數
 | 情境 | 必須成立 | 主要驗證 |
 |---|---|---|
 | A、B 交錯執行 | 各自的 task、請購、事件鏈、錢包參照與畫面一致；不串資料 | Go（fake，`wait_file` 交錯）、瀏覽器 |
-| 同人重複開始、重送、名額已滿 | 不重複執行、不超過 2；`consumer_busy`、`capacity_full`、`request_id_conflict` 可理解 | Go |
-| 停 A、B 繼續 | 只取消 A 的 context、程序群組與 capability；兩場各有收尾結果 | Go（race）、瀏覽器 |
+| 容量設定 | 預設 2 並在啟動訊息與 `status.capacity` 顯示；非整數、0、超過 consumer 數、沒有 `--scenarios` 都拒絕啟動；`N = 1` 等於單場行為 | Go |
+| 同人重複開始、重送、名額已滿、`stopping` 占位 | 不重複執行、不超過有效上限；`stopping` 未收尾時新開始回 `capacity_full`；`consumer_busy`、`request_id_conflict` 可理解 | Go |
+| 超出畫面能力 | 有效上限或 consumer 超過 Unity 宣告的客人時，主持人頁明示哪些不在場景中；場次列表列出全部場次，不靜默遺漏；舊 Unity 時明示只呈現選取的一位 | node、瀏覽器 |
+| 停 A、B 繼續 | 只取消 A 的 context、程序群組與 capability；兩場各有收尾結果；A 的停止受理時點與程序回收時點分開記錄 | Go（race）、瀏覽器 |
 | A 慢 trace、失敗或到期 | B 的資料、輪詢與動畫不被拖住 | Go、node、瀏覽器 |
-| viewer 越權、晚到回覆、舊 Unity 回報 | 不暴露其他 consumer；舊欄位或舊場景世代的回覆與回報不覆蓋新狀態；B 的回報不完成 A | Go、node、Unity |
-| 新頁面配舊 Unity | 顯示「只支援單一客人」說明，不靜默少一位 | node、瀏覽器 |
+| Unity 完成回報 | 正例：六項完全一致才完成。反例：錯 consumer、錯 slot、錯 scene、錯 task、錯 phase、舊 seq、未送過的較大 seq、缺欄位或格式錯誤，都不完成、不結束另一位或較新目標的等待；放行真正符合的回報後才完成 | node、Unity |
+| 查看較早的 task | A、B 正在各自更新時查看 A 的較早 task：兩位場景仍跟隨最新資料、欄位世代不變；面板明示「場景呈現的是…」；「回到場景這筆」後面板回到最新；回放退出後沒有舊回覆污染場景或面板 | node、瀏覽器 |
+| viewer 越權、晚到回覆、舊 Unity 回報 | 不暴露其他 consumer；舊欄位、舊查看或舊場景世代的回覆與回報不覆蓋新狀態 | Go、node、Unity |
 | 刷新與服務重啟 | 不自動執行模型、不混場；中斷與未確認照實顯示 | Go、瀏覽器 |
 | 單場 fake、live 接線替身、單筆歷史回放、`/` viewer 頁 | 必要的既有行為不退化；不重開 M1 驗收 | 既有測試 |
-| 重疊判定工具 | 交集為正才通過；只有 task 重疊、單一工具呼叫、不同 Host 程序都不通過 | Go 或 script 單元測試 |
-| 真實工作重疊 | M-C 另以真實兩場的證據判定 | M-C |
+| 時間紀錄與判定工具 | 同一 Host 的合法交錯 → 交錯成立；不同 `host_instance` → `not_comparable`；呼叫配對缺失、時間倒退、呼叫落在程序區間外、`id` 重複 → `invalid`；只有 task 重疊、只有程序存活重疊、跨度相交但沒有交替（跨度內有空白的活動區間）→ 不通過並輸出對應原文；中斷的呼叫保留 `null` 完成時間；A 已結束才停止 → 不算停止隔離 | Go 或 script 單元測試（以 fake 握手與手寫的反例紀錄，M-B 實作時建立） |
+| 真實工作重疊與停止隔離 | M-C 以已 review 的工具核對真實兩場證據 | M-C |
 
 ### 10.2 測試與耗時
 
 - **每次修改**：只跑受影響的定向測試。
-  - `go test -race` 跑 `./cmd/demo` 的場次與取消測試（現行套件約 1～3 分鐘）、`./internal/toolbridge`、`./internal/buyer`；
+  - `go test -race` 跑 `./cmd/demo` 的場次、容量與取消測試（現行套件約 1～3 分鐘）、`./internal/toolbridge`、`./internal/buyer`；
   - `node --test web/test/*.mjs`（約 10 秒）；
-  - Unity EditMode／PlayMode（以 `scripts/unity/unity.sh` 執行，約 1～2 分鐘，需要 Unity）。
+  - Unity EditMode／PlayMode（以 `scripts/unity/unity.sh` 執行，約 1～2 分鐘，需要 Unity）；
+  - 判定工具的單元測試（秒級）。
 - **M-B 出口前一次**：
-  - 新的雙場瀏覽器流程（預估 3～5 分鐘）；
+  - 新的多場瀏覽器流程（預估 3～5 分鐘）；
   - 既有的 `browser-ui.mjs` 回歸（約 7 分鐘）與歷史回放、live 替身流程（各約 1～2 分鐘）。
 - **不預設跑**：`make m1-fixture`（只在改到 fixture 或證據共用程式時才跑，約 8 分鐘）、完整容器（必要時由實作派工明列次數與範圍，約 15～20 分鐘）、全部突變與全部反向清單。
 - **反向檢查**只集中在關鍵保護：
-  - 名額上限、同 consumer 拒絕；
+  - 有效上限、同 consumer 拒絕、`stopping` 占位、非法設定拒絕；
   - 停止只作用於指定場次、capability 只撤銷該場；
-  - 欄位世代的晚到防護、Unity 的 Invalid／Stale；
-  - 舊 Unity 的明示退回；
-  - 重疊判定（只有 task 重疊不得通過）。
+  - 六項完成判定（任一項不比對都要被抓到）、欄位與查看世代的晚到防護、Unity 的 Invalid／Stale；
+  - 舊 Unity 與超出畫面能力的明示；
+  - 判定工具的 `host_instance` 檢查、配對與時間倒退檢查、交替條件（只有跨度相交不得通過）。
   沿用 `m1-e3-reverse.py` 的作法：每項指定對應測試與預期斷言，在一次性 clone 中執行。
 - **進度**：耗時的驗證沿用 `cmd/m1-check` 的 `--plan`，顯示步驟、基準、elapsed、log 位置與 PASS／FAIL／NOT_RUN。失敗先保存紀錄並定位，不原樣重跑到轉綠。
 
 ## 11 需要 Aaron 決定的事項
 
-雙 Agent 重疊的方向已接受，不再列為待決。只剩：
-1. **M-C 的真實執行**：兩個場次同時使用同一個本人訂閱（`~/.apa-claude`）的用量與限流風險，以及核准幾次嘗試（重疊一次、停止隔離一次，或合併為一次）。
-2. **正式規則文字**：第 1 節的建議新規則，在 review 通過後由 Aaron 確認再同步到 PRD、執行計畫與後續任務卡。
+雙 Agent 重疊的方向與「同時執行上限是部署設定、本輪預設 2」的原則已接受，不再列為待決。只剩：
+1. **M-C 的真實執行**：多個場次同時使用同一個本人訂閱（`~/.apa-claude`）的用量與限流風險，以及核准幾次嘗試（重疊一次、停止隔離一次，或合併為一次）。
+2. **正式規則文字**：第 1 節的建議新規則，在複核通過後由 Aaron 確認再同步到 PRD、執行計畫與後續任務卡。
 3. **任務編號**：若 B2 已保留給付款模組，指定雙 Agent 卡的編號。
 
-其他細節（錯誤碼、欄位世代、偏移、檔名、測試範圍）是本文件的推薦，由 review 決定是否調整。
+其他細節（錯誤碼、旗標名稱、欄位世代、偏移、檔名、時間紀錄欄位、測試範圍）是本文件的推薦，由 review 決定是否調整。
 
 ## 12 本片不做的事
 
-- 20 人或更多同時執行、效能測試、排程平台、分散式 runtime；
+- 大量同時執行、效能或壓力測試、自動容量探測、排隊、排程平台、分散式 runtime；
+- 擴增 `show-*` 測試資料池或付款帳號；
 - Admin 聚合、營收數據；
 - 付款、grant、真實核准、ZK、Signer、鏈上交易；
-- Unity 內點選角色（D3）、新的尋路或素材；
+- Unity 內點選角色（D3）、新的尋路或素材、超過兩位客人的 Unity 畫面；
 - 改 Store 的付款語意、事件契約、M1 證據格式與檢查器；
-- 為了重疊而加假工具呼叫、卡住工具或睡眠。
+- 完整的 AI 活動監控、保存模型原文；
+- 為了重疊而加假工具呼叫、卡住工具、睡眠或延遲。
+
+## 13 R1～R4 補正對照（Codex 對 `79000a2` 的核對）
+
+Codex 的結論是「方向通過，R1～R4 補正後再限定複核；暫不開始 M-B」。Codex 這次做的是文件、Git 差異與相關原始碼的唯讀核對，沒有跑測試、容器、Unity 或 CLI，沒有 repo 證據 log。本輪是設計修訂，不以任何舊測試結果作為通過證據。原寫法保留在 `79000a2`。
+
+| 項目 | 原寫法（`79000a2`） | 修改後的規則 | 驗收位置 |
+|---|---|---|---|
+| **R1** 容量 | §3.1 寫死 `maxConcurrentRuns = 2`、「不做成旗標」；「20 個付款帳號」寫成固定要求 | 三種數量分開（§3.1）；同時執行上限是部署設定 `--max-runs`，預設與驗收 2，有驗證、拒絕與顯示規則（§3.2、§7）；「約 20 個付款帳號」是先前估計的展示規模；20 個 `show-*` task 是測試資料池；資料鍵以 consumer／run／task 定位；超出畫面能力時明示、不靜默遺漏 | §10.1「容量設定」「同人重複開始…`stopping` 占位」「超出畫面能力」 |
+| **R2** Unity 回報 | §5.2 的完成條件只列 scene、consumer、slot、task；把現行同步描述成只比世代與序號 | 六項（scene、consumer、slot、task、seq、phase）全部等於該角色最後送出的投影才完成；缺項、錯項、舊序號、未送過的較大序號都不完成；同一規則用於狀態列、查證面板與動畫完成；註明現行 `sameShown` 已精確比對世代、task、序號、階段，v2 在其上加角色與欄位隔離（§5.2） | §10.1「Unity 完成回報」 |
+| **R3** 查看與場景 | §5.4 一處說選取只換面板，另一處允許手動選舊 task 後更換 Unity 欄位 | 場景 task 只跟隨每位 consumer 最新場次；選取與查看較早 task 只換面板，不送替代投影、不增欄位世代、不停輪詢；場景 task 與查看 task 分開保存並明示差異、提供回到場景這筆；只有歷史回放切換場景模式，退出後重新取得資料、舊回覆丟棄（§5.1、§5.4、§5.5） | §10.1「查看較早的 task」 |
+| **R4** 時間證據 | §6.2～6.4 只記錄呼叫的牆鐘毫秒；沒有 Host 實例、程序與停止時點；以首末呼叫的跨度當成有效工作區間；判定工具一處說 M-C 實作、一處列入 M-B | 時間紀錄加 Host 實例、單調時間基準、生命週期與停止受理時點、呼叫編號與開始完成配對、中斷呼叫不補時間（§6.2）；完整性檢查與判定（§6.3）；分開程序區間、工具活動跨度、已觀測呼叫區間，以「呼叫開始的交替順序」作為 operational 定義，並列出各結論原文，不宣稱持續工作或供應商內部同時推論（§6.4）；停止隔離的可查證條件（§6.5）；判定工具在 M-B 以 fake 完成，M-C 只用已 review 的工具（§6.6、§9） | §10.1「停 A、B 繼續」「時間紀錄與判定工具」 |

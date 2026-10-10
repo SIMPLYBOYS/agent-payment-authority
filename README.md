@@ -21,7 +21,7 @@
 
 預設的 fake 模式與所有測試**不需要**也不會使用：Claude Code CLI、模型服務、RPC、facilitator、testnet 帳戶。只有明確 opt-in 的 live 命令（`make m1-live-cli`、`make present-live`，每次都需另行核准）才需要官方 Claude Code CLI（釘選 `2.1.293`）與本人的官方登入（APA 專用設定目錄 `~/.apa-claude`）；登入由使用者自己透過官方流程完成，這個 repo 不讀取、不複製也不保存登入憑證。
 
-**下一階段（設計中）**：雙 Agent 商店的 M-A 設計見 [docs/multi-agent-demo-design.md](docs/multi-agent-demo-design.md)（待 review，尚未實作）。
+**下一階段（設計中）**：雙 Agent 商店的 M-A 設計見 [docs/multi-agent-demo-design.md](docs/multi-agent-demo-design.md)（R1～R4 補正完成，待限定複核；尚未實作）。同時執行的 Agent 數將是部署設定，本輪預設 2。
 
 **M1 的結果**：M1 已於 2026-10-11 結案，見 [docs/m1-result.md](docs/m1-result.md)（fixture 與 live 證據包、逐卡核對、重跑命令、限制與結案紀錄）。**乾淨目錄**：2026-10-11 在只有本 repo clone 的新目錄，以 `cp .env.example .env` 與 `make m1-fixture` 完成 fixture E2E（31 案 PASS，檢查器 PASS）；使用本機的 Go／Node 快取與既有的 Unity Web 建置副本（`docs/m1-result.md` 第 3.4 節）。
 
