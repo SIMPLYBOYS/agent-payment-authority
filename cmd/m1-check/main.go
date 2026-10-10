@@ -17,8 +17,10 @@
 //
 // Every byte a step prints goes to its log, up to maxLog; progress reads
 // lines of up to maxLine and skips longer ones (they stay in the log). A
-// log, progress file or summary that cannot be saved whole, and a summary
-// that cannot be written to stdout, make the run incomplete.
+// log, progress file or summary that cannot be saved whole (a write, a
+// short write or a Close that fails), and a summary that cannot be written
+// to stdout, make the run incomplete; progress.log is closed before the
+// summary and the exit code are formed.
 //
 // Exit codes, the first that applies: 2 a step was interrupted; 1 a step
 // failed, timed out or could not run; 3 the evidence or the summary is
@@ -191,11 +193,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	// Progress goes to stderr and, while it can be saved, to the evidence
 	// directory too.
 	var prog io.Writer = stderr
+	var progFile io.WriteCloser // closed before the summary is formed
 	if saving {
 		if f, err := openLog(filepath.Join(dir, "progress.log")); err != nil {
 			saveErr("progress.log", err)
 		} else {
-			defer func() { saveErr("progress.log", f.Close()) }()
+			progFile = f
 			prog = io.MultiWriter(stderr, &failSafe{w: f, onErr: func(err error) { saveErr("progress.log", err) }})
 		}
 		if raw, err := json.MarshalIndent(plan, "", "  "); err == nil {
@@ -242,6 +245,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			ec = fmt.Sprint(*r.ExitCode)
 		}
 		say("  %d/%d %-16s %-11s exit %-3s %6.1fs %s", i+1, len(sum.Steps), r.Name, r.Result, ec, r.Seconds, r.Log)
+	}
+	// progress.log ends here, before summary.json, the stdout JSON and the
+	// exit code are formed, so its last writes and its Close count in them;
+	// what follows goes to stderr only.
+	if progFile != nil {
+		mu.Lock()
+		saveErr("progress.log", progFile.Close())
+		prog = stderr
+		mu.Unlock()
 	}
 	if saving {
 		raw, _ := json.MarshalIndent(sum, "", "  ")
