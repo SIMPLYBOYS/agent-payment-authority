@@ -65,12 +65,15 @@ type liveToolCall struct {
 	Outcome   string `json:"outcome"`
 }
 
-// liveRun is live/run.json (version apa.m1.live.v1), every member named.
+// liveRun is live/run.json (version apa.m1.live.v2: v1 had no
+// termination, and recorded a normal end as the outer bound; see
+// docs/m1-evidence.md 16.6), every member named.
 type liveRun struct {
 	Version            string   `json:"version"`
 	RunID              string   `json:"run_id"`
 	Command            string   `json:"command"`
 	ExitCode           int      `json:"apa_buyer_exit_code"`
+	Termination        string   `json:"termination"`
 	ProducerError      string   `json:"producer_error"`
 	StartedAt          uint64   `json:"started_at"`
 	EndedAt            uint64   `json:"ended_at"`
@@ -290,7 +293,7 @@ func (v *verifier) liveRunRecord(f *findings, run liveRun, t *task, lr *LiveRepo
 		cmd = v.m.Commands[0].Command
 	}
 	switch {
-	case run.Version != "apa.m1.live.v1":
+	case run.Version != "apa.m1.live.v2":
 		f.fail("V4", ev, "run record version %s", quote(run.Version))
 	case run.RunID != v.m.RunID || run.Command != cmd || len(v.m.Commands) == 1 && run.ExitCode != v.m.Commands[0].ExitCode:
 		f.fail("V4", ev, "the run record is not the manifest's run, command or exit code")
@@ -300,6 +303,18 @@ func (v *verifier) liveRunRecord(f *findings, run liveRun, t *task, lr *LiveRepo
 	}
 	if run.CLIVersionRequired != buyer.ApprovedCLIVersion || !slices.Equal(run.AuthAccepted, buyer.LiveAcceptAuth) {
 		f.fail("V1", ev, "the run record names another approved version or accepted authentication than the shared live settings")
+	}
+	// How the run ended, as the producer recorded it, against its exit code:
+	// a live claim needs a run that ended by itself with 0 and no producer
+	// error; a recorded failure is never outweighed by the other fields.
+	switch t, code, perr := run.Termination, run.ExitCode, run.ProducerError; {
+	case !slices.Contains([]string{"completed", "wrapper_exit_nonzero", "outer_bound", "interrupted", "start_failed"}, t):
+		f.fail("V4", ev, "termination %s is not one the producer records", quote(t))
+	case t == "completed" && (code != 0 || perr != ""), t == "wrapper_exit_nonzero" && (code == 0 || perr != ""),
+		t == "start_failed" && code != -1, (t == "outer_bound" || t == "interrupted" || t == "start_failed") && perr == "":
+		f.fail("V4", ev, "the run record contradicts itself: termination %s, exit %d, producer error %s", quote(t), code, quote(perr))
+	case t != "completed" || perr != "":
+		f.fail("V4", ev, "the run did not end by itself: termination %s (%s)", quote(t), quote(perr))
 	}
 	r := run.Report
 	switch {

@@ -31,6 +31,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -45,11 +46,31 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/m1evidence"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/progress"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 )
 
+// main stops this run on SIGINT or SIGTERM: the first cancels it (the
+// wrapper's group gets SIGTERM, then SIGKILL after the grace period, see
+// internal/progress.Group) and the bundle records the interruption; later
+// signals are only reported, so they cannot cut the cleanup short or
+// restart its clock. SIGKILL cannot be caught.
 func main() {
-	os.Exit(run(os.Args[1:], os.Environ(), os.Stdout, os.Stderr))
+	ctx, cancel := context.WithCancel(context.Background())
+	sigs := make(chan os.Signal, 4)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		for n := 0; ; n++ {
+			s := <-sigs
+			if n == 0 {
+				fmt.Fprintf(os.Stderr, "m1-live: %v: stopping this run (no retry); the wrapper gets SIGTERM and its bounded cleanup runs\n", s)
+				cancel()
+			} else {
+				fmt.Fprintf(os.Stderr, "m1-live: %v again: already stopping; the cleanup continues\n", s)
+			}
+		}
+	}()
+	os.Exit(run(ctx, os.Args[1:], os.Environ(), os.Stdout, os.Stderr))
 }
 
 // Exit codes: the bundle is complete and the ask claim passed; complete
@@ -75,8 +96,9 @@ const (
 )
 
 // run is the producer; env is its whole environment, which apa-buyer gets
-// with APA_DB_PATH added (apa-buyer narrows the CLI's own).
-func run(args []string, env []string, stdout, stderr io.Writer) int {
+// with APA_DB_PATH added (apa-buyer narrows the CLI's own). ctx ending is
+// the operator's interruption.
+func run(ctx context.Context, args []string, env []string, stdout, stderr io.Writer) int {
 	getenv := func(k string) string {
 		v := ""
 		for _, kv := range env {
@@ -97,6 +119,7 @@ func run(args []string, env []string, stdout, stderr io.Writer) int {
 	workRoot := fl.String("work", "artifacts/m1-live-work", "where the run's private working directory (database, trace, build) is made")
 	task := fl.String("task", "task-a", "the trusted registry task")
 	wait := fl.Duration("wait", 10*time.Minute, "outer bound on the one run (apa-buyer's own limits are 180 s); then it is stopped, not retried")
+	heartbeat := fl.Duration("heartbeat", 10*time.Second, "how often a quiet stage reports that it is still waiting")
 	if fl.Parse(args) != nil || fl.NArg() != 0 {
 		return exitIncomplete
 	}
@@ -104,6 +127,18 @@ func run(args []string, env []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "m1-live: STOP (nothing was started): "+format+"\n", a...)
 		return exitIncomplete
 	}
+	// Stages and heartbeats go to stderr; they name the producer's own
+	// steps only, never what the CLI says.
+	begun := time.Now()
+	stage := func(n int, name string) {
+		fmt.Fprintf(stderr, "m1-live: [%d/6] %s (%s, %s since start)\n", n, name, time.Now().UTC().Format("15:04:05Z"), time.Since(begun).Truncate(time.Second))
+	}
+	waiting := func(what string) func() {
+		return progress.Heartbeat(stderr, *heartbeat, func(d time.Duration) string {
+			return fmt.Sprintf("m1-live: ... %s: still waiting (%s); no new information", what, d)
+		})
+	}
+	stage(1, "preconditions")
 	// Preconditions: nothing is created, built or started before they pass.
 	if on, err := strconv.ParseBool(getenv("APA_LIVE_CLI")); err != nil || !on || !*live {
 		return stop("a live run needs both --live and APA_LIVE_CLI=true")
@@ -202,6 +237,7 @@ func run(args []string, env []string, stdout, stderr io.Writer) int {
 	}
 
 	// A clean local clone at HEAD and its build; the build must say so.
+	stage(2, "local clone")
 	buildDir := filepath.Join(workAbs, "build")
 	if err := os.Mkdir(buildDir, 0o700); err != nil {
 		return b.incomplete("save_failed", "nothing was started", err)
@@ -209,16 +245,29 @@ func run(args []string, env []string, stdout, stderr io.Writer) int {
 	defer os.RemoveAll(buildDir) // only what this run built
 	src := filepath.Join(buildDir, "src")
 	for _, c := range [][]string{{"clone", "--quiet", "--no-hardlinks", "--no-checkout", repoAbs, src}, {"-C", src, "checkout", "--quiet", "--detach", head}} {
-		if out, err := exec.Command("git", c...).CombinedOutput(); err != nil {
-			return b.incomplete("provenance_failed", "nothing was started", fmt.Errorf("git %s: %v: %s", c[0], err, bytes.TrimSpace(out)))
+		quiet := waiting("git " + c[0])
+		gitOut, err := exec.CommandContext(ctx, "git", c...).CombinedOutput()
+		quiet()
+		if ctx.Err() != nil {
+			return b.incomplete("interrupted", "nothing was started", ctx.Err())
+		}
+		if err != nil {
+			return b.incomplete("provenance_failed", "nothing was started", fmt.Errorf("git %s: %v: %s", c[0], err, bytes.TrimSpace(gitOut)))
 		}
 	}
 	afterClone(src)
+	stage(3, "build and VCS check")
 	bin := filepath.Join(buildDir, "apa-buyer")
-	gb := exec.Command("go", "build", "-o", bin, "./cmd/apa-buyer")
+	gb := exec.CommandContext(ctx, "go", "build", "-o", bin, "./cmd/apa-buyer")
 	gb.Dir = src
-	if out, err := gb.CombinedOutput(); err != nil {
-		return b.incomplete("provenance_failed", "nothing was started", fmt.Errorf("go build: %v: %s", err, bytes.TrimSpace(out)))
+	quiet := waiting("go build")
+	buildOut, err := gb.CombinedOutput()
+	quiet()
+	if ctx.Err() != nil {
+		return b.incomplete("interrupted", "nothing was started", ctx.Err())
+	}
+	if err != nil {
+		return b.incomplete("provenance_failed", "nothing was started", fmt.Errorf("go build: %v: %s", err, bytes.TrimSpace(buildOut)))
 	}
 	vcs, err := exec.Command("go", "version", "-m", bin).Output()
 	if err != nil {
@@ -266,26 +315,49 @@ func run(args []string, env []string, stdout, stderr io.Writer) int {
 	cmdArgs = append(cmdArgs, "--task", *task, "--registry", filepath.Join(src, "testdata/contracts/registry.json"),
 		"--profile", filepath.Join(src, "testdata/policy/m1-demo-profile.json"), "--trace-dir", traceDir)
 	command := "apa-buyer " + strings.Join(cmdArgs, " ")
+	if ctx.Err() != nil {
+		return b.incomplete("interrupted", "nothing was started", ctx.Err())
+	}
+	beforeRun(bin)
+	stage(4, "the wrapper run: waiting for apa-buyer to finish (no CLI text is read)")
 	fmt.Fprintf(stderr, "m1-live: %s: LIVE: one run of %s (%s gate); no retry\n", runID, *cli, *gate)
 	started := time.Now().UTC()
-	ctx, cancel := context.WithTimeout(context.Background(), *wait)
-	c := exec.CommandContext(ctx, bin, cmdArgs...)
+	runCtx, cancelRun := context.WithTimeout(ctx, *wait)
+	c := exec.CommandContext(runCtx, bin, cmdArgs...)
 	c.Dir = src
 	c.Env = append(slices.Clone(env), "APA_DB_PATH="+dbPath)
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	c.Cancel = func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGTERM) } // apa-buyer stops its run
-	c.WaitDelay = 30 * time.Second                                                   // then the group is killed
+	var group progress.Group
+	group.Prepare(c, 30*time.Second) // SIGTERM to apa-buyer's group (it stops its run), SIGKILL to that group 30 s later
 	var outBuf, errBuf bounded
 	outBuf.max, errBuf.max = maxStdout, maxStderr
 	c.Stdout, c.Stderr = &outBuf, &errBuf
+	quiet = waiting("apa-buyer")
 	runErr := c.Run()
-	cancel()
-	ended := time.Now().UTC()
+	group.Done()
+	quiet()
+	// Why it ended, read before anything else is cancelled: the stop ran
+	// (the operator, or the outer bound), it never started, or it exited by
+	// itself (with its own code).
+	termination := "completed"
 	exitCode := -1
 	if c.ProcessState != nil {
 		exitCode = c.ProcessState.ExitCode()
 	}
+	switch {
+	case group.Stopped() && ctx.Err() != nil:
+		termination = "interrupted"
+	case group.Stopped():
+		termination = "outer_bound"
+	case c.ProcessState == nil:
+		termination = "start_failed"
+	case exitCode != 0:
+		termination = "wrapper_exit_nonzero"
+	}
+	cancelRun()
+	_ = runErr // the termination and the exit code say it
+	ended := time.Now().UTC()
 	os.RemoveAll(buildDir)
+	stage(5, "Store offline check and read-only export")
 
 	// What the run left: apa-buyer's whitelisted report and its own error
 	// lines, the trace, the Store.
@@ -386,7 +458,8 @@ func run(args []string, env []string, stdout, stderr io.Writer) int {
 		}
 	}
 	runRecord := map[string]any{
-		"version": "apa.m1.live.v1", "run_id": runID, "command": command, "apa_buyer_exit_code": exitCode, "producer_error": errString(runErr, ctx),
+		"version": "apa.m1.live.v2", "run_id": runID, "command": command, "apa_buyer_exit_code": exitCode,
+		"termination": termination, "producer_error": producerError[termination],
 		"started_at": started.Unix(), "ended_at": ended.Unix(), "gate_mode": *gate, "gate_result": gateResult, "model": model,
 		"cli": filepath.Base(*cli), "cli_version_required": buyer.ApprovedCLIVersion, "auth_accepted": buyer.LiveAcceptAuth,
 		"report": report, "host_error_lines": nonNil(hostLines), "dropped_stderr_lines": dropped, "trace_files": len(traces),
@@ -408,6 +481,11 @@ func run(args []string, env []string, stdout, stderr io.Writer) int {
 	askCase := cases.Cases[askI]
 	verdict, reason := "PASS", "the run ended ok and its stored record shows the Ask"
 	switch {
+	case termination == "interrupted" || termination == "outer_bound" || termination == "start_failed":
+		verdict, reason = "FAIL", producerError[termination]
+		if tasks == nil {
+			verdict = "INCONCLUSIVE"
+		}
 	case tasks == nil:
 		verdict, reason = "INCONCLUSIVE", "no task was stored: the run did not reach the Store"
 	case exitCode != 0 || report["outcome"] == nil || string(report["outcome"].(json.RawMessage)) != `"ok"`:
@@ -466,6 +544,7 @@ func run(args []string, env []string, stdout, stderr io.Writer) int {
 		}
 	}
 	m.NotEvaluated = append(m.NotEvaluated, contracts.CapabilityIDs...)
+	stage(6, "saving the bundle")
 	beforeManifest(dir)
 	if leaks := scan(dir); len(leaks) > 0 {
 		return b.incomplete("secret_found", "", fmt.Errorf("a bare token-like value in %v", leaks))
@@ -495,10 +574,11 @@ func run(args []string, env []string, stdout, stderr io.Writer) int {
 
 // Test hooks; nothing else sets them. beforeManifest breaks the directory
 // before the manifest and the end marker are written; afterClone changes
-// the clone before it is built.
+// the clone before it is built; beforeRun can remove the built wrapper.
 var (
 	beforeManifest = func(dir string) {}
 	afterClone     = func(src string) {}
+	beforeRun      = func(bin string) {}
 )
 
 // bundle saves into the new run directory and marks it incomplete when
@@ -590,17 +670,14 @@ func firstLine(b []byte) string {
 	return v
 }
 
-func errString(err error, ctx context.Context) string {
-	switch {
-	case ctx.Err() != nil:
-		return "the outer bound was reached; the run was stopped"
-	case err == nil:
-		return ""
-	}
-	if _, ok := errors.AsType[*exec.ExitError](err); ok {
-		return "" // apa-buyer's exit code says it
-	}
-	return "apa-buyer could not be run"
+// producerError is the producer's own account of a run that did not end by
+// itself; "" when it did (its exit code, 0 or not, says the rest).
+var producerError = map[string]string{
+	"completed":            "",
+	"wrapper_exit_nonzero": "",
+	"outer_bound":          "the outer bound was reached; the run was stopped",
+	"interrupted":          "interrupted by the operator (SIGINT or SIGTERM); the run was stopped",
+	"start_failed":         "apa-buyer could not be started",
 }
 
 func nonNil(s []string) []string {

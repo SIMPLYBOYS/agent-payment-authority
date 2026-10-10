@@ -1,4 +1,4 @@
-.PHONY: check check-contracts build dev demo-fake demo-integration demo present-live present-fake m1-fixture verify-m1 m1-live-cli
+.PHONY: check check-m1-e3 check-contracts build dev demo-fake demo-integration demo present-live present-fake m1-fixture verify-m1 m1-live-cli
 
 # Compile, vet and unit-test. Calls no paid model and touches no testnet.
 check:
@@ -103,3 +103,12 @@ verify-m1:
 m1-live-cli:
 	@test -n "$(CLI)" && test -n "$(BASE)" && test -n "$(GATE)" || { echo "usage: APA_LIVE_CLI=true make m1-live-cli CLI=/abs/path/claude BASE=<reviewed commit> GATE=dev_demo_plugins|strict" >&2; exit 2; }
 	@go run -buildvcs=true ./cmd/m1-live --live --cli "$(CLI)" --base "$(BASE)" --gate "$(GATE)"
+
+# M1-E3 fix round (docs/m1-evidence.md 16.6): the targeted fake checks and
+# the R1/R2 reverse checks, with progress on stderr and the JSON summary on
+# stdout, into a new artifacts/m1-check/m1-check-<time>/. No real CLI. ARGS=--list
+# prints the plan and runs nothing. Exit 0 PASS, 1 a step did not pass, 2
+# interrupted, 3 the evidence is incomplete. Built first so a signal reaches
+# the runner itself (not go run).
+check-m1-e3:
+	@go build -o "$${TMPDIR:-/tmp}/apa-m1-check" ./cmd/m1-check && exec "$${TMPDIR:-/tmp}/apa-m1-check" $(ARGS)
