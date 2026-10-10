@@ -97,12 +97,22 @@ func setup(t *testing.T, version string, steps []map[string]any) env {
 	return e
 }
 
+// goDirs are the go command's cache directories as resolved here (not
+// only when set in the environment): with HOME a new directory, the clone's
+// build would otherwise start from an empty cache each time.
+var goDirs = sync.OnceValue(func() []string {
+	out, _ := exec.Command("go", "env", "GOCACHE", "GOMODCACHE", "GOPATH").Output()
+	var dirs []string
+	for i, v := range strings.Fields(string(out)) {
+		dirs = append(dirs, []string{"GOCACHE", "GOMODCACHE", "GOPATH"}[i]+"="+v)
+	}
+	return dirs
+})
+
 func (e env) env(extra ...string) []string {
-	out := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + e.home}
-	for _, k := range []string{"GOCACHE", "GOMODCACHE", "GOPATH", "TMPDIR"} {
-		if v := os.Getenv(k); v != "" {
-			out = append(out, k+"="+v)
-		}
+	out := append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + e.home}, goDirs()...)
+	if v := os.Getenv("TMPDIR"); v != "" {
+		out = append(out, "TMPDIR="+v)
 	}
 	return append(out, extra...)
 }
@@ -474,7 +484,7 @@ func TestInterruptInProcess(t *testing.T) {
 		t.Fatalf("exit %d, end %q, starts %v\n%s", code, endState(t, dir), e.starts(), se.String())
 	}
 	if r := runRecord(t, dir); r.Termination != "interrupted" || !strings.HasPrefix(r.ProducerError, "interrupted") {
-		t.Fatalf("%+v", r)
+		t.Fatalf("termination %q, producer error %q", r.Termination, r.ProducerError)
 	}
 	for _, pid := range []int{cli, wrapper} {
 		if s := state(pid); s != "gone" {
@@ -498,48 +508,108 @@ func TestSignals(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := setup(t, approved, hang)
-			c := exec.Command(bin, "--repo", e.repo, "--out", e.out, "--work", e.work, "--live", "--cli", e.cli, "--base", "HEAD", "--gate", "dev_demo_plugins")
+			if len(sigs) > 1 {
+				holdOnTerm(t, e)
+			}
+			// --wait: a signal that does not stop the run ends at the outer
+			// bound (outer_bound), not by the test's own deadline.
+			c := exec.Command(bin, "--repo", e.repo, "--out", e.out, "--work", e.work, "--live", "--cli", e.cli, "--base", "HEAD", "--gate", "dev_demo_plugins", "--wait", "30s")
 			c.Env = live(e)
-			var so, se bytes.Buffer
-			c.Stdout, c.Stderr = &so, &se
+			errPath := filepath.Join(e.root, "stderr")
+			errFile, _ := os.Create(errPath)
+			defer errFile.Close()
+			var so bytes.Buffer
+			c.Stdout, c.Stderr = &so, errFile
 			if err := c.Start(); err != nil {
 				t.Fatal(err)
 			}
 			cli := ready(t, e)
 			wrapper := parent(cli)
-			for i, s := range sigs {
-				if i > 0 {
-					time.Sleep(100 * time.Millisecond)
+			if err := c.Process.Signal(sigs[0]); err != nil {
+				t.Fatal(err)
+			}
+			signalled := time.Now()
+			if len(sigs) > 1 {
+				// The cleanup has begun (the stand-in CLI got its SIGTERM)
+				// and is held by the test: only then the second signal,
+				// whose handling must show while the CLI is still held.
+				until(t, "the cleanup did not begin", func() bool { _, err := os.Stat(e.count + ".term"); return err == nil })
+				if s := state(cli); s != "running" {
+					t.Fatalf("the stand-in CLI is %s before the second signal; the cleanup is not held", s)
 				}
-				c.Process.Signal(s)
+				if err := c.Process.Signal(sigs[1]); err != nil {
+					t.Fatal(err)
+				}
+				until(t, "the second signal was not reported", func() bool {
+					b, _ := os.ReadFile(errPath)
+					return strings.Contains(string(b), "again: already stopping")
+				})
+				if s := state(cli); s != "running" {
+					t.Fatalf("the stand-in CLI is %s when the second signal was reported; it did not arrive during the cleanup", s)
+				}
+				os.WriteFile(e.count+".release", nil, 0o600)
 			}
 			waited := make(chan error, 1)
 			go func() { waited <- c.Wait() }()
+			wrapperGone := make(chan time.Duration, 1)
+			go func() {
+				for state(wrapper) == "running" {
+					time.Sleep(50 * time.Millisecond)
+				}
+				wrapperGone <- time.Since(signalled)
+			}()
 			select {
 			case <-waited:
 			case <-time.After(90 * time.Second):
 				c.Process.Kill()
 				t.Fatal("the producer did not end after the signal")
 			}
+			t.Logf("after the first signal: apa-buyer gone %s, the producer ended %s", <-wrapperGone, time.Since(signalled))
+			se, _ := os.ReadFile(errPath)
 			code := c.ProcessState.ExitCode()
 			dir := e.bundleDir(t)
 			if code != exitFailures || endState(t, dir) != "complete" || strings.Join(e.starts(), ",") != "version,run" {
-				t.Fatalf("exit %d, end %q, starts %v\n%s", code, endState(t, dir), e.starts(), se.String())
+				t.Fatalf("exit %d, end %q, starts %v\n%s", code, endState(t, dir), e.starts(), se)
 			}
 			if r := runRecord(t, dir); r.Termination != "interrupted" {
 				t.Fatalf("termination %q", r.Termination)
-			}
-			if len(sigs) > 1 && !strings.Contains(se.String(), "already stopping") {
-				t.Fatalf("the second signal was not reported:\n%s", se.String())
 			}
 			for _, pid := range []int{cli, wrapper} {
 				if s := state(pid); s != "gone" {
 					t.Fatalf("process %d is %s after the producer ended", pid, s)
 				}
 			}
-			noMarker(t, dir, so.String(), se.String())
+			noMarker(t, dir, so.String(), string(se))
 		})
 	}
+}
+
+// holdOnTerm makes the stand-in CLI hold the cleanup: on SIGTERM it
+// records <count>.term and waits for <count>.release (apa-buyer's own
+// SIGKILL, 3 s later, ends it otherwise).
+func holdOnTerm(t *testing.T, e env) {
+	t.Helper()
+	b, _ := os.ReadFile(e.cli)
+	script := string(b)
+	i := strings.LastIndex(script, "APA_FAKE_CLI_SCENARIO=")
+	if i < 0 {
+		t.Fatal("unexpected stand-in script")
+	}
+	run := strings.Replace(strings.TrimSpace(script[i:]), " exec ", " ", 1)
+	script = script[:i] + "trap 'echo > " + e.count + ".term; while [ ! -f " + e.count + ".release ]; do sleep 0.02; done; exit 143' TERM\n" + run + " &\nwait\n"
+	os.WriteFile(e.cli, []byte(script), 0o700)
+}
+
+// until polls cond (a readiness condition, not a fixed sleep) for up to
+// 20 s.
+func until(t *testing.T, failure string, cond func() bool) {
+	t.Helper()
+	for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+		if cond() {
+			return
+		}
+	}
+	t.Fatal(failure)
 }
 
 // A quiet stage reports that it is still waiting, and stops reporting when

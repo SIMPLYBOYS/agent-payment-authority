@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -170,18 +172,111 @@ func TestReverse(t *testing.T) {
 	lines := func(res ...string) string {
 		s := "echo PLAN 2"
 		for i, r := range res {
-			s += "; echo ITEM " + strconv.Itoa(i+1) + "/2 x" + strconv.Itoa(i) + "; echo " + r + " x" + strconv.Itoa(i)
+			s += "; echo ITEM " + strconv.Itoa(i+1) + "/2 x" + strconv.Itoa(i) + "; echo 'RESULT " + r + " | 0.5s | x" + strconv.Itoa(i) + " | why'"
 		}
 		return s
 	}
 	for want, script := range map[string]string{
-		"PASS": lines("caught", "caught"),
-		"FAIL": lines("caught", "MISSED"),
+		"PASS":           lines("caught", "caught"),
+		"FAIL":           lines("caught", "not-caught"),
+		"FAIL, one item": lines("caught"), // fewer results than planned
 	} {
 		_, sum, se := check(t, context.Background(), "--out", t.TempDir(), "--plan", plan(t, sh("rev", script, time.Minute, "reverse")))
-		if sum.Verdict != want || !strings.Contains(se, "item 2/2 x1") {
+		if !strings.HasPrefix(want, sum.Verdict) || !strings.Contains(se, "item 1/2 x0") || !strings.Contains(se, "CAUGHT x0 (0.5s): why") {
 			t.Fatalf("want %s: %+v\n%s", want, sum, se)
 		}
+	}
+}
+
+// A line longer than progress reads (and than the old 16 MiB scanner
+// buffer) is saved whole in the log, and what follows it is still read
+// (10/11 review, R3).
+func TestLongLine(t *testing.T) {
+	script := "head -c 17000000 /dev/zero | tr '\\0' a; echo; echo PLAN 1; echo ITEM 1/1 x; echo 'RESULT caught | 1s | x | why'; echo END-MARK"
+	code, sum, se := check(t, context.Background(), "--out", t.TempDir(), "--plan", plan(t, sh("long", script, time.Minute, "reverse")))
+	b, _ := os.ReadFile(sum.Steps[0].Log)
+	if code != exitPass || !sum.Complete || !sum.Steps[0].LogSaved || len(b) < 17000000 || !strings.HasSuffix(string(b), "END-MARK\n") || !strings.Contains(se, "CAUGHT x") {
+		t.Fatalf("exit %d, %d log bytes, %+v\n%s", code, len(b), sum, se)
+	}
+}
+
+// A log over its limit is incomplete: the step keeps its own result, the
+// run is incomplete, exit 3; a failing step still exits 1 (the step's
+// failure comes first).
+func TestLogLimit(t *testing.T) {
+	defer func(m int64) { maxLog = m }(maxLog)
+	maxLog = 1000
+	for script, want := range map[string]int{"head -c 5000 /dev/zero": exitIncomplete, "head -c 5000 /dev/zero; exit 4": exitFailed} {
+		code, sum, se := check(t, context.Background(), "--out", t.TempDir(), "--plan", plan(t, sh("big", script, time.Minute, "plain")))
+		b, _ := os.ReadFile(sum.Steps[0].Log)
+		wantResult := map[int]string{exitIncomplete: "PASS", exitFailed: "FAIL"}[want]
+		if code != want || sum.Complete || sum.Steps[0].LogSaved || sum.Steps[0].Result != wantResult || len(b) != 1000 || !strings.Contains(sum.Steps[0].Detail, "size limit") {
+			t.Fatalf("%s: exit %d, %d log bytes, %+v\n%s", script, code, len(b), sum, se)
+		}
+	}
+}
+
+// failAfter fails writes once n bytes were taken.
+type failAfter struct {
+	n     int
+	short bool // a short write without an error, instead of an error
+}
+
+func (f *failAfter) Write(p []byte) (int, error) {
+	if len(p) <= f.n {
+		f.n -= len(p)
+		return len(p), nil
+	}
+	k := f.n
+	f.n = 0
+	if f.short {
+		return k, nil
+	}
+	return k, errors.New("disk full")
+}
+
+func (f *failAfter) Close() error { return nil }
+
+// A log write that fails part way: the step is drained and keeps its
+// result, the evidence is incomplete, exit 3.
+func TestLogWriteFailure(t *testing.T) {
+	defer func(o func(string) (io.WriteCloser, error)) { openLog = o }(openLog)
+	openLog = func(path string) (io.WriteCloser, error) {
+		if strings.HasSuffix(path, "01-w.log") {
+			return &failAfter{n: 10}, nil
+		}
+		return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	}
+	code, sum, se := check(t, context.Background(), "--out", t.TempDir(), "--plan", plan(t, sh("w", "head -c 300000 /dev/zero", time.Minute, "plain")))
+	if code != exitIncomplete || sum.Complete || sum.Steps[0].Result != "PASS" || sum.Steps[0].LogSaved || !strings.Contains(se, "INCOMPLETE") {
+		t.Fatalf("exit %d, %+v\n%s", code, sum, se)
+	}
+}
+
+// A summary that cannot be written to stdout (an error, or a short write)
+// is not a success: exit 3, a fixed message on stderr that says whether
+// the evidence files were saved; summary.json is there. A failing step
+// still exits 1.
+func TestSummaryNotDelivered(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		out    *failAfter
+		script string
+		want   int
+	}{
+		{"error", &failAfter{n: 5}, "true", exitIncomplete},
+		{"short write", &failAfter{n: 5, short: true}, "true", exitIncomplete},
+		{"error, a failing step", &failAfter{n: 5}, "exit 4", exitFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := t.TempDir()
+			var se bytes.Buffer
+			code := run(context.Background(), []string{"--out", out, "--plan", plan(t, sh("s", tc.script, time.Minute, "plain"))}, tc.out, &se)
+			dirs, _ := filepath.Glob(filepath.Join(out, "m1-check-*", "summary.json"))
+			if code != tc.want || len(dirs) != 1 || !strings.Contains(se.String(), "the JSON summary was NOT delivered on stdout") || !strings.Contains(se.String(), "evidence files are complete") {
+				t.Fatalf("exit %d, %d summaries\n%s", code, len(dirs), se.String())
+			}
+		})
 	}
 }
 
