@@ -1,27 +1,39 @@
 // Command m1-check runs a round's targeted fake verification with terminal
-// progress (make check-m1-e3; docs/m1-evidence.md 16.6):
+// progress (make check-m1-e3; docs/m1-evidence.md 16.6, 16.7):
 //
 //	m1-check [--list] [--out artifacts/m1-check] [--heartbeat 10s] [--plan FILE]
 //
 // Before running it prints the base commit, the steps with their commands
-// and timeouts, and the evidence directory; --list prints that and runs
-// nothing. Each step prints START, then (on stderr) what it can say
-// reliably: for `go test -json` steps the test running and the counts so
-// far, for the reverse checks the item and its result; a quiet step gets a
-// heartbeat (default every 10 s) saying the process is still running and
-// how long since its last output. Each ends PASS, FAIL, TIMEOUT,
-// INTERRUPTED or ERROR with its real exit code and its log. After a step
-// that does not pass, the rest are NOT RUN; nothing is retried. stdout
-// carries only the final JSON summary.
+// and timeouts, the reverse items with their own test filters, and the
+// evidence directory; --list prints that and runs nothing. Each step
+// prints START, then (on stderr) what it can say reliably: for
+// `go test -json` steps the test running and the counts so far, for the
+// reverse checks the item, its time and its result; a quiet step gets a
+// heartbeat (default every 10 s) with the counts, the step and total time,
+// how long since its last output and its log. Each ends PASS, FAIL,
+// TIMEOUT, INTERRUPTED or ERROR with its real exit code and its log. After
+// a step that does not pass, the rest are NOT RUN; nothing is retried.
+// stdout carries only the final JSON summary.
 //
-// The default plan is M1-E3's fix round: fake only. It runs no real CLI,
-// make m1-live-cli, version query or login.
+// Every byte a step prints goes to its log, up to maxLog; progress reads
+// lines of up to maxLine and skips longer ones (they stay in the log). A
+// log, progress file or summary that cannot be saved whole, and a summary
+// that cannot be written to stdout, make the run incomplete.
+//
+// Exit codes, the first that applies: 2 a step was interrupted; 1 a step
+// failed, timed out or could not run; 3 the evidence or the summary is
+// incomplete (or usage); 0 every step passed and everything was saved and
+// written. A save failure never changes a step's own result.
+//
+// The default plan is the M1-E3 10/11 fix round: fake only. It runs no real
+// CLI, make m1-live-cli, version query or login.
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -39,8 +51,9 @@ import (
 )
 
 // Step is one command of a plan. Kind says how its output is read: "go"
-// (go test -json events), "reverse" (PLAN/ITEM lines of a reverse-check
-// script) or "plain".
+// (go test -json events), "reverse" (PLAN/ITEM/RESULT lines of a
+// reverse-check script) or "plain". "{dir}" in Cmd is the evidence
+// directory.
 type Step struct {
 	Name    string        `json:"name"`
 	Cmd     []string      `json:"cmd"`
@@ -48,22 +61,36 @@ type Step struct {
 	Kind    string        `json:"kind"`
 }
 
-// e3Plan is the M1-E3 fix round (docs/m1-evidence.md 16.6): fake only.
+// e3Plan is the M1-E3 10/11 fix round (docs/m1-evidence.md 16.7): R1 group
+// stop and signals, R3 saving and the summary, R4 the classifier, the R2
+// contrasts the changed paths need, and the reverse items, each on its own
+// tests. Fake only.
 var e3Plan = []Step{
 	{"vet", []string{"go", "vet", "./cmd/m1-live", "./cmd/m1-check", "./internal/progress", "./internal/verification"}, 5 * time.Minute, "plain"},
-	{"progress-helper", []string{"go", "test", "-json", "-count=1", "-race", "./internal/progress"}, 5 * time.Minute, "go"},
-	{"checker-live", []string{"go", "test", "-json", "-count=1", "-run", "^(TestLive|TestModesAndLayers)", "./internal/verification"}, 10 * time.Minute, "go"},
-	{"producer-fake", []string{"go", "test", "-json", "-count=1", "./cmd/m1-live"}, 20 * time.Minute, "go"},
-	{"check-runner", []string{"go", "test", "-json", "-count=1", "./cmd/m1-check"}, 10 * time.Minute, "go"},
-	{"reverse-r1-r2", []string{"python3", "-u", "scripts/verify/m1-e3-reverse.py", "^(R1|R2) "}, 40 * time.Minute, "reverse"},
+	{"r1-group", []string{"go", "test", "-json", "-count=1", "-race", "./internal/progress"}, 5 * time.Minute, "go"},
+	{"r3-runner", []string{"go", "test", "-json", "-count=1", "-race", "./cmd/m1-check"}, 10 * time.Minute, "go"},
+	{"r4-classifier", []string{"python3", "-I", "scripts/verify/m1_e3_reverse_test.py"}, 2 * time.Minute, "plain"},
+	{"r1-r2-producer", []string{"go", "test", "-json", "-count=1", "-race", "-run", "^(TestSignals|TestInterruptInProcess|TestLiveAsk|TestStartFailure|TestFailedRuns)$", "./cmd/m1-live"}, 15 * time.Minute, "go"},
+	{"r2-checker", []string{"go", "test", "-json", "-count=1", "-race", "-run", "^(TestLiveGolden|TestLiveRecordsThatContradict)$", "./internal/verification"}, 10 * time.Minute, "go"},
+	{"reverse", []string{"python3", "-u", "scripts/verify/m1-e3-reverse.py", "--out", "{dir}/reverse", "^(R1|R2|R3|R4) "}, 30 * time.Minute, "reverse"},
 }
 
 // Exit codes.
 const (
-	exitPass        = 0 // every step passed and the evidence was saved
+	exitPass        = 0 // every step passed; evidence and summary complete
 	exitFailed      = 1 // a step failed, timed out or could not run
 	exitInterrupted = 2 // interrupted (SIGINT or SIGTERM)
-	exitIncomplete  = 3 // usage, or the evidence could not be saved
+	exitIncomplete  = 3 // usage, or the evidence or the summary incomplete
+)
+
+// Limits on what a step's output may take.
+var (
+	maxLog  int64 = 256 << 20 // bytes of a step's log; beyond it the log is incomplete
+	maxLine       = 1 << 20   // bytes of a line progress reads; longer ones are only in the log
+	// openLog creates a new evidence file (a test replaces it to fail).
+	openLog = func(path string) (io.WriteCloser, error) {
+		return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	}
 )
 
 func main() {
@@ -91,10 +118,11 @@ type Result struct {
 	ExitCode *int    `json:"exit_code"`
 	Seconds  float64 `json:"seconds"`
 	Log      string  `json:"log,omitempty"`
+	LogSaved bool    `json:"log_saved"` // the whole output is in Log
 	Detail   string  `json:"detail,omitempty"`
 }
 
-// Summary is the stdout JSON.
+// Summary is the stdout JSON (and summary.json).
 type Summary struct {
 	Base         string   `json:"base"`
 	TrackedClean bool     `json:"tracked_clean"`
@@ -131,37 +159,47 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stderr, "m1-check: base %s (tracked tree clean: %v)\n", base, clean)
 	fmt.Fprintf(stderr, "m1-check: %d steps (steps, not test cases):\n", len(plan))
 	for i, s := range plan {
-		fmt.Fprintf(stderr, "  %d/%d %-16s timeout %-6s %s\n", i+1, len(plan), s.Name, s.Timeout, strings.Join(s.Cmd, " "))
+		fmt.Fprintf(stderr, "  %d/%d %-16s timeout %-6s %s\n", i+1, len(plan), s.Name, s.Timeout, strings.Join(expand(s.Cmd, dir), " "))
+		if s.Kind == "reverse" && *list {
+			// The items and their own test filters (the script's --list
+			// reads its table only).
+			c := exec.CommandContext(ctx, s.Cmd[0], append(expand(s.Cmd[1:], dir), "--list")...)
+			c.Stdout, c.Stderr = stderr, stderr
+			if err := c.Run(); err != nil {
+				fmt.Fprintf(stderr, "m1-check: listing %s: %v\n", s.Name, err)
+				return exitIncomplete
+			}
+		}
 	}
 	fmt.Fprintf(stderr, "m1-check: evidence %s\n", dir)
 	if *list {
 		return exitPass
 	}
 	sum := Summary{Base: base, TrackedClean: clean, Evidence: dir, Complete: true, Steps: []Result{}}
-	saveErr := func(err error) {
+	saveErr := func(what string, err error) {
 		if err != nil && sum.Complete {
 			sum.Complete = false
-			fmt.Fprintf(stderr, "m1-check: the evidence could not be saved (%v); the run's evidence is INCOMPLETE\n", err)
+			fmt.Fprintf(stderr, "m1-check: %s could not be saved whole (%v); the evidence is INCOMPLETE\n", what, err)
 		}
 	}
 	if err := os.MkdirAll(*out, 0o700); err != nil {
-		saveErr(err)
+		saveErr("the evidence directory", err)
 	} else if err := os.Mkdir(dir, 0o700); err != nil { // new, never an old one
-		saveErr(err)
+		saveErr("the evidence directory", err)
 	}
-	// Progress goes to stderr and, as long as it can be saved, to the
-	// evidence directory too.
+	saving := sum.Complete
+	// Progress goes to stderr and, while it can be saved, to the evidence
+	// directory too.
 	var prog io.Writer = stderr
-	if sum.Complete {
-		f, err := os.OpenFile(filepath.Join(dir, "progress.log"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if err != nil {
-			saveErr(err)
+	if saving {
+		if f, err := openLog(filepath.Join(dir, "progress.log")); err != nil {
+			saveErr("progress.log", err)
 		} else {
-			defer f.Close()
-			prog = io.MultiWriter(stderr, &failSafe{w: f, onErr: saveErr})
+			defer func() { saveErr("progress.log", f.Close()) }()
+			prog = io.MultiWriter(stderr, &failSafe{w: f, onErr: func(err error) { saveErr("progress.log", err) }})
 		}
 		if raw, err := json.MarshalIndent(plan, "", "  "); err == nil {
-			saveErr(os.WriteFile(filepath.Join(dir, "plan.json"), append(raw, '\n'), 0o600))
+			saveErr("plan.json", writeNew(filepath.Join(dir, "plan.json"), append(raw, '\n')))
 		}
 	}
 	var mu sync.Mutex // progress lines from the step reader and the heartbeat
@@ -177,7 +215,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			sum.Steps = append(sum.Steps, Result{Name: s.Name, Result: "NOT_RUN"})
 			continue
 		}
-		r := runStep(ctx, i, len(plan), s, dir, sum.Complete, *heartbeat, started, say, saveErr)
+		r := runStep(ctx, i, len(plan), s, dir, saving, *heartbeat, started, say, saveErr)
 		sum.Steps = append(sum.Steps, r)
 		if r.Result != "PASS" {
 			stopped = true
@@ -205,24 +243,59 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		say("  %d/%d %-16s %-11s exit %-3s %6.1fs %s", i+1, len(sum.Steps), r.Name, r.Result, ec, r.Seconds, r.Log)
 	}
-	raw, err := json.MarshalIndent(sum, "", "  ")
-	if err == nil && sum.Complete {
-		saveErr(os.WriteFile(filepath.Join(dir, "summary.json"), append(raw, '\n'), 0o600))
+	if saving {
+		raw, _ := json.MarshalIndent(sum, "", "  ")
+		saveErr("summary.json", writeNew(filepath.Join(dir, "summary.json"), append(raw, '\n')))
 	}
+	raw, _ := json.MarshalIndent(sum, "", "  ") // evidence_complete as it ended
+	raw = append(raw, '\n')
+	saved := "complete"
 	if !sum.Complete {
-		raw, _ = json.MarshalIndent(sum, "", "  ")
-		say("m1-check: %s; the evidence is INCOMPLETE (%s)", verdict, dir)
-	} else {
-		say("m1-check: %s; evidence %s", verdict, dir)
+		saved = "INCOMPLETE"
 	}
-	stdout.Write(append(raw, '\n'))
-	if !sum.Complete && code == exitPass {
+	say("m1-check: %s; evidence %s (%s)", verdict, dir, saved)
+	if n, err := stdout.Write(raw); err != nil || n != len(raw) {
+		// A fixed message: the writer's error is not repeated.
+		say("m1-check: the JSON summary was NOT delivered on stdout (the write failed or was short); the evidence files are %s in %s", saved, dir)
+		sum.Complete = false
+	}
+	if code == exitPass && !sum.Complete {
 		return exitIncomplete
 	}
 	return code
 }
 
-// failSafe reports the first write error and then keeps quiet.
+// expand puts the evidence directory in for "{dir}".
+func expand(args []string, dir string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = strings.ReplaceAll(a, "{dir}", dir)
+	}
+	return out
+}
+
+// writeNew writes a new evidence file whole, or reports why not.
+func writeNew(path string, data []byte) error {
+	f, err := openLog(path)
+	if err != nil {
+		return err
+	}
+	if n, err := f.Write(data); err != nil || n != len(data) {
+		f.Close()
+		return firstErr(err, io.ErrShortWrite)
+	}
+	return f.Close()
+}
+
+func firstErr(err, or error) error {
+	if err != nil {
+		return err
+	}
+	return or
+}
+
+// failSafe reports the first write error (or short write) and then drops
+// what follows; it never fails its caller.
 type failSafe struct {
 	w     io.Writer
 	onErr func(error)
@@ -231,9 +304,9 @@ type failSafe struct {
 
 func (f *failSafe) Write(p []byte) (int, error) {
 	if !f.err {
-		if _, err := f.w.Write(p); err != nil {
+		if n, err := f.w.Write(p); err != nil || n != len(p) {
 			f.err = true
-			f.onErr(err)
+			f.onErr(firstErr(err, io.ErrShortWrite))
 		}
 	}
 	return len(p), nil
@@ -242,91 +315,143 @@ func (f *failSafe) Write(p []byte) (int, error) {
 var (
 	reversePlan = regexp.MustCompile(`^PLAN (\d+)$`)
 	reverseItem = regexp.MustCompile(`^ITEM (\d+)/(\d+) (.*)$`)
-	reverseRes  = regexp.MustCompile(`^(caught|MISSED|BUILD |ANCHOR) ?(.*)$`)
+	reverseRes  = regexp.MustCompile(`^RESULT (caught|not-caught) \| ([0-9.]+)s \| (.*?) \| (.*)$`)
 )
 
 // state is what a step's reader has seen, for the heartbeat.
 type state struct {
-	mu       sync.Mutex
-	last     time.Time // last output
-	current  string    // the test or item running
-	passed   int
-	failed   int
-	items    int
-	caught   int
-	notCaugt int
+	mu        sync.Mutex
+	last      time.Time // last output
+	current   string    // the test or item running
+	passed    int
+	failed    int
+	items     int // reverse items planned
+	caught    int
+	notCaught int
+}
+
+// stepOut takes a step's output (stdout and stderr, one writer): every byte
+// to the log while it is under maxLog and writes succeed (after that the
+// log is incomplete and the rest is drained unsaved), and whole lines of up
+// to maxLine to the progress reader. It never fails the step's pipe, so the
+// step is never blocked on it.
+type stepOut struct {
+	log     io.Writer // nil: not saved
+	logErr  error     // why the log is incomplete
+	written int64
+	line    []byte
+	skip    bool // in a line longer than maxLine
+	onByte  func()
+	onLine  func(string)
+}
+
+var errLogLimit = errors.New("the log reached its size limit")
+
+func (o *stepOut) Write(p []byte) (int, error) {
+	n := len(p)
+	o.onByte()
+	if o.log != nil && o.logErr == nil {
+		q := p
+		if room := maxLog - o.written; int64(len(q)) > room {
+			q, o.logErr = q[:room], errLogLimit
+		}
+		w, err := o.log.Write(q)
+		o.written += int64(w)
+		if err != nil || w != len(q) {
+			o.logErr = firstErr(err, io.ErrShortWrite)
+		}
+	}
+	for {
+		i := bytes.IndexByte(p, '\n')
+		chunk := p
+		if i >= 0 {
+			chunk = p[:i]
+		}
+		if !o.skip {
+			if len(o.line)+len(chunk) > maxLine {
+				o.skip, o.line = true, o.line[:0]
+			} else {
+				o.line = append(o.line, chunk...)
+			}
+		}
+		if i < 0 {
+			return n, nil
+		}
+		if !o.skip {
+			o.onLine(string(o.line))
+		}
+		o.line, o.skip = o.line[:0], false
+		p = p[i+1:]
+	}
+}
+
+// flush hands on a last line without a newline.
+func (o *stepOut) flush() {
+	if len(o.line) > 0 && !o.skip {
+		o.onLine(string(o.line))
+	}
 }
 
 func runStep(ctx context.Context, i, n int, s Step, dir string, saving bool, every time.Duration, all time.Time,
-	say func(string, ...any), saveErr func(error)) Result {
+	say func(string, ...any), saveErr func(string, error)) Result {
 	r := Result{Name: s.Name}
 	logName := fmt.Sprintf("%02d-%s.log", i+1, s.Name)
 	logPath := filepath.Join(dir, logName)
 	say("START %d/%d %s at %s", i+1, n, s.Name, time.Now().UTC().Format("15:04:05Z"))
-	if saving {
-		say("  log: %s (tail -f it from another terminal)", logPath)
+	st := &state{last: time.Now()}
+	o := &stepOut{
+		onByte: func() { st.mu.Lock(); st.last = time.Now(); st.mu.Unlock() },
+		onLine: func(line string) { read(s.Kind, line, st, say) },
 	}
-	var logW io.Writer = io.Discard
+	var logFile io.WriteCloser
 	if saving {
-		f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		f, err := openLog(logPath)
 		if err != nil {
-			saveErr(err)
+			saveErr(logName, err)
 		} else {
-			defer f.Close()
-			logW = &failSafe{w: f, onErr: saveErr}
-			r.Log = logPath
+			logFile, o.log, r.Log = f, f, logPath
+			say("  log: %s (tail -f it from another terminal)", logPath)
 		}
 	}
 	start := time.Now()
-	st := &state{last: start}
 	stepCtx, cancel := context.WithTimeout(ctx, s.Timeout)
 	defer cancel()
-	c := exec.CommandContext(stepCtx, s.Cmd[0], s.Cmd[1:]...)
+	cmd := expand(s.Cmd, dir)
+	c := exec.CommandContext(stepCtx, cmd[0], cmd[1:]...)
 	var g progress.Group
 	g.Prepare(c, 10*time.Second)
-	pr, pw := io.Pipe()
-	c.Stdout, c.Stderr = pw, pw
-	readDone := make(chan struct{})
-	go func() {
-		defer close(readDone)
-		sc := bufio.NewScanner(pr)
-		sc.Buffer(make([]byte, 64<<10), 16<<20)
-		for sc.Scan() {
-			line := sc.Text()
-			logW.Write([]byte(line + "\n"))
-			st.mu.Lock()
-			st.last = time.Now()
-			st.mu.Unlock()
-			read(s.Kind, line, st, say)
-		}
-		if err := sc.Err(); err != nil {
-			fmt.Fprintf(logW, "m1-check: output not read further: %v\n", err)
-		}
-		io.Copy(io.Discard, pr) // never block the step on a line too long to scan
-	}()
+	c.Stdout, c.Stderr = o, o // one writer: exec calls it from one goroutine at a time
 	stopBeat := progress.Heartbeat(&sayWriter{say}, every, func(d time.Duration) string {
 		st.mu.Lock()
 		defer st.mu.Unlock()
-		quiet := time.Since(st.last).Truncate(time.Second)
-		what := "no test events yet; the process is running (it may still be compiling)"
+		what := "no test events yet; the process is running"
 		switch {
 		case s.Kind == "go" && st.current != "":
 			what = fmt.Sprintf("running %s; %d passed, %d failed so far", st.current, st.passed, st.failed)
 		case s.Kind == "reverse" && st.current != "":
-			what = fmt.Sprintf("item %s; %d caught, %d not caught so far", st.current, st.caught, st.notCaugt)
+			what = fmt.Sprintf("item %s; %d of %d done (%d caught, %d not caught)", st.current, st.caught+st.notCaught, st.items, st.caught, st.notCaught)
 		case s.Kind == "plain":
-			what = "the process is running"
+			what = "the process is running; it reports no events"
 		}
-		return fmt.Sprintf("  ... %d/%d %s: %s (step %s, all %s, last output %s ago)", i+1, n, s.Name, what, d, time.Since(all).Truncate(time.Second), quiet)
+		return fmt.Sprintf("  ... %d/%d %s: %s (step %s, all %s, last output %s ago, log %s)", i+1, n, s.Name, what, d,
+			time.Since(all).Truncate(time.Second), time.Since(st.last).Truncate(time.Second), logName)
 	})
 	err := c.Start()
 	if err == nil {
 		err = c.Wait()
 	}
-	g.Done()
-	pw.Close()
-	<-readDone
+	groupErr := g.Done()
 	stopBeat()
+	o.flush()
+	if logFile != nil {
+		if cerr := logFile.Close(); o.logErr == nil {
+			o.logErr = cerr
+		}
+	}
+	r.LogSaved = logFile != nil && o.logErr == nil
+	if logFile != nil && o.logErr != nil {
+		saveErr(logName, o.logErr)
+	}
 	r.Seconds = time.Since(start).Seconds()
 	if c.ProcessState != nil {
 		code := c.ProcessState.ExitCode()
@@ -334,6 +459,7 @@ func runStep(ctx context.Context, i, n int, s Step, dir string, saving bool, eve
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	var exitErr *exec.ExitError
 	switch {
 	case g.Stopped() && ctx.Err() != nil:
 		r.Result, r.Detail = "INTERRUPTED", "stopped by SIGINT or SIGTERM"
@@ -343,17 +469,32 @@ func runStep(ctx context.Context, i, n int, s Step, dir string, saving bool, eve
 		r.Result, r.Detail = "ERROR", fmt.Sprintf("could not start: %v", err)
 	case *r.ExitCode != 0:
 		r.Result = "FAIL"
-	case s.Kind == "reverse" && (st.items == 0 || st.notCaugt > 0 || st.caught != st.items):
-		r.Result, r.Detail = "FAIL", fmt.Sprintf("%d of %d items caught by an assertion", st.caught, st.items)
+	case err != nil && !errors.As(err, &exitErr):
+		// exit 0, but its output was not read to the end (a pipe error, or
+		// pipes held open past WaitDelay): nothing says it passed.
+		r.Result, r.Detail = "ERROR", fmt.Sprintf("exit 0 but the output was not read to the end: %v", err)
+	case s.Kind == "reverse" && (st.items == 0 || st.caught != st.items):
+		r.Result = "FAIL"
 	default:
 		r.Result = "PASS"
 	}
-	if s.Kind == "go" {
-		r.Detail = strings.TrimSpace(fmt.Sprintf("%s %d tests passed, %d failed", r.Detail, st.passed, st.failed))
+	var notes []string
+	if r.Detail != "" {
+		notes = append(notes, r.Detail)
 	}
-	if s.Kind == "reverse" && r.Detail == "" {
-		r.Detail = fmt.Sprintf("%d of %d items caught by an assertion", st.caught, st.items)
+	switch s.Kind {
+	case "go":
+		notes = append(notes, fmt.Sprintf("%d tests passed, %d failed", st.passed, st.failed))
+	case "reverse":
+		notes = append(notes, fmt.Sprintf("%d of %d items caught by the expected assertion, %d not", st.caught, st.items, st.notCaught))
 	}
+	if groupErr != nil {
+		notes = append(notes, groupErr.Error())
+	}
+	if logFile != nil && o.logErr != nil {
+		notes = append(notes, "log incomplete: "+o.logErr.Error())
+	}
+	r.Detail = strings.Join(notes, "; ")
 	ec := "-"
 	if r.ExitCode != nil {
 		ec = fmt.Sprint(*r.ExitCode)
@@ -400,15 +541,15 @@ func read(kind, line string, st *state, say func(string, ...any)) {
 			st.current = m[1] + "/" + m[2] + " " + m[3]
 			say("  item %s/%s %s", m[1], m[2], m[3])
 		} else if m := reversePlan.FindStringSubmatch(line); m != nil {
+			fmt.Sscan(m[1], &st.items)
 			say("  %s reverse items", m[1])
 		} else if m := reverseRes.FindStringSubmatch(line); m != nil {
-			st.items++
 			if m[1] == "caught" {
 				st.caught++
-				say("    CAUGHT %s", strings.TrimSpace(m[2]))
+				say("    CAUGHT %s (%ss): %s", m[3], m[2], m[4])
 			} else {
-				st.notCaugt++
-				say("    NOT CAUGHT (%s) %s", strings.TrimSpace(m[1]), strings.TrimSpace(m[2]))
+				st.notCaught++
+				say("    NOT CAUGHT %s (%ss): %s", m[3], m[2], m[4])
 			}
 		}
 	}

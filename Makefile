@@ -104,11 +104,13 @@ m1-live-cli:
 	@test -n "$(CLI)" && test -n "$(BASE)" && test -n "$(GATE)" || { echo "usage: APA_LIVE_CLI=true make m1-live-cli CLI=/abs/path/claude BASE=<reviewed commit> GATE=dev_demo_plugins|strict" >&2; exit 2; }
 	@go run -buildvcs=true ./cmd/m1-live --live --cli "$(CLI)" --base "$(BASE)" --gate "$(GATE)"
 
-# M1-E3 fix round (docs/m1-evidence.md 16.6): the targeted fake checks and
-# the R1/R2 reverse checks, with progress on stderr and the JSON summary on
-# stdout, into a new artifacts/m1-check/m1-check-<time>/. No real CLI. ARGS=--list
-# prints the plan and runs nothing. Exit 0 PASS, 1 a step did not pass, 2
-# interrupted, 3 the evidence is incomplete. Built first so a signal reaches
-# the runner itself (not go run).
+# M1-E3 fix rounds (docs/m1-evidence.md 16.6, 16.7): the targeted fake checks
+# and the R1-R4 reverse items (each on its own test, in a disposable clone),
+# with progress on stderr and the JSON summary on stdout, into a new
+# artifacts/m1-check/m1-check-<time>/. No real CLI. ARGS=--list prints the
+# plan, the reverse items' filters and expectations, and runs nothing. Exit
+# 2 interrupted, else 1 a step did not pass, else 3 the evidence or the
+# summary incomplete, else 0. Built first so a signal reaches the runner
+# itself (not go run).
 check-m1-e3:
 	@go build -o "$${TMPDIR:-/tmp}/apa-m1-check" ./cmd/m1-check && exec "$${TMPDIR:-/tmp}/apa-m1-check" $(ARGS)

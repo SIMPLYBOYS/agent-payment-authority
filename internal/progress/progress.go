@@ -5,6 +5,7 @@
 package progress
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -37,33 +38,47 @@ func Heartbeat(w io.Writer, every time.Duration, line func(elapsed time.Duration
 }
 
 // Group runs c in a process group of its own and, when c's context is
-// done, stops that group: SIGTERM first (the command's own bounded
-// cleanup), then SIGKILL to the group if it has not ended after grace.
-// Both signals go to this command's group only, and only while its leader
-// has not been reaped (Wait has not returned), so the group ID cannot have
-// been reused. A process that left the group (its own new group or
-// session) is out of reach and stays the command's own responsibility.
-// Stopped reports whether the stop ran (the context ended the command).
+// done, stops the whole group: SIGTERM first (the command's own bounded
+// cleanup), then, if any member is still there after grace, SIGKILL.
+// The leader ending is not the group ending: a member that ignores SIGTERM
+// and closed its copies of the pipes outlives the leader, so the stop
+// watches the group itself until it is empty or killed.
+//
+// Signals go to this group's ID only, never by name. The ID cannot be
+// reused while the group exists (POSIX); the stop sends a signal only
+// while the leader is unreaped or a probe at most probeEvery earlier
+// found the group, and stops sending once a probe finds it gone. A
+// process that left the group (its own new group or session) is out of
+// reach and stays the command's own responsibility.
 type Group struct {
 	stopped atomic.Bool
-	waited  chan struct{}
+	ended   chan struct{} // closed when a stop has finished
+	left    bool          // members were still there after the SIGKILL bound
 }
+
+// probeEvery is how often a stop looks whether the group is empty;
+// afterKill bounds the wait for the group to go after SIGKILL.
+const (
+	probeEvery = 20 * time.Millisecond
+	afterKill  = 5 * time.Second
+)
 
 // Prepare sets c up; call it before c.Start or c.Run, and call Done after
 // c.Wait or c.Run returns.
 func (g *Group) Prepare(c *exec.Cmd, grace time.Duration) {
-	g.waited = make(chan struct{})
+	g.ended = make(chan struct{})
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	c.Cancel = func() error {
 		g.stopped.Store(true)
 		pgid := c.Process.Pid
 		syscall.Kill(-pgid, syscall.SIGTERM)
 		go func() {
-			select {
-			case <-g.waited:
-			case <-time.After(grace):
-				syscall.Kill(-pgid, syscall.SIGKILL)
+			defer close(g.ended)
+			if gone(pgid, time.Now().Add(grace)) {
+				return
 			}
+			syscall.Kill(-pgid, syscall.SIGKILL)
+			g.left = !gone(pgid, time.Now().Add(afterKill))
 		}()
 		return nil
 	}
@@ -72,8 +87,34 @@ func (g *Group) Prepare(c *exec.Cmd, grace time.Duration) {
 	c.WaitDelay = grace + 5*time.Second
 }
 
-// Done marks the leader reaped: no signal is sent to the group after it.
-func (g *Group) Done() { close(g.waited) }
+// gone probes the group until it is empty (true) or until passes (false).
+// A zombie member still counts until it is reaped.
+func gone(pgid int, until time.Time) bool {
+	for {
+		if errors.Is(syscall.Kill(-pgid, 0), syscall.ESRCH) {
+			return true
+		}
+		if time.Now().After(until) {
+			return false
+		}
+		time.Sleep(probeEvery)
+	}
+}
+
+// Done returns at once when no stop ran (a command that ended by itself is
+// not waited for or signalled). After a stop it waits until the stop has
+// finished: the group empty, or killed (at most grace plus afterKill from
+// the stop), and reports a group that outlived the SIGKILL.
+func (g *Group) Done() error {
+	if !g.stopped.Load() {
+		return nil
+	}
+	<-g.ended
+	if g.left {
+		return fmt.Errorf("the process group still had members %s after SIGKILL", afterKill)
+	}
+	return nil
+}
 
 // Stopped says whether the context ended the command.
 func (g *Group) Stopped() bool { return g.stopped.Load() }

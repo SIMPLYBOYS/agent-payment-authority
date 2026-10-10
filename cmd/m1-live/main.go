@@ -327,13 +327,15 @@ func run(ctx context.Context, args []string, env []string, stdout, stderr io.Wri
 	c.Dir = src
 	c.Env = append(slices.Clone(env), "APA_DB_PATH="+dbPath)
 	var group progress.Group
-	group.Prepare(c, 30*time.Second) // SIGTERM to apa-buyer's group (it stops its run), SIGKILL to that group 30 s later
+	group.Prepare(c, 30*time.Second) // SIGTERM to apa-buyer's group (it stops its run), SIGKILL to what is left of that group 30 s later
 	var outBuf, errBuf bounded
 	outBuf.max, errBuf.max = maxStdout, maxStderr
 	c.Stdout, c.Stderr = &outBuf, &errBuf
 	quiet = waiting("apa-buyer")
 	runErr := c.Run()
-	group.Done()
+	if err := group.Done(); err != nil { // a stop that could not empty the group
+		fmt.Fprintf(stderr, "m1-live: %s: %v\n", runID, err)
+	}
 	quiet()
 	// Why it ended, read before anything else is cancelled: the stop ran
 	// (the operator, or the outer bound), it never started, or it exited by
