@@ -17,7 +17,7 @@
 - **目前狀態**：
   - B1-00～B1-03、B1-05 已 Done。
   - B1-04、B1-06 的能力大多已做出並經限定 review，但都**還沒有依任務卡的形式交出出口證據**。
-  - **B1-07 完全未實作**，所以 M1 目前不能結案。**10/10 更新**：fixture 子範圍已實作（M1-E2，`make verify-m1`），待 Codex 限定 review；live 包驗收與 reviewer 挑戰尚未完成，M1 仍不能結案。
+  - **B1-07 完全未實作**，所以 M1 目前不能結案。**10/10 更新**：fixture 子範圍已實作（M1-E2，`make verify-m1`），並通過限定技術複核（`48a43bc`／`973a58d`）；live 包驗收尚未完成，M1 仍不能結案。
 - **最短路徑**：
   1. 沿用既有的證據契約（`RunManifest` 等），補齊證據檔的內容與產生流程，以 `make m1-fixture` 產生 fixture 證據（B1-06 的出口）。**10/10 已通過限定驗收**（M1-E1，見第 4 節）；
   2. B1-07 只讀檢查器 `make verify-m1`；
@@ -31,7 +31,7 @@
 | B1-00～B1-03、B1-05 | **已完成** | 任務清單第 3 節為 Done（Aaron 或 Codex 驗收）。 |
 | B1-04 真實 Buyer wrapper | **能力已完成，缺證據形式** | 真實 CLI → wrapper → MCP → Ask → Store 已走通三次（第 53、55.11、56.9 節，Codex 核對紀錄）；live 開關、版本釘選、init Gate、fake runner 的錯誤案例都有測試與 review。缺：任務卡勾選項未逐項核對；live trace 不是以 B1-06 定義的 `make m1-live-cli` 證據包產生，也沒有經 B1-07 核對。 |
 | B1-06 展示層與整合 | **展示能力已完成，缺 M1 出口** | 已完成：Unity＋LimeZu 商店、Dashboard、Inspector／Timeline、主持人 HTTP、Store 接線、A／B 隔離、取消與重啟、歷史回放、單一真實即時展示、啟動簡化（D1、D2、3.x、第 54～56 節）。**10/10 更新**：`make m1-fixture` 與 fixture 證據包（`artifacts/m1/<run-id>/`）已實作，並通過限定驗收（M1-E1，見第 4 節）。**未實作**：`make m1-live-cli`、`tests/m1/`、`docs/m1-result.md`。**缺證據**：在沒有 sibling repo 的乾淨目錄依 README 完成 fixture E2E。 |
-| B1-07 只讀驗收器 | **未實作**（10/10 更新：fixture 子範圍已實作，待 review，見第 4 節） | `cmd/verify-demo/`、`internal/verification/`、`testdata/verification/`、`make verify-m1` 都不存在。Owner 未指派。 |
+| B1-07 只讀驗收器 | **未實作**（10/10 更新：fixture 子範圍已實作並通過限定技術複核，live 未接，見第 4 節） | `cmd/verify-demo/`、`internal/verification/`、`testdata/verification/`、`make verify-m1` 都不存在。Owner 未指派。 |
 | S1～S3、S4-B | 不列入 M1 門檻 | 依任務清單分列；S4-A 已 Accepted。 |
 
 ## 2 B1-04 與 B1-06 的必要出口
@@ -162,7 +162,7 @@
 **之後的順序**：
 1. M1-E2：B1-07 檢查器（第 3 節）。E1 與 E2 維持分開，先把產出格式與案例對照做紮實。
    - **現況（10/10）**：fixture 子範圍已實作——`cmd/verify-demo`、`internal/verification`、`testdata/verification`、`make verify-m1 RUN_DIR=...`。對 E1 驗收包唯讀判定為 PASS（31 案、V1～V7 與 3.2 要求），38 項反向驗證都以斷言抓到（`docs/m1-evidence.md` 第 15 節）。
-   - 待 Codex 限定 review。live 包（3.3）在 E3 接上；目前檢查器對 live 回報 INCONCLUSIVE（不支援）。
+   - **10/10 通過限定技術複核**（fixture 子範圍；程式 `48a43bc`、測試 `973a58d`；`docs/m1-evidence.md` 第 15.6、15.7 節）。B1-07 整體仍是 InProgress；live 包（3.3）在 E3 接上，目前檢查器對 live 回報 INCONCLUSIVE（不支援）；E3 待另行派工。
 2. M1-E3：`make m1-live-cli` 一次真實的 live 單筆 Ask 包（3.3），需 Aaron 另行核准。
 3. M1-E4：`docs/m1-result.md`、乾淨目錄 E2E、逐卡結案。
 

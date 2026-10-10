@@ -14,7 +14,7 @@
 >
 > **現行狀態（10/10）**：M1-E1 於程式 `0d13255`、測試與產包基準 `0853b44` 通過限定範圍技術複核（第 14 節）。R1-1、R1-2 關閉，R2 維持關閉。這是 fixture 產生端的驗收，不代替 B1-07，也不代表 M1、B1-04 或 B1-06 整體完成。下一步 E2（B1-07 獨立證據檢查器）待另行派工。
 >
-> **E2（10/10）**：唯讀檢查器 `make verify-m1 RUN_DIR=...` 已實作（B1-07 的 fixture 子範圍），對 E1 驗收包判定 PASS（第 15 節），待 Codex 限定 review；live 包（E3）尚未支援。
+> **E2（10/10）**：唯讀檢查器 `make verify-m1 RUN_DIR=...` 的 fixture 子範圍，於程式 `48a43bc`、測試 `973a58d` **通過 Codex 限定技術複核**（R1～R3 關閉，第 15.7 節）。B1-07 整體仍是 InProgress：live 包（E3）尚未支援，E3 待另行派工。
 >
 > **這是產出端，不是 B1-07**。包內的 PASS／FAIL／INCONCLUSIVE 是產生程式自己的判定；`RunManifest.ValidateAgainst` 只檢查索引。獨立核對由 B1-07（`make verify-m1`，M1-E2）負責。
 
@@ -668,7 +668,7 @@ go test -race -count=1 ./internal/store -run '^TestM1Evidence' -timeout 90s
   - 31 案全部 PASS（13 案 host_e2e 各兩份紀錄、3 案 Store、15 案契約）；
   - 七個 capability 為 not_evaluated；
   - 與產生端沒有差異；六項整合要求都是 PASS；
-  - checker 的 build 是 `ff776bd…`，標為 `(modified)`：Go 把未追蹤的 `demo` 也算成修改，已追蹤的檔案是乾淨的（`git-status.txt`）。
+  - checker 的 build 是 `ff776bd…`，標為 `(modified)`，照實保留，不是乾淨建置。原因說明：工作區有未追蹤的 `demo`（`git-status.txt`），Go 把它也算成修改。
 
 **判定與歸屬**：以上全部是 Claude Code 執行，待 Codex 限定 review。這不是 E1 的驗收，也不代表 B1-07 或 M1 已完成：
 - live 包（E3）尚未支援；
@@ -694,7 +694,7 @@ go test -race -count=1 ./internal/store -run '^TestM1Evidence' -timeout 90s
 
 | 項目 | 問題 | 修正 | 證據 |
 |---|---|---|---|
-| R1 golden 不完整 | golden 的 manifest 索引了 `browser/browser-test.log`，但它被 `.gitignore` 的 `*.log` 忽略，沒有進 Git；乾淨匯出時 golden 判 INCONCLUSIVE，`TestExitCodes` 回 2 | `.gitignore` 只為這一個路徑加例外（`!testdata/verification/m1-fixture-20261009T162703Z-4ddb7a/browser/browser-test.log`），其他 `.log` 仍忽略；提交該檔（內容掃描沒有 token 形狀的值；有一行本機的 Unity 建置路徑，是證據原文，沒有改） | `git archive 973a58d` 匯出到新的暫存目錄，`go test -race -count=1 ./internal/verification/... ./cmd/verify-demo/...` 結束碼 0，golden 59 檔都在（`artifacts/m1-verify/e2-r1r3-20261010T032429Z/clean-export-*`） |
+| R1 golden 不完整 | golden 的 manifest 索引了 `browser/browser-test.log`，但它被 `.gitignore` 的 `*.log` 忽略，沒有進 Git；乾淨匯出時 golden 判 INCONCLUSIVE，`TestExitCodes` 回 2 | `.gitignore` 只為這一個路徑加例外（`!testdata/verification/m1-fixture-20261009T162703Z-4ddb7a/browser/browser-test.log`），其他 `.log` 仍忽略；提交該檔（內容掃描沒有 token 形狀的值；有一行本機的 Unity 建置路徑，是證據原文，沒有改） | `git archive 973a58d` 匯出到新的暫存目錄，`go test -race -count=1 ./internal/verification/... ./cmd/verify-demo/...` 結束碼 0，golden 的 57 個檔都在（55 個索引證據，加上 manifest 與結束標記；`testdata/verification` 另有 README 與 expected.json，共 59 個。原 E1 包是 81 個檔，兩者不同）（`artifacts/m1-verify/e2-r1r3-20261010T032429Z/clean-export-*`） |
 | R2 E2E 執行紀錄沒有實質核對 | `traces`、`host_runs` 讀入卻沒核對；API 與 Store 只比部分欄位 | E2E 案例必須有 host run 與 run trace（缺 → INCONCLUSIVE V4）。逐項對照 Store（矛盾 → FAIL）：<br>• host run：task、consumer、state、結束方式；<br>• trace：task、gate（fixture 必須 strict／passed）、結束方式、工具呼叫編號、每個 `request_purchase` 的 purchase、裁決與事件序號；<br>• API 的每筆請購：訂單欄位（request_id、method、URL、chain、asset、asset_id、pay_to、amount、intent／requirement digest）、原始裁決、決策時間、期限、核准關閉狀態與時間，以及 API task 的身分。<br>結束方式的規則：CLI 逾時只由 run 記錄，所以必須是 timeout；沒有生命週期事件必須是 ok；主持人取消可能停掉進行中的 run（cancelled，且不早於取消），也可能在 run 結束後（ok，取消不早於 run 結束）。沒有請購的合法流程不要求 `request_purchase` | `TestE2ERunRecords`：複核的五例——刪 `traces`、刪 `host_runs`（INCONCLUSIVE）；API 裁決改為 Deny、API 金額改為 1、trace 的 `request_purchase` 改為 Deny（FAIL）。另外五例：trace 指向別的事件、host run 說 timeout、cancelled 的 run 早於取消就結束、API 少了核准關閉、restart 第二個 task 沒有 trace。每例都重算索引與結束標記，並斷言 V1 PASS。正例：ask、cancel-no-purchase、cli-timeout、cancel-pending、cli-timeout-pending、restart 都 PASS |
 | R3 掃描中止被當成通過 | 整合要求的紀錄解析沒有檢查 `Scanner.Err()`，前段的 PASS 會掩蓋超長行之後的失敗 | 掃描錯誤（超過有界的 16 MiB token，或讀取錯誤）回報為 `incomplete`：INCONCLUSIVE，不 PASS；錯誤之前已讀到的失敗仍判 FAIL。上限不放寬。索引說 pass 而紀錄讀不完時判 INCONCLUSIVE，不判矛盾 | `TestRequirementLogReadToTheEnd`：只有超長行 → INCONCLUSIVE；超長行之後才有失敗（複核的反例）→ INCONCLUSIVE；失敗在超長行之前 → FAIL。三例都重算索引，V1 PASS |
 
@@ -716,7 +716,7 @@ go test -race -count=1 ./internal/store -run '^TestM1Evidence' -timeout 90s
 - `go test -race -count=1 ./internal/verification/... ./cmd/verify-demo/...` 在開發副本與乾淨匯出都通過。
 
 **既有包唯讀驗收**：證據在 `artifacts/m1-verify/e2-r1r3-20261010T032429Z/`，`NOTE.txt` 說明每個檔案。
-- checker 是 `973a58d`；build 標 `(modified)`，因為 Go 把未追蹤的 `demo` 也算成修改。
+- checker 是 `973a58d`；build 標 `(modified)`，照實保留，不是乾淨建置。原因說明：工作區有未追蹤的 `demo`，Go 把它也算成修改。
 - `make verify-m1`（經 `rtk proxy`，不截斷）結束碼 0；編好的程式直接執行，結束碼 0；兩份報告除了 build 欄位外相同。
 - 結果：verdict PASS；V1～V7 與 R 都是 PASS；31 案全部 PASS；七個 capability 為 not_evaluated；沒有 finding；與產生端沒有差異。
 - 原包 81 個檔的 sha256 前後相同。
@@ -728,3 +728,33 @@ go test -race -count=1 ./internal/store -run '^TestM1Evidence' -timeout 90s
 - host run 與取消的時間只有秒級，兩者同一秒時，兩種結束方式都接受。
 - checker 的規則版本字串仍是 `m1-e2.1`，請以 build 的 commit 辨識版本。
 - 沒有執行：完整容器七步、311 項突變、瀏覽器、Unity、真實 CLI、`make m1-fixture`、E3／E4。
+
+### 15.7 限定驗收紀錄（10/10，Codex 限定技術複核；Claude Code 文件同步）
+
+**結論**：R1～R3 關閉；M1-E2 的 fixture 子範圍通過限定技術複核。基準為程式 `48a43bc`、測試 `973a58d`（之後的 `817eba2` 只有文件）。這不代表 B1-07 或 M1 完成：
+- B1-07 只完成 fixture 子範圍，整體仍是 InProgress；
+- E3（live 單筆 Ask）待另行派工；
+- M1 live 證據是否接受開發展示 plugin 例外，仍待 Aaron 決定。
+
+**本輪確認**：
+- **R1**：缺少的 golden log 已納入 Git，乾淨匯出包含該檔。
+- **R2**：缺 trace 或 host run 判 INCONCLUSIVE；API 裁決、金額或 trace 結果矛盾判 FAIL。
+- **R3**：超長行造成解析中止時，不再把成功的前段當成完整 PASS。
+
+**證據歸屬**：
+- **Codex 獨立執行**：
+  - 在斷網、來源唯讀的容器中，前輪的六個反例全部通過；
+  - 原 E1 包經獨立核對，31 案、V1～V7 與整合要求都是 PASS；
+  - 原包 81 個檔案的雜湊沒有變。
+- **Claude Code 執行、Codex 核對紀錄**：
+  - 乾淨匯出的兩個套件以 `-race` 通過；
+  - 兩份完整驗收報告一致（第 15.6 節，`artifacts/m1-verify/e2-r1r3-20261010T032429Z/`）。
+- **保留的限制**：
+  - Codex 重跑整個 `internal/verification` 套件時碰到 150 秒的時間上限，不能記為通過；`cmd/verify-demo` 通過。
+  - 46 項反向驗證沒有由 Codex 重跑，維持 Claude Code 的執行歸屬。
+
+**文字修正**（不改證據，只修文件的說法）：
+- golden 是 **57 個檔案**（55 個索引證據，加上 manifest 與結束標記），不是 59 個。59 是 `testdata/verification` 的總數（另含 README 與 expected.json），也不能和原 E1 包的 81 個檔案混淆。第 15.6 節已更正；證據目錄裡的檔案維持原樣。
+- `build=(modified)` 照實保留；未追蹤的 `demo` 只是原因說明，不能據此稱為乾淨建置。第 15.4、15.6 節的說法已調整。證據目錄中 `NOTE.txt` 的原文維持原樣，以本節為準。
+
+**本節是文件同步**：沒有重跑測試，沒有產包，沒有改程式或證據。

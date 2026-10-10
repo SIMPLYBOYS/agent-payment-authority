@@ -145,7 +145,7 @@
 |---|---|---|---|
 | B1-04（完成門檻含 live CLI → 402 → 結構化請購 trace，任務清單 L67） | fake、階段 A 已驗收 | 閘門因 plugins／agents／認證停下；階段 B、C 未執行 | **L1** |
 | B1-06（opt-in live trace、`tests/m1/`，任務清單 L69） | fake 展示各切片已驗收 | live trace 未收錄；`tests/m1/` 不存在 | **L2** |
-| B1-07（只讀 checker、PASS／FAIL／INCONCLUSIVE） | Waiting | 未實作（10/10：fixture 子範圍已實作〔M1-E2，`make verify-m1`〕，待 review；live 未接） | **L3** |
+| B1-07（只讀 checker、PASS／FAIL／INCONCLUSIVE） | Waiting | 未實作（10/10：fixture 子範圍已實作〔M1-E2，`make verify-m1`〕並通過限定技術複核；live 未接） | **L3** |
 | M1 完成門檻（B1-00～07 全部通過，任務清單 L34） | 00、01、02、03、05 Done | 04、06、07 | L1 → L2 → L3 |
 | S1 WebAuthn（Ready） | 未領取 | 實機註冊、assertion、錯 challenge | **A1**（spike） |
 | FR-8；驗收 20、36（WebAuthn 部分） | 未實作 | WebAuthn 接入 Approval／grant | **A2**（必要） |
