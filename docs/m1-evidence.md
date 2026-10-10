@@ -760,3 +760,196 @@ go test -race -count=1 ./internal/store -run '^TestM1Evidence' -timeout 90s
 - `build=(modified)` 照實保留；未追蹤的 `demo` 只是原因說明，不能據此稱為乾淨建置。第 15.4、15.6 節的說法已調整。證據目錄中 `NOTE.txt` 的原文維持原樣，以本節為準。
 
 **本節是文件同步**：沒有重跑測試，沒有產包，沒有改程式或證據。
+
+## 16 M1-E3 live 單筆 Ask 證據包與檢查器（Claude Code 實作，fake 驗證；待 Codex review，真實執行待 Aaron 另行核准）
+
+> 依 `Claude-Code-M1-E3-live證據包與檢查器派工-f0adfb3-20261010`。開工基準 `f0adfb3`。本節**沒有**執行任何真實 Claude CLI、版本查詢、登入、C0′ 或請購。Aaron 10/10 已接受開發展示 plugin 例外（第 14 節之後的現行摘要），但那不是執行核准。
+
+### 16.1 產包入口 `make m1-live-cli`（`cmd/m1-live`）
+
+```sh
+APA_LIVE_CLI=true make m1-live-cli CLI=/abs/path/claude BASE=<review 過的產品 commit> GATE=dev_demo_plugins
+```
+
+它是 `docs/cli-poc.md` 第 51 節的單次請購腳本改寫成程式，沒有 fake 開關；測試只是把 `--cli` 換成替身。
+
+**前置**（任一失敗：結束碼 2，「nothing was started」，不建任何目錄，不啟動 CLI）：
+- 必須同時有 `--live` 與 `APA_LIVE_CLI=true`；
+- `--gate` 必須明確給：`dev_demo_plugins`（已接受的例外）或 `strict`；
+- `--cli` 必須是絕對路徑的可執行檔，不做 PATH 搜尋；
+- `--base`：review 過的產品 commit，必須是 HEAD 的祖先；兩者之間只能有 `docs/` 與 `README.md` 的差異；
+- 已追蹤的檔案沒有修改。未追蹤的檔案（例如 repo 根目錄的 `demo`）會記錄，但不阻擋：它們不會進 clone；
+- 輸出根目錄與工作根目錄不能是 symlink。
+
+**建置**：
+- 在新的工作目錄 `artifacts/m1-live-work/<run-id>/build/`，用 `git clone --no-hardlinks` 本機 clone，切到 HEAD，建置 `apa-buyer`；
+- `go version -m` 的 `vcs.revision` 必須等於 HEAD，`vcs.modified` 必須是 `false`，否則結束碼 2，CLI 不會啟動；
+- 建置暫存在執行後刪除，只刪這個目錄。
+
+**一次執行**：
+- `apa-buyer run --live --cli <CLI> [--dev-demo-plugins] --task task-a --registry/--profile <clone 內的可信設定> --trace-dir <工作目錄>/runs`，加上 `APA_DB_PATH=<工作目錄>/db/live.db`；
+- `db/` 交給 Store 以 0700 建立，避免 §52 的權限問題；
+- 版本檢查、Gate、上限（180 秒、10 則回覆、8 次工具呼叫）都沿用 apa-buyer，沒有放寬；apa-buyer 本身就含一次前置版本查詢；
+- 外層上限 `--wait`（預設 10 分鐘）：到時對 process group 送 SIGTERM，30 秒後強制結束；
+- 不重試，不改模式，不用備援模型。
+
+**證據**（新的 0700 目錄 `artifacts/m1/m1-live-<UTC>-<hex>/`）：
+
+| 路徑 | 內容 | source |
+|---|---|---|
+| `provenance/git-status.txt` | repo 的 `git status --porcelain` | `provenance` |
+| `provenance/config-files.json` | clone 內六個設定檔的 digest（與第 3 節同一份清單、同一順序） | `provenance` |
+| `provenance/build.json` | HEAD、reviewed base、未追蹤檔、clone 方式、`vcs_revision`、`vcs_modified`、go 版本、產包器自己的建置資訊 | `provenance` |
+| `live/run.json` | 版本 `apa.m1.live.v1`：命令、apa-buyer 結束碼、開始與結束時間、gate 模式與結果、模型、CLI 檔名、核准版本、接受的認證、apa-buyer 報告的白名單欄位、apa-buyer 自己以 `apa-buyer: ` 開頭的錯誤行、資料庫 digest 與它和匯出的關係、快照邊界、用量、剩餘風險 | `live_cli` |
+| `live/trace.jsonl` | runner 的 run trace，原樣複製（它本來就是白名單紀錄：不含 CLI 文字、能力、環境、stderr 內容、prompt 原文或認證值） | `live_cli` |
+| `live/ask.json` | `internal/m1evidence.Export` 對資料庫私有副本的唯讀匯出（task、四份設定快照、請購、事件與 hash） | `live_cli` |
+| `manifest.json`、`run-end.json` | 既有契約；`evidence_mode` 一律是 `live` | — |
+
+- **一致性快照**：apa-buyer 結束（writer 關閉）後，先過 Store 自己的離線檢查 `store.OpenSnapshot`：旁邊有 -wal 或 -shm 就拒絕；複製時確認原檔沒有改變；在副本上驗證 hash 鏈、投影與快照。之後再取一份私有副本，同樣確認複製期間沒有改變，從副本匯出。原始資料庫與 trace 留在工作目錄，`run.json` 記錄資料庫的 digest。
+- **不含**：CLI 的 stdout 與 stderr 原文（apa-buyer 的報告只取白名單欄位，stderr 只留 apa-buyer 自己的錯誤行；有 token 形狀的行一律丟棄並計數）、token、配對碼、登入資料、keychain、原始 init、模型文字。
+- **掃描**：不帶前綴的 64 位 hex 就判為 `secret_found`。唯一的例外是 trace 裡固定 prompt 的 `prompt_sha256` 那一個確切值；同名欄位帶其他值，照樣會被抓。
+- **用量**：trace 的 `usage` 有計數時記為「CLI 自報，不是計費紀錄」，沒有就是 `unknown`，不會填 0。
+- **可宣稱範圍**：只有 `ask`；其他 30 案與七個 capability 都列為 not_evaluated。
+- **結束碼**（`cmd/m1-live` 本身）：
+  - 0：包完整，ask PASS；
+  - 1：包完整，但執行失敗或紀錄不足以顯示 Ask；
+  - 2：前置停止，或包沒有存完整（結束標記的 state 會說明）。
+  - 經 `make` 時，非 0 會變成 make 的 `Error N`（結束碼 2）。
+- **產生端判定**：
+  - INCONCLUSIVE：沒有存到 task；
+  - FAIL：apa-buyer 結束碼不是 0、結束方式不是 ok、trace 沒有 passed 的 Gate，或 `m1evidence` 重算有問題；
+  - 其餘 PASS。
+  - 這仍是產生端自己的判定，獨立核對由 `make verify-m1 MODE=live` 負責。
+
+### 16.2 檢查器的 live 模式（`make verify-m1 RUN_DIR=... MODE=live`）
+
+fixture 模式完全不變。live 模式改用以下規則，判定一樣由檢查器自己組織：
+
+- **V1**：
+  - run ID 是 `m1-live-…`，且等於目錄名稱；
+  - versions 恰好是 `case_manifest`、`cli`、`gate_mode`、`go`、`os`，`cli` 等於核准版本；
+  - 恰好一個 `apa-buyer run --live` 命令，結束碼 0；
+  - `provenance/build.json` 的 revision 等於 commit，`vcs_modified=false`，並記有 reviewed base；
+  - config digest 與可信設定一致（同第 15 節）；
+  - claim 恰好只有 `ask`，not_evaluated 恰好是其他 30 案加七個 capability。
+- **V6**：
+  - 每個證據的 evidence mode 必須是 `live`，source 只能是 `provenance` 或 `live_cli`；
+  - gate 模式在 manifest、命令旗標、`run.json`、trace 四處一致，只能是 `strict` 或 `dev_demo_plugins`；
+  - `dev_demo_plugins` 必須明載「strict zero-plugin mode not verified」；
+  - fixture 包不能當成 live 通過，live 包也不能當成 fixture 通過。
+- **V2～V5、V7（ask）**：
+  - `live/ask.json` 用與 fixture 案例相同的方式重算：參數、設定快照、必要條件、事件鏈、裁決、預算、forbidden、A／B 身分。
+  - 另外與 trace、`run.json` 交叉核對：
+    - trace 只有 run_start、init、工具呼叫、run_end 四種行，順序固定，各欄位嚴格解碼；
+    - task 與 consumer 等於存下的 task；
+    - prompt 雜湊等於固定 prompt；上限等於核准值；
+    - init 的 gate 為 `passed`、task 已開始、要求的模型是 host 的；
+    - run 以 ok 結束、結束碼 0、沒有取消或逾時；
+    - trace 的工具呼叫等於 `run.json` 的；
+    - 每個帶裁決的 `request_purchase`，對應同一商品存下的請購（`po-<task>-<product>`）與同一裁決；同商品重送時，裁決必須相同；每筆存下的請購都必須有呼叫；
+    - 用量的標示一致；
+    - 快照的最後事件等於匯出的最後事件；所有事件都在執行期間內（秒級，容許 1 秒）。
+  - **時間**：
+    - 原始裁決（POLICY_DECIDED）與快照當時的狀態分開呈現；之後的 APPROVAL_EXPIRED 不改寫原本的 Ask，原本的 pending 也不代表現在可以核准；
+    - 到期不得早於期限；在 ok 結束的 run 裡出現撤回，判 FAIL；
+    - 不要求等待到期。
+- **R**：fixture 的六項整合要求不在 live 範圍內，報告列為 `out_of_scope`，claim R 為 `NOT_EVALUATED`。
+- **報告**：`live` 區段列出 gate 模式與結果、CLI 版本、模型、用量（自報或 unknown）、原始裁決、快照當時的狀態、觀測截止點、bundle 自己寫的剩餘風險，以及範圍外的項目；`limits` 固定列出 plugin 的剩餘風險與「嚴格模式未驗證」。
+- **結束碼**：同第 15 節（0／1／2／3）。live PASS 只表示單筆 live claim 的證據核對通過，不代表 fixture 全案例、B1-07 整體或 M1 完成。
+
+### 16.3 限制
+
+- 沒有簽章或外部錨點：檢查器能發現包內的缺失與矛盾，但無法證明整份一致重造的包真的由指定模型產生。
+- gate 模式為 `dev_demo_plugins` 時，嚴格零 plugin 模式沒有驗證。plugin 名稱、Gate 通過與專用設定目錄，都不證明 plugin 的內容、沒有背景活動，或作業系統層級的隔離。
+- `auth_source=none` 本身不證明登入或計費來源；用量是 CLI 自報或 unknown。
+- 這次的 live 資料使用實際執行時間，不等於 fixture 的固定時鐘；案例的必要條件仍要成立。
+- CLI 請購層的證據，不包含即時展示畫面的操作；展示驗收是另外的證據。
+
+### 16.4 一次真實產包的確認清單（準備好，**未執行**；需 E3 實作通過 Codex review，且 Aaron 另行核准）
+
+**執行前**：
+1. **產品基準**：用通過 review 的 commit 當 `BASE`；HEAD 與它之間只能有 `docs/`、`README.md` 的差異。產包器會檢查，前置失敗就停，不啟動 CLI。
+2. **乾淨建置**：產包器自己做本機 `git clone --no-hardlinks`，切到 HEAD 後建置 `apa-buyer`，並要求 `vcs.revision=HEAD`、`vcs.modified=false`。原工作區未追蹤的 `demo` 不需要刪除。
+3. **完整命令**：
+
+   ```sh
+   cd /Users/mac/Documents/OpenSourceProjects/agent-payment-authority
+   APA_LIVE_CLI=true make m1-live-cli CLI=/Users/mac/.local/bin/claude BASE=<通過 review 的 commit> GATE=dev_demo_plugins
+   ```
+
+   - CLI 路徑沿用 §51 的紀錄，執行前由執行者確認；
+   - 專用設定目錄 `~/.apa-claude`（Aaron 本人訂閱）；
+   - 版本釘選 `2.1.293 (Claude Code)`；
+   - Gate 為開發展示例外；
+   - 不要求重新登入，不追加 plugin 調查。
+4. **範圍**：
+   - 一個業務 run（apa-buyer 本身另有一次前置 `--version`）；
+   - 合成資料（task-a、fixture 商店）、全新資料庫、不付款；
+   - 上限沿用：180 秒、10 則回覆、8 次工具呼叫，以及 apa-buyer 既有的收尾限制；外層 `--wait` 10 分鐘；
+   - 都沒有提高。
+5. **風險**：
+   - 可能用到訂閱額度；用量可能是 `unknown`；
+   - CLI 或 plugins 可能有背景活動；
+   - 專用目錄不等於作業系統層級的隔離；
+   - 嚴格零 plugin 模式未驗證。
+6. **執行者**：Aaron 或 Claude Code，由 Aaron 在核准時指定，本清單不代為決定。若由 Claude Code 執行，需要在沙箱外使用既有登入環境，這也必須在核准中寫明。
+
+**判讀**（依 `cmd/m1-live` 的結束碼與證據）：
+
+| 結果 | 分類 |
+|---|---|
+| 結束碼 2，stderr 有「nothing was started」 | 前置停止，CLI 沒有啟動 |
+| 結束碼 2，結束標記 state 是 `save_failed`、`store_unreadable` 等 | CLI 已執行，但證據包不完整；工作目錄保留 |
+| 結束碼 1、ask INCONCLUSIVE、沒有 trace | 版本檢查拒絕（CLI 只啟動了 `--version`） |
+| 結束碼 1、ask INCONCLUSIVE、trace 的 init gate 不是 passed | Gate 拒絕，沒有 task |
+| 結束碼 1、ask INCONCLUSIVE、gate passed 但有 `prepare_error` | Store 無法開啟，沒有請購（同 §52） |
+| 結束碼 1、ask FAIL | run 沒有 ok 結束（逾時、取消、上限），或紀錄沒有顯示 Ask |
+| 結束碼 0、ask PASS | 再執行 `make verify-m1 RUN_DIR=<包> MODE=live`，以檢查器的 verdict 為準，交 review |
+
+**執行後**：
+- 任何結果都保存：證據包 `artifacts/m1/m1-live-*`，資料庫與 trace 在 `artifacts/m1-live-work/m1-live-*`。
+- 不重試，不自動改成 strict 或其他模式，不清理 `~/.apa-claude` 或既有資料庫。
+- 證據包不完整時，照實記錄 state，不補檔、不重跑。
+- 取得單筆 Ask 包之後，以檢查器唯讀核對並交 review，不自動開始 E4，不標 Done。
+
+### 16.5 交付紀錄（10/10，Claude Code 執行，只用 fake；待 Codex review）
+
+**Commit**：
+- 開工基準 `f0adfb3`（只有未追蹤的 `demo`）；
+- 程式 `67e7c92`：`cmd/m1-live`、`internal/verification` 的 live 模式、`cmd/verify-demo` 的 `--mode`、Makefile 的 `m1-live-cli` 與 `verify-m1 MODE=`；
+- 測試 `89d6135`：`cmd/m1-live` 的測試、`live_test.go`、fixture 測試中 live 模式的預期更新、`testdata/verification/live-synthetic`（合成，不是真實執行）、`tests/m1/README.md`、`scripts/verify/m1-e3-reverse.py`、E2 反向驗證腳本的兩個錨點；
+- 文件：本節、README、`docs/m1-closeout-gaps.md`。
+
+**fake 驗證**（替身 CLI：`--version` 時回答核准版本，其餘交給 fake CLI；HOME 是新的暫存目錄；repo 是本機 clone）：
+- 產包器：
+  - 正例：Ask，ask PASS；CLI 依序只啟動兩次（`version`、`run`）；建置暫存已刪，資料庫與 trace 保留；合成敏感標記沒有進入證據包或輸出；
+  - 前置拒絕 10 種，都是結束碼 2、沒有建立目錄、沒有啟動 CLI：沒有 `APA_LIVE_CLI`、沒有 `--live`、沒有給 gate、gate 不是兩個允許值、CLI 用相對路徑、沒有 base、已追蹤的檔案有修改、base 之後有程式差異、輸出根目錄是 symlink、clone 被改動導致建置標為 modified；
+  - 失敗執行 4 種，都是結束碼 1、證據包完整、不重試：版本不符（只啟動 `version`，INCONCLUSIVE）、strict Gate 拒絕 plugins（INCONCLUSIVE，有 trace）、沒有請購（FAIL）、外層上限停止（FAIL）；
+  - 保存失敗（結束標記寫不出）：結束碼 2，沒有完成摘要，已存的資料保留；
+  - 掃描：只豁免固定 prompt 的雜湊。
+- 檢查器的 live 模式：
+  - 合成 golden PASS，與 `expected.json` 一致；
+  - 語意負例 20 種，都重算索引並斷言 V1 PASS：缺 trace、缺 Store 匯出、缺 run 紀錄（INCONCLUSIVE）；例外在 run 紀錄或 trace 被稱為 strict；未寫明剩餘風險；工具結果與 Store 矛盾；兩份紀錄的工具呼叫不同；別的 consumer；缺 profile；事件中段改動；記錄付款；快照的最後事件不符；在 ok 的 run 裡撤回；到期早於期限；上限不同；prompt 不同；Gate 沒過（只在 trace，或兩份紀錄都是）；trace 有未知成員（報告不會重複其中的文字）；
+  - 合法的事後到期：PASS，原始裁決與快照狀態分開呈現；
+  - bundle 規則 7 種：多宣稱一案、not_evaluated 少一案、標成 fixture、建置標為 modified、run 結束碼 1、CLI 版本不同、命令少了 gate 旗標；
+  - fixture 包當成 live、live 包當成 fixture，都 FAIL；未知模式判 INCONCLUSIVE。
+- 回歸：
+  - `go vet ./...` 通過；
+  - `go test -race` 跑 `internal/verification`、`cmd/verify-demo`、`cmd/m1-live` 通過；
+  - fixture 的既有測試都通過（只更新了一個原本預期「live 不支援」的斷言）。
+- **乾淨匯出**：本機 `git clone --no-hardlinks` 後切到 `89d6135`，已追蹤的檔案沒有修改，用 `-race` 跑三個套件，結束碼 0。`git archive` 的匯出沒有 `.git`，產包器的測試需要從 git repo clone，所以這次改用 clone。
+- **反向驗證**：`m1-e3-reverse.py` 26 項，26／26 以斷言抓到。
+  - 第一次 22／26：「run 紀錄的 gate 模式」與「Gate 通過」各被另一處比對遮蔽，改成兩處一起拿掉，並補了兩份紀錄都寫 Gate 沒通過的測試。
+  - 「已追蹤的檔案不得修改」沒抓到，是測試的缺陷：前置測試的子案例共用同一個環境，前面案例的準備會讓後面案例在別的檢查就先停下；已改成每個子案例用全新環境。
+  - 「乾淨建置」原本沒有測試，補上 clone 後的測試掛鉤與案例。
+  - 修正後先只重跑這幾項通過，最後完整跑一次 26／26。
+  - E2 的 `m1-e2-reverse.py` 在 live 模式改動後完整重跑，46／46。
+- **原 E1 包唯讀回歸**：檢查器在乾淨 clone 建置（`vcs.revision=89d6135`、`vcs.modified=false`），以 fixture 模式檢查原 E1 包，PASS（31 案、V1～V7 與 R 都 PASS、0 個 finding、與產生端沒有差異），81 個檔的 sha256 前後相同。
+- 證據目錄：`artifacts/m1-verify/e3-20261010T044017Z/`（`NOTE.txt` 說明每個檔案）。
+
+**沒有執行**：
+- 真實 Claude CLI、版本查詢、登入、C0′、真實請購、`make m1-live-cli` 的真實執行；
+- `make m1-fixture`、完整容器七步、311 項突變、瀏覽器、Unity；
+- E4。
+
+B1-04／B1-06／B1-07 維持 InProgress。

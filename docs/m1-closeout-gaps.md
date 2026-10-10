@@ -169,6 +169,8 @@
    - **現況（10/10）**：fixture 子範圍已實作——`cmd/verify-demo`、`internal/verification`、`testdata/verification`、`make verify-m1 RUN_DIR=...`。對 E1 驗收包唯讀判定為 PASS（31 案、V1～V7 與 3.2 要求），38 項反向驗證都以斷言抓到（`docs/m1-evidence.md` 第 15 節）。
    - **10/10 通過限定技術複核**（fixture 子範圍；程式 `48a43bc`、測試 `973a58d`；`docs/m1-evidence.md` 第 15.6、15.7 節）。B1-07 整體仍是 InProgress；live 包（3.3）在 E3 接上，目前檢查器對 live 回報 INCONCLUSIVE（不支援）；E3 待另行派工。
 2. M1-E3：`make m1-live-cli` 一次真實的 live 單筆 Ask 包（3.3），需 Aaron 另行核准。
+   - **現況（10/10）**：產包入口 `cmd/m1-live` 與檢查器的 live 模式（`make verify-m1 MODE=live`）已實作，只做了 fake 驗證（`docs/m1-evidence.md` 第 16 節），**實作待 Codex review**。
+   - 真實執行：待 review 通過後由 Aaron 另行核准一次；至今沒有執行任何真實 CLI。
 3. M1-E4：`docs/m1-result.md`、乾淨目錄 E2E、逐卡結案。
 
 ## 5 不算入 M1 的項目（後續商業展示的要求）

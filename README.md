@@ -108,7 +108,32 @@ make verify-m1 RUN_DIR=artifacts/m1/<run-id>       # M1-E2：唯讀檢查一個�
   - 2：INCONCLUSIVE（缺資料或版本不支援）；
   - 3：無法檢查，或報告寫不出。
 - 經 `make` 時，非 0 的結束碼會變成 make 自己的 `Error N`（結束碼 2），要看報告裡的 `verdict`。
-- 目前只支援 fixture 包；live 包是 M1-E3 的範圍。格式、V1～V7 的覆蓋、共用的依賴與限制見 [docs/m1-evidence.md](docs/m1-evidence.md) 第 15 節。
+- 格式、V1～V7 的覆蓋、共用的依賴與限制見 [docs/m1-evidence.md](docs/m1-evidence.md) 第 15 節。
+
+**live 單筆 Ask 包（M1-E3）**：
+
+```sh
+APA_LIVE_CLI=true make m1-live-cli CLI=/abs/path/claude BASE=<review 過的產品 commit> GATE=dev_demo_plugins
+make verify-m1 RUN_DIR=artifacts/m1/<m1-live-run-id> MODE=live
+```
+
+- **`m1-live-cli` 會跑一次真實模型**（用 APA 專用設定目錄的本人訂閱登入）。要另經 Aaron 核准才能執行；一般測試、建置與 `verify-m1` 都不會啟動模型。
+- 前置任一不符就停，不啟動 CLI：
+  - 要有 `--live` 與 `APA_LIVE_CLI=true`；
+  - Gate 模式要明確給；
+  - review 過的基準之後只能有文件差異；
+  - 已追蹤的檔案沒有修改；
+  - 本機乾淨 clone 的建置不能標為 modified。
+- 執行規則：
+  - 只執行一次，不重試，不自動改模式；
+  - 上限沿用 apa-buyer：180 秒、10 則回覆、8 次工具呼叫；
+  - 資料庫、trace 與建置都放在新的 `artifacts/m1-live-work/<run-id>/`，證據包是新的 `artifacts/m1/<run-id>/`。
+- 剩餘風險：
+  - 開發展示 plugin 例外下，嚴格零 plugin 模式沒有驗證；
+  - plugin 名稱、Gate 與專用目錄，不證明 plugin 的內容、沒有背景活動，或作業系統層級的隔離；
+  - 可能用到訂閱額度，用量可能是 `unknown`。
+- live 包只宣稱 `ask`。PASS 不代表 fixture 全案例或 M1 完成。
+- 格式、判定與真實執行前的確認清單見 [docs/m1-evidence.md](docs/m1-evidence.md) 第 16 節。
 
 ## 設定
 
