@@ -109,7 +109,8 @@ func (v *verifier) storeRecord(f *findings, c contracts.AcceptanceCase, p string
 		f.fail("V6", []string{p}, "the record is %s %s %s, not this case's Store record", quote(rec.CaseID), quote(rec.Layer), quote(rec.Operation))
 		return Observed{}
 	}
-	return v.integration(f, c, p, "store_integration", rec.Tasks)
+	o, _ := v.integration(f, c, p, "store_integration", rec.Tasks)
+	return o
 }
 
 func (v *verifier) e2eRecord(f *findings, c contracts.AcceptanceCase, p string) Observed {
@@ -124,14 +125,15 @@ func (v *verifier) e2eRecord(f *findings, c contracts.AcceptanceCase, p string) 
 	if !reflect.DeepEqual(rec.Expected, c.Expected) {
 		f.fail("V3", []string{p}, "the record carries another expected outcome than the frozen case's")
 	}
-	o := v.integration(f, c, p, "host_e2e", rec.Store)
-	v.e2eSources(f, p, rec)
+	o, ts := v.integration(f, c, p, "host_e2e", rec.Store)
+	v.e2eSources(f, p, rec, ts)
+	v.e2eExecution(f, p, rec, ts)
 	return o
 }
 
 // integration checks one record's tasks against the case: the case's task
 // first, the task after the restart second.
-func (v *verifier) integration(f *findings, c contracts.AcceptanceCase, p, layer string, rows []storedTask) Observed {
+func (v *verifier) integration(f *findings, c contracts.AcceptanceCase, p, layer string, rows []storedTask) (Observed, []*task) {
 	ev := []string{p}
 	o := Observed{ForbiddenFound: []string{}}
 	want := 1
@@ -140,13 +142,13 @@ func (v *verifier) integration(f *findings, c contracts.AcceptanceCase, p, layer
 	}
 	if len(rows) != want {
 		f.missing("V2", ev, "%d stored tasks, the case needs %d", len(rows), want)
-		return o
+		return o, nil
 	}
 	var ts []*task
 	for _, row := range rows {
 		t := v.readTask(f, ev, row)
 		if !t.usable {
-			return o
+			return o, nil
 		}
 		ts = append(ts, t)
 	}
@@ -247,7 +249,7 @@ func (v *verifier) integration(f *findings, c contracts.AcceptanceCase, p, layer
 		f.fail("V5", ev, "forbidden events %v", o.ForbiddenFound)
 	}
 	v.parameters(f, ev, layer, params, ts[0], s)
-	return o
+	return o, ts
 }
 
 // readTask recomputes one stored task from its record alone.
@@ -612,7 +614,7 @@ func (v *verifier) parameters(f *findings, ev []string, layer string, params map
 // replies (task and events) against the stored records (V4), the API's
 // purchases (V2, V5), and the host's trusted settings against the
 // snapshots the Store took (V2).
-func (v *verifier) e2eSources(f *findings, p string, rec e2eRecord) {
+func (v *verifier) e2eSources(f *findings, p string, rec e2eRecord, ts []*task) {
 	ev := []string{p}
 	type apiEvent struct {
 		EventID       string `json:"event_id"`
@@ -622,14 +624,18 @@ func (v *verifier) e2eSources(f *findings, p string, rec e2eRecord) {
 		ObservedAt    uint64 `json:"observed_at"`
 	}
 	type apiTask struct {
-		TaskID       string `json:"task_id"`
-		Status       string `json:"status"`
-		AsOfSequence uint64 `json:"as_of_sequence"`
-		Purchases    []struct {
-			PurchaseOrderID string                   `json:"purchase_order_id"`
-			IntentHash      string                   `json:"intent_hash"`
-			Decision        contracts.PolicyDecision `json:"decision"`
-		} `json:"purchases"`
+		TaskID       string        `json:"task_id"`
+		ConsumerID   string        `json:"consumer_id"`
+		AgentID      string        `json:"agent_id"`
+		WalletID     string        `json:"wallet_id"`
+		Payer        string        `json:"payer"`
+		Status       string        `json:"status"`
+		AsOfSequence uint64        `json:"as_of_sequence"`
+		Purchases    []apiPurchase `json:"purchases"`
+	}
+	read := map[string]*task{}
+	for _, t := range ts {
+		read[t.row.TaskID] = t
 	}
 	byTask := map[string]int{}
 	for i, raw := range rec.Tasks {
@@ -652,13 +658,17 @@ func (v *verifier) e2eSources(f *findings, p string, rec e2eRecord) {
 		if api.Status != row.Status || api.AsOfSequence != uint64(len(row.Events)) {
 			f.fail("V4", ev, "task %s: the API says %s as of event %d; the Store has %s with %d events", quote(row.TaskID), quote(api.Status), api.AsOfSequence, quote(row.Status), len(row.Events))
 		}
+		if api.ConsumerID != row.ConsumerID || api.AgentID != row.AgentID || api.WalletID != row.WalletID || api.Payer != row.Payer {
+			f.fail("V7", ev, "task %s: the API names another consumer, agent, wallet or payer than the Store", quote(row.TaskID))
+		}
 		for _, pu := range api.Purchases {
-			s, ok := row.Purchases[pu.PurchaseOrderID]
-			if !ok || s.Hash != pu.IntentHash {
-				f.fail("V2", ev, "task %s: the API's purchase %s is not the stored one", quote(row.TaskID), quote(pu.PurchaseOrderID))
-			}
 			if pu.Decision.PaymentStatus != "unavailable" {
 				f.fail("V5", ev, "task %s: the API shows payment status %s", quote(row.TaskID), quote(pu.Decision.PaymentStatus))
+			}
+			if t := read[row.TaskID]; t != nil {
+				t.compareAPI(f, ev, pu)
+			} else if s, ok := row.Purchases[pu.PurchaseOrderID]; !ok || s.Hash != pu.IntentHash {
+				f.fail("V2", ev, "task %s: the API's purchase %s is not the stored one", quote(row.TaskID), quote(pu.PurchaseOrderID))
 			}
 		}
 		if len(api.Purchases) != len(row.Purchases) {
@@ -720,5 +730,282 @@ func (v *verifier) e2eSources(f *findings, p string, rec e2eRecord) {
 	}
 	if rec.Verdict != "PASS" {
 		f.fail("V3", ev, "the E2E test itself recorded %s", quote(rec.Verdict))
+	}
+}
+
+// apiPurchase is a purchase as GET /api/tasks/{id} shows it.
+type apiPurchase struct {
+	PurchaseOrderID        string                   `json:"purchase_order_id"`
+	RequestID              string                   `json:"request_id"`
+	HTTPMethod             string                   `json:"http_method"`
+	ResourceURL            string                   `json:"resource_url"`
+	ChainID                string                   `json:"chain_id"`
+	AssetContract          string                   `json:"asset_contract"`
+	AssetID                string                   `json:"asset_id"`
+	PayTo                  string                   `json:"pay_to"`
+	Amount                 string                   `json:"amount"`
+	IntentHash             string                   `json:"intent_hash"`
+	PaymentRequirementHash string                   `json:"payment_requirement_hash"`
+	Decision               contracts.PolicyDecision `json:"decision"`
+	DecidedAt              uint64                   `json:"decided_at"`
+	DeadlineAt             uint64                   `json:"deadline_at"`
+	ApprovalClosed         string                   `json:"approval_closed"`
+	ClosedAt               uint64                   `json:"closed_at"`
+}
+
+// purchaseEvents is what the stored events say of one purchase.
+type purchaseEvents struct {
+	decision  *contracts.PolicyDecision
+	decidedAt uint64
+	closure   string
+	closedAt  uint64
+	sequences []uint64
+}
+
+func (t *task) purchaseEvents() map[string]*purchaseEvents {
+	out := map[string]*purchaseEvents{}
+	for _, e := range t.events {
+		po := e.Scope.PurchaseOrderID
+		if po == "" {
+			continue
+		}
+		pe := out[po]
+		if pe == nil {
+			pe = &purchaseEvents{}
+			out[po] = pe
+		}
+		pe.sequences = append(pe.sequences, e.Sequence)
+		switch e.EventType {
+		case "POLICY_DECIDED":
+			pe.decision, pe.decidedAt = e.Payload.Decision, e.ObservedAt
+		case "APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN":
+			pe.closure, pe.closedAt = e.Payload.Decision.ApprovalStatus, e.ObservedAt
+		}
+	}
+	return out
+}
+
+// lifecycle is the task's TASK_CANCELLED or TASK_TIMED_OUT, if any.
+func (t *task) lifecycle() *contracts.AuditEvent {
+	for i, e := range t.events {
+		if e.EventType == "TASK_CANCELLED" || e.EventType == "TASK_TIMED_OUT" {
+			return &t.events[i]
+		}
+	}
+	return nil
+}
+
+// runOutcomes are the ways the host and the trace may say a task's run
+// ended, given the stored events: a CLI timeout is recorded only by the run
+// itself (timeout); without a lifecycle event the run ended ok; a host
+// cancel either stopped the run (cancelled) or came after it ended (ok).
+func (t *task) runOutcomes() []string {
+	switch e := t.lifecycle(); {
+	case e == nil:
+		return []string{"ok"}
+	case e.EventType == "TASK_TIMED_OUT":
+		return []string{"timeout"}
+	}
+	return []string{"cancelled", "ok"}
+}
+
+// compareAPI: the API's view of a purchase is the stored order, its
+// original decision and its closure, field by field. The API was read after
+// the run ended (its as_of_sequence is the last stored event, checked
+// above), so the closure the events record is the one it must show.
+func (t *task) compareAPI(f *findings, ev []string, pu apiPurchase) {
+	id, po := quote(t.row.TaskID), quote(pu.PurchaseOrderID)
+	order, s := t.orders[pu.PurchaseOrderID], t.row.Purchases[pu.PurchaseOrderID]
+	pe := t.purchaseEvents()[pu.PurchaseOrderID]
+	if order == nil || pe == nil || pe.decision == nil {
+		f.fail("V2", ev, "task %s: the API shows purchase %s, which the Store did not decide", id, po)
+		return
+	}
+	i := order.Intent
+	assetID := ""
+	if a, ok := t.reg.TrustedAsset(i.ChainID, i.AssetContract); ok {
+		assetID = a.AssetID
+	}
+	for _, c := range [][3]string{{"request_id", pu.RequestID, order.RequestID}, {"http_method", pu.HTTPMethod, i.HTTPMethod},
+		{"resource_url", pu.ResourceURL, i.ResourceURL}, {"chain_id", pu.ChainID, i.ChainID}, {"asset_contract", pu.AssetContract, i.AssetContract},
+		{"asset_id", pu.AssetID, assetID}, {"pay_to", pu.PayTo, i.PayTo}, {"amount", pu.Amount, string(i.Amount)},
+		{"intent_hash", pu.IntentHash, s.Hash}, {"payment_requirement_hash", pu.PaymentRequirementHash, i.PaymentRequirementHash}} {
+		if c[1] != c[2] {
+			f.fail("V2", ev, "task %s purchase %s: the API's %s is %s, the stored %s", id, po, c[0], quote(c[1]), quote(c[2]))
+		}
+	}
+	deadline := uint64(0)
+	if pe.decision.PolicyVerdict == "Ask" {
+		deadline = pe.decidedAt + t.terms.ApprovalDeadlineSeconds
+	}
+	switch {
+	case pu.Decision != *pe.decision:
+		f.fail("V3", ev, "task %s purchase %s: the API's decision %s/%s/%s is not the recorded %s/%s/%s", id, po,
+			pu.Decision.PolicyVerdict, pu.Decision.Reason, pu.Decision.ApprovalStatus, pe.decision.PolicyVerdict, pe.decision.Reason, pe.decision.ApprovalStatus)
+	case pu.DecidedAt != pe.decidedAt || pu.DeadlineAt != deadline:
+		f.fail("V3", ev, "task %s purchase %s: the API's decision time or deadline is not the recorded one", id, po)
+	case pu.ApprovalClosed != pe.closure || pu.ClosedAt != pe.closedAt:
+		f.fail("V3", ev, "task %s purchase %s: the API's approval closure %s at %d is not the recorded %s at %d", id, po,
+			quote(pu.ApprovalClosed), pu.ClosedAt, quote(pe.closure), pe.closedAt)
+	}
+}
+
+// e2eExecution checks the run's own records against the Store: the host's
+// run for each task, and the run trace (the history allow-list) with its
+// tool calls, the purchases they made and the events those led to. Both
+// records are required for an E2E case; a missing one is INCONCLUSIVE, a
+// contradiction FAIL. A run that ended before a purchase, by a cancel or a
+// timeout, is checked as what it is: no request_purchase is required.
+func (v *verifier) e2eExecution(f *findings, p string, rec e2eRecord, ts []*task) {
+	ev := []string{p}
+	absent := func(raw json.RawMessage) bool { return len(raw) == 0 || string(raw) == "null" }
+	var runs struct {
+		Runs []struct {
+			TaskID      string `json:"task_id"`
+			ConsumerID  string `json:"consumer_id"`
+			State       string `json:"state"`
+			Outcome     string `json:"outcome"`
+			TaskStarted bool   `json:"task_started"`
+			EndedAt     uint64 `json:"ended_at"`
+		} `json:"runs"`
+	}
+	runsOK := false
+	switch {
+	case absent(rec.HostRuns):
+		f.missing("V4", ev, "the host's run record (host_runs) is missing")
+	case json.Unmarshal(rec.HostRuns, &runs) != nil:
+		f.missing("V4", ev, "the host's run record is not readable")
+	default:
+		runsOK = true
+	}
+	var traces map[string][]json.RawMessage
+	tracesOK := false
+	switch {
+	case absent(rec.Traces):
+		f.missing("V4", ev, "the run traces (traces) are missing")
+	case json.Unmarshal(rec.Traces, &traces) != nil:
+		f.missing("V4", ev, "the run traces are not readable")
+	default:
+		tracesOK = true
+	}
+	stored := map[string]bool{}
+	for _, t := range ts {
+		stored[t.row.TaskID] = true
+	}
+	if runsOK {
+		for _, r := range runs.Runs {
+			if !stored[r.TaskID] {
+				f.fail("V4", ev, "a host run for task %s, which the record does not store", quote(r.TaskID))
+			}
+		}
+	}
+	for _, t := range ts {
+		id := quote(t.row.TaskID)
+		want := t.runOutcomes()
+		runOutcome := ""
+		if runsOK {
+			n := 0
+			for _, r := range runs.Runs {
+				if r.TaskID != t.row.TaskID {
+					continue
+				}
+				n++
+				switch {
+				case r.ConsumerID != t.row.ConsumerID:
+					f.fail("V7", ev, "task %s: its host run is %s's", id, quote(r.ConsumerID))
+				case r.State != "ended" || !r.TaskStarted:
+					f.fail("V4", ev, "task %s: its host run is %s (task started: %v)", id, quote(r.State), r.TaskStarted)
+				case !slices.Contains(want, r.Outcome):
+					f.fail("V4", ev, "task %s: the host run ended %s; the stored events allow %v", id, quote(r.Outcome), want)
+				}
+				runOutcome = r.Outcome
+				// A cancel that stopped the run came before its end; one after
+				// an ok run came after it (times are whole seconds).
+				if e := t.lifecycle(); e != nil && e.EventType == "TASK_CANCELLED" {
+					if r.Outcome == "cancelled" && r.EndedAt < e.ObservedAt || r.Outcome == "ok" && e.ObservedAt < r.EndedAt {
+						f.fail("V4", ev, "task %s: the run ended %s at %d, the cancel is at %d", id, quote(r.Outcome), r.EndedAt, e.ObservedAt)
+					}
+				}
+			}
+			if n != 1 {
+				f.fail("V4", ev, "task %s has %d host runs", id, n)
+			}
+		}
+		if !tracesOK {
+			continue
+		}
+		list := traces[t.row.TaskID]
+		if len(list) == 0 {
+			f.missing("V4", ev, "task %s has no run trace", id)
+			continue
+		}
+		if len(list) > 1 {
+			f.fail("V4", ev, "task %s has %d run traces", id, len(list))
+			continue
+		}
+		var tr struct {
+			TaskID       string `json:"task_id"`
+			GateMode     string `json:"gate_mode"`
+			Gate         string `json:"gate"`
+			Outcome      string `json:"outcome"`
+			NotAvailable string `json:"not_available"`
+			ToolCalls    []struct {
+				N               int      `json:"n"`
+				Tool            string   `json:"tool"`
+				Outcome         string   `json:"outcome"`
+				PurchaseOrderID string   `json:"purchase_order_id"`
+				EventSequences  []uint64 `json:"event_sequences"`
+			} `json:"tool_calls"`
+		}
+		if json.Unmarshal(list[0], &tr) != nil {
+			f.missing("V4", ev, "task %s: its run trace is not readable", id)
+			continue
+		}
+		if tr.NotAvailable != "" {
+			f.missing("V4", ev, "task %s: its run trace is not available (%s)", id, quote(tr.NotAvailable))
+			continue
+		}
+		switch {
+		case tr.TaskID != t.row.TaskID:
+			f.fail("V4", ev, "task %s: its run trace is task %s's", id, quote(tr.TaskID))
+			continue
+		case tr.GateMode != "strict" || tr.Gate != "passed":
+			f.fail("V6", ev, "task %s: a fixture run's trace says gate %s %s", id, quote(tr.GateMode), quote(tr.Gate))
+		case !slices.Contains(want, tr.Outcome) || runOutcome != "" && tr.Outcome != runOutcome:
+			f.fail("V4", ev, "task %s: the trace ended %s; the host run %s, the stored events allow %v", id, quote(tr.Outcome), quote(runOutcome), want)
+		}
+		pes := t.purchaseEvents()
+		called := map[string]int{}
+		for k, c := range tr.ToolCalls {
+			if c.N != k+1 {
+				f.fail("V4", ev, "task %s: tool call %d is numbered %d", id, k+1, c.N)
+			}
+			if c.Tool != "request_purchase" {
+				continue
+			}
+			pe := pes[c.PurchaseOrderID]
+			switch {
+			case c.PurchaseOrderID == "":
+				if slices.Contains([]string{"Ask", "Deny", "Allow"}, c.Outcome) {
+					f.fail("V4", ev, "task %s: request_purchase %d reports %s without a purchase", id, c.N, quote(c.Outcome))
+				}
+				continue
+			case pe == nil || pe.decision == nil:
+				f.fail("V4", ev, "task %s: request_purchase %d names purchase %s, which the Store did not decide", id, c.N, quote(c.PurchaseOrderID))
+				continue
+			}
+			called[c.PurchaseOrderID]++
+			if c.Outcome != pe.decision.PolicyVerdict {
+				f.fail("V3", ev, "task %s: request_purchase %d reports %s; the Store decided %s", id, c.N, quote(c.Outcome), pe.decision.PolicyVerdict)
+			}
+			if !slices.Equal(c.EventSequences, pe.sequences) {
+				f.fail("V4", ev, "task %s: request_purchase %d names events %v; the purchase's stored events are %v", id, c.N, c.EventSequences, pe.sequences)
+			}
+		}
+		for po := range t.orders {
+			if called[po] != 1 {
+				f.fail("V4", ev, "task %s: purchase %s is made by %d request_purchase calls in the trace", id, quote(po), called[po])
+			}
+		}
 	}
 }

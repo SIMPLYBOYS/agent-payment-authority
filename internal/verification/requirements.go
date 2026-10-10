@@ -25,7 +25,10 @@ var requirements = []struct {
 // testStatus reads one test's status from a log: go test -json lines
 // (top-level tests), TAP (top-level "ok N - name", "not ok", "# SKIP") or
 // browser-ui's "PASS name" / "FAIL name" lines. pass needs at least one
-// passing match and no failing or skipped one.
+// passing match and no failing or skipped one, and the whole log read: a
+// line beyond the scanner's bounded token (16 MiB) or a read error stops
+// it, and what was read before cannot stand for the rest (incomplete). A
+// failure already read stays a failure.
 func testStatus(file string, log []byte, name string) string {
 	prefix := strings.HasSuffix(name, "*")
 	name = strings.TrimSuffix(name, "*")
@@ -81,6 +84,8 @@ func testStatus(file string, log []byte, name string) string {
 	switch {
 	case fail > 0:
 		return "fail"
+	case sc.Err() != nil:
+		return "incomplete"
 	case skip > 0:
 		return "skip"
 	case pass > 0:
@@ -133,8 +138,11 @@ func (v *verifier) requirements() {
 			case "skip", "missing":
 				rr.Verdict = worst(rr.Verdict, Inconclusive)
 				f.missing("R", []string{c[0]}, "%s: test %s is %s in the record", r.name, quote(c[1]), st)
+			case "incomplete":
+				rr.Verdict = worst(rr.Verdict, Inconclusive)
+				f.missing("R", []string{c[0]}, "%s: %s could not be read to its end (a line over the scanner's limit or a read error); test %s is not shown", r.name, c[0], quote(c[1]))
 			}
-			if said, ok := claimed[c]; ok && said == "pass" && st != "pass" {
+			if said, ok := claimed[c]; ok && said == "pass" && st != "pass" && st != "incomplete" {
 				rr.Verdict = worst(rr.Verdict, Fail)
 				f.fail("R", []string{index, c[0]}, "%s: the index says %s passed; the record shows %s", r.name, quote(c[1]), st)
 			}
