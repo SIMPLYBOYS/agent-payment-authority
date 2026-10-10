@@ -24,8 +24,8 @@ E1～E3 都已驗收，E4 的結案候選報告在 [m1-result.md](m1-result.md)�
 | 乾淨目錄依 README 完成 fixture E2E | E4 補驗：新 clone、`make m1-fixture` 結束碼 0、31 案 PASS、檢查器 PASS；用了本機快取與既有 Unity Web 建置副本 | `m1-result.md` §3.4 |
 | `tests/m1/` 的案例對照 | `tests/m1/README.md` | — |
 | `docs/m1-result.md` | 已建立（結案候選） | — |
-| 任務卡逐項核對 | 已列建議，待 reviewer 判定 | `m1-result.md` §5 |
-| B1-07 reviewer 選擇現場挑戰 | **沒有紀錄，待 reviewer 選擇與操作** | `m1-result.md` §5.3 |
+| 任務卡逐項核對 | 已列建議；10/11 Codex 限定核對通過，接受三個待判定項目（白名單 trace、標示文字、乾淨目錄補驗）；勾選與結案待 Codex／Aaron | `m1-result.md` §4.2、§5 |
+| B1-07 reviewer 選擇現場挑戰 | 10/11 Codex 選定 `deny-merchant`，Claude Code 執行 Ask → Deny → Ask，與事前預期相符；待 Codex 最後核對 | `m1-result.md` §5.3 |
 
 B1-04／B1-06／B1-07 仍是 InProgress，本文件不改任務狀態。
 
