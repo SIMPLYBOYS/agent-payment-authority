@@ -301,3 +301,72 @@ func TestList(t *testing.T) {
 		t.Fatalf("exit %d, stdout %q, %d entries\n%s", code, so.String(), len(entries), se.String())
 	}
 }
+
+// progressFile stands in for progress.log: it fails the write that carries
+// failOn (an error, or a short write), or its Close, and counts writes
+// after Close.
+type progressFile struct {
+	failOn     string
+	short      bool
+	closeErr   error
+	closed     bool
+	afterClose int
+	got        bytes.Buffer
+}
+
+func (f *progressFile) Write(p []byte) (int, error) {
+	if f.closed {
+		f.afterClose++
+	}
+	if f.failOn != "" && bytes.Contains(p, []byte(f.failOn)) {
+		if f.short {
+			return len(p) - 1, nil
+		}
+		return 0, errors.New("disk full")
+	}
+	return f.got.Write(p)
+}
+
+func (f *progressFile) Close() error { f.closed = true; return f.closeErr }
+
+// progress.log is part of the result: its last writes and its Close happen
+// before the summary and the exit code are formed, so a failure there makes
+// summary.json and stdout say evidence_complete=false and the exit 3 (1
+// when a step failed); a step keeps its own result; nothing is written to
+// it after Close (10/11 review, R3).
+func TestProgressFile(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		file   *progressFile
+		script string
+		want   int
+		result string
+	}{
+		{"close fails", &progressFile{closeErr: errors.New("close failed")}, "true", exitIncomplete, "PASS"},
+		{"the last write fails", &progressFile{failOn: "summary ("}, "true", exitIncomplete, "PASS"},
+		{"the last write is short", &progressFile{failOn: "summary (", short: true}, "true", exitIncomplete, "PASS"},
+		{"a failing step, then close fails", &progressFile{closeErr: errors.New("close failed")}, "exit 4", exitFailed, "FAIL"},
+		{"all saved", &progressFile{}, "true", exitPass, "PASS"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func(o func(string) (io.WriteCloser, error)) { openLog = o }(openLog)
+			openLog = func(path string) (io.WriteCloser, error) {
+				if filepath.Base(path) == "progress.log" {
+					return tc.file, nil
+				}
+				return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+			}
+			code, sum, se := check(t, context.Background(), "--out", t.TempDir(), "--plan", plan(t, sh("s", tc.script, time.Minute, "plain")))
+			var file Summary
+			raw, _ := os.ReadFile(filepath.Join(sum.Evidence, "summary.json"))
+			json.Unmarshal(raw, &file)
+			complete := tc.want == exitPass
+			if code != tc.want || sum.Steps[0].Result != tc.result || sum.Complete != complete || file.Complete != complete || len(file.Steps) != 1 {
+				t.Fatalf("exit %d, step %s, stdout complete %v, summary.json complete %v\n%s", code, sum.Steps[0].Result, sum.Complete, file.Complete, se)
+			}
+			if !tc.file.closed || tc.file.afterClose != 0 || !strings.Contains(tc.file.got.String(), "START 1/1 s") {
+				t.Fatalf("closed %v, %d writes after Close\n%s", tc.file.closed, tc.file.afterClose, tc.file.got.String())
+			}
+		})
+	}
+}

@@ -115,6 +115,9 @@ MUTATIONS = [
      [(C, "if n, err := stdout.Write(raw); err != nil || n != len(raw) {", "if n, err := stdout.Write(raw); false && (err != nil || n != len(raw)) {")]),
     ("R3 a short summary write is reported", go("./cmd/m1-check/", "^TestSummaryNotDelivered$/^short_write$", ("TestSummaryNotDelivered/short_write", r"exit 0, 1 summaries")),
      [(C, "if n, err := stdout.Write(raw); err != nil || n != len(raw) {", "if n, err := stdout.Write(raw); err != nil || n < 0 {")]),
+    ("R3 a progress.log Close error is in the result", go("./cmd/m1-check/", "^TestProgressFile$/^close_fails$",
+                                                         ("TestProgressFile/close_fails", r"exit 0, step PASS, stdout complete true, summary.json complete true")),
+     [(C, 'saveErr("progress.log", progFile.Close())', "progFile.Close()")]),
     # R4: only the expected assertion counts
     ("R4 a panic is not caught", py("scripts/verify/m1_e3_reverse_test.py", r"a timeout panic counted as caught"),
      [(S, '\n    if "panic: " in text:', "\n    if False:")]),  # the newline and indent: the code, not this table
