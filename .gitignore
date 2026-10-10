@@ -15,6 +15,9 @@ bin/
 var/
 artifacts/
 *.log
+# ...except the M1-E2 golden bundle's browser log, which its manifest indexes
+# (testdata/verification/README.md).
+!testdata/verification/m1-fixture-20261009T162703Z-4ddb7a/browser/browser-test.log
 __pycache__/
 *.pyc
 

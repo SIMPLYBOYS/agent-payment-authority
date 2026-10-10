@@ -4,7 +4,7 @@
 # thing, both), run the verifier's tests, require an assertion failure (a
 # build failure does not count), restore the file. Run from the repository
 # root:
-#   python3 scripts/verify/m1-e2-reverse.py
+#   python3 scripts/verify/m1-e2-reverse.py [name filter]
 import subprocess, sys
 
 V = "internal/verification/verify.go"
@@ -33,7 +33,7 @@ MUTATIONS = [
                                         "func changes(f *findings, ev []string, name string, got, base contracts.PurchaseOrder, allowed map[string]func(string) bool) {\n\treturn")]),
     ("V2 purchase validation", [(I, "if err := order.Validate(); err != nil {", "if err := order.Validate(); err != nil && false {")]),
     ("V2 case parameters", [(I, "v.parameters(f, ev, layer, params, ts[0], s)", "_ = layer")]),
-    ("V2/V4 E2E sources", [(I, "v.e2eSources(f, p, rec)", "_ = rec")]),
+    ("V2/V4 E2E sources", [(I, "v.e2eSources(f, p, rec, ts)", "_ = rec")]),
     # V3
     ("V3 expected outcome", [(I, "if cmp[1] != cmp[2] {", "if false {")]),
     ("V3 necessary conditions", [(I, "v.necessaryConditions(f, ev, t, t.orders[po], e.Payload.Decision, e.ObservedAt)", "_ = po")]),
@@ -64,7 +64,22 @@ MUTATIONS = [
     ("V7 event scope", [(I, "if sc := e.Scope; sc.ConsumerID != row.ConsumerID || sc.AgentID != row.AgentID || sc.WalletID != row.WalletID {", "if false {"),
                         (I, 'claim = "V7"\n\t\t\t}\n\t\t\tf.fail(claim, ev, "task %s event', 'claim = "V4"\n\t\t\t}\n\t\t\tf.fail(claim, ev, "task %s event')]),
     # R
-    ("R index vs record", [(Q, 'if said, ok := claimed[c]; ok && said == "pass" && st != "pass" {', 'if said, ok := claimed[c]; ok && said == "pass" && st != "pass" && false {')]),
+    ("R index vs record", [(Q, 'if said, ok := claimed[c]; ok && said == "pass" && st != "pass" && st != "incomplete" {', 'if said, ok := claimed[c]; ok && said == "pass" && st != "pass" && st != "incomplete" && false {')]),
+    # 10/10 round R2: an E2E case's run records against the Store
+    ("R2 run records checked at all", [(I, "v.e2eExecution(f, p, rec, ts)", "_ = ts")]),
+    ("R2 run records required", [(I, "case absent(rec.HostRuns):", "case false && absent(rec.HostRuns):"),
+                                 (I, "case json.Unmarshal(rec.HostRuns, &runs) != nil:", "case false && json.Unmarshal(rec.HostRuns, &runs) != nil:"),
+                                 (I, "case absent(rec.Traces):", "case false && absent(rec.Traces):"),
+                                 (I, "case json.Unmarshal(rec.Traces, &traces) != nil:", "case false && json.Unmarshal(rec.Traces, &traces) != nil:")]),
+    ("R2 API purchase vs Store", [(I, "t.compareAPI(f, ev, pu)", "_ = t")]),
+    ("R2 trace outcome vs decision", [(I, "if c.Outcome != pe.decision.PolicyVerdict {", "if false {")]),
+    ("R2 trace events vs Store", [(I, "if !slices.Equal(c.EventSequences, pe.sequences) {", "if false {")]),
+    ("R2 run outcome vs lifecycle", [(I, "case !slices.Contains(want, r.Outcome):", "case false && !slices.Contains(want, r.Outcome):"),
+                                     (I, 'case !slices.Contains(want, tr.Outcome) || runOutcome != "" && tr.Outcome != runOutcome:',
+                                      'case false && (!slices.Contains(want, tr.Outcome) || runOutcome != "" && tr.Outcome != runOutcome):')]),
+    ("R2 cancel timing", [(I, 'if r.Outcome == "cancelled" && r.EndedAt < e.ObservedAt || r.Outcome == "ok" && e.ObservedAt < r.EndedAt {', "if false {")]),
+    # 10/10 round R3: a log not read to its end
+    ("R3 scanner error", [(Q, 'case sc.Err() != nil:\n\t\treturn "incomplete"', 'case false:\n\t\treturn "incomplete"')]),
     ("R failing test", [(Q, 'f.fail("R", []string{c[0]}, "%s: test %s failed", r.name, quote(c[1]))', "_ = r")]),
     # exit codes and reporting
     ("exit code FAIL", [(R, "case Fail:\n\t\treturn 1", "case Fail:\n\t\treturn 2")]),
@@ -73,6 +88,9 @@ MUTATIONS = [
     ("worst keeps FAIL", [(R, "case a == Fail || b == Fail:\n\t\treturn Fail", "case a == Fail || b == Fail:\n\t\treturn Inconclusive")]),
 ]
 
+# An argument runs only the mutations whose name contains it.
+only = sys.argv[1] if len(sys.argv) > 1 else ""
+MUTATIONS = [m for m in MUTATIONS if only in m[0]]
 failed = 0
 for name, edits in MUTATIONS:
     originals = {}

@@ -1,0 +1,854 @@
+commit 0853b44daf722066f95f06cadfed4b46e8e84d73
+unity build /Users/mac/Documents/OpenSourceProjects/agent-payment-authority/unity/AgentPaymentAuthority/Build/WebGL/Build
+demo at 127.0.0.1:54407 (fake plan: task-a Ask, task-b Deny)
+PASS header says M1 / fake agent / no payment
+PASS Unity Web build loaded in the browser  [Unity 場景就緒（LimeZu 素材）：等待選擇 task]
+PASS Unity uses LimeZu art (not placeholders)
+PASS viewer A signed in
+PASS token field cleared after reading
+PASS task-a synced
+PASS Inspector: Ask HUMAN_APPROVAL_REQUIRED pending, unpaid
+PASS Dashboard scene phase waiting
+PASS Timeline has events #1-#3
+PASS Unity shows task-a #3 waiting Ask HUMAN_APPROVAL_REQUIRED  [Unity 已呈現 task-a #3 waiting（HUMAN_APPROVAL_REQUIRED）]
+PASS event JSON is the API whitelist, labelled as not raw output
+PASS nothing says paid or delivered
+PASS screenshot desktop-task-a-ask: token field empty
+  screenshot desktop-task-a-ask.png viewport 1280x900
+  task-a seq 3 Ask (consumer-a) shown in the desktop screenshot
+PASS R3: event #2 opened
+PASS R3: two polls completed
+PASS R3: event #2 still open (visible) after two polls
+PASS R2 order: before the replay, task-a is at #3 and its deadline is 4–8 s ahead (server time)  [served_at 1791563284, deadline 1791563292]
+PASS R2 order: the page is in replay while task-a is still #3 (no expiry committed yet)  [seq 3 at 1791563284, deadline 1791563292]
+PASS R2: Unity reports a replay step in a new generation
+PASS R2 order: the backend commits #4 while the page is still in replay  [seq 4 seen at 1791563292 in mode replay]
+  replay order (server time): replay entered at 1791563284 with task-a #3; deadline 1791563292; #4 (APPROVAL_EXPIRED) committed, seen at 1791563292 in mode replay; 27 samples during the replay
+PASS R2: during the replay nothing switches back to 已同步  [replay|歷史展示回放（唯讀，不重跑 task、不改事件）]
+PASS R2: replay note says the panels are not the shop's moment
+PASS R2: replay ends and polling resumes
+PASS R2: the backend added an event during the replay  [as_of_sequence 3 -> 4]
+PASS R2: restore shows the latest snapshot in Unity (new generation, task-a #4 expired, Ask HUMAN_APPROVAL_REQUIRED)  [Unity 已呈現 task-a #4 expired（HUMAN_APPROVAL_REQUIRED）]
+PASS R2: restore shows the latest snapshot in the Dashboard
+PASS R3: event #2 still open after the new event #4
+PASS R3: a closed event is not reopened by later polls
+PASS before the task switch Unity shows task-a #4
+PASS task switch: at once Unity says 同步中 and holds nothing of task-a  [syncing|true]
+PASS viewer A on task-b: same not-found answer
+PASS viewer A on task-b: nothing of B shown
+PASS task switch: Unity waits for a task, nothing of task-a  [ready|Unity 場景就緒（LimeZu 素材）：等待選擇 task]
+PASS task switch: a late report of task-a's generation does not bring it back  [ready|Unity 場景就緒（LimeZu 素材）：等待選擇 task]
+PASS R3: opening another task cleared the opened events
+PASS before the consumer switch Unity shows task-a #4
+PASS switch clears viewer, Inspector and Timeline
+PASS consumer switch: Unity waits for a task, nothing of task-a  [ready|Unity 場景就緒（LimeZu 素材）：等待選擇 task]
+PASS consumer switch: a late report of A's generation does not bring task-a back  [ready|Unity 場景就緒（LimeZu 素材）：等待選擇 task]
+PASS Inspector: Deny INSUFFICIENT_BUDGET, wallet-b
+PASS Unity shows task-b #3 denied Deny INSUFFICIENT_BUDGET  [Unity 已呈現 task-b #3 denied（INSUFFICIENT_BUDGET）]
+PASS screenshot narrow-task-b-deny: token field empty
+  screenshot narrow-task-b-deny.png viewport 390x844
+  task-b seq 3 Deny (consumer-b) shown in the narrow screenshot
+PASS R2 Deny: replay mode
+PASS R2 Deny: Unity reports a replay step in a new generation
+PASS R2 Deny: replay ends and polling resumes
+PASS R2: restore shows task-b #3 denied Deny INSUFFICIENT_BUDGET (new generation)  [Unity 已呈現 task-b #3 denied（INSUFFICIENT_BUDGET）]
+PASS R2: replay wrote nothing (task-b events unchanged)
+PASS R2: a replay step of task-b is shown before the switch
+PASS R2: after a switch mid-replay: live, no replay note, signed out
+PASS R2: after the switch the Unity status holds nothing of task-b (no late replay step)  [ready|Unity 場景就緒（LimeZu 素材）：等待選擇 task]
+PASS R2: a late replay report of the old generation does not restore task-b  [ready|Unity 場景就緒（LimeZu 素材）：等待選擇 task]
+PASS R2: a second replay replaces the first and restores
+PASS R2: one polling loop (about one poll a second over 5 s)  [5 polls]
+PASS host token refused by the Dashboard
+PASS hostile strings render as text only
+PASS no storage, cookie or URL holds anything  [{"ls":0,"ss":0,"cookie":"","url":"http://127.0.0.1:54407/"}]
+PASS no token in the page or the console
+PASS after a refresh the viewer must sign in again
+PASS refresh + sign-in restores task-a from the Store
+PASS restart: recorded task-a not rerun
+PASS restart: task-a-next Ask on the same wallet-a
+  [71 s] delivery 2 R1 seeded two purchases
+PASS R1: Inspector lists both purchases (one expired, one pending)
+PASS R1: Dashboard scene follows the newer Ask (waiting)
+PASS R1: Unity shows task-a #6 waiting Ask, not the old expiry  [Unity 已呈現 task-a #6 waiting（HUMAN_APPROVAL_REQUIRED）]
+PASS screenshot desktop-r1-two-purchases: token field empty
+  screenshot desktop-r1-two-purchases.png viewport 1280x900
+  task-a seq 6 (two purchases; the newer an open Ask) shown in desktop-r1-two-purchases.png
+  [78 s] B1-06 D1
+PASS D1: on / at 1280×900 the Unity shop is wholly in the first viewport
+PASS D1 default: the card shows the scene's purchase (po-B, the open Ask)  [客人 A · consumer-a · task-a
+
+請購 po-task-a-2
+
+①進店
+#1 TASK_STARTED
+②選商品
+無獨立事件（fake 腳本）
+③報價
+無獨立事件；402 以 hash 綁定在請購
+④請購
+#5 PURCHASE_PROPOSED
+⑤裁決
+#6 Ask
+⑥收尾
+等待中（M1 無核准能力）
+
+Ask：等待人工核准（M1 無核准能力）
+
+task 狀態：等待核准（Store）
+
+402 綁定金額
+500000（基本單位，fixture-usdc）
+Store
+目錄標示
+目錄未取得
+商店 HTTP /catalog（fixture，不綁定此請購；瀏覽器讀取 00:28:53）
+裁決
+Ask
+Store
+原因
+HUMAN_APPROVAL_REQUIRED（需要人工核准（M1 無核准能力））
+Store
+期限
+16:37:33 UTC
+Store 時間；裁決時決定
+付款
+未付款（payment_status：unavailable）
+Store
+其他請購 ▾ 
+po-a-1
+po-task-a-2（場景這筆）]
+PASS D1 default: Inspector, evidence and the card name the same purchase and intent hash
+PASS D1 default: Unity's report matches the projection sent; the purchase link says it is the page's own  [場景對應
+
+Unity 的回報沒有 purchase_order_id；請購關聯由網頁依送出的投影推導，不是 Unity 獨立確認。
+
+送出投影
+gen 3 · task-a #6 waiting
+網頁
+對應請購
+po-task-a-2（網頁推導）
+網頁推導
+這次過場
+首次載入為保存的快照，未觀測進店過程（不播放過場）（規則 1）
+網頁依轉換表推導
+Unity 回報
+gen 3 · task-a #6 waiting
+瀏覽器觀測
+同步
+Unity 已呈現 task-a #6（waiting）
+網頁比較]
+PASS D1 default: the bound amount is its own row, apart from any catalog price
+PASS D1 by hand: the card shows po-A and says the scene shows po-B  [客人 A · consumer-a · task-a
+
+請購 po-a-1
+
+你正在查看 po-a-1；商店場景呈現的是 po-task-a-2 回到場景這筆
+
+①進店
+#1 TASK_STARTED
+②選商品
+無獨立事件（fake 腳本）
+③報價
+無獨立事件；402 以 hash 綁定在請購
+④請購
+#2 PURCHASE_PROPOSED
+⑤裁決
+#3 Ask
+⑥收尾
+#4 APPROVAL_EXPIRED
+
+Ask 已到期（後端已記錄）
+
+task 狀態：等待核准（Store）
+
+402 綁定金額
+500000（基本單位，fixture-usdc）
+Store
+目錄標示
+目錄未取得
+商店 HTTP /catalog（fixture，不綁定此請購；瀏覽器讀取 00:28:53）
+裁決
+Ask
+Store
+原因
+HUMAN_APPROVAL_REQUIRED（需要人工核准（M1 無核准能力））
+Store
+期限
+16:27:31 UTC
+Store 時間；裁決時決定
+付款
+未付款（payment_status：unavailable）
+Store
+其他請購 ▾ 
+po-a-1
+po-task-a-2（場景這筆）]
+PASS D1 by hand: Unity unchanged, no 尚未一致, and the evidence says it is a different pick, not a sync failure
+PASS D1 by hand: 回到場景這筆 returns to the scene's purchase
+PASS D1 replay #1: no purchase yet; the full record says it is not the step  [回放當步 #1／共 6（唯讀）
+
+客人 A · consumer-a · task-a
+
+尚無請購
+
+①進店
+#1 TASK_STARTED
+②選商品
+無獨立事件（fake 腳本）
+③報價
+無獨立事件；402 以 hash 綁定在請購
+④請購
+尚未發生（回放位置 #1）
+⑤裁決
+尚未發生（回放位置 #1）
+⑥收尾
+尚未發生（回放位置 #1）
+
+此 task 尚無請購
+
+task 狀態：執行中（依已回放事件推導，網頁）]
+PASS D1 replay #2: po-A and its fixed fields only: no Ask, reason or expiry  [回放當步 #2／共 6（唯讀）
+
+客人 A · consumer-a · task-a
+
+請購 po-a-1
+
+①進店
+#1 TASK_STARTED
+②選商品
+無獨立事件（fake 腳本）
+③報價
+無獨立事件；402 以 hash 綁定在請購
+④請購
+#2 PURCHASE_PROPOSED
+⑤裁決
+尚未發生（回放位置 #2）
+⑥收尾
+尚未發生（回放位置 #2）
+
+已提出請購，尚無裁決
+
+task 狀態：執行中（依已回放事件推導，網頁）
+
+402 綁定金額
+500000（基本單位，fixture-usdc）
+Store
+目錄標示
+目錄未取得
+商店 HTTP /catalog（fixture，不綁定此請購；瀏覽器讀取 00:28:53）
+付款
+未付款（payment_status：unavailable）
+Store]
+PASS D1 replay #3: Ask waiting, though the record says expired and the browser's clock is long past the deadline  [回放當步 #3／共 6（唯讀）
+
+客人 A · consumer-a · task-a
+
+請購 po-a-1
+
+①進店
+#1 TASK_STARTED
+②選商品
+無獨立事件（fake 腳本）
+③報價
+無獨立事件；402 以 hash 綁定在請購
+④請購
+#2 PURCHASE_PROPOSED
+⑤裁決
+#3 Ask
+⑥收尾
+等待中（M1 無核准能力）
+
+Ask：等待人工核准（M1 無核准能力）
+
+task 狀態：等待核准（依已回放事件推導，網頁）
+
+402 綁定金額
+500000（基本單位，fixture-usdc）
+Store
+目錄標示
+目錄未取得
+商店 HTTP /catalog（fixture，不綁定此請購；瀏覽器讀取 00:28:53）
+裁決
+Ask
+Store 事件（回放）
+原因
+HUMAN_APPROVAL_REQUIRED（需要人工核准（M1 無核准能力））
+Store 事件（回放）
+期限
+16:27:31 UTC
+Store 時間；裁決時決定
+付款
+未付款（payment_status：unavailable）
+Store]
+PASS D1 replay #4: only now expired; po-B is not in the step  [回放當步 #4／共 6（唯讀）
+
+客人 A · consumer-a · task-a
+
+請購 po-a-1
+
+①進店
+#1 TASK_STARTED
+②選商品
+無獨立事件（fake 腳本）
+③報價
+無獨立事件；402 以 hash 綁定在請購
+④請購
+#2 PURCHASE_PROPOSED
+⑤裁決
+#3 Ask
+⑥收尾
+#4 APPROVAL_EXPIRED
+
+Ask 已到期（後端已記錄）
+
+task 狀態：執行中（依已回放事件推導，網頁）
+
+402 綁定金額
+500000（基本單位，fixture-usdc）
+Store
+目錄標示
+目錄未取得
+商店 HTTP /catalog（fixture，不綁定此請購；瀏覽器讀取 00:28:53）
+裁決
+Ask
+Store 事件（回放）
+原因
+HUMAN_APPROVAL_REQUIRED（需要人工核准（M1 無核准能力））
+Store 事件（回放）
+期限
+16:27:31 UTC
+Store 時間；裁決時決定
+付款
+未付款（payment_status：unavailable）
+Store]
+PASS D1 replay #6: po-B's Ask  [回放當步 #6／共 6（唯讀）
+
+客人 A · consumer-a · task-a
+
+請購 po-task-a-2
+
+①進店
+#1 TASK_STARTED
+②選商品
+無獨立事件（fake 腳本）
+③報價
+無獨立事件；402 以 hash 綁定在請購
+④請購
+#5 PURCHASE_PROPOSED
+⑤裁決
+#6 Ask
+⑥收尾
+等待中（M1 無核准能力）
+
+Ask：等待人工核准（M1 無核准能力）
+
+task 狀態：等待核准（依已回放事件推導，網頁）
+
+402 綁定金額
+500000（基本單位，fixture-usdc）
+Store
+目錄標示
+目錄未取得
+商店 HTTP /catalog（fixture，不綁定此請購；瀏覽器讀取 00:28:53）
+裁決
+Ask
+Store 事件（回放）
+原因
+HUMAN_APPROVAL_REQUIRED（需要人工核准（M1 無核准能力））
+Store 事件（回放）
+期限
+16:37:33 UTC
+Store 時間；裁決時決定
+付款
+未付款（payment_status：unavailable）
+Store]
+PASS D1 replay end: back to live, the latest snapshot, no replay labels
+PASS D1 replay: nothing written, no request other than reads
+PASS D1 replay switched away: the late reports bring back no card, no replay  [尚未選擇 task]
+PASS D1: with every section folded the status bar still says fake, no payment and what is not built  [M1／fake agent／不付款
+即時
+目前：未選擇 task
+能力：真實 Agent 未啟用 · 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行
+
+已清除，請輸入另一位 consumer 的 viewer token]
+PASS D1 narrow (390×844): shop above the card, no horizontal scroll
+  [122 s] B1-06 D2
+PASS D2 seeded: the Store already has all six events before the task is opened (#3 first: the decided Ask is stored)  [1 TASK_STARTED,2 PURCHASE_PROPOSED,3 POLICY_DECIDED,4 PURCHASE_PROPOSED,5 POLICY_DECIDED,6 APPROVAL_EXPIRED]
+PASS D2 item 1: a first snapshot shows Unity at the counter (task-a #6 waiting)
+PASS D2 item 1: no move: Unity reported #6 within 800 ms of the first-load text  [first-load text 2978.5 ms, rendered 2977.5999999996275 ms]
+PASS D2 item 1: the scene text says it is a stored snapshot, not an observed walk-in
+PASS D2 item 1: the evidence's scene page says so too, derived by the page  [場景對應
+
+Unity 的回報沒有 purchase_order_id；請購關聯由網頁依送出的投影推導，不是 Unity 獨立確認。
+
+送出投影
+gen 3 · task-a #6 waiting
+網頁
+對應請購
+po-task-a-2（網頁推導）
+網頁推導
+這次過場
+首次載入為保存的快照，未觀測進店過程（不播放過場）（規則 1）
+網頁依轉換表推導
+Unity 回報
+gen 3 · task-a #6 waiting
+瀏覽器觀測
+同步
+Unity 已呈現 task-a #6（waiting）
+網頁比較]
+PASS D2 item 3 (replay #5): a new purchase is said to browse again, while it walks  [回放 #5：Ask：等待人工核准（M1 無法核准）
+
+Unity 補間中：新的一筆請購：展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #5 記錄
+
+此 task 有 2 筆請購；場景顯示最近裁決的 po-task-a-2]
+PASS D2 item 3 (replay #5): the evidence names this move and where it comes from  [場景對應
+
+Unity 的回報沒有 purchase_order_id；請購關聯由網頁依送出的投影推導，不是 Unity 獨立確認。
+
+送出投影
+回放 · gen 4 · task-a #5 waiting
+網頁
+對應請購
+po-task-a-2（網頁推導）
+網頁推導
+這次過場
+新的一筆請購：展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #5 記錄（規則 2）
+網頁依轉換表推導
+Unity 回報
+gen 4 · task-a #4 waiting
+瀏覽器觀測
+同步
+Unity 尚未一致：序號較舊（Unity #4，送出 #5）（不是同步完成）
+網頁比較]
+PASS D2 replay ends and the latest snapshot is back
+  D2 replay: ms from each step's text to Unity's report: {"1":1011,"2":1717,"3":1243,"4":-1,"5":2502,"6":-1}
+PASS D2 item 8 (replay #2): the browse is called a display animation, with the request's event  [回放 #2：取得報價
+
+Unity 補間中：展示動畫：選商品（沒有獨立事件）；請購已在 #2 記錄 / 回放 #2：取得報價]
+PASS D2 item 8 (replay #3): to the counter, display animation, the decision's event  [回放 #3：Ask：等待人工核准（M1 無法核准）
+
+Unity 補間中：展示動畫：到櫃檯（沒有獨立事件）；裁決已在 #3 記錄 / 回放 #3：Ask：等待人工核准（M1 無法核准）]
+PASS D2 item 3 (replay #4, #6): another purchase's event: no move, Unity reports at once  [{"1":1011,"2":1717,"3":1243,"4":-1,"5":2502,"6":-1}]
+PASS D2 item 3 (replay #5): the new purchase walks (Unity reports after a move, within 2.5 s + 700 ms)  [{"1":1011,"2":1717,"3":1243,"4":-1,"5":2502,"6":-1}]
+PASS D2 item 7: no replay step's move took over 2.5 s (+ 700 ms for a slow frame and the report)  [{"1":1011,"2":1717,"3":1243,"4":-1,"5":2502,"6":-1}]
+PASS D2 live: the slow run started (host side)  [{"run_id":"run-fdbb3fb33669d1d4636492a5","request_id":"req-d2-slow-00000001","scenario":"ask-slow","task_id":"show-a-01","consumer_id":"consumer-a","state":"accepted","live":"running","accepted_at":1791563411}]
+PASS D2 item 2: the Store had only #1 when the task was opened and the page's first snapshot is #1 (else this check fails; it is never skipped)  [Store at open 1, page: 已同步：show-a-01，快照序號 1（Store 時間 2026-10-09T16:30:11.000Z），首次載入為保存的快照]
+PASS D2 item 2: Unity shows #1 entered, as a first load
+PASS D2 item 2: data first: the card says Ask while Unity is still on its way from #1  [Ask：等待人工核准（M1 無核准能力） | 1]
+  screenshot d2-live-on-the-way.png (at once): ["Unity 已呈現 show-a-01 #1 entered","Ask：等待人工核准（M1 無法核准）\n\nUnity 補間中：展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #3 記錄"]
+PASS D2 (review of d7070af): reports of another task, another phase or a sequence never sent leave the page saying Unity is on its way  [moving,moving,moving]
+PASS D2 item 2: Unity's own report of #3 comes (held by the hook)
+PASS D2 item 2: released, the exact report (#3 waiting of this task) ends the transition
+PASS D2 item 2: while Unity walked, the scene text said browse and counter are a display animation, the decision in #3  [Ask：等待人工核准（M1 無法核准）
+
+Unity 補間中：展示動畫：選商品 → 到櫃檯（沒有獨立事件）；裁決已在 #3 記錄]
+PASS D2 item 7: the walk to the counter took over 1 s and at most 2.5 s (+ 700 ms for a slow frame and the report)  [2499 ms]
+PASS screenshot d2-live-at-counter: token field empty
+  screenshot d2-live-at-counter.png viewport 1280x900
+  [164 s] B1-06 slice 3.1
+PASS 3.1: the viewer page / has no token file input
+PASS 3.1: before loading, readiness is unconfirmed (never ok)
+PASS 3.1: the token file loads (host + two viewers confirmed by the server)  [{"mode":"file","consumers":"consumer-a,consumer-b","buttons":2,"viewer":"未驗證","text":"已載入 token 檔：host、operator 與 2 位 viewer"}]
+PASS 3.1: the file field is empty after reading
+PASS 3.1: readiness: Store ok after a completed expiry check  [正常：最近完成的到期檢查 00:30:26（目標每 1 秒，不是延遲保證）]
+PASS 3.1: readiness: Unity build ok, fake CLI ok, real CLI off, no payment
+PASS 3.1: readiness: the Unity scene says LimeZu
+PASS 3.1: viewer A from the file shows task-a in Unity
+PASS screenshot desktop-host-ready: token field empty
+  screenshot desktop-host-ready.png viewport 1280x900
+PASS 3.1: switching to B clears A's task and shop at once
+PASS 3.1: viewer B shows task-b, A's task-a is not readable
+PASS 3.1: 「清除目前 viewer」 keeps the loaded file
+PASS 3.1: no token in storage, cookie, URL, page or console  [{"ls":0,"ss":0,"cookie":"","url":"http://127.0.0.1:54560/host"}]
+PASS 3.1: 清除全部憑證 drops every token and the old picture  [{"mode":"none","consumers":"","buttons":0,"viewer":"未驗證","text":"已清除全部憑證"}]
+PASS 3.1: a file over 16 KiB is refused unread
+PASS 3.1: a file that is not the token file is refused
+PASS 3.1: a previous start's token file is refused (server check)
+PASS 3.1 async: A's verification held
+PASS 3.1 async: A loading, then 清除全部: A's late reply restores nothing  [{"mode":"none","consumers":"","buttons":0,"viewer":"未驗證","text":"已清除全部憑證"}]
+PASS 3.1 async: stale A's verification held
+PASS 3.1 async: B loads while A is held
+PASS 3.1 async: A's late 401 neither clears nor replaces B  [{"mode":"file","consumers":"consumer-a,consumer-b","buttons":2,"viewer":"未驗證","text":"已載入 token 檔：host、operator 與 2 位 viewer"}]
+PASS 3.1 async: A's verification held before manual mode
+PASS 3.1 async: manual viewer mode, then A's verification completes: only the typed viewer, no file tokens  [{"mode":"manual","consumers":"","buttons":0,"viewer":"consumer-b（demo viewer，不是使用者登入）","text":"手動 viewer 模式：已清除載入的 token 檔"}]
+PASS 3.1 pagehide: one readiness request (GET /api/host/status) is held in flight  [/api/host/status]
+PASS 3.1 pagehide: the held request then ended  [before pagehide file|consumer-a（demo viewer，不是使用者登入）; not continued (Fetch.continueRequest: Invalid InterceptionId.); ended: cancelled by the page]
+PASS 3.1 pagehide: tokens dropped, Dashboard and shop cleared; the late request restores nothing  [{"mode":"none","viewer":"未驗證","unity":"Unity 場景就緒（LimeZu 素材）：等待選擇 task"}]
+PASS 3.1 pagehide: no more requests after leaving (readiness, viewer, tasks)  [0 requests in 6 s]
+PASS 3.1 pagehide: pageshow: nothing comes back by itself
+PASS 3.1 pagehide (late reply): a readiness reply (GET /api/host/status) has come and its body is held
+PASS 3.1 pagehide (late reply): after pagehide the held reply was handed to the page
+PASS 3.1 pagehide (late reply): the late reply restores no credential, picture or readiness  [{"mode":"none","viewer":"未驗證","readiness":"就緒狀態未確認：請先配對或載入 token 檔Unity 場景已載入（LimeZu 素材）"}]
+PASS 3.1 pagehide (late reply): no more requests after leaving (readiness, viewer, tasks)  [0 requests in 6 s]
+PASS 3.1-R1: viewer A's JSON held
+PASS 3.1-R1: A's late JSON after switching to B: identity and task list stay B's  [consumer-b（demo viewer，不是使用者登入）]
+PASS 3.1-R1: A's late JSON after 清除全部: no identity, no task list  [未驗證]
+PASS 3.1-R1: A's late JSON after pagehide: no identity, no task list  [未驗證]
+PASS 3.1-R2: 清除全部 empties a typed, unsubmitted token
+PASS 3.1-R2: pagehide empties a typed, unsubmitted token
+PASS 3.1-R2: a typed token still signs in on /host (manual mode after reading the field)
+PASS 3.1: after leaving and returning, no credentials and no identity  [{"mode":"none","consumers":"","buttons":0,"viewer":"未驗證","text":"尚未載入 token 檔"}]
+PASS 3.1: after a restart the page's 401 clears every credential  [{"mode":"none","consumers":"","buttons":0,"viewer":"未驗證","text":"服務已重啟或 token 失效，請重新載入 token 檔"}]
+PASS 3.1: the pre-restart file is refused
+PASS 3.1: the new file loads
+PASS 3.1-R1 /: viewer A's JSON held
+PASS 3.1-R1 /: A's late JSON after 清除／切換: no identity, no task list  [未驗證]
+PASS 3.1-R2 /: 清除／切換 empties a typed, unsubmitted token
+PASS 3.1-R2 /: pagehide empties a typed, unsubmitted token
+PASS 3.1-R2 /: a typed token still signs in
+  [200 s] B1-06 slice 3.2
+PASS 3.2: nothing runs at start
+PASS 3.2: the token file with the operator loads
+PASS 3.2: the control panel offers the catalog's scenarios
+PASS 3.2: start Ask opens show-a-01 for consumer-a  [Unity 已呈現 show-a-01 #3 waiting（HUMAN_APPROVAL_REQUIRED）]
+PASS 3.2: the run ends and the list says so without claiming payment
+PASS screenshot desktop-host-control: token field empty
+  screenshot desktop-host-control.png viewport 1280x900
+PASS 3.2: a double click starts one run  [1]
+PASS 3.2: after a lost reply the same request ID returns the same run  [已受理（同一請求）show-b-01]
+PASS 3.2: and the page opens it (consumer-b, show-b-01 Deny)
+PASS 3.2: a start reply is held (the server accepted it)
+PASS 3.2: the late start reply after 清除全部 signs nobody in and opens nothing  [未驗證]
+PASS 3.2: clearing the page did not withdraw the accepted run  [["show-a-03","show-b-01","show-a-02","show-a-01"]]
+PASS 3.2: reloading the file lists that run without switching to it
+PASS 3.2: a second start reply is held
+PASS 3.2: the old reply after loading the file again switches no consumer and opens no task  [未驗證]
+PASS 3.2: that run stands on the server too
+PASS 3.2: the hanging run is running with a stop button  [show-a-05（consumer-a，hang）：進行中 停止]
+PASS 3.2: no other start while a run is active
+PASS 3.2: stopped only after the cancel was recorded  [show-a-05（consumer-a，hang）：已停止，取消已記錄]
+PASS 3.2: no token (operator included) in storage, cookie, URL, page or console
+  runs before the restart: show-a-05/ended/ended/cancelled show-a-04/ended/ended/ok show-a-03/ended/ended/ok show-b-01/ended/ended/ok show-a-02/ended/ended/ok show-a-01/ended/ended/ok
+PASS 3.2: after a restart the page's credentials are cleared (401)
+PASS 3.2: after a restart the runs are kept and nothing reruns  [run-0b670f6d160a44f5c5b4966fended,run-181e03b1ae572700b4bb308bended,run-5ccdbc136ce29e5aa66789d6ended,run-6d96512b5f9a6ddcc76c3e8aended,run-9e67119e5b3c9e9f7cae422dended,run-edb2caadeb5d8141dcbaaa02ended -> run-0b670f6d160a44f5c5b4966fended,run-181e03b1ae572700b4bb308bended,run-5ccdbc136ce29e5aa66789d6ended,run-6d96512b5f9a6ddcc76c3e8aended,run-9e67119e5b3c9e9f7cae422dended,run-edb2caadeb5d8141dcbaaa02ended]
+  [219 s] B1-06 slice 3.3
+PASS 3.3: viewer A's list is A's stored tasks, newest first, none of B's  [show-a-05,show-a-04,show-a-03,show-a-02,show-a-01]
+PASS 3.3: a run started meanwhile (host side)  [{"run_id":"run-656432f553860c17d94aafa0","request_id":"req-list-0000000001","scenario":"ask","task_id":"show-a-06","consumer_id":"consumer-a","state":"accepted","live":"running","accepted_at":1791563479}]
+PASS 3.3: the open page lists the new task without a reload  [show-a-06,show-a-05,show-a-04,show-a-03,show-a-02,show-a-01]
+PASS 3.3 seq: an older list reply is held
+PASS 3.3 seq: the newer list shows the new task  [show-a-07,show-a-06,show-a-05,show-a-04,show-a-03,show-a-02,show-a-01]
+PASS 3.3 seq: the older reply, released last, does not overwrite the newer list  [show-a-07,show-a-06,show-a-05,show-a-04,show-a-03,show-a-02,show-a-01]
+PASS 3.3 seq: one list timer (about one read per 5 s over 11 s)  [2 reads]
+PASS 3.3 note: a switch clears the list note  [清單更新於 00:31:34]
+PASS 3.3 fallback: the viewer is signed in although the list failed  [清單尚未取得，可手動輸入 task ID]
+PASS 3.3 fallback: a visible note says no list yet (not 尚無 task)  [清單尚未取得，可手動輸入 task ID]
+PASS 3.3 fallback: a task ID typed by hand still opens
+PASS 3.3 fallback: the next refresh loads the list
+PASS 3.3 fallback: the recovered list shows its update time  [清單更新於 00:31:41]
+PASS 3.3 R1 503: a later failed update is visible, with the shown data's time  [更新失敗，以下為上次成功資料（00:31:41）]
+PASS 3.3 R1 503: the last good list stays visible  [show-a-07,show-a-06,show-a-05,show-a-04,show-a-03,show-a-02,show-a-01]
+PASS 3.3 R1 503: the open task's status and Inspector are untouched  [已同步：show-a-01，快照序號 4（Store 時間 <time>）]
+PASS 3.3 R1 503: the next good read clears the error and shows a new time  [清單更新於 00:31:41]
+PASS 3.3 R1 disconnect: a later failed update is visible, with the shown data's time  [更新失敗，以下為上次成功資料（00:31:41）]
+PASS 3.3 R1 disconnect: the last good list stays visible  [show-a-07,show-a-06,show-a-05,show-a-04,show-a-03,show-a-02,show-a-01]
+PASS 3.3 R1 disconnect: the open task's status and Inspector are untouched  [已同步：show-a-01，快照序號 4（Store 時間 <time>）]
+PASS 3.3 R1 disconnect: the next good read clears the error and shows a new time  [清單更新於 00:31:41]
+PASS 3.3: an older run's task opens from the list
+PASS 3.3: its replay ends and the list stays
+PASS 3.3: the replay wrote nothing
+PASS 3.3: viewer A's list reply is held
+PASS 3.3: A's late list reply leaves B's list and identity  [show-b-01]
+PASS 3.3: no fixed fixture names remain on the page
+  [252 s] B1-06 slice 3.4
+PASS 3.4: the previous host's open run is marked interrupted; nothing reruns
+PASS 3.4: CLI timeout: its history, the Ask left to its deadline, no cancel offered  [show-a-01（consumer-a，hang）：CLI 已逾時（已記錄）；Ask 已依原到期機制到期]
+PASS 3.4: Deny: its original reason, no cancel offered  [show-b-01（consumer-b，deny-budget）：場次完成；Deny：INSUFFICIENT_BUDGET]
+PASS 3.4: an expired Ask: the task can still be cancelled  [show-a-02（consumer-a，ask）：場次完成；Ask 已到期；task 仍可由主持人取消 取消 task show-a-02]
+PASS 3.4: a failed cancel record: that history, and the task can be cancelled  [show-a-03（consumer-a，hang）：程序已停止；當時取消紀錄寫入失敗（CLOCK_REGRESSION）；Ask 已到期；task 仍可由主持人取消 取消 task show-a-03]
+PASS 3.4: an interrupted run: that history, and the task can be cancelled  [show-a-04（consumer-a，hang）：場次曾中斷（上一個 host 未正常結束）；Ask 已到期；task 仍可由主持人取消 取消 task show-a-04]
+PASS R2 folded: the runs summary and the status bar keep the history (2 runs interrupted or with a failed record)  [最近場次（5 場；歷史：2 場中斷或紀錄寫入失敗） / 場次歷史：2 場中斷或紀錄寫入失敗]
+PASS R2 folded: a failed task read shows now, apart from the history  [最近場次（5 場；歷史：2 場中斷或紀錄寫入失敗；目前：task 狀態讀取失敗（status_503），未確認）]
+PASS R2 folded: after recovery the current warning goes, the history stays  [場次歷史：2 場中斷或紀錄寫入失敗]
+PASS R2: 清除全部 leaves no runs warning behind  [就緒：1 項未確認或錯誤（就緒狀態）]
+PASS R2: loading the file again brings the history back from the server
+PASS 3.4 R2: a failed detail read shows the Asks unconfirmed, not none  [show-a-01（consumer-a，hang）：CLI 已逾時（已記錄）；Ask 狀態未確認（task 詳情未取得）]
+PASS 3.4 R2: the next good read confirms the expiry again  [show-a-01（consumer-a，hang）：CLI 已逾時（已記錄）；Ask 已依原到期機制到期]
+PASS 3.4: a forged hint for show-b-01: the server refuses, the page says so  [task show-b-01：task 已是 Deny（終態），未取消；Deny 原因保留]
+PASS 3.4: show-b-01 unchanged, its line back to the Store's state  [show-b-01（consumer-b，deny-budget）：場次完成；Deny：INSUFFICIENT_BUDGET]
+PASS 3.4: a forged hint for show-a-01: the server refuses, the page says so  [task show-a-01：task 已因 CLI 逾時結束，未取消；原紀錄保留]
+PASS 3.4: show-a-01 unchanged, its line back to the Store's state  [show-a-01（consumer-a，hang）：CLI 已逾時（已記錄）；Ask 已依原到期機制到期]
+PASS 3.4: an expired Ask's task is cancelled  [task show-a-02 已取消]
+PASS 3.4: its events: the expiry, then the cancel, no withdrawal  [TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_EXPIRED,TASK_CANCELLED]
+PASS 3.4: the interrupted run: 場次曾中斷；task 現已取消  [show-a-04（consumer-a，hang）：場次曾中斷（上一個 host 未正常結束）；task 現已取消]
+PASS 3.4: the failed record: 當時取消紀錄寫入失敗；後續已成功取消 task  [show-a-03（consumer-a，hang）：程序已停止；當時取消紀錄寫入失敗（CLOCK_REGRESSION）；後續已成功取消 task]
+PASS 3.4: the cancels left every run's history as it was
+PASS screenshot desktop-host-cancel: token field empty
+  screenshot desktop-host-cancel.png viewport 1280x900
+PASS 3.4: a new Ask waits, the Dashboard shows it  [Unity 已呈現 show-a-05 #3 waiting（HUMAN_APPROVAL_REQUIRED）]
+PASS 3.4: cancel while the Ask waits  [task show-a-05 已取消]
+PASS 3.4: Unity shows the same task withdrawn  [Unity 已呈現 show-a-05 #5 withdrawn（HUMAN_APPROVAL_REQUIRED）]
+PASS 3.4: Timeline and Inspector show the same cancel  [APPROVAL_WITHDRAWN,TASK_CANCELLED / cancelled,withdrawn]
+PASS 3.4: nothing claims payment or delivery
+PASS screenshot desktop-host-cancel-live: token field empty
+  screenshot desktop-host-cancel-live.png viewport 1280x900
+PASS 3.4: a replay after the cancel sends no cancel and adds no event
+PASS 3.4: a lost reply: 結果尚未確認, neither success nor failure  [取消 task show-a-06：結果尚未確認（沒有收到回覆）；請看最近場次的目前狀態，需要時再按一次（伺服器不會重複寫入）]
+PASS 3.4: the server did cancel it once; the page sent one request  [TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_WITHDRAWN,TASK_CANCELLED]
+PASS 3.4: the runs list then reads the Store: task 現已取消  [show-a-06（consumer-a，ask）：場次完成；task 現已取消]
+PASS 3.4: committed but the follow-up read fails: 取消已記錄；畫面更新失敗  [取消已記錄；畫面更新失敗（task show-a-07 未能重新讀取，畫面可能不是最新）]
+PASS 3.4 R3: a 503 after a committed cancel: 取消結果尚未確認, not 未取消  [task show-a-08：Store 不可用，取消結果尚未確認（可能已由其他寫入完成）；請看最近場次重新讀取的目前狀態（STORE_ERROR）]
+PASS 3.4 R3: the re-read shows the committed state: task 現已取消  [show-a-08（consumer-a，ask）：場次完成；task 現已取消]
+PASS 3.4 R3: a 503 with nothing committed: the same 取消結果尚未確認, no claim either way  [task show-a-09：Store 不可用，取消結果尚未確認（可能已由其他寫入完成）；請看最近場次重新讀取的目前狀態（STORE_ERROR）]
+PASS 3.4 R3: the re-read shows the true state: the Ask still waits, cancel still offered  [show-a-09（consumer-a，ask）：場次完成；Ask 等待中；task 可由主持人取消 取消 task show-a-09]
+PASS 3.4 held: a cancel reply is held after the server committed
+PASS 3.4 held: after a switch of task the old reply shows no result and opens nothing  [取消 task show-a-10 的回覆未套用（畫面已切換）；結果以最近場次的目前狀態為準]
+PASS 3.4 held: the runs list still reads the Store: that task 現已取消  [show-a-10（consumer-a，ask）：場次完成；task 現已取消]
+PASS 3.4 held: after a switch of consumer the old reply shows no result and switches nothing back  [取消 task show-a-11 的回覆未套用（畫面已切換）；結果以最近場次的目前狀態為準]
+PASS 3.4 held: after 清除全部 the old reply restores nothing
+PASS 3.4 held: clearing did not withdraw the server's cancel
+PASS 3.4 held: loading the file again shows that task cancelled, from the Store  [show-a-12（consumer-a，ask）：場次完成；task 現已取消]
+PASS 3.4 held: after loading the file again the old reply shows nothing and opens nothing
+PASS 3.4 R2: past the 5 detail reads the lines say unconfirmed (9 of 14)  [["show-a-13（consumer-a，ask）：場次完成；task 已結束（CLI 逾時）；無未決 Ask","show-a-12（consumer-a，ask）：場次完成；task 已結束（CLI 逾時）；無未決 Ask","show-a-11（consumer-a，ask）：場次完成；task 已結束（CLI 逾時）；無未決 Ask","show-a-10（consumer-a，ask）：場次完成；task 已結束（CLI 逾時）；無未決 Ask","show-a-09（consumer-a，ask）：場次完成；task 已結束（CLI 逾時）；未決 Ask 仍依原到期機制處理",]
+PASS 3.4: a running run offers 停止, not 取消 task  [show-a-14（consumer-a，hang）：進行中 停止]
+PASS 3.4: stopped with its own cancel; no 取消 task afterwards  [show-a-14（consumer-a，hang）：已停止，取消已記錄]
+PASS 3.4: no token in storage, cookie, URL, page or console
+  [328 s] B1-06 slice 3.5
+  3.5 acceptance host at 127.0.0.1:54722, new database /var/folders/r7/dg8yrq_s7zxbxy4hz0zp9wkh0000gn/T/apa-ui-w5XaRZ/state-acceptance/demo.db (throwaway), catalog testdata/demo/scenarios-acceptance.json
+PASS 3.5: a new database, nothing runs at start
+PASS D1 /host folded: the status bar says fake, no payment, readiness not confirmed, and offers the file  [M1／fake agent／不付款
+即時
+目前：未選擇 task
+能力：真實 Agent 未啟用 · 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行
+就緒：1 項未確認或錯誤（就緒狀態）
+進階：載入 token 檔
+
+請輸入啟動終端機上的配對碼（或在「進階」載入 token 檔）]
+PASS 3.5: readiness: HTTP, Store, fake CLI and the Unity build ready; real CLI and payment off  [HTTP=ok Store=ok fake CLI=ok 真實 CLI=off Unity 建置=ok 付款=off 建置=info 檢查時間=info Unity 場景=ok]
+PASS 3.5: the token file is in page memory only (field emptied; no storage, cookie or URL)  [{"ls":0,"ss":0,"cookie":"","url":"http://127.0.0.1:54722/host","field":""}]
+PASS D1 /host at 1280×900: the shop and the start buttons are in the first viewport
+PASS screenshot desktop-acceptance-ready: token field empty
+  screenshot desktop-acceptance-ready.png viewport 1280x900
+PASS screenshot full-acceptance-ready: token field empty
+  screenshot full-acceptance-ready.png viewport 1280x1276
+  full-acceptance-ready.png (full page): {"unity":"Unity 場景就緒（LimeZu 素材）：等待選擇 task","status":"讀取 token 檔…","timeline":"","runStatus":""}
+PASS 3.5 Ask: the page switches to consumer-a and opens the new task  [show-a-01]
+PASS 3.5 Ask: Unity, Dashboard, Inspector and Timeline agree on show-a-01 #3 waiting  [unity Unity 已呈現 show-a-01 #3 waiting（HUMAN_APPROVAL_REQUIRED） / events TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED]
+PASS 3.5 Ask: its line: 場次完成；Ask 等待中, cancel offered  [show-a-01（consumer-a，ask）：場次完成；Ask 等待中；task 可由主持人取消 取消 task show-a-01]
+PASS D1 card: the 402 amount and the catalog's fixture price are two rows; the catalog is marked not bound  [客人 A · consumer-a · show-a-01
+
+請購 po-show-a-01-kr-market
+
+①進店
+#1 TASK_STARTED
+②選商品
+無獨立事件（fake 腳本）
+③報價
+無獨立事件；402 以 hash 綁定在請購
+④請購
+#2 PURCHASE_PROPOSED
+⑤裁決
+#3 Ask
+⑥收尾
+等待中（M1 無核准能力）
+
+Ask：等待人工核准（M1 無核准能力）
+
+task 狀態：等待核准（Store）
+
+402 綁定金額
+500000（基本單位，fixture-usdc）
+Store
+目錄標示
+0.50 test USDC；700 KRW（FX 1400，]
+PASS D1 host row: 取消 task for the open task is in the first viewport
+PASS screenshot desktop-acceptance-ask: token field empty
+  screenshot desktop-acceptance-ask.png viewport 1280x900
+PASS screenshot full-acceptance-ask: token field empty
+  screenshot full-acceptance-ask.png viewport 1280x2040
+  full-acceptance-ask.png (full page): {"unity":"Unity 已呈現 show-a-01 #3 waiting（HUMAN_APPROVAL_REQUIRED）","status":"已同步：show-a-01，快照序號 3（Store 時間 2026-10-09T16:33:22.000Z）","timeline":"1,2,3","runStatus":"已開始 show-a-01"}
+PASS 3.5 Deny: the page switches to consumer-b  [show-b-01]
+PASS 3.5 Deny: Unity, Dashboard, Inspector and Timeline agree on show-b-01 #3 denied  [unity Unity 已呈現 show-b-01 #3 denied（INSUFFICIENT_BUDGET） / events TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED]
+PASS 3.5 Deny: its line: 場次完成；Deny：INSUFFICIENT_BUDGET, no cancel  [show-b-01（consumer-b，deny-budget）：場次完成；Deny：INSUFFICIENT_BUDGET]
+PASS screenshot desktop-acceptance-deny: token field empty
+  screenshot desktop-acceptance-deny.png viewport 1280x900
+PASS screenshot full-acceptance-deny: token field empty
+  screenshot full-acceptance-deny.png viewport 1280x2013
+  full-acceptance-deny.png (full page): {"unity":"Unity 已呈現 show-b-01 #3 denied（INSUFFICIENT_BUDGET）","status":"已同步：show-b-01，快照序號 3（Store 時間 2026-10-09T16:33:30.000Z）","timeline":"1,2,3","runStatus":"已開始 show-b-01"}
+PASS 3.5 stop: a running run offers 停止, not 取消 task  [show-a-02（consumer-a，ask-wait）：進行中 停止]
+PASS 3.5 running: Unity, Dashboard, Inspector and Timeline agree on show-a-02 #3 waiting  [unity Unity 已呈現 show-a-02 #3 waiting（HUMAN_APPROVAL_REQUIRED） / events TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED]
+PASS 3.5 stop: 已停止，取消已記錄 (after the record was written)  [show-a-02（consumer-a，ask-wait）：已停止，取消已記錄]
+PASS 3.5 stop: after the 202 a neutral notice (accepted; see the runs list), not 停止中 and not a claimed result  [{"text":"場次 run-3452f207429e4e2b9190d323 的停止請求已受理；最終結果請看最近場次。","state":"idle"}]
+PASS 3.5 stop: Unity, Dashboard, Inspector and Timeline agree on show-a-02 #5 withdrawn  [unity Unity 已呈現 show-a-02 #5 withdrawn（HUMAN_APPROVAL_REQUIRED） / events TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_WITHDRAWN,TASK_CANCELLED]
+PASS screenshot desktop-acceptance-stop: token field empty
+  screenshot desktop-acceptance-stop.png viewport 1280x900
+PASS screenshot full-acceptance-stop: token field empty
+  screenshot full-acceptance-stop.png viewport 1280x2240
+  full-acceptance-stop.png (full page): {"unity":"Unity 已呈現 show-a-02 #5 withdrawn（HUMAN_APPROVAL_REQUIRED）","status":"已同步：show-a-02，快照序號 5（Store 時間 2026-10-09T16:33:40.000Z）","timeline":"1,2,3,4,5","runStatus":"場次 run-3452f207429e4e2b9190d323 的停止請求已受理；最終結果請看最近場次。"}
+PASS 3.5 cancel: task 已取消, its line task 現已取消  [task show-a-03 已取消]
+PASS 3.5 cancel: Unity, Dashboard, Inspector and Timeline agree on show-a-03 #5 withdrawn  [unity Unity 已呈現 show-a-03 #5 withdrawn（HUMAN_APPROVAL_REQUIRED） / events TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_WITHDRAWN,TASK_CANCELLED]
+PASS D1 replay #3 (cancelled task): Ask waiting; no withdrawal, no cancel yet  [回放當步 #3／共 5（唯讀）
+
+客人 A · consumer-a · show-a-03
+
+請購 po-show-a-03-kr-market
+
+①進店
+#1 TASK_STARTED
+②選商品
+無獨立事件（fake 腳本）
+③報價
+無獨立事件；402 以 hash 綁定在請購
+④請購
+#2 PURCHASE_PROPOSED
+⑤裁決
+#3 Ask
+⑥收尾
+等待中（M1 無核准能力）
+
+Ask：等待人工核准（M1 無核准能力）
+
+task 狀態：等待核准（依已回放事件推導，網頁）
+
+402 綁定金額
+500000（基本單位，fixture-usdc）
+Store
+目錄標示
+0.50 test USDC；700 KRW（FX 1400，fixture, not live FX）
+商店 HTTP /catalog（fixture，不綁定此請購；瀏覽器讀取 00:33:08）
+裁決
+Ask
+Store 事件（回放）
+原因
+HUMAN_APPROVAL_REQUIRED（需要人工核准（M1 無核准能力））
+Store 事件（回放）
+期限
+16:34:11 UTC
+Store 時間；裁決時決定
+付款
+未付款（payment_status：unavailable）
+Store]
+PASS D1 replay #4: withdrawn; the task not yet cancelled  [回放當步 #4／共 5（唯讀）
+
+客人 A · consumer-a · show-a-03
+
+請購 po-show-a-03-kr-market
+
+①進店
+#1 TASK_STARTED
+②選商品
+無獨立事件（fake 腳本）
+③報價
+無獨立事件；402 以 hash 綁定在請購
+④請購
+#2 PURCHASE_PROPOSED
+⑤裁決
+#3 Ask
+⑥收尾
+#4 APPROVAL_WITHDRAWN
+
+Ask 已撤回（task 取消）
+
+task 狀態：執行中（依已回放事件推導，網頁）
+
+402 綁定金額
+500000（基本單位，fixture-usdc）
+Store
+目錄標示
+0.50 test USDC；700 KRW（FX 1400，fixture, not live FX）
+商店 HTTP /catalog（fixture，不綁定此請購；瀏覽器讀取 00:33:08）
+裁決
+Ask
+Store 事件（回放）
+原因
+HUMAN_APPROVAL_REQUIRED（需要人工核准（M1 無核准能力））
+Store 事件（回放）
+期限
+16:34:11 UTC
+Store 時間；裁決時決定
+付款
+未付款（payment_status：unavailable）
+Store]
+PASS D1 replay #5: now the task is cancelled  [回放當步 #5／共 5（唯讀）
+
+客人 A · consumer-a · show-a-03
+
+請購 po-show-a-03-kr-market
+
+①進店
+#1 TASK_STARTED
+②選商品
+無獨立事件（fake 腳本）
+③報價
+無獨立事件；402 以 hash 綁定在請購
+④請購
+#2 PURCHASE_PROPOSED
+⑤裁決
+#3 Ask
+⑥收尾
+#4 APPROVAL_WITHDRAWN
+
+Ask 已撤回（task 取消）
+
+task 狀態：已取消（依已回放事件推導，網頁）；task 已取消
+
+402 綁定金額
+500000（基本單位，fixture-usdc）
+Store
+目錄標示
+0.50 test USDC；700 KRW（FX 1400，fixture, not live FX）
+商店 HTTP /catalog（fixture，不綁定此請購；瀏覽器讀取 00:33:08）
+裁決
+Ask
+Store 事件（回放）
+原因
+HUMAN_APPROVAL_REQUIRED（需要人工核准（M1 無核准能力））
+Store 事件（回放）
+期限
+16:34:11 UTC
+Store 時間；裁決時決定
+付款
+未付款（payment_status：unavailable）
+Store]
+PASS screenshot desktop-acceptance-cancel: token field empty
+  screenshot desktop-acceptance-cancel.png viewport 1280x900
+PASS screenshot full-acceptance-cancel: token field empty
+  screenshot full-acceptance-cancel.png viewport 1280x2263
+  full-acceptance-cancel.png (full page): {"unity":"Unity 已呈現 show-a-03 #5 withdrawn（HUMAN_APPROVAL_REQUIRED）","status":"已同步：show-a-03，快照序號 5（Store 時間 2026-10-09T16:34:13.000Z）","timeline":"1,2,3,4,5","runStatus":"task show-a-03 已取消"}
+PASS 3.5 expiry: the backend recorded APPROVAL_EXPIRED at or after the deadline  [deadline 1791563625, seen at 1791563654]
+PASS 3.5 expiry: its line: Ask 已到期；task 仍可由主持人取消  [show-a-01（consumer-a，ask）：場次完成；Ask 已到期；task 仍可由主持人取消 取消 task show-a-01]
+PASS 3.5 expiry: Unity, Dashboard, Inspector and Timeline agree on show-a-01 #4 expired  [unity Unity 已呈現 show-a-01 #4 expired（HUMAN_APPROVAL_REQUIRED） / events TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_EXPIRED]
+PASS screenshot desktop-acceptance-expired: token field empty
+  screenshot desktop-acceptance-expired.png viewport 1280x900
+PASS screenshot full-acceptance-expired: token field empty
+  screenshot full-acceptance-expired.png viewport 1280x2188
+  full-acceptance-expired.png (full page): {"unity":"Unity 已呈現 show-a-01 #4 expired（HUMAN_APPROVAL_REQUIRED）","status":"已同步：show-a-01，快照序號 4（Store 時間 2026-10-09T16:34:17.000Z）","timeline":"1,2,3,4","runStatus":"task show-a-03 已取消"}
+PASS 3.5 switch: consumer-b shows nothing of consumer-a
+PASS 3.5 replay: read only, then back to the latest snapshot
+PASS 3.5 after replay: Unity, Dashboard, Inspector and Timeline agree on show-a-01 #4 expired  [unity Unity 已呈現 show-a-01 #4 expired（HUMAN_APPROVAL_REQUIRED） / events TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_EXPIRED]
+PASS 3.5 error: a failed detail read: Ask 狀態未確認  [show-a-01（consumer-a，ask）：場次完成；task 未收尾（Ask 狀態未確認（task 詳情未取得））；可由主持人取消 取消 task show-a-01]
+PASS 3.5 error: recovered: the real state again  [show-a-01（consumer-a，ask）：場次完成；Ask 已到期；task 仍可由主持人取消 取消 task show-a-01]
+PASS 3.5 error: a cancel answered 503: 取消結果尚未確認, nothing claimed, nothing written  [task show-a-01：Store 不可用，取消結果尚未確認（可能已由其他寫入完成）；請看最近場次重新讀取的目前狀態（STORE_ERROR）]
+PASS 3.5 error: then a cancel through: task 已取消, read from the Store  [task show-a-01 已取消]
+PASS 3.5 expired then cancelled: Unity, Dashboard, Inspector and Timeline agree on show-a-01 #5 expired  [unity Unity 已呈現 show-a-01 #5 expired（HUMAN_APPROVAL_REQUIRED） / events TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_EXPIRED,TASK_CANCELLED]
+PASS C1 hidden: 7 s hidden, no task poll, no readiness read, no runs read  [[{"polls":45,"status":0,"runs":0,"checked":"00:34:26（Store 時間）"},{"polls":45,"status":0,"runs":0}]]
+PASS C1 hidden: the run started meanwhile is not shown yet
+PASS C1 visible again: task, readiness and runs are read at once  [{"status":1,"runs":1}]
+PASS C1 visible again: what changed meanwhile shows (the new run, a new readiness time)
+PASS 3.5 restart: the page's credentials are cleared (old tokens 401)
+PASS 3.5 restart: nothing reruns, no run interrupted (an orderly shutdown)
+PASS 3.5 restart: the same runs and the same events (only the running run's cancel or the waiting Ask's expiry appended)  [run-580d70789fcb78d620120d0b,run-3a331e1ee88b92b74edea895,run-c0856563b4b000d54af3e81f,run-539824310bdc2d4f444c4b5e,run-3452f207429e4e2b9190d323,run-a5883862871a02c23c90fa7c,run-c23a72852982a1985534ee7d -> run-580d70789fcb78d620120d0b,run-3a331e1ee88b92b74edea895,run-c0856563b4b000d54af3e81f,run-539824310bdc2d4f444c4b5e,run-3452f207429e4e2b9190d323,run-a5883862871a02c23c90fa7c,run-c23a72852982a1985534ee7d]
+PASS 3.5 restart: the run that was running ended with its cancel at the shutdown  [show-a-06（consumer-a，ask-wait）：已停止，取消已記錄]
+PASS 3.5 restart: the history lines read as before
+PASS 3.5 restart: the Ask left waiting is cancelled afterwards  [task show-a-05 已取消]
+PASS 3.5 after restart: Unity, Dashboard, Inspector and Timeline agree on show-a-05 #5 withdrawn  [unity Unity 已呈現 show-a-05 #5 withdrawn（HUMAN_APPROVAL_REQUIRED） / events TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_WITHDRAWN,TASK_CANCELLED]
+PASS screenshot desktop-acceptance-restart: token field empty
+  screenshot desktop-acceptance-restart.png viewport 1280x900
+PASS screenshot full-acceptance-restart: token field empty
+  screenshot full-acceptance-restart.png viewport 1280x2398
+  full-acceptance-restart.png (full page): {"unity":"Unity 已呈現 show-a-05 #5 withdrawn（HUMAN_APPROVAL_REQUIRED）","status":"已同步：show-a-05，快照序號 5（Store 時間 2026-10-09T16:34:48.000Z）","timeline":"1,2,3,4,5","runStatus":"task show-a-05 已取消"}
+PASS 3.5: nothing on the page claims payment or delivery
+PASS 3.5: no token in storage, cookie, URL or console
+  3.5 run / task / events:
+    Ask: run run-c23a72852982a1985534ee7d task show-a-01 #3 [TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED]
+    Deny: run run-a5883862871a02c23c90fa7c task show-b-01 #3 [TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED]
+    stop: run run-3452f207429e4e2b9190d323 task show-a-02 #5 [TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_WITHDRAWN,TASK_CANCELLED]
+    cancel: run run-539824310bdc2d4f444c4b5e task show-a-03 #5 [TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_WITHDRAWN,TASK_CANCELLED]
+    expiry: run run-c23a72852982a1985534ee7d task show-a-01 #4 [TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_EXPIRED]
+    expired then cancelled: run run-c23a72852982a1985534ee7d task show-a-01 #5 [TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_EXPIRED,TASK_CANCELLED]
+    restart: shutdown cancel: run run-580d70789fcb78d620120d0b task show-a-06 #5 [TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_WITHDRAWN,TASK_CANCELLED]
+    restart: cancelled afterwards: run run-3a331e1ee88b92b74edea895 task show-a-05 #5 [TASK_STARTED,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_WITHDRAWN,TASK_CANCELLED]
+PASS without a build: Unity 場景未就緒
+PASS screenshot desktop-unity-missing: token field empty
+  screenshot desktop-unity-missing.png viewport 1280x900
+  [431 s] end
+result: PASS

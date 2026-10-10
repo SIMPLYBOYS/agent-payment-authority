@@ -830,3 +830,112 @@ func TestFailingRequirementTest(t *testing.T) {
 		t.Fatalf("%v", r.Findings)
 	}
 }
+
+// R2 (10/10 review): an E2E case's run records (host run, trace, API
+// replies) must be there and agree with the Store. Each change is reindexed;
+// V1 stays PASS, so only the cross-checks can catch it.
+func TestE2ERunRecords(t *testing.T) {
+	edit := func(rel string, f func(map[string]any)) func(*testing.T, string) {
+		return func(t *testing.T, dir string) {
+			p := filepath.Join(dir, rel)
+			rec := readMap(t, p)
+			f(rec)
+			writeMap(t, p, rec)
+		}
+	}
+	firstPurchase := func(rec map[string]any) map[string]any {
+		return rec["tasks"].([]any)[0].(map[string]any)["purchases"].([]any)[0].(map[string]any)
+	}
+	requestPurchase := func(rec map[string]any, task string) map[string]any {
+		calls := rec["traces"].(map[string]any)[task].([]any)[0].(map[string]any)["tool_calls"].([]any)
+		for _, c := range calls {
+			if c := c.(map[string]any); c["tool"] == "request_purchase" {
+				return c
+			}
+		}
+		return nil
+	}
+	for name, tc := range map[string]struct {
+		change  func(*testing.T, string)
+		caseID  string
+		claim   string
+		verdict Verdict
+	}{
+		// The review's five.
+		"no traces":    {edit("e2e/ask.json", func(r map[string]any) { delete(r, "traces") }), "ask", "V4", Inconclusive},
+		"no host runs": {edit("e2e/ask.json", func(r map[string]any) { delete(r, "host_runs") }), "ask", "V4", Inconclusive},
+		"the API's decision is a Deny": {edit("e2e/ask.json", func(r map[string]any) {
+			d := firstPurchase(r)["decision"].(map[string]any)
+			d["policy_verdict"], d["approval_status"], d["reason"] = "Deny", "not_requested", "INSUFFICIENT_BUDGET"
+		}), "ask", "V3", Fail},
+		"the API's amount is 1":                  {edit("e2e/ask.json", func(r map[string]any) { firstPurchase(r)["amount"] = "1" }), "ask", "V2", Fail},
+		"the trace's request_purchase says Deny": {edit("e2e/ask.json", func(r map[string]any) { requestPurchase(r, "show-a-01")["outcome"] = "Deny" }), "ask", "V3", Fail},
+		// More of the same relations.
+		"the trace names other events": {edit("e2e/ask.json", func(r map[string]any) {
+			requestPurchase(r, "show-a-01")["event_sequences"] = []any{json.Number("2")}
+		}), "ask", "V4", Fail},
+		"the host run timed out; the Store says ok": {edit("e2e/ask.json", func(r map[string]any) {
+			r["host_runs"].(map[string]any)["runs"].([]any)[0].(map[string]any)["outcome"] = "timeout"
+		}), "ask", "V4", Fail},
+		"a cancelled run that ended before the cancel": {edit("e2e/cancel-no-purchase.json", func(r map[string]any) {
+			run := r["host_runs"].(map[string]any)["runs"].([]any)[0].(map[string]any)
+			run["ended_at"] = json.Number("1")
+		}), "cancel-no-purchase", "V4", Fail},
+		"the API's approval closure is missing": {edit("e2e/cancel-pending.json", func(r map[string]any) {
+			p := firstPurchase(r)
+			p["approval_closed"], p["closed_at"] = "", json.Number("0")
+		}), "cancel-pending", "V3", Fail},
+		"no trace for the task after the restart": {edit("e2e/restart.json", func(r map[string]any) {
+			delete(r["traces"].(map[string]any), "show-a-02")
+		}), "restart", "V4", Inconclusive},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := copyGolden(t)
+			tc.change(t, dir)
+			reindex(t, dir)
+			r := verify(t, dir)
+			expectCase(t, r, tc.caseID, tc.claim, tc.verdict)
+			if r.Claims["V1"] != Pass {
+				t.Fatalf("V1 %s: an outer check fired: %v", r.Claims["V1"], r.Findings)
+			}
+			if c := caseIn(t, r, tc.caseID); c.Verdict != tc.verdict {
+				t.Fatalf("%s: %s, want %s: %v", tc.caseID, c.Verdict, tc.verdict, c.Findings)
+			}
+		})
+	}
+	// Positive: the golden's lawful flows pass their run records, the
+	// purchaseless and the cancelled-after-the-run ones included.
+	r := verify(t, golden)
+	for _, id := range []string{"ask", "cancel-no-purchase", "cli-timeout", "cancel-pending", "cli-timeout-pending", "restart"} {
+		if c := caseIn(t, r, id); c.Verdict != Pass {
+			t.Errorf("%s: %s %v", id, c.Verdict, c.Findings)
+		}
+	}
+}
+
+// R3 (10/10 review): a log the scanner cannot read to its end does not
+// pass on what it read before; a failure it read stays a failure.
+func TestRequirementLogReadToTheEnd(t *testing.T) {
+	long := "# " + strings.Repeat("x", 16<<20+1) + "\n"
+	const failing = "not ok 999 - hostile strings stay strings; nothing reads as paid\n"
+	for name, tc := range map[string]struct {
+		appended string
+		verdict  Verdict
+	}{
+		"a line over the limit":                  {long, Inconclusive},
+		"a failure after a line over the limit":  {long + failing, Inconclusive},
+		"a failure before a line over the limit": {failing + long, Fail},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := copyGolden(t)
+			p := filepath.Join(dir, "tests", "requirements-web.tap")
+			b, _ := os.ReadFile(p)
+			os.WriteFile(p, append(b, tc.appended...), 0o600)
+			reindex(t, dir)
+			r := verify(t, dir)
+			if r.Claims["V1"] != Pass || r.Claims["R"] != tc.verdict || r.Verdict != tc.verdict {
+				t.Fatalf("V1 %s, R %s, verdict %s; want R and verdict %s: %v", r.Claims["V1"], r.Claims["R"], r.Verdict, tc.verdict, r.Findings)
+			}
+		})
+	}
+}
