@@ -585,9 +585,16 @@ func TestModesAndLayers(t *testing.T) {
 			}
 		})
 	}
+	// The fixture bundle checked as live is no live PASS: its run ID and its
+	// evidence mode are a fixture's.
 	r, err := Verify(golden, trusted(t), "live")
+	if err != nil || r.Claims["V1"] != Fail || r.Claims["V6"] != Fail || r.ExitCode() != 1 {
+		t.Fatalf("the fixture bundle as live: %v %v %d", err, r.Claims, r.ExitCode())
+	}
+	// An unknown mode checks nothing.
+	r, err = Verify(golden, trusted(t), "other")
 	if err != nil || r.Claims["V6"] != Inconclusive || r.ExitCode() != 2 || len(r.Cases) != 0 {
-		t.Fatalf("live mode: %v %v %d", err, r.Claims, r.ExitCode())
+		t.Fatalf("an unknown mode: %v %v %d", err, r.Claims, r.ExitCode())
 	}
 }
 

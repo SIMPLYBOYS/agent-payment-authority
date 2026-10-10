@@ -1,0 +1,116 @@
+{
+  "version": "apa.m1.v2",
+  "run_id": "m1-live-20261010T041827Z-50f565",
+  "code_commit": "f0adfb318f7a0aee2b501f3d2e65ce141865c860",
+  "dirty_patch_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "config_digest": "sha256:73ad59db646473bd2c0c70d12f5d4f1bdcc3362e77976d14ed5ff8e5b804cc56",
+  "case_manifest_digest": "sha256:d8b740748cdb7fcf7e88ff877b508b8459c6046675d2aef19246dc1124b8d51d",
+  "versions": {
+    "case_manifest": "m1-cases-v2",
+    "cli": "2.1.293 (Claude Code)",
+    "gate_mode": "dev_demo_plugins",
+    "go": "go1.26.4",
+    "os": "darwin/amd64"
+  },
+  "commands": [
+    {
+      "command": "apa-buyer run --live --cli /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3try/claude --dev-demo-plugins --task task-a --registry /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3try/golden-work/m1-live-20261010T041827Z-50f565/build/src/testdata/contracts/registry.json --profile /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3try/golden-work/m1-live-20261010T041827Z-50f565/build/src/testdata/policy/m1-demo-profile.json --trace-dir /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3try/golden-work/m1-live-20261010T041827Z-50f565/runs",
+      "exit_code": 0
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "ev-live-ask.json",
+      "path": "live/ask.json",
+      "digest": "sha256:cc84d154a13f2e250271f29f3520e4a44bf1e55e78efbf03c1c8b1c973429b99",
+      "evidence_mode": "live",
+      "source": "live_cli"
+    },
+    {
+      "evidence_id": "ev-live-run.json",
+      "path": "live/run.json",
+      "digest": "sha256:39a54db6b58c80790433875d7c9d4db99846da10003b647c4b90d7e09e43c6ea",
+      "evidence_mode": "live",
+      "source": "live_cli"
+    },
+    {
+      "evidence_id": "ev-live-trace.jsonl",
+      "path": "live/trace.jsonl",
+      "digest": "sha256:592ac015389b6199aa08a8446c637f077aec535753997d73a075b5e9228f4bfa",
+      "evidence_mode": "live",
+      "source": "live_cli"
+    },
+    {
+      "evidence_id": "ev-provenance-build.json",
+      "path": "provenance/build.json",
+      "digest": "sha256:17dd9399bc4d3ef729489e26db3469ee17b90d81c106212dc50e130b9ed2de32",
+      "evidence_mode": "live",
+      "source": "provenance"
+    },
+    {
+      "evidence_id": "ev-provenance-config-files.json",
+      "path": "provenance/config-files.json",
+      "digest": "sha256:35ad485cacbef0c7e09212380f2746be8ba04a0046d8fb2398426920e210f676",
+      "evidence_mode": "live",
+      "source": "provenance"
+    },
+    {
+      "evidence_id": "ev-provenance-git-status.txt",
+      "path": "provenance/git-status.txt",
+      "digest": "sha256:01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "evidence_mode": "live",
+      "source": "provenance"
+    }
+  ],
+  "results": [
+    {
+      "case_id": "ask",
+      "verdict": "PASS",
+      "evidence_ids": [
+        "ev-live-run.json",
+        "ev-live-ask.json",
+        "ev-live-trace.jsonl"
+      ],
+      "reason": "the run ended ok and its stored record shows the Ask"
+    }
+  ],
+  "not_evaluated": [
+    "deny-budget",
+    "deny-merchant",
+    "deny-expired",
+    "deny-missing-config",
+    "deny-unattended",
+    "deny-asset",
+    "allow-unavailable",
+    "cancel-pending",
+    "cancel-no-purchase",
+    "approval-timeout",
+    "approval-deadline-before",
+    "approval-deadline-exact",
+    "cli-timeout",
+    "cli-timeout-pending",
+    "restart",
+    "retry-same",
+    "retry-conflict",
+    "retry-new-request-same-order",
+    "retry-same-request-id-a-b",
+    "consumer-a",
+    "consumer-b",
+    "cross-consumer",
+    "cross-consumer-wallet",
+    "cross-consumer-payer",
+    "altered-consumer-id",
+    "altered-agent-id",
+    "no-premature-settlement",
+    "reject-erc7710-quote",
+    "reject-permit2-quote",
+    "reject-case-variant-key",
+    "credential_verification",
+    "webauthn",
+    "voice_approval",
+    "zk_budget_proof",
+    "signer_key_selection",
+    "cross_consumer_grant_proof",
+    "onchain_settlement"
+  ]
+}

@@ -55,9 +55,9 @@ MUTATIONS = [
                            (I, 'if d := e.Payload.Decision; d != nil && d.PaymentStatus != "unavailable" {', 'if d := e.Payload.Decision; d != nil && d.PaymentStatus != "unavailable" && false {')]),
     # V6
     ("V6 source labels", [(V, "} else if e.Source != want {", "} else if false {")]),
-    ("V6 evidence mode", [(V, 'if e.EvidenceMode != "fixture" {', "if false {")]),
+    ("V6 evidence mode", [(V, 'if e.EvidenceMode != mode {', "if false {")]),
     ("V6 record layer", [(C, 'if rec.CaseID != c.CaseID || rec.Layer != "contracts_test" || rec.Operation != c.Operation {', "if false {")]),
-    ("V6 live not supported", [(V, 'if mode != "fixture" {', "if false {")]),
+    ("V6 unknown mode", [(V, 'v.f.missing("V6", nil, "mode %s is not one this checker knows (fixture, live)", quote(mode))', "_ = mode")]),
     # V7
     ("V7 task binding", [(I, "case b.ConsumerID != row.ConsumerID || b.AgentID != row.AgentID || w.WalletID != row.WalletID || w.From != row.Payer:", "case false && b.ConsumerID != row.ConsumerID && w.From != row.Payer:"),
                          (I, "case who != identity{row.ConsumerID, row.AgentID, row.WalletID, row.Payer}:", "case false && who != identity{}:")]),

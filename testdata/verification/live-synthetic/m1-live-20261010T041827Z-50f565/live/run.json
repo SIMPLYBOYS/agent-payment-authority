@@ -1,0 +1,66 @@
+{
+  "apa_buyer_exit_code": 0,
+  "auth_accepted": [
+    "none"
+  ],
+  "cli": "claude",
+  "cli_version_required": "2.1.293 (Claude Code)",
+  "command": "apa-buyer run --live --cli /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3try/claude --dev-demo-plugins --task task-a --registry /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3try/golden-work/m1-live-20261010T041827Z-50f565/build/src/testdata/contracts/registry.json --profile /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3try/golden-work/m1-live-20261010T041827Z-50f565/build/src/testdata/policy/m1-demo-profile.json --trace-dir /private/tmp/claude-501/-Users-mac-Documents-OpenSourceProjects-agent-payment-authority/b6b47224-92d2-4202-a040-e6fd70ed9470/scratchpad/e3try/golden-work/m1-live-20261010T041827Z-50f565/runs",
+  "database": {
+    "digests": {
+      "live.db": "sha256:e4d3f5d50ec82883ab4e835302bb9fbd1ea437083ef31621a3eb8f017aa524db"
+    },
+    "relation": "live/ask.json is the read-only export of a private copy of this file, taken after apa-buyer exited and the Store's offline check (store.OpenSnapshot: no -wal or -shm, verified) passed"
+  },
+  "dropped_stderr_lines": 0,
+  "ended_at": 1791605912,
+  "gate_mode": "dev_demo_plugins",
+  "gate_result": "passed",
+  "host_error_lines": [],
+  "model": "sonnet",
+  "producer_error": "the outer bound was reached; the run was stopped",
+  "report": {
+    "detail": "",
+    "exit_code": 0,
+    "expiry_errors": 0,
+    "mode": "live",
+    "not_ready_refusals": 1,
+    "outcome": "ok",
+    "store_end": "",
+    "store_end_error": "",
+    "task_started": true,
+    "tool_calls": [
+      {
+        "tool": "list_products",
+        "outcome": "ok"
+      },
+      {
+        "tool": "get_quote",
+        "product_id": "kr-market",
+        "outcome": "ok"
+      },
+      {
+        "tool": "request_purchase",
+        "product_id": "kr-market",
+        "outcome": "Ask"
+      }
+    ]
+  },
+  "residual_risks": [
+    "strict zero-plugin mode not verified",
+    "plugin names and the gate do not prove a plugin's content or that it has no background activity",
+    "the APA-only configuration directory is not operating-system isolation",
+    "auth_source none alone proves no login or billing source",
+    "usage is the CLI's own report or unknown; not a billing record"
+  ],
+  "run_id": "m1-live-20261010T041827Z-50f565",
+  "snapshot": {
+    "exported_at": 1791605913,
+    "last_observed_at": 1791605912,
+    "last_sequence": 3
+  },
+  "started_at": 1791605911,
+  "trace_files": 1,
+  "usage": "unknown",
+  "version": "apa.m1.live.v1"
+}
