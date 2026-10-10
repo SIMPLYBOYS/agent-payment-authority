@@ -1234,3 +1234,65 @@ R2 維持關閉；R1、R3、R4 待 Codex 限定複核，不自行宣告 E3 通�
 - 這次通過的是實作與 fake 驗證的限定技術 review。它**不代替**真實執行的核准，也不代表 E3 真實證據已驗收，或 M1 已完成。
 - 下一個待辦：Aaron 另行核准一次真實 live 產包，並指定執行者（確認清單 16.4）。至今沒有執行任何真實 Claude CLI、版本查詢、登入、C0′ 或真實請購。
 - B1-04／B1-06／B1-07 維持 InProgress，不 merge、不 push、不標 Done；E4 另行派工。
+
+### 16.10 一次真實 live 產包（10/11，Claude Code 依 Aaron 核准執行；待 Codex review）
+
+**核准範圍**（Aaron，10/11）：
+- 由 Claude Code 執行一次；
+- 使用 `~/.apa-claude` 的本人訂閱，明確採用 `dev_demo_plugins`，接受既有剩餘風險，用量不明時記為 unknown；
+- 合成資料、全新資料庫，只做單筆請購與 Policy 裁決，不核准付款；
+- 沿用既有的版本、Gate 與上限；
+- 只嘗試一次，不重試；
+- 產包後以檢查器唯讀核對，交 Codex review；
+- 不開始 E4，不 merge、不 push、不標 Done。
+
+**執行前核對**
+- HEAD 是 `076f398`。通過 review 的程式基準是 `c11138a`，之後到 `4feb7df` 只有測試與反向腳本，到 HEAD 只有文件。產包器要求 HEAD 與 BASE 之間只能有 `docs/`、`README.md` 的差異，所以 `BASE=4feb7df`（review 的測試基準）；`4feb7df..HEAD` 只動了 `README.md` 與 `docs/m1-evidence.md`。
+- **CLI 路徑**：§51 記錄的 `/Users/mac/.local/bin/claude` 已經自動更新，指向 `versions/2.1.296`，與釘選的 `2.1.293 (Claude Code)` 不符；照原路徑執行，apa-buyer 的版本檢查會拒絕。2.1.293 仍在 `~/.local/share/claude/versions/`（只列出目錄檔名，沒有執行 CLI，也沒有讀設定）。經 Aaron 選擇，直接指定 `CLI=/Users/mac/.local/share/claude/versions/2.1.293`。版本釘選、Gate 與上限都沒有改變，版本仍由 apa-buyer 自己的 `--version` 檢查。
+- apa-buyer 自己從 HOME 設定 `CLAUDE_CONFIG_DIR=$HOME/.apa-claude`，沒有另外加環境變數。執行在沙箱外，用既有的登入環境。
+
+**命令**（只執行一次）：
+
+```sh
+APA_LIVE_CLI=true make m1-live-cli CLI=/Users/mac/.local/share/claude/versions/2.1.293 BASE=4feb7df GATE=dev_demo_plugins
+```
+
+**結果**：2026-10-10T17:38:29Z～17:38:51Z（UTC），make 結束碼 0。
+- 產包器各階段：前置 0 秒、clone 0 秒、建置與 VCS 檢查 3 秒、apa-buyer run 從 8 秒開始；第 19 秒做 Store 離線檢查、匯出與保存。業務 run 本身約 11 秒（`started_at` 1791653919，`ended_at` 1791653930）。
+- 證據包 `artifacts/m1/m1-live-20261010T173831Z-9d32ef/`，state `complete`；資料庫、trace 與快照保留在 `artifacts/m1-live-work/m1-live-20261010T173831Z-9d32ef/`。
+- `live/run.json`（v2）：
+  - `termination=completed`，`producer_error` 為空，apa-buyer 結束碼 0；
+  - `gate_mode=dev_demo_plugins`，`gate_result=passed`，CLI 版本 `2.1.293 (Claude Code)`；
+  - 用量是 CLI 自報（不是計費紀錄）：input 8、output 421、cache creation 3107、cache read 8100 tokens。
+- manifest：只宣稱 `ask`，結果 PASS；其他 30 案與 7 個 capability 列為 not evaluated。
+- 產生端判定：ask PASS（run 以 ok 結束，存下的紀錄顯示 Ask）。
+
+**檢查器唯讀核對**：`make verify-m1 RUN_DIR=artifacts/m1/m1-live-20261010T173831Z-9d32ef MODE=live`
+- 結束碼 0，**verdict PASS**；V1～V7 都是 PASS，R 為 NOT_EVALUATED，0 個 finding。
+- `live` 區段：
+  - 原始裁決 `Ask/HUMAN_APPROVAL_REQUIRED/pending`（1791653928），快照當時的狀態是 pending，觀測截止到事件 3（1791653931 匯出）；
+  - 要求的模型 `claude-sonnet-5-5`；
+  - 列出包內寫明的剩餘風險：嚴格零 plugin 模式未驗證、plugin 名稱與 Gate 不證明 plugin 內容或沒有背景活動、專用設定目錄不是作業系統隔離、`auth_source none` 不證明登入或計費來源、用量是自報。
+- 核對前後，包內每個檔案的 sha256 都相同，核對沒有改動證據包。
+- 敏感內容檢查（只看鍵名與字元形狀，沒有輸出值）：
+  - 沒有 email，也沒有 org、account 類欄位；
+  - 長字串都是雜湊或摘要（64 位 hex）、commit（40 位 hex）、fixture 的合成地址（`0x1111…`～`0x4444…`）與一個 32 位元組的合成值；
+  - 帶 `sk-` 的只有 `task-a-k…` 這類請購 ID 的片段。
+- 這次結果不包含任何付款或核准動作：Ask 仍是 pending，沒有被核准。
+
+**證據**：`artifacts/m1-verify/e3-live-20261010T173831Z/`，內含：
+- 產包器的階段輸出與一行結果（不含 CLI 文字）；
+- 檢查器的 JSON 報告與一行結果；
+- 包內檔案的 sha256；
+- `NOTE.txt`：命令、基準、CLI 路徑的選擇與時間。
+
+**證據歸屬**：產包與檢查器核對都由 Claude Code 執行，尚未經 Codex 核對。
+
+**限制**：
+- live PASS 只代表這一筆 Ask claim 的證據核對通過，不代表 fixture 全案例、B1-07 整體或 M1 完成；
+- 包本身沒有簽章或外部錨點，不能自證由指定模型產生；
+- 嚴格模式未驗證；
+- 用量是 CLI 自報。
+- 之後若再執行，CLI 路徑要再確認：`~/.local/bin/claude` 會自動更新。
+
+**狀態**：待 Codex review；不自動開始 E4。B1-04／B1-06／B1-07 維持 InProgress，不 merge、不 push、不標 Done。
