@@ -11,9 +11,9 @@
 > - 執行計畫 §5 驗收 41–44；
 > - repo `docs/cli-poc.md` 第 53～56 節、`docs/commercial-demo-roadmap.md`。
 
-## 現行摘要（10/11，M1-E4；以本節為準）
+## 現行摘要（10/11，M1 已結案；以本節為準）
 
-E1～E3 都已驗收，E4 的結案候選報告在 [m1-result.md](m1-result.md)，待 Codex／Aaron 最終確認。下面第 0～6 節是 **10/9 盤點當時的狀態**，加上當時陸續的現況註記，原文保留作為歷史；其中「B1-07 未實作」「E2 未實作」「E3 未執行」「`docs/m1-result.md` 不存在」等說法都已過時。
+**M1 已於 2026-10-11 結案**：M1-E4 最後核對通過，B1-04、B1-06、B1-07 與 M1 標為 Done（[m1-result.md](m1-result.md) 第 10 節）。下面第 0～6 節是 **10/9 盤點當時的狀態**，加上當時陸續的現況註記，原文保留作為歷史；其中「B1-07 未實作」「E2 未實作」「E3 未執行」「`docs/m1-result.md` 不存在」等說法都已過時。
 
 | 出口 | 現況 | 依據 |
 |---|---|---|
@@ -23,11 +23,11 @@ E1～E3 都已驗收，E4 的結案候選報告在 [m1-result.md](m1-result.md)�
 | E3 一次真實 live 單筆 Ask | 通過 Codex 限定核對（`m1-live-20261010T173831Z-9d32ef`） | §16.10、§16.11 |
 | 乾淨目錄依 README 完成 fixture E2E | E4 補驗：新 clone、`make m1-fixture` 結束碼 0、31 案 PASS、檢查器 PASS；用了本機快取與既有 Unity Web 建置副本 | `m1-result.md` §3.4 |
 | `tests/m1/` 的案例對照 | `tests/m1/README.md` | — |
-| `docs/m1-result.md` | 已建立（結案候選） | — |
-| 任務卡逐項核對 | 已列建議；10/11 Codex 限定核對通過，接受三個待判定項目（白名單 trace、標示文字、乾淨目錄補驗）；勾選與結案待 Codex／Aaron | `m1-result.md` §4.2、§5 |
-| B1-07 reviewer 選擇現場挑戰 | 10/11 Codex 選定 `deny-merchant`，Claude Code 執行 Ask → Deny → Ask，與事前預期相符；待 Codex 最後核對 | `m1-result.md` §5.3 |
+| `docs/m1-result.md` | 已建立；結案紀錄在第 10 節 | — |
+| 任務卡逐項核對 | 10/11 完成：已接受的驗收項勾選，B1-04、B1-06、B1-07 結案（白名單 trace、標示文字、乾淨目錄前置條件、`QuoteReceived` 對照為已接受的範圍調整） | `m1-result.md` §4.2、§5、§10 |
+| B1-07 reviewer 選擇現場挑戰 | 10/11 Codex 選定 `deny-merchant`，Claude Code 執行 Ask → Deny → Ask，與事前預期相符；經最後核對通過，缺口關閉 | `m1-result.md` §5.3、§10 |
 
-B1-04／B1-06／B1-07 仍是 InProgress，本文件不改任務狀態。
+B1-04、B1-06、B1-07 與 M1 已 Done（10/11）。M1 結案不包含人工逐項清單、D3～D6、`R2 order` 與商業展示版的後續項目（`m1-result.md` §10、第 5 節）。下一個切片待另行派工。
 
 ## 0 結論（10/9 盤點當時；現況見上方「現行摘要」）
 
