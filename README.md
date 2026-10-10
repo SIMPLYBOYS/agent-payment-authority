@@ -13,11 +13,15 @@
 |---|---|---|
 | Go | 1.26 以上（以 1.26.4 驗證） | 編譯與測試 |
 | make | 系統內建即可 | `make check`、`make dev` |
-| Node.js | 20 以上 | 僅 `make check-contracts` 的獨立展示端向量檢查；啟動 Go 服務不需要 |
+| Node.js | 20 以上 | `make check-contracts` 的展示端向量檢查、web adapter 測試與瀏覽器檢查；啟動 Go 服務不需要 |
+| Google Chrome | 安裝在 `/Applications/Google Chrome.app`（固定路徑） | `make m1-fixture` 的瀏覽器步驟與 `scripts/verify/*-ui.mjs`（以 CDP 操作，不需要 Playwright） |
+| Unity Web 建置 | 由本 repo 的 Unity 專案建置（見「B1-06 交付點 2」） | 商店畫面；`make m1-fixture` 的瀏覽器步驟需要它。建置不在 Git 裡（`unity/AgentPaymentAuthority/Build/` 被忽略），要先匯入本機已取得授權的 LimeZu 素材，再以 `scripts/unity/unity.sh webgl` 建置；或把既有的建置副本放到該路徑並保存 sha256 |
 
 只 checkout 這個 repo 就能安裝、啟動與測試。不需要其他 repo、submodule、symlink 或 local module replace。唯一的第三方 Go 套件是 SQLite driver `modernc.org/sqlite`（不需 CGO），第一次建置時由 `proxy.golang.org` 下載並以 `go.sum` 核對；授權見 [docs/third-party.md](docs/third-party.md)。
 
-現階段**不需要**也不會使用：Claude Code CLI、模型服務、RPC、facilitator、testnet 帳戶。後續 live 模式才需要官方 Claude Code CLI 與本人的官方登入；登入由使用者自己透過官方流程完成，這個 repo 不讀取、不複製也不保存登入憑證。
+預設的 fake 模式與所有測試**不需要**也不會使用：Claude Code CLI、模型服務、RPC、facilitator、testnet 帳戶。只有明確 opt-in 的 live 命令（`make m1-live-cli`、`make present-live`，每次都需另行核准）才需要官方 Claude Code CLI（釘選 `2.1.293`）與本人的官方登入（APA 專用設定目錄 `~/.apa-claude`）；登入由使用者自己透過官方流程完成，這個 repo 不讀取、不複製也不保存登入憑證。
+
+**M1 的結果**：見 [docs/m1-result.md](docs/m1-result.md)（結案候選報告：fixture 與 live 證據包、逐卡核對、重跑命令與限制）。**乾淨目錄**：2026-10-11 在只有本 repo clone 的新目錄，以 `cp .env.example .env` 與 `make m1-fixture` 完成 fixture E2E（31 案 PASS，檢查器 PASS）；使用本機的 Go／Node 快取與既有的 Unity Web 建置副本（`docs/m1-result.md` 第 3.4 節）。
 
 ## 啟動
 

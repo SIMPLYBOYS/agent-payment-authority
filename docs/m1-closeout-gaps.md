@@ -11,7 +11,25 @@
 > - 執行計畫 §5 驗收 41–44；
 > - repo `docs/cli-poc.md` 第 53～56 節、`docs/commercial-demo-roadmap.md`。
 
-## 0 結論
+## 現行摘要（10/11，M1-E4；以本節為準）
+
+E1～E3 都已驗收，E4 的結案候選報告在 [m1-result.md](m1-result.md)，待 Codex／Aaron 最終確認。下面第 0～6 節是 **10/9 盤點當時的狀態**，加上當時陸續的現況註記，原文保留作為歷史；其中「B1-07 未實作」「E2 未實作」「E3 未執行」「`docs/m1-result.md` 不存在」等說法都已過時。
+
+| 出口 | 現況 | 依據 |
+|---|---|---|
+| E1 `make m1-fixture` 與 fixture 包 | 限定驗收通過（`0d13255`／`0853b44`；`m1-fixture-20261009T162703Z-4ddb7a`） | `m1-evidence.md` §14 |
+| E2 B1-07 檢查器 fixture 模式 | 限定技術複核通過（`48a43bc`／`973a58d`） | §15.7 |
+| E3 產包入口、live 檢查器與進度工具 | 限定技術 review 通過（`c11138a`／`4feb7df`） | §16.9 |
+| E3 一次真實 live 單筆 Ask | 通過 Codex 限定核對（`m1-live-20261010T173831Z-9d32ef`） | §16.10、§16.11 |
+| 乾淨目錄依 README 完成 fixture E2E | E4 補驗：新 clone、`make m1-fixture` 結束碼 0、31 案 PASS、檢查器 PASS；用了本機快取與既有 Unity Web 建置副本 | `m1-result.md` §3.4 |
+| `tests/m1/` 的案例對照 | `tests/m1/README.md` | — |
+| `docs/m1-result.md` | 已建立（結案候選） | — |
+| 任務卡逐項核對 | 已列建議，待 reviewer 判定 | `m1-result.md` §5 |
+| B1-07 reviewer 選擇現場挑戰 | **沒有紀錄，待 reviewer 選擇與操作** | `m1-result.md` §5.3 |
+
+B1-04／B1-06／B1-07 仍是 InProgress，本文件不改任務狀態。
+
+## 0 結論（10/9 盤點當時；現況見上方「現行摘要」）
 
 - **M1 完成門檻**：B1-00～B1-07 全部通過。B1-06 產出執行證據，再由 B1-07 只讀核對；任何必要 claim 為 FAIL 或 INCONCLUSIVE，都不能結案。
 - **目前狀態**：
@@ -24,7 +42,7 @@
   3. 一次 `make m1-live-cli` 真實證據包，並以 B1-07 驗證；
   4. `docs/m1-result.md` 與正式結案。
 
-## 1 對照 M1 門檻
+## 1 對照 M1 門檻（10/9 當時的狀態）
 
 | 任務 | 判定 | 依據與缺口 |
 |---|---|---|
@@ -34,7 +52,7 @@
 | B1-07 只讀驗收器 | **未實作**（10/10 更新：fixture 子範圍已實作並通過限定技術複核，live 未接，見第 4 節） | `cmd/verify-demo/`、`internal/verification/`、`testdata/verification/`、`make verify-m1` 都不存在。Owner 未指派。 |
 | S1～S3、S4-B | 不列入 M1 門檻 | 依任務清單分列；S4-A 已 Accepted。 |
 
-## 2 B1-04 與 B1-06 的必要出口
+## 2 B1-04 與 B1-06 的必要出口（10/9 當時列出；完成情形見「現行摘要」）
 
 **B1-04**
 1. 逐項核對任務卡的 8 個勾選項並附證據位置；大多已有 review 紀錄，交 Codex 判定能否勾選。
@@ -132,7 +150,7 @@
   - **不得稱為全案例通過**。
 - 這兩個包分別以 `make verify-m1` 驗證；fixture 包通過不能掩蓋 live 包缺少證據。
 
-## 4 建議的下一個切片
+## 4 建議的下一個切片（10/9 當時；E1～E3 已完成，E4 見 m1-result.md）
 
 **M1-E1：沿用既有證據契約，補齊證據檔內容並做 `make m1-fixture`**（B1-06 出口的第 1、3 項）。
 

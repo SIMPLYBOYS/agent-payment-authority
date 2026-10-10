@@ -13,3 +13,8 @@ existing package tests and commands. This page only says where each is.
 
 Which case runs at which layer, and what each bundle claims:
 `docs/m1-evidence.md` sections 4 (fixture), 15 (checker) and 16 (live).
+
+Accepted bundles and how each card item maps to evidence: `docs/m1-result.md`
+(sections 3 and 5). The fixture bundle (31 cases) and the live bundle (the
+single `ask`) are judged separately and do not stand in for each other; the
+E4 clean-directory fixture bundle is in `artifacts/m1-e4-clean/` (section 3.4).
