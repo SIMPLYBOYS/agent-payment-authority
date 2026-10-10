@@ -1,5 +1,5 @@
 // Command m1-check runs a round's targeted fake verification with terminal
-// progress (make check-m1-e3; docs/m1-evidence.md 16.7):
+// progress (make check-m1-e3; docs/m1-evidence.md 16.6):
 //
 //	m1-check [--list] [--out artifacts/m1-check] [--heartbeat 10s] [--plan FILE]
 //
@@ -358,7 +358,11 @@ func runStep(ctx context.Context, i, n int, s Step, dir string, saving bool, eve
 	if r.ExitCode != nil {
 		ec = fmt.Sprint(*r.ExitCode)
 	}
-	say("%s %d/%d %s: exit %s, %s (%s) %s", r.Result, i+1, n, s.Name, ec, time.Duration(r.Seconds*float64(time.Second)).Truncate(100*time.Millisecond), r.Detail, r.Log)
+	detail := ""
+	if r.Detail != "" {
+		detail = " (" + r.Detail + ")"
+	}
+	say("%s %d/%d %s: exit %s, %s%s %s", r.Result, i+1, n, s.Name, ec, time.Duration(r.Seconds*float64(time.Second)).Truncate(100*time.Millisecond), detail, r.Log)
 	return r
 }
 
