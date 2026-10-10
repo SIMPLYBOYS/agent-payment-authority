@@ -25,9 +25,13 @@ def failing(output):
 CASES = [
     # (name, rc, text, timed out, caught)
     ("the expected assertion", 1, failing("    main_test.go:12: exit 0, 1 summaries\n"), False, True),
-    ("a timeout panic", 2, stream(("run", "TestA"), ("run", "TestA/sub"),
+    # go test exits 1 when its test binary panics, and the expected line
+    # may already be there (t.Errorf before the panic): only the panic
+    # check stands between these and "caught".
+    ("a timeout panic", 1, stream(("run", "TestA"), ("run", "TestA/sub"), ("output", "TestA/sub", "    main_test.go:12: exit 0, 1 summaries\n"),
                                   ("output", "TestA/sub", "panic: test timed out after 1s\n"), ("fail", "TestA/sub")), False, False),
-    ("a panic", 2, failing("panic: close of nil channel [recovered]\n"), False, False),
+    ("a panic", 1, stream(("run", "TestA"), ("run", "TestA/sub"), ("output", "TestA/sub", "    main_test.go:12: exit 0, 1 summaries\n"),
+                          ("output", "TestA/sub", "panic: close of nil channel [recovered]\n"), ("fail", "TestA/sub")), False, False),
     ("a failure without the expected assertion", 1, failing("    main_test.go:12: something else\n"), False, False),
     ("a build failure", 1, stream(("build-fail", "", "")) + "FAIL\tx [build failed]\n", False, False),
     ("a setup failure", 1, "FAIL\tx [setup failed]\n", False, False),
