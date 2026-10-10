@@ -687,3 +687,44 @@ go test -race -count=1 ./internal/store -run '^TestM1Evidence' -timeout 90s
 - live 模式回報 INCONCLUSIVE（不支援），E3 時再接上；檢查器沒有假設開發展示 plugin 例外已獲 M1 核准。
 - 經 `make` 或 `go run` 時，外層會改寫非零的結束碼。
 - 在這個環境，`make` 還會被 shell 掛鉤改寫並截斷輸出；需要完整報告時，直接執行編好的程式，或用不過濾的方式執行。
+
+### 15.6 Codex review R1～R3 補正（10/10，Claude Code；待 Codex 限定複核）
+
+> 依 `Claude-Code-M1-E2檢查器R1-R3補正派工-fd3cc90-20261010`。E2 前輪暫不通過。15.1～15.5 是前輪的原始紀錄，原樣保留。E1 包沒有重產。
+
+| 項目 | 問題 | 修正 | 證據 |
+|---|---|---|---|
+| R1 golden 不完整 | golden 的 manifest 索引了 `browser/browser-test.log`，但它被 `.gitignore` 的 `*.log` 忽略，沒有進 Git；乾淨匯出時 golden 判 INCONCLUSIVE，`TestExitCodes` 回 2 | `.gitignore` 只為這一個路徑加例外（`!testdata/verification/m1-fixture-20261009T162703Z-4ddb7a/browser/browser-test.log`），其他 `.log` 仍忽略；提交該檔（內容掃描沒有 token 形狀的值；有一行本機的 Unity 建置路徑，是證據原文，沒有改） | `git archive 973a58d` 匯出到新的暫存目錄，`go test -race -count=1 ./internal/verification/... ./cmd/verify-demo/...` 結束碼 0，golden 59 檔都在（`artifacts/m1-verify/e2-r1r3-20261010T032429Z/clean-export-*`） |
+| R2 E2E 執行紀錄沒有實質核對 | `traces`、`host_runs` 讀入卻沒核對；API 與 Store 只比部分欄位 | E2E 案例必須有 host run 與 run trace（缺 → INCONCLUSIVE V4）。逐項對照 Store（矛盾 → FAIL）：<br>• host run：task、consumer、state、結束方式；<br>• trace：task、gate（fixture 必須 strict／passed）、結束方式、工具呼叫編號、每個 `request_purchase` 的 purchase、裁決與事件序號；<br>• API 的每筆請購：訂單欄位（request_id、method、URL、chain、asset、asset_id、pay_to、amount、intent／requirement digest）、原始裁決、決策時間、期限、核准關閉狀態與時間，以及 API task 的身分。<br>結束方式的規則：CLI 逾時只由 run 記錄，所以必須是 timeout；沒有生命週期事件必須是 ok；主持人取消可能停掉進行中的 run（cancelled，且不早於取消），也可能在 run 結束後（ok，取消不早於 run 結束）。沒有請購的合法流程不要求 `request_purchase` | `TestE2ERunRecords`：複核的五例——刪 `traces`、刪 `host_runs`（INCONCLUSIVE）；API 裁決改為 Deny、API 金額改為 1、trace 的 `request_purchase` 改為 Deny（FAIL）。另外五例：trace 指向別的事件、host run 說 timeout、cancelled 的 run 早於取消就結束、API 少了核准關閉、restart 第二個 task 沒有 trace。每例都重算索引與結束標記，並斷言 V1 PASS。正例：ask、cancel-no-purchase、cli-timeout、cancel-pending、cli-timeout-pending、restart 都 PASS |
+| R3 掃描中止被當成通過 | 整合要求的紀錄解析沒有檢查 `Scanner.Err()`，前段的 PASS 會掩蓋超長行之後的失敗 | 掃描錯誤（超過有界的 16 MiB token，或讀取錯誤）回報為 `incomplete`：INCONCLUSIVE，不 PASS；錯誤之前已讀到的失敗仍判 FAIL。上限不放寬。索引說 pass 而紀錄讀不完時判 INCONCLUSIVE，不判矛盾 | `TestRequirementLogReadToTheEnd`：只有超長行 → INCONCLUSIVE；超長行之後才有失敗（複核的反例）→ INCONCLUSIVE；失敗在超長行之前 → FAIL。三例都重算索引，V1 PASS |
+
+**結束碼與 verdict**：沒有變。解析不完整時是 INCONCLUSIVE（結束碼 2），不會是 PASS；已有明確 FAIL 時是 FAIL（結束碼 1），不會被不完整掩蓋。
+
+**反向驗證**：`python3 scripts/verify/m1-e2-reverse.py [名稱過濾]`，增為 46 項，新增 9 項：
+- R2：E2E 紀錄整體、必須存在、API 請購、trace 裁決、trace 事件、run 結束方式、取消時間；
+- R3：掃描錯誤；
+- 另外，R index 的錨點隨條件更新。
+
+過程：
+- **第一次**被我中斷；中斷時「V1 盤點違規」這一項的 mutation 留在 `verify.go` 沒有還原。
+- **第二次**因此在這一項報告錨點找不到，結果 45／46。發現後以 `git restore` 把 `verify.go` 還原成已提交的版本（這一輪本來就沒有要改它），兩個套件重測通過。
+- **第三次**完整重跑：45／46。沒抓到的是「run 結束方式對照生命週期」：同一條規則也套用在 trace 上，只拿掉一處會被另一處抓到。腳本把兩處一起拿掉後，只重跑這一項，1／1 以斷言抓到。程式沒有改動。
+- 合計 **46／46 以斷言失敗抓到**。
+
+**定向回歸**：
+- `go vet ./...` 通過；
+- `go test -race -count=1 ./internal/verification/... ./cmd/verify-demo/...` 在開發副本與乾淨匯出都通過。
+
+**既有包唯讀驗收**：證據在 `artifacts/m1-verify/e2-r1r3-20261010T032429Z/`，`NOTE.txt` 說明每個檔案。
+- checker 是 `973a58d`；build 標 `(modified)`，因為 Go 把未追蹤的 `demo` 也算成修改。
+- `make verify-m1`（經 `rtk proxy`，不截斷）結束碼 0；編好的程式直接執行，結束碼 0；兩份報告除了 build 欄位外相同。
+- 結果：verdict PASS；V1～V7 與 R 都是 PASS；31 案全部 PASS；七個 capability 為 not_evaluated；沒有 finding；與產生端沒有差異。
+- 原包 81 個檔的 sha256 前後相同。
+
+**Commit**：修正 `48a43bc`，測試、`.gitignore` 與 golden log `973a58d`，文件為本小節。
+
+**限制**：
+- 這些是包內可見資料的一致性檢查，不是簽章或外部錨點；整份一致重造的包仍然無法分辨。
+- host run 與取消的時間只有秒級，兩者同一秒時，兩種結束方式都接受。
+- checker 的規則版本字串仍是 `m1-e2.1`，請以 build 的 commit 辨識版本。
+- 沒有執行：完整容器七步、311 項突變、瀏覽器、Unity、真實 CLI、`make m1-fixture`、E3／E4。
