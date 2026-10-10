@@ -23,6 +23,9 @@ const (
 	Pass         Verdict = "PASS"
 	Fail         Verdict = "FAIL"
 	Inconclusive Verdict = "INCONCLUSIVE"
+	// NotEvaluated marks a claim the mode does not check (R in a live
+	// report: the fixture's integration requirements are not rerun).
+	NotEvaluated Verdict = "NOT_EVALUATED"
 )
 
 func worst(a, b Verdict) Verdict {
@@ -142,6 +145,7 @@ type Report struct {
 	Requirements []RequirementReport `json:"requirements"`
 	NotEvaluated []string            `json:"not_evaluated"`
 	Differences  []string            `json:"differences_from_producer"`
+	Live         *LiveReport         `json:"live,omitempty"` // live mode only
 	Limits       []string            `json:"limits"`
 }
 
@@ -152,6 +156,9 @@ func (r *Report) finish() {
 		all = append(all, c.Findings...)
 	}
 	r.Claims = all.verdicts(Claims)
+	if r.Mode == "live" {
+		r.Claims["R"] = NotEvaluated
+	}
 	r.Verdict = all.verdict()
 }
 

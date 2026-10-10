@@ -1,7 +1,7 @@
 // Command verify-demo is the M1 read-only evidence checker (B1-07, fixture
 // scope; docs/m1-evidence.md section 15):
 //
-//	verify-demo --run-dir artifacts/m1/<run-id> [--repo .] [--mode fixture]
+//	verify-demo --run-dir artifacts/m1/<run-id> [--repo .] [--mode fixture|live]
 //
 // It reads the run directory and the repository's frozen case list and
 // fixtures, writes a JSON report to stdout and diagnostics to stderr, and
@@ -36,9 +36,9 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 	fl.SetOutput(stderr)
 	dir := fl.String("run-dir", "", "the run directory to check (artifacts/m1/<run-id>)")
 	repo := fl.String("repo", ".", "the repository holding the frozen case list and fixtures")
-	mode := fl.String("mode", "fixture", "fixture (live is M1-E3's)")
+	mode := fl.String("mode", "fixture", "fixture (the full case bundle) or live (the single-Ask bundle)")
 	if fl.Parse(args) != nil || fl.NArg() != 0 || *dir == "" {
-		fmt.Fprintln(stderr, "usage: verify-demo --run-dir DIR [--repo .] [--mode fixture]")
+		fmt.Fprintln(stderr, "usage: verify-demo --run-dir DIR [--repo .] [--mode fixture|live]")
 		return 3
 	}
 	tr, err := verification.LoadTrusted(*repo)

@@ -77,8 +77,9 @@ type verifier struct {
 }
 
 // Verify checks the run directory dir against the trusted inputs. mode is
-// "fixture" (the only mode before M1-E3). An error means the check could
-// not be made at all (the directory cannot be opened).
+// "fixture" (the full case bundle) or "live" (the single-Ask bundle,
+// section 16). An error means the check could not be made at all (the
+// directory cannot be opened).
 func Verify(dir string, tr Trusted, mode string) (*Report, error) {
 	b, err := openBundle(dir)
 	if err != nil {
@@ -98,10 +99,29 @@ func Verify(dir string, tr Trusted, mode string) (*Report, error) {
 	}
 	defer func() { v.r.Input.Bytes = b.total }()
 
-	v.bundleChecks(dir, mode)
-	if mode == "fixture" && v.m.Version != "" {
+	if mode == "live" {
+		v.r.NotEvaluated = nil
+		for _, c := range tr.Cases.Cases {
+			if c.CaseID != "ask" {
+				v.r.NotEvaluated = append(v.r.NotEvaluated, c.CaseID)
+			}
+		}
+		v.r.NotEvaluated = append(v.r.NotEvaluated, contracts.CapabilityIDs...)
+		v.r.Limits = append(v.r.Limits, liveLimits...)
+	}
+	switch mode {
+	case "fixture", "live":
+		v.bundleChecks(dir, mode)
+	default:
+		v.f.missing("V6", nil, "mode %s is not one this checker knows (fixture, live)", quote(mode))
+	}
+	switch {
+	case v.m.Version == "":
+	case mode == "fixture":
 		v.cases()
 		v.requirements()
+	case mode == "live":
+		v.liveCase()
 	}
 	v.r.Findings = v.f
 	if v.r.Findings == nil {
@@ -189,8 +209,8 @@ func (v *verifier) bundleChecks(dir, mode string) {
 	switch {
 	case m.Version != contracts.Version:
 		f.fail("V1", []string{"manifest.json"}, "manifest version %s", quote(m.Version))
-	case !runIDPattern.MatchString(m.RunID) || m.RunID != base:
-		f.fail("V1", []string{"manifest.json"}, "run ID %s is not a fixture run ID or not the directory's name %s", quote(m.RunID), quote(base))
+	case !map[string]*regexp.Regexp{"fixture": runIDPattern, "live": liveRunIDPattern}[mode].MatchString(m.RunID) || m.RunID != base:
+		f.fail("V1", []string{"manifest.json"}, "run ID %s is not a %s run ID or not the directory's name %s", quote(m.RunID), mode, quote(base))
 	}
 	if !commitPattern.MatchString(m.CodeCommit) || !digestPattern.MatchString(m.DirtyPatchDigest) || !digestPattern.MatchString(m.ConfigDigest) {
 		f.fail("V1", []string{"manifest.json"}, "code commit, dirty patch digest or config digest malformed")
@@ -203,8 +223,9 @@ func (v *verifier) bundleChecks(dir, mode string) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	if !slices.Equal(keys, []string{"case_manifest", "fake_cli", "go", "node", "os"}) {
-		f.fail("V1", []string{"manifest.json"}, "versions %v, want case_manifest, fake_cli, go, node, os", keys)
+	wantKeys := map[string][]string{"fixture": {"case_manifest", "fake_cli", "go", "node", "os"}, "live": {"case_manifest", "cli", "gate_mode", "go", "os"}}[mode]
+	if !slices.Equal(keys, wantKeys) {
+		f.fail("V1", []string{"manifest.json"}, "versions %v, want %v", keys, wantKeys)
 	} else if m.Versions["case_manifest"] != v.tr.Cases.ManifestID {
 		f.fail("V1", []string{"manifest.json"}, "versions name case list %s, not %s", quote(m.Versions["case_manifest"]), v.tr.Cases.ManifestID)
 	}
@@ -218,8 +239,17 @@ func (v *verifier) bundleChecks(dir, mode string) {
 	if _, err := v.b.read("provenance/git-status.txt"); err != nil {
 		v.readErr(f, "V1", "provenance/git-status.txt", err)
 	}
+	if mode == "live" {
+		v.liveBundle()
+	} else {
+		v.fixtureCommands()
+	}
+	v.index(mode)
+}
 
-	// Commands: each producer step once, exit 0, nothing else.
+// fixtureCommands: each producer step once, exit 0, nothing else.
+func (v *verifier) fixtureCommands() {
+	f, m := &v.f, v.m
 	seen := make([]int, len(commands))
 	for _, c := range m.Commands {
 		i := slices.IndexFunc(commands, func(want string) bool {
@@ -245,15 +275,14 @@ func (v *verifier) bundleChecks(dir, mode string) {
 			f.fail("V1", []string{"manifest.json"}, "command %s recorded %d times", quote(commands[i]), n)
 		}
 	}
+}
 
-	// Mode.
-	if mode != "fixture" {
-		f.missing("V6", nil, "mode %s is not supported before M1-E3: only fixture bundles are checked", quote(mode))
-		v.m.Version = ""
-	}
-
-	// The index: unique, plain relative paths, the right source, fixture
-	// mode, the bytes' digest; nothing in the directory left out.
+// index: unique, plain relative paths, the mode's source for each path and
+// its evidence mode, the bytes' digest; nothing in the directory left out;
+// the mode's claims (fixture: every case; live: ask alone) and the rest
+// not evaluated.
+func (v *verifier) index(mode string) {
+	f, m := &v.f, v.m
 	for _, e := range m.Evidence {
 		ev := []string{e.Path}
 		if _, dup := v.ids[e.EvidenceID]; dup {
@@ -263,11 +292,11 @@ func (v *verifier) bundleChecks(dir, mode string) {
 			f.fail("V1", ev, "evidence path listed twice")
 		}
 		v.ids[e.EvidenceID], v.paths[e.Path] = e.Path, e.EvidenceID
-		if e.EvidenceMode != "fixture" {
-			f.fail("V6", ev, "evidence mode %s in a fixture bundle", quote(e.EvidenceMode))
+		if e.EvidenceMode != mode {
+			f.fail("V6", ev, "evidence mode %s in a %s bundle", quote(e.EvidenceMode), mode)
 		}
-		if want, ok := sourceFor(e.Path); !ok {
-			f.fail("V6", ev, "a file outside the fixture layout")
+		if want, ok := v.source(e.Path, mode); !ok {
+			f.fail("V6", ev, "a file outside the %s layout", mode)
 		} else if e.Source != want {
 			f.fail("V6", ev, "labelled source %s; this file is %s evidence", quote(e.Source), want)
 		}
@@ -309,23 +338,42 @@ func (v *verifier) bundleChecks(dir, mode string) {
 			f.fail("V1", []string{"manifest.json"}, "claim %s listed %d times", quote(id), n)
 		}
 	}
+	// fixture: every case is required; live: ask alone, every other case
+	// not evaluated (docs/m1-closeout-gaps.md 3.3).
+	want := slices.Clone(contracts.CapabilityIDs)
 	for _, c := range v.tr.Cases.Cases {
-		if count[c.CaseID] == 0 {
-			f.fail("V1", []string{"manifest.json"}, "required claim %s has no result (a fixture bundle evaluates all %d cases)", c.CaseID, len(v.tr.Cases.Cases))
-		}
-		if slices.Contains(m.NotEvaluated, c.CaseID) {
+		required := mode == "fixture" || c.CaseID == "ask"
+		switch {
+		case required && count[c.CaseID] == 0:
+			f.fail("V1", []string{"manifest.json"}, "required claim %s has no result (a %s bundle evaluates %s)", c.CaseID, mode, map[string]string{"fixture": "every case", "live": "ask"}[mode])
+		case required && slices.Contains(m.NotEvaluated, c.CaseID):
 			f.fail("V1", []string{"manifest.json"}, "required claim %s is listed as not evaluated", c.CaseID)
+		case !required && count[c.CaseID] > 0:
+			f.fail("V1", []string{"manifest.json"}, "a live bundle claims %s; it shows the single Ask only", c.CaseID)
+		case !required:
+			want = append(want, c.CaseID)
 		}
 	}
 	ne := slices.Clone(m.NotEvaluated)
 	sort.Strings(ne)
-	want := slices.Clone(contracts.CapabilityIDs)
 	sort.Strings(want)
-	if !slices.Equal(slices.DeleteFunc(ne, func(s string) bool {
-		return slices.ContainsFunc(v.tr.Cases.Cases, func(c contracts.AcceptanceCase) bool { return c.CaseID == s })
-	}), want) {
-		f.fail("V1", []string{"manifest.json"}, "not_evaluated %v must be exactly the seven capabilities", m.NotEvaluated)
+	if !slices.Equal(ne, want) {
+		f.fail("V1", []string{"manifest.json"}, "not_evaluated %v must be exactly %v", m.NotEvaluated, want)
 	}
+}
+
+// source is the evidence source a path must carry in the mode's layout.
+func (v *verifier) source(p, mode string) (string, bool) {
+	if mode == "live" {
+		switch {
+		case strings.HasPrefix(p, "provenance/"):
+			return "provenance", true
+		case strings.HasPrefix(p, "live/"):
+			return "live_cli", true
+		}
+		return "", false
+	}
+	return sourceFor(p)
 }
 
 // configChecks: the bundle's configuration digests are the trusted files',

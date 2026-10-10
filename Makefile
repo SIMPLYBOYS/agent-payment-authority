@@ -1,4 +1,4 @@
-.PHONY: check check-contracts build dev demo-fake demo-integration demo present-live present-fake m1-fixture verify-m1
+.PHONY: check check-contracts build dev demo-fake demo-integration demo present-live present-fake m1-fixture verify-m1 m1-live-cli
 
 # Compile, vet and unit-test. Calls no paid model and touches no testnet.
 check:
@@ -85,6 +85,21 @@ m1-fixture:
 # the bundle's commands. The JSON report goes to stdout; the checker exits
 # 0 PASS, 1 FAIL, 2 INCONCLUSIVE, 3 not checked, which make reports as its
 # own "Error N" (exit 2): read the report's verdict.
+# MODE=live checks a live single-Ask bundle (make m1-live-cli).
+MODE ?= fixture
 verify-m1:
-	@test -n "$(RUN_DIR)" || { echo "usage: make verify-m1 RUN_DIR=artifacts/m1/<run-id>" >&2; exit 2; }
-	@go run -buildvcs=true ./cmd/verify-demo --run-dir "$(RUN_DIR)"
+	@test -n "$(RUN_DIR)" || { echo "usage: make verify-m1 RUN_DIR=artifacts/m1/<run-id> [MODE=fixture|live]" >&2; exit 2; }
+	@go run -buildvcs=true ./cmd/verify-demo --run-dir "$(RUN_DIR)" --mode "$(MODE)"
+
+# M1-E3 (docs/m1-evidence.md section 16): ONE real Claude Code run (a real
+# model on the APA-only login) through apa-buyer's live path, into a new
+# artifacts/m1/<run-id>/. Only with Aaron's separate approval of that one
+# run. Needs APA_LIVE_CLI=true in the environment and all three of CLI (the
+# absolute path), BASE (the reviewed product commit; HEAD may differ in
+# docs/ and README.md only) and GATE (dev_demo_plugins or strict). A clean
+# local clone is built; nothing retries. The producer exits 0 ask PASS, 1
+# the run or its record failed, 2 stopped before the CLI or not saved
+# completely (make reports a non-zero exit as its own Error N).
+m1-live-cli:
+	@test -n "$(CLI)" && test -n "$(BASE)" && test -n "$(GATE)" || { echo "usage: APA_LIVE_CLI=true make m1-live-cli CLI=/abs/path/claude BASE=<reviewed commit> GATE=dev_demo_plugins|strict" >&2; exit 2; }
+	@go run -buildvcs=true ./cmd/m1-live --live --cli "$(CLI)" --base "$(BASE)" --gate "$(GATE)"
