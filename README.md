@@ -147,7 +147,7 @@ tail -f artifacts/m1-check/m1-check-<時間>/05-r1-r2-producer.log   # 另一個
 - 10/11 的計畫：`go vet`；`internal/progress`（R1，`-race`）；`cmd/m1-check`（R3，`-race`）；反向分類器的 fake 測試（R4）；產包器的訊號、中斷、正常完成與失敗判讀（`-race`，只跑相關測試）；檢查器的 golden 與 run 紀錄負例；R1～R4 反向驗證。不啟動真實 CLI。
 - 每步印 `START i/N`、正在跑的測試（只取自 `go test -json` 事件）或反向項目；安靜時約每 10 秒一行心跳（已完成數、本步與總耗時、距上次輸出多久、log 檔名）。結果是 `PASS`、`FAIL`、`TIMEOUT`、`INTERRUPTED` 或 `ERROR`，附真實結束碼與 log 路徑。
 - 反向驗證：每項只跑對應的測試，先確認未突變時通過；突變在一次性的 clone 裡做。只有對應測試以預期的斷言失敗才算 `CAUGHT`；編譯或環境失敗、panic（包含測試逾時）、逾時、訊號、沒跑到測試、其他斷言都不算。
-- 一步沒過就停，後面標 `NOT_RUN`，不重試。結束碼依序判斷：2 被中斷；1 有一步沒過；3 證據或摘要不完整（log 存不完整、超過 256 MiB 上限、摘要寫不到 stdout）；0 全部通過且都已保存與送出。保存失敗不會改變步驟本身的結果。
+- 一步沒過就停，後面標 `NOT_RUN`，不重試。結束碼依序判斷：2 被中斷；1 有一步沒過；3 證據或摘要不完整（log 存不完整、超過 256 MiB 上限、`progress.log` 最後寫入或關閉失敗、摘要寫不到 stdout）；0 全部通過且都已保存與送出。保存失敗不會改變步驟本身的結果。
 - 證據：`plan.json`、`progress.log`、每步的 log、`summary.json`，都在新的 `artifacts/m1-check/m1-check-<時間>/`。
 
 ## 設定

@@ -1176,3 +1176,41 @@ m1-check: PASS; evidence artifacts/m1-check/m1-check-20261010T165549Z (complete)
 **Commit**：`a4535e7`（程式）、`0e84521`（測試）、`09b6464`（反向定義修正）、`6e1145a`（分類器測試修正）；文件見本節的 commit。
 
 R2 維持關閉；R1、R3、R4 待 Codex 限定複核，不自行宣告 E3 通過。B1-04／B1-06／B1-07 維持 InProgress。
+
+### 16.8 R3 進度檔關閉補正（10/11，Claude Code；只用 fake；待 Codex 限定複核）
+
+依 Codex 對 `6e1145a` 的限定複核：**R1 群組收尾與 R4 分類器關閉，R2 維持關閉**。R3 剩一個缺口，本節只修這一項。E3 整體尚未通過，真實產包仍待 Aaron 另行核准。
+
+**證據歸屬**
+- R1：Codex 在斷網、來源唯讀的容器內獨立跑了群組測試，結果通過，並核對了連續訊號的握手修正與交付紀錄；沒有另外重跑產包器。
+- R4：Codex 獨立執行 17 個分類案例與 41 項錨點檢查，結果通過，並核對了 16.7 第二次執行 15 項反向的原始輸出，都對上預期的斷言；沒有重新執行突變。
+- R3：既有測試通過；Codex 新增的 Close 失敗探測，以斷言重現了下面的缺口。Codex 的輸出只在它的工具紀錄，repo 沒有對應的 log。
+- 16.7 的兩次執行（`m1-check-20261010T164923Z`、`m1-check-20261010T165549Z`）原樣保留，各屬當時的基準。本節的發現不代表那兩次執行真的遇到磁碟錯誤。
+
+**缺口**：`progress.log` 原本用 `defer` 關閉，關閉時 `summary.json`、stdout 的 JSON 和結束碼都已決定。Codex 用只跑 `sh -c true` 的合成計畫，注入「寫入成功、只有 Close 回錯」的 writer，結果是結束碼 0、stdout `verdict=PASS`、`evidence_complete=true`，「證據不完整」要到最後才出現在 stderr。
+
+**修正**（`c11138a`，`cmd/m1-check/main.go`）：
+- 最後的摘要行寫完後，立即關閉 `progress.log`，接著才寫 `summary.json`、組 stdout 的 JSON、決定結束碼。所以最後一次寫入失敗、短寫或 Close 失敗，都會讓兩份摘要寫 `evidence_complete=false`，並讓結束碼變成 3。
+- Close 之後不再寫入這個檔案：最後的判定行和「摘要未送出」通知只送到 stderr，`progress.log` 以摘要表結尾。
+- 步驟本身的結果與真實結束碼不變；結束碼的優先順序不變：2 被中斷、1 有步驟沒過、3 證據或摘要不完整、0 全部完成。
+- 原有的 `summary.json` 保存、stdout 錯誤與短寫處理都保留；不重試，不覆寫舊證據。
+
+**測試**（`4feb7df`）：`TestProgressFile` 注入假的 `progress.log`，不啟動產包器或 CLI：
+
+| 案例 | 預期 |
+|---|---|
+| 只有 Close 失敗 | 步驟 PASS；結束碼 3；`summary.json` 與 stdout 都是 `evidence_complete=false` |
+| 最後一段寫入失敗 | 同上 |
+| 最後一段短寫 | 同上 |
+| 步驟失敗後 Close 也失敗 | 步驟 FAIL；結束碼 1；兩份摘要都標不完整 |
+| 全部保存成功 | 結束碼 0；兩份摘要都完整；stdout 只有一份 JSON |
+
+每個案例都檢查檔案已關閉、Close 之後沒有任何寫入，而且進度確實寫進檔案。另新增一個反向項目：「R3 a progress.log Close error is in the result」，改法是忽略 `progFile.Close()` 的錯誤。
+
+**驗證**：沿用 `m1-check`，以兩步的 `--plan` 在乾淨 clone 中執行（基準 `4feb7df`，已追蹤的檔案沒有修改），證據在 `artifacts/m1-check/m1-check-20261010T172232Z/`。**PASS，結束碼 0，證據完整，共 22 秒**：
+1. `go test -json -count=1 -race ./cmd/m1-check`：13 個測試通過（包含 `TestProgressFile` 的 5 個案例，以及原有的保存與摘要測試），17.4 秒；
+2. `m1-e3-reverse.py --out {dir}/reverse '^R3 a progress.log Close'`：在一次性 clone 中執行。未突變時通過（1.2 秒）；突變後結束碼 1，`TestProgressFile/close_fails` 命中預期斷言 `exit 0, step PASS, stdout complete true, summary.json complete true`，算 CAUGHT，不是 panic、編譯或環境錯誤；最後一行是「ORIGINAL this working tree unchanged」。整步 4.8 秒。
+
+**沒有執行**：完整的 `make check-m1-e3` 七步、16.7 的 15 項反向、產包器、E1 產包、E2／E3 全清單、完整容器、311 項突變、瀏覽器、Unity；真實 Claude CLI、版本查詢、登入、C0′、真實請購、`make m1-live-cli`、`make present-live`；E4、多 Agent、ZK。
+
+**狀態**：R1、R2、R4 關閉；R3 待 Codex 限定複核；E3 未通過。B1-04／B1-06／B1-07 維持 InProgress。
