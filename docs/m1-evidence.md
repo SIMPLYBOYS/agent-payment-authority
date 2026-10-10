@@ -790,8 +790,8 @@ APA_LIVE_CLI=true make m1-live-cli CLI=/abs/path/claude BASE=<review 過的產�
 - `apa-buyer run --live --cli <CLI> [--dev-demo-plugins] --task task-a --registry/--profile <clone 內的可信設定> --trace-dir <工作目錄>/runs`，加上 `APA_DB_PATH=<工作目錄>/db/live.db`；
 - `db/` 交給 Store 以 0700 建立，避免 §52 的權限問題；
 - 版本檢查、Gate、上限（180 秒、10 則回覆、8 次工具呼叫）都沿用 apa-buyer，沒有放寬；apa-buyer 本身就含一次前置版本查詢；
-- 外層上限 `--wait`（預設 10 分鐘）：到時對 apa-buyer 自己的 process group 送 SIGTERM，30 秒後對同一 group 送 SIGKILL；
-- SIGINT 或 SIGTERM（16.6 R1）：產包器取消這次執行，停止方式與外層上限相同；只送給這次 apa-buyer 的 group，而且只在它的 leader 還沒被回收之前送，不會依名稱終止其他程序；第二次訊號不會跳過清理，也不會重設期限；SIGKILL 無法攔截，被 SIGKILL 時不會留下證據包；
+- 外層上限 `--wait`（預設 10 分鐘）：到時對 apa-buyer 自己的 process group 送 SIGTERM；之後觀察整個 group（不以 apa-buyer 本身結束為準），30 秒內清空就結束，否則對同一 group 送 SIGKILL（16.7 R1）；
+- SIGINT 或 SIGTERM（16.6、16.7 R1）：產包器取消這次執行，停止方式與外層上限相同；訊號只送給這次 apa-buyer 的 group ID，只在 leader 還沒被回收、或剛探測到 group 仍存在時送，不會依名稱終止其他程序；第二次訊號不會跳過清理，也不會重設期限；SIGKILL 無法攔截，被 SIGKILL 時不會留下證據包；
 - 結束方式記在 `run.json` 的 `termination`：`completed`（自行結束且結束碼 0）、`wrapper_exit_nonzero`（自行結束但結束碼非 0）、`outer_bound`、`interrupted`、`start_failed`；在釋放執行的 context 之前判定；
 - 不重試，不改模式，不用備援模型。
 
@@ -1053,3 +1053,126 @@ m1-check: PASS; evidence artifacts/m1-check/m1-check-20261010T151533Z
 - **沒有執行**：真實 Claude CLI、版本查詢、登入、C0′、真實請購、`make m1-live-cli` 的真實執行、`make present-live`；`make m1-fixture`、完整容器、311 項突變、瀏覽器、Unity；E4。
 
 B1-04／B1-06／B1-07 維持 InProgress。
+
+### 16.7 E3 收尾與進度工具 R1／R3／R4 補正（10/11，Claude Code；只用 fake；待 Codex 限定複核）
+
+依 Codex 在 `eac2a43` 的限定核對（斷網、來源唯讀的容器；輸出只在 Codex 的工具紀錄，repo 沒有對應 log）。R2 已關閉，沒有重做：`live/run.json` v2、五種 termination 與一致性檢查都不變。E3 整體尚未通過，真實產包仍未核准。
+
+**證據歸屬**
+- Codex 獨立通過：既有 GroupStop 案例、正常 Ask、保存失敗、單次 SIGINT／SIGTERM、live golden 與 25 個語意負例。
+- Codex 獨立重現：同群子程序殘留、超長輸出遺失卻報完整、摘要寫入失敗卻回 0、timeout 被反向腳本算成斷言抓到。
+- 連續訊號測試沒有到達可靠的第二訊號觀測條件：按測試同步缺口處理，不宣稱是另一個已證實的產品缺陷。
+- 16.6 的六步 PASS 與乾淨 clone race 紀錄維持 Claude Code 的歸屬。那次的反向 log 沒有保存每項的實際失敗輸出，只能算當時回報；而且「R1 the wrapper's group stopped」的改法拿掉了 `group.Prepare` 卻保留 `group.Done()`，會關閉 nil 通道而 panic，當時很可能是被 panic「抓到」的。這些紀錄不覆寫，也不據此確認。
+
+**R1：群組首程序結束不等於收尾完成**（`internal/progress`）
+- 原本的問題：收到 SIGTERM 後，首程序結束、`Wait` 返回，`Done` 關閉等待通道，排定的 SIGKILL 就被取消。同群裡忽略 SIGTERM、又關掉繼承管線的子程序因此繼續執行。
+- 現在：
+  - `Cancel` 送 SIGTERM 給群組後，觀察的是**整個群組**（`kill(-pgid, 0)` 探測，每 20 ms 一次），不是首程序有沒有被回收；寬限期內清空就結束，否則送 SIGKILL，再最多等 5 秒；
+  - `Done` 在發生過停止時，會等這段收尾結束；SIGKILL 後 5 秒仍有成員，就回報錯誤（產包器寫到 stderr，`m1-check` 寫進該步的 detail）。沒有發生停止時立即返回，不送任何訊號、不等寬限期；
+  - 訊號只送給這個群組 ID，不依名稱。只在首程序還沒被回收、或探測剛確認群組仍存在時送；探測發現群組已不存在就不再送。POSIX 規定群組存在期間它的 ID 不會被重用；剩下的風險是群組在兩次探測之間清空、而且同一個 ID 剛好被新群組使用，要在 20 ms 內繞完整個 pid 空間才可能發生；
+  - 第二個訊號只印「already stopping」，`Cancel` 只執行一次，期限不會重設。
+- 測試：`TestGroupMixed`（首程序接受 SIGTERM 並結束；同群成員忽略 SIGTERM、關閉繼承的管線、寫握手檔；確認首程序的 `Wait` 返回時成員還在執行，`Done` 之後已不在執行，並以 `ps` 區分 running、zombie、gone）；`TestGroupNotStopped` 確認不等待。
+- 連續訊號測試（`cmd/m1-live` `TestSignals`）：替身 CLI 收到 SIGTERM 時寫下 `.term` 並停住，直到測試寫 `.release`。測試等到 `.term` 出現、確認 CLI 仍在執行，才送第二個訊號並檢查 `Signal` 的錯誤；要求 CLI 仍被停住時 stderr 已出現「again: already stopping」，最後才放行。用的都是就緒條件，沒有固定 sleep。另外加了 `--wait 30s`，讓不會取消的訊號處理在外層上限結束，不必等測試自己的期限。
+- 停止實測（`TestSignals` 的 log）：第一個訊號後約 60～90 ms apa-buyer 就結束，約 0.4～0.5 秒產包器結束。
+- 測試加速（沒有改斷言）：產包器測試的暫存 HOME 讓每次 clone 的建置都從空快取開始，一次約 24 秒。改成傳入 `go env` 解析出的 `GOCACHE`／`GOMODCACHE`／`GOPATH` 後，`TestSignals` 從 98 秒降到 26 秒。
+
+**R3：輸出沒有完整保存，就不能宣稱成功**（`cmd/m1-check`）
+- 原本的問題：Scanner 遇到超過 16 MiB 的一行就停下，之後的輸出被丟棄，結果卻仍是 0、PASS、`evidence_complete=true`；最後的摘要寫不到 stdout 也照樣回 0。
+- 現在：
+  - 步驟輸出由同一個 writer 分兩路：log 收到**每個位元組**（上限 256 MiB），進度只讀不超過 1 MiB 的行，更長的行只略過解析，log 裡仍完整保存，之後的行照常讀；
+  - log 超過上限、寫入失敗、短寫、關閉失敗，都標記該步 `log_saved=false`，證據不完整；writer 不會讓步驟的管線出錯，所以程序會被排空，不會卡住；
+  - 結束碼 0 但輸出沒讀完（管線錯誤或超過 WaitDelay）判 ERROR；
+  - `progress.log`、`plan.json`、`summary.json` 的寫入與關閉錯誤也算不完整；
+  - 最後的摘要寫到 stdout 時會檢查錯誤與短寫。失敗時 stderr 印固定訊息（不重複 writer 的錯誤內容），說明摘要沒送出，以及證據檔是完整或不完整，並寫入 `progress.log`；
+  - 結束碼依序判斷：2 有步驟被中斷；否則 1 有步驟沒過（FAIL／TIMEOUT／ERROR）；否則 3 證據或摘要不完整；否則 0。保存失敗不會改變步驟本身的結果，也不會被寫成斷言失敗。
+- 測試：`TestLongLine`（17,000,000 位元組的一行後接 PLAN／ITEM／RESULT 與結尾標記：PASS，log 完整、以結尾標記收尾，之後的行有讀到）、`TestLogLimit`（超過上限：步驟仍 PASS、證據不完整、結束碼 3；步驟失敗時是 1）、`TestLogWriteFailure`（寫到一半失敗）、`TestSummaryNotDelivered`（錯誤、短寫、步驟失敗加錯誤），以及原有的純 JSON stdout 測試。
+
+**R4：反向驗證必須證明是預期的斷言失敗**（`scripts/verify/m1-e3-reverse.py`）
+- 原本的問題：只排除 build failed 與 setup failed，其他非零都算 CAUGHT，所以 timeout panic 也會被算成抓到。
+- 現在：
+  - 每項列出對應測試（`-run`）與預期的斷言 regex；
+  - 只有該測試確實執行、確實失敗，且自己的輸出含有預期斷言時才算 CAUGHT；
+  - 不算抓到的情況：編譯或 setup 失敗、panic（包含測試逾時）、腳本逾時（300 秒；`go test -timeout 240s`）、被訊號結束、結束碼不是 1、預期測試沒有執行或沒有失敗、其他斷言；
+  - 每項先跑未突變的同一個測試，必須通過（同一命令只跑一次）；
+  - 突變只在一次性的本機 clone 做（原工作區的已追蹤檔案必須乾淨），每項做完都還原並核對，最後刪除 clone，並核對原工作區沒變、HEAD 沒變；
+  - 每項的 log 保存命令、預期、未突變與突變後的結束碼、耗時、判讀依據與原始輸出，另有 `results.json`；
+  - `--list` 只讀表格，列出每項的命令與預期。
+- 10/10 之前的 26 項（檢查器與產包器的舊項目）還沒有定義預期斷言，標為 legacy，執行時一律「not caught」。這一輪沒有跑它們。
+- 原 R1 群組項目改成只拿掉保護本身：SIGTERM／SIGKILL 改送首程序而不是群組，`Prepare` 與通道照樣保留；另新增「首程序結束後仍收尾」一項。
+- 分類器的 fake 測試 `scripts/verify/m1_e3_reverse_test.py`（不編譯產品）：預期斷言、成功沒抓到、timeout panic、一般 panic、其他斷言、編譯失敗、setup 失敗、沒跑到測試、腳本逾時、訊號、其他結束碼，以及 Python 項目的三種情況、基準規則，並核對所有錨點各出現一次。
+
+**縮短驗證**
+- 上一輪的反向驗證每項都跑整套產包器測試，12 分 51 秒。這一輪每項只跑它對應的測試或子案例，15 項共 2 分 54 秒（第二次執行）；整個計畫 5 分 17 秒。
+- 斷言與期限都沒有降低：唯一新增的 `--wait 30s` 只讓「沒取消」的突變更早結束；必要的正例仍保留，每項的未突變基準也照樣要跑。
+
+**計畫與執行**（`make check-m1-e3`，每次都在最終 commit 的乾淨 clone 裡執行，證據寫進本 repo 的 `artifacts/m1-check/`）
+
+| 步 | 命令 | 涵蓋 |
+|---|---|---|
+| 1 vet | `go vet` 四個套件 | — |
+| 2 r1-group | `go test -race ./internal/progress` | R1 群組（含混合案例） |
+| 3 r3-runner | `go test -race ./cmd/m1-check` | R3 |
+| 4 r4-classifier | `python3 -I scripts/verify/m1_e3_reverse_test.py` | R4 |
+| 5 r1-r2-producer | `go test -race -run '^(TestSignals\|TestInterruptInProcess\|TestLiveAsk\|TestStartFailure\|TestFailedRuns)$' ./cmd/m1-live` | R1 訊號、R2 正常完成與失敗判讀的必要對照 |
+| 6 r2-checker | `go test -race -run '^(TestLiveGolden\|TestLiveRecordsThatContradict)$' ./internal/verification` | R2 檢查器 |
+| 7 reverse | `m1-e3-reverse.py --out {dir}/reverse '^(R1\|R2\|R3\|R4) '` | 15 項，各跑對應測試 |
+
+- **第一次**：基準 `0e84521`，證據 `artifacts/m1-check/m1-check-20261010T164923Z/`，5 分 05 秒。1～6 步 PASS；反向 **FAIL，11／15**，m1-check 結束碼 1。沒抓到的 4 項都是反向定義本身的錯，分類器正確地拒絕了：
+  - 「R2 a normal end is completed」：TestLiveAsk 有失敗，但最先失敗的斷言是 `exit 1, end "complete"`（產包器把正常的 Ask 判成失敗），不是我預期的 run 紀錄斷言；
+  - 「R3 a short summary write is reported」：突變後 `n` 沒有被使用，編譯失敗；
+  - 「R4 a panic is not caught」：fake panic 案例用了結束碼 2，拿掉 panic 檢查後仍被結束碼規則擋下，最後是錨點檢查的斷言失敗。實際上 `go test` 在測試程式 panic 時也是結束碼 1；
+  - 「R4 the expected assertion is required」：拿掉斷言檢查後，下一行的 `next()` 拋出 StopIteration，不是斷言失敗。
+- **修正**：`09b6464`（預期斷言改成 `exit 1, end "complete"`；短寫突變改成 `n < 0`，可以編譯；預期行只找一次，沒找到用預設值）、`6e1145a`（panic 案例改成結束碼 1，並且 panic 前已有預期的斷言行，所以只剩 panic 檢查能擋）。這不是原樣重跑：新基準再完整跑一次計畫。
+- **第二次**：基準 `6e1145a`（乾淨 clone，已追蹤的檔案沒有修改），證據 `artifacts/m1-check/m1-check-20261010T165549Z/`，**PASS，結束碼 0，證據完整，stdout 只有 JSON**，5 分 17 秒：
+  - vet 2.4 秒；r1-group 3.9 秒（4 個測試）；r3-runner 19.3 秒（12 個）；r4-classifier 0.1 秒；r1-r2-producer 111.4 秒（5 個）；r2-checker 6.3 秒（2 個）；reverse 174.0 秒，15／15 以預期斷言抓到，最後一行是「ORIGINAL this working tree unchanged」。
+  - 每項的預期斷言與實際命中：
+
+| 項目 | 測試 | 命中的斷言 | 秒 |
+|---|---|---|---|
+| R1 signal handler cancels the run | TestSignals/SIGINT | `termination "outer_bound"` | 59.5 |
+| R1 a second signal does not cut the cleanup short | TestSignals/SIGINT,_then_SIGTERM_during_the_cleanup | `the second signal was not reported` | 46.9 |
+| R1 interruption recorded | TestInterruptInProcess | `termination "outer_bound", producer error …` | 17.7 |
+| R1 the stop signals the group, not the leader | TestGroupStop/ends_on_SIGTERM | `the process group still had members 5s after SIGKILL` | 7.3 |
+| R1 the stop outlasts the group leader | TestGroupMixed | `the member is still running after Done` | 2.1 |
+| R2 a normal end is completed | TestLiveAsk | `exit 1, end "complete"` | 18.0 |
+| R2 checker termination and producer error | TestLiveRecordsThatContradict 兩個子案例 | `no V4 FAIL finding` | 3.8 |
+| R2 checker run record version | …/a_version_1_run_record | `no V4 FAIL finding` | 3.0 |
+| R3 lines after a long line are read | TestLongLine | `exit 1, 17000057 log bytes` | 5.7 |
+| R3 a log over its limit is incomplete | TestLogLimit | `exit 0, 1000 log bytes` | 2.0 |
+| R3 a failed log write is reported | TestLogWriteFailure | `exit 0, …` | 1.9 |
+| R3 a failed summary write is reported | TestSummaryNotDelivered/error | `exit 0, 1 summaries` | 2.0 |
+| R3 a short summary write is reported | TestSummaryNotDelivered/short_write | `exit 0, 1 summaries` | 1.8 |
+| R4 a panic is not caught | 分類器 fake 測試 | `AssertionError: a timeout panic counted as caught` | 0.2 |
+| R4 the expected assertion is required | 分類器 fake 測試 | `AssertionError: a failure without the expected assertion counted as caught` | 0.1 |
+
+- 計畫的 2、3、5、6 步都帶 `-race`，而且在最終程式 commit 的乾淨 clone 中執行，這就是本輪受影響套件的定向 race 回歸。`cmd/verify-demo` 與 fixture 共用邏輯沒有改，所以不另跑 E1 包的回歸。
+
+輸出範例（第二次，摘錄）：
+
+```text
+START 5/7 r1-r2-producer at 16:56:15Z
+  log: …/05-r1-r2-producer.log (tail -f it from another terminal)
+  run  TestLiveAsk
+  ... 5/7 r1-r2-producer: running TestLiveAsk; 0 passed, 0 failed so far (step 10s, all 35s, last output 5s ago, log 05-r1-r2-producer.log)
+  ...
+  item 6/15 R2 a normal end is completed
+  ... 7/7 reverse: item 6/15 R2 a normal end is completed; 5 of 15 done (5 caught, 0 not caught) (step 2m20s, all 4m43s, last output 4s ago, log 07-reverse.log)
+  ... 7/7 reverse: item 6/15 R2 a normal end is completed; 5 of 15 done (5 caught, 0 not caught) (step 2m30s, all 4m53s, last output 14s ago, log 07-reverse.log)
+    CAUGHT R2 a normal end is completed (18.0s): TestLiveAsk: main_test.go:216: exit 1, end "complete"
+  ...
+m1-check: summary (5m17s total):
+  1/7 vet              PASS        exit 0      2.4s …/01-vet.log
+  2/7 r1-group         PASS        exit 0      3.9s …/02-r1-group.log
+  3/7 r3-runner        PASS        exit 0     19.3s …/03-r3-runner.log
+  4/7 r4-classifier    PASS        exit 0      0.1s …/04-r4-classifier.log
+  5/7 r1-r2-producer   PASS        exit 0    111.4s …/05-r1-r2-producer.log
+  6/7 r2-checker       PASS        exit 0      6.3s …/06-r2-checker.log
+  7/7 reverse          PASS        exit 0    174.0s …/07-reverse.log
+m1-check: PASS; evidence artifacts/m1-check/m1-check-20261010T165549Z (complete)
+```
+
+**沒有執行**：E1 產包、E2 的 46 項、E3 原有的 26 項完整清單、完整容器七步、311 項產品突變、瀏覽器、Unity；真實 Claude CLI、版本查詢、登入、C0′、真實請購、`make m1-live-cli`、`make present-live`；E4、多 Agent、付款、ZK。
+
+**Commit**：`a4535e7`（程式）、`0e84521`（測試）、`09b6464`（反向定義修正）、`6e1145a`（分類器測試修正）；文件見本節的 commit。
+
+R2 維持關閉；R1、R3、R4 待 Codex 限定複核，不自行宣告 E3 通過。B1-04／B1-06／B1-07 維持 InProgress。

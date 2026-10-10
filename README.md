@@ -134,19 +134,20 @@ make verify-m1 RUN_DIR=artifacts/m1/<m1-live-run-id> MODE=live
   - 可能用到訂閱額度，用量可能是 `unknown`。
 - live 包只宣稱 `ask`。PASS 不代表 fixture 全案例或 M1 完成。
 - 格式、判定與真實執行前的確認清單見 [docs/m1-evidence.md](docs/m1-evidence.md) 第 16 節。
-- 執行中按 Ctrl-C（SIGINT）或送 SIGTERM：只停這一次執行（apa-buyer 的行程群組先收 SIGTERM 做有上限的清理，30 秒後才 SIGKILL），資料庫、trace 與證據包保留，`live/run.json` 記為 `interrupted`，結束碼 1，不重試。再按一次不會跳過清理。
+- 執行中按 Ctrl-C（SIGINT）或送 SIGTERM：只停這一次執行。apa-buyer 的行程群組先收 SIGTERM 做有上限的清理；之後看整個群組，30 秒內沒清空才對群組送 SIGKILL（apa-buyer 本身先結束不算清完）。資料庫、trace 與證據包保留，`live/run.json` 記為 `interrupted`，結束碼 1，不重試。再按一次不會跳過清理。
 
 **M1-E3 修正輪的目標驗證（只用 fake，有進度）**：
 
 ```sh
-make check-m1-e3 ARGS=--list   # 只列出計畫（基準 commit、步驟、命令、上限、證據目錄），不執行
+make check-m1-e3 ARGS=--list   # 只列出計畫（基準 commit、步驟、命令、上限、反向項目的 -run 篩選與預期斷言、證據目錄），不執行
 make check-m1-e3               # 執行；進度在 stderr，最後的 JSON 摘要在 stdout
-tail -f artifacts/m1-check/m1-check-<時間>/04-producer-fake.log   # 另一個終端看某一步的完整輸出
+tail -f artifacts/m1-check/m1-check-<時間>/05-r1-r2-producer.log   # 另一個終端看某一步的完整輸出
 ```
 
-- 步驟：`go vet`、`internal/progress`（`-race`）、檢查器 live 測試、產包器 fake 測試、`cmd/m1-check` 測試、R1／R2 反向驗證。不啟動真實 CLI。
-- 每步印 `START i/N`、正在跑的測試（只取自 `go test -json` 事件）或反向項目；安靜時約每 10 秒一行心跳（已過時間、距上次輸出多久）。結果是 `PASS`、`FAIL`、`TIMEOUT`、`INTERRUPTED` 或 `ERROR`，附真實結束碼與 log 路徑。反向驗證只有斷言失敗才算 `CAUGHT`。
-- 一步沒過就停，後面標 `NOT_RUN`，不重試。結束碼：0 全過、1 有一步沒過、2 被中斷、3 證據沒能完整保存。
+- 10/11 的計畫：`go vet`；`internal/progress`（R1，`-race`）；`cmd/m1-check`（R3，`-race`）；反向分類器的 fake 測試（R4）；產包器的訊號、中斷、正常完成與失敗判讀（`-race`，只跑相關測試）；檢查器的 golden 與 run 紀錄負例；R1～R4 反向驗證。不啟動真實 CLI。
+- 每步印 `START i/N`、正在跑的測試（只取自 `go test -json` 事件）或反向項目；安靜時約每 10 秒一行心跳（已完成數、本步與總耗時、距上次輸出多久、log 檔名）。結果是 `PASS`、`FAIL`、`TIMEOUT`、`INTERRUPTED` 或 `ERROR`，附真實結束碼與 log 路徑。
+- 反向驗證：每項只跑對應的測試，先確認未突變時通過；突變在一次性的 clone 裡做。只有對應測試以預期的斷言失敗才算 `CAUGHT`；編譯或環境失敗、panic（包含測試逾時）、逾時、訊號、沒跑到測試、其他斷言都不算。
+- 一步沒過就停，後面標 `NOT_RUN`，不重試。結束碼依序判斷：2 被中斷；1 有一步沒過；3 證據或摘要不完整（log 存不完整、超過 256 MiB 上限、摘要寫不到 stdout）；0 全部通過且都已保存與送出。保存失敗不會改變步驟本身的結果。
 - 證據：`plan.json`、`progress.log`、每步的 log、`summary.json`，都在新的 `artifacts/m1-check/m1-check-<時間>/`。
 
 ## 設定
