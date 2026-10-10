@@ -790,7 +790,9 @@ APA_LIVE_CLI=true make m1-live-cli CLI=/abs/path/claude BASE=<review 過的產�
 - `apa-buyer run --live --cli <CLI> [--dev-demo-plugins] --task task-a --registry/--profile <clone 內的可信設定> --trace-dir <工作目錄>/runs`，加上 `APA_DB_PATH=<工作目錄>/db/live.db`；
 - `db/` 交給 Store 以 0700 建立，避免 §52 的權限問題；
 - 版本檢查、Gate、上限（180 秒、10 則回覆、8 次工具呼叫）都沿用 apa-buyer，沒有放寬；apa-buyer 本身就含一次前置版本查詢；
-- 外層上限 `--wait`（預設 10 分鐘）：到時對 process group 送 SIGTERM，30 秒後強制結束；
+- 外層上限 `--wait`（預設 10 分鐘）：到時對 apa-buyer 自己的 process group 送 SIGTERM，30 秒後對同一 group 送 SIGKILL；
+- SIGINT 或 SIGTERM（16.6 R1）：產包器取消這次執行，停止方式與外層上限相同；只送給這次 apa-buyer 的 group，而且只在它的 leader 還沒被回收之前送，不會依名稱終止其他程序；第二次訊號不會跳過清理，也不會重設期限；SIGKILL 無法攔截，被 SIGKILL 時不會留下證據包；
+- 結束方式記在 `run.json` 的 `termination`：`completed`（自行結束且結束碼 0）、`wrapper_exit_nonzero`（自行結束但結束碼非 0）、`outer_bound`、`interrupted`、`start_failed`；在釋放執行的 context 之前判定；
 - 不重試，不改模式，不用備援模型。
 
 **證據**（新的 0700 目錄 `artifacts/m1/m1-live-<UTC>-<hex>/`）：
@@ -800,7 +802,7 @@ APA_LIVE_CLI=true make m1-live-cli CLI=/abs/path/claude BASE=<review 過的產�
 | `provenance/git-status.txt` | repo 的 `git status --porcelain` | `provenance` |
 | `provenance/config-files.json` | clone 內六個設定檔的 digest（與第 3 節同一份清單、同一順序） | `provenance` |
 | `provenance/build.json` | HEAD、reviewed base、未追蹤檔、clone 方式、`vcs_revision`、`vcs_modified`、go 版本、產包器自己的建置資訊 | `provenance` |
-| `live/run.json` | 版本 `apa.m1.live.v1`：命令、apa-buyer 結束碼、開始與結束時間、gate 模式與結果、模型、CLI 檔名、核准版本、接受的認證、apa-buyer 報告的白名單欄位、apa-buyer 自己以 `apa-buyer: ` 開頭的錯誤行、資料庫 digest 與它和匯出的關係、快照邊界、用量、剩餘風險 | `live_cli` |
+| `live/run.json` | 版本 `apa.m1.live.v2`：命令、apa-buyer 結束碼、結束方式 `termination` 與 `producer_error`（只有 `outer_bound`、`interrupted`、`start_failed` 時非空）、開始與結束時間、gate 模式與結果、模型、CLI 檔名、核准版本、接受的認證、apa-buyer 報告的白名單欄位、apa-buyer 自己以 `apa-buyer: ` 開頭的錯誤行、資料庫 digest 與它和匯出的關係、快照邊界、用量、剩餘風險 | `live_cli` |
 | `live/trace.jsonl` | runner 的 run trace，原樣複製（它本來就是白名單紀錄：不含 CLI 文字、能力、環境、stderr 內容、prompt 原文或認證值） | `live_cli` |
 | `live/ask.json` | `internal/m1evidence.Export` 對資料庫私有副本的唯讀匯出（task、四份設定快照、請購、事件與 hash） | `live_cli` |
 | `manifest.json`、`run-end.json` | 既有契約；`evidence_mode` 一律是 `live` | — |
@@ -817,7 +819,7 @@ APA_LIVE_CLI=true make m1-live-cli CLI=/abs/path/claude BASE=<review 過的產�
   - 經 `make` 時，非 0 會變成 make 的 `Error N`（結束碼 2）。
 - **產生端判定**：
   - INCONCLUSIVE：沒有存到 task；
-  - FAIL：apa-buyer 結束碼不是 0、結束方式不是 ok、trace 沒有 passed 的 Gate，或 `m1evidence` 重算有問題；
+  - FAIL：`termination` 是 `outer_bound`、`interrupted` 或 `start_failed`，apa-buyer 結束碼不是 0、結束方式不是 ok、trace 沒有 passed 的 Gate，或 `m1evidence` 重算有問題；
   - 其餘 PASS。
   - 這仍是產生端自己的判定，獨立核對由 `make verify-m1 MODE=live` 負責。
 
@@ -844,7 +846,7 @@ fixture 模式完全不變。live 模式改用以下規則，判定一樣由檢�
     - task 與 consumer 等於存下的 task；
     - prompt 雜湊等於固定 prompt；上限等於核准值；
     - init 的 gate 為 `passed`、task 已開始、要求的模型是 host 的；
-    - run 以 ok 結束、結束碼 0、沒有取消或逾時；
+    - run 以 ok 結束、結束碼 0、沒有取消或逾時；`run.json` 是 v2，`termination` 是 `completed`，`producer_error` 為空；`termination`、結束碼與 `producer_error` 互相矛盾（例如結束碼 0 卻有 `producer_error`）時判 FAIL；
     - trace 的工具呼叫等於 `run.json` 的；
     - 每個帶裁決的 `request_purchase`，對應同一商品存下的請購（`po-<task>-<product>`）與同一裁決；同商品重送時，裁決必須相同；每筆存下的請購都必須有呼叫；
     - 用量的標示一致；
@@ -951,5 +953,103 @@ fixture 模式完全不變。live 模式改用以下規則，判定一樣由檢�
 - 真實 Claude CLI、版本查詢、登入、C0′、真實請購、`make m1-live-cli` 的真實執行；
 - `make m1-fixture`、完整容器七步、311 項突變、瀏覽器、Unity；
 - E4。
+
+B1-04／B1-06／B1-07 維持 InProgress。
+
+### 16.6 E3 收尾修正與測試進度（10/10，Claude Code；只用 fake；待 Codex review）
+
+依 Codex 對 `429f6f7` 的 review：R1（中斷要停下這次執行）、R2（記錄真實的結束原因），以及測試進度入口。
+
+**R1：SIGINT／SIGTERM**
+- 原本的問題：產包器沒有處理訊號。apa-buyer 在自己的 process group，終端的 Ctrl-C 送到產包器的 group，到不了 apa-buyer；產包器直接結束，留下孤兒執行，也沒有證據包。
+- 現在：
+  - 第一次訊號取消這次執行的 context。`internal/progress.Group` 的 `Cancel` 對 apa-buyer 自己的 group 送 SIGTERM，讓 apa-buyer 做自己有上限的清理（記錄 TASK_CANCELLED 後結束）。30 秒後若還沒結束，對同一 group 送 SIGKILL。
+  - 兩個訊號都只送給這次的 group，而且只在 leader 還沒被回收（`Wait` 還沒回傳）之前送，group ID 不會被重用，也不會依名稱終止其他程序。
+  - 第二次以後的訊號只印「already stopping」，不會跳過清理，也不會重設期限。
+  - 資料庫、trace 與證據包照樣保存；`run.json` 記為 `termination=interrupted`，`producer_error` 寫明是操作者中斷；結束碼 1，不會是 0，也不重試。
+  - clone、checkout、建置也跟著 context；在 CLI 啟動前被中斷時，結束標記是 incomplete，狀態 `interrupted`，並寫明沒有啟動任何東西。
+- `WaitDelay`（查過 Go 原始碼 `os/exec`）：逾時後只用 `os.Process.Kill` 結束**直接子程序**，再關閉 pipe；不會處理 group。所以 group 的 SIGTERM／SIGKILL 由我們自己的 `Cancel` 負責，`WaitDelay` 設為 grace + 5 秒，只是最後的保險。
+- 限制：
+  - SIGKILL 無法攔截。產包器本身被 SIGKILL 時，不會留下證據包，apa-buyer 會繼續跑到它自己的上限（180 秒）才結束；
+  - 離開這個 group 的程序（例如 apa-buyer 本身被 SIGKILL 後，它替 CLI 開的另一個 group）不在範圍內，仍由 apa-buyer 自己負責。
+
+**R2：結束原因**
+- 原本的問題：舊程式在 `errString` 檢查 `ctx.Err()` 之前就先呼叫了 `cancel()`，所以正常結束也會被記成「the outer bound was reached」。舊的合成 golden v1（`m1-live-20261010T041827Z-50f565`）就是這樣：`apa_buyer_exit_code` 是 0，`producer_error` 卻寫外層上限停止。v1 檢查器不讀 `producer_error`，所以照樣判 PASS。
+- 現在：
+  - 在釋放執行的 context 之前，用 group 是否被停止與上層 context 判定 `termination`：`completed`、`wrapper_exit_nonzero`、`outer_bound`、`interrupted`、`start_failed`。只有後三種的 `producer_error` 非空；
+  - `run.json` 版本升為 `apa.m1.live.v2`；
+  - 產生端：後三種一律 FAIL（沒有 task 時 INCONCLUSIVE）；
+  - 檢查器的 live 模式：只接受 v2；`termination` 必須是已知值；它與結束碼、`producer_error` 互相矛盾時判 V4 FAIL；不是 `completed` 或 `producer_error` 非空，判 V4 FAIL（「the run did not end by itself」）。
+- 合成 golden 換成 v2：`m1-live-20261010T151404Z-9f8031`，由 `0cb0fa4` 的產包器以替身 CLI 產生，逐位元組複製（8 個檔，sha256 與來源相同），`termination=completed`、`producer_error` 為空。v1 已從 testdata 移除，原因寫在 `testdata/verification/live-synthetic/README.md`。
+
+**測試進度入口**：`make check-m1-e3`（`cmd/m1-check`）
+- `make check-m1-e3 ARGS=--list` 只列出計畫，不執行、不建目錄：基準 commit、已追蹤檔是否乾淨、六個步驟（是步驟，不是測試案例數）的命令與上限、證據目錄。
+- 執行時（進度都在 stderr，逐行 flush；stdout 只有最後的 JSON 摘要）：
+  - 每步印 `START i/N 名稱 at 時間` 與 log 路徑；
+  - `go test -json` 的步驟只從事件取出正在跑的頂層測試與目前的通過／失敗數；反向驗證取 `ITEM i/n 名稱` 與結果；
+  - 安靜時每 10 秒（`--heartbeat`）一行心跳：步驟與總計已過時間、距上次輸出多久；沒有可靠資訊時只說程序還在跑，不編細節，也不印百分比；
+  - 每步結束印 `PASS`／`FAIL`／`TIMEOUT`／`INTERRUPTED`／`ERROR`、真實結束碼、耗時與 log；反向驗證只有斷言失敗才算 `CAUGHT`，編譯失敗或錨點不符都算沒抓到；
+  - 一步沒過，後面全部 `NOT_RUN`，不重試，不延長上限；
+  - 最後的摘要列出每一步。
+- 中斷：SIGINT／SIGTERM 以同樣的 group 停止方式停下目前這一步（10 秒後 SIGKILL），結果 `INTERRUPTED`，結束碼 2，不留孤兒程序。
+- 證據：新的 `artifacts/m1-check/m1-check-<UTC>/`（不覆寫舊目錄），含 `plan.json`、`progress.log`、每步的 log、`summary.json`。任何一個寫不出來，摘要的 `evidence_complete=false`、結束碼 3。
+- 結束碼：0 全過、1 有一步沒過、2 被中斷、3 證據不完整。
+- `cmd/m1-live` 也加了階段訊息 `[n/6]` 與等待心跳；等待 apa-buyer 時只說「still waiting; no new information」，不讀 CLI 的文字。
+
+輸出範例：
+
+```text
+START 4/6 producer-fake at 15:15:38Z
+  log: …/04-producer-fake.log (tail -f it from another terminal)
+  run  TestLiveAsk
+  run  TestPreconditions
+  ... 4/6 producer-fake: running TestPreconditions; 1 passed, 0 failed so far (step 10s, all 15s, last output 1s ago)
+  ...
+PASS 4/6 producer-fake: exit 0, 2m58.3s (9 tests passed, 0 failed) …/04-producer-fake.log
+  ...
+    CAUGHT R1 interruption recorded
+  item 3/6 R1 the wrapper's group stopped
+  ... 6/6 reverse-r1-r2: item 3/6 R1 the wrapper's group stopped; 2 caught, 0 not caught so far (step 10m0s, all 13m17s, last output 7s ago)
+    CAUGHT R1 the wrapper's group stopped
+  item 4/6 R2 a normal end is completed
+  ...
+m1-check: summary (16m8s total):
+  1/6 vet              PASS        exit 0      0.4s …/01-vet.log
+  2/6 progress-helper  PASS        exit 0      2.7s …/02-progress-helper.log
+  3/6 checker-live     PASS        exit 0      2.6s …/03-checker-live.log
+  4/6 producer-fake    PASS        exit 0    178.3s …/04-producer-fake.log
+  5/6 check-runner     PASS        exit 0     13.1s …/05-check-runner.log
+  6/6 reverse-r1-r2    PASS        exit 0    771.4s …/06-reverse-r1-r2.log
+m1-check: PASS; evidence artifacts/m1-check/m1-check-20261010T151533Z
+```
+
+**R1／R2／進度對照**
+
+| 要求 | 實作 | 測試 | 反向項目 |
+|---|---|---|---|
+| R1 訊號取消執行 | `cmd/m1-live` `main` | `TestSignals`（建出產包器，送 SIGINT、SIGTERM、SIGINT 後於清理期間再送 SIGTERM）、`TestInterruptInProcess` | R1 signal handler cancels the run |
+| R1 只停這次的 group，有上限的清理 | `internal/progress.Group` | `TestGroupStop`（孫程序、忽略 SIGTERM 的程序）、`TestSignals`（apa-buyer 與替身 CLI 都已結束並回收，不是殭屍）、`cmd/m1-check` `TestTimeout`／`TestInterrupt` | R1 the wrapper's group stopped |
+| R1 記為中斷、結束碼 1、只一次執行 | `cmd/m1-live` `termination` | `TestSignals`（證據包完整、`interrupted`、只啟動一次 run、沒有敏感標記） | R1 interruption recorded |
+| R2 正常結束是 completed | `cmd/m1-live` | `TestLiveAsk`、`TestFailedRuns`、`TestStartFailure` | R2 a normal end is completed |
+| R2 檢查器判讀 | `internal/verification/live.go` | `TestLiveRecordsThatContradict` 的 5 個新負例（只有 `producer_error` 顯示失敗、interrupted、outer bound、未知 termination、v1 紀錄；都重算外層 hash、V1 PASS） | R2 checker termination and producer error、R2 checker run record version |
+| 進度 | `cmd/m1-check`、`internal/progress.Heartbeat` | `cmd/m1-check` 的 8 個測試、`TestHeartbeat`、`cmd/m1-live` `TestHeartbeats` | — |
+
+**交付紀錄**
+- 開工基準 `429f6f7`（只有未追蹤的 `demo`）。
+- Commit：
+  - 程式 `0cb0fa4`：`cmd/m1-live`、`internal/verification/live.go`、`internal/progress`、`cmd/m1-check`、Makefile 的 `check-m1-e3`；
+  - 測試 `8632056`：上表的測試、合成 golden v2（v1 移除）、`m1-e3-reverse.py`（名稱過濾、`PLAN`／`ITEM` 行、6 個 R1／R2 項目）；
+  - 小修 `eac2a43`：`m1-check` 對沒有細節的步驟不再印空的 `()`，doc comment 改指本節（在證據執行之後，只動輸出格式）；
+  - 文件：本節、16.1／16.2 的 v2 與訊號說明、README、`tests/m1/README.md`。
+- **原本的失敗**（保留，不是修正後的結果）：
+  - R1、R2 本身：Codex 在 `429f6f7` 指出，原本沒有任何測試涵蓋；golden v1 的矛盾見上；
+  - `cmd/m1-check` 測試初跑 `TestPass` 失敗：測試把敏感標記寫在步驟的命令裡，而命令本來就會印在計畫中。這是測試的缺陷，改成步驟從檔案讀出標記後通過；程式沒有改。
+- **修正後的結果**：
+  - 產包器 fake 測試先單獨跑一次（`go test ./cmd/m1-live`，211 秒）全過；
+  - `make check-m1-e3`（基準 `8632056`，已追蹤的檔案乾淨）：6 步全 PASS，總計 16 分 8 秒；R1／R2 反向 6 項，6／6 以斷言抓到；證據完整；
+  - 證據目錄：`artifacts/m1-check/m1-check-20261010T151533Z/`（`plan.json`、`progress.log`、六個步驟的 log、`summary.json`）；
+  - 乾淨 clone 回歸：本機 `git clone --no-hardlinks` 切到 `eac2a43`，已追蹤的檔案沒有修改，`go test -count=1 -race ./cmd/m1-live ./internal/verification ./internal/progress ./cmd/m1-check`：157 個測試通過，結束碼 0（`artifacts/m1-verify/e3-fix-20261010T1550Z/`；逐項輸出被終端過濾工具摘要成一行計數，見 `NOTE.txt`）。
+- **沒有重跑**：E1 包的唯讀回歸不需要重跑（fixture 共用邏輯沒有改），沿用 16.5 在 `89d6135` 的紀錄；`cmd/verify-demo` 這輪沒有改，不在回歸內；E2／E3 的完整反向清單沒有跑，只跑了 R1／R2 的 6 項。
+- **沒有執行**：真實 Claude CLI、版本查詢、登入、C0′、真實請購、`make m1-live-cli` 的真實執行、`make present-live`；`make m1-fixture`、完整容器、311 項突變、瀏覽器、Unity；E4。
 
 B1-04／B1-06／B1-07 維持 InProgress。
