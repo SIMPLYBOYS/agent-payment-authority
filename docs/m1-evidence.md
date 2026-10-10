@@ -1296,3 +1296,22 @@ APA_LIVE_CLI=true make m1-live-cli CLI=/Users/mac/.local/share/claude/versions/2
 - 之後若再執行，CLI 路徑要再確認：`~/.local/bin/claude` 會自動更新。
 
 **狀態**：待 Codex review；不自動開始 E4。B1-04／B1-06／B1-07 維持 InProgress，不 merge、不 push、不標 Done。
+
+### 16.11 真實 live 證據包限定核對驗收紀錄（10/11，Codex 限定核對；Claude Code 文件同步）
+
+**結論**：16.10 的真實 live 證據包（`artifacts/m1/m1-live-20261010T173831Z-9d32ef/`）**通過 Codex 限定核對**，M1-E3 的單筆 Ask 證據出口關閉。不需要再執行真實請購；下一步是另行派工的 E4 結案整理（尚未開始）。
+
+**Codex 獨立確認**
+- 在斷網、來源與證據唯讀的容器執行檢查器：結束碼 0，V1～V7 PASS，0 個 finding。
+- 在本機以唯讀方式查詢資料庫：task、請購原文、三筆事件都與包內的匯出一致，SQLite 完整性檢查通過。
+- 證據包 8 個檔案與資料庫的雜湊都沒有改變。
+- 沒有重跑真實 CLI，也沒有讀登入資料。
+- 核對過程照實記錄：兩次前置環境設定失敗，沒有啟動檢查器；另一次因掛載目錄名稱與 run ID 不符，被 V1 拒絕，修正掛載名稱後通過。這些都沒有修改證據，也不是重新執行請購。
+
+**界線**
+1. 證據歸屬：真實執行由 Claude Code 完成（16.10）；Codex 獨立執行的是唯讀核對。Codex 的輸出只在它的工具紀錄，repo 沒有新增 log。
+2. 建置：包內的建置紀錄顯示 apa-buyer 是 `vcs.modified=false`（本機乾淨 clone 建置）。外層的產包器與原檢查器帶有 modified 標記（從含未追蹤檔的工作區以 `go run` 建置），所以不能概括成「全部都是乾淨建置」。
+3. 狀態：`pending` 是匯出當時的快照，不代表現在仍可以核准。這次沒有任何核准或付款；嚴格零 plugin 模式仍未驗證。
+4. 範圍：只驗收單筆 live Ask，不代表 B1-07 整體或 M1 已完成。
+
+**狀態**：E4 尚未開始，另行派工。B1-04／B1-06／B1-07 維持 InProgress，不 merge、不 push、不標 Done。
