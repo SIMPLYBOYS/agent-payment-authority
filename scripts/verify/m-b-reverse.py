@@ -42,10 +42,8 @@ ITEMS = [
     ("capacity: the cap holds", go("./cmd/demo/", "^TestCapacityAndStopping$", ("TestCapacityAndStopping", r"full: 202")),
      [(C, "if len(c.active) >= c.maxRuns { // a stopping run still holds its place", "if false { // a stopping run still holds its place")]),
     ("capacity: a stopping run holds its place", go("./cmd/demo/", "^TestCapacityAndStopping$", ("TestCapacityAndStopping", r"while stopping: 202")),
-     [(C, '''			lr.state, lr.stopAt = "stopping", time.Now()
-			lr.cancel()''', '''			lr.state, lr.stopAt = "stopping", time.Now()
-			delete(c.active, lr.run.ConsumerID)
-			lr.cancel()''')]),
+     [(C, "if len(c.active) >= c.maxRuns { // a stopping run still holds its place",
+       'if func() int { n := 0; for _, x := range c.active { if x.state == "running" { n++ } }; return n }() >= c.maxRuns { // a stopping run still holds its place')]),
     ("one run per consumer", go("./cmd/demo/", "^TestTwoRunsAtOnce$", ("TestTwoRunsAtOnce", r"same consumer: 409")),
      [(C, "if busy := c.active[sc.ConsumerID]; busy != nil {", "if busy := c.active[sc.ConsumerID]; false && busy != nil {")]),
     ("a stop touches only its run", go("./cmd/demo/", "^TestStopIsolation$", ("TestStopIsolation", r"B after A's stop")),
@@ -64,7 +62,7 @@ ITEMS = [
      [(T, "if n == 4 {", "if n == 2 {")]),
     ("timing: stop isolation needs B's own call after the stop", go("./internal/timing/", "^TestStopIsolation$/^no_call_of_B_after_the_stop$",
                                                                  ("TestStopIsolation/no_call_of_B_after_the_stop", r"Held:true")),
-     [(T, "\n\t\tif !after {", "\n\t\tif false {")]),
+     [(T, "\n\t\tif !after {", "\n\t\tif false && !after {")]),
     ("web: the six-field rule compares the slot", node("web/test/scene.test.mjs", "the six-field rule: only the exact projection last sent completes", r"another slot"),
      [(AD, "\n  && rep.slot === sent.slot && rep.task === sent.task_id", "\n  && rep.task === sent.task_id")]),
     ("web: each slot is read with its own consumer's token", node("web/test/scene.test.mjs", "two consumers at once, each read with its own token and sent in its own slot",
