@@ -197,6 +197,11 @@ function unityShows(b, w, ms = 20000) {
   if (w.afterGen !== undefined) cond.push(`Number(${uKey("gen")}) > ${w.afterGen}`);
   return b.waitFor(cond.join(" && "), ms);
 }
+// M-B (docs/multi-agent-demo-design.md 5.4): on /host the shop follows each
+// consumer's newest run; a chosen older task is in the panels, with a note
+// that the scene shows the newer one, never in the shop.
+const viewsTask = (b, task, ms = 15000) => b.waitFor(`(document.getElementById("unity-status").dataset.state === "rendered" && document.getElementById("unity-status").dataset.task === ${JSON.stringify(task)})
+  || (!document.getElementById("view-note").hidden && (document.getElementById("inspector").textContent || "").includes(${JSON.stringify(task)}))`, ms);
 // Nothing of a previous task on #unity-status: no data-*, none of words in its text.
 const unityCleared = (words) => `(() => { const e = document.getElementById("unity-status"), d = e.dataset;
   return !d.gen && !d.seq && !d.task && !d.phase && !d.verdict && !d.reason && ${JSON.stringify(words)}.every((w) => !e.textContent.includes(w)); })()`;
@@ -1184,7 +1189,10 @@ full: {
   // Stop a hanging run: stopping, then stopped with the cancel recorded.
   await clickScenario("hang");
   check("3.2: the hanging run is running with a stop button", await b.waitFor(`${runItem("show-a-05")}.includes("進行中") && !!document.querySelector('#runs li[data-live="running"] .run-stop')`, 20000), await b.evaluate(runItem("show-a-05")));
-  check("3.2: no other start while a run is active", await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].every((x) => x.disabled)`));
+  // M-B (docs/multi-agent-demo-design.md 3.3): one run per consumer, not one
+  // in all: consumer-a's starts wait, consumer-b's do not.
+  check("3.2: no other start of the same consumer while its run is active; the other consumer may start", await b.evaluate(`[...document.querySelectorAll('#run-scenarios .consumer-row[data-consumer="consumer-a"] button')].every((x) => x.disabled)
+    && [...document.querySelectorAll('#run-scenarios .consumer-row[data-consumer="consumer-b"] button')].every((x) => !x.disabled)`));
   await b.evaluate(`document.querySelector('#runs li[data-live="running"] .run-stop').click()`);
   check("3.2: stopped only after the cancel was recorded", await b.waitFor(`${runItem("show-a-05")}.includes("已停止，取消已記錄")`, 20000), await b.evaluate(runItem("show-a-05")));
 
@@ -1558,7 +1566,7 @@ full: {
   await b.waitFor(`document.getElementById("status").dataset.kind === "ok" && ${text("#inspector")}.includes("show-a-02")`, 15000);
   await releaseCancel();
   check("3.4 held: after a switch of task the old reply shows no result and opens nothing", await b.evaluate(notOld(sw)) && (await b.evaluate(`${text("#inspector")}.includes("show-a-02") && !${text("#inspector")}.includes(${JSON.stringify(sw)})`))
-    && await unityShows(b, { task: "show-a-02" }, 5000), await runSeen());
+    && await viewsTask(b, "show-a-02", 5000), await runSeen());
   check("3.4 held: the runs list still reads the Store: that task 現已取消", await lineHas(sw, ["task 現已取消"], false), await b.evaluate(seenLine(sw)));
   // A switch of consumer.
   const swc = await askEnded();
@@ -1656,7 +1664,14 @@ full: {
       // Ready when the Store has the expected last event (a run's task is stored a moment after it starts).
       let ev = await aEvents(task);
       for (let i = 0; i < 100 && ev.at(-1) !== lastEvent; i++) { await sleep(200); ev = await aEvents(task); }
-      const u = await unityShows(b, { task, seq: ev.length, phase, verdict }, 30000);
+      // M-B: a task older than its consumer's newest run is not in the shop:
+      // the page says the scene shows the newest one, and the scene line does.
+      const consumer = task.startsWith("show-b") ? "consumer-b" : "consumer-a";
+      const newest = ((await aRuns()).find((r) => r.consumer_id === consumer) || {}).task_id;
+      const u = newest && newest !== task
+        ? await b.waitFor(`!document.getElementById("view-note").hidden && document.getElementById("view-note-text").textContent.includes("場景呈現的是 ${newest}")
+            && (document.querySelector('#scene-status li[data-consumer="${consumer}"]') || { dataset: {} }).dataset.task === "${newest}"`, 30000)
+        : await unityShows(b, { task, seq: ev.length, phase, verdict }, 30000);
       const d = await b.waitFor(`document.getElementById("scene-text").dataset.phase === ${JSON.stringify(phase)} && document.querySelectorAll("#timeline li").length === ${ev.length}`, 15000);
       const tl = await b.evaluate(`document.getElementById("timeline").innerText`);
       const ins = await b.evaluate(`document.getElementById("inspector").innerText`);

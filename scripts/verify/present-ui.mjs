@@ -380,7 +380,12 @@ try {
   await typeCode(b, bb.code);
   check("B: the used code after a reload: closed", await b.waitFor(`${text("#pair-note")}.includes("已使用、逾時或失效")`, 10000));
   await sleep(1500);
-  check("B: no run from loading, pairing, reloading", (await api(bb.addr, op, "/api/host/runs")).json.runs.length === runsBefore && runsBefore === 2 && readdirSync(join(bb.session, "runs")).length === 2);
+  // Each run leaves its trace (.jsonl) and, since M-B, its timing record
+  // (.timing.json) beside it: the traces count the runs.
+  const runFiles = readdirSync(join(bb.session, "runs"));
+  const runsAfter = (await api(bb.addr, op, "/api/host/runs")).json.runs.length;
+  check("B: no run from loading, pairing, reloading", runsAfter === runsBefore && runsBefore === 2 && runFiles.filter((f) => f.endsWith(".jsonl")).length === 2,
+    "runs " + runsBefore + " -> " + runsAfter + "; files " + runFiles.map((f) => f.replace(/^.*\./, ".")).join(","));
   check("B: no token or code in the console", secrets.every((x) => x && !b.consoleText.join("\n").includes(x)));
   await B.stopHost(bb.pid);
 

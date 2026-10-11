@@ -26,6 +26,7 @@ function reply(taskId, consumer, events) {
 function fakeHost() {
   const data = new Map();
   const slow = new Set();
+  const held = new Map(); // task -> the releases of its held replies
   const failing = new Set();
   const reads = [];
   const fetchFn = (path, init) => {
@@ -33,12 +34,16 @@ function fakeHost() {
     const task = decodeURIComponent(m[1]);
     reads.push({ task, token: init.headers.Authorization });
     if (slow.has(task)) return new Promise(() => {});
+    if (held.has(task)) return new Promise((resolve) => held.get(task).push(() => {
+      const r = data.get(task);
+      resolve({ status: 200, ok: true, json: async () => (m[2] ? r.events : r.task) });
+    }));
     if (failing.has(task)) return Promise.reject(new TypeError("offline"));
     const r = data.get(task);
     if (!r) return Promise.resolve({ status: 404, ok: false, json: async () => ({}) });
     return Promise.resolve({ status: 200, ok: true, json: async () => (m[2] ? r.events : r.task) });
   };
-  return { data, slow, failing, reads, fetchFn };
+  return { data, slow, held, failing, reads, fetchFn };
 }
 
 function fakeUnity() {
@@ -136,7 +141,8 @@ test("A slow or failing never holds B", async () => {
 
 test("a new run of A changes A's slot only; A's late reply of its old task acts on nothing", async () => {
   const { host, unity, scene } = setup();
-  host.slow.add("show-a-01"); // the old task's reply never comes in time
+  host.data.set("show-a-01", reply("show-a-01", "consumer-a", askEvents()));
+  host.held.set("show-a-01", []); // the old task's reply comes only after A's new run
   host.data.set("show-b-01", reply("show-b-01", "consumer-b", askEvents()));
   scene.start();
   scene.setRuns(runs(["consumer-a", "show-a-01"], ["consumer-b", "show-b-01"]));
@@ -145,12 +151,14 @@ test("a new run of A changes A's slot only; A's late reply of its old task acts 
   host.data.set("show-a-02", reply("show-a-02", "consumer-a", askEvents().slice(0, 1)));
   scene.setRuns(runs(["consumer-a", "show-a-02"], ["consumer-a", "show-a-01"], ["consumer-b", "show-b-01"]));
   await settle();
+  for (const release of host.held.get("show-a-01")) release(); // the old reply arrives late
+  await settle();
   const a = scene.slots().find((x) => x.consumer === "consumer-a");
   assert.equal(a.task, "show-a-02");
   assert.equal(scene.slots().find((x) => x.consumer === "consumer-b").slot, bSlot, "B's slot changed");
   const clears = unity.sent.filter((m) => m.clear && m.consumer === "consumer-a").map((m) => m.slot);
   assert.deepEqual(clears, [1, 2], "A's slot cleared once per task");
-  assert.ok(unity.sent.every((m) => m.consumer !== "consumer-a" || m.clear || m.task_id === "show-a-02"));
+  assert.ok(unity.sent.every((m) => m.consumer !== "consumer-a" || m.clear || m.task_id === "show-a-02"), "a late reply of A's old task reached the shop");
   scene.stop();
 });
 

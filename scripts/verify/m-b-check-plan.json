@@ -1,0 +1,145 @@
+[
+ {
+  "name": "vet",
+  "cmd": [
+   "go",
+   "vet",
+   "./cmd/demo",
+   "./cmd/timing-judge",
+   "./internal/timing",
+   "./internal/toolbridge",
+   "./internal/buyer/..."
+  ],
+  "timeout": 300000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "go-race-demo",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "-race",
+   "./cmd/demo"
+  ],
+  "timeout": 1200000000000,
+  "kind": "go"
+ },
+ {
+  "name": "go-race-timing-bridge",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "-race",
+   "./internal/timing",
+   "./cmd/timing-judge",
+   "./internal/toolbridge",
+   "./internal/buyer/..."
+  ],
+  "timeout": 900000000000,
+  "kind": "go"
+ },
+ {
+  "name": "node",
+  "cmd": [
+   "node",
+   "--test",
+   "web/test/adapter.test.mjs",
+   "web/test/hostcreds.test.mjs",
+   "web/test/scene.test.mjs"
+  ],
+  "timeout": 180000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "reverse-selftest",
+  "cmd": [
+   "python3",
+   "-I",
+   "scripts/verify/m_b_reverse_test.py"
+  ],
+  "timeout": 60000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "unity",
+  "cmd": [
+   "sh",
+   "scripts/unity/unity.sh",
+   "test",
+   "{dir}/unity"
+  ],
+  "timeout": 900000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "dual-ui",
+  "cmd": [
+   "node",
+   "scripts/verify/dual-ui.mjs",
+   "--out",
+   "{dir}/dual-ui"
+  ],
+  "timeout": 900000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "browser-ui",
+  "cmd": [
+   "node",
+   "scripts/verify/browser-ui.mjs",
+   "--out",
+   "{dir}/browser-ui"
+  ],
+  "timeout": 1500000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "history-ui",
+  "cmd": [
+   "node",
+   "scripts/verify/history-ui.mjs",
+   "--out",
+   "{dir}/history-ui"
+  ],
+  "timeout": 900000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "live-ui",
+  "cmd": [
+   "node",
+   "scripts/verify/live-ui.mjs",
+   "--out",
+   "{dir}/live-ui"
+  ],
+  "timeout": 900000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "present-ui",
+  "cmd": [
+   "node",
+   "scripts/verify/present-ui.mjs",
+   "--out",
+   "{dir}/present-ui"
+  ],
+  "timeout": 1200000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "reverse",
+  "cmd": [
+   "python3",
+   "-u",
+   "scripts/verify/m-b-reverse.py",
+   "--out",
+   "{dir}/reverse"
+  ],
+  "timeout": 3600000000000,
+  "kind": "reverse"
+ }
+]
