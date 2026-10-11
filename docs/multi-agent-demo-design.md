@@ -553,3 +553,67 @@ stop_isolation.held: true
 - [ ] 停止隔離只在 A `running` 且已有完成的呼叫、B 仍 `running` 時才停止 A；沒抓到時機就記為「停止隔離未示範」。
 - [ ] 以 M-B review 過的 `timing-judge`（不加 `--fake`）判定；保留判定結論原文、兩份時間紀錄、trace 與 Store 匯出。
 - [ ] 證據中沒有 token、配對碼或登入資料。
+
+### 14.3 R1、R2、C1 補正（10/12，Claude Code 執行，待 Codex 核對）
+
+**依據**：Codex 對 `eed0f90` 的限定 review。該 review 是原始碼與 Git 的唯讀核對；當時 Docker 沒有運行，Codex 沒有獨立執行這些反例。Codex 另核對了驗證摘要與四個 WebGL 檔的雜湊（相符），沒有逐一核對全部反向 log。M-B 暫不通過；M1 與 B1-00～B1-07 維持 Done；M-C 未開始。第 14.1 節的紀錄維持原樣：`67a5041` 整輪前 11 步 PASS、最後的反向步驟中斷，之後的反向修正與分批結果，不是同一基準上的整輪全過。
+
+**修改**（開工基準 `eed0f90`）：
+- **R1**（`web/scene.js`，`5cd2384`）：`reset()`、`stop()` 會把所有欄位移出場景，但舊欄位的世代沒有改，所以一個回應已到、JSON 尚未讀完的請求，仍可能通過世代檢查。新增 `current(s, gen)`：欄位仍是該 consumer 目前的欄位，且世代未變。請求開始前、取得回應後、讀完 JSON 後、更新狀態、送 Unity 投影、通知畫面與安排下一次讀取之前，都要先通過這項檢查；舊工作結束時也不會清除新欄位的 in-flight 狀態。正常換 task、A／B 各自輪詢、回放後恢復的行為不變。
+- **R2**（`internal/timing`、`cmd/timing-judge`，`3591736`）：判定工具以唯讀方式讀取每場的 `host_runs`（`state`、`outcome`、`store_end`），以及該 task 在 Store `events` 的結束事件（`timing.ReadHostRun`；判定工具和 demo 的端到端測試共用這段讀取）。
+  - `Check`：紀錄說場次已結束而 `host_runs` 不是 `ended`、`outcome` 或 `store_end` 與 `host_runs` 不同、紀錄宣稱的 Store 結束在 `events` 找不到同一事件，都判 `invalid`。沒有 `host_runs` 列，或資料庫讀不到，判 `incomplete`。這兩種情況都不判定（結束碼 2），也不做停止隔離判定。
+  - `StopIsolation`：另一場的 task 在 Store 有 `TASK_CANCELLED` 時不成立（task 可能在場次結束後被取消，所以這不算矛盾）。
+  - 合法的取消、逾時等結束照各自的語意處理：B 自己逾時時，交錯與停止隔離仍可成立。沒有改 schema、Policy、事件契約、M1 檢查器或 Store 的寫入流程。
+- **C1**（`cmd/timing-judge`，`3591736`）：報告寫出失敗或短寫時，結束碼 3，stderr 給出不含敏感內容的原因（「the report was not written in full (n of m bytes); there is no verdict」）。結束碼 3 時，不論 stdout 留下什麼，都不算判定結果。
+- 反向項目與本輪計畫：`67fd695`（`scripts/verify/m-b-reverse.py` 新增 8 項，以 `^(R1|R2|C1):` 單獨執行；`scripts/verify/m-b-r1r2c1-check-plan.json`）。文件：`107819f` 與本節。
+
+**最小重現**（修正前）：
+- Node：新的兩個 scene 測試在 `eed0f90` 的 `scene.js` 上都失敗，斷言是 `the old reply sent a projection`。
+- 瀏覽器：同一流程在 `eed0f90` 的 `scene.js` 上 FAIL（`artifacts/m-b/r1-repro-prefix-dual-ui/`；工作區是新測試加上舊的 `scene.js`）。舊回覆把 A 的欄位 2 送進新場景 3，Unity 回報 `consumer-a|2|show-a-03|waiting|…`；A 真正的欄位 1 因此顯示為未呈現（`shown:false`）。
+
+**新增測試**：
+- Node（`web/test/scene.test.mjs`）：A 的事件回應已到、JSON 被扣住，接著 `reset()`（或 `stop()`→`start()`），新場景指向新的 task，然後才放行舊 JSON。檢查四件事：沒有任何新投影、沒有通知、超過一個輪詢間隔後舊 task 沒有再被讀取、新場景照常更新。
+- 瀏覽器（`scripts/verify/dual-ui.mjs`，「old reply after new credentials」）：
+  - 觸發方式：按「清除全部憑證」再載入 token 檔，走真實的憑證生命週期；只使用測試建立的合成憑證，不保存 token。
+  - 扣住 JSON 的方法：頁面自己的 `fetch` 被包一層，只攔住場景讀取（以呼叫來源判斷）的一份事件內容。
+  - Unity 的回報逐筆記錄下來，用來確認新場景沒有收到 A 欄位 2 的東西，且 A 的欄位 1 仍顯示已呈現。
+- Go，`internal/timing`：`TestRecordVsDatabase` 從一致的一對紀錄出發，每個案例只改一處，並檢查拒絕的原因文字；逾時是合法結束的正例；`TestStopIsolation` 加上「B 在 Store 被取消」的案例。
+- Go，`cmd/timing-judge`：
+  - `TestJudge` 與 `TestRecordsAgainstTheDatabase` 由命令入口讀取以 Store 本身建立的資料庫（`store.Open`、`AcceptRun`、`StartTask`、`Cancel`、`EndRun`）。
+  - 案例：一致的停止 A／B 繼續（結束碼 0）；A 宣稱取消但資料庫沒有該事件（直接刪除事件列，模擬被改過的資料庫）；A 宣稱取消但資料庫說 A 正常結束；B 在 Store 被取消；`host_runs` 仍是 `accepted`；B 的 outcome 不同；資料庫沒有 `events` 表；未達交錯（`processes_only`，結束碼 1）。
+  - `TestReportWrite`：寫入錯誤、短寫但不回 error、正常寫出（只有一份完整 JSON）三種 writer。
+
+**驗證**（`artifacts/m-b/m1-check-20261011T162236Z/`，基準 `67fd695`；計畫 `scripts/verify/m-b-r1r2c1-check-plan.json`）：
+
+| 步驟 | 結果 | 結束碼 | 秒數 | 內容 |
+|---|---|---|---|---|
+| vet | PASS | 0 | 0.3 | demo、timing-judge、timing |
+| go-race-timing-judge | PASS | 0 | 4.2 | timing、timing-judge race：10 個測試（不含子測試） |
+| go-race-demo-runs | PASS | 0 | 22.9 | demo 的多場與時間紀錄測試 race：5 個（`TestStopIsolation` 改用 `ReadHostRun`） |
+| node | PASS | 0 | 5.7 | adapter、hostcreds、scene：66 個測試 |
+| reverse-selftest | PASS | 0 | 0.1 | 21 項錨點與分類器 |
+| dual-ui | PASS | 0 | 46.6 | 雙場流程，含新的 R1 瀏覽器案例 |
+| history-ui | PASS | 0 | 35.4 | 回放的暫停與恢復（`scene.js` 有改） |
+| browser-ui | PASS | 0 | 433.9 | 既有單場與主持人頁的憑證流程（`scene.js` 有改） |
+| reverse | FAIL | 2 | 0.3 | 執行期間我改了文件，工作區有未提交的修改，腳本依規則拒絕建立副本；紀錄保留 |
+
+反向驗證在提交文件後只重跑這一步（基準 `107819f`，只多了文件；`artifacts/m-b/m1-check-20261011T163221Z/`，PASS，26.7 秒）。8 項都由預期斷言抓到：
+
+| 項目 | 突變 | 命中 |
+|---|---|---|
+| R1 reset | `current` 只比世代 | scene「…before reset (new credentials)…」`the old reply sent a projection` |
+| R1 stop→start | 同上 | scene「…before stop, then start…」`the old reply sent a projection` |
+| R2 宣稱的結束需有事件 | 移除事件比對 | `TestRecordsAgainstTheDatabase/A's_record_says_TASK_CANCELLED,…` `want not judged, A's cancel has no event in the Store` |
+| R2 outcome／store_end 與 host_runs 一致 | 移除比對 | `…/B's_record_has_another_outcome_than_host_runs` `want not judged, B's outcome differs from host_runs` |
+| R2 host_runs 須為 ended | 移除狀態比對 | `TestRecordVsDatabase/B's_run_not_ended_in_host_runs` `want invalid: host_runs says it is accepted` |
+| R2 B 在 Store 被取消時停止隔離不成立 | 移除檢查 | `…/B_was_cancelled_in_the_database,…` `want stop isolation not held, B cancelled in the Store` |
+| C1 寫入錯誤 | 不檢查寫入 | `TestReportWrite/a_write_error` `want exit 3 and the reason` |
+| C1 短寫 | 不檢查長度 | `TestReportWrite/a_short_write_without_an_error` `want exit 3 and the reason` |
+
+「host_runs 須為 ended」一項只在原因上被抓到：在真實資料庫裡，未結束的列沒有 outcome，所以移除狀態比對後，outcome 比對仍會拒絕這個情況（結論仍是不判定）。這項確認的是指出的原因，不代表安全性依賴它。
+
+**沿用與沒有重跑**：
+- 沿用第 14.1 節的 Unity 與 WebGL 結果：本輪沒有改 `unity/`，沒有重建。
+- 沒有重跑 live-ui、present-ui：本輪只改了 `scene.js` 的防護，兩者走的主持人頁流程由 browser-ui 涵蓋，也不使用判定工具。
+- 沒有重跑完整的 demo race、M1、容器或全套突變。
+- 沒有執行真實 CLI。
