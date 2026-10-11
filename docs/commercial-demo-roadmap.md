@@ -11,7 +11,8 @@
 
 - **M1 已結案**（2026-10-11）：真實 Claude Code 的單筆 Ask 請購、確定性 Policy 裁決、展示與證據查核，見 [m1-result.md](m1-result.md)。所以第 0 節「還沒有任何真實請購 trace」等現況描述都已過時。真實請購 trace 已經取得（`docs/cli-poc.md` §53，以及 M1-E3 的 live 證據包）。
 - **下一階段方向**（Aaron 10/11 接受）：先讓兩位不同 consumer 的 Agent 在同一間商店有重疊的工作流程，各自的資料與場景不串；之後再接 Admin 營運視角。容量原則（Aaron 最新）：三種數量分開——可管理的 consumer／付款帳號數、同時執行的 Agent 數、同時付款數。同時執行的 Agent 數是部署設定，本輪預設與驗收規模為 2，不是產品永久上限；「約 20 個付款帳號」是先前估計的展示規模，不是產品上限，也不等於要跑 20 個模型。
-- **M-A**（最小設計與範圍修訂）：[multi-agent-demo-design.md](multi-agent-demo-design.md)。初版 `79000a2` 經 Codex 核對「方向通過」，**R1～R4 補正完成，待 Codex 限定複核；尚未核准 M-B 實作或真實執行。**
+- **M-A**（最小設計與範圍修訂）：[multi-agent-demo-design.md](multi-agent-demo-design.md)。R1～R4 已通過 Codex 限定設計複核並關閉。
+- **M-B**（10/11 Aaron 核准 fake 實作）：已在分支 `b2-dual-agent` 實作，只用 fake 驗證，**待 Codex 限定 review**（設計文件第 14 節）。
 - **M-B 收斂**：相對 §6.8 舊版 M-B（含 Admin 總覽），現在的 M-B 只做多場 Host 接線（同時執行上限為部署設定，預設 2）、資料隔離、Unity 雙角色、最小主持人選取，以及時間紀錄與唯讀重疊判定工具，先用 fake 驗證；Admin 活動／請購營運總覽後接，再隨付款整合加入結算金額與鏈上證據。
 - **M-C**：兩位真實 Agent 的受控展示，以 M-B 已 review 的工具判定工作重疊與停止隔離；每次真實執行另行核准。
 - 付款、20 個付款帳號、ZK 不是開始 M-B 的前置條件，也不因此刪除最終商業展示的技術要求。

@@ -74,6 +74,8 @@ make demo                         (一個指令：檢查 → 編譯 Go → 啟�
 
 ## 4 主持人操作（§4.2）
 
+> **M-B 現行規則（10/11，雙 Agent 商店；本節以下是單場時期的設計）**：每位 consumer 一次最多一場 `running`／`stopping`，總數不超過部署設定 `--max-runs`（預設 2）；同一位 consumer 已有場次時回 `409 consumer_busy`，名額已滿回 `409 capacity_full`（`stopping` 仍占名額）；request ID 仍是全域冪等，先於名額檢查。停止依 run、取消依 task。詳見 [multi-agent-demo-design.md](multi-agent-demo-design.md) 第 3、14 節。M1 的驗收沿用單場時期的規則。
+
 **情境目錄**（新檔 `testdata/demo/scenarios.json`，取代自動計畫的角色）。它是 host 的可信設定，不是 agent 或 HTTP 請求能改的內容；欄位沿用現有 `planRun`：
 
 ```json
@@ -603,6 +605,8 @@ B1-04／B1-06 整體維持 InProgress。交付點 3.1 標為技術 review 通過
 **不重開**：Policy 裁決、Store 的事件、到期、取消、逾時與 task 狀態投影（`project()`）都不改。協調資料表不寫任何事件，也不參與 task 狀態。
 
 ### 13.1 主持人控制
+
+> **M-B（10/11）**：開始後，面板仍切到該場次的 consumer；商店場景則由每位 consumer 的欄位各自跟隨最新場次（橋接 v2），選取只換面板。見 [multi-agent-demo-design.md](multi-agent-demo-design.md) 第 5 節。
 
 | 操作 | 誰可以 | 端點 | 作用對象 | 切片 |
 |---|---|---|---|---|

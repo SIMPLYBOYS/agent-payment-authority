@@ -21,7 +21,7 @@
 
 預設的 fake 模式與所有測試**不需要**也不會使用：Claude Code CLI、模型服務、RPC、facilitator、testnet 帳戶。只有明確 opt-in 的 live 命令（`make m1-live-cli`、`make present-live`，每次都需另行核准）才需要官方 Claude Code CLI（釘選 `2.1.293`）與本人的官方登入（APA 專用設定目錄 `~/.apa-claude`）；登入由使用者自己透過官方流程完成，這個 repo 不讀取、不複製也不保存登入憑證。
 
-**下一階段（設計中）**：雙 Agent 商店的 M-A 設計見 [docs/multi-agent-demo-design.md](docs/multi-agent-demo-design.md)（R1～R4 補正完成，待限定複核；尚未實作）。同時執行的 Agent 數將是部署設定，本輪預設 2。
+**雙 Agent 商店（M-B，10/11 實作，待 review）**：主持人頁每位客人一列，各有開始與停止，另有「一起開始」（各自送出的兩個請求）；兩位客人同時在同一間 Unity 商店，各自依自己最新場次的事件呈現；選取或查看較早的 task 只換面板。同時執行上限是部署設定 `--max-runs`（預設 2；`make demo`、`make present-fake` 不帶時即為 2）。每場在 trace 旁多寫一份時間紀錄 `<task>-<nanos>.timing.json`，`go run ./cmd/timing-judge --db … --a … --b … [--stop a|b] [--fake]` 唯讀判定兩場的工具呼叫是否交錯。只用 fake 驗證，不代表兩位真實 Agent 已同時工作（M-C 另行核准）。驗證計畫：`go run ./cmd/m1-check --plan scripts/verify/m-b-check-plan.json --out artifacts/m-b`（加 `--list` 只列計畫）。設計與實作紀錄見 [docs/multi-agent-demo-design.md](docs/multi-agent-demo-design.md)。
 
 **M1 的結果**：M1 已於 2026-10-11 結案，見 [docs/m1-result.md](docs/m1-result.md)（fixture 與 live 證據包、逐卡核對、重跑命令、限制與結案紀錄）。**乾淨目錄**：2026-10-11 在只有本 repo clone 的新目錄，以 `cp .env.example .env` 與 `make m1-fixture` 完成 fixture E2E（31 案 PASS，檢查器 PASS）；使用本機的 Go／Node 快取與既有的 Unity Web 建置副本（`docs/m1-result.md` 第 3.4 節）。
 

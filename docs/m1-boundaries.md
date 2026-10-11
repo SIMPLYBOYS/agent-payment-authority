@@ -39,6 +39,8 @@ M1 的終點是 **請購與 Ask／Deny**。M1 沒有 Signer、沒有結算、沒
 
 ## 誰可以啟動 task
 
+> **M1 之後（10/11，M-B）**：主持人頁可讓不同 consumer 的場次同時進行（每位 consumer 一場，總數為部署設定 `--max-runs`，預設 2）。這是後續展示擴充，不回寫成 M1 當時已支援雙場；M1 的驗收沿用本節的單場規則。見 [multi-agent-demo-design.md](multi-agent-demo-design.md)。
+
 - 只有在本機操作的主持人可以啟動 task，透過這個 repo 自己的入口。
 - 模型、CLI 輸出與前端不能建立 task，也不能改寫 consumer／agent／task／wallet 的對應；對應來自主持人建立的可信設定。
 - 一次只有一個 active task。Consumer A 與 B 依序操作。

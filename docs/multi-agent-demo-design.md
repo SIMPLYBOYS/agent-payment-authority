@@ -1,7 +1,7 @@
 # 雙 Agent 商店：M-A 最小設計與範圍修訂提案
 
 > 2026-10-11，Claude Code（M-A）。初版 `79000a2`（基準 HEAD `d3b7c53`，M1 已於 10/11 結案）。
-> **狀態：M-A 設計 R1～R4 補正完成，待 Codex 限定複核；尚未核准 M-B 實作或真實執行。** 補正對照見第 13 節。
+> **狀態（10/11）：M-A 的 R1～R4 已通過 Codex 限定設計複核並關閉**（文件、Git 與相關原始碼的唯讀核對，沒有執行測試或真實 CLI）。**Aaron 已核准 M-B 的 fake 實作與定向驗證；M-B 已實作，待 Codex 限定 review**（第 14 節）。M-C 的真實執行仍待另行核准。補正對照見第 13 節。
 > 只讀程式與文件寫成，沒有改產品、沒有跑測試或展示。M1 與 B1-00～B1-07 維持 Done，本文件的工作是後續切片，不以 M1 的 PASS 代替並行驗收。
 > 方向（Aaron 已接受）：先讓兩位不同 consumer 的 Agent 在同一間商店有重疊的工作流程，各自的資料與場景不串，之後再接 Admin 營運視角。容量原則（Aaron 最新）：同時執行的 Agent 數是部署設定，本輪預設與驗收規模為 2，不是產品永久上限。下面的生命週期、橋接格式與權限方案是本文件的**推薦**，不是 Aaron 已逐項核准的細節。
 
@@ -155,10 +155,12 @@ Host 從「全域同時一場」改成「**每位 consumer 最多一場**，總�
 **Web → Unity**（`SendMessage("Bridge","Receive", json)`，現行通道）：
 
 ```json
-{"v":2,"scene":7,"consumer":"consumer-a","slot":3,"task_id":"show-a-02","seq":3,"phase":"waiting","verdict":"Ask","reason":"HUMAN_APPROVAL_REQUIRED","animate":true,"cause_seq":3,"task_end":false}
-{"v":2,"scene":7,"consumer":"consumer-b","slot":5,"clear":"slot"}
-{"v":2,"scene":8,"clear":"scene"}
+{"v":2,"scene":7,"consumer":"consumer-a","slot":3,"task_id":"show-a-02","seq":3,"phase":"waiting","verdict":"Ask","reason":"HUMAN_APPROVAL_REQUIRED","animate":true,"cause_seq":3,"task_end":""}
+{"v":2,"scene":7,"consumer":"consumer-b","slot":5,"clear":true}
+{"v":2,"scene":8,"clear":true}
 ```
+
+`task_end` 沿用 v1 的字串語意（`""`、`cancelled`、`timed_out`）。`clear` 沿用 v1 的布林欄位：不帶 `consumer` 是清空整個場景，帶 `consumer` 與 `slot` 是只清空那位客人（M-B 實作時由字串改為布林，見第 14 節）。
 
 **Unity 的處理**（每位客人一份 v1 現有的狀態，外面包一層場景世代）：
 - `scene` 比目前舊：Stale，丟棄；比目前新：清空**所有**客人，採用新的場景世代。
@@ -435,3 +437,28 @@ Codex 的結論是「方向通過，R1～R4 補正後再限定複核；暫不開
 | **R2** Unity 回報 | §5.2 的完成條件只列 scene、consumer、slot、task；把現行同步描述成只比世代與序號 | 六項（scene、consumer、slot、task、seq、phase）全部等於該角色最後送出的投影才完成；缺項、錯項、舊序號、未送過的較大序號都不完成；同一規則用於狀態列、查證面板與動畫完成；註明現行 `sameShown` 已精確比對世代、task、序號、階段，v2 在其上加角色與欄位隔離（§5.2） | §10.1「Unity 完成回報」 |
 | **R3** 查看與場景 | §5.4 一處說選取只換面板，另一處允許手動選舊 task 後更換 Unity 欄位 | 場景 task 只跟隨每位 consumer 最新場次；選取與查看較早 task 只換面板，不送替代投影、不增欄位世代、不停輪詢；場景 task 與查看 task 分開保存並明示差異、提供回到場景這筆；只有歷史回放切換場景模式，退出後重新取得資料、舊回覆丟棄（§5.1、§5.4、§5.5） | §10.1「查看較早的 task」 |
 | **R4** 時間證據 | §6.2～6.4 只記錄呼叫的牆鐘毫秒；沒有 Host 實例、程序與停止時點；以首末呼叫的跨度當成有效工作區間；判定工具一處說 M-C 實作、一處列入 M-B | 時間紀錄加 Host 實例、單調時間基準、生命週期與停止受理時點、呼叫編號與開始完成配對、中斷呼叫不補時間（§6.2）；完整性檢查與判定（§6.3）；分開程序區間、工具活動跨度、已觀測呼叫區間，以「呼叫開始的交替順序」作為 operational 定義，並列出各結論原文，不宣稱持續工作或供應商內部同時推論（§6.4）；停止隔離的可查證條件（§6.5）；判定工具在 M-B 以 fake 完成，M-C 只用已 review 的工具（§6.6、§9） | §10.1「停 A、B 繼續」「時間紀錄與判定工具」 |
+
+## 14 M-B 實作紀錄（10/11，Claude Code；只用 fake；待 Codex 限定 review）
+
+**核准**：Aaron 核准 M-B 的 fake 實作、Unity 測試與 WebGL 重建、定向驗證、關鍵反向驗證與必要文件同步。未核准：真實 Claude CLI（含版本查詢、登入、C0′、真實請購、`make present-live`）、完整容器、全套突變、M1 重新產包、M-C。分支 `b2-dual-agent`，從 `a9bd836` 建立。
+
+**實作**（設計第 3～10 節）：
+- **Host**（`cmd/demo`）：`--max-runs`（預設 2；`1～consumer 數`；沒有 `--scenarios` 或非法值時拒絕啟動，啟動訊息與 `status.capacity` 顯示有效值）；以 `consumer_id` 為鍵的進行中場次；`consumer_busy`、`capacity_full`；停止依 run、取消與 trace 執行中依 task 查找；程序結束後的停止回 `run_not_running`；`runView.tool_calls` 與 `timing`；可信設定加 `ask-b`、`live-b`。
+- **時間紀錄**（`internal/timing`、`cmd/demo/timing.go`、`internal/toolbridge`、`internal/buyer`）：每次工具呼叫的編號與開始、完成時點；程序開始、回收與「呼叫關閉」時點；每場結束時寫 `<task>-<nanos>.timing.json`（與 trace 同一個時間戳，成對）；寫不出來時 `timing=not_written`，不補時間。M1 的 trace 與檢查器沒有改。
+- **唯讀判定工具** `cmd/timing-judge`：讀兩份紀錄與 `host_runs`（資料庫以唯讀開啟）；結束碼 0 交錯成立（加 `--stop` 時停止隔離也成立）、1 判定但未達成、2 不判定或用法錯誤；fake 紀錄要加 `--fake` 才判定，判定文字標明是 fake。
+- **Unity**（`Projection.cs`、`ShopBridge.cs`、`ShopView.cs`）：v2 的場景世代與每位客人的欄位；`bridge` 回報；六項完成回報；v2 時兩位完整亮度、各自一行狀態；v1 不變。
+- **網頁**（`web/scene.js` 新增、`unity.js`、`adapter.js`、`app.js`、`host.js`、`host.html`）：每位 consumer 的場景欄位，各用自己的 viewer token 輪詢；按客人分組的開始鍵、每場的停止鍵、「一起開始」；選取與查看較早 task 只換面板，附「回到場景這筆」；`#unity-status` 映照所選客人的欄位（只有六項完全一致才是「已呈現」）；舊 Unity 或場景無法呈現全部客人時明示。
+
+**與設計文字的差異**（實作時的小決定，請 review 判定）：
+1. `clear` 用 v1 既有的布林欄位，不用字串：Unity 的 `JsonUtility` 無法把字串放進布林欄位，改成以有沒有 `consumer` 區分清空場景或單一客人（第 5.2 節已同步）。
+2. 客人 B 的偏移：只往下 0.45 時，兩人在櫃台幾乎重疊（第一次截圖看得出來），改成從貨架起再往左一格，B 的標籤放在腳下。
+3. 「一起開始」使用場次目錄中每位 consumer 的第一個情境（依 id 排序），按鈕上寫明是哪兩個情境。
+4. 時間紀錄多一個 `calls_closed_ms`（場次的呼叫全部結束的時點）：程序回收後，仍可能有一個進行中的呼叫在收尾，所以「完成時點不晚於呼叫關閉」才是正確的上界；`completed_ms` 是 Host 得到結果、送出回覆之前的時點。
+5. 主持人頁的 `#unity-status` 映照所選客人的場景欄位，讓既有的單場瀏覽器檢查仍然有意義；它只在六項一致時寫成「已呈現」。
+6. fake CLI 新增只供測試的 `wait_file` 步驟，live 不使用。
+
+**操作**：
+- 雙場展示：`make demo`（或 `make present-fake`）照常啟動；主持人頁每位客人一列。`--max-runs N` 改變同時執行上限（預設 2）。
+- 判定時間紀錄：`go run ./cmd/timing-judge --db <APA_DB_PATH> --a <A>.timing.json --b <B>.timing.json [--stop a|b] [--fake]`。
+- M-B 驗證計畫：`scripts/verify/m-b-check-plan.json`，以 `cmd/m1-check --plan` 執行（`--list` 只列計畫，第 14.1 節）。
+

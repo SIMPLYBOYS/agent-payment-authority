@@ -23,6 +23,8 @@
 
 ## 2 現況摘要（設計的出發點）
 
+> **M-B（10/11）**：主持人頁的 v2 場景中，兩位客人都完整亮度、各自一行狀態，B 在店內固定偏移；選取與查看較早 task 只換面板（§4.4 的「切換 consumer 重設選取」只適用面板）。見 [multi-agent-demo-design.md](multi-agent-demo-design.md) 第 5、14 節。
+
 **畫面**
 - `/` 與 `/host` 都是：上方 badge → 認證與控制區（`/host` 含 token 檔、就緒表、主持人控制、最近場次、手動 viewer、task 清單）→ 下方三欄 grid（Unity 1.3fr、Inspector、Timeline），900 px 以下改為單欄（`web/style.css`）。
 - 因此在 1280×900 的 `/host`，Unity 商店的位置在一個螢幕高度以下（`ui-d18efa270912-…/full-acceptance-stop.png`：商店區塊從約 860 px 開始）。觀眾得先捲過操作表單，才看得到場景。
