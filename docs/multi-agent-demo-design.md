@@ -660,7 +660,7 @@ M1 與 B1-00～B1-07 維持 Done。本節記錄 M-B 技術 review 通過與三�
   - A：`live-a`，`show-a-01`，受理於 16:48:16Z，結束於 16:48:26Z。
   - B：`live-b`，`show-b-01`，受理於 16:48:19Z，結束於 16:48:29Z。
 - 兩場都由 CLI 2.1.293 執行；init gate passed（`dev_demo_plugins`）；model 為 `claude-sonnet-5-5`。各自依序呼叫 `list_products`、`get_quote`、`request_purchase`，最後都得到 Ask。outcome 都是 `ok`，結束碼 0，trace 沒有 stderr。
-- 兩場的受理時點相隔約 3.7 秒（`accepted_ms` 分別是 20495、24192），大於 §6.5 預期「一起開始」的一秒內。紀錄無法區分是按了一次「一起開始」還是分別按下開始，這裡照實記錄。
+- 兩場的受理時點相隔約 3.7 秒（`accepted_ms` 分別是 20495、24192），大於 §6.5 預期「一起開始」的一秒內。Aaron 事後說明：是分別按下 A、B 的開始鍵，沒有使用「一起開始」。所以這一次不是 §6.5 的有界開始方式；交錯是在兩個分別送出的開始之下觀測到的。
 - 沒有受理任何停止（兩份紀錄的 `stop_accepted_ms` 都是 null）。
 - Store：A 的 Ask 在 16:48:53Z 到期（`APPROVAL_EXPIRED`），task 仍是 `running`。B 的 task 在 16:48:55Z 撤回並取消（`APPROVAL_WITHDRAWN`、`TASK_CANCELLED`），這時 B 的場次已結束 26 秒，`host_runs.store_end` 仍是 `""`，所以這是場次結束後的取消（例如主持人頁的取消），不是場次中的停止。
 - 沒有付款，也沒有任何付款能力。
