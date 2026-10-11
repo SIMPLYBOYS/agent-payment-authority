@@ -2,7 +2,7 @@
 // 2 helpers; docs/multi-agent-demo-design.md 5): a slot per customer, read
 // with its own viewer token, the six-field completion rule, and one
 // customer's slow, failed or late reads never touching the other.
-import { test } from "node:test";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import * as A from "../adapter.js";
 import { createScene } from "../scene.js";
@@ -55,11 +55,18 @@ async function settle() { for (let i = 0; i < 10; i++) await tick(); }
 
 const runs = (...pairs) => pairs.map(([consumer, task, run]) => ({ consumer_id: consumer, task_id: task, run_id: run || "run-" + task }));
 
+// Every scene is stopped after its test, passed or failed: a failed
+// assertion skips the test's own stop, and a live poll timer would keep
+// node --test from ever ending.
+const scenes = [];
+afterEach(() => { while (scenes.length) scenes.pop().stop(); });
+
 function setup() {
   const host = fakeHost();
   const unity = fakeUnity();
   const tokens = { "consumer-a": "token-a", "consumer-b": "token-b" };
   const scene = createScene({ unity, token: (c) => tokens[c], onChange: () => {}, fetchFn: host.fetchFn });
+  scenes.push(scene);
   return { host, unity, scene };
 }
 
