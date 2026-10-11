@@ -349,7 +349,7 @@ try {
   // Start (one click), the Dashboard follows; 查看證據 opens the task's evidence.
   await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].find((x) => x.textContent.startsWith("開始（真實 CLI）："))?.click()`);
   check("B: one click starts one run; the Dashboard switches to its task", await b.waitFor(`${text("#current")}.includes("show-a-01") && ${uKey("seq")} === "3" && ${uKey("state")} === "rendered"`, 30000));
-  check("B: running: the stop button and the run status in the first screen", await b.waitFor(`!!document.querySelector("#control-now .row-stop")`, 10000) && await b.evaluate(inView("#control-now .row-stop")) && await b.evaluate(inView("#run-status")));
+  check("B: running: the stop button and the run status in the first screen", await b.waitFor(`!!document.querySelector("#run-scenarios .row-stop")`, 10000) && await b.evaluate(inView("#run-scenarios .row-stop")) && await b.evaluate(inView("#run-status")));
   await shot(b, "3-running");
   await b.evaluate(`(document.getElementById("show-evidence").click(), true)`);
   check("B: 查看證據 opens the task's evidence where it is", await b.waitFor(`document.getElementById("evidence-box").open && ${text("#evidence")}.includes("po-show-a-01-kr-market")`, 10000));
@@ -361,8 +361,8 @@ try {
   await b.waitFor(`[...document.querySelectorAll("#run-scenarios button")].some((x) => !x.disabled)`, 30000);
   await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].find((x) => !x.disabled)?.click()`);
   check("B: the second run's task opens", await b.waitFor(`${text("#current")}.includes("show-a-02") && ${uKey("seq")} === "3"`, 30000));
-  await b.waitFor(`!!document.querySelector("#control-now .row-stop")`, 20000);
-  await b.evaluate(`document.querySelector("#control-now .row-stop").click()`);
+  await b.waitFor(`!!document.querySelector("#run-scenarios .row-stop")`, 20000);
+  await b.evaluate(`document.querySelector("#run-scenarios .row-stop").click()`);
   check("B: 停止 accepted, the result not yet claimed", await b.waitFor(`${text("#run-status")}.includes("停止請求已受理")`, 20000));
   check("B: the cancel reaches the Timeline (#4 withdrawn, #5 cancelled)", await b.waitFor(`[...document.querySelectorAll("#timeline li")].map((li) => li.dataset.seq).join(",") === "1,2,3,4,5"`, 30000));
   await shot(b, "5-stopped");

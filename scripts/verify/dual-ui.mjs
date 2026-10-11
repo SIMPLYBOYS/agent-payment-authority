@@ -185,7 +185,7 @@ try {
   // Stop A; B goes on.
   mark("stop A");
   const runA = r1.find((r) => r.consumer_id === "consumer-a").run_id;
-  await b.evaluate(`document.querySelector('#control-now .row-stop[data-run="${runA}"]').click()`);
+  await b.evaluate(`document.querySelector('#run-scenarios .row-stop[data-run="${runA}"]').click()`);
   check("A is withdrawn and leaves; B still waits", await shows("consumer-a", "show-a-01", "withdrawn") && await shows("consumer-b", "show-b-01", "waiting"));
   const r2 = await runs();
   check("A's run ended cancelled; B's run still running", r2.find((r) => r.run_id === runA).store_end === "TASK_CANCELLED" && r2.find((r) => r.consumer_id === "consumer-b").live === "running");

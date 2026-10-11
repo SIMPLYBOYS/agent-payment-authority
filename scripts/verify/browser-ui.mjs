@@ -1363,6 +1363,12 @@ full: {
   // What the host sees: a run's line (innerText of a shown element) and its buttons.
   const seenLine = (task) => `(([...document.querySelectorAll("#runs li")].find((l) => l.textContent.startsWith(${JSON.stringify(task + "（")})) || {}).innerText || "")`;
   const cancelBtn = (task) => `document.querySelector('#runs .task-cancel[data-task="${task}"]')`;
+  // UX1: a cancel asks first; the confirmation is the cancel operation.
+  const confirmCancel = async (task) => {
+    await confirmCancel(task);
+    await b.waitFor(`!!document.querySelector('#runs .agent-confirm[data-task="${task}"] .cancel-confirm')`, 5000);
+    await b.evaluate(`document.querySelector('#runs .agent-confirm[data-task="${task}"] .cancel-confirm').click()`);
+  };
   const runSeen = () => b.evaluate(`document.getElementById("run-status").innerText`);
   const lineHas = (task, parts, button, ms = 15000) => b.waitFor(`(() => { const l = ${seenLine(task)}; return ${JSON.stringify(parts)}.every((p) => l.includes(p)) && !!${cancelBtn(task)} === ${button}; })()`, ms);
   const xRuns = async () => (await hostGet(xAddr, xt.op, "/api/host/runs")).json.runs;
@@ -1449,7 +1455,7 @@ full: {
     const evs = (await xEvents(task)).length;
     forge = true;
     await b.waitFor(`!!${cancelBtn(task)} && !${cancelBtn(task)}.disabled`, 15000);
-    await b.evaluate(`${cancelBtn(task)}.click()`);
+    await confirmCancel(task);
     check("3.4: a forged hint for " + task + ": the server refuses, the page says so", await b.waitFor(`document.getElementById("run-status").innerText === ${JSON.stringify("task " + task + "：" + words)}`, 10000), await runSeen());
     forge = false;
     check("3.4: " + task + " unchanged, its line back to the Store's state", (await xEvents(task)).length === evs
@@ -1459,7 +1465,7 @@ full: {
   offForge();
 
   // Cancel the expired Ask, the interrupted run's task and the one whose cancel record failed.
-  const cancelBy = async (task) => { await b.waitFor(`!!${cancelBtn(task)} && !${cancelBtn(task)}.disabled`, 15000); await b.evaluate(`${cancelBtn(task)}.click()`); return b.waitFor(`document.getElementById("run-status").innerText === ${JSON.stringify("task " + task + " 已取消")}`, 15000); };
+  const cancelBy = async (task) => { await b.waitFor(`!!${cancelBtn(task)} && !${cancelBtn(task)}.disabled`, 15000); await confirmCancel(task); return b.waitFor(`document.getElementById("run-status").innerText === ${JSON.stringify("task " + task + " 已取消")}`, 15000); };
   check("3.4: an expired Ask's task is cancelled", await cancelBy("show-a-02") && await lineHas("show-a-02", ["場次完成", "task 現已取消"], false), await runSeen());
   let ev2 = (await xEvents("show-a-02")).map((e) => e.event_type);
   check("3.4: its events: the expiry, then the cancel, no withdrawal", ev2.at(-1) === "TASK_CANCELLED" && ev2.filter((t) => t === "APPROVAL_EXPIRED").length === 1 && !ev2.includes("APPROVAL_WITHDRAWN"), ev2.join());
@@ -1519,7 +1525,7 @@ full: {
   await b.send("Fetch.enable", { patterns: [{ urlPattern: "*/cancel", requestStage: "Response" }, { urlPattern: "*/cancel", requestStage: "Request" }, { urlPattern: "*/api/tasks/*", requestStage: "Request" }] });
   const lost = await askEnded();
   failCancel = 1;
-  await b.evaluate(`${cancelBtn(lost)}.click()`);
+  await confirmCancel(lost);
   check("3.4: a lost reply: 結果尚未確認, neither success nor failure", await b.waitFor(`document.getElementById("run-status").innerText.includes("結果尚未確認")`, 15000)
     && !(await runSeen()).includes("已取消") && !(await runSeen()).includes("未取消"), await runSeen());
   const lostEv = (await xEvents(lost)).map((e) => e.event_type);
@@ -1528,21 +1534,21 @@ full: {
   // Committed, then the follow-up read fails: 取消已記錄；畫面更新失敗.
   const reread = await askEnded();
   failHostRead = 1;
-  await b.evaluate(`${cancelBtn(reread)}.click()`);
+  await confirmCancel(reread);
   check("3.4: committed but the follow-up read fails: 取消已記錄；畫面更新失敗", await b.waitFor(`document.getElementById("run-status").innerText.startsWith("取消已記錄；畫面更新失敗")`, 15000)
     && (await xEvents(reread)).at(-1).event_type === "TASK_CANCELLED", await runSeen());
   // Review of d61771c (R3): the server committed the cancel, the page gets
   // a 503 (as when a re-read fails): not confirmed, never "not cancelled".
   const late503 = await askEnded();
   cancel503 = 1;
-  await b.evaluate(`${cancelBtn(late503)}.click()`);
+  await confirmCancel(late503);
   check("3.4 R3: a 503 after a committed cancel: 取消結果尚未確認, not 未取消", await b.waitFor(`document.getElementById("run-status").innerText.includes("取消結果尚未確認")`, 15000)
     && !/未取消|取消未完成/.test(await runSeen()) && (await xEvents(late503)).filter((e) => e.event_type === "TASK_CANCELLED").length === 1, await runSeen());
   check("3.4 R3: the re-read shows the committed state: task 現已取消", await lineHas(late503, ["task 現已取消"], false), await b.evaluate(seenLine(late503)));
   // A 503 with nothing committed (the request never reaches the server): the same words, and the task is still waiting.
   const none503 = await askEnded();
   refuse503 = 1;
-  await b.evaluate(`${cancelBtn(none503)}.click()`);
+  await confirmCancel(none503);
   check("3.4 R3: a 503 with nothing committed: the same 取消結果尚未確認, no claim either way", await b.waitFor(`document.getElementById("run-status").innerText.includes("取消結果尚未確認")`, 15000)
     && !/未取消|取消未完成|已取消/.test(await runSeen()) && !(await xEvents(none503)).some((e) => e.event_type === "TASK_CANCELLED"), await runSeen());
   check("3.4 R3: the re-read shows the true state: the Ask still waits, cancel still offered", await lineHas(none503, ["Ask 等待中；task 可由主持人取消"], true), await b.evaluate(seenLine(none503)));
@@ -1554,7 +1560,7 @@ full: {
   // file before the reply. The old reply opens, signs in and shows nothing.
   const holdCancel = async (task) => {
     await b.evaluate(`(window.__cancelProbe.hold = 1, true)`);
-    await b.evaluate(`${cancelBtn(task)}.click()`);
+    await confirmCancel(task);
     return b.waitFor(`window.__cancelProbe.held.length === 1`, 15000);
   };
   const releaseCancel = async () => { await b.evaluate(`(window.__cancelProbe.held.splice(0).forEach((f) => f()), true)`); await sleep(1500); };
@@ -1746,7 +1752,7 @@ full: {
     // 4. Cancel a task after its run ended.
     const cRun = await startNew("ask");
     await lineHas(cRun.task_id, ["場次完成", "Ask 等待中；task 可由主持人取消"], true, 20000);
-    await b.evaluate(`${cancelBtn(cRun.task_id)}.click()`);
+    await confirmCancel(cRun.task_id);
     check("3.5 cancel: task 已取消, its line task 現已取消", await b.waitFor(`document.getElementById("run-status").innerText === ${JSON.stringify("task " + cRun.task_id + " 已取消")}`, 15000) && await lineHas(cRun.task_id, ["task 現已取消"], false), await runSeen());
     await views("cancel", cRun.task_id, "withdrawn", "Ask", "TASK_CANCELLED", ["cancelled", "withdrawn"]);
     await record("cancel", cRun.task_id);
@@ -1808,12 +1814,12 @@ full: {
     failAccDetail = false;
     check("3.5 error: recovered: the real state again", await lineHas(askRun.task_id, ["Ask 已到期；task 仍可由主持人取消"], true, 15000), await b.evaluate(seenLine(askRun.task_id)));
     refuseAcc = 1;
-    await b.evaluate(`${cancelBtn(askRun.task_id)}.click()`);
+    await confirmCancel(askRun.task_id);
     check("3.5 error: a cancel answered 503: 取消結果尚未確認, nothing claimed, nothing written", await b.waitFor(`document.getElementById("run-status").innerText.includes("取消結果尚未確認")`, 15000)
       && !(await aEvents(askRun.task_id)).includes("TASK_CANCELLED") && await lineHas(askRun.task_id, ["Ask 已到期；task 仍可由主持人取消"], true), await runSeen());
     await b.send("Fetch.disable");
     offAcc();
-    await b.evaluate(`${cancelBtn(askRun.task_id)}.click()`);
+    await confirmCancel(askRun.task_id);
     check("3.5 error: then a cancel through: task 已取消, read from the Store", await b.waitFor(`document.getElementById("run-status").innerText === ${JSON.stringify("task " + askRun.task_id + " 已取消")}`, 15000) && await lineHas(askRun.task_id, ["task 現已取消"], false), await runSeen());
     await views("expired then cancelled", askRun.task_id, "expired", "Ask", "TASK_CANCELLED", ["expired", "cancelled"]);
     await record("expired then cancelled", askRun.task_id);
@@ -1870,7 +1876,7 @@ full: {
     check("3.5 restart: the run that was running ended with its cancel at the shutdown", await lineHas(running.task_id, ["已停止，取消已記錄"], false, 20000) && (await aEvents(running.task_id)).at(-1) === "TASK_CANCELLED", await b.evaluate(seenLine(running.task_id)));
     check("3.5 restart: the history lines read as before", await lineHas(denyRun.task_id, ["場次完成", "Deny：INSUFFICIENT_BUDGET"], false) && await lineHas(waitRun.task_id, ["已停止，取消已記錄"], false)
       && await lineHas(cRun.task_id, ["task 現已取消"], false) && await lineHas(askRun.task_id, ["task 現已取消"], false));
-    await b.evaluate(`${cancelBtn(pending.task_id)}.click()`);
+    await confirmCancel(pending.task_id);
     check("3.5 restart: the Ask left waiting is cancelled afterwards", await b.waitFor(`document.getElementById("run-status").innerText === ${JSON.stringify("task " + pending.task_id + " 已取消")}`, 15000) && await lineHas(pending.task_id, ["task 現已取消"], false), await runSeen());
     await b.evaluate(`document.querySelector('#consumer-pick button[data-consumer="consumer-a"]').click()`);
     await b.waitFor(`${text("#viewer")}.startsWith("consumer-a")`, 10000);

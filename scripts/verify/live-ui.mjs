@@ -245,8 +245,8 @@ try {
   await b.waitFor(`[...document.querySelectorAll("#run-scenarios button")].some((x) => !x.disabled)`, 20000);
   await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].find((x) => !x.disabled)?.click()`);
   check("second run: the Dashboard switches to its new task", await b.waitFor(`${text("#current")}.includes("show-a-") && !${text("#current")}.includes(${JSON.stringify(r1.task_id)}) && ${uKey("seq")} === "3"`, 30000), await b.evaluate(text("#current")));
-  check("the stop button is offered", await b.waitFor(`!!document.querySelector("#control-now .row-stop")`, 20000));
-  await b.evaluate(`document.querySelector("#control-now .row-stop").click()`);
+  check("the stop button is offered", await b.waitFor(`!!document.querySelector("#run-scenarios .row-stop")`, 20000));
+  await b.evaluate(`document.querySelector("#run-scenarios .row-stop").click()`);
   check("the stop is accepted, its result not yet claimed", await b.waitFor(`${text("#run-status")}.includes("停止請求已受理")`, 20000), await b.evaluate(text("#run-status")));
   // A stop of a waiting Ask: the buyer host records APPROVAL_WITHDRAWN, then TASK_CANCELLED.
   const run2 = (await api(addr, hostTok, "/api/host/runs")).json.runs[0];
