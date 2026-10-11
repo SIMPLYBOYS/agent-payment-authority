@@ -30,6 +30,7 @@ T = "internal/timing/timing.go"
 AD = "web/adapter.js"
 SC = "web/scene.js"
 PR = "unity/AgentPaymentAuthority/Assets/APA/Scripts/Projection.cs"
+J = "cmd/timing-judge/main.go"
 
 
 def node(path, test, regex):
@@ -75,6 +76,27 @@ ITEMS = [
      [(AD, "overCap: Number.isInteger(maxRuns) && maxRuns > can.size", "overCap: false")]),
     ("unity: an older slot is stale (late messages)", unity("SceneStateTests.ASlotChangeResetsThatCustomerOnly", r"Expected: Stale"),
      [(PR, "if (m.slot < s.Gen) return Outcome.Stale;", "")]),
+    # The review of eed0f90 (R1, R2, C1); run them alone with "^(R1|R2|C1):".
+    ("R1: a reply read after reset() acts on nothing", node("web/test/scene.test.mjs", "a reply that arrived before reset (new credentials) and is read after it acts on nothing", r"the old reply sent a projection"),
+     [(SC, "const current = (s, gen) => slots.get(s.consumer) === s && gen === s.st.gen;", "const current = (s, gen) => gen === s.st.gen;")]),
+    ("R1: a reply read after stop() and start() acts on nothing", node("web/test/scene.test.mjs", "a reply that arrived before stop, then start and is read after it acts on nothing", r"the old reply sent a projection"),
+     [(SC, "const current = (s, gen) => slots.get(s.consumer) === s && gen === s.st.gen;", "const current = (s, gen) => gen === s.st.gen;")]),
+    ("R2: a claimed Store end needs the task's end event", go("./cmd/timing-judge/", "^TestRecordsAgainstTheDatabase$/^A's_record_says_TASK_CANCELLED,_the_database_has_no_such_event$",
+                                                         ("TestRecordsAgainstTheDatabase/A's_record_says_TASK_CANCELLED,_the_database_has_no_such_event", r"want not judged, A's cancel has no event in the Store")),
+     [(T, 'case r.StoreEnd != "" && row.TaskEnd != r.StoreEnd:', "case false:")]),
+    ("R2: the outcome and Store end must be host_runs'", go("./cmd/timing-judge/", "^TestRecordsAgainstTheDatabase$/^B's_record_has_another_outcome_than_host_runs$",
+                                                         ("TestRecordsAgainstTheDatabase/B's_record_has_another_outcome_than_host_runs", r"want not judged, B's outcome differs from host_runs")),
+     [(T, "case row.Outcome != r.Outcome || row.StoreEnd != r.StoreEnd:", "case false:")]),
+    ("R2: host_runs must say the run ended", go("./internal/timing/", "^TestRecordVsDatabase$/^B's_run_not_ended_in_host_runs$",
+                                              ("TestRecordVsDatabase/B's_run_not_ended_in_host_runs", r"want invalid: host_runs says it is accepted")),
+     [(T, 'case row.State != "ended":', "case false:")]),
+    ("R2: stop isolation fails when B was cancelled in the Store", go("./cmd/timing-judge/", "^TestRecordsAgainstTheDatabase$/^B_was_cancelled_in_the_database,_its_record_says_it_ended_on_its_own$",
+                                                                    ("TestRecordsAgainstTheDatabase/B_was_cancelled_in_the_database,_its_record_says_it_ended_on_its_own", r"want stop isolation not held, B cancelled in the Store")),
+     [(T, 'if otherRow == nil || otherRow.TaskEnd == "TASK_CANCELLED" {', "if false {")]),
+    ("C1: a report write error is no verdict", go("./cmd/timing-judge/", "^TestReportWrite$/^a_write_error$", ("TestReportWrite/a_write_error", r"want exit 3 and the reason")),
+     [(J, "if n, err := stdout.Write(raw); err != nil || n != len(raw) {", "if n, err := stdout.Write(raw); false && (err != nil || n != len(raw)) {")]),
+    ("C1: a short report write is no verdict", go("./cmd/timing-judge/", "^TestReportWrite$/^a_short_write_without_an_error$", ("TestReportWrite/a_short_write_without_an_error", r"want exit 3 and the reason")),
+     [(J, "if n, err := stdout.Write(raw); err != nil || n != len(raw) {", "if n, err := stdout.Write(raw); err != nil {")]),
 ]
 
 ITEM_TIMEOUT = 900
