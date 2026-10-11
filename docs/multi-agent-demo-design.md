@@ -462,3 +462,90 @@ Codex 的結論是「方向通過，R1～R4 補正後再限定複核；暫不開
 - 判定時間紀錄：`go run ./cmd/timing-judge --db <APA_DB_PATH> --a <A>.timing.json --b <B>.timing.json [--stop a|b] [--fake]`。
 - M-B 驗證計畫：`scripts/verify/m-b-check-plan.json`，以 `cmd/m1-check --plan` 執行（`--list` 只列計畫，第 14.1 節）。
 
+
+### 14.1 驗證結果（Claude Code 執行，待 Codex 核對）
+
+證據目錄都在 `artifacts/m-b/`（git 忽略，只在本機）。每次執行的 `summary.json` 記有基準 commit、每步結束碼與秒數。
+
+**整輪**（基準 `67a5041`，`artifacts/m-b/m1-check-20261011T043725Z/`，計畫 `scripts/verify/m-b-check-plan.json`）：
+
+| 步驟 | 結果 | 結束碼 | 秒數 | 內容 |
+|---|---|---|---|---|
+| vet | PASS | 0 | 0.6 | `go vet` demo、timing-judge、timing、toolbridge、buyer |
+| go-race-demo | PASS | 0 | 339.5 | `./cmd/demo` race：65 個測試 |
+| go-race-timing-bridge | PASS | 0 | 115.6 | timing、timing-judge、toolbridge、buyer race：81 個測試 |
+| node | PASS | 0 | 0.4 | adapter、hostcreds、scene：64 個測試 |
+| reverse-selftest | PASS | 0 | 0.1 | 反向分類器與錨點 |
+| unity | PASS | 0 | 99.8 | 場景重建；EditMode 14／14、PlayMode 20／20（`unity/*.xml`） |
+| dual-ui | PASS | 0 | 39.3 | 新的雙場瀏覽器流程（截圖見下） |
+| browser-ui | PASS | 0 | 428.9 | 既有單場 fake 與主持人頁 |
+| history-ui | PASS | 0 | 49.5 | 歷史回放 |
+| live-ui | PASS | 0 | 95.6 | live 接線代用（假 CLI、測試建立的 HOME） |
+| present-ui | PASS | 0 | 99.2 | 展示流程 |
+| reverse | INTERRUPTED | −1 | 77.8 | 前一個工作階段結束時中斷；中斷前 7 項抓到、2 項沒抓到（見下） |
+
+**反向驗證的失敗與修正**（紀錄都保留，沒有原樣重跑）：
+1. `043725Z`，第 2 項「停止中的場次占名額」沒抓到：突變直接把場次移出進行中，連停止請求本身也找不到這一場，測試失敗在別的斷言。改為只計 `running` 的場次（`d148ade`）。
+2. `043725Z`，第 9 項「停止隔離需要 B 在停止後的呼叫」沒抓到：突變讓變數 `after` 未使用而編譯失敗。改為 `if false && !after`（`d148ade`）。
+3. `152440Z`（基準 `d148ade`）：第 1～9 項都抓到；第 10 項卡住，手動停止，紀錄為 INTERRUPTED。原因：突變後 scene 測試第 7 個也失敗，失敗的斷言跳過了測試自己的 `scene.stop()`，輪詢計時器讓 `node --test` 永遠不結束。測試改為每個測試結束（成功或失敗）都停止所有場景（`124ba22`）。
+4. `153211Z`（基準 `124ba22`）：第 1～12 項抓到；第 13 項（Unity）的未突變基準在副本中不通過：複製的 Library 保留原本的檔案時間，編輯器沿用舊的 script 紀錄，PlayMode 找不到場景上的 script。副本改用新的檔案時間複製（`480c750`，與 `cp -R` 相同；只改反向腳本）。
+5. `154143Z`（基準 `480c750`）：只重跑 Unity 那一項，抓到。
+
+**13 項命中的斷言**（第 1～12 項 `153211Z`，第 13 項 `154143Z`）：
+
+| # | 項目 | 命中 |
+|---|---|---|
+| 1 | 名額上限 | `TestCapacityAndStopping` `full: 202` |
+| 2 | 停止中的場次占名額 | `TestCapacityAndStopping` `while stopping: 202` |
+| 3 | 每位 consumer 一場 | `TestTwoRunsAtOnce` `same consumer: 409` |
+| 4 | 停止只影響自己那場 | `TestStopIsolation` `B after A's stop` |
+| 5 | 非法 `--max-runs` 拒絕啟動 | `TestMaxRunsSetting` `more than consumers` |
+| 6 | 兩個 Host 不比較 | `TestNotJudged/another_host` `want not_comparable` |
+| 7 | 程序外的呼叫無效 | `TestNotJudged/call_before_process` `want invalid` |
+| 8 | 交錯需要 A,B,A,B | `TestNotInterleaved/spans_meet,_a_quiet_gap` `want spans_only` |
+| 9 | 停止隔離需要 B 停止後的呼叫 | `TestStopIsolation/no_call_of_B_after_the_stop` `Held:true` |
+| 10 | 六項規則比對欄位 | scene 測試「the six-field rule」`another slot` |
+| 11 | 每個欄位用自己的 token | scene 測試「two consumers at once」`a consumer's task read with another's token` |
+| 12 | 場景無法呈現全部時明示 | scene 測試「each consumer's scene task」`deep-equal` |
+| 13 | 較舊欄位世代是 Stale | `SceneStateTests.ASlotChangeResetsThatCustomerOnly` `Expected: Stale` |
+
+**改測試後重跑受影響部分**：node 與 reverse-selftest（基準 `480c750`，`m1-check-20261011T154520Z`）PASS，node 64／64。整輪的其他步驟沒有重跑：之後的三個 commit 只改 scene 測試與反向腳本。
+
+**WebGL**：從 `8b3c265` 重建（Unity 6000.5.3f1；之後 `unity/` 沒有再改）。sha256 記在 `artifacts/m-b/webgl-8b3c265.sha256`：
+
+```text
+3217162c96b765a63749237035c3658f9588a8a055c9d1eec1092f333f91ecca  WebGL.data
+3c7d6ab5547a85de82e08400bfd63520ba9c2f50c098eff05074a6a010e65666  WebGL.framework.js
+813b3921e95b836b17e0beea85e39b996ecae337329bec6d6c868b8f0ef7ae65  WebGL.loader.js
+9a6efc0b73c3a3d9c8d03314539e94d601b15e0dd05f1913d297b268e0f8d4e4  WebGL.wasm
+```
+
+**雙場截圖**（`043725Z/dual-ui/`；每張都先確認 token 欄位是空的）：`dual-both-ask`、`dual-a-asks-b-entered`、`dual-a-stopped-b-waits`、`dual-viewing-older`、`dual-after-reload`、`dual-old-unity`。截圖證明頁面的 DOM 與狀態文字；畫布內容以 Unity 測試為準，DOM 不證明畫布畫了什麼。
+
+**fake 時間判定範例**（`artifacts/m-b/timing-judge-fake-example/`；`judge-example.mjs` 以測試建立的 HOME 與假 CLI 跑兩場，用 `wait_file` 排出 A、B、A 的呼叫，A 停止後 B 再呼叫一次）：
+
+```text
+timing-judge --fake --db $TMP/state/demo.db --a show-a-01-….timing.json --b show-b-01-….timing.json --stop a
+exit 0
+conclusion: interleaved
+text: （fake 紀錄：不是真實模型的工作）同一 Host 上，consumer-a 與 consumer-b 的工具呼叫交錯發生：雙方都在對方兩次呼叫之間有自己的工具呼叫。這不代表跨度內每一刻都在工作，也不代表觀測到模型供應商內部同時推論。
+stop_isolation.held: true
+```
+
+這是 fake 紀錄，不是真實模型的工作。
+
+**限制**：
+- 沒有執行真實 Claude CLI、完整斷網容器、全套突變、M1 重新產包。
+- 畫布上兩位客人的名字標籤字小、對比低，在截圖中不易辨識；兩人的狀態另有畫布下方各自一行的文字。
+- 「場景無法呈現全部客人」的提示，用目前兩位 consumer 的登錄無法在瀏覽器觸發，只由 node 單元測試涵蓋。
+- browser-ui 3.5 原本由瀏覽器檢查 Unity 呈現**較舊** task 的到期狀態；現在場景跟隨最新場次，這項改由 Unity 測試涵蓋。
+
+### 14.2 M-C 執行前確認清單（未執行；M-C 須另行核准）
+
+- [ ] Aaron 核准 M-C 的真實執行，以及兩場同時使用同一個本人訂閱（第 11 節：用量、限流、嘗試次數）。
+- [ ] 本機 CLI 版本等於釘選版本；專用設定目錄、Gate 與認證清單照現行。
+- [ ] 用 `scenarios-live.json`（`live`、`live-b`），`--max-runs 2`；啟動訊息顯示上限 2 與 host instance。
+- [ ] 只嘗試一次「一起開始」；沒有交錯就照實記錄，不重試（第 6.5 節）。
+- [ ] 停止隔離只在 A `running` 且已有完成的呼叫、B 仍 `running` 時才停止 A；沒抓到時機就記為「停止隔離未示範」。
+- [ ] 以 M-B review 過的 `timing-judge`（不加 `--fake`）判定；保留判定結論原文、兩份時間紀錄、trace 與 Store 匯出。
+- [ ] 證據中沒有 token、配對碼或登入資料。
