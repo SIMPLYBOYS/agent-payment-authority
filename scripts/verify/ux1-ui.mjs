@@ -52,7 +52,7 @@ writeFileSync(catalog, JSON.stringify({ description: "ux1-ui", scenarios: [
 ] }));
 
 const SIZES = [[1440, 900], [1280, 900], [390, 844]];
-let demo, b, pump;
+let demo, b;
 const tokens = [];
 try {
   log("commit " + commit);
@@ -67,13 +67,7 @@ try {
   // A headless page counts as unfocused; Unity's frames then may wait for
   // something else to draw. The page is focused, as a presenter's would be.
   await b.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-  // Headless Chrome was seen to hold Unity's walk while nothing else on the
-  // page changed (A's exit after its Ask expired waited until a screenshot
-  // drew a frame: ux1-ui-dev-1..5, m1-check-20261011T192541Z); a requested
-  // animation frame was not always enough. A 1-pixel screenshot every 0.5 s
-  // draws frames as a visible tab does. Not checked in a visible browser:
-  // the manual check watches an Ask expire (docs/commercial-ux1.md).
-  pump = setInterval(() => { b.send("Page.captureScreenshot", { format: "png", clip: { x: 0, y: 0, width: 1, height: 1, scale: 1 } }).catch(() => {}); }, 500);
+
   const size = (w, h) => b.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: w < 500 });
   const hostGet = async (path) => (await fetch("http://" + addr + path, { headers: { Authorization: "Bearer " + t.op } })).json();
   const hostTask = async (id) => (await fetch("http://" + addr + "/api/tasks/" + id, { headers: { Authorization: "Bearer " + t.host } })).json();
@@ -82,7 +76,21 @@ try {
   const cardText = (c) => b.evaluate(`(${card(c)} || {}).textContent || ""`);
   const li = (c) => `document.querySelector('#scene-status li[data-consumer="${c}"]')`;
   const slot = (c) => b.evaluate(`JSON.stringify((${li(c)} || {}).dataset || null)`).then(JSON.parse);
-  const shows = (c, task, phase) => b.waitFor(`(() => { const e = ${li(c)}; return !!e && e.dataset.task === "${task}" && e.dataset.phase === "${phase}" && e.dataset.shown === "true"; })()`, 30000);
+  // shows waits for Unity's exact report of a customer's state. Headless
+  // Chrome was seen to hold Unity's walk while nothing else on the page
+  // changed, until a full screenshot drew the page (A's exit after its Ask
+  // expired: ux1-ui-dev-1..5, m1-check-20261011T192541Z/192834Z; neither a
+  // requested animation frame nor a 1-pixel screenshot was enough). So the
+  // wait draws the page every 2 s, as a visible tab does all the time. Not
+  // checked in a visible browser: the manual check watches an Ask expire.
+  const shows = async (c, task, phase) => {
+    const want = `(() => { const e = ${li(c)}; return !!e && e.dataset.task === "${task}" && e.dataset.phase === "${phase}" && e.dataset.shown === "true"; })()`;
+    for (const end = Date.now() + 30000; Date.now() < end; await sleep(2000)) {
+      if (await b.waitFor(want, 2000)) return true;
+      await b.send("Page.captureScreenshot", { format: "png" });
+    }
+    return false;
+  };
   const chosen = () => b.evaluate(`[...document.querySelectorAll('.agent-card[data-selected="true"]')].map((x) => x.dataset.consumer).join(",")`);
   const reports = (kind) => b.evaluate(`JSON.stringify((window.__reports || []).filter((r) => r[0] === "${kind}"))`).then(JSON.parse);
   async function shot(name, keepScroll = false) {
@@ -290,7 +298,6 @@ try {
 } catch (e) {
   check("the flow ran to its end", false, String(e && e.stack || e).slice(0, 400));
 } finally {
-  clearInterval(pump);
   if (b) b.close();
   if (demo) await demo.stop();
 }
