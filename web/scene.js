@@ -9,7 +9,10 @@
 // generation changes on new credentials and around a replay. A reply, a
 // timer or a Unity report of an older slot or scene acts on nothing, and
 // one customer's reads, failures and reports never wait for or touch the
-// other's.
+// other's. reset() and stop() drop every slot: a dropped slot is never
+// current again (current()), so a reply that had already arrived when it
+// was dropped changes no state, sends nothing, notifies nothing and
+// schedules nothing, whatever scene came after.
 
 import * as A from "./adapter.js";
 
@@ -25,6 +28,10 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
   const newSlot = (consumer) => ({ consumer, slot: 0, task: null, st: A.newState(), timer: null, abort: null, inFlight: false,
     shownSeq: -1, sent: null, report: null, target: null, motion: null, read: "idle" });
 
+  // current: the slot is still its consumer's slot and gen still its
+  // generation; only then may a read's work go on.
+  const current = (s, gen) => slots.get(s.consumer) === s && gen === s.st.gen;
+
   function stopSlot(s) {
     clearTimeout(s.timer);
     s.timer = null;
@@ -34,18 +41,19 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
   }
 
   async function call(s, gen, path) {
+    if (!current(s, gen)) throw Object.assign(new Error("stale"), { code: "stale" });
     const t = token(s.consumer);
     if (!t) throw Object.assign(new Error("no_token"), { code: "no_token" });
     const res = await fetchFn(path, { headers: { Authorization: "Bearer " + t }, cache: "no-store", credentials: "omit", signal: s.abort.signal });
-    if (gen !== s.st.gen) throw Object.assign(new Error("stale"), { code: "stale" });
+    if (!current(s, gen)) throw Object.assign(new Error("stale"), { code: "stale" });
     if (res.status === 401) throw Object.assign(new Error("unauthenticated"), { code: "unauthenticated" });
     if (res.status === 404) throw Object.assign(new Error("not_found"), { code: "not_found" });
     if (!res.ok) throw Object.assign(new Error("offline"), { code: "offline" });
     return res.json();
   }
 
-  // poll reads one slot's task and events until they agree; only this
-  // slot's own generation acts on the reply.
+  // poll reads one slot's task and events until they agree; only the
+  // current slot of its own generation acts on the reply.
   async function poll(s, first) {
     clearTimeout(s.timer);
     if (!active || paused || !s.task || s.inFlight) return;
@@ -57,16 +65,17 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
       for (let i = 0; i < MAX_REREAD && result === "inconsistent"; i++) {
         const task = await call(s, gen, "/api/tasks/" + id);
         const events = await call(s, gen, "/api/tasks/" + id + "/events");
+        if (!current(s, gen)) return; // the body came after a drop or a newer generation
         result = A.commit(s.st, gen, task, events);
       }
-      if (gen === s.st.gen) s.read = result === "ok" || result === "older" ? "ok" : "updating";
+      if (current(s, gen)) s.read = result === "ok" || result === "older" ? "ok" : "updating";
     } catch (e) {
-      if (gen !== s.st.gen || e.code === "stale") return; // a newer slot generation owns the slot now
+      if (!current(s, gen) || e.code === "stale") return; // dropped, or a newer slot generation owns the slot now
       s.read = e.code || "offline";
     } finally {
-      if (gen === s.st.gen) s.inFlight = false;
+      if (current(s, gen)) s.inFlight = false;
     }
-    if (gen !== s.st.gen || !active || paused) return;
+    if (!current(s, gen) || !active || paused) return;
     show(s, first);
     s.timer = setTimeout(() => poll(s, false), POLL_MS);
   }

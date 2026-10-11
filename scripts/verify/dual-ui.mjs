@@ -147,6 +147,9 @@ try {
     await b.send("Page.navigate", { url: "http://" + addr + "/host" });
     await b.waitFor(`document.readyState === "complete"`);
     await b.waitFor(`["ready","rendered","failed","scene","syncing"].includes(document.getElementById("unity-status").dataset.state)`, 90000);
+    return loadFile();
+  }
+  async function loadFile() {
     const doc = await b.send("DOM.getDocument", {});
     const q = await b.send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: "#token-file" });
     await b.send("DOM.setFileInputFiles", { nodeId: q.nodeId, files: [tokenFile] });
@@ -237,6 +240,50 @@ try {
   check("after a reload and the token file again, the scene is restored", await loadPage() && await shows("consumer-a", "show-a-02", "waiting") && await shows("consumer-b", "show-b-01", "withdrawn"));
   check("the reload started no run", (await runs()).length === n && (await runs()).every((r) => r.live !== "running"));
   await shot("dual-after-reload");
+
+  // R1 (review of eed0f90): A's scene read of its new task gets its reply
+  // before the credentials are cleared, and its JSON is read only after the
+  // token file is loaded again (a new scene). The page's own fetch is
+  // wrapped to hold that one body (the scene's reads only, by the caller);
+  // Unity's reports are recorded as they come. The old slot (A's slot 2)
+  // must send nothing to the new scene, where A is slot 1 again.
+  mark("old reply after new credentials");
+  await b.evaluate(`(() => {
+    window.__bodies = []; window.__reports = []; window.__hold = "show-a-03";
+    const of = window.fetch;
+    window.fetch = async (...a) => {
+      const fromScene = (new Error().stack || "").includes("/ui/scene.js");
+      const res = await of(...a);
+      if (fromScene && window.__hold && String(a[0]).endsWith("/api/tasks/" + window.__hold + "/events") && res.ok) {
+        window.__hold = null;
+        const text = await res.text();
+        let release;
+        const gate = new Promise((r) => { release = r; });
+        window.__bodies.push(release);
+        return { status: res.status, ok: res.ok, json: () => gate.then(() => JSON.parse(text)) };
+      }
+      return res;
+    };
+    const report = window.apaUnityReport;
+    window.apaUnityReport = (k, g, q, d) => { window.__reports.push([String(k), Number(g), String(d)]); return report(k, g, q, d); };
+    return true;
+  })()`);
+  await b.waitFor(`!document.querySelector('#run-scenarios button[data-scenario="z-ask-a"]').disabled`, 15000);
+  await b.evaluate(`document.querySelector('#run-scenarios button[data-scenario="z-ask-a"]').click()`);
+  const oldSlot = await b.waitFor(`window.__bodies.length === 1`, 20000) ? await slot("consumer-a") : null;
+  check("A's scene read of show-a-03 has its reply, its JSON held", !!oldSlot && oldSlot.task === "show-a-03" && oldSlot.slot === "2", JSON.stringify(oldSlot));
+  await b.evaluate(`document.getElementById("clear-all").click()`);
+  check("清除全部憑證 drops the scene", await b.waitFor(`document.getElementById("scene-status").hidden`, 15000));
+  check("the token file again: a new scene shows A's show-a-03 in slot 1", await loadFile() && await shows("consumer-a", "show-a-03", "waiting") && (await slot("consumer-a")).slot === "1",
+    JSON.stringify(await slot("consumer-a")));
+  const newScene = (await slot("consumer-a")).scene;
+  const mark0 = await b.evaluate(`window.__reports.length`);
+  await b.evaluate(`window.__bodies.forEach((r) => r())`); // the old JSON is read now
+  await sleep(3000);
+  const late = await b.evaluate(`JSON.stringify(window.__reports.slice(${mark0}).filter((r) => r[0] === "rendered" && r[2].startsWith("consumer-a|") && r[2].split("|")[1] !== "1"))`);
+  check("the old reply sent nothing to the new scene (no Unity report of A's slot 2)", late === "[]", late);
+  const after = await slot("consumer-a");
+  check("A's slot 1 is still shown, in the same scene", after.task === "show-a-03" && after.slot === "1" && after.scene === newScene && after.shown === "true", JSON.stringify(after));
 
   // An old Unity build (no bridge report): one customer only, said so.
   mark("old Unity");

@@ -27,6 +27,7 @@ function fakeHost() {
   const data = new Map();
   const slow = new Set();
   const held = new Map(); // task -> the releases of its held replies
+  const heldBody = new Map(); // task -> the releases of its events bodies: the reply has arrived, its JSON not yet
   const failing = new Set();
   const reads = [];
   const fetchFn = (path, init) => {
@@ -39,11 +40,15 @@ function fakeHost() {
       resolve({ status: 200, ok: true, json: async () => (m[2] ? r.events : r.task) });
     }));
     if (failing.has(task)) return Promise.reject(new TypeError("offline"));
+    if (m[2] && heldBody.has(task)) {
+      const r = data.get(task);
+      return Promise.resolve({ status: 200, ok: true, json: () => new Promise((resolve) => heldBody.get(task).push(() => resolve(r.events))) });
+    }
     const r = data.get(task);
     if (!r) return Promise.resolve({ status: 404, ok: false, json: async () => ({}) });
     return Promise.resolve({ status: 200, ok: true, json: async () => (m[2] ? r.events : r.task) });
   };
-  return { data, slow, held, failing, reads, fetchFn };
+  return { data, slow, held, heldBody, failing, reads, fetchFn };
 }
 
 function fakeUnity() {
@@ -65,9 +70,10 @@ function setup() {
   const host = fakeHost();
   const unity = fakeUnity();
   const tokens = { "consumer-a": "token-a", "consumer-b": "token-b" };
-  const scene = createScene({ unity, token: (c) => tokens[c], onChange: () => {}, fetchFn: host.fetchFn });
+  const changes = { n: 0 };
+  const scene = createScene({ unity, token: (c) => tokens[c], onChange: () => { changes.n++; }, fetchFn: host.fetchFn });
   scenes.push(scene);
-  return { host, unity, scene };
+  return { host, unity, scene, changes };
 }
 
 test("the six-field rule: only the exact projection last sent completes", () => {
@@ -166,6 +172,46 @@ test("a new run of A changes A's slot only; A's late reply of its old task acts 
   const clears = unity.sent.filter((m) => m.clear && m.consumer === "consumer-a").map((m) => m.slot);
   assert.deepEqual(clears, [1, 2], "A's slot cleared once per task");
   assert.ok(unity.sent.every((m) => m.consumer !== "consumer-a" || m.clear || m.task_id === "show-a-02"), "a late reply of A's old task reached the shop");
+  scene.stop();
+});
+
+// R1 (review of eed0f90): a reply whose response arrived before the scene
+// was dropped, and whose JSON is read only after a new scene began, acts on
+// nothing: no state, no projection, no notice, no next read of the old slot.
+// The old task gains an event meanwhile, so an old slot that went on would
+// have something new to send.
+for (const [name, drop] of [
+  ["reset (new credentials)", (scene) => scene.reset()],
+  ["stop, then start", (scene) => { scene.stop(); scene.start(); }],
+]) test("a reply that arrived before " + name + " and is read after it acts on nothing", async () => {
+  const { host, unity, scene, changes } = setup();
+  host.data.set("show-a-01", reply("show-a-01", "consumer-a", askEvents().slice(0, 2)));
+  host.data.set("show-a-02", reply("show-a-02", "consumer-a", askEvents().slice(0, 1)));
+  host.heldBody.set("show-a-01", []);
+  scene.start();
+  scene.setRuns(runs(["consumer-a", "show-a-01"]));
+  await settle();
+  assert.equal(host.heldBody.get("show-a-01").length, 1, "the old events reply is not held");
+  host.data.set("show-a-01", reply("show-a-01", "consumer-a", askEvents()));
+  drop(scene);
+  scene.setRuns(runs(["consumer-a", "show-a-02"]));
+  await settle();
+  const sent = unity.sent.length;
+  const notices = changes.n;
+  const reads = host.reads.length;
+  const newScene = unity.sent.filter((m) => m.clear && !m.consumer).pop().scene;
+  assert.ok(unity.sent.some((m) => m.scene === newScene && m.task_id === "show-a-02"), "the new scene did not show A's new task");
+  for (const release of host.heldBody.get("show-a-01")) release(); // the old JSON is read now
+  await settle();
+  assert.deepEqual(unity.sent.slice(sent), [], "the old reply sent a projection");
+  assert.equal(changes.n, notices, "the old reply notified the page");
+  assert.deepEqual(scene.slots().map((x) => [x.consumer, x.task, x.slot]), [["consumer-a", "show-a-02", 1]]);
+  await new Promise((r) => setTimeout(r, 1300)); // past one poll interval
+  assert.ok(!host.reads.slice(reads).some((x) => x.task === "show-a-01"), "the old slot read again");
+  host.data.set("show-a-02", reply("show-a-02", "consumer-a", askEvents().slice(0, 2)));
+  await new Promise((r) => setTimeout(r, 1300));
+  assert.ok(unity.sent.slice(sent).some((m) => m.scene === newScene && m.task_id === "show-a-02" && m.seq === 2), "the new scene stopped updating");
+  assert.ok(unity.sent.every((m) => m.clear || m.task_id !== "show-a-01" || m.scene < newScene), "the old task reached the new scene");
   scene.stop();
 });
 
