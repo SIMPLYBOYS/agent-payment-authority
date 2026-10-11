@@ -654,7 +654,7 @@ M1 與 B1-00～B1-07 維持 Done。本節記錄 M-B 技術 review 通過與三�
 **核准與分工**：Aaron 核准一次 M-C，由 Aaron 在自己的終端機操作（`make present-live`；配對碼與登入資料不經 Claude Code），Claude Code 協助。核准包含兩場同時使用 Aaron 本人的訂閱。執行前，Claude Code 只做唯讀準備：`~/.local/bin/claude` 已自動更新到 2.1.296，host 只接受 `2.1.293 (Claude Code)`；經 Aaron 選擇，把本機 `var/present.conf`（git 忽略）的 `cli=` 改為 `/Users/mac/.local/share/claude/versions/2.1.293`，只改這一行。開發展示 plugin 例外照舊開啟；Gate、認證清單與版本釘選未改。
 
 **這一次**（場次目錄 `var/present-GyCNVx/`，git 忽略）：
-- 建置 `0dbefd8`（`build.txt`）。Go 標記 `vcs.modified=true`，來源是未追蹤的 `demo` 目錄；`3591736..0dbefd8` 的產品與判定工具程式沒有差異。
+- 建置 `0dbefd8`（`build.txt`）。Go 標記 `vcs.modified=true`，這是事實，不稱為乾淨建置。未追蹤的 `demo` 目錄是可能原因，但不能證明建置當下只有這一項差異。`3591736..0dbefd8` 之間已提交的產品與判定工具程式沒有差異。
 - Host instance `70e423a9411278f7b1c735f7cb53109d`，於 2026-10-11T16:47:55Z 啟動，同時執行上限 2。
 - 兩場：
   - A：`live-a`，`show-a-01`，受理於 16:48:16Z，結束於 16:48:26Z。
@@ -687,7 +687,7 @@ M1 與 B1-00～B1-07 維持 Done。本節記錄 M-B 技術 review 通過與三�
 **核准**：Aaron 核准第二次，要用「一起開始」並示範停止隔離；仍由 Aaron 操作、Claude Code 協助。CLI 設定與第一次相同（`var/present.conf` 指向 2.1.293；開發展示 plugin 例外照舊）。
 
 **執行**（場次目錄 `var/present-Zwrcxw/`）：
-- 建置 `15edf10`（`vcs.modified=true` 來自未追蹤的 `demo`；`3591736..15edf10` 的產品程式沒有差異）。
+- 建置 `15edf10`。`vcs.modified=true` 是事實，不稱為乾淨建置；未追蹤的 `demo` 是可能原因，但不能證明建置當下只有這一項差異。`3591736..15edf10` 之間已提交的產品程式沒有差異。
 - Host instance 開頭為 `bc99b8d2`，同時執行上限 2。
 - 這個場次裡 Aaron 按了兩次「一起開始」，所以有兩組場次，分組判定，不合在一起算。四場都由 CLI 2.1.293 執行，init gate passed（`dev_demo_plugins`），model `claude-sonnet-5-5`，trace 沒有 stderr。
 - Aaron 說明：使用「一起開始」，過程中沒有取消任何 task；唯一的操作是對第二組的 A 按「停止」。
