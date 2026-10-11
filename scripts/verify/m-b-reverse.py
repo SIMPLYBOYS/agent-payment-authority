@@ -13,7 +13,10 @@
 # TAP of node --test (an AssertionError of the named test); the Unity item
 # reads the NUnit XML (the named test Failed with the expected message).
 # The clone gets the Unity project's ignored Library and LimeZu import
-# copied in, so the editor does not rebuild them. Output lines as
+# copied in, so the editor does not rebuild them. The copies get new file
+# times (shutil.copy, as cp -R): with the original times kept, the editor
+# trusts the copied Library's script entries and PlayMode finds the scene's
+# scripts missing. Output lines as
 # m1-e3-reverse.py: PLAN, ITEM, RESULT; exit 0 all caught, 1 not, 2 setup.
 import argparse, importlib.util, json, os, re, shutil, subprocess, sys, tempfile, time
 
@@ -184,7 +187,7 @@ def main():
             u = "unity/AgentPaymentAuthority"
             for d in ("Library", "Assets/LimeZu"):
                 if os.path.isdir(os.path.join(root, u, d)):
-                    shutil.copytree(os.path.join(root, u, d), os.path.join(copy, u, d), symlinks=True, dirs_exist_ok=True)
+                    shutil.copytree(os.path.join(root, u, d), os.path.join(copy, u, d), symlinks=True, dirs_exist_ok=True, copy_function=shutil.copy)
         print(f"BASE {head} (mutations in a disposable clone)", flush=True)
         print(f"PLAN {len(items)}", flush=True)
         baseline, results, failed = {}, [], 0
