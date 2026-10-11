@@ -52,7 +52,9 @@ namespace APA
         // Each customer waits, and leaves to, its own row outside the door.
         public static Vector2 Point(string consumer, int n)
         {
-            float row = consumer == "consumer-b" ? 0.2f : 3.0f;
+            // UX1: B's row is 0.6 (was 0.2) so its label under its feet stays
+            // inside the view.
+            float row = consumer == "consumer-b" ? 0.6f : 3.0f;
             switch (n)
             {
                 case Out: return new Vector2(-1.3f, row);
@@ -104,6 +106,7 @@ namespace APA
             public GameObject go;
             public SpriteRenderer body;
             public TextMesh tag;
+            public SpriteRenderer plate, marker, ring; // UX1: the label's backing, the colour under the feet, the selection ring
             public Sprite idleDown, idleRight;
             public Sprite[][] walk;          // right, up, left, down
             public int facing = 3;
@@ -122,21 +125,35 @@ namespace APA
         readonly Dictionary<string, Customer> customers = new Dictionary<string, Customer>();
         TextMesh status, banner;
         Font font;
+        Sprite pixel, disc, circle; // UX1: a white pixel, a filled ellipse and an ellipse ring
+        SpriteRenderer bannerPlate;
+
+        // UX1 selection (docs/commercial-ux1.md): which customer the page has
+        // chosen (a ring under its feet), and who was clicked. Selecting is a
+        // UI intent only: the page decides, Unity only shows and reports.
+        public string Highlighted { get; private set; }
+        [System.NonSerialized] public System.Action<string> Picked;
 
         void Awake()
         {
             font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            pixel = Shape(1, 1, (x, y) => 1f);
+            disc = Shape(32, 16, (x, y) => x * x + y * y <= 1f ? 1f : 0f);
+            circle = Shape(48, 24, (x, y) => { float r = x * x + y * y; return r <= 1f && r >= 0.62f ? 1f : 0f; });
             UsingPlaceholders = floorSheet == null || wallSheet == null || customerA == null || customerB == null;
             for (int i = 0; i < props.Length; i++) if (props[i] == null) UsingPlaceholders = true;
             BuildRoom();
             customers["consumer-a"] = MakeCustomer("consumer-a", customerA, "Customer A", new Color(0.55f, 0.75f, 1f));
             customers["consumer-b"] = MakeCustomer("consumer-b", customerB, "Customer B", new Color(1f, 0.7f, 0.5f));
-            banner = MakeText("banner", new Vector2(5.6f, 9.5f), 0.1f, Color.white);
+            // UX1: the title is small, in the top left corner of the view.
+            banner = MakeText("banner", new Vector2(-2.05f, 8.8f), 0.055f, new Color(1f, 1f, 1f, 0.8f));
+            banner.anchor = TextAnchor.UpperLeft;
+            bannerPlate = Child(gameObject, "banner-plate", pixel, 99, new Color(0.08f, 0.08f, 0.12f, 0.85f));
             // Neutral about where the agent's actions come from: the same build
             // shows the fake demo and the history replay of a recorded real run
             // (docs/cli-poc.md 54.2); the page's header says which.
             banner.text = "M1 / no payment" + (UsingPlaceholders ? "   [LimeZu pending: placeholder art]" : "   Art: LimeZu (limezu.itch.io)");
-            status = MakeText("status", new Vector2(6f, -0.6f), 0.1f, new Color(1f, 0.95f, 0.6f));
+            status = MakeText("status", new Vector2(6f, -0.35f), 0.08f, new Color(1f, 0.95f, 0.6f));
             ResetAll();
         }
 
@@ -154,6 +171,20 @@ namespace APA
             t.SetPixels(px);
             t.Apply();
             return Sprite.Create(t, new Rect(0, 0, w, h), new Vector2(0.5f, 0f), PPU);
+        }
+
+        // Shape: a white sprite of w x h pixels, pivot in the middle; f says
+        // how opaque each point is, with x and y from -1 to 1.
+        Sprite Shape(int w, int h, System.Func<float, float, float> f)
+        {
+            var t = new Texture2D(w, h) { filterMode = FilterMode.Point };
+            var px = new Color[w * h];
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                    px[y * w + x] = new Color(1f, 1f, 1f, f((x + 0.5f) / w * 2f - 1f, (y + 0.5f) / h * 2f - 1f));
+            t.SetPixels(px);
+            t.Apply();
+            return Sprite.Create(t, new Rect(0, 0, w, h), new Vector2(0.5f, 0.5f), Mathf.Max(w, h) == 1 ? 1 : PPU);
         }
 
         SpriteRenderer Put(string name, Sprite s, Vector2 at, int order)
@@ -176,6 +207,10 @@ namespace APA
                 for (int y = 0; y < 7; y++) Put("floor", floor, new Vector2(x + 0.5f, y), -100);
                 Put("wall", wall, new Vector2(x + 0.5f, 7f), -90);
             }
+            // UX1: the sidewalk outside the door, where a customer waits and
+            // leaves to: the same floor, darker, so outside reads as ground.
+            for (int x = -2; x < 0; x++)
+                for (int y = 0; y < 7; y++) Put("sidewalk", floor, new Vector2(x + 0.5f, y), -100).color = new Color(0.55f, 0.6f, 0.56f);
             for (int i = 0; i < props.Length && i < propPositions.Length; i++)
             {
                 var t = props[i];
@@ -209,10 +244,28 @@ namespace APA
             c.id = id;
             c.name = label;
             c.body.sprite = c.idleDown;
-            c.tag = MakeText(id + "-tag", Vector2.zero, 0.07f, tint);
+            c.tag = MakeText(id + "-tag", Vector2.zero, 0.065f, Color.white);
             c.tag.transform.SetParent(c.go.transform, false);
             c.tag.text = label;
+            // UX1: the label on a solid plate in the customer's colour, the
+            // colour again under its feet, and the selection ring.
+            c.plate = Child(c.go, id + "-plate", pixel, 99, new Color(tint.r * 0.35f, tint.g * 0.35f, tint.b * 0.35f, 0.92f));
+            c.marker = Child(c.go, id + "-marker", disc, 48, new Color(tint.r, tint.g, tint.b, 0.75f));
+            c.marker.transform.localScale = new Vector3(1.1f, 1.1f, 1f);
+            c.ring = Child(c.go, id + "-ring", circle, 49, new Color(1f, 0.86f, 0.2f, 1f));
+            c.ring.enabled = false;
             return c;
+        }
+
+        SpriteRenderer Child(GameObject parent, string name, Sprite s, int order, Color color)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent.transform, false);
+            var r = go.AddComponent<SpriteRenderer>();
+            r.sprite = s;
+            r.sortingOrder = order;
+            r.color = color;
+            return r;
         }
 
         Sprite[] Frames(Texture2D t, int yTop, int first)
@@ -245,6 +298,10 @@ namespace APA
         {
             foreach (var c in customers.Values) Clear(c);
             if (status != null) status.text = Multi ? StatusLines() : "No task shown";
+            // UX1: with two customers the page's cards carry each status; the
+            // text stays (tests read it) but is not drawn over the shop.
+            if (status != null) status.GetComponent<MeshRenderer>().enabled = !Multi;
+            Highlight(null);
         }
 
         // Reset: one customer only (version 2: that customer's slot changed);
@@ -428,6 +485,55 @@ namespace APA
         void Update()
         {
             foreach (var c in customers.Values) if (c.route != null) Advance(c, Time.unscaledDeltaTime);
+            if (Picked != null && Input.GetMouseButtonDown(0) && Camera.main != null)
+            {
+                var who = PickAt(transform.InverseTransformPoint(Camera.main.ScreenToWorldPoint(Input.mousePosition)));
+                if (who != null) Picked(who);
+            }
+        }
+
+        // PickAt: the customer under a point (local units): its body, from the
+        // feet up two tiles and half a tile to each side; the nearest wins.
+        public string PickAt(Vector2 p)
+        {
+            string best = null;
+            float bestD = float.MaxValue;
+            foreach (var kv in customers)
+            {
+                var at = (Vector2)kv.Value.go.transform.localPosition;
+                if (Mathf.Abs(p.x - at.x) > 0.5f || p.y < at.y - 0.25f || p.y > at.y + 2f) continue;
+                float d = (p - (at + new Vector2(0f, 1f))).sqrMagnitude;
+                if (d < bestD) { bestD = d; best = kv.Key; }
+            }
+            return best;
+        }
+
+        // Fit puts a plate under a text, a little larger than it.
+        static void Fit(SpriteRenderer plate, TextMesh text)
+        {
+            var b = text.GetComponent<MeshRenderer>().bounds;
+            var local = plate.transform.parent.InverseTransformPoint(b.center);
+            plate.transform.localPosition = new Vector3(local.x, local.y, 0f);
+            plate.transform.localScale = new Vector3(b.size.x + 0.2f, b.size.y + 0.1f, 1f);
+        }
+
+        // Highlight: the ring under one customer (null: none). Only the page
+        // calls it, through the bridge.
+        public void Highlight(string consumer)
+        {
+            Highlighted = consumer != null && customers.ContainsKey(consumer) ? consumer : null;
+            foreach (var kv in customers) kv.Value.ring.enabled = kv.Key == Highlighted;
+        }
+
+        // LateUpdate fits each label's plate to its text, and lets the ring breathe.
+        void LateUpdate()
+        {
+            Fit(bannerPlate, banner);
+            foreach (var c in customers.Values)
+            {
+                Fit(c.plate, c.tag);
+                if (c.ring.enabled) c.ring.transform.localScale = Vector3.one * (1f + 0.08f * Mathf.Sin(Time.unscaledTime * 5f));
+            }
         }
 
         void Advance(Customer c, float dt)
@@ -518,7 +624,11 @@ namespace APA
         void ShowLabel(Customer c)
         {
             var label = LabelNow(c);
-            c.tag.text = label == "" ? c.name : c.name + "\n" + label;
+            // UX1: with two customers the canvas keeps a display-only
+            // segment's [anim] mark and drops its explanation (the page's
+            // card says it), so a walking label does not cover the other.
+            var shown = Multi && c.seg == "browse" ? "[anim] browsing" : Multi && c.seg == "counter" ? "[anim] to counter" : label;
+            c.tag.text = shown == "" ? c.name : c.name + "\n" + shown;
             // Kept inside the view: to the right of a customer on the left
             // half of the room, to the left on the right half.
             bool left = c.go.transform.localPosition.x < 6f;

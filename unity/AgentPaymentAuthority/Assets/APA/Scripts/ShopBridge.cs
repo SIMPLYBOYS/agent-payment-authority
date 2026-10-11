@@ -6,6 +6,11 @@
 // only and are never evidence of a decision. Version 1 is one customer per
 // generation (the viewer page, history replay); version 2 is the scene with
 // every customer in its own slot (docs/multi-agent-demo-design.md 5.2).
+// UX1 (docs/commercial-ux1.md) adds selection, version 2 only and outside
+// the projection: "Select" takes {scene, consumer} from the page and only
+// shows the ring; a click on a customer is reported as "select" with the
+// scene, that customer's slot and its consumer. The page decides; a click
+// never selects anything here.
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -38,7 +43,8 @@ namespace APA
         // page that does not know the kind ignores it.
         void Start()
         {
-            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers));
+            view.Picked = Picked;
+            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers) + ";select=1");
             Report("ready", -1, -1, view.UsingPlaceholders ? "placeholder" : "limezu");
         }
 
@@ -64,6 +70,35 @@ namespace APA
 
         // What the shop shows: phase, task, verdict and reason code.
         void Rendered() => Report("rendered", state.Gen, state.Seq, state.Phase + "|" + state.TaskId + "|" + state.T.Verdict + "|" + state.T.Reason);
+
+        [System.Serializable]
+        public class SelectMessage
+        {
+            public int scene = -1;
+            public string consumer; // "" or null: no one
+        }
+
+        // Picked: a click on a customer, in the version 2 scene only.
+        void Picked(string consumer)
+        {
+            if (mode != SceneState.Version || scene.Scene < 0) return;
+            Report("select", scene.Scene, scene.Of(consumer).Gen, consumer);
+        }
+
+        // Select: the page's choice, for the scene it names; another scene, a
+        // customer this build does not show or version 1 changes nothing.
+        public void Select(string json)
+        {
+            SelectMessage m = null;
+            try { m = JsonUtility.FromJson<SelectMessage>(json); } catch (System.Exception) { }
+            string outcome;
+            if (m == null || mode != SceneState.Version) outcome = "Invalid";
+            else if (m.scene != scene.Scene) outcome = "Stale";
+            else if (string.IsNullOrEmpty(m.consumer)) { view.Highlight(null); outcome = "Applied"; }
+            else if (System.Array.IndexOf(ProjectionState.Consumers, m.consumer) < 0) outcome = "Invalid";
+            else { view.Highlight(m.consumer); outcome = "Applied"; }
+            Report("selected", m != null ? m.scene : -1, 0, (m != null ? m.consumer ?? "" : "") + "|" + outcome);
+        }
 
         public void Receive(string json)
         {

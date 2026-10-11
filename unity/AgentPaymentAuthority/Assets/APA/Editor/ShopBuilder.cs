@@ -69,8 +69,10 @@ namespace APA.EditorTools
             var cam = new GameObject("Main Camera").AddComponent<Camera>();
             cam.tag = "MainCamera";
             cam.orthographic = true;
-            cam.orthographicSize = 5.5f;
-            cam.transform.position = new Vector3(5.6f, 4.2f, -10f); // the room, the door's outside and the banner
+            // UX1: the room fills the view (3:2): the sidewalk outside the door
+            // on the left, the wall at the top, nothing much beyond.
+            cam.orthographicSize = 4.8f;
+            cam.transform.position = new Vector3(5.1f, 4.1f, -10f);
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = new Color(0.12f, 0.12f, 0.16f);
 

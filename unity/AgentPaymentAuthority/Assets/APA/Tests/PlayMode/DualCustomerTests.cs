@@ -41,7 +41,7 @@ public class DualCustomerTests
     [Test]
     public void BridgeReportComesFirst()
     {
-        Assert.AreEqual("bridge:0:0:versions=1,2;customers=consumer-a,consumer-b", bridge.reports[0]);
+        Assert.AreEqual("bridge:0:0:versions=1,2;customers=consumer-a,consumer-b;select=1", bridge.reports[0]);
         StringAssert.StartsWith("ready:", bridge.reports[1]);
     }
 
