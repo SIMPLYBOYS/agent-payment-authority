@@ -1,6 +1,6 @@
 # UX1：商業展示主畫面與操作重整
 
-> 2026-10-12，Claude Code。依 vault〈Claude-Code-商業展示UX1主畫面與操作重整派工-20261012〉。分支 `commercial-ux1`，從 `32e5183` 建立。
+> 2026-10-12，Claude Code。**狀態：UX1 已實作，Claude Code 執行，待 Codex 核對；Aaron 尚未判定畫面與操作是否達到本片目標。**依 vault〈Claude-Code-商業展示UX1主畫面與操作重整派工-20261012〉。分支 `commercial-ux1`，從 `32e5183` 建立。
 > UX1 是暫稱，不占付款或 Admin 的任務編號。只用 fake CLI 與合成資料驗證；不執行真實 CLI。不改 Policy、Store schema、事件契約、付款、Gate、認證、版本釘選、plugin 例外、登入與配對權限。
 
 ## 1 版面與操作安排（實作前）
@@ -39,3 +39,98 @@ Unity 場景：
 - 畫布上的標題保留（`M1 / no payment`、LimeZu 署名），改小放在角落；雙客人模式的狀態列不再畫在畫布上（網頁操作卡已有），文字仍保留給測試。
 - 走道、站點與道具位置不變（不穿越道具、不瞬移）；動畫仍只跟隨已提交的狀態。
 - 新增的橋接只有兩個最小訊息：頁面 → Unity `Select`（`{scene, consumer}`，只控制選取圈），Unity → 頁面 `select` 回報（點到的 consumer 與其欄位世代）。投影與完成回報契約不變。
+
+## 2 實作（Claude Code 執行，待 Codex 核對）
+
+分支 `commercial-ux1`，從 `32e5183` 開始。產品：`d27abde`（Unity）、`915cce7`（主持人頁）、`fc89b52`（回歸發現的修正：不自行選人、fake 開始鍵文字、能力短列留在頁首、`adapter.runCard`）。測試與計畫：`e9763ca`（UX1 瀏覽器流程與共用 harness、既有流程的選擇器）、`1e1ec30`、`03e46fd`、`4438dda`、`58a7c5d`（檢查計畫與 ux1-ui 的修正）。文件：本節所在的提交。
+
+**網頁**（`web/host.html`、`host.js`、`style.css`、`scene.js`、`unity.js`、`adapter.js`、`app.js`）：
+- 主持人頁：左側放大的商店畫布；右側是每位 Agent 的操作卡、「一起開始」、選取摘要（標題列有「查看證據」）；查證放在抽屜；憑證、就緒、最近場次、手動 viewer、切換與回放收在頁尾「進階」（歷史模式與手動 viewer 時自動展開一次）。既有元素 ID 不變，`/` viewer 頁版面不變。
+- 操作卡（`adapter.runCard` 判斷執行狀態、停止可用性與呼叫數）：執行中／停止中（仍占名額）／已結束／未開始；已回覆工具呼叫 N 次（Host 的 `tool_calls`，含被拒的呼叫；只在執行中或停止中提供），沒有值時「未確認」，場次清單讀取失敗時「未確認（場次清單讀取失敗）」，場次結束後「場次結束後不提供」，從不寫 0；業務狀態取自場景欄位，Agent 已結束而 Ask 未到期時「執行已結束／請購待核准（M1 無核准功能；到期前不會付款）」；按鈕：選取、開始、停止 Agent（只有執行中可按；停止中與已結束停用並寫明原因）、取消請購／task（先確認，說明會取消整個 task 與 `TASK_CANCELLED`；場次執行中不提供）。
+- 選取：操作卡、卡上的「選取」與點 Unity 角色是同一個動作——面板改看該客人的場景 task（照舊用該 consumer 的 viewer token），畫布顯示選取圈。不會自行選人：重新載入或換憑證後不切換任何客人（既有 3.2 規則；開始一場時照舊開啟它）。
+- 點選回報的核對（`scene.picked`）：只採用目前場景世代、該客人目前欄位世代、且該欄位有 task 的回報；舊場景、舊欄位、未知客人、回放中都丟棄（`#unity-canvas` 的 `data-picks-dropped` 計數）。
+- 抽屜：「查看證據」開啟右側抽屜（查證面板、工具紀錄、Timeline、Inspector）；Esc 或「關閉」關閉，焦點回到原按鈕；不重啟場景、不清空選取、不停輪詢。
+- 頂部：模式徽章（fake／live／歷史／未確認）、能力短列（付款未實作等）、警示；live 與歷史回放的完整說明照舊在商店上方，live 的訂閱用量與 plugin 例外以短標示顯示在操作區，全文在「展開完整說明」，開始前就看得到。
+
+**Unity**（`ShopView.cs`、`ShopBridge.cs`、`ShopBuilder.cs`）：
+- 鏡頭收緊（正交大小 5.5 → 4.8，中心 (5.1, 4.1)），商店占滿畫布；門外加兩格人行道；B 的店外等待列 y 0.2 → 0.6，標籤不再貼著畫布下緣。走道其他站點與道具位置不變。
+- 名稱與狀態放在該客人顏色的不透明底牌上（A 藍、B 橙）；腳下有同色標記；選取時加黃色選取圈。標題（`M1 / no payment`、LimeZu 署名）縮小放在左上角並加底；雙客人時畫布不再畫狀態列（文字保留給測試），過場標籤縮為 `[anim] browsing`／`[anim] to counter`（完整說明在 `LabelOf` 與網頁）。
+- 橋接新增兩個最小訊息，不改投影與完成回報：頁面 → `Select {scene, consumer}`（只有目前場景、這個建置呈現的客人才移動選取圈；其他回報 `selected …|Stale/Invalid`）；點擊 → `select` 回報（場景、該客人的欄位世代、consumer）。v1 沒有選取。`bridge` 回報加 `;select=1`，舊建置不送 Select。
+
+## 3 驗收對照（派工第 5 節）
+
+| # | 情境 | 驗證層 | 結果 |
+|---|---|---|---|
+| 1 | 憑證後不必挑 consumer／task 就能開始雙場（開始時照舊開啟該場）；重新整理不自動執行，也不自行切換客人 | ux1-ui（token 檔；配對由 present-ui 驗證）、browser-ui 3.2 | PASS |
+| 2 | 同時活動時角色、狀態、呼叫數可辨識；點角色與點操作列選到同一對象 | ux1-ui（實際滑鼠點畫布）、Unity SelectionTests、Node | PASS |
+| 3 | 停 A 不影響 B；A 結束後停止不誤導；取消的提示與結果一致 | ux1-ui、Node `runCard` | PASS |
+| 4 | 開關證據不清場、不停輪詢、不換人；查較早 task 有標示 | ux1-ui（抽屜）、dual-ui（較早 task） | PASS |
+| 5 | 模式查詢失敗、慢／失敗讀取、晚到回覆、舊角色選取 | ux1-ui（`/api/mode` 失敗、面板讀取失敗、舊場景／舊欄位／未知客人的點擊）、dual-ui（R1 晚到）、Node | PASS |
+| 6 | Ask 到期、task 取消、執行停止可分辨；沒有核准、付款、交付按鈕 | ux1-ui | PASS |
+| 7 | 單人 viewer 與歷史回放可用；回放不當即時 | browser-ui、history-ui | PASS |
+| 8 | 1440×900、1280×900、390×844；抽屜鍵盤關閉與焦點返回 | ux1-ui（第一屏、無橫向捲動、抽屜） | PASS |
+
+## 4 驗證（Claude Code 執行，待 Codex 核對）
+
+證據都在 `artifacts/ux1/`（git 忽略，只在本機）；計畫 `scripts/verify/ux1-check-plan.json`，以 `go run ./cmd/m1-check --plan scripts/verify/ux1-check-plan.json --out artifacts/ux1` 執行。每次的 `summary.json` 記有基準、每步結束碼與秒數。
+
+| 執行 | 基準 | 步驟 | 結果 |
+|---|---|---|---|
+| `m1-check-20261011T191223Z` | `1e1ec30` | node 69／69（5.7 s）；reverse-selftest；Unity 場景重建＋EditMode 14／14＋PlayMode 25／25（103.6 s）；WebGL 建置（20.0 s，原始碼與先前開發建置相同，增量） | 前四步 PASS；第 5 步 webgl-hashes FAIL（exit 1：計畫在建置目錄內寫相對的證據路徑，我的錯），之後未執行。紀錄保留 |
+| `m1-check-20261011T192541Z` | `03e46fd`（只改計畫） | 從 webgl-hashes 起 | hashes PASS；ux1-ui FAIL（A 的 Ask 到期後，Unity 在等待時間內沒有回報「已呈現」；見限制 1）；之後未執行 |
+| `m1-check-20261011T192834Z` | `4438dda`（只改 ux1-ui） | 同上 | hashes PASS；ux1-ui FAIL（同一個等待，以及 1 像素截圖與視窗尺寸衝突，1440 的第一屏量到手機寬度）；之後未執行 |
+| `m1-check-20261011T193325Z` | `58a7c5d`（只改 ux1-ui） | 從 webgl-hashes 起 | **全部 PASS**：hashes；ux1-ui 73 項（99.9 s）；dual-ui（47.0 s）；browser-ui（468.1 s）；history-ui（50.2 s）；live-ui（83.8 s）；present-ui（106.3 s）；反向 5／5（244.6 s） |
+
+`1e1ec30..58a7c5d` 只改了 `scripts/verify/ux1-check-plan.json` 與 `ux1-ui.mjs`，產品程式與 Unity 沒有變，所以 node、Unity 測試與 WebGL 建置沿用 `191223Z` 的結果，沒有重跑。
+
+**沒有跑的**：Go race（本輪沒有改 Go）；完整容器、全部突變、`make m1-fixture`、M1 重新產包；任何真實 CLI（`live-ui`、`present-ui` 用替身 CLI 與測試建立的 HOME）。
+
+**WebGL**：由 `1e1ec30` 的 Unity 原始碼建置（Unity 6000.5.3f1；產品原始碼與 `fc89b52` 相同），sha256 在 `m1-check-20261011T193325Z/webgl.sha256`：
+
+```text
+c9c9e47618ffc1f8e90c99f33a1c75e3cb73a7ef1e5200860ad4537c32760468  WebGL.data
+3c7d6ab5547a85de82e08400bfd63520ba9c2f50c098eff05074a6a010e65666  WebGL.framework.js
+476908225cb4ee459c16a28dde2f222f1bde8e688aea9f197eef839f92f2b369  WebGL.loader.js
+9c70798fece7dc10be81453010ce83df91f9ecd14861ab48e5d8b2a0f7347113  WebGL.wasm
+```
+
+**反向**（`m-b-reverse.py "^UX1:"`，一次性副本，先確認未突變通過）：
+
+| 項目 | 突變 | 命中的斷言 |
+|---|---|---|
+| 舊場景的點擊不選人 | `scene.picked` 不比場景世代 | scene 測試「a click names a customer only for the current scene and its slot」`an older scene's click` |
+| 其他欄位的點擊不選人 | 不比欄位世代 | 同一測試 `another slot's click` |
+| Unity 不採用舊場景的 Select | 移除 `Stale` 判斷 | `SelectionTests.OnlyTheCurrentScenesSelectShowsTheRing` `an older scene's Select` |
+| 只有執行中的場次可停止 | `stoppable` 改為非 idle 即可 | 「a card stops only a running run…」`a stopping run is not stopped again` |
+| 沒有次數就不是 0 | 缺值寫成 0 次 | 同一測試 `no count from the host is unconfirmed, not 0` |
+
+晚到回覆的既有防護（M-B R1：舊欄位的回覆不送投影）沿用已驗收的反向項目，本輪以 dual-ui 回歸，沒有另造相同突變。
+
+**改前／改後截圖**（同尺寸；每張都先確認 token 與配對碼欄位是空的）：
+- 改前（`32e5183`）：`artifacts/ux1/before-32e5183/`：`1440x900`、`1280x900`、`390x844` 各有 `ready`、`a-asks-b-entered`、`both-ask`，加 `1440x900-both-ask-full`。
+- 改後（`58a7c5d`）：`artifacts/ux1/m1-check-20261011T193325Z/ux1-ui/`：三個尺寸的 `ready`、`two-at-work`；`1440x900` 的 `a-chosen-in-the-shop`、`evidence-drawer`、`a-stopped-b-running`、`b-ended-ask-pending`、`b-cancelled`、`a-expired`；`390x844` 的 `evidence-drawer`、`after-the-runs`。
+
+實際看過的畫布問題與改善：改前畫布約 415×310，客人標籤是細小的藍／橙字壓在貨架上，B 在店外時標籤貼著購物車與畫布邊；改後畫布在 1440 寬約 965×643，名稱牌有底、客人腳下有色塊，店外有人行道，選取的客人有黃圈。過程中發現並修正：名稱牌第一版太大，B 走過時蓋住 A（字級改小、過場標籤縮短）；標題白字落在白牆上看不到（加底）。
+
+## 5 限制
+
+1. **無頭瀏覽器的畫面更新**：headless Chrome 在頁面沒有其他變化時，Unity 的走路會停住，直到有完整截圖畫出整頁（A 的 Ask 到期後走出店外：`ux1-ui-dev-1`～`5`、`192541Z`、`192834Z`；頁面自己的 `requestAnimationFrame` 迴圈與 1 像素截圖都不夠）。ux1-ui 在等待 Unity 回報時每 2 秒畫一次整頁。可見的瀏覽器沒有驗證過，手動驗收第 8 步請留意。
+2. 畫布上的名稱牌在 390 寬時約 8 px，手機上主要靠操作卡閱讀。
+3. 點選角色需要滑鼠先移到該處（Unity 以移動事件更新游標位置）；測試以實際的移動加點擊驗證，觸控沒有驗證。
+4. 配對入口由 present-ui 驗證（需要終端機）；ux1-ui 以 token 檔取得同樣的憑證。
+5. 「查看較早紀錄」沒有放在操作卡上，沿用「進階」裡的 task 清單與最近場次；查看較早 task 時的差異提示與「回到場景這筆」照舊。
+6. 舊的 v2 Unity 建置（沒有 `select=1`）不顯示選取圈、也不回報點擊；操作卡照常可用。
+7. 切換選取時，選取圈會先短暫消失（換 viewer 時面板先清空），再出現在新的客人腳下。
+8. 這是 fake 與合成資料的驗證，不代表人工體驗已通過；真實 CLI 沒有執行。
+
+## 6 Aaron 手動驗收（fake 彩排；真實執行另行核准）
+
+1. `make present-fake`，在開啟的頁面輸入終端機的配對碼。
+2. 確認第一屏：左邊是商店，右邊兩張操作卡（未開始）與「一起開始」；頂部寫 fake、不付款。
+3. 按「一起開始」：兩張卡變「執行中」，「已回覆工具呼叫」數字增加；畫布上兩位客人各有名稱牌，A 腳下有黃色選取圈。
+4. 點畫布上的 B（或 B 卡的「選取」）：B 的卡變黃框，摘要與「正在查看」換成 B 的 task。
+5. 按「查看證據」：右側抽屜打開，商店仍在動；按 Esc 關閉，選取不變。
+6. 按 A 卡的「停止 Agent」：A 變「已結束」，停止鍵停用；B 不受影響。
+7. B 結束後卡上寫「執行已結束／請購待核准」；按「取消請購／task」先出現確認，按「返回」不取消，再按「確認取消 task」才取消。
+8. 等一筆 Ask 30 秒到期：卡上寫到期；畫面上沒有核准或付款按鈕。**請特別留意這一步畫布上的客人是否走出店外**（見限制）。
+9. 把視窗縮到手機寬度：商店在最上方，沒有橫向捲動。

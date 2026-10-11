@@ -10,6 +10,8 @@
 
 ## 1 畫面
 
+> **UX1（10/12，待 Codex 核對）**：主持人頁 `/host` 改為場景優先：放大的商店、每位 Agent 的操作卡、選取摘要、證據抽屜、「進階」收合；畫布加人行道、名稱底牌與選取圈，橋接只多「Select」與點擊回報。`/` viewer 頁與歷史回放規則不變。見 [commercial-ux1.md](commercial-ux1.md)。
+>
 > **M-B（10/11）**：主持人頁搭配支援 v2 的 Unity 建置時，兩位客人同時在店內，各自依自己最新場次的事件呈現（橋接 v2：場景世代＋每位客人的欄位世代，六項完成回報）；`/` viewer 頁與歷史回放維持本文件的 v1 單客人規則。見 [multi-agent-demo-design.md](multi-agent-demo-design.md) 第 5 節。
 
 頁首固定「M1／fake agent／不付款」。三區：
