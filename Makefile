@@ -13,6 +13,7 @@ check-contracts:
 	node scripts/check-contract-vectors.mjs
 	node --test web/test/adapter.test.mjs  # Dashboard adapter (docs/demo-ui.md); the same Node
 	node --test web/test/hostcreds.test.mjs  # /host credentials (docs/demo-operation-design.md 6.3)
+	node --test web/test/scene.test.mjs  # /host scene with a slot per customer (docs/multi-agent-demo-design.md 5)
 
 build:
 	go build -o bin/demo ./cmd/demo

@@ -203,7 +203,7 @@ func TestHostPage(t *testing.T) {
 	if _, body, _ := h.get("/", ""); bytes.Contains(body, []byte(`type="file"`)) || bytes.Contains(body, []byte("host.js")) {
 		t.Error("the viewer page / offers the token file")
 	}
-	for _, a := range []string{"host.js", "hostcreds.js"} {
+	for _, a := range []string{"host.js", "hostcreds.js", "scene.js"} {
 		if code, _, hdr := h.get("/ui/"+a, ""); code != 200 || !strings.HasPrefix(hdr.Get("Content-Type"), "text/javascript") {
 			t.Errorf("/ui/%s: %d", a, code)
 		}

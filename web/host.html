@@ -12,6 +12,7 @@
   <strong class="badge" data-mode="unknown">模式未確認（讀取中）</strong>
   <span id="mode-chip" class="chip" data-mode="live">即時</span>
   <span id="current" class="chip">目前：未選擇 task</span>
+  <span id="scene-summary" class="chip" hidden></span>
   <span class="caps">能力：模式未確認（不代表 fake 或真實 Agent）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行</span>
   <span id="alerts"></span>
   <button type="button" id="load-file">進階：載入 token 檔</button>
@@ -30,11 +31,12 @@
   <section id="control" class="host-control" aria-label="主持人控制" hidden>
     <div class="host-row">
       <span id="run-scenarios" class="host-row"></span>
+      <button type="button" id="start-all" hidden></button>
       <span id="control-now" class="host-row"></span>
       <button type="button" id="show-evidence">查看證據</button>
     </div>
     <p id="run-status" data-state="idle"></p>
-    <p id="live-warning" class="live-warning" hidden>真實 Agent 即時展示：按「開始（真實 CLI）」會實際執行 Claude Code CLI，可能使用本人訂閱額度；開發展示例外，plugins 內容與行為未確認，不是嚴格零 plugin 模式；合成資料、不付款。一次一場、不自動重試；清除瀏覽器憑證不會撤回已受理的場次。</p>
+    <p id="live-warning" class="live-warning" hidden>真實 Agent 即時展示：按「開始（真實 CLI）」會實際執行 Claude Code CLI，可能使用本人訂閱額度；開發展示例外，plugins 內容與行為未確認，不是嚴格零 plugin 模式；合成資料、不付款。每位客人一次一場，同時執行數不超過部署設定的上限；不自動重試；清除瀏覽器憑證不會撤回已受理的場次。</p>
     <p class="scene-note">M1 無核准能力：Ask 停在等待，30 秒後由後端記錄到期。開始只會建立新的 task，不重跑已有的 task。</p>
   </section>
 </section>
@@ -47,11 +49,14 @@
     <p id="live-note" class="replay-note" hidden>真實 Agent 即時展示：主持人按「開始」才會實際執行 Claude Code CLI（可能使用本人訂閱額度）；開發展示例外，plugins 內容與行為未確認，不是嚴格零 plugin 模式；合成資料、不付款。商店場景只呈現 Store 已提交的狀態，過場是展示動畫。</p>
     <canvas id="unity-canvas" width="768" height="512"></canvas>
     <p id="unity-status" data-state="loading">Unity 場景載入中…</p>
+    <p id="scene-cap" class="scene-cap" hidden></p>
+    <ul id="scene-status" class="scene-status" aria-label="場景狀態" hidden></ul>
     <div id="scene-text"></div>
     <p class="credit">像素素材：LimeZu（limezu.itch.io）；素材未接入時為 placeholder</p>
   </section>
   <aside class="card" aria-label="這筆請購">
     <h2>這筆請購</h2>
+    <p id="view-note" class="view-note" hidden><span id="view-note-text"></span> <button type="button" id="view-back">回到場景這筆</button></p>
     <div id="card"></div>
     <details id="evidence-box">
       <summary>查證這筆 ▸</summary>

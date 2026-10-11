@@ -18,6 +18,12 @@
 // The host's page /host (host.js) uses the same module: it hands a viewer
 // token from its loaded file to useViewer, clears with forget, and is told
 // of a 401 of the current generation through onUnauthorized.
+//
+// On /host with a Unity build that shows version 2, the shop belongs to the
+// scene (scene.js: every consumer's newest run at once; M-B,
+// docs/multi-agent-demo-design.md 5.4): this module's panels then follow the
+// chosen consumer and task only and send nothing to the shop; a replay hands
+// the shop back to this module until it ends.
 
 import * as A from "./adapter.js";
 import { renderInspector, renderTimeline, renderSceneText, renderCard, renderEvidence } from "./render.js";
@@ -78,6 +84,10 @@ const art = () => unity.art === "limezu" ? "LimeZu 素材" : "placeholder，Lime
 
 const unity = new UnityHost($("unity-canvas"), (s, detail) => {
   const box = $("unity-status");
+  if (s === "rendered2") { // the scene's (version 2): one customer's slot
+    if (sceneReport) sceneReport(detail);
+    return;
+  }
   if (s === "rendered") {
     // detail: what the shop says it shows, for the generation last sent
     // (unity.js drops older reports, so a late one cannot bring back a
@@ -112,6 +122,18 @@ export function refreshNow() {
 // unityInfo: whether the shop is ready and which art it uses, for /host.
 export const unityInfo = () => ({ ready: unity.ready, art: unity.art });
 
+// For /host's scene (scene.js): the shop, the scene's reports, what the
+// panels compare with for a consumer (its scene task's projection and
+// report), and the replay's hand-over of the shop.
+export const shop = () => unity;
+let sceneReport = null;
+let sceneView = null;
+let replayMode = null;
+export function onSceneReport(fn) { sceneReport = fn; }
+export function setSceneView(fn) { sceneView = fn; }
+export function onReplayMode(fn) { replayMode = fn; }
+export function refreshPanels() { drawScene(); renderPanels(); }
+
 // shopReset drops what the shop last reported (generation, sequence, task,
 // phase, verdict, reason) and says what it waits for now: ready (no task
 // chosen) or syncing (the current generation is not shown yet). Loading and
@@ -120,6 +142,12 @@ function shopReset(waiting) {
   const box = $("unity-status");
   for (const k of SHOWN) delete box.dataset[k];
   if (!unity.ready) return;
+  if (unity.sceneOwned) { // the scene shows every consumer; its own lines say what each shows
+    mirrored = ""; // the next mirror writes again
+    box.dataset.state = "scene";
+    box.textContent = "Unity 場景：每位客人各自跟隨自己最新的場次（見下方場景狀態）";
+    return;
+  }
   box.dataset.state = waiting;
   box.textContent = waiting === "ready" ? "Unity 場景就緒（" + art() + "）：等待選擇 task" : "Unity 同步中（等待最新快照）";
 }
@@ -179,6 +207,7 @@ export function forget(message) {
   if (listAbort) listAbort.abort();
   $("token").value = "";
   replayRun++;
+  if (mode === "replay" && replayMode) replayMode(false); // a replay ended this way gives the shop back too
   setMode("live");
   stopPolling();
   expanded.clear();
@@ -234,8 +263,17 @@ function sendShop(msg) {
 function drawScene() {
   const sc = mode === "replay" ? replaySc : A.scene(state.snapshot);
   if (!sc) return;
-  const mo = motion && motion.gen === state.gen ? motion : null;
+  let mo = motion && motion.gen === state.gen ? motion : null;
   const notes = [...sc.notes];
+  if (unity.sceneOwned && mode !== "replay") {
+    // The scene's (version 2): what the shop does for the chosen consumer's
+    // scene task; an older task chosen is said to be one.
+    const sv = sceneView && state.consumer ? sceneView(state.consumer) : null;
+    if (!sv || sv.task !== state.taskId) {
+      mo = null;
+      notes.unshift(sv ? "商店場景呈現的是 " + sv.task + "（你正在查看較早的 task）" : "這位客人尚無場次");
+    } else mo = sv.motion ? { rule: sv.motion.rule, text: sv.motion.text, first: sv.motion.first, done: sv.shown } : null;
+  }
   if (history && sc.phase === "waiting") notes.push("歷史快照：執行結束時待人工核准；期限早已過，不是即時等待");
   let now = "";
   if (mo && mo.first) { now = "first"; notes.unshift(FIRST_LOAD); }
@@ -255,7 +293,20 @@ function renderPanels() {
     trace: live && liveTrace && liveTrace.gen === state.gen ? liveTrace.reply : null, traceFailed: !!(live && liveTrace && liveTrace.gen === state.gen && liveTrace.failed) };
   const c = A.card(view, rp ? null : chosenPo, ctx);
   const mo = motion && motion.gen === state.gen ? motion : null;
-  const e = snap ? A.evidence(snap, c && c.po, { ...ctx, sent, report: lastReport, motion: mo && { rule: mo.rule, text: mo.first ? FIRST_LOAD + "（不播放過場）" : mo.text } }) : null;
+  let shopCtx = { sent, report: lastReport, motion: mo && { rule: mo.rule, text: mo.first ? FIRST_LOAD + "（不播放過場）" : mo.text } };
+  // The scene's (version 2): the chosen consumer's scene task, compared by
+  // the six-field rule; an older task chosen is said to be one, not a failure.
+  const sv = !rp && unity.sceneOwned && sceneView && state.consumer ? sceneView(state.consumer) : null;
+  const older = sv && state.taskId && sv.task !== state.taskId ? sv.task : "";
+  if (unity.sceneOwned && !rp) shopCtx = older ? { sent: null, report: null, motion: null, viewOlder: older } : { sent: sv && sv.sent, report: sv && sv.report, motion: sv && sv.motion };
+  const e = snap ? A.evidence(snap, c && c.po, { ...ctx, ...shopCtx }) : null;
+  if (unity.sceneOwned && !rp) mirrorScene(sv, older);
+  const vn = $("view-note");
+  if (vn) {
+    vn.hidden = !older;
+    vn.dataset.scene = older;
+    $("view-note-text").textContent = older ? "正在查看較早的 task（" + state.taskId + "）；場景呈現的是 " + older + "（查看與場景不同，不是同步失敗）" : "";
+  }
   // Rebuilt only when what they say changed: a poll or a Unity report that
   // changes nothing leaves the DOM (and an open menu or a scroll) alone.
   const cKey = JSON.stringify(c), eKey = JSON.stringify(e);
@@ -273,7 +324,36 @@ function renderPanels() {
   const chip = $("mode-chip");
   chip.dataset.mode = rp ? "replay" : "live";
   chip.textContent = rp ? "回放中 #" + rp.n + "／共 " + rp.m + "（唯讀）" : mode === "replay" ? "回放中（唯讀）" : history ? "歷史紀錄（非即時）" : live ? "即時（真實 Agent）" : "即時";
-  $("current").textContent = c ? "目前：" + c.title.replace(/^客人 /, "") + " · " + (c.scenePo || "尚無請購") + (rp ? "（回放當步）" : "") : "目前：未選擇 task";
+  $("current").textContent = unity.sceneOwned && !rp
+    ? (c ? "正在查看：" + c.title.replace(/^客人 /, "") + " 的請購" : "正在查看：未選擇 task")
+    : c ? "目前：" + c.title.replace(/^客人 /, "") + " · " + (c.scenePo || "尚無請購") + (rp ? "（回放當步）" : "") : "目前：未選擇 task";
+}
+
+// mirrorScene shows on #unity-status what the shop shows for the chosen
+// consumer: its scene slot, "rendered" only after Unity's exact report of
+// the projection last sent for it (the six-field rule); otherwise syncing,
+// no run yet, or that an older task is being viewed. Written only when it
+// changed.
+let mirrored = "";
+function mirrorScene(sv, older) {
+  const box = $("unity-status");
+  if (!unity.ready) return;
+  let st = "scene", text, data = {};
+  if (!sv) text = "Unity 場景：這位客人尚無場次（每位客人各自跟隨自己最新的場次）";
+  else if (older) text = "Unity 場景呈現 " + older + "（你正在查看較早的 task）";
+  else if (sv.shown && sv.report) {
+    const r = sv.report;
+    st = "rendered";
+    data = { gen: String(r.gen), seq: String(r.seq), phase: r.phase, task: r.task, verdict: r.verdict || "", reason: r.reason || "" };
+    text = "Unity 已呈現 " + r.task + " #" + r.seq + " " + r.phase + (r.reason ? "（" + r.reason + "）" : "");
+  } else { st = "syncing"; text = "Unity 同步中（等待最新快照）"; }
+  const key = st + "|" + text + "|" + JSON.stringify(data);
+  if (key === mirrored) return;
+  mirrored = key;
+  for (const k of SHOWN) delete box.dataset[k];
+  Object.assign(box.dataset, data);
+  box.dataset.state = st;
+  box.textContent = text;
 }
 
 // applyHistory labels the page for the host's history mode (a recorded real
@@ -436,6 +516,7 @@ export function setAlert(key, text, kind = "warn") {
 // currentTask is the Dashboard's task, for /host's row of controls; a view
 // change is announced with the apa:view event.
 export const currentTask = () => state.taskId;
+export const currentConsumer = () => state.consumer;
 const viewChanged = () => document.dispatchEvent(new Event("apa:view"));
 
 // listFailed marks the list as not loaded; the next refresh tries again.
@@ -476,6 +557,7 @@ function renderList(tasks) {
 export function openTask(id) {
   if (!token || !/^[A-Za-z0-9._-]{1,64}$/.test(id)) return setStatus("task ID 格式不正確", "error");
   replayRun++;
+  if (mode === "replay" && replayMode) replayMode(false);
   setMode("live");
   stopPolling();
   expanded.clear();
@@ -590,6 +672,7 @@ function show(first) {
 async function replay() {
   if (!state.snapshot || !token) return;
   const run = ++replayRun;
+  if (replayMode) replayMode(true); // the scene hands the shop over for the replay
   setMode("replay");
   stopPolling();
   inFlight = false;
@@ -626,6 +709,7 @@ function restore(run) {
   if (run !== replayRun || mode !== "replay") return;
   replayRun++;
   setMode("live");
+  if (replayMode) replayMode(false); // the scene takes the shop back: a new scene, every slot again
   A.bump(state);
   shownSeq = -1;
   chosenPo = null;

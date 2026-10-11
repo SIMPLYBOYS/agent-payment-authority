@@ -21,8 +21,11 @@
 // click: a clear, a new file, the manual mode, pagehide, or a switch of
 // consumer or task drops it; nothing is opened or signed in for it.
 
-import { nextModeSeq, confirmMode, setStatus, forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, setAlert } from "./app.js";
+import { nextModeSeq, confirmMode, setStatus, forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, currentConsumer, setAlert,
+  shop, onSceneReport, setSceneView, onReplayMode, refreshPanels } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
+import { createScene } from "./scene.js";
+import * as A from "./adapter.js";
 
 const $ = (id) => document.getElementById(id);
 const READY_MS = 5000; // readiness is read every 5 s while the page is visible
@@ -56,6 +59,70 @@ const DETAILS_MAX = 5; // ponytail: task reads per poll for the Ask notes; more 
 
 const creds = createHostCreds({ call, onChange: render });
 
+// M-B (docs/multi-agent-demo-design.md 5): with a Unity build that shows
+// version 2 and a host that starts runs, the shop is the scene: every
+// consumer's newest run at once, each read with its own viewer token. The
+// panels (app.js) follow the chosen consumer and task only.
+const scene = createScene({ unity: shop(), token: (c) => creds.viewerToken(c), onChange: () => { renderScene(); refreshPanels(); } });
+onSceneReport((r) => scene.rendered(r));
+setSceneView((c) => scene.view(c));
+onReplayMode((on) => (on ? scene.pause() : scene.resume()));
+const short = (c) => (c === "consumer-a" ? "A" : c === "consumer-b" ? "B" : c);
+
+// hosting: this host starts runs (not history mode) and the page holds its credentials.
+const hosting = () => !!(creds.view().hasHost && lastReady && lastReady.status && lastReady.status.runs && !lastReady.status.history);
+
+// ensureScene starts the scene once the shop and the host allow it, and
+// stops it when they no longer do (the shop goes back to the Dashboard).
+function ensureScene() {
+  const u = shop();
+  if (hosting() && u.ready && u.supports2) {
+    if (!scene.started) {
+      scene.start();
+      if (lastRuns && lastRuns.gen === creds.gen) scene.setRuns(lastRuns.runs);
+    }
+  } else if (scene.started) scene.stop();
+  renderScene();
+}
+
+// renderScene: one line per customer of the scene, its summary, and what
+// the scene cannot show (never a run left out without a word).
+function renderScene() {
+  const u = shop();
+  const st = lastReady && lastReady.status;
+  let cap = "";
+  if (hosting() && u.ready && !u.supports2) {
+    cap = "此 Unity 建置只支援單一客人：場景只呈現選取的 " + (currentConsumer() || "客人") + "；其他位的資料仍在面板與場次列表";
+  } else if (hosting() && u.supports2) {
+    const consumers = [...new Set(((st.runs && st.runs.scenarios) || []).map((x) => x.consumer_id))];
+    const ns = A.notShown(consumers, u.bridge.customers, st.capacity && st.capacity.max_runs);
+    if (ns.consumers.length || ns.overCap) {
+      cap = "此場景最多同時呈現 " + u.bridge.customers.length + " 位（" + u.bridge.customers.join("、") + "）"
+        + (ns.consumers.length ? "；" + ns.consumers.join("、") + " 的場次只在場次列表與面板中" : "")
+        + (ns.overCap ? "；同時執行上限 " + st.capacity.max_runs + " 高於場景能呈現的人數" : "");
+    }
+  }
+  const capBox = $("scene-cap");
+  capBox.hidden = !cap;
+  capBox.textContent = cap;
+  setAlert("scene-cap", cap, "warn");
+  const slots = scene.started ? scene.slots() : [];
+  const list = $("scene-status");
+  list.hidden = !scene.started;
+  list.replaceChildren(...slots.map((x) => {
+    const li = document.createElement("li");
+    Object.assign(li.dataset, { consumer: x.consumer, task: x.task || "", seq: String(x.seq), phase: x.phase, slot: String(x.slot), scene: String(x.scene),
+      shown: String(x.shown), read: x.read });
+    const sync = !scene.active ? "回放中：場景暫停" : x.read !== "ok" && x.read !== "loading" ? "讀取失敗（" + x.read + "），保留上次資料" : x.seq < 0 ? "同步中"
+      : x.shown ? "Unity 已呈現" : x.moving ? "Unity 補間中" : "Unity 尚未回報";
+    li.textContent = "客人 " + short(x.consumer) + "：" + (x.task || "—") + (x.seq >= 0 ? " #" + x.seq : "") + (x.label ? " · " + x.label : "") + " · " + sync;
+    return li;
+  }));
+  const sum = $("scene-summary");
+  sum.hidden = !scene.started;
+  sum.textContent = "場景：" + (slots.length ? slots.map((x) => short(x.consumer) + (x.seq >= 0 ? " #" + x.seq : "") + " " + (x.label || "同步中")).join(" · ") : "尚無場次");
+}
+
 // A 401 the Dashboard saw for its current viewer: the whole file is stale.
 onUnauthorized(() => { if (!creds.unauthorized(viewerGen)) forget(); });
 
@@ -73,6 +140,7 @@ function render(v) {
     clearTimeout(readyTimer);
     clearTimeout(runsTimer);
     setRunStatus("", "idle");
+    scene.reset(); // the old identity's slots and reads go too
   }
   // D1: the credentials fold once a file is loaded or the page paired; the
   // status bar keeps a way to load one (section 4.1). Pairing (docs/cli-poc.md
@@ -136,6 +204,7 @@ async function pollReadiness() {
         if (r.status) confirmMode(mseq, r.status.history && r.status.history.record === "live_history" ? r.status.history : r.status.live && r.status.live.record === "live_demo" ? r.status.live : null);
         renderReadiness();
         renderControl();
+        ensureScene();
       }
     }
   } finally {
@@ -186,6 +255,7 @@ function renderReadiness() {
         + (live.dev_demo_plugins ? "開發展示例外（plugins 內容與行為未確認）" : "嚴格模式")]
       : ["真實 CLI", "off", hist ? "未執行（歷史模式：顯示已保存的真實執行紀錄）" : "未啟用（fake 模式）"]);
     rows.push(["Unity 建置", st.unity_build.state, st.unity_build.state === "ok" ? "就緒（4 個建置檔）" : "缺少 " + missing.join("、") + "：請先完成首次準備"]);
+    if (st.capacity) rows.push(["同時執行上限", "info", st.capacity.max_runs + " 場（部署設定 --max-runs；目錄中 " + st.capacity.consumers + " 位客人，每位一次一場）"]);
     rows.push(["付款", "off", "無付款能力"]);
     // The binary's own record of its source (docs/cli-poc.md 56): a dirty
     // build is shown as such (Go counts untracked files as modified too).
@@ -221,6 +291,8 @@ function setRunStatus(text, state) {
 
 const ERRORS = {
   run_active: "上一場尚未結束；請先等它結束或停止它",
+  consumer_busy: "這位客人的場次尚未結束；請先等它結束或停止它",
+  capacity_full: "同時執行的場次已達上限（部署設定）；請先等一場結束或停止一場",
   no_free_task: "展示 task 已用完：請設定新的 APA_DB_PATH 後重啟，或擴充 demo registry",
   request_id_conflict: "請求編號與另一個情境衝突，未開始",
   unknown_scenario: "沒有這個情境",
@@ -303,25 +375,47 @@ function renderControl() {
   const live = !!(lastReady && lastReady.status && lastReady.status.live);
   $("live-warning").hidden = !live;
   const runs = (lastRuns && lastRuns.gen === creds.gen && lastRuns.runs) || [];
-  const active = runs.some((r) => r.live === "running" || r.live === "stopping");
-  pick.replaceChildren(...scenarios.map((sc) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.dataset.scenario = sc.id;
-    b.textContent = (live ? "開始（真實 CLI）：" : "開始（fake，不執行模型）：") + sc.label + "（" + sc.consumer_id + "）";
-    b.disabled = starting || active;
-    b.addEventListener("click", () => start(sc));
-    return b;
+  // M-B: one running or stopping run per consumer, at most max_runs in all
+  // (a deployment setting; the server decides again).
+  const activeRuns = runs.filter((r) => r.live === "running" || r.live === "stopping");
+  const busy = new Set(activeRuns.map((r) => r.consumer_id));
+  const maxRuns = (lastReady && lastReady.status && lastReady.status.capacity && lastReady.status.capacity.max_runs) || 1;
+  const full = activeRuns.length >= maxRuns;
+  const consumers = [...new Set(scenarios.map((sc) => sc.consumer_id))].sort();
+  pick.replaceChildren(...consumers.map((c) => {
+    const row = document.createElement("span");
+    row.className = "consumer-row";
+    row.dataset.consumer = c;
+    row.append("客人 " + short(c) + "：");
+    for (const sc of scenarios.filter((x) => x.consumer_id === c)) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.scenario = sc.id;
+      b.textContent = (live ? "開始（真實 CLI）：" : "開始（fake，不執行模型）：") + sc.label + "（" + sc.consumer_id + "）";
+      b.disabled = starting || busy.has(c) || full;
+      b.title = busy.has(c) ? "這位客人的場次尚未結束" : full ? "同時執行的場次已達上限" : "";
+      b.addEventListener("click", () => start(sc));
+      row.append(b);
+    }
+    return row;
   }));
-  // The row under the shop: the running run's stop and the Dashboard's
+  // 一起開始: each consumer's first scenario, as separate requests; not one
+  // atomic start (docs/multi-agent-demo-design.md 3.5).
+  const pair = consumers.map((c) => scenarios.find((x) => x.consumer_id === c));
+  const all = $("start-all");
+  all.hidden = pair.length < 2 || maxRuns < 2;
+  all.textContent = "一起開始：" + pair.map((sc) => sc.id + "（" + short(sc.consumer_id) + "）").join(" ＋ ") + "（各自送出，不保證都成功）";
+  all.disabled = starting || pair.every((sc) => busy.has(sc.consumer_id)) || full;
+  all.onclick = () => startAll(pair);
+  // The row under the shop: every running run's stop and the Dashboard's
   // task's cancel, the same operations as in the runs list (section 4.1).
   const now = [];
-  const act = runs.find((r) => r.live === "running");
-  if (act) {
+  for (const act of runs.filter((r) => r.live === "running")) {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "row-stop";
-    b.textContent = "停止 " + act.task_id;
+    b.dataset.run = act.run_id;
+    b.textContent = "停止 " + short(act.consumer_id) + " " + act.task_id;
     b.addEventListener("click", () => stop(act.run_id));
     now.push(b);
   }
@@ -400,6 +494,31 @@ async function start(sc) {
     setRunStatus((r.status === 202 ? "已開始 " : "已受理（同一請求）") + r.body.task_id, "ok");
     await openRun(r.body, g);
   } else setRunStatus(ERRORS[r.body && r.body.error] || "未開始（" + r.status + "）", "error");
+  pollRuns();
+}
+
+// startAll sends one start per consumer, one after the other, each with its
+// own request ID; each reply is shown as it is, and a refused one is not
+// retried. The panels open the first one accepted.
+async function startAll(pair) {
+  if (starting) return;
+  const g = creds.gen;
+  starting = true;
+  renderControl();
+  setRunStatus("一起開始：送出 " + pair.length + " 個獨立的開始請求…", "busy");
+  const results = [];
+  for (const sc of pair) {
+    const r = await creds.startRun(sc.id);
+    if (g !== creds.gen || !r || r.gen !== creds.gen) return; // cleared or replaced: nothing acts
+    results.push([sc, r]);
+  }
+  starting = false;
+  renderControl();
+  const ok = results.filter(([, r]) => !r.error && (r.status === 202 || r.status === 200));
+  setRunStatus("一起開始（各自送出，不是一次成功或一次失敗）：" + results.map(([sc, r]) => short(sc.consumer_id) + " "
+    + (r.error ? "沒有收到回覆，未確認" : r.status === 202 ? "已開始 " + r.body.task_id : r.status === 200 ? "已受理（同一請求）" + r.body.task_id
+      : ERRORS[r.body && r.body.error] || "未開始（" + r.status + "）")).join("；"), ok.length === results.length ? "ok" : ok.length ? "warn" : "error");
+  if (ok.length) await openRun(ok[0][1].body, g);
   pollRuns();
 }
 
@@ -497,7 +616,7 @@ async function pollRuns() {
       const r = await creds.runs();
       if (r && r.gen === creds.gen && r.runs) {
         const t = await readTasks(r.runs);
-        if (g === creds.gen) { lastRuns = r; lastRunsError = null; if (t) lastTasks = t; renderControl(); }
+        if (g === creds.gen) { lastRuns = r; lastRunsError = null; if (t) lastTasks = t; renderControl(); scene.setRuns(r.runs); }
       } else if (r && r.gen === creds.gen && r.error) {
         lastRunsError = r.error;
         renderControl();
@@ -545,7 +664,9 @@ onTypedSignIn(() => {
   viewerGen = creds.gen;
 });
 // 「清除目前 viewer」 keeps the loaded file; app.js clears the viewer only.
-new MutationObserver(renderReadiness).observe($("unity-status"), { attributes: true, attributeFilter: ["data-state"] });
+new MutationObserver(() => { renderReadiness(); ensureScene(); }).observe($("unity-status"), { attributes: true, attributeFilter: ["data-state"] });
+// 回到場景這筆: the panels go back to the chosen consumer's scene task.
+$("view-back").addEventListener("click", () => { const t = $("view-note").dataset.scene; if (t) openTask(t); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden && creds.view().hasHost) { pollReadiness(); pollRuns(); } });
 // Leaving the page: drop every credential, stop polling, end every step in
 // flight; app.js clears the Dashboard and the shop. Nothing returns on a

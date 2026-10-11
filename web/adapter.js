@@ -296,6 +296,64 @@ export function clearMessage(gen) {
   return { v: BRIDGE_VERSION, gen, clear: true };
 }
 
+// ---- Version 2: the scene with a slot per customer (docs/multi-agent-demo-design.md 5) ----
+// The host page shows every consumer's latest run at once. scene is the
+// page's scene generation (a credentials change, a replay); slot is one
+// consumer's slot generation (its scene task changed). A message for one
+// customer never moves, clears or completes another.
+export const BRIDGE_V2 = 2;
+
+// projection2: the version 2 message of a slot's committed snapshot.
+export function projection2(slotState, scene, slot, animate) {
+  const m = projection(slotState, animate);
+  if (!m) return null;
+  const { gen, ...rest } = m;
+  return { ...rest, v: BRIDGE_V2, scene, slot, clear: false };
+}
+
+export const sceneClear2 = (scene) => ({ v: BRIDGE_V2, scene, clear: true });
+export const slotClear2 = (scene, consumer, slot) => ({ v: BRIDGE_V2, scene, consumer, slot, clear: true });
+
+// parseReport2: Unity's version 2 rendered report, or null when malformed:
+// gen is the scene; detail is consumer|slot|task|phase|verdict|reason.
+export function parseReport2(gen, seq, detail) {
+  const parts = String(detail).split("|");
+  if (parts.length !== 6 || !Number.isInteger(gen) || !Number.isInteger(seq) || !/^(0|[1-9][0-9]{0,8})$/.test(parts[1])) return null;
+  const [consumer, slot, task, phase, verdict, reason] = parts;
+  if (!consumer || !task || !phase) return null;
+  return { scene: gen, seq, consumer, slot: Number(slot), task, phase, verdict, reason };
+}
+
+// sameShown2: whether a version 2 report names exactly the projection last
+// sent for that customer: scene, consumer, slot, task, seq and phase, all
+// six. Anything else (a missing field, another customer, an older slot or
+// scene, an older or a never sent later sequence) confirms nothing.
+export const sameShown2 = (sent, rep) => !!sent && !!rep && Number.isInteger(rep.scene) && rep.scene === sent.scene && rep.consumer === sent.consumer
+  && rep.slot === sent.slot && rep.task === sent.task_id && rep.seq === sent.seq && rep.phase === sent.phase;
+
+// parseBridge: Unity's bridge report: the versions and customers the build
+// can show; null when malformed. A build without it shows one customer.
+export function parseBridge(detail) {
+  const m = /^versions=([0-9,]+);customers=([a-z0-9,-]*)$/.exec(String(detail));
+  if (!m) return null;
+  return { versions: new Set(m[1].split(",").map(Number)), customers: m[2] ? m[2].split(",") : [] };
+}
+
+// sceneTasks: each consumer's scene task, the task of its newest run (the
+// runs list is newest first). An older task stays out of the scene.
+export function sceneTasks(runs) {
+  const out = new Map();
+  for (const r of runs || []) if (r && r.consumer_id && r.task_id && !out.has(r.consumer_id)) out.set(r.consumer_id, { task: r.task_id, run: r.run_id, live: r.live || "" });
+  return out;
+}
+
+// notShown: the consumers whose runs the scene cannot show (not in the
+// build's customers), and whether the host's cap is above what it shows.
+export function notShown(consumers, customers, maxRuns) {
+  const can = new Set(customers);
+  return { consumers: consumers.filter((c) => !can.has(c)), overCap: Number.isInteger(maxRuns) && maxRuns > can.size };
+}
+
 // bump starts a new generation for the same viewer and task, keeping the
 // snapshot: the read-only historical replay uses it, so late replies and
 // animation callbacks of the previous generation are dropped.
@@ -573,16 +631,21 @@ export function evidence(snapshot, po, ctx) {
   // generation, task, sequence and phase. Anything else is "not yet in
   // step", never a completed sync (review of 7ffc45d, R1).
   const sent = ctx.sent, rep = ctx.report;
+  // Version 2: the report must be this customer's, of this slot (the
+  // six-field rule, sameShown2); viewing an older task compares nothing.
   const diffs = [];
   if (sent && rep) {
     if (rep.gen !== sent.gen) diffs.push("世代不同（Unity gen " + rep.gen + "）");
+    if (sent.consumer !== undefined && rep.consumer !== sent.consumer) diffs.push("客人不同（Unity " + str(rep.consumer) + "）");
+    if (sent.slot !== undefined && rep.slot !== sent.slot) diffs.push("欄位世代不同（Unity " + rep.slot + "，送出 " + sent.slot + "）");
     if (rep.task !== sent.task) diffs.push("task 不同（Unity " + str(rep.task) + "）");
     if (rep.seq < sent.seq) diffs.push("序號較舊（Unity #" + rep.seq + "，送出 #" + sent.seq + "）");
     else if (rep.seq !== sent.seq) diffs.push("序號不同（Unity #" + rep.seq + "）");
     if (rep.phase !== sent.phase) diffs.push("phase 不同（Unity " + str(rep.phase) + "）");
   }
   const same = !!(sent && rep) && diffs.length === 0;
-  const sync = !sent ? "尚未送出投影" : !rep ? "Unity 尚未回報：尚未一致" : same ? "Unity 已呈現 " + str(rep.task) + " #" + rep.seq + "（" + str(rep.phase) + "）"
+  const sync = ctx.viewOlder ? "你正在查看較早的 task；場景呈現的是 " + str(ctx.viewOlder) + "（查看與場景不同，不是同步失敗）"
+    : !sent ? "尚未送出投影" : !rep ? "Unity 尚未回報：尚未一致" : same ? "Unity 已呈現 " + str(rep.task) + " #" + rep.seq + "（" + str(rep.phase) + "）"
     : "Unity 尚未一致：" + diffs.join("、") + "（不是同步完成）";
   sections.push({ title: "場景對應", note: "Unity 的回報沒有 purchase_order_id；請購關聯由網頁依送出的投影推導，不是 Unity 獨立確認。", rows: [
     ["送出投影", sent ? (replay ? "回放 · " : "") + "gen " + sent.gen + " · " + str(sent.task) + " #" + sent.seq + " " + str(sent.phase) : "尚未送出", "網頁"],
