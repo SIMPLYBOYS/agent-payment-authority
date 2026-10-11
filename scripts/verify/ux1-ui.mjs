@@ -52,7 +52,7 @@ writeFileSync(catalog, JSON.stringify({ description: "ux1-ui", scenarios: [
 ] }));
 
 const SIZES = [[1440, 900], [1280, 900], [390, 844]];
-let demo, b;
+let demo, b, pump;
 const tokens = [];
 try {
   log("commit " + commit);
@@ -67,6 +67,13 @@ try {
   // A headless page counts as unfocused; Unity's frames then may wait for
   // something else to draw. The page is focused, as a presenter's would be.
   await b.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  // Headless Chrome was seen to hold Unity's walk while nothing else on the
+  // page changed (A's exit after its Ask expired waited until a screenshot
+  // drew a frame: ux1-ui-dev-1..5, m1-check-20261011T192541Z); a requested
+  // animation frame was not always enough. A 1-pixel screenshot every 0.5 s
+  // draws frames as a visible tab does. Not checked in a visible browser:
+  // the manual check watches an Ask expire (docs/commercial-ux1.md).
+  pump = setInterval(() => { b.send("Page.captureScreenshot", { format: "png", clip: { x: 0, y: 0, width: 1, height: 1, scale: 1 } }).catch(() => {}); }, 500);
   const size = (w, h) => b.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: w < 500 });
   const hostGet = async (path) => (await fetch("http://" + addr + path, { headers: { Authorization: "Bearer " + t.op } })).json();
   const hostTask = async (id) => (await fetch("http://" + addr + "/api/tasks/" + id, { headers: { Authorization: "Bearer " + t.host } })).json();
@@ -115,11 +122,6 @@ try {
     await b.send("Page.navigate", { url: "http://" + addr + "/host" });
     await b.waitFor(`document.readyState === "complete"`);
     await b.waitFor(`["ready","rendered","failed","scene","syncing"].includes(document.getElementById("unity-status").dataset.state)`, 90000);
-    // Headless Chrome was seen to hold Unity's frames while nothing else on
-    // the page draws (a walk then waits, ux1-ui-dev-1..5); a page that keeps
-    // drawing, as a visible tab does, lets them run. Not seen in a real
-    // browser; the manual check watches an Ask expire (docs/commercial-ux1.md).
-    await b.evaluate(`(() => { const f = () => requestAnimationFrame(f); f(); return true; })()`);
     // Unity's reports, as they come (the page's own handler still runs).
     await b.evaluate(`(() => { window.__reports = []; const r = window.apaUnityReport; window.apaUnityReport = (k, g, q, d) => { window.__reports.push([String(k), Number(g), Number(q), String(d)]); return r(k, g, q, d); }; return true; })()`);
     return loadFile();
@@ -288,6 +290,7 @@ try {
 } catch (e) {
   check("the flow ran to its end", false, String(e && e.stack || e).slice(0, 400));
 } finally {
+  clearInterval(pump);
   if (b) b.close();
   if (demo) await demo.stop();
 }
