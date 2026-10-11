@@ -48,7 +48,7 @@
   "cmd": [
    "sh",
    "-c",
-   "cd unity/AgentPaymentAuthority/Build/WebGL/Build && shasum -a 256 WebGL.data WebGL.framework.js WebGL.loader.js WebGL.wasm > {dir}/webgl.sha256 && cat {dir}/webgl.sha256"
+   "shasum -a 256 unity/AgentPaymentAuthority/Build/WebGL/Build/WebGL.data unity/AgentPaymentAuthority/Build/WebGL/Build/WebGL.framework.js unity/AgentPaymentAuthority/Build/WebGL/Build/WebGL.loader.js unity/AgentPaymentAuthority/Build/WebGL/Build/WebGL.wasm > {dir}/webgl.sha256 && cat {dir}/webgl.sha256"
   ],
   "timeout": 60000000000,
   "kind": "plain"
