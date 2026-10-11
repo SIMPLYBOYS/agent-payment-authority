@@ -85,9 +85,9 @@ func (a *api) tracesOf(taskID string) []string {
 	return out
 }
 
-// running says whether the run of a task is the one running or stopping.
+// running says whether the run of a task is running or stopping.
 func (c *control) running(taskID string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.active != nil && c.active.run.TaskID == taskID
+	return c.byTask(taskID) != nil
 }

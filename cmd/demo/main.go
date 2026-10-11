@@ -111,9 +111,15 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	liveCLI := fs.String("live-cli", "", "live mode: absolute path of the approved Claude Code executable; a run the operator starts runs it (needs APA_LIVE_CLI=true, APA_DB_PATH and --scenarios with a live catalog; docs/cli-poc.md 55)")
 	devDemo := fs.Bool("dev-demo-plugins", false, "live mode only: the development demo plugin exception (docs/live-purchase-execution-decision.md 9)")
 	pairingOn := fs.Bool("pairing", false, "with --scenarios: show a one-time code on this terminal; /host trades it once for this run's tokens (docs/cli-poc.md 56)")
+	maxRuns := fs.Int("max-runs", 0, "with --scenarios: running or stopping runs at most (a deployment setting; default 2, at most one per consumer)")
 	readyFile := fs.String("ready-file", "", "write {addr, pid} here once serving (for scripts/demo/present.sh)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	maxRunsSet := false
+	fs.Visit(func(f *flag.Flag) { maxRunsSet = maxRunsSet || f.Name == "max-runs" })
+	if maxRunsSet && *scenariosPath == "" {
+		return errors.New("--max-runs is for a host that starts runs (--scenarios); nothing was started")
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
@@ -220,10 +226,19 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		return fmt.Errorf("profile: %w", err)
 	}
 	var scenarios map[string]*scenario
+	var effMaxRuns, nConsumers int
 	if *scenariosPath != "" {
 		if scenarios, err = loadScenarios(*scenariosPath, reg, regCfg, live); err != nil {
 			return err
 		}
+		if effMaxRuns, nConsumers, err = capacity(scenarios, *maxRuns, maxRunsSet); err != nil {
+			return err
+		}
+	}
+	hostStart := time.Now() // the timing records' clock zero; monotonic
+	instance, err := newInstanceID()
+	if err != nil {
+		return err
 	}
 	var runner *cliRunner
 	switch {
@@ -335,8 +350,10 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		mux.HandleFunc("GET /api/tasks/{task_id}/trace", ui.taskTrace)
 	}
 	if scenarios != nil {
-		ui.control = &control{st: st, runner: runner, bridge: bridge, scenarios: scenarios, ctx: runCtx, wg: &runs, out: d.out, ended: map[string]*liveRun{}}
+		ui.control = &control{st: st, runner: runner, bridge: bridge, scenarios: scenarios, ctx: runCtx, wg: &runs, out: d.out,
+			active: map[string]*liveRun{}, ended: map[string]*liveRun{}, maxRuns: effMaxRuns, consumers: nConsumers, instance: instance, started: hostStart}
 		ui.control.register(mux, ui)
+		fmt.Fprintf(d.out, "demo: concurrent runs: at most %d (deployment setting --max-runs) of %d consumers in the scenario catalog; host instance %s\n", effMaxRuns, nConsumers, instance)
 	}
 	if root, err := os.OpenRoot(*unityDir); err == nil {
 		ui.unity = root

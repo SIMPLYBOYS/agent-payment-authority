@@ -2,7 +2,9 @@ package main
 
 // Host control of fake runs (docs/demo-operation-design.md sections 13.1,
 // 13.3-13.5, 13.8 R3): the operator starts and stops runs; the operator and
-// the host read them. One run at a time; each run gets a new demo task. A
+// the host read them. At most one running or stopping run per consumer, and
+// at most maxRuns in all (the deployment setting --max-runs; default 2;
+// docs/multi-agent-demo-design.md 3.2-3.5); each run gets a new demo task. A
 // request ID always answers with the same run, even after a restart.
 // Nothing here writes an event: the run's own buyer host does (StartTask,
 // Cancel, CLITimeout), and host_runs holds the coordination record.
@@ -10,6 +12,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/toolbridge"
@@ -32,6 +37,12 @@ type liveRun struct {
 	cancel    context.CancelFunc
 	end       *store.RunEnd
 	recordErr string // T4 failed: the process ended, its record was not written
+	// For the timing record (docs/multi-agent-demo-design.md 6.2).
+	accepted time.Time           // the host accepted the run
+	stopAt   time.Time           // a stop was accepted while the run was running
+	reaped   bool                // the process is over; a later stop is refused
+	binding  *toolbridge.Binding // the run's calls so far (counts only)
+	timing   string              // written | not_written, once the run ended
 }
 
 type control struct {
@@ -43,8 +54,42 @@ type control struct {
 	ctx       context.Context // ends with the host
 	wg        *sync.WaitGroup // the host waits for every run before closing the Store
 	out       io.Writer
-	active    *liveRun            // the one run whose process is running or stopping
+	active    map[string]*liveRun // runs whose process is running or stopping, by consumer
 	ended     map[string]*liveRun // runs that ended in this process, by run_id
+	maxRuns   int                 // the effective --max-runs: running or stopping runs at most
+	consumers int                 // consumers in the scenario catalog
+	instance  string              // this host process: the timing records' host_instance
+	started   time.Time           // this host's start: the timing records' clock zero (monotonic)
+}
+
+// find is the running or stopping run with this ID, or nil. c.mu is held.
+func (c *control) find(runID string) *liveRun {
+	for _, lr := range c.active {
+		if lr.run.RunID == runID {
+			return lr
+		}
+	}
+	return nil
+}
+
+// byTask is the running or stopping run of this task, or nil. c.mu is held.
+func (c *control) byTask(taskID string) *liveRun {
+	for _, lr := range c.active {
+		if lr.run.TaskID == taskID {
+			return lr
+		}
+	}
+	return nil
+}
+
+// activeViews are the running or stopping runs, by consumer. c.mu is held.
+func (c *control) activeViews() []runView {
+	out := []runView{}
+	for _, lr := range c.active {
+		out = append(out, c.view(lr.run))
+	}
+	slices.SortFunc(out, func(a, b runView) int { return strings.Compare(a.ConsumerID, b.ConsumerID) })
+	return out
 }
 
 // runView is a run as the API shows it: fixed fields and codes, never a
@@ -66,6 +111,8 @@ type runView struct {
 	StoreEnd      string `json:"store_end,omitempty"`
 	StoreEndError string `json:"store_end_error,omitempty"`
 	RecordError   string `json:"record_error,omitempty"` // the run's end could not be recorded (code)
+	ToolCalls     *int   `json:"tool_calls,omitempty"`   // calls the host has answered so far, while running or stopping (a count only)
+	Timing        string `json:"timing,omitempty"`       // the run's timing record: written | not_written
 }
 
 // view merges the stored run with what this process knows. c.mu is held,
@@ -79,11 +126,15 @@ func (c *control) view(r store.Run) runView {
 		v.Outcome, v.Detail, v.TaskStarted, v.StoreEnd, v.StoreEndError = r.Outcome, r.Detail, &started, r.StoreEnd, r.StoreEndError
 	}
 	lr := c.ended[r.RunID]
-	if c.active != nil && c.active.run.RunID == r.RunID {
-		lr = c.active
+	if a := c.find(r.RunID); a != nil {
+		lr = a
 	}
 	if lr != nil {
-		v.Live, v.RecordError = lr.state, lr.recordErr
+		v.Live, v.RecordError, v.Timing = lr.state, lr.recordErr, lr.timing
+		if lr.state != "ended" && lr.binding != nil {
+			n := len(lr.binding.Calls())
+			v.ToolCalls = &n
+		}
 		if lr.end != nil && r.State != "ended" { // ended here, record not written: show what is known, marked
 			e := lr.end
 			v.Outcome, v.Detail, v.TaskStarted, v.StoreEnd, v.StoreEndError = e.Outcome, e.Detail, &e.TaskStarted, e.StoreEnd, e.StoreEndError
@@ -200,8 +251,12 @@ func (c *control) start(w http.ResponseWriter, r *http.Request, a *api) {
 		fail(w, http.StatusBadRequest, "unknown_scenario")
 		return
 	}
-	if c.active != nil {
-		reply(w, http.StatusConflict, map[string]any{"error": "run_active", "run": c.view(c.active.run)})
+	if busy := c.active[sc.ConsumerID]; busy != nil {
+		reply(w, http.StatusConflict, map[string]any{"error": "consumer_busy", "run": c.view(busy.run)})
+		return
+	}
+	if len(c.active) >= c.maxRuns { // a stopping run still holds its place
+		reply(w, http.StatusConflict, map[string]any{"error": "capacity_full", "max_runs": c.maxRuns, "runs": c.activeViews()})
 		return
 	}
 	run, created, err := c.st.AcceptRun(store.RunRequest{RequestID: req.RequestID, Scenario: sc.ID, ScenarioDigest: sc.digest,
@@ -218,8 +273,8 @@ func (c *control) start(w http.ResponseWriter, r *http.Request, a *api) {
 		return
 	}
 	ctx, cancel := context.WithCancel(c.ctx)
-	lr := &liveRun{run: run, state: "running", cancel: cancel}
-	c.active = lr
+	lr := &liveRun{run: run, state: "running", cancel: cancel, accepted: time.Now()}
+	c.active[run.ConsumerID] = lr
 	c.wg.Go(func() { c.runOne(ctx, lr, sc) })
 	reply(w, http.StatusAccepted, c.view(run))
 }
@@ -262,16 +317,22 @@ func (c *control) answer(w http.ResponseWriter, run store.Run, scenarioName stri
 // restart marks the run interrupted.
 func (c *control) runOne(ctx context.Context, lr *liveRun, sc *scenario) {
 	defer lr.cancel()
-	o := c.runner.runOne(ctx, c.st, c.bridge, planRun{TaskID: lr.run.TaskID, Scenario: sc.Scenario, BudgetInitial: sc.BudgetInitial})
+	bound := func(b *toolbridge.Binding) { c.mu.Lock(); lr.binding = b; c.mu.Unlock() }
+	o := c.runner.runOne(ctx, c.st, c.bridge, planRun{TaskID: lr.run.TaskID, Scenario: sc.Scenario, BudgetInitial: sc.BudgetInitial, bound: bound})
 	end := runEnd(o)
+	c.mu.Lock() // from here a stop is refused: the process is over
+	lr.reaped = true
+	stopAt := lr.stopAt
+	c.mu.Unlock()
+	timing := c.writeTiming(lr, o, end, stopAt, time.Now())
 	c.mu.Lock() // the end's record and this process's view of it change together
 	err := c.st.EndRun(lr.run.RunID, end)
-	lr.state, lr.end = "ended", &end
+	lr.state, lr.end, lr.timing = "ended", &end, timing
 	if err != nil {
 		lr.recordErr = store.CodeOf(err)
 	}
-	if c.active == lr {
-		c.active = nil
+	if c.active[lr.run.ConsumerID] == lr {
+		delete(c.active, lr.run.ConsumerID)
 	}
 	c.ended[lr.run.RunID] = lr
 	if len(c.ended) > 50 { // ponytail: drop an arbitrary old one; the record is in host_runs
@@ -283,8 +344,8 @@ func (c *control) runOne(ctx context.Context, lr *liveRun, sc *scenario) {
 		}
 	}
 	c.mu.Unlock()
-	fmt.Fprintf(c.out, "demo: run %s task %s: outcome=%q detail=%q task_started=%t store_end=%q store_end_error=%q record_error=%q\n",
-		lr.run.RunID, lr.run.TaskID, end.Outcome, end.Detail, end.TaskStarted, end.StoreEnd, end.StoreEndError, lr.recordErr)
+	fmt.Fprintf(c.out, "demo: run %s task %s: outcome=%q detail=%q task_started=%t store_end=%q store_end_error=%q record_error=%q timing=%s\n",
+		lr.run.RunID, lr.run.TaskID, end.Outcome, end.Detail, end.TaskStarted, end.StoreEnd, end.StoreEndError, lr.recordErr, timing)
 }
 
 // runEnd maps the fake runner's outcome to the run's end, codes only.
@@ -311,9 +372,9 @@ func (c *control) stop(w http.ResponseWriter, r *http.Request, a *api) {
 	}
 	id := r.PathValue("run_id")
 	c.mu.Lock()
-	if lr := c.active; lr != nil && lr.run.RunID == id {
-		if lr.state == "running" {
-			lr.state = "stopping"
+	if lr := c.find(id); lr != nil && !(lr.state == "running" && lr.reaped) {
+		if lr.state == "running" { // only this run's context: no other run is touched
+			lr.state, lr.stopAt = "stopping", time.Now()
 			lr.cancel()
 		}
 		v := c.view(lr.run)
@@ -372,15 +433,15 @@ func (c *control) list(w http.ResponseWriter, r *http.Request, a *api) {
 }
 
 // summary is the status's runs field: the scenarios the host offers (id,
-// consumer, label: trusted catalog text), the active run and the
-// interrupted ones among the latest 20 (IDs, tasks and states only).
+// consumer, label: trusted catalog text), the running or stopping runs and
+// the interrupted ones among the latest 20 (IDs, tasks and states only).
 func (c *control) summary() map[string]any {
 	var scs []map[string]string
 	for _, sc := range c.scenarios {
 		scs = append(scs, map[string]string{"id": sc.ID, "consumer_id": sc.ConsumerID, "label": sc.Label})
 	}
 	slices.SortFunc(scs, func(a, b map[string]string) int { return strings.Compare(a["id"], b["id"]) })
-	out := map[string]any{"scenarios": scs, "active": nil, "interrupted": []map[string]string{}}
+	out := map[string]any{"scenarios": scs, "active": []map[string]string{}, "interrupted": []map[string]string{}}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	runs, err := c.st.Runs(20)
@@ -388,9 +449,11 @@ func (c *control) summary() map[string]any {
 		out["error"] = store.CodeOf(err)
 		return out
 	}
-	if c.active != nil {
-		out["active"] = map[string]string{"run_id": c.active.run.RunID, "task_id": c.active.run.TaskID, "live": c.active.state}
+	active := []map[string]string{}
+	for _, v := range c.activeViews() {
+		active = append(active, map[string]string{"run_id": v.RunID, "task_id": v.TaskID, "consumer_id": v.ConsumerID, "live": v.Live})
 	}
+	out["active"] = active
 	var interrupted []map[string]string
 	for _, r := range runs {
 		if r.State == "interrupted" {
@@ -401,4 +464,34 @@ func (c *control) summary() map[string]any {
 		out["interrupted"] = interrupted
 	}
 	return out
+}
+
+// capacity is the effective --max-runs (docs/multi-agent-demo-design.md 3.2):
+// an integer from 1 to the scenario catalog's consumers, since a consumer
+// has one run at most; unset, 2 or the consumer count if smaller. Raising it
+// does not mean that many runs were ever tested, nor that the page can show
+// that many customers.
+func capacity(scenarios map[string]*scenario, n int, set bool) (int, int, error) {
+	consumers := map[string]bool{}
+	for _, sc := range scenarios {
+		consumers[sc.ConsumerID] = true
+	}
+	m := len(consumers)
+	if !set {
+		return min(2, m), m, nil
+	}
+	if n < 1 || n > m {
+		return 0, m, fmt.Errorf("--max-runs %d: it must be from 1 to %d (one run per consumer in the scenario catalog); nothing was started", n, m)
+	}
+	return n, m, nil
+}
+
+// newInstanceID names this host process in the timing records: two records
+// with the same ID share one monotonic clock.
+func newInstanceID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

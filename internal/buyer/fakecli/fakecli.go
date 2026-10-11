@@ -80,6 +80,8 @@ type Scenario struct {
 //	flood   write one stream-json line of Bytes bytes
 //	stderr  write Bytes bytes (or Text) to stderr
 //	sleep   wait MS milliseconds
+//	wait_file  block until the file named by Text exists (tests only: a
+//	        handshake that orders two runs' steps exactly; never live)
 //	hang    block forever; IgnoreTerm ignores SIGTERM first
 //	ignore_term  ignore SIGTERM from now on (only SIGKILL ends the fake)
 //	holder  start a grandchild that holds stdout and stderr open (Detach: new session)
@@ -361,6 +363,13 @@ func (r *run) step(s Step) (code int, done bool) {
 		io.WriteString(r.errw, text)
 	case "sleep":
 		time.Sleep(time.Duration(s.MS) * time.Millisecond)
+	case "wait_file":
+		for {
+			if _, err := os.Stat(s.Text); err == nil {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
 	case "hang":
 		if s.IgnoreTerm {
 			signal.Ignore(syscall.SIGTERM)

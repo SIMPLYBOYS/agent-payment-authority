@@ -87,7 +87,7 @@ func (c *control) cancelTask(w http.ResponseWriter, r *http.Request, a *api) {
 		storeDown(w, store.CodeOf(err))
 		return
 	}
-	if c.active != nil && c.active.run.TaskID == id { // running or stopping: its stop ends it
+	if c.byTask(id) != nil { // running or stopping: its stop ends it
 		fail(w, http.StatusConflict, "run_active")
 		return
 	}

@@ -78,10 +78,11 @@ type statusReply struct {
 	UnityBuild        unityBuildStatus `json:"unity_build"`
 	PaymentCapability string           `json:"payment_capability"`
 	ServedAt          uint64           `json:"served_at"`
-	Runs              map[string]any   `json:"runs,omitempty"`    // with --scenarios: the active run and the interrupted ones
-	History           *historyInfo     `json:"history,omitempty"` // history mode only
-	Live              *liveInfo        `json:"live,omitempty"`    // live mode only
-	Build             buildInfo        `json:"build"`             // what this binary says of its source, as Go recorded it
+	Runs              map[string]any   `json:"runs,omitempty"`     // with --scenarios: the active run and the interrupted ones
+	Capacity          map[string]int   `json:"capacity,omitempty"` // with --scenarios: the effective --max-runs and the consumers (a deployment setting)
+	History           *historyInfo     `json:"history,omitempty"`  // history mode only
+	Live              *liveInfo        `json:"live,omitempty"`     // live mode only
+	Build             buildInfo        `json:"build"`              // what this binary says of its source, as Go recorded it
 }
 
 // hostStatus answers the host and the operator tokens
@@ -117,6 +118,7 @@ func (a *api) hostStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.control != nil {
 		out.Runs = a.control.summary()
+		out.Capacity = map[string]int{"max_runs": a.control.maxRuns, "consumers": a.control.consumers}
 	}
 	reply(w, http.StatusOK, out)
 }

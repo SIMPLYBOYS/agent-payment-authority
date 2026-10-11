@@ -197,14 +197,15 @@ func TestControlRuns(t *testing.T) {
 	if v := h.task("show-b-01"); v.Status != "denied" || v.DenyReason != "INSUFFICIENT_BUDGET" {
 		t.Errorf("show-b-01: %+v", v)
 	}
-	// A running run blocks a new start; two starts with one new ID make one run.
+	// A running run blocks a new start of the same consumer (consumer_busy);
+	// two starts with one new ID make one run.
 	code, hang := h.post("/api/host/runs", op, startBody("req-hang-00000000001", "hang"))
 	if code != 202 || hang["task_id"] != "show-a-02" {
 		t.Fatalf("start hang: %d %v", code, hang)
 	}
 	h.waitFor("show-a-02", func(v taskReply) bool { return len(v.Purchases) == 1 })
-	if code, c := h.post("/api/host/runs", op, startBody("req-other-0000000001", "ask")); code != 409 || c["error"] != "run_active" {
-		t.Fatalf("run_active: %d %v", code, c)
+	if code, c := h.post("/api/host/runs", op, startBody("req-other-0000000001", "ask")); code != 409 || c["error"] != "consumer_busy" {
+		t.Fatalf("consumer_busy: %d %v", code, c)
 	}
 	// Stop: stopping, then ended with TASK_CANCELLED recorded.
 	if code, s := h.post("/api/host/runs/"+hang["run_id"].(string)+"/stop", op, `{}`); code != 202 || (s["live"] != "stopping" && s["live"] != "ended") {
@@ -411,7 +412,7 @@ func TestLoadScenarios(t *testing.T) {
 	raw, _ := os.ReadFile("testdata/demo/registry.json")
 	contracts.Decode(raw, &regCfg)
 	reg, _ := contracts.NewRegistry(regCfg)
-	if s, err := loadScenarios("testdata/demo/scenarios.json", reg, regCfg, false); err != nil || len(s) != 2 || len(s["ask"].candidates) != 20 || s["ask"].digest == "" {
+	if s, err := loadScenarios("testdata/demo/scenarios.json", reg, regCfg, false); err != nil || len(s) != 3 || s["ask-b"].ConsumerID != "consumer-b" || len(s["ask"].candidates) != 20 || s["ask"].digest == "" {
 		t.Fatalf("the shipped catalog: %v %v", s, err)
 	}
 	// The acceptance catalog (slice 3.5): the shipped two, unchanged, and a run that waits.

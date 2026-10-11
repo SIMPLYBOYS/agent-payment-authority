@@ -29,10 +29,11 @@ type plan struct {
 }
 
 type planRun struct {
-	TaskID        string           `json:"task_id"`
-	Scenario      string           `json:"scenario"`
-	BudgetInitial contracts.Amount `json:"budget_initial,omitempty"`
-	Note          string           `json:"note,omitempty"`
+	TaskID        string                    `json:"task_id"`
+	Scenario      string                    `json:"scenario"`
+	BudgetInitial contracts.Amount          `json:"budget_initial,omitempty"`
+	Note          string                    `json:"note,omitempty"`
+	bound         func(*toolbridge.Binding) // told the run's binding (host runs only)
 }
 
 // runOutcome is what the host reports of one run: fixed codes and counts,
@@ -45,6 +46,9 @@ type runOutcome struct {
 	TaskStarted bool   `json:"task_started"`
 	StoreEnd    string `json:"store_end,omitempty"`
 	EndError    string `json:"store_end_error,omitempty"`
+	// The host's times and calls for the timing record (not reported).
+	ProcessStarted, ProcessReaped, CallsClosed time.Time               `json:"-"`
+	Calls                                      []toolbridge.CallRecord `json:"-"`
 }
 
 // cliRunner runs tasks through the buyer host: the fake CLI (plan or
@@ -213,7 +217,7 @@ func (f *cliRunner) runOne(ctx context.Context, st *store.Store, bridge *toolbri
 		limits = *f.d.limits
 	}
 	h := &buyer.Host{Registry: f.reg, Bridge: bridge, CLI: f.cli, BridgeCmd: []string{f.d.self, "mcp-bridge"}, Env: env, Limits: limits,
-		Gate: gate, TraceDir: f.traceDir}
+		Gate: gate, TraceDir: f.traceDir, Bound: r.bound}
 	prepare := func() (*store.Store, error) {
 		// The credential is an M1 fixture made at start, valid for a day of
 		// host time; nothing verifies a BBS+ proof.
@@ -228,6 +232,7 @@ func (f *cliRunner) runOne(ctx context.Context, st *store.Store, bridge *toolbri
 		o.Detail = "host_error"
 	}
 	o.Outcome, o.TaskStarted, o.StoreEnd, o.EndError = string(res.Report.Outcome), res.TaskStarted, res.StoreEnd, res.EndError
+	o.ProcessStarted, o.ProcessReaped, o.CallsClosed, o.Calls = res.ProcessStarted, res.ProcessReaped, res.CallsClosed, res.Calls
 	if o.Detail == "" {
 		o.Detail = res.Report.Detail
 	}

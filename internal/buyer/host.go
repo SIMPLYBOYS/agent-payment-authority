@@ -148,6 +148,10 @@ type Host struct {
 	Limits    Limits
 	Gate      Gate
 	TraceDir  string
+	// Bound, if set, is told the run's binding once it is registered, so the
+	// demo host can show how many calls a running run has had; it reads the
+	// binding's counts only.
+	Bound func(*toolbridge.Binding)
 }
 
 // Prepare opens what the run's tools need: the Store and the run's task.
@@ -169,6 +173,11 @@ type RunResult struct {
 	StoreEnd     string // TASK_TIMED_OUT or TASK_CANCELLED when the run recorded one
 	EndError     string // the Store's refusal code when recording the end failed
 	Trace        string
+	// The host's own times (monotonic) for its timing record
+	// (docs/multi-agent-demo-design.md 6.2): just before the CLI process is
+	// started, when it has been reaped, and when the run's calls are closed
+	// (no call is taken or answered after it). Zero when no process started.
+	ProcessStarted, ProcessReaped, CallsClosed time.Time
 }
 
 // Run starts one CLI process for taskID. The run is registered idle: the
@@ -208,6 +217,9 @@ func (h *Host) Run(ctx context.Context, taskID, prompt string, prepare Prepare) 
 		return res, err
 	}
 	defer h.Bridge.Revoke(capability)
+	if h.Bound != nil {
+		h.Bound(b)
+	}
 	cfg, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{MCPServer: map[string]any{
 		"type": "stdio", "command": h.BridgeCmd[0], "args": h.BridgeCmd[1:],
 		"env": map[string]string{toolbridge.EnvSocket: h.Bridge.SocketPath(), toolbridge.EnvCapability: capability},
@@ -258,8 +270,10 @@ func (h *Host) Run(ctx context.Context, taskID, prompt string, prepare Prepare) 
 	}
 
 	started := time.Now()
+	res.ProcessStarted = started
 	res.Report = Run(ctx, Spec{Path: h.CLI, Args: Argv(prompt, cfgPath), Dir: work, Env: env, Limits: h.Limits,
 		Watch: watch, Stopping: b.Disarm})
+	res.ProcessReaped = time.Now()
 	if !initSeen {
 		gateCode = "init_missing"
 		if res.Report.Detail == "" {
@@ -272,6 +286,7 @@ func (h *Host) Run(ctx context.Context, taskID, prompt string, prepare Prepare) 
 	// Revoke returns once the run's calls in flight have finished; after it
 	// nothing more is written for this run and its records are complete.
 	h.Bridge.Revoke(capability)
+	res.CallsClosed = time.Now()
 	res.Calls, res.Attempts, res.NotReady = b.Calls(), b.Attempts(), b.NotReady()
 
 	// Only these two outcomes have Store semantics, and only for a task the

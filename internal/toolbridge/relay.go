@@ -157,6 +157,12 @@ type CallRecord struct {
 	Tool      string `json:"tool"`
 	ProductID string `json:"product_id,omitempty"`
 	Outcome   string `json:"outcome"` // a decision, "ok", or a refusal code
+	// When the host took the call and when it had its answer, and the call's
+	// number in this run (docs/multi-agent-demo-design.md 6.2). They are for
+	// the host's timing record only and never part of the trace.
+	ID        int       `json:"-"`
+	Started   time.Time `json:"-"`
+	Completed time.Time `json:"-"`
 }
 
 // Calls returns a copy of the run's call records: at most MaxCalls+1, the
@@ -317,7 +323,8 @@ func (s *Server) serve(req relayRequest) ToolResult {
 		return refusal(refused, "the host has not finished starting this run")
 	}
 	defer b.inflight.Done()
-	name := req.Tool // traced, so only ever a known name
+	started := time.Now() // monotonic: comparable with the host's other times
+	name := req.Tool      // traced, so only ever a known name
 	if !known(name) {
 		name = "unknown"
 	}
@@ -325,25 +332,29 @@ func (s *Server) serve(req relayRequest) ToolResult {
 	b.calls++
 	n := b.calls
 	b.mu.Unlock()
+	record := func(r CallRecord) {
+		r.ID, r.Started, r.Completed = n, started, time.Now()
+		b.record(r)
+	}
 	if n > MaxCalls {
 		if n == MaxCalls+1 { // one record says the budget ran out; the rest are only counted
-			b.record(CallRecord{Tool: name, Outcome: "TOO_MANY_CALLS"})
+			record(CallRecord{Tool: name, Outcome: "TOO_MANY_CALLS"})
 		}
 		return refusal("TOO_MANY_CALLS", "this run has used all its tool calls")
 	}
 	if name == "unknown" {
-		b.record(CallRecord{Tool: name, Outcome: "UNKNOWN_TOOL"})
+		record(CallRecord{Tool: name, Outcome: "UNKNOWN_TOOL"})
 		return refusal("UNKNOWN_TOOL", "no such tool")
 	}
 	product, err := parseArgs(name, req.Arguments)
 	if err != nil {
-		b.record(CallRecord{Tool: name, Outcome: "INVALID_ARGUMENTS"})
+		record(CallRecord{Tool: name, Outcome: "INVALID_ARGUMENTS"})
 		return refusal("INVALID_ARGUMENTS", err.Error())
 	}
 	ctx, cancel := context.WithTimeout(runCtx, callTimeout)
 	defer cancel()
 	result, rec := s.exec.Call(ctx, b, name, product)
-	b.record(rec)
+	record(rec)
 	return result
 }
 

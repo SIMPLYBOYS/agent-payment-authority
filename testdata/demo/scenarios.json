@@ -8,6 +8,12 @@
       "label": "主商品，Ask（等待核准）"
     },
     {
+      "id": "ask-b",
+      "consumer_id": "consumer-b",
+      "scenario": "testdata/cli/ask-mainline.json",
+      "label": "客人 B 主商品，Ask（等待核准）"
+    },
+    {
       "id": "deny-budget",
       "consumer_id": "consumer-b",
       "scenario": "testdata/cli/ask-mainline.json",
