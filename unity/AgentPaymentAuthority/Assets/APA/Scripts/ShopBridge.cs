@@ -1,8 +1,11 @@
 // ShopBridge: the GameObject "Bridge" the page calls with
 // unityInstance.SendMessage("Bridge", "Receive", json). It takes data only
 // (a ProjectionMessage), never a method name, script or URL. It reports back
-// "ready", "applied" and "rendered" with a generation and sequence; those
-// reports confirm display only and are never evidence of a decision.
+// "bridge" (the versions and customers it can show), "ready", "applied" and
+// "rendered" with a generation and sequence; those reports confirm display
+// only and are never evidence of a decision. Version 1 is one customer per
+// generation (the viewer page, history replay); version 2 is the scene with
+// every customer in its own slot (docs/multi-agent-demo-design.md 5.2).
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -12,7 +15,9 @@ namespace APA
     public class ShopBridge : MonoBehaviour
     {
         public ShopView view;
-        public readonly ProjectionState state = new ProjectionState();
+        public ProjectionState state = new ProjectionState();
+        public SceneState scene = new SceneState();
+        int mode = 1; // the version of the last message taken; a switch resets the scene
         public readonly List<string> reports = new List<string>(); // the last reports, for the PlayMode tests
         int viewGen = -1; // the generation the view was last reset for
 
@@ -29,7 +34,33 @@ namespace APA
             APA_Report(kind, gen, seq, detail);
         }
 
-        void Start() => Report("ready", -1, -1, view.UsingPlaceholders ? "placeholder" : "limezu");
+        // The versions and the customers this build can show, before ready: a
+        // page that does not know the kind ignores it.
+        void Start()
+        {
+            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers));
+            Report("ready", -1, -1, view.UsingPlaceholders ? "placeholder" : "limezu");
+        }
+
+        // Version 2: what one customer shows, with its slot.
+        void RenderedV2(string consumer)
+        {
+            var s = scene.Of(consumer);
+            Report("rendered", scene.Scene, s.T.Seq, consumer + "|" + s.Gen + "|" + s.TaskId + "|" + s.T.Phase + "|" + s.T.Verdict + "|" + s.T.Reason);
+        }
+
+        // Switching versions starts the scene over: neither state's rules
+        // may judge the other's messages.
+        void Switch(int v)
+        {
+            if (v == mode) return;
+            mode = v;
+            state = new ProjectionState();
+            scene = new SceneState();
+            viewGen = -1;
+            view.Multi = v == SceneState.Version;
+            view.ResetAll();
+        }
 
         // What the shop shows: phase, task, verdict and reason code.
         void Rendered() => Report("rendered", state.Gen, state.Seq, state.Phase + "|" + state.TaskId + "|" + state.T.Verdict + "|" + state.T.Reason);
@@ -37,6 +68,12 @@ namespace APA
         public void Receive(string json)
         {
             var m = ProjectionState.Parse(json);
+            if (m != null && m.v == SceneState.Version)
+            {
+                ReceiveV2(m);
+                return;
+            }
+            if (m != null && m.v == ProjectionState.Version) Switch(1);
             var outcome = state.Apply(m, out bool animate);
             switch (outcome)
             {
@@ -62,6 +99,27 @@ namespace APA
                     break;
             }
             Report("applied", m != null ? m.gen : -1, m != null ? m.seq : -1, outcome.ToString());
+        }
+
+        void ReceiveV2(ProjectionMessage m)
+        {
+            Switch(2);
+            var outcome = scene.Apply(m, out bool animate, out bool sceneReset, out bool slotReset);
+            if (sceneReset) view.ResetAll();
+            else if (slotReset) view.Reset(m.consumer);
+            if (outcome == Outcome.Applied)
+            {
+                var s = scene.Of(m.consumer);
+                int sc = scene.Scene, gen = s.Gen;
+                // rendered only once the customer shows the target, for its
+                // newest sequence; a replaced walk or an older scene or slot
+                // reports nothing, and never for the other customer.
+                if (s.Rule <= 2)
+                    view.Go(m.consumer, s.T, s.Browse, animate, gen, g => { if (scene.Scene == sc && scene.Of(m.consumer).Gen == g) RenderedV2(m.consumer); });
+                else if (view.Relabel(m.consumer, s.T))
+                    RenderedV2(m.consumer);
+            }
+            Report("applied", m.scene, m.seq, (m.consumer ?? "") + "|" + outcome);
         }
     }
 }

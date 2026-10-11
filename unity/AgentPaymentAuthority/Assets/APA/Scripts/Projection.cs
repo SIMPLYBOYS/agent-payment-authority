@@ -3,6 +3,7 @@
 // The shop holds no token and reads no API: it only shows what it is sent.
 // Nothing here can decide, pay, expire or record anything.
 using System;
+using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using UnityEngine;
 
@@ -25,6 +26,12 @@ namespace APA
         // A missing or bad value is unknown: 0 and "".
         public int cause_seq;    // the event that set the phase; shown as #n
         public string task_end;  // "" | cancelled | timed_out
+        // Version 2 only (docs/multi-agent-demo-design.md 5.2): the scene's
+        // generation and the customer's own slot generation. A clear without
+        // a consumer clears the scene; with a consumer and slot, that
+        // customer only. -1 when missing.
+        public int scene = -1;
+        public int slot = -1;
     }
 
     // Target: what the shop is to show for a customer (16.4 "T"). The page's
@@ -165,6 +172,81 @@ namespace APA
             T = new Target { Phase = phase, Cause = cause, End = end, Seq = m.seq, Verdict = m.verdict ?? "", Reason = m.reason ?? "" };
             if (m.animate && m.seq > AnimatedSeq) animate = true;
             if (m.seq > AnimatedSeq) AnimatedSeq = m.seq; // never animate the same sequence twice
+            return Outcome.Applied;
+        }
+    }
+
+    // SceneState is the version 2 rule (docs/multi-agent-demo-design.md 5.2):
+    // one scene generation and, inside it, one slot per customer with its own
+    // slot generation, task, target and animated sequences. A message for one
+    // customer never moves, clears or completes the other. Pure logic, no
+    // scene: the EditMode tests drive it directly.
+    public class SceneState
+    {
+        public const int Version = 2;
+
+        public class Slot
+        {
+            public int Gen = -1;            // the slot generation
+            public string TaskId;
+            public Target T = new Target();
+            public int AnimatedSeq = -1;
+            public int Rule;                // of the last Applied message
+            public bool Browse;
+        }
+
+        public int Scene { get; private set; } = -1;
+        readonly Dictionary<string, Slot> slots = new Dictionary<string, Slot>();
+
+        public Slot Of(string consumer)
+        {
+            if (!slots.TryGetValue(consumer, out var s)) slots[consumer] = s = new Slot();
+            return s;
+        }
+
+        // Apply takes one message. sceneReset: every customer is to be reset
+        // first; slotReset: this customer only.
+        public Outcome Apply(ProjectionMessage m, out bool animate, out bool sceneReset, out bool slotReset)
+        {
+            animate = sceneReset = slotReset = false;
+            if (m == null || m.v != Version || m.scene < 0) return Outcome.Invalid;
+            bool sceneClear = m.clear && string.IsNullOrEmpty(m.consumer);
+            // Checked whole before anything may reset: an invalid message never clears.
+            if (!sceneClear)
+            {
+                if (Array.IndexOf(ProjectionState.Consumers, m.consumer) < 0 || m.slot < 0) return Outcome.Invalid;
+                if (!m.clear && (string.IsNullOrEmpty(m.task_id) || m.seq < 0)) return Outcome.Invalid;
+            }
+            if (m.scene < Scene) return Outcome.Stale;
+            if (m.scene > Scene)
+            {
+                Scene = m.scene;
+                slots.Clear();
+                sceneReset = true;
+                if (sceneClear) return Outcome.Cleared;
+            }
+            else if (sceneClear) return Outcome.Duplicate;
+            var s = Of(m.consumer);
+            if (m.slot < s.Gen) return Outcome.Stale;
+            if (m.slot > s.Gen)
+            {
+                slots[m.consumer] = s = new Slot { Gen = m.slot };
+                slotReset = true;
+                if (m.clear) return Outcome.Cleared;
+            }
+            else if (m.clear) return Outcome.Duplicate;
+            if (s.TaskId != null && m.task_id != s.TaskId) return Outcome.Invalid; // one task per slot generation
+            if (m.seq < s.T.Seq) return Outcome.Older;
+            var phase = Array.IndexOf(ProjectionState.Phases, m.phase) >= 0 ? m.phase : "unknown";
+            if (m.seq == s.T.Seq && phase == s.T.Phase) return Outcome.Duplicate;
+            int cause = SceneRules.Cause(m.cause_seq, m.seq);
+            var end = SceneRules.End(m.task_end);
+            s.Rule = SceneRules.Rule(s.T, phase, cause, end);
+            s.Browse = SceneRules.Browse(s.T, s.Rule, phase, cause);
+            s.TaskId = m.task_id;
+            s.T = new Target { Phase = phase, Cause = cause, End = end, Seq = m.seq, Verdict = m.verdict ?? "", Reason = m.reason ?? "" };
+            if (m.animate && m.seq > s.AnimatedSeq) animate = true;
+            if (m.seq > s.AnimatedSeq) s.AnimatedSeq = m.seq; // per customer: never animate the same sequence twice
             return Outcome.Applied;
         }
     }

@@ -21,6 +21,22 @@ namespace APA
         public bool UsingPlaceholders { get; private set; }
         public int AnimationsStarted { get; private set; } // tests: one per animated sequence
         [System.NonSerialized] public float Pace = 1f; // tests only: below 1 slows the walk, so the 2.5 s limit snaps it
+        // Version 2 (docs/multi-agent-demo-design.md 5.3): every customer at
+        // full brightness, a status line each, and B one fixed step aside
+        // inside the shop so two customers never stand on one spot. Set by
+        // the bridge, which resets the scene when it changes.
+        [System.NonSerialized] public bool Multi;
+        public const float BAside = 0.45f;
+
+        // P is where a customer stands at a point: Point, and in version 2 B
+        // a little lower on the inside points (the corridor stays horizontal
+        // and vertical).
+        public Vector2 P(string consumer, int n)
+        {
+            var p = Point(consumer, n);
+            if (Multi && consumer == "consumer-b" && n >= Aisle) p.y -= BAside;
+            return p;
+        }
 
         // D2 pacing (docs/demo-presentation-design.md 16.5).
         public const float Walk = 4.5f, BrowsePause = 0.6f, DenyPause = 0.8f, MaxTransition = 2.5f;
@@ -49,7 +65,7 @@ namespace APA
         }
 
         // Shortest ways between the eight points (Floyd-Warshall).
-        static void Ways(string consumer, out float[,] d, out int[,] next)
+        void Ways(string consumer, out float[,] d, out int[,] next)
         {
             const int N = 8;
             d = new float[N, N];
@@ -58,7 +74,7 @@ namespace APA
             for (int e = 0; e < Lines.GetLength(0); e++)
             {
                 int a = Lines[e, 0], b = Lines[e, 1];
-                d[a, b] = d[b, a] = (Point(consumer, a) - Point(consumer, b)).magnitude;
+                d[a, b] = d[b, a] = (P(consumer, a) - P(consumer, b)).magnitude;
             }
             for (int k = 0; k < N; k++) for (int i = 0; i < N; i++) for (int j = 0; j < N; j++)
                 if (d[i, k] < float.MaxValue && d[k, j] < float.MaxValue && d[i, k] + d[k, j] < d[i, j]) { d[i, j] = d[i, k] + d[k, j]; next[i, j] = next[i, k]; }
@@ -225,19 +241,42 @@ namespace APA
         // called) and the status is cleared.
         public void ResetAll()
         {
-            foreach (var c in customers.Values)
+            foreach (var c in customers.Values) Clear(c);
+            if (status != null) status.text = Multi ? StatusLines() : "No task shown";
+        }
+
+        // Reset: one customer only (version 2: that customer's slot changed);
+        // the others keep their place, walk and done.
+        public void Reset(string consumer)
+        {
+            if (!customers.TryGetValue(consumer, out var c)) return;
+            Clear(c);
+            if (status != null && Multi) status.text = StatusLines();
+        }
+
+        void Clear(Customer c)
+        {
+            c.route = null;
+            c.done = null;
+            c.seg = "final"; // a dropped walk's [anim] label goes too (review of d7070af)
+            c.target = new Target();
+            c.from = c.to = Out;
+            c.go.transform.localPosition = P(c.id, Out);
+            c.body.color = new Color(1f, 1f, 1f, Multi ? 1f : 0.45f);
+            Idle(c);
+            ShowLabel(c);
+        }
+
+        // StatusLines: version 2's status, one line per customer.
+        string StatusLines()
+        {
+            var lines = new List<string>();
+            foreach (var kv in customers)
             {
-                c.route = null;
-                c.done = null;
-                c.seg = "final"; // a dropped walk's [anim] label goes too (review of d7070af)
-                c.target = new Target();
-                c.from = c.to = Out;
-                c.go.transform.localPosition = Point(c.id, Out);
-                c.body.color = new Color(1f, 1f, 1f, 0.45f);
-                Idle(c);
-                ShowLabel(c);
+                var label = LabelNow(kv.Value);
+                lines.Add((kv.Key == "consumer-a" ? "A" : "B") + ": " + (label == "" ? (kv.Value.target.Phase == "empty" ? "no task shown" : kv.Value.target.Phase) : label));
             }
-            if (status != null) status.text = "No task shown";
+            return string.Join("\n", lines);
         }
 
         // For the PlayMode tests: observations only.
@@ -248,6 +287,7 @@ namespace APA
         public string FacingOf(string consumer) => customers.TryGetValue(consumer, out var c) ? Facings[c.facing] : null;
         public float DeadlineOf(string consumer) => customers.TryGetValue(consumer, out var c) && c.route != null ? c.deadline : -1f;
         public string StatusText => status.text;
+        public float AlphaOf(string consumer) => customers.TryGetValue(consumer, out var c) ? c.body.color.a : -1f;
         // The points still to walk, from where the customer stands.
         public List<Vector2> RouteOf(string consumer)
         {
@@ -260,7 +300,7 @@ namespace APA
 
         void Activate(string consumer)
         {
-            foreach (var kv in customers) kv.Value.body.color = new Color(1f, 1f, 1f, kv.Key == consumer ? 1f : 0.45f);
+            foreach (var kv in customers) kv.Value.body.color = new Color(1f, 1f, 1f, Multi || kv.Key == consumer ? 1f : 0.45f);
         }
 
         // Go: a new target (16.4 rules 1 and 2). done(gen) is called once,
@@ -355,18 +395,18 @@ namespace APA
         }
 
         // Leg: the corridor from p (on the line a-b) to goal.
-        static void Leg(string consumer, ref Vector2 p, ref int a, ref int b, int goal, string seg, List<Step> steps)
+        void Leg(string consumer, ref Vector2 p, ref int a, ref int b, int goal, string seg, List<Step> steps)
         {
             Ways(consumer, out var d, out var next);
             int via = a;
-            if (b != a && (p - Point(consumer, b)).magnitude + d[b, goal] < (p - Point(consumer, a)).magnitude + d[a, goal]) via = b;
-            if ((p - Point(consumer, via)).sqrMagnitude > 1e-6f) steps.Add(new Step { to = Point(consumer, via), node = via, seg = seg });
+            if (b != a && (p - P(consumer, b)).magnitude + d[b, goal] < (p - P(consumer, a)).magnitude + d[a, goal]) via = b;
+            if ((p - P(consumer, via)).sqrMagnitude > 1e-6f) steps.Add(new Step { to = P(consumer, via), node = via, seg = seg });
             for (int n = via; n != goal;)
             {
                 n = next[n, goal];
-                steps.Add(new Step { to = Point(consumer, n), node = n, seg = seg });
+                steps.Add(new Step { to = P(consumer, n), node = n, seg = seg });
             }
-            p = Point(consumer, goal);
+            p = P(consumer, goal);
             a = b = goal;
         }
 
@@ -456,7 +496,7 @@ namespace APA
         // Standing still faces down; at the counter it faces the counter.
         void Idle(Customer c)
         {
-            bool atCounter = ((Vector2)c.go.transform.localPosition - Point(c.id, Counter)).sqrMagnitude < 1e-4f;
+            bool atCounter = ((Vector2)c.go.transform.localPosition - P(c.id, Counter)).sqrMagnitude < 1e-4f;
             c.facing = atCounter ? 0 : 3;
             c.body.sprite = atCounter ? c.idleRight : c.idleDown;
         }
@@ -482,7 +522,9 @@ namespace APA
             bool left = c.go.transform.localPosition.x < 6f;
             c.tag.anchor = left ? TextAnchor.LowerLeft : TextAnchor.LowerRight;
             c.tag.transform.localPosition = new Vector3(left ? -0.4f : 0.4f, 2.05f, 0f);
-            if (status != null && c.body.color.a > 0.9f) status.text = (c.id == "consumer-a" ? "A" : "B") + ": " + (label == "" ? c.target.Phase : label);
+            if (status == null) return;
+            if (Multi) status.text = StatusLines();
+            else if (c.body.color.a > 0.9f) status.text = (c.id == "consumer-a" ? "A" : "B") + ": " + (label == "" ? c.target.Phase : label);
         }
     }
 }
