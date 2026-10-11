@@ -10,14 +10,19 @@
 // case for the stopped run. Live records are required unless --fake, and a
 // fake verdict says it is fake. It writes nothing.
 //
+// It reads each run's host_runs row (state, outcome, store_end) and its
+// task's end event in the Store's events, and checks the records against
+// them: a record that the database contradicts is not judged.
+//
 // Exit codes: 0 interleaved (and, with --stop, the stop isolation held);
-// 1 judged, not reached; 2 not judged, or usage.
+// 1 judged, not reached; 2 not judged, or usage; 3 the report could not be
+// written in full (a write error or a short write): there is no verdict,
+// whatever the judgement was.
 package main
 
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -54,23 +59,28 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	defer conn.Close()
-	rowA, rowB := hostRun(conn, ra.RunID), hostRun(conn, rb.RunID)
+	rowA, qa := timing.ReadHostRun(conn, ra.RunID)
+	rowB, qb := timing.ReadHostRun(conn, rb.RunID)
 	v := verdict{Verdict: timing.Judge(ra, rb, rowA, rowB, !*fake)}
-	for _, e := range []error{ea, eb} {
+	for _, e := range []error{ea, eb, qa, qb} {
 		if e != nil {
 			v.Conclusion = timing.NotJudged
 			v.Problems = append(v.Problems, timing.Problem{Kind: timing.Incomplete, Detail: e.Error()})
 		}
 	}
 	if *stop != "" && v.Conclusion != timing.NotJudged {
-		s := timing.StopIsolation(ra, rb)
+		s := timing.StopIsolation(ra, rb, rowB)
 		if *stop == "b" {
-			s = timing.StopIsolation(rb, ra)
+			s = timing.StopIsolation(rb, ra, rowA)
 		}
 		v.Stop = &s
 	}
 	raw, _ := json.MarshalIndent(v, "", "  ")
-	stdout.Write(append(raw, '\n'))
+	raw = append(raw, '\n')
+	if n, err := stdout.Write(raw); err != nil || n != len(raw) {
+		fmt.Fprintf(stderr, "timing-judge: the report was not written in full (%d of %d bytes); there is no verdict\n", n, len(raw))
+		return 3
+	}
 	switch {
 	case v.Conclusion == timing.NotJudged:
 		return 2
@@ -91,14 +101,4 @@ func read(path string) (timing.Record, error) {
 		return timing.Record{}, fmt.Errorf("%s: not a timing record", path)
 	}
 	return r, nil
-}
-
-// hostRun is the run's host_runs row, or nil when there is none.
-func hostRun(conn *sql.DB, runID string) *timing.HostRun {
-	var r timing.HostRun
-	err := conn.QueryRow(`SELECT run_id, task_id, consumer_id, state FROM host_runs WHERE run_id = ?`, runID).Scan(&r.RunID, &r.TaskID, &r.ConsumerID, &r.State)
-	if errors.Is(err, sql.ErrNoRows) || err != nil {
-		return nil
-	}
-	return &r
 }

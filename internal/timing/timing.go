@@ -13,7 +13,9 @@ package timing
 import (
 	"bytes"
 	"cmp"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 )
@@ -63,9 +65,31 @@ type Call struct {
 	Outcome     string `json:"outcome"`
 }
 
-// HostRun is a run's row as host_runs holds it, for the cross-check.
+// HostRun is what the database says of a run, for the cross-check: its
+// host_runs row (outcome and store_end are "" until the run ended) and its
+// task's end event in the Store's events (TASK_CANCELLED, TASK_TIMED_OUT,
+// or "" when the task has none; there is at most one).
 type HostRun struct {
 	RunID, TaskID, ConsumerID, State string
+	Outcome, StoreEnd                string
+	TaskEnd                          string
+}
+
+// ReadHostRun reads a run's HostRun from a demo database (the caller opens
+// it, read only): nil when host_runs has no such run, an error when the
+// database cannot be read.
+func ReadHostRun(conn *sql.DB, runID string) (*HostRun, error) {
+	var r HostRun
+	err := conn.QueryRow(`SELECT h.run_id, h.task_id, h.consumer_id, h.state, COALESCE(h.outcome, ''), COALESCE(h.store_end, ''),
+		COALESCE((SELECT e.event_type FROM events e WHERE e.task_id = h.task_id AND e.event_type IN ('TASK_CANCELLED', 'TASK_TIMED_OUT')), '')
+		FROM host_runs h WHERE h.run_id = ?`, runID).Scan(&r.RunID, &r.TaskID, &r.ConsumerID, &r.State, &r.Outcome, &r.StoreEnd, &r.TaskEnd)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("the database's host_runs or events cannot be read for run %s", runID)
+	}
+	return &r, nil
 }
 
 // Problem kinds (section 6.3), worst first.
@@ -109,11 +133,23 @@ func Check(r Record, row *HostRun) []Problem {
 	if l.AcceptedMs == nil || l.ProcessStartedMs == nil || l.ProcessReapedMs == nil || l.CallsClosedMs == nil || l.RunEndedMs == nil {
 		add(Incomplete, "missing a lifecycle time (no process ran, or the record was cut short)")
 	}
+	// The record says the run ended, with an outcome and a Store end; the
+	// database must say the same (review of eed0f90, R2). A Store end the
+	// record claims must be the task's end event in the Store. The other way
+	// round is not a contradiction: a task may be cancelled after its run
+	// ended (the operator's cancel), so a Store end without one in the
+	// record is left to StopIsolation.
 	switch {
 	case row == nil:
 		add(Incomplete, "no host_runs row for %s", r.RunID)
 	case row.RunID != r.RunID || row.TaskID != r.TaskID || row.ConsumerID != r.ConsumerID:
 		add(Invalid, "the record's run, task or consumer differ from host_runs")
+	case row.State != "ended":
+		add(Invalid, "the record says the run ended; host_runs says it is %s", row.State)
+	case row.Outcome != r.Outcome || row.StoreEnd != r.StoreEnd:
+		add(Invalid, "the record's outcome or Store end (%s, %q) differ from host_runs (%s, %q)", r.Outcome, r.StoreEnd, row.Outcome, row.StoreEnd)
+	case r.StoreEnd != "" && row.TaskEnd != r.StoreEnd:
+		add(Invalid, "the record's Store end %s is not the task's end event in the Store (%q)", r.StoreEnd, row.TaskEnd)
 	}
 	if len(ps) > 0 {
 		return ps
@@ -286,8 +322,10 @@ type Stop struct {
 	Missing []string `json:"missing,omitempty"`
 }
 
-// StopIsolation checks the case on two records that Judge could judge.
-func StopIsolation(stopped, other Record) Stop {
+// StopIsolation checks the case on two records that Judge could judge;
+// otherRow is the other run's database view (Judge has checked both
+// records against theirs).
+func StopIsolation(stopped, other Record, otherRow *HostRun) Stop {
 	var miss []string
 	l := stopped.Lifecycle
 	if l.StopAcceptedMs == nil || l.StopAcceptedFrom != "running" {
@@ -321,6 +359,9 @@ func StopIsolation(stopped, other Record) Stop {
 		}
 		if other.StoreEnd == "TASK_CANCELLED" || other.Outcome == "cancelled" {
 			miss = append(miss, "另一場也被取消，不是以自己的結果結束")
+		}
+		if otherRow == nil || otherRow.TaskEnd == "TASK_CANCELLED" {
+			miss = append(miss, "另一場的 task 在 Store 有 TASK_CANCELLED（或沒有資料庫紀錄），不能確認以自己的結果結束")
 		}
 	}
 	if len(miss) > 0 {

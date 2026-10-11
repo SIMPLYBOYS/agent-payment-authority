@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -82,11 +83,16 @@ func (h *host) record(runID, taskID string) (timing.Record, *timing.HostRun) {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	run, found, err := h.st.GetRun(runID)
-	if err != nil || !found {
-		h.t.Fatalf("host_runs %s: %v %v", runID, found, err)
+	conn, err := sql.Open("sqlite", "file:"+filepath.Join(h.dir, "demo.db")+"?mode=ro")
+	if err != nil {
+		h.t.Fatal(err)
 	}
-	return r, &timing.HostRun{RunID: run.RunID, TaskID: run.TaskID, ConsumerID: run.ConsumerID, State: run.State}
+	defer conn.Close()
+	row, err := timing.ReadHostRun(conn, runID) // as cmd/timing-judge reads it
+	if err != nil || row == nil {
+		h.t.Fatalf("host_runs %s: %v %v", runID, row, err)
+	}
+	return r, row
 }
 
 // The deployment setting: refused when illegal or without host runs.
@@ -286,7 +292,7 @@ func TestStopIsolation(t *testing.T) {
 	if tb.Calls[len(tb.Calls)-1].Outcome != "ok" {
 		t.Errorf("B's call after A's stop: %+v", tb.Calls)
 	}
-	if s := timing.StopIsolation(ta, tb); !s.Held {
+	if s := timing.StopIsolation(ta, tb, rowB); !s.Held {
 		t.Fatalf("stop isolation: %+v\nA %+v\nB %+v", s, ta, tb)
 	}
 	// Stopping a run that already ended is refused, and is no stop.

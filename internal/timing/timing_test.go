@@ -18,8 +18,9 @@ func rec(consumer, run, host, mode string, p0, p1 int64, starts ...int64) Record
 	return r
 }
 
+// row is the database's view of r when the two agree.
 func row(r Record) *HostRun {
-	return &HostRun{RunID: r.RunID, TaskID: r.TaskID, ConsumerID: r.ConsumerID, State: "ended"}
+	return &HostRun{RunID: r.RunID, TaskID: r.TaskID, ConsumerID: r.ConsumerID, State: "ended", Outcome: r.Outcome, StoreEnd: r.StoreEnd, TaskEnd: r.StoreEnd}
 }
 
 func judge(a, b Record, live bool) Verdict { return Judge(a, b, row(a), row(b), live) }
@@ -120,6 +121,54 @@ func TestNotJudged(t *testing.T) {
 	}
 }
 
+// The records against the database (review of eed0f90, R2): each case
+// changes one thing of an agreeing pair, and must be refused by the check
+// it names (the detail), not by another field.
+func TestRecordVsDatabase(t *testing.T) {
+	agree := func() (Record, Record, *HostRun, *HostRun) {
+		a := rec("consumer-a", "ra", "h1", "live", 0, 60, 10, 30)
+		a.Lifecycle.StopAcceptedMs, a.Lifecycle.StopAcceptedFrom, a.StoreEnd, a.Outcome = ms(40), "running", "TASK_CANCELLED", "cancelled"
+		b := rec("consumer-b", "rb", "h1", "live", 5, 120, 20, 50, 90)
+		return a, b, row(a), row(b)
+	}
+	a, b, ra, rb := agree()
+	if v := Judge(a, b, ra, rb, true); v.Conclusion != Interleaved {
+		t.Fatalf("agreeing records: %+v", v)
+	}
+	for name, tc := range map[string]struct {
+		edit func(a, b *Record, ra, rb *HostRun)
+		want string
+	}{
+		"A's TASK_CANCELLED has no event in the Store": {func(a, b *Record, ra, rb *HostRun) { ra.TaskEnd = "" }, "is not the task's end event in the Store"},
+		"B cancelled in host_runs, the record says ok": {func(a, b *Record, ra, rb *HostRun) {
+			rb.Outcome, rb.StoreEnd, rb.TaskEnd = "cancelled", "TASK_CANCELLED", "TASK_CANCELLED"
+		}, "differ from host_runs"},
+		"B's run not ended in host_runs":   {func(a, b *Record, ra, rb *HostRun) { rb.State, rb.Outcome, rb.StoreEnd = "accepted", "", "" }, "host_runs says it is accepted"},
+		"B's run interrupted in host_runs": {func(a, b *Record, ra, rb *HostRun) { rb.State, rb.Outcome, rb.StoreEnd = "interrupted", "", "" }, "host_runs says it is interrupted"},
+		"B's outcome differs":              {func(a, b *Record, ra, rb *HostRun) { rb.Outcome = "timeout" }, "differ from host_runs"},
+		"A's Store end differs":            {func(a, b *Record, ra, rb *HostRun) { ra.StoreEnd = "" }, "differ from host_runs"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, b, ra, rb := agree()
+			tc.edit(&a, &b, ra, rb)
+			v := Judge(a, b, ra, rb, true)
+			if v.Conclusion != NotJudged || kinds(v) != Invalid || !strings.Contains(v.Problems[0].Detail, tc.want) {
+				t.Fatalf("got %s %+v, want invalid: %s", v.Conclusion, v.Problems, tc.want)
+			}
+		})
+	}
+	// Not every end other than ok is a contradiction: B timed out on its
+	// own, and the database says so.
+	a, b, ra, _ = agree()
+	b.Outcome, b.StoreEnd = "timeout", "TASK_TIMED_OUT"
+	if v := Judge(a, b, ra, row(b), true); v.Conclusion != Interleaved {
+		t.Fatalf("B timed out: %+v", v)
+	}
+	if s := StopIsolation(a, b, row(b)); !s.Held {
+		t.Fatalf("B timed out on its own: %+v", s)
+	}
+}
+
 // A call cut off without an answer stays unanswered: valid, and not counted.
 func TestInterruptedCall(t *testing.T) {
 	a := rec("consumer-a", "ra", "h1", "live", 0, 100, 10, 30, 50)
@@ -156,8 +205,19 @@ func TestStopIsolation(t *testing.T) {
 		return a, b
 	}
 	a, b := stopped()
-	if s := StopIsolation(a, b); !s.Held {
+	if s := StopIsolation(a, b, row(b)); !s.Held {
 		t.Fatalf("%+v", s)
+	}
+	// B's task cancelled in the Store (after its run, as the operator's
+	// cancel can): the records agree with host_runs, but B did not end with
+	// its own result as far as the database shows.
+	late := row(b)
+	late.TaskEnd = "TASK_CANCELLED"
+	if v := Judge(a, b, row(a), late, true); v.Conclusion != Interleaved {
+		t.Fatalf("judged: %+v", v)
+	}
+	if s := StopIsolation(a, b, late); s.Held || !strings.Contains(strings.Join(s.Missing, " "), "在 Store 有 TASK_CANCELLED") {
+		t.Fatalf("B cancelled in the Store: %+v", s)
 	}
 	for name, edit := range map[string]func(a, b *Record){
 		"A had ended: the stop was refused": func(a, b *Record) { a.Lifecycle.StopAcceptedMs, a.Lifecycle.StopAcceptedFrom = nil, "" },
@@ -173,7 +233,7 @@ func TestStopIsolation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			a, b := stopped()
 			edit(&a, &b)
-			if s := StopIsolation(a, b); s.Held || !strings.HasPrefix(s.Text, "停止隔離未示範") {
+			if s := StopIsolation(a, b, row(b)); s.Held || !strings.HasPrefix(s.Text, "停止隔離未示範") {
 				t.Fatalf("%+v", s)
 			}
 		})
