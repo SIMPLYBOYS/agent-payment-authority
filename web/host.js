@@ -151,7 +151,6 @@ function render(v) {
     starting = false;
     cancelling = false;
     confirming = null;
-    autoPicked = false;
     clearTimeout(readyTimer);
     clearTimeout(runsTimer);
     setRunStatus("", "idle");
@@ -382,7 +381,6 @@ const cancellable = (r) => {
 // confirming: the task whose cancel waits for its confirmation (with the
 // generation); a new generation or a done cancel drops it.
 let confirming = null;
-let autoPicked = false; // this generation has chosen a customer for the panels once by itself
 let shownControl = "";
 let shownRuns = "";
 let advancedGen = -1; // the generation 進階 was opened for by itself (history mode, the manual viewer)
@@ -393,13 +391,8 @@ let advancedGen = -1; // the generation 進階 was opened for by itself (history
 function agentModel(c, runs, slots, ctx) {
   const run = runs.find((r) => r.consumer_id === c) || null;
   const slot = slots.find((x) => x.consumer === c) || null;
-  const state = !run ? "idle" : run.live === "running" ? "running" : run.live === "stopping" ? "stopping" : "ended";
-  const stateText = { idle: "未開始", running: "執行中", stopping: "停止中（仍占名額）", ended: "已結束" }[state];
-  let calls = "";
-  if (state === "running" || state === "stopping") {
-    calls = ctx.runsError ? "已回覆工具呼叫：未確認（場次清單讀取失敗）"
-      : Number.isInteger(run.tool_calls) ? "已回覆工具呼叫 " + run.tool_calls + " 次" : "已回覆工具呼叫：未確認";
-  } else if (state === "ended") calls = "工具呼叫數：場次結束後不提供";
+  const rc = A.runCard(run, ctx.runsError);
+  const { state, calls } = rc;
   let business = "";
   if (slot && slot.task) {
     if (slot.read !== "ok" && slot.read !== "loading") business = "讀取失敗（" + slot.read + "），保留上次資料" + (slot.label ? "：" + slot.label : "");
@@ -409,9 +402,9 @@ function agentModel(c, runs, slots, ctx) {
   const t = run && ctx.tasks && ctx.tasks.get(run.task_id);
   const sync = !slot || !slot.task || slot.seq < 0 ? "" : !scene.active ? "回放中：場景暫停" : slot.shown ? "Unity 已呈現" : slot.moving ? "Unity 補間中" : "Unity 尚未回報";
   return {
-    c, state, stateText, calls, business, sync, selected: ctx.chosen === c,
+    c, state, stateText: rc.text, calls, callsKind: rc.kind, business, sync, selected: ctx.chosen === c,
     task: run ? run.task_id + (slot && slot.task === run.task_id && slot.seq >= 0 ? " #" + slot.seq : "") : "",
-    run: run && run.run_id, stoppable: state === "running", cancel: run && cancellable(run) ? run.task_id : "",
+    run: run && run.run_id, stoppable: rc.stoppable, cancel: run && cancellable(run) ? run.task_id : "",
     taskStatus: t ? t.status : "",
   };
 }
@@ -440,13 +433,8 @@ function renderControl() {
   const chosen = currentConsumer();
   // The ring in the shop follows the customer the panels show.
   if (scene.started && scene.selected !== (chosen || null)) scene.select(chosen);
-  // The first time this generation's scene has a task and no customer is
-  // chosen, the panels take the first one: nothing to pick by hand.
-  if (chosen) autoPicked = true; // chosen once in this generation (by a start, a card or the shop): never by itself again
-  if (!autoPicked && !chosen && scene.started && v.hasHost) {
-    const first = slots.find((x) => x.task);
-    if (first) { autoPicked = true; selectConsumer(first.consumer); }
-  }
+  // No customer is chosen by itself (a reload or new credentials switch to
+  // no one, section 13): a start opens its run, a card or the shop chooses.
   if (confirming && confirming.gen !== creds.gen) confirming = null;
   const ctx = { chosen, runsError: lastRunsError, tasks: lastTasks && lastTasks.gen === creds.gen && lastTasks.list };
   const models = consumers.map((c) => agentModel(c, runs, slots, ctx));
@@ -526,7 +514,7 @@ function agentCard(m, scs, { live, busy, full }) {
   card.append(el("p", "agent-business", m.business));
   if (m.calls) {
     const c = el("p", "agent-calls", m.calls);
-    c.dataset.calls = m.calls.includes("未確認") ? "unconfirmed" : m.calls.includes("不提供") ? "not_provided" : "known";
+    c.dataset.calls = m.callsKind;
     card.append(c);
   }
   const acts = el("div", "agent-actions");
@@ -536,7 +524,7 @@ function agentCard(m, scs, { live, busy, full }) {
   sel.addEventListener("click", () => selectConsumer(m.c));
   acts.append(sel);
   for (const sc of scs) {
-    const b = el("button", "agent-start", (live ? "開始（真實 CLI）" : "開始（fake）") + (scs.length > 1 ? "：" + sc.label : ""));
+    const b = el("button", "agent-start", (live ? "開始（真實 CLI）" : "開始（fake，不執行模型）") + (scs.length > 1 ? "：" + sc.label : ""));
     b.type = "button";
     b.dataset.scenario = sc.id;
     b.disabled = starting || busy.has(m.c) || full;

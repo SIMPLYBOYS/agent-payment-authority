@@ -308,3 +308,24 @@ test("a click names a customer only for the current scene and its slot", async (
   assert.equal(scene.picked({ scene: b.scene, slot: b.slot, consumer: "consumer-b" }), false, "during a replay");
   scene.stop();
 });
+
+// An Agent's card (UX1): only a running run is stopped; a count is the
+// host's or it is unconfirmed, never 0 or guessed.
+test("a card stops only a running run and never makes up a count", () => {
+  const run = (live, extra = {}) => ({ run_id: "r1", task_id: "show-a-01", consumer_id: "consumer-a", live, state: live === "ended" ? "ended" : "accepted", ...extra });
+  assert.deepEqual(A.runCard(null), { state: "idle", text: "未開始", calls: "", kind: "", stoppable: false });
+  const r = A.runCard(run("running", { tool_calls: 3 }));
+  assert.equal(r.stoppable, true);
+  assert.equal(r.calls, "已回覆工具呼叫 3 次");
+  assert.equal(A.runCard(run("running", { tool_calls: 0 })).calls, "已回覆工具呼叫 0 次", "a real 0 is the host's 0");
+  assert.equal(A.runCard(run("running")).kind, "unconfirmed", "no count from the host is unconfirmed, not 0");
+  assert.equal(A.runCard(run("running", { tool_calls: "3" })).kind, "unconfirmed", "not a count");
+  assert.equal(A.runCard(run("running", { tool_calls: 3 }), "status_503").kind, "unconfirmed", "the runs list could not be read");
+  const s = A.runCard(run("stopping", { tool_calls: 2 }));
+  assert.equal(s.stoppable, false, "a stopping run is not stopped again");
+  assert.equal(s.text, "停止中（仍占名額）");
+  const e = A.runCard(run("ended", { outcome: "ok" }));
+  assert.equal(e.stoppable, false, "an ended run has nothing to stop");
+  assert.equal(e.kind, "not_provided");
+  assert.equal(A.runCard(run(undefined, { state: "interrupted" })).stoppable, false, "an interrupted run");
+});

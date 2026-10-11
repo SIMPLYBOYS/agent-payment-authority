@@ -112,6 +112,11 @@ async function startChrome() {
   await send("Runtime.enable");
   await send("Log.enable");
   await send("Page.enable");
+  // UX1 (docs/commercial-ux1.md): the host page folds the credentials, the
+  // runs list, the manual viewer and the task switch under 進階; these flows
+  // use them, as an operator would after opening it. A closed <details>
+  // gives its contents no innerText, so it is opened on every page.
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: `document.addEventListener("DOMContentLoaded", () => { const a = document.getElementById("advanced"); if (a) a.open = true; });` });
   const evaluate = async (expr) => {
     const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true });
     if (r.exceptionDetails) throw new Error("evaluate: " + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
@@ -133,7 +138,7 @@ const text = (sel) => `(document.querySelector(${JSON.stringify(sel)})?.textCont
 
 async function signIn(b, token) {
   // D1: the viewer form may sit in a folded section; a user opens it first.
-  await b.evaluate(`(document.getElementById("token").closest("details")?.setAttribute("open", ""), document.getElementById("token").focus())`);
+  await b.evaluate(`(() => { for (let d = document.getElementById("token").closest("details"); d; d = d.parentElement.closest("details")) d.open = true; document.getElementById("token").focus(); })()`); // UX1: the form is under 進階
   await b.send("Input.insertText", { text: token }); // typed into the masked field; never in an expression or a log
   await b.evaluate(`document.querySelector("#auth-form button[type=submit]").click()`);
 }
@@ -892,7 +897,7 @@ full: {
   const releaseJson = async () => { await b.evaluate(`(window.__jsonHold.held.splice(0).forEach((f) => f()), true)`); await sleep(500); };
   const noViewer = () => b.evaluate(`${text("#viewer")} === "未驗證" && document.getElementById("task-form").hidden && document.querySelectorAll("#task-pick button").length === 0`);
   // R2: a token typed but not submitted.
-  const typeOnly = async (t) => { await b.evaluate(`document.getElementById("token").focus()`); await b.send("Input.insertText", { text: t }); };
+  const typeOnly = async (t) => { await b.evaluate(`(() => { for (let d = document.getElementById("token").closest("details"); d; d = d.parentElement.closest("details")) d.open = true; document.getElementById("token").focus(); })()`); await b.send("Input.insertText", { text: t }); };
   const tokenFieldEmpty = () => b.evaluate(`document.getElementById("token").value === ""`);
 
   // Load the current file: the field is emptied, both consumers offered.
@@ -1112,7 +1117,7 @@ full: {
   await b.waitFor(`["ready","rendered","failed"].includes(document.getElementById("unity-status").dataset.state)`, 90000);
   await chooseFile(ctlFile);
   check("3.2: the token file with the operator loads", await b.waitFor(`document.getElementById("creds").dataset.mode === "file" && document.getElementById("creds").textContent.includes("operator")`));
-  check("3.2: the control panel offers the catalog's scenarios", await b.waitFor(`!document.getElementById("control").hidden && document.querySelectorAll("#run-scenarios button").length === 3`, 15000));
+  check("3.2: the control panel offers the catalog's scenarios", await b.waitFor(`!document.getElementById("control").hidden && document.querySelectorAll("#run-scenarios button[data-scenario]").length === 3`, 15000));
   const runsOf = async () => (await hostGet(cAddr, ct.op, "/api/host/runs")).json.runs;
   // clickScenario waits until the scenario's button is enabled (no run active, no start in flight), then clicks it.
   const clickScenario = async (id) => {
@@ -1191,8 +1196,8 @@ full: {
   check("3.2: the hanging run is running with a stop button", await b.waitFor(`${runItem("show-a-05")}.includes("進行中") && !!document.querySelector('#runs li[data-live="running"] .run-stop')`, 20000), await b.evaluate(runItem("show-a-05")));
   // M-B (docs/multi-agent-demo-design.md 3.3): one run per consumer, not one
   // in all: consumer-a's starts wait, consumer-b's do not.
-  check("3.2: no other start of the same consumer while its run is active; the other consumer may start", await b.evaluate(`[...document.querySelectorAll('#run-scenarios .consumer-row[data-consumer="consumer-a"] button')].every((x) => x.disabled)
-    && [...document.querySelectorAll('#run-scenarios .consumer-row[data-consumer="consumer-b"] button')].every((x) => !x.disabled)`));
+  check("3.2: no other start of the same consumer while its run is active; the other consumer may start", await b.evaluate(`[...document.querySelectorAll('#run-scenarios .consumer-row[data-consumer="consumer-a"] button[data-scenario]')].every((x) => x.disabled)
+    && [...document.querySelectorAll('#run-scenarios .consumer-row[data-consumer="consumer-b"] button[data-scenario]')].every((x) => !x.disabled)`));
   await b.evaluate(`document.querySelector('#runs li[data-live="running"] .run-stop').click()`);
   check("3.2: stopped only after the cancel was recorded", await b.waitFor(`${runItem("show-a-05")}.includes("已停止，取消已記錄")`, 20000), await b.evaluate(runItem("show-a-05")));
 
@@ -1365,7 +1370,7 @@ full: {
   const cancelBtn = (task) => `document.querySelector('#runs .task-cancel[data-task="${task}"]')`;
   // UX1: a cancel asks first; the confirmation is the cancel operation.
   const confirmCancel = async (task) => {
-    await confirmCancel(task);
+    await b.evaluate(`${cancelBtn(task)}.click()`);
     await b.waitFor(`!!document.querySelector('#runs .agent-confirm[data-task="${task}"] .cancel-confirm')`, 5000);
     await b.evaluate(`document.querySelector('#runs .agent-confirm[data-task="${task}"] .cancel-confirm').click()`);
   };
@@ -1706,7 +1711,7 @@ full: {
     const keptA = await b.evaluate(`JSON.stringify({ ls: localStorage.length, ss: sessionStorage.length, cookie: document.cookie, url: location.href, field: document.getElementById("token-file").value })`);
     check("3.5: the token file is in page memory only (field emptied; no storage, cookie or URL)", /"ls":0,"ss":0,"cookie":"","url":"[^"]*\/host","field":""/.test(keptA) && [at.op, at.host, at.a, at.b].every((t) => !keptA.includes(t)), keptA.slice(0, 120));
     await b.evaluate(`(window.scrollTo(0, 0), true)`);
-    check("D1 /host at 1280×900: the shop and the start buttons are in the first viewport", await b.evaluate(inView("#unity-canvas")) && await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].every((x) => { const r = x.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })`));
+    check("D1 /host at 1280×900: the shop and the start buttons are in the first viewport", await b.evaluate(inView("#unity-canvas")) && await b.evaluate(`[...document.querySelectorAll("#run-scenarios button[data-scenario]")].every((x) => { const r = x.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })`));
     await shot(b, "desktop-acceptance-ready", 1280, 900, false);
     await shotFull(b, "full-acceptance-ready");
 

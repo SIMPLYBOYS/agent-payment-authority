@@ -175,7 +175,7 @@ try {
     JSON.stringify([await slot("consumer-a"), await slot("consumer-b")]));
   const r1 = await runs();
   check("two runs running, one per consumer", r1.filter((r) => r.live === "running").length === 2);
-  check("each consumer's start is disabled while its run runs", await b.waitFor(`[...document.querySelectorAll('.consumer-row button')].every((x) => x.disabled) && document.getElementById("start-all").disabled`, 10000));
+  check("each consumer's start is disabled while its run runs", await b.waitFor(`[...document.querySelectorAll('.consumer-row button[data-scenario]')].every((x) => x.disabled) && document.getElementById("start-all").disabled`, 10000));
   await shot("dual-a-asks-b-entered");
   writeFileSync(gate, "");
   check("B goes on to its own Ask; A stays", await shows("consumer-b", "show-b-01", "waiting") && await shows("consumer-a", "show-a-01", "waiting"));

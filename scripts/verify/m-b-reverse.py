@@ -31,6 +31,7 @@ AD = "web/adapter.js"
 SC = "web/scene.js"
 PR = "unity/AgentPaymentAuthority/Assets/APA/Scripts/Projection.cs"
 J = "cmd/timing-judge/main.go"
+BR = "unity/AgentPaymentAuthority/Assets/APA/Scripts/ShopBridge.cs"
 
 
 def node(path, test, regex):
@@ -97,6 +98,18 @@ ITEMS = [
      [(J, "if n, err := stdout.Write(raw); err != nil || n != len(raw) {", "if n, err := stdout.Write(raw); false && (err != nil || n != len(raw)) {")]),
     ("C1: a short report write is no verdict", go("./cmd/timing-judge/", "^TestReportWrite$/^a_short_write_without_an_error$", ("TestReportWrite/a_short_write_without_an_error", r"want exit 3 and the reason")),
      [(J, "if n, err := stdout.Write(raw); err != nil || n != len(raw) {", "if n, err := stdout.Write(raw); err != nil {")]),
+    # UX1 (docs/commercial-ux1.md): selection kept apart from late clicks, and
+    # the card's stop and count; run them alone with "^UX1:".
+    ("UX1: an older scene's click names nobody", node("web/test/scene.test.mjs", "a click names a customer only for the current scene and its slot", r"an older scene's click"),
+     [(SC, "if (!active || paused || !r || r.scene !== scene) return false;", "if (!active || paused || !r) return false;")]),
+    ("UX1: another slot's click names nobody", node("web/test/scene.test.mjs", "a click names a customer only for the current scene and its slot", r"another slot's click"),
+     [(SC, "return !!s && !!s.task && s.slot === r.slot;", "return !!s && !!s.task;")]),
+    ("UX1: unity: an older scene's Select shows no ring", unity("SelectionTests.OnlyTheCurrentScenesSelectShowsTheRing", r"an older scene's Select"),
+     [(BR, 'else if (m.scene != scene.Scene) outcome = "Stale";', 'else if (false) outcome = "Stale";')]),
+    ("UX1: only a running run can be stopped", node("web/test/scene.test.mjs", "a card stops only a running run and never makes up a count", r"a stopping run is not stopped again"),
+     [(AD, 'return { state, text, calls, kind, stoppable: state === "running" };', 'return { state, text, calls, kind, stoppable: state !== "idle" };')]),
+    ("UX1: no count from the host is not 0", node("web/test/scene.test.mjs", "a card stops only a running run and never makes up a count", r"no count from the host is unconfirmed, not 0"),
+     [(AD, 'else [calls, kind] = ["已回覆工具呼叫：未確認", "unconfirmed"];', 'else [calls, kind] = ["已回覆工具呼叫 " + (run.tool_calls || 0) + " 次", "known"];')]),
 ]
 
 ITEM_TIMEOUT = 900

@@ -336,7 +336,7 @@ try {
   check("B: one pairing: credentials held, the field emptied, no file chosen, the status bar says paired", await b.waitFor(`${paired} && ${text("#status")}.startsWith("已配對")`, 20000) && (await b.evaluate(`document.getElementById("pair-code").value`)) === ""
     && (await b.evaluate(`document.getElementById("token-file").value`)) === "" && !(await b.evaluate(visible("#pair-form"))));
   check("B: the live warning, the real-CLI start, the stop slot and 查看證據 in the first screen",
-    await b.waitFor(`${visible("#live-warning")} && [...document.querySelectorAll("#run-scenarios button")].some((x) => x.textContent.startsWith("開始（真實 CLI）："))`, 20000)
+    await b.waitFor(`${visible("#live-warning")} && [...document.querySelectorAll("#run-scenarios button")].some((x) => x.textContent.startsWith("開始（真實 CLI）"))`, 20000)
     && await b.evaluate(inView("#live-warning")) && await b.evaluate(inView("#run-scenarios button")) && await b.evaluate(inView("#show-evidence")) && await b.evaluate(inView("#unity-canvas")));
   const buildRow = await b.evaluate(`(document.querySelector('#readiness tr[data-item="建置"]')?.textContent || "")`);
   check("B: the readiness says the build as recorded (revision and modified)", /[0-9a-f]{12}（modified=(true|false)/.test(buildRow), buildRow);
@@ -347,7 +347,7 @@ try {
   check("B: nothing of the code or a token in the URL, cookies or storage", kept === JSON.stringify([bb.url, "", 0, 0]), kept);
 
   // Start (one click), the Dashboard follows; 查看證據 opens the task's evidence.
-  await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].find((x) => x.textContent.startsWith("開始（真實 CLI）："))?.click()`);
+  await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].find((x) => x.textContent.startsWith("開始（真實 CLI）"))?.click()`);
   check("B: one click starts one run; the Dashboard switches to its task", await b.waitFor(`${text("#current")}.includes("show-a-01") && ${uKey("seq")} === "3" && ${uKey("state")} === "rendered"`, 30000));
   check("B: running: the stop button and the run status in the first screen", await b.waitFor(`!!document.querySelector("#run-scenarios .row-stop")`, 10000) && await b.evaluate(inView("#run-scenarios .row-stop")) && await b.evaluate(inView("#run-status")));
   await shot(b, "3-running");
@@ -358,8 +358,8 @@ try {
   // A second run, stopped.
   script(...purchase, { do: "hang" });
   await b.evaluate(`(window.scrollTo(0, 0), true)`);
-  await b.waitFor(`[...document.querySelectorAll("#run-scenarios button")].some((x) => !x.disabled)`, 30000);
-  await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].find((x) => !x.disabled)?.click()`);
+  await b.waitFor(`[...document.querySelectorAll("#run-scenarios button[data-scenario]")].some((x) => !x.disabled)`, 30000);
+  await b.evaluate(`[...document.querySelectorAll("#run-scenarios button[data-scenario]")].find((x) => !x.disabled)?.click()`);
   check("B: the second run's task opens", await b.waitFor(`${text("#current")}.includes("show-a-02") && ${uKey("seq")} === "3"`, 30000));
   await b.waitFor(`!!document.querySelector("#run-scenarios .row-stop")`, 20000);
   await b.evaluate(`document.querySelector("#run-scenarios .row-stop").click()`);
@@ -397,7 +397,7 @@ try {
   await b.waitFor(`document.readyState === "complete"`);
   await typeCode(b, cc.code);
   check("C (fake): after pairing, the header says fake and the start says no model", await b.waitFor(`${paired} && ${text("header .badge")} === "M1／fake agent／不付款"
-    && [...document.querySelectorAll("#run-scenarios button")].length > 0 && [...document.querySelectorAll("#run-scenarios button")].every((x) => x.textContent.startsWith("開始（fake，不執行模型）："))`, 20000));
+    && [...document.querySelectorAll("#run-scenarios button[data-scenario]")].length > 0 && [...document.querySelectorAll("#run-scenarios button[data-scenario]")].every((x) => x.textContent.startsWith("開始（fake，不執行模型）"))`, 20000));
   check("C (fake): /api/mode says fake", (await api(cc.addr, null, "/api/mode")).json.mode === "fake");
   await C.stopHost(cc.pid);
 } catch (e) {

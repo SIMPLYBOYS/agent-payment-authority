@@ -173,7 +173,7 @@ try {
   await b.send("DOM.setFileInputFiles", { nodeId: q.nodeId, files: [tokFile] });
   check("before any start: the label, the warning, the real CLI row", await b.waitFor(`${text("header .badge")} === ${JSON.stringify(LABEL)} && ${visible("#live-warning")} && ${visible("#live-note")}
     && ${row("真實 CLI")}.includes("按「開始」才執行真實 Claude Code CLI") && ${row("真實 CLI")}.includes("開發展示例外")`, 20000), await b.evaluate(row("真實 CLI")));
-  check("the start button says real CLI", await b.waitFor(`[...document.querySelectorAll("#run-scenarios button")].some((x) => x.textContent.startsWith("開始（真實 CLI）："))`, 20000));
+  check("the start button says real CLI", await b.waitFor(`[...document.querySelectorAll("#run-scenarios button")].some((x) => x.textContent.startsWith("開始（真實 CLI）"))`, 20000));
   await sleep(1500);
   check("loading the page and the token file started nothing", tracesIn(session).length === 0 && (await api(addr, hostTok, "/api/host/runs")).json.runs.length === 0);
   await shot(b, "before-start");
@@ -199,7 +199,7 @@ try {
 
   // ---- one run: start, the Dashboard follows the Store ----
   await traceMode("hold"); // R1 (1): every trace read is held from the start
-  await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].find((x) => x.textContent.startsWith("開始（真實 CLI）："))?.click()`);
+  await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].find((x) => x.textContent.startsWith("開始（真實 CLI）"))?.click()`);
   check("the Dashboard switches to the run's task", await b.waitFor(`${text("#current")}.includes("show-a-") && document.getElementById("status").dataset.kind === "ok"`, 30000), await b.evaluate(text("#current")));
   check("Unity reports the task at #3 waiting", await b.waitFor(`${uKey("state")} === "rendered" && ${uKey("task")}.startsWith("show-a-") && ${uKey("seq")} === "3" && ${uKey("phase")} === "waiting"`, 30000));
   await b.evaluate(`(document.getElementById("evidence-box").open = true, true)`);
@@ -242,8 +242,8 @@ try {
 
   // ---- a second run, stopped by the operator ----
   script(...purchaseSteps, { do: "hang" });
-  await b.waitFor(`[...document.querySelectorAll("#run-scenarios button")].some((x) => !x.disabled)`, 20000);
-  await b.evaluate(`[...document.querySelectorAll("#run-scenarios button")].find((x) => !x.disabled)?.click()`);
+  await b.waitFor(`[...document.querySelectorAll("#run-scenarios button[data-scenario]")].some((x) => !x.disabled)`, 20000);
+  await b.evaluate(`[...document.querySelectorAll("#run-scenarios button[data-scenario]")].find((x) => !x.disabled)?.click()`);
   check("second run: the Dashboard switches to its new task", await b.waitFor(`${text("#current")}.includes("show-a-") && !${text("#current")}.includes(${JSON.stringify(r1.task_id)}) && ${uKey("seq")} === "3"`, 30000), await b.evaluate(text("#current")));
   check("the stop button is offered", await b.waitFor(`!!document.querySelector("#run-scenarios .row-stop")`, 20000));
   await b.evaluate(`document.querySelector("#run-scenarios .row-stop").click()`);

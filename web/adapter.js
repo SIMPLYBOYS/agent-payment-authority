@@ -663,3 +663,20 @@ export function evidence(snapshot, po, ctx) {
     po: po || null, sections,
   };
 }
+
+// runCard (UX1, docs/commercial-ux1.md): what an Agent's card says of its
+// newest run (null: none). Only a running run can be stopped; a stopping one
+// still holds its place. tool_calls is the calls the host has answered,
+// sent while the run runs or stops; anything else is unconfirmed or not
+// given, never 0. runsError: the runs list could not be read now.
+export function runCard(run, runsError) {
+  const state = !run ? "idle" : run.live === "running" ? "running" : run.live === "stopping" ? "stopping" : "ended";
+  const text = { idle: "未開始", running: "執行中", stopping: "停止中（仍占名額）", ended: "已結束" }[state];
+  let calls = "", kind = "";
+  if (state === "running" || state === "stopping") {
+    if (runsError) [calls, kind] = ["已回覆工具呼叫：未確認（場次清單讀取失敗）", "unconfirmed"];
+    else if (Number.isInteger(run.tool_calls) && run.tool_calls >= 0) [calls, kind] = ["已回覆工具呼叫 " + run.tool_calls + " 次", "known"];
+    else [calls, kind] = ["已回覆工具呼叫：未確認", "unconfirmed"];
+  } else if (state === "ended") [calls, kind] = ["工具呼叫數：場次結束後不提供", "not_provided"];
+  return { state, text, calls, kind, stoppable: state === "running" };
+}
