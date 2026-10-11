@@ -26,15 +26,17 @@ namespace APA
         // inside the shop so two customers never stand on one spot. Set by
         // the bridge, which resets the scene when it changes.
         [System.NonSerialized] public bool Multi;
-        public const float BAside = 0.45f;
+        public const float BAside = 0.45f, BLeft = 1.0f;
 
         // P is where a customer stands at a point: Point, and in version 2 B
-        // a little lower on the inside points (the corridor stays horizontal
-        // and vertical).
+        // a little lower on the inside points and one tile to the left from
+        // the shelf on, so two customers never cover each other (the
+        // corridor stays horizontal and vertical).
         public Vector2 P(string consumer, int n)
         {
             var p = Point(consumer, n);
             if (Multi && consumer == "consumer-b" && n >= Aisle) p.y -= BAside;
+            if (Multi && consumer == "consumer-b" && n >= Shelf) p.x -= BLeft;
             return p;
         }
 
@@ -520,8 +522,11 @@ namespace APA
             // Kept inside the view: to the right of a customer on the left
             // half of the room, to the left on the right half.
             bool left = c.go.transform.localPosition.x < 6f;
-            c.tag.anchor = left ? TextAnchor.LowerLeft : TextAnchor.LowerRight;
-            c.tag.transform.localPosition = new Vector3(left ? -0.4f : 0.4f, 2.05f, 0f);
+            // Version 2: B's label under its feet, A's over its head, so two
+            // customers side by side never cover each other's words.
+            bool below = Multi && c.id == "consumer-b";
+            c.tag.anchor = below ? (left ? TextAnchor.UpperLeft : TextAnchor.UpperRight) : (left ? TextAnchor.LowerLeft : TextAnchor.LowerRight);
+            c.tag.transform.localPosition = new Vector3(left ? -0.4f : 0.4f, below ? -0.1f : 2.05f, 0f);
             if (status == null) return;
             if (Multi) status.text = StatusLines();
             else if (c.body.color.a > 0.9f) status.text = (c.id == "consumer-a" ? "A" : "B") + ": " + (label == "" ? c.target.Phase : label);
