@@ -1,7 +1,7 @@
 # 雙 Agent 商店：M-A 最小設計與範圍修訂提案
 
 > 2026-10-11，Claude Code（M-A）。初版 `79000a2`（基準 HEAD `d3b7c53`，M1 已於 10/11 結案）。
-> **狀態（10/11）：M-A 的 R1～R4 已通過 Codex 限定設計複核並關閉**（文件、Git 與相關原始碼的唯讀核對，沒有執行測試或真實 CLI）。**現行（10/12）：M-B fake 技術 review 通過，R1／R2／C1 關閉；M-C 真實雙 Agent 展示待 Aaron 核准**（第 14.4 節）。歷程：Aaron 核准 M-B 的 fake 實作與定向驗證；M-B 實作（第 14 節）；10/12 Codex 限定 review 提出 R1、R2、C1，暫不通過；補正（第 14.3 節）通過限定複核。補正對照見第 13 節。
+> **狀態（10/11）：M-A 的 R1～R4 已通過 Codex 限定設計複核並關閉**（文件、Git 與相關原始碼的唯讀核對，沒有執行測試或真實 CLI）。**現行（10/12）：M-B fake 技術 review 通過，R1／R2／C1 關閉（第 14.4 節）。M-C 已依 Aaron 核准執行一次（Aaron 操作）：兩位真實 Agent 的工具呼叫判定為交錯；停止隔離未示範（第 15 節；Claude Code 唯讀核對，待 Codex 核對）。**歷程：Aaron 核准 M-B 的 fake 實作與定向驗證；M-B 實作（第 14 節）；10/12 Codex 限定 review 提出 R1、R2、C1，暫不通過；補正（第 14.3 節）通過限定複核。補正對照見第 13 節。
 > 只讀程式與文件寫成，沒有改產品、沒有跑測試或展示。M1 與 B1-00～B1-07 維持 Done，本文件的工作是後續切片，不以 M1 的 PASS 代替並行驗收。
 > 方向（Aaron 已接受）：先讓兩位不同 consumer 的 Agent 在同一間商店有重疊的工作流程，各自的資料與場景不串，之後再接 Admin 營運視角。容量原則（Aaron 最新）：同時執行的 Agent 數是部署設定，本輪預設與驗收規模為 2，不是產品永久上限。下面的生命週期、橋接格式與權限方案是本文件的**推薦**，不是 Aaron 已逐項核准的細節。
 
@@ -648,3 +648,36 @@ M1 與 B1-00～B1-07 維持 Done。本節記錄 M-B 技術 review 通過與三�
 - 開發展示的 plugin 例外與其剩餘風險照舊，嚴格零 plugin 模式仍未驗證；Gate、認證清單與版本釘選都沒有改。
 - 雙角色展示不代表任意容量已驗收：可管理的帳號數、同時執行的 Agent 數與付款並行數是三個不同的數量，20 不是產品硬上限。
 - 付款、Admin、真實核准／grant、Signer、BBS+、ZK、語音等屬於後續切片，不在本次驗收範圍。
+
+## 15 M-C 真實雙 Agent 執行（10/12，一次）
+
+**核准與分工**：Aaron 核准一次 M-C，由 Aaron 在自己的終端機操作（`make present-live`；配對碼與登入資料不經 Claude Code），Claude Code 協助。核准包含兩場同時使用 Aaron 本人的訂閱。執行前，Claude Code 只做唯讀準備：`~/.local/bin/claude` 已自動更新到 2.1.296，host 只接受 `2.1.293 (Claude Code)`；經 Aaron 選擇，把本機 `var/present.conf`（git 忽略）的 `cli=` 改為 `/Users/mac/.local/share/claude/versions/2.1.293`，只改這一行。開發展示 plugin 例外照舊開啟；Gate、認證清單與版本釘選未改。
+
+**這一次**（場次目錄 `var/present-GyCNVx/`，git 忽略）：
+- 建置 `0dbefd8`（`build.txt`）。Go 標記 `vcs.modified=true`，來源是未追蹤的 `demo` 目錄；`3591736..0dbefd8` 的產品與判定工具程式沒有差異。
+- Host instance `70e423a9411278f7b1c735f7cb53109d`，於 2026-10-11T16:47:55Z 啟動，同時執行上限 2。
+- 兩場：
+  - A：`live-a`，`show-a-01`，受理於 16:48:16Z，結束於 16:48:26Z。
+  - B：`live-b`，`show-b-01`，受理於 16:48:19Z，結束於 16:48:29Z。
+- 兩場都由 CLI 2.1.293 執行；init gate passed（`dev_demo_plugins`）；model 為 `claude-sonnet-5-5`。各自依序呼叫 `list_products`、`get_quote`、`request_purchase`，最後都得到 Ask。outcome 都是 `ok`，結束碼 0，trace 沒有 stderr。
+- 兩場的受理時點相隔約 3.7 秒（`accepted_ms` 分別是 20495、24192），大於 §6.5 預期「一起開始」的一秒內。紀錄無法區分是按了一次「一起開始」還是分別按下開始，這裡照實記錄。
+- 沒有受理任何停止（兩份紀錄的 `stop_accepted_ms` 都是 null）。
+- Store：A 的 Ask 在 16:48:53Z 到期（`APPROVAL_EXPIRED`），task 仍是 `running`。B 的 task 在 16:48:55Z 撤回並取消（`APPROVAL_WITHDRAWN`、`TASK_CANCELLED`），這時 B 的場次已結束 26 秒，`host_runs.store_end` 仍是 `""`，所以這是場次結束後的取消（例如主持人頁的取消），不是場次中的停止。
+- 沒有付款，也沒有任何付款能力。
+
+**判定**（Claude Code 以 `0dbefd8` 建置 `cmd/timing-judge`，不加 `--fake`；資料庫以唯讀開啟，前後 sha256 相同；輸出在 `artifacts/m-c/judge-GyCNVx/`）：
+- `timing-judge --db …/live.db --a …show-a-01….timing.json --b …show-b-01….timing.json`：**結束碼 0，`interleaved`，`fake: false`**。
+  - 呼叫開始時點（毫秒）：A 24564、25979、27796；B 27365、28899、30737。
+  - 依時間排序是 A、A、B、A、B、B，含有 A（25979）、B（27365）、A（27796）、B（28899）的交替鏈。
+  - 判定原文：「同一 Host 上，consumer-a 與 consumer-b 的工具呼叫交錯發生：雙方都在對方兩次呼叫之間有自己的工具呼叫。這不代表跨度內每一刻都在工作，也不代表觀測到模型供應商內部同時推論。」
+- 加上 `--stop a`：結束碼 1，`held: false`，原文為「停止隔離未示範：沒有在 running 時受理的停止（停止被拒或對已結束的場次）」。依 §6.5，這一次不重試。即使有停止，B 的 task 在 Store 有 `TASK_CANCELLED`，依 R2 停止隔離也不會成立。
+
+**證據檢查**：兩份 trace 與兩份時間紀錄都只有固定代碼、工具名稱、商品 ID 與用量計數；搜尋 token、bearer、配對碼與密碼字樣，只命中用量欄位（`input_tokens` 等），沒有憑證。
+
+**結論**（Claude Code 唯讀核對，待 Codex 核對）：
+- 這一次 M-C 的兩位真實 Agent，在同一 Host 上的工具呼叫判定為**交錯**（M-C 的工作重疊條件，§6.4）。
+- **停止隔離未示範**。
+- 這不代表跨度內每一刻都在工作，也不代表觀測到供應商內部同時推論；不代表付款能力。
+- 只有一次結果，不推論穩定性或任意容量。
+
+**後續待決**：是否另外核准一次以示範停止隔離（停止 A 的時機要在 A 已有完成的呼叫、且兩場都仍在執行時），由 Aaron 決定；本紀錄不自動安排。
