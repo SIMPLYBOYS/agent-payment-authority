@@ -23,6 +23,7 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
   let scene = 0;
   let active = false;
   let paused = false;
+  let selected = null; // UX1: the consumer the page has chosen (the ring), or null
   const slots = new Map(); // consumer -> slot
 
   const newSlot = (consumer) => ({ consumer, slot: 0, task: null, st: A.newState(), timer: null, abort: null, inFlight: false,
@@ -123,7 +124,14 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
       s.task = null;
       if (task) follow(s.consumer, task);
     }
+    sendSelect();
     onChange();
+  }
+
+  // sendSelect: the choice, for the current scene (a new scene starts
+  // without a ring in Unity).
+  function sendSelect() {
+    if (active && !paused && unity.select2) unity.select2({ scene, consumer: selected || "" });
   }
 
   return {
@@ -139,6 +147,7 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
     stop() {
       if (!active) return;
       active = false;
+      selected = null;
       for (const s of slots.values()) stopSlot(s);
       slots.clear();
       unity.own(false);
@@ -153,8 +162,25 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
       if (active && !paused) {
         scene += 1;
         unity.send2(A.sceneClear2(scene));
+        sendSelect();
       }
       onChange();
+    },
+    // select: the page's choice (UX1); the ring only, sent when it changed.
+    select(consumer) {
+      const c = consumer || null;
+      if (c === selected) return;
+      selected = c;
+      sendSelect();
+    },
+    get selected() { return selected; },
+    // picked: whether a click Unity reported names a customer of this very
+    // scene and slot; an older scene's or slot's click, or a customer the
+    // scene has no slot for, names nobody.
+    picked(r) {
+      if (!active || paused || !r || r.scene !== scene) return false;
+      const s = slots.get(r.consumer);
+      return !!s && !!s.task && s.slot === r.slot;
     },
     // setRuns: each consumer's scene task is its newest run's task.
     setRuns(runs) {

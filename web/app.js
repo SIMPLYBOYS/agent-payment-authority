@@ -88,6 +88,10 @@ const unity = new UnityHost($("unity-canvas"), (s, detail) => {
     if (sceneReport) sceneReport(detail);
     return;
   }
+  if (s === "select2") { // UX1: a click on a customer; /host decides
+    if (scenePick) scenePick(detail);
+    return;
+  }
   if (s === "rendered") {
     // detail: what the shop says it shows, for the generation last sent
     // (unity.js drops older reports, so a late one cannot bring back a
@@ -129,7 +133,9 @@ export const shop = () => unity;
 let sceneReport = null;
 let sceneView = null;
 let replayMode = null;
+let scenePick = null;
 export function onSceneReport(fn) { sceneReport = fn; }
+export function onScenePick(fn) { scenePick = fn; }
 export function setSceneView(fn) { sceneView = fn; }
 export function onReplayMode(fn) { replayMode = fn; }
 export function refreshPanels() { drawScene(); renderPanels(); }

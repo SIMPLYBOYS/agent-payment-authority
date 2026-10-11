@@ -334,9 +334,11 @@ export const sameShown2 = (sent, rep) => !!sent && !!rep && Number.isInteger(rep
 // parseBridge: Unity's bridge report: the versions and customers the build
 // can show; null when malformed. A build without it shows one customer.
 export function parseBridge(detail) {
-  const m = /^versions=([0-9,]+);customers=([a-z0-9,-]*)$/.exec(String(detail));
+  const m = /^versions=([0-9,]+);customers=([a-z0-9,-]*)(;select=1)?$/.exec(String(detail));
   if (!m) return null;
-  return { versions: new Set(m[1].split(",").map(Number)), customers: m[2] ? m[2].split(",") : [] };
+  // select: the build takes the page's Select and reports clicks (UX1,
+  // docs/commercial-ux1.md); an older build says nothing of it.
+  return { versions: new Set(m[1].split(",").map(Number)), customers: m[2] ? m[2].split(",") : [], select: !!m[3] };
 }
 
 // sceneTasks: each consumer's scene task, the task of its newest run (the

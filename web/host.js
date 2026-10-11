@@ -20,9 +20,14 @@
 // only while the credentials and the Dashboard's view are the ones of the
 // click: a clear, a new file, the manual mode, pagehide, or a switch of
 // consumer or task drops it; nothing is opened or signed in for it.
+//
+// UX1 (docs/commercial-ux1.md): an operation card per Agent (its run's
+// state, the calls the host has answered, the business state, start, stop
+// and a confirmed cancel), the same choice from a card or a click on a
+// customer in the shop, and the evidence in a drawer.
 
 import { nextModeSeq, confirmMode, setStatus, forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, currentConsumer, setAlert,
-  shop, onSceneReport, setSceneView, onReplayMode, refreshPanels } from "./app.js";
+  shop, onSceneReport, onScenePick, setSceneView, onReplayMode, refreshPanels } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
 import { createScene } from "./scene.js";
 import * as A from "./adapter.js";
@@ -65,6 +70,14 @@ const creds = createHostCreds({ call, onChange: render });
 // panels (app.js) follow the chosen consumer and task only.
 const scene = createScene({ unity: shop(), token: (c) => creds.viewerToken(c), onChange: () => { renderScene(); refreshPanels(); } });
 onSceneReport((r) => scene.rendered(r));
+// A click on a customer in the shop: taken only when it names a customer of
+// the current scene and slot (scene.picked); otherwise counted and dropped.
+let picksDropped = 0;
+onScenePick((r) => {
+  if (scene.picked(r)) return selectConsumer(r.consumer);
+  picksDropped++;
+  $("unity-canvas").dataset.picksDropped = String(picksDropped);
+});
 setSceneView((c) => scene.view(c));
 onReplayMode((on) => (on ? scene.pause() : scene.resume()));
 const short = (c) => (c === "consumer-a" ? "A" : c === "consumer-b" ? "B" : c);
@@ -118,9 +131,9 @@ function renderScene() {
     li.textContent = "客人 " + short(x.consumer) + "：" + (x.task || "—") + (x.seq >= 0 ? " #" + x.seq : "") + (x.label ? " · " + x.label : "") + " · " + sync;
     return li;
   }));
-  const sum = $("scene-summary");
-  sum.hidden = !scene.started;
-  sum.textContent = "場景：" + (slots.length ? slots.map((x) => short(x.consumer) + (x.seq >= 0 ? " #" + x.seq : "") + " " + (x.label || "同步中")).join(" · ") : "尚無場次");
+  // UX1: each card says its customer's state; the header chip would repeat it.
+  $("scene-summary").hidden = true;
+  renderControl();
 }
 
 // A 401 the Dashboard saw for its current viewer: the whole file is stale.
@@ -137,6 +150,8 @@ function render(v) {
     lastRunsError = null;
     starting = false;
     cancelling = false;
+    confirming = null;
+    autoPicked = false;
     clearTimeout(readyTimer);
     clearTimeout(runsTimer);
     setRunStatus("", "idle");
@@ -364,12 +379,51 @@ const cancellable = (r) => {
   return !!t && (t.status === "awaiting_approval" || t.status === "running");
 };
 
+// confirming: the task whose cancel waits for its confirmation (with the
+// generation); a new generation or a done cancel drops it.
+let confirming = null;
+let autoPicked = false; // this generation has chosen a customer for the panels once by itself
+let shownControl = "";
+let shownRuns = "";
+let advancedGen = -1; // the generation 進階 was opened for by itself (history mode, the manual viewer)
+
+// agentModel: what one customer's card says, from its newest run (the runs
+// list, newest first), its scene slot and the task reads. Unknown is said
+// to be unknown, never 0 or "none".
+function agentModel(c, runs, slots, ctx) {
+  const run = runs.find((r) => r.consumer_id === c) || null;
+  const slot = slots.find((x) => x.consumer === c) || null;
+  const state = !run ? "idle" : run.live === "running" ? "running" : run.live === "stopping" ? "stopping" : "ended";
+  const stateText = { idle: "未開始", running: "執行中", stopping: "停止中（仍占名額）", ended: "已結束" }[state];
+  let calls = "";
+  if (state === "running" || state === "stopping") {
+    calls = ctx.runsError ? "已回覆工具呼叫：未確認（場次清單讀取失敗）"
+      : Number.isInteger(run.tool_calls) ? "已回覆工具呼叫 " + run.tool_calls + " 次" : "已回覆工具呼叫：未確認";
+  } else if (state === "ended") calls = "工具呼叫數：場次結束後不提供";
+  let business = "";
+  if (slot && slot.task) {
+    if (slot.read !== "ok" && slot.read !== "loading") business = "讀取失敗（" + slot.read + "），保留上次資料" + (slot.label ? "：" + slot.label : "");
+    else if (slot.seq < 0) business = "同步中";
+    else business = (state === "ended" && slot.phase === "waiting" ? "執行已結束／請購待核准（M1 無核准功能；到期前不會付款）" : "") || slot.label || slot.phase;
+  } else business = run ? "同步中" : "尚無場次";
+  const t = run && ctx.tasks && ctx.tasks.get(run.task_id);
+  const sync = !slot || !slot.task || slot.seq < 0 ? "" : !scene.active ? "回放中：場景暫停" : slot.shown ? "Unity 已呈現" : slot.moving ? "Unity 補間中" : "Unity 尚未回報";
+  return {
+    c, state, stateText, calls, business, sync, selected: ctx.chosen === c,
+    task: run ? run.task_id + (slot && slot.task === run.task_id && slot.seq >= 0 ? " #" + slot.seq : "") : "",
+    run: run && run.run_id, stoppable: state === "running", cancel: run && cancellable(run) ? run.task_id : "",
+    taskStatus: t ? t.status : "",
+  };
+}
+
 function renderControl() {
   const v = creds.view();
   const box = $("control");
   // History mode has no control: the server refuses it (409), the page
-  // does not offer it.
-  box.hidden = !v.hasHost || !!(lastReady && lastReady.status && lastReady.status.history);
+  // does not offer it. The task picker and the replay are then the way in.
+  const history = !!(lastReady && lastReady.status && lastReady.status.history);
+  box.hidden = !v.hasHost || history;
+  if ((history || v.mode === "manual") && advancedGen !== creds.gen) { advancedGen = creds.gen; $("advanced").open = true; }
   const pick = $("run-scenarios");
   const scenarios = (lastReady && lastReady.status && lastReady.status.runs && lastReady.status.runs.scenarios) || [];
   const live = !!(lastReady && lastReady.status && lastReady.status.live);
@@ -382,23 +436,27 @@ function renderControl() {
   const maxRuns = (lastReady && lastReady.status && lastReady.status.capacity && lastReady.status.capacity.max_runs) || 1;
   const full = activeRuns.length >= maxRuns;
   const consumers = [...new Set(scenarios.map((sc) => sc.consumer_id))].sort();
-  pick.replaceChildren(...consumers.map((c) => {
-    const row = document.createElement("span");
-    row.className = "consumer-row";
-    row.dataset.consumer = c;
-    row.append("客人 " + short(c) + "：");
-    for (const sc of scenarios.filter((x) => x.consumer_id === c)) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.dataset.scenario = sc.id;
-      b.textContent = (live ? "開始（真實 CLI）：" : "開始（fake，不執行模型）：") + sc.label + "（" + sc.consumer_id + "）";
-      b.disabled = starting || busy.has(c) || full;
-      b.title = busy.has(c) ? "這位客人的場次尚未結束" : full ? "同時執行的場次已達上限" : "";
-      b.addEventListener("click", () => start(sc));
-      row.append(b);
-    }
-    return row;
-  }));
+  const slots = scene.started ? scene.slots() : [];
+  const chosen = currentConsumer();
+  // The ring in the shop follows the customer the panels show.
+  if (scene.started && scene.selected !== (chosen || null)) scene.select(chosen);
+  // The first time this generation's scene has a task and no customer is
+  // chosen, the panels take the first one: nothing to pick by hand.
+  if (chosen) autoPicked = true; // chosen once in this generation (by a start, a card or the shop): never by itself again
+  if (!autoPicked && !chosen && scene.started && v.hasHost) {
+    const first = slots.find((x) => x.task);
+    if (first) { autoPicked = true; selectConsumer(first.consumer); }
+  }
+  if (confirming && confirming.gen !== creds.gen) confirming = null;
+  const ctx = { chosen, runsError: lastRunsError, tasks: lastTasks && lastTasks.gen === creds.gen && lastTasks.list };
+  const models = consumers.map((c) => agentModel(c, runs, slots, ctx));
+  // Rebuilt only when what the cards say changed: a poll that changes
+  // nothing keeps the focus and an open confirmation where they are.
+  const key = JSON.stringify([models, scenarios, live, starting, cancelling, full, [...busy], confirming]);
+  if (key !== shownControl) {
+    shownControl = key;
+    pick.replaceChildren(...models.map((m) => agentCard(m, scenarios.filter((x) => x.consumer_id === m.c), { live, busy, full })));
+  }
   // 一起開始: each consumer's first scenario, as separate requests; not one
   // atomic start (docs/multi-agent-demo-design.md 3.5).
   const pair = consumers.map((c) => scenarios.find((x) => x.consumer_id === c));
@@ -407,31 +465,7 @@ function renderControl() {
   all.textContent = "一起開始：" + pair.map((sc) => sc.id + "（" + short(sc.consumer_id) + "）").join(" ＋ ") + "（各自送出，不保證都成功）";
   all.disabled = starting || pair.every((sc) => busy.has(sc.consumer_id)) || full;
   all.onclick = () => startAll(pair);
-  // The row under the shop: every running run's stop and the Dashboard's
-  // task's cancel, the same operations as in the runs list (section 4.1).
-  const now = [];
-  for (const act of runs.filter((r) => r.live === "running")) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "row-stop";
-    b.dataset.run = act.run_id;
-    b.textContent = "停止 " + short(act.consumer_id) + " " + act.task_id;
-    b.addEventListener("click", () => stop(act.run_id));
-    now.push(b);
-  }
-  const cur = currentTask();
-  const curRun = cur && runs.find((r) => r.task_id === cur);
-  if (curRun && cancellable(curRun)) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "row-cancel";
-    b.dataset.task = cur;
-    b.textContent = "取消 task " + cur;
-    b.disabled = cancelling;
-    b.addEventListener("click", () => cancel(cur));
-    now.push(b);
-  }
-  $("control-now").replaceChildren(...now);
+  renderNext(runs);
   // What the folded runs list would hide stays in its summary and in the
   // status bar: the runs' history (interrupted, a record not written) apart
   // from what cannot be read now (review of 7ffc45d, R2).
@@ -449,6 +483,9 @@ function renderControl() {
   $("runs-summary").textContent = "最近場次（" + runs.length + " 場" + (odd ? "；歷史：" + odd + " 場中斷或紀錄寫入失敗" : "") + (issues.length ? "；目前：" + issues.join("、") : "") + "）";
   setAlert("runs-history", odd ? "場次歷史：" + odd + " 場中斷或紀錄寫入失敗" : "", "warn");
   setAlert("runs-now", issues.length ? "最近場次目前：" + issues.join("、") : "", "error");
+  const runsKey = JSON.stringify([runs, ctx.tasks ? [...ctx.tasks.keys()].map((k) => [k, ctx.tasks.get(k).status]) : null, lastTasks && lastTasks.details ? [...lastTasks.details.keys()] : null, lastTasks && lastTasks.error, cancelling, confirming]);
+  if (runsKey === shownRuns) return;
+  shownRuns = runsKey;
   $("runs").replaceChildren(...runs.map((r) => {
     const li = document.createElement("li");
     li.dataset.run = r.run_id;
@@ -457,14 +494,8 @@ function renderControl() {
     const now = taskNow(r);
     li.textContent = r.task_id + "（" + r.consumer_id + "，" + r.scenario + "）：" + runText(r) + (now ? "；" + now : "");
     if (cancellable(r)) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "task-cancel";
-      b.dataset.task = r.task_id;
-      b.textContent = "取消 task " + r.task_id;
-      b.disabled = cancelling;
-      b.addEventListener("click", () => cancel(r.task_id));
-      li.append(" ", b);
+      li.append(" ", cancelButton(r.task_id, "task-cancel", "取消 task " + r.task_id));
+      if (confirming && confirming.task === r.task_id && confirming.where === "runs") li.append(confirmBox(r.task_id));
     }
     if (r.live === "running") {
       const b = document.createElement("button");
@@ -476,6 +507,143 @@ function renderControl() {
     }
     return li;
   }));
+}
+
+// agentCard draws one customer's card. Clicking the card (not a button)
+// chooses the customer, as does its 選取 button and a click on it in the shop.
+function agentCard(m, scs, { live, busy, full }) {
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+  const card = el("section", "consumer-row agent-card");
+  Object.assign(card.dataset, { consumer: m.c, state: m.state, selected: String(m.selected) });
+  card.setAttribute("aria-label", "客人 " + short(m.c) + " 的操作");
+  const head = el("div", "agent-head");
+  head.append(el("span", "agent-dot", short(m.c)), el("span", "agent-name", "客人 " + short(m.c)), el("span", "agent-id", m.c));
+  const st = el("span", "agent-state", m.stateText);
+  st.dataset.state = m.state;
+  head.append(st);
+  card.append(head);
+  if (m.task) card.append(el("p", "agent-meta", "task " + m.task + (m.sync ? " · " + m.sync : "")));
+  card.append(el("p", "agent-business", m.business));
+  if (m.calls) {
+    const c = el("p", "agent-calls", m.calls);
+    c.dataset.calls = m.calls.includes("未確認") ? "unconfirmed" : m.calls.includes("不提供") ? "not_provided" : "known";
+    card.append(c);
+  }
+  const acts = el("div", "agent-actions");
+  const sel = el("button", "agent-select", m.selected ? "已選取" : "選取");
+  sel.type = "button";
+  sel.setAttribute("aria-pressed", String(m.selected));
+  sel.addEventListener("click", () => selectConsumer(m.c));
+  acts.append(sel);
+  for (const sc of scs) {
+    const b = el("button", "agent-start", (live ? "開始（真實 CLI）" : "開始（fake）") + (scs.length > 1 ? "：" + sc.label : ""));
+    b.type = "button";
+    b.dataset.scenario = sc.id;
+    b.disabled = starting || busy.has(m.c) || full;
+    b.title = sc.label + "（" + sc.consumer_id + "）" + (busy.has(m.c) ? "：這位客人的場次尚未結束" : full ? "：同時執行的場次已達上限" : "");
+    b.addEventListener("click", () => start(sc));
+    acts.append(b);
+  }
+  if (m.run) {
+    // 停止 Agent: only a running run; a stopping one still holds its place,
+    // an ended one has nothing to stop.
+    const b = el("button", m.stoppable ? "row-stop" : "row-stop-off", m.state === "stopping" ? "停止中…" : "停止 Agent");
+    b.type = "button";
+    if (m.stoppable) b.dataset.run = m.run;
+    b.disabled = !m.stoppable;
+    b.title = m.stoppable ? "停止這位客人執行中的場次（只停這一場）" : m.state === "stopping" ? "停止請求已受理，等待程序結束" : "場次已結束，沒有可停止的執行";
+    b.addEventListener("click", () => stop(m.run));
+    acts.append(b);
+  }
+  if (m.cancel) acts.append(cancelButton(m.cancel, "row-cancel", "取消請購／task"));
+  card.append(acts);
+  if (m.cancel && confirming && confirming.task === m.cancel && confirming.where === "card") card.append(confirmBox(m.cancel));
+  if (m.state === "ended" && !m.cancel) card.append(el("p", "agent-note", "場次已結束；停止不適用。"));
+  card.addEventListener("click", (ev) => { if (!ev.target.closest("button")) selectConsumer(m.c); });
+  return card;
+}
+
+// cancelButton asks first: the cancel ends the whole task (section 6.1).
+function cancelButton(taskId, cls, text) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = cls;
+  b.dataset.task = taskId;
+  b.textContent = text;
+  b.disabled = cancelling;
+  const where = cls === "task-cancel" ? "runs" : "card";
+  b.addEventListener("click", () => {
+    confirming = { task: taskId, gen: creds.gen, where };
+    renderControl();
+    const yes = document.querySelector((where === "runs" ? "#runs" : "#run-scenarios") + ' .agent-confirm[data-task="' + CSS.escape(taskId) + '"] .cancel-confirm');
+    if (yes) yes.focus();
+  });
+  return b;
+}
+
+const CANCEL_SCOPE = "取消整個 task：未到期的 Ask 會撤回、已到期的記為到期，task 記錄為已取消（TASK_CANCELLED）；不付款，無法復原。";
+
+function confirmBox(taskId) {
+  const box = document.createElement("div");
+  box.className = "agent-confirm";
+  box.dataset.task = taskId;
+  box.setAttribute("role", "group");
+  box.setAttribute("aria-label", "確認取消 task " + taskId);
+  const p = document.createElement("p");
+  p.textContent = "確認取消 task " + taskId + "？" + CANCEL_SCOPE;
+  const yes = document.createElement("button");
+  yes.type = "button";
+  yes.className = "cancel-confirm";
+  yes.dataset.task = taskId;
+  yes.textContent = "確認取消 task";
+  yes.disabled = cancelling;
+  yes.addEventListener("click", () => { confirming = null; cancel(taskId); });
+  const no = document.createElement("button");
+  no.type = "button";
+  no.className = "cancel-back";
+  no.textContent = "返回，不取消";
+  no.addEventListener("click", () => { confirming = null; renderControl(); });
+  box.append(p, yes, " ", no);
+  return box;
+}
+
+// renderNext: the next operation the chosen customer's task has, said in
+// the summary (no approval and no payment exist in M1).
+function renderNext(runs) {
+  const p = $("next-action");
+  const task = currentTask();
+  const run = task && runs.find((r) => r.task_id === task);
+  let text = "";
+  if (run) {
+    if (run.live === "running") text = "可用操作：停止 Agent（只停這一場）";
+    else if (run.live === "stopping") text = "停止中：等待程序結束（仍占名額）";
+    else if (cancellable(run)) text = "可用操作：取消請購／task。M1 沒有核准功能，Ask 不會付款，到期後由後端記錄。";
+    else if (lastTasks && lastTasks.gen === creds.gen && lastTasks.list && lastTasks.list.get(run.task_id)) text = "沒有可用操作：task 已收尾。";
+    else text = "task 狀態讀取中（未確認）";
+  }
+  p.hidden = !text;
+  p.textContent = text;
+}
+
+// selectConsumer: the panels show this customer's scene task (its viewer
+// token, as always); the ring follows (renderControl). A UI choice only:
+// nothing is started, stopped or cancelled.
+let selecting = 0;
+async function selectConsumer(c) {
+  const sv = scene.view(c);
+  const task = sv && sv.task;
+  if (currentConsumer() === c) {
+    if (task && currentTask() !== task) openTask(task);
+    return;
+  }
+  const token = creds.viewerToken(c);
+  if (!token) return;
+  const g = creds.gen;
+  const n = ++selecting;
+  viewerGen = g;
+  const signedIn = await useViewer(token);
+  if (signedIn !== true || g !== creds.gen || n !== selecting) return;
+  if (task) openTask(task);
 }
 
 // start: one start operation; only a reply of this generation acts.
@@ -649,12 +817,28 @@ $("pair-form").addEventListener("submit", (ev) => {
   pairTried = true;
   creds.pair(typed);
 });
-// 查看證據: the open task's evidence panel, opened where it is.
-$("show-evidence").addEventListener("click", () => {
-  const box = $("evidence-box");
-  box.open = true;
-  box.scrollIntoView({ block: "start" });
-});
+// 查看證據 (UX1): a drawer over the right side. The scene, the choice and
+// the polling go on underneath; Esc or 關閉 closes it and the focus goes
+// back to where it came from.
+const drawer = $("evidence-drawer");
+let drawerFrom = null;
+function openDrawer() {
+  drawerFrom = document.activeElement;
+  drawer.hidden = false;
+  $("show-evidence").setAttribute("aria-expanded", "true");
+  $("evidence-box").open = true;
+  $("drawer-close").focus();
+}
+function closeDrawer() {
+  if (drawer.hidden) return;
+  drawer.hidden = true;
+  $("show-evidence").setAttribute("aria-expanded", "false");
+  const back = drawerFrom && document.contains(drawerFrom) && drawerFrom !== document.body ? drawerFrom : $("show-evidence");
+  back.focus();
+}
+$("show-evidence").addEventListener("click", openDrawer);
+$("drawer-close").addEventListener("click", closeDrawer);
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !drawer.hidden) closeDrawer(); });
 $("load-file").addEventListener("click", () => $("token-file").click());
 document.addEventListener("apa:view", renderControl);
 // Manual viewer mode: app.js has read and emptied the typed token; every

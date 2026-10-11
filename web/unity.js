@@ -24,6 +24,7 @@ export class UnityHost {
     this.sceneOwned = false;
     this.pendingScene = null;       // version 2: the latest scene clear, while not ready
     this.pending2 = new Map();      // version 2: the latest message per customer, while not ready
+    this.pendingSelect = null;      // UX1: the latest Select, sent after the scene's messages
     window.apaUnityReport = (kind, gen, seq, detail) => this.report(String(kind), Number(gen), Number(seq), String(detail));
   }
 
@@ -56,6 +57,10 @@ export class UnityHost {
       this.art = detail === "limezu" ? "limezu" : "placeholder";
       this.onStatus("ready", this.art);
       this.flush();
+    } else if (kind === "select" && this.sceneOwned) {
+      // UX1: a click on a customer, with its scene and slot; the scene
+      // (scene.js) decides whether it names a current customer.
+      if (/^consumer-[a-z0-9-]{1,32}$/.test(detail)) this.onStatus("select2", { scene: gen, slot: seq, consumer: detail });
     } else if (kind === "rendered" && this.sceneOwned) {
       // version 2: the scene matches it to the one customer and slot it names
       const r = parseReport2(gen, seq, detail);
@@ -75,6 +80,7 @@ export class UnityHost {
     this.pending = null;
     this.pendingScene = null;
     this.pending2.clear();
+    this.pendingSelect = null;
     if (!on) this.gen = -1;
   }
 
@@ -106,6 +112,14 @@ export class UnityHost {
     }
   }
 
+  // select2 sends the page's choice to a build that takes it (UX1): it only
+  // moves the ring; nothing else in the shop changes.
+  select2(msg) {
+    if (!this.sceneOwned || !(this.bridge && this.bridge.select)) return;
+    this.pendingSelect = msg;
+    this.flush();
+  }
+
   flush() {
     if (!this.ready || !this.instance) return;
     if (this.sceneOwned) {
@@ -114,6 +128,9 @@ export class UnityHost {
       if (sc) this.post(sc);
       for (const m of this.pending2.values()) this.post(m);
       this.pending2.clear();
+      const sel = this.pendingSelect;
+      this.pendingSelect = null;
+      if (sel) this.instance.SendMessage("Bridge", "Select", JSON.stringify(sel));
       return;
     }
     if (!this.pending) return;

@@ -52,7 +52,7 @@ function fakeHost() {
 }
 
 function fakeUnity() {
-  return { sent: [], owned: false, own(on) { this.owned = on; }, send2(m) { if (this.owned) this.sent.push(m); } };
+  return { sent: [], selects: [], owned: false, own(on) { this.owned = on; }, send2(m) { if (this.owned) this.sent.push(m); }, select2(m) { if (this.owned) this.selects.push(m); } };
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -97,6 +97,9 @@ test("version 2 reports, bridge reports and messages", () => {
   assert.deepEqual([...b.versions], [1, 2]);
   assert.deepEqual(b.customers, ["consumer-a", "consumer-b"]);
   assert.equal(A.parseBridge("limezu"), null);
+  assert.equal(b.select, false, "an older build takes no Select");
+  assert.equal(A.parseBridge("versions=1,2;customers=consumer-a,consumer-b;select=1").select, true);
+  assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;select=2"), null);
   assert.deepEqual(A.sceneClear2(4), { v: 2, scene: 4, clear: true });
   assert.deepEqual(A.slotClear2(4, "consumer-a", 2), { v: 2, scene: 4, consumer: "consumer-a", slot: 2, clear: true });
   const st = A.newState();
@@ -255,5 +258,53 @@ test("a replay pauses the scene; afterwards a new scene shows every slot again",
   const again = unity.sent.filter((m) => m.consumer === "consumer-a" && !m.clear).pop();
   assert.equal(again.scene, scenes[scenes.length - 1]);
   assert.equal(again.animate, false);
+  scene.stop();
+});
+
+// UX1 (docs/commercial-ux1.md): the page's choice goes to Unity for the
+// current scene, again after a new one; a click Unity reports names a
+// customer only for the current scene and that customer's current slot.
+test("the choice is sent for the current scene, and again after a new scene", async () => {
+  const { host, unity, scene } = setup();
+  host.data.set("show-a-01", reply("show-a-01", "consumer-a", askEvents()));
+  host.data.set("show-b-01", reply("show-b-01", "consumer-b", askEvents()));
+  scene.select("consumer-b"); // before the scene: kept, sent once it starts
+  assert.deepEqual(unity.selects, []);
+  scene.start();
+  scene.setRuns(runs(["consumer-a", "show-a-01"], ["consumer-b", "show-b-01"]));
+  await settle();
+  const first = unity.sent.find((m) => m.clear && !m.consumer).scene;
+  assert.deepEqual(unity.selects, [{ scene: first, consumer: "consumer-b" }]);
+  scene.select("consumer-b");
+  assert.equal(unity.selects.length, 1, "the same choice is not sent again");
+  scene.select("consumer-a");
+  assert.deepEqual(unity.selects.at(-1), { scene: first, consumer: "consumer-a" });
+  scene.reset(); // new credentials: a new scene, the choice sent for it
+  assert.deepEqual(unity.selects.at(-1), { scene: first + 1, consumer: "consumer-a" });
+  scene.select(null);
+  assert.deepEqual(unity.selects.at(-1), { scene: first + 1, consumer: "" });
+  scene.stop();
+  assert.equal(scene.selected, null, "a stopped scene has no choice");
+});
+
+test("a click names a customer only for the current scene and its slot", async () => {
+  const { host, scene } = setup();
+  host.data.set("show-a-01", reply("show-a-01", "consumer-a", askEvents()));
+  host.data.set("show-b-01", reply("show-b-01", "consumer-b", askEvents()));
+  scene.start();
+  scene.setRuns(runs(["consumer-a", "show-a-01"], ["consumer-b", "show-b-01"]));
+  await settle();
+  const [a, b] = scene.slots();
+  assert.equal(scene.picked({ scene: a.scene, slot: a.slot, consumer: "consumer-a" }), true);
+  assert.equal(scene.picked({ scene: b.scene, slot: b.slot, consumer: "consumer-b" }), true);
+  assert.equal(scene.picked({ scene: a.scene - 1, slot: a.slot, consumer: "consumer-a" }), false, "an older scene's click");
+  assert.equal(scene.picked({ scene: a.scene, slot: a.slot + 1, consumer: "consumer-a" }), false, "another slot's click");
+  assert.equal(scene.picked({ scene: a.scene, slot: 1, consumer: "consumer-z" }), false, "a customer the scene has no slot for");
+  host.data.set("show-a-02", reply("show-a-02", "consumer-a", askEvents().slice(0, 1)));
+  scene.setRuns(runs(["consumer-a", "show-a-02"], ["consumer-b", "show-b-01"]));
+  await settle();
+  assert.equal(scene.picked({ scene: a.scene, slot: a.slot, consumer: "consumer-a" }), false, "A's click of its old slot after A's new run");
+  scene.pause();
+  assert.equal(scene.picked({ scene: b.scene, slot: b.slot, consumer: "consumer-b" }), false, "during a replay");
   scene.stop();
 });
