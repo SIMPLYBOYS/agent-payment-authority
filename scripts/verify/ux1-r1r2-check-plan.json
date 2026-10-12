@@ -1,0 +1,70 @@
+[
+ {
+  "name": "node",
+  "cmd": [
+   "node",
+   "--test",
+   "web/test/adapter.test.mjs",
+   "web/test/hostcreds.test.mjs",
+   "web/test/scene.test.mjs"
+  ],
+  "timeout": 180000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "reverse-selftest",
+  "cmd": [
+   "python3",
+   "-I",
+   "scripts/verify/m_b_reverse_test.py"
+  ],
+  "timeout": 60000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "ux1-focus-ui",
+  "cmd": [
+   "node",
+   "scripts/verify/ux1-focus-ui.mjs",
+   "--out",
+   "{dir}/ux1-focus-ui"
+  ],
+  "timeout": 600000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "rehearsal-entry",
+  "cmd": [
+   "node",
+   "scripts/verify/rehearsal-entry.mjs",
+   "--out",
+   "{dir}/rehearsal-entry"
+  ],
+  "timeout": 600000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "ux1-ui",
+  "cmd": [
+   "node",
+   "scripts/verify/ux1-ui.mjs",
+   "--out",
+   "{dir}/ux1-ui"
+  ],
+  "timeout": 900000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "reverse",
+  "cmd": [
+   "python3",
+   "-u",
+   "scripts/verify/m-b-reverse.py",
+   "--out",
+   "{dir}/reverse",
+   "^UX1-R1:"
+  ],
+  "timeout": 1200000000000,
+  "kind": "reverse"
+ }
+]

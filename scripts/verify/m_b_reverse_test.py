@@ -37,6 +37,20 @@ for name, rc, text, want in [
     caught, reason = mb.classify(unity, rc, text)
     assert caught == want, f"unity {name} counted as {'caught' if caught else 'not caught'} ({reason})"
 
+CHECK = "B's confirm keeps the focus while A's card updates"
+uit = mb.ui("scripts/verify/ux1-focus-ui.mjs", CHECK)
+for name, rc, text, want in [
+    ("the expected check", 1, "PASS a\nFAIL " + CHECK + "  [{}]\nresult: FAIL (1)\n", True),
+    ("the expected check, no detail", 1, "FAIL " + CHECK + "\nresult: FAIL (1)\n", True),
+    ("another check", 1, "FAIL something else\nresult: FAIL (1)\n", False),
+    ("a crash", 1, "FAIL " + CHECK + "\nFAIL the flow ran to its end  [x]\n", False),
+    ("passed", 0, "PASS " + CHECK + "\nresult: PASS\n", False),
+    ("a timeout", -9, "FAIL " + CHECK + "\n", False),
+]:
+    caught, reason = mb.classify(uit, rc, text, timed_out=(rc == -9))
+    assert caught == want, f"ui {name} counted as {'caught' if caught else 'not caught'} ({reason})"
+assert mb.passed(uit, 0, "result: PASS\n") and not mb.passed(uit, 0, "result: FAIL (1)\n"), "ui baseline rule"
+
 assert mb.passed(node, 0, "# tests 8\n# fail 0\n") and not mb.passed(node, 0, "# tests 8\n# fail 1\n"), "node baseline rule"
 assert mb.passed(unity, 0, xml.replace('result="Failed"', 'result="Passed"')) and not mb.passed(unity, 0, xml), "unity baseline rule"
 

@@ -42,6 +42,12 @@ def unity(test, regex):
     return {"kind": "unity", "expect": [(test, regex)]}
 
 
+def ui(script, check):
+    """A browser check script: caught when the named check FAILs and the flow
+    ran to its end (a crash or a setup failure is not caught)."""
+    return {"kind": "ui", "script": script, "expect": [(check, "")]}
+
+
 go = rev.go
 ITEMS = [
     ("capacity: the cap holds", go("./cmd/demo/", "^TestCapacityAndStopping$", ("TestCapacityAndStopping", r"full: 202")),
@@ -110,6 +116,9 @@ ITEMS = [
      [(AD, 'return { state, text, calls, kind, stoppable: state === "running" };', 'return { state, text, calls, kind, stoppable: state !== "idle" };')]),
     ("UX1: no count from the host is not 0", node("web/test/scene.test.mjs", "a card stops only a running run and never makes up a count", r"no count from the host is unconfirmed, not 0"),
      [(AD, 'else [calls, kind] = ["已回覆工具呼叫：未確認", "unconfirmed"];', 'else [calls, kind] = ["已回覆工具呼叫 " + (run.tool_calls || 0) + " 次", "known"];')]),
+    # Review of 382a4b5 (R1): the focus kept across a card rebuild; alone with "^UX1-R1:".
+    ("UX1-R1: a card rebuild keeps the confirmation's focus", ui("scripts/verify/ux1-focus-ui.mjs", "B's confirm keeps the focus while A's card updates"),
+     [("web/host.js", "function keepFocus(el, rebuild) {", "function keepFocus(el, rebuild) { return rebuild();")]),
 ]
 
 ITEM_TIMEOUT = 900
@@ -118,6 +127,10 @@ ITEM_TIMEOUT = 900
 def command(t):
     if t["kind"] == "node":
         return ["node", "--test", t["path"]]
+    if t["kind"] == "ui":
+        # The clone has no Unity build (ignored by git): the repository's own.
+        build = os.path.join(os.path.dirname(os.path.dirname(here)), "unity/AgentPaymentAuthority/Build/WebGL/Build")
+        return ["node", t["script"], "--unity-build", build, "--out", "rev-ui-out"]
     if t["kind"] == "unity":
         # The editor's NUnit XML on stdout after the run; the exit code is
         # the editor's.
@@ -149,6 +162,12 @@ def classify(t, rc, text, timed_out=False):
     if rc < 0:
         return False, f"ended by signal {-rc}"
     test, regex = t["expect"][0]
+    if t["kind"] == "ui":
+        if re.search(r"^FAIL the flow ran to its end", text, re.M):
+            return False, "the flow did not run to its end"
+        if re.search(r"^FAIL " + re.escape(test) + r"(  \[|$)", text, re.M):
+            return True, "FAIL " + test
+        return False, f"the expected check did not fail: {test}"
     if t["kind"] == "node":
         blocks = tap_blocks(text)
         if test not in blocks:
@@ -178,6 +197,8 @@ def passed(t, rc, text):
         return False
     if t["kind"] == "node":
         return re.search(r"^# fail 0$", text, re.M) is not None
+    if t["kind"] == "ui":
+        return re.search(r"^result: PASS$", text, re.M) is not None
     test = t["expect"][0][0]
     return re.search(r'<test-case [^>]*fullname="' + re.escape(test) + r'"[^>]*result="Passed"', text) is not None
 
