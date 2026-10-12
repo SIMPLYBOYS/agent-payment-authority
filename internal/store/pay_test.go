@@ -393,3 +393,17 @@ func TestM1EvidenceRefusesPayTask(t *testing.T) {
 		t.Fatalf("the checker on a v1 event: %v", problems)
 	}
 }
+
+// A v1 contract refusal keeps its own code (not INVALID_PURCHASE): here a
+// session that does not own the order's identity.
+func TestPayRefusalKeepsItsCode(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	e.payTask(s, "task-a", 30)
+	o := v1Of(t, variant(t, e.base, 11))
+	o.Intent.AgentID = "agent-b" // another identity than the session's
+	b, _ := json.Marshal(o)
+	if _, err := s.Submit(sessA, b); Code(err) != "OWNERSHIP_MISMATCH" {
+		t.Fatalf("code %v", err)
+	}
+}

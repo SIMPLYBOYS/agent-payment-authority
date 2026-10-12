@@ -704,7 +704,7 @@ func uniqueViolation(err error) bool {
 // contractRefusal keeps a contract error's code and drops its detail, which
 // can quote the request (a case-variant key name, for example).
 func contractRefusal(err error) error {
-	code := contracts.ErrorCode(err)
+	code := paycontract.Code(err) // either contract's code (paycontract falls back to the M1 one)
 	if code == "" {
 		code = "INVALID_PURCHASE"
 	}
