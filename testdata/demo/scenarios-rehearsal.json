@@ -1,0 +1,9 @@
+{
+  "description": "Fake rehearsal catalog for Aaron's UX1 checks (docs/commercial-ux1.md 7.2): make present-rehearsal. Two runs that ask and then wait until stopped (the fake CLI ends them after 3 minutes), so a stop can be made at leisure (一起開始 starts these two: the host lists the catalog by id); and the main line for each customer, which asks and ends, for a natural expiry and for a cancel. Fake CLI only, no model: never evidence of real Agents working at once. Not a policy change and not agent input.",
+  "scenarios": [
+    {"id": "wait-a", "consumer_id": "consumer-a", "scenario": "testdata/cli/hang.json", "label": "彩排：Ask 後等待，直到停止（fake）"},
+    {"id": "wait-b", "consumer_id": "consumer-b", "scenario": "testdata/cli/hang.json", "label": "彩排：Ask 後等待，直到停止（fake）"},
+    {"id": "z-ask-a", "consumer_id": "consumer-a", "scenario": "testdata/cli/ask-mainline.json", "label": "主商品，Ask 後結束（fake）"},
+    {"id": "z-ask-b", "consumer_id": "consumer-b", "scenario": "testdata/cli/ask-mainline.json", "label": "客人 B 主商品，Ask 後結束（fake）"}
+  ]
+}

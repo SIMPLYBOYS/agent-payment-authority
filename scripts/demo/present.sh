@@ -30,7 +30,9 @@
 # port), APA_UNITY_PROJECT, APA_PRESENT_CONF (default var/present.conf),
 # APA_PRESENT_DIR (where the session directory is made; default var/),
 # APA_PRESENT_OPEN (the command that opens the page; default open),
-# APA_PRESENT_GO (default go).
+# APA_PRESENT_GO (default go). APA_PRESENT_SCENARIOS (fake only; default
+# testdata/demo/scenarios.json): another trusted fake catalog, e.g. the
+# rehearsal one (make present-rehearsal). The live catalog never changes.
 set -u
 stop() { echo "present: STOP（未啟動）：$1" >&2; exit 2; }
 
@@ -78,7 +80,7 @@ if [ "$mode" = live ]; then
 else
 	echo "present: fake 展示（不執行模型）。" >&2
 	APA_ADDR=$addr APA_DB_PATH=$w/db/fake.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \
-		--fake-cli "$w/fake-claude" --scenarios testdata/demo/scenarios.json --registry testdata/demo/registry.json \
+		--fake-cli "$w/fake-claude" --scenarios "${APA_PRESENT_SCENARIOS:-testdata/demo/scenarios.json}" --registry testdata/demo/registry.json \
 		--trace-dir "$w/runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" &
 fi
 pid=$!
