@@ -1,7 +1,8 @@
 # P1-b：金鑰庫與獨立 Signer（實作紀錄）
 
 > 2026-10-12，Claude Code。依 vault〈Claude-Code-P1-b金鑰庫與獨立Signer實作派工-e725c44-20261012〉（Aaron：「這三件事我都核准，請提供派工筆記」）實作。設計見 [commercial-p1b-design.md](commercial-p1b-design.md)，分支 `commercial-p1b`，從 `e725c44` 開出。
-> **狀態：P1-b 已實作並完成本輪定向測試，待 Codex 技術 review；OS 隔離部署尚未驗收；正式付款仍未啟用。**（本輪 run 的 29 項反向檢查中，1 項因反向項目本身的突變寫法無法編譯而未計為抓到；修正該項目後單獨補跑，已被預期斷言抓到。見第 5 節。）
+> **狀態：P1-b 實作 R1～R3 補正完成，待 Codex 限定複核；OS 隔離部署尚未驗收；正式付款仍未啟用。**（第 8 節：Codex 對 `22e45ed` 的技術 review 暫不通過，R1～R3 已補正並在隔離容器完成定向測試。）
+> 以下為 `22e45ed` 交付時的狀態，保留原文：P1-b 已實作並完成本輪定向測試，待 Codex 技術 review；OS 隔離部署尚未驗收；正式付款仍未啟用。（本輪 run 的 29 項反向檢查中，1 項因反向項目本身的突變寫法無法編譯而未計為抓到；修正該項目後單獨補跑，已被預期斷言抓到。見第 5 節。）
 > 沒有建立系統帳號或 socket 目錄，沒有日常或展示用付款金鑰，沒有連鏈、faucet 或 facilitator，Signer 沒有接進任何展示流程。所有執行結果歸 Claude Code，待 Codex 核對。
 
 ## 1 定向驗收計畫（執行前）
@@ -205,3 +206,47 @@ env HOME="$T/home" GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)"
 | 既有（錨點更新） | 無回覆時不記 unknown（程式改寫） | `TestUnknownThenResume` →「no Signer」 |
 
 **不在本計畫**：原九步全部、原 29 項中其餘 27 項、完整容器七步、全部突變、M1 產包、瀏覽器、Unity、真實 CLI、cmd/demo（本輪沒有改 demo 的路徑；其 P1a／History／Cancel 測試在提交前的本機預檢通過，不算證據）。
+
+### 8.2 修正與正反例對照
+
+| 項目 | 來源（基準 `22e45ed`） | 修正（`a3d33aa`） | 正例 | 反例 |
+|---|---|---|---|---|
+| R1 取消後的新付款 | `internal/store/payment.go` `BeginPayment`；`internal/signerclient/client.go` `Pay` | `BeginPayment` 在它自己的寫入交易裡看 task 的事件：已提交 `TASK_CANCELLED` 就回 `TASK_ALREADY_ENDED`，**既有的** requested／unknown 列也不再交出去（不是 Replay），所以 client 的 `Pay` 不送 sign。看的是事件而不是 `project()` 的狀態，因為先有 Deny 再取消的 task 狀態仍是 `denied`。`Payment`、`UpdatePayment`、`Resume`、`Abandon` 照舊，同一個 request ID | 取消前：付款一次、重送同一個 ID 與簽章；取消後：signed 的查詢回原授權，unknown 的查詢與對帳照常；CLI timeout 不算取消（未改） | 取消後首次付款被拒、列數不增、client 沒送 sign；unknown 後取消也不重送；先 Deny 後取消一樣被拒 |
+| R2 處理期限 | `internal/signer/server.go` Handler；Core 的鎖等待與 DB 操作 | request context 傳進 `Core.Sign`／`Get`／`Abandon`：錢包鎖等待同時看 context（用同一個剩餘期限，不重新起算；`lockWait` 3 秒仍是另一個上限），所有 DB 呼叫用 `…Context`。期限讓工作結束時，Handler 回 503 `SIGNER_TIMEOUT`。啟動恢復用自己的有界 context（`apa-signer` 60 秒）。最後判定的期限與狀態條件、abandon、保存後才回傳都沒改；request 的期限與 `auth_deadline` 是兩件事 | 期限到後下一個正常請求照常；接受後才逾時的 attempt 維持 accepted、同一個 request ID 完成簽署；相鄰的 IPC、恢復、R3-a、R3-b、正例都通過 | 握手確認在等錢包鎖後取消，或給 100 ms 期限：都在期限內結束、沒有保留任何 attempt；握手確認在等 DB 唯一連線（pool 的等待計數）後，經由真的 Handler 在期限內回 `SIGNER_TIMEOUT` |
+| R3 unknown 保存失敗 | `internal/signerclient/client.go` `settle` | 檢查 `UpdatePayment` 的錯誤：失敗時回 `Unknown` 與 `NotSaved`（`PAYMENT_STATE_NOT_SAVED`）的組合錯誤，兩者都能用 `errors.Is` 辨認；成功時回更新後的 attempt。不重試、不換 ID | 保存成功：回 Unknown，回傳的 attempt 與 ledger 都是 unknown；保存恢復後同一 ID 查詢、再付款 | 保存失敗：同時是 Unknown 與 NotSaved，回傳的 attempt 仍是 requested、沒有宣稱已存 unknown，只送過一次 sign |
+
+**新增與更新的測試**：`internal/store/payment_test.go` `TestPaymentAfterCancel`；`internal/signerclient/store_test.go` `TestRealStoreCancel`（真 Store＋真 Signer socket，計數的傳輸替身；Store 的 registry 是測試專用的副本，兩個錢包改成測試金鑰的地址，共用凍結 fixture 不變，付款人驗證不放寬）；`internal/signer/deadline_test.go` `TestLockWaitHonorsContext`、`TestHandlerDeadline`、`TestDeadlineAfterAccept`；`client_test.go` `TestUnknownSaveFailure`。`TestUnknownThenResume` 原本斷言回傳的是舊的 requested 紀錄（等於把 R3 的缺陷寫進了測試），現改為斷言 unknown。
+
+**介面變動**：`Core.Sign`／`Get`／`Abandon` 與 `NewCore` 多了 `context.Context` 參數；Signer 多一個錯誤碼 `SIGNER_TIMEOUT`（503，client 記為 unknown）；client 多一個 `NotSaved`。信任邊界、限額規則、契約 hash、schema 與付款能力都沒有改，也沒有新依賴。
+
+**照實記的限制**：
+- 取消只擋住**之後**的付款請求。取消在 `BeginPayment` 交易之後才提交時，已送出的 sign 不會被召回；這沿用既有的 attempt／abandon 規則，沒有新增全域即時撤回。已 signed 的授權不能撤回。
+- CLI timeout（`TASK_TIMED_OUT`，狀態 `failed`）與 Deny 不在 R1 範圍，行為沒變：timeout 後的 Allow 請購仍可以建立付款嘗試。是否也要擋，請 Codex／Aaron 決定。
+- R2 的 5 秒是 Handler 的常數；測試用較短的 request context 證明期限會傳遞，沒有另外等滿 5 秒。
+- 跨 OS 使用者的隔離仍未驗收（第 6 節）。
+
+### 8.3 本輪驗證
+
+| 執行 | 基準 | 結果 |
+|---|---|---|
+| 本機預檢（不是證據） | `ca6c600` | 提交前本機跑過受影響套件與 `cmd/demo` 的 P1a／History／Cancel 測試，通過；9 項反向本機預跑 9／9（`scratchpad`，不保留） |
+| 第一次容器 run：`artifacts/p1b/r-20261012T164216Z/` | `ca6c600` | **設定失敗，容器沒有啟動，沒有測試執行**：`container-plan.sh` 在設定了新的 `GOMODCACHE` 之後才讀本機快取路徑，`go mod download` 找不到檔案（`modules.txt`）。這是驗證工具的缺陷，不是產品失敗；`1bfbe44` 修正 |
+| 正式容器 run：`artifacts/p1b/r-20261012T164244Z/` | `1bfbe44`（`tracked_clean: true`，證據完整） | 7 步全部 PASS，exit 0，總耗時 4 m 37 s（見下表） |
+
+| # | 步驟 | 結果 | exit | 耗時 | 內容 |
+|---|---|---|---|---|---|
+| 1 | vet | PASS | 0 | 48.1 s | `go vet ./...`（含所有套件的編譯） |
+| 2 | r1-store-race | PASS | 0 | 1 m 20 s | 6 個測試，`-race` |
+| 3 | r1-r3-client-race | PASS | 0 | 17.2 s | 5 個測試，`-race` |
+| 4 | r2-signer-race | PASS | 0 | 5.1 s | 16 個測試，`-race` |
+| 5 | production-refusal | PASS | 0 | 9.8 s | 2 個測試 |
+| 6 | adjacent-store-race | PASS | 0 | 1 m 17 s | 29 個測試，`-race` |
+| 7 | reverse | PASS | 0 | 40.2 s | 9／9 被預期斷言抓到（第 8.1 節的表；每項的未突變基準先通過） |
+
+實際命中的斷言（`07-reverse.log`）：「abandon blocked by the signing lock」「no Signer」（兩項）「cancelled task accepted a new payment request: <nil>」「cancelled task handed out its unknown attempt for sending」「po-3 after cancel: <nil>; sign sent after cancel: 3 -> 4, attempts 2 -> 3」「lock wait ignored its cancellation」「handler outlived its deadline」「save failure hidden: SIGNER_OUTCOME_UNKNOWN」。
+
+**隔離紀錄**：`isolation.txt`（run 自己的容器）：外部 HTTPS 與 IP 都被拒；寫 `/src`、Go 工具鏈、模組快取都被拒；uid 10001；Go 1.26.4 linux/amd64；完整環境變數清單（只有白名單與映像內建的 `PATH`、`GOLANG_VERSION`、`HOSTNAME`、`PWD`）。其中「上線網卡」那一行因為探測寫法錯誤（`/sys/class/net/bonding_masters` 不是目錄）而**沒有記到**；run 結束後另開一個同樣 `--network none`、同 uid 的容器補測，記在 `isolation-interfaces.txt`：只有 `lo` 上線、沒有 IPv4 路由。這是補充紀錄，不是同一個容器實例；探測寫法已在之後的提交修正。
+
+**不外洩**：掃描本輪證據，沒有 64 bytes 的 hex、測試密語或金鑰。
+
+**沒有跑**：原九步全部、原 29 項中其餘 27 項、完整容器七步、全部突變、M1 產包、瀏覽器、Unity、真實 CLI；`cmd/demo` 只有提交前的本機預檢。原 `m1-check-20261012T134841Z`（整輪 FAIL）與 `rerun-20261012T135238Z` 的紀錄不變，也不和本輪合併。

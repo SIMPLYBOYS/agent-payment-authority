@@ -62,7 +62,7 @@ probe() { if timeout -k 5 30 sh -c "$2" >/dev/null 2>&1; then got=allowed; else 
 	probe "write /src" "touch /src/probe"
 	probe "write the Go toolchain" "touch \$(go env GOROOT)/probe"
 	probe "write the module cache" "touch /opt/p1b/gomodcache/probe"
-	echo "network interfaces up: $(for n in /sys/class/net/*; do [ $(( $(cat $n/flags) & 1 )) = 1 ] && basename $n; done | tr "\n" " ")"
+	echo "network interfaces up: $(for n in /sys/class/net/*; do [ -f $n/flags ] && [ $(( $(cat $n/flags) & 1 )) = 1 ] && basename $n; done | tr "\n" " ")"
 	echo "uid: $(id -u)"; go version; python3 --version; git --version
 	echo "environment:"; env | sort | sed "s/^/  /"
 } >/out/isolation.txt 2>&1
