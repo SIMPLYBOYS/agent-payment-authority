@@ -508,7 +508,9 @@ function renderControl() {
 // keepFocus rebuilds el and gives the focus back to the same control, when
 // the focus was in el (review of 382a4b5, R1): the same kind of button for
 // the same customer or run and the same task, run or scenario, in the same
-// credentials generation. A control that is gone hands the focus to a safe
+// credentials generation. A button that names its run (停止 Agent) comes
+// back only for that run: a newer run's stop never gets it (review of
+// c646c26). A control that is gone hands the focus to a safe
 // one of the same customer (a closed confirmation: its 取消 entry; else 選取),
 // never to another task's cancel, and nothing is clicked. A focus the user
 // moved elsewhere stays where it is.
@@ -518,14 +520,14 @@ function keepFocus(el, rebuild) {
   const kind = a && el.contains(a) ? FOCUS_KINDS.find((k) => a.classList.contains(k)) : null;
   const card = kind && a.closest(".agent-card"), li = kind && a.closest("li[data-run]");
   const built = card || li; // the generation the control was made in, not the one now
-  const was = kind && { gen: Number(built ? built.dataset.gen : -1), kind, consumer: card ? card.dataset.consumer : "", run: li ? li.dataset.run : "", task: a.dataset.task || "", scenario: a.dataset.scenario || "" };
+  const was = kind && { gen: Number(built ? built.dataset.gen : -1), kind, consumer: card ? card.dataset.consumer : "", run: li ? li.dataset.run : "", ownRun: a.dataset.run || "", task: a.dataset.task || "", scenario: a.dataset.scenario || "" };
   rebuild();
   if (!was || (document.activeElement && document.activeElement !== document.body && document.activeElement !== a)) return;
   const usable = (x) => !!x && !x.disabled && x.offsetParent !== null;
   const scope = was.consumer ? el.querySelector('.agent-card[data-consumer="' + CSS.escape(was.consumer) + '"]') : was.run ? el.querySelector('li[data-run="' + CSS.escape(was.run) + '"]') : null;
   if (was.gen === creds.gen && scope) {
     const attr = (k, v) => (v ? "[data-" + k + '="' + CSS.escape(v) + '"]' : "");
-    const same = scope.querySelector("." + was.kind + attr("task", was.task) + attr("scenario", was.scenario));
+    const same = scope.querySelector("." + was.kind + attr("task", was.task) + attr("scenario", was.scenario) + attr("run", was.ownRun));
     if (usable(same)) return same.focus();
     // A confirmation closed (返回, or its task ended): its own entry, if the task still has one.
     const entry = was.task && scope.querySelector('.row-cancel[data-task="' + CSS.escape(was.task) + '"], .task-cancel[data-task="' + CSS.escape(was.task) + '"]');
