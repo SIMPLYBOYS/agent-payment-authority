@@ -86,7 +86,6 @@ func TestKeyFile(t *testing.T) {
 			x.Address = "0x" + strings.Repeat("1", 40)
 			return []byte("pass phrase"), "wallet-a"
 		},
-		"weak scrypt":    func(x *KeyFile) ([]byte, string) { x.N = 1 << 10; return []byte("pass phrase"), "wallet-a" },
 		"other version":  func(x *KeyFile) ([]byte, string) { x.Version = 2; return []byte("pass phrase"), "wallet-a" },
 		"not power of 2": func(x *KeyFile) ([]byte, string) { x.N = 1<<14 + 1; return []byte("pass phrase"), "wallet-a" },
 	}
@@ -96,5 +95,13 @@ func TestKeyFile(t *testing.T) {
 		if _, err := DecryptKey(x, wallet, pass); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+	// A file honestly made with a work factor under the bound.
+	weak, err := EncryptKey("wallet-a", priv, []byte("pass phrase"), 1<<10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecryptKey(weak, "wallet-a", []byte("pass phrase")); err == nil {
+		t.Error("weak scrypt: accepted")
 	}
 }

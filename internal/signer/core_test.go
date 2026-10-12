@@ -447,20 +447,24 @@ func TestAbandonRaces(t *testing.T) {
 		c := e.core()
 		var abandoned Reply
 		var aerr error
+		blocked := false
 		hook = func(s, id string) error {
 			if s == "after-sign" {
 				done := make(chan struct{})
 				go func() { abandoned, aerr = c.Abandon(id); close(done) }()
 				select {
 				case <-done:
-				case <-time.After(2 * time.Second):
-					return errors.New("abandon blocked by the signing lock")
+				case <-time.After(2 * time.Second): // bounded: a handshake, not a guess at timing
+					blocked = true
 				}
 			}
 			return nil
 		}
 		defer func() { hook = nil }()
 		r, err := c.Sign(e.req("request-0000000001", a(1)))
+		if blocked {
+			t.Fatal("abandon blocked by the signing lock")
+		}
 		if aerr != nil || abandoned.State != "abandoned" {
 			t.Fatalf("abandon: %+v %v", abandoned, aerr)
 		}

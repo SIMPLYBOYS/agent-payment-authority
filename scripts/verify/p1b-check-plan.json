@@ -1,0 +1,131 @@
+[
+ {
+  "name": "vet",
+  "cmd": [
+   "go",
+   "vet",
+   "./..."
+  ],
+  "timeout": 300000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "crypto-keystore",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "./internal/signer/",
+   "./cmd/apa-signer/",
+   "-run",
+   "^(TestEIP712SpecVector|TestTypeHashes|TestKeyFile|TestSignOne|TestAssemblyRefusesItsInputs)$"
+  ],
+  "timeout": 300000000000,
+  "kind": "go"
+ },
+ {
+  "name": "authorization",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "./internal/signer/",
+   "./cmd/apa-signer/",
+   "-run",
+   "^(TestRefusalsConsumeNothing|TestBindingFields|TestProductionVerifierRefuses|TestTotalCap|TestAssemblyRefusesEveryOrder)$"
+  ],
+  "timeout": 300000000000,
+  "kind": "go"
+ },
+ {
+  "name": "state-race",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-race",
+   "-count=1",
+   "./internal/signer/",
+   "-run",
+   "^(TestResendConflictReplay|TestConcurrentCap|TestInterruptions|TestFinalDeadline|TestAcceptDeadline|TestAbandonRaces|TestWalletBusy|TestDelegationEndsFirst|TestKeyVersionMismatch)$"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "ipc-host-store-race",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-race",
+   "-count=1",
+   "./internal/signer/",
+   "./internal/signerclient/",
+   "./internal/store/",
+   "-run",
+   "^(TestServer|TestServerCaller|TestPay|TestUnknownThenResume|TestReplyLost|TestPayment.*|TestUpgrade.*|TestSchemaNewAndRefusedUpgrade)$"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "adjacent-store",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "./internal/store/",
+   "./internal/paycontract/",
+   "./internal/paypolicy/",
+   "./internal/m1evidence/"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "adjacent-store-race",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-race",
+   "-count=1",
+   "./internal/store/",
+   "-run",
+   "Pay|Upgrade|Expir|Recovery|Cancel"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "adjacent-demo",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "./cmd/demo/",
+   "-run",
+   "^(TestP1a|TestHistory|TestHistoricalTaskKeepsItsBinding)"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "reverse",
+  "cmd": [
+   "python3",
+   "-u",
+   "scripts/verify/m-b-reverse.py",
+   "--out",
+   "{dir}/reverse",
+   "^P1b:"
+  ],
+  "timeout": 2400000000000,
+  "kind": "reverse"
+ }
+]

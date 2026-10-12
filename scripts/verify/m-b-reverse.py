@@ -32,6 +32,9 @@ SC = "web/scene.js"
 PR = "unity/AgentPaymentAuthority/Assets/APA/Scripts/Projection.cs"
 J = "cmd/timing-judge/main.go"
 BR = "unity/AgentPaymentAuthority/Assets/APA/Scripts/ShopBridge.cs"
+SG = "internal/signer/core.go"
+AS = "cmd/apa-signer/main.go"
+PM = "internal/store/payment.go"
 
 
 def node(path, test, regex):
@@ -172,6 +175,72 @@ ITEMS = [
      [("web/adapter.js", 'const TARGET_KEYS = ["gen", "sim", "consumer", "task", "session", "intent"];', 'const TARGET_KEYS = ["gen", "consumer"];')]),
     ("P1a-R: R1 ui: a rebuilt panel gives the focus back to the same item only", ui("scripts/verify/p1a-ui.mjs", "R1 rebuild: show-a-06 expires, the panel shows show-a-04, the focus left for the heading"),
      [("web/host.js", "if (same && !same.disabled && A.sameTarget(had.target, target, submits)) same.focus();", "if (same && !same.disabled) same.focus();")]),
+    # P1-b (docs/commercial-p1b-design.md 8): the Signer, schema 4 and the
+    # Host client; run them alone with "^P1b:".
+    ("P1b: R1 a delegation's version must match", go("./internal/signer/", "^TestRefusalsConsumeNothing$", ("TestRefusalsConsumeNothing", r"another version: <nil>")),
+     [(SG, "\tcase d.Version != r.Authorization.DelegationVersion:", "\tcase false:")]),
+    ("P1b: R1 the cumulative cap", go("./internal/signer/", "^TestTotalCap$", ("TestTotalCap", r"over the cap")),
+     [(SG, "if total, _ := units(d.TotalCap); spent+amount > total {", "if false {")]),
+    ("P1b: R1 A's delegation never signs B's wallet", go("./internal/signer/", "^TestRefusalsConsumeNothing$", ("TestRefusalsConsumeNothing", r"A's delegation for B: <nil>")),
+     [(SG, "\tcase d.ConsumerID != i.ConsumerID || d.WalletID != i.WalletID:", "\tcase false:")]),
+    ("P1b: simulated is never accepted", go("./internal/signer/", "^TestRefusalsConsumeNothing$", ("TestRefusalsConsumeNothing", r"simulated: .*want GRANT_METHOD_NOT_ACCEPTED")),
+     [(SG, '\tcase "delegation":\n', '\tcase "delegation", "simulated":\n')]),
+    ("P1b: the production assembly signs nothing before P2", go("./cmd/apa-signer/", "^TestAssemblyRefusesEveryOrder$", ("TestAssemblyRefusesEveryOrder", r"the production assembly signed")),
+     [(AS, '\t"context"\n', '\t"context"\n\t"encoding/json"\n'),
+      (AS, "clock, signer.Unavailable{})", "clock, open{})"),
+      (AS, "// private refuses a directory", "type open struct{}\n\nfunc (open) Verify(string, json.RawMessage) error { return nil }\n\n// private refuses a directory")]),
+    ("P1b: R2 recovery finishes from the snapshot before serving", go("./internal/signer/", "^TestInterruptions$", ("TestInterruptions/after-accept", r"recovery used the request, not the snapshot")),
+     [(SG, "\tfor _, p := range pending {", "\tfor _, p := range pending[:0] {")]),
+    ("P1b: R2 the same request ID with other content is refused", go("./internal/signer/", "^TestResendConflictReplay$", ("TestResendConflictReplay", r"same ID, other content")),
+     [(SG, "\t\tif a.fingerprint != fp {", "\t\tif false {")]),
+    ("P1b: R2 the key is chosen by the snapshot's address", go("./internal/signer/", "^TestKeyVersionMismatch$", ("TestKeyVersionMismatch", r"signed with another key")),
+     [(SG, "if key == nil || Address(key.PubKey()) != a.snap.Address {", "if key == nil {")]),
+    ("P1b: R2 a saved result is answered after expiry", go("./internal/signer/", "^TestFinalDeadline$", ("TestFinalDeadline", r"saved result refused after expiry")),
+     [(SG, "\t}\n\treturn reply(a), nil\n}\n\n// Abandon gives up", "\t}\n\tif c.clock() >= a.deadline {\n\t\treturn Reply{}, Refusal(\"ATTEMPT_EXPIRED\")\n\t}\n\treturn reply(a), nil\n}\n\n// Abandon gives up")]),
+    ("P1b: R3-a accepting takes its own time after the write lock", go("./internal/signer/", "^TestAcceptDeadline$", ("TestAcceptDeadline", r"accepted at the deadline")),
+     [(SG, "\tif now >= s.AuthDeadline {", "\tif false {")]),
+    ("P1b: R3-a the final decision checks the deadline", go("./internal/signer/", "^TestFinalDeadline$", ("TestFinalDeadline/reached_before_saving", r"signed after the deadline")),
+     [(SG, "WHERE attempt_id = ? AND state = 'accepted' AND ? < auth_deadline`,\n\t\tsig, now, id, now)", "WHERE attempt_id = ? AND state = 'accepted' AND ? > 0`,\n\t\tsig, now, id, now)")]),
+    ("P1b: R3-a the deadline is strict", go("./internal/signer/", "^TestFinalDeadline$", ("TestFinalDeadline/exactly_at_the_deadline", r"signed after the deadline")),
+     [(SG, "WHERE attempt_id = ? AND state = 'accepted' AND ? < auth_deadline`,\n\t\tsig, now, id, now)", "WHERE attempt_id = ? AND state = 'accepted' AND ? <= auth_deadline`,\n\t\tsig, now, id, now)")]),
+    ("P1b: R3-a the final decision reads the time after the write lock", go("./internal/signer/", "^TestFinalDeadline$", ("TestFinalDeadline/reached_before_saving", r"signed after the deadline")),
+     [(SG, "\tdefer tx.Rollback()\n\tnow := c.clock()\n\tif now < a.acceptedAt {", "\tdefer tx.Rollback()\n\tnow := a.acceptedAt\n\tif now < a.acceptedAt {")]),
+    ("P1b: R3-b no signature after abandon", go("./internal/signer/", "^TestAbandonRaces$", ("TestAbandonRaces/abandon_first", r"signature returned after abandon")),
+     [(SG, "UPDATE attempts SET state = 'signed', signature = ?, signed_at = ? WHERE attempt_id = ? AND state = 'accepted' AND ? < auth_deadline`",
+       "UPDATE attempts SET state = 'signed', signature = ?, signed_at = ?, closed_at = NULL WHERE attempt_id = ? AND ? < auth_deadline`")]),
+    ("P1b: R3-b abandon never waits for the signing lock", go("./internal/signer/", "^TestAbandonRaces$", ("TestAbandonRaces/abandon_first", r"abandon blocked by the signing lock")),
+     [(SG, "func (c *Core) Abandon(attemptID string) (Reply, error) {\n", "func (c *Core) Abandon(attemptID string) (Reply, error) {\n\tif a, ok, _ := c.byID(attemptID); ok {\n\t\tif unlock, err := c.lockWallet(a.snap.WalletID); err == nil {\n\t\t\tdefer unlock()\n\t\t}\n\t}\n")]),
+    ("P1b: R3-b abandon never overwrites signed", go("./internal/signer/", "^TestAbandonRaces$", ("TestAbandonRaces/signed_first", r"abandon overwrote signed")),
+     [(SG, "UPDATE attempts SET state = 'abandoned', closed_at = ? WHERE attempt_id = ? AND state = 'accepted' AND ? < auth_deadline`, now, attemptID, now)",
+       "UPDATE attempts SET state = 'abandoned', closed_at = ?, signature = NULL, signed_at = NULL WHERE attempt_id = ? AND ? < auth_deadline`, now, attemptID, now)")]),
+    ("P1b: R3-b abandon after expiry changes nothing", go("./internal/signer/", "^TestAbandonRaces$", ("TestAbandonRaces/expired,_then_abandon", r"abandon after expiry")),
+     [(SG, "UPDATE attempts SET state = 'abandoned', closed_at = ? WHERE attempt_id = ? AND state = 'accepted' AND ? < auth_deadline`, now, attemptID, now)",
+       "UPDATE attempts SET state = 'abandoned', closed_at = ? WHERE attempt_id = ? AND ? > 0`, now, attemptID, now)")]),
+    ("P1b: crypto: v follows r and s and is 27 or 28", go("./internal/signer/", "^TestEIP712SpecVector$", ("TestEIP712SpecVector", r"signature [0-9a-f]+")),
+     [("internal/signer/eip712.go", "c[1:65]...), c[0])", "c[1:65]...), c[0]-27)")]),
+    ("P1b: crypto: key files of another version are refused", go("./internal/signer/", "^TestKeyFile$", ("TestKeyFile", r"other version: accepted")),
+     [("internal/signer/keystore.go", "if f.Version != 1 || f.KDF", "if f.KDF")]),
+    ("P1b: crypto: the scrypt work factor is bounded", go("./internal/signer/", "^TestKeyFile$", ("TestKeyFile", r"weak scrypt: accepted")),
+     [("internal/signer/keystore.go", "f.N < 1<<14 ||", "f.N < 1 ||")]),
+    ("P1b: keystore: key files private to their owner", go("./cmd/apa-signer/", "^TestAssemblyRefusesItsInputs$", ("TestAssemblyRefusesItsInputs", r"group-readable key file")),
+     [("internal/signer/keystore.go", "if !fi.Mode().IsRegular() || fi.Mode().Perm()&0o077 != 0 {", "if !fi.Mode().IsRegular() {")]),
+    ("P1b: IPC: a caller uid not configured is refused", go("./internal/signer/", "^TestServerCaller$", ("TestServerCaller", r"a uid not configured")),
+     [("internal/signer/server.go", "if !ok || uid < 0 || !core.cfg.allows(uint32(uid)) {", "if !ok || uid < 0 {")]),
+    ("P1b: R4 Store: a purchase keeps its one request ID", go("./internal/store/", "^TestPaymentDelegationPath$", ("TestPaymentDelegationPath", r"resend 0")),
+     [(PM, "paymentWhere(`a.task_id = ? AND a.purchase_order_id = ?`)", "paymentWhere(`a.task_id = ? AND a.purchase_order_id = ? AND 0`)")]),
+    ("P1b: R4 Store: schema 4 accepts delegation only", go("./internal/store/", "^TestPaymentSchemaChecks$", ("TestPaymentSchemaChecks/method_simulated", r"non-delegation payment attempt accepted")),
+     [(PM, "CHECK (method = 'delegation'),", "CHECK (method IN ('delegation', 'simulated', 'webauthn')),")]),
+    ("P1b: R4 Store: recovery refuses a row of an Ask", go("./internal/store/", "^TestPaymentSchemaChecks$", ("TestPaymentSchemaChecks/an_Ask's_purchase", r"want a payment corruption")),
+     [(PM, " OR p.policy_verdict != 'Allow'", "")]),
+    ("P1b: R4 Store: a simulated approval is never paid", go("./internal/store/", "^TestUpgradeSchema3$", ("TestUpgradeSchema3", r"a simulated approval was paid")),
+     [(PM, '\t\tcase p.Decision.PolicyVerdict != "Allow":', "\t\tcase false:")]),
+    ("P1b: R4 Store: the Host writes no webauthn attempt", go("./internal/store/", "^TestPaymentRefusals$", ("TestPaymentRefusals", r"webauthn: ")),
+     [(PM, '\tcase req.Method == "webauthn":\n\t\treturn PaymentAttempt{}, false, refuse("HUMAN_APPROVAL_UNAVAILABLE", "webauthn payments are A2\'s")\n\tcase req.Method != "delegation":',
+       '\tcase req.Method != "delegation" && req.Method != "webauthn":')]),
+    ("P1b: R1 Store: B reads nothing of A's", go("./internal/store/", "^TestPaymentDelegationPath$", ("TestPaymentDelegationPath", r"B read A's attempt")),
+     [(PM, "err == nil && consumer != consumerID {", "err == nil && false {")]),
+    ("P1b: client: no reply is recorded unknown", go("./internal/signerclient/", "^TestUnknownThenResume$", ("TestUnknownThenResume", r"no Signer")),
+     [("internal/signerclient/client.go", '\t\t\tc.ledger.UpdatePayment(a.RequestID, "unknown", a.SignerAttemptID, "")\n', "")]),
 ]
 
 ITEM_TIMEOUT = 900
