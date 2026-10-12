@@ -250,3 +250,40 @@ env HOME="$T/home" GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)"
 **不外洩**：掃描本輪證據，沒有 64 bytes 的 hex、測試密語或金鑰。
 
 **沒有跑**：原九步全部、原 29 項中其餘 27 項、完整容器七步、全部突變、M1 產包、瀏覽器、Unity、真實 CLI；`cmd/demo` 只有提交前的本機預檢。原 `m1-check-20261012T134841Z`（整輪 FAIL）與 `rerun-20261012T135238Z` 的紀錄不變，也不和本輪合併。
+
+## 9 R2 回覆分類限定補正（Codex 對 `fcc5095` 的限定複核）
+
+依 vault〈Claude-Code-P1-b實作R2回覆分類限定補正派工-fcc5095-20261013〉。Codex 的結論：R1、R3 本輪限定複核關閉（取消後不新增或重送付款；unknown 保存錯誤與更新後紀錄的處理）。R2 還剩一項：Signer 已接受請求後 context 結束，Handler 卻回 `404 ATTEMPT_UNKNOWN`。P1-b 不標 Done。
+
+**前輪證據歸屬**（照實記）：
+- Claude Code 執行、Codex 核對：`artifacts/p1b/r-20261012T164244Z/`（基準 `1bfbe44`，七步 PASS、反向九項命中；Codex 沒有重跑）；`artifacts/p1b/r-20261012T164216Z/`（設定階段失敗、測試容器沒有啟動，原樣保留）；正式 run 的網卡列舉探測失敗，另開同旗標容器的 lo／路由補測是補充紀錄，不是原實例的觀測。
+- Codex 獨立執行：在 `fcc5095` 的暫存匯出副本、斷網且來源唯讀的 Linux 容器，以測試資料跑 `TestHandlerDeadline`、`TestDeadlineAfterAccept`、`TestRealStoreCancel`、`TestUnknownThenResume`、`TestUnknownSaveFailure`、`TestPaymentAfterCancel`，全部通過；另加的 `TestCodexHandlerAfterAcceptDeadline` 以「accepted attempt misclassified after request cancellation: HTTP=404 code=ATTEMPT_UNKNOWN persisted_state=accepted; want HTTP=503 SIGNER_TIMEOUT」失敗重現缺口（在 after-accept 取消 request context，經實際 Handler）。這組沒有加 race，不是完整套件或完整容器驗證；輸出只在 Codex 對話工具紀錄，沒有 repo log 路徑。沒有觀察到重複簽署或付款。
+
+### 9.1 根因與修正
+
+- **根因**：`core.finish` 把「讀取失敗」和「讀到但不存在」合在一起，回 `errors.Join(err, Refusal("ATTEMPT_UNKNOWN"))`；Handler 先處理 Refusal，蓋掉了 context 失敗，所以接受後才結束的請求被回成 404。client 收到沒有狀態的 404，走的是明確拒絕，不會記 unknown。
+- **修正**（只改錯誤來源）：讀取失敗原樣回傳；只有讀取成功而且確實沒有紀錄才回 `ATTEMPT_UNKNOWN`。Handler 不用改：非拒絕的錯誤在 request context 已結束時本來就回 `503 SIGNER_TIMEOUT`，其他錯誤回 `SIGNER_ERROR`，回覆與 log 都不帶原始 DB 錯誤。`Get`、`Abandon` 原本就分開這兩種情況。client 不用改：它對 503 已經記 unknown、回 `Unknown`、不重送；本輪補的是接線測試。
+- **相鄰影響**：啟動恢復走同一個 `finish`。以前恢復時讀取失敗會被當成拒絕而略過，現在會讓 `NewCore` 回錯誤。`TestFinishReadError` 在 Core 層驗這一點。
+- 不變：request 處理期限（5 秒）、`auth_deadline`、最後寫入前的到期檢查、abandon 競爭、保存後才回傳簽章；accepted 紀錄不刪；`Resume` 只查詢，不簽新授權，完成 accepted attempt 沿用同一 request ID 的既有路徑，沒有新增自動重試。
+
+### 9.2 定向計畫（執行前）
+
+- 計畫：`scripts/verify/p1b-r2b-check-plan.json`（5 步）；只列：`go run ./cmd/m1-check --plan scripts/verify/p1b-r2b-check-plan.json --list`。
+- 執行：`sh scripts/verify/container-plan.sh scripts/verify/p1b-r2b-check-plan.json artifacts/p1b/r2b-<UTC 時間>`，同一個釘選映像與隔離方式（第 8.1 節），模組只取自本機快取，不下載、不重建映像。預估 4–6 分鐘。
+
+| # | 步驟 | 範圍 | 上限 |
+|---|---|---|---|
+| 1 | vet | `go vet ./...`（所有套件的編譯檢查） | 10 m |
+| 2 | r2b-signer-race | 新測試 `TestHandlerAfterAccept`（cancel、deadline）、`TestFinishReadError`、`TestClientAfterAccept`、`TestClientAfterAcceptNotSaved`；相鄰的期限、恢復、abandon、IPC | 10 m |
+| 3 | client-race | `TestUnknownThenResume`、`TestUnknownSaveFailure`、`TestReplyLost`、`TestRealStoreCancel` | 10 m |
+| 4 | production-refusal | `cmd/apa-signer`（正式組裝與恢復） | 10 m |
+| 5 | reverse | `P1b-R2b:` 4 項：把 `finish` 改回合併的錯誤 | 20 m |
+
+| 反向項目 | 測試 → 預期斷言 |
+|---|---|
+| Handler，取消 | `TestHandlerAfterAccept/cancel` →「accepted attempt answered 404 ATTEMPT_UNKNOWN」 |
+| Handler，期限 | `TestHandlerAfterAccept/deadline` →「accepted attempt answered 404 ATTEMPT_UNKNOWN」 |
+| client 接線 | `TestClientAfterAccept` →「client took an accepted attempt for never accepted」 |
+| Core | `TestFinishReadError` →「a failed read became a refusal」 |
+
+**不在本計畫**：上輪七步、上輪九項反向、原九步／29 項、完整容器流程、全部突變、M1 產包、瀏覽器、Unity、真實 CLI；Store 沒有改動，不跑 Store 套件。

@@ -258,6 +258,19 @@ ITEMS = [
      [(CL, 'return Result{Attempt: a}, errors.Join(Unknown, fmt.Errorf("%w: %w", NotSaved, uerr))', "return Result{Attempt: a}, Unknown")]),
     ("P1b-R: R3 the saved unknown attempt is returned", go("./internal/signerclient/", "^TestUnknownThenResume$", ("TestUnknownThenResume", r"no Signer")),
      [(CL, "\t\t\ta = updated\n", "\t\t\t_ = updated\n")]),
+    # Review of fcc5095 (R2 reply classification); run them alone with "^P1b-R2b:".
+    ("P1b-R2b: Handler: an accepted attempt is not answered unknown after a cancel", go("./internal/signer/", "^TestHandlerAfterAccept$", ("TestHandlerAfterAccept/cancel", r"accepted attempt answered 404 ATTEMPT_UNKNOWN")),
+     [(SG, "\ta, found, err := c.byID(ctx, id)\n\tif err != nil { // the read failed (the request's deadline, the DB): not \"unknown\"\n\t\treturn Reply{}, err\n\t}\n\tif !found {\n\t\treturn Reply{}, Refusal(\"ATTEMPT_UNKNOWN\")\n\t}",
+       "\ta, found, err := c.byID(ctx, id)\n\tif err != nil || !found {\n\t\treturn Reply{}, errors.Join(err, Refusal(\"ATTEMPT_UNKNOWN\"))\n\t}")]),
+    ("P1b-R2b: Handler: an accepted attempt is not answered unknown after the deadline", go("./internal/signer/", "^TestHandlerAfterAccept$", ("TestHandlerAfterAccept/deadline", r"accepted attempt answered 404 ATTEMPT_UNKNOWN")),
+     [(SG, "\ta, found, err := c.byID(ctx, id)\n\tif err != nil { // the read failed (the request's deadline, the DB): not \"unknown\"\n\t\treturn Reply{}, err\n\t}\n\tif !found {\n\t\treturn Reply{}, Refusal(\"ATTEMPT_UNKNOWN\")\n\t}",
+       "\ta, found, err := c.byID(ctx, id)\n\tif err != nil || !found {\n\t\treturn Reply{}, errors.Join(err, Refusal(\"ATTEMPT_UNKNOWN\"))\n\t}")]),
+    ("P1b-R2b: client: an accepted attempt is recorded unknown, not refused", go("./internal/signer/", "^TestClientAfterAccept$", ("TestClientAfterAccept", r"client took an accepted attempt for never accepted")),
+     [(SG, "\ta, found, err := c.byID(ctx, id)\n\tif err != nil { // the read failed (the request's deadline, the DB): not \"unknown\"\n\t\treturn Reply{}, err\n\t}\n\tif !found {\n\t\treturn Reply{}, Refusal(\"ATTEMPT_UNKNOWN\")\n\t}",
+       "\ta, found, err := c.byID(ctx, id)\n\tif err != nil || !found {\n\t\treturn Reply{}, errors.Join(err, Refusal(\"ATTEMPT_UNKNOWN\"))\n\t}")]),
+    ("P1b-R2b: Core: a failed read is not ATTEMPT_UNKNOWN", go("./internal/signer/", "^TestFinishReadError$", ("TestFinishReadError", r"a failed read became a refusal")),
+     [(SG, "\ta, found, err := c.byID(ctx, id)\n\tif err != nil { // the read failed (the request's deadline, the DB): not \"unknown\"\n\t\treturn Reply{}, err\n\t}\n\tif !found {\n\t\treturn Reply{}, Refusal(\"ATTEMPT_UNKNOWN\")\n\t}",
+       "\ta, found, err := c.byID(ctx, id)\n\tif err != nil || !found {\n\t\treturn Reply{}, errors.Join(err, Refusal(\"ATTEMPT_UNKNOWN\"))\n\t}")]),
 ]
 
 ITEM_TIMEOUT = 900
