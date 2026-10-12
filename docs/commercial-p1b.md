@@ -1,7 +1,8 @@
 # P1-b：金鑰庫與獨立 Signer（實作紀錄）
 
 > 2026-10-12，Claude Code。依 vault〈Claude-Code-P1-b金鑰庫與獨立Signer實作派工-e725c44-20261012〉（Aaron：「這三件事我都核准，請提供派工筆記」）實作。設計見 [commercial-p1b-design.md](commercial-p1b-design.md)，分支 `commercial-p1b`，從 `e725c44` 開出。
-> **狀態：P1-b 實作 R1～R3 補正完成，待 Codex 限定複核；OS 隔離部署尚未驗收；正式付款仍未啟用。**（第 8 節：Codex 對 `22e45ed` 的技術 review 暫不通過，R1～R3 已補正並在隔離容器完成定向測試。）
+> **狀態：P1-b R1、R3 限定複核關閉；R2 回覆分類補正完成，待 Codex 限定複核；OS 隔離部署尚未驗收；正式付款仍未啟用。**（第 9 節：Codex 對 `fcc5095` 的限定複核關閉 R1、R3；R2 剩下的回覆分類已補正並在隔離容器完成定向測試。）
+> 以下為 `fcc5095` 交付時的狀態，保留原文：P1-b 實作 R1～R3 補正完成，待 Codex 限定複核；OS 隔離部署尚未驗收；正式付款仍未啟用。（第 8 節：Codex 對 `22e45ed` 的技術 review 暫不通過，R1～R3 已補正並在隔離容器完成定向測試。）
 > 以下為 `22e45ed` 交付時的狀態，保留原文：P1-b 已實作並完成本輪定向測試，待 Codex 技術 review；OS 隔離部署尚未驗收；正式付款仍未啟用。（本輪 run 的 29 項反向檢查中，1 項因反向項目本身的突變寫法無法編譯而未計為抓到；修正該項目後單獨補跑，已被預期斷言抓到。見第 5 節。）
 > 沒有建立系統帳號或 socket 目錄，沒有日常或展示用付款金鑰，沒有連鏈、faucet 或 facilitator，Signer 沒有接進任何展示流程。所有執行結果歸 Claude Code，待 Codex 核對。
 
@@ -287,3 +288,37 @@ env HOME="$T/home" GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)"
 | Core | `TestFinishReadError` →「a failed read became a refusal」 |
 
 **不在本計畫**：上輪七步、上輪九項反向、原九步／29 項、完整容器流程、全部突變、M1 產包、瀏覽器、Unity、真實 CLI；Store 沒有改動，不跑 Store 套件。
+
+### 9.3 本輪驗證
+
+| 執行 | 基準 | 結果 |
+|---|---|---|
+| 本機（不是證據） | `07b16fd` 提交前 | 提交前本機跑 `internal/signer`、`internal/signerclient`、`cmd/apa-signer`（`-race`），通過 |
+| 第一次容器 run：`artifacts/p1b/r2b-20261012T172925Z/` | `935de2f` | **沒有啟動容器，沒有測試執行**：`docker image inspect apa-verify:b1-05` 那一刻回「No such image」，runner 帶著空的映像 ID 繼續，`docker run` exit 125（`invalid reference format`）。隨即查證映像仍在（ID `78258368de09`，與上輪同一個），判定為 Docker 的暫時錯誤；不修改、不重建映像，同一個 commit 重跑 |
+| 正式容器 run：`artifacts/p1b/r2b-20261012T172959Z/` | `935de2f`（`tracked_clean: true`，證據完整） | 5 步全部 PASS，exit 0，總耗時 2 m 18 s |
+
+| # | 步驟 | 結果 | exit | 耗時 | 內容 |
+|---|---|---|---|---|---|
+| 1 | vet | PASS | 0 | 47.9 s | `go vet ./...`（含所有套件的編譯；本輪沒有介面變動，沒有套件只因介面而需要重新編譯） |
+| 2 | r2b-signer-race | PASS | 0 | 1 m 2 s | 13 個測試，`-race` |
+| 3 | client-race | PASS | 0 | 4.3 s | 4 個測試，`-race` |
+| 4 | production-refusal | PASS | 0 | 9.7 s | 2 個測試 |
+| 5 | reverse | PASS | 0 | 13.8 s | 4／4 被預期斷言抓到（每項的未突變基準先通過） |
+
+實際命中的斷言（`05-reverse.log`）：
+- `TestHandlerAfterAccept/cancel`、`/deadline`：「accepted attempt answered 404 ATTEMPT_UNKNOWN; want 503 SIGNER_TIMEOUT」
+- `TestClientAfterAccept`：「client took an accepted attempt for never accepted: ATTEMPT_UNKNOWN」
+- `TestFinishReadError`：「a failed read became a refusal: context canceled」
+
+**驗證內容**（第 2、3 步）：
+- Handler：hook 在接受提交後（握手：已提交 1 筆 accepted）取消 request context，或讓 100 ms 的測試期限在同一點到達（hook 等 `ctx.Done()`，不用 sleep 猜位置）：兩者都回 `503 SIGNER_TIMEOUT`、沒有授權；新的查詢讀到同一筆 accepted；同一 request ID 的既有路徑完成簽署，attempt 仍是 1 筆，signed 可查回；從沒見過的 ID 仍是 `404 ATTEMPT_UNKNOWN`。正式 5 秒值不變。
+- client 接線：client 經 Unix socket 打實際 Handler，測試記下 Handler 真正回的是「503 SIGNER_TIMEOUT」；client 回 `Unknown`，Result 與 ledger 都是 unknown，request ID 不變，只送過一次 sign；`Resume` 讀到 accepted、沒有授權、沒有送 sign；之後同一 ID 的 `Pay` 完成，attempt ID 不變，signed 可查回。保存 unknown 失敗時仍同時是 `Unknown` 與 `NotSaved`（R3 沒有退回）。
+- 相鄰：接受前的 DB／錢包鎖中斷（`TestHandlerDeadline`、`TestLockWaitHonorsContext`）、`TestDeadlineAfterAccept`、三個中斷點與恢復、R3-a 期限、R3-b abandon、金鑰版本、委託先到期、IPC，以及 client 的 unknown／回覆遺失／取消接線，都通過。
+
+**隔離紀錄**（`isolation.txt`，本次 run 自己的容器）：外部 HTTPS 與 IP 被拒；寫 `/src`、Go 工具鏈、模組快取被拒；上線網卡只有 `lo`（探測已在 `fcc5095` 修正，本次有記到）；uid 10001；Go 1.26.4；環境變數清單同第 8.3 節。
+
+**不外洩**：掃描本輪證據，沒有 64 bytes 的 hex、測試密語或金鑰。
+
+**沒有跑**：上輪七步、上輪九項反向、原九步／29 項、完整容器流程、全部突變、M1 產包、瀏覽器、Unity、真實 CLI、Store 套件（沒有改動）。前面各輪的紀錄（`m1-check-20261012T134841Z`、`rerun-20261012T135238Z`、`r-20261012T164216Z`、`r-20261012T164244Z`）不變，也不和本輪合併。
+
+**另列決策，不在本輪**：CLI timeout 後是否禁止新的付款（目前行為不變；那是 task 的 timeout，與 Signer 的 request timeout 是不同問題）。
