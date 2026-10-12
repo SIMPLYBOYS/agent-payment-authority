@@ -1,6 +1,6 @@
 # UX1：商業展示主畫面與操作重整
 
-> 2026-10-12，Claude Code。**狀態（10/12）：UX1 已實作；Codex 限定 review 提出 R1（操作卡更新丟失鍵盤焦點）、R2（手動清單情境衝突），UX1 尚未整體關閉；R1／R2 補正完成，Claude Code 執行，待 Codex 限定複核（第 7 節）。Aaron 尚未判定畫面與操作是否達到本片目標。**依 vault〈Claude-Code-商業展示UX1主畫面與操作重整派工-20261012〉。分支 `commercial-ux1`，從 `32e5183` 建立。
+> 2026-10-12，Claude Code。**狀態（10/12）：UX1 已實作；Codex 限定 review 提出 R1（操作卡更新丟失鍵盤焦點）、R2（手動清單情境衝突），UX1 尚未整體關閉；R1／R2 補正完成（第 7 節）；Codex 限定複核：R2 關閉，R1 留一個停止鍵焦點的局部缺口，已補正，待 Codex 複核（第 7.4 節）。Aaron 尚未判定畫面與操作是否達到本片目標。**依 vault〈Claude-Code-商業展示UX1主畫面與操作重整派工-20261012〉。分支 `commercial-ux1`，從 `32e5183` 建立。
 > UX1 是暫稱，不占付款或 Admin 的任務編號。只用 fake CLI 與合成資料驗證；不執行真實 CLI。不改 Policy、Store schema、事件契約、付款、Gate、認證、版本釘選、plugin 例外、登入與配對權限。
 
 ## 1 版面與操作安排（實作前）
@@ -213,3 +213,24 @@ c9c9e47618ffc1f8e90c99f33a1c75e3cb73a7ef1e5200860ad4537c32760468  WebGL.data
 - `app.js` 的按鍵處理也套用在 `/` viewer 頁，沒有另外跑 viewer 頁的流程。
 
 產品基準：`1bd1354`（網頁）、`33629dc`（彩排入口）；測試與計畫：`70dc9c9`；WebGL 基準：`1e1ec30`。
+
+### 7.4 R1 局部缺口：停止鍵的焦點只回到同一場（10/12，Claude Code 執行，待 Codex 複核）
+
+**Codex 對 `c646c26` 的限定複核**（照 Codex 說法）：R2 的三段獨立彩排符合要求，關閉（Aaron 的實際體驗仍待確認）。R1 剩一個局部缺口：`keepFocus` 沒有保存操作卡「停止 Agent」的 `data-run`，恢復時也不比對 run；Codex 在真實瀏覽器 DOM 重現：焦點原在 A 的舊場次停止鍵，卡片換成 A 的新場次後，焦點落到新場次的停止鍵（程式不會自己按下，但使用者接著按 Enter 可能停止不是原本要停的場次）。Codex 另獨立執行 Node 69／69，並以本版建置的 fake 服務確認 `/` viewer 頁的 Enter 登入、Tab 移動焦點、Space 清除憑證都正常；先前沿用舊執行檔的按鍵探測不算本版缺陷。Codex 沒有啟動 Agent、執行真實 CLI 或修改產品，探測輸出只在對話紀錄，沒有 repo log。
+
+**補正**（`a5ed03f`）：`keepFocus` 另記下有焦點的按鈕自己的 `data-run`，恢復時要求同一個 run；原場次的停止鍵不在了（場次結束、停止中或換成新的一場），焦點退回同一位客人的「選取」，不會落到新場次的停止鍵，也不會點擊。
+
+**測試**（`531697f`，`ux1-focus-ui.mjs`；A 的 fake 情境多一道閘門）：
+- 同一場更新：焦點在 A 的「停止 Agent」，A 的同一場經輪詢更新（呼叫 2 → 3 次），焦點仍在同一場的停止鍵。
+- 換成新的一場：焦點在 A 舊場次的停止鍵，舊場次停止、A 開始新的一場後，焦點在 A 的「選取」，不在新場次的停止鍵；新場次沒有被停止。
+- 原有案例照舊（B 的確認、返回、移開焦點、B 換場、憑證變更、明確確認、抽屜）。
+
+**驗證**（`artifacts/ux1/m1-check-20261012T040507Z/`，基準 `531697f`；計畫 `scripts/verify/ux1-r1b-check-plan.json`）：
+
+| 步驟 | 結果 | 結束碼 | 秒數 | 內容 |
+|---|---|---|---|---|
+| reverse-selftest | PASS | 0 | 0.1 | 28 項錨點與分類器 |
+| ux1-focus-ui | PASS | 0 | 25.6 | 32 項 |
+| reverse | PASS | 0 | 97.2 | `UX1-R1` 兩項：拿掉 `keepFocus` 命中 `FAIL B's confirm keeps the focus while A's card updates`；拿掉 run 比對命中 `FAIL a new run's stop does not get the old run's focus: A's 選取 has it` |
+
+只跑受影響的焦點檢查；Node、其他瀏覽器流程、Unity、容器、產包與真實 CLI 都沒有重跑（本次只改 `keepFocus` 的 run 比對）。產品基準 `a5ed03f`；WebGL 基準仍是 `1e1ec30`。下一步：Codex 複核這個缺口；之後是 Aaron 依第 7.2 節的三段 fake 體驗確認。
