@@ -260,6 +260,8 @@ Linux 容器裡的結果（前幾輪的定向 run）不是 macOS 跨使用者實
 
 此方案與 keygen 工具尚未經 Codex review；Aaron 的核准不代表 Codex 已複核。
 
+**驗收指令筆記**：[commercial-p1b-os-isolation-runbook.md](commercial-p1b-os-isolation-runbook.md)，給 Codex 先做不用 sudo 的預演、再陪同 Aaron 執行並判讀。其中的命令都還沒有執行或驗證過。
+
 ### 8.1 D4 的定向驗證計畫（執行前）
 
 - 計畫：`scripts/verify/p1b-d4-check-plan.json`（4 步）；只列：`go run ./cmd/m1-check --plan scripts/verify/p1b-d4-check-plan.json --list`。
