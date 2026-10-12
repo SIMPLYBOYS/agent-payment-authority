@@ -1,0 +1,92 @@
+[
+ {
+  "name": "go-store",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "./internal/store/",
+   "./internal/paycontract/"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "go-race-store",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-race",
+   "-count=1",
+   "./internal/store/",
+   "-run",
+   "Pay|Upgrade|Expir|Recovery|Cancel"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "go-demo-p1a",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "./cmd/demo/",
+   "-run",
+   "^TestP1a"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "node",
+  "cmd": [
+   "node",
+   "--test",
+   "web/test/adapter.test.mjs",
+   "web/test/hostcreds.test.mjs",
+   "web/test/scene.test.mjs",
+   "web/test/p1a.test.mjs"
+  ],
+  "timeout": 180000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "p1a-ui",
+  "cmd": [
+   "node",
+   "scripts/verify/p1a-ui.mjs",
+   "--out",
+   "{dir}/p1a-ui"
+  ],
+  "timeout": 900000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "ux1-focus-ui",
+  "cmd": [
+   "node",
+   "scripts/verify/ux1-focus-ui.mjs",
+   "--out",
+   "{dir}/ux1-focus-ui"
+  ],
+  "timeout": 900000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "reverse",
+  "cmd": [
+   "python3",
+   "-u",
+   "scripts/verify/m-b-reverse.py",
+   "--out",
+   "{dir}/reverse",
+   "^P1a(-R:|: web: a reply)"
+  ],
+  "timeout": 1800000000000,
+  "kind": "reverse"
+ }
+]

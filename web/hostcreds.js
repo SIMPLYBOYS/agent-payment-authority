@@ -71,14 +71,17 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
   let abort = new AbortController();
   let held = null; // { host, viewers } of the current generation, once verified
   // P1-a: the fake-only simulated approver (docs/commercial-transaction-flow.md 9):
-  // { consumer, token } of this generation, in memory only; one consumer at
-  // a time (the host replaces the previous one too). Not a person's login.
+  // { id, consumer, token } of this generation, in memory only; one
+  // consumer at a time (the host replaces the previous one too). Not a
+  // person's login. The object is the capability's identity: a new
+  // simulate makes a new one, even for the same consumer (A, B, A again).
   let sim = null;
+  let simSeq = 0;
   let mode = "none"; // none | loading | pairing | file | paired | manual
   let fileName = "";
   let message = "";
 
-  const view = () => ({ gen, mode, fileName, message, consumers: held ? [...held.viewers.keys()] : [], hasHost: !!held, simConsumer: sim ? sim.consumer : null });
+  const view = () => ({ gen, mode, fileName, message, consumers: held ? [...held.viewers.keys()] : [], hasHost: !!held, simConsumer: sim ? sim.consumer : null, simId: sim ? sim.id : 0 });
   const changed = () => onChange(view());
 
   // next ends every step of the previous generation and drops all tokens.
@@ -293,7 +296,7 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
       const r = await operatorCall(g, "/api/host/simulate", { body: { consumer_id: consumer } }, 8000);
       if (!r) return null;
       if (r.status === 200 && r.body && r.body.consumer_id === consumer && TOKEN.test(r.body.token || "")) {
-        sim = { consumer, token: r.body.token };
+        sim = { id: ++simSeq, consumer, token: r.body.token };
         changed();
       }
       return { gen: g, status: r.status, body: r.status === 200 ? { consumer_id: consumer } : r.body };
@@ -302,40 +305,52 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
     }
   }
 
-  // simCall is one request with the simulated approver's capability; a 401
-  // (expired, or replaced by the host) drops it. Same generation rule.
-  async function simCall(path, post, timeoutMs = 8000) {
-    if (!sim) return null;
-    const g = gen, mine = sim;
+  // simCall is one request with capability cap (default: the current one).
+  // A reply after the capability changed is never applied: it comes back
+  // as { superseded } with the old capability's id. A 401 (expired, or
+  // replaced by the host) drops the capability. Same generation rule.
+  async function simCall(path, post, timeoutMs = 8000, cap = sim) {
+    if (!cap) return null;
+    const g = gen;
     const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(timeoutMs)]);
-    const r = await call(mine.token, path, signal, post);
-    if (g !== gen || sim !== mine) return null;
+    const r = await call(cap.token, path, signal, post);
+    if (g !== gen) return null;
+    if (sim !== cap) return { gen: g, simId: cap.id, consumer: cap.consumer, superseded: true };
     if (r.status === 401) { sim = null; changed(); return null; }
-    return { gen: g, consumer: mine.consumer, status: r.status, body: r.body };
+    return { gen: g, simId: cap.id, consumer: cap.consumer, status: r.status, body: r.body };
   }
 
   async function approvals() {
     try { return await simCall("/api/sim/approvals"); } catch { return sim ? { gen, error: "unreachable" } : null; }
   }
 
-  // confirmDelegation and resolve are one operation each: one request ID,
-  // resent unchanged on a network error within the generation; the server
-  // answers a resend with the same result.
+  // confirmDelegation and resolve are one operation each, bound for their
+  // whole life to the capability they started with: one request ID, resent
+  // unchanged on a network error, with that same capability only. Once the
+  // capability changes (another customer, or the same one simulated again)
+  // nothing more is sent, and the operation answers { superseded }: what was
+  // sent may have been accepted; the caller reads the state again, as the
+  // current customer, and claims no result.
   async function once(path, body) {
-    if (!sim) return null;
+    const cap = sim;
+    if (!cap) return null;
     const g = gen;
     const request = { ...body, request_id: newId() };
+    const gone = () => ({ gen: g, simId: cap.id, consumer: cap.consumer, superseded: true, requestId: request.request_id });
     for (let attempt = 0; attempt < 3; attempt++) {
       if (g !== gen) return null;
+      if (sim !== cap) return gone();
       try {
-        const r = await simCall(path, { body: request });
+        const r = await simCall(path, { body: request }, 8000, cap);
         return r && { ...r, requestId: request.request_id };
       } catch {
         if (g !== gen) return null;
+        if (sim !== cap) return gone();
         await wait(500);
       }
     }
-    return g === gen ? { gen: g, error: "unreachable" } : null;
+    if (g !== gen) return null;
+    return sim !== cap ? gone() : { gen: g, simId: cap.id, consumer: cap.consumer, error: "unreachable", requestId: request.request_id };
   }
   const confirmDelegation = (scenario) => once("/api/sim/delegations", { scenario });
   const resolve = (sessionId, intentHash, decision) => once("/api/sim/approvals/" + encodeURIComponent(sessionId), { intent_hash: intentHash, decision });

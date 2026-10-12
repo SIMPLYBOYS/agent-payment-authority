@@ -706,6 +706,24 @@ export function evidence(snapshot, po, ctx) {
   };
 }
 
+// approvalTarget (P1-a, review of f95415d R1): what an approve, deny or
+// evidence button of 「需要你處理」 acts on: the credentials generation, the
+// simulated capability, the consumer, task, approval session and intent,
+// and whether that session is still pending. The focus may come back to a
+// rebuilt button only when every one of these is the same (sameTarget); a
+// button that submits needs the session still pending. Anything else is
+// another item, and the focus goes to the panel's heading, never to a
+// button of it.
+export function approvalTarget(gen, simId, item) {
+  const p = (item && item.purchase) || {}, ap = p.approval || {};
+  return { gen, sim: simId, consumer: (item && item.consumer_id) || "", task: (item && item.task_id) || "", session: ap.approval_session_id || "",
+    intent: p.intent_hash || "", pending: ap.state === "pending" };
+}
+const TARGET_KEYS = ["gen", "sim", "consumer", "task", "session", "intent"];
+export function sameTarget(was, now, submits) {
+  return !!was && !!now && TARGET_KEYS.every((k) => String(was[k]) === String(now[k]) && now[k] !== "" && now[k] !== 0) && (!submits || now.pending);
+}
+
 // runCard (UX1, docs/commercial-ux1.md): what an Agent's card says of its
 // newest run (null: none). Only a running run can be stopped; a stopping one
 // still holds its place. tool_calls is the calls the host has answered,

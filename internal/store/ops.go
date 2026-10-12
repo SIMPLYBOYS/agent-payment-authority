@@ -357,8 +357,8 @@ func (t *taskTx) close(p *purchaseRow, event, approval, reason string, by *resol
 func (t *taskTx) expire() error {
 	for _, p := range t.openAsks() {
 		due := t.now >= p.DecidedAt && t.now-p.DecidedAt >= t.terms.ApprovalDeadlineSeconds
-		if p.Session != nil { // apa.pay.v1: the session's own deadline (never past the binding's valid_before)
-			due = t.now >= p.Session.ExpiresAt
+		if p.Session != nil { // apa.pay.v1: the deadline recomputed from what is stored (never past the binding's valid_before)
+			due = t.now >= t.sessionDeadline(p)
 		}
 		if due {
 			if err := t.close(p, "APPROVAL_EXPIRED", "expired", "APPROVAL_TIMEOUT", nil); err != nil {

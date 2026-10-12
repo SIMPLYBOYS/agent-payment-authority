@@ -211,6 +211,33 @@ try {
   check("approve B: B's own grant; A's results untouched", await click("#approval .approval-approve")
     && await b.waitFor(`(document.querySelector("#approval .approval-head[data-state=approved] h3") || {}).textContent === "已核准（模擬），未啟用付款"`, 15000)
     && (await hostTask("show-a-02")).purchases[0].approval.state === "denied" && (await hostTask("show-b-01")).purchases[0].approval.grant.authorization_method === "simulated");
+
+  // ---- 7 review of f95415d R1: the focus never moves to another item's button ----
+  mark("focus stays with its item");
+  check("以 A 模擬 again", await click(`.agent-card[data-consumer="consumer-a"] .agent-sim`) && await b.waitFor(`document.getElementById("sim-chip").textContent.includes("客人 A")`, 10000));
+  const runA = async (scenario, task) => click(`.agent-card[data-consumer="consumer-a"] .agent-delegate[data-scenario="${scenario}"]`)
+    && await click(`.delegation[data-scenario="${scenario}"] .delegation-confirm`) && await b.waitFor(`document.getElementById("run-status").textContent.includes("已開始 ${task}")`, 20000)
+    && await b.waitFor(`(document.querySelector("#approval .approval-approve") || {}).dataset?.task === "${task}"`, 30000);
+  check("A's 60 s request (show-a-04), then A's 5 s request (show-a-05): the panel shows the newer", await runA("pay-a", "show-a-04") && await runA("pay-a-short", "show-a-05"),
+    await text("#approval-body"));
+  await b.evaluate(`(document.getElementById("approval-title").focus(), true)`);
+  await key("Tab");
+  check("the focus is on show-a-05's 核准此筆（模擬）", await b.evaluate(`document.activeElement.classList.contains("approval-approve") && document.activeElement.dataset.task === "show-a-05"`), await active());
+  check("show-a-05 expires; the panel now shows show-a-04 pending", await b.waitFor(`(document.querySelector("#approval .approval-approve") || {}).dataset?.task === "show-a-04"`, 20000), await text("#approval-body"));
+  check("the focus went to the heading, not to show-a-04's buttons", await b.evaluate(`document.activeElement && document.activeElement.id === "approval-title"`), await active());
+  await key("Enter");
+  await sleep(1500);
+  check("Enter after the switch approved nothing: show-a-04 still pending, no grant", (await hostTask("show-a-04")).purchases[0].approval.state === "pending"
+    && !(await hostTask("show-a-04")).purchases[0].approval.grant, JSON.stringify((await hostTask("show-a-04")).purchases[0].approval));
+  check("another 5 s request (show-a-06) is the newer one", await runA("pay-a-short", "show-a-06"), await text("#approval-body"));
+  await b.evaluate(`(document.getElementById("approval-title").focus(), true)`);
+  for (let i = 0; i < 3; i++) await key("Tab");
+  check("the focus is on show-a-06's 查看技術證據", await b.evaluate(`document.activeElement.classList.contains("approval-evidence") && document.activeElement.dataset.task === "show-a-06"`), await active());
+  check("R1 rebuild: show-a-06 expires, the panel shows show-a-04, the focus left for the heading", await b.waitFor(`(document.querySelector("#approval .approval-approve") || {}).dataset?.task === "show-a-04"`, 20000)
+    && await b.evaluate(`document.activeElement && document.activeElement.id === "approval-title"`), await active());
+  await key("Enter");
+  await sleep(1500);
+  check("show-a-04 still pending after that Enter", (await hostTask("show-a-04")).purchases[0].approval.state === "pending");
   check("the flow ran to its end", true);
 } catch (e) {
   if (!(preview && String(e.message).startsWith("preview"))) check("the flow ran to its end", false, String(e && e.stack || e).slice(0, 400));

@@ -407,3 +407,70 @@ func TestPayRefusalKeepsItsCode(t *testing.T) {
 		t.Fatalf("code %v", err)
 	}
 }
+
+// R3: the recovery check recomputes a session's deadline from the stored
+// decision time, the terms' approval seconds and the binding's
+// valid_before, and checks the grant's times against its session and
+// binding; it never trusts the stored values alone. Legal files reopen.
+// Every change is made to a database this test created.
+func TestPayRecoveryDeadlines(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		approve bool
+		sql     string // "" = unchanged: must reopen
+	}{
+		{"a pending session as stored", false, ""},
+		{"an approved session and its grant as stored", true, ""},
+		{"a pending session's deadline moved later", false, `UPDATE approval_sessions SET expires_at = expires_at + 3600`},
+		{"a pending session's deadline moved earlier", false, `UPDATE approval_sessions SET expires_at = expires_at - 1`},
+		{"an approved session's deadline moved later", true, `UPDATE approval_sessions SET expires_at = expires_at + 3600`},
+		{"the grant's expiry moved later", true, `UPDATE grants SET body = json_set(body, '$.expires_at', json_extract(body, '$.expires_at') + 3600)`},
+		{"the grant's issue time moved", true, `UPDATE grants SET body = json_set(body, '$.issued_at', json_extract(body, '$.issued_at') - 1)`},
+		{"the grant row's issue time moved", true, `UPDATE grants SET issued_at = issued_at - 1`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			s := e.open()
+			id, intent := e.payTask(s, "task-a", 30)
+			if c.approve {
+				if _, err := approve(s, id, intent, "approve-req-000000001", "consumer-a", "approve"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s.Close()
+			if c.sql != "" {
+				if _, err := rawDB(t, e.path).Exec(c.sql); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s2, err := Open(Config{Path: e.path, Registry: e.reg, Offers: e.offers, Clock: e.clock.clock()})
+			var ce *CorruptError
+			switch {
+			case c.sql == "" && err != nil:
+				t.Fatalf("a legal file was refused: %v", err)
+			case c.sql != "" && !errors.As(err, &ce):
+				t.Fatalf("recovery accepted it: %v", err)
+			}
+			if s2 != nil {
+				s2.Close()
+			}
+		})
+	}
+}
+
+// R3: expiry uses the deadline recomputed from the stored decision, terms
+// and binding, not the session row: a deadline moved later in the file
+// while the Store is open does not keep the session open past it.
+func TestPayExpiryIgnoresStoredDeadline(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	id, intent := e.payTask(s, "task-a", 30)
+	if _, err := rawDB(t, e.path).Exec(`UPDATE approval_sessions SET expires_at = expires_at + 3600`); err != nil {
+		t.Fatal(err)
+	}
+	e.clock.Add(30)
+	r, err := approve(s, id, intent, "approve-req-000000001", "consumer-a", "approve")
+	if err != nil || r.Outcome != "closed" || r.Purchase.Approval.State != "expired" || count(t, e.path, "grants", "") != 0 {
+		t.Fatalf("at the recomputed deadline: %+v %v", r, err)
+	}
+}

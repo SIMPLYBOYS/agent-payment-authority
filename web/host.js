@@ -821,6 +821,12 @@ async function confirmAndStart(sc) {
   setRunStatus("確認委託中…", "busy");
   const r = await creds.confirmDelegation(sc.id);
   if (g !== creds.gen || !r) return;
+  // Another customer is simulated now (or the same one again): the old
+  // confirmation starts nothing; whatever the host recorded stays there.
+  if (r.superseded || r.simId !== creds.view().simId) {
+    setRunStatus("客人 " + short(r.consumer) + " 的委託確認：模擬身分已更換，結果未確認，沒有開始場次（不會用新身分補送）", "warn");
+    return;
+  }
   if (r.error || !(r.status === 201 || r.status === 200) || !r.body || !r.body.delegation) {
     setRunStatus(r.error ? "沒有收到回覆：委託未確認（不會自動開始）" : "委託未確認（" + ((r.body && r.body.error) || r.status) + "）", "error");
     return;
@@ -832,13 +838,13 @@ async function confirmAndStart(sc) {
 // pollApprovals reads the simulated customer's approval sessions (its own
 // capability); a reply of an older generation or customer is dropped.
 async function pollApprovals() {
-  const c = creds.view().simConsumer;
+  const { simConsumer: c, simId } = creds.view();
   if (!c) { if (lastApprovals) { lastApprovals = null; renderControl(); } return; }
   const g = creds.gen;
   const r = await creds.approvals();
-  if (!r || g !== creds.gen || creds.view().simConsumer !== c) return;
-  lastApprovals = r.error || r.status !== 200 ? { gen: g, consumer: c, error: r.error || "status_" + r.status }
-    : { gen: g, consumer: c, servedAt: r.body.served_at, at: Date.now(), items: r.body.approvals || [] };
+  if (!r || r.superseded || g !== creds.gen || creds.view().simId !== simId) return;
+  lastApprovals = r.error || r.status !== 200 ? { gen: g, simId, consumer: c, error: r.error || "status_" + r.status }
+    : { gen: g, simId, consumer: c, servedAt: r.body.served_at, at: Date.now(), items: r.body.approvals || [] };
   renderControl();
 }
 
@@ -854,7 +860,7 @@ const RESULT = {
 // newest item of the customer's newest run (its result); else none.
 function pickItem(runs) {
   const a = lastApprovals;
-  if (!a || a.gen !== creds.gen || !a.items) return null;
+  if (!a || a.gen !== creds.gen || a.simId !== creds.view().simId || !a.items) return null;
   const pending = a.items.find((x) => x.purchase.approval && x.purchase.approval.state === "pending");
   if (pending) return pending;
   const run = runs.find((r) => r.consumer_id === a.consumer);
@@ -871,14 +877,19 @@ function renderApproval(runs) {
   box.hidden = !v.hasHost || !pay;
   if (box.hidden) return;
   const item = simC ? pickItem(runs) : null;
-  if (approvalNote && approvalNote.gen !== creds.gen) approvalNote = null;
-  const a = lastApprovals && lastApprovals.gen === creds.gen ? lastApprovals : null;
-  const key = JSON.stringify([simC, item, !!a, a && a.error, approvalNote, resolving]);
+  const target = A.approvalTarget(creds.gen, v.simId, item);
+  // A note belongs to the item and capability it was made for, never to another.
+  if (approvalNote && !A.sameTarget(approvalNote.target, target, false)) approvalNote = null;
+  const a = lastApprovals && lastApprovals.gen === creds.gen && lastApprovals.simId === v.simId ? lastApprovals : null;
+  const key = JSON.stringify([simC, v.simId, item, !!a, a && a.error, approvalNote, resolving]);
   if (key === shownApproval) return updateCountdown();
   shownApproval = key;
   const body = $("approval-body");
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
-  const had = document.activeElement && box.contains(document.activeElement) ? document.activeElement.className : "";
+  // The focused control and what it acted on (R1): it comes back only to
+  // the same control of the same item, capability and generation.
+  const act = document.activeElement && box.contains(document.activeElement) ? document.activeElement : null;
+  const had = act ? { kind: act.className.split(" ")[0], target: act.dataset.session ? { ...act.dataset, pending: true } : null } : null;
   const parts = [];
   if (!simC) {
     parts.push(el("p", "approval-empty", "選一位客人按「以 A 模擬」或「以 B 模擬」，才能替他確認委託與核准（fake 模擬，不是本人驗證）。"));
@@ -924,6 +935,7 @@ function renderApproval(runs) {
       const no = el("button", "approval-deny", "拒絕");
       for (const [b, dec] of [[yes, "approve"], [no, "deny"]]) {
         b.type = "button";
+        Object.assign(b.dataset, target, { pending: "" });
         b.disabled = resolving;
         b.addEventListener("click", () => resolveItem(item, dec));
         acts.append(b, " ");
@@ -935,6 +947,7 @@ function renderApproval(runs) {
     }
     const ev = el("button", "approval-evidence", "查看技術證據 ›");
     ev.type = "button";
+    Object.assign(ev.dataset, target, { pending: "" });
     ev.addEventListener("click", async () => { await selectConsumer(item.consumer_id); if (currentTask() !== item.task_id) openTask(item.task_id); openDrawer(); });
     parts.push(ev);
   }
@@ -946,8 +959,15 @@ function renderApproval(runs) {
   }
   body.replaceChildren(...parts);
   updateCountdown();
-  // The focus stays on the same kind of control when it is still there.
-  if (had) { const same = had && body.querySelector("." + had.split(" ")[0]); if (same && !same.disabled) same.focus(); else $("approval-title").focus(); }
+  // The focus stays on the same control of the same item; any other change
+  // (another item, a closed session, another capability or generation)
+  // gives it to the heading, which submits nothing. Nothing is clicked.
+  if (had) {
+    const same = had.target && body.querySelector("." + CSS.escape(had.kind));
+    const submits = had.kind === "approval-approve" || had.kind === "approval-deny";
+    if (same && !same.disabled && A.sameTarget(had.target, target, submits)) same.focus();
+    else if (document.activeElement === document.body || !document.activeElement || box.contains(document.activeElement)) $("approval-title").focus();
+  }
 }
 
 // updateCountdown: the remaining time from the server's clock at the last
@@ -960,7 +980,13 @@ function updateCountdown() {
   if (!item) return;
   const left = item.purchase.approval.expires_at - a.servedAt - Math.floor((Date.now() - a.at) / 1000);
   cd.textContent = left > 0 ? "剩約 " + left + " 秒" : "已達期限，等待後端確認";
-  for (const b of document.querySelectorAll("#approval .approval-approve, #approval .approval-deny")) b.disabled = resolving || left <= 0;
+  for (const b of document.querySelectorAll("#approval .approval-approve, #approval .approval-deny")) {
+    const off = resolving || left <= 0;
+    // A focused button about to be disabled hands the focus to the heading
+    // (which submits nothing), not to the page (review of f95415d, R1).
+    if (off && !b.disabled && document.activeElement === b) $("approval-title").focus();
+    b.disabled = off;
+  }
 }
 setInterval(updateCountdown, 1000);
 
@@ -968,12 +994,24 @@ setInterval(updateCountdown, 1000);
 async function resolveItem(item, decision) {
   if (resolving) return;
   const g = creds.gen;
+  const target = A.approvalTarget(g, creds.view().simId, item);
   resolving = true;
   approvalNote = null;
   renderControl();
   const r = await creds.resolve(item.purchase.approval.approval_session_id, item.purchase.intent_hash, decision);
   if (g !== creds.gen) return;
   resolving = false;
+  // R2: the operation was another capability's (the customer changed
+  // meanwhile): its reply, error or silence is not this panel's. It may
+  // have been accepted; the panel reads the state again as the current
+  // customer and says nothing of the old item; the focus stays put.
+  if (r && (r.superseded || r.simId !== creds.view().simId)) {
+    setRunStatus("客人 " + short(r.consumer) + " 的" + (decision === "approve" ? "核准" : "拒絕") + "：模擬身分已更換，結果未確認（可能已被後端記錄）；以目前身分重新讀取", "warn");
+    await pollApprovals();
+    refreshNow();
+    return renderControl();
+  }
+  const note = (kind, text) => ({ gen: g, target, kind, text });
   const code = r && r.body && r.body.error;
   if (!r) approvalNote = { gen: g, kind: "warn", text: "角色模擬已失效：請重新「以 " + short(item.consumer_id) + " 模擬」，結果未確認" };
   else if (r.error) approvalNote = { gen: g, kind: "warn", text: "沒有收到回覆：結果未確認；畫面會重新讀取（同一請求重送不會多發授權）" };
@@ -983,9 +1021,11 @@ async function resolveItem(item, decision) {
   else if (code === "intent_mismatch") approvalNote = { gen: g, kind: "error", text: "摘要與後端不符：未核准（請重新讀取這一筆）" };
   else if (code === "not_found") approvalNote = { gen: g, kind: "error", text: "找不到這一筆（可能不是目前模擬的客人）" };
   else approvalNote = { gen: g, kind: "error", text: "未處理（" + (code || r.status) + "）" };
+  if (approvalNote) approvalNote = note(approvalNote.kind, approvalNote.text);
   await pollApprovals();
   refreshNow();
-  $("approval-title").focus();
+  renderControl();
+  if (g === creds.gen && target.sim === creds.view().simId) $("approval-title").focus();
 }
 
 // startAll sends one start per consumer, one after the other, each with its

@@ -76,6 +76,7 @@ type sessionRow struct {
 	ClosedAt                               sql.NullInt64
 	Grant                                  *GrantView
 	grantBody                              string
+	grantIssuedAt                          uint64 // the grants row's issued_at column
 }
 
 const sessionCols = `approval_session_id, task_id, purchase_order_id, consumer_id, intent_hash, opened_at, expires_at, state, resolve_request_id, resolved_by, closed_at`
@@ -112,14 +113,15 @@ func (t *taskTx) loadSessions() error {
 	if err := drained(rows); err != nil {
 		return readErr("task", id, err)
 	}
-	grows, err := t.tx.Query(`SELECT g.approval_session_id, g.body FROM grants g JOIN approval_sessions s USING (approval_session_id) WHERE s.task_id = ?`, id)
+	grows, err := t.tx.Query(`SELECT g.approval_session_id, g.body, g.issued_at FROM grants g JOIN approval_sessions s USING (approval_session_id) WHERE s.task_id = ?`, id)
 	if err != nil {
 		return readErr("task", id, err)
 	}
 	defer grows.Close()
 	for grows.Next() {
 		var sid, body string
-		if err := grows.Scan(&sid, &body); err != nil {
+		var issued uint64
+		if err := grows.Scan(&sid, &body, &issued); err != nil {
 			return readErr("task", id, err)
 		}
 		var g paycontract.AuthorizationGrant
@@ -129,11 +131,19 @@ func (t *taskTx) loadSessions() error {
 		for _, p := range t.purchases {
 			if p.Session != nil && p.Session.ID == sid {
 				p.Session.Grant = &GrantView{JTI: g.JTI, AuthorizationMethod: g.AuthorizationMethod, Audience: g.Audience, IssuedAt: g.IssuedAt, ExpiresAt: g.ExpiresAt}
-				p.Session.grantBody = body
+				p.Session.grantBody, p.Session.grantIssuedAt = body, issued
 			}
 		}
 	}
 	return drained(grows)
+}
+
+// sessionDeadline is an apa.pay.v1 Ask's approval deadline, from what is
+// stored and verified, never from the session row: the decision time plus
+// the terms' approval seconds, but never past the payment binding's
+// valid_before (a payment could not be made after it anyway).
+func (t *taskTx) sessionDeadline(p *purchaseRow) uint64 {
+	return min(p.DecidedAt+t.terms.ApprovalDeadlineSeconds, p.V1.PaymentBinding.ValidBefore)
 }
 
 // resolver is who closed a session by deciding it: the approval request's
@@ -372,7 +382,8 @@ func (s *Store) submitV1(t *taskTx, sess contracts.Session, po paycontract.Purch
 	}
 	if d.PolicyVerdict == "Ask" {
 		ss := &sessionRow{ID: paycontract.SessionID(t.row.TaskID, i.PurchaseOrderID), TaskID: t.row.TaskID, PO: i.PurchaseOrderID,
-			ConsumerID: t.row.ConsumerID, IntentHash: d.IntentHash, OpenedAt: t.now, ExpiresAt: min(t.now+t.terms.ApprovalDeadlineSeconds, b.ValidBefore), State: "pending"}
+			ConsumerID: t.row.ConsumerID, IntentHash: d.IntentHash, OpenedAt: t.now, State: "pending"}
+		ss.ExpiresAt = t.sessionDeadline(p)
 		if _, err := t.tx.Exec(`INSERT INTO approval_sessions (approval_session_id, task_id, purchase_order_id, consumer_id, intent_hash, opened_at, expires_at, state)
 			VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`, ss.ID, ss.TaskID, ss.PO, ss.ConsumerID, ss.IntentHash, ss.OpenedAt, ss.ExpiresAt); err != nil {
 			return err
@@ -483,7 +494,7 @@ func (s *Store) ResolveApproval(req ApprovalRequest) (ApprovalResult, error) {
 			}
 			g := paycontract.AuthorizationGrant{Version: paycontract.Version, JTI: paycontract.GrantID(p.Session.ID), IntentHash: p.Session.IntentHash,
 				ApprovalSessionID: p.Session.ID, Decision: "approve", AuthorizationMethod: "simulated", Issuer: paycontract.Issuer, Audience: "signer",
-				ApproverID: req.Approver, IssuedAt: now, ExpiresAt: max(p.V1.PaymentBinding.ValidBefore, now+1)}
+				ApproverID: req.Approver, IssuedAt: now, ExpiresAt: p.V1.PaymentBinding.ValidBefore} // pending here means now < the deadline <= valid_before
 			if err := g.Validate(); err != nil {
 				return err
 			}
@@ -611,12 +622,13 @@ func (t *taskTx) verifyPay() string {
 	if err != nil || d == nil || d.ConsumerID != t.row.ConsumerID {
 		return "the bound delegation is unreadable or another consumer's"
 	}
-	opened, granted := map[string]bool{}, map[string]string{}
+	opened, granted, grantedAt := map[string]bool{}, map[string]string{}, map[string]uint64{}
 	for _, e := range events["APPROVAL_SESSION_OPENED"] {
 		opened[e.Payload.ApprovalSessionID] = true
 	}
 	for _, e := range events["GRANT_ISSUED"] {
 		granted[e.Payload.ApprovalSessionID] = e.Payload.GrantID
+		grantedAt[e.Payload.ApprovalSessionID] = e.ObservedAt
 	}
 	for po, p := range t.purchases {
 		ss := p.Session
@@ -627,6 +639,9 @@ func (t *taskTx) verifyPay() string {
 			continue
 		}
 		closed := p.ApprovalClosed.String
+		if ss.ExpiresAt != t.sessionDeadline(p) {
+			return "purchase " + po + ": the session's deadline is not the one its decision time, terms and valid_before give"
+		}
 		if ss.ID != paycontract.SessionID(t.row.TaskID, po) || ss.IntentHash != p.Decision.IntentHash || ss.ConsumerID != t.row.ConsumerID ||
 			ss.OpenedAt != p.DecidedAt || !opened[ss.ID] || (ss.State == "pending") != (closed == "") || closed != "" && ss.State != closed ||
 			ss.ClosedAt.Valid && uint64(ss.ClosedAt.Int64) != uint64(p.ClosedAt.Int64) {
@@ -640,6 +655,15 @@ func (t *taskTx) verifyPay() string {
 			return "purchase " + po + ": an approved session has exactly one grant and GRANT_ISSUED, nothing else has one"
 		case g != nil && (g.Validate() != nil || g.JTI != granted[ss.ID] || g.IntentHash != ss.IntentHash || g.ApprovalSessionID != ss.ID):
 			return "purchase " + po + ": the grant does not match its session or event"
+		case g != nil:
+			// Its times: issued when the session was approved (the closing
+			// time, the grants row and GRANT_ISSUED say the same), expiring
+			// at the binding's valid_before; by the approver who closed it.
+			c, _ := contracts.Canonical([]byte(ss.grantBody))
+			if string(c) != ss.grantBody || g.ExpiresAt != p.V1.PaymentBinding.ValidBefore || g.IssuedAt != uint64(ss.ClosedAt.Int64) ||
+				g.IssuedAt != ss.grantIssuedAt || g.IssuedAt != grantedAt[ss.ID] || g.ApproverID != ss.ResolvedBy.String {
+				return "purchase " + po + ": the grant's times or approver do not match its session, binding or GRANT_ISSUED"
+			}
 		}
 	}
 	return ""

@@ -153,11 +153,25 @@ ITEMS = [
     ("P1a: web: a new generation holds no capability", node("web/test/p1a.test.mjs", "the simulated customer: one at a time, per generation; a late reply after a switch is dropped", r"a new generation holds no capability"),
      [("web/hostcreds.js", "    held = null;\n    sim = null;\n", "    held = null;\n")]),
     ("P1a: web: a reply after a switch of customer is dropped", node("web/test/p1a.test.mjs", "the simulated customer: one at a time, per generation; a late reply after a switch is dropped", r"after the switch to B is dropped"),
-     [("web/hostcreds.js", "if (g !== gen || sim !== mine) return null;", "if (g !== gen) return null;")]),
+     [("web/hostcreds.js", "    if (sim !== cap) return { gen: g, simId: cap.id, consumer: cap.consumer, superseded: true };\n", "")]),
     ("P1a: web: Unity never shows an approval as still waiting", node("web/test/p1a.test.mjs", "apa.pay.v1: each closure is its own phase; Unity gets the M1 phase that is true of it", r"APPROVED"),
      [("web/adapter.js", 'export const UNITY_PHASE = { approved: "allowed_unpaid",', 'export const UNITY_PHASE = { approved: "waiting",')]),
     ("P1a: ui: 建立委託 waits for the customer's simulation", ui("scripts/verify/p1a-ui.mjs", "each card offers 以 X 模擬 and 建立委託 (disabled until simulated); no plain start for apa.pay.v1"),
      [("web/host.js", "b.disabled = starting || busy.has(m.c) || full || simC !== m.c;", "b.disabled = starting || busy.has(m.c) || full;")]),
+    # Review of f95415d (R1-R3); run them alone with "^P1a-R:".
+    ("P1a-R: R3 recovery recomputes the session deadline", go("./internal/store/", "^TestPayRecoveryDeadlines$", ("TestPayRecoveryDeadlines/a_pending_session's_deadline_moved_later", r"recovery accepted it")),
+     [("internal/store/pay.go", "\t\tif ss.ExpiresAt != t.sessionDeadline(p) {", "\t\tif false {")]),
+    ("P1a-R: R3 recovery checks the grant's times", go("./internal/store/", "^TestPayRecoveryDeadlines$", ("TestPayRecoveryDeadlines/the_grant's_expiry_moved_later", r"recovery accepted it")),
+     [("internal/store/pay.go", "if string(c) != ss.grantBody ||", "if false && (string(c) != ss.grantBody ||"),
+      ("internal/store/pay.go", "g.ApproverID != ss.ResolvedBy.String {", "g.ApproverID != ss.ResolvedBy.String) {")]),
+    ("P1a-R: R3 expiry uses the recomputed deadline", go("./internal/store/", "^TestPayExpiryIgnoresStoredDeadline$", ("TestPayExpiryIgnoresStoredDeadline", r"at the recomputed deadline")),
+     [("internal/store/ops.go", "due = t.now >= t.sessionDeadline(p)", "due = t.now >= p.Session.ExpiresAt")]),
+    ("P1a-R: R2 an operation never resends after its capability changed", node("web/test/p1a.test.mjs", "R2 (throw): after a failed attempt, A→B and A→B→A send nothing with the new capability", r"no resend after the switch"),
+     [("web/hostcreds.js", "      if (sim !== cap) return gone();\n      try {", "      try {")]),
+    ("P1a-R: R1 the target compares the item, capability and generation", node("web/test/p1a.test.mjs", "R1: sameTarget: the same item of the same capability and generation; never another", r"another session"),
+     [("web/adapter.js", 'const TARGET_KEYS = ["gen", "sim", "consumer", "task", "session", "intent"];', 'const TARGET_KEYS = ["gen", "consumer"];')]),
+    ("P1a-R: R1 ui: a rebuilt panel gives the focus back to the same item only", ui("scripts/verify/p1a-ui.mjs", "R1 rebuild: show-a-06 expires, the panel shows show-a-04, the focus left for the heading"),
+     [("web/host.js", "if (same && !same.disabled && A.sameTarget(had.target, target, submits)) same.focus();", "if (same && !same.disabled) same.focus();")]),
 ]
 
 ITEM_TIMEOUT = 900
