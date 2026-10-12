@@ -30,8 +30,9 @@ import (
 // 1: tasks, purchases, events, snapshots; 2 adds host_runs
 // (docs/demo-operation-design.md section 13); 3 adds the contract version of
 // tasks and runs, delegations, approval sessions and grants
-// (docs/commercial-transaction-flow.md section 10).
-const schemaVersion = 3
+// (docs/commercial-transaction-flow.md section 10); 4 adds payment_attempts
+// (docs/commercial-p1b-design.md 6.4).
+const schemaVersion = 4
 const defaultDeadline = 30 // seconds an Ask waits for approval
 
 // Clock is the trusted host clock in Unix seconds; never a caller's value.
@@ -50,9 +51,9 @@ type Config struct {
 	Registry contracts.RegistryConfig
 	Offers   OfferBook
 	Clock    Clock
-	// UpgradeDB lets Open migrate a schema 1 or 2 database to 3 (demo
+	// UpgradeDB lets Open migrate a schema 1, 2 or 3 database to 4 (demo
 	// --upgrade-db): verify as the old version, back up with VACUUM INTO,
-	// migrate, verify as 3. Without it an older database is refused and
+	// migrate, verify as 4. Without it an older database is refused and
 	// left untouched.
 	UpgradeDB bool
 }
@@ -121,7 +122,7 @@ var openReader = func(dsn string) (*sql.DB, error) { return sql.Open("sqlite", d
 
 // upgradeHook runs at each step of an upgrade (tests only; nil in
 // production): "verified<old>", "backed-up", "migrate" (before commit),
-// "verified3". An error fails that step as a real failure would.
+// "verified4". An error fails that step as a real failure would.
 var upgradeHook func(stage string) error
 
 func upgradeAt(stage string) error {
@@ -183,7 +184,7 @@ func Open(cfg Config) (*Store, error) {
 		return nil, err
 	}
 	switch {
-	case (v == 1 || v == 2) && !cfg.UpgradeDB:
+	case v >= 1 && v < schemaVersion && !cfg.UpgradeDB:
 		return nil, upgradeRequired(path, v)
 	case v < 0 || v > schemaVersion:
 		return nil, &CorruptError{Check: "schema", Detail: fmt.Sprintf("schema version %d is not %d", v, schemaVersion)}
@@ -440,8 +441,8 @@ func upgradeRequired(path string, v int) error {
 }
 
 // migrate sets WAL (a property of the file) and brings the schema to the
-// current version, never down. A new file gets schema 3 in one transaction.
-// A schema 1 or 2 file is refused untouched unless upgrade is set; then
+// current version, never down. A new file gets schema 4 in one transaction.
+// A schema 1, 2 or 3 file is refused untouched unless upgrade is set; then
 // upgradeFrom runs. Any other version is refused.
 func (s *Store) migrate(upgrade bool) error {
 	var v int
@@ -451,7 +452,7 @@ func (s *Store) migrate(upgrade bool) error {
 	switch v {
 	case schemaVersion:
 	case 0:
-	case 1, 2:
+	case 1, 2, 3:
 		if !upgrade {
 			return upgradeRequired(s.path, v)
 		}
@@ -463,7 +464,7 @@ func (s *Store) migrate(upgrade bool) error {
 		return fmt.Errorf("journal_mode WAL not set (%q, %v)", mode, err)
 	}
 	switch v {
-	case 1, 2:
+	case 1, 2, 3:
 		return s.upgradeFrom(v)
 	case 0:
 		tx, err := s.w.Begin()
@@ -474,7 +475,7 @@ func (s *Store) migrate(upgrade bool) error {
 		if err := tx.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 0 {
 			return fmt.Errorf("schema changed while opening (%d, %v)", v, err)
 		}
-		if _, err := tx.Exec(schema + runsSchema + schema3); err != nil {
+		if _, err := tx.Exec(schema + runsSchema + schema3 + schema4); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
@@ -485,11 +486,11 @@ func (s *Store) migrate(upgrade bool) error {
 	return nil
 }
 
-// upgradeFrom is --upgrade-db (section 13.8 R2, kept for schema 3): verify
+// upgradeFrom is --upgrade-db (section 13.8 R2, kept for schemas 3 and 4): verify
 // as the old version (read only), back up with VACUUM INTO, add what each
-// later version adds in one transaction, verify as schema 3. A failure
+// later version adds in one transaction, verify as schema 4. A failure
 // before the commit leaves the old version and keeps the backup; a failure
-// of the last verify leaves schema 3 and Open serves nothing: restore the
+// of the last verify leaves schema 4 and Open serves nothing: restore the
 // backup to a NEW path (section 13.14.1). Hook stages: verified<old>,
 // backed-up, migrate, verified<new>.
 func (s *Store) upgradeFrom(from int) error {
@@ -518,10 +519,7 @@ func (s *Store) upgradeFrom(from int) error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != from {
 		return fmt.Errorf("schema changed during the upgrade (%d, %v)", v, err)
 	}
-	ddl := schema3
-	if from == 1 {
-		ddl = runsSchema + schema3
-	}
+	ddl := map[int]string{1: runsSchema + schema3 + schema4, 2: schema3 + schema4, 3: schema4}[from]
 	if _, err := tx.Exec(ddl); err != nil {
 		return err
 	}

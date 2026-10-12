@@ -99,7 +99,7 @@ func openOpt(e *env, upgrade bool) (*Store, error) {
 func TestSchemaNewAndRefusedUpgrade(t *testing.T) {
 	e := newEnv(t)
 	e.open().Close()
-	if v := userVersion(t, e.path); v != 3 || count(t, e.path, "host_runs", "") != 0 {
+	if v := userVersion(t, e.path); v != schemaVersion || count(t, e.path, "host_runs", "") != 0 {
 		t.Fatalf("a new database: schema %d", v)
 	}
 	e2 := newEnv(t)
@@ -124,8 +124,8 @@ func TestUpgradeSchema1(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Close()
-	if userVersion(t, e.path) != 3 || fingerprint(t, e.path) != want {
-		t.Fatal("upgrade: not schema 3, or the data changed")
+	if userVersion(t, e.path) != schemaVersion || fingerprint(t, e.path) != want {
+		t.Fatal("upgrade: not the current schema, or the data changed")
 	}
 	m, _ := filepath.Glob(e.path + ".schema1-*.bak")
 	if len(m) != 1 {
@@ -143,7 +143,7 @@ func TestUpgradeFailures(t *testing.T) {
 		stage   string
 		version int
 		backup  bool
-	}{{"verified1", 1, false}, {"backed-up", 1, true}, {"migrate", 1, true}, {"verified3", 3, true}} {
+	}{{"verified1", 1, false}, {"backed-up", 1, true}, {"migrate", 1, true}, {"verified4", 4, true}} {
 		t.Run(c.stage, func(t *testing.T) {
 			e := newEnv(t)
 			schema1(t, e)
@@ -484,7 +484,7 @@ func TestVerifyFileLocks(t *testing.T) {
 		e := offline(t)
 		os.WriteFile(e.path+".lock", nil, 0o600)
 		before := stamps(t, e.path)
-		if v, err := VerifyFile(e.path); err != nil || v != 3 {
+		if v, err := VerifyFile(e.path); err != nil || v != schemaVersion {
 			t.Fatalf("%d %v", v, err)
 		}
 		if stamps(t, e.path) != before {
@@ -513,7 +513,7 @@ func TestVerifyFileLocks(t *testing.T) {
 		e := offline(t)
 		dir := filepath.Join(t.TempDir(), "restore")
 		db, v, err := RestoreCopy(e.path, dir)
-		if err != nil || v != 3 {
+		if err != nil || v != schemaVersion {
 			t.Fatalf("%v %d", err, v)
 		}
 		f, _ := os.OpenFile(db+".lock", os.O_RDWR, 0)
@@ -563,7 +563,7 @@ func TestRestoreCopySteps(t *testing.T) {
 		before := stamps(t, e.path)
 		calls = 0
 		db, v, err := RestoreCopy(e.path, filepath.Join(t.TempDir(), "r"))
-		if err != nil || v != 3 || calls != 1 {
+		if err != nil || v != schemaVersion || calls != 1 {
 			t.Fatalf("%v %d calls %d", err, v, calls)
 		}
 		if fi, _ := os.Stat(db + ".lock"); fi == nil || fi.Mode().Perm() != 0o600 {
@@ -623,7 +623,7 @@ func walChild(c, path string) int {
 		block("V1_WAL_READY")
 	case "A":
 		upgradeHook = func(stage string) error {
-			if stage == "verified3" {
+			if stage == "verified4" {
 				block("UPGRADE_FAILED_READY") // the injected failure: before any connection is closed
 			}
 			return nil
@@ -734,11 +734,11 @@ func TestLeftoverWALCaseA(t *testing.T) {
 	if v := throwaway(t, e.path, false, `SELECT count(*) FROM sqlite_master WHERE name = 'host_runs'`); v != "0" {
 		t.Fatal("main file alone has host_runs: the migration is not only in the WAL")
 	}
-	if v := throwaway(t, e.path, true, `SELECT user_version FROM pragma_user_version`); v != "3" {
-		t.Fatalf("main file + WAL: schema %s, want 3", v)
+	if v := throwaway(t, e.path, true, `SELECT user_version FROM pragma_user_version`); v != "4" {
+		t.Fatalf("main file + WAL: schema %s, want 4", v)
 	}
 	// Re-verify without the hook: the stored data is complete.
-	if v, err := VerifyFile(e.path); err != nil || v != 3 {
+	if v, err := VerifyFile(e.path); err != nil || v != schemaVersion {
 		t.Fatalf("VerifyFile: %d %v", v, err)
 	}
 	if stamps(t, e.path) != base {

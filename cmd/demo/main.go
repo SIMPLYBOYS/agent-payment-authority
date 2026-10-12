@@ -102,7 +102,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	traceDir := fs.String("trace-dir", "var/runs", "where fake run traces are written")
 	unityDir := fs.String("unity-build", "unity/AgentPaymentAuthority/Build/WebGL/Build", "the Unity Web build's Build directory (served as /unity/)")
 	scenariosPath := fs.String("scenarios", "", "trusted scenario catalog for host-started runs, e.g. testdata/demo/scenarios.json")
-	upgradeDB := fs.Bool("upgrade-db", false, "migrate a schema 1 or 2 database to 3 (verified, backed up first)")
+	upgradeDB := fs.Bool("upgrade-db", false, "migrate a schema 1, 2 or 3 database to 4 (verified, backed up first)")
 	verifyDB := fs.String("verify-db", "", "check an offline database read only, then exit")
 	restoreCopy := fs.String("restore-copy", "", "backup to restore into --restore-dir, then exit")
 	restoreDir := fs.String("restore-dir", "", "the new directory of --restore-copy")

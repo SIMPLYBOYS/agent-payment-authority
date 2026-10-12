@@ -338,7 +338,7 @@ func TestPayRecoveryRefuses(t *testing.T) {
 	}
 }
 
-// A schema 2 file (M1 tasks and a run) upgrades to 3 with --upgrade-db:
+// A schema 2 file (M1 tasks and a run) upgrades to the current schema with --upgrade-db:
 // backed up, the data unchanged, its tasks and run apa.m1.v2; without the
 // flag it is refused and left as it was.
 func TestUpgradeSchema2(t *testing.T) {
@@ -358,7 +358,7 @@ func TestUpgradeSchema2(t *testing.T) {
 	}
 	r, found, err := s.RunByRequest(runReq("old-run", "consumer-a", "task-a").RequestID)
 	s.Close()
-	if userVersion(t, e.path) != 3 || fingerprint(t, e.path) != want || err != nil || !found || r.ContractVersion != contracts.Version || r.DelegationID != "" ||
+	if userVersion(t, e.path) != schemaVersion || fingerprint(t, e.path) != want || err != nil || !found || r.ContractVersion != contracts.Version || r.DelegationID != "" ||
 		count(t, e.path, "tasks", "contract_version = 'apa.m1.v2'") != 1 {
 		t.Fatalf("upgrade: v%d run %+v %v", userVersion(t, e.path), r, err)
 	}

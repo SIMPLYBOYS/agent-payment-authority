@@ -64,9 +64,9 @@ func OpenSnapshot(path string) (s *Store, done func() error, err error) {
 		db.Close()
 		return nil, nil, err
 	}
-	if v != 2 && v != schemaVersion { // a recorded schema 2 file is read as it is, never migrated
+	if v < 2 || v > schemaVersion { // a recorded schema 2 or 3 file is read as it is, never migrated
 		db.Close()
-		return nil, nil, &CorruptError{Check: "schema", Detail: fmt.Sprintf("schema version %d is not 2 or %d", v, schemaVersion)}
+		return nil, nil, &CorruptError{Check: "schema", Detail: fmt.Sprintf("schema version %d is not 2 to %d", v, schemaVersion)}
 	}
 	s = &Store{path: cp, r: db, legacy: v < 3}
 	if err := s.verify(v); err != nil {
