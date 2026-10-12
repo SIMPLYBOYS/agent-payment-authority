@@ -176,3 +176,50 @@ details.live-warning > p { font-weight: normal; margin: 4px 0 0; }
   .advanced { margin: 12px 8px 24px; }
   .host-bar { margin: 8px 8px 0; }
 }
+
+/* P1-a (docs/commercial-p1a.md): the simulated customer, the delegation's
+   terms on its card, and 「需要你處理」: one purchase's summary on a light
+   sheet, the backend's deadline and one main action. Colours mean state
+   only: amber waits for you, green done, red refused or closed. */
+.sim-chip { background: #ffe58a; color: #3a2c00; font-weight: bold; }
+.stage.ux > .side > section.approval { background: #f7f6f2; color: #1a1d2e; border: 2px solid #f0c46b; padding: 0; overflow: hidden; }
+.approval h2 { color: #6b4b00; background: #fff1cf; margin: 0; padding: 8px 12px; font-size: 15px; border-bottom: 1px solid #ecd28d; }
+.approval h2:focus { outline: 2px solid #6b4b00; outline-offset: -2px; }
+#approval-body { padding: 10px 12px 12px; display: grid; gap: 8px; }
+.approval-empty { margin: 0; color: #5d6280; }
+.approval-mode { margin: 0; font-size: 12px; font-weight: bold; color: #6b4b00; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.approval-tag { background: #6b4b00; color: #fff1cf; border-radius: 4px; padding: 1px 6px; }
+.approval-head h3 { margin: 0; font-size: 20px; }
+.approval-head p { margin: 2px 0 0; color: #5d6280; font-size: 13px; }
+.approval-head[data-state="approved"] h3 { color: #1f7a45; }
+.approval-head[data-state="denied"] h3, .approval-head[data-state="expired"] h3, .approval-head[data-state="superseded"] h3, .approval-head[data-state="withdrawn"] h3 { color: #b03030; }
+.approval-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: #fff; border: 1px solid #e3e1d8; border-radius: 8px; padding: 8px 10px; }
+.approval-product { margin: 0; font-weight: bold; }
+.approval-amount { margin: 0; white-space: nowrap; }
+.approval-amount b { font-size: 26px; }
+.approval-amount span { color: #5d6280; font-size: 12px; }
+.approval-rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 0; font-size: 13px; }
+.approval-rows dt { color: #7a7f99; }
+.approval-rows dd { margin: 0; overflow-wrap: anywhere; }
+.approval-deadline { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; background: #fff8e8; border: 1px solid #f0d99a; border-radius: 8px; padding: 6px 10px; font-size: 13px; color: #7a6a3a; }
+.approval-deadline b { font-size: 16px; color: #1a1d2e; }
+.approval-note { margin: 0; font-size: 12px; color: #7a7f99; }
+.approval-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.approval button { border-radius: 8px; padding: 8px 14px; font-weight: bold; }
+.approval .approval-approve { background: #1a1d2e; color: #fff; border: 2px solid #1a1d2e; }
+.approval .approval-deny { background: #fff; color: #b03030; border: 2px solid #d24a4a; }
+.approval .approval-evidence { background: none; border: 0; color: #4d5dbb; padding: 2px 0; justify-self: start; }
+.approval button:focus-visible { outline: 3px solid #4d5dbb; outline-offset: 2px; }
+.approval-grant { margin: 0; font-size: 12px; color: #1f7a45; overflow-wrap: anywhere; }
+.approval-msg { margin: 0; font-weight: bold; font-size: 13px; }
+.approval-msg[data-kind="ok"] { color: #1f7a45; }
+.approval-msg[data-kind="error"] { color: #b03030; }
+.approval-msg[data-kind="warn"] { color: #8a5a00; }
+.agent-sim-on { margin: 4px 0 0; font-size: 12px; color: #ffe58a; }
+.delegation { margin-top: 6px; padding: 8px 10px; border: 1px solid #f0c46b; border-radius: 6px; background: #221d10; }
+.delegation-title { margin: 0 0 4px; font-weight: bold; color: #ffe58a; }
+.delegation-rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 0 0 6px; font-size: 13px; }
+.delegation-rows dt { color: var(--muted); }
+.delegation-rows dd { margin: 0; overflow-wrap: anywhere; }
+.delegation-note { margin: 0 0 6px; font-size: 12px; color: var(--warn); }
+.delegation .delegation-confirm { background: #ffe58a; color: #3a2c00; border-color: #ffe58a; font-weight: bold; }

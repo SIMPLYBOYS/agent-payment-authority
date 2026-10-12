@@ -84,7 +84,7 @@ func copyFile(src, dst string) error {
 // VerifyFile checks an offline database file without changing it: it takes
 // the source's existing <db>.lock (never created, never another file), reads
 // the database and its -wal as bytes, refuses if anything changed while
-// reading, and runs the schema 1 or 2 recovery check on a throwaway copy.
+// reading, and runs the schema 1, 2 or 3 recovery check on a throwaway copy.
 // It returns the schema version. It never falls back to opening the source.
 func VerifyFile(path string) (int, error) {
 	abs, err := filepath.Abs(path)
@@ -145,8 +145,8 @@ func VerifyFile(path string) (int, error) {
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
 		return 0, err
 	}
-	if v != 1 && v != 2 {
-		return v, &CorruptError{Check: "schema", Detail: fmt.Sprintf("schema version %d is neither 1 nor 2", v)}
+	if v < 1 || v > schemaVersion {
+		return v, &CorruptError{Check: "schema", Detail: fmt.Sprintf("schema version %d is not 1 to %d", v, schemaVersion)}
 	}
 	return v, (&Store{r: db}).verify(v)
 }

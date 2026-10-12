@@ -17,9 +17,15 @@ type EventScope struct {
 
 // Payload is deliberately small and typed: raw CLI text, tokens, biometrics,
 // signatures and private keys have no field here. Extend only with a version.
+// The last four fields came with apa.pay.v1 (internal/paycontract validates
+// them); an M1 event never carries them and ValidateEvent refuses one that does.
 type EventPayload struct {
-	Code     string          `json:"code,omitempty"`
-	Decision *PolicyDecision `json:"decision,omitempty"`
+	Code                string          `json:"code,omitempty"`
+	Decision            *PolicyDecision `json:"decision,omitempty"`
+	DelegationID        string          `json:"delegation_id,omitempty"`
+	ApprovalSessionID   string          `json:"approval_session_id,omitempty"`
+	GrantID             string          `json:"grant_id,omitempty"`
+	AuthorizationMethod string          `json:"authorization_method,omitempty"`
 }
 
 // AuditEvent is one link of its task's hash chain. PrevEventHash is the
@@ -65,6 +71,9 @@ func (r *Registry) ValidateEvent(e AuditEvent, order *PurchaseOrder) error {
 	}
 	if e.Payload.Code != "" && !ids(e.Payload.Code) {
 		return fmt.Errorf("invalid event code")
+	}
+	if p := e.Payload; p.DelegationID != "" || p.ApprovalSessionID != "" || p.GrantID != "" || p.AuthorizationMethod != "" {
+		return fmt.Errorf("delegation, approval session and grant fields belong to apa.pay.v1, not M1")
 	}
 	if e.EventType == "SYSTEM_READY" {
 		if e.Scope != nil || e.Sequence != 0 || e.PrevEventHash != "" || e.Payload.Decision != nil || order != nil {

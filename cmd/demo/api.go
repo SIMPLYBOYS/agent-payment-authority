@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 )
 
@@ -111,6 +112,7 @@ type api struct {
 	live     *liveInfo    // live mode (--live-cli); nil otherwise
 	traceDir string       // live mode: where the run traces are
 	pairing  *pairing     // --pairing: the host page's one-time code; nil otherwise
+	sim      *simulator   // fake mode with --scenarios: the simulated approver (P1-a); nil otherwise
 	out      io.Writer    // the host's log (fixed lines only)
 }
 
@@ -188,6 +190,8 @@ func (a *api) record(w http.ResponseWriter, r *http.Request) (store.TaskRecord, 
 // cannot do. Nothing comes from the current registry.
 type taskReply struct {
 	TaskID             string               `json:"task_id"`
+	ContractVersion    string               `json:"contract_version"`
+	DelegationID       string               `json:"delegation_id,omitempty"`
 	ConsumerID         string               `json:"consumer_id"`
 	AgentID            string               `json:"agent_id"`
 	WalletID           string               `json:"wallet_id"`
@@ -208,9 +212,14 @@ func (a *api) task(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, v := rec.Binding, rec.Task
-	reply(w, http.StatusOK, taskReply{TaskID: b.TaskID, ConsumerID: b.ConsumerID, AgentID: b.AgentID, WalletID: b.WalletID, Payer: b.Payer,
+	capability := "unavailable" // M1 cannot pay
+	if v.ContractVersion == paycontract.Version {
+		capability = paycontract.PaymentNotEnabled // P1-a: an approval, simulated, is not a payment
+	}
+	reply(w, http.StatusOK, taskReply{TaskID: b.TaskID, ContractVersion: v.ContractVersion, DelegationID: v.DelegationID, ConsumerID: b.ConsumerID,
+		AgentID: b.AgentID, WalletID: b.WalletID, Payer: b.Payer,
 		WalletEvidenceMode: b.WalletEvidenceMode, Status: v.Status, DenyReason: v.DenyReason, AsOfSequence: v.AsOfSequence,
-		AsOfObservedAt: v.AsOfObservedAt, ServedAt: a.clock(), Purchases: v.Purchases, PaymentCapability: "unavailable"})
+		AsOfObservedAt: v.AsOfObservedAt, ServedAt: a.clock(), Purchases: v.Purchases, PaymentCapability: capability})
 }
 
 // eventView is the whitelisted projection of one stored event, copied as
@@ -224,6 +233,12 @@ type eventView struct {
 	IntentHash      string                    `json:"intent_hash,omitempty"`
 	Code            string                    `json:"code,omitempty"`
 	Decision        *contracts.PolicyDecision `json:"decision,omitempty"`
+	// apa.pay.v1 events only.
+	DelegationID        string `json:"delegation_id,omitempty"`
+	ApprovalSessionID   string `json:"approval_session_id,omitempty"`
+	GrantID             string `json:"grant_id,omitempty"`
+	AuthorizationMethod string `json:"authorization_method,omitempty"`
+	Version             string `json:"version,omitempty"`
 	EvidenceMode    string                    `json:"evidence_mode"`
 	Source          string                    `json:"source"`
 	ObservedAt      uint64                    `json:"observed_at"`
@@ -243,7 +258,11 @@ func (a *api) events(w http.ResponseWriter, r *http.Request) {
 	out := eventsReply{TaskID: rec.Binding.TaskID, Events: []eventView{}}
 	for _, e := range rec.Events {
 		v := eventView{EventID: e.EventID, EventType: e.EventType, Sequence: e.Sequence, PrevEventHash: e.PrevEventHash,
-			Code: e.Payload.Code, Decision: e.Payload.Decision, EvidenceMode: e.EvidenceMode, Source: e.Source, ObservedAt: e.ObservedAt}
+			Code: e.Payload.Code, Decision: e.Payload.Decision, EvidenceMode: e.EvidenceMode, Source: e.Source, ObservedAt: e.ObservedAt,
+			DelegationID: e.Payload.DelegationID, ApprovalSessionID: e.Payload.ApprovalSessionID, GrantID: e.Payload.GrantID, AuthorizationMethod: e.Payload.AuthorizationMethod}
+		if e.Version == paycontract.Version { // an M1 event's view is what it always was
+			v.Version = e.Version
+		}
 		if e.Scope != nil {
 			v.PurchaseOrderID, v.IntentHash = e.Scope.PurchaseOrderID, e.Scope.IntentHash
 		}

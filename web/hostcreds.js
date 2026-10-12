@@ -70,11 +70,15 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
   let gen = 0;
   let abort = new AbortController();
   let held = null; // { host, viewers } of the current generation, once verified
+  // P1-a: the fake-only simulated approver (docs/commercial-transaction-flow.md 9):
+  // { consumer, token } of this generation, in memory only; one consumer at
+  // a time (the host replaces the previous one too). Not a person's login.
+  let sim = null;
   let mode = "none"; // none | loading | pairing | file | paired | manual
   let fileName = "";
   let message = "";
 
-  const view = () => ({ gen, mode, fileName, message, consumers: held ? [...held.viewers.keys()] : [], hasHost: !!held });
+  const view = () => ({ gen, mode, fileName, message, consumers: held ? [...held.viewers.keys()] : [], hasHost: !!held, simConsumer: sim ? sim.consumer : null });
   const changed = () => onChange(view());
 
   // next ends every step of the previous generation and drops all tokens.
@@ -83,6 +87,7 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
     abort.abort();
     abort = new AbortController();
     held = null;
+    sim = null;
     mode = newMode;
     fileName = "";
     message = msg || "";
@@ -206,15 +211,16 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
   // within the same generation only. A reply of an older generation is
   // dropped: nothing switches, signs in or opens. Clearing the credentials
   // does not withdraw a run the server accepted, and never resends it.
-  async function startRun(scenario) {
+  async function startRun(scenario, delegationId) {
     if (!held) return null;
     const g = gen;
     const requestId = newId();
+    const body = delegationId ? { request_id: requestId, scenario, delegation_id: delegationId } : { request_id: requestId, scenario };
     for (let attempt = 0; attempt < 3; attempt++) {
       if (g !== gen) return null;
       let r;
       try {
-        r = await operatorCall(g, "/api/host/runs", { body: { request_id: requestId, scenario } }, 8000);
+        r = await operatorCall(g, "/api/host/runs", { body }, 8000);
       } catch {
         if (g !== gen) return null;
         await wait(500);
@@ -277,8 +283,66 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
     }
   }
 
+  // simulate asks the host (operator, fake only) to act as consumer; the
+  // capability it returns replaces any previous one. A reply of an older
+  // generation is dropped.
+  async function simulate(consumer) {
+    if (!held) return null;
+    const g = gen;
+    try {
+      const r = await operatorCall(g, "/api/host/simulate", { body: { consumer_id: consumer } }, 8000);
+      if (!r) return null;
+      if (r.status === 200 && r.body && r.body.consumer_id === consumer && TOKEN.test(r.body.token || "")) {
+        sim = { consumer, token: r.body.token };
+        changed();
+      }
+      return { gen: g, status: r.status, body: r.status === 200 ? { consumer_id: consumer } : r.body };
+    } catch {
+      return g === gen ? { gen: g, error: "unreachable" } : null;
+    }
+  }
+
+  // simCall is one request with the simulated approver's capability; a 401
+  // (expired, or replaced by the host) drops it. Same generation rule.
+  async function simCall(path, post, timeoutMs = 8000) {
+    if (!sim) return null;
+    const g = gen, mine = sim;
+    const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(timeoutMs)]);
+    const r = await call(mine.token, path, signal, post);
+    if (g !== gen || sim !== mine) return null;
+    if (r.status === 401) { sim = null; changed(); return null; }
+    return { gen: g, consumer: mine.consumer, status: r.status, body: r.body };
+  }
+
+  async function approvals() {
+    try { return await simCall("/api/sim/approvals"); } catch { return sim ? { gen, error: "unreachable" } : null; }
+  }
+
+  // confirmDelegation and resolve are one operation each: one request ID,
+  // resent unchanged on a network error within the generation; the server
+  // answers a resend with the same result.
+  async function once(path, body) {
+    if (!sim) return null;
+    const g = gen;
+    const request = { ...body, request_id: newId() };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (g !== gen) return null;
+      try {
+        const r = await simCall(path, { body: request });
+        return r && { ...r, requestId: request.request_id };
+      } catch {
+        if (g !== gen) return null;
+        await wait(500);
+      }
+    }
+    return g === gen ? { gen: g, error: "unreachable" } : null;
+  }
+  const confirmDelegation = (scenario) => once("/api/sim/delegations", { scenario });
+  const resolve = (sessionId, intentHash, decision) => once("/api/sim/approvals/" + encodeURIComponent(sessionId), { intent_hash: intentHash, decision });
+
   return {
     load, pair, clearAll, manual, unauthorized, readiness, startRun, stopRun, cancelTask, hostRead, runs,
+    simulate, approvals, confirmDelegation, resolve,
     viewerToken: (consumer) => (held ? held.viewers.get(consumer) || null : null),
     get gen() { return gen; },
     view,

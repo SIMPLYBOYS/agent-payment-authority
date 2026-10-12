@@ -34,6 +34,8 @@ type planRun struct {
 	BudgetInitial contracts.Amount          `json:"budget_initial,omitempty"`
 	Note          string                    `json:"note,omitempty"`
 	bound         func(*toolbridge.Binding) // told the run's binding (host runs only)
+	contract      string                    // host runs: the run's contract version ("" = apa.m1.v2)
+	delegation    string                    // host runs: an apa.pay.v1 run's confirmed delegation
 }
 
 // runOutcome is what the host reports of one run: fixed codes and counts,
@@ -222,7 +224,8 @@ func (f *cliRunner) runOne(ctx context.Context, st *store.Store, bridge *toolbri
 		// The credential is an M1 fixture made at start, valid for a day of
 		// host time; nothing verifies a BBS+ proof.
 		cred := policy.Credential{ConsumerID: task.ConsumerID, ValidUntil: f.d.clock() + 86400, EvidenceMode: "fixture"}
-		if err := st.StartTask(store.TaskSetup{TaskID: task.TaskID, Profile: &f.profile, Credential: &cred, BudgetInitial: r.BudgetInitial}); err != nil {
+		if err := st.StartTask(store.TaskSetup{TaskID: task.TaskID, Profile: &f.profile, Credential: &cred, BudgetInitial: r.BudgetInitial,
+			ContractVersion: r.contract, DelegationID: r.delegation}); err != nil {
 			return nil, err
 		}
 		return st, nil

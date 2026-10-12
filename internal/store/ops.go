@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
@@ -25,37 +26,78 @@ type taskRow struct {
 	NextSeq                                      uint64
 	ChainHead                                    string
 	StartedAt                                    uint64
+	ContractVersion                              string // apa.m1.v2 | apa.pay.v1
 }
 
-const taskCols = `task_id, consumer_id, agent_id, wallet_id, payer, registry_snapshot, profile_snapshot, credential_snapshot,
+// taskCols are the columns scanTask reads. A schema 1 or 2 file (verified
+// before an upgrade) has no contract_version: all its tasks are apa.m1.v2.
+func (s *Store) taskCols() string {
+	cols := `task_id, consumer_id, agent_id, wallet_id, payer, registry_snapshot, profile_snapshot, credential_snapshot,
   terms_snapshot, budget_remaining, status, deny_reason, next_sequence, chain_head, started_at`
+	if s.legacy {
+		return cols + `, 'apa.m1.v2'`
+	}
+	return cols + `, contract_version`
+}
 
 func scanTask(row interface{ Scan(...any) error }) (taskRow, error) {
 	var t taskRow
 	err := row.Scan(&t.TaskID, &t.ConsumerID, &t.AgentID, &t.WalletID, &t.Payer, &t.RegistrySnap, &t.ProfileSnap, &t.CredentialSnap,
-		&t.TermsSnap, &t.BudgetRemaining, &t.Status, &t.DenyReason, &t.NextSeq, &t.ChainHead, &t.StartedAt)
+		&t.TermsSnap, &t.BudgetRemaining, &t.Status, &t.DenyReason, &t.NextSeq, &t.ChainHead, &t.StartedAt, &t.ContractVersion)
 	return t, err
 }
 
+// purchaseRow is one stored purchase of either contract: Order for an
+// apa.m1.v2 task, V1 for an apa.pay.v1 task, whose Ask also has a Session.
 type purchaseRow struct {
 	Order          contracts.PurchaseOrder
+	V1             *paycontract.PurchaseOrder
 	Body           string
 	Decision       contracts.PolicyDecision
 	DecidedAt      uint64
 	ApprovalClosed sql.NullString
 	ClosedAt       sql.NullInt64
+	Session        *sessionRow
+}
+
+// terms are a purchase's fields both contracts have, wherever each keeps them.
+type purchaseTerms struct {
+	PO, RequestID, Method, URL, ReqHash string
+	ChainID, Asset, From, PayTo, Nonce  string
+	Amount                              contracts.Amount
+}
+
+func (p *purchaseRow) terms() purchaseTerms {
+	if v := p.V1; v != nil {
+		i, b := v.Intent, v.PaymentBinding
+		return purchaseTerms{i.PurchaseOrderID, v.RequestID, i.HTTPMethod, i.ResourceURL, i.PaymentRequirementHash, b.ChainID, b.AssetContract, b.From, b.PayTo, b.Nonce, b.Amount}
+	}
+	i := p.Order.Intent
+	return purchaseTerms{i.PurchaseOrderID, p.Order.RequestID, i.HTTPMethod, i.ResourceURL, i.PaymentRequirementHash, i.ChainID, i.AssetContract, i.From, i.PayTo, i.EIP3009Nonce, i.Amount}
 }
 
 const purchaseCols = `body, intent_hash, policy_verdict, approval_status, reason, decided_at, approval_closed, closed_at`
 
-func scanPurchase(row interface{ Scan(...any) error }) (purchaseRow, error) {
+// scanPurchase reads a purchase of a task of contract version.
+func scanPurchase(row interface{ Scan(...any) error }, version string) (purchaseRow, error) {
 	var p purchaseRow
 	d := &p.Decision
 	if err := row.Scan(&p.Body, &d.IntentHash, &d.PolicyVerdict, &d.ApprovalStatus, &d.Reason, &p.DecidedAt, &p.ApprovalClosed, &p.ClosedAt); err != nil {
 		return p, readErr("purchase", "", err)
 	}
+	return p, p.decode(version)
+}
+
+// decode fills the stored body and the decision's fixed fields by version.
+func (p *purchaseRow) decode(version string) error {
+	d := &p.Decision
+	if version == paycontract.Version {
+		d.Version, d.PaymentStatus = paycontract.Version, paycontract.PaymentNotEnabled
+		p.V1 = new(paycontract.PurchaseOrder)
+		return contracts.Decode([]byte(p.Body), p.V1)
+	}
 	d.Version, d.PaymentStatus = contracts.Version, "unavailable"
-	return p, contracts.Decode([]byte(p.Body), &p.Order)
+	return contracts.Decode([]byte(p.Body), &p.Order)
 }
 
 func decodeSnapshot(q interface {
@@ -85,14 +127,18 @@ type taskTx struct {
 	events    []contracts.AuditEvent
 	stored    int // events[:stored] are already in the database
 	purchases map[string]*purchaseRow
+	delegation string // apa.pay.v1: the bound delegation's ID
 }
 
 func (s *Store) openTask(tx *sql.Tx, now uint64, taskID string) (*taskTx, error) {
-	row, err := scanTask(tx.QueryRow(`SELECT `+taskCols+` FROM tasks WHERE task_id = ?`, taskID))
+	row, err := scanTask(tx.QueryRow(`SELECT `+s.taskCols()+` FROM tasks WHERE task_id = ?`, taskID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, refuse("UNKNOWN_TASK", "no such task has been started")
 	} else if err != nil {
 		return nil, readErr("task", taskID, err)
+	}
+	if row.ContractVersion != contracts.Version && row.ContractVersion != paycontract.Version {
+		return nil, fmt.Errorf("task %s has unknown contract version %q", taskID, row.ContractVersion)
 	}
 	t := &taskTx{tx: tx, now: now, row: row, purchases: map[string]*purchaseRow{}}
 	if err := decodeSnapshot(tx, row.RegistrySnap, "registry", &t.regCfg); err != nil {
@@ -131,7 +177,7 @@ func (s *Store) openTask(tx *sql.Tx, now uint64, taskID string) (*taskTx, error)
 	defer prow.Close()
 	for prow.Next() {
 		var po string
-		p, err := scanPurchase(scanFunc(func(dst ...any) error { return prow.Scan(append([]any{&po}, dst...)...) }))
+		p, err := scanPurchase(scanFunc(func(dst ...any) error { return prow.Scan(append([]any{&po}, dst...)...) }), row.ContractVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -139,6 +185,11 @@ func (s *Store) openTask(tx *sql.Tx, now uint64, taskID string) (*taskTx, error)
 	}
 	if err := drained(prow); err != nil {
 		return nil, readErr("task", taskID, err)
+	}
+	if t.v1() {
+		if err := t.loadSessions(); err != nil {
+			return nil, err
+		}
 	}
 	return t, nil
 }
@@ -154,19 +205,19 @@ func (t *taskTx) session() contracts.Session {
 // emit appends one event to the task's chain in memory; finish writes it.
 func (t *taskTx) emit(typ string, p *purchaseRow, payload contracts.EventPayload) error {
 	seq := uint64(len(t.events)) + 1
-	prev, err := contracts.GenesisHash(t.row.TaskID)
+	prev, err := t.genesis()
 	if len(t.events) > 0 {
-		prev, err = contracts.EventHash(t.events[len(t.events)-1])
+		prev, err = t.eventHash(t.events[len(t.events)-1])
 	}
 	if err != nil {
 		return err
 	}
 	scope := &contracts.EventScope{ConsumerID: t.row.ConsumerID, AgentID: t.row.AgentID, WalletID: t.row.WalletID, TaskID: t.row.TaskID}
 	if p != nil {
-		scope.PurchaseOrderID, scope.IntentHash = p.Order.Intent.PurchaseOrderID, p.Decision.IntentHash
+		scope.PurchaseOrderID, scope.IntentHash = p.terms().PO, p.Decision.IntentHash
 	}
 	t.events = append(t.events, contracts.AuditEvent{
-		Version: contracts.Version, EventID: eventID(t.row.TaskID, seq), EventType: typ, Scope: scope,
+		Version: t.row.ContractVersion, EventID: eventID(t.row.TaskID, seq), EventType: typ, Scope: scope,
 		Sequence: seq, PrevEventHash: prev, Payload: payload, EvidenceMode: "fixture", Source: "host", ObservedAt: t.now,
 	})
 	return nil
@@ -177,15 +228,11 @@ func (t *taskTx) emit(typ string, p *purchaseRow, payload contracts.EventPayload
 // unless all of it holds.
 func (t *taskTx) finish() error {
 	for _, e := range t.events[t.stored:] {
-		var order *contracts.PurchaseOrder
-		if po := e.Scope.PurchaseOrderID; po != "" {
-			order = &t.purchases[po].Order
-		}
-		if err := t.reg.ValidateEvent(e, order); err != nil {
+		if err := t.validateEvent(e); err != nil {
 			return fmt.Errorf("event %s: %w", e.EventType, err)
 		}
 	}
-	if err := contracts.ValidateEventOrder(t.events); err != nil {
+	if err := t.validateOrder(); err != nil {
 		return err
 	}
 	for _, e := range t.events[t.stored:] {
@@ -193,7 +240,7 @@ func (t *taskTx) finish() error {
 		if err != nil {
 			return err
 		}
-		h, err := contracts.EventHash(e)
+		h, err := t.eventHash(e)
 		if err != nil {
 			return err
 		}
@@ -241,7 +288,7 @@ func project(events []contracts.AuditEvent) (status, denyReason string) {
 			case "Ask":
 				open[po] = true
 			}
-		case "APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN":
+		case "APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN", "APPROVED", "APPROVAL_DENIED", "APPROVAL_SUPERSEDED": // the last three: apa.pay.v1 only
 			delete(open, po)
 		case "TASK_CANCELLED":
 			return "cancelled", ""
@@ -266,20 +313,31 @@ func (t *taskTx) openAsks() []*purchaseRow {
 	}
 	sort.Slice(asks, func(i, j int) bool {
 		a, b := asks[i], asks[j]
-		return a.DecidedAt < b.DecidedAt || a.DecidedAt == b.DecidedAt && a.Order.Intent.PurchaseOrderID < b.Order.Intent.PurchaseOrderID
+		return a.DecidedAt < b.DecidedAt || a.DecidedAt == b.DecidedAt && a.terms().PO < b.terms().PO
 	})
 	return asks
 }
 
-// close ends an open Ask as expired or withdrawn, once.
-func (t *taskTx) close(p *purchaseRow, event, approval, reason string) error {
+// close ends an open Ask as expired or withdrawn (or, apa.pay.v1 only,
+// approved, denied or superseded), once. An apa.pay.v1 Ask's session
+// closes with it, in the same transaction; by names who resolved it
+// (approved or denied: its request ID, the approver and the method).
+func (t *taskTx) close(p *purchaseRow, event, approval, reason string, by *resolver) error {
 	d := p.Decision
 	d.ApprovalStatus, d.Reason = approval, reason
-	if err := t.emit(event, p, contracts.EventPayload{Decision: &d}); err != nil {
+	payload := contracts.EventPayload{Decision: &d}
+	if p.Session != nil {
+		payload.ApprovalSessionID = p.Session.ID
+		if by != nil {
+			payload.AuthorizationMethod = by.method
+		}
+	}
+	if err := t.emit(event, p, payload); err != nil {
 		return err
 	}
+	po := p.terms().PO
 	res, err := t.tx.Exec(`UPDATE purchases SET approval_closed = ?, closed_at = ? WHERE task_id = ? AND purchase_order_id = ? AND approval_closed IS NULL`,
-		approval, t.now, t.row.TaskID, p.Order.Intent.PurchaseOrderID)
+		approval, t.now, t.row.TaskID, po)
 	if err != nil {
 		return err
 	}
@@ -287,6 +345,9 @@ func (t *taskTx) close(p *purchaseRow, event, approval, reason string) error {
 		return errors.New("approval was already closed")
 	}
 	p.ApprovalClosed, p.ClosedAt = sql.NullString{String: approval, Valid: true}, sql.NullInt64{Int64: int64(t.now), Valid: true}
+	if t.v1() {
+		return t.closeSession(p, approval, by)
+	}
 	return nil
 }
 
@@ -295,8 +356,12 @@ func (t *taskTx) close(p *purchaseRow, event, approval, reason string) error {
 // deadline. Checking now >= decided_at first means no unsigned underflow.
 func (t *taskTx) expire() error {
 	for _, p := range t.openAsks() {
-		if t.now >= p.DecidedAt && t.now-p.DecidedAt >= t.terms.ApprovalDeadlineSeconds {
-			if err := t.close(p, "APPROVAL_EXPIRED", "expired", "APPROVAL_TIMEOUT"); err != nil {
+		due := t.now >= p.DecidedAt && t.now-p.DecidedAt >= t.terms.ApprovalDeadlineSeconds
+		if p.Session != nil { // apa.pay.v1: the session's own deadline (never past the binding's valid_before)
+			due = t.now >= p.Session.ExpiresAt
+		}
+		if due {
+			if err := t.close(p, "APPROVAL_EXPIRED", "expired", "APPROVAL_TIMEOUT", nil); err != nil {
 				return err
 			}
 		}
@@ -350,6 +415,10 @@ func (s *Store) StartTask(setup TaskSetup) error {
 				return err
 			}
 		}
+		version, dlg, err := s.taskContract(tx, now, &setup, task)
+		if err != nil {
+			return err
+		}
 		tm, err := s.buildTerms(setup)
 		if err != nil {
 			return refuse("INVALID_TASK_SETUP", err.Error())
@@ -377,9 +446,17 @@ func (s *Store) StartTask(setup TaskSetup) error {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', NULL, 1, ?, ?)`,
+		if version == paycontract.Version {
+			genesis, err = paycontract.GenesisHash(task.TaskID)
+			if err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO tasks (task_id, consumer_id, agent_id, wallet_id, payer, registry_snapshot, profile_snapshot, credential_snapshot,
+			terms_snapshot, budget_remaining, status, deny_reason, next_sequence, chain_head, started_at, contract_version)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', NULL, 1, ?, ?, ?)`,
 			task.TaskID, task.ConsumerID, task.AgentID, wallet.WalletID, wallet.From, regSnap, profileSnap, credSnap, termsSnap,
-			string(tm.BudgetInitial), genesis, now); err != nil {
+			string(tm.BudgetInitial), genesis, now, version); err != nil {
 			return err
 		}
 		t, err := s.openTask(tx, now, task.TaskID)
@@ -388,6 +465,18 @@ func (s *Store) StartTask(setup TaskSetup) error {
 		}
 		if err := t.emit("TASK_STARTED", nil, contracts.EventPayload{}); err != nil {
 			return err
+		}
+		if dlg != nil { // Gate passed: the delegation is bound with the task, in this transaction
+			res, err := tx.Exec(`UPDATE delegations SET task_id = ?, bound_at = ? WHERE delegation_id = ? AND task_id IS NULL`, task.TaskID, now, dlg.DelegationID)
+			if err != nil {
+				return err
+			}
+			if n, _ := res.RowsAffected(); n != 1 {
+				return refuse("DELEGATION_UNAVAILABLE", "the delegation was bound meanwhile")
+			}
+			if err := t.emit("DELEGATION_BOUND", nil, contracts.EventPayload{DelegationID: dlg.DelegationID}); err != nil {
+				return err
+			}
 		}
 		return t.finish()
 	})
@@ -441,8 +530,20 @@ type Result struct {
 // for a new purchase only the current offer book, the active-task rule, the
 // Policy and the write. Refusals roll everything back.
 func (s *Store) Submit(sess contracts.Session, raw []byte) (Result, error) {
+	// The body's own version only picks the decoder; the stored task's
+	// contract version decides which entry may take it (checked below).
+	var head struct {
+		Version string `json:"version"`
+	}
+	json.Unmarshal(raw, &head)
 	var po contracts.PurchaseOrder
-	if err := contracts.Decode(raw, &po); err != nil {
+	var v1 *paycontract.PurchaseOrder
+	if head.Version == paycontract.Version {
+		v1 = new(paycontract.PurchaseOrder)
+		if err := contracts.Decode(raw, v1); err != nil {
+			return Result{}, refuse("INVALID_PURCHASE", "purchase does not decode as an apa.pay.v1 purchase order")
+		}
+	} else if err := contracts.Decode(raw, &po); err != nil {
 		return Result{}, refuse("INVALID_PURCHASE", "purchase does not decode as an M1 purchase order")
 	}
 	var out Result
@@ -452,6 +553,12 @@ func (s *Store) Submit(sess contracts.Session, raw []byte) (Result, error) {
 			return refuse("OWNERSHIP_MISMATCH", "session does not own this task")
 		} else if err != nil {
 			return err
+		}
+		if (v1 != nil) != t.v1() {
+			return refuse("CONTRACT_VERSION_MISMATCH", "the purchase's contract is not the task's ("+t.row.ContractVersion+")")
+		}
+		if v1 != nil {
+			return s.submitV1(t, sess, *v1, &out)
 		}
 		if err := t.reg.ValidatePurchase(sess, po); err != nil {
 			return contractRefusal(err)
@@ -465,26 +572,15 @@ func (s *Store) Submit(sess contracts.Session, raw []byte) (Result, error) {
 		}
 		// Replay and conflicts are judged on stored rows only, never on the
 		// current offer book.
-		var existing []purchaseRow
-		rows, err := tx.Query(`SELECT `+purchaseCols+` FROM purchases WHERE retry_key = ?
-		  UNION ALL SELECT `+purchaseCols+` FROM purchases WHERE retry_key != ? AND ((task_id = ? AND purchase_order_id = ?)
-		    OR (chain_id = ? AND asset_contract = ? AND payer = ? AND eip3009_nonce = ?))`,
-			key, key, po.Intent.TaskID, po.Intent.PurchaseOrderID, po.Intent.ChainID, po.Intent.AssetContract, po.Intent.From, po.Intent.EIP3009Nonce)
+		existing, err := s.related(t, key, purchaseTerms{PO: po.Intent.PurchaseOrderID, ChainID: po.Intent.ChainID, Asset: po.Intent.AssetContract,
+			From: po.Intent.From, Nonce: po.Intent.EIP3009Nonce})
 		if err != nil {
 			return err
 		}
-		for rows.Next() {
-			p, err := scanPurchase(rows)
-			if err != nil {
-				rows.Close()
-				return err
-			}
-			existing = append(existing, p)
-		}
-		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-			return err
-		}
 		for _, e := range existing {
+			if e.V1 != nil { // another contract's row holds the nonce (the unique index backs this up)
+				return refuse("IDEMPOTENCY_CONFLICT", "a stored purchase already holds this retry key, purchase_order_id or nonce")
+			}
 			switch kind, err := contracts.CompareRetry(e.Order, po); {
 			case err != nil:
 				return contractRefusal(err)
@@ -493,7 +589,7 @@ func (s *Store) Submit(sess contracts.Session, raw []byte) (Result, error) {
 				return t.finish() // only this task's expiry, if any
 			}
 		}
-		if !s.offered(po) {
+		if !s.offered(po.Intent.HTTPMethod, po.Intent.ResourceURL, po.Quote) {
 			return refuse("QUOTE_NOT_OFFERED", "quote is not in the current trusted offer book")
 		}
 		status, _ := project(t.events)
@@ -501,17 +597,8 @@ func (s *Store) Submit(sess contracts.Session, raw []byte) (Result, error) {
 			return contractRefusal(err)
 		}
 		in := policy.Input{Session: sess, Purchase: po, TaskStatus: status, Budget: policy.Budget{TaskID: t.row.TaskID, Remaining: contracts.Amount(t.row.BudgetRemaining)}, Now: now}
-		if t.row.ProfileSnap.Valid {
-			in.Profile = new(policy.Profile)
-			if err := decodeSnapshot(tx, t.row.ProfileSnap.String, "profile", in.Profile); err != nil {
-				return err
-			}
-		}
-		if t.row.CredentialSnap.Valid {
-			in.Credential = new(policy.Credential)
-			if err := decodeSnapshot(tx, t.row.CredentialSnap.String, "credential", in.Credential); err != nil {
-				return err
-			}
+		if in.Profile, in.Credential, err = t.settings(); err != nil {
+			return err
 		}
 		d, err := policy.Decide(t.reg, in)
 		if err != nil {
@@ -522,16 +609,9 @@ func (s *Store) Submit(sess contracts.Session, raw []byte) (Result, error) {
 			return err
 		}
 		p := &purchaseRow{Order: po, Body: string(body), Decision: d, DecidedAt: now}
-		i := po.Intent
-		if _, err := tx.Exec(`INSERT INTO purchases VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
-			i.TaskID, i.PurchaseOrderID, po.RequestID, key, i.ChainID, i.AssetContract, i.From, i.EIP3009Nonce, p.Body,
-			d.IntentHash, d.PolicyVerdict, d.ApprovalStatus, d.Reason, now); uniqueViolation(err) {
-			// The unique indexes back up the CompareRetry checks above.
-			return refuse("IDEMPOTENCY_CONFLICT", "a stored purchase already holds this retry key, purchase_order_id or nonce")
-		} else if err != nil {
+		if err := t.insertPurchase(p, key); err != nil {
 			return err
 		}
-		t.purchases[i.PurchaseOrderID] = p
 		if err := s.at("after-purchase"); err != nil {
 			return err
 		}
@@ -550,6 +630,72 @@ func (s *Store) Submit(sess contracts.Session, raw []byte) (Result, error) {
 	return out, err
 }
 
+// related reads the stored purchases that share the retry key, or the
+// task's purchase_order_id, or the payer's nonce: the rows a new purchase
+// is a replay of or conflicts with.
+func (s *Store) related(t *taskTx, key string, k purchaseTerms) ([]purchaseRow, error) {
+	rows, err := t.tx.Query(`SELECT p.task_id, `+purchaseColsP+`, t.contract_version FROM purchases p JOIN tasks t USING (task_id) WHERE p.retry_key = ?
+	  UNION ALL SELECT p.task_id, `+purchaseColsP+`, t.contract_version FROM purchases p JOIN tasks t USING (task_id) WHERE p.retry_key != ? AND ((p.task_id = ? AND p.purchase_order_id = ?)
+	    OR (p.chain_id = ? AND p.asset_contract = ? AND p.payer = ? AND p.eip3009_nonce = ?))`,
+		key, key, t.row.TaskID, k.PO, k.ChainID, k.Asset, k.From, k.Nonce)
+	if err != nil {
+		return nil, err
+	}
+	var out []purchaseRow
+	for rows.Next() {
+		var task, version string
+		var p purchaseRow
+		err := rows.Scan(&task, &p.Body, &p.Decision.IntentHash, &p.Decision.PolicyVerdict, &p.Decision.ApprovalStatus, &p.Decision.Reason,
+			&p.DecidedAt, &p.ApprovalClosed, &p.ClosedAt, &version)
+		if err == nil {
+			err = p.decode(version)
+		}
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, errors.Join(rows.Err(), rows.Close())
+}
+
+const purchaseColsP = `p.body, p.intent_hash, p.policy_verdict, p.approval_status, p.reason, p.decided_at, p.approval_closed, p.closed_at`
+
+// settings are the task's stored profile and credential (nil: absent).
+func (t *taskTx) settings() (*policy.Profile, *policy.Credential, error) {
+	var p *policy.Profile
+	var c *policy.Credential
+	if t.row.ProfileSnap.Valid {
+		p = new(policy.Profile)
+		if err := decodeSnapshot(t.tx, t.row.ProfileSnap.String, "profile", p); err != nil {
+			return nil, nil, err
+		}
+	}
+	if t.row.CredentialSnap.Valid {
+		c = new(policy.Credential)
+		if err := decodeSnapshot(t.tx, t.row.CredentialSnap.String, "credential", c); err != nil {
+			return nil, nil, err
+		}
+	}
+	return p, c, nil
+}
+
+// insertPurchase writes a new purchase row; the unique indexes back up the
+// CompareRetry checks.
+func (t *taskTx) insertPurchase(p *purchaseRow, key string) error {
+	k := p.terms()
+	d := p.Decision
+	if _, err := t.tx.Exec(`INSERT INTO purchases VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+		t.row.TaskID, k.PO, k.RequestID, key, k.ChainID, k.Asset, k.From, k.Nonce, p.Body,
+		d.IntentHash, d.PolicyVerdict, d.ApprovalStatus, d.Reason, p.DecidedAt); uniqueViolation(err) {
+		return refuse("IDEMPOTENCY_CONFLICT", "a stored purchase already holds this retry key, purchase_order_id or nonce")
+	} else if err != nil {
+		return err
+	}
+	t.purchases[k.PO] = p
+	return nil
+}
+
 func uniqueViolation(err error) bool {
 	var e *sqlite.Error
 	return errors.As(err, &e) && (e.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE || e.Code() == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY)
@@ -565,12 +711,12 @@ func contractRefusal(err error) error {
 	return refuse(code, "refused by a contract check")
 }
 
-func (s *Store) offered(po contracts.PurchaseOrder) bool {
-	c, err := canonical(po.Quote)
+func (s *Store) offered(method, url string, quote contracts.Quote) bool {
+	c, err := canonical(quote)
 	if err != nil {
 		return false
 	}
-	for _, q := range s.offers[OfferKey{po.Intent.HTTPMethod, po.Intent.ResourceURL}] {
+	for _, q := range s.offers[OfferKey{method, url}] {
 		if bytes.Equal(q, c) {
 			return true
 		}
@@ -604,7 +750,7 @@ func (s *Store) end(taskID, event, code string, withdraw bool) error {
 		}
 		if withdraw {
 			for _, p := range t.openAsks() {
-				if err := t.close(p, "APPROVAL_WITHDRAWN", "withdrawn", "HOST_CANCELLED"); err != nil {
+				if err := t.close(p, "APPROVAL_WITHDRAWN", "withdrawn", "HOST_CANCELLED", nil); err != nil {
 					return err
 				}
 			}
@@ -699,16 +845,40 @@ type PurchaseView struct {
 	PaymentRequirementHash string                   `json:"payment_requirement_hash"`
 	Decision               contracts.PolicyDecision `json:"decision"` // the original decision, never rewritten
 	DecidedAt              uint64                   `json:"decided_at"`
-	DeadlineAt             uint64                   `json:"deadline_at,omitempty"` // Asks: decided_at + deadline
+	DeadlineAt             uint64                   `json:"deadline_at,omitempty"` // Asks: decided_at + deadline (apa.pay.v1: the session's)
 	ApprovalClosed         string                   `json:"approval_closed,omitempty"`
 	ClosedAt               uint64                   `json:"closed_at,omitempty"`
+	Approval               *ApprovalView            `json:"approval,omitempty"` // apa.pay.v1 Asks: the approval session and its grant
+}
+
+// ApprovalView is an apa.pay.v1 Ask's approval session as stored, and its
+// grant once approved. A simulated grant gives no payment capability.
+type ApprovalView struct {
+	SessionID  string     `json:"approval_session_id"`
+	State      string     `json:"state"` // pending | approved | denied | expired | withdrawn | superseded
+	OpenedAt   uint64     `json:"opened_at"`
+	ExpiresAt  uint64     `json:"expires_at"`
+	ClosedAt   uint64     `json:"closed_at,omitempty"`
+	ResolvedBy string     `json:"resolved_by,omitempty"`
+	Grant      *GrantView `json:"grant,omitempty"`
+}
+
+// GrantView is the stored grant's identity, method and window.
+type GrantView struct {
+	JTI                 string `json:"jti"`
+	AuthorizationMethod string `json:"authorization_method"`
+	Audience            string `json:"audience"`
+	IssuedAt            uint64 `json:"issued_at"`
+	ExpiresAt           uint64 `json:"expires_at"`
 }
 
 // TaskView is a committed, consistent snapshot of one task. AsOf names the
 // last committed event; it does not claim to be current as of now.
 type TaskView struct {
-	TaskID         string         `json:"task_id"`
-	Status         string         `json:"status"`
+	TaskID          string         `json:"task_id"`
+	ContractVersion string         `json:"contract_version"`
+	DelegationID    string         `json:"delegation_id,omitempty"` // apa.pay.v1: the bound delegation
+	Status          string         `json:"status"`
 	DenyReason     string         `json:"deny_reason,omitempty"`
 	AsOfSequence   uint64         `json:"as_of_sequence"`
 	AsOfObservedAt uint64         `json:"as_of_observed_at"`
@@ -716,16 +886,21 @@ type TaskView struct {
 }
 
 func (t *taskTx) view(p *purchaseRow) PurchaseView {
-	i := p.Order.Intent
-	v := PurchaseView{PurchaseOrderID: i.PurchaseOrderID, RequestID: p.Order.RequestID, HTTPMethod: i.HTTPMethod, ResourceURL: i.ResourceURL,
-		ChainID: i.ChainID, AssetContract: i.AssetContract, PayTo: i.PayTo, Amount: i.Amount, IntentHash: p.Decision.IntentHash,
-		PaymentRequirementHash: i.PaymentRequirementHash, Decision: p.Decision, DecidedAt: p.DecidedAt,
+	k := p.terms()
+	v := PurchaseView{PurchaseOrderID: k.PO, RequestID: k.RequestID, HTTPMethod: k.Method, ResourceURL: k.URL,
+		ChainID: k.ChainID, AssetContract: k.Asset, PayTo: k.PayTo, Amount: k.Amount, IntentHash: p.Decision.IntentHash,
+		PaymentRequirementHash: k.ReqHash, Decision: p.Decision, DecidedAt: p.DecidedAt,
 		ApprovalClosed: p.ApprovalClosed.String, ClosedAt: uint64(p.ClosedAt.Int64)}
-	if a, ok := t.reg.TrustedAsset(i.ChainID, i.AssetContract); ok {
+	if a, ok := t.reg.TrustedAsset(k.ChainID, k.Asset); ok {
 		v.AssetID = a.AssetID
 	}
 	if p.Decision.PolicyVerdict == "Ask" {
 		v.DeadlineAt = p.DecidedAt + t.terms.ApprovalDeadlineSeconds
+	}
+	if ss := p.Session; ss != nil {
+		v.DeadlineAt = ss.ExpiresAt
+		v.Approval = &ApprovalView{SessionID: ss.ID, State: ss.State, OpenedAt: ss.OpenedAt, ExpiresAt: ss.ExpiresAt, ClosedAt: uint64(ss.ClosedAt.Int64),
+			ResolvedBy: ss.ResolvedBy.String, Grant: ss.Grant}
 	}
 	return v
 }
@@ -748,7 +923,8 @@ func (s *Store) read(sess contracts.Session, fn func(t *taskTx) error) error {
 }
 
 func (t *taskTx) taskView() TaskView {
-	v := TaskView{TaskID: t.row.TaskID, Status: t.row.Status, DenyReason: t.row.DenyReason.String, Purchases: []PurchaseView{}}
+	v := TaskView{TaskID: t.row.TaskID, ContractVersion: t.row.ContractVersion, DelegationID: t.delegation, Status: t.row.Status,
+		DenyReason: t.row.DenyReason.String, Purchases: []PurchaseView{}}
 	if n := len(t.events); n > 0 {
 		v.AsOfSequence, v.AsOfObservedAt = t.events[n-1].Sequence, t.events[n-1].ObservedAt
 	}

@@ -43,32 +43,63 @@ func userVersion(t *testing.T, path string) int {
 	return v
 }
 
-// schema1 writes a task and a purchase through a schema 2 Store, then turns
-// the file into schema 1 (the two differ by host_runs only).
-func schema1(t *testing.T, e *env) {
+// schema1 writes a task and a purchase through a current Store, then turns
+// the file into schema 1.
+func schema1(t *testing.T, e *env) { t.Helper(); older(t, e, 1) }
+
+// older writes a task and a purchase (and, for schema 2, an ended run)
+// through a current Store, then rebuilds the file with schema 1's or 2's
+// DDL (still in the code) and the same rows: an M1 file as an older version
+// wrote it.
+func older(t *testing.T, e *env, version int) {
 	t.Helper()
 	s := e.open()
+	r, _, err := s.AcceptRun(runReq("old-run", "consumer-a", "task-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	e.start(s, "task-a")
 	submit(t, s, sessA, e.base)
+	if err := s.EndRun(r.RunID, RunEnd{Outcome: "ok", TaskStarted: true}); err != nil {
+		t.Fatal(err)
+	}
 	s.Close()
+	cur := e.path + ".current"
+	if err := os.Rename(e.path, cur); err != nil {
+		t.Fatal(err)
+	}
 	db, err := sql.Open("sqlite", e.path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`DROP TABLE host_runs; PRAGMA user_version = 1`); err != nil {
+	defer db.Close()
+	ddl, copyRuns := schema, ""
+	if version == 2 {
+		ddl += runsSchema
+		copyRuns = `INSERT INTO host_runs SELECT ` + runColsBase + ` FROM o.host_runs;`
+	}
+	if _, err := db.Exec(ddl + `ATTACH DATABASE '` + cur + `' AS o;
+		INSERT INTO config_snapshots SELECT * FROM o.config_snapshots;
+		INSERT INTO tasks SELECT task_id, consumer_id, agent_id, wallet_id, payer, registry_snapshot, profile_snapshot, credential_snapshot,
+		  terms_snapshot, budget_remaining, status, deny_reason, next_sequence, chain_head, started_at FROM o.tasks;
+		INSERT INTO purchases SELECT * FROM o.purchases;
+		INSERT INTO events SELECT * FROM o.events;` + copyRuns + `
+		DETACH DATABASE o;
+		PRAGMA journal_mode = WAL;
+		PRAGMA user_version = ` + fmt.Sprint(version)); err != nil {
 		t.Fatal(err)
 	}
-	db.Close()
+	os.Remove(cur)
 }
 
 func openOpt(e *env, upgrade bool) (*Store, error) {
-	return Open(Config{Path: e.path, Registry: e.reg, Offers: e.offers, Clock: e.clock.clock(), UpgradeSchema1: upgrade})
+	return Open(Config{Path: e.path, Registry: e.reg, Offers: e.offers, Clock: e.clock.clock(), UpgradeDB: upgrade})
 }
 
 func TestSchemaNewAndRefusedUpgrade(t *testing.T) {
 	e := newEnv(t)
 	e.open().Close()
-	if v := userVersion(t, e.path); v != 2 || count(t, e.path, "host_runs", "") != 0 {
+	if v := userVersion(t, e.path); v != 3 || count(t, e.path, "host_runs", "") != 0 {
 		t.Fatalf("a new database: schema %d", v)
 	}
 	e2 := newEnv(t)
@@ -93,8 +124,8 @@ func TestUpgradeSchema1(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Close()
-	if userVersion(t, e.path) != 2 || fingerprint(t, e.path) != want {
-		t.Fatal("upgrade: not schema 2, or the data changed")
+	if userVersion(t, e.path) != 3 || fingerprint(t, e.path) != want {
+		t.Fatal("upgrade: not schema 3, or the data changed")
 	}
 	m, _ := filepath.Glob(e.path + ".schema1-*.bak")
 	if len(m) != 1 {
@@ -112,7 +143,7 @@ func TestUpgradeFailures(t *testing.T) {
 		stage   string
 		version int
 		backup  bool
-	}{{"verified1", 1, false}, {"backed-up", 1, true}, {"migrate", 1, true}, {"verified2", 2, true}} {
+	}{{"verified1", 1, false}, {"backed-up", 1, true}, {"migrate", 1, true}, {"verified3", 3, true}} {
 		t.Run(c.stage, func(t *testing.T) {
 			e := newEnv(t)
 			schema1(t, e)
@@ -453,7 +484,7 @@ func TestVerifyFileLocks(t *testing.T) {
 		e := offline(t)
 		os.WriteFile(e.path+".lock", nil, 0o600)
 		before := stamps(t, e.path)
-		if v, err := VerifyFile(e.path); err != nil || v != 2 {
+		if v, err := VerifyFile(e.path); err != nil || v != 3 {
 			t.Fatalf("%d %v", v, err)
 		}
 		if stamps(t, e.path) != before {
@@ -482,7 +513,7 @@ func TestVerifyFileLocks(t *testing.T) {
 		e := offline(t)
 		dir := filepath.Join(t.TempDir(), "restore")
 		db, v, err := RestoreCopy(e.path, dir)
-		if err != nil || v != 2 {
+		if err != nil || v != 3 {
 			t.Fatalf("%v %d", err, v)
 		}
 		f, _ := os.OpenFile(db+".lock", os.O_RDWR, 0)
@@ -532,7 +563,7 @@ func TestRestoreCopySteps(t *testing.T) {
 		before := stamps(t, e.path)
 		calls = 0
 		db, v, err := RestoreCopy(e.path, filepath.Join(t.TempDir(), "r"))
-		if err != nil || v != 2 || calls != 1 {
+		if err != nil || v != 3 || calls != 1 {
 			t.Fatalf("%v %d calls %d", err, v, calls)
 		}
 		if fi, _ := os.Stat(db + ".lock"); fi == nil || fi.Mode().Perm() != 0o600 {
@@ -592,14 +623,14 @@ func walChild(c, path string) int {
 		block("V1_WAL_READY")
 	case "A":
 		upgradeHook = func(stage string) error {
-			if stage == "verified2" {
+			if stage == "verified3" {
 				block("UPGRADE_FAILED_READY") // the injected failure: before any connection is closed
 			}
 			return nil
 		}
-		Open(Config{Path: path, Registry: reg, Clock: clock, UpgradeSchema1: true})
+		Open(Config{Path: path, Registry: reg, Clock: clock, UpgradeDB: true})
 	case "B":
-		s, err := Open(Config{Path: path, Registry: reg, Clock: clock, UpgradeSchema1: true})
+		s, err := Open(Config{Path: path, Registry: reg, Clock: clock, UpgradeDB: true})
 		if err != nil {
 			fmt.Println("CHILD_OPEN_FAILED", err)
 			return 2
@@ -703,11 +734,11 @@ func TestLeftoverWALCaseA(t *testing.T) {
 	if v := throwaway(t, e.path, false, `SELECT count(*) FROM sqlite_master WHERE name = 'host_runs'`); v != "0" {
 		t.Fatal("main file alone has host_runs: the migration is not only in the WAL")
 	}
-	if v := throwaway(t, e.path, true, `SELECT user_version FROM pragma_user_version`); v != "2" {
-		t.Fatalf("main file + WAL: schema %s, want 2", v)
+	if v := throwaway(t, e.path, true, `SELECT user_version FROM pragma_user_version`); v != "3" {
+		t.Fatalf("main file + WAL: schema %s, want 3", v)
 	}
 	// Re-verify without the hook: the stored data is complete.
-	if v, err := VerifyFile(e.path); err != nil || v != 2 {
+	if v, err := VerifyFile(e.path); err != nil || v != 3 {
 		t.Fatalf("VerifyFile: %d %v", v, err)
 	}
 	if stamps(t, e.path) != base {

@@ -102,7 +102,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	traceDir := fs.String("trace-dir", "var/runs", "where fake run traces are written")
 	unityDir := fs.String("unity-build", "unity/AgentPaymentAuthority/Build/WebGL/Build", "the Unity Web build's Build directory (served as /unity/)")
 	scenariosPath := fs.String("scenarios", "", "trusted scenario catalog for host-started runs, e.g. testdata/demo/scenarios.json")
-	upgradeDB := fs.Bool("upgrade-db", false, "migrate a schema 1 database to 2 (verified, backed up first)")
+	upgradeDB := fs.Bool("upgrade-db", false, "migrate a schema 1 or 2 database to 3 (verified, backed up first)")
 	verifyDB := fs.String("verify-db", "", "check an offline database read only, then exit")
 	restoreCopy := fs.String("restore-copy", "", "backup to restore into --restore-dir, then exit")
 	restoreDir := fs.String("restore-dir", "", "the new directory of --restore-copy")
@@ -231,6 +231,9 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		if scenarios, err = loadScenarios(*scenariosPath, reg, regCfg, live); err != nil {
 			return err
 		}
+		if err := checkDelegations(scenarios, profile); err != nil {
+			return err
+		}
 		if effMaxRuns, nConsumers, err = capacity(scenarios, *maxRuns, maxRunsSet); err != nil {
 			return err
 		}
@@ -285,7 +288,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		return err
 	}
 	defer unlock()
-	st, err := store.Open(store.Config{Path: dbPath, Registry: regCfg, Offers: offers, Clock: d.clock, UpgradeSchema1: *upgradeDB})
+	st, err := store.Open(store.Config{Path: dbPath, Registry: regCfg, Offers: offers, Clock: d.clock, UpgradeDB: *upgradeDB})
 	if err != nil {
 		// Recovery failed: nothing is served, repaired or rebuilt.
 		return fmt.Errorf("store %s: %w", dbPath, err)
@@ -351,8 +354,16 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	}
 	if scenarios != nil {
 		ui.control = &control{st: st, runner: runner, bridge: bridge, scenarios: scenarios, ctx: runCtx, wg: &runs, out: d.out,
-			active: map[string]*liveRun{}, ended: map[string]*liveRun{}, maxRuns: effMaxRuns, consumers: nConsumers, instance: instance, started: hostStart}
+			active: map[string]*liveRun{}, ended: map[string]*liveRun{}, maxRuns: effMaxRuns, consumers: nConsumers, instance: instance, started: hostStart, profile: profile}
 		ui.control.register(mux, ui)
+		if !live { // the simulated approver exists in fake mode only; a live host answers simulation_unavailable
+			var ids []string
+			for _, c := range regCfg.Consumers {
+				ids = append(ids, c.ConsumerID)
+			}
+			ui.sim = &simulator{consumers: ids, now: now, instance: instance}
+		}
+		ui.registerSim(mux)
 		fmt.Fprintf(d.out, "demo: concurrent runs: at most %d (deployment setting --max-runs) of %d consumers in the scenario catalog; host instance %s\n", effMaxRuns, nConsumers, instance)
 	}
 	if root, err := os.OpenRoot(*unityDir); err == nil {

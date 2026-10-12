@@ -85,6 +85,66 @@ func LoadProfile(raw []byte) (Profile, error) {
 	return p, p.Validate()
 }
 
+// Outcome kinds of Rules.
+const (
+	Denied         = "deny"
+	WithinAllowMax = "within_allow_max"
+	NeedsApproval  = "needs_approval"
+)
+
+// RuleInput is what the shared business rules need, every value already
+// validated by the contract's own entry (docs/commercial-transaction-flow.md
+// 10.1): the profile and credential (nil: missing), whether the purchase's
+// asset is a trusted registry asset and which, the payee, the amount and the
+// remaining budget in base units, the intent's validity window and the
+// trusted time.
+type RuleInput struct {
+	Profile                 *Profile
+	Credential              *Credential
+	AssetTrusted            bool
+	AssetID, PayTo          string
+	Amount, Remaining       uint64
+	ValidAfter, ValidBefore uint64
+	Now                     uint64
+}
+
+// RuleOutcome is a kind and a reason code: Denied with the first failing
+// check's code, WithinAllowMax (WITHIN_ALLOW_MAX), or NeedsApproval
+// (HUMAN_APPROVAL_REQUIRED). Each contract maps it to its own decision.
+type RuleOutcome struct{ Kind, Reason string }
+
+// Rules is the contract-neutral judgement both decision entries share, in
+// this order: CONFIG_MISSING, ASSET_NOT_ALLOWED, MERCHANT_NOT_ALLOWED,
+// AUTHORIZATION_EXPIRED, INSUFFICIENT_BUDGET; then within allow_max; then
+// an unattended profile is APPROVER_UNAVAILABLE; else a human must approve.
+// It parses nothing, hashes nothing, decides no payment capability and
+// reads no clock.
+func Rules(in RuleInput) RuleOutcome {
+	p := in.Profile
+	allowMax := uint64(0)
+	if p != nil {
+		allowMax, _ = p.AllowMax.Units()
+	}
+	switch {
+	case p == nil || in.Credential == nil:
+		return RuleOutcome{Denied, "CONFIG_MISSING"}
+	case !in.AssetTrusted || in.AssetID != p.AssetID: // budgets are in the profile's asset only
+		return RuleOutcome{Denied, "ASSET_NOT_ALLOWED"}
+	case !slices.Contains(p.Merchants, in.PayTo):
+		return RuleOutcome{Denied, "MERCHANT_NOT_ALLOWED"}
+	// The intent window follows EIP-3009: valid only while valid_after < now < valid_before.
+	case in.Now >= in.Credential.ValidUntil || in.Now <= in.ValidAfter || in.Now >= in.ValidBefore:
+		return RuleOutcome{Denied, "AUTHORIZATION_EXPIRED"}
+	case in.Amount > in.Remaining:
+		return RuleOutcome{Denied, "INSUFFICIENT_BUDGET"}
+	case in.Amount <= allowMax:
+		return RuleOutcome{WithinAllowMax, "WITHIN_ALLOW_MAX"}
+	case p.Mode == "unattended":
+		return RuleOutcome{Denied, "APPROVER_UNAVAILABLE"}
+	}
+	return RuleOutcome{NeedsApproval, "HUMAN_APPROVAL_REQUIRED"}
+}
+
 // Decide returns the decision for one purchase, or an error when there is
 // nothing to decide: an invalid purchase, a session that does not own it
 // (OWNERSHIP_MISMATCH), an ended task (TASK_NOT_ACTIVE; no decision may follow
@@ -130,31 +190,15 @@ func Decide(reg *contracts.Registry, in Input) (contracts.PolicyDecision, error)
 	}
 	amount, _ := i.Amount.Units() // ValidatePurchase checked it
 
-	d := contracts.PolicyDecision{Version: contracts.Version, IntentHash: hash, PaymentStatus: "unavailable", PolicyVerdict: "Deny", ApprovalStatus: "not_requested"}
-	p := in.Profile
 	asset, trusted := reg.TrustedAsset(i.ChainID, i.AssetContract)
-	allowMax := uint64(0)
-	if p != nil {
-		allowMax, _ = p.AllowMax.Units()
-	}
-	switch {
-	case p == nil || in.Credential == nil:
-		d.Reason = "CONFIG_MISSING"
-	case !trusted || asset.AssetID != p.AssetID: // budgets are in the profile's asset only
-		d.Reason = "ASSET_NOT_ALLOWED"
-	case !slices.Contains(p.Merchants, i.PayTo):
-		d.Reason = "MERCHANT_NOT_ALLOWED"
-	// The intent window follows EIP-3009: valid only while valid_after < now < valid_before.
-	case in.Now >= in.Credential.ValidUntil || in.Now <= i.ValidAfter || in.Now >= i.ValidBefore:
-		d.Reason = "AUTHORIZATION_EXPIRED"
-	case amount > remaining:
-		d.Reason = "INSUFFICIENT_BUDGET"
-	case amount <= allowMax:
+	out := Rules(RuleInput{Profile: in.Profile, Credential: in.Credential, AssetTrusted: trusted, AssetID: asset.AssetID, PayTo: i.PayTo,
+		Amount: amount, Remaining: remaining, ValidAfter: i.ValidAfter, ValidBefore: i.ValidBefore, Now: in.Now})
+	d := contracts.PolicyDecision{Version: contracts.Version, IntentHash: hash, PaymentStatus: "unavailable", PolicyVerdict: "Deny", ApprovalStatus: "not_requested", Reason: out.Reason}
+	switch out.Kind {
+	case WithinAllowMax: // M1 cannot pay: an Allow says so
 		d.PolicyVerdict, d.Reason = "Allow", "PAYMENT_CAPABILITY_UNAVAILABLE"
-	case p.Mode == "unattended":
-		d.Reason = "APPROVER_UNAVAILABLE"
-	default:
-		d.PolicyVerdict, d.ApprovalStatus, d.Reason = "Ask", "pending", "HUMAN_APPROVAL_REQUIRED"
+	case NeedsApproval:
+		d.PolicyVerdict, d.ApprovalStatus = "Ask", "pending"
 	}
 	if err := d.Validate(); err != nil {
 		return contracts.PolicyDecision{}, err // unreachable: every branch above is a valid M1 decision

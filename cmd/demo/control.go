@@ -25,6 +25,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/toolbridge"
 )
@@ -59,6 +61,7 @@ type control struct {
 	maxRuns   int                 // the effective --max-runs: running or stopping runs at most
 	consumers int                 // consumers in the scenario catalog
 	instance  string              // this host process: the timing records' host_instance
+	profile   policy.Profile      // the host's profile: a delegation's merchants and asset
 	started   time.Time           // this host's start: the timing records' clock zero (monotonic)
 }
 
@@ -100,6 +103,8 @@ type runView struct {
 	Scenario      string `json:"scenario"`
 	TaskID        string `json:"task_id"`
 	ConsumerID    string `json:"consumer_id"`
+	Contract      string `json:"contract_version"`
+	DelegationID  string `json:"delegation_id,omitempty"`
 	State         string `json:"state"`          // accepted | interrupted | ended (host_runs)
 	Live          string `json:"live,omitempty"` // running | stopping | ended (this process)
 	AcceptedAt    uint64 `json:"accepted_at"`
@@ -120,7 +125,7 @@ type runView struct {
 // c.mu too, so a view never mixes an older row with a newer end.
 func (c *control) view(r store.Run) runView {
 	v := runView{RunID: r.RunID, RequestID: r.RequestID, Scenario: r.Scenario, TaskID: r.TaskID, ConsumerID: r.ConsumerID,
-		State: r.State, AcceptedAt: r.AcceptedAt, InterruptedAt: r.InterruptedAt, EndedAt: r.EndedAt}
+		Contract: r.ContractVersion, DelegationID: r.DelegationID, State: r.State, AcceptedAt: r.AcceptedAt, InterruptedAt: r.InterruptedAt, EndedAt: r.EndedAt}
 	if r.State == "ended" {
 		started := r.TaskStarted
 		v.Outcome, v.Detail, v.TaskStarted, v.StoreEnd, v.StoreEndError = r.Outcome, r.Detail, &started, r.StoreEnd, r.StoreEndError
@@ -220,13 +225,14 @@ var requestIDFormat = regexp.MustCompile(`^[A-Za-z0-9-]{16,64}$`)
 // more inside its transaction). The run's process starts after the commit.
 func (c *control) start(w http.ResponseWriter, r *http.Request, a *api) {
 	var req struct {
-		RequestID string `json:"request_id"`
-		Scenario  string `json:"scenario"`
+		RequestID    string `json:"request_id"`
+		Scenario     string `json:"scenario"`
+		DelegationID string `json:"delegation_id,omitempty"` // an apa.pay.v1 scenario's confirmed delegation
 	}
 	if !postGuard(w, r, a, &req) {
 		return
 	}
-	if !requestIDFormat.MatchString(req.RequestID) || !scenarioID.MatchString(req.Scenario) {
+	if !requestIDFormat.MatchString(req.RequestID) || !scenarioID.MatchString(req.Scenario) || req.DelegationID != "" && !paycontract.ValidID(req.DelegationID) {
 		fail(w, http.StatusBadRequest, "bad_request")
 		return
 	}
@@ -251,6 +257,12 @@ func (c *control) start(w http.ResponseWriter, r *http.Request, a *api) {
 		fail(w, http.StatusBadRequest, "unknown_scenario")
 		return
 	}
+	// The catalog, not the request, says which contract the run gets; a
+	// delegation goes with an apa.pay.v1 scenario only, and is required there.
+	if (sc.version() == paycontract.Version) != (req.DelegationID != "") {
+		fail(w, http.StatusBadRequest, "delegation_required")
+		return
+	}
 	if busy := c.active[sc.ConsumerID]; busy != nil {
 		reply(w, http.StatusConflict, map[string]any{"error": "consumer_busy", "run": c.view(busy.run)})
 		return
@@ -260,10 +272,14 @@ func (c *control) start(w http.ResponseWriter, r *http.Request, a *api) {
 		return
 	}
 	run, created, err := c.st.AcceptRun(store.RunRequest{RequestID: req.RequestID, Scenario: sc.ID, ScenarioDigest: sc.digest,
-		BudgetInitial: string(sc.BudgetInitial), ConsumerID: sc.ConsumerID, Candidates: sc.candidates})
+		BudgetInitial: string(sc.BudgetInitial), ConsumerID: sc.ConsumerID, Candidates: sc.candidates,
+		ContractVersion: sc.version(), DelegationID: req.DelegationID})
 	switch {
 	case store.Code(err) == "NO_FREE_TASK":
 		fail(w, http.StatusConflict, "no_free_task")
+		return
+	case store.Code(err) == "DELEGATION_UNAVAILABLE":
+		fail(w, http.StatusConflict, "delegation_unavailable")
 		return
 	case err != nil:
 		reply(w, http.StatusServiceUnavailable, map[string]string{"error": "store_unavailable", "code": store.CodeOf(err)})
@@ -318,7 +334,8 @@ func (c *control) answer(w http.ResponseWriter, run store.Run, scenarioName stri
 func (c *control) runOne(ctx context.Context, lr *liveRun, sc *scenario) {
 	defer lr.cancel()
 	bound := func(b *toolbridge.Binding) { c.mu.Lock(); lr.binding = b; c.mu.Unlock() }
-	o := c.runner.runOne(ctx, c.st, c.bridge, planRun{TaskID: lr.run.TaskID, Scenario: sc.Scenario, BudgetInitial: sc.BudgetInitial, bound: bound})
+	o := c.runner.runOne(ctx, c.st, c.bridge, planRun{TaskID: lr.run.TaskID, Scenario: sc.Scenario, BudgetInitial: sc.BudgetInitial, bound: bound,
+		contract: lr.run.ContractVersion, delegation: lr.run.DelegationID})
 	end := runEnd(o)
 	c.mu.Lock() // from here a stop is refused: the process is over
 	lr.reaped = true
@@ -436,11 +453,18 @@ func (c *control) list(w http.ResponseWriter, r *http.Request, a *api) {
 // consumer, label: trusted catalog text), the running or stopping runs and
 // the interrupted ones among the latest 20 (IDs, tasks and states only).
 func (c *control) summary() map[string]any {
-	var scs []map[string]string
+	var scs []map[string]any
 	for _, sc := range c.scenarios {
-		scs = append(scs, map[string]string{"id": sc.ID, "consumer_id": sc.ConsumerID, "label": sc.Label})
+		m := map[string]any{"id": sc.ID, "consumer_id": sc.ConsumerID, "label": sc.Label}
+		if d := sc.Delegation; d != nil { // apa.pay.v1: the terms the page shows before the consumer confirms
+			m["contract"] = sc.Contract
+			m["delegation"] = map[string]any{"purpose": d.Purpose, "task_budget": d.TaskBudget, "allow_max": d.AllowMax,
+				"approval_deadline_seconds": d.ApprovalDeadlineSeconds, "valid_seconds": d.ValidSeconds,
+				"merchants": c.profile.Merchants, "asset_id": c.profile.AssetID}
+		}
+		scs = append(scs, m)
 	}
-	slices.SortFunc(scs, func(a, b map[string]string) int { return strings.Compare(a["id"], b["id"]) })
+	slices.SortFunc(scs, func(a, b map[string]any) int { return strings.Compare(a["id"].(string), b["id"].(string)) })
 	out := map[string]any{"scenarios": scs, "active": []map[string]string{}, "interrupted": []map[string]string{}}
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -1,0 +1,9 @@
+{
+  "description": "P1-a fake catalog (docs/commercial-transaction-flow.md 7): make present-p1a. Each customer first confirms a delegation (the host's terms: purpose, task budget, allow_max, approval deadline; the merchants and asset are the profile's), then the Agent runs the main line and requests the brief; 0.50 test USDC is above allow_max 0.10, so it asks. Approval is the fake-only simulated approver (the host plays the customer, not a person's verification); an approval leaves one simulated grant and enables no payment. Fake CLI only, no model, no key, no transaction. Not a policy change and not agent input.",
+  "scenarios": [
+    {"id": "pay-a", "consumer_id": "consumer-a", "contract": "apa.pay.v1", "scenario": "testdata/cli/ask-mainline.json", "label": "委託後選購：韓國市場簡報（需要你核准・模擬）",
+     "delegation": {"purpose": "買一份韓國市場簡報（數位資料）", "task_budget": "5000000", "allow_max": "100000", "approval_deadline_seconds": 60, "valid_seconds": 1800}},
+    {"id": "pay-b", "consumer_id": "consumer-b", "contract": "apa.pay.v1", "scenario": "testdata/cli/ask-mainline.json", "label": "委託後選購：韓國市場簡報（需要你核准・模擬）",
+     "delegation": {"purpose": "買一份韓國市場簡報（數位資料）", "task_budget": "5000000", "allow_max": "100000", "approval_deadline_seconds": 60, "valid_seconds": 1800}}
+  ]
+}

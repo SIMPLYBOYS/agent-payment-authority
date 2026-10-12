@@ -25,6 +25,13 @@
 // state, the calls the host has answered, the business state, start, stop
 // and a confirmed cancel), the same choice from a card or a click on a
 // customer in the shop, and the evidence in a drawer.
+//
+// P1-a (docs/commercial-p1a.md): for an apa.pay.v1 scenario the card offers
+// 「以 A 模擬」 (the fake-only simulated approver: the host plays the
+// customer; not a person's verification), then 「建立委託」: the host's
+// terms, confirmed by the simulated customer, start the run. Its Ask shows in
+// 「需要你處理」: the purchase's summary, the backend's deadline and one main
+// action. An approval leaves a simulated grant and enables no payment.
 
 import { nextModeSeq, confirmMode, setStatus, forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, currentConsumer, setAlert,
   shop, onSceneReport, onScenePick, setSceneView, onReplayMode, refreshPanels } from "./app.js";
@@ -59,6 +66,11 @@ let starting = false;
 let cancelling = false;
 let lastTasks = null;
 let lastRunsError = null; // the runs read of this generation failed: the list shown is the last good one // { gen, list: Map(task_id -> summary), details: Map(task_id -> task) } or { gen, error }
+let lastApprovals = null; // P1-a: { gen, consumer, servedAt, at (ms), items } of the simulated customer, or { gen, consumer, error }
+let delegating = null;    // P1-a: { gen, consumer, scenario } whose delegation terms are open on its card
+let simulating = false;   // a 「以 X 模擬」 request is in flight
+let resolving = false;    // an approve or deny is in flight
+let approvalNote = null;  // { gen, kind, text } the last approval action's outcome
 const RUNS_MS = 2000;
 const DETAILS_MAX = 5; // ponytail: task reads per poll for the Ask notes; more runs waiting would read in turn
 
@@ -151,6 +163,11 @@ function render(v) {
     starting = false;
     cancelling = false;
     confirming = null;
+    lastApprovals = null;
+    delegating = null;
+    simulating = false;
+    resolving = false;
+    approvalNote = null;
     clearTimeout(readyTimer);
     clearTimeout(runsTimer);
     setRunStatus("", "idle");
@@ -215,7 +232,8 @@ async function pollReadiness() {
       const r = await creds.readiness();
       if (r && g === creds.gen) {
         lastReady = r;
-        if (r.status) confirmMode(mseq, r.status.history && r.status.history.record === "live_history" ? r.status.history : r.status.live && r.status.live.record === "live_demo" ? r.status.live : null);
+        const p1a = r.status && r.status.runs && (r.status.runs.scenarios || []).some((x) => x.contract === A.V1) ? { record: "fake_p1a" } : null;
+        if (r.status) confirmMode(mseq, r.status.history && r.status.history.record === "live_history" ? r.status.history : r.status.live && r.status.live.record === "live_demo" ? r.status.live : p1a);
         renderReadiness();
         renderControl();
         ensureScene();
@@ -397,7 +415,8 @@ function agentModel(c, runs, slots, ctx) {
   if (slot && slot.task) {
     if (slot.read !== "ok" && slot.read !== "loading") business = "讀取失敗（" + slot.read + "），保留上次資料" + (slot.label ? "：" + slot.label : "");
     else if (slot.seq < 0) business = "同步中";
-    else business = (state === "ended" && slot.phase === "waiting" ? "執行已結束／請購待核准（M1 無核准功能；到期前不會付款）" : "") || slot.label || slot.phase;
+    else business = (state === "ended" && slot.phase === "waiting" ? (run && run.contract_version === A.V1 ? "Agent 已結束；請購仍等你核准（模擬）"
+      : "執行已結束／請購待核准（M1 無核准功能；到期前不會付款）") : "") || slot.label || slot.phase;
   } else business = run ? "同步中" : "尚無場次";
   const t = run && ctx.tasks && ctx.tasks.get(run.task_id);
   const sync = !slot || !slot.task || slot.seq < 0 ? "" : !scene.active ? "回放中：場景暫停" : slot.shown ? "Unity 已呈現" : slot.moving ? "Unity 補間中" : "Unity 尚未回報";
@@ -447,14 +466,26 @@ function renderControl() {
   const models = consumers.map((c) => agentModel(c, runs, slots, ctx));
   // Rebuilt only when what the cards say changed: a poll that changes
   // nothing keeps the focus and an open confirmation where they are.
-  const key = JSON.stringify([models, scenarios, live, starting, cancelling, full, [...busy], confirming]);
+  if (delegating && delegating.gen !== creds.gen) delegating = null;
+  const simC = v.simConsumer;
+  const key = JSON.stringify([models, scenarios, live, starting, cancelling, full, [...busy], confirming, simC, delegating, simulating]);
   if (key !== shownControl) {
     shownControl = key;
-    keepFocus(pick, () => pick.replaceChildren(...models.map((m) => agentCard(m, scenarios.filter((x) => x.consumer_id === m.c), { live, busy, full }))));
+    keepFocus(pick, () => pick.replaceChildren(...models.map((m) => agentCard(m, scenarios.filter((x) => x.consumer_id === m.c), { live, busy, full, simC }))));
   }
+  const pay = scenarios.some((x) => x.contract === A.V1);
+  $("control-note").textContent = pay
+    ? "委託與核准是 fake 模擬：主持人扮演客人，不是本人驗證；核准只留下模擬授權，未啟用付款。開始只建立新的 task。"
+    : "M1 無核准能力：Ask 30 秒後由後端記錄到期。開始只建立新的 task。";
+  const chip = $("sim-chip");
+  chip.hidden = !simC;
+  chip.textContent = simC ? "角色模擬：客人 " + short(simC) + "（主持人扮演，不是本人驗證）" : "";
+  renderApproval(runs);
   // 一起開始: each consumer's first scenario, as separate requests; not one
   // atomic start (docs/multi-agent-demo-design.md 3.5).
-  const pair = consumers.map((c) => scenarios.find((x) => x.consumer_id === c));
+  // An apa.pay.v1 scenario starts only with its own confirmed delegation:
+  // never from 一起開始.
+  const pair = consumers.map((c) => scenarios.find((x) => x.consumer_id === c && x.contract !== A.V1)).filter(Boolean);
   const all = $("start-all");
   all.hidden = pair.length < 2 || maxRuns < 2;
   all.textContent = "一起開始：" + pair.map((sc) => sc.id + "（" + short(sc.consumer_id) + "）").join(" ＋ ") + "（各自送出，不保證都成功）";
@@ -514,7 +545,8 @@ function renderControl() {
 // one of the same customer (a closed confirmation: its 取消 entry; else 選取),
 // never to another task's cancel, and nothing is clicked. A focus the user
 // moved elsewhere stays where it is.
-const FOCUS_KINDS = ["cancel-confirm", "cancel-back", "row-cancel", "task-cancel", "row-stop", "run-stop", "agent-select", "agent-start"];
+const FOCUS_KINDS = ["cancel-confirm", "cancel-back", "row-cancel", "task-cancel", "row-stop", "run-stop", "agent-select", "agent-start",
+  "agent-sim", "agent-delegate", "delegation-confirm", "delegation-back"];
 function keepFocus(el, rebuild) {
   const a = document.activeElement;
   const kind = a && el.contains(a) ? FOCUS_KINDS.find((k) => a.classList.contains(k)) : null;
@@ -542,7 +574,7 @@ function keepFocus(el, rebuild) {
 
 // agentCard draws one customer's card. Clicking the card (not a button)
 // chooses the customer, as does its 選取 button and a click on it in the shop.
-function agentCard(m, scs, { live, busy, full }) {
+function agentCard(m, scs, { live, busy, full, simC }) {
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
   const card = el("section", "consumer-row agent-card");
   Object.assign(card.dataset, { consumer: m.c, state: m.state, selected: String(m.selected), gen: String(creds.gen) });
@@ -566,7 +598,27 @@ function agentCard(m, scs, { live, busy, full }) {
   sel.setAttribute("aria-pressed", String(m.selected));
   sel.addEventListener("click", () => selectConsumer(m.c));
   acts.append(sel);
-  for (const sc of scs) {
+  const payScs = scs.filter((sc) => sc.contract === A.V1);
+  if (payScs.length) {
+    if (simC !== m.c) {
+      const b = el("button", "agent-sim", "以 " + short(m.c) + " 模擬（fake）");
+      b.type = "button";
+      b.disabled = simulating;
+      b.title = "主持人扮演客人 " + short(m.c) + "：確認委託與核准都只在 fake 模式，不是本人驗證；一次扮演一位";
+      b.addEventListener("click", () => simulateAs(m.c));
+      acts.append(b);
+    }
+    for (const sc of payScs) {
+      const b = el("button", "agent-delegate", "建立委託" + (payScs.length > 1 ? "：" + sc.label : ""));
+      b.type = "button";
+      b.dataset.scenario = sc.id;
+      b.disabled = starting || busy.has(m.c) || full || simC !== m.c;
+      b.title = simC !== m.c ? "先「以 " + short(m.c) + " 模擬」" : busy.has(m.c) ? "這位客人的場次尚未結束" : full ? "同時執行的場次已達上限" : "看委託內容，確認後開始";
+      b.addEventListener("click", () => { delegating = { gen: creds.gen, consumer: m.c, scenario: sc.id }; renderControl(); focusIn('.delegation[data-scenario="' + CSS.escape(sc.id) + '"] .delegation-confirm'); });
+      acts.append(b);
+    }
+  }
+  for (const sc of scs.filter((x) => x.contract !== A.V1)) {
     const b = el("button", "agent-start", (live ? "開始（真實 CLI）" : "開始（fake，不執行模型）") + (scs.length > 1 ? "：" + sc.label : ""));
     b.type = "button";
     b.dataset.scenario = sc.id;
@@ -588,6 +640,9 @@ function agentCard(m, scs, { live, busy, full }) {
   }
   if (m.cancel) acts.append(cancelButton(m.cancel, "row-cancel", "取消請購／task"));
   card.append(acts);
+  if (simC === m.c) card.append(el("p", "agent-sim-on", "模擬中：主持人扮演客人 " + short(m.c) + "（不是本人驗證；不會付款）"));
+  const open = delegating && delegating.consumer === m.c && payScs.find((sc) => sc.id === delegating.scenario);
+  if (open) card.append(delegationBox(open, { busy, full, simC }));
   if (m.cancel && confirming && confirming.task === m.cancel && confirming.where === "card") card.append(confirmBox(m.cancel));
   if (m.state === "ended" && !m.cancel) card.append(el("p", "agent-note", "場次已結束；停止不適用。"));
   card.addEventListener("click", (ev) => { if (!ev.target.closest("button")) selectConsumer(m.c); });
@@ -649,7 +704,8 @@ function renderNext(runs) {
   if (run) {
     if (run.live === "running") text = "可用操作：停止 Agent（只停這一場）";
     else if (run.live === "stopping") text = "停止中：等待程序結束（仍占名額）";
-    else if (cancellable(run)) text = "可用操作：取消請購／task。M1 沒有核准功能，Ask 不會付款，到期後由後端記錄。";
+    else if (cancellable(run)) text = run.contract_version === A.V1 ? "可用操作：在「需要你處理」核准或拒絕（模擬）；或取消請購／task。不會付款。"
+      : "可用操作：取消請購／task。M1 沒有核准功能，Ask 不會付款，到期後由後端記錄。";
     else if (lastTasks && lastTasks.gen === creds.gen && lastTasks.list && lastTasks.list.get(run.task_id)) text = "沒有可用操作：task 已收尾。";
     else text = "task 狀態讀取中（未確認）";
   }
@@ -678,14 +734,15 @@ async function selectConsumer(c) {
   if (task) openTask(task);
 }
 
-// start: one start operation; only a reply of this generation acts.
-async function start(sc) {
+// start: one start operation; only a reply of this generation acts. An
+// apa.pay.v1 scenario starts with its confirmed delegation.
+async function start(sc, delegationId) {
   if (starting) return; // one start operation at a time (a second click, even on a re-rendered button, does nothing)
   const g = creds.gen;
   starting = true;
   renderControl();
   setRunStatus("開始中…", "busy");
-  const r = await creds.startRun(sc.id);
+  const r = await creds.startRun(sc.id, delegationId);
   if (g !== creds.gen || !r || r.gen !== creds.gen) return; // cleared or replaced: nothing acts
   starting = false;
   renderControl();
@@ -695,6 +752,240 @@ async function start(sc) {
     await openRun(r.body, g);
   } else setRunStatus(ERRORS[r.body && r.body.error] || "未開始（" + r.status + "）", "error");
   pollRuns();
+}
+
+// ---- P1-a: the simulated customer, the delegation and the approval ----
+
+const focusIn = (sel) => { const x = document.querySelector(sel); if (x && !x.disabled) x.focus(); };
+const units = (a) => (typeof a === "string" && /^[0-9]+$/.test(a) ? (Number(a) / 1e6).toFixed(2) : "?"); // fixture-usdc: 6 decimals
+const NETWORK = { "84532": "Base Sepolia（84532）" };
+const addr = (x) => (typeof x === "string" && x.length > 12 ? x.slice(0, 6) + "…" + x.slice(-4) : String(x || "?"));
+const clock = (sec) => (typeof sec === "number" ? new Date(sec * 1000).toLocaleTimeString("zh-TW", { hour12: false }) : "?");
+
+// simulateAs asks the host to let this page act as consumer c (fake only).
+async function simulateAs(c) {
+  if (simulating) return;
+  const g = creds.gen;
+  simulating = true;
+  renderControl();
+  const r = await creds.simulate(c);
+  if (g !== creds.gen) return;
+  simulating = false;
+  if (!r || r.error) setRunStatus("沒有收到回覆：角色模擬未確認", "error");
+  else if (r.status === 200) {
+    setRunStatus("角色模擬：客人 " + short(c) + "（主持人扮演，不是本人驗證；只在 fake 模式）", "ok");
+    lastApprovals = null;
+    approvalNote = null;
+    pollRuns();
+  } else setRunStatus(r.body && r.body.error === "simulation_unavailable" ? "這個服務沒有角色模擬（只有 fake 模式有）" : "角色模擬未開始（" + r.status + "）", "error");
+  renderControl();
+  focusIn('.agent-card[data-consumer="' + CSS.escape(c) + '"] .agent-delegate');
+}
+
+// delegationBox shows the host's terms of an apa.pay.v1 scenario: the
+// customer only confirms them (nothing here is editable).
+function delegationBox(sc, { busy, full, simC }) {
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+  const d = sc.delegation || {};
+  const box = el("div", "delegation");
+  box.dataset.scenario = sc.id;
+  box.setAttribute("role", "group");
+  box.setAttribute("aria-label", "委託內容：" + sc.label);
+  box.append(el("p", "delegation-title", "委託內容（主持人設定，客人確認）"));
+  const dl = el("dl", "delegation-rows");
+  for (const [k, v] of [["需求", d.purpose], ["商家範圍", (d.merchants || []).map(addr).join("、") + "（示意商店）"],
+    ["資產與網路", "test USDC（" + (d.asset_id || "?") + "）· Base Sepolia 測試網"], ["任務預算", units(d.task_budget) + " test USDC"],
+    ["自動範圍", "超過 " + units(d.allow_max) + " 一律要你核准"], ["核准期限", (d.approval_deadline_seconds || "?") + " 秒（後端時間為準）"],
+    ["委託有效", Math.round((d.valid_seconds || 0) / 60) + " 分鐘內開始"]]) {
+    dl.append(el("dt", "", k), el("dd", "", String(v)));
+  }
+  box.append(dl, el("p", "delegation-note", "委託不是付款核准：每一筆超過範圍的請購仍要你單筆核准。這是 fake 模擬，不會付款。"));
+  const yes = el("button", "delegation-confirm", "確認委託並開始（模擬）");
+  yes.type = "button";
+  yes.dataset.scenario = sc.id;
+  yes.disabled = starting || busy.has(sc.consumer_id) || full || simC !== sc.consumer_id;
+  yes.addEventListener("click", () => confirmAndStart(sc));
+  const no = el("button", "delegation-back", "返回");
+  no.type = "button";
+  no.dataset.scenario = sc.id;
+  no.addEventListener("click", () => { delegating = null; renderControl(); focusIn('.agent-card[data-consumer="' + CSS.escape(sc.consumer_id) + '"] .agent-delegate'); });
+  box.append(yes, " ", no);
+  return box;
+}
+
+// confirmAndStart: the simulated customer confirms the delegation (one
+// request ID, resent unchanged), then the operator starts the run with it.
+async function confirmAndStart(sc) {
+  if (starting) return;
+  const g = creds.gen;
+  setRunStatus("確認委託中…", "busy");
+  const r = await creds.confirmDelegation(sc.id);
+  if (g !== creds.gen || !r) return;
+  if (r.error || !(r.status === 201 || r.status === 200) || !r.body || !r.body.delegation) {
+    setRunStatus(r.error ? "沒有收到回覆：委託未確認（不會自動開始）" : "委託未確認（" + ((r.body && r.body.error) || r.status) + "）", "error");
+    return;
+  }
+  delegating = null;
+  await start(sc, r.body.delegation.delegation_id);
+}
+
+// pollApprovals reads the simulated customer's approval sessions (its own
+// capability); a reply of an older generation or customer is dropped.
+async function pollApprovals() {
+  const c = creds.view().simConsumer;
+  if (!c) { if (lastApprovals) { lastApprovals = null; renderControl(); } return; }
+  const g = creds.gen;
+  const r = await creds.approvals();
+  if (!r || g !== creds.gen || creds.view().simConsumer !== c) return;
+  lastApprovals = r.error || r.status !== 200 ? { gen: g, consumer: c, error: r.error || "status_" + r.status }
+    : { gen: g, consumer: c, servedAt: r.body.served_at, at: Date.now(), items: r.body.approvals || [] };
+  renderControl();
+}
+
+const RESULT = {
+  approved: ["ok", "已核准（模擬），未啟用付款", "這筆只留下模擬授權（grant）；它不能付款，也不會交付商品。"],
+  denied: ["deny", "已拒絕", "Agent 不會取得這一筆；沒有付款。"],
+  expired: ["closed", "已過期，無法核准", "期限由後端決定；需要重新請購。"],
+  withdrawn: ["closed", "已撤回（task 取消）", "這筆請購已隨 task 取消。"],
+  superseded: ["closed", "報價已改變：這次核准作廢", "需要重新請購；沒有付款。"],
+};
+
+// pick: the item 「需要你處理」 shows: the newest pending one; else the
+// newest item of the customer's newest run (its result); else none.
+function pickItem(runs) {
+  const a = lastApprovals;
+  if (!a || a.gen !== creds.gen || !a.items) return null;
+  const pending = a.items.find((x) => x.purchase.approval && x.purchase.approval.state === "pending");
+  if (pending) return pending;
+  const run = runs.find((r) => r.consumer_id === a.consumer);
+  return (run && a.items.find((x) => x.task_id === run.task_id)) || null;
+}
+
+let shownApproval = "";
+function renderApproval(runs) {
+  const box = $("approval");
+  const v = creds.view();
+  const simC = v.simConsumer;
+  const scenarios = (lastReady && lastReady.status && lastReady.status.runs && lastReady.status.runs.scenarios) || [];
+  const pay = scenarios.some((x) => x.contract === A.V1);
+  box.hidden = !v.hasHost || !pay;
+  if (box.hidden) return;
+  const item = simC ? pickItem(runs) : null;
+  if (approvalNote && approvalNote.gen !== creds.gen) approvalNote = null;
+  const a = lastApprovals && lastApprovals.gen === creds.gen ? lastApprovals : null;
+  const key = JSON.stringify([simC, item, !!a, a && a.error, approvalNote, resolving]);
+  if (key === shownApproval) return updateCountdown();
+  shownApproval = key;
+  const body = $("approval-body");
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+  const had = document.activeElement && box.contains(document.activeElement) ? document.activeElement.className : "";
+  const parts = [];
+  if (!simC) {
+    parts.push(el("p", "approval-empty", "選一位客人按「以 A 模擬」或「以 B 模擬」，才能替他確認委託與核准（fake 模擬，不是本人驗證）。"));
+  } else if (a && a.error && !item) {
+    parts.push(el("p", "approval-empty", "客人 " + short(simC) + " 的核准清單讀取失敗（" + a.error + "），未確認"));
+  } else if (!item) {
+    parts.push(el("p", "approval-empty", a ? "客人 " + short(simC) + " 目前沒有需要你處理的請購。" : "讀取客人 " + short(simC) + " 的待核准…"));
+  } else {
+    const p = item.purchase, ap = p.approval, d = item.delegation;
+    const mode = el("p", "approval-mode");
+    mode.append(el("span", "approval-tag", "模擬核准"), "fake 展示・主持人扮演客人 " + short(item.consumer_id) + "（不是本人驗證）・不會付款");
+    parts.push(mode);
+    const pending = ap.state === "pending";
+    const res = RESULT[ap.state];
+    const head = el("div", "approval-head");
+    head.dataset.state = ap.state;
+    head.append(el("h3", "", pending ? "核准這一筆付款？" : res ? res[1] : ap.state),
+      el("p", "", pending ? "客人 " + short(item.consumer_id) + " 的 Agent 想買下面這一項。你只核准這一筆，不是之後所有付款。" : res ? res[2] : ""));
+    parts.push(head);
+    const product = (() => { try { return new URL(p.resource_url).pathname.split("/").pop() || "?"; } catch { return "?"; } })();
+    const it = el("div", "approval-item");
+    const amt = el("p", "approval-amount");
+    amt.append(el("b", "", units(p.amount)), el("span", "", " test USDC"));
+    it.append(el("p", "approval-product", "商品 " + product + "（數位資料・付款確認後交付；本片不付款）"), amt);
+    parts.push(it);
+    const dl = el("dl", "approval-rows");
+    for (const [k, val] of [["收款人", addr(p.pay_to) + " · 與報價相同（payTo）"], ["付款帳戶", "客人 " + short(item.consumer_id) + " 的測試錢包 " + addr(item.payer) + " · " + item.wallet_id],
+      ["網路與資產", (NETWORK[p.chain_id] || p.chain_id) + " · test USDC（" + (p.asset_id || "?") + "），不是真錢"],
+      ["委託範圍", d ? "預算 " + units(d.task_budget) + "；超過 " + units(d.allow_max) + " 一律要你核准" : "未取得"],
+      ["intent", (p.intent_hash || "").slice(0, 23) + "…（後端比對這一份）"]]) {
+      dl.append(el("dt", "", k), el("dd", "", val));
+    }
+    parts.push(dl);
+    if (pending) {
+      const dl2 = el("div", "approval-deadline");
+      const cd = el("b", "", "");
+      cd.id = "approval-countdown";
+      dl2.append(cd, el("span", "", "期限 " + clock(ap.expires_at) + "（後端時間為準；畫面倒數只是提示）"));
+      parts.push(dl2);
+      parts.push(el("p", "approval-note", "按下核准後：這是模擬，只留下不能付款的模擬授權，畫面會標示未啟用付款。過期、取消或報價改變時，核准會被拒絕，需要重新請購。"));
+      const acts = el("div", "approval-actions");
+      const yes = el("button", "approval-approve", "核准此筆（模擬）");
+      const no = el("button", "approval-deny", "拒絕");
+      for (const [b, dec] of [[yes, "approve"], [no, "deny"]]) {
+        b.type = "button";
+        b.disabled = resolving;
+        b.addEventListener("click", () => resolveItem(item, dec));
+        acts.append(b, " ");
+      }
+      parts.push(acts);
+    } else if (ap.grant) {
+      parts.push(el("p", "approval-grant", "模擬授權 " + ap.grant.jti.slice(0, 18) + "…（authorization_method " + ap.grant.authorization_method
+        + "，audience " + ap.grant.audience + "）· Signer 樁：拒絕模擬授權（GRANT_METHOD_NOT_ACCEPTED）· 未啟用付款"));
+    }
+    const ev = el("button", "approval-evidence", "查看技術證據 ›");
+    ev.type = "button";
+    ev.addEventListener("click", async () => { await selectConsumer(item.consumer_id); if (currentTask() !== item.task_id) openTask(item.task_id); openDrawer(); });
+    parts.push(ev);
+  }
+  if (approvalNote) {
+    const n = el("p", "approval-msg", approvalNote.text);
+    n.dataset.kind = approvalNote.kind;
+    n.setAttribute("role", "status");
+    parts.push(n);
+  }
+  body.replaceChildren(...parts);
+  updateCountdown();
+  // The focus stays on the same kind of control when it is still there.
+  if (had) { const same = had && body.querySelector("." + had.split(" ")[0]); if (same && !same.disabled) same.focus(); else $("approval-title").focus(); }
+}
+
+// updateCountdown: the remaining time from the server's clock at the last
+// read, advanced by the page's own clock as a hint only.
+function updateCountdown() {
+  const cd = $("approval-countdown");
+  const a = lastApprovals;
+  if (!cd || !a || !a.items) return;
+  const item = a.items.find((x) => x.purchase.approval && x.purchase.approval.state === "pending");
+  if (!item) return;
+  const left = item.purchase.approval.expires_at - a.servedAt - Math.floor((Date.now() - a.at) / 1000);
+  cd.textContent = left > 0 ? "剩約 " + left + " 秒" : "已達期限，等待後端確認";
+  for (const b of document.querySelectorAll("#approval .approval-approve, #approval .approval-deny")) b.disabled = resolving || left <= 0;
+}
+setInterval(updateCountdown, 1000);
+
+// resolveItem: one approve or deny; the server decides in one transaction.
+async function resolveItem(item, decision) {
+  if (resolving) return;
+  const g = creds.gen;
+  resolving = true;
+  approvalNote = null;
+  renderControl();
+  const r = await creds.resolve(item.purchase.approval.approval_session_id, item.purchase.intent_hash, decision);
+  if (g !== creds.gen) return;
+  resolving = false;
+  const code = r && r.body && r.body.error;
+  if (!r) approvalNote = { gen: g, kind: "warn", text: "角色模擬已失效：請重新「以 " + short(item.consumer_id) + " 模擬」，結果未確認" };
+  else if (r.error) approvalNote = { gen: g, kind: "warn", text: "沒有收到回覆：結果未確認；畫面會重新讀取（同一請求重送不會多發授權）" };
+  else if (r.status === 200) approvalNote = { gen: g, kind: "ok", text: decision === "approve" ? "已記錄：已核准（模擬），未啟用付款" : "已記錄：已拒絕" };
+  else if (code === "approval_closed") approvalNote = { gen: g, kind: "error", text: "無法" + (decision === "approve" ? "核准" : "拒絕") + "：這一筆已" + ({ expired: "過期", withdrawn: "撤回", approved: "核准", denied: "拒絕", superseded: "作廢" }[r.body.result && r.body.result.purchase && r.body.result.purchase.approval && r.body.result.purchase.approval.state] || "關閉") + "（後端判定）" };
+  else if (code === "approval_superseded") approvalNote = { gen: g, kind: "error", text: "報價已改變：這次核准作廢，需要重新請購" };
+  else if (code === "intent_mismatch") approvalNote = { gen: g, kind: "error", text: "摘要與後端不符：未核准（請重新讀取這一筆）" };
+  else if (code === "not_found") approvalNote = { gen: g, kind: "error", text: "找不到這一筆（可能不是目前模擬的客人）" };
+  else approvalNote = { gen: g, kind: "error", text: "未處理（" + (code || r.status) + "）" };
+  await pollApprovals();
+  refreshNow();
+  $("approval-title").focus();
 }
 
 // startAll sends one start per consumer, one after the other, each with its
@@ -817,6 +1108,7 @@ async function pollRuns() {
       if (r && r.gen === creds.gen && r.runs) {
         const t = await readTasks(r.runs);
         if (g === creds.gen) { lastRuns = r; lastRunsError = null; if (t) lastTasks = t; renderControl(); scene.setRuns(r.runs); }
+        await pollApprovals();
       } else if (r && r.gen === creds.gen && r.error) {
         lastRunsError = r.error;
         renderControl();

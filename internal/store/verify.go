@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 )
 
@@ -25,6 +26,9 @@ import (
 // version is the schema the file must have: 1 when checking before an
 // upgrade, otherwise schemaVersion; host_runs is checked from 2 on.
 func (s *Store) verify(version int) error {
+	old := s.legacy
+	s.legacy = version < 3
+	defer func() { s.legacy = old }()
 	tx, err := s.r.Begin()
 	if err != nil {
 		return err
@@ -120,7 +124,7 @@ func (s *Store) verify(version int) error {
 		}
 	}
 
-	rows, err := tx.Query(`SELECT ` + taskCols + ` FROM tasks ORDER BY task_id`)
+	rows, err := tx.Query(`SELECT ` + s.taskCols() + ` FROM tasks ORDER BY task_id`)
 	if err != nil {
 		return readErr("task", "", err)
 	}
@@ -209,18 +213,26 @@ func (s *Store) verify(version int) error {
 			}
 			p := t.purchases[po]
 			c, cerr := contracts.Canonical([]byte(body))
-			o := p.Order
-			i := o.Intent
-			h, herr := i.Hash()
-			k, kerr := o.RetryKey()
+			var h, k string
+			var herr, kerr, verr error
+			if p.V1 != nil { // apa.pay.v1: its own hashes and ownership rules
+				h, herr = p.V1.IntentHash()
+				k, kerr = p.V1.RetryKey()
+				verr = paycontract.ValidatePurchase(t.reg, t.session(), *p.V1)
+			} else {
+				h, herr = p.Order.Intent.Hash()
+				k, kerr = p.Order.RetryKey()
+				verr = t.reg.ValidatePurchase(t.session(), p.Order)
+			}
+			x := p.terms()
 			if cerr != nil || !bytes.Equal(c, []byte(body)) || herr != nil || h != intent || kerr != nil || k != key ||
-				i.PurchaseOrderID != po || o.RequestID != req || i.ChainID != chain || i.AssetContract != asset || i.From != payer || i.EIP3009Nonce != nonce {
+				x.PO != po || x.RequestID != req || x.ChainID != chain || x.Asset != asset || x.From != payer || x.Nonce != nonce {
 				prow.Close()
 				return bad("purchase", id, "purchase %s: body, hashes or index columns disagree", po)
 			}
-			if err := t.reg.ValidatePurchase(t.session(), o); err != nil {
+			if verr != nil {
 				prow.Close()
-				return bad("purchase", id, "purchase %s: %v", po, err)
+				return bad("purchase", id, "purchase %s: %v", po, verr)
 			}
 		}
 		if err := drained(prow); err != nil {
@@ -245,18 +257,14 @@ func (s *Store) verify(version int) error {
 			e := t.events[n]
 			n++
 			c, cerr := contracts.Canonical([]byte(body))
-			eh, herr := contracts.EventHash(e)
+			eh, herr := t.eventHash(e)
 			if cerr != nil || !bytes.Equal(c, []byte(body)) || herr != nil || eh != hash || e.Sequence != seq || e.EventID != eid ||
 				eid != eventID(id, seq) || e.EventType != typ || e.ObservedAt != observed || e.Scope == nil || e.Scope.TaskID != id ||
 				e.Scope.PurchaseOrderID != po.String {
 				erow.Close()
 				return bad("event", id, "event %d: body, hash or index columns disagree", seq)
 			}
-			var order *contracts.PurchaseOrder
-			if po.Valid {
-				order = &t.purchases[po.String].Order
-			}
-			if err := t.reg.ValidateEvent(e, order); err != nil {
+			if err := t.validateEvent(e); err != nil {
 				erow.Close()
 				return bad("event", id, "event %d: %v", seq, err)
 			}
@@ -268,8 +276,8 @@ func (s *Store) verify(version int) error {
 			return bad("chain", id, "task has no events")
 		}
 		last := t.events[len(t.events)-1]
-		head, _ := contracts.EventHash(last)
-		if err := contracts.ValidateEventOrder(t.events); err != nil {
+		head, _ := t.eventHash(last)
+		if err := t.validateOrder(); err != nil {
 			return bad("chain", id, "%v", err)
 		}
 		if row.ChainHead != head || row.NextSeq != last.Sequence+1 {
@@ -282,7 +290,7 @@ func (s *Store) verify(version int) error {
 			switch e.EventType {
 			case "POLICY_DECIDED":
 				decided[e.Scope.PurchaseOrderID] = e
-			case "APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN":
+			case "APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN", "APPROVED", "APPROVAL_DENIED", "APPROVAL_SUPERSEDED":
 				closedBy[e.Scope.PurchaseOrderID] = e
 			}
 		}
@@ -315,9 +323,19 @@ func (s *Store) verify(version int) error {
 		if status != row.Status || reason != row.DenyReason.String || (reason == "") == row.DenyReason.Valid {
 			return bad("projection", id, "status %s/%s is not what the events give (%s/%s)", row.Status, row.DenyReason.String, status, reason)
 		}
+
+		// 9. apa.pay.v1: the delegation, sessions and grants match the events.
+		if why := t.verifyPay(); why != "" {
+			return bad("approval", id, "%s", why)
+		}
+	}
+	if version >= 3 {
+		if err := verifyPayTables(tx); err != nil {
+			return err
+		}
 	}
 	if version >= 2 {
-		return verifyRuns(tx)
+		return verifyRuns(tx, version)
 	}
 	return nil
 }

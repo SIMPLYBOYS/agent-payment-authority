@@ -1,4 +1,4 @@
-.PHONY: check check-m1-e3 check-contracts build dev demo-fake demo-integration demo present-live present-fake present-rehearsal m1-fixture verify-m1 m1-live-cli
+.PHONY: check check-m1-e3 check-contracts build dev demo-fake demo-integration demo present-live present-fake present-rehearsal present-p1a m1-fixture verify-m1 m1-live-cli
 
 # Compile, vet and unit-test. Calls no paid model and touches no testnet.
 check:
@@ -79,6 +79,12 @@ present-fake:
 # (docs/commercial-ux1.md 7.2). Fake CLI only.
 present-rehearsal:
 	@APA_PRESENT_SCENARIOS=testdata/demo/scenarios-rehearsal.json sh scripts/demo/present.sh fake
+
+# present-p1a: the fake demo with the P1-a catalog: confirm a delegation as
+# the simulated customer, the Agent asks, approve or deny (simulated; no
+# payment). docs/commercial-p1a.md has the steps. Fake CLI only.
+present-p1a:
+	@APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p1a.json sh scripts/demo/present.sh fake
 
 # docs/m1-evidence.md: the M1 fixture evidence bundle, a new
 # artifacts/m1/<run-id>/ each time (manifest.json, its evidence, run-end.json).

@@ -73,6 +73,11 @@ func Export(dbPath string, taskIDs ...string) ([]Task, error) {
 			return nil, fmt.Errorf("task %s: %w", id, err)
 		}
 		t.DenyReason = deny.String
+		// Schema 3 files say each task's contract; an older file holds M1 only.
+		var version string
+		if err := db.QueryRow(`SELECT contract_version FROM tasks WHERE task_id = ?`, id).Scan(&version); err == nil && version != contracts.Version {
+			return nil, fmt.Errorf("task %s: %w", id, &contracts.CodedError{Code: "M1_CONTRACT_REQUIRED", Detail: "the task is " + version + "; M1 evidence covers apa.m1.v2 tasks only"})
+		}
 		for kind, h := range snaps {
 			if !h.Valid {
 				continue
@@ -166,6 +171,16 @@ func digest(b string) string {
 // rules).
 func verify(t Task) (*checked, error) {
 	c := &checked{task: t}
+	// An apa.pay.v1 task is never M1 evidence: refused by its own code
+	// before any M1 rule reads it.
+	for _, s := range t.Events {
+		var head struct {
+			Version string `json:"version"`
+		}
+		if json.Unmarshal([]byte(s.Body), &head) == nil && head.Version != contracts.Version {
+			return nil, &contracts.CodedError{Code: "M1_CONTRACT_REQUIRED", Detail: "an event of version " + head.Version + "; M1 evidence covers apa.m1.v2 tasks only"}
+		}
+	}
 	for kind, s := range t.Snapshots {
 		if digest(s.Body) != s.Hash {
 			return nil, fmt.Errorf("%s snapshot digest mismatch", kind)

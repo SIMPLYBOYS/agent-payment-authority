@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 )
 
 // scenario is one entry of the host's trusted scenario catalog
@@ -24,9 +26,25 @@ type scenario struct {
 	Scenario      string           `json:"scenario"`
 	BudgetInitial contracts.Amount `json:"budget_initial,omitempty"`
 	Label         string           `json:"label"`
+	// Contract is the task's contract version ("" = apa.m1.v2). An
+	// apa.pay.v1 entry has the Delegation the consumer is asked to confirm
+	// (docs/commercial-transaction-flow.md section 10 row 1); fake only.
+	Contract   string           `json:"contract,omitempty"`
+	Delegation *delegationTerms `json:"delegation,omitempty"`
 
 	digest     string   // sha256 of this entry and its scenario file's bytes
 	candidates []string // the consumer's demo tasks (show-*), in registry order
+}
+
+// delegationTerms are a delegation's host-set terms; the merchants and the
+// asset come from the host's profile. allow_max and task_budget only narrow
+// the profile's.
+type delegationTerms struct {
+	Purpose                 string           `json:"purpose"`
+	TaskBudget              contracts.Amount `json:"task_budget"`
+	AllowMax                contracts.Amount `json:"allow_max"`
+	ApprovalDeadlineSeconds uint64           `json:"approval_deadline_seconds"`
+	ValidSeconds            uint64           `json:"valid_seconds"` // how long a confirmed delegation may start a run
 }
 
 type catalog struct {
@@ -72,6 +90,20 @@ func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.Regist
 				}
 			}
 		}
+		switch sc.Contract {
+		case "", contracts.Version:
+			if sc.Delegation != nil {
+				return nil, fmt.Errorf("scenarios %s: %s: only an apa.pay.v1 entry has a delegation", path, sc.ID)
+			}
+		case paycontract.Version:
+			d := sc.Delegation
+			if live || d == nil || sc.BudgetInitial != "" || d.Purpose == "" || len(d.Purpose) > 200 || d.ApprovalDeadlineSeconds == 0 || d.ApprovalDeadlineSeconds > 600 ||
+				d.ValidSeconds == 0 || d.ValidSeconds > 86400 || !amount(d.TaskBudget) || !amount(d.AllowMax) {
+				return nil, fmt.Errorf("scenarios %s: %s: an apa.pay.v1 entry is fake only and needs a whole delegation (no budget_initial)", path, sc.ID)
+			}
+		default:
+			return nil, fmt.Errorf("scenarios %s: %s: unknown contract %q", path, sc.ID, sc.Contract)
+		}
 		if len(sc.candidates) == 0 {
 			return nil, fmt.Errorf("scenarios %s: %s: consumer %q has no show-* task in the registry", path, sc.ID, sc.ConsumerID)
 		}
@@ -89,7 +121,13 @@ func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.Regist
 				return nil, fmt.Errorf("scenarios %s: %s: scenario file: %w", path, sc.ID, err)
 			}
 		}
-		entry, _ := json.Marshal(struct{ ID, ConsumerID, BudgetInitial string }{sc.ID, sc.ConsumerID, string(sc.BudgetInitial)})
+		// An M1 entry's digest is what it always was; the contract and the
+		// delegation join it only when set.
+		entry, _ := json.Marshal(struct {
+			ID, ConsumerID, BudgetInitial string
+			Contract                      string           `json:",omitempty"`
+			Delegation                    *delegationTerms `json:",omitempty"`
+		}{sc.ID, sc.ConsumerID, string(sc.BudgetInitial), sc.Contract, sc.Delegation})
 		h := sha256.New()
 		h.Write(entry)
 		h.Write([]byte{0})
@@ -98,4 +136,31 @@ func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.Regist
 		out[sc.ID] = &sc
 	}
 	return out, nil
+}
+
+func amount(a contracts.Amount) bool { n, err := a.Units(); return err == nil && n > 0 }
+
+// version is the entry's contract version.
+func (sc *scenario) version() string {
+	if sc.Contract == "" {
+		return contracts.Version
+	}
+	return sc.Contract
+}
+
+// checkDelegations refuses an apa.pay.v1 entry whose delegation is wider
+// than the host's profile: the Store would refuse it at the task's start.
+func checkDelegations(scs map[string]*scenario, p policy.Profile) error {
+	limit, _ := p.TaskCap.Units()
+	allow, _ := p.AllowMax.Units()
+	for _, sc := range scs {
+		if d := sc.Delegation; d != nil {
+			b, _ := d.TaskBudget.Units()
+			a, _ := d.AllowMax.Units()
+			if b > limit || a > allow || a > b {
+				return fmt.Errorf("scenario %s: the delegation's task_budget and allow_max must be within the profile's (and allow_max within the budget)", sc.ID)
+			}
+		}
+	}
+	return nil
 }

@@ -6,6 +6,7 @@ package store
 // tasks to allocate, and never write an event or change a task.
 
 import (
+	"cmp"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -16,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 )
 
 // RunOutcomes are the outcome codes a run may end with: the buyer's fixed
@@ -47,6 +49,7 @@ var StoreCodes = []string{
 	"OWNERSHIP_MISMATCH", "QUOTE_NOT_OFFERED", "TASK_ALREADY_ENDED", "TASK_ALREADY_STARTED", "UNKNOWN_TASK",
 	"WALLET_BINDING_CHANGED", "WALLET_ID_IN_USE", "PAYER_IN_USE",
 	"SCHEMA_UPGRADE_REQUIRED", "NO_FREE_TASK", "RUN_NOT_OPEN", "INVALID_RUN_RECORD",
+	"CONTRACT_VERSION_MISMATCH", "DELEGATION_UNAVAILABLE", "INVALID_DELEGATION", "INVALID_APPROVAL", "INTENT_MISMATCH",
 	"STORE_ERROR",
 }
 
@@ -81,6 +84,8 @@ type Run struct {
 	Outcome, Detail                                           string
 	TaskStarted                                               bool
 	StoreEnd, StoreEndError                                   string
+	ContractVersion                                           string // the trusted catalog's: apa.m1.v2 | apa.pay.v1
+	DelegationID                                              string // apa.pay.v1: the confirmed delegation the run starts with
 }
 
 // RunEnd is what a run reports when its process has ended (T4).
@@ -95,6 +100,7 @@ type RunEnd struct {
 type RunRequest struct {
 	RequestID, Scenario, ScenarioDigest, BudgetInitial, ConsumerID string
 	Candidates                                                     []string
+	ContractVersion, DelegationID                                  string // "" = apa.m1.v2, no delegation
 }
 
 var (
@@ -110,14 +116,18 @@ type runRow struct {
 	taskStarted                              sql.NullInt64
 }
 
-const runCols = `run_id, request_id, scenario, scenario_digest, budget_initial, task_id, consumer_id, agent_id, wallet_id, payer,
+const runCols = runColsBase + `, contract_version, delegation_id`
+
+const runColsBase = `run_id, request_id, scenario, scenario_digest, budget_initial, task_id, consumer_id, agent_id, wallet_id, payer,
   state, accepted_at, interrupted_at, ended_at, outcome, detail, task_started, store_end, store_end_error`
 
 func scanRun(sc interface{ Scan(...any) error }) (runRow, error) {
 	var w runRow
+	var dlg sql.NullString
 	err := sc.Scan(&w.r.RunID, &w.r.RequestID, &w.r.Scenario, &w.r.ScenarioDigest, &w.r.BudgetInitial, &w.r.TaskID,
 		&w.r.ConsumerID, &w.r.AgentID, &w.r.WalletID, &w.r.Payer, &w.r.State, &w.r.AcceptedAt,
-		&w.interruptedAt, &w.endedAt, &w.outcome, &w.detail, &w.taskStarted, &w.storeEnd, &w.storeEndError)
+		&w.interruptedAt, &w.endedAt, &w.outcome, &w.detail, &w.taskStarted, &w.storeEnd, &w.storeEndError, &w.r.ContractVersion, &dlg)
+	w.r.DelegationID = dlg.String
 	w.r.InterruptedAt, w.r.EndedAt = uint64(w.interruptedAt.Int64), uint64(w.endedAt.Int64)
 	w.r.Outcome, w.r.Detail, w.r.StoreEnd, w.r.StoreEndError = w.outcome.String, w.detail.String, w.storeEnd.String, w.storeEndError.String
 	w.r.TaskStarted = w.taskStarted.Int64 == 1
@@ -133,6 +143,18 @@ func validRun(w runRow) string {
 	if r.RunID == "" || !requestIDPattern.MatchString(r.RequestID) || r.Scenario == "" || r.ScenarioDigest == "" ||
 		r.TaskID == "" || r.ConsumerID == "" || r.AgentID == "" || r.WalletID == "" || r.Payer == "" || r.AcceptedAt == 0 {
 		return "a binding or acceptance field is missing"
+	}
+	switch r.ContractVersion {
+	case contracts.Version:
+		if r.DelegationID != "" {
+			return "an apa.m1.v2 run has a delegation"
+		}
+	case paycontract.Version:
+		if r.DelegationID == "" {
+			return "an apa.pay.v1 run has no delegation"
+		}
+	default:
+		return "unknown contract version"
 	}
 	result := w.outcome.Valid || w.detail.Valid || w.taskStarted.Valid || w.storeEnd.Valid || w.storeEndError.Valid
 	switch r.State {
@@ -181,8 +203,12 @@ func validRun(w runRow) string {
 // inside verify's read transaction: every row valid, its binding equal to
 // the stored task's, task_started and store_end matching tasks and events.
 // It reads no current setting.
-func verifyRuns(tx *sql.Tx) error {
-	rows, err := tx.Query(`SELECT ` + runCols + ` FROM host_runs ORDER BY run_id`)
+func verifyRuns(tx *sql.Tx, version int) error {
+	cols := runCols
+	if version < 3 { // before schema 3 every run was apa.m1.v2, without a delegation
+		cols = runColsBase + `, 'apa.m1.v2', NULL`
+	}
+	rows, err := tx.Query(`SELECT ` + cols + ` FROM host_runs ORDER BY run_id`)
 	if err != nil {
 		return readErr("host_runs", "", err)
 	}
@@ -206,7 +232,7 @@ func verifyRuns(tx *sql.Tx) error {
 		if why := validRun(w); why != "" {
 			return bad("%s", why)
 		}
-		why, err := runVsStore(tx, r)
+		why, err := runVsStore(tx, r, version)
 		if err != nil {
 			return readErr("host_runs", r.TaskID, err)
 		}
@@ -222,15 +248,37 @@ func verifyRuns(tx *sql.Tx) error {
 // its write transaction: the binding equals the stored task's; an ended
 // run's task_started says whether the task exists; a store_end has its
 // event. It returns "" or what is wrong; err is a failed read.
-func runVsStore(tx *sql.Tx, r Run) (string, error) {
+func runVsStore(tx *sql.Tx, r Run, version int) (string, error) {
 	var consumer, agent, wallet, payer string
-	err := tx.QueryRow(`SELECT consumer_id, agent_id, wallet_id, payer FROM tasks WHERE task_id = ?`, r.TaskID).Scan(&consumer, &agent, &wallet, &payer)
+	contract := contracts.Version
+	q := `SELECT consumer_id, agent_id, wallet_id, payer, contract_version FROM tasks WHERE task_id = ?`
+	if version < 3 {
+		q = `SELECT consumer_id, agent_id, wallet_id, payer, 'apa.m1.v2' FROM tasks WHERE task_id = ?`
+	}
+	err := tx.QueryRow(q, r.TaskID).Scan(&consumer, &agent, &wallet, &payer, &contract)
 	exists := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
 	if exists && (consumer != r.ConsumerID || agent != r.AgentID || wallet != r.WalletID || payer != r.Payer) {
 		return "binding differs from the stored task", nil
+	}
+	if exists && contract != r.ContractVersion {
+		return "contract version differs from the stored task's", nil
+	}
+	if r.DelegationID != "" {
+		var owner string
+		var task sql.NullString
+		if err := tx.QueryRow(`SELECT consumer_id, task_id FROM delegations WHERE delegation_id = ?`, r.DelegationID).Scan(&owner, &task); errors.Is(err, sql.ErrNoRows) {
+			return "the run's delegation does not exist", nil
+		} else if err != nil {
+			return "", err
+		}
+		// A run whose task exists bound the delegation to it; a run that made
+		// no task (its Gate failed) left it to a later run.
+		if owner != r.ConsumerID || exists && task.String != r.TaskID {
+			return "the run's delegation is another consumer's, or not bound to the run's task", nil
+		}
 	}
 	if r.State != "ended" {
 		return "", nil
@@ -273,6 +321,10 @@ func (s *Store) AcceptRun(req RunRequest) (run Run, created bool, err error) {
 	if !requestIDPattern.MatchString(req.RequestID) || req.Scenario == "" || req.ScenarioDigest == "" {
 		return Run{}, false, refuse("INVALID_RUN_RECORD", "request_id, scenario and digest are required")
 	}
+	version := cmp.Or(req.ContractVersion, contracts.Version)
+	if (version == paycontract.Version) != (req.DelegationID != "") || version != contracts.Version && version != paycontract.Version {
+		return Run{}, false, refuse("INVALID_RUN_RECORD", "an apa.pay.v1 run, and only one, starts with a delegation")
+	}
 	err = s.write(func(tx *sql.Tx, now uint64) error {
 		w, err := scanRun(tx.QueryRow(`SELECT `+runCols+` FROM host_runs WHERE request_id = ?`, req.RequestID))
 		if err == nil {
@@ -280,6 +332,21 @@ func (s *Store) AcceptRun(req RunRequest) (run Run, created bool, err error) {
 			return nil
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return err
+		}
+		var dlg any
+		if req.DelegationID != "" { // confirmed, this consumer's, not bound, not expired, and no other open run holds it
+			d, bound, err := readDelegation(tx, req.DelegationID)
+			if err != nil {
+				return err
+			}
+			var held int
+			if err := tx.QueryRow(`SELECT count(*) FROM host_runs WHERE delegation_id = ? AND state = 'accepted'`, req.DelegationID).Scan(&held); err != nil {
+				return err
+			}
+			if d == nil || d.ConsumerID != req.ConsumerID || bound || now >= d.ExpiresAt || held > 0 {
+				return refuse("DELEGATION_UNAVAILABLE", "no unbound, unexpired delegation of this consumer that no other run holds")
+			}
+			dlg = req.DelegationID
 		}
 		for _, id := range req.Candidates {
 			task, wallet, err := s.registry.Binding(id)
@@ -299,10 +366,10 @@ func (s *Store) AcceptRun(req RunRequest) (run Run, created bool, err error) {
 			}
 			run = Run{RunID: "run-" + hex.EncodeToString(b), RequestID: req.RequestID, Scenario: req.Scenario, ScenarioDigest: req.ScenarioDigest,
 				BudgetInitial: req.BudgetInitial, TaskID: task.TaskID, ConsumerID: task.ConsumerID, AgentID: task.AgentID,
-				WalletID: wallet.WalletID, Payer: wallet.From, State: "accepted", AcceptedAt: now}
-			_, err = tx.Exec(`INSERT INTO host_runs (run_id, request_id, scenario, scenario_digest, budget_initial, task_id, consumer_id, agent_id, wallet_id, payer, state, accepted_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?)`, run.RunID, run.RequestID, run.Scenario, run.ScenarioDigest, run.BudgetInitial,
-				run.TaskID, run.ConsumerID, run.AgentID, run.WalletID, run.Payer, now)
+				WalletID: wallet.WalletID, Payer: wallet.From, State: "accepted", AcceptedAt: now, ContractVersion: version, DelegationID: req.DelegationID}
+			_, err = tx.Exec(`INSERT INTO host_runs (run_id, request_id, scenario, scenario_digest, budget_initial, task_id, consumer_id, agent_id, wallet_id, payer, state, accepted_at, contract_version, delegation_id)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?, ?)`, run.RunID, run.RequestID, run.Scenario, run.ScenarioDigest, run.BudgetInitial,
+				run.TaskID, run.ConsumerID, run.AgentID, run.WalletID, run.Payer, now, version, dlg)
 			created = err == nil
 			return err
 		}
@@ -341,7 +408,7 @@ func (s *Store) EndRun(runID string, e RunEnd) error {
 		}
 		// The same check against the stored task and events as on open, in
 		// this transaction: a record the recovery would refuse is never written.
-		if why, err := runVsStore(tx, w.r); err != nil {
+		if why, err := runVsStore(tx, w.r, schemaVersion); err != nil {
 			return err
 		} else if why != "" {
 			return refuse("INVALID_RUN_RECORD", why)
