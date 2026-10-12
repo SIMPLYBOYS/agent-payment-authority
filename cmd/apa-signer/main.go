@@ -4,16 +4,20 @@
 // authorization per accepted attempt.
 //
 //	apa-signer serve --dir DIR
+//	apa-signer keygen --dir DIR --wallet ID
 //
 // DIR (private to its owner) holds signer.json, keys/<wallet_id>.key and
 // signer.db; the passphrase is read from this terminal. It is meant to run
-// as its own OS user (apa-signer); creating that user is a separate,
-// not yet approved step. Until P2 its reservation verifier refuses every
-// order, so it signs nothing; no flag or variable changes that.
+// as its own OS user (apa-signer; docs/commercial-p1b-os-isolation.md).
+// Until P2 its reservation verifier refuses every order, so it signs
+// nothing; no flag or variable changes that. keygen makes one new key file
+// (decision D4 of the OS isolation plan: a one-time test key).
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -26,6 +30,7 @@ import (
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"golang.org/x/sys/unix"
 )
 
@@ -37,21 +42,34 @@ func main() {
 }
 
 func run(args []string, out io.Writer) error {
-	if len(args) == 0 || args[0] != "serve" {
-		return errors.New("usage: apa-signer serve --dir DIR")
+	usage := errors.New("usage: apa-signer serve --dir DIR | apa-signer keygen --dir DIR --wallet ID")
+	if len(args) == 0 || args[0] != "serve" && args[0] != "keygen" {
+		return usage
 	}
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	dir := fs.String("dir", "", "the Signer's private directory")
-	if err := fs.Parse(args[1:]); err != nil || *dir == "" || fs.NArg() != 0 {
-		return errors.New("usage: apa-signer serve --dir DIR")
+	var wallet string
+	if args[0] == "keygen" {
+		fs.StringVar(&wallet, "wallet", "", "the wallet ID of the new key")
+	}
+	if err := fs.Parse(args[1:]); err != nil || *dir == "" || fs.NArg() != 0 || args[0] == "keygen" && wallet == "" {
+		return usage
 	}
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return errors.New("the passphrase is read from a terminal (/dev/tty), and there is none")
 	}
 	defer tty.Close()
-	core, cfg, err := assemble(*dir, func() ([]byte, error) { return readPassphrase(tty) }, func() uint64 { return uint64(time.Now().Unix()) })
+	if args[0] == "keygen" {
+		prompts := []string{"new passphrase: ", "the same passphrase again: "}
+		return keygen(*dir, wallet, func() ([]byte, error) {
+			p := prompts[0]
+			prompts = prompts[1:]
+			return readPassphrase(tty, p)
+		}, out)
+	}
+	core, cfg, err := assemble(*dir, func() ([]byte, error) { return readPassphrase(tty, "passphrase: ") }, func() uint64 { return uint64(time.Now().Unix()) })
 	if err != nil {
 		return err
 	}
@@ -112,6 +130,78 @@ func assemble(dir string, passphrase func() ([]byte, error), clock signer.Clock)
 	return core, cfg, err
 }
 
+// minPassphrase is the shortest passphrase keygen accepts.
+const minPassphrase = 12
+
+// keygen writes one new key file DIR/keys/<walletID>.key: a fresh random
+// key, encrypted with a passphrase read twice (they must match). An existing
+// file is never replaced. It prints the wallet ID and the address only.
+func keygen(dir, walletID string, passphrase func() ([]byte, error), out io.Writer) error {
+	if err := private(dir); err != nil {
+		return err
+	}
+	keys := filepath.Join(dir, "keys")
+	if err := private(keys); err != nil {
+		return err
+	}
+	if !signer.ValidWalletID(walletID) {
+		return fmt.Errorf("wallet ID %q is not valid", walletID)
+	}
+	path := filepath.Join(keys, walletID+".key")
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%s exists or cannot be checked; nothing was written", path)
+	}
+	pass, err := passphrase()
+	if err != nil {
+		return err
+	}
+	defer clear(pass)
+	again, err := passphrase()
+	if err != nil {
+		return err
+	}
+	defer clear(again)
+	switch {
+	case !bytes.Equal(pass, again):
+		return errors.New("the passphrases differ; nothing was written")
+	case len(pass) < minPassphrase:
+		return fmt.Errorf("the passphrase must be at least %d characters; nothing was written", minPassphrase)
+	}
+	key, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		return err
+	}
+	defer key.Zero()
+	priv := key.Serialize()
+	defer clear(priv)
+	f, err := signer.EncryptKey(walletID, priv, pass, signer.ScryptN)
+	if err != nil {
+		return err
+	}
+	if k, err := signer.DecryptKey(f, walletID, pass); err != nil || signer.Address(k.PubKey()) != f.Address {
+		return errors.New("the new key file does not decrypt to its address; nothing was written")
+	}
+	raw, err := json.Marshal(f)
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(raw); err != nil {
+		file.Close()
+		os.Remove(path)
+		return err
+	}
+	if err := errors.Join(file.Sync(), file.Close()); err != nil {
+		os.Remove(path)
+		return err
+	}
+	fmt.Fprintf(out, "apa-signer: wallet %s address %s\n", walletID, f.Address)
+	return nil
+}
+
 // private refuses a directory that is not this user's alone.
 func private(dir string) error {
 	fi, err := os.Lstat(dir)
@@ -126,8 +216,8 @@ func private(dir string) error {
 }
 
 // readPassphrase reads one line from the terminal with echo off.
-func readPassphrase(tty *os.File) ([]byte, error) {
-	fmt.Fprint(tty, "apa-signer passphrase: ")
+func readPassphrase(tty *os.File, prompt string) ([]byte, error) {
+	fmt.Fprint(tty, "apa-signer "+prompt)
 	fd := int(tty.Fd())
 	old, err := unix.IoctlGetTermios(fd, getTermios)
 	if err != nil {

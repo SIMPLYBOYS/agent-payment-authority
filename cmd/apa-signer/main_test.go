@@ -9,6 +9,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,5 +98,104 @@ func TestAssemblyRefusesItsInputs(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "keys", "wallet-a.key"), raw, 0o600)
 	if _, _, err := assemble(dir, passphrase, clock); err == nil {
 		t.Fatal("a key file of another wallet was accepted")
+	}
+}
+
+// keygen (D4 of docs/commercial-p1b-os-isolation.md): one new key file, the
+// passphrase twice, never a replacement; the production assembly loads it.
+func keyDir(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "signer")
+	if err := os.MkdirAll(filepath.Join(dir, "keys"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	os.Chmod(dir, 0o700)
+	return dir
+}
+
+// answers gives the passphrases in order and counts the questions.
+func answers(n *int, ps ...string) func() ([]byte, error) {
+	return func() ([]byte, error) {
+		*n++
+		if len(ps) == 0 {
+			return nil, errors.New("no passphrase")
+		}
+		p := ps[0]
+		ps = ps[1:]
+		return []byte(p), nil
+	}
+}
+
+const newPass = "one-time test passphrase"
+
+func TestKeygen(t *testing.T) {
+	dir := keyDir(t)
+	var out strings.Builder
+	n := 0
+	if err := keygen(dir, "wallet-test", answers(&n, newPass, newPass), &out); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "keys", "wallet-test.key")
+	fi, err := os.Stat(path)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("key file mode: %v %v", fi, err)
+	}
+	raw, _ := os.ReadFile(path)
+	var f signer.KeyFile
+	json.Unmarshal(raw, &f)
+	k, err := signer.DecryptKey(f, "wallet-test", []byte(newPass))
+	if err != nil || signer.Address(k.PubKey()) != f.Address {
+		t.Fatalf("decrypt: %v", err)
+	}
+	if got, want := out.String(), "apa-signer: wallet wallet-test address "+f.Address+"\n"; got != want || strings.Contains(got, newPass) {
+		t.Fatalf("output %q, want %q", got, want)
+	}
+	// The real serve assembly loads it (no delegations: nothing can be signed).
+	cfg, _ := json.Marshal(map[string]any{"version": 1, "socket": filepath.Join(dir, "s.sock"), "callers": []int{os.Getuid()}, "max_window_seconds": 600,
+		"wallets": []map[string]string{{"wallet_id": "wallet-test", "consumer_id": "consumer-test", "chain_id": "84532", "address": f.Address}},
+		"assets":  []any{}, "delegations": []any{}})
+	os.WriteFile(filepath.Join(dir, "signer.json"), cfg, 0o600)
+	core, _, err := assemble(dir, func() ([]byte, error) { return []byte(newPass), nil }, func() uint64 { return t0 })
+	if err != nil {
+		t.Fatalf("assemble with the new key: %v", err)
+	}
+	core.Close()
+
+	// Never a replacement: the file stays, no passphrase is asked.
+	n = 0
+	if err := keygen(dir, "wallet-test", answers(&n, newPass, newPass), io.Discard); err == nil || n != 0 {
+		t.Fatalf("an existing key file was replaced: %v, %d questions", err, n)
+	}
+	if again, _ := os.ReadFile(path); string(again) != string(raw) {
+		t.Fatal("an existing key file was replaced")
+	}
+}
+
+func TestKeygenRefuses(t *testing.T) {
+	for name, c := range map[string]struct {
+		wallet string
+		ps     []string
+		edit   func(dir string)
+	}{
+		"passphrases differ": {"wallet-x", []string{newPass, newPass + "!"}, nil},
+		"short passphrase":   {"wallet-x", []string{"short", "short"}, nil},
+		"wallet ID":          {"../wallet-x", []string{newPass, newPass}, nil},
+		"directory mode":     {"wallet-x", []string{newPass, newPass}, func(dir string) { os.Chmod(dir, 0o750) }},
+		"keys mode":          {"wallet-x", []string{newPass, newPass}, func(dir string) { os.Chmod(filepath.Join(dir, "keys"), 0o755) }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := keyDir(t)
+			if c.edit != nil {
+				c.edit(dir)
+			}
+			n := 0
+			if err := keygen(dir, c.wallet, answers(&n, c.ps...), io.Discard); err == nil {
+				t.Fatalf("%s: accepted", name)
+			}
+			entries, _ := os.ReadDir(filepath.Join(dir, "keys"))
+			if len(entries) != 0 {
+				t.Fatalf("%s: a file was written", name)
+			}
+		})
 	}
 }

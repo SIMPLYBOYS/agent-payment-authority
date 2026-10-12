@@ -57,10 +57,14 @@ func gcmFor(pass []byte, salt []byte, n int) (cipher.AEAD, error) {
 	return cipher.NewGCM(block)
 }
 
+// ValidWalletID is the configuration's ID rule, which also keeps a key file
+// name inside its directory.
+func ValidWalletID(id string) bool { return idPattern.MatchString(id) }
+
 // EncryptKey makes a version 1 key file for a 32-byte private key.
 func EncryptKey(walletID string, priv, pass []byte, n int) (KeyFile, error) {
-	if len(priv) != 32 || len(pass) == 0 {
-		return KeyFile{}, errors.New("a 32-byte key and a passphrase are required")
+	if len(priv) != 32 || len(pass) == 0 || !ValidWalletID(walletID) {
+		return KeyFile{}, errors.New("a 32-byte key, a passphrase and a valid wallet ID are required")
 	}
 	addr := Address(secp256k1.PrivKeyFromBytes(priv).PubKey())
 	salt, nonce := make([]byte, 16), make([]byte, 12)
