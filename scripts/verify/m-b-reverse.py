@@ -238,7 +238,7 @@ ITEMS = [
      [(PM, '\tcase req.Method == "webauthn":\n\t\treturn PaymentAttempt{}, false, refuse("HUMAN_APPROVAL_UNAVAILABLE", "webauthn payments are A2\'s")\n\tcase req.Method != "delegation":',
        '\tcase req.Method != "delegation" && req.Method != "webauthn":')]),
     ("P1b: R1 Store: B reads nothing of A's", go("./internal/store/", "^TestPaymentDelegationPath$", ("TestPaymentDelegationPath", r"B read A's attempt")),
-     [(PM, "err == nil && consumer != consumerID {", "err == nil && false {")]),
+     [(PM, "err == nil && consumer != consumerID {", "err == nil && len(consumer) < 0 {")]),
     ("P1b: client: no reply is recorded unknown", go("./internal/signerclient/", "^TestUnknownThenResume$", ("TestUnknownThenResume", r"no Signer")),
      [("internal/signerclient/client.go", '\t\t\tc.ledger.UpdatePayment(a.RequestID, "unknown", a.SignerAttemptID, "")\n', "")]),
 ]
