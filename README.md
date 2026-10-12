@@ -23,7 +23,7 @@
 
 **雙 Agent 商店（M-B，10/11 實作；10/12 fake 技術 review 通過，R1／R2／C1 關閉；M-C 真實雙 Agent 展示待 Aaron 核准）**：主持人頁每位客人一列，各有開始與停止，另有「一起開始」（各自送出的兩個請求）；兩位客人同時在同一間 Unity 商店，各自依自己最新場次的事件呈現；選取或查看較早的 task 只換面板。同時執行上限是部署設定 `--max-runs`（預設 2；`make demo`、`make present-fake` 不帶時即為 2）。每場在 trace 旁多寫一份時間紀錄 `<task>-<nanos>.timing.json`，`go run ./cmd/timing-judge --db … --a … --b … [--stop a|b] [--fake]` 唯讀判定兩場的工具呼叫是否交錯，並核對資料庫的場次結束與取消事件（結束碼 0 交錯、1 未達成、2 不判定、3 報告沒有完整寫出）。只用 fake 驗證，不代表兩位真實 Agent 已同時工作（M-C 另行核准）。驗證計畫：`go run ./cmd/m1-check --plan scripts/verify/m-b-check-plan.json --out artifacts/m-b`（加 `--list` 只列計畫）。設計與實作紀錄見 [docs/multi-agent-demo-design.md](docs/multi-agent-demo-design.md)。
 
-**商業展示 UX1：主畫面與操作重整（10/12 實作，Claude Code 執行，待 Codex 核對；分支 `commercial-ux1`）**：主持人頁改為商店場景為主視覺，旁邊每位 Agent 一張操作卡（執行狀態、Host 已回覆的工具呼叫次數，不知道時寫未確認、開始、只對執行中可按的「停止 Agent」、先確認的「取消請購／task」），點卡或點畫布上的客人選到同一位，查證放在「查看證據」抽屜，憑證與場次清單收在「進階」。只用 fake 驗證：`make present-fake`。說明與手動驗收步驟見 [docs/commercial-ux1.md](docs/commercial-ux1.md)。
+**商業展示 UX1：主畫面與操作重整（10/12 實作；R1／R2 補正完成，待 Codex 限定複核；分支 `commercial-ux1`）**：主持人頁改為商店場景為主視覺，旁邊每位 Agent 一張操作卡（執行狀態、Host 已回覆的工具呼叫次數，不知道時寫未確認、開始、只對執行中可按的「停止 Agent」、先確認的「取消請購／task」），點卡或點畫布上的客人選到同一位，查證放在「查看證據」抽屜，憑證與場次清單收在「進階」。只用 fake 驗證：`make present-fake`；手動彩排用 `make present-rehearsal`。說明與手動驗收步驟見 [docs/commercial-ux1.md](docs/commercial-ux1.md)。
 
 **M1 的結果**：M1 已於 2026-10-11 結案，見 [docs/m1-result.md](docs/m1-result.md)（fixture 與 live 證據包、逐卡核對、重跑命令、限制與結案紀錄）。**乾淨目錄**：2026-10-11 在只有本 repo clone 的新目錄，以 `cp .env.example .env` 與 `make m1-fixture` 完成 fixture E2E（31 案 PASS，檢查器 PASS）；使用本機的 Go／Node 快取與既有的 Unity Web 建置副本（`docs/m1-result.md` 第 3.4 節）。
 
