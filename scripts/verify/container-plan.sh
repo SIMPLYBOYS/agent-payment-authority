@@ -33,7 +33,8 @@ trap cleanup EXIT INT TERM
 
 git clone --quiet --no-hardlinks "$ROOT" "$BASE/src"
 git -C "$BASE/src" checkout --quiet --detach "$SHA"
-(cd "$BASE/src" && GOMODCACHE="$BASE/gomodcache" GOPROXY="file://$(go env GOMODCACHE)/cache/download" GOSUMDB=off \
+HOSTMOD=$(go env GOMODCACHE) # read before GOMODCACHE is set below
+(cd "$BASE/src" && GOMODCACHE="$BASE/gomodcache" GOPROXY="file://$HOSTMOD/cache/download" GOSUMDB=off \
 	GOTOOLCHAIN=local GOFLAGS=-mod=readonly go mod download) >"$OUT/modules.txt" 2>&1
 echo "modules: from the local module cache only (GOPROXY=file://...), checked against go.sum of $SHA" >>"$OUT/modules.txt"
 chmod -R a+rX,a-w "$BASE/src" "$BASE/gomodcache"
