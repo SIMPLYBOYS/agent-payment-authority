@@ -239,9 +239,9 @@ type eventView struct {
 	GrantID             string `json:"grant_id,omitempty"`
 	AuthorizationMethod string `json:"authorization_method,omitempty"`
 	Version             string `json:"version,omitempty"`
-	EvidenceMode    string                    `json:"evidence_mode"`
-	Source          string                    `json:"source"`
-	ObservedAt      uint64                    `json:"observed_at"`
+	EvidenceMode        string `json:"evidence_mode"`
+	Source              string `json:"source"`
+	ObservedAt          uint64 `json:"observed_at"`
 }
 
 type eventsReply struct {

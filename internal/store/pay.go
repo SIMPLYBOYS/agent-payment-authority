@@ -230,9 +230,9 @@ func readDelegation(q interface {
 // the same delegation; ConfirmedBy is the trusted simulated approver.
 type DelegationRequest struct {
 	RequestID, ConsumerID, Scenario, Purpose, AssetID, ConfirmedBy string
-	Merchants                                                     []string
-	TaskBudget, AllowMax                                          contracts.Amount
-	ApprovalDeadlineSeconds, ValidSeconds                         uint64
+	Merchants                                                      []string
+	TaskBudget, AllowMax                                           contracts.Amount
+	ApprovalDeadlineSeconds, ValidSeconds                          uint64
 }
 
 // DelegationView is a delegation as stored, and the task bound to it.
@@ -404,10 +404,10 @@ type ApprovalRequest struct {
 // by another request) and Outcome is "closed", or the quote changed and
 // this request superseded it ("superseded").
 type ApprovalResult struct {
-	Outcome  string       `json:"outcome"`
-	Replay   bool         `json:"replay"`
-	TaskID   string       `json:"task_id"`
-	Purchase PurchaseView `json:"purchase"`
+	Outcome  string                          `json:"outcome"`
+	Replay   bool                            `json:"replay"`
+	TaskID   string                          `json:"task_id"`
+	Purchase PurchaseView                    `json:"purchase"`
 	Grant    *paycontract.AuthorizationGrant `json:"grant,omitempty"`
 }
 
@@ -579,7 +579,9 @@ func (s *Store) Approvals(consumerID string, limit int) ([]ApprovalItem, error) 
 			}
 		}
 	}
-	slices.SortFunc(out, func(a, b ApprovalItem) int { return int(b.Purchase.Approval.OpenedAt) - int(a.Purchase.Approval.OpenedAt) })
+	slices.SortFunc(out, func(a, b ApprovalItem) int {
+		return int(b.Purchase.Approval.OpenedAt) - int(a.Purchase.Approval.OpenedAt)
+	})
 	if len(out) > limit {
 		out = out[:limit]
 	}

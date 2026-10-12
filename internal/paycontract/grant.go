@@ -34,7 +34,9 @@ type Delegation struct {
 func DelegationID(requestID string) string { return "dlg-" + short(requestID) }
 
 // SessionID is the one approval session of a task's purchase.
-func SessionID(taskID, purchaseOrderID string) string { return "aps-" + short(taskID+"\x00"+purchaseOrderID) }
+func SessionID(taskID, purchaseOrderID string) string {
+	return "aps-" + short(taskID+"\x00"+purchaseOrderID)
+}
 
 // GrantID (the grant's jti) is derived from its session: a session can
 // never have two grants.

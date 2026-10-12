@@ -160,8 +160,60 @@ try {
   await shot("p1a-390x844-3-approved");
   await size(1440, 900);
   if (preview) throw new Error("preview: stopped after the main line");
+
+  // ---- 4 a second purchase of A, denied with the keyboard only ----
+  mark("deny by keyboard");
+  const key = async (k) => {
+    const code = { Tab: 9, Enter: 13 }[k];
+    await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code: k, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code, ...(k === "Enter" ? { text: "\r" } : {}) });
+    await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: k, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
+    await sleep(150);
+  };
+  const active = () => b.evaluate(`(document.activeElement && (document.activeElement.className || document.activeElement.id)) || ""`);
+  check("建立委託 → 確認 again: A's second run", await click(`.agent-card[data-consumer="consumer-a"] .agent-delegate[data-scenario="pay-a"]`)
+    && await click(`.delegation[data-scenario="pay-a"] .delegation-confirm`) && await b.waitFor(`document.getElementById("run-status").textContent.includes("已開始 show-a-02")`, 20000), await text("#run-status"));
+  check("A's new Ask is the one 需要你處理 shows", await b.waitFor(`!!document.querySelector("#approval .approval-head[data-state=pending]")`, 30000), await text("#approval-body"));
+  await b.evaluate(`(document.getElementById("approval-title").focus(), true)`);
+  await key("Tab");
+  check("Tab from the heading reaches 核准此筆（模擬） first", (await active()).startsWith("approval-approve"), await active());
+  await key("Tab");
+  check("the next Tab reaches 拒絕", (await active()).startsWith("approval-deny"), await active());
+  await key("Enter");
+  check("Enter on 拒絕: 已拒絕, no grant", await b.waitFor(`(document.querySelector("#approval .approval-head[data-state=denied] h3") || {}).textContent === "已拒絕"`, 15000), await text("#approval-body"));
+  const td = await hostTask("show-a-02");
+  check("the Store: denied, no grant", td.purchases[0].approval.state === "denied" && !td.purchases[0].approval.grant, JSON.stringify(td.purchases[0].approval));
+  check("the scene: A leaves with the denial's code (Unity's M1 phase denied)", await shows("consumer-a", "show-a-02", "denied"));
+  await shot("p1a-1440x900-4-denied");
+
+  // ---- 5 an Ask whose deadline passes (5 s): the backend expires it ----
+  mark("expiry");
+  check("A's 5 s run asks", await click(`.agent-card[data-consumer="consumer-a"] .agent-delegate[data-scenario="pay-a-short"]`)
+    && await click(`.delegation[data-scenario="pay-a-short"] .delegation-confirm`) && await b.waitFor(`!!document.querySelector("#approval .approval-head[data-state=pending]")`, 30000));
+  check("at the deadline: 已過期，無法核准 (the backend's word), no buttons", await b.waitFor(`(document.querySelector("#approval .approval-head[data-state=expired] h3") || {}).textContent === "已過期，無法核准"
+    && !document.querySelector("#approval .approval-approve")`, 20000), await text("#approval-body"));
+  const te = await hostTask("show-a-03");
+  check("the Store: expired, no grant", te.purchases[0].approval.state === "expired" && !te.purchases[0].approval.grant);
+  await shot("p1a-1440x900-5-expired");
+
+  // ---- 6 act as B: A's capability goes; B sees only B's ----
+  mark("act as B");
+  check("以 B 模擬: the chip says B; A's card offers 以 A 模擬 again", await click(`.agent-card[data-consumer="consumer-b"] .agent-sim`)
+    && await b.waitFor(`document.getElementById("sim-chip").textContent.includes("客人 B") && !!${card("consumer-a")}.querySelector(".agent-sim")`, 10000));
+  check("B has nothing to approve; A's sessions are not shown", await b.waitFor(`document.getElementById("approval-body").textContent.includes("客人 B 目前沒有需要你處理的請購")`, 10000), await text("#approval-body"));
+  check("B's delegation and run: B's Ask, B's wallet", await click(`.agent-card[data-consumer="consumer-b"] .agent-delegate[data-scenario="pay-b"]`)
+    && await click(`.delegation[data-scenario="pay-b"] .delegation-confirm`)
+    && await b.waitFor(`!!document.querySelector("#approval .approval-head[data-state=pending]") && document.getElementById("approval-body").textContent.includes("客人 B 的測試錢包 0x2222")`, 30000), await text("#approval-body"));
+  const ra = await fetch("http://" + addr + "/api/sim/approvals", { headers: { Authorization: "Bearer " + t.op } });
+  check("the operator token does not read approvals", ra.status === 403);
+  await shot("p1a-1440x900-6-b-ask");
+  for (const [w, h] of [[1280, 900], [390, 844]]) { await size(w, h); await shot("p1a-" + w + "x" + h + "-6-b-ask"); }
+  await size(1440, 900);
+  check("approve B: B's own grant; A's results untouched", await click("#approval .approval-approve")
+    && await b.waitFor(`(document.querySelector("#approval .approval-head[data-state=approved] h3") || {}).textContent === "已核准（模擬），未啟用付款"`, 15000)
+    && (await hostTask("show-a-02")).purchases[0].approval.state === "denied" && (await hostTask("show-b-01")).purchases[0].approval.grant.authorization_method === "simulated");
+  check("the flow ran to its end", true);
 } catch (e) {
-  if (!(preview && String(e.message).startsWith("preview"))) { failures++; log("FAIL exception: " + (e && e.stack || e)); }
+  if (!(preview && String(e.message).startsWith("preview"))) check("the flow ran to its end", false, String(e && e.stack || e).slice(0, 400));
 } finally {
   if (b) {
     const errs = b.consoleText.filter((x) => !/favicon/.test(x));
@@ -170,8 +222,8 @@ try {
     b.close();
   }
   if (demo) await demo.stop();
-  writeFileSync(join(out, "p1a-ui.txt"), lines.join("\n") + "\n" + (failures ? failures + " FAIL" : "all PASS") + "\n");
+  log("result: " + (failures ? "FAIL (" + failures + ")" : "PASS"));
+  writeFileSync(join(out, "p1a-ui.txt"), lines.join("\n") + "\n");
   console.log("evidence: " + out);
-  console.log(failures ? failures + " FAIL" : "all PASS");
   process.exit(failures ? 1 : 0);
 }

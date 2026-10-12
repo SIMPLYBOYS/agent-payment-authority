@@ -118,15 +118,15 @@ func decodeSnapshot(q interface {
 // taskTx is one write transaction's view of one task: its stored events and
 // purchases, plus the events this transaction appends.
 type taskTx struct {
-	tx        *sql.Tx
-	now       uint64
-	row       taskRow
-	reg       *contracts.Registry
-	regCfg    contracts.RegistryConfig
-	terms     terms
-	events    []contracts.AuditEvent
-	stored    int // events[:stored] are already in the database
-	purchases map[string]*purchaseRow
+	tx         *sql.Tx
+	now        uint64
+	row        taskRow
+	reg        *contracts.Registry
+	regCfg     contracts.RegistryConfig
+	terms      terms
+	events     []contracts.AuditEvent
+	stored     int // events[:stored] are already in the database
+	purchases  map[string]*purchaseRow
 	delegation string // apa.pay.v1: the bound delegation's ID
 }
 
@@ -879,10 +879,10 @@ type TaskView struct {
 	ContractVersion string         `json:"contract_version"`
 	DelegationID    string         `json:"delegation_id,omitempty"` // apa.pay.v1: the bound delegation
 	Status          string         `json:"status"`
-	DenyReason     string         `json:"deny_reason,omitempty"`
-	AsOfSequence   uint64         `json:"as_of_sequence"`
-	AsOfObservedAt uint64         `json:"as_of_observed_at"`
-	Purchases      []PurchaseView `json:"purchases"`
+	DenyReason      string         `json:"deny_reason,omitempty"`
+	AsOfSequence    uint64         `json:"as_of_sequence"`
+	AsOfObservedAt  uint64         `json:"as_of_observed_at"`
+	Purchases       []PurchaseView `json:"purchases"`
 }
 
 func (t *taskTx) view(p *purchaseRow) PurchaseView {

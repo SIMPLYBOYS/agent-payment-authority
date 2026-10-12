@@ -320,3 +320,21 @@ func TestP1aLiveCatalogRefusesPayContract(t *testing.T) {
 		t.Fatalf("the fake catalog: %v", err)
 	}
 }
+
+// A live host (its CLI is this test's fake behind a version script; nothing
+// real runs) has no simulated approver: the operator's request is refused,
+// and no run starts.
+func TestP1aLiveHostHasNoSimulation(t *testing.T) {
+	l := newLiveCLI(t)
+	h := startHost(t, l.opts(false))
+	defer h.stop()
+	if code, b := h.post("/api/host/simulate", h.tokens["operator"], `{"consumer_id":"consumer-a"}`); code != 403 || b["error"] != "simulation_unavailable" {
+		t.Fatalf("simulate on a live host: %d %v", code, b)
+	}
+	if code, _, _ := h.get("/api/sim/approvals", h.tokens["operator"]); code != 403 {
+		t.Fatalf("approvals on a live host: %d", code)
+	}
+	if code, raw, _ := h.get("/api/host/runs", h.tokens["operator"]); code != 200 || strings.Contains(string(raw), "run_id") {
+		t.Fatalf("runs: %d %s", code, raw)
+	}
+}
