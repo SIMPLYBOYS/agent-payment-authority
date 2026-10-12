@@ -1,7 +1,8 @@
 # P1-a：委託與單筆模擬核准
 
 > 2026-10-12，Claude Code。依 vault〈Claude-Code-P1-a委託與單筆模擬核准實作派工-b0700a7-20261012〉。分支 `commercial-p1a`，基準 `b0700a7`。
-> **狀態：P1-a 已實作，待 Codex review 與 Aaron fake 操作驗收。** 本文的驗證結果都由 Claude Code 執行，待 Codex 核對；沒有 Codex 獨立重跑，也沒有 Aaron 的體驗判定（首版截圖 Aaron 已看過，回覆「目前是滿意的」，這不是 fake 操作驗收）。
+> **狀態（10/12）：P1-a R1～R3 補正完成，待 Codex 限定複核；Aaron 已提供階段性 fake 操作回饋。** 歷程：P1-a 實作與定向驗證到 `f95415d`（第 1–7 節，保留當時文字）；Codex 對 `f95415d` 的限定複核暫不通過，提出 R1～R3，本輪補正見第 8 節。本文的驗證結果都由 Claude Code 執行，待 Codex 核對。
+> **Aaron 的回饋**（原話，本人操作與判定）：首版截圖「我實際看過截圖，目前是滿意的」；實際 fake 操作後「以實際操作過，暫時沒太大問題。」後者是階段性的 fake 體驗確認，不是逐項清單通過，也不取代技術複核。
 > 本片**不付款**：核准只留下一筆明標 `simulated` 的授權（grant），它不能取得付款能力；沒有金鑰、簽署、faucet、部署或交易，沒有執行真實 CLI。
 
 設計依據是 [commercial-transaction-flow.md](commercial-transaction-flow.md) 第 7–11 節。三項前置決定已由 Aaron 核准：付款帳戶採 EOA＋EIP-3009（[ADR](adr/payment-account-model.md) 改為 Accepted，`5aa5f12` 提交 Codex 依核准寫入的修改）；首片只用 fake 模式的模擬核准者；`apa.pay.v1` 接線與 schema 3 範圍照第 10 節。
@@ -102,3 +103,46 @@
 - 沒有執行真實 Claude CLI、版本或登入查詢，沒有讀個人設定或 keychain；Gate、認證與 CLI 釘選不變。
 - 沒有重建 Unity、沒有跑 Unity 測試（Unity 沒有改）；沒有跑完整容器、全部突變或完整 M1 產包。
 - 付款帳戶 ADR 的 Accepted 不授權上述任何外部執行。
+
+## 8 Codex 限定複核 R1～R3 補正（基準 `f95415d`）
+
+Codex 前輪核對的是原始碼、文件，以及部分驗證摘要與反向輸出。Docker daemon 沒有啟動，所以 Codex 沒有獨立執行測試、瀏覽器或資料庫竄改重現。以下都是 Claude Code 執行，待 Codex 核對。`560c354` 的反向檢查仍照第 5.1 節記錄：前 16 項完成後中斷，第 17 項另行補跑；這兩次執行的歸屬分開，沒有改寫成單輪 17 項全過。
+
+| 項目 | 原問題 | 修正 | 位置 |
+|---|---|---|---|
+| R1 核准焦點 | 面板重畫時只依按鈕的 class 恢復焦點；如果待處理的那一筆換成另一筆，焦點會落到另一筆的核准或拒絕按鈕上 | 核准、拒絕、證據按鈕都帶著憑證世代、模擬能力、consumer、task、會話與 `intent_hash`（`adapter.approvalTarget`）。重畫後，焦點只回到「同一筆、同一能力、同一世代」的同一個按鈕（`sameTarget`）；送出類按鈕還要求該會話仍是 pending。其他情況焦點交給「需要你處理」標題，標題不會送出任何操作。期限到時倒數會停用按鈕，若該按鈕正有焦點，先把焦點交給標題。不自動點擊；使用者已把焦點移開時，不會搶回 | `web/host.js`、`web/adapter.js` |
+| R2 模擬身分與重送 | `once` 只核對憑證世代，切換模擬客人不會改變世代，所以網路錯誤後的重送會取用當下的能力。後端仍有 consumer 檢查，這不是已證明的跨客人核准漏洞，而是前端操作的身分與結果歸屬不完整 | 委託確認與核准／拒絕這兩種操作，從第一次請求到重送結束都固定在開始時的那一份能力（以物件本身比對，A→B→A 也算更換）。等待前後、例外後都檢查。能力一旦更換就不再送出，操作回傳 `superseded`；舊操作晚到的成功、錯誤或沒有回覆，都不套用到新客人的面板，也不移動焦點；被取代的委託確認不會開始場次。頁面只在狀態列說明「結果未確認，可能已被後端記錄」，並以目前身分重新讀取。同一能力內的重送仍用原 request ID、原內容，次數上限不變 | `web/hostcreds.js`、`web/host.js` |
+| R3 復原與到期的期限 | 會話建立時取兩者較早的期限是對的，但復原檢查沒有重新核對 `expires_at`，到期處理也直接用這個欄位；grant 的時間也沒有和會話、付款綁定完整比對 | 會話期限一律由已驗證的決策時間、terms 的核准秒數和 `valid_before` 重算（`sessionDeadline`）。復原檢查要求存的值與重算值相同，到期處理也用重算值。grant 的到期必須等於 `valid_before`；發出時間必須等於會話的關閉時間、grants 列的 `issued_at` 與 `GRANT_ISSUED` 的時間；核准者必須等於會話的 `resolved_by`；body 必須是 canonical。發 grant 時到期直接取 `valid_before`（核准時一定早於它）。不加外部錨點或簽章，也不修改歷史資料 | `internal/store/pay.go`、`ops.go` |
+
+### 8.1 修正前的定向結果（R3）
+
+基準 `f95415d`，先寫 `TestPayRecoveryDeadlines`，竄改只做在測試自己建立的資料庫上：
+- 兩個合法檔案（pending、approved）照常重新開啟。
+- 六種竄改全部被接受：pending 會話的期限往後或往前、approved 會話的期限往後、grant body 的到期或發出時間、grants 列的 `issued_at`。
+
+紀錄在 `artifacts/p1a/r3-before-fix/go-test.txt`（本機，git 忽略；`go test -run TestPayRecoveryDeadlines -v`，exit 1）。修正後六種竄改全部拒絕，合法檔案照常開啟。另外新增 `TestPayExpiryIgnoresStoredDeadline`：Store 開著的時候把檔案裡的期限往後改，到了重算的期限仍然到期。
+
+### 8.2 本輪驗證（基準 `c547ca4`）
+
+計畫 `scripts/verify/p1a-r-check-plan.json`，用 `go run ./cmd/m1-check --plan scripts/verify/p1a-r-check-plan.json --out artifacts/p1a` 執行，結果在 `artifacts/p1a/m1-check-20261012T104237Z/`。整個 run exit 0，7 步都通過，同一次執行完成：
+
+| 步驟 | 結果 | 耗時 |
+|---|---|---|
+| go-store（`internal/store`、`internal/paycontract` 全部，含 M1 的 Store 測試，因為到期規則是共用路徑） | 79 個通過 | 13 s |
+| go-race-store（`-race`，Pay／Upgrade／Expir／Recovery／Cancel） | 27 個通過 | 50 s |
+| go-demo-p1a（`cmd/demo` 的 `TestP1a*`） | 8 個通過 | 4 s |
+| node（四個 web 單元測試檔，含 R1、R2 新測試：throw 與 timeout 兩條路徑、A→B、A→B→A、同能力重送沿用同一 request ID、晚到的成功與錯誤、`sameTarget`） | 0 fail | 6 s |
+| p1a-ui（原流程，加上 R1：兩筆待核准時，焦點在較新那筆的核准鍵上，那筆到期後焦點到標題，真正按 Enter 後另一筆仍是 pending；焦點在證據鍵上時，重畫後同樣到標題，再按 Enter 仍不核准） | PASS | 1 m 7 s |
+| ux1-focus-ui（UX1 焦點相鄰回歸） | PASS | 25 s |
+| reverse（`^P1a(-R:\|: web: a reply)`：本輪 6 項新防護，加上 1 項因程式改寫而更新錨點的既有項目） | 7／7 被預期斷言抓到 | 2 m 34 s |
+
+timeout 路徑在單元測試裡是用「以 `TimeoutError` 拒絕」模擬的，走的是和真正逾時同一個 catch，不是等 8 秒的真實逾時。
+
+**本輪沒有跑**：完整 P1-a 計畫、其他瀏覽器流程（ux1-ui、dual、browser-ui 等）、M1 證據包與產包、完整容器、全部突變、Unity。理由是本輪只改了核准面板、hostcreds 和 Store 的 v1 期限；M1 的 Store 測試已包含在 go-store 裡。
+
+### 8.3 暫不擴大的項目
+
+- **Unity**：本輪不改、不重建。頁面保留中文「已核准（模擬），未啟用付款」。場景裡沿用 M1 的 `ALLOW - no payment capability` 標籤，這只是呈現限制，不能當成 Policy 改判 Allow 或正式核准的證據；專屬文字留到後續呈現修正。
+- **`TestTimingInterleaved`**：另列為既有失敗追蹤。它在 `b0700a7` 乾淨的 worktree 上同樣失敗（Claude Code 的核對，Codex 尚未獨立確認）。計畫裡用 `-skip` 排除，skip 不算通過，本輪也不擴修。
+- 沒有執行真實 CLI、版本或登入查詢；沒有金鑰、正式 Signer、WebAuthn、交易、付款或交付。P1-b 未開工。
+
