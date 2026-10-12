@@ -78,7 +78,7 @@ Signer 自己重算並核對一切；鏈上預留驗證完成之前（P2 之前�
 |---|---|---|---|---|
 | Agent（Claude CLI）與 MCP bridge | Aaron（Host 啟動） | 這一場的 MCP 能力 | 三個業務工具 | 讀付款金鑰（OS 權限）；要求超出常設委託的付款 |
 | Go Host（Store、Policy、Approval 元件） | Aaron | Host DB、demo token；**沒有任何簽發金鑰** | 組請購、裁決、轉送本人核准的 assertion、向 Signer 請求簽署、保存 attempt 鏡像、在自己的 API 依 consumer 篩選 | 讀付款金鑰；建立或放寬常設委託；偽造本人核准 |
-| Signer | `apa-signer`（一般使用者，非管理員） | 付款金鑰（記憶體）、Signer DB、可信設定 | 驗證後簽一筆 EIP-3009 `TransferWithAuthorization` | 簽任意 bytes 或交易；送交易；連網；修改自己的設定 |
+| Signer | `apa-signer`（一般使用者，非管理員） | 付款金鑰（記憶體）、Signer DB、可信設定 | 驗證後簽一筆 EIP-3009 `TransferWithAuthorization` | 簽任意 bytes 或交易；送交易；連網（程式沒有網路用戶端，**沒有 OS 強制**，見 OS 隔離方案 D7）；修改自己的設定（程式沒有寫入路徑；**`apa-signer` 被攻破時可改**，見第 3.5 節） |
 | 管理者（Aaron，本機管理員） | sudo | 一切 | 建帳號、寫 Signer 設定（常設委託、核准者公鑰）、解鎖 | 本設計不防禦管理員 |
 
 資料流：
@@ -124,7 +124,9 @@ Signer 自己重算並核對一切；鏈上預留驗證完成之前（P2 之前�
 
 ### 3.5 Signer 的可信設定
 
-`apa-signer` 擁有，只有管理者能改；請求不能指定檔案路徑、金鑰或委託內容：
+`apa-signer` 擁有；請求不能指定檔案路徑、金鑰或委託內容。Host 與 Agent（Aaron 的 uid）不能讀或改它；Signer 的程式沒有任何寫入設定的路徑。
+
+> 2026-10-13 修正（OS 隔離方案 D6，Aaron 核准採 C1）：原文「只有管理者能改」在現行程式下不成立於 OS 層。`serve --dir` 要求設定所在目錄由 `apa-signer` 擁有、`0700`，所以 `apa-signer` 這個身分能改自己的設定；只有在 `apa-signer` 被攻破時才會發生，那時金鑰已經暴露（T3），改設定不會擴大損失。若之後要由 OS 強制，選項 C2（設定改放 root 擁有的位置並在啟動時檢查）需另行核准實作。見 [commercial-p1b-os-isolation.md](commercial-p1b-os-isolation.md) 第 1.4 節。
 
 ```text
 wallets:     wallet_id → { consumer_id, chain_id, address, key: <wallet_id>.key }

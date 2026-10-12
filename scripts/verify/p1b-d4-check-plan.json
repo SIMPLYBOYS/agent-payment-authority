@@ -1,0 +1,51 @@
+[
+ {
+  "name": "vet",
+  "cmd": [
+   "go",
+   "vet",
+   "./..."
+  ],
+  "timeout": 600000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "keygen-assembly",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "./cmd/apa-signer/"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "keystore",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "./internal/signer/",
+   "-run",
+   "^(TestKeyFile|TestEIP712SpecVector|TestTypeHashes|TestSignOne)$"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "reverse",
+  "cmd": [
+   "python3",
+   "-u",
+   "scripts/verify/m-b-reverse.py",
+   "--out",
+   "{dir}/reverse",
+   "^P1b-D4:"
+  ],
+  "timeout": 1200000000000,
+  "kind": "reverse"
+ }
+]

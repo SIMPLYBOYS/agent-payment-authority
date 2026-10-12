@@ -1,7 +1,8 @@
 # P1-b：OS 隔離部署最小方案
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-P1-bOS隔離部署最小方案派工-76c3673-20261013〉（Aaron 核准撰寫本方案）。分支 `commercial-p1b`，基準 `76c3673`；產品與驗證基準 `07b16fd`、`935de2f`（R1～R3 限定技術複核已通過，本方案不重開）。
-> **狀態：方案完成，待 Codex review 與 Aaron 執行核准；尚未部署，正式付款未啟用。**本文件的所有命令都**待核准後執行**：撰寫本方案時沒有試跑任何命令（包括 dry-run、語法檢查或測試替身），沒有 sudo，沒有建立使用者、群組、目錄或金鑰，沒有改權限。
+> **狀態：Aaron 已核准 D1～D7（10/13，第 8 節）；D4 的 keygen 工具與 D6 的設計措辭已完成；D1～D3、D5 待 Aaron 親自執行；尚未部署，正式付款未啟用。**
+> 以下為方案交付時（`27b6e96`）的狀態，保留原文：方案完成，待 Codex review 與 Aaron 執行核准；尚未部署，正式付款未啟用。本文件的所有命令都**待核准後執行**：撰寫本方案時沒有試跑任何命令（包括 dry-run、語法檢查或測試替身），沒有 sudo，沒有建立使用者、群組、目錄或金鑰，沒有改權限。
 > 撰寫時只做了：讀本 repo 的程式與文件、讀本機手冊（`unix(4)`、`sudoers(5)`、`dseditgroup(8)`）、讀 `/opt`、`/usr/local`、`/usr/local/bin`、`/var/db`、`/private/var/run` 五個目錄的擁有者與權限（`ls -ld`）。沒有列舉帳號、讀登入資料或探測服務。
 
 目的：補上 [commercial-p1b.md](commercial-p1b.md) 第 6 節尚未驗收的 macOS 跨使用者隔離，只涵蓋設計第 3.1 節前兩個保證（付款私鑰不可讀、服務呼叫者可識別）。第三個保證（這筆付款確實被授權）已由程式與測試涵蓋，本方案不重新證明。
@@ -135,7 +136,8 @@
 
 | # | 執行者／權限 | 操作（**待核准後執行**） | 預期 | 停止條件 |
 |---|---|---|---|---|
-| B1 | Aaron，W-admin | 寫設定（不是秘密）：先在 W-host 準備 `signer.json`（`socket` = `/opt/apa-signer/run/signer.sock`、`callers` = `[<Host 使用者的 uid>]`、`max_window_seconds` = 600、其餘依 B0／B1），再 `sudo -u apa-signer /bin/sh -c 'umask 077; cat > /opt/apa-signer/data/signer.json' < <該檔>` | 檔案 `0600`，`apa-signer` 擁有 | 非 0 → 停止 |
+| B0k | （只在 B1 做法）Aaron，W-signer | `cd /`；`sudo -u apa-signer /bin/sh -c 'umask 077; exec /opt/apa-signer/bin/apa-signer keygen --dir /opt/apa-signer/data --wallet wallet-isolation-test'`；兩次提示時由 Aaron 輸入同一個新的測試密語（至少 12 字元，只用於這把測試金鑰） | 印出「apa-signer: wallet wallet-isolation-test address 0x…」；`data/keys/wallet-isolation-test.key` 為 `0600` | 讀不到 `/dev/tty`、檔案已存在、或兩次不同 → 停止，不重試成其他名稱 |
+| B1 | Aaron，W-admin | 寫設定（不是秘密）：先在 W-host 準備 `signer.json`（`socket` = `/opt/apa-signer/run/signer.sock`、`callers` = `[<Host 使用者的 uid>]`、`max_window_seconds` = 600；B0：`wallets`、`assets`、`delegations` 都是空陣列；B1：`wallets` 只有 `{wallet_id: wallet-isolation-test, consumer_id: consumer-isolation-test, chain_id: "84532", address: <B0k 印出的地址>}`，`assets`、`delegations` 空陣列，所以沒有任何委託、sign 一定被拒），再 `sudo -u apa-signer /bin/sh -c 'umask 077; cat > /opt/apa-signer/data/signer.json' < <該檔>` | 檔案 `0600`，`apa-signer` 擁有 | 非 0 → 停止 |
 | B2 | Aaron，W-signer | `cd /`；`sudo -u apa-signer /bin/sh -c 'umask 077; exec /opt/apa-signer/bin/apa-signer serve --dir /opt/apa-signer/data'`；出現「apa-signer passphrase:」時由 Aaron 直接輸入（B0：任意一行；B1：測試金鑰的密語） | 印出「serving on /opt/apa-signer/run/signer.sock (reservation verification unavailable until P2: nothing is signed)」 | 「there is none」（讀不到 `/dev/tty`）、權限錯誤、socket 已存在 → 停止（第 5 節）。**以「不能登入、沒有 shell」的帳號經 sudo 前景啟動並讀 `/dev/tty`，是待實測項目**：sudo 直接執行指定的命令，不使用帳號的 shell；`use_pty` 若開啟，終端機會是 sudo 另配的 pty。讀不到時不改程式、不改用其他輸入方式，交 review（可能的選項見第 6 節 D3 備註） |
 | B3 | Aaron，W-host | `pgrep -u apa-signer -f '^/opt/apa-signer/bin/apa-signer serve'` | 恰好一個 PID | 0 或多個 → 停止 |
 | B4 | Aaron，W-host | `ls -led /opt/apa-signer/run/signer.sock`；`ps -o pid,user,group,command -p <PID>` | socket `srw-rw----`、`apa-signer apa-signer-clients`、沒有 ACL；程序的使用者是 `apa-signer`，命令列只有 `serve --dir …` | 群組不是 `apa-signer-clients` 或權限不同 → 停止 |
@@ -241,3 +243,37 @@
 | `/usr/local/bin` 可被 Host 使用者寫入 | 本機 `ls -ld`：`mac admin 0775` | 已讀（所以不放這裡） |
 
 Linux 容器裡的結果（前幾輪的定向 run）不是 macOS 跨使用者實測，本方案不引用為證據。
+
+## 8 核准與執行紀錄
+
+**10/13 Aaron 核准 D1～D7**（原話：「關於 d1 到 d7 我都核准」），即第 6 節各項的推薦做法：
+
+| # | 核准內容 | 現況 |
+|---|---|---|
+| D1 | 帳號、群組、Host 使用者加入 `apa-signer-clients`、`/opt/apa-signer` 樹與執行檔 | 待 Aaron 在 W-admin 親自執行（需要 sudo 密碼）；執行檔從 D4 之後的 commit 建置 |
+| D2 | A 階段 | 待 Aaron 執行 |
+| D3 | B 階段，先 B0；讀不到 `/dev/tty` 時停止另議 | 待 Aaron 執行 |
+| D4 | 建金鑰工具與一次性未注資測試金鑰 | 工具 `apa-signer keygen` 已實作於 `f047ad6`（定向驗證見第 8.1 節）；測試金鑰的建立、使用與撤回待 Aaron 在 B1 執行（步驟 B0k） |
+| D5 | A＋B0 後保留帳號、群組與目錄；撤回測試檔、B0 設定與 DB；B1 的測試金鑰在 B1 結束時撤回 | 照第 5 節撤回表執行 |
+| D6 | 採 C1 | 設計第 3.2、3.5 節措辭已改（本次提交） |
+| D7 | 「Signer 不能連網」暫標未驗證，不改全機防火牆；`sandbox-exec` 之後另行評估與核准 | 維持未驗證 |
+
+此方案與 keygen 工具尚未經 Codex review；Aaron 的核准不代表 Codex 已複核。
+
+### 8.1 D4 的定向驗證計畫（執行前）
+
+- 計畫：`scripts/verify/p1b-d4-check-plan.json`（4 步）；只列：`go run ./cmd/m1-check --plan scripts/verify/p1b-d4-check-plan.json --list`。
+- 執行：`sh scripts/verify/container-plan.sh scripts/verify/p1b-d4-check-plan.json artifacts/p1b/d4-<UTC 時間>`（同一個釘選映像與隔離方式，見 commercial-p1b.md 第 8.1 節）。預估 3–5 分鐘（scrypt 2^17 在測試裡跑數次）。
+
+| # | 步驟 | 範圍 | 上限 |
+|---|---|---|---|
+| 1 | vet | `go vet ./...` | 10 m |
+| 2 | keygen-assembly | `cmd/apa-signer` 全部：`TestKeygen`、`TestKeygenRefuses`、`TestAssemblyRefusesEveryOrder`、`TestAssemblyRefusesItsInputs` | 10 m |
+| 3 | keystore | `TestKeyFile`、`TestEIP712SpecVector`、`TestTypeHashes`、`TestSignOne`（`EncryptKey` 多了錢包 ID 檢查） | 10 m |
+| 4 | reverse | `P1b-D4:` 3 項 | 20 m |
+
+| 反向項目 | 拿掉的防護 | 測試 → 預期斷言 |
+|---|---|---|
+| 不覆寫 | 存在檢查改成恆假、`O_EXCL` 改 `O_TRUNC` | `TestKeygen` →「an existing key file was replaced」 |
+| 兩次密語一致 | 比對改成恆假 | `TestKeygenRefuses/passphrases_differ` →「passphrases differ: accepted」 |
+| 檔案權限 | `0600` 改 `0644` | `TestKeygen` →「key file mode」 |

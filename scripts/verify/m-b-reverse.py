@@ -271,6 +271,14 @@ ITEMS = [
     ("P1b-R2b: Core: a failed read is not ATTEMPT_UNKNOWN", go("./internal/signer/", "^TestFinishReadError$", ("TestFinishReadError", r"a failed read became a refusal")),
      [(SG, "\ta, found, err := c.byID(ctx, id)\n\tif err != nil { // the read failed (the request's deadline, the DB): not \"unknown\"\n\t\treturn Reply{}, err\n\t}\n\tif !found {\n\t\treturn Reply{}, Refusal(\"ATTEMPT_UNKNOWN\")\n\t}",
        "\ta, found, err := c.byID(ctx, id)\n\tif err != nil || !found {\n\t\treturn Reply{}, errors.Join(err, Refusal(\"ATTEMPT_UNKNOWN\"))\n\t}")]),
+    # D4 of the OS isolation plan (keygen); run them alone with "^P1b-D4:".
+    ("P1b-D4: keygen never replaces a key file", go("./cmd/apa-signer/", "^TestKeygen$", ("TestKeygen", r"an existing key file was replaced")),
+     [(AS, "if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {", "if _, err := os.Lstat(path); false && !errors.Is(err, os.ErrNotExist) {"),
+      (AS, "os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)", "os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)")]),
+    ("P1b-D4: keygen needs the same passphrase twice", go("./cmd/apa-signer/", "^TestKeygenRefuses$", ("TestKeygenRefuses/passphrases_differ", r"passphrases differ: accepted")),
+     [(AS, "case !bytes.Equal(pass, again):", "case false && !bytes.Equal(pass, again):")]),
+    ("P1b-D4: keygen writes the key file 0600", go("./cmd/apa-signer/", "^TestKeygen$", ("TestKeygen", r"key file mode")),
+     [(AS, "os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)", "os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)")]),
 ]
 
 ITEM_TIMEOUT = 900
