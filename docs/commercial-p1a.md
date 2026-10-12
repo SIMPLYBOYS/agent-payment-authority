@@ -52,13 +52,49 @@
 
 每一步都不會付款。結束按 Ctrl-C；場次目錄保留在 `var/present-*`。
 
-## 5 定向驗證
+## 5 定向驗證（Claude Code 執行，待 Codex 核對）
 
-（見第 5.1 節的執行紀錄。）
+計畫 `scripts/verify/p1a-check-plan.json`，以既有進度工具 `go run ./cmd/m1-check --plan scripts/verify/p1a-check-plan.json --out artifacts/p1a` 執行：每步顯示步驟、耗時、最近輸出與 log 路徑，一步失敗後其餘不跑。證據在本機 `artifacts/p1a/`（git 忽略）。各次結果分開記，沒有拼成一次全過。所有瀏覽器與 host 測試只用 fake CLI；loopback 埠在 sandbox 外綁定。
+
+| 範圍 | 對應風險 | 測試 |
+|---|---|---|
+| 契約與 Policy | 兩版本各自驗證與 digest、版本交叉誤用、付款綁定改變、Rules 的先後與 M1 輸出不變 | `internal/paycontract`（golden vectors、同欄位兩契約、綁定進 hash、裁決與事件規則）、`policy.TestRulesOrder`、`paypolicy.TestSameFieldsBothEntries`；既有 `policy`、`contracts` 測試不改 |
+| Store | 遷移與失敗保護、重啟、Ask／會話／grant 一致、沒有半份核准 | `internal/store/pay_test.go`：核准一次與重送（含重啟後）、grant 後注入失敗整筆回滾、拒絕、別人的會話、意圖不符、期限前一秒與到期、核准與取消同時（10 輪）、報價改變作廢、版本邊界、委託防護、復原檢查拒絕竄改、schema 2→3、M1 證據拒絕 v1、v1 拒絕保留原代碼；既有 schema 1→3 升級測試 |
+| 權限 | B 不能讀或核准 A；三種既有角色不能核准；live 拒絕模擬 | `cmd/demo/p1a_test.go`：`TestP1aPermissions`、`TestP1aLiveRefusesSimulation`（handler）、`TestP1aLiveHostHasNoSimulation`（live host，CLI 是測試自己的假程式） |
+| 付款界線 | 模擬 grant 沒有付款能力；不產生付款或交付的假成功 | `signer.TestStubRefusesSimulated`（兩次都拒絕，只證明樁的規則）；主線與瀏覽器檢查確認沒有 SETTLED／DELIVERED |
+| 網頁 | 正常、拒絕、到期、角色切換、鍵盤、晚到回覆 | `web/test/p1a.test.mjs`；`scripts/verify/p1a-ui.mjs`；UX1 相鄰流程 `ux1-ui.mjs`、`ux1-focus-ui.mjs` |
+| M1 | 既有契約／Policy／Store 測試與證據包 | 受影響套件的既有測試；`verify-demo` 唯讀檢查兩份既有證據包，前後比對檔案雜湊，不重新產包 |
+
+### 5.1 執行紀錄
+
+1. **完整計畫，基準 `72e0941`**（`artifacts/p1a/m1-check-20261012T071807Z/`）：
+   - go-targeted 295 個測試通過（58 s）；go-race 31 個（20 s）；go-race-demo 7 個（25 s）；vet；node 單元測試；M1 contract vectors。
+   - M1 證據包：`m1-fixture-20261009T162703Z-4ddb7a`（fixture）與 `m1-live-20261010T173831Z-9d32ef`（live）都是 `verify-demo` PASS，81 與 8 個檔案的雜湊前後相同。
+   - 瀏覽器：p1a-ui PASS（50 s）、ux1-ui PASS（1 m 42 s）、ux1-focus-ui PASS（28 s）。
+   - reverse 步驟**沒有執行**：計畫執行中我改了受版控的文件與一個測試，reverse 在 setup 拒絕（「tracked tree has changes」），所以 0 項。
+2. **只跑 reverse，基準 `ae85824`**（只多了文件與一個目錄測試，產品程式與 `72e0941` 相同；`m1-check-20261012T072330Z`）：17 項中 14 項被預期斷言抓到，3 項沒有：
+   - 「task 存的版本選入口」：突變後仍被拒絕，但代碼是 `INVALID_PURCHASE`。原因是 Store 的 `contractRefusal` 只讀 M1 的錯誤代碼，`paycontract` 的代碼都被換成 `INVALID_PURCHASE`。這是產品的小錯（拒絕仍成立，只是代碼錯），已在 `560c354` 修正並補測試 `TestPayRefusalKeepsItsCode`。
+   - 「委託不寬於 profile」：我的突變寫法編譯失敗（變數未使用），不算抓到；已改正寫法。
+   - 「付款綁定在 hash 裡」：我的突變用了空的綁定，金額無法序列化，測試先崩潰，不算抓到；已改正寫法。
+3. **修正後只重跑受影響部分，基準 `560c354`**（`m1-check-20261012T072740Z`）：
+   - go-targeted 297 個通過（55 s）；go-race 32 個（16 s）；go-race-demo 8 個（24 s）；vet。
+   - reverse 在第 17 項（瀏覽器）時，Claude Code 的工作階段結束，被中斷（`INTERRUPTED`）。中斷前完成的 16 項全部被預期斷言抓到，包含上一輪沒抓到的 3 項。
+4. **補跑第 17 項，基準 `560c354`**（`m1-check-20261012T100102Z`）：「建立委託要先以該客人模擬」被 p1a-ui 的預期檢查抓到。
+
+合計：在 `560c354` 上，17 項核心防護都各自被預期斷言抓到（第 3、4 兩次執行合起來；第 3 次是中斷的執行，只計它完成的 16 項）。`560c354` 只改了 Store 的拒絕代碼對應，所以瀏覽器流程與 M1 證據包沒有在它上面重跑，結果沿用第 1 次（`72e0941`）。
+
+**沒有跑的**：
+- 完整容器、全部突變、完整 M1 產包、真實展示；
+- Unity 測試與建置（Unity 沒有改）；
+- `make present-p1a` 本身的配對流程。目錄由 `TestP1aShippedCatalog` 檢查可載入；配對入口與 UX1 相同，是既有的 present-ui 範圍，本片沒有重跑。
+
+**既有問題，不屬本片**：`cmd/demo` 的 `TestTimingInterleaved` 在本機每次都失敗，在基準 `b0700a7` 的乾淨工作樹上同樣失敗（本輪另以 git worktree 檢出 `b0700a7` 單獨重跑），所以計畫用 `-skip` 排除它，沒有修改。
+
+**瀏覽器裡的 404**：頁面在新 task 的 Gate 通過前就去讀它，得到 404，之後重試成功（UX1 既有行為）；另有 `/favicon.ico`。這兩種都不是錯誤。
 
 ## 6 截圖
 
-首個可操作版本（基準 `27055af`，fake）：`artifacts/p1a/p1a-ui-27055afbd0b6-20261012T070253Z/`（git 忽略，本機）。`p1a-1440x900-1-delegation.png`（主畫面與委託）、`-2-ask-summary.png`（核准摘要）、`-3-approved.png` 與 `p1a-390x844-3-approved.png`（核准後未啟用付款）。和 UX1 的差異：多了角色模擬標籤、委託步驟、「需要你處理」單筆摘要與結果；場景、商店美術與 Unity 都沿用 UX1，沒有新的場景美術。
+首個可操作版本（基準 `27055af`，fake；Aaron 看過後回覆「我實際看過截圖，目前是滿意的」）：`artifacts/p1a/p1a-ui-27055afbd0b6-20261012T070253Z/`（git 忽略，本機）。`p1a-1440x900-1-delegation.png`（主畫面與委託）、`-2-ask-summary.png`（核准摘要）、`-3-approved.png` 與 `p1a-390x844-3-approved.png`（核准後未啟用付款）。和 UX1 的差異：多了角色模擬標籤、委託步驟、「需要你處理」單筆摘要與結果；場景、商店美術與 Unity 都沿用 UX1，沒有新的場景美術。
 
 ## 7 沒有做的
 
