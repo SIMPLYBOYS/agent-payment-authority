@@ -1,7 +1,7 @@
 # 核准到交易完成：最小商業流程設計
 
 > 2026-10-12，Claude Code。依 vault〈Claude-Code-核准到交易完成最小商業流程派工-20261012〉。基準 `ee9bf0e`（分支 `commercial-ux1`）。
-> **狀態（10/12，P1-a 開工後）：Codex 限定複核通過，R3 與三項概念稿語意關閉；Aaron 核准三張稿目前方向、三項決策（EOA＋EIP-3009、fake-only 模擬核准、第 10 節的接線與 schema 3）與 P1-a 實作；P1-a 已限定結案：既有階段性 fake 操作確認已記錄，c547ca4 的 R1～R3 限定技術複核通過；付款仍未啟用；P1-b 設計 R1、R2 已通過限定複核；R3、R4 補正完成，待 Codex 限定複核。尚未核准實作、依賴安裝、系統設定、建立金鑰、簽署或交易（[commercial-p1a.md](commercial-p1a.md) 第 9 節；[commercial-p1b-design.md](commercial-p1b-design.md)，其第 5.8 節是對第 11 節的修訂對照）。** 以下各節保留當時的設計文字；實作與草案的差異見 commercial-p1a.md 第 3 節。 歷程：Codex 對 `df64d13` 的設計 review 提出 R1～R4（本版第 0 節）；對 `e5d2b04` 的限定複核認為 R1、R2、R4 的設計缺口已補上，R3 的 Policy 接線與概念稿三項語意仍待補（第 0.2 節）。 （以下是本文件初版時的說明，保留原文）Aaron 核准的是「核准到交易完成的最小商業流程」這個**方向**；這不是付款帳戶模型、真實簽署、金鑰、faucet、部署或送交易的核准。付款帳戶 ADR（`docs/adr/payment-account-model.md`）當時仍是 Proposed（10/12 已改為 Accepted）。
+> **狀態（10/12，P1-a 開工後）：Codex 限定複核通過，R3 與三項概念稿語意關閉；Aaron 核准三張稿目前方向、三項決策（EOA＋EIP-3009、fake-only 模擬核准、第 10 節的接線與 schema 3）與 P1-a 實作；P1-a 已限定結案：既有階段性 fake 操作確認已記錄，c547ca4 的 R1～R3 限定技術複核通過；付款仍未啟用；P1-b 設計已通過限定複核（`e725c44`），Aaron 核准實作、兩個新依賴與常設委託的信任邊界；P1-b 已實作並完成本輪定向測試，待 Codex 技術 review；OS 隔離部署尚未驗收；正式付款仍未啟用；系統設定、展示用付款金鑰、正式簽署與交易仍未核准（[commercial-p1b.md](commercial-p1b.md)；[commercial-p1a.md](commercial-p1a.md) 第 9 節；[commercial-p1b-design.md](commercial-p1b-design.md)，其第 5.8 節是對第 11 節的修訂對照）。** 以下各節保留當時的設計文字；實作與草案的差異見 commercial-p1a.md 第 3 節。 歷程：Codex 對 `df64d13` 的設計 review 提出 R1～R4（本版第 0 節）；對 `e5d2b04` 的限定複核認為 R1、R2、R4 的設計缺口已補上，R3 的 Policy 接線與概念稿三項語意仍待補（第 0.2 節）。 （以下是本文件初版時的說明，保留原文）Aaron 核准的是「核准到交易完成的最小商業流程」這個**方向**；這不是付款帳戶模型、真實簽署、金鑰、faucet、部署或送交易的核准。付款帳戶 ADR（`docs/adr/payment-account-model.md`）當時仍是 Proposed（10/12 已改為 Accepted）。
 > 本輪只讀程式與文件、寫設計：沒有改產品、沒有跑測試或展示、沒有執行真實 CLI。M1、M-B、UX1 維持完成。
 
 依據（位置都在 repo 或 vault 的同一專案資料夾）：PRD-第一期（§3.1–3.2、§4–8、§10–12、FR-8、FR-15）、執行計畫（§1-sexies、§1-septies、§3.5、§7、§9.1、§10）、〈真人進店與授權Agent消費-後續體驗概念〉、`docs/adr/payment-account-model.md`、`docs/contracts.md`、`docs/persistence-design.md`、`docs/policy.md`、`docs/merchant.md`、`docs/commercial-demo-roadmap.md`（現行進度、§4–5、§9.2）。現行程式入口見第 2 節。
@@ -300,7 +300,7 @@ Codex 的設計一致性核對不代替 Aaron 對畫面的判定。**Aaron 要�
 | 一次性紀錄元件（若 P1-a 先做） | 首次合法消耗成功、第二次拒絕、重啟後仍是已消耗 | 元件自己的單元測試，用測試專用、非 `simulated` 的 grant 樣本，不經過 Signer 路徑 | 不讓模擬 grant 進入正式 Signer 路徑 |
 | P1-b 正式 Signer | 簽發者與完整性、意圖綁定、期限、原子消耗、重播、恢復 | P1-b 的正反例與反向（本輪不簽 grant、不建金鑰、不跑測試） | — |
 
-### 11.1 P1-b 設計對本節的修訂（10/12，待 Codex 限定複核）
+### 11.1 P1-b 設計對本節的修訂（10/12；設計已通過限定複核，已依此實作，待技術 review）
 
 上面第 11 節保留當時文字。P1-b 設計（[commercial-p1b-design.md](commercial-p1b-design.md) 第 5.8 節）的現行推薦有四點：
 - 接受時保存不可變快照，恢復只讀快照；
