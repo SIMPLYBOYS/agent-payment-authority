@@ -1,7 +1,7 @@
 # 核准到交易完成：最小商業流程設計
 
 > 2026-10-12，Claude Code。依 vault〈Claude-Code-核准到交易完成最小商業流程派工-20261012〉。基準 `ee9bf0e`（分支 `commercial-ux1`）。
-> **狀態（10/12）：R3 與概念稿語意補正完成，待 Codex 限定複核；Aaron 的視覺方向及三項實作決策待確認；P1-a 未開工。** 歷程：Codex 對 `df64d13` 的設計 review 提出 R1～R4（本版第 0 節）；對 `e5d2b04` 的限定複核認為 R1、R2、R4 的設計缺口已補上，R3 的 Policy 接線與概念稿三項語意仍待補（第 0.2 節）。 Aaron 核准的是「核准到交易完成的最小商業流程」這個**方向**；這不是付款帳戶模型、真實簽署、金鑰、faucet、部署或送交易的核准。付款帳戶 ADR（`docs/adr/payment-account-model.md`）仍是 Proposed。
+> **狀態（10/12，P1-a 開工後）：Codex 限定複核通過，R3 與三項概念稿語意關閉；Aaron 核准三張稿目前方向、三項決策（EOA＋EIP-3009、fake-only 模擬核准、第 10 節的接線與 schema 3）與 P1-a 實作；P1-a 已實作，待 Codex review 與 Aaron fake 操作驗收（[commercial-p1a.md](commercial-p1a.md)）。** 以下各節保留當時的設計文字；實作與草案的差異見 commercial-p1a.md 第 3 節。 歷程：Codex 對 `df64d13` 的設計 review 提出 R1～R4（本版第 0 節）；對 `e5d2b04` 的限定複核認為 R1、R2、R4 的設計缺口已補上，R3 的 Policy 接線與概念稿三項語意仍待補（第 0.2 節）。 Aaron 核准的是「核准到交易完成的最小商業流程」這個**方向**；這不是付款帳戶模型、真實簽署、金鑰、faucet、部署或送交易的核准。付款帳戶 ADR（`docs/adr/payment-account-model.md`）仍是 Proposed。
 > 本輪只讀程式與文件、寫設計：沒有改產品、沒有跑測試或展示、沒有執行真實 CLI。M1、M-B、UX1 維持完成。
 
 依據（位置都在 repo 或 vault 的同一專案資料夾）：PRD-第一期（§3.1–3.2、§4–8、§10–12、FR-8、FR-15）、執行計畫（§1-sexies、§1-septies、§3.5、§7、§9.1、§10）、〈真人進店與授權Agent消費-後續體驗概念〉、`docs/adr/payment-account-model.md`、`docs/contracts.md`、`docs/persistence-design.md`、`docs/policy.md`、`docs/merchant.md`、`docs/commercial-demo-roadmap.md`（現行進度、§4–5、§9.2）。現行程式入口見第 2 節。
@@ -279,7 +279,7 @@ Codex 的設計一致性核對不代替 Aaron 對畫面的判定。**Aaron 要�
 
 | 案例 | 預期 | 對應的版本或綁定防護 |
 |---|---|---|
-| 同一組商業欄位（同一商品、金額、收款人、預算）分別經 M1 與 `apa.pay.v1` | 各自走自己的驗證；digest 不同（網域不同）；兩個入口的裁決種類與理由一致（共用 `Rules`） | 入口依版本；digest 網域分開 |
+| 同一組商業欄位（同一商品、金額、收款人、預算）分別經 M1 與 `apa.pay.v1` | 各自走自己的驗證；digest 不同（網域不同）；共用規則的結果一致，各入口依自己的契約映射理由（M1 的 Allow 仍是 `PAYMENT_CAPABILITY_UNAVAILABLE`，v1 是 `WITHIN_ALLOW_MAX`；不要求兩種契約的原始理由碼完全相同） | 入口依版本；digest 網域分開 |
 | `PaymentBinding` 改一個欄位（例如收款人或 nonce） | v1 `intent_hash` 改變；舊的核准會話拒絕核准（`intent_hash` 不符），舊 grant 不適用 | 會話與 grant 綁 v1 hash |
 | M1 task 收到 v1 請購、v1 task 收到 M1 請購 | 都被拒絕（明確代碼，例如 `CONTRACT_VERSION_MISMATCH`）；請購內容不能選入口 | 入口由 `tasks.contract_version` 決定 |
 | 既有 M1 判定 | `policy` 的現有測試與 M1 凍結案例的裁決與 digest 逐項不變；M1 檢查器在既有證據上結果不變（不重新產包） | `policy.Decide` 不變 |

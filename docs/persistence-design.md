@@ -556,3 +556,14 @@ registry、consumer／wallet 歸屬、請購格式與 hash、事件與投影一�
 - B1-06 的主持人 HTTP 端點（上列要求）。
 
 本結案紀錄由 main 上的文件 commit 記錄，沒有改寫已驗收的 commit。
+
+## Schema 3（P1-a，2026-10-12）
+
+`apa.pay.v1` 的委託與單筆模擬核准（[commercial-p1a.md](commercial-p1a.md)；設計見 commercial-transaction-flow.md 第 10 節）。實作在 `internal/store/store.go`（`schema3`）與 `pay.go`。
+
+- `tasks.contract_version`（`apa.m1.v2`｜`apa.pay.v1`，既有列為 `apa.m1.v2`）；`host_runs.contract_version` 與 `delegation_id`（`apa.pay.v1` 的 run 必有，M1 的必無）。
+- `delegations`：確認過的委託（canonical body 與欄位）；`task_id`／`bound_at` 在 Gate 通過、task 建立的同一交易寫入，之後不能再綁。
+- `approval_sessions`：每個 v1 Ask 一個，與 Ask 同一交易建立；`state` pending → approved｜denied｜expired｜withdrawn｜superseded；approved／denied 必有 `resolve_request_id`（唯一，同一請求重送回原結果）與 `resolved_by`。
+- `grants`：一個 approved 會話一筆，`jti` 由會話導出；`authorization_method` 由 CHECK 限定 `simulated`；與會話的關閉、`APPROVED`、`GRANT_ISSUED` 在同一交易。
+- 升級：`--upgrade-db` 接受 schema 1 或 2，先以舊版驗證、`VACUUM INTO` 備份（`<db>.schema<舊版>-<時間>.bak`）、單一交易加上缺少的部分、再以 schema 3 驗證；沒有旗標時舊檔原樣拒絕。歷史模式的 schema 2 紀錄照舊唯讀開啟、不遷移。
+- 復原檢查新增：v1 task 的委託與 `DELEGATION_BOUND` 一致；每個 Ask 恰一個會話、意圖與開啟時間相符、狀態與請購收尾一致、`APPROVAL_SESSION_OPENED` 存在；approved 會話恰一筆 grant 與 `GRANT_ISSUED`；M1 task 沒有會話或委託；委託 body 與欄位一致。

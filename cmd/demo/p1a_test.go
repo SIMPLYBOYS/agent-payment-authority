@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 )
 
 // payCatalog: an apa.pay.v1 entry per consumer (the main line asks: 0.50 is
@@ -336,5 +337,27 @@ func TestP1aLiveHostHasNoSimulation(t *testing.T) {
 	}
 	if code, raw, _ := h.get("/api/host/runs", h.tokens["operator"]); code != 200 || strings.Contains(string(raw), "run_id") {
 		t.Fatalf("runs: %d %s", code, raw)
+	}
+}
+
+// The shipped P1-a catalog (make present-p1a) loads in fake mode and its
+// delegations fit the demo profile.
+func TestP1aShippedCatalog(t *testing.T) {
+	var regCfg contracts.RegistryConfig
+	if err := decodeFile("testdata/demo/registry.json", &regCfg); err != nil {
+		t.Fatal(err)
+	}
+	reg, _ := contracts.NewRegistry(regCfg)
+	scs, err := loadScenarios("testdata/demo/scenarios-p1a.json", reg, regCfg, false)
+	if err != nil || len(scs) != 2 || scs["pay-a"].version() != "apa.pay.v1" || scs["pay-b"].ConsumerID != "consumer-b" {
+		t.Fatalf("catalog: %v %v", scs, err)
+	}
+	raw, err := os.ReadFile("testdata/policy/m1-demo-profile.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := policy.LoadProfile(raw)
+	if err != nil || checkDelegations(scs, p) != nil {
+		t.Fatalf("profile: %v / %v", err, checkDelegations(scs, p))
 	}
 }
