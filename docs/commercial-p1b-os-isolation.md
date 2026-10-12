@@ -1,0 +1,243 @@
+# P1-b：OS 隔離部署最小方案
+
+> 2026-10-13，Claude Code。依 vault〈Claude-Code-P1-bOS隔離部署最小方案派工-76c3673-20261013〉（Aaron 核准撰寫本方案）。分支 `commercial-p1b`，基準 `76c3673`；產品與驗證基準 `07b16fd`、`935de2f`（R1～R3 限定技術複核已通過，本方案不重開）。
+> **狀態：方案完成，待 Codex review 與 Aaron 執行核准；尚未部署，正式付款未啟用。**本文件的所有命令都**待核准後執行**：撰寫本方案時沒有試跑任何命令（包括 dry-run、語法檢查或測試替身），沒有 sudo，沒有建立使用者、群組、目錄或金鑰，沒有改權限。
+> 撰寫時只做了：讀本 repo 的程式與文件、讀本機手冊（`unix(4)`、`sudoers(5)`、`dseditgroup(8)`）、讀 `/opt`、`/usr/local`、`/usr/local/bin`、`/var/db`、`/private/var/run` 五個目錄的擁有者與權限（`ls -ld`）。沒有列舉帳號、讀登入資料或探測服務。
+
+目的：補上 [commercial-p1b.md](commercial-p1b.md) 第 6 節尚未驗收的 macOS 跨使用者隔離，只涵蓋設計第 3.1 節前兩個保證（付款私鑰不可讀、服務呼叫者可識別）。第三個保證（這筆付款確實被授權）已由程式與測試涵蓋，本方案不重新證明。
+
+## 1 推薦配置
+
+### 1.1 身分
+
+| 身分 | 是什麼 | 用途 | 執行時查核 |
+|---|---|---|---|
+| Host 使用者 | Aaron 的一般登入帳號（目前 `mac`，本機管理員群組成員） | 執行 Host、demo 與 Agent（Claude CLI、bridge）；**Host 與 Agent 同一個 uid，OS 分不出兩者** | `id -u`、`id -Gn` |
+| `apa-signer` | 新建，非管理員、不能登入、沒有 shell、home `/var/empty`、隱藏帳號 | 只執行 Signer；擁有私有資料 | uid 與 gid 在執行時選定，不在本文寫死 |
+| `apa-signer`（群組） | 新建，`apa-signer` 的主要群組 | 私有資料的群組 | 同上 |
+| `apa-signer-clients`（群組） | 新建，成員只有 Host 使用者 | 讓 Host 使用者能進 socket 目錄、連 socket | 加入後開新終端機確認 `id -Gn` |
+| 未授權一般 uid | 既有的 `nobody`（不新增帳號） | 驗收「檔案權限擋住」 | `id nobody` |
+| 管理者 | Aaron 用 sudo | 建帳號、放置檔案、以其他身分啟動程序 | **不在防禦範圍**；管理者提升權限後看得到的東西，不代表一般 Host 讀得到 |
+
+名稱或路徑已存在就停止（第 5 節）：不覆寫、不沿用不明帳號或資料。
+
+### 1.2 檔案與目錄
+
+全部放在新建的 `/opt/apa-signer` 之下，好處是擁有者單純、撤回範圍明確。
+
+| 路徑 | 擁有者:群組 | 權限 | 用途 | 誰能做什麼 |
+|---|---|---|---|---|
+| `/opt` | `root:wheel`（既有） | `0755` | 上層 | 一般使用者只能進入 |
+| `/opt/apa-signer` | `root:wheel` | `0755` | 樹根 | 同上；Host 使用者不能新增、改名、刪除其中項目 |
+| `/opt/apa-signer/bin` | `root:wheel` | `0755` | 執行檔目錄 | 同上 |
+| `/opt/apa-signer/bin/apa-signer` | `root:wheel` | `0755` | Signer 執行檔（從已 review 的 commit 建置） | 所有人可執行；只有 root 能替換 |
+| `/opt/apa-signer/data` | `apa-signer:apa-signer` | `0700` | `serve --dir` 的私有目錄（程式要求擁有者是執行者、`0700`） | 只有 `apa-signer` 能進入 |
+| `data/signer.json` | `apa-signer:apa-signer` | `0600` | 可信設定 | 只有 `apa-signer`；**`apa-signer` 自己能改**（第 1.4 節） |
+| `data/keys` | `apa-signer:apa-signer` | `0700` | 金鑰目錄（程式要求同上） | 只有 `apa-signer` |
+| `data/keys/<wallet_id>.key` | `apa-signer:apa-signer` | `0600` | 加密金鑰檔（程式要求一般檔且 `0600` 或更嚴） | 只有 `apa-signer` |
+| `data/signer.db`（與 `-wal`、`-shm`） | `apa-signer:apa-signer` | 依 umask；啟動時設 `umask 077` 會是 `0600` | Signer DB | 上層 `0700` 已擋住其他人 |
+| `/opt/apa-signer/run` | `apa-signer:apa-signer-clients` | `0750` | socket 目錄，與私有資料分開 | 群組成員（Host 使用者）可進入，不能新增或刪除；其他人不能進入 |
+| `run/signer.sock` | `apa-signer:apa-signer-clients` | `0660` | Unix socket | Host 使用者可讀寫（能 `connect`）；`nobody` 連路徑都進不去 |
+
+**不放 `/usr/local/bin`**：本機的 `/usr/local/bin` 是 `mac:admin 0775`（Homebrew 的常見配置），Host 使用者能替換其中的檔案，等於 Host 或 Agent 能在下次啟動前換掉 Signer。**不放 `/var/run`**：本機 `/private/var/run` 是 `root:daemon 0775`，而且是否在開機時被清空沒有在本機確認。
+
+### 1.3 對各項要求的回答
+
+- **Host／Agent 能連 socket，但不能讀或改私有資料**：`run/` 給 `apa-signer-clients` 進入（`0750`），socket `0660`；`data/` 是 `apa-signer` 的 `0700`，Host 使用者連列出內容都不行。兩個目錄分開，所以為了連線開放的只有 `run/`。
+- **socket 的擁有者、群組與權限怎麼成立**：
+  - 程式（`cmd/apa-signer/main.go` `run`）在 `net.Listen` 建立 socket 後才 `chmod 0660`。擁有者是執行者 `apa-signer`。
+  - 群組：macOS 依 BSD 規則，新檔的群組取自上層目錄，所以應是 `apa-signer-clients`（**待實測**，第 2 節 B4 驗）。若不是，停止；可選的修正（如啟動後由管理者 `chgrp`，或改程式在建立後設定群組）都另行核准。
+  - `Listen` 到 `chmod` 之間，socket 的權限由 umask 決定（`umask 077` 時為 `0700`），群組成員在這段時間連不上；`run/` 本身 `0750`，其他人一直進不去。
+  - `unix(4)`（本機手冊）：`connect(2)` 的目標必須可寫，一般的檔案系統存取控制適用。所以 socket 權限是實際的門檻，不是裝飾。
+  - Host 使用者還需要能進入每一層上層目錄：`/opt`、`/opt/apa-signer` 都是 `0755`，`run/` 靠群組。
+  - **ACL**：每一層都要用 `ls -led` 確認沒有 ACL；有任何 ACL 就停止，不自行移除。
+- **Host 不能替換執行檔或放寬可信設定**：執行檔與它的上層目錄全部 `root:wheel 0755`；可信設定在 `apa-signer` 的 `0700` 目錄裡。Host 使用者雖是管理員群組成員，沒有 sudo 也不能寫這些位置。
+- **「Signer 不能修改自己的設定」**：見第 1.4 節，目前**不成立於 OS 層**。
+
+### 1.4 與設計承諾的差異：Signer 能改自己的設定
+
+設計第 3.2 節寫 Signer「不能修改自己的設定」，第 3.5 節寫設定「`apa-signer` 擁有，只有管理者能改」。兩句互相矛盾，現行程式也做不到：`assemble` 從 `--dir` 讀 `signer.json`，而 `private()` 要求這個目錄由執行者擁有、`0700`，所以 `apa-signer` 對設定檔與它的目錄都有寫入權（即使檔案改成 root 擁有，`apa-signer` 仍能在自己的目錄裡改名或刪除再重建）。目前成立的只有：Host／Agent 不能改設定；Signer 的程式沒有任何寫設定的路徑。
+
+最小選項，交 Codex review 與 Aaron 決定，本輪不改程式、不改承諾：
+
+| 選項 | 做法 | 影響 |
+|---|---|---|
+| C1（推薦先採） | 不改程式；把承諾改寫成「Host／Agent 不能改；Signer 程式沒有寫入路徑；`apa-signer` 被攻破時設定可被改」 | 與 T3 同一個前提：`apa-signer` 被攻破時金鑰已經暴露，改設定不會擴大損失 |
+| C2 | 改程式：`serve --config PATH`，設定放 `/opt/apa-signer/etc/signer.json`（`root:apa-signer 0640`，目錄 `root:wheel 0755`），啟動時檢查設定檔與每層上層目錄都不是 `apa-signer` 可寫 | 需要另行核准實作與測試；部署多一個目錄 |
+
+### 1.5 不改變的邊界
+
+- Agent 與 Host 同一個 uid：OS 分不出兩者，本方案**不**宣稱「Host 能連、Agent 不能連」（設計第 3.4 節）。
+- 已接受的同 uid 常設委託風險不變。本方案不防本機管理員，也不是完整安全稽核。
+- **網路**：設計寫 Signer「不能連網」。目前沒有任何 OS 機制強制這一點：程式沒有網路用戶端，但 `apa-signer` uid 本身可以連網。本方案把它標為**未驗證**，列為待決（第 6 節 D7）；不自行修改全機防火牆。
+- **sudo 的時間戳**：本機 `sudoers(5)` 預設每個終端機各自記錄，5 分鐘內同一終端機再用 sudo 不必輸入密碼（本機設定可能不同，第 2 節 P0 查核）。同一終端機裡的其他程式也可能沿用。所以所有 sudo 步驟都在**專用的管理終端機視窗**執行，結束時 `sudo -k`；Host、demo、Claude CLI 永遠不在這個視窗或 Signer 視窗裡執行。
+
+## 2 操作清單
+
+除非另外註明，每一步都由 **Aaron 在自己的終端機**親自執行。有三個視窗：
+- **W-admin**：管理終端機，只做 sudo 步驟；
+- **W-signer**：前景執行 Signer；
+- **W-host**：Host 使用者的一般視窗。
+
+密語只在 W-signer 的提示出現時由 Aaron 直接輸入，不放在參數、環境變數、管線、檔案或任何錄製裡，也不貼給 Claude Code 或 Codex。W-signer 不要用 `script` 或終端機錄影。
+
+證據：W-admin 與 W-host 的輸出由 Aaron 存到 `artifacts/p1b/os-isolation-<UTC 時間>/`（git 忽略），只含命令、退出碼、`id`、`ls -led` 與固定訊息。
+
+### 2.0 前置（P）
+
+| # | 執行者／權限 | 操作（**待核准後執行**） | 預期 | 停止條件 | 留下 |
+|---|---|---|---|---|---|
+| P0 | Aaron，W-admin | `sudo -l` 看 Defaults（只看 `use_pty`、`timestamp_type`、`timestamp_timeout`、`umask`、`env_reset`）；`sw_vers`；`id -u`；`id -Gn` | 記下實際值 | 輸出看不懂或與第 1.5 節假設不同 → 停止，交 review | 文字紀錄 |
+| P1 | Aaron，W-host | 從已 review 的 commit 建置：`git -C <repo> rev-parse HEAD`；`go build -o <暫存目錄>/apa-signer ./cmd/apa-signer`；`shasum -a 256 <暫存目錄>/apa-signer` | 得到執行檔與 sha256 | commit 不是核准的那一個 → 停止 | hash |
+| P2 | Aaron，W-admin | 確認名稱與路徑都不存在：`dscl . -read /Users/apa-signer`、`dscl . -read /Groups/apa-signer`、`dscl . -read /Groups/apa-signer-clients`（三者都應回「not found」類錯誤）；`ls -ld /opt/apa-signer`（應不存在）；`ls -led /opt`（應為 `root:wheel 0755`、沒有 ACL） | 都不存在 | 任一已存在、或 `/opt` 不符 → 停止 | 文字紀錄 |
+| P3 | Aaron，W-admin | 選 uid 與 gid：`dscl . -list /Users UniqueID` 與 `dscl . -list /Groups PrimaryGroupID`，在 400–499 之間（macOS 不在登入畫面顯示 500 以下）各挑一個**兩邊都未使用**的值；`apa-signer` 群組與使用者用同一個值，`apa-signer-clients` 另一個值 | 兩個未使用的值 | 找不到、或看到不認識的相近帳號 → 停止 | 選定的值 |
+
+### 2.1 帳號與目錄（S）
+
+| # | 執行者／權限 | 操作（**待核准後執行**；`<UID>`、`<GID_C>`、`<HOSTUSER>` 用 P0、P3 的值） | 預期 | 停止條件 | 留下 |
+|---|---|---|---|---|---|
+| S1 | Aaron，sudo | `sudo dseditgroup -o create -i <UID> -r "APA Signer" apa-signer`；`sudo dseditgroup -o create -i <GID_C> -r "APA Signer clients" apa-signer-clients` | 兩個群組 | 任一命令非 0 → 停止 | 兩個群組 |
+| S2 | Aaron，sudo | `sudo dscl . -create /Users/apa-signer`，再分別設定 `UniqueID <UID>`、`PrimaryGroupID <UID>`、`UserShell /usr/bin/false`、`NFSHomeDirectory /var/empty`、`RealName "APA Signer"`、`IsHidden 1`、`Password '*'` | 使用者存在、不能登入 | 任一命令非 0 → 停止，照第 5 節撤回已建立的部分 | 使用者 |
+| S3 | Aaron，sudo | `sudo dseditgroup -o edit -a <HOSTUSER> -t user apa-signer-clients` | Host 使用者成為成員 | 非 0 → 停止 | 群組成員變更 |
+| S4 | Aaron，**新開**的 W-host | `id -Gn` 含 `apa-signer-clients`；`id apa-signer` 顯示選定的 uid／gid | 生效 | 新視窗仍沒有該群組 → 登出再登入一次後再看；仍沒有 → 停止（群組生效方式**待實測**） | — |
+| S5 | Aaron，sudo | `sudo install -d -o root -g wheel -m 0755 /opt/apa-signer /opt/apa-signer/bin`；`sudo install -d -o apa-signer -g apa-signer -m 0700 /opt/apa-signer/data /opt/apa-signer/data/keys`；`sudo install -d -o apa-signer -g apa-signer-clients -m 0750 /opt/apa-signer/run`；`sudo install -o root -g wheel -m 0755 <暫存目錄>/apa-signer /opt/apa-signer/bin/apa-signer` | 目錄與執行檔就位 | 任一非 0 → 停止 | 目錄、執行檔 |
+| S6 | Aaron，W-admin | `ls -led /opt /opt/apa-signer /opt/apa-signer/bin /opt/apa-signer/bin/apa-signer /opt/apa-signer/run`；`sudo ls -led /opt/apa-signer/data /opt/apa-signer/data/keys`；`shasum -a 256 /opt/apa-signer/bin/apa-signer` | 擁有者、群組、權限同第 1.2 節；沒有 ACL；hash 等於 P1 | 任何不符或有 ACL → 停止，不自行修權限 | 文字紀錄 |
+| S7 | Aaron，W-admin | `sudo -k` | 清除時間戳 | — | — |
+
+### 2.2 A 階段：非敏感檔案的權限（A）
+
+只用公開的測試文字，**不產生付款金鑰**。
+
+| # | 執行者／權限 | 操作（**待核准後執行**） | 預期 |
+|---|---|---|---|
+| A1 | Aaron 以 sudo 切成 `apa-signer` | `sudo -u apa-signer /bin/sh -c 'umask 077; printf "%s\n" "apa-signer isolation probe, public test text" > /opt/apa-signer/data/probe.txt; printf "%s\n" "apa-signer isolation probe, public test text" > /opt/apa-signer/data/keys/probe.txt'` | 兩個檔案建立，exit 0 |
+| A2 | 同上（前置：檔案存在而且 Signer 可讀） | `sudo -u apa-signer /bin/sh -c 'id; for f in /opt/apa-signer/data/probe.txt /opt/apa-signer/data/keys/probe.txt; do test -f "$f" && test -r "$f" && test -w "$f" && echo "ok $f"; done'` | `apa-signer` 的 uid／gid，兩行 `ok` |
+| A3 | Aaron，W-host（Host 使用者，**不用 sudo**） | `id`；對兩個檔案各試：讀（`cat F`）、附加（`printf x >> F`）、替換（`cp /etc/hosts F`）、改名（`mv F F.x`）、列目錄（`ls /opt/apa-signer/data`）；每個命令後 `echo "exit=$?"` | 每一個都 exit 非 0，錯誤是「Permission denied」 |
+| A4 | Aaron，W-host | 對執行檔與它的目錄：`cp /usr/bin/true /opt/apa-signer/bin/apa-signer`、`touch /opt/apa-signer/bin/x`、`mv /opt/apa-signer/bin /opt/apa-signer/bin.x`、`touch /opt/apa-signer/run/x`；每個後 `echo "exit=$?"` | 都被拒；再做一次 S6 的 `shasum`，hash 不變 |
+| A5 | Aaron 以 sudo 切成 `nobody` | `sudo -u nobody /bin/sh -c 'id; cat /opt/apa-signer/data/probe.txt; echo "exit=$?"; ls /opt/apa-signer/run; echo "exit=$?"'` | `nobody` 的 uid；兩者都「Permission denied」、exit 非 0 |
+| A6 | Aaron，W-admin | `sudo -k` | — |
+
+判讀：只有 A2 先通過（檔案存在且 Signer 可用），A3～A5 的拒絕才算數；「No such file」、命令沒執行、路徑打錯都不算拒絕成功。A 階段只證明這些路徑的檔案權限，不代表 Signer 的 peer uid、解鎖、socket 服務或付款授權已驗收。
+
+### 2.3 B 階段：真正 Signer 的跨使用者 IPC（B）
+
+**啟動條件（核對現行程式）**：
+- `serve` 一定先開 `/dev/tty` 讀密語，再讀設定；
+- 設定裡的每個錢包都必須有能用該密語解密的金鑰檔；
+- `ParseConfig` 允許 `wallets` 為空：這時不需要任何金鑰檔，但仍會提示並讀一行密語（不使用）。
+
+因此有兩種做法，都另行核准（第 6 節 D3）：
+
+- **B0（不需金鑰，推薦先做）**：設定只有 `socket`、`callers` 與空的 `wallets`／`assets`／`delegations`。證明 `apa-signer` 能從 Aaron 的終端機前景啟動並讀 `/dev/tty`、socket 的擁有者／群組／權限、跨使用者 peer uid 判定、私有目錄不可讀。**不**證明金鑰檔在真正 Signer 下的解鎖。
+- **B1（一次性未注資測試金鑰）**：另需一個建立金鑰檔的工具（目前程式沒有，第 6 節 D4），以 `apa-signer` 身分在 `data/keys/` 建立一把只用於本驗收的金鑰（不是 A／B 展示金鑰，不注資），設定一個測試錢包（不設委託，所以 sign 一定被拒）。多證明：金鑰檔在 `apa-signer` 下解密成功、Host 使用者讀不到它。
+
+兩者都不呼叫 sign、不產生可用授權、不連 RPC 或外部服務；正式組裝的預留檢查保持不可用（`RESERVATION_UNAVAILABLE`），沒有任何繞過開關。
+
+| # | 執行者／權限 | 操作（**待核准後執行**） | 預期 | 停止條件 |
+|---|---|---|---|---|
+| B1 | Aaron，W-admin | 寫設定（不是秘密）：先在 W-host 準備 `signer.json`（`socket` = `/opt/apa-signer/run/signer.sock`、`callers` = `[<Host 使用者的 uid>]`、`max_window_seconds` = 600、其餘依 B0／B1），再 `sudo -u apa-signer /bin/sh -c 'umask 077; cat > /opt/apa-signer/data/signer.json' < <該檔>` | 檔案 `0600`，`apa-signer` 擁有 | 非 0 → 停止 |
+| B2 | Aaron，W-signer | `cd /`；`sudo -u apa-signer /bin/sh -c 'umask 077; exec /opt/apa-signer/bin/apa-signer serve --dir /opt/apa-signer/data'`；出現「apa-signer passphrase:」時由 Aaron 直接輸入（B0：任意一行；B1：測試金鑰的密語） | 印出「serving on /opt/apa-signer/run/signer.sock (reservation verification unavailable until P2: nothing is signed)」 | 「there is none」（讀不到 `/dev/tty`）、權限錯誤、socket 已存在 → 停止（第 5 節）。**以「不能登入、沒有 shell」的帳號經 sudo 前景啟動並讀 `/dev/tty`，是待實測項目**：sudo 直接執行指定的命令，不使用帳號的 shell；`use_pty` 若開啟，終端機會是 sudo 另配的 pty。讀不到時不改程式、不改用其他輸入方式，交 review（可能的選項見第 6 節 D3 備註） |
+| B3 | Aaron，W-host | `pgrep -u apa-signer -f '^/opt/apa-signer/bin/apa-signer serve'` | 恰好一個 PID | 0 或多個 → 停止 |
+| B4 | Aaron，W-host | `ls -led /opt/apa-signer/run/signer.sock`；`ps -o pid,user,group,command -p <PID>` | socket `srw-rw----`、`apa-signer apa-signer-clients`、沒有 ACL；程序的使用者是 `apa-signer`，命令列只有 `serve --dir …` | 群組不是 `apa-signer-clients` 或權限不同 → 停止 |
+| B5 | Aaron，W-host（Host 使用者） | `curl -sS --unix-socket /opt/apa-signer/run/signer.sock -w '\nHTTP=%{http_code}\n' http://signer/v1/health; echo "exit=$?"` | `{"state":"unlocked"}`、`HTTP=200`、exit 0 | 其他結果 → 停止 |
+| B6 | Aaron 以 sudo 切成 `apa-signer`（**已連線、由 peer uid 拒絕**） | `sudo -u apa-signer curl -sS --unix-socket /opt/apa-signer/run/signer.sock -w '\nHTTP=%{http_code}\n' http://signer/v1/health; echo "exit=$?"` | `{"error":"CALLER_NOT_ALLOWED"}`、`HTTP=403`、exit 0；W-signer 的 log 有一行「caller  CALLER_NOT_ALLOWED」 | 不是 403 → 停止 |
+| B7 | Aaron 以 sudo 切成 `nobody`（**檔案權限擋住**） | `sudo -u nobody curl -sS --unix-socket /opt/apa-signer/run/signer.sock http://signer/v1/health; echo "exit=$?"` | curl 回連線失敗（`Permission denied`），exit 7，沒有 HTTP 回覆；W-signer 沒有新的 log 行 | 收到任何 HTTP 回覆 → 停止 |
+| B8 | Aaron，W-host | 讀私有資料：`ls /opt/apa-signer/data`、`cat /opt/apa-signer/data/signer.json`、（B1）`cat /opt/apa-signer/data/keys/<wallet_id>.key`、`cat /opt/apa-signer/data/signer.db`；每個後 `echo "exit=$?"` | 都「Permission denied」（前置：B2 已啟動，代表 `apa-signer` 讀得到這些檔案） | — |
+| B9 | Aaron，W-admin | 只看這一個 PID：`ps -o command -p <PID>`（參數裡沒有密語）；`sudo ps -E -o command -p <PID>`（環境變數裡沒有密語；以管理者觀察，只看這個程序）；W-signer 的輸出沒有密語 | 都沒有 | 看到密語 → 立即停止 Signer、記錄，並視為該密語已洩漏 |
+| B10 | Aaron，W-signer | Ctrl-C | 程序結束；`ls /opt/apa-signer/run` 是空的（程式結束時移除 socket） | socket 留下 → 第 5 節 |
+| B11 | Aaron，W-admin | `sudo -k`；關閉 W-signer | — | — |
+
+**為什麼 403 不需要第三個帳號**：B6 用 `apa-signer` 自己當未授權的呼叫者。它擁有 socket，所以檔案權限讓它連得上；它不在 `callers`，所以由 Signer 的 peer uid 檢查回 403。B7 用既有的 `nobody`，在檔案權限就被擋住。兩者分別證明兩件事，互不代替。正式 socket 的權限沒有為測試放寬。
+
+**觀測的限制**：B9 只看這一個程序的參數、環境與輸出。沒看到不等於所有洩漏管道都不存在（例如終端機捲動緩衝、shell 歷史不會記錄提示下的輸入，但管理者的其他工具不在觀測範圍）。
+
+## 3 驗收表
+
+| 條件 | 執行身分 | 可觀測結果 | PASS | FAIL | 未驗證 | 證據 | 需核准 |
+|---|---|---|---|---|---|---|---|
+| 帳號與目錄如方案建立 | 管理者 | S6 的 `ls -led`、`id`、hash | 全部符合第 1.2 節、沒有 ACL | 任一不符 | 沒做 S6 | S6 輸出 | D1 |
+| Host 使用者讀不到私有資料 | Host 使用者 | A3、B8 的退出碼與訊息 | A2 先通過，且 A3、B8 全部 Permission denied | 任一成功 | A2 沒通過、或錯誤是 No such file | A、B 輸出 | D2、D3 |
+| Host 使用者不能替換執行檔、改設定 | Host 使用者 | A4 | 全部被拒、hash 不變 | 任一成功 | — | A4 輸出 | D2 |
+| 未授權 uid 在檔案權限被擋 | `nobody` | A5、B7 | Permission denied；B7 exit 7、沒有 HTTP 回覆 | 收到 HTTP 回覆或讀到內容 | — | A5、B7 | D2、D3 |
+| Signer 以專用 uid 前景執行，讀得到 `/dev/tty` | `apa-signer` | B2、B3、B4 | 提示出現、serving、PID 的使用者是 `apa-signer` | 無法啟動 | 只在同一 uid 做過 | B2～B4 | D3 |
+| socket 的擁有者、群組與權限 | — | B4 | `apa-signer:apa-signer-clients`、`0660`、沒有 ACL | 不同 | — | B4 | D3 |
+| Host uid 能呼叫不涉及簽署的端點 | Host 使用者 | B5 | HTTP 200 `unlocked` | 其他 | — | B5 | D3 |
+| peer uid 判定（已連線、uid 不在 `callers`） | `apa-signer` | B6 | HTTP 403 `CALLER_NOT_ALLOWED` 與 log 行 | 200 或連不上 | — | B6 | D3 |
+| 密語不在參數、環境、輸出 | 管理者觀察單一 PID | B9 | 都沒有 | 看到 | — | B9（不含密語本身） | D3 |
+| 金鑰檔在 `apa-signer` 下解鎖 | `apa-signer` | B2（B1 做法） | B1 做法下 serving | 解密失敗 | 只做 B0 | B2 | D3、D4 |
+| Signer 不能連網 | — | — | — | — | **未驗證**（目前沒有 OS 機制） | — | D7 |
+| Signer 不能改自己的設定 | — | — | — | — | **不成立於 OS 層**（第 1.4 節） | — | D6 |
+
+證據只保留前後權限、程序身分、退出碼與固定訊息；不保存私鑰、密語或完整授權。
+
+**各階段能關閉什麼**：
+- A 階段：只關閉「被測路徑的檔案權限」。
+- B0：再關閉「專用 uid 執行、socket 權限、跨使用者 peer uid 判定、私有目錄不可讀」。
+- B1：再補「金鑰檔在真正 Signer 下解鎖、且 Host 讀不到」。
+- 以上都完成，也只補設計第 3.1 節前兩個保證的部署證據。網路限制、設定不可改、管理者、同 uid 的 Agent 都仍在剩餘風險內。方案寫完或執行完，都**不**代表 P1-b 完成。
+
+## 4 剩餘風險
+
+- **三件事分開**：私有資料不可讀（OS）、呼叫者 uid 可信（OS＋Signer）、付款是否獲授權（Signer 規則，已由程式測試涵蓋）。本方案只補前兩者的部署證據。
+- **單獨的 uid 與檔案權限不等於網路隔離**：「Signer 不能連網」目前只是程式沒有網路用戶端，沒有 OS 強制，標為未驗證。
+- **管理者**：Aaron 是管理員群組成員，sudo 後能讀、改一切。本方案不防管理者，也提醒：Host 使用者本身是管理員帳號，sudo 時間戳若被同一終端機的程式沿用，就等於管理者（第 1.5 節的操作紀律只能降低、不能消除這個風險）。
+- **同 uid 的 Host 與 Agent**：可在常設委託範圍內要求付款（決策 3 已接受）；OS 分不出 Host 與 Agent。
+- **`apa-signer` 被攻破**：金鑰暴露（T3），也能改自己的設定（第 1.4 節）。
+- **備份**：`/opt/apa-signer/data` 若在 Time Machine 等備份範圍內，加密金鑰檔與 DB 會進備份（仍受密語保護）。是否排除，執行時由 Aaron 決定。
+- 這不是完整安全稽核。
+
+## 5 停止與撤回
+
+**停止**：遇到帳號／路徑衝突、權限或擁有者不符、出現 ACL、看到不明既有資料、程序沒停、無法確認執行身分、任一預期不符時，立刻停止。不自動修權限、不重試、不換路徑，記錄後交 review。
+
+**留下的 socket**（Signer 非正常結束）：
+1. 確認沒有程序：`pgrep -u apa-signer -f '^/opt/apa-signer/bin/apa-signer serve'` 沒有輸出；
+2. 確認是 socket：`test -S /opt/apa-signer/run/signer.sock`；
+3. 才移除該檔：`sudo rm /opt/apa-signer/run/signer.sock`。
+
+不依程序名稱廣泛終止任何程序。需要停止時只對 B3 那一個 PID 在 W-signer 按 Ctrl-C；不得已才 `sudo kill <PID>`，用 B3 的 PID。
+
+**撤回**（只針對本次新建、已確認的項目，依序；每一步前先 `ls -lea` 該目錄，看到清單以外的檔案就停止）：
+
+| 順序 | 項目 | 命令（**待核准後執行**） | 確認 |
+|---|---|---|---|
+| 1 | 測試檔 | `sudo rm /opt/apa-signer/data/probe.txt /opt/apa-signer/data/keys/probe.txt` | 先列出確認存在 |
+| 2 | （B1）測試金鑰檔 | `sudo rm /opt/apa-signer/data/keys/<wallet_id>.key` | 只刪這一個名稱 |
+| 3 | 設定與 DB | `sudo rm /opt/apa-signer/data/signer.json /opt/apa-signer/data/signer.db`，以及存在的話 `signer.db-wal`、`signer.db-shm` | 逐一列名 |
+| 4 | 目錄 | `sudo rmdir /opt/apa-signer/data/keys /opt/apa-signer/data /opt/apa-signer/run` | `rmdir` 只刪空目錄；失敗代表還有東西 → 停止 |
+| 5 | 執行檔與樹 | `sudo rm /opt/apa-signer/bin/apa-signer`；`sudo rmdir /opt/apa-signer/bin /opt/apa-signer` | 同上 |
+| 6 | 群組成員 | `sudo dseditgroup -o edit -d <HOSTUSER> -t user apa-signer-clients` | — |
+| 7 | 帳號與群組 | 先確認 `apa-signer` 沒有程序（`pgrep -u apa-signer` 沒有輸出），再 `sudo dscl . -delete /Users/apa-signer`、`sudo dseditgroup -o delete apa-signer-clients`、`sudo dseditgroup -o delete apa-signer` | `dscl . -read` 回 not found |
+
+不使用遞迴刪除，不對 HOME、repo 根目錄或未解析的變數執行任何刪除；`/opt` 本身與其他既有資料保持原樣。
+
+**保留或撤回**：建議 A＋B0 完成後**保留**帳號、群組與目錄（B1、之後的部署會再用），**撤回**測試檔與 B0 的設定、DB；B1 的測試金鑰檔在 B1 結束時撤回。最後由 Aaron 決定（D5）。
+
+## 6 核准清單（下一輪由 Aaron 決定；都尚未核准）
+
+| # | 事項 | 推薦 | 影響 | 核准後的出口 |
+|---|---|---|---|---|
+| D1 | 系統帳號與權限變更（第 2.0、2.1 節：使用者 `apa-signer`、兩個群組、Host 使用者加入 `apa-signer-clients`、`/opt/apa-signer` 樹與執行檔） | 照第 1 節配置；由 Aaron 在 W-admin 親自執行 | 新增一個隱藏帳號與兩個群組；Host 使用者多一個群組 | S6 的輸出符合第 1.2 節 |
+| D2 | A 階段：非敏感檔案權限驗收 | 做 | 只寫兩個公開測試檔 | A 階段的判讀（第 2.2 節） |
+| D3 | B 階段：前景啟動、`/dev/tty` 解鎖、IPC 驗收 | 先做 B0（不需金鑰）；B2 讀不到 `/dev/tty` 時停止，另議（例如改程式在 stdin 是終端機時從 stdin 讀，或調整 sudo 的 pty 設定，都需另行核准與測試） | 啟動一次真正的 Signer，不簽署 | B 階段各列 PASS／FAIL／未驗證 |
+| D4 | 一次性測試金鑰與所需工具 | 如要做 B1，另行核准一個最小的建金鑰工具：`apa-signer keygen --dir DIR --wallet ID`，以執行者身分在記憶體產生金鑰，從 `/dev/tty` 讀兩次密語，寫 `keys/<ID>.key`（`0600`、已存在就拒絕），只印出錢包 ID 與地址，附單元測試；之後才建立、使用與撤回一把未注資的測試金鑰 | 新的產品程式碼（一個子命令）與一把測試金鑰 | B1 的 B2 serving，B8 讀不到金鑰檔 |
+| D5 | 保留或撤回資源 | A＋B0 後保留帳號、群組、目錄；撤回測試檔、B0 設定與 DB | 留下一個隱藏帳號與空目錄 | 第 5 節撤回表照決定執行 |
+| D6 | 「Signer 不能改自己的設定」的承諾 | 先採 C1（改寫承諾，不改程式）；C2 列為之後的選項 | 設計文件措辭 | Codex review 後更新設計第 3.2、3.5 節 |
+| D7 | 「Signer 不能連網」的強制機制 | 暫標未驗證，不改全機防火牆；之後可評估以 `sandbox-exec` 設定檔只限制 Signer 程序（需本機實測與另行核准） | 無 | 決定接受或另開評估 |
+
+本方案不需要其他新工具：A、B 階段的檢查都用 macOS 內建命令與 `curl --unix-socket`。設計與第 6 節提到的 `scripts/verify/p1b-isolation.sh` 尚不存在，本方案不使用它。
+
+## 7 依據與待實測
+
+| 項目 | 依據 | 狀態 |
+|---|---|---|
+| `connect(2)` 需要 socket 可寫 | 本機 `unix(4)`：「the destination of a connect(2) or sendto(2) must be writable」 | 手冊；B5～B7 實測 |
+| 新檔群組取自上層目錄 | BSD 慣例 | **待實測**（B4） |
+| sudo 預設不配 pty、時間戳每個終端機各自記錄、預設 5 分鐘 | 本機 `sudoers(5)`（Sudo 1.9.5p2）：`use_pty`「off by default」、`timestamp_type` 的 `tty`、`timestamp_timeout` 預設 5 | 本機 sudoers 可能覆寫；P0 查核 |
+| `sudo -u` 直接執行命令，不用帳號的 shell；能否讀 `/dev/tty` | sudo 的一般行為 | **待實測**（B2） |
+| 群組成員變更對新的終端機或要重新登入才生效 | macOS 行為 | **待實測**（S4） |
+| `dseditgroup` 建群組與加成員的參數 | 本機 `dseditgroup(8)`：`-o create`、`-i gid`、`-r`、`-o edit -a … -t user` | 手冊 |
+| `dscl` 建使用者的欄位 | macOS 慣例 | 執行時以 `dscl . -read` 核對 |
+| `/usr/local/bin` 可被 Host 使用者寫入 | 本機 `ls -ld`：`mac admin 0775` | 已讀（所以不放這裡） |
+
+Linux 容器裡的結果（前幾輪的定向 run）不是 macOS 跨使用者實測，本方案不引用為證據。
