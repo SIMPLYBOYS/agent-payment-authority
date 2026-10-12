@@ -162,3 +162,46 @@ env HOME="$T/home" GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)"
 - 沒有建立、匯入、讀取或解鎖日常或 A／B 展示用付款金鑰；測試用的是公開向量金鑰（keccak256("cow")）與由原始碼中固定字串推導、未注資的一次性測試金鑰，金鑰檔只存在測試暫存目錄。
 - 沒有連 RPC、faucet、facilitator，沒有部署或送交易；Signer 沒有接進 present-live／present-p1a 或任何展示流程。
 - 沒有執行真實 Claude CLI、版本或登入查詢。
+
+## 8 R1～R3 限定補正（Codex 對 `22e45ed` 的技術 review）
+
+依 vault〈Claude-Code-P1-b實作R1-R3限定補正派工-22e45ed-20261012〉。Codex 的結論：P1-b 本輪限定技術 review 暫不通過，R1、R2、R3 都已用合成資料重現。這三項是實作缺口，不是重開設計的同名問題。
+
+**前輪證據歸屬**（照實記，不寫成本輪驗收）：
+- Codex 在 `22e45ed` 的暫存匯出副本加了三個定向探測，在斷網、來源唯讀、有資源上限的 Linux 容器裡執行：`TestCodexPaymentAfterCancel`（「cancelled task accepted a NEW payment request」）、`TestCodexHandlerDeadline`（5 秒期限後仍阻塞，釋放 DB 後才返回）、`TestCodexUnknownSaveFailure`（保存錯誤沒有傳回），三項都以斷言失敗重現。既有的 `TestPaymentDelegationPath`、`TestSignOne`、`TestProductionVerifierRefuses`、`TestPay` 通過；這四項不是完整套件，也沒有加 race。第一次容器探測少掛載新依賴的本機快取校驗檔，Signer／client 測試沒有啟動，補正掛載後才完成；這是環境失敗，不算產品失敗。Codex 的輸出只在對話工具紀錄，repo 沒有對應 log；前輪沒有修改產品，也沒有做 OS 跨使用者隔離、正式付款或真實 CLI。
+- Claude Code 前輪的兩份紀錄不變：`artifacts/p1b/m1-check-20261012T134841Z/`（基準 `f434d10`，前八步 PASS，第九步 28／29，整輪 FAIL）與 `artifacts/p1b/rerun-20261012T135238Z/`（基準 `0dd458a`，只補跑那一項）。Codex 核對了摘要、輸出與突變修正，沒有重跑。兩次不能合寫成同一輪九步全過。
+
+### 8.1 定向計畫（執行前）
+
+- 計畫：`scripts/verify/p1b-r-check-plan.json`（7 步）；只列步驟與反向項目：`go run ./cmd/m1-check --plan scripts/verify/p1b-r-check-plan.json --list`。
+- 執行：`sh scripts/verify/container-plan.sh scripts/verify/p1b-r-check-plan.json artifacts/p1b/r-<UTC 時間>`。
+  - 容器旗標沿用 `container-verify.sh`：`--network none`（只有 lo）、唯讀根檔案系統（映像裡的 Go 工具鏈與工具不可寫）、commit 的 clone 唯讀掛在 `/src`、tmpfs `/scratch` 放 HOME、TMPDIR 與 build cache、`--user 10001`、`--cap-drop ALL`、no-new-privileges、記憶體／pids／CPU 與 ulimit 上限、整體 45 分鐘；不掛 host home、登入資料或 Docker socket；只設白名單環境變數。映像是既有的釘選驗證映像 `apa-verify:b1-05`（Go 1.26.4、python3、git、gcc）。
+  - Go 模組：在 host 上**只從本機模組快取**（`GOPROXY=file://…`，不連網）依該 commit 的 go.sum 建一份，唯讀掛入。
+  - 唯一可寫的掛載是新的證據目錄；容器先記錄隔離探測（外網、寫 `/src`、寫工具鏈、寫模組快取、上線的網卡、uid、版本與完整環境變數）到 `isolation.txt`，再跑 m1-check。
+- 預估 6–10 分鐘（容器內 build cache 從零開始，含 race runtime）；每步上限見計畫。
+
+| # | 步驟 | 範圍 | 上限 |
+|---|---|---|---|
+| 1 | vet | `go vet ./...`；也是所有套件（含只因介面改動需要重新編譯的測試）的編譯檢查 | 10 m |
+| 2 | r1-store-race | `TestPaymentAfterCancel`（從未付款、unknown 後取消、Deny 後取消、CLI timeout 不算取消）與相鄰 `TestPayment*`、`TestUpgradeSchema3` | 10 m |
+| 3 | r1-r3-client-race | `internal/signerclient` 全部：`TestRealStoreCancel`（真 Store＋真 Signer socket）、`TestUnknownSaveFailure`、`TestUnknownThenResume`、`TestReplyLost`、`TestPay` | 10 m |
+| 4 | r2-signer-race | `TestLockWaitHonorsContext`、`TestHandlerDeadline`、`TestDeadlineAfterAccept`，以及相鄰的 IPC／恢復／期限／abandon／正例 | 10 m |
+| 5 | production-refusal | `cmd/apa-signer`（正式組裝回 `RESERVATION_UNAVAILABLE`；組裝改了恢復的 context） | 10 m |
+| 6 | adjacent-store-race | Store 的 Pay／Cancel／Upgrade／Recovery | 15 m |
+| 7 | reverse | `P1b-R:` 7 項新增，加上因程式改寫而更新錨點的 2 項既有項目 | 30 m |
+
+**反向項目**（每項先跑未突變基準；只算預期斷言命中）：
+
+| 項目 | 拿掉的防護 | 測試 → 預期斷言 |
+|---|---|---|
+| R1 新付款 | `BeginPayment` 的取消檢查改成恆假 | `TestPaymentAfterCancel/a_purchase_never_paid` →「cancelled task accepted a new payment request」 |
+| R1 既有 unknown | 同上 | `TestPaymentAfterCancel/an_unknown_attempt` →「handed out its unknown attempt for sending」 |
+| R1 接線 | 同上 | `TestRealStoreCancel` →「sign sent after cancel」 |
+| R2 鎖等待 | 錢包鎖等待不看 context | `TestLockWaitHonorsContext` →「lock wait ignored its cancellation」 |
+| R2 DB 等待 | 依 request ID 查詢不帶 context | `TestHandlerDeadline` →「handler outlived its deadline」 |
+| R3 保存失敗 | 只回 `Unknown`，丟掉保存錯誤 | `TestUnknownSaveFailure` →「save failure hidden」 |
+| R3 回傳更新後的紀錄 | 不採用更新後的 attempt | `TestUnknownThenResume` →「no Signer」 |
+| 既有（錨點更新） | abandon 取錢包鎖（`Abandon` 簽名多了 ctx） | `TestAbandonRaces/abandon_first` →「abandon blocked by the signing lock」 |
+| 既有（錨點更新） | 無回覆時不記 unknown（程式改寫） | `TestUnknownThenResume` →「no Signer」 |
+
+**不在本計畫**：原九步全部、原 29 項中其餘 27 項、完整容器七步、全部突變、M1 產包、瀏覽器、Unity、真實 CLI、cmd/demo（本輪沒有改 demo 的路徑；其 P1a／History／Cancel 測試在提交前的本機預檢通過，不算證據）。

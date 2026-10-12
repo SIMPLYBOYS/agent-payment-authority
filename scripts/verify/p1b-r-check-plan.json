@@ -1,0 +1,95 @@
+[
+ {
+  "name": "vet",
+  "cmd": [
+   "go",
+   "vet",
+   "./..."
+  ],
+  "timeout": 600000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "r1-store-race",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-race",
+   "-count=1",
+   "./internal/store/",
+   "-run",
+   "^(TestPaymentAfterCancel|TestPaymentDelegationPath|TestPaymentAttemptIDFixed|TestPaymentRefusals|TestPaymentSchemaChecks|TestUpgradeSchema3)$"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "r1-r3-client-race",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-race",
+   "-count=1",
+   "./internal/signerclient/"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "r2-signer-race",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-race",
+   "-count=1",
+   "./internal/signer/",
+   "-run",
+   "^(TestLockWaitHonorsContext|TestHandlerDeadline|TestDeadlineAfterAccept|TestServer|TestServerCaller|TestInterruptions|TestFinalDeadline|TestAcceptDeadline|TestAbandonRaces|TestWalletBusy|TestResendConflictReplay|TestConcurrentCap|TestDelegationEndsFirst|TestKeyVersionMismatch|TestSignOne|TestProductionVerifierRefuses)$"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "production-refusal",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "./cmd/apa-signer/"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "adjacent-store-race",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-race",
+   "-count=1",
+   "./internal/store/",
+   "-run",
+   "Pay|Cancel|Upgrade|Recovery"
+  ],
+  "timeout": 900000000000,
+  "kind": "go"
+ },
+ {
+  "name": "reverse",
+  "cmd": [
+   "python3",
+   "-u",
+   "scripts/verify/m-b-reverse.py",
+   "--out",
+   "{dir}/reverse",
+   "^(P1b-R:|P1b: R3-b abandon never waits|P1b: client: no reply)"
+  ],
+  "timeout": 1800000000000,
+  "kind": "reverse"
+ }
+]

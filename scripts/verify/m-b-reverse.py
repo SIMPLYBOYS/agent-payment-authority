@@ -35,6 +35,7 @@ BR = "unity/AgentPaymentAuthority/Assets/APA/Scripts/ShopBridge.cs"
 SG = "internal/signer/core.go"
 AS = "cmd/apa-signer/main.go"
 PM = "internal/store/payment.go"
+CL = "internal/signerclient/client.go"
 
 
 def node(path, test, regex):
@@ -209,7 +210,7 @@ ITEMS = [
      [(SG, "UPDATE attempts SET state = 'signed', signature = ?, signed_at = ? WHERE attempt_id = ? AND state = 'accepted' AND ? < auth_deadline`",
        "UPDATE attempts SET state = 'signed', signature = ?, signed_at = ?, closed_at = NULL WHERE attempt_id = ? AND ? < auth_deadline`")]),
     ("P1b: R3-b abandon never waits for the signing lock", go("./internal/signer/", "^TestAbandonRaces$", ("TestAbandonRaces/abandon_first", r"abandon blocked by the signing lock")),
-     [(SG, "func (c *Core) Abandon(attemptID string) (Reply, error) {\n", "func (c *Core) Abandon(attemptID string) (Reply, error) {\n\tif a, ok, _ := c.byID(attemptID); ok {\n\t\tif unlock, err := c.lockWallet(a.snap.WalletID); err == nil {\n\t\t\tdefer unlock()\n\t\t}\n\t}\n")]),
+     [(SG, "func (c *Core) Abandon(ctx context.Context, attemptID string) (Reply, error) {\n", "func (c *Core) Abandon(ctx context.Context, attemptID string) (Reply, error) {\n\tif a, ok, _ := c.byID(ctx, attemptID); ok {\n\t\tif unlock, err := c.lockWallet(ctx, a.snap.WalletID); err == nil {\n\t\t\tdefer unlock()\n\t\t}\n\t}\n")]),
     ("P1b: R3-b abandon never overwrites signed", go("./internal/signer/", "^TestAbandonRaces$", ("TestAbandonRaces/signed_first", r"abandon overwrote signed")),
      [(SG, "UPDATE attempts SET state = 'abandoned', closed_at = ? WHERE attempt_id = ? AND state = 'accepted' AND ? < auth_deadline`, now, attemptID, now)",
        "UPDATE attempts SET state = 'abandoned', closed_at = ?, signature = NULL, signed_at = NULL WHERE attempt_id = ? AND ? < auth_deadline`, now, attemptID, now)")]),
@@ -240,7 +241,23 @@ ITEMS = [
     ("P1b: R1 Store: B reads nothing of A's", go("./internal/store/", "^TestPaymentDelegationPath$", ("TestPaymentDelegationPath", r"B read A's attempt")),
      [(PM, "err == nil && consumer != consumerID {", "err == nil && len(consumer) < 0 {")]),
     ("P1b: client: no reply is recorded unknown", go("./internal/signerclient/", "^TestUnknownThenResume$", ("TestUnknownThenResume", r"no Signer")),
-     [("internal/signerclient/client.go", '\t\t\tc.ledger.UpdatePayment(a.RequestID, "unknown", a.SignerAttemptID, "")\n', "")]),
+     [(CL, 'updated, uerr := c.ledger.UpdatePayment(a.RequestID, "unknown", a.SignerAttemptID, "")', "updated, uerr := a, error(nil)")]),
+    # Review of 22e45ed (R1-R3); run them alone with "^P1b-R:".
+    ("P1b-R: R1 a cancelled task gets no payment attempt", go("./internal/store/", "^TestPaymentAfterCancel$", ("TestPaymentAfterCancel/a_purchase_never_paid", r"cancelled task accepted a new payment request")),
+     [(PM, "case slices.ContainsFunc(t.events,", "case false && slices.ContainsFunc(t.events,")]),
+    ("P1b-R: R1 a cancelled task's unknown attempt is not handed out again", go("./internal/store/", "^TestPaymentAfterCancel$", ("TestPaymentAfterCancel/an_unknown_attempt", r"handed out its unknown attempt for sending")),
+     [(PM, "case slices.ContainsFunc(t.events,", "case false && slices.ContainsFunc(t.events,")]),
+    ("P1b-R: R1 client and real Store send no sign after cancel", go("./internal/signerclient/", "^TestRealStoreCancel$", ("TestRealStoreCancel", r"sign sent after cancel")),
+     [(PM, "case slices.ContainsFunc(t.events,", "case false && slices.ContainsFunc(t.events,")]),
+    ("P1b-R: R2 the wallet lock wait ends with the request", go("./internal/signer/", "^TestLockWaitHonorsContext$", ("TestLockWaitHonorsContext", r"lock wait ignored its cancellation")),
+     [(SG, "\tcase <-ctx.Done():\n\t\treturn nil, ctx.Err()\n", "")]),
+    ("P1b-R: R2 the DB wait ends with the request", go("./internal/signer/", "^TestHandlerDeadline$", ("TestHandlerDeadline", r"handler outlived its deadline")),
+     [(SG, "return scanAttempt(c.db.QueryRowContext(ctx, `SELECT `+attemptCols+` FROM attempts WHERE request_id = ?`, id))",
+       "return scanAttempt(c.db.QueryRow(`SELECT `+attemptCols+` FROM attempts WHERE request_id = ?`, id))")]),
+    ("P1b-R: R3 a failed unknown save is reported", go("./internal/signerclient/", "^TestUnknownSaveFailure$", ("TestUnknownSaveFailure", r"save failure hidden")),
+     [(CL, 'return Result{Attempt: a}, errors.Join(Unknown, fmt.Errorf("%w: %w", NotSaved, uerr))', "return Result{Attempt: a}, Unknown")]),
+    ("P1b-R: R3 the saved unknown attempt is returned", go("./internal/signerclient/", "^TestUnknownThenResume$", ("TestUnknownThenResume", r"no Signer")),
+     [(CL, "\t\t\ta = updated\n", "\t\t\t_ = updated\n")]),
 ]
 
 ITEM_TIMEOUT = 900
