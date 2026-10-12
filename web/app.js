@@ -82,6 +82,18 @@ let replaySc = null;
 const FIRST_LOAD = "首次載入為保存的快照，未觀測進店過程";
 const art = () => unity.art === "limezu" ? "LimeZu 素材" : "placeholder，LimeZu 待接入";
 
+// Unity's WebGL input hears keys on the whole page and cancels their default
+// action, so Enter, Space and Tab did nothing on the page's own buttons and
+// fields (review of 382a4b5, R1: a keyboard user could not open or answer
+// a cancel confirmation). A key whose target is a page element other than
+// the shop's canvas keeps its default; Unity still hears it, and the page
+// itself cancels no key's default.
+for (const type of ["keydown", "keypress", "keyup"]) {
+  window.addEventListener(type, (e) => {
+    if (e.target instanceof Element && e.target.id !== "unity-canvas") e.preventDefault = () => {};
+  }, true);
+}
+
 const unity = new UnityHost($("unity-canvas"), (s, detail) => {
   const box = $("unity-status");
   if (s === "rendered2") { // the scene's (version 2): one customer's slot

@@ -436,6 +436,13 @@ function renderControl() {
   // No customer is chosen by itself (a reload or new credentials switch to
   // no one, section 13): a start opens its run, a card or the shop chooses.
   if (confirming && confirming.gen !== creds.gen) confirming = null;
+  // A confirmation whose task can no longer be cancelled (it ended, or the
+  // customer's newest run is another task) closes: never moved to another task.
+  if (confirming) {
+    const r = runs.find((x) => x.task_id === confirming.task);
+    const newest = r && runs.find((x) => x.consumer_id === r.consumer_id);
+    if (!r || !cancellable(r) || (confirming.where === "card" && newest !== r)) confirming = null;
+  }
   const ctx = { chosen, runsError: lastRunsError, tasks: lastTasks && lastTasks.gen === creds.gen && lastTasks.list };
   const models = consumers.map((c) => agentModel(c, runs, slots, ctx));
   // Rebuilt only when what the cards say changed: a poll that changes
@@ -443,7 +450,7 @@ function renderControl() {
   const key = JSON.stringify([models, scenarios, live, starting, cancelling, full, [...busy], confirming]);
   if (key !== shownControl) {
     shownControl = key;
-    pick.replaceChildren(...models.map((m) => agentCard(m, scenarios.filter((x) => x.consumer_id === m.c), { live, busy, full })));
+    keepFocus(pick, () => pick.replaceChildren(...models.map((m) => agentCard(m, scenarios.filter((x) => x.consumer_id === m.c), { live, busy, full }))));
   }
   // 一起開始: each consumer's first scenario, as separate requests; not one
   // atomic start (docs/multi-agent-demo-design.md 3.5).
@@ -474,11 +481,12 @@ function renderControl() {
   const runsKey = JSON.stringify([runs, ctx.tasks ? [...ctx.tasks.keys()].map((k) => [k, ctx.tasks.get(k).status]) : null, lastTasks && lastTasks.details ? [...lastTasks.details.keys()] : null, lastTasks && lastTasks.error, cancelling, confirming]);
   if (runsKey === shownRuns) return;
   shownRuns = runsKey;
-  $("runs").replaceChildren(...runs.map((r) => {
+  keepFocus($("runs"), () => $("runs").replaceChildren(...runs.map((r) => {
     const li = document.createElement("li");
     li.dataset.run = r.run_id;
     li.dataset.state = r.state;
     li.dataset.live = r.live || "";
+    li.dataset.gen = String(creds.gen);
     const now = taskNow(r);
     li.textContent = r.task_id + "（" + r.consumer_id + "，" + r.scenario + "）：" + runText(r) + (now ? "；" + now : "");
     if (cancellable(r)) {
@@ -494,7 +502,40 @@ function renderControl() {
       li.append(" ", b);
     }
     return li;
-  }));
+  })));
+}
+
+// keepFocus rebuilds el and gives the focus back to the same control, when
+// the focus was in el (review of 382a4b5, R1): the same kind of button for
+// the same customer or run and the same task, run or scenario, in the same
+// credentials generation. A control that is gone hands the focus to a safe
+// one of the same customer (a closed confirmation: its 取消 entry; else 選取),
+// never to another task's cancel, and nothing is clicked. A focus the user
+// moved elsewhere stays where it is.
+const FOCUS_KINDS = ["cancel-confirm", "cancel-back", "row-cancel", "task-cancel", "row-stop", "run-stop", "agent-select", "agent-start"];
+function keepFocus(el, rebuild) {
+  const a = document.activeElement;
+  const kind = a && el.contains(a) ? FOCUS_KINDS.find((k) => a.classList.contains(k)) : null;
+  const card = kind && a.closest(".agent-card"), li = kind && a.closest("li[data-run]");
+  const built = card || li; // the generation the control was made in, not the one now
+  const was = kind && { gen: Number(built ? built.dataset.gen : -1), kind, consumer: card ? card.dataset.consumer : "", run: li ? li.dataset.run : "", task: a.dataset.task || "", scenario: a.dataset.scenario || "" };
+  rebuild();
+  if (!was || (document.activeElement && document.activeElement !== document.body && document.activeElement !== a)) return;
+  const usable = (x) => !!x && !x.disabled && x.offsetParent !== null;
+  const scope = was.consumer ? el.querySelector('.agent-card[data-consumer="' + CSS.escape(was.consumer) + '"]') : was.run ? el.querySelector('li[data-run="' + CSS.escape(was.run) + '"]') : null;
+  if (was.gen === creds.gen && scope) {
+    const attr = (k, v) => (v ? "[data-" + k + '="' + CSS.escape(v) + '"]' : "");
+    const same = scope.querySelector("." + was.kind + attr("task", was.task) + attr("scenario", was.scenario));
+    if (usable(same)) return same.focus();
+    // A confirmation closed (返回, or its task ended): its own entry, if the task still has one.
+    const entry = was.task && scope.querySelector('.row-cancel[data-task="' + CSS.escape(was.task) + '"], .task-cancel[data-task="' + CSS.escape(was.task) + '"]');
+    if (usable(entry)) return entry.focus();
+    const sel = scope.querySelector(".agent-select");
+    if (usable(sel)) return sel.focus();
+  }
+  // Another generation, or nothing of that customer left: a control that only shows.
+  const safe = ["pair-code", "load-file", "show-evidence"].map((id) => $(id)).find(usable);
+  if (safe) safe.focus();
 }
 
 // agentCard draws one customer's card. Clicking the card (not a button)
@@ -502,7 +543,7 @@ function renderControl() {
 function agentCard(m, scs, { live, busy, full }) {
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
   const card = el("section", "consumer-row agent-card");
-  Object.assign(card.dataset, { consumer: m.c, state: m.state, selected: String(m.selected) });
+  Object.assign(card.dataset, { consumer: m.c, state: m.state, selected: String(m.selected), gen: String(creds.gen) });
   card.setAttribute("aria-label", "客人 " + short(m.c) + " 的操作");
   const head = el("div", "agent-head");
   head.append(el("span", "agent-dot", short(m.c)), el("span", "agent-name", "客人 " + short(m.c)), el("span", "agent-id", m.c));
@@ -589,6 +630,7 @@ function confirmBox(taskId) {
   const no = document.createElement("button");
   no.type = "button";
   no.className = "cancel-back";
+  no.dataset.task = taskId;
   no.textContent = "返回，不取消";
   no.addEventListener("click", () => { confirming = null; renderControl(); });
   box.append(p, yes, " ", no);
