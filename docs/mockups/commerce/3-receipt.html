@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>概念稿 3：交易完成與收據</title>
+<style>
+  /* Concept mockup (docs/commercial-transaction-flow.md 8). Static: no API, no product, no art files. */
+  :root { --bg: #0e1120; --panel: #161a2e; --panel2: #1d2240; --line: #2b3157; --text: #eef0fa; --muted: #9aa1c4;
+    --a: #7fb6ff; --teal: #3dd6c6; --amber: #f5b84a; --green: #4cd97b; --red: #ff7a7a; --violet: #b49cff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 1440px; height: 900px; overflow: hidden; background: var(--bg); color: var(--text); font: 15px/1.5 "PingFang TC", "Noto Sans TC", system-ui, sans-serif; }
+  .concept { position: absolute; top: 0; left: 0; right: 0; height: 26px; background: repeating-linear-gradient(135deg, #3a2a00 0 12px, #4a3500 12px 24px); color: #ffd98a; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 18px; }
+  header { position: absolute; top: 26px; left: 0; right: 0; height: 64px; display: flex; align-items: center; gap: 14px; padding: 0 28px; border-bottom: 1px solid var(--line); background: #11152a; }
+  .brand { font-size: 20px; font-weight: 800; } .brand small { display: block; font-size: 12px; font-weight: 500; color: var(--muted); }
+  .chip { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .chip.goal { background: #2a2245; color: var(--violet); border: 1px solid #4b3d80; }
+  .chip.net { background: #13304a; color: #9fd0ff; border: 1px solid #275a85; }
+  .spacer { flex: 1; }
+  main { position: absolute; top: 90px; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: 1fr 380px; gap: 20px; padding: 20px 28px 22px; }
+  .done { background: var(--panel); border-radius: 16px; padding: 22px 24px; display: grid; grid-template-rows: auto auto 1fr auto; gap: 16px; }
+  .title { display: flex; align-items: center; gap: 14px; }
+  .who { width: 46px; height: 46px; border-radius: 50%; background: var(--a); display: grid; place-items: center; font-weight: 900; font-size: 20px; color: #10131f; }
+  .title h1 { margin: 0; font-size: 26px; } .title p { margin: 0; color: var(--muted); font-size: 14px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .stat { border-radius: 14px; padding: 16px 18px; border: 1px solid; }
+  .stat .k { font-size: 12px; font-weight: 800; letter-spacing: .06em; }
+  .stat h2 { margin: 4px 0 6px; font-size: 22px; }
+  .stat p { margin: 0; font-size: 13px; color: #cfd3ee; }
+  .paid { background: #12281f; border-color: #2c6b4a; } .paid .k, .paid h2 { color: var(--green); }
+  .deliv { background: #12233a; border-color: #2a5a8a; } .deliv .k, .deliv h2 { color: #9fd0ff; }
+  .txs { margin-top: 10px; display: grid; gap: 6px; font-size: 13px; }
+  .tx { display: flex; justify-content: space-between; background: rgba(255,255,255,.04); border-radius: 8px; padding: 6px 10px; color: #cfd3ee; }
+  .tx a { color: #9fd0ff; text-decoration: none; }
+  .result { background: var(--panel2); border-radius: 14px; padding: 16px 18px; display: grid; grid-template-columns: 1fr 260px; gap: 18px; }
+  .result h3 { margin: 0 0 6px; font-size: 16px; color: var(--muted); font-weight: 700; letter-spacing: .04em; }
+  .result blockquote { margin: 0; font-size: 16px; line-height: 1.7; color: var(--text); border-left: 3px solid var(--teal); padding-left: 14px; }
+  .receipt { background: #f7f6f2; color: #1a1d2e; border-radius: 12px; padding: 14px 16px; font-size: 13px; }
+  .receipt b { font-size: 14px; } .receipt div { display: flex; justify-content: space-between; border-bottom: 1px dashed #d8d4c8; padding: 5px 0; }
+  .evid { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 14px; }
+  .evid b { color: var(--text); }
+  .states { display: grid; gap: 10px; align-content: start; }
+  .states h2 { margin: 0 0 2px; font-size: 13px; color: var(--muted); letter-spacing: .08em; }
+  .s { border-radius: 12px; padding: 12px 14px; border-left: 5px solid; background: var(--panel); }
+  .s b { display: block; font-size: 15px; } .s span { font-size: 13px; color: #cfd3ee; }
+  .s.wait { border-color: var(--amber); } .s.wait b { color: var(--amber); }
+  .s.unk { border-color: var(--violet); } .s.unk b { color: var(--violet); }
+  .s.fail { border-color: var(--red); } .s.fail b { color: var(--red); }
+  .s.part { border-color: #9fd0ff; } .s.part b { color: #9fd0ff; }
+  .foot { font-size: 11px; color: #6d74a0; }
+</style>
+</head>
+<body>
+<div class="concept">概念稿／示意資料／未實作的目標畫面（P2 之後）　·　不是執行畫面，不能當作 runtime 證據　·　沒有任何交易被執行</div>
+<header>
+  <div class="brand">示意資料商店<small>收據與交付</small></div>
+  <span class="chip goal">目標畫面・未實作</span>
+  <span class="chip net">Base Sepolia 測試網・test USDC</span>
+  <div class="spacer"></div>
+</header>
+<main>
+  <section class="done">
+    <div class="title"><div class="who">A</div><div><h1>完成：韓國市場簡報</h1><p>客人 A · 你在 12:04 核准 · 金額 0.50 test USDC</p></div></div>
+    <div class="two">
+      <div class="stat paid"><div class="k">付款</div><h2>已付款（鏈上已確認）</h2><p>對帳確認：測試錢包 0x1111…1111 → 示意商店 0x3333…3333，0.50 test USDC。</p>
+        <div class="txs"><div class="tx"><span>① 預算預留（ZK 驗證）</span><a>tx 0x8a2f…19c0 ↗</a></div><div class="tx"><span>② 付款結算</span><a>tx 0x51d7…e2a4 ↗</a></div></div>
+        <p style="margin-top:8px;color:#9aa1c4">① 和 ② 是兩筆不同的交易，不是同一筆，也不是一次原子完成。</p></div>
+      <div class="stat deliv"><div class="k">取貨</div><h2>已交付</h2><p>商店在付款確認後交付：kr-market 第 1 版（12:05:02）。<br>內容摘要 hash 與收據相符。</p>
+        <div class="txs"><div class="tx"><span>交付回應 PAYMENT-RESPONSE</span><span>已收到</span></div></div></div>
+    </div>
+    <div class="result">
+      <div><h3>Agent 依交付的資料完成任務</h3>
+        <blockquote>（示意文字）根據交付的韓國市場簡報，本週 KOSPI 主要由半導體帶動……此段為示意，不是實際交付內容。</blockquote></div>
+      <div class="receipt"><b>收據（示意）</b>
+        <div><span>商品</span><span>韓國市場簡報</span></div><div><span>金額</span><span>0.50 test USDC</span></div>
+        <div><span>網路</span><span>Base Sepolia</span></div><div><span>核准</span><span>本人（WebAuthn）</span></div>
+        <div><span>委託預算剩餘</span><span>4.50 / 5.00</span></div><div style="border:0"><span>gas、模型用量</span><span>另列；取不到寫未知</span></div></div>
+    </div>
+    <div class="evid"><span><b>查看技術證據</b>　intent hash · 核准會話 · grant · ZK proof · 兩筆交易 receipt · 交付 hash · 時間軸</span><span>展開 ›</span></div>
+  </section>
+  <aside class="states" aria-label="其他狀態的呈現">
+    <h2>不是成功時怎麼呈現</h2>
+    <div class="s wait"><b>確認中</b><span>已送出，等待鏈上確認。不會自動重付；可離開頁面，回來會顯示結果。</span></div>
+    <div class="s unk"><b>結果未知</b><span>付款已送出，但還不能確認是否成功（例如服務逾時）。需要人工對帳；不顯示已付款，也不顯示失敗。</span></div>
+    <div class="s fail"><b>付款未完成</b><span>授權已過期且鏈上沒有結算：沒有扣款。若預算已預留，顯示「已預留、未付款，待處理」。</span></div>
+    <div class="s part"><b>已付款，交付失敗</b><span>付款已確認，但商店沒有交付。不說成付款失敗；進入人工處理，取貨區不出現商品。</span></div>
+    <div class="s wait"><b>等你核准／已過期</b><span>期限由後端決定；過期後這一筆不能再核准，需要重新請購。</span></div>
+    <div class="foot">取貨動畫只跟著真實交付狀態：沒有「已交付」就不演取貨。</div>
+  </aside>
+</main>
+</body>
+</html>

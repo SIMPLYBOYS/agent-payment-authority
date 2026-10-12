@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>概念稿 2：單筆核准</title>
+<style>
+  /* Concept mockup (docs/commercial-transaction-flow.md 8). Static: no API, no product, no art files. */
+  :root { --bg: #0e1120; --panel: #161a2e; --panel2: #1d2240; --line: #2b3157; --text: #eef0fa; --muted: #9aa1c4;
+    --a: #7fb6ff; --teal: #3dd6c6; --amber: #f5b84a; --green: #4cd97b; --red: #ff7a7a; --violet: #b49cff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 1440px; height: 900px; overflow: hidden; background: var(--bg); color: var(--text); font: 15px/1.5 "PingFang TC", "Noto Sans TC", system-ui, sans-serif; }
+  .concept { position: absolute; top: 0; left: 0; right: 0; height: 26px; background: repeating-linear-gradient(135deg, #3a2a00 0 12px, #4a3500 12px 24px); color: #ffd98a; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 18px; }
+  .dim { position: absolute; top: 26px; left: 0; right: 0; bottom: 0; background: radial-gradient(ellipse at 30% 40%, #1a2040 0%, #0b0d18 70%); }
+  .dim::after { content: "（背景：商店主畫面，變暗；場景與輪詢照常）"; position: absolute; left: 28px; top: 18px; color: #3d4570; font-size: 13px; }
+  .sheet { position: absolute; top: 70px; left: 80px; width: 780px; bottom: 40px; background: #f7f6f2; color: #1a1d2e; border-radius: 18px; box-shadow: 0 30px 80px rgba(0,0,0,.55); display: grid; grid-template-rows: auto auto 1fr auto; overflow: hidden; }
+  .mode { background: #fff1cf; border-bottom: 1px solid #ecd28d; color: #6b4b00; padding: 12px 28px; font-weight: 800; font-size: 14px; display: flex; gap: 10px; align-items: center; }
+  .mode .tag { background: #6b4b00; color: #fff1cf; border-radius: 6px; padding: 2px 8px; font-size: 12px; }
+  .head { padding: 22px 28px 6px; display: flex; align-items: center; gap: 14px; }
+  .who { width: 46px; height: 46px; border-radius: 50%; background: var(--a); display: grid; place-items: center; font-weight: 900; font-size: 20px; color: #10131f; }
+  .head h1 { margin: 0; font-size: 26px; letter-spacing: .01em; }
+  .head p { margin: 2px 0 0; color: #5d6280; font-size: 14px; }
+  .body { padding: 10px 28px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; align-content: start; }
+  .item { grid-column: 1 / 3; display: grid; grid-template-columns: 84px 1fr auto; gap: 16px; align-items: center; background: #fff; border: 1px solid #e3e1d8; border-radius: 14px; padding: 16px; }
+  .thumb { width: 84px; height: 84px; border-radius: 12px; background: linear-gradient(135deg, #1d3557, #457b9d); display: grid; place-items: center; color: #fff; font-weight: 900; font-size: 22px; }
+  .item h2 { margin: 0; font-size: 20px; } .item p { margin: 2px 0 0; color: #5d6280; font-size: 14px; }
+  .amount { text-align: right; } .amount b { font-size: 34px; letter-spacing: -.01em; } .amount span { display: block; color: #5d6280; font-size: 13px; }
+  .f { background: #fff; border: 1px solid #e3e1d8; border-radius: 12px; padding: 12px 14px; }
+  .f .k { font-size: 12px; color: #7a7f99; font-weight: 700; letter-spacing: .06em; }
+  .f .v { font-size: 16px; font-weight: 700; margin-top: 2px; }
+  .f .s { font-size: 12px; color: #7a7f99; }
+  .deadline { grid-column: 1 / 3; display: flex; justify-content: space-between; align-items: center; background: #fff8e8; border: 1px solid #f0d99a; border-radius: 12px; padding: 12px 14px; }
+  .deadline b { font-size: 18px; } .deadline span { color: #7a6a3a; font-size: 13px; }
+  .bar { height: 8px; background: #efe3bd; border-radius: 99px; width: 260px; overflow: hidden; } .bar i { display: block; height: 100%; width: 60%; background: #e0a43a; }
+  .actions { padding: 18px 28px 22px; display: flex; align-items: center; gap: 12px; border-top: 1px solid #e3e1d8; background: #fbfaf7; }
+  .btn { border-radius: 12px; padding: 13px 22px; font-weight: 800; font-size: 16px; border: 2px solid transparent; }
+  .btn.approve { background: #1a1d2e; color: #fff; }
+  .btn.deny { background: #fff; border-color: #d24a4a; color: #b03030; }
+  .link { margin-left: auto; color: #4d5dbb; font-size: 14px; font-weight: 700; }
+  .note { font-size: 12px; color: #7a7f99; padding: 0 28px 10px; }
+  .formal { position: absolute; top: 70px; right: 60px; width: 480px; bottom: 40px; background: var(--panel); border: 1px dashed #4b5490; border-radius: 18px; padding: 22px 24px; display: grid; grid-template-rows: auto auto 1fr auto; gap: 12px; }
+  .formal .k { color: var(--violet); font-weight: 800; font-size: 13px; letter-spacing: .06em; }
+  .formal h3 { margin: 0; font-size: 20px; }
+  .formal ol { margin: 0; padding-left: 20px; display: grid; gap: 14px; align-content: start; color: #cfd3ee; font-size: 14px; }
+  .formal ol b { color: var(--text); }
+  .vs { display: grid; gap: 8px; }
+  .v3 { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: center; background: var(--panel2); border-radius: 10px; padding: 9px 12px; font-size: 13px; }
+  .v3 b { font-size: 13px; } .ok b { color: var(--green); } .bad b { color: var(--red); } .deg b { color: var(--amber); }
+  .formal .foot { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="concept">概念稿／示意資料／未實作　·　不是執行畫面，不能當作 runtime 證據　·　模擬與正式兩種模式分開呈現，不能混用</div>
+<div class="dim"></div>
+<section class="sheet" aria-label="單筆核准（模擬模式）">
+  <div class="mode"><span class="tag">模擬核准</span>fake 展示・角色模擬：客人 A（主持人扮演，不是本人驗證）・不會付款</div>
+  <div class="head"><div class="who">A</div><div><h1>核准這一筆付款？</h1><p>客人 A 的 Agent 想買下面這一項。你只核准這一筆，不是之後所有付款。</p></div></div>
+  <div class="body">
+    <div class="item"><div class="thumb">KR</div><div><h2>韓國市場簡報（數位資料）</h2><p>商品 kr-market · 第 1 版 · 付款確認後立即交付</p></div>
+      <div class="amount"><b>0.50</b><span>test USDC（Base Sepolia 測試網）</span></div></div>
+    <div class="f"><div class="k">收款人</div><div class="v">示意商店</div><div class="s">0x3333…3333 · 與報價相同</div></div>
+    <div class="f"><div class="k">付款帳戶</div><div class="v">客人 A 的測試錢包</div><div class="s">0x1111…1111 · consumer-a</div></div>
+    <div class="f"><div class="k">網路與資產</div><div class="v">Base Sepolia · test USDC</div><div class="s">測試網，不是真錢</div></div>
+    <div class="f"><div class="k">委託範圍內</div><div class="v">是（預算 5.00，剩 5.00）</div><div class="s">超過 0.10 一律要你核准</div></div>
+    <div class="deadline"><div><b>剩約 18 秒</b><br><span>期限 12:04:31（後端時間為準；畫面倒數只是提示）</span></div><div class="bar"><i></i></div></div>
+  </div>
+  <div>
+    <div class="note">按下核准後：這是模擬，不會產生可付款的授權；畫面會寫「已核准（模擬），未啟用付款」。過期、取消或報價改變時，這次核准會被拒絕，需要重新請購。</div>
+    <div class="actions"><span class="btn approve">核准此筆（模擬）</span><span class="btn deny">拒絕</span><span class="link">查看技術證據 ›</span></div>
+  </div>
+</section>
+<aside class="formal" aria-label="正式核准（A2 之後）">
+  <div class="k">正式核准・A2 之後・未實作</div>
+  <h3>同一張摘要，換成本人驗證</h3>
+  <ol>
+    <li><b>確認摘要</b>：商品、收款人、金額、資產、網路、期限（同左）。</li>
+    <li><b>WebAuthn</b>：已登記的 authenticator（手機跨裝置或外接 FIDO2；Touch ID 次之）。challenge 綁這一筆的 intent、核准會話、金額、收款人、網路、期限。</li>
+    <li><b>語音挑戰</b>（附加訊號，三種狀態都照實顯示）：
+      <div class="vs">
+        <div class="v3 ok"><b>通過</b><span>amr = webauthn＋voice</span></div>
+        <div class="v3 bad"><b>失敗</b><span>不發授權，轉為拒絕；不能改走降級</span></div>
+        <div class="v3 deg"><b>不可用</b><span>可發授權（amr = webauthn），畫面明寫「降級：語音不可用」</span></div>
+      </div></li>
+  </ol>
+  <div class="foot">標示：上方徽章改為「本人核准（WebAuthn）」，不再出現「模擬」。模擬按鈕在正式模式由後端拒絕，不只是隱藏。</div>
+</aside>
+</body>
+</html>

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>概念稿 1：商店主畫面</title>
+<style>
+  /* Concept mockup (docs/commercial-transaction-flow.md 8). Static: no API, no product, no art files. */
+  :root { --bg: #0e1120; --panel: #161a2e; --panel2: #1d2240; --line: #2b3157; --text: #eef0fa; --muted: #9aa1c4;
+    --a: #7fb6ff; --b: #ffb27a; --teal: #3dd6c6; --amber: #f5b84a; --green: #4cd97b; --red: #ff7a7a; --violet: #b49cff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 1440px; height: 900px; overflow: hidden; background: var(--bg); color: var(--text); font: 15px/1.5 "PingFang TC", "Noto Sans TC", system-ui, sans-serif; }
+  .concept { position: absolute; top: 0; left: 0; right: 0; height: 26px; background: repeating-linear-gradient(135deg, #3a2a00 0 12px, #4a3500 12px 24px); color: #ffd98a; font-size: 12px; font-weight: 700; letter-spacing: .04em; display: flex; align-items: center; justify-content: center; gap: 18px; }
+  header { position: absolute; top: 26px; left: 0; right: 0; height: 64px; display: flex; align-items: center; gap: 14px; padding: 0 28px; border-bottom: 1px solid var(--line); background: #11152a; }
+  .brand { font-size: 20px; font-weight: 800; letter-spacing: .02em; }
+  .brand small { display: block; font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+  .chip { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .chip.fake { background: #3a2f12; color: var(--amber); border: 1px solid #6b5520; }
+  .chip.net { background: #13304a; color: #9fd0ff; border: 1px solid #275a85; }
+  .chip.syn { background: #2a2245; color: var(--violet); border: 1px solid #4b3d80; }
+  .spacer { flex: 1; }
+  .conn { color: var(--green); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .conn i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; }
+  .evid { color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; font-size: 13px; }
+  main { position: absolute; top: 90px; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: 1fr 392px; gap: 20px; padding: 20px 28px 22px; }
+  .stage { background: var(--panel); border-radius: 14px; padding: 16px; display: grid; grid-template-rows: auto 1fr auto; gap: 12px; min-height: 0; }
+  .stage h2, .side h2 { margin: 0; font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: .08em; }
+  svg { width: 100%; height: 100%; display: block; border-radius: 10px; }
+  .progress { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .step { background: var(--panel2); border-radius: 10px; padding: 10px 12px; border: 1px solid var(--line); }
+  .step b { display: block; font-size: 15px; }
+  .step span { font-size: 12px; color: var(--muted); }
+  .step.done { border-color: #2c6b4a; } .step.done b::before { content: "✓ "; color: var(--green); }
+  .step.now { border-color: var(--amber); background: #2b2614; } .step.now b { color: var(--amber); }
+  .step.todo b { color: #6d74a0; }
+  .side { display: grid; grid-template-rows: auto auto auto 1fr auto; gap: 14px; min-height: 0; }
+  .todo-card { background: linear-gradient(180deg, #2b2410, #221d0f); border: 1px solid #6b5520; border-radius: 14px; padding: 16px 18px; }
+  .todo-card .k { font-size: 12px; color: var(--amber); font-weight: 700; letter-spacing: .06em; }
+  .todo-card h3 { margin: 6px 0 4px; font-size: 20px; }
+  .todo-card p { margin: 0 0 12px; color: #d9d2b8; font-size: 14px; }
+  .btn { display: inline-block; border-radius: 10px; padding: 10px 16px; font-weight: 700; font-size: 15px; border: 1px solid transparent; }
+  .btn.primary { background: var(--amber); color: #1a1405; }
+  .btn.ghost { border-color: var(--line); color: var(--text); background: transparent; }
+  .agents { display: grid; gap: 10px; }
+  .agent { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; grid-template-columns: 34px 1fr auto; gap: 4px 12px; align-items: center; }
+  .agent.sel { border: 2px solid #ffd84d; padding: 11px 13px; }
+  .dot { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; color: #10131f; }
+  .agent .name { font-weight: 700; } .agent .name small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+  .agent .st { font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 700; }
+  .agent .line { grid-column: 2 / 4; font-size: 13px; color: var(--muted); }
+  .agent .line b { color: var(--text); font-weight: 600; }
+  .feed { background: var(--panel); border-radius: 12px; padding: 12px 14px; overflow: hidden; }
+  .feed ol { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; font-size: 13px; }
+  .feed li { display: grid; grid-template-columns: 52px 1fr; color: var(--muted); }
+  .feed li b { color: var(--text); font-weight: 600; }
+  .foot { font-size: 11px; color: #6d74a0; }
+</style>
+</head>
+<body>
+<div class="concept">概念稿／示意資料／未實作　·　不是執行畫面，不能當作 runtime 證據　·　商店圖形為示意（正式畫面為 Unity＋LimeZu）</div>
+<header>
+  <div class="brand">示意資料商店<small>Agent 代你選購 · 每筆付款由你核准</small></div>
+  <span class="chip fake">fake 展示（不執行模型）</span>
+  <span class="chip net">Base Sepolia 測試網</span>
+  <span class="chip syn">合成資料・不付真錢</span>
+  <div class="spacer"></div>
+  <span class="conn"><i></i>已連線 · 資料 2 秒前</span>
+  <span class="evid">查看證據</span>
+</header>
+<main>
+  <section class="stage" aria-label="商店">
+    <h2>商店　·　點客人可選取</h2>
+    <svg viewBox="0 0 960 560" role="img" aria-label="商店示意：入口、選購區、櫃台、等待區、取貨區與兩位客人">
+      <defs>
+        <pattern id="tile" width="40" height="40" patternUnits="userSpaceOnUse"><rect width="40" height="40" fill="#e6e8ef"/><path d="M40 0H0V40" fill="none" stroke="#cdd1de" stroke-width="2"/></pattern>
+        <pattern id="walk" width="40" height="40" patternUnits="userSpaceOnUse"><rect width="40" height="40" fill="#8a9a8f"/><path d="M40 0H0V40" fill="none" stroke="#76857b" stroke-width="2"/></pattern>
+      </defs>
+      <rect width="960" height="560" fill="#0b0e1a"/>
+      <rect x="0" y="80" width="110" height="480" fill="url(#walk)"/>
+      <rect x="110" y="0" width="850" height="80" fill="#f4f1ea"/><rect x="110" y="72" width="850" height="10" fill="#c9c2b2"/>
+      <rect x="110" y="80" width="850" height="480" fill="url(#tile)"/>
+      <!-- zones -->
+      <rect x="112" y="330" width="120" height="228" fill="#7fb6ff" opacity=".12"/>
+      <rect x="250" y="96" width="390" height="200" fill="#3dd6c6" opacity=".10"/>
+      <rect x="700" y="300" width="250" height="250" fill="#f5b84a" opacity=".12"/>
+      <rect x="700" y="96" width="250" height="180" fill="#4cd97b" opacity=".10"/>
+      <g font-family="PingFang TC, Noto Sans TC, sans-serif" font-size="15" font-weight="700" fill="#2b3157">
+        <text x="122" y="352">入口</text><text x="262" y="118">選購區（報價）</text><text x="712" y="322">櫃台・等待核准</text><text x="712" y="118">取貨區（交付後）</text>
+      </g>
+      <!-- shelves -->
+      <g fill="#c96d4e"><rect x="280" y="140" width="110" height="34" rx="4"/><rect x="420" y="140" width="110" height="34" rx="4"/><rect x="280" y="220" width="110" height="34" rx="4"/><rect x="420" y="220" width="110" height="34" rx="4"/></g>
+      <g fill="#ffd36b"><rect x="290" y="146" width="16" height="22"/><rect x="314" y="146" width="16" height="22"/><rect x="430" y="226" width="16" height="22"/><rect x="456" y="226" width="16" height="22"/></g>
+      <rect x="560" y="132" width="60" height="140" rx="6" fill="#5b6a8f"/><rect x="566" y="140" width="48" height="40" fill="#9fd0ff"/>
+      <!-- counter -->
+      <rect x="860" y="360" width="80" height="150" rx="6" fill="#6b5a4a"/><rect x="866" y="380" width="68" height="16" fill="#f5b84a"/>
+      <!-- pickup shelf (empty: nothing delivered yet) -->
+      <rect x="760" y="140" width="160" height="40" rx="6" fill="#3e8f63" opacity=".55"/><text x="770" y="200" font-size="13" fill="#2b3157" font-family="PingFang TC, sans-serif">尚無交付（付款前不會出現）</text>
+      <!-- path hint -->
+      <path d="M60 470 H170 V300 H500 V430 H800" fill="none" stroke="#7fb6ff" stroke-width="3" stroke-dasharray="8 8" opacity=".7"/>
+      <!-- customer A at counter, selected -->
+      <ellipse cx="800" cy="452" rx="34" ry="12" fill="none" stroke="#ffd84d" stroke-width="5"/>
+      <ellipse cx="800" cy="450" rx="22" ry="8" fill="#7fb6ff" opacity=".8"/>
+      <g transform="translate(784 384)"><rect x="6" y="0" width="20" height="18" rx="6" fill="#6b4a3a"/><rect x="8" y="8" width="16" height="14" fill="#f2c9a6"/><rect x="4" y="22" width="24" height="28" rx="4" fill="#e8eef9"/><rect x="8" y="50" width="7" height="16" fill="#3a4060"/><rect x="17" y="50" width="7" height="16" fill="#3a4060"/></g>
+      <g transform="translate(590 470)"><rect width="200" height="56" rx="10" fill="#1d2a4a" opacity=".95"/><rect width="6" height="56" rx="3" fill="#7fb6ff"/><text x="16" y="23" fill="#eef0fa" font-size="15" font-weight="800" font-family="PingFang TC, sans-serif">客人 A</text><text x="16" y="44" fill="#f5b84a" font-size="13" font-family="PingFang TC, sans-serif">等你核准這一筆</text></g>
+      <!-- customer B shopping -->
+      <ellipse cx="470" cy="330" rx="22" ry="8" fill="#ffb27a" opacity=".8"/>
+      <g transform="translate(454 262)"><rect x="6" y="0" width="20" height="18" rx="6" fill="#2b2f45"/><rect x="8" y="8" width="16" height="14" fill="#f2c9a6"/><rect x="4" y="22" width="24" height="28" rx="4" fill="#8a5aa8"/><rect x="8" y="50" width="7" height="16" fill="#3a4060"/><rect x="17" y="50" width="7" height="16" fill="#3a4060"/></g>
+      <g transform="translate(400 340)"><rect width="180" height="56" rx="10" fill="#3a2516" opacity=".95"/><rect width="6" height="56" rx="3" fill="#ffb27a"/><text x="16" y="23" fill="#eef0fa" font-size="15" font-weight="800" font-family="PingFang TC, sans-serif">客人 B</text><text x="16" y="44" fill="#ffd2b0" font-size="13" font-family="PingFang TC, sans-serif">選購中 · 已看 2 項</text></g>
+    </svg>
+    <div>
+      <div class="progress" aria-label="客人 A 的進度">
+        <div class="step done"><b>委託</b><span>預算 5.00 · 今天內</span></div>
+        <div class="step done"><b>選購與報價</b><span>韓國市場簡報 0.50</span></div>
+        <div class="step now"><b>等你核准</b><span>後端期限 剩 18 秒</span></div>
+        <div class="step todo"><b>付款</b><span>核准後才開始</span></div>
+        <div class="step todo"><b>取貨</b><span>付款確認後交付</span></div>
+      </div>
+    </div>
+  </section>
+  <aside class="side">
+    <h2>需要你處理</h2>
+    <div class="todo-card">
+      <div class="k">客人 A · 單筆核准</div>
+      <h3>韓國市場簡報　0.50 test USDC</h3>
+      <p>收款：示意商店 · Base Sepolia · 期限以後端為準</p>
+      <span class="btn primary">查看並核准</span>　<span class="btn ghost">拒絕</span>
+    </div>
+    <div class="agents" aria-label="Agent">
+      <div class="agent sel"><div class="dot" style="background:var(--a)">A</div><div class="name">客人 A<small>consumer-a</small></div><span class="st" style="background:#3a2f12;color:var(--amber)">等待核准</span>
+        <div class="line">工具呼叫 <b>3 次</b> · 停止 Agent · 取消請購</div></div>
+      <div class="agent"><div class="dot" style="background:var(--b)">B</div><div class="name">客人 B<small>consumer-b</small></div><span class="st" style="background:#183a2a;color:var(--green)">選購中</span>
+        <div class="line">工具呼叫 <b>2 次</b> · 停止 Agent</div></div>
+    </div>
+    <div class="feed">
+      <h2>剛剛發生</h2>
+      <ol>
+        <li><span>12:04</span><span><b>A</b> 請購韓國市場簡報（Policy：需要你核准）</span></li>
+        <li><span>12:04</span><span><b>B</b> 查看商品與報價</span></li>
+        <li><span>12:03</span><span><b>A</b> 委託已確認，Agent 進店</span></li>
+      </ol>
+    </div>
+    <div class="foot">技術證據（intent hash、proof、grant、交易）都在「查看證據」。<br>像素素材：LimeZu（limezu.itch.io），正式畫面使用；此稿以示意圖形表示。</div>
+  </aside>
+</main>
+</body>
+</html>
