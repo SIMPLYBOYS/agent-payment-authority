@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
@@ -101,7 +102,11 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 	// stable identifiers: if the Store already has it, report it and submit
 	// nothing; a retry never mints a new request or nonce.
 	po := PurchaseOrderID(b.Session.TaskID, p.ID)
-	if v, ok := s.stored(b, po); ok {
+	// A failed read (the task may not exist yet) is no stored purchase: the
+	// Store decides below, as before. An apa.pay.v1 task read as "" builds an
+	// M1 order, which its Submit refuses (CONTRACT_VERSION_MISMATCH).
+	task, _ := s.Store.Task(b.Session)
+	if v, ok := stored(task, po); ok {
 		rec.Outcome = v.Decision.PolicyVerdict
 		return textResult(projection(p.ID, v, true), false), rec
 	}
@@ -109,7 +114,14 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 	if err != nil {
 		return fail("QUOTE_REFUSED", "the shop quote failed a host check")
 	}
-	order, err := s.assemble(b, p, po, quote, req)
+	// The stored task's contract version picks the purchase to build; the
+	// model and the request never name it.
+	var order any
+	if task.ContractVersion == paycontract.Version {
+		order, err = s.assembleV1(b, p, po, quote, req)
+	} else {
+		order, err = s.assemble(b, p, po, quote, req)
+	}
 	if err != nil {
 		return fail("PURCHASE_REFUSED", "the purchase could not be assembled from trusted data")
 	}
@@ -132,11 +144,7 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 	return textResult(projection(p.ID, res.Purchase, res.Replay), false), rec
 }
 
-func (s *Shop) stored(b *Binding, po string) (store.PurchaseView, bool) {
-	v, err := s.Store.Task(b.Session)
-	if err != nil {
-		return store.PurchaseView{}, false
-	}
+func stored(v store.TaskView, po string) (store.PurchaseView, bool) {
 	for _, p := range v.Purchases {
 		if p.PurchaseOrderID == po {
 			return p, true
@@ -151,10 +159,13 @@ func projection(product string, v store.PurchaseView, replay bool) map[string]an
 	if v.ApprovalClosed != "" {
 		approval = v.ApprovalClosed
 	}
+	note := "No payment was made and no content was delivered; M1 cannot pay. An Ask waits for a human."
+	if v.Decision.Version == paycontract.Version {
+		note = "No payment was made and no content was delivered; payment is not enabled. An Ask waits for a human."
+	}
 	return map[string]any{
 		"product_id": product, "decision": v.Decision.PolicyVerdict, "reason": v.Decision.Reason,
-		"approval": approval, "already_requested": replay, "payment": "none",
-		"note": "No payment was made and no content was delivered; M1 cannot pay. An Ask waits for a human.",
+		"approval": approval, "already_requested": replay, "payment": "none", "note": note,
 	}
 }
 
@@ -237,6 +248,42 @@ func (s *Shop) assemble(b *Binding, p Product, po string, q contracts.Quote, req
 			ChainID: chain, AssetContract: req.Asset, From: b.From, PayTo: req.PayTo, Amount: req.Amount,
 			ValidAfter: now - 1, ValidBefore: now + window, EIP3009Nonce: "0x" + hex.EncodeToString(nonce[:]),
 		},
+	}
+	return order, order.Validate()
+}
+
+// assembleV1 is assemble for an apa.pay.v1 task: the same trusted sources,
+// the business intent and the EIP-3009 payment binding apart, under this
+// version's domain (its own resource and requirement hashes and nonce).
+func (s *Shop) assembleV1(b *Binding, p Product, po string, q contracts.Quote, req x402.Requirement) (paycontract.PurchaseOrder, error) {
+	chain, ok := strings.CutPrefix(req.Network, "eip155:")
+	if !ok {
+		return paycontract.PurchaseOrder{}, errors.New("network is not eip155")
+	}
+	rh, err := paycontract.ResourceHash(http.MethodGet, p.URL)
+	if err != nil {
+		return paycontract.PurchaseOrder{}, err
+	}
+	qh, err := paycontract.RequirementHash(q)
+	if err != nil {
+		return paycontract.PurchaseOrder{}, err
+	}
+	now := s.Now()
+	window := req.MaxTimeoutSeconds
+	if window == 0 {
+		window = 60
+	}
+	nonce := sha256.Sum256([]byte("apa-pay-v1/eip3009-nonce\x00" + b.Session.TaskID + "\x00" + p.ID))
+	order := paycontract.PurchaseOrder{
+		Version: paycontract.Version, RequestID: "req-" + p.ID, Quote: q,
+		Intent: paycontract.Intent{
+			Version: paycontract.Version, Domain: paycontract.Domain,
+			ConsumerID: b.Session.ConsumerID, AgentID: b.Session.AgentID, WalletID: b.WalletID, TaskID: b.Session.TaskID,
+			PurchaseOrderID: po, ResourceHash: rh, HTTPMethod: http.MethodGet, ResourceURL: p.URL,
+			X402Version: q.X402Version, Scheme: req.Scheme, PaymentRequirementHash: qh,
+		},
+		PaymentBinding: paycontract.PaymentBinding{Method: "eip3009", ChainID: chain, AssetContract: req.Asset, From: b.From, PayTo: req.PayTo,
+			Amount: req.Amount, ValidAfter: now - 1, ValidBefore: now + window, Nonce: "0x" + hex.EncodeToString(nonce[:])},
 	}
 	return order, order.Validate()
 }
