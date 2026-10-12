@@ -1,7 +1,7 @@
 # 核准到交易完成：最小商業流程設計
 
 > 2026-10-12，Claude Code。依 vault〈Claude-Code-核准到交易完成最小商業流程派工-20261012〉。基準 `ee9bf0e`（分支 `commercial-ux1`）。
-> **狀態（10/12）：Codex 對 `df64d13` 的設計 review 結論為「方向可沿用，但尚不能直接派工實作」，提出 R1～R4；本版完成設計補正與三張靜態視覺稿，待 Codex 限定複核與 Aaron 視覺方向確認；P1-a 未開工。** 第 5 節的三項仍待補正後集中決定。 Aaron 核准的是「核准到交易完成的最小商業流程」這個**方向**；這不是付款帳戶模型、真實簽署、金鑰、faucet、部署或送交易的核准。付款帳戶 ADR（`docs/adr/payment-account-model.md`）仍是 Proposed。
+> **狀態（10/12）：R3 與概念稿語意補正完成，待 Codex 限定複核；Aaron 的視覺方向及三項實作決策待確認；P1-a 未開工。** 歷程：Codex 對 `df64d13` 的設計 review 提出 R1～R4（本版第 0 節）；對 `e5d2b04` 的限定複核認為 R1、R2、R4 的設計缺口已補上，R3 的 Policy 接線與概念稿三項語意仍待補（第 0.2 節）。 Aaron 核准的是「核准到交易完成的最小商業流程」這個**方向**；這不是付款帳戶模型、真實簽署、金鑰、faucet、部署或送交易的核准。付款帳戶 ADR（`docs/adr/payment-account-model.md`）仍是 Proposed。
 > 本輪只讀程式與文件、寫設計：沒有改產品、沒有跑測試或展示、沒有執行真實 CLI。M1、M-B、UX1 維持完成。
 
 依據（位置都在 repo 或 vault 的同一專案資料夾）：PRD-第一期（§3.1–3.2、§4–8、§10–12、FR-8、FR-15）、執行計畫（§1-sexies、§1-septies、§3.5、§7、§9.1、§10）、〈真人進店與授權Agent消費-後續體驗概念〉、`docs/adr/payment-account-model.md`、`docs/contracts.md`、`docs/persistence-design.md`、`docs/policy.md`、`docs/merchant.md`、`docs/commercial-demo-roadmap.md`（現行進度、§4–5、§9.2）。現行程式入口見第 2 節。
@@ -16,6 +16,21 @@ Codex 前輪只核對文件、Git 與相關原始碼，沒有執行測試；R1�
 | R2 | viewer 是唯讀能力、不是本人登入；配對後頁面持有多位 consumer 的 viewer token，不能只比對 consumer ID 就當本人核准 | `cmd/demo/api.go`：viewer 只讀自己、host 全域唯讀、operator 只能開始／停止／取消；`web/hostcreds.js` 依 consumer 持有 viewer token | 第 9 節（權限表、模擬角色、live 拒絕、未來 approver）；第 7 節操作步驟 | P1-a 的權限反例（第 7 節）；A1／A2 的正式 approver |
 | R3 | `tasks` 沒有契約版本欄位，`Store.Submit` 固定解析 M1 請購；只加三張表說不清 `apa.pay.v1` 怎麼走完請購 | `Submit` 只解 `contracts.PurchaseOrder`；事件白名單拒絕核准類事件；Gate 通過後才 `StartTask` | 第 10 節（接線對照、schema 3、遷移）；第 7 節改動清單；第 5 節 #3 | P1-a 的契約與 Store 定向測試；M1 檢查器在 M1 證據上照舊通過 |
 | R4 | 模擬 grant 一律被拒，又用重播驗 jti：兩次都因「模擬」被拒，證明不了一次性 | M1 沒有 grant | 第 11 節（三層驗收、消耗語意）；第 7 節驗收與反向 | P1-a：重送不產生第二個 grant；一次性元件的獨立測試；P1-b：正式 Signer 的消耗與恢復 |
+
+### 0.2 R3 與概念稿語意補正（Codex 對 `e5d2b04` 的限定複核）
+
+Codex 這輪是文件、Git、相關原始碼與靜態圖片的唯讀核對，沒有重跑測試或真實 CLI。R3 是設計接線缺口，不是已重現的產品漏洞；R1、R2、R4 的設計缺口已補上，不代表產品實作通過，也不代表 Aaron 已確認商業視覺。
+
+| 項目 | 原問題 | 現在的設計 | 修改位置 | 未來驗收 |
+|---|---|---|---|---|
+| R3 Policy 接線 | 第 10 節寫「重用 `policy.Decide`（純函式）」，但 `Decide` 不是契約中立：它用 M1 Registry 驗 M1 請購、算 M1 intent hash、檢查 M1 fixture 憑證，輸出 M1 版本、付款 unavailable 的裁決 | 抽出契約中立的商業規則 `policy.Rules`；M1 的 `policy.Decide` 公開入口與語意不變；`apa.pay.v1` 自己的入口負責驗證、digest、裁決與付款能力狀態 | 第 10 節第 3 列、第 10.1 節；第 7 節改動清單 | 第 10.1 節的定向驗收（這次不執行） |
+| 設計註解 | 核准稿右側的正式核准說明、收據稿右側並列的失敗情況，看起來像要一起上線的介面 | 兩處改成虛線框加「設計註解・非產品畫面」標籤，並寫明實際畫面只顯示當前模式或當前結果 | `2-approval.html`／`.png`、`3-receipt.html`／`.png`；第 8 節 | Aaron 確認版面方向時一併確認 |
+| Agent 與請購狀態 | 「等待核准」被寫成 Agent 狀態，像是 Agent 仍在執行 | 操作卡分兩列：Agent（場次，來源 Host）與請購（來源 Store）；A 示範「Agent 已結束，請購仍等你核准」：停止 Agent 停用並說明，取消請購／task 是另一個動作（沿用 UX1 的操作邊界） | `1-shop.html`／`.png`；第 8 節 | P1-a 的操作卡沿用 |
+| 商品數量 | B 的「已看 2 項」從兩次工具呼叫推算，查商品與報價可能是同一商品 | 本片沒有可查證的商品數量來源，改為「選購中」；需要數字時只寫 Host 的「已回覆工具呼叫 N 次」 | `1-shop.html`／`.png` | — |
+
+第 5 節三項待決（付款帳戶 ADR、fake-only 模擬核准、契約與遷移範圍）本輪不替 Aaron 選擇；ADR 仍是 Proposed。
+
+靜態預覽：三張 HTML 以本機 headless Chrome（DevTools protocol）開檔截成 PNG，1440×900、沒有橫向捲動；不連產品 API、不啟動模型、不用真實帳號。這是概念稿檢視，不是產品測試。
 
 ## 1 一筆真正完成的購物
 
@@ -148,6 +163,7 @@ ZK、BBS+、WebAuthn、語音、AI 評測與多場景仍是商業展示版的既
 |---|---|
 | 契約 | `docs/contracts.md` 新增 `apa.pay.v1`；新套件 `internal/paycontract`（`PurchaseIntentV1`、`PaymentBinding`、`AuthorizationGrant`、canonical、digest、golden vectors） |
 | 契約版本接線 | 情境目錄的 `contract` 欄位 → `host_runs.contract_version` → `TaskSetup` → `tasks.contract_version`；工具橋接與 `Store.Submit` 依版本分流（第 10 節） |
+| Policy | 抽出契約中立的 `policy.Rules`（M1 的 `policy.Decide` 對外不變）；新增 `paypolicy.Decide`（v1 驗證、v1 `intent_hash`、`paycontract.Decision`，`payment_capability=not_enabled`）（第 10.1 節） |
 | Store | schema 3（第 10 節）；`apa.pay.v1` task 允許 `DELEGATION_CONFIRMED`、`DELEGATION_BOUND`、`APPROVAL_SESSION_OPENED`、`APPROVED`、`APPROVAL_DENIED`、`APPROVAL_SUPERSEDED`、`GRANT_ISSUED`；M1 task 規則不變 |
 | 服務 | `internal/approval`：`ConfirmDelegation`、`OpenSession`（與 Ask 同一交易）、`Approve`／`Deny`（同一交易內判斷會話、期限、`intent_hash`、核准者綁定，並寫 grant） |
 | 模擬角色 | fake-only 的模擬核准者憑證（第 9 節）：`POST /api/host/simulate`（operator，同源 JSON），後端依 registry 映射 consumer；live 模式不註冊、一律拒絕 |
@@ -169,6 +185,7 @@ ZK、BBS+、WebAuthn、語音、AI 評測與多場景仍是商業展示版的既
 | 報價改變後才核准 | `superseded`，需重新請購 | 會話綁意圖 | — |
 | 客戶端或模型送出較寬的契約版本 | 忽略／拒絕，版本只來自目錄 | 版本來源 | 讓請求帶的版本生效 |
 | M1 task 的請購與證據 | 行為與檢查器結果不變；M1 檢查器拒絕 `apa.pay.v1` task（明確代碼） | 依版本分流 | — |
+| 版本交叉誤用、`PaymentBinding` 改變、同一商業欄位經兩種契約 | 見第 10.1 節的定向驗收 | 入口依版本、會話綁 v1 hash | 讓請購內容選入口；拿掉會話的 hash 比對 |
 | Signer 樁收到模擬 grant（第一次與第二次） | 兩次都 `GRANT_METHOD_NOT_ACCEPTED`；**只證明樁的規則**，不證明 jti 一次性 | 樁的方法規則 | — |
 
 一次性消耗的驗收不在這張表：見第 11 節。回歸：契約與 Store 的定向測試；M1 檢查器在 M1 證據上照舊通過（不重新產包）；UX1 的焦點檢查與 ux1-ui 相鄰流程。
@@ -191,7 +208,7 @@ ZK、BBS+、WebAuthn、語音、AI 評測與多場景仍是商業展示版的既
 | 2 單筆核准（模擬與正式分開） | [2-approval.html](mockups/commerce/2-approval.html) | ![單筆核准概念稿](mockups/commerce/2-approval.png) |
 | 3 交易完成與收據（P2 後的目標畫面） | [3-receipt.html](mockups/commerce/3-receipt.html) | ![交易完成概念稿](mockups/commerce/3-receipt.png) |
 
-每張頂端都有「概念稿／示意資料／未實作」條，不能當 runtime 證據；fake、測試網、合成資料的標示在頁首可見。商店圖形是示意：正式畫面仍是 Unity＋LimeZu（素材不進 repo，署名保留在稿上）；沒有購買或下載新素材。
+每張頂端都有「概念稿／示意資料／未實作」條，不能當 runtime 證據；fake、測試網、合成資料的標示在頁首可見。核准稿右側與收據稿右側是**設計註解（非產品畫面）**：虛線框與黃色標籤標出，實際畫面只顯示當前模式（模擬或正式其一）或當前結果（成功、確認中、未知、未完成、交付失敗其一）。主畫面的操作卡把 Agent（場次）與請購兩種狀態分開，並示範「Agent 已結束，請購仍等你核准」；B 的狀態只寫「選購中」，不從工具呼叫次數推算看過幾項商品。商店圖形是示意：正式畫面仍是 Unity＋LimeZu（素材不進 repo，署名保留在稿上）；沒有購買或下載新素材。
 
 **與現況的差距**（現況截圖在本機 `artifacts/ux1/`，git 忽略：UX1 改後 `m1-check-20261011T193325Z/ux1-ui/ux1-1440x900-two-at-work.png`、改前 `before-32e5183/1440x900-both-ask.png`）：
 
@@ -211,7 +228,7 @@ WareTrack 的影片本身不在 vault，只有〈商店互動展示設計-WareTr
 
 **之後的場景共用**：色彩語意、字級階層、「需要你處理」卡、核准表、進度條、收據與證據入口是元件；場景只換 Unity 的店面與區域名稱（入口、選購、櫃台、取貨的對應）。不做多場景引擎。
 
-Codex 的設計一致性核對不代替 Aaron 對畫面的判定。
+Codex 的設計一致性核對不代替 Aaron 對畫面的判定。**Aaron 要確認的是兩件分開的事**：版面方向（場景為主、需要處理的事項集中、單一主要動作、技術證據收起來）與場景美術方向（區域與人物目前只是示意）。概念稿不是最終美術、動畫或商業體驗驗收；場景打磨留到後續。沒有回覆前兩者都維持待確認。
 
 ## 9 R2：核准身分與權限
 
@@ -235,12 +252,38 @@ Codex 的設計一致性核對不代替 Aaron 對畫面的判定。
 |---|---|---|---|---|---|---|
 | 1 | 契約版本 | 情境目錄（`cmd/demo/scenarios.go`）、`control.start`、`AcceptRun`、`TaskSetup` | 目錄的情境加 `contract`（預設 `apa.m1.v2`）；開始時寫進 `host_runs.contract_version`；`prepare` 把它帶進 `TaskSetup`，寫入 `tasks.contract_version` | 可信目錄（Host 本機設定）；客戶端與模型不能送 | `host_runs`、`tasks` 新欄位 | 沒寫 `contract` 的情境就是 `apa.m1.v2` |
 | 2 | 委託、init、Gate、task 的先後 | `buyer.Host.Run`：Gate 檢查 init 通過後才呼叫 `prepare()`（`StartTask`） | 委託先確認並保存在 `delegations`（**不建 task**）；operator 以 `delegation_id` 開始一場（寫進 `host_runs`）；CLI init → Gate → `prepare` 才 `StartTask`，同一交易寫 `TASK_STARTED` 與 `DELEGATION_BOUND` | 委託：模擬核准者；開始：operator | `delegations`、`host_runs.delegation_id` | Gate 前不建 task 的界線不變；Gate 失敗：場次照現行結束，委託留在 `confirmed`（未使用，到期即 `expired`），不建 task |
-| 3 | 請購 | `toolbridge.Shop.Call` → `assemble` → `Store.Submit`（只解 M1 `PurchaseOrder`）→ `policy.Decide` | Binding 帶 task 的契約版本；`assemble` 依版本組 `PurchaseIntentV1`＋`PaymentBinding`；`Submit` 依 `tasks.contract_version` 解對應的請購並驗證；報價白名單、重試鍵與 `policy.Decide`（純函式）重用 | Store 依 task 的版本 | `purchases`（同表，body 依版本）| M1 task 走原本的解析與驗證；Agent 的三個工具與模型看到的回應不變，不另寫 runner |
+| 3 | 請購與 Policy | `toolbridge.Shop.Call` → `assemble` → `Store.Submit`（只解 M1 `PurchaseOrder`）→ `policy.Decide`（M1 專用：M1 Registry 驗證、M1 intent hash、M1 fixture 憑證、M1 裁決） | Binding 帶 task 的契約版本；`assemble` 依版本組 `PurchaseIntentV1`＋`PaymentBinding`；`Submit` 依 `tasks.contract_version` 選入口：M1 走原本的 `policy.Decide`，`apa.pay.v1` 走新的 `paypolicy.Decide`；兩者共用契約中立的 `policy.Rules`（第 10.1 節）；報價白名單與重試鍵重用 | Store 依 task 的版本（不是請購內容） | `purchases`（同表，body 與裁決依版本）| `policy.Decide` 的簽名、驗證、digest 與輸出不變；Agent 的三個工具與模型看到的回應不變，不另寫 runner |
 | 4 | 核准會話與 grant | Ask 時寫 `POLICY_DECIDED`；`expire`、`Cancel` 關閉未決 Ask | Ask 的同一交易開 `approval_sessions`（`APPROVAL_SESSION_OPENED`）；`Approve` 一個交易內：會話仍 pending、未到期、`intent_hash` 相同、核准者綁定 → 會話 `approved`＋寫 `grants`（`jti` 唯一）＋`APPROVED`、`GRANT_ISSUED`；核准請求 id 唯一，重送回同一結果；到期與取消同時關閉會話 | Store 的單一寫入交易 | `approval_sessions`、`grants` | M1 的 Ask 沒有會話；M1 事件不變 |
 | 5 | Store schema 3 | schema 1→2 的遷移（驗證、`VACUUM INTO` 備份、遷移、再驗證；失敗就拒絕開啟） | `tasks.contract_version`（既有列標為 `apa.m1.v2`）；`host_runs.contract_version`、`delegation_id`；新表 `delegations`、`approval_sessions`、`grants`；事件驗證與投影依版本（`project()` 加 `approved` 等狀態）；開啟時的一致性檢查涵蓋新表 | 遷移旗標照現行（需明確要求才升級） | 同上 | 同一套遷移方式；失敗時資料庫保持原樣 |
 | 6 | UI 與 checker | `TaskView`；`adapter.js`；`internal/m1evidence`、`internal/verification` | `TaskView` 帶 `contract_version`；網頁依版本顯示核准與 grant；M1 證據匯出與檢查器只接受 `apa.m1.v2`，遇到 `apa.pay.v1` task 明確拒絕（新代碼） | — | — | M1 原包、digest、案例與事件白名單的意義不變；不把新付款能力寫進舊證據 |
 
 本節是設計，不寫 SQL、不改程式、不執行遷移。P1-b、A2 仍可能再加資料表或欄位（一次性消耗紀錄、簽發者金鑰、authenticator 登記）。
+
+### 10.1 Policy：商業規則與契約包裝分開
+
+現行 `policy.Decide(reg, Input)`（`internal/policy/policy.go`）一次做了兩件事：M1 的契約處理（`reg.ValidatePurchase`、`CheckTaskActive`、`Intent.Hash()` 的 M1 digest、「憑證必須是此 consumer 的 M1 fixture」、輸出 `contracts.PolicyDecision`，版本 `apa.m1.v2`、`payment_status=unavailable`），以及中間那段與契約無關的判斷順序。推薦把後者抽出來，兩種契約各有自己的入口：
+
+| 函式（草案） | 責任 | 接收 | 回傳 | 不做的事 |
+|---|---|---|---|---|
+| `policy.Rules(RuleInput) RuleOutcome`（新，純函式） | 現行的判斷順序，原樣搬出：設定缺 → `CONFIG_MISSING`；資產不在 profile → `ASSET_NOT_ALLOWED`；收款人不在白名單 → `MERCHANT_NOT_ALLOWED`；憑證或意圖時間窗不成立 → `AUTHORIZATION_EXPIRED`；超過剩餘預算 → `INSUFFICIENT_BUDGET`；≤ `allow_max` → 範圍內（`WITHIN_ALLOW_MAX`）；無人值守 → `APPROVER_UNAVAILABLE`；其餘 → 需要本人核准（`HUMAN_APPROVAL_REQUIRED`） | **已驗證**的值：profile（資產、`allow_max`、任務上限、商家白名單、模式）、憑證是否存在與有效期限、剩餘預算（整數基本單位）、可信時間、這筆的資產 id（由呼叫者依可信 registry 對到）、收款人、金額、`valid_after`／`valid_before` | 結果種類（Deny／範圍內／需核准）與理由碼 | 不解析請購、不算任何 hash、不看憑證格式、不決定付款能力、不讀時鐘或檔案 |
+| `policy.Decide(reg, Input)`（M1，公開入口不變） | M1 契約處理 → 呼叫 `Rules` → 把「範圍內」包成 M1 的 `Allow`／`PAYMENT_CAPABILITY_UNAVAILABLE`、「需核准」包成 `Ask`／`pending`；`payment_status=unavailable` | 同現在 | 同現在（`contracts.PolicyDecision`） | 行為與輸出逐位元不變 |
+| `paypolicy.Decide(reg, InputV1)`（新，`apa.pay.v1`） | 先確認 task 的契約版本是 `apa.pay.v1`；用 `internal/paycontract` 驗證 `PurchaseIntentV1` 與 `PaymentBinding`（對報價、registry 的 consumer／錢包／資產、收款人、金額、網路）；計算 v1 `intent_hash`（網域 `agent-payment-authority/pay/v1/intent`，涵蓋業務意圖與 `PaymentBinding`）；檢查此版本接受的憑證（P1-a 只有明標的 fixture；C2 後為 BBS+）；呼叫 `Rules`；輸出 `paycontract.Decision`（版本 `apa.pay.v1`、v1 `intent_hash`、裁決、理由、核准狀態、`payment_capability`） | `InputV1`：session、v1 請購、task 狀態與契約版本、profile、憑證、預算、可信時間 | `paycontract.Decision` | 不沿用 M1 的 digest、M1 的「fixture 憑證」判斷或 M1 裁決型別 |
+
+- **誰驗證新請購**：`paypolicy.Decide` 呼叫 `paycontract` 的驗證；入口由 Store 依 `tasks.contract_version` 選，不由請購內容選。
+- **v1 `intent_hash`**：由 `paycontract` 計算，`paypolicy.Decide` 寫進裁決；核准會話與 grant 都存這個 hash，核准與（之後的）Signer 都以重新算出的 v1 hash 比對。`PaymentBinding` 任一欄改變（收款人、金額、網路、資產、nonce、時間窗）都會得到另一個 hash，舊的核准會話與 grant 不再適用。
+- **共用規則只吃已驗證的值**：M1 專屬的檢查（M1 Registry 的請購驗證、M1 digest、「fixture 憑證」的條件、`payment_status=unavailable` 的不變式）留在 M1 入口，不搬進 `Rules`。
+- **新契約的裁決與付款能力**：`paycontract.Decision.payment_capability` 在 P1-a 一律是 `not_enabled`；「範圍內」在 v1 是 `Allow`，但**不會自動付款**，也不在 P1-a 發 policy grant。付款能力要到 P1-b／P2 另行設計與核准。
+- **M1 不變**：`policy.Decide` 的簽名、輸入驗證、digest、裁決、凍結案例與證據意義都不動；抽出 `Rules` 只是把同一段判斷移到另一個函式。
+
+**未來的定向驗收**（P1-a 時執行；本輪不執行）：
+
+| 案例 | 預期 | 對應的版本或綁定防護 |
+|---|---|---|
+| 同一組商業欄位（同一商品、金額、收款人、預算）分別經 M1 與 `apa.pay.v1` | 各自走自己的驗證；digest 不同（網域不同）；兩個入口的裁決種類與理由一致（共用 `Rules`） | 入口依版本；digest 網域分開 |
+| `PaymentBinding` 改一個欄位（例如收款人或 nonce） | v1 `intent_hash` 改變；舊的核准會話拒絕核准（`intent_hash` 不符），舊 grant 不適用 | 會話與 grant 綁 v1 hash |
+| M1 task 收到 v1 請購、v1 task 收到 M1 請購 | 都被拒絕（明確代碼，例如 `CONTRACT_VERSION_MISMATCH`）；請購內容不能選入口 | 入口由 `tasks.contract_version` 決定 |
+| 既有 M1 判定 | `policy` 的現有測試與 M1 凍結案例的裁決與 digest 逐項不變；M1 檢查器在既有證據上結果不變（不重新產包） | `policy.Decide` 不變 |
+| `Rules` 本身 | 理由的先後與現行 `Decide` 一致（逐一改一個條件） | 判斷順序搬移後不變 |
 
 ## 11 R4：grant 的驗收分層
 

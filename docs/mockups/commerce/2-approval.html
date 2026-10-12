@@ -38,7 +38,7 @@
   .btn.deny { background: #fff; border-color: #d24a4a; color: #b03030; }
   .link { margin-left: auto; color: #4d5dbb; font-size: 14px; font-weight: 700; }
   .note { font-size: 12px; color: #7a7f99; padding: 0 28px 10px; }
-  .formal { position: absolute; top: 70px; right: 60px; width: 480px; bottom: 40px; background: var(--panel); border: 1px dashed #4b5490; border-radius: 18px; padding: 22px 24px; display: grid; grid-template-rows: auto auto 1fr auto; gap: 12px; }
+  .formal { position: absolute; top: 70px; right: 60px; width: 480px; bottom: 40px; background: var(--panel); border: 1px dashed #4b5490; border-radius: 18px; padding: 22px 24px; display: grid; grid-template-rows: auto auto auto 1fr auto; gap: 12px; }
   .formal .k { color: var(--violet); font-weight: 800; font-size: 13px; letter-spacing: .06em; }
   .formal h3 { margin: 0; font-size: 20px; }
   .formal ol { margin: 0; padding-left: 20px; display: grid; gap: 14px; align-content: start; color: #cfd3ee; font-size: 14px; }
@@ -47,6 +47,9 @@
   .v3 { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: center; background: var(--panel2); border-radius: 10px; padding: 9px 12px; font-size: 13px; }
   .v3 b { font-size: 13px; } .ok b { color: var(--green); } .bad b { color: var(--red); } .deg b { color: var(--amber); }
   .formal .foot { font-size: 12px; color: var(--muted); }
+  .ann-badge { display: inline-block; background: #ffe58a; color: #3a2c00; font-size: 12px; font-weight: 900; border-radius: 6px; padding: 3px 10px; letter-spacing: .04em; }
+  .ann { background: repeating-linear-gradient(135deg, #1a1d33 0 14px, #171a2e 14px 28px) !important; border: 2px dashed #ffe58a !important; }
+  .ann-rule { font-size: 13px; color: #ffe58a; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -69,8 +72,9 @@
     <div class="actions"><span class="btn approve">核准此筆（模擬）</span><span class="btn deny">拒絕</span><span class="link">查看技術證據 ›</span></div>
   </div>
 </section>
-<aside class="formal" aria-label="正式核准（A2 之後）">
-  <div class="k">正式核准・A2 之後・未實作</div>
+<aside class="formal ann" aria-label="設計註解：正式核准的差異">
+  <div><span class="ann-badge">設計註解・非產品畫面</span></div>
+  <div class="k">正式核准（A2 之後・未實作）和左側模擬版的差異</div>
   <h3>同一張摘要，換成本人驗證</h3>
   <ol>
     <li><b>確認摘要</b>：商品、收款人、金額、資產、網路、期限（同左）。</li>
@@ -82,7 +86,7 @@
         <div class="v3 deg"><b>不可用</b><span>可發授權（amr = webauthn），畫面明寫「降級：語音不可用」</span></div>
       </div></li>
   </ol>
-  <div class="foot">標示：上方徽章改為「本人核准（WebAuthn）」，不再出現「模擬」。模擬按鈕在正式模式由後端拒絕，不只是隱藏。</div>
+  <div class="foot"><div class="ann-rule">實際畫面只顯示當前模式：fake 時只有左側的模擬核准；正式模式時只有正式核准，兩者不會同時出現，這一欄也不會上線。</div>正式模式的徽章改為「本人核准（WebAuthn）」，不再出現「模擬」；模擬核准在正式模式由後端拒絕，不只是隱藏按鈕。</div>
 </aside>
 </body>
 </html>

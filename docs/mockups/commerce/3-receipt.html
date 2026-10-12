@@ -48,6 +48,10 @@
   .s.fail { border-color: var(--red); } .s.fail b { color: var(--red); }
   .s.part { border-color: #9fd0ff; } .s.part b { color: #9fd0ff; }
   .foot { font-size: 11px; color: #6d74a0; }
+  .ann-badge { display: inline-block; background: #ffe58a; color: #3a2c00; font-size: 12px; font-weight: 900; border-radius: 6px; padding: 3px 10px; letter-spacing: .04em; }
+  .ann { background: repeating-linear-gradient(135deg, #1a1d33 0 14px, #171a2e 14px 28px) !important; border: 2px dashed #ffe58a !important; }
+  .ann-rule { font-size: 13px; color: #ffe58a; font-weight: 700; }
+  .states.ann { border-radius: 14px; padding: 14px; }
 </style>
 </head>
 <body>
@@ -78,8 +82,10 @@
     </div>
     <div class="evid"><span><b>查看技術證據</b>　intent hash · 核准會話 · grant · ZK proof · 兩筆交易 receipt · 交付 hash · 時間軸</span><span>展開 ›</span></div>
   </section>
-  <aside class="states" aria-label="其他狀態的呈現">
-    <h2>不是成功時怎麼呈現</h2>
+  <aside class="states ann" aria-label="設計註解：其他結果的呈現規則">
+    <div><span class="ann-badge">設計註解・非產品畫面</span></div>
+    <h2>不是成功時，同一個位置怎麼呈現</h2>
+    <div class="ann-rule">實際畫面只顯示當前結果的一種，取代左側的「完成」；這一欄不會上線。</div>
     <div class="s wait"><b>確認中</b><span>已送出，等待鏈上確認。不會自動重付；可離開頁面，回來會顯示結果。</span></div>
     <div class="s unk"><b>結果未知</b><span>付款已送出，但還不能確認是否成功（例如服務逾時）。需要人工對帳；不顯示已付款，也不顯示失敗。</span></div>
     <div class="s fail"><b>付款未完成</b><span>授權已過期且鏈上沒有結算：沒有扣款。若預算已預留，顯示「已預留、未付款，待處理」。</span></div>
