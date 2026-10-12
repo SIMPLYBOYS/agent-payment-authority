@@ -152,7 +152,7 @@ env HOME="$T/home" GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)"
 
 ## 6 OS 隔離（尚未驗收，本輪不執行）
 
-> 10/13：最小部署方案見 [commercial-p1b-os-isolation.md](commercial-p1b-os-isolation.md)（P1-b OS 隔離部署最小方案完成，待 Codex review 與 Aaron 執行核准；尚未部署，正式付款未啟用）。方案取代下面第 3 步的 `scripts/verify/p1b-isolation.sh`：該腳本沒有撰寫，方案改用 macOS 內建命令與 `curl --unix-socket`。以下保留當時的文字。
+> 10/13：最小部署方案見 [commercial-p1b-os-isolation.md](commercial-p1b-os-isolation.md)（P1-b OS 隔離部署最小方案：Aaron 已核准 D1～D7；keygen 工具（D4）已實作並完成定向驗證，設計措辭（D6）已更新；D1～D3、D5 待 Aaron 親自執行；方案與 keygen 尚未經 Codex review；尚未部署，正式付款未啟用）。方案取代下面第 3 步的 `scripts/verify/p1b-isolation.sh`：該腳本沒有撰寫，方案改用 macOS 內建命令與 `curl --unix-socket`。以下保留當時的文字。
 
 本輪的 caller uid 測試在**同一個 OS 使用者**下進行：伺服器與客戶端都是目前的 uid，設定允許它就通過，不允許就 403。這證明程式讀的是核心回報的對端 uid，**不**證明 Agent／Host 在 OS 層讀不到金鑰或連不到 Signer。跨使用者的證據需要 Aaron 核准系統設定（決策 4）後才做，最小步驟：
 

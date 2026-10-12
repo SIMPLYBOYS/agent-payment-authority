@@ -277,3 +277,25 @@ Linux 容器裡的結果（前幾輪的定向 run）不是 macOS 跨使用者實
 | 不覆寫 | 存在檢查改成恆假、`O_EXCL` 改 `O_TRUNC` | `TestKeygen` →「an existing key file was replaced」 |
 | 兩次密語一致 | 比對改成恆假 | `TestKeygenRefuses/passphrases_differ` →「passphrases differ: accepted」 |
 | 檔案權限 | `0600` 改 `0644` | `TestKeygen` →「key file mode」 |
+
+### 8.2 D4 的定向驗證結果
+
+| 執行 | 基準 | 結果 |
+|---|---|---|
+| 未啟動（沒有證據目錄） | `0ce52ac` | `docker image inspect apa-verify:b1-05` 回「No such image」，包裝命令接著以空的輸出路徑呼叫 runner，在 `mkdir` 就停止；沒有建立證據目錄、沒有啟動容器、沒有測試執行 |
+| 正式容器 run：`artifacts/p1b/d4-20261012T184045Z/` | `0ce52ac`（`tracked_clean: true`，證據完整） | 4 步全部 PASS，exit 0，1 m 17 s |
+
+映像：用標籤查詢時斷續回「No such image」，`docker images` 卻列得出它；以完整 ID 查詢與執行都正常。所以本次用 `APA_VERIFY_IMAGE=sha256:78258368de09…`（與前幾輪 run 同一個映像，未重建、未更新）。標籤查詢失敗的根因沒有確認（推測是 Docker Desktop 的標籤解析問題）；第 9.3 節 `r2b-20261012T172925Z` 那次未啟動，可能也是同一原因。
+
+| # | 步驟 | 結果 | exit | 耗時 | 內容 |
+|---|---|---|---|---|---|
+| 1 | vet | PASS | 0 | 47.1 s | `go vet ./...` |
+| 2 | keygen-assembly | PASS | 0 | 11.2 s | 4 個測試 |
+| 3 | keystore | PASS | 0 | 1.6 s | 4 個測試 |
+| 4 | reverse | PASS | 0 | 17.6 s | 3／3 被預期斷言抓到（每項的未突變基準先通過） |
+
+實際命中的斷言：「an existing key file was replaced: <nil>, 2 questions」「passphrases differ: accepted」「key file mode: …」（`0644`）。
+
+隔離紀錄（本次容器）：外網拒、寫 `/src`／工具鏈／模組快取拒、只有 `lo` 上線、uid 10001。證據掃描沒有 64 bytes 的 hex 或測試密語。
+
+這只驗證 keygen 的程式行為（在 Linux 容器、同一個 uid）。它在 macOS 以 `apa-signer` 身分從 `/dev/tty` 讀密語、寫進 `/opt/apa-signer/data/keys`，要在 B1（步驟 B0k）實測。
