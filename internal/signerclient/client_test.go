@@ -33,6 +33,8 @@ import (
 
 const t0 = 1790726450
 
+var bg = context.Background()
+
 func testKey(name string) *secp256k1.PrivateKey {
 	b := sha256.Sum256([]byte("signerclient test wallet " + name))
 	return secp256k1.PrivKeyFromBytes(b[:])
@@ -52,6 +54,7 @@ type ledger struct {
 	orders map[string]json.RawMessage // purchase order ID -> order
 	rows   map[string]*row            // request ID -> row
 	n      int
+	fail   error // UpdatePayment fails with it, writing nothing
 }
 
 func (l *ledger) BeginPayment(req store.PaymentRequest) (store.PaymentAttempt, bool, error) {
@@ -79,6 +82,9 @@ func (l *ledger) UpdatePayment(id, state, attempt, code string) (store.PaymentAt
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	r := l.rows[id]
+	if l.fail != nil {
+		return store.PaymentAttempt{}, l.fail
+	}
 	if r.SignerAttemptID != "" && attempt != r.SignerAttemptID {
 		return r.PaymentAttempt, errors.New("IDEMPOTENCY_CONFLICT")
 	}
@@ -98,17 +104,25 @@ func (l *ledger) Payment(consumer, id string) (store.PaymentAttempt, error) {
 // committed is the test reservation verifier, and the handshake that the
 // Host committed the request before calling: the Signer finds the row
 // already written for the intent it is asked to sign.
-type committed struct{ l *ledger }
+type committed func(intent string) bool
 
 func (c committed) Verify(intent string, _ json.RawMessage) error {
-	c.l.mu.Lock()
-	defer c.l.mu.Unlock()
-	for _, r := range c.l.rows {
+	if !c(intent) {
+		return signer.Refusal("REQUEST_NOT_COMMITTED")
+	}
+	return nil
+}
+
+// committed is the handshake against the ledger stand-in.
+func (l *ledger) committed(intent string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.rows {
 		if r.IntentHash == intent && (r.State == "requested" || r.State == "unknown" || r.State == "rejected") {
-			return nil
+			return true
 		}
 	}
-	return signer.Refusal("REQUEST_NOT_COMMITTED")
+	return false
 }
 
 type env struct {
@@ -118,7 +132,10 @@ type env struct {
 	socket string
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T) *env { return newEnvChecking(t, nil) }
+
+// newEnvChecking takes the commit handshake; nil checks the ledger stand-in.
+func newEnvChecking(t *testing.T, check committed) *env {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "sc") // a socket path is at most 104 bytes
 	if err != nil {
@@ -131,8 +148,11 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	e := &env{t: t, l: &ledger{orders: map[string]json.RawMessage{}, rows: map[string]*row{}}, socket: filepath.Join(dir, "s")}
-	if e.core, err = signer.NewCore(cfg, map[string]*secp256k1.PrivateKey{a: keyA, b: keyB}, filepath.Join(dir, "signer.db"),
-		func() uint64 { return t0 }, committed{e.l}); err != nil {
+	if check == nil {
+		check = e.l.committed
+	}
+	if e.core, err = signer.NewCore(bg, cfg, map[string]*secp256k1.PrivateKey{a: keyA, b: keyB}, filepath.Join(dir, "signer.db"),
+		func() uint64 { return t0 }, check); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { e.core.Close() })
@@ -182,7 +202,7 @@ func TestPay(t *testing.T) {
 	if err != nil || r.Attempt.State != "signed" || r.Attempt.SignerAttemptID == "" || r.Authorization == nil {
 		t.Fatalf("pay: %+v %v", r, err)
 	}
-	got, _ := e.core.Get(r.Attempt.SignerAttemptID, "")
+	got, _ := e.core.Get(bg, r.Attempt.SignerAttemptID, "")
 	if recovers(t, r.Authorization, got.TypedDigest) != signer.Address(keyA.PubKey()) || got.RequestID != r.Attempt.RequestID {
 		t.Fatal("the authorization is not wallet-a's for this request")
 	}
@@ -212,7 +232,7 @@ func TestUnknownThenResume(t *testing.T) {
 	e := newEnv(t)
 	c := New(e.socket, e.l)
 	r, err := c.Pay(pay("po-1"))
-	if !errors.Is(err, Unknown) || r.Attempt.State != "requested" || e.l.rows[r.Attempt.RequestID].State != "unknown" {
+	if !errors.Is(err, Unknown) || errors.Is(err, NotSaved) || r.Attempt.State != "unknown" || e.l.rows[r.Attempt.RequestID].State != "unknown" {
 		t.Fatalf("no Signer: %+v %v", r, err)
 	}
 	id := r.Attempt.RequestID
@@ -274,5 +294,63 @@ func TestReplyLost(t *testing.T) {
 	res, err := direct.Resume("consumer-a", r.Attempt.RequestID)
 	if err != nil || res.Attempt.State != "signed" || res.Authorization == nil || res.Attempt.RequestID != r.Attempt.RequestID {
 		t.Fatalf("resume: %+v %v", res, err)
+	}
+}
+
+// counting counts the sign requests a client sends, and can fail them as a
+// broken transport would (a controlled stand-in for the socket).
+type counting struct {
+	rt   http.RoundTripper
+	mu   sync.Mutex
+	sign int
+	fail bool
+}
+
+func (c *counting) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.mu.Lock()
+	fail := false
+	if req.Method == "POST" && req.URL.Path == "/v1/sign" {
+		c.sign++
+		fail = c.fail
+	}
+	c.mu.Unlock()
+	if fail {
+		return nil, errors.New("injected transport failure")
+	}
+	return c.rt.RoundTrip(req)
+}
+
+func (c *counting) signs() int { c.mu.Lock(); defer c.mu.Unlock(); return c.sign }
+
+func countingClient(socket string, l Ledger) (*Client, *counting) {
+	c := New(socket, l)
+	tr := &counting{rt: c.http.Transport}
+	c.http.Transport = tr
+	return c, tr
+}
+
+// R3 of the P1-b review (22e45ed): the outcome is unknown AND recording
+// unknown failed; the caller sees both, nothing claims unknown was saved,
+// nothing is sent again, and once the Store works the same request ID is
+// resolved.
+func TestUnknownSaveFailure(t *testing.T) {
+	e := newEnv(t)
+	c, tr := countingClient(e.socket, e.l) // no Signer listening
+	e.l.fail = errors.New("disk I/O error")
+	r, err := c.Pay(pay("po-1"))
+	if !errors.Is(err, Unknown) || !errors.Is(err, NotSaved) {
+		t.Fatalf("save failure hidden: %v", err)
+	}
+	id := r.Attempt.RequestID
+	if r.Attempt.State != "requested" || e.l.rows[id].State != "requested" || tr.signs() != 1 {
+		t.Fatalf("claimed a saved unknown, or sent again: %+v, ledger %s, %d sign requests", r.Attempt, e.l.rows[id].State, tr.signs())
+	}
+	e.l.fail = nil
+	e.listen()
+	if r, err := c.Resume("consumer-a", id); err == nil || r.Attempt.State != "rejected" || r.Attempt.RequestID != id {
+		t.Fatalf("resume: %+v %v", r, err)
+	}
+	if r, err := c.Pay(pay("po-1")); err != nil || r.Attempt.RequestID != id || r.Attempt.State != "signed" || len(e.l.rows) != 1 {
+		t.Fatalf("pay after: %+v %v", r, err)
 	}
 }

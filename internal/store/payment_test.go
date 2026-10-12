@@ -258,3 +258,75 @@ func mustRead(t *testing.T, path string) []byte {
 	}
 	return b
 }
+
+// R1 of the P1-b review (22e45ed): once the task's cancellation is
+// committed, no payment attempt is created and none is handed out again for
+// sending; what exists can still be read and reconciled.
+func TestPaymentAfterCancel(t *testing.T) {
+	t.Run("a purchase never paid", func(t *testing.T) {
+		e := newEnv(t)
+		s := e.open()
+		po, _ := e.payAllowed(s)
+		if err := s.Cancel("task-a"); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := s.BeginPayment(payReq(po)); Code(err) != "TASK_ALREADY_ENDED" || count(t, e.path, "payment_attempts", "") != 0 {
+			t.Fatalf("cancelled task accepted a new payment request: %v", err)
+		}
+	})
+	t.Run("an unknown attempt", func(t *testing.T) {
+		e := newEnv(t)
+		s := e.open()
+		po, _ := e.payAllowed(s)
+		a, _, err := s.BeginPayment(payReq(po))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.UpdatePayment(a.RequestID, "unknown", "", ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Cancel("task-a"); err != nil {
+			t.Fatal(err)
+		}
+		if again, replay, err := s.BeginPayment(payReq(po)); Code(err) != "TASK_ALREADY_ENDED" || replay {
+			t.Fatalf("cancelled task handed out its unknown attempt for sending: %+v %v", again, err)
+		}
+		// Still readable, and the Signer's answer for the same ID still recorded.
+		if got, err := s.Payment("consumer-a", a.RequestID); err != nil || got.State != "unknown" {
+			t.Fatalf("read after cancel: %+v %v", got, err)
+		}
+		if got, err := s.UpdatePayment(a.RequestID, "signed", "att-1", ""); err != nil || got.State != "signed" || count(t, e.path, "payment_attempts", "") != 1 {
+			t.Fatalf("reconcile after cancel: %+v %v", got, err)
+		}
+	})
+	t.Run("a Deny before the cancellation", func(t *testing.T) {
+		// The task's status stays denied (project), but it was cancelled.
+		e := newEnv(t)
+		s := e.open()
+		po, _ := e.payAllowed(s)
+		d := v1Of(t, forTask(t, e.denied, "task-a"))
+		d.PaymentBinding.Nonce = fmt.Sprintf("0x%064x", 60)
+		if r := submitV1(t, s, sessA, d); r.Purchase.Decision.PolicyVerdict != "Deny" {
+			t.Fatalf("not a Deny: %+v", r.Purchase.Decision)
+		}
+		if err := s.Cancel("task-a"); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := s.BeginPayment(payReq(po)); Code(err) != "TASK_ALREADY_ENDED" {
+			t.Fatalf("cancelled task accepted a new payment request: %v", err)
+		}
+	})
+	t.Run("a CLI timeout is not a cancellation", func(t *testing.T) {
+		// Unchanged by R1: whether a timed-out task may still pay is not
+		// decided here.
+		e := newEnv(t)
+		s := e.open()
+		po, _ := e.payAllowed(s)
+		if err := s.CLITimeout("task-a"); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := s.BeginPayment(payReq(po)); err != nil {
+			t.Fatalf("CLI timeout taken for a cancellation: %v", err)
+		}
+	})
+}

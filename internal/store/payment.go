@@ -14,6 +14,9 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"slices"
+
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 )
 
 // schema4 is schema 4's addition.
@@ -77,7 +80,11 @@ func paymentWhere(cond string) string {
 // BeginPayment records the request to pay an allowed purchase of the
 // consumer's apa.pay.v1 task, and commits it, before the Signer is called.
 // The purchase's existing row is returned as it is (Replay): the Host never
-// makes a second request ID for a purchase.
+// makes a second request ID for a purchase. Once the task's cancellation is
+// committed it refuses, the existing row too, so neither a new attempt nor a
+// resend of a requested or unknown one reaches the Signer; Payment still
+// reads it, and the Signer's abandon still applies. A cancellation committed
+// after this transaction does not recall a request already sent.
 func (s *Store) BeginPayment(req PaymentRequest) (PaymentAttempt, bool, error) {
 	switch {
 	case req.Method == "webauthn":
@@ -98,6 +105,8 @@ func (s *Store) BeginPayment(req PaymentRequest) (PaymentAttempt, bool, error) {
 		}
 		p := t.purchases[req.PurchaseOrderID]
 		switch {
+		case slices.ContainsFunc(t.events, func(e contracts.AuditEvent) bool { return e.EventType == "TASK_CANCELLED" }):
+			return refuse("TASK_ALREADY_ENDED", "the task was cancelled: no payment is sent for it")
 		case !t.v1():
 			return refuse("CONTRACT_VERSION_MISMATCH", "only apa.pay.v1 purchases are paid")
 		case p == nil:

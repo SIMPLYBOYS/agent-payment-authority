@@ -7,6 +7,7 @@ package signer
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -36,6 +37,8 @@ var (
 	keyA = secp256k1.PrivKeyFromBytes(keccak([]byte("cow")))
 	keyB = secp256k1.PrivKeyFromBytes(keccak([]byte("apa-signer test wallet b")))
 )
+
+var bg = context.Background()
 
 // reserved is the test-only reservation verifier: every order is reserved
 // unless refuse names a code.
@@ -82,7 +85,7 @@ func newEnv(t *testing.T) *env {
 // core opens (or reopens: a restart) the Core on the env's DB.
 func (e *env) core() *Core {
 	e.t.Helper()
-	c, err := NewCore(e.cfg, e.keys, filepath.Join(e.dir, "signer.db"), e.now.Load, e.res)
+	c, err := NewCore(bg, e.cfg, e.keys, filepath.Join(e.dir, "signer.db"), e.now.Load, e.res)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -157,7 +160,7 @@ func recovered(t *testing.T, sigHex, digestHex string) string {
 func TestSignOne(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()
-	r, err := c.Sign(e.req("request-0000000001", a(1)))
+	r, err := c.Sign(bg, e.req("request-0000000001", a(1)))
 	if err != nil || r.State != "signed" || r.Authorization == nil {
 		t.Fatalf("%+v %v", r, err)
 	}
@@ -201,18 +204,18 @@ func TestRefusalsConsumeNothing(t *testing.T) {
 		"not an order":         {SignRequest{RequestID: "request-0000000010", Authorization: delegation("dlg-a"), Order: json.RawMessage(`{"version":"apa.m1.v2"}`)}, "ORDER_INVALID"},
 	}
 	for name, cs := range cases {
-		if _, err := c.Sign(cs.r); code(err) != cs.want {
+		if _, err := c.Sign(bg, cs.r); code(err) != cs.want {
 			t.Errorf("%s: %v, want %s", name, err, cs.want)
 		}
 	}
 	// The order's quote must name the registered EIP-712 domain.
 	e.quote = "9"
-	if _, err := c.Sign(e.req("request-0000000011", a(7))); code(err) != "ASSET_NOT_ALLOWED" {
+	if _, err := c.Sign(bg, e.req("request-0000000011", a(7))); code(err) != "ASSET_NOT_ALLOWED" {
 		t.Errorf("another domain version: %v", err)
 	}
 	e.quote = "2"
 	e.now.Store(t0 + 3600) // the delegation's valid_until
-	if _, err := c.Sign(e.req("request-0000000012", a(8))); code(err) != "DELEGATION_EXPIRED" {
+	if _, err := c.Sign(bg, e.req("request-0000000012", a(8))); code(err) != "DELEGATION_EXPIRED" {
 		t.Errorf("expired delegation: %v", err)
 	}
 	if n := count(t, c, "1"); n != 0 {
@@ -248,7 +251,7 @@ func TestBindingFields(t *testing.T) {
 		o := e.po(a(1))
 		cs.edit(&o)
 		raw, _ := json.Marshal(o)
-		if _, err := c.Sign(SignRequest{RequestID: "request-0000000001", Authorization: delegation("dlg-a"), Order: raw}); code(err) != cs.want {
+		if _, err := c.Sign(bg, SignRequest{RequestID: "request-0000000001", Authorization: delegation("dlg-a"), Order: raw}); code(err) != cs.want {
 			t.Errorf("%s: %v, want %s", name, err, cs.want)
 		}
 	}
@@ -268,12 +271,12 @@ func TestAcceptDeadline(t *testing.T) {
 		}
 		return t0 + 60 // the accept transaction: valid_before, the deadline
 	}
-	c, err := NewCore(e.cfg, e.keys, filepath.Join(e.dir, "signer.db"), clock, e.res)
+	c, err := NewCore(bg, e.cfg, e.keys, filepath.Join(e.dir, "signer.db"), clock, e.res)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if _, err := c.Sign(e.req("request-0000000001", a(1))); code(err) != "AUTHORIZATION_EXPIRED" || count(t, c, "1") != 0 {
+	if _, err := c.Sign(bg, e.req("request-0000000001", a(1))); code(err) != "AUTHORIZATION_EXPIRED" || count(t, c, "1") != 0 {
 		t.Fatalf("accepted at the deadline: %v", err)
 	}
 }
@@ -282,7 +285,7 @@ func TestProductionVerifierRefuses(t *testing.T) {
 	e := newEnv(t)
 	e.res = Unavailable{}
 	c := e.core()
-	if _, err := c.Sign(e.req("request-0000000001", a(1))); code(err) != "RESERVATION_UNAVAILABLE" || count(t, c, "1") != 0 {
+	if _, err := c.Sign(bg, e.req("request-0000000001", a(1))); code(err) != "RESERVATION_UNAVAILABLE" || count(t, c, "1") != 0 {
 		t.Fatalf("%v", err)
 	}
 }
@@ -290,25 +293,25 @@ func TestProductionVerifierRefuses(t *testing.T) {
 func TestResendConflictReplay(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()
-	first, err := c.Sign(e.req("request-0000000001", a(1)))
+	first, err := c.Sign(bg, e.req("request-0000000001", a(1)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := c.Sign(e.req("request-0000000001", a(1)))
+	again, err := c.Sign(bg, e.req("request-0000000001", a(1)))
 	if err != nil || again.AttemptID != first.AttemptID || again.Authorization.Signature != first.Authorization.Signature || count(t, c, "1") != 1 {
 		t.Fatalf("resend: %+v %v", again, err)
 	}
 	other := a(2)
-	if _, err := c.Sign(e.req("request-0000000001", other)); code(err) != "REQUEST_ID_CONFLICT" {
+	if _, err := c.Sign(bg, e.req("request-0000000001", other)); code(err) != "REQUEST_ID_CONFLICT" {
 		t.Fatalf("same ID, other content: %v", err)
 	}
-	if _, err := c.Sign(e.req("request-0000000002", a(1))); code(err) != "INTENT_IN_USE" {
+	if _, err := c.Sign(bg, e.req("request-0000000002", a(1))); code(err) != "INTENT_IN_USE" {
 		t.Fatalf("same order, new ID: %v", err)
 	}
 	s := a(3)
 	r := e.req("request-0000000003", s)
 	r.Order = bytes.Replace(r.Order, []byte(fmt.Sprintf("0x%064x", 3)), []byte(fmt.Sprintf("0x%064x", 1)), 1) // reuse order 1's nonce
-	if _, err := c.Sign(r); code(err) != "NONCE_IN_USE" {
+	if _, err := c.Sign(bg, r); code(err) != "NONCE_IN_USE" {
 		t.Fatalf("reused nonce: %v", err)
 	}
 }
@@ -316,23 +319,23 @@ func TestResendConflictReplay(t *testing.T) {
 func TestTotalCap(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()
-	if _, err := c.Sign(e.req("request-0000000001", a(1))); err != nil {
+	if _, err := c.Sign(bg, e.req("request-0000000001", a(1))); err != nil {
 		t.Fatal(err)
 	}
 	// 500000 signed of 1000000: another 500000 fits, a third does not.
-	if _, err := c.Sign(e.req("request-0000000002", a(2))); err != nil {
+	if _, err := c.Sign(bg, e.req("request-0000000002", a(2))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Sign(e.req("request-0000000003", a(3))); code(err) != "OVER_TOTAL_CAP" {
+	if _, err := c.Sign(bg, e.req("request-0000000003", a(3))); code(err) != "OVER_TOTAL_CAP" {
 		t.Fatalf("over the cap: %v", err)
 	}
 	// A restart keeps the spend: it is derived from the saved states.
 	c = e.core()
-	if _, err := c.Sign(e.req("request-0000000004", a(4))); code(err) != "OVER_TOTAL_CAP" {
+	if _, err := c.Sign(bg, e.req("request-0000000004", a(4))); code(err) != "OVER_TOTAL_CAP" {
 		t.Fatalf("after a restart: %v", err)
 	}
 	// B's delegation is its own.
-	if _, err := c.Sign(SignRequest{RequestID: "request-0000000005", Authorization: delegation("dlg-b"),
+	if _, err := c.Sign(bg, SignRequest{RequestID: "request-0000000005", Authorization: delegation("dlg-b"),
 		Order: e.order(spec{"consumer-b", "agent-b", "wallet-b", keyB, merchant, "500000", 5, 60})}); err != nil {
 		t.Fatalf("B: %v", err)
 	}
@@ -346,7 +349,7 @@ func TestConcurrentCap(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
 	for i, s := range []spec{s1, s2} {
-		wg.Go(func() { _, errs[i] = c.Sign(e.req(fmt.Sprintf("request-000000000%d", i+1), s)) })
+		wg.Go(func() { _, errs[i] = c.Sign(bg, e.req(fmt.Sprintf("request-000000000%d", i+1), s)) })
 	}
 	wg.Wait()
 	ok := 0
@@ -379,7 +382,7 @@ func crashAt(stage string) func() {
 // uninterrupted run.
 func TestInterruptions(t *testing.T) {
 	ref := newEnv(t)
-	want, err := ref.core().Sign(ref.req("request-0000000001", a(1)))
+	want, err := ref.core().Sign(bg, ref.req("request-0000000001", a(1)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,15 +391,15 @@ func TestInterruptions(t *testing.T) {
 			e := newEnv(t)
 			c := e.core()
 			defer crashAt(stage)()
-			if _, err := c.Sign(e.req("request-0000000001", a(1))); err == nil {
+			if _, err := c.Sign(bg, e.req("request-0000000001", a(1))); err == nil {
 				t.Fatal("no crash")
 			}
 			c = e.core() // restart: recovery runs before serving
-			r, err := c.Get("", "request-0000000001")
+			r, err := c.Get(bg, "", "request-0000000001")
 			if err != nil || r.State != "signed" || r.Authorization.Signature != want.Authorization.Signature {
 				t.Fatalf("recovery used the request, not the snapshot, or signed differently: %+v %v", r, err)
 			}
-			again, err := c.Sign(e.req("request-0000000001", a(1)))
+			again, err := c.Sign(bg, e.req("request-0000000001", a(1)))
 			if err != nil || again.Authorization.Signature != want.Authorization.Signature || count(t, c, "1") != 1 {
 				t.Fatalf("a second attempt for the same request: %+v %v", again, err)
 			}
@@ -422,7 +425,7 @@ func TestFinalDeadline(t *testing.T) {
 				return nil
 			}
 			defer func() { hook = nil }()
-			r, err := core.Sign(e.req("request-0000000001", a(1)))
+			r, err := core.Sign(bg, e.req("request-0000000001", a(1)))
 			if code(err) != c.want || r.Authorization != nil || count(t, core, "state = 'expired_unsigned'") != 1 {
 				t.Fatalf("signed after the deadline: %+v %v", r, err)
 			}
@@ -431,9 +434,9 @@ func TestFinalDeadline(t *testing.T) {
 	// A signed attempt whose deadline passes later is still answered as saved.
 	e := newEnv(t)
 	core := e.core()
-	first, _ := core.Sign(e.req("request-0000000001", a(1)))
+	first, _ := core.Sign(bg, e.req("request-0000000001", a(1)))
 	e.now.Store(t0 + 3600)
-	r, err := core.Get(first.AttemptID, "")
+	r, err := core.Get(bg, first.AttemptID, "")
 	if err != nil || r.State != "signed" || r.Authorization.Signature != first.Authorization.Signature {
 		t.Fatalf("saved result refused after expiry: %+v %v", r, err)
 	}
@@ -451,7 +454,7 @@ func TestAbandonRaces(t *testing.T) {
 		hook = func(s, id string) error {
 			if s == "after-sign" {
 				done := make(chan struct{})
-				go func() { abandoned, aerr = c.Abandon(id); close(done) }()
+				go func() { abandoned, aerr = c.Abandon(bg, id); close(done) }()
 				select {
 				case <-done:
 				case <-time.After(2 * time.Second): // bounded: a handshake, not a guess at timing
@@ -461,7 +464,7 @@ func TestAbandonRaces(t *testing.T) {
 			return nil
 		}
 		defer func() { hook = nil }()
-		r, err := c.Sign(e.req("request-0000000001", a(1)))
+		r, err := c.Sign(bg, e.req("request-0000000001", a(1)))
 		if blocked {
 			t.Fatal("abandon blocked by the signing lock")
 		}
@@ -479,12 +482,12 @@ func TestAbandonRaces(t *testing.T) {
 		var aerr error
 		hook = func(s, id string) error {
 			if s == "after-final" {
-				ab, aerr = c.Abandon(id)
+				ab, aerr = c.Abandon(bg, id)
 			}
 			return nil
 		}
 		defer func() { hook = nil }()
-		r, err := c.Sign(e.req("request-0000000001", a(1)))
+		r, err := c.Sign(bg, e.req("request-0000000001", a(1)))
 		if err != nil || r.State != "signed" || code(aerr) != "ATTEMPT_NOT_ACCEPTED" || ab.State != "signed" {
 			t.Fatalf("abandon overwrote signed: %+v %v / %+v %v", r, err, ab, aerr)
 		}
@@ -493,11 +496,11 @@ func TestAbandonRaces(t *testing.T) {
 		e := newEnv(t)
 		c := e.core()
 		release := crashAt("after-accept")
-		c.Sign(e.req("request-0000000001", a(1)))
+		c.Sign(bg, e.req("request-0000000001", a(1)))
 		release()
 		e.now.Store(t0 + 60)
-		g, _ := c.Get("", "request-0000000001")
-		ab, err := c.Abandon(g.AttemptID)
+		g, _ := c.Get(bg, "", "request-0000000001")
+		ab, err := c.Abandon(bg, g.AttemptID)
 		var spent int
 		c.db.QueryRow(`SELECT coalesce(sum(amount), 0) FROM attempts WHERE state IN ('accepted', 'signed')`).Scan(&spent)
 		if g.State != "expired_unsigned" || code(err) != "ATTEMPT_NOT_ACCEPTED" || ab.State != "expired_unsigned" || spent != 0 {
@@ -517,14 +520,14 @@ func TestWalletBusy(t *testing.T) {
 	hook = func(s, _ string) error {
 		if s == "after-sign" {
 			hook = nil
-			_, same = c.Sign(e.req("request-0000000002", a(2)))
-			_, other = c.Sign(SignRequest{RequestID: "request-0000000003", Authorization: delegation("dlg-b"),
+			_, same = c.Sign(bg, e.req("request-0000000002", a(2)))
+			_, other = c.Sign(bg, SignRequest{RequestID: "request-0000000003", Authorization: delegation("dlg-b"),
 				Order: e.order(spec{"consumer-b", "agent-b", "wallet-b", keyB, merchant, "500000", 3, 60})})
 		}
 		return nil
 	}
 	defer func() { hook = nil }()
-	if _, err := c.Sign(e.req("request-0000000001", a(1))); err != nil {
+	if _, err := c.Sign(bg, e.req("request-0000000001", a(1))); err != nil {
 		t.Fatal(err)
 	}
 	if code(same) != "SIGNER_BUSY" || other != nil {
@@ -539,11 +542,11 @@ func TestDelegationEndsFirst(t *testing.T) {
 	e.cfg.Delegations[0].ValidUntil = t0 + 30 // valid_before is t0+60
 	c := e.core()
 	release := crashAt("after-accept")
-	c.Sign(e.req("request-0000000001", a(1)))
+	c.Sign(bg, e.req("request-0000000001", a(1)))
 	release()
 	e.now.Store(t0 + 30)
 	c = e.core()
-	if r, err := c.Get("", "request-0000000001"); err != nil || r.State != "expired_unsigned" || r.Authorization != nil || r.AuthDeadline != t0+30 {
+	if r, err := c.Get(bg, "", "request-0000000001"); err != nil || r.State != "expired_unsigned" || r.Authorization != nil || r.AuthDeadline != t0+30 {
 		t.Fatalf("signed after the authorization expired: %+v %v", r, err)
 	}
 }
@@ -552,11 +555,11 @@ func TestKeyVersionMismatch(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()
 	release := crashAt("after-accept")
-	c.Sign(e.req("request-0000000001", a(1)))
+	c.Sign(bg, e.req("request-0000000001", a(1)))
 	release()
 	e.keys = map[string]*secp256k1.PrivateKey{Address(keyA.PubKey()): keyB, Address(keyB.PubKey()): keyB} // wallet-a's address now maps to another key
 	c = e.core()
-	if r, err := c.Sign(e.req("request-0000000001", a(1))); code(err) != "KEY_VERSION_MISMATCH" || count(t, c, "state = 'accepted'") != 1 {
+	if r, err := c.Sign(bg, e.req("request-0000000001", a(1))); code(err) != "KEY_VERSION_MISMATCH" || count(t, c, "state = 'accepted'") != 1 {
 		t.Fatalf("signed with another key: %+v %v", r, err)
 	}
 }

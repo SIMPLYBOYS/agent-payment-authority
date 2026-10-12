@@ -6,6 +6,7 @@ package main
 // one-time test keys made here; nothing is sent anywhere.
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"os"
@@ -21,6 +22,8 @@ import (
 const t0 = 1790726450
 
 var pass = []byte("test passphrase, not a real one")
+
+var bg = context.Background()
 
 // signerDir writes a private Signer directory with two encrypted test keys
 // and returns it with wallet-a's address.
@@ -62,12 +65,12 @@ func TestAssemblyRefusesEveryOrder(t *testing.T) {
 	defer core.Close()
 	order := signertest.Order{Consumer: "consumer-a", Agent: "agent-a", Wallet: "wallet-a", From: a, PayTo: signertest.Merchant, Amount: "500000",
 		N: 1, Now: t0, Window: 60}.Raw()
-	r, err := core.Sign(signer.SignRequest{RequestID: "request-0000000001",
+	r, err := core.Sign(bg, signer.SignRequest{RequestID: "request-0000000001",
 		Authorization: signer.Authorization{Method: "delegation", DelegationID: "dlg-a", DelegationVersion: 1}, Order: order})
 	if err == nil || err.Error() != "RESERVATION_UNAVAILABLE" || r.Authorization != nil {
 		t.Fatalf("the production assembly signed: %+v %v", r, err)
 	}
-	if _, err := core.Get("", "request-0000000001"); err == nil || err.Error() != "ATTEMPT_UNKNOWN" {
+	if _, err := core.Get(bg, "", "request-0000000001"); err == nil || err.Error() != "ATTEMPT_UNKNOWN" {
 		t.Fatalf("an attempt was kept: %v", err)
 	}
 }

@@ -73,6 +73,9 @@ func run(args []string, out io.Writer) error {
 	return signer.Serve(ctx, ln, core, func(line string) { fmt.Fprintln(out, "apa-signer:", line) })
 }
 
+// recoveryTimeout bounds the startup recovery (signer.NewCore).
+const recoveryTimeout = 60 * time.Second
+
 // assemble is the production assembly: the directory's configuration,
 // keys and DB, and the Unavailable reservation verifier, always.
 func assemble(dir string, passphrase func() ([]byte, error), clock signer.Clock) (*signer.Core, *signer.Config, error) {
@@ -102,7 +105,10 @@ func assemble(dir string, passphrase func() ([]byte, error), clock signer.Clock)
 	if err != nil {
 		return nil, nil, err
 	}
-	core, err := signer.NewCore(cfg, keys, filepath.Join(dir, "signer.db"), clock, signer.Unavailable{})
+	// The recovery of attempts left accepted runs before serving, bounded.
+	ctx, cancel := context.WithTimeout(context.Background(), recoveryTimeout)
+	defer cancel()
+	core, err := signer.NewCore(ctx, cfg, keys, filepath.Join(dir, "signer.db"), clock, signer.Unavailable{})
 	return core, cfg, err
 }
 

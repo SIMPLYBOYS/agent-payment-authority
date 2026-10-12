@@ -81,7 +81,7 @@ func Serve(ctx context.Context, ln net.Listener, core *Core, log func(string)) e
 // caller check.
 func Handler(core *Core, log func(string)) http.Handler {
 	mux := http.NewServeMux()
-	answer := func(w http.ResponseWriter, route string, r Reply, err error) {
+	answer := func(w http.ResponseWriter, req *http.Request, route string, r Reply, err error) {
 		status := http.StatusOK
 		if err != nil {
 			var ref Refusal
@@ -95,6 +95,11 @@ func Handler(core *Core, log func(string)) http.Handler {
 				case "BAD_REQUEST":
 					status = http.StatusBadRequest
 				}
+			} else if req.Context().Err() != nil {
+				// the request's deadline ended the work; an attempt
+				// accepted before it stays as it is, for the same request ID
+				r = Reply{Error: "SIGNER_TIMEOUT"}
+				status = http.StatusServiceUnavailable
 			} else {
 				r = Reply{Error: "SIGNER_ERROR"}
 				status = http.StatusServiceUnavailable
@@ -109,31 +114,31 @@ func Handler(core *Core, log func(string)) http.Handler {
 		var sr SignRequest
 		body, err := io.ReadAll(http.MaxBytesReader(w, req.Body, maxBody))
 		if err != nil || json.Unmarshal(body, &sr) != nil {
-			answer(w, "sign", Reply{}, Refusal("BAD_REQUEST"))
+			answer(w, req, "sign", Reply{}, Refusal("BAD_REQUEST"))
 			return
 		}
-		r, err := core.Sign(sr)
-		answer(w, "sign", r, err)
+		r, err := core.Sign(req.Context(), sr)
+		answer(w, req, "sign", r, err)
 	})
 	mux.HandleFunc("GET /v1/attempts/{id}", func(w http.ResponseWriter, req *http.Request) {
-		r, err := core.Get(req.PathValue("id"), "")
-		answer(w, "get", r, err)
+		r, err := core.Get(req.Context(), req.PathValue("id"), "")
+		answer(w, req, "get", r, err)
 	})
 	mux.HandleFunc("GET /v1/attempts", func(w http.ResponseWriter, req *http.Request) {
-		r, err := core.Get("", req.URL.Query().Get("request_id"))
-		answer(w, "get", r, err)
+		r, err := core.Get(req.Context(), "", req.URL.Query().Get("request_id"))
+		answer(w, req, "get", r, err)
 	})
 	mux.HandleFunc("POST /v1/attempts/{id}/abandon", func(w http.ResponseWriter, req *http.Request) {
-		r, err := core.Abandon(req.PathValue("id"))
-		answer(w, "abandon", r, err)
+		r, err := core.Abandon(req.Context(), req.PathValue("id"))
+		answer(w, req, "abandon", r, err)
 	})
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, req *http.Request) {
-		answer(w, "health", Reply{State: "unlocked"}, nil)
+		answer(w, req, "health", Reply{State: "unlocked"}, nil)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		uid, ok := req.Context().Value(ctxKey{}).(int64)
 		if !ok || uid < 0 || !core.cfg.allows(uint32(uid)) {
-			answer(w, "caller", Reply{}, Refusal("CALLER_NOT_ALLOWED"))
+			answer(w, req, "caller", Reply{}, Refusal("CALLER_NOT_ALLOWED"))
 			return
 		}
 		ctx, cancel := context.WithTimeout(req.Context(), timeout)

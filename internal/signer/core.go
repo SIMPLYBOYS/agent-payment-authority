@@ -7,6 +7,7 @@ package signer
 // transaction (single writer, BEGIN IMMEDIATE).
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -45,8 +46,9 @@ func (r Refusal) Error() string { return string(r) }
 type Clock func() uint64
 
 // hook runs at the named points of an attempt (tests only; nil in
-// production): "after-accept", "after-sign", "after-final". An error stops
-// there, as a crash would.
+// production): "after-accept", "after-sign", "after-final", and
+// "wait-lock" (with the wallet ID) just before waiting for a wallet's lock.
+// An error stops there, as a crash would.
 var hook func(stage, attemptID string) error
 
 func at(stage, id string) error {
@@ -100,8 +102,9 @@ CREATE INDEX IF NOT EXISTS spend ON attempts (delegation_id, state);
 
 // NewCore opens the Signer DB at dbPath with an unlocked key per configured
 // wallet. A wallet without its key is refused. Accepted attempts left by a
-// previous process are finished or expired before it serves (recover).
-func NewCore(cfg *Config, keys map[string]*secp256k1.PrivateKey, dbPath string, clock Clock, res ReservationVerifier) (*Core, error) {
+// previous process are finished or expired before it serves (recover);
+// ctx bounds that recovery.
+func NewCore(ctx context.Context, cfg *Config, keys map[string]*secp256k1.PrivateKey, dbPath string, clock Clock, res ReservationVerifier) (*Core, error) {
 	for _, w := range cfg.Wallets {
 		if keys[w.Address] == nil {
 			return nil, fmt.Errorf("no key for wallet %s", w.WalletID)
@@ -112,12 +115,12 @@ func NewCore(cfg *Config, keys map[string]*secp256k1.PrivateKey, dbPath string, 
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.ExecContext(ctx, schema); err != nil {
 		db.Close()
 		return nil, err
 	}
 	c := &Core{cfg: cfg, keys: keys, db: db, clock: clock, res: res, wallets: map[string]chan struct{}{}}
-	if err := c.recover(); err != nil {
+	if err := c.recover(ctx); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -127,9 +130,10 @@ func NewCore(cfg *Config, keys map[string]*secp256k1.PrivateKey, dbPath string, 
 func (c *Core) Close() error { return c.db.Close() }
 
 // lockWallet takes the wallet's signing lock, or refuses SIGNER_BUSY after
-// lockWait. It serializes accepting and signing only; abandon and queries
-// never take it.
-func (c *Core) lockWallet(id string) (unlock func(), err error) {
+// lockWait; it gives up sooner when ctx ends (the request's own deadline,
+// never a fresh one). It serializes accepting and signing only; abandon and
+// queries never take it.
+func (c *Core) lockWallet(ctx context.Context, id string) (unlock func(), err error) {
 	c.mu.Lock()
 	ch := c.wallets[id]
 	if ch == nil {
@@ -139,9 +143,14 @@ func (c *Core) lockWallet(id string) (unlock func(), err error) {
 	c.mu.Unlock()
 	t := time.NewTimer(lockWait)
 	defer t.Stop()
+	if err := at("wait-lock", id); err != nil {
+		return nil, err
+	}
 	select {
 	case ch <- struct{}{}:
 		return func() { <-ch }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	case <-t.C:
 		return nil, Refusal("SIGNER_BUSY")
 	}
@@ -191,7 +200,7 @@ func fingerprint(r SignRequest) (string, error) {
 var requestIDPattern = idPattern
 
 // Sign is POST /v1/sign: a new request, or the resend of one already seen.
-func (c *Core) Sign(r SignRequest) (Reply, error) {
+func (c *Core) Sign(ctx context.Context, r SignRequest) (Reply, error) {
 	if !requestIDPattern.MatchString(r.RequestID) || len(r.Order) == 0 {
 		return Reply{}, Refusal("BAD_REQUEST")
 	}
@@ -199,13 +208,13 @@ func (c *Core) Sign(r SignRequest) (Reply, error) {
 	if err != nil {
 		return Reply{}, Refusal("BAD_REQUEST")
 	}
-	if a, found, err := c.byRequest(r.RequestID); err != nil {
+	if a, found, err := c.byRequest(ctx, r.RequestID); err != nil {
 		return Reply{}, err
 	} else if found {
 		if a.fingerprint != fp {
 			return Reply{}, Refusal("REQUEST_ID_CONFLICT")
 		}
-		return c.resume(a)
+		return c.resume(ctx, a)
 	}
 	var po struct {
 		Intent struct {
@@ -218,7 +227,7 @@ func (c *Core) Sign(r SignRequest) (Reply, error) {
 		}
 		return Reply{}, Refusal("WALLET_NOT_REGISTERED")
 	}
-	unlock, err := c.lockWallet(po.Intent.WalletID)
+	unlock, err := c.lockWallet(ctx, po.Intent.WalletID)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -227,10 +236,10 @@ func (c *Core) Sign(r SignRequest) (Reply, error) {
 		unlock()
 		return Reply{}, err
 	}
-	id, err := c.accept(snap, d, amount)
+	id, err := c.accept(ctx, snap, d, amount)
 	if errors.Is(err, Refusal("REQUEST_ID_RACE")) { // a twin of this request was accepted meanwhile: answer as its resend
 		unlock()
-		return c.Sign(r)
+		return c.Sign(ctx, r)
 	}
 	defer unlock()
 	if err != nil {
@@ -239,7 +248,7 @@ func (c *Core) Sign(r SignRequest) (Reply, error) {
 	if err := at("after-accept", id); err != nil {
 		return Reply{}, err
 	}
-	return c.finish(id)
+	return c.finish(ctx, id)
 }
 
 // verify is design 4.3, steps 1 to 7: nothing is written.
@@ -340,8 +349,8 @@ func quoteDomainIs(q contracts.Quote, a *Asset) bool {
 // accept reserves the request ID, intent, nonce and the delegation's
 // spend in one write transaction, with the snapshot. The time is taken
 // after the write lock and must still be before the deadline.
-func (c *Core) accept(s *snapshot, d *Delegation, amount uint64) (string, error) {
-	tx, err := c.db.Begin()
+func (c *Core) accept(ctx context.Context, s *snapshot, d *Delegation, amount uint64) (string, error) {
+	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
 	}
@@ -351,7 +360,7 @@ func (c *Core) accept(s *snapshot, d *Delegation, amount uint64) (string, error)
 		return "", Refusal("AUTHORIZATION_EXPIRED")
 	}
 	var n int
-	if err := tx.QueryRow(`SELECT count(*) FROM attempts WHERE request_id = ?`, s.RequestID).Scan(&n); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM attempts WHERE request_id = ?`, s.RequestID).Scan(&n); err != nil {
 		return "", err
 	} else if n > 0 {
 		return "", Refusal("REQUEST_ID_RACE")
@@ -365,14 +374,14 @@ func (c *Core) accept(s *snapshot, d *Delegation, amount uint64) (string, error)
 		{"NONCE_IN_USE", `SELECT count(*) FROM attempts WHERE chain_id = ? AND asset_contract = ? AND payer = ? AND nonce = ?`,
 			[]any{s.Domain.ChainID, s.Domain.VerifyingContract, m.From, m.Nonce}},
 	} {
-		if err := tx.QueryRow(q.sql, q.args...).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, q.sql, q.args...).Scan(&n); err != nil {
 			return "", err
 		} else if n > 0 {
 			return "", Refusal(q.code)
 		}
 	}
 	var spent uint64
-	if err := tx.QueryRow(`SELECT coalesce(sum(amount), 0) FROM attempts WHERE delegation_id = ? AND state IN ('accepted', 'signed')`, d.DelegationID).Scan(&spent); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT coalesce(sum(amount), 0) FROM attempts WHERE delegation_id = ? AND state IN ('accepted', 'signed')`, d.DelegationID).Scan(&spent); err != nil {
 		return "", err
 	}
 	if total, _ := units(d.TotalCap); spent+amount > total {
@@ -392,7 +401,7 @@ func (c *Core) accept(s *snapshot, d *Delegation, amount uint64) (string, error)
 	if err != nil {
 		return "", err
 	}
-	if _, err := tx.Exec(`INSERT INTO attempts (attempt_id, request_id, fingerprint, intent_hash, wallet_id, chain_id, asset_contract, payer, nonce,
+	if _, err := tx.ExecContext(ctx, `INSERT INTO attempts (attempt_id, request_id, fingerprint, intent_hash, wallet_id, chain_id, asset_contract, payer, nonce,
 		delegation_id, amount, state, accepted_at, auth_deadline, typed_digest, snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?, ?, ?)`,
 		id, s.RequestID, s.Fingerprint, s.IntentHash, s.WalletID, s.Domain.ChainID, s.Domain.VerifyingContract, m.From, m.Nonce,
 		d.DelegationID, amount, now, s.AuthDeadline, s.TypedDigest, string(canon)); err != nil {
@@ -424,12 +433,12 @@ func scanAttempt(row interface{ Scan(...any) error }) (attempt, bool, error) {
 	return a, true, nil
 }
 
-func (c *Core) byRequest(id string) (attempt, bool, error) {
-	return scanAttempt(c.db.QueryRow(`SELECT `+attemptCols+` FROM attempts WHERE request_id = ?`, id))
+func (c *Core) byRequest(ctx context.Context, id string) (attempt, bool, error) {
+	return scanAttempt(c.db.QueryRowContext(ctx, `SELECT `+attemptCols+` FROM attempts WHERE request_id = ?`, id))
 }
 
-func (c *Core) byID(id string) (attempt, bool, error) {
-	return scanAttempt(c.db.QueryRow(`SELECT `+attemptCols+` FROM attempts WHERE attempt_id = ?`, id))
+func (c *Core) byID(ctx context.Context, id string) (attempt, bool, error) {
+	return scanAttempt(c.db.QueryRowContext(ctx, `SELECT `+attemptCols+` FROM attempts WHERE attempt_id = ?`, id))
 }
 
 // reply is an attempt's answer; a signed attempt carries its saved
@@ -445,16 +454,16 @@ func reply(a attempt) Reply {
 // resume answers a resend: an accepted attempt is finished (or expires) as
 // a new one would be; any other state is answered as saved, without
 // checking the authorization's validity again.
-func (c *Core) resume(a attempt) (Reply, error) {
+func (c *Core) resume(ctx context.Context, a attempt) (Reply, error) {
 	if a.state != "accepted" {
 		return reply(a), nil
 	}
-	unlock, err := c.lockWallet(a.snap.WalletID)
+	unlock, err := c.lockWallet(ctx, a.snap.WalletID)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer unlock()
-	return c.finish(a.id)
+	return c.finish(ctx, a.id)
 }
 
 // finish signs an accepted attempt from its snapshot and lets the
@@ -462,8 +471,8 @@ func (c *Core) resume(a attempt) (Reply, error) {
 // write transaction, with the time taken after the write lock, the row
 // must still be accepted and before its deadline. The caller holds the
 // wallet's signing lock.
-func (c *Core) finish(id string) (Reply, error) {
-	a, found, err := c.byID(id)
+func (c *Core) finish(ctx context.Context, id string) (Reply, error) {
+	a, found, err := c.byID(ctx, id)
 	if err != nil || !found {
 		return Reply{}, errors.Join(err, Refusal("ATTEMPT_UNKNOWN"))
 	}
@@ -482,7 +491,7 @@ func (c *Core) finish(id string) (Reply, error) {
 	if err := at("after-sign", id); err != nil {
 		return Reply{}, err
 	}
-	tx, err := c.db.Begin()
+	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -491,13 +500,13 @@ func (c *Core) finish(id string) (Reply, error) {
 	if now < a.acceptedAt {
 		return Reply{}, Refusal("CLOCK_REGRESSION")
 	}
-	res, err := tx.Exec(`UPDATE attempts SET state = 'signed', signature = ?, signed_at = ? WHERE attempt_id = ? AND state = 'accepted' AND ? < auth_deadline`,
+	res, err := tx.ExecContext(ctx, `UPDATE attempts SET state = 'signed', signature = ?, signed_at = ? WHERE attempt_id = ? AND state = 'accepted' AND ? < auth_deadline`,
 		sig, now, id, now)
 	if err != nil {
 		return Reply{}, err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		if _, err := tx.Exec(`UPDATE attempts SET state = 'expired_unsigned', closed_at = ? WHERE attempt_id = ? AND state = 'accepted'`, now, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE attempts SET state = 'expired_unsigned', closed_at = ? WHERE attempt_id = ? AND state = 'accepted'`, now, id); err != nil {
 			return Reply{}, err
 		}
 	}
@@ -507,7 +516,7 @@ func (c *Core) finish(id string) (Reply, error) {
 	if err := at("after-final", id); err != nil {
 		return Reply{}, err
 	}
-	a, _, err = c.byID(id)
+	a, _, err = c.byID(ctx, id)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -524,14 +533,14 @@ func (c *Core) finish(id string) (Reply, error) {
 // Get is a query: it does not sign. An accepted attempt past its deadline
 // is recorded expired by a short write guarded by its state, so a
 // concurrent signed is never overwritten. It takes no wallet lock.
-func (c *Core) Get(attemptID, requestID string) (Reply, error) {
+func (c *Core) Get(ctx context.Context, attemptID, requestID string) (Reply, error) {
 	var a attempt
 	var found bool
 	var err error
 	if attemptID != "" {
-		a, found, err = c.byID(attemptID)
+		a, found, err = c.byID(ctx, attemptID)
 	} else {
-		a, found, err = c.byRequest(requestID)
+		a, found, err = c.byRequest(ctx, requestID)
 	}
 	if err != nil {
 		return Reply{}, err
@@ -541,11 +550,11 @@ func (c *Core) Get(attemptID, requestID string) (Reply, error) {
 	}
 	if a.state == "accepted" {
 		now := c.clock()
-		if _, err := c.db.Exec(`UPDATE attempts SET state = 'expired_unsigned', closed_at = ? WHERE attempt_id = ? AND state = 'accepted' AND ? >= auth_deadline`,
+		if _, err := c.db.ExecContext(ctx, `UPDATE attempts SET state = 'expired_unsigned', closed_at = ? WHERE attempt_id = ? AND state = 'accepted' AND ? >= auth_deadline`,
 			now, a.id, now); err != nil {
 			return Reply{}, err
 		}
-		if a, _, err = c.byID(a.id); err != nil {
+		if a, _, err = c.byID(ctx, a.id); err != nil {
 			return Reply{}, err
 		}
 	}
@@ -555,27 +564,27 @@ func (c *Core) Get(attemptID, requestID string) (Reply, error) {
 // Abandon gives up an accepted attempt before it is signed. It takes no
 // wallet lock: the conditional update on the row decides against a
 // concurrent final decision. Past its deadline the attempt expires instead.
-func (c *Core) Abandon(attemptID string) (Reply, error) {
-	tx, err := c.db.Begin()
+func (c *Core) Abandon(ctx context.Context, attemptID string) (Reply, error) {
+	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer tx.Rollback()
 	now := c.clock()
-	res, err := tx.Exec(`UPDATE attempts SET state = 'abandoned', closed_at = ? WHERE attempt_id = ? AND state = 'accepted' AND ? < auth_deadline`, now, attemptID, now)
+	res, err := tx.ExecContext(ctx, `UPDATE attempts SET state = 'abandoned', closed_at = ? WHERE attempt_id = ? AND state = 'accepted' AND ? < auth_deadline`, now, attemptID, now)
 	if err != nil {
 		return Reply{}, err
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		if _, err := tx.Exec(`UPDATE attempts SET state = 'expired_unsigned', closed_at = ? WHERE attempt_id = ? AND state = 'accepted'`, now, attemptID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE attempts SET state = 'expired_unsigned', closed_at = ? WHERE attempt_id = ? AND state = 'accepted'`, now, attemptID); err != nil {
 			return Reply{}, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		return Reply{}, err
 	}
-	a, found, err := c.byID(attemptID)
+	a, found, err := c.byID(ctx, attemptID)
 	switch {
 	case err != nil:
 		return Reply{}, err
@@ -589,8 +598,8 @@ func (c *Core) Abandon(attemptID string) (Reply, error) {
 
 // recover finishes or expires the attempts a previous process left
 // accepted, each from its snapshot, before the Core serves.
-func (c *Core) recover() error {
-	rows, err := c.db.Query(`SELECT attempt_id, wallet_id FROM attempts WHERE state = 'accepted' ORDER BY accepted_at`)
+func (c *Core) recover(ctx context.Context) error {
+	rows, err := c.db.QueryContext(ctx, `SELECT attempt_id, wallet_id FROM attempts WHERE state = 'accepted' ORDER BY accepted_at`)
 	if err != nil {
 		return err
 	}
@@ -607,11 +616,11 @@ func (c *Core) recover() error {
 		return err
 	}
 	for _, p := range pending {
-		unlock, err := c.lockWallet(p[1])
+		unlock, err := c.lockWallet(ctx, p[1])
 		if err != nil {
 			return err
 		}
-		_, err = c.finish(p[0])
+		_, err = c.finish(ctx, p[0])
 		unlock()
 		var ref Refusal
 		if err != nil && !errors.As(err, &ref) {

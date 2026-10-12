@@ -55,6 +55,11 @@ func New(socket string, ledger Ledger) *Client {
 // it cannot read); the attempt is recorded unknown, for Resume.
 var Unknown = errors.New("SIGNER_OUTCOME_UNKNOWN")
 
+// NotSaved comes with Unknown when recording unknown failed too: the Store
+// still holds the attempt's previous state. Nothing is retried and the
+// request ID stays the same; Resume asks again once the Store works.
+var NotSaved = errors.New("PAYMENT_STATE_NOT_SAVED")
+
 // Refused is the Signer's (or the Store's) fixed code.
 type Refused string
 
@@ -135,7 +140,11 @@ func (c *Client) settle(a store.PaymentAttempt, status int, r signer.Reply, err 
 	switch {
 	case err != nil || status != http.StatusOK && status != http.StatusConflict && status != http.StatusNotFound:
 		if a.State == "requested" || a.State == "unknown" {
-			c.ledger.UpdatePayment(a.RequestID, "unknown", a.SignerAttemptID, "")
+			updated, uerr := c.ledger.UpdatePayment(a.RequestID, "unknown", a.SignerAttemptID, "")
+			if uerr != nil {
+				return Result{Attempt: a}, errors.Join(Unknown, fmt.Errorf("%w: %w", NotSaved, uerr))
+			}
+			a = updated
 		}
 		return Result{Attempt: a}, Unknown
 	case r.State == "":
