@@ -1,7 +1,7 @@
 # 核准到交易完成：最小商業流程設計
 
 > 2026-10-12，Claude Code。依 vault〈Claude-Code-核准到交易完成最小商業流程派工-20261012〉。基準 `ee9bf0e`（分支 `commercial-ux1`）。
-> **狀態（10/12，P1-a 開工後）：Codex 限定複核通過，R3 與三項概念稿語意關閉；Aaron 核准三張稿目前方向、三項決策（EOA＋EIP-3009、fake-only 模擬核准、第 10 節的接線與 schema 3）與 P1-a 實作；P1-a 已實作，待 Codex review 與 Aaron fake 操作驗收（[commercial-p1a.md](commercial-p1a.md)）。** 以下各節保留當時的設計文字；實作與草案的差異見 commercial-p1a.md 第 3 節。 歷程：Codex 對 `df64d13` 的設計 review 提出 R1～R4（本版第 0 節）；對 `e5d2b04` 的限定複核認為 R1、R2、R4 的設計缺口已補上，R3 的 Policy 接線與概念稿三項語意仍待補（第 0.2 節）。 Aaron 核准的是「核准到交易完成的最小商業流程」這個**方向**；這不是付款帳戶模型、真實簽署、金鑰、faucet、部署或送交易的核准。付款帳戶 ADR（`docs/adr/payment-account-model.md`）仍是 Proposed。
+> **狀態（10/12，P1-a 開工後）：Codex 限定複核通過，R3 與三項概念稿語意關閉；Aaron 核准三張稿目前方向、三項決策（EOA＋EIP-3009、fake-only 模擬核准、第 10 節的接線與 schema 3）與 P1-a 實作；P1-a 已實作；Codex 限定複核提出的 R1～R3 補正完成，待 Codex 限定複核；Aaron 已提供階段性 fake 操作回饋（[commercial-p1a.md](commercial-p1a.md) 第 8 節）。** 以下各節保留當時的設計文字；實作與草案的差異見 commercial-p1a.md 第 3 節。 歷程：Codex 對 `df64d13` 的設計 review 提出 R1～R4（本版第 0 節）；對 `e5d2b04` 的限定複核認為 R1、R2、R4 的設計缺口已補上，R3 的 Policy 接線與概念稿三項語意仍待補（第 0.2 節）。 Aaron 核准的是「核准到交易完成的最小商業流程」這個**方向**；這不是付款帳戶模型、真實簽署、金鑰、faucet、部署或送交易的核准。付款帳戶 ADR（`docs/adr/payment-account-model.md`）仍是 Proposed。
 > 本輪只讀程式與文件、寫設計：沒有改產品、沒有跑測試或展示、沒有執行真實 CLI。M1、M-B、UX1 維持完成。
 
 依據（位置都在 repo 或 vault 的同一專案資料夾）：PRD-第一期（§3.1–3.2、§4–8、§10–12、FR-8、FR-15）、執行計畫（§1-sexies、§1-septies、§3.5、§7、§9.1、§10）、〈真人進店與授權Agent消費-後續體驗概念〉、`docs/adr/payment-account-model.md`、`docs/contracts.md`、`docs/persistence-design.md`、`docs/policy.md`、`docs/merchant.md`、`docs/commercial-demo-roadmap.md`（現行進度、§4–5、§9.2）。現行程式入口見第 2 節。
