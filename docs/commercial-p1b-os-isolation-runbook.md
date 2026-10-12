@@ -1,16 +1,17 @@
-# P1-b OS 隔離驗收：指令筆記（給 Codex 預演、審閱與陪同判讀）
+# P1-b OS 隔離驗收：指令筆記（給 Aaron 逐關卡操作、Codex 陪同判讀）
 
-> 2026-10-13，Claude Code。第二版：依 vault〈Claude-Code-P1-bOS隔離驗收指令補正派工-0ef6172-20261013〉補正 O1～O3；第一版（`0ef6172`）不適合直接照貼，保留在 Git 歷史，修訂對照見第 9 節。
+> 2026-10-13，Claude Code。第三版：依 vault〈Claude-Code-P1-bOS隔離驗收指令第二輪限定補正派工-c7744be-20261013〉補正第二輪 O1～O4（修訂對照見第 9 節）。第二版（`c7744be`，第一輪 O1～O3）與第一版（`0ef6172`）保留在 Git 歷史。
+> **狀態：OS 隔離驗收指令第二輪補正完成，待 Codex 限定複核；預演與跨使用者驗收未完成，正式付款未啟用。**
 > 依據：[commercial-p1b-os-isolation.md](commercial-p1b-os-isolation.md)（方案，Aaron 已核准 D1～D7，第 8 節）；程式 `cmd/apa-signer`（`serve`、`keygen`）。
-> **狀態：命令都還沒有執行過。**本版只做了 `zsh -f -n` 語法解析（第 10 節），沒有執行任何區塊，也沒有建置、啟動 Signer、keygen、sudo 或改系統。語法通過不等於參數合法或操作已驗證。跨使用者、sudo、`/dev/tty` 經 sudo、群組生效、socket 群組繼承，只能在第一次執行時得知。
+> **命令都還沒有執行過。**本版只做了 `zsh -f -n` 語法解析（第 10 節），沒有執行任何區塊，也沒有建置、啟動 Signer、keygen、sudo 或改系統。語法通過不等於參數合法或操作已驗證。跨使用者、sudo、`/dev/tty` 經 sudo、群組生效、socket 群組繼承，只能在第一次執行時得知。
 > 歸屬：`serve`、`keygen` 的程式行為由 Claude Code 測試（同一 uid；`keygen` 見方案第 8.2 節），keygen 尚未經 Codex 技術複核。Codex 前一輪只做文件、原始碼、本機手冊與語法預檢，沒有建置或啟動 Signer，沒有 keygen、sudo 或跨使用者測試，也沒有 repo 證據 log。
 
 ## 0 角色與通則
 
 | 誰 | 做什麼 |
 |---|---|
-| Codex | 第 1 節的受控預演；之後在每個關卡讀輸出、判讀、建議。不輸入、不接收、不保存任何密碼或密語 |
-| Aaron | 第 2～8 節的操作；所有 sudo 密碼與密語只由 Aaron 在鍵盤上輸入 |
+| Codex | 路徑 B：在每個關卡讀錄製視窗的非敏感輸出、判讀、建議（路徑 A 的受控預演目前不可用，第 1 節）。不輸入、不接收、不保存任何密碼或密語 |
+| Aaron | 選擇路徑，執行第 2～8 節；所有 sudo 密碼與密語只由 Aaron 在鍵盤上輸入 |
 
 - **一律用乾淨的 zsh**：每個視窗先執行 `exec /bin/zsh -f`，不載入個人啟動設定。本筆記所有區塊都是 zsh 語法。
 - **三個視窗**：
@@ -33,145 +34,29 @@
 - **停止時**：看到 `STOP` 或 `UNEXPECTED`，不修權限、不重試、不改名重跑。把該段輸出交 Codex 判讀，由 Aaron 決定。
 - **不做**：不呼叫 `/v1/sign`、不連 RPC 或外部服務、不改全機防火牆或 sudo 政策、不用 A／B 展示金鑰、不接進展示流程。
 
-## 1 受控預演（Codex，不用 sudo、不改系統）
+## 1 操作路徑（開始前由 Aaron 選擇）
 
-目的：在動系統前，用 Codex 自己的 uid 實際跑一次 `serve`／`keygen` 的形狀，對照輸出與退出碼，修正本筆記。預演用的密語與金鑰是丟棄式材料（非秘密），只存在本次暫存目錄，結束後刪除，之後不再使用。
+| 路徑 | 是什麼 | 現況 |
+|---|---|---|
+| **A：Codex 受控預演** | Codex 用自己的 uid、在強制隔離下跑一次 `serve`／`keygen`，修正本筆記 | **未執行，目前不可用**（見下） |
+| **B：Aaron 逐關卡操作，Codex 陪同判讀** | Aaron 在自己的終端機、於已核准的 D1～D7 範圍內，依第 2～8 節逐關卡操作；Codex 只讀錄製視窗裡的非敏感輸出、判讀並建議 | 可用。**這不是 Codex 的隔離預演**，任何結果都不能寫成「預演 PASS」 |
 
-**執行邊界**（security-audit）：
-- 網路：OS 強制斷網，以 `sandbox-exec` 設定檔拒絕 IP 進出，只留 Unix socket。
-- 環境：`env -i` 白名單環境；暫存 HOME。
-- 可寫區域：設定檔只允許寫本次目錄與必要的 `/dev` 節點。
-- 資源：CPU 時間、檔案大小、開檔數的 `ulimit`。
+**路徑 A 的前置條件**：下列控制**全部**都能被強制執行，才可以啟動。缺任一項就記為「未執行」，不用自我檢查或風險說明代替控制。
+- OS 強制斷網；
+- 讀取隔離：不能讀日常 HOME，不能接觸本機其他 socket；
+- 寫入只限本次目錄；
+- 乾淨的白名單環境、暫存 HOME；
+- 資源上限：記憶體、程序數、磁碟、整體牆鐘時間與 CPU 時間。
 
-**無法提供、請 Codex 確認或補安排的**：
-- 記憶體上限：macOS 不強制 `RLIMIT_AS`。
-- 程序數上限：`ulimit -u` 算的是整個 uid 的程序數，設低會擋到其他程式，所以不設。
-- 磁碟配額。
-- `sandbox-exec` 已被 Apple 標為不建議使用，設定檔的實際效果要由預演第一步自我檢查。
+目前的狀況：
+- 第二版的 `sandbox-exec` 設定檔用了 `allow default`，沒有限制讀取 HOME 或接觸其他 socket；`env -i` 與暫存 HOME 也不等於讀取隔離。
+- macOS 的 `ulimit` 不能強制記憶體上限；`ulimit -u` 算的是整個 uid 的程序數；沒有磁碟配額；也沒有整體牆鐘時間上限。
 
-不足時不改成無隔離預演，回報缺口。Linux 容器結果不能當成 macOS 的 TTY 或跨使用者驗證。
+因此路徑 A **目前不可用**。本輪不實作新的 macOS 沙箱、VM 或驗證框架。第二版的預演腳本已從本筆記移除（它的寫入自我檢查會截斷真實 repo 裡的固定路徑，而且失敗時不保證停止已啟動的程序），只保留在 Git 歷史（`c7744be` 第 1 節），**不可執行**。之後若要採用路徑 A，須先能提供上列全部控制，再另行提出。
 
-**1.1 啟動（Codex 的終端機）**
-```zsh
-R=$(mktemp -d /tmp/apa-r.XXXXXX) && chmod 700 "$R" && RP=$(cd "$R" && pwd -P) && print -r -- "R=$R RP=$RP"
-# 把 1.2 的內容存成 "$R/rehearse.zsh"，再執行：
-PROFILE="(version 1)(allow default)(deny network-outbound (remote ip))(deny network-inbound (local ip))(deny file-write* (require-not (require-any (subpath \"$RP\") (literal \"/dev/null\") (literal \"/dev/tty\") (literal \"/dev/ptmx\") (regex #\"^/dev/ttys[0-9]+\$\") (literal \"/dev/dtracehelper\"))))"
-ulimit -t 900; ulimit -f 2097152; ulimit -n 1024
-/usr/bin/sandbox-exec -p "$PROFILE" /usr/bin/env -i HOME="$RP/home" TMPDIR="$RP/tmp" PATH=/usr/bin:/bin:/usr/sbin:/sbin TERM=xterm-256color \
-  R="$RP" REPO=/Users/mac/Documents/OpenSourceProjects/agent-payment-authority GO=/usr/local/bin/go GOMODCACHE="$(go env GOMODCACHE)" \
-  GOCACHE="$RP/gocache" GOPROXY=off GOSUMDB=off GOFLAGS=-mod=readonly GOTOOLCHAIN=local GIT_OPTIONAL_LOCKS=0 \
-  /bin/zsh -f -eu -o pipefail "$R/rehearse.zsh" > "$R/rehearse.log" 2>&1; print -r -- "rehearse exit=$?"
-```
+**已經可以先完成的**（不需要路徑 A）：語法解析（第 10 節）、本機手冊與原始碼核對。Linux 容器裡的既有驗證不能充當 macOS 的 TTY、跨使用者或部署驗收。
 
-**1.2 `rehearse.zsh`**
-```zsh
-# Same-uid rehearsal of the Signer commands. No sudo, no system change.
-mkdir -m 700 "$R/home" "$R/tmp" "$R/data" "$R/data/keys"
-step() { print -r -- "== $*" }
-
-step R0 isolation self-check
-if /usr/bin/curl -sS --connect-timeout 3 --max-time 5 -o /dev/null https://example.com 2>/dev/null; then print -r -- "STOP: the network is reachable"; exit 1; fi
-if : 2>/dev/null >| "$REPO/.rehearsal-write-probe"; then /bin/rm -f -- "$REPO/.rehearsal-write-probe"; print -r -- "STOP: the repo is writable"; exit 1; fi
-print -r -- "network: refused; repo: not writable"
-
-step R1 build
-cd "$REPO"
-[[ "$(git status --porcelain)" == '?? demo' ]] || { print -r -- "STOP: the work tree is not clean"; exit 1 }
-print -r -- "HEAD=$(git rev-parse HEAD)"
-"$GO" build -o "$R/apa-signer" ./cmd/apa-signer
-cd "$R"
-
-step R2 ps, pgrep and curl flags
-ps -o pid,uid,gid,user,command -p $$
-print -r -- "user=[$(ps -o user= -p $$)] command=[$(ps -o command= -p $$)]"
-/bin/sleep 30 & P=$!
-pgrep -u "$(id -un)" -f '^/bin/sleep 30$' | grep -qx "$P"
-kill "$P"; wait "$P" 2>/dev/null || true
-/usr/bin/curl --version | head -1
-
-SOCK="$R/sd/s"
-mkdir -m 700 "$R/sd"
-(( ${#SOCK} < 100 )) || { print -r -- "STOP: socket path too long"; exit 1 }
-config() { # callers-uid [wallet-address]
-  local wallets='[]'
-  [[ -n ${2:-} ]] && wallets="[{\"wallet_id\":\"wallet-rehearsal\",\"consumer_id\":\"consumer-rehearsal\",\"chain_id\":\"84532\",\"address\":\"$2\"}]"
-  print -r -- "{\"version\":1,\"socket\":\"$SOCK\",\"callers\":[$1],\"max_window_seconds\":600,\"wallets\":$wallets,\"assets\":[],\"delegations\":[]}" >| "$R/data/signer.json"
-  chmod 600 "$R/data/signer.json"
-}
-start_serve() { # passphrase line (non-secret, rehearsal only)
-  mkfifo "$R/in"
-  /usr/bin/script -q /dev/null "$R/apa-signer" serve --dir "$R/data" < "$R/in" >| "$R/serve.out" 2>&1 &
-  SPID=$!
-  exec 3> "$R/in"
-  print -u3 -r -- "$1"
-  APID=''
-  for i in {1..50}; do APID=$(pgrep -P "$SPID" -x apa-signer || true); [[ -n $APID ]] && break; sleep 0.2; done
-  [[ -n $APID ]] || { print -r -- "STOP: no Signer process under script"; exit 1 }
-  [[ "$(ps -o command= -p "$APID" | sed 's/ *$//')" == "$R/apa-signer serve --dir $R/data" ]] || { print -r -- "STOP: unexpected command line"; exit 1 }
-  for i in {1..50}; do [[ -S $SOCK ]] && break; sleep 0.2; done
-  [[ -S $SOCK ]] || { print -r -- "STOP: no socket within 10 s"; cat "$R/serve.out"; exit 1 }
-  print -r -- "serving: pid $APID"
-}
-stop_serve() {
-  kill -TERM "$APID"
-  for i in {1..25}; do ps -p "$APID" >/dev/null || break; sleep 0.2; done
-  ! ps -p "$APID" >/dev/null || { print -r -- "STOP: the Signer did not stop"; exit 1 }
-  exec 3>&-
-  wait "$SPID" || true
-  /bin/rm -- "$R/in"
-  [[ ! -e $SOCK ]] || { print -r -- "STOP: the socket was left"; exit 1 }
-  print -r -- "stopped"
-}
-health() {
-  HOUT=$(/usr/bin/curl -sS --connect-timeout 3 --max-time 5 --unix-socket "$SOCK" -w '\nHTTP=%{http_code}' http://signer/v1/health 2>&1) && HRC=0 || HRC=$?
-  print -r -- "$HOUT"; print -r -- "curl_rc=$HRC"
-}
-
-step R4 serve: health 200, 403, and a refused connect
-config "$(id -u)"
-start_serve rehearsal
-health; [[ $HRC == 0 && $HOUT == *'{"state":"unlocked"}'* && $HOUT == *'HTTP=200'* ]] || { print -r -- "STOP: health"; exit 1 }
-chmod 000 "$R/sd"
-health; chmod 700 "$R/sd"
-print -r -- "^ a connect refused by file permissions: note this message and code for step 6"
-stop_serve
-config "$(( $(id -u) + 1 ))"
-start_serve rehearsal
-health; [[ $HRC == 0 && $HOUT == *'{"error":"CALLER_NOT_ALLOWED"}'* && $HOUT == *'HTTP=403'* ]] || { print -r -- "STOP: 403"; exit 1 }
-stop_serve
-print -r -- "--- serve output (no secret: the rehearsal input is not echoed)"; cat "$R/serve.out"
-
-step R5 keygen, then unlock it with serve
-mkfifo "$R/kin"
-/usr/bin/script -q /dev/null "$R/apa-signer" keygen --dir "$R/data" --wallet wallet-rehearsal < "$R/kin" >| "$R/keygen.out" 2>&1 &
-KPID=$!
-exec 4> "$R/kin"
-print -u4 -r -- 'rehearsal-only passphrase'
-print -u4 -r -- 'rehearsal-only passphrase'
-exec 4>&-
-for i in {1..100}; do ps -p "$KPID" >/dev/null || break; sleep 0.2; done
-! ps -p "$KPID" >/dev/null || { print -r -- "STOP: keygen did not finish within 20 s"; exit 1 }
-wait "$KPID" || true
-/bin/rm -- "$R/kin"
-cat "$R/keygen.out"
-ADDR=$(grep -o '0x[0-9a-f]\{40\}' "$R/keygen.out" | head -1)
-[[ -n $ADDR ]] || { print -r -- "STOP: no address printed"; exit 1 }
-ls -le "$R/data/keys"
-config "$(id -u)" "$ADDR"
-start_serve 'rehearsal-only passphrase'
-health; [[ $HRC == 0 && $HOUT == *'HTTP=200'* ]] || { print -r -- "STOP: the new key did not unlock"; exit 1 }
-stop_serve
-print -r -- "keygen + unlock: the configured wallet's key decrypted under serve"
-
-step R6 clean up the rehearsal files
-for f in "$R/apa-signer" "$R/serve.out" "$R/keygen.out" "$R/data/signer.json" "$R/data/signer.db" "$R/data/signer.db-wal" "$R/data/signer.db-shm" "$R/data/keys/wallet-rehearsal.key"; do
-  [[ -e $f ]] && /bin/rm -- "$f"
-done
-/bin/rmdir "$R/data/keys" "$R/data" "$R/sd"
-print -r -- "rehearsal done; remaining under R:"; ls -la "$R"
-```
-
-預演結束後，Codex 回報 `rehearse.log`，特別是：R0 的自我檢查、R2 的 `ps` 欄位格式、R4「被檔案權限擋住的 connect」實際訊息與退出碼、R5 的輸出。並說明本筆記第 6、7 節 `expect_fs_block` 的判斷字樣要不要調整。最後由 Codex 確認 `$R` 只剩 `home`、`tmp`、`gocache`、`rehearse.zsh`、`rehearse.log`，再整個移除這個預演目錄（先 `print -r -- "$R"` 確認是 `/tmp/apa-r.` 開頭的那個）。
+**選擇方式**：第 2 節開始時，Aaron 在 W-host 輸入 `B` 選擇路徑 B。只接受 `B`；選擇會寫進交接檔與錄製紀錄。
 
 ## 2 建立本次目錄並建置（W-host，錄製前）
 
@@ -179,10 +64,14 @@ print -r -- "rehearsal done; remaining under R:"; ls -la "$R"
 exec /bin/zsh -f
 ```
 ```zsh
+read -r "ROUTE?operating route (only B: Aaron step by step, Codex judges the output): "
+```
+```zsh
 RUN=$(mktemp -d /tmp/apa-iso.XXXXXX) && chmod 700 "$RUN" && print -r -- "RUN=$RUN"
 ```
 ```zsh
 ( setopt ERR_EXIT NO_UNSET PIPE_FAIL
+  [[ ${ROUTE:-} == B ]] || { print -r -- "STOP: choose route B (route A is not available)"; exit 1 }
   [[ -n $RUN && -d $RUN && -O $RUN && $(stat -f %Lp "$RUN") == 700 ]] || { print -r -- "STOP: RUN"; exit 1 }
   REPO=/Users/mac/Documents/OpenSourceProjects/agent-payment-authority
   cd "$REPO"
@@ -196,10 +85,10 @@ RUN=$(mktemp -d /tmp/apa-iso.XXXXXX) && chmod 700 "$RUN" && print -r -- "RUN=$RU
   B="$RUN/build/apa-signer"; HOSTUSER=$(id -un); HOSTUID=$(id -u)
   { print -r -- "REPO=${(q)REPO}"; print -r -- "HEAD=${(q)HEAD}"; print -r -- "E=${(q)E}"; print -r -- "B=${(q)B}"
     print -r -- "SUM=${(q)SUM}"; print -r -- "HOSTUSER=${(q)HOSTUSER}"; print -r -- "HOSTUID=${(q)HOSTUID}"
-    print -r -- "SOCK=/opt/apa-signer/run/signer.sock" } >| "$RUN/vars"
+    print -r -- "SOCK=/opt/apa-signer/run/signer.sock"; print -r -- "ROUTE=B" } >| "$RUN/vars"
   cat >| "$RUN/lib.zsh" <<'EOF'
 # Helpers of the P1-b OS isolation runbook (non-secret).
-stop() { print -r -- "STOP: $*"; return 1 }
+stop() { print -r -- "STOP: $*" >&2; return 1 }
 mark() { : >| "$RUN/ok.$1" && print -r -- "OK $1" }
 need() { local s; for s in "$@"; do [[ -e $RUN/ok.$s ]] || { stop "step $s has not completed"; return 1 }; done }
 # denied LABEL CMD...: CMD must fail with a permission error. Its output is discarded.
@@ -227,19 +116,53 @@ health() {
 }
 expect_ok()  { health "$@"; [[ $HRC == 0 && $HOUT == *'{"state":"unlocked"}'* && $HOUT == *'HTTP=200'* ]] || stop "not 200 unlocked" }
 expect_403() { health "$@"; [[ $HRC == 0 && $HOUT == *'{"error":"CALLER_NOT_ALLOWED"}'* && $HOUT == *'HTTP=403'* ]] || stop "not 403 CALLER_NOT_ALLOWED" }
-# A connect refused by file permissions: no HTTP status and a permission error. The wording comes from rehearsal R4.
+# A connect refused by file permissions: no HTTP status and a permission error. The wording is not yet
+# observed on this machine; any other wording stops for judgement.
 expect_fs_block() { health "$@"; [[ $HRC != 0 && $HOUT == *'HTTP=000'* && $HOUT == *'ermission denied'* ]] || stop "not a file-permission refusal; judge this output before going on" }
 # signer_pid: exactly one apa-signer process with exactly the serve command line.
+# pgrep: 0 found, 1 none matched, anything else is an error (never "none").
 signer_pid() {
-  local pids
-  pids=($(pgrep -u apa-signer -f '^/opt/apa-signer/bin/apa-signer serve --dir /opt/apa-signer/data$' || true))
+  local out rc pids
+  out=$(pgrep -u apa-signer -f '^/opt/apa-signer/bin/apa-signer serve --dir /opt/apa-signer/data$' 2>&1) && rc=0 || rc=$?
+  case $rc in
+    0) pids=(${=out}) ;;
+    1) stop "no Signer process"; return 1 ;;
+    *) stop "pgrep failed (rc=$rc): $out"; return 1 ;;
+  esac
   (( ${#pids} == 1 )) || { stop "want exactly one Signer process, got ${#pids}"; return 1 }
   [[ "$(ps -o user= -p "${pids[1]}" | tr -d ' ')" == apa-signer ]] || { stop "the process is not apa-signer's"; return 1 }
   [[ "$(ps -o command= -p "${pids[1]}" | sed 's/ *$//')" == '/opt/apa-signer/bin/apa-signer serve --dir /opt/apa-signer/data' ]] || { stop "unexpected command line"; return 1 }
   PID=${pids[1]}
 }
+# no_signer_process: succeeds only when pgrep reports no apa-signer process (exit 1).
+no_signer_process() {
+  local out rc
+  out=$(pgrep -u apa-signer 2>&1) && rc=0 || rc=$?
+  case $rc in
+    1) print -r -- "no apa-signer process" ;;
+    0) stop "apa-signer has a process: ${out//$'\n'/ }"; return 1 ;;
+    *) stop "pgrep failed (rc=$rc): $out; cannot tell whether apa-signer runs"; return 1 ;;
+  esac
+}
+# sock_absent [PREFIX...]: succeeds only when the socket path is confirmed absent.
+sock_absent() {
+  local out rc
+  out=$("$@" /usr/bin/stat -f %HT "$SOCK" 2>&1) && rc=0 || rc=$?
+  if (( rc == 0 )); then stop "$SOCK exists ($out)"; return 1
+  elif [[ $out == *'No such file or directory'* ]]; then print -r -- "socket absent"
+  else stop "cannot tell whether $SOCK exists (rc=$rc): $out"; return 1; fi
+}
+# pid_state PID: prints running or gone; an unreadable answer stops.
+pid_state() {
+  local out rc
+  out=$(ps -o pid= -p "$1" 2>&1) && rc=0 || rc=$?
+  out=${out//[[:space:]]/}
+  if (( rc == 0 )) && [[ $out == "$1" ]]; then print running
+  elif (( rc == 1 )) && [[ -z $out ]]; then print gone
+  else stop "cannot tell whether $1 runs (rc=$rc): $out"; return 1; fi
+}
 EOF
-  : >| "$RUN/ok.2"; print -r -- "OK 2  HEAD=$HEAD  sha256=$SUM  E=$E"
+  : >| "$RUN/ok.2"; print -r -- "OK 2  route=B  HEAD=$HEAD  sha256=$SUM  E=$E"
 )
 ```
 預期：`OK 2`、HEAD、hash 與證據目錄。記下 `RUN=…`，其他視窗會用到。
@@ -250,7 +173,7 @@ EOF
 ```
 **錄製中**（W-host，第一件事）：
 ```zsh
-source "$RUN/lib.zsh" && source "$RUN/vars" && print -r -- "recording W-host  RUN=$RUN  HEAD=$HEAD"
+source "$RUN/lib.zsh" && source "$RUN/vars" && print -r -- "recording W-host  RUN=$RUN  HEAD=$HEAD  route=$ROUTE"
 ```
 
 ## 3 管理視窗與查核（W-admin）
@@ -281,8 +204,10 @@ source "$RUN/lib.zsh" && source "$RUN/vars" && print -r -- "recording W-admin  R
   grep -E 'Defaults|use_pty|timestamp|umask|log_input|log_output|iolog' "$RUN/sudo-l.txt" || true
   if grep -qE 'log_input|log_output|iolog' "$RUN/sudo-l.txt"; then stop "the sudo policy records input or output: stop here"; fi
   for r in /Users/apa-signer /Groups/apa-signer /Groups/apa-signer-clients; do
-    if dscl . -read "$r" RecordName >/dev/null 2>&1; then stop "$r already exists"; fi
-    print -r -- "absent  $r"
+    out=$(dscl . -read "$r" RecordName 2>&1) && rc=0 || rc=$?
+    if (( rc == 0 )); then stop "$r already exists"
+    elif [[ $out == *eDSRecordNotFound* ]]; then print -r -- "absent  $r  (rc=$rc)"
+    else stop "dscl could not tell whether $r exists (rc=$rc): ${out%%$'\n'*}"; fi
   done
   [[ ! -e /opt/apa-signer ]] || stop "/opt/apa-signer already exists"
   ls -led /opt
@@ -458,8 +383,8 @@ if [[ $RUN == /tmp/apa-iso.?????? && -d $RUN && -O $RUN && -e $RUN/ok.4.2 ]]; th
 ```zsh
 ( setopt ERR_EXIT NO_UNSET PIPE_FAIL
   need 6.1; cd /
-  [[ ! -e $SOCK ]] || stop "a socket already exists"
-  if pgrep -u apa-signer >/dev/null; then stop "apa-signer already has a process"; fi
+  sock_absent sudo
+  no_signer_process
   sudo -u apa-signer /bin/sh -c 'umask 077; cat > /opt/apa-signer/data/signer.json' < "$RUN/b0.json"
   shape /opt/apa-signer/data/signer.json apa-signer:apa-signer:600
   sudo -k
@@ -513,28 +438,42 @@ if [[ $RUN == /tmp/apa-iso.?????? && -d $RUN && -e $RUN/ok.6.2 ]]; then cd / && 
 - `apa-signer` 的 `expect_403`：已連線、由 peer uid 拒絕；
 - `nobody` 的 `expect_fs_block`：檔案權限擋住，沒有 HTTP 狀態。
 
-緊接在 `nobody` 之前的 `expect_ok` 證明 socket 當時活著。`nobody` 只靠退出碼不算數：必須同時沒有 HTTP 狀態、有權限錯誤字樣。字樣若和預演 R4 不同，`expect_fs_block` 會停下讓 Codex 判讀。
+緊接在 `nobody` 之前的 `expect_ok` 證明 socket 當時活著。`nobody` 只靠退出碼不算數：必須同時沒有 HTTP 狀態、有權限錯誤字樣。curl 在這台機器上的實際字樣尚未觀察過（路徑 A 未執行）；若不同，`expect_fs_block` 會停下讓 Codex 判讀，不自行放寬。
 
-**6.6 W-signer 觀察**（W-admin，錄製中由 Aaron 回答）
-```zsh
-read -r "OBS?W-signer: exactly one new 'caller  CALLER_NOT_ALLOWED' line, no line for nobody, and no passphrase anywhere (yes/no): "; print -r -- "W-signer observation: $OBS"
-```
-**6.7 停止**：在 W-signer 按 Ctrl-C。然後（W-host）：
+**6.6 W-signer 觀察**（W-admin，驗收關卡；只有回答 `yes` 才通過）
 ```zsh
 ( setopt ERR_EXIT NO_UNSET PIPE_FAIL
-  need 6.5; source "$RUN/pid"
-  for i in {1..10}; do ps -p "$PID" >/dev/null || break; sleep 1; done
-  if ps -p "$PID" >/dev/null; then stop "the Signer is still running"; fi
-  [[ ! -e $SOCK ]] || stop "the socket was left behind (do not delete anything; judge with Codex)"
+  need 6.5
+  OBS=''
+  read -r "OBS?W-signer: exactly one new 'caller  CALLER_NOT_ALLOWED' line, no line for nobody, and no passphrase anywhere (yes/no): " || stop "no answer was read"
+  print -r -- "W-signer observation (B0): [$OBS]"
+  [[ $OBS == yes ]] || stop "the B0 observation did not pass: stop the Signer (6.7), do not go on to B1"
+  mark 6.6
+)
+```
+- 回答 `no`、空值、輸入中斷或其他回答都不會寫入 `ok.6.6`，7.1 起的 B1 都會被擋住。
+- **若在任何地方看見密語**：回答 `no`，在 W-signer 按 Ctrl-C 停止；把本次密語視為已洩漏。不要把密語或含密語的輸出貼給 Codex 或 Claude Code，不自動清除證據，也不改密語重試。後續處置由 Aaron 決定。
+**6.7 停止**（安全收尾，不看 6.4～6.6 是否通過）：在 W-signer 按 Ctrl-C。然後（W-host）：
+```zsh
+( setopt ERR_EXIT NO_UNSET PIPE_FAIL
+  need 6.2
+  if [[ -f $RUN/pid ]]; then
+    source "$RUN/pid"
+    for i in {1..10}; do st=$(pid_state "$PID"); [[ $st == gone ]] && break; sleep 1; done
+    [[ $st == gone ]] || stop "the Signer (PID $PID) is still running"
+  fi
+  no_signer_process
+  sock_absent
   mark 6.7
 )
 ```
+`ok.6.7` 只表示「已確認停止」，不表示 B0 驗收通過。B0 通過要看 6.4、6.5、6.6 的標記（第 9 節）。無法確認停止時（`pgrep`／`ps`／`stat` 回錯誤、程序仍在、socket 還在），不往下做，也不刪任何資料，交 Codex 判讀。
 
 ## 7 B1：一次性測試金鑰（D3、D4）
 
 **7.1 建金鑰**（W-signer，不錄製；兩次提示輸入同一個**新的**測試密語，至少 12 字元，只用於這把金鑰）
 ```zsh
-if [[ -e $RUN/ok.6.7 ]]; then cd / && sudo -u apa-signer /bin/sh -c 'umask 077; exec /opt/apa-signer/bin/apa-signer keygen --dir /opt/apa-signer/data --wallet wallet-isolation-test'; else print -r -- "STOP: step 6.7 has not completed"; fi
+if [[ -e $RUN/ok.6.6 && -e $RUN/ok.6.7 ]]; then cd / && sudo -u apa-signer /bin/sh -c 'umask 077; exec /opt/apa-signer/bin/apa-signer keygen --dir /opt/apa-signer/data --wallet wallet-isolation-test'; else print -r -- "STOP: B0 has not passed (6.6) or has not been stopped (6.7)"; fi
 ```
 預期：`apa-signer: wallet wallet-isolation-test address 0x…`（地址是公開資訊）。
 
@@ -544,7 +483,7 @@ read -r "ADDR?address printed by keygen: "
 ```
 ```zsh
 ( setopt ERR_EXIT NO_UNSET PIPE_FAIL
-  need 6.7
+  need 6.6 6.7
   [[ $ADDR =~ '^0x[0-9a-f]{40}$' ]] || stop "not an address"
   print -r -- "{\"version\":1,\"socket\":\"$SOCK\",\"callers\":[$HOSTUID],\"max_window_seconds\":600,\"wallets\":[{\"wallet_id\":\"wallet-isolation-test\",\"consumer_id\":\"consumer-isolation-test\",\"chain_id\":\"84532\",\"address\":\"$ADDR\"}],\"assets\":[],\"delegations\":[]}" >| "$RUN/b1.json"
   cat "$RUN/b1.json"
@@ -556,8 +495,8 @@ read -r "ADDR?address printed by keygen: "
 ( setopt ERR_EXIT NO_UNSET PIPE_FAIL
   need 7.2; cd /
   shape /opt/apa-signer/data/keys/wallet-isolation-test.key apa-signer:apa-signer:600
-  [[ ! -e $SOCK ]] || stop "a socket already exists"
-  if pgrep -u apa-signer >/dev/null; then stop "apa-signer already has a process"; fi
+  sock_absent sudo
+  no_signer_process
   sudo -u apa-signer /bin/sh -c 'umask 077; cat > /opt/apa-signer/data/signer.json' < "$RUN/b1.json"
   shape /opt/apa-signer/data/signer.json apa-signer:apa-signer:600
   sudo -k
@@ -597,19 +536,32 @@ if [[ -e $RUN/ok.7.3 ]]; then cd / && sudo -u apa-signer /bin/sh -c 'umask 077; 
   mark 7.6
 )
 ```
-```zsh
-read -r "OBS?W-signer: one new 'caller  CALLER_NOT_ALLOWED' line, none for nobody, no passphrase anywhere (yes/no): "; print -r -- "W-signer observation: $OBS"
-```
-**7.7 停止**：W-signer 按 Ctrl-C，然後（W-host）：
+**7.6o W-signer 觀察**（W-admin，驗收關卡；只有 `yes` 通過，規則同 6.6）
 ```zsh
 ( setopt ERR_EXIT NO_UNSET PIPE_FAIL
-  need 7.6; source "$RUN/pid"
-  for i in {1..10}; do ps -p "$PID" >/dev/null || break; sleep 1; done
-  if ps -p "$PID" >/dev/null; then stop "the Signer is still running"; fi
-  [[ ! -e $SOCK ]] || stop "the socket was left behind (do not delete anything; judge with Codex)"
+  need 7.6
+  OBS=''
+  read -r "OBS?W-signer: one new 'caller  CALLER_NOT_ALLOWED' line, none for nobody, no passphrase anywhere (yes/no): " || stop "no answer was read"
+  print -r -- "W-signer observation (B1): [$OBS]"
+  [[ $OBS == yes ]] || stop "the B1 observation did not pass: stop the Signer (7.7); B1 has not passed"
+  mark 7.6o
+)
+```
+**7.7 停止**（安全收尾，不看 7.5～7.6o 是否通過）：W-signer 按 Ctrl-C，然後（W-host）：
+```zsh
+( setopt ERR_EXIT NO_UNSET PIPE_FAIL
+  need 7.3
+  if [[ -f $RUN/pid ]]; then
+    source "$RUN/pid"
+    for i in {1..10}; do st=$(pid_state "$PID"); [[ $st == gone ]] && break; sleep 1; done
+    [[ $st == gone ]] || stop "the Signer (PID $PID) is still running"
+  fi
+  no_signer_process
+  sock_absent
   mark 7.7
 )
 ```
+`ok.7.7` 只表示已確認停止；B1 通過要看 7.5、7.6、7.6o。
 W-signer 最後執行 `sudo -k`，然後關閉視窗。
 
 ## 8 撤回測試資料（D5：保留帳號、群組與目錄）
@@ -617,9 +569,9 @@ W-signer 最後執行 `sudo -k`，然後關閉視窗。
 **8.1 確認已停止並列清單**（W-admin）
 ```zsh
 ( setopt ERR_EXIT NO_UNSET PIPE_FAIL
-  need 7.7; cd /
-  if pgrep -u apa-signer >/dev/null; then stop "apa-signer still has a process"; fi
-  [[ ! -e $SOCK ]] || stop "a socket is present: judge with Codex before removing anything"
+  need 4.2; cd /
+  no_signer_process
+  sock_absent sudo
   sudo /usr/bin/find /opt/apa-signer -mindepth 1 | sort >| "$RUN/inventory"
   cat "$RUN/inventory"
   print -l /opt/apa-signer/bin /opt/apa-signer/bin/apa-signer /opt/apa-signer/bin/probe.txt /opt/apa-signer/data \
@@ -632,7 +584,7 @@ W-signer 最後執行 `sudo -k`，然後關閉視窗。
   mark 8.1
 )
 ```
-Aaron 看過清單，確定只有上面已知的項目，再做 8.2。
+8.1 不看驗收是否通過（安全收尾），但要求這一刻確認 `apa-signer` 沒有程序、socket 不存在；`pgrep` 或 `stat` 回錯誤就停止，不刪任何資料。Aaron 看過清單，確定只有上面已知的項目，再做 8.2。
 
 **8.2 只移除本次建立的具名測試項目**（W-admin）
 ```zsh
@@ -678,10 +630,12 @@ Aaron 看過清單，確定只有上面已知的項目，再做 8.2。
 | 群組生效 | 4.3 | `OK 4.3` |
 | Host 讀不到、改不了私有資料；不能改寫 `bin/` 裡 root 擁有的檔案、不能在 `bin/`／`run/` 建檔、不能移動 `bin/` 的同形狀目錄 | 5.1～5.3、6.4、7.5 | 前置 `OK 5.1` 存在，且每一行都是 `denied` |
 | `nobody` 被檔案權限擋住 | 5.3、6.5、7.6 | `denied`；`expect_fs_block` 通過 |
+| B0 通過 | 6.4、6.5、6.6 | `OK 6.4`、`OK 6.5`、`OK 6.6`（觀察 `yes`）；`OK 6.7` 只代表已停止 |
+| B1 通過 | 7.5、7.6、7.6o | `OK 7.5`、`OK 7.6`、`OK 7.6o`（觀察 `yes`）；`OK 7.7` 只代表已停止 |
 | Signer 以 `apa-signer` 前景執行並讀到 `/dev/tty` | 6.3、6.4 | W-signer 印出 serving；`signer_pid` 通過 |
 | socket 擁有者、群組、權限 | 6.4、7.5 | `apa-signer:apa-signer-clients:660`，沒有 ACL |
 | Host 呼叫 health | 6.4、7.5 | `expect_ok` |
-| peer uid 拒絕 | 6.5、7.6 | `expect_403`，加上 6.6／7.6 的觀察為 yes |
+| peer uid 拒絕 | 6.5、7.6 | `expect_403`，加上 6.6／7.6o 的觀察通過 |
 | 金鑰在 `apa-signer` 下解鎖；Host 讀不到金鑰檔 | 7.4、7.5 | serving；`denied "read the test key"` |
 | 撤回 | 8.1、8.2 | 沒有未知項目；剩餘等於保留清單 |
 
@@ -691,7 +645,16 @@ Aaron 看過清單，確定只有上面已知的項目，再做 8.2。
 - 終端機捲動緩衝、其他管理者工具、記憶體：不在觀測範圍。觀測不到不等於不存在。
 - 「Signer 不能連網」（D7）：未驗證。「Signer 不能改自己的設定」不成立於 OS 層（D6，已採 C1）。
 
-**修訂對照**（第一版 `0ef6172` → 本版）：
+**第二輪修訂對照**（第二版 `c7744be` → 本版；第二輪 O1～O4 是第一輪 O1～O3 之後的再補正，不表示第二版當時已驗收）：
+
+| 項目 | 第二版的問題 | 本版 |
+|---|---|---|
+| 第二輪 O1 預演資格 | 第 1 節設定檔 `allow default`，沒有讀取隔離，也缺記憶體、程序數、磁碟與牆鐘時間上限，卻寫成「必須先完成」的前置 | 第 1 節改為路徑分流：路徑 A（Codex 受控預演）只有全部控制都能強制時才可啟動，目前**不可用、未執行**；路徑 B（Aaron 逐關卡、Codex 陪同判讀）由 Aaron 在第 2 節明確選擇，並寫進交接檔與紀錄；路徑 B 的結果不是預演 PASS |
+| 第二輪 O2 自檢與收尾 | 寫入自檢對真實 repo 的固定路徑 `>|` 再刪除；失敗時不保證停止已啟動的程序；FIFO、`wait` 沒有期限；keygen 退出碼被吞 | 依第二輪 O1 不提供可執行的預演，整個預演腳本從現行入口移除，只留在 Git 歷史（`c7744be`），標明不可執行；不為未採用的路徑實作控制器 |
+| 第二輪 O3 查詢失敗 ≠ 不存在 | 3.1 的 `dscl` 非零就印 `absent`；6.2、7.3、8.1 的 `pgrep` 錯誤會被當成沒有程序；6.7、7.7 的 `ps -p` 觀測失敗會被當成已停止；`[[ -e ]]` 看不到也當成不存在 | `dscl`：退出碼 0 是存在，有 `eDSRecordNotFound` 才算查無，其他一律停止；`pgrep` 以退出碼分「找到（0）／沒有（1）／錯誤（其他）」（`no_signer_process`、`signer_pid`）；`ps` 以 `pid_state` 分 running／gone／無法判讀（停止）；socket 以 `stat` 分存在／`No such file`／錯誤（`sock_absent`）。都立即保存退出碼，不交給 `ERR_EXIT` 猜 |
+| 第二輪 O4 人工觀察 | 6.6、7.6 只印出回答，`no` 或空值也能往下走 | 6.6、7.6o 變成驗收關卡：只有 `yes` 寫入標記；B1（7.1、7.2）需要 `ok.6.6`。安全收尾 6.7、7.7、8.1 不看觀察或驗收標記，只要求當下確認已停止；`ok.6.7`／`ok.7.7` 只代表已停止。看見密語時：答 `no`、停止、視為已洩漏、不貼出、不自動清除或重試 |
+
+**第一輪修訂對照**（第一版 `0ef6172` → 第二版 `c7744be`；其中「預演」相關各列已在第二輪隨預演腳本移出現行入口）：
 
 | 項目 | 第一版的問題 | 本版 |
 |---|---|---|
@@ -717,34 +680,59 @@ Aaron 看過清單，確定只有上面已知的項目，再做 8.2。
 | O3-7 遞迴刪除 | — | 沒有；本次暫存目錄以具名刪除加 `rmdir`。預演目錄由 Codex 先確認路徑再移除 |
 
 **原第 8 節五個問題的處理**：
-1. 預演結果與修正：第 1 節改成受控預演腳本，回報要點寫在第 1 節末尾。
+1. 預演結果與修正：第二版改成受控預演腳本；第二輪因無法提供必要控制，改為路徑分流，路徑 A 未執行（第 1 節）。
 2. 讀不到 `/dev/tty`：6.3 停止並交判讀；可能的選項（程式在 stdin 是終端機時改讀 stdin，或調整 sudo 的 pty 設定）都需另行核准，本輪不改。
 3. `ps -E`：不足以觀測，已移除，列為未觀測（第 9 節）。
 4. 證據與停止條件：錄製兩個視窗；所有關卡有 `STOP`／`UNEXPECTED`；清單複製到證據目錄。
 5. 撤回範圍：8.1 未知就停止，8.2 只刪具名項目，保留 D5 決定的資源。
 
-**仍需預演或第一次執行才能確認**：
-- `sandbox-exec` 設定檔的效果（R0）；
-- 本機 `ps`、`pgrep`、`curl` 的實際格式（R2、R4）；
-- 被檔案權限擋住時 curl 的訊息（R4，影響 `expect_fs_block`）；
-- `script` 以 FIFO 為輸入時的行為（R4、R5）；
+**仍需第一次執行（路徑 B）才能確認**（路徑 A 未執行，以下都沒有事前觀測）：
+- 本機 `ps`、`pgrep`、`curl` 的實際輸出格式與退出碼；
+- `dscl` 查無紀錄時是否含 `eDSRecordNotFound`（不是就會停止，交判讀）；
+- 被檔案權限擋住時 curl 的訊息（影響 `expect_fs_block`；不同就會停止）；
 - 跨使用者、sudo、`/dev/tty`、群組生效、socket 群組繼承（第 4～7 節）。
 
-## 10 語法檢查紀錄（本版提交前，Claude Code）
+## 10 語法解析與靜態分支推演（本版提交前，Claude Code）
 
-- **方法**：把本文件每個 ```` ```zsh ```` 區塊依序另存成檔案（共 44 塊），各跑一次 `/bin/zsh -f -n <檔案>`（zsh 5.8.1，只解析、不執行），記錄退出碼與 stderr。本文件沒有其他 shell 的區塊。
-- **結果**：44 塊的退出碼都是 0。
+**語法解析**：
+- 方法：本文件每個 ```` ```zsh ```` 區塊依序另存成檔案（43 塊），各跑一次 `/bin/zsh -f -n <檔案>`（zsh 5.8.1，只解析、不執行）。第 2 節區塊內以 here-document 寫出的 `lib.zsh`（74 行）在區塊解析時只被當成文字，所以另外抽出來單獨解析。本文件沒有其他 shell 的區塊；區塊裡沒有需要替換的佔位值（交接只讀 `RUN`）。
+- 結果：43 塊與 `lib.zsh` 的退出碼都是 0，stderr 都是空的（在 Claude Code 工具沙箱外解析）。
 
 | 區塊 | 章節 | 退出碼 | stderr |
 |---|---|---|---|
-| 01～02 | 1 受控預演（1.1 啟動、1.2 `rehearse.zsh`） | 0 | 01 無；02 見下 |
-| 03～07 | 2 建立本次目錄並建置、進入錄製 | 0 | 無 |
-| 08～13 | 3 管理視窗與查核 | 0 | 無 |
-| 14～20 | 4 帳號、群組、目錄、群組生效 | 0 | 無 |
-| 21～23 | 5 A 階段 | 0 | 無 |
-| 24～32 | 6 B0 | 0 | 無 |
-| 33～41 | 7 B1 | 0 | 無 |
-| 42～44 | 8 撤回 | 0 | 無 |
+| 01～06 | 2 選路徑、建立本次目錄、建置、進入錄製 | 0 | 無 |
+| 07～12 | 3 管理視窗與查核 | 0 | 無 |
+| 13～19 | 4 帳號、群組、目錄、群組生效 | 0 | 無 |
+| 20～22 | 5 A 階段 | 0 | 無 |
+| 23～31 | 6 B0（含 6.6 觀察關卡、6.7 安全收尾） | 0 | 無 |
+| 32～40 | 7 B1（含 7.6o 觀察關卡、7.7 安全收尾） | 0 | 無 |
+| 41～43 | 8 撤回 | 0 | 無 |
+| `lib.zsh` | 第 2 節的 here-document | 0 | 無 |
 
-- **區塊 02 的 stderr**：在 Claude Code 的工具沙箱裡解析時，第 20、79 行（兩個 `&` 背景工作）各印一行 `nice(5) failed: operation not permitted`。在沙箱外重新解析同一個檔案，退出碼 0、stderr 為空；加 `-o NO_BG_NICE` 也一樣。判讀：這是 zsh 的 `BG_NICE` 在工具沙箱裡被拒絕調整優先權，不是 parser 診斷。
-- **限制**：語法通過不代表參數合法、路徑存在或行為如預期。第 9 節列出的項目仍要預演或第一次執行才能確認。
+上一版（`c7744be`）的 44 塊解析結果仍歸 Claude Code 當時的紀錄，不是 Codex 的獨立驗證。語法通過不代表參數合法、路徑存在或行為如預期。
+
+**靜態分支推演**：依文字逐一推演，不是實測，也不是 PASS。
+
+| 情況 | 能否往下 | 是否仍能安全停止 |
+|---|---|---|
+| 3.1 `dscl` 退出碼 0（紀錄存在） | 否，停止 | 不涉及（尚未改系統） |
+| 3.1 `dscl` 非零且含 `eDSRecordNotFound` | 是，記為 `absent` | — |
+| 3.1 `dscl` 非零但沒有 `eDSRecordNotFound`（查詢失敗或字樣不同） | 否，停止並保留錯誤與退出碼 | 不涉及 |
+| `pgrep` 找到程序（0） | 6.2／7.3／8.1 停止；`signer_pid` 繼續核對唯一性與命令列 | 6.7／7.7 會停在「仍有程序」，不刪資料 |
+| `pgrep` 沒有符合（1） | `no_signer_process` 通過；`signer_pid` 停止（沒有 Signer） | 是 |
+| `pgrep` 其他退出碼（錯誤） | 否，停止 | 6.7／7.7／8.1 停止，不宣稱已停、不刪資料 |
+| `ps -o pid= -p` 回 running／gone／無法判讀 | running：等待到上限仍在就停止；gone：繼續；無法判讀：停止 | 無法判讀時不宣稱已停 |
+| socket `stat`：存在／`No such file`／其他錯誤 | 存在：停止；不存在：繼續；錯誤：停止 | 錯誤時不刪資料 |
+| 6.6／7.6o 回答 `yes` | 寫入觀察標記；B1 需要 `ok.6.6` | 是（6.7／7.7 與觀察無關） |
+| 回答 `no`、空值、其他文字 | 否；不寫標記，B1 被 `need 6.6` 與 7.1 的條件擋住 | 是：照常 Ctrl-C，6.7／7.7 只確認已停止 |
+| `read` 失敗（輸入中斷） | 否（`stop "no answer was read"`） | 是 |
+| 看見密語 | 否；答 `no`、停止、視為洩漏，不貼出 | 是 |
+| Signer 啟動後失敗（6.4／7.5 任一處停止） | 否；後續驗收步驟的 `need` 擋住 | 是：6.7 只需要 `ok.6.2`、7.7 只需要 `ok.7.3`；沒有 `pid` 檔也以 `pgrep`、`stat` 確認 |
+| 收尾失敗（仍有程序、socket 還在、查詢錯誤） | 否；不寫 `ok.6.7`／`ok.7.7`／`ok.8.1` | 交 Codex 判讀，不刪 DB、設定或金鑰 |
+| 8.1 清單有未知項目 | 否，不寫 `ok.8.1`，8.2 不會執行 | 不刪任何東西 |
+
+**Aaron 的下一步**：
+1. 等 Codex 限定複核本版。
+2. 開始時在 W-host 依第 2 節執行 `exec /bin/zsh -f`，在 `operating route` 提示輸入 `B`。這是路徑 B，不是預演；路徑 A 目前不可用，也沒有任何隱含的預演前置。
+3. 建立本次目錄並建置，看到 `OK 2  route=B …`；之後每一步都以前一步的 `OK` 為入口。
+4. 看到任一 `STOP` 或 `UNEXPECTED` 就停下，把該段輸出交 Codex。
