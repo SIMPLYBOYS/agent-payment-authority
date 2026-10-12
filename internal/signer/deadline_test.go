@@ -6,6 +6,7 @@ package signer
 // never guessed with sleeps.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -158,5 +159,92 @@ func TestDeadlineAfterAccept(t *testing.T) {
 	r, err := c.Sign(bg, e.req("request-0000000001", a(1)))
 	if err != nil || r.State != "signed" || count(t, c, "1") != 1 {
 		t.Fatalf("the same request ID: %+v %v", r, err)
+	}
+}
+
+// R2 (review of fcc5095): the request ends after the attempt was accepted.
+// The Handler must answer SIGNER_TIMEOUT, not ATTEMPT_UNKNOWN: the attempt
+// exists, accepted, under its request ID, and that ID finishes it.
+func TestHandlerAfterAccept(t *testing.T) {
+	for _, end := range []string{"cancel", "deadline"} {
+		t.Run(end, func(t *testing.T) {
+			e := newEnv(t)
+			e.cfg.Callers = []uint32{uint32(os.Getuid())}
+			c := e.core()
+			h := Handler(c, func(string) {})
+			caller := context.WithValue(bg, ctxKey{}, int64(os.Getuid()))
+			body, _ := json.Marshal(e.req("request-0000000001", a(1)))
+			do := func(ctx context.Context, method, path string, body []byte) (int, Reply) {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(method, path, bytes.NewReader(body)).WithContext(ctx))
+				var r Reply
+				json.Unmarshal(rec.Body.Bytes(), &r)
+				return rec.Code, r
+			}
+
+			var ctx context.Context
+			var cancel context.CancelFunc
+			if end == "cancel" {
+				ctx, cancel = context.WithCancel(caller)
+			} else {
+				ctx, cancel = context.WithTimeout(caller, 100*time.Millisecond)
+			}
+			defer cancel()
+			accepted := 0
+			hook = func(s, _ string) error {
+				if s == "after-accept" {
+					accepted = count(t, c, "state = 'accepted'") // handshake: the acceptance is committed
+					if end == "cancel" {
+						cancel()
+					} else {
+						<-ctx.Done() // the deadline, reached exactly here
+					}
+				}
+				return nil
+			}
+			defer func() { hook = nil }()
+			st, r := do(ctx, "POST", "/v1/sign", body)
+			hook = nil
+			if accepted != 1 {
+				t.Fatalf("the hook ran with %d accepted attempts", accepted)
+			}
+			if st != http.StatusServiceUnavailable || r.Error != "SIGNER_TIMEOUT" || r.Authorization != nil {
+				t.Fatalf("accepted attempt answered %d %s; want 503 SIGNER_TIMEOUT", st, r.Error)
+			}
+			if st, g := do(caller, "GET", "/v1/attempts?request_id=request-0000000001", nil); st != http.StatusOK || g.State != "accepted" || g.Authorization != nil {
+				t.Fatalf("the accepted attempt: %d %+v", st, g)
+			}
+			st, signed := do(caller, "POST", "/v1/sign", body)
+			if st != http.StatusOK || signed.State != "signed" || count(t, c, "1") != 1 {
+				t.Fatalf("the same request ID: %d %+v, %d attempts", st, signed, count(t, c, "1"))
+			}
+			if st, g := do(caller, "GET", "/v1/attempts/"+signed.AttemptID, nil); st != http.StatusOK || g.Authorization.Signature != signed.Authorization.Signature {
+				t.Fatalf("the signed attempt: %d %+v", st, g)
+			}
+			if st, g := do(caller, "GET", "/v1/attempts?request_id=request-0000000002", nil); st != http.StatusNotFound || g.Error != "ATTEMPT_UNKNOWN" {
+				t.Fatalf("a request never seen: %d %+v", st, g)
+			}
+		})
+	}
+}
+
+// The root cause, in Core: a read that fails is that failure, never
+// ATTEMPT_UNKNOWN. Recovery goes through the same finish.
+func TestFinishReadError(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	release := crashAt("after-accept")
+	c.Sign(bg, e.req("request-0000000001", a(1)))
+	release()
+	g, err := c.Get(bg, "", "request-0000000001")
+	if err != nil || g.State != "accepted" {
+		t.Fatalf("%+v %v", g, err)
+	}
+	ctx, cancel := context.WithCancel(bg)
+	cancel()
+	_, err = c.finish(ctx, g.AttemptID)
+	var ref Refusal
+	if !errors.Is(err, context.Canceled) || errors.As(err, &ref) {
+		t.Fatalf("a failed read became a refusal: %v", err)
 	}
 }

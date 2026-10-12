@@ -473,8 +473,11 @@ func (c *Core) resume(ctx context.Context, a attempt) (Reply, error) {
 // wallet's signing lock.
 func (c *Core) finish(ctx context.Context, id string) (Reply, error) {
 	a, found, err := c.byID(ctx, id)
-	if err != nil || !found {
-		return Reply{}, errors.Join(err, Refusal("ATTEMPT_UNKNOWN"))
+	if err != nil { // the read failed (the request's deadline, the DB): not "unknown"
+		return Reply{}, err
+	}
+	if !found {
+		return Reply{}, Refusal("ATTEMPT_UNKNOWN")
 	}
 	if a.state != "accepted" {
 		return reply(a), nil
