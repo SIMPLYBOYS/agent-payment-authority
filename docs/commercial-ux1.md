@@ -1,6 +1,6 @@
 # UX1：商業展示主畫面與操作重整
 
-> 2026-10-12，Claude Code。**狀態（10/12）：UX1 已實作；Codex 限定 review 提出 R1（操作卡更新丟失鍵盤焦點）、R2（手動清單情境衝突），UX1 尚未整體關閉；R1／R2 補正完成（第 7 節）；Codex 限定複核：R2 關閉，R1 留一個停止鍵焦點的局部缺口，已補正，待 Codex 複核（第 7.4 節）。Aaron 尚未判定畫面與操作是否達到本片目標。**依 vault〈Claude-Code-商業展示UX1主畫面與操作重整派工-20261012〉。分支 `commercial-ux1`，從 `32e5183` 建立。
+> 2026-10-12，Claude Code。**狀態（10/12）：UX1 完成**——Aaron 依第 7.2 節三段 fake 彩排手動驗證並判定合格，結合既有 Codex 技術複核（第 8 節）。以下各節保留當時的狀態文字。
 > UX1 是暫稱，不占付款或 Admin 的任務編號。只用 fake CLI 與合成資料驗證；不執行真實 CLI。不改 Policy、Store schema、事件契約、付款、Gate、認證、版本釘選、plugin 例外、登入與配對權限。
 
 ## 1 版面與操作安排（實作前）
@@ -234,3 +234,21 @@ c9c9e47618ffc1f8e90c99f33a1c75e3cb73a7ef1e5200860ad4537c32760468  WebGL.data
 | reverse | PASS | 0 | 97.2 | `UX1-R1` 兩項：拿掉 `keepFocus` 命中 `FAIL B's confirm keeps the focus while A's card updates`；拿掉 run 比對命中 `FAIL a new run's stop does not get the old run's focus: A's 選取 has it` |
 
 只跑受影響的焦點檢查；Node、其他瀏覽器流程、Unity、容器、產包與真實 CLI 都沒有重跑（本次只改 `keepFocus` 的 run 比對）。產品基準 `a5ed03f`；WebGL 基準仍是 `1e1ec30`。下一步：Codex 複核這個缺口；之後是 Aaron 依第 7.2 節的三段 fake 體驗確認。
+
+## 8 驗收紀錄（10/12）
+
+**Aaron 手動驗收**：Aaron 本人依第 7.2 節的三段 fake 彩排（自然到期、取消請購／task、停止隔離；`make present-rehearsal`）操作並判定。Aaron 原話：
+
+> 以上過程均以手動驗證過，行為模式合格
+
+三段的操作與判定歸屬 Aaron 本人；Claude Code 沒有代為操作，也沒有另外的紀錄檔。
+
+**技術複核**（既有紀錄，照 Codex 說法）：第 7 節（Codex 前輪：獨立 Node 69／69、WebGL 雜湊相符、定向 fake 探測）與第 7.4 節（Codex 限定複核 `c646c26`：R2 關閉，R1 留停止鍵焦點缺口；獨立 Node 69／69、viewer 頁按鍵確認）。停止鍵焦點的補正 `a5ed03f`（第 7.4 節，Claude Code 執行）在本文件中沒有另外的 Codex 複核結論。
+
+**結論**：依 Aaron 指示，結合以上 Codex 技術複核與 Aaron 的手動驗收，UX1「商業展示主畫面與操作重整」標為完成。產品基準：網頁 `a5ed03f`、彩排入口 `33629dc`；WebGL 基準 `1e1ec30`。
+
+**不在本次驗收範圍**：真實 Agent（本片只用 fake CLI）、付款、委託與本人核准、整體商業展示版。
+
+**保留的限制**：手機寬度下畫布名稱牌偏小（約 8 px）；觸控點選未驗證；較早的 task 在「進階」裡查看；無頭瀏覽器中 Unity 走路需要整頁畫面更新的觀察（第 5 節）；換選取時選取圈短暫消失；舊 v2 Unity 建置沒有選取圈。
+
+本次只更新文件：沒有重跑測試或展示，沒有 merge、push，下一個切片沒有開始。
