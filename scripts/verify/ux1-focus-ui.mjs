@@ -1,7 +1,8 @@
 // Real-browser check of UX1's keyboard focus on the operation cards (review
 // of 382a4b5, R1; docs/commercial-ux1.md 7): a cancel confirmation keeps the
 // focus while another card updates from the polls, 返回 gives it back to its
-// 取消 entry, a focus moved elsewhere is not taken back, a confirmation whose
+// 取消 entry, a 停止 Agent keeps the focus while its own run updates and never
+// hands it to a newer run's stop, a focus moved elsewhere is not taken back, a confirmation whose
 // task or credentials changed hands the focus to a safe control and cancels
 // nothing, and one explicit confirmation cancels the right task. Keys are
 // the browser's own key events. The fake CLI with gate files decides when A's
@@ -48,7 +49,7 @@ const tool = (name, product) => ({ do: "tool", tool: name, ...(product ? { args:
 const scenario = (name, steps) => { const p = join(tmp, name + ".json"); writeFileSync(p, JSON.stringify({ steps })); return p; };
 const catalog = join(tmp, "scenarios.json");
 writeFileSync(catalog, JSON.stringify({ description: "ux1-focus-ui", scenarios: [
-  { id: "a-gated", consumer_id: "consumer-a", label: "A：每次呼叫前等候", scenario: scenario("a-gated", [tool("list_products"), { do: "wait_file", text: gate("a1") }, tool("get_quote", "kr-market"), { do: "wait_file", text: gate("a2") }, tool("request_purchase", "kr-market"), { do: "hang" }]) },
+  { id: "a-gated", consumer_id: "consumer-a", label: "A：每次呼叫前等候", scenario: scenario("a-gated", [tool("list_products"), { do: "wait_file", text: gate("a1") }, tool("get_quote", "kr-market"), { do: "wait_file", text: gate("a2") }, tool("request_purchase", "kr-market"), { do: "wait_file", text: gate("a3") }, tool("list_products"), { do: "hang" }]) },
   { id: "b-ask", consumer_id: "consumer-b", label: "B：Ask 後結束", scenario: scenario("b-ask", [tool("list_products"), tool("get_quote", "kr-market"), tool("request_purchase", "kr-market"), { do: "result", text: "done" }]) },
   { id: "b-wait", consumer_id: "consumer-b", label: "B：進店後等待", scenario: scenario("b-wait", [tool("list_products"), { do: "hang" }]) },
 ] }));
@@ -117,20 +118,42 @@ try {
   await sleep(3000); // polls that change nothing
   check("polls that change nothing leave the focus where it is", await b.evaluate(`document.activeElement === window.__was`));
 
+  // ---- 停止 Agent: its own run's update keeps the focus (review of c646c26) ----
+  mark("A's stop, same run");
+  const runA1 = await b.evaluate(`${card("consumer-a")}.querySelector(".row-stop").dataset.run`);
+  await b.evaluate(`${card("consumer-a")}.querySelector(".row-stop").focus()`);
+  writeFileSync(gate("a2"), "");
+  check("A's card updates (3 calls), same run", await b.waitFor(`${card("consumer-a")}.querySelector(".agent-calls").textContent === "已回覆工具呼叫 3 次"`, 20000), await calls("consumer-a"));
+  f = await b.evaluate(`JSON.stringify({ cls: document.activeElement.className, run: document.activeElement.dataset.run || "", consumer: document.activeElement.closest(".agent-card")?.dataset.consumer || "" })`).then(JSON.parse);
+  check("A's 停止 Agent keeps the focus while its own run updates", f.cls.includes("row-stop") && f.run === runA1 && f.consumer === "consumer-a", JSON.stringify(f));
+
   // ---- a focus moved elsewhere is not taken back ----
   mark("focus moved away");
+  await b.evaluate(`${card("consumer-b")}.querySelector(".row-cancel").focus()`);
   await key("Enter");
   await key("Tab");
   await key("Tab");
   f = await focused();
   const away = !f.consumer && !f.body;
   check("Tab leaves the card (the user moved on)", away, JSON.stringify(f));
-  writeFileSync(gate("a2"), "");
-  check("A's card updates again (3 calls)", await b.waitFor(`${card("consumer-a")}.querySelector(".agent-calls").textContent === "已回覆工具呼叫 3 次"`, 20000), await calls("consumer-a"));
+  writeFileSync(gate("a3"), "");
+  check("A's card updates again (4 calls)", await b.waitFor(`${card("consumer-a")}.querySelector(".agent-calls").textContent === "已回覆工具呼叫 4 次"`, 20000), await calls("consumer-a"));
   const f2 = await focused();
   check("an update does not take the focus back", JSON.stringify(f2) === JSON.stringify(f), JSON.stringify(f2));
   await b.evaluate(`(${card("consumer-b")}.querySelector(".cancel-back")?.click(), true)`);
   await b.waitFor(`!${card("consumer-b")}.querySelector(".agent-confirm")`, 5000);
+
+  // ---- 停止 Agent: a newer run of A never gets the old run's focus ----
+  mark("A's stop, a new run");
+  await b.evaluate(`${card("consumer-a")}.querySelector('.row-stop[data-run="${runA1}"]').focus()`);
+  await fetch("http://" + addr + "/api/host/runs/" + runA1 + "/stop", { method: "POST", headers: { Authorization: "Bearer " + t.op, Origin: "http://" + addr, "Content-Type": "application/json" }, body: "{}" });
+  let a2 = null;
+  for (let i = 0; i < 100 && !(a2 && a2.task_id); i++) { await sleep(200); a2 = await startRun("a-gated"); } // once A's old run has ended
+  check("A's card follows its newer run", !!a2 && a2.task_id === "show-a-02" && await b.waitFor(`${card("consumer-a")}.dataset.state === "running" && ${card("consumer-a")}.textContent.includes("show-a-02")
+    && !!${card("consumer-a")}.querySelector('.row-stop[data-run="${a2 && a2.run_id}"]')`, 20000), JSON.stringify(a2));
+  f = await b.evaluate(`JSON.stringify({ cls: document.activeElement.className, run: document.activeElement.dataset.run || "", consumer: document.activeElement.closest(".agent-card")?.dataset.consumer || "" })`).then(JSON.parse);
+  check("a new run's stop does not get the old run's focus: A's 選取 has it", !f.cls.includes("row-stop") && f.cls.includes("agent-select") && f.consumer === "consumer-a", JSON.stringify(f));
+  check("nothing stopped the new run", (await (await fetch("http://" + addr + "/api/host/runs/" + a2.run_id, { headers: { Authorization: "Bearer " + t.op } })).json()).live === "running");
 
   // ---- the confirmation's task is no longer B's: closed, nothing cancelled ----
   mark("B's task changes");
@@ -169,7 +192,7 @@ try {
   await key("Enter");
   check("Enter on 確認取消 task cancels show-b-01, as the page says", await b.waitFor(`document.getElementById("run-status").textContent.includes("task show-b-01 已取消")`, 20000) && (await hostTask("show-b-01")).status === "cancelled",
     await b.evaluate(`document.getElementById("run-status").textContent`));
-  check("the other tasks are not cancelled", (await hostTask("show-a-01")).status !== "cancelled" && (await hostTask("show-b-02")).status !== "cancelled");
+  check("the other tasks are not cancelled", (await hostTask("show-a-02")).status !== "cancelled" && (await hostTask("show-b-02")).status !== "cancelled");
 
   // ---- the drawer's keys, next to it ----
   mark("drawer");

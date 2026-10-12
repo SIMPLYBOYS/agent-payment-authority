@@ -119,6 +119,8 @@ ITEMS = [
     # Review of 382a4b5 (R1): the focus kept across a card rebuild; alone with "^UX1-R1:".
     ("UX1-R1: a card rebuild keeps the confirmation's focus", ui("scripts/verify/ux1-focus-ui.mjs", "B's confirm keeps the focus while A's card updates"),
      [("web/host.js", "function keepFocus(el, rebuild) {", "function keepFocus(el, rebuild) { return rebuild();")]),
+    ("UX1-R1: a newer run's stop never gets the old run's focus", ui("scripts/verify/ux1-focus-ui.mjs", "a new run's stop does not get the old run's focus: A's 選取 has it"),
+     [("web/host.js", ' + attr("run", was.ownRun));', ");")]),
 ]
 
 ITEM_TIMEOUT = 900
