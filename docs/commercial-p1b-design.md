@@ -1,8 +1,9 @@
 # P1-b：金鑰庫與獨立 Signer（最小設計）
 
 > 2026-10-12，Claude Code。初版依 vault〈Claude-Code-P1-b金鑰庫與獨立Signer最小設計派工-1fb6225-20261012〉（Aaron：「我批准進行P1-b「金鑰庫與獨立 Signer」最小設計」），交付於 `3314e7c`；本版依〈Claude-Code-P1-b設計R1-R4補正派工-3314e7c-20261012〉修訂。分支 `commercial-p1a`。
-> **狀態：P1-b 設計 R1～R4 補正完成，待 Codex 限定複核；尚未核准實作、依賴安裝、系統設定、建立金鑰、簽署或交易。**
-> Codex 對 `3314e7c` 的結論：獨立 Signer 的方向保留，設計暫不通過，先補 R1～R4。這些是實作前的規格缺口，不是已重現的產品漏洞。Codex 前輪做的是 Git、文件、原始碼與官方公開資料的唯讀核對；沒有跑測試、執行真實 CLI、簽署、改產品或驗證作業系統隔離，repo 裡沒有對應的測試 log。本版是 Claude Code 的設計修訂與來源核對，待 Codex 限定複核，**R1～R4 尚未驗收**。
+> **狀態：P1-b 設計 R1、R2 已通過限定複核；R3、R4 補正完成，待 Codex 限定複核。尚未核准實作、依賴安裝、系統設定、建立金鑰、簽署或交易。**（第 0.2 節。常設委託的風險接受、實作與新依賴、OS 設定仍由 Aaron 另行決定；設計複核不是其中任何一項的核准。）
+> 以下為 R1～R4 交付時（`19fe1f7`）的狀態，保留原文：P1-b 設計 R1～R4 補正完成，待 Codex 限定複核；尚未核准實作、依賴安裝、系統設定、建立金鑰、簽署或交易。
+> （以下兩段是 R1～R4 交付時的說明，保留原文）Codex 對 `3314e7c` 的結論：獨立 Signer 的方向保留，設計暫不通過，先補 R1～R4。這些是實作前的規格缺口，不是已重現的產品漏洞。Codex 前輪做的是 Git、文件、原始碼與官方公開資料的唯讀核對；沒有跑測試、執行真實 CLI、簽署、改產品或驗證作業系統隔離，repo 裡沒有對應的測試 log。本版是 Claude Code 的設計修訂與來源核對，待 Codex 限定複核，**R1～R4 尚未驗收**。
 > 本輪只讀程式與文件、修訂設計與驗收計畫：沒有改產品、契約、schema、Signer 樁，沒有原型、測試或建置，沒有建立系統帳號或 socket 目錄，沒有產生、匯入或讀取任何金鑰，沒有連 RPC、faucet 或 facilitator。
 
 依據：[付款帳戶 ADR](adr/payment-account-model.md)（Accepted：每位 consumer 一個 EOA＋EIP-3009，金鑰由隔離的 Signer 保管；Signer 只在同時有一次性授權與鏈上已驗的 `intent_hash` 時才簽）、[commercial-transaction-flow.md](commercial-transaction-flow.md) 第 3、10、11 節、[commercial-demo-roadmap.md](commercial-demo-roadmap.md) 的 P1／A2／P2 切片，以及第 1 節列出的現行程式。
@@ -15,6 +16,20 @@
 | R2 | `attempts` 只有 digest 等欄位；「完整簽章只回傳一次」，又寫重送回原結果 | 接受時原子保存不可變的 canonical 快照（付款內容、授權、期限、錢包與金鑰版本、驗證結果、請求指紋）；三個中斷點都只讀快照；查回既有結果與新請求分開；已保存的授權可以在授權範圍內重複回給同一個呼叫者 | hash 還原不出付款欄位；恢復時不能再相信呼叫者 | 5.1–5.5 | 第 8 節 R2 列 |
 | R3 | 接受前看 grant 與付款時間窗，恢復時只看 `valid_before`；寫「Host 取消後送來也會被拒」 | 接受時固定 `auth_deadline = min(授權到期, valid_before)`；三個階段都依它，未簽的恢復不跨過它；取消的權威在 Host，Signer 沒有可驗證的撤回，刪除原保證；abandon 與簽署以同一個條件式狀態轉換決勝，簽章只在 `signed` 提交後才離開 | 規則前後一致；不以「Host 不送」代替「Signer 可拒」 | 5.3、5.7、5.8 | 第 8 節 R3 列 |
 | R4 | schema 4 只放寬 `grants` 的方法 CHECK、加 `issuer_kid` | 三類授權的資料關係分開：`simulated` 與 `webauthn` 有核准會話與 `grants` 列；常設委託路徑**沒有** `grants` 列，記在新的 `payment_attempts`（`delegation_ref`）。P1-b 的 schema 4 只加 `payment_attempts`；`grants` 的方法放寬到 `webauthn` 留到 A2 | 現行 `grants.approval_session_id` 是 `NOT NULL UNIQUE REFERENCES approval_sessions`，不為自動放行偽造本人會話 | 6 | 第 8 節 R4 列 |
+
+### 0.2 R3、R4 限定補正（Codex 對 `19fe1f7` 的限定複核）
+
+Codex 的結論是：R1、R2 的設計缺口可以關閉；R3、R4 還有局部矛盾，補正前整份設計暫不通過，但不需要重做架構。
+- R1 關閉，只代表設計補正通過。Aaron 還沒有接受常設委託的付款風險，OS 隔離也還沒實測。
+- R2 關閉，不代表實作或當機恢復測試已通過。
+
+Codex 這輪做的是限定安全設計複核：唯讀核對 Git、設計與相關原始碼，確認 `19fe1f7` 只改了四份文件；沒有執行測試、CLI、簽署或系統隔離驗證，也沒有修改產品或設計文件。R3、R4 是設計一致性缺口，不是已重現的產品漏洞；repo 裡沒有對應的測試 log。本輪是 Claude Code 的文件修訂與來源核對，**R3、R4 尚未通過**。
+
+| 項目 | 原規則（`19fe1f7`） | 修訂後 | 理由 | 章節 | 未來驗收 |
+|---|---|---|---|---|---|
+| R3-a 最後狀態轉換的期限 | 第 5.3 節要求未簽的不能跨過 `auth_deadline`，但第 5.7 節的簽署更新只有 `WHERE state='accepted'` | 簽署的最後判定在「寫入 `signed`」的那個寫入交易裡：取得寫入鎖後取一次可信時間，條件式更新同時要求 `state='accepted'` 與 `now < auth_deadline`；不符就在同一交易把仍是 `accepted` 的轉成 `expired_unsigned`，丟棄尚未交出的簽章 | 計算簽章前有效、寫入前到期的情況原本沒有防護 | 5.3、5.4、5.7 | 第 8 節 R3-a 四列 |
+| R3-b 鎖與取消競爭 | 錢包鎖涵蓋驗證、簽署與提交，abandon 也取同一把鎖；驗收卻要求 abandon 插在簽完、提交前（不可能到達） | 錢包鎖**只**序列化同一錢包的接受與簽署工作；abandon **不取**錢包鎖。勝負由同一列的條件式交易決定（SQLite 單一寫入者） | 保留「保存前仍可放棄」的設計意圖，讓驗收的插入點可到達 | 5.6、5.7 | 第 8 節 R3-b 三列 |
+| R4 P1-b 與 A2 的分界 | 第 6.2 節說 P1-b 不改 `grants`、WebAuthn 留到 A2；第 6.4 節的 DDL 與第 8 節卻讓 schema 4 接受 `webauthn` | P1-b 的 schema 4：`payment_attempts.method` 只能是 `delegation`，**沒有** `grant_jti` 欄位。WebAuthn 的欄位、CHECK 與正例全部移到 A2 的遷移與驗收 | 本片不得形成有效的 WebAuthn 付款路徑；DDL、說明與驗收要一致 | 6.1–6.4、8 | 第 8 節 R4 四列 |
 
 ## 1 現況與差距
 
@@ -128,7 +143,7 @@ limits:      { max_window_seconds: 600 }
 | 限制 | 負責 | 可信來源 | 備註 |
 |---|---|---|---|
 | 每筆金額、商家、資產、錢包 | Signer | 常設委託或本人核准登記 | 單筆上限**不是**總風險上限 |
-| 常設委託的累計用量 | Signer | Signer DB：該委託下 `accepted` 與 `signed` 的 attempt 金額總和（`abandoned`、`expired_unsigned` 不計；`signed` 一律計入，直到 P2 對帳能證明未結算） | 這才是自動放行的總風險上限 |
+| 常設委託的累計用量 | Signer | Signer DB：該委託下狀態為 `accepted` 或 `signed` 的 attempt 金額總和，**每次都由狀態推導**，不另設計數器（`abandoned`、`expired_unsigned` 自然不再計入，不會重複釋放；`signed` 一律計入，直到 P2 對帳能證明未結算） | 這才是自動放行的總風險上限 |
 | 每個 task 的預算、P1-a 的任務委託 | Host（Policy、Store）；之後由鏈上預留（Z2／P2）在鏈上扣減 | Host 自報（同 uid 可偽造）；P2 起是預算合約 | Signer 不信任 Host 自報的任務委託，只當作「只能更嚴」的參考 |
 | 鏈上預留 | 預算合約（Z2）；Signer 檢查預留事件 | 合約狀態與事件中的 `intent_hash` | 預留證明**預算已扣**，不證明**有人授權**；所以 Signer 要求「預留」**加上**（本人核准或常設委託），兩者缺一都不簽 |
 
@@ -164,7 +179,7 @@ limits:      { max_window_seconds: 600 }
 - 綁定與限額：`INTENT_MISMATCH`、`WALLET_NOT_REGISTERED`、`CONSUMER_MISMATCH`、`ASSET_NOT_ALLOWED`、`MERCHANT_NOT_ALLOWED`、`OVER_PER_TX`、`OVER_TOTAL_CAP`、`WINDOW_INVALID`。
 - 預留：`RESERVATION_UNAVAILABLE`、`RESERVATION_MISMATCH`。
 - 一次性與 attempt：`GRANT_REPLAYED`、`INTENT_IN_USE`、`NONCE_IN_USE`、`REQUEST_ID_CONFLICT`、`ATTEMPT_UNKNOWN`、`ATTEMPT_NOT_ACCEPTED`、`ATTEMPT_ABANDONED`、`ATTEMPT_EXPIRED`。
-- 金鑰與狀態：`KEY_VERSION_MISMATCH`、`SIGNER_LOCKED`、`SIGNER_BUSY`。
+- 金鑰與狀態：`KEY_VERSION_MISMATCH`、`SIGNER_LOCKED`、`SIGNER_BUSY`、`CLOCK_REGRESSION`。
 
 ### 4.3 新請求的檢查（任一不符即拒絕，不保留任何東西）
 
@@ -225,10 +240,18 @@ UNIQUE(chain_id, asset_contract, from, nonce)
 | 狀態 | 意思 | 誰推進 | 規則 |
 |---|---|---|---|
 | （拒絕） | 第 4.3 節任一項不符 | Signer | 不寫入，不保留任何東西 |
-| `accepted` | 已驗證；jti、`intent_hash`、nonce 與累計用量在同一個寫入交易保留 | Signer | 只在 `now < auth_deadline` 時可以完成簽署 |
-| `signed` | 簽章已算出，並以條件式更新（`WHERE state='accepted'`）提交 | Signer | 終態；授權在 `valid_before` 前都可能被提交，**不能撤回** |
-| `abandoned` | Host 在簽署提交前放棄 | Host 呼叫，Signer 以條件式更新 | 終態；釋放累計用量；jti、`intent_hash`、nonce 仍算已用 |
-| `expired_unsigned` | `now ≥ auth_deadline` 時仍是 `accepted` | Signer（恢復或查詢時） | 終態；釋放累計用量 |
+| `accepted` | 已驗證；jti、`intent_hash`、nonce 與累計用量在同一個寫入交易保留 | Signer | 能不能進入 `signed`，在最後的寫入交易裡判定（下方「最後判定」） |
+| `signed` | 簽章已算出，並以條件式更新（`WHERE state='accepted' AND ? < auth_deadline`）提交 | Signer | 終態；授權在 `valid_before` 前都可能被提交，**不能撤回** |
+| `abandoned` | Host 在簽署提交前放棄 | Host 呼叫，Signer 以條件式更新 | 終態；不再計入累計用量（由狀態推導）；jti、`intent_hash`、nonce 仍算已用，不重用 |
+| `expired_unsigned` | 最後判定時 `now ≥ auth_deadline` 而仍是 `accepted` | Signer（最後判定、恢復或查詢時） | 終態；不再計入累計用量；jti、`intent_hash`、nonce 不重用 |
+
+**最後判定**（R3-a）：要進入 `signed`，必須在一個寫入交易裡完成下列步驟：
+1. `BEGIN IMMEDIATE` 取得 SQLite 的寫入鎖後，取一次可信時間 `now`。這個時間不能早於快照裡的 `accepted_at`，否則回 `CLOCK_REGRESSION`，不寫入。
+2. 執行 `UPDATE attempts SET state='signed', signature=?, signed_at=? WHERE attempt_id=? AND state='accepted' AND ? < auth_deadline`，最後一個參數就是這個 `now`。
+3. 影響 1 列：提交，提交成功後才把簽章回給呼叫者。
+4. 影響 0 列：在同一交易重讀這一列。如果仍是 `accepted`（也就是期限已到），執行 `UPDATE … SET state='expired_unsigned', closed_at=? WHERE attempt_id=? AND state='accepted'` 並提交，丟棄剛算出的簽章，回 `ATTEMPT_EXPIRED`；如果已是 `abandoned`、`expired_unsigned` 或 `signed`，回對應的狀態，不交出這次算出的簽章。
+
+這裡判定的是「在取得寫入鎖後取時間的那一刻，授權仍然有效」。它**不**保證磁碟提交、回覆送達或之後的鏈上提交都發生在同一瞬間：提交與回覆會稍晚於 `now`。這個差距由 `auth_deadline ≤ valid_before` 承擔，授權在鏈上仍以 `valid_before` 為準。`now == auth_deadline` 算已到期，不用 `≤` 放行。
 
 例子：grant 在 10:00:30 到期，`valid_before` 是 10:01:00。10:00:20 接受後當機，10:00:40 重啟。這時 `auth_deadline`（10:00:30）已過，結果是 `expired_unsigned`，**不簽**，即使 `valid_before` 還沒到。這是保守規則：未完成的簽署不跨過授權到期。如果要改成「接受時就固定授權、之後可以跨過授權到期完成」，那是語意變更，列為待決（決策 6，推薦不要）。
 
@@ -241,7 +264,7 @@ UNIQUE(chain_id, asset_contract, from, nonce)
 
 | 中斷點 | 從哪裡讀 | 是否再簽 | 回傳什麼 | 何時持久化 |
 |---|---|---|---|---|
-| 已接受，還沒簽 | 快照（typed data、`address`、`auth_deadline`） | `now < auth_deadline` 時，用快照中的 typed digest 與 `address` 對應的金鑰簽；載入的金鑰地址不等於快照時回 `KEY_VERSION_MISMATCH`，維持 `accepted`，交管理者處理 | 簽完回 `signed` 與授權；已過期則回 `expired_unsigned`，沒有授權 | 簽署結果以條件式更新提交，提交成功後才回傳 |
+| 已接受，還沒簽 | 快照（typed data、`address`、`auth_deadline`） | 用快照中的 typed digest 與 `address` 對應的金鑰簽；載入的金鑰地址不等於快照時回 `KEY_VERSION_MISMATCH`，維持 `accepted`，交管理者處理。是否能保存為 `signed`，由第 5.3 節的最後判定決定 | 最後判定通過：`signed` 與授權。已到期：`expired_unsigned`，沒有授權 | 最後判定的寫入交易提交成功後才回傳 |
 | 已簽，結果未保存 | 同上（狀態仍是 `accepted`） | 同上；決定性簽章得到完全相同的位元組。前一次的簽章沒有離開 process | 同上 | 同上 |
 | 結果已保存，回覆遺失 | 快照與已保存的 `signature` | 否 | 同一份 `signed` 授權（同一個 `request_id` 重送，或查詢） | 已在前一次提交 |
 
@@ -258,7 +281,11 @@ Host 這一側：送出前先把 `request_id` 寫進自己的 `payment_attempts`
 ### 5.6 唯一性、併發與 consumer 範圍
 
 - **唯一性**：見第 5.2 節。累計用量檢查與保留在同一個寫入交易（`BEGIN IMMEDIATE`），所以兩筆並行的請求不會一起超過 `total_cap`。
-- **併發**：每個錢包一把鎖，同一錢包同時只有一筆在驗證、簽署與提交之間，`SIGNER_BUSY` 在有界等待後回覆；不同錢包並行。正確性不依賴鎖：保留與簽署提交都是條件式的交易，鎖只是避免白算簽章。
+- **併發**（R3-b）：
+  - **錢包鎖**是 Signer 程序內每個錢包一把的互斥鎖，只序列化同一錢包的**接受與簽署工作**：新請求或恢復時取得，依序做第 4.3 節的檢查、接受的寫入交易、計算簽章、第 5.3 節最後判定的寫入交易，全部完成（或放棄）後釋放。取不到時有界等待，之後回 `SIGNER_BUSY`。不同錢包並行。
+  - **abandon 與查詢不取錢包鎖**：abandon 只執行一個條件式寫入交易，不會被「計算簽章」這段較長的區段擋住；查詢只讀。
+  - **SQLite 寫入鎖**（`BEGIN IMMEDIATE`）讓接受、最後判定與 abandon 三種寫入交易彼此序列化。勝負由同一列的條件式更新決定，不由錢包鎖決定。
+  - 正確性不依賴錢包鎖：鎖只避免同一錢包重複計算簽章，以及累計用量檢查的不必要競爭。即使沒有錢包鎖，累計檢查與保留也在同一個寫入交易裡。
 - **consumer 範圍**：A、B 的請求都來自同一個 Host uid，所以 Signer **不能**以呼叫者分辨 consumer。
   - 簽署：consumer 的界線由授權依據執行。常設委託與核准者登記都綁定 consumer 與錢包；A 的委託或核准不能簽 B 的錢包，這一點不依賴 Host。
   - 查詢與 abandon：Signer 只檢查呼叫者是 Host。哪位 consumer 能看到或放棄哪一筆，由 **Host** 在自己的 API（viewer、模擬核准者能力與 Store 的 consumer 綁定）執行，所以依賴 Host 可信。
@@ -272,11 +299,19 @@ Host 這一側：送出前先把 `request_id` 寫進自己的 `payment_attempts`
 | 已接受、未簽 | Host 呼叫 abandon | 恢復或查詢時改成 `expired_unsigned` | 同左（`auth_deadline` 不晚於它） | 已接受的不再改 |
 | 已簽 | **不能撤回**；Host 記為待對帳 | 不影響已簽的授權 | 授權自然失效；有沒有被提交要靠 P2 的鏈上對帳 | 不重簽 |
 
-**abandon 與簽署的競爭**：兩者都是對同一列的條件式狀態轉換，在同一把錢包鎖與各自的寫入交易裡。
-- 簽署：先算簽章，再 `UPDATE … SET state='signed', signature=? WHERE attempt_id=? AND state='accepted'`。影響 1 列才回傳授權；影響 0 列（已被放棄或已過期）就丟棄剛算出的簽章，回 `ATTEMPT_ABANDONED`／`ATTEMPT_EXPIRED`，簽章從未離開 process。
-- abandon：`UPDATE … SET state='abandoned' WHERE attempt_id=? AND state='accepted'`。影響 1 列才回 `abandoned`；否則回目前狀態，例如 `signed` 時回 `ATTEMPT_NOT_ACCEPTED`，附 `state=signed`。
+**abandon 與簽署的競爭**（R3-b）：
+- **簽署**：持錢包鎖算出簽章，再進入第 5.3 節的最後判定寫入交易。
+- **abandon**：不取錢包鎖，在自己的寫入交易裡執行 `UPDATE … SET state='abandoned', closed_at=? WHERE attempt_id=? AND state='accepted'`。
 
-所以「簽章已算出、尚未保存」的那一刻可以被放棄，算出的簽章被丟棄。回覆過 `abandoned` 的 attempt 絕不會再交出簽章。`signed` 從不被描述為已撤回。
+兩者都對同一列做條件式更新，SQLite 的寫入鎖讓它們一前一後：
+
+| 先提交的一方 | 後到的一方得到 |
+|---|---|
+| abandon（例如落在簽章算出之後、最後判定交易之前） | 最後判定影響 0 列，重讀為 `abandoned`：丟棄簽章，回 `ATTEMPT_ABANDONED`，沒有授權離開 Signer |
+| 最後判定（`signed`） | abandon 影響 0 列，回 `ATTEMPT_NOT_ACCEPTED`，附 `state=signed`：明確表示**無法放棄**，不能說成已撤回 |
+| 期限已到（最後判定或查詢先寫入 `expired_unsigned`） | abandon 回 `ATTEMPT_NOT_ACCEPTED`，附 `state=expired_unsigned`。取消競爭不會略過期限 |
+
+累計用量由狀態推導，不論哪一方先成功都只看最後狀態，不會重複釋放。回覆過 `abandoned` 的 attempt 絕不會再交出簽章；`signed` 從不被描述為已撤回。
 
 EIP-3009 的鏈上 `cancelAuthorization` 要由付款人送交易，屬 P2 以後的決定。
 
@@ -286,8 +321,8 @@ EIP-3009 的鏈上 `cancelAuthorization` 要由付款人送交易，屬 P2 以�
 |---|---|
 | 接受時原子消耗 jti 並建立 PaymentAttempt（`not_started`） | 不變；Signer 裡的狀態叫 `accepted`。保留項目擴大為 jti、`intent_hash`、nonce 與累計用量，並保存不可變快照 |
 | 正常重送：同 jti、同 attempt 回原 attempt | 以 `request_id`＋指紋判定重送；同 `request_id`、不同內容拒絕 |
-| 崩潰恢復：jti 已消耗未簽 → 停在 `not_started`，重啟後繼續或交人工，不重簽第二次 | 只讀快照；`now < auth_deadline` 才用同一個 digest 與同一把金鑰完成，否則 `expired_unsigned`；決定性簽章、保存後才回傳，所以同一 attempt 只有一份授權內容 |
-| （沒有取消規則） | 已接受未簽可 abandon；與簽署以條件式狀態轉換決勝；已簽不能撤回 |
+| 崩潰恢復：jti 已消耗未簽 → 停在 `not_started`，重啟後繼續或交人工，不重簽第二次 | 只讀快照；用同一個 digest 與同一把金鑰計算，是否保存為 `signed` 由最後判定（寫入交易內取時間，`now < auth_deadline`）決定，否則 `expired_unsigned`；決定性簽章、保存後才回傳，所以同一 attempt 只有一份授權內容 |
+| （沒有取消規則） | 已接受未簽可 abandon（不取錢包鎖）；與最後判定以同一列的條件式交易決勝；已簽不能撤回 |
 | 拒絕：simulated、過期等不消耗 jti | 不變 |
 | AuthorizationGrant 的方法 `webauthn`／`policy`／`simulated`；Policy gate 發 policy grant | 自動放行改為 Signer 端常設委託（沒有 Host 簽發的 policy grant）；`webauthn` 在 A2；`simulated` 永遠拒絕 |
 
@@ -300,8 +335,8 @@ EIP-3009 的鏈上 `cancelAuthorization` 要由付款人送交易，屬 P2 以�
 | 類別 | 來源依據 | Host 資料 | 必填 | 唯一性與外鍵 |
 |---|---|---|---|---|
 | `simulated`（P1-a） | 模擬核准者 | `grants` 一列，連到核准會話 | `approval_session_id`、`jti`、`body`（未簽 grant） | 現行：`jti` PK、`approval_session_id NOT NULL UNIQUE REFERENCES approval_sessions`、方法 CHECK `simulated`；**永遠不能出現在付款流程** |
-| `webauthn`（A2） | 本人 WebAuthn assertion | `grants` 一列，連到核准會話（本人核准就有會話） | 同上，`body` 是 assertion 包 | 同上；A2 時方法 CHECK 放寬為 `IN ('simulated','webauthn')` |
-| `delegation`（常設委託） | Signer 設定裡的委託 | **沒有** `grants` 列；`payment_attempts` 一列帶 `delegation_ref`（委託 ID＋版本） | `delegation_ref`；`grant_jti` 為空 | 不建立、不偽造核准會話 |
+| `webauthn`（**A2，本片不建立**） | 本人 WebAuthn assertion | A2 時：`grants` 一列連到核准會話，`payment_attempts` 以 A2 新增的 `grant_jti` 欄位引用它 | 同上，`body` 是 assertion 包 | 全部在 A2 的遷移與驗收裡加入；P1-b 的 schema 4 沒有任何 WebAuthn 欄位或允許值，**未實作、未驗收** |
+| `delegation`（常設委託，P1-b） | Signer 設定裡的委託 | **沒有** `grants` 列；`payment_attempts` 一列帶 `delegation_ref`（委託 ID＋版本） | `delegation_ref` | 不建立、不偽造核准會話 |
 
 ### 6.2 現行程式要改的地方（本輪只寫設計，不改程式）
 
@@ -310,16 +345,17 @@ EIP-3009 的鏈上 `cancelAuthorization` 要由付款人送交易，屬 P2 以�
 | `store.go:428` `grants` DDL | 方法 CHECK＝`simulated`；會話必填 | 不改 | CHECK 放寬為 `simulated`／`webauthn` |
 | `pay.go:433`、`:505` `ResolveApproval` 寫 grant | 只寫 simulated | 不改（自動放行不經過它） | 本人核准寫 `webauthn` grant |
 | `pay.go:116` `loadSessions` 讀 grant | `grants JOIN approval_sessions` | 不改；另讀 `payment_attempts` 給檢視用 | 依方法解碼 |
-| `pay.go:606` `verifyPay` | approved 會話恰一筆 grant 與 `GRANT_ISSUED` | 增加：`payment_attempts` 與請購、會話（webauthn）或委託參照一致；**引用的 grant 方法必須是 `webauthn`** | 檢查 assertion 包的形狀 |
-| `pay.go:682` `verifyPayTables` | grant 的會話必須 approved | 增加：`payment_attempts` 不能引用 simulated grant；`delegation` 列不能有 `grant_jti` | — |
+| `pay.go:606` `verifyPay` | approved 會話恰一筆 grant 與 `GRANT_ISSUED` | 增加：每列 `payment_attempts` 的請購屬於 v1 task、`intent_hash` 與請購相符、方法是 `delegation`、`delegation_ref` 非空 | 加入 `grant_jti` 後：引用的 grant 必須是 `webauthn` 且會話已 approved |
+| `pay.go:682` `verifyPayTables` | grant 的會話必須 approved | 不必改：schema 4 的 `payment_attempts` 沒有引用 grant 的欄位，結構上不可能引用 simulated grant | 加入 `grant_jti` 後：不能引用 simulated grant |
 | `store.go:495` `upgradeFrom` | 1 或 2 → 3 | 加 schema 4（新增 `payment_attempts`），沿用驗證、備份、單一交易、再驗證；1／2／3 都能升到 4 | — |
-| `paycontract` | `AuthorizationGrant` 只有 simulated | 新增 Signer 請求與回覆型別（`delegation` 授權、`SignRequest`、`SignedAuthorization`）；simulated 型別不變，兩者不共用型別 | 新增 `webauthn` 授權型別與 challenge 向量 |
+| `paycontract` | `AuthorizationGrant` 只有 simulated | 新增 Signer 請求與回覆型別（`delegation` 授權、`SignRequest`、`SignedAuthorization`）；simulated 型別不變，兩者不共用型別；**沒有** webauthn 型別 | 新增 `webauthn` 授權型別與 challenge 向量 |
+| Host 的 Signer client | — | 只會為 `delegation` 建立 `payment_attempts` 與送簽；其他方法在 Host 就拒絕，不寫入 | 加入 `webauthn` |
 
 ### 6.3 舊資料
 
 - schema 3 的 simulated grant 遷移後原樣保留；復原檢查照舊。
-- `payment_attempts` 的方法只能是 `webauthn` 或 `delegation`，而且引用的 grant 必須是 `webauthn`，所以 simulated 資料遷移後也取得不到付款能力。
-- 不符合任何一類的資料（例如 `delegation` 列帶 grant、`webauthn` 列沒有 grant、引用 simulated grant）一律由復原檢查拒絕開啟，不修補。
+- schema 4 的 `payment_attempts` 只接受 `delegation`，也沒有引用 grant 的欄位，所以 simulated 資料遷移後取得不到付款能力，結構上也無法被付款引用。
+- 不符合的資料（方法不是 `delegation`、`delegation_ref` 為空、請購不屬於 v1 task、`intent_hash` 與請購不符）由 CHECK 或復原檢查拒絕開啟，不修補。
 - M1 的 task、證據與檢查器不變；M1 檢查器照舊拒絕 v1 task。
 
 ### 6.4 Host 的 `payment_attempts`（鏡像）
@@ -329,18 +365,15 @@ payment_attempts(
   request_id         TEXT PRIMARY KEY,          -- Host 在呼叫 Signer 前產生並先寫入
   task_id, purchase_order_id                    -- 外鍵到 purchases
   intent_hash        TEXT NOT NULL UNIQUE,
-  method             TEXT NOT NULL CHECK (method IN ('webauthn', 'delegation')),
-  grant_jti          TEXT UNIQUE REFERENCES grants,   -- webauthn 才有
-  delegation_ref     TEXT,                            -- delegation 才有
+  method             TEXT NOT NULL CHECK (method = 'delegation'),   -- P1-b 只有常設委託；webauthn 與 grant_jti 由 A2 的遷移加入
+  delegation_ref     TEXT NOT NULL,
   signer_attempt_id  TEXT UNIQUE,                     -- Signer 回覆後才填，之前可空
   state              TEXT NOT NULL CHECK (state IN ('requested','accepted','signed','abandoned','expired_unsigned','rejected','unknown')),
-  error_code TEXT, requested_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-  CHECK ((method = 'webauthn') = (grant_jti IS NOT NULL)),
-  CHECK ((method = 'delegation') = (delegation_ref IS NOT NULL))
+  error_code TEXT, requested_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 )
 ```
 
-恢復查詢的鍵是 `request_id`（Signer 的 `GET /v1/attempts?request_id=`）；`signer_attempt_id` 只在有回覆後才有。Host 不保存授權的簽章本身：需要時再向 Signer 查。
+`webauthn` 不是本片的結構預留：schema 4 不含它的允許值或欄位，A2 以另一次遷移加入（`ADD COLUMN grant_jti … REFERENCES grants`、放寬 CHECK，以及「方法與 grant 必須相符」的檢查），並在 A2 驗收。恢復查詢的鍵是 `request_id`（Signer 的 `GET /v1/attempts?request_id=`）；`signer_attempt_id` 只在有回覆後才有。Host 不保存授權的簽章本身：需要時再向 Signer 查。
 
 ## 7 D 本機驗收與正式付款依賴
 
@@ -374,14 +407,20 @@ payment_attempts(
 | R2 同 ID 不同內容 | 同一 `request_id` 改一欄 | 指紋 | `REQUEST_ID_CONFLICT` | 指紋比對 | 「conflicting request accepted」 |
 | R2 金鑰版本不符 | 快照的 `address` 與載入的金鑰不同 | 快照 | `KEY_VERSION_MISMATCH`，維持 `accepted` | 以地址選鑰 | 「signed with another key」 |
 | R2 過期後查回 | `signed` 之後 grant 已過期，`GET` | 已保存結果 | 回同一份授權，不重新簽 | 查詢不重驗期限 | 「saved result refused after expiry」 |
-| R3 grant 先到期 | 接受後中斷；重開時 grant 已過、`valid_before` 未過 | `auth_deadline` | `expired_unsigned`，沒有授權 | 恢復比 `auth_deadline` | 「signed after the authorization expired」 |
-| R3 付款窗先到期 | 同上，`valid_before` 已過 | 同上 | `expired_unsigned` | 同上 | 同上 |
-| R3 取消與簽署競爭 | hook 讓 abandon 落在簽章算出後、提交前 | 條件式更新 | abandon 成功，簽署回 `ATTEMPT_ABANDONED`，沒有授權離開 | `WHERE state='accepted'` | 「signature returned after abandon」 |
+| R3 grant 先到期（恢復） | 接受後中斷；重開時 grant 已過、`valid_before` 未過 | `auth_deadline` | `expired_unsigned`，沒有授權 | 最後判定的期限條件 | 「signed after the authorization expired」 |
+| R3-a 計算前有效、最後判定前到期 | hook 停在簽章算出後、最後判定交易前；把測試時鐘推到 `≥ auth_deadline` 再放行 | 寫入交易內取的 `now` | `expired_unsigned`，回 `ATTEMPT_EXPIRED`，沒有授權 | 最後判定的 `? < auth_deadline` | 拿掉期限條件 →「signed after the deadline」 |
+| R3-a 剛好在期限 | 最後判定時 `now == auth_deadline` | 同上 | 拒絕，`expired_unsigned` | 嚴格 `<` | 改成 `<=` →「signed at the deadline」 |
+| R3-a 未到期 | 最後判定時仍 `accepted` 且 `now < auth_deadline` | 同上 | `signed`，提交後回傳授權 | — | （正例） |
+| R3-a 保存後才到期 | 已 `signed`，之後過了 `auth_deadline` 再 `GET` 或重送 | 已保存結果 | 回同一份授權，不再簽，不改狀態 | 查詢不重驗期限（R2 規則） | 查詢改成重驗期限 →「saved result refused after expiry」 |
+| R3-b abandon 先成功 | hook 讓簽署持錢包鎖停在簽章算出後、最後判定前；此時呼叫 abandon | 條件式更新 | abandon 在有界時間內完成並回 `abandoned`；放行後簽署回 `ATTEMPT_ABANDONED`，沒有授權離開 | abandon 不取錢包鎖；最後判定的 `state='accepted'` | 拿掉最後判定的狀態條件 →「signature returned after abandon」；讓 abandon 取錢包鎖 →「abandon blocked by the signing lock」（測試以有界等待判定，不靠測試逾時） |
+| R3-b signed 先成功 | hook 停在最後判定提交後、回覆前；此時呼叫 abandon | 同上 | abandon 回 `ATTEMPT_NOT_ACCEPTED`，附 `state=signed`；簽署照常回傳 | abandon 的 `state='accepted'` | 拿掉 abandon 的狀態條件 →「abandon overwrote signed」 |
+| R3-b 期限已到時取消 | `accepted` 已過期，查詢先寫入 `expired_unsigned`，再 abandon | 同上 | abandon 回 `ATTEMPT_NOT_ACCEPTED`，附 `state=expired_unsigned`；累計用量為 0（由狀態推導，不重複釋放） | 同上 | 拿掉 abandon 的狀態條件 →「abandon after expiry」 |
 | R3 Host 本地撤回、grant 尚有效 | Host 撤回會話但仍送出（模擬故障的 Host） | 無可驗證撤回 | **被接受**（照實記：取消保證依賴 Host）；曝險以 grant 期限為界 | 設計說明 | — |
-| R4 三類關係 | simulated、webauthn（合成）、delegation 各一組資料 | schema 4 的 CHECK 與復原檢查 | 合法的都能開啟 | DDL 與 `verifyPay` | 「valid relation refused」 |
-| R4 方法與來源不符 | `delegation` 列帶 `grant_jti`；`webauthn` 列沒有 grant；引用 simulated grant | 同上 | 復原檢查拒絕開啟 | CHECK 與 `verifyPayTables` | 「simulated grant referenced by a payment」 |
-| R4 舊 simulated 遷移 | schema 3 檔（含 simulated grant）升到 4 | 遷移與復原 | 資料不變；沒有 `payment_attempts`；遷移後仍不能付款 | `upgradeFrom` | 「migration changed simulated data」 |
-| R4 無會話的 policy 路徑 | 自動放行一筆 | 委託參照 | 沒有核准會話、沒有 grant，`payment_attempts` 帶 `delegation_ref` | 第 6.1 節 | 「session invented for a delegation payment」 |
+| R4 舊 simulated 遷移與恢復（P1-b 正例） | schema 3 檔（含 simulated grant）升到 4 | 遷移與復原檢查 | simulated 資料原樣保留、照常開啟；沒有 `payment_attempts` 引用它 | `upgradeFrom`、`verifyPay` | 「migration changed simulated data」 |
+| R4 常設委託路徑（P1-b 正例） | 自動放行一筆 | 委託參照 | 沒有核准會話、沒有 grant；`payment_attempts` 一列，方法 `delegation`、帶 `delegation_ref` | 第 6.1 節、schema 4 | 「session invented for a delegation payment」 |
+| R4 方法與關係不符（P1-b 反例） | 寫入方法不是 `delegation`、或 `delegation_ref` 為空、或請購不屬於 v1 task 的 `payment_attempts` | schema 4 的 CHECK 與 `verifyPay` | 寫入被 CHECK 拒絕；直接改檔的列由復原檢查拒絕開啟 | CHECK、`verifyPay` | 放寬 CHECK →「non-delegation payment attempt accepted」 |
+| R4 WebAuthn 尚未開放（P1-b 反例） | Host client 收到 `webauthn` 或 `simulated` 授權；或直接送給 Signer | Host client 的方法限制；Signer 的方法規則 | Host 拒絕、不寫入；Signer 回 `HUMAN_APPROVAL_UNAVAILABLE`／`GRANT_METHOD_NOT_ACCEPTED`；合成的 assertion 也不能繞過 schema 4 | Host client、Signer | 讓 Host client 接受 `webauthn` →「webauthn payment attempt written」 |
+| R4（A2，**未實作、未驗收**） | WebAuthn grant 的合法保存與復原、本人核准正例、`grant_jti` 引用的 grant 必須是 `webauthn` 且會話已 approved | A2 的遷移與檢查 | 在 A2 定義與執行 | A2 | — |
 
 另外沿用初版的群組：正例與 typed digest 凍結向量；綁定每欄改一次；預留（正式組裝回 `RESERVATION_UNAVAILABLE`）；介面（非 `callers` 的 uid、超大請求、逾時、沒有其他路由）；不外洩（log、錯誤與證據不含私鑰、密語、完整簽章、assertion 原文）；P1-a 不回歸（`go test ./internal/store/ ./internal/paycontract/ ./cmd/demo/ -run 'Pay|P1a'`、`node --test web/test/p1a.test.mjs`）；OS 隔離（**需系統設定核准後**，`scripts/verify/p1b-isolation.sh`）。估時合計約 20–30 分鐘。不預設：完整容器、全部突變、M1 產包、瀏覽器、Unity、任何鏈或網路。
 
@@ -405,5 +444,6 @@ payment_attempts(
 - **macOS 的對端 uid**：Codex 前輪已核對 Go 官方原始碼（[golang/sys unix/syscall_darwin.go](https://github.com/golang/sys/blob/master/unix/syscall_darwin.go)）提供 `GetsockoptXucred`，註解列出 `LOCAL_PEERCRED`。這是官方介面依據；macOS 上的部署與帳號隔離實測**尚未**執行。
 - 依賴版本：本版沒有改變推薦的依賴，所以沒有再查其他來源。
 - **歸屬**：
-  - Codex 前輪：Git、文件、原始碼與官方公開資料的唯讀核對；沒有跑測試、執行真實 CLI、簽署、改產品或驗證 OS 隔離，repo 裡沒有對應的測試 log。
-  - 本輪：Claude Code 的設計修訂與來源核對，待 Codex 限定複核；R1～R4 尚未驗收。
+  - Codex 對 `3314e7c`：Git、文件、原始碼與官方公開資料的唯讀核對；沒有跑測試、執行真實 CLI、簽署、改產品或驗證 OS 隔離，repo 裡沒有對應的測試 log。
+  - Codex 對 `19fe1f7`：限定安全設計複核，唯讀核對 Git、設計與相關原始碼，確認該提交只改四份文件；沒有執行測試、CLI、簽署或系統隔離驗證，沒有修改產品或設計文件；R1、R2 關閉（設計層面），R3、R4 為一致性缺口。
+  - 本輪：Claude Code 的文件修訂與來源核對（R3、R4），待 Codex 限定複核；R3、R4 尚未通過。
