@@ -12,21 +12,29 @@ SRC = "credential.go"
 ITEMS = [  # (name, test filter, expected regex, old, new)
     ("expiry", "^TestRefusals$/^expired$", r"expired: <nil>, want CREDENTIAL_EXPIRED", "\tif now >= exp {", "\tif false {"),
     ("holder binding", "^TestRefusals$/^holder_signature_by_another_key$", r"holder signature by another key: <nil>",
-     "!ed25519.Verify(holder, hp, p.HolderSig) {", "false && !ed25519.Verify(holder, hp, p.HolderSig) {"),
+     "\tif !ed25519.Verify(holder, hp, p.HolderSig) {", "\tif false && !ed25519.Verify(holder, hp, p.HolderSig) {"),
     ("nonce binds the intent", "^TestRefusals$/^other_intent$", r"other intent: <nil>",
-     '"agent-payment-authority/c1-spike/presentation/v0", r.VerifierID, r.Challenge, r.IntentHash}',
-     '"agent-payment-authority/c1-spike/presentation/v0", r.VerifierID, r.Challenge}'),
-    ("replay", "^TestReplay$", r"replay: <nil>", "\tif v.used[req.Challenge] {", "\tif false {"),
+     '"agent-payment-authority/c1-spike/presentation/v1", r.VerifierID, r.Challenge, r.IntentHash}',
+     '"agent-payment-authority/c1-spike/presentation/v1", r.VerifierID, r.Challenge}'),
+    ("replay", "^TestReplay$", r"replay: <nil>", "\tdelete(v.outstanding, req.Challenge)\n", "\n"),
     ("revocation", "^TestRefusals$/^revoked$", r"revoked: <nil>, want CREDENTIAL_REVOKED", '\tif v.Revoked[d["status"]] {', "\tif false {"),
-    ("exact disclosure", "^TestRefusals$/^extra_field_disclosed$", r"extra field disclosed: <nil>", "\tif !slices.Equal(got, want) {", "\tif false {"),
+    ("exact disclosure", "^TestRefusals$/^extra_field_disclosed$", r"extra field disclosed: <nil>", "\tif len(p.Disclosed) != len(idx) {", "\tif false {"),
     ("issuer id", "^TestRefusals$/^untrusted_issuer_id$", r"untrusted issuer id: <nil>", '\tif d["issuer"] != v.IssuerID {', "\tif false {"),
+    # Review must-fix: the proof's revealed set and message count are the request's.
+    ("revealed set bound to the request", "^TestRefusals$/^proof_reveals_a_subset;_forged_holder_and_status$", r"proof reveals a subset; forged holder and status: <nil>",
+     "err != nil || pl.MessagesCount != len(Fields) || !slices.Equal(pl.Revealed, idx) {",
+     "false && (err != nil || pl.MessagesCount != len(Fields) || !slices.Equal(pl.Revealed, idx)) {"),
+    ("mandatory fields", "^TestRefusals$/^mandatory_field_hidden$", r"mandatory field hidden: STATUS_INVALID, want FIELD_MISSING",
+     "\t\tif _, ok := p.Disclosed[f]; !ok {", "\t\tif _, ok := p.Disclosed[f]; false && !ok {"),
+    ("expiry format", "^TestRefusals$/^expiry_with_a_plus$", r"expiry with a plus: <nil>", '\tif !format["expiry"].MatchString(d["expiry"]) {', "\tif false {"),
+    ("status format", "^TestRefusals$/^status_with_a_leading_zero$", r"status with a leading zero: <nil>", '\tif !format["status"].MatchString(d["status"]) {', "\tif false {"),
 ]
 
 
 def main():
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
-    env = dict(os.environ, GOFLAGS="-mod=readonly", GOPROXY="off")
+    env = dict(os.environ, GOFLAGS="-mod=readonly", GOPROXY="off", GOCACHE=os.environ.get("GOCACHE") or os.path.join(tempfile.gettempdir(), "gocache"))
     caught = 0
     only = re.compile(sys.argv[2]) if len(sys.argv) > 2 else None
     items = [(n, it) for n, it in enumerate(ITEMS, 1) if not only or only.search(it[0])]
