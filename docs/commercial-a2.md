@@ -1,7 +1,7 @@
 # A2 本人核准產品接線：實作差異、驗證與限制
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-A2本人核准產品接線實作派工-f2bf224-20261013〉（Aaron 已批准「A2 開工」）。分支 `commercial-a2`，基準 `f2bf224`（工作區只有未追蹤的 `demo`；沒有適用的 AGENTS.md）。
-> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節），待第三次獨立上下文 review；實機登記與操作未驗收，付款未啟用。**
+> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節）；第三次 review 窄幅 not pass，A、B 已修正（第 9 節），待第四次獨立上下文 review；實機登記與操作未驗收，付款未啟用。**
 > 以下為 `f0817c7` 時的狀態，保留原文：A2 已實作並完成本輪定向自動化驗證，待 Codex 技術 review；實機登記與操作未驗收，付款未啟用。A2 不自行標 Done；本輪所有結果都是「Claude Code 執行，待 Codex 核對」，不是實機結果。
 >
 > **歸屬的變更**：Codex 訂閱已到期，從這一節起沒有第三方核對。Review 改由 Claude Code 另開的獨立上下文 subagent 執行：它們只拿到 diff、設計文件與本文件，沒有作者寫程式時的推理；這比作者自審接近獨立核對，但仍是同一個模型。紀錄一律寫「Claude Code 獨立上下文 review」，不寫成 Codex。
@@ -36,6 +36,7 @@
 | 8 | — | 委託確認仍是 P1-a 的模擬（「以 A 模擬」）；只有單筆核准是本人裝置 | A2 範圍只接單筆核准；頁首與卡片照實寫委託確認是模擬 |
 | 9 | 驗證器來源標示 | `--authenticator-source device｜virtual` 由主持人宣告 | 頁面與 Host 都分不出實機或 virtual；這只是標籤，不是證據 |
 | 10 | 合法重送 | 已 verified 的 attempt 以同一 verify request ID 重送時，Host 先向 Signer 查回同一筆，再走 Store 的重送路徑 | 不重新驗證、不比計數器（第 4.4 節第 5 點） |
+| 11 | 第 8 節面板列「已過期（後端時間為準）；沒有核准。」 | A2 面板的 expired、withdrawn、superseded 標題不寫「沒有核准」或「核准作廢」，結果由面板訊息說明（第 8、9 節，review N-b、C） | 嘗試的結果可能未知；設計第 7、8 節規定未知不寫成「未核准」，標題與訊息不得互相矛盾 |
 
 另外：
 - `serve-approvals` 不讀 `keys/`、不問密語、不開 `signer.db`，付款與 attempts 路由一律回 409 `PAYMENT_MODE_OFF`。
@@ -312,7 +313,7 @@ R1～R6 的修正另開一輪：修正、只重跑受影響的部分、再交一
 - **Signer note 2**：`refuse()` 標 `suspect` 前不重讀 challenge 狀態。需要持鑰者簽章、BE 卻改變的 assertion；依 D6 這本身就可疑，R2 仍成立。
 - **Signer note 3**：同一把 credential 兩個 challenge 並行、亂序 verify，會觸發計數器政策。這是 D6 已接受的影響，已列在第 4 節。
 - **N-c**：`ApprovalAttemptOf` 唯讀、不記錄到期，所以期限已過但尚未記錄時，assertion 仍會送到 Signer。之所以正確，是因為 Signer 的 challenge 期限不超過 HostDeadline，且 Signer 的時鐘不落後 Host。
-- **N-e**：本節起，證據檔開頭都寫明命令。
+- **N-e**：本節起，`go test`、`node --test` 與反向的證據檔都寫明命令；瀏覽器的 log 只記 commit 與驗證器，命令見本文件（第三次 review 指出原句誇大，第 9 節起另存 `browser-runs.txt` 含命令）。
 - 第 7 節列的其他 note 不變。
 
 ### 8.3 重跑（`0cea87f`；本機、未在容器）
@@ -326,3 +327,34 @@ R1～R6 的修正另開一輪：修正、只重跑受影響的部分、再交一
 | 瀏覽器 p1a-ui（P1-a 面板改用 `decidedText`） | 54 PASS、0 FAIL | `artifacts/p1a/p1a-ui-0cea87f4c951-20261013T122029Z/` |
 
 下一步：第三次獨立上下文 review，只看第二輪修正的差異。之後才討論實機與部署。
+
+## 9 第三次獨立上下文 review 與第三輪修正（10/13；Claude Code，都不是實機結果）
+
+第三次 review 由一個 subagent 執行，只審 `321c87f..4662ae3`。判定 **not pass（窄）**：
+- S1、S2 已關閉；`APPROVER_CHANGED` 的兩半各自獨立；Signer 端與反向項目沒有問題。
+- 剩兩項 should-fix：
+  - **A**：已決定紀錄的標籤與來源列仍依面板。例如舊資料庫的模擬核准在 A2 面板顯示「本人核准・驗證器：已登記的裝置」。
+  - **B**：會話到期、結果未知，且 Signer 仍連不上時，恢復輪詢的「結果確認中」蓋過設計第 7 節的終點文字。
+- note：
+  - **C**：withdrawn／superseded 標題仍有「沒有核准」「核准作廢」；註解誤寫 N9。
+  - **D**：outcome closed 寫「在驗證完成前」，但 S2 的情境裡 Signer 其實驗證過。
+  - **E**：N-e 誇大，見第 8.2 節更正。
+
+第三輪修正（`13dbc03`）：
+- **A**：用 `recordTag` 讓與面板方式不同的紀錄顯示自己的標籤與來源列；A2 面板上的模擬紀錄不提裝置。
+- **B**：用 `panelNote`，會話不是 pending 時，存下的 attempt 文字優先於上一次操作的訊息。
+- **C**：A2 面板的標題改寫，列為第 2 節差異 #11。
+- **D**：改為「這筆已關閉（過期、取消或報價改變），裝置的驗證沒有被採用；不會付款。」
+- 測試：`approve.test.mjs` 新增一項（A、B）。
+
+重跑（`13dbc03`；只改了 web，沒有改 Go）：
+
+| 重跑 | 結果 | 證據 |
+|---|---|---|
+| web 測試 5 檔 | 全部 pass（29、9、27、9、13） | `artifacts/human-approval/fix-13dbc03/node-tests.txt` |
+| 瀏覽器 a2-ui（CDP virtual，不是實機） | 36 PASS、0 FAIL | `artifacts/human-approval/a2-ui-13dbc03e5c4e-20261013T123052Z/`；命令與輸出在 `fix-13dbc03/browser-runs.txt` |
+| 瀏覽器 p1a-ui | 54 PASS、0 FAIL | `artifacts/p1a/p1a-ui-13dbc03e5c4e-20261013T123143Z/`；同上 |
+
+沒有 W 或 B 層測試在畫面上直接呈現 B 的情境（Signer 斷線且會話到期）；B 只在 `panelNote` 的單元測試覆蓋。
+
+下一步：第四次獨立上下文 review，只看 `4662ae3..` 本輪差異。
