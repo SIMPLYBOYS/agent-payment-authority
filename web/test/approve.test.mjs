@@ -141,3 +141,18 @@ test("a decided record's tag follows the record; a closed session's attempt text
   assert.equal(AP.panelNote({ kind: "warn", text: "x" }, ["idle", "y"], true).text, "x");
   assert.equal(AP.panelNote(null, null, false), null);
 });
+
+// Review S-B: on a closed session, an open attempt of any state has an end,
+// and a note written while it was pending ("仍在等你決定") does not stay.
+test("a closed session's open attempt has an end; a pending-time note does not survive", () => {
+  assert.deepEqual(AP.attemptText({ state: "challenged", challenge_id: "chl-1" }, "expired"), ["closed", "這筆已依後端期限關閉；這次驗證沒有完成。"]);
+  assert.deepEqual(AP.attemptText({ state: "requested" }, "withdrawn"), ["closed", "這筆已關閉（任務取消）；這次驗證沒有完成。"]);
+  assert.equal(AP.attemptText({ state: "unknown" }, "approved"), null);
+  assert.equal(AP.attemptText({ state: "closed" }, "expired"), null);
+  const idle = AP.outcomeText(200, { attempt: { state: "closed" } }, "approve");
+  assert.match(idle[1], /仍在等你決定/);
+  assert.equal(AP.panelNote({ kind: idle[0], text: idle[1] }, null, false), null);
+  assert.equal(AP.panelNote({ kind: "closed", text: "z" }, null, false).text, "z");
+  const stored = AP.attemptText({ state: "challenged", challenge_id: "chl-1" }, "expired");
+  assert.equal(AP.panelNote({ kind: "warn", text: "結果確認中，請不要重複操作。" }, stored, false).text, "這筆已依後端期限關閉；這次驗證沒有完成。");
+});

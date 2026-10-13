@@ -1155,11 +1155,11 @@ function renderA2() {
     for (const [k, val] of [["收款人", addr(p.pay_to) + " · 與報價相同（payTo）"], ["付款帳戶", "客人 " + short(item.consumer_id) + " 的測試錢包 " + addr(item.payer) + " · " + item.wallet_id],
       ["網路與資產", (NETWORK[p.chain_id] || p.chain_id) + " · test USDC（" + (p.asset_id || "?") + "），不是真錢"],
       ["委託範圍", d ? "預算 " + units(d.task_budget) + "；超過 " + units(d.allow_max) + " 一律要你核准" : "未取得"],
-      ["intent", (p.intent_hash || "").slice(0, 23) + "…（Signer 依完整請購重算比對）"]]) {
+      ["intent", (p.intent_hash || "").slice(0, 23) + (other ? "…（後端比對這一份）" : "…（Signer 依完整請購重算比對）")]]) { // review S-A: a simulated record never reached the Signer
       dl.append(el("dt", "", k), el("dd", "", val));
     }
     parts.push(dl);
-    parts.push(el("p", "approval-note", "瀏覽器的裝置提示只會顯示網站（localhost），不會顯示金額：請以這裡的摘要為準。這個頁面由 demo host 提供，不是獨立的可信顯示。"));
+    if (!other) parts.push(el("p", "approval-note", "瀏覽器的裝置提示只會顯示網站（localhost），不會顯示金額：請以這裡的摘要為準。這個頁面由 demo host 提供，不是獨立的可信顯示。"));
     const at = item.attempt;
     const stored = AP.attemptText(at, ap.state);
     if (pending) {
