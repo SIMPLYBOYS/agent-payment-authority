@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A1 WebAuthn spike</title>
+<style>
+  body { font: 15px/1.5 -apple-system, "PingFang TC", sans-serif; max-width: 760px; margin: 24px auto; padding: 0 16px; background: #fff; color: #111; }
+  .banner { background: #fff3cd; border: 1px solid #e0c060; padding: 8px 12px; border-radius: 6px; }
+  .warn { background: #fde2e1; border-color: #d88; }
+  button { display: block; margin: 10px 0 2px; padding: 8px 12px; font-size: 15px; }
+  .expect { color: #555; font-size: 13px; margin: 0 0 6px; }
+  pre { background: #f4f4f4; padding: 8px; white-space: pre-wrap; word-break: break-all; font-size: 12px; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; }
+  dt { color: #555; }
+</style>
+</head>
+<body>
+<p class="banner">A1 spike：<b>只供測試</b>。不付款、不簽交易、不連鏈、沒有真實 Agent。下面是一筆固定的合成請購。</p>
+<p id="origin-note" class="banner warn" hidden>這頁不是從 <code>http://localhost</code> 開的。這正是「錯 origin」測試：按「1 登記」，記下瀏覽器的反應。</p>
+
+<h3>合成請購</h3>
+<dl id="display"></dl>
+
+<button id="b-register">1 登記這個 authenticator</button>
+<p class="expect">預期：瀏覽器要求 Touch ID／手機／安全金鑰，並驗證本人（UV）；伺服器回 ok。</p>
+<button id="b-approve">2 核准（要求 UV）</button>
+<p class="expect">預期：再驗證一次本人；伺服器回 verified。</p>
+<button id="b-replay">3 重送第 2 步的同一份 assertion</button>
+<p class="expect">預期：CHALLENGE_USED（不需要再碰裝置）。</p>
+<button id="b-wrong">4 錯 challenge：簽會話 s1 的 challenge，送到會話 s2</button>
+<p class="expect">預期：驗證一次本人後，伺服器拒絕（ASSERTION_INVALID，challenge 不符）。</p>
+<button id="b-probe">5 不要求 UV 的探測（userVerification=discouraged）</button>
+<p class="expect">記錄裝置實際回的 UV 旗標；伺服器仍以「必須 UV」判定。</p>
+
+<h3>結果</h3>
+<pre id="log"></pre>
+
+<script>
+"use strict";
+const logEl = document.getElementById("log");
+const show = (label, v) => { logEl.textContent = label + "\n" + JSON.stringify(v, null, 2) + "\n\n" + logEl.textContent; };
+if (location.hostname !== "localhost") document.getElementById("origin-note").hidden = false;
+
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
+
+async function api(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  const v = await r.json();
+  if (!r.ok) throw Object.assign(new Error(v.code), { server: v });
+  return v;
+}
+// A browser-side refusal is recorded by the server as reported, not verified.
+async function report(step, e) {
+  show(step + "：瀏覽器端 " + e.name, { message: e.message });
+  try { await api("/api/report", { step, name: e.name, message: e.message }); } catch (_) {}
+}
+function creationOptions(o) {
+  const p = o.publicKey;
+  p.challenge = unb64u(p.challenge);
+  p.user.id = unb64u(p.user.id);
+  (p.excludeCredentials || []).forEach((c) => { c.id = unb64u(c.id); });
+  return p;
+}
+function requestOptions(o) {
+  const p = o.publicKey;
+  p.challenge = unb64u(p.challenge);
+  (p.allowCredentials || []).forEach((c) => { c.id = unb64u(c.id); });
+  return p;
+}
+function credJSON(c) {
+  const r = c.response, out = { id: c.id, rawId: b64u(c.rawId), type: c.type, authenticatorAttachment: c.authenticatorAttachment || undefined,
+    clientExtensionResults: c.getClientExtensionResults(), response: { clientDataJSON: b64u(r.clientDataJSON) } };
+  if (r.attestationObject) {
+    out.response.attestationObject = b64u(r.attestationObject);
+    out.response.transports = r.getTransports ? r.getTransports() : [];
+  } else {
+    out.response.authenticatorData = b64u(r.authenticatorData);
+    out.response.signature = b64u(r.signature);
+    if (r.userHandle) out.response.userHandle = b64u(r.userHandle);
+  }
+  return out;
+}
+// step: runs fn and shows the server outcome; a thrown browser error is reported.
+function step(name, fn) {
+  return async () => {
+    try { show(name + "：伺服器結果", await fn()); }
+    catch (e) { if (e.server) show(name + "：伺服器拒絕", e.server); else await report(name, e); }
+  };
+}
+async function sign(session, uv) {
+  const b = await api("/api/approve/begin", { session, uv });
+  const c = await navigator.credentials.get({ publicKey: requestOptions(b.options) });
+  return { begin: b, credential: credJSON(c) };
+}
+
+let last = null;
+document.getElementById("b-register").onclick = step("register", async () => {
+  if (!window.PublicKeyCredential) throw Object.assign(new Error("PublicKeyCredential is not available"), { name: "Unsupported" });
+  const o = await api("/api/register/begin");
+  const c = await navigator.credentials.create({ publicKey: creationOptions(o) });
+  return api("/api/register/finish", credJSON(c));
+});
+document.getElementById("b-approve").onclick = step("approve", async () => {
+  const s = await sign("s1", "required");
+  last = { challenge_id: s.begin.challenge_id, credential: s.credential };
+  return api("/api/approve/finish", { ...last, step: "approve" });
+});
+document.getElementById("b-replay").onclick = step("replay", async () => {
+  if (!last) throw Object.assign(new Error("run step 2 first"), { name: "NotReady" });
+  return api("/api/approve/finish", { ...last, step: "replay" });
+});
+document.getElementById("b-wrong").onclick = step("wrong-challenge", async () => {
+  const s1 = await sign("s1", "required");
+  const s2 = await api("/api/approve/begin", { session: "s2", uv: "required" });
+  return api("/api/approve/finish", { challenge_id: s2.challenge_id, credential: s1.credential, step: "wrong-challenge" });
+});
+document.getElementById("b-probe").onclick = step("uv-discouraged", async () => {
+  const s = await sign("s1", "discouraged");
+  return api("/api/approve/finish", { challenge_id: s.begin.challenge_id, credential: s.credential, step: "uv-discouraged" });
+});
+
+// The synthetic purchase and its intent_hash, as the server binds them.
+api("/api/display").then((v) => {
+  const dl = document.getElementById("display");
+  for (const [k, x] of Object.entries({ ...v.display, intent_hash: v.intent_hash })) {
+    const dt = document.createElement("dt"), dd = document.createElement("dd");
+    dt.textContent = k; dd.textContent = x; dl.append(dt, dd);
+  }
+}, (e) => show("display", e.server || { message: e.message }));
+</script>
+</body>
+</html>
