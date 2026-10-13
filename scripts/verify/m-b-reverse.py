@@ -47,6 +47,8 @@ PP = "internal/paypolicy/paypolicy.go"
 PV = "internal/paycontract/version.go"
 CR = "internal/credential/credential.go"
 CD = "internal/credential/dir.go"
+SCR = "internal/store/credential.go"
+SOP = "internal/store/ops.go"
 
 
 def node(path, test, regex):
@@ -380,6 +382,22 @@ ITEMS = [
      [(PE, 'case deny && (d.PolicyVerdict != "Deny" || d.Reason != want):', 'case false && deny && (d.PolicyVerdict != "Deny" || d.Reason != want):')]),
     ("C2b: a v2 decision needs its verification first", go("./internal/paycontract/", "^TestCredentialVerifiedOrder$", ("TestCredentialVerifiedOrder", r"no verification: <nil>")),
      [(PE, '\t\t\tcase r == "":', '\t\t\tcase false && r == "":')]),
+    ("C2b: a v2 task never takes the fixture credential", go("./internal/store/", "^TestStartV2Refuses$", ("TestStartV2Refuses/a_fixture_credential", r"a fixture credential: <nil>")),
+     [(SOP, "if v2 || c.ConsumerID != task.ConsumerID", "if c.ConsumerID != task.ConsumerID")]),
+    ("C2b: SubmitV2 uses the Store's challenge, not the presentation's", go("./internal/store/", "^TestSubmitV2Denies$", ("TestSubmitV2Denies/a_presentation_for_another_challenge", r"verification invalid/PRESENTATION_FORMAT")),
+     [(SCR, "case pr.Presentation.ChallengeID != ch.ID:", "case false && pr.Presentation.ChallengeID != ch.ID:")]),
+    ("C2b: an expired challenge decides nothing valid", go("./internal/store/", "^TestSubmitV2Denies$", ("TestSubmitV2Denies/challenge_expired", r"challenge expired: \{.*PolicyVerdict:Allow")),
+     [(SCR, "case t.now >= ch.ExpiresAt:", "case false && t.now >= ch.ExpiresAt:")]),
+    ("C2b: an older status list than one seen is not used", go("./internal/store/", "^TestSubmitV2StatusRollback$", ("TestSubmitV2StatusRollback", r"rolled back: \{")),
+     [(SCR, "case list.ListVersion < max || list.ListVersion == max && sum != seen:", "case false && (list.ListVersion < max || list.ListVersion == max && sum != seen):")]),
+    ("C2b: recovery holds a record to its event", go("./internal/store/", "^TestV2CredentialRecovery$", ("TestV2CredentialRecovery/a_record's_result", r"Open: <nil>")),
+     [(SCR, "case !ok || e != c:", "case !ok:")]),
+    ("C2b: a simulated approval rechecks the credential", go("./internal/store/", "^TestV2ApprovalRecheck$", ("TestV2ApprovalRecheck/revoked", r"revoked: \{Outcome:approved")),
+     [(SPY, '} else if reason != "" { // design 7.1: withdrawn, no grant', '} else if false && reason != "" { // design 7.1: withdrawn, no grant')]),
+    ("C2b: a webauthn approval rechecks the credential", go("./internal/store/", "^TestV2WebAuthnRecheck$", ("TestV2WebAuthnRecheck", r"\{Outcome:approved")),
+     [(STA, 'if reason != "" { // design 7.1: withdrawn, no grant', 'if false && reason != "" { // design 7.1: withdrawn, no grant')]),
+    ("C2b: a payment rechecks the credential", go("./internal/store/", "^TestV2PaymentRecheck$", ("TestV2PaymentRecheck", r"revoked: <nil>")),
+     [(PM, '} else if reason != "" {', '} else if false && reason != "" {')]),
     ("C2b: a v2 credential denies before the rules", go("./internal/paypolicy/", "^TestV2CredentialStep$", ("TestV2CredentialStep", r"revoked: \{")),
      [(PP, 'case credentialDeny != "":', 'case false && credentialDeny != "":')]),
     # D4 of the OS isolation plan (keygen); run them alone with "^P1b-D4:".
