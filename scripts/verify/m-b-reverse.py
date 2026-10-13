@@ -296,7 +296,9 @@ ITEMS = [
      [(SA, "\tvar s webauthn.SessionData\n", "\tif stored.Flags.BackupEligible != parsed.Response.AuthenticatorData.Flags.HasBackupEligible() {\n\t\treturn \"ASSERTION_INVALID_FLAGS:suspect\", stored, nil\n\t}\n\tvar s webauthn.SessionData\n")]),
     ("A2: Store: a simulated grant is never raised to webauthn", go("./internal/store/", "^TestApprovalSchemaChecks$", ("TestApprovalSchemaChecks", r"a simulated grant became webauthn")),
      [(STA, "  CHECK ((authorization_method = 'webauthn') = (signer_approval_id IS NOT NULL))", "  CHECK (1)")]),
-    ("A2: R1 the routes keep a viewer to its consumer", go("./cmd/demo/", "^TestA2Permissions$", ("TestA2Permissions", r"B's viewer: ")),
+    # Review N14: without the Store's ownership check the Signer's consumer
+    # check still refuses (SIGNER_MISMATCH, 502); the regex names that status.
+    ("A2: R1 the routes keep a viewer to its consumer", go("./cmd/demo/", "^TestA2Permissions$", ("TestA2Permissions", r"B's viewer: 502, want 404")),
      [(STA, "err == nil && ss.ConsumerID != consumer {", "err == nil && false {")]),
     ("A2: R1 a viewer token cannot replace the assertion", go("./cmd/demo/", "^TestA2Permissions$", ("TestA2Permissions", r"forged: 200")),
      [(HA, "return h.onVerify(consumer, st, h.signer.Verify(signer.VerifyRequest{VerifyRequestID: verifyID, ChallengeID: b.ChallengeID, Order: st.Order, Assertion: assertion}))",
