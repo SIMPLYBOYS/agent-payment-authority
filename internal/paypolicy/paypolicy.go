@@ -31,7 +31,7 @@ type Input struct {
 // when there is nothing to decide (another contract's task, an invalid or
 // foreign purchase, an ended task, contradictory trusted inputs).
 func Decide(reg *contracts.Registry, in Input) (contracts.PolicyDecision, error) {
-	if in.ContractVersion != paycontract.Version {
+	if in.ContractVersion != paycontract.Version || in.Purchase.Version != in.ContractVersion {
 		return contracts.PolicyDecision{}, &paycontract.Error{Code: "CONTRACT_VERSION_MISMATCH", Detail: "the task is not an apa.pay.v1 task"}
 	}
 	if err := paycontract.ValidatePurchase(reg, in.Session, in.Purchase); err != nil {

@@ -316,6 +316,8 @@ func TestPayRecoveryRefuses(t *testing.T) {
 		{"a session with another intent", `UPDATE approval_sessions SET intent_hash = 'sha256:` + fmt.Sprintf("%064x", 5) + `'`},
 		{"no grant for an approval", `DELETE FROM grants`},
 		{"a session moved to an M1 task", `UPDATE tasks SET contract_version = 'apa.m1.v2'`},
+		// C2a review should-fix 3: a v1 delegation's body flipped to v2 still validates as a pay-family delegation.
+		{"a delegation body flipped to apa.pay.v2", `UPDATE delegations SET body = replace(body, '"version":"apa.pay.v1"', '"version":"apa.pay.v2"')`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)

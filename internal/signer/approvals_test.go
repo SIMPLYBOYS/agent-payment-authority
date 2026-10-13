@@ -707,6 +707,11 @@ func TestV2OrderChallenge(t *testing.T) {
 	if c.IntentHash != want {
 		t.Fatalf("intent %s, want the v2 intent %s", c.IntentHash, want)
 	}
+	// The stored jti is v2's (review should-fix 2), not v1's for the same session.
+	var jti string
+	if err := f.core.db.QueryRow(`SELECT jti FROM approval_challenges WHERE challenge_id = ?`, c.ChallengeID).Scan(&jti); err != nil || jti != sp.GrantID(session) || jti == paycontract.GrantID(session) {
+		t.Fatalf("stored jti %q (%v), want v2's %q", jti, err, sp.GrantID(session))
+	}
 	r, err := f.verify("ver-v2", c.ChallengeID, order, a.Get(c.Options, origin))
 	if err != nil || r.State != "verified" {
 		t.Fatalf("v2 verify: %+v %v", r, err)

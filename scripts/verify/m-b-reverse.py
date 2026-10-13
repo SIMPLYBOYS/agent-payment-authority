@@ -42,6 +42,8 @@ STA = "internal/store/approvals.go"
 HA = "cmd/demo/approvals.go"
 PC = "internal/paycontract/paycontract.go"
 PE = "internal/paycontract/events.go"
+SPY = "internal/store/pay.go"
+PP = "internal/paypolicy/paypolicy.go"
 
 
 def node(path, test, regex):
@@ -338,6 +340,21 @@ ITEMS = [
      [(PC, "slices.Contains(sp.deny, d.Reason)", "slices.Contains(append(slices.Clone(sp.deny), specs[V2].deny...), d.Reason)")]),
     ("C2a: the Signer derives the session by the order's version", go("./internal/signer/", "^TestV2OrderChallenge$", ("TestV2OrderChallenge", r"v1 session ID for a v2 order: <nil>")),
      [(SA, "if r.ApprovalSessionID != sp.SessionID(i.TaskID, i.PurchaseOrderID) {", "if r.ApprovalSessionID != paycontract.SessionID(i.TaskID, i.PurchaseOrderID) && r.ApprovalSessionID != sp.SessionID(i.TaskID, i.PurchaseOrderID) {")]),
+    # C2a review should-fixes.
+    ("C2a: an event's order is of the event's version", go("./internal/paycontract/", "^TestEventCrossVersion$", ("TestEventCrossVersion", r"a v1 event took a v2 order")),
+     [(PE, "order.Version != e.Version || ", "")]),
+    ("C2a: an event's decision is of the event's version", go("./internal/paycontract/", "^TestEventCrossVersion$", ("TestEventCrossVersion", r"a v1 event took a v2 decision")),
+     [(PE, "d.Version != e.Version || ", "")]),
+    ("C2a: a grant event's ID is its version's", go("./internal/paycontract/", "^TestEventCrossVersion$", ("TestEventCrossVersion", r"a v2 grant event took v1's grant ID")),
+     [(PE, "if p.GrantID != sp.GrantID(p.ApprovalSessionID) {", "if p.GrantID != GrantID(p.ApprovalSessionID) {")]),
+    ("C2a: the Signer derives the jti by the order's version", go("./internal/signer/", "^TestV2OrderChallenge$", ("TestV2OrderChallenge", r"stored jti")),
+     [(SA, "JTI: sp.GrantID(r.ApprovalSessionID),", "JTI: paycontract.GrantID(r.ApprovalSessionID),")]),
+    ("C2a: a stored v1 delegation stays v1", go("./internal/store/", "^TestPayRecoveryRefuses$", ("TestPayRecoveryRefuses/a_delegation_body_flipped_to_apa.pay.v2", r"Open: <nil>")),
+     [(SPY, "d.Version != paycontract.Version || d.Validate()", "d.Validate()")]),
+    ("C2a: a purchase is decided only in a task of its version", go("./internal/paypolicy/", "^TestSameFieldsBothEntries$", ("TestSameFieldsBothEntries", r"a v2 purchase in a v1 task: <nil>")),
+     [(PP, "in.ContractVersion != paycontract.Version || in.Purchase.Version != in.ContractVersion {", "in.ContractVersion != paycontract.Version {")]),
+    ("C2a: one request ID never names orders of two versions", go("./internal/paycontract/", "^TestCompareRetryAcrossVersions$", ("TestCompareRetryAcrossVersions", r"v1 and v2 orders of one request: <nil>")),
+     [(PC, "if existing.Version != incoming.Version {", "if false {")]),
     # D4 of the OS isolation plan (keygen); run them alone with "^P1b-D4:".
     ("P1b-D4: keygen never replaces a key file", go("./cmd/apa-signer/", "^TestKeygen$", ("TestKeygen", r"an existing key file was replaced")),
      [(AS, "if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {", "if _, err := os.Lstat(path); false && !errors.Is(err, os.ErrNotExist) {"),

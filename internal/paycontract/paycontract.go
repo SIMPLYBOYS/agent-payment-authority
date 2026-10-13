@@ -240,6 +240,9 @@ func (p PurchaseOrder) RetryKey() (string, error) {
 // same canonical order, "new" for an unrelated one, IDEMPOTENCY_CONFLICT
 // for a reused request ID, purchase_order_id or payer nonce.
 func CompareRetry(existing, incoming PurchaseOrder) (string, error) {
+	if existing.Version != incoming.Version { // a task's orders are of one version; retry keys of two never meet
+		return "", coded("IDEMPOTENCY_CONFLICT", "orders of two contract versions")
+	}
 	a, err := existing.RetryKey()
 	if err != nil {
 		return "", err

@@ -88,4 +88,16 @@ func TestSameFieldsBothEntries(t *testing.T) {
 	if _, err := Decide(reg, Input{Session: sess, Purchase: v1Of(t, m), ContractVersion: contracts.Version, TaskStatus: "running", Profile: &prof, Credential: &cred, Budget: in.Budget, Now: in.Now}); paycontract.Code(err) != "CONTRACT_VERSION_MISMATCH" {
 		t.Errorf("an M1 task through the v1 entry: %v", err)
 	}
+	// C2a review should-fix 3: a v2 purchase in a v1 task is not decided.
+	v2 := v1Of(t, m)
+	sp, _ := paycontract.SpecOf(paycontract.V2)
+	v2.Version, v2.Intent.Version, v2.Intent.Domain = paycontract.V2, paycontract.V2, paycontract.DomainV2
+	v2.Intent.ResourceHash, _ = sp.ResourceHash(v2.Intent.HTTPMethod, v2.Intent.ResourceURL)
+	v2.Intent.PaymentRequirementHash, _ = sp.RequirementHash(v2.Quote)
+	if err := v2.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Decide(reg, Input{Session: sess, Purchase: v2, ContractVersion: paycontract.Version, TaskStatus: "running", Profile: &prof, Credential: &cred, Budget: in.Budget, Now: in.Now}); paycontract.Code(err) != "CONTRACT_VERSION_MISMATCH" {
+		t.Errorf("a v2 purchase in a v1 task: %v", err)
+	}
 }

@@ -736,7 +736,7 @@ func verifyPayTables(tx *sql.Tx) error {
 		}
 		var d paycontract.Delegation
 		c, cerr := contracts.Canonical([]byte(body))
-		if cerr != nil || string(c) != body || contracts.Decode(c, &d) != nil || d.Validate() != nil || d.DelegationID != id || id != paycontract.DelegationID(req) ||
+		if cerr != nil || string(c) != body || contracts.Decode(c, &d) != nil || d.Version != paycontract.Version || d.Validate() != nil || d.DelegationID != id || id != paycontract.DelegationID(req) ||
 			d.ConsumerID != consumer || d.ConfirmedAt != confirmed || d.ExpiresAt != expires {
 			return bad("delegation %s: body and columns disagree", id)
 		}
