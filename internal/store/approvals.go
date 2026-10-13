@@ -402,6 +402,17 @@ func (s *Store) ResolveWebAuthn(r WebAuthnResult) (ApprovalResult, error) {
 		case min(r.ExpiresAt, p.V1.PaymentBinding.ValidBefore) <= now:
 			out.Outcome = "closed" // the Signer's approval has already expired: nothing to record
 		default:
+			reason, err := s.recheck(t)
+			if err != nil {
+				return err
+			}
+			if reason != "" { // design 7.1: withdrawn, no grant; the Host abandons the Signer's approval on closed
+				if err := t.close(p, "APPROVAL_WITHDRAWN", "withdrawn", reason, nil); err != nil {
+					return err
+				}
+				out.Outcome = "closed"
+				break
+			}
 			if err := t.close(p, "APPROVED", "approved", "WEBAUTHN_APPROVAL", by); err != nil {
 				return err
 			}

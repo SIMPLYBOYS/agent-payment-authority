@@ -547,6 +547,13 @@ func (s *Store) ResolveApproval(req ApprovalRequest) (ApprovalResult, error) {
 				return err
 			}
 			out.Outcome = "denied"
+		} else if reason, err := s.recheck(t); err != nil {
+			return err
+		} else if reason != "" { // design 7.1: withdrawn, no grant
+			if err := t.close(p, "APPROVAL_WITHDRAWN", "withdrawn", reason, nil); err != nil {
+				return err
+			}
+			out.Outcome = "closed"
 		} else {
 			if err := t.close(p, "APPROVED", "approved", "SIMULATED_APPROVAL", &resolver{req.RequestID, req.Approver, "simulated", ""}); err != nil {
 				return err

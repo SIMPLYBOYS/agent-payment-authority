@@ -114,6 +114,13 @@ func (s *Store) BeginPayment(req PaymentRequest) (PaymentAttempt, bool, error) {
 		case p.Decision.PolicyVerdict != "Allow":
 			return refuse("PAYMENT_NOT_ALLOWED", "only a purchase the policy allowed is paid under a delegation")
 		}
+		// Design 7.1: the credential again, before anything reaches the
+		// Signer; a refusal writes nothing (the status versions seen too).
+		if reason, err := s.recheck(t); err != nil {
+			return err
+		} else if reason != "" {
+			return refuse(reason, "the task's credential no longer holds")
+		}
 		a, _, err := scanPayment(tx.QueryRow(paymentWhere(`a.task_id = ? AND a.purchase_order_id = ?`), req.TaskID, req.PurchaseOrderID))
 		if err == nil {
 			if a.Method != req.Method || a.DelegationRef != req.DelegationRef {

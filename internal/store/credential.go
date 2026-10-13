@@ -431,3 +431,30 @@ func verifyCredentialTables(tx *sql.Tx) error {
 	}
 	return nil
 }
+
+// recheck is design 7.1's check of an apa.pay.v2 task's credential when an
+// approval lands or a payment starts: the status list read now, then
+// revocation, then expiry, in verification's order. It returns the
+// credential reason that stops it, or "". An absent credential never
+// reaches it (its purchases are denied).
+func (s *Store) recheck(t *taskTx) (string, error) {
+	if t.row.ContractVersion != paycontract.V2 {
+		return "", nil
+	}
+	b, err := t.bbs()
+	if err != nil || b == nil {
+		return "", err
+	}
+	st, _, err := s.status(t, b)
+	switch {
+	case err != nil:
+		return "", err
+	case st.Err != nil:
+		return "CREDENTIAL_STATUS_UNAVAILABLE", nil
+	case slices.Contains(st.List.Revoked, b.Status):
+		return "CREDENTIAL_REVOKED", nil
+	case t.now >= b.Expiry:
+		return "AUTHORIZATION_EXPIRED", nil
+	}
+	return "", nil
+}

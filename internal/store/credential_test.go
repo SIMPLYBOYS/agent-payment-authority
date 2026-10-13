@@ -548,3 +548,118 @@ func TestV2CredentialRecovery(t *testing.T) {
 		})
 	}
 }
+
+// askV2 submits task-a's base purchase (an Ask) with its credential and
+// returns its session ID and intent.
+func (v *v2env) askV2(s *Store) (string, string) {
+	v.t.Helper()
+	r, err := v.buy(s, sessA, v2Of(v.t, v.base))
+	if err != nil || r.Purchase.Approval == nil {
+		v.t.Fatalf("v2 Ask: %+v %v", r.Purchase, err)
+	}
+	return r.Purchase.Approval.SessionID, r.Purchase.IntentHash
+}
+
+// Design 7.1: an approval rechecks the credential (revoked, the list
+// unavailable, expired) and, if it no longer holds, withdraws the session
+// with that reason and issues no grant; a denial is not rechecked.
+func TestV2ApprovalRecheck(t *testing.T) {
+	revoke := func(t *testing.T, v *v2env) {
+		st, _ := v.dir.ReadCredential("task-a")
+		if err := v.dir.Revoke(st.Credential["status"], t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, c := range map[string]struct {
+		ttl               uint64
+		mut               func(t *testing.T, v *v2env)
+		decision, outcome string
+		closure, reason   string
+	}{
+		"still valid":    {MaxCredentialTTL, func(*testing.T, *v2env) {}, "approve", "approved", "approved", "SIMULATED_APPROVAL"},
+		"revoked":        {MaxCredentialTTL, revoke, "approve", "closed", "withdrawn", "CREDENTIAL_REVOKED"},
+		"no status list": {MaxCredentialTTL, func(t *testing.T, v *v2env) { os.Remove(filepath.Join(v.credDir, "status.json")) }, "approve", "closed", "withdrawn", "CREDENTIAL_STATUS_UNAVAILABLE"},
+		"expired":        {20, func(t *testing.T, v *v2env) { v.clock.Add(20) }, "approve", "closed", "withdrawn", "AUTHORIZATION_EXPIRED"},
+		"a denial":       {MaxCredentialTTL, revoke, "deny", "denied", "denied", "APPROVER_DENIED"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			v := newV2(t)
+			v.ttl = c.ttl
+			s := v.started()
+			id, intent := v.askV2(s)
+			c.mut(t, v)
+			r, err := approve(s, id, intent, "approve-req-000000001", "consumer-a", c.decision)
+			if err != nil || r.Outcome != c.outcome || (r.Grant != nil) != (c.outcome == "approved") {
+				t.Fatalf("%s: %+v %v", name, r, err)
+			}
+			if r.Purchase.ApprovalClosed != c.closure || lastReason(t, s) != c.reason {
+				t.Fatalf("%s: closed %s, reason %s", name, r.Purchase.ApprovalClosed, lastReason(t, s))
+			}
+			s.Close()
+			v.open()
+		})
+	}
+}
+
+// The webauthn path closes the same way: outcome closed, so the Host
+// abandons the Signer's approval (design 7.1).
+func TestV2WebAuthnRecheck(t *testing.T) {
+	v := newV2(t)
+	s := v.started()
+	id, intent := v.askV2(s)
+	begin(t, s, "consumer-a", id, "att-req-00000001", "approve")
+	for _, u := range []AttemptUpdate{{From: []string{"requested"}, State: "challenged", ChallengeID: "chl-1"}, {From: []string{"challenged"}, State: "verifying", VerifyRequestID: "ver-1"}} {
+		u.ConsumerID, u.RequestID = "consumer-a", "att-req-00000001"
+		if _, err := s.UpdateApprovalAttempt(u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, _ := v.dir.ReadCredential("task-a")
+	if err := v.dir.Revoke(st.Credential["status"], t0); err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.ResolveWebAuthn(wa("consumer-a", "att-req-00000001", "approve", "hap-1", intent))
+	if err != nil || r.Outcome != "closed" || r.Grant != nil || r.Purchase.ApprovalClosed != "withdrawn" || lastReason(t, s) != "CREDENTIAL_REVOKED" {
+		t.Fatalf("%+v %v", r, err)
+	}
+	s.Close()
+	v.open()
+}
+
+// A payment starts only while the credential holds; a refusal writes
+// nothing (design 7.1).
+func TestV2PaymentRecheck(t *testing.T) {
+	v := newV2(t)
+	s := v.started()
+	o := v2Of(t, v.allow)
+	if r, err := v.buy(s, sessA, o); err != nil || r.Purchase.Decision.PolicyVerdict != "Allow" {
+		t.Fatalf("%+v %v", r.Purchase.Decision, err)
+	}
+	st, _ := v.dir.ReadCredential("task-a")
+	if err := v.dir.Revoke(st.Credential["status"], t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.BeginPayment(payReq(o.Intent.PurchaseOrderID)); Code(err) != "CREDENTIAL_REVOKED" {
+		t.Fatalf("revoked: %v", err)
+	}
+	var n int
+	rawDB(t, v.path).QueryRow(`SELECT count(*) FROM payment_attempts`).Scan(&n)
+	if n != 0 {
+		t.Fatal("a refused payment was recorded")
+	}
+}
+
+// lastReason is the reason of task-a's last event that closed an Ask.
+func lastReason(t *testing.T, s *Store) string {
+	t.Helper()
+	events, err := s.Events(sessA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		if d := events[i].Payload.Decision; d != nil && events[i].EventType != "POLICY_DECIDED" {
+			return d.Reason
+		}
+	}
+	return ""
+}
