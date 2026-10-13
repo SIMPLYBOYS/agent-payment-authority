@@ -341,6 +341,12 @@ func (s *Store) verify(version int) error {
 		if why := t.verifyPay(); why != "" {
 			return bad("approval", id, "%s", why)
 		}
+
+		// 10. apa.pay.v2: the credential records match the events, the
+		// snapshot and the challenges (design 3.3).
+		if why := t.verifyCredentials(); why != "" {
+			return bad("credential", id, "%s", why)
+		}
 	}
 	if version >= 3 {
 		if err := verifyPayTables(tx); err != nil {
@@ -354,6 +360,11 @@ func (s *Store) verify(version int) error {
 	}
 	if version >= 5 {
 		if err := verifyApprovals(tx); err != nil {
+			return err
+		}
+	}
+	if version >= 6 {
+		if err := verifyCredentialTables(tx); err != nil {
 			return err
 		}
 	}

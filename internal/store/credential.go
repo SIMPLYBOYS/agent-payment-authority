@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"slices"
 	"strconv"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
@@ -332,4 +333,101 @@ func (t *taskTx) recordVerification(poID string, c contracts.CredentialCheck) er
 		t.row.TaskID, poID, chl, c.Result, c.Detail, c.Issuer, c.Holder, c.StatusIndex, c.Expiry,
 		c.StatusListVersion, c.StatusListIssuedAt, c.StatusListSHA256, c.ProofSHA256, c.Verifier, t.now)
 	return err
+}
+
+// intentExempt are the details whose record names a challenge of another
+// intent, or none was compared (design 3.3).
+var intentExempt = []string{"INTENT_MISMATCH", "CHALLENGE_EXPIRED", "CHALLENGE_MISMATCH"}
+
+// verifyCredentials is design 3.3's cross-check of an apa.pay.v2 task:
+// each record equals its CREDENTIAL_VERIFIED event, was made at its
+// decision's time, agrees with the task's snapshot (absent exactly when
+// the task has none), and names a used challenge of its own purchase (of
+// its intent, but for the exempt details). It returns why not, or "".
+func (t *taskTx) verifyCredentials() string {
+	if t.row.ContractVersion != paycontract.V2 {
+		return ""
+	}
+	b, err := t.bbs()
+	if err != nil {
+		return "credential snapshot: " + err.Error()
+	}
+	events := map[string]contracts.CredentialCheck{}
+	for _, e := range t.events {
+		if e.EventType == "CREDENTIAL_VERIFIED" {
+			events[e.Scope.PurchaseOrderID] = *e.Payload.Credential
+		}
+	}
+	rows, err := t.tx.Query(`SELECT purchase_order_id, coalesce(challenge_id, ''), result, detail, issuer, holder, status_index, expiry,
+		status_list_version, status_list_issued_at, status_list_sha256, proof_sha256, verifier, verified_at FROM credential_verifications WHERE task_id = ?`, t.row.TaskID)
+	if err != nil {
+		return "credential records: " + err.Error()
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var po string
+		var c contracts.CredentialCheck
+		var at uint64
+		if err := rows.Scan(&po, &c.ChallengeID, &c.Result, &c.Detail, &c.Issuer, &c.Holder, &c.StatusIndex, &c.Expiry,
+			&c.StatusListVersion, &c.StatusListIssuedAt, &c.StatusListSHA256, &c.ProofSHA256, &c.Verifier, &at); err != nil {
+			return "credential records: " + err.Error()
+		}
+		if c.Issuer != "" {
+			c.CredentialSchema = credential.Schema
+		}
+		e, ok := events[po]
+		p := t.purchases[po]
+		switch {
+		case !ok || e != c:
+			return "purchase " + po + ": the credential record is not its CREDENTIAL_VERIFIED event"
+		case p == nil || at != p.DecidedAt:
+			return "purchase " + po + ": the credential record is not of its decision's time"
+		case (b == nil) != (c.Result == credential.Absent):
+			return "purchase " + po + ": a credential is absent exactly when the task has none"
+		case c.Issuer != "" && (c.Issuer != b.Issuer || c.Holder != b.Holder || c.StatusIndex != b.Status || c.Expiry != b.Expiry):
+			return "purchase " + po + ": the credential record is not the task's snapshot"
+		}
+		if c.ChallengeID != "" {
+			var task, cpo, intent, state string
+			err := t.tx.QueryRow(`SELECT task_id, purchase_order_id, intent_hash, state FROM credential_challenges WHERE challenge_id = ?`, c.ChallengeID).
+				Scan(&task, &cpo, &intent, &state)
+			if err != nil || task != t.row.TaskID || cpo != po || state != "used" || intent != p.Decision.IntentHash && !slices.Contains(intentExempt, c.Detail) {
+				return "purchase " + po + ": the credential record's challenge is not a used one of this purchase and intent"
+			}
+		}
+		delete(events, po)
+	}
+	if err := rows.Err(); err != nil {
+		return "credential records: " + err.Error()
+	}
+	if len(events) > 0 {
+		return "CREDENTIAL_VERIFIED without a credential record"
+	}
+	return ""
+}
+
+// verifyCredentialTables is schema 6's whole-table check: challenges and
+// records belong to apa.pay.v2 tasks; a challenge is used exactly when a
+// record names it (an issued one left by a failed presentation is fine);
+// no record read a list version beyond the highest seen.
+func verifyCredentialTables(tx *sql.Tx) error {
+	for _, c := range []struct{ q, why string }{
+		{`SELECT count(*) FROM credential_challenges c LEFT JOIN tasks t USING (task_id) WHERE t.contract_version IS NOT 'apa.pay.v2'
+			OR (c.state = 'used') != EXISTS (SELECT 1 FROM credential_verifications v WHERE v.challenge_id = c.challenge_id)`,
+			"a challenge is not an apa.pay.v2 task's, or is used without a record (or the reverse)"},
+		{`SELECT count(*) FROM credential_verifications v LEFT JOIN tasks t USING (task_id) WHERE t.contract_version IS NOT 'apa.pay.v2'`,
+			"a credential record is not an apa.pay.v2 task's"},
+		{`SELECT count(*) FROM credential_verifications v LEFT JOIN credential_status_seen s USING (issuer)
+			WHERE v.status_list_version > 0 AND (s.issuer IS NULL OR v.status_list_version > s.max_list_version)`,
+			"a credential record read a status list newer than any seen"},
+	} {
+		var n int
+		if err := tx.QueryRow(c.q).Scan(&n); err != nil {
+			return readErr("credential", "", err)
+		}
+		if n > 0 {
+			return &CorruptError{Check: "credential", Detail: c.why}
+		}
+	}
+	return nil
 }

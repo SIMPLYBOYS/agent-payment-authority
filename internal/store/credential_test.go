@@ -503,3 +503,48 @@ func TestIssueChallenge(t *testing.T) {
 		t.Fatalf("an absent credential got a challenge: %v", err)
 	}
 }
+
+// Design 3.3: Open cross-checks the records, events, challenges and the
+// status versions seen; a challenge left issued by a failed presentation
+// is fine.
+func TestV2CredentialRecovery(t *testing.T) {
+	prepare := func(t *testing.T) *v2env {
+		v := newV2(t)
+		s := v.started()
+		if _, err := v.buy(s, sessA, v2Of(t, v.allow)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := v.buy(s, sessB, v2Of(t, forTask(t, v.allow, "task-b"))); err != nil {
+			t.Fatal(err)
+		}
+		body, _ := json.Marshal(v2Of(t, v.base))
+		if _, _, err := s.IssueChallenge(sessA, body); err != nil { // never presented
+			t.Fatal(err)
+		}
+		s.Close()
+		return v
+	}
+	v := prepare(t)
+	v.open()
+	for name, sql := range map[string]string{
+		"a record's result":                `UPDATE credential_verifications SET result = 'revoked' WHERE task_id = 'task-a'`,
+		"a record's time":                  `UPDATE credential_verifications SET verified_at = verified_at + 1 WHERE task_id = 'task-a'`,
+		"a record removed":                 `DELETE FROM credential_verifications WHERE task_id = 'task-a'`,
+		"the used challenge's intent":      `UPDATE credential_challenges SET intent_hash = 'sha256:other' WHERE state = 'used'`,
+		"the used challenge set back":      `UPDATE credential_challenges SET state = 'expired' WHERE state = 'used'`,
+		"the leftover challenge used":      `UPDATE credential_challenges SET state = 'used' WHERE state = 'issued'`,
+		"the status versions seen dropped": `DELETE FROM credential_status_seen`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			v := prepare(t)
+			db := rawDB(t, v.path)
+			if _, err := db.Exec(`PRAGMA foreign_keys = OFF; ` + sql); err != nil {
+				t.Fatal(err)
+			}
+			var ce *CorruptError
+			if _, err := Open(v.config()); !errors.As(err, &ce) {
+				t.Fatalf("Open: %v", err)
+			}
+		})
+	}
+}
