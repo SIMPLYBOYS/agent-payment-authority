@@ -335,7 +335,7 @@ ITEMS = [
     ("C2a: one version per event stream", go("./internal/paycontract/", "^TestEventStreamOneVersion$", ("TestEventStreamOneVersion", r"a mixed stream: <nil>")),
      [(PE, "\t\tif e.Version != st.version {", "\t\tif false && e.Version != st.version {")]),
     ("C2a: the credential reasons are v2's only", go("./internal/paycontract/", "^TestDecisionReasonsByVersion$", ("TestDecisionReasonsByVersion", r"apa.pay.v1 CREDENTIAL_REVOKED: <nil>")),
-     [(PC, "slices.Contains(sp.deny, d.Reason)", "slices.Contains(specs[V2].deny, d.Reason)")]),
+     [(PC, "slices.Contains(sp.deny, d.Reason)", "slices.Contains(append(slices.Clone(sp.deny), specs[V2].deny...), d.Reason)")]),
     ("C2a: the Signer derives the session by the order's version", go("./internal/signer/", "^TestV2OrderChallenge$", ("TestV2OrderChallenge", r"v1 session ID for a v2 order: <nil>")),
      [(SA, "if r.ApprovalSessionID != sp.SessionID(i.TaskID, i.PurchaseOrderID) {", "if r.ApprovalSessionID != paycontract.SessionID(i.TaskID, i.PurchaseOrderID) && r.ApprovalSessionID != sp.SessionID(i.TaskID, i.PurchaseOrderID) {")]),
     # D4 of the OS isolation plan (keygen); run them alone with "^P1b-D4:".
