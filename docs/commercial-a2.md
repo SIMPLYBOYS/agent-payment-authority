@@ -1,7 +1,7 @@
 # A2 本人核准產品接線：實作差異、驗證與限制
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-A2本人核准產品接線實作派工-f2bf224-20261013〉（Aaron 已批准「A2 開工」）。分支 `commercial-a2`，基準 `f2bf224`（工作區只有未追蹤的 `demo`；沒有適用的 AGENTS.md）。
-> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節）；第三次 review 窄幅 not pass，A、B 已修正（第 9 節）；第四次 review 窄幅 not pass，S-B、S-A 已修正（第 10 節），待第五次獨立上下文 review；實機登記與操作未驗收，付款未啟用。**
+> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節）；第三次 review 窄幅 not pass，A、B 已修正（第 9 節）；第四次 review 窄幅 not pass，S-B、S-A 已修正（第 10 節）；第五次 review（全組合掃描）窄幅 not pass，5-1、5-2 已修正（第 11 節）；實機登記與操作未驗收，付款未啟用。**
 > 以下為 `f0817c7` 時的狀態，保留原文：A2 已實作並完成本輪定向自動化驗證，待 Codex 技術 review；實機登記與操作未驗收，付款未啟用。A2 不自行標 Done；本輪所有結果都是「Claude Code 執行，待 Codex 核對」，不是實機結果。
 >
 > **歸屬的變更**：Codex 訂閱已到期，從這一節起沒有第三方核對。Review 改由 Claude Code 另開的獨立上下文 subagent 執行：它們只拿到 diff、設計文件與本文件，沒有作者寫程式時的推理；這比作者自審接近獨立核對，但仍是同一個模型。紀錄一律寫「Claude Code 獨立上下文 review」，不寫成 Codex。
@@ -374,15 +374,15 @@ note：
 第四輪修正（`598bbef`）：
 - **S-B**：會話不是 pending 時，任何未結束的 attempt 都依會話狀態給終點文字：
   - unknown／verifying：「無法確認這次驗證的結果；這筆已依後端期限關閉。」（或已關閉，任務取消／報價改變）；
-  - requested／challenged／refused：「……；這次驗證沒有完成。」
-  - 只有最終訊息（ok、deny、closed）留下。已決定的會話不加訊息，標題即結果。
+  - requested／challenged／帶 challenge 的 refused：「……；這次驗證沒有完成。」（不帶 challenge 的 refused 不是未結束的 attempt，沒有文字）
+  - 只有最終訊息（ok、deny、closed）留下。已決定的會話，`attemptText` 不加文字；上一次的最終訊息仍可能顯示。
 - **S-A**：與面板方式不同的紀錄，intent 列寫「後端比對這一份」，也不顯示裝置提示說明。
 - **note 3**：outcome closed 改為「裝置的驗證沒有被採用（這筆已關閉，或 Signer 的核准已過期）；不會付款。」
 - 測試：`approve.test.mjs` 新增一項（S-B）。
 
 不處理、記錄為已知：
 - 卡片與抽屜的 expired、superseded 用詞（P1-a 共用，差異 #11 只涵蓋面板）。
-- A、S-A、B、S-B 都只有單元測試，沒有畫面層測試。
+- A、B、S-B 只有單元測試；S-A（`host.js` 的 intent 列與裝置說明）連單元測試都沒有（第五次 review 更正）。都沒有畫面層測試。
 
 重跑（`598bbef`；只改了 web）：
 
@@ -392,3 +392,38 @@ note：
 | 瀏覽器 a2-ui（CDP virtual，不是實機）與 p1a-ui | 36 與 54 PASS、0 FAIL | `fix-598bbef/browser-runs.txt`（含命令）；`artifacts/human-approval/a2-ui-598bbef7650d-20261013T124122Z/`、`artifacts/p1a/p1a-ui-598bbef7650d-20261013T124208Z/` |
 
 下一步：第五次獨立上下文 review，只看 `6c38cf3..` 本輪差異。
+
+## 11 第五次獨立上下文 review 與第五輪修正（10/13；Claude Code，都不是實機結果）
+
+第五次 review 由一個 subagent 執行，只審 `6c38cf3..20daa79`。這次另外要求它把面板文字依「會話狀態 × attempt 狀態 × 上次訊息 × 紀錄方式」全組合掃過，並分清可達性。
+
+判定 **not pass（窄）**：S-B、S-A 已關閉，本輪修正沒有帶進新缺陷。掃描另外找到兩項 should-fix，都是舊碼，在全新 A2 環境就可能遇到：
+- **5-1**：challenge 回覆的 attempt 已 verified 時，頁面一律寫「這筆已在另一個視窗核准或拒絕」，不看 outcome。若共用的 attempt 在恢復時會話剛好關閉，或 Signer 的核准已過期，標題寫「已過期」，訊息卻說已決定。
+- **5-2**：「驗證結果沒有送達，這次沒有核准。請按「重新核准」」不看決定。lost 的若是拒絕，文字說「沒有核准」，還指向一顆不會出現的按鈕。
+
+note：
+- pending 期間，網路中斷後的「確認中」要到期限才結束。
+- 自動恢復後才出現「這筆已經結束」。
+- 舊資料庫中 P1-a 已關閉的紀錄，在 A2 面板會以本人核准顯示。
+- 第 10 節三處不精確，已在該節更正：refused 要帶 challenge；已決定的會話仍可能顯示上次的最終訊息；S-A 沒有任何測試。
+
+第五輪修正（`9987eb4`）：
+- **5-1**：有 outcome 時改由 `outcomeText` 用詞；沒有 outcome 時寫「這筆已經有本人決定（以後端為準）。」。
+- **5-2**：`lostText` 依決定用詞。拒絕時寫「驗證結果沒有送達，這次沒有拒絕。請再按「用裝置拒絕這筆」。」。
+- 測試：`approve.test.mjs` 新增一項。
+
+上面的 note 不處理，記為已知。
+
+重跑（`9987eb4`；只改了 web）：
+
+| 重跑 | 結果 | 證據 |
+|---|---|---|
+| web 測試 5 檔 | 全部 pass（29、11、27、9、13） | `artifacts/human-approval/fix-9987eb4/node-tests.txt` |
+| 瀏覽器 a2-ui（CDP virtual，不是實機）與 p1a-ui | 36 與 54 PASS、0 FAIL | `fix-9987eb4/browser-runs.txt`（含命令）；`artifacts/human-approval/a2-ui-9987eb41e9c4-dirty-20261013T125334Z/`、`artifacts/p1a/p1a-ui-9987eb41e9c4-dirty-20261013T125419Z/` |
+
+目錄名稱中的 `dirty`：執行時工作區有未提交的 `docs/commercial-a2.md`（第 10 節的三處更正，3 行文字）。頁面與建置都不含它，所以結果等同 `9987eb4`；不重跑，照實保留。
+
+review 的收斂情形：
+- 第二次起已沒有 must-fix，Signer 端已 pass。
+- 之後每一輪的 should-fix 都是面板文字的鄰近路徑，而且一輪比一輪窄。
+- 第五次已經做過全組合掃描。

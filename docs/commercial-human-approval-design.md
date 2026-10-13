@@ -1,7 +1,7 @@
 # 本人核准最小流程（A1 實機可行性、A2 正式接線）：設計
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-本人核准最小流程設計派工-d7cbf9f-20261013〉（Aaron 已核准「本人核准最小流程」的設計）。分支 `commercial-p1b`，基準 `d7cbf9f`（工作區只有未追蹤的 `demo`）。
-> **狀態：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`）；A1 可行性切片完成（Done，10/13，限 Chrome＋Google 密碼管理工具／PIN 路徑；Codex 限定核對通過、Aaron 批准）；Touch ID 未驗證、另列，不作為 A2 必要阻擋；A2 已實作（分支 `commercial-a2`）；Codex 訂閱到期後改由 Claude Code 獨立上下文 subagent review，判定 not pass；R1～R6 已修正；第二至四次 review 的 should-fix（S1、S2；A、B；S-B、S-A）已修正並重跑受影響部分，待第五次獨立上下文 review；實機登記與操作未驗收；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。**（第 23 節）
+> **狀態：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`）；A1 可行性切片完成（Done，10/13，限 Chrome＋Google 密碼管理工具／PIN 路徑；Codex 限定核對通過、Aaron 批准）；Touch ID 未驗證、另列，不作為 A2 必要阻擋；A2 已實作（分支 `commercial-a2`）；Codex 訂閱到期後改由 Claude Code 獨立上下文 subagent review，判定 not pass；R1～R6 已修正；第二至五次 review 的 should-fix 都是面板文字，已修正並重跑受影響部分（第五次為全組合掃描，見 commercial-a2.md 第 11 節）；實機登記與操作未驗收；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。**（第 23 節）
 > 以下為 `f2bf224` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`）；A1 可行性切片完成（Done，10/13，限 Chrome＋Google 密碼管理工具／PIN 路徑；Codex 限定核對通過、Aaron 批准）；Touch ID 未驗證、另列，不作為 A2 必要阻擋；A2 接線需另行派工、未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。（第 22 節）
 > 以下為 `7ba7184` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`）；Chrome＋Google 密碼管理工具／PIN 的 A1 實機操作已完成回報，完整證據待 Codex 最後核對；Touch ID 未驗證，A1 未標 Done；A2 未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。（第 21 節）
 > 以下為 `33a5bf4` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`）；Aaron 核准先做 Chrome＋Touch ID 實機操作；第一關登記時 Aaron 選了 Google 密碼管理工具（PIN 驗證，不是 Touch ID），登記成功，本機 Touch ID 尚未試，待 Codex 判讀；實機未驗收，A2 未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。（第 20.4 節）
@@ -1139,4 +1139,4 @@ Aaron 先回覆第 3、5 步「有提示」，後來附上畫面並明確說「�
 
 **狀態**：A2 已實作並完成本輪定向自動化驗證，待 Codex 技術 review；實機登記與操作未驗收；付款未啟用。A2 不自行標 Done。
 
-**10/13 補記**：Codex 訂閱已到期。A2 的 review 改由 Claude Code 另開的獨立上下文 subagent 執行（commercial-a2.md 第 6 節），判定 not pass，R1～R6 已修正（commercial-a2.md 第 7 節）；第二至四次 review 的 should-fix 已修正（第 8～10 節），待第五次獨立上下文 review；之後的 review 也循此方式，紀錄一律寫明不是 Codex。
+**10/13 補記**：Codex 訂閱已到期。A2 的 review 改由 Claude Code 另開的獨立上下文 subagent 執行（commercial-a2.md 第 6 節），判定 not pass，R1～R6 已修正（commercial-a2.md 第 7 節）；第二至五次 review 的 should-fix 已修正（第 8～11 節）；之後的 review 也循此方式，紀錄一律寫明不是 Codex。
