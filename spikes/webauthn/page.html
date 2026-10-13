@@ -54,7 +54,8 @@ async function api(path, body) {
 // A browser-side refusal is recorded by the server as reported, not verified.
 async function report(step, e) {
   show(step + "：瀏覽器端 " + e.name, { message: e.message });
-  try { await api("/api/report", { step, name: e.name, message: e.message }); } catch (_) {}
+  // Only the error name goes to the server (a fixed list there); the message stays on this page.
+  try { await api("/api/report", { step, name: e.name }); } catch (_) {}
 }
 function creationOptions(o) {
   const p = o.publicKey;

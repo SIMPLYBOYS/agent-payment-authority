@@ -27,7 +27,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
@@ -181,14 +184,76 @@ func (e *apiError) Error() string { return e.code }
 
 func fail(status int, code, detail string) *apiError { return &apiError{status, code, detail} }
 
-// libDetail keeps the library's reason (its DevInfo) for the results file.
-func libDetail(err error) string {
-	var pe *protocol.Error
-	if errors.As(err, &pe) {
-		return pe.Details + "; " + pe.DevInfo
-	}
-	return err.Error()
+// Evidence keeps fixed words only (review R2 of 20677b0): the library's own
+// text can carry the expected and received challenge (DevInfo, Info, some
+// Details), so a library error is reduced to one of these reasons and its
+// text never reaches the results file or an HTTP reply.
+var reasonByDetails = map[string]string{
+	"Error validating challenge":                                                   "challenge_mismatch",
+	"Error validating origin":                                                      "origin_mismatch",
+	"Error validating cross origin flag":                                           "cross_origin",
+	"Error validating topOrigin":                                                   "top_origin",
+	"Error validating top origin":                                                  "top_origin",
+	"Error validating ceremony type":                                               "ceremony_type",
+	"Session has Expired":                                                          "session_expired",
+	"User handle and User ID do not match":                                         "user_handle_mismatch",
+	"The credential ID provided is not owned by the user":                          "credential_not_allowed",
+	"The credential ID provided is not in the sessions allowed credential list":    "credential_not_allowed",
+	"Unable to find the credential for the returned credential ID":                 "credential_not_allowed",
+	"Backup Eligible flag inconsistency detected during login validation":          "backup_eligible_changed",
+	"Backup State Flag is true but Backup Eligible flag is false which is invalid": "backup_state_invalid",
 }
+
+var reasonByInfo = map[string]string{
+	"User verification required but flag not set by authenticator": "uv_missing",
+	"User presence required but flag not set by authenticator":     "up_missing",
+}
+
+// errorTypes are the library's fixed error type names (protocol/errors.go).
+var errorTypes = map[string]bool{"invalid_request": true, "policy_restriction": true, "challenge_mismatch": true, "parse_error": true,
+	"auth_data": true, "verification_error": true, "attestation_error": true, "invalid_attestation": true, "invalid_metadata": true,
+	"invalid_certificate": true, "invalid_signature": true, "invalid_key_type": true, "unsupported_key_algorithm": true,
+	"spec_unimplemented": true, "not_implemented": true}
+
+func reason(err error) string {
+	var pe *protocol.Error
+	if !errors.As(err, &pe) {
+		return "other"
+	}
+	if r, ok := reasonByDetails[pe.Details]; ok {
+		return r
+	}
+	if r, ok := reasonByInfo[pe.DevInfo]; ok {
+		return r
+	}
+	if strings.HasPrefix(pe.DevInfo, "RP Hash mismatch") {
+		return "rp_id_mismatch"
+	}
+	if errorTypes[pe.Type] {
+		return "other:" + pe.Type
+	}
+	return "other"
+}
+
+// allowed returns v when it is one of the known values, else "other".
+func allowed(v string, known ...string) string {
+	if v == "" {
+		return ""
+	}
+	for _, k := range known {
+		if v == k {
+			return v
+		}
+	}
+	return "other"
+}
+
+var steps = map[string]bool{"register": true, "approve": true, "replay": true, "wrong-challenge": true, "uv-discouraged": true}
+
+// browserErrors are the DOMException names a WebAuthn call can raise, plus
+// the page's own two; the message itself is never kept.
+var browserErrors = []string{"NotAllowedError", "SecurityError", "InvalidStateError", "NotSupportedError", "AbortError",
+	"ConstraintError", "UnknownError", "TypeError", "NetworkError", "Unsupported", "NotReady"}
 
 func (s *spike) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !s.hosts[r.Host] {
@@ -211,7 +276,7 @@ func (s *spike) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad body", http.StatusBadRequest)
 		return
 	}
-	res := result{Time: s.now().UTC().Format(time.RFC3339Nano), Authenticator: s.label, UserAgent: r.UserAgent(), Origin: o}
+	res := result{Time: s.now().UTC().Format(time.RFC3339Nano), Authenticator: s.label, UserAgent: truncate(r.UserAgent(), 300), Origin: o}
 	s.mu.Lock()
 	reply, aerr := s.route(r.URL.Path, body, &res)
 	s.mu.Unlock()
@@ -224,7 +289,7 @@ func (s *spike) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		line, _ := json.Marshal(res)
 		if _, err := s.out.Write(append(line, '\n')); err != nil {
 			log.Printf("a1-spike: result not saved: %v", err)
-			aerr, reply = fail(http.StatusInternalServerError, "RESULT_NOT_SAVED", err.Error()), nil
+			aerr, reply = fail(http.StatusInternalServerError, "RESULT_NOT_SAVED", ""), nil
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -250,14 +315,15 @@ func (s *spike) route(path string, body []byte, res *result) (any, *apiError) {
 	case "/api/display":
 		return map[string]any{"display": intent, "intent_hash": intentHash}, nil
 	case "/api/report":
-		var in struct{ Step, Name, Message string }
-		if json.Unmarshal(body, &in) != nil || in.Step == "" {
+		var in struct{ Step, Name string }
+		if json.Unmarshal(body, &in) != nil || !steps[in.Step] {
 			return nil, fail(http.StatusBadRequest, "BAD_REQUEST", "")
 		}
 		// A browser-side outcome (refusal, cancel, SecurityError): recorded as
-		// reported by the page, never as a server verification.
-		res.Step, res.Detail = "browser:"+truncate(in.Step, 40), truncate(in.Name+": "+in.Message, 300)
-		return nil, fail(http.StatusOK, "BROWSER_REPORTED", res.Detail)
+		// reported by the page, never as a server verification; only the
+		// error name, from a fixed list, is kept.
+		res.Step = "browser:" + in.Step
+		return nil, fail(http.StatusOK, "BROWSER_REPORTED", allowed(in.Name, browserErrors...))
 	}
 	return nil, fail(http.StatusNotFound, "NOT_FOUND", "")
 }
@@ -278,7 +344,8 @@ func (s *spike) registerBegin() (any, *apiError) {
 		webauthn.WithCredentialParameters([]protocol.CredentialParameter{{Type: protocol.PublicKeyCredentialType, Algorithm: -7}}),
 		webauthn.WithExclusions(exclude))
 	if err != nil {
-		return nil, fail(http.StatusInternalServerError, "BEGIN_FAILED", err.Error())
+		log.Printf("a1-spike: begin: %v", err)
+		return nil, fail(http.StatusInternalServerError, "BEGIN_FAILED", "")
 	}
 	s.reg = session
 	return opts, nil
@@ -292,20 +359,21 @@ func (s *spike) registerFinish(body []byte, res *result) (any, *apiError) {
 	s.reg = nil // one attempt per begin
 	parsed, err := protocol.ParseCredentialCreationResponseBytes(body)
 	if err != nil {
-		return nil, fail(http.StatusBadRequest, "REGISTRATION_MALFORMED", libDetail(err))
+		return nil, fail(http.StatusBadRequest, "REGISTRATION_MALFORMED", reason(err))
 	}
 	ad := parsed.Response.AttestationObject.AuthData
-	res.Flags, res.Format = flagString(ad.Flags), parsed.Response.AttestationObject.Format
-	res.Attachment, res.Credential = string(parsed.AuthenticatorAttachment), credTag(parsed.RawID)
+	res.Flags, res.Format = flagString(ad.Flags), allowed(parsed.Response.AttestationObject.Format,
+		"none", "packed", "tpm", "android-key", "android-safetynet", "fido-u2f", "apple", "compound")
+	res.Attachment, res.Credential = allowed(string(parsed.AuthenticatorAttachment), "platform", "cross-platform"), credTag(parsed.RawID)
 	for _, t := range parsed.Response.Transports {
-		res.Transports = append(res.Transports, string(t))
+		res.Transports = append(res.Transports, allowed(string(t), "usb", "nfc", "ble", "smart-card", "hybrid", "internal"))
 	}
 	cred, err := s.wa.CreateCredential(&s.user, session, parsed)
 	if err != nil {
-		return nil, fail(http.StatusBadRequest, "REGISTRATION_INVALID", libDetail(err))
+		return nil, fail(http.StatusBadRequest, "REGISTRATION_INVALID", reason(err))
 	}
 	if cred.AttestationFormat != "none" { // D6: attestation=none only
-		return nil, fail(http.StatusBadRequest, "REGISTRATION_ATTESTATION", "fmt "+cred.AttestationFormat)
+		return nil, fail(http.StatusBadRequest, "REGISTRATION_ATTESTATION", "fmt_not_none")
 	}
 	res.AAGUID = hex.EncodeToString(cred.Authenticator.AAGUID)
 	res.SignCount = &cred.Authenticator.SignCount
@@ -340,7 +408,8 @@ func (s *spike) approveBegin(body []byte) (any, *apiError) {
 	opts, sd, err := s.wa.BeginLogin(&s.user, webauthn.WithChallenge(rec.challenge()), webauthn.WithAllowedCredentials(allow),
 		webauthn.WithUserVerification(protocol.UserVerificationRequirement(in.UV)))
 	if err != nil {
-		return nil, fail(http.StatusInternalServerError, "BEGIN_FAILED", err.Error())
+		log.Printf("a1-spike: begin: %v", err)
+		return nil, fail(http.StatusInternalServerError, "BEGIN_FAILED", "")
 	}
 	s.ch[rec.ChallengeID] = &pending{rec: rec, session: *sd}
 	return map[string]any{"challenge_id": rec.ChallengeID, "options": opts, "record": rec, "display": intent}, nil
@@ -352,21 +421,22 @@ func (s *spike) approveFinish(body []byte, res *result) (any, *apiError) {
 		Step        string          `json:"step"`
 		Credential  json.RawMessage `json:"credential"`
 	}
-	if json.Unmarshal(body, &in) != nil || in.Step == "" {
+	if json.Unmarshal(body, &in) != nil || !steps[in.Step] || in.Step == "register" {
 		return nil, fail(http.StatusBadRequest, "BAD_REQUEST", "")
 	}
-	res.Step, res.ChallengeID = truncate(in.Step, 40), in.ChallengeID
+	res.Step = in.Step
 	p := s.ch[in.ChallengeID]
 	if p == nil {
 		return nil, fail(http.StatusNotFound, "CHALLENGE_UNKNOWN", "")
 	}
+	res.ChallengeID = p.rec.ChallengeID
 	res.Session, res.UVRequested = p.rec.SessionID, p.rec.UserVerification
 	parsed, err := protocol.ParseCredentialRequestResponseBytes(in.Credential)
 	if err != nil {
-		return nil, fail(http.StatusBadRequest, "ASSERTION_MALFORMED", libDetail(err))
+		return nil, fail(http.StatusBadRequest, "ASSERTION_MALFORMED", reason(err))
 	}
 	ad := parsed.Response.AuthenticatorData
-	res.Flags, res.Credential, res.Attachment = flagString(ad.Flags), credTag(parsed.RawID), string(parsed.AuthenticatorAttachment)
+	res.Flags, res.Credential, res.Attachment = flagString(ad.Flags), credTag(parsed.RawID), allowed(string(parsed.AuthenticatorAttachment), "platform", "cross-platform")
 	res.SignCount = &ad.Counter
 	if p.used {
 		return nil, fail(http.StatusConflict, "CHALLENGE_USED", "")
@@ -390,7 +460,7 @@ func (s *spike) approveFinish(body []byte, res *result) (any, *apiError) {
 	}
 	if stored.Flags.BackupEligible != ad.Flags.HasBackupEligible() { // D6: BE is fixed at registration
 		s.suspect[string(stored.ID)] = true
-		return nil, fail(http.StatusBadRequest, "ASSERTION_INVALID_FLAGS", "BE changed; credential marked suspect")
+		return nil, fail(http.StatusBadRequest, "ASSERTION_INVALID_FLAGS", "backup_eligible_changed")
 	}
 	// The product policy always requires UV, also when the page asked the
 	// browser for "discouraged" (that request only probes the device).
@@ -398,11 +468,11 @@ func (s *spike) approveFinish(body []byte, res *result) (any, *apiError) {
 	session.UserVerification = protocol.VerificationRequired
 	cred, err := s.wa.ValidateLogin(&s.user, session, parsed)
 	if err != nil {
-		return nil, fail(http.StatusBadRequest, "ASSERTION_INVALID", libDetail(err))
+		return nil, fail(http.StatusBadRequest, "ASSERTION_INVALID", reason(err))
 	}
 	if cred.Authenticator.CloneWarning { // D6: counter went back (0/0 is accepted by the library)
 		s.suspect[string(stored.ID)] = true
-		return nil, fail(http.StatusConflict, "ASSERTION_COUNTER", fmt.Sprintf("stored %d, received %d; credential marked suspect", stored.Authenticator.SignCount, ad.Counter))
+		return nil, fail(http.StatusConflict, "ASSERTION_COUNTER", "counter_regressed")
 	}
 	p.used = true
 	s.user.creds[i] = *cred
@@ -410,21 +480,54 @@ func (s *spike) approveFinish(body []byte, res *result) (any, *apiError) {
 		"intent_hash": p.rec.IntentHash, "flags": res.Flags, "sign_count": ad.Counter}, nil
 }
 
+// openResults makes a new private run directory under parent and its results
+// file (review R2 of 20677b0): parent must be an existing directory of this
+// user, not a symlink, with no group or other access; the run directory is
+// made with mkdir (fails if anything is there, symlinks included) and the
+// file with O_EXCL, so an existing file or link is never appended to and
+// nothing outside the new directory is changed.
+func openResults(parent, run string) (*os.File, string, error) {
+	fi, err := os.Lstat(parent)
+	if err != nil {
+		return nil, "", err
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !fi.IsDir() || fi.Mode().Perm()&0o077 != 0 || !ok || int(st.Uid) != os.Getuid() {
+		return nil, "", fmt.Errorf("%s must be a directory of this user with mode 0700 (not a symlink)", parent)
+	}
+	dir := filepath.Join(parent, run)
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		return nil, "", err
+	}
+	path := filepath.Join(dir, "results.jsonl")
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, "", err
+	}
+	return f, path, nil
+}
+
+func runName(now time.Time) string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return "run-" + now.UTC().Format("20060102T150405Z") + "-" + hex.EncodeToString(b)
+}
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8123", "loopback address; the page is opened as http://localhost:<port>")
-	out := flag.String("out", "", "results file (JSONL, appended, mode 0600); required")
+	outDir := flag.String("out-dir", "", "existing private directory (0700); each start makes a new run directory with results.jsonl in it; required")
 	label := flag.String("authenticator", "", "real-device or virtual; written on every result; required")
 	flag.Parse()
 	host, port, err := net.SplitHostPort(*addr)
 	if err != nil || (host != "127.0.0.1" && host != "::1") {
 		log.Fatal("a1-spike: --addr must be a loopback address with a port")
 	}
-	if *out == "" || (*label != "real-device" && *label != "virtual") {
-		log.Fatal("a1-spike: --out and --authenticator real-device|virtual are required")
+	if *outDir == "" || (*label != "real-device" && *label != "virtual") {
+		log.Fatal("a1-spike: --out-dir and --authenticator real-device|virtual are required")
 	}
-	f, err := os.OpenFile(*out, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	f, out, err := openResults(*outDir, runName(time.Now()))
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("a1-spike: results: ", err)
 	}
 	defer f.Close()
 	ln, err := net.Listen("tcp", *addr)
@@ -436,7 +539,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("a1-spike: test use only, no payment; authenticator=%s; results %s", *label, *out)
+	log.Printf("a1-spike: test use only, no payment; authenticator=%s; results %s", *label, out)
 	log.Printf("a1-spike: listening on http://localhost:%s", port)
 	log.Fatal((&http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second}).Serve(ln))
 }

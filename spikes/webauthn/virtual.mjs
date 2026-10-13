@@ -2,20 +2,23 @@
 // authenticator, so the page is known to work before the real-device run.
 // Every result line it produces is labelled "virtual": it is never a
 // real-device result. Usage: node spikes/webauthn/virtual.mjs BINARY OUTDIR
+// (OUTDIR is made private here; the spike makes its own run directory in it).
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync } from "node:fs";
+import { dirname } from "node:path";
 import { join } from "node:path";
 import { startChrome, sleep } from "../../scripts/verify/harness.mjs";
 
 const [bin, outDir] = process.argv.slice(2);
 mkdirSync(outDir, { recursive: true, mode: 0o700 });
-const results = join(outDir, "virtual-results.jsonl");
-const srv = spawn(bin, ["--addr", "127.0.0.1:0", "--authenticator", "virtual", "--out", results], { stdio: ["ignore", "ignore", "pipe"] });
+const srv = spawn(bin, ["--addr", "127.0.0.1:0", "--authenticator", "virtual", "--out-dir", outDir], { stdio: ["ignore", "ignore", "pipe"] });
 let log = "";
 srv.stderr.on("data", (b) => { log += b; });
 let port;
 for (let i = 0; i < 100 && !port; i++) { await sleep(100); port = log.match(/listening on http:\/\/localhost:(\d+)/)?.[1]; }
 if (!port) throw new Error("spike did not start: " + log);
+const results = log.match(/results (\S+)\n/)[1];
+console.log("results " + results);
 
 const lines = () => { try { return readFileSync(results, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 const b = await startChrome(join(outDir, "chrome-profile"));
@@ -43,17 +46,21 @@ try {
   r = await click("b-replay", "replay");
   check(r.step === "replay" && r.code === "CHALLENGE_USED", "replay: " + r.code);
   r = await click("b-wrong", "wrong-challenge");
-  check(r.step === "wrong-challenge" && r.code === "ASSERTION_INVALID", "wrong challenge: " + r.code + " " + (r.detail || ""));
+  check(r.step === "wrong-challenge" && r.code === "ASSERTION_INVALID" && r.detail === "challenge_mismatch", "wrong challenge: " + r.code + " " + r.detail);
   r = await click("b-probe", "uv-discouraged");
-  check(r.step === "uv-discouraged", "UV discouraged, recorded: " + JSON.stringify([r.ok, r.code, r.flags]));
+  check(r.step === "uv-discouraged", "UV discouraged, recorded: " + JSON.stringify([r.ok, r.code, r.detail, r.flags]));
 
   // Wrong origin: the same page from 127.0.0.1 cannot use rp_id=localhost.
   await b.send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   check(await b.waitFor(`!document.getElementById("origin-note").hidden`), "the 127.0.0.1 page says it is the wrong-origin test");
   r = await click("b-register", "browser:register");
-  check(r.step === "browser:register" && !r.ok && /SecurityError/.test(r.detail), "wrong origin, browser refuses: " + r.detail);
+  check(r.step === "browser:register" && !r.ok && r.detail === "SecurityError", "wrong origin, browser refuses: " + r.detail);
 
   check(lines().every((l) => l.authenticator === "virtual"), "every result line is labelled virtual");
+  // R2 of 20677b0: fixed words only, in a new private run directory.
+  check(lines().every((l) => /^[A-Za-z_:]*$/.test(l.detail || "")), "every detail is a fixed word: " + lines().map((l) => l.detail || "-").join(","));
+  check((statSync(results).mode & 0o777) === 0o600 && (statSync(dirname(results)).mode & 0o777) === 0o700 && dirname(dirname(results)) === outDir,
+    "results.jsonl 0600 in a new 0700 run directory under OUTDIR");
   // The refusals above are 4xx answers by design (and there is no favicon);
   // only exceptions and console errors count as page errors.
   const errors = b.consoleText.filter((t) => !t.startsWith("LOG Failed to load resource: the server responded with a status of 4"));

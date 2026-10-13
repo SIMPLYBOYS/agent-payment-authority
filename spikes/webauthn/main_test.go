@@ -14,12 +14,16 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/go-webauthn/webauthn/protocol"
 )
 
 const origin = "http://localhost:8123"
@@ -166,7 +170,7 @@ func (f *fixture) begin(session, uv string) (string, string) {
 
 func (f *fixture) finish(id string, cred json.RawMessage) (int, string) {
 	f.t.Helper()
-	code, v := f.post("/api/approve/finish", map[string]any{"challenge_id": id, "credential": cred, "step": "test"})
+	code, v := f.post("/api/approve/finish", map[string]any{"challenge_id": id, "credential": cred, "step": "approve"})
 	if code == 200 {
 		return code, "verified"
 	}
@@ -215,16 +219,17 @@ func TestApproveAndRefusals(t *testing.T) {
 	}
 
 	for name, c := range map[string]struct {
-		org  string
-		more map[string]any
-		uv   bool
+		org    string
+		more   map[string]any
+		uv     bool
+		reason string
 	}{
-		"wrong origin":       {"http://127.0.0.1:8123", nil, true},
-		"other port":         {"http://localhost:8402", nil, true},
-		"topOrigin":          {origin, map[string]any{"topOrigin": "http://evil.example"}, true},
-		"crossOrigin":        {origin, map[string]any{"crossOrigin": true, "topOrigin": origin}, true},
-		"no UV":              {origin, nil, false},
-		"no UV, discouraged": {origin, nil, false},
+		"wrong origin":       {"http://127.0.0.1:8123", nil, true, "origin_mismatch"},
+		"other port":         {"http://localhost:8402", nil, true, "origin_mismatch"},
+		"topOrigin":          {origin, map[string]any{"topOrigin": "http://evil.example"}, true, "top_origin"},
+		"crossOrigin":        {origin, map[string]any{"crossOrigin": true, "topOrigin": origin}, true, "cross_origin"},
+		"no UV":              {origin, nil, false, "uv_missing"},
+		"no UV, discouraged": {origin, nil, false, "uv_missing"},
 	} {
 		uv := "required"
 		if strings.HasSuffix(name, "discouraged") {
@@ -238,6 +243,12 @@ func TestApproveAndRefusals(t *testing.T) {
 		a.flags = fUP | fUV
 		if got != "ASSERTION_INVALID" {
 			t.Fatalf("%s: %d %s", name, code, got)
+		}
+		lines := strings.Split(strings.TrimSpace(f.out.String()), "\n")
+		var r result
+		json.Unmarshal([]byte(lines[len(lines)-1]), &r)
+		if r.Detail != c.reason {
+			t.Fatalf("%s: recorded reason %q, want %q", name, r.Detail, c.reason)
 		}
 	}
 
@@ -372,7 +383,133 @@ func TestResultsFile(t *testing.T) {
 	}
 	var last result
 	json.Unmarshal([]byte(lines[2]), &last)
-	if last.Step != "browser:register" || last.OK || last.Code != "BROWSER_REPORTED" {
+	if last.Step != "browser:register" || last.OK || last.Code != "BROWSER_REPORTED" || last.Detail != "SecurityError" {
 		t.Fatalf("browser report recorded as %+v", last)
+	}
+}
+
+// R2 of 20677b0: each start makes a new private run directory; an existing
+// file, directory or link is refused before anything is written, and the
+// parent must be private.
+func TestResultsDir(t *testing.T) {
+	parent := t.TempDir()
+	os.Chmod(parent, 0o700)
+	f, path, err := openResults(parent, "run-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if fi, _ := os.Stat(filepath.Dir(path)); fi.Mode().Perm() != 0o700 {
+		t.Fatalf("run directory mode %v", fi.Mode().Perm())
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 || filepath.Base(path) != "results.jsonl" {
+		t.Fatalf("results file %s mode %v", path, fi.Mode().Perm())
+	}
+
+	// Bystanders: a file with its own content and mode, a directory, links to both.
+	other := t.TempDir()
+	by := filepath.Join(other, "bystander.jsonl")
+	os.WriteFile(by, []byte("keep\n"), 0o644)
+	os.Chmod(by, 0o644)
+	os.Mkdir(filepath.Join(parent, "run-dir"), 0o755)
+	os.WriteFile(filepath.Join(parent, "run-dir", "results.jsonl"), []byte("keep\n"), 0o644)
+	os.WriteFile(filepath.Join(parent, "run-file"), []byte("keep\n"), 0o644)
+	os.Symlink(other, filepath.Join(parent, "run-link-dir"))
+	os.Symlink(by, filepath.Join(parent, "run-link-file"))
+	for _, run := range []string{"run-a", "run-dir", "run-file", "run-link-dir", "run-link-file"} {
+		if f, _, err := openResults(parent, run); err == nil {
+			f.Close()
+			t.Fatalf("%s: an existing path was used", run)
+		}
+	}
+	for _, p := range []string{by, filepath.Join(parent, "run-dir", "results.jsonl"), filepath.Join(parent, "run-file")} {
+		raw, _ := os.ReadFile(p)
+		fi, _ := os.Stat(p)
+		if string(raw) != "keep\n" || fi.Mode().Perm() != 0o644 {
+			t.Fatalf("%s changed: %q %v", p, raw, fi.Mode().Perm())
+		}
+	}
+	if entries, _ := os.ReadDir(other); len(entries) != 1 {
+		t.Fatalf("something was written through a link: %v", entries)
+	}
+
+	// The parent: missing, readable by others, or a link to a private directory.
+	link := filepath.Join(t.TempDir(), "parent-link")
+	os.Symlink(parent, link)
+	open := t.TempDir()
+	os.Chmod(open, 0o755)
+	for name, p := range map[string]string{"missing": filepath.Join(parent, "nope"), "mode 0755": open, "symlink": link} {
+		if f, _, err := openResults(p, "run-b"); err == nil {
+			f.Close()
+			t.Fatalf("parent %s accepted", name)
+		}
+	}
+	if fi, _ := os.Stat(open); fi.Mode().Perm() != 0o755 {
+		t.Fatal("the parent's mode was changed")
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "run-b")); err == nil {
+		t.Fatal("a run directory was made through the parent link")
+	}
+}
+
+// R2 of 20677b0: what is kept (results file and HTTP replies) is fixed
+// words; the library's text, challenges, credential IDs, assertions and
+// whatever the page sends are not.
+func TestEvidenceKeepsFixedWords(t *testing.T) {
+	const marker = "MARKER-5f3a"
+	for err, want := range map[error]string{
+		&protocol.Error{Type: "verification_error", Details: "Error validating challenge", DevInfo: "Expected " + marker}:    "challenge_mismatch",
+		&protocol.Error{Type: "verification_error", DevInfo: "RP Hash mismatch. " + marker}:                                  "rp_id_mismatch",
+		&protocol.Error{Type: "verification_error", DevInfo: "User verification required but flag not set by authenticator"}: "uv_missing",
+		&protocol.Error{Type: "invalid_signature", Details: "Error validating the assertion signature: " + marker}:           "other:invalid_signature",
+		&protocol.Error{Type: marker, Details: marker, DevInfo: marker}:                                                      "other",
+		errors.New(marker): "other",
+	} {
+		if got := reason(err); got != want {
+			t.Fatalf("reason(%v) = %q, want %q", err, got, want)
+		}
+	}
+
+	f := newFixture(t)
+	a := newAuthn(t)
+	f.register(a)
+	id1, ch1 := f.begin("s1", "required")
+	id2, ch2 := f.begin("s2", "required")
+	s1 := a.get(t, ch1, origin, nil)
+	raw, _ := json.Marshal(map[string]any{"challenge_id": id2, "credential": s1, "step": "wrong-challenge"})
+	r := httptest.NewRequest("POST", "/api/approve/finish", bytes.NewReader(raw))
+	r.Host, r.Header = "localhost:8123", map[string][]string{"Origin": {origin}, "Content-Type": {"application/json"}}
+	w := httptest.NewRecorder()
+	f.s.ServeHTTP(w, r)
+	reply := w.Body.String()
+	if !strings.Contains(reply, `"detail":"challenge_mismatch"`) {
+		t.Fatalf("reply %s", reply)
+	}
+	// The page's text and step label, and an unknown error name.
+	f.post("/api/report", map[string]string{"step": "approve", "name": marker, "message": marker})
+	if code, _ := f.post("/api/report", map[string]string{"step": marker, "name": "SecurityError"}); code != 400 {
+		t.Fatalf("unknown step reported: %d", code)
+	}
+	if code, _ := f.post("/api/approve/finish", map[string]any{"challenge_id": id1, "credential": s1, "step": marker}); code != 400 {
+		t.Fatalf("unknown step accepted: %d", code)
+	}
+	var cred struct {
+		Response struct{ ClientDataJSON, AuthenticatorData, Signature string }
+	}
+	json.Unmarshal(s1, &cred)
+	kept := f.out.String() + reply
+	for name, v := range map[string]string{"challenge s1": ch1, "challenge s2": ch2, "credential ID": b64.EncodeToString(a.id),
+		"clientDataJSON": cred.Response.ClientDataJSON, "signature": cred.Response.Signature, "marker": marker} {
+		if strings.Contains(kept, v) {
+			t.Fatalf("%s kept in the evidence", name)
+		}
+	}
+	lines := strings.Split(strings.TrimSpace(f.out.String()), "\n")
+	var wrong, browser result
+	json.Unmarshal([]byte(lines[len(lines)-2]), &wrong)
+	json.Unmarshal([]byte(lines[len(lines)-1]), &browser)
+	if wrong.Step != "wrong-challenge" || wrong.Code != "ASSERTION_INVALID" || wrong.Detail != "challenge_mismatch" ||
+		browser.Step != "browser:approve" || browser.Detail != "other" {
+		t.Fatalf("results %+v %+v", wrong, browser)
 	}
 }
