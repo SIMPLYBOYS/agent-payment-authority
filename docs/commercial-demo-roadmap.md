@@ -235,6 +235,11 @@
 6. 設計核准（新增依賴）。停止點：spike 報告與結論交 review。
 
 **C1 BBS+ 選庫與正反測試**（S2，計畫 W1、W3）
+> **進度（10/13）**：spike 完成，待 Claude Code 獨立上下文 review（[commercial-c1.md](commercial-c1.md)；`spikes/bbs/`，證據在 `artifacts/s2/`）。
+> - 找不到仍在維護、實作 IETF BBS（`bbs-2023` 所用）的 Go 庫；
+> - 以仍在維護的舊版 BBS+ `trustbloc/bbs-signature-go` v1.0.4（Apache-2.0）證明了發證、衍生 proof、選擇性揭露，以及綁定 verifier／challenge／intent、持有人、期限、撤銷、重播的正反測試；
+> - 格式是否沿用舊版 BBS+，屬於 C2 的決定（C1-D1～D4），待 Aaron 決定；
+> - 沒有改用 SD-JWT，不代表憑證已參與准駁。
 1. 目標：選定 Go 可用的 BBS（W3C Data Integrity BBS cryptosuite）實作，驗發證、derived proof、選擇性揭露、錯簽章與竄改的負向測試。不做：接入 Policy。
 2. 前置：無；研究可先做。
 3. 影響：`spikes/bbs/`（任務清單 S2）；結論影響正式授權條件格式。
