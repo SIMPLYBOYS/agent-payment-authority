@@ -91,8 +91,8 @@ func scanPurchase(row interface{ Scan(...any) error }, version string) (purchase
 // decode fills the stored body and the decision's fixed fields by version.
 func (p *purchaseRow) decode(version string) error {
 	d := &p.Decision
-	if version == paycontract.Version {
-		d.Version, d.PaymentStatus = paycontract.Version, paycontract.PaymentNotEnabled
+	if paycontract.Supported(version) {
+		d.Version, d.PaymentStatus = version, paycontract.PaymentNotEnabled
 		p.V1 = new(paycontract.PurchaseOrder)
 		return contracts.Decode([]byte(p.Body), p.V1)
 	}
@@ -137,7 +137,7 @@ func (s *Store) openTask(tx *sql.Tx, now uint64, taskID string) (*taskTx, error)
 	} else if err != nil {
 		return nil, readErr("task", taskID, err)
 	}
-	if row.ContractVersion != contracts.Version && row.ContractVersion != paycontract.Version {
+	if row.ContractVersion != contracts.Version && !paycontract.Supported(row.ContractVersion) {
 		return nil, fmt.Errorf("task %s has unknown contract version %q", taskID, row.ContractVersion)
 	}
 	t := &taskTx{tx: tx, now: now, row: row, purchases: map[string]*purchaseRow{}}
@@ -186,7 +186,7 @@ func (s *Store) openTask(tx *sql.Tx, now uint64, taskID string) (*taskTx, error)
 	if err := drained(prow); err != nil {
 		return nil, readErr("task", taskID, err)
 	}
-	if t.v1() {
+	if t.pay() {
 		if err := t.loadSessions(); err != nil {
 			return nil, err
 		}
@@ -345,7 +345,7 @@ func (t *taskTx) close(p *purchaseRow, event, approval, reason string, by *resol
 		return errors.New("approval was already closed")
 	}
 	p.ApprovalClosed, p.ClosedAt = sql.NullString{String: approval, Valid: true}, sql.NullInt64{Int64: int64(t.now), Valid: true}
-	if t.v1() {
+	if t.pay() {
 		return t.closeSession(p, approval, by)
 	}
 	return nil
@@ -446,8 +446,8 @@ func (s *Store) StartTask(setup TaskSetup) error {
 		if err != nil {
 			return err
 		}
-		if version == paycontract.Version {
-			genesis, err = paycontract.GenesisHash(task.TaskID)
+		if sp, ok := paycontract.SpecOf(version); ok {
+			genesis, err = sp.GenesisHash(task.TaskID)
 			if err != nil {
 				return err
 			}
@@ -554,7 +554,7 @@ func (s *Store) Submit(sess contracts.Session, raw []byte) (Result, error) {
 		} else if err != nil {
 			return err
 		}
-		if (v1 != nil) != t.v1() {
+		if (v1 != nil) != t.pay() {
 			return refuse("CONTRACT_VERSION_MISMATCH", "the purchase's contract is not the task's ("+t.row.ContractVersion+")")
 		}
 		if v1 != nil {

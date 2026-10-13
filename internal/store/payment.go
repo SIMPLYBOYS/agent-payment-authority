@@ -107,7 +107,7 @@ func (s *Store) BeginPayment(req PaymentRequest) (PaymentAttempt, bool, error) {
 		switch {
 		case slices.ContainsFunc(t.events, func(e contracts.AuditEvent) bool { return e.EventType == "TASK_CANCELLED" }):
 			return refuse("TASK_ALREADY_ENDED", "the task was cancelled: no payment is sent for it")
-		case !t.v1():
+		case !t.pay():
 			return refuse("CONTRACT_VERSION_MISMATCH", "only apa.pay.v1 purchases are paid")
 		case p == nil:
 			return refuse("UNKNOWN_PURCHASE", "no such purchase in this task")
@@ -199,7 +199,7 @@ func (s *Store) Payment(consumerID, requestID string) (PaymentAttempt, error) {
 func verifyPayments(tx *sql.Tx) error {
 	var n int
 	if err := tx.QueryRow(`SELECT count(*) FROM payment_attempts a LEFT JOIN purchases p USING (task_id, purchase_order_id) LEFT JOIN tasks t USING (task_id)
-		WHERE p.task_id IS NULL OR t.contract_version != 'apa.pay.v1' OR p.intent_hash != a.intent_hash OR p.policy_verdict != 'Allow'
+		WHERE p.task_id IS NULL OR t.contract_version NOT IN ('apa.pay.v1', 'apa.pay.v2') OR p.intent_hash != a.intent_hash OR p.policy_verdict != 'Allow'
 		OR a.method != 'delegation' OR a.delegation_ref = '' OR a.updated_at < a.requested_at`).Scan(&n); err != nil {
 		return readErr("payment", "", err)
 	}

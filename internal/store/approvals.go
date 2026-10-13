@@ -150,7 +150,7 @@ func (s *Store) sessionFor(tx *sql.Tx, now uint64, consumer, session string) (*t
 		return nil, nil, err
 	}
 	p := t.purchases[ss.PO]
-	if p == nil || p.Session == nil || !t.v1() {
+	if p == nil || p.Session == nil || !t.pay() {
 		return nil, nil, &CorruptError{Check: "approval", TaskID: ss.TaskID, Detail: "session without its apa.pay.v1 purchase"}
 	}
 	return t, p, nil
@@ -405,7 +405,7 @@ func (s *Store) ResolveWebAuthn(r WebAuthnResult) (ApprovalResult, error) {
 			if err := t.close(p, "APPROVED", "approved", "WEBAUTHN_APPROVAL", by); err != nil {
 				return err
 			}
-			g := paycontract.AuthorizationGrant{Version: paycontract.Version, JTI: paycontract.GrantID(p.Session.ID), IntentHash: p.Session.IntentHash,
+			g := paycontract.AuthorizationGrant{Version: t.row.ContractVersion, JTI: t.spec().GrantID(p.Session.ID), IntentHash: p.Session.IntentHash,
 				ApprovalSessionID: p.Session.ID, Decision: "approve", AuthorizationMethod: "webauthn", Issuer: paycontract.Recorder, Audience: "signer",
 				ApproverID: by.by, IssuedAt: now, ExpiresAt: min(r.ExpiresAt, p.V1.PaymentBinding.ValidBefore),
 				SignerApprovalID: r.SignerApprovalID, CredentialRef: r.CredentialRef, AMR: []string{"webauthn"}}

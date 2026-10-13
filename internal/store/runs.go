@@ -152,9 +152,9 @@ func validRun(w runRow) string {
 		if r.DelegationID != "" {
 			return "an apa.m1.v2 run has a delegation"
 		}
-	case paycontract.Version:
+	case paycontract.Version, paycontract.V2:
 		if r.DelegationID == "" {
-			return "an apa.pay.v1 run has no delegation"
+			return "a pay-family run has no delegation"
 		}
 	default:
 		return "unknown contract version"
@@ -325,8 +325,8 @@ func (s *Store) AcceptRun(req RunRequest) (run Run, created bool, err error) {
 		return Run{}, false, refuse("INVALID_RUN_RECORD", "request_id, scenario and digest are required")
 	}
 	version := cmp.Or(req.ContractVersion, contracts.Version)
-	if (version == paycontract.Version) != (req.DelegationID != "") || version != contracts.Version && version != paycontract.Version {
-		return Run{}, false, refuse("INVALID_RUN_RECORD", "an apa.pay.v1 run, and only one, starts with a delegation")
+	if paycontract.Supported(version) != (req.DelegationID != "") || version != contracts.Version && !paycontract.Supported(version) {
+		return Run{}, false, refuse("INVALID_RUN_RECORD", "a pay-family run, and only one, starts with a delegation")
 	}
 	err = s.write(func(tx *sql.Tx, now uint64) error {
 		w, err := scanRun(tx.QueryRow(`SELECT `+runCols+` FROM host_runs WHERE request_id = ?`, req.RequestID))

@@ -22,17 +22,21 @@ type Input struct {
 	ContractVersion string
 	TaskStatus      string
 	Profile         *policy.Profile
-	Credential      *policy.Credential
+	Credential      *policy.Credential         // apa.pay.v1: the marked fixture; nil in apa.pay.v2
+	Check           *contracts.CredentialCheck // apa.pay.v2: the verifier's record of this purchase's presentation
 	Budget          policy.Budget
 	Now             uint64
 }
 
-// Decide returns the decision for one apa.pay.v1 purchase, or an error
+// Decide returns the decision for one pay-family purchase, or an error
 // when there is nothing to decide (another contract's task, an invalid or
-// foreign purchase, an ended task, contradictory trusted inputs).
+// foreign purchase, an ended task, contradictory trusted inputs). In
+// apa.pay.v2 the credential step comes first (docs/commercial-c2-design.md
+// 3.3): a result other than valid decides Deny with its reason; a valid
+// one gives Rules the credential's verified expiry.
 func Decide(reg *contracts.Registry, in Input) (contracts.PolicyDecision, error) {
-	if in.ContractVersion != paycontract.Version || in.Purchase.Version != in.ContractVersion {
-		return contracts.PolicyDecision{}, &paycontract.Error{Code: "CONTRACT_VERSION_MISMATCH", Detail: "the task is not an apa.pay.v1 task"}
+	if !paycontract.Supported(in.ContractVersion) || in.Purchase.Version != in.ContractVersion {
+		return contracts.PolicyDecision{}, &paycontract.Error{Code: "CONTRACT_VERSION_MISMATCH", Detail: "the task is not a pay-family task of the purchase's version"}
 	}
 	if err := paycontract.ValidatePurchase(reg, in.Session, in.Purchase); err != nil {
 		return contracts.PolicyDecision{}, err
@@ -47,8 +51,19 @@ func Decide(reg *contracts.Registry, in Input) (contracts.PolicyDecision, error)
 	if in.Budget.TaskID != in.Session.TaskID {
 		return contracts.PolicyDecision{}, fmt.Errorf("budget belongs to task %q, not %q", in.Budget.TaskID, in.Session.TaskID)
 	}
-	// P1-a accepts the marked fixture credential only (C2 brings BBS+).
-	if c := in.Credential; c != nil && (c.ConsumerID != in.Session.ConsumerID || c.EvidenceMode != "fixture") {
+	var credentialDeny string
+	if in.ContractVersion == paycontract.V2 {
+		c := in.Check
+		if in.Credential != nil || c == nil {
+			return contracts.PolicyDecision{}, fmt.Errorf("an apa.pay.v2 decision takes the verifier's record, never a fixture credential")
+		}
+		if c.Result == "valid" {
+			in.Credential = &policy.Credential{ConsumerID: in.Session.ConsumerID, ValidUntil: c.Expiry, EvidenceMode: "bbs"}
+		} else if credentialDeny = paycontract.CredentialDeny[c.Result]; credentialDeny == "" {
+			return contracts.PolicyDecision{}, fmt.Errorf("credential result %q", c.Result)
+		}
+	} else if c := in.Credential; in.Check != nil || c != nil && (c.ConsumerID != in.Session.ConsumerID || c.EvidenceMode != "fixture") {
+		// apa.pay.v1 accepts the marked fixture credential only.
 		return contracts.PolicyDecision{}, fmt.Errorf("credential is not this consumer's fixture")
 	}
 	remaining, err := in.Budget.Remaining.Units()
@@ -71,16 +86,18 @@ func Decide(reg *contracts.Registry, in Input) (contracts.PolicyDecision, error)
 	asset, trusted := reg.TrustedAsset(b.ChainID, b.AssetContract)
 	out := policy.Rules(policy.RuleInput{Profile: in.Profile, Credential: in.Credential, AssetTrusted: trusted, AssetID: asset.AssetID, PayTo: b.PayTo,
 		Amount: amount, Remaining: remaining, ValidAfter: b.ValidAfter, ValidBefore: b.ValidBefore, Now: in.Now})
-	d := contracts.PolicyDecision{Version: paycontract.Version, IntentHash: hash, PaymentStatus: paycontract.PaymentNotEnabled,
+	d := contracts.PolicyDecision{Version: in.ContractVersion, IntentHash: hash, PaymentStatus: paycontract.PaymentNotEnabled,
 		PolicyVerdict: "Deny", ApprovalStatus: "not_requested", Reason: out.Reason}
-	switch out.Kind {
-	case policy.WithinAllowMax: // an Allow is not a payment: no grant, no capability
+	switch {
+	case credentialDeny != "": // the credential decides before the rules (design 3.3)
+		d.Reason = credentialDeny
+	case out.Kind == policy.WithinAllowMax: // an Allow is not a payment: no grant, no capability
 		d.PolicyVerdict = "Allow"
-	case policy.NeedsApproval:
+	case out.Kind == policy.NeedsApproval:
 		d.PolicyVerdict, d.ApprovalStatus = "Ask", "pending"
 	}
 	if err := paycontract.ValidateDecision(d); err != nil {
-		return contracts.PolicyDecision{}, err // unreachable: every kind maps to a valid v1 decision
+		return contracts.PolicyDecision{}, err // unreachable: every kind maps to a valid decision of its version
 	}
 	return d, nil
 }

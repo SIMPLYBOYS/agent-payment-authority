@@ -340,6 +340,23 @@ func TestPayRecoveryRefuses(t *testing.T) {
 	}
 }
 
+// C2b: a delegation not yet bound to a task is checked by its own body:
+// its ID is its version's, so a v1 body flipped to v2 does not reopen.
+func TestUnboundDelegationVersion(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	e.delegation(s, "consumer-a", "dlg-req-a-0000000000009", 30)
+	s.Close()
+	db := rawDB(t, e.path)
+	if _, err := db.Exec(`UPDATE delegations SET body = replace(body, '"version":"apa.pay.v1"', '"version":"apa.pay.v2"')`); err != nil {
+		t.Fatal(err)
+	}
+	var ce *CorruptError
+	if _, err := Open(Config{Path: e.path, Registry: e.reg, Offers: e.offers, Clock: e.clock.clock()}); !errors.As(err, &ce) {
+		t.Fatalf("Open: %v", err)
+	}
+}
+
 // A schema 2 file (M1 tasks and a run) upgrades to the current schema with --upgrade-db:
 // backed up, the data unchanged, its tasks and run apa.m1.v2; without the
 // flag it is refused and left as it was.

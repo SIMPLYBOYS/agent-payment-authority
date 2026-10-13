@@ -101,3 +101,55 @@ func TestSameFieldsBothEntries(t *testing.T) {
 		t.Errorf("a v2 purchase in a v1 task: %v", err)
 	}
 }
+
+// C2b: apa.pay.v2 decides by the verifier's record first (design 3.3).
+func TestV2CredentialStep(t *testing.T) {
+	var cfg contracts.RegistryConfig
+	load(t, "testdata/contracts/registry.json", &cfg)
+	reg, _ := contracts.NewRegistry(cfg)
+	var m contracts.PurchaseOrder
+	load(t, "testdata/contracts/purchase-input.json", &m)
+	var prof policy.Profile
+	load(t, "testdata/policy/m1-demo-profile.json", &prof)
+	sess := contracts.Session{ConsumerID: m.Intent.ConsumerID, AgentID: m.Intent.AgentID, TaskID: m.Intent.TaskID}
+	v2 := v1Of(t, m)
+	sp, _ := paycontract.SpecOf(paycontract.V2)
+	v2.Version, v2.Intent.Version, v2.Intent.Domain = paycontract.V2, paycontract.V2, paycontract.DomainV2
+	v2.Intent.ResourceHash, _ = sp.ResourceHash(v2.Intent.HTTPMethod, v2.Intent.ResourceURL)
+	v2.Intent.PaymentRequirementHash, _ = sp.RequirementHash(v2.Quote)
+	small := prof
+	small.AllowMax = "500000" // within allow_max: Allow when the credential is valid
+	budget := policy.Budget{TaskID: sess.TaskID, Remaining: "5000000"}
+	in := func(c *contracts.CredentialCheck) Input {
+		return Input{Session: sess, Purchase: v2, ContractVersion: paycontract.V2, TaskStatus: "running", Profile: &small, Check: c, Budget: budget, Now: 1790726450}
+	}
+	valid := &contracts.CredentialCheck{Result: "valid", Expiry: 1790726450 + 3600, Verifier: "host-1"}
+	for _, c := range []struct {
+		check            *contracts.CredentialCheck
+		verdict, reason string
+	}{
+		{valid, "Allow", "WITHIN_ALLOW_MAX"},
+		{&contracts.CredentialCheck{Result: "invalid", Detail: "PROOF_INVALID", Verifier: "host-1"}, "Deny", "CREDENTIAL_INVALID"},
+		{&contracts.CredentialCheck{Result: "revoked", Verifier: "host-1"}, "Deny", "CREDENTIAL_REVOKED"},
+		{&contracts.CredentialCheck{Result: "status_unavailable", Verifier: "host-1"}, "Deny", "CREDENTIAL_STATUS_UNAVAILABLE"},
+		{&contracts.CredentialCheck{Result: "expired", Verifier: "host-1"}, "Deny", "AUTHORIZATION_EXPIRED"},
+		{&contracts.CredentialCheck{Result: "absent", Verifier: "host-1"}, "Deny", "CONFIG_MISSING"},
+	} {
+		d, err := Decide(reg, in(c.check))
+		if err != nil || d.PolicyVerdict != c.verdict || d.Reason != c.reason || d.Version != paycontract.V2 {
+			t.Errorf("%s: %+v %v", c.check.Result, d, err)
+		}
+	}
+	bad := in(valid)
+	bad.Credential = &policy.Credential{ConsumerID: sess.ConsumerID, ValidUntil: 1790726450 + 86400, EvidenceMode: "fixture"}
+	if _, err := Decide(reg, bad); err == nil {
+		t.Error("a v2 decision took a fixture credential")
+	}
+	if _, err := Decide(reg, in(nil)); err == nil {
+		t.Error("a v2 decision without the verifier's record")
+	}
+	v1in := Input{Session: sess, Purchase: v1Of(t, m), ContractVersion: paycontract.Version, TaskStatus: "running", Profile: &small, Check: valid, Budget: budget, Now: 1790726450}
+	if _, err := Decide(reg, v1in); err == nil {
+		t.Error("a v1 decision took a credential record")
+	}
+}

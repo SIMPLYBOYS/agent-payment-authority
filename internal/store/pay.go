@@ -10,6 +10,7 @@ package store
 // pay: a simulated grant gives no payment capability.
 
 import (
+	"cmp"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -22,17 +23,25 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 )
 
-func (t *taskTx) v1() bool { return t.row.ContractVersion == paycontract.Version }
+// specs is a pay-family version's spec; an unknown version gets the zero
+// Spec, whose IDs never match a stored one.
+func specs(version string) paycontract.Spec { s, _ := paycontract.SpecOf(version); return s }
+
+// pay reports a pay-family task (apa.pay.v1 or apa.pay.v2); spec is its
+// contract's rules (C2a, docs/commercial-c2-design.md 3.1).
+func (t *taskTx) pay() bool { return paycontract.Supported(t.row.ContractVersion) }
+
+func (t *taskTx) spec() paycontract.Spec { s, _ := paycontract.SpecOf(t.row.ContractVersion); return s }
 
 func (t *taskTx) genesis() (string, error) {
-	if t.v1() {
-		return paycontract.GenesisHash(t.row.TaskID)
+	if t.pay() {
+		return t.spec().GenesisHash(t.row.TaskID)
 	}
 	return contracts.GenesisHash(t.row.TaskID)
 }
 
 func (t *taskTx) eventHash(e contracts.AuditEvent) (string, error) {
-	if t.v1() {
+	if t.pay() {
 		return paycontract.EventHash(e)
 	}
 	return contracts.EventHash(e)
@@ -47,7 +56,7 @@ func (t *taskTx) validateEvent(e contracts.AuditEvent) error {
 			return fmt.Errorf("event names purchase %s, which is not stored", po)
 		}
 	}
-	if t.v1() {
+	if t.pay() {
 		var order *paycontract.PurchaseOrder
 		if p != nil {
 			order = p.V1
@@ -62,7 +71,7 @@ func (t *taskTx) validateEvent(e contracts.AuditEvent) error {
 }
 
 func (t *taskTx) validateOrder() error {
-	if t.v1() {
+	if t.pay() {
 		return paycontract.ValidateEventOrder(t.events)
 	}
 	return contracts.ValidateEventOrder(t.events)
@@ -241,6 +250,7 @@ func readDelegation(q interface {
 // Every term is the host's (catalog and profile); RequestID makes a resend
 // the same delegation; ConfirmedBy is the trusted simulated approver.
 type DelegationRequest struct {
+	ContractVersion                                                string // the scenario's pay-family version ("" = apa.pay.v1)
 	RequestID, ConsumerID, Scenario, Purpose, AssetID, ConfirmedBy string
 	Merchants                                                      []string
 	TaskBudget, AllowMax                                           contracts.Amount
@@ -262,9 +272,14 @@ func (s *Store) ConfirmDelegation(req DelegationRequest) (DelegationView, bool, 
 	if !requestIDPattern.MatchString(req.RequestID) {
 		return out, false, refuse("INVALID_DELEGATION", "request_id")
 	}
+	version := cmp.Or(req.ContractVersion, paycontract.Version)
+	sp, ok := paycontract.SpecOf(version)
+	if !ok {
+		return out, false, refuse("INVALID_DELEGATION", "contract version")
+	}
 	err := s.write(func(tx *sql.Tx, now uint64) error {
-		id := paycontract.DelegationID(req.RequestID)
-		d := paycontract.Delegation{Version: paycontract.Version, DelegationID: id, ConsumerID: req.ConsumerID, Scenario: req.Scenario, Purpose: req.Purpose,
+		id := sp.DelegationID(req.RequestID)
+		d := paycontract.Delegation{Version: version, DelegationID: id, ConsumerID: req.ConsumerID, Scenario: req.Scenario, Purpose: req.Purpose,
 			Merchants: req.Merchants, AssetID: req.AssetID, TaskBudget: req.TaskBudget, AllowMax: req.AllowMax, ApprovalDeadlineSeconds: req.ApprovalDeadlineSeconds,
 			ConfirmedBy: req.ConfirmedBy, ConfirmMethod: "simulated", ConfirmedAt: now, ExpiresAt: now + req.ValidSeconds}
 		old, bound, err := readDelegation(tx, id)
@@ -383,7 +398,7 @@ func (s *Store) submitV1(t *taskTx, sess contracts.Session, po paycontract.Purch
 		return err
 	}
 	if d.PolicyVerdict == "Ask" {
-		ss := &sessionRow{ID: paycontract.SessionID(t.row.TaskID, i.PurchaseOrderID), TaskID: t.row.TaskID, PO: i.PurchaseOrderID,
+		ss := &sessionRow{ID: t.spec().SessionID(t.row.TaskID, i.PurchaseOrderID), TaskID: t.row.TaskID, PO: i.PurchaseOrderID,
 			ConsumerID: t.row.ConsumerID, IntentHash: d.IntentHash, OpenedAt: t.now, State: "pending"}
 		ss.ExpiresAt = t.sessionDeadline(p)
 		if _, err := t.tx.Exec(`INSERT INTO approval_sessions (approval_session_id, task_id, purchase_order_id, consumer_id, intent_hash, opened_at, expires_at, state)
@@ -450,7 +465,7 @@ func (s *Store) ResolveApproval(req ApprovalRequest) (ApprovalResult, error) {
 		}
 		p := t.purchases[ss.PO]
 		out.TaskID = t.row.TaskID
-		if p == nil || p.Session == nil || !t.v1() {
+		if p == nil || p.Session == nil || !t.pay() {
 			return &CorruptError{Check: "approval", TaskID: ss.TaskID, Detail: "session without its apa.pay.v1 purchase"}
 		}
 		// A resend of the request that decided this session: the same answer.
@@ -494,7 +509,7 @@ func (s *Store) ResolveApproval(req ApprovalRequest) (ApprovalResult, error) {
 			if err := t.close(p, "APPROVED", "approved", "SIMULATED_APPROVAL", &resolver{req.RequestID, req.Approver, "simulated", ""}); err != nil {
 				return err
 			}
-			g := paycontract.AuthorizationGrant{Version: paycontract.Version, JTI: paycontract.GrantID(p.Session.ID), IntentHash: p.Session.IntentHash,
+			g := paycontract.AuthorizationGrant{Version: t.row.ContractVersion, JTI: t.spec().GrantID(p.Session.ID), IntentHash: p.Session.IntentHash,
 				ApprovalSessionID: p.Session.ID, Decision: "approve", AuthorizationMethod: "simulated", Issuer: paycontract.Issuer, Audience: "signer",
 				ApproverID: req.Approver, IssuedAt: now, ExpiresAt: p.V1.PaymentBinding.ValidBefore} // pending here means now < the deadline <= valid_before
 			if err := g.Validate(); err != nil {
@@ -623,7 +638,7 @@ func (s *Store) itemsOf(tx *sql.Tx, id, consumerID string) ([]ApprovalItem, erro
 // every approved session's one grant, each matching the events. An M1 task
 // has none of them. It returns "" or what is wrong.
 func (t *taskTx) verifyPay() string {
-	if !t.v1() {
+	if !t.pay() {
 		if t.delegation != "" {
 			return "an apa.m1.v2 task has a delegation"
 		}
@@ -668,7 +683,7 @@ func (t *taskTx) verifyPay() string {
 		if ss.ExpiresAt != t.sessionDeadline(p) {
 			return "purchase " + po + ": the session's deadline is not the one its decision time, terms and valid_before give"
 		}
-		if ss.ID != paycontract.SessionID(t.row.TaskID, po) || ss.IntentHash != p.Decision.IntentHash || ss.ConsumerID != t.row.ConsumerID ||
+		if ss.ID != t.spec().SessionID(t.row.TaskID, po) || ss.IntentHash != p.Decision.IntentHash || ss.ConsumerID != t.row.ConsumerID ||
 			ss.OpenedAt != p.DecidedAt || !opened[ss.ID] || (ss.State == "pending") != (closed == "") || closed != "" && ss.State != closed ||
 			ss.ClosedAt.Valid && uint64(ss.ClosedAt.Int64) != uint64(p.ClosedAt.Int64) {
 			return "purchase " + po + ": its session does not match the purchase or its events"
@@ -711,8 +726,8 @@ func verifyPayTables(tx *sql.Tx) error {
 		return &CorruptError{Check: "approval", Detail: fmt.Sprintf(format, a...)}
 	}
 	for _, c := range []struct{ q, why string }{
-		{`SELECT count(*) FROM approval_sessions s JOIN tasks t USING (task_id) WHERE t.contract_version != 'apa.pay.v1'`, "an apa.m1.v2 task has an approval session"},
-		{`SELECT count(*) FROM delegations d JOIN tasks t USING (task_id) WHERE t.contract_version != 'apa.pay.v1' OR t.consumer_id != d.consumer_id`, "a delegation is bound to an apa.m1.v2 or another consumer's task"},
+		{`SELECT count(*) FROM approval_sessions s JOIN tasks t USING (task_id) WHERE t.contract_version NOT IN ('apa.pay.v1', 'apa.pay.v2')`, "an apa.m1.v2 task has an approval session"},
+		{`SELECT count(*) FROM delegations d JOIN tasks t USING (task_id) WHERE t.contract_version NOT IN ('apa.pay.v1', 'apa.pay.v2') OR t.consumer_id != d.consumer_id OR json_extract(d.body, '$.version') != t.contract_version`, "a delegation is bound to an apa.m1.v2 or another consumer's task"},
 		{`SELECT count(*) FROM grants g JOIN approval_sessions s USING (approval_session_id) WHERE s.state != 'approved' OR g.intent_hash != s.intent_hash`, "a grant's session is not approved or has another intent"},
 	} {
 		var n int
@@ -736,7 +751,7 @@ func verifyPayTables(tx *sql.Tx) error {
 		}
 		var d paycontract.Delegation
 		c, cerr := contracts.Canonical([]byte(body))
-		if cerr != nil || string(c) != body || contracts.Decode(c, &d) != nil || d.Version != paycontract.Version || d.Validate() != nil || d.DelegationID != id || id != paycontract.DelegationID(req) ||
+		if cerr != nil || string(c) != body || contracts.Decode(c, &d) != nil || d.Validate() != nil || d.DelegationID != id || id != specs(d.Version).DelegationID(req) ||
 			d.ConsumerID != consumer || d.ConfirmedAt != confirmed || d.ExpiresAt != expires {
 			return bad("delegation %s: body and columns disagree", id)
 		}
