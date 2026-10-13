@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
@@ -147,8 +148,9 @@ func (t *taskTx) sessionDeadline(p *purchaseRow) uint64 {
 }
 
 // resolver is who closed a session by deciding it: the approval request's
-// ID, the approver and the method.
-type resolver struct{ requestID, by, method string }
+// ID, the approver and the method; signer is the Signer's approval ID of a
+// webauthn decision (A2).
+type resolver struct{ requestID, by, method, signer string }
 
 func (t *taskTx) closeSession(p *purchaseRow, state string, by *resolver) error {
 	ss := p.Session
@@ -484,12 +486,12 @@ func (s *Store) ResolveApproval(req ApprovalRequest) (ApprovalResult, error) {
 			}
 			out.Outcome = "superseded"
 		} else if req.Decision == "deny" {
-			if err := t.close(p, "APPROVAL_DENIED", "denied", "APPROVER_DENIED", &resolver{req.RequestID, req.Approver, "simulated"}); err != nil {
+			if err := t.close(p, "APPROVAL_DENIED", "denied", "APPROVER_DENIED", &resolver{req.RequestID, req.Approver, "simulated", ""}); err != nil {
 				return err
 			}
 			out.Outcome = "denied"
 		} else {
-			if err := t.close(p, "APPROVED", "approved", "SIMULATED_APPROVAL", &resolver{req.RequestID, req.Approver, "simulated"}); err != nil {
+			if err := t.close(p, "APPROVED", "approved", "SIMULATED_APPROVAL", &resolver{req.RequestID, req.Approver, "simulated", ""}); err != nil {
 				return err
 			}
 			g := paycontract.AuthorizationGrant{Version: paycontract.Version, JTI: paycontract.GrantID(p.Session.ID), IntentHash: p.Session.IntentHash,
@@ -502,7 +504,7 @@ func (s *Store) ResolveApproval(req ApprovalRequest) (ApprovalResult, error) {
 			if err != nil {
 				return err
 			}
-			if _, err := tx.Exec(`INSERT INTO grants VALUES (?, ?, ?, ?, ?, ?)`, g.JTI, g.ApprovalSessionID, g.IntentHash, g.AuthorizationMethod, string(body), now); uniqueViolation(err) {
+			if _, err := tx.Exec(`INSERT INTO grants (jti, approval_session_id, intent_hash, authorization_method, body, issued_at) VALUES (?, ?, ?, ?, ?, ?)`, g.JTI, g.ApprovalSessionID, g.IntentHash, g.AuthorizationMethod, string(body), now); uniqueViolation(err) {
 				return refuse("IDEMPOTENCY_CONFLICT", "this session already has a grant")
 			} else if err != nil {
 				return err
@@ -537,12 +539,13 @@ func grantOf(ss *sessionRow) (*paycontract.AuthorizationGrant, error) {
 // approver sees it: the session and the purchase summary it was opened for,
 // read from the stored task; the delegation's terms when there is one.
 type ApprovalItem struct {
-	TaskID     string          `json:"task_id"`
-	ConsumerID string          `json:"consumer_id"`
-	WalletID   string          `json:"wallet_id"`
-	Payer      string          `json:"payer"`
-	Purchase   PurchaseView    `json:"purchase"`
-	Delegation *DelegationView `json:"delegation,omitempty"`
+	TaskID     string           `json:"task_id"`
+	ConsumerID string           `json:"consumer_id"`
+	WalletID   string           `json:"wallet_id"`
+	Payer      string           `json:"payer"`
+	Purchase   PurchaseView     `json:"purchase"`
+	Delegation *DelegationView  `json:"delegation,omitempty"`
+	Attempt    *ApprovalAttempt `json:"attempt,omitempty"` // A2: the session's latest webauthn attempt
 }
 
 // Approvals lists consumerID's approval sessions, newest first, at most
@@ -572,29 +575,45 @@ func (s *Store) Approvals(consumerID string, limit int) ([]ApprovalItem, error) 
 	}
 	out := []ApprovalItem{}
 	for _, id := range tasks {
-		t, err := s.openTask(tx, 0, id)
+		items, err := s.itemsOf(tx, id, consumerID)
 		if err != nil {
 			return nil, err
 		}
-		var dv *DelegationView
-		if t.delegation != "" {
-			d, _, err := readDelegation(tx, t.delegation)
-			if err != nil || d == nil {
-				return nil, fmt.Errorf("task %s: delegation %s unreadable", id, t.delegation)
-			}
-			dv = &DelegationView{Delegation: *d, TaskID: id}
-		}
-		for _, p := range t.purchases {
-			if p.Session != nil && t.row.ConsumerID == consumerID {
-				out = append(out, ApprovalItem{TaskID: id, ConsumerID: t.row.ConsumerID, WalletID: t.row.WalletID, Payer: t.row.Payer, Purchase: t.view(p), Delegation: dv})
-			}
-		}
+		out = append(out, items...)
 	}
 	slices.SortFunc(out, func(a, b ApprovalItem) int {
 		return int(b.Purchase.Approval.OpenedAt) - int(a.Purchase.Approval.OpenedAt)
 	})
 	if len(out) > limit {
 		out = out[:limit]
+	}
+	return out, nil
+}
+
+// itemsOf is a task's approval items of consumer, with each session's
+// latest webauthn attempt.
+func (s *Store) itemsOf(tx *sql.Tx, id, consumerID string) ([]ApprovalItem, error) {
+	t, err := s.openTask(tx, 0, id)
+	if err != nil {
+		return nil, err
+	}
+	var dv *DelegationView
+	if t.delegation != "" {
+		d, _, err := readDelegation(tx, t.delegation)
+		if err != nil || d == nil {
+			return nil, fmt.Errorf("task %s: delegation %s unreadable", id, t.delegation)
+		}
+		dv = &DelegationView{Delegation: *d, TaskID: id}
+	}
+	var out []ApprovalItem
+	for _, p := range t.purchases {
+		if p.Session != nil && t.row.ConsumerID == consumerID {
+			it := ApprovalItem{TaskID: id, ConsumerID: t.row.ConsumerID, WalletID: t.row.WalletID, Payer: t.row.Payer, Purchase: t.view(p), Delegation: dv}
+			if err := attemptOf(tx, &it); err != nil {
+				return nil, err
+			}
+			out = append(out, it)
+		}
 	}
 	return out, nil
 }
@@ -622,13 +641,20 @@ func (t *taskTx) verifyPay() string {
 	if err != nil || d == nil || d.ConsumerID != t.row.ConsumerID {
 		return "the bound delegation is unreadable or another consumer's"
 	}
-	opened, granted, grantedAt := map[string]bool{}, map[string]string{}, map[string]uint64{}
+	opened, granted, grantedAt, grantedBy := map[string]bool{}, map[string]string{}, map[string]uint64{}, map[string]string{}
 	for _, e := range events["APPROVAL_SESSION_OPENED"] {
 		opened[e.Payload.ApprovalSessionID] = true
 	}
 	for _, e := range events["GRANT_ISSUED"] {
 		granted[e.Payload.ApprovalSessionID] = e.Payload.GrantID
 		grantedAt[e.Payload.ApprovalSessionID] = e.ObservedAt
+		grantedBy[e.Payload.ApprovalSessionID] = e.Payload.SignerApprovalID
+	}
+	resolvedBy := map[string]string{} // session -> the Signer approval its APPROVED or APPROVAL_DENIED names
+	for _, typ := range []string{"APPROVED", "APPROVAL_DENIED"} {
+		for _, e := range events[typ] {
+			resolvedBy[e.Payload.ApprovalSessionID] = e.Payload.AuthorizationMethod + "/" + e.Payload.SignerApprovalID
+		}
 	}
 	for po, p := range t.purchases {
 		ss := p.Session
@@ -658,12 +684,20 @@ func (t *taskTx) verifyPay() string {
 		case g != nil:
 			// Its times: issued when the session was approved (the closing
 			// time, the grants row and GRANT_ISSUED say the same), expiring
-			// at the binding's valid_before; by the approver who closed it.
+			// at the binding's valid_before (a webauthn grant: the Signer's
+			// approval expiry, never later); by the approver who closed it,
+			// and for webauthn the same Signer approval everywhere.
 			c, _ := contracts.Canonical([]byte(ss.grantBody))
-			if string(c) != ss.grantBody || g.ExpiresAt != p.V1.PaymentBinding.ValidBefore || g.IssuedAt != uint64(ss.ClosedAt.Int64) ||
-				g.IssuedAt != ss.grantIssuedAt || g.IssuedAt != grantedAt[ss.ID] || g.ApproverID != ss.ResolvedBy.String {
-				return "purchase " + po + ": the grant's times or approver do not match its session, binding or GRANT_ISSUED"
+			vb := p.V1.PaymentBinding.ValidBefore
+			expiry := g.ExpiresAt == vb || g.AuthorizationMethod == "webauthn" && g.ExpiresAt < vb
+			if string(c) != ss.grantBody || !expiry || g.IssuedAt != uint64(ss.ClosedAt.Int64) ||
+				g.IssuedAt != ss.grantIssuedAt || g.IssuedAt != grantedAt[ss.ID] || g.ApproverID != ss.ResolvedBy.String ||
+				grantedBy[ss.ID] != g.SignerApprovalID || resolvedBy[ss.ID] != g.AuthorizationMethod+"/"+g.SignerApprovalID {
+				return "purchase " + po + ": the grant's times, approver or Signer approval do not match its session, binding or events"
 			}
+		}
+		if m := resolvedBy[ss.ID]; m != "" && (strings.HasPrefix(m, "webauthn/") != strings.HasPrefix(ss.ResolvedBy.String, "webauthn:")) {
+			return "purchase " + po + ": the method of its decision event is not its session's"
 		}
 	}
 	return ""

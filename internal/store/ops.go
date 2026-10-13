@@ -329,7 +329,7 @@ func (t *taskTx) close(p *purchaseRow, event, approval, reason string, by *resol
 	if p.Session != nil {
 		payload.ApprovalSessionID = p.Session.ID
 		if by != nil {
-			payload.AuthorizationMethod = by.method
+			payload.AuthorizationMethod, payload.SignerApprovalID = by.method, by.signer
 		}
 	}
 	if err := t.emit(event, p, payload); err != nil {

@@ -31,8 +31,10 @@ import (
 // (docs/demo-operation-design.md section 13); 3 adds the contract version of
 // tasks and runs, delegations, approval sessions and grants
 // (docs/commercial-transaction-flow.md section 10); 4 adds payment_attempts
-// (docs/commercial-p1b-design.md 6.4).
-const schemaVersion = 4
+// (docs/commercial-p1b-design.md 6.4); 5 lets grants mirror a
+// Signer-verified webauthn decision and adds approval_attempts
+// (docs/commercial-human-approval-design.md 6.2).
+const schemaVersion = 5
 const defaultDeadline = 30 // seconds an Ask waits for approval
 
 // Clock is the trusted host clock in Unix seconds; never a caller's value.
@@ -51,7 +53,7 @@ type Config struct {
 	Registry contracts.RegistryConfig
 	Offers   OfferBook
 	Clock    Clock
-	// UpgradeDB lets Open migrate a schema 1, 2 or 3 database to 4 (demo
+	// UpgradeDB lets Open migrate a schema 1, 2, 3 or 4 database to 5 (demo
 	// --upgrade-db): verify as the old version, back up with VACUUM INTO,
 	// migrate, verify as 4. Without it an older database is refused and
 	// left untouched.
@@ -441,8 +443,8 @@ func upgradeRequired(path string, v int) error {
 }
 
 // migrate sets WAL (a property of the file) and brings the schema to the
-// current version, never down. A new file gets schema 4 in one transaction.
-// A schema 1, 2 or 3 file is refused untouched unless upgrade is set; then
+// current version, never down. A new file gets schema 5 in one transaction.
+// A schema 1 to 4 file is refused untouched unless upgrade is set; then
 // upgradeFrom runs. Any other version is refused.
 func (s *Store) migrate(upgrade bool) error {
 	var v int
@@ -452,7 +454,7 @@ func (s *Store) migrate(upgrade bool) error {
 	switch v {
 	case schemaVersion:
 	case 0:
-	case 1, 2, 3:
+	case 1, 2, 3, 4:
 		if !upgrade {
 			return upgradeRequired(s.path, v)
 		}
@@ -464,7 +466,7 @@ func (s *Store) migrate(upgrade bool) error {
 		return fmt.Errorf("journal_mode WAL not set (%q, %v)", mode, err)
 	}
 	switch v {
-	case 1, 2, 3:
+	case 1, 2, 3, 4:
 		return s.upgradeFrom(v)
 	case 0:
 		tx, err := s.w.Begin()
@@ -475,7 +477,7 @@ func (s *Store) migrate(upgrade bool) error {
 		if err := tx.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 0 {
 			return fmt.Errorf("schema changed while opening (%d, %v)", v, err)
 		}
-		if _, err := tx.Exec(schema + runsSchema + schema3 + schema4); err != nil {
+		if _, err := tx.Exec(schema + runsSchema + schema3 + schema4 + schema5); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
@@ -486,11 +488,11 @@ func (s *Store) migrate(upgrade bool) error {
 	return nil
 }
 
-// upgradeFrom is --upgrade-db (section 13.8 R2, kept for schemas 3 and 4): verify
+// upgradeFrom is --upgrade-db (section 13.8 R2, kept for schemas 3 to 5): verify
 // as the old version (read only), back up with VACUUM INTO, add what each
-// later version adds in one transaction, verify as schema 4. A failure
+// later version adds in one transaction, verify as schema 5. A failure
 // before the commit leaves the old version and keeps the backup; a failure
-// of the last verify leaves schema 4 and Open serves nothing: restore the
+// of the last verify leaves schema 5 and Open serves nothing: restore the
 // backup to a NEW path (section 13.14.1). Hook stages: verified<old>,
 // backed-up, migrate, verified<new>.
 func (s *Store) upgradeFrom(from int) error {
@@ -519,7 +521,7 @@ func (s *Store) upgradeFrom(from int) error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != from {
 		return fmt.Errorf("schema changed during the upgrade (%d, %v)", v, err)
 	}
-	ddl := map[int]string{1: runsSchema + schema3 + schema4, 2: schema3 + schema4, 3: schema4}[from]
+	ddl := map[int]string{1: runsSchema + schema3 + schema4 + schema5, 2: schema3 + schema4 + schema5, 3: schema4 + schema5, 4: schema5}[from]
 	if _, err := tx.Exec(ddl); err != nil {
 		return err
 	}

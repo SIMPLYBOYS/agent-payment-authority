@@ -339,6 +339,11 @@ func (s *Store) verify(version int) error {
 			return err
 		}
 	}
+	if version >= 5 {
+		if err := verifyApprovals(tx); err != nil {
+			return err
+		}
+	}
 	if version >= 2 {
 		return verifyRuns(tx, version)
 	}

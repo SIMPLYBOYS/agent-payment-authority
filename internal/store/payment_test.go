@@ -197,10 +197,33 @@ func TestPaymentSchemaChecks(t *testing.T) {
 	}
 }
 
+// toSchema4 turns the current file into schema 4 as P1-b wrote it: schema
+// 5 rebuilt grants (method webauthn, signer_approval_id) and added
+// approval_attempts.
+func toSchema4(t *testing.T, path string) {
+	t.Helper()
+	if _, err := rawDB(t, path).Exec(`DROP TABLE approval_attempts;
+CREATE TABLE grants_v4 (
+  jti                  TEXT PRIMARY KEY,
+  approval_session_id  TEXT NOT NULL UNIQUE REFERENCES approval_sessions,
+  intent_hash          TEXT NOT NULL,
+  authorization_method TEXT NOT NULL CHECK (authorization_method = 'simulated'),
+  body                 TEXT NOT NULL,
+  issued_at            INTEGER NOT NULL
+) STRICT;
+INSERT INTO grants_v4 SELECT jti, approval_session_id, intent_hash, authorization_method, body, issued_at FROM grants;
+DROP TABLE grants;
+ALTER TABLE grants_v4 RENAME TO grants;
+PRAGMA user_version = 4`); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // toSchema3 turns the current file into schema 3 as P1-a wrote it: schema 4
 // only added payment_attempts.
 func toSchema3(t *testing.T, path string) {
 	t.Helper()
+	toSchema4(t, path)
 	if _, err := rawDB(t, path).Exec(`DROP TABLE payment_attempts; PRAGMA user_version = 3`); err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +257,7 @@ func TestUpgradeSchema3(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if userVersion(t, e.path) != 4 || fingerprint(t, e.path) != want || grant() != g || count(t, e.path, "payment_attempts", "") != 0 {
+	if userVersion(t, e.path) != schemaVersion || fingerprint(t, e.path) != want || grant() != g || count(t, e.path, "payment_attempts", "") != 0 {
 		t.Fatal("migration changed simulated data")
 	}
 	if m, _ := filepath.Glob(e.path + ".schema3-*.bak"); len(m) != 1 {

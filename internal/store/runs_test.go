@@ -143,7 +143,7 @@ func TestUpgradeFailures(t *testing.T) {
 		stage   string
 		version int
 		backup  bool
-	}{{"verified1", 1, false}, {"backed-up", 1, true}, {"migrate", 1, true}, {"verified4", 4, true}} {
+	}{{"verified1", 1, false}, {"backed-up", 1, true}, {"migrate", 1, true}, {"verified5", 5, true}} {
 		t.Run(c.stage, func(t *testing.T) {
 			e := newEnv(t)
 			schema1(t, e)
@@ -623,7 +623,7 @@ func walChild(c, path string) int {
 		block("V1_WAL_READY")
 	case "A":
 		upgradeHook = func(stage string) error {
-			if stage == "verified4" {
+			if stage == "verified5" {
 				block("UPGRADE_FAILED_READY") // the injected failure: before any connection is closed
 			}
 			return nil
@@ -734,8 +734,8 @@ func TestLeftoverWALCaseA(t *testing.T) {
 	if v := throwaway(t, e.path, false, `SELECT count(*) FROM sqlite_master WHERE name = 'host_runs'`); v != "0" {
 		t.Fatal("main file alone has host_runs: the migration is not only in the WAL")
 	}
-	if v := throwaway(t, e.path, true, `SELECT user_version FROM pragma_user_version`); v != "4" {
-		t.Fatalf("main file + WAL: schema %s, want 4", v)
+	if v := throwaway(t, e.path, true, `SELECT user_version FROM pragma_user_version`); v != fmt.Sprint(schemaVersion) {
+		t.Fatalf("main file + WAL: schema %s, want %d", v, schemaVersion)
 	}
 	// Re-verify without the hook: the stored data is complete.
 	if v, err := VerifyFile(e.path); err != nil || v != schemaVersion {
