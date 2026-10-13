@@ -37,6 +37,8 @@
 # running apa-signer serve-approvals; the person's approval then runs on
 # http://localhost:<port>/host, which is the page opened (WebAuthn needs
 # localhost, not 127.0.0.1; docs/commercial-a2.md).
+# APA_AUTHENTICATOR_SOURCE (with it): device (default) or virtual, what the
+# page declares the authenticator to be (review N17).
 set -u
 stop() { echo "present: STOP（未啟動）：$1" >&2; exit 2; }
 
@@ -50,6 +52,8 @@ OPEN=${APA_PRESENT_OPEN:-open}
 addr=${APA_ADDR:-127.0.0.1:8402}
 signer=${APA_APPROVALS_SIGNER:-}
 [ -z "$signer" ] || [ "$mode" = fake ] || stop "APA_APPROVALS_SIGNER 只用於 fake 展示（A2 使用 fake Agent）"
+authsrc=${APA_AUTHENTICATOR_SOURCE:-device}
+case $authsrc in device|virtual) ;; *) stop "APA_AUTHENTICATOR_SOURCE=${authsrc}：只接受 device 或 virtual" ;; esac
 [ -z "$signer" ] || [ -S "$signer" ] || stop "APA_APPROVALS_SIGNER=${signer} 不是 socket：請先啟動 apa-signer serve-approvals（docs/commercial-a2.md）"
 
 if [ "$mode" = live ]; then
@@ -87,7 +91,7 @@ if [ "$mode" = live ]; then
 else
 	echo "present: fake 展示（不執行模型）。" >&2
 	set --
-	[ -z "$signer" ] || set -- --approvals-signer "$signer" --authenticator-source device
+	[ -z "$signer" ] || set -- --approvals-signer "$signer" --authenticator-source "$authsrc"
 	APA_ADDR=$addr APA_DB_PATH=$w/db/fake.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \
 		--fake-cli "$w/fake-claude" --scenarios "${APA_PRESENT_SCENARIOS:-testdata/demo/scenarios.json}" --registry testdata/demo/registry.json \
 		--trace-dir "$w/runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" "$@" &

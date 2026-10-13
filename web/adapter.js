@@ -114,7 +114,7 @@ export function scene(snapshot) {
         if (po) { const p = of(po); p.decision = e.decision || null; p.decidedSeq = e.sequence; } else orphanDecision = true;
         break;
       case "APPROVAL_EXPIRED": case "APPROVAL_WITHDRAWN": case "APPROVED": case "APPROVAL_DENIED": case "APPROVAL_SUPERSEDED":
-        if (po) Object.assign(of(po), { closed: CLOSED[e.event_type], closedSeq: e.sequence });
+        if (po) Object.assign(of(po), { closed: CLOSED[e.event_type], closedSeq: e.sequence, method: e.authorization_method || "" });
         break;
       case "TASK_CANCELLED": end = "cancelled"; firstEnd = firstEnd || end; break;
       case "TASK_TIMED_OUT": end = "timed_out"; firstEnd = firstEnd || end; break;
@@ -150,7 +150,7 @@ export function scene(snapshot) {
     approved: "已核准（模擬）：未啟用付款，不會取貨", approval_denied: "核准者拒絕：離店", superseded: "報價已改變：需要重新請購",
   };
   if (v1(task)) labels.waiting = simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；不會付款）";
-  if (!simulated()) labels.approved = "本人核准已驗證：未啟用付款，不會取貨";
+  if (cur && cur.method === "webauthn") labels.approved = "本人核准已驗證：未啟用付款，不會取貨"; // the record's own method (review R4)
   const d = cur && cur.decision ? cur.decision : null;
   const cause = { entered: startedSeq, quoted: cur && cur.proposedSeq, waiting: cur && cur.decidedSeq, denied: cur && cur.decidedSeq,
     allowed_unpaid: cur && cur.decidedSeq, expired: cur && cur.closedSeq, withdrawn: cur && cur.closedSeq,
@@ -478,6 +478,10 @@ export const REASONS_V1 = {
 let approvalMode = "simulated";
 export function setApprovalMode(m) { approvalMode = m === "webauthn" ? "webauthn" : "simulated"; }
 export const simulated = () => approvalMode !== "webauthn";
+// A decided record is worded by its own method, never the host's mode
+// (review R4): the Signer's decisions are resolved_by "webauthn:…".
+export const byDevice = (p) => !!(p && p.approval && typeof p.approval.resolved_by === "string" && p.approval.resolved_by.startsWith("webauthn:"));
+const grantText = (g) => (g.authorization_method === "webauthn" ? "本人核准 grant " : "模擬 grant ");
 const reasonText = (r, task) => (typeof r === "string" && r !== "" ? r + ((v1(task) ? REASONS_V1 : REASONS)[r] ? "（" + (v1(task) ? REASONS_V1 : REASONS)[r] + "）" : "") : UNKNOWN);
 const hhmmss = (s) => (typeof s === "number" ? new Date(s * 1000).toISOString().slice(11, 19) + " UTC" : UNKNOWN);
 const CUSTOMER = { "consumer-a": "A", "consumer-b": "B" };
@@ -496,7 +500,7 @@ function purchaseStatus(p, live, servedAt, task) {
     const reached = live && typeof servedAt === "number" && typeof p.deadline_at === "number" && servedAt >= p.deadline_at;
     if (d.policy_verdict === "Deny") return "Deny：" + reasonText(d.reason, task);
     if (d.policy_verdict === "Allow") return "Allow：在委託範圍內，但未啟用付款（不會自動付款）";
-    return { approved: simulated() ? "已核准（模擬），未啟用付款" : "本人核准已驗證，未啟用付款", denied: simulated() ? "已拒絕（模擬核准者）" : "已拒絕（本人，已驗證裝置）",
+    return { approved: byDevice(p) ? "本人核准已驗證，未啟用付款" : "已核准（模擬），未啟用付款", denied: byDevice(p) ? "已拒絕（本人，已驗證裝置）" : "已拒絕（模擬核准者）",
       superseded: "報價已改變：這次核准作廢，需要重新請購", expired: "已過期，無法核准（後端已記錄）", withdrawn: "已撤回（task 取消）" }[p.approval_closed]
       || (simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；不會付款）") + (reached ? "；已達期限，等待後端確認" : "");
   }
@@ -557,7 +561,7 @@ export function card(view, chosen, ctx) {
     }
     if (typeof p.deadline_at === "number") rows.push(["期限", hhmmss(p.deadline_at), hist ? "Store 時間；當時的期限，早已過，不是倒數" : "Store 時間；裁決時決定"]);
     rows.push(["付款", "未付款（payment_status：" + str(p.decision ? p.decision.payment_status : "unavailable") + "）", "Store"]);
-    if (p.approval && p.approval.grant) rows.push(["授權", "模擬 grant " + short(p.approval.grant.jti) + "（" + str(p.approval.grant.authorization_method) + "）：不能付款", "Store"]);
+    if (p.approval && p.approval.grant) rows.push(["授權", grantText(p.approval.grant) + short(p.approval.grant.jti) + "（" + str(p.approval.grant.authorization_method) + "）：不能付款", "Store"]);
   }
   return {
     mode: live ? "live" : "replay", n: ctx.n, m: ctx.m,
@@ -642,7 +646,9 @@ export function evidence(snapshot, po, ctx) {
       ["intent_hash", str(p.intent_hash), "Store"], ["payment_requirement_hash", str(p.payment_requirement_hash), "Store"],
       ["PURCHASE_PROPOSED", proposed ? "#" + proposed.sequence + " · " + hhmmss(proposed.observed_at) : UNKNOWN, "Store 事件"],
     ] : [] },
-    { title: "裁決", note: v1(t) ? "固定原因代碼；核准是 fake 模擬（主持人扮演，不是本人驗證）；模擬 grant 不能取得付款能力，沒有付款或交付。"
+    { title: "裁決", note: v1(t) ? (byDevice(p) || !(p && p.approval && p.approval.resolved_by) && !simulated()
+      ? "固定原因代碼；核准由 Signer 驗證本人已登記的裝置；grant 不能取得付款能力，沒有付款或交付。"
+      : "固定原因代碼；核准是 fake 模擬（主持人扮演，不是本人驗證）；模擬 grant 不能取得付款能力，沒有付款或交付。")
       : "固定原因代碼；M1 沒有核准、付款或交付。", rows: p ? [
       ["verdict", str(d.policy_verdict), "Store"], ["reason", reasonText(d.reason, t), "Store"], ["approval_status", str(d.approval_status), "Store"],
       ["payment_status", str(d.payment_status), "Store"], ["decided_at", hhmmss(p.decided_at), "Store 時間"],
@@ -651,7 +657,7 @@ export function evidence(snapshot, po, ctx) {
       ...(p.approval ? [
         ["核准會話", str(p.approval.approval_session_id) + " · " + str(p.approval.state) + (p.approval.resolved_by ? " · " + str(p.approval.resolved_by) : ""), "Store"],
         ["grant", p.approval.grant ? str(p.approval.grant.jti) + " · " + str(p.approval.grant.authorization_method) + " · audience " + str(p.approval.grant.audience)
-          + " · 到期 " + hhmmss(p.approval.grant.expires_at) + "（模擬：Signer 樁拒絕，不能付款）" : "無", "Store"],
+          + " · 到期 " + hhmmss(p.approval.grant.expires_at) + (p.approval.grant.authorization_method === "webauthn" ? "（本人核准；付款未啟用，不能付款）" : "（模擬：Signer 樁拒絕，不能付款）") : "無", "Store"],
       ] : []),
     ] : [] },
     { title: "Store 事件", note: "hash chain 只表示這份事件序列前後相連，不是 ZKP，也不是 B1-07 獨立驗證。", rows: mine.map((e) => [

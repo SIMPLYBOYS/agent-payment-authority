@@ -187,6 +187,12 @@ try {
     && a1.purchases[0].approval.grant && a1.purchases[0].approval.grant.authorization_method === "webauthn" && a1.payment_capability === "not_enabled", JSON.stringify(a1.purchases[0].approval));
   check("focus is on 需要你處理's heading", await b.evaluate(`document.activeElement && document.activeElement.id === "approval-title"`));
   await shot("a2-1440x900-2-approved-unpaid");
+  // Review R5: the drawer words A's grant by its own method (webauthn), never as simulated.
+  check("the drawer: the person's grant, payment not enabled, nothing simulated", await click("#approval .approval-evidence")
+    && await b.waitFor(`(() => { const d = document.getElementById("evidence-drawer"), x = d.textContent; return !d.hidden && x.includes("本人核准；付款未啟用")
+      && x.includes("Signer 驗證本人已登記的裝置") && !x.includes("模擬 grant") && !x.includes("Signer 樁拒絕") && !document.body.textContent.includes("模擬 grant"); })()`, 15000),
+    await text("#evidence-drawer"));
+  await b.evaluate(`(document.getElementById("drawer-close").click(), true)`);
 
   // ---- 4 a second Ask of A, denied with the keyboard ----
   mark("deny by keyboard");

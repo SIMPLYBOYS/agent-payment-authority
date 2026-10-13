@@ -62,13 +62,47 @@ test("the three sources are named apart", () => {
   assert.match(AP.sourceText({ agent: "fake", authenticator: "device", payment: "disabled" }), /已登記的裝置/);
 });
 
-test("the host's method words what waits and what was decided; P1-a's words stay", async () => {
+// Review R4/R5: a decided record is worded by its own method, whatever the
+// host's mode; the drawer's grant too. Only what still waits follows the mode.
+test("a decided record is worded by its own method, never the host's mode", async () => {
   const A = await import("../adapter.js");
-  const task = { contract_version: "apa.pay.v1", purchases: [] };
-  A.setApprovalMode("webauthn");
-  assert.equal(A.simulated(), false);
-  assert.match(A.REASONS_V1.WEBAUTHN_APPROVAL, /本人核准/);
-  A.setApprovalMode("simulated");
-  assert.equal(A.simulated(), true);
-  void task;
+  const dec = (status, reason) => ({ version: A.V1, policy_verdict: "Ask", reason, approval_status: status, payment_status: "not_enabled" });
+  const ev = (seq, type, extra = {}) => ({ event_id: "e" + seq, event_type: type, sequence: seq, evidence_mode: "fixture", source: "host", observed_at: 1790726450 + seq, purchase_order_id: "po-1", ...extra });
+  const snap = (method) => {
+    const by = method === "webauthn" ? "webauthn:approver-a" : "sim-approver-a";
+    const events = [ev(1, "TASK_STARTED", { purchase_order_id: "" }), ev(2, "PURCHASE_PROPOSED"), ev(3, "POLICY_DECIDED", { decision: dec("pending", "HUMAN_APPROVAL_REQUIRED") }),
+      ev(4, "APPROVED", { decision: dec("approved", method === "webauthn" ? "WEBAUTHN_APPROVAL" : "SIMULATED_APPROVAL"), authorization_method: method })];
+    const p = { purchase_order_id: "po-1", decision: dec("approved", "x"), decided_at: 1790726453, approval_closed: "approved", closed_at: 1790726454,
+      approval: { approval_session_id: "aps-1", state: "approved", resolved_by: by, grant: { jti: "grant-1", authorization_method: method, audience: "a", expires_at: 1790726999 } } };
+    return { task: { task_id: "t-1", consumer_id: "consumer-a", status: "running", as_of_sequence: 4, served_at: 1790726470, purchases: [p], contract_version: A.V1, payment_capability: "not_enabled" }, events };
+  };
+  try {
+    for (const mode of ["webauthn", "simulated"]) {
+      A.setApprovalMode(mode);
+      const sim = snap("simulated"), dev = snap("webauthn");
+      assert.equal(A.card(sim, null, { mode: "live" }).status, "已核准（模擬），未啟用付款", mode);
+      assert.equal(A.card(dev, null, { mode: "live" }).status, "本人核准已驗證，未啟用付款", mode);
+      assert.equal(A.scene(sim).label, "已核准（模擬）：未啟用付款，不會取貨", mode);
+      assert.equal(A.scene(dev).label, "本人核准已驗證：未啟用付款，不會取貨", mode);
+      assert.ok(A.card(dev, null, { mode: "live" }).rows.some(([k, v]) => k === "授權" && v.startsWith("本人核准 grant ")), mode);
+      assert.ok(A.card(sim, null, { mode: "live" }).rows.some(([k, v]) => k === "授權" && v.startsWith("模擬 grant ")), mode);
+      const rows = (s) => A.evidence(s, "po-1", { mode: "live", catalog: null }).sections.find((x) => x.title === "裁決");
+      const g = (s) => rows(s).rows.find(([k]) => k === "grant")[1];
+      assert.match(g(dev), /本人核准；付款未啟用/, mode);
+      assert.match(g(sim), /模擬：Signer 樁拒絕/, mode);
+      assert.match(rows(dev).note, /Signer 驗證本人已登記的裝置/, mode);
+      assert.match(rows(sim).note, /fake 模擬/, mode);
+    }
+  } finally {
+    A.setApprovalMode("simulated");
+  }
+});
+
+test("an expired session's unknown attempt and a mismatched result say no approval (N9, N10)", () => {
+  const [kind, text] = AP.attemptText({ state: "unknown" }, "expired");
+  assert.equal(kind, "closed");
+  assert.match(text, /沒有核准/);
+  const [k2, t2] = AP.outcomeText(200, { outcome: "mismatch" }, "approve");
+  assert.equal(k2, "error");
+  assert.match(t2, /沒有採用/);
 });

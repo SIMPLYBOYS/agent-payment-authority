@@ -207,6 +207,10 @@ func (a *api) simResolve(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if a.approve != nil { // A2: an Ask is decided by the person's device only (review R4); the delegation stays simulated
+		fail(w, http.StatusConflict, "human_approval_required")
+		return
+	}
 	if !requestIDFormat.MatchString(req.RequestID) || (req.Decision != "approve" && req.Decision != "deny") || !paycontract.ValidID(r.PathValue("session_id")) {
 		fail(w, http.StatusBadRequest, "bad_request")
 		return

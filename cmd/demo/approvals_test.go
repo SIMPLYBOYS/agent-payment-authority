@@ -608,3 +608,14 @@ func TestA2VerifyLookupFails(t *testing.T) {
 		t.Fatalf("a failed read was taken for not found: %d %v (challenge %s %v)", code, s, c.State, err)
 	}
 }
+
+// Review R4: with A2 on, the simulated approver cannot decide an Ask (the
+// delegation is still confirmed by the simulated customer).
+func TestA2NoSimulatedApproval(t *testing.T) {
+	f := startA2(t, 60)
+	sid, intent, _ := f.ask("01")
+	code, r := f.h.post("/api/sim/approvals/"+sid, f.h.simulate("consumer-a"), resolveBody("approve-req-00000001", intent, "approve"))
+	if code != 409 || r["error"] != "human_approval_required" || f.h.grants() != 0 {
+		t.Fatalf("simulated approval in A2: %d %v", code, r)
+	}
+}

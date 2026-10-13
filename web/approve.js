@@ -68,6 +68,7 @@ export function outcomeText(status, body, decision) {
   const a = b.attempt || {};
   if (status === 200 && b.outcome === "approved") return ["ok", "本人核准已驗證，付款未啟用。"];
   if (status === 200 && b.outcome === "denied") return ["deny", "你已拒絕這筆（已驗證裝置）。"];
+  if (status === 200 && b.outcome === "mismatch") return ["error", "Signer 的結果和這次操作不一致，沒有採用；這筆仍等你決定。"];
   if (status === 200 && (b.outcome === "closed" || b.outcome === "superseded")) return ["closed", "這筆在驗證完成前已關閉（過期、取消或報價改變）；沒有核准。"];
   if (status === 200 && a.state === "lost") return ["warn", "驗證結果沒有送達，這次沒有核准。請按「重新核准」。"];
   if (status === 200 && a.state === "closed") return ["idle", "已取消這次驗證；這筆仍在等你決定。"];
@@ -87,7 +88,7 @@ export function outcomeText(status, body, decision) {
 export function attemptText(a, sessionState) {
   if (!a) return null;
   if (sessionState && sessionState !== "pending") {
-    if (a.state === "unknown" || a.state === "verifying") return ["warn", "無法確認這次驗證的結果；這筆已依後端期限關閉。"];
+    if (a.state === "unknown" || a.state === "verifying") return ["closed", "這筆已依後端期限關閉，沒有核准；裝置那次驗證的結果無法確認，完成了也不會生效。"];
     return null;
   }
   switch (a.state) {

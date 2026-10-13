@@ -92,9 +92,10 @@ present-p1a:
 # device (docs/commercial-a2.md): SIGNER is the socket of a running
 # apa-signer serve-approvals whose origin is http://localhost:8402; the page
 # opened is http://localhost:8402/host. Fake CLI only; payment stays off.
+# AUTH=virtual declares a virtual authenticator (default device).
 present-a2:
 	@test -n "$(SIGNER)" || { echo "usage: make present-a2 SIGNER=/path/of/serve-approvals.sock (docs/commercial-a2.md)" >&2; exit 2; }
-	@APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p1a.json sh scripts/demo/present.sh fake
+	@APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p1a.json sh scripts/demo/present.sh fake
 
 # docs/m1-evidence.md: the M1 fixture evidence bundle, a new
 # artifacts/m1/<run-id>/ each time (manifest.json, its evidence, run-end.json).
