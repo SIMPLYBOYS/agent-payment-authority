@@ -1,7 +1,7 @@
 # A2 本人核准產品接線：實作差異、驗證與限制
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-A2本人核准產品接線實作派工-f2bf224-20261013〉（Aaron 已批准「A2 開工」）。分支 `commercial-a2`，基準 `f2bf224`（工作區只有未追蹤的 `demo`；沒有適用的 AGENTS.md）。
-> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（R1～R6 待修）；實機登記與操作未驗收，付款未啟用。**（第 6 節）
+> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正、只重跑受影響部分，待第二次獨立上下文 review（第 7 節）；實機登記與操作未驗收，付款未啟用。**
 > 以下為 `f0817c7` 時的狀態，保留原文：A2 已實作並完成本輪定向自動化驗證，待 Codex 技術 review；實機登記與操作未驗收，付款未啟用。A2 不自行標 Done；本輪所有結果都是「Claude Code 執行，待 Codex 核對」，不是實機結果。
 >
 > **歸屬的變更**：Codex 訂閱已到期，從這一節起沒有第三方核對。Review 改由 Claude Code 另開的獨立上下文 subagent 執行：它們只拿到 diff、設計文件與本文件，沒有作者寫程式時的推理；這比作者自審接近獨立核對，但仍是同一個模型。紀錄一律寫「Claude Code 獨立上下文 review」，不寫成 Codex。
@@ -232,3 +232,51 @@ Host／web：
 ### 6.4 下一步
 
 R1～R6 的修正另開一輪：修正、只重跑受影響的部分、再交一次獨立上下文 review。在那之前不做實機與部署。
+
+## 7 修正輪（10/13；Aaron 在對話中核准修正計畫；Claude Code 執行，都不是實機結果）
+
+範圍：第 6 節的 R1～R6，並處理 N1、N2、N4、N5、N6、N9、N10、N13、N14、N17 與未測分支。只重跑受影響的部分，本機執行、未在容器。**這一輪的通過不併入第 3 節**：第 3 節是 `1f9d966`／`9d3c2aa` 的結果，本節是修正後各自的重跑。
+
+### 7.1 修正
+
+| # | 提交 | 修正 | 新測試 | 反向（新／改） |
+|---|---|---|---|---|
+| R1 | `73acb69` | `commit` 在寫入交易內先讀 challenge 狀態；不是 issued（used／closed／已到期）就依狀態回 `CHALLENGE_USED`／`CHALLENGE_CLOSED`／`CHALLENGE_EXPIRED`，不看 credential、不比計數器 | `TestTwoAssertionsInFlight` | 新「R1 the commit answers by the challenge before the counter」；第 4、5 項同時關掉新的狀態檢查 |
+| R2 | `73acb69` | 移除簽章前的 BE 比對；函式庫在簽章之後的 BE 檢查對應 `ASSERTION_INVALID_FLAGS:suspect`，BS 無 BE 為 `ASSERTION_INVALID_FLAGS` | `TestFlagsNeedTheSignature` | 新「R2 flags are compared only after the signature」 |
+| R3 | `570a88c` | Store 回傳 attempt 時一併回會話狀態；會話不是 pending 時不再 share open attempt（`SESSION_CLOSED` 並帶該 attempt）。Host 對這種 attempt 只關閉 challenge、不驅動：`drive`（challenge、status 路由）與 assertion 路由呼叫 Signer 之前（`closeOnSession`；cancel 的關閉部分抽成 `closeAttempt`）。Signer 已 used 的仍會落地為 closed 並 abandon | `TestA2CancelledTask`（改：另一頁的 challenge 請求關閉 challenge、不驗證任何 assertion）、`TestA2AssertionAfterCancel` | 新兩項 R3 |
+| R4 | `2faca43` | 已決定的紀錄依自己的方式用詞（會話 `resolved_by` 是否 `webauthn:`、收尾事件的 `authorization_method`），不依 Host 模式；只有仍在等的依模式。A2 模式下 `POST /api/sim/approvals/{session}` 回 409 `human_approval_required`（委託確認仍是模擬） | `TestA2NoSimulatedApproval`；`approve.test.mjs` 兩種模式 × 兩種紀錄 | — |
+| R5 | `2faca43` | 抽屜的「授權」列、「裁決」說明與 grant 列依 grant 的方式 | 同上；`a2-ui.mjs` 核准後打開抽屜檢查 | — |
+| R6 | `570a88c` | （測試缺口） | `TestA2ChallengeUsedElsewhere`（另一份 assertion 得 `CHALLENGE_USED`；cancel 時 close 回 used；自己的 verify 查無後 close 回 used）、`TestA2TwoAssertions` | 新兩項 R6 |
+
+備註：
+- N1、N2、N5、N6 與未測分支：`73acb69`。N6 之後 challenge 對 suspect 回 `CREDENTIAL_SUSPECT`。未測分支由 `TestChangedAndLateBranches` 補上（`APPROVER_CHANGED`、`AUTHORIZATION_EXPIRED`、commit 時到期）。
+- N4：`dc71087`。
+- N9、N10、N17：`2faca43`。用法：`make present-a2 SIGNER=… AUTH=virtual`；只接受 device 或 virtual，其他值在啟動前就停。
+- N14：`6220250`。第 7 項的 regex 改為 `B's viewer: 502, want 404`。拿掉 Store 的擁有權檢查後，仍是 Signer 自己的 consumer 檢查擋下（`SIGNER_MISMATCH`），regex 寫明這一點，不再對任何狀態碼都成立。
+- N13：見 7.2 的 `timing-interleaved-f2bf224.txt`。另外，`08-adjacent-demo.log` 裡的兩筆既有 `t.Skip`（`TestSeedCancelDisplay`、`TestAliveTreatsZombieAsGone`）在 A2 之前就存在，A2 沒有碰它們；它們是跳過，不是通過。
+- 沒有處理、留待下一輪或已接受：N3（升級 go-webauthn 時要重跑 `TestAssertionRules`）、N7、N8、N11（D7）、N12（差異 #7）、N15、N16。
+
+### 7.2 重跑（證據都在 `artifacts/human-approval/`）
+
+| 重跑 | 基準 | 結果 | 證據 |
+|---|---|---|---|
+| Signer 反向 8 項（challenge、UV、origin、replay、close first、R1、R2、R2 serve） | `73acb69` | 8／8 預期斷言。第 5 項這次由 schema 的 `closed_at` CHECK 擋下遲到的寫入（測試斷言「late verify」成立） | `reverse-signer-73acb69/` |
+| `go test -race`：store、cmd/demo、paycontract、signerclient、signer、cmd/apa-signer（cmd/demo 照名跳過 `TestTimingInterleaved`） | `570a88c` | 全部 ok，exit 0 | `fix-570a88c/go-test.txt` |
+| Host／Store 反向 9 項 | `570a88c` | **8／9**。「the other decision gets no challenge」**沒抓到**：R3 把該行改成 switch，舊錨點不存在（紀錄保留） | `reverse-host-570a88c/` |
+| 上一項改錨點後單獨補跑 | `75a5445` | 1／1 | `reverse-other-decision-75a5445/` |
+| `go test -race ./cmd/demo/`（照名跳過同上） | `2faca43` | ok，exit 0 | `fix-2faca43/go-test-cmd-demo.txt` |
+| web 測試 5 檔 | `2faca43` | 全部 pass（29、7、27、9、13） | `fix-2faca43/node-tests.txt` |
+| 瀏覽器 a2-ui（CDP virtual authenticator，不是實機） | `2faca43` | 36 項 PASS、0 FAIL（多了抽屜一項） | `a2-ui-2faca439fc7e-20261013T113855Z/` |
+| `present.sh` 拒絕不合法的 `APA_AUTHENTICATOR_SOURCE` | `2faca43` | 啟動前停止，exit 2 | `fix-2faca43/present-authsrc-refusal.txt` |
+| `TestTimingInterleaved` 於 A2 之前的基準（`git worktree`） | `f2bf224` | FAIL，`multirun_test.go:325`，exit 1 | `fix-2faca43/timing-interleaved-f2bf224.txt` |
+| 同上，但第一次 `cd` 進 worktree 失敗（沙箱外 TMPDIR 不同），實際跑在主工作區 | `2faca43` | FAIL，同一斷言。檔頭標籤錯、雜湊正確，已加註保留 | `fix-2faca43/timing-interleaved-2faca43-misdirected.txt` |
+| 反向第 7 項（N14）單獨補跑 | `6220250` | 1／1，`B's viewer: 502, want 404` | `reverse-item7-6220250/` |
+
+**沒有重跑**：
+- **A2 入口實測**：以測試 Signer 起 `present.sh`。這次被 Claude Code 的安全檢查擋下：命令裡 `present.sh` 會在 `sh -c` 中執行 `rm`，檢查無法分析，所以命令沒有執行，也沒有繞過。第 3.3 節那次入口實測沒有存檔，仍是無證據的陳述。之後由 Aaron 執行 `make present-a2 SIGNER=…`，或在實機階段一併驗證。
+- **其他**：容器（Docker daemon 未啟動）、m1-check 全計畫、所有歷史突變。
+
+### 7.3 下一步
+
+- 第二次獨立上下文 review 只看 `20ea7c7..dc71087`（與本節）。
+- 通過之後，才討論實機登記／驗證與部署（第 5 節清單）。
