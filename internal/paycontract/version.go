@@ -1,0 +1,95 @@
+package paycontract
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"slices"
+
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+)
+
+// The pay family has one rule set per version (C2a,
+// docs/commercial-c2-design.md 3.1). An order, a delegation, a grant, a
+// decision or an event is checked and digested by the spec of its own
+// version field. apa.pay.v1's spec is the constants above, unchanged (its
+// golden values are frozen); apa.pay.v2 adds the BBS+ credential (C2):
+// another domain, so no v1 digest or ID can name a v2 object, and three
+// more Deny reasons.
+const (
+	V2       = "apa.pay.v2"
+	DomainV2 = "agent-payment-authority/pay/v2"
+)
+
+// CredentialReasons are apa.pay.v2's Deny reasons for a credential that
+// does not verify, is revoked, or whose status cannot be read.
+var CredentialReasons = []string{"CREDENTIAL_INVALID", "CREDENTIAL_REVOKED", "CREDENTIAL_STATUS_UNAVAILABLE"}
+
+// Spec is one version's rules.
+type Spec struct {
+	Version, Domain string
+	reasons, deny   []string
+}
+
+var specs = map[string]Spec{
+	Version: {Version, Domain, ReasonCodes, denyReasons},
+	V2:      {V2, DomainV2, slices.Concat(ReasonCodes, CredentialReasons), slices.Concat(denyReasons, CredentialReasons)},
+}
+
+// SpecOf is the spec of a pay-family version.
+func SpecOf(version string) (Spec, bool) { s, ok := specs[version]; return s, ok }
+
+// Supported reports whether version is a pay-family version.
+func Supported(version string) bool { _, ok := specs[version]; return ok }
+
+// ReasonCodes are this version's decision and closure reasons.
+func (s Spec) ReasonCodes() []string { return slices.Clone(s.reasons) }
+
+func (s Spec) digest(kind string, v any) (string, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return contracts.Digest(s.Domain+"/"+kind, raw)
+}
+
+func (s Spec) short(x string) string {
+	sum := sha256.Sum256([]byte(s.Domain + "\x00" + x))
+	return hex.EncodeToString(sum[:16])
+}
+
+// DelegationID is derived from the confirming request, so a resend names
+// the same delegation.
+func (s Spec) DelegationID(requestID string) string { return "dlg-" + s.short(requestID) }
+
+// SessionID is the one approval session of a task's purchase.
+func (s Spec) SessionID(taskID, purchaseOrderID string) string {
+	return "aps-" + s.short(taskID+"\x00"+purchaseOrderID)
+}
+
+// GrantID (the grant's jti) is derived from its session.
+func (s Spec) GrantID(sessionID string) string { return "grant-" + s.short(sessionID) }
+
+// ResourceHash binds method and URL under this version's domain.
+func (s Spec) ResourceHash(method, resource string) (string, error) {
+	return s.digest("resource", map[string]string{"http_method": method, "resource_url": resource})
+}
+
+// RequirementHash is the quote's digest under this version's domain, after
+// the M1 quote checks (version 2, objects, no case-ambiguous keys).
+func (s Spec) RequirementHash(q contracts.Quote) (string, error) {
+	if _, err := q.Hash(); err != nil {
+		return "", err
+	}
+	return s.digest("requirement", q)
+}
+
+// EventHash and GenesisHash: a chain under one version never links to
+// another's.
+func (s Spec) EventHash(e contracts.AuditEvent) (string, error) { return s.digest("event", e) }
+
+func (s Spec) GenesisHash(taskID string) (string, error) {
+	return s.digest("event-genesis", map[string]string{"task_id": taskID})
+}
+
+var v1 = specs[Version]

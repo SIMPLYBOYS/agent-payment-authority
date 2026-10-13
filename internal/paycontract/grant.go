@@ -1,8 +1,6 @@
 package paycontract
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"slices"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
@@ -29,29 +27,20 @@ type Delegation struct {
 	ExpiresAt               uint64           `json:"expires_at"`
 }
 
-// DelegationID is derived from the confirming request, so a resend names
-// the same delegation.
-func DelegationID(requestID string) string { return "dlg-" + short(requestID) }
+// DelegationID, SessionID and GrantID are apa.pay.v1's (Spec has every
+// version's): a resend names the same delegation; a purchase has one
+// session; a session can never have two grants.
+func DelegationID(requestID string) string { return v1.DelegationID(requestID) }
 
-// SessionID is the one approval session of a task's purchase.
-func SessionID(taskID, purchaseOrderID string) string {
-	return "aps-" + short(taskID+"\x00"+purchaseOrderID)
-}
+func SessionID(taskID, purchaseOrderID string) string { return v1.SessionID(taskID, purchaseOrderID) }
 
-// GrantID (the grant's jti) is derived from its session: a session can
-// never have two grants.
-func GrantID(sessionID string) string { return "grant-" + short(sessionID) }
-
-func short(s string) string {
-	sum := sha256.Sum256([]byte(Domain + "\x00" + s))
-	return hex.EncodeToString(sum[:16])
-}
+func GrantID(sessionID string) string { return v1.GrantID(sessionID) }
 
 func (d Delegation) Validate() error {
 	budget, errB := d.TaskBudget.Units()
 	allow, errA := d.AllowMax.Units()
 	switch {
-	case d.Version != Version || !ids(d.DelegationID, d.ConsumerID, d.Scenario, d.AssetID, d.ConfirmedBy):
+	case !Supported(d.Version) || !ids(d.DelegationID, d.ConsumerID, d.Scenario, d.AssetID, d.ConfirmedBy):
 		return coded("INVALID_DELEGATION", "version or IDs")
 	case d.Purpose == "" || len(d.Purpose) > 200:
 		return coded("INVALID_DELEGATION", "purpose")
@@ -103,7 +92,7 @@ const (
 
 func (g AuthorizationGrant) Validate() error {
 	switch {
-	case g.Version != Version || g.JTI != GrantID(g.ApprovalSessionID) || !ids(g.ApprovalSessionID, g.ApproverID) || !digestPattern.MatchString(g.IntentHash):
+	case !Supported(g.Version) || g.JTI != specs[g.Version].GrantID(g.ApprovalSessionID) || !ids(g.ApprovalSessionID, g.ApproverID) || !digestPattern.MatchString(g.IntentHash):
 		return coded("INVALID_GRANT", "version, IDs or intent hash")
 	case g.Decision != "approve" || g.Audience != "signer":
 		return coded("INVALID_GRANT", "decision or audience")

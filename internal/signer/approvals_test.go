@@ -684,3 +684,31 @@ func TestChangedAndLateBranches(t *testing.T) {
 		t.Fatalf("challenge after a late commit: %s", q.State)
 	}
 }
+
+// C2a: an apa.pay.v2 order gets a challenge under its own version's
+// session and jti; v1's session ID for the same purchase is refused.
+func TestV2OrderChallenge(t *testing.T) {
+	f := newAFX(t)
+	a := f.enroll("approver-a", nil)
+	order := signertest.Order{Consumer: "consumer-a", Agent: "agent-a", Wallet: "wallet-a", From: addrA, PayTo: signertest.Merchant,
+		Amount: "500000", N: 1, Now: f.now, Window: 600, Contract: paycontract.V2}.Raw()
+	var po paycontract.PurchaseOrder
+	json.Unmarshal(order, &po)
+	sp, _ := paycontract.SpecOf(paycontract.V2)
+	session := sp.SessionID(po.Intent.TaskID, po.Intent.PurchaseOrderID)
+	if _, err := f.core.Challenge(bgA, ChallengeRequest{RequestID: "req-v1-session", ApprovalSessionID: sessionOf(order), Decision: "approve", Order: order, HostDeadline: f.now + 600}); refusal(err) != "SESSION_MISMATCH" {
+		t.Fatalf("v1 session ID for a v2 order: %v", err)
+	}
+	c, err := f.core.Challenge(bgA, ChallengeRequest{RequestID: "req-v2", ApprovalSessionID: session, Decision: "approve", Order: order, HostDeadline: f.now + 600})
+	if err != nil {
+		t.Fatalf("v2 challenge: %v", err)
+	}
+	want, _ := po.IntentHash()
+	if c.IntentHash != want {
+		t.Fatalf("intent %s, want the v2 intent %s", c.IntentHash, want)
+	}
+	r, err := f.verify("ver-v2", c.ChallengeID, order, a.Get(c.Options, origin))
+	if err != nil || r.State != "verified" {
+		t.Fatalf("v2 verify: %+v %v", r, err)
+	}
+}

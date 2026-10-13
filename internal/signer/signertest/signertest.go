@@ -27,6 +27,7 @@ type Order struct {
 	N                             int    // purchase and nonce number
 	Now, Window                   uint64 // valid_before = Now + Window
 	DomainVersion                 string // the quote's EIP-712 version; "2" if empty
+	Contract                      string // a pay-family version; apa.pay.v1 if empty
 }
 
 func (o Order) Quote() contracts.Quote {
@@ -41,14 +42,19 @@ func (o Order) Quote() contracts.Quote {
 
 func (o Order) PO() paycontract.PurchaseOrder {
 	q := o.Quote()
-	rh, _ := paycontract.ResourceHash("GET", URL)
-	qh, _ := paycontract.RequirementHash(q)
+	version := o.Contract
+	if version == "" {
+		version = paycontract.Version
+	}
+	sp, _ := paycontract.SpecOf(version)
+	rh, _ := sp.ResourceHash("GET", URL)
+	qh, _ := sp.RequirementHash(q)
 	task := o.Task
 	if task == "" {
 		task = "task-" + o.Consumer
 	}
-	return paycontract.PurchaseOrder{Version: paycontract.Version, RequestID: fmt.Sprintf("req-%d", o.N), Quote: q,
-		Intent: paycontract.Intent{Version: paycontract.Version, Domain: paycontract.Domain, ConsumerID: o.Consumer, AgentID: o.Agent, WalletID: o.Wallet,
+	return paycontract.PurchaseOrder{Version: version, RequestID: fmt.Sprintf("req-%d", o.N), Quote: q,
+		Intent: paycontract.Intent{Version: version, Domain: sp.Domain, ConsumerID: o.Consumer, AgentID: o.Agent, WalletID: o.Wallet,
 			TaskID: task, PurchaseOrderID: fmt.Sprintf("po-%d", o.N), ResourceHash: rh, HTTPMethod: "GET", ResourceURL: URL,
 			X402Version: 2, Scheme: "exact", PaymentRequirementHash: qh},
 		PaymentBinding: paycontract.PaymentBinding{Method: "eip3009", ChainID: Chain, AssetContract: Asset, From: o.From, PayTo: o.PayTo,

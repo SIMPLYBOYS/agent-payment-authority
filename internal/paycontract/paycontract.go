@@ -119,36 +119,30 @@ func timestamp(v uint64) bool { return v > 0 && v <= 253402300799 }
 
 func positive(v string) bool { n, err := contracts.Amount(v).Units(); return err == nil && n > 0 }
 
-func digest(kind string, v any) (string, error) {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return "", err
-	}
-	return contracts.Digest(Domain+"/"+kind, raw)
-}
+// ResourceHash and RequirementHash are apa.pay.v1's (Spec has every version's).
+func ResourceHash(method, resource string) (string, error) { return v1.ResourceHash(method, resource) }
 
-// ResourceHash binds method and URL under this version's domain.
-func ResourceHash(method, resource string) (string, error) {
-	return digest("resource", map[string]string{"http_method": method, "resource_url": resource})
-}
+func RequirementHash(q contracts.Quote) (string, error) { return v1.RequirementHash(q) }
 
-// RequirementHash is the quote's digest under this version's domain, after
-// the M1 quote checks (version 2, objects, no case-ambiguous keys).
-func RequirementHash(q contracts.Quote) (string, error) {
-	if _, err := q.Hash(); err != nil {
-		return "", err
+// specOf is the spec of an object's own version field, or the error code
+// its validation reports.
+func specOf(version, code, what string) (Spec, error) {
+	s, ok := SpecOf(version)
+	if !ok {
+		return Spec{}, coded(code, "not a pay-family "+what)
 	}
-	return digest("requirement", q)
+	return s, nil
 }
 
 // Validate checks shape and quote/intent/binding consistency. Like the M1
 // contract it says nothing about Policy: an unlisted payee still passes.
 func (p PurchaseOrder) Validate() error {
 	i, b := p.Intent, p.PaymentBinding
-	if p.Version != Version || !ids(p.RequestID) {
-		return coded("INVALID_PURCHASE", "not an apa.pay.v1 purchase order")
+	sp, err := specOf(p.Version, "INVALID_PURCHASE", "purchase order")
+	if err != nil || !ids(p.RequestID) {
+		return coded("INVALID_PURCHASE", "not a pay-family purchase order")
 	}
-	if i.Version != Version || i.Domain != Domain {
+	if i.Version != p.Version || i.Domain != sp.Domain {
 		return coded("INVALID_PURCHASE", "intent version or domain")
 	}
 	if !ids(i.ConsumerID, i.AgentID, i.WalletID, i.TaskID, i.PurchaseOrderID) {
@@ -161,7 +155,7 @@ func (p PurchaseOrder) Validate() error {
 	if err != nil || u.Hostname() == "" || u.User != nil || strings.Contains(i.ResourceURL, "#") || (u.Scheme != "http" && u.Scheme != "https") {
 		return coded("INVALID_PURCHASE", "resource URL")
 	}
-	if rh, err := ResourceHash(i.HTTPMethod, i.ResourceURL); err != nil || rh != i.ResourceHash {
+	if rh, err := sp.ResourceHash(i.HTTPMethod, i.ResourceURL); err != nil || rh != i.ResourceHash {
 		return coded("INVALID_PURCHASE", "resource hash")
 	}
 	if b.Method != "eip3009" {
@@ -176,7 +170,7 @@ func (p PurchaseOrder) Validate() error {
 	if !timestamp(b.ValidAfter) || !timestamp(b.ValidBefore) || b.ValidBefore <= b.ValidAfter || !noncePattern.MatchString(b.Nonce) {
 		return coded("INVALID_PURCHASE", "binding validity or nonce")
 	}
-	h, err := RequirementHash(p.Quote)
+	h, err := sp.RequirementHash(p.Quote)
 	if err != nil || h != i.PaymentRequirementHash || p.Quote.X402Version != i.X402Version || i.X402Version != 2 || i.Scheme != "exact" {
 		return coded("INVALID_PURCHASE", "requirement hash or metadata")
 	}
@@ -210,7 +204,7 @@ func (p PurchaseOrder) IntentHash() (string, error) {
 	if err := p.Validate(); err != nil {
 		return "", err
 	}
-	return digest("intent", struct {
+	return specs[p.Version].digest("intent", struct {
 		Intent         Intent         `json:"intent"`
 		PaymentBinding PaymentBinding `json:"payment_binding"`
 	}{p.Intent, p.PaymentBinding})
@@ -239,7 +233,7 @@ func (p PurchaseOrder) RetryKey() (string, error) {
 	if err := p.Validate(); err != nil {
 		return "", err
 	}
-	return digest("retry", map[string]string{"consumer_id": p.Intent.ConsumerID, "task_id": p.Intent.TaskID, "wallet_id": p.Intent.WalletID, "request_id": p.RequestID})
+	return specs[p.Version].digest("retry", map[string]string{"consumer_id": p.Intent.ConsumerID, "task_id": p.Intent.TaskID, "wallet_id": p.Intent.WalletID, "request_id": p.RequestID})
 }
 
 // CompareRetry is contracts.CompareRetry for this version: "replay" for the
@@ -265,11 +259,11 @@ func CompareRetry(existing, incoming PurchaseOrder) (string, error) {
 		}
 		return "new", nil
 	}
-	x, err := digest("purchase", existing)
+	x, err := specs[existing.Version].digest("purchase", existing)
 	if err != nil {
 		return "", err
 	}
-	y, err := digest("purchase", incoming)
+	y, err := specs[incoming.Version].digest("purchase", incoming)
 	if err != nil {
 		return "", err
 	}
@@ -284,19 +278,20 @@ func CompareRetry(existing, incoming PurchaseOrder) (string, error) {
 // approval states, and payment_status not_enabled: an Allow or an approval
 // is not a payment.
 func ValidateDecision(d contracts.PolicyDecision) error {
-	if d.Version != Version || !digestPattern.MatchString(d.IntentHash) {
+	sp, ok := SpecOf(d.Version)
+	if !ok || !digestPattern.MatchString(d.IntentHash) {
 		return coded("INVALID_DECISION", "version or intent hash")
 	}
 	if d.PaymentStatus != PaymentNotEnabled {
 		return coded("INVALID_DECISION", "payment_status must be not_enabled: P1-a has no payment capability")
 	}
-	ok := false
+	ok = false
 	switch d.PolicyVerdict {
 	case "Ask":
 		ok = slices.Contains([][2]string{{"pending", "HUMAN_APPROVAL_REQUIRED"}, {"expired", "APPROVAL_TIMEOUT"}, {"withdrawn", "HOST_CANCELLED"},
 			{"approved", "SIMULATED_APPROVAL"}, {"approved", "WEBAUTHN_APPROVAL"}, {"denied", "APPROVER_DENIED"}, {"superseded", "QUOTE_CHANGED"}}, [2]string{d.ApprovalStatus, d.Reason})
 	case "Deny":
-		ok = d.ApprovalStatus == "not_requested" && slices.Contains(denyReasons, d.Reason)
+		ok = d.ApprovalStatus == "not_requested" && slices.Contains(sp.deny, d.Reason)
 	case "Allow":
 		ok = d.ApprovalStatus == "not_requested" && d.Reason == "WITHIN_ALLOW_MAX"
 	}

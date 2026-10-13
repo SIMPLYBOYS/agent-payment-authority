@@ -28,17 +28,23 @@ var lifecycleCodes = map[string]string{"TASK_CANCELLED": "HOST_CANCELLED", "TASK
 
 // EventHash and GenesisHash are contracts.EventHash and GenesisHash under
 // this version's domain: an M1 chain and a v1 chain never link.
-func EventHash(e contracts.AuditEvent) (string, error) { return digest("event", e) }
-
-func GenesisHash(taskID string) (string, error) {
-	return digest("event-genesis", map[string]string{"task_id": taskID})
+// They are apa.pay.v1's; EventHash follows the event's own version.
+func EventHash(e contracts.AuditEvent) (string, error) {
+	sp, err := specOf(e.Version, "INVALID_EVENT", "event")
+	if err != nil {
+		return "", err
+	}
+	return sp.EventHash(e)
 }
+
+func GenesisHash(taskID string) (string, error) { return v1.GenesisHash(taskID) }
 
 // ValidateEvent checks one event of an apa.pay.v1 task: shape, the task's
 // registry binding, the purchase it names (whose v1 intent_hash it must
 // carry) and the payload each type allows.
 func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *PurchaseOrder) error {
-	if e.Version != Version || !ids(e.EventID, e.Source) || !timestamp(e.ObservedAt) || e.Sequence == 0 || e.Sequence > contracts.MaxSafeInteger {
+	sp, ok := SpecOf(e.Version)
+	if !ok || !ids(e.EventID, e.Source) || !timestamp(e.ObservedAt) || e.Sequence == 0 || e.Sequence > contracts.MaxSafeInteger {
 		return errf("invalid event metadata")
 	}
 	if !slices.Contains([]string{"fixture", "live", "replay"}, e.EvidenceMode) || e.Scope == nil || !digestPattern.MatchString(e.PrevEventHash) {
@@ -70,7 +76,7 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 			return err
 		}
 		h, err := order.IntentHash()
-		if err != nil || s.IntentHash != h || s.PurchaseOrderID != order.Intent.PurchaseOrderID {
+		if err != nil || order.Version != e.Version || s.IntentHash != h || s.PurchaseOrderID != order.Intent.PurchaseOrderID {
 			return errf("event intent mismatch")
 		}
 	}
@@ -140,7 +146,7 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 		if err != nil {
 			return err
 		}
-		if p.GrantID != GrantID(p.ApprovalSessionID) {
+		if p.GrantID != sp.GrantID(p.ApprovalSessionID) {
 			return errf("grant ID is not the session's")
 		}
 		return only(fields...)
@@ -174,8 +180,8 @@ func decisionOf(e contracts.AuditEvent, approvals ...string) error {
 	if err := ValidateDecision(*d); err != nil {
 		return err
 	}
-	if d.IntentHash != e.Scope.IntentHash {
-		return errf("decision intent mismatch")
+	if d.Version != e.Version || d.IntentHash != e.Scope.IntentHash {
+		return errf("decision version or intent mismatch")
 	}
 	if !slices.Contains(approvals, d.ApprovalStatus) {
 		return coded("INVALID_DECISION", e.EventType+" cannot record approval_status "+d.ApprovalStatus)
@@ -185,6 +191,7 @@ func decisionOf(e contracts.AuditEvent, approvals ...string) error {
 
 // chain is one task's position in its stream; see contracts' chainState.
 type chain struct {
+	version                 string
 	next                    uint64
 	prev                    string
 	bound                   bool
@@ -214,13 +221,20 @@ func ValidateEventOrder(events []contracts.AuditEvent) error {
 		task := e.Scope.TaskID
 		st := tasks[task]
 		if st == nil {
-			g, err := GenesisHash(task)
+			sp, err := specOf(e.Version, "INVALID_EVENT_ORDER", "event")
 			if err != nil {
 				return err
 			}
-			st = &chain{prev: g, proposed: map[string]bool{}, verdict: map[string]string{}, intent: map[string]string{},
+			g, err := sp.GenesisHash(task)
+			if err != nil {
+				return err
+			}
+			st = &chain{version: e.Version, prev: g, proposed: map[string]bool{}, verdict: map[string]string{}, intent: map[string]string{},
 				session: map[string]string{}, closed: map[string]string{}, granted: map[string]bool{}}
 			tasks[task] = st
+		}
+		if e.Version != st.version {
+			return coded("INVALID_EVENT_ORDER", fmt.Sprintf("task %s: one contract version per event stream", task))
 		}
 		if e.Sequence != st.next+1 {
 			return coded("INVALID_EVENT_ORDER", fmt.Sprintf("task %s: sequence %d after %d", task, e.Sequence, st.next))

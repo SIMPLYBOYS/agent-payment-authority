@@ -325,7 +325,10 @@ const (
 	verifyReq    = "agent-payment-authority/pay/v1/approval-verify-request"
 )
 
-// order decodes and checks a whole v1 order and recomputes its intent.
+// order decodes and checks a whole pay-family order (its own version's
+// rules) and recomputes its intent. The challenge tags below stay
+// ".../pay/v1/..." for every version: the intent they carry is already
+// domain-separated by version (docs/commercial-c2-design.md 2.2).
 func readOrder(raw json.RawMessage) (*paycontract.PurchaseOrder, string, error) {
 	var po paycontract.PurchaseOrder
 	if err := contracts.Decode(raw, &po); err != nil || po.Validate() != nil {
@@ -385,7 +388,8 @@ func (c *ApprovalCore) Challenge(ctx context.Context, r ChallengeRequest) (Appro
 		return ApprovalReply{}, err
 	}
 	i, b := po.Intent, po.PaymentBinding
-	if r.ApprovalSessionID != paycontract.SessionID(i.TaskID, i.PurchaseOrderID) {
+	sp, _ := paycontract.SpecOf(po.Version) // readOrder accepted the version
+	if r.ApprovalSessionID != sp.SessionID(i.TaskID, i.PurchaseOrderID) {
 		return ApprovalReply{}, Refusal("SESSION_MISMATCH")
 	}
 	w := c.cfg.wallet(i.WalletID)
@@ -441,7 +445,7 @@ func (c *ApprovalCore) Challenge(ctx context.Context, r ChallengeRequest) (Appro
 		return ApprovalReply{}, err
 	}
 	rec := challengeRecord{Version: 1, ChallengeID: id, Random: b64(rnd), ApprovalSessionID: r.ApprovalSessionID, Decision: r.Decision,
-		ConsumerID: i.ConsumerID, WalletID: w.WalletID, IntentHash: intent, JTI: paycontract.GrantID(r.ApprovalSessionID),
+		ConsumerID: i.ConsumerID, WalletID: w.WalletID, IntentHash: intent, JTI: sp.GrantID(r.ApprovalSessionID),
 		ApproverID: ap.ApproverID, ApproverVersion: ap.Version, ConfigHash: c.cfg.hash, ExpiresAt: expires}
 	_, canon, err := digestOf(challengeTag, rec)
 	if err != nil {
