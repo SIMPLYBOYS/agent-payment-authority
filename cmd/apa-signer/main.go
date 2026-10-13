@@ -5,6 +5,8 @@
 //
 //	apa-signer serve --dir DIR
 //	apa-signer keygen --dir DIR --wallet ID
+//	apa-signer serve-approvals --dir DIR        (A2: human approval only, approvals.go)
+//	apa-signer approver enroll|revoke|list ...  (A2: the administrator's commands)
 //
 // DIR (private to its owner) holds signer.json, keys/<wallet_id>.key and
 // signer.db; the passphrase is read from this terminal. It is meant to run
@@ -42,7 +44,19 @@ func main() {
 }
 
 func run(args []string, out io.Writer) error {
-	usage := errors.New("usage: apa-signer serve --dir DIR | apa-signer keygen --dir DIR --wallet ID")
+	usage := errors.New("usage: apa-signer serve --dir DIR | keygen --dir DIR --wallet ID | serve-approvals --dir DIR | approver ...")
+	if len(args) > 0 && args[0] == "approver" {
+		return approver(args[1:], out, askTTY)
+	}
+	if len(args) > 0 && args[0] == "serve-approvals" {
+		fs := flag.NewFlagSet("serve-approvals", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		dir := fs.String("dir", "", "the Signer's private directory")
+		if err := fs.Parse(args[1:]); err != nil || *dir == "" || fs.NArg() != 0 {
+			return usage
+		}
+		return serveApprovals(*dir, out) // no terminal, no passphrase, no key
+	}
 	if len(args) == 0 || args[0] != "serve" && args[0] != "keygen" {
 		return usage
 	}

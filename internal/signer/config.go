@@ -54,6 +54,30 @@ type Delegation struct {
 	ValidUntil    uint64           `json:"valid_until"`
 }
 
+// Approver is a person who may approve one consumer's payments from the
+// listed wallets with a registered authenticator (A2; docs/commercial-
+// human-approval-design.md 3.1, 6.1). Version is bumped by the
+// administrator whenever the entry changes; a challenge records it and a
+// verify refuses another (APPROVER_CHANGED). SignerMax is the per-payment
+// hard limit P2 will apply; A2 only checks its form.
+type Approver struct {
+	ApproverID string           `json:"approver_id"`
+	ConsumerID string           `json:"consumer_id"`
+	WalletIDs  []string         `json:"wallet_ids"`
+	SignerMax  contracts.Amount `json:"signer_max"`
+	Version    uint64           `json:"version"`
+}
+
+// WebAuthn is the relying party: RP ID localhost and exact origins
+// http://localhost:<port> (decision D3); the TTLs bound a challenge and a
+// verified approval.
+type WebAuthn struct {
+	RPID                string   `json:"rp_id"`
+	Origins             []string `json:"origins"`
+	ChallengeTTLSeconds uint64   `json:"challenge_ttl_seconds"`
+	ApprovalTTLSeconds  uint64   `json:"approval_ttl_seconds"`
+}
+
 type Config struct {
 	Version          int          `json:"version"` // 1
 	Socket           string       `json:"socket"`  // absolute path of the Unix socket
@@ -62,6 +86,8 @@ type Config struct {
 	Wallets          []Wallet     `json:"wallets"`
 	Assets           []Asset      `json:"assets"`
 	Delegations      []Delegation `json:"delegations"`
+	Approvers        []Approver   `json:"approvers,omitempty"` // A2: serve-approvals only
+	WebAuthn         *WebAuthn    `json:"webauthn,omitempty"`
 
 	hash string // sha256 of the canonical configuration, in each snapshot
 }
@@ -119,6 +145,9 @@ func ParseConfig(raw []byte) (*Config, error) {
 		}
 		seen[d.DelegationID] = true
 	}
+	if err := c.checkApprovers(wallets); err != nil {
+		return nil, err
+	}
 	canon, err := contracts.Canonical(raw)
 	if err != nil {
 		return nil, err
@@ -126,6 +155,62 @@ func ParseConfig(raw []byte) (*Config, error) {
 	sum := sha256.Sum256(canon)
 	c.hash = "sha256:" + hex.EncodeToString(sum[:])
 	return &c, nil
+}
+
+var originPattern = regexp.MustCompile(`^http://localhost:[1-9][0-9]{0,4}$`)
+
+// checkApprovers: each approver names wallets registered to its own
+// consumer; the relying party is localhost with exact origins. Approvers
+// without a webauthn section (or the reverse) are refused.
+func (c *Config) checkApprovers(wallets map[string]Wallet) error {
+	if (len(c.Approvers) == 0) != (c.WebAuthn == nil) {
+		return errors.New("config: approvers and webauthn go together")
+	}
+	if w := c.WebAuthn; w != nil {
+		switch {
+		case w.RPID != "localhost":
+			return errors.New("config: webauthn rp_id must be localhost")
+		case len(w.Origins) == 0 || slices.ContainsFunc(w.Origins, func(o string) bool { return !originPattern.MatchString(o) }):
+			return errors.New("config: webauthn origins must be exactly http://localhost:<port>")
+		case w.ChallengeTTLSeconds == 0 || w.ChallengeTTLSeconds > 300 || w.ApprovalTTLSeconds == 0 || w.ApprovalTTLSeconds > 600:
+			return errors.New("config: webauthn challenge TTL 1 to 300 seconds, approval TTL 1 to 600")
+		}
+	}
+	seen, consumers := map[string]bool{}, map[string]bool{}
+	for _, a := range c.Approvers {
+		if _, ok := units(a.SignerMax); !ok || !idPattern.MatchString(a.ApproverID) || seen[a.ApproverID] || a.Version == 0 || len(a.WalletIDs) == 0 {
+			return fmt.Errorf("config: approver %q", a.ApproverID)
+		}
+		if consumers[a.ConsumerID] { // a challenge finds the consumer's approver: one each
+			return fmt.Errorf("config: consumer %q has two approvers", a.ConsumerID)
+		}
+		for _, id := range a.WalletIDs {
+			if w, ok := wallets[id]; !ok || w.ConsumerID != a.ConsumerID {
+				return fmt.Errorf("config: approver %q wallet %q is not its consumer's", a.ApproverID, id)
+			}
+		}
+		seen[a.ApproverID], consumers[a.ConsumerID] = true, true
+	}
+	return nil
+}
+
+// approverOf is the consumer's approver, or nil.
+func (c *Config) approverOf(consumer string) *Approver {
+	for i := range c.Approvers {
+		if c.Approvers[i].ConsumerID == consumer {
+			return &c.Approvers[i]
+		}
+	}
+	return nil
+}
+
+func (c *Config) approver(id string) *Approver {
+	for i := range c.Approvers {
+		if c.Approvers[i].ApproverID == id {
+			return &c.Approvers[i]
+		}
+	}
+	return nil
 }
 
 func (c *Config) wallet(id string) *Wallet {
