@@ -1,7 +1,7 @@
 # A2 本人核准產品接線：實作差異、驗證與限制
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-A2本人核准產品接線實作派工-f2bf224-20261013〉（Aaron 已批准「A2 開工」）。分支 `commercial-a2`，基準 `f2bf224`（工作區只有未追蹤的 `demo`；沒有適用的 AGENTS.md）。
-> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節）；第三次 review 窄幅 not pass，A、B 已修正（第 9 節）；第四次 review 窄幅 not pass，S-B、S-A 已修正（第 10 節）；第五次 review（全組合掃描）窄幅 not pass，5-1、5-2 已修正（第 11 節）；第六次 review（只看 `9987eb4`）pass，review 結束（第 12 節），待實機與部署討論；實機登記與單筆核准、拒絕已由 Aaron 以 Chrome＋Google 密碼管理工具 PIN 完成（展示角色；基準 9987eb4；commercial-a2.md 第 13 節），付款未啟用。**
+> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節）；第三次 review 窄幅 not pass，A、B 已修正（第 9 節）；第四次 review 窄幅 not pass，S-B、S-A 已修正（第 10 節）；第五次 review（全組合掃描）窄幅 not pass，5-1、5-2 已修正（第 11 節）；第六次 review（只看 `9987eb4`）pass，review 結束（第 12 節），待實機與部署討論；實機登記與單筆核准、拒絕已由 Aaron 以 Chrome＋Google 密碼管理工具 PIN 完成（客人 A、B 兩位 approver；展示角色；基準 9987eb4；Touch ID／Safari／手機／安全金鑰／容器排到後期；commercial-a2.md 第 13 節），付款未啟用。**
 > 以下為 `f0817c7` 時的狀態，保留原文：A2 已實作並完成本輪定向自動化驗證，待 Codex 技術 review；實機登記與操作未驗收，付款未啟用。A2 不自行標 Done；本輪所有結果都是「Claude Code 執行，待 Codex 核對」，不是實機結果。
 >
 > **歸屬的變更**：Codex 訂閱已到期，從這一節起沒有第三方核對。Review 改由 Claude Code 另開的獨立上下文 subagent 執行：它們只拿到 diff、設計文件與本文件，沒有作者寫程式時的推理；這比作者自審接近獨立核對，但仍是同一個模型。紀錄一律寫「Claude Code 獨立上下文 review」，不寫成 Codex。
@@ -501,10 +501,25 @@ note（不阻擋，記為已知）：
 - Google 密碼管理工具新增的 `localhost` passkey 是否刪除，由 Aaron 決定。
 - 全程沒有建立、讀取或解鎖付款金鑰，沒有簽署，沒有送交易。
 
+### 13.6 approver-b／客人 B（第二段）
+
+依據：Aaron「請把會影響的部分完成」。roadmap 的商業 demo 主線是兩位客人 A、B（M-B／M-C）。A2 模式下模擬核准會被拒絕（第二次 review 的 R4），所以 B 的請購只能由 approver-b 用裝置核准，必須補上。
+
+- Host 與 `serve-approvals` 重新啟動；配對改用 token 檔。
+- 登記：begin 的輸出依指示沒有貼回，確認碼沒有外流。
+  - 終端機顯示 credential `663f78ce86cf48fc`，`UP=1 UV=1 BE=1 BS=1`，AAGUID 是 Google 密碼管理工具的；Aaron 核對與頁面相同後輸入 `yes`。
+  - `approver list`：approver-a `b8923ecec9bc556c`、approver-b `663f78ce86cf48fc`，都是 active。
+- 單筆核准：
+  - 面板顯示「本人核准已驗證，付款未啟用。」；付款帳戶是客人 B 的測試錢包 `0x2222…2222`、wallet-b；`grant-5e73348a…`（webauthn）。
+  - Store（`var/present-FhbSr0`）：`aps-2b47844b…`，consumer-b，approved，`webauthn:approver-b`，webauthn grant 帶 `signer_approval_id`。
+- B 由 Aaron 代操作，是展示角色。
+
 ### 13.5 限制與還沒有做的
 
-- 只驗證了 Chrome＋Google 密碼管理工具＋PIN、單一 approver（approver-a）、客人 A。
-- approver-b／客人 B、Touch ID、Safari、手機、安全金鑰都沒有做，也都不是前置條件。
+- 只驗證了 Chrome＋Google 密碼管理工具＋PIN；approver-a／客人 A（核准 2、拒絕 1）與 approver-b／客人 B（核准 1，見 13.6）。
+- **排到後期，視情況再決定要不要做**（Aaron 10/13：不影響最終商業 demo 的部分先排後期）：
+  - Touch ID、Safari、手機、安全金鑰：A1 已選定 Google 密碼管理工具＋PIN，Touch ID 也已批准不作為 A2 的必要阻擋；
+  - 容器內執行：屬於證據完整度，不影響畫面或流程，Docker 啟動時可補。
 - 委託確認仍是模擬。
 - 頁面不是可信顯示。
 - 沒有在容器中執行。
