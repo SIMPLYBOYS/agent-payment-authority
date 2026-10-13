@@ -1,7 +1,8 @@
 # 本人核准最小流程（A1 實機可行性、A2 正式接線）：設計
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-本人核准最小流程設計派工-d7cbf9f-20261013〉（Aaron 已核准「本人核准最小流程」的設計）。分支 `commercial-p1b`，基準 `d7cbf9f`（工作區只有未追蹤的 `demo`）。
-> **狀態：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作並通過定向驗證（軟體與 virtual authenticator，不是實機結果），實機登記／驗證待 Aaron 操作；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。**（第 18 節）
+> **狀態：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 補正完成（`7bb874f`），待 Codex 限定複核；實機未驗收，A2 未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。**（第 19 節）
+> 以下為 `20677b0` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作並通過定向驗證（軟體與 virtual authenticator，不是實機結果），實機登記／驗證待 Aaron 操作；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。（第 18 節）
 > 以下為 `35cbf3f` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 尚未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。（第 17 節）
 > 以下為 `e4153ca` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核（設計一致性核對；R1～R3、decision 綁定與到期規則缺口關閉）；不是實作、全面安全稽核或實機驗收；D1～D8 的決策與執行核准另行處理；A1／A2 未執行，付款未啟用。（第 16 節）
 > 以下為 `c798bad` 時的狀態，保留原文：本人核准設計另開條件與 close 到期判斷補正完成，待 Codex 限定複核；R1 原存取權限與 R2 維持關閉；整份設計尚未通過；A1／A2 未執行，付款未啟用。（第 15 節）
@@ -803,3 +804,58 @@ Aaron 轉達的結論（原文）：
 - 裝置不支援時保存結果並停止，不自動採購或擴大方案。
 
 **不做**：A2、Signer、Store、Host 接線、付款金鑰、簽署、交易、真實 Agent。
+
+## 19 A1 spike R1／R2 限定補正（10/13）
+
+**依據**：vault〈Claude-Code-A1-spike反向驗證與結果保存限定補正派工-20677b0-20261013〉。
+- Codex 對 `20677b0` 只做 security-audit 限定唯讀核對：讀了 Git、原始碼、操作文件與本機 go-webauthn 原始碼。
+- Codex 沒有重跑測試、沒有啟動伺服器，也沒有登記驗證器。
+
+**狀態**：A1 spike R1／R2 補正完成，待 Codex 限定複核；實機未驗收，A2 未開工，付款未啟用。A1 不標 Done。
+
+### 19.1 原因與修正
+
+| # | 原問題 | 修正（`7bb874f`） |
+|---|---|---|
+| R1 | `reverse.py` 只排除兩種建置錯誤字樣，其他非零退出（panic、逾時等）都算抓到；不足 13 項也可能 exit 0 | 每項明列目標測試與預期斷言。先確認未突變的基準通過且確實跑到目標測試；只有「指定測試以預期斷言失敗」才算抓到。建置或環境錯誤、panic、逾時、訊號終止、沒跑到測試、其他斷言、存活都不算。每項 120 秒、整體 900 秒上限，逐項印出進度、耗時與分類理由。每項的基準與突變輸出和 `summary.json` 都保存。腳本自己建立一次性副本，中斷也不會寫到工作區。全數抓到才 exit 0。另附 `--self-test`，用合成輸出檢查分類器 |
+| R2 結果檔 | `OpenFile(..., 0600)` 只替新檔設權限；既有較寬權限的檔案或 symlink 仍會被追加，與 README 的 0600 不一致 | `--out` 改成 `--out-dir`：父目錄必須已經存在、屬於自己、不是 symlink、權限 0700。每次啟動以 `mkdir` 建新的 `run-<UTC>-<隨機>/`（0700），再以 `O_EXCL\|O_NOFOLLOW` 建 `results.jsonl`（0600）。既有檔案、目錄或 symlink 一律拒絕，不改旁觀檔案。啟動時印出結果檔路徑 |
+| R2 錯誤輸出 | `libDetail` 保存函式庫的 `Details`／`DevInfo`；challenge 不符時會帶出預期與收到的 challenge（Codex 依依賴原始碼確認；屬於輸出超出最小紀錄範圍，不是已證明的外洩） | 函式庫錯誤只轉成固定的白名單原因（`challenge_mismatch`、`origin_mismatch`、`top_origin`、`cross_origin`、`uv_missing`、`up_missing`、`rp_id_mismatch`、`backup_eligible_changed`；其餘記 `other:<類型>`／`other`），結果檔與 HTTP 回覆都一樣。我們自己的拒絕也改成固定字詞。`fmt`、attachment、transports 只留已知值；步驟名稱只接受頁面的五個步驟。瀏覽器端只保存錯誤名稱（固定清單），不保存訊息 |
+
+**操作文件**（`spikes/webauthn/README.md`）：
+- 「沒有金鑰」改成「不建立或使用付款金鑰」。
+- 寫明實機登記會在驗證器裡建立 credential，重啟 spike 只清伺服器記憶體。
+- A2 重新登記；裝置端 credential 是否清理，由 Aaron 辨認後自己決定與操作，不自動刪除。
+- 補上關卡 A／B／C 與停止條件：「不支援」不算通過；全部不支援就保存並停止，不採購也不擴大方案。
+- 補上授權來源表：
+  - 決策接受：Aaron 10/13 原話，第 17 節逐字保存；
+  - 實作派工：同一段原話，加上對話中的「核准 A1 派工」，再加本補正派工；
+  - 實機執行：原話寫明由 Aaron 操作，依本補正派工，要等核對完成、Aaron 確認後才進行。
+- 兩句原話都可在 Claude Code 對話中核對；Codex 的建議表不是核准。
+
+### 19.2 本輪驗證（Claude Code 執行，待 Codex 核對；都不是實機結果）
+
+基準 `7bb874f`。證據在 `artifacts/a1/r1r2-20261013T062322Z/`（git 忽略；原始執行目錄在 Claude Code 的暫存區，已複製過來，不含 binary 與臨時 Chrome profile）。
+
+| 步驟 | 命令 | exit | 耗時 | 結果 |
+|---|---|---|---|---|
+| 1 | `go test -count=1 -v ./...`（`GOPROXY=off`） | 0 | 2 s | 6／6 PASS，含新增的 `TestResultsDir`、`TestEvidenceKeepsFixedWords`；拒絕案例另外核對結果檔記到的原因（錯 origin、topOrigin、crossOrigin、缺 UV） |
+| 2 | `python3 reverse.py --self-test` | 0 | 1 s | 11／11：正例，以及建置錯誤、panic、逾時（兩種）、訊號、未執行（兩種）、其他斷言（兩種）、存活 |
+| 3 | `python3 reverse.py <證據>/reverse` | 0 | 23 s | 13／13 都以預期斷言命中；4 個目標測試的基準都通過；工作區事後無變更 |
+| 4 | `node spikes/webauthn/virtual.mjs <binary> <證據>/virtual`（工具沙箱外，綁 loopback） | 0 | 4 s | 整頁 PASS：錯 challenge 記 `challenge_mismatch`、不要求 UV 記 `uv_missing`（virtual 回 `UV=0`）、錯 origin 記 `SecurityError`；每行都是 `virtual`；`detail` 只有固定字詞；`results.jsonl` 0600，在新的 0700 run 目錄裡 |
+
+**執行範圍**：
+- 四步都在 `7bb874f` 上各跑一次，沒有重跑。
+- 開發期間（提交前）有一次失敗：缺 UV 的原因被記成 `other:verification_error`，因為那個錯誤的 `Details` 不是空的。已改成依 `DevInfo` 的固定字串判斷，再提交與正式執行。
+- 環境：
+  - 測試只用合成資料、軟體與 virtual authenticator，加上臨時的 Chrome profile；
+  - 沒有用個人瀏覽器 profile 或真實 credential；
+  - 沒有下載或升級依賴。
+
+**沿用與未跑**：
+- 第 18 節的舊紀錄（`20677b0` 的軟體測試、virtual 流程、13／13）保留，歸 Claude Code。
+- 舊的 13／13 是用舊分類器算的，不足以證明每項都命中預期斷言；本輪以新分類器重跑，不把兩輪合寫。
+- 沒有跑主專案全套、完整容器、全部突變、M1 產包、Unity 或 P1-b 隔離流程。
+- 沒有實機登記、沒有讀 keychain、沒有啟動 Signer、沒有碰 `/opt/apa-signer`。
+- 沒有 A2、真實 Agent、付款金鑰、簽署或連鏈。
+
+**下一步**：交 Codex 限定複核；實機操作要等核對完成、Aaron 確認後，才依 `spikes/webauthn/README.md` 進行。
