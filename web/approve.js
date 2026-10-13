@@ -69,7 +69,7 @@ export function outcomeText(status, body, decision) {
   if (status === 200 && b.outcome === "approved") return ["ok", "本人核准已驗證，付款未啟用。"];
   if (status === 200 && b.outcome === "denied") return ["deny", "你已拒絕這筆（已驗證裝置）。"];
   if (status === 200 && b.outcome === "mismatch") return ["error", "Signer 的結果和這次操作不一致，沒有採用。"];
-  if (status === 200 && (b.outcome === "closed" || b.outcome === "superseded")) return ["closed", "這筆在驗證完成前已關閉（過期、取消或報價改變）；沒有核准。"];
+  if (status === 200 && (b.outcome === "closed" || b.outcome === "superseded")) return ["closed", "這筆已關閉（過期、取消或報價改變），裝置的驗證沒有被採用；不會付款。"];
   if (status === 200 && a.state === "lost") return ["warn", "驗證結果沒有送達，這次沒有核准。請按「重新核准」。"];
   if (status === 200 && a.state === "closed") return ["idle", "已取消這次驗證；這筆仍在等你決定。"];
   if (status === 200 && a.state === "expired") return ["closed", "已過期（後端時間為準）；這次驗證沒有完成。"];
@@ -117,6 +117,19 @@ const DONE = {
     denied: ["deny", "已拒絕", "Agent 不會取得這一筆；沒有付款。"] }, // P1-a's words
 };
 export const decidedText = (state, p) => DONE[byDevice(p) ? "device" : "simulated"][state] || null;
+
+// recordTag (review A): the tag and source line of a record decided by the
+// other method than the panel's ("simulated" or "device"); null for a
+// pending record, a record nobody decided, or one of the panel's method.
+export function recordTag(p, panel) {
+  const ap = p && p.approval;
+  if (!ap || ap.state === "pending" || !ap.resolved_by || (byDevice(p) ? "device" : "simulated") === panel) return null;
+  return byDevice(p) ? ["本人核准", "這筆由 Signer 驗證已登記的裝置・付款：未啟用"] : ["模擬核准", "這筆是 fake 模擬核准（主持人扮演，不是本人驗證）・付款：未啟用"];
+}
+
+// panelNote (review B): a closed session's stored attempt text (design 7:
+// the unknown has an end) wins over the last operation's note.
+export const panelNote = (note, stored, pending) => (stored && !pending ? { kind: stored[0], text: stored[1] } : note || (stored && { kind: stored[0], text: stored[1] }));
 
 // grantLine: a grant by its own method.
 export function grantLine(g) {

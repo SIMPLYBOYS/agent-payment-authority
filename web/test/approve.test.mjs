@@ -123,3 +123,21 @@ test("the panels word a decided record and its grant by the record", () => {
   assert.match(AP.grantLine(sim.approval.grant), /^模擬授權 .*GRANT_METHOD_NOT_ACCEPTED/);
   assert.ok(!AP.grantLine(sim.approval.grant).includes("由 Signer 驗證"));
 });
+
+// Review A: a record decided by the other method than the panel's gets that
+// method's tag and source line; review B: a closed session's stored attempt
+// text wins over the last operation's note (the unknown has an end).
+test("a decided record's tag follows the record; a closed session's attempt text wins", () => {
+  const rec = (state, by) => ({ approval: { state, resolved_by: by } });
+  assert.deepEqual(AP.recordTag(rec("approved", "sim-approver-a"), "device")[0], "模擬核准");
+  assert.ok(!AP.recordTag(rec("approved", "sim-approver-a"), "device")[1].includes("裝置"));
+  assert.equal(AP.recordTag(rec("approved", "webauthn:approver-a"), "simulated")[0], "本人核准");
+  assert.equal(AP.recordTag(rec("approved", "webauthn:approver-a"), "device"), null);
+  assert.equal(AP.recordTag(rec("pending", undefined), "device"), null);
+  assert.equal(AP.recordTag(rec("expired", undefined), "simulated"), null);
+  const unknown = AP.outcomeText(503, { error: "result_unknown" }, "approve");
+  const stored = AP.attemptText({ state: "unknown" }, "expired");
+  assert.equal(AP.panelNote({ kind: unknown[0], text: unknown[1] }, stored, false).text, "無法確認這次驗證的結果；這筆已依後端期限關閉。");
+  assert.equal(AP.panelNote({ kind: "warn", text: "x" }, ["idle", "y"], true).text, "x");
+  assert.equal(AP.panelNote(null, null, false), null);
+});

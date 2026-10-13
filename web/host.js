@@ -910,7 +910,8 @@ function renderApproval(runs) {
   } else {
     const p = item.purchase, ap = p.approval, d = item.delegation;
     const mode = el("p", "approval-mode");
-    mode.append(el("span", "approval-tag", "模擬核准"), "fake 展示・主持人扮演客人 " + short(item.consumer_id) + "（不是本人驗證）・不會付款");
+    const other = AP.recordTag(p, "simulated");
+    mode.append(el("span", "approval-tag", other ? other[0] : "模擬核准"), other ? other[1] : "fake 展示・主持人扮演客人 " + short(item.consumer_id) + "（不是本人驗證）・不會付款");
     parts.push(mode);
     const pending = ap.state === "pending";
     const res = AP.decidedText(ap.state, p) || RESULT[ap.state];
@@ -1099,9 +1100,12 @@ function a2Item() {
 const a2Target = (item) => A.approvalTarget(creds.gen, "a2", item);
 
 const A2_RESULT = {
-  expired: ["closed", "已過期（後端時間為準）。", "需要重新請購。"], // N9: an unknown attempt is never worded as not approved
-  withdrawn: ["closed", "主持人已取消這個任務；這筆沒有核准，也不是你拒絕的。", ""],
-  superseded: ["closed", "報價已改變：這次核准作廢", "需要重新請購；沒有付款。"],
+  // Review N-b, C: a closed session's heading never says "not approved"
+  // (an attempt's result may be unknown; design 7, 8); the panel's message
+  // says what is known.
+  expired: ["closed", "已過期（後端時間為準）。", "需要重新請購。"],
+  withdrawn: ["closed", "主持人已取消這個任務；這筆不是你拒絕的。", "不會付款。"],
+  superseded: ["closed", "報價已改變：這筆已關閉", "需要重新請購；沒有付款。"],
 };
 
 let shownA2 = "";
@@ -1131,7 +1135,8 @@ function renderA2() {
   } else {
     const p = item.purchase, ap = p.approval, d = item.delegation;
     const mode = el("p", "approval-mode");
-    mode.append(el("span", "approval-tag", "本人核准"), AP.sourceText(lastA2 && lastA2.sources) + (lastA2 && lastA2.signer !== "approvals-only" ? "・Signer 目前無法連線" : ""));
+    const other = AP.recordTag(p, "device");
+    mode.append(el("span", "approval-tag", other ? other[0] : "本人核准"), other ? other[1] : AP.sourceText(lastA2 && lastA2.sources) + (lastA2 && lastA2.signer !== "approvals-only" ? "・Signer 目前無法連線" : ""));
     parts.push(mode);
     const pending = ap.state === "pending";
     const res = AP.decidedText(ap.state, p) || A2_RESULT[ap.state];
@@ -1188,7 +1193,7 @@ function renderA2() {
     } else if (ap.grant) {
       parts.push(el("p", "approval-grant", AP.grantLine(ap.grant)));
     }
-    const shown = a2Op && a2Op.session === ap.approval_session_id ? null : a2Note || (stored && { kind: stored[0], text: stored[1] });
+    const shown = a2Op && a2Op.session === ap.approval_session_id ? null : AP.panelNote(a2Note, stored, pending);
     if (a2Op && a2Op.session === ap.approval_session_id) {
       const n = el("p", "approval-msg", a2Op.phase === "device" ? "請在裝置上完成驗證…" : a2Op.phase === "verify" ? "結果確認中，請不要重複操作。" : "準備驗證中…");
       n.dataset.kind = "busy";
