@@ -2,7 +2,8 @@
 
 依 `docs/commercial-human-approval-design.md` 第 2、4 節與第 17～19 節。
 
-**狀態**：A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`；設計文件第 20 節）。Aaron 核准先做 Chrome＋Touch ID，尚待操作結果；實機未驗收，A2 未開工，付款未啟用。
+**狀態**：A1 可行性切片完成（Done，10/13），限 Chrome＋Google 密碼管理工具／PIN 路徑（Codex 限定核對通過、Aaron 批准；設計文件第 22 節）。Touch ID 未驗證、另列，不作為 A2 必要阻擋；A2 接線需另行派工；付款未啟用。
+（`53601e1` 時的狀態，保留原文：A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`；設計文件第 20 節）。Aaron 核准先做 Chrome＋Touch ID，尚待操作結果；實機未驗收，A2 未開工，付款未啟用。）
 （`f8b59b9` 時的狀態，保留原文：A1 spike R1／R2 補正完成，待 Codex 限定複核；實機未驗收，A2 未開工，付款未啟用。）
 
 **範圍**：
