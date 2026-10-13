@@ -1,7 +1,8 @@
 # 本人核准最小流程（A1 實機可行性、A2 正式接線）：設計
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-本人核准最小流程設計派工-d7cbf9f-20261013〉（Aaron 已核准「本人核准最小流程」的設計）。分支 `commercial-p1b`，基準 `d7cbf9f`（工作區只有未追蹤的 `demo`）。
-> **狀態：本人核准設計 R1～R3 與規格補正完成，待 Codex 限定複核；A1 實機與 A2 接線未執行，付款未啟用。**（第 13 節；依 vault〈Claude-Code-本人核准設計R1-R3限定補正派工-6c49619-20261013〉）
+> **狀態：本人核准設計 close／verify 競爭與 decision 綁定補正完成，待 Codex 限定複核；R1 原存取權限與 R2 維持關閉；A1／A2 未執行，付款未啟用。**（第 14 節；依 vault〈Claude-Code-本人核准設計競爭與決策綁定限定補正派工-031c4c7-20261013〉）
+> 以下為 `031c4c7` 時的狀態，保留原文：本人核准設計 R1～R3 與規格補正完成，待 Codex 限定複核；A1 實機與 A2 接線未執行，付款未啟用。（第 13 節）
 > 以下為初版（`6c49619`）時的狀態，保留原文：本人核准最小流程設計完成，待 Codex review；A1 實機與 A2 接線未執行，付款未啟用。
 > 本輪只讀程式與文件、查官方資料、寫本文件：
 > - 沒有改產品、沒有原型、沒有安裝依賴、沒有建置或測試；
@@ -192,7 +193,7 @@ Signer 依 §7.1 全部 29 步，重點如下：
 
 ### 4.4 assertion 的驗證規則（§7.2）
 
-第 1～6 步已核對原文；第 7 步之後依規格結構列出，**待 Codex 對照原文核對**：
+第 1～6 步由 Claude Code 在初版核對原文；第 7 步之後與 §13.4.3、§6.1.3 的原文由 **Codex 在 `6c49619` 的 review 補讀核對**（不是 Claude Code 初版讀完），本節的規則已依那次核對修正（第 13 節）：
 
 1. credential ID 在本次 challenge 的 `allowCredentials` 之內，對應一筆 `active` credential，屬於這次 challenge 的 approver。若回應帶 `userHandle`，必須等於該 approver 的 `user.id`。
 2. client data：`type` 是 `webauthn.get`；`challenge` 等於本次 challenge；`origin` 在允許清單；`topOrigin` 不存在；`crossOrigin` 不是 `true`。
@@ -313,7 +314,7 @@ webauthn_challenge = SHA-256("agent-payment-authority/pay/v1/webauthn-challenge"
   - `approvers: [{approver_id, consumer_id, wallet_ids, signer_max, version}]`；
   - `webauthn: {rp_id: "localhost", origins: ["http://localhost:8402"], challenge_ttl_seconds: 120, approval_ttl_seconds: 300}`。
   - `ParseConfig` 嚴格驗證：approver 的 consumer 與 wallet 對得上 `wallets`，origins 必須是精確的 `http://localhost:<port>`。
-- **DB**（`signer.db` 新表）：
+- **DB**（A2 的核准表全部放在 **`approvals.db`**，由 `serve-approvals` 開啟，第 6.4 節；既有付款模式的 `signer.db` 不變）：
 
 | 表 | 欄位（最小） | 唯一性與檢查 |
 |---|---|---|
@@ -325,7 +326,8 @@ webauthn_challenge = SHA-256("agent-payment-authority/pay/v1/webauthn-challenge"
 - **socket 路由**（固定，沿用 P1-b 的 caller uid、64 KiB、期限）：
   - `POST /v1/approvals/challenge {request_id, approval_session_id, decision, order, host_deadline}` → `{challenge_id, options, display, expires_at}`。`decision` 是 `approve` 或 `deny`（第 6.3 節），進入 challenge 的 `record`；
   - `GET /v1/approvals/challenge?request_id=`：**依 Host 的 request ID 查 challenge**（第 7 節斷點 1）；
-  - `POST /v1/approvals/challenges/{challenge_id}/close`：只在 `issued` 時改成 `closed`，用於 assertion 遺失後的收尾（第 7 節斷點 2）；
+  - `POST /v1/approvals/challenges/{challenge_id}/close {close_request_id}`：用於 assertion 遺失後的收尾與改變決定（第 7 節）。規則見下面「close 與 verify 的競爭」；
+  - `GET /v1/approvals/challenge?challenge_id=`：查 challenge 的目前狀態；`used` 時一併回 `approval_id` 與 `verify_request_id`；
   - `POST /v1/approvals/verify {verify_request_id, challenge_id, order, assertion}` → `{approval_id, state, decision, intent_hash, approver_id, expires_at}`；
   - `GET /v1/approvals?verify_request_id=`：**依 verify 的 request ID 查結果**；`GET /v1/approvals/{approval_id}`；
   - `POST /v1/approvals/{approval_id}/abandon`（只在 `verified` 時，改成 `abandoned`）；
@@ -334,9 +336,21 @@ webauthn_challenge = SHA-256("agent-payment-authority/pay/v1/webauthn-challenge"
   - challenge：鍵是 Host 的 `request_id`；指紋是 `SHA-256("agent-payment-authority/pay/v1/approval-challenge-request" ‖ 0x00 ‖ canonical({approval_session_id, decision, order, host_deadline}))`。同鍵同指紋回同一個 challenge；同鍵不同指紋 `REQUEST_ID_CONFLICT`。
   - verify：鍵是 Host 的 `verify_request_id`（每次送出 assertion 前先寫入 Host）；指紋是 `SHA-256("…/approval-verify-request" ‖ 0x00 ‖ canonical({challenge_id, order_fingerprint, assertion_sha256}))`。同鍵同指紋回保存的結果（成功或拒絕），**不重新驗證**；同鍵不同指紋 `REQUEST_ID_CONFLICT`。
   - 這兩組鍵與付款 attempt 的 request ID 是三套，彼此不共用。
+- **close 與 verify 的競爭**（同一列、同一個狀態，條件式寫入決勝）：
+  - **verify 的提交**：密碼學驗證可以在交易外先做，但最後的寫入交易必須以 `UPDATE approval_challenges SET state='used' … WHERE challenge_id=? AND state='issued' AND ? < expires_at`（時間在交易內取）影響**恰好一列**，才在**同一個交易**裡寫 `human_approvals` 與 `verify_requests`。影響 0 列時在同一交易重讀：`closed` → 記 `verify_requests(outcome=CHALLENGE_CLOSED)`，**不寫核准**；`used` → 若是同一個 `verify_request_id` 就回保存的結果，否則 `CHALLENGE_USED`；`issued` 但已到期 → 改 `expired`，`CHALLENGE_EXPIRED`。不在驗證前讀一次狀態就當成依據。
+  - **close 的提交**：`UPDATE approval_challenges SET state='closed', closed_at=? WHERE challenge_id=? AND state='issued'`。不論影響幾列，都在同一交易重讀並**回 challenge 的目前狀態**：
+    - `closed`：關閉成功（這次或先前的 close 都一樣，close 冪等）；
+    - `used`：verify 已先提交，**close 不覆寫**，回 `approval_id`、`verify_request_id` 與該筆的 `decision`；
+    - `expired`：已到期，沒有 verify 能再提交；
+    - challenge 不存在：`CHALLENGE_UNKNOWN`。
+  - **close 的冪等與查回**：`close_request_id` 由 Host 在呼叫前寫入；同一個 challenge 可以重送 close，結果都由上面的重讀決定。close 的回覆遺失時，以 `GET /v1/approvals/challenge?challenge_id=` 查回同一個權威狀態。
+  - 因此 `closed` 之後不可能再出現核准；`used` 之後 close 一定看得到那筆核准。
 - **新增 `verify_requests` 表**：`verify_request_id` PK、`fingerprint`、`challenge_id`、`outcome`（`verified` 或固定拒絕碼）、`approval_id` NULL、`received_at`。拒絕也記錄，所以同一個請求的重送回同一個拒絕。拒絕不消耗 challenge；同一個 challenge 最多 3 次失敗，之後改成 `closed`（`CHALLENGE_CLOSED`）。
 - **新錯誤碼**：`APPROVER_UNKNOWN`、`CREDENTIAL_REVOKED`、`CREDENTIAL_PENDING`、`CHALLENGE_UNKNOWN`、`CHALLENGE_EXPIRED`、`CHALLENGE_USED`、`CHALLENGE_CLOSED`、`PAYMENT_MODE_OFF`、`ASSERTION_INVALID`（細分 `_TYPE`、`_ORIGIN`、`_RPID`、`_FLAGS`、`_SIGNATURE`、`_COUNTER`）、`APPROVER_CHANGED`、`ENROLLMENT_CODE`；沿用 `CONSUMER_MISMATCH`、`ORDER_INVALID`、`REQUEST_ID_CONFLICT`、`SIGNER_TIMEOUT`。
-- **`/v1/sign` 的 `webauthn`**：A2 **維持** `HUMAN_APPROVAL_UNAVAILABLE`。P2 才改成接受 `{method: webauthn, approval_id}`，並在接受交易裡重驗與消耗（第 5 節）。這樣 A2 的驗證入口不會變成付款入口，正式預留驗證器維持 fail-closed，不加繞過開關。
+- **付款入口在兩種模式的回覆**（分開列，測試也分開）：
+  - `serve`（既有付款模式，不變）：`/v1/sign` 收到 `webauthn` 仍回 `HUMAN_APPROVAL_UNAVAILABLE`；其他付款規則照 P1-b（正式組裝 `RESERVATION_UNAVAILABLE`）。P2 才改成接受 `{method: webauthn, approval_id}`，並在接受交易裡重驗與消耗（第 5 節）。
+  - `serve-approvals`（A2 新增）：`/v1/sign` 與所有 attempts 路由一律回 409 `PAYMENT_MODE_OFF`，不看授權方法。
+  - 兩者都不加繞過預留的開關，正式預留驗證器維持 fail-closed。
 - **管理命令**（`cmd/apa-signer`，只在終端機）：`approver enroll begin|confirm`、`approver revoke`、`approver list`。
 
 **verify 入口不消耗什麼、不能代替什麼**：
@@ -374,10 +388,15 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 | 路由 | 呼叫者 | 身分來源 | consumer／session 綁定 | 可取得的資料 | 可造成的狀態變化 | 未授權時 |
 |---|---|---|---|---|---|---|
 | `GET /api/approvals?consumer=` 列出待核准、`GET /api/approvals/{session_id}` 看摘要與狀態 | 該 consumer 的頁面 | **viewer 憑證**（`hostcreds.js` 依 consumer 持有，既有角色）；或 host 憑證（全域唯讀，沿用既有規則） | 會話的 consumer 由 Store 決定；viewer 只看得到自己 consumer 的會話 | 摘要（Signer 的 `display` 若已取得）、會話與 attempt 狀態；**不含** credential 選項 | 無 | 沒有憑證 401；別的 consumer 一律 404（不洩漏存在與否，同 `record`） |
-| `POST /api/approvals/{session_id}/challenge {request_id, decision}` | 同上 | **該 consumer 的 viewer 憑證**；host、operator、模擬核准者憑證都不接受 | 會話必須屬於 viewer 的 consumer，且仍是 `pending` | challenge 選項（`allowCredentials`）、`display`、期限 | 寫 `approval_attempts`（`requested` → `challenged`）；**不改會話狀態** | 401／404；會話不是 `pending` 409 |
-| `POST /api/approvals/{session_id}/assertion {verify_request_id, assertion}` | 同上 | viewer 憑證**加上** Signer 對 assertion 的驗證 | 同上；assertion 必須屬於這個會話目前 attempt 的 challenge | 結果 | Signer 驗證通過才寫：`approve` → 會話 `approved`＋webauthn grant＋事件；`deny` → 會話 `denied`（`APPROVAL_DENIED`，`resolved_by=webauthn:<approver_id>`）。**viewer 憑證單獨不能造成任何核准或拒絕** | 401／404；assertion 被拒時照 Signer 的代碼，不改會話 |
+| `POST /api/approvals/{session_id}/challenge {request_id, decision}` | 同上 | **該 consumer 的 viewer 憑證**；host、operator、模擬核准者憑證都不接受 | 會話必須屬於 viewer 的 consumer，且仍是 `pending`；`decision` 必須與目前非終態 attempt 相容（第 7 節） | 權威的 attempt ID、challenge 選項（`allowCredentials`）、`display`，以及 Signer 回傳的 `consumer_id`、`approval_session_id`、`intent_hash`、`decision`、期限 | 寫 `approval_attempts`（`requested` → `challenged`）或共用相容的 attempt；**不改會話狀態** | 401／404；會話不是 `pending` 409；相反的 `decision` 409 `DECISION_CONFLICT` |
+| `POST /api/approvals/{session_id}/attempts/{request_id}/cancel`（取消這次驗證） | 同上 | 該 consumer 的 viewer 憑證 | 同上；attempt 必須屬於這個會話 | close 的權威結果 | Host 以 close 規則結束舊 challenge；不改會話狀態（會話仍 `pending`，除非 close 回 `used` 而那筆已完成） | 401／404 |
+| `POST /api/approvals/{session_id}/assertion {verify_request_id, assertion}` | 同上 | viewer 憑證**加上** Signer 對 assertion 的驗證 | 同上；assertion 必須屬於這個會話目前 attempt 的 challenge | 結果 | Host 只依 **Signer 回傳的 `decision`**，而且它必須等於 attempt 的 `decision`（不一致就拒絕並記錄，不落地），Signer 驗證通過才寫：`approve` → 會話 `approved`＋webauthn grant＋事件；`deny` → 會話 `denied`（`APPROVAL_DENIED`，`resolved_by=webauthn:<approver_id>`）。**viewer 憑證單獨不能造成任何核准或拒絕** | 401／404；assertion 被拒時照 Signer 的代碼，不改會話 |
 | `GET /api/approvals/{session_id}/attempts/{request_id}` 恢復查詢 | 同上 | viewer 憑證 | 同上 | attempt 狀態；Host 依需要向 Signer 查（第 7 節） | 只依 Signer 的權威結果推進 attempt，不推進會話以外的東西 | 401／404 |
 | 取消 task（既有 `POST /api/host/tasks/{id}/cancel`） | 主持人 | operator 憑證（既有） | task | — | 照 P1-a：關閉會話為 `withdrawn`，事件寫取消，**不寫成本人拒絕** | 既有規則 |
+
+**WebAuthn 啟動前的核對**（頁面）：challenge 回覆的 `consumer_id`、`approval_session_id`、`intent_hash`、`decision` 必須與這次使用者操作一致（沿用 `approvalTarget`／`sameTarget`，再加上 `decision`）；不一致就停止，**不彈出裝置提示**。
+
+**落地**：`approve` 才寫 webauthn grant；`deny` 只把會話改成 `denied`，**不發付款 grant**。後端結果不由前端按鈕文字決定。
 
 **最小原則**：
 - 看資料沿用既有、以 consumer 為範圍的讀取憑證。這**不**讓 viewer 有核准權限：viewer 憑證只能發起 challenge 與轉送 assertion，結果完全取決於 Signer 的驗證。
@@ -429,7 +448,7 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 | 1 | Host 寫了 `requested`，還沒呼叫或呼叫沒有回應 | `request_id`、`decision` | 不確定 | 不確定（**不是**「確定未受理」） | `GET /v1/approvals/challenge?request_id=`：查到就補寫 `challenge_id`；**確定查無**（讀取成功、404）就以同一個 `request_id`、同內容重送 POST；讀取失敗就有界重試 | 「準備驗證中…」 | 成功 → 第 3 步；到會話期限仍無法確認 → `expired` |
 | 2 | **斷點 1**：Signer 存了 challenge，回覆遺失 | `request_id` | challenge `issued` | Signer | 依 `request_id` 查到同一個 challenge，Host 補寫 `challenge_id`；不產生第二個 challenge | 「可以繼續驗證」（使用者按主要按鈕才彈出） | 繼續第 3 步 |
 | 3 | 頁面拿到 challenge，使用者沒完成或關閉頁面 | `challenge_id` | `issued` | Signer | 查 challenge 狀態 | 「驗證未完成」 | challenge 到期 → attempt `expired`；使用者按「重新核准」開新的 attempt（新 `request_id`） |
-| 4 | **斷點 2**：Host 存了 `verifying`，assertion 沒送到 Signer 就當機 | `challenge_id`、`verify_request_id`；**沒有** assertion（Host 不保存原文） | challenge `issued`，沒有這個 `verify_request_id` | Signer（查無＝確定未收到） | `GET /v1/approvals?verify_request_id=`：**讀取成功且查無**，Host 呼叫 `POST /v1/approvals/challenges/{id}/close`（`issued` → `closed`），attempt 改 `lost`；讀取失敗就有界重試，**不當成查無** | 「驗證結果沒有送達，這次沒有核准。請按『重新核准』。」不自動彈出 | 終態 `lost`；使用者明確按「重新核准」才開新的 attempt。舊 challenge 已 `closed`，那份遺失的 assertion 之後也不能被用 |
+| 4 | **斷點 2**：Host 存了 `verifying`，之後當機，不知道 assertion 有沒有送到 | `challenge_id`、`verify_request_id`；**沒有** assertion（Host 不保存原文） | 不確定：可能沒收到、可能 verify 還在途中、可能已提交 | 不確定。**查無不等於確定未收到**：查詢當下查無之後，verify 仍可能提交 | 先依 `verify_request_id` 查；查到就照第 6 或 7 列。讀取成功且查無時，Host 先寫 `close_request_id`，再送 close，**依 close 回的權威狀態處理**（見下表）；讀取失敗就有界重試，不當成查無 | 等 close 的結果時：「正在確認這次驗證…」 | 見下面「close 與 verify 的先後」 |
 | 5 | assertion 送到、Signer 受理狀態不明（逾時） | `verify_request_id` | 可能有 | 不確定 | 依 `verify_request_id` 查；讀取失敗就有界重試；**不重送新的 assertion** | 「結果確認中，請不要重複操作。」 | 查到 → 第 6 或第 7 列；到會話期限仍不明 → 會話 `expired`，attempt `unknown`；之後查到 `verified` 時 Host 呼叫 `abandon` |
 | 6 | Signer 已驗證，回覆遺失 | `verify_request_id` | `verify_requests` 與 `human_approvals(verified)` | Signer | 依 `verify_request_id` 查到結果；Host 有原 assertion 時，以同鍵同內容重送也回同一結果，**不重新驗證、不再比計數器** | 成功文案 | Host 寫會話結果＋grant＋事件 |
 | 7 | Signer 拒絕，回覆遺失 | 同上 | `verify_requests(outcome=拒絕碼)` | Signer | 同上，回同一個拒絕 | 失敗文案 | attempt `refused`；challenge 未達失敗上限時可以重試同一個 challenge（新 `verify_request_id`） |
@@ -442,12 +461,21 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 - **「確認中」有終點**：最晚到會話期限（`sessionDeadline`）就轉成 `expired` 或 `unknown`，畫面顯示已結束，不會永遠「確認中」，也不會自動再彈出 WebAuthn。
 - **不為恢復保存可重放的材料**：Host 不保存 assertion 原文，也不把它或登記確認碼寫進 log 或證據。所以斷點 2 的恢復方式是關閉舊 challenge、請使用者重新核准，而不是重送。推薦**不新增**私有保存：若之後需要，最小資料是 assertion 原文（加密），只放 Host 的 `0700` 目錄、`0600`，在 verify 成功、關閉或會話期限到達時刪除；本設計不採用。
 
+**close 與 verify 的先後**（第 4 列與改變決定時都用這張表）：
+
+| 先後結果 | Signer 規則 | Host 與畫面 |
+|---|---|---|
+| close 先成功 | 條件式寫入把 `issued` 改成 `closed`；晚到的 verify 在自己的寫入交易裡看到 `closed`，記 `CHALLENGE_CLOSED`，**不寫核准** | close 回 `closed` 之後，Host 才把 attempt 標 `lost`，畫面：「驗證結果沒有送達，這次沒有核准。請按『重新核准』。」不自動彈出；使用者按了才開新的 attempt |
+| verify 先成功 | 核准、challenge 改 `used` 與 `verify_requests` 在同一個交易提交；close 不覆寫 `used`，回 `approval_id`、`verify_request_id` 與 `decision` | Host 依回傳的 `approval_id` 查回並核對該筆（會話、`intent_hash`、`decision` 與 attempt 一致），照第 6 列落地；**不標 `lost`、不顯示「這次沒有核准」、不開第二筆**。若 Host 會話此時已取消或過期，不把結果寫回已關閉的會話，approve 的核准呼叫 `abandon` |
+| challenge 已到期 | close 回 `expired`；verify 在期限後不能提交 | attempt 標 `expired`：「已過期（後端時間為準）；這次驗證沒有完成。」 |
+| close 回覆遺失或查詢失敗 | close 冪等，可以重送；`GET /v1/approvals/challenge?challenge_id=` 查回權威狀態 | 結果未知時**不開新的 attempt**，畫面：「這次驗證的結果還無法確認。」有界重試；到會話期限就結束等待，畫面：「無法確認這次驗證的結果；這筆已依後端期限關閉。」**不寫成「未核准」**。之後查到 `used` 時照「verify 先成功」核對並 `abandon` |
+
 | 其他情況 | 規則 |
 |---|---|
 | 核准與拒絕 | 兩者都要 WebAuthn（第 6.3 節）。拒絕或期限先發生後，Host 不再接受 verify 的結果；若 Signer 已 `verified` 一筆 approve，Host 呼叫 `abandon` 並記錄 |
 | 到期 | Host 的會話期限照 `sessionDeadline`（決策時間＋terms 期限與 `valid_before` 取小）；Signer 的 challenge 期限只能更短。兩邊都由可信時鐘決定，呼叫者不能延長 |
 | 取消 task | 會話 `withdrawn`；已驗證未用的核准由 Host 呼叫 `abandon`。Signer 沒有可驗證的撤回清單（沿用 P1-b），曝險以 `approval_ttl` 與 `valid_before` 為界 |
-| 兩個分頁 | 同一個會話同時最多一筆非終態 attempt。第二個分頁以自己的 `request_id` 要 challenge 時，Host 回目前那筆 attempt 的 challenge；先驗證成功的生效，另一個得到 `CHALLENGE_USED`，畫面依 Store 顯示「已在另一個視窗核准」 |
+| 兩個分頁與決定綁定 | 同一個會話同時最多一筆非終態 attempt，attempt 帶自己的 `decision`。第二個要求的處理：**同一個 consumer、會話、`intent_hash` 與同一個 `decision`** 才共用目前的 attempt，Host 回 200 與**權威的 attempt ID**（目前那筆的 `request_id`）與它的 challenge，不另建 attempt；這和「同一個 `request_id`、同內容的冪等重送」分開記錄。**相反的 `decision`**：回 409 `DECISION_CONFLICT`，附目前 attempt 的 `decision` 與狀態，**不回另一種 challenge、不改使用者的選擇**。要改變決定，使用者先按「取消這次驗證」：Host 以第 7 節的 close 規則結束舊 challenge；close 回 `closed`（或舊 attempt 已是終態）之後才能開新的 attempt；close 回 `used` 就照既有結果；close 結果未知時不能另開 |
 | 不同 ID 重用 assertion | assertion 的 client data 帶的是原 challenge，對不上別的 challenge（`ASSERTION_INVALID_CHALLENGE`）；原 challenge 已 `used` 或 `closed` 就是 `CHALLENGE_USED`／`CHALLENGE_CLOSED` |
 | 晚到的舊回覆 | Host 只接受目前 attempt 的 `challenge_id` 與 `verify_request_id`；網頁沿用 `hostcreds` 的世代與 `approvalTarget`／`sameTarget`，舊世代的回覆丟棄 |
 | 裝置撤銷 | 第 3.4 節 |
@@ -476,6 +504,7 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 **動作**：
 - 主要按鈕「用已登記的裝置核准」，啟動 WebAuthn；
 - 次要按鈕「用裝置拒絕這筆」，同樣啟動 WebAuthn（`decision=deny`），不使用核准付款的 challenge（第 6.3 節）；
+- 「取消這次驗證」：只在有進行中的 attempt 時出現，用第 7 節的 close 規則結束它；要改變決定（核准改拒絕或反過來）必須先做這一步；
 - 「返回」只關閉面板；
 - 「取消任務」維持在主持人的場次控制，不放在核准表。
 
@@ -488,7 +517,11 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 | 裝置已撤銷 | 「這個裝置已停用，請找管理者重新登記。」 | 不能核准 |
 | 已過期 | 「已過期（後端時間為準）；沒有核准。」 | 關閉 |
 | 結果尚未確認 | 「結果確認中，請不要重複操作。」 | 只查詢同一個 ID，不再發 challenge；最晚到後端期限就結束（第 7 節） |
-| 驗證結果沒有送達 | 「驗證結果沒有送達，這次沒有核准。請按『重新核准』。」 | 終態 `lost`；舊 challenge 已關閉；不自動彈出，使用者按了才開新的 attempt |
+| 驗證結果沒有送達 | 「驗證結果沒有送達，這次沒有核准。請按『重新核准』。」 | **只在 close 回 `closed` 之後**才顯示；終態 `lost`；不自動彈出，使用者按了才開新的 attempt |
+| 正在確認這次驗證 | 「正在確認這次驗證…」 | 等 close 或查詢的權威結果；不開新的 attempt |
+| 這次驗證的結果無法確認 | 「這次驗證的結果還無法確認。」；到期後：「無法確認這次驗證的結果；這筆已依後端期限關閉。」 | 不寫成「未核准」；不開新的 attempt |
+| 另一個視窗選了不同的決定 | 「另一個視窗正在{核准／拒絕}這筆。要改變決定，請先『取消這次驗證』。」 | `DECISION_CONFLICT`；不彈出裝置提示 |
+| 回覆與這次操作不符 | 「回傳的資料和你這次的操作不一致，已停止，沒有要求裝置驗證。」 | 頁面核對失敗；不彈出 |
 | 已拒絕 | 「你已拒絕這筆（已驗證裝置）。」 | 會話 `denied` |
 | 主持人取消 | 「主持人已取消這個任務；這筆沒有核准，也不是你拒絕的。」 | 會話 `withdrawn` |
 | 成功 | 「本人核准已驗證，付款未啟用。」 | 不顯示已付款或已交付 |
@@ -527,11 +560,21 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 | 重放 | 同一 challenge 第二份 assertion；同一份 assertion 給另一個 challenge | `CHALLENGE_USED`／`_CHALLENGE` | U、I | 20 s |
 | 到期邊界 | `now == expires_at` | 拒絕（嚴格 `<`） | U | 10 s |
 | 取消競爭 | verify 成功與 Host 取消先後兩種 | 取消先：不核准、Signer 核准被 `abandon`；核准先：取消照 P1-a 規則 | S、I | 1 m |
-| 兩個分頁 | 兩個頁面同時核准 | 只有一筆核准；另一個 `CHALLENGE_USED` | I、B | 1 m |
+| 兩個分頁，同一個決定 | 兩個頁面都按「核准」 | 共用同一個 attempt（回權威的 attempt ID），只有一筆核准；另一份 assertion `CHALLENGE_USED` | I、B | 1 m |
+| 核准進行中按拒絕 | attempt 是 `approve`，另一頁按拒絕 | 409 `DECISION_CONFLICT`；沒有回 approve 的 challenge 給拒絕頁；沒有彈出 | I、B | 30 s |
+| 拒絕進行中按核准 | attempt 是 `deny`，另一頁按核准 | 409 `DECISION_CONFLICT`；同上 | I、B | 30 s |
+| 回覆的決定與按鈕不符 | 測試替身讓 challenge 回覆的 `decision` 與按鈕相反 | 頁面停止、不彈出；Host 落地時也因 `decision` 不一致而拒絕 | W、I | 30 s |
+| 改變決定時舊 verify 晚到 | 按「取消這次驗證」，close 先成功後舊 assertion 才送到 | 舊 verify `CHALLENGE_CLOSED`，沒有核准；新的 attempt 照常 | I | 30 s |
+| 查無後 close 先成功 | verify 查無 → close → 晚到的 verify | close 回 `closed`；verify `CHALLENGE_CLOSED`；沒有核准紀錄；attempt `lost` | I | 30 s |
+| 查無後 verify 先成功 | verify 查無 → verify 提交 → close | close 回 `used` 與 `approval_id`；Host 不標 `lost`、不開第二筆，照第 6 列落地 | I | 30 s |
+| close 回覆遺失 | close 已提交，回覆中斷 | 重送 close 或依 `challenge_id` 查詢，得到同一個 `closed` | I | 30 s |
+| close 或查詢失敗、期限到達 | Signer 讀取失敗直到會話期限 | 畫面「無法確認……已依後端期限關閉」，不寫「未核准」；沒有新的 attempt；之後查到 `used` 就 `abandon` | I、W | 1 m |
+| deny 不發付款 grant | `decision=deny` 驗證通過 | 會話 `denied`，沒有 grant 列；那筆 Signer 紀錄不能被付款消耗 | S、I | 20 s |
 | 相同請求重送 | 同 `request_id`、同內容 | 同一個 challenge／核准 | U、I | 20 s |
 | 保存失敗與回覆遺失 | 注入 Store 寫入失敗、Signer 回覆中斷 | `unknown`，同 ID 恢復；保存失敗同時回報 | I | 1 m |
 | 模擬 grant 仍不能付款 | simulated grant 送 `/v1/sign` | `GRANT_METHOD_NOT_ACCEPTED`（不變） | U | 10 s |
-| A2 不開付款路徑 | webauthn 送 `/v1/sign` | `HUMAN_APPROVAL_UNAVAILABLE`；正式組裝 `RESERVATION_UNAVAILABLE`（不變） | U | 10 s |
+| `serve` 的付款規則不變 | `serve` 收到 webauthn 的 `/v1/sign` | `HUMAN_APPROVAL_UNAVAILABLE`；正式組裝 `RESERVATION_UNAVAILABLE`（不變） | U | 10 s |
+| `serve-approvals` 沒有付款入口 | `serve-approvals` 收到 `/v1/sign`（任何授權方法）與 attempts 路由 | 409 `PAYMENT_MODE_OFF` | I | 10 s |
 | 舊資料不升權 | schema 4 檔（含 simulated grant、delegation attempt）升 5 | simulated 不能變 webauthn（CHECK）；復原檢查通過；delegation 路徑不建會話 | S | 1 m |
 | 畫面與綁定一致 | Signer 的 `display` 與請購一致；改請購後重開 | 顯示新的；舊核准不適用 | W、B | 1 m |
 | 焦點與身分世代 | 切換客人、刷新、晚到回覆 | 舊回覆丟棄；焦點規則同 P1-a R1 | W、B | 1 m |
@@ -565,7 +608,9 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 - 讓 Host 的核准路由不檢查 viewer 憑證的 consumer → 命中「R1 跨 consumer」；
 - 讓 viewer 憑證就能把會話改成 `approved`（略過 Signer 的結果）→ 命中「R1 讀取憑證不能代替 assertion」；
 - 讓 `serve-approvals` 註冊付款路由 → 命中「R2 付款路由拒絕」；
-- 讓 Host 把「verify 查詢讀取失敗」當成查無 → 命中「R3 狀態查詢失敗」。
+- 讓 Host 把「verify 查詢讀取失敗」當成查無 → 命中「R3 狀態查詢失敗」；
+- 拿掉 verify 寫入交易的 `state='issued'` 條件 → 命中「查無後 close 先成功」；
+- 讓 Host 對相反的 `decision` 回目前的 challenge → 命中「核准進行中按拒絕」。
 
 **計畫**：
 - 沿用 `go run ./cmd/m1-check --plan …`（`--list` 只列）與 `scripts/verify/container-plan.sh`（斷網、唯讀、白名單），加上 B 層的 Chrome headless；
@@ -587,7 +632,7 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 | D2 | 首次登記（**交 Aaron 決定，不替他接受**） | E1：管理者在 Signer 終端機開始與確認，瀏覽器經 Host 轉送 attestation，Signer 依 §7.1 驗證（第 3.2 節）。接受 E1 就是接受「登記期間必須信任 Host 與其頁面」 | E2：儀式期間由 Signer 自己開只綁 loopback 的登記頁，Host 不經手；仍要信任瀏覽器、這段時間的本機環境與一次性確認碼，且 Signer 暫時多一個網路入口 | E1：Host 被控制時可以登記它自己的 authenticator，兩邊相同的指紋也擋不住；E2：不會自動解決所有本機風險 | A2 開工前 |
 | D3 | RP、origin、入口 | `rp_id=localhost`、唯一 origin `http://localhost:8402`：Host 多一個可信名稱，核准路由只接受它 | 獨立的核准 origin（例如 `:8123`，多一個元件） | 現行 `127.0.0.1` 不能用；要改 Host 的 Host／Origin 檢查 | A2 開工前 |
 | D4 | 新依賴 | `go-webauthn/webauthn` v0.18.2，只在 Signer | 只用 `fxamacker/cbor` 加標準庫自寫驗證 | Signer 的可信程式範圍擴大（第 4.8 節） | A1 開工前（A1 也要用） |
-| D5 | Signer 介面 | 兩步：challenge 加 verify（A2），付款引用 `approval_id`（P2）；A2 的 `/v1/sign` 仍拒絕 webauthn | P1-b 設計第 4.2 節的單步（assertion 直接放進 sign） | 單步的話，A2 就沒辦法在不付款的前提下取得 Signer 驗證的結果 | A2 開工前 |
+| D5 | Signer 介面 | 兩步：challenge 加 verify（A2），付款引用 `approval_id`（P2）；A2 期間 `serve` 的 `/v1/sign` 對 webauthn 仍回 `HUMAN_APPROVAL_UNAVAILABLE`，`serve-approvals` 的付款入口回 `PAYMENT_MODE_OFF` | P1-b 設計第 4.2 節的單步（assertion 直接放進 sign） | 單步的話，A2 就沒辦法在不付款的前提下取得 Signer 驗證的結果 | A2 開工前 |
 | D6 | UV、同步 passkey、BE／BS、計數器 | UV 必須；ES256；`attestation=none`；BE 以登記時的值為準、改變就拒絕並標 `suspect`；BS 可變、寫回；計數器倒退就拒絕並標 `suspect`（都是 0 時接受）——這是**本產品的政策** | 只接受裝置綁定的 credential（BE=0）；要求 attestation；計數器倒退只拒絕、不標 `suspect` | 同步 passkey 的私鑰可能存在雲端帳號。**並行影響**：同一把 credential 同時核准兩筆（兩個待核准的 Ask），後簽的先送到時，先簽的那份會被當成倒退而拒絕，並把 credential 標 `suspect`，要管理者處理；同一個會話不受影響（同時最多一筆 attempt） | A2 開工前 |
 | D7 | 核准路由的逐路由權限與本人拒絕的主體 | 看資料、發起 challenge、轉送 assertion 都要該 consumer 的 **viewer 憑證**（既有、以 consumer 為範圍）；核准或本人拒絕的結果只取決於 Signer 驗過的 assertion（拒絕用 `decision=deny` 的 challenge）；主持人只能以 operator 憑證「取消」（第 6.3 節） | 拒絕只要 viewer 憑證、不要 WebAuthn（等於讓 viewer 多一個寫入動作，擴大既有角色）；或拒絕交給主持人並照實記成取消 | viewer 憑證被盜時，可以看該 consumer 的摘要、發起 challenge（只能造成打擾），但不能核准或拒絕；Host／Origin 檢查不是身分驗證 | A2 開工前 |
 | D8 | 核准資料庫與付款資料庫（P2） | A2 用獨立的 `approvals.db`，`serve-approvals` 不開 `signer.db`；P2 時再決定 `serve` 同時開兩個檔案，或把核准表搬進 `signer.db` | A2 就把核准表放進 `signer.db`（`serve-approvals` 也要開它，會碰到付款恢復的路徑） | 合併方式影響 P2 消耗核准的交易邊界 | P2 開工前 |
@@ -633,3 +678,22 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 | 登記 E1 的措辭 | 「兩邊的指紋比對可以降低風險」「登記必須在乾淨啟動的 Host 上進行」 | 兩邊相同的指紋不是獨立可信通道；「乾淨啟動」不能證明 Host 未被控制；E1 明寫為「登記期間必須信任 Host 與其頁面」的待接受風險；E2 列最小差異與仍依賴的條件；D2 交 Aaron 決定 | Host 可以替換登記內容並控制瀏覽器的顯示 | 第 3.2 節、D2 | — |
 
 **仍待決策**：D1～D8（第 10 節），其中 D2（E1 或 E2）與 D7（逐路由權限與拒絕的主體）依本輪修正後的內容交 Aaron 決定；D8 到 P2 才決定。
+
+## 14 close／verify 競爭與 decision 綁定（Codex 對 `91a7204／031c4c7` 的限定複核）
+
+**Codex 的限定結論**（原文）：
+
+> R1 原本的存取權限缺口、R2 無付款金鑰的組裝缺口可以關閉；整份設計仍有兩處需要補齊。都是局部狀態規則，不需要重做架構或執行測試。
+
+- **維持關閉**：R1 原本的存取權限（consumer 範圍的資料權限、核准結果只來自 Signer 驗過的 assertion）、R2（`serve-approvals` 不讀付款 key、不開付款 DB；fake Agent＋合成請購＋實機 authenticator＋付款停用的入口）。BE／BS、計數器政策、`topOrigin` 與 E1 的信任限制不重開。**這不表示整份設計已通過。**
+- **證據歸屬**：Codex 依 security-audit 的限定檢視方式，唯讀核對 `91a7204／031c4c7` 的 Git、文件差異與相關既有程式；沒有執行測試、Signer、驗證器或交易，也沒有修改 repo 文件；這次沒有重新查閱官方網站（規格原文核對歸前輪）。兩項問題是依文字規則推演出的設計缺口，不是執行重現的產品漏洞。Claude Code 本輪只改文件，分支推演是紙上核對，不是實測。
+
+| 項目 | 原規則（`91a7204`） | 新規則 | 理由 | 位置 | 未來驗收案例 |
+|---|---|---|---|---|---|
+| R3 剩餘：查無與關閉的競爭 | 恢復表第 4 列「查無＝確定未收到」，查無就送 close 並把 attempt 標 `lost`；close 只寫「只在 `issued` 時改成 `closed`」 | 查無不等於確定未收到；verify 的最後提交以 `state='issued'` 條件式寫入，與 close 競爭同一列，同一交易寫核准與 `verify_requests`；close 冪等、重讀並回權威狀態（`closed`／`used`＋`approval_id`／`expired`／不存在），不覆寫 `used`；Host 只在 close 回 `closed` 後標 `lost`；`used` 時照既有結果落地（會話已關閉就 `abandon`）；結果未知時不開新 attempt，到期結束等待但不寫成「未核准」；新增依 `challenge_id` 查詢 | 合法時序：查無 → verify 提交 → close 才送到 | 第 6.1、7、8 節 | 第 9 節「查無後 close 先成功」「查無後 verify 先成功」「close 回覆遺失」「close 或查詢失敗、期限到達」與一項反向 |
+| 新增 decision 後的雙分頁綁定 | 第二個分頁一律拿回目前 attempt 的 challenge | 只有同一 consumer、會話、`intent_hash`、`decision` 才共用 attempt，回權威的 attempt ID（與同鍵冪等分開）；相反的 `decision` 回 409 `DECISION_CONFLICT`；改變決定要先「取消這次驗證」並照 close 規則結束舊 challenge，未確認前不得另開；WebAuthn 啟動前頁面核對 consumer、會話、intent、`decision`，不一致就不彈出；Host 只依 Signer 回傳且與 attempt 一致的 `decision` 落地，deny 不發 grant | 加入 `decision=deny` 後，原規則會讓按拒絕的頁面拿到核准的 challenge，或反過來 | 第 6.3、7、8 節 | 第 9 節「核准進行中按拒絕」「拒絕進行中按核准」「兩個分頁，同一個決定」「回覆的決定與按鈕不符」「改變決定時舊 verify 晚到」「deny 不發付款 grant」與一項反向 |
+| 殘留文字：DB 位置 | 第 6.1 節寫「`signer.db` 新表」 | A2 的核准表全部在 `approvals.db`；付款模式的 `signer.db` 不變 | 對齊第 6.4 節 | 第 6.1 節 | — |
+| 殘留文字：規格核對歸屬 | 第 4.4 節寫「待 Codex 對照原文核對」 | 第 7 步之後與 §13.4.3、§6.1.3 的原文由 Codex 在 `6c49619` 的 review 補讀核對；不是 Claude Code 初版讀完 | 對齊前輪歸屬 | 第 4.4 節 | — |
+| 殘留文字：付款拒絕碼依模式 | 第 6.1 節、D5 與驗收表只寫 `HUMAN_APPROVAL_UNAVAILABLE` | `serve`：webauthn 仍 `HUMAN_APPROVAL_UNAVAILABLE`、其餘照 P1-b；`serve-approvals`：所有付款入口 `PAYMENT_MODE_OFF`；驗收分成兩列 | 兩個入口的預期不同 | 第 6.1、9、10 節 | 第 9 節「`serve` 的付款規則不變」「`serve-approvals` 沒有付款入口」 |
+
+**仍待決策**：D1～D8 不變（第 10 節）；技術 review 不代替 Aaron 的決策或執行核准。
