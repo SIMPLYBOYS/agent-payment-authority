@@ -83,7 +83,7 @@ func TestRecoveryRefusesCorruption(t *testing.T) {
 		{"middle event deleted", "chain", []string{`DELETE FROM events WHERE task_id = 'task-a' AND sequence = 2`}},
 		{"event inserted", "event", []string{`INSERT INTO events SELECT task_id, 99, 'evt-inserted', event_type, purchase_order_id, observed_at, body, event_hash FROM events WHERE task_id = 'task-a' AND sequence = 2`}},
 		{"tail deleted, head not updated", "chain", []string{`DELETE FROM events WHERE task_id = 'task-b' AND sequence = 4`}},
-		{"schema version", "schema", []string{`PRAGMA user_version = 6`}}, // 5 is the current schema since A2
+		{"schema version", "schema", []string{`PRAGMA user_version = 7`}}, // 6 is the current schema since C2b
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

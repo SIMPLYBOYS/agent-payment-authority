@@ -8,6 +8,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/binary"
@@ -34,7 +35,7 @@ import (
 // (docs/commercial-p1b-design.md 6.4); 5 lets grants mirror a
 // Signer-verified webauthn decision and adds approval_attempts
 // (docs/commercial-human-approval-design.md 6.2).
-const schemaVersion = 5
+const schemaVersion = 6
 const defaultDeadline = 30 // seconds an Ask waits for approval
 
 // Clock is the trusted host clock in Unix seconds; never a caller's value.
@@ -443,8 +444,8 @@ func upgradeRequired(path string, v int) error {
 }
 
 // migrate sets WAL (a property of the file) and brings the schema to the
-// current version, never down. A new file gets schema 5 in one transaction.
-// A schema 1 to 4 file is refused untouched unless upgrade is set; then
+// current version, never down. A new file gets schema 6 in one transaction.
+// A schema 1 to 5 file is refused untouched unless upgrade is set; then
 // upgradeFrom runs. Any other version is refused.
 func (s *Store) migrate(upgrade bool) error {
 	var v int
@@ -454,7 +455,7 @@ func (s *Store) migrate(upgrade bool) error {
 	switch v {
 	case schemaVersion:
 	case 0:
-	case 1, 2, 3, 4:
+	case 1, 2, 3, 4, 5:
 		if !upgrade {
 			return upgradeRequired(s.path, v)
 		}
@@ -466,29 +467,182 @@ func (s *Store) migrate(upgrade bool) error {
 		return fmt.Errorf("journal_mode WAL not set (%q, %v)", mode, err)
 	}
 	switch v {
-	case 1, 2, 3, 4:
+	case 1, 2, 3, 4, 5:
 		return s.upgradeFrom(v)
 	case 0:
-		tx, err := s.w.Begin()
-		if err != nil {
+		return s.schemaTx(func(tx *sql.Tx) error {
+			if err := tx.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 0 {
+				return fmt.Errorf("schema changed while opening (%d, %v)", v, err)
+			}
+			if _, err := tx.Exec(schema + runsSchema + schema3 + schema4 + schema5); err != nil {
+				return err
+			}
+			if err := schema6(tx); err != nil {
+				return err
+			}
+			_, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion))
 			return err
-		}
-		defer tx.Rollback()
-		if err := tx.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 0 {
-			return fmt.Errorf("schema changed while opening (%d, %v)", v, err)
-		}
-		if _, err := tx.Exec(schema + runsSchema + schema3 + schema4 + schema5); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
-			return err
-		}
-		return tx.Commit()
+		})
 	}
 	return nil
 }
 
-// upgradeFrom is --upgrade-db (section 13.8 R2, kept for schemas 3 to 5): verify
+// schemaTx runs a schema change with foreign keys off: schema 6 rebuilds
+// tables that other tables reference (tasks, config_snapshots), and DROP
+// TABLE would otherwise delete through them. PRAGMA foreign_keys is a
+// no-op inside a transaction and the writer's DSN turns it on for every
+// new connection, so one connection is pinned, the pragma is set and read
+// back before BEGIN, foreign_key_check must be empty before COMMIT, and
+// the pragma is restored after (docs/commercial-c2-design.md 8).
+func (s *Store) schemaTx(f func(*sql.Tx) error) error {
+	ctx := context.Background()
+	conn, err := s.w.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+		return err
+	}
+	defer conn.ExecContext(ctx, "PRAGMA foreign_keys = ON")
+	var fk int
+	if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&fk); err != nil || fk != 0 {
+		return fmt.Errorf("schema change: foreign keys still on (%d, %v)", fk, err)
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := f(tx); err != nil {
+		return err
+	}
+	rows, err := tx.Query("PRAGMA foreign_key_check")
+	if err != nil {
+		return err
+	}
+	broken := rows.Next()
+	if err := drained(rows); err != nil {
+		return err
+	}
+	if broken {
+		return errors.New("schema change: foreign_key_check reports a broken reference")
+	}
+	return tx.Commit()
+}
+
+// schema6 is schema 6's change (C2b, docs/commercial-c2-design.md 8): the
+// BBS+ credential snapshot kind and contract apa.pay.v2 in three CHECKs
+// (SQLite cannot change a CHECK: each table is rebuilt from its own stored
+// definition, so columns added by earlier ALTERs come along), then the
+// challenges, the verification records and the status list versions seen.
+func schema6(tx *sql.Tx) error {
+	if err := rebuildChecks(tx, schema6Checks, false); err != nil {
+		return err
+	}
+	_, err := tx.Exec(schema6Tables)
+	return err
+}
+
+var schema6Checks = [][3]string{
+	{"config_snapshots", "kind IN ('registry', 'profile', 'credential', 'terms')", "kind IN ('registry', 'profile', 'credential', 'terms', 'credential_bbs')"},
+	{"tasks", "contract_version IN ('apa.m1.v2', 'apa.pay.v1')", "contract_version IN ('apa.m1.v2', 'apa.pay.v1', 'apa.pay.v2')"},
+	{"host_runs", "contract_version IN ('apa.m1.v2', 'apa.pay.v1')", "contract_version IN ('apa.m1.v2', 'apa.pay.v1', 'apa.pay.v2')"},
+}
+
+// rebuildChecks replaces, in each table's stored definition, one CHECK
+// text by another (reverse: the other way), copying the rows and the
+// table's indexes. Each text must occur exactly once.
+func rebuildChecks(tx *sql.Tx, checks [][3]string, reverse bool) error {
+	for _, c := range checks {
+		table, from, to := c[0], c[1], c[2]
+		if reverse {
+			from, to = to, from
+		}
+		var ddl string
+		if err := tx.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&ddl); err != nil {
+			return fmt.Errorf("rebuild %s: %w", table, err)
+		}
+		// A table renamed by an earlier rebuild is stored with its name quoted.
+		head := "CREATE TABLE " + table + " ("
+		if q := `CREATE TABLE "` + table + `" (`; strings.HasPrefix(ddl, q) {
+			head = q
+		}
+		if !strings.HasPrefix(ddl, head) || strings.Count(ddl, from) != 1 {
+			return fmt.Errorf("rebuild %s: unexpected definition", table)
+		}
+		rows, err := tx.Query(`SELECT sql FROM sqlite_master WHERE tbl_name = ? AND type IN ('index', 'trigger') AND sql IS NOT NULL`, table)
+		if err != nil {
+			return err
+		}
+		var extra []string
+		for rows.Next() {
+			var x string
+			if err := rows.Scan(&x); err != nil {
+				rows.Close()
+				return err
+			}
+			extra = append(extra, x)
+		}
+		if err := drained(rows); err != nil {
+			return err
+		}
+		tmp := table + "_rebuild"
+		stmts := []string{
+			"CREATE TABLE " + tmp + " (" + strings.Replace(strings.TrimPrefix(ddl, head), from, to, 1),
+			"INSERT INTO " + tmp + " SELECT * FROM " + table,
+			"DROP TABLE " + table,
+			"ALTER TABLE " + tmp + " RENAME TO " + table,
+		}
+		for _, q := range append(stmts, extra...) {
+			if _, err := tx.Exec(q); err != nil {
+				return fmt.Errorf("rebuild %s: %w", table, err)
+			}
+		}
+	}
+	return nil
+}
+
+const schema6Tables = `
+CREATE TABLE credential_challenges (
+  challenge_id      TEXT PRIMARY KEY,
+  task_id           TEXT NOT NULL REFERENCES tasks,
+  purchase_order_id TEXT NOT NULL,
+  intent_hash       TEXT NOT NULL,
+  disclose          TEXT NOT NULL,
+  verifier_id       TEXT NOT NULL,
+  issued_at         INTEGER NOT NULL,
+  expires_at        INTEGER NOT NULL,
+  state             TEXT NOT NULL CHECK (state IN ('issued', 'used', 'expired'))
+) STRICT;
+CREATE UNIQUE INDEX one_issued_challenge ON credential_challenges (task_id, purchase_order_id) WHERE state = 'issued';
+CREATE TABLE credential_verifications (
+  task_id               TEXT NOT NULL,
+  purchase_order_id     TEXT NOT NULL,
+  challenge_id          TEXT REFERENCES credential_challenges,
+  result                TEXT NOT NULL CHECK (result IN ('valid', 'absent', 'invalid', 'status_unavailable', 'revoked', 'expired')),
+  detail                TEXT NOT NULL,
+  issuer                TEXT NOT NULL,
+  holder                TEXT NOT NULL,
+  status_index          TEXT NOT NULL,
+  expiry                INTEGER NOT NULL,
+  status_list_version   INTEGER NOT NULL,
+  status_list_issued_at INTEGER NOT NULL,
+  status_list_sha256    TEXT NOT NULL,
+  proof_sha256          TEXT NOT NULL,
+  verifier              TEXT NOT NULL,
+  verified_at           INTEGER NOT NULL,
+  PRIMARY KEY (task_id, purchase_order_id),
+  FOREIGN KEY (task_id, purchase_order_id) REFERENCES purchases
+) STRICT;
+CREATE TABLE credential_status_seen (
+  issuer           TEXT PRIMARY KEY,
+  max_list_version INTEGER NOT NULL,
+  sha256           TEXT NOT NULL
+) STRICT;
+`
+
+// upgradeFrom is --upgrade-db (section 13.8 R2, kept for schemas 3 to 6): verify
 // as the old version (read only), back up with VACUUM INTO, add what each
 // later version adds in one transaction, verify as schema 5. A failure
 // before the commit leaves the old version and keeps the backup; a failure
@@ -512,26 +666,24 @@ func (s *Store) upgradeFrom(from int) error {
 	if err := upgradeAt("backed-up"); err != nil {
 		return err
 	}
-	tx, err := s.w.Begin()
+	err := s.schemaTx(func(tx *sql.Tx) error {
+		var v int
+		if err := tx.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != from {
+			return fmt.Errorf("schema changed during the upgrade (%d, %v)", v, err)
+		}
+		ddl := map[int]string{1: runsSchema + schema3 + schema4 + schema5, 2: schema3 + schema4 + schema5, 3: schema4 + schema5, 4: schema5, 5: ""}[from]
+		if _, err := tx.Exec(ddl); err != nil {
+			return err
+		}
+		if err := schema6(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+			return err
+		}
+		return upgradeAt("migrate")
+	})
 	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var v int
-	if err := tx.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != from {
-		return fmt.Errorf("schema changed during the upgrade (%d, %v)", v, err)
-	}
-	ddl := map[int]string{1: runsSchema + schema3 + schema4 + schema5, 2: schema3 + schema4 + schema5, 3: schema4 + schema5, 4: schema5}[from]
-	if _, err := tx.Exec(ddl); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
-		return err
-	}
-	if err := upgradeAt("migrate"); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
 		return err
 	}
 	if err := s.verify(schemaVersion); err != nil {

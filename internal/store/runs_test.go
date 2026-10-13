@@ -143,7 +143,7 @@ func TestUpgradeFailures(t *testing.T) {
 		stage   string
 		version int
 		backup  bool
-	}{{"verified1", 1, false}, {"backed-up", 1, true}, {"migrate", 1, true}, {"verified5", 5, true}} {
+	}{{"verified1", 1, false}, {"backed-up", 1, true}, {"migrate", 1, true}, {fmt.Sprintf("verified%d", schemaVersion), schemaVersion, true}} {
 		t.Run(c.stage, func(t *testing.T) {
 			e := newEnv(t)
 			schema1(t, e)
@@ -623,7 +623,7 @@ func walChild(c, path string) int {
 		block("V1_WAL_READY")
 	case "A":
 		upgradeHook = func(stage string) error {
-			if stage == "verified5" {
+			if stage == fmt.Sprintf("verified%d", schemaVersion) {
 				block("UPGRADE_FAILED_READY") // the injected failure: before any connection is closed
 			}
 			return nil

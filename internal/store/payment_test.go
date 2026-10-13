@@ -200,8 +200,32 @@ func TestPaymentSchemaChecks(t *testing.T) {
 // toSchema4 turns the current file into schema 4 as P1-b wrote it: schema
 // 5 rebuilt grants (method webauthn, signer_approval_id) and added
 // approval_attempts.
+// toSchema5 turns the current file into schema 5 as A2 wrote it: schema 6
+// only added the credential tables and widened three CHECKs.
+func toSchema5(t *testing.T, path string) {
+	t.Helper()
+	tx, err := rawDB(t, path).Begin() // rawDB has foreign keys off
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DROP TABLE credential_verifications; DROP TABLE credential_challenges; DROP TABLE credential_status_seen`); err != nil {
+		t.Fatal(err)
+	}
+	if err := rebuildChecks(tx, schema6Checks, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`PRAGMA user_version = 5`); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func toSchema4(t *testing.T, path string) {
 	t.Helper()
+	toSchema5(t, path)
 	if _, err := rawDB(t, path).Exec(`DROP TABLE approval_attempts;
 CREATE TABLE grants_v4 (
   jti                  TEXT PRIMARY KEY,

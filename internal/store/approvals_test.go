@@ -7,6 +7,7 @@ package store
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -209,7 +210,7 @@ func TestApprovalSchemaChecks(t *testing.T) {
 	}
 }
 
-// A schema 4 file (P1-b) with a simulated grant upgrades to 5 unchanged.
+// A schema 4 file (P1-b) with a simulated grant upgrades to the current schema unchanged.
 func TestUpgradeSchema4(t *testing.T) {
 	e := newEnv(t)
 	s := e.open()
@@ -228,7 +229,56 @@ func TestUpgradeSchema4(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if userVersion(t, e.path) != 5 || fingerprint(t, e.path) != want || count(t, e.path, "grants", "authorization_method = 'simulated' AND signer_approval_id IS NULL") != 1 {
+	if userVersion(t, e.path) != schemaVersion || fingerprint(t, e.path) != want || count(t, e.path, "grants", "authorization_method = 'simulated' AND signer_approval_id IS NULL") != 1 {
 		t.Fatal("the upgrade changed simulated data")
+	}
+}
+
+// C2b: a schema 5 file (A2) upgrades to 6 unchanged: the rebuilt tables
+// keep their rows, the credential tables exist, the CHECKs take the BBS+
+// snapshot and apa.pay.v2, foreign keys hold, a backup is made.
+func TestUpgradeSchema5(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	id, intent := e.payTask(s, "task-a", 30)
+	if _, err := approve(s, id, intent, "approve-req-000000001", "consumer-a", "approve"); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	toSchema5(t, e.path)
+	want := fingerprint(t, e.path)
+	if _, err := openOpt(e, false); Code(err) != "SCHEMA_UPGRADE_REQUIRED" {
+		t.Fatalf("without the flag: %v", err)
+	}
+	s, err := openOpt(e, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if userVersion(t, e.path) != 6 || fingerprint(t, e.path) != want {
+		t.Fatal("the upgrade changed the data or the version")
+	}
+	for _, table := range []string{"credential_challenges", "credential_verifications", "credential_status_seen"} {
+		if count(t, e.path, "sqlite_master", "name = ?", table) != 1 {
+			t.Fatalf("no table %s", table)
+		}
+	}
+	db := rawDB(t, e.path)
+	if _, err := db.Exec(`INSERT INTO config_snapshots VALUES ('sha256:x', 'credential_bbs', '{}', 1)`); err != nil {
+		t.Fatalf("credential_bbs kind: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE tasks SET contract_version = 'apa.pay.v2' WHERE task_id = 'task-a'`); err != nil {
+		t.Fatalf("apa.pay.v2 task: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE tasks SET contract_version = 'apa.pay.v9' WHERE task_id = 'task-a'`); err == nil {
+		t.Fatal("an unknown contract version was accepted")
+	}
+	var broken int
+	db.QueryRow(`SELECT count(*) FROM pragma_foreign_key_check`).Scan(&broken)
+	if broken != 0 {
+		t.Fatal("foreign keys broken after the rebuild")
+	}
+	if m, _ := filepath.Glob(e.path + ".schema5-*.bak"); len(m) != 1 {
+		t.Fatalf("backups %v", m)
 	}
 }
