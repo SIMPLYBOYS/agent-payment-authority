@@ -1258,7 +1258,10 @@ async function a2Act(item, decision) {
     if (r.status === 0) return done("warn", "沒有收到回覆：結果未確認；畫面會重新讀取（不會自動要求裝置）");
     if (r.status !== 200 || !r.body.challenge) {
       const at = r.body && r.body.attempt;
-      if (r.status === 200 && at && at.state === "verified") return done("ok", "這筆已在另一個視窗核准或拒絕（以後端為準）。");
+      // Review 5-1: a shared attempt resolved now has an outcome (closed,
+      // superseded, ...) that outcomeText words; only without one is it
+      // simply already decided.
+      if (r.status === 200 && at && at.state === "verified" && !r.body.outcome) return done("ok", "這筆已經有本人決定（以後端為準）。");
       const [kind, text] = AP.outcomeText(r.status, r.body, decision);
       return done(kind, text);
     }

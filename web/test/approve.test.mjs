@@ -156,3 +156,12 @@ test("a closed session's open attempt has an end; a pending-time note does not s
   const stored = AP.attemptText({ state: "challenged", challenge_id: "chl-1" }, "expired");
   assert.equal(AP.panelNote({ kind: "warn", text: "結果確認中，請不要重複操作。" }, stored, false).text, "這筆已依後端期限關閉；這次驗證沒有完成。");
 });
+
+// Review 5-2: a lost attempt is worded by its decision; 5-1: an outcome on a
+// verified attempt is worded by outcomeText, never "decided elsewhere".
+test("a lost deny is not worded as an approval; a verified attempt's outcome speaks", () => {
+  assert.match(AP.attemptText({ state: "lost", decision: "deny" }, "pending")[1], /沒有拒絕.*用裝置拒絕這筆/);
+  assert.match(AP.attemptText({ state: "lost", decision: "approve" }, "pending")[1], /沒有核准.*重新核准/);
+  assert.match(AP.outcomeText(200, { attempt: { state: "lost", decision: "deny" } }, "deny")[1], /沒有拒絕/);
+  assert.deepEqual(AP.outcomeText(200, { outcome: "closed", attempt: { state: "verified" } }, "approve")[0], "closed");
+});
