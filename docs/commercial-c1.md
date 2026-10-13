@@ -102,6 +102,12 @@
 | C1-D3 | 憑證外層 | spike 使用原始 `名稱=值` 訊息，不是 JSON-LD 的 VC Data Integrity | 由 C2 訂 `apa` 自己的正規化外層：版本、欄位順序、編碼，並固定 spike 已採用的嚴格格式；經 review 後才接 Policy |
 | C1-D4 | 撤銷與 challenge 保存 | 狀態清單的來源、challenge 存放處 | C2 設計時一併決定 |
 
+**Aaron 的決定（10/14）**：「開工前要你決定的四件事，都允許依照建議的方式下去進行」。
+- C1-D1：採 (a)，用 idemix v0.3.1 的舊版 BBS+，文件與畫面標明不是 `bbs-2023`；
+- C1-D2：採 (a)，揭露 holder 公鑰並由持有人簽名，標明可被串連；
+- C1-D3：由 C2 訂 `apa` 的正規化外層，經 review 後才接 Policy；
+- C1-D4：撤銷與 challenge 保存在 C2 設計時決定。
+
 ## 7 不在本片
 
 - 沒有接 Policy、Store、Host、Signer、A2 或付款；

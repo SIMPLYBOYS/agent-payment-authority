@@ -239,7 +239,7 @@
 > - 找不到仍在維護、實作 IETF BBS（`bbs-2023` 所用）的 Go 庫。
 > - 第一版（trustbloc v1.0.4）經 review 判定 not pass：揭露集合沒有綁到 proof，持有人、期限、撤銷可以被偽造；第一版關於這些能力的陳述不成立。
 > - 第二版改用 IBM idemix v0.3.1 的 `bbs`（舊版 BBS+，Apache-2.0），把揭露索引與訊息數綁定到要求，正反測試 38 項、反向 11／11 在同一提交通過。
-> - 格式是否沿用舊版 BBS+，屬於 C2 的決定（C1-D1～D4），待 Aaron 決定。
+> - C1-D1～D4 由 Aaron 依建議決定（10/14）：沿用 idemix 的舊版 BBS+ 並標明不是 `bbs-2023`；揭露 holder 公鑰的持有人綁定；外層、撤銷與 challenge 保存由 C2 設計。
 > - 沒有改用 SD-JWT，不代表憑證已參與准駁。
 1. 目標：選定 Go 可用的 BBS（W3C Data Integrity BBS cryptosuite）實作，驗發證、derived proof、選擇性揭露、錯簽章與竄改的負向測試。不做：接入 Policy。
 2. 前置：無；研究可先做。
