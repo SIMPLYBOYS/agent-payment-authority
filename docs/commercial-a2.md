@@ -1,7 +1,7 @@
 # A2 本人核准產品接線：實作差異、驗證與限制
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-A2本人核准產品接線實作派工-f2bf224-20261013〉（Aaron 已批准「A2 開工」）。分支 `commercial-a2`，基準 `f2bf224`（工作區只有未追蹤的 `demo`；沒有適用的 AGENTS.md）。
-> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節）；第三次 review 窄幅 not pass，A、B 已修正（第 9 節）；第四次 review 窄幅 not pass，S-B、S-A 已修正（第 10 節）；第五次 review（全組合掃描）窄幅 not pass，5-1、5-2 已修正（第 11 節）；第六次 review（只看 `9987eb4`）pass，review 結束（第 12 節），待實機與部署討論；實機登記與單筆核准、拒絕已由 Aaron 以 Chrome＋Google 密碼管理工具 PIN 完成（客人 A、B 兩位 approver；展示角色；基準 9987eb4；Touch ID／Safari／手機／安全金鑰／容器排到後期；commercial-a2.md 第 13 節），付款未啟用。**
+> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節）；第三次 review 窄幅 not pass，A、B 已修正（第 9 節）；第四次 review 窄幅 not pass，S-B、S-A 已修正（第 10 節）；第五次 review（全組合掃描）窄幅 not pass，5-1、5-2 已修正（第 11 節）；第六次 review（只看 `9987eb4`）pass，review 結束（第 12 節），待實機與部署討論；實機登記與單筆核准、拒絕已由 Aaron 以 Chrome＋Google 密碼管理工具 PIN 完成（客人 A、B 兩位 approver；展示角色；基準 9987eb4；Touch ID／Safari／手機／安全金鑰／容器排到後期；commercial-a2.md 第 13 節）；**A2 Done（Aaron 10/13）**，付款未啟用。**
 > 以下為 `f0817c7` 時的狀態，保留原文：A2 已實作並完成本輪定向自動化驗證，待 Codex 技術 review；實機登記與操作未驗收，付款未啟用。A2 不自行標 Done；本輪所有結果都是「Claude Code 執行，待 Codex 核對」，不是實機結果。
 >
 > **歸屬的變更**：Codex 訂閱已到期，從這一節起沒有第三方核對。Review 改由 Claude Code 另開的獨立上下文 subagent 執行：它們只拿到 diff、設計文件與本文件，沒有作者寫程式時的推理；這比作者自審接近獨立核對，但仍是同一個模型。紀錄一律寫「Claude Code 獨立上下文 review」，不寫成 Codex。
@@ -523,4 +523,4 @@ note（不阻擋，記為已知）：
 - 委託確認仍是模擬。
 - 頁面不是可信顯示。
 - 沒有在容器中執行。
-- A2 未標 Done，由 Aaron 決定。
+- **A2 Done**：Aaron 10/13「A2 視為 done」。付款仍未啟用；排到後期的項目見上。
