@@ -391,7 +391,7 @@ ITEMS = [
     ("C2b: an older status list than one seen is not used", go("./internal/store/", "^TestSubmitV2StatusRollback$", ("TestSubmitV2StatusRollback", r"rolled back: \{")),
      [(SCR, "case list.ListVersion < max || list.ListVersion == max && sum != seen:", "case false && (list.ListVersion < max || list.ListVersion == max && sum != seen):")]),
     ("C2b: recovery holds a record to its event", go("./internal/store/", "^TestV2CredentialRecovery$", ("TestV2CredentialRecovery/a_record's_result", r"Open: <nil>")),
-     [(SCR, "case !ok || e != c:", "case !ok:")]),
+     [(SCR, "case !ok || e != c:", "case !ok || false && e != c:")]),
     ("C2b: a simulated approval rechecks the credential", go("./internal/store/", "^TestV2ApprovalRecheck$", ("TestV2ApprovalRecheck/revoked", r"revoked: \{Outcome:approved")),
      [(SPY, '} else if reason != "" { // design 7.1: withdrawn, no grant', '} else if false && reason != "" { // design 7.1: withdrawn, no grant')]),
     ("C2b: a webauthn approval rechecks the credential", go("./internal/store/", "^TestV2WebAuthnRecheck$", ("TestV2WebAuthnRecheck", r"\{Outcome:approved")),
