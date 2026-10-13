@@ -36,6 +36,10 @@ SG = "internal/signer/core.go"
 AS = "cmd/apa-signer/main.go"
 PM = "internal/store/payment.go"
 CL = "internal/signerclient/client.go"
+SA = "internal/signer/approvals.go"
+SS = "internal/signer/server.go"
+STA = "internal/store/approvals.go"
+HA = "cmd/demo/approvals.go"
 
 
 def node(path, test, regex):
@@ -271,6 +275,33 @@ ITEMS = [
     ("P1b-R2b: Core: a failed read is not ATTEMPT_UNKNOWN", go("./internal/signer/", "^TestFinishReadError$", ("TestFinishReadError", r"a failed read became a refusal")),
      [(SG, "\ta, found, err := c.byID(ctx, id)\n\tif err != nil { // the read failed (the request's deadline, the DB): not \"unknown\"\n\t\treturn Reply{}, err\n\t}\n\tif !found {\n\t\treturn Reply{}, Refusal(\"ATTEMPT_UNKNOWN\")\n\t}",
        "\ta, found, err := c.byID(ctx, id)\n\tif err != nil || !found {\n\t\treturn Reply{}, errors.Join(err, Refusal(\"ATTEMPT_UNKNOWN\"))\n\t}")]),
+    # A2's core protections (docs/commercial-human-approval-design.md 9, the
+    # reverse list); run them alone with "^A2:".
+    ("A2: the Signer compares the challenge", go("./internal/signer/", "^TestAssertionRules$", ("TestAssertionRules", r"other challenge: ")),
+     [(SA, "\ts.UserVerification = protocol.VerificationRequired\n", "\ts.UserVerification = protocol.VerificationRequired\n\ts.Challenge = parsed.Response.CollectedClientData.Challenge\n")]),
+    ("A2: the Signer requires UV", go("./internal/signer/", "^TestAssertionRules$", ("TestAssertionRules", r"no UV: ")),
+     [(SA, "\ts.UserVerification = protocol.VerificationRequired\n", "\ts.UserVerification = protocol.VerificationDiscouraged\n")]),
+    ("A2: the Signer compares the origin", go("./internal/signer/", "^TestAssertionRules$", ("TestAssertionRules", r"(127\.0\.0\.1 origin|other port): ")),
+     [(SA, "RPOrigins: w.Origins,", "RPOrigins: append(w.Origins, \"http://127.0.0.1:8402\", \"http://localhost:8403\"),")]),
+    ("A2: a used challenge is not used again (replay)", go("./internal/signer/", "^TestApproveAndResend$", ("TestApproveAndResend", r"replay: ")),
+     [(SA, "\tcase a.state == \"used\":", "\tcase false && a.state == \"used\":"),
+      (SA, "WHERE challenge_id = ? AND state = 'issued' AND ? < expires_at`, a.id, now)", "WHERE challenge_id = ? AND ? < expires_at`, a.id, now)")]),
+    ("A2: the verify commit needs the challenge still issued (close first)", go("./internal/signer/", "^TestCloseBeatsVerify$", ("TestCloseBeatsVerify", r"late verify: ")),
+     [(SA, "WHERE challenge_id = ? AND state = 'issued' AND ? < expires_at`, a.id, now)", "WHERE challenge_id = ? AND ? < expires_at`, a.id, now)")]),
+    ("A2: Store: a simulated grant is never raised to webauthn", go("./internal/store/", "^TestApprovalSchemaChecks$", ("TestApprovalSchemaChecks", r"a simulated grant became webauthn")),
+     [(STA, "  CHECK ((authorization_method = 'webauthn') = (signer_approval_id IS NOT NULL))", "  CHECK (1)")]),
+    ("A2: R1 the routes keep a viewer to its consumer", go("./cmd/demo/", "^TestA2Permissions$", ("TestA2Permissions", r"B's viewer: ")),
+     [(STA, "err == nil && ss.ConsumerID != consumer {", "err == nil && false {")]),
+    ("A2: R1 a viewer token cannot replace the assertion", go("./cmd/demo/", "^TestA2Permissions$", ("TestA2Permissions", r"forged: 200")),
+     [(HA, "return h.onVerify(consumer, st, h.signer.Verify(signer.VerifyRequest{VerifyRequestID: verifyID, ChallengeID: b.ChallengeID, Order: st.Order, Assertion: assertion}))",
+       "return h.resolve(consumer, st, signer.ApprovalReply{State: \"verified\", Decision: b.Decision, ApprovalID: \"hap-forged\", ApproverID: \"approver-a\", "
+       "CredentialRef: \"sha256:0000000000000000000000000000000000000000000000000000000000000000\", IntentHash: st.IntentHash, ExpiresAt: 1 << 40})")]),
+    ("A2: R2 serve-approvals answers PAYMENT_MODE_OFF on every payment route", go("./internal/signer/", "^TestApprovalsHandler$", ("TestApprovalsHandler", r"/v1/sign")),
+     [(SS, "Refusal(\"PAYMENT_MODE_OFF\")", "Refusal(\"HUMAN_APPROVAL_UNAVAILABLE\")")]),
+    ("A2: R3 a failed verify lookup is not not-found", go("./cmd/demo/", "^TestA2VerifyLookupFails$", ("TestA2VerifyLookupFails", r"a failed read was taken for not found")),
+     [(HA, "\tcase signerclient.KindNotFound:\n\t\treturn h.closeChallenge(consumer, st, true)", "\tcase signerclient.KindNotFound, signerclient.KindUnknown:\n\t\treturn h.closeChallenge(consumer, st, true)")]),
+    ("A2: the other decision gets no challenge", go("./cmd/demo/", "^TestA2TwoPagesAndChangingTheDecision$", ("TestA2TwoPagesAndChangingTheDecision", r"other decision: ")),
+     [(STA, "if cur.Decision != req.Decision {", "if false {")]),
     # D4 of the OS isolation plan (keygen); run them alone with "^P1b-D4:".
     ("P1b-D4: keygen never replaces a key file", go("./cmd/apa-signer/", "^TestKeygen$", ("TestKeygen", r"an existing key file was replaced")),
      [(AS, "if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {", "if _, err := os.Lstat(path); false && !errors.Is(err, os.ErrNotExist) {"),

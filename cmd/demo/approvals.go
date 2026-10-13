@@ -40,9 +40,24 @@ type approvalStore interface {
 	ApprovalOf(consumer, session string) (store.ApprovalItem, error)
 }
 
+// approvalSigner is the Signer's part (signerclient.Approvals; tests make
+// one call fail).
+type approvalSigner interface {
+	Challenge(signer.ChallengeRequest) signerclient.Answer
+	ChallengeByRequest(id string) signerclient.Answer
+	ChallengeByID(id string) signerclient.Answer
+	Close(challengeID, closeRequestID string) signerclient.Answer
+	Verify(signer.VerifyRequest) signerclient.Answer
+	ByVerifyRequest(id string) signerclient.Answer
+	Approval(id string) signerclient.Answer
+	Abandon(id string) signerclient.Answer
+	Health() signerclient.Answer
+	EnrollRelay(id string, body map[string]any) (int, json.RawMessage)
+}
+
 type approvals struct {
 	st     approvalStore
-	signer *signerclient.Approvals
+	signer approvalSigner
 	source string // device | virtual: what the operator says verifies (a label, not evidence)
 	out    io.Writer
 	mu     sync.Mutex // ponytail: one approval operation at a time on this host; per-session locks if it ever matters

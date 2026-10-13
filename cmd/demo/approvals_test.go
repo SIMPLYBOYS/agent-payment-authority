@@ -21,10 +21,12 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer/signertest"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signerclient"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 )
 
 type a2fx struct {
+	relay               *approvals
 	t                   *testing.T
 	h                   *host
 	alias, origin, sock string
@@ -64,7 +66,7 @@ func startA2(t *testing.T, deadline int) *a2fx {
 	f := &a2fx{t: t, sdir: sdir, sock: filepath.Join(sdir, "s.sock"), failResolve: &failStore{}}
 	f.h = controlHost(t, hostOpts{expiryEvery: time.Hour, scenarios: payCatalog(t, deadline),
 		args:        []string{"--approvals-signer", f.sock, "--authenticator-source", "virtual"},
-		onApprovals: func(h *approvals) { f.failResolve.approvalStore = h.st; h.st = f.failResolve }})
+		onApprovals: func(h *approvals) { f.relay = h; f.failResolve.approvalStore = h.st; h.st = f.failResolve }})
 	t.Cleanup(func() { f.h.stop() })
 	_, port, _ := net.SplitHostPort(f.h.addr)
 	f.alias, f.origin = "localhost:"+port, "http://localhost:"+port
@@ -493,5 +495,33 @@ func TestA2EnrollmentRelayRefusals(t *testing.T) {
 	}
 	if code, _, _ := f.h.get("/approve/enroll", ""); code != 403 {
 		t.Fatalf("enroll page on 127.0.0.1: %d", code)
+	}
+}
+
+// unreadable makes the Signer's answer to the verify request lookup fail
+// (a read error), while everything else works.
+type unreadable struct{ approvalSigner }
+
+func (unreadable) ByVerifyRequest(string) signerclient.Answer {
+	return signerclient.Answer{Kind: signerclient.KindUnknown}
+}
+
+// R3: a failed lookup of the verify request is not "not found": the
+// attempt stays as it is, nothing is closed (design 7, row 4).
+func TestA2VerifyLookupFails(t *testing.T) {
+	f := startA2(t, 60)
+	sid, _, _ := f.ask("01")
+	_, r := f.challenge(sid, "att-req-0000000000001", "approve")
+	chID := r["challenge"].(map[string]any)["challenge_id"].(string)
+	if _, err := f.h.st.UpdateApprovalAttempt(store.AttemptUpdate{ConsumerID: "consumer-a", RequestID: "att-req-0000000000001", From: []string{"challenged"},
+		State: "verifying", VerifyRequestID: "ver-req-0000000000001"}); err != nil {
+		t.Fatal(err)
+	}
+	real := f.relay.signer
+	f.relay.signer = unreadable{real}
+	code, s := f.status(sid, "att-req-0000000000001")
+	f.relay.signer = real
+	if c, err := f.core.ChallengeByID(context.Background(), chID); err != nil || c.State != "issued" || code != 503 || attempt(s)["state"] != "verifying" {
+		t.Fatalf("a failed read was taken for not found: %d %v (challenge %s %v)", code, s, c.State, err)
 	}
 }
