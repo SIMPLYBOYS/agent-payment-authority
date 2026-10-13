@@ -124,13 +124,16 @@ type AttemptRequest struct {
 // stored v1 order (canonical), the session's deadline and intent. Kind is
 // new, shared (the session's open attempt of the same decision: its
 // request ID is the authoritative one) or replay (this request ID's own).
+// SessionState is the session's state when read: an open attempt of a
+// session no longer pending is closed by the Host, never driven (review R3).
 type AttemptStart struct {
-	Attempt    ApprovalAttempt `json:"attempt"`
-	Kind       string          `json:"kind"`
-	Order      json.RawMessage `json:"-"`
-	Deadline   uint64          `json:"deadline"`
-	IntentHash string          `json:"intent_hash"`
-	TaskID     string          `json:"task_id"`
+	Attempt      ApprovalAttempt `json:"attempt"`
+	Kind         string          `json:"kind"`
+	SessionState string          `json:"session_state"`
+	Order        json.RawMessage `json:"-"`
+	Deadline     uint64          `json:"deadline"`
+	IntentHash   string          `json:"intent_hash"`
+	TaskID       string          `json:"task_id"`
 }
 
 // sessionFor reads a session of consumer (OWNERSHIP_MISMATCH for another's
@@ -171,6 +174,7 @@ func (s *Store) BeginApprovalAttempt(req AttemptRequest) (AttemptStart, error) {
 			return err
 		}
 		out.Order, out.Deadline, out.IntentHash, out.TaskID = json.RawMessage(p.Body), p.Session.ExpiresAt, p.Session.IntentHash, t.row.TaskID
+		out.SessionState = p.Session.State
 		if a, found, err := attemptBy(tx, "request_id", req.RequestID); err != nil {
 			return err
 		} else if found {
@@ -183,15 +187,19 @@ func (s *Store) BeginApprovalAttempt(req AttemptRequest) (AttemptStart, error) {
 		if err := t.expire(); err != nil {
 			return err
 		}
+		out.SessionState = p.Session.State
 		if cur, found, err := latestAttempt(tx, req.SessionID); err != nil {
 			return err
 		} else if found && cur.Open() {
 			out.Attempt = cur
-			if cur.Decision != req.Decision {
+			switch {
+			case p.Session.State != "pending": // the Host closes it (review R3); nothing is shared
+				conflict = refuse("SESSION_CLOSED", "the session is "+p.Session.State)
+			case cur.Decision != req.Decision:
 				conflict = refuse("DECISION_CONFLICT", "the session's open attempt has the other decision")
-				return t.finish()
+			default:
+				out.Kind = "shared"
 			}
-			out.Kind = "shared"
 			return t.finish()
 		}
 		if p.Session.State != "pending" {
@@ -307,7 +315,7 @@ func (s *Store) ApprovalAttemptOf(consumer, requestID string) (ApprovalAttempt, 
 			if err := tx.QueryRow(`SELECT body FROM purchases WHERE task_id = ? AND purchase_order_id = ?`, ss.TaskID, ss.PO).Scan(&body); err != nil {
 				return a, st, &ReadError{Check: "approval", Err: err}
 			}
-			st = AttemptStart{Attempt: a, Order: json.RawMessage(body), Deadline: ss.ExpiresAt, IntentHash: ss.IntentHash, TaskID: ss.TaskID}
+			st = AttemptStart{Attempt: a, Order: json.RawMessage(body), Deadline: ss.ExpiresAt, IntentHash: ss.IntentHash, TaskID: ss.TaskID, SessionState: ss.State}
 			return a, st, nil
 		}
 	}

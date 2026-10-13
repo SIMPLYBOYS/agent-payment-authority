@@ -302,6 +302,9 @@ func (h *approvals) challenge(consumer, session, requestID, decision string) (in
 	case "DECISION_CONFLICT":
 		return http.StatusConflict, approvalReply{Error: "decision_conflict", Attempt: attemptPtr(st.Attempt)}
 	case "SESSION_CLOSED":
+		if st.Attempt.Open() {
+			return h.closeOnSession(consumer, st)
+		}
 		return http.StatusConflict, approvalReply{Error: "session_closed"}
 	case "IDEMPOTENCY_CONFLICT":
 		return http.StatusConflict, approvalReply{Error: "request_id_conflict"}
@@ -323,6 +326,8 @@ func (h *approvals) drive(consumer string, st store.AttemptStart, fresh bool) (i
 	switch {
 	case !a.Open():
 		return http.StatusOK, approvalReply{Attempt: &a}
+	case st.SessionState != "pending":
+		return h.closeOnSession(consumer, st)
 	case a.State == "verifying" || a.State == "unknown" && a.VerifyRequestID != "":
 		return h.recoverVerify(consumer, st)
 	case a.ChallengeID != "":
@@ -397,6 +402,8 @@ func (h *approvals) assertion(consumer, session, requestID, verifyID string, ass
 		return http.StatusServiceUnavailable, approvalReply{Error: "store_unavailable"}
 	case a.State == "verified" && a.VerifyRequestID == verifyID: // a resend: the saved result, asked again by the same ID
 		return h.onVerify(consumer, st, h.signer.ByVerifyRequest(verifyID))
+	case a.Open() && st.SessionState != "pending": // nothing is sent to the Signer (review R3)
+		return h.closeOnSession(consumer, st)
 	case !a.Open() || a.ChallengeID == "":
 		return http.StatusConflict, approvalReply{Error: "attempt_not_ready", Attempt: &a}
 	case a.VerifyRequestID != "" && a.VerifyRequestID != verifyID && (a.State == "verifying" || a.State == "unknown"):
@@ -522,6 +529,24 @@ func (h *approvals) cancel(consumer, session, requestID string) (int, approvalRe
 	case !a.Open():
 		return http.StatusOK, approvalReply{Attempt: &a}
 	}
+	return h.closeAttempt(consumer, st)
+}
+
+// closeOnSession (review R3): the session closed (cancelled, expired,
+// superseded) while an attempt was open. Its challenge is closed, never
+// shown or verified; a challenge the Signer had already used still
+// resolves (to the session's closed outcome, its approval abandoned).
+func (h *approvals) closeOnSession(consumer string, st store.AttemptStart) (int, approvalReply) {
+	status, out := h.closeAttempt(consumer, st)
+	if status == http.StatusOK && out.Outcome == "" {
+		status, out.Error = http.StatusConflict, "session_closed"
+	}
+	return status, out
+}
+
+// closeAttempt closes an open attempt's challenge (or finds it never made).
+func (h *approvals) closeAttempt(consumer string, st store.AttemptStart) (int, approvalReply) {
+	a := st.Attempt
 	if a.ChallengeID == "" {
 		ans := h.signer.ChallengeByRequest(a.RequestID)
 		switch ans.Kind {

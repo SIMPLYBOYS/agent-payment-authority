@@ -427,9 +427,39 @@ func TestA2SignerUnavailable(t *testing.T) {
 	}
 }
 
-// The host cancels the task while the person verifies: the session is
-// withdrawn, the Signer's approval is abandoned, no grant.
+// The host cancels the task while the person verifies (review R3): the
+// session is withdrawn; the open attempt's challenge is closed, not shown
+// to another page or verified; the Signer makes no approval; no grant.
 func TestA2CancelledTask(t *testing.T) {
+	f := startA2(t, 60)
+	sid, intent, task := f.ask("01")
+	_, r := f.challenge(sid, "att-req-0000000000001", "approve")
+	as := f.sign(r, sid, intent, "approve")
+	chID := r["challenge"].(map[string]any)["challenge_id"].(string)
+	if code, c := f.h.post("/api/host/tasks/"+task+"/cancel", f.h.tokens["operator"], `{}`); code != 200 && code != 202 {
+		t.Fatalf("cancel task: %d %v", code, c)
+	}
+	f.h.waitFor(task, func(v taskReply) bool { return v.Purchases[0].Approval.State == "withdrawn" })
+	// Another page asks for the same decision: no shared challenge.
+	if code, r := f.challenge(sid, "att-req-0000000000002", "approve"); code != 409 || r["error"] != "session_closed" || r["challenge"] != nil || attempt(r)["state"] != "closed" {
+		t.Fatalf("shared after cancel: %d %v", code, r)
+	}
+	if c, err := f.core.ChallengeByID(context.Background(), chID); err != nil || c.State != "closed" {
+		t.Fatalf("Signer challenge after cancel: %+v %v", c, err)
+	}
+	// The first page's assertion: nothing is verified.
+	code, r := f.assert(sid, "att-req-0000000000001", "ver-req-0000000000001", as)
+	if code != 409 || r["error"] != "attempt_not_ready" || sessionState(r) != "withdrawn" || f.h.grants() != 0 {
+		t.Fatalf("after cancel: %d %v", code, r)
+	}
+	if _, err := f.core.ApprovalByVerifyRequest(context.Background(), "ver-req-0000000000001"); err == nil {
+		t.Fatal("the Signer verified an assertion of a withdrawn session")
+	}
+}
+
+// The same, with the attempt's assertion arriving first after the cancel
+// (review R3): the assertion route closes the challenge instead of sending.
+func TestA2AssertionAfterCancel(t *testing.T) {
 	f := startA2(t, 60)
 	sid, intent, task := f.ask("01")
 	_, r := f.challenge(sid, "att-req-0000000000001", "approve")
@@ -439,12 +469,65 @@ func TestA2CancelledTask(t *testing.T) {
 	}
 	f.h.waitFor(task, func(v taskReply) bool { return v.Purchases[0].Approval.State == "withdrawn" })
 	code, r := f.assert(sid, "att-req-0000000000001", "ver-req-0000000000001", as)
-	if code != 200 || r["outcome"] != "closed" || sessionState(r) != "withdrawn" || f.h.grants() != 0 {
-		t.Fatalf("after cancel: %d %v", code, r)
+	if code != 409 || r["error"] != "session_closed" || attempt(r)["state"] != "closed" || f.h.grants() != 0 {
+		t.Fatalf("assertion after cancel: %d %v", code, r)
 	}
-	id := attempt(r)["signer_approval_id"].(string)
-	if a, err := f.core.ApprovalByID(context.Background(), id); err != nil || a.State != "abandoned" {
-		t.Fatalf("Signer approval %+v %v", a, err)
+	if _, err := f.core.ApprovalByVerifyRequest(context.Background(), "ver-req-0000000000001"); err == nil {
+		t.Fatal("the Signer verified an assertion of a withdrawn session")
+	}
+}
+
+// Review R6: the Signer used the challenge by a verify request the Host
+// has no answer for; each Host path resolves to that decision once.
+func TestA2ChallengeUsedElsewhere(t *testing.T) {
+	for _, path := range []string{"assertion", "cancel", "status after a lost verify"} {
+		t.Run(path, func(t *testing.T) {
+			f := startA2(t, 60)
+			sid, intent, _ := f.ask("01")
+			_, r := f.challenge(sid, "att-req-0000000000001", "approve")
+			chID := r["challenge"].(map[string]any)["challenge_id"].(string)
+			used, err := f.core.Verify(context.Background(), signer.VerifyRequest{VerifyRequestID: "ver-req-0000000000000", ChallengeID: chID,
+				Order: orderOf(t, f, "att-req-0000000000001"), Assertion: f.sign(r, sid, intent, "approve")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var code int
+			switch path {
+			case "assertion": // another page's assertion: CHALLENGE_USED, then the challenge, then the approval
+				code, r = f.assert(sid, "att-req-0000000000001", "ver-req-0000000000002", f.sign(r, sid, intent, "approve"))
+			case "cancel": // the close answers used
+				code, r = f.post("/api/approvals/"+sid+"/attempts/att-req-0000000000001/cancel", f.h.tokens["viewer:consumer-a"], map[string]any{})
+			default: // its own verify request found nothing; the close answers used
+				if _, err := f.h.st.UpdateApprovalAttempt(store.AttemptUpdate{ConsumerID: "consumer-a", RequestID: "att-req-0000000000001", From: []string{"challenged"},
+					State: "verifying", VerifyRequestID: "ver-req-0000000000001"}); err != nil {
+					t.Fatal(err)
+				}
+				code, r = f.status(sid, "att-req-0000000000001")
+			}
+			if code != 200 || r["outcome"] != "approved" || sessionState(r) != "approved" || attempt(r)["signer_approval_id"] != used.ApprovalID || f.h.grants() != 1 {
+				t.Fatalf("%s: %d %v", path, code, r)
+			}
+		})
+	}
+}
+
+// Two pages each send an assertion of the shared challenge: the first
+// decides; the second is not verified and changes nothing.
+func TestA2TwoAssertions(t *testing.T) {
+	f := startA2(t, 60)
+	sid, intent, _ := f.ask("01")
+	_, first := f.challenge(sid, "att-req-0000000000001", "approve")
+	_, second := f.challenge(sid, "att-req-0000000000002", "approve")
+	a1, a2 := f.sign(first, sid, intent, "approve"), f.sign(second, sid, intent, "approve")
+	if code, r := f.assert(sid, "att-req-0000000000001", "ver-req-0000000000001", a1); code != 200 || r["outcome"] != "approved" {
+		t.Fatalf("first: %d %v", code, r)
+	}
+	code, r := f.assert(sid, "att-req-0000000000001", "ver-req-0000000000002", a2)
+	if code != 409 || r["error"] != "attempt_not_ready" || f.h.grants() != 1 {
+		t.Fatalf("second: %d %v", code, r)
+	}
+	if list, _ := f.core.Credentials(context.Background()); list[0].State != "active" {
+		t.Fatalf("credential %s after two assertions", list[0].State)
 	}
 }
 
