@@ -654,7 +654,7 @@ M1 與 B1-00～B1-07 維持 Done。本節記錄 M-B 技術 review 通過與三�
 **核准與分工**：Aaron 核准一次 M-C，由 Aaron 在自己的終端機操作（`make present-live`；配對碼與登入資料不經 Claude Code），Claude Code 協助。核准包含兩場同時使用 Aaron 本人的訂閱。執行前，Claude Code 只做唯讀準備：`~/.local/bin/claude` 已自動更新到 2.1.296，host 只接受 `2.1.293 (Claude Code)`；經 Aaron 選擇，把本機 `var/present.conf`（git 忽略）的 `cli=` 改為 `/Users/mac/.local/share/claude/versions/2.1.293`，只改這一行。開發展示 plugin 例外照舊開啟；Gate、認證清單與版本釘選未改。
 
 **這一次**（場次目錄 `var/present-GyCNVx/`，git 忽略）：
-- 建置 `0dbefd8`（`build.txt`）。Go 標記 `vcs.modified=true`，這是事實，不稱為乾淨建置。未追蹤的 `demo` 目錄是可能原因，但不能證明建置當下只有這一項差異。`3591736..0dbefd8` 之間已提交的產品與判定工具程式沒有差異。
+- 建置 `0dbefd8`（`build.txt`）。Go 標記 `vcs.modified=true`，這是事實，不稱為乾淨建置。未追蹤的 `demo`（repo 根目錄的一個執行檔，不是目錄；10/13 review 更正）是可能原因，但不能證明建置當下只有這一項差異。`3591736..0dbefd8` 之間已提交的產品與判定工具程式沒有差異。
 - Host instance `70e423a9411278f7b1c735f7cb53109d`，於 2026-10-11T16:47:55Z 啟動，同時執行上限 2。
 - 兩場：
   - A：`live-a`，`show-a-01`，受理於 16:48:16Z，結束於 16:48:26Z。
@@ -684,7 +684,7 @@ M1 與 B1-00～B1-07 維持 Done。本節記錄 M-B 技術 review 通過與三�
 
 ### 15.1 第二次：一起開始與停止隔離（10/12）
 
-**核准**：Aaron 核准第二次，要用「一起開始」並示範停止隔離；仍由 Aaron 操作、Claude Code 協助。CLI 設定與第一次相同（`var/present.conf` 指向 2.1.293；開發展示 plugin 例外照舊）。
+**核准**：Aaron 核准第二次，要用「一起開始」並示範停止隔離；仍由 Aaron 操作、Claude Code 協助。**10/13 Aaron 確認：第二次的核准本來就涵蓋兩組**，所以第二組不是 §6.5／§14.2「一次嘗試、不重試」意義下的重試。CLI 設定與第一次相同（`var/present.conf` 指向 2.1.293；開發展示 plugin 例外照舊）。
 
 **執行**（場次目錄 `var/present-Zwrcxw/`）：
 - 建置 `15edf10`。`vcs.modified=true` 是事實，不稱為乾淨建置；未追蹤的 `demo` 是可能原因，但不能證明建置當下只有這一項差異。`3591736..15edf10` 之間已提交的產品程式沒有差異。
@@ -716,4 +716,46 @@ M1 與 B1-00～B1-07 維持 Done。本節記錄 M-B 技術 review 通過與三�
 - **停止隔離成立**（第二組）：停止 A 只結束 A，B 繼續自己的呼叫並以自己的結果結束。
 - 兩項結論來自同一場次的兩組，不是同一組同時達成。這不代表每一刻都在工作或供應商內部同時推論，也不代表付款能力；兩次執行不足以推論穩定性或任意容量。
 
-**M-B 對照設計的缺口**：§6.5 寫明「主持人頁顯示每場的 `tool_calls` 次數」，但目前的主持人頁沒有顯示：API 的 `runView.tool_calls` 有這個值，`web/host.js` 沒有呈現。第一次因此難以抓到停止的時機；第二次是 Aaron 憑時間抓到的。本紀錄只記下缺口，沒有修改程式；是否修正由 Aaron 決定。
+**M-B 對照設計的缺口**：§6.5 寫明「主持人頁顯示每場的 `tool_calls` 次數」，但在這兩次所用的建置（`0dbefd8`、`15edf10`）中，主持人頁沒有顯示。之後的提交 `fc89b52`（UX1）已在卡片上顯示「已回覆工具呼叫 N 次」（10/13 review 補記）。當時：API 的 `runView.tool_calls` 有這個值，`web/host.js` 沒有呈現。第一次因此難以抓到停止的時機；第二次是 Aaron 憑時間抓到的。本紀錄只記下缺口，沒有修改程式；是否修正由 Aaron 決定。
+
+### 15.2 第三次：未曾記錄的真實雙 Agent 場次（10/12；10/13 補記）
+
+10/13 的 Claude Code 獨立上下文 review 發現 `var/present-nIrgxS/`：這是一次真實雙 Agent 場次，§15、§15.1 與任務清單原本都沒有記錄。**Aaron 10/13 確認：這一場是他核准並操作的。**目的沒有另外說明，本節只記證據顯示的內容。
+
+- 時間：2026-10-11T17:00Z（台灣 10/12 01:00），在 §15.1 的提交 `5557088` 之前約 2 分鐘。
+- 建置 `15edf10`，與第二次相同；`vcs.modified=true`（`build.txt`）。Host instance `a398e2a8914d497bd7b618ce122920e3`，啟動於 17:00:20.18Z。
+- 兩場：`live-a`／`show-a-01` 與 `live-b`／`show-b-01`。
+  - `accepted_ms` 分別是 11491 與 11498，相差 7 ms，與「一起開始」相符；
+  - 都由 CLI 2.1.293 執行，init gate passed（`dev_demo_plugins`），model `claude-sonnet-5-5`；
+  - 各自依序呼叫 `list_products`、`get_quote`、`request_purchase`，最後都得到 Ask；
+  - outcome `ok`，exit 0，stderr 0 bytes。
+- 沒有停止：兩份紀錄的 `stop_accepted_ms` 都是 null。兩個 task 在 Store 裡仍是 `awaiting_approval`，沒有到期事件，表示主持人在兩場結束後不久就停止了。
+- 判定：以同一建置的 `artifacts/m-c/judge-Zwrcxw/timing-judge`，在複本上離線執行，結果是 **interleaved**，exit 0，原始 `live.db` 的 sha256 前後相同。證據在 `artifacts/m-c/judge-nIrgxS/`（`command.txt`、`pair.json`、`pair.exit`、`db.sha256.before`／`.after`）。
+- 這一場不改變第一、二次的結論，也不和它們合併。M-C 一共是三次真實執行：
+  - 第一次：交錯，停止隔離未示範；
+  - 第二次：兩組，第一組交錯，第二組停止隔離成立；
+  - 第三次：交錯，沒有停止。
+  
+  三次執行仍不足以推論穩定性或任意容量。
+
+### 15.3 M-C 證據核對：Claude Code 獨立上下文 review（10/13）
+
+Codex 訂閱已到期，改由 Claude Code 另開的獨立上下文 subagent 唯讀核對，沒有重跑真實 Agent。
+
+做法：
+- 把第一、二次的 `live.db` 與 timing 紀錄複製出來，以已存的 judge 工具離線重跑；六份輸出與原存檔逐 byte 相同，exit 碼一致。
+- `live.db` 的 sha256 與 `db.sha256` 相同。
+- 以唯讀方式讀 Store 與 trace，並用 `go version -m` 核對建置。
+
+結果：
+- **第一、二次**：§15、§15.1 的每項事實陳述都有證據支持。限制條件寫得正確，沒有誇大：第一次相隔 3.7 秒，不是有界的「一起開始」；第二次的兩組分開陳述。
+- **must-fix（已關閉）**：未記錄的第三場。Aaron 確認是核准並操作的，已補記於 §15.2。
+- **should-fix（已關閉）**：第二次按了兩次「一起開始」，與「一次嘗試」的寫法不一致。Aaron 確認核准本來就涵蓋兩組，已補記於 §15.1。
+- **note（已處理或記錄）**：
+  - judge 的存檔沒有記錄命令。第三次起，`command.txt` 寫明命令與輸入。
+  - `demo` 是執行檔，不是目錄，已更正。
+  - `tool_calls` 缺口只存在於當時的建置，已補記 `fc89b52`。
+  - 「上限 2」是由 `present.sh` 沒有傳 `--max-runs` 推得的，啟動時的那一行沒有保存。
+  - 第一次的場次目錄有一個空的 `.claude/.cc-writes`（00:50 建立，在第一次之後），沒有影響。
+
+**判定：M-C 證據核對關閉。** 依據是上述 review，加上 Aaron 10/13 對兩個問題的確認。M-C 不因此等同付款能力或整體商業 demo 完成。
