@@ -238,6 +238,9 @@ func TestAssertionRules(t *testing.T) {
 		"crossOrigin": {func(ch string) []byte {
 			return signertest.ClientData("webauthn.get", ch, origin, map[string]any{"crossOrigin": true, "topOrigin": origin})
 		}, "ASSERTION_INVALID_ORIGIN"},
+		"crossOrigin alone": {func(ch string) []byte {
+			return signertest.ClientData("webauthn.get", ch, origin, map[string]any{"crossOrigin": true})
+		}, "ASSERTION_INVALID_ORIGIN"},
 		"type create": {func(ch string) []byte { return signertest.ClientData("webauthn.create", ch, origin, nil) }, "ASSERTION_INVALID_TYPE"},
 		"other challenge": {func(string) []byte {
 			return signertest.ClientData("webauthn.get", "AAAAAAAAAAAAAAAAAAAAAA", origin, nil)
@@ -305,7 +308,7 @@ func TestCounterAndBackupFlags(t *testing.T) {
 	if _, err := f.verify("ver-2", c.ChallengeID, order, a.Get(c.Options, origin)); refusal(err) != "CREDENTIAL_SUSPECT" {
 		t.Fatalf("after suspect: %v", err)
 	}
-	if _, err := f.challenge("req-2", f.order("a"), "approve"); refusal(err) != "CREDENTIAL_REVOKED" {
+	if _, err := f.challenge("req-2", f.order("a"), "approve"); refusal(err) != "CREDENTIAL_SUSPECT" {
 		t.Fatalf("new challenge for a suspect credential only: %v", err)
 	}
 	// BE is fixed at registration; BS may change while BE=1, and is written back.
@@ -566,5 +569,104 @@ func TestApproverConfig(t *testing.T) {
 	}
 	if _, err := ParseConfig(base); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Review R1: two assertions of one issued challenge in flight (counters
+// not zero). The second to commit answers by the challenge's state; the
+// counter it carries is never compared, and the credential stays active.
+func TestTwoAssertionsInFlight(t *testing.T) {
+	f := newAFX(t)
+	a := signertest.NewAuthenticator()
+	a.Count = 1
+	f.enroll("approver-a", a)
+	order := f.order("a")
+	c := f.mustChallenge("req-1", order, "approve")
+	a.Count = 2
+	first := a.Get(c.Options, origin)
+	a.Count = 3
+	second := a.Get(c.Options, origin)
+	inner := false
+	hook = func(stage, id string) error {
+		if stage == "verify-checked" && !inner {
+			inner = true
+			if r, err := f.verify("ver-2", c.ChallengeID, order, second); err != nil || r.State != "verified" {
+				t.Errorf("the other assertion: %+v %v", r, err)
+			}
+		}
+		return nil
+	}
+	defer func() { hook = nil }()
+	_, err := f.verify("ver-1", c.ChallengeID, order, first)
+	list, _ := f.core.Credentials(bgA)
+	if refusal(err) != "CHALLENGE_USED" || list[0].State != "active" {
+		t.Fatalf("the late assertion: %s, credential %s; want CHALLENGE_USED and active", refusal(err), list[0].State)
+	}
+}
+
+// Review R2: the right credential ID with another key and BE flipped is a
+// bad signature; nothing without the key can make the credential suspect.
+func TestFlagsNeedTheSignature(t *testing.T) {
+	f := newAFX(t)
+	a := f.enroll("approver-a", nil) // BE=0 at registration
+	order := f.order("a")
+	c := f.mustChallenge("req-1", order, "approve")
+	thief := signertest.NewAuthenticator()
+	thief.ID = a.ID
+	thief.Flags = signertest.UP | signertest.UV | signertest.BE
+	_, err := f.verify("ver-1", c.ChallengeID, order, thief.Get(c.Options, origin))
+	list, _ := f.core.Credentials(bgA)
+	if refusal(err) != "ASSERTION_INVALID_SIGNATURE" || list[0].State != "active" {
+		t.Fatalf("an unsigned BE change: %s, credential %s; want ASSERTION_INVALID_SIGNATURE and active", refusal(err), list[0].State)
+	}
+	// BS=1 while BE=0, signed: an invalid combination, refused, not suspect.
+	a.Flags = signertest.UP | signertest.UV | signertest.BS
+	if _, err := f.verify("ver-2", c.ChallengeID, order, a.Get(c.Options, origin)); refusal(err) != "ASSERTION_INVALID_FLAGS" {
+		t.Fatalf("BS without BE: %v", err)
+	}
+	if list, _ := f.core.Credentials(bgA); list[0].State != "active" {
+		t.Fatalf("BS without BE made the credential %s", list[0].State)
+	}
+}
+
+// The branches the review found untested: the approver's version changed
+// after the challenge; a session already past its deadline; the deadline
+// reached between the checks and the commit.
+func TestChangedAndLateBranches(t *testing.T) {
+	f := newAFX(t)
+	a := f.enroll("approver-a", nil)
+	order := f.order("a")
+	c := f.mustChallenge("req-1", order, "approve")
+	var m map[string]any
+	json.Unmarshal(signertest.ApprovalsConfig("/tmp/apa-test.sock", 501, f.now, addrA, addrB, origin), &m)
+	m["approvers"].([]any)[0].(map[string]any)["version"] = 2
+	raw, _ := json.Marshal(m)
+	cfg, err := ParseConfig(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.core.cfg = cfg // the administrator changed approver-a after the challenge
+	if _, err := f.verify("ver-1", c.ChallengeID, order, a.Get(c.Options, origin)); refusal(err) != "APPROVER_CHANGED" {
+		t.Fatalf("approver version changed: %v", err)
+	}
+	f = newAFX(t)
+	a = f.enroll("approver-a", nil)
+	order = f.order("a")
+	if _, err := f.core.Challenge(bgA, ChallengeRequest{RequestID: "req-1", ApprovalSessionID: sessionOf(order), Decision: "approve", Order: order, HostDeadline: f.now}); refusal(err) != "AUTHORIZATION_EXPIRED" {
+		t.Fatalf("host deadline already reached: %v", err)
+	}
+	c = f.mustChallenge("req-2", order, "approve")
+	hook = func(stage, id string) error {
+		if stage == "verify-checked" {
+			f.now = c.ExpiresAt // the deadline arrives after the checks
+		}
+		return nil
+	}
+	defer func() { hook = nil }()
+	if _, err := f.verify("ver-2", c.ChallengeID, order, a.Get(c.Options, origin)); refusal(err) != "CHALLENGE_EXPIRED" {
+		t.Fatalf("deadline at the commit: %v", err)
+	}
+	if q, _ := f.core.ChallengeByID(bgA, c.ChallengeID); q.State != "expired" {
+		t.Fatalf("challenge after a late commit: %s", q.State)
 	}
 }

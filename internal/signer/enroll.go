@@ -388,10 +388,6 @@ func (c *ApprovalCore) Credentials(ctx context.Context) ([]CredentialInfo, error
 // Revoke revokes the one credential whose fingerprint is fp. Challenges
 // already issued for it are refused at verify (the state is read again).
 func (c *ApprovalCore) Revoke(ctx context.Context, fp string) error {
-	list, err := c.Credentials(ctx)
-	if err != nil {
-		return err
-	}
 	var match []string
 	rows, err := c.db.QueryContext(ctx, `SELECT credential_id FROM credentials`)
 	if err != nil {
@@ -410,7 +406,6 @@ func (c *ApprovalCore) Revoke(ctx context.Context, fp string) error {
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
-	_ = list
 	if len(match) != 1 {
 		return Refusal("CREDENTIAL_UNKNOWN")
 	}

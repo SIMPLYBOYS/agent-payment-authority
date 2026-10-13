@@ -403,13 +403,15 @@ func (c *ApprovalCore) Challenge(ctx context.Context, r ChallengeRequest) (Appro
 		return ApprovalReply{}, err
 	}
 	var allow []protocol.CredentialDescriptor
-	pending, revoked := false, false
+	pending, suspect, revoked := false, false, false
 	for _, cr := range u.creds {
 		switch states[b64(cr.ID)] {
 		case "active":
 			allow = append(allow, cr.Descriptor())
 		case "pending":
 			pending = true
+		case "suspect":
+			suspect = true
 		default:
 			revoked = true
 		}
@@ -418,6 +420,8 @@ func (c *ApprovalCore) Challenge(ctx context.Context, r ChallengeRequest) (Appro
 	case len(allow) > 0:
 	case pending:
 		return ApprovalReply{}, Refusal("CREDENTIAL_PENDING")
+	case suspect:
+		return ApprovalReply{}, Refusal("CREDENTIAL_SUSPECT")
 	case revoked:
 		return ApprovalReply{}, Refusal("CREDENTIAL_REVOKED")
 	default:
@@ -727,10 +731,6 @@ func (c *ApprovalCore) check(ctx context.Context, a challengeRow, r VerifyReques
 	case st != "active":
 		return "CREDENTIAL_REVOKED", nil, nil
 	}
-	ad := parsed.Response.AuthenticatorData
-	if stored.Flags.BackupEligible != ad.Flags.HasBackupEligible() { // D6: BE is fixed at registration
-		return "ASSERTION_INVALID_FLAGS:suspect", stored, nil
-	}
 	var s webauthn.SessionData
 	if err := json.Unmarshal([]byte(a.session), &s); err != nil {
 		return "ASSERTION_INVALID", nil, nil
@@ -756,6 +756,14 @@ func assertionCode(err error) string {
 		return "ASSERTION_INVALID_ORIGIN"
 	case "Error validating ceremony type":
 		return "ASSERTION_INVALID_TYPE"
+	// D6: BE is fixed at registration. The library compares it after the
+	// signature is verified, so only the credential's holder can make it
+	// change, and that marks the credential suspect (review R2: a check
+	// before the signature let anyone with the credential ID do it).
+	case "Backup Eligible flag inconsistency detected during login validation":
+		return "ASSERTION_INVALID_FLAGS:suspect"
+	case "Backup State Flag is true but Backup Eligible flag is false which is invalid":
+		return "ASSERTION_INVALID_FLAGS"
 	}
 	switch {
 	case strings.HasPrefix(pe.DevInfo, "RP Hash mismatch"):
@@ -842,6 +850,29 @@ func (c *ApprovalCore) commit(ctx context.Context, r VerifyRequest, fp string, a
 		} else if n > 0 {
 			return Refusal("REQUEST_ID_RACE")
 		}
+		// The challenge first (review R1): this write transaction holds the
+		// lock, so its state read here is the authoritative one. A
+		// challenge no longer issued answers by its state, and nothing of
+		// the credential is looked at or changed.
+		var state string
+		var expiresAt uint64
+		if err := tx.QueryRowContext(ctx, `SELECT state, expires_at FROM approval_challenges WHERE challenge_id = ?`, a.id).Scan(&state, &expiresAt); err != nil {
+			return err
+		}
+		if state != "issued" || now >= expiresAt {
+			switch state {
+			case "closed":
+				code = "CHALLENGE_CLOSED"
+			case "used":
+				code = "CHALLENGE_USED"
+			default: // issued past its deadline, or expired
+				code = "CHALLENGE_EXPIRED"
+				if _, err := tx.ExecContext(ctx, `UPDATE approval_challenges SET state = 'expired', closed_at = ? WHERE challenge_id = ? AND state = 'issued'`, now, a.id); err != nil {
+					return err
+				}
+			}
+			return c.saveRefusal(ctx, tx, now, r, fp, a.id, code, false)
+		}
 		var rec, st string
 		if err := tx.QueryRowContext(ctx, `SELECT record, state FROM credentials WHERE credential_id = ?`, credID).Scan(&rec, &st); err != nil {
 			return err
@@ -874,30 +905,16 @@ func (c *ApprovalCore) commit(ctx context.Context, r VerifyRequest, fp string, a
 		if err != nil {
 			return err
 		}
-		if k, _ := res.RowsAffected(); k != 1 {
-			var state string
-			if err := tx.QueryRowContext(ctx, `SELECT state FROM approval_challenges WHERE challenge_id = ?`, a.id).Scan(&state); err != nil {
-				return err
-			}
-			switch state {
-			case "closed":
-				code = "CHALLENGE_CLOSED"
-			case "used":
-				code = "CHALLENGE_USED"
-			default: // issued past its deadline, or expired
-				code = "CHALLENGE_EXPIRED"
-				if _, err := tx.ExecContext(ctx, `UPDATE approval_challenges SET state = 'expired', closed_at = ? WHERE challenge_id = ? AND state = 'issued'`, now, a.id); err != nil {
-					return err
-				}
-			}
-			return c.saveRefusal(ctx, tx, now, r, fp, a.id, code, false)
+		if k, _ := res.RowsAffected(); k != 1 { // the state read above holds in this transaction
+			return errors.New("challenge changed inside its write transaction")
 		}
-		var validBefore uint64
-		var d Display
-		if json.Unmarshal([]byte(a.display), &d) == nil {
-			validBefore = d.ValidBefore
+		// The approval never outlives the order's valid_before (the order's
+		// intent was checked against the challenge's).
+		po, _, err := readOrder(r.Order)
+		if err != nil {
+			return err
 		}
-		expires := min(now+c.cfg.WebAuthn.ApprovalTTLSeconds, validBefore)
+		expires := min(now+c.cfg.WebAuthn.ApprovalTTLSeconds, po.PaymentBinding.ValidBefore)
 		fresh.Authenticator.SignCount = ad.Counter
 		fresh.Flags.BackupState = ad.Flags.HasBackupState()
 		updated, err := json.Marshal(fresh)
