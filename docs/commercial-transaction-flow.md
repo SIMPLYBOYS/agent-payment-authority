@@ -300,7 +300,7 @@ Codex 的設計一致性核對不代替 Aaron 對畫面的判定。**Aaron 要�
 | 一次性紀錄元件（若 P1-a 先做） | 首次合法消耗成功、第二次拒絕、重啟後仍是已消耗 | 元件自己的單元測試，用測試專用、非 `simulated` 的 grant 樣本，不經過 Signer 路徑 | 不讓模擬 grant 進入正式 Signer 路徑 |
 | P1-b 正式 Signer | 簽發者與完整性、意圖綁定、期限、原子消耗、重播、恢復 | P1-b 的正反例與反向（本輪不簽 grant、不建金鑰、不跑測試） | — |
 
-> 10/13：本人核准（A1、A2）的最小設計見 [commercial-human-approval-design.md](commercial-human-approval-design.md)，其第 11 節列出它對本文件第 3.2、9 節（challenge 公式、grant 由誰產生）的修訂。現況：本人核准設計 close／verify 競爭與 decision 綁定補正完成，待 Codex 限定複核；R1 原存取權限與 R2 維持關閉；A1／A2 未執行，付款未啟用（該文件第 14 節；整份設計尚未通過）。
+> 10/13：本人核准（A1、A2）的最小設計見 [commercial-human-approval-design.md](commercial-human-approval-design.md)，其第 11 節列出它對本文件第 3.2、9 節（challenge 公式、grant 由誰產生）的修訂。現況：本人核准設計另開條件與 close 到期判斷補正完成，待 Codex 限定複核；R1 原存取權限與 R2 維持關閉；整份設計尚未通過；A1／A2 未執行，付款未啟用（該文件第 15 節）。
 
 ### 11.1 P1-b 設計對本節的修訂（10/12；設計已通過限定複核，已依此實作，待技術 review）
 

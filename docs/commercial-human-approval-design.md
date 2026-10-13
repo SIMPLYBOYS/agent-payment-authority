@@ -1,7 +1,8 @@
 # 本人核准最小流程（A1 實機可行性、A2 正式接線）：設計
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-本人核准最小流程設計派工-d7cbf9f-20261013〉（Aaron 已核准「本人核准最小流程」的設計）。分支 `commercial-p1b`，基準 `d7cbf9f`（工作區只有未追蹤的 `demo`）。
-> **狀態：本人核准設計 close／verify 競爭與 decision 綁定補正完成，待 Codex 限定複核；R1 原存取權限與 R2 維持關閉；A1／A2 未執行，付款未啟用。**（第 14 節；依 vault〈Claude-Code-本人核准設計競爭與決策綁定限定補正派工-031c4c7-20261013〉）
+> **狀態：本人核准設計另開條件與 close 到期判斷補正完成，待 Codex 限定複核；R1 原存取權限與 R2 維持關閉；整份設計尚未通過；A1／A2 未執行，付款未啟用。**（第 15 節；依 Codex 對 `287f340` 的核對，Aaron 指示「請照做」）
+> 以下為 `287f340` 時的狀態，保留原文：本人核准設計 close／verify 競爭與 decision 綁定補正完成，待 Codex 限定複核；R1 原存取權限與 R2 維持關閉；A1／A2 未執行，付款未啟用。（第 14 節）
 > 以下為 `031c4c7` 時的狀態，保留原文：本人核准設計 R1～R3 與規格補正完成，待 Codex 限定複核；A1 實機與 A2 接線未執行，付款未啟用。（第 13 節）
 > 以下為初版（`6c49619`）時的狀態，保留原文：本人核准最小流程設計完成，待 Codex review；A1 實機與 A2 接線未執行，付款未啟用。
 > 本輪只讀程式與文件、查官方資料、寫本文件：
@@ -338,12 +339,16 @@ webauthn_challenge = SHA-256("agent-payment-authority/pay/v1/webauthn-challenge"
   - 這兩組鍵與付款 attempt 的 request ID 是三套，彼此不共用。
 - **close 與 verify 的競爭**（同一列、同一個狀態，條件式寫入決勝）：
   - **verify 的提交**：密碼學驗證可以在交易外先做，但最後的寫入交易必須以 `UPDATE approval_challenges SET state='used' … WHERE challenge_id=? AND state='issued' AND ? < expires_at`（時間在交易內取）影響**恰好一列**，才在**同一個交易**裡寫 `human_approvals` 與 `verify_requests`。影響 0 列時在同一交易重讀：`closed` → 記 `verify_requests(outcome=CHALLENGE_CLOSED)`，**不寫核准**；`used` → 若是同一個 `verify_request_id` 就回保存的結果，否則 `CHALLENGE_USED`；`issued` 但已到期 → 改 `expired`，`CHALLENGE_EXPIRED`。不在驗證前讀一次狀態就當成依據。
-  - **close 的提交**：`UPDATE approval_challenges SET state='closed', closed_at=? WHERE challenge_id=? AND state='issued'`。不論影響幾列，都在同一交易重讀並**回 challenge 的目前狀態**：
+  - **close 的提交**：在**同一個寫入交易**裡取一次可信時間 `now`，只處理仍是 `issued` 的紀錄，並區分未到期與已到期（**等於期限也算到期**）：
+    - `UPDATE approval_challenges SET state='expired', closed_at=? WHERE challenge_id=? AND state='issued' AND ? >= expires_at`；
+    - `UPDATE approval_challenges SET state='closed', closed_at=? WHERE challenge_id=? AND state='issued' AND ? < expires_at`。
+    - 兩句的條件互斥，最多一句影響一列；已經是 `used`、`closed` 或 `expired` 的紀錄都不受影響，**`used` 不會因為時間經過而被覆寫**。
+    - 不論影響幾列，都在同一交易重讀並**回 challenge 的目前狀態**：
     - `closed`：關閉成功（這次或先前的 close 都一樣，close 冪等）；
     - `used`：verify 已先提交，**close 不覆寫**，回 `approval_id`、`verify_request_id` 與該筆的 `decision`；
-    - `expired`：已到期，沒有 verify 能再提交；
+    - `expired`：已到期（包括這次 close 才把「時間已到、還是 `issued`」的紀錄寫成 `expired`），沒有 verify 能再提交；
     - challenge 不存在：`CHALLENGE_UNKNOWN`。
-  - **close 的冪等與查回**：`close_request_id` 由 Host 在呼叫前寫入；同一個 challenge 可以重送 close，結果都由上面的重讀決定。close 的回覆遺失時，以 `GET /v1/approvals/challenge?challenge_id=` 查回同一個權威狀態。
+  - **close 的冪等與查回**：`close_request_id` 由 Host 在呼叫前寫入；同一個 challenge 可以重送 close，結果都由上面的重讀決定。close 的回覆遺失時，以 `GET /v1/approvals/challenge?challenge_id=` 查回同一個權威狀態。這個查詢遇到「還是 `issued` 但 `now >= expires_at`」時，以受狀態條件保護的短寫入改成 `expired` 再回覆（同 P1-b 查詢記錄到期的做法），不回 `issued`。
   - 因此 `closed` 之後不可能再出現核准；`used` 之後 close 一定看得到那筆核准。
 - **新增 `verify_requests` 表**：`verify_request_id` PK、`fingerprint`、`challenge_id`、`outcome`（`verified` 或固定拒絕碼）、`approval_id` NULL、`received_at`。拒絕也記錄，所以同一個請求的重送回同一個拒絕。拒絕不消耗 challenge；同一個 challenge 最多 3 次失敗，之後改成 `closed`（`CHALLENGE_CLOSED`）。
 - **新錯誤碼**：`APPROVER_UNKNOWN`、`CREDENTIAL_REVOKED`、`CREDENTIAL_PENDING`、`CHALLENGE_UNKNOWN`、`CHALLENGE_EXPIRED`、`CHALLENGE_USED`、`CHALLENGE_CLOSED`、`PAYMENT_MODE_OFF`、`ASSERTION_INVALID`（細分 `_TYPE`、`_ORIGIN`、`_RPID`、`_FLAGS`、`_SIGNATURE`、`_COUNTER`）、`APPROVER_CHANGED`、`ENROLLMENT_CODE`；沿用 `CONSUMER_MISMATCH`、`ORDER_INVALID`、`REQUEST_ID_CONFLICT`、`SIGNER_TIMEOUT`。
@@ -451,7 +456,7 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 | 4 | **斷點 2**：Host 存了 `verifying`，之後當機，不知道 assertion 有沒有送到 | `challenge_id`、`verify_request_id`；**沒有** assertion（Host 不保存原文） | 不確定：可能沒收到、可能 verify 還在途中、可能已提交 | 不確定。**查無不等於確定未收到**：查詢當下查無之後，verify 仍可能提交 | 先依 `verify_request_id` 查；查到就照第 6 或 7 列。讀取成功且查無時，Host 先寫 `close_request_id`，再送 close，**依 close 回的權威狀態處理**（見下表）；讀取失敗就有界重試，不當成查無 | 等 close 的結果時：「正在確認這次驗證…」 | 見下面「close 與 verify 的先後」 |
 | 5 | assertion 送到、Signer 受理狀態不明（逾時） | `verify_request_id` | 可能有 | 不確定 | 依 `verify_request_id` 查；讀取失敗就有界重試；**不重送新的 assertion** | 「結果確認中，請不要重複操作。」 | 查到 → 第 6 或第 7 列；到會話期限仍不明 → 會話 `expired`，attempt `unknown`；之後查到 `verified` 時 Host 呼叫 `abandon` |
 | 6 | Signer 已驗證，回覆遺失 | `verify_request_id` | `verify_requests` 與 `human_approvals(verified)` | Signer | 依 `verify_request_id` 查到結果；Host 有原 assertion 時，以同鍵同內容重送也回同一結果，**不重新驗證、不再比計數器** | 成功文案 | Host 寫會話結果＋grant＋事件 |
-| 7 | Signer 拒絕，回覆遺失 | 同上 | `verify_requests(outcome=拒絕碼)` | Signer | 同上，回同一個拒絕 | 失敗文案 | attempt `refused`；challenge 未達失敗上限時可以重試同一個 challenge（新 `verify_request_id`） |
+| 7 | Signer 拒絕，回覆遺失 | 同上 | `verify_requests(outcome=拒絕碼)` | Signer | 同上，回同一個拒絕 | 失敗文案 | attempt `refused`；challenge 未達失敗上限時可以重試同一個 challenge（新 `verify_request_id`）。**`refused` 只是 Host 這次 attempt 的終態，不表示 Signer 的 challenge 已失效**：challenge 仍可能是 `issued` |
 | 8 | Signer 已驗證，Host 寫結果的交易失敗 | `verifying` | `verified` | Signer | 重試 Host 的交易；必要時依第 6 列再查一次 | 「結果確認中」 | 寫入成功 → 完成；會話已到期或已取消 → Host 呼叫 `abandon` |
 | 9 | 已完成 | `verified` | `verified` | 兩邊一致 | 任何重送回同一結果 | 成功或拒絕文案 | — |
 | 10 | 已過期 | 會話 `expired` 或 attempt `expired` | challenge `expired` | 各自 | 查詢回原狀態 | 「已過期（後端時間為準）」 | 終態 |
@@ -475,7 +480,7 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 | 核准與拒絕 | 兩者都要 WebAuthn（第 6.3 節）。拒絕或期限先發生後，Host 不再接受 verify 的結果；若 Signer 已 `verified` 一筆 approve，Host 呼叫 `abandon` 並記錄 |
 | 到期 | Host 的會話期限照 `sessionDeadline`（決策時間＋terms 期限與 `valid_before` 取小）；Signer 的 challenge 期限只能更短。兩邊都由可信時鐘決定，呼叫者不能延長 |
 | 取消 task | 會話 `withdrawn`；已驗證未用的核准由 Host 呼叫 `abandon`。Signer 沒有可驗證的撤回清單（沿用 P1-b），曝險以 `approval_ttl` 與 `valid_before` 為界 |
-| 兩個分頁與決定綁定 | 同一個會話同時最多一筆非終態 attempt，attempt 帶自己的 `decision`。第二個要求的處理：**同一個 consumer、會話、`intent_hash` 與同一個 `decision`** 才共用目前的 attempt，Host 回 200 與**權威的 attempt ID**（目前那筆的 `request_id`）與它的 challenge，不另建 attempt；這和「同一個 `request_id`、同內容的冪等重送」分開記錄。**相反的 `decision`**：回 409 `DECISION_CONFLICT`，附目前 attempt 的 `decision` 與狀態，**不回另一種 challenge、不改使用者的選擇**。要改變決定，使用者先按「取消這次驗證」：Host 以第 7 節的 close 規則結束舊 challenge；close 回 `closed`（或舊 attempt 已是終態）之後才能開新的 attempt；close 回 `used` 就照既有結果；close 結果未知時不能另開 |
+| 兩個分頁與決定綁定 | 同一個會話同時最多一筆非終態 attempt，attempt 帶自己的 `decision`。第二個要求的處理：**同一個 consumer、會話、`intent_hash` 與同一個 `decision`** 才共用目前的 attempt，Host 回 200 與**權威的 attempt ID**（目前那筆的 `request_id`）與它的 challenge，不另建 attempt；這和「同一個 `request_id`、同內容的冪等重送」分開記錄。**相反的 `decision`**：回 409 `DECISION_CONFLICT`，附目前 attempt 的 `decision` 與狀態，**不回另一種 challenge、不改使用者的選擇**。要改變決定（或在任何舊 attempt 之後另開），**依 Signer 對舊 challenge 的權威結果**，不依 Host attempt 的狀態：使用者先按「取消這次驗證」，Host 以第 6.1 節的 close 規則處理舊 challenge——close 回 `closed` 或 `expired`，而且會話仍是 `pending` 且未到期，才能開新的 attempt；回 `used` 就照既有結果；結果未知就不能另開。Host attempt 已是終態（例如 `refused`）也一樣要先完成 close |
 | 不同 ID 重用 assertion | assertion 的 client data 帶的是原 challenge，對不上別的 challenge（`ASSERTION_INVALID_CHALLENGE`）；原 challenge 已 `used` 或 `closed` 就是 `CHALLENGE_USED`／`CHALLENGE_CLOSED` |
 | 晚到的舊回覆 | Host 只接受目前 attempt 的 `challenge_id` 與 `verify_request_id`；網頁沿用 `hostcreds` 的世代與 `approvalTarget`／`sameTarget`，舊世代的回覆丟棄 |
 | 裝置撤銷 | 第 3.4 節 |
@@ -564,6 +569,10 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 | 核准進行中按拒絕 | attempt 是 `approve`，另一頁按拒絕 | 409 `DECISION_CONFLICT`；沒有回 approve 的 challenge 給拒絕頁；沒有彈出 | I、B | 30 s |
 | 拒絕進行中按核准 | attempt 是 `deny`，另一頁按核准 | 409 `DECISION_CONFLICT`；同上 | I、B | 30 s |
 | 回覆的決定與按鈕不符 | 測試替身讓 challenge 回覆的 `decision` 與按鈕相反 | 頁面停止、不彈出；Host 落地時也因 `decision` 不一致而拒絕 | W、I | 30 s |
+| 已 refused、challenge 仍 issued 時改變決定 | 舊 attempt 是 `refused`（assertion 被拒），Signer 的 challenge 仍是 `issued`；使用者改按相反的決定 | 不直接另開：先 close；close 回 `closed` 後才開新的 attempt；之後同一份舊 challenge 的任何 verify 都是 `CHALLENGE_CLOSED` | I | 30 s |
+| close 在期限前一刻 | `now = expires_at − 1` | 改成 `closed` | U | 10 s |
+| close 剛好在期限 | `now == expires_at` | 改成 `expired`、回 `expired`（不是 `closed`） | U | 10 s |
+| `used` 之後才到期 | verify 已提交（`used`），之後 `now >= expires_at` 再送 close 或查詢 | 仍回 `used` 與 `approval_id`，不被改成 `expired` 或 `closed` | U | 10 s |
 | 改變決定時舊 verify 晚到 | 按「取消這次驗證」，close 先成功後舊 assertion 才送到 | 舊 verify `CHALLENGE_CLOSED`，沒有核准；新的 attempt 照常 | I | 30 s |
 | 查無後 close 先成功 | verify 查無 → close → 晚到的 verify | close 回 `closed`；verify `CHALLENGE_CLOSED`；沒有核准紀錄；attempt `lost` | I | 30 s |
 | 查無後 verify 先成功 | verify 查無 → verify 提交 → close | close 回 `used` 與 `approval_id`；Host 不標 `lost`、不開第二筆，照第 6 列落地 | I | 30 s |
@@ -697,3 +706,16 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 | 殘留文字：付款拒絕碼依模式 | 第 6.1 節、D5 與驗收表只寫 `HUMAN_APPROVAL_UNAVAILABLE` | `serve`：webauthn 仍 `HUMAN_APPROVAL_UNAVAILABLE`、其餘照 P1-b；`serve-approvals`：所有付款入口 `PAYMENT_MODE_OFF`；驗收分成兩列 | 兩個入口的預期不同 | 第 6.1、9、10 節 | 第 9 節「`serve` 的付款規則不變」「`serve-approvals` 沒有付款入口」 |
 
 **仍待決策**：D1～D8 不變（第 10 節）；技術 review 不代替 Aaron 的決策或執行核准。
+
+## 15 另開條件與 close 的到期判斷（Codex 對 `287f340` 的核對）
+
+**Codex 的結論**：主要修正方向成立（verify／close 競爭同一列、核准與結果原子提交；相反 decision 不共用 challenge、頁面啟動前核對、Host 落地核對與 deny 不發 grant），但還有兩處狀態規則要對齊，**整份設計暫不標通過**；都是局部文件補正，不需要重做架構或跑測試。原 R1 存取權限、R2 核准專用模式維持關閉。
+
+**證據歸屬**：Codex 依 security-audit 的限定文件檢視核對 Git 與文字，沒有執行重現或產生測試 PASS。Claude Code 本輪只改文件（Aaron 指示「請照做」），沒有執行任何東西。
+
+| 項目 | 原規則（`287f340`） | 新規則 | 理由 | 位置 | 未來驗收案例 |
+|---|---|---|---|---|---|
+| 另開新 attempt 的條件 | 「close 回 `closed`（或舊 attempt 已是終態）之後才能開新的 attempt」 | 刪除「或舊 attempt 已是終態」；改依 Signer 對舊 challenge 的權威結果：`closed`／`expired` 且會話仍有效才能另開，`used` 照既有結果，未知不能另開；恢復表第 7 列註明 `refused` 不表示 challenge 已失效 | 第 7 列允許 attempt 已是 `refused` 而 challenge 仍可重試，所以 Host 的終態不保證舊驗證已失效 | 第 7 節 | 第 9 節「已 refused、challenge 仍 issued 時改變決定」 |
+| close 的到期判斷 | close 只以 `state='issued'` 更新成 `closed`，會把「時間已到、還沒改 `expired`」的紀錄寫成 `closed` | 同一交易內取時間，對仍是 `issued` 的紀錄以互斥條件分成未到期（`closed`）與已到期（`expired`，等於期限也算）；`used` 不因時間經過被覆寫；依 `challenge_id` 的查詢遇到過期的 `issued` 也以條件式短寫入記成 `expired` | 結果表要求回 `expired`，原 SQL 與它不一致 | 第 6.1 節 | 第 9 節「close 在期限前一刻」「close 剛好在期限」「`used` 之後才到期」 |
+
+**不變**：D1～D8 不代選；A1／A2 不開工；其餘章節不重開。
