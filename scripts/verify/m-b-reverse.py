@@ -346,7 +346,7 @@ ITEMS = [
     ("C2a: an event's decision is of the event's version", go("./internal/paycontract/", "^TestEventCrossVersion$", ("TestEventCrossVersion", r"a v1 event took a v2 decision")),
      [(PE, "d.Version != e.Version || ", "")]),
     ("C2a: a grant event's ID is its version's", go("./internal/paycontract/", "^TestEventCrossVersion$", ("TestEventCrossVersion", r"a v2 grant event took v1's grant ID")),
-     [(PE, "if p.GrantID != sp.GrantID(p.ApprovalSessionID) {", "if p.GrantID != GrantID(p.ApprovalSessionID) {")]),
+     [(PE, "if p.GrantID != sp.GrantID(p.ApprovalSessionID) {", "if p.GrantID != GrantID(p.ApprovalSessionID) && sp.Domain != \"\" {")]),
     ("C2a: the Signer derives the jti by the order's version", go("./internal/signer/", "^TestV2OrderChallenge$", ("TestV2OrderChallenge", r"stored jti")),
      [(SA, "JTI: sp.GrantID(r.ApprovalSessionID),", "JTI: paycontract.GrantID(r.ApprovalSessionID),")]),
     ("C2a: a stored v1 delegation stays v1", go("./internal/store/", "^TestPayRecoveryRefuses$", ("TestPayRecoveryRefuses/a_delegation_body_flipped_to_apa.pay.v2", r"Open: <nil>")),
