@@ -1,0 +1,155 @@
+[
+ {
+  "name": "vet",
+  "cmd": [
+   "go",
+   "vet",
+   "./..."
+  ],
+  "timeout": 300000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "signer-a2-race",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-race",
+   "-count=1",
+   "./internal/signer/",
+   "./cmd/apa-signer/",
+   "-run",
+   "^(TestApproveAndResend|TestDenyIsADecisionToo|TestBindingAndIdentity|TestAssertionRules|TestCounterAndBackupFlags|TestDeadlinesAndClose|TestCloseBeatsVerify|TestEnrollmentRules|TestRevokedMidway|TestApprovalsHandler|TestApproverConfig|TestServeApprovalsNeedsNoKey|TestServeApprovalsRefusesItsInputs|TestServeStillNeedsEveryKey|TestApproverCommands)$"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "contract",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "./internal/paycontract/",
+   "./internal/contracts/..."
+  ],
+  "timeout": 300000000000,
+  "kind": "go"
+ },
+ {
+  "name": "store-a2-race",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-race",
+   "-count=1",
+   "./internal/store/",
+   "-run",
+   "^(TestAttemptLifecycle|TestAttemptDenyAndMismatch|TestAttemptAfterTheSessionClosed|TestApprovalSchemaChecks|TestUpgradeSchema4|TestUpgradeSchema3|TestUpgradeSchema2|TestRecoveryRefusesCorruption|TestUpgradeFailures)$"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "host-a2-race",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-race",
+   "-count=1",
+   "./cmd/demo/",
+   "-run",
+   "^TestA2"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "adjacent-store",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "./internal/store/",
+   "./internal/paypolicy/",
+   "./internal/m1evidence/"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "adjacent-signer-p1b",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "./internal/signer/...",
+   "./internal/signerclient/",
+   "./cmd/apa-signer/"
+  ],
+  "timeout": 600000000000,
+  "kind": "go"
+ },
+ {
+  "name": "adjacent-demo",
+  "cmd": [
+   "go",
+   "test",
+   "-json",
+   "-count=1",
+   "./cmd/demo/",
+   "-skip",
+   "^TestTimingInterleaved$"
+  ],
+  "timeout": 1200000000000,
+  "kind": "go"
+ },
+ {
+  "name": "web",
+  "cmd": [
+   "node",
+   "--test",
+   "web/test/adapter.test.mjs",
+   "web/test/hostcreds.test.mjs",
+   "web/test/scene.test.mjs",
+   "web/test/p1a.test.mjs",
+   "web/test/approve.test.mjs"
+  ],
+  "timeout": 300000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "m1-golden-readonly",
+  "cmd": [
+   "go",
+   "run",
+   "-buildvcs=true",
+   "./cmd/verify-demo",
+   "--run-dir",
+   "testdata/verification/m1-fixture-20261009T162703Z-4ddb7a",
+   "--mode",
+   "fixture"
+  ],
+  "timeout": 300000000000,
+  "kind": "plain"
+ },
+ {
+  "name": "reverse",
+  "cmd": [
+   "python3",
+   "-u",
+   "scripts/verify/m-b-reverse.py",
+   "--out",
+   "{dir}/reverse",
+   "^A2:"
+  ],
+  "timeout": 2400000000000,
+  "kind": "reverse"
+ }
+]
