@@ -415,3 +415,34 @@ Aaron 10/14 已批准第一版的 D1～D7 照建議進行。下表標出**本版
 | S7 驗收對照漏了 2、3、4、38 | §11 |
 | D-a、D-b、D-c | §9 的 D10、D11、D12 |
 | notes | §4（理由碼的先後）；§7 第 2 步（組裝在鎖外）；§8（固定連線、空資料庫、委託 request_id）；§10 第 7 步（只限 fake）；`ResolveApproval` 的 `!t.v1()`（pay.go L453）與 `paypolicy.Decide`（L34／L74）在改為 `isPay()` 時一併處理 |
+
+## 15 C2a 交付（10/14，Claude Code；待 Claude Code 獨立上下文 review）
+
+**做了什麼**（`a9de749`、`c086925`、`c88b18d`）：
+- **`paycontract/version.go`**：`Spec`、`SpecOf`、`Supported`，以及 `V2`、`DomainV2`、`CredentialReasons`。
+  - v1 的規格就是現有的常數，逐字不變；
+  - v2 有自己的 domain，另外多三個 Deny 理由碼。
+- order、裁決、委託、grant、事件都依**自己的版本欄位**檢查與計算摘要。
+- 事件流規則：
+  - 一個 task 的事件流只能有一個版本；
+  - 事件所指的 order、事件內的裁決，都必須和事件本身同版本。
+- 套件層的 `ResourceHash`、`RequirementHash`、`DelegationID`、`SessionID`、`GrantID`、`GenesisHash` 維持 v1，所以既有的呼叫端不用改。
+- **Signer** 依 order 的版本推導會話 ID 與 jti；`signertest.Order` 可以產生 v2 的 order。
+- **v2 golden 值已凍結**（`TestV2GoldenVectors`），每一個都和 v1 不同。
+
+**沒有做的，移到 C2b**（第 10 節）：
+- Store、Host、畫面的切換；
+- `CREDENTIAL_VERIFIED` 事件與共用 payload 欄位，以及 v1 拒絕這個欄位；
+- idemix 依賴。
+
+C2a 階段沒有任何路徑能建立 v2 task。
+
+**證據**（`artifacts/c2/`；本機、不在容器中）：
+
+| 項目 | 基準 | 結果 | 檔案 |
+|---|---|---|---|
+| `go test -count=1 -race -skip ^TestTimingInterleaved$ ./...` | `c086925` | 24 個套件 ok，exit 0。v1 golden（`TestGoldenVectors`）、M1 向量、A2、P1-b、Signer 的既有測試都沒有修改，全部通過 | `c2a-c086925/go-test-race.txt` |
+| 反向 `^C2a:` 4 項 | `c086925` | **3／4**。「憑證理由碼只屬於 v2」**沒有抓到**：突變後 `sp` 沒有被用到，建置失敗（紀錄保留） | `c2a-c086925/reverse.txt` |
+| 上一項改為保留 `sp` 的突變後單獨補跑 | `c88b18d` | 1／1，`apa.pay.v1 CREDENTIAL_REVOKED: <nil>` | `c2a-c88b18d/reverse-reasons.txt` |
+
+`c88b18d` 只改了 `scripts/verify/m-b-reverse.py`，所以 `c086925` 的測試結果適用於它。
