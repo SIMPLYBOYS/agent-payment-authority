@@ -1,7 +1,7 @@
 # A2 本人核准產品接線：實作差異、驗證與限制
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-A2本人核准產品接線實作派工-f2bf224-20261013〉（Aaron 已批准「A2 開工」）。分支 `commercial-a2`，基準 `f2bf224`（工作區只有未追蹤的 `demo`；沒有適用的 AGENTS.md）。
-> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正、只重跑受影響部分，待第二次獨立上下文 review（第 7 節）；實機登記與操作未驗收，付款未啟用。**
+> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節），待第三次獨立上下文 review；實機登記與操作未驗收，付款未啟用。**
 > 以下為 `f0817c7` 時的狀態，保留原文：A2 已實作並完成本輪定向自動化驗證，待 Codex 技術 review；實機登記與操作未驗收，付款未啟用。A2 不自行標 Done；本輪所有結果都是「Claude Code 執行，待 Codex 核對」，不是實機結果。
 >
 > **歸屬的變更**：Codex 訂閱已到期，從這一節起沒有第三方核對。Review 改由 Claude Code 另開的獨立上下文 subagent 執行：它們只拿到 diff、設計文件與本文件，沒有作者寫程式時的推理；這比作者自審接近獨立核對，但仍是同一個模型。紀錄一律寫「Claude Code 獨立上下文 review」，不寫成 Codex。
@@ -280,3 +280,49 @@ R1～R6 的修正另開一輪：修正、只重跑受影響的部分、再交一
 
 - 第二次獨立上下文 review 只看 `20ea7c7..dc71087`（與本節）。
 - 通過之後，才討論實機登記／驗證與部署（第 5 節清單）。
+
+## 8 第二次獨立上下文 review 與第二輪修正（10/13；Claude Code，都不是實機結果）
+
+### 8.1 判定
+
+兩個 subagent 只審 `20ea7c7..321c87f`，只拿到 diff、設計文件與本文件。
+- **Signer（security-auditor）：pass。** R1、R2 已關閉。reviewer 另以 overlay 重現：challenge 在 verify 途中被關閉或到期時，修正前 credential 被標 `suspect`，修正後仍 active。N1、N6 正確；R1、R2 的新測試在還原修正後會失敗。
+- **Host／Store／web（code-reviewer）：not pass（窄）。** R3、R5、R6 已關閉；R4 在 `sim.go` 與 `adapter.js` 已關閉。剩兩項 should-fix：
+  - **S1**：`host.js` 兩個面板仍依「哪個面板」用詞，不依紀錄。例如以 `--approvals-signer` 開啟存有 P1-a 模擬核准的資料庫時，A2 面板會把模擬核准寫成「本人核准已驗證」。
+  - **S2**：R3 改寫 `TestA2CancelledTask` 後，Host 的 abandon 路徑沒有測試了。
+
+更正第 7 節：
+- `TestA2TwoAssertions` 被 Host 的 `attempt_not_ready` 擋下，沒有走到 `resolveUsed`；它是 Host 防護的測試，**不算 R6 的覆蓋**。
+- 設計第 9 節「close 回覆遺失」（close 失敗後重試才查到 used）仍沒有 I 層測試。
+- N14 的 502 來自 **Host** 比對 Signer 回覆的 `consumer_id`（`onChallenge`），不是 Signer 自己的檢查。提交 `6220250` 的訊息寫錯，訊息不改，以本節為準。
+
+### 8.2 第二輪修正（`0cea87f`）
+
+- **S1**：兩個面板的「已核准／已拒絕」與 grant 列，改由 `approve.js` 的 `decidedText`、`grantLine` 依紀錄自己的方式決定。P1-a 的文字不變。
+- **S2**：新增 `TestA2CancelledAfterSignerVerified`。情境：Signer 已 verified，Host 不知道；task 取消後，Host 下一次查詢發現 challenge 已 used，已撤回的會話不記錄任何決定，Signer 的核准被 abandon。另新增一項反向。
+- **Signer note 1**：`APPROVER_CHANGED` 的兩半（approver 版本、設定雜湊）各有自己的案例與反向。
+- **N-b**：
+  - 會話到期、結果未知時，恢復設計第 7 節的原文「無法確認這次驗證的結果；這筆已依後端期限關閉。」，不寫「沒有核准」。第 7 節的 N9 修正方向錯了，這裡更正。
+  - A2 面板的「已過期」標題拿掉「沒有核准」。
+  - 會話撤回或報價改變時，不再寫成「依期限關閉」。
+- **N-f**：mismatch 文案不再說「仍等你決定」。
+- **N-d**：反向項目的註解改寫正確的那一層。
+
+不處理、記錄為已知：
+- **Signer note 2**：`refuse()` 標 `suspect` 前不重讀 challenge 狀態。需要持鑰者簽章、BE 卻改變的 assertion；依 D6 這本身就可疑，R2 仍成立。
+- **Signer note 3**：同一把 credential 兩個 challenge 並行、亂序 verify，會觸發計數器政策。這是 D6 已接受的影響，已列在第 4 節。
+- **N-c**：`ApprovalAttemptOf` 唯讀、不記錄到期，所以期限已過但尚未記錄時，assertion 仍會送到 Signer。之所以正確，是因為 Signer 的 challenge 期限不超過 HostDeadline，且 Signer 的時鐘不落後 Host。
+- **N-e**：本節起，證據檔開頭都寫明命令。
+- 第 7 節列的其他 note 不變。
+
+### 8.3 重跑（`0cea87f`；本機、未在容器）
+
+| 重跑 | 結果 | 證據 |
+|---|---|---|
+| `go test -count=1 -race -skip ^TestTimingInterleaved$ ./internal/signer/... ./cmd/apa-signer/ ./cmd/demo/` | 全部 ok，exit 0 | `artifacts/human-approval/fix-0cea87f/go-test.txt` |
+| web 測試 5 檔 | 全部 pass（29、8、27、9、13） | `artifacts/human-approval/fix-0cea87f/node-tests.txt` |
+| 反向 3 項（S2、approver 版本、設定雜湊） | 3／3 預期斷言 | `artifacts/human-approval/reverse-0cea87f/` |
+| 瀏覽器 a2-ui（CDP virtual，不是實機） | 36 PASS、0 FAIL | `artifacts/human-approval/a2-ui-0cea87f4c951-20261013T121941Z/` |
+| 瀏覽器 p1a-ui（P1-a 面板改用 `decidedText`） | 54 PASS、0 FAIL | `artifacts/p1a/p1a-ui-0cea87f4c951-20261013T122029Z/` |
+
+下一步：第三次獨立上下文 review，只看第二輪修正的差異。之後才討論實機與部署。
