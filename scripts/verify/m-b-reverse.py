@@ -45,6 +45,8 @@ PE = "internal/paycontract/events.go"
 SPY = "internal/store/pay.go"
 PP = "internal/paypolicy/paypolicy.go"
 PV = "internal/paycontract/version.go"
+CR = "internal/credential/credential.go"
+CD = "internal/credential/dir.go"
 
 
 def node(path, test, regex):
@@ -359,6 +361,19 @@ ITEMS = [
     # C2b: the BBS+ credential in apa.pay.v2 (docs/commercial-c2-design.md); run them alone with "^C2b:".
     ("C2b: only v2 withdraws an Ask for a credential reason", go("./internal/paycontract/", "^TestAskClosuresByVersion$", ("TestAskClosuresByVersion", r"apa.pay.v1 withdrawn CREDENTIAL_REVOKED: <nil>")),
      [(PV, "Version: {Version, Domain, ReasonCodes, denyReasons, askV1},", "Version: {Version, Domain, ReasonCodes, denyReasons, askV2},")]),
+    ("C2b: the proof's revealed set and count are the request's", go("./internal/credential/", "^TestRefusals$", ("TestRefusals/subset_proof_with_forged_holder_and_status", r"subset proof with forged holder and status: invalid/SNAPSHOT_MISMATCH")),
+     [(CR, "if pl, err := bbs.ParsePoKPayload(p.Proof); err != nil || pl.MessagesCount != len(Fields) || !slices.Equal(pl.Revealed, idx) {",
+       "if pl, err := bbs.ParsePoKPayload(p.Proof); false && (err != nil || pl.MessagesCount != len(Fields) || !slices.Equal(pl.Revealed, idx)) {")]),
+    ("C2b: disclosed values are the task's snapshot", go("./internal/credential/", "^TestRefusals$", ("TestRefusals/another_credential_of_the_task", r"another credential of the task: valid/")),
+     [(CR, 'if d["task_id"] != e.TaskID || d["expiry"] != e.Expiry || d["status"] != e.Status {', "if false {")]),
+    ("C2b: the holder is the consumer's registered key", go("./internal/credential/", "^TestRefusals$", ("TestRefusals/not_the_registered_holder", r"not the registered holder: valid/")),
+     [(CR, 'case d["holder"] != e.Holder:', "case false:")]),
+    ("C2b: a revoked status is refused", go("./internal/credential/", "^TestRefusals$", ("TestRefusals/revoked", r"revoked: valid/")),
+     [(CR, 'case slices.Contains(st.List.Revoked, d["status"]):', "case false:")]),
+    ("C2b: a stale status list is not read", go("./internal/credential/", "^TestStatusListWriter$", ("TestStatusListWriter", r"read a stale list")),
+     [(CD, "case now >= l.NextUpdate:", "case false:")]),
+    ("C2b: a missing counter refuses to issue", go("./internal/credential/", "^TestCounterRefuses$", ("TestCounterRefuses", r"issued from a missing counter")),
+     [(CD, 'return fmt.Errorf("status counter: refuse to issue: %w", err)', 'raw = []byte("0")\n\t\t\t_ = err')]),
     # D4 of the OS isolation plan (keygen); run them alone with "^P1b-D4:".
     ("P1b-D4: keygen never replaces a key file", go("./cmd/apa-signer/", "^TestKeygen$", ("TestKeygen", r"an existing key file was replaced")),
      [(AS, "if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {", "if _, err := os.Lstat(path); false && !errors.Is(err, os.ErrNotExist) {"),
