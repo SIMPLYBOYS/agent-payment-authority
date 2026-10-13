@@ -374,6 +374,12 @@ ITEMS = [
      [(CD, "case now >= l.NextUpdate:", "case false:")]),
     ("C2b: a missing counter refuses to issue", go("./internal/credential/", "^TestCounterRefuses$", ("TestCounterRefuses", r"issued from a missing counter")),
      [(CD, 'return fmt.Errorf("status counter: refuse to issue: %w", err)', 'raw = []byte("0")\n\t\t\t_ = err')]),
+    ("C2b: v1 refuses the credential payload field", go("./internal/paycontract/", "^TestCredentialPayload$", ("TestCredentialPayload", r"a v1 event took a credential field")),
+     [(PE, '"credential": p.Credential != nil}', '"credential": p.Credential != nil && e.Version == V2}')]),
+    ("C2b: a v2 decision follows its credential result", go("./internal/paycontract/", "^TestCredentialVerifiedOrder$", ("TestCredentialVerifiedOrder", r"invalid, Ask: <nil>")),
+     [(PE, 'case deny && (d.PolicyVerdict != "Deny" || d.Reason != want):', 'case false && deny && (d.PolicyVerdict != "Deny" || d.Reason != want):')]),
+    ("C2b: a v2 decision needs its verification first", go("./internal/paycontract/", "^TestCredentialVerifiedOrder$", ("TestCredentialVerifiedOrder", r"no verification: <nil>")),
+     [(PE, '\t\t\tcase r == "":', '\t\t\tcase false && r == "":')]),
     # D4 of the OS isolation plan (keygen); run them alone with "^P1b-D4:".
     ("P1b-D4: keygen never replaces a key file", go("./cmd/apa-signer/", "^TestKeygen$", ("TestKeygen", r"an existing key file was replaced")),
      [(AS, "if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {", "if _, err := os.Lstat(path); false && !errors.Is(err, os.ErrNotExist) {"),

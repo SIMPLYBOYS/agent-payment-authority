@@ -25,6 +25,20 @@ const (
 // does not verify, is revoked, or whose status cannot be read.
 var CredentialReasons = []string{"CREDENTIAL_INVALID", "CREDENTIAL_REVOKED", "CREDENTIAL_STATUS_UNAVAILABLE"}
 
+// CredentialDeny is the Deny reason each non-valid verification result
+// must decide (design 3.3): no credential is CONFIG_MISSING (as in M1), an
+// expired one AUTHORIZATION_EXPIRED; "valid" has none.
+var CredentialDeny = map[string]string{"absent": "CONFIG_MISSING", "invalid": "CREDENTIAL_INVALID", "revoked": "CREDENTIAL_REVOKED",
+	"status_unavailable": "CREDENTIAL_STATUS_UNAVAILABLE", "expired": "AUTHORIZATION_EXPIRED"}
+
+// CredentialDetails are the fixed detail codes of a verification record.
+var CredentialDetails = []string{"PRESENTATION_FORMAT", "DISCLOSURE_MISMATCH", "FIELD_MISSING", "FORMAT_INVALID", "PROOF_INVALID",
+	"ISSUER_UNTRUSTED", "HOLDER_MISMATCH", "HOLDER_BINDING_INVALID", "SNAPSHOT_MISMATCH", "STATUS_LIST_UNAVAILABLE", "STATUS_LIST_ROLLBACK",
+	"CHALLENGE_MISSING", "CHALLENGE_EXPIRED", "CHALLENGE_MISMATCH", "INTENT_MISMATCH", "HOLDER_MATERIAL_UNAVAILABLE"}
+
+// NoChallenge are the details of a record made without a stored challenge.
+var NoChallenge = []string{"HOLDER_MATERIAL_UNAVAILABLE", "CHALLENGE_MISSING"}
+
 // Spec is one version's rules.
 type Spec struct {
 	Version, Domain string

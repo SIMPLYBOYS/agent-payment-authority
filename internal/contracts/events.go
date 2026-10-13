@@ -20,13 +20,35 @@ type EventScope struct {
 // The last four fields came with apa.pay.v1 (internal/paycontract validates
 // them); an M1 event never carries them and ValidateEvent refuses one that does.
 type EventPayload struct {
-	Code                string          `json:"code,omitempty"`
-	Decision            *PolicyDecision `json:"decision,omitempty"`
-	DelegationID        string          `json:"delegation_id,omitempty"`
-	ApprovalSessionID   string          `json:"approval_session_id,omitempty"`
-	GrantID             string          `json:"grant_id,omitempty"`
-	AuthorizationMethod string          `json:"authorization_method,omitempty"`
-	SignerApprovalID    string          `json:"signer_approval_id,omitempty"` // apa.pay.v1, A2: the Signer's verified decision
+	Code                string           `json:"code,omitempty"`
+	Decision            *PolicyDecision  `json:"decision,omitempty"`
+	DelegationID        string           `json:"delegation_id,omitempty"`
+	ApprovalSessionID   string           `json:"approval_session_id,omitempty"`
+	GrantID             string           `json:"grant_id,omitempty"`
+	AuthorizationMethod string           `json:"authorization_method,omitempty"`
+	SignerApprovalID    string           `json:"signer_approval_id,omitempty"` // apa.pay.v1, A2: the Signer's verified decision
+	Credential          *CredentialCheck `json:"credential,omitempty"`         // apa.pay.v2 (C2): CREDENTIAL_VERIFIED only
+}
+
+// CredentialCheck is apa.pay.v2's record of one purchase's BBS+ credential
+// verification (docs/commercial-c2-design.md 3.2): its result and fixed
+// detail, the challenge it used, what the presentation established, the
+// status list it read. No proof, signature or key: ProofSHA256 is for
+// tracing only, never a replay key. internal/paycontract validates it.
+type CredentialCheck struct {
+	Result             string `json:"result"`
+	Detail             string `json:"detail,omitempty"`
+	ChallengeID        string `json:"challenge_id,omitempty"`
+	CredentialSchema   string `json:"credential_schema,omitempty"`
+	Issuer             string `json:"issuer,omitempty"`
+	Holder             string `json:"holder,omitempty"`
+	StatusIndex        string `json:"status_index,omitempty"`
+	Expiry             uint64 `json:"expiry,omitempty"`
+	StatusListVersion  uint64 `json:"status_list_version,omitempty"`
+	StatusListIssuedAt uint64 `json:"status_list_issued_at,omitempty"`
+	StatusListSHA256   string `json:"status_list_sha256,omitempty"`
+	ProofSHA256        string `json:"proof_sha256,omitempty"`
+	Verifier           string `json:"verifier"`
 }
 
 // AuditEvent is one link of its task's hash chain. PrevEventHash is the
@@ -73,8 +95,8 @@ func (r *Registry) ValidateEvent(e AuditEvent, order *PurchaseOrder) error {
 	if e.Payload.Code != "" && !ids(e.Payload.Code) {
 		return fmt.Errorf("invalid event code")
 	}
-	if p := e.Payload; p.DelegationID != "" || p.ApprovalSessionID != "" || p.GrantID != "" || p.AuthorizationMethod != "" || p.SignerApprovalID != "" {
-		return fmt.Errorf("delegation, approval session and grant fields belong to apa.pay.v1, not M1")
+	if p := e.Payload; p.DelegationID != "" || p.ApprovalSessionID != "" || p.GrantID != "" || p.AuthorizationMethod != "" || p.SignerApprovalID != "" || p.Credential != nil {
+		return fmt.Errorf("delegation, approval session, grant and credential fields belong to the pay family, not M1")
 	}
 	if e.EventType == "SYSTEM_READY" {
 		if e.Scope != nil || e.Sequence != 0 || e.PrevEventHash != "" || e.Payload.Decision != nil || order != nil {

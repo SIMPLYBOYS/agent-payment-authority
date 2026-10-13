@@ -18,14 +18,15 @@ type step struct {
 func chainOf(t *testing.T, o PurchaseOrder, steps ...step) []contracts.AuditEvent {
 	t.Helper()
 	h := mustHash(t, o)
-	prev, _ := GenesisHash(o.Intent.TaskID)
+	sp, _ := SpecOf(o.Version)
+	prev, _ := sp.GenesisHash(o.Intent.TaskID)
 	var out []contracts.AuditEvent
 	for n, s := range steps {
 		sc := &contracts.EventScope{ConsumerID: o.Intent.ConsumerID, AgentID: o.Intent.AgentID, WalletID: o.Intent.WalletID, TaskID: o.Intent.TaskID}
 		if s.po {
 			sc.PurchaseOrderID, sc.IntentHash = o.Intent.PurchaseOrderID, h
 		}
-		e := contracts.AuditEvent{Version: Version, EventID: "evt-" + strings.Repeat("0", 10) + string(rune('a'+n)), EventType: s.typ, Scope: sc, Sequence: uint64(n + 1),
+		e := contracts.AuditEvent{Version: o.Version, EventID: "evt-" + strings.Repeat("0", 10) + string(rune('a'+n)), EventType: s.typ, Scope: sc, Sequence: uint64(n + 1),
 			PrevEventHash: prev, Payload: s.p, EvidenceMode: "fixture", Source: "host", ObservedAt: 1790726450}
 		prev, _ = EventHash(e)
 		out = append(out, e)
@@ -34,7 +35,7 @@ func chainOf(t *testing.T, o PurchaseOrder, steps ...step) []contracts.AuditEven
 }
 
 func decision(t *testing.T, o PurchaseOrder, approval, reason string) *contracts.PolicyDecision {
-	return &contracts.PolicyDecision{Version: Version, IntentHash: mustHash(t, o), PolicyVerdict: "Ask", ApprovalStatus: approval, PaymentStatus: PaymentNotEnabled, Reason: reason}
+	return &contracts.PolicyDecision{Version: o.Version, IntentHash: mustHash(t, o), PolicyVerdict: "Ask", ApprovalStatus: approval, PaymentStatus: PaymentNotEnabled, Reason: reason}
 }
 
 func TestEventOrder(t *testing.T) {

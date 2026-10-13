@@ -84,7 +84,7 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 	d := p.Decision
 	only := func(want ...string) error { // the payload fields this type carries, all present; no other
 		have := map[string]bool{"code": p.Code != "", "decision": d != nil, "delegation": p.DelegationID != "", "session": p.ApprovalSessionID != "",
-			"grant": p.GrantID != "", "method": p.AuthorizationMethod != "", "signer": p.SignerApprovalID != ""}
+			"grant": p.GrantID != "", "method": p.AuthorizationMethod != "", "signer": p.SignerApprovalID != "", "credential": p.Credential != nil}
 		for k, v := range have {
 			if v != slices.Contains(want, k) {
 				return errf("%s: payload field %s must %s", e.EventType, k, map[bool]string{true: "be absent", false: "be present"}[v])
@@ -150,6 +150,14 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 			return errf("grant ID is not the session's")
 		}
 		return only(fields...)
+	case "CREDENTIAL_VERIFIED": // apa.pay.v2 only (C2)
+		if sp.Version != V2 || !purchase {
+			return errf("CREDENTIAL_VERIFIED is an apa.pay.v2 purchase's")
+		}
+		if err := only("credential"); err != nil {
+			return err
+		}
+		return credentialCheck(p.Credential)
 	case "TASK_CANCELLED", "TASK_TIMED_OUT", "CLI_EXITED":
 		want := lifecycleCodes[e.EventType]
 		if p.Code == "" || (want != "" && p.Code != want) {
@@ -158,6 +166,37 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 		return only("code")
 	}
 	return errf("unsupported apa.pay.v1 event %s; cannot settle or deliver", e.EventType)
+}
+
+// credentialCheck is a verification record's shape (design 3.2, 3.3): a
+// result with its fixed detail; a challenge exactly when one was stored;
+// what was established when the presentation verified; the status list it
+// read when it got that far.
+func credentialCheck(c *contracts.CredentialCheck) error {
+	_, deny := CredentialDeny[c.Result]
+	switch {
+	case c.Result != "valid" && !deny:
+		return errf("credential result %q", c.Result)
+	case c.Detail != "" && !slices.Contains(CredentialDetails, c.Detail):
+		return errf("credential detail %q", c.Detail)
+	case !ids(c.Verifier):
+		return errf("credential verifier")
+	case (c.ChallengeID == "") != (c.Result == "absent" || slices.Contains(NoChallenge, c.Detail)):
+		return errf("a credential record has a challenge exactly when one was stored")
+	case c.ChallengeID != "" && !ids(c.ChallengeID):
+		return errf("credential challenge ID")
+	}
+	established := c.Result == "valid" || c.Result == "revoked" || c.Result == "expired" || (c.Result == "status_unavailable" && c.Issuer != "")
+	if established && (c.CredentialSchema != "apa.credential.v1" || c.Issuer == "" || c.Holder == "" || c.StatusIndex == "" || c.Expiry == 0 || c.ProofSHA256 == "") {
+		return errf("a verified presentation records what it established")
+	}
+	if (c.Result == "valid" || c.Result == "revoked" || c.Result == "expired") && (c.StatusListVersion == 0 || c.StatusListIssuedAt == 0 || c.StatusListSHA256 == "") {
+		return errf("a status decision records the list it read")
+	}
+	if (c.Result == "absent" || c.Result == "invalid") && (c.Issuer != "" || c.StatusListVersion != 0) {
+		return errf("a presentation that did not verify establishes nothing")
+	}
+	return nil
 }
 
 // method checks the decision's method: simulated (P1-a), or webauthn
@@ -200,6 +239,7 @@ type chain struct {
 	verdict, intent         map[string]string
 	session, closed         map[string]string // po -> session ID; po -> closure event
 	granted                 map[string]bool
+	credential              map[string]string // v2: po -> verification result
 }
 
 // ValidateEventOrder checks complete per-task streams of this version:
@@ -229,7 +269,7 @@ func ValidateEventOrder(events []contracts.AuditEvent) error {
 			if err != nil {
 				return err
 			}
-			st = &chain{version: e.Version, prev: g, proposed: map[string]bool{}, verdict: map[string]string{}, intent: map[string]string{},
+			st = &chain{version: e.Version, prev: g, proposed: map[string]bool{}, verdict: map[string]string{}, intent: map[string]string{}, credential: map[string]string{},
 				session: map[string]string{}, closed: map[string]string{}, granted: map[string]bool{}}
 			tasks[task] = st
 		}
@@ -276,9 +316,26 @@ func (st *chain) apply(e contracts.AuditEvent) error {
 			return errors.New("one proposal per purchase, none after the task ended")
 		}
 		st.proposed[po], st.intent[po] = true, e.Scope.IntentHash
+	case "CREDENTIAL_VERIFIED":
+		if st.version != V2 || st.stopped || !st.proposed[po] || st.verdict[po] != "" || st.credential[po] != "" {
+			return errors.New("one credential verification per v2 purchase, after its proposal and before its decision")
+		}
+		st.credential[po] = e.Payload.Credential.Result
 	case "POLICY_DECIDED":
 		if st.stopped || !st.proposed[po] || st.verdict[po] != "" {
 			return errors.New("one decision per proposed purchase, none after the task ended")
+		}
+		if st.version == V2 { // the decision follows the verification (design 3.3)
+			d, r := e.Payload.Decision, st.credential[po]
+			want, deny := CredentialDeny[r]
+			switch {
+			case r == "":
+				return errors.New("a v2 decision needs its purchase's credential verification first")
+			case deny && (d.PolicyVerdict != "Deny" || d.Reason != want):
+				return fmt.Errorf("credential %s must decide Deny %s", r, want)
+			case !deny && d.PolicyVerdict == "Deny" && slices.Contains(CredentialReasons, d.Reason):
+				return errors.New("a valid credential cannot be denied for a credential reason")
+			}
 		}
 		st.verdict[po] = e.Payload.Decision.PolicyVerdict
 		if st.verdict[po] == "Deny" {
