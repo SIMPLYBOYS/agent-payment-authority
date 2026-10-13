@@ -1,7 +1,7 @@
 # A2 本人核准產品接線：實作差異、驗證與限制
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-A2本人核准產品接線實作派工-f2bf224-20261013〉（Aaron 已批准「A2 開工」）。分支 `commercial-a2`，基準 `f2bf224`（工作區只有未追蹤的 `demo`；沒有適用的 AGENTS.md）。
-> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節）；第三次 review 窄幅 not pass，A、B 已修正（第 9 節）；第四次 review 窄幅 not pass，S-B、S-A 已修正（第 10 節）；第五次 review（全組合掃描）窄幅 not pass，5-1、5-2 已修正（第 11 節）；第六次 review（只看 `9987eb4`）pass，review 結束（第 12 節），待實機與部署討論；實機登記與操作未驗收，付款未啟用。**
+> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節）；第三次 review 窄幅 not pass，A、B 已修正（第 9 節）；第四次 review 窄幅 not pass，S-B、S-A 已修正（第 10 節）；第五次 review（全組合掃描）窄幅 not pass，5-1、5-2 已修正（第 11 節）；第六次 review（只看 `9987eb4`）pass，review 結束（第 12 節），待實機與部署討論；實機登記與單筆核准、拒絕已由 Aaron 以 Chrome＋Google 密碼管理工具 PIN 完成（展示角色；基準 9987eb4；commercial-a2.md 第 13 節），付款未啟用。**
 > 以下為 `f0817c7` 時的狀態，保留原文：A2 已實作並完成本輪定向自動化驗證，待 Codex 技術 review；實機登記與操作未驗收，付款未啟用。A2 不自行標 Done；本輪所有結果都是「Claude Code 執行，待 Codex 核對」，不是實機結果。
 >
 > **歸屬的變更**：Codex 訂閱已到期，從這一節起沒有第三方核對。Review 改由 Claude Code 另開的獨立上下文 subagent 執行：它們只拿到 diff、設計文件與本文件，沒有作者寫程式時的推理；這比作者自審接近獨立核對，但仍是同一個模型。紀錄一律寫「Claude Code 獨立上下文 review」，不寫成 Codex。
@@ -444,3 +444,68 @@ note（不阻擋，記為已知）：
 - **N4**：設計第 8 節的文字表仍是舊的「驗證結果沒有送達」與「這筆已在另一個視窗核准。」，新文字只記在本文件第 11 節。
 
 **review 結束**：第一次 review 的 R1～R6，以及第二至五次 review 的 should-fix，都已修正並重跑受影響的部分。所有結果都是本機自動化，不在容器中執行，也不是實機結果。下一步依第 5 節進行實機與部署討論，要 Aaron 確認後才執行。
+
+## 13 實機登記與操作（10/13；Aaron 操作，Claude Code 陪同與記錄）
+
+**依據**：
+- Aaron 批准第 12 節之後提出的六項，包括基準、sudo 部署、登記與操作、入口實測、清理界線；
+- socket 路徑與 Host uid 取自 P1-b 文件：`/opt/apa-signer/run/signer.sock`、`mac`／501。
+
+**組合**：
+- fake Agent＋合成請購；
+- Chrome＋Google 密碼管理工具＋PIN；
+- 付款 disabled；
+- A 由 Aaron 代操作，是展示角色。
+
+**這是實機結果**，不是 virtual authenticator。
+
+逐步紀錄、原始輸出與核對在 `artifacts/human-approval/device-9987eb4/`：`device-log.md`、`runbook.md`、`build.txt`、`config-check.txt`、`signer.json`、執行檔。截圖由 Aaron 在對話中提供。
+
+### 13.1 部署（增量；sudo 由 Aaron 執行）
+
+| 步驟 | 結果 |
+|---|---|
+| 建置 | `9987eb4` 乾淨的 worktree，Go 1.26.4，`GOPROXY=off`；`apa-signer` SHA-256 `9a40cc2449ae77a82f4f62a057c94768cefb06f610111fc389a05e7fa6e35952` |
+| 設定檔本機驗證 | 只把 socket 換成暫存路徑：health 回 `approvals-only`；socket `0660`；`approvals.db` `0600`；沒有 `keys/`、`signer.db` |
+| D1 備份 | `/opt/apa-signer/data/signer.json` 原本就不存在（P1-b 收尾時已移除），略過 |
+| D2 安裝 | **第一次核對雜湊是 `3f29a2d5…`，即 P1-b 的舊執行檔：install 沒有生效**（保留）。重新執行後是 `9a40cc24…`，`root:wheel 0755`，無 ACL |
+| D3 設定 | exit 0；`-rw------- apa-signer`；雜湊 `425e0070…2cef`，與本機相同 |
+| S1／核對 | **第一次核對：socket 與 `approvals.db` 都不存在，`serve-approvals` 還沒啟動完成**（保留）。第二次：socket `srw-rw---- apa-signer apa-signer-clients`；`approvals.db`、`signer.json` 都是 `0600`；health `{"state":"approvals-only","payment":"unavailable"}` |
+| H1（A2 入口實測，補做） | Host 印出 `human approval (A2) on http://localhost:8402 through /opt/apa-signer/run/signer.sock (signer approvals-only); authenticator source device; payment disabled`；`present.sh` 回報就緒 `http://localhost:8402/host`。建置 `b8dae03`（程式與 `9987eb4` 相同），`vcs.modified=true` 只因未追蹤的 `demo` |
+
+### 13.2 登記（E1）
+
+- **第一、二次 begin 作廢**：兩次的確認碼都被貼進對話。`EnrollBegin` 的規則是重新 begin 會關閉同一 approver 先前未確認的登記，所以用重新 begin 作廢；確認碼不寫入任何紀錄。
+- **第二次另有一個錯誤**：還沒做頁面登記就先執行 confirm，Signer 回 `ENROLLMENT_NOT_FINISHED`。這是正確的拒絕，沒有 credential 被啟用。
+- **第三次成功**（`enr-fa779eba…`）：
+  - 頁面與終端機顯示的資訊相同：credential `b8923ecec9bc556c`，旗標 `UP=1 UV=1 BE=1 BS=1`，AAGUID `ea9b8d66-4d01-1d21-3ce4-b6b48cb575d4`（Google 密碼管理工具）；
+  - Aaron 輸入 `yes`；
+  - `approver list`：`approver-a b8923ecec9bc556c active … created 2026-10-13T13:19:49Z`。
+- 主持人的第一組配對碼也曾貼進對話，之後過期未使用，改用「進階：載入 token 檔」配對。
+
+### 13.3 單筆核准與拒絕
+
+查核方式：Aaron 的截圖，加上以 `sqlite3 -readonly` 讀這次 Host 的 Store。
+
+| 場 | 預期 | 面板 | Store |
+|---|---|---|---|
+| 1 | 核准 | 「本人核准已驗證，付款未啟用。」；來源列「驗證器：已登記的裝置・付款：未啟用」；`grant-10136a35…`（webauthn，由 Signer 驗證） | `aps-a93fa7c0…` approved，`webauthn:approver-a`，webauthn grant 帶 `signer_approval_id`；attempt approve verified |
+| 2 | **拒絕** | **實際按了核准**：「本人核准已驗證，付款未啟用。」，`grant-841c5f44…` | `aps-5e04c7f2…` approved，webauthn grant；attempt approve verified。這是有效的第二筆核准，照實保留 |
+| 3 | 拒絕 | 「你已拒絕這筆（已驗證裝置）。」「Agent 不會取得這一筆；沒有付款。」；沒有 grant 列 | `aps-75f41752…` denied，`webauthn:approver-a`，無 grant；attempt deny verified，帶 `signer_approval_id` |
+
+### 13.4 停止與清理
+
+- Host 與 `serve-approvals` 都以 Ctrl-C 停止。
+- `data/` 下是 `approvals.db`（保留，`0600`，106496 bytes）、`signer.json`，以及 P1-b 留下的 `keys/`（只看了目錄資訊，沒讀內容）；沒有 `signer.db`；`-wal`、`-shm` 已不在。
+- socket 的 `ls` 結果沒有貼回。
+- Google 密碼管理工具新增的 `localhost` passkey 是否刪除，由 Aaron 決定。
+- 全程沒有建立、讀取或解鎖付款金鑰，沒有簽署，沒有送交易。
+
+### 13.5 限制與還沒有做的
+
+- 只驗證了 Chrome＋Google 密碼管理工具＋PIN、單一 approver（approver-a）、客人 A。
+- approver-b／客人 B、Touch ID、Safari、手機、安全金鑰都沒有做，也都不是前置條件。
+- 委託確認仍是模擬。
+- 頁面不是可信顯示。
+- 沒有在容器中執行。
+- A2 未標 Done，由 Aaron 決定。
