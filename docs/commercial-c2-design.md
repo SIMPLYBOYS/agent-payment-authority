@@ -467,3 +467,33 @@ C2a 階段沒有任何路徑能建立 v2 task。
 | finding 3 畫面文字會寫成「task 取消」 | §10 步驟 8：依理由碼決定文字，列出要改的地方 |
 | finding 4 第 38 項的對照做不到 | §11：改為掃描私鑰與簽章的位元組 |
 | notes | `status.pub` 與指紋（§5）；P1-b 不通過時的代碼、什麼都不寫入（§7.1）；只有 expired 列時也是 `CHALLENGE_MISSING`（§3.3）；`init` 不覆寫既有清單（§6）；撤回的 payload 不帶核准者、在 switch 中的位置（§3.3、§7.1）；第 2 項的位元與集合（§11）；狀態欄位的文字（§9） |
+
+## 17 C2a 的獨立上下文 review 與修正（10/14）
+
+**review**（`651e7df..c88b18d`）：判定 **pass**，沒有 must-fix。
+- v1 逐字不變：既有的 v1 golden 測試沒有修改而且通過；各種摘要的輸入與 domain 都和原本相同；舊反向項目的錨點也都還在。
+- v2 不會被當成 v1：所有依版本取規格的地方都先檢查過版本。
+
+**3 項 should-fix 與 note 的修正**（`a26f4a4`、`29d310c`）：
+- **should-fix 1**：事件的 order、裁決、grant ID 必須和事件同版本，這三個檢查原本沒有測試。新增 `TestEventCrossVersion` 與 3 項反向。
+- **should-fix 2**：新增測試，證明 Signer 存下的 jti 是 v2 的（`TestV2OrderChallenge` 改為讀取 `approval_challenges.jti`），並新增反向。
+- **should-fix 3**：C2a 讓 `Validate` 接受所有 pay 系列版本，原本只認 v1 的呼叫端因此被默默放寬了。現在把它們釘回 v1：
+  - 存下的委託必須是 `apa.pay.v1`（`store/pay.go`）；
+  - `paypolicy.Decide` 只裁決和 task 同版本的請購。
+  
+  兩者各有測試與反向；C2b 會改為依 task 的版本。
+- **note 1**：同一個 request ID 不得指向兩個版本的 order（`CompareRetry`）。
+- **note 2**：凍結一組 v2 事件鏈雜湊（`TestV2EventChainGolden`）。
+- 其餘 note 列為 C2b 的工作：錯誤訊息裡仍寫 `apa.pay.v1` 的地方、`Spec` 的欄位要不要不匯出、`signertest` 忽略 `SpecOf` 的 ok、Signer 的 Display 沒有顯示契約版本。
+
+**證據**：
+
+| 項目 | 基準 | 結果 | 檔案 |
+|---|---|---|---|
+| `go test -count=1 -race -skip ^TestTimingInterleaved$ ./...` | `a26f4a4` | 24 個套件 ok，exit 0 | `artifacts/c2/c2a-a26f4a4/go-test-race.txt` |
+| 反向 `^C2a:` 11 項，同一個提交 | `a26f4a4` | **10／11**。「grant 事件的 ID 屬於自己的版本」**沒有抓到**：突變後 `sp` 沒有被用到，建置失敗（紀錄保留） | `c2a-a26f4a4/reverse.txt` |
+| 上一項改為保留 `sp` 的突變後單獨補跑 | `29d310c` | 1／1 | `c2a-29d310c/reverse-grant.txt` |
+
+`29d310c` 只改了反向腳本。
+
+**下一步**：C2a 通過；第四版設計的條件已修正（第 16 節）。開始 C2b，第一個提交是 v2 的 Ask 收尾表。
