@@ -1,7 +1,8 @@
 # 本人核准最小流程（A1 實機可行性、A2 正式接線）：設計
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-本人核准最小流程設計派工-d7cbf9f-20261013〉（Aaron 已核准「本人核准最小流程」的設計）。分支 `commercial-p1b`，基準 `d7cbf9f`（工作區只有未追蹤的 `demo`）。
-> **狀態：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 尚未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。**（第 17 節）
+> **狀態：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作並通過定向驗證（軟體與 virtual authenticator，不是實機結果），實機登記／驗證待 Aaron 操作；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。**（第 18 節）
+> 以下為 `35cbf3f` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 尚未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。（第 17 節）
 > 以下為 `e4153ca` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核（設計一致性核對；R1～R3、decision 綁定與到期規則缺口關閉）；不是實作、全面安全稽核或實機驗收；D1～D8 的決策與執行核准另行處理；A1／A2 未執行，付款未啟用。（第 16 節）
 > 以下為 `c798bad` 時的狀態，保留原文：本人核准設計另開條件與 close 到期判斷補正完成，待 Codex 限定複核；R1 原存取權限與 R2 維持關閉；整份設計尚未通過；A1／A2 未執行，付款未啟用。（第 15 節）
 > 以下為 `287f340` 時的狀態，保留原文：本人核准設計 close／verify 競爭與 decision 綁定補正完成，待 Codex 限定複核；R1 原存取權限與 R2 維持關閉；A1／A2 未執行，付款未啟用。（第 14 節）
@@ -766,4 +767,39 @@ Aaron 轉達的結論（原文）：
 
 **仍需另行核准**：A2 實作、付款金鑰、簽署與交易。
 
-**現況**：A1 尚未開工，等派工筆記。
+**現況**（`35cbf3f` 時）：A1 尚未開工，等派工筆記。之後 Aaron 以「核准 A1 派工」指示直接開工，見第 18 節。
+
+## 18 A1 spike 實作與定向驗證（10/13）
+
+**依據**：Aaron 10/13「核准 A1 派工」。vault 沒有另寫 A1 派工筆記，範圍取第 2 節 A1 列、roadmap A1 與第 17 節的條件。
+
+**交付**：`spikes/webauthn/`，操作與規則見該目錄的 `README.md`。
+- 一個獨立的 Go module（go-webauthn v0.18.2，D4），不進主 `go.mod`，也不 import 產品程式。新增的間接依賴與第 4.8 節列的相同；`x/crypto v0.57.0`、`x/sys v0.48.0` 與主 module 一致，沒有升級既有依賴。
+- 本機小伺服器：只綁 loopback，入口是 `http://localhost:8123`（D3），RP ID 是 `localhost`。
+- 請購是固定的一筆合成資料，challenge 依第 4.5 節的形式由 record 雜湊產生（簡化：兩個合成會話、jti 由會話推出）。狀態只在記憶體。
+- 驗證政策照 D6：
+  - UV 必須；
+  - 只接受 ES256 與 `attestation=none`；
+  - BE 固定、BS 可變；
+  - 計數器倒退就拒絕並標 `suspect`，兩邊都是 0 時接受；
+  - `topOrigin` 與 `crossOrigin` 都拒絕；
+  - challenge 只能用一次、120 秒到期。
+- 結果寫成 JSONL：每行都標 `real-device` 或 `virtual`；credential ID 只留雜湊；瀏覽器端的拒絕另記為 `browser:…`。
+
+**定向驗證（Claude Code 執行；都不是實機結果）**：
+
+| 項目 | 方式 | 結果 |
+|---|---|---|
+| 伺服器規則 | 軟體 authenticator（P-256，`none`／packed）直接呼叫 handler，4 個測試 | PASS |
+| 反向 | `reverse.py`：在副本裡逐條拿掉 13 條規則（已用、到期、計數器、BE、強制 UV、suspect 兩處、Host、Origin、一次登記、challenge 來自 record、credential ID 雜湊、`fmt=none`） | 13／13 被抓到 |
+| 整頁 | `virtual.mjs`：headless Chrome＋CDP virtual authenticator（ctap2、internal、UV） | 登記、核准、重送 `CHALLENGE_USED`、錯 challenge `ASSERTION_INVALID`、`127.0.0.1` 頁面瀏覽器回 `SecurityError`；這個 virtual authenticator 在不要求 UV 時回 `UV=0`，伺服器拒絕 |
+| 啟動 | 綁 `127.0.0.1:8123` | 頁面 200、錯 Host 421、沒有 Origin 的 API 404；`--authenticator` 不對或 `--addr` 不是 loopback 時拒絕啟動 |
+
+**這台機器**：MacBookPro13,3（2016 年 15 吋、有 Touch Bar，應有 Touch ID），macOS 12.7.6，有 Chrome 與 Safari。Touch ID 能不能用於 WebAuthn，以實測為準。
+
+**下一步**：
+- Aaron 依 `spikes/webauthn/README.md` 操作實機：Chrome＋Touch ID → Safari＋Touch ID → Chrome＋手機。
+- 結果檔放 `var/a1/`（不提交），交 review 判讀。
+- 裝置不支援時保存結果並停止，不自動採購或擴大方案。
+
+**不做**：A2、Signer、Store、Host 接線、付款金鑰、簽署、交易、真實 Agent。
