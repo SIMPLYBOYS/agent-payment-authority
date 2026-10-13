@@ -1,7 +1,7 @@
 # A2 本人核准產品接線：實作差異、驗證與限制
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-A2本人核准產品接線實作派工-f2bf224-20261013〉（Aaron 已批准「A2 開工」）。分支 `commercial-a2`，基準 `f2bf224`（工作區只有未追蹤的 `demo`；沒有適用的 AGENTS.md）。
-> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節）；第三次 review 窄幅 not pass，A、B 已修正（第 9 節）；第四次 review 窄幅 not pass，S-B、S-A 已修正（第 10 節）；第五次 review（全組合掃描）窄幅 not pass，5-1、5-2 已修正（第 11 節）；實機登記與操作未驗收，付款未啟用。**
+> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節）；第三次 review 窄幅 not pass，A、B 已修正（第 9 節）；第四次 review 窄幅 not pass，S-B、S-A 已修正（第 10 節）；第五次 review（全組合掃描）窄幅 not pass，5-1、5-2 已修正（第 11 節）；第六次 review（只看 `9987eb4`）pass，review 結束（第 12 節），待實機與部署討論；實機登記與操作未驗收，付款未啟用。**
 > 以下為 `f0817c7` 時的狀態，保留原文：A2 已實作並完成本輪定向自動化驗證，待 Codex 技術 review；實機登記與操作未驗收，付款未啟用。A2 不自行標 Done；本輪所有結果都是「Claude Code 執行，待 Codex 核對」，不是實機結果。
 >
 > **歸屬的變更**：Codex 訂閱已到期，從這一節起沒有第三方核對。Review 改由 Claude Code 另開的獨立上下文 subagent 執行：它們只拿到 diff、設計文件與本文件，沒有作者寫程式時的推理；這比作者自審接近獨立核對，但仍是同一個模型。紀錄一律寫「Claude Code 獨立上下文 review」，不寫成 Codex。
@@ -128,7 +128,7 @@
 
 ## 5 實機與部署清單（不執行；review 通過、Aaron 確認後才做）
 
-**基準**：Codex review 通過的提交（本輪最後一個程式與測試提交是 `70c9dc5`，只改了測試；之後只有文件）。
+**基準**：`9987eb4`，最後一個程式與測試提交，第六次 Claude Code 獨立上下文 review 判定 pass（第 12 節）；之後只有文件提交。原句是「Codex review 通過的提交（本輪最後一個程式與測試提交是 `70c9dc5`）」，那時 Codex 尚未到期，已被本句取代。`make present-a2` 一律用預設的 `AUTH=device`。
 
 **組合**：fake Agent＋合成請購＋Chrome／Google 密碼管理工具 PIN＋付款 disabled。
 - 由 Aaron 代操作 A／B 時標「展示角色」，不宣稱是兩位自然人。
@@ -427,3 +427,20 @@ review 的收斂情形：
 - 第二次起已沒有 must-fix，Signer 端已 pass。
 - 之後每一輪的 should-fix 都是面板文字的鄰近路徑，而且一輪比一輪窄。
 - 第五次已經做過全組合掃描。
+
+## 12 第六次獨立上下文 review：只看 `9987eb4`（10/13；Claude Code subagent）
+
+由 Aaron 指定：「再做一次只看 9987eb4 這兩行修正的小 review。通過就結束 review，進入實機與部署討論。」
+
+**判定：pass。** 5-1、5-2 已關閉，沒有 must-fix 或 should-fix。reviewer 另外確認了：
+- 新測試在修正前的 `approve.js` 上會失敗；
+- `node --test` 89／89 通過；
+- 沒有任何驗證腳本依賴被改掉的文字。
+
+note（不阻擋，記為已知）：
+- **N1**：測試中「verified 且有 outcome」那一條在修正前也會通過；真正改動的是 `host.js` 的分支，沒有測試覆蓋。
+- **N2**：status 與 cancel 路由回 200、attempt 已 verified、沒有 outcome 時，`outcomeText` 會落到「未完成（200）」。會話已關閉時這段文字被隱藏；pending 時，只有在「Signer 核准已過期」之後才可能出現。
+- **N3**：以同一 request ID 重送已 verified 的 attempt 時，即使 outcome 是 closed，畫面仍寫「已經有本人決定」。頁面每次點擊都用新的 ID，所以只有 API 客戶端會遇到。
+- **N4**：設計第 8 節的文字表仍是舊的「驗證結果沒有送達」與「這筆已在另一個視窗核准。」，新文字只記在本文件第 11 節。
+
+**review 結束**：第一次 review 的 R1～R6，以及第二至五次 review 的 should-fix，都已修正並重跑受影響的部分。所有結果都是本機自動化，不在容器中執行，也不是實機結果。下一步依第 5 節進行實機與部署討論，要 Aaron 確認後才執行。

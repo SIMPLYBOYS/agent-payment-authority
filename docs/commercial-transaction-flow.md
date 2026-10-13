@@ -300,7 +300,7 @@ Codex 的設計一致性核對不代替 Aaron 對畫面的判定。**Aaron 要�
 | 一次性紀錄元件（若 P1-a 先做） | 首次合法消耗成功、第二次拒絕、重啟後仍是已消耗 | 元件自己的單元測試，用測試專用、非 `simulated` 的 grant 樣本，不經過 Signer 路徑 | 不讓模擬 grant 進入正式 Signer 路徑 |
 | P1-b 正式 Signer | 簽發者與完整性、意圖綁定、期限、原子消耗、重播、恢復 | P1-b 的正反例與反向（本輪不簽 grant、不建金鑰、不跑測試） | — |
 
-> 10/13：本人核准（A1、A2）的最小設計見 [commercial-human-approval-design.md](commercial-human-approval-design.md)，其第 11 節列出它對本文件第 3.2、9 節（challenge 公式、grant 由誰產生）的修訂。現況：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`）；A1 可行性切片完成（Done，10/13，限 Chrome＋Google 密碼管理工具／PIN 路徑；Codex 限定核對通過、Aaron 批准）；Touch ID 未驗證、另列，不作為 A2 必要阻擋；A2 已實作（分支 `commercial-a2`）；Codex 訂閱到期後改由 Claude Code 獨立上下文 subagent review，判定 not pass；R1～R6 已修正；第二至五次 review 的 should-fix 都是面板文字，已修正並重跑受影響部分（第五次為全組合掃描，見 commercial-a2.md 第 11 節）；實機登記與操作未驗收；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用（該文件第 23 節；實作見 commercial-a2.md）。
+> 10/13：本人核准（A1、A2）的最小設計見 [commercial-human-approval-design.md](commercial-human-approval-design.md)，其第 11 節列出它對本文件第 3.2、9 節（challenge 公式、grant 由誰產生）的修訂。現況：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`）；A1 可行性切片完成（Done，10/13，限 Chrome＋Google 密碼管理工具／PIN 路徑；Codex 限定核對通過、Aaron 批准）；Touch ID 未驗證、另列，不作為 A2 必要阻擋；A2 已實作（分支 `commercial-a2`）；Codex 訂閱到期後改由 Claude Code 獨立上下文 subagent review，判定 not pass；R1～R6 已修正；第二至五次 review 的 should-fix 都是面板文字，已修正並重跑受影響部分；第六次 review（只看 9987eb4）pass，review 結束，待實機與部署討論（commercial-a2.md 第 11、12 節）；實機登記與操作未驗收；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用（該文件第 23 節；實作見 commercial-a2.md）。
 
 ### 11.1 P1-b 設計對本節的修訂（10/12；設計已通過限定複核，已依此實作，待技術 review）
 
