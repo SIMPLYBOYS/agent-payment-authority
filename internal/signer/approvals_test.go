@@ -140,6 +140,10 @@ func TestApproveAndResend(t *testing.T) {
 		r.ApproverID != "approver-a" || !strings.HasPrefix(r.CredentialRef, "sha256:") {
 		t.Fatalf("verify %+v %v", r, err)
 	}
+	// Another assertion of the used challenge (a replay) is refused, while the credential is still active.
+	if _, err := f.verify("ver-2", c.ChallengeID, order, as); refusal(err) != "CHALLENGE_USED" {
+		t.Fatalf("replay: %v", err)
+	}
 	// The session is decided once: no new challenge, for either decision.
 	if _, err := f.challenge("req-3", order, "deny"); refusal(err) != "SESSION_DECIDED" {
 		t.Fatalf("after a decision: %v", err)
@@ -154,10 +158,6 @@ func TestApproveAndResend(t *testing.T) {
 	}
 	if _, err := f.verify("ver-1", c.ChallengeID, order, a.Get(c.Options, origin)); refusal(err) != "REQUEST_ID_CONFLICT" {
 		t.Fatalf("same verify ID, other assertion: %v", err)
-	}
-	// Another assertion of the used challenge (a replay) is refused.
-	if _, err := f.verify("ver-2", c.ChallengeID, order, as); refusal(err) != "CHALLENGE_USED" {
-		t.Fatalf("replay: %v", err)
 	}
 	if q, err := f.core.ChallengeByRequest(bgA, "req-1"); err != nil || q.State != "used" || q.ApprovalID != r.ApprovalID || q.VerifyRequestID != "ver-1" {
 		t.Fatalf("query: %+v %v", q, err)
