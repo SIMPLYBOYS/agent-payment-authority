@@ -235,7 +235,7 @@
 6. 設計核准（新增依賴）。停止點：spike 報告與結論交 review。
 
 **C1 BBS+ 選庫與正反測試**（S2，計畫 W1、W3）
-> **進度（10/14）**：spike 第二版完成，待再次 Claude Code 獨立上下文 review（[commercial-c1.md](commercial-c1.md)；`spikes/bbs/`；證據在 `artifacts/s2/c1-6090587/`）。
+> **進度（10/14）**：spike 第二版完成，Claude Code 獨立上下文 review pass（第 9 節）（[commercial-c1.md](commercial-c1.md)；`spikes/bbs/`；證據在 `artifacts/s2/c1-6090587/`）。
 > - 找不到仍在維護、實作 IETF BBS（`bbs-2023` 所用）的 Go 庫。
 > - 第一版（trustbloc v1.0.4）經 review 判定 not pass：揭露集合沒有綁到 proof，持有人、期限、撤銷可以被偽造；第一版關於這些能力的陳述不成立。
 > - 第二版改用 IBM idemix v0.3.1 的 `bbs`（舊版 BBS+，Apache-2.0），把揭露索引與訊息數綁定到要求，正反測試 38 項、反向 11／11 在同一提交通過。

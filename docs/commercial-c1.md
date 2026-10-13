@@ -1,7 +1,7 @@
 # C1 BBS+ 憑證選型 spike：候選、結論與 C2 需要的決定
 
 > 2026-10-13～14，Claude Code，依 vault〈Claude-Code-C1-BBS憑證選型Spike派工-20261013〉（Aaron：「再開始 C1」）。分支 `commercial-c1`，基準 `main` `74cdc55`。程式在 `spikes/bbs/`（獨立 module，主 `go.mod` 不變）。
-> **狀態：spike 完成。第一版經 Claude Code 獨立上下文 review 判定 not pass（must-fix：揭露集合沒有綁到 proof），已修正並在同一提交重跑全部證據（第 8 節），待再次 review。這只證明格式與函式庫可用，不是憑證參與 Policy 的證據（那是 C2）。C2 未開始。**
+> **狀態：spike 完成，Claude Code 獨立上下文 review pass（第二次，第 9 節）。第一版判定 not pass（must-fix：揭露集合沒有綁到 proof），已修正並在同一提交重跑全部證據（第 8 節）。C1-D1～D4 待 Aaron 決定。這只證明格式與函式庫可用，不是憑證參與 Policy 的證據（那是 C2）。C2 未開始。**
 
 ## 1 結論（先講）
 
@@ -23,7 +23,7 @@
 
 | 候選 | 版本／日期 | 授權 | 方案 | 判定 |
 |---|---|---|---|---|
-| `github.com/IBM/idemix` 的 `bbs` | v0.3.1，2026-09-09 | Apache-2.0 | 舊版 BBS+（`bbs12381g2pub` 一系），有上述三處補強；`bbs` 套件只 import `IBM/mathlib` 與標準庫，所以編譯進來的程式不包含 idemix 其他部分 | **採用**（第二版）：仍在維護，四者之中最新，三處補強 |
+| `github.com/IBM/idemix` 的 `bbs` | v0.3.1，2026-09-09 | Apache-2.0 | 舊版 BBS+（`bbs12381g2pub` 一系），有上述三處補強；`bbs` 套件只 import `IBM/mathlib`、`x/crypto` 的 `blake2b` 與 `hkdf`，以及標準庫，所以編譯進來的程式不包含 idemix 其他部分（第二次 review 更正） | **採用**（第二版）：仍在維護，四者之中最新，三處補強 |
 | `github.com/trustbloc/bbs-signature-go` | v1.0.4，2026-01-29 | Apache-2.0 | 舊版 BBS+（DST `BLS12381G1_XMD:BLAKE2B_SSWU_RO_BBS+_SIGNATURES:1_0_0`；`DeriveProof` 只有 nonce，沒有 header／presentation header）；依賴未打 tag 的 mathlib pseudo-version | 第一版採用；第二版改掉：`VerifyProof` 會改寫傳入的 proof，格式錯誤的 proof 會 panic，聲稱的訊息數沒有上限 |
 | `github.com/hyperledger/aries-bbs-go` | pseudo-version，2024-05-28 | Apache-2.0 | 同一系（DST 相同） | 不採用：較舊，沒有 tag |
 | `github.com/cloudflare/circl/bbs` | 只在 v1.3.4／v1.3.5（2023-10-16，依 pkg.go.dev） | BSD-3-Clause | IETF BBS 的 API 形狀（有 header、ph、disclosed indexes），引用 draft-03 | **不採用**：最新的 v1.6.5 沒有這個套件；draft-03 已過時；找不到移除的說明 |
@@ -85,7 +85,9 @@
    - 驗證端若只依要求重建訊息，就會被只揭露部分欄位的 proof 騙過：持有人綁定、撤銷、期限與 task 都能偽造（第一版的 must-fix，第 8 節）。
    - C2 不論用哪個庫，都要先把 proof 標頭和要求比對。
 2. trustbloc v1.0.4 的 `parsePoKPayload` 會**就地反轉 bitvector**，所以會改寫傳入的 proof；idemix v0.3.1 先複製再反轉。spike 仍傳複本給函式庫，並以測試斷言不會被改寫。
-3. **持有人綁定是揭露 holder 公鑰**：函式庫沒有 blind signing，同一張憑證的多次出示可以用 holder 欄位串起來。proof 位元組本身每次都不同。
+3. **持有人綁定**：spike 的做法是揭露 holder 公鑰，所以同一張憑證的多次出示可以用 holder 欄位串起來；proof 位元組本身每次都不同。
+   - trustbloc 沒有 blind signing。**idemix v0.3.1 有**：同一 module 的 `bccsp/schemes/aries/blind_sign.go` 提供 `BlindMessages`、`BlindSign`、`UnblindSign`、`VerifyBlinding`，`bbs` 的 `SignWithKeyB` 也支援。
+   - 所以「持有人秘密不揭露」的綁定方式（link secret）現在就可行，但要使用 `aries` scheme 套件，不只是 `bbs`；spike 沒有實作它（第二次 review 更正）。
 4. **沒有 header／presentation header**：情境綁定全部放在加了長度前綴的 nonce。
 5. **撤銷**：揭露 status 索引，由 verifier 持有已撤銷的集合；清單的來源與更新留給 C2。
 6. **challenge**：由 verifier 發出並加鎖，只存在記憶體裡（`ponytail:` 註記），持久化留給 C2。
@@ -96,7 +98,7 @@
 | # | 決定 | 選項 | 建議 |
 |---|---|---|---|
 | C1-D1 | 憑證格式與函式庫 | (a) 沿用舊版 BBS+，用 idemix v0.3.1 的 `bbs`，文件與畫面標明「BBS+（`bbs12381g2pub` 一系），不是 W3C `bbs-2023`」；(b) 自行在 gnark-crypto 上實作 IETF BBS，對照官方測試向量；(c) 用 cgo 接 Rust 的 IETF BBS 實作 | **(a)**：維護中、有 tag、授權清楚、已補強；能力足夠 demo 使用。(b) 是自行實作密碼學，風險與工作量都高；(c) 增加跨語言建置與部署成本 |
-| C1-D2 | 持有人綁定 | (a) 揭露 holder 公鑰，由持有人簽 nonce 與 proof（可被串連）；(b) 等有 blind signing 的實作 | **(a)**：demo 只有單一 verifier；在畫面與文件上標明可被串連 |
+| C1-D2 | 持有人綁定 | (a) 揭露 holder 公鑰，由持有人簽 nonce 與 proof（spike 的做法，可被串連）；(b) 用 idemix `aries` scheme 的 blind signing，以不揭露的持有人秘密綁定（同一 module 已有，需引入 `aries` 套件並另做 spike） | **(a)**：demo 只有單一 verifier，(a) 已有正反測試；在畫面與文件上標明可被串連。要求不可串連時再做 (b) |
 | C1-D3 | 憑證外層 | spike 使用原始 `名稱=值` 訊息，不是 JSON-LD 的 VC Data Integrity | 由 C2 訂 `apa` 自己的正規化外層：版本、欄位順序、編碼，並固定 spike 已採用的嚴格格式；經 review 後才接 Policy |
 | C1-D4 | 撤銷與 challenge 保存 | 狀態清單的來源、challenge 存放處 | C2 設計時一併決定 |
 
@@ -139,3 +141,37 @@ review 由一個 Claude Code 獨立上下文 subagent 執行，範圍是 `74cdc5
 - 新增上述負例與 4 項反向（揭露集合、必要欄位、expiry 格式、status 格式）。
 
 全部證據都在 `6090587` 重跑（第 4 節）。第一版的結果與證據保留，不併入第二版。
+
+## 9 第二次獨立上下文 review（10/14；只看 `e05de0f..270810e`）
+
+判定 **pass**。
+
+reviewer 讀了 idemix v0.3.1 的相關原始碼，所有攻擊與 fuzz 都在複本裡執行，沒有改動 repo。
+- **must-fix 已關閉**，以下嘗試都回 `PROOF_INVALID`：
+  - 為 `{0,1,2,5}` 衍生的 proof，把標頭改寫成要求的集合，再偽造 holder 與 status；
+  - 揭露索引超出訊息數；
+  - 訊息數改為 0、6、7、9、15、16、1024；
+  - 多揭露 `consumer_id` 並由持有人重新簽名；
+  - 補到 9000 bytes、聲稱 65535 則訊息的 proof，5 ms 內被拒。
+  
+  把這道檢查拿掉後，部分揭露的偽造會通過，證明擋住它的就是這道檢查。
+- 先前的 should-fix 與 note 全部在程式裡關閉：
+  - 約 34 萬筆隨機 proof 的 fuzz 沒有 panic；
+  - 8 個並行驗證同一筆出示，只有一筆通過；
+  - 拒絕的先後順序不會洩漏資訊。
+- 測試、反向與證據互相一致：38 = 8 + 30；benchmark、授權、11／11 都和檔案相符。
+
+新發現：
+- **N1（文件，should-fix，已更正）**：idemix 有 blind signing；已更正第 5 節第 3 點與 C1-D2。
+- **N2（文件，note，已更正）**：`bbs` 套件也 import `x/crypto`；已更正第 2 節。
+- **N3（測試，note，未改）**：
+  - 「聲稱 65535 則訊息」「過短」「長度欄位越界」三個負例，在 idemix 依大小就被拒，沒有走到訊息數綁定，所以不能證明那道綁定；
+  - 「只揭露 schema」在拿掉綁定後會變成 `HOLDER_BINDING_INVALID`；
+  - 真正獨立證明 must-fix 的，是「只揭露部分欄位」那一項（反向第 8 項）。
+- **N4（給 C2，note）**：`Verify` 信任呼叫端給的 Request（intent、揭露欄位），challenge 只記字串。C2 若從持有人的訊息取得 Request，intent 綁定就會變成由持有人宣稱。應在發 challenge 時存下 Request，驗證時依 challenge 取回；未用的 challenge 也要有期限與上限。
+- **N5（給 C2，note）**：驗證期間持有鎖，約 3.4 ms 的配對運算會序列化。C2 應改為：先保留 challenge，再在鎖外驗證，最後用掉或釋放。
+- **N6（給 C2，note）**：proof 位元組可被延展，函式庫接受尾端多出的 bytes。第三方延展會因持有人簽章而失敗，但 C2 不得把 proof 位元組當成唯一性或重播的鍵。
+- **N7（反向，note）**：反向第 9 項（必要欄位）拿掉檢查後，被後面的 status 格式檢查擋下；只有隱藏 task_id 才會直接通過。若改成以 task_id 為目標，更能證明這道檢查本身的作用。
+- **N8（note）**：`BenchmarkVerify` 量到的是 generator 已快取的情況；訊息數固定為 8，所以沒有影響。
+
+派工筆記寫「交 Codex review」；Codex 已到期，依 Aaron 的指示改由 Claude Code 獨立上下文 review，本節即是。
