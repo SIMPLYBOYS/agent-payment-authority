@@ -149,7 +149,8 @@ export function scene(snapshot) {
     // apa.pay.v1 (P1-a): the simulated approval's outcomes.
     approved: "已核准（模擬）：未啟用付款，不會取貨", approval_denied: "核准者拒絕：離店", superseded: "報價已改變：需要重新請購",
   };
-  if (v1(task)) labels.waiting = "等你核准（模擬核准；不會付款）";
+  if (v1(task)) labels.waiting = simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；不會付款）";
+  if (!simulated()) labels.approved = "本人核准已驗證：未啟用付款，不會取貨";
   const d = cur && cur.decision ? cur.decision : null;
   const cause = { entered: startedSeq, quoted: cur && cur.proposedSeq, waiting: cur && cur.decidedSeq, denied: cur && cur.decidedSeq,
     allowed_unpaid: cur && cur.decidedSeq, expired: cur && cur.closedSeq, withdrawn: cur && cur.closedSeq,
@@ -469,7 +470,14 @@ export const REASONS = {
 export const REASONS_V1 = {
   ...REASONS, HUMAN_APPROVAL_REQUIRED: "超過委託的 allow_max，需要你核准", WITHIN_ALLOW_MAX: "在委託範圍內；未啟用付款",
   SIMULATED_APPROVAL: "模擬核准（主持人扮演，不是本人驗證）", APPROVER_DENIED: "核准者拒絕", QUOTE_CHANGED: "報價已改變，需重新請購",
+  WEBAUTHN_APPROVAL: "本人核准（Signer 驗證已登記的裝置）",
 };
+
+// The host's way of approving (A2): simulated in P1-a, webauthn with the
+// person's registered device; it words what is still pending or decided.
+let approvalMode = "simulated";
+export function setApprovalMode(m) { approvalMode = m === "webauthn" ? "webauthn" : "simulated"; }
+export const simulated = () => approvalMode !== "webauthn";
 const reasonText = (r, task) => (typeof r === "string" && r !== "" ? r + ((v1(task) ? REASONS_V1 : REASONS)[r] ? "（" + (v1(task) ? REASONS_V1 : REASONS)[r] + "）" : "") : UNKNOWN);
 const hhmmss = (s) => (typeof s === "number" ? new Date(s * 1000).toISOString().slice(11, 19) + " UTC" : UNKNOWN);
 const CUSTOMER = { "consumer-a": "A", "consumer-b": "B" };
@@ -488,9 +496,9 @@ function purchaseStatus(p, live, servedAt, task) {
     const reached = live && typeof servedAt === "number" && typeof p.deadline_at === "number" && servedAt >= p.deadline_at;
     if (d.policy_verdict === "Deny") return "Deny：" + reasonText(d.reason, task);
     if (d.policy_verdict === "Allow") return "Allow：在委託範圍內，但未啟用付款（不會自動付款）";
-    return { approved: "已核准（模擬），未啟用付款", denied: "已拒絕（模擬核准者）", superseded: "報價已改變：這次核准作廢，需要重新請購",
-      expired: "已過期，無法核准（後端已記錄）", withdrawn: "已撤回（task 取消）" }[p.approval_closed]
-      || "等你核准（模擬核准；不會付款）" + (reached ? "；已達期限，等待後端確認" : "");
+    return { approved: simulated() ? "已核准（模擬），未啟用付款" : "本人核准已驗證，未啟用付款", denied: simulated() ? "已拒絕（模擬核准者）" : "已拒絕（本人，已驗證裝置）",
+      superseded: "報價已改變：這次核准作廢，需要重新請購", expired: "已過期，無法核准（後端已記錄）", withdrawn: "已撤回（task 取消）" }[p.approval_closed]
+      || (simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；不會付款）") + (reached ? "；已達期限，等待後端確認" : "");
   }
   if (d.policy_verdict === "Deny") return "Deny：" + reasonText(d.reason);
   if (d.policy_verdict === "Allow") return "Allow：政策允許，M1 未付款（PAYMENT_CAPABILITY_UNAVAILABLE）";
@@ -532,7 +540,7 @@ export function card(view, chosen, ctx) {
     step("請購", p && at("PURCHASE_PROPOSED"), "PURCHASE_PROPOSED"),
     step("裁決", p && at("POLICY_DECIDED"), p && p.decision ? str(p.decision.policy_verdict) : ""),
     closing || ended ? step("收尾", closing || ended, (closing || ended).event_type)
-      : waiting ? { label: "收尾", state: "wait", note: hist ? "執行結束時仍待核准（歷史快照，不是即時狀態；期限已過）" : v1(t) ? "等你核准（模擬）" : "等待中（M1 無核准能力）" }
+      : waiting ? { label: "收尾", state: "wait", note: hist ? "執行結束時仍待核准（歷史快照，不是即時狀態；期限已過）" : v1(t) ? (simulated() ? "等你核准（模擬）" : "等你核准（本人裝置）") : "等待中（M1 無核准能力）" }
       : p && p.decision && p.decision.policy_verdict === "Deny" ? { label: "收尾", state: "none", note: "Deny 即結束；沒有收尾事件" }
       : p && p.decision && p.decision.policy_verdict === "Allow" ? { label: "收尾", state: "none", note: v1(t) ? "未啟用付款；沒有後續事件" : "M1 無付款；沒有後續事件" }
       : step("收尾", null),

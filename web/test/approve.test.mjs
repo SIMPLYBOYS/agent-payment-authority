@@ -61,3 +61,14 @@ test("the three sources are named apart", () => {
   assert.equal(AP.sourceText({ agent: "fake", authenticator: "virtual", payment: "disabled" }), "Agent：fake・驗證器：virtual authenticator（測試用）・付款：未啟用");
   assert.match(AP.sourceText({ agent: "fake", authenticator: "device", payment: "disabled" }), /已登記的裝置/);
 });
+
+test("the host's method words what waits and what was decided; P1-a's words stay", async () => {
+  const A = await import("../adapter.js");
+  const task = { contract_version: "apa.pay.v1", purchases: [] };
+  A.setApprovalMode("webauthn");
+  assert.equal(A.simulated(), false);
+  assert.match(A.REASONS_V1.WEBAUTHN_APPROVAL, /本人核准/);
+  A.setApprovalMode("simulated");
+  assert.equal(A.simulated(), true);
+  void task;
+});

@@ -240,7 +240,9 @@ async function pollReadiness() {
       const r = await creds.readiness();
       if (r && g === creds.gen) {
         lastReady = r;
-        const p1a = r.status && r.status.runs && (r.status.runs.scenarios || []).some((x) => x.contract === A.V1) ? { record: "fake_p1a" } : null;
+        A.setApprovalMode(r.status && r.status.human_approval ? "webauthn" : "simulated");
+        const p1a = r.status && r.status.human_approval ? { record: "fake_a2" }
+          : r.status && r.status.runs && (r.status.runs.scenarios || []).some((x) => x.contract === A.V1) ? { record: "fake_p1a" } : null;
         if (r.status) confirmMode(mseq, r.status.history && r.status.history.record === "live_history" ? r.status.history : r.status.live && r.status.live.record === "live_demo" ? r.status.live : p1a);
         renderReadiness();
         renderControl();
@@ -423,7 +425,7 @@ function agentModel(c, runs, slots, ctx) {
   if (slot && slot.task) {
     if (slot.read !== "ok" && slot.read !== "loading") business = "讀取失敗（" + slot.read + "），保留上次資料" + (slot.label ? "：" + slot.label : "");
     else if (slot.seq < 0) business = "同步中";
-    else business = (state === "ended" && slot.phase === "waiting" ? (run && run.contract_version === A.V1 ? "Agent 已結束；請購仍等你核准（模擬）"
+    else business = (state === "ended" && slot.phase === "waiting" ? (run && run.contract_version === A.V1 ? (A.simulated() ? "Agent 已結束；請購仍等你核准（模擬）" : "Agent 已結束；請購仍等你核准（本人裝置）")
       : "執行已結束／請購待核准（M1 無核准功能；到期前不會付款）") : "") || slot.label || slot.phase;
   } else business = run ? "同步中" : "尚無場次";
   const t = run && ctx.tasks && ctx.tasks.get(run.task_id);

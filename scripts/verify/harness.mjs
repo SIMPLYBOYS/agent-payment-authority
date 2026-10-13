@@ -9,9 +9,9 @@ export const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chr
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // startDemo starts bin/demo on a free port with a new state directory.
-export function startDemo({ repo, bin, catalog, unityBuild, state, home, extra = [] }) {
+export function startDemo({ repo, bin, catalog, unityBuild, state, home, extra = [], addr = "127.0.0.1:0" }) {
   mkdirSync(state, { recursive: true, mode: 0o700 });
-  const env = { PATH: process.env.PATH, HOME: home || process.env.HOME, APA_ADDR: "127.0.0.1:0", APA_DB_PATH: join(state, "demo.db"), APA_DEMO_TOKEN_FILE: join(state, "tokens.json") };
+  const env = { PATH: process.env.PATH, HOME: home || process.env.HOME, APA_ADDR: addr, APA_DB_PATH: join(state, "demo.db"), APA_DEMO_TOKEN_FILE: join(state, "tokens.json") };
   const args = ["--trace-dir", join(state, "runs"), "--unity-build", unityBuild, "--fake-cli", join(bin, "fake-claude"), "--scenarios", catalog,
     "--registry", join(repo, "testdata/demo/registry.json"), ...extra];
   const p = spawn(join(bin, "demo"), args, { cwd: repo, env, stdio: ["ignore", "ignore", "pipe"] });
