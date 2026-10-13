@@ -5,7 +5,7 @@
 // the device is asked, converts WebAuthn's binary fields, and words each
 // state with fixed texts (never "approved" for something unknown).
 
-import { b64u, unb64u } from "./adapter.js";
+import { b64u, unb64u, byDevice } from "./adapter.js";
 
 // sameChallenge: the challenge the host returned is the one this click
 // asked for (consumer, session, intent and decision); otherwise the page
@@ -68,7 +68,7 @@ export function outcomeText(status, body, decision) {
   const a = b.attempt || {};
   if (status === 200 && b.outcome === "approved") return ["ok", "本人核准已驗證，付款未啟用。"];
   if (status === 200 && b.outcome === "denied") return ["deny", "你已拒絕這筆（已驗證裝置）。"];
-  if (status === 200 && b.outcome === "mismatch") return ["error", "Signer 的結果和這次操作不一致，沒有採用；這筆仍等你決定。"];
+  if (status === 200 && b.outcome === "mismatch") return ["error", "Signer 的結果和這次操作不一致，沒有採用。"];
   if (status === 200 && (b.outcome === "closed" || b.outcome === "superseded")) return ["closed", "這筆在驗證完成前已關閉（過期、取消或報價改變）；沒有核准。"];
   if (status === 200 && a.state === "lost") return ["warn", "驗證結果沒有送達，這次沒有核准。請按「重新核准」。"];
   if (status === 200 && a.state === "closed") return ["idle", "已取消這次驗證；這筆仍在等你決定。"];
@@ -88,7 +88,9 @@ export function outcomeText(status, body, decision) {
 export function attemptText(a, sessionState) {
   if (!a) return null;
   if (sessionState && sessionState !== "pending") {
-    if (a.state === "unknown" || a.state === "verifying") return ["closed", "這筆已依後端期限關閉，沒有核准；裝置那次驗證的結果無法確認，完成了也不會生效。"];
+    // Design 7, 8: unknown is never worded as not approved (review N-b).
+    if (a.state === "unknown" || a.state === "verifying") return ["warn", sessionState === "expired" ? "無法確認這次驗證的結果；這筆已依後端期限關閉。"
+      : "無法確認這次驗證的結果；這筆已關閉（任務取消或報價改變）。"];
     return null;
   }
   switch (a.state) {
@@ -104,6 +106,25 @@ export function attemptText(a, sessionState) {
 // openAttempt: the attempt still holds the session (a click shares it or
 // must be cancelled first).
 export const openAttempt = (a) => !!a && (["requested", "challenged", "verifying", "unknown"].includes(a.state) || (a.state === "refused" && !!a.challenge_id));
+
+// decidedText (review S1): an approved or denied record in either panel,
+// worded by its own method, never the host's mode; null for the rest
+// (each panel words its closures).
+const DONE = {
+  device: { approved: ["ok", "本人核准已驗證，付款未啟用。", "這筆只留下 Signer 驗證的本人核准紀錄；付款未啟用，不會交付商品。"],
+    denied: ["deny", "你已拒絕這筆（已驗證裝置）。", "Agent 不會取得這一筆；沒有付款。"] },
+  simulated: { approved: ["ok", "已核准（模擬），未啟用付款", "這筆只留下模擬授權（grant）；它不能付款，也不會交付商品。"],
+    denied: ["deny", "已拒絕", "Agent 不會取得這一筆；沒有付款。"] }, // P1-a's words
+};
+export const decidedText = (state, p) => DONE[byDevice(p) ? "device" : "simulated"][state] || null;
+
+// grantLine: a grant by its own method.
+export function grantLine(g) {
+  const id = String(g.jti).slice(0, 18) + "…";
+  return g.authorization_method === "webauthn"
+    ? "本人核准紀錄 " + id + "（authorization_method webauthn，由 Signer 驗證；Host 只記錄）・付款未啟用"
+    : "模擬授權 " + id + "（authorization_method " + g.authorization_method + "，audience " + g.audience + "）· Signer 樁：拒絕模擬授權（GRANT_METHOD_NOT_ACCEPTED）· 未啟用付款";
+}
 
 // sourceText: the three sources, apart (design 2, 8).
 export function sourceText(s) {

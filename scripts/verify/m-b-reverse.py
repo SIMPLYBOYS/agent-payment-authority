@@ -296,8 +296,9 @@ ITEMS = [
      [(SA, "\tvar s webauthn.SessionData\n", "\tif stored.Flags.BackupEligible != parsed.Response.AuthenticatorData.Flags.HasBackupEligible() {\n\t\treturn \"ASSERTION_INVALID_FLAGS:suspect\", stored, nil\n\t}\n\tvar s webauthn.SessionData\n")]),
     ("A2: Store: a simulated grant is never raised to webauthn", go("./internal/store/", "^TestApprovalSchemaChecks$", ("TestApprovalSchemaChecks", r"a simulated grant became webauthn")),
      [(STA, "  CHECK ((authorization_method = 'webauthn') = (signer_approval_id IS NOT NULL))", "  CHECK (1)")]),
-    # Review N14: without the Store's ownership check the Signer's consumer
-    # check still refuses (SIGNER_MISMATCH, 502); the regex names that status.
+    # Review N14: without the Store's ownership check the Host's comparison
+    # of the Signer's reply (consumer_id) still refuses (SIGNER_MISMATCH,
+    # 502; review N-d corrected the layer); the regex names that status.
     ("A2: R1 the routes keep a viewer to its consumer", go("./cmd/demo/", "^TestA2Permissions$", ("TestA2Permissions", r"B's viewer: 502, want 404")),
      [(STA, "err == nil && ss.ConsumerID != consumer {", "err == nil && false {")]),
     ("A2: R1 a viewer token cannot replace the assertion", go("./cmd/demo/", "^TestA2Permissions$", ("TestA2Permissions", r"forged: 200")),
@@ -320,6 +321,12 @@ ITEMS = [
     ("A2: R6 a close answering used resolves", go("./cmd/demo/", "^TestA2ChallengeUsedElsewhere$", ("TestA2ChallengeUsedElsewhere/cancel", r"cancel: 502"),
                                                      ("TestA2ChallengeUsedElsewhere/status_after_a_lost_verify", r"status after a lost verify: 502")),
      [(HA, "\tcase \"used\":\n\t\treturn h.resolveUsed(consumer, st, ans.Reply.ApprovalID)", "\tcase \"used-never\":\n\t\treturn h.resolveUsed(consumer, st, ans.Reply.ApprovalID)")]),
+    ("A2: S2 a used challenge of a closed session is abandoned", go("./cmd/demo/", "^TestA2CancelledAfterSignerVerified$", ("TestA2CancelledAfterSignerVerified", r"Signer approval after cancel: .*State:verified")),
+     [(HA, "\t\tab := h.signer.Abandon(r.ApprovalID)\n", "\t\tab := signerclient.Answer{}\n")]),
+    ("A2: the approver's version alone is checked", go("./internal/signer/", "^TestChangedAndLateBranches$", ("TestChangedAndLateBranches", r"approver version only: ")),
+     [(SA, "ap.Version != a.approverVersion || c.cfg.hash != a.configHash {", "c.cfg.hash != a.configHash {")]),
+    ("A2: the configuration hash alone is checked", go("./internal/signer/", "^TestChangedAndLateBranches$", ("TestChangedAndLateBranches", r"config hash only: ")),
+     [(SA, "ap.Version != a.approverVersion || c.cfg.hash != a.configHash {", "ap.Version != a.approverVersion {")]),
     # D4 of the OS isolation plan (keygen); run them alone with "^P1b-D4:".
     ("P1b-D4: keygen never replaces a key file", go("./cmd/apa-signer/", "^TestKeygen$", ("TestKeygen", r"an existing key file was replaced")),
      [(AS, "if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {", "if _, err := os.Lstat(path); false && !errors.Is(err, os.ErrNotExist) {"),

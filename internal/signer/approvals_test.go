@@ -649,6 +649,20 @@ func TestChangedAndLateBranches(t *testing.T) {
 	if _, err := f.verify("ver-1", c.ChallengeID, order, a.Get(c.Options, origin)); refusal(err) != "APPROVER_CHANGED" {
 		t.Fatalf("approver version changed: %v", err)
 	}
+	// Each half of the check alone (review note): the approver's version
+	// with the same configuration hash, and the hash with the same version.
+	for name, col := range map[string]string{"approver version only": "approver_version = approver_version + 1", "config hash only": "config_hash = 'sha256:other'"} {
+		f := newAFX(t)
+		a := f.enroll("approver-a", nil)
+		order := f.order("a")
+		c := f.mustChallenge("req-1", order, "approve")
+		if _, err := f.core.db.Exec(`UPDATE approval_challenges SET `+col+` WHERE challenge_id = ?`, c.ChallengeID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.verify("ver-1", c.ChallengeID, order, a.Get(c.Options, origin)); refusal(err) != "APPROVER_CHANGED" {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
 	f = newAFX(t)
 	a = f.enroll("approver-a", nil)
 	order = f.order("a")

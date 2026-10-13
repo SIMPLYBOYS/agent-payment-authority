@@ -98,11 +98,28 @@ test("a decided record is worded by its own method, never the host's mode", asyn
   }
 });
 
-test("an expired session's unknown attempt and a mismatched result say no approval (N9, N10)", () => {
-  const [kind, text] = AP.attemptText({ state: "unknown" }, "expired");
-  assert.equal(kind, "closed");
-  assert.match(text, /沒有核准/);
+test("an unknown attempt of a closed session is never worded as not approved; a mismatch has its text (N9, N10, N-b)", () => {
+  assert.deepEqual(AP.attemptText({ state: "unknown" }, "expired"), ["warn", "無法確認這次驗證的結果；這筆已依後端期限關閉。"]);
+  for (const st of ["withdrawn", "superseded"]) {
+    const [, text] = AP.attemptText({ state: "verifying" }, st);
+    assert.ok(!text.includes("期限") && !text.includes("沒有核准") && !text.includes("未核准"), text);
+  }
   const [k2, t2] = AP.outcomeText(200, { outcome: "mismatch" }, "approve");
   assert.equal(k2, "error");
   assert.match(t2, /沒有採用/);
+});
+
+// Review S1: both panels word an approved or denied record and its grant by
+// the record's own method, whatever panel (host mode) shows it.
+test("the panels word a decided record and its grant by the record", () => {
+  const rec = (by, method) => ({ approval: { resolved_by: by, grant: { jti: "grant-1234567890abcdef", authorization_method: method, audience: "signer" } } });
+  const dev = rec("webauthn:approver-a", "webauthn"), sim = rec("sim-approver-a", "simulated");
+  assert.equal(AP.decidedText("approved", dev)[1], "本人核准已驗證，付款未啟用。");
+  assert.equal(AP.decidedText("approved", sim)[1], "已核准（模擬），未啟用付款");
+  assert.equal(AP.decidedText("denied", dev)[1], "你已拒絕這筆（已驗證裝置）。");
+  assert.equal(AP.decidedText("denied", sim)[1], "已拒絕");
+  assert.equal(AP.decidedText("expired", dev), null);
+  assert.match(AP.grantLine(dev.approval.grant), /^本人核准紀錄 .*webauthn，由 Signer 驗證/);
+  assert.match(AP.grantLine(sim.approval.grant), /^模擬授權 .*GRANT_METHOD_NOT_ACCEPTED/);
+  assert.ok(!AP.grantLine(sim.approval.grant).includes("由 Signer 驗證"));
 });

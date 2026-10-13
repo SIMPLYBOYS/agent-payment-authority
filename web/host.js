@@ -858,9 +858,8 @@ async function pollApprovals() {
   renderControl();
 }
 
+// Closures; approved and denied are worded by the record (AP.decidedText).
 const RESULT = {
-  approved: ["ok", "已核准（模擬），未啟用付款", "這筆只留下模擬授權（grant）；它不能付款，也不會交付商品。"],
-  denied: ["deny", "已拒絕", "Agent 不會取得這一筆；沒有付款。"],
   expired: ["closed", "已過期，無法核准", "期限由後端決定；需要重新請購。"],
   withdrawn: ["closed", "已撤回（task 取消）", "這筆請購已隨 task 取消。"],
   superseded: ["closed", "報價已改變：這次核准作廢", "需要重新請購；沒有付款。"],
@@ -914,7 +913,7 @@ function renderApproval(runs) {
     mode.append(el("span", "approval-tag", "模擬核准"), "fake 展示・主持人扮演客人 " + short(item.consumer_id) + "（不是本人驗證）・不會付款");
     parts.push(mode);
     const pending = ap.state === "pending";
-    const res = RESULT[ap.state];
+    const res = AP.decidedText(ap.state, p) || RESULT[ap.state];
     const head = el("div", "approval-head");
     head.dataset.state = ap.state;
     head.append(el("h3", "", pending ? "核准這一筆付款？" : res ? res[1] : ap.state),
@@ -953,8 +952,7 @@ function renderApproval(runs) {
       }
       parts.push(acts);
     } else if (ap.grant) {
-      parts.push(el("p", "approval-grant", "模擬授權 " + ap.grant.jti.slice(0, 18) + "…（authorization_method " + ap.grant.authorization_method
-        + "，audience " + ap.grant.audience + "）· Signer 樁：拒絕模擬授權（GRANT_METHOD_NOT_ACCEPTED）· 未啟用付款"));
+      parts.push(el("p", "approval-grant", AP.grantLine(ap.grant)));
     }
     const ev = el("button", "approval-evidence", "查看技術證據 ›");
     ev.type = "button";
@@ -1101,9 +1099,7 @@ function a2Item() {
 const a2Target = (item) => A.approvalTarget(creds.gen, "a2", item);
 
 const A2_RESULT = {
-  approved: ["ok", "本人核准已驗證，付款未啟用。", "這筆只留下 Signer 驗證的本人核准紀錄；付款未啟用，不會交付商品。"],
-  denied: ["deny", "你已拒絕這筆（已驗證裝置）。", "Agent 不會取得這一筆；沒有付款。"],
-  expired: ["closed", "已過期（後端時間為準）；沒有核准。", "需要重新請購。"],
+  expired: ["closed", "已過期（後端時間為準）。", "需要重新請購。"], // N9: an unknown attempt is never worded as not approved
   withdrawn: ["closed", "主持人已取消這個任務；這筆沒有核准，也不是你拒絕的。", ""],
   superseded: ["closed", "報價已改變：這次核准作廢", "需要重新請購；沒有付款。"],
 };
@@ -1138,7 +1134,7 @@ function renderA2() {
     mode.append(el("span", "approval-tag", "本人核准"), AP.sourceText(lastA2 && lastA2.sources) + (lastA2 && lastA2.signer !== "approvals-only" ? "・Signer 目前無法連線" : ""));
     parts.push(mode);
     const pending = ap.state === "pending";
-    const res = A2_RESULT[ap.state];
+    const res = AP.decidedText(ap.state, p) || A2_RESULT[ap.state];
     const head = el("div", "approval-head");
     head.dataset.state = ap.state;
     head.append(el("h3", "", pending ? "核准這一筆付款？" : res ? res[1] : ap.state),
@@ -1190,7 +1186,7 @@ function renderA2() {
       }
       parts.push(acts);
     } else if (ap.grant) {
-      parts.push(el("p", "approval-grant", "本人核准紀錄 " + ap.grant.jti.slice(0, 18) + "…（authorization_method " + ap.grant.authorization_method + "，由 Signer 驗證；Host 只記錄）・付款未啟用"));
+      parts.push(el("p", "approval-grant", AP.grantLine(ap.grant)));
     }
     const shown = a2Op && a2Op.session === ap.approval_session_id ? null : a2Note || (stored && { kind: stored[0], text: stored[1] });
     if (a2Op && a2Op.session === ap.approval_session_id) {

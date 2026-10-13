@@ -619,3 +619,30 @@ func TestA2NoSimulatedApproval(t *testing.T) {
 		t.Fatalf("simulated approval in A2: %d %v", code, r)
 	}
 }
+
+// Review S2: the Signer verified an approval whose answer never reached the
+// Host; the task is then cancelled. The Host's next look closes the
+// challenge, finds it used, records nothing on the withdrawn session and
+// abandons the Signer's approval (design 7).
+func TestA2CancelledAfterSignerVerified(t *testing.T) {
+	f := startA2(t, 60)
+	sid, intent, task := f.ask("01")
+	_, r := f.challenge(sid, "att-req-0000000000001", "approve")
+	chID := r["challenge"].(map[string]any)["challenge_id"].(string)
+	used, err := f.core.Verify(context.Background(), signer.VerifyRequest{VerifyRequestID: "ver-req-0000000000000", ChallengeID: chID,
+		Order: orderOf(t, f, "att-req-0000000000001"), Assertion: f.sign(r, sid, intent, "approve")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, c := f.h.post("/api/host/tasks/"+task+"/cancel", f.h.tokens["operator"], `{}`); code != 200 && code != 202 {
+		t.Fatalf("cancel task: %d %v", code, c)
+	}
+	f.h.waitFor(task, func(v taskReply) bool { return v.Purchases[0].Approval.State == "withdrawn" })
+	code, s := f.status(sid, "att-req-0000000000001")
+	if code != 200 || s["outcome"] != "closed" || sessionState(s) != "withdrawn" || f.h.grants() != 0 {
+		t.Fatalf("after cancel: %d %v", code, s)
+	}
+	if a, err := f.core.ApprovalByID(context.Background(), used.ApprovalID); err != nil || a.State != "abandoned" {
+		t.Fatalf("Signer approval after cancel: %+v %v", a, err)
+	}
+}
