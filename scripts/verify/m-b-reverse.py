@@ -44,6 +44,7 @@ PC = "internal/paycontract/paycontract.go"
 PE = "internal/paycontract/events.go"
 SPY = "internal/store/pay.go"
 PP = "internal/paypolicy/paypolicy.go"
+PV = "internal/paycontract/version.go"
 
 
 def node(path, test, regex):
@@ -355,6 +356,9 @@ ITEMS = [
      [(PP, "in.ContractVersion != paycontract.Version || in.Purchase.Version != in.ContractVersion {", "in.ContractVersion != paycontract.Version {")]),
     ("C2a: one request ID never names orders of two versions", go("./internal/paycontract/", "^TestCompareRetryAcrossVersions$", ("TestCompareRetryAcrossVersions", r"v1 and v2 orders of one request: <nil>")),
      [(PC, "if existing.Version != incoming.Version {", "if false {")]),
+    # C2b: the BBS+ credential in apa.pay.v2 (docs/commercial-c2-design.md); run them alone with "^C2b:".
+    ("C2b: only v2 withdraws an Ask for a credential reason", go("./internal/paycontract/", "^TestAskClosuresByVersion$", ("TestAskClosuresByVersion", r"apa.pay.v1 withdrawn CREDENTIAL_REVOKED: <nil>")),
+     [(PV, "Version: {Version, Domain, ReasonCodes, denyReasons, askV1},", "Version: {Version, Domain, ReasonCodes, denyReasons, askV2},")]),
     # D4 of the OS isolation plan (keygen); run them alone with "^P1b-D4:".
     ("P1b-D4: keygen never replaces a key file", go("./cmd/apa-signer/", "^TestKeygen$", ("TestKeygen", r"an existing key file was replaced")),
      [(AS, "if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {", "if _, err := os.Lstat(path); false && !errors.Is(err, os.ErrNotExist) {"),

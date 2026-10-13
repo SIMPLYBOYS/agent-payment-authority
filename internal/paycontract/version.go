@@ -29,11 +29,21 @@ var CredentialReasons = []string{"CREDENTIAL_INVALID", "CREDENTIAL_REVOKED", "CR
 type Spec struct {
 	Version, Domain string
 	reasons, deny   []string
+	askClosures     [][2]string // (approval_status, reason) pairs an Ask may record
 }
 
+// askV1 is apa.pay.v1's Ask table, as it was before versions.
+var askV1 = [][2]string{{"pending", "HUMAN_APPROVAL_REQUIRED"}, {"expired", "APPROVAL_TIMEOUT"}, {"withdrawn", "HOST_CANCELLED"},
+	{"approved", "SIMULATED_APPROVAL"}, {"approved", "WEBAUTHN_APPROVAL"}, {"denied", "APPROVER_DENIED"}, {"superseded", "QUOTE_CHANGED"}}
+
+// apa.pay.v2 also withdraws an Ask whose credential is revoked, whose
+// status cannot be read or which expired before an approval landed
+// (docs/commercial-c2-design.md 3.2, 7.1).
+var askV2 = slices.Concat(askV1, [][2]string{{"withdrawn", "CREDENTIAL_REVOKED"}, {"withdrawn", "CREDENTIAL_STATUS_UNAVAILABLE"}, {"withdrawn", "AUTHORIZATION_EXPIRED"}})
+
 var specs = map[string]Spec{
-	Version: {Version, Domain, ReasonCodes, denyReasons},
-	V2:      {V2, DomainV2, slices.Concat(ReasonCodes, CredentialReasons), slices.Concat(denyReasons, CredentialReasons)},
+	Version: {Version, Domain, ReasonCodes, denyReasons, askV1},
+	V2:      {V2, DomainV2, slices.Concat(ReasonCodes, CredentialReasons), slices.Concat(denyReasons, CredentialReasons), askV2},
 }
 
 // SpecOf is the spec of a pay-family version.

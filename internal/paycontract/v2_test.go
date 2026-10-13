@@ -157,3 +157,21 @@ func TestGrantIDByVersion(t *testing.T) {
 		t.Fatal("a v2 grant took v1's jti")
 	}
 }
+
+// C2b: v2 withdraws an Ask for a credential reason; v1 never does.
+func TestAskClosuresByVersion(t *testing.T) {
+	_, p1 := base(t)
+	for _, c := range []struct {
+		version, reason string
+		ok              bool
+	}{
+		{V2, "CREDENTIAL_REVOKED", true}, {V2, "CREDENTIAL_STATUS_UNAVAILABLE", true}, {V2, "AUTHORIZATION_EXPIRED", true}, {V2, "HOST_CANCELLED", true},
+		{Version, "CREDENTIAL_REVOKED", false}, {Version, "CREDENTIAL_STATUS_UNAVAILABLE", false}, {Version, "AUTHORIZATION_EXPIRED", false}, {Version, "HOST_CANCELLED", true},
+	} {
+		d := contracts.PolicyDecision{Version: c.version, IntentHash: mustHash(t, p1), PolicyVerdict: "Ask", ApprovalStatus: "withdrawn",
+			PaymentStatus: PaymentNotEnabled, Reason: c.reason}
+		if err := ValidateDecision(d); (err == nil) != c.ok {
+			t.Errorf("%s withdrawn %s: %v", c.version, c.reason, err)
+		}
+	}
+}

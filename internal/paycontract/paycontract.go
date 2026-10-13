@@ -291,8 +291,7 @@ func ValidateDecision(d contracts.PolicyDecision) error {
 	ok = false
 	switch d.PolicyVerdict {
 	case "Ask":
-		ok = slices.Contains([][2]string{{"pending", "HUMAN_APPROVAL_REQUIRED"}, {"expired", "APPROVAL_TIMEOUT"}, {"withdrawn", "HOST_CANCELLED"},
-			{"approved", "SIMULATED_APPROVAL"}, {"approved", "WEBAUTHN_APPROVAL"}, {"denied", "APPROVER_DENIED"}, {"superseded", "QUOTE_CHANGED"}}, [2]string{d.ApprovalStatus, d.Reason})
+		ok = slices.Contains(sp.askClosures, [2]string{d.ApprovalStatus, d.Reason})
 	case "Deny":
 		ok = d.ApprovalStatus == "not_requested" && slices.Contains(sp.deny, d.Reason)
 	case "Allow":
