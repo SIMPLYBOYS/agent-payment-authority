@@ -1,7 +1,7 @@
 # A2 本人核准產品接線：實作差異、驗證與限制
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-A2本人核准產品接線實作派工-f2bf224-20261013〉（Aaron 已批准「A2 開工」）。分支 `commercial-a2`，基準 `f2bf224`（工作區只有未追蹤的 `demo`；沒有適用的 AGENTS.md）。
-> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節）；第三次 review 窄幅 not pass，A、B 已修正（第 9 節），待第四次獨立上下文 review；實機登記與操作未驗收，付款未啟用。**
+> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（第 6 節）；R1～R6 已修正（第 7 節）；第二次 review Signer pass、Host 窄幅 not pass，S1、S2 已修正（第 8 節）；第三次 review 窄幅 not pass，A、B 已修正（第 9 節）；第四次 review 窄幅 not pass，S-B、S-A 已修正（第 10 節），待第五次獨立上下文 review；實機登記與操作未驗收，付款未啟用。**
 > 以下為 `f0817c7` 時的狀態，保留原文：A2 已實作並完成本輪定向自動化驗證，待 Codex 技術 review；實機登記與操作未驗收，付款未啟用。A2 不自行標 Done；本輪所有結果都是「Claude Code 執行，待 Codex 核對」，不是實機結果。
 >
 > **歸屬的變更**：Codex 訂閱已到期，從這一節起沒有第三方核對。Review 改由 Claude Code 另開的獨立上下文 subagent 執行：它們只拿到 diff、設計文件與本文件，沒有作者寫程式時的推理；這比作者自審接近獨立核對，但仍是同一個模型。紀錄一律寫「Claude Code 獨立上下文 review」，不寫成 Codex。
@@ -358,3 +358,37 @@ R1～R6 的修正另開一輪：修正、只重跑受影響的部分、再交一
 沒有 W 或 B 層測試在畫面上直接呈現 B 的情境（Signer 斷線且會話到期）；B 只在 `panelNote` 的單元測試覆蓋。
 
 下一步：第四次獨立上下文 review，只看 `4662ae3..` 本輪差異。
+
+## 10 第四次獨立上下文 review 與第四輪修正（10/13；Claude Code，都不是實機結果）
+
+第四次 review 由一個 subagent 執行，只審 `4662ae3..6c38cf3`。判定 **not pass（窄）**：A、B 已關閉。剩兩項 should-fix：
+- **S-B**（B 的同類，舊碼）：會話關閉後，pending 時寫下的訊息仍會留著。例如按核准後取消裝置提示，然後期限到，標題寫「已過期」，訊息卻仍是「這筆仍在等你決定」。另外，`challenged` 或 `requested` 的 attempt 在會話關閉後沒有終點文字。
+- **S-A**（A 的殘留）：A2 面板上的模擬紀錄，intent 列寫「Signer 依完整請購重算比對」，且仍顯示裝置提示說明。所以第 9 節「A2 面板上的模擬紀錄不提裝置」是誇大，以本節為準。
+
+note：
+- outcome closed 也涵蓋「Signer 的核准已過期、會話仍 pending」。
+- 卡片與抽屜在 A2 模式下，對 expired、superseded 仍是 P1-a 的「已過期，無法核准」「這次核准作廢」，與面板用詞不同；差異 #11 只涵蓋面板。
+- 跨模式下，已決定的會話配上未知的 attempt。
+- A 也只有單元測試：a2-ui 與 p1a-ui 只有同方式的紀錄，沒有在畫面層執行 `other` 分支。第 9 節只對 B 說明了這點，這裡補上。
+
+第四輪修正（`598bbef`）：
+- **S-B**：會話不是 pending 時，任何未結束的 attempt 都依會話狀態給終點文字：
+  - unknown／verifying：「無法確認這次驗證的結果；這筆已依後端期限關閉。」（或已關閉，任務取消／報價改變）；
+  - requested／challenged／refused：「……；這次驗證沒有完成。」
+  - 只有最終訊息（ok、deny、closed）留下。已決定的會話不加訊息，標題即結果。
+- **S-A**：與面板方式不同的紀錄，intent 列寫「後端比對這一份」，也不顯示裝置提示說明。
+- **note 3**：outcome closed 改為「裝置的驗證沒有被採用（這筆已關閉，或 Signer 的核准已過期）；不會付款。」
+- 測試：`approve.test.mjs` 新增一項（S-B）。
+
+不處理、記錄為已知：
+- 卡片與抽屜的 expired、superseded 用詞（P1-a 共用，差異 #11 只涵蓋面板）。
+- A、S-A、B、S-B 都只有單元測試，沒有畫面層測試。
+
+重跑（`598bbef`；只改了 web）：
+
+| 重跑 | 結果 | 證據 |
+|---|---|---|
+| web 測試 5 檔 | 全部 pass（29、10、27、9、13） | `artifacts/human-approval/fix-598bbef/node-tests.txt` |
+| 瀏覽器 a2-ui（CDP virtual，不是實機）與 p1a-ui | 36 與 54 PASS、0 FAIL | `fix-598bbef/browser-runs.txt`（含命令）；`artifacts/human-approval/a2-ui-598bbef7650d-20261013T124122Z/`、`artifacts/p1a/p1a-ui-598bbef7650d-20261013T124208Z/` |
+
+下一步：第五次獨立上下文 review，只看 `6c38cf3..` 本輪差異。
