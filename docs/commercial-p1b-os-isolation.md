@@ -1,7 +1,8 @@
 # P1-b：OS 隔離部署最小方案
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-P1-bOS隔離部署最小方案派工-76c3673-20261013〉（Aaron 核准撰寫本方案）。分支 `commercial-p1b`，基準 `76c3673`；產品與驗證基準 `07b16fd`、`935de2f`（R1～R3 限定技術複核已通過，本方案不重開）。
-> **狀態：keygen 通過 B1 一次性未注資測試金鑰用途的限定技術複核；A／B0 由 Aaron 依 Route B 操作並完成安全停止，Codex 依回報判讀。B1 金鑰隔離仍待 Aaron 操作；P1-b 未結案，正式付款未啟用。**（第 8.5、8.6 節）
+> **狀態：P1-b 既有實作缺口已限定複核；A／B0／B1 與測試資料清理完成，限定結案紀錄待最後核對；正式付款未啟用。**（第 8.7 節；P1-b 限定結案候選見 [commercial-p1b.md](commercial-p1b.md) 第 10 節）
+> 以下為 `b7cc85d` 時的狀態，保留原文：keygen 通過 B1 一次性未注資測試金鑰用途的限定技術複核；A／B0 由 Aaron 依 Route B 操作並完成安全停止，Codex 依回報判讀。B1 金鑰隔離仍待 Aaron 操作；P1-b 未結案，正式付款未啟用。（第 8.5、8.6 節）
 > 以下為 `8fb5f8c` 時的狀態，保留原文：Aaron 已核准 D1～D7（10/13，第 8 節）；D4 的 keygen 工具與 D6 的設計措辭已完成；OS 隔離驗收指令第二輪補正完成，待 Codex 限定複核；預演與跨使用者驗收未完成，正式付款未啟用。（第 8.3 節）
 > 以下為 `62b5037` 時的狀態，保留原文：Aaron 已核准 D1～D7；D4 的 keygen 工具與 D6 的設計措辭已完成；D1～D3、D5 待 Aaron 親自執行；尚未部署，正式付款未啟用。
 > 以下為方案交付時（`27b6e96`）的狀態，保留原文：方案完成，待 Codex review 與 Aaron 執行核准；尚未部署，正式付款未啟用。本文件的所有命令都**待核准後執行**：撰寫本方案時沒有試跑任何命令（包括 dry-run、語法檢查或測試替身），沒有 sudo，沒有建立使用者、群組、目錄或金鑰，沒有改權限。
@@ -405,3 +406,48 @@ D1～D7 的核准不變，R1～R3 維持關閉。
 - 設定仍然沒有 `assets`／`delegations`；不 sign、不連鏈、不呼叫 RPC 或 faucet、不交易。
 - 建立後，依序確認檔案權限、Signer 解鎖、Host 讀不到金鑰、IPC、人工觀察與安全停止，才能判讀 B1。
 - 清理照 D5 與 runbook 第 8 節，在確認程序與 socket 已停止、清單一致之後，由 Aaron 在另一道關卡操作。
+
+### 8.7 B1、D5 清理與本次暫存清理（Aaron，Route B，10/13）
+
+依 vault〈Claude-Code-P1-bB1隔離驗收與清理同步派工-b7cc85d-20261013〉。
+
+> 依 Aaron 實際執行與回報，A／B0／B1 的限定 OS 隔離驗收及本次測試資料清理已完成；Signer 已停止，socket 與本次暫存已清理。這不代表管理員防護、網路隔離或全面安全稽核，也不代表正式付款已啟用。
+
+**基準**：執行時的建置基準仍是 `8fb5f8c1f03f5674222b88e842d0def6b4751e47`（不是文件提交 `b7cc85d`）；執行檔 SHA-256 `3f29a2d54c71a74f52840f34bede4b3c1439218c4400b9eee0b8617f243e0683`（同第 8.6 節）。
+
+**B1**（全部由 Aaron 執行，Codex 依貼回的輸出陪同判讀）：
+1. 在不錄製的 W-signer 建立一次性測試金鑰 `wallet-isolation-test`，回報完整公開地址與 `keygen exit=0`。地址 `0xef4d86f298b5020ff083e6414f24a11571bb11b9` 只用於本次測試識別，不是可用的付款帳戶；金鑰已刪除，不得注資。
+2. 7.2 的設定只加入這個測試錢包：`callers=[501]`、`assets=[]`、`delegations=[]`。7.3 核對金鑰與設定檔都是 `apa-signer:apa-signer:600`，啟動前沒有 Signer 程序或 socket。
+3. W-signer 用剛建立的測試密語啟動，回報 `serving on /opt/apa-signer/run/signer.sock (reservation verification unavailable until P2: nothing is signed)`。依已複核的 `assemble` 行為，這表示設定裡的測試金鑰成功載入並解鎖；這不是簽署或付款成功。
+4. 7.5：Host health 回 200；不用 sudo 讀測試金鑰、`signer.json`、`signer.db` 都得到 `Permission denied`，回報 `OK 7.5`。讀取探測的內容丟棄，沒有印出私鑰。
+5. 7.6：未授權的 `apa-signer` 呼叫者回 403；`nobody` 直接 AF_UNIX connect 得到 `connect_errno=13 reason=Permission denied`，回報 `OK 7.6`。這次直接用 B0 已判讀過的補充方法（第 8.6 節），不是 curl helper 通過，B1 也沒有再發生一次 curl STOP。
+6. Aaron 貼回 W-signer 的兩行 `health unlocked` 與一行 `caller  CALLER_NOT_ALLOWED`，並明確回答「沒有顯示密語」；之後確認 `7.6o observation recorded`。人工觀察歸 Aaron，Codex 沒有看過未錄製的畫面。
+7. Ctrl-C 後回報 `no apa-signer process`、`socket absent`、`OK 7.7`。
+
+沒有執行 sign、注資、鏈上或外部交易。
+
+**D5 清理**（Aaron；證據目錄 `artifacts/p1b/os-isolation-20261013T020819Z/`）：
+- 8.1：先確認程序與 socket 不存在，再列清單；只有已知項目，回報 `OK 8.1`。
+- 8.2：因為訊息截斷，**拆成三段**操作：重新核對清單未變、刪除具名項目、確認保留清單並保存證據。這不是原始區塊一次執行。
+- 刪除六個實際存在的檔案：測試金鑰、`data/keys/probe.txt`、`data/probe.txt`、`data/signer.json`、`data/signer.db`、`bin/probe.txt`；另以非遞迴的 `rmdir` 移除空的 `probe-dir`。這次清單沒有 DB 的 WAL／SHM，所以沒有刪它們。
+- 保留項目精確為 `bin/`、`bin/apa-signer`、`data/`、`data/keys/`、`run/`，以及已建立的帳號與群組（D5）。三個私有／socket 目錄的權限核對正確，回報 `OK 8.2`。
+- `sudo-l.txt`、`ids`、`inventory`、`remaining` 複製到證據目錄；Aaron 回報 W-admin、W-host 都已退出錄製。
+- 測試金鑰已刪除：不宣稱有可恢復的備份，也不宣稱這是對底層儲存媒體的安全抹除。
+
+**本次暫存清理**（Aaron）：先把 `probe-hashes` 複製到證據目錄，再刪除本次暫存的建置、設定副本、交接檔、標記與空目錄（原 `RUN=/tmp/apa-iso.I0Wtz3`）。回報：`DONE: 本次暫存已清理，證據保留於 .../os-isolation-20261013T020819Z`。這個 `RUN` 已不存在，不是下一次操作的入口。
+
+**證據歸屬**：
+- **Aaron**：sudo、密語輸入、keygen、Signer 啟動與停止、權限與 IPC 探測、人工觀察、錄製與清理。
+- **Codex**：
+  - 原始碼與既有測試紀錄的限定複核；提供逐關卡指示，並依 Aaron 的輸出判讀。
+  - 退出錄製後只讀核對過檔案 metadata：兩份 log 存在且非空、清理清單存在、暫存目錄項目符合本次範圍。
+  - 沒有讀完整錄製內容，沒有全面核對錄製檔的完整性或雜湊，沒有獨立重新執行 B1。
+- **Claude Code**：先前的程式實作與 D4 測試，以及本輪的文件同步。本輪沒有讀錄製檔、沒有掃描個人資料、沒有複製或上傳 log。
+- **未核對項**：錄製檔的完整性與雜湊沒有證明；若之後需要，另列處理，不因此重跑部署或金鑰驗收。
+
+**界線**（不變）：
+- 只驗證這台 macOS、本次設定與非提權使用者的限定行為。不能抵抗 sudo／管理員，也不能辨識同一 UID 下是哪一個 Host 程式。
+- 環境變數未觀測；Route A 未執行；沒有 OS 強制的網路隔離。
+- keygen 的地址輸出錯誤未處理、解密自檢的私鑰副本未明確清零，維持非阻擋追蹤（第 8.5 節），本輪不改程式。
+- 正式付款仍未啟用：沒有 A／B 正式金鑰、正式本人核准、WebAuthn、鏈上預留、付款或交付的驗收。
+- CLI timeout 後是否禁止新付款，仍是另列決策。

@@ -1,7 +1,8 @@
 # P1-b：金鑰庫與獨立 Signer（實作紀錄）
 
 > 2026-10-12，Claude Code。依 vault〈Claude-Code-P1-b金鑰庫與獨立Signer實作派工-e725c44-20261012〉（Aaron：「這三件事我都核准，請提供派工筆記」）實作。設計見 [commercial-p1b-design.md](commercial-p1b-design.md)，分支 `commercial-p1b`，從 `e725c44` 開出。
-> **狀態：P1-b 實作缺口 R1～R3 已通過限定技術複核（程式 `07b16fd`、測試與計畫 `935de2f`；Codex 唯讀核對，沒有獨立重跑）；OS 隔離部署尚未驗收，正式付款仍未啟用。**（第 9.4 節；下一步為 OS 隔離部署規劃與另行核准；P1-b 不標 Done。）
+> **狀態：P1-b 既有實作缺口已限定複核；A／B0／B1 與測試資料清理完成，限定結案紀錄待最後核對；正式付款未啟用。**（第 10 節「限定結案候選」；P1-b 不標 Done。）
+> 以下為 `b7cc85d` 時的狀態，保留原文：P1-b 實作缺口 R1～R3 已通過限定技術複核（程式 `07b16fd`、測試與計畫 `935de2f`；Codex 唯讀核對，沒有獨立重跑）；OS 隔離部署尚未驗收，正式付款仍未啟用。（第 9.4 節；下一步為 OS 隔離部署規劃與另行核准；P1-b 不標 Done。）
 > 以下為 `a33ebf7` 交付時的狀態，保留原文：P1-b R1、R3 限定複核關閉；R2 回覆分類補正完成，待 Codex 限定複核；OS 隔離部署尚未驗收；正式付款仍未啟用。（第 9 節：Codex 對 `fcc5095` 的限定複核關閉 R1、R3；R2 剩下的回覆分類已補正並在隔離容器完成定向測試。）
 > 以下為 `fcc5095` 交付時的狀態，保留原文：P1-b 實作 R1～R3 補正完成，待 Codex 限定複核；OS 隔離部署尚未驗收；正式付款仍未啟用。（第 8 節：Codex 對 `22e45ed` 的技術 review 暫不通過，R1～R3 已補正並在隔離容器完成定向測試。）
 > 以下為 `22e45ed` 交付時的狀態，保留原文：P1-b 已實作並完成本輪定向測試，待 Codex 技術 review；OS 隔離部署尚未驗收；正式付款仍未啟用。（本輪 run 的 29 項反向檢查中，1 項因反向項目本身的突變寫法無法編譯而未計為抓到；修正該項目後單獨補跑，已被預期斷言抓到。見第 5 節。）
@@ -152,7 +153,7 @@ env HOME="$T/home" GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)"
 
 ## 6 OS 隔離（尚未驗收，本輪不執行）
 
-> 10/13：最小部署方案見 [commercial-p1b-os-isolation.md](commercial-p1b-os-isolation.md)（P1-b OS 隔離部署最小方案：Aaron 已核准 D1～D7；keygen 工具（D4）已實作並完成定向驗證，設計措辭（D6）已更新；keygen 通過 B1 一次性未注資測試金鑰用途的限定技術複核；A／B0 由 Aaron 依 Route B 操作並完成安全停止，Codex 依回報判讀。B1 金鑰隔離仍待 Aaron 操作；P1-b 未結案，正式付款未啟用）。方案取代下面第 3 步的 `scripts/verify/p1b-isolation.sh`：該腳本沒有撰寫，方案改用 macOS 內建命令與 `curl --unix-socket`。以下保留當時的文字。
+> 10/13：最小部署方案見 [commercial-p1b-os-isolation.md](commercial-p1b-os-isolation.md)（P1-b OS 隔離部署最小方案：Aaron 已核准 D1～D7；keygen 工具（D4）已實作並完成定向驗證，設計措辭（D6）已更新；keygen 通過 B1 一次性未注資測試金鑰用途的限定技術複核；P1-b 既有實作缺口已限定複核；A／B0／B1 與測試資料清理完成，限定結案紀錄待最後核對；正式付款未啟用）。方案取代下面第 3 步的 `scripts/verify/p1b-isolation.sh`：該腳本沒有撰寫，方案改用 macOS 內建命令與 `curl --unix-socket`。以下保留當時的文字。
 
 本輪的 caller uid 測試在**同一個 OS 使用者**下進行：伺服器與客戶端都是目前的 uid，設定允許它就通過，不允許就 403。這證明程式讀的是核心回報的對端 uid，**不**證明 Agent／Host 在 OS 層讀不到金鑰或連不到 Signer。跨使用者的證據需要 Aaron 核准系統設定（決策 4）後才做，最小步驟：
 
@@ -353,3 +354,27 @@ env HOME="$T/home" GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)"
 - `TestFinishReadError` 是 Core 層的錯誤分類測試，不是部署或啟動故障演練。
 
 **之後**：整個 P1-b 不標 Done。下一步為 OS 隔離部署規劃與另行核准（本輪不撰寫部署方案、不執行部署）。CLI timeout 後是否禁止新付款，繼續另列決策。
+
+## 10 限定結案候選（待 Codex 最後核對）
+
+依 vault〈Claude-Code-P1-bB1隔離驗收與清理同步派工-b7cc85d-20261013〉。本節只把各項結論連回原始紀錄，不重複產生測試結果，也不新增技術驗收門檻。**P1-b 尚未標 Done**：要等 Codex 的文件核對。
+
+| 範圍 | 結論 | 執行與證據 | 原始紀錄 |
+|---|---|---|---|
+| Signer 實作缺口 R1～R3 | Codex 限定技術複核通過（程式 `07b16fd`、測試與計畫 `935de2f`） | Claude Code 執行 `artifacts/p1b/r-20261012T164244Z/`、`r2b-20261012T172959Z/`；Codex 唯讀核對，沒有獨立重跑 | 本文件第 8、9 節（含 9.4） |
+| 原始實作與定向驗證 | 第一輪 run 整輪 FAIL（28／29），補跑那一項抓到；不合併成同一輪全過 | Claude Code：`m1-check-20261012T134841Z/`、`rerun-20261012T135238Z/` | 本文件第 5 節 |
+| keygen（D4） | 限定技術複核通過，只適用於 B1 一次性未注資測試金鑰 | Claude Code 執行 `artifacts/p1b/d4-20261012T184045Z/`；Codex 唯讀核對 | [OS 隔離方案](commercial-p1b-os-isolation.md) 第 8.2、8.5 節 |
+| A 階段、B0 | Route B 限定操作完成、安全停止；6.5 的原始 curl STOP 保留，errno 13 為補充判讀 | Aaron 執行、Codex 依回報判讀；`artifacts/p1b/os-isolation-20261013T020819Z/` | OS 隔離方案第 8.6 節 |
+| B1 | 測試金鑰在 `apa-signer` 下解鎖；Host 讀不到；403 與檔案權限阻擋；人工觀察；安全停止 | 同上 | OS 隔離方案第 8.7 節 |
+| D5 清理與本次暫存 | 只刪本次具名項目；保留帳號、群組與目錄；8.2 拆三段操作 | 同上 | OS 隔離方案第 8.7 節；runbook 第 8.2 節後的說明 |
+| D6 設定承諾 | 採 C1：「Signer 不能改自己的設定」不成立於 OS 層 | — | [設計](commercial-p1b-design.md) 第 3.2、3.5 節 |
+
+**沒有涵蓋、維持不變的界線**：
+- 管理員／sudo；同一 UID 下的 Host 程式辨識；
+- 環境變數未觀測；Route A 未執行；沒有 OS 強制的網路隔離（D7）；
+- 錄製檔的完整性與雜湊沒有核對；
+- keygen 的兩個非阻擋追蹤項（OS 隔離方案第 8.5 節）；
+- 正式付款未啟用：沒有 A／B 正式金鑰、正式本人核准、WebAuthn、鏈上預留、付款或交付的驗收；
+- CLI timeout 後是否禁止新付款，仍是另列決策。
+
+**核對時看到的出入**：沒有發現與上述結論矛盾的既有資料。
