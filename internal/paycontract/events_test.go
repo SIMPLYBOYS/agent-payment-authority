@@ -102,3 +102,48 @@ func TestEventShape(t *testing.T) {
 		t.Error("M1 took delegation_id")
 	}
 }
+
+// A2: a decision verified by the Signer is recorded with method webauthn
+// and the Signer's approval ID, and its own reason; neither mixes with
+// the simulated form.
+func TestWebAuthnEventShape(t *testing.T) {
+	_, o := base(t)
+	var cfg contracts.RegistryConfig
+	fixture(t, "testdata/contracts/registry.json", &cfg)
+	reg, err := contracts.NewRegistry(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := SessionID(o.Intent.TaskID, o.Intent.PurchaseOrderID)
+	approved := func(reason, method, signer string) contracts.EventPayload {
+		return contracts.EventPayload{Decision: decision(t, o, "approved", reason), ApprovalSessionID: sid, AuthorizationMethod: method, SignerApprovalID: signer}
+	}
+	for _, c := range []struct {
+		name string
+		typ  string
+		p    contracts.EventPayload
+		ok   bool
+	}{
+		{"webauthn approved", "APPROVED", approved("WEBAUTHN_APPROVAL", "webauthn", "hap-1"), true},
+		{"webauthn without its approval", "APPROVED", approved("WEBAUTHN_APPROVAL", "webauthn", ""), false},
+		{"webauthn with the simulated reason", "APPROVED", approved("SIMULATED_APPROVAL", "webauthn", "hap-1"), false},
+		{"simulated with a Signer approval", "APPROVED", approved("SIMULATED_APPROVAL", "simulated", "hap-1"), false},
+		{"simulated with the webauthn reason", "APPROVED", approved("WEBAUTHN_APPROVAL", "simulated", ""), false},
+		{"other method", "APPROVED", approved("WEBAUTHN_APPROVAL", "voice", "hap-1"), false},
+		{"webauthn denied", "APPROVAL_DENIED", contracts.EventPayload{Decision: decision(t, o, "denied", "APPROVER_DENIED"), ApprovalSessionID: sid, AuthorizationMethod: "webauthn", SignerApprovalID: "hap-1"}, true},
+		{"webauthn grant", "GRANT_ISSUED", contracts.EventPayload{ApprovalSessionID: sid, GrantID: GrantID(sid), AuthorizationMethod: "webauthn", SignerApprovalID: "hap-1"}, true},
+		{"webauthn grant without its approval", "GRANT_ISSUED", contracts.EventPayload{ApprovalSessionID: sid, GrantID: GrantID(sid), AuthorizationMethod: "webauthn"}, false},
+		{"a Signer approval elsewhere", "APPROVAL_SESSION_OPENED", contracts.EventPayload{ApprovalSessionID: sid, SignerApprovalID: "hap-1"}, false},
+	} {
+		es := chainOf(t, o, step{"TASK_STARTED", contracts.EventPayload{}, false}, step{"DELEGATION_BOUND", contracts.EventPayload{DelegationID: "dlg-1"}, false}, step{c.typ, c.p, true})
+		if err := ValidateEvent(reg, es[2], &o); (err == nil) != c.ok {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+	// The M1 rules refuse signer_approval_id on an M1 event.
+	m1 := chainOf(t, o, step{"TASK_STARTED", contracts.EventPayload{SignerApprovalID: "hap-1"}, false})[0]
+	m1.Version = contracts.Version
+	if reg.ValidateEvent(m1, nil) == nil {
+		t.Error("M1 took signer_approval_id")
+	}
+}

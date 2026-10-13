@@ -60,6 +60,7 @@ var ReasonCodes = []string{
 	"HUMAN_APPROVAL_REQUIRED", "WITHIN_ALLOW_MAX",
 	"INSUFFICIENT_BUDGET", "MERCHANT_NOT_ALLOWED", "AUTHORIZATION_EXPIRED", "CONFIG_MISSING", "APPROVER_UNAVAILABLE", "ASSET_NOT_ALLOWED",
 	"APPROVAL_TIMEOUT", "HOST_CANCELLED", "SIMULATED_APPROVAL", "APPROVER_DENIED", "QUOTE_CHANGED",
+	"WEBAUTHN_APPROVAL", // A2: approved by a Signer-verified assertion
 }
 
 var denyReasons = []string{"INSUFFICIENT_BUDGET", "MERCHANT_NOT_ALLOWED", "AUTHORIZATION_EXPIRED", "CONFIG_MISSING", "APPROVER_UNAVAILABLE", "ASSET_NOT_ALLOWED"}
@@ -293,7 +294,7 @@ func ValidateDecision(d contracts.PolicyDecision) error {
 	switch d.PolicyVerdict {
 	case "Ask":
 		ok = slices.Contains([][2]string{{"pending", "HUMAN_APPROVAL_REQUIRED"}, {"expired", "APPROVAL_TIMEOUT"}, {"withdrawn", "HOST_CANCELLED"},
-			{"approved", "SIMULATED_APPROVAL"}, {"denied", "APPROVER_DENIED"}, {"superseded", "QUOTE_CHANGED"}}, [2]string{d.ApprovalStatus, d.Reason})
+			{"approved", "SIMULATED_APPROVAL"}, {"approved", "WEBAUTHN_APPROVAL"}, {"denied", "APPROVER_DENIED"}, {"superseded", "QUOTE_CHANGED"}}, [2]string{d.ApprovalStatus, d.Reason})
 	case "Deny":
 		ok = d.ApprovalStatus == "not_requested" && slices.Contains(denyReasons, d.Reason)
 	case "Allow":

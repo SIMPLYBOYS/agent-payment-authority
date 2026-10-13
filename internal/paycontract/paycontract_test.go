@@ -203,6 +203,26 @@ func TestGrantAndDelegation(t *testing.T) {
 			t.Errorf("%s accepted", name)
 		}
 	}
+	// A2: the Host's mirror of a Signer-verified approval.
+	w := g
+	w.AuthorizationMethod, w.Issuer, w.SignerApprovalID, w.CredentialRef, w.AMR = "webauthn", Recorder, "hap-1", "sha256:"+strings.Repeat("b", 64), []string{"webauthn"}
+	w.ApproverID = "webauthn:approver-a"
+	if err := w.Validate(); err != nil {
+		t.Fatalf("webauthn grant: %v", err)
+	}
+	for name, edit := range map[string]func(*AuthorizationGrant){
+		"host issuer":      func(x *AuthorizationGrant) { x.Issuer = Issuer },
+		"no approval":      func(x *AuthorizationGrant) { x.SignerApprovalID = "" },
+		"no credential":    func(x *AuthorizationGrant) { x.CredentialRef = "" },
+		"amr":              func(x *AuthorizationGrant) { x.AMR = []string{"webauthn", "voice"} },
+		"simulated mirror": func(x *AuthorizationGrant) { x.AuthorizationMethod = "simulated" },
+	} {
+		x := w
+		edit(&x)
+		if Code(x.Validate()) != "INVALID_GRANT" {
+			t.Errorf("webauthn %s accepted", name)
+		}
+	}
 	d := Delegation{Version: Version, DelegationID: DelegationID("r"), ConsumerID: "consumer-a", Scenario: "pay-a", Purpose: "x", Merchants: []string{"0x" + strings.Repeat("3", 40)},
 		AssetID: "fixture-usdc", TaskBudget: "5000000", AllowMax: "100000", ApprovalDeadlineSeconds: 60, ConfirmedBy: "simulated:consumer-a:host-x", ConfirmMethod: "simulated", ConfirmedAt: 100, ExpiresAt: 200}
 	if err := d.Validate(); err != nil {

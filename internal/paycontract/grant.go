@@ -70,8 +70,12 @@ func (d Delegation) Validate() error {
 }
 
 // AuthorizationGrant is the single-use authorization an approval produces
-// (section 3.2). P1-a makes simulated grants only, unsigned: they name an
-// approval and give no payment capability (the Signer stub refuses them).
+// (section 3.2). A simulated grant (P1-a) is unsigned: it names an approval
+// and gives no payment capability (the Signer stub refuses it). A webauthn
+// grant (A2) is the Host's mirror of a decision the Signer verified: the
+// Host records it, it does not issue it (Issuer then names the recorder,
+// Recorder), and it carries the Signer's approval ID, the credential's
+// reference and amr. Neither pays in A2.
 type AuthorizationGrant struct {
 	Version             string `json:"version"`
 	JTI                 string `json:"jti"`
@@ -83,22 +87,40 @@ type AuthorizationGrant struct {
 	Audience            string `json:"audience"` // signer
 	ApproverID          string `json:"approver_id"`
 	IssuedAt            uint64 `json:"issued_at"`
-	ExpiresAt           uint64 `json:"expires_at"` // the payment binding's valid_before: never outlives the intent
+	ExpiresAt           uint64 `json:"expires_at"` // never past the payment binding's valid_before
+	// webauthn only.
+	SignerApprovalID string   `json:"signer_approval_id,omitempty"`
+	CredentialRef    string   `json:"credential_ref,omitempty"` // sha256 of the credential ID
+	AMR              []string `json:"amr,omitempty"`            // ["webauthn"]
 }
 
-// Issuer is the demo host's approval service.
-const Issuer = "apa-demo-host/approval"
+// Issuer is the demo host's approval service (simulated grants); Recorder
+// is the Host recording the Signer's verified decision (webauthn grants).
+const (
+	Issuer   = "apa-demo-host/approval"
+	Recorder = "apa-demo-host/signer-approval-mirror"
+)
 
 func (g AuthorizationGrant) Validate() error {
 	switch {
 	case g.Version != Version || g.JTI != GrantID(g.ApprovalSessionID) || !ids(g.ApprovalSessionID, g.ApproverID) || !digestPattern.MatchString(g.IntentHash):
 		return coded("INVALID_GRANT", "version, IDs or intent hash")
-	case g.Decision != "approve" || g.Issuer != Issuer || g.Audience != "signer":
-		return coded("INVALID_GRANT", "decision, issuer or audience")
-	case g.AuthorizationMethod != "simulated":
-		return coded("INVALID_GRANT", "P1-a issues simulated grants only")
+	case g.Decision != "approve" || g.Audience != "signer":
+		return coded("INVALID_GRANT", "decision or audience")
 	case !timestamp(g.IssuedAt) || g.ExpiresAt <= g.IssuedAt:
 		return coded("INVALID_GRANT", "times")
+	}
+	switch g.AuthorizationMethod {
+	case "simulated":
+		if g.Issuer != Issuer || g.SignerApprovalID != "" || g.CredentialRef != "" || g.AMR != nil {
+			return coded("INVALID_GRANT", "a simulated grant is the host's, with no Signer approval")
+		}
+	case "webauthn":
+		if g.Issuer != Recorder || !ids(g.SignerApprovalID) || !digestPattern.MatchString(g.CredentialRef) || !slices.Equal(g.AMR, []string{"webauthn"}) {
+			return coded("INVALID_GRANT", "a webauthn grant mirrors a Signer approval: recorder, approval ID, credential reference and amr")
+		}
+	default:
+		return coded("INVALID_GRANT", "method is simulated or webauthn")
 	}
 	return nil
 }

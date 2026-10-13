@@ -45,7 +45,7 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 		return errf("task event needs evidence mode, scope and prev_event_hash")
 	}
 	p := e.Payload
-	for _, v := range []string{p.Code, p.DelegationID, p.ApprovalSessionID, p.GrantID} {
+	for _, v := range []string{p.Code, p.DelegationID, p.ApprovalSessionID, p.GrantID, p.SignerApprovalID} {
 		if v != "" && !ids(v) {
 			return errf("invalid payload ID")
 		}
@@ -78,7 +78,7 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 	d := p.Decision
 	only := func(want ...string) error { // the payload fields this type carries, all present; no other
 		have := map[string]bool{"code": p.Code != "", "decision": d != nil, "delegation": p.DelegationID != "", "session": p.ApprovalSessionID != "",
-			"grant": p.GrantID != "", "method": p.AuthorizationMethod != ""}
+			"grant": p.GrantID != "", "method": p.AuthorizationMethod != "", "signer": p.SignerApprovalID != ""}
 		for k, v := range have {
 			if v != slices.Contains(want, k) {
 				return errf("%s: payload field %s must %s", e.EventType, k, map[bool]string{true: "be absent", false: "be present"}[v])
@@ -124,21 +124,26 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 		}
 		return decisionOf(e, Closures[e.EventType])
 	case "APPROVED", "APPROVAL_DENIED": // decided by an approver, whose method is recorded
-		if !purchase || p.AuthorizationMethod != "simulated" {
-			return errf("%s needs a purchase; P1-a decides by simulation only", e.EventType)
-		}
-		if err := only("decision", "session", "method"); err != nil {
+		fields, err := method(e, purchase, "decision", "session", "method")
+		if err != nil {
 			return err
+		}
+		if err := only(fields...); err != nil {
+			return err
+		}
+		if e.EventType == "APPROVED" && d != nil && d.Reason != map[string]string{"simulated": "SIMULATED_APPROVAL", "webauthn": "WEBAUTHN_APPROVAL"}[p.AuthorizationMethod] {
+			return errf("APPROVED's reason is its method's")
 		}
 		return decisionOf(e, Closures[e.EventType])
 	case "GRANT_ISSUED":
-		if !purchase || p.AuthorizationMethod != "simulated" {
-			return errf("GRANT_ISSUED needs a purchase; P1-a grants are simulated only")
+		fields, err := method(e, purchase, "session", "grant", "method")
+		if err != nil {
+			return err
 		}
 		if p.GrantID != GrantID(p.ApprovalSessionID) {
 			return errf("grant ID is not the session's")
 		}
-		return only("session", "grant", "method")
+		return only(fields...)
 	case "TASK_CANCELLED", "TASK_TIMED_OUT", "CLI_EXITED":
 		want := lifecycleCodes[e.EventType]
 		if p.Code == "" || (want != "" && p.Code != want) {
@@ -147,6 +152,21 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 		return only("code")
 	}
 	return errf("unsupported apa.pay.v1 event %s; cannot settle or deliver", e.EventType)
+}
+
+// method checks the decision's method: simulated (P1-a), or webauthn
+// (A2), which also names the Signer's approval; it returns the payload
+// fields the event then carries.
+func method(e contracts.AuditEvent, purchase bool, fields ...string) ([]string, error) {
+	switch {
+	case !purchase:
+		return nil, errf("%s needs a purchase", e.EventType)
+	case e.Payload.AuthorizationMethod == "simulated":
+		return fields, nil
+	case e.Payload.AuthorizationMethod == "webauthn":
+		return append(fields, "signer"), nil
+	}
+	return nil, errf("%s: the method is simulated or webauthn", e.EventType)
 }
 
 func decisionOf(e contracts.AuditEvent, approvals ...string) error {

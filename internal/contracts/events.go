@@ -26,6 +26,7 @@ type EventPayload struct {
 	ApprovalSessionID   string          `json:"approval_session_id,omitempty"`
 	GrantID             string          `json:"grant_id,omitempty"`
 	AuthorizationMethod string          `json:"authorization_method,omitempty"`
+	SignerApprovalID    string          `json:"signer_approval_id,omitempty"` // apa.pay.v1, A2: the Signer's verified decision
 }
 
 // AuditEvent is one link of its task's hash chain. PrevEventHash is the
@@ -72,7 +73,7 @@ func (r *Registry) ValidateEvent(e AuditEvent, order *PurchaseOrder) error {
 	if e.Payload.Code != "" && !ids(e.Payload.Code) {
 		return fmt.Errorf("invalid event code")
 	}
-	if p := e.Payload; p.DelegationID != "" || p.ApprovalSessionID != "" || p.GrantID != "" || p.AuthorizationMethod != "" {
+	if p := e.Payload; p.DelegationID != "" || p.ApprovalSessionID != "" || p.GrantID != "" || p.AuthorizationMethod != "" || p.SignerApprovalID != "" {
 		return fmt.Errorf("delegation, approval session and grant fields belong to apa.pay.v1, not M1")
 	}
 	if e.EventType == "SYSTEM_READY" {
