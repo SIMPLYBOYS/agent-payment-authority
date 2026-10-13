@@ -102,7 +102,9 @@ func newTokens(cfg contracts.RegistryConfig, path, db string, inputs ...string) 
 type api struct {
 	st       *store.Store
 	tokens   []demoToken
-	addr     string // the bound address, the only Host and Origin accepted
+	addr     string     // the bound address, the Host and Origin accepted (with alias)
+	alias    string     // A2: localhost:<port>, the trusted name WebAuthn needs (decision D3); "" otherwise
+	approve  *approvals // A2: the human approval relay (--approvals-signer); nil otherwise
 	clock    store.Clock
 	unity    *os.Root // the Unity Web build's Build/ directory; nil without a build
 	expiry   *expiryHealth
@@ -135,15 +137,23 @@ func fail(w http.ResponseWriter, status int, code string) {
 	reply(w, status, map[string]string{"error": code})
 }
 
+// ourHost and ourOrigin are an exact list: the bound address and, with
+// A2, localhost on the same port; never a wildcard or a null origin.
+func (a *api) ourHost(h string) bool { return h == a.addr || a.alias != "" && h == a.alias }
+
+func (a *api) ourOrigin(o string) bool {
+	return o == "http://"+a.addr || a.alias != "" && o == "http://"+a.alias
+}
+
 // authorize checks Host, Origin and the bearer token, in that order. Only
 // the Authorization header counts; nothing in the URL, the body or another
 // header names who the caller is.
 func (a *api) authorize(w http.ResponseWriter, r *http.Request) (grant, bool) {
-	if r.Host != a.addr {
+	if !a.ourHost(r.Host) {
 		fail(w, http.StatusForbidden, "forbidden_host")
 		return grant{}, false
 	}
-	if o := r.Header.Get("Origin"); o != "" && o != "http://"+a.addr {
+	if o := r.Header.Get("Origin"); o != "" && !a.ourOrigin(o) {
 		fail(w, http.StatusForbidden, "forbidden_origin")
 		return grant{}, false
 	}

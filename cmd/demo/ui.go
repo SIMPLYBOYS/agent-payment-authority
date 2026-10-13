@@ -73,7 +73,7 @@ func (a *api) unityFile(w http.ResponseWriter, r *http.Request) {
 
 // hostOK applies the API's Host rule to the page and its assets too.
 func (a *api) hostOK(w http.ResponseWriter, r *http.Request) bool {
-	if r.Host != a.addr {
+	if !a.ourHost(r.Host) {
 		fail(w, http.StatusForbidden, "forbidden_host")
 		return false
 	}
@@ -145,7 +145,7 @@ func (a *api) viewer(w http.ResponseWriter, r *http.Request) {
 // shows it before any credentials (docs/cli-poc.md 56). Nothing of a task,
 // a run or a token; this host's own Host only.
 func (a *api) mode(w http.ResponseWriter, r *http.Request) {
-	if r.Host != a.addr {
+	if !a.ourHost(r.Host) {
 		fail(w, http.StatusForbidden, "forbidden_host")
 		return
 	}

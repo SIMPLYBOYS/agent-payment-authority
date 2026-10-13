@@ -180,7 +180,7 @@ func postGuard(w http.ResponseWriter, r *http.Request, a *api, dst any) bool {
 	if !ok {
 		return false
 	}
-	if r.Header.Get("Origin") != "http://"+a.addr {
+	if !a.ourOrigin(r.Header.Get("Origin")) {
 		fail(w, http.StatusForbidden, "forbidden_origin")
 		return false
 	}
@@ -194,11 +194,17 @@ func postGuard(w http.ResponseWriter, r *http.Request, a *api, dst any) bool {
 // strictJSON reads a JSON POST body (application/json, at most 1 KiB,
 // exactly one object, only white space after it) strictly into dst.
 func strictJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	return strictJSONLimit(w, r, dst, 1024)
+}
+
+// strictJSONLimit is strictJSON with another size limit (A2: an
+// assertion or an attestation, relayed).
+func strictJSONLimit(w http.ResponseWriter, r *http.Request, dst any, limit int64) bool {
 	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
 		fail(w, http.StatusBadRequest, "bad_request")
 		return false
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1024))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil || !bytes.HasPrefix(bytes.TrimLeft(body, " \t\r\n"), []byte("{")) {
 		fail(w, http.StatusBadRequest, "bad_request")
 		return false

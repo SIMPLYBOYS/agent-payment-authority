@@ -78,11 +78,19 @@ type statusReply struct {
 	UnityBuild        unityBuildStatus `json:"unity_build"`
 	PaymentCapability string           `json:"payment_capability"`
 	ServedAt          uint64           `json:"served_at"`
-	Runs              map[string]any   `json:"runs,omitempty"`     // with --scenarios: the active run and the interrupted ones
-	Capacity          map[string]int   `json:"capacity,omitempty"` // with --scenarios: the effective --max-runs and the consumers (a deployment setting)
-	History           *historyInfo     `json:"history,omitempty"`  // history mode only
-	Live              *liveInfo        `json:"live,omitempty"`     // live mode only
-	Build             buildInfo        `json:"build"`              // what this binary says of its source, as Go recorded it
+	Runs              map[string]any   `json:"runs,omitempty"`           // with --scenarios: the active run and the interrupted ones
+	Capacity          map[string]int   `json:"capacity,omitempty"`       // with --scenarios: the effective --max-runs and the consumers (a deployment setting)
+	History           *historyInfo     `json:"history,omitempty"`        // history mode only
+	Live              *liveInfo        `json:"live,omitempty"`           // live mode only
+	Build             buildInfo        `json:"build"`                    // what this binary says of its source, as Go recorded it
+	HumanApproval     *humanApproval   `json:"human_approval,omitempty"` // A2 (--approvals-signer) only
+}
+
+// humanApproval is what the page needs to offer the person's approval:
+// the one origin it runs on and the sources it shows.
+type humanApproval struct {
+	Origin  string  `json:"origin"`
+	Sources sources `json:"sources"`
 }
 
 // hostStatus answers the host and the operator tokens
@@ -115,6 +123,9 @@ func (a *api) hostStatus(w http.ResponseWriter, r *http.Request) {
 		if len(out.UnityBuild.Files) == len(unityFiles) {
 			out.UnityBuild.State = "ok"
 		}
+	}
+	if a.approve != nil {
+		out.HumanApproval = &humanApproval{Origin: "http://" + a.alias, Sources: a.approve.sources()}
 	}
 	if a.control != nil {
 		out.Runs = a.control.summary()

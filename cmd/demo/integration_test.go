@@ -67,6 +67,7 @@ type hostOpts struct {
 	env         map[string]string // more environment, e.g. HOME and APA_LIVE_CLI
 	pairOut     io.Writer         // --pairing: the "terminal" the code is shown on
 	now         func() time.Time  // --pairing: the window's clock
+	onApprovals func(*approvals)  // A2: the relay once made
 }
 
 type host struct {
@@ -195,7 +196,7 @@ func startHost(t *testing.T, o hostOpts) *host {
 		return env(k)
 	}
 	d := deps{getenv: getenv, self: exe, out: h.out, clock: clock, ready: ready, expiryEvery: o.expiryEvery,
-		limits: o.limits, fakeEnv: o.fakeEnv, onStore: func(s *store.Store) { h.st = s }, runsDone: h.runs, stage: o.stage, liveVersion: o.liveVersion, pairOut: o.pairOut, now: o.now}
+		limits: o.limits, fakeEnv: o.fakeEnv, onStore: func(s *store.Store) { h.st = s }, runsDone: h.runs, stage: o.stage, liveVersion: o.liveVersion, pairOut: o.pairOut, now: o.now, onApprovals: o.onApprovals}
 	args := serveArgs(t, o, dir)
 	go func() { done <- serve(ctx, args, d) }()
 	h.stop = func() error {

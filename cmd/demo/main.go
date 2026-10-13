@@ -33,6 +33,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signerclient"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/toolbridge"
 )
@@ -76,6 +77,7 @@ type deps struct {
 	liveVersion string              // tests: "" means buyer.ApprovedCLIVersion
 	pairOut     io.Writer           // --pairing: where the code is shown; nil means /dev/tty
 	now         func() time.Time    // the pairing window's clock (monotonic); nil means time.Now
+	onApprovals func(*approvals)    // tests: the A2 relay once made (to wrap its Store)
 }
 
 // run serves with no fake runs; the B1-01 tests and checks use it.
@@ -113,6 +115,8 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	pairingOn := fs.Bool("pairing", false, "with --scenarios: show a one-time code on this terminal; /host trades it once for this run's tokens (docs/cli-poc.md 56)")
 	maxRuns := fs.Int("max-runs", 0, "with --scenarios: running or stopping runs at most (a deployment setting; default 2, at most one per consumer)")
 	readyFile := fs.String("ready-file", "", "write {addr, pid} here once serving (for scripts/demo/present.sh)")
+	approvalsSigner := fs.String("approvals-signer", "", "A2: the Unix socket of apa-signer serve-approvals; the person's approval then runs on http://localhost:<port> (fake mode with --scenarios only; payment stays disabled)")
+	authSource := fs.String("authenticator-source", "device", "A2: device or virtual, the authenticator's source as shown and logged (a label, not evidence)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -174,6 +178,10 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		return errors.New("--fake-cli goes with --plan or --scenarios")
 	case *pairingOn && *scenariosPath == "":
 		return errors.New("--pairing is for a host that starts runs (--scenarios)")
+	case *approvalsSigner != "" && (live || *fakePath == "" || *scenariosPath == ""):
+		return errors.New("--approvals-signer is for a fake host that starts runs (--fake-cli and --scenarios): A2 uses the fake Agent only")
+	case *authSource != "device" && *authSource != "virtual":
+		return errors.New("--authenticator-source is device or virtual")
 	}
 	// The pairing code goes to the operator's terminal only.
 	pairOut := d.pairOut
@@ -371,6 +379,20 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		defer root.Close()
 	} else {
 		fmt.Fprintln(d.out, "demo: no Unity Web build at", *unityDir, "- the page will say the scene is not ready")
+	}
+	if *approvalsSigner != "" {
+		_, port, _ := net.SplitHostPort(addr)
+		ui.alias = "localhost:" + port
+		ui.approve = &approvals{st: st, signer: signerclient.NewApprovals(*approvalsSigner), source: *authSource, out: d.out}
+		if d.onApprovals != nil {
+			d.onApprovals(ui.approve)
+		}
+		ui.registerApprovals(mux)
+		state := "unavailable"
+		if ans := ui.approve.signer.Health(); ans.Kind == signerclient.KindOK {
+			state = ans.Reply.State
+		}
+		fmt.Fprintf(d.out, "demo: human approval (A2) on http://%s through %s (signer %s); authenticator source %s; payment disabled\n", ui.alias, *approvalsSigner, state, *authSource)
 	}
 	ui.register(mux)
 	ui.registerUI(mux)

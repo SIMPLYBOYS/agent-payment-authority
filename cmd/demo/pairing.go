@@ -90,11 +90,11 @@ func (p *pairing) redeem(typed string) string {
 // right code in an open window answers with the tokens; every answer is
 // no-store (reply), and nothing of the code is logged.
 func (a *api) pair(w http.ResponseWriter, r *http.Request) {
-	if r.Host != a.addr {
+	if !a.ourHost(r.Host) {
 		fail(w, http.StatusForbidden, "forbidden_host")
 		return
 	}
-	if r.Header.Get("Origin") != "http://"+a.addr {
+	if !a.ourOrigin(r.Header.Get("Origin")) {
 		fail(w, http.StatusForbidden, "forbidden_origin")
 		return
 	}

@@ -104,11 +104,11 @@ func (a *api) simulate(w http.ResponseWriter, r *http.Request) {
 // (required on a POST), then the bearer. A demo token is the wrong role; a
 // live host has no simulation at all.
 func (a *api) simGuard(w http.ResponseWriter, r *http.Request, post bool, dst any) (string, bool) {
-	if r.Host != a.addr {
+	if !a.ourHost(r.Host) {
 		fail(w, http.StatusForbidden, "forbidden_host")
 		return "", false
 	}
-	if o := r.Header.Get("Origin"); (post || o != "") && o != "http://"+a.addr {
+	if o := r.Header.Get("Origin"); (post || o != "") && !a.ourOrigin(o) {
 		fail(w, http.StatusForbidden, "forbidden_origin")
 		return "", false
 	}

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>登記核准裝置</title>
+<link rel="stylesheet" href="/ui/style.css">
+</head>
+<body data-page="enroll">
+<!-- A2 enrollment, E1 (docs/commercial-human-approval-design.md 3.2): the
+     administrator began it at the Signer's terminal; this page only makes
+     the credential and relays it. It stays pending until the
+     administrator confirms it there. -->
+<main class="enroll">
+  <h1>登記核准裝置</h1>
+  <p class="enroll-note">管理者在 Signer 終端機執行 <code>apa-signer approver enroll begin</code> 後，會顯示登記 ID 與一次性確認碼。在這裡輸入，再用你的裝置完成驗證。</p>
+  <p class="enroll-note">登記期間這個頁面與 demo host 是受信任的（決策 D2）：兩邊顯示相同的指紋，不是獨立的可信通道。登記後要由管理者在終端機確認，裝置才能核准。這不會付款。</p>
+  <form id="enroll-form" autocomplete="off">
+    <label for="enroll-id">登記 ID</label>
+    <input id="enroll-id" spellcheck="false" maxlength="64">
+    <label for="enroll-code">一次性確認碼（8 個字元）</label>
+    <input id="enroll-code" type="password" spellcheck="false" maxlength="16">
+    <button type="submit" id="enroll-go">用裝置登記</button>
+  </form>
+  <p id="enroll-status" role="status"></p>
+  <dl id="enroll-result" hidden>
+    <dt>credential 指紋</dt><dd id="enroll-fp"></dd>
+    <dt>旗標</dt><dd id="enroll-flags"></dd>
+    <dt>AAGUID</dt><dd id="enroll-aaguid"></dd>
+  </dl>
+</main>
+<script type="module" src="/ui/enroll.js"></script>
+</body>
+</html>

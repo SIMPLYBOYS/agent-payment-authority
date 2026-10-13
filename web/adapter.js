@@ -740,3 +740,8 @@ export function runCard(run, runsError) {
   } else if (state === "ended") [calls, kind] = ["工具呼叫數：場次結束後不提供", "not_provided"];
   return { state, text, calls, kind, stoppable: state === "running" };
 }
+
+// b64u and unb64u: base64url without padding, for WebAuthn's binary fields
+// (A2: the Signer's options in, the browser's credential out).
+export const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+export const unb64u = (s) => Uint8Array.from(atob(String(s).replace(/-/g, "+").replace(/_/g, "/") + "===".slice((String(s).length + 3) % 4)), (c) => c.charCodeAt(0));
