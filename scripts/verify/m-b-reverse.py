@@ -307,7 +307,7 @@ ITEMS = [
     ("A2: R3 a failed verify lookup is not not-found", go("./cmd/demo/", "^TestA2VerifyLookupFails$", ("TestA2VerifyLookupFails", r"a failed read was taken for not found")),
      [(HA, "\tcase signerclient.KindNotFound:\n\t\treturn h.closeChallenge(consumer, st, true)", "\tcase signerclient.KindNotFound, signerclient.KindUnknown:\n\t\treturn h.closeChallenge(consumer, st, true)")]),
     ("A2: the other decision gets no challenge", go("./cmd/demo/", "^TestA2TwoPagesAndChangingTheDecision$", ("TestA2TwoPagesAndChangingTheDecision", r"other decision: ")),
-     [(STA, "if cur.Decision != req.Decision {", "if false {")]),
+     [(STA, "\t\t\tcase cur.Decision != req.Decision:", "\t\t\tcase false:")]),
     ("A2: R3 a closed session's open attempt is not shared", go("./cmd/demo/", "^TestA2CancelledTask$", ("TestA2CancelledTask", r"shared after cancel: 200")),
      [(STA, "\t\t\tcase p.Session.State != \"pending\": // the Host closes it (review R3); nothing is shared", "\t\t\tcase false:"),
       (HA, "\tcase st.SessionState != \"pending\":\n\t\treturn h.closeOnSession(consumer, st)\n\tcase a.State == \"verifying\"", "\tcase false:\n\t\treturn h.closeOnSession(consumer, st)\n\tcase a.State == \"verifying\"")]),
