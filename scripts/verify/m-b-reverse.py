@@ -40,6 +40,8 @@ SA = "internal/signer/approvals.go"
 SS = "internal/signer/server.go"
 STA = "internal/store/approvals.go"
 HA = "cmd/demo/approvals.go"
+PC = "internal/paycontract/paycontract.go"
+PE = "internal/paycontract/events.go"
 
 
 def node(path, test, regex):
@@ -327,6 +329,15 @@ ITEMS = [
      [(SA, "ap.Version != a.approverVersion || c.cfg.hash != a.configHash {", "c.cfg.hash != a.configHash {")]),
     ("A2: the configuration hash alone is checked", go("./internal/signer/", "^TestChangedAndLateBranches$", ("TestChangedAndLateBranches", r"config hash only: ")),
      [(SA, "ap.Version != a.approverVersion || c.cfg.hash != a.configHash {", "ap.Version != a.approverVersion {")]),
+    # C2a: the pay family parameterised by version (docs/commercial-c2-design.md 3.1); run them alone with "^C2a:".
+    ("C2a: an order takes only its own version's domain", go("./internal/paycontract/", "^TestVersionsApart$", ("TestVersionsApart", r"v2 order, v1 domain: validated")),
+     [(PC, "if i.Version != p.Version || i.Domain != sp.Domain {", "if i.Version != p.Version {")]),
+    ("C2a: one version per event stream", go("./internal/paycontract/", "^TestEventStreamOneVersion$", ("TestEventStreamOneVersion", r"a mixed stream: <nil>")),
+     [(PE, "\t\tif e.Version != st.version {", "\t\tif false && e.Version != st.version {")]),
+    ("C2a: the credential reasons are v2's only", go("./internal/paycontract/", "^TestDecisionReasonsByVersion$", ("TestDecisionReasonsByVersion", r"apa.pay.v1 CREDENTIAL_REVOKED: <nil>")),
+     [(PC, "slices.Contains(sp.deny, d.Reason)", "slices.Contains(specs[V2].deny, d.Reason)")]),
+    ("C2a: the Signer derives the session by the order's version", go("./internal/signer/", "^TestV2OrderChallenge$", ("TestV2OrderChallenge", r"v1 session ID for a v2 order: <nil>")),
+     [(SA, "if r.ApprovalSessionID != sp.SessionID(i.TaskID, i.PurchaseOrderID) {", "if r.ApprovalSessionID != paycontract.SessionID(i.TaskID, i.PurchaseOrderID) && r.ApprovalSessionID != sp.SessionID(i.TaskID, i.PurchaseOrderID) {")]),
     # D4 of the OS isolation plan (keygen); run them alone with "^P1b-D4:".
     ("P1b-D4: keygen never replaces a key file", go("./cmd/apa-signer/", "^TestKeygen$", ("TestKeygen", r"an existing key file was replaced")),
      [(AS, "if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {", "if _, err := os.Lstat(path); false && !errors.Is(err, os.ErrNotExist) {"),
