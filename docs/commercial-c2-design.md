@@ -4,7 +4,7 @@
 > **狀態：第四版設計稿。**
 > - 第一版（`3d8aeb2`）與第二版（`2d9cc2c`）經 Claude Code 獨立上下文 review，都判定 not pass；第三版（`752bf2f`）**有條件通過**：沒有 must-fix，7 項 should-fix 須在 C2b 動工前修進文件，本版已修。對照見第 12～14 節。
 > - **Aaron 10/14 核准 D2、D4、D8～D12 照建議進行**（第 9 節）；C2a（只做參數化）開始。
-> - Aaron 已批准第一版的 C2-D1～D7 照建議進行。後續各版**新增 C2-D8、C2-D9，並調整 C2-D2、C2-D4、C2-D9 的建議**；第三次 review 另外指出三個應交 Aaron 的選擇（D10～D12）。這些都須 Aaron 確認（第 9 節）。
+> - Aaron 已批准第一版的 C2-D1～D7 照建議進行。後續各版**新增 C2-D8、C2-D9，並調整 C2-D2、C2-D4、C2-D9 的建議**；第三次 review 另外指出三個應交 Aaron 的選擇（D10～D12）。這些都已由 Aaron 確認（第 9 節）。
 > - **通過前不寫 Policy、Store、Host 的程式。**
 
 依據：
@@ -98,6 +98,9 @@
   - `proof_sha256`：只供追溯，不是重播的鍵；
   - `verifier`。
 - 共用的 `contracts.EventPayload` 以 omitempty 指標加入這個欄位；M1 的 schema 標為 `{"not":{}}`，M1 的 `ValidateEvent` 拒絕它。
+- **v2 新增的 Ask 收尾配對**（第六次核對的 finding 2）：`(withdrawn, CREDENTIAL_REVOKED)`、`(withdrawn, CREDENTIAL_STATUS_UNAVAILABLE)`、`(withdrawn, AUTHORIZATION_EXPIRED)`，用於第 7.1 節「核准時重新檢查不通過」。
+  - `Spec` 改為每個版本各有一張 Ask 收尾表：v1 的表和現在的 `ValidateDecision` 逐字相同，**v1 仍然拒絕這三種配對**，並有測試。
+  - C2a 交付的 v2 規格只有三個 Deny 理由碼，還沒有這張表。這是 C2b 的第一個提交；在那之前，沒有任何路徑能建立 v2 task。
 - **`PolicyDecision` 不變。**
 - **過期**：verifier 回 `result=expired`，Deny `AUTHORIZATION_EXPIRED`（既有的理由碼）。計畫驗收第 1 項是「憑證效期過了 → verifier 拒絕，帳上留痕」，所以紀錄上要寫 expired，不能寫 valid（第二次 review 的 should-fix 1）。`Rules` 仍會以同一個 expiry 檢查，兩者一致。
 
@@ -113,8 +116,10 @@
   - `SubmitV2` 一律消耗 **Store 為這個 (task, purchase_order_id) 保存的那一列**，不消耗出示所宣稱的那一列；兩者不同時，就是 `detail=CHALLENGE_MISMATCH`。
   - 已發出但過期的那一列，在 `SubmitV2` 裡標為 `used`，並記錄 `detail=CHALLENGE_EXPIRED`。
   - **`challenge_id` 為 NULL，若且唯若** `result=absent`、`detail=HOLDER_MATERIAL_UNAVAILABLE` 或 `detail=CHALLENGE_MISSING`（這個 (task, PO) 沒有任何保存的 challenge）。
+  - 這個 (task, PO) 只有 `expired` 的列、沒有 `issued` 的列時，也是 `CHALLENGE_MISSING`。
   - 其他結果的 `challenge_id` 都指向一列 `state=used` 的 challenge，而且它的 task、purchase_order_id 相符。intent_hash 相符的要求只適用於 `detail` 不是 `INTENT_MISMATCH`、`CHALLENGE_EXPIRED`、`CHALLENGE_MISMATCH` 的紀錄。
   - `verify.go` 容許出示失敗後留下的 `issued` 列（第 7 節第 5 步），只要它沒有被任何驗證紀錄引用。
+- **以憑證理由撤回**：只出現在 v2；只出現在還沒有 `TASK_CANCELLED` 的事件流；`APPROVAL_WITHDRAWN` 的 payload 只帶 decision 與 session，**不帶核准者**（events.go L124-130；帶了就會被 `ValidateEvent` 拒絕而回滾）。
 - `verify.go` 在開啟 Store 時交叉核對以下各項，不一致就回報資料毀損：
   - 驗證紀錄 ↔ 事件 ↔ challenge 的 `state=used` ↔ task 的 `credential_bbs` snapshot（issuer、holder、status_index、expiry）；
   - 驗證紀錄的 `(task_id, purchase_order_id)` 唯一；
@@ -153,6 +158,7 @@
 - **目錄**：`--credential-dir`，必須是 0700、擁有者為目前使用者、不是 symlink。這比 Store 的 `dbPath`（store.go L270-296，只檢查權限，而且會跟隨 symlink）**更嚴格**。目錄裡的每個金鑰檔也一樣檢查擁有者，並且不跟隨 symlink。內容：
   - `issuer.key`：BBS+ 私鑰，0600；
   - `status.key`：Ed25519，簽狀態清單，0600，和 issuer 金鑰分開；
+  - `status.pub`：狀態清單的公鑰。verifier 讀取後，必須符合 task snapshot 裡的指紋才使用；
   - `holders.json`：每個 consumer 的 holder 公鑰，也就是信任設定；
   - `holder/<consumer>.key`：0600；
   - `holder/<task>.cred`：0600。
@@ -162,7 +168,7 @@
   - **不**和 `Delegation.ExpiresAt` 綁在一起。後者只是「必須在這之前開始 task」的期限（pay.go L202），場景設定是 1800 s；若拿它當憑證期限，晚 29 分鐘開始的 task，憑證約 1 分鐘後就會過期（第二次 review 的 should-fix 6）。
   - 為了負例，issuer 提供只在測試中可用的短期限注入，不是產品旗標。
 - **發證的時機與順序**：Store 不持有 issuer 金鑰。
-  1. Host 先向 Store 保留一個狀態索引：`ReserveStatusIndex`，獨立提交；
+  1. Host 在 `status.lock` 下，從 `--credential-dir/status.counter` 保留一個狀態索引：計數器加一、fsync 之後才釋放鎖。`status.json` 存在、但 `status.counter` 不存在或毀損時，**拒絕發證**，不從 0 重新開始（第六次核對的 finding 1）；
   2. 以 issuer 金鑰發證；
   3. 以暫存檔加改名的方式寫入 `holder/<task>.cred`；
   4. 再呼叫 `StartTask`，連同 snapshot 一起寫入。
@@ -175,7 +181,7 @@
 - **`status.json`**：`{version, issuer, list_version, issued_at, next_update, revoked:[…]}`，以 `status.key` 簽章。
 - **寫入規則**（第二次 review 的 N3：兩個寫入者會把撤銷蓋掉）：
   - 每次簽發，不論是 `revoke` 還是更新，都先取得 `status.lock` 的獨占鎖（flock），**重新讀取目前的檔案並驗簽**；
-  - **目前的檔案驗不過（不存在、毀損、簽章錯）時，拒絕簽發**，不當成空清單；只有 `apa-issuer init` 建立第 1 版（第三次 review 的 S4）；
+  - **目前的檔案驗不過（不存在、毀損、簽章錯）時，拒絕簽發**，不當成空清單；只有 `apa-issuer init` 建立第 1 版（第三次 review 的 S4）。`status.json` 已存在時，`init` 拒絕執行，避免版本被重設回 1；
   - 在讀到的撤銷集合上做修改：只能加入，不能移除；
   - `list_version` 加一後簽章；寫暫存檔、fsync 暫存檔、改名、fsync 目錄，然後才釋放鎖；
   - Host 的自動更新與 CLI 的 `revoke` 都走同一個函式，所以撤銷不會被舊的集合覆蓋。
@@ -232,10 +238,13 @@
   - 只在**核准**時重新檢查，拒絕不檢查；
   - 不通過時的處理是 C2-D11，建議 (b)：**以既有的撤回流程關閉會話**（`APPROVAL_WITHDRAWN`，v2 允許它帶 `CREDENTIAL_REVOKED`、`CREDENTIAL_STATUS_UNAVAILABLE` 或 `AUTHORIZATION_EXPIRED` 作為原因），不發 grant。
     - A2 路徑：`ResolveWebAuthn` 回傳既有的 `closed` outcome，Host 依現有邏輯 abandon Signer 的核准（cmd/demo/approvals.go L458）。不能用回傳錯誤的方式處理：那會讓交易回滾、Host 當成 store_unavailable，也不會 abandon（第三次 review 的 S5）。
-    - 模擬核准路徑：`ResolveApproval` 回傳 `closed`，頁面顯示既有的「已關閉」文字。
-    - 兩條路徑都留在事件鏈裡，不需要新的資料欄。
+    - 模擬核准路徑：`ResolveApproval` 回傳 `closed`。
+    - 兩條路徑都留在事件鏈裡，不需要新的資料欄；
+    - 呼叫 `t.close(p, "APPROVAL_WITHDRAWN", "withdrawn", <理由>, nil)`，也就是 `end()` 用的同一個基本操作（ops.go L753），不帶核准者，`resolve_request_id` 維持未設定；
+    - 在 approve 分支裡，這個檢查放在「報價已改變（superseded）」與「Signer 的核准已過期」兩種 closed 之後；
+    - 畫面不能沿用「已撤回（task 取消）」的文字，見第 10 節步驟 8。
   - 若選 (a)「會話維持原狀到逾時」：A2 只能記在 attempt（`verified` 加 `error_code`，或 `refused` 且沒有 `signer_approval_id`），模擬路徑則需要 schema 6 新增欄位，否則無處記錄；
-  - P1-b 付款開始前做同樣的檢查；付款目前仍未啟用，先以測試涵蓋。
+  - P1-b 付款開始前做同樣的檢查，不通過時以 `refuse()` 回傳 `CREDENTIAL_REVOKED`、`CREDENTIAL_STATUS_UNAVAILABLE` 或 `AUTHORIZATION_EXPIRED`，**什麼都不寫入**。此時會話已經是 APPROVED，不能再撤回（events.go L292-295），而且交易會回滾，`credential_status_seen` 的更新也一起撤銷，這不影響安全。付款目前仍未啟用，先以測試涵蓋。
 - 「核准等待中被撤銷」是自然的展示情境，列入第 11 節的負例。
 
 ## 8 Store schema 6（review S6）
@@ -269,18 +278,18 @@ Aaron 10/14 已批准第一版的 D1～D7 照建議進行。下表標出**本版
 | # | 決定 | 選項 | 建議 | 本版狀態 |
 |---|---|---|---|---|
 | D1 | 契約升版方式 | 新增 `apa.pay.v2`；或在 v1 上直接加碼（違反 §3.1） | 新增 v2 | 已批准，不變 |
-| D2 | 憑證失敗的語意 | (a) Deny 並留紀錄，task 結束；(b) 當成裁決前的錯誤，不留裁決；(c) 只把 `STATUS_UNAVAILABLE` 當成暫時、不結束 task 的拒絕，並留稽核紀錄 | (a)，**前提是採 D4(a)**：自動更新下 status 不可用的情況很少。若 D4 維持 (b) 手動，則建議 (c)，否則錯過一次更新就會讓 task 結束 | **須依 D4 有條件地再確認** |
+| D2 | 憑證失敗的語意 | (a) Deny 並留紀錄，task 結束；(b) 當成裁決前的錯誤，不留裁決；(c) 只把 `STATUS_UNAVAILABLE` 當成暫時、不結束 task 的拒絕，並留稽核紀錄 | (a)，**前提是採 D4(a)**：自動更新下 status 不可用的情況很少。若 D4 維持 (b) 手動，則建議 (c)，否則錯過一次更新就會讓 task 結束 | **已核准（D4 採 (a)）** |
 | D3 | 角色放在哪 | 同一程序分套件，或分程序 | 同一程序，並誠實標示（第 5 節） | 已批准；本版補上誠實標示 |
-| D4 | 撤銷清單的更新 | (a) Host 每 300 s 自動更新；(b) 只能手動 | **改建議為 (a)**（第 6 節） | **須再確認** |
+| D4 | 撤銷清單的更新 | (a) Host 每 300 s 自動更新；(b) 只能手動 | **改建議為 (a)**（第 6 節） | **已核准** |
 | D5 | `c0` 在 Z2 之前 | (a) 全零佔位，不揭露、不參與裁決；(b) 現在就放「已核准委託」的摘要，綁定已核准的條件 | (a)：C₀ 在計畫中是 Z2 的預算承諾，若現在挪作他用，Z2 時要改變它的意義；委託仍由 Store 的 snapshot 約束 | 已批准；本版補上 (b) |
 | D6 | 正式依賴 | idemix v0.3.1 加入主 `go.mod`，go 指令升到 1.26.3 | 照做 | 已批准，不變 |
 | D7 | 畫面 | 卡片與抽屜各加一列 | 照做；但 `web/host.js` 至少 8 處「非 V1 就當 M1」要一併改，`reasonText` 也要加文字，工作量比「一列」大 | 已批准；補上工作量 |
-| **D8** | **v2 與核准、付款、委託的關係**（review M1） | (a) `paycontract` 依版本參數化，Signer、A2、P1-b、委託、grant 都在 C2 內支援 v2；(b) v2 只能用模擬核准、不能付款，另開一片補；(c) 不新增版本，在 v1 上加碼 | **(a)**：否則真正能核准與付款的契約只有 fixture 憑證，E1 的「同一個 intent_hash 串起憑證、裁決、核准、proof、交易」做不到 | **新增，須確認** |
-| **D9** | **v2 可否用在 live，以及 `evidence_mode`** | (a) v2 在 fake 與 live 都可用；(b) **C2 的 v2 只限 fake**，live 之後另開一片 | **改建議為 (b)**（第二次 review 的 N2）：live 模式沒有模擬核准者（`ui.sim` 只在非 live 時建立，cmd/demo/main.go L367-372），委託只能經 `/api/sim/delegations` 確認且必須是 simulated（sim.go L178、grant.go L64），A2 也只限 fake（main.go L181-182）。所以 live 的 v2 拿不到委託，Ask 也沒有核准者。(a) 等於取消先前核准的 P1-a 與 A2 兩個界線，那需要另外決定。`evidence_mode` 沿用現況（描述付款證據層，付款仍未啟用） | **新增並改建議，須確認** |
+| **D8** | **v2 與核准、付款、委託的關係**（review M1） | (a) `paycontract` 依版本參數化，Signer、A2、P1-b、委託、grant 都在 C2 內支援 v2；(b) v2 只能用模擬核准、不能付款，另開一片補；(c) 不新增版本，在 v1 上加碼 | **(a)**：否則真正能核准與付款的契約只有 fixture 憑證，E1 的「同一個 intent_hash 串起憑證、裁決、核准、proof、交易」做不到 | **新增，已核准** |
+| **D9** | **v2 可否用在 live，以及 `evidence_mode`** | (a) v2 在 fake 與 live 都可用；(b) **C2 的 v2 只限 fake**，live 之後另開一片 | **改建議為 (b)**（第二次 review 的 N2）：live 模式沒有模擬核准者（`ui.sim` 只在非 live 時建立，cmd/demo/main.go L367-372），委託只能經 `/api/sim/delegations` 確認且必須是 simulated（sim.go L178、grant.go L64），A2 也只限 fake（main.go L181-182）。所以 live 的 v2 拿不到委託，Ask 也沒有核准者。(a) 等於取消先前核准的 P1-a 與 A2 兩個界線，那需要另外決定。`evidence_mode` 沿用現況（描述付款證據層，付款仍未啟用） | **新增並改建議，已核准** |
 
-| **D10** | **憑證效期**（第三次 review 的 D-a） | (a) task 開始後 24 h，另外由 `CheckTaskActive` 確保只在 task 進行中可用；(b) 照計畫字面「效期 ≤ task 生命」，以 run 的時限加核准期限為效期 | **(a)**：計畫 L155 寫「效期 ≤ task 生命」，驗收第 23 項也依賴它。(a) 的憑證本身較長，但使用時一定綁定 task_id，而且 task 必須仍在進行，實際可用期間仍不超過 task 生命。(b) 的效期只有幾分鐘，run 結束後才落地的核准會被判過期 | **新增，須確認** |
-| **D11** | **核准等待中憑證被撤銷或過期**（D-b） | (a) 拒絕這次核准，會話維持到逾時，紀錄只留在 attempt；(b) 以撤回流程關閉會話，原因碼為 `CREDENTIAL_REVOKED` 等，Ask 就此結束 | **(b)**：兩條核准路徑都留在事件鏈裡，不需新欄位；畫面能直接顯示「憑證已撤銷，這筆已關閉」（第 7.1 節） | **新增，須確認** |
-| **D12** | **出示失敗的語意**（D-c） | (a) 材料問題（不見、毀損、不符）→ Deny 留紀錄；產生 proof 的暫時錯誤 → 工具回錯誤、不留裁決；(b) 兩者都 Deny | **(a)**：材料問題重試也不會好，留裁決可以避免無限重試；暫時錯誤若也 Deny，會讓偶發錯誤結束 task。這縮小了 D2「Deny 並留紀錄」的範圍 | **新增，須確認** |
+| **D10** | **憑證效期**（第三次 review 的 D-a） | (a) task 開始後 24 h，另外由 `CheckTaskActive` 確保只在 task 進行中可用；(b) 照計畫字面「效期 ≤ task 生命」，以 run 的時限加核准期限為效期 | **(a)**：計畫 L155 寫「效期 ≤ task 生命」，驗收第 23 項也依賴它。(a) 的憑證本身較長，但使用時一定綁定 task_id，而且 task 必須仍在進行，實際可用期間仍不超過 task 生命。(b) 的效期只有幾分鐘，run 結束後才落地的核准會被判過期 | **新增，已核准** |
+| **D11** | **核准等待中憑證被撤銷或過期**（D-b） | (a) 拒絕這次核准，會話維持到逾時，紀錄只留在 attempt；(b) 以撤回流程關閉會話，原因碼為 `CREDENTIAL_REVOKED` 等，Ask 就此結束 | **(b)**：兩條核准路徑都留在事件鏈裡，不需新欄位；畫面能直接顯示「憑證已撤銷，這筆已關閉」（第 7.1 節） | **新增，已核准** |
+| **D12** | **出示失敗的語意**（D-c） | (a) 材料問題（不見、毀損、不符）→ Deny 留紀錄；產生 proof 的暫時錯誤 → 工具回錯誤、不留裁決；(b) 兩者都 Deny | **(a)**：材料問題重試也不會好，留裁決可以避免無限重試；暫時錯誤若也 Deny，會讓偶發錯誤結束 task。這縮小了 D2「Deny 並留紀錄」的範圍 | **新增，已核准** |
 
 **Aaron 的決定（10/14）**：「針對這 7 項我核准依照建議的方式進行處理」。
 - D2：(a)；
@@ -310,7 +319,7 @@ Aaron 10/14 已批准第一版的 D1～D7 照建議進行。下表標出**本版
 | 5 | Store schema 6 與遷移；新表；`IssueChallenge`、`SubmitV2`；依版本的恢復檢查與第 3.3 節的不變式 |
 | 6 | `paypolicy` v2 的憑證步驟 |
 | 7 | Host 與 Shop：發證、`Commit` 內依序取 challenge、出示、送出；`apa-issuer`；`--credential-dir`；自動更新（若採 D4(a)）；**fake** 場景目錄允許 v2（scenarios.go L98） |
-| 8 | 畫面：卡片與抽屜的「憑證檢查」列，`host.js` 對 v2 的判斷 |
+| 8 | 畫面：卡片與抽屜的「憑證檢查」列，`host.js` 對 v2 的判斷；**依 `decision.reason` 決定「已撤回」的文字**：`HOST_CANCELLED` 沿用「已撤回（task 取消）」，憑證理由改為「憑證已撤銷（或狀態無法確認、已過期），這筆已關閉」。要改的地方：`web/host.js` 的兩張結果表（L864、L1107）與 L1029，`web/adapter.js` L148、L284（第六次核對的 finding 3） |
 | 9 | 文件：roadmap、transaction-flow §3.1／§10、`docs/policy.md`、操作說明 |
 | 10 | 定向驗證計畫、反向、瀏覽器檢查，證據在 `artifacts/c2/` |
 
@@ -320,14 +329,14 @@ Aaron 10/14 已批准第一版的 D1～D7 照建議進行。下表標出**本版
 | 計畫驗收 | C2 涵蓋 | 不在 C2 |
 |---|---|---|
 | 1 憑證效期過了 → verifier 拒絕，帳上留痕（執行計畫 §5 L720） | `result=expired` → Deny `AUTHORIZATION_EXPIRED`，留下驗證紀錄與事件。另外，第 6 節展示表的第 1 項（存進本地 keystore）：發證並存入 holder 區（測試 issuer、測試金鑰） | 「核准上限 $5」寫進憑證，屬 C₀ 與 Z2；eKYC 屬第二期 |
-| 2 已撤銷的憑證被拒絕 | `CREDENTIAL_REVOKED`，含核准等待中被撤銷（D11） | — |
+| 2 已撤銷的憑證被拒絕 | `CREDENTIAL_REVOKED`，含核准等待中被撤銷（D11）。計畫寫的是「Status List 打開該位元」；本設計用簽章的 `revoked:[…]` 集合，意義相同 | — |
 | 3 偽造的出示被拒絕並記錄 | `CREDENTIAL_INVALID` 與驗證紀錄、事件 | — |
 | 4 超過憑證上限的請購 | — | Z2（上限在 C₀） |
 | 12 不可串連 | 文件寫明：對自家 policy gate **可串連**（揭露 holder），符合計畫原文 | 對 x402 resource server 不可串連 → 第 26 項，P2 |
 | 26 credential extension | — | P2（x402 層） |
 | 28 credential → commitment | 把 A 的憑證拿去 B 的 task → `CREDENTIAL_INVALID`（snapshot 與 holder 比對） | `registerTask` 與 C₀ 的鏈上部分 → Z2、P2 |
 | 29 presentation 重播 | 跨 verifier、舊 challenge、把憑證複製到別的 holder 出示 → 全部拒絕並記錄 | policy／human grant 的重播：既有 A2 與 P1-b 已涵蓋；C2 以 v2 再跑一次 |
-| 38 遮罩掃描 | 驗收時掃描畫面事件與 log，確認 `consumer_id`、`c0` 與 `.cred` 內容從未出現 | — |
+| 38 遮罩掃描 | 驗收時掃描畫面事件、log 與資料庫，確認 **issuer.key、status.key、holder/*.key 的位元組與 `.cred` 裡的簽章**從未出現。`consumer_id` 是公開的系統識別碼，本來就在每個事件的 scope 與頁面上；「不揭露」只指它不在 proof 的揭露欄位裡。`c0` 是全零佔位，掃描它沒有意義。計畫第 38 項其餘部分（完整 grant 或 token、HTML／log 注入）沿用既有的檢查 | — |
 | 35 撤銷 fail-closed | 清單抓不到、簽章錯、換回舊版清單 → 拒絕並記錄 | — |
 
 **測試清單**，每一項都核對理由碼、`detail`、驗證紀錄、事件鏈與 snapshot 一致：
@@ -446,3 +455,15 @@ C2a 階段沒有任何路徑能建立 v2 task。
 | 上一項改為保留 `sp` 的突變後單獨補跑 | `c88b18d` | 1／1，`apa.pay.v1 CREDENTIAL_REVOKED: <nil>` | `c2a-c88b18d/reverse-reasons.txt` |
 
 `c88b18d` 只改了 `scripts/verify/m-b-reverse.py`，所以 `c086925` 的測試結果適用於它。
+
+## 16 第四版設計的條件核對（10/14，Claude Code 獨立上下文）
+
+**判定**：S1～S4 已關閉；D10～D12 已交 Aaron 決定並經核准。S5、S6、S7 各有一處遺留，加上 4 項文字層的 should-fix，**本版已修正，修正後 C2b 可以開始**；reviewer 認為不需要再做一次完整 review。
+
+| 核對 | 處理 |
+|---|---|
+| finding 1 第 5 節仍寫計數器在 Store | §5 改為在 `status.lock` 下從 `status.counter` 保留；計數器不見或毀損時拒絕發證 |
+| finding 2 v2 撤回配對只寫在括號裡 | §3.2：每個版本一張 Ask 收尾表、v1 仍拒絕；§3.3：不變式；C2b 的第一個提交 |
+| finding 3 畫面文字會寫成「task 取消」 | §10 步驟 8：依理由碼決定文字，列出要改的地方 |
+| finding 4 第 38 項的對照做不到 | §11：改為掃描私鑰與簽章的位元組 |
+| notes | `status.pub` 與指紋（§5）；P1-b 不通過時的代碼、什麼都不寫入（§7.1）；只有 expired 列時也是 `CHALLENGE_MISSING`（§3.3）；`init` 不覆寫既有清單（§6）；撤回的 payload 不帶核准者、在 switch 中的位置（§3.3、§7.1）；第 2 項的位元與集合（§11）；狀態欄位的文字（§9） |
