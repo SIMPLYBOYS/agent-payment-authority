@@ -1,4 +1,4 @@
-.PHONY: check check-m1-e3 check-contracts build dev demo-fake demo-integration demo present-live present-fake present-rehearsal present-p1a m1-fixture verify-m1 m1-live-cli
+.PHONY: check check-m1-e3 check-contracts build dev demo-fake demo-integration demo present-live present-fake present-rehearsal present-p1a present-a2 m1-fixture verify-m1 m1-live-cli
 
 # Compile, vet and unit-test. Calls no paid model and touches no testnet.
 check:
@@ -87,6 +87,14 @@ present-rehearsal:
 # payment). docs/commercial-p1a.md has the steps. Fake CLI only.
 present-p1a:
 	@APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p1a.json sh scripts/demo/present.sh fake
+
+# present-a2: the P1-a catalog with the person's approval by a registered
+# device (docs/commercial-a2.md): SIGNER is the socket of a running
+# apa-signer serve-approvals whose origin is http://localhost:8402; the page
+# opened is http://localhost:8402/host. Fake CLI only; payment stays off.
+present-a2:
+	@test -n "$(SIGNER)" || { echo "usage: make present-a2 SIGNER=/path/of/serve-approvals.sock (docs/commercial-a2.md)" >&2; exit 2; }
+	@APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p1a.json sh scripts/demo/present.sh fake
 
 # docs/m1-evidence.md: the M1 fixture evidence bundle, a new
 # artifacts/m1/<run-id>/ each time (manifest.json, its evidence, run-end.json).

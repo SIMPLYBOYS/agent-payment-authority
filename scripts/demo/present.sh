@@ -33,6 +33,10 @@
 # APA_PRESENT_GO (default go). APA_PRESENT_SCENARIOS (fake only; default
 # testdata/demo/scenarios.json): another trusted fake catalog, e.g. the
 # rehearsal one (make present-rehearsal). The live catalog never changes.
+# APA_APPROVALS_SIGNER (fake only; make present-a2): the Unix socket of a
+# running apa-signer serve-approvals; the person's approval then runs on
+# http://localhost:<port>/host, which is the page opened (WebAuthn needs
+# localhost, not 127.0.0.1; docs/commercial-a2.md).
 set -u
 stop() { echo "present: STOP（未啟動）：$1" >&2; exit 2; }
 
@@ -44,6 +48,9 @@ cd "$root" || stop "no repository directory"
 GO=${APA_PRESENT_GO:-go}
 OPEN=${APA_PRESENT_OPEN:-open}
 addr=${APA_ADDR:-127.0.0.1:8402}
+signer=${APA_APPROVALS_SIGNER:-}
+[ -z "$signer" ] || [ "$mode" = fake ] || stop "APA_APPROVALS_SIGNER 只用於 fake 展示（A2 使用 fake Agent）"
+[ -z "$signer" ] || [ -S "$signer" ] || stop "APA_APPROVALS_SIGNER=${signer} 不是 socket：請先啟動 apa-signer serve-approvals（docs/commercial-a2.md）"
 
 if [ "$mode" = live ]; then
 	conf=${APA_PRESENT_CONF:-$root/var/present.conf}
@@ -79,9 +86,11 @@ if [ "$mode" = live ]; then
 		--trace-dir "$w/runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" &
 else
 	echo "present: fake 展示（不執行模型）。" >&2
+	set --
+	[ -z "$signer" ] || set -- --approvals-signer "$signer" --authenticator-source device
 	APA_ADDR=$addr APA_DB_PATH=$w/db/fake.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \
 		--fake-cli "$w/fake-claude" --scenarios "${APA_PRESENT_SCENARIOS:-testdata/demo/scenarios.json}" --registry testdata/demo/registry.json \
-		--trace-dir "$w/runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" &
+		--trace-dir "$w/runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" "$@" &
 fi
 pid=$!
 trap 'kill -INT "$pid" 2>/dev/null' INT TERM
@@ -105,6 +114,7 @@ while :; do
 	sleep 0.1
 done
 url="http://$(sed -n 's/.*"addr":"\([^"]*\)".*/\1/p' "$w/ready.json")/host"
+[ -z "$signer" ] || url="http://localhost:${url##*:}" # the same port, by the trusted name (A2)
 if ! "$OPEN" "$url" >/dev/null 2>&1; then
 	echo "present: 無法自動開啟瀏覽器；請手動開啟 ${url}（host 仍在服務，不需要重新啟動）" >&2
 fi
