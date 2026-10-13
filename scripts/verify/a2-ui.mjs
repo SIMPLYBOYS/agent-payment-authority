@@ -136,7 +136,7 @@ try {
     const m = begun.match(/enrollment (enr-[0-9a-f]+) for \S+; one-time code ([A-Z0-9]{8})/);
     if (!m) throw new Error("enroll begin printed nothing usable");
     await b.send("Page.navigate", { url: origin + "/approve/enroll" });
-    await b.waitFor(`!!document.getElementById("enroll-form")`);
+    await b.waitFor(`document.body.dataset.ready === "1"`); // enroll.js attached its handler (a module runs after parsing)
     await b.evaluate(`(document.getElementById("enroll-id").value = ${JSON.stringify(m[1])}, document.getElementById("enroll-code").value = ${JSON.stringify(m[2])}, document.getElementById("enroll-go").click(), true)`);
     const ok = await b.waitFor(`!document.getElementById("enroll-result").hidden`, 15000);
     const fp = await text("#enroll-fp");

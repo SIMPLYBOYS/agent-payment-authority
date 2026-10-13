@@ -56,3 +56,7 @@ $("enroll-form").addEventListener("submit", async (ev) => {
     $("enroll-code").value = "";
   }
 });
+
+// The page is ready once the handler above is attached (a check script
+// waits for this; a submit before it would do nothing: CSP form-action).
+document.body.dataset.ready = "1";
