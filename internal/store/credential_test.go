@@ -4,10 +4,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
@@ -17,7 +20,9 @@ import (
 // consumer-a has a registered holder) and the Store as its verifier.
 type v2env struct {
 	*env
-	dir *credential.Dir
+	dir     *credential.Dir
+	credDir string
+	ttl     uint64 // the credential's lifetime from the task's start
 }
 
 func newV2(t *testing.T) *v2env {
@@ -31,7 +36,7 @@ func newV2(t *testing.T) *v2env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &v2env{e, d}
+	return &v2env{e, d, path, MaxCredentialTTL}
 }
 
 func (v *v2env) config() Config {
@@ -62,7 +67,7 @@ func (v *v2env) setupV2(s *Store, task string) TaskSetup {
 	}
 	p := v.profile
 	setup := TaskSetup{TaskID: task, Profile: &p, ContractVersion: paycontract.V2, DelegationID: d.DelegationID}
-	st, ok, err := v.dir.IssueTask(task, consumer, int64(v.clock.clock()())+MaxCredentialTTL)
+	st, ok, err := v.dir.IssueTask(task, consumer, int64(v.clock.clock()()+v.ttl))
 	if err != nil {
 		v.t.Fatal(err)
 	}
@@ -200,5 +205,301 @@ func TestV2SnapshotRecovery(t *testing.T) {
 				t.Fatalf("Open: %v", err)
 			}
 		})
+	}
+}
+
+// v2Of is v1Of under apa.pay.v2, keeping m's nonce.
+func v2Of(t *testing.T, m contracts.PurchaseOrder) paycontract.PurchaseOrder {
+	t.Helper()
+	o := v1Of(t, m)
+	sp, _ := paycontract.SpecOf(paycontract.V2)
+	o.Version, o.Intent.Version, o.Intent.Domain, o.PaymentBinding.Nonce = paycontract.V2, paycontract.V2, paycontract.DomainV2, m.Intent.EIP3009Nonce
+	var err error
+	if o.Intent.ResourceHash, err = sp.ResourceHash(o.Intent.HTTPMethod, o.Intent.ResourceURL); err != nil {
+		t.Fatal(err)
+	}
+	if o.Intent.PaymentRequirementHash, err = sp.RequirementHash(o.Quote); err != nil {
+		t.Fatal(err)
+	}
+	return o
+}
+
+// present is the Host's holder answering ch for task (consumer-a's).
+func (v *v2env) present(ch Challenge) *credential.Presentation {
+	v.t.Helper()
+	st, err := v.dir.ReadCredential(ch.TaskID)
+	if err != nil {
+		v.t.Fatal(err)
+	}
+	hk, err := v.dir.HolderKey("consumer-a")
+	if err != nil {
+		v.t.Fatal(err)
+	}
+	_, pk, _ := v.dir.IssuerPublic()
+	p, err := credential.Present(st.Credential, st.Signature, pk, hk, ch.Request())
+	if err != nil {
+		v.t.Fatal(err)
+	}
+	return &p
+}
+
+// buy is the Host's in-Commit sequence (design 7): challenge, present, submit.
+func (v *v2env) buy(s *Store, sess contracts.Session, o paycontract.PurchaseOrder) (Result, error) {
+	v.t.Helper()
+	body, _ := json.Marshal(o)
+	ch, ok, err := s.IssueChallenge(sess, body)
+	if err != nil {
+		return Result{}, err
+	}
+	var pr Presented
+	if ok {
+		pr.Presentation = v.present(ch)
+	}
+	return s.SubmitV2(sess, body, pr)
+}
+
+// started is a Store with task-a started as apa.pay.v2 (consumer-a, with a
+// credential) and task-b (consumer-b, absent).
+func (v *v2env) started() *Store {
+	v.t.Helper()
+	s := v.open()
+	for _, task := range []string{"task-a", "task-b"} {
+		if err := s.StartTask(v.setupV2(s, task)); err != nil {
+			v.t.Fatal(err)
+		}
+	}
+	return s
+}
+
+func verification(t *testing.T, path, po string) (result, detail string, challenge sql.NullString) {
+	t.Helper()
+	if err := rawDB(t, path).QueryRow(`SELECT result, detail, challenge_id FROM credential_verifications WHERE purchase_order_id = ?`, po).
+		Scan(&result, &detail, &challenge); err != nil {
+		t.Fatal(err)
+	}
+	return
+}
+
+// C2b, design 3.3 and 7: a valid credential lets the rules decide; the
+// three events are written in order with the verification record; the
+// challenge is used; a resend is the stored purchase; the file reopens.
+func TestSubmitV2(t *testing.T) {
+	v := newV2(t)
+	s := v.started()
+	allow, ask := v2Of(t, v.allow), v2Of(t, v.base)
+	for _, c := range []struct {
+		o               paycontract.PurchaseOrder
+		verdict, reason string
+	}{{allow, "Allow", "WITHIN_ALLOW_MAX"}, {ask, "Ask", "HUMAN_APPROVAL_REQUIRED"}} {
+		r, err := v.buy(s, sessA, c.o)
+		if err != nil || r.Replay || r.Purchase.Decision.PolicyVerdict != c.verdict || r.Purchase.Decision.Reason != c.reason {
+			t.Fatalf("%s: %+v %v", c.verdict, r.Purchase.Decision, err)
+		}
+		if res, detail, chl := verification(t, v.path, c.o.Intent.PurchaseOrderID); res != "valid" || detail != "" || !chl.Valid {
+			t.Fatalf("%s: verification %s %s %v", c.verdict, res, detail, chl)
+		}
+	}
+	got := strings.Join(eventTypes(t, s, sessA), " ")
+	want := "TASK_STARTED DELEGATION_BOUND PURCHASE_PROPOSED CREDENTIAL_VERIFIED POLICY_DECIDED PURCHASE_PROPOSED CREDENTIAL_VERIFIED POLICY_DECIDED APPROVAL_SESSION_OPENED"
+	if got != want {
+		t.Fatalf("events:\n got %s\nwant %s", got, want)
+	}
+	var issued int
+	rawDB(t, v.path).QueryRow(`SELECT count(*) FROM credential_challenges WHERE state != 'used'`).Scan(&issued)
+	if issued != 0 {
+		t.Fatalf("%d challenges not used", issued)
+	}
+	if r, err := v.buy(s, sessA, allow); err != nil || !r.Replay {
+		t.Fatalf("resend: %+v %v", r, err)
+	}
+	body, _ := json.Marshal(allow)
+	if _, err := s.SubmitV2(sessB, body, Presented{}); Code(err) != "OWNERSHIP_MISMATCH" {
+		t.Fatalf("another consumer's session: %v", err)
+	}
+	s.Close()
+	v.open()
+}
+
+// Each case changes one thing; the purchase is decided Deny with the
+// credential's reason, and its record says why (design 3.3, 4, 6, 7).
+func TestSubmitV2Denies(t *testing.T) {
+	for name, c := range map[string]struct {
+		sess                   contracts.Session
+		run                    func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error)
+		result, detail, reason string
+		challenge              bool
+	}{
+		"no registered holder": {sessB, nil, "absent", "", "CONFIG_MISSING", false},
+		"holder material unavailable": {sessA, func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) {
+			if _, _, err := s.IssueChallenge(sessA, body); err != nil {
+				t.Fatal(err)
+			}
+			return s.SubmitV2(sessA, body, Presented{Unavailable: true})
+		}, "invalid", "HOLDER_MATERIAL_UNAVAILABLE", "CREDENTIAL_INVALID", false},
+		"no challenge": {sessA, func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) {
+			return s.SubmitV2(sessA, body, Presented{Presentation: &credential.Presentation{ChallengeID: "chl-none"}})
+		}, "invalid", "CHALLENGE_MISSING", "CREDENTIAL_INVALID", false},
+		"challenge expired": {sessA, func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) {
+			ch, _, _ := s.IssueChallenge(sessA, body)
+			p := v.present(ch)
+			v.clock.Add(ChallengeSeconds)
+			return s.SubmitV2(sessA, body, Presented{Presentation: p})
+		}, "invalid", "CHALLENGE_EXPIRED", "CREDENTIAL_INVALID", true},
+		"a presentation for another challenge": {sessA, func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) {
+			ch, _, _ := s.IssueChallenge(sessA, body)
+			ch.ID = "chl-replayed"
+			return s.SubmitV2(sessA, body, Presented{Presentation: v.present(ch)})
+		}, "invalid", "CHALLENGE_MISMATCH", "CREDENTIAL_INVALID", true},
+		"the challenge's intent is not the order's": {sessA, func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) {
+			ch, _, _ := s.IssueChallenge(sessA, body)
+			if _, err := rawDB(t, v.path).Exec(`UPDATE credential_challenges SET intent_hash = 'sha256:other'`); err != nil {
+				t.Fatal(err)
+			}
+			return s.SubmitV2(sessA, body, Presented{Presentation: v.present(ch)})
+		}, "invalid", "INTENT_MISMATCH", "CREDENTIAL_INVALID", true},
+		"a tampered proof": {sessA, func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) {
+			ch, _, _ := s.IssueChallenge(sessA, body)
+			p := v.present(ch)
+			p.Proof[len(p.Proof)-1] ^= 1
+			return s.SubmitV2(sessA, body, Presented{Presentation: p})
+		}, "invalid", "PROOF_INVALID", "CREDENTIAL_INVALID", true},
+		"revoked": {sessA, func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) {
+			st, _ := v.dir.ReadCredential("task-a")
+			if err := v.dir.Revoke(st.Credential["status"], t0); err != nil {
+				t.Fatal(err)
+			}
+			return v.buyRaw(s, sessA, body)
+		}, "revoked", "", "CREDENTIAL_REVOKED", true},
+		"no status list": {sessA, func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) {
+			os.Remove(filepath.Join(v.credDir, "status.json"))
+			return v.buyRaw(s, sessA, body)
+		}, "status_unavailable", "STATUS_LIST_UNAVAILABLE", "CREDENTIAL_STATUS_UNAVAILABLE", true},
+		"expired": {sessA, func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) {
+			v.clock.Add(10)
+			return v.buyRaw(s, sessA, body)
+		}, "expired", "", "AUTHORIZATION_EXPIRED", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			v := newV2(t)
+			if name == "expired" {
+				v.ttl = 10
+			}
+			s := v.started()
+			o := v2Of(t, forTask(t, v.allow, c.sess.TaskID))
+			body, _ := json.Marshal(o)
+			run := c.run
+			if run == nil {
+				run = func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) { return v.buyRaw(s, c.sess, body) }
+			}
+			r, err := run(t, v, s, body)
+			if err != nil || r.Purchase.Decision.PolicyVerdict != "Deny" || r.Purchase.Decision.Reason != c.reason {
+				t.Fatalf("%s: %+v %v", name, r.Purchase.Decision, err)
+			}
+			if res, detail, chl := verification(t, v.path, o.Intent.PurchaseOrderID); res != c.result || detail != c.detail || chl.Valid != c.challenge {
+				t.Fatalf("%s: verification %s/%s challenge %v", name, res, detail, chl)
+			}
+			s.Close()
+			v.open()
+		})
+	}
+}
+
+func (v *v2env) buyRaw(s *Store, sess contracts.Session, body []byte) (Result, error) {
+	var o paycontract.PurchaseOrder
+	if err := json.Unmarshal(body, &o); err != nil {
+		v.t.Fatal(err)
+	}
+	return v.buy(s, sess, o)
+}
+
+// A list older than one already seen is not used (design 6): rollback.
+func TestSubmitV2StatusRollback(t *testing.T) {
+	v := newV2(t)
+	s := v.started()
+	old, err := os.ReadFile(filepath.Join(v.credDir, "status.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.dir.Refresh(t0); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := v.buy(s, sessA, v2Of(t, v.allow)); err != nil || r.Purchase.Decision.PolicyVerdict != "Allow" {
+		t.Fatalf("first: %+v %v", r.Purchase.Decision, err)
+	}
+	if err := os.WriteFile(filepath.Join(v.credDir, "status.json"), old, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := v2Of(t, variant(t, v.allow, 51))
+	r, err := v.buy(s, sessA, o)
+	if err != nil || r.Purchase.Decision.Reason != "CREDENTIAL_STATUS_UNAVAILABLE" {
+		t.Fatalf("rolled back: %+v %v", r.Purchase.Decision, err)
+	}
+	if res, detail, _ := verification(t, v.path, o.Intent.PurchaseOrderID); res != "status_unavailable" || detail != "STATUS_LIST_ROLLBACK" {
+		t.Fatalf("verification %s/%s", res, detail)
+	}
+}
+
+// Refusals decide nothing: no presentation for a task with a credential,
+// a v2 order through Submit or into a v1 task.
+func TestSubmitV2Refuses(t *testing.T) {
+	v := newV2(t)
+	s := v.started()
+	body, _ := json.Marshal(v2Of(t, v.allow))
+	if _, _, err := s.IssueChallenge(sessA, body); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SubmitV2(sessA, body, Presented{}); Code(err) != "PRESENTATION_REQUIRED" {
+		t.Fatalf("no presentation: %v", err)
+	}
+	var n int
+	rawDB(t, v.path).QueryRow(`SELECT count(*) FROM credential_challenges WHERE state = 'issued'`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("the refusal changed the challenge: %d issued", n)
+	}
+	if _, err := s.Submit(sessA, body); Code(err) != "CONTRACT_VERSION_MISMATCH" {
+		t.Fatalf("Submit: %v", err)
+	}
+	v1body, _ := json.Marshal(v1Of(t, v.allow))
+	if _, err := s.SubmitV2(sessA, v1body, Presented{}); Code(err) != "CONTRACT_VERSION_MISMATCH" {
+		t.Fatalf("a v1 order: %v", err)
+	}
+	if len(eventTypes(t, s, sessA)) != 2 {
+		t.Fatal("a refusal wrote events")
+	}
+}
+
+// Design 7 step 4: one usable challenge per purchase, reused for the same
+// intent until it expires; none when the purchase is stored or the
+// credential absent.
+func TestIssueChallenge(t *testing.T) {
+	v := newV2(t)
+	s := v.started()
+	body, _ := json.Marshal(v2Of(t, v.allow))
+	a, ok, err := s.IssueChallenge(sessA, body)
+	if err != nil || !ok || a.VerifierID != "host-test" || a.ExpiresAt != t0+ChallengeSeconds || !slices.Equal(a.Disclose, credential.Mandatory) {
+		t.Fatalf("first: %+v %t %v", a, ok, err)
+	}
+	if b, _, _ := s.IssueChallenge(sessA, body); b.ID != a.ID {
+		t.Fatal("the same intent got another challenge")
+	}
+	v.clock.Add(ChallengeSeconds)
+	b, _, _ := s.IssueChallenge(sessA, body)
+	if b.ID == a.ID {
+		t.Fatal("an expired challenge was reused")
+	}
+	var states string
+	rawDB(t, v.path).QueryRow(`SELECT group_concat(state, ' ') FROM (SELECT state FROM credential_challenges ORDER BY issued_at)`).Scan(&states)
+	if states != "expired issued" {
+		t.Fatalf("states %q", states)
+	}
+	if _, err := s.SubmitV2(sessA, body, Presented{Presentation: v.present(b)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := s.IssueChallenge(sessA, body); ok || err != nil {
+		t.Fatalf("a stored purchase got a challenge: %v", err)
+	}
+	bb, _ := json.Marshal(v2Of(t, forTask(t, v.allow, "task-b")))
+	if _, ok, err := s.IssueChallenge(sessB, bb); ok || err != nil {
+		t.Fatalf("an absent credential got a challenge: %v", err)
 	}
 }

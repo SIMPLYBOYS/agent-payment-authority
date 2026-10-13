@@ -577,7 +577,7 @@ func (s *Store) Submit(sess contracts.Session, raw []byte) (Result, error) {
 			return refuse("CONTRACT_VERSION_MISMATCH", "an apa.pay.v2 purchase is submitted with its credential presentation (SubmitV2)")
 		}
 		if v1 != nil {
-			return s.submitV1(t, sess, *v1, &out)
+			return s.submitPay(t, sess, *v1, nil, &out)
 		}
 		if err := t.reg.ValidatePurchase(sess, po); err != nil {
 			return contractRefusal(err)

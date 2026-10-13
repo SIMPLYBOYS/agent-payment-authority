@@ -343,49 +343,72 @@ func (s *Store) consumers() []string {
 	return out
 }
 
-// submitV1 is Submit for an apa.pay.v1 task, in the same order as M1's:
-// ownership, expiry, replay or conflict, offer book, active task, the
-// decision (paypolicy), the write. An Ask opens its approval session in the
-// same transaction; its deadline never passes the binding's valid_before.
-func (s *Store) submitV1(t *taskTx, sess contracts.Session, po paycontract.PurchaseOrder, out *Result) error {
+// payChecks are a pay-family purchase's checks before its decision, in the
+// same order as M1's: ownership (the caller's), contract, expiry, replay or
+// conflict, offer book, active task. It returns the retry key and the
+// task's status, or the stored purchase as a replay.
+func (s *Store) payChecks(t *taskTx, sess contracts.Session, po paycontract.PurchaseOrder) (string, string, *Result, error) {
 	if err := paycontract.ValidatePurchase(t.reg, sess, po); err != nil {
-		return contractRefusal(err)
+		return "", "", nil, contractRefusal(err)
 	}
 	if err := t.expire(); err != nil {
-		return err
+		return "", "", nil, err
 	}
 	key, err := po.RetryKey()
 	if err != nil {
-		return contractRefusal(err)
+		return "", "", nil, contractRefusal(err)
 	}
 	i, b := po.Intent, po.PaymentBinding
 	existing, err := s.related(t, key, purchaseTerms{PO: i.PurchaseOrderID, ChainID: b.ChainID, Asset: b.AssetContract, From: b.From, Nonce: b.Nonce})
 	if err != nil {
-		return err
+		return "", "", nil, err
 	}
 	for _, e := range existing {
 		if e.V1 == nil {
-			return refuse("IDEMPOTENCY_CONFLICT", "a stored purchase already holds this retry key, purchase_order_id or nonce")
+			return "", "", nil, refuse("IDEMPOTENCY_CONFLICT", "a stored purchase already holds this retry key, purchase_order_id or nonce")
 		}
 		switch kind, err := paycontract.CompareRetry(*e.V1, po); {
 		case err != nil:
-			return contractRefusal(err)
+			return "", "", nil, contractRefusal(err)
 		case kind == "replay":
-			*out = Result{Replay: true, Purchase: t.view(t.purchases[i.PurchaseOrderID])}
-			return t.finish()
+			return "", "", &Result{Replay: true, Purchase: t.view(t.purchases[i.PurchaseOrderID])}, nil
 		}
 	}
 	if !s.offered(i.HTTPMethod, i.ResourceURL, po.Quote) {
-		return refuse("QUOTE_NOT_OFFERED", "quote is not in the current trusted offer book")
+		return "", "", nil, refuse("QUOTE_NOT_OFFERED", "quote is not in the current trusted offer book")
 	}
 	status, _ := project(t.events)
 	if err := contracts.CheckTaskActive(status); err != nil {
-		return contractRefusal(err)
+		return "", "", nil, contractRefusal(err)
 	}
+	return key, status, nil, nil
+}
+
+// submitPay is Submit for a pay-family task: payChecks, then for
+// apa.pay.v2 the credential step (pr, design 7 step 6), the decision
+// (paypolicy), the write. An Ask opens its approval session in the same
+// transaction; its deadline never passes the binding's valid_before.
+func (s *Store) submitPay(t *taskTx, sess contracts.Session, po paycontract.PurchaseOrder, pr *Presented, out *Result) error {
+	key, status, replay, err := s.payChecks(t, sess, po)
+	if err != nil {
+		return err
+	} else if replay != nil {
+		*out = *replay
+		return t.finish()
+	}
+	i := po.Intent
 	in := paypolicy.Input{Session: sess, Purchase: po, ContractVersion: t.row.ContractVersion, TaskStatus: status,
 		Budget: policy.Budget{TaskID: t.row.TaskID, Remaining: contracts.Amount(t.row.BudgetRemaining)}, Now: t.now}
 	if in.Profile, in.Credential, err = t.settings(); err != nil {
 		return err
+	}
+	if (t.row.ContractVersion == paycontract.V2) != (pr != nil) {
+		return errors.New("an apa.pay.v2 purchase, and only one, goes with its presentation")
+	}
+	if pr != nil {
+		if in.Check, err = s.verifyCredential(t, po, *pr); err != nil {
+			return err
+		}
 	}
 	d, err := paypolicy.Decide(t.reg, in)
 	if err != nil {
@@ -404,6 +427,14 @@ func (s *Store) submitV1(t *taskTx, sess contracts.Session, po paycontract.Purch
 	}
 	if err := t.emit("PURCHASE_PROPOSED", p, contracts.EventPayload{}); err != nil {
 		return err
+	}
+	if in.Check != nil {
+		if err := t.recordVerification(i.PurchaseOrderID, *in.Check); err != nil {
+			return err
+		}
+		if err := t.emit("CREDENTIAL_VERIFIED", p, contracts.EventPayload{Credential: in.Check}); err != nil {
+			return err
+		}
 	}
 	if err := t.emit("POLICY_DECIDED", p, contracts.EventPayload{Decision: &d}); err != nil {
 		return err

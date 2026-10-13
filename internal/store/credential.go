@@ -7,12 +7,17 @@ package store
 // and verifies under its write transaction.
 
 import (
+	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strconv"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 )
 
 // MaxCredentialTTL caps a credential's expiry after its task starts (C2-D10).
@@ -81,4 +86,250 @@ func NewBBSCredential(dir *credential.Dir, s credential.Stored) (*BBSCredential,
 	b := &BBSCredential{Schema: c["schema"], Issuer: issuer, IssuerPK: hex.EncodeToString(pk), StatusKeySHA256: fp, ConsumerID: c["consumer_id"],
 		Holder: c["holder"], TaskID: c["task_id"], Expiry: expiry, Status: c["status"], SignatureSHA256: credential.Fingerprint(s.Signature)}
 	return b, b.validate()
+}
+
+// ChallengeSeconds is how long an issued challenge stays usable (design 7).
+const ChallengeSeconds = 60
+
+// Challenge is a stored presentation request for one (task, purchase) and
+// intent (design 7 step 4).
+type Challenge struct {
+	ID, TaskID, PurchaseOrderID, IntentHash, VerifierID string
+	Disclose                                            []string
+	IssuedAt, ExpiresAt                                 uint64
+}
+
+// Request is what the holder answers and the verifier checks.
+func (c Challenge) Request() credential.Request {
+	return credential.Request{VerifierID: c.VerifierID, ChallengeID: c.ID, IntentHash: c.IntentHash, Disclose: c.Disclose}
+}
+
+// Presented is the Host holder's answer to a challenge: a presentation, or
+// Unavailable when the holder material is missing, corrupt or not the
+// registered key (design 7 step 3: a decided Deny). A proof that failed to
+// build is not presented at all (C2-D12): no submit, no decision.
+type Presented struct {
+	Presentation *credential.Presentation
+	Unavailable  bool
+}
+
+// payTask opens sess's task for a pay-family order of po's version: the
+// session owns it, and the order's version is the task's, which is version.
+func (s *Store) payTask(tx *sql.Tx, now uint64, sess contracts.Session, po paycontract.PurchaseOrder, version string) (*taskTx, error) {
+	t, err := s.openTask(tx, now, sess.TaskID)
+	if Code(err) == "UNKNOWN_TASK" || err == nil && (t.row.ConsumerID != sess.ConsumerID || t.row.AgentID != sess.AgentID) {
+		return nil, refuse("OWNERSHIP_MISMATCH", "session does not own this task")
+	} else if err != nil {
+		return nil, err
+	}
+	if t.row.ContractVersion != version || po.Version != version {
+		return nil, refuse("CONTRACT_VERSION_MISMATCH", "the purchase's contract is not the task's ("+t.row.ContractVersion+")")
+	}
+	return t, nil
+}
+
+func decodePay(raw []byte) (paycontract.PurchaseOrder, error) {
+	var po paycontract.PurchaseOrder
+	if err := contracts.Decode(raw, &po); err != nil {
+		return po, refuse("INVALID_PURCHASE", "purchase does not decode as a pay-family purchase order")
+	}
+	return po, nil
+}
+
+// IssueChallenge returns the challenge the Host's holder answers for an
+// apa.pay.v2 purchase, after the same checks as SubmitV2's (design 7 steps
+// 1, 2, 4). ok is false when there is nothing to present: the purchase is
+// already stored (SubmitV2 returns it), or the task's credential is absent.
+// An issued challenge of the same intent that has not expired is reused;
+// any other issued one of this purchase is marked expired first.
+func (s *Store) IssueChallenge(sess contracts.Session, raw []byte) (Challenge, bool, error) {
+	po, err := decodePay(raw)
+	if err != nil {
+		return Challenge{}, false, err
+	}
+	var out Challenge
+	var ok bool
+	err = s.write(func(tx *sql.Tx, now uint64) error {
+		t, err := s.payTask(tx, now, sess, po, paycontract.V2)
+		if err != nil {
+			return err
+		}
+		if _, _, replay, err := s.payChecks(t, sess, po); err != nil {
+			return err
+		} else if replay != nil {
+			return t.finish() // an Ask that expired meanwhile is recorded, as Submit's replay does
+		}
+		if b, err := t.bbs(); err != nil {
+			return err
+		} else if b == nil {
+			return t.finish()
+		}
+		intent, err := po.IntentHash()
+		if err != nil {
+			return contractRefusal(err)
+		}
+		poID := po.Intent.PurchaseOrderID
+		if _, err := tx.Exec(`UPDATE credential_challenges SET state = 'expired' WHERE task_id = ? AND purchase_order_id = ? AND state = 'issued'
+			AND (expires_at <= ? OR intent_hash != ?)`, t.row.TaskID, poID, now, intent); err != nil {
+			return err
+		}
+		out = Challenge{TaskID: t.row.TaskID, PurchaseOrderID: poID}
+		var disclose string
+		err = tx.QueryRow(`SELECT challenge_id, intent_hash, disclose, verifier_id, issued_at, expires_at FROM credential_challenges
+			WHERE task_id = ? AND purchase_order_id = ? AND state = 'issued'`, t.row.TaskID, poID).
+			Scan(&out.ID, &out.IntentHash, &disclose, &out.VerifierID, &out.IssuedAt, &out.ExpiresAt)
+		switch {
+		case err == nil:
+			ok = true
+			return errors.Join(json.Unmarshal([]byte(disclose), &out.Disclose), t.finish())
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
+		b := make([]byte, 16)
+		if _, err := rand.Read(b); err != nil {
+			return err
+		}
+		out.ID, out.IntentHash, out.VerifierID, out.Disclose = "chl-"+hex.EncodeToString(b), intent, s.verifier, credential.Mandatory
+		out.IssuedAt, out.ExpiresAt = now, now+ChallengeSeconds
+		d, err := canonical(out.Disclose)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO credential_challenges VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'issued')`,
+			out.ID, out.TaskID, poID, intent, string(d), out.VerifierID, out.IssuedAt, out.ExpiresAt); err != nil {
+			return err
+		}
+		ok = true
+		return t.finish()
+	})
+	return out, ok, err
+}
+
+// SubmitV2 is Submit for an apa.pay.v2 task: the same checks, then the
+// credential step with the Host holder's answer, the decision and the
+// write, in one transaction (design 7 step 6). A stored purchase is
+// returned as it is, whatever was presented.
+func (s *Store) SubmitV2(sess contracts.Session, raw []byte, pr Presented) (Result, error) {
+	po, err := decodePay(raw)
+	if err != nil {
+		return Result{}, err
+	}
+	var out Result
+	err = s.write(func(tx *sql.Tx, now uint64) error {
+		t, err := s.payTask(tx, now, sess, po, paycontract.V2)
+		if err != nil {
+			return err
+		}
+		return s.submitPay(t, sess, po, &pr, &out)
+	})
+	return out, err
+}
+
+// verifyCredential is the credential step (design 3.3, 4, 7): it consumes
+// the challenge the Store keeps for this purchase, whatever the
+// presentation names, and verifies against the task's snapshot and the
+// status list read now. ponytail: verifies inside the write transaction
+// (about 3.4 ms); move it before the transaction if that becomes the
+// bottleneck (C1 review N5).
+func (s *Store) verifyCredential(t *taskTx, po paycontract.PurchaseOrder, pr Presented) (*contracts.CredentialCheck, error) {
+	c := &contracts.CredentialCheck{Verifier: s.verifier}
+	b, err := t.bbs()
+	switch {
+	case err != nil:
+		return nil, err
+	case b == nil:
+		c.Result = credential.Absent
+		return c, nil
+	case pr.Unavailable:
+		c.Result, c.Detail = credential.Invalid, "HOLDER_MATERIAL_UNAVAILABLE"
+		return c, nil
+	case pr.Presentation == nil:
+		return nil, refuse("PRESENTATION_REQUIRED", "the task has a credential: present it, or report the holder material unavailable")
+	}
+	poID := po.Intent.PurchaseOrderID
+	var ch Challenge
+	var disclose string
+	err = t.tx.QueryRow(`SELECT challenge_id, intent_hash, disclose, verifier_id, expires_at FROM credential_challenges
+		WHERE task_id = ? AND purchase_order_id = ? AND state = 'issued'`, t.row.TaskID, poID).Scan(&ch.ID, &ch.IntentHash, &disclose, &ch.VerifierID, &ch.ExpiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		c.Result, c.Detail = credential.Invalid, "CHALLENGE_MISSING"
+		return c, nil
+	} else if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(disclose), &ch.Disclose); err != nil {
+		return nil, err
+	}
+	if _, err := t.tx.Exec(`UPDATE credential_challenges SET state = 'used' WHERE challenge_id = ?`, ch.ID); err != nil {
+		return nil, err
+	}
+	c.ChallengeID = ch.ID
+	intent, err := po.IntentHash()
+	if err != nil {
+		return nil, contractRefusal(err)
+	}
+	switch {
+	case t.now >= ch.ExpiresAt:
+		c.Result, c.Detail = credential.Invalid, "CHALLENGE_EXPIRED"
+	case pr.Presentation.ChallengeID != ch.ID:
+		c.Result, c.Detail = credential.Invalid, "CHALLENGE_MISMATCH"
+	case ch.IntentHash != intent:
+		c.Result, c.Detail = credential.Invalid, "INTENT_MISMATCH"
+	}
+	if c.Result != "" {
+		return c, nil
+	}
+	st, rollback, err := s.status(t, b)
+	if err != nil {
+		return nil, err
+	}
+	pk, _ := hex.DecodeString(b.IssuerPK)
+	o := credential.Verify(ch.Request(), *pr.Presentation, credential.Expect{IssuerID: b.Issuer, IssuerPK: pk, Holder: b.Holder, TaskID: b.TaskID,
+		Expiry: strconv.FormatUint(b.Expiry, 10), Status: b.Status}, st, int64(t.now))
+	c.Result, c.Detail = o.Result, o.Detail
+	if rollback && o.Result == credential.StatusUnavailable {
+		c.Detail = "STATUS_LIST_ROLLBACK"
+	}
+	if o.Issuer != "" {
+		c.CredentialSchema, c.Issuer, c.Holder, c.StatusIndex, c.Expiry, c.ProofSHA256 = credential.Schema, o.Issuer, o.Holder, o.Status, uint64(o.Expiry), o.ProofSHA256
+	}
+	c.StatusListVersion, c.StatusListIssuedAt, c.StatusListSHA256 = o.StatusListVersion, uint64(o.StatusListIssuedAt), o.StatusListSHA256
+	return c, nil
+}
+
+var errRollback = errors.New("status list: an older version, or another list of the same version, than one already seen")
+
+// status reads the task issuer's status list now, never cached (design 6),
+// and records its version in credential_status_seen. A list older than one
+// seen, or another of the same version, is not used: rollback.
+func (s *Store) status(t *taskTx, b *BBSCredential) (credential.Status, bool, error) {
+	list, sum, err := s.creds.ReadStatus(b.Issuer, b.StatusKeySHA256, int64(t.now))
+	if err != nil {
+		return credential.Status{Err: err}, false, nil
+	}
+	var max uint64
+	var seen string
+	err = t.tx.QueryRow(`SELECT max_list_version, sha256 FROM credential_status_seen WHERE issuer = ?`, b.Issuer).Scan(&max, &seen)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		_, err = t.tx.Exec(`INSERT INTO credential_status_seen VALUES (?, ?, ?)`, b.Issuer, list.ListVersion, sum)
+	case err != nil:
+	case list.ListVersion < max || list.ListVersion == max && sum != seen:
+		return credential.Status{Err: errRollback}, true, nil
+	case list.ListVersion > max:
+		_, err = t.tx.Exec(`UPDATE credential_status_seen SET max_list_version = ?, sha256 = ? WHERE issuer = ?`, list.ListVersion, sum, b.Issuer)
+	}
+	return credential.Status{List: list, SHA256: sum}, false, err
+}
+
+// recordVerification writes the purchase's verification record.
+func (t *taskTx) recordVerification(poID string, c contracts.CredentialCheck) error {
+	var chl any
+	if c.ChallengeID != "" {
+		chl = c.ChallengeID
+	}
+	_, err := t.tx.Exec(`INSERT INTO credential_verifications VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.row.TaskID, poID, chl, c.Result, c.Detail, c.Issuer, c.Holder, c.StatusIndex, c.Expiry,
+		c.StatusListVersion, c.StatusListIssuedAt, c.StatusListSHA256, c.ProofSHA256, c.Verifier, t.now)
+	return err
 }
