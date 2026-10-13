@@ -115,6 +115,11 @@ func (s *Store) verify(version int) error {
 			if derr = contracts.Decode(c, &cr); derr == nil && (cr.EvidenceMode != "fixture" || cr.ValidUntil == 0) {
 				derr = fmt.Errorf("not an M1 fixture credential")
 			}
+		case "credential_bbs":
+			var b BBSCredential
+			if derr = contracts.Decode(c, &b); derr == nil {
+				derr = b.validate()
+			}
 		case "terms":
 			var t terms
 			derr = contracts.Decode(c, &t)
@@ -162,7 +167,15 @@ func (s *Store) verify(version int) error {
 				return classify("snapshot", id, err, "profile reference")
 			}
 		}
-		if row.CredentialSnap.Valid {
+		// apa.pay.v2 keeps a credential_bbs snapshot of this task; the others
+		// the fixture (a v2 task with a fixture is corrupt, and the reverse).
+		if row.CredentialSnap.Valid && row.ContractVersion == paycontract.V2 {
+			if b, err := t.bbs(); err != nil {
+				return classify("snapshot", id, err, "credential reference")
+			} else if b.ConsumerID != row.ConsumerID || b.TaskID != id || b.Expiry > row.StartedAt+MaxCredentialTTL {
+				return bad("snapshot", id, "credential_bbs is another task's or consumer's, or outlives its TTL")
+			}
+		} else if row.CredentialSnap.Valid {
 			var cr policy.Credential
 			if err := decodeSnapshot(tx, row.CredentialSnap.String, "credential", &cr); err != nil {
 				return classify("snapshot", id, err, "credential reference")

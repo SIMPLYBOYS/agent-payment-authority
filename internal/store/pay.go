@@ -187,10 +187,13 @@ func (t *taskTx) closeSession(p *purchaseRow, state string, by *resolver) error 
 	return nil
 }
 
-// taskContract checks setup's contract version and, for apa.pay.v1, its
-// delegation, inside StartTask's transaction. It narrows setup to the
-// delegation: the budget, allow_max, merchants and approval deadline the
-// consumer confirmed, never wider than the host's profile.
+// taskContract checks setup's contract version and, for the pay family, its
+// delegation of the same version, inside StartTask's transaction. It narrows
+// setup to the delegation: the budget, allow_max, merchants and approval
+// deadline the consumer confirmed, never wider than the host's profile. An
+// apa.pay.v1 task needs the fixture credential; an apa.pay.v2 task its
+// BBS+ credential, issued for at most MaxCredentialTTL, or a declared absent
+// one, and the Store's credential directory to verify against.
 func (s *Store) taskContract(tx *sql.Tx, now uint64, setup *TaskSetup, task contracts.Task) (string, *paycontract.Delegation, error) {
 	switch setup.ContractVersion {
 	case "", contracts.Version:
@@ -198,10 +201,11 @@ func (s *Store) taskContract(tx *sql.Tx, now uint64, setup *TaskSetup, task cont
 			return "", nil, refuse("INVALID_TASK_SETUP", "an apa.m1.v2 task has no delegation")
 		}
 		return contracts.Version, nil, nil
-	case paycontract.Version:
+	case paycontract.Version, paycontract.V2:
 	default:
 		return "", nil, refuse("INVALID_TASK_SETUP", "unknown contract version")
 	}
+	v2 := setup.ContractVersion == paycontract.V2
 	d, bound, err := readDelegation(tx, setup.DelegationID)
 	switch {
 	case err != nil:
@@ -210,10 +214,17 @@ func (s *Store) taskContract(tx *sql.Tx, now uint64, setup *TaskSetup, task cont
 		return "", nil, refuse("DELEGATION_UNAVAILABLE", "no confirmed delegation of this consumer")
 	case bound || now >= d.ExpiresAt:
 		return "", nil, refuse("DELEGATION_UNAVAILABLE", "the delegation is already bound or has expired")
+	case d.Version != setup.ContractVersion:
+		return "", nil, refuse("DELEGATION_UNAVAILABLE", "the delegation is another contract version's")
 	}
 	p := setup.Profile
-	if p == nil || setup.Credential == nil {
+	switch b := setup.BBS; {
+	case p == nil || !v2 && setup.Credential == nil:
 		return "", nil, refuse("INVALID_TASK_SETUP", "an apa.pay.v1 task needs the profile and the credential")
+	case v2 && (s.creds == nil || s.verifier == ""):
+		return "", nil, refuse("INVALID_TASK_SETUP", "an apa.pay.v2 task needs the Store's credential directory and verifier ID")
+	case b != nil && (b.Expiry <= now || b.Expiry > now+MaxCredentialTTL):
+		return "", nil, refuse("INVALID_TASK_SETUP", "the credential's expiry is not within the TTL from now")
 	}
 	limit, _ := p.TaskCap.Units()
 	allow, _ := p.AllowMax.Units()
@@ -225,7 +236,7 @@ func (s *Store) taskContract(tx *sql.Tx, now uint64, setup *TaskSetup, task cont
 	narrowed := *p
 	narrowed.AllowMax, narrowed.Merchants = d.AllowMax, slices.Clone(d.Merchants)
 	setup.Profile, setup.BudgetInitial, setup.AssetID, setup.ApprovalDeadlineSeconds = &narrowed, d.TaskBudget, d.AssetID, d.ApprovalDeadlineSeconds
-	return paycontract.Version, d, nil
+	return setup.ContractVersion, d, nil
 }
 
 func readDelegation(q interface {

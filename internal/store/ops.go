@@ -438,6 +438,11 @@ func (s *Store) StartTask(setup TaskSetup) error {
 				return err
 			}
 		}
+		if setup.BBS != nil {
+			if credSnap, err = s.snapshot(tx, "credential_bbs", setup.BBS, now); err != nil {
+				return err
+			}
+		}
 		termsSnap, err := s.snapshot(tx, "terms", tm, now)
 		if err != nil {
 			return err
@@ -486,7 +491,8 @@ func (s *Store) buildTerms(setup TaskSetup) (terms, error) {
 	task, _, _ := s.registry.Binding(setup.TaskID)
 	tm := terms{TaskID: setup.TaskID, ProfileState: "absent", CredentialState: "absent", BudgetInitial: setup.BudgetInitial,
 		AssetID: setup.AssetID, ApprovalDeadlineSeconds: setup.ApprovalDeadlineSeconds}
-	if (setup.Profile == nil) != setup.ProfileAbsent || (setup.Credential == nil) != setup.CredentialAbsent {
+	hasCred := setup.Credential != nil || setup.BBS != nil
+	if (setup.Profile == nil) != setup.ProfileAbsent || hasCred == setup.CredentialAbsent || setup.Credential != nil && setup.BBS != nil {
 		return tm, errors.New("declare a missing profile or credential explicitly; never pass both or neither")
 	}
 	if p := setup.Profile; p != nil {
@@ -501,9 +507,19 @@ func (s *Store) buildTerms(setup TaskSetup) (terms, error) {
 			tm.AssetID = p.AssetID
 		}
 	}
+	v2 := setup.ContractVersion == paycontract.V2
 	if c := setup.Credential; c != nil {
-		if c.ConsumerID != task.ConsumerID || c.EvidenceMode != "fixture" || c.ValidUntil == 0 {
-			return tm, errors.New("credential must be this consumer's M1 fixture with a valid_until")
+		if v2 || c.ConsumerID != task.ConsumerID || c.EvidenceMode != "fixture" || c.ValidUntil == 0 {
+			return tm, errors.New("credential must be this consumer's M1 fixture with a valid_until, in an apa.m1.v2 or apa.pay.v1 task")
+		}
+		tm.CredentialState = "present"
+	}
+	if b := setup.BBS; b != nil {
+		if err := b.validate(); err != nil {
+			return tm, err
+		}
+		if !v2 || b.ConsumerID != task.ConsumerID || b.TaskID != task.TaskID {
+			return tm, errors.New("credential_bbs must be this task's and consumer's, in an apa.pay.v2 task")
 		}
 		tm.CredentialState = "present"
 	}
@@ -538,10 +554,10 @@ func (s *Store) Submit(sess contracts.Session, raw []byte) (Result, error) {
 	json.Unmarshal(raw, &head)
 	var po contracts.PurchaseOrder
 	var v1 *paycontract.PurchaseOrder
-	if head.Version == paycontract.Version {
+	if paycontract.Supported(head.Version) {
 		v1 = new(paycontract.PurchaseOrder)
 		if err := contracts.Decode(raw, v1); err != nil {
-			return Result{}, refuse("INVALID_PURCHASE", "purchase does not decode as an apa.pay.v1 purchase order")
+			return Result{}, refuse("INVALID_PURCHASE", "purchase does not decode as a pay-family purchase order")
 		}
 	} else if err := contracts.Decode(raw, &po); err != nil {
 		return Result{}, refuse("INVALID_PURCHASE", "purchase does not decode as an M1 purchase order")
@@ -556,6 +572,9 @@ func (s *Store) Submit(sess contracts.Session, raw []byte) (Result, error) {
 		}
 		if (v1 != nil) != t.pay() {
 			return refuse("CONTRACT_VERSION_MISMATCH", "the purchase's contract is not the task's ("+t.row.ContractVersion+")")
+		}
+		if t.row.ContractVersion == paycontract.V2 {
+			return refuse("CONTRACT_VERSION_MISMATCH", "an apa.pay.v2 purchase is submitted with its credential presentation (SubmitV2)")
 		}
 		if v1 != nil {
 			return s.submitV1(t, sess, *v1, &out)
@@ -671,7 +690,7 @@ func (t *taskTx) settings() (*policy.Profile, *policy.Credential, error) {
 			return nil, nil, err
 		}
 	}
-	if t.row.CredentialSnap.Valid {
+	if t.row.CredentialSnap.Valid && t.row.ContractVersion != paycontract.V2 { // v2: the verifier's record, t.bbs()
 		c = new(policy.Credential)
 		if err := decodeSnapshot(t.tx, t.row.CredentialSnap.String, "credential", c); err != nil {
 			return nil, nil, err

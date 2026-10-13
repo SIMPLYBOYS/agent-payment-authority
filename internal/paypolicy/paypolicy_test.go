@@ -125,7 +125,7 @@ func TestV2CredentialStep(t *testing.T) {
 	}
 	valid := &contracts.CredentialCheck{Result: "valid", Expiry: 1790726450 + 3600, Verifier: "host-1"}
 	for _, c := range []struct {
-		check            *contracts.CredentialCheck
+		check           *contracts.CredentialCheck
 		verdict, reason string
 	}{
 		{valid, "Allow", "WITHIN_ALLOW_MAX"},

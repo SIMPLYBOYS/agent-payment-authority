@@ -314,6 +314,39 @@ func (d *Dir) ReadCredential(taskID string) (Stored, error) {
 	return s, nil
 }
 
+// IssueTask issues task's credential to consumer as the Host does before
+// StartTask (design 5): reserve a status index, sign with the issuer key,
+// write holder/<task>.cred. ok is false, and nothing is reserved, when the
+// consumer has no registered holder: the task starts with an absent
+// credential. A failed StartTask leaves the index unused and the file to be
+// overwritten by the next issue for the task.
+func (d *Dir) IssueTask(task, consumer string, expiry int64) (s Stored, ok bool, err error) {
+	holders, err := d.Holders()
+	if err != nil {
+		return s, false, err
+	}
+	holder, ok := holders[consumer]
+	if !ok {
+		return s, false, nil
+	}
+	k, err := d.IssuerKey()
+	if err != nil {
+		return s, false, err
+	}
+	idx, err := d.ReserveStatusIndex()
+	if err != nil {
+		return s, false, err
+	}
+	c := Credential{"schema": Schema, "issuer": k.ID, "task_id": task, "consumer_id": consumer, "c0": C0Placeholder,
+		"expiry": strconv.FormatInt(expiry, 10), "holder": holder, "status": idx}
+	sig, err := k.Issue(c)
+	if err != nil {
+		return s, false, err
+	}
+	s = Stored{Credential: c, Signature: sig}
+	return s, true, d.WriteCredential(task, s)
+}
+
 const statusVersion = "apa.status-list.v1"
 
 // StatusList is the issuer's signed revocation list (design 6).

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 	_ "modernc.org/sqlite" // CGo-free SQLite; pinned with modernc.org/libc in go.mod
 )
@@ -59,6 +60,11 @@ type Config struct {
 	// migrate, verify as 4. Without it an older database is refused and
 	// left untouched.
 	UpgradeDB bool
+	// Credentials is the credential directory (--credential-dir) whose
+	// status list apa.pay.v2 verifications read, and VerifierID names this
+	// Host in each presentation's nonce. Without them no v2 task starts.
+	Credentials *credential.Dir
+	VerifierID  string
 }
 
 // Error is a refused operation. Code is the contract reason when a contract
@@ -143,6 +149,8 @@ type Store struct {
 	regBody  []byte
 	offers   map[OfferKey][][]byte // canonical quotes
 	clock    Clock
+	creds    *credential.Dir
+	verifier string
 	hook     func(stage string) error // tests only; nil in production
 }
 
@@ -166,7 +174,7 @@ func Open(cfg Config) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{path: path, registry: reg, regBody: regBody, offers: map[OfferKey][][]byte{}, clock: cfg.Clock}
+	s := &Store{path: path, registry: reg, regBody: regBody, offers: map[OfferKey][][]byte{}, clock: cfg.Clock, creds: cfg.Credentials, verifier: cfg.VerifierID}
 	for k, quotes := range cfg.Offers {
 		for _, q := range quotes {
 			if _, err := q.Hash(); err != nil {
@@ -802,6 +810,9 @@ type TaskSetup struct {
 	// the profile (docs/commercial-transaction-flow.md section 10).
 	ContractVersion string
 	DelegationID    string
+	// BBS is an apa.pay.v2 task's issued credential (Credential stays nil;
+	// CredentialAbsent declares a consumer without a registered holder).
+	BBS *BBSCredential
 }
 
 func (s *Store) snapshot(tx *sql.Tx, kind string, v any, now uint64) (string, error) {
