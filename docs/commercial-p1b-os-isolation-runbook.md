@@ -1,7 +1,8 @@
 # P1-b OS 隔離驗收：指令筆記（給 Aaron 逐關卡操作、Codex 陪同判讀）
 
 > 2026-10-13，Claude Code。第三版：依 vault〈Claude-Code-P1-bOS隔離驗收指令第二輪限定補正派工-c7744be-20261013〉補正第二輪 O1～O4（修訂對照見第 9 節）。第二版（`c7744be`，第一輪 O1～O3）與第一版（`0ef6172`）保留在 Git 歷史。
-> **狀態：OS 隔離驗收指令第二輪補正完成，待 Codex 限定複核；預演與跨使用者驗收未完成，正式付款未啟用。**
+> **狀態：keygen 通過 B1 一次性未注資測試金鑰用途的限定技術複核；A／B0 由 Aaron 依 Route B 操作並完成安全停止，Codex 依回報判讀。B1 金鑰隔離仍待 Aaron 操作；P1-b 未結案，正式付款未啟用。**（A 與 B0 的操作紀錄見 [方案](commercial-p1b-os-isolation.md) 第 8.6 節；本筆記第 6.5 節後附這次的補充判讀。）
+> 以下為 `8fb5f8c` 時的狀態，保留原文：OS 隔離驗收指令第二輪補正完成，待 Codex 限定複核；預演與跨使用者驗收未完成，正式付款未啟用。
 > 依據：[commercial-p1b-os-isolation.md](commercial-p1b-os-isolation.md)（方案，Aaron 已核准 D1～D7，第 8 節）；程式 `cmd/apa-signer`（`serve`、`keygen`）。
 > **命令都還沒有執行過。**本版只做了 `zsh -f -n` 語法解析（第 10 節），沒有執行任何區塊，也沒有建置、啟動 Signer、keygen、sudo 或改系統。語法通過不等於參數合法或操作已驗證。跨使用者、sudo、`/dev/tty` 經 sudo、群組生效、socket 群組繼承，只能在第一次執行時得知。
 > 歸屬：`serve`、`keygen` 的程式行為由 Claude Code 測試（同一 uid；`keygen` 見方案第 8.2 節），keygen 尚未經 Codex 技術複核。Codex 前一輪只做文件、原始碼、本機手冊與語法預檢，沒有建置或啟動 Signer，沒有 keygen、sudo 或跨使用者測試，也沒有 repo 證據 log。
@@ -14,7 +15,7 @@
 | Aaron | 選擇路徑，執行第 2～8 節；所有 sudo 密碼與密語只由 Aaron 在鍵盤上輸入 |
 
 - **一律用乾淨的 zsh**：每個視窗先執行 `exec /bin/zsh -f`，不載入個人啟動設定。本筆記所有區塊都是 zsh 語法。
-- **三個視窗**：
+- **三個視窗**（每段都標明在哪個視窗執行；`need`、`mark`、`denied` 等只在錄製中的 W-host／W-admin 載入，貼到 W-signer 會得到 `command not found`，而且這種錯誤不能用來推定任何狀態）：
   - W-host：Host 使用者，不用 sudo，錄製。
   - W-admin：只做 sudo，錄製。
   - W-signer：前景 Signer，**不錄製**。
@@ -438,6 +439,13 @@ if [[ $RUN == /tmp/apa-iso.?????? && -d $RUN && -e $RUN/ok.6.2 ]]; then cd / && 
 - `apa-signer` 的 `expect_403`：已連線、由 peer uid 拒絕；
 - `nobody` 的 `expect_fs_block`：檔案權限擋住，沒有 HTTP 狀態。
 
+**10/13 第一次操作的補充（B0）**：
+- `nobody` 的 curl 回 7、HTTP 000，訊息只有無法連線、沒有權限字樣，所以 `expect_fs_block` 正確停在 STOP。
+- 這時**保留這個 STOP**，不重跑、不放寬判斷，交 Codex 依兩件事判讀：服務當時是否可用（同一段的 Host `expect_ok`），以及有沒有明確的 errno。
+- 這次是 Aaron 依 Codex 指示，以 `nobody` 補做一次 AF_UNIX 直接 connect，得到 errno 13（Permission denied）；只嘗試連線，不送 HTTP 或任何請求。之後再取得一次 Host health 200，記下補充說明，才完成 `OK 6.5`。
+- 這不是原始區塊一次通過。檔案不存在、連線被拒、逾時、工具不存在或其他錯誤，都不算權限阻擋。helper 不改成「非零就通過」，也不加自動重試。
+- 補充探測的命令是 Codex 當場提供的，本筆記沒有收錄成可執行區塊；若之後要收錄，先交 Codex 核對。
+
 緊接在 `nobody` 之前的 `expect_ok` 證明 socket 當時活著。`nobody` 只靠退出碼不算數：必須同時沒有 HTTP 狀態、有權限錯誤字樣。curl 在這台機器上的實際字樣尚未觀察過（路徑 A 未執行）；若不同，`expect_fs_block` 會停下讓 Codex 判讀，不自行放寬。
 
 **6.6 W-signer 觀察**（W-admin，驗收關卡；只有回答 `yes` 才通過）
@@ -524,7 +532,7 @@ if [[ -e $RUN/ok.7.3 ]]; then cd / && sudo -u apa-signer /bin/sh -c 'umask 077; 
   mark 7.5
 )
 ```
-**7.6**（W-admin）
+**7.6**（W-admin；`expect_fs_block` 若像 B0 一樣停在 STOP，照第 6.5 節的補充處理：保留 STOP，交 Codex 判讀，不機械式重跑）
 ```zsh
 ( setopt ERR_EXIT NO_UNSET PIPE_FAIL
   need 7.5; cd /

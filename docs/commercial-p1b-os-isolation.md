@@ -1,7 +1,8 @@
 # P1-b：OS 隔離部署最小方案
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-P1-bOS隔離部署最小方案派工-76c3673-20261013〉（Aaron 核准撰寫本方案）。分支 `commercial-p1b`，基準 `76c3673`；產品與驗證基準 `07b16fd`、`935de2f`（R1～R3 限定技術複核已通過，本方案不重開）。
-> **狀態：Aaron 已核准 D1～D7（10/13，第 8 節）；D4 的 keygen 工具與 D6 的設計措辭已完成；OS 隔離驗收指令第二輪補正完成，待 Codex 限定複核；預演與跨使用者驗收未完成，正式付款未啟用。**（第 8.3 節）
+> **狀態：keygen 通過 B1 一次性未注資測試金鑰用途的限定技術複核；A／B0 由 Aaron 依 Route B 操作並完成安全停止，Codex 依回報判讀。B1 金鑰隔離仍待 Aaron 操作；P1-b 未結案，正式付款未啟用。**（第 8.5、8.6 節）
+> 以下為 `8fb5f8c` 時的狀態，保留原文：Aaron 已核准 D1～D7（10/13，第 8 節）；D4 的 keygen 工具與 D6 的設計措辭已完成；OS 隔離驗收指令第二輪補正完成，待 Codex 限定複核；預演與跨使用者驗收未完成，正式付款未啟用。（第 8.3 節）
 > 以下為 `62b5037` 時的狀態，保留原文：Aaron 已核准 D1～D7；D4 的 keygen 工具與 D6 的設計措辭已完成；D1～D3、D5 待 Aaron 親自執行；尚未部署，正式付款未啟用。
 > 以下為方案交付時（`27b6e96`）的狀態，保留原文：方案完成，待 Codex review 與 Aaron 執行核准；尚未部署，正式付款未啟用。本文件的所有命令都**待核准後執行**：撰寫本方案時沒有試跑任何命令（包括 dry-run、語法檢查或測試替身），沒有 sudo，沒有建立使用者、群組、目錄或金鑰，沒有改權限。
 > 撰寫時只做了：讀本 repo 的程式與文件、讀本機手冊（`unix(4)`、`sudoers(5)`、`dseditgroup(8)`）、讀 `/opt`、`/usr/local`、`/usr/local/bin`、`/var/db`、`/private/var/run` 五個目錄的擁有者與權限（`ls -ld`）。沒有列舉帳號、讀登入資料或探測服務。
@@ -334,3 +335,73 @@ D1～D7 的核准不變，R1～R3 維持關閉。
   - 觀察關卡只有 `yes` 通過；安全收尾不依賴驗收標記。
 - **語法解析**：43 塊與內嵌的 `lib.zsh` 以 `zsh -f -n` 解析，都是 0 且無 stderr（其第 10 節，另附靜態分支推演）。沒有執行任何區塊、沒有建置、沒有啟動 Signer、沒有 keygen、沒有 sudo。
 - **下一步**：Codex 限定複核；之後 Aaron 從第 2 節選擇路徑 B 開始。
+
+### 8.5 keygen 的限定技術複核（Codex，10/13）
+
+依 vault〈Claude-Code-P1-b金鑰工具限定複核與B0驗收同步派工-8fb5f8c-20261013〉。
+
+> keygen 通過本次 B1「一次性、未注資測試金鑰」使用範圍的限定技術複核，可以繼續第 7 節。這不代表正式錢包或整個 P1-b 已驗收。
+
+**Codex 核對的內容**：
+- 隨機產生金鑰、兩次密語一致檢查，以及 scrypt 與 AES-GCM 加密；
+- 寫入前的解密自檢；以 `0600`、`O_EXCL` 建立，拒絕覆寫既有金鑰；
+- 正常輸出只有錢包 ID 與公開地址，不輸出私鑰或密語；
+- 正式 `serve` 仍使用 `Unavailable` 預留驗證器，建立金鑰不會啟用付款；
+- 第 8.2 節的 D4 四步測試紀錄與三項反向檢查的原始輸出：反向項目命中預期斷言，不是編譯或 panic 失敗。
+
+**基準**：keygen 程式 `f047ad6`；D4 測試與計畫 `0ce52ac`。Codex 確認其後到 `8fb5f8c` 的 `cmd/apa-signer`、`internal/signer` 沒有變更（本輪以 `git diff --stat 0ce52ac..8fb5f8c -- cmd/apa-signer internal/signer` 再看一次，沒有輸出）。
+
+**證據歸屬**：D4 測試由 Claude Code 執行，紀錄在 `artifacts/p1b/d4-20261012T184045Z/`。Codex 本輪只核對 Git、程式、測試、原始紀錄與操作文件；沒有獨立重跑、建置、建立金鑰或啟動 Signer，也沒有新增 repo 證據 log。
+
+**非阻擋的改善點**（只列追蹤，本輪不改程式）：
+1. `cmd/apa-signer/main.go` 印出地址時沒有檢查 `fmt.Fprintf` 的錯誤。所以沒看到完整地址時就停止：退出碼不能單獨證明完成，也不能因此重新 keygen。看到完整地址也不能取代正常退出，以及之後的檔案權限與解鎖確認。
+2. 解密自檢產生的私鑰副本沒有明確清零，不能宣稱所有記憶體副本都已清除。
+
+**限制**：測試用的是密語替身，不是實際的 macOS TTY。B1 還沒有證明測試金鑰能在 `apa-signer` 下解鎖，也還沒有「Host 讀不到該金鑰」的實測結果。
+
+### 8.6 A 階段與 B0 的操作紀錄（Aaron，Route B，10/13）
+
+**歸屬**：實際操作與終端機觀察是 Aaron 做的；Codex 依 Aaron 貼回的輸出陪同判讀，不是 Codex 在機器上執行或事後獨立重查。Claude Code 本輪只同步文件，沒有讀取 `/opt/apa-signer/data`、金鑰、密語或錄製檔。
+
+**識別資訊**（Aaron 回報）：
+
+| 項目 | 值 |
+|---|---|
+| 路徑 | Route B（不是 Codex 受控預演；Route A 仍未執行） |
+| `RUN` | `/tmp/apa-iso.I0Wtz3` |
+| 建置 HEAD | `8fb5f8c1f03f5674222b88e842d0def6b4751e47` |
+| 執行檔 SHA-256 | `3f29a2d54c71a74f52840f34bede4b3c1439218c4400b9eee0b8617f243e0683` |
+| 錄製目錄 | `artifacts/p1b/os-isolation-20261013T020819Z/`（Codex 本輪沒有核對錄製檔的完整性或雜湊，不是已獨立驗證的完整證據包） |
+| 系統與身分 | macOS 12.7.6；Host uid 501；`apa-signer` uid／gid 401；`apa-signer-clients` gid 402 |
+
+**已回報並判讀的結果**：
+- **A 階段**：
+  - Host 不用 sudo：對 `data/`、`data/keys/` 的公開探測檔，讀取、寫入、取代、改名都被拒；受保護目錄與 `bin/` 的探測也被拒。
+  - `nobody`：指定的讀取與目錄探測被拒。
+  - 這是公開探測檔的證據，不是付款私鑰的測試。
+- **B0**：
+  - 空錢包設定下 Signer 啟動。
+  - Host health 回 200／`unlocked`；Host 讀取 `signer.json`、`signer.db` 與列出 `data/` 都被拒。
+  - `apa-signer` 當作不在 `callers` 的呼叫者：已連線，回 403／`CALLER_NOT_ALLOWED`。
+  - `nobody`：直接連 socket 回 `connect_errno=13 reason=Permission denied`（補充判讀見下）。
+  - W-signer 的三項人工觀察：Aaron 回覆「三項都符合」，之後回報 `6.6 observation recorded`。Codex 沒有看過未錄製的 W-signer 畫面。
+  - 安全停止：`no apa-signer process`、`socket absent`、`OK 6.7`。
+
+**6.5 的原始 STOP 與補充判讀**：
+- `nobody` 的 curl 回 7、HTTP 000，訊息只說無法連線，沒有明確的權限拒絕。
+- 原本的 `expect_fs_block` 正確停止：`STOP: not a file-permission refusal; judge this output before going on`。
+- Aaron 依 Codex 指示補做一次 `nobody` 的 AF_UNIX 直接連線探測，得到 errno 13／Permission denied。該探測只嘗試 connect，沒有送 HTTP、sign 或任何付款請求。
+- 之後再取得一次 Host health 200，並記下補充說明，才完成 `OK 6.5`。
+- 所以：原始 curl 區塊**沒有**一次通過；curl 7 不能一概當成權限拒絕。
+
+**操作錯誤（不是產品失敗）**：Aaron 曾把需要 `need` 的區塊放到 W-signer，得到 `zsh: command not found: need`；之後在正確的視窗確認了觀察標記與停止狀態。這個錯誤本身不能用來推定程序已停止。
+
+**結論**：A 階段與 B0 無金鑰 Signer，在本次 Route B 的限定操作範圍內完成，並已安全停止。這不是整體 OS 隔離或 P1-b 的結案。環境變數沒有觀測；sudo／管理員能力不在「一般 Host 權限被擋住」的保證範圍內。
+
+**下一步**：B1，由 Aaron 在既有 D1～D7 核准內操作（runbook 第 7 節），Codex 陪同判讀：
+- 只建一把 `wallet-isolation-test`，用全新的測試密語；它不是正式或展示錢包，不注資。
+- 密語不進命令、環境變數、檔案或對話；W-signer 不錄製。
+- 任一步錯誤就停止：不換名稱、不自動重建、不改密語重試。
+- 設定仍然沒有 `assets`／`delegations`；不 sign、不連鏈、不呼叫 RPC 或 faucet、不交易。
+- 建立後，依序確認檔案權限、Signer 解鎖、Host 讀不到金鑰、IPC、人工觀察與安全停止，才能判讀 B1。
+- 清理照 D5 與 runbook 第 8 節，在確認程序與 socket 已停止、清單一致之後，由 Aaron 在另一道關卡操作。
