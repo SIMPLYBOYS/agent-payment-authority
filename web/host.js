@@ -38,6 +38,7 @@ import { nextModeSeq, confirmMode, setStatus, forget, useViewer, onUnauthorized,
 import { createHostCreds } from "./hostcreds.js";
 import { createScene } from "./scene.js";
 import * as A from "./adapter.js";
+import * as AP from "./approve.js";
 
 const $ = (id) => document.getElementById(id);
 const READY_MS = 5000; // readiness is read every 5 s while the page is visible
@@ -71,6 +72,10 @@ let delegating = null;    // P1-a: { gen, consumer, scenario } whose delegation 
 let simulating = false;   // a 「以 X 模擬」 request is in flight
 let resolving = false;    // an approve or deny is in flight
 let approvalNote = null;  // { gen, kind, text } the last approval action's outcome
+let lastA2 = null;        // A2: { gen, consumer, servedAt, at, items, signer, sources } of the selected customer, or { gen, consumer, error }
+let a2Op = null;          // A2: the operation in flight { gen, consumer, session, intent, decision, phase }
+let a2Note = null;        // A2: { target, kind, text } the last operation's outcome, for its own item only
+let a2Recovering = false; // A2: a status query by the same IDs is in flight
 const RUNS_MS = 2000;
 const DETAILS_MAX = 5; // ponytail: task reads per poll for the Ask notes; more runs waiting would read in turn
 
@@ -168,6 +173,9 @@ function render(v) {
     simulating = false;
     resolving = false;
     approvalNote = null;
+    lastA2 = null;
+    a2Op = null;
+    a2Note = null;
     clearTimeout(readyTimer);
     clearTimeout(runsTimer);
     setRunStatus("", "idle");
@@ -869,6 +877,7 @@ function pickItem(runs) {
 
 let shownApproval = "";
 function renderApproval(runs) {
+  if (a2Mode()) return renderA2();
   const box = $("approval");
   const v = creds.view();
   const simC = v.simConsumer;
@@ -1028,6 +1037,275 @@ async function resolveItem(item, decision) {
   if (g === creds.gen && target.sim === creds.view().simId) $("approval-title").focus();
 }
 
+// ---- A2: the person's approval with a registered device (docs/commercial-human-approval-design.md 8) ----
+//
+// The selected customer's viewer token reads and acts; the Signer decides.
+// Nothing is prompted automatically: only a click on 「用已登記的裝置核准」
+// or 「用裝置拒絕這筆」 asks the device, after the challenge is checked to be
+// this click's (AP.sameChallenge). Every reply is bound to the generation
+// and the customer it was asked for; a switch drops it.
+
+const a2Info = () => (lastReady && lastReady.status && lastReady.status.human_approval) || null;
+const a2Mode = () => !!a2Info() && creds.view().hasHost;
+const a2OnOrigin = () => { const i = a2Info(); return !!i && location.origin === i.origin; };
+
+async function a2Call(consumer, path, body) {
+  const token = creds.viewerToken(consumer);
+  if (!token) return { status: 0, body: { error: "no_viewer" } };
+  try { return await call(token, path, AbortSignal.timeout(15000), body === undefined ? undefined : { body }); }
+  catch { return { status: 0, body: { error: "unreachable" } }; }
+}
+
+// pollA2 reads the selected customer's approvals; a reply of another
+// generation or customer is dropped. An attempt whose result is not known
+// is asked about again by its own IDs (never a new challenge or prompt).
+async function pollA2() {
+  if (!a2Mode() || !a2OnOrigin()) { if (lastA2) { lastA2 = null; renderControl(); } return; }
+  const c = currentConsumer();
+  if (!c || !creds.viewerToken(c)) { if (lastA2) { lastA2 = null; renderControl(); } return; }
+  const g = creds.gen;
+  const r = await a2Call(c, "/api/approvals");
+  if (g !== creds.gen || currentConsumer() !== c) return;
+  lastA2 = r.status === 200 ? { gen: g, consumer: c, servedAt: r.body.served_at, at: Date.now(), items: r.body.approvals || [], signer: r.body.signer, sources: r.body.sources }
+    : { gen: g, consumer: c, error: (r.body && r.body.error) || "status_" + r.status };
+  renderControl();
+  const it = a2Item();
+  const at = it && it.attempt;
+  if (at && !a2Op && !a2Recovering && (at.state === "unknown" || at.state === "verifying" || at.state === "requested")) {
+    a2Recovering = true;
+    try {
+      const q = await a2Call(c, "/api/approvals/" + encodeURIComponent(at.approval_session_id) + "/attempts/" + encodeURIComponent(at.request_id));
+      if (g === creds.gen && currentConsumer() === c && q.status !== 0) {
+        const [kind, text] = q.status === 200 && q.body.challenge ? ["idle", "可以繼續驗證：按下按鈕才會要求裝置。"] : AP.outcomeText(q.status, q.body, at.decision);
+        a2Note = { target: a2Target(it), kind, text };
+      }
+    } finally { a2Recovering = false; }
+    renderControl();
+  }
+}
+
+// a2Item: the newest pending item of the selected customer; else the
+// newest item of its newest run (its result).
+function a2Item() {
+  const a = lastA2;
+  if (!a || a.gen !== creds.gen || !a.items || a.consumer !== currentConsumer()) return null;
+  const pending = a.items.find((x) => x.purchase.approval && x.purchase.approval.state === "pending");
+  if (pending) return pending;
+  const runs = (lastRuns && lastRuns.gen === creds.gen && lastRuns.runs) || [];
+  const run = runs.find((r) => r.consumer_id === a.consumer);
+  return (run && a.items.find((x) => x.task_id === run.task_id)) || a.items[0] || null;
+}
+
+const a2Target = (item) => A.approvalTarget(creds.gen, "a2", item);
+
+const A2_RESULT = {
+  approved: ["ok", "本人核准已驗證，付款未啟用。", "這筆只留下 Signer 驗證的本人核准紀錄；付款未啟用，不會交付商品。"],
+  denied: ["deny", "你已拒絕這筆（已驗證裝置）。", "Agent 不會取得這一筆；沒有付款。"],
+  expired: ["closed", "已過期（後端時間為準）；沒有核准。", "需要重新請購。"],
+  withdrawn: ["closed", "主持人已取消這個任務；這筆沒有核准，也不是你拒絕的。", ""],
+  superseded: ["closed", "報價已改變：這次核准作廢", "需要重新請購；沒有付款。"],
+};
+
+let shownA2 = "";
+function renderA2() {
+  const box = $("approval");
+  box.hidden = false;
+  const item = a2Item();
+  const target = a2Target(item);
+  if (a2Note && !A.sameTarget(a2Note.target, target, false)) a2Note = null;
+  const key = JSON.stringify([currentConsumer(), item, lastA2 && lastA2.error, a2Note, a2Op && a2Op.phase, a2OnOrigin(), lastA2 && lastA2.signer]);
+  if (key === shownA2) return updateA2Countdown();
+  shownA2 = key;
+  const body = $("approval-body");
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+  const act = document.activeElement && box.contains(document.activeElement) ? document.activeElement : null;
+  const had = act ? { kind: act.dataset.kind || "", target: act.dataset.session ? { ...act.dataset, pending: true } : null } : null;
+  const parts = [];
+  const info = a2Info();
+  if (!a2OnOrigin()) {
+    parts.push(el("p", "approval-empty", "本人核准需要從 " + info.origin + "/host 開啟這個頁面（WebAuthn 只接受 localhost），在那裡配對後再操作。"));
+  } else if (!currentConsumer()) {
+    parts.push(el("p", "approval-empty", "選一位客人（Agent 卡片或商店裡的客人），這裡會顯示他需要處理的請購。"));
+  } else if (lastA2 && lastA2.error && !item) {
+    parts.push(el("p", "approval-empty", "客人 " + short(currentConsumer()) + " 的核准清單讀取失敗（" + lastA2.error + "），未確認"));
+  } else if (!item) {
+    parts.push(el("p", "approval-empty", lastA2 ? "客人 " + short(currentConsumer()) + " 目前沒有需要你處理的請購。" : "讀取客人 " + short(currentConsumer()) + " 的待核准…"));
+  } else {
+    const p = item.purchase, ap = p.approval, d = item.delegation;
+    const mode = el("p", "approval-mode");
+    mode.append(el("span", "approval-tag", "本人核准"), AP.sourceText(lastA2 && lastA2.sources) + (lastA2 && lastA2.signer !== "approvals-only" ? "・Signer 目前無法連線" : ""));
+    parts.push(mode);
+    const pending = ap.state === "pending";
+    const res = A2_RESULT[ap.state];
+    const head = el("div", "approval-head");
+    head.dataset.state = ap.state;
+    head.append(el("h3", "", pending ? "核准這一筆付款？" : res ? res[1] : ap.state),
+      el("p", "", pending ? "客人 " + short(item.consumer_id) + " 的 Agent 想買下面這一項。核准會要求你的裝置驗證；你只核准這一筆。" : res ? res[2] : ""));
+    parts.push(head);
+    const product = (() => { try { return new URL(p.resource_url).pathname.split("/").pop() || "?"; } catch { return "?"; } })();
+    const it = el("div", "approval-item");
+    const amt = el("p", "approval-amount");
+    amt.append(el("b", "", units(p.amount)), el("span", "", " test USDC"));
+    it.append(el("p", "approval-product", "商品 " + product + "（數位資料・本片不付款）"), amt);
+    parts.push(it);
+    const dl = el("dl", "approval-rows");
+    for (const [k, val] of [["收款人", addr(p.pay_to) + " · 與報價相同（payTo）"], ["付款帳戶", "客人 " + short(item.consumer_id) + " 的測試錢包 " + addr(item.payer) + " · " + item.wallet_id],
+      ["網路與資產", (NETWORK[p.chain_id] || p.chain_id) + " · test USDC（" + (p.asset_id || "?") + "），不是真錢"],
+      ["委託範圍", d ? "預算 " + units(d.task_budget) + "；超過 " + units(d.allow_max) + " 一律要你核准" : "未取得"],
+      ["intent", (p.intent_hash || "").slice(0, 23) + "…（Signer 依完整請購重算比對）"]]) {
+      dl.append(el("dt", "", k), el("dd", "", val));
+    }
+    parts.push(dl);
+    parts.push(el("p", "approval-note", "瀏覽器的裝置提示只會顯示網站（localhost），不會顯示金額：請以這裡的摘要為準。這個頁面由 demo host 提供，不是獨立的可信顯示。"));
+    const at = item.attempt;
+    const stored = AP.attemptText(at, ap.state);
+    if (pending) {
+      const dl2 = el("div", "approval-deadline");
+      const cd = el("b", "", "");
+      cd.id = "approval-countdown";
+      dl2.append(cd, el("span", "", "期限 " + clock(ap.expires_at) + "（後端時間為準；畫面倒數只是提示）"));
+      parts.push(dl2);
+      const acts = el("div", "approval-actions");
+      const busy = !!a2Op;
+      const open = AP.openAttempt(at);
+      const lostOrClosed = at && (at.state === "lost" || at.state === "closed" || at.state === "expired");
+      const yes = el("button", "approval-approve", lostOrClosed && at.decision === "approve" ? "重新核准（用已登記的裝置）" : "用已登記的裝置核准");
+      const no = el("button", "approval-deny", "用裝置拒絕這筆");
+      for (const [b, dec, kind] of [[yes, "approve", "a2-approve"], [no, "deny", "a2-deny"]]) {
+        b.type = "button";
+        Object.assign(b.dataset, target, { pending: "", kind });
+        b.disabled = busy;
+        b.addEventListener("click", () => a2Act(item, dec));
+        acts.append(b, " ");
+      }
+      if (open && at) {
+        const cancel = el("button", "approval-cancel", "取消這次驗證");
+        cancel.type = "button";
+        Object.assign(cancel.dataset, target, { pending: "", kind: "a2-cancel" });
+        cancel.disabled = busy;
+        cancel.addEventListener("click", () => a2Cancel(item, at));
+        acts.append(cancel);
+      }
+      parts.push(acts);
+    } else if (ap.grant) {
+      parts.push(el("p", "approval-grant", "本人核准紀錄 " + ap.grant.jti.slice(0, 18) + "…（authorization_method " + ap.grant.authorization_method + "，由 Signer 驗證；Host 只記錄）・付款未啟用"));
+    }
+    const shown = a2Op && a2Op.session === ap.approval_session_id ? null : a2Note || (stored && { kind: stored[0], text: stored[1] });
+    if (a2Op && a2Op.session === ap.approval_session_id) {
+      const n = el("p", "approval-msg", a2Op.phase === "device" ? "請在裝置上完成驗證…" : a2Op.phase === "verify" ? "結果確認中，請不要重複操作。" : "準備驗證中…");
+      n.dataset.kind = "busy";
+      n.setAttribute("role", "status");
+      parts.push(n);
+    } else if (shown) {
+      const n = el("p", "approval-msg", shown.text);
+      n.dataset.kind = shown.kind;
+      n.setAttribute("role", "status");
+      parts.push(n);
+    }
+    const ev = el("button", "approval-evidence", "查看技術證據 ›");
+    ev.type = "button";
+    Object.assign(ev.dataset, target, { pending: "", kind: "a2-evidence" });
+    ev.addEventListener("click", async () => { if (currentTask() !== item.task_id) openTask(item.task_id); openDrawer(); });
+    parts.push(ev);
+  }
+  body.replaceChildren(...parts);
+  updateA2Countdown();
+  // The focus comes back to the same control of the same item only; else
+  // to the heading, which submits nothing (P1-a R1). Nothing is clicked.
+  if (had) {
+    const same = had.kind && body.querySelector('[data-kind="' + had.kind + '"]');
+    const submits = had.kind !== "a2-evidence";
+    if (same && !same.disabled && A.sameTarget(had.target, target, submits)) same.focus();
+    else if (document.activeElement === document.body || !document.activeElement || box.contains(document.activeElement)) $("approval-title").focus();
+  }
+}
+
+function updateA2Countdown() {
+  const cd = $("approval-countdown");
+  const a = lastA2;
+  const item = a2Item();
+  if (!cd || !a || !item || !item.purchase.approval || item.purchase.approval.state !== "pending") return;
+  const left = item.purchase.approval.expires_at - a.servedAt - Math.floor((Date.now() - a.at) / 1000);
+  cd.textContent = left > 0 ? "剩約 " + left + " 秒" : "已達期限，等待後端確認";
+  for (const b of document.querySelectorAll('#approval [data-kind="a2-approve"], #approval [data-kind="a2-deny"]')) {
+    const off = !!a2Op || left <= 0;
+    if (off && !b.disabled && document.activeElement === b) $("approval-title").focus();
+    b.disabled = off;
+  }
+}
+setInterval(() => { if (a2Mode()) updateA2Countdown(); }, 1000);
+
+// a2Act: one approve or deny. The challenge (the Signer's, via the host)
+// is checked to be this click's before the device is asked; the assertion
+// goes with the authoritative attempt's request ID and a new verify
+// request ID. A switch of credentials or customer drops every later step.
+async function a2Act(item, decision) {
+  if (a2Op) return;
+  const g = creds.gen, consumer = item.consumer_id;
+  const p = item.purchase, session = p.approval.approval_session_id;
+  const target = a2Target(item);
+  const stale = () => g !== creds.gen || currentConsumer() !== consumer;
+  const done = (kind, text) => { a2Op = null; if (!stale()) a2Note = { target, kind, text }; };
+  a2Op = { gen: g, consumer, session, intent: p.intent_hash, decision, phase: "challenge" };
+  a2Note = null;
+  renderControl();
+  try {
+    const r = await a2Call(consumer, "/api/approvals/" + encodeURIComponent(session) + "/challenge", { request_id: crypto.randomUUID(), decision });
+    if (stale()) return;
+    if (r.status === 0) return done("warn", "沒有收到回覆：結果未確認；畫面會重新讀取（不會自動要求裝置）");
+    if (r.status !== 200 || !r.body.challenge) {
+      const at = r.body && r.body.attempt;
+      if (r.status === 200 && at && at.state === "verified") return done("ok", "這筆已在另一個視窗核准或拒絕（以後端為準）。");
+      const [kind, text] = AP.outcomeText(r.status, r.body, decision);
+      return done(kind, text);
+    }
+    if (!AP.sameChallenge(r.body.challenge, { consumer, session, intent: p.intent_hash, decision })) return done("error", "回傳的資料和你這次的操作不一致，已停止，沒有要求裝置驗證。");
+    const requestId = r.body.attempt.request_id; // the authoritative one when shared
+    a2Op.phase = "device";
+    renderControl();
+    let cred;
+    try {
+      cred = await navigator.credentials.get({ publicKey: AP.requestOptions(r.body.challenge.options) });
+    } catch (e) {
+      if (stale()) return;
+      // NotAllowedError covers a cancel, a timeout and no usable device:
+      // the page cannot tell them apart and does not claim which.
+      return done("idle", e && e.name === "NotAllowedError" ? "裝置驗證沒有完成（取消、逾時或沒有可用的裝置）；這筆仍在等你決定。" : "瀏覽器拒絕這次驗證（" + (e && e.name) + "）；沒有" + (decision === "approve" ? "核准" : "拒絕") + "。");
+    }
+    if (stale()) return; // never sent for another customer or generation
+    a2Op.phase = "verify";
+    renderControl();
+    const v = await a2Call(consumer, "/api/approvals/" + encodeURIComponent(session) + "/assertion",
+      { request_id: requestId, verify_request_id: crypto.randomUUID(), assertion: AP.assertionJSON(cred) });
+    if (stale()) return;
+    if (v.status === 0) return done("warn", "結果確認中，請不要重複操作。");
+    const [kind, text] = AP.outcomeText(v.status, v.body, decision);
+    done(kind, text);
+  } finally {
+    if (a2Op && a2Op.gen === g && a2Op.session === session) a2Op = null;
+    if (!stale()) { await pollA2(); refreshNow(); renderControl(); if (g === creds.gen) $("approval-title").focus(); }
+  }
+}
+
+// a2Cancel: 「取消這次驗證」, by the Signer's close; the session stays as it is
+// unless the Signer says the challenge was already used.
+async function a2Cancel(item, at) {
+  if (a2Op) return;
+  const g = creds.gen, consumer = item.consumer_id, session = at.approval_session_id;
+  const target = a2Target(item);
+  a2Op = { gen: g, consumer, session, phase: "cancel" };
+  renderControl();
+  try {
+    const r = await a2Call(consumer, "/api/approvals/" + encodeURIComponent(session) + "/attempts/" + encodeURIComponent(at.request_id) + "/cancel", {});
+    if (g !== creds.gen || currentConsumer() !== consumer) return;
+    const [kind, text] = r.status === 0 ? ["warn", "這次驗證的結果還無法確認。"] : AP.outcomeText(r.status, r.body, at.decision);
+    a2Note = { target, kind, text };
+  } finally {
+    a2Op = null;
+    if (g === creds.gen && currentConsumer() === consumer) { await pollA2(); renderControl(); $("approval-title").focus(); }
+  }
+}
+
 // startAll sends one start per consumer, one after the other, each with its
 // own request ID; each reply is shown as it is, and a refused one is not
 // retried. The panels open the first one accepted.
@@ -1149,6 +1427,7 @@ async function pollRuns() {
         const t = await readTasks(r.runs);
         if (g === creds.gen) { lastRuns = r; lastRunsError = null; if (t) lastTasks = t; renderControl(); scene.setRuns(r.runs); }
         await pollApprovals();
+        await pollA2();
       } else if (r && r.gen === creds.gen && r.error) {
         lastRunsError = r.error;
         renderControl();

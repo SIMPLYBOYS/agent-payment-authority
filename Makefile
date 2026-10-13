@@ -15,6 +15,7 @@ check-contracts:
 	node --test web/test/hostcreds.test.mjs  # /host credentials (docs/demo-operation-design.md 6.3)
 	node --test web/test/scene.test.mjs  # /host scene with a slot per customer (docs/multi-agent-demo-design.md 5)
 	node --test web/test/p1a.test.mjs  # P1-a: apa.pay.v1 in the page and the simulated approver (docs/commercial-p1a.md)
+	node --test web/test/approve.test.mjs  # A2: the person's approval in the page (docs/commercial-a2.md)
 
 build:
 	go build -o bin/demo ./cmd/demo
