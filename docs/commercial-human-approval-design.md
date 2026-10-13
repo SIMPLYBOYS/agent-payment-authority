@@ -1,7 +1,8 @@
 # 本人核准最小流程（A1 實機可行性、A2 正式接線）：設計
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-本人核准最小流程設計派工-d7cbf9f-20261013〉（Aaron 已核准「本人核准最小流程」的設計）。分支 `commercial-p1b`，基準 `d7cbf9f`（工作區只有未追蹤的 `demo`）。
-> **狀態：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`）；Aaron 核准先做 Chrome＋Touch ID 實機操作，尚待操作結果；實機未驗收，A2 未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。**（第 20 節）
+> **狀態：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`）；Aaron 核准先做 Chrome＋Touch ID 實機操作；第一關登記時 Aaron 選了 Google 密碼管理工具（PIN 驗證，不是 Touch ID），登記成功，本機 Touch ID 尚未試，待 Codex 判讀；實機未驗收，A2 未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。**（第 20.4 節）
+> 以下為 `53601e1` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`）；Aaron 核准先做 Chrome＋Touch ID 實機操作，尚待操作結果；實機未驗收，A2 未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。（第 20 節）
 > 以下為 `f8b59b9` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 補正完成（`7bb874f`），待 Codex 限定複核；實機未驗收，A2 未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。（第 19 節）
 > 以下為 `20677b0` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作並通過定向驗證（軟體與 virtual authenticator，不是實機結果），實機登記／驗證待 Aaron 操作；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。（第 18 節）
 > 以下為 `35cbf3f` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 尚未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。（第 17 節）
@@ -917,3 +918,34 @@ Aaron 原話：
 - 已核准 Chrome＋Touch ID，尚待 Aaron 的操作結果。
 - 實機未驗收，A1 未標 Done；A2 未開工；付款未啟用。
 - 這次只同步文件，沒有改程式、沒有重跑自動化。
+
+### 20.4 第一關結果：Chrome 登記（部分完成）
+
+**來源與分工**：
+- 操作與目視由 Aaron 執行，下面「Aaron 回報」一欄是他在對話中的口述，不是助手親眼所見。
+- 伺服器紀錄取自 spike 寫出的結果檔。
+- Claude Code 只整理紀錄、複製證據；尚未經 Codex 判讀。
+
+| 項目 | 內容 |
+|---|---|
+| Aaron 回報：Chrome 提供的選項 | 有「這台 Mac」與「Google 密碼管理工具」（其他選項未回報） |
+| Aaron 回報：所選 | Google 密碼管理工具 |
+| Aaron 回報：驗證本人 | 輸入 Google 密碼管理工具的 PIN，**不是 Touch ID** |
+| 伺服器紀錄 | `step=register`、`ok=true`、`authenticator=real-device`、`flags=UP=1 UV=1 BE=1 BS=1`、`sign_count=0`、`fmt=none`、`attachment=platform`、`transports=[hybrid, internal]`、AAGUID `ea9b8d664d011d213ce4b6b48cb575d4`、credential 雜湊 `867b5d6c`；Chrome 150（user agent） |
+| 證據 | 來源 `/tmp/apa-a1.rUI7UP/results/run-20261013T064844Z-c200573f/results.jsonl`（Aaron 確認是他終端機印出的路徑；1 行、448 bytes、0600，run 目錄 0700），複製到 `artifacts/a1/real-device-chrome-20261013T064844Z/results.jsonl`（新目錄、不覆寫、git 忽略）；兩邊 SHA-256 都是 `f1990ebb93b27b1a5170fc3f6adcec11135c471ebc16f3699d872c078865dbb6`。暫存目錄保留，未清除 |
+
+**整理**（不是判讀結論）：
+- 這次登記的是「Chrome＋Google 密碼管理工具」的同步 passkey：Aaron 的選項、`BE=1 BS=1` 都指向這一點。
+  - Claude Code 記得這個 AAGUID 在公開的 passkey AAGUID 對照表裡對應 Google Password Manager，但沒有在本輪查表核實，由 Codex 判讀時確認。
+  - D6 接受同步 passkey；這把 credential 可能已經同步到 Aaron 的 Google 帳號。
+- **「Chrome＋本機 Touch ID」尚未試**：「這台 Mac」的選項有出現但沒有選，所以不算通過，也不算不支援。
+- `UV=1` 不推定為 Touch ID；這次實際用的是 PIN。
+- 只完成了按鈕 1；按鈕 2～5 與錯 origin 都沒有做。spike 仍在 Aaron 的終端機執行中。
+
+**待判讀**：
+1. Google 密碼管理工具這條路徑，要不要繼續做按鈕 2～5？
+2. 要不要另開新的 run，選「這台 Mac」用本機 Touch ID 重新登記？這仍在 Aaron 核准的範圍內，但屬於重新操作，要等判讀與 Aaron 確認。
+
+**裝置端 credential**：Google 密碼管理工具裡已經有一把 `localhost`／`a1-spike-tester` 的測試 passkey。要不要清理，由 Aaron 辨認後自己決定與操作，不自動刪除。
+
+**現況**：實機未驗收，A1 未標 Done；A2 未開工；付款未啟用。
