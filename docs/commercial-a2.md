@@ -1,7 +1,10 @@
 # A2 本人核准產品接線：實作差異、驗證與限制
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-A2本人核准產品接線實作派工-f2bf224-20261013〉（Aaron 已批准「A2 開工」）。分支 `commercial-a2`，基準 `f2bf224`（工作區只有未追蹤的 `demo`；沒有適用的 AGENTS.md）。
-> **狀態：A2 已實作並完成本輪定向自動化驗證，待 Codex 技術 review；實機登記與操作未驗收，付款未啟用。** A2 不自行標 Done；本輪所有結果都是「Claude Code 執行，待 Codex 核對」，不是實機結果。
+> **狀態：A2 已實作並完成本輪定向自動化驗證；獨立上下文 review 判定 not pass（R1～R6 待修）；實機登記與操作未驗收，付款未啟用。**（第 6 節）
+> 以下為 `f0817c7` 時的狀態，保留原文：A2 已實作並完成本輪定向自動化驗證，待 Codex 技術 review；實機登記與操作未驗收，付款未啟用。A2 不自行標 Done；本輪所有結果都是「Claude Code 執行，待 Codex 核對」，不是實機結果。
+>
+> **歸屬的變更**：Codex 訂閱已到期，從這一節起沒有第三方核對。Review 改由 Claude Code 另開的獨立上下文 subagent 執行：它們只拿到 diff、設計文件與本文件，沒有作者寫程式時的推理；這比作者自審接近獨立核對，但仍是同一個模型。紀錄一律寫「Claude Code 獨立上下文 review」，不寫成 Codex。
 
 規則以 [commercial-human-approval-design.md](commercial-human-approval-design.md) 為準（第 2～9 節，第 13～16 節的修訂，第 17 節的決策，第 22 節 A1 結案）。本文件只記：實作了什麼、和設計哪裡不同、驗證的證據、還沒做的事，以及實機與部署清單。
 
@@ -167,3 +170,65 @@
 - `approvals.db` 保留作為紀錄。
 - 裝置端 passkey 是否清理，由 Aaron 辨認後自行決定，不自動刪除。
 - 不建立、讀取或解鎖付款金鑰，不簽署，不送交易。
+
+## 6 獨立上下文 review（10/13；Claude Code subagent，不是 Codex）
+
+兩個 subagent 同時審 `f2bf224..f0817c7`，各審一半，只拿到 diff、設計文件與本文件。
+- Signer／契約（security-auditor）：另以 `go test -overlay` 寫了 5 個審查用測試，不碰 repo；其中 2 個重現缺陷。
+- Store／Host／web／工具／證據（code-reviewer）：Host 整合測試 11 項在沙箱裡無法綁 loopback，只以第 3.1 節的證據為準。
+
+**判定：not pass。** R1～R6 須關閉後才交實機登記／驗證；其餘檢查項目與第 2 節的十項差異通過（#5、#10 判為「其實不是差異」，#8 需改）。
+
+### 6.1 要修的（R）
+
+| # | 嚴重度 | 位置 | 問題 | 失敗情境 |
+|---|---|---|---|---|
+| R1 | should-fix | `internal/signer/approvals.go` `commit` | 計數器比對在「issued→used」條件式更新之前 | 同一 challenge 兩份 assertion 在途（計數器非 0）：後提交的那份被判 `ASSERTION_COUNTER`，credential 被標 `suspect`；應得 `CHALLENGE_USED`、credential 仍 active。reviewer 以 overlay 測試重現 |
+| R2 | should-fix | `internal/signer/approvals.go` `check` | BE 比對在簽章驗證之前，且結果會標 `suspect` | 只要知道 credential ID（challenge 回覆就有），用垃圾簽章和翻轉的 BE 旗標就能讓本人的 credential 失效，不需要私鑰。reviewer 以 overlay 測試重現。函式庫在簽章之後自己會檢查 BE |
+| R3 | should-fix | `internal/store/approvals.go` `BeginApprovalAttempt`；`cmd/demo/approvals.go` `assertion` | 會話已 `withdrawn`／`superseded` 但仍有 open attempt 時，challenge 路由先回 shared／replay 才查會話；assertion 路由不看會話 | 主持人取消 task 後，viewer 仍能拿到 challenge、裝置仍被要求、Signer 仍寫一筆 verified→abandoned。結果不會落到已關閉的會話，但違反 6.3「會話仍是 pending」 |
+| R4 | should-fix | `web/adapter.js`；`cmd/demo/sim.go` | 頁面用詞依 Host 的核准方式（全域旗標），不依該筆紀錄的 `authorization_method`；A2 模式下 P1-a 的 `simResolve` 仍能把 Ask 以 simulated 核准 | A2 模式下用模擬身分核准 → 紀錄是 simulated（CHECK 擋得住升權），畫面卻寫「本人核准已驗證」；違反第 8 節三個來源分開 |
+| R5 | should-fix | `web/adapter.js` 抽屜的授權列與事件列 | 任何 grant 都寫「模擬 grant」 | A2 的 webauthn grant 在抽屜被寫成模擬；`a2-ui.mjs` 只檢查卡片與面板，沒查抽屜 |
+| R6 | should-fix（測試缺口） | `cmd/demo/approvals_test.go` | `resolveUsed`（`CHALLENGE_USED`→查 challenge→查核准；close 回 `used`）在 Host 層沒有測試 | 設計第 9 節「兩個分頁各送一份 assertion」「查無後 verify 先成功」「close 回覆遺失」三列沒有 I 層證據 |
+
+### 6.2 備註（note；修 R 時順手處理或列入下一輪）
+
+Signer：
+- N1 `commit` 的 `validBefore` 從 `display` JSON 取，解析失敗會寫出 `expires_at=0`（fail-open 方向）；改從 verify 請求的 order 取。
+- N2 `TestAssertionRules` 的 crossOrigin 案例同時帶 topOrigin，測不到 crossOrigin 本身；補單獨案例。
+- N3 `assertionCode` 依函式庫英文字串分碼；升級時要重跑 `TestAssertionRules`。
+- N4 `go.mod` 把 `fxamacker/cbor/v2` 標 indirect，但 `signertest` 直接 import。
+- N5 `Revoke` 裡有死碼。
+- N6 challenge 時 suspect 併入 `CREDENTIAL_REVOKED`，verify 時細分 `CREDENTIAL_SUSPECT`，不一致。
+- 未測：`APPROVER_CHANGED`、`AUTHORIZATION_EXPIRED`、commit 內「issued 但已到期」分支。
+
+Host／web：
+- N7 「verify 先成功」時 Host 沒有比對回覆的 `ApprovalSessionID`／`ChallengeID`（intent 涵蓋 task／PO，實務上等同）。
+- N8 close 重送用新的 `close_request_id`，不是同一組 ID（Signer 只以 challenge_id 條件式寫入，無正確性問題）。
+- N9 會話 `expired`、attempt `verifying`／`unknown` 時，標題寫「沒有核准」，訊息寫「無法確認」，互相矛盾。
+- N10 outcome `mismatch` 沒有文案。
+- N11 設計寫核准路由要限速；沒有實作（既有路由也沒有；D7 已接受只能造成打擾）。
+- N12 全域鎖持鎖期間呼叫 Signer（差異 #7，已註記）。
+- N13 文件第 3.3 節「入口實測」與「TestTimingInterleaved 在 f2bf224 失敗」沒有對應的 artifacts；`08-adjacent-demo.log` 另有兩筆既有 `t.Skip`（`TestSeedCancelDisplay`、`TestAliveTreatsZombieAsGone`）文件沒提。
+- N14 反向第 7 項（viewer 跨 consumer）抓到的是第二層 `SIGNER_MISMATCH`（502），不是被測的那層（404）；斷言 regex 對任何狀態碼都成立。
+- N15 `ApprovalAttemptOf` 在 `OWNERSHIP_MISMATCH` 時仍回另一 consumer 的 attempt 結構（呼叫端都先看錯誤碼）。
+- N16 已 verified 的 attempt 以同一 verify ID 重送時，Host 不比對這次的 assertion 內容（Signer 層才會）。
+- N17 `make present-a2` 固定 `device`，主持人無法宣告 `virtual`。
+
+### 6.3 十項差異的判定
+
+| # | Signer 側 | Host 側 |
+|---|---|---|
+| 1 | acceptable | acceptable |
+| 2 | acceptable | — |
+| 3 | acceptable | acceptable |
+| 4 | acceptable | — |
+| 5 | 其實不是差異（設計第 7 節已寫） | acceptable |
+| 6 | acceptable | acceptable |
+| 7 | acceptable；但 R1 顯示 Signer 在並行下不自足，不能靠 Host 的鎖當保證 | acceptable，附 N12 |
+| 8 | acceptable | **needs change**（R4） |
+| 9 | acceptable | acceptable，附 N17 |
+| 10 | 其實不是差異（設計第 7 節第 6 列） | acceptable，附 N16 |
+
+### 6.4 下一步
+
+R1～R6 的修正另開一輪：修正、只重跑受影響的部分、再交一次獨立上下文 review。在那之前不做實機與部署。
