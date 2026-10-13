@@ -1,7 +1,8 @@
 # 本人核准最小流程（A1 實機可行性、A2 正式接線）：設計
 
 > 2026-10-13，Claude Code。依 vault〈Claude-Code-本人核准最小流程設計派工-d7cbf9f-20261013〉（Aaron 已核准「本人核准最小流程」的設計）。分支 `commercial-p1b`，基準 `d7cbf9f`（工作區只有未追蹤的 `demo`）。
-> **狀態：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`）；Aaron 核准先做 Chrome＋Touch ID 實機操作；第一關登記時 Aaron 選了 Google 密碼管理工具（PIN 驗證，不是 Touch ID），登記成功，本機 Touch ID 尚未試，待 Codex 判讀；實機未驗收，A2 未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。**（第 20.4 節）
+> **狀態：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`）；Chrome＋Google 密碼管理工具／PIN 的 A1 實機操作已完成回報，完整證據待 Codex 最後核對；Touch ID 未驗證，A1 未標 Done；A2 未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。**（第 21 節）
+> 以下為 `33a5bf4` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`）；Aaron 核准先做 Chrome＋Touch ID 實機操作；第一關登記時 Aaron 選了 Google 密碼管理工具（PIN 驗證，不是 Touch ID），登記成功，本機 Touch ID 尚未試，待 Codex 判讀；實機未驗收，A2 未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。（第 20.4 節）
 > 以下為 `53601e1` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 通過限定技術複核並關閉（`7bb874f`）；Aaron 核准先做 Chrome＋Touch ID 實機操作，尚待操作結果；實機未驗收，A2 未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。（第 20 節）
 > 以下為 `f8b59b9` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作（`20677b0`）；A1 spike R1／R2 補正完成（`7bb874f`），待 Codex 限定複核；實機未驗收，A2 未開工；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。（第 19 節）
 > 以下為 `20677b0` 時的狀態，保留原文：本人核准最小流程設計通過限定技術複核；Aaron 已決定 D1～D7（採推薦方案與明列限制），D8 延後到 P2（A2 用獨立 approvals.db）；已核准另行派工 A1 最小 spike（測試用途、不接付款、不用真實 Agent），A1 spike 已實作並通過定向驗證（軟體與 virtual authenticator，不是實機結果），實機登記／驗證待 Aaron 操作；A2 實作、付款金鑰、簽署與交易仍需另行核准；付款未啟用。（第 18 節）
@@ -949,3 +950,112 @@ Aaron 原話：
 **裝置端 credential**：Google 密碼管理工具裡已經有一把 `localhost`／`a1-spike-tester` 的測試 passkey。要不要清理，由 Aaron 辨認後自己決定與操作，不自動刪除。
 
 **現況**：實機未驗收，A1 未標 Done；A2 未開工；付款未啟用。
+
+## 21 A1 Chrome＋Google 密碼管理工具／PIN 實機證據收尾（10/13）
+
+**依據**：vault〈Claude-Code-A1Chrome-Google密碼管理工具實機證據收尾派工-33a5bf4-20261013〉。開工基準 HEAD `33a5bf4`；`7bb874f` 之後程式沒有變動。第 20.4 節第一關的原始紀錄與證據保持不變。
+
+**範圍調整**：Aaron 原話：
+
+> 同意先完成 Chrome＋Google 密碼管理工具／PIN 的 A1 測試，Touch ID 另行驗證。
+
+所以這次記為「Chrome＋Google 密碼管理工具／PIN」，不記為 Chrome＋Touch ID。本機 Touch ID 未驗證，不寫成通過或不支援。
+
+**證據歸屬**：
+- Aaron：操作驗證器與瀏覽器，目視並回報。
+- Claude Code：確認停止、複製、唯讀整理與文件同步。沒有建置、啟動服務或操作驗證器。
+- Codex：依 Aaron 貼回的內容逐步判讀；核對第一關副本（重算單行雜湊）；查閱 [Google 官方說明](https://web.dev/articles/webauthn-aaguid)，核實 AAGUID `ea9b8d66-4d01-1d21-3ce4-b6b48cb575d4` 對應 Google Password Manager。
+  - Codex 尚未核對下面的完整 JSONL，也沒有親自操作驗證器。
+  - AAGUID 不是獨立的安全認證，也不能單憑它或 UV 旗標推定具體的本人驗證手段。
+
+### 21.1 停止確認與保存
+
+**停止確認**：
+- Aaron 在對話中確認已在原 spike 終端機按下 Ctrl-C，這是他的回報。
+- Claude Code 另外以 `lsof -nP -iTCP:8123 -sTCP:LISTEN` 唯讀檢查，8123 沒有監聽；沒有終止或碰任何程序。
+
+**來源**：`/tmp/apa-a1.rUI7UP/results/run-20261013T064844Z-c200573f/results.jsonl`。
+- 是 Aaron 先前確認的同一路徑，沒有用搜尋找到的其他 run 代替。
+- 一般檔案、不是 symlink；6577 bytes；`-rw-------`，uid 501；14 行；最後修改 15:36:29（+08:00）。
+- run 目錄 `drwx------`。
+
+**保存**：
+- 目的地：`artifacts/a1/real-device-chrome-gpm-complete-20261013T074258Z/results.jsonl`。新目錄 0700、副本 0600，git 忽略；目的地事先不存在，沒有覆寫第一關證據或任何舊紀錄。
+- 命令：`test -f`／`! -L`、`stat`、`wc -l`、`shasum -a 256`（複製前）、`mkdir -m 700`、`cp`、`chmod 600`（只改副本）、`shasum -a 256`（複製後的來源與副本）。
+
+| 對象 | SHA-256 |
+|---|---|
+| 來源，複製前 | `908cbbe2bdd717895c0390ed6ffb834074167207c718384457cba6890110a5cc` |
+| 來源，複製後 | `908cbbe2bdd717895c0390ed6ffb834074167207c718384457cba6890110a5cc` |
+| 副本 | `908cbbe2bdd717895c0390ed6ffb834074167207c718384457cba6890110a5cc` |
+| 第一關副本（未動） | `f1990ebb93b27b1a5170fc3f6adcec11135c471ebc16f3699d872c078865dbb6`（仍是第 20.4 節的單行；來源後來繼續追加，不要求符合這個雜湊） |
+
+`/tmp/apa-a1.rUI7UP` 保留，沒有清理；裝置端 credential 也沒有動。
+
+### 21.2 完整 JSONL 逐行（14 行，全部保留，順序照檔案）
+
+共通欄位：
+- 每行都是 `authenticator=real-device`，user agent 都是 Chrome 150（只有一種）。
+- 除了第 14 行，origin 都是 `http://localhost:8123`。
+- 有 credential 的行，都是 `867b5d6c`、AAGUID `ea9b8d66…`、`attachment=platform`。
+
+時間是 UTC。
+
+| 行 | 時間 | step | 結果 | 會話／challenge | UV 要求 | flags | sign_count |
+|---|---|---|---|---|---|---|---|
+| 1 | 06:50:01 | register | ok；`fmt=none`；transports hybrid、internal | — | — | UP=1 UV=1 BE=1 BS=1 | 0 |
+| 2 | 07:29:55 | browser:approve | `BROWSER_REPORTED`、`NotAllowedError` | — | — | — | — |
+| 3 | 07:30:10 | approve | ok（verified） | s1／`ch-8944f23601d8cafdf94c2c95` | required | UP=1 UV=1 BE=1 BS=1 | 0 |
+| 4 | 07:30:22 | approve | ok（verified） | s1／`ch-0bedd6f09bea6ed6fa2e955f` | required | UP=1 UV=1 BE=1 BS=1 | 0 |
+| 5 | 07:30:55 | replay | `CHALLENGE_USED` | s1／`ch-0bedd6f0…`（第 4 行的） | required | UP=1 UV=1 BE=1 BS=1 | 0 |
+| 6 | 07:31:21 | wrong-challenge | `ASSERTION_INVALID`、`challenge_mismatch` | s2／`ch-c694774c14ed45ace7f079aa` | required | UP=1 UV=1 BE=1 BS=1 | 0 |
+| 7 | 07:31:53 | uv-discouraged | `ASSERTION_INVALID`、`uv_missing` | s1／`ch-915eb092efef44df51c82b2a` | discouraged | UP=1 **UV=0** BE=1 BS=1 | 0 |
+| 8 | 07:33:24 | uv-discouraged | `ASSERTION_INVALID`、`uv_missing` | s1／`ch-19b5bed241a5a4db351ac36e` | discouraged | UP=1 **UV=0** BE=1 BS=1 | 0 |
+| 9 | 07:34:16 | uv-discouraged | `ASSERTION_INVALID`、`uv_missing` | s1／`ch-9c45635904c31176d616574e` | discouraged | UP=1 **UV=0** BE=1 BS=1 | 0 |
+| 10 | 07:34:18 | replay | `CHALLENGE_USED` | s1／`ch-0bedd6f0…` | required | UP=1 UV=1 BE=1 BS=1 | 0 |
+| 11 | 07:34:20 | replay | `CHALLENGE_USED` | s1／`ch-0bedd6f0…` | required | UP=1 UV=1 BE=1 BS=1 | 0 |
+| 12 | 07:34:23 | replay | `CHALLENGE_USED` | s1／`ch-0bedd6f0…` | required | UP=1 UV=1 BE=1 BS=1 | 0 |
+| 13 | 07:34:58 | browser:register | `BROWSER_REPORTED`、`InvalidStateError` | — | — | — | — |
+| 14 | 07:36:29 | browser:register（origin `http://127.0.0.1:8123`） | `BROWSER_REPORTED`、`SecurityError` | — | — | — | — |
+
+- 每行都是完整的 JSON，時間遞增，沒有出現非預期的 origin 或錯誤碼。
+- 「重送」那幾行裡的 flags 與 sign_count，是重送的那份 assertion 本身的值（伺服器先解析再判定 `CHALLENGE_USED`），不是一次新的驗證。
+
+### 21.3 與 Aaron 回報對照
+
+| 回報項目 | 對應的行 | 對照 |
+|---|---|---|
+| 1 登記：ok；UP=1 UV=1 BE=1 BS=1；`fmt=none`；`sign_count=0`；platform；hybrid、internal；選 Google 密碼管理工具、用 PIN | 1 | 欄位一致。選項與 PIN 是 Aaron 的回報，結果檔不記驗證手段 |
+| 2 核准：verified；s1；`ch-8944f23601d8cafdf94c2c95`；UP=1 UV=1 BE=1 BS=1；`sign_count=0`；要求 PIN | 3 | 欄位一致 |
+| 2 核准回報的 `intent_hash` `c9f7485c…4e537ba5` | — | 結果檔依設計不記 `intent_hash`。Claude Code 依 `main.go` 的固定合成請購，以 Python 重算 `json.Marshal` 等價的 SHA-256，得到同一個值（沒有建置或執行 spike） |
+| 3 重送：`CHALLENGE_USED`，detail 空字串；沒有裝置提示 | 5（另有 10～12） | 代碼一致；被重送的是第 4 行的 challenge，不是回報裡的 `ch-8944…` |
+| 4 錯 challenge：`ASSERTION_INVALID`、`challenge_mismatch` | 6 | 一致；s1 的回覆送到 s2 的 challenge |
+| 5 不要求 UV：`ASSERTION_INVALID`、`uv_missing`；只出現 passkey 選擇提示，沒有重新輸入 PIN | 7（另有 8、9） | 代碼一致；**flags 是 `UV=0`**，和「沒有輸入 PIN」相符，三行都一樣 |
+| 誤操作的重複登記：localhost 上 `InvalidStateError` | 13 | 一致。這是在 localhost 對已登記的驗證器再登記一次，不是錯 origin 測試；不算該項通過，也不是防護失效 |
+| 錯 origin：`http://127.0.0.1:8123/`，`SecurityError`，訊息「This is an invalid domain.」 | 14 | 名稱一致；結果檔依設計只存固定名稱，訊息來自 Aaron 貼回的頁面，沒有補造。這是瀏覽器端的拒絕，不是伺服器 WebAuthn 驗證的拒絕 |
+
+Aaron 先回覆第 3、5 步「有提示」，後來附上畫面並明確說「第 5 步才有」；那個畫面是選擇或確認 passkey，不是 PIN 輸入框。這裡以澄清後的內容為準，並保留澄清的過程。
+
+### 21.4 回報裡沒有的行（照實列出，交 Codex 判讀）
+
+| 行 | 內容 | 說明 |
+|---|---|---|
+| 2 | `browser:approve`、`NotAllowedError`，在第 3 行之前 15 秒 | 有一次核准在瀏覽器端沒有完成，例如取消、逾時或對話框被關。結果檔不記原因，Aaron 沒有回報 |
+| 4 | 第二次 `approve` 成功（`ch-0bedd6f0…`），第 3 行之後 12 秒 | 第 2 步被按了兩次，兩次都 verified；兩次 `sign_count` 都是 0（0/0，依 D6 接受） |
+| 5、10～12 | 共 4 次 `replay`，都是 `CHALLENGE_USED` | 重送的是第 4 行那份；4 次都被拒，沒有任何一次被接受 |
+| 7～9 | 共 3 次 `uv-discouraged`，都是 `uv_missing`、`UV=0` | 第 5 步被按了 3 次，結果都一樣 |
+
+**影響（整理，不是判讀）**：
+- 多出來的行，都和回報的類型與結果一致，沒有任何一行出現非預期的接受。
+- 和回報的差異在於：
+  - 次數：核准成功 2 次、重送 4 次、不要求 UV 3 次，另有 1 次瀏覽器端的 `NotAllowedError`；
+  - 被重送的 challenge 是第二次核准的那一個。
+- 這些是不是「異常重試」，由 Codex 判讀。Claude Code 沒有重跑或刪行來消除差異。
+
+### 21.5 現況
+
+- Chrome＋Google 密碼管理工具／PIN 的 A1 實機操作已完成回報，完整證據待 Codex 最後核對。
+- Touch ID 未驗證，A1 未標 Done；A2 未開工；付款未啟用。
+- 這次沒有改程式、沒有建置、沒有啟動服務，也沒有重跑自動化或實機步驟。
+- 沒有試 Touch ID、Safari 或手機。
+- 沒有清理暫存或裝置端 credential（Google 密碼管理工具裡那把 `localhost`／`a1-spike-tester` 測試 passkey，由 Aaron 辨認後自行決定）。
