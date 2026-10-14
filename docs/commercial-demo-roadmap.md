@@ -277,7 +277,7 @@
 5. 依 A1 的 authenticator 結論。
 6. 設計與契約核准。停止點：接線後的正反測試交 review。
 **Z2 電路 v2、phase-2 setup 與有狀態預算合約（本機鏈）**（計畫 W9、W10）
-> **進度（10/14）**：實作完成；獨立上下文 review pass，should-fix 已修（[commercial-z2.md](commercial-z2.md) 第 12 節）。電路 v2、本機 mpcsetup（三加三次貢獻，信任等同信任主持人）、Solidity verifier、預算合約、31 個 forge 測試、anvil 端到端 PASS；成功的 `spend` 約 29.6 萬 gas。不部署 testnet。
+> **進度（10/14）**：**Z2 Done（Aaron 10/14），已 merge 進 main**；獨立上下文 review pass，should-fix 已修（[commercial-z2.md](commercial-z2.md) 第 12 節）。電路 v2、本機 mpcsetup（三加三次貢獻，信任等同信任主持人）、Solidity verifier、預算合約、31 個 forge 測試、anvil 端到端 PASS；成功的 `spend` 約 29.6 萬 gas。不部署 testnet。
 1. 目標：v2（`C = H(balance, r)`、守恆、`balance_new ≥ 0`、nullifier `N = H(r_old, task_id, domain)`，public `task_id, C_old, amount, C_new, N, intent_hash`）；三位自己的 phase-2 貢獻者（README 照寫）；Solidity verifier＋`registerTask`＋預算合約（驗 proof、`commitment[task_id]==C_old`、nullifier 未用、原子寫入並 emit `intent_hash`），先在**本機鏈**驗。不做：testnet 部署。
 2. 前置：Z1 結論；`intent_hash` 映射 review。
 3. 影響：新合約與 prover 服務；正式付款契約。

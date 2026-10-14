@@ -1,6 +1,7 @@
 # Z2 ZK 電路 v2 與本機預算合約
 
 > 2026-10-14，Claude Code。依 vault〈Claude-Code-Z2-ZK電路v2與本機預算合約派工-20261013〉與 Aaron「我們要開始 Z2 的部分」。分支 `commercial-z2`（從 main `e36502e`）。
+> **Z2 Done（Aaron 10/14：「Z2 請標記 done 並 merge」）；已 fast-forward merge 進本機 main，未 push。** 不部署 testnet；P2 前置條件見第 10 節。
 > **狀態：實作完成；獨立上下文 review pass（無 must-fix），三項 should-fix 已修（第 12 節）。** 設計選擇與工具已核准（第 1 節）。 只用合成資料與本機鏈（anvil）；不碰 Base Sepolia、testnet、faucet、外部交易或付款金鑰。
 
 ## 1 開工前的核准（Aaron 10/14：「以上的內容，我批准先依照建議的方式進行，除非後續很難做調整，我們在深入討論取捨」）
