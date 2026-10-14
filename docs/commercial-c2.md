@@ -1,6 +1,7 @@
 # C2：BBS+ 憑證接入 Policy（`apa.pay.v2`）
 
 > 2026-10-14，Claude Code。設計與 Aaron 的決定見 [commercial-c2-design.md](commercial-c2-design.md)（第四版；C2-D1～D12 已核准，第 9 節）。分支 `commercial-c2`。
+> **C2 Done（Aaron 10/14：「C2 請標記為 done 並 merge 進 main」）；已 fast-forward merge 進本機 main，未 push。** 付款仍未啟用；憑證是 fake 目錄與測試金鑰。
 > **狀態（10/14）：C2a、C2b 都已通過 Claude Code 獨立上下文 review（C2b：pass，無 must-fix；三項 should-fix 已修，第 8 節）。** 本文的驗證都由 Claude Code 執行。
 > 本片**不付款**：沒有付款金鑰、簽署、faucet、鏈或交易；沒有執行真實 CLI。憑證全部是合成的測試金鑰，沒有 eKYC、真實 issuer、錢包或 RPC。
 
