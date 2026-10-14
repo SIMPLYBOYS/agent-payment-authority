@@ -120,29 +120,53 @@ public class ShopSceneTests
 
     static Rect Feet(Vector2 p) => Rect.MinMaxRect(p.x - FeetHalf, p.y, p.x + FeetHalf, p.y + FeetHigh);
 
-    // The props' drawn (non-transparent) pixels, in room units, where
-    // ShopBuilder placed them; a placeholder is its whole 32 x 48 box.
+    // The props' drawn (non-transparent) pixels, in room units, where the
+    // room's layout placed them: each sprite's rect of its file (a
+    // placeholder is its whole box).
     List<Rect> PropRects()
     {
         var rects = new List<Rect>();
-        for (int i = 0; i < view.propPositions.Length; i++)
+        foreach (var (_, at, sprite) in view.Placed)
         {
-            var at = view.propPositions[i];
-            var tex = i < view.props.Length ? view.props[i] : null;
-            if (tex == null) { rects.Add(Rect.MinMaxRect(at.x - 0.5f, at.y, at.x + 0.5f, at.y + 1.5f)); continue; }
+            var sr = sprite.rect;
+            int w = (int)sr.width, h = (int)sr.height, x0 = 0, x1 = w - 1, y0 = 0, y1 = h - 1;
 #if UNITY_EDITOR
-            var copy = new Texture2D(2, 2);
-            copy.LoadImage(System.IO.File.ReadAllBytes(UnityEditor.AssetDatabase.GetAssetPath(tex)));
-            var px = copy.GetPixels32();
-            int w = copy.width, h = copy.height, x0 = w, x1 = -1, y0 = h, y1 = -1;
-            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++)
-                if (px[y * w + x].a > 0) { x0 = Mathf.Min(x0, x); x1 = Mathf.Max(x1, x); y0 = Mathf.Min(y0, y); y1 = Mathf.Max(y1, y); }
-            rects.Add(Rect.MinMaxRect(at.x - w / 64f + x0 / 32f, at.y + y0 / 32f, at.x - w / 64f + (x1 + 1) / 32f, at.y + (y1 + 1) / 32f));
-#else
-            rects.Add(Rect.MinMaxRect(at.x - tex.width / 64f, at.y, at.x + tex.width / 64f, at.y + tex.height / 32f));
+            var path = UnityEditor.AssetDatabase.GetAssetPath(sprite.texture);
+            if (path != "")
+            {
+                var copy = new Texture2D(2, 2);
+                copy.LoadImage(System.IO.File.ReadAllBytes(path));
+                var px = copy.GetPixels32();
+                x0 = w; x1 = -1; y0 = h; y1 = -1;
+                for (int y = 0; y < h; y++) for (int x = 0; x < w; x++)
+                    if (px[((int)sr.y + y) * copy.width + (int)sr.x + x].a > 0) { x0 = Mathf.Min(x0, x); x1 = Mathf.Max(x1, x); y0 = Mathf.Min(y0, y); y1 = Mathf.Max(y1, y); }
+            }
 #endif
+            rects.Add(Rect.MinMaxRect(at.x - w / 64f + x0 / 32f, at.y + y0 / 32f, at.x - w / 64f + (x1 + 1) / 32f, at.y + (y1 + 1) / 32f));
         }
         return rects;
+    }
+
+    // UX3: in every room, each customer's corridor (with B's version 2 step
+    // aside too) is horizontal or vertical and its feet never touch a prop.
+    [Test]
+    public void CorridorsKeepClearInEveryRoom()
+    {
+        foreach (var key in view.LayoutKeys.ToList())
+        {
+            Assert.IsTrue(view.UseLayout(key));
+            var props = PropRects();
+            Assert.IsNotEmpty(props, key);
+            foreach (var multi in new[] { false, true })
+            {
+                view.Multi = multi;
+                foreach (var who in new[] { "consumer-a", "consumer-b" })
+                    for (int e = 0; e < ShopView.Lines.GetLength(0); e++)
+                        CheckRoute(key + " " + who + (multi ? " v2" : " v1"), new List<Vector2> { view.P(who, ShopView.Lines[e, 0]), view.P(who, ShopView.Lines[e, 1]) }, props);
+            }
+            view.Multi = false;
+        }
+        Debug.Log("APA ShopSceneTests: corridors clear in rooms " + string.Join(",", view.LayoutKeys));
     }
 
     // Every line of a route is horizontal or vertical, and the feet swept
@@ -161,41 +185,48 @@ public class ShopSceneTests
     [UnityTest]
     public IEnumerator RoutesKeepClearOfPropsInFourDirectionsWithAsciiLabels()
     {
-        var props = PropRects();
-        Assert.AreEqual(11, props.Count);
         var facings = new HashSet<string>();
         var labels = new HashSet<string>();
-        var plays = new[]
+        int g = 0; // each room plays from a new generation
+        foreach (var key in view.LayoutKeys.ToList())
         {
-            ("consumer-a", D2(1, "consumer-a", 1, "entered", 1)), ("consumer-a", D2(1, "consumer-a", 2, "quoted", 2)),
-            ("consumer-a", D2(1, "consumer-a", 3, "waiting", 3)), ("consumer-a", D2(1, "consumer-a", 4, "expired", 4)),
-            ("", "{\"v\":1,\"gen\":2,\"clear\":true}"),
-            ("consumer-b", D2(2, "consumer-b", 1, "entered", 1)), ("consumer-b", D2(2, "consumer-b", 3, "waiting", 3)),
-            ("consumer-b", D2(2, "consumer-b", 6, "waiting", 6)), ("consumer-b", D2(2, "consumer-b", 9, "denied", 9, reason: "INSUFFICIENT_BUDGET")),
-            ("", "{\"v\":1,\"gen\":3,\"clear\":true}"),
-            ("consumer-a", D2(3, "consumer-a", 3, "waiting", 3)), ("consumer-a", D2(3, "consumer-a", 4, "withdrawn", 4)),
-            ("", "{\"v\":1,\"gen\":4,\"clear\":true}"),
-            ("consumer-b", D2(4, "consumer-b", 3, "waiting", 3)), ("consumer-b", D2(4, "consumer-b", 4, "expired", 4)),
-        };
-        foreach (var (who, json) in plays)
-        {
-            bridge.Receive(json);
-            if (who == "") continue;
-            CheckRoute(who + " " + json, view.RouteOf(who), props);
-            float t = 0;
-            while (view.Moving(who) && t < 4f)
+            Assert.IsTrue(view.UseLayout(key));
+            var props = PropRects();
+            Assert.IsNotEmpty(props, key);
+            var plays = new[]
             {
-                var feet = Feet(view.PositionOf(who));
-                foreach (var r in props) Assert.IsFalse(feet.Overlaps(r), who + " stands on a prop at " + view.PositionOf(who));
-                facings.Add(view.FacingOf(who));
+                ("", "{\"v\":1,\"gen\":" + (g + 1) + ",\"clear\":true}"),
+                ("consumer-a", D2(g + 1, "consumer-a", 1, "entered", 1)), ("consumer-a", D2(g + 1, "consumer-a", 2, "quoted", 2)),
+                ("consumer-a", D2(g + 1, "consumer-a", 3, "waiting", 3)), ("consumer-a", D2(g + 1, "consumer-a", 4, "expired", 4)),
+                ("", "{\"v\":1,\"gen\":" + (g + 2) + ",\"clear\":true}"),
+                ("consumer-b", D2(g + 2, "consumer-b", 1, "entered", 1)), ("consumer-b", D2(g + 2, "consumer-b", 3, "waiting", 3)),
+                ("consumer-b", D2(g + 2, "consumer-b", 6, "waiting", 6)), ("consumer-b", D2(g + 2, "consumer-b", 9, "denied", 9, reason: "INSUFFICIENT_BUDGET")),
+                ("", "{\"v\":1,\"gen\":" + (g + 3) + ",\"clear\":true}"),
+                ("consumer-a", D2(g + 3, "consumer-a", 3, "waiting", 3)), ("consumer-a", D2(g + 3, "consumer-a", 4, "withdrawn", 4)),
+                ("", "{\"v\":1,\"gen\":" + (g + 4) + ",\"clear\":true}"),
+                ("consumer-b", D2(g + 4, "consumer-b", 3, "waiting", 3)), ("consumer-b", D2(g + 4, "consumer-b", 4, "expired", 4)),
+            };
+            g += 4;
+            foreach (var (who, json) in plays)
+            {
+                bridge.Receive(json);
+                if (who == "") continue;
+                CheckRoute(who + " " + json, view.RouteOf(who), props);
+                float t = 0;
+                while (view.Moving(who) && t < 4f)
+                {
+                    var feet = Feet(view.PositionOf(who));
+                    foreach (var r in props) Assert.IsFalse(feet.Overlaps(r), who + " stands on a prop at " + view.PositionOf(who));
+                    facings.Add(view.FacingOf(who));
+                    labels.Add(view.LabelOf(who));
+                    t += Time.deltaTime;
+                    yield return null;
+                }
+                Assert.IsFalse(view.Moving(who));
                 labels.Add(view.LabelOf(who));
-                t += Time.deltaTime;
-                yield return null;
             }
-            Assert.IsFalse(view.Moving(who));
-            labels.Add(view.LabelOf(who));
+            Assert.Less(view.PositionOf("consumer-b").x, 0f, key + ": an expired Ask ends outside");
         }
-        Assert.Less(view.PositionOf("consumer-b").x, 0f, "an expired Ask ends outside");
         CollectionAssert.IsSupersetOf(facings, new[] { "right", "up", "left", "down" }, "four walking directions");
         foreach (var l in labels)
         {
@@ -208,7 +239,7 @@ public class ShopSceneTests
             "ASK (#3) - waiting for a human", "ask expired (#4) - leaving", "ASK (#6) - waiting for a human",
             "DENY (#9, INSUFFICIENT_BUDGET) - leaving", "ask withdrawn (#4) - leaving",
         });
-        Debug.Log("APA ShopSceneTests: routes clear of " + props.Count + " props; facings " + string.Join(",", facings) + "; labels " + string.Join(" | ", labels));
+        Debug.Log("APA ShopSceneTests: routes clear in rooms " + string.Join(",", view.LayoutKeys) + "; facings " + string.Join(",", facings) + "; labels " + string.Join(" | ", labels));
     }
 
     // 16.5 rule 4 and item 7: from outside to the counter is the longest
@@ -227,7 +258,7 @@ public class ShopSceneTests
             float took = Time.realtimeSinceStartup - start;
             Assert.LessOrEqual(took, 2.5f + 0.1f, who + " took " + took);
             Assert.Greater(took, 1.5f, who + ": walked, not jumped");
-            Assert.AreEqual(ShopView.Point(who, ShopView.Counter), view.PositionOf(who));
+            Assert.AreEqual(view.Point(who, ShopView.Counter), view.PositionOf(who));
             Assert.AreEqual("right", view.FacingOf(who), "at the counter it faces the counter");
         }
     }
@@ -241,7 +272,7 @@ public class ShopSceneTests
         Assert.IsTrue(view.Moving("consumer-a"));
         bridge.Receive(D2(1, "consumer-a", 4, "expired", 4, animate: false));
         Assert.IsFalse(view.Moving("consumer-a"));
-        Assert.AreEqual(ShopView.Point("consumer-a", ShopView.Out), view.PositionOf("consumer-a"));
+        Assert.AreEqual(view.Point("consumer-a", ShopView.Out), view.PositionOf("consumer-a"));
         Assert.AreEqual("rendered:1:4:expired|task-a||", Rendered().Last());
         yield return new WaitForSeconds(3f);
         Assert.That(bridge.reports, Has.None.StartsWith("rendered:1:3:"), "the replaced move is void");
@@ -280,7 +311,7 @@ public class ShopSceneTests
         bridge.Receive(D2(1, "consumer-b", 4, "expired", 4));
         var route = view.RouteOf("consumer-b");
         CheckRoute("expired on the way", route, props);
-        Assert.AreEqual(ShopView.Point("consumer-b", ShopView.Out), route.Last());
+        Assert.AreEqual(view.Point("consumer-b", ShopView.Out), route.Last());
         yield return Arrive("consumer-b");
         Assert.LessOrEqual(Time.realtimeSinceStartup - start, 2.5f + 0.1f);
         Assert.AreEqual(new[] { "rendered:1:4:expired|task-b||" }, Rendered().ToArray(), "only the newest, never the replaced #3");
@@ -307,7 +338,7 @@ public class ShopSceneTests
             yield return Arrive("consumer-a");
             float took = Time.realtimeSinceStartup - start;
             Assert.AreEqual(2.5f, took, 0.15f, "jumped at the limit");
-            Assert.AreEqual(ShopView.Point("consumer-a", ShopView.Counter), view.PositionOf("consumer-a"));
+            Assert.AreEqual(view.Point("consumer-a", ShopView.Counter), view.PositionOf("consumer-a"));
             Assert.AreEqual(new[] { "rendered:1:5:waiting|task-a||" }, Rendered().ToArray(), "once, for the newest sequence");
             Assert.AreEqual("CLI timeout - ask still pending", view.LabelOf("consumer-a"));
         }
@@ -385,7 +416,7 @@ public class ShopSceneTests
             float took = Time.realtimeSinceStartup - start;
             Assert.IsFalse(view.Moving("consumer-a"));
             Assert.LessOrEqual(took, 2.5f + 0.45f, "real seconds, frames of 200 ms");
-            Assert.AreEqual(ShopView.Point("consumer-a", ShopView.Counter), view.PositionOf("consumer-a"));
+            Assert.AreEqual(view.Point("consumer-a", ShopView.Counter), view.PositionOf("consumer-a"));
             Assert.AreEqual(new[] { "rendered:1:3:waiting|task-a||" }, Rendered().ToArray());
         }
         finally { Time.maximumDeltaTime = cap; }

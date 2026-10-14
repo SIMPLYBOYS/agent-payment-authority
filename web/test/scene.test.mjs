@@ -329,3 +329,47 @@ test("a card stops only a running run and never makes up a count", () => {
   assert.equal(e.kind, "not_provided");
   assert.equal(A.runCard(run(undefined, { state: "interrupted" })).stoppable, false, "an interrupted run");
 });
+
+// UX3 (docs/commercial-scenes.md): the page picks a scene first; the shop
+// shows that scene's room and only its runs, and every message of a scene
+// names the same room.
+test("UX3: bridge layouts, rooms in messages, the scenes in order", () => {
+  const b = A.parseBridge("versions=1,2;customers=consumer-a,consumer-b;select=1;layouts=cafe,data,mart");
+  assert.deepEqual(b.layouts, ["cafe", "data", "mart"]);
+  assert.equal(b.select, true);
+  assert.deepEqual(A.parseBridge("versions=1,2;customers=consumer-a;select=1").layouts, [], "an older build names no rooms");
+  assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;layouts=Cafe"), null);
+  assert.deepEqual(A.sceneClear2(4, "cafe"), { v: 2, scene: 4, clear: true, layout: "cafe" });
+  assert.deepEqual(A.slotClear2(4, "consumer-a", 2, "mart"), { v: 2, scene: 4, consumer: "consumer-a", slot: 2, clear: true, layout: "mart" });
+  assert.deepEqual(A.venues([{ scene: "mart" }, { scene: "zoo" }, {}, { scene: "cafe" }, { scene: "mart" }]), ["data", "cafe", "mart", "zoo"]);
+  assert.equal(A.venue("cafe").demo, true);
+  assert.equal(A.venue("data").demo, false);
+  assert.match(A.venue("mart").delivery, /付款後才交付/);
+  const rs = [{ consumer_id: "consumer-a", task_id: "show-a-02", scene: "mart" }, { consumer_id: "consumer-b", task_id: "show-b-01", scene: "cafe" },
+    { consumer_id: "consumer-a", task_id: "show-a-01", scene: "cafe" }, { consumer_id: "consumer-b", task_id: "show-b-00" }];
+  const cafe = A.sceneTasks(rs, "cafe");
+  assert.equal(cafe.get("consumer-a").task, "show-a-01", "the newest run of this scene, not of another");
+  assert.equal(cafe.get("consumer-b").task, "show-b-01");
+  assert.equal(A.sceneTasks(rs, "data").size, 0, "a run that names no scene is in none");
+  assert.equal(A.sceneTasks(rs).get("consumer-a").task, "show-a-02", "no venue: every run, as before");
+});
+
+test("UX3: a scene change is a new scene with its room, and only its runs", async () => {
+  const { host, unity, scene } = setup();
+  host.data.set("show-a-01", reply("show-a-01", "consumer-a", askEvents()));
+  host.data.set("show-b-01", reply("show-b-01", "consumer-b", askEvents()));
+  scene.start();
+  scene.setVenue("cafe", "cafe");
+  scene.setRuns([{ consumer_id: "consumer-a", task_id: "show-a-01", run_id: "r1", scene: "mart" }, { consumer_id: "consumer-b", task_id: "show-b-01", run_id: "r2", scene: "cafe" }]);
+  await settle();
+  const cafeScene = unity.sent.at(-1).scene;
+  assert.ok(unity.sent.filter((m) => m.scene === cafeScene).every((m) => m.layout === "cafe"), "every message of the scene names its room");
+  assert.deepEqual(scene.slots().map((x) => x.consumer), ["consumer-b"], "A's run is in the mart: not in the cafe");
+  scene.setVenue("mart", "mart");
+  await settle();
+  const mart = unity.sent.filter((m) => m.scene > cafeScene);
+  assert.ok(mart.length > 0 && mart[0].clear && !mart[0].consumer && mart.every((m) => m.layout === "mart"), "a new scene, all in the mart's room");
+  assert.deepEqual(scene.slots().map((x) => x.consumer), ["consumer-a"]);
+  assert.ok(mart.some((m) => m.consumer === "consumer-a" && m.phase === "waiting"));
+  assert.ok(!mart.some((m) => m.consumer === "consumer-b"), "B's cafe slot is gone");
+});

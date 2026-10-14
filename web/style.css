@@ -131,6 +131,10 @@ body[data-page="host"] #unity-status, body[data-page="host"] .credit { font-size
 body[data-page="host"] #scene-text .scene-label { margin-top: 4px; }
 .scene-cap, .view-note { color: #3a2a00; }
 .agents { display: grid; gap: 8px; }
+/* UX3: the scene first (UX2-D3), then the customers' cards. */
+.venues { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.venue-pick[aria-pressed="true"] { border-color: #ffd84d; color: #ffd84d; }
+.venue-demo { font-size: 11px; padding: 0 6px; border-radius: 8px; background: #3a2c2c; color: var(--warn); }
 .consumer-row.agent-card { display: block; margin: 0; padding: 8px 10px; border: 2px solid #3a3f52; border-radius: 6px; background: #191b22; cursor: pointer; }
 .agent-card[data-selected="true"] { border-color: #ffd84d; box-shadow: inset 0 0 0 1px #ffd84d; }
 .agent-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }

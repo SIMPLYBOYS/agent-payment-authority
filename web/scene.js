@@ -24,6 +24,11 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
   let active = false;
   let paused = false;
   let selected = null; // UX1: the consumer the page has chosen (the ring), or null
+  // UX3: the scene's venue (whose runs it shows; "" all) and room (the
+  // layout sent to Unity; "" the build's default), and the last runs list.
+  let venue = "";
+  let layout = "";
+  let lastRuns = null;
   const slots = new Map(); // consumer -> slot
 
   const newSlot = (consumer) => ({ consumer, slot: 0, task: null, st: A.newState(), timer: null, abort: null, inFlight: false,
@@ -86,7 +91,7 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
     const snap = s.st.snapshot;
     if (snap && snap.task.as_of_sequence !== s.shownSeq) {
       s.shownSeq = snap.task.as_of_sequence;
-      const msg = A.projection2(s.st, scene, s.slot, !first && fresh.length > 0);
+      const msg = A.projection2(s.st, scene, s.slot, !first && fresh.length > 0, layout);
       const tr = A.transition(s.target, msg);
       s.target = tr.target;
       if (tr.rule <= 2 || !s.motion) s.motion = { rule: tr.rule, text: tr.text, first: !msg.animate, done: false };
@@ -109,7 +114,7 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
     s.sent = s.report = s.target = s.motion = null;
     s.read = "loading";
     s.abort = new AbortController();
-    unity.send2(A.slotClear2(scene, consumer, s.slot));
+    unity.send2(A.slotClear2(scene, consumer, s.slot, layout));
     poll(s, true);
   }
 
@@ -117,7 +122,7 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
   // snapshot, without animation (a first load).
   function restart() {
     scene += 1;
-    unity.send2(A.sceneClear2(scene));
+    unity.send2(A.sceneClear2(scene, layout));
     for (const s of slots.values()) {
       stopSlot(s);
       const task = s.task;
@@ -159,9 +164,10 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
     reset() {
       for (const s of slots.values()) stopSlot(s);
       slots.clear();
+      lastRuns = null; // the old identity's runs are never followed again
       if (active && !paused) {
         scene += 1;
-        unity.send2(A.sceneClear2(scene));
+        unity.send2(A.sceneClear2(scene, layout));
         sendSelect();
       }
       onChange();
@@ -182,11 +188,29 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
       const s = slots.get(r.consumer);
       return !!s && !!s.task && s.slot === r.slot;
     },
-    // setRuns: each consumer's scene task is its newest run's task.
+    // setRuns: each consumer's scene task is its newest run's task (of the venue, UX3).
     setRuns(runs) {
+      lastRuns = runs;
       if (!active || paused) return;
-      for (const [consumer, r] of A.sceneTasks(runs)) follow(consumer, r.task);
+      for (const [consumer, r] of A.sceneTasks(runs, venue)) follow(consumer, r.task);
     },
+    // setVenue (UX3): another scene the page chose, shown in room layout. A
+    // change is a new scene: no slot is kept; the venue's runs come back.
+    setVenue(v, room) {
+      if (v === venue && room === layout) return;
+      venue = v || "";
+      layout = room || "";
+      for (const s of slots.values()) stopSlot(s);
+      slots.clear();
+      if (active && !paused) {
+        scene += 1;
+        unity.send2(A.sceneClear2(scene, layout));
+        sendSelect();
+        for (const [consumer, r] of A.sceneTasks(lastRuns, venue)) follow(consumer, r.task);
+      }
+      onChange();
+    },
+    get venue() { return venue; },
     // pause and resume a replay: the Dashboard's version 1 replay owns the
     // shop meanwhile; afterwards a new scene shows every slot again.
     pause() {

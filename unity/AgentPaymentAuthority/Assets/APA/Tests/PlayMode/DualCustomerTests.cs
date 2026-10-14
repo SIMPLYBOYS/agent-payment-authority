@@ -41,7 +41,7 @@ public class DualCustomerTests
     [Test]
     public void BridgeReportComesFirst()
     {
-        Assert.AreEqual("bridge:0:0:versions=1,2;customers=consumer-a,consumer-b;select=1", bridge.reports[0]);
+        Assert.AreEqual("bridge:0:0:versions=1,2;customers=consumer-a,consumer-b;select=1;layouts=cafe,data,mart", bridge.reports[0]);
         StringAssert.StartsWith("ready:", bridge.reports[1]);
     }
 
@@ -112,6 +112,35 @@ public class DualCustomerTests
         Assert.IsFalse(view.Multi);
         Assert.AreEqual("empty", view.PhaseOf("consumer-b"));
         Assert.Less(view.AlphaOf("consumer-b"), 0.9f);
-        Assert.AreEqual(ShopView.Point("consumer-a", ShopView.Shelf), view.PositionOf("consumer-a"));
+        Assert.AreEqual(view.Point("consumer-a", ShopView.Shelf), view.PositionOf("consumer-a"));
+    }
+
+    // UX3: a new scene names its room; the room is reported, and changes
+    // only with a new scene. An unknown room, or another room in the same
+    // scene, is refused whole: nothing moves or resets.
+    [Test]
+    public void EachSceneShowsItsRoom()
+    {
+        Assert.AreEqual(ShopView.DefaultLayout, view.LayoutKey);
+        bridge.Receive(V2(1, "consumer-a", 1, "show-a-01", 3, "waiting", animate: false).Replace("{", "{\"layout\":\"cafe\","));
+        Assert.That(bridge.reports, Has.Some.EqualTo("layout:1:0:cafe"));
+        Assert.AreEqual("cafe", view.LayoutKey);
+        Assert.AreEqual("waiting", view.PhaseOf("consumer-a"));
+        var texts = Object.FindObjectsByType<TextMesh>(FindObjectsSortMode.None).Select(t => t.text).ToList();
+        Assert.That(texts, Has.Some.StartsWith("M1 / no payment - Street cafe"));
+        Assert.That(texts, Has.Some.EqualTo("Pickup - after payment"));
+        Assert.That(texts, Has.None.EqualTo("Download - after payment"), "the old room's notes are gone");
+
+        bridge.Receive(V2(1, "consumer-b", 1, "show-b-01", 2, "quoted").Replace("{", "{\"layout\":\"mart\","));
+        Assert.That(bridge.reports.Last(), Is.EqualTo("applied:1:2:consumer-b|Invalid"));
+        bridge.Receive(V2(2, "consumer-b", 1, "show-b-01", 2, "quoted").Replace("{", "{\"layout\":\"zoo\","));
+        Assert.That(bridge.reports.Last(), Is.EqualTo("applied:2:2:consumer-b|Invalid"));
+        Assert.AreEqual("cafe", view.LayoutKey);
+        Assert.AreEqual("waiting", view.PhaseOf("consumer-a"), "a refused room resets nothing");
+
+        bridge.Receive("{\"v\":2,\"scene\":3,\"clear\":true}"); // no layout: the default room
+        Assert.That(bridge.reports, Has.Some.EqualTo("layout:3:0:" + ShopView.DefaultLayout));
+        Assert.AreEqual(ShopView.DefaultLayout, view.LayoutKey);
+        Assert.AreEqual("empty", view.PhaseOf("consumer-a"));
     }
 }

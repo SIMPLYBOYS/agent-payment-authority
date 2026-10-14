@@ -1,6 +1,9 @@
-// ShopView: one grocery shop and two pixel customers, A and B. It shows a
+// ShopView: one shop room and two pixel customers, A and B. It shows a
 // projection and nothing else: where a customer stands follows the phase it
 // was sent, and an animation never feeds back into a decision.
+// The room is a layout (UX3, docs/commercial-scenes.md): a data file in
+// Resources/Layouts names its floor, wall, props, corridor points and zone
+// notes, so a new scene is a new file, not new code.
 // Art is LimeZu (limezu.itch.io) when the files were imported; any missing
 // file is a plain placeholder, and the scene then says so.
 using System.Collections.Generic;
@@ -8,14 +11,43 @@ using UnityEngine;
 
 namespace APA
 {
+    // Layout: one room, as Resources/Layouts/<key>.json gives it. Units are
+    // 32 px tiles; the room is 12 x 8. The corridor's eight points are joined
+    // as ShopView.Lines says, so each joined pair must share an x or a y.
+    [System.Serializable]
+    public class Layout
+    {
+        public string key, title;      // title: the banner's name for the room (ASCII)
+        public string floor = "floor", wall = "wall";
+        public Color floorTint = Color.white, wallTint = Color.white;
+        public Vector2 door, aisle, shelf, bend, front, counter;
+        public Prop[] props = new Prop[0];
+        public Note[] notes = new Note[0]; // zone labels; the delivery zone's says "after payment"
+
+        [System.Serializable] public class Prop { public string key; public float x, y; }
+        [System.Serializable] public class Note { public string text; public float x, y; }
+    }
+
     public class ShopView : MonoBehaviour
     {
-        // Assigned by the editor's ShopBuilder from Assets/LimeZu; null when
-        // a file was not imported.
-        public Texture2D floorSheet, wallSheet, customerA, customerB;
-        public Texture2D[] props = new Texture2D[0];
-        public Vector2[] propPositions = new Vector2[0];
-        public string[] propKeys = new string[0];
+        // Assigned by the editor's ShopBuilder from Assets/LimeZu: every
+        // manifest image by key with its rect (x, y, w, h from the top left;
+        // width 0: the whole file). An entry is null when not imported.
+        public Texture2D customerA, customerB;
+        public Texture2D[] art = new Texture2D[0];
+        public string[] artKeys = new string[0];
+        public RectInt[] artRects = new RectInt[0];
+
+        public const string DefaultLayout = "data"; // the main scene (UX2-D1)
+        readonly Dictionary<string, Layout> layouts = new Dictionary<string, Layout>();
+        Layout layout;
+        GameObject room;
+        readonly List<(SpriteRenderer plate, TextMesh text)> notePlates = new List<(SpriteRenderer, TextMesh)>();
+        public string LayoutKey => layout != null ? layout.key : null;
+        public IEnumerable<string> LayoutKeys => layouts.Keys;
+        public bool HasLayout(string key) => key != null && layouts.ContainsKey(key);
+        // The props as placed, for the PlayMode tests: key, where, sprite.
+        public readonly List<(string key, Vector2 at, Sprite sprite)> Placed = new List<(string, Vector2, Sprite)>();
 
         public const int PPU = 32;
         public bool UsingPlaceholders { get; private set; }
@@ -47,10 +79,11 @@ namespace APA
         // lines that keep clear of the props. A customer only walks along it.
         // Units are 32 px tiles; the room is 12 x 8.
         public const int Out = 0, OutRow = 1, Door = 2, Aisle = 3, Shelf = 4, Bend = 5, Front = 6, Counter = 7;
-        static readonly int[,] Lines = { { Out, OutRow }, { OutRow, Door }, { Door, Aisle }, { OutRow, Aisle }, { Aisle, Shelf }, { Shelf, Bend }, { Bend, Front }, { Front, Counter } };
+        public static readonly int[,] Lines = { { Out, OutRow }, { OutRow, Door }, { Door, Aisle }, { OutRow, Aisle }, { Aisle, Shelf }, { Shelf, Bend }, { Bend, Front }, { Front, Counter } };
 
-        // Each customer waits, and leaves to, its own row outside the door.
-        public static Vector2 Point(string consumer, int n)
+        // Each customer waits, and leaves to, its own row outside the door;
+        // inside, the points are the layout's.
+        public Vector2 Point(string consumer, int n)
         {
             // UX1: B's row is 0.6 (was 0.2) so its label under its feet stays
             // inside the view.
@@ -59,12 +92,12 @@ namespace APA
             {
                 case Out: return new Vector2(-1.3f, row);
                 case OutRow: return new Vector2(1.5f, row);
-                case Door: return new Vector2(1.5f, 1.2f);
-                case Aisle: return new Vector2(1.5f, 3.2f);
-                case Shelf: return new Vector2(4.5f, 3.2f);
-                case Bend: return new Vector2(7.5f, 3.2f);
-                case Front: return new Vector2(7.5f, 1.6f);
-                default: return new Vector2(8.5f, 1.6f);
+                case Door: return layout.door;
+                case Aisle: return layout.aisle;
+                case Shelf: return layout.shelf;
+                case Bend: return layout.bend;
+                case Front: return layout.front;
+                default: return layout.counter;
             }
         }
 
@@ -124,6 +157,7 @@ namespace APA
 
         readonly Dictionary<string, Customer> customers = new Dictionary<string, Customer>();
         TextMesh status, banner;
+        string art0 = ""; // the banner's art note
         Font font;
         Sprite pixel, disc, circle; // UX1: a white pixel, a filled ellipse and an ellipse ring
         SpriteRenderer bannerPlate;
@@ -140,8 +174,12 @@ namespace APA
             pixel = Shape(1, 1, (x, y) => 1f);
             disc = Shape(32, 16, (x, y) => x * x + y * y <= 1f ? 1f : 0f);
             circle = Shape(48, 24, (x, y) => { float r = x * x + y * y; return r <= 1f && r >= 0.62f ? 1f : 0f; });
-            UsingPlaceholders = floorSheet == null || wallSheet == null || customerA == null || customerB == null;
-            for (int i = 0; i < props.Length; i++) if (props[i] == null) UsingPlaceholders = true;
+            foreach (var t in Resources.LoadAll<TextAsset>("Layouts"))
+            {
+                var l = JsonUtility.FromJson<Layout>(t.text);
+                if (l != null && l.key == t.name) layouts[l.key] = l;
+            }
+            layout = layouts.TryGetValue(DefaultLayout, out var d) ? d : new Layout { key = DefaultLayout, title = "" };
             BuildRoom();
             customers["consumer-a"] = MakeCustomer("consumer-a", customerA, "Customer A", new Color(0.55f, 0.75f, 1f));
             customers["consumer-b"] = MakeCustomer("consumer-b", customerB, "Customer B", new Color(1f, 0.7f, 0.5f));
@@ -152,9 +190,27 @@ namespace APA
             // Neutral about where the agent's actions come from: the same build
             // shows the fake demo and the history replay of a recorded real run
             // (docs/cli-poc.md 54.2); the page's header says which.
-            banner.text = "M1 / no payment" + (UsingPlaceholders ? "   [LimeZu pending: placeholder art]" : "   Art: LimeZu (limezu.itch.io)");
+            Banner();
             status = MakeText("status", new Vector2(6f, -0.35f), 0.08f, new Color(1f, 0.95f, 0.6f));
             ResetAll();
+        }
+
+        void Banner()
+        {
+            if (banner == null) return;
+            banner.text = "M1 / no payment - " + layout.title + (UsingPlaceholders ? "   [LimeZu pending: placeholder art]" : "   Art: LimeZu (limezu.itch.io)");
+        }
+
+        // UseLayout: another room. Every customer goes back outside at once,
+        // as in ResetAll; false (and nothing changes) for an unknown key.
+        public bool UseLayout(string key)
+        {
+            if (!layouts.TryGetValue(key ?? "", out var l)) return false;
+            layout = l;
+            BuildRoom();
+            Banner();
+            ResetAll();
+            return true;
         }
 
         Sprite Cut(Texture2D t, int x, int yTop, int w, int h)
@@ -190,7 +246,7 @@ namespace APA
         SpriteRenderer Put(string name, Sprite s, Vector2 at, int order)
         {
             var go = new GameObject(name);
-            go.transform.SetParent(transform, false);
+            go.transform.SetParent(room.transform, false);
             go.transform.localPosition = at;
             var r = go.AddComponent<SpriteRenderer>();
             r.sprite = s;
@@ -198,25 +254,53 @@ namespace APA
             return r;
         }
 
+        // Art: the sprite of a manifest key, cut to its rect; a placeholder
+        // of w x h when the file was not imported.
+        Sprite Art(string key, Color fallback, int w, int h)
+        {
+            int i = System.Array.IndexOf(artKeys, key);
+            var t = i >= 0 && i < art.Length ? art[i] : null;
+            if (t == null) { UsingPlaceholders = true; return Placeholder(fallback, w, h); }
+            var r = i < artRects.Length ? artRects[i] : default;
+            return r.width > 0 ? Cut(t, r.x, r.y, r.width, r.height) : Sprite.Create(t, new Rect(0, 0, t.width, t.height), new Vector2(0.5f, 0f), PPU);
+        }
+
+        // BuildRoom: the layout's room, in place of any earlier one.
         void BuildRoom()
         {
-            var floor = floorSheet != null ? Cut(floorSheet, 288, 1056, 32, 32) : Placeholder(new Color(0.78f, 0.8f, 0.84f), 32, 32);
-            var wall = wallSheet != null ? Cut(wallSheet, 32, 64, 32, 64) : Placeholder(new Color(0.85f, 0.85f, 0.9f), 32, 64);
+            if (room != null) { room.SetActive(false); Destroy(room); }
+            room = new GameObject("room-" + layout.key);
+            room.transform.SetParent(transform, false);
+            Placed.Clear();
+            notePlates.Clear();
+            UsingPlaceholders = customerA == null || customerB == null;
+            var floor = Art(layout.floor, new Color(0.78f, 0.8f, 0.84f), 32, 32);
+            var wall = Art(layout.wall, new Color(0.85f, 0.85f, 0.9f), 32, 64);
             for (int x = 0; x < 12; x++)
             {
-                for (int y = 0; y < 7; y++) Put("floor", floor, new Vector2(x + 0.5f, y), -100);
-                Put("wall", wall, new Vector2(x + 0.5f, 7f), -90);
+                for (int y = 0; y < 7; y++) Put("floor", floor, new Vector2(x + 0.5f, y), -100).color = layout.floorTint;
+                Put("wall", wall, new Vector2(x + 0.5f, 7f), -90).color = layout.wallTint;
             }
             // UX1: the sidewalk outside the door, where a customer waits and
             // leaves to: the same floor, darker, so outside reads as ground.
             for (int x = -2; x < 0; x++)
                 for (int y = 0; y < 7; y++) Put("sidewalk", floor, new Vector2(x + 0.5f, y), -100).color = new Color(0.55f, 0.6f, 0.56f);
-            for (int i = 0; i < props.Length && i < propPositions.Length; i++)
+            foreach (var p in layout.props)
             {
-                var t = props[i];
-                var s = t != null ? Sprite.Create(t, new Rect(0, 0, t.width, t.height), new Vector2(0.5f, 0f), PPU)
-                                  : Placeholder(new Color(0.6f, 0.5f, 0.4f), 32, 48);
-                Put(i < propKeys.Length ? propKeys[i] : "prop", s, propPositions[i], -(int)(propPositions[i].y * 10));
+                var at = new Vector2(p.x, p.y);
+                var s = Art(p.key, new Color(0.6f, 0.5f, 0.4f), 32, 48);
+                Put(p.key, s, at, -(int)(at.y * 10));
+                Placed.Add((p.key, at, s));
+            }
+            // The zone notes, each on a dark plate (readable on a light
+            // wall): over the props, under the customers' labels.
+            foreach (var n in layout.notes)
+            {
+                var t = MakeText("note", new Vector2(n.x, n.y), 0.05f, new Color(1f, 0.94f, 0.78f, 1f));
+                t.transform.SetParent(room.transform, true);
+                t.text = n.text;
+                t.GetComponent<MeshRenderer>().sortingOrder = 61;
+                notePlates.Add((Child(room, "note-plate", pixel, 60, new Color(0.08f, 0.08f, 0.12f, 0.7f)), t));
             }
         }
 
@@ -529,6 +613,7 @@ namespace APA
         void LateUpdate()
         {
             Fit(bannerPlate, banner);
+            foreach (var (plate, text) in notePlates) Fit(plate, text);
             foreach (var c in customers.Values)
             {
                 Fit(c.plate, c.tag);

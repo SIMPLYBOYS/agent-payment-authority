@@ -331,15 +331,36 @@ export function clearMessage(gen) {
 export const BRIDGE_V2 = 2;
 
 // projection2: the version 2 message of a slot's committed snapshot.
-export function projection2(slotState, scene, slot, animate) {
+// UX3: a version 2 message names the scene's room (layout) when the page
+// has one; every message of a scene carries the same one (Unity refuses a
+// mismatch), and none is the build's default room.
+const room = (layout) => (layout ? { layout } : {});
+
+export function projection2(slotState, scene, slot, animate, layout) {
   const m = projection(slotState, animate);
   if (!m) return null;
   const { gen, ...rest } = m;
-  return { ...rest, v: BRIDGE_V2, scene, slot, clear: false };
+  return { ...rest, v: BRIDGE_V2, scene, slot, clear: false, ...room(layout) };
 }
 
-export const sceneClear2 = (scene) => ({ v: BRIDGE_V2, scene, clear: true });
-export const slotClear2 = (scene, consumer, slot) => ({ v: BRIDGE_V2, scene, consumer, slot, clear: true });
+export const sceneClear2 = (scene, layout) => ({ v: BRIDGE_V2, scene, clear: true, ...room(layout) });
+export const slotClear2 = (scene, consumer, slot, layout) => ({ v: BRIDGE_V2, scene, consumer, slot, clear: true, ...room(layout) });
+
+// VENUES: the UX3 scenes (docs/commercial-scenes.md 3) as the page names
+// them. cafe and mart are demo scenes: fixture products, no POS, inventory
+// or logistics. Delivery waits for payment (UX2-D4); nothing pays here.
+export const VENUES = {
+  data: { name: "資料研究室", demo: false, goods: "數位資料", delivery: "下載終端（付款後才交付）" },
+  cafe: { name: "街角咖啡", demo: true, goods: "餐點・示意菜單", delivery: "出餐口叫號（付款後才交付）" },
+  mart: { name: "巷口便利商店", demo: true, goods: "商品・示意商品", delivery: "取貨櫃（付款後才交付）" },
+};
+export const venue = (key) => VENUES[key] || { name: "情境 " + String(key || "未知"), demo: true, goods: "商品", delivery: "付款後才交付" };
+// venues: the scenes a catalog offers, the main one first, then as listed above, then by name.
+export function venues(scenarios) {
+  const order = Object.keys(VENUES);
+  const rank = (k) => (order.includes(k) ? order.indexOf(k) : order.length);
+  return [...new Set((scenarios || []).map((x) => x.scene || "data"))].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+}
 
 // parseReport2: Unity's version 2 rendered report, or null when malformed:
 // gen is the scene; detail is consumer|slot|task|phase|verdict|reason.
@@ -361,18 +382,24 @@ export const sameShown2 = (sent, rep) => !!sent && !!rep && Number.isInteger(rep
 // parseBridge: Unity's bridge report: the versions and customers the build
 // can show; null when malformed. A build without it shows one customer.
 export function parseBridge(detail) {
-  const m = /^versions=([0-9,]+);customers=([a-z0-9,-]*)(;select=1)?$/.exec(String(detail));
+  const m = /^versions=([0-9,]+);customers=([a-z0-9,-]*)(;select=1)?(;layouts=([a-z0-9,-]*))?$/.exec(String(detail));
   if (!m) return null;
   // select: the build takes the page's Select and reports clicks (UX1,
-  // docs/commercial-ux1.md); an older build says nothing of it.
-  return { versions: new Set(m[1].split(",").map(Number)), customers: m[2] ? m[2].split(",") : [], select: !!m[3] };
+  // docs/commercial-ux1.md); layouts: the rooms it has (UX3). An older
+  // build says nothing of either.
+  return { versions: new Set(m[1].split(",").map(Number)), customers: m[2] ? m[2].split(",") : [], select: !!m[3], layouts: m[5] ? m[5].split(",") : [] };
 }
 
 // sceneTasks: each consumer's scene task, the task of its newest run (the
-// runs list is newest first). An older task stays out of the scene.
-export function sceneTasks(runs) {
+// runs list is newest first). An older task stays out of the scene. With a
+// venue (UX3), only that scene's runs count; a run that names no scene (its
+// catalog entry changed since) is in none.
+export function sceneTasks(runs, venue) {
   const out = new Map();
-  for (const r of runs || []) if (r && r.consumer_id && r.task_id && !out.has(r.consumer_id)) out.set(r.consumer_id, { task: r.task_id, run: r.run_id, live: r.live || "" });
+  for (const r of runs || []) {
+    if (venue && (!r || r.scene !== venue)) continue;
+    if (r && r.consumer_id && r.task_id && !out.has(r.consumer_id)) out.set(r.consumer_id, { task: r.task_id, run: r.run_id, live: r.live || "" });
+  }
   return out;
 }
 
@@ -662,6 +689,7 @@ export function evidence(snapshot, po, ctx) {
   const d = (p && p.decision) || {};
   const sections = [
     { title: "報價", note: "402 的報價以 payment_requirement_hash 綁定在請購上；目錄價格只是說明，不與此請購綁定。", rows: p ? [
+      ...(ctx.venue ? [["情境", venue(ctx.venue).name + (venue(ctx.venue).demo ? "（示範情境・示意商品，沒有接 POS、庫存或物流）" : "") + "・交付：" + venue(ctx.venue).delivery, "Host 場景目錄"]] : []),
       ["資源", str(p.http_method) + " " + str(p.resource_url), "Store"], ["amount（基本單位）", amount(p.amount), "Store"],
       ["asset", str(p.asset_id), "Store"], ["network（chain）", str(p.chain_id), "Store"], ["payTo", str(p.pay_to), "Store"],
       ["payment_requirement_hash", str(p.payment_requirement_hash), "Store"],

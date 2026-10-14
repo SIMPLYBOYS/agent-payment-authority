@@ -32,6 +32,9 @@ namespace APA
         // customer only. -1 when missing.
         public int scene = -1;
         public int slot = -1;
+        // UX3, version 2 only: the scene's room (a layout key). A scene
+        // generation has one layout; another room is a new scene.
+        public string layout;
     }
 
     // Target: what the shop is to show for a customer (16.4 "T"). The page's
@@ -196,6 +199,7 @@ namespace APA
         }
 
         public int Scene { get; private set; } = -1;
+        public string Layout { get; private set; } = ""; // the scene generation's layout, as sent
         readonly Dictionary<string, Slot> slots = new Dictionary<string, Slot>();
 
         public Slot Of(string consumer)
@@ -218,9 +222,11 @@ namespace APA
                 if (!m.clear && (string.IsNullOrEmpty(m.task_id) || m.seq < 0)) return Outcome.Invalid;
             }
             if (m.scene < Scene) return Outcome.Stale;
+            if (m.scene == Scene && (m.layout ?? "") != Layout) return Outcome.Invalid; // one layout per scene generation
             if (m.scene > Scene)
             {
                 Scene = m.scene;
+                Layout = m.layout ?? "";
                 slots.Clear();
                 sceneReset = true;
                 if (sceneClear) return Outcome.Cleared;

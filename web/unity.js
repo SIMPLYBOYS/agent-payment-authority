@@ -52,6 +52,8 @@ export class UnityHost {
   report(kind, gen, seq, detail) {
     if (kind === "bridge") {
       this.bridge = parseBridge(detail);
+    } else if (kind === "layout") {
+      this.room = { scene: gen, key: detail }; // UX3: the room a new scene shows (display only)
     } else if (kind === "ready") {
       this.ready = true;
       this.art = detail === "limezu" ? "limezu" : "placeholder";

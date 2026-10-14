@@ -10,7 +10,9 @@
 // the projection: "Select" takes {scene, consumer} from the page and only
 // shows the ring; a click on a customer is reported as "select" with the
 // scene, that customer's slot and its consumer. The page decides; a click
-// never selects anything here.
+// never selects anything here. UX3 (docs/commercial-scenes.md): a version 2
+// message names the scene's layout (none: the default room); the room
+// changes only with a new scene generation, and is reported as "layout".
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -44,7 +46,9 @@ namespace APA
         void Start()
         {
             view.Picked = Picked;
-            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers) + ";select=1");
+            var rooms = new List<string>(view.LayoutKeys);
+            rooms.Sort(System.StringComparer.Ordinal);
+            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers) + ";select=1;layouts=" + string.Join(",", rooms));
             Report("ready", -1, -1, view.UsingPlaceholders ? "placeholder" : "limezu");
         }
 
@@ -65,7 +69,8 @@ namespace APA
             scene = new SceneState();
             viewGen = -1;
             view.Multi = v == SceneState.Version;
-            view.ResetAll();
+            if (view.LayoutKey != ShopView.DefaultLayout) view.UseLayout(ShopView.DefaultLayout); // version 1 shows the default room
+            else view.ResetAll();
         }
 
         // What the shop shows: phase, task, verdict and reason code.
@@ -139,8 +144,16 @@ namespace APA
         void ReceiveV2(ProjectionMessage m)
         {
             Switch(2);
-            var outcome = scene.Apply(m, out bool animate, out bool sceneReset, out bool slotReset);
-            if (sceneReset) view.ResetAll();
+            if (string.IsNullOrEmpty(m.layout)) m.layout = ShopView.DefaultLayout;
+            // A room this build does not have is refused whole, before anything resets.
+            var outcome = view.HasLayout(m.layout) ? scene.Apply(m, out bool animate, out bool sceneReset, out bool slotReset)
+                                                   : Invalid(out animate, out sceneReset, out slotReset);
+            if (sceneReset)
+            {
+                if (scene.Layout != view.LayoutKey) view.UseLayout(scene.Layout); // resets every customer too
+                else view.ResetAll();
+                Report("layout", scene.Scene, 0, view.LayoutKey); // the room each new scene shows
+            }
             else if (slotReset) view.Reset(m.consumer);
             if (outcome == Outcome.Applied)
             {
@@ -155,6 +168,12 @@ namespace APA
                     RenderedV2(m.consumer);
             }
             Report("applied", m.scene, m.seq, (m.consumer ?? "") + "|" + outcome);
+        }
+
+        static Outcome Invalid(out bool animate, out bool sceneReset, out bool slotReset)
+        {
+            animate = sceneReset = slotReset = false;
+            return Outcome.Invalid;
         }
     }
 }

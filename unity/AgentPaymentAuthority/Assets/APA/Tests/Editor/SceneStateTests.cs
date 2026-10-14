@@ -12,6 +12,7 @@ public class SceneStateTests
 
     static Outcome Apply(SceneState s, ProjectionMessage m) => s.Apply(m, out _, out _, out _);
 
+
     [Test]
     public void TwoCustomersInOneScene()
     {
@@ -82,5 +83,28 @@ public class SceneStateTests
         Assert.AreEqual(Outcome.Invalid, Apply(s, M(9, "consumer-x", 1, "t", 1, "entered")));
         Assert.AreEqual(1, s.Scene);
         Assert.AreEqual("waiting", s.Of("consumer-a").T.Phase);
+    }
+
+    // UX3: a scene generation has one layout; another room needs a new
+    // scene, and a mismatch is refused whole (nothing resets).
+    [Test]
+    public void OneLayoutPerScene()
+    {
+        var s = new SceneState();
+        var cafe = M(1, "consumer-a", 1, "show-a-01", 2, "quoted");
+        cafe.layout = "cafe";
+        Assert.AreEqual(Outcome.Applied, Apply(s, cafe));
+        Assert.AreEqual("cafe", s.Layout);
+        var mart = M(1, "consumer-b", 1, "show-b-01", 2, "quoted");
+        mart.layout = "mart";
+        Assert.AreEqual(Outcome.Invalid, s.Apply(mart, out _, out bool rs, out bool rsl));
+        Assert.IsFalse(rs || rsl);
+        Assert.AreEqual("empty", s.Of("consumer-b").T.Phase);
+        var next = ProjectionState.Parse("{\"v\":2,\"scene\":2,\"clear\":true,\"layout\":\"mart\"}");
+        Assert.AreEqual(Outcome.Cleared, s.Apply(next, out _, out rs, out _));
+        Assert.IsTrue(rs);
+        Assert.AreEqual("mart", s.Layout);
+        mart.scene = 2;
+        Assert.AreEqual(Outcome.Applied, Apply(s, mart));
     }
 }

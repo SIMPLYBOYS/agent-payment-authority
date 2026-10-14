@@ -34,7 +34,7 @@
 // action. An approval leaves a simulated grant and enables no payment.
 
 import { nextModeSeq, confirmMode, setStatus, forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, currentConsumer, setAlert,
-  shop, onSceneReport, onScenePick, setSceneView, onReplayMode, refreshPanels } from "./app.js";
+  shop, onSceneReport, onScenePick, setSceneView, setVenueOf, onReplayMode, refreshPanels } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
 import { createScene } from "./scene.js";
 import * as A from "./adapter.js";
@@ -96,6 +96,18 @@ onScenePick((r) => {
   $("unity-canvas").dataset.picksDropped = String(picksDropped);
 });
 setSceneView((c) => scene.view(c));
+// UX3 (docs/commercial-scenes.md): the scene the page shows, chosen first
+// (UX2-D3); the customers' cards and the shop follow it. null until the
+// catalog is known; only a catalog of more than one scene offers a choice.
+let venue = null;
+const allScenarios = () => (lastReady && lastReady.status && lastReady.status.runs && lastReady.status.runs.scenarios) || [];
+const multiVenue = () => A.venues(allScenarios()).length > 1;
+// runVenue: a task's scene, from its run (only when there is a choice).
+const runVenue = (task) => {
+  const r = multiVenue() && lastRuns && lastRuns.gen === creds.gen && (lastRuns.runs || []).find((x) => x.task_id === task);
+  return (r && r.scene) || "";
+};
+setVenueOf(runVenue);
 onReplayMode((on) => (on ? scene.pause() : scene.resume()));
 const short = (c) => (c === "consumer-a" ? "A" : c === "consumer-b" ? "B" : c);
 
@@ -109,6 +121,7 @@ function ensureScene() {
   if (hosting() && u.ready && u.supports2) {
     if (!scene.started) {
       scene.start();
+      renderVenues(A.venues(allScenarios())); // the room before the runs
       if (lastRuns && lastRuns.gen === creds.gen) scene.setRuns(lastRuns.runs);
     }
   } else if (scene.started) scene.stop();
@@ -132,6 +145,10 @@ function renderScene() {
         + (ns.overCap ? "；同時執行上限 " + st.capacity.max_runs + " 高於場景能呈現的人數" : "");
     }
   }
+  if (scene.started && scene.venue && !(u.bridge && u.bridge.layouts.includes(scene.venue))) {
+    cap = (cap ? cap + "；" : "") + "此 Unity 建置沒有「" + A.venue(scene.venue).name + "」的場景佈置：場景沿用預設房間";
+  }
+  $("unity-canvas").dataset.room = u.room ? u.room.scene + ":" + u.room.key : "";
   const capBox = $("scene-cap");
   capBox.hidden = !cap;
   capBox.textContent = cap;
@@ -440,6 +457,47 @@ function agentModel(c, runs, slots, ctx) {
   };
 }
 
+// renderVenues: the scene choice, first (UX2-D3): one button per scene the
+// catalog offers; a demo scene says so. Choosing one changes the cards and
+// the shop's room; it starts or stops nothing.
+let shownVenues = "";
+function renderVenues(vs) {
+  const box = $("venue-picker");
+  box.hidden = vs.length < 2;
+  const chip = $("venue-chip");
+  chip.hidden = box.hidden;
+  chip.textContent = box.hidden ? "" : "情境：" + A.venue(venue).name + (A.venue(venue).demo ? "（示範情境・示意商品）" : "");
+  const u = shop();
+  const room = venue && u.bridge && u.bridge.layouts.includes(venue) ? venue : "";
+  if (scene.started) scene.setVenue(vs.length > 1 ? venue : "", vs.length > 1 ? room : "");
+  const key = JSON.stringify([vs, venue]);
+  if (box.hidden || key === shownVenues) return;
+  shownVenues = key;
+  keepFocus(box, () => box.replaceChildren(...vs.map((k) => {
+    const v = A.venue(k);
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "venue-pick";
+    b.dataset.venue = k;
+    b.setAttribute("aria-pressed", String(k === venue));
+    b.append(v.name);
+    if (v.demo) {
+      const chip = document.createElement("span");
+      chip.className = "venue-demo";
+      chip.textContent = "示範情境";
+      b.append(" ", chip);
+    }
+    b.addEventListener("click", () => {
+      if (venue === k) return;
+      venue = k;
+      shownControl = "";
+      renderControl();
+      refreshPanels();
+    });
+    return b;
+  })));
+}
+
 function renderControl() {
   const v = creds.view();
   const box = $("control");
@@ -449,7 +507,11 @@ function renderControl() {
   box.hidden = !v.hasHost || history;
   if ((history || v.mode === "manual") && advancedGen !== creds.gen) { advancedGen = creds.gen; $("advanced").open = true; }
   const pick = $("run-scenarios");
-  const scenarios = (lastReady && lastReady.status && lastReady.status.runs && lastReady.status.runs.scenarios) || [];
+  const vs = A.venues(allScenarios());
+  if (!vs.includes(venue)) venue = vs[0] || null;
+  // With a choice of scenes, the cards, 一起開始 and the shop are the chosen scene's.
+  const scenarios = vs.length > 1 ? allScenarios().filter((x) => (x.scene || "data") === venue) : allScenarios();
+  renderVenues(vs);
   const live = !!(lastReady && lastReady.status && lastReady.status.live);
   $("live-warning").hidden = !live;
   const runs = (lastRuns && lastRuns.gen === creds.gen && lastRuns.runs) || [];
@@ -929,10 +991,12 @@ function renderApproval(runs) {
     const it = el("div", "approval-item");
     const amt = el("p", "approval-amount");
     amt.append(el("b", "", units(p.amount)), el("span", "", " test USDC"));
-    it.append(el("p", "approval-product", "商品 " + product + "（數位資料・付款確認後交付；本片不付款）"), amt);
+    const vk = runVenue(item.task_id);
+    it.append(el("p", "approval-product", "商品 " + product + "（" + (vk ? A.venue(vk).goods : "數位資料") + "・付款確認後交付；本片不付款）"), amt);
     parts.push(it);
     const dl = el("dl", "approval-rows");
-    for (const [k, val] of [["收款人", addr(p.pay_to) + " · 與報價相同（payTo）"], ["付款帳戶", "客人 " + short(item.consumer_id) + " 的測試錢包 " + addr(item.payer) + " · " + item.wallet_id],
+    for (const [k, val] of [...(vk ? [["情境", A.venue(vk).name + (A.venue(vk).demo ? "（示範情境）" : "")], ["交付方式", A.venue(vk).delivery]] : []),
+      ["收款人", addr(p.pay_to) + " · 與報價相同（payTo）"], ["付款帳戶", "客人 " + short(item.consumer_id) + " 的測試錢包 " + addr(item.payer) + " · " + item.wallet_id],
       ["網路與資產", (NETWORK[p.chain_id] || p.chain_id) + " · test USDC（" + (p.asset_id || "?") + "），不是真錢"],
       ["委託範圍", d ? "預算 " + units(d.task_budget) + "；超過 " + units(d.allow_max) + " 一律要你核准" : "未取得"],
       ["intent", (p.intent_hash || "").slice(0, 23) + "…（後端比對這一份）"]]) {
@@ -1159,10 +1223,12 @@ function renderA2() {
     const it = el("div", "approval-item");
     const amt = el("p", "approval-amount");
     amt.append(el("b", "", units(p.amount)), el("span", "", " test USDC"));
-    it.append(el("p", "approval-product", "商品 " + product + "（數位資料・本片不付款）"), amt);
+    const vk = runVenue(item.task_id);
+    it.append(el("p", "approval-product", "商品 " + product + "（" + (vk ? A.venue(vk).goods : "數位資料") + "・本片不付款）"), amt);
     parts.push(it);
     const dl = el("dl", "approval-rows");
-    for (const [k, val] of [["收款人", addr(p.pay_to) + " · 與報價相同（payTo）"], ["付款帳戶", "客人 " + short(item.consumer_id) + " 的測試錢包 " + addr(item.payer) + " · " + item.wallet_id],
+    for (const [k, val] of [...(vk ? [["情境", A.venue(vk).name + (A.venue(vk).demo ? "（示範情境）" : "")], ["交付方式", A.venue(vk).delivery]] : []),
+      ["收款人", addr(p.pay_to) + " · 與報價相同（payTo）"], ["付款帳戶", "客人 " + short(item.consumer_id) + " 的測試錢包 " + addr(item.payer) + " · " + item.wallet_id],
       ["網路與資產", (NETWORK[p.chain_id] || p.chain_id) + " · test USDC（" + (p.asset_id || "?") + "），不是真錢"],
       ["委託範圍", d ? "預算 " + units(d.task_budget) + "；超過 " + units(d.allow_max) + " 一律要你核准" : "未取得"],
       ["intent", (p.intent_hash || "").slice(0, 23) + (other ? "…（後端比對這一份）" : "…（Signer 依完整請購重算比對）")]]) { // review S-A: a simulated record never reached the Signer

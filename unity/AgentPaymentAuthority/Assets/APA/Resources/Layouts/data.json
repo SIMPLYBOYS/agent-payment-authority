@@ -1,0 +1,18 @@
+{
+  "key": "data",
+  "title": "Data room",
+  "floor": "floor", "wall": "wall",
+  "floorTint": {"r": 0.86, "g": 0.9, "b": 1, "a": 1}, "wallTint": {"r": 0.9, "g": 0.93, "b": 1, "a": 1},
+  "door": {"x": 1.5, "y": 1.2}, "aisle": {"x": 1.5, "y": 3.2}, "shelf": {"x": 4.0, "y": 3.2},
+  "bend": {"x": 6.5, "y": 3.2}, "front": {"x": 6.5, "y": 1.6}, "counter": {"x": 7.5, "y": 1.6},
+  "props": [
+    {"key": "bookshelf-wide", "x": 2.7, "y": 4.0}, {"key": "bookshelf-narrow", "x": 5.1, "y": 4.0},
+    {"key": "bookshelf-wide", "x": 7.6, "y": 4.0}, {"key": "sign-open", "x": 1.5, "y": 7.3},
+    {"key": "pc-desk", "x": 9.97, "y": 0.4}, {"key": "terminal", "x": 11.4, "y": 3.0}
+  ],
+  "notes": [
+    {"text": "Reports - pick & quote", "x": 4.5, "y": 7.45},
+    {"text": "Counter - approval", "x": 9.97, "y": 0.0},
+    {"text": "Download - after payment", "x": 10.4, "y": 4.85}
+  ]
+}

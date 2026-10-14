@@ -17,6 +17,7 @@
   <span id="mode-chip" class="chip" data-mode="live">即時</span>
   <span id="current" class="chip">目前：未選擇 task</span>
   <span id="sim-chip" class="chip sim-chip" hidden></span>
+  <span id="venue-chip" class="chip venue-chip" hidden></span>
   <span id="scene-summary" class="chip" hidden></span>
   <span id="alerts"></span>
   <button type="button" id="load-file">進階：載入 token 檔</button>
@@ -56,6 +57,7 @@
     </section>
     <section id="control" class="host-control" aria-label="Agent 操作" hidden>
       <h2>Agent 操作</h2>
+      <div id="venue-picker" class="venues" role="group" aria-label="選擇情境（先選情境，再選客人）" hidden></div>
       <div id="run-scenarios" class="agents"></div>
       <div class="host-row">
         <button type="button" id="start-all" hidden></button>

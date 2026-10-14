@@ -149,6 +149,9 @@ let scenePick = null;
 export function onSceneReport(fn) { sceneReport = fn; }
 export function onScenePick(fn) { scenePick = fn; }
 export function setSceneView(fn) { sceneView = fn; }
+// UX3: the host page tells the evidence panel a task's scene ("" none).
+let venueOf = null;
+export function setVenueOf(fn) { venueOf = fn; }
 export function onReplayMode(fn) { replayMode = fn; }
 export function refreshPanels() { drawScene(); renderPanels(); }
 
@@ -317,7 +320,7 @@ function renderPanels() {
   const sv = !rp && unity.sceneOwned && sceneView && state.consumer ? sceneView(state.consumer) : null;
   const older = sv && state.taskId && sv.task !== state.taskId ? sv.task : "";
   if (unity.sceneOwned && !rp) shopCtx = older ? { sent: null, report: null, motion: null, viewOlder: older } : { sent: sv && sv.sent, report: sv && sv.report, motion: sv && sv.motion };
-  const e = snap ? A.evidence(snap, c && c.po, { ...ctx, ...shopCtx }) : null;
+  const e = snap ? A.evidence(snap, c && c.po, { ...ctx, ...shopCtx, venue: venueOf && state.taskId ? venueOf(state.taskId) : "" }) : null;
   if (unity.sceneOwned && !rp) mirrorScene(sv, older);
   const vn = $("view-note");
   if (vn) {
