@@ -1,6 +1,7 @@
 # Z1 ZK 額度電路 v1 spike：電路、量測、`intent_hash` 映射與 Z2 前置條件
 
 > 2026-10-14，Claude Code。依 vault〈Claude-Code-Z1-ZK額度電路v1Spike派工-20261013〉與 Aaron「我們先做 Z1」。分支 `commercial-z1`（從 main `87c9ebf`）。
+> **Z1 Done（Aaron 10/14：「Z1 先記為 done 並 merge」）；已 fast-forward merge 進本機 main，未 push。** Z1-D2～D4 留到 Z2 開工前決定。
 > **狀態：spike 完成；第一次獨立上下文 review not pass，修正後第二次 review pass（第 10 節）。** 開工時查證：repo 與 vault 都沒有 Z1／S3 的既有交付（`spikes/` 只有 `bbs`、`webauthn`），因此從頭建立。
 > 本片**只證明本機 proof primitive 可行**：不接 Policy、Signer、Store，不建合約、不部署、不碰 testnet、RPC、faucet 或付款。資料全部合成；setup 是本機單方 setup，不是可信儀式。**不能宣稱預算已被鏈上保護。**
 
