@@ -188,6 +188,10 @@ UX3 新增的 13 項（Aaron 10/15 核准）：
 - `WebGL.framework.js` `3c7d6ab5…e65666`
 - `WebGL.loader.js` `0dc56612…88fa5a`
 
+**取貨櫃換素材後（dacc5fe，乾淨工作樹）**
+- Unity：EditMode 17/17、PlayMode 27/27（含每個房間走道不碰道具）；場景重建時 LimeZu 檔案齊全。
+- WebGL 建置成功；瀏覽器 PASS（38 項）。
+
 ## 11 獨立上下文 review（Claude Code subagent，10/15）
 
 結論：APPROVE，沒有 must-fix。確認：一場不論經哪條路都買不到別的情境的商品；`/catalog` 的位元組（以 1148bc6 與 5bdf531 實際比對）和 M1 entry 的 digest 都沒變；SceneState 的佈置規則與 scene.js 的換場都正確。
