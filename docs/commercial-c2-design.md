@@ -1,7 +1,7 @@
 # C2 BBS+ 憑證接入 Policy：設計與契約升版（第四版）
 
 > 2026-10-14，Claude Code，依 vault〈Claude-Code-C2-BBS憑證接入Policy派工-20261013〉與 Aaron「先做 option a」。分支 `commercial-c2`（從 `commercial-c1`）。
-> **狀態：第四版設計稿；C2a 已通過 review；C2b 已實作，待獨立上下文 review（第 18 節、[commercial-c2.md](commercial-c2.md)）。**
+> **狀態：第四版設計稿；C2a 已通過 review；C2b 已實作並通過獨立上下文 review，should-fix 已修（第 18 節、[commercial-c2.md](commercial-c2.md) 第 8 節）。**
 > - 第一版（`3d8aeb2`）與第二版（`2d9cc2c`）經 Claude Code 獨立上下文 review，都判定 not pass；第三版（`752bf2f`）**有條件通過**：沒有 must-fix，7 項 should-fix 須在 C2b 動工前修進文件，本版已修。對照見第 12～14 節。
 > - **Aaron 10/14 核准 D2、D4、D8～D12 照建議進行**（第 9 節）；C2a（只做參數化）開始。
 > - Aaron 已批准第一版的 C2-D1～D7 照建議進行。後續各版**新增 C2-D8、C2-D9，並調整 C2-D2、C2-D4、C2-D9 的建議**；第三次 review 另外指出三個應交 Aaron 的選擇（D10～D12）。這些都已由 Aaron 確認（第 9 節）。
@@ -498,7 +498,7 @@ C2a 階段沒有任何路徑能建立 v2 task。
 
 **下一步**：C2a 通過；第四版設計的條件已修正（第 16 節）。開始 C2b，第一個提交是 v2 的 Ask 收尾表。
 
-## 18 C2b 交付（10/14，Claude Code；待 Claude Code 獨立上下文 review）
+## 18 C2b 交付（10/14，Claude Code；獨立上下文 review pass，見 commercial-c2.md 第 8 節）
 
 實作內容、與本設計不同的地方、fake 操作步驟與驗證結果都寫在 [commercial-c2.md](commercial-c2.md)。這裡只記與設計各節的對應：
 

@@ -1,7 +1,7 @@
 # C2：BBS+ 憑證接入 Policy（`apa.pay.v2`）
 
 > 2026-10-14，Claude Code。設計與 Aaron 的決定見 [commercial-c2-design.md](commercial-c2-design.md)（第四版；C2-D1～D12 已核准，第 9 節）。分支 `commercial-c2`。
-> **狀態（10/14）：C2a 已通過獨立上下文 review；C2b 實作完成，待 Claude Code 獨立上下文 review。** 本文的驗證都由 Claude Code 執行。review 通過前，不宣稱 BBS+ 已參與商業交易的可信准駁（設計第 11 節）。
+> **狀態（10/14）：C2a、C2b 都已通過 Claude Code 獨立上下文 review（C2b：pass，無 must-fix；三項 should-fix 已修，第 8 節）。** 本文的驗證都由 Claude Code 執行。
 > 本片**不付款**：沒有付款金鑰、簽署、faucet、鏈或交易；沒有執行真實 CLI。憑證全部是合成的測試金鑰，沒有 eKYC、真實 issuer、錢包或 RPC。
 
 ## 1 一段話
@@ -41,6 +41,8 @@
 - **Unity 的英文標籤沒改**：以憑證理由撤回時 Unity 仍顯示「ask withdrawn - leaving」（對它為真）；Unity 沒有重建，`scene-transitions.json` 與 `Projection.cs` 共用。頁面自己的文字寫明理由。場景下方「Unity 已呈現 … withdrawn（HUMAN_APPROVAL_REQUIRED）」括號裡是 Unity 回報的投影理由（原裁決），P1-a 以 `HOST_CANCELLED` 撤回時也一樣，屬既有行為。
 - **Shop 沒有憑證目錄時**：v2 task 的請購以材料不可得送出（Deny）。實際上沒有目錄時 v2 task 根本不會啟動，這只是防線。
 - **verifier ID** 固定為 `apa-demo-host`（同一台 host）。
+- **沒有憑證目錄時重新開啟**（review S1）：狀態清單讀不到，等待中的 v2 Ask 核准時以 `CREDENTIAL_STATUS_UNAVAILABLE` 撤回，付款被拒；不會當掉。
+- **快到期的 challenge 不再沿用**（review note 3）：剩不到 5 秒就發新的，避免重試時因時鐘跨過期限而被 Deny。
 
 ## 5 fake 操作步驟（Aaron）
 
@@ -50,6 +52,8 @@
 4. 「以 B 模擬」→ 建立委託並開始 → 核准 →「已核准（模擬），未啟用付款」。
 
 每一步都不會付款。結束按 Ctrl-C；場次目錄保留在 `var/present-*`（含測試金鑰，可直接刪除）。
+
+**注意**：「已看過的清單版本」以 issuer ID 為鍵。若重新建立憑證目錄（同一個 issuer ID、新的清單從第 1 版開始）卻沿用舊的資料庫，新 task 會一直被判 `CREDENTIAL_STATUS_UNAVAILABLE`（`STATUS_LIST_ROLLBACK`），直到新清單的版本超過舊的。這是安全的一側（拒絕），但請把憑證目錄與資料庫一起換新；`make present-c2` 每次都是新的場次目錄，不會遇到（review note 1）。
 
 ## 6 驗證（Claude Code 執行；證據在本機 `artifacts/c2/`，git 忽略）
 
@@ -78,3 +82,20 @@
 - v2 的真實 Agent（C2-D9：只限 fake）。
 - Touch ID、Safari、手機、安全金鑰、容器執行（Aaron 排到後期）。
 - checker 不新增 credential claim（E1-b）。
+
+## 8 獨立上下文 review（10/14）
+
+Claude Code 獨立上下文 subagent review `8a36be2..7eff220`：**pass，無 must-fix**。決策路徑（用 Store 自己的 challenge、快照的 issuer 金鑰與狀態金鑰指紋、每次重讀清單、驗證先後、v2 先於 Rules 的 Deny、三個事件同一交易、核准時重查的位置）都與設計一致；v1 與 M1 只經 `pay()` 改動。reviewer 也在暫存副本重現了 S1 並確認 S2、S3 的突變原本不會被抓到。
+
+| 項目 | 處理 |
+|---|---|
+| S1 沒有憑證目錄重新開啟後核准 v2 Ask 會當掉（nil） | 修正：讀不到清單即 `status_unavailable`；`TestV2RecheckWithoutDirectory` |
+| S2 Shop 的「材料問題 vs 產生 proof 失敗」沒有測試 | 補 `TestC2HolderMaterialMissing` 與反向項目 |
+| S3「已看過的最高版本」會前進沒有測試 | 補 `TestStatusSeenAdvances` 與反向項目 |
+| note 1 已看過的版本以 issuer ID 為鍵 | 不改 schema；第 5 節寫明操作方式 |
+| note 2 重新開啟時沒有核對 Allow／Ask 的 `expiry > decided_at` | 未改：要同時竄改快照、紀錄與事件鏈才會出現，與其他交叉核對同一層級；留給後續 |
+| note 3 快到期的 challenge 會被沿用 | 修正：剩不到 5 秒不沿用；`TestChallengeReuseMargin` 與反向項目 |
+| note 4 `credentialCheck` 接受沒有 issuer 的 status_unavailable | 未改：Verify 不會產生這種組合 |
+| note 5 `InitDir` 會先把既有路徑改成 0700 | 未改：測試工具、同一使用者；請只對新路徑執行 `apa-issuer init` |
+
+修正提交 `df2c054`：`go test` store、toolbridge 通過，cmd/demo 只有已知的 `TestTimingInterleaved`；三個新反向項目 3／3。
