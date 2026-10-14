@@ -241,8 +241,10 @@ async function pollReadiness() {
       if (r && g === creds.gen) {
         lastReady = r;
         A.setApprovalMode(r.status && r.status.human_approval ? "webauthn" : "simulated");
-        const p1a = r.status && r.status.human_approval ? { record: "fake_a2" }
-          : r.status && r.status.runs && (r.status.runs.scenarios || []).some((x) => x.contract === A.V1) ? { record: "fake_p1a" } : null;
+        const scs = (r.status && r.status.runs && r.status.runs.scenarios) || [];
+        const credential = scs.some((x) => x.contract === A.V2); // C2: a BBS+ credential catalog
+        const p1a = r.status && r.status.human_approval ? { record: "fake_a2", credential }
+          : scs.some((x) => A.isPay(x.contract)) ? { record: "fake_p1a", credential } : null;
         if (r.status) confirmMode(mseq, r.status.history && r.status.history.record === "live_history" ? r.status.history : r.status.live && r.status.live.record === "live_demo" ? r.status.live : p1a);
         renderReadiness();
         renderControl();
@@ -425,7 +427,7 @@ function agentModel(c, runs, slots, ctx) {
   if (slot && slot.task) {
     if (slot.read !== "ok" && slot.read !== "loading") business = "讀取失敗（" + slot.read + "），保留上次資料" + (slot.label ? "：" + slot.label : "");
     else if (slot.seq < 0) business = "同步中";
-    else business = (state === "ended" && slot.phase === "waiting" ? (run && run.contract_version === A.V1 ? (A.simulated() ? "Agent 已結束；請購仍等你核准（模擬）" : "Agent 已結束；請購仍等你核准（本人裝置）")
+    else business = (state === "ended" && slot.phase === "waiting" ? (run && A.isPay(run.contract_version) ? (A.simulated() ? "Agent 已結束；請購仍等你核准（模擬）" : "Agent 已結束；請購仍等你核准（本人裝置）")
       : "執行已結束／請購待核准（M1 無核准功能；到期前不會付款）") : "") || slot.label || slot.phase;
   } else business = run ? "同步中" : "尚無場次";
   const t = run && ctx.tasks && ctx.tasks.get(run.task_id);
@@ -483,7 +485,7 @@ function renderControl() {
     shownControl = key;
     keepFocus(pick, () => pick.replaceChildren(...models.map((m) => agentCard(m, scenarios.filter((x) => x.consumer_id === m.c), { live, busy, full, simC }))));
   }
-  const pay = scenarios.some((x) => x.contract === A.V1);
+  const pay = scenarios.some((x) => A.isPay(x.contract));
   $("control-note").textContent = pay
     ? "委託與核准是 fake 模擬：主持人扮演客人，不是本人驗證；核准只留下模擬授權，未啟用付款。開始只建立新的 task。"
     : "M1 無核准能力：Ask 30 秒後由後端記錄到期。開始只建立新的 task。";
@@ -495,7 +497,7 @@ function renderControl() {
   // atomic start (docs/multi-agent-demo-design.md 3.5).
   // An apa.pay.v1 scenario starts only with its own confirmed delegation:
   // never from 一起開始.
-  const pair = consumers.map((c) => scenarios.find((x) => x.consumer_id === c && x.contract !== A.V1)).filter(Boolean);
+  const pair = consumers.map((c) => scenarios.find((x) => x.consumer_id === c && !A.isPay(x.contract))).filter(Boolean);
   const all = $("start-all");
   all.hidden = pair.length < 2 || maxRuns < 2;
   all.textContent = "一起開始：" + pair.map((sc) => sc.id + "（" + short(sc.consumer_id) + "）").join(" ＋ ") + "（各自送出，不保證都成功）";
@@ -608,7 +610,7 @@ function agentCard(m, scs, { live, busy, full, simC }) {
   sel.setAttribute("aria-pressed", String(m.selected));
   sel.addEventListener("click", () => selectConsumer(m.c));
   acts.append(sel);
-  const payScs = scs.filter((sc) => sc.contract === A.V1);
+  const payScs = scs.filter((sc) => A.isPay(sc.contract));
   if (payScs.length) {
     if (simC !== m.c) {
       const b = el("button", "agent-sim", "以 " + short(m.c) + " 模擬（fake）");
@@ -628,7 +630,7 @@ function agentCard(m, scs, { live, busy, full, simC }) {
       acts.append(b);
     }
   }
-  for (const sc of scs.filter((x) => x.contract !== A.V1)) {
+  for (const sc of scs.filter((x) => !A.isPay(x.contract))) {
     const b = el("button", "agent-start", (live ? "開始（真實 CLI）" : "開始（fake，不執行模型）") + (scs.length > 1 ? "：" + sc.label : ""));
     b.type = "button";
     b.dataset.scenario = sc.id;
@@ -714,7 +716,7 @@ function renderNext(runs) {
   if (run) {
     if (run.live === "running") text = "可用操作：停止 Agent（只停這一場）";
     else if (run.live === "stopping") text = "停止中：等待程序結束（仍占名額）";
-    else if (cancellable(run)) text = run.contract_version === A.V1 ? "可用操作：在「需要你處理」核准或拒絕（模擬）；或取消請購／task。不會付款。"
+    else if (cancellable(run)) text = A.isPay(run.contract_version) ? "可用操作：在「需要你處理」核准或拒絕（模擬）；或取消請購／task。不會付款。"
       : "可用操作：取消請購／task。M1 沒有核准功能，Ask 不會付款，到期後由後端記錄。";
     else if (lastTasks && lastTasks.gen === creds.gen && lastTasks.list && lastTasks.list.get(run.task_id)) text = "沒有可用操作：task 已收尾。";
     else text = "task 狀態讀取中（未確認）";
@@ -859,6 +861,9 @@ async function pollApprovals() {
 }
 
 // Closures; approved and denied are worded by the record (AP.decidedText).
+// C2: a withdrawal for a credential reason is the credential's, not the task's.
+const closedResult = (table, state, p) => (state === "withdrawn" && A.CREDENTIAL_CLOSED[p.closed_reason]
+  ? ["closed", A.CREDENTIAL_CLOSED[p.closed_reason], "核准時重新檢查憑證未通過；沒有發出授權，不會付款。"] : table[state]);
 const RESULT = {
   expired: ["closed", "已過期，無法核准", "期限由後端決定；需要重新請購。"],
   withdrawn: ["closed", "已撤回（task 取消）", "這筆請購已隨 task 取消。"],
@@ -883,7 +888,7 @@ function renderApproval(runs) {
   const v = creds.view();
   const simC = v.simConsumer;
   const scenarios = (lastReady && lastReady.status && lastReady.status.runs && lastReady.status.runs.scenarios) || [];
-  const pay = scenarios.some((x) => x.contract === A.V1);
+  const pay = scenarios.some((x) => A.isPay(x.contract));
   box.hidden = !v.hasHost || !pay;
   if (box.hidden) return;
   const item = simC ? pickItem(runs) : null;
@@ -914,7 +919,7 @@ function renderApproval(runs) {
     mode.append(el("span", "approval-tag", other ? other[0] : "模擬核准"), other ? other[1] : "fake 展示・主持人扮演客人 " + short(item.consumer_id) + "（不是本人驗證）・不會付款");
     parts.push(mode);
     const pending = ap.state === "pending";
-    const res = AP.decidedText(ap.state, p) || RESULT[ap.state];
+    const res = AP.decidedText(ap.state, p) || closedResult(RESULT, ap.state, p);
     const head = el("div", "approval-head");
     head.dataset.state = ap.state;
     head.append(el("h3", "", pending ? "核准這一筆付款？" : res ? res[1] : ap.state),
@@ -1026,7 +1031,12 @@ async function resolveItem(item, decision) {
   if (!r) approvalNote = { gen: g, kind: "warn", text: "角色模擬已失效：請重新「以 " + short(item.consumer_id) + " 模擬」，結果未確認" };
   else if (r.error) approvalNote = { gen: g, kind: "warn", text: "沒有收到回覆：結果未確認；畫面會重新讀取（同一請求重送不會多發授權）" };
   else if (r.status === 200) approvalNote = { gen: g, kind: "ok", text: decision === "approve" ? "已記錄：已核准（模擬），未啟用付款" : "已記錄：已拒絕" };
-  else if (code === "approval_closed") approvalNote = { gen: g, kind: "error", text: "無法" + (decision === "approve" ? "核准" : "拒絕") + "：這一筆已" + ({ expired: "過期", withdrawn: "撤回", approved: "核准", denied: "拒絕", superseded: "作廢" }[r.body.result && r.body.result.purchase && r.body.result.purchase.approval && r.body.result.purchase.approval.state] || "關閉") + "（後端判定）" };
+  else if (code === "approval_closed") {
+    const rp = r.body.result && r.body.result.purchase;
+    const cred = rp && A.CREDENTIAL_CLOSED[rp.closed_reason]; // C2: closed by the recheck at approval, not by the task
+    approvalNote = { gen: g, kind: "error", text: cred ? "未核准：" + cred + "（後端判定）"
+      : "無法" + (decision === "approve" ? "核准" : "拒絕") + "：這一筆已" + ({ expired: "過期", withdrawn: "撤回", approved: "核准", denied: "拒絕", superseded: "作廢" }[rp && rp.approval && rp.approval.state] || "關閉") + "（後端判定）" };
+  }
   else if (code === "approval_superseded") approvalNote = { gen: g, kind: "error", text: "報價已改變：這次核准作廢，需要重新請購" };
   else if (code === "intent_mismatch") approvalNote = { gen: g, kind: "error", text: "摘要與後端不符：未核准（請重新讀取這一筆）" };
   else if (code === "not_found") approvalNote = { gen: g, kind: "error", text: "找不到這一筆（可能不是目前模擬的客人）" };
@@ -1139,7 +1149,7 @@ function renderA2() {
     mode.append(el("span", "approval-tag", other ? other[0] : "本人核准"), other ? other[1] : AP.sourceText(lastA2 && lastA2.sources) + (lastA2 && lastA2.signer !== "approvals-only" ? "・Signer 目前無法連線" : ""));
     parts.push(mode);
     const pending = ap.state === "pending";
-    const res = AP.decidedText(ap.state, p) || A2_RESULT[ap.state];
+    const res = AP.decidedText(ap.state, p) || closedResult(A2_RESULT, ap.state, p);
     const head = el("div", "approval-head");
     head.dataset.state = ap.state;
     head.append(el("h3", "", pending ? "核准這一筆付款？" : res ? res[1] : ap.state),

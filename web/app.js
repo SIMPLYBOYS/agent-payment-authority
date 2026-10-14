@@ -415,16 +415,19 @@ export function labelPage(h) {
   const p1a = !!h && h.record === "fake_p1a"; // the fake demo with an apa.pay.v1 catalog (docs/commercial-p1a.md)
   const a2 = !!h && h.record === "fake_a2"; // the same with the person's approval by device (docs/commercial-a2.md)
   const badge = document.querySelector("header .badge"), caps = document.querySelector("header .caps");
+  // C2: a fake catalog with apa.pay.v2 runs the BBS+ credential step (old BBS+, test issuer in the host process).
+  const cred = (s) => (!!h && h.credential ? s.replace("憑證／ZK 未實作", "憑證 BBS+ 舊版（非 W3C bbs-2023；測試 issuer，與 host 同一程序）· ZK 未實作") : s);
   if (badge) {
     badge.textContent = unknown ? (h.failed ? "模式未確認：讀取失敗（重試中）" : "模式未確認（讀取中）")
-      : history ? history.label : live ? live.label : a2 ? "A2／fake agent／本人核准（裝置）／不付款" : p1a ? "P1-a／fake agent／模擬核准／不付款" : "M1／fake agent／不付款";
+      : history ? history.label : live ? live.label : a2 ? (h.credential ? "C2＋A2／fake agent／BBS+ 憑證／本人核准（裝置）／不付款" : "A2／fake agent／本人核准（裝置）／不付款")
+      : p1a ? (h.credential ? "C2／fake agent／BBS+ 憑證／模擬核准／不付款" : "P1-a／fake agent／模擬核准／不付款") : "M1／fake agent／不付款";
     badge.dataset.mode = unknown ? (h.failed ? "failed" : "unknown") : history ? "history" : live ? "live" : "fake";
   }
   if (caps) caps.textContent = unknown ? "能力：模式未確認（不代表 fake 或真實 Agent）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
     : history ? "能力：真實 Agent 執行紀錄（開發展示例外，非即時）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
     : live ? "能力：真實 Agent（" + (live.dev_demo_plugins ? "開發展示例外：plugins 內容與行為未確認，不是嚴格零 plugin 模式" : "嚴格模式") + "）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
-    : a2 ? "能力：真實 Agent 未啟用 · 核准 本人以已登記的裝置（Signer 驗證；委託確認仍是模擬） · 付款 未啟用 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
-    : p1a ? "能力：真實 Agent 未啟用 · 核准 僅 fake 模擬（不是本人驗證） · 付款 未啟用 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
+    : a2 ? cred("能力：真實 Agent 未啟用 · 核准 本人以已登記的裝置（Signer 驗證；委託確認仍是模擬） · 付款 未啟用 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行")
+    : p1a ? cred("能力：真實 Agent 未啟用 · 核准 僅 fake 模擬（不是本人驗證） · 付款 未啟用 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行")
     : "能力：真實 Agent 未啟用 · 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行";
   const note = $("history-note");
   if (note) note.hidden = !history;

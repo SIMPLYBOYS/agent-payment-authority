@@ -298,6 +298,9 @@ func TestSubmitV2(t *testing.T) {
 		if res, detail, chl := verification(t, v.path, c.o.Intent.PurchaseOrderID); res != "valid" || detail != "" || !chl.Valid {
 			t.Fatalf("%s: verification %s %s %v", c.verdict, res, detail, chl)
 		}
+		if cr := r.Purchase.Credential; cr == nil || cr.Result != "valid" || cr.ChallengeID == "" {
+			t.Fatalf("%s: the view's credential %+v", c.verdict, cr)
+		}
 	}
 	got := strings.Join(eventTypes(t, s, sessA), " ")
 	want := "TASK_STARTED DELEGATION_BOUND PURCHASE_PROPOSED CREDENTIAL_VERIFIED POLICY_DECIDED PURCHASE_PROPOSED CREDENTIAL_VERIFIED POLICY_DECIDED APPROVAL_SESSION_OPENED"
@@ -619,7 +622,7 @@ func TestV2WebAuthnRecheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, err := s.ResolveWebAuthn(wa("consumer-a", "att-req-00000001", "approve", "hap-1", intent))
-	if err != nil || r.Outcome != "closed" || r.Grant != nil || r.Purchase.ApprovalClosed != "withdrawn" || lastReason(t, s) != "CREDENTIAL_REVOKED" {
+	if err != nil || r.Outcome != "closed" || r.Grant != nil || r.Purchase.ApprovalClosed != "withdrawn" || r.Purchase.ClosedReason != "CREDENTIAL_REVOKED" || lastReason(t, s) != "CREDENTIAL_REVOKED" {
 		t.Fatalf("%+v %v", r, err)
 	}
 	s.Close()

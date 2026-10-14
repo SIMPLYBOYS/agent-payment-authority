@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -867,7 +868,10 @@ type PurchaseView struct {
 	DeadlineAt             uint64                   `json:"deadline_at,omitempty"` // Asks: decided_at + deadline (apa.pay.v1: the session's)
 	ApprovalClosed         string                   `json:"approval_closed,omitempty"`
 	ClosedAt               uint64                   `json:"closed_at,omitempty"`
-	Approval               *ApprovalView            `json:"approval,omitempty"` // apa.pay.v1 Asks: the approval session and its grant
+	ClosedReason           string                   `json:"closed_reason,omitempty"` // the closing event's reason (e.g. HOST_CANCELLED, CREDENTIAL_REVOKED)
+	Approval               *ApprovalView            `json:"approval,omitempty"`      // apa.pay.v1 Asks: the approval session and its grant
+	// apa.pay.v2: the purchase's verification record, as its CREDENTIAL_VERIFIED event holds it.
+	Credential *contracts.CredentialCheck `json:"credential,omitempty"`
 }
 
 // ApprovalView is an apa.pay.v1 Ask's approval session as stored, and its
@@ -904,6 +908,9 @@ type TaskView struct {
 	Purchases       []PurchaseView `json:"purchases"`
 }
 
+// closingEvents close an Ask.
+var closingEvents = []string{"APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN", "APPROVED", "APPROVAL_DENIED", "APPROVAL_SUPERSEDED"}
+
 func (t *taskTx) view(p *purchaseRow) PurchaseView {
 	k := p.terms()
 	v := PurchaseView{PurchaseOrderID: k.PO, RequestID: k.RequestID, HTTPMethod: k.Method, ResourceURL: k.URL,
@@ -915,6 +922,15 @@ func (t *taskTx) view(p *purchaseRow) PurchaseView {
 	}
 	if p.Decision.PolicyVerdict == "Ask" {
 		v.DeadlineAt = p.DecidedAt + t.terms.ApprovalDeadlineSeconds
+	}
+	for _, e := range t.events {
+		switch {
+		case !t.pay() || e.Scope == nil || e.Scope.PurchaseOrderID != k.PO: // an M1 view is what it always was
+		case e.EventType == "CREDENTIAL_VERIFIED":
+			v.Credential = e.Payload.Credential
+		case slices.Contains(closingEvents, e.EventType) && e.Payload.Decision != nil:
+			v.ClosedReason = e.Payload.Decision.Reason
+		}
 	}
 	if ss := p.Session; ss != nil {
 		v.DeadlineAt = ss.ExpiresAt
