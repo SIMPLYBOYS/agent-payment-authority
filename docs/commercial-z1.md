@@ -10,7 +10,7 @@
   - 正例通過；11 個無法成立的 witness 都產不出 proof；7 種竄改公開輸入都驗不過。
   - 一個 tx#1 的 Go 模型只收公開值，擋下重播、舊狀態、別的 task、未登記的 task、已用的 nullifier，以及非標準寫法（值 + r）的公開輸入。
 - 成本很低：3,096 個約束；prove 中位數約 45 ms、verify 約 0.9 ms；proof 164 bytes；proving key 約 604 KB；記憶體峰值約 23～25 MB（第 5 節）。
-- **`intent_hash` 映射建議採「兩個 128 位元 limb」**（第 4 節選項 A）：一對一、不截斷、合約端拆 `bytes32` 很便宜。正式格式由 Aaron 決定（Z1-D1），本片沒有定稿。
+- **`intent_hash` 映射採「兩個 128 位元 limb」**（第 4 節選項 A；Z1-D1，Aaron 10/14 決定）：一對一、不截斷、合約端拆 `bytes32` 很便宜。proof 不綁定 `amount` 與 intent 內金額的一致性，是已知限制，後續再看是否調整。
 - **三個要帶進 Z2 的發現**：
   1. gnark 會照常編譯「公開輸入沒有出現在任何約束裡」的電路，而這個輸入填什麼值都會驗過。反向檢查把 `intent_hi` 或 `intent_lo` 唯一的約束拿掉後，竄改它的 proof 就通過了。每個公開輸入都要有「竄改即驗不過」的測試。
   2. gnark 的 Go verifier 會把公開輸入先取模 r：同一個 proof 拿「值 + r」去驗也會通過（`TestAliasedPublicInputs`）。所以「竄改即驗不過」只在輸入是標準值（[0, r)）時成立。合約與 verifier 必須自己拒絕 ≥ r 的輸入，並用同一個標準值做承諾與 nullifier 的比對（第一次 review 的 M1）。
@@ -128,7 +128,7 @@
 
 ## 8 Z2 的前置條件
 
-1. **Z1-D1** `intent_hash` 映射（建議 A），寫進正式付款契約前另行 review；同時決定 amount 與 intent 的一致性由誰在電路外核對（合約或 Signer），或改採選項 E。
+1. **Z1-D1（Aaron 10/14 已決定）**：`intent_hash` 採選項 A，拆成兩個 128 位元 limb（Aaron：「Z1-D1 先按照建議的方式拆成兩份」）。寫進正式付款契約前仍另行 review。「proof 只保證綁在這個 `intent_hash`，不保證公開的 `amount` 等於 intent 裡的金額」列為已知限制（Aaron：「也是已知的情況，後續看是否需要做調整」）；由誰在電路外核對（合約或 Signer），或是否改採選項 E，後續再定。
 2. **Z1-D2** task 的欄位映射（建議沿用 31 bytes 截斷，或由合約 `registerTask` 配發欄位內的 ID）。
 3. **Z1-D3** 雜湊：MiMC（本 spike）或 Poseidon2（約束較少、較常見）。合約不需要重算雜湊，只比對承諾，所以不影響鏈上成本。
 4. **Z1-D4** setup 方式與展示時的標示（第 7 節）。
