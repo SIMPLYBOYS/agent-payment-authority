@@ -705,7 +705,7 @@ MUTATIONS = [
     ('UX3 bridge: a scene catalog not filtered to the scene', 'internal/toolbridge/shop.go',
      'if !ok || p.Scene != scene || e.HTTPMethod', 'if !ok || e.HTTPMethod', 'TestScenesAreSeparate'),
     ('UX3 host: the run\'s scene not bound', 'internal/buyer/host.go',
-     'From: wallet.From, Scene: h.Scene,', 'From: wallet.From,', 'TestUX3ScenesEndToEnd'),
+     'From: wallet.From, Scene: h.Scene,', 'From: wallet.From,', 'TestHostScene'),
     ('UX3 demo: the entry\'s scene not passed to the run', 'cmd/demo/control.go',
      'delegation: lr.run.DelegationID, scene: sc.Scene})', 'delegation: lr.run.DelegationID})', 'TestUX3ScenesEndToEnd'),
     ('UX3 demo: an unknown scene accepted', 'cmd/demo/scenarios.go',

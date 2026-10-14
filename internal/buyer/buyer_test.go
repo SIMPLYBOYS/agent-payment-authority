@@ -300,17 +300,20 @@ func newHost(t *testing.T) *hostEnv {
 	t.Cleanup(srv.Close)
 	shop, _ := merchant.New(srv.URL)
 	shop.Register(mux)
-	offers, products := store.OfferBook{}, map[string]toolbridge.Product{}
+	offers, products, scenes := store.OfferBook{}, map[string]toolbridge.Product{}, map[string]string{}
 	for _, o := range shop.Offers() {
 		k := store.OfferKey{Method: o.Method, URL: o.URL}
 		offers[k] = append(offers[k], o.Quote)
 		products[o.ProductID] = toolbridge.Product{ID: o.ProductID, URL: o.URL, Scene: o.Scene}
+		if o.Scene != "" {
+			scenes[o.Scene] = o.CatalogURL
+		}
 	}
 	if e.st, err = store.Open(store.Config{Path: filepath.Join(t.TempDir(), "db", "apa.db"), Registry: e.reg, Offers: offers, Clock: e.now.Load}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { e.st.Close() })
-	bridge, err := toolbridge.Listen(&toolbridge.Shop{Store: e.st, CatalogURL: srv.URL + "/catalog", Products: products, Client: toolbridge.NewClient(), Now: e.now.Load})
+	bridge, err := toolbridge.Listen(&toolbridge.Shop{Store: e.st, CatalogURL: srv.URL + "/catalog", Scenes: scenes, Products: products, Client: toolbridge.NewClient(), Now: e.now.Load})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,6 +437,18 @@ func TestHostMainLine(t *testing.T) {
 		!strings.Contains(string(trace), `"requested_model":"sonnet"`) ||
 		!strings.Contains(string(trace), fmt.Sprintf(`"result_chars":%d`, len("Paid and downloaded the Korean market brief."))) {
 		t.Errorf("trace: %s", trace)
+	}
+}
+
+// UX3: the host binds the run's scene, so the run buys from that scene's
+// storefront (the cafe's lunch set, within allow_max: Allow).
+func TestHostScene(t *testing.T) {
+	e := newHost(t)
+	var bound string
+	e.h.Scene, e.h.Bound = "cafe", func(b *toolbridge.Binding) { bound = b.Scene }
+	res := e.run(context.Background(), "task-b", "cafe-lunch")
+	if got := outcomes(res.Calls); bound != "cafe" || got != "list_products:ok get_quote:ok request_purchase:Allow" {
+		t.Fatalf("scene %q, calls %s", bound, got)
 	}
 }
 
