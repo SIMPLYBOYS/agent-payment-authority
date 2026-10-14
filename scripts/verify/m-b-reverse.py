@@ -357,7 +357,7 @@ ITEMS = [
     ("C2a: a stored v1 delegation stays v1", go("./internal/store/", "^TestUnboundDelegationVersion$", ("TestUnboundDelegationVersion", r"Open: <nil>")),
      [(SPY, "id != specs(d.Version).DelegationID(req)", "id != paycontract.DelegationID(req)")]),
     ("C2a: a purchase is decided only in a task of its version", go("./internal/paypolicy/", "^TestSameFieldsBothEntries$", ("TestSameFieldsBothEntries", r"a v2 purchase in a v1 task: <nil>")),
-     [(PP, "in.ContractVersion != paycontract.Version || in.Purchase.Version != in.ContractVersion {", "in.ContractVersion != paycontract.Version {")]),
+     [(PP, "!paycontract.Supported(in.ContractVersion) || in.Purchase.Version != in.ContractVersion {", "!paycontract.Supported(in.ContractVersion) {")]),
     ("C2a: one request ID never names orders of two versions", go("./internal/paycontract/", "^TestCompareRetryAcrossVersions$", ("TestCompareRetryAcrossVersions", r"v1 and v2 orders of one request: <nil>")),
      [(PC, "if existing.Version != incoming.Version {", "if false {")]),
     # C2b: the BBS+ credential in apa.pay.v2 (docs/commercial-c2-design.md); run them alone with "^C2b:".
