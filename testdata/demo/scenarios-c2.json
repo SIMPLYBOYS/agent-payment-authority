@@ -1,0 +1,9 @@
+{
+  "description": "C2 fake catalog (docs/commercial-c2-design.md): make present-c2. As P1-a, but the contract is apa.pay.v2: each task starts with a BBS+ credential issued by the test issuer in --credential-dir (old BBS+, not W3C bbs-2023; synthetic test keys, no real identity), and each purchase is verified first (CREDENTIAL_VERIFIED) and decided with the result. Revoke a task's credential with apa-issuer revoke while its Ask waits: the approval then withdraws the session. Issuer, holder and verifier run in the host process: this shows the wiring, not independent parties. Fake CLI only, no model, no key, no transaction.",
+  "scenarios": [
+    {"id": "v2-a", "consumer_id": "consumer-a", "contract": "apa.pay.v2", "scenario": "testdata/cli/ask-mainline.json", "label": "憑證＋委託後選購：韓國市場簡報（需要你核准・模擬）",
+     "delegation": {"purpose": "買一份韓國市場簡報（數位資料）", "task_budget": "5000000", "allow_max": "100000", "approval_deadline_seconds": 120, "valid_seconds": 1800}},
+    {"id": "v2-b", "consumer_id": "consumer-b", "contract": "apa.pay.v2", "scenario": "testdata/cli/ask-mainline.json", "label": "憑證＋委託後選購：韓國市場簡報（需要你核准・模擬）",
+     "delegation": {"purpose": "買一份韓國市場簡報（數位資料）", "task_budget": "5000000", "allow_max": "100000", "approval_deadline_seconds": 120, "valid_seconds": 1800}}
+  ]
+}

@@ -39,6 +39,9 @@
 # localhost, not 127.0.0.1; docs/commercial-a2.md).
 # APA_AUTHENTICATOR_SOURCE (with it): device (default) or virtual, what the
 # page declares the authenticator to be (review N17).
+# APA_PRESENT_CREDENTIALS=1 (fake only; make present-c2): build apa-issuer,
+# make a credential directory of test keys in the session directory (holders
+# for consumer-a and consumer-b) and start the host with --credential-dir.
 set -u
 stop() { echo "present: STOP（未啟動）：$1" >&2; exit 2; }
 
@@ -54,6 +57,8 @@ signer=${APA_APPROVALS_SIGNER:-}
 [ -z "$signer" ] || [ "$mode" = fake ] || stop "APA_APPROVALS_SIGNER 只用於 fake 展示（A2 使用 fake Agent）"
 authsrc=${APA_AUTHENTICATOR_SOURCE:-device}
 case $authsrc in device|virtual) ;; *) stop "APA_AUTHENTICATOR_SOURCE=${authsrc}：只接受 device 或 virtual" ;; esac
+creds=${APA_PRESENT_CREDENTIALS:-}
+[ -z "$creds" ] || [ "$mode" = fake ] || stop "APA_PRESENT_CREDENTIALS 只用於 fake 展示（C2 的 v2 場景只用 fake Agent）"
 [ -z "$signer" ] || [ -S "$signer" ] || stop "APA_APPROVALS_SIGNER=${signer} 不是 socket：請先啟動 apa-signer serve-approvals（docs/commercial-a2.md）"
 
 if [ "$mode" = live ]; then
@@ -76,6 +81,11 @@ mkdir -m 700 "$w/db" "$w/runs" "$w/tok" || stop "cannot make ${w}/db, runs and t
 if [ "$mode" = fake ]; then
 	"$GO" build -o "$w/fake-claude" ./cmd/fake-claude || stop "fake CLI 建置失敗；沒有啟動任何程式"
 fi
+if [ -n "$creds" ]; then
+	"$GO" build -o "$w/apa-issuer" ./cmd/apa-issuer || stop "apa-issuer 建置失敗；沒有啟動任何程式"
+	"$w/apa-issuer" init --dir "$w/cred" --issuer issuer-demo --consumers consumer-a,consumer-b >&2 || stop "憑證目錄建立失敗；沒有啟動任何程式"
+	echo "present: 撤銷某個 task 的憑證：${w}/apa-issuer revoke --dir ${w}/cred --task <task_id>（測試金鑰；host 每 300 秒自動更新清單）" >&2
+fi
 # What the binary says of its source, as Go recorded it (a modified tree says so).
 "$GO" version -m "$w/demo" 2>/dev/null | grep -E 'vcs\.(revision|modified|time)' | tr -s '\t ' ' ' >"$w/build.txt"
 echo "present: 場次 ${w}；建置：$(tr '\n' ' ' <"$w/build.txt")" >&2
@@ -92,6 +102,7 @@ else
 	echo "present: fake 展示（不執行模型）。" >&2
 	set --
 	[ -z "$signer" ] || set -- --approvals-signer "$signer" --authenticator-source "$authsrc"
+	[ -z "$creds" ] || set -- "$@" --credential-dir "$w/cred"
 	APA_ADDR=$addr APA_DB_PATH=$w/db/fake.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \
 		--fake-cli "$w/fake-claude" --scenarios "${APA_PRESENT_SCENARIOS:-testdata/demo/scenarios.json}" --registry testdata/demo/registry.json \
 		--trace-dir "$w/runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" "$@" &

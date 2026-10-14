@@ -175,7 +175,7 @@ func (a *api) simDelegation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d, p := sc.Delegation, a.control.profile
-	view, replay, err := a.st.ConfirmDelegation(store.DelegationRequest{RequestID: req.RequestID, ConsumerID: consumer, Scenario: sc.ID, Purpose: d.Purpose,
+	view, replay, err := a.st.ConfirmDelegation(store.DelegationRequest{ContractVersion: sc.version(), RequestID: req.RequestID, ConsumerID: consumer, Scenario: sc.ID, Purpose: d.Purpose,
 		AssetID: p.AssetID, Merchants: p.Merchants, TaskBudget: d.TaskBudget, AllowMax: d.AllowMax, ApprovalDeadlineSeconds: d.ApprovalDeadlineSeconds,
 		ValidSeconds: d.ValidSeconds, ConfirmedBy: a.sim.approver(consumer)})
 	switch code := store.Code(err); {

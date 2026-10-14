@@ -1,0 +1,89 @@
+// Command apa-issuer is C2's test issuer (docs/commercial-c2-design.md 5,
+// 6): it makes a credential directory of synthetic test keys and signs its
+// status list. It holds no real identity, issuer or wallet.
+//
+//	apa-issuer init --dir D --issuer ID --consumers a,b   new keys, holders and status list version 1
+//	apa-issuer revoke --dir D --task T                    revoke task T's issued credential
+//	apa-issuer revoke --dir D --status N                  revoke status index N
+//	apa-issuer refresh --dir D                            re-sign the list (a running Host does this every 300 s)
+//
+// Every write goes through the directory's lock: a revocation is never
+// overwritten. Nothing secret is printed.
+package main
+
+import (
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
+)
+
+func main() {
+	if err := run(os.Args[1:], os.Stdout, func() int64 { return time.Now().Unix() }); err != nil {
+		fmt.Fprintln(os.Stderr, "apa-issuer:", err)
+		os.Exit(1)
+	}
+}
+
+const usage = "usage: apa-issuer init|revoke|refresh --dir D ..."
+
+func run(args []string, out io.Writer, now func() int64) error {
+	if len(args) == 0 {
+		return errors.New(usage)
+	}
+	fs := flag.NewFlagSet("apa-issuer "+args[0], flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	dir := fs.String("dir", "", "the credential directory")
+	issuer := fs.String("issuer", "", "init: the issuer ID")
+	consumers := fs.String("consumers", "", "init: the consumers given a holder, comma-separated")
+	task := fs.String("task", "", "revoke: the task whose credential is revoked")
+	status := fs.String("status", "", "revoke: the status index revoked")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || *dir == "" {
+		return errors.New(usage)
+	}
+	if args[0] == "init" {
+		if *issuer == "" || *consumers == "" {
+			return errors.New("init needs --issuer and --consumers")
+		}
+		if err := credential.InitDir(*dir, *issuer, strings.Split(*consumers, ","), now()); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "apa-issuer: %s initialised: issuer %s, holders for %s, status list version 1 (test keys only)\n", *dir, *issuer, *consumers)
+		return nil
+	}
+	d, err := credential.OpenDir(*dir)
+	if err != nil {
+		return err
+	}
+	switch args[0] {
+	case "refresh":
+		if err := d.Refresh(now()); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "apa-issuer: status list re-signed")
+		return nil
+	case "revoke":
+		index := *status
+		if (*task == "") == (index == "") {
+			return errors.New("revoke needs exactly one of --task and --status")
+		}
+		if *task != "" {
+			s, err := d.ReadCredential(*task)
+			if err != nil {
+				return err
+			}
+			index = s.Credential["status"]
+		}
+		if err := d.Revoke(index, now()); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "apa-issuer: status index %s revoked\n", index)
+		return nil
+	}
+	return errors.New(usage)
+}

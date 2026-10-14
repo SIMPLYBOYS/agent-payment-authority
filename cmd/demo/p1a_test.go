@@ -51,13 +51,19 @@ func (h *host) simulate(consumer string) string {
 // run with it; it waits for the run to end and returns the run.
 func (h *host) delegateAndRun(sim, scenario, n string) map[string]any {
 	h.t.Helper()
+	return h.delegateAndRunAs(sim, scenario, n, "apa.pay.v1")
+}
+
+// delegateAndRunAs is delegateAndRun for a scenario of version.
+func (h *host) delegateAndRunAs(sim, scenario, n, version string) map[string]any {
+	h.t.Helper()
 	code, d := h.post("/api/sim/delegations", sim, `{"request_id":"dlg-req-000000000`+n+`","scenario":"`+scenario+`"}`)
 	if code != 201 {
 		h.t.Fatalf("confirm delegation: %d %v", code, d)
 	}
 	id := d["delegation"].(map[string]any)["delegation_id"].(string)
 	code, r := h.post("/api/host/runs", h.tokens["operator"], `{"request_id":"run-req-000000000`+n+`","scenario":"`+scenario+`","delegation_id":"`+id+`"}`)
-	if code != 202 || r["contract_version"] != "apa.pay.v1" || r["delegation_id"] != id {
+	if code != 202 || r["contract_version"] != version || r["delegation_id"] != id {
 		h.t.Fatalf("start with delegation: %d %v", code, r)
 	}
 	return h.waitRun(r["run_id"].(string), ended)

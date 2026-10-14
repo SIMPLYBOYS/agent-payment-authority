@@ -264,8 +264,8 @@ func (c *control) start(w http.ResponseWriter, r *http.Request, a *api) {
 		return
 	}
 	// The catalog, not the request, says which contract the run gets; a
-	// delegation goes with an apa.pay.v1 scenario only, and is required there.
-	if (sc.version() == paycontract.Version) != (req.DelegationID != "") {
+	// delegation goes with a pay-family scenario only, and is required there.
+	if paycontract.Supported(sc.version()) != (req.DelegationID != "") {
 		fail(w, http.StatusBadRequest, "delegation_required")
 		return
 	}

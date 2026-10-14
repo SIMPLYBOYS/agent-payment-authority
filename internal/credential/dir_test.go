@@ -2,6 +2,7 @@ package credential
 
 import (
 	"crypto/ed25519"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -144,5 +145,51 @@ func TestCounterRefuses(t *testing.T) {
 	os.WriteFile(filepath.Join(path, "status.counter"), []byte("07"), 0o600)
 	if _, err := d.ReserveStatusIndex(); err == nil {
 		t.Fatal("issued from a malformed counter")
+	}
+}
+
+// Design 7 step 3: missing, corrupt or unregistered holder material is
+// ErrHolderMaterial; the registered holder presents.
+func TestPresentHolderMaterial(t *testing.T) {
+	d, path := newDir(t)
+	if _, ok, err := d.IssueTask("show-a-01", "consumer-a", now+3600); !ok || err != nil {
+		t.Fatalf("issue: %t %v", ok, err)
+	}
+	if _, ok, err := d.IssueTask("show-c-01", "consumer-c", now+3600); ok || err != nil {
+		t.Fatalf("an unregistered consumer was issued: %v", err)
+	}
+	r := Request{VerifierID: "host-1", ChallengeID: "chl-1", IntentHash: "sha256:intent-1", Disclose: Mandatory}
+	if _, err := d.Present("show-a-01", "consumer-a", r); err != nil {
+		t.Fatal(err)
+	}
+	for name, mut := range map[string]func(){
+		"no credential": func() { os.Remove(filepath.Join(path, "holder", "show-a-01.cred")) },
+		"a corrupt key": func() { os.WriteFile(filepath.Join(path, "holder", "consumer-a.key"), []byte("{"), 0o600) },
+		"a corrupt signature": func() {
+			s, _ := d.ReadCredential("show-a-01")
+			s.Signature[len(s.Signature)/2] ^= 1
+			d.WriteCredential("show-a-01", s)
+		},
+		"another holder's key": func() {
+			b, _ := os.ReadFile(filepath.Join(path, "holder", "consumer-b.key"))
+			os.WriteFile(filepath.Join(path, "holder", "consumer-a.key"), b, 0o600)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d, path = newDir(t)
+			d.IssueTask("show-a-01", "consumer-a", now+3600)
+			mut()
+			if _, err := d.Present("show-a-01", "consumer-a", r); !errors.Is(err, ErrHolderMaterial) {
+				t.Fatalf("%s: %v", name, err)
+			}
+		})
+	}
+}
+
+func TestInitRefusesConsumerIDs(t *testing.T) {
+	for _, cs := range [][]string{{"../escape"}, {"consumer-a", "consumer-a"}, {""}} {
+		if err := InitDir(filepath.Join(t.TempDir(), "cred"), "issuer-demo", cs, now); err == nil {
+			t.Errorf("initialised with %q", cs)
+		}
 	}
 }

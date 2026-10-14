@@ -14,6 +14,8 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer/fakecli"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/toolbridge"
@@ -64,6 +66,7 @@ type cliRunner struct {
 	profile  policy.Profile
 	d        deps
 	live     *liveSettings
+	creds    *credential.Dir // C2: apa.pay.v2 tasks' issuer and holders
 }
 
 // liveSettings are a live runner's: the approved version and whether the
@@ -221,11 +224,18 @@ func (f *cliRunner) runOne(ctx context.Context, st *store.Store, bridge *toolbri
 	h := &buyer.Host{Registry: f.reg, Bridge: bridge, CLI: f.cli, BridgeCmd: []string{f.d.self, "mcp-bridge"}, Env: env, Limits: limits,
 		Gate: gate, TraceDir: f.traceDir, Bound: r.bound}
 	prepare := func() (*store.Store, error) {
-		// The credential is an M1 fixture made at start, valid for a day of
-		// host time; nothing verifies a BBS+ proof.
-		cred := policy.Credential{ConsumerID: task.ConsumerID, ValidUntil: f.d.clock() + 86400, EvidenceMode: "fixture"}
-		if err := st.StartTask(store.TaskSetup{TaskID: task.TaskID, Profile: &f.profile, Credential: &cred, BudgetInitial: r.BudgetInitial,
-			ContractVersion: r.contract, DelegationID: r.delegation}); err != nil {
+		setup := store.TaskSetup{TaskID: task.TaskID, Profile: &f.profile, BudgetInitial: r.BudgetInitial, ContractVersion: r.contract, DelegationID: r.delegation}
+		if r.contract == paycontract.V2 {
+			// C2: the BBS+ credential, issued now; verified at each purchase.
+			if err := taskCredential(f.creds, &setup, task.ConsumerID, f.d.clock()); err != nil {
+				return nil, err
+			}
+		} else {
+			// The credential is an M1 fixture made at start, valid for a day of
+			// host time; nothing verifies a BBS+ proof.
+			setup.Credential = &policy.Credential{ConsumerID: task.ConsumerID, ValidUntil: f.d.clock() + 86400, EvidenceMode: "fixture"}
+		}
+		if err := st.StartTask(setup); err != nil {
 			return nil, err
 		}
 		return st, nil

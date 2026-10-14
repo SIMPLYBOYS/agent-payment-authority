@@ -31,7 +31,9 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/config"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signerclient"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
@@ -63,21 +65,22 @@ func wallClock() uint64 { return uint64(time.Now().Unix()) }
 
 // deps are what tests replace.
 type deps struct {
-	getenv      func(string) string
-	self        string // this executable, started again as the MCP bridge
-	out         io.Writer
-	clock       store.Clock
-	ready       chan<- string       // receives the bound address once serving
-	expiryEvery time.Duration       // 0 means one second
-	limits      *buyer.Limits       // nil means buyer.DefaultLimits
-	fakeEnv     []string            // extra fake CLI variables (tests: pid and capability files)
-	onStore     func(*store.Store)  // after the Store opened, before serving
-	stage       func(string)        // tests: each stop step, in the order it happens
-	runsDone    chan<- []runOutcome // receives the fake runs' outcomes when all ended
-	liveVersion string              // tests: "" means buyer.ApprovedCLIVersion
-	pairOut     io.Writer           // --pairing: where the code is shown; nil means /dev/tty
-	now         func() time.Time    // the pairing window's clock (monotonic); nil means time.Now
-	onApprovals func(*approvals)    // tests: the A2 relay once made (to wrap its Store)
+	getenv       func(string) string
+	self         string // this executable, started again as the MCP bridge
+	out          io.Writer
+	clock        store.Clock
+	ready        chan<- string       // receives the bound address once serving
+	expiryEvery  time.Duration       // 0 means one second
+	refreshEvery time.Duration       // C2: the status list's refresh; 0 means statusRefresh
+	limits       *buyer.Limits       // nil means buyer.DefaultLimits
+	fakeEnv      []string            // extra fake CLI variables (tests: pid and capability files)
+	onStore      func(*store.Store)  // after the Store opened, before serving
+	stage        func(string)        // tests: each stop step, in the order it happens
+	runsDone     chan<- []runOutcome // receives the fake runs' outcomes when all ended
+	liveVersion  string              // tests: "" means buyer.ApprovedCLIVersion
+	pairOut      io.Writer           // --pairing: where the code is shown; nil means /dev/tty
+	now          func() time.Time    // the pairing window's clock (monotonic); nil means time.Now
+	onApprovals  func(*approvals)    // tests: the A2 relay once made (to wrap its Store)
 }
 
 // run serves with no fake runs; the B1-01 tests and checks use it.
@@ -116,6 +119,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	maxRuns := fs.Int("max-runs", 0, "with --scenarios: running or stopping runs at most (a deployment setting; default 2, at most one per consumer)")
 	readyFile := fs.String("ready-file", "", "write {addr, pid} here once serving (for scripts/demo/present.sh)")
 	approvalsSigner := fs.String("approvals-signer", "", "A2: the Unix socket of apa-signer serve-approvals; the person's approval then runs on http://localhost:<port> (fake mode with --scenarios only; payment stays disabled)")
+	credentialDir := fs.String("credential-dir", "", "C2: the credential directory (apa-issuer init) for apa.pay.v2 scenarios: test issuer, status list, holders")
 	authSource := fs.String("authenticator-source", "device", "A2: device or virtual, the authenticator's source as shown and logged (a label, not evidence)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -246,6 +250,23 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 			return err
 		}
 	}
+	// C2: apa.pay.v2 scenarios need the credential directory; its status
+	// list is refreshed now (a missing or invalid one stops the start)
+	// and then every statusRefresh (C2-D4 (a)).
+	var creds *credential.Dir
+	if *credentialDir != "" {
+		if creds, err = credential.OpenDir(*credentialDir); err != nil {
+			return fmt.Errorf("credential directory: %w", err)
+		}
+		if err := creds.Refresh(int64(d.clock())); err != nil {
+			return fmt.Errorf("credential directory: status list: %w", err)
+		}
+	}
+	for _, sc := range scenarios {
+		if sc.version() == paycontract.V2 && creds == nil {
+			return fmt.Errorf("scenario %s is apa.pay.v2: start with --credential-dir", sc.ID)
+		}
+	}
 	hostStart := time.Now() // the timing records' clock zero; monotonic
 	instance, err := newInstanceID()
 	if err != nil {
@@ -296,7 +317,8 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		return err
 	}
 	defer unlock()
-	st, err := store.Open(store.Config{Path: dbPath, Registry: regCfg, Offers: offers, Clock: d.clock, UpgradeDB: *upgradeDB})
+	st, err := store.Open(store.Config{Path: dbPath, Registry: regCfg, Offers: offers, Clock: d.clock, UpgradeDB: *upgradeDB,
+		Credentials: creds, VerifierID: verifierID})
 	if err != nil {
 		// Recovery failed: nothing is served, repaired or rebuilt.
 		return fmt.Errorf("store %s: %w", dbPath, err)
@@ -333,10 +355,19 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		})
 	})
 	defer func() { stopExpiry(); expiry.Wait(); d.at("expiry_stopped") }()
+	if creds != nil {
+		refreshEvery := d.refreshEvery
+		if refreshEvery == 0 {
+			refreshEvery = statusRefresh
+		}
+		expiry.Go(func() { refreshStatus(expiryCtx, creds, refreshEvery, d) })
+	}
 
 	var bridge *toolbridge.Server
 	if runner != nil {
-		tools := &toolbridge.Shop{Store: st, CatalogURL: "http://" + addr + "/catalog", Products: products, Client: toolbridge.NewClient(), Now: d.clock}
+		tools := &toolbridge.Shop{Store: st, CatalogURL: "http://" + addr + "/catalog", Products: products, Client: toolbridge.NewClient(), Now: d.clock,
+			Credentials: creds}
+		runner.creds = creds
 		if bridge, err = toolbridge.Listen(tools); err != nil {
 			return err
 		}

@@ -1,4 +1,4 @@
-.PHONY: check check-m1-e3 check-contracts build dev demo-fake demo-integration demo present-live present-fake present-rehearsal present-p1a present-a2 m1-fixture verify-m1 m1-live-cli
+.PHONY: check check-m1-e3 check-contracts build dev demo-fake demo-integration demo present-live present-fake present-rehearsal present-p1a present-c2 present-a2 m1-fixture verify-m1 m1-live-cli
 
 # Compile, vet and unit-test. Calls no paid model and touches no testnet.
 check:
@@ -87,6 +87,13 @@ present-rehearsal:
 # payment). docs/commercial-p1a.md has the steps. Fake CLI only.
 present-p1a:
 	@APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p1a.json sh scripts/demo/present.sh fake
+
+# present-c2: the C2 catalog (apa.pay.v2): each task gets a BBS+ credential
+# from a test issuer in the session directory, each purchase is verified
+# first; revoke with the apa-issuer command the script prints. Fake CLI
+# only; test keys; payment stays off (docs/commercial-c2-design.md).
+present-c2:
+	@APA_PRESENT_CREDENTIALS=1 APA_PRESENT_SCENARIOS=testdata/demo/scenarios-c2.json sh scripts/demo/present.sh fake
 
 # present-a2: the P1-a catalog with the person's approval by a registered
 # device (docs/commercial-a2.md): SIGNER is the socket of a running

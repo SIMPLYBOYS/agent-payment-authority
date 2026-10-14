@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
@@ -12,6 +13,8 @@ import (
 	"slices"
 	"strconv"
 	"syscall"
+
+	"github.com/IBM/idemix/bbs"
 )
 
 // Dir is the credential directory (--credential-dir, design 5): the test
@@ -141,6 +144,11 @@ const fileVersion = "apa.credential-dir.v1"
 func InitDir(path, issuerID string, consumers []string, now int64) error {
 	if len(consumers) == 0 {
 		return errors.New("init: no consumer")
+	}
+	for i, c := range consumers { // each names a key file
+		if !validField("consumer_id", c) || slices.Contains(consumers[:i], c) {
+			return errors.New("init: a consumer ID is malformed or repeated")
+		}
 	}
 	if err := os.MkdirAll(filepath.Join(path, "holder"), 0o700); err != nil {
 		return err
@@ -345,6 +353,43 @@ func (d *Dir) IssueTask(task, consumer string, expiry int64) (s Stored, ok bool,
 	}
 	s = Stored{Credential: c, Signature: sig}
 	return s, true, d.WriteCredential(task, s)
+}
+
+// ErrHolderMaterial is a holder whose stored credential or key is missing,
+// corrupt, unreadable or not the registered one (design 7 step 3): a
+// decided Deny, which a retry would not change.
+var ErrHolderMaterial = errors.New("credential: holder material unavailable")
+
+// Present answers r for task as consumer's holder, from the task's stored
+// credential and the consumer's key, which must be the registered holder
+// and the credential's. A material problem is ErrHolderMaterial; any other
+// error is a transient failure to build the proof (C2-D12: nothing is
+// submitted, the challenge stays issued).
+func (d *Dir) Present(task, consumer string, r Request) (Presentation, error) {
+	s, err := d.ReadCredential(task)
+	if err != nil {
+		return Presentation{}, fmt.Errorf("%w: %v", ErrHolderMaterial, err)
+	}
+	k, err := d.HolderKey(consumer)
+	if err != nil {
+		return Presentation{}, fmt.Errorf("%w: %v", ErrHolderMaterial, err)
+	}
+	holders, err := d.Holders()
+	if err != nil {
+		return Presentation{}, fmt.Errorf("%w: %v", ErrHolderMaterial, err)
+	}
+	_, pk, err := d.IssuerPublic()
+	if err != nil {
+		return Presentation{}, fmt.Errorf("%w: %v", ErrHolderMaterial, err)
+	}
+	c := s.Credential
+	if h := HolderField(k.Public().(ed25519.PublicKey)); h != holders[consumer] || h != c["holder"] || c["consumer_id"] != consumer || c["task_id"] != task {
+		return Presentation{}, fmt.Errorf("%w: the key or credential is not this consumer's registered holder's", ErrHolderMaterial)
+	}
+	if err := bbs.New(curve).Verify(c.messages(), bytes.Clone(s.Signature), pk); err != nil { // a corrupt credential, not a failed proof
+		return Presentation{}, fmt.Errorf("%w: the stored signature does not verify", ErrHolderMaterial)
+	}
+	return Present(c, s.Signature, pk, k, r)
 }
 
 const statusVersion = "apa.status-list.v1"

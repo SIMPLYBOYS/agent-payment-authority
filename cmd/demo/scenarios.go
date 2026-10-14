@@ -93,13 +93,13 @@ func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.Regist
 		switch sc.Contract {
 		case "", contracts.Version:
 			if sc.Delegation != nil {
-				return nil, fmt.Errorf("scenarios %s: %s: only an apa.pay.v1 entry has a delegation", path, sc.ID)
+				return nil, fmt.Errorf("scenarios %s: %s: only a pay-family entry has a delegation", path, sc.ID)
 			}
-		case paycontract.Version:
+		case paycontract.Version, paycontract.V2:
 			d := sc.Delegation
 			if live || d == nil || sc.BudgetInitial != "" || d.Purpose == "" || len(d.Purpose) > 200 || d.ApprovalDeadlineSeconds == 0 || d.ApprovalDeadlineSeconds > 600 ||
 				d.ValidSeconds == 0 || d.ValidSeconds > 86400 || !amount(d.TaskBudget) || !amount(d.AllowMax) {
-				return nil, fmt.Errorf("scenarios %s: %s: an apa.pay.v1 entry is fake only and needs a whole delegation (no budget_initial)", path, sc.ID)
+				return nil, fmt.Errorf("scenarios %s: %s: a pay-family entry is fake only and needs a whole delegation (no budget_initial)", path, sc.ID)
 			}
 		default:
 			return nil, fmt.Errorf("scenarios %s: %s: unknown contract %q", path, sc.ID, sc.Contract)

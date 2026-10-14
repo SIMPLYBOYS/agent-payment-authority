@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
@@ -41,6 +42,9 @@ type Shop struct {
 	Products   map[string]Product
 	Client     *http.Client
 	Now        func() uint64 // trusted host clock, Unix seconds
+	// Credentials is the Host's holder for apa.pay.v2 tasks (design 7):
+	// the issued credentials and the consumers' holder keys.
+	Credentials *credential.Dir
 }
 
 // NewClient is the only HTTP client the shop tools use: no proxy from the
@@ -117,8 +121,8 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 	// The stored task's contract version picks the purchase to build; the
 	// model and the request never name it.
 	var order any
-	if task.ContractVersion == paycontract.Version {
-		order, err = s.assembleV1(b, p, po, quote, req)
+	if paycontract.Supported(task.ContractVersion) {
+		order, err = s.assemblePay(b, p, po, quote, req, task.ContractVersion)
 	} else {
 		order, err = s.assemble(b, p, po, quote, req)
 	}
@@ -128,7 +132,11 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 	raw, _ := json.Marshal(order)
 	var res store.Result
 	err = b.Commit(func() (err error) {
-		res, err = s.Store.Submit(b.Session, raw)
+		if task.ContractVersion == paycontract.V2 {
+			res, err = s.submitV2(b, raw)
+		} else {
+			res, err = s.Store.Submit(b.Session, raw)
+		}
 		return err
 	})
 	if errors.Is(err, ErrRunEnded) {
@@ -142,6 +150,30 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 	}
 	rec.Outcome = res.Purchase.Decision.PolicyVerdict
 	return textResult(projection(p.ID, res.Purchase, res.Replay), false), rec
+}
+
+// submitV2 is an apa.pay.v2 purchase inside Commit's lock (design 7):
+// the Store's challenge, the holder's presentation, the submit. Missing
+// or wrong holder material is submitted as such (a decided Deny); a proof
+// that failed to build submits nothing and leaves the challenge issued.
+func (s *Shop) submitV2(b *Binding, raw []byte) (store.Result, error) {
+	ch, ok, err := s.Store.IssueChallenge(b.Session, raw)
+	if err != nil {
+		return store.Result{}, err
+	}
+	var pr store.Presented
+	if ok {
+		if s.Credentials == nil {
+			pr.Unavailable = true
+		} else if p, err := s.Credentials.Present(b.Session.TaskID, b.Session.ConsumerID, ch.Request()); errors.Is(err, credential.ErrHolderMaterial) {
+			pr.Unavailable = true
+		} else if err != nil {
+			return store.Result{}, err
+		} else {
+			pr.Presentation = &p
+		}
+	}
+	return s.Store.SubmitV2(b.Session, raw, pr)
 }
 
 func stored(v store.TaskView, po string) (store.PurchaseView, bool) {
@@ -160,7 +192,7 @@ func projection(product string, v store.PurchaseView, replay bool) map[string]an
 		approval = v.ApprovalClosed
 	}
 	note := "No payment was made and no content was delivered; M1 cannot pay. An Ask waits for a human."
-	if v.Decision.Version == paycontract.Version {
+	if paycontract.Supported(v.Decision.Version) {
 		note = "No payment was made and no content was delivered; payment is not enabled. An Ask waits for a human."
 	}
 	return map[string]any{
@@ -252,19 +284,24 @@ func (s *Shop) assemble(b *Binding, p Product, po string, q contracts.Quote, req
 	return order, order.Validate()
 }
 
-// assembleV1 is assemble for an apa.pay.v1 task: the same trusted sources,
-// the business intent and the EIP-3009 payment binding apart, under this
-// version's domain (its own resource and requirement hashes and nonce).
-func (s *Shop) assembleV1(b *Binding, p Product, po string, q contracts.Quote, req x402.Requirement) (paycontract.PurchaseOrder, error) {
+// assemblePay is assemble for a pay-family task of version: the same
+// trusted sources, the business intent and the EIP-3009 payment binding
+// apart, under the version's domain (its own resource and requirement
+// hashes and nonce).
+func (s *Shop) assemblePay(b *Binding, p Product, po string, q contracts.Quote, req x402.Requirement, version string) (paycontract.PurchaseOrder, error) {
+	sp, ok := paycontract.SpecOf(version)
+	if !ok {
+		return paycontract.PurchaseOrder{}, errors.New("not a pay-family version")
+	}
 	chain, ok := strings.CutPrefix(req.Network, "eip155:")
 	if !ok {
 		return paycontract.PurchaseOrder{}, errors.New("network is not eip155")
 	}
-	rh, err := paycontract.ResourceHash(http.MethodGet, p.URL)
+	rh, err := sp.ResourceHash(http.MethodGet, p.URL)
 	if err != nil {
 		return paycontract.PurchaseOrder{}, err
 	}
-	qh, err := paycontract.RequirementHash(q)
+	qh, err := sp.RequirementHash(q)
 	if err != nil {
 		return paycontract.PurchaseOrder{}, err
 	}
@@ -273,11 +310,12 @@ func (s *Shop) assembleV1(b *Binding, p Product, po string, q contracts.Quote, r
 	if window == 0 {
 		window = 60
 	}
-	nonce := sha256.Sum256([]byte("apa-pay-v1/eip3009-nonce\x00" + b.Session.TaskID + "\x00" + p.ID))
+	label := map[string]string{paycontract.Version: "apa-pay-v1", paycontract.V2: "apa-pay-v2"}[version] // v1's as it always was
+	nonce := sha256.Sum256([]byte(label + "/eip3009-nonce\x00" + b.Session.TaskID + "\x00" + p.ID))
 	order := paycontract.PurchaseOrder{
-		Version: paycontract.Version, RequestID: "req-" + p.ID, Quote: q,
+		Version: version, RequestID: "req-" + p.ID, Quote: q,
 		Intent: paycontract.Intent{
-			Version: paycontract.Version, Domain: paycontract.Domain,
+			Version: version, Domain: sp.Domain,
 			ConsumerID: b.Session.ConsumerID, AgentID: b.Session.AgentID, WalletID: b.WalletID, TaskID: b.Session.TaskID,
 			PurchaseOrderID: po, ResourceHash: rh, HTTPMethod: http.MethodGet, ResourceURL: p.URL,
 			X402Version: q.X402Version, Scheme: req.Scheme, PaymentRequirementHash: qh,

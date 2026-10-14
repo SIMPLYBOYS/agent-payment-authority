@@ -223,7 +223,7 @@ func (a *api) task(w http.ResponseWriter, r *http.Request) {
 	}
 	b, v := rec.Binding, rec.Task
 	capability := "unavailable" // M1 cannot pay
-	if v.ContractVersion == paycontract.Version {
+	if paycontract.Supported(v.ContractVersion) {
 		capability = paycontract.PaymentNotEnabled // P1-a: an approval, simulated, is not a payment
 	}
 	reply(w, http.StatusOK, taskReply{TaskID: b.TaskID, ContractVersion: v.ContractVersion, DelegationID: v.DelegationID, ConsumerID: b.ConsumerID,
@@ -248,10 +248,12 @@ type eventView struct {
 	ApprovalSessionID   string `json:"approval_session_id,omitempty"`
 	GrantID             string `json:"grant_id,omitempty"`
 	AuthorizationMethod string `json:"authorization_method,omitempty"`
-	Version             string `json:"version,omitempty"`
-	EvidenceMode        string `json:"evidence_mode"`
-	Source              string `json:"source"`
-	ObservedAt          uint64 `json:"observed_at"`
+	// apa.pay.v2's CREDENTIAL_VERIFIED: the verification record as stored.
+	Credential   *contracts.CredentialCheck `json:"credential,omitempty"`
+	Version      string                     `json:"version,omitempty"`
+	EvidenceMode string                     `json:"evidence_mode"`
+	Source       string                     `json:"source"`
+	ObservedAt   uint64                     `json:"observed_at"`
 }
 
 type eventsReply struct {
@@ -269,8 +271,9 @@ func (a *api) events(w http.ResponseWriter, r *http.Request) {
 	for _, e := range rec.Events {
 		v := eventView{EventID: e.EventID, EventType: e.EventType, Sequence: e.Sequence, PrevEventHash: e.PrevEventHash,
 			Code: e.Payload.Code, Decision: e.Payload.Decision, EvidenceMode: e.EvidenceMode, Source: e.Source, ObservedAt: e.ObservedAt,
-			DelegationID: e.Payload.DelegationID, ApprovalSessionID: e.Payload.ApprovalSessionID, GrantID: e.Payload.GrantID, AuthorizationMethod: e.Payload.AuthorizationMethod}
-		if e.Version == paycontract.Version { // an M1 event's view is what it always was
+			DelegationID: e.Payload.DelegationID, ApprovalSessionID: e.Payload.ApprovalSessionID, GrantID: e.Payload.GrantID, AuthorizationMethod: e.Payload.AuthorizationMethod,
+			Credential: e.Payload.Credential}
+		if paycontract.Supported(e.Version) { // an M1 event's view is what it always was
 			v.Version = e.Version
 		}
 		if e.Scope != nil {
