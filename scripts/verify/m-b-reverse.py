@@ -151,7 +151,7 @@ ITEMS = [
     ("P1a: a closed session is not decided again", go("./internal/store/", "^TestPayAskApproveOnce$", ("TestPayAskApproveOnce", r"another request")),
      [("internal/store/pay.go", '\t\tif p.Session.State != "pending" {\n\t\t\tout.Outcome, out.Purchase = "closed", t.view(p)', '\t\tif false {\n\t\t\tout.Outcome, out.Purchase = "closed", t.view(p)')]),
     ("P1a: the stored task's version picks the entry", go("./internal/store/", "^TestPayVersionBoundary$", ("TestPayVersionBoundary", r"M1 body, v1 task")),
-     [("internal/store/ops.go", "if (v1 != nil) != t.v1() {", "if false {")]),
+     [("internal/store/ops.go", "if (v1 != nil) != t.pay() {", "if false {")]),  # C2b: t.v1() is t.pay()
     ("P1a: a delegation is no wider than the profile", go("./internal/store/", "^TestPayDelegationGuards$", ("TestPayDelegationGuards", r"wider than the profile")),
      [("internal/store/pay.go", "if budget > limit || narrow > allow ||", "if false && budget > limit && narrow > allow ||")]),
     ("P1a: the payment binding is in the intent hash", go("./internal/paycontract/", "^TestBindingInTheHash$", ("TestBindingInTheHash", r"the intent hash did not change")),
@@ -162,7 +162,7 @@ ITEMS = [
     ("P1a: M1 evidence refuses an apa.pay.v1 task", go("./internal/store/", "^TestM1EvidenceRefusesPayTask$", ("TestM1EvidenceRefusesPayTask", r"export of the v1 task")),
      [("internal/m1evidence/m1evidence.go", "err == nil && version != contracts.Version {", "err == nil && false {")]),
     ("P1a: an apa.pay.v1 run starts with a delegation", go("./cmd/demo/", "^TestP1aPermissions$", ("TestP1aPermissions", r"apa.pay.v1 without a delegation")),
-     [("cmd/demo/control.go", 'if (sc.version() == paycontract.Version) != (req.DelegationID != "") {', "if false {")]),
+     [("cmd/demo/control.go", 'if paycontract.Supported(sc.version()) != (req.DelegationID != "") {', "if false {")]),  # C2b: the pay family
     ("P1a: viewer, host and operator never approve", go("./cmd/demo/", "^TestP1aPermissions$", ("TestP1aPermissions", r"(viewer|host|operator) approves: 200")),
      [("cmd/demo/sim.go", "\tconsumer := a.sim.holder(tok)\n", '\tconsumer := a.sim.holder(tok)\n\tif consumer == "" && tok != "" {\n\t\tconsumer = "consumer-a"\n\t}\n')]),
     ("P1a: a live host has no simulated approver", go("./cmd/demo/", "^TestP1aLiveHostHasNoSimulation$", ("TestP1aLiveHostHasNoSimulation", r"simulate on a live host")),

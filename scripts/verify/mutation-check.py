@@ -198,7 +198,8 @@ MUTATIONS = [
     ("B1-05 store: a moved wallet is followed", "internal/store/ops.go",
      "if err == nil && (prevWallet != wallet.WalletID || prevPayer != wallet.From) {", "if false && err == nil && (prevWallet != wallet.WalletID || prevPayer != wallet.From) {", "TestWalletBindingKept"),
     ("B1-05 store: a missing profile is inferred from nil", "internal/store/ops.go",
-     "if (setup.Profile == nil) != setup.ProfileAbsent || (setup.Credential == nil) != setup.CredentialAbsent {", "if false {", "TestStartTask"),
+     # C2b re-anchored (the BBS+ credential joined the line); hasCred stays used.
+     "if (setup.Profile == nil) != setup.ProfileAbsent || hasCred == setup.CredentialAbsent || setup.Credential != nil && setup.BBS != nil {", "if false && hasCred {", "TestStartTask"),
     ("B1-05 store: contract refusal echoes its detail", "internal/store/ops.go",
      'return refuse(code, "refused by a contract check")', "return refuse(code, err.Error())", "TestQuoteSafety"),
     ("B1-05 store: decode refusal echoes the input", "internal/store/ops.go",
