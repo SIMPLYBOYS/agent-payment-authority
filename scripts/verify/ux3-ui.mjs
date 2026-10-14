@@ -89,8 +89,8 @@ try {
     return b.waitFor(`document.getElementById("creds").dataset.mode === "file"`, 20000);
   }
   const room = () => b.evaluate(`document.getElementById("unity-canvas").dataset.room || ""`);
-  // inRoom: Unity reported this room for the page's current scene (the canvas
-  // dataset is refreshed with the page's scene line).
+  // inRoom: Unity's last room report names this room (the key only, not the
+  // scene number: the flow alternates rooms, so a stale report cannot pass).
   const inRoom = async (key) => {
     for (const end = Date.now() + 20000; Date.now() < end; await sleep(500)) if ((await room()).endsWith(":" + key)) return true;
     return false;
@@ -126,7 +126,10 @@ try {
 
   // ---- 2 the cafe: B's lunch set, within the delegation: Allow ----
   mark("cafe");
+  await b.evaluate(`(window.__cafeButton = document.querySelector('#venue-picker .venue-pick[data-venue="cafe"]'), true)`);
   check("choose 街角咖啡: Unity shows the cafe; the cards are B's (cafe-b)", await choose("cafe") && await inRoom("cafe") && (await cards()) === "consumer-b", (await room()) + " " + (await cards()));
+  check("the chosen button is the same element (a choice does not rebuild the buttons, so the focus stays)",
+    await b.evaluate(`window.__cafeButton === document.querySelector('#venue-picker .venue-pick[data-venue="cafe"]') && window.__cafeButton.isConnected`));
   check("the header says the cafe is a demo scene", (await text("#venue-chip")) === "情境：街角咖啡（示範情境・示意商品）", await text("#venue-chip"));
   check("以 B 模擬, 建立委託, 確認: B's cafe run starts", await start("consumer-b", "cafe-b", "show-b-01"), await text("#run-status"));
   check("the scene: B at the counter, within the delegation (allowed_unpaid)", await shows("consumer-b", "show-b-01", "allowed_unpaid"));

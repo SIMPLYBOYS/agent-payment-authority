@@ -157,7 +157,6 @@ namespace APA
 
         readonly Dictionary<string, Customer> customers = new Dictionary<string, Customer>();
         TextMesh status, banner;
-        string art0 = ""; // the banner's art note
         Font font;
         Sprite pixel, disc, circle; // UX1: a white pixel, a filled ellipse and an ellipse ring
         SpriteRenderer bannerPlate;
@@ -179,7 +178,7 @@ namespace APA
                 var l = JsonUtility.FromJson<Layout>(t.text);
                 if (l != null && l.key == t.name) layouts[l.key] = l;
             }
-            layout = layouts.TryGetValue(DefaultLayout, out var d) ? d : new Layout { key = DefaultLayout, title = "" };
+            if (!layouts.TryGetValue(DefaultLayout, out layout)) layouts[DefaultLayout] = layout = new Layout { key = DefaultLayout, title = "" }; // never without a default room (review note)
             BuildRoom();
             customers["consumer-a"] = MakeCustomer("consumer-a", customerA, "Customer A", new Color(0.55f, 0.75f, 1f));
             customers["consumer-b"] = MakeCustomer("consumer-b", customerB, "Customer B", new Color(1f, 0.7f, 0.5f));

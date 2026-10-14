@@ -12,7 +12,6 @@ public class SceneStateTests
 
     static Outcome Apply(SceneState s, ProjectionMessage m) => s.Apply(m, out _, out _, out _);
 
-
     [Test]
     public void TwoCustomersInOneScene()
     {

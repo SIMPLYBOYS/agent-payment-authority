@@ -708,6 +708,8 @@ MUTATIONS = [
      'From: wallet.From, Scene: h.Scene,', 'From: wallet.From,', 'TestHostScene'),
     ('UX3 demo: the entry\'s scene not passed to the run', 'cmd/demo/control.go',
      'delegation: lr.run.DelegationID, scene: sc.Scene})', 'delegation: lr.run.DelegationID})', 'TestUX3ScenesEndToEnd'),
+    ('UX3 demo: the scene catalogs not given to the shop tools (review S1)', 'cmd/demo/main.go',
+     'Scenes: scenes, Products: products,', 'Products: products,', 'TestUX3ScenesEndToEnd'),
     ('UX3 demo: an unknown scene accepted', 'cmd/demo/scenarios.go',
      '} else if sc.Scene != "" && !slices.Contains(merchant.Scenes(), sc.Scene) {', '} else if sc.Scene != "" && !slices.Contains(merchant.Scenes(), sc.Scene) && false {', 'TestUX3ShippedCatalog'),
     ('UX3 demo: the scene not in the digest', 'cmd/demo/scenarios.go',

@@ -102,11 +102,19 @@ setSceneView((c) => scene.view(c));
 let venue = null;
 const allScenarios = () => (lastReady && lastReady.status && lastReady.status.runs && lastReady.status.runs.scenarios) || [];
 const multiVenue = () => A.venues(allScenarios()).length > 1;
-// runVenue: a task's scene, from its run (only when there is a choice).
+// runVenue: a task's scene: the catalog's only one ("" for the data shop
+// alone, as before UX3), else its run's; null when there is a choice and
+// the run is not known (not among the newest runs, or its entry changed).
 const runVenue = (task) => {
-  const r = multiVenue() && lastRuns && lastRuns.gen === creds.gen && (lastRuns.runs || []).find((x) => x.task_id === task);
-  return (r && r.scene) || "";
+  const vs = A.venues(allScenarios());
+  if (vs.length < 2) return vs[0] && vs[0] !== "data" ? vs[0] : "";
+  const r = lastRuns && lastRuns.gen === creds.gen && (lastRuns.runs || []).find((x) => x.task_id === task);
+  return (r && r.scene) || null;
 };
+// The approval's goods and its scene rows; an unknown scene says so, never 數位資料 (review S2).
+const goodsOf = (vk) => (vk ? A.venue(vk).goods : vk === null ? "商品・情境未確認" : "數位資料");
+const venueRows = (vk) => (vk ? [["情境", A.venue(vk).name + (A.venue(vk).demo ? "（示範情境）" : "")], ["交付方式", A.venue(vk).delivery]]
+  : vk === null ? [["情境", "未確認（不在最近的場次中，或目錄已改）"]] : []);
 setVenueOf(runVenue);
 onReplayMode((on) => (on ? scene.pause() : scene.resume()));
 const short = (c) => (c === "consumer-a" ? "A" : c === "consumer-b" ? "B" : c);
@@ -462,6 +470,8 @@ function agentModel(c, runs, slots, ctx) {
 // the shop's room; it starts or stops nothing.
 let shownVenues = "";
 function renderVenues(vs) {
+  // ponytail: the choice's buttons are rebuilt only when the scenes change; a
+  // choice only moves aria-pressed, so the focus stays on the button (review S5).
   const box = $("venue-picker");
   box.hidden = vs.length < 2;
   const chip = $("venue-chip");
@@ -469,8 +479,10 @@ function renderVenues(vs) {
   chip.textContent = box.hidden ? "" : "情境：" + A.venue(venue).name + (A.venue(venue).demo ? "（示範情境・示意商品）" : "");
   const u = shop();
   const room = venue && u.bridge && u.bridge.layouts.includes(venue) ? venue : "";
-  if (scene.started) scene.setVenue(vs.length > 1 ? venue : "", vs.length > 1 ? room : "");
-  const key = JSON.stringify([vs, venue]);
+  // One scene: no filter, but its room (review S3).
+  if (scene.started) scene.setVenue(vs.length > 1 ? venue : "", room);
+  for (const b of box.querySelectorAll(".venue-pick")) b.setAttribute("aria-pressed", String(b.dataset.venue === venue));
+  const key = JSON.stringify(vs);
   if (box.hidden || key === shownVenues) return;
   shownVenues = key;
   keepFocus(box, () => box.replaceChildren(...vs.map((k) => {
@@ -992,10 +1004,10 @@ function renderApproval(runs) {
     const amt = el("p", "approval-amount");
     amt.append(el("b", "", units(p.amount)), el("span", "", " test USDC"));
     const vk = runVenue(item.task_id);
-    it.append(el("p", "approval-product", "商品 " + product + "（" + (vk ? A.venue(vk).goods : "數位資料") + "・付款確認後交付；本片不付款）"), amt);
+    it.append(el("p", "approval-product", "商品 " + product + "（" + goodsOf(vk) + "・付款確認後交付；本片不付款）"), amt);
     parts.push(it);
     const dl = el("dl", "approval-rows");
-    for (const [k, val] of [...(vk ? [["情境", A.venue(vk).name + (A.venue(vk).demo ? "（示範情境）" : "")], ["交付方式", A.venue(vk).delivery]] : []),
+    for (const [k, val] of [...venueRows(vk),
       ["收款人", addr(p.pay_to) + " · 與報價相同（payTo）"], ["付款帳戶", "客人 " + short(item.consumer_id) + " 的測試錢包 " + addr(item.payer) + " · " + item.wallet_id],
       ["網路與資產", (NETWORK[p.chain_id] || p.chain_id) + " · test USDC（" + (p.asset_id || "?") + "），不是真錢"],
       ["委託範圍", d ? "預算 " + units(d.task_budget) + "；超過 " + units(d.allow_max) + " 一律要你核准" : "未取得"],
@@ -1224,10 +1236,10 @@ function renderA2() {
     const amt = el("p", "approval-amount");
     amt.append(el("b", "", units(p.amount)), el("span", "", " test USDC"));
     const vk = runVenue(item.task_id);
-    it.append(el("p", "approval-product", "商品 " + product + "（" + (vk ? A.venue(vk).goods : "數位資料") + "・本片不付款）"), amt);
+    it.append(el("p", "approval-product", "商品 " + product + "（" + goodsOf(vk) + "・本片不付款）"), amt);
     parts.push(it);
     const dl = el("dl", "approval-rows");
-    for (const [k, val] of [...(vk ? [["情境", A.venue(vk).name + (A.venue(vk).demo ? "（示範情境）" : "")], ["交付方式", A.venue(vk).delivery]] : []),
+    for (const [k, val] of [...venueRows(vk),
       ["收款人", addr(p.pay_to) + " · 與報價相同（payTo）"], ["付款帳戶", "客人 " + short(item.consumer_id) + " 的測試錢包 " + addr(item.payer) + " · " + item.wallet_id],
       ["網路與資產", (NETWORK[p.chain_id] || p.chain_id) + " · test USDC（" + (p.asset_id || "?") + "），不是真錢"],
       ["委託範圍", d ? "預算 " + units(d.task_budget) + "；超過 " + units(d.allow_max) + " 一律要你核准" : "未取得"],

@@ -172,11 +172,14 @@ func New(baseURL string) (*Merchant, error) {
 			ProductID: p.ID, Title: p.Title, Summary: p.Summary, HTTPMethod: "GET", ResourceURL: o.url, Price: pr,
 		})
 	}
-	names := map[string]string{"": "APA fixture data shop", "cafe": "APA fixture cafe", "mart": "APA fixture mart"}
 	for scene, e := range entries {
+		name := "APA fixture data shop"
+		if scene != "" {
+			name = "APA fixture " + scene // a new scene needs no name here
+		}
 		var err error
 		if m.catalogs[scene], err = json.Marshal(map[string]any{
-			"merchant":      names[scene],
+			"merchant":      name,
 			"evidence_mode": "fixture",
 			"price_note":    "Catalog prices are informational. The binding quote is the PAYMENT-REQUIRED header of the HTTP 402 from resource_url.",
 			"products":      e,

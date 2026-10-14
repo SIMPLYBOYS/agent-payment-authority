@@ -41,7 +41,10 @@ public class DualCustomerTests
     [Test]
     public void BridgeReportComesFirst()
     {
-        Assert.AreEqual("bridge:0:0:versions=1,2;customers=consumer-a,consumer-b;select=1;layouts=cafe,data,mart", bridge.reports[0]);
+        var rooms = view.LayoutKeys.ToList();
+        rooms.Sort(System.StringComparer.Ordinal); // every layout file, whatever is added (review S4)
+        Assert.AreEqual("bridge:0:0:versions=1,2;customers=consumer-a,consumer-b;select=1;layouts=" + string.Join(",", rooms), bridge.reports[0]);
+        CollectionAssert.IsSupersetOf(rooms, new[] { "cafe", "data", "mart" });
         StringAssert.StartsWith("ready:", bridge.reports[1]);
     }
 

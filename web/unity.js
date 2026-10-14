@@ -79,6 +79,7 @@ export class UnityHost {
   // shop over (Unity resets on a version switch).
   own(on) {
     this.sceneOwned = on;
+    this.room = null; // the next scene reports its room again; version 1 shows the default one
     this.pending = null;
     this.pendingScene = null;
     this.pending2.clear();

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,6 +84,16 @@ func TestUX3ScenesEndToEnd(t *testing.T) {
 		task := run["task_id"].(string)
 		if run["scene"] != c.id[:4] {
 			t.Errorf("%s run view scene %v", c.id, run["scene"])
+		}
+		// The run read its own scene's catalog (review S1: the fake CLI
+		// requests the purchase whatever list_products answered).
+		rec, _ := h.record(run["run_id"].(string), task)
+		var calls []string
+		for _, x := range rec.Calls {
+			calls = append(calls, x.Tool+":"+x.Outcome)
+		}
+		if got := strings.Join(calls, " "); got != "list_products:ok get_quote:ok request_purchase:"+c.verdict {
+			t.Errorf("%s calls %s", c.id, got)
 		}
 		code, raw, _ := h.get("/api/tasks/"+task, h.tokens["host"])
 		var v struct {
