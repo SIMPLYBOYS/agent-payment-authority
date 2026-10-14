@@ -1,6 +1,7 @@
 # UX2 多商務場景：產品體驗提案
 
 > 2026-10-14，Claude Code。依 vault〈Claude-Code-UX2多商務場景產品體驗設計派工-20261013〉與 Aaron「開始 UX2」。分支 `commercial-ux2`（從 main `b8f5165`）。
+> **UX2 Done（Aaron 10/15：「先結案 UX2」）；已 fast-forward merge 進本機 main，未 push。** 交付是提案與概念稿；正式畫面在 UX3。
 > **狀態：方向已確認（Aaron 10/14：「四件事都先依照建議的方向做」，第 10 節）。** 這是方向確認，不是技術 review 或整片驗收；UX3 實作時畫面仍可能調整。可操作原型與截圖是**概念稿**：不呼叫 API、不是執行畫面、不能當作 runtime 證據；場景圖形是自製示意，正式畫面在 UX3 以 Unity＋LimeZu 製作。
 
 ## 1 一段話
