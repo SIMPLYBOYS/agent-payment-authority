@@ -75,6 +75,7 @@ M1 刻意沒有核准、grant、付款、結算或交付：`contracts.md` 第 87
 - `intent_hash` 是 256 位元 SHA-256，超過 BN254 欄位：ZK 端以 limbs 或欄位 hash 對映（ADR 開放問題 4，Z1 處理）。
 - 新的 golden vectors 與回歸測試；新理由碼一律隨契約版本增加。
 - 委託、核准會話、grant 與付款事件都屬於 `apa.pay.v1` 的 task；M1 task 的事件規則不變（以 task 的契約版本選驗證規則，不放寬舊版白名單）。
+- **C2（10/14）另立 `apa.pay.v2`**：型別與 v1 相同，網域 `agent-payment-authority/pay/v2`；多一個 `CREDENTIAL_VERIFIED` 事件與三個理由碼（`CREDENTIAL_INVALID`、`CREDENTIAL_REVOKED`、`CREDENTIAL_STATUS_UNAVAILABLE`），Ask 可因憑證理由撤回。v1 逐字不變，並拒絕這些新項目。見 [commercial-c2-design.md](commercial-c2-design.md) 第 3 節與 [commercial-c2.md](commercial-c2.md)。
 
 ### 3.2 新物件
 
@@ -256,6 +257,8 @@ Codex 的設計一致性核對不代替 Aaron 對畫面的判定。**Aaron 要�
 | 4 | 核准會話與 grant | Ask 時寫 `POLICY_DECIDED`；`expire`、`Cancel` 關閉未決 Ask | Ask 的同一交易開 `approval_sessions`（`APPROVAL_SESSION_OPENED`）；`Approve` 一個交易內：會話仍 pending、未到期、`intent_hash` 相同、核准者綁定 → 會話 `approved`＋寫 `grants`（`jti` 唯一）＋`APPROVED`、`GRANT_ISSUED`；核准請求 id 唯一，重送回同一結果；到期與取消同時關閉會話 | Store 的單一寫入交易 | `approval_sessions`、`grants` | M1 的 Ask 沒有會話；M1 事件不變 |
 | 5 | Store schema 3 | schema 1→2 的遷移（驗證、`VACUUM INTO` 備份、遷移、再驗證；失敗就拒絕開啟） | `tasks.contract_version`（既有列標為 `apa.m1.v2`）；`host_runs.contract_version`、`delegation_id`；新表 `delegations`、`approval_sessions`、`grants`；事件驗證與投影依版本（`project()` 加 `approved` 等狀態）；開啟時的一致性檢查涵蓋新表 | 遷移旗標照現行（需明確要求才升級） | 同上 | 同一套遷移方式；失敗時資料庫保持原樣 |
 | 6 | UI 與 checker | `TaskView`；`adapter.js`；`internal/m1evidence`、`internal/verification` | `TaskView` 帶 `contract_version`；網頁依版本顯示核准與 grant；M1 證據匯出與檢查器只接受 `apa.m1.v2`，遇到 `apa.pay.v1` task 明確拒絕（新代碼） | — | — | M1 原包、digest、案例與事件白名單的意義不變；不把新付款能力寫進舊證據 |
+
+C2 的 `apa.pay.v2` 走同一張表的每一列：目錄標 `contract: apa.pay.v2`（只限 fake）、委託為 v2、`Submit` 拒絕 v2 而改走 `SubmitV2`（多一個 challenge 與出示的步驟）、核准會話與 grant 帶 v2 的 ID、schema 6 加三張憑證表；M1 與 v1 的規則都不變（[commercial-c2.md](commercial-c2.md) 第 3 節）。
 
 本節是設計，不寫 SQL、不改程式、不執行遷移。P1-b、A2 仍可能再加資料表或欄位（一次性消耗紀錄、簽發者金鑰、authenticator 登記）。
 

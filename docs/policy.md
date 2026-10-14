@@ -76,3 +76,19 @@ Deny 優先，真人不能覆蓋。依序檢查，第一個不通過的項目決
 ## 不在節點 1
 
 去重與衝突拒絕、原子寫入、事件與 hash chain、取消／逾時、approval deadline 計時、重啟恢復、A／B 儲存隔離、事件查詢 endpoint、憑證 fixture 的設定載入。
+
+## `apa.pay.v2` 的憑證步驟（C2，2026-10-14）
+
+`paypolicy.Decide` 對 `apa.pay.v2` 的請購多一個步驟，位置在 `Rules` 之前（[commercial-c2-design.md](commercial-c2-design.md) 第 3.3、4 節）。輸入是 Store 在同一個交易裡做出的驗證紀錄（`contracts.CredentialCheck`），**不收 fixture 憑證**；沒有紀錄就不裁決。
+
+| 驗證結果 | 裁決 |
+|---|---|
+| `absent`（沒有登記 holder） | Deny `CONFIG_MISSING` |
+| `invalid` | Deny `CREDENTIAL_INVALID`（細分原因在紀錄的 `detail`） |
+| `status_unavailable` | Deny `CREDENTIAL_STATUS_UNAVAILABLE` |
+| `revoked` | Deny `CREDENTIAL_REVOKED` |
+| `expired` | Deny `AUTHORIZATION_EXPIRED` |
+| `valid` | 以驗證過的 expiry 交給 `Rules`，照本文的裁決順序 |
+
+所以過期的憑證會先於資產、商家的檢查決定理由碼；裁決同樣是 Deny。M1 的 `policy.Decide`、`Rules`、`CONFIG_MISSING` 的語意與 `apa.pay.v1` 都不變；v1 收到驗證紀錄就拒絕。
+

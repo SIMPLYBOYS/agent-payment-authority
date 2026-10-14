@@ -167,7 +167,7 @@
 | S4-A（契約影響 Accepted；ADR Proposed） | 研究順序已接受 | 採用或保留基線的決定 | **P0**（文件決定） |
 | S4-B（Waiting；不阻塞 M1） | 未開始 | 候選 PoC | 只有在 P0 決定「採用候選」時才需要；保留基線則不阻擋 P1／P2 |
 | W2 keystore 與分離服務；驗收 6、9、33 | 未實作 | Signer、Approval、grant 鑰隔離與服務間認證 | **P1** |
-| W2「憑證存進 keystore；CLI 出示」、W3 verifier 與選擇性揭露；FR-1–3；驗收 1–3、12、26、28、29、35 | 未實作 | 發證、出示、驗證、撤銷，接入 Policy | **C2**（必要；C1 之後） |
+| W2「憑證存進 keystore；CLI 出示」、W3 verifier 與選擇性揭露；FR-1–3；驗收 1–3、12、26、28、29、35 | C2b 已實作，待 review（10/14；fake、測試金鑰；[commercial-c2.md](commercial-c2.md)） | 獨立上下文 review；x402 credential extension（第 26 項）屬 P2 | **C2**（必要；C1 之後） |
 | W4、W9、W10 電路 v1／v2、MPC、有狀態合約；驗收 10、11、15、16、17、27 | 未實作 | 全部 | Z1 → **Z2** |
 | W7–8 語音核准；FR-9；驗收 20、36；PRD §7 三態 | 未實作 | 全部 | **V1**（必要；A2 之後） |
 | W11 x402＋testnet 真簽名；驗收 7、24、25、30、31、39、44 | 只有 402 | Signer 簽章、verify／settle、兩筆 tx、對帳、交付 | **P2** |
@@ -247,6 +247,8 @@
 4. 驗收：可重跑的正反測試與選型結論（固定版本與授權）。若 4 小時內選不到可用庫，計畫的停損是改 SD-JWT VC（L637）——**這會改變必要能力，須 Aaron 核准，不能自行改用**。證據：`artifacts/s2/`。
 5. 新依賴：BBS 函式庫（授權須確認）。
 6. 設計核准。停止點：選型結論交 review。**C1 通過只代表選型與 spike 成立，不代表憑證已參與准駁**（那是 C2）。
+
+> 10/14：C2 設計第四版與 C2-D1～D12 已核准；C2a 通過 review；**C2b 已實作（`apa.pay.v2`：發證、challenge、出示、驗證、撤銷、核准時重新檢查；fake 目錄 `make present-c2`），待獨立上下文 review**。見 [commercial-c2-design.md](commercial-c2-design.md)、[commercial-c2.md](commercial-c2.md)。review 通過前不宣稱 BBS+ 已參與可信准駁。
 
 **C2 正式 BBS 發證、出示、驗證接入 Policy**（原任務：計畫 W2「憑證存進本地 keystore；CLI 出示」、W3「verifier 與選擇性揭露」；FR-1–3；驗收 1、2、3、12、26、28、29、35）
 1. 目標：issuer 依 task 發 BBS+ 憑證（`task_id, C₀, expiry, holder binding`）存入 keystore；請購時出示 derived proof；Policy 以驗證結果參與裁決（取代 M1 的 fixture 授權條件）；撤銷、過期、holder binding、跨 verifier 與舊 challenge 重播都被拒。fixture 憑證路徑只保留為明標 fake 的開發模式。不做：eKYC 核發閘門（第二期）。
