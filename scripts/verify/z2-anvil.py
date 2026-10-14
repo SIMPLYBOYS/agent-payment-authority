@@ -44,7 +44,7 @@ def run(cmd, cwd=ROOT, ok=True, env=None):
 
 
 def main():
-    out = sys.argv[1]
+    out = os.path.abspath(sys.argv[1])  # go build runs in zk/: a relative path would land there
     os.makedirs(out, exist_ok=True)
     go_env = dict(os.environ, GOTOOLCHAIN="go1.26.8", GOFLAGS="-mod=readonly", GOPROXY="off")
     bin_dir = os.path.join(out, "bin")
