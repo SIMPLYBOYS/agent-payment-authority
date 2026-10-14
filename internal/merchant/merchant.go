@@ -13,12 +13,18 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
 
 type product struct {
+	// Scene is the demo storefront the product belongs to: "" is the data
+	// shop at /catalog (M1's, unchanged); the others are UX3 demo scenes at
+	// /scenes/{scene}/catalog. One fixture merchant (the registry has one
+	// pay_to) serves them all.
+	Scene                        string
 	ID, Title, Summary, MimeType string
 	Path, Query                  string // matched exactly; the query is not normalized
 	Requirement                  x402.Requirement
@@ -51,7 +57,57 @@ var products = []product{{
 	FiatCurrency: "KRW",
 	FXRate:       "1400",
 	content:      `{"edition":1,"canary":"APA-PROTECTED-kr-market-e1","body":"Synthetic fixture text. Seeing this in any response is a leak."}`,
+}, {
+	// UX3 demo scenes (docs/commercial-scenes.md section 3): a fixture
+	// menu and fixture goods; no POS, inventory or logistics behind them.
+	Scene:        "cafe",
+	ID:           "cafe-lunch-set",
+	Title:        "Lunch set, 12:30 pickup (fixture menu)",
+	Summary:      "Synthetic sample: a demo menu item. No POS or delivery is connected.",
+	MimeType:     "application/json",
+	Path:         "/scenes/cafe/lunch-set",
+	Query:        "pickup=1230",
+	Requirement:  fixtureRequirement("80000"),
+	AssetDisplay: "0.08 test USDC",
+	content:      `{"canary":"APA-PROTECTED-cafe-lunch-set","body":"Synthetic fixture pickup number. Seeing this in any response is a leak."}`,
+}, {
+	Scene:        "mart",
+	ID:           "mart-coffee-beans",
+	Title:        "Office coffee beans x2 (fixture goods)",
+	Summary:      "Synthetic sample: a demo shelf item. No inventory or logistics is connected.",
+	MimeType:     "application/json",
+	Path:         "/scenes/mart/coffee-beans",
+	Query:        "qty=2",
+	Requirement:  fixtureRequirement("360000"),
+	AssetDisplay: "0.36 test USDC",
+	content:      `{"canary":"APA-PROTECTED-mart-coffee-beans","body":"Synthetic fixture locker code. Seeing this in any response is a leak."}`,
 }}
+
+// fixtureRequirement is kr-market's requirement at another amount.
+func fixtureRequirement(amount contracts.Amount) x402.Requirement {
+	return x402.Requirement{Scheme: "exact", Network: "eip155:84532", Amount: amount,
+		Asset: "0x4444444444444444444444444444444444444444", PayTo: "0x3333333333333333333333333333333333333333",
+		MaxTimeoutSeconds: 60, Extra: map[string]string{"name": "USDC", "version": "2"}}
+}
+
+// Scenes are the demo scenes besides the data shop, in product order.
+func Scenes() []string {
+	var out []string
+	for _, p := range products {
+		if p.Scene != "" && !slices.Contains(out, p.Scene) {
+			out = append(out, p.Scene)
+		}
+	}
+	return out
+}
+
+// CatalogPath is a scene's catalog path ("" is the data shop's).
+func CatalogPath(scene string) string {
+	if scene == "" {
+		return "/catalog"
+	}
+	return "/scenes/" + scene + "/catalog"
+}
 
 type offer struct {
 	product
@@ -61,8 +117,9 @@ type offer struct {
 }
 
 type Merchant struct {
-	catalog []byte
-	offers  map[string]offer // path + "?" + raw query
+	base     string
+	catalogs map[string][]byte // scene => catalog
+	offers   map[string]offer  // path + "?" + raw query
 }
 
 type catalogEntry struct {
@@ -76,10 +133,10 @@ type catalogEntry struct {
 type price struct {
 	AssetAmount  string `json:"asset_amount"`
 	AssetDisplay string `json:"asset_display"`
-	FiatAmount   string `json:"fiat_amount"`
-	FiatCurrency string `json:"fiat_currency"`
-	FXRate       string `json:"fx_rate"`
-	FXSource     string `json:"fx_source"`
+	FiatAmount   string `json:"fiat_amount,omitempty"` // the demo scenes show no fiat price
+	FiatCurrency string `json:"fiat_currency,omitempty"`
+	FXRate       string `json:"fx_rate,omitempty"`
+	FXSource     string `json:"fx_source,omitempty"`
 }
 
 // New builds the shop for baseURL, a trusted http(s) origin with no path,
@@ -89,8 +146,8 @@ func New(baseURL string) (*Merchant, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 		return nil, fmt.Errorf("merchant base URL %q must be an http(s) origin with no path", baseURL)
 	}
-	m := &Merchant{offers: map[string]offer{}}
-	entries := []catalogEntry{}
+	m := &Merchant{base: baseURL, catalogs: map[string][]byte{}, offers: map[string]offer{}}
+	entries := map[string][]catalogEntry{"": {}}
 	for _, p := range products {
 		o := offer{product: p, url: baseURL + p.Path + "?" + p.Query}
 		raw, err := json.Marshal(p.Requirement)
@@ -107,22 +164,32 @@ func New(baseURL string) (*Merchant, error) {
 			Extensions:  json.RawMessage(`{}`),
 		}
 		m.offers[p.Path+"?"+p.Query] = o
-		entries = append(entries, catalogEntry{
-			ProductID: p.ID, Title: p.Title, Summary: p.Summary, HTTPMethod: "GET", ResourceURL: o.url,
-			Price: price{string(p.Requirement.Amount), p.AssetDisplay, p.FiatAmount, p.FiatCurrency, p.FXRate, "fixture, not live FX"},
+		pr := price{AssetAmount: string(p.Requirement.Amount), AssetDisplay: p.AssetDisplay}
+		if p.FiatAmount != "" {
+			pr.FiatAmount, pr.FiatCurrency, pr.FXRate, pr.FXSource = p.FiatAmount, p.FiatCurrency, p.FXRate, "fixture, not live FX"
+		}
+		entries[p.Scene] = append(entries[p.Scene], catalogEntry{
+			ProductID: p.ID, Title: p.Title, Summary: p.Summary, HTTPMethod: "GET", ResourceURL: o.url, Price: pr,
 		})
 	}
-	m.catalog, err = json.Marshal(map[string]any{
-		"merchant":      "APA fixture data shop",
-		"evidence_mode": "fixture",
-		"price_note":    "Catalog prices are informational. The binding quote is the PAYMENT-REQUIRED header of the HTTP 402 from resource_url.",
-		"products":      entries,
-	})
-	return m, err
+	names := map[string]string{"": "APA fixture data shop", "cafe": "APA fixture cafe", "mart": "APA fixture mart"}
+	for scene, e := range entries {
+		var err error
+		if m.catalogs[scene], err = json.Marshal(map[string]any{
+			"merchant":      names[scene],
+			"evidence_mode": "fixture",
+			"price_note":    "Catalog prices are informational. The binding quote is the PAYMENT-REQUIRED header of the HTTP 402 from resource_url.",
+			"products":      e,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return m, nil
 }
 
 // Offer is one quote the shop serves at a resource.
 type Offer struct {
+	Scene, CatalogURL      string // the product's scene ("" is the data shop) and its catalog
 	ProductID, Method, URL string
 	Quote                  contracts.Quote
 }
@@ -134,7 +201,7 @@ func (m *Merchant) Offers() []Offer {
 	var out []Offer
 	for _, p := range products {
 		o := m.offers[p.Path+"?"+p.Query]
-		out = append(out, Offer{ProductID: p.ID, Method: "GET", URL: o.url,
+		out = append(out, Offer{Scene: p.Scene, CatalogURL: m.base + CatalogPath(p.Scene), ProductID: p.ID, Method: "GET", URL: o.url,
 			Quote: contracts.Quote{X402Version: o.required.X402Version, SelectedRequirement: o.accepts, Extensions: o.required.Extensions}})
 	}
 	return out
@@ -142,7 +209,12 @@ func (m *Merchant) Offers() []Offer {
 
 // Register adds the shop's routes. Anything else stays the mux's 404.
 func (m *Merchant) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /catalog", m.serveCatalog)
+	for scene, body := range m.catalogs {
+		mux.HandleFunc("GET "+CatalogPath(scene), func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(body)
+		})
+	}
 	paths := map[string]bool{}
 	for _, o := range m.offers {
 		if !paths[o.Path] {
@@ -150,11 +222,6 @@ func (m *Merchant) Register(mux *http.ServeMux) {
 			mux.HandleFunc("GET "+o.Path, m.serveResource)
 		}
 	}
-}
-
-func (m *Merchant) serveCatalog(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(m.catalog)
 }
 
 // problem is the response body; the protocol data is in the header.

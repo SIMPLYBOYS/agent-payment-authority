@@ -24,8 +24,11 @@ import (
 const MaxBodyBytes = 64 << 10
 
 // Product is a host-trusted resource the model may ask about, by ID only.
+// Scene is its demo scene ("" is the data shop): a run sees and buys only
+// its own scene's products.
 type Product struct {
 	ID, URL string
+	Scene   string
 }
 
 // PurchaseOrderID is the one purchase order ID of a task and product: a
@@ -38,7 +41,8 @@ func PurchaseOrderID(taskID, productID string) string {
 // Shop executes the three tools against the trusted shop and the Store.
 type Shop struct {
 	Store      *store.Store
-	CatalogURL string
+	CatalogURL string            // the data shop's catalog
+	Scenes     map[string]string // UX3: another demo scene's catalog URL, by scene
 	Products   map[string]Product
 	Client     *http.Client
 	Now        func() uint64 // trusted host clock, Unix seconds
@@ -70,7 +74,9 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 	// The record names a product only when the host offers it: a well-formed
 	// ID the CLI chose is still CLI text (a 64-hex capability is well-formed).
 	rec := CallRecord{Tool: tool}
-	if _, ok := s.Products[product]; ok {
+	p, ok := s.Products[product]
+	ok = ok && p.Scene == b.Scene // another scene's product is not offered to this run
+	if ok {
 		rec.ProductID = product
 	}
 	fail := func(code, msg string) (ToolResult, CallRecord) {
@@ -81,14 +87,13 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 		return refusal(code, msg), rec
 	}
 	if tool == "list_products" {
-		items, err := s.catalog(ctx)
+		items, err := s.catalog(ctx, b.Scene)
 		if err != nil {
 			return fail("SHOP_UNAVAILABLE", "the shop catalog could not be read safely")
 		}
 		rec.Outcome = "ok"
 		return textResult(map[string]any{"products": items, "note": "Prices are informational; the binding quote is the shop's HTTP 402."}, false), rec
 	}
-	p, ok := s.Products[product]
 	if !ok {
 		return fail("UNKNOWN_PRODUCT", "the product is not offered by the trusted shop")
 	}
@@ -334,11 +339,17 @@ type catalogItem struct {
 	FiatDisplay  string `json:"price_local,omitempty"`
 }
 
-// catalog reads the shop's catalog and keeps only entries that match a
-// trusted product exactly (ID, GET and URL). Shop text is untrusted: control
+// catalog reads the scene's catalog and keeps only entries that match a
+// trusted product of the scene exactly (ID, GET and URL). Shop text is untrusted: control
 // characters are dropped and length is capped.
-func (s *Shop) catalog(ctx context.Context) ([]catalogItem, error) {
-	resp, body, err := s.get(ctx, s.CatalogURL)
+func (s *Shop) catalog(ctx context.Context, scene string) ([]catalogItem, error) {
+	url := s.CatalogURL
+	if scene != "" {
+		if url = s.Scenes[scene]; url == "" {
+			return nil, errors.New("no catalog for the scene")
+		}
+	}
+	resp, body, err := s.get(ctx, url)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return nil, errors.New("catalog unavailable")
 	}
@@ -362,7 +373,7 @@ func (s *Shop) catalog(ctx context.Context) ([]catalogItem, error) {
 	items := []catalogItem{}
 	for _, e := range c.Products {
 		p, ok := s.Products[e.ProductID]
-		if !ok || e.HTTPMethod != http.MethodGet || e.ResourceURL != p.URL {
+		if !ok || p.Scene != scene || e.HTTPMethod != http.MethodGet || e.ResourceURL != p.URL {
 			continue
 		}
 		item := catalogItem{ProductID: p.ID, Title: Clean(e.Title, 200), Summary: Clean(e.Summary, 200), AssetDisplay: Clean(e.Price.AssetDisplay, 200)}

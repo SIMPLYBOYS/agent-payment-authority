@@ -304,7 +304,7 @@ func newHost(t *testing.T) *hostEnv {
 	for _, o := range shop.Offers() {
 		k := store.OfferKey{Method: o.Method, URL: o.URL}
 		offers[k] = append(offers[k], o.Quote)
-		products[o.ProductID] = toolbridge.Product{ID: o.ProductID, URL: o.URL}
+		products[o.ProductID] = toolbridge.Product{ID: o.ProductID, URL: o.URL, Scene: o.Scene}
 	}
 	if e.st, err = store.Open(store.Config{Path: filepath.Join(t.TempDir(), "db", "apa.db"), Registry: e.reg, Offers: offers, Clock: e.now.Load}); err != nil {
 		t.Fatal(err)

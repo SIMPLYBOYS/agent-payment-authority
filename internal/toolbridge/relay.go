@@ -36,6 +36,7 @@ type Binding struct {
 	Session  contracts.Session
 	WalletID string
 	From     string
+	Scene    string // the run's demo scene ("" is the data shop); host-set
 
 	mu       sync.Mutex // guards the fields below and is held across a Commit
 	state    runState

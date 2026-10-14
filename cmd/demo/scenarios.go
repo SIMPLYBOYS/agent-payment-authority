@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 )
@@ -31,6 +33,10 @@ type scenario struct {
 	// (docs/commercial-transaction-flow.md section 10 row 1); fake only.
 	Contract   string           `json:"contract,omitempty"`
 	Delegation *delegationTerms `json:"delegation,omitempty"`
+	// Scene is the entry's demo scene (UX3; docs/commercial-scenes.md):
+	// "cafe" or "mart" picks that storefront's products and the page's
+	// layout; omitted or "data" is the data shop (kept as "").
+	Scene string `json:"scene,omitempty"`
 
 	digest     string   // sha256 of this entry and its scenario file's bytes
 	candidates []string // the consumer's demo tasks (show-*), in registry order
@@ -90,6 +96,11 @@ func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.Regist
 				}
 			}
 		}
+		if sc.Scene == "data" {
+			sc.Scene = ""
+		} else if sc.Scene != "" && !slices.Contains(merchant.Scenes(), sc.Scene) {
+			return nil, fmt.Errorf("scenarios %s: %s: unknown scene %q", path, sc.ID, sc.Scene)
+		}
 		switch sc.Contract {
 		case "", contracts.Version:
 			if sc.Delegation != nil {
@@ -121,13 +132,14 @@ func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.Regist
 				return nil, fmt.Errorf("scenarios %s: %s: scenario file: %w", path, sc.ID, err)
 			}
 		}
-		// An M1 entry's digest is what it always was; the contract and the
-		// delegation join it only when set.
+		// An M1 entry's digest is what it always was; the contract, the
+		// delegation and the scene join it only when set.
 		entry, _ := json.Marshal(struct {
 			ID, ConsumerID, BudgetInitial string
 			Contract                      string           `json:",omitempty"`
 			Delegation                    *delegationTerms `json:",omitempty"`
-		}{sc.ID, sc.ConsumerID, string(sc.BudgetInitial), sc.Contract, sc.Delegation})
+			Scene                         string           `json:",omitempty"`
+		}{sc.ID, sc.ConsumerID, string(sc.BudgetInitial), sc.Contract, sc.Delegation, sc.Scene})
 		h := sha256.New()
 		h.Write(entry)
 		h.Write([]byte{0})
@@ -139,6 +151,14 @@ func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.Regist
 }
 
 func amount(a contracts.Amount) bool { n, err := a.Units(); return err == nil && n > 0 }
+
+// sceneName is a scene as the page names it ("" is "data").
+func sceneName(scene string) string {
+	if scene == "" {
+		return "data"
+	}
+	return scene
+}
 
 // version is the entry's contract version.
 func (sc *scenario) version() string {

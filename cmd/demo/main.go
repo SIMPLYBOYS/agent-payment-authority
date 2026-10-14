@@ -305,11 +305,14 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		return err
 	}
 	offers := store.OfferBook{}
-	products := map[string]toolbridge.Product{}
+	products, scenes := map[string]toolbridge.Product{}, map[string]string{}
 	for _, o := range shop.Offers() {
 		k := store.OfferKey{Method: o.Method, URL: o.URL}
 		offers[k] = append(offers[k], o.Quote)
-		products[o.ProductID] = toolbridge.Product{ID: o.ProductID, URL: o.URL}
+		products[o.ProductID] = toolbridge.Product{ID: o.ProductID, URL: o.URL, Scene: o.Scene}
+		if o.Scene != "" {
+			scenes[o.Scene] = o.CatalogURL
+		}
 	}
 
 	unlock, err := lockDB(dbPath)
@@ -365,7 +368,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 
 	var bridge *toolbridge.Server
 	if runner != nil {
-		tools := &toolbridge.Shop{Store: st, CatalogURL: "http://" + addr + "/catalog", Products: products, Client: toolbridge.NewClient(), Now: d.clock,
+		tools := &toolbridge.Shop{Store: st, CatalogURL: "http://" + addr + "/catalog", Scenes: scenes, Products: products, Client: toolbridge.NewClient(), Now: d.clock,
 			Credentials: creds}
 		runner.creds = creds
 		if bridge, err = toolbridge.Listen(tools); err != nil {

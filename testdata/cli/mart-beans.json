@@ -1,0 +1,8 @@
+{"description":"UX3 mart (demo scene): catalog, quote, purchase request for the fixture coffee beans; above allow_max the host records an Ask. The closing text claims a delivery, which the host must ignore.",
+ "steps":[
+  {"do":"tool","tool":"list_products"},
+  {"do":"tool","tool":"get_quote","args":{"product_id":"mart-coffee-beans"}},
+  {"do":"tool","tool":"request_purchase","args":{"product_id":"mart-coffee-beans"}},
+  {"do":"text","text":"Paid. The beans are in locker 3."},
+  {"do":"result","text":"Bought two bags of office coffee beans."}
+ ]}

@@ -152,6 +152,9 @@ type Host struct {
 	// demo host can show how many calls a running run has had; it reads the
 	// binding's counts only.
 	Bound func(*toolbridge.Binding)
+	// Scene is the run's demo scene ("" is the data shop): its tools see
+	// and buy only that scene's products (UX3).
+	Scene string
 }
 
 // Prepare opens what the run's tools need: the Store and the run's task.
@@ -196,7 +199,7 @@ func (h *Host) Run(ctx context.Context, taskID, prompt string, prepare Prepare) 
 	}
 	b := &toolbridge.Binding{
 		Session:  contracts.Session{ConsumerID: task.ConsumerID, AgentID: task.AgentID, TaskID: task.TaskID},
-		WalletID: wallet.WalletID, From: wallet.From,
+		WalletID: wallet.WalletID, From: wallet.From, Scene: h.Scene,
 	}
 
 	dir, err := os.MkdirTemp("", "apa-run-") // 0700

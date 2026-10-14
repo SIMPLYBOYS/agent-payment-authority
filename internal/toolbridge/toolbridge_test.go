@@ -79,7 +79,7 @@ func newEnv(t *testing.T) *env {
 	for _, o := range e.shop.Offers() {
 		k := store.OfferKey{Method: o.Method, URL: o.URL}
 		e.offers[k] = append(e.offers[k], o.Quote)
-		products[o.ProductID] = Product{ID: o.ProductID, URL: o.URL}
+		products[o.ProductID] = Product{ID: o.ProductID, URL: o.URL, Scene: o.Scene}
 	}
 	e.open(e.offers)
 	e.sh = &Shop{Store: e.st, CatalogURL: e.srv.URL + "/catalog", Products: products, Client: NewClient(), Now: e.now.Load}
@@ -458,6 +458,58 @@ func TestCatalogFilteredAndCleaned(t *testing.T) {
 	e.setTamper(func(w http.ResponseWriter, r *http.Request) bool { w.WriteHeader(500); return true })
 	if _, rec := e.call(b, "list_products", ""); rec.Outcome != "SHOP_UNAVAILABLE" {
 		t.Errorf("catalog 500: %v", rec)
+	}
+}
+
+// UX3: a run sees and buys only its scene's products; another scene's
+// product is unknown to it, even when a catalog lists it.
+func TestScenesAreSeparate(t *testing.T) {
+	e := newEnv(t)
+	e.sh.Scenes = map[string]string{}
+	for _, o := range e.shop.Offers() {
+		if o.Scene != "" {
+			e.sh.Scenes[o.Scene] = o.CatalogURL
+		}
+	}
+	data := e.start("task-a")
+	if q, rec := e.call(data, "get_quote", "cafe-lunch-set"); q["refused"] == nil || rec.Outcome != "UNKNOWN_PRODUCT" || rec.ProductID != "" {
+		t.Errorf("data run, cafe product: %v %+v", q, rec)
+	}
+	if list, _ := e.call(data, "list_products", ""); len(list["products"].([]any)) != 1 {
+		t.Errorf("data run lists %v", list)
+	}
+	cafe := e.start("task-b")
+	cafe.Scene = "cafe"
+	list, rec := e.call(cafe, "list_products", "")
+	items := list["products"].([]any)
+	if rec.Outcome != "ok" || len(items) != 1 || items[0].(map[string]any)["product_id"] != "cafe-lunch-set" {
+		t.Fatalf("cafe list_products: %v %+v", list, rec)
+	}
+	if q, rec := e.call(cafe, "request_purchase", "kr-market"); q["refused"] == nil || rec.Outcome != "UNKNOWN_PRODUCT" {
+		t.Errorf("cafe run, data product: %v %+v", q, rec)
+	}
+	// Within the profile's allow_max (0.10): Allow, and still nothing paid.
+	p, rec := e.call(cafe, "request_purchase", "cafe-lunch-set")
+	if rec.Outcome != "Allow" || p["decision"] != "Allow" || p["payment"] != "none" {
+		t.Fatalf("cafe request_purchase: %v %+v", p, rec)
+	}
+	// A cafe catalog that lists the data product is filtered to the scene.
+	kr := e.srv.URL + "/resources/kr-market?edition=1"
+	e.setTamper(func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/scenes/cafe/catalog" {
+			return false
+		}
+		json.NewEncoder(w).Encode(map[string]any{"products": []any{
+			map[string]any{"product_id": "kr-market", "title": "smuggled", "http_method": "GET", "resource_url": kr}}})
+		return true
+	})
+	if list, _ := e.call(cafe, "list_products", ""); len(list["products"].([]any)) != 0 {
+		t.Errorf("cafe catalog not filtered to the scene: %v", list)
+	}
+	zoo := e.start("task-a-next")
+	zoo.Scene = "zoo"
+	if _, rec := e.call(zoo, "list_products", ""); rec.Outcome != "SHOP_UNAVAILABLE" {
+		t.Errorf("unknown scene: %+v", rec)
 	}
 }
 

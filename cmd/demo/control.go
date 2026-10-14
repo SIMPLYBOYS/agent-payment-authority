@@ -104,6 +104,7 @@ type runView struct {
 	TaskID        string `json:"task_id"`
 	ConsumerID    string `json:"consumer_id"`
 	Contract      string `json:"contract_version"`
+	Scene         string `json:"scene,omitempty"` // the entry's demo scene, while the catalog has the entry as accepted
 	DelegationID  string `json:"delegation_id,omitempty"`
 	State         string `json:"state"`          // accepted | interrupted | ended (host_runs)
 	Live          string `json:"live,omitempty"` // running | stopping | ended (this process)
@@ -126,6 +127,9 @@ type runView struct {
 func (c *control) view(r store.Run) runView {
 	v := runView{RunID: r.RunID, RequestID: r.RequestID, Scenario: r.Scenario, TaskID: r.TaskID, ConsumerID: r.ConsumerID,
 		Contract: r.ContractVersion, DelegationID: r.DelegationID, State: r.State, AcceptedAt: r.AcceptedAt, InterruptedAt: r.InterruptedAt, EndedAt: r.EndedAt}
+	if sc := c.scenarios[r.Scenario]; sc != nil && sc.digest == r.ScenarioDigest {
+		v.Scene = sceneName(sc.Scene) // the entry the run was accepted with, not a later edit
+	}
 	if r.State == "ended" {
 		started := r.TaskStarted
 		v.Outcome, v.Detail, v.TaskStarted, v.StoreEnd, v.StoreEndError = r.Outcome, r.Detail, &started, r.StoreEnd, r.StoreEndError
@@ -341,7 +345,7 @@ func (c *control) runOne(ctx context.Context, lr *liveRun, sc *scenario) {
 	defer lr.cancel()
 	bound := func(b *toolbridge.Binding) { c.mu.Lock(); lr.binding = b; c.mu.Unlock() }
 	o := c.runner.runOne(ctx, c.st, c.bridge, planRun{TaskID: lr.run.TaskID, Scenario: sc.Scenario, BudgetInitial: sc.BudgetInitial, bound: bound,
-		contract: lr.run.ContractVersion, delegation: lr.run.DelegationID})
+		contract: lr.run.ContractVersion, delegation: lr.run.DelegationID, scene: sc.Scene})
 	end := runEnd(o)
 	c.mu.Lock() // from here a stop is refused: the process is over
 	lr.reaped = true
@@ -461,7 +465,7 @@ func (c *control) list(w http.ResponseWriter, r *http.Request, a *api) {
 func (c *control) summary() map[string]any {
 	var scs []map[string]any
 	for _, sc := range c.scenarios {
-		m := map[string]any{"id": sc.ID, "consumer_id": sc.ConsumerID, "label": sc.Label}
+		m := map[string]any{"id": sc.ID, "consumer_id": sc.ConsumerID, "label": sc.Label, "scene": sceneName(sc.Scene)}
 		if d := sc.Delegation; d != nil { // apa.pay.v1: the terms the page shows before the consumer confirms
 			m["contract"] = sc.Contract
 			m["delegation"] = map[string]any{"purpose": d.Purpose, "task_budget": d.TaskBudget, "allow_max": d.AllowMax,

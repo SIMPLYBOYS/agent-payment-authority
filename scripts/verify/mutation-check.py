@@ -257,7 +257,7 @@ MUTATIONS = [
     ("B1-04 bridge: oversized body accepted", "internal/toolbridge/shop.go",
      "if err != nil || len(body) > MaxBodyBytes {", "if err != nil {", "Test402Tampering"),
     ("B1-04 bridge: catalog entries not matched to trusted URL and method", "internal/toolbridge/shop.go",
-     "if !ok || e.HTTPMethod != http.MethodGet || e.ResourceURL != p.URL {", "if !ok {", "TestCatalogFilteredAndCleaned"),
+     "if !ok || p.Scene != scene || e.HTTPMethod != http.MethodGet || e.ResourceURL != p.URL {", "if !ok || p.Scene != scene {", "TestCatalogFilteredAndCleaned"),
     ("B1-04 bridge: catalog text not cleaned", "internal/toolbridge/shop.go",
      "Title: Clean(e.Title, 200)", "Title: e.Title", "TestCatalogFilteredAndCleaned"),
     ("B1-04 bridge: stored purchase not looked up before submitting", "internal/toolbridge/shop.go",
@@ -378,7 +378,7 @@ MUTATIONS = [
      "field(f, \"model\", &model) == nil && slices.Contains(knownModels, model) {", "field(f, \"model\", &model) == nil && (true || slices.Contains(knownModels, model)) {", "TestHostTraceKeepsOnlyListedNames|TestHostTraceWhitelist"),
     # B1-04 stage A follow-up (59da5d9 review): only listed names in the trace.
     ("B1-04 A R1 bridge: a well-formed but unoffered product ID recorded", "internal/toolbridge/shop.go",
-     "if _, ok := s.Products[product]; ok {\n\t\trec.ProductID = product", "if true {\n\t\trec.ProductID = product", "TestPurchaseIntegrity"),
+     "if ok {\n\t\trec.ProductID = product", "if true {\n\t\trec.ProductID = product", "TestPurchaseIntegrity"),
     ("B1-04 A R1 host: requested model missing from the trace", "internal/buyer/host.go",
      "\"requested_model\": Model, ", "", "TestHostMainLine|TestHostTraceKeepsOnlyListedNames"),
     # B1-04 C0 probe: zero input, never armed, stops on init, whitelist,
@@ -698,6 +698,22 @@ MUTATIONS = [
      'if err := os.Link(tmp.Name(), path); err != nil {', 'if err := os.Rename(tmp.Name(), path); err != nil {', 'TestWriteReadyNeverReplaces'),
     ('mode: answered on another Host', 'cmd/demo/ui.go',
      '\tif !a.ourHost(r.Host) {\n\t\tfail(w, http.StatusForbidden, "forbidden_host")\n\t\treturn\n\t}\n\tswitch {', '\tswitch {', 'TestPairingOffAndReadyFile'),
+    # UX3 (docs/commercial-scenes.md): a run sees and buys only its scene's
+    # products; the scene comes from the trusted catalog entry.
+    ('UX3 bridge: another scene\'s product offered to the run', 'internal/toolbridge/shop.go',
+     'ok = ok && p.Scene == b.Scene', 'ok = ok && (true || p.Scene == b.Scene)', 'TestScenesAreSeparate'),
+    ('UX3 bridge: a scene catalog not filtered to the scene', 'internal/toolbridge/shop.go',
+     'if !ok || p.Scene != scene || e.HTTPMethod', 'if !ok || e.HTTPMethod', 'TestScenesAreSeparate'),
+    ('UX3 host: the run\'s scene not bound', 'internal/buyer/host.go',
+     'From: wallet.From, Scene: h.Scene,', 'From: wallet.From,', 'TestUX3ScenesEndToEnd'),
+    ('UX3 demo: the entry\'s scene not passed to the run', 'cmd/demo/control.go',
+     'delegation: lr.run.DelegationID, scene: sc.Scene})', 'delegation: lr.run.DelegationID})', 'TestUX3ScenesEndToEnd'),
+    ('UX3 demo: an unknown scene accepted', 'cmd/demo/scenarios.go',
+     '} else if sc.Scene != "" && !slices.Contains(merchant.Scenes(), sc.Scene) {', '} else if sc.Scene != "" && !slices.Contains(merchant.Scenes(), sc.Scene) && false {', 'TestUX3ShippedCatalog'),
+    ('UX3 demo: the scene not in the digest', 'cmd/demo/scenarios.go',
+     'sc.Contract, sc.Delegation, sc.Scene})', 'sc.Contract, sc.Delegation, ""})', 'TestUX3ShippedCatalog'),
+    ('UX3 demo: a run view shows an edited entry\'s scene', 'cmd/demo/control.go',
+     'sc != nil && sc.digest == r.ScenarioDigest {', 'sc != nil {', 'TestUX3RunViewScene'),
 ]
 
 

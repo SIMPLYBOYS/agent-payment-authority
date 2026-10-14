@@ -38,6 +38,7 @@ type planRun struct {
 	bound         func(*toolbridge.Binding) // told the run's binding (host runs only)
 	contract      string                    // host runs: the run's contract version ("" = apa.m1.v2)
 	delegation    string                    // host runs: an apa.pay.v1 run's confirmed delegation
+	scene         string                    // host runs: the entry's demo scene ("" is the data shop)
 }
 
 // runOutcome is what the host reports of one run: fixed codes and counts,
@@ -222,7 +223,7 @@ func (f *cliRunner) runOne(ctx context.Context, st *store.Store, bridge *toolbri
 		limits = *f.d.limits
 	}
 	h := &buyer.Host{Registry: f.reg, Bridge: bridge, CLI: f.cli, BridgeCmd: []string{f.d.self, "mcp-bridge"}, Env: env, Limits: limits,
-		Gate: gate, TraceDir: f.traceDir, Bound: r.bound}
+		Gate: gate, TraceDir: f.traceDir, Bound: r.bound, Scene: r.scene}
 	prepare := func() (*store.Store, error) {
 		setup := store.TaskSetup{TaskID: task.TaskID, Profile: &f.profile, BudgetInitial: r.BudgetInitial, ContractVersion: r.contract, DelegationID: r.delegation}
 		if r.contract == paycontract.V2 {

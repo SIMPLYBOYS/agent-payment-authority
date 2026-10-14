@@ -1,4 +1,5 @@
-# LimeZu files this shop uses (B1-06 delivery 2, docs/demo-ui.md).
+# LimeZu files the scenes use (B1-06 delivery 2, docs/demo-ui.md; UX3 adds the
+# data room and the cafe, docs/commercial-scenes.md 8, Aaron 10/15).
 # key <TAB> path under the LimeZu folder <TAB> rect (x,y,w,h in pixels from the top left; "-" = whole file)
 # The images are not in git (LimeZu licence: use allowed, distribution not;
 # credit limezu.itch.io). scripts/unity/import-limezu.sh copies exactly
@@ -19,3 +20,17 @@ cart	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Groc
 fruit	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_427.png	-
 customer-a	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_01.png	sheet
 customer-b	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_05.png	sheet
+# UX3. The pack's Classroom_and_Library singles folder holds the music items, so the data room is cut from the theme sheet.
+bookshelf-wide	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/5_Classroom_and_library_32x32.png	0,416,96,96
+bookshelf-narrow	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/5_Classroom_and_library_32x32.png	128,416,64,96
+terminal	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/5_Classroom_and_library_32x32.png	0,320,32,64
+pc-desk	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/5_Classroom_and_library_32x32.png	96,320,128,96
+library-desk	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/5_Classroom_and_library_32x32.png	352,320,160,96
+menu-board	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/24_Ice_Cream_Shop_Singles_32x32/Ice_Cream_Shop_Singles_32x32_14.png	-
+ice-counter	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/24_Ice_Cream_Shop_Singles_32x32/Ice_Cream_Shop_Singles_32x32_102.png	-
+cafe-counter	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/24_Ice_Cream_Shop_Singles_32x32/Ice_Cream_Shop_Singles_32x32_100.png	-
+ice-display	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/24_Ice_Cream_Shop_Singles_32x32/Ice_Cream_Shop_Singles_32x32_37.png	-
+cafe-table	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/24_Ice_Cream_Shop_Singles_32x32/Ice_Cream_Shop_Singles_32x32_75.png	-
+cafe-chair	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/24_Ice_Cream_Shop_Singles_32x32/Ice_Cream_Shop_Singles_32x32_76.png	-
+locker-1	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/8_Gym_Singles_32x32/Gym_Singles_32x32_114.png	-
+locker-2	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/8_Gym_Singles_32x32/Gym_Singles_32x32_115.png	-
