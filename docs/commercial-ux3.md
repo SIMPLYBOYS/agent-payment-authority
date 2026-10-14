@@ -1,7 +1,7 @@
 # UX3 三個情境的場景與資料
 
 > 2026-10-15，Claude Code。依 Aaron「我們開始 UX3」與 UX2 的拆分（[commercial-scenes.md](commercial-scenes.md) 第 9、10 節）。分支 `commercial-ux3`（從 main `1148bc6`）。
-> **狀態：實作完成，待獨立上下文 review。** 只用 fake CLI、合成資料與測試金鑰；不付款、不連鏈。咖啡店與便利商店是示範情境：示意商品，沒有接 POS、庫存或物流。
+> **狀態：實作完成；獨立上下文 review APPROVE（無 must-fix），五項 should-fix 已修（第 11 節）。待 Aaron 驗收。** 只用 fake CLI、合成資料與測試金鑰；不付款、不連鏈。咖啡店與便利商店是示範情境：示意商品，沒有接 POS、庫存或物流。
 
 ## 1 Aaron 的核准
 
@@ -171,8 +171,33 @@ UX3 新增的 13 項（Aaron 10/15 核准）：
   - WebGL 建置成功；
   - 瀏覽器 **PASS**，含頁首標籤、三個情境、桌面與手機截圖。
 
-**WebGL 建置**（本機，不進 git）sha256：
-- `WebGL.data` `c831ae27…84c7d0`
-- `WebGL.wasm` `39b85096…c36e2b`
+- 5bdf531（提交後的乾淨工作樹）：瀏覽器 PASS。
+
+**review 修正後（aed6d88，乾淨工作樹）**
+- 反向突變 10 項（UX3 八項，含 review S1 新增的一項，加上兩項重新定錨）：10 KILLED。
+- Go：vet 通過；merchant＋toolbridge 55 通過；cmd/demo 139 通過（略過 `TestTimingInterleaved`）。
+- 網頁單元測試 96/96。
+- Unity：EditMode 17/17、PlayMode 27/27。
+- WebGL 建置成功；瀏覽器 PASS（38 項，含 S5 的按鈕節點檢查）。
+
+**WebGL 建置**（aed6d88，本機，不進 git）sha256：
+- `WebGL.data` `aafb66fb…f4d1cd`
+- `WebGL.wasm` `859c115d…ca26bb`
 - `WebGL.framework.js` `3c7d6ab5…e65666`
-- `WebGL.loader.js` `887cbccb…95d327`
+- `WebGL.loader.js` `0dc56612…88fa5a`
+
+## 11 獨立上下文 review（Claude Code subagent，10/15）
+
+結論：APPROVE，沒有 must-fix。確認：一場不論經哪條路都買不到別的情境的商品；`/catalog` 的位元組（以 1148bc6 與 5bdf531 實際比對）和 M1 entry 的 digest 都沒變；SceneState 的佈置規則與 scene.js 的換場都正確。
+
+| 項目 | 問題 | 處理（aed6d88） |
+|---|---|---|
+| S1 | 拿掉主持人接上各情境目錄的那一行，測試仍通過（假 CLI 不管 list_products 結果照樣請購） | 端到端測試檢查每場的呼叫為 `list_products:ok …`；新增突變 #316，KILLED |
+| S2 | 場次不在最近 20 場或目錄已改時，核准摘要退回「數位資料」 | 改寫「商品・情境未確認」與「情境：未確認」 |
+| S3 | 只有一個非 data 情境的目錄顯示資料研究室與資料用語 | 單一情境也送它的房間、用它的用語 |
+| S4 | 文件說新增情境不必改程式，但能力回報測試與商家名稱寫死 | 兩者都由資料推導 |
+| S5 | 選情境後按鈕被重建，鍵盤焦點掉了 | 選擇只改 `aria-pressed`；瀏覽器檢查確認按鈕是同一個節點 |
+
+附註：
+- 已處理：預設房間一定登記；頁面換手時忘掉房間回報；刪除未用欄位與多餘空行。
+- 寫進文件：v1 回放時的 v2 訊息會重設、ready 素材回報只送一次、換房間的 Sprite 不回收。
