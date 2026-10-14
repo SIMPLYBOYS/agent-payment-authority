@@ -1,0 +1,21 @@
+{
+  "contributors": "3 contributions per phase, all by this host in one process",
+  "entropy": "crypto/rand (the operating system) for each contribution; the beacons are fixed strings, not a public randomness beacon",
+  "trust": "信任等同信任主持人 (Z1-D4): whoever ran this process could have kept the toxic waste and forge proofs",
+  "constraints": 3096,
+  "domain_size": 4096,
+  "phase1_sha256": [
+    "aa75d1903054bc3e43d7b500d540b9977465bfc3beb1760a1dc1f51d34b7245d",
+    "55b320f50f33f12734f47074f03a3e782b93fe7e1031b0d6024296461b7734f4",
+    "99f7bcc9cf5e56ee6d570685fe05d4276a216949049504e9e264d18741d68ef5"
+  ],
+  "beacon1": "agent-payment-authority/zk/v2 beacon 1 (fixed, not a public beacon)",
+  "phase2_sha256": [
+    "57e0f2d828a6f947b2ffae403d9157c568ecdd28575b6a2f7f4c797e083f7a1e",
+    "8bae570200a2f678114cc0d3d707ce8c840153b1486825bcdbd7724d5aac79c7",
+    "7f3b5035967a8cfaf8773bbd533d58459c02ae956f4abcc918698b7293dc95b0"
+  ],
+  "beacon2": "agent-payment-authority/zk/v2 beacon 2 (fixed, not a public beacon)",
+  "proving_key_sha256": "63de07412e35ffcb311f2668d0b13394d7aae30166e9a21e4391340a8267a756",
+  "verifying_key_sha256": "d889ea0eb8111c857e59eb4bc47399bf241c07e5a32195d4f4d6de0153d572b7"
+}

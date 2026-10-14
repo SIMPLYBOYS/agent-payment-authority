@@ -1,0 +1,13 @@
+# Z2's budget contract (docs/commercial-z2.md). Local chain only.
+[profile.default]
+src = "src"
+test = "test"
+out = "../var/contracts/out"
+cache_path = "../var/contracts/cache"
+libs = []
+solc_version = "0.8.37"
+evm_version = "prague"
+optimizer = true
+optimizer_runs = 200
+via_ir = true
+offline = false
