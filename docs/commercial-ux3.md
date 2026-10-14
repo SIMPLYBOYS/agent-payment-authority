@@ -191,6 +191,7 @@ UX3 新增的 13 項（Aaron 10/15 核准）：
 **取貨櫃換素材後（dacc5fe，乾淨工作樹）**
 - Unity：EditMode 17/17、PlayMode 27/27（含每個房間走道不碰道具）；場景重建時 LimeZu 檔案齊全。
 - WebGL 建置成功；瀏覽器 PASS（38 項）。
+- Aaron 10/15 看過畫面：「目前我覺得還可以」；fast-forward merge 進本機 main，未 push。
 
 ## 11 獨立上下文 review（Claude Code subagent，10/15）
 
