@@ -163,7 +163,7 @@
 | S1 WebAuthn（Ready） | 未領取 | 實機註冊、assertion、錯 challenge | **A1**（spike） |
 | FR-8；驗收 20、36（WebAuthn 部分） | 未實作 | WebAuthn 接入 Approval／grant | **A2**（必要） |
 | S2 BBS+（Ready） | 未領取 | 選庫、derived proof 正反測試 | **C1** |
-| S3 gnark（Ready） | 未領取 | 真 proof 與 witness／public input 負向測試 | **Z1** |
+| S3 gnark（Ready） | Z1 spike 完成，待 review（10/14） | review；Z1-D1～D4 的決定 | **Z1** |
 | S4-A（契約影響 Accepted；ADR Proposed） | 研究順序已接受 | 採用或保留基線的決定 | **P0**（文件決定） |
 | S4-B（Waiting；不阻塞 M1） | 未開始 | 候選 PoC | 只有在 P0 決定「採用候選」時才需要；保留基線則不阻擋 P1／P2 |
 | W2 keystore 與分離服務；驗收 6、9、33 | 未實作 | Signer、Approval、grant 鑰隔離與服務間認證 | **P1** |
@@ -227,6 +227,7 @@
 ### 5.2 授權、憑證與 ZK 線
 
 **Z1 gnark 額度電路 v1 與負向測試**（S3，計畫 W4）
+> **進度（10/14）**：spike 完成，待 Claude Code 獨立上下文 review（[commercial-z1.md](commercial-z1.md)；`spikes/zk/`；證據 `artifacts/s3/z1-61f06a7/`）。gnark v0.16.3 Groth16（BN254），3,096 約束、prove 約 45 ms、verify 約 0.9 ms；`intent_hash` 建議拆兩個 128 位元 limb（Z1-D1，待決定）；setup 為本機單方，不是可信儀式。不能宣稱預算已被鏈上保護。
 1. 目標：本機 gnark Groth16（BN254）電路 v1「額度 ≥ 金額＋承諾開啟」（計畫 L700），產生並驗證真 proof；錯 witness、超額、竄改 public input 的負向測試；量測 proving／verify 時間；提出 `intent_hash` 進 public input 的映射（拆 limb 或 field hash）。不做：合約、testnet、與 Policy 整合。
 2. 前置：無；研究可先做。
 3. 影響：新增 `spikes/zk/`（不進產品路徑）；`intent_hash` 映射會影響**正式付款契約**，結論須另行 review。
