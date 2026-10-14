@@ -92,6 +92,10 @@ func NewBBSCredential(dir *credential.Dir, s credential.Stored) (*BBSCredential,
 // ChallengeSeconds is how long an issued challenge stays usable (design 7).
 const ChallengeSeconds = 60
 
+// ChallengeReuseMargin: a challenge with less than this left is not reused,
+// so a retry is not denied CHALLENGE_EXPIRED by a clock tick (review note 3).
+const ChallengeReuseMargin = 5
+
 // Challenge is a stored presentation request for one (task, purchase) and
 // intent (design 7 step 4).
 type Challenge struct {
@@ -141,7 +145,7 @@ func decodePay(raw []byte) (paycontract.PurchaseOrder, error) {
 // apa.pay.v2 purchase, after the same checks as SubmitV2's (design 7 steps
 // 1, 2, 4). ok is false when there is nothing to present: the purchase is
 // already stored (SubmitV2 returns it), or the task's credential is absent.
-// An issued challenge of the same intent that has not expired is reused;
+// An issued challenge of the same intent with ChallengeReuseMargin left is reused;
 // any other issued one of this purchase is marked expired first.
 func (s *Store) IssueChallenge(sess contracts.Session, raw []byte) (Challenge, bool, error) {
 	po, err := decodePay(raw)
@@ -171,7 +175,7 @@ func (s *Store) IssueChallenge(sess contracts.Session, raw []byte) (Challenge, b
 		}
 		poID := po.Intent.PurchaseOrderID
 		if _, err := tx.Exec(`UPDATE credential_challenges SET state = 'expired' WHERE task_id = ? AND purchase_order_id = ? AND state = 'issued'
-			AND (expires_at <= ? OR intent_hash != ?)`, t.row.TaskID, poID, now, intent); err != nil {
+			AND (expires_at <= ? OR intent_hash != ?)`, t.row.TaskID, poID, now+ChallengeReuseMargin, intent); err != nil {
 			return err
 		}
 		out = Challenge{TaskID: t.row.TaskID, PurchaseOrderID: poID}
@@ -298,12 +302,17 @@ func (s *Store) verifyCredential(t *taskTx, po paycontract.PurchaseOrder, pr Pre
 	return c, nil
 }
 
+var errNoDirectory = errors.New("status list: no credential directory")
+
 var errRollback = errors.New("status list: an older version, or another list of the same version, than one already seen")
 
 // status reads the task issuer's status list now, never cached (design 6),
 // and records its version in credential_status_seen. A list older than one
 // seen, or another of the same version, is not used: rollback.
 func (s *Store) status(t *taskTx, b *BBSCredential) (credential.Status, bool, error) {
+	if s.creds == nil { // reopened without --credential-dir: the list cannot be read (review S1)
+		return credential.Status{Err: errNoDirectory}, false, nil
+	}
 	list, sum, err := s.creds.ReadStatus(b.Issuer, b.StatusKeySHA256, int64(t.now))
 	if err != nil {
 		return credential.Status{Err: err}, false, nil

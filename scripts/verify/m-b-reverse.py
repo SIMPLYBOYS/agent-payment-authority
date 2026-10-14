@@ -410,6 +410,13 @@ ITEMS = [
      [(AD, 'const withdrawnText = (p) => CREDENTIAL_CLOSED[p && p.closed_reason] || "已撤回（task 取消）";', 'const withdrawnText = (p) => false && CREDENTIAL_CLOSED[p && p.closed_reason] || "已撤回（task 取消）";')]),
     ("C2b: ui: the approval panel says the credential closed it", ui("scripts/verify/c2-ui.mjs", "核准此筆（模擬） after the revocation: 憑證已撤銷，這筆已關閉, never the task's cancellation"),
      [("web/host.js", 'const closedResult = (table, state, p) => (state === "withdrawn" && A.CREDENTIAL_CLOSED[p.closed_reason]', 'const closedResult = (table, state, p) => (false && state === "withdrawn" && A.CREDENTIAL_CLOSED[p.closed_reason]')]),
+    # Review should-fixes S2, S3 and note 3 (10/14).
+    ("C2b: missing holder material is decided, not retried", go("./cmd/demo/", "^TestC2HolderMaterialMissing$", ("TestC2HolderMaterialMissing", r"holder material missing: ")),
+     [("internal/toolbridge/shop.go", "ch.Request()); errors.Is(err, credential.ErrHolderMaterial) {", "ch.Request()); false && errors.Is(err, credential.ErrHolderMaterial) {")]),
+    ("C2b: the highest status list version seen advances", go("./internal/store/", "^TestStatusSeenAdvances$", ("TestStatusSeenAdvances", r"version 1 again: valid/")),
+     [(SCR, "case list.ListVersion > max:", "case false && list.ListVersion > max:")]),
+    ("C2b: a challenge about to expire is not reused", go("./internal/store/", "^TestChallengeReuseMargin$", ("TestChallengeReuseMargin", r"a challenge about to expire was reused")),
+     [(SCR, "now+ChallengeReuseMargin, intent)", "now, intent)")]),
     ("C2b: a v2 credential denies before the rules", go("./internal/paypolicy/", "^TestV2CredentialStep$", ("TestV2CredentialStep", r"revoked: \{")),
      [(PP, 'case credentialDeny != "":', 'case false && credentialDeny != "":')]),
     # D4 of the OS isolation plan (keygen); run them alone with "^P1b-D4:".

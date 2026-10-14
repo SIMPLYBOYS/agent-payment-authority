@@ -726,3 +726,71 @@ func lastReason(t *testing.T, s *Store) string {
 	}
 	return ""
 }
+
+// Review S1: a Store reopened without its credential directory cannot read
+// the list: an approval withdraws with CREDENTIAL_STATUS_UNAVAILABLE and a
+// payment is refused, never a nil dereference.
+func TestV2RecheckWithoutDirectory(t *testing.T) {
+	v := newV2(t)
+	s := v.started()
+	if _, err := v.buy(s, sessA, v2Of(t, v.allow)); err != nil {
+		t.Fatal(err)
+	}
+	id, intent := v.askV2(s)
+	s.Close()
+	s = v.env.open()
+	r, err := approve(s, id, intent, "approve-req-000000001", "consumer-a", "approve")
+	if err != nil || r.Outcome != "closed" || r.Grant != nil || r.Purchase.ClosedReason != "CREDENTIAL_STATUS_UNAVAILABLE" {
+		t.Fatalf("approve: %+v %v", r, err)
+	}
+	if _, _, err := s.BeginPayment(payReq(v2Of(t, v.allow).Intent.PurchaseOrderID)); Code(err) != "CREDENTIAL_STATUS_UNAVAILABLE" {
+		t.Fatalf("payment: %v", err)
+	}
+}
+
+// Review S3: the highest version seen advances, so a list older than the
+// newest one read is refused, not only one older than the first.
+func TestStatusSeenAdvances(t *testing.T) {
+	v := newV2(t)
+	s := v.started()
+	first, err := os.ReadFile(filepath.Join(v.credDir, "status.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.buy(s, sessA, v2Of(t, v.allow)); err != nil { // reads version 1
+		t.Fatal(err)
+	}
+	if err := v.dir.Refresh(t0); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := v.buy(s, sessA, v2Of(t, variant(t, v.allow, 51))); err != nil || r.Purchase.Decision.PolicyVerdict != "Allow" { // reads version 2
+		t.Fatalf("version 2: %+v %v", r.Purchase.Decision, err)
+	}
+	if err := os.WriteFile(filepath.Join(v.credDir, "status.json"), first, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := v2Of(t, variant(t, v.allow, 52))
+	if _, err := v.buy(s, sessA, o); err != nil {
+		t.Fatal(err)
+	}
+	if res, detail, _ := verification(t, v.path, o.Intent.PurchaseOrderID); res != "status_unavailable" || detail != "STATUS_LIST_ROLLBACK" {
+		t.Fatalf("version 1 again: %s/%s", res, detail)
+	}
+}
+
+// Review note 3: a challenge with less than ChallengeReuseMargin left is
+// not handed out again.
+func TestChallengeReuseMargin(t *testing.T) {
+	v := newV2(t)
+	s := v.started()
+	body, _ := json.Marshal(v2Of(t, v.allow))
+	a, _, _ := s.IssueChallenge(sessA, body)
+	v.clock.Add(ChallengeSeconds - ChallengeReuseMargin - 1)
+	if b, _, _ := s.IssueChallenge(sessA, body); b.ID != a.ID {
+		t.Fatal("a challenge with time left was not reused")
+	}
+	v.clock.Add(1)
+	if c, _, _ := s.IssueChallenge(sessA, body); c.ID == a.ID {
+		t.Fatal("a challenge about to expire was reused")
+	}
+}

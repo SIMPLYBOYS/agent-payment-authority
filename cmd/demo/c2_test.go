@@ -182,3 +182,29 @@ func TestC2ShippedCatalog(t *testing.T) {
 		t.Fatal("a v2 catalog loaded as live")
 	}
 }
+
+// Review S2 (C2-D12): missing holder material is presented as such and
+// decided (Deny CREDENTIAL_INVALID, HOLDER_MATERIAL_UNAVAILABLE, no
+// challenge), never a tool error to retry.
+func TestC2HolderMaterialMissing(t *testing.T) {
+	path, _ := credDir(t, "consumer-a", "consumer-b")
+	if err := os.Remove(filepath.Join(path, "holder", "consumer-a.key")); err != nil {
+		t.Fatal(err)
+	}
+	h := controlHost(t, hostOpts{expiryEvery: time.Hour, scenarios: v2Catalog(t), args: []string{"--credential-dir", path}})
+	defer h.stop()
+	task := h.delegateAndRunAs(h.simulate("consumer-a"), "v2-a", "01", "apa.pay.v2")["task_id"].(string)
+	var cred, dec bool
+	for _, e := range h.events(task).Events {
+		switch e.EventType {
+		case "CREDENTIAL_VERIFIED":
+			c := e.Credential
+			cred = c != nil && c.Result == "invalid" && c.Detail == "HOLDER_MATERIAL_UNAVAILABLE" && c.ChallengeID == ""
+		case "POLICY_DECIDED":
+			dec = e.Decision.PolicyVerdict == "Deny" && e.Decision.Reason == "CREDENTIAL_INVALID"
+		}
+	}
+	if !cred || !dec {
+		t.Fatalf("holder material missing: %s", types(h.events(task)))
+	}
+}
