@@ -1,7 +1,7 @@
 # Z1 ZK 額度電路 v1 spike：電路、量測、`intent_hash` 映射與 Z2 前置條件
 
 > 2026-10-14，Claude Code。依 vault〈Claude-Code-Z1-ZK額度電路v1Spike派工-20261013〉與 Aaron「我們先做 Z1」。分支 `commercial-z1`（從 main `87c9ebf`）。
-> **狀態：spike 完成；第一次獨立上下文 review not pass（1 項 must-fix、4 項 should-fix），已全部修正（第 10 節），待再次 review。** 開工時查證：repo 與 vault 都沒有 Z1／S3 的既有交付（`spikes/` 只有 `bbs`、`webauthn`），因此從頭建立。
+> **狀態：spike 完成；第一次獨立上下文 review not pass，修正後第二次 review pass（第 10 節）。** 開工時查證：repo 與 vault 都沒有 Z1／S3 的既有交付（`spikes/` 只有 `bbs`、`webauthn`），因此從頭建立。
 > 本片**只證明本機 proof primitive 可行**：不接 Policy、Signer、Store，不建合約、不部署、不碰 testnet、RPC、faucet 或付款。資料全部合成；setup 是本機單方 setup，不是可信儀式。**不能宣稱預算已被鏈上保護。**
 
 ## 1 結論（先講）
@@ -170,3 +170,9 @@ Claude Code 獨立上下文 subagent review `87c9ebf..2ad16f5`：**not pass**。
 | S3 | 帳本的「另一個 task」其實是「未登記的 task」 | 兩個 task 都登記後送 A 的 proof；未登記另列一案 |
 | S4 | Z2 前置條件缺 C₀、誰可以花、部署範圍、r 的遺失或重用、隱私極限 | 第 8 節第 9 項 |
 | notes | 公告查證的來源與日期、選項 A 的 gas、calldata 大小、ptau 格式轉換、nullifier 的用詞、金額為 0、證據只在本機、程式小處 | 第 2、3、4、5、6、7、8 節與程式註解 |
+
+**第二次 review**（`2ad16f5..ff50bd8`）：**pass**。M1、S1～S4 都已解決，沒有新的 must-fix 或 should-fix。reviewer 另以 7 個突變探測帳本模型，6 個被抓到；沒被抓到的是「≥ r 改成 > r」的邊界。三個建議已在 `0daf737` 補上：
+- 用金額為 0 的 proof 測 `amount = r`（剛好等於 r 的別名）；改回 `> r` 的突變現在會失敗；
+- 「偽造 C_new」改在新帳本上只換 `C_new`，直接重現 M1 的情境，並確認 42 沒有被寫入；
+- 修正 task B 那一案的註解（B 刻意登記成 A 目前的承諾）。
+

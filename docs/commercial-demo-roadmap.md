@@ -227,7 +227,7 @@
 ### 5.2 授權、憑證與 ZK 線
 
 **Z1 gnark 額度電路 v1 與負向測試**（S3，計畫 W4）
-> **進度（10/14）**：spike 完成；第一次獨立上下文 review not pass，已修正，待再次 review（[commercial-z1.md](commercial-z1.md) 第 10 節；`spikes/zk/`；證據 `artifacts/s3/z1-192df5b/`）。gnark v0.16.3 Groth16（BN254），3,096 約束、prove 約 45 ms、verify 約 0.9 ms；`intent_hash` 建議拆兩個 128 位元 limb（Z1-D1，待決定）；setup 為本機單方，不是可信儀式。不能宣稱預算已被鏈上保護。
+> **進度（10/14）**：spike 完成；第一次獨立上下文 review not pass，修正後第二次 review pass（[commercial-z1.md](commercial-z1.md) 第 10 節；`spikes/zk/`；證據 `artifacts/s3/z1-192df5b/`）。gnark v0.16.3 Groth16（BN254），3,096 約束、prove 約 45 ms、verify 約 0.9 ms；`intent_hash` 建議拆兩個 128 位元 limb（Z1-D1，待決定）；setup 為本機單方，不是可信儀式。不能宣稱預算已被鏈上保護。
 1. 目標：本機 gnark Groth16（BN254）電路 v1「額度 ≥ 金額＋承諾開啟」（計畫 L700），產生並驗證真 proof；錯 witness、超額、竄改 public input 的負向測試；量測 proving／verify 時間；提出 `intent_hash` 進 public input 的映射（拆 limb 或 field hash）。不做：合約、testnet、與 Policy 整合。
 2. 前置：無；研究可先做。
 3. 影響：新增 `spikes/zk/`（不進產品路徑）；`intent_hash` 映射會影響**正式付款契約**，結論須另行 review。
