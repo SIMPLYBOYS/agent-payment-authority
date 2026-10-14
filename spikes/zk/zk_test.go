@@ -63,7 +63,7 @@ func prove(t testing.TB, k keys, a *Spend) (groth16.Proof, witness.Witness, erro
 	t.Helper()
 	w, err := frontend.NewWitness(a, ecc.BN254.ScalarField())
 	if err != nil {
-		return nil, nil, err
+		t.Fatalf("witness: %v", err) // a refusal must come from the prover, never from building the witness (review S1)
 	}
 	pub, err := w.Public()
 	if err != nil {
@@ -99,7 +99,10 @@ func TestSpendVerifies(t *testing.T) {
 		t.Fatalf("balance %d", next.Balance)
 	}
 	// The whole balance may be spent: balance_new = 0 is in range.
-	all, _, _ := Assignment(start, start.Balance, r1, intent1)
+	all, _, err := Assignment(start, start.Balance, r1, intent1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if p, pub, err := prove(t, k, all); err != nil || groth16.Verify(p, k.vk, pub) != nil {
 		t.Fatalf("the whole balance: %v", err)
 	}
@@ -116,7 +119,7 @@ func TestProverRefuses(t *testing.T) {
 			wrapped := new(big.Int).Mod(big.NewInt(300_000-500_000), Field)
 			a.CNew = Hash(DomCommit, taskA, wrapped, r1)
 		},
-		"wrong r_old (the commitment does not open)": func(a *Spend) { a.ROld = r2 },
+		"wrong r_old (opening and nullifier both fail)": func(a *Spend) { a.ROld = r2 },
 		// Only the opening fails: the prover claims more than C_old holds,
 		// with the right r_old and nullifier and a consistent C_new.
 		"a balance above the committed one": func(a *Spend) {
@@ -125,15 +128,25 @@ func TestProverRefuses(t *testing.T) {
 		"C_new not the rest": func(a *Spend) {
 			a.CNew = Hash(DomCommit, taskA, big.NewInt(4_600_000), r1)
 		},
-		"another task's nullifier": func(a *Spend) { a.Nullifier = Hash(DomNullifier, taskB, r0) },
-		"amount of 2^64":           func(a *Spend) { a.Amount = new(big.Int).Lsh(big.NewInt(1), 64) },
+		"another task's nullifier":               func(a *Spend) { a.Nullifier = Hash(DomNullifier, taskB, r0) },
+		"amount of 2^64 (balance_new wraps too)": func(a *Spend) { a.Amount = new(big.Int).Lsh(big.NewInt(1), 64) },
+		// Review S2: each of these fails one constraint only.
+		"a committed balance of 2^64": func(a *Spend) { // balance_new = 2^63 stays in range
+			big64, big63 := new(big.Int).Lsh(big.NewInt(1), 64), new(big.Int).Lsh(big.NewInt(1), 63)
+			a.BalanceOld, a.Amount = big64, big63
+			a.COld, a.CNew = Hash(DomCommit, taskA, big64, r0), Hash(DomCommit, taskA, big63, r1)
+		},
+		"intent lo limb of 2^128": func(a *Spend) { a.IntentLo = new(big.Int).Lsh(big.NewInt(1), 128) },
+		"a commitment of another task": func(a *Spend) { // the opening binds the task; the nullifier is still A's
+			a.COld = Hash(DomCommit, taskB, big.NewInt(5_000_000), r0)
+		},
 		// −1000 in the field: balance_new = balance_old + 1000 stays in
 		// range, so only the amount's own range check refuses it.
 		"a negative amount (the balance grows)": func(a *Spend) {
 			a.Amount = new(big.Int).Sub(Field, big.NewInt(1000))
 			a.CNew = Hash(DomCommit, taskA, big.NewInt(5_001_000), r1)
 		},
-		"intent limb of 2^128": func(a *Spend) { a.IntentHi = new(big.Int).Lsh(big.NewInt(1), 128) },
+		"intent hi limb of 2^128": func(a *Spend) { a.IntentHi = new(big.Int).Lsh(big.NewInt(1), 128) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			a := *good
@@ -177,73 +190,164 @@ func TestTamperedPublicInputs(t *testing.T) {
 	}
 }
 
-// Ledger models tx#1 (docs/commercial-demo-roadmap.md table row 7): verify
-// the proof, require the task's current commitment and an unused
-// nullifier, then store C_new. A model in Go, not a contract.
+// Ledger models tx#1 (docs/commercial-demo-roadmap.md table row 7). It
+// takes only the public values the caller submits, refuses any outside
+// [0, r) (the Go verifier reduces them mod r, so value+r would verify:
+// review M1), verifies the proof against exactly those values, and makes
+// its decisions on the same canonical values: the task's current
+// commitment, an unused nullifier, then C_new is stored. A model in Go, not
+// a contract.
 type Ledger struct {
 	vk     groth16.VerifyingKey
-	commit map[string]*big.Int
+	commit map[string]string // task -> C (decimal, canonical)
 	used   map[string]bool
 }
 
 var (
-	errProof     = errors.New("PROOF_INVALID")
-	errStale     = errors.New("STALE_COMMITMENT")
-	errNullifier = errors.New("NULLIFIER_USED")
+	errNonCanonical = errors.New("PUBLIC_INPUT_NOT_CANONICAL")
+	errProof        = errors.New("PROOF_INVALID")
+	errStale        = errors.New("STALE_COMMITMENT")
+	errNullifier    = errors.New("NULLIFIER_USED")
 )
 
-func (l *Ledger) Apply(p groth16.Proof, a *Spend, pub witness.Witness) error {
-	if err := groth16.Verify(p, l.vk, pub); err != nil {
+// Public is what a spend submits on chain: the seven public inputs only.
+type Public struct{ Task, COld, Amount, CNew, Nullifier, IntentHi, IntentLo *big.Int }
+
+func publicFrom(a *Spend) Public {
+	b := func(v frontend.Variable) *big.Int {
+		switch x := v.(type) {
+		case *big.Int:
+			return new(big.Int).Set(x)
+		case int:
+			return big.NewInt(int64(x))
+		case uint64:
+			return new(big.Int).SetUint64(x)
+		}
+		panic(fmt.Sprintf("public input of type %T", v))
+	}
+	return Public{b(a.Task), b(a.COld), b(a.Amount), b(a.CNew), b(a.Nullifier), b(a.IntentHi), b(a.IntentLo)}
+}
+
+func (l *Ledger) Apply(p groth16.Proof, in Public) error {
+	vals := []*big.Int{in.Task, in.COld, in.Amount, in.CNew, in.Nullifier, in.IntentHi, in.IntentLo}
+	for _, v := range vals {
+		if v == nil || v.Sign() < 0 || v.Cmp(Field) >= 0 {
+			return errNonCanonical
+		}
+	}
+	w, err := frontend.NewWitness(&Spend{Task: in.Task, COld: in.COld, Amount: in.Amount, CNew: in.CNew, Nullifier: in.Nullifier, IntentHi: in.IntentHi, IntentLo: in.IntentLo},
+		ecc.BN254.ScalarField(), frontend.PublicOnly())
+	if err != nil {
 		return errProof
 	}
-	task, cOld, n := fmt.Sprint(a.Task), fmt.Sprint(a.COld), fmt.Sprint(a.Nullifier)
+	if err := groth16.Verify(p, l.vk, w); err != nil {
+		return errProof
+	}
+	task, n := in.Task.String(), in.Nullifier.String()
 	switch {
-	case l.commit[task] == nil || l.commit[task].String() != cOld:
+	case l.commit[task] != in.COld.String():
 		return errStale
 	case l.used[n]:
 		return errNullifier
 	}
-	l.used[n], l.commit[task] = true, a.CNew.(*big.Int)
+	l.used[n], l.commit[task] = true, in.CNew.String()
 	return nil
 }
 
 func TestLedgerReplayAndStale(t *testing.T) {
 	k := compiled(t)
-	l := &Ledger{vk: k.vk, commit: map[string]*big.Int{fmt.Sprint(taskA): start.Commitment()}, used: map[string]bool{}}
+	l := &Ledger{vk: k.vk, commit: map[string]string{taskA.String(): start.Commitment().String()}, used: map[string]bool{}}
 	a1, s1, _ := Assignment(start, 500_000, r1, intent1)
-	p1, pub1, err := prove(t, k, a1)
+	p1, _, err := prove(t, k, a1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := l.Apply(p1, a1, pub1); err != nil {
+	in1 := publicFrom(a1)
+	if err := l.Apply(p1, in1); err != nil {
 		t.Fatalf("first spend: %v", err)
 	}
-	if err := l.Apply(p1, a1, pub1); !errors.Is(err, errStale) {
+	if err := l.Apply(p1, in1); !errors.Is(err, errStale) {
 		t.Fatalf("replay: %v", err)
 	}
 	// A second proof from the same old state (another intent): its C_old is stale.
 	a1b, _, _ := Assignment(start, 100_000, r2, intent2)
-	p1b, pub1b, _ := prove(t, k, a1b)
-	if err := l.Apply(p1b, a1b, pub1b); !errors.Is(err, errStale) {
+	p1b, _, _ := prove(t, k, a1b)
+	if err := l.Apply(p1b, publicFrom(a1b)); !errors.Is(err, errStale) {
 		t.Fatalf("a second spend of the old state: %v", err)
 	}
+	// A C_new other than the proven one is refused at the proof (review M1).
+	forged := in1
+	forged.COld, forged.CNew = s1.Commitment(), big.NewInt(42)
+	if err := l.Apply(p1, forged); !errors.Is(err, errProof) {
+		t.Fatalf("a C_new the proof does not hold: %v", err)
+	}
 	// The next spend from the new state is accepted.
-	a2, _, _ := Assignment(s1, 400_000, r2, intent2)
-	p2, pub2, _ := prove(t, k, a2)
-	if err := l.Apply(p2, a2, pub2); err != nil {
+	a2, s2, _ := Assignment(s1, 400_000, r2, intent2)
+	p2, _, _ := prove(t, k, a2)
+	if err := l.Apply(p2, publicFrom(a2)); err != nil {
 		t.Fatalf("second spend: %v", err)
 	}
-	// Task B has no commitment here: A's state cannot be spent as B's.
-	b := State{Task: taskB, Balance: s1.Balance, R: r2}
-	ab, _, _ := Assignment(b, 1, r0, intent1)
-	pb, pubb, _ := prove(t, k, ab)
-	if err := l.Apply(pb, ab, pubb); !errors.Is(err, errStale) {
-		t.Fatalf("another task: %v", err)
+	// Task B registered with its own state: A's current proof submitted as
+	// B's is refused at the proof (review S3).
+	l.commit[taskB.String()] = s2.Commitment().String()
+	a3, _, _ := Assignment(s2, 1, r0, intent1)
+	p3, _, _ := prove(t, k, a3)
+	asB := publicFrom(a3)
+	asB.Task = taskB
+	if err := l.Apply(p3, asB); !errors.Is(err, errProof) {
+		t.Fatalf("A's proof as task B: %v", err)
 	}
-	// The nullifier check alone: same commitment reinstated, nullifier used.
-	l.commit[fmt.Sprint(taskA)] = start.Commitment()
-	if err := l.Apply(p1, a1, pub1); !errors.Is(err, errNullifier) {
+	// An unregistered task has no commitment to spend.
+	c := State{Task: TaskField("show-c-01"), Balance: 10, R: r0}
+	ac, _, _ := Assignment(c, 1, r1, intent1)
+	pc, _, _ := prove(t, k, ac)
+	if err := l.Apply(pc, publicFrom(ac)); !errors.Is(err, errStale) {
+		t.Fatalf("an unregistered task: %v", err)
+	}
+	// The nullifier check alone: A's first commitment reinstated, the
+	// nullifier used.
+	l.commit[taskA.String()] = start.Commitment().String()
+	if err := l.Apply(p1, in1); !errors.Is(err, errNullifier) {
 		t.Fatalf("a used nullifier: %v", err)
+	}
+	// The same nullifier written as N + r: the Go verifier would accept it
+	// (TestAliasedPublicInputs); the ledger refuses it as non-canonical.
+	aliased := in1
+	aliased.Nullifier = new(big.Int).Add(in1.Nullifier, Field)
+	if err := l.Apply(p1, aliased); !errors.Is(err, errNonCanonical) {
+		t.Fatalf("an aliased nullifier: %v", err)
+	}
+}
+
+// Review M1: gnark's Go verifier reduces public inputs mod r, so a valid
+// proof also verifies with value + r. Recorded here so Z2's verifier and
+// contract refuse inputs outside [0, r) themselves.
+func TestAliasedPublicInputs(t *testing.T) {
+	k := compiled(t)
+	a, _, _ := Assignment(start, 500_000, r1, intent1)
+	p, _, err := prove(t, k, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := publicFrom(a)
+	for name, mut := range map[string]func(x *Public){
+		"amount + r":    func(x *Public) { x.Amount = new(big.Int).Add(x.Amount, Field) },
+		"nullifier + r": func(x *Public) { x.Nullifier = new(big.Int).Add(x.Nullifier, Field) },
+	} {
+		x := in
+		mut(&x)
+		w, err := frontend.NewWitness(&Spend{Task: x.Task, COld: x.COld, Amount: x.Amount, CNew: x.CNew, Nullifier: x.Nullifier, IntentHi: x.IntentHi, IntentLo: x.IntentLo},
+			ecc.BN254.ScalarField(), frontend.PublicOnly())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := groth16.Verify(p, k.vk, w); err != nil {
+			t.Errorf("%s: the library no longer reduces mod r (%v); update the report", name, err)
+		}
+		l := &Ledger{vk: k.vk, commit: map[string]string{taskA.String(): start.Commitment().String()}, used: map[string]bool{}}
+		if err := l.Apply(p, x); !errors.Is(err, errNonCanonical) {
+			t.Errorf("%s: the ledger took it: %v", name, err)
+		}
 	}
 }
 

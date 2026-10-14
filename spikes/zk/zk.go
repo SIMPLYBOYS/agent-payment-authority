@@ -102,7 +102,7 @@ func Hash(in ...*big.Int) *big.Int {
 		var e fr.Element
 		e.SetBigInt(x)
 		b := e.Bytes()
-		h.Write(b[:])
+		h.Write(b[:]) // canonical 32 bytes below r: MiMC's Write cannot refuse them
 	}
 	return new(big.Int).SetBytes(h.Sum(nil))
 }

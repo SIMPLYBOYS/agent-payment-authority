@@ -21,6 +21,15 @@ ITEMS = [  # (name, test filter, expected regex, old, new)
      "api.AssertIsEqual(c.CNew, next)", "api.AssertIsEqual(next, next)"),
     ("the nullifier is the task's", "^TestProverRefuses$/^another_task's_nullifier", r"another task's nullifier: a proof was made",
      "api.AssertIsEqual(c.Nullifier, n)", "api.AssertIsEqual(n, n)"),
+    # Review S2: the other range checks, each by the case that isolates it.
+    ("balance_old in range", "^TestProverRefuses$/^a_committed_balance_of_2\\^64", r"a committed balance of 2\^64: a proof was made",
+     "\tapi.ToBinary(c.BalanceOld, 64)\n", ""),
+    ("the intent's hi limb is in range", "^TestProverRefuses$/^intent_hi_limb", r"intent hi limb of 2\^128: a proof was made",
+     "\tapi.ToBinary(c.IntentHi, 128)\n", ""),
+    ("the intent's lo limb is in range", "^TestProverRefuses$/^intent_lo_limb", r"intent lo limb of 2\^128: a proof was made",
+     "\tapi.ToBinary(c.IntentLo, 128)\n", ""),
+    ("the intent's lo limb is constrained", "^TestTamperedPublicInputs$/^another_intent_\\(lo_limb\\)", r"another intent \(lo limb\): verified",
+     "\tapi.ToBinary(c.IntentLo, 128)\n", ""),
     ("the intent's hi limb is constrained", "^TestTamperedPublicInputs$/^another_intent_\\(hi_limb\\)", r"another intent \(hi limb\): verified",
      "\tapi.ToBinary(c.IntentHi, 128)\n", ""),
 ]
