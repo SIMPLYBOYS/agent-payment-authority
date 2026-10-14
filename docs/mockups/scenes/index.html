@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UX2 多商務場景原型</title>
+<style>
+  /* UX2 clickable prototype (docs/commercial-scenes.md). Static: no API, no product, no art files.
+     Scene drawings are placeholder geometry; the real scenes are Unity + LimeZu (UX3). */
+  :root { --bg: #0e1120; --panel: #161a2e; --panel2: #1d2240; --line: #2b3157; --text: #eef0fa; --muted: #9aa1c4; --dim: #6d74a0;
+    --a: #7fb6ff; --b: #ffb27a; --teal: #3dd6c6; --amber: #f5b84a; --green: #4cd97b; --red: #ff7a7a; --violet: #b49cff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 "PingFang TC", "Noto Sans TC", system-ui, sans-serif; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .concept { min-height: 26px; padding: 4px 10px; background: repeating-linear-gradient(135deg, #3a2a00 0 12px, #4a3500 12px 24px); color: #ffd98a; font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; gap: 14px; text-align: center; flex-wrap: wrap; }
+  header { min-height: 64px; display: flex; align-items: center; gap: 12px; padding: 8px 28px; border-bottom: 1px solid var(--line); background: #11152a; flex-wrap: wrap; }
+  .brand { font-size: 20px; font-weight: 800; }
+  .brand small { display: block; font-size: 12px; font-weight: 500; color: var(--muted); }
+  .chip { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .chip.fake { background: #3a2f12; color: var(--amber); border: 1px solid #6b5520; }
+  .chip.net { background: #13304a; color: #9fd0ff; border: 1px solid #275a85; }
+  .chip.fix { background: #2a2245; color: var(--violet); border: 1px solid #4b3d80; }
+  .spacer { flex: 1; }
+  .evid { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; font-size: 13px; }
+  .tabs { display: flex; gap: 6px; }
+  .tab { background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: 13px; color: var(--muted); }
+  .tab[aria-pressed="true"] { border-color: #ffd84d; color: var(--text); background: #2a2614; }
+  main { display: grid; grid-template-columns: 1fr 392px; gap: 20px; padding: 20px 28px 22px; }
+  .stage { background: var(--panel); border-radius: 14px; padding: 16px; display: grid; grid-template-rows: auto 1fr auto; gap: 12px; }
+  .stage h2, .side h2 { margin: 0; font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: .08em; }
+  .canvas { position: relative; border-radius: 10px; overflow: hidden; background: #1a1f38; aspect-ratio: 16 / 9.4; }
+  .canvas svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .progress { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .step { background: var(--panel2); border-radius: 10px; padding: 9px 12px; border: 1px solid var(--line); }
+  .step b { display: block; font-size: 14px; } .step span { font-size: 12px; color: var(--muted); }
+  .step.done { border-color: #2c6b4a; } .step.done b::before { content: "✓ "; color: var(--green); }
+  .step.now { border-color: var(--amber); background: #2b2614; } .step.now b { color: var(--amber); }
+  .step.bad { border-color: #7a3b3b; background: #2a1616; } .step.bad b { color: var(--red); }
+  .step.todo b { color: #6d74a0; }
+  .side { display: grid; gap: 14px; align-content: start; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .todo { background: linear-gradient(180deg, #2b2410, #221d0f); border-color: #6b5520; }
+  .todo .k { font-size: 12px; color: var(--amber); font-weight: 700; }
+  .todo h3, .card h3 { margin: 4px 0; font-size: 19px; }
+  .todo p, .card p { margin: 0 0 10px; color: #d9d2b8; font-size: 14px; }
+  .card p { color: var(--muted); }
+  .bad-card { background: #2a1616; border-color: #7a3b3b; } .bad-card .k { color: var(--red); font-size: 12px; font-weight: 700; }
+  .btn { border-radius: 10px; padding: 9px 15px; font-weight: 700; border: 1px solid transparent; }
+  .btn.primary { background: var(--amber); color: #1a1405; } .btn.ghost { border-color: var(--line); background: transparent; }
+  .kv { display: grid; grid-template-columns: 76px 1fr; gap: 2px 10px; font-size: 13px; margin-bottom: 10px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; }
+  .feed ol { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+  .feed li { display: grid; grid-template-columns: 48px 1fr; color: var(--muted); } .feed li b { color: var(--text); font-weight: 600; }
+  .foot { font-size: 11px; color: var(--dim); }
+  /* picker */
+  .picker { padding: 22px 28px; display: grid; gap: 16px; }
+  .picker h1 { margin: 0; font-size: 22px; } .picker > p { margin: 0; color: var(--muted); }
+  .scenes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .scene { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 0; overflow: hidden; display: grid; }
+  .scene:hover, .scene:focus-visible { border-color: #ffd84d; outline: none; }
+  .scene .art { position: relative; aspect-ratio: 16 / 9.4; background: #1a1f38; }
+  .scene .art svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .scene .body { padding: 14px 16px 16px; display: grid; gap: 8px; }
+  .scene h3 { margin: 0; font-size: 19px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .scene .tag { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+  .tag.main { background: #183a2a; color: var(--green); } .tag.demo { background: #2a2245; color: var(--violet); }
+  .scene dl { margin: 0; display: grid; grid-template-columns: 84px 1fr; gap: 4px 10px; font-size: 13px; }
+  .scene dt { color: var(--muted); } .scene dd { margin: 0; }
+  .shared { background: var(--panel); border-radius: 14px; padding: 12px 16px; font-size: 13px; color: var(--muted); }
+  .shared b { color: var(--text); }
+  /* evidence drawer */
+  .drawer { position: fixed; top: 90px; right: 0; bottom: 0; width: 520px; background: #12162b; border-left: 1px solid var(--line); padding: 18px 20px; overflow: auto; box-shadow: -12px 0 30px #0008; }
+  .drawer[hidden] { display: none; }
+  .drawer h2 { margin: 0 0 10px; font-size: 17px; }
+  .drawer table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .drawer td { border-top: 1px solid var(--line); padding: 6px 4px; vertical-align: top; } .drawer td:first-child { color: var(--muted); width: 120px; }
+  .drawer .src { color: var(--dim); font-size: 11px; }
+  @media (max-width: 760px) {
+    header { padding: 8px 14px; } main { grid-template-columns: 1fr; padding: 12px 14px; }
+    .progress { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; } .step { padding: 6px; } .step span { display: none; } .step b { font-size: 12px; }
+    .scenes { grid-template-columns: 1fr; } .picker { padding: 14px; } .drawer { width: 100%; top: 0; }
+    .hide-narrow { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="concept">UX2 概念稿／示意資料／未實作　·　不是執行畫面，不能當作 runtime 證據　·　場景圖形為自製示意（正式畫面為 Unity＋LimeZu，UX3）</div>
+<header>
+  <div class="brand" id="brand">Agent 代你購物<small>同一套委託、請購、核准與付款，三種商務情境</small></div>
+  <span class="chip fake">fake 展示（不執行模型）</span>
+  <span class="chip net hide-narrow">Base Sepolia 測試網（付款未啟用）</span>
+  <span class="chip fix" id="fixchip" hidden>示範情境：商品為示意資料</span>
+  <div class="spacer"></div>
+  <nav class="tabs hide-narrow" aria-label="畫面">
+    <button class="tab" data-view="picker">選擇情境</button>
+    <button class="tab" data-view="task">任務進行中</button>
+    <button class="tab" data-view="ask">需要你決定</button>
+  </nav>
+  <button class="evid" id="evid">查看證據</button>
+</header>
+<div id="app"></div>
+<aside class="drawer" id="drawer" hidden aria-label="證據"></aside>
+<script>
+// ---- the three scenes: same states, different business objects ----
+const SCENES = {
+  data: { name: "資料研究室", tag: ["main", "主場景：完整交易閉環"], role: "研究助理 Agent", who: "客人 A", color: "#7fb6ff",
+    task: "買一份韓國市場簡報（數位資料）", item: "韓國市場簡報", price: "0.50", deliver: "下載終端：付款確認後解鎖檔案",
+    decide: "超過 0.10 的單筆要你核准", source: "既有示意商店（x402 報價）；P2 接上測試網付款後才算真實閉環",
+    shop: "示意資料商店", box: "下載終端（付款確認後解鎖）", browse: "在報告書架看目錄，取得報價", spot: [78, 40], wait: "在櫃台等你核准",
+    zones: [["入口", 4, 62, 14, 34, "#1e2a4a"], ["報告書架（選購・報價）", 22, 10, 40, 40, "#2b2246"], ["櫃台・核准", 66, 52, 30, 44, "#3a2c1c"], ["下載終端（交付）", 66, 10, 30, 34, "#16352f"]],
+    props: [[26, 18, 9, 7, "#8a6cff"], [37, 18, 9, 7, "#8a6cff"], [48, 18, 9, 7, "#8a6cff"], [26, 32, 9, 7, "#8a6cff"], [37, 32, 9, 7, "#8a6cff"], [74, 18, 8, 16, "#3dd6c6"], [84, 62, 9, 24, "#7a5a3c"]] },
+  cafe: { name: "街角咖啡", tag: ["demo", "示範情境（fixture）"], role: "午餐 Agent", who: "客人 B", color: "#ffb27a",
+    task: "訂一份 12:30 取餐的午餐套餐", item: "午餐套餐（雞肉三明治＋拿鐵）", price: "0.08", deliver: "出餐口：付款確認後叫號取餐",
+    decide: "在委託範圍內（≤ 0.10）自動通過；超過才問你", source: "示意菜單資料；沒有接真 POS 或外送",
+    zones: [["入口", 4, 62, 14, 34, "#1e2a4a"], ["點餐看板（選購・報價）", 22, 10, 36, 30, "#3a2a18"], ["櫃台・點餐", 22, 54, 36, 42, "#3a2c1c"], ["出餐口（叫號）", 64, 10, 32, 36, "#16352f"], ["取餐區", 64, 54, 32, 42, "#1d3324"]],
+    props: [[26, 16, 28, 8, "#e0a458"], [28, 66, 10, 18, "#7a5a3c"], [42, 66, 10, 18, "#7a5a3c"], [70, 20, 20, 8, "#3dd6c6"], [70, 70, 8, 8, "#c96b3a"], [82, 70, 8, 8, "#c96b3a"]] },
+  mart: { name: "巷口便利商店", tag: ["demo", "示範情境（fixture）"], role: "採買 Agent", who: "客人 A", color: "#7fb6ff",
+    task: "補辦公室咖啡豆 ×2（每月例行採買）", item: "咖啡豆 1kg ×2", price: "0.36", deliver: "取貨櫃：付款確認後開格",
+    decide: "超過 0.10 的單筆要你核准；憑證被撤銷就自動關閉", source: "示意商品資料；沒有接真庫存或物流",
+    shop: "巷口便利商店（示意）", box: "取貨櫃 B-07（付款確認後開格）", browse: "在貨架比價，取得報價", spot: [52, 40], wait: "在櫃台等你核准",
+    zones: [["入口", 4, 62, 14, 34, "#1e2a4a"], ["貨架（選購・報價）", 22, 10, 40, 44, "#2a3a22"], ["冷藏櫃", 22, 60, 18, 36, "#1c3340"], ["櫃台・核准", 44, 60, 22, 36, "#3a2c1c"], ["取貨櫃（交付）", 70, 10, 26, 86, "#16352f"]],
+    props: [[26, 16, 34, 6, "#b07a3c"], [26, 28, 34, 6, "#b07a3c"], [26, 40, 34, 6, "#b07a3c"], [25, 66, 12, 24, "#7fc8e8"], [50, 70, 10, 18, "#7a5a3c"], [74, 16, 8, 10, "#3dd6c6"], [84, 16, 8, 10, "#3dd6c6"], [74, 30, 8, 10, "#3dd6c6"], [84, 30, 8, 10, "#3dd6c6"]] },
+};
+
+// One customer figure: head, body, feet marker, name card (Unity draws the real one).
+function figure(x, y, color, label, sub) {
+  return `<g transform="translate(${x} ${y})">
+    <ellipse cx="0" cy="11" rx="4.2" ry="1.4" fill="${color}" opacity=".55"/>
+    <rect x="-2.2" y="-1" width="4.4" height="9" rx="1" fill="${color}"/><circle cx="0" cy="-3.4" r="2.6" fill="#f2d3b3"/>
+    <rect x="3.5" y="-8" width="${Math.max(label.length * 1.6, (sub || "").length * 1.75) + 3}" height="${sub ? 7.2 : 4.4}" rx="1.1" fill="#10142a" stroke="${color}" stroke-width=".35"/>
+    <text x="5" y="-4.4" font-size="2.2" fill="#eef0fa" font-weight="700">${label}</text>
+    ${sub ? `<text x="5" y="-1.6" font-size="1.75" fill="${color}">${sub}</text>` : ""}</g>`;
+}
+
+function sceneSVG(s, who) {
+  let g = `<svg viewBox="0 0 100 58.75" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${s.name}（示意）">
+    <defs><pattern id="tile" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="4" fill="#232947"/><path d="M4 0H0V4" fill="none" stroke="#2c3358" stroke-width=".3"/></pattern></defs>
+    <rect width="100" height="58.75" fill="url(#tile)"/><rect width="100" height="5" fill="#3a3f63"/>`;
+  for (const [label, x, y, w, h, c] of s.zones) {
+    const Y = y * .5875, H = h * .5875;
+    g += `<rect x="${x}" y="${Y}" width="${w}" height="${H}" rx="1.2" fill="${c}" opacity=".85"/><text x="${x + 1}" y="${Y + 2.6}" font-size="1.8" fill="#d8dcf2" font-weight="700">${label}</text>`;
+  }
+  for (const [x, y, w, h, c] of s.props) g += `<rect x="${x}" y="${y * .5875}" width="${w}" height="${h * .5875}" rx=".6" fill="${c}"/>`;
+  if (who) g += figure(who.x, who.y, s.color, s.who, who.sub);
+  return g + `<text x="98" y="57.8" font-size="1.4" fill="#6d74a0" text-anchor="end">示意圖形（UX3 改為 Unity＋LimeZu）</text></svg>`;
+}
+
+const STEPS = ["委託", "選購與報價", "請購・Policy", "付款", "交付"];
+function progress(state) {
+  return `<div class="progress">${STEPS.map((n, i) => {
+    const [cls, span] = state[i];
+    return `<div class="step ${cls}"><b>${n}</b><span>${span}</span></div>`;
+  }).join("")}</div>`;
+}
+
+// ---- screens ----
+function picker() {
+  return `<section class="picker"><h1>今天要讓 Agent 去哪裡辦事？</h1>
+    <p>三個情境用同一套「委託 → 請購 → Policy／本人核准 → 付款 → 交付」，只換商品、角色任務與場景。</p>
+    <div class="scenes">${Object.entries(SCENES).map(([k, s]) => `
+      <button class="scene" data-scene="${k}" aria-label="進入${s.name}">
+        <div class="art">${sceneSVG(s, null)}</div>
+        <div class="body"><h3>${s.name}<span class="tag ${s.tag[0]}">${s.tag[1]}</span></h3>
+          <dl><dt>Agent</dt><dd>${s.role}・${s.who}</dd><dt>這次任務</dt><dd>${s.task}</dd>
+            <dt>你要決定</dt><dd>${s.decide}</dd><dt>交付</dt><dd>${s.deliver}</dd><dt>資料來源</dt><dd>${s.source}</dd></dl></div>
+      </button>`).join("")}</div>
+    <div class="shared"><b>三個情境共用</b>：同一位 Policy、同一個核准面板、同一套事件與「查看證據」。示範情境的商品與店家是示意資料，不代表已接真實 POS、庫存或物流；付款在 P2 前都不會發生。</div></section>`;
+}
+
+function stage(s, who, steps, title) {
+  return `<section class="stage"><h2>${s.name} · ${title}</h2><div class="canvas">${sceneSVG(s, who)}</div>${progress(steps)}</section>`;
+}
+
+function feed(rows) {
+  return `<div class="card feed"><h2>剛剛發生</h2><ol>${rows.map(([t, x]) => `<li>${t}<span>${x}</span></li>`).join("")}</ol></div>`;
+}
+
+function task() {
+  const s = SCENES.cafe;
+  return `<main>${stage(s, { x: 40, y: 34, sub: "在櫃台點餐" }, [["done", "預算 2.00・今天內"], ["done", "午餐套餐 0.08"], ["done", "範圍內：自動通過"], ["now", "未啟用（P2）"], ["todo", "付款後叫號"]], "任務進行中")}
+    <div class="side">
+      <div class="card"><div class="k" style="color:var(--green);font-size:12px;font-weight:700">客人 B ・ 不需要你核准</div><h3>${s.item}　${s.price} test USDC</h3>
+        <p>在委託範圍內（每筆 ≤ 0.10），Policy 自動通過。付款功能尚未啟用，所以會停在這裡，不會叫號。</p>
+        <dl class="kv"><dt>店家</dt><dd>街角咖啡（示意）</dd><dt>取餐</dt><dd>12:30・出餐口叫號</dd><dt>憑證</dt><dd>通過（BBS+ 舊版・測試金鑰）</dd></dl>
+        <button class="btn ghost" data-open="evidence">查看技術證據 ›</button></div>
+      <div class="card"><h2>客人 B 的 Agent</h2><p style="margin:6px 0 0"><b style="color:var(--text)">已結束</b>・請購已記錄（Allow）・付款未啟用</p></div>
+      ${feed([["12:04", "<b>B</b> 請購午餐套餐（Policy：範圍內）"], ["12:04", "<b>B</b> 憑證檢查通過"], ["12:03", "<b>B</b> 看了菜單，取得報價"], ["12:03", "<b>B</b> 委託已確認，Agent 進店"]])}
+      <div class="foot">示範情境：菜單與店家是示意資料，沒有接真 POS。</div></div></main>`;
+}
+
+function ask(key, failed) {
+  const s = SCENES[key];
+  const short = key === "mart" ? "咖啡豆 ×2" : "韓國市場簡報";
+  const steps = failed ? [["done", "預算 5.00"], ["done", short + " " + s.price], ["bad", "憑證已撤銷：關閉"], ["todo", "不會付款"], ["todo", "不交付"]]
+    : [["done", "預算 5.00"], ["done", short + " " + s.price], ["now", "等你核准・剩 48 秒"], ["todo", "核准後（P2）"], ["todo", "付款後交付"]];
+  const panel = failed
+    ? `<div class="card bad-card"><div class="k">客人 A ・ 這筆已關閉</div><h3>憑證已撤銷，這筆已關閉</h3>
+        <p style="color:#e8c1c1">你按核准時，系統重新檢查了憑證，發現已被撤銷。沒有發出授權，不會付款；需要時請重新開始任務。</p>
+        <button class="btn ghost" data-open="evidence">查看技術證據 ›</button> <button class="btn ghost" data-failed="0">看正常情況</button></div>`
+    : `<div class="card todo"><div class="k">客人 A ・ 單筆核准</div><h3>${s.item}　${s.price} test USDC</h3>
+        <p>超過委託的單筆上限 0.10，需要你決定。你只核准這一筆，不是之後所有付款。</p>
+        <dl class="kv" style="color:#d9d2b8"><dt>店家</dt><dd>${s.shop}</dd><dt>收款</dt><dd>0x3333…3333・與報價相同</dd><dt>交付</dt><dd>${s.box}</dd><dt>期限</dt><dd>12:06:10（後端時間為準）</dd></dl>
+        <button class="btn primary">核准此筆</button> <button class="btn ghost">拒絕</button>
+        <p style="margin-top:10px"><button class="btn ghost" data-open="evidence">查看技術證據 ›</button> <button class="btn ghost" data-failed="1">看失敗情況</button></p></div>`;
+  return `<main>${stage(s, { x: failed ? 9 : s.spot[0], y: failed ? 50 : s.spot[1], sub: failed ? "離店（已關閉）" : s.wait }, steps, failed ? "失敗：憑證已撤銷" : "需要你決定")}
+    <div class="side">${panel}
+      ${feed(failed ? [["12:05", "<b>A</b> 憑證已撤銷：這筆已關閉（不是 task 取消）"], ["12:05", "你按了核准（後端重新檢查）"], ["12:04", `<b>A</b> 請購${short}（Policy：需要你核准）`]]
+        : [["12:04", `<b>A</b> 請購${short}（Policy：需要你核准）`], ["12:04", "<b>A</b> 憑證檢查通過"], ["12:03", `<b>A</b> ${s.browse}`]])}
+      <div class="foot">${key === "mart" ? "示範情境：商品與店家是示意資料，沒有接真庫存或物流。" : "主場景：P2 接上測試網付款後，這裡會走完付款與下載交付。"}</div></div></main>`;
+}
+
+function evidence(view) {
+  const failed = view.failed;
+  const where = { task: "街角咖啡（示範情境・fixture）", ask: view.scene === "data" ? "資料研究室（主場景）" : "巷口便利商店（示範情境・fixture）" }[view.view];
+  const rows = [["情境", where, "場景設定"],
+    ["契約", "apa.pay.v2", "Store"], ["裁決", view.view === "task" ? "Allow・WITHIN_ALLOW_MAX" : "Ask・HUMAN_APPROVAL_REQUIRED", "Store 事件 POLICY_DECIDED"],
+    ["憑證檢查", "通過：BBS+（舊版，非 W3C bbs-2023）・測試金鑰", "Store 事件 CREDENTIAL_VERIFIED"],
+    ["收尾", failed ? "withdrawn（CREDENTIAL_REVOKED）" : view.view === "task" ? "—（Allow 沒有收尾事件）" : "尚未收尾", "Store"],
+    ["付款", "未付款（payment_status：not_enabled）", "Store"], ["交付", "尚未實作（P2）：不顯示取餐／開格成功", "—"],
+    ["intent_hash", "sha256:f712…0856（後端比對這一份）", "Store"], ["事件鏈", "#1 TASK_STARTED … #6 " + (failed ? "APPROVAL_WITHDRAWN" : "POLICY_DECIDED"), "Store 事件"]];
+  return `<h2>查看證據</h2><p class="foot">與現行 /host 的證據抽屜相同欄位；情境只多一列「情境」說明資料來源。</p>
+    <table>${rows.map(([k, v, src]) => `<tr><td>${k}</td><td>${v}<div class="src">${src}</div></td></tr>`).join("")}</table>
+    <p><button class="btn ghost" data-close="1">關閉</button></p>`;
+}
+
+// ---- state: ?view=picker|task|ask&failed=1&evidence=1 ----
+const q = new URLSearchParams(location.search);
+const view = { view: q.get("view") || "picker", scene: q.get("scene") || "mart", failed: q.get("failed") === "1", evidence: q.get("evidence") === "1" };
+function render() {
+  const app = document.getElementById("app");
+  app.innerHTML = view.view === "task" ? task() : view.view === "ask" ? ask(view.scene, view.failed) : picker();
+  document.getElementById("fixchip").hidden = view.view === "picker" || (view.view === "ask" && view.scene === "data");
+  document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-pressed", String(t.dataset.view === view.view)));
+  const d = document.getElementById("drawer");
+  d.hidden = !view.evidence || view.view === "picker";
+  if (!d.hidden) d.innerHTML = evidence(view);
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.view) Object.assign(view, { view: b.dataset.view, scene: "mart", failed: false, evidence: false });
+  if (b.dataset.scene) Object.assign(view, { view: b.dataset.scene === "cafe" ? "task" : "ask", scene: b.dataset.scene, failed: false, evidence: false });
+  if (b.dataset.failed) view.failed = b.dataset.failed === "1";
+  if (b.dataset.open || b.id === "evid") view.evidence = true;
+  if (b.dataset.close) view.evidence = false;
+  render();
+});
+render();
+</script>
+</body>
+</html>
