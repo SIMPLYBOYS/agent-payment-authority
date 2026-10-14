@@ -76,6 +76,14 @@ contract BudgetTest {
         return S("show-a-01", F.A1B_C_OLD, F.A1B_AMOUNT, F.A1B_C_NEW, F.A1B_N, F.A1B_INTENT, F.A1B_PROOF);
     }
 
+    function forged() internal pure returns (S memory) {
+        return S("show-a-01", F.FORGED_C_OLD, F.FORGED_AMOUNT, F.FORGED_C_NEW, F.FORGED_N, F.FORGED_INTENT, F.FORGED_PROOF);
+    }
+
+    function zero() internal pure returns (S memory) {
+        return S("show-a-01", F.ZERO_C_OLD, F.ZERO_AMOUNT, F.ZERO_C_NEW, F.ZERO_N, F.ZERO_INTENT, F.ZERO_PROOF);
+    }
+
     function b1() internal pure returns (S memory) {
         return S("show-b-01", F.B1_C_OLD, F.B1_AMOUNT, F.B1_C_NEW, F.B1_N, F.B1_INTENT, F.B1_PROOF);
     }
@@ -145,17 +153,42 @@ contract BudgetTest {
         vm.prank(vm.addr(ISSUER_KEY));
         vm.expectRevert(Budget.InvalidCommitment.selector);
         budget.registerTask("show-a-01", R);
+        vm.prank(vm.addr(ISSUER_KEY));
+        vm.expectRevert(Budget.InvalidCommitment.selector);
+        budget.registerTask("show-a-01", 0);
+    }
+
+    function test_ZeroNewCommitment() public {
+        register("show-a-01", F.C0_A);
+        S memory x = a1();
+        x.cNew = 0;
+        bytes memory ps = signed(x);
+        vm.expectRevert(Budget.InvalidCommitment.selector);
+        send(x, ps);
     }
 
     // ---- what must be refused, with nothing written ----
 
+    /// Review S2: a valid zero-amount proof of A's registered state, signed;
+    /// the circuit allows it, so only the contract refuses it (Z2-D4).
     function test_ZeroAmount() public {
         register("show-a-01", F.C0_A);
-        S memory x = a1();
-        x.amount = 0;
+        S memory x = zero();
         bytes memory ps = signed(x);
         vm.expectRevert(Budget.ZeroAmount.selector);
         send(x, ps);
+    }
+
+    /// Review S1: a valid proof from a state the issuer never registered
+    /// (2^64−1, a fresh nullifier), policy-signed: only C_old == current
+    /// ties the proof's balance to the issuer's C0.
+    function test_ForgedOldCommitment() public {
+        register("show-a-01", F.C0_A);
+        S memory x = forged();
+        bytes memory ps = signed(x);
+        vm.expectRevert(Budget.StaleCommitment.selector);
+        send(x, ps);
+        unchanged(x.task, F.C0_A, F.FORGED_N);
     }
 
     function test_UnregisteredTask() public {
@@ -336,12 +369,42 @@ contract BudgetTest {
         send(x, flipped);
     }
 
+    function test_PolicySignatureMalformed() public {
+        register("show-a-01", F.C0_A);
+        S memory x = a1();
+        bytes memory good = signed(x);
+        bytes memory short = new bytes(64);
+        bytes memory v0 = new bytes(65);
+        bytes memory zeroR = new bytes(65);
+        for (uint256 i = 0; i < 64; i++) {
+            short[i] = good[i];
+            v0[i] = good[i];
+            zeroR[i] = i < 32 ? bytes1(0) : good[i];
+        }
+        v0[64] = bytes1(uint8(good[64]) - 27); // 0 or 1 instead of 27 or 28
+        zeroR[64] = good[64];
+        bytes[3] memory bad = [short, v0, zeroR];
+        for (uint256 i = 0; i < 3; i++) {
+            vm.expectRevert(Budget.PolicySignatureInvalid.selector);
+            send(x, bad[i]);
+        }
+    }
+
     // ---- public inputs must be canonical (Z1 finding 2) ----
 
     function test_NullifierPlusR() public {
         register("show-a-01", F.C0_A);
         S memory x = a1();
         x.n += R;
+        bytes memory ps = signed(x);
+        vm.expectRevert(Verifier.PublicInputNotInField.selector);
+        send(x, ps);
+    }
+
+    function test_AmountPlusR() public {
+        register("show-a-01", F.C0_A);
+        S memory x = a1();
+        x.amount += R;
         bytes memory ps = signed(x);
         vm.expectRevert(Verifier.PublicInputNotInField.selector);
         send(x, ps);
@@ -364,7 +427,9 @@ contract BudgetTest {
         bad.amount += 1;
         try this.spendFor(bad) {
             revert("a tampered spend went through");
-        } catch {}
+        } catch (bytes memory reason) {
+            require(bytes4(reason) == Verifier.ProofInvalid.selector, "it failed for another reason");
+        }
         unchanged("show-a-01", F.C0_A, F.A1_N);
         send(a1());
         require(budget.commitment(budget.taskField("show-a-01")) == F.A1_C_NEW, "the resend did not apply");

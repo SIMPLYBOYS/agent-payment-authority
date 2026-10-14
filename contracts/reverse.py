@@ -12,7 +12,7 @@ FORGE = os.path.join(os.path.dirname(HERE), "var/tools/foundry-v1.8.3/bin/forge"
 SRC = "src/Budget.sol"
 ITEMS = [  # (name, forge test, old, new)
     ("a zero amount is refused", "test_ZeroAmount", "        if (amount == 0) revert ZeroAmount();\n", ""),
-    ("C_old is the current commitment", "test_SecondSpendOfAnOldState",
+    ("C_old is the current commitment", "test_ForgedOldCommitment",  # review S1: the only check tying the proof to the issuer's C0
      "if (current == 0 || current != cOld) revert StaleCommitment();", "if (current == 0 || false && current != cOld) revert StaleCommitment();"),
     ("a nullifier is used once", "test_UsedNullifierWithTheCommitmentReinstated",
      "        if (nullifierUsed[nullifier]) revert NullifierUsed();\n", ""),

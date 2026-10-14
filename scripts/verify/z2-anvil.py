@@ -57,14 +57,15 @@ def main():
     log(f"commit {commit}" + (" (tracked changes present)" if dirty else ""))
     log(run([ANVIL, "--version"]).stdout.strip().splitlines()[0])
 
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    rpc = f"http://127.0.0.1:{port}"
-    anvil = subprocess.Popen([ANVIL, "--host", "127.0.0.1", "--port", str(port), "--chain-id", "31337", "--silent"],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    anvil = None
     try:
+        s = socket.socket()  # inside try: a refused bind (a sandbox) still writes the log
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        rpc = f"http://127.0.0.1:{port}"
+        anvil = subprocess.Popen([ANVIL, "--host", "127.0.0.1", "--port", str(port), "--chain-id", "31337", "--silent"],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(100):
             if run([CAST, "chain-id", "--rpc-url", rpc], ok=False).returncode == 0:
                 break
@@ -125,9 +126,12 @@ def main():
         p1 = prove(balance, r0, 500_000, r1, "e2e-1")
         # A tampered amount, signed by the policy layer too: only the proof can refuse it.
         bad = spend(p1, sign(p1, amount=500_001), amount=500_001, mined=True)
-        status = json.loads(bad.stdout).get("status") if bad.stdout.strip().startswith("{") else None
-        check("a tampered amount is mined and fails (status 0); the state is as it was",
-              status == "0x0" and state() == c0["commitment"] and not used(p1["inputs"][4]), f"status {status}")
+        rcpt = json.loads(bad.stdout) if bad.stdout.strip().startswith("{") else {}
+        status, used_gas = rcpt.get("status"), int(rcpt.get("gasUsed", "0x0"), 16)
+        # Well below the 2M limit: a revert, not out-of-gas (review note).
+        check("a tampered amount is mined and fails (status 0, not out of gas); the state is as it was",
+              status == "0x0" and 0 < used_gas < 1_500_000 and state() == c0["commitment"] and not used(p1["inputs"][4]),
+              f"status {status}, gas {used_gas}")
         other = spend(p1, sign(p1, key=KEYS[0]))
         check("another key's policy signature reverts; the state is as it was", other.returncode != 0 and state() == c0["commitment"])
         good = spend(p1, sign(p1))
@@ -150,8 +154,9 @@ def main():
     else:
         check("the flow ran to its end", True)
     finally:
-        anvil.terminate()
-        anvil.wait()
+        if anvil:
+            anvil.terminate()
+            anvil.wait()
     log("result: " + (f"FAIL ({failures})" if failures else "PASS"))
     open(os.path.join(out, "z2-anvil.txt"), "w").write("\n".join(lines) + "\n")
     shutil.rmtree(bin_dir, ignore_errors=True)

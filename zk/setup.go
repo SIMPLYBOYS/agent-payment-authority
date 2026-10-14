@@ -33,9 +33,10 @@ func Compile() (*cs.R1CS, error) {
 }
 
 // Transcript is the ceremony's public record (Z2-D3): what each step
-// produced, by hash, so anyone can re-verify the contributions in order
-// and recompute the keys. It holds no secret: each contributor's toxic
-// waste lived only in this process's memory.
+// produced, by hash. The serialized steps themselves are not kept, so a
+// third party can check the keys against these hashes but cannot re-verify
+// the contributions without them. It holds no secret: each contributor's
+// toxic waste lived only in this process's memory.
 type Transcript struct {
 	Contributors     string   `json:"contributors"`
 	Entropy          string   `json:"entropy"`
