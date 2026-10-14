@@ -7,14 +7,14 @@
   "bend": {"x": 7.5, "y": 3.2}, "front": {"x": 7.5, "y": 1.6}, "counter": {"x": 8.5, "y": 1.6},
   "props": [
     {"key": "shelf-1", "x": 2.5, "y": 4.2}, {"key": "shelf-2", "x": 3.5, "y": 4.2}, {"key": "shelf-3", "x": 5.5, "y": 4.2},
-    {"key": "shelf-4", "x": 6.5, "y": 4.2}, {"key": "fridge-1", "x": 9.0, "y": 5.3}, {"key": "fridge-2", "x": 10.2, "y": 5.3},
+    {"key": "shelf-4", "x": 6.5, "y": 4.2}, {"key": "fridge-1", "x": 8.6, "y": 5.3},
     {"key": "counter", "x": 10.3, "y": 1.0}, {"key": "counter-2", "x": 10.3, "y": 2.4}, {"key": "sign-open", "x": 1.5, "y": 7.3},
     {"key": "cart", "x": 2.8, "y": 0.4}, {"key": "fruit", "x": 5.0, "y": 0.3},
-    {"key": "locker-1", "x": 10.5, "y": 3.9}, {"key": "locker-2", "x": 11.5, "y": 3.9}
+    {"key": "parcel-locker", "x": 10.75, "y": 4.6}
   ],
   "notes": [
     {"text": "Shelves - pick & quote", "x": 4.5, "y": 7.45},
     {"text": "Counter - approval", "x": 10.3, "y": 0.55},
-    {"text": "Lockers - after payment", "x": 10.4, "y": 6.0}
+    {"text": "Lockers - after payment", "x": 10.6, "y": 7.45}
   ]
 }

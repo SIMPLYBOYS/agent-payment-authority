@@ -76,7 +76,7 @@
 ## 5 Unity（做法 B）
 
 - **佈置檔**：`Resources/Layouts/{data,cafe,mart}.json`，見第 3 節。
-  - **便利商店**：沿用原雜貨店的佈置，加上取貨櫃。水果架下移 0.1 格：舊佈置在 v2 時，B 偏移後的走道會碰到它。舊測試只跑 v1，所以沒抓到。
+  - **便利商店**：沿用原雜貨店的佈置，加上取貨櫃。取貨櫃換成 Condominium 82（Aaron 10/15「取貨櫃素材可以更換」）後，為了放得下，拿掉一台冰櫃（fridge-2），冰櫃 1 左移 0.4 格。水果架下移 0.1 格：舊佈置在 v2 時，B 偏移後的走道會碰到它。舊測試只跑 v1，所以沒抓到。
   - **資料研究室**：櫃台點左移一格，放得下 4 格寬的電腦桌（核准櫃台）。
 - **ShopBuilder**：依 `limezu-assets.txt` 把每個鍵的圖與裁切範圍放進 ShopView（`art`、`artKeys`、`artRects`）。同一張主題圖只匯入設定一次。不再寫死道具位置。
 - **ShopView**：
@@ -135,10 +135,11 @@ UX3 新增的 13 項（Aaron 10/15 核准）：
 |---|---|---|
 | 資料研究室 | `bookshelf-wide`、`bookshelf-narrow`、`terminal`、`pc-desk`、`library-desk` | `5_Classroom_and_library_32x32.png` 主題圖裁切。素材包的 Classroom_and_Library singles 資料夾其實是樂器，所以從主題圖裁 |
 | 街角咖啡 | `menu-board`、`ice-counter`、`cafe-counter`、`ice-display`、`cafe-table`、`cafe-chair` | Ice Cream Shop singles 14、102、100、37、75、76 |
-| 巷口便利商店 | `locker-1`、`locker-2` | Gym singles 114、115 |
+| 巷口便利商店 | `parcel-locker` | Condominium singles 82（站立式信箱櫃，一排小格門）。原本核准的 Gym 114、115 看起來像灰色面板；Aaron 10/15「取貨櫃素材可以更換」 |
 
 - `library-desk` 已匯入，但目前的佈置沒有用到。
-- Gym 114／115 是一組灰色櫃門的左端與中段，畫面上讀起來像一個灰色櫃子。若要更像取貨櫃，可以加 116（右端），或換別的素材，這需要另外核准。
+- 取貨櫃只放櫃子，不放包裹：交付區在付款前保持空（UX2-D4）。
+- 之前匯入的 Gym 114、115 已從清單移除；本機 `Assets/LimeZu/` 裡的舊副本（git 忽略）沒有用到。
 
 ## 9 已知限制
 
