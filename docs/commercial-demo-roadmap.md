@@ -163,7 +163,7 @@
 | S1 WebAuthn（Ready） | 未領取 | 實機註冊、assertion、錯 challenge | **A1**（spike） |
 | FR-8；驗收 20、36（WebAuthn 部分） | 未實作 | WebAuthn 接入 Approval／grant | **A2**（必要） |
 | S2 BBS+（Ready） | 未領取 | 選庫、derived proof 正反測試 | **C1** |
-| S3 gnark（Ready） | **Z1 Done（Aaron 10/14）**；Z1-D1 已決定（兩個 128 位元 limb） | Z1-D2～D4 留到 Z2 開工前決定 | **Z1** |
+| S3 gnark（Ready） | **Z1 Done（Aaron 10/14）**；Z1-D1 已決定（兩個 128 位元 limb） | Z1-D3 已決定 MiMC；Z1-D2、D4 留到 Z2 開工前決定 | **Z1** |
 | S4-A（契約影響 Accepted；ADR Proposed） | 研究順序已接受 | 採用或保留基線的決定 | **P0**（文件決定） |
 | S4-B（Waiting；不阻塞 M1） | 未開始 | 候選 PoC | 只有在 P0 決定「採用候選」時才需要；保留基線則不阻擋 P1／P2 |
 | W2 keystore 與分離服務；驗收 6、9、33 | 未實作 | Signer、Approval、grant 鑰隔離與服務間認證 | **P1** |

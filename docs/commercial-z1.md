@@ -1,7 +1,7 @@
 # Z1 ZK 額度電路 v1 spike：電路、量測、`intent_hash` 映射與 Z2 前置條件
 
 > 2026-10-14，Claude Code。依 vault〈Claude-Code-Z1-ZK額度電路v1Spike派工-20261013〉與 Aaron「我們先做 Z1」。分支 `commercial-z1`（從 main `87c9ebf`）。
-> **Z1 Done（Aaron 10/14：「Z1 先記為 done 並 merge」）；已 fast-forward merge 進本機 main，未 push。** Z1-D2～D4 留到 Z2 開工前決定。
+> **Z1 Done（Aaron 10/14：「Z1 先記為 done 並 merge」）；已 fast-forward merge 進本機 main，未 push。** Z1-D3 已決定用 MiMC；Z1-D2、D4 留到 Z2 開工前決定。
 > **狀態：spike 完成；第一次獨立上下文 review not pass，修正後第二次 review pass（第 10 節）。** 開工時查證：repo 與 vault 都沒有 Z1／S3 的既有交付（`spikes/` 只有 `bbs`、`webauthn`），因此從頭建立。
 > 本片**只證明本機 proof primitive 可行**：不接 Policy、Signer、Store，不建合約、不部署、不碰 testnet、RPC、faucet 或付款。資料全部合成；setup 是本機單方 setup，不是可信儀式。**不能宣稱預算已被鏈上保護。**
 
@@ -131,7 +131,7 @@
 
 1. **Z1-D1（Aaron 10/14 已決定）**：`intent_hash` 採選項 A，拆成兩個 128 位元 limb（Aaron：「Z1-D1 先按照建議的方式拆成兩份」）。寫進正式付款契約前仍另行 review。「proof 只保證綁在這個 `intent_hash`，不保證公開的 `amount` 等於 intent 裡的金額」列為已知限制（Aaron：「也是已知的情況，後續看是否需要做調整」）；由誰在電路外核對（合約或 Signer），或是否改採選項 E，後續再定。
 2. **Z1-D2** task 的欄位映射（建議沿用 31 bytes 截斷，或由合約 `registerTask` 配發欄位內的 ID）。
-3. **Z1-D3** 雜湊：MiMC（本 spike）或 Poseidon2（約束較少、較常見）。合約不需要重算雜湊，只比對承諾，所以不影響鏈上成本。
+3. **Z1-D3（Aaron 10/14 已決定）**：雜湊先用 MiMC（Aaron：「雜湊先走 MiMC」），與本 spike 相同。Poseidon2 約束較少、較常見，之後若要換再另行決定。合約不需要重算雜湊，只比對承諾，所以不影響鏈上成本。
 4. **Z1-D4** setup 方式與展示時的標示（第 7 節）。
 5. gnark 升到 ≥ v0.16.4（需要 Go ≥ 1.26.8）。
 6. **公開輸入必須是標準值**（發現 2）：
