@@ -180,7 +180,7 @@ ITEMS = [
      [("internal/store/pay.go", "\t\tif ss.ExpiresAt != t.sessionDeadline(p) {", "\t\tif false {")]),
     ("P1a-R: R3 recovery checks the grant's times", go("./internal/store/", "^TestPayRecoveryDeadlines$", ("TestPayRecoveryDeadlines/the_grant's_expiry_moved_later", r"recovery accepted it")),
      [("internal/store/pay.go", "if string(c) != ss.grantBody ||", "if false && (string(c) != ss.grantBody ||"),
-      ("internal/store/pay.go", "g.ApproverID != ss.ResolvedBy.String {", "g.ApproverID != ss.ResolvedBy.String) {")]),
+      ("internal/store/pay.go", 'resolvedBy[ss.ID] != g.AuthorizationMethod+"/"+g.SignerApprovalID {', 'resolvedBy[ss.ID] != g.AuthorizationMethod+"/"+g.SignerApprovalID) {')]),  # re-anchored: A2 extended the condition
     ("P1a-R: R3 expiry uses the recomputed deadline", go("./internal/store/", "^TestPayExpiryIgnoresStoredDeadline$", ("TestPayExpiryIgnoresStoredDeadline", r"at the recomputed deadline")),
      [("internal/store/ops.go", "due = t.now >= t.sessionDeadline(p)", "due = t.now >= p.Session.ExpiresAt")]),
     ("P1a-R: R2 an operation never resends after its capability changed", node("web/test/p1a.test.mjs", "R2 (throw): after a failed attempt, A→B and A→B→A send nothing with the new capability", r"no resend after the switch"),
@@ -188,7 +188,8 @@ ITEMS = [
     ("P1a-R: R1 the target compares the item, capability and generation", node("web/test/p1a.test.mjs", "R1: sameTarget: the same item of the same capability and generation; never another", r"another session"),
      [("web/adapter.js", 'const TARGET_KEYS = ["gen", "sim", "consumer", "task", "session", "intent"];', 'const TARGET_KEYS = ["gen", "consumer"];')]),
     ("P1a-R: R1 ui: a rebuilt panel gives the focus back to the same item only", ui("scripts/verify/p1a-ui.mjs", "R1 rebuild: show-a-06 expires, the panel shows show-a-04, the focus left for the heading"),
-     [("web/host.js", "if (same && !same.disabled && A.sameTarget(had.target, target, submits)) same.focus();", "if (same && !same.disabled) same.focus();")]),
+     [("web/host.js", 'const submits = had.kind === "approval-approve" || had.kind === "approval-deny";\n    if (same && !same.disabled && A.sameTarget(had.target, target, submits)) same.focus();',
+       'const submits = had.kind === "approval-approve" || had.kind === "approval-deny";\n    if (same && !same.disabled) same.focus();')]),  # re-anchored: A2 copied the line into its own panel
     # P1-b (docs/commercial-p1b-design.md 8): the Signer, schema 4 and the
     # Host client; run them alone with "^P1b:".
     ("P1b: R1 a delegation's version must match", go("./internal/signer/", "^TestRefusalsConsumeNothing$", ("TestRefusalsConsumeNothing", r"another version: <nil>")),
@@ -239,7 +240,7 @@ ITEMS = [
     ("P1b: keystore: key files private to their owner", go("./cmd/apa-signer/", "^TestAssemblyRefusesItsInputs$", ("TestAssemblyRefusesItsInputs", r"group-readable key file")),
      [("internal/signer/keystore.go", "if !fi.Mode().IsRegular() || fi.Mode().Perm()&0o077 != 0 {", "if !fi.Mode().IsRegular() {")]),
     ("P1b: IPC: a caller uid not configured is refused", go("./internal/signer/", "^TestServerCaller$", ("TestServerCaller", r"a uid not configured")),
-     [("internal/signer/server.go", "if !ok || uid < 0 || !core.cfg.allows(uint32(uid)) {", "if !ok || uid < 0 {")]),
+     [("internal/signer/server.go", "if !ok || uid < 0 || !cfg.allows(uint32(uid)) {", "if !ok || uid < 0 {")]),  # re-anchored: the check moved into callers()
     ("P1b: R4 Store: a purchase keeps its one request ID", go("./internal/store/", "^TestPaymentDelegationPath$", ("TestPaymentDelegationPath", r"resend 0")),
      [(PM, "paymentWhere(`a.task_id = ? AND a.purchase_order_id = ?`)", "paymentWhere(`a.task_id = ? AND a.purchase_order_id = ? AND 0`)")]),
     ("P1b: R4 Store: schema 4 accepts delegation only", go("./internal/store/", "^TestPaymentSchemaChecks$", ("TestPaymentSchemaChecks/method_simulated", r"non-delegation payment attempt accepted")),
