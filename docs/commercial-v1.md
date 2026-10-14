@@ -20,6 +20,25 @@
 | D8 | 下載：PyPI、Hugging Face（兩個模型）、openslr（LibriSpeech test-clean），約 2–3 GB，放 `var/voice/`。版本與 sha256 記在第 2 節；之後全部離線執行。 |
 | D9 | 只接 A2 的本人裝置核准；模擬核准標「語音未評估」。實機輪（Aaron 的聲音與真實裝置）等 review 後另外核准。 |
 
-## 2 工具與資料（下載紀錄）
+## 2 工具與資料（下載紀錄，10/15）
 
-（下載後填入版本、來源與 sha256。）
+都在 `var/voice/`（git 忽略），合計約 3.3 GB（含 uv 下載快取）。下載後全部離線執行（`HF_HUB_OFFLINE=1`）。
+
+| 項目 | 版本／來源 | 授權 | 核對 |
+|---|---|---|---|
+| Python 環境 | Python 3.12.6（Homebrew），uv venv `var/voice/.venv`；鎖定檔 `var/voice/requirements.txt` | — | sha256 `7069fd96…2964d9` |
+| 主要套件 | torch 2.2.2、torchaudio 2.2.2（CPU）、speechbrain 1.0.3、faster-whisper 1.1.1、ctranslate2 4.8.3、numpy 1.26.4、huggingface-hub 0.36.2 | BSD／Apache-2.0／MIT | PyPI |
+| 語音轉文字模型 | Hugging Face `Systran/faster-whisper-small`，commit `536b0662742c02347bc0e980a01041f333bce120`，473 MB | MIT | 固定 commit |
+| 聲紋模型 | Hugging Face `speechbrain/spkrec-ecapa-voxceleb`，commit `0f99f2d0ebe89ac095bcc5903c4dd8f72b367286`，92 MB | Apache-2.0 | 固定 commit |
+| 評測資料 | openslr 12 LibriSpeech `test-clean.tar.gz`（330.6 MB；40 位說話者、2620 段） | CC BY 4.0 | md5 `32fa31d2…f4849a9`，與 openslr 公布的 md5sum 相同 |
+
+**安裝過程的修正**（照實記錄）：
+- huggingface-hub 2.x 不帶 `requests`，也不是這兩個套件預期的 API，所以鎖在 1.0 以下。
+- Hugging Face 的 xet 下載用戶端連不上（沒有走沙箱的代理），改用一般 HTTP（`HF_HUB_DISABLE_XET=1`）。
+- 想把 `av` 鎖在 15 以下，但這台機器沒有 14.x 的預編譯版本，已撤回。sidecar 自己用 soundfile 把錄音解碼成 PCM 再交給模型，不經過 `av`。
+- SpeechBrain 的設定檔把權重路徑寫成 Hub 名稱，載入時用 `pretrained_path` 改指向本機目錄。
+- ctranslate2 與 PyTorch 在 Intel Mac 上各帶一份 OpenMP runtime，放在同一個行程會衝突。所以語音轉文字和聲紋各用一個獨立行程。不採用 `KMP_DUPLICATE_LIB_OK`，因為官方說明它可能讓結果出錯。
+
+**冒煙測試**（離線；macOS TTS 美佳 zh_TW 與 Ting-Ting zh_CN 唸「核准 0.36 test USDC，付給巷口便利商店，代碼 4712」）：
+- 語音轉文字：金額 0.36、代碼 4712 兩個聲音都對；商家名稱出現同音字（巷口→相口／向口、商店→商点），輸出是簡體。每段約 3.5 秒（CPU）。所以商家比對要比讀音，不能比字形。
+- 聲紋：兩個不同聲音的 cosine 相似度 0.515（門檻待評測決定）。
