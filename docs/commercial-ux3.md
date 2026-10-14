@@ -1,7 +1,8 @@
 # UX3 三個情境的場景與資料
 
 > 2026-10-15，Claude Code。依 Aaron「我們開始 UX3」與 UX2 的拆分（[commercial-scenes.md](commercial-scenes.md) 第 9、10 節）。分支 `commercial-ux3`（從 main `1148bc6`）。
-> **狀態：實作完成；獨立上下文 review APPROVE（無 must-fix），五項 should-fix 已修（第 11 節）。待 Aaron 驗收。** 只用 fake CLI、合成資料與測試金鑰；不付款、不連鏈。咖啡店與便利商店是示範情境：示意商品，沒有接 POS、庫存或物流。
+> **UX3 Done（Aaron 10/15：「UX3 先標 done」）；未 merge、未 push。**
+> 實作完成；獨立上下文 review APPROVE（無 must-fix），五項 should-fix 已修（第 11 節）。 只用 fake CLI、合成資料與測試金鑰；不付款、不連鏈。咖啡店與便利商店是示範情境：示意商品，沒有接 POS、庫存或物流。
 
 ## 1 Aaron 的核准
 
