@@ -8,12 +8,14 @@
 // fake CLI (no model, no network, no key but synthetic test keys), a test
 // HOME, the Unity Web build, Chrome over the DevTools protocol. The token
 // file stands in for pairing; no token, code or capability is logged, and
-// every screenshot is taken with the token fields empty.
+// every screenshot is taken with the token fields empty. Last, acceptance
+// 38: no key seed or credential signature appears in the page, the API,
+// the database, the traces or the host's log.
 //
 //   node scripts/verify/c2-ui.mjs [--unity-build DIR] [--out DIR]
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, chmodSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startDemo, startChrome, sleep } from "./harness.mjs";
@@ -162,6 +164,29 @@ try {
     && await b.waitFor(`(document.querySelector("#approval .approval-head[data-state=approved] h3") || {}).textContent === "已核准（模擬），未啟用付款"`, 15000)
     && (await hostTask("show-b-01")).purchases[0].approval.grant.authorization_method === "simulated", await text("#approval-body"));
   await shot("c2-1440x900-4-b-approved");
+
+  // ---- 5 acceptance 38: no key or signature bytes where the demo writes or shows ----
+  mark("mask scan");
+  const raw = (f) => readFileSync(join(cred, f), "utf8").trim();
+  const secrets = [["issuer seed", JSON.parse(raw("issuer.key")).seed], ["status key", raw("status.key")],
+    ...["consumer-a", "consumer-b"].map((c) => ["holder key " + c, raw("holder/" + c + ".key")])];
+  for (const task of ["show-a-01", "show-b-01"]) {
+    const sig = JSON.parse(raw("holder/" + task + ".cred")).signature;
+    secrets.push(["signature " + task, sig], ["signature hex " + task, Buffer.from(sig, "base64").toString("hex")]);
+  }
+  const places = [["page", await b.evaluate(`document.documentElement.outerHTML`)], ["host log", demo.log()]];
+  for (const task of ["show-a-01", "show-b-01"]) places.push(["task " + task, JSON.stringify(await hostTask(task))], ["events " + task, JSON.stringify(await hostEvents(task))]);
+  for (const f of ["demo.db", "demo.db-wal"]) if (existsSync(join(state, f))) places.push([f, readFileSync(join(state, f)).toString("latin1")]);
+  for (const f of readdirSync(join(state, "runs"), { recursive: true })) {
+    try { places.push(["runs/" + f, readFileSync(join(state, "runs", String(f))).toString("latin1")]); } catch {} // a directory
+  }
+  const found = [];
+  for (const [what, v] of secrets) {
+    if (typeof v !== "string" || v.length < 32) { found.push(what + ": not read"); continue; }
+    for (const [where, text] of places) if (text.includes(v) || text.includes(v.slice(0, 32))) found.push(what + " in " + where);
+  }
+  check("no key seed or credential signature in the page, the API, the database, the traces or the log (" + secrets.length + " values, " + places.length + " places)",
+    found.length === 0, found.join("; "));
   check("the flow ran to its end", true);
 } catch (e) {
   check("the flow ran to its end", false, String(e && e.stack || e).slice(0, 400));

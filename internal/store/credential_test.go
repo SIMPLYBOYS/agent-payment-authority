@@ -290,7 +290,7 @@ func TestSubmitV2(t *testing.T) {
 	for _, c := range []struct {
 		o               paycontract.PurchaseOrder
 		verdict, reason string
-	}{{allow, "Allow", "WITHIN_ALLOW_MAX"}, {ask, "Ask", "HUMAN_APPROVAL_REQUIRED"}} {
+	}{{allow, "Allow", "WITHIN_ALLOW_MAX"}, {ask, "Ask", "HUMAN_APPROVAL_REQUIRED"}, {v2Of(t, v.denied), "Deny", "ASSET_NOT_ALLOWED"}} {
 		r, err := v.buy(s, sessA, c.o)
 		if err != nil || r.Replay || r.Purchase.Decision.PolicyVerdict != c.verdict || r.Purchase.Decision.Reason != c.reason {
 			t.Fatalf("%s: %+v %v", c.verdict, r.Purchase.Decision, err)
@@ -303,7 +303,8 @@ func TestSubmitV2(t *testing.T) {
 		}
 	}
 	got := strings.Join(eventTypes(t, s, sessA), " ")
-	want := "TASK_STARTED DELEGATION_BOUND PURCHASE_PROPOSED CREDENTIAL_VERIFIED POLICY_DECIDED PURCHASE_PROPOSED CREDENTIAL_VERIFIED POLICY_DECIDED APPROVAL_SESSION_OPENED"
+	want := "TASK_STARTED DELEGATION_BOUND PURCHASE_PROPOSED CREDENTIAL_VERIFIED POLICY_DECIDED PURCHASE_PROPOSED CREDENTIAL_VERIFIED POLICY_DECIDED APPROVAL_SESSION_OPENED" +
+		" PURCHASE_PROPOSED CREDENTIAL_VERIFIED POLICY_DECIDED"
 	if got != want {
 		t.Fatalf("events:\n got %s\nwant %s", got, want)
 	}
@@ -415,8 +416,43 @@ func (v *v2env) buyRaw(s *Store, sess contracts.Session, body []byte) (Result, e
 	return v.buy(s, sess, o)
 }
 
-// A list older than one already seen is not used (design 6): rollback.
+// A list older than one already seen, or another list of the same
+// version, is not used (design 6): rollback.
 func TestSubmitV2StatusRollback(t *testing.T) {
+	t.Run("same version, another list", func(t *testing.T) {
+		v := newV2(t)
+		s := v.started()
+		// A copy of the directory signs version 2 without the revocation the
+		// original's version 2 has: one version, two contents.
+		twin := filepath.Join(t.TempDir(), "twin")
+		if err := os.CopyFS(twin, os.DirFS(v.credDir)); err != nil {
+			t.Fatal(err)
+		}
+		filepath.WalkDir(twin, func(p string, d os.DirEntry, err error) error {
+			if d.IsDir() {
+				return os.Chmod(p, 0o700)
+			}
+			return os.Chmod(p, 0o600)
+		})
+		td, err := credential.OpenDir(twin)
+		if err != nil || td.Refresh(t0) != nil || v.dir.Revoke("99", t0) != nil {
+			t.Fatalf("lists: %v", err)
+		}
+		if r, err := v.buy(s, sessA, v2Of(t, v.allow)); err != nil || r.Purchase.Decision.PolicyVerdict != "Allow" {
+			t.Fatalf("first: %+v %v", r.Purchase.Decision, err)
+		}
+		other, _ := os.ReadFile(filepath.Join(twin, "status.json"))
+		if err := os.WriteFile(filepath.Join(v.credDir, "status.json"), other, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		o := v2Of(t, variant(t, v.allow, 51))
+		if _, err := v.buy(s, sessA, o); err != nil {
+			t.Fatal(err)
+		}
+		if res, detail, _ := verification(t, v.path, o.Intent.PurchaseOrderID); res != "status_unavailable" || detail != "STATUS_LIST_ROLLBACK" {
+			t.Fatalf("same version, another list: %s/%s", res, detail)
+		}
+	})
 	v := newV2(t)
 	s := v.started()
 	old, err := os.ReadFile(filepath.Join(v.credDir, "status.json"))
@@ -485,14 +521,23 @@ func TestIssueChallenge(t *testing.T) {
 	if b, _, _ := s.IssueChallenge(sessA, body); b.ID != a.ID {
 		t.Fatal("the same intent got another challenge")
 	}
+	// A retry with another intent (its time window moved) within the 60 s:
+	// a new challenge, the old one expired.
+	moved := v2Of(t, v.allow)
+	moved.PaymentBinding.ValidBefore++
+	mb, _ := json.Marshal(moved)
+	c, _, err := s.IssueChallenge(sessA, mb)
+	if err != nil || c.ID == a.ID || c.IntentHash == a.IntentHash {
+		t.Fatalf("another intent: %+v %v", c, err)
+	}
 	v.clock.Add(ChallengeSeconds)
 	b, _, _ := s.IssueChallenge(sessA, body)
-	if b.ID == a.ID {
+	if b.ID == a.ID || b.ID == c.ID {
 		t.Fatal("an expired challenge was reused")
 	}
 	var states string
 	rawDB(t, v.path).QueryRow(`SELECT group_concat(state, ' ') FROM (SELECT state FROM credential_challenges ORDER BY issued_at)`).Scan(&states)
-	if states != "expired issued" {
+	if states != "expired expired issued" {
 		t.Fatalf("states %q", states)
 	}
 	if _, err := s.SubmitV2(sessA, body, Presented{Presentation: v.present(b)}); err != nil {
@@ -604,12 +649,9 @@ func TestV2ApprovalRecheck(t *testing.T) {
 	}
 }
 
-// The webauthn path closes the same way: outcome closed, so the Host
-// abandons the Signer's approval (design 7.1).
-func TestV2WebAuthnRecheck(t *testing.T) {
-	v := newV2(t)
-	s := v.started()
-	id, intent := v.askV2(s)
+// verifying takes task-a's Ask to a webauthn attempt the Signer verified.
+func verifying(t *testing.T, s *Store, id string) {
+	t.Helper()
 	begin(t, s, "consumer-a", id, "att-req-00000001", "approve")
 	for _, u := range []AttemptUpdate{{From: []string{"requested"}, State: "challenged", ChallengeID: "chl-1"}, {From: []string{"challenged"}, State: "verifying", VerifyRequestID: "ver-1"}} {
 		u.ConsumerID, u.RequestID = "consumer-a", "att-req-00000001"
@@ -617,11 +659,29 @@ func TestV2WebAuthnRecheck(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// The webauthn path: a valid credential is approved with the webauthn
+// grant of v2; after a revocation it closes the same way as the simulated
+// one: outcome closed, so the Host abandons the Signer's approval (7.1).
+func TestV2WebAuthnRecheck(t *testing.T) {
+	v := newV2(t)
+	s := v.started()
+	id, intent := v.askV2(s)
+	verifying(t, s, id)
+	r, err := s.ResolveWebAuthn(wa("consumer-a", "att-req-00000001", "approve", "hap-1", intent))
+	if err != nil || r.Outcome != "approved" || r.Grant == nil || r.Grant.Version != paycontract.V2 || r.Grant.AuthorizationMethod != "webauthn" {
+		t.Fatalf("valid: %+v %v", r, err)
+	}
+	v = newV2(t)
+	s = v.started()
+	id, intent = v.askV2(s)
+	verifying(t, s, id)
 	st, _ := v.dir.ReadCredential("task-a")
 	if err := v.dir.Revoke(st.Credential["status"], t0); err != nil {
 		t.Fatal(err)
 	}
-	r, err := s.ResolveWebAuthn(wa("consumer-a", "att-req-00000001", "approve", "hap-1", intent))
+	r, err = s.ResolveWebAuthn(wa("consumer-a", "att-req-00000001", "approve", "hap-1", intent))
 	if err != nil || r.Outcome != "closed" || r.Grant != nil || r.Purchase.ApprovalClosed != "withdrawn" || r.Purchase.ClosedReason != "CREDENTIAL_REVOKED" || lastReason(t, s) != "CREDENTIAL_REVOKED" {
 		t.Fatalf("%+v %v", r, err)
 	}
