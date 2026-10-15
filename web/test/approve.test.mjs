@@ -165,3 +165,39 @@ test("a lost deny is not worded as an approval; a verified attempt's outcome spe
   assert.match(AP.outcomeText(200, { attempt: { state: "lost", decision: "deny" } }, "deny")[1], /沒有拒絕/);
   assert.deepEqual(AP.outcomeText(200, { outcome: "closed", attempt: { state: "verified" } }, "approve")[0], "closed");
 });
+
+// V1 (docs/commercial-v1.md): the recording's format, and the words of
+// each voice outcome. A failure never reads as approved; an unavailable
+// voice always says it is degraded.
+test("V1: a recording becomes a 16 kHz mono 16-bit WAV, at most ten seconds", () => {
+  const rate = 48000;
+  const tone = new Float32Array(rate * 2).map((_, i) => Math.sin(i / 10));
+  const wav = AP.wav16k(tone, rate);
+  const dv = new DataView(wav.buffer);
+  const tag = (o) => String.fromCharCode(...wav.subarray(o, o + 4));
+  assert.equal(tag(0), "RIFF"); assert.equal(tag(8), "WAVE"); assert.equal(tag(36), "data");
+  assert.equal(dv.getUint16(20, true), 1); assert.equal(dv.getUint16(22, true), 1); assert.equal(dv.getUint32(24, true), 16000); assert.equal(dv.getUint16(34, true), 16);
+  assert.equal(AP.seconds(wav), 2);
+  assert.equal(dv.getUint32(40, true), wav.length - 44);
+  assert.equal(AP.seconds(AP.wav16k(new Float32Array(rate * 12), rate)), 10, "clamped to ten seconds");
+  assert.equal(AP.wav16k(new Float32Array([2, -2]), 16000).subarray(44).length, 4);
+  assert.deepEqual([...new Int16Array(AP.wav16k(new Float32Array([2, -2]), 16000).slice(44).buffer)], [32767, -32767], "clipped, not wrapped");
+  assert.equal(atob(AP.base64(wav)).length, wav.length);
+});
+
+test("V1: the words of a voice outcome", () => {
+  const item = (grant) => ({ purchase: { approval: { grant } } });
+  const [k1, t1] = AP.outcomeText(200, { outcome: "approved", item: item({ authorization_method: "webauthn", voice: "verified" }) }, "approve");
+  assert.equal(k1, "ok"); assert.match(t1, /語音挑戰/);
+  const [k2, t2] = AP.outcomeText(200, { outcome: "approved", item: item({ authorization_method: "webauthn", voice: "unavailable", voice_reason: "VOICE_TIMEOUT" }) }, "approve");
+  assert.equal(k2, "warn"); assert.match(t2, /降級：語音不可用（語音服務逾時）/);
+  for (const code of AP.VOICE_FAILURES) {
+    const [k, t] = AP.outcomeText(200, { outcome: "denied", code, attempt: { state: "closed" } }, "approve");
+    assert.equal(k, "deny", code);
+    assert.ok(t.startsWith("語音挑戰未通過（" + AP.VOICE[code] + "）") && !t.includes("你已拒絕"), t);
+  }
+  assert.equal(AP.outcomeText(200, { outcome: "denied" }, "deny")[1], "你已拒絕這筆（已驗證裝置）。", "an approver's own deny is still worded as before");
+  assert.match(AP.grantLine({ jti: "grant-abc", authorization_method: "webauthn", voice: "unavailable", voice_reason: "VOICE_DEVICE_UNAVAILABLE" }), /降級：語音不可用（沒有麥克風/);
+  assert.ok(!AP.grantLine({ jti: "grant-abc", authorization_method: "webauthn" }).includes("語音"), "an A2 grant without a voice says nothing of one");
+  assert.match(AP.codeText("VOICE_NOT_ENROLLED"), /聲紋/);
+});

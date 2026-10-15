@@ -507,9 +507,31 @@ export const REASONS_V1 = {
   SIMULATED_APPROVAL: "模擬核准（主持人扮演，不是本人驗證）", APPROVER_DENIED: "核准者拒絕", QUOTE_CHANGED: "報價已改變，需重新請購",
   WEBAUTHN_APPROVAL: "本人核准（Signer 驗證已登記的裝置）",
   // apa.pay.v2 (C2): the credential's reasons.
+  VOICE_CHALLENGE_FAILED: "語音挑戰未通過，這筆已拒絕", // V1
   CREDENTIAL_INVALID: "憑證驗證未通過", CREDENTIAL_REVOKED: "憑證已撤銷", CREDENTIAL_STATUS_UNAVAILABLE: "憑證狀態無法確認",
   AUTHORIZATION_EXPIRED: "憑證已過期", CONFIG_MISSING: "缺少設定（沒有憑證）",
 };
+
+// V1: the voice outcome codes, in words. A failure denies the purchase; an
+// unavailable voice only degrades the approval (and says so).
+export const VOICE = {
+  VOICE_REPLAY: "錄音是重播（這段錄音已用過）",
+  VOICE_PHRASE_MISMATCH: "唸的內容和這筆不符（金額、商家或代碼）",
+  VOICE_SPEAKER_MISMATCH: "聲音不是已登記的核准者",
+  VOICE_AUDIO_INVALID: "錄音無法辨識",
+  VOICE_DEVICE_UNAVAILABLE: "沒有麥克風，或沒有允許使用麥克風",
+  VOICE_SERVICE_UNAVAILABLE: "語音服務無法使用",
+  VOICE_TIMEOUT: "語音服務逾時",
+};
+export const VOICE_FAILURES = ["VOICE_REPLAY", "VOICE_PHRASE_MISMATCH", "VOICE_SPEAKER_MISMATCH", "VOICE_AUDIO_INVALID"];
+export const voiceText = (c) => VOICE[c] || c || "?";
+
+// voiceEventText: a voice outcome event, in words (V1).
+export function voiceEventText(e) {
+  if (e.event_type === "VOICE_CHALLENGE_VERIFIED") return "通過（金額、商家、代碼與聲紋）";
+  if (e.event_type === "VOICE_CHALLENGE_FAILED") return "未通過：" + voiceText(e.code) + "；這筆已拒絕，不發授權";
+  return "降級：" + voiceText(e.code) + "（仍需摘要確認與裝置驗證）";
+}
 
 // C2: an Ask withdrawn for a credential reason (design 7.1) is worded by its
 // reason, never as the task's cancellation (HOST_CANCELLED).
@@ -716,6 +738,7 @@ export function evidence(snapshot, po, ctx) {
         ["憑證細節", "issuer " + str(p.credential.issuer || "—") + " · 狀態索引 " + str(p.credential.status_index || "—") + " · 清單第 " + str(p.credential.status_list_version || "—")
           + " 版 · challenge " + short(p.credential.challenge_id || "—") + " · verifier " + str(p.credential.verifier), "Store 事件 CREDENTIAL_VERIFIED"],
       ] : []),
+      ...(mine.filter((e) => e.purchase_order_id === po && /^VOICE_/.test(e.event_type)).map((e) => ["語音挑戰", voiceEventText(e), "Store 事件 " + e.event_type])),
       ...(p.approval ? [
         ["核准會話", str(p.approval.approval_session_id) + " · " + str(p.approval.state) + (p.approval.resolved_by ? " · " + str(p.approval.resolved_by) : ""), "Store"],
         ["grant", p.approval.grant ? str(p.approval.grant.jti) + " · " + str(p.approval.grant.authorization_method) + " · audience " + str(p.approval.grant.audience)

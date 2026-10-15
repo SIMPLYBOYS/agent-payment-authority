@@ -593,3 +593,14 @@ test("UX3 evidence: the scene row", () => {
   assert.equal(src, "Host 場景目錄");
   assert.ok(!rows("")[0][0].startsWith("情境"));
 });
+
+// V1: the evidence drawer shows the purchase's voice outcome from its event.
+test("V1 evidence: the voice row", () => {
+  const snap = expiredAsk();
+  const voiced = { ...snap, events: [...snap.events.slice(0, 3), ev(4, "VOICE_UNAVAILABLE", { purchase_order_id: "po-1", code: "VOICE_TIMEOUT" }), { ...snap.events[3], sequence: 5 }] };
+  const rows = A.evidence(voiced, "po-1", { mode: "live", catalog: null }).sections.find((x) => x.title === "裁決").rows;
+  const v = rows.find(([k]) => k === "語音挑戰");
+  assert.deepEqual(v, ["語音挑戰", "降級：語音服務逾時（仍需摘要確認與裝置驗證）", "Store 事件 VOICE_UNAVAILABLE"]);
+  assert.ok(!A.evidence(snap, "po-1", { mode: "live", catalog: null }).sections.find((x) => x.title === "裁決").rows.some(([k]) => k === "語音挑戰"));
+  assert.equal(A.voiceEventText({ event_type: "VOICE_CHALLENGE_FAILED", code: "VOICE_REPLAY" }), "未通過：錄音是重播（這段錄音已用過）；這筆已拒絕，不發授權");
+});

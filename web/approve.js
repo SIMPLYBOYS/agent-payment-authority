@@ -5,7 +5,9 @@
 // the device is asked, converts WebAuthn's binary fields, and words each
 // state with fixed texts (never "approved" for something unknown).
 
-import { b64u, unb64u, byDevice } from "./adapter.js";
+import { b64u, unb64u, byDevice, VOICE, VOICE_FAILURES, voiceText } from "./adapter.js";
+
+export { VOICE, VOICE_FAILURES };
 
 // sameChallenge: the challenge the host returned is the one this click
 // asked for (consumer, session, intent and decision); otherwise the page
@@ -56,7 +58,18 @@ export const CODES = {
   SESSION_DECIDED: "這筆已經有本人決定",
   AUTHORIZATION_EXPIRED: "已過期（後端時間為準）",
   INTENT_MISMATCH: "請購內容與這次驗證不一致",
+  // V1 (docs/commercial-v1.md)
+  VOICE_REQUIRED: "這次核准需要語音挑戰",
+  VOICE_NOT_ENROLLED: "核准者還沒有登記聲紋，無法核准（請找管理者）",
+  VOICE_MERCHANT_UNKNOWN: "Signer 沒有這個收款人的唸法設定，無法核准",
 };
+
+
+// voiceGrant: what a webauthn grant says of its voice ("" when none was asked).
+export function voiceGrant(g) {
+  if (!g || !g.voice) return "";
+  return g.voice === "verified" ? "語音挑戰通過" : "降級：語音不可用（" + voiceText(g.voice_reason) + "）";
+}
 export const codeText = (c) => CODES[c] || "未通過（" + (c || "?") + "）";
 
 const DECISION = { approve: "核准", deny: "拒絕" };
@@ -66,7 +79,11 @@ const DECISION = { approve: "核准", deny: "拒絕" };
 export function outcomeText(status, body, decision) {
   const b = body || {};
   const a = b.attempt || {};
+  const grant = b.item && b.item.purchase && b.item.purchase.approval && b.item.purchase.approval.grant;
+  if (status === 200 && b.outcome === "approved" && grant && grant.voice === "verified") return ["ok", "本人核准已驗證（裝置＋語音挑戰），付款未啟用。"];
+  if (status === 200 && b.outcome === "approved" && grant && grant.voice === "unavailable") return ["warn", "本人核准已驗證（裝置）；" + voiceGrant(grant) + "。付款未啟用。"];
   if (status === 200 && b.outcome === "approved") return ["ok", "本人核准已驗證，付款未啟用。"];
+  if (status === 200 && b.outcome === "denied" && VOICE_FAILURES.includes(b.code)) return ["deny", "語音挑戰未通過（" + voiceText(b.code) + "），這筆已拒絕；不會付款。"];
   if (status === 200 && b.outcome === "denied") return ["deny", "你已拒絕這筆（已驗證裝置）。"];
   if (status === 200 && b.outcome === "mismatch") return ["error", "Signer 的結果和這次操作不一致，沒有採用。"];
   if (status === 200 && (b.outcome === "closed" || b.outcome === "superseded")) return ["closed", "裝置的驗證沒有被採用（這筆已關閉，或 Signer 的核准已過期）；不會付款。"];
@@ -148,7 +165,7 @@ export function panelNote(note, stored, pending) {
 export function grantLine(g) {
   const id = String(g.jti).slice(0, 18) + "…";
   return g.authorization_method === "webauthn"
-    ? "本人核准紀錄 " + id + "（authorization_method webauthn，由 Signer 驗證；Host 只記錄）・付款未啟用"
+    ? "本人核准紀錄 " + id + "（authorization_method webauthn，由 Signer 驗證；Host 只記錄）" + (g.voice ? "・" + voiceGrant(g) : "") + "・付款未啟用"
     : "模擬授權 " + id + "（authorization_method " + g.authorization_method + "，audience " + g.audience + "）· Signer 樁：拒絕模擬授權（GRANT_METHOD_NOT_ACCEPTED）· 未啟用付款";
 }
 
@@ -156,4 +173,30 @@ export function grantLine(g) {
 export function sourceText(s) {
   const auth = s && s.authenticator === "virtual" ? "virtual authenticator（測試用）" : "已登記的裝置";
   return "Agent：" + (s && s.agent === "fake" ? "fake" : "?") + "・驗證器：" + auth + "・付款：" + (s && s.payment === "disabled" ? "未啟用" : "?");
+}
+
+// V1: a recording as the Signer takes it: a WAV, 16 kHz mono 16-bit PCM,
+// at most maxSeconds. samples are the microphone's floats at rate; they
+// are resampled by linear interpolation.
+export function wav16k(samples, rate, maxSeconds = 10) {
+  const n = Math.min(Math.floor(samples.length * 16000 / rate), 16000 * maxSeconds);
+  const out = new DataView(new ArrayBuffer(44 + n * 2));
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) out.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, "RIFF"); out.setUint32(4, 36 + n * 2, true); str(8, "WAVE"); str(12, "fmt ");
+  out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true); out.setUint32(24, 16000, true);
+  out.setUint32(28, 32000, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true); str(36, "data"); out.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {
+    const x = i * rate / 16000, j = Math.floor(x), f = x - j;
+    const v = (samples[j] || 0) * (1 - f) + (samples[j + 1] || 0) * f;
+    out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, v)) * 0x7fff, true);
+  }
+  return new Uint8Array(out.buffer);
+}
+
+export const seconds = (wav) => (wav.length - 44) / 32000;
+
+export function base64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
 }

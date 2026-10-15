@@ -39,6 +39,7 @@ import { createHostCreds } from "./hostcreds.js";
 import { createScene } from "./scene.js";
 import * as A from "./adapter.js";
 import * as AP from "./approve.js";
+import * as V from "./voice.js";
 
 const $ = (id) => document.getElementById(id);
 const READY_MS = 5000; // readiness is read every 5 s while the page is visible
@@ -1283,7 +1284,17 @@ function renderA2() {
     }
     const shown = a2Op && a2Op.session === ap.approval_session_id ? null : AP.panelNote(a2Note, stored, pending);
     if (a2Op && a2Op.session === ap.approval_session_id) {
-      const n = el("p", "approval-msg", a2Op.phase === "device" ? "請在裝置上完成驗證…" : a2Op.phase === "verify" ? "結果確認中，請不要重複操作。" : "準備驗證中…");
+      if (a2Op.phase === "voice") { // V1: the phrase to read, and the end of the recording
+        const box = el("div", "approval-voice");
+        box.append(el("p", "approval-voice-label", "請唸出下面這句（錄音中，最多 10 秒；錄音只用來比對，不會保存）"), el("p", "approval-voice-phrase", a2Op.phrase));
+        const stop = el("button", "approval-voice-stop", "唸完了");
+        stop.type = "button";
+        stop.disabled = !a2Op.stop;
+        stop.addEventListener("click", () => a2Op && a2Op.stop && a2Op.stop());
+        box.append(stop);
+        parts.push(box);
+      }
+      const n = el("p", "approval-msg", a2Op.phase === "voice" ? "錄音中…" : a2Op.phase === "device" ? "請在裝置上完成驗證…" : a2Op.phase === "verify" ? "結果確認中，請不要重複操作。" : "準備驗證中…");
       n.dataset.kind = "busy";
       n.setAttribute("role", "status");
       parts.push(n);
@@ -1355,6 +1366,17 @@ async function a2Act(item, decision) {
     }
     if (!AP.sameChallenge(r.body.challenge, { consumer, session, intent: p.intent_hash, decision })) return done("error", "回傳的資料和你這次的操作不一致，已停止，沒有要求裝置驗證。");
     const requestId = r.body.attempt.request_id; // the authoritative one when shared
+    // V1: an approve challenge may ask for its phrase to be read first; the
+    // recording goes with the assertion. No microphone: sent as such (degraded).
+    const prompt = decision === "approve" && r.body.challenge.display && r.body.challenge.display.voice;
+    let voice;
+    if (prompt) {
+      Object.assign(a2Op, { phase: "voice", phrase: prompt.phrase, stop: null });
+      renderControl();
+      voice = await V.record(prompt.max_seconds || 10, (stop) => { if (a2Op) { a2Op.stop = stop; renderControl(); } });
+      if (stale()) return;
+      if (voice.short) return done("idle", "錄音不到 1 秒，沒有送出；這筆仍在等你決定，請再按核准並唸完整句。");
+    }
     a2Op.phase = "device";
     renderControl();
     let cred;
@@ -1370,7 +1392,7 @@ async function a2Act(item, decision) {
     a2Op.phase = "verify";
     renderControl();
     const v = await a2Call(consumer, "/api/approvals/" + encodeURIComponent(session) + "/assertion",
-      { request_id: requestId, verify_request_id: crypto.randomUUID(), assertion: AP.assertionJSON(cred) });
+      { request_id: requestId, verify_request_id: crypto.randomUUID(), assertion: AP.assertionJSON(cred), ...(voice ? { voice } : {}) });
     if (stale()) return;
     if (v.status === 0) return done("warn", "結果確認中，請不要重複操作。");
     const [kind, text] = AP.outcomeText(v.status, v.body, decision);
