@@ -337,9 +337,13 @@ Aaron 10/16「先做開發模式（A）」。這一輪用你的帳號在 `var/v1
 
 **試用**（每一筆都是「以 A 模擬」→「建立委託」→「確認並開始」→ 等「需要你處理」）
 
-- **試用期間不要重啟 Host（終端機 3）。** 每次啟動 Host 都會開一個新的資料庫，task 又從 `show-a-01` 開始編號。會話 ID 由 task 算出（`SessionID(task, po)`），但 Signer 的資料（`var/v1-dev/data`）會一直留著，所以已經有決定的會話，會被 Signer 以 `SESSION_DECIDED` 拒絕（2026-10-16 實機試用時遇到：show-a-01 到 06 都已用過）。
-- 已用過的 task 要跳過時，只要開始那一筆、等 60 秒的核准期限過去就好，不用按核准。下一筆會用下一個 task（registry 共有 `show-a-01` 到 `show-a-20`）。
-- 正式部署（/opt）也是同一個 Signer 長期保存，所以重啟 Host 一樣會撞號。這一點尚未處理：要等 Aaron 決定 present-a2 是否要在多次啟動之間保留 Host 資料庫。
+- **Host 資料庫沿用（Aaron 2026-10-16：「讓 present-a2 在多次啟動之間保留 Host 資料庫，讓 task 不會重複使用」）。**
+  - 先前的問題：每次啟動 Host 都開一個新的資料庫，task 又從 `show-a-01` 開始。會話 ID 由 task 算出（`SessionID(task, po)`），而 Signer 會保留每個已決定的會話，所以重啟後被 Signer 以 `SESSION_DECIDED` 拒絕（實機試用時遇到：show-a-01 到 06）。
+  - 現在：`make present-a2` 的 Host 資料庫和 trace 改放 `var/a2-host-<Signer socket 路徑的 12 位 sha256>/`，每次啟動都沿用；配對 token 和建置的程式仍在每次新的 `var/present-XXXXXX`。啟動時終端機會印出「A2 的 Host 資料庫沿用 …」。
+  - 一個 Signer 對應一個 Host 資料庫：開發模式（`var/v1-dev/run/signer.sock`）和 /opt 各用各的。
+  - 開發模式那份（`var/a2-host-b0fa460f7678`）先放進了舊場次 `var/present-tWKEpN` 的資料庫與 trace（`.backup`，已用 show-a-01 到 06），所以下一筆是 show-a-07。
+  - 上限：每位客人 20 個 task（registry `show-a-01` 到 `show-a-20`），在同一個 Signer 的生命週期內用完就是 `NO_FREE_TASK`。刪掉 `var/a2-host-…` 而 Signer 資料還在，撞號就會回來。
+  - 這些都只是 demo 的做法；正式的 Host 本來就只有一個長期資料庫。
 
 7. **唸對 5 次**：
    - 按「用已登記的裝置核准」→ 唸畫面上的整句（含四位代碼）→「唸完了」→ PIN；

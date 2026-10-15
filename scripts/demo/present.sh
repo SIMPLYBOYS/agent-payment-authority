@@ -36,7 +36,13 @@
 # APA_APPROVALS_SIGNER (fake only; make present-a2): the Unix socket of a
 # running apa-signer serve-approvals; the person's approval then runs on
 # http://localhost:<port>/host, which is the page opened (WebAuthn needs
-# localhost, not 127.0.0.1; docs/commercial-a2.md).
+# localhost, not 127.0.0.1; docs/commercial-a2.md). Its database and traces
+# are then kept across starts, one place per Signer socket,
+# var/a2-host-<12 hex of the socket's path>: the Signer keeps every
+# session it decided and a session's ID is derived from its task, so a new
+# database would start again at show-a-01 and be refused SESSION_DECIDED
+# (V1 device round). Its 20 show-* tasks per consumer then last for that
+# Signer's lifetime; removing that directory brings the refusals back.
 # APA_AUTHENTICATOR_SOURCE (with it): device (default) or virtual, what the
 # page declares the authenticator to be (review N17).
 # APA_PRESENT_CREDENTIALS=1 (fake only; make present-c2): build apa-issuer,
@@ -77,6 +83,16 @@ base=${APA_PRESENT_DIR:-$root/var}
 [ -d "$base" ] || mkdir -m 700 "$base" || stop "cannot make ${base}"
 w=$(mktemp -d "$base/present-XXXXXX") || stop "cannot make a session directory under ${base}"
 mkdir -m 700 "$w/db" "$w/runs" "$w/tok" || stop "cannot make ${w}/db, runs and tok"
+db=$w/db
+runs=$w/runs
+if [ -n "$signer" ]; then
+	sabs=$(cd "$(dirname "$signer")" && pwd)/$(basename "$signer") || stop "cannot resolve ${signer}"
+	keep=$base/a2-host-$(printf %s "$sabs" | shasum -a 256 | cut -c1-12)
+	{ mkdir -p "$keep/db" "$keep/runs" && chmod 700 "$keep" "$keep/db" "$keep/runs"; } || stop "cannot make ${keep}"
+	db=$keep/db
+	runs=$keep/runs
+	echo "present: A2 的 Host 資料庫沿用 ${keep}（Signer ${sabs}；task 不重複使用）" >&2
+fi
 "$GO" build -o "$w/demo" ./cmd/demo || stop "建置失敗；沒有啟動任何程式（也不用舊的）"
 if [ "$mode" = fake ]; then
 	"$GO" build -o "$w/fake-claude" ./cmd/fake-claude || stop "fake CLI 建置失敗；沒有啟動任何程式"
@@ -103,9 +119,9 @@ else
 	set --
 	[ -z "$signer" ] || set -- --approvals-signer "$signer" --authenticator-source "$authsrc"
 	[ -z "$creds" ] || set -- "$@" --credential-dir "$w/cred"
-	APA_ADDR=$addr APA_DB_PATH=$w/db/fake.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \
+	APA_ADDR=$addr APA_DB_PATH=$db/fake.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \
 		--fake-cli "$w/fake-claude" --scenarios "${APA_PRESENT_SCENARIOS:-testdata/demo/scenarios.json}" --registry testdata/demo/registry.json \
-		--trace-dir "$w/runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" "$@" &
+		--trace-dir "$runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" "$@" &
 fi
 pid=$!
 trap 'kill -INT "$pid" 2>/dev/null' INT TERM
