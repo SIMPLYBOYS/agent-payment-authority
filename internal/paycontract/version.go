@@ -48,7 +48,8 @@ type Spec struct {
 
 // askV1 is apa.pay.v1's Ask table, as it was before versions.
 var askV1 = [][2]string{{"pending", "HUMAN_APPROVAL_REQUIRED"}, {"expired", "APPROVAL_TIMEOUT"}, {"withdrawn", "HOST_CANCELLED"},
-	{"approved", "SIMULATED_APPROVAL"}, {"approved", "WEBAUTHN_APPROVAL"}, {"denied", "APPROVER_DENIED"}, {"superseded", "QUOTE_CHANGED"}}
+	{"approved", "SIMULATED_APPROVAL"}, {"approved", "WEBAUTHN_APPROVAL"}, {"denied", "APPROVER_DENIED"}, {"superseded", "QUOTE_CHANGED"},
+	{"denied", "VOICE_CHALLENGE_FAILED"}} // V1
 
 // apa.pay.v2 also withdraws an Ask whose credential is revoked, whose
 // status cannot be read or which expired before an approval landed

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -37,6 +38,7 @@ type approvalStore interface {
 	UpdateApprovalAttempt(store.AttemptUpdate) (store.ApprovalAttempt, error)
 	ApprovalAttemptOf(consumer, requestID string) (store.ApprovalAttempt, store.AttemptStart, error)
 	ResolveWebAuthn(store.WebAuthnResult) (store.ApprovalResult, error)
+	ResolveVoiceFailure(consumer, requestID, code string) (store.ApprovalResult, error)
 	ApprovalOf(consumer, session string) (store.ApprovalItem, error)
 }
 
@@ -210,18 +212,19 @@ func (a *api) approvalChallenge(w http.ResponseWriter, r *http.Request) {
 
 func (a *api) approvalAssertion(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		RequestID       string          `json:"request_id"`
-		VerifyRequestID string          `json:"verify_request_id"`
-		Assertion       json.RawMessage `json:"assertion"`
+		RequestID       string              `json:"request_id"`
+		VerifyRequestID string              `json:"verify_request_id"`
+		Assertion       json.RawMessage     `json:"assertion"`
+		Voice           *signer.VoiceAnswer `json:"voice,omitempty"` // V1: relayed as it is; the Signer judges it
 	}
-	g, ok := a.approvalGuard(w, r, true, true, 48<<10, &req)
+	g, ok := a.approvalGuard(w, r, true, true, 512<<10, &req) // V1: a recording of up to 10 s, base64
 	if !ok {
 		return
 	}
 	h := a.approve
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	status, out := h.assertion(g.ConsumerID, r.PathValue("session_id"), req.RequestID, req.VerifyRequestID, req.Assertion)
+	status, out := h.assertion(g.ConsumerID, r.PathValue("session_id"), req.RequestID, req.VerifyRequestID, req.Assertion, req.Voice)
 	h.answer(w, "assertion", g.ConsumerID, r.PathValue("session_id"), status, out)
 }
 
@@ -390,7 +393,7 @@ func (h *approvals) onChallenge(consumer string, st store.AttemptStart, ans sign
 // assertion is POST .../assertion: the verify request ID is written
 // before the call; the Signer verifies; only its decision moves the
 // session.
-func (h *approvals) assertion(consumer, session, requestID, verifyID string, assertion json.RawMessage) (int, approvalReply) {
+func (h *approvals) assertion(consumer, session, requestID, verifyID string, assertion json.RawMessage, voice *signer.VoiceAnswer) (int, approvalReply) {
 	if !requestIDFormat.MatchString(requestID) || !requestIDFormat.MatchString(verifyID) || len(assertion) == 0 {
 		return http.StatusBadRequest, approvalReply{Error: "bad_request"}
 	}
@@ -414,7 +417,7 @@ func (h *approvals) assertion(consumer, session, requestID, verifyID string, ass
 		return http.StatusServiceUnavailable, approvalReply{Error: "store_unavailable", Attempt: &a}
 	}
 	st.Attempt = b
-	return h.onVerify(consumer, st, h.signer.Verify(signer.VerifyRequest{VerifyRequestID: verifyID, ChallengeID: b.ChallengeID, Order: st.Order, Assertion: assertion}))
+	return h.onVerify(consumer, st, h.signer.Verify(signer.VerifyRequest{VerifyRequestID: verifyID, ChallengeID: b.ChallengeID, Order: st.Order, Assertion: assertion, Voice: voice}))
 }
 
 // onVerify applies the Signer's answer to a verify request (sent now, or
@@ -425,6 +428,15 @@ func (h *approvals) onVerify(consumer string, st store.AttemptStart, ans signerc
 	case signerclient.KindOK:
 		return h.resolve(consumer, st, ans.Reply)
 	case signerclient.KindRefused:
+		if slices.Contains(paycontract.VoiceFailures, ans.Code) { // V1: a failed voice challenge denies the session
+			res, err := h.st.ResolveVoiceFailure(consumer, a.RequestID, ans.Code)
+			if err != nil {
+				fmt.Fprintf(h.out, "demo: voice failure not recorded: %s\n", store.CodeOf(err))
+				return http.StatusServiceUnavailable, approvalReply{Error: "store_unavailable", Code: ans.Code, Attempt: &a, StateNotSaved: true}
+			}
+			b, _, _ := h.st.ApprovalAttemptOf(consumer, a.RequestID)
+			return http.StatusOK, approvalReply{Attempt: &b, Outcome: res.Outcome, Code: ans.Code}
+		}
 		switch ans.Code {
 		case "CHALLENGE_CLOSED", "CHALLENGE_EXPIRED":
 			state := map[string]string{"CHALLENGE_CLOSED": "closed", "CHALLENGE_EXPIRED": "expired"}[ans.Code]
@@ -451,7 +463,7 @@ func (h *approvals) onVerify(consumer string, st store.AttemptStart, ans signerc
 func (h *approvals) resolve(consumer string, st store.AttemptStart, r signer.ApprovalReply) (int, approvalReply) {
 	a := st.Attempt
 	res, err := h.st.ResolveWebAuthn(store.WebAuthnResult{ConsumerID: consumer, RequestID: a.RequestID, Decision: r.Decision, SignerApprovalID: r.ApprovalID,
-		ApproverID: r.ApproverID, CredentialRef: r.CredentialRef, IntentHash: r.IntentHash, ExpiresAt: r.ExpiresAt})
+		ApproverID: r.ApproverID, CredentialRef: r.CredentialRef, IntentHash: r.IntentHash, ExpiresAt: r.ExpiresAt, Voice: voiceOf(r).Result, VoiceReason: voiceOf(r).Reason})
 	if err != nil { // the Signer verified it; the Host could not record it yet: the status route asks again by the same IDs
 		return http.StatusServiceUnavailable, approvalReply{Error: "store_unavailable", Attempt: &a, StateNotSaved: true}
 	}
@@ -461,6 +473,14 @@ func (h *approvals) resolve(consumer string, st store.AttemptStart, r signer.App
 	}
 	b, _, _ := h.st.ApprovalAttemptOf(consumer, a.RequestID)
 	return http.StatusOK, approvalReply{Attempt: &b, Outcome: res.Outcome}
+}
+
+// voiceOf is the Signer's voice outcome of an approval (none: the zero value).
+func voiceOf(r signer.ApprovalReply) signer.VoiceResult {
+	if r.VoiceResult == nil {
+		return signer.VoiceResult{}
+	}
+	return *r.VoiceResult
 }
 
 // resolveUsed: the challenge was used; its decision, read by approval ID.

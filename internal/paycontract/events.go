@@ -17,7 +17,15 @@ import (
 // cannot pay or deliver.
 var EventTypes = []string{"TASK_STARTED", "DELEGATION_BOUND", "PURCHASE_PROPOSED", "POLICY_DECIDED", "APPROVAL_SESSION_OPENED",
 	"APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN", "APPROVED", "APPROVAL_DENIED", "APPROVAL_SUPERSEDED", "GRANT_ISSUED",
-	"TASK_CANCELLED", "TASK_TIMED_OUT", "CLI_EXITED"}
+	"TASK_CANCELLED", "TASK_TIMED_OUT", "CLI_EXITED",
+	"VOICE_CHALLENGE_VERIFIED", "VOICE_CHALLENGE_FAILED", "VOICE_UNAVAILABLE"} // V1: a voice outcome, just before the closure it leads to
+
+// V1's voice codes (docs/commercial-v1.md): the failures deny the session;
+// unavailability only degrades the approval, and says so.
+var (
+	VoiceFailures    = []string{"VOICE_REPLAY", "VOICE_PHRASE_MISMATCH", "VOICE_SPEAKER_MISMATCH", "VOICE_AUDIO_INVALID"}
+	VoiceUnavailable = []string{"VOICE_DEVICE_UNAVAILABLE", "VOICE_SERVICE_UNAVAILABLE", "VOICE_TIMEOUT"}
+)
 
 // Closures are the events that end an approval session, and the approval
 // state each records.
@@ -129,7 +137,29 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 			return err
 		}
 		return decisionOf(e, Closures[e.EventType])
-	case "APPROVED", "APPROVAL_DENIED": // decided by an approver, whose method is recorded
+	case "VOICE_CHALLENGE_VERIFIED", "VOICE_CHALLENGE_FAILED", "VOICE_UNAVAILABLE":
+		codes := map[string][]string{"VOICE_CHALLENGE_FAILED": VoiceFailures, "VOICE_UNAVAILABLE": VoiceUnavailable}[e.EventType]
+		switch {
+		case !purchase:
+			return errf("a voice outcome needs a purchase")
+		case codes == nil && p.Code != "", codes != nil && !slices.Contains(codes, p.Code):
+			return errf("%s code %q", e.EventType, p.Code)
+		case codes == nil:
+			return only("session")
+		}
+		return only("session", "code")
+	case "APPROVAL_DENIED":
+		if d != nil && d.Reason == "VOICE_CHALLENGE_FAILED" { // V1: the voice denied it, not the approver: no method
+			if !purchase {
+				return errf("a closure needs a purchase")
+			}
+			if err := only("decision", "session"); err != nil {
+				return err
+			}
+			return decisionOf(e, "denied")
+		}
+		fallthrough
+	case "APPROVED": // decided by an approver, whose method is recorded
 		fields, err := method(e, purchase, "decision", "session", "method")
 		if err != nil {
 			return err
@@ -240,6 +270,7 @@ type chain struct {
 	session, closed         map[string]string // po -> session ID; po -> closure event
 	granted                 map[string]bool
 	credential              map[string]string // v2: po -> verification result
+	voiced                  map[string]string // V1: po -> its session's voice outcome event
 }
 
 // ValidateEventOrder checks complete per-task streams of this version:
@@ -270,7 +301,7 @@ func ValidateEventOrder(events []contracts.AuditEvent) error {
 				return err
 			}
 			st = &chain{version: e.Version, prev: g, proposed: map[string]bool{}, verdict: map[string]string{}, intent: map[string]string{}, credential: map[string]string{},
-				session: map[string]string{}, closed: map[string]string{}, granted: map[string]bool{}}
+				session: map[string]string{}, closed: map[string]string{}, granted: map[string]bool{}, voiced: map[string]string{}}
 			tasks[task] = st
 		}
 		if e.Version != st.version {
@@ -346,9 +377,21 @@ func (st *chain) apply(e contracts.AuditEvent) error {
 			return errors.New("one session per Ask")
 		}
 		st.session[po] = e.Payload.ApprovalSessionID
+	case "VOICE_CHALLENGE_VERIFIED", "VOICE_CHALLENGE_FAILED", "VOICE_UNAVAILABLE":
+		if st.session[po] == "" || st.closed[po] != "" || st.voiced[po] != "" || e.Payload.ApprovalSessionID != st.session[po] {
+			return errors.New("one voice outcome per open session")
+		}
+		st.voiced[po] = e.EventType
 	case "APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN", "APPROVED", "APPROVAL_DENIED", "APPROVAL_SUPERSEDED":
 		if st.session[po] == "" || st.closed[po] != "" || e.Payload.ApprovalSessionID != st.session[po] {
 			return errors.New("only an open session of this purchase can close, once")
+		}
+		byVoice := e.EventType == "APPROVAL_DENIED" && e.Payload.Decision != nil && e.Payload.Decision.Reason == "VOICE_CHALLENGE_FAILED"
+		if byVoice != (st.voiced[po] == "VOICE_CHALLENGE_FAILED") {
+			return errors.New("a failed voice challenge, and only one, closes its session denied for it")
+		}
+		if st.voiced[po] != "" && e.EventType != "APPROVED" && !byVoice {
+			return errors.New("a voice outcome leads to its session's approval or its denial")
 		}
 		st.closed[po] = e.EventType
 	case "GRANT_ISSUED":

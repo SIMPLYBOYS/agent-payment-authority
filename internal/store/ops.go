@@ -893,6 +893,13 @@ type GrantView struct {
 	Audience            string `json:"audience"`
 	IssuedAt            uint64 `json:"issued_at"`
 	ExpiresAt           uint64 `json:"expires_at"`
+	Voice               string `json:"voice,omitempty"`        // V1: verified | unavailable
+	VoiceReason         string `json:"voice_reason,omitempty"` // V1: why unavailable
+}
+
+func grantView(g paycontract.AuthorizationGrant) *GrantView {
+	return &GrantView{JTI: g.JTI, AuthorizationMethod: g.AuthorizationMethod, Audience: g.Audience, IssuedAt: g.IssuedAt, ExpiresAt: g.ExpiresAt,
+		Voice: g.Voice, VoiceReason: g.VoiceReason}
 }
 
 // TaskView is a committed, consistent snapshot of one task. AsOf names the

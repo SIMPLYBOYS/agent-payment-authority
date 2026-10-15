@@ -140,7 +140,7 @@ func (t *taskTx) loadSessions() error {
 		}
 		for _, p := range t.purchases {
 			if p.Session != nil && p.Session.ID == sid {
-				p.Session.Grant = &GrantView{JTI: g.JTI, AuthorizationMethod: g.AuthorizationMethod, Audience: g.Audience, IssuedAt: g.IssuedAt, ExpiresAt: g.ExpiresAt}
+				p.Session.Grant = grantView(g)
 				p.Session.grantBody, p.Session.grantIssuedAt = body, issued
 			}
 		}
@@ -579,7 +579,7 @@ func (s *Store) ResolveApproval(req ApprovalRequest) (ApprovalResult, error) {
 			if err := t.emit("GRANT_ISSUED", p, contracts.EventPayload{ApprovalSessionID: p.Session.ID, GrantID: g.JTI, AuthorizationMethod: "simulated"}); err != nil {
 				return err
 			}
-			p.Session.Grant = &GrantView{JTI: g.JTI, AuthorizationMethod: g.AuthorizationMethod, Audience: g.Audience, IssuedAt: g.IssuedAt, ExpiresAt: g.ExpiresAt}
+			p.Session.Grant = grantView(g)
 			out.Outcome, out.Grant = "approved", &g
 		}
 		if err := t.finish(); err != nil {

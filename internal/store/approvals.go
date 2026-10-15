@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
@@ -329,6 +330,7 @@ type WebAuthnResult struct {
 	ConsumerID, RequestID                                             string
 	Decision, SignerApprovalID, ApproverID, CredentialRef, IntentHash string
 	ExpiresAt                                                         uint64
+	Voice, VoiceReason                                                string // V1: the Signer's voice outcome (verified | unavailable), if it asked
 }
 
 // ResolveWebAuthn writes the Signer's verified decision for an attempt, in
@@ -342,7 +344,9 @@ type WebAuthnResult struct {
 // answer is not this attempt's: nothing of the session changes).
 func (s *Store) ResolveWebAuthn(r WebAuthnResult) (ApprovalResult, error) {
 	var out ApprovalResult
-	if !paycontract.ValidID(r.SignerApprovalID) || !paycontract.ValidID(r.ApproverID) || (r.Decision != "approve" && r.Decision != "deny") {
+	if !paycontract.ValidID(r.SignerApprovalID) || !paycontract.ValidID(r.ApproverID) || (r.Decision != "approve" && r.Decision != "deny") ||
+		!(r.Voice == "" && r.VoiceReason == "" || r.Voice == "verified" && r.VoiceReason == "" && r.Decision == "approve" ||
+			r.Voice == "unavailable" && slices.Contains(paycontract.VoiceUnavailable, r.VoiceReason) && r.Decision == "approve") {
 		return out, refuse("INVALID_APPROVAL", "the Signer's result")
 	}
 	err := s.write(func(tx *sql.Tx, now uint64) error {
@@ -413,13 +417,23 @@ func (s *Store) ResolveWebAuthn(r WebAuthnResult) (ApprovalResult, error) {
 				out.Outcome = "closed"
 				break
 			}
+			amr := []string{"webauthn"}
+			if r.Voice != "" { // V1: the voice outcome, just before the approval it is part of
+				ev := map[string]string{"verified": "VOICE_CHALLENGE_VERIFIED", "unavailable": "VOICE_UNAVAILABLE"}[r.Voice]
+				if err := t.emit(ev, p, contracts.EventPayload{ApprovalSessionID: p.Session.ID, Code: r.VoiceReason}); err != nil {
+					return err
+				}
+				if r.Voice == "verified" {
+					amr = append(amr, "voice")
+				}
+			}
 			if err := t.close(p, "APPROVED", "approved", "WEBAUTHN_APPROVAL", by); err != nil {
 				return err
 			}
 			g := paycontract.AuthorizationGrant{Version: t.row.ContractVersion, JTI: t.spec().GrantID(p.Session.ID), IntentHash: p.Session.IntentHash,
 				ApprovalSessionID: p.Session.ID, Decision: "approve", AuthorizationMethod: "webauthn", Issuer: paycontract.Recorder, Audience: "signer",
 				ApproverID: by.by, IssuedAt: now, ExpiresAt: min(r.ExpiresAt, p.V1.PaymentBinding.ValidBefore),
-				SignerApprovalID: r.SignerApprovalID, CredentialRef: r.CredentialRef, AMR: []string{"webauthn"}}
+				SignerApprovalID: r.SignerApprovalID, CredentialRef: r.CredentialRef, AMR: amr, Voice: r.Voice, VoiceReason: r.VoiceReason}
 			if err := g.Validate(); err != nil {
 				return err
 			}
@@ -440,8 +454,62 @@ func (s *Store) ResolveWebAuthn(r WebAuthnResult) (ApprovalResult, error) {
 				SignerApprovalID: g.SignerApprovalID}); err != nil {
 				return err
 			}
-			p.Session.Grant = &GrantView{JTI: g.JTI, AuthorizationMethod: g.AuthorizationMethod, Audience: g.Audience, IssuedAt: g.IssuedAt, ExpiresAt: g.ExpiresAt}
+			p.Session.Grant = grantView(g)
 			out.Outcome, out.Grant = "approved", &g
+		}
+		if err := t.finish(); err != nil {
+			return err
+		}
+		out.Purchase = t.view(p)
+		return nil
+	})
+	return out, err
+}
+
+// ResolveVoiceFailure records the Signer's refusal of an attempt for a
+// failed voice challenge (V1; code one of paycontract.VoiceFailures): the
+// attempt is closed with the code (the Signer closed its challenge); the session, if still pending,
+// closes denied for VOICE_CHALLENGE_FAILED after VOICE_CHALLENGE_FAILED.
+// No grant. The Signer never issues the session another challenge. A
+// repeat of the same result answers it again (Replay).
+func (s *Store) ResolveVoiceFailure(consumer, requestID, code string) (ApprovalResult, error) {
+	var out ApprovalResult
+	if !slices.Contains(paycontract.VoiceFailures, code) {
+		return out, refuse("INVALID_APPROVAL", "not a voice failure")
+	}
+	err := s.write(func(tx *sql.Tx, now uint64) error {
+		a, err := s.ownAttempt(tx, consumer, requestID)
+		if err != nil {
+			return err
+		}
+		t, p, err := s.sessionFor(tx, now, consumer, a.SessionID)
+		if err != nil {
+			return err
+		}
+		out.TaskID = t.row.TaskID
+		if a.State == "closed" && a.ErrorCode == code {
+			out.Replay, out.Outcome, out.Purchase = true, p.Session.State, t.view(p)
+			return nil
+		}
+		if a.Decision != "approve" || !slices.Contains([]string{"challenged", "verifying", "unknown", "refused"}, a.State) {
+			return refuse("ATTEMPT_STATE", "the attempt is "+a.State)
+		}
+		if _, err := tx.Exec(`UPDATE approval_attempts SET state = 'closed', error_code = ?, updated_at = ? WHERE request_id = ?`, code, now, a.RequestID); err != nil {
+			return err
+		}
+		if err := t.expire(); err != nil {
+			return err
+		}
+		out.Outcome = "closed"
+		if p.Session.State == "pending" {
+			if err := t.emit("VOICE_CHALLENGE_FAILED", p, contracts.EventPayload{ApprovalSessionID: p.Session.ID, Code: code}); err != nil {
+				return err
+			}
+			// Resolved by this attempt, refused for its voice: no approver and no method decided it.
+			if err := t.close(p, "APPROVAL_DENIED", "denied", "VOICE_CHALLENGE_FAILED", &resolver{a.RequestID, "signer-voice-check", "", ""}); err != nil {
+				return err
+			}
+			out.Outcome = "denied"
 		}
 		if err := t.finish(); err != nil {
 			return err
@@ -511,8 +579,9 @@ func verifyApprovals(tx *sql.Tx) error {
 			"a webauthn grant does not mirror its session's verified attempt"},
 		{`SELECT count(*) FROM grants g JOIN approval_sessions s USING (approval_session_id) WHERE g.authorization_method = 'simulated' AND s.resolved_by LIKE 'webauthn:%'`,
 			"a simulated grant of a session resolved by webauthn"},
-		{`SELECT count(*) FROM approval_attempts a JOIN approval_sessions s USING (approval_session_id) WHERE s.resolve_request_id = a.request_id AND a.state <> 'verified'`,
-			"a session was resolved by an attempt that is not verified"},
+		{`SELECT count(*) FROM approval_attempts a JOIN approval_sessions s USING (approval_session_id) WHERE s.resolve_request_id = a.request_id AND a.state <> 'verified'
+		  AND NOT (a.state = 'closed' AND a.error_code IN ('` + strings.Join(paycontract.VoiceFailures, "', '") + `') AND s.state = 'denied' AND s.resolved_by = 'signer-voice-check')`,
+			"a session was resolved by an attempt that is not verified (or refused for its voice, V1)"},
 	} {
 		var n int
 		if err := tx.QueryRow(c.q).Scan(&n); err != nil {

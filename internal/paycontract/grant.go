@@ -80,7 +80,11 @@ type AuthorizationGrant struct {
 	// webauthn only.
 	SignerApprovalID string   `json:"signer_approval_id,omitempty"`
 	CredentialRef    string   `json:"credential_ref,omitempty"` // sha256 of the credential ID
-	AMR              []string `json:"amr,omitempty"`            // ["webauthn"]
+	AMR              []string `json:"amr,omitempty"`            // ["webauthn"], or ["webauthn", "voice"] (V1)
+	// V1: the voice challenge's outcome, when the Signer asked for one:
+	// verified, or unavailable with its code (a degraded approval).
+	Voice       string `json:"voice,omitempty"`
+	VoiceReason string `json:"voice_reason,omitempty"`
 }
 
 // Issuer is the demo host's approval service (simulated grants); Recorder
@@ -101,12 +105,24 @@ func (g AuthorizationGrant) Validate() error {
 	}
 	switch g.AuthorizationMethod {
 	case "simulated":
-		if g.Issuer != Issuer || g.SignerApprovalID != "" || g.CredentialRef != "" || g.AMR != nil {
+		if g.Issuer != Issuer || g.SignerApprovalID != "" || g.CredentialRef != "" || g.AMR != nil || g.Voice != "" || g.VoiceReason != "" {
 			return coded("INVALID_GRANT", "a simulated grant is the host's, with no Signer approval")
 		}
 	case "webauthn":
-		if g.Issuer != Recorder || !ids(g.SignerApprovalID) || !digestPattern.MatchString(g.CredentialRef) || !slices.Equal(g.AMR, []string{"webauthn"}) {
+		amr := []string{"webauthn"}
+		if g.Voice == "verified" {
+			amr = []string{"webauthn", "voice"}
+		}
+		if g.Issuer != Recorder || !ids(g.SignerApprovalID) || !digestPattern.MatchString(g.CredentialRef) || !slices.Equal(g.AMR, amr) {
 			return coded("INVALID_GRANT", "a webauthn grant mirrors a Signer approval: recorder, approval ID, credential reference and amr")
+		}
+		switch {
+		case g.Voice == "" || g.Voice == "verified":
+			if g.VoiceReason != "" {
+				return coded("INVALID_GRANT", "only an unavailable voice has a reason")
+			}
+		case g.Voice != "unavailable" || !slices.Contains(VoiceUnavailable, g.VoiceReason):
+			return coded("INVALID_GRANT", "a grant's voice is verified, or unavailable with its code")
 		}
 	default:
 		return coded("INVALID_GRANT", "method is simulated or webauthn")

@@ -144,12 +144,6 @@ type VoiceResult struct {
 	Reason string `json:"reason,omitempty"` // a fixed code, unless verified
 }
 
-// Failure codes (the session is denied) and unavailability codes (degraded).
-var (
-	VoiceFailures    = []string{"VOICE_REPLAY", "VOICE_PHRASE_MISMATCH", "VOICE_SPEAKER_MISMATCH", "VOICE_AUDIO_INVALID"}
-	VoiceUnavailable = []string{"VOICE_DEVICE_UNAVAILABLE", "VOICE_SERVICE_UNAVAILABLE", "VOICE_TIMEOUT"}
-)
-
 const (
 	voiceMaxSeconds = 10
 	voiceMaxWAV     = 44 + voiceMaxSeconds*16000*2

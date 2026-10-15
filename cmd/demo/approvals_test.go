@@ -35,6 +35,7 @@ type a2fx struct {
 	auth                *signertest.Authenticator
 	stopSigner          func()
 	failResolve         *failStore
+	voice               map[string]any // V1: the Signer's voice section, if any
 }
 
 // failStore makes the relay's next ResolveWebAuthn fail once, as a lost
@@ -56,7 +57,7 @@ func (f *failStore) ResolveWebAuthn(r store.WebAuthnResult) (store.ApprovalResul
 	return f.approvalStore.ResolveWebAuthn(r)
 }
 
-func startA2(t *testing.T, deadline int) *a2fx {
+func startA2(t *testing.T, deadline int, voice ...map[string]any) *a2fx {
 	t.Helper()
 	sdir, err := os.MkdirTemp("", "a2s")
 	if err != nil {
@@ -64,6 +65,9 @@ func startA2(t *testing.T, deadline int) *a2fx {
 	}
 	t.Cleanup(func() { os.RemoveAll(sdir) })
 	f := &a2fx{t: t, sdir: sdir, sock: filepath.Join(sdir, "s.sock"), failResolve: &failStore{}}
+	if len(voice) > 0 {
+		f.voice = voice[0]
+	}
 	f.h = controlHost(t, hostOpts{expiryEvery: time.Hour, scenarios: payCatalog(t, deadline),
 		args:        []string{"--approvals-signer", f.sock, "--authenticator-source", "virtual"},
 		onApprovals: func(h *approvals) { f.relay = h; f.failResolve.approvalStore = h.st; h.st = f.failResolve }})
@@ -96,8 +100,15 @@ func startA2(t *testing.T, deadline int) *a2fx {
 
 func (f *a2fx) startSigner() {
 	f.t.Helper()
-	cfg, err := signer.ParseConfig(signertest.ApprovalsConfig(f.sock, uint32(os.Getuid()), uint64(time.Now().Unix()),
-		"0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222", f.origin))
+	raw := signertest.ApprovalsConfig(f.sock, uint32(os.Getuid()), uint64(time.Now().Unix()),
+		"0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222", f.origin)
+	if f.voice != nil {
+		var c map[string]any
+		json.Unmarshal(raw, &c)
+		c["voice"] = f.voice
+		raw, _ = json.Marshal(c)
+	}
+	cfg, err := signer.ParseConfig(raw)
 	if err != nil {
 		f.t.Fatal(err)
 	}
