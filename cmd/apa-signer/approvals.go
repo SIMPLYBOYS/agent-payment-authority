@@ -7,6 +7,8 @@ package main
 //	apa-signer approver enroll confirm --dir DIR --id ENROLLMENT
 //	apa-signer approver revoke --dir DIR --credential FINGERPRINT
 //	apa-signer approver list --dir DIR
+//	apa-signer approver voice-enroll --dir DIR --approver ID WAV WAV WAV...  (V1: at least three recordings)
+//	apa-signer approver voice-delete --dir DIR --approver ID
 //
 // serve-approvals reads signer.json only for the wallets' public
 // information, the approvers and the relying party; it never opens keys/
@@ -95,7 +97,7 @@ func serveApprovals(dir string, out io.Writer) error {
 // approver runs the administrator's commands; ask reads the answer to the
 // confirm question (the terminal in production).
 func approver(args []string, out io.Writer, ask func(prompt string) (string, error)) error {
-	usage := errors.New("usage: apa-signer approver enroll begin --dir DIR --approver ID | enroll confirm --dir DIR --id ENROLLMENT | revoke --dir DIR --credential FINGERPRINT | list --dir DIR")
+	usage := errors.New("usage: apa-signer approver enroll begin --dir DIR --approver ID | enroll confirm --dir DIR --id ENROLLMENT | revoke --dir DIR --credential FINGERPRINT | list --dir DIR | voice-enroll --dir DIR --approver ID WAV... | voice-delete --dir DIR --approver ID")
 	if len(args) == 0 {
 		return usage
 	}
@@ -113,10 +115,10 @@ func approver(args []string, out io.Writer, ask func(prompt string) (string, err
 	id := fs.String("approver", "", "")
 	enr := fs.String("id", "", "")
 	cred := fs.String("credential", "", "")
-	if err := fs.Parse(rest); err != nil || *dir == "" || fs.NArg() != 0 {
+	if err := fs.Parse(rest); err != nil || *dir == "" || (fs.NArg() != 0) != (cmd == "voice-enroll") {
 		return usage
 	}
-	need := map[string]*string{"enroll begin": id, "enroll confirm": enr, "revoke": cred}[cmd]
+	need := map[string]*string{"enroll begin": id, "enroll confirm": enr, "revoke": cred, "voice-enroll": id, "voice-delete": id}[cmd]
 	if cmd != "list" && (need == nil || *need == "") {
 		return usage
 	}
@@ -155,6 +157,32 @@ func approver(args []string, out io.Writer, ask func(prompt string) (string, err
 			return err
 		}
 		fmt.Fprintf(out, "apa-signer: credential %s of %s is active\n", e.Fingerprint, e.ApproverID)
+		return nil
+	case "voice-enroll":
+		// The recordings are read here and given to the sidecar; nothing of them is written.
+		var wavs [][]byte
+		for _, p := range fs.Args() {
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			wavs = append(wavs, b)
+		}
+		n, err := core.EnrollVoice(ctx, *id, wavs)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "apa-signer: voice template of %s from %d recordings (sealed in approvals.db; key %s)\n", *id, n, filepath.Join(*dir, "voice.key"))
+		return nil
+	case "voice-delete":
+		ok, err := core.DeleteVoice(ctx, *id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("%s has no voice template", *id)
+		}
+		fmt.Fprintf(out, "apa-signer: voice template of %s deleted\n", *id)
 		return nil
 	case "revoke":
 		if err := core.Revoke(ctx, *cred); err != nil {

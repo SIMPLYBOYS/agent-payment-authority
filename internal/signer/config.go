@@ -88,6 +88,7 @@ type Config struct {
 	Delegations      []Delegation `json:"delegations"`
 	Approvers        []Approver   `json:"approvers,omitempty"` // A2: serve-approvals only
 	WebAuthn         *WebAuthn    `json:"webauthn,omitempty"`
+	Voice            *Voice       `json:"voice,omitempty"` // V1: approvals ask for a voice challenge
 
 	hash string // sha256 of the canonical configuration, in each snapshot
 }
@@ -147,6 +148,11 @@ func ParseConfig(raw []byte) (*Config, error) {
 	}
 	if err := c.checkApprovers(wallets); err != nil {
 		return nil, err
+	}
+	if c.Voice != nil {
+		if err := c.Voice.check(&c); err != nil {
+			return nil, err
+		}
 	}
 	canon, err := contracts.Canonical(raw)
 	if err != nil {

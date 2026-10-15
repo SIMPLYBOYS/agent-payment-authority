@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -123,6 +124,8 @@ type ApprovalCore struct {
 	rp    *webauthn.WebAuthn
 	db    *sql.DB
 	clock Clock
+	dir   string   // the Signer's directory: the voice template key's
+	voice *sidecar // V1, when configured
 }
 
 // challengeFailures closes a challenge after this many refused assertions.
@@ -150,11 +153,15 @@ func NewApprovalCore(ctx context.Context, cfg *Config, dbPath string, clock Cloc
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.ExecContext(ctx, approvalsSchema); err != nil {
+	if _, err := db.ExecContext(ctx, approvalsSchema+voiceSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
-	return &ApprovalCore{cfg: cfg, rp: rp, db: db, clock: clock}, nil
+	c := &ApprovalCore{cfg: cfg, rp: rp, db: db, clock: clock, dir: filepath.Dir(dbPath)}
+	if cfg.Voice != nil {
+		c.voice = newSidecar(cfg.Voice)
+	}
+	return c, nil
 }
 
 func (c *ApprovalCore) Close() error { return c.db.Close() }
@@ -176,6 +183,7 @@ type Display struct {
 	TaskID          string           `json:"task_id"`
 	PurchaseOrderID string           `json:"purchase_order_id"`
 	ValidBefore     uint64           `json:"valid_before"`
+	Voice           *VoicePrompt     `json:"voice,omitempty"` // V1: the phrase to read, for an approve challenge
 }
 
 // ChallengeRequest is POST /v1/approvals/challenge. The order is the whole
@@ -196,6 +204,7 @@ type VerifyRequest struct {
 	ChallengeID     string          `json:"challenge_id"`
 	Order           json.RawMessage `json:"order"`
 	Assertion       json.RawMessage `json:"assertion"`
+	Voice           *VoiceAnswer    `json:"voice,omitempty"` // V1: required exactly when the challenge asked for it
 }
 
 // ApprovalReply is the Signer's answer on the approval routes. On the
@@ -220,8 +229,9 @@ type ApprovalReply struct {
 	CredentialRef     string          `json:"credential_ref,omitempty"` // sha256 of the credential ID
 	Flags             string          `json:"flags,omitempty"`
 	VerifiedAt        uint64          `json:"verified_at,omitempty"`
-	Payment           string          `json:"payment,omitempty"` // health
-	Error             string          `json:"error,omitempty"`   // a fixed code
+	VoiceResult       *VoiceResult    `json:"voice_result,omitempty"` // V1: an approval's, or a voice refusal's
+	Payment           string          `json:"payment,omitempty"`      // health
+	Error             string          `json:"error,omitempty"`        // a fixed code
 }
 
 // rpUser is an approver as the WebAuthn library sees it.
@@ -356,6 +366,7 @@ type challengeRecord struct {
 	ApproverVersion   uint64 `json:"approver_version"`
 	ConfigHash        string `json:"config_hash"`
 	ExpiresAt         uint64 `json:"expires_at"`
+	VoiceNonce        string `json:"voice_nonce,omitempty"` // V1: the phrase's code; the WebAuthn challenge covers it
 }
 
 var decisionPattern = regexp.MustCompile(`^(approve|deny)$`)
@@ -431,6 +442,17 @@ func (c *ApprovalCore) Challenge(ctx context.Context, r ChallengeRequest) (Appro
 	default:
 		return ApprovalReply{}, Refusal("CREDENTIAL_UNKNOWN")
 	}
+	voice := c.cfg.Voice != nil && r.Decision == "approve" // a deny needs no voice
+	if voice {
+		if ok, err := c.hasVoiceTemplate(ctx, c.db, ap.ApproverID); err != nil {
+			return ApprovalReply{}, err
+		} else if !ok {
+			return ApprovalReply{}, Refusal("VOICE_NOT_ENROLLED")
+		}
+		if c.cfg.Voice.merchant(b.PayTo) == nil {
+			return ApprovalReply{}, Refusal("VOICE_MERCHANT_UNKNOWN")
+		}
+	}
 	now := c.clock()
 	expires := min(now+c.cfg.WebAuthn.ChallengeTTLSeconds, b.ValidBefore, r.HostDeadline)
 	if expires <= now {
@@ -447,6 +469,13 @@ func (c *ApprovalCore) Challenge(ctx context.Context, r ChallengeRequest) (Appro
 	rec := challengeRecord{Version: 1, ChallengeID: id, Random: b64(rnd), ApprovalSessionID: r.ApprovalSessionID, Decision: r.Decision,
 		ConsumerID: i.ConsumerID, WalletID: w.WalletID, IntentHash: intent, JTI: sp.GrantID(r.ApprovalSessionID),
 		ApproverID: ap.ApproverID, ApproverVersion: ap.Version, ConfigHash: c.cfg.hash, ExpiresAt: expires}
+	if voice {
+		vn := make([]byte, 16)
+		if _, err := rand.Read(vn); err != nil {
+			return ApprovalReply{}, err
+		}
+		rec.VoiceNonce = b64(vn)
+	}
 	_, canon, err := digestOf(challengeTag, rec)
 	if err != nil {
 		return ApprovalReply{}, err
@@ -467,6 +496,13 @@ func (c *ApprovalCore) Challenge(ctx context.Context, r ChallengeRequest) (Appro
 	if a := c.cfg.asset(b.ChainID, b.AssetContract); a != nil {
 		disp.AssetName = a.EIP712Name
 	}
+	if voice {
+		p, err := c.cfg.Voice.phrase(disp, rec.VoiceNonce)
+		if err != nil {
+			return ApprovalReply{}, err
+		}
+		disp.Voice = &VoicePrompt{Phrase: p, MaxSeconds: voiceMaxSeconds}
+	}
 	dispJSON, _ := json.Marshal(disp)
 	err = c.inTx(ctx, func(tx *sql.Tx, now uint64) error {
 		var n int
@@ -479,6 +515,11 @@ func (c *ApprovalCore) Challenge(ctx context.Context, r ChallengeRequest) (Appro
 			return err
 		} else if n > 0 {
 			return Refusal("SESSION_DECIDED") // one verified decision per session, ever
+		}
+		if failed, err := c.voiceFailed(ctx, tx, rec.JTI); err != nil {
+			return err
+		} else if failed {
+			return Refusal("SESSION_DECIDED") // V1: a failed voice challenge denied the session for good
 		}
 		// An issued challenge of this session past its deadline is recorded
 		// expired first; one still open stays the session's (CHALLENGE_OPEN):
@@ -527,20 +568,28 @@ func (c *ApprovalCore) inTx(ctx context.Context, fn func(tx *sql.Tx, now uint64)
 
 type challengeRow struct {
 	id, requestID, fingerprint, challenge, sessionID, decision, consumer, wallet, intent, jti, approver, configHash string
-	session, options, display, state                                                                                string
+	session, options, display, state, voiceNonce                                                                    string
 	approverVersion, expiresAt                                                                                      uint64
 	failures                                                                                                        int
 }
 
 const challengeCols = `challenge_id, request_id, fingerprint, challenge, approval_session_id, decision, consumer_id, wallet_id, intent_hash, jti,
-  approver_id, config_hash, session, options, display, state, approver_version, expires_at, failures`
+  approver_id, config_hash, session, options, display, state, approver_version, expires_at, failures, record`
 
 func scanChallenge(row interface{ Scan(...any) error }) (challengeRow, bool, error) {
 	var a challengeRow
+	var record string
 	err := row.Scan(&a.id, &a.requestID, &a.fingerprint, &a.challenge, &a.sessionID, &a.decision, &a.consumer, &a.wallet, &a.intent, &a.jti,
-		&a.approver, &a.configHash, &a.session, &a.options, &a.display, &a.state, &a.approverVersion, &a.expiresAt, &a.failures)
+		&a.approver, &a.configHash, &a.session, &a.options, &a.display, &a.state, &a.approverVersion, &a.expiresAt, &a.failures, &record)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, false, nil
+	}
+	if err == nil {
+		var rec challengeRecord
+		if err := json.Unmarshal([]byte(record), &rec); err != nil {
+			return a, false, err
+		}
+		a.voiceNonce = rec.VoiceNonce
 	}
 	return a, err == nil, err
 }
@@ -638,14 +687,25 @@ func (c *ApprovalCore) Verify(ctx context.Context, r VerifyRequest) (ApprovalRep
 	if !requestIDPattern.MatchString(r.VerifyRequestID) || !requestIDPattern.MatchString(r.ChallengeID) || len(r.Order) == 0 || len(r.Assertion) == 0 {
 		return ApprovalReply{}, Refusal("BAD_REQUEST")
 	}
+	if v := r.Voice; v != nil {
+		wav, err := base64.StdEncoding.DecodeString(v.Audio)
+		if (v.Audio == "") == (v.Unavailable == "") || v.Unavailable != "" && v.Unavailable != "device" || err != nil || len(wav) > voiceMaxWAV {
+			return ApprovalReply{}, Refusal("BAD_REQUEST")
+		}
+	}
 	order, err := contracts.Canonical(r.Order)
 	if err != nil {
 		return ApprovalReply{}, Refusal("ORDER_INVALID")
 	}
 	os := sha256.Sum256(order)
 	as := sha256.Sum256(r.Assertion)
-	fp, _, err := digestOf(verifyReq, map[string]string{"challenge_id": r.ChallengeID, "order_fingerprint": hex.EncodeToString(os[:]),
-		"assertion_sha256": hex.EncodeToString(as[:])})
+	fpv := map[string]string{"challenge_id": r.ChallengeID, "order_fingerprint": hex.EncodeToString(os[:]), "assertion_sha256": hex.EncodeToString(as[:])}
+	if r.Voice != nil { // V1: a resend is the same recording (or the same no-device answer)
+		raw, _ := json.Marshal(r.Voice)
+		vs := sha256.Sum256(raw)
+		fpv["voice_sha256"] = hex.EncodeToString(vs[:])
+	}
+	fp, _, err := digestOf(verifyReq, fpv)
 	if err != nil {
 		return ApprovalReply{}, Refusal("BAD_REQUEST")
 	}
@@ -663,12 +723,29 @@ func (c *ApprovalCore) Verify(ctx context.Context, r VerifyRequest) (ApprovalRep
 	if code != "" {
 		return c.refuse(ctx, r, fp, &a, code, true)
 	}
+	// V1: the voice, judged only once the assertion passed.
+	var vo *voiceOutcome
+	switch {
+	case a.voiceNonce == "" && r.Voice != nil:
+		return c.refuse(ctx, r, fp, &a, "BAD_REQUEST", false)
+	case a.voiceNonce != "" && r.Voice == nil:
+		return c.refuse(ctx, r, fp, &a, "VOICE_REQUIRED", true)
+	case a.voiceNonce != "":
+		if c.voice == nil { // the voice section was removed: the approver's version check covers the config hash
+			return c.refuse(ctx, r, fp, &a, "APPROVER_CHANGED", true)
+		}
+		o := c.judgeVoice(ctx, a, r.Voice)
+		if o.Result == "failed" {
+			return c.voiceFail(ctx, r, fp, a, o)
+		}
+		vo = &o
+	}
 	// Tests only: a close (or anything) can happen here, between the
 	// checks and the commit, as it could in production.
 	if err := at("verify-checked", a.id); err != nil {
 		return ApprovalReply{}, err
 	}
-	return c.commit(ctx, r, fp, a, cred, parsed)
+	return c.commit(ctx, r, fp, a, cred, parsed, vo)
 }
 
 // verifyAnswer is the saved outcome of a verify request, if there is one.
@@ -686,7 +763,13 @@ func (c *ApprovalCore) verifyAnswer(ctx context.Context, id, fp string) (Approva
 		return ApprovalReply{}, true, Refusal("REQUEST_ID_CONFLICT")
 	}
 	if !approval.Valid {
-		return ApprovalReply{ChallengeID: challengeID, VerifyRequestID: id, Error: outcome}, true, Refusal(outcome)
+		rep := ApprovalReply{ChallengeID: challengeID, VerifyRequestID: id, Error: outcome}
+		if vr, err := c.voiceResultOf(ctx, challengeID); err != nil {
+			return ApprovalReply{}, true, err
+		} else if vr != nil && vr.Reason == outcome {
+			rep.VoiceResult = vr
+		}
+		return rep, true, Refusal(outcome)
 	}
 	rep, err := c.approvalBy(ctx, "approval_id", approval.String)
 	return rep, true, err
@@ -836,7 +919,7 @@ func (c *ApprovalCore) refuse(ctx context.Context, r VerifyRequest, fp string, a
 // transaction, writes the decision and the verify request, together. The
 // credential's state and counter are read again inside it. Otherwise the
 // row is read again in the same transaction and the refusal saved.
-func (c *ApprovalCore) commit(ctx context.Context, r VerifyRequest, fp string, a challengeRow, cred *webauthn.Credential, p *protocol.ParsedCredentialAssertionData) (ApprovalReply, error) {
+func (c *ApprovalCore) commit(ctx context.Context, r VerifyRequest, fp string, a challengeRow, cred *webauthn.Credential, p *protocol.ParsedCredentialAssertionData, vo *voiceOutcome) (ApprovalReply, error) {
 	ad := p.Response.AuthenticatorData
 	approvalID, err := newID("hap-")
 	if err != nil {
@@ -935,6 +1018,12 @@ func (c *ApprovalCore) commit(ctx context.Context, r VerifyRequest, fp string, a
 			flagString(ad.Flags), ad.Counter, hex.EncodeToString(cdh[:]), b64(p.Raw.AssertionResponse.AuthenticatorData), hex.EncodeToString(sig[:]), now, expires); err != nil {
 			return err
 		}
+		if vo != nil {
+			// ponytail: the same recording racing in under two challenges at once fails here (the UNIQUE sha256) and writes nothing
+			if err := c.saveVoice(ctx, tx, now, a, r.VerifyRequestID, *vo); err != nil {
+				return err
+			}
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO verify_requests (verify_request_id, fingerprint, challenge_id, outcome, approval_id, received_at) VALUES (?, ?, ?, 'verified', ?, ?)`,
 			r.VerifyRequestID, fp, a.id, approvalID, now)
 		return err
@@ -986,7 +1075,8 @@ func (c *ApprovalCore) approvalBy(ctx context.Context, col, v string) (ApprovalR
 		return ApprovalReply{}, err
 	}
 	r.CredentialRef = CredentialRef(id)
-	return r, nil
+	r.VoiceResult, err = c.voiceResultOf(ctx, r.ChallengeID)
+	return r, err
 }
 
 // ApprovalByVerifyRequest answers GET /v1/approvals?verify_request_id=:
