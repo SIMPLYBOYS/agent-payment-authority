@@ -52,7 +52,7 @@ cfg = {"version": 1, "socket": os.environ["SSOCK"], "callers": [int(os.environ["
                      {"approver_id": "approver-b", "consumer_id": "consumer-b", "wallet_ids": ["wallet-b"], "signer_max": "1000000", "version": 1}],
        "webauthn": {"rp_id": "localhost", "origins": ["http://localhost:8402"], "challenge_ttl_seconds": 120, "approval_ttl_seconds": 300},
        "voice": {"socket": os.environ["VSOCK"], "timeout_ms": 10000, "speaker_threshold_milli": 365, "asr_model": h["asr"], "speaker_model": h["speaker"],
-                 "decimals": 6, "merchants": [{"pay_to": "0x3333333333333333333333333333333333333333", "name": "示意商家", "pinyin": "shi yi shang jia"}]}}
+                 "decimals": 6, "merchants": [{"pay_to": "0x3333333333333333333333333333333333333333", "name": "測試商店", "pinyin": "ce shi shang dian"}]}}
 fd = os.open(os.environ["OUT"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
 os.write(fd, json.dumps(cfg, ensure_ascii=False, indent=1).encode())
 os.close(fd)

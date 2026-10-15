@@ -211,3 +211,12 @@ export function base64(bytes) {
   for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(s);
 }
+
+// peak: the loudest sample's magnitude (0 to 1). Below QUIET a recording
+// holds no speech worth sending (an unused or muted microphone).
+export const QUIET = 0.02;
+export function peak(samples) {
+  let p = 0;
+  for (const x of samples) p = Math.max(p, Math.abs(x));
+  return p;
+}

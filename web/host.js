@@ -1203,7 +1203,7 @@ function renderA2() {
   const item = a2Item();
   const target = a2Target(item);
   if (a2Note && !A.sameTarget(a2Note.target, target, false)) a2Note = null;
-  const key = JSON.stringify([currentConsumer(), item, lastA2 && lastA2.error, a2Note, a2Op && a2Op.phase, a2OnOrigin(), lastA2 && lastA2.signer]);
+  const key = JSON.stringify([currentConsumer(), item, lastA2 && lastA2.error, a2Note, a2Op && a2Op.phase, a2Op && !!a2Op.stop, a2Op && a2Op.mic, a2OnOrigin(), lastA2 && lastA2.signer]); // V1: the recording's stop and microphone redraw it
   if (key === shownA2) return updateA2Countdown();
   shownA2 = key;
   const body = $("approval-body");
@@ -1288,6 +1288,7 @@ function renderA2() {
       if (a2Op.phase === "voice") { // V1: the phrase to read, and the end of the recording
         const box = el("div", "approval-voice");
         box.append(el("p", "approval-voice-label", "請唸出下面這句（錄音中，最多 10 秒；錄音只用來比對，不會保存）"), el("p", "approval-voice-phrase", a2Op.phrase));
+        if (a2Op.mic) box.append(el("p", "approval-voice-mic", "麥克風：" + a2Op.mic));
         const stop = el("button", "approval-voice-stop", "唸完了");
         stop.type = "button";
         stop.disabled = !a2Op.stop;
@@ -1374,9 +1375,10 @@ async function a2Act(item, decision) {
     if (prompt) {
       Object.assign(a2Op, { phase: "voice", phrase: prompt.phrase, stop: null });
       renderControl();
-      voice = await V.record(prompt.max_seconds || 10, (stop) => { if (a2Op) { a2Op.stop = stop; renderControl(); } });
+      voice = await V.record(prompt.max_seconds || 10, (stop, mic) => { if (a2Op) { a2Op.stop = stop; a2Op.mic = mic; renderControl(); } });
       if (stale()) return;
       if (voice.short) return done("idle", "錄音不到 1 秒，沒有送出；這筆仍在等你決定，請再按核准並唸完整句。");
+      if (voice.quiet) return done("idle", "沒有收到聲音（麥克風：" + (voice.mic || "未知") + "），沒有送出；這筆仍在等你決定。請確認 Chrome 用的是正確的麥克風，再按核准。");
     }
     a2Op.phase = "device";
     renderControl();

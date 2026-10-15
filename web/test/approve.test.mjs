@@ -201,3 +201,9 @@ test("V1: the words of a voice outcome", () => {
   assert.ok(!AP.grantLine({ jti: "grant-abc", authorization_method: "webauthn" }).includes("語音"), "an A2 grant without a voice says nothing of one");
   assert.match(AP.codeText("VOICE_NOT_ENROLLED"), /聲紋/);
 });
+
+test("V1: a recording with almost no sound is not sent", () => {
+  assert.ok(Math.abs(AP.peak(new Float32Array([0, 0.001, -0.005])) - 0.005) < 1e-6);
+  assert.ok(AP.peak(new Float32Array([0, 0.001, -0.005])) < AP.QUIET);
+  assert.ok(AP.peak(new Float32Array([0.1, -0.3])) >= AP.QUIET);
+});

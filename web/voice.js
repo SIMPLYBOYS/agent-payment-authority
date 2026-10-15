@@ -5,9 +5,11 @@
 
 import * as AP from "./approve.js";
 
-// record: up to maxSeconds, until stop() (given to onStart) is called.
-// Resolves { audio } (base64 WAV), { unavailable: "device" } or
-// { short: true } (under a second: not sent, read it again).
+// record: up to maxSeconds, until stop() (given to onStart, with the
+// microphone's name) is called. Resolves { audio } (base64 WAV),
+// { unavailable: "device" }, { short: true } (under a second) or
+// { quiet: true } (almost no sound: the wrong microphone, or none in
+// use); the last two are not sent, the purchase keeps waiting.
 export async function record(maxSeconds, onStart) {
   let stream;
   try {
@@ -16,6 +18,8 @@ export async function record(maxSeconds, onStart) {
     return { unavailable: "device" };
   }
   const ctx = new AudioContext();
+  await ctx.resume(); // a context made after the permission prompt may start suspended: it would record silence
+  const mic = (stream.getAudioTracks()[0] || {}).label || "";
   const src = ctx.createMediaStreamSource(stream);
   const node = ctx.createScriptProcessor(4096, 1, 1); // ponytail: deprecated but everywhere; an AudioWorklet if it goes
   const chunks = [];
@@ -24,7 +28,7 @@ export async function record(maxSeconds, onStart) {
   node.connect(ctx.destination);
   await new Promise((resolve) => {
     const t = setTimeout(resolve, maxSeconds * 1000);
-    onStart(() => { clearTimeout(t); resolve(); });
+    onStart(() => { clearTimeout(t); resolve(); }, mic);
   });
   node.disconnect();
   src.disconnect();
@@ -35,6 +39,7 @@ export async function record(maxSeconds, onStart) {
   let o = 0;
   for (const c of chunks) { all.set(c, o); o += c.length; }
   const wav = AP.wav16k(all, rate, maxSeconds);
-  if (AP.seconds(wav) < 1) return { short: true };
+  if (AP.seconds(wav) < 1) return { short: true, mic };
+  if (AP.peak(all) < AP.QUIET) return { quiet: true, mic };
   return { audio: AP.base64(wav) };
 }
