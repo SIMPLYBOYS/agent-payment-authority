@@ -33,10 +33,10 @@ export function startDemo({ repo, bin, catalog, unityBuild, state, home, extra =
 }
 
 // startChrome: one headless page; send, evaluate, waitFor, on (events).
-export async function startChrome(profile) {
+export async function startChrome(profile, extra = []) {
   const c = spawn(CHROME, ["--headless=new", "--user-data-dir=" + profile, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check",
     "--disable-extensions", "--disable-sync", "--disable-background-networking", "--disable-component-update", "--use-angle=swiftshader",
-    "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--enable-unsafe-swiftshader", "about:blank"], { stdio: "ignore" });
+    "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--enable-unsafe-swiftshader", ...extra, "about:blank"], { stdio: "ignore" });
   let port;
   for (let i = 0; i < 100 && !port; i++) { await sleep(100); try { port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0]; } catch {} }
   const targets = await (await fetch("http://127.0.0.1:" + port + "/json/list")).json();

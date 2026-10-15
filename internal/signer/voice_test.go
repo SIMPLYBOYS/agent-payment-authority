@@ -345,3 +345,35 @@ func TestPhraseMatching(t *testing.T) {
 		t.Error("voiceCode")
 	}
 }
+
+// TestVoicePhraseEval is voice/eval.py's use of this package's own phrase
+// comparison (so the evaluation judges exactly what the Signer judges):
+// skipped unless APA_VOICE_PHRASES names a JSON list of {transcript,
+// pinyin, amount, code, merchant_pinyin}; the results go to
+// APA_VOICE_PHRASES + ".out" as a list of [amount_ok, merchant_ok, code_ok].
+func TestVoicePhraseEval(t *testing.T) {
+	in := os.Getenv("APA_VOICE_PHRASES")
+	if in == "" {
+		t.Skip("evaluation only (voice/eval.py)")
+	}
+	raw, err := os.ReadFile(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct {
+		Transcript, Pinyin, Amount, Code string
+		MerchantPinyin                   string `json:"merchant_pinyin"`
+	}
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatal(err)
+	}
+	var out [][3]bool
+	for _, c := range cases {
+		a, m, k := matchPhrase(c.Transcript, c.Pinyin, c.Amount, c.Code, c.MerchantPinyin)
+		out = append(out, [3]bool{a, m, k})
+	}
+	res, _ := json.Marshal(out)
+	if err := os.WriteFile(in+".out", res, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
