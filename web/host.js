@@ -1012,7 +1012,8 @@ function renderApproval(runs) {
       ["收款人", addr(p.pay_to) + " · 與報價相同（payTo）"], ["付款帳戶", "客人 " + short(item.consumer_id) + " 的測試錢包 " + addr(item.payer) + " · " + item.wallet_id],
       ["網路與資產", (NETWORK[p.chain_id] || p.chain_id) + " · test USDC（" + (p.asset_id || "?") + "），不是真錢"],
       ["委託範圍", d ? "預算 " + units(d.task_budget) + "；超過 " + units(d.allow_max) + " 一律要你核准" : "未取得"],
-      ["intent", (p.intent_hash || "").slice(0, 23) + "…（後端比對這一份）"]]) {
+      ["intent", (p.intent_hash || "").slice(0, 23) + "…（後端比對這一份）"],
+      ["語音", "未評估（模擬核准不含語音挑戰）"]]) { // V1 D9: the simulated path asks for no voice
       dl.append(el("dt", "", k), el("dd", "", val));
     }
     parts.push(dl);
