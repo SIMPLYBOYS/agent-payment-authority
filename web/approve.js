@@ -62,6 +62,7 @@ export const CODES = {
   VOICE_REQUIRED: "這次核准需要語音挑戰",
   VOICE_NOT_ENROLLED: "核准者還沒有登記聲紋，無法核准（請找管理者）",
   VOICE_MERCHANT_UNKNOWN: "Signer 沒有這個收款人的唸法設定，無法核准",
+  VOICE_SIGNER_UNAVAILABLE: "Signer 讀不到聲紋設定，這次沒有核准（請找管理者）",
 };
 
 

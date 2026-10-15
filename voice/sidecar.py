@@ -46,11 +46,14 @@ def asr_worker(models, conn):
     conn.send("ready")
     while True:
         pcm = conn.recv_bytes()
-        audio = np.frombuffer(pcm, dtype="<i2").astype("float32") / 32768.0
-        # zh: the challenge phrase is Chinese; digits come back as digits or numerals.
-        segs, _ = m.transcribe(audio, language="zh", beam_size=5, vad_filter=False, condition_on_previous_text=False)
-        text = "".join(s.text for s in segs).strip()
-        conn.send({"transcript": text, "pinyin": " ".join(lazy_pinyin(text))})
+        try:
+            audio = np.frombuffer(pcm, dtype="<i2").astype("float32") / 32768.0
+            # zh: the challenge phrase is Chinese; digits come back as digits or numerals.
+            segs, _ = m.transcribe(audio, language="zh", beam_size=5, vad_filter=False, condition_on_previous_text=False)
+            text = "".join(s.text for s in segs).strip()
+            conn.send({"transcript": text, "pinyin": " ".join(lazy_pinyin(text))})
+        except Exception as e:  # the worker lives on; the request fails (500)
+            conn.send({"error": type(e).__name__})
 
 
 def speaker_worker(models, conn):
@@ -63,10 +66,13 @@ def speaker_worker(models, conn):
     conn.send("ready")
     while True:
         pcm = conn.recv_bytes()
-        audio = torch.from_numpy(np.frombuffer(pcm, dtype="<i2").astype("float32") / 32768.0).unsqueeze(0)
-        with torch.no_grad():
-            e = enc.encode_batch(audio).squeeze()
-        conn.send([float(x) for x in e])
+        try:
+            audio = torch.from_numpy(np.frombuffer(pcm, dtype="<i2").astype("float32") / 32768.0).unsqueeze(0)
+            with torch.no_grad():
+                e = enc.encode_batch(audio).squeeze()
+            conn.send([float(x) for x in e])
+        except Exception as e:  # the worker lives on; the request fails (500)
+            conn.send({"error": type(e).__name__})
 
 
 class Workers:
@@ -95,8 +101,17 @@ class Workers:
     def ask(self, name, pcm):
         parent, lock, _ = self.pipes[name]
         with lock:
-            parent.send_bytes(pcm)
-            return parent.recv()
+            try:
+                parent.send_bytes(pcm)
+                out = parent.recv()
+            except (EOFError, OSError):
+                # A worker is gone: exit, so the supervisor starts a whole new
+                # sidecar (meanwhile the Signer reads it as unavailable).
+                print("voice sidecar: a model worker died; exiting", file=sys.stderr, flush=True)
+                os._exit(1)
+        if isinstance(out, dict) and "error" in out:
+            raise RuntimeError(out["error"])
+        return out
 
 
 def read_wav(body):
@@ -109,7 +124,7 @@ def read_wav(body):
             if n > MAX_SECONDS * RATE:
                 return None, "AUDIO_TOO_LONG"
             pcm = w.readframes(n)
-    except (wave.Error, EOFError):
+    except Exception:  # anything unreadable is the recording's fault, never the service's (review S5)
         return None, "AUDIO_FORMAT"
     if len(pcm) < RATE // 2 * 2:  # under half a second
         return None, "AUDIO_EMPTY"
@@ -148,8 +163,11 @@ def handler_for(workers, versions):
             if err:
                 return self.reply(400, {"error": err})
             out = {"duration_ms": len(pcm) * 1000 // (RATE * 2)}
-            out.update(workers.ask("asr", pcm))
-            out["embedding"] = workers.ask("speaker", pcm)
+            try:
+                out.update(workers.ask("asr", pcm))
+                out["embedding"] = workers.ask("speaker", pcm)
+            except RuntimeError as e:
+                return self.reply(500, {"error": "ANALYSIS_FAILED:" + str(e)})
             self.reply(200, out)
 
     return H

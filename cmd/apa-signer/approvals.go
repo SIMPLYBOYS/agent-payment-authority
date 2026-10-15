@@ -9,6 +9,7 @@ package main
 //	apa-signer approver list --dir DIR
 //	apa-signer approver voice-enroll --dir DIR --approver ID WAV WAV WAV...  (V1: at least three recordings)
 //	apa-signer approver voice-delete --dir DIR --approver ID
+//	apa-signer approver voice-stats --dir DIR  (V1: stored voice outcomes by result and reason)
 //
 // serve-approvals reads signer.json only for the wallets' public
 // information, the approvers and the relying party; it never opens keys/
@@ -27,6 +28,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -97,7 +99,7 @@ func serveApprovals(dir string, out io.Writer) error {
 // approver runs the administrator's commands; ask reads the answer to the
 // confirm question (the terminal in production).
 func approver(args []string, out io.Writer, ask func(prompt string) (string, error)) error {
-	usage := errors.New("usage: apa-signer approver enroll begin --dir DIR --approver ID | enroll confirm --dir DIR --id ENROLLMENT | revoke --dir DIR --credential FINGERPRINT | list --dir DIR | voice-enroll --dir DIR --approver ID WAV... | voice-delete --dir DIR --approver ID")
+	usage := errors.New("usage: apa-signer approver enroll begin --dir DIR --approver ID | enroll confirm --dir DIR --id ENROLLMENT | revoke --dir DIR --credential FINGERPRINT | list --dir DIR | voice-enroll --dir DIR --approver ID WAV... | voice-delete --dir DIR --approver ID | voice-stats --dir DIR")
 	if len(args) == 0 {
 		return usage
 	}
@@ -119,7 +121,7 @@ func approver(args []string, out io.Writer, ask func(prompt string) (string, err
 		return usage
 	}
 	need := map[string]*string{"enroll begin": id, "enroll confirm": enr, "revoke": cred, "voice-enroll": id, "voice-delete": id}[cmd]
-	if cmd != "list" && (need == nil || *need == "") {
+	if cmd != "list" && cmd != "voice-stats" && (need == nil || *need == "") {
 		return usage
 	}
 	core, cfg, err := assembleApprovals(*dir, unixClock)
@@ -173,6 +175,32 @@ func approver(args []string, out io.Writer, ask func(prompt string) (string, err
 			return err
 		}
 		fmt.Fprintf(out, "apa-signer: voice template of %s from %d recordings (sealed in approvals.db; key %s)\n", *id, n, filepath.Join(*dir, "voice.key"))
+		return nil
+	case "voice-stats":
+		st, err := core.VoiceStats(ctx)
+		if err != nil {
+			return err
+		}
+		total, degraded := 0, 0
+		for k, n := range st {
+			total += n
+			if strings.HasPrefix(k, "unavailable") {
+				degraded += n
+			}
+		}
+		keys := make([]string, 0, len(st))
+		for k := range st {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(out, "%s %d\n", k, st[k])
+		}
+		if total > 0 {
+			fmt.Fprintf(out, "apa-signer: %d voice outcomes; degraded (unavailable) %d, %.1f%%\n", total, degraded, 100*float64(degraded)/float64(total))
+		} else {
+			fmt.Fprintln(out, "apa-signer: no voice outcome yet")
+		}
 		return nil
 	case "voice-delete":
 		ok, err := core.DeleteVoice(ctx, *id)

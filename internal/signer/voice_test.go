@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"net"
@@ -69,7 +70,7 @@ func (s *fakeSidecar) start(t *testing.T) {
 		}
 		body, _ := io.ReadAll(r.Body)
 		s.mu.Lock()
-		sc, ok := s.script[string(body)]
+		sc, ok := s.script[tagOf(body)]
 		s.calls++
 		s.mu.Unlock()
 		if !ok {
@@ -154,7 +155,37 @@ func (f *afx) verifyVoice(vid, challengeID string, order, assertion json.RawMess
 }
 
 func audio(s string) *VoiceAnswer {
-	return &VoiceAnswer{Audio: base64.StdEncoding.EncodeToString([]byte(s))}
+	return &VoiceAnswer{Audio: base64.StdEncoding.EncodeToString(wavOf(s))}
+}
+
+// wavOf is a recording in the page's format whose sound carries tag (the
+// scripted sidecar answers by it): at least half a second of 16 kHz mono
+// 16-bit PCM.
+func wavOf(tag string) []byte {
+	n := max(16000, len(tag)+len(tag)%2)
+	b := make([]byte, 44+n)
+	copy(b, "RIFF")
+	binary.LittleEndian.PutUint32(b[4:], uint32(36+n))
+	copy(b[8:], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(b[16:], 16)
+	binary.LittleEndian.PutUint16(b[20:], 1)
+	binary.LittleEndian.PutUint16(b[22:], 1)
+	binary.LittleEndian.PutUint32(b[24:], 16000)
+	binary.LittleEndian.PutUint32(b[28:], 32000)
+	binary.LittleEndian.PutUint16(b[32:], 2)
+	binary.LittleEndian.PutUint16(b[34:], 16)
+	copy(b[36:], "data")
+	binary.LittleEndian.PutUint32(b[40:], uint32(n))
+	copy(b[44:], tag)
+	return b
+}
+
+// tagOf is what a scripted sidecar keys a body by: a WAV's tag, else the body.
+func tagOf(body []byte) string {
+	if len(body) > 44 && string(body[:4]) == "RIFF" {
+		return strings.TrimRight(string(body[44:]), "\x00")
+	}
+	return string(body)
 }
 
 func TestVoicePassResendAndNothingKept(t *testing.T) {
@@ -375,5 +406,76 @@ func TestVoicePhraseEval(t *testing.T) {
 	res, _ := json.Marshal(out)
 	if err := os.WriteFile(in+".out", res, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Review S2-S5: the Signer's own trouble is never an unavailable voice; a
+// recording not in the page's format fails before the sidecar; a sidecar
+// in a directory others can write gets nothing.
+func TestVoiceSignerTroubleAndInputs(t *testing.T) {
+	s := newFakeSidecar(t)
+	f := newVoiceAFX(t, s)
+	a := f.enroll("approver-a", nil)
+	enrollVoice(t, f, s, "approver-a")
+	verify := func(name string, v *VoiceAnswer) (ApprovalReply, error, ApprovalReply) {
+		t.Helper()
+		order := f.order("a")
+		c := f.mustChallenge("req-"+name, order, "approve")
+		if v == nil {
+			s.set("rec-"+name, said(codeOf(t, c), speakerA))
+			v = audio("rec-" + name)
+		}
+		r, err := f.verifyVoice("ver-"+name, c.ChallengeID, order, a.Get(c.Options, origin), v)
+		st, _ := f.core.ChallengeByID(bgA, c.ChallengeID)
+		return r, err, st
+	}
+	calls := s.calls
+	raw := &VoiceAnswer{Audio: base64.StdEncoding.EncodeToString([]byte("not a wav"))}
+	if r, err, _ := verify("raw", raw); refusal(err) != "VOICE_AUDIO_INVALID" || s.calls != calls {
+		t.Errorf("a non-WAV recording: %+v %v (sidecar calls %d -> %d)", r, err, calls, s.calls)
+	}
+	s.set("rec-500", scripted{status: 500})
+	if r, err, _ := verify("500", audio("rec-500")); err != nil || r.VoiceResult == nil || r.VoiceResult.Reason != "VOICE_SERVICE_UNAVAILABLE" {
+		t.Errorf("a sidecar 500: %+v %v", r, err)
+	}
+	// The socket's directory writable by others: nothing is sent, unavailable.
+	dir := filepath.Dir(s.socket)
+	os.Chmod(dir, 0o777)
+	calls = s.calls
+	if r, err, _ := verify("dir", nil); err != nil || r.VoiceResult == nil || r.VoiceResult.Reason != "VOICE_SERVICE_UNAVAILABLE" || s.calls != calls {
+		t.Errorf("a socket directory others can write: %+v %v (sidecar calls %d -> %d)", r, err, calls, s.calls)
+	}
+	os.Chmod(dir, 0o700)
+	// The key gone between the challenge and the verify: refused, nothing approved, the challenge still issued.
+	order := f.order("a")
+	c := f.mustChallenge("req-key", order, "approve")
+	s.set("rec-key", said(codeOf(t, c), speakerA))
+	key := filepath.Join(f.core.dir, "voice.key")
+	saved, _ := os.ReadFile(key)
+	os.Remove(key)
+	r, err := f.verifyVoice("ver-key", c.ChallengeID, order, a.Get(c.Options, origin), audio("rec-key"))
+	if st, _ := f.core.ChallengeByID(bgA, c.ChallengeID); refusal(err) != "VOICE_SIGNER_UNAVAILABLE" || r.ApprovalID != "" || st.State != "issued" {
+		t.Errorf("no key at verify: %+v %v, challenge %s", r, err, st.State)
+	}
+	if _, err := f.challenge("req-nokey", f.order("a"), "approve"); refusal(err) != "VOICE_NOT_ENROLLED" {
+		t.Errorf("no key at the challenge: %v", err)
+	}
+	os.WriteFile(key, saved, 0o644)
+	if _, err := f.challenge("req-0644", f.order("a"), "approve"); refusal(err) != "VOICE_NOT_ENROLLED" {
+		t.Errorf("a key others can read: %v", err)
+	}
+	os.Chmod(key, 0o600)
+	f.core.db.Exec(`UPDATE voice_templates SET speaker_model = 'spk@old'`)
+	if _, err := f.challenge("req-model", f.order("a"), "approve"); refusal(err) != "VOICE_NOT_ENROLLED" {
+		t.Errorf("a template of another speaker model: %v", err)
+	}
+	// An embedding with no length makes no template.
+	s.set("zero-1", scripted{an: analysis{Transcript: "x", Embedding: []float64{0, 0, 0, 0}}})
+	if _, err := f.core.EnrollVoice(bgA, "approver-a", [][]byte{[]byte("zero-1"), []byte("enroll-2"), []byte("enroll-3")}); err == nil {
+		t.Error("a zero embedding enrolled")
+	}
+	st, err := f.core.VoiceStats(bgA)
+	if err != nil || st["failed VOICE_AUDIO_INVALID"] != 1 || st["unavailable VOICE_SERVICE_UNAVAILABLE"] != 2 {
+		t.Errorf("stats %v %v", st, err)
 	}
 }

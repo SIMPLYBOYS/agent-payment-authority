@@ -89,10 +89,12 @@ writeFileSync(join(sdir, "signer.json"), JSON.stringify({ version: 1, socket: so
   voice: { socket: vsock, timeout_ms: 10000, speaker_threshold_milli: threshold, asr_model: h.asr, speaker_model: h.speaker, decimals: 6,
     merchants: [{ pay_to: "0x3333333333333333333333333333333333333333", name: "示意商家", pinyin: "shi yi shang jia" }] } }), { mode: 0o600 });
 let signer = null;
+let signerLog = "";
 async function startSigner() {
-  const p = spawn(join(bin, "apa-signer"), ["serve-approvals", "--dir", sdir], { stdio: ["ignore", "ignore", "pipe"] });
+  const p = spawn(join(bin, "apa-signer"), ["serve-approvals", "--dir", sdir], { stdio: ["ignore", "pipe", "pipe"] });
   let text = "";
-  p.stderr.on("data", (d) => { text += d; });
+  p.stderr.on("data", (d) => { text += d; signerLog += d; });
+  p.stdout.on("data", (d) => { signerLog += d; });
   for (let i = 0; i < 100 && !text.includes("serving approvals only"); i++) await sleep(100);
   if (!text.includes("serving approvals only")) throw new Error("serve-approvals did not start");
   signer = p;
@@ -148,6 +150,15 @@ try {
   await b.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await b.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await b.send("Page.addScriptToEvaluateOnNewDocument", { source: MIC });
+  // Review S7: the recordings exactly as the page sent them, for the scan at the end.
+  const sent = [];
+  await b.send("Network.enable", { maxPostDataSize: 1 << 20 });
+  b.on("Network.requestWillBeSent", (p) => {
+    if (p.request.method !== "POST" || !/\/assertion$/.test(p.request.url)) return;
+    const take = (d) => { try { const v = JSON.parse(d).voice; if (v && v.audio) sent.push(v.audio); } catch {} };
+    if (p.request.postData) take(p.request.postData);
+    else b.send("Network.getRequestPostData", { requestId: p.requestId }).then((r) => take(r.postData)).catch(() => {});
+  });
   await b.send("WebAuthn.enable");
   await b.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
   const text = (sel) => b.evaluate(`(document.querySelector(${JSON.stringify(sel)}) || {}).textContent || ""`);
@@ -294,13 +305,17 @@ try {
   const places = [];
   for (const f of ["demo.db", "demo.db-wal"]) if (existsSync(join(state, f))) places.push([f, readFileSync(join(state, f))]);
   for (const f of ["approvals.db", "approvals.db-wal"]) if (existsSync(join(sdir, f))) places.push(["signer " + f, readFileSync(join(sdir, f))]);
-  places.push(["host log", Buffer.from(demo.log())]);
+  places.push(["host log", Buffer.from(demo.log())], ["signer log", Buffer.from(signerLog)]);
   const found = [];
-  for (const rec of recordings) {
-    const pcm = readFileSync(rec).subarray(1000, 1064); // 64 bytes of sound, raw and base64
-    for (const [where, bytes] of places) if (bytes.includes(pcm) || bytes.includes(Buffer.from(pcm.toString("base64")))) found.push(rec + " in " + where);
+  // Each recording the page sent: 64 bytes of its sound at two places, raw,
+  // and 64 characters of its base64 at two places (as sent).
+  for (const [i, a] of sent.entries()) {
+    const raw = Buffer.from(a, "base64");
+    const needles = [raw.subarray(2000, 2064), raw.subarray(raw.length >> 1, (raw.length >> 1) + 64), Buffer.from(a.slice(4000, 4064)), Buffer.from(a.slice(a.length >> 1, (a.length >> 1) + 64))];
+    for (const [where, bytes] of places) if (needles.some((x) => bytes.includes(x))) found.push("recording " + i + " in " + where);
   }
-  check("no recording in the Host's or the Signer's database or the Host's log (" + recordings.length + " recordings, " + places.length + " places)", found.length === 0, found.join("; "));
+  check("the page sent the recordings (" + sent.length + ")", sent.length === 4, String(sent.length));
+  check("no recording the page sent is in the Host's or the Signer's database or log (" + sent.length + " recordings, " + places.length + " places)", sent.length > 0 && found.length === 0, found.join("; "));
   check("the flow ran to its end", true);
 } catch (e) {
   check("the flow ran to its end", false, String(e && e.stack || e).slice(0, 400));

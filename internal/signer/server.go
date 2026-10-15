@@ -146,20 +146,20 @@ func Handler(core *Core, log func(string)) http.Handler {
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, req *http.Request) {
 		answer(w, req, "health", Reply{State: "unlocked"}, nil)
 	})
-	return callers(core.cfg, mux, func(w http.ResponseWriter, req *http.Request) {
+	return callers(core.cfg, timeout, mux, func(w http.ResponseWriter, req *http.Request) {
 		answer(w, req, "caller", Reply{}, Refusal("CALLER_NOT_ALLOWED"))
 	})
 }
 
 // callers admits the configured uids only, each request under timeout.
-func callers(cfg *Config, mux http.Handler, refuse http.HandlerFunc) http.Handler {
+func callers(cfg *Config, t time.Duration, mux http.Handler, refuse http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		uid, ok := req.Context().Value(ctxKey{}).(int64)
 		if !ok || uid < 0 || !cfg.allows(uint32(uid)) {
 			refuse(w, req)
 			return
 		}
-		ctx, cancel := context.WithTimeout(req.Context(), cfg.requestTimeout())
+		ctx, cancel := context.WithTimeout(req.Context(), t)
 		defer cancel()
 		mux.ServeHTTP(w, req.WithContext(ctx))
 	})
@@ -302,7 +302,7 @@ func ApprovalsHandler(core *ApprovalCore, log func(string)) http.Handler {
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, req *http.Request) {
 		answer(w, req, "health", &ApprovalReply{State: "approvals-only", Payment: "unavailable"}, nil)
 	})
-	return callers(core.cfg, mux, func(w http.ResponseWriter, req *http.Request) {
+	return callers(core.cfg, core.cfg.requestTimeout(), mux, func(w http.ResponseWriter, req *http.Request) {
 		answer(w, req, "caller", &ApprovalReply{}, Refusal("CALLER_NOT_ALLOWED"))
 	})
 }

@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"net"
@@ -49,8 +50,8 @@ func newV1Sidecar(t *testing.T) *v1Sidecar {
 		}
 		body, _ := io.ReadAll(r.Body)
 		s.mu.Lock()
-		a, ok := s.script[string(body)]
-		d := s.delay[string(body)]
+		a, ok := s.script[tagOf(body)]
+		d := s.delay[tagOf(body)]
 		s.mu.Unlock()
 		time.Sleep(d)
 		if !ok {
@@ -120,7 +121,37 @@ func (f *a2fx) assertVoice(session, req, verify string, as json.RawMessage, voic
 }
 
 func rec(s string) map[string]string {
-	return map[string]string{"audio": base64.StdEncoding.EncodeToString([]byte(s))}
+	return map[string]string{"audio": base64.StdEncoding.EncodeToString(wavOf(s))}
+}
+
+// wavOf is a recording in the page's format whose sound carries tag (the
+// scripted sidecar answers by it): at least half a second of 16 kHz mono
+// 16-bit PCM.
+func wavOf(tag string) []byte {
+	n := max(16000, len(tag)+len(tag)%2)
+	b := make([]byte, 44+n)
+	copy(b, "RIFF")
+	binary.LittleEndian.PutUint32(b[4:], uint32(36+n))
+	copy(b[8:], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(b[16:], 16)
+	binary.LittleEndian.PutUint16(b[20:], 1)
+	binary.LittleEndian.PutUint16(b[22:], 1)
+	binary.LittleEndian.PutUint32(b[24:], 16000)
+	binary.LittleEndian.PutUint32(b[28:], 32000)
+	binary.LittleEndian.PutUint16(b[32:], 2)
+	binary.LittleEndian.PutUint16(b[34:], 16)
+	copy(b[36:], "data")
+	binary.LittleEndian.PutUint32(b[40:], uint32(n))
+	copy(b[44:], tag)
+	return b
+}
+
+// tagOf is what a scripted sidecar keys a body by: a WAV's tag, else the body.
+func tagOf(body []byte) string {
+	if len(body) > 44 && string(body[:4]) == "RIFF" {
+		return strings.TrimRight(string(body[44:]), "\x00")
+	}
+	return string(body)
 }
 
 func types2(evs []eventView) string {

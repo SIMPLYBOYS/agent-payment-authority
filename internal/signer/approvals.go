@@ -444,9 +444,7 @@ func (c *ApprovalCore) Challenge(ctx context.Context, r ChallengeRequest) (Appro
 	}
 	voice := c.cfg.Voice != nil && r.Decision == "approve" // a deny needs no voice
 	if voice {
-		if ok, err := c.hasVoiceTemplate(ctx, c.db, ap.ApproverID); err != nil {
-			return ApprovalReply{}, err
-		} else if !ok {
+		if _, err := c.voiceTemplate(ctx, ap.ApproverID); err != nil { // none, unreadable or another model's: never a degraded approval later
 			return ApprovalReply{}, Refusal("VOICE_NOT_ENROLLED")
 		}
 		if c.cfg.Voice.merchant(b.PayTo) == nil {
@@ -734,7 +732,10 @@ func (c *ApprovalCore) Verify(ctx context.Context, r VerifyRequest) (ApprovalRep
 		if c.voice == nil { // the voice section was removed: the approver's version check covers the config hash
 			return c.refuse(ctx, r, fp, &a, "APPROVER_CHANGED", true)
 		}
-		o := c.judgeVoice(ctx, a, r.Voice)
+		o, err := c.judgeVoice(ctx, a, r.Voice)
+		if err != nil {
+			return c.refuse(ctx, r, fp, &a, "VOICE_SIGNER_UNAVAILABLE", false) // nothing approved; the challenge stays
+		}
 		if o.Result == "failed" {
 			return c.voiceFail(ctx, r, fp, a, o)
 		}

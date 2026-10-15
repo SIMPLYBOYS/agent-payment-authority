@@ -38,6 +38,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
@@ -272,10 +273,52 @@ type sidecar struct {
 
 func newSidecar(v *Voice) *sidecar {
 	return &sidecar{cfg: v, client: &http.Client{Transport: &http.Transport{
+		DisableKeepAlives: true, // every request dials, so every request is checked
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			// Review S4: whoever is behind the socket gets the recording and
+			// answers for the models. Only a directory of the Signer's own
+			// user that nobody else can write, and a process of that user.
+			if err := ownDir(filepath.Dir(v.Socket)); err != nil {
+				return nil, err
+			}
 			var d net.Dialer
-			return d.DialContext(ctx, "unix", v.Socket)
+			c, err := d.DialContext(ctx, "unix", v.Socket)
+			if err != nil {
+				return nil, err
+			}
+			uc, ok := c.(*net.UnixConn)
+			if uid, err := peerUID(uc); !ok || err != nil || uid != uint32(os.Getuid()) {
+				c.Close()
+				return nil, errors.New("voice sidecar: not the Signer's user")
+			}
+			return c, nil
 		}}}}
+}
+
+// ownDir: dir is the Signer's user's, and no one else can write in it.
+func ownDir(dir string) error {
+	fi, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok || st.Uid != uint32(os.Getuid()) || fi.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("voice sidecar: %s must be the Signer's user's and writable by no one else", dir)
+	}
+	return nil
+}
+
+// wavOK: the page's format, a 16 kHz mono 16-bit PCM WAV (44-byte header)
+// of half a second to the limit. Anything else is a failed recording,
+// decided here, never the sidecar's (review S5).
+func wavOK(b []byte) bool {
+	if len(b) < 44 || string(b[0:4]) != "RIFF" || string(b[8:12]) != "WAVE" || string(b[12:16]) != "fmt " || string(b[36:40]) != "data" {
+		return false
+	}
+	le := binary.LittleEndian
+	n := le.Uint32(b[40:44])
+	return le.Uint32(b[16:20]) == 16 && le.Uint16(b[20:22]) == 1 && le.Uint16(b[22:24]) == 1 && le.Uint32(b[24:28]) == 16000 &&
+		le.Uint16(b[34:36]) == 16 && int(n) == len(b)-44 && n >= 16000 && n <= 16000*2*voiceMaxSeconds
 }
 
 type analysis struct {
@@ -347,17 +390,33 @@ type voiceOutcome struct {
 
 // judgeVoice scores the page's answer for challenge a (whose record holds
 // the nonce), within the configured time limit.
-func (c *ApprovalCore) judgeVoice(ctx context.Context, a challengeRow, ans *VoiceAnswer) voiceOutcome {
+// An error is the Signer's own trouble (its database, its key, its
+// template or configuration): the verify is refused, nothing is approved,
+// and it is never read as an unavailable voice (review S3).
+func (c *ApprovalCore) judgeVoice(ctx context.Context, a challengeRow, ans *VoiceAnswer) (voiceOutcome, error) {
 	v := c.cfg.Voice
 	if ans.Unavailable == "device" {
-		return voiceOutcome{VoiceResult: VoiceResult{"unavailable", "VOICE_DEVICE_UNAVAILABLE"}}
+		return voiceOutcome{VoiceResult: VoiceResult{"unavailable", "VOICE_DEVICE_UNAVAILABLE"}}, nil
+	}
+	var d Display
+	_ = json.Unmarshal([]byte(a.display), &d)
+	m := v.merchant(d.PayTo)
+	tpl, err := c.voiceTemplate(ctx, a.approver)
+	if m == nil || err != nil {
+		return voiceOutcome{}, errors.Join(errors.New("voice: merchant or template"), err)
 	}
 	wav, _ := base64.StdEncoding.DecodeString(ans.Audio) // checked by Verify
 	sum := sha256.Sum256(wav)
 	out := voiceOutcome{audioSHA: hex.EncodeToString(sum[:])}
 	var seen int
-	if err := c.db.QueryRowContext(ctx, `SELECT count(*) FROM voice_results WHERE audio_sha256 = ?`, out.audioSHA).Scan(&seen); err == nil && seen > 0 {
-		return voiceOutcome{VoiceResult: VoiceResult{"failed", "VOICE_REPLAY"}} // the hash stays the first use's
+	if err := c.db.QueryRowContext(ctx, `SELECT count(*) FROM voice_results WHERE audio_sha256 = ?`, out.audioSHA).Scan(&seen); err != nil {
+		return voiceOutcome{}, err
+	} else if seen > 0 {
+		return voiceOutcome{VoiceResult: VoiceResult{"failed", "VOICE_REPLAY"}}, nil // the hash stays the first use's
+	}
+	if !wavOK(wav) {
+		out.VoiceResult = VoiceResult{"failed", "VOICE_AUDIO_INVALID"}
+		return out, nil
 	}
 	tctx, cancel := context.WithTimeout(ctx, time.Duration(v.TimeoutMS)*time.Millisecond)
 	defer cancel() // a result past the deadline is never read: the request is gone with the context
@@ -365,21 +424,13 @@ func (c *ApprovalCore) judgeVoice(ctx context.Context, a challengeRow, ans *Voic
 	switch {
 	case errors.Is(err, Refusal("VOICE_AUDIO_INVALID")):
 		out.VoiceResult = VoiceResult{"failed", "VOICE_AUDIO_INVALID"}
-		return out
-	case tctx.Err() != nil:
+		return out, nil
+	case err != nil && tctx.Err() != nil: // review S2: an analysis that did come back is always judged
 		out.VoiceResult = VoiceResult{"unavailable", "VOICE_TIMEOUT"}
-		return out
+		return out, nil
 	case err != nil:
 		out.VoiceResult = VoiceResult{"unavailable", "VOICE_SERVICE_UNAVAILABLE"}
-		return out
-	}
-	var d Display
-	_ = json.Unmarshal([]byte(a.display), &d)
-	m := v.merchant(d.PayTo)
-	tpl, err := c.voiceTemplate(ctx, a.approver)
-	if m == nil || err != nil { // the merchant and the template were there at the challenge
-		out.VoiceResult = VoiceResult{"unavailable", "VOICE_SERVICE_UNAVAILABLE"}
-		return out
+		return out, nil
 	}
 	am, mm, cm := matchPhrase(an.Transcript, an.Pinyin, spokenAmount(d.Amount, v.Decimals), voiceCode(a.voiceNonce), m.Pinyin)
 	score := cosine(an.Embedding, tpl)
@@ -387,12 +438,12 @@ func (c *ApprovalCore) judgeVoice(ctx context.Context, a challengeRow, ans *Voic
 	switch {
 	case !am || !mm || !cm:
 		out.VoiceResult = VoiceResult{"failed", "VOICE_PHRASE_MISMATCH"}
-	case score < v.threshold():
+	case !(score >= v.threshold()): // a NaN score is no match
 		out.VoiceResult = VoiceResult{"failed", "VOICE_SPEAKER_MISMATCH"}
 	default:
 		out.VoiceResult = VoiceResult{Result: "verified"}
 	}
-	return out
+	return out, nil
 }
 
 // saveVoice keeps an outcome in tx (never the recording or its text).
@@ -517,10 +568,15 @@ func voiceGCM(key []byte) (cipher.AEAD, error) {
 	return cipher.NewGCM(b)
 }
 
+// voiceTemplate opens approverID's template, made with the configured
+// speaker model (another model's embeddings are not comparable).
 func (c *ApprovalCore) voiceTemplate(ctx context.Context, approverID string) ([]float64, error) {
-	var sealed string
-	if err := c.db.QueryRowContext(ctx, `SELECT sealed FROM voice_templates WHERE approver_id = ?`, approverID).Scan(&sealed); err != nil {
+	var sealed, model string
+	if err := c.db.QueryRowContext(ctx, `SELECT sealed, speaker_model FROM voice_templates WHERE approver_id = ?`, approverID).Scan(&sealed, &model); err != nil {
 		return nil, err
+	}
+	if model != c.cfg.Voice.SpeakerModel {
+		return nil, errors.New("voice template of another speaker model")
 	}
 	key, err := c.voiceKey(false)
 	if err != nil {
@@ -574,11 +630,17 @@ func (c *ApprovalCore) EnrollVoice(ctx context.Context, approverID string, wavs 
 			norm += x * x
 		}
 		norm = math.Sqrt(norm)
+		if !(norm > 0) || math.IsInf(norm, 0) { // zero, NaN or infinite: no template from it (review S3)
+			return 0, fmt.Errorf("recording %d: an unusable embedding", i+1)
+		}
 		for j, x := range an.Embedding {
 			mean[j] += x / norm / float64(len(wavs))
 		}
 	}
-	plain, _ := json.Marshal(mean)
+	plain, err := json.Marshal(mean)
+	if err != nil {
+		return 0, err
+	}
 	key, err := c.voiceKey(true)
 	if err != nil {
 		return 0, err
@@ -608,10 +670,24 @@ func (c *ApprovalCore) DeleteVoice(ctx context.Context, approverID string) (bool
 	return n > 0, nil
 }
 
-func (c *ApprovalCore) hasVoiceTemplate(ctx context.Context, q querier, approverID string) (bool, error) {
-	var n int
-	err := q.QueryRowContext(ctx, `SELECT count(*) FROM voice_templates WHERE approver_id = ?`, approverID).Scan(&n)
-	return n > 0, err
+// VoiceStats counts the stored voice outcomes by result and reason: the
+// degradation rate's numbers (review S1).
+func (c *ApprovalCore) VoiceStats(ctx context.Context) (map[string]int, error) {
+	rows, err := c.db.QueryContext(ctx, `SELECT result, coalesce(reason, ''), count(*) FROM voice_results GROUP BY result, reason ORDER BY result, reason`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var r, why string
+		var n int
+		if err := rows.Scan(&r, &why, &n); err != nil {
+			return nil, err
+		}
+		out[strings.TrimSuffix(r+" "+why, " ")] = n
+	}
+	return out, rows.Err()
 }
 
 // voiceResultOf is the stored outcome of challenge id, if any.

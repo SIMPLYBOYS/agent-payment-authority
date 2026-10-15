@@ -720,9 +720,9 @@ MUTATIONS = [
     # failed voice denies for good, unavailability never read as success,
     # and the contract's voice rules.
     ('V1 signer: another speaker passes', 'internal/signer/voice.go',
-     'case score < v.threshold():', 'case false && score < v.threshold():', 'TestVoiceFailuresDenyTheSession'),
+     'case !(score >= v.threshold()):', 'case false && !(score >= v.threshold()):', 'TestVoiceFailuresDenyTheSession'),
     ('V1 signer: a recording used once is not a replay', 'internal/signer/voice.go',
-     'Scan(&seen); err == nil && seen > 0 {', 'Scan(&seen); err == nil && seen > 0 && false {', 'TestVoiceFailuresDenyTheSession'),
+     '} else if seen > 0 {', '} else if false && seen > 0 {', 'TestVoiceFailuresDenyTheSession'),
     ('V1 signer: the code is not compared', 'internal/signer/voice.go',
      'case !am || !mm || !cm:', 'case !am || !mm || false && !cm:', 'TestVoiceFailuresDenyTheSession'),
     ('V1 signer: the merchant is not compared', 'internal/signer/voice.go',
@@ -739,6 +739,20 @@ MUTATIONS = [
      'if byVoice != (st.voiced[po] == "VOICE_CHALLENGE_FAILED") {', 'if false && byVoice != (st.voiced[po] == "VOICE_CHALLENGE_FAILED") {', 'TestVoiceEventOrder'),
     ('V1 contract: a voice event with any code', 'internal/paycontract/events.go',
      'case codes == nil && p.Code != "", codes != nil && !slices.Contains(codes, p.Code):', 'case false:', 'TestVoiceEventShape'),
+    # V1 review S3-S5: the Signer's own trouble, the recording's format, the
+    # sidecar's directory.
+    ('V1 review: a recording not in the page\'s format reaches the sidecar', 'internal/signer/voice.go',
+     'if !wavOK(wav) {', 'if false && !wavOK(wav) {', 'TestVoiceSignerTroubleAndInputs'),
+    ('V1 review: a sidecar directory others can write is trusted', 'internal/signer/voice.go',
+     ' || fi.Mode().Perm()&0o022 != 0', '', 'TestVoiceSignerTroubleAndInputs'),
+    ('V1 review: an unreadable template still gets a challenge', 'internal/signer/approvals.go',
+     'if _, err := c.voiceTemplate(ctx, ap.ApproverID); err != nil {', 'if _, err := c.voiceTemplate(ctx, ap.ApproverID); false && err != nil {', 'TestVoiceSignerTroubleAndInputs'),
+    ('V1 review: another speaker model\'s template is used', 'internal/signer/voice.go',
+     'if model != c.cfg.Voice.SpeakerModel {', 'if false && model != c.cfg.Voice.SpeakerModel {', 'TestVoiceSignerTroubleAndInputs'),
+    ('V1 review: the Signer\'s trouble is not refused', 'internal/signer/approvals.go',
+     'if err != nil {\n\t\t\treturn c.refuse(ctx, r, fp, &a, "VOICE_SIGNER_UNAVAILABLE"', 'if false && err != nil {\n\t\t\treturn c.refuse(ctx, r, fp, &a, "VOICE_SIGNER_UNAVAILABLE"', 'TestVoiceSignerTroubleAndInputs'),
+    ('V1 review: a zero embedding enrolls', 'internal/signer/voice.go',
+     'if !(norm > 0) || math.IsInf(norm, 0) {', 'if false {', 'TestVoiceSignerTroubleAndInputs'),
 ]
 
 
