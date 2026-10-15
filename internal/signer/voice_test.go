@@ -471,8 +471,8 @@ func TestVoiceSignerTroubleAndInputs(t *testing.T) {
 	}
 	// An embedding with no length makes no template.
 	s.set("zero-1", scripted{an: analysis{Transcript: "x", Embedding: []float64{0, 0, 0, 0}}})
-	if _, err := f.core.EnrollVoice(bgA, "approver-a", [][]byte{[]byte("zero-1"), []byte("enroll-2"), []byte("enroll-3")}); err == nil {
-		t.Error("a zero embedding enrolled")
+	if _, err := f.core.EnrollVoice(bgA, "approver-a", [][]byte{[]byte("zero-1"), []byte("enroll-2"), []byte("enroll-3")}); err == nil || !strings.Contains(err.Error(), "an unusable embedding") {
+		t.Errorf("a zero embedding: %v", err) // refused for what it is, before anything is encoded
 	}
 	st, err := f.core.VoiceStats(bgA)
 	if err != nil || st["failed VOICE_AUDIO_INVALID"] != 1 || st["unavailable VOICE_SERVICE_UNAVAILABLE"] != 2 {
