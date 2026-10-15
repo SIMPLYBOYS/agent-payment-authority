@@ -45,7 +45,10 @@ def asr_worker(models, conn):
     m = WhisperModel(os.path.join(models, ASR_MODEL), device="cpu", compute_type="int8")
     conn.send("ready")
     while True:
-        pcm = conn.recv_bytes()
+        try:
+            pcm = conn.recv_bytes()
+        except EOFError:  # the sidecar is gone: so is this worker, quietly
+            return
         try:
             audio = np.frombuffer(pcm, dtype="<i2").astype("float32") / 32768.0
             # zh: the challenge phrase is Chinese; digits come back as digits or numerals.
@@ -65,7 +68,10 @@ def speaker_worker(models, conn):
     enc = EncoderClassifier.from_hparams(source=local, savedir=local, overrides={"pretrained_path": local}, run_opts={"device": "cpu"})
     conn.send("ready")
     while True:
-        pcm = conn.recv_bytes()
+        try:
+            pcm = conn.recv_bytes()
+        except EOFError:  # the sidecar is gone: so is this worker, quietly
+            return
         try:
             audio = torch.from_numpy(np.frombuffer(pcm, dtype="<i2").astype("float32") / 32768.0).unsqueeze(0)
             with torch.no_grad():

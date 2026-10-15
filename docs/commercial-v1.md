@@ -254,3 +254,110 @@ review 時的意外，照它的回報記錄：
 - 它曾在沙箱外對 repo 的 `internal/store/approvals.go` 套用一次突變後還原，已確認與 commit 相同；
 - 它的一次 `grep -r` 走進了 `var/`，只搜一個事件名稱，沒有讀出任何語音資料；
 - 它留下 `$TMPDIR/approvals.go.orig` 等暫存檔，沒有放進 repo。
+
+## 13 開發模式實機輪（A）：操作步驟
+
+Aaron 10/16「先做開發模式（A）」。這一輪用你的帳號在 `var/v1-dev/`（git 忽略、權限 0700）跑 sidecar 和 `serve-approvals`。不碰 `/opt/apa-signer`、不需要 sudo、不建立付款金鑰、不付款。
+
+這一輪會做兩件需要你同意的事：
+- **錄你的聲音建立聲紋模板**：錄音檔登記完就刪除；模板加密存在 `var/v1-dev/data`。
+- **在 Google 密碼管理工具新增一把 `localhost` 的 passkey**：這是開發模式自己的 Signer 用的，跟 A2 在 `/opt` 的那把分開。
+
+以下步驟都在 repo 根目錄執行，請依編號順序做。
+
+**終端機 1：啟動**
+
+1. `sh scripts/demo/v1-dev.sh`
+   - 看到 `v1-dev: ready` 就是好了；
+   - 讓它一直開著，結束時按 Ctrl-C。
+
+**終端機 2：登記**（設 `A=var/v1-dev/bin/apa-signer`、`D=var/v1-dev/data`）
+
+2. **錄音並登記聲紋**：
+   - 先確認麥克風編號：`ffmpeg -hide_banner -f avfoundation -list_devices true -i ""`。下面假設是 `:0`；第一次錄音時，macOS 可能會問終端機能不能用麥克風。
+   - 建一個私人暫存目錄：
+
+     ```
+     R=$(mktemp -d); chmod 700 "$R"
+     ```
+
+   - 錄 3 段，每段約 6 秒，用一般說話的音量和速度唸國語：
+
+     ```
+     ffmpeg -hide_banner -loglevel error -f avfoundation -i ":0" -ar 16000 -ac 1 -t 6 "$R/1.wav"
+     ```
+
+     唸：「我是核准者，這是登記用的第一句話。」
+
+     ```
+     ffmpeg -hide_banner -loglevel error -f avfoundation -i ":0" -ar 16000 -ac 1 -t 6 "$R/2.wav"
+     ```
+
+     唸：「今天天氣很好，我們去買咖啡豆。」
+
+     ```
+     ffmpeg -hide_banner -loglevel error -f avfoundation -i ":0" -ar 16000 -ac 1 -t 6 "$R/3.wav"
+     ```
+
+     唸：「請確認金額與商家，再按下核准。」
+   - 登記，然後立刻刪除錄音：
+
+     ```
+     $A approver voice-enroll --dir $D --approver approver-a "$R/1.wav" "$R/2.wav" "$R/3.wav"
+     rm -P "$R"/*.wav && rmdir "$R"
+     ```
+
+   - 應該看到 `voice template of approver-a from 3 recordings`。這一行可以貼回來。
+3. **裝置登記，第一段（終端機）**：`$A approver enroll begin --dir $D --approver approver-a`
+   - 輸出含**一次性代碼**，請不要貼回來；
+   - 記下登記 ID（`enr-…`）和代碼。
+4. **裝置登記，第二段（瀏覽器）**：用 Chrome 打開 `http://localhost:8402/approve/enroll`。
+   - 這一步要等第 6 步的 Host 啟動後才能打開；如果還沒啟動，先做第 6 步再回來。
+   - 輸入登記 ID 和代碼，選 Google 密碼管理工具，用 PIN 完成。
+   - 頁面會顯示一個指紋。
+5. **裝置登記，第三段（終端機）**：一定要在第 4 步完成之後才執行。
+
+   ```
+   $A approver enroll confirm --dir $D --id enr-…
+   ```
+
+   核對終端機和頁面的指紋相同後，輸入 `yes`。
+
+**終端機 3：Host**
+
+6. 執行下面這行，會打開 `http://localhost:8402/host`：
+
+   ```
+   make present-a2 SIGNER=$PWD/var/v1-dev/run/signer.sock
+   ```
+
+   - 頁面要你輸入終端機上的配對碼，**配對碼不要貼回來**；
+   - 第一次核准時，Chrome 會問能不能用麥克風，請按允許；
+   - 如果 macOS 沒有允許 Chrome 使用麥克風，要到「系統設定 → 隱私權與安全性 → 麥克風」打開。
+
+**試用**（每一筆都是「以 A 模擬」→「建立委託」→「確認並開始」→ 等「需要你處理」）
+
+7. **唸對 5 次**：
+   - 按「用已登記的裝置核准」→ 唸畫面上的整句（含四位代碼）→「唸完了」→ PIN；
+   - 預期看到「本人核准已驗證（裝置＋語音），付款未啟用。」；
+   - 記下每次是通過，還是「語音挑戰未通過（原因）」。
+8. **故意唸錯一次**：例如把代碼唸成別的數字。預期看到「語音挑戰未通過（唸的內容和這筆不符…），這筆已拒絕」。
+9. **拒絕麥克風一次**：
+   - 在 Chrome 網址列左邊的網站設定，把 `localhost:8402` 的麥克風改成「封鎖」，再按核准並完成 PIN；
+   - 預期看到「本人核准已驗證（語音降級），付款未啟用。」；
+   - 做完把麥克風改回「詢問」或「允許」。
+10. **看結果**：`$A approver voice-stats --dir $D`。輸出只有次數，可以整段貼回來。
+
+**結束與清理**
+
+11. 在終端機 3、終端機 1 按 Ctrl-C。
+12. 要不要清理由你決定：
+    - 聲紋模板：`$A approver voice-delete --dir $D --approver approver-a`；
+    - 整個開發模式資料：刪掉 `var/v1-dev/`，含 `approvals.db`、`voice.key`；
+    - Google 密碼管理工具裡那把 `localhost` passkey：你自己辨認後再決定要不要刪除。
+
+**回報時只需要**：第 2 步的那一行、第 7–9 步每次的結果、第 10 步的輸出。不要貼一次性代碼、配對碼或整段終端機輸出。
+
+**注意**：
+- 門檻 0.365 是用英文資料定的，這一輪是你本人國語的第一次實測。
+- 評測裡約 6% 會因為數字辨識錯而被拒；被拒的那一筆不能再核准，要重新請購。
