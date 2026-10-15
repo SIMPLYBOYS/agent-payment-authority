@@ -491,6 +491,28 @@ func TestEnrollmentRules(t *testing.T) {
 	}
 }
 
+// A new begin while an enrollment is finished but not confirmed replaces it:
+// the old one closes, its credential is revoked, and it cannot be confirmed.
+func TestEnrollBeginReplacesFinished(t *testing.T) {
+	f := newAFX(t)
+	a := signertest.NewAuthenticator()
+	id, c, _, _ := f.core.EnrollBegin(bgA, "approver-a")
+	o, _ := f.core.EnrollOptions(bgA, id, c)
+	if _, err := f.core.EnrollFinish(bgA, id, c, a.Create(o.Options, origin)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := f.core.EnrollBegin(bgA, "approver-a"); err != nil {
+		t.Fatalf("begin after a finished enrollment: %v", err)
+	}
+	if err := f.core.EnrollConfirm(bgA, id); refusal(err) != "ENROLLMENT_NOT_FINISHED" {
+		t.Fatalf("confirm of the replaced enrollment: %v", err)
+	}
+	list, _ := f.core.Credentials(bgA)
+	if len(list) != 1 || list[0].State != "revoked" {
+		t.Fatalf("credentials %+v", list)
+	}
+}
+
 func TestRevokedMidway(t *testing.T) {
 	f := newAFX(t)
 	a := f.enroll("approver-a", nil)

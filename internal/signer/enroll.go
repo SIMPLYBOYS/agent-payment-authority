@@ -111,7 +111,9 @@ func (c *ApprovalCore) EnrollBegin(ctx context.Context, approverID string) (stri
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE enrollments SET state = 'closed' WHERE approver_id = ? AND state IN ('pending', 'finished')`, approverID); err != nil {
+		// A finished one gives up its credential reference (its credential is revoked
+		// just below): a closed enrollment names none (found in V1's device round).
+		if _, err := tx.ExecContext(ctx, `UPDATE enrollments SET state = 'closed', credential_id = NULL WHERE approver_id = ? AND state IN ('pending', 'finished')`, approverID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE credentials SET state = 'revoked', state_reason = 'ENROLLMENT_REPLACED', revoked_at = ?
