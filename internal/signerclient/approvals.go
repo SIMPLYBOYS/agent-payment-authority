@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
 )
@@ -32,13 +33,17 @@ type Answer struct {
 	Reply signer.ApprovalReply
 }
 
+// ApprovalsTimeout bounds one call to serve-approvals: longer than its own
+// limit with a voice challenge (5 s plus the sidecar's, at most 10 s; V1).
+const ApprovalsTimeout = 20 * time.Second
+
 // Approvals calls serve-approvals on its Unix socket.
 type Approvals struct {
 	http *http.Client
 }
 
 func NewApprovals(socket string) *Approvals {
-	return &Approvals{http: &http.Client{Timeout: Timeout, Transport: &http.Transport{
+	return &Approvals{http: &http.Client{Timeout: ApprovalsTimeout, Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 		}}}}

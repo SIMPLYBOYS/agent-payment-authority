@@ -88,6 +88,15 @@ func (v *Voice) check(c *Config) error {
 
 func (v *Voice) threshold() float64 { return float64(v.SpeakerThreshold) / 1000 }
 
+// requestTimeout bounds one request: the usual time, and with a voice
+// section the sidecar's time limit on top (a verify waits for it).
+func (c *Config) requestTimeout() time.Duration {
+	if c.Voice == nil {
+		return timeout
+	}
+	return timeout + time.Duration(c.Voice.TimeoutMS)*time.Millisecond
+}
+
 func (v *Voice) merchant(payTo string) *VoiceMerchant {
 	for i := range v.Merchants {
 		if v.Merchants[i].PayTo == payTo {

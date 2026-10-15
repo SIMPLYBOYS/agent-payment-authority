@@ -20,9 +20,11 @@ import (
 type ctxKey struct{}
 
 const (
-	maxBody  = 64 << 10
-	maxConns = 16
-	timeout  = 5 * time.Second
+	maxBody = 64 << 10
+	// V1: a verify request with a recording (a 10 s WAV, base64, and the assertion).
+	maxVerifyBody = 512 << 10
+	maxConns      = 16
+	timeout       = 5 * time.Second
 )
 
 // limited bounds the connections a listener hands out at once.
@@ -54,16 +56,16 @@ func (c *slotConn) Close() error {
 
 // Serve serves a Core on a listener; log gets one fixed line per request.
 func Serve(ctx context.Context, ln net.Listener, core *Core, log func(string)) error {
-	return serveHandler(ctx, ln, Handler(core, log))
+	return serveHandler(ctx, ln, Handler(core, log), timeout)
 }
 
 // ServeApprovals serves serve-approvals' ApprovalCore the same way.
 func ServeApprovals(ctx context.Context, ln net.Listener, core *ApprovalCore, log func(string)) error {
-	return serveHandler(ctx, ln, ApprovalsHandler(core, log))
+	return serveHandler(ctx, ln, ApprovalsHandler(core, log), core.cfg.requestTimeout())
 }
 
-func serveHandler(ctx context.Context, ln net.Listener, h http.Handler) error {
-	srv := &http.Server{Handler: h, ReadTimeout: timeout, WriteTimeout: timeout, ReadHeaderTimeout: timeout,
+func serveHandler(ctx context.Context, ln net.Listener, h http.Handler, t time.Duration) error {
+	srv := &http.Server{Handler: h, ReadTimeout: t, WriteTimeout: t, ReadHeaderTimeout: timeout,
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 			if s, ok := c.(*slotConn); ok {
 				c = s.Conn
@@ -157,7 +159,7 @@ func callers(cfg *Config, mux http.Handler, refuse http.HandlerFunc) http.Handle
 			refuse(w, req)
 			return
 		}
-		ctx, cancel := context.WithTimeout(req.Context(), timeout)
+		ctx, cancel := context.WithTimeout(req.Context(), cfg.requestTimeout())
 		defer cancel()
 		mux.ServeHTTP(w, req.WithContext(ctx))
 	})
@@ -209,7 +211,11 @@ func ApprovalsHandler(core *ApprovalCore, log func(string)) http.Handler {
 		json.NewEncoder(w).Encode(r)
 	}
 	read := func(w http.ResponseWriter, req *http.Request, dst any) bool {
-		body, err := io.ReadAll(http.MaxBytesReader(w, req.Body, maxBody))
+		limit := int64(maxBody)
+		if req.URL.Path == "/v1/approvals/verify" {
+			limit = maxVerifyBody // V1: a verify request may carry a recording of up to 10 s
+		}
+		body, err := io.ReadAll(http.MaxBytesReader(w, req.Body, limit))
 		return err == nil && json.Unmarshal(body, dst) == nil
 	}
 	approval := func(route string, f func(ctx context.Context, req *http.Request) (ApprovalReply, error)) http.HandlerFunc {

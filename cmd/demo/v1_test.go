@@ -78,10 +78,14 @@ func heard(code string, e []float64) map[string]any {
 	return map[string]any{"transcript": "核准0.5USDC 付给是一商家，代码" + code, "pinyin": "he zhun 0.5USDC fu gei shi yi shang jia , dai ma " + code, "embedding": e}
 }
 
-func startV1(t *testing.T) (*a2fx, *v1Sidecar) {
+func startV1(t *testing.T, timeoutMS ...int) (*a2fx, *v1Sidecar) {
 	t.Helper()
 	s := newV1Sidecar(t)
-	f := startA2(t, 60, map[string]any{"socket": s.sock, "timeout_ms": 300, "speaker_threshold_milli": 800, "asr_model": "asr@t", "speaker_model": "spk@t",
+	tm := 300
+	if len(timeoutMS) > 0 {
+		tm = timeoutMS[0]
+	}
+	f := startA2(t, 60, map[string]any{"socket": s.sock, "timeout_ms": tm, "speaker_threshold_milli": 800, "asr_model": "asr@t", "speaker_model": "spk@t",
 		"decimals": 6, "merchants": []map[string]string{{"pay_to": "0x3333333333333333333333333333333333333333", "name": "示意商家", "pinyin": "shi yi shang jia"}}})
 	var wavs [][]byte
 	for _, w := range []string{"enr-1", "enr-2", "enr-3"} {
@@ -229,4 +233,25 @@ func tail(s string, n int) string {
 		return s[len(s)-n:]
 	}
 	return s
+}
+
+// A recording of a real size (about ten seconds of WAV) and a sidecar that
+// takes longer than the Signer's usual 5 s, within its voice time limit:
+// neither is cut by a size or time limit on the way (Host, Signer).
+func TestV1VoiceRealSizeAndSlow(t *testing.T) {
+	f, s := startV1(t, 7000)
+	sid, intent, _ := f.ask("01")
+	r, code := f.voiceChallenge(sid, "att-req-0000000000001")
+	big := strings.Repeat("w", 320000)
+	s.set(big, heard(code, voiceA))
+	s.mu.Lock()
+	s.delay[big] = 6 * time.Second
+	s.mu.Unlock()
+	st, out := f.assertVoice(sid, "att-req-0000000000001", "ver-req-0000000000001", f.sign(r, sid, intent, "approve"), rec(big))
+	if st != 200 || out["outcome"] != "approved" {
+		t.Fatalf("assertion: %d %v %v", st, out["error"], out["code"])
+	}
+	if g := out["item"].(map[string]any)["purchase"].(map[string]any)["approval"].(map[string]any)["grant"].(map[string]any); g["voice"] != "verified" {
+		t.Fatalf("grant %v", g)
+	}
 }
