@@ -1,7 +1,7 @@
 # V1 語音核准三態
 
 > 2026-10-15，Claude Code。依 vault〈Claude-Code-V1語音核准三態與評測派工-20261013〉與 Aaron「我們開始進行 V1 語音三態」。分支 `commercial-v1`（從 main `cfc5c28`）。
-> **狀態：實作與評測完成，待獨立上下文 review。** 本片只用合成音訊、公開資料集與 virtual authenticator；不收 Aaron 的聲音、不碰真實裝置、不改 `/opt/apa-signer`。
+> **狀態：實作與評測完成；獨立上下文 review 無 must-fix，S1–S8 已處理（第 12 節）。待 Aaron 驗收。** 本片只用合成音訊、公開資料集與 virtual authenticator；不收 Aaron 的聲音、不碰真實裝置、不改 `/opt/apa-signer`。
 
 ## 1 Aaron 的核准（10/15）
 
@@ -63,17 +63,23 @@
   - `asr_model`、`speaker_model`：sidecar 回報的版本必須相同，否則當作服務不可用；
   - `decimals`；`merchants`：每個 `pay_to` 的唸法名稱和拼音。挑戰語的商家名稱來自這裡，不信任頁面送來的文字。
   - 有 `voice` 時，Signer 每個請求的時限是 5 秒加上 `timeout_ms`；Host 呼叫 Signer 的時限放寬到 20 秒。
+- **sidecar 的位置**（review S4）：Signer 只連「屬於 Signer 自己的使用者、其他人不能寫」的目錄裡的 socket，而且連上後確認對方行程的 uid 是同一個使用者，否則不送錄音、記為不可用。每個請求都重新連線檢查。
 - **Signer 流程**：
   - 核准的 challenge 才加 `voice_nonce`（拒絕不用語音），而且 WebAuthn 的 challenge 涵蓋它；
   - `display.voice` 帶挑戰語，例如「核准 0.5 USDC，付給示意商家，代碼 9 7 4 0」；
   - verify 先驗 WebAuthn，再判語音。
-  - 核准者沒有聲紋模板：`VOICE_NOT_ENROLLED`；收款人沒有唸法：`VOICE_MERCHANT_UNKNOWN`。兩者都直接拒絕發 challenge。
+  - 核准者沒有可用的聲紋模板：`VOICE_NOT_ENROLLED`。模板不存在、解不開、金鑰檔權限不對，或模板是別的聲紋模型做的，都算沒有。收款人沒有唸法：`VOICE_MERCHANT_UNKNOWN`。兩者都直接拒絕發 challenge。
+  - verify 時，Signer 自己出問題（金鑰、模板、自己的資料庫）回 `VOICE_SIGNER_UNAVAILABLE`：這次不核准、challenge 保留，**不會**變成降級核准。
+  - 錄音不是頁面的格式（16 kHz 單聲道 16-bit、0.5–10 秒），Signer 不送 sidecar，直接判失敗（`VOICE_AUDIO_INVALID`）。
 - **資料**：只新增兩張表（`voice_templates`、`voice_results`），舊的 `approvals.db` 不用遷移。
   - 模板是三段以上錄音聲紋向量的平均，用 AES-GCM 加密；金鑰是 Signer 目錄裡的 `voice.key`（0600）。
   - 結果只存結果碼、三個欄位對不對、分數、門檻、模型版本、錄音的 SHA-256。
-- **管理指令**：`apa-signer approver voice-enroll --dir DIR --approver ID WAV...`（至少三段）、`apa-signer approver voice-delete --dir DIR --approver ID`。
+- **管理指令**：
+  - `apa-signer approver voice-enroll --dir DIR --approver ID WAV...`（至少三段；零向量、NaN 一律拒絕）；
+  - `apa-signer approver voice-delete --dir DIR --approver ID`；
+  - `apa-signer approver voice-stats --dir DIR`：依結果與原因列出次數，以及降級（不可用）的比例。
 - **契約**：
-  - 事件 `VOICE_CHALLENGE_VERIFIED`、`VOICE_CHALLENGE_FAILED`（`code`：`VOICE_REPLAY`／`VOICE_PHRASE_MISMATCH`／`VOICE_SPEAKER_MISMATCH`／`VOICE_AUDIO_INVALID`）、`VOICE_UNAVAILABLE`（`code`：`VOICE_DEVICE_UNAVAILABLE`／`VOICE_SERVICE_UNAVAILABLE`／`VOICE_TIMEOUT`）。每個核准會話最多一筆，緊接在它導致的關閉之前。
+  - 事件 `VOICE_CHALLENGE_VERIFIED`、`VOICE_CHALLENGE_FAILED`（`code`：`VOICE_REPLAY`／`VOICE_PHRASE_MISMATCH`／`VOICE_SPEAKER_MISMATCH`／`VOICE_AUDIO_INVALID`）、`VOICE_UNAVAILABLE`（`code`：`VOICE_DEVICE_UNAVAILABLE`／`VOICE_SERVICE_UNAVAILABLE`／`VOICE_TIMEOUT`）。每個核准會話最多一筆，出現在它導致的關閉之前。驗證器不強制「緊接」，中間可以有其他事件。grant 的 `voice` 與語音事件之間目前也沒有交叉比對。
   - 語音失敗只能接 `APPROVAL_DENIED`，原因 `VOICE_CHALLENGE_FAILED`，不帶核准方法；這個原因也只能出現在語音失敗之後。
   - webauthn grant：語音通過時 `amr: ["webauthn","voice"]`、`voice: "verified"`；不可用時 `amr: ["webauthn"]`、`voice: "unavailable"`＋`voice_reason`。
 - **Host**：assertion 路由轉送 `voice`（上限 512 KB）。Signer 回語音失敗時，把這次嘗試標為 `closed`（保留錯誤碼），並把會話關成 denied（`resolved_by: signer-voice-check`）。Store 的復原檢查接受這種關閉。
@@ -83,11 +89,13 @@
 | 結果 | 什麼時候 | 會話 | grant | 畫面 |
 |---|---|---|---|---|
 | 通過 | 金額、商家（比讀音）、代碼都對，而且聲紋 cosine ≥ 門檻 | 核准 | `amr` 含 voice | 「本人核准已驗證（裝置＋語音），付款未啟用。」 |
-| 失敗 | 錄音的 SHA-256 用過（重播）；挑戰語不符；聲紋低於門檻；錄音無法辨識 | 拒絕，之後不再發 challenge | 無 | 「語音挑戰未通過，這筆已拒絕。」加上原因 |
-| 不可用 | sidecar 連不上、模型版本不對、超過時限；頁面沒有麥克風或被拒絕權限（D4 a） | 核准 | `voice: unavailable`＋原因 | 「本人核准已驗證（語音降級），付款未啟用。」加上原因 |
+| 失敗 | 錄音的 SHA-256 用過（重播）；挑戰語不符；聲紋低於門檻；錄音格式不對或無法辨識 | 拒絕，之後不再發 challenge | 無 | 「語音挑戰未通過，這筆已拒絕。」加上原因 |
+| 不可用 | sidecar 連不上、模型版本不對、回 5xx、沒有在時限內回答；socket 位置不可信；頁面沒有麥克風或被拒絕權限（D4 a） | 核准 | `voice: unavailable`＋原因 | 「本人核准已驗證（語音降級），付款未啟用。」加上原因 |
+| （Signer 自身問題） | 金鑰、模板、Signer 資料庫出錯 | 不變（仍在等待） | 無 | 「Signer 讀不到聲紋設定，這次沒有核准（請找管理者）」 |
 
 - 頁面錄音不到 1 秒不會送出，會請使用者重唸，這筆仍在等待。
-- 逾時後才到的 sidecar 回應不會被讀取，因為請求已隨時限取消。
+- 逾時後才到的 sidecar 回應不會被讀取，因為請求已隨時限取消；但只要分析結果在時限內完整回來，就一定照結果判定（review S2）。
+- 判定語音期間，challenge 若已被關閉或過期，回覆會是 `CHALLENGE_CLOSED`／`CHALLENGE_EXPIRED`，會話不會因語音被拒。這時語音結果不會回給頁面，就算通過也同樣會被拒，所以不洩漏任何資訊。
 
 ## 5 評測報告（`voice/eval.py`，`artifacts/v1/eval-1/v1-eval.json`）
 
@@ -100,6 +108,8 @@
 | 調參組（決定門檻） | 200 | 3800 | 0.97%（0.71–1.34%） | 0.5%（0.09–2.78%） | 0.5% |
 | 評測組 | 200 | 3800 | **0.58%（0.38–0.88%）** | **1.0%（0.27–3.57%）** | 0.61% |
 
+括號是**以單次比對計**的 Wilson 95% 區間（review S8）：3800 次冒名比對只來自 20 位說話者、190 組配對，彼此並不獨立，所以實際的不確定性比這些區間大。若要以說話者為單位估計，需要依說話者 bootstrap，本片沒有做。
+
 門檻是調參組 FAR ≤ 1% 的最低 cosine，取千分位並往上進位：**0.365**（`speaker_threshold_milli: 365`）。
 
 **挑戰語**（macOS TTS 美佳 zh_TW、Ting-Ting zh_CN 各 25 句；金額、代碼隨機，商家三選一；走真的 sidecar，比對用 Signer 自己的程式碼）：
@@ -107,7 +117,7 @@
 - 也就是說，本人唸對了，約有 6% 會因為辨識錯一個數字被判成失敗，而失敗會讓這筆被拒絕。這是 B 範圍下的主要誤拒來源。
 - 延遲：中位數 3.7 秒、p95 5.5 秒、最長 8.1 秒；超過 10 秒時限 0/50，所以本批降級率 0%。最長值已接近時限。
 
-**重播**：每段錄音拿去比對另一個 challenge 的代碼，50/50 被擋下。位元組完全相同的重送由錄音 SHA-256 擋下，Go 測試已涵蓋。
+**重播**：每段錄音拿去比對另一個 challenge 的代碼，50/50 被擋下。這只驗證了「比對邏輯會拒絕不同的四位代碼」（review S8），不是抗重播能力的實證；隨機猜中代碼的機率是萬分之一。位元組完全相同的重送由錄音 SHA-256 擋下，Go 測試已涵蓋。
 
 **合成聲音冒充**：兩個 macOS 國語聲音互相拿對方的模板比對，全部通過（22/22、22/22）。同一套 TTS 引擎的不同聲音，ECAPA 分不出來；本片不做抗合成，這是範圍 B 寫明的已知邊界。所以：
 - 瀏覽器檢查裡的「別的說話者」改用 LibriSpeech 真人錄音建模板，不用另一個 TTS 聲音；
@@ -117,11 +127,22 @@
 
 - **合成語音**（已知邊界）：任何能產生核准者聲音的 TTS 或語音轉換，都可能通過聲紋。擋得住的是重播（一次性代碼）和不同的真人（依英文資料集的數字）。
 - **誤拒**：辨識錯數字約 6%（TTS 國語樣本），加上聲紋 FRR 約 1%（英文資料）。失敗會讓這筆被拒；要重來只能重新請購。
-- **降級可以被選**：頁面回報「沒有麥克風」就會降級（D4 選 a）。降級仍要求摘要確認和 WebAuthn，畫面和紀錄都會標明，並計入降級率。
+- **降級可以被選，所以語音擋不住拿到裝置的人**（review S1）：頁面回報「沒有麥克風」就會降級（D4 選 a）。這表示拿到核准者裝置的人，只要拒絕麥克風權限，就能只靠 WebAuthn 核准。在下游拒絕或限制 `voice=unavailable` 之前，語音對「裝置持有者」沒有保護作用；它目前保護的是：
+  - 在有唸的情況下，擋重播和不同的真人；
+  - 在紀錄上，讓降級看得見。
+  - 降級仍要求摘要確認和 WebAuthn，畫面和紀錄都會標明。降級比例用 `apa-signer approver voice-stats` 計算。
+- **給 P2 付款路徑**：付款時若要看語音結果，必須讀 **Signer 自己的 `voice_results`**，不能讀 grant 的 `voice` 欄位，因為 grant 是 Host 寫的。
 - **延遲**：Intel CPU 上最長 8.1 秒，接近 10 秒時限；機器忙的時候，降級會變多。
 - **國語與真人**：聲紋門檻是用英文朗讀資料定的；國語真人（包含 Aaron 本人）的 FAR／FRR 還沒有量。
 - **信任**：頁面由 Host 提供，Host 可以顯示一句話、卻送另一段錄音。挑戰語由 Signer 依 `voice_nonce` 產生並比對，所以送錯的錄音會被判失敗，不會變成通過。
-- **時限**：Signer 每個請求的時限多了語音的 10 秒；Host 的用戶端放寬到 20 秒。
+- **時限**：serve-approvals 每個請求的時限多了語音的 10 秒（付款 Signer 維持 5 秒）；Host 的用戶端放寬到 20 秒。
+- **Host 的鎖**：Host 的核准路由共用一把鎖，一次語音判定最多佔用 15–20 秒，期間所有客人的核准操作都要排隊。sidecar 每個模型一次也只處理一個請求，所以兩位核准者同時核准時，後到的比較容易逾時、變成降級。
+- **sidecar 停掉之後**：模型 worker 掛掉時 sidecar 會整個退出，需要外部的 supervisor 重新啟動；在那之前每次核准都會降級。Signer 放棄等待後，sidecar 仍會把那次分析做完，下一個請求要排在它後面。
+- **未測到的情況**：
+  - 同一段錄音同時用在兩個 challenge 時，唯一索引會擋下，但回覆的是一般的 Signer 錯誤，沒有測試；
+  - 結果剛好在時限邊界回來（S2）沒有可重現的測試；
+  - sidecar 屬於別的使用者的情況，在單一使用者的測試環境裡無法建立；
+  - 回覆遺失後，Host 經由狀態路由找回語音失敗，沒有測試。
 
 ## 7 畫面文字
 
@@ -177,7 +198,9 @@
   - 4826e0d 修正：verify 上限改 512 KiB；有語音時放寬時限；新增 `TestV1VoiceRealSizeAndSlow`（320 KB 錄音、sidecar 6 秒）；面板標題改依語音結果寫。
   - 第 3 輪（`ui-3`）：**FAIL (1)**。重播那一項判成「內容不符」而不是「重播」：錄音經過麥克風重錄，位元組不同，雜湊對不上，但舊代碼對不上這次的 challenge，所以仍被拒、沒有 grant。是檢查的預期寫錯了，改成檢查「因舊代碼被拒」（8b6f802）。
   - 第 4 輪（`ui-4`，未提交的工作樹）：PASS（24 項）。
-  - 第 5 輪（8b6f802 乾淨工作樹，`ui-5-clean`）：**PASS（24 項）**。包含：通過、換人被拒、重播被拒、沒有麥克風降級、sidecar 停掉降級、手機 390 px 沒有橫向捲動、Host／Signer 資料庫和 Host log 裡都找不到錄音、沒有頁面錯誤。
+  - 第 5 輪（8b6f802 乾淨工作樹，`ui-5-clean`）：**PASS（24 項）**。包含：通過、換人被拒、重播被拒、沒有麥克風降級、sidecar 停掉降級、手機 390 px 沒有橫向捲動、沒有頁面錯誤。
+    - 其中「資料庫和 log 裡找不到錄音」那一項，review 指出（S7）是拿原始 TTS 檔去搜，但頁面送出的是重新錄製、重新取樣後的位元組，所以這項檢查**本來就不可能找到**，不能算數。那時這個結論只有 Go 測試在支撐。
+  - 第 6 輪（f338827 乾淨工作樹，`ui-6-clean`）：**PASS（25 項）**。改用 CDP 抓下頁面實際送出的 4 段錄音，拿原始位元組和 base64 片段去搜兩個資料庫、Host log 和 Signer log，都找不到。
 
 ## 10 結果的來源
 
@@ -195,3 +218,38 @@
 - 國語真人的 FAR／FRR，以及 Aaron 本人的聲紋登記與實機輪：都需要先取得同意並另外核准。
 - `/opt/apa-signer` 的部署。
 - 模擬核准的路徑不接語音（D9），畫面上標「語音未評估」。
+
+## 12 獨立上下文 review（Claude Code subagent，10/16）
+
+結論：目前範圍內（付款未啟用、D4 a 已接受）沒有 must-fix；實機輪之前要先處理 S1–S8。
+- 確認：語音失敗不會在 Signer、Store、Host 或頁面變成核准；因語音被拒的會話不能重開。
+- 也指出：除了 D4 a，還有四條路能把失敗變成「不可用」，或讓每次核准都變成「不可用」（S2–S5）。
+
+| 項目 | 問題 | 處理 |
+|---|---|---|
+| S1 | 文件高估了語音能擋的東西；「計入降級率」沒有實作 | 第 6 節改寫：語音擋不住拿到裝置的人，也寫明 P2 要讀 Signer 的 `voice_results`。加 `voice-stats` 計算降級比例（5d40ff1） |
+| S2 | 分析剛好在時限時回來，會被判成逾時（降級） | 有結果就照結果判定（5d40ff1）。沒有可重現的測試 |
+| S3 | 金鑰、模板出問題時一律降級；登記時零向量會產生壞模板；模板的模型版本沒有比對 | 發 challenge 時檢查模板（含模型版本）；verify 時回 `VOICE_SIGNER_UNAVAILABLE`；登記時拒絕零向量、NaN（5d40ff1、f338827） |
+| S4 | Signer 會把錄音送給任何綁在那個 socket 上的行程 | 檢查目錄擁有者與權限、對方行程 uid；每個請求重新連線（5d40ff1） |
+| S5 | sidecar 例外與 worker 死掉都會變成降級 | Signer 先自己檢查 WAV 格式；sidecar 解析例外回 400、模型錯誤回 500、worker 死掉就退出（5d40ff1） |
+| S6 | 付款 Signer 的時限被意外改了 | 只有 serve-approvals 加語音時間（5d40ff1） |
+| S7 | 瀏覽器檢查的「找不到錄音」本來就不可能找到 | 改搜頁面實際送出的錄音，並納入 Signer 的 log（第 6 輪 PASS） |
+| S8 | 信賴區間太窄；重播數字被說得太強 | 第 5 節改寫 |
+
+附註：
+- 已處理：NaN 分數不再算通過；查重播時資料庫出錯不再忽略。
+- 寫進第 6 節：Host 的鎖、同一錄音同時用於兩個 challenge、challenge 在判定中被關閉、事件順序只檢查「之前」、grant 與事件沒有交叉比對、模型以 revision 字串固定。
+
+修正後的驗證：
+- 反向突變（V1 共 16 項）：
+  - 5d40ff1 上 15 KILLED，#335（零向量）SURVIVED。拿掉零向量檢查後，NaN 讓 JSON 編碼失敗，測試只檢查「有錯誤」，分不出是哪一層擋下。
+  - f338827 把測試改成檢查錯誤原因後，#335 KILLED。
+- Signer、Host 的 V1 測試全過，新增 `TestVoiceSignerTroubleAndInputs`。
+- Go 全套第一次：1 項失敗，`internal/buyer TestProbeOneMessage`（假 CLI 沒收到訊息，與 V1 無關）。單獨重跑 3/3 通過，屬於全套並行時的時序問題。
+- 網頁 99/99。
+- 瀏覽器第 6 輪 PASS（25 項）。
+
+review 時的意外，照它的回報記錄：
+- 它曾在沙箱外對 repo 的 `internal/store/approvals.go` 套用一次突變後還原，已確認與 commit 相同；
+- 它的一次 `grep -r` 走進了 `var/`，只搜一個事件名稱，沒有讀出任何語音資料；
+- 它留下 `$TMPDIR/approvals.go.orig` 等暫存檔，沒有放進 repo。
