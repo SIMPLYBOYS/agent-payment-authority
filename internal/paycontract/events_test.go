@@ -148,3 +148,72 @@ func TestWebAuthnEventShape(t *testing.T) {
 		t.Error("M1 took signer_approval_id")
 	}
 }
+
+// V1: one voice outcome per open session, just before the closure it leads
+// to; a failed voice, and only it, closes the session denied for it.
+func TestVoiceEventOrder(t *testing.T) {
+	_, o := base(t)
+	sid := SessionID(o.Intent.TaskID, o.Intent.PurchaseOrderID)
+	start := []step{{"TASK_STARTED", contracts.EventPayload{}, false}, {"DELEGATION_BOUND", contracts.EventPayload{DelegationID: "dlg-1"}, false},
+		{"PURCHASE_PROPOSED", contracts.EventPayload{}, true}, {"POLICY_DECIDED", contracts.EventPayload{Decision: decision(t, o, "pending", "HUMAN_APPROVAL_REQUIRED")}, true},
+		{"APPROVAL_SESSION_OPENED", contracts.EventPayload{ApprovalSessionID: sid}, true}}
+	verified := step{"VOICE_CHALLENGE_VERIFIED", contracts.EventPayload{ApprovalSessionID: sid}, true}
+	unavailable := step{"VOICE_UNAVAILABLE", contracts.EventPayload{ApprovalSessionID: sid, Code: "VOICE_TIMEOUT"}, true}
+	failed := step{"VOICE_CHALLENGE_FAILED", contracts.EventPayload{ApprovalSessionID: sid, Code: "VOICE_SPEAKER_MISMATCH"}, true}
+	approved := step{"APPROVED", contracts.EventPayload{Decision: decision(t, o, "approved", "WEBAUTHN_APPROVAL"), ApprovalSessionID: sid, AuthorizationMethod: "webauthn", SignerApprovalID: "hap-1"}, true}
+	byVoice := step{"APPROVAL_DENIED", contracts.EventPayload{Decision: decision(t, o, "denied", "VOICE_CHALLENGE_FAILED"), ApprovalSessionID: sid}, true}
+	byApprover := step{"APPROVAL_DENIED", contracts.EventPayload{Decision: decision(t, o, "denied", "APPROVER_DENIED"), ApprovalSessionID: sid, AuthorizationMethod: "webauthn", SignerApprovalID: "hap-1"}, true}
+	expired := step{"APPROVAL_EXPIRED", contracts.EventPayload{Decision: decision(t, o, "expired", "APPROVAL_TIMEOUT"), ApprovalSessionID: sid}, true}
+	with := func(s ...step) []step { return append(append([]step{}, start...), s...) }
+	for name, c := range map[string]struct {
+		steps []step
+		ok    bool
+	}{
+		"verified, approved":              {with(verified, approved), true},
+		"unavailable, approved":           {with(unavailable, approved), true},
+		"failed, denied for it":           {with(failed, byVoice), true},
+		"failed, then approved":           {with(failed, approved), false},
+		"failed, denied by the approver":  {with(failed, byApprover), false},
+		"denied for a voice not failed":   {with(byVoice), false},
+		"verified, denied for the voice":  {with(verified, byVoice), false},
+		"two voice outcomes":              {with(verified, unavailable, approved), false},
+		"a voice outcome, then expired":   {with(unavailable, expired), false},
+		"a voice outcome after closing":   {with(approved, verified), false},
+		"a voice outcome with no session": {append(append([]step{}, start[:4]...), verified), false},
+	} {
+		if err := ValidateEventOrder(chainOf(t, o, c.steps...)); (err == nil) != c.ok {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+func TestVoiceEventShape(t *testing.T) {
+	_, o := base(t)
+	var cfg contracts.RegistryConfig
+	fixture(t, "testdata/contracts/registry.json", &cfg)
+	reg, err := contracts.NewRegistry(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := SessionID(o.Intent.TaskID, o.Intent.PurchaseOrderID)
+	for _, c := range []struct {
+		name, typ string
+		p         contracts.EventPayload
+		ok        bool
+	}{
+		{"verified", "VOICE_CHALLENGE_VERIFIED", contracts.EventPayload{ApprovalSessionID: sid}, true},
+		{"verified with a code", "VOICE_CHALLENGE_VERIFIED", contracts.EventPayload{ApprovalSessionID: sid, Code: "VOICE_TIMEOUT"}, false},
+		{"failed with its code", "VOICE_CHALLENGE_FAILED", contracts.EventPayload{ApprovalSessionID: sid, Code: "VOICE_REPLAY"}, true},
+		{"failed with an unavailable code", "VOICE_CHALLENGE_FAILED", contracts.EventPayload{ApprovalSessionID: sid, Code: "VOICE_TIMEOUT"}, false},
+		{"unavailable with its code", "VOICE_UNAVAILABLE", contracts.EventPayload{ApprovalSessionID: sid, Code: "VOICE_DEVICE_UNAVAILABLE"}, true},
+		{"unavailable with a failure code", "VOICE_UNAVAILABLE", contracts.EventPayload{ApprovalSessionID: sid, Code: "VOICE_PHRASE_MISMATCH"}, false},
+		{"unavailable with no code", "VOICE_UNAVAILABLE", contracts.EventPayload{ApprovalSessionID: sid}, false},
+		{"denied for the voice, no method", "APPROVAL_DENIED", contracts.EventPayload{Decision: decision(t, o, "denied", "VOICE_CHALLENGE_FAILED"), ApprovalSessionID: sid}, true},
+		{"denied for the voice, with a method", "APPROVAL_DENIED", contracts.EventPayload{Decision: decision(t, o, "denied", "VOICE_CHALLENGE_FAILED"), ApprovalSessionID: sid, AuthorizationMethod: "webauthn", SignerApprovalID: "hap-1"}, false},
+	} {
+		es := chainOf(t, o, step{"TASK_STARTED", contracts.EventPayload{}, false}, step{"DELEGATION_BOUND", contracts.EventPayload{DelegationID: "dlg-1"}, false}, step{c.typ, c.p, true})
+		if err := ValidateEvent(reg, es[2], &o); (err == nil) != c.ok {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+}

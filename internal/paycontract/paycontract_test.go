@@ -223,6 +223,33 @@ func TestGrantAndDelegation(t *testing.T) {
 			t.Errorf("webauthn %s accepted", name)
 		}
 	}
+	// V1: the voice outcome a webauthn grant records.
+	for name, c := range map[string]struct {
+		voice, reason string
+		amr           []string
+		ok            bool
+	}{
+		"verified":                  {"verified", "", []string{"webauthn", "voice"}, true},
+		"verified, amr without it":  {"verified", "", []string{"webauthn"}, false},
+		"unavailable with its code": {"unavailable", "VOICE_TIMEOUT", []string{"webauthn"}, true},
+		"unavailable, amr with it":  {"unavailable", "VOICE_TIMEOUT", []string{"webauthn", "voice"}, false},
+		"unavailable without code":  {"unavailable", "", []string{"webauthn"}, false},
+		"unavailable, a failure":    {"unavailable", "VOICE_REPLAY", []string{"webauthn"}, false},
+		"verified with a reason":    {"verified", "VOICE_TIMEOUT", []string{"webauthn", "voice"}, false},
+		"failed":                    {"failed", "VOICE_REPLAY", []string{"webauthn"}, false},
+	} {
+		x := w
+		x.Voice, x.VoiceReason, x.AMR = c.voice, c.reason, c.amr
+		if err := x.Validate(); (err == nil) != c.ok {
+			t.Errorf("voice %s: %v", name, err)
+		}
+	}
+	if sv := g; true {
+		sv.Voice = "verified"
+		if Code(sv.Validate()) != "INVALID_GRANT" {
+			t.Error("a simulated grant with a voice accepted")
+		}
+	}
 	d := Delegation{Version: Version, DelegationID: DelegationID("r"), ConsumerID: "consumer-a", Scenario: "pay-a", Purpose: "x", Merchants: []string{"0x" + strings.Repeat("3", 40)},
 		AssetID: "fixture-usdc", TaskBudget: "5000000", AllowMax: "100000", ApprovalDeadlineSeconds: 60, ConfirmedBy: "simulated:consumer-a:host-x", ConfirmMethod: "simulated", ConfirmedAt: 100, ExpiresAt: 200}
 	if err := d.Validate(); err != nil {

@@ -716,6 +716,29 @@ MUTATIONS = [
      'sc.Contract, sc.Delegation, sc.Scene})', 'sc.Contract, sc.Delegation, ""})', 'TestUX3ShippedCatalog'),
     ('UX3 demo: a run view shows an edited entry\'s scene', 'cmd/demo/control.go',
      'sc != nil && sc.digest == r.ScenarioDigest {', 'sc != nil {', 'TestUX3RunViewScene'),
+    # V1 (docs/commercial-v1.md): the voice challenge's checks, the session a
+    # failed voice denies for good, unavailability never read as success,
+    # and the contract's voice rules.
+    ('V1 signer: another speaker passes', 'internal/signer/voice.go',
+     'case score < v.threshold():', 'case false && score < v.threshold():', 'TestVoiceFailuresDenyTheSession'),
+    ('V1 signer: a recording used once is not a replay', 'internal/signer/voice.go',
+     'Scan(&seen); err == nil && seen > 0 {', 'Scan(&seen); err == nil && seen > 0 && false {', 'TestVoiceFailuresDenyTheSession'),
+    ('V1 signer: the code is not compared', 'internal/signer/voice.go',
+     'case !am || !mm || !cm:', 'case !am || !mm || false && !cm:', 'TestVoiceFailuresDenyTheSession'),
+    ('V1 signer: the merchant is not compared', 'internal/signer/voice.go',
+     'strings.Contains(squash(pinyin), squash(merchantPinyin))', 'true || strings.Contains(squash(pinyin), squash(merchantPinyin))', 'TestVoiceFailuresDenyTheSession'),
+    ('V1 signer: a late sidecar reads as verified', 'internal/signer/voice.go',
+     'VoiceResult{"unavailable", "VOICE_TIMEOUT"}', 'VoiceResult{Result: "verified"}', 'TestVoiceUnavailableIsDegradedNotFailed'),
+    ('V1 signer: a session denied by its voice gets another challenge', 'internal/signer/approvals.go',
+     '} else if failed {', '} else if false && failed {', 'TestVoiceFailuresDenyTheSession'),
+    ('V1 signer: an approve challenge asks for no voice', 'internal/signer/approvals.go',
+     'rec.VoiceNonce = b64(vn)', 'rec.VoiceNonce = b64(vn)[:0]', 'TestVoiceRequestRules|TestVoicePassResendAndNothingKept'),
+    ('V1 contract: a verified voice is not in the amr', 'internal/paycontract/grant.go',
+     'if g.Voice == "verified" {', 'if false && g.Voice == "verified" {', 'TestGrantAndDelegation'),
+    ('V1 contract: a failed voice need not deny its session', 'internal/paycontract/events.go',
+     'if byVoice != (st.voiced[po] == "VOICE_CHALLENGE_FAILED") {', 'if false && byVoice != (st.voiced[po] == "VOICE_CHALLENGE_FAILED") {', 'TestVoiceEventOrder'),
+    ('V1 contract: a voice event with any code', 'internal/paycontract/events.go',
+     'case codes == nil && p.Code != "", codes != nil && !slices.Contains(codes, p.Code):', 'case false:', 'TestVoiceEventShape'),
 ]
 
 
