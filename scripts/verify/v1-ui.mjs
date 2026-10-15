@@ -9,7 +9,7 @@
 // recording); the page records, encodes and sends it as it would a
 // person's. Cases: pass; another speaker (the template re-enrolled from a
 // LibriSpeech speaker, a human recording: fail, denied); the first
-// recording again (fail: replay); no microphone (degraded); the sidecar
+// recording played again (fail: its code is the old one's); no microphone (degraded); the sidecar
 // stopped (degraded). Two TTS voices are not "another speaker": the
 // evaluation found they pass for each other. No key, no payment, no
 // person's voice; no token, code or capability logged; nothing of a
@@ -257,7 +257,11 @@ try {
   a = await ask();
   r = await approveWith({ wav: passRecording });
   await settled();
-  check("the approved recording sent again: denied as a replay", (await head()).startsWith("denied|語音挑戰未通過") && (await text("#approval-body")).includes("錄音是重播"), (await head()) + " / " + (await text("#approval .approval-msg")));
+  // Played into the microphone again, the old recording is new bytes (no
+  // hash match: that is the Signer's check of a byte-identical resend,
+  // tested in Go); its old code does not match this challenge's.
+  check("the approved recording played again into the microphone: denied, its code is the old challenge's", (await head()).startsWith("denied|語音挑戰未通過")
+    && (await text("#approval-body")).includes("唸的內容和這筆不符"), (await head()) + " / " + (await text("#approval .approval-msg")));
 
   // ---- 4 unavailable: no microphone ----
   mark("no microphone");
