@@ -1,7 +1,8 @@
 # V1 語音核准三態
 
 > 2026-10-15，Claude Code。依 vault〈Claude-Code-V1語音核准三態與評測派工-20261013〉與 Aaron「我們開始進行 V1 語音三態」。分支 `commercial-v1`（從 main `cfc5c28`）。
-> **狀態：實作與評測完成；獨立上下文 review 無 must-fix，S1–S8 已處理（第 12 節）。待 Aaron 驗收。** 本片只用合成音訊、公開資料集與 virtual authenticator；不收 Aaron 的聲音、不碰真實裝置、不改 `/opt/apa-signer`。
+> **V1 Done（Aaron 10/16：「V1 先標記為完成，並做 merge」）；已 fast-forward merge 進本機 main，未 push。**
+> 實作與評測完成；獨立上下文 review 無 must-fix，S1–S8 已處理（第 12 節）。實機輪（Aaron 的聲音與真實裝置）需另行同意與核准。 本片只用合成音訊、公開資料集與 virtual authenticator；不收 Aaron 的聲音、不碰真實裝置、不改 `/opt/apa-signer`。
 
 ## 1 Aaron 的核准（10/15）
 
