@@ -227,3 +227,7 @@ details.live-warning > p { font-weight: normal; margin: 4px 0 0; }
 .delegation-rows dd { margin: 0; overflow-wrap: anywhere; }
 .delegation-note { margin: 0 0 6px; font-size: 12px; color: var(--warn); }
 .delegation .delegation-confirm { background: #ffe58a; color: #3a2c00; border-color: #ffe58a; font-weight: bold; }
+
+/* V1: the recording's microphone, under the approval buttons */
+.approval-mic { display: block; margin-top: 10px; font-size: 14px; color: #7a7f99; }
+.approval-mic select { margin-left: 4px; max-width: 100%; font: inherit; }

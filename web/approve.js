@@ -220,3 +220,9 @@ export function peak(samples) {
   for (const x of samples) p = Math.max(p, Math.abs(x));
   return p;
 }
+
+// micOptions: the microphone choices, Chrome's default first; an input
+// without a label (no permission yet) is numbered.
+export function micOptions(list) {
+  return [["", "Chrome 預設"], ...list.map((m, i) => [m.id, m.label || "麥克風 " + (i + 1)])];
+}

@@ -203,7 +203,9 @@ try {
     return { task, ok };
   }
   // approveWith: 核准, then the microphone answers as given (mic.voice reads the phrase now; mic.wav is a recording; mic.deny refuses).
+  let micShown = "";
   async function approveWith(mic, shotName) {
+    if (!micShown) micShown = await b.evaluate(`(() => { const s = document.querySelector("#approval .approval-mic select"); return s ? [...s.options].map((o) => o.textContent).join(",") : ""; })()`);
     if (!(await click("#approval .approval-approve"))) return "no approve button";
     if (!(await b.waitFor(`!!document.querySelector("#approval .approval-voice-phrase")`, 15000))) return "no phrase shown";
     const phrase = await text("#approval .approval-voice-phrase");
@@ -275,6 +277,8 @@ try {
   const replayBody = await text("#approval-body");
   check("the approved recording played again into the microphone: denied, as a replay or by its old code", (await head()).startsWith("denied|語音挑戰未通過")
     && (replayBody.includes("唸的內容和這筆不符") || replayBody.includes("這段錄音已用過")), (await head()) + " / " + (await text("#approval .approval-msg")));
+
+  check("the approval panel offers the recording's microphone, Chrome's default first", micShown.startsWith("Chrome 預設"), micShown);
 
   // ---- 4 unavailable: no microphone ----
   mark("no microphone");

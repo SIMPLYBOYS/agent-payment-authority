@@ -1197,13 +1197,26 @@ const A2_RESULT = {
 };
 
 let shownA2 = "";
+// V1: the microphone the recording uses ("" is Chrome's default), in memory
+// only like the rest of the page; the list follows Chrome's devices.
+let micChoice = "";
+let micList = [];
+async function refreshMics() {
+  micList = await V.microphones();
+  if (micChoice && !micList.some((m) => m.id === micChoice)) micChoice = "";
+  renderControl();
+}
+if (navigator.mediaDevices) {
+  navigator.mediaDevices.addEventListener("devicechange", refreshMics);
+  refreshMics();
+}
 function renderA2() {
   const box = $("approval");
   box.hidden = false;
   const item = a2Item();
   const target = a2Target(item);
   if (a2Note && !A.sameTarget(a2Note.target, target, false)) a2Note = null;
-  const key = JSON.stringify([currentConsumer(), item, lastA2 && lastA2.error, a2Note, a2Op && a2Op.phase, a2Op && !!a2Op.stop, a2Op && a2Op.mic, a2OnOrigin(), lastA2 && lastA2.signer]); // V1: the recording's stop and microphone redraw it
+  const key = JSON.stringify([currentConsumer(), item, lastA2 && lastA2.error, a2Note, a2Op && a2Op.phase, a2Op && !!a2Op.stop, a2Op && a2Op.mic, micChoice, micList, a2OnOrigin(), lastA2 && lastA2.signer]); // V1: the recording's stop and microphone, and the microphone list, redraw it
   if (key === shownA2) return updateA2Countdown();
   shownA2 = key;
   const body = $("approval-body");
@@ -1280,6 +1293,19 @@ function renderA2() {
         acts.append(cancel);
       }
       parts.push(acts);
+      const micRow = el("label", "approval-mic", "錄音用的麥克風（Signer 要求唸句子時才會錄音）：");
+      const sel = el("select");
+      for (const [id, name] of AP.micOptions(micList)) {
+        const o = el("option", "", name);
+        o.value = id;
+        sel.append(o);
+      }
+      sel.value = micChoice;
+      Object.assign(sel.dataset, target, { pending: "", kind: "a2-mic" });
+      sel.disabled = busy;
+      sel.addEventListener("change", () => { micChoice = sel.value; });
+      micRow.append(sel);
+      parts.push(micRow);
     } else if (ap.grant) {
       parts.push(el("p", "approval-grant", AP.grantLine(ap.grant)));
     }
@@ -1320,7 +1346,7 @@ function renderA2() {
   // to the heading, which submits nothing (P1-a R1). Nothing is clicked.
   if (had) {
     const same = had.kind && body.querySelector('[data-kind="' + had.kind + '"]');
-    const submits = had.kind !== "a2-evidence";
+    const submits = had.kind !== "a2-evidence" && had.kind !== "a2-mic";
     if (same && !same.disabled && A.sameTarget(had.target, target, submits)) same.focus();
     else if (document.activeElement === document.body || !document.activeElement || box.contains(document.activeElement)) $("approval-title").focus();
   }
@@ -1377,8 +1403,10 @@ async function a2Act(item, decision) {
     if (prompt) {
       Object.assign(a2Op, { phase: "voice", phrase: prompt.phrase, stop: null });
       renderControl();
-      voice = await V.record(prompt.max_seconds || 10, (stop, mic) => { if (a2Op) { a2Op.stop = stop; a2Op.mic = mic; renderControl(); } });
+      voice = await V.record(prompt.max_seconds || 10, (stop, mic) => { if (a2Op) { a2Op.stop = stop; a2Op.mic = mic; renderControl(); } }, micChoice);
+      refreshMics(); // the names show once the microphone has been allowed
       if (stale()) return;
+      if (voice.missing) return done("idle", "選擇的麥克風現在找不到，沒有送出；這筆仍在等你決定。請重新選擇麥克風，再按核准。");
       if (voice.short) return done("idle", "錄音不到 1 秒，沒有送出；這筆仍在等你決定，請再按核准並唸完整句。");
       if (voice.quiet) return done("idle", "沒有收到聲音（麥克風：" + (voice.mic || "未知") + "），沒有送出；這筆仍在等你決定。請確認 Chrome 用的是正確的麥克風，再按核准。");
     }

@@ -5,16 +5,31 @@
 
 import * as AP from "./approve.js";
 
+// microphones: the audio inputs Chrome offers, [{ id, label }] (labels are
+// empty until the page has been allowed the microphone once).
+export async function microphones() {
+  try {
+    return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput" && d.deviceId).map((d) => ({ id: d.deviceId, label: d.label }));
+  } catch {
+    return [];
+  }
+}
+
 // record: up to maxSeconds, until stop() (given to onStart, with the
-// microphone's name) is called. Resolves { audio } (base64 WAV),
-// { unavailable: "device" }, { short: true } (under a second) or
-// { quiet: true } (almost no sound: the wrong microphone, or none in
-// use); the last two are not sent, the purchase keeps waiting.
-export async function record(maxSeconds, onStart) {
+// microphone's name) is called, from the chosen microphone (deviceId) or
+// Chrome's default. Resolves { audio } (base64 WAV),
+// { unavailable: "device" }, { missing: true } (the chosen microphone is
+// gone), { short: true } (under a second) or { quiet: true } (almost no
+// sound: the wrong microphone, or none in use); the last three are not
+// sent, the purchase keeps waiting.
+export async function record(maxSeconds, onStart, deviceId) {
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
-  } catch {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false, ...(deviceId ? { deviceId: { exact: deviceId } } : {}) } });
+  } catch (e) {
+    // A chosen microphone that is gone is a choice to make again, not a
+    // device-less approval (D4 a stays for no microphone or no permission).
+    if (deviceId && e && (e.name === "OverconstrainedError" || e.name === "NotFoundError")) return { missing: true };
     return { unavailable: "device" };
   }
   // MediaRecorder captures and encodes off the page's main thread: a

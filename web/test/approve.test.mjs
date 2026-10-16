@@ -207,3 +207,9 @@ test("V1: a recording with almost no sound is not sent", () => {
   assert.ok(AP.peak(new Float32Array([0, 0.001, -0.005])) < AP.QUIET);
   assert.ok(AP.peak(new Float32Array([0.1, -0.3])) >= AP.QUIET);
 });
+
+test("V1: the microphone choices, Chrome's default first", () => {
+  assert.deepEqual(AP.micOptions([]), [["", "Chrome 預設"]]);
+  assert.deepEqual(AP.micOptions([{ id: "a", label: "Wireless Microphone" }, { id: "b", label: "" }]),
+    [["", "Chrome 預設"], ["a", "Wireless Microphone"], ["b", "麥克風 2"]]);
+});
