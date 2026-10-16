@@ -279,9 +279,10 @@ func TestLiveOptIn(t *testing.T) {
 
 	// The approved version is required exactly; the check itself runs the
 	// CLI with --version only.
-	// 2.1.289, 2.1.288 and 2.1.287 are the earlier pins; 2.1.291 the version
-	// Aaron reported before 2.1.293 was given; 2.1.294 a later version.
-	for _, v := range []string{"2.1.289", "2.1.288", "2.1.287", "2.1.291", "2.1.294"} {
+	// 2.1.293, 2.1.289, 2.1.288 and 2.1.287 are the earlier pins; 2.1.291 the
+	// version Aaron reported before 2.1.293 was given; 2.1.300 the one before
+	// the current pin, 2.1.302 a later version.
+	for _, v := range []string{"2.1.293", "2.1.289", "2.1.288", "2.1.287", "2.1.291", "2.1.300", "2.1.302"} {
 		other, ran2 := marker(t, v+" (Claude Code)")
 		_, err := f.exec(context.Background(), []string{"run", "--live", "--cli", other}, map[string]string{"APA_LIVE_CLI": "true"}, deps{})
 		if err == nil || !strings.Contains(err.Error(), "other than the approved") || strings.Contains(err.Error(), v) {
@@ -305,10 +306,10 @@ func TestLiveOptIn(t *testing.T) {
 		t.Error("a refused live start created the database")
 	}
 
-	// The pin itself (Aaron, 2026-10-08): exactly 2.1.293 passes the version
-	// check, and the init gate then expects claude_code_version 2.1.293
+	// The pin itself (Aaron, 2026-10-17): exactly 2.1.301 passes the version
+	// check, and the init gate then expects claude_code_version 2.1.301
 	// (TestApprovedVersionInit).
-	if approvedCLIVersion != "2.1.293 (Claude Code)" || strings.Fields(approvedCLIVersion)[0] != "2.1.293" {
+	if approvedCLIVersion != "2.1.301 (Claude Code)" || strings.Fields(approvedCLIVersion)[0] != "2.1.301" {
 		t.Fatalf("approved version %q", approvedCLIVersion)
 	}
 	if err := checkLive(context.Background(), cli, buyer.CLIEnv(os.Getenv), approvedCLIVersion); err != nil {
@@ -711,7 +712,7 @@ func TestProbeOneMessageCommand(t *testing.T) {
 // init_cli_version, the version shown only as "other". The CLI is a script that
 // answers --version itself and hands everything else to the fake.
 func TestApprovedVersionInit(t *testing.T) {
-	for v, want := range map[string]string{"2.1.293": "", "2.1.289": "init_cli_version", "2.1.291": "init_cli_version", "2.1.288": "init_cli_version", "2.1.287": "init_cli_version", fakecli.InitVersion: "init_cli_version"} {
+	for v, want := range map[string]string{"2.1.301": "", "2.1.293": "init_cli_version", "2.1.289": "init_cli_version", "2.1.291": "init_cli_version", "2.1.288": "init_cli_version", "2.1.287": "init_cli_version", fakecli.InitVersion: "init_cli_version"} {
 		f := newFixture(t)
 		os.WriteFile(f.fake+".scenario.json", []byte(`{"manual_init":true,"steps":[{"do":"init","init":{"claude_code_version":"`+v+`"}},{"do":"hang"}]}`), 0o600)
 		cli := filepath.Join(t.TempDir(), "claude")

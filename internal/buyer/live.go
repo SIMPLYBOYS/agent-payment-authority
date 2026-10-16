@@ -14,9 +14,16 @@ import (
 // ApprovedCLIVersion is the `claude --version` output a live run requires
 // (2.1.287 recorded 2026-10-02; Aaron re-approved 2.1.288 on 2026-10-03,
 // 2.1.289 on 2026-10-04 and 2.1.293 on 2026-10-08, each after a local
-// update; 2.1.293 is the version Aaron gave, not one this repo queried).
+// update; 2.1.293 is the version Aaron gave, not one this repo queried;
+// 2.1.301 on 2026-10-17, 「我想直接從 2.1.301 重新開始」, after the updater
+// had removed 2.1.293, re-qualified by an init probe before any model run).
 // Another version stops the run; nothing upgrades.
-const ApprovedCLIVersion = "2.1.293 (Claude Code)"
+const ApprovedCLIVersion = "2.1.301 (Claude Code)"
+
+// EvidenceCLIVersions are the versions a live evidence bundle may name:
+// each was the approved one when bundles were made (M1's live bundle is
+// 2.1.293's). A new live run still needs ApprovedCLIVersion itself.
+var EvidenceCLIVersions = []string{"2.1.293 (Claude Code)", ApprovedCLIVersion}
 
 // LiveAcceptAuth is the apiKeySource values a live init may state, for
 // every live run, strict or the dev demo exception (Aaron 2026-10-08, L1-d;

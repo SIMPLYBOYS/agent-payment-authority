@@ -449,7 +449,7 @@ MUTATIONS = [
      "\tcase inputBroken:\n\t\tres.Status, res.Code = ProbeFailed", "\tcase false:\n\t\tres.Status, res.Code = ProbeFailed", "TestProbeOneMessageWriteFailureAfterInit"),
     ("B1-04 C0′ R1: the observation kept after a broken write", "internal/buyer/probe.go",
      "\tif rep.Outcome == InitObserved && !inputBroken {", "\tif rep.Outcome == InitObserved {", "TestProbeOneMessageWriteFailureAfterInit"),
-    ("B1-04 pin 2.1.293: the probe's init version not taken from the pin", "cmd/apa-buyer/main.go",
+    ("B1-04 pin: the probe's init version not taken from the pin", "cmd/apa-buyer/main.go",
      "Limits: lim, CLIVersion: strings.Fields(want)[0], TraceDir", "Limits: lim, CLIVersion: \"2.1.289\", TraceDir", "TestApprovedVersionInit"),
     ("B1-04 plugins/agents: an element's name copied out, not only a listed one", "internal/buyer/probe.go",
      "\t\te.Name, e.NameLength = pick(f, \"name\", names)\n", "\t\te.Name, e.NameLength = pick(f, \"name\", names)\n\t\tjson.Unmarshal(f[\"name\"], &e.Name)\n",

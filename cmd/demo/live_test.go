@@ -34,7 +34,7 @@ func newLiveCLI(t *testing.T) *liveCLI {
 	if err := os.Symlink(exe, l.fake); err != nil {
 		t.Fatal(err)
 	}
-	l.setVersion(t, "2.1.293 (Claude Code)")
+	l.setVersion(t, "2.1.301 (Claude Code)")
 	os.WriteFile(l.cli, []byte("#!/bin/sh\nif [ \"$*\" = --version ]; then exec /bin/cat '"+l.version+"'; fi\nexec '"+l.fake+"' \"$@\"\n"), 0o755)
 	if l.home, err = os.MkdirTemp(testRoot, "live-home-"); err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func (l *liveCLI) setVersion(t *testing.T, v string) {
 func (l *liveCLI) script(t *testing.T, plugins string, steps ...map[string]any) {
 	t.Helper()
 	var init map[string]any
-	json.Unmarshal([]byte(`{"apiKeySource":"none","claude_code_version":"2.1.293","plugins":`+plugins+`}`), &init)
+	json.Unmarshal([]byte(`{"apiKeySource":"none","claude_code_version":"2.1.301","plugins":`+plugins+`}`), &init)
 	all := append([]map[string]any{{"do": "init", "init": init}}, steps...)
 	raw, _ := json.Marshal(map[string]any{"manual_init": true, "steps": all})
 	if err := os.WriteFile(l.fake+".scenario.json", raw, 0o600); err != nil {
@@ -120,7 +120,7 @@ func TestLiveRun(t *testing.T) {
 
 	// Before any start: labelled, nothing ran.
 	_, s, _ := h.status(h.tokens["host"])
-	if s.Live == nil || s.Live.Label != liveLabel || !s.Live.DevDemoPlugins || s.Live.CLIVersion != "2.1.293 (Claude Code)" || s.LiveCLI != "on" || s.FakeCLI.State != "off" {
+	if s.Live == nil || s.Live.Label != liveLabel || !s.Live.DevDemoPlugins || s.Live.CLIVersion != "2.1.301 (Claude Code)" || s.LiveCLI != "on" || s.FakeCLI.State != "off" {
 		t.Fatalf("status %+v live %+v", s, s.Live)
 	}
 	if code, body, _ := h.get("/api/mode", ""); code != 200 || !strings.Contains(string(body), `"mode":"live"`) || !strings.Contains(string(body), liveLabel) || strings.Contains(string(body), "token") {
@@ -248,7 +248,7 @@ func TestLiveRunChecksAgainEachRun(t *testing.T) {
 	if end := waitEnded(h, run["run_id"].(string)); end["outcome"] != "start_failed" || end["detail"] != "cli_version" || end["task_started"] != false {
 		t.Fatalf("another version: %v", end)
 	}
-	l.setVersion(t, "2.1.293 (Claude Code)")
+	l.setVersion(t, "2.1.301 (Claude Code)")
 	os.Remove(filepath.Join(l.home, ".apa-claude"))
 	code, run = h.post("/api/host/runs", h.tokens["operator"], startBody("req-live-confdir-01", "live-a"))
 	if code != 202 {
@@ -389,7 +389,7 @@ func TestLiveModeRefusals(t *testing.T) {
 			t.Errorf("%s: neither served nor refused", name)
 		}
 		cancel()
-		l.setVersion(t, "2.1.293 (Claude Code)")
+		l.setVersion(t, "2.1.301 (Claude Code)")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "live.db")); !os.IsNotExist(err) {
 		t.Error("a refused start opened the database")

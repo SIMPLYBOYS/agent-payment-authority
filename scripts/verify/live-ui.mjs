@@ -45,12 +45,12 @@ const bin = join(tmp, "bin");
 mkdirSync(bin);
 execFileSync("go", ["build", "-o", join(bin, "fake-claude"), "./cmd/fake-claude"], { cwd: repo, stdio: "inherit" });
 const cli = join(bin, "claude");
-writeFileSync(cli, "#!/bin/sh\nif [ \"$*\" = --version ]; then echo '2.1.293 (Claude Code)'; exit 0; fi\nexec '" + join(bin, "fake-claude") + "' \"$@\"\n", { mode: 0o755 });
+writeFileSync(cli, "#!/bin/sh\nif [ \"$*\" = --version ]; then echo '2.1.301 (Claude Code)'; exit 0; fi\nexec '" + join(bin, "fake-claude") + "' \"$@\"\n", { mode: 0o755 });
 const home = join(tmp, "home");
 mkdirSync(join(home, ".apa-claude"), { recursive: true, mode: 0o700 });
 const tool = (name, product) => (product ? { do: "tool", tool: name, args: { product_id: product } } : { do: "tool", tool: name });
 function script(...steps) {
-  const init = { do: "init", init: { apiKeySource: "none", claude_code_version: "2.1.293", plugins: PLUGINS } };
+  const init = { do: "init", init: { apiKeySource: "none", claude_code_version: "2.1.301", plugins: PLUGINS } };
   writeFileSync(join(bin, "fake-claude.scenario.json"), JSON.stringify({ manual_init: true, steps: [init, ...steps] }));
 }
 const purchaseSteps = [tool("list_products"), tool("get_quote", "kr-market"), tool("request_purchase", "kr-market")];

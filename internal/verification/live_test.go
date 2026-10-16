@@ -335,6 +335,11 @@ func TestLiveBundleRules(t *testing.T) {
 		}, "V1"},
 		"the run exited 1":    {manifest(func(m map[string]any) { m["commands"].([]any)[0].(map[string]any)["exit_code"] = json.Number("1") }), "V1"},
 		"another CLI version": {manifest(func(m map[string]any) { m["versions"].(map[string]any)["cli"] = "2.1.999 (Claude Code)" }), "V1"},
+		// 2.1.300 was never approved; the bundle and its run record must name one version (2026-10-17 pin change).
+		"a version between the pins": {manifest(func(m map[string]any) { m["versions"].(map[string]any)["cli"] = "2.1.300 (Claude Code)" }), "V1"},
+		"the run record's version is not the bundle's": {func(t *testing.T, d string) {
+			editFile(t, d, "live/run.json", func(m map[string]any) { m["cli_version_required"] = "2.1.301 (Claude Code)" })
+		}, "V1"},
 		"the command without its gate flag": {manifest(func(m map[string]any) {
 			c := m["commands"].([]any)[0].(map[string]any)
 			c["command"] = strings.Replace(c["command"].(string), " --dev-demo-plugins", "", 1)

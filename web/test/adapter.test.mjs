@@ -507,7 +507,7 @@ test("history: a recorded real run is labelled, its open Ask is a snapshot, its 
 // mapping is marked as the Host's; usage is the CLI's own or unknown.
 test("live: the evidence panel says what the trace shows and when; nothing reads as paid or streamed", () => {
   const label = "真實 Agent 即時展示・開發展示例外・合成資料・不付款";
-  const live = { record: "live_demo", label, dev_demo_plugins: true, cli_version: "2.1.293 (Claude Code)" };
+  const live = { record: "live_demo", label, dev_demo_plugins: true, cli_version: "2.1.301 (Claude Code)" };
   const po = "po-show-a-01-kr-market";
   const evs = [ev(1, "TASK_STARTED"), ev(2, "PURCHASE_PROPOSED", { purchase_order_id: po }),
     ev(3, "POLICY_DECIDED", { purchase_order_id: po, decision: { policy_verdict: "Ask", reason: ask.reason, approval_status: "pending", payment_status: "unavailable" } })];

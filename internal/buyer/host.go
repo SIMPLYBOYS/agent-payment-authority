@@ -89,7 +89,7 @@ var envAllowlist = []string{"HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG",
 // CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1 (L1-a, Aaron 2026-10-07): the
 // official docs say that in -p mode it removes all built-in subagent types
 // (docs/cli-poc.md 32.2 item 6). Whether it empties the agents list a real
-// 2.1.293 init reports is not verified (that is L1-c); the init gate still
+// 2.1.293 (now 2.1.301) init reports is not verified (that is L1-c); the init gate still
 // refuses any agent. Like the others, a parent value cannot replace it.
 var fixedEnv = []string{"DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1"}
 

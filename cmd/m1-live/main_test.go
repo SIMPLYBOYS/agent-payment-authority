@@ -59,7 +59,7 @@ type env struct {
 
 // liveInit is an init the dev demo gate passes: the approved version, auth
 // none, exactly the two named plugins.
-var liveInit = map[string]any{"apiKeySource": "none", "claude_code_version": "2.1.293",
+var liveInit = map[string]any{"apiKeySource": "none", "claude_code_version": "2.1.301",
 	"plugins": []any{map[string]any{"name": "cc-plugin-agents-md", "path": "p"}, map[string]any{"name": "cc-plugin-plugin-authoring", "path": "p"}}}
 
 func mainLine() []map[string]any {
@@ -201,7 +201,7 @@ func noMarker(t *testing.T, dir, stdout, stderr string) {
 	}
 }
 
-const approved = "2.1.293 (Claude Code)"
+const approved = "2.1.301 (Claude Code)"
 
 func live(e env) []string { return e.env("APA_LIVE_CLI=true") }
 

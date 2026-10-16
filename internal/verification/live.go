@@ -166,8 +166,8 @@ type traceEnd struct {
 func (v *verifier) liveBundle() {
 	f, m := &v.f, v.m
 	ev := []string{"manifest.json"}
-	if m.Versions["cli"] != buyer.ApprovedCLIVersion {
-		f.fail("V1", ev, "the CLI version %s is not the approved %s", quote(m.Versions["cli"]), buyer.ApprovedCLIVersion)
+	if !slices.Contains(buyer.EvidenceCLIVersions, m.Versions["cli"]) {
+		f.fail("V1", ev, "the CLI version %s is none of the approved %s", quote(m.Versions["cli"]), strings.Join(buyer.EvidenceCLIVersions, ", "))
 	}
 	gate := m.Versions["gate_mode"]
 	if gate != "dev_demo_plugins" && gate != "strict" {
@@ -301,7 +301,7 @@ func (v *verifier) liveRunRecord(f *findings, run liveRun, t *task, lr *LiveRepo
 	if run.GateMode != v.m.Versions["gate_mode"] {
 		f.fail("V6", ev, "the run record's gate mode %s is not the bundle's %s", quote(run.GateMode), quote(v.m.Versions["gate_mode"]))
 	}
-	if run.CLIVersionRequired != buyer.ApprovedCLIVersion || !slices.Equal(run.AuthAccepted, buyer.LiveAcceptAuth) {
+	if run.CLIVersionRequired != v.m.Versions["cli"] || !slices.Contains(buyer.EvidenceCLIVersions, run.CLIVersionRequired) || !slices.Equal(run.AuthAccepted, buyer.LiveAcceptAuth) {
 		f.fail("V1", ev, "the run record names another approved version or accepted authentication than the shared live settings")
 	}
 	// How the run ended, as the producer recorded it, against its exit code:

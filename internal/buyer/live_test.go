@@ -12,7 +12,7 @@ import (
 // Aaron approved; the version check takes the approved output only, and its
 // error never repeats the CLI's text. Every live entry point uses these.
 func TestCheckLiveVersion(t *testing.T) {
-	if ApprovedCLIVersion != "2.1.293 (Claude Code)" || !slices.Equal(LiveAcceptAuth, []string{"none"}) {
+	if ApprovedCLIVersion != "2.1.301 (Claude Code)" || !slices.Equal(LiveAcceptAuth, []string{"none"}) {
 		t.Fatalf("live settings %q %q", ApprovedCLIVersion, LiveAcceptAuth)
 	}
 	env := CLIEnv(os.Getenv)

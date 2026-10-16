@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// devInit is a passing init for Gate{CLIVersion: "2.1.293", AcceptAuth:
+// devInit is a passing init for Gate{CLIVersion: "2.1.301", AcceptAuth:
 // ["none"]}, with members replaced (raw JSON) or removed (value "").
 func devInit(t *testing.T, over map[string]string) []byte {
 	t.Helper()
@@ -18,7 +18,7 @@ func devInit(t *testing.T, over map[string]string) []byte {
 		"mcp_servers":         json.RawMessage(`[{"name":"apa","status":"connected"}]`),
 		"permissionMode":      json.RawMessage(`"dontAsk"`),
 		"apiKeySource":        json.RawMessage(`"none"`),
-		"claude_code_version": json.RawMessage(`"2.1.293"`),
+		"claude_code_version": json.RawMessage(`"2.1.301"`),
 		"plugins":             json.RawMessage(`[{"name":"cc-plugin-agents-md","path":"p"},{"name":"cc-plugin-plugin-authoring","path":"p"}]`),
 		"skills":              json.RawMessage(`[]`),
 		"agents":              json.RawMessage(`[]`),
@@ -42,7 +42,7 @@ func devInit(t *testing.T, over map[string]string) []byte {
 // only exactly the two named plugins, each once; every other check is the
 // strict gate's. "none" in AcceptAuth applies to both modes.
 func TestDevDemoGate(t *testing.T) {
-	strict := Gate{CLIVersion: "2.1.293", AcceptAuth: []string{"none"}}
+	strict := Gate{CLIVersion: "2.1.301", AcceptAuth: []string{"none"}}
 	dev := strict
 	dev.DevDemoPlugins = true
 	if strict.Mode() != "strict" || dev.Mode() != "dev_demo_plugins" {
