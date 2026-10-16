@@ -1,0 +1,9 @@
+{
+ "benign_success_min": 0.9,
+ "false_deny_max": 0.05,
+ "false_ask_max": 0.1,
+ "excess_intervention_max": 0.1,
+ "crafted_pass_min": 1.0,
+ "model_gap_max": 0.15,
+ "infra_max": 0.1
+}
