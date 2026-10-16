@@ -1287,7 +1287,9 @@ function renderA2() {
     if (a2Op && a2Op.session === ap.approval_session_id) {
       if (a2Op.phase === "voice") { // V1: the phrase to read, and the end of the recording
         const box = el("div", "approval-voice");
-        box.append(el("p", "approval-voice-label", "請唸出下面這句（錄音中，最多 10 秒；錄音只用來比對，不會保存）"), el("p", "approval-voice-phrase", a2Op.phrase));
+        // The recording starts only once the microphone is open (stop is set then):
+        // until then, words read are lost (V1 device round).
+        box.append(el("p", "approval-voice-label", a2Op.stop ? "請唸出下面這句（錄音中，最多 10 秒；錄音只用來比對，不會保存）" : "麥克風準備中，還不要唸；先看一下這句："), el("p", "approval-voice-phrase", a2Op.phrase));
         if (a2Op.mic) box.append(el("p", "approval-voice-mic", "麥克風：" + a2Op.mic));
         const stop = el("button", "approval-voice-stop", "唸完了");
         stop.type = "button";
@@ -1296,7 +1298,7 @@ function renderA2() {
         box.append(stop);
         parts.push(box);
       }
-      const n = el("p", "approval-msg", a2Op.phase === "voice" ? "錄音中…" : a2Op.phase === "device" ? "請在裝置上完成驗證…" : a2Op.phase === "verify" ? "結果確認中，請不要重複操作。" : "準備驗證中…");
+      const n = el("p", "approval-msg", a2Op.phase === "voice" ? (a2Op.stop ? "錄音中…" : "麥克風準備中…") : a2Op.phase === "device" ? "請在裝置上完成驗證…" : a2Op.phase === "verify" ? "結果確認中，請不要重複操作。" : "準備驗證中…");
       n.dataset.kind = "busy";
       n.setAttribute("role", "status");
       parts.push(n);
