@@ -641,22 +641,24 @@ function keepFocus(el, rebuild) {
   const built = card || li; // the generation the control was made in, not the one now
   const was = kind && { gen: Number(built ? built.dataset.gen : -1), kind, consumer: card ? card.dataset.consumer : "", run: li ? li.dataset.run : "", ownRun: a.dataset.run || "", task: a.dataset.task || "", scenario: a.dataset.scenario || "" };
   rebuild();
+  // The focus goes back where it was without moving the page: a scroll to the
+  // Agent card hid the phrase to read (V1 device round).
   if (!was || (document.activeElement && document.activeElement !== document.body && document.activeElement !== a)) return;
   const usable = (x) => !!x && !x.disabled && x.offsetParent !== null;
   const scope = was.consumer ? el.querySelector('.agent-card[data-consumer="' + CSS.escape(was.consumer) + '"]') : was.run ? el.querySelector('li[data-run="' + CSS.escape(was.run) + '"]') : null;
   if (was.gen === creds.gen && scope) {
     const attr = (k, v) => (v ? "[data-" + k + '="' + CSS.escape(v) + '"]' : "");
     const same = scope.querySelector("." + was.kind + attr("task", was.task) + attr("scenario", was.scenario) + attr("run", was.ownRun));
-    if (usable(same)) return same.focus();
+    if (usable(same)) return same.focus({ preventScroll: true });
     // A confirmation closed (返回, or its task ended): its own entry, if the task still has one.
     const entry = was.task && scope.querySelector('.row-cancel[data-task="' + CSS.escape(was.task) + '"], .task-cancel[data-task="' + CSS.escape(was.task) + '"]');
-    if (usable(entry)) return entry.focus();
+    if (usable(entry)) return entry.focus({ preventScroll: true });
     const sel = scope.querySelector(".agent-select");
-    if (usable(sel)) return sel.focus();
+    if (usable(sel)) return sel.focus({ preventScroll: true });
   }
   // Another generation, or nothing of that customer left: a control that only shows.
   const safe = ["pair-code", "load-file", "show-evidence"].map((id) => $(id)).find(usable);
-  if (safe) safe.focus();
+  if (safe) safe.focus({ preventScroll: true });
 }
 
 // agentCard draws one customer's card. Clicking the card (not a button)
@@ -1314,15 +1316,19 @@ function renderA2() {
       if (a2Op.phase === "voice") { // V1: the phrase to read, and the end of the recording
         const box = el("div", "approval-voice");
         // The recording starts only once the microphone is open (stop is set then):
-        // until then, words read are lost (V1 device round).
-        box.append(el("p", "approval-voice-label", a2Op.stop ? "請唸出下面這句（錄音中，最多 10 秒；錄音只用來比對，不會保存）" : "麥克風準備中，還不要唸；先看一下這句："), el("p", "approval-voice-phrase", a2Op.phrase));
+        // until then, words read are lost (V1 device round). The phrase comes
+        // first and alone in large type, and the box goes right under the
+        // heading: at the panel's end it was out of sight and the label above it
+        // was read instead (「…最多10秒…」, V1 device round).
+        box.append(el("p", "approval-voice-label", a2Op.stop ? "錄音中，請唸這一句：" : "麥克風準備中，還不要唸；先看這一句："), el("p", "approval-voice-phrase", a2Op.phrase),
+          el("p", "approval-voice-note", "只唸上面這一句；唸完按「唸完了」。最多 10 秒，錄音只用來比對，不會保存。"));
         if (a2Op.mic) box.append(el("p", "approval-voice-mic", "麥克風：" + a2Op.mic));
         const stop = el("button", "approval-voice-stop", "唸完了");
         stop.type = "button";
         stop.disabled = !a2Op.stop;
         stop.addEventListener("click", () => a2Op && a2Op.stop && a2Op.stop());
         box.append(stop);
-        parts.push(box);
+        parts.splice(2, 0, box); // after the mode line and the heading
       }
       const n = el("p", "approval-msg", a2Op.phase === "voice" ? (a2Op.stop ? "錄音中…" : "麥克風準備中…") : a2Op.phase === "device" ? "請在裝置上完成驗證…" : a2Op.phase === "verify" ? "結果確認中，請不要重複操作。" : "準備驗證中…");
       n.dataset.kind = "busy";
