@@ -45,6 +45,9 @@
 # Signer's lifetime; removing that directory brings the refusals back.
 # APA_AUTHENTICATOR_SOURCE (with it): device (default) or virtual, what the
 # page declares the authenticator to be (review N17).
+# APA_PRESENT_REGISTRY (fake only; default testdata/demo/registry.json): another
+# demo registry, e.g. V1 development mode's var/v1-dev/registry.json (the
+# same plus more show-* tasks: a kept A2 database uses them up).
 # APA_PRESENT_CREDENTIALS=1 (fake only; make present-c2): build apa-issuer,
 # make a credential directory of test keys in the session directory (holders
 # for consumer-a and consumer-b) and start the host with --credential-dir.
@@ -64,6 +67,9 @@ signer=${APA_APPROVALS_SIGNER:-}
 authsrc=${APA_AUTHENTICATOR_SOURCE:-device}
 case $authsrc in device|virtual) ;; *) stop "APA_AUTHENTICATOR_SOURCE=${authsrc}：只接受 device 或 virtual" ;; esac
 creds=${APA_PRESENT_CREDENTIALS:-}
+registry=${APA_PRESENT_REGISTRY:-testdata/demo/registry.json}
+[ "$registry" = testdata/demo/registry.json ] || [ "$mode" = fake ] || stop "APA_PRESENT_REGISTRY 只用於 fake 展示"
+[ -f "$registry" ] || stop "APA_PRESENT_REGISTRY=${registry} 不是檔案"
 [ -z "$creds" ] || [ "$mode" = fake ] || stop "APA_PRESENT_CREDENTIALS 只用於 fake 展示（C2 的 v2 場景只用 fake Agent）"
 [ -z "$signer" ] || [ -S "$signer" ] || stop "APA_APPROVALS_SIGNER=${signer} 不是 socket：請先啟動 apa-signer serve-approvals（docs/commercial-a2.md）"
 
@@ -120,7 +126,7 @@ else
 	[ -z "$signer" ] || set -- --approvals-signer "$signer" --authenticator-source "$authsrc"
 	[ -z "$creds" ] || set -- "$@" --credential-dir "$w/cred"
 	APA_ADDR=$addr APA_DB_PATH=$db/fake.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \
-		--fake-cli "$w/fake-claude" --scenarios "${APA_PRESENT_SCENARIOS:-testdata/demo/scenarios.json}" --registry testdata/demo/registry.json \
+		--fake-cli "$w/fake-claude" --scenarios "${APA_PRESENT_SCENARIOS:-testdata/demo/scenarios.json}" --registry "$registry" \
 		--trace-dir "$runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" "$@" &
 fi
 pid=$!

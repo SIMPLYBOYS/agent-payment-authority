@@ -65,6 +65,21 @@ os.write(fd, json.dumps(cfg, ensure_ascii=False, indent=1).encode())
 os.close(fd)
 EOF
 
+# The demo registry plus show-a/b-21..100: present-a2 keeps its database
+# (one per Signer), and the 20 show-* tasks of each customer run out.
+python3 -I - "$root/testdata/demo/registry.json" "$dir/registry.json" <<'EOF'
+import json, sys
+r = json.load(open(sys.argv[1]))
+have = {t["task_id"] for t in r["tasks"]}
+for c in ("a", "b"):
+    last = next(t for t in r["tasks"] if t["task_id"] == "show-" + c + "-20")
+    for n in range(21, 101):  # ponytail: 80 more each; the Host reads at most 64 KiB of registry
+        t = dict(last, task_id=f"show-{c}-{n:02d}", created_at=last["created_at"] + (n - 20) * 30)
+        if t["task_id"] not in have:
+            r["tasks"].append(t)
+json.dump(r, open(sys.argv[2], "w"), separators=(",", ":"))
+EOF
+
 "$dir/bin/apa-signer" serve-approvals --dir "$dir/data" 2>"$dir/run/signer.log" &
 pids="$pids $!"
 i=0
@@ -76,7 +91,7 @@ v1-dev: ready (sidecar $(echo "$health" | sed -E 's/.*"asr": "([^"]+)", "speaker
   Signer socket:  $ssock
   Signer data:    $dir/data
   admin command:  $dir/bin/apa-signer approver ... --dir $dir/data
-  host (another terminal):  make present-a2 SIGNER=$ssock
+  host (another terminal):  make present-a2 SIGNER=$ssock REGISTRY=$dir/registry.json
 Leave this running; Ctrl-C stops the sidecar and the Signer.
 EOF
 wait

@@ -328,7 +328,7 @@ Aaron 10/16「先做開發模式（A）」。這一輪用你的帳號在 `var/v1
 6. 執行下面這行，會打開 `http://localhost:8402/host`：
 
    ```
-   make present-a2 SIGNER=$PWD/var/v1-dev/run/signer.sock
+   make present-a2 SIGNER=$PWD/var/v1-dev/run/signer.sock REGISTRY=$PWD/var/v1-dev/registry.json
    ```
 
    - 頁面要你輸入終端機上的配對碼，**配對碼不要貼回來**；
@@ -343,6 +343,8 @@ Aaron 10/16「先做開發模式（A）」。這一輪用你的帳號在 `var/v1
   - 一個 Signer 對應一個 Host 資料庫：開發模式（`var/v1-dev/run/signer.sock`）和 /opt 各用各的。
   - 開發模式那份（`var/a2-host-b0fa460f7678`）先放進了舊場次 `var/present-tWKEpN` 的資料庫與 trace（`.backup`，已用 show-a-01 到 06），所以下一筆是 show-a-07。
   - 上限：每位客人 20 個 task（registry `show-a-01` 到 `show-a-20`），在同一個 Signer 的生命週期內用完就是 `NO_FREE_TASK`。刪掉 `var/a2-host-…` 而 Signer 資料還在，撞號就會回來。
+  - 2026-10-16 實機試用時 consumer-a 的 20 個 task 全部用完（頁面顯示「展示 task 已用完」）。開發模式改用擴充 registry：`v1-dev.sh` 每次啟動都會產生 `var/v1-dev/registry.json`，內容是原本的 registry 再加上 `show-a/b-21` 到 `100`（不縮排，因為 Host 讀 registry 的上限是 64 KiB）。Host 改用 `make present-a2 SIGNER=… REGISTRY=$PWD/var/v1-dev/registry.json` 啟動（`present.sh` 的 `APA_PRESENT_REGISTRY`，只用於 fake）。已提交的 `testdata/demo/registry.json` 不變。
+  - 已實測：在用完 20 個 task 的資料庫副本上，用擴充 registry 啟動 Host 會正常就緒；透過 API 建立委託並開始一筆，被選中的是 `show-a-21`。
   - 這些都只是 demo 的做法；正式的 Host 本來就只有一個長期資料庫。
 
 7. **唸對 5 次**：
