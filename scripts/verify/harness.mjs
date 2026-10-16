@@ -33,8 +33,8 @@ export function startDemo({ repo, bin, catalog, unityBuild, state, home, extra =
 }
 
 // startChrome: one headless page; send, evaluate, waitFor, on (events).
-export async function startChrome(profile, extra = []) {
-  const c = spawn(CHROME, ["--headless=new", "--user-data-dir=" + profile, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check",
+export async function startChrome(profile, extra = [], { headless = true } = {}) {
+  const c = spawn(CHROME, [...(headless ? ["--headless=new"] : []), "--user-data-dir=" + profile, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check",
     "--disable-extensions", "--disable-sync", "--disable-background-networking", "--disable-component-update", "--use-angle=swiftshader",
     "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--enable-unsafe-swiftshader", ...extra, "about:blank"], { stdio: "ignore" });
   let port;
