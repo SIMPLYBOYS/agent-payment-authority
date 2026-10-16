@@ -21,7 +21,14 @@ py="$root/var/voice/.venv/bin/python"
 
 vsock="$dir/run/voice.sock"
 ssock="$dir/run/signer.sock"
-[ -e "$ssock" ] && { echo "v1-dev: $ssock exists: another Signer may be running; stop it (or remove the file yourself if not)" >&2; exit 1; }
+if [ -e "$ssock" ]; then
+  # Nothing listening (curl exit 7: connection refused) is a stop that skipped
+  # the cleanup, e.g. a closed terminal: that file alone is removed.
+  curl -s -o /dev/null --max-time 2 --unix-socket "$ssock" http://signer/ </dev/null; rc=$?
+  [ $rc -eq 7 ] && [ -S "$ssock" ] || { echo "v1-dev: $ssock exists and may be in use (curl $rc): another Signer may be running; stop it first" >&2; exit 1; }
+  echo "v1-dev: removing $ssock (nothing listens on it: a previous stop left it)" >&2
+  rm -f "$ssock"
+fi
 
 pids=""
 cleanup() { for p in $pids; do kill "$p" 2>/dev/null || true; done; wait 2>/dev/null || true; rm -f "$ssock"; }
