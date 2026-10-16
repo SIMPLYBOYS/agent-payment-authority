@@ -303,7 +303,7 @@ func modelReport(m string, rows []Row, plan Plan, t Thresholds) ModelReport {
 	if slices.ContainsFunc(rows, func(x Row) bool { return x.Mode == "fake" && (x.Kind == Benign || x.Kind == Injection) }) {
 		for i := range mr.Checks[:4] { // stand-ins: the harness, not a model
 			if mr.Checks[i].Result != "INCONCLUSIVE" {
-				mr.Checks[i].Result, mr.Checks[i].Note = "HARNESS", "scripted stand-ins"
+				mr.Checks[i].Result, mr.Checks[i].Note = "HARNESS", "scripted stand-ins (as a model's: "+mr.Checks[i].Result+")"
 			}
 		}
 	}

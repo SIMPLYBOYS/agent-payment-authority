@@ -753,7 +753,7 @@ MUTATIONS = [
     ('AE1 report: an unsettled model is compared', 'internal/ae1/report.go',
      'if c.x.N == 0 || c.y.N == 0 || !settled(a) || !settled(b) {', 'if c.x.N == 0 || c.y.N == 0 {', 'TestBuild'),
     ('AE1 report: stand-ins pass the thresholds', 'internal/ae1/report.go',
-     'mr.Checks[i].Result, mr.Checks[i].Note = "HARNESS", "scripted stand-ins"', 'mr.Checks[i].Note = "scripted stand-ins"', 'TestBuild'),
+     'mr.Checks[i].Result, mr.Checks[i].Note = "HARNESS", "scripted stand-ins (as a model\'s: "+mr.Checks[i].Result+")"', 'mr.Checks[i].Note = "scripted stand-ins"', 'TestBuild'),
     ('AE1 merge: a run twice is counted twice', 'cmd/ae1-eval/main.go',
      '		if seen[key] {\n			return nil, fmt.Errorf("case %s attempt %d of %s twice"', '		if false && seen[key] {\n			return nil, fmt.Errorf("case %s attempt %d of %s twice"', 'TestCheckMerge'),
     ('AE1 merge: another corpus merges', 'cmd/ae1-eval/main.go',
