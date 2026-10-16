@@ -2,6 +2,9 @@
 //
 //	apa-buyer run --fake-cli PATH --scenario FILE [--task ID]
 //	apa-buyer run --live --cli ABSOLUTE-PATH [--task ID]   (also needs APA_LIVE_CLI=true)
+//	  either with [--catalog FILE --task-text TEXT [--model sonnet|haiku]]: an AE1
+//	  evaluation run (docs/commercial-ae1.md): the shop sells the catalog's items
+//	  and the prompt asks for the task (buyer.TaskPrompt)
 //	apa-buyer probe-init --cli ABSOLUTE-PATH [--send-one-message]  (also needs APA_LIVE_CLI=true)
 //	apa-buyer mcp-bridge
 //
@@ -137,6 +140,9 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 	registryPath := fs.String("registry", "testdata/contracts/registry.json", "trusted registry fixture")
 	profilePath := fs.String("profile", "testdata/policy/m1-demo-profile.json", "consumer profile fixture")
 	traceDir := fs.String("trace-dir", "var/runs", "where run traces are written")
+	catalogPath := fs.String("catalog", "", "AE1: a JSON list of evaluation items the shop sells instead of its fixture products")
+	taskText := fs.String("task-text", "", "AE1: the evaluation case's task, put into buyer.TaskPrompt (with --catalog)")
+	model := fs.String("model", "", "AE1: one of buyer.EvalModels (default buyer.Model)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -153,6 +159,20 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 		return errors.New("--cli is for live runs only (--live with APA_LIVE_CLI=true)")
 	case !live && *fake == "":
 		return errors.New("pass --fake-cli for a fake run; a live run needs both --live and APA_LIVE_CLI=true (see docs/cli-poc.md)")
+	case (*catalogPath == "") != (*taskText == ""):
+		return errors.New("--catalog and --task-text go together (an AE1 evaluation run)")
+	case *model != "" && *catalogPath == "":
+		return errors.New("--model is for AE1 evaluation runs only (with --catalog and --task-text)")
+	}
+	runPrompt := prompt
+	var evalItems []merchant.EvalItem
+	if *catalogPath != "" {
+		if runPrompt, err = buyer.TaskPrompt(*taskText); err != nil {
+			return err
+		}
+		if err := decodeFile(*catalogPath, &evalItems); err != nil {
+			return fmt.Errorf("catalog: %w", err)
+		}
 	}
 
 	var (
@@ -242,7 +262,12 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 	if err != nil {
 		return err
 	}
-	shop, err := merchant.New("http://" + ln.Addr().String())
+	var shop *merchant.Merchant
+	if evalItems != nil {
+		shop, err = merchant.NewEval("http://"+ln.Addr().String(), evalItems)
+	} else {
+		shop, err = merchant.New("http://" + ln.Addr().String())
+	}
 	if err != nil {
 		ln.Close()
 		return err
@@ -332,7 +357,7 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 		limits = *d.limits
 	}
 	h := &buyer.Host{Registry: reg, Bridge: bridge, CLI: cli, BridgeCmd: []string{d.self, "mcp-bridge"},
-		Env: env, Limits: limits, Gate: gate, TraceDir: *traceDir}
+		Env: env, Limits: limits, Gate: gate, TraceDir: *traceDir, Model: *model}
 	mode := "fake"
 	if live {
 		mode = "live"
@@ -343,7 +368,7 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 	} else {
 		fmt.Fprintf(d.out, "FAKE MODE: %s runs no model. Shop %s, Store %s (opened only after the init check), task %s.\n", filepath.Base(cli), ln.Addr(), dbPath, task.TaskID)
 	}
-	res, err := h.Run(ctx, task.TaskID, prompt, prepare)
+	res, err := h.Run(ctx, task.TaskID, runPrompt, prepare)
 	if err != nil {
 		return err
 	}

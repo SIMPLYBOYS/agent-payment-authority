@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
@@ -118,6 +119,7 @@ type offer struct {
 
 type Merchant struct {
 	base     string
+	products []product
 	catalogs map[string][]byte // scene => catalog
 	offers   map[string]offer  // path + "?" + raw query
 }
@@ -141,12 +143,54 @@ type price struct {
 
 // New builds the shop for baseURL, a trusted http(s) origin with no path,
 // e.g. "http://127.0.0.1:8402".
-func New(baseURL string) (*Merchant, error) {
+func New(baseURL string) (*Merchant, error) { return build(baseURL, products) }
+
+// EvalItem is one product of an AE1 evaluation catalog (docs/commercial-ae1.md
+// 3.1): the data shop only, at an amount of the fixture asset. PayTo empty is
+// the registry's merchant; another is a merchant the policy does not allow.
+// Title and Summary are untrusted shop text, where an injection case puts its
+// words; the bridge cleans and cuts them as it does any catalog.
+type EvalItem struct {
+	ID           string `json:"id"`
+	Title        string `json:"title"`
+	Summary      string `json:"summary"`
+	Amount       string `json:"amount"`
+	AssetDisplay string `json:"asset_display"`
+	PayTo        string `json:"pay_to,omitempty"`
+}
+
+// NewEval builds a data shop selling only items, for an evaluation run.
+func NewEval(baseURL string, items []EvalItem) (*Merchant, error) {
+	var ps []product
+	seen := map[string]bool{}
+	for _, it := range items {
+		if !productID.MatchString(it.ID) || seen[it.ID] {
+			return nil, fmt.Errorf("eval item %q: a distinct [a-z0-9-] product ID", it.ID)
+		}
+		seen[it.ID] = true
+		amount := contracts.Amount(it.Amount)
+		if _, err := amount.Units(); err != nil {
+			return nil, fmt.Errorf("eval item %s: amount %q", it.ID, it.Amount)
+		}
+		req := fixtureRequirement(amount)
+		if it.PayTo != "" {
+			req.PayTo = it.PayTo
+		}
+		ps = append(ps, product{ID: it.ID, Title: it.Title, Summary: it.Summary, MimeType: "application/json",
+			Path: "/eval/" + it.ID, Query: "v=1", Requirement: req, AssetDisplay: it.AssetDisplay,
+			content: `{"canary":"APA-PROTECTED-eval-` + it.ID + `"}`})
+	}
+	return build(baseURL, ps)
+}
+
+var productID = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
+
+func build(baseURL string, products []product) (*Merchant, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 		return nil, fmt.Errorf("merchant base URL %q must be an http(s) origin with no path", baseURL)
 	}
-	m := &Merchant{base: baseURL, catalogs: map[string][]byte{}, offers: map[string]offer{}}
+	m := &Merchant{base: baseURL, products: products, catalogs: map[string][]byte{}, offers: map[string]offer{}}
 	entries := map[string][]catalogEntry{"": {}}
 	for _, p := range products {
 		o := offer{product: p, url: baseURL + p.Path + "?" + p.Query}
@@ -202,7 +246,7 @@ type Offer struct {
 // it happened to receive.
 func (m *Merchant) Offers() []Offer {
 	var out []Offer
-	for _, p := range products {
+	for _, p := range m.products {
 		o := m.offers[p.Path+"?"+p.Query]
 		out = append(out, Offer{Scene: p.Scene, CatalogURL: m.base + CatalogPath(p.Scene), ProductID: p.ID, Method: "GET", URL: o.url,
 			Quote: contracts.Quote{X402Version: o.required.X402Version, SelectedRequirement: o.accepts, Extensions: o.required.Extensions}})
