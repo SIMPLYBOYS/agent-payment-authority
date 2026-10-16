@@ -407,3 +407,142 @@ Aaron 10/16「先做開發模式（A）」。這一輪用你的帳號在 `var/v1
 - **`voice-stats` 總計**：30 筆，含修正前的失敗；降級 3 筆（10.0%）。
 
 **尚未做**：§13 裡的「故意唸錯一次」還沒有單獨做，這輪的拒絕都是不小心唸錯的；代碼與金額仍然要完全一致，不能放寬。
+
+## 15 /opt 正式部署（option B）：操作步驟
+
+**決定**：Aaron「要做 /opt 的正式部署」；Python 來源選「下載獨立版 Python（建議）」。sudo 一律由 Aaron 輸入；Claude Code 不執行 sudo，也不動 `/opt`。
+
+**為什麼不直接用開發模式的 venv**：語音服務必須以 `apa-signer` 執行（Signer 會檢查 socket 對端的 uid），所以它載入的任何東西都不能讓其他帳號改寫（P1-b 隔離）。Homebrew 的 Python、標準函式庫，以及 openssl、sqlite、xz、mpdecimal 都屬於 mac；wheel 裡還留著指向 `/usr/local/lib`（mac 的）和 `/tmp/vendor/lib`（任何人都能寫）的 rpath。所以改用 python-build-standalone 3.12.6，離線裝入固定版本的套件，刪掉所有絕對路徑的 rpath（16 個檔案）後重新 ad-hoc 簽章，再整包以 root 擁有的方式裝進 `/opt`（`scripts/demo/v1-opt-stage.sh`）。
+
+**準備好的東西**（`var/v1-opt/`，git 忽略）：
+- `apa-signer`：從 f81517a 的乾淨 worktree 建置（`GOFLAGS=-mod=readonly GOPROXY=off GOTOOLCHAIN=local`），SHA-256 `1012f3e91dc4275aa92a597ee72a4d48e71b204d5e461a4ec1bbe3511793b24e`；Go 程式與第二輪 review APPROVE 的 158b768 相同；
+- `signer.json`：A2 的設定（`/opt` 上那份，SHA-256 `425e0070…2cef`）加上 `voice` 段（socket `/opt/apa-signer/voice-run/voice.sock`、門檻 365、商家「測試商店」），SHA-256 `f641ac0ebda6d0556fb85a8746ea4204d07f2ca433339f774ca930434b1568d0`；本機以暫存 socket 驗證過（`config-check.txt`）；
+- `stage/voice/`：`python/`、`models/`、`sidecar.py`，共 20655 個檔案，清單 `stage/manifest.sha256`。
+
+**本機已驗證**：
+- 搬到別的路徑、改成唯讀、用 `env -i HOME=/var/empty` 從 `/` 啟動，健康檢查通過（模型載入約 130 秒）、分析正確（約 3.2 秒）；
+- 新執行檔打開 A2 時期的 `approvals.db` 會補上 `voice_templates`、`voice_results`；舊執行檔（A2，9987eb4）也能打開補過表的資料庫，所以可以回滾；
+- `/opt` 的 Signer 已決定過 show-a-01 到 03（10/13）：Host 資料庫 `var/a2-host-b6424086acbc` 已先接上 10/13 的場次 `var/present-XIxA0b`（schema 5，已用 `--upgrade-db` 升級，升級前的備份留著），下一筆會是 show-a-04。
+
+**開始前**：停掉開發模式的 Host（終端機 3）；開發模式的語音服務與 Signer（終端機 1）建議也先停掉，因為兩組模型一起跑，這台機器容易逾時。以下的 `$P` 是 repo 目錄：`P=/Users/mac/Documents/OpenSourceProjects/agent-payment-authority`。
+
+**D 部署（終端機 W-host，mac）**
+1. 核對：
+
+   ```
+   shasum -a 256 $P/var/v1-opt/apa-signer        # 1012f3e91dc4275aa92a597ee72a4d48e71b204d5e461a4ec1bbe3511793b24e
+   (cd $P/var/v1-opt/stage && shasum -a 256 -c manifest.sha256 | grep -vc ': OK$')   # 0
+   pgrep -fl '/opt/apa-signer/'                    # 應無輸出
+   sudo shasum -a 256 /opt/apa-signer/data/signer.json /opt/apa-signer/bin/apa-signer
+   # signer.json 425e0070…2cef；apa-signer 9a40cc24…（A2）。不同就停下來，先問
+   ```
+
+2. 備份（留著，不刪）：
+
+   ```
+   sudo -u apa-signer /bin/cp -p /opt/apa-signer/data/signer.json /opt/apa-signer/data/signer.json.a2
+   sudo -u apa-signer /bin/cp -p /opt/apa-signer/data/approvals.db /opt/apa-signer/data/approvals.db.a2
+   sudo /bin/cp -p /opt/apa-signer/bin/apa-signer /opt/apa-signer/bin/apa-signer.a2
+   ```
+
+3. 安裝執行檔與語音檔案：
+
+   ```
+   sudo install -o root -g wheel -m 0755 $P/var/v1-opt/apa-signer /opt/apa-signer/bin/apa-signer
+   sudo /usr/bin/ditto $P/var/v1-opt/stage/voice /opt/apa-signer/voice
+   sudo /usr/sbin/chown -R root:wheel /opt/apa-signer/voice
+   sudo /bin/chmod -R go-w,a+rX /opt/apa-signer/voice
+   sudo install -d -o apa-signer -g apa-signer -m 0700 /opt/apa-signer/voice-run
+   sudo -u apa-signer /bin/sh -c 'umask 077; cat > /opt/apa-signer/data/signer.json' < $P/var/v1-opt/signer.json
+   ```
+
+4. 核對安裝結果：
+
+   ```
+   sudo shasum -a 256 /opt/apa-signer/bin/apa-signer /opt/apa-signer/data/signer.json   # 1012f3e9… 與 f641ac0e…
+   (cd /opt/apa-signer && shasum -a 256 -c $P/var/v1-opt/stage/manifest.sha256 | grep -vc ': OK$')   # 0
+   sudo find /opt/apa-signer/voice \( ! -user root -o -perm -g+w -o -perm -o+w \) | head -3   # 應無輸出
+   ls -led /opt/apa-signer/voice-run    # drwx------ apa-signer apa-signer
+   ```
+
+**S1 啟動語音服務（另開終端機 W-voice）**
+
+```
+cd /; sudo -u apa-signer /usr/bin/env -i HOME=/var/empty PATH=/usr/bin:/bin /opt/apa-signer/voice/python/bin/python3.12 -I /opt/apa-signer/voice/sidecar.py --socket /opt/apa-signer/voice-run/voice.sock --models /opt/apa-signer/voice/models
+```
+
+- 預期：`voice sidecar: listening on /opt/apa-signer/voice-run/voice.sock`，之後模型要載入 2～3 分鐘。
+- 在 W-host 確認就緒（重複執行到看見 `"ok": true`）：
+
+  ```
+  sudo -u apa-signer /usr/bin/curl -s --unix-socket /opt/apa-signer/voice-run/voice.sock http://voice/v1/health
+  ```
+
+  應該是 `{"ok": true, "asr": "faster-whisper-small@536b066", "speaker": "spkrec-ecapa-voxceleb@0f99f2d"}`。
+
+**V 登記聲紋（W-host；在 S2 之前；用 wireless microphone）**
+1. 找出 wireless microphone 的編號 N：`ffmpeg -hide_banner -f avfoundation -list_devices true -i ""`（看 audio devices 那一段）。
+2. 錄 3 段（各約 6 秒），句子同 §13：
+
+   ```
+   R=$(mktemp -d); chmod 700 "$R"
+   ffmpeg -hide_banner -loglevel error -f avfoundation -i ":N" -ar 16000 -ac 1 -t 6 "$R/1.wav"   # 我是核准者，這是登記用的第一句話。
+   ffmpeg -hide_banner -loglevel error -f avfoundation -i ":N" -ar 16000 -ac 1 -t 6 "$R/2.wav"   # 今天天氣很好，我們去買咖啡豆。
+   ffmpeg -hide_banner -loglevel error -f avfoundation -i ":N" -ar 16000 -ac 1 -t 6 "$R/3.wav"   # 請確認金額與商家，再按下核准。
+   ```
+
+3. 交給 apa-signer、登記，然後立刻刪除兩邊的錄音：
+
+   ```
+   sudo -u apa-signer /bin/mkdir -m 700 /opt/apa-signer/data/voice-enroll
+   for i in 1 2 3; do sudo -u apa-signer /bin/sh -c "umask 077; cat > /opt/apa-signer/data/voice-enroll/$i.wav" < "$R/$i.wav"; done
+   cd /; sudo -u apa-signer /opt/apa-signer/bin/apa-signer approver voice-enroll --dir /opt/apa-signer/data --approver approver-a /opt/apa-signer/data/voice-enroll/1.wav /opt/apa-signer/data/voice-enroll/2.wav /opt/apa-signer/data/voice-enroll/3.wav
+   sudo -u apa-signer /bin/rm -P /opt/apa-signer/data/voice-enroll/1.wav /opt/apa-signer/data/voice-enroll/2.wav /opt/apa-signer/data/voice-enroll/3.wav
+   sudo -u apa-signer /bin/rmdir /opt/apa-signer/data/voice-enroll
+   rm -P "$R"/*.wav && rmdir "$R"; cd $P
+   ```
+
+   應該看到 `voice template of approver-a from 3 recordings`。
+
+**S2 啟動 Signer（另開終端機 W-signer）**
+
+```
+cd /; sudo -u apa-signer /opt/apa-signer/bin/apa-signer serve-approvals --dir /opt/apa-signer/data
+```
+
+預期：`apa-signer: serving approvals only on /opt/apa-signer/run/signer.sock (payment unavailable: …)`。不會問密語；問了就 Ctrl-C 停止。
+
+**C 核對（W-host）**
+
+```
+ls -led /opt/apa-signer/run/signer.sock      # srw-rw---- apa-signer apa-signer-clients
+sudo ls -le /opt/apa-signer/data             # signer.json、approvals.db、voice.key 都是 -rw------- apa-signer
+curl -sS --unix-socket /opt/apa-signer/run/signer.sock http://signer/v1/health   # {"state":"approvals-only","payment":"unavailable"}
+```
+
+**H 啟動 Host（W-host，repo 目錄）**
+
+```
+make present-a2 SIGNER=/opt/apa-signer/run/signer.sock REGISTRY=$P/var/v1-dev/registry.json
+```
+
+- 確認終端機印出「A2 的 Host 資料庫沿用 …a2-host-b6424086acbc」，然後配對（配對碼不要貼回來）。
+- 裝置不用重新登記：`/opt` 已有 10/13 登記的 approver-a credential `b8923ecec9bc556c`。Google 密碼管理工具裡有兩把 localhost passkey（`/opt` 與開發模式各一把），瀏覽器會自動用對應的那一把。
+
+**O 試用**：「以 A 模擬 → 建立委託 → 確認並開始」；在面板選 wireless microphone，按核准，等「錄音中，請唸這一句：」再唸大字，按「唸完了」，輸入 PIN。預期「本人核准已驗證（裝置＋語音）」。approver-b 沒有聲紋模板，核准會被以 `VOICE_NOT_ENROLLED` 拒絕，這是預期的。
+
+**X 停止**：Host、Signer、語音服務各自 Ctrl-C。資料全部保留（Aaron：商業 demo 結束前都不做清理）。
+
+**R 回滾（需要時）**：停掉三個程序後，
+
+```
+sudo install -o root -g wheel -m 0755 /opt/apa-signer/bin/apa-signer.a2 /opt/apa-signer/bin/apa-signer
+sudo -u apa-signer /bin/cp -p /opt/apa-signer/data/signer.json.a2 /opt/apa-signer/data/signer.json
+```
+
+`approvals.db` 不用還原：A2 的執行檔能打開補過語音表的資料庫（已驗證）；要完全回到部署前，也可以用 `approvals.db.a2`。`/opt/apa-signer/voice` 與 `voice-run` 留著不影響 A2。
+
+**已知（review 第二輪 note，不阻擋）**：
+- 用 Chrome 預設麥克風時，`NotReadableError`、`AbortError`（麥克風被占用）也會走降級；D4 只寫了「沒有麥克風、拒絕權限」。這是原本就有的行為，沒有擴大攻擊面（拒絕權限本來就能降級），留待 Aaron 決定要收緊，還是把 D4 補寫清楚。
+- 商家相似度只比兩個名字本身；兩家各差一個音節時，同一句唸錯的話可能同時通過兩家。現在只有一家商家。
+- 「拔掉指定麥克風」只有單元測試，v1-ui 沒有對應情境。
