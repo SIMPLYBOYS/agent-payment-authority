@@ -17,27 +17,33 @@ export async function record(maxSeconds, onStart) {
   } catch {
     return { unavailable: "device" };
   }
-  const ctx = new AudioContext();
-  await ctx.resume(); // a context made after the permission prompt may start suspended: it would record silence
+  // MediaRecorder captures and encodes off the page's main thread: a
+  // ScriptProcessor ran on it, and a busy page (the Unity shop) garbled the
+  // audio while keeping its length (V1 device round). The browser decodes
+  // and resamples the recording to 16 kHz itself (OfflineAudioContext).
   const mic = (stream.getAudioTracks()[0] || {}).label || "";
-  const src = ctx.createMediaStreamSource(stream);
-  const node = ctx.createScriptProcessor(4096, 1, 1); // ponytail: deprecated but everywhere; an AudioWorklet if it goes
-  const chunks = [];
-  node.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-  src.connect(node);
-  node.connect(ctx.destination);
+  const parts = [];
+  const rec = new MediaRecorder(stream, { audioBitsPerSecond: 128000 });
+  rec.ondataavailable = (e) => { if (e.data.size) parts.push(e.data); };
+  const stopped = new Promise((r) => { rec.onstop = r; });
+  await new Promise((r) => { rec.onstart = r; rec.start(); });
   await new Promise((resolve) => {
     const t = setTimeout(resolve, maxSeconds * 1000);
     onStart(() => { clearTimeout(t); resolve(); }, mic);
   });
-  node.disconnect();
-  src.disconnect();
+  rec.stop();
+  await stopped;
   for (const tr of stream.getTracks()) tr.stop();
-  const rate = ctx.sampleRate;
-  await ctx.close();
-  const all = new Float32Array(chunks.reduce((n, c) => n + c.length, 0));
-  let o = 0;
-  for (const c of chunks) { all.set(c, o); o += c.length; }
+  let all = new Float32Array(0);
+  const rate = 16000;
+  try {
+    const bytes = await new Blob(parts).arrayBuffer();
+    const buf = await new OfflineAudioContext(1, rate, rate).decodeAudioData(bytes);
+    all = new Float32Array(buf.length);
+    for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c); for (let i = 0; i < d.length; i++) all[i] += d[i] / buf.numberOfChannels; }
+  } catch {
+    return { short: true, mic }; // nothing decodable: as a recording too short to send
+  }
   const wav = AP.wav16k(all, rate, maxSeconds);
   if (AP.seconds(wav) < 1) return { short: true, mic };
   if (AP.peak(all) < AP.QUIET) return { quiet: true, mic };

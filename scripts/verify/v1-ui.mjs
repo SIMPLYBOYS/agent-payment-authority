@@ -268,11 +268,13 @@ try {
   a = await ask();
   r = await approveWith({ wav: passRecording });
   await settled();
-  // Played into the microphone again, the old recording is new bytes (no
-  // hash match: that is the Signer's check of a byte-identical resend,
-  // tested in Go); its old code does not match this challenge's.
-  check("the approved recording played again into the microphone: denied, its code is the old challenge's", (await head()).startsWith("denied|語音挑戰未通過")
-    && (await text("#approval-body")).includes("唸的內容和這筆不符"), (await head()) + " / " + (await text("#approval .approval-msg")));
+  // Played into the microphone again, the old recording is refused either
+  // way: by its old code (this challenge's does not match), or, since the
+  // page records with MediaRecorder, a synthetic replay can come out
+  // byte-identical and the Signer's hash of used recordings refuses it first.
+  const replayBody = await text("#approval-body");
+  check("the approved recording played again into the microphone: denied, as a replay or by its old code", (await head()).startsWith("denied|語音挑戰未通過")
+    && (replayBody.includes("唸的內容和這筆不符") || replayBody.includes("這段錄音已用過")), (await head()) + " / " + (await text("#approval .approval-msg")));
 
   // ---- 4 unavailable: no microphone ----
   mark("no microphone");
