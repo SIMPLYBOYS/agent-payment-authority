@@ -173,6 +173,12 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 		if err := decodeFile(*catalogPath, &evalItems); err != nil {
 			return fmt.Errorf("catalog: %w", err)
 		}
+		if len(evalItems) == 0 {
+			return errors.New("catalog: no evaluation item")
+		}
+		if d.getenv("APA_DB_PATH") == "" {
+			return errors.New("an AE1 evaluation run needs APA_DB_PATH (its own Store), never the default one")
+		}
 	}
 
 	var (
@@ -263,7 +269,7 @@ func run(ctx context.Context, args []string, d deps) (err error) {
 		return err
 	}
 	var shop *merchant.Merchant
-	if evalItems != nil {
+	if *catalogPath != "" {
 		shop, err = merchant.NewEval("http://"+ln.Addr().String(), evalItems)
 	} else {
 		shop, err = merchant.New("http://" + ln.Addr().String())

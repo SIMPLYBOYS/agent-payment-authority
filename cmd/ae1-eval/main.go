@@ -5,7 +5,7 @@
 //	             [--corpus FILE] [--kinds K,...] [--cases ID,...] [--reps N] [--max-runs N]
 //	ae1-eval run --mode live --batch NAME --model sonnet|haiku --cli ABSOLUTE-PATH --buyer PATH --out DIR ...
 //	             (also needs APA_LIVE_CLI=true: a real model runs on the operator's login)
-//	ae1-eval report --out DIR RESULTS.jsonl...
+//	ae1-eval report --out DIR --reps N [--corpus FILE] RESULTS.jsonl...  (live batches, plus the fake crafted/fault run)
 //
 // run makes every run with apa-buyer run --catalog --task-text, each in a
 // new private directory with its own Store, and scores it from the Store's
@@ -38,6 +38,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/ae1"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/toolbridge"
 )
 
 func main() {
@@ -56,7 +57,7 @@ func cli(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	if len(args) > 0 && args[0] == "report" {
 		return report(args[1:], out)
 	}
-	return errors.New("usage: ae1-eval run ... | report --out DIR RESULTS.jsonl...")
+	return errors.New("usage: ae1-eval run ... | report --out DIR --reps N RESULTS.jsonl...")
 }
 
 // Behaviors are a fake run's stand-ins for a model on benign and injection
@@ -64,6 +65,10 @@ func cli(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 var behaviors = []string{"obey", "fooled", "miss", "extra", "wrong"}
 
 const craftedTask = "crafted input run: no model; the fake CLI sends the case's script"
+
+// evalTask is the registry task every evaluation run uses (apa-buyer's default),
+// each in its own Store.
+const evalTask = "task-a"
 
 func run(ctx context.Context, args []string, out io.Writer, getenv func(string) string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
@@ -141,7 +146,9 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	if *maxRuns > 0 {
 		planned = min(planned, *maxRuns)
 	}
+	plan := ae1.Plan{Runs: planned, Crafted: countKind(corpus, ae1.Crafted)}
 	var rows []ae1.Row
+	var stopErr error
 	infraRun, n := 0, 0
 loop:
 	for rep := 1; rep <= *reps; rep++ {
@@ -158,6 +165,14 @@ loop:
 				}
 			}
 			row, err := once(ctx, corpus, k, b, rep, runOpts{live: live, model: *model, buyer: *buyerPath, fake: *fakeCLI, cli: *cliPath, devDemo: *devDemo, getenv: getenv})
+			if ctx.Err() != nil {
+				fmt.Fprintln(out, "interrupted: the runs made so far are reported (INCONCLUSIVE: fewer than planned)")
+				break loop
+			}
+			if errors.Is(err, errPayment) {
+				stopErr = fmt.Errorf("case %s attempt %d: %w", k.ID, rep, err)
+				break loop
+			}
 			if err != nil {
 				return fmt.Errorf("case %s attempt %d: %w", k.ID, rep, err)
 			}
@@ -180,8 +195,31 @@ loop:
 			}
 		}
 	}
-	return writeReport(*outDir, ae1.Build(rows, map[string]int{label: planned}, thr), out)
+	if err := writeReport(*outDir, ae1.Build(rows, map[string]ae1.Plan{label: plan}, thr), out); err != nil {
+		return err
+	}
+	return stopErr
 }
+
+func countKind(c *ae1.Corpus, kind string) int {
+	n := 0
+	for _, k := range c.Cases {
+		if k.Kind == kind {
+			n++
+		}
+	}
+	return n
+}
+
+// errPayment stops a batch: a run whose report names any payment (M1 cannot
+// pay; it should never happen).
+var errPayment = errors.New("apa-buyer reported a payment; the batch is stopped")
+
+// families are the init model names each asked-for model may come back as.
+var families = map[string][]string{"sonnet": {"sonnet", "claude-sonnet-5-5"}, "haiku": {"haiku", "claude-haiku-5-5"}}
+
+// modelMatches reports whether the init's model is the one asked for.
+func modelMatches(asked, init string) bool { return slices.Contains(families[asked], init) }
 
 func show(s ae1.Score) string {
 	if s.Class == "" {
@@ -218,7 +256,8 @@ type buyerReport struct {
 			} `json:"decision"`
 		} `json:"purchases"`
 	} `json:"task"`
-	Trace string `json:"trace"`
+	Trace   string `json:"trace"`
+	Payment string `json:"payment"`
 }
 
 func once(ctx context.Context, c *ae1.Corpus, k ae1.Case, behavior string, attempt int, o runOpts) (ae1.Row, error) {
@@ -269,6 +308,11 @@ func once(ctx context.Context, c *ae1.Corpus, k ae1.Case, behavior string, attem
 	}
 	cmd := exec.CommandContext(ctx, o.buyer, argv...)
 	cmd.Env, cmd.Dir = env, mustWD()
+	// Stopped, apa-buyer gets an interrupt, as at a terminal, and stops its
+	// CLI's process group itself; a kill would leave a live CLI without its
+	// host's limits (review 3).
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.WaitDelay = 2*buyer.DefaultLimits.Grace + 10*time.Second
 	var stdout bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, io.Discard
 	start := time.Now()
@@ -281,8 +325,16 @@ func once(ctx context.Context, c *ae1.Corpus, k ae1.Case, behavior string, attem
 		}
 		return row, fmt.Errorf("apa-buyer gave no report: %w", err)
 	}
+	if !strings.HasPrefix(rep.Payment, "none") {
+		return row, errPayment
+	}
 	row.Obs, row.Detail = observe(rep), rep.Detail
 	row.InitModel, row.Usage, row.PromptSHA = traceFacts(rep.Trace)
+	if o.live && row.Obs.Outcome == "ok" && !modelMatches(o.model, row.InitModel) {
+		// The CLI ran another model than asked (or named none known): not this
+		// model's run (acceptance 19); counted as an infrastructure failure.
+		row.Obs.Outcome, row.Detail = "model_mismatch", strings.TrimSpace(row.Detail+" init_model="+row.InitModel)
+	}
 	row.Score = ae1.ScoreRun(k, row.Obs)
 	return row, nil
 }
@@ -292,23 +344,27 @@ func once(ctx context.Context, c *ae1.Corpus, k ae1.Case, behavior string, attem
 // same purchase), and the bridge's refusals.
 func observe(r buyerReport) ae1.Observation {
 	o := ae1.Observation{Outcome: r.Outcome}
-	verdict := map[string]string{}
+	verdict := map[string]string{} // purchase order ID => verdict
 	if r.Task != nil {
 		for _, p := range r.Task.Purchases {
-			if prod, ok := strings.CutPrefix(p.PurchaseOrderID, "po-task-a-"); ok {
-				verdict[prod] = p.Decision.Verdict
-			}
+			verdict[p.PurchaseOrderID] = p.Decision.Verdict
 		}
 	}
 	seen := map[string]bool{}
 	for _, c := range r.ToolCalls {
+		po := toolbridge.PurchaseOrderID(evalTask, c.ProductID)
 		switch {
-		case c.Tool == "request_purchase" && verdict[c.ProductID] != "" && !seen[c.ProductID]:
-			seen[c.ProductID] = true
-			o.Requests = append(o.Requests, ae1.Req{Product: c.ProductID, Verdict: verdict[c.ProductID]})
+		case c.Tool == "request_purchase" && c.ProductID != "" && verdict[po] != "" && !seen[po]:
+			seen[po] = true
+			o.Requests = append(o.Requests, ae1.Req{Product: c.ProductID, Verdict: verdict[po]})
 		case !slices.Contains([]string{"ok", "Allow", "Ask", "Deny"}, c.Outcome):
 			o.Refused = append(o.Refused, c.Outcome)
 		}
+	}
+	if len(seen) != len(verdict) && o.Outcome == "ok" {
+		// The Store holds a purchase the host's record does not name: the run
+		// cannot be scored (counted as an infrastructure failure).
+		o.Outcome = "record_mismatch"
 	}
 	return o
 }
@@ -393,12 +449,18 @@ func report(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	outDir := fs.String("out", "", "a new directory for the merged report")
+	corpusPath := fs.String("corpus", "testdata/ae1/corpus.json", "the frozen corpus every row must come from")
 	thresholdsPath := fs.String("thresholds", "testdata/ae1/thresholds.json", "D2's thresholds")
+	reps := fs.Int("reps", 0, "runs per case and model the batches meant to make (D4: 3)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *outDir == "" || fs.NArg() == 0 {
-		return errors.New("usage: ae1-eval report --out DIR RESULTS.jsonl...")
+	if *outDir == "" || fs.NArg() == 0 || *reps < 1 {
+		return errors.New("usage: ae1-eval report --out DIR --reps N [--corpus FILE] RESULTS.jsonl...")
+	}
+	corpus, err := ae1.Load(*corpusPath)
+	if err != nil {
+		return err
 	}
 	var thr ae1.Thresholds
 	if err := decode(*thresholdsPath, &thr); err != nil {
@@ -418,10 +480,62 @@ func report(args []string, out io.Writer) error {
 			rows = append(rows, r)
 		}
 	}
+	plans, err := checkMerge(corpus, rows, *reps)
+	if err != nil {
+		return err
+	}
 	if err := os.Mkdir(*outDir, 0o700); err != nil {
 		return fmt.Errorf("--out must be a new directory: %w", err)
 	}
-	return writeReport(*outDir, ae1.Build(rows, nil, thr), out)
+	return writeReport(*outDir, ae1.Build(rows, plans, thr), out)
+}
+
+// checkMerge refuses rows that cannot be one evaluation (review 2): another
+// corpus, a model in two modes, a case under two prompts, a run twice, a run
+// the plan has no place for; fake rows only for crafted and fault cases. It
+// returns each model's plan: every benign and injection case reps times; the
+// fake stand-in, every crafted and fault case once.
+func checkMerge(c *ae1.Corpus, rows []ae1.Row, reps int) (map[string]ae1.Plan, error) {
+	kind := map[string]string{}
+	for _, k := range c.Cases {
+		kind[k.ID] = k.Kind
+	}
+	mode, prompt := map[string]string{}, map[string]string{}
+	seen := map[string]bool{}
+	plans := map[string]ae1.Plan{}
+	for _, r := range rows {
+		k, ok := kind[r.Case]
+		switch {
+		case r.CorpusSHA != c.SHA256:
+			return nil, fmt.Errorf("case %s: corpus %.12s is not %.12s", r.Case, r.CorpusSHA, c.SHA256)
+		case !ok || k != r.Kind:
+			return nil, fmt.Errorf("case %s (%s) is not in the corpus", r.Case, r.Kind)
+		case r.Attempt < 1 || (r.Model == "fake" && r.Attempt != 1) || (r.Model != "fake" && r.Attempt > reps):
+			return nil, fmt.Errorf("case %s attempt %d of %s has no place in the plan", r.Case, r.Attempt, r.Model)
+		case (r.Model == "fake") != (k == ae1.Crafted || k == ae1.Fault):
+			return nil, fmt.Errorf("case %s: %s rows here are a model's, crafted and fault rows the fake stand-in's", r.Case, k)
+		case mode[r.Model] != "" && mode[r.Model] != r.Mode:
+			return nil, fmt.Errorf("model %s in two modes", r.Model)
+		case r.PromptSHA != "" && prompt[r.Case] != "" && prompt[r.Case] != r.PromptSHA && r.Model != "fake":
+			return nil, fmt.Errorf("case %s under two prompts", r.Case)
+		}
+		key := fmt.Sprintf("%s|%s|%d", r.Model, r.Case, r.Attempt)
+		if seen[key] {
+			return nil, fmt.Errorf("case %s attempt %d of %s twice", r.Case, r.Attempt, r.Model)
+		}
+		seen[key], mode[r.Model] = true, r.Mode
+		if r.PromptSHA != "" && r.Model != "fake" {
+			prompt[r.Case] = r.PromptSHA
+		}
+		if _, ok := plans[r.Model]; !ok {
+			if r.Model == "fake" {
+				plans[r.Model] = ae1.Plan{Runs: countKind(c, ae1.Crafted) + countKind(c, ae1.Fault), Crafted: countKind(c, ae1.Crafted)}
+			} else {
+				plans[r.Model] = ae1.Plan{Runs: (countKind(c, ae1.Benign) + countKind(c, ae1.Injection)) * reps}
+			}
+		}
+	}
+	return plans, nil
 }
 
 func writeReport(dir string, r ae1.Report, out io.Writer) error {

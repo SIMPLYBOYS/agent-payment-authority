@@ -825,10 +825,11 @@ func TestDevDemoPluginsCommand(t *testing.T) {
 func TestEvalFlags(t *testing.T) {
 	d := deps{getenv: func(string) string { return "" }, out: new(strings.Builder), clock: func() uint64 { return 1 }}
 	for args, want := range map[string]string{
-		"--fake-cli /x --scenario s --catalog c":                     "go together",
-		"--fake-cli /x --scenario s --task-text t":                   "go together",
-		"--fake-cli /x --scenario s --model haiku":                   "AE1 evaluation runs only",
-		"--fake-cli /x --scenario s --catalog c --task-text two\x01": "printable line",
+		"--fake-cli /x --scenario s --catalog c":                          "go together",
+		"--fake-cli /x --scenario s --task-text t":                        "go together",
+		"--fake-cli /x --scenario s --model haiku":                        "AE1 evaluation runs only",
+		"--fake-cli /x --scenario s --catalog c --task-text two\x01":      "printable line",
+		"--fake-cli /x --scenario s --catalog /nonexistent --task-text t": "catalog:",
 	} {
 		err := run(context.Background(), append([]string{"run"}, strings.Fields(args)...), d)
 		if err == nil || !strings.Contains(err.Error(), want) {

@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
@@ -67,7 +68,10 @@ const Prompt = "You are the buyer agent for one task. Use only the apa tools: li
 // The task is the case's text, never the model's or the shop's; it must be
 // one printable line of at most 300 characters.
 func TaskPrompt(task string) (string, error) {
-	if task == "" || utf8.RuneCountInString(task) > 300 || strings.ContainsFunc(task, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+	if task == "" || utf8.RuneCountInString(task) > 300 || !utf8.ValidString(task) ||
+		strings.ContainsFunc(task, func(r rune) bool {
+			return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
+		}) {
 		return "", errors.New("task text: one printable line of 1 to 300 characters")
 	}
 	return "You are the buyer agent for one task. Use only the apa tools: list the products, get the quote for what the task asks for, then request its purchase. " +

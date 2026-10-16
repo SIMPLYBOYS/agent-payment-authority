@@ -72,3 +72,49 @@ func TestRunFlags(t *testing.T) {
 		}
 	}
 }
+
+// A purchase the Store has and the host's record does not name: the run
+// cannot be scored.
+func TestObserveMismatch(t *testing.T) {
+	var r buyerReport
+	json.Unmarshal([]byte(`{"outcome":"ok","tool_calls":[{"tool":"request_purchase","product_id":"a","outcome":"Allow"}],
+	 "task":{"purchases":[{"purchase_order_id":"po-task-a-a","decision":{"policy_verdict":"Allow"}},{"purchase_order_id":"po-task-a-z","decision":{"policy_verdict":"Allow"}}]}}`), &r)
+	if o := observe(r); o.Outcome != "record_mismatch" {
+		t.Fatalf("%+v", o)
+	}
+}
+
+func TestFamilies(t *testing.T) {
+	for model, ok := range map[[2]string]bool{{"sonnet", "claude-sonnet-5-5"}: true, {"haiku", "haiku"}: true, {"haiku", "claude-sonnet-5-5"}: false, {"sonnet", "unrecognized"}: false} {
+		if got := modelMatches(model[0], model[1]); got != ok {
+			t.Errorf("%v: %v", model, got)
+		}
+	}
+}
+
+// Merged batches are one evaluation or none (review 2).
+func TestCheckMerge(t *testing.T) {
+	c := &ae1.Corpus{SHA256: "s", Cases: []ae1.Case{{ID: "b", Kind: ae1.Benign}, {ID: "i", Kind: ae1.Injection}, {ID: "k", Kind: ae1.Crafted}, {ID: "f", Kind: ae1.Fault}}}
+	r := func(model, kase, kind string, attempt int, mode string) ae1.Row {
+		return ae1.Row{CorpusSHA: "s", Model: model, Case: kase, Kind: kind, Attempt: attempt, Mode: mode, PromptSHA: "p-" + kase}
+	}
+	good := []ae1.Row{r("sonnet", "b", ae1.Benign, 1, "live"), r("haiku", "b", ae1.Benign, 2, "live"), r("fake", "k", ae1.Crafted, 1, "fake")}
+	plans, err := checkMerge(c, good, 3)
+	if err != nil || plans["sonnet"].Runs != 6 || plans["fake"] != (ae1.Plan{Runs: 2, Crafted: 1}) {
+		t.Fatalf("%+v %v", plans, err)
+	}
+	for name, bad := range map[string]ae1.Row{
+		"another corpus":    {CorpusSHA: "x", Model: "sonnet", Case: "b", Kind: ae1.Benign, Attempt: 1, Mode: "live"},
+		"not in the corpus": r("sonnet", "nope", ae1.Benign, 1, "live"),
+		"past the reps":     r("sonnet", "i", ae1.Injection, 4, "live"),
+		"a model's crafted": r("sonnet", "k", ae1.Crafted, 1, "live"),
+		"a fake benign":     r("fake", "b", ae1.Benign, 1, "fake"),
+		"twice":             r("sonnet", "b", ae1.Benign, 1, "live"),
+		"two modes":         r("sonnet", "i", ae1.Injection, 1, "fake"),
+		"two prompts":       {CorpusSHA: "s", Model: "haiku", Case: "b", Kind: ae1.Benign, Attempt: 1, Mode: "live", PromptSHA: "other"},
+	} {
+		if _, err := checkMerge(c, append(append([]ae1.Row{}, good...), bad), 3); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
