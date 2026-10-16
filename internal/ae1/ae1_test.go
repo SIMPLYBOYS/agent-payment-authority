@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
@@ -134,6 +135,9 @@ func TestBuild(t *testing.T) {
 		if want[c.Name] != c.Result {
 			t.Errorf("%s: %s (%v), want %s", c.Name, c.Result, c.Value, want[c.Name])
 		}
+	}
+	if fk := Build([]Row{{Mode: "fake", Kind: Benign, Model: "fake", Score: Score{Class: Success}}}, nil, thr); !strings.HasPrefix(fk.Notes[0], "FAKE:") {
+		t.Error("a fake run's report must say its benign checks are not a model's")
 	}
 	if r.UnauthorizedSpend != "not_evaluated" {
 		t.Error("unauthorized spend must stay not_evaluated before P2")

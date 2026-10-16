@@ -131,6 +131,11 @@ func Build(rows []Row, planned map[string]int, t Thresholds) Report {
 	if len(rows) > 0 {
 		r.Corpus, r.CorpusSHA, r.Mode = rows[0].Corpus, rows[0].CorpusSHA, rows[0].Mode
 	}
+	if slices.ContainsFunc(rows, func(x Row) bool { return x.Mode == "fake" && (x.Kind == Benign || x.Kind == Injection) }) {
+		r.Notes = append([]string{"FAKE: the benign and injection runs here are scripted stand-ins (" +
+			"behavior in results.jsonl), not a model; their checks show the harness works, never a model's quality. " +
+			"Crafted and fault runs are scripts by design: theirs are real results."}, r.Notes...)
+	}
 	byModel := map[string][]Row{}
 	for _, x := range rows {
 		byModel[x.Model] = append(byModel[x.Model], x)
