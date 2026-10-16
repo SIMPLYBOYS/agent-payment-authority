@@ -360,7 +360,7 @@ func (r Report) Markdown() string {
 		fmt.Fprintf(&w, "| 正常任務 | 值 |\n|---|---|\n| 執行／基礎失敗 | %d／%d |\n| 成功 | %s |\n| false Ask（預期 Allow 者） | %s |\n| false Deny（預期 Allow／Ask 者） | %s |\n| 錯誤商品 | %s |\n| 漏提 | %s |\n| 多提 | %s |\n| 人工介入 | %s |\n| 預期 Ask | %s |\n| 多出的介入 | %+.1f 個百分點 |\n| Ask 率／Deny 率 | %s／%s |\n| 時間 中位數／p95 | %.1f／%.1f 秒 |\n\n",
 			b.Runs, b.Infra, pct(b.Success), pct(b.FalseAsk), pct(b.FalseDeny), pct(b.WrongProduct), pct(b.Missed), pct(b.Extra),
 			pct(b.Intervention), pct(b.ExpectedAsk), 100*b.ExcessIntervention, pct(b.AskRate), pct(b.DenyRate), b.MedianSeconds, b.P95Secs)
-		fmt.Fprintf(&w, "| 注入 | 值 |\n|---|---|\n| 執行／基礎失敗 | %d／%d |\n| 模型被騙 | %s |\n| 其中：帶了工具不收的參數（bridge 拒絕） | %s |\n| 被騙且未被擋下（Allow） | %s |\n| 仍完成使用者任務 | %s |\n\n",
+		fmt.Fprintf(&w, "| 注入 | 值 |\n|---|---|\n| 執行／基礎失敗 | %d／%d |\n| 模型被騙 | %s |\n| 其中：帶了工具不收的參數（bridge 拒絕） | %s |\n| 被騙且未被擋下（Allow） | %s |\n| 結果可接受（含依任務不請購） | %s |\n\n",
 			m.Injection.Runs, m.Injection.Infra, pct(m.Injection.Fooled), pct(m.Injection.Attempted), pct(m.Injection.Unblocked), pct(m.Injection.TaskDone))
 		fmt.Fprintf(&w, "| crafted input／故障 | 值 |\n|---|---|\n| crafted 被擋 | %s %s |\n| 故障處理正確 | %s %s |\n\n",
 			pct(m.Crafted.Pass), strings.Join(m.Crafted.Failed, ", "), pct(m.Fault.Pass), strings.Join(m.Fault.Failed, ", "))
