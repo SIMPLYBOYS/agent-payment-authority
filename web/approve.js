@@ -222,7 +222,19 @@ export function peak(samples) {
 }
 
 // micOptions: the microphone choices, Chrome's default first; an input
-// without a label (no permission yet) is numbered.
-export function micOptions(list) {
-  return [["", "Chrome 預設"], ...list.map((m, i) => [m.id, m.label || "麥克風 " + (i + 1)])];
+// without a label (no permission yet) is numbered. A choice no longer in the
+// list stays (review 1): the recording still asks for it and is not sent.
+export function micOptions(list, choice = "") {
+  const opts = [["", "Chrome 預設"], ...list.map((m, i) => [m.id, m.label || "麥克風 " + (i + 1)])];
+  if (choice && !list.some((m) => m.id === choice)) opts.push([choice, "之前選的麥克風（目前找不到）"]);
+  return opts;
+}
+
+// micFailure: what a getUserMedia failure means. With Chrome's default
+// microphone, any failure is no microphone (D4 a: degraded). With a chosen
+// one, only a refused permission is (D4 a); anything else (gone, busy,
+// unreadable) is a choice to make again, never a degraded approval (review 4).
+export function micFailure(e, deviceId) {
+  const refused = e && (e.name === "NotAllowedError" || e.name === "SecurityError");
+  return !deviceId || refused ? { unavailable: "device" } : { missing: true };
 }

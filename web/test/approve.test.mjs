@@ -213,3 +213,13 @@ test("V1: the microphone choices, Chrome's default first", () => {
   assert.deepEqual(AP.micOptions([{ id: "a", label: "Wireless Microphone" }, { id: "b", label: "" }]),
     [["", "Chrome 預設"], ["a", "Wireless Microphone"], ["b", "麥克風 2"]]);
 });
+
+test("V1 review 1/4: a chosen microphone that fails is chosen again, never a degraded approval", () => {
+  const err = (name) => ({ name });
+  assert.deepEqual(AP.micFailure(err("NotFoundError"), ""), { unavailable: "device" });
+  assert.deepEqual(AP.micFailure(err("NotAllowedError"), ""), { unavailable: "device" });
+  assert.deepEqual(AP.micFailure(err("NotAllowedError"), "a"), { unavailable: "device" });
+  for (const n of ["NotFoundError", "OverconstrainedError", "NotReadableError", "AbortError", "TypeError"]) assert.deepEqual(AP.micFailure(err(n), "a"), { missing: true }, n);
+  assert.deepEqual(AP.micOptions([{ id: "b", label: "Built-in" }], "a"), [["", "Chrome 預設"], ["b", "Built-in"], ["a", "之前選的麥克風（目前找不到）"]]);
+  assert.deepEqual(AP.micOptions([{ id: "a", label: "Wireless" }], "a"), [["", "Chrome 預設"], ["a", "Wireless"]]);
+});

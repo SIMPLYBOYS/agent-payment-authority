@@ -82,6 +82,8 @@ const analyze = (wav) => {
 };
 
 let b, ff;
+// Ctrl-C ends here too: the recordings never stay behind.
+process.once("SIGINT", () => { try { if (ff) ff.kill(); if (b) b.close(); } catch {} rmSync(tmp, { recursive: true, force: true }); process.exit(130); });
 try {
   b = await startChrome(join(tmp, "chrome"), ["--use-fake-ui-for-media-stream", "--window-size=700,400"], { headless: false });
   await b.send("Page.navigate", { url: origin + "/" });

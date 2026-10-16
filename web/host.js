@@ -1204,8 +1204,7 @@ let shownA2 = "";
 let micChoice = "";
 let micList = [];
 async function refreshMics() {
-  micList = await V.microphones();
-  if (micChoice && !micList.some((m) => m.id === micChoice)) micChoice = "";
+  micList = await V.microphones(); // a choice that went away stays chosen (review 1)
   renderControl();
 }
 if (navigator.mediaDevices) {
@@ -1297,7 +1296,7 @@ function renderA2() {
       parts.push(acts);
       const micRow = el("label", "approval-mic", "錄音用的麥克風（Signer 要求唸句子時才會錄音）：");
       const sel = el("select");
-      for (const [id, name] of AP.micOptions(micList)) {
+      for (const [id, name] of AP.micOptions(micList, micChoice)) {
         const o = el("option", "", name);
         o.value = id;
         sel.append(o);
@@ -1412,7 +1411,8 @@ async function a2Act(item, decision) {
       voice = await V.record(prompt.max_seconds || 10, (stop, mic) => { if (a2Op) { a2Op.stop = stop; a2Op.mic = mic; renderControl(); } }, micChoice);
       refreshMics(); // the names show once the microphone has been allowed
       if (stale()) return;
-      if (voice.missing) return done("idle", "選擇的麥克風現在找不到，沒有送出；這筆仍在等你決定。請重新選擇麥克風，再按核准。");
+      if (voice.missing) return done("idle", "選擇的麥克風現在找不到或無法使用，沒有送出；這筆仍在等你決定。請重新選擇麥克風，再按核准。");
+      if (voice.notRecorded) return done("idle", "錄音沒有成功（麥克風：" + (voice.mic || "未知") + "），沒有送出；這筆仍在等你決定，請再按核准。");
       if (voice.short) return done("idle", "錄音不到 1 秒，沒有送出；這筆仍在等你決定，請再按核准並唸完整句。");
       if (voice.quiet) return done("idle", "沒有收到聲音（麥克風：" + (voice.mic || "未知") + "），沒有送出；這筆仍在等你決定。請確認 Chrome 用的是正確的麥克風，再按核准。");
     }

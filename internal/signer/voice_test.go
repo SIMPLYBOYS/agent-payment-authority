@@ -378,8 +378,8 @@ func TestPhraseMatching(t *testing.T) {
 		want   bool
 	}{
 		{"he zhun 0.5USDC , fu gei ce shi shang dian , dai ma 3540", true},
-		{"fu gei ce shi , shang dian", true},
-		{"fu gei ce shi , shang chang", true},          // punctuation is not a syllable: one wrong only           // punctuation inside the name
+		{"fu gei ce shi , shang dian", true},           // punctuation inside the name
+		{"fu gei ce shi , shang chang", true},          // punctuation is not a syllable: one wrong only
 		{"fu gei ce shi de shang dian", true},          // one added
 		{"fu gei ce shi shang chang", true},            // one wrong
 		{"fu gei ce shang dian", true},                 // one missing
@@ -500,5 +500,25 @@ func TestVoiceSignerTroubleAndInputs(t *testing.T) {
 	st, err := f.core.VoiceStats(bgA)
 	if err != nil || st["failed VOICE_AUDIO_INVALID"] != 1 || st["unavailable VOICE_SERVICE_UNAVAILABLE"] != 2 {
 		t.Errorf("stats %v %v", st, err)
+	}
+}
+
+// Review 6: two merchants whose spoken names pass for each other are refused.
+func TestVoiceMerchantsSoundApart(t *testing.T) {
+	v := func(pinyins ...string) *Voice {
+		w := &Voice{Socket: "/tmp/v.sock", TimeoutMS: 10000, SpeakerThreshold: 365, ASRModel: "a", SpeakerModel: "s", Decimals: 6}
+		for i, p := range pinyins {
+			w.Merchants = append(w.Merchants, VoiceMerchant{PayTo: "0x" + strings.Repeat(string(rune('3'+i)), 40), Name: "店", Pinyin: p})
+		}
+		return w
+	}
+	c := &Config{WebAuthn: &WebAuthn{}}
+	if err := v("ce shi shang dian", "xiang kou bian li shang dian").check(c); err != nil {
+		t.Fatalf("names apart: %v", err)
+	}
+	for _, alike := range [][]string{{"ce shi shang dian", "ce shi shang chang"}, {"ce shi shang dian", "ce shi shang"}, {"ce shi", "ce shi"}} {
+		if err := v(alike...).check(c); err == nil || !strings.Contains(err.Error(), "too alike") {
+			t.Errorf("%v: %v", alike, err)
+		}
 	}
 }

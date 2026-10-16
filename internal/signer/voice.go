@@ -79,9 +79,16 @@ func (v *Voice) check(c *Config) error {
 	case v.ASRModel == "" || v.SpeakerModel == "" || v.Decimals > 18 || len(v.Merchants) == 0:
 		return errors.New("config: voice models, decimals and merchants")
 	}
-	for _, m := range v.Merchants {
+	for i, m := range v.Merchants {
 		if !addressPattern.MatchString(m.PayTo) || m.Name == "" || len(m.Name) > 60 || !pinyinPattern.MatchString(m.Pinyin) {
 			return fmt.Errorf("config: voice merchant %q", m.PayTo)
+		}
+		// The spoken name is matched loosely (merchantNear): two merchants
+		// whose names pass for each other would make it confirm nothing.
+		for _, o := range v.Merchants[:i] {
+			if merchantNear(m.Pinyin, o.Pinyin) || merchantNear(o.Pinyin, m.Pinyin) {
+				return fmt.Errorf("config: voice merchants %q and %q sound too alike", o.PayTo, m.PayTo)
+			}
 		}
 	}
 	return nil

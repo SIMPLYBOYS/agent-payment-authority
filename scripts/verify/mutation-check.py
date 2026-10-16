@@ -731,6 +731,8 @@ MUTATIONS = [
      'return best <= len(name)/4', 'return best <= len(name)/2', 'TestPhraseMatching'),
     ('V1 signer: the merchant may start only at the transcript start', 'internal/signer/voice.go',
      'prev := row[0] // the stretch may start anywhere: row[0] stays 0', 'prev := row[0]; row[0]++', 'TestPhraseMatching'),
+    ('V1 signer: merchants that sound alike are accepted', 'internal/signer/voice.go',
+     'if merchantNear(m.Pinyin, o.Pinyin) || merchantNear(o.Pinyin, m.Pinyin) {', 'if false && (merchantNear(m.Pinyin, o.Pinyin) || merchantNear(o.Pinyin, m.Pinyin)) {', 'TestVoiceMerchantsSoundApart'),
     ('V1 signer: punctuation splits the merchant', 'internal/signer/voice.go',
      'if w != "" && strings.Trim(w, "abcdefghijklmnopqrstuvwxyzü") == "" {', 'if w != "" {', 'TestPhraseMatching'),
     ('V1 signer: a late sidecar reads as verified', 'internal/signer/voice.go',
