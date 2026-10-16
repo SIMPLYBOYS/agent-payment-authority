@@ -244,11 +244,54 @@ func hasNumber(s, n string) bool {
 }
 
 // matchPhrase is D5's structured comparison: the amount and the code as
-// numbers, the merchant by its pinyin.
+// numbers, exactly; the merchant by its pinyin, loosely (merchantNear).
 func matchPhrase(transcript, pinyin, amount, code, merchantPinyin string) (amountOK, merchantOK, codeOK bool) {
 	n := normalize(transcript)
-	squash := func(s string) string { return strings.ReplaceAll(strings.ToLower(s), " ", "") }
-	return hasNumber(n, amount), strings.Contains(squash(pinyin), squash(merchantPinyin)), hasNumber(n, code)
+	return hasNumber(n, amount), merchantNear(pinyin, merchantPinyin), hasNumber(n, code)
+}
+
+// merchantNear: the merchant's toneless syllables appear in the
+// transcript's, with at most one syllable wrong, missing or added per four
+// (Aaron 2026-10-16, after his device round: 「我覺得可以放寬比對規則」; the
+// merchant only: the amount and the code, the replay guard, stay exact). A
+// syllable is a run of letters: punctuation, digits and Latin runs such as
+// "0.5USDC" are not syllables and never split the name. The binding to the
+// payee is the intent hash; the spoken name is the person's confirmation.
+func merchantNear(pinyin, merchant string) bool {
+	syl := func(s string) []string {
+		var out []string
+		for _, w := range strings.Fields(strings.ToLower(s)) {
+			if w != "" && strings.Trim(w, "abcdefghijklmnopqrstuvwxyzü") == "" {
+				out = append(out, w)
+			}
+		}
+		return out
+	}
+	hay, name := syl(pinyin), syl(merchant)
+	if len(name) == 0 {
+		return false
+	}
+	// Approximate substring matching (Sellers): row[i] is the fewest edits
+	// that turn name[:i] into a stretch of hay ending here.
+	row := make([]int, len(name)+1)
+	for i := range row {
+		row[i] = i
+	}
+	best := row[len(name)]
+	for _, h := range hay {
+		prev := row[0] // the stretch may start anywhere: row[0] stays 0
+		for i := 1; i <= len(name); i++ {
+			cur := row[i]
+			cost := 1
+			if name[i-1] == h {
+				cost = 0
+			}
+			row[i] = min(prev+cost, row[i]+1, row[i-1]+1)
+			prev = cur
+		}
+		best = min(best, row[len(name)])
+	}
+	return best <= len(name)/4
 }
 
 func cosine(a, b []float64) float64 {

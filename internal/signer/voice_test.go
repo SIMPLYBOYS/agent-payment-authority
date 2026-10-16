@@ -372,6 +372,29 @@ func TestPhraseMatching(t *testing.T) {
 	if a, m, c := matchPhrase("核准0.36USDC 付给相口便利商店,代码4712", "he zhun 0.36USDC fu gei xiang kou bian li shang dian , dai ma 4712", "0.36", "4712", "xiang kou bian li shang dian"); !a || !m || !c {
 		t.Errorf("a homophone merchant: %v %v %v", a, m, c)
 	}
+	// The merchant, loosely: one syllable in four wrong, missing or added.
+	for _, c := range []struct {
+		pinyin string
+		want   bool
+	}{
+		{"he zhun 0.5USDC , fu gei ce shi shang dian , dai ma 3540", true},
+		{"fu gei ce shi , shang dian", true},
+		{"fu gei ce shi , shang chang", true},          // punctuation is not a syllable: one wrong only           // punctuation inside the name
+		{"fu gei ce shi de shang dian", true},          // one added
+		{"fu gei ce shi shang chang", true},            // one wrong
+		{"fu gei ce shang dian", true},                 // one missing
+		{"fu gei se shi shang chang", false},           // two wrong
+		{"fu gei ce shi de de shang dian", false},      // two added
+		{"fu gei shi yi shang jia dai ma 3540", false}, // another merchant
+		{"", false},
+	} {
+		if got := merchantNear(c.pinyin, "ce shi shang dian"); got != c.want {
+			t.Errorf("merchantNear(%q) = %v", c.pinyin, got)
+		}
+	}
+	if merchantNear("fu gei ce dian", "ce shi") || !merchantNear("ce shi", "ce shi") { // a short name: exact only
+		t.Error("a two-syllable merchant is matched exactly")
+	}
 	if voiceCode("AAAAAA") != "0000" || len(voiceCode("_____w")) != 4 || voiceCode("!") != "" {
 		t.Error("voiceCode")
 	}
