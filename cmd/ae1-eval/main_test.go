@@ -23,7 +23,7 @@ func TestObserve(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := observe(r)
-	if len(o.Requests) != 1 || o.Requests[0] != (ae1.Req{Product: "b", Verdict: "Deny"}) || strings.Join(o.Refused, ",") != "TASK_NOT_ACTIVE,UNKNOWN_PRODUCT" {
+	if len(o.Requests) != 1 || o.Requests[0] != (ae1.Req{Product: "b", Verdict: "Deny"}) || strings.Join(o.Refused, ",") != "request_purchase:TASK_NOT_ACTIVE,request_purchase:UNKNOWN_PRODUCT" {
 		t.Fatalf("%+v", o)
 	}
 	if _, err := parseReport([]byte("no report at all")); err == nil {
@@ -56,6 +56,14 @@ func TestScript(t *testing.T) {
 	}
 }
 
+// A subset is never the plan (review 2-1).
+func TestRunPlanIsTheCorpus(t *testing.T) {
+	c := &ae1.Corpus{Cases: []ae1.Case{{Kind: ae1.Benign}, {Kind: ae1.Injection}, {Kind: ae1.Crafted}, {Kind: ae1.Fault}}}
+	if planRuns(c, true, 3) != 6 || planRuns(c, false, 1) != 4 {
+		t.Fatal(planRuns(c, true, 3), planRuns(c, false, 1))
+	}
+}
+
 func TestRunFlags(t *testing.T) {
 	env := func(string) string { return "" }
 	for args, want := range map[string]string{
@@ -65,6 +73,7 @@ func TestRunFlags(t *testing.T) {
 		"--buyer b --out o --mode live --batch x --model opus":           "--model sonnet|haiku",
 		"--buyer b --out o --mode live --batch x --model haiku --cli /c": "APA_LIVE_CLI=true",
 		"--out o": "--buyer are required",
+		"--buyer b --out o --fake-cli f --first-rep 0": "--first-rep",
 	} {
 		err := run(t.Context(), strings.Fields(args), new(strings.Builder), env)
 		if err == nil || !strings.Contains(err.Error(), want) {

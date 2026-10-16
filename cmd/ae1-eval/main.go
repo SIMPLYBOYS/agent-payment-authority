@@ -86,6 +86,7 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	kinds := fs.String("kinds", "", "only these kinds (comma separated)")
 	cases := fs.String("cases", "", "only these case IDs (comma separated)")
 	reps := fs.Int("reps", 1, "runs per case")
+	firstRep := fs.Int("first-rep", 1, "the first run's attempt number (to complete an interrupted or split set: the next one's)")
 	maxRuns := fs.Int("max-runs", 0, "stop after this many runs (0: no limit)")
 	outDir := fs.String("out", "", "a new directory for the results")
 	if err := fs.Parse(args); err != nil {
@@ -97,8 +98,8 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 		return errors.New("--mode is fake or live")
 	case *outDir == "" || *buyerPath == "":
 		return errors.New("--out and --buyer are required")
-	case *reps < 1:
-		return errors.New("--reps must be at least 1")
+	case *reps < 1 || *firstRep < 1:
+		return errors.New("--reps and --first-rep must be at least 1")
 	case live && (*batch == "" || !slices.Contains(buyer.EvalModels, *model) || !filepath.IsAbs(*cliPath)):
 		return errors.New("--mode live needs --batch, --model sonnet|haiku and an absolute --cli")
 	case live && getenv("APA_LIVE_CLI") != "true":
@@ -142,16 +143,14 @@ func run(ctx context.Context, args []string, out io.Writer, getenv func(string) 
 	if live {
 		label = *model
 	}
-	planned := len(todo) * *reps
-	if *maxRuns > 0 {
-		planned = min(planned, *maxRuns)
-	}
-	plan := ae1.Plan{Runs: planned, Crafted: countKind(corpus, ae1.Crafted)}
+	// The plan is the corpus's, never the selection's (review 2-1): a subset
+	// (--cases, --kinds, --max-runs) is INCONCLUSIVE, so a trial is never judged.
+	plan := ae1.Plan{Runs: planRuns(corpus, live, *reps), Crafted: countKind(corpus, ae1.Crafted)}
 	var rows []ae1.Row
 	var stopErr error
 	infraRun, n := 0, 0
 loop:
-	for rep := 1; rep <= *reps; rep++ {
+	for rep := *firstRep; rep < *firstRep+*reps; rep++ {
 		for ci, k := range todo {
 			if ctx.Err() != nil || (*maxRuns > 0 && n >= *maxRuns) {
 				break loop
@@ -199,6 +198,15 @@ loop:
 		return err
 	}
 	return stopErr
+}
+
+// planRuns is a batch's planned runs: the corpus's model cases (live) or all
+// its cases (fake), reps times, whatever was selected.
+func planRuns(c *ae1.Corpus, live bool, reps int) int {
+	if live {
+		return (countKind(c, ae1.Benign) + countKind(c, ae1.Injection)) * reps
+	}
+	return len(c.Cases) * reps
 }
 
 func countKind(c *ae1.Corpus, kind string) int {
@@ -358,7 +366,7 @@ func observe(r buyerReport) ae1.Observation {
 			seen[po] = true
 			o.Requests = append(o.Requests, ae1.Req{Product: c.ProductID, Verdict: verdict[po]})
 		case !slices.Contains([]string{"ok", "Allow", "Ask", "Deny"}, c.Outcome):
-			o.Refused = append(o.Refused, c.Outcome)
+			o.Refused = append(o.Refused, c.Tool+":"+c.Outcome)
 		}
 	}
 	if len(seen) != len(verdict) && o.Outcome == "ok" {
