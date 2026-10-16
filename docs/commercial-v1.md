@@ -412,6 +412,8 @@ Aaron 10/16「先做開發模式（A）」。這一輪用你的帳號在 `var/v1
 
 **決定**：Aaron「要做 /opt 的正式部署」；Python 來源選「下載獨立版 Python（建議）」。sudo 一律由 Aaron 輸入；Claude Code 不執行 sudo，也不動 `/opt`。
 
+**延後（10/16）**：Aaron「先照你的建議進行」：`/opt` 部署延到 P2 部署時一起做，E1-b 之前必須完成。原因：AE1、P2 可能還會改 Signer，到時要重新建置執行檔（重跑 `scripts/demo/v1-opt-stage.sh`、重建 `apa-signer`、重新產生 `signer.json` 與核對值），而 P2 本來就要動 `/opt`；開發模式（`var/v1-dev`）在那之前可用於練習與展示，但它的 Signer 與語音服務以 mac 執行，沒有 P1-b 隔離，不能當作最終驗收的證據。下面的雜湊是 1942796 那一版的，部署前要更新。
+
 **為什麼不直接用開發模式的 venv**：語音服務必須以 `apa-signer` 執行（Signer 會檢查 socket 對端的 uid），所以它載入的任何東西都不能讓其他帳號改寫（P1-b 隔離）。Homebrew 的 Python、標準函式庫，以及 openssl、sqlite、xz、mpdecimal 都屬於 mac；wheel 裡還留著指向 `/usr/local/lib`（mac 的）和 `/tmp/vendor/lib`（任何人都能寫）的 rpath。所以改用 python-build-standalone 3.12.6，離線裝入固定版本的套件，刪掉所有絕對路徑的 rpath（16 個檔案）後重新 ad-hoc 簽章，再整包以 root 擁有的方式裝進 `/opt`（`scripts/demo/v1-opt-stage.sh`）。
 
 **準備好的東西**（`var/v1-opt/`，git 忽略）：
