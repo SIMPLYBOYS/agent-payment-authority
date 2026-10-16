@@ -104,7 +104,7 @@ func TestCheckMerge(t *testing.T) {
 		t.Fatalf("%+v %v", plans, err)
 	}
 	for name, bad := range map[string]ae1.Row{
-		"another corpus":    {CorpusSHA: "x", Model: "sonnet", Case: "b", Kind: ae1.Benign, Attempt: 1, Mode: "live"},
+		"another corpus":    {CorpusSHA: "x", Model: "sonnet", Case: "b", Kind: ae1.Benign, Attempt: 3, Mode: "live"}, // only the corpus differs
 		"not in the corpus": r("sonnet", "nope", ae1.Benign, 1, "live"),
 		"past the reps":     r("sonnet", "i", ae1.Injection, 4, "live"),
 		"a model's crafted": r("sonnet", "k", ae1.Crafted, 1, "live"),
