@@ -150,7 +150,7 @@ M1 的規則照舊：Deny 之後 task 就結束，之後的請購是 `TASK_NOT_A
 
 歷史：第一版（728debb，語料 `859b50f1…`）的同樣兩輪在 `fake-obey-728debb/`、`fake-mix-728debb/`；其報告沒有 FAKE 說明，門檻印 PASS／FAIL（review should-fix 8），已由上面取代。
 
-## 11 第一個真實模型批次（申請草案，等 Aaron 核准）
+## 11 第一個真實模型批次（trial-1；Aaron 10/16：「我核准 trial-1」）
 
 - **目的**：試跑，量測每次執行的用量（CLI 自報的 token 數）與時間，作為估算全量 216 次的依據；不判門檻（計畫一律從語料推算，只跑 5 次時報告四項門檻都是 INCONCLUSIVE「5 of 36 planned runs recorded」）。
 - **模型**：`sonnet`（D3），`effort` 固定 `low`。
