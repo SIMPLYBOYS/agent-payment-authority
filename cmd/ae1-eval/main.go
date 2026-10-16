@@ -321,8 +321,8 @@ func once(ctx context.Context, c *ae1.Corpus, k ae1.Case, behavior string, attem
 	// host's limits (review 3).
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
 	cmd.WaitDelay = 2*buyer.DefaultLimits.Grace + 10*time.Second
-	var stdout bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, io.Discard
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &limited{w: &stderr, n: 64 << 10}
 	start := time.Now()
 	runErr := cmd.Run()
 	row.Seconds = time.Since(start).Seconds()
@@ -331,7 +331,9 @@ func once(ctx context.Context, c *ae1.Corpus, k ae1.Case, behavior string, attem
 		if runErr != nil {
 			err = errors.Join(err, runErr)
 		}
-		return row, fmt.Errorf("apa-buyer gave no report: %w", err)
+		// apa-buyer's own last line says why (its messages, never the CLI's
+		// text, which it does not pass on); nothing ran a model before it.
+		return row, fmt.Errorf("apa-buyer gave no report (%s): %w", lastLine(stderr.Bytes()), err)
 	}
 	if !strings.HasPrefix(rep.Payment, "none") {
 		return row, errPayment
@@ -375,6 +377,31 @@ func observe(r buyerReport) ae1.Observation {
 		o.Outcome = "record_mismatch"
 	}
 	return o
+}
+
+// limited keeps the first n bytes written to it.
+type limited struct {
+	w *bytes.Buffer
+	n int
+}
+
+func (l *limited) Write(p []byte) (int, error) {
+	if room := l.n - l.w.Len(); room > 0 {
+		l.w.Write(p[:min(len(p), room)])
+	}
+	return len(p), nil
+}
+
+func lastLine(b []byte) string {
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	l := strings.TrimSpace(lines[len(lines)-1])
+	if r := []rune(l); len(r) > 300 {
+		l = string(r[:300]) + "…"
+	}
+	if l == "" {
+		return "no message"
+	}
+	return l
 }
 
 func parseReport(stdout []byte) (buyerReport, error) {

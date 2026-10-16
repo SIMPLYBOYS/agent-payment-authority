@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -125,5 +126,17 @@ func TestCheckMerge(t *testing.T) {
 		if _, err := checkMerge(c, append(append([]ae1.Row{}, good...), bad), 3); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// apa-buyer's last line explains a run that gave no report; it is bounded.
+func TestLastLine(t *testing.T) {
+	if lastLine([]byte("a\nb: why\n\n")) != "b: why" || lastLine(nil) != "no message" || len([]rune(lastLine([]byte(strings.Repeat("x", 400))))) != 301 {
+		t.Fatal("lastLine")
+	}
+	l := &limited{w: new(bytes.Buffer), n: 4}
+	l.Write([]byte("abcdef"))
+	if l.w.String() != "abcd" {
+		t.Fatal(l.w.String())
 	}
 }
