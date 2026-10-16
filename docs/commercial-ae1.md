@@ -201,3 +201,22 @@ M1 的規則照舊：Deny 之後 task 就結束，之後的請購是 `TASK_NOT_A
   - 單批 `run` 的計畫原本取自 `--cases`／`--max-runs`，子集（例如試跑 5 次）也會判 PASS／FAIL；改為一律從語料推算（`planRuns`），子集是 INCONCLUSIVE（以 fake 跑試跑那組參數實測：計畫 50、記錄 5，四項 INCONCLUSIVE）；
   - 中斷或分批之後無法補齊（attempt 一律從 1 起，合併判為重複）；加 `--first-rep`，補跑程序寫在 §11。
   - note 已處理：只有 `request_purchase` 的 `INVALID_ARGUMENTS` 算嘗試（`Refused` 改記 `工具:代碼`）；合併報告的模式以 live 為準；比較表印出備註；付款檢查與「不存在的工具」量不到寫進 §12；haiku 的模型名稱要先跑 1 次確認（§11）。其餘 note（`accepted` 為可接受商品聯集、SIGHUP 未處理）記為已知。
+
+## 14 CLI 版本改為 2.1.301（10/17）
+
+**經過**：trial-1 兩次都在啟動模型前停下（`live-trial-1`、`live-trial-1b` 都沒有任何執行紀錄，沒有用到額度）：
+- 第一次：ae1-eval 把 apa-buyer 的錯誤訊息丟掉，只看到「no report」。已改成帶出 apa-buyer 自己的最後一行（ba348cc）；
+- 第二次：版本檢查 `not_installed`。自動更新已經刪除 `~/.local/share/claude/versions/2.1.293`，只剩 2.1.299–2.1.301。Claude Code 執行前只核對了 `var/present.conf`，沒有確認檔案還在，是這次的疏失（已寫進記憶）。
+
+**決定**：先建議重裝 2.1.293；Aaron 改為「我想直接從 2.1.301 重新開始」。
+
+**程式**（7794e04）：
+- `buyer.ApprovedCLIVersion` 改為 `2.1.301 (Claude Code)`：之後所有新的 live 執行都只接受它；
+- 證據檢查接受 `EvidenceCLIVersions`（2.1.293、2.1.301）：M1 的 live 證據包是 2.1.293 時做的，仍可獨立驗證；執行紀錄的版本必須等於證據包自己記的版本；從未核准的版本（例如 2.1.300）不通過；
+- 測試裡代表核准版本的假 CLI 改為 2.1.301；版本順序測試多擋 2.1.293、2.1.300、2.1.302。
+
+**重新認證（Aaron 執行，模型額度 0）**：
+1. 把 2.1.301 複製到自動更新不會動的位置，`var/present.conf` 改指向它（`var/` 不進版控）；
+2. init 探測 C0（`apa-buyer probe-init`）：只啟動 CLI、讀它的啟動回報，不送任何訊息；輸出全部是白名單欄位；
+3. Claude Code 依 `docs/cli-poc.md` 的基準核對：三個 apa 工具、沒有其他工具；MCP 只有 apa 且 connected；`permission_mode` 為 `dontAsk`；`cli_version` 為 `approved`；`auth_source` 為 `none`；agents、skills 為 0；plugins 只有開發展示例外允許的兩個。不一致就停，不放寬任何清單；
+4. 核對通過才重跑 trial-1（`--out artifacts/ae1/live-trial-1c`）。
