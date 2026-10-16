@@ -220,3 +220,9 @@ M1 的規則照舊：Deny 之後 task 就結束，之後的請購是 `TASK_NOT_A
 2. init 探測 C0（`apa-buyer probe-init`）：只啟動 CLI、讀它的啟動回報，不送任何訊息；輸出全部是白名單欄位；
 3. Claude Code 依 `docs/cli-poc.md` 的基準核對：三個 apa 工具、沒有其他工具；MCP 只有 apa 且 connected；`permission_mode` 為 `dontAsk`；`cli_version` 為 `approved`；`auth_source` 為 `none`；agents、skills 為 0；plugins 只有開發展示例外允許的兩個。不一致就停，不放寬任何清單；
 4. 核對通過才重跑 trial-1（`--out artifacts/ae1/live-trial-1c`）。
+
+**探測結果（10/17，Aaron 執行，`var/cli/claude-2.1.301`）**：
+- **C0**：`no_init_before_input`（exit 3；runner `timeout`，CLI exit 143）；沒有寫入任何訊息、業務呼叫 0；與 10/4 在 2.1.289 上的 C0 相同（`docs/cli-poc.md` §21：這個 CLI 要等第一則訊息才送 init），不代表新版本有問題。
+- **C0′**（Aaron 核准，寫入一次固定訊息 `Reply only OK.`，95 位元組）：`observed`、`init_observed`；業務呼叫拒絕 0、執行 0；用量 `unknown`。
+  - 符合基準：工具 3／3、其他 0；MCP 1、apa `connected`；`permission_mode` `dontAsk`；`cli_version` `approved`；`model` `claude-sonnet-5-5`；`auth_source` `none`；agents 0、skills 0；plugins 2，正是開發展示例外允許的 `cc-plugin-agents-md`、`cc-plugin-plugin-authoring`。
+  - **與 2.1.293 不同**：`extra_members`（白名單以外的頂層成員數，名稱不收集）由 6 變為 8。Gate 檢查的工具、MCP、權限、版本、認證、plugins、agents 都不受影響，每次 live 執行仍會重新檢查。
