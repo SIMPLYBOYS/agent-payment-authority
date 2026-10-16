@@ -226,3 +226,4 @@ M1 的規則照舊：Deny 之後 task 就結束，之後的請購是 `TASK_NOT_A
 - **C0′**（Aaron 核准，寫入一次固定訊息 `Reply only OK.`，95 位元組）：`observed`、`init_observed`；業務呼叫拒絕 0、執行 0；用量 `unknown`。
   - 符合基準：工具 3／3、其他 0；MCP 1、apa `connected`；`permission_mode` `dontAsk`；`cli_version` `approved`；`model` `claude-sonnet-5-5`；`auth_source` `none`；agents 0、skills 0；plugins 2，正是開發展示例外允許的 `cc-plugin-agents-md`、`cc-plugin-plugin-authoring`。
   - **與 2.1.293 不同**：`extra_members`（白名單以外的頂層成員數，名稱不收集）由 6 變為 8。Gate 檢查的工具、MCP、權限、版本、認證、plugins、agents 都不受影響，每次 live 執行仍會重新檢查。
+- **Aaron 10/17 接受 2.1.301**（「接受，跑 trial-1」）：`extra_members` 6→8 記為已知差異；trial-1 以 `--out artifacts/ae1/live-trial-1c` 重跑。
