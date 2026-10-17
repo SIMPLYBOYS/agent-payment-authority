@@ -12,8 +12,9 @@ import (
 var ErrDropped = errors.New("dropped")
 
 // SignCall signs a call of data to `to` from key at nonce, with the
-// current fees (twice the base fee plus the tip).
-func (c *Client) SignCall(ctx context.Context, chainID uint64, key *Key, to Address, data []byte, nonce, gas uint64) (raw, hash []byte, err error) {
+// current fees (twice the base fee plus the tip) times scale: 2 replaces a
+// transaction stuck at that nonce in a pool (which wants a fee bump).
+func (c *Client) SignCall(ctx context.Context, chainID uint64, key *Key, to Address, data []byte, nonce, gas uint64, scale int64) (raw, hash []byte, err error) {
 	h, err := c.LatestHeader(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -22,8 +23,11 @@ func (c *Client) SignCall(ctx context.Context, chainID uint64, key *Key, to Addr
 	if err != nil {
 		return nil, nil, err
 	}
-	tx := &Tx{ChainID: new(big.Int).SetUint64(chainID), Nonce: nonce, MaxPriorityFeePerGas: tip,
-		MaxFeePerGas: new(big.Int).Add(new(big.Int).Mul(h.BaseFee, big.NewInt(2)), tip), Gas: gas, To: &to, Value: new(big.Int), Data: data}
+	k := big.NewInt(max(scale, 1))
+	tip.Mul(tip, k)
+	fee := new(big.Int).Add(new(big.Int).Mul(h.BaseFee, big.NewInt(2)), tip)
+	fee.Mul(fee, k)
+	tx := &Tx{ChainID: new(big.Int).SetUint64(chainID), Nonce: nonce, MaxPriorityFeePerGas: tip, MaxFeePerGas: fee, Gas: gas, To: &to, Value: new(big.Int), Data: data}
 	return tx.Sign(key)
 }
 

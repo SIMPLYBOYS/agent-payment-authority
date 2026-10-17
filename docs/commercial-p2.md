@@ -281,18 +281,22 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。全部�
 - **`merchant.Settler`**：自己的 SQLite（0600），以（payer、授權 nonce）為鍵。
   - **驗證**（任何一項不過：402、`PAYMENT-RESPONSE` 的 `success:false` 附 `errorReason`，什麼都不送、不交付）：
     - 收款人、金額必須是報價的；
-    - `validAfter < 現在 < validBefore`；
-    - EIP-712 簽章還原出的位址必須是 `from`（重用 Signer 的 `DomainSeparator`、`TransferHash`、`TypedDigest`）；
+    - `validAfter < 現在`，`現在 + 5 秒 < validBefore ≤ 現在 + 報價的 maxTimeoutSeconds + 5 秒`（快到期的不送，以免送出就 revert；太長的不收，以免一筆上不了鏈的轉帳長時間占住 gas nonce）；
+    - EIP-712 簽章還原出的位址必須是 `from`（重用 Signer 的 `DomainSeparator`、`TransferHash`、`TypedDigest`）；只收 low S、v 為 27 或 28（decred 的 `RecoverCompact` 也接受 high S，實測確認，所以要自己擋）；
     - 鏈上 `authorizationState` 未用過；
     - `balanceOf` 足夠；
     - 以 `eth_call` 模擬 `transferWithAuthorization`。
   - **結算**：已簽的交易**先寫入再送出**；送新交易前先重送並逐筆判定所有未完成的結算；pending nonce 低於「未完成交易的最高 nonce＋1」時不簽，回 `settlement_busy`（202，什麼都不寫）。
+    - 一筆已因期限失敗、但仍卡在 pool 裡的轉帳（它的 nonce 還沒被用掉），下一筆轉帳會改用它的 nonce、手續費加倍，把它取代掉，不會讓之後的轉帳一直排在它後面。
+    - 節點連線錯誤回 202（`settlement_node_unavailable`，什麼都不寫），不當成付款人的錯；只有合約真的 revert 才算驗證失敗。
+    - 鎖只涵蓋「判定並寫入轉帳」；等待確認時不持鎖（狀態更新本身有 `state = 'sent'` 的條件保護）。
   - **交付把關**：只有轉帳達到確認數，且收據裡有代幣本身發出、金額正確、由 payer 轉給 `payTo` 的 `Transfer`，才回 200，附內容與 `PAYMENT-RESPONSE`（`success`、`transaction`、`network`、`payer`）。
   - **結果不明**（等不到確認，每次最多 20 秒）：回 **202**（`settlement_pending`，`Retry-After: 2`），不附內容、不附 `PAYMENT-RESPONSE`。同一個 `PAYMENT-SIGNATURE` 再送一次只會重送同一筆、再查一次，**絕不送第二筆**。x402 的 HTTP 規格（coinbase/x402 `aeef1bf` 的 transports-v2/http.md）沒有定義「結算中」，202 是本專案自己的約定。
-  - **重播**：同一份授權（同一 payer、nonce）用在別的資源或別的 payload 上，回 402 `invalid_exact_evm_payload_authorization_nonce_used`；同一份 payload 再送一次，回同一筆結算。
+  - **重播**：同一份授權（同一 payer、nonce）用在別的資源，或簽章不同時，回 402 `invalid_exact_evm_payload_authorization_nonce_used`。同一份授權再送一次，即使換了序列化方式（欄位順序、空白、位址大小寫），回的也是同一筆結算：比對的是正規化後的轉帳呼叫（涵蓋所有簽署欄位與簽章），不是原始位元組。
+  - **被搶先送出**：驗證之後，若付款人或第三人先把同一份授權送上鏈，商店的轉帳會 revert，回 402 `settlement_failed`，雖然 `payTo` 已經收到款項。這筆款項要交給對帳（Reconciler）處理。商店這邊失敗的那一列會擋住這份授權，但它在鏈上到 `validBefore` 之前仍然可以被別人使用。
+  - 200 與 202 都帶 `Cache-Control: no-store`。
   - `errorReason` 的值除了 `insufficient_funds`（規格範例）之外都是本專案自訂的，名稱比照 x402 的寫法。
   - 已知、刻意：
-    - 不檢查 `validBefore − 現在` 是否不超過報價的 `maxTimeoutSeconds`（期限由 Signer 的 `max_window_seconds` 管）；
     - 模擬是第二道檢查，前面各項都會先擋下，所以沒有單獨的測試；
     - 「轉帳成功卻沒有對應的 `Transfer`」在 TestUSDC 上不會發生，也沒有測試涵蓋；
     - ponytail：一把鎖管所有結算與 gas nonce。
@@ -307,4 +311,32 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。全部�
   - 商店新增 10 項；
   - `local-mutations.py` 的測試欄位可以寫「套件:測試」，讓 `internal/eth` 的突變由 budget 或 merchant 的測試判定；
   - P2 全部 58 項（eth 4、D1 15、累計上限 5、預算 relayer 24、商店 10）重跑，基準全部通過，58／58 KILLED。
+- review 後新增的測試：
+  - 驗證失敗表新增：被改造的 high-S 簽章、期限長於報價、快到期；
+  - `TestSettleAndDeliver` 加上「同一份授權換一種序列化」；
+  - `TestRefusedThenRetried`：餘額不足被拒之後什麼都沒留下，補足餘額後同一個 `PAYMENT-SIGNATURE` 就能付款；
+  - `TestConcurrentSamePayment`：4 個相同請求同時送出，只有一筆轉帳，全部交付；
+  - `TestReplayWhileUnmined`：轉帳還沒上鏈時，同一份授權用在別的資源，由商店自己的紀錄擋下；
+  - `TestFrontRunFails`：被搶先送出 → `settlement_failed`，不交付，`payTo` 只收到一次；
+  - `TestStuckTransferIsReplaced`：用很小的區塊 gas 上限讓轉帳留在 pool 裡，過了期限後判定為失敗；下一筆付款沿用它的 nonce（gas pending nonce 不變）、把它取代，並且交付。
+  - 用「拉高 base fee」讓交易卡住的做法在 anvil 上行不通：anvil 會把付不起的交易從 pool 移除（實測確認），所以改用 gas 上限。
+- **突變**：review 後商店共 15 項，P2 全部 63 項，基準全部通過，全部 KILLED。過程中有兩項起初沒被抓到，都已修正：
+  - high-S：測試裡的竄改把 v 從 27 變成 26，而不是 28；
+  - 取代卡住的 nonce：用 base fee 的做法根本沒有讓交易留在 pool 裡。
 - **本片 §7 必驗反例中，商店這一段證明的**：verify 失敗不 settle；EIP-3009 重播；結果不明不被當成失敗、不重付；未確認就不交付。其餘反例要等 Host 端與 Reconciler 完成後才能證明。
+
+### 9.11 商店結算的 review（6cc86a2）與修正
+
+Claude Code 獨立 context 的 code-reviewer，結論 APPROVE with should-fix，沒有 Critical。審查者確認 §9.10 的各項保證在本機都成立。修正：
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Important | `validBefore` 沒有上限：一筆上不了鏈的轉帳可能長時間占住 gas nonce；超過 2^63 的值寫不進 DB，付款永遠卡在 202 | 不得超過 `maxTimeoutSeconds`＋5 秒；也不收 5 秒內就到期的授權 |
+| Important | 因期限失敗、但仍在 pool 裡的轉帳一直占著它的 nonce，之後的轉帳都排在它後面 | 下一筆轉帳沿用它的 nonce、手續費加倍，把它取代掉；`TestStuckTransferIsReplaced` |
+| Important | 以原始 payload 的位元組判斷重播：同一份授權只是換了序列化方式，就被當成重播，付了錢卻拿不到內容 | 改比對正規化後的轉帳呼叫 |
+| 建議 | high-S 簽章 | 拒絕 |
+| 建議 | 節點連線錯誤被說成付款人的錯 | 回 202，什麼都不寫；只有 revert 才算失敗 |
+| 建議 | 等待確認時持著全域鎖 | 等待時放開鎖 |
+| 建議 | 付費內容可能被快取 | `Cache-Control: no-store` |
+| 建議 | 被搶先送出的情況沒有寫 | 寫進 §9.10，交給對帳 |
+| 建議 | 缺測試：revert、因期限失敗、驗證失敗後重試、同時送出、轉帳未上鏈時的重播 | 補上前述 6 個測試；`settlement_busy`（需要讓重送被所有 pool 拒收）沒有測試 |

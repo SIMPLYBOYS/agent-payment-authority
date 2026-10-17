@@ -323,6 +323,7 @@ func (m *Merchant) serveResource(w http.ResponseWriter, r *http.Request) {
 // false when it failed; 202 while its transfer is unconfirmed (the same
 // PAYMENT-SIGNATURE again asks again: never a second transfer).
 func (m *Merchant) settled(w http.ResponseWriter, o offer, out Outcome) {
+	w.Header().Set("Cache-Control", "no-store") // paid content, or a state that changes
 	switch out.Kind {
 	case "delivered":
 		h, err := x402.Encode(out.Response)

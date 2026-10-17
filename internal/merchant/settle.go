@@ -145,20 +145,38 @@ type verified struct {
 // only then, the content due only once it is confirmed. The same payload
 // again answers the same settlement; one authorization pays once.
 func (s *Settler) Pay(ctx context.Context, o offer, payload json.RawMessage) Outcome {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	network := "eip155:" + strconv.FormatUint(s.cfg.ChainID, 10)
 	v, reason := parse(payload)
 	if reason != "" {
 		return Outcome{Kind: "invalid", Reason: reason}
 	}
 	resp := SettlementResponse{Network: network, Payer: v.payer.Hex()}
-	sum := sha256.Sum256(payload)
+	data, err := transferCall(v)
+	if err != nil {
+		return Outcome{Kind: "invalid", Reason: "invalid_payload"}
+	}
+	// The same authorization however it is serialized: every signed field
+	// and the signature, as the transfer will carry them.
+	sum := sha256.Sum256(data)
 	nonceHex := "0x" + hex.EncodeToString(v.nonce[:])
+	// The lock covers deciding and writing a transfer; waiting for its
+	// confirmations does not hold it (decide's writes are guarded by state).
+	s.mu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			s.mu.Unlock()
+		}
+	}()
+	unlockThen := func(f func() Outcome) Outcome {
+		s.mu.Unlock()
+		locked = false
+		return f()
+	}
 	var have struct {
 		payloadHash, url, state, hash string
 	}
-	err := s.db.QueryRowContext(ctx, `SELECT payload_hash, resource_url, state, tx_hash FROM settlements WHERE payer = ? AND auth_nonce = ?`,
+	err = s.db.QueryRowContext(ctx, `SELECT payload_hash, resource_url, state, tx_hash FROM settlements WHERE payer = ? AND auth_nonce = ?`,
 		v.payer.Hex(), nonceHex).Scan(&have.payloadHash, &have.url, &have.state, &have.hash)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -169,15 +187,13 @@ func (s *Settler) Pay(ctx context.Context, o offer, payload json.RawMessage) Out
 		resp.ErrorReason = "invalid_exact_evm_payload_authorization_nonce_used"
 		return Outcome{Kind: "failed", Reason: resp.ErrorReason, Response: resp}
 	default:
-		return s.resume(ctx, v.payer.Hex(), nonceHex, resp)
+		return unlockThen(func() Outcome { return s.resume(ctx, v.payer.Hex(), nonceHex, resp) })
 	}
-	if r := s.verify(ctx, o, v); r != "" {
+	if r := s.verify(ctx, o, v); r == "settlement_node_unavailable" {
+		return Outcome{Kind: "pending", Reason: r, Response: resp} // the node, not the payment: nothing written
+	} else if r != "" {
 		resp.ErrorReason = r
 		return Outcome{Kind: "failed", Reason: r, Response: resp}
-	}
-	data, err := transferCall(v)
-	if err != nil {
-		return Outcome{Kind: "invalid", Reason: "invalid_payload"}
 	}
 	if err := s.settleOpen(ctx); err != nil {
 		return Outcome{Kind: "pending", Reason: "settlement_store_unavailable", Response: resp}
@@ -195,7 +211,7 @@ func (s *Settler) Pay(ctx context.Context, o offer, payload json.RawMessage) Out
 	if err := at("after-write"); err != nil {
 		return Outcome{Kind: "pending", Reason: "settlement_pending", Response: resp}
 	}
-	return s.resume(ctx, v.payer.Hex(), nonceHex, resp)
+	return unlockThen(func() Outcome { return s.resume(ctx, v.payer.Hex(), nonceHex, resp) })
 }
 
 // parse reads the exact-EVM payload's form; nothing is judged yet.
@@ -249,7 +265,10 @@ func (s *Settler) verify(ctx context.Context, o offer, v verified) string {
 		return "invalid_exact_evm_payload_authorization_value"
 	case now <= v.validAfter:
 		return "invalid_exact_evm_payload_authorization_valid_after"
-	case now >= v.before:
+	case now+settleMargin >= v.before || v.before > now+o.Requirement.MaxTimeoutSeconds+clockSkew:
+		// Too close to expiry to be mined in time, or longer than the offer
+		// allows: a transfer that could sit unmined for long holds the
+		// shop's gas nonce that long.
 		return "invalid_exact_evm_payload_authorization_valid_before"
 	}
 	dom := signer.Domain{Name: s.cfg.TokenName, Version: s.cfg.TokenVersion, ChainID: strconv.FormatUint(s.cfg.ChainID, 10), VerifyingContract: s.cfg.Token.Hex()}
@@ -257,8 +276,8 @@ func (s *Settler) verify(ctx context.Context, o offer, v verified) string {
 		Nonce: "0x" + hex.EncodeToString(v.nonce[:])}
 	sep, err1 := signer.DomainSeparator(dom)
 	th, err2 := signer.TransferHash(msg)
-	if errors.Join(err1, err2) != nil || v.sig[64] != 27 && v.sig[64] != 28 {
-		return "invalid_exact_evm_payload_signature"
+	if errors.Join(err1, err2) != nil || v.sig[64] != 27 && v.sig[64] != 28 || new(big.Int).SetBytes(v.sig[32:64]).Cmp(halfN) > 0 {
+		return "invalid_exact_evm_payload_signature" // low S only: one signature per authorization
 	}
 	pub, _, err := ecdsa.RecoverCompact(append([]byte{v.sig[64]}, v.sig[:64]...), signer.TypedDigest(sep, th))
 	if err != nil || signer.Address(pub) != v.payer.Hex() {
@@ -283,10 +302,22 @@ func (s *Settler) verify(ctx context.Context, o offer, v verified) string {
 		return "invalid_payload"
 	}
 	if _, err := s.rpc.Call(ctx, eth.Msg{From: s.gas.Addr, To: s.cfg.Token, Data: data}); err != nil {
-		return "invalid_transaction_state" // the token itself refuses it
+		var re *eth.RPCError
+		if errors.As(err, &re) {
+			return "invalid_transaction_state" // the token itself refuses it
+		}
+		return "settlement_node_unavailable"
 	}
 	return ""
 }
+
+const (
+	settleMargin = 5 // seconds an authorization must still have to be sent
+	clockSkew    = 5 // seconds past maxTimeoutSeconds tolerated
+)
+
+// halfN is secp256k1's group order / 2: a higher S is the malleated twin.
+var halfN, _ = new(big.Int).SetString("7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0", 16)
 
 func mustCall(sig string, args ...any) []byte {
 	b, err := eth.Call(sig, args...)
@@ -319,14 +350,31 @@ func (s *Settler) prepare(ctx context.Context, data []byte) (raw, hash []byte, n
 	if nonce, err = s.rpc.PendingNonce(ctx, s.gas.Addr); err != nil {
 		return nil, nil, 0, "settlement_node_unavailable"
 	}
-	var floor sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `SELECT max(tx_nonce) + 1 FROM settlements WHERE state = 'sent'`).Scan(&floor); err != nil {
+	latest, err := s.rpc.BlockNumber(ctx)
+	if err != nil {
+		return nil, nil, 0, "settlement_node_unavailable"
+	}
+	mined, err := s.rpc.NonceAt(ctx, s.gas.Addr, latest)
+	if err != nil {
+		return nil, nil, 0, "settlement_node_unavailable"
+	}
+	var floor, stale sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT (SELECT max(tx_nonce) + 1 FROM settlements WHERE state = 'sent'),
+		(SELECT min(tx_nonce) FROM settlements f WHERE state = 'failed' AND tx_nonce >= ?
+			AND NOT EXISTS (SELECT 1 FROM settlements o WHERE o.state <> 'failed' AND o.tx_nonce = f.tx_nonce))`, mined).Scan(&floor, &stale); err != nil {
 		return nil, nil, 0, "settlement_store_unavailable"
 	}
-	if floor.Valid && nonce < uint64(floor.Int64) {
+	scale := int64(1)
+	switch {
+	case stale.Valid && uint64(stale.Int64) < nonce:
+		// A failed transfer (past its validBefore) still holds this nonce in
+		// a pool, unmined: this one replaces it there, with doubled fees, so
+		// it never leaves later transfers waiting behind it.
+		nonce, scale = uint64(stale.Int64), 2
+	case floor.Valid && nonce < uint64(floor.Int64):
 		return nil, nil, 0, "settlement_busy"
 	}
-	raw, hash, err = s.rpc.SignCall(ctx, s.cfg.ChainID, s.gas, s.cfg.Token, data, nonce, gas+gas/5)
+	raw, hash, err = s.rpc.SignCall(ctx, s.cfg.ChainID, s.gas, s.cfg.Token, data, nonce, gas+gas/5, scale)
 	if err != nil {
 		return nil, nil, 0, "settlement_node_unavailable"
 	}

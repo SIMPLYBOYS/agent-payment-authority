@@ -866,6 +866,16 @@ MUTATIONS = [
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
     # P2 merchant settlement (docs/commercial-p2.md 9.10).
+    ('P2 shop: a re-serialized payment reads as a replay', 'internal/merchant/settle.go',
+     'sum := sha256.Sum256(data)', 'sum := sha256.Sum256(payload)', 'TestSettleAndDeliver'),
+    ('P2 shop: validBefore past the offer is accepted', 'internal/merchant/settle.go',
+     '|| v.before > now+o.Requirement.MaxTimeoutSeconds+clockSkew:', '|| false && v.before > now+o.Requirement.MaxTimeoutSeconds+clockSkew:', 'TestVerificationFailuresSendNothing'),
+    ('P2 shop: an authorization about to expire is sent', 'internal/merchant/settle.go',
+     'case now+settleMargin >= v.before ||', 'case now >= v.before ||', 'TestVerificationFailuresSendNothing'),
+    ('P2 shop: a high-S signature is taken', 'internal/merchant/settle.go',
+     '|| new(big.Int).SetBytes(v.sig[32:64]).Cmp(halfN) > 0 {', '|| false && new(big.Int).SetBytes(v.sig[32:64]).Cmp(halfN) > 0 {', 'TestVerificationFailuresSendNothing'),
+    ("P2 shop: a stuck transfer's nonce is not replaced", 'internal/merchant/settle.go',
+     'case stale.Valid && uint64(stale.Int64) < nonce:', 'case false && stale.Valid && uint64(stale.Int64) < nonce:', 'TestStuckTransferIsReplaced'),
     ('P2 shop: a payment to another recipient settles', 'internal/merchant/settle.go',
      'case v.to != payTo:', 'case false && v.to != payTo:', 'TestVerificationFailuresSendNothing'),
     ('P2 shop: a payment of another amount settles', 'internal/merchant/settle.go',
@@ -877,7 +887,7 @@ LOCAL_MUTATIONS = [
     ('P2 shop: the balance is not checked', 'internal/merchant/settle.go',
      'b.Cmp(new(big.Int).SetUint64(v.value)) < 0 {', 'b.Cmp(new(big.Int).SetUint64(v.value)) < -1 {', 'TestVerificationFailuresSendNothing'),
     ('P2 shop: an expired authorization is sent', 'internal/merchant/settle.go',
-     'case now >= v.before:', 'case false && now >= v.before:', 'TestVerificationFailuresSendNothing'),
+     'case now+settleMargin >= v.before || v.before >', 'case false && now+settleMargin >= v.before || false && v.before >', 'TestVerificationFailuresSendNothing'),
     ('P2 shop: an authorization is replayed for another resource', 'internal/merchant/settle.go',
      'case have.payloadHash != hex.EncodeToString(sum[:]) || have.url != o.url:', 'case false && (have.payloadHash != hex.EncodeToString(sum[:]) || have.url != o.url):', 'TestReplayElsewhereRefused'),
     ('P2 shop: an unconfirmed transfer is delivered', 'internal/eth/send.go',

@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -159,6 +161,19 @@ func TestSettleAndDeliver(t *testing.T) {
 	if rec2.Code != 200 || sr2 != sr || s.gasNonce() != before+1 || s.balance(payTo) != 500000 {
 		t.Fatalf("again: %d %+v, gas nonce %d -> %d", rec2.Code, sr2, before, s.gasNonce())
 	}
+	// The same authorization serialized otherwise (indented, upper-case
+	// hex): the same settlement, not a replay.
+	var p x402.PaymentPayload
+	x402.Decode(h, &p)
+	var e map[string]any
+	json.Unmarshal(p.Payload, &e)
+	au := e["authorization"].(map[string]any)
+	au["from"] = "0x" + strings.ToUpper(strings.TrimPrefix(au["from"].(string), "0x"))
+	p.Payload, _ = json.MarshalIndent(e, "", "  ")
+	h3, _ := x402.Encode(p)
+	if rec3, sr3 := s.get("kr-market", h3); rec3.Code != 200 || sr3.Transaction != sr.Transaction {
+		t.Fatalf("re-serialized: %d %+v", rec3.Code, sr3)
+	}
 }
 
 // A payment that fails verification is answered 402 with success false
@@ -189,6 +204,14 @@ func TestVerificationFailuresSendNothing(t *testing.T) {
 		"not yet valid":        {func() auth { a := s.auth(500000); a.after = now + 100; return a }(), nil, "invalid_exact_evm_payload_authorization_valid_after"},
 		"no funds":             {func() auth { a := s.auth(500000); a.key, a.from = poor, poor.Addr; return a }(), nil, "insufficient_funds"},
 		"a tampered signature": {s.auth(500000), func(b []byte) { b[10] ^= 1 }, "invalid_exact_evm_payload_signature"},
+		"a malleated (high S) signature": {s.auth(500000), func(b []byte) {
+			n, _ := new(big.Int).SetString("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141", 16)
+			hi := new(big.Int).Sub(n, new(big.Int).SetBytes(b[32:64]))
+			hi.FillBytes(b[32:64])
+			b[64] = 55 - b[64] // 27 <-> 28: the same key's other signature
+		}, "invalid_exact_evm_payload_signature"},
+		"longer than the offer allows": {func() auth { a := s.auth(500000); a.till = now + 600; return a }(), nil, "invalid_exact_evm_payload_authorization_valid_before"},
+		"about to expire":              {func() auth { a := s.auth(500000); a.till = now + 2; return a }(), nil, "invalid_exact_evm_payload_authorization_valid_before"},
 	} {
 		h := s.header("kr-market", cs.a, cs.tamper)
 		before := s.gasNonce()
@@ -289,5 +312,144 @@ func TestSettleResumesAfterACrash(t *testing.T) {
 	rec, sr := s.get("kr-market", h)
 	if rec.Code != 200 || !sr.Success || s.gasNonce() != before+1 {
 		t.Fatalf("after: %d %+v", rec.Code, sr)
+	}
+}
+
+// A payment refused for its funds leaves nothing behind: the same
+// PAYMENT-SIGNATURE, once the payer is funded, pays.
+func TestRefusedThenRetried(t *testing.T) {
+	s := newChainShop(t, 1)
+	poor, _ := eth.NewKey(eth.Keccak256([]byte("merchant test poor payer")))
+	a := s.auth(500000)
+	a.key, a.from = poor, poor.Addr
+	h := s.header("kr-market", a, nil)
+	if rec, sr := s.get("kr-market", h); rec.Code != 402 || sr.ErrorReason != "insufficient_funds" {
+		t.Fatalf("unfunded: %d %+v", rec.Code, sr)
+	}
+	data, _ := eth.Call("mint(address,uint256)", poor.Addr, uint64(500000))
+	ethtest.Mine(t, s.rpc, ethtest.Key(t, 0), &eth.Tx{To: &s.usdc, Gas: 200_000, Data: data})
+	if rec, sr := s.get("kr-market", h); rec.Code != 200 || !sr.Success {
+		t.Fatalf("funded: %d %+v", rec.Code, sr)
+	}
+}
+
+// Two identical requests at once: one transfer, both delivered.
+func TestConcurrentSamePayment(t *testing.T) {
+	s := newChainShop(t, 1)
+	h := s.header("kr-market", s.auth(500000), nil)
+	before := s.gasNonce()
+	var wg sync.WaitGroup
+	out := make([]SettlementResponse, 4)
+	codes := make([]int, 4)
+	for i := range out {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rec, sr := s.get("kr-market", h)
+			codes[i], out[i] = rec.Code, sr
+		}()
+	}
+	wg.Wait()
+	for i := range out {
+		if codes[i] != 200 || out[i] != out[0] {
+			t.Fatalf("%d: %d %+v", i, codes[i], out[i])
+		}
+	}
+	if s.gasNonce() != before+1 || s.balance(payTo) != 500000 {
+		t.Fatalf("gas nonce %d -> %d, payTo %d", before, s.gasNonce(), s.balance(payTo))
+	}
+}
+
+// While its transfer is unmined, the same authorization for another
+// resource is refused by the shop's own record (the chain has not used
+// the nonce yet).
+func TestReplayWhileUnmined(t *testing.T) {
+	s := newChainShop(t, 1)
+	s.st.wait = time.Second
+	ethtest.RPC(t, s.rpc, "evm_setAutomine", false)
+	h := s.header("kr-market", s.auth(500000), nil)
+	if rec, _ := s.get("kr-market", h); rec.Code != 202 {
+		t.Fatalf("unmined: %d", rec.Code)
+	}
+	var p x402.PaymentPayload
+	x402.Decode(h, &p)
+	var other offer
+	for _, o := range s.m.offers {
+		if o.ID == "kr-market" {
+			other = o
+		}
+	}
+	other.url += "&elsewhere=1"
+	if out := s.st.Pay(context.Background(), other, p.Payload); out.Kind != "failed" || out.Reason != "invalid_exact_evm_payload_authorization_nonce_used" {
+		t.Fatalf("elsewhere: %+v", out)
+	}
+	ethtest.RPC(t, s.rpc, "evm_setAutomine", true)
+	ethtest.RPC(t, s.rpc, "evm_mine")
+}
+
+// Front-run: the same authorization submitted on chain by someone else
+// first. The shop's transfer reverts: settlement_failed, nothing delivered,
+// and payTo was paid once.
+func TestFrontRunFails(t *testing.T) {
+	s := newChainShop(t, 1)
+	s.st.wait = time.Second
+	ethtest.RPC(t, s.rpc, "evm_setAutomine", false)
+	h := s.header("kr-market", s.auth(500000), nil)
+	if rec, _ := s.get("kr-market", h); rec.Code != 202 {
+		t.Fatalf("unmined: %d", rec.Code)
+	}
+	var p x402.PaymentPayload
+	x402.Decode(h, &p)
+	v, _ := parse(p.Payload)
+	data, _ := transferCall(v)
+	k := ethtest.Key(t, 0)
+	nonce, _ := s.rpc.PendingNonce(context.Background(), k.Addr)
+	hd, _ := s.rpc.LatestHeader(context.Background())
+	tx := &eth.Tx{ChainID: big.NewInt(ethtest.Chain), Nonce: nonce, MaxPriorityFeePerGas: big.NewInt(100e9),
+		MaxFeePerGas: new(big.Int).Add(new(big.Int).Mul(hd.BaseFee, big.NewInt(2)), big.NewInt(100e9)), Gas: 200_000, To: &s.usdc, Value: new(big.Int), Data: data}
+	signed, _, _ := tx.Sign(k)
+	if _, err := s.rpc.SendRaw(context.Background(), signed); err != nil {
+		t.Fatal(err)
+	}
+	ethtest.RPC(t, s.rpc, "evm_mine")
+	ethtest.RPC(t, s.rpc, "evm_setAutomine", true)
+	rec, sr := s.get("kr-market", h)
+	if rec.Code != 402 || sr.ErrorReason != "settlement_failed" || strings.Contains(rec.Body.String(), "APA-PROTECTED") || s.balance(payTo) != 500000 {
+		t.Fatalf("front-run: %d %+v, payTo %d", rec.Code, sr, s.balance(payTo))
+	}
+}
+
+// A transfer stuck in the pool (here: blocks too small to hold it) past its
+// validBefore is failed, and the next payment takes its nonce with
+// doubled fees, replacing it there, instead of waiting behind it.
+func TestStuckTransferIsReplaced(t *testing.T) {
+	s := newChainShop(t, 1)
+	s.st.wait = time.Second
+	ethtest.RPC(t, s.rpc, "evm_setAutomine", false)
+	stuck := s.header("kr-market", s.auth(500000), nil)
+	if rec, _ := s.get("kr-market", stuck); rec.Code != 202 {
+		t.Fatalf("sent: %d", rec.Code)
+	}
+	before := s.gasNonce()
+	ethtest.RPC(t, s.rpc, "evm_setBlockGasLimit", "0x7530") // 30000: below the transfer's gas, so it stays pooled
+	ethtest.RPC(t, s.rpc, "evm_mine")
+	ethtest.RPC(t, s.rpc, "evm_increaseTime", 120) // past its validBefore
+	ethtest.RPC(t, s.rpc, "evm_mine")
+	// Normal blocks again, none mined yet: the stuck transfer is still pooled.
+	ethtest.RPC(t, s.rpc, "evm_setBlockGasLimit", "0x1c9c380")
+	if rec, sr := s.get("kr-market", stuck); rec.Code != 402 || sr.ErrorReason != "settlement_failed" {
+		t.Fatalf("past its deadline: %d %+v", rec.Code, sr)
+	}
+	next := s.header("kr-market", s.auth(500000), nil)
+	if rec, _ := s.get("kr-market", next); rec.Code != 202 {
+		t.Fatalf("next sent: %d", rec.Code)
+	}
+	if s.gasNonce() != before {
+		t.Fatalf("the next one took a new nonce: %d -> %d", before, s.gasNonce())
+	}
+	ethtest.RPC(t, s.rpc, "evm_mine")
+	ethtest.RPC(t, s.rpc, "evm_setAutomine", true)
+	if rec, sr := s.get("kr-market", next); rec.Code != 200 || !sr.Success || s.balance(payTo) != 500000 {
+		t.Fatalf("next: %d %+v, payTo %d", rec.Code, sr, s.balance(payTo))
 	}
 }
