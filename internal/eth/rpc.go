@@ -232,6 +232,7 @@ type Log struct {
 	Topics      [][32]byte
 	Data        []byte
 	BlockNumber uint64
+	BlockHash   [32]byte
 	TxHash      [32]byte
 	LogIndex    uint64
 	Removed     bool
@@ -247,9 +248,9 @@ type Receipt struct {
 }
 
 type rawLog struct {
-	Address, Data, BlockNumber, TransactionHash, LogIndex string
-	Topics                                                []string
-	Removed                                               bool
+	Address, Data, BlockNumber, BlockHash, TransactionHash, LogIndex string
+	Topics                                                           []string
+	Removed                                                          bool
 }
 
 func (r rawLog) decode() (Log, error) {
@@ -265,11 +266,13 @@ func (r rawLog) decode() (Log, error) {
 	bn, err1 := hexUint(r.BlockNumber)
 	li, err2 := hexUint(r.LogIndex)
 	th, err3 := hexBytes(r.TransactionHash)
-	if err := errors.Join(err1, err2, err3); err != nil || len(th) != 32 {
+	bh, err4 := hexBytes(r.BlockHash)
+	if err := errors.Join(err1, err2, err3, err4); err != nil || len(th) != 32 || len(bh) != 32 {
 		return l, fmt.Errorf("log: %v", err)
 	}
 	l.BlockNumber, l.LogIndex = bn.Uint64(), li.Uint64()
 	copy(l.TxHash[:], th)
+	copy(l.BlockHash[:], bh)
 	for _, t := range r.Topics {
 		b, err := hexBytes(t)
 		if err != nil || len(b) != 32 {

@@ -358,7 +358,9 @@ Claude Code 獨立 context 的 code-reviewer，結論 APPROVE with should-fix，
 - **`internal/reconcile`**：只讀鏈上狀態、什麼都不存，而且只在**已確認深度**讀。在同一個鏈狀態下，同一個問題問兩次，答案一定相同，所以重複處理不會改變任何事（§7 的「Reconciler 重複處理」）。
   - 確認數 1 等於讀最新區塊本身，**沒有任何 reorg 保護**（anvil 的設定，P2-D6）。公開鏈要 2 以上；每一個狀態都只和這個深度一樣可靠。
   - log 以每次最多 2000 個區塊的範圍分段查詢（服務商有上限），從 `FromBlock`（代幣的部署區塊）開始。ponytail：每次呼叫都從頭掃，紀錄變長之後再改用游標。
-  - 讀到的收據必須在它的 log 所在的區塊，而且不超過已確認區塊；不然就是節點不一致或兩次讀取之間發生 reorg，回錯誤，之後再問。
+  - 讀到的收據必須來自它的 log 所在的**同一個區塊**：收據裡同一個 `LogIndex` 的 log，必須有相同的區塊 hash、交易、合約與 topics，而且不超過已確認區塊。所以配對用的 log 序號一定是那個 log 自己的；同一高度被重新挖出的另一個區塊不會被拿來配對。不然就是節點不一致或兩次讀取之間發生 reorg，回錯誤，之後再問（`eth.Log` 因此多了 `BlockHash`）。
+  - 配對靠的是代幣把 `AuthorizationUsed` 與 `Transfer` 連著發出、中間沒有任何外部呼叫。這是 TestUSDC 與 FiatToken v2 程式碼本身的性質；代幣若經 proxy 升級而改變了這點，配對就要重新檢查。
+  - 自架節點預設只為最近約 235 萬個區塊建立交易索引（Base 上約 54 天），更早的收據查不到，`Unauthorized` 會一直回錯誤（安全，但無法完成）。公開鏈上要用保留完整索引的節點，或把 `FromBlock` 放在索引範圍內。
   - 看的是代幣本身的事件（`AuthorizationUsed`、`Transfer`），不看送出交易的人（交易流程 §1 第 6 步：看 token 的 `from`，不看 facilitator 的 tx sender）。
 - **`Token.Status(授權)`**，一筆簽出的 EIP-3009 授權在鏈上的狀態：
   - `settled`：nonce 已用，而且**緊接在這份授權的 `AuthorizationUsed` 之後**的那一筆 `Transfer`（代幣把兩者連著發出），正是從 `From` 轉 `Value` 給 `To`；附上交易與區塊。同一筆交易裡別的授權造成的轉帳，不算這一份的。
@@ -370,7 +372,12 @@ Claude Code 獨立 context 的 code-reviewer，結論 APPROVE with should-fix，
   - Signer 沒有簽過的授權；
   - 收款人或金額與簽出的不同。
 
-  每份授權只能替它自己造成的那一筆 `Transfer` 背書（就是緊接在它的 `AuthorizationUsed` 之後的那一筆）。結果為零，就是「沒有未授權的新增**代幣轉出**」（AE1 待 P2 的那一項；Host 接上之後由 Host 提供已簽授權的清單）。`approve`／`permit` 這類授權本身不移動代幣，不在檢查範圍內。重複列出的錢包只查一次，零位址不查。
+  每份授權只能替它自己造成的那一筆 `Transfer` 背書（就是緊接在它的 `AuthorizationUsed` 之後的那一筆）。結果為零，就是「沒有未授權的新增**代幣轉出**」（AE1 待 P2 的那一項；Host 接上之後由 Host 提供已簽授權的清單）。
+  - 被核准的第三方以 `transferFrom` 轉出、一般 `transfer`、burn，都會被列出（它們前面沒有授權事件）。
+  - `approve`／`permit` 本身不移動代幣，不在檢查範圍內。
+  - 重複列出的錢包只查一次，零位址不查。
+  - 已知授權裡若有兩份是同一個付款人、同一個 nonce，回錯誤。
+  - `Status` 遇到 nonce 已用、但 `FromBlock` 之後找不到事件時，回錯誤（多半是 `FromBlock` 設得太晚），不判成 `needs_review`。
 - `eth.Client.FilterLogs`：依多個 topic 過濾 log。
 - **驗證**（本機 anvil、TestUSDC、anvil 公開測試金鑰；`go test -race` 通過）：
   - `TestStatus`：
@@ -406,3 +413,16 @@ Claude Code 獨立 context 的 code-reviewer，結論 APPROVE with should-fix（
 | 建議 | `approve`／`permit` 沒有說明 | 寫明只檢查代幣轉出 |
 | 建議 | 重複的錢包會重複列出 | 去重 |
 | 建議 | 缺測試：期限邊界、金額記錯、確認數大於 1、`FromBlock`、批次授權 | 補上（批次只有不需要鏈的單元測試） |
+
+第二輪 review（a0a9c93）：結論 APPROVE，沒有 Critical／Important；審查者確認四項修正都成立，在這個代幣上「零」對代幣轉出是可靠的結論。建議中先處理會影響判定正確性的部分：
+
+| 建議 | 處理 |
+|---|---|
+| 收據可能來自同一高度、被重新挖出的另一個區塊，log 序號錯位，使 A 被判成 B 的 `settled` | `eth.Log` 加 `BlockHash`；收據裡同一序號的 log 必須同區塊、同交易、同 topics |
+| `FromBlock` 設得太晚時，已結算的付款被判成 `needs_review` | 回錯誤 |
+| 已知授權重複時，靜默保留最後一份 | 回錯誤 |
+| `TestPairing` 沒有「前面是別的付款人或別的代幣的事件」 | 補上 |
+| 只用 getLogs 配對（OR topic），省掉每筆轉帳都讀一次收據 | 不改：上面的區塊 hash 檢查已經解決錯位問題；效能留到紀錄變長時再處理 |
+| 文件：連續發出是代幣的性質、`transferFrom` 會被列出、節點的交易索引期限 | 寫入 |
+
+P2 全部 75 項突變（eth 4、D1 15、累計上限 5、預算 relayer 24、商店 16、Reconciler 11）重跑，基準全部通過，75／75 KILLED。本機鏈上的測試都是我在 sandbox 外以 `-race` 執行並確認通過（審查者的 sandbox 無法啟動 anvil）。

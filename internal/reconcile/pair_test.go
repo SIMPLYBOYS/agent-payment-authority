@@ -29,6 +29,15 @@ func TestPairing(t *testing.T) {
 		t.Fatalf("B's transfer: %+v", l)
 	}
 	signed := map[[2][32]byte]Authorization{{word(w), na}: a, {word(w), nb}: b}
+	// An AuthorizationUsed of another payer, or of another token, right before a Transfer accounts for nothing.
+	otherPayer := eth.Log{Address: token, LogIndex: 5, Topics: [][32]byte{usedTopic, word(eth.Address{0x2}), nb}}
+	otherToken := eth.Log{Address: eth.Address{0x8}, LogIndex: 7, Topics: [][32]byte{usedTopic, word(w), nb}}
+	rc2 := &eth.Receipt{Status: 1, Logs: []eth.Log{otherPayer, transfer(6, shop, 5), otherToken, transfer(8, shop, 5)}}
+	for _, i := range []int{1, 3} {
+		if _, ok := accounted(rc2, token, w, rc2.Logs[i], signed); ok {
+			t.Errorf("rc2 transfer %d: accounted", i)
+		}
+	}
 	for i, want := range map[int]bool{1: false, 3: true, 4: false} {
 		n, ok := accounted(rc, token, w, rc.Logs[i], signed)
 		if ok != want {

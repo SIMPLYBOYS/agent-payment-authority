@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 )
@@ -53,18 +54,24 @@ func (t Token) logs(ctx context.Context, topics [][32]byte, to uint64) ([]eth.Lo
 	return out, nil
 }
 
-// receipt is a logged transaction's receipt, mined where its log says and
-// at or below the confirmed block: anything else is a node behind another,
-// or a reorg between the reads (an error, asked again later).
+// receipt is a logged transaction's receipt, read from the very block its
+// log came from (the same log at the same index, block hash and
+// transaction) and at or below the confirmed block, so the log indexes
+// paired in it are the log's own. Anything else is a node behind another,
+// or a reorg between the reads: an error, asked again later.
 func (t Token) receipt(ctx context.Context, l eth.Log, at uint64) (*eth.Receipt, error) {
 	rc, err := t.RPC.Receipt(ctx, l.TxHash[:])
 	if err != nil {
 		return nil, err
 	}
-	if rc == nil || rc.BlockNumber != l.BlockNumber || rc.BlockNumber > at {
-		return nil, errors.New("reconcile: a logged transaction's receipt is not where its log is: ask again")
+	if rc != nil && rc.BlockNumber == l.BlockNumber && rc.BlockNumber <= at {
+		for _, r := range rc.Logs {
+			if r.LogIndex == l.LogIndex && r.BlockHash == l.BlockHash && r.TxHash == l.TxHash && r.Address == l.Address && slices.Equal(r.Topics, l.Topics) {
+				return rc, nil
+			}
+		}
 	}
-	return rc, nil
+	return nil, errors.New("reconcile: a logged transaction's receipt is not the log's block: ask again")
 }
 
 // pairedTransfer is the token's Transfer right after the AuthorizationUsed
@@ -157,6 +164,11 @@ func (t Token) Status(ctx context.Context, a Authorization) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if len(live) == 0 && t.FromBlock > 0 {
+		// Used, and no event since FromBlock: it may be before it (a
+		// misconfigured FromBlock), not a matter for review.
+		return Result{}, fmt.Errorf("reconcile: the nonce is used and no AuthorizationUsed since block %d: is FromBlock too late?", t.FromBlock)
+	}
 	if len(live) != 1 {
 		return Result{State: "needs_review", Block: at}, nil // used, and no single event says by what (a cancellation, say)
 	}
@@ -218,7 +230,11 @@ func (t Token) Unauthorized(ctx context.Context, wallets []eth.Address, known []
 	seen := map[eth.Address]bool{}
 	signed := map[[2][32]byte]Authorization{}
 	for _, a := range known {
-		signed[[2][32]byte{word(a.From), a.Nonce}] = a
+		k := [2][32]byte{word(a.From), a.Nonce}
+		if _, dup := signed[k]; dup {
+			return nil, fmt.Errorf("reconcile: two known authorizations of %s share a nonce", a.From.Hex())
+		}
+		signed[k] = a
 	}
 	var out []Spend
 	for _, w := range wallets {
