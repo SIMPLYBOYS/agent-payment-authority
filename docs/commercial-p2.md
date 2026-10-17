@@ -88,20 +88,22 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
 
 ### 9.4 本人核准併入 `signer.db`，付款時一筆交易消耗（P2-D1）
 
-- **一個資料庫**：`signer.OpenDB`（WAL、full sync、foreign keys、immediate）。付款的 `attempts` 與核准表（`enrollments`、`credentials`、`approval_challenges`、`human_approvals`、`verify_requests`、語音兩表）都在 `DIR/signer.db`；核准表的 schema 沒有改。
+- **一個資料庫**：`signer.OpenDB`（WAL、full sync、foreign keys、immediate）。付款的 `attempts` 與核准表（`approver_handles`、`enrollments`、`credentials`、`approval_challenges`、`human_approvals`、`verify_requests`、語音兩表）都在 `DIR/signer.db`；核准表的 schema 沒有改。
 - **付款用本人核准**：`/v1/sign` 的 `authorization` 可為 `{method: "webauthn", approval_id}`。Signer 會：
   - 從完整請購重算 intent 與 jti；
   - 要求核准是 `approve`、`verified`、未到期，credential 仍 `active`，approver 版本相同、屬於同一 consumer、錢包在其 `wallet_ids`；
-  - 單筆上限用 approver 的 `signer_max`，期限取 `min(核准到期, valid_before)`；
+  - 單筆上限用 approver 的 `signer_max`，期限取 `min(核准到期, valid_before)`。人類核准設計 §4.7 寫的是「每筆與累計硬上限（`signer_max`）」，但沒有定義累計的範圍，目前**只做每筆**；累計怎麼算待 Aaron 決定；
+  - 一筆付款只能有一種授權：webauthn 帶了 delegation 欄位，或 delegation 帶了 `approval_id`，都回 `BAD_REQUEST`；
   - 在**接受付款的同一筆交易**裡重讀核准、改成 `consumed`，並建立 attempt（`attempts.approval_id` UNIQUE；`delegation_id` 與 `approval_id` 恰有一個）。
   - 拒絕碼：`APPROVAL_UNKNOWN`、`APPROVAL_DENIED`、`APPROVAL_CONSUMED`、`APPROVAL_NOT_VERIFIED`、`APPROVAL_EXPIRED`、`INTENT_MISMATCH`、`CREDENTIAL_REVOKED`、`APPROVER_CHANGED`、`CONSUMER_MISMATCH`、`OVER_PER_TX`。原本的 `HUMAN_APPROVAL_UNAVAILABLE` 在 Signer 端不再出現。
   - 委派付款的規則不變。
 - **同一個行程**：`serve` 在設定有 approvers 與 webauthn 時，同一個 socket 也提供核准與登記路由（`signer.ServeAll`）；health 仍是付款的 `unlocked`。`serve-approvals` 保留（不讀金鑰、付款路由回 `PAYMENT_MODE_OFF`），資料改為 `signer.db`。
 - **遷移**（一次性）：`apa-signer approver migrate --dir DIR`。
-  - 先確認 socket 不存在（Signer 已停）。
-  - 對舊檔做 `wal_checkpoint(TRUNCATE)`，把殘留的 WAL 併回主檔；仍有人使用時拒絕。
-  - 在 `signer.db` 的一筆交易裡依欄位名逐表複製，並核對每表筆數；`signer.db` 已有核准資料時拒絕。
+  - Signer 必須先停：命令先確認 socket 不存在。
+  - 對舊檔做 `wal_checkpoint(TRUNCATE)`，把殘留的 WAL 併回主檔；有其他連線**開著交易**時拒絕。只開著、沒有交易的連線（例如舊版的管理命令）偵測不到，所以要靠「先停 Signer、不同時跑管理命令」。
+  - 舊檔以可寫方式 ATTACH，複製期間的 immediate 交易也持有舊檔的寫鎖。在 `signer.db` 的一筆交易裡依欄位名逐表複製，並核對每表筆數。
   - 完成後把舊檔改名為 `approvals.db.migrated`，不刪除。
+  - 若上次已提交、但在改名前中斷：`signer.db` 的核准資料與舊檔逐列相同時，再跑一次只會補完改名；`signer.db` 有其他核准資料時拒絕，什麼都不搬。
   - P1-b 的 `attempts` 表（`delegation_id NOT NULL`、沒有 `approval_id`）在開啟時以一筆交易重建，原有資料保留。
   - 目錄裡還有 `approvals.db` 時，除了 `migrate` 以外的命令（`serve`、`serve-approvals`、`approver …`）一律拒絕，並提示這個命令。`scripts/demo/v1-dev.sh` 也會先停下來，提示同一個命令。
 - **還沒有做的**：
@@ -113,11 +115,17 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
 - **驗證**：
   - `internal/signer` 新增測試：
     - `TestHumanApprovalPays`：6 種拒絕都不寫 attempt、核准維持 verified；成功時核准與 attempt 一起寫入；重送得到同一筆；第二筆付款得到 `APPROVAL_CONSUMED`；A2 查詢顯示 consumed。
-    - `TestHumanApprovalLapses`：到期、credential 撤銷。
-    - `TestHumanApprovalRace`：8 個請求搶同一個核准，恰好一筆簽成。
-    - `TestMigrateApprovals`：使用中拒絕、P1-b attempts 保留、遷移後可付款、不能遷兩次、`signer.db` 已有核准時拒絕。
+    - `TestHumanApprovalLapses`：到期、credential 撤銷、核准被放棄（`APPROVAL_NOT_VERIFIED`）、錢包不再屬於 approver（`CONSUMER_MISMATCH`）、approver 版本改變（`APPROVER_CHANGED`）。
+    - `TestHumanApprovalChangesBeforeAccept`：在 verify 之後、accept 之前（測試掛勾 `after-verify`）放棄核准或撤銷 credential，都被接受交易裡的重讀擋下，不寫 attempt。
+    - `TestHumanApprovalRace`：8 個請求搶同一個核准，恰好一筆簽成。（同一錢包的請求由錢包鎖序列化，所以這個測試證明的是結果，交易內的重讀由上一個測試證明。）
+    - `TestMigrateApprovals`：開著交易時拒絕、P1-b attempts 保留、不能遷兩次、改名前中斷後可補完、遷移後可付款、`signer.db` 有其他核准資料時拒絕。
     - `TestServeAll`：真 Unix socket 上，核准在同一個 socket 驗證並付款。
   - `cmd/apa-signer`：`TestApproverMigrate`；既有測試改為 `signer.db`。
   - `go test -race ./internal/signer/... ./cmd/apa-signer/` 通過。
-  - 反向突變新增 9 項，在工作樹的複本上執行，9／9 KILLED。既有突變中涉及 signer 的文字都仍只出現一次（mutation-check 與 m-b-reverse 的 47 項）。
-- **既有失敗（不是這次造成的）**：`cmd/demo` 的 `TestTimingInterleaved` 在本分支與 `main`（e41cd5d，暫時 worktree）都失敗在 `multirun_test.go:325`：B 的 run 沒有工具呼叫就 `ended`。原因尚未追查。
+  - 反向突變新增 14 項（review 後補 5 項），在工作樹的複本上執行，14／14 KILLED。既有突變中涉及 signer 的文字都仍只出現一次（mutation-check 與 m-b-reverse 的 47 項）。
+- **順手修的既有失敗**：`cmd/demo` 的 `TestTimingInterleaved` 在本分支與 `main`（e41cd5d）都固定失敗。原因是測試的競態：已結束的 run 不再顯示 `tool_calls`，B 在第二次呼叫後立刻結束，測試等不到。改成 B 也等 `x3` 才結束（ea4e397）。
+- **Review**：Claude Code 獨立 context 的 code-reviewer，結論是 APPROVE，附 3 項 Important 與 5 項建議：
+  - 累計上限：待 Aaron 決定。
+  - 改名前中斷會卡住：已修。
+  - 測試沒有證明 3 個拒絕碼與交易內重讀：已補。
+  - 建議全部處理：`verify` 改用請求的 ctx；拒絕混用兩種授權；遷移時的寫鎖與文件用語；人類核准設計文件標註已被 P2-D1 取代；表清單補上 `approver_handles`。

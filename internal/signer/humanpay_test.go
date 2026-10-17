@@ -92,12 +92,13 @@ func TestHumanApprovalPays(t *testing.T) {
 		r    SignRequest
 		want string
 	}{
-		"no approval":        {SignRequest{RequestID: "request-0000000101", Authorization: byApproval(""), Order: order}, "APPROVAL_UNKNOWN"},
-		"unknown approval":   {SignRequest{RequestID: "request-0000000102", Authorization: byApproval("hap-00"), Order: order}, "APPROVAL_UNKNOWN"},
-		"another purchase":   {SignRequest{RequestID: "request-0000000103", Authorization: byApproval(ap.ApprovalID), Order: other}, "INTENT_MISMATCH"},
-		"a deny":             {SignRequest{RequestID: "request-0000000104", Authorization: byApproval(denied.ApprovalID), Order: deny}, "APPROVAL_DENIED"},
-		"over the approver":  {SignRequest{RequestID: "request-0000000105", Authorization: byApproval(bigAp.ApprovalID), Order: big}, "OVER_PER_TX"},
-		"a delegation order": {SignRequest{RequestID: "request-0000000106", Authorization: Authorization{Method: "webauthn", DelegationID: "dlg-a", DelegationVersion: 1}, Order: order}, "APPROVAL_UNKNOWN"},
+		"no approval":             {SignRequest{RequestID: "request-0000000101", Authorization: byApproval(""), Order: order}, "APPROVAL_UNKNOWN"},
+		"unknown approval":        {SignRequest{RequestID: "request-0000000102", Authorization: byApproval("hap-00"), Order: order}, "APPROVAL_UNKNOWN"},
+		"another purchase":        {SignRequest{RequestID: "request-0000000103", Authorization: byApproval(ap.ApprovalID), Order: other}, "INTENT_MISMATCH"},
+		"a deny":                  {SignRequest{RequestID: "request-0000000104", Authorization: byApproval(denied.ApprovalID), Order: deny}, "APPROVAL_DENIED"},
+		"over the approver":       {SignRequest{RequestID: "request-0000000105", Authorization: byApproval(bigAp.ApprovalID), Order: big}, "OVER_PER_TX"},
+		"mixed with a delegation": {SignRequest{RequestID: "request-0000000106", Authorization: Authorization{Method: "webauthn", ApprovalID: ap.ApprovalID, DelegationID: "dlg-a", DelegationVersion: 1}, Order: order}, "BAD_REQUEST"},
+		"a delegation naming it":  {SignRequest{RequestID: "request-0000000107", Authorization: Authorization{Method: "delegation", ApprovalID: ap.ApprovalID, DelegationID: "dlg-a", DelegationVersion: 1}, Order: order}, "BAD_REQUEST"},
 	} {
 		if _, err := f.pay.Sign(bg, cs.r); code(err) != cs.want {
 			t.Errorf("%s: %v, want %s", name, err, cs.want)
@@ -127,12 +128,32 @@ func TestHumanApprovalPays(t *testing.T) {
 	}
 }
 
-// What changes after the approval: its expiry, the credential, the approver.
+// What changes after the approval: its expiry, the credential, the
+// approver's version and wallets, the approval itself.
 func TestHumanApprovalLapses(t *testing.T) {
 	f := newHFX(t)
 	a := f.enroll("approver-a", nil)
-	o1, o2 := f.orderA("500000"), f.orderA("500000")
+	o1, o2, o3, o4, o5 := f.orderA("500000"), f.orderA("500000"), f.orderA("500000"), f.orderA("500000"), f.orderA("500000")
 	ap1, ap2 := f.approve(a, o1, "approve"), f.approve(a, o2, "approve")
+	ap3, ap4, ap5 := f.approve(a, o3, "approve"), f.approve(a, o4, "approve"), f.approve(a, o5, "approve")
+
+	if _, err := f.core.Abandon(bg, ap3.ApprovalID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000203", Authorization: byApproval(ap3.ApprovalID), Order: o3}); code(err) != "APPROVAL_NOT_VERIFIED" {
+		t.Fatalf("abandoned: %v", err)
+	}
+	ar := &f.pay.cfg.Approvers[0]
+	ar.WalletIDs = []string{"wallet-b"}
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000204", Authorization: byApproval(ap4.ApprovalID), Order: o4}); code(err) != "CONSUMER_MISMATCH" {
+		t.Fatalf("the wallet is no longer the approver's: %v", err)
+	}
+	ar.WalletIDs = []string{"wallet-a"}
+	ar.Version++
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000205", Authorization: byApproval(ap5.ApprovalID), Order: o5}); code(err) != "APPROVER_CHANGED" {
+		t.Fatalf("another approver version: %v", err)
+	}
+	ar.Version--
 
 	f.now += 300 // approval_ttl_seconds
 	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000201", Authorization: byApproval(ap1.ApprovalID), Order: o1}); code(err) != "APPROVAL_EXPIRED" {
@@ -147,6 +168,35 @@ func TestHumanApprovalLapses(t *testing.T) {
 	}
 	if count(t, f.pay, "1") != 0 {
 		t.Fatal("an attempt was written")
+	}
+}
+
+// The approval read again in the accepting transaction: abandoned or its
+// credential revoked after verify and before accept, nothing is written.
+func TestHumanApprovalChangesBeforeAccept(t *testing.T) {
+	f := newHFX(t)
+	a := f.enroll("approver-a", nil)
+	for i, cs := range []struct {
+		change func(ap ApprovalReply) error
+		want   string
+	}{
+		{func(ap ApprovalReply) error { _, err := f.core.Abandon(bg, ap.ApprovalID); return err }, "APPROVAL_NOT_VERIFIED"},
+		{func(ApprovalReply) error { return f.core.Revoke(bg, Fingerprint(a.ID)) }, "CREDENTIAL_REVOKED"},
+	} {
+		order := f.orderA("500000")
+		ap := f.approve(a, order, "approve")
+		hook = func(stage, _ string) error {
+			if stage == "after-verify" {
+				hook = nil
+				return cs.change(ap)
+			}
+			return nil
+		}
+		_, err := f.pay.Sign(bg, SignRequest{RequestID: "request-00000006" + string(rune('0'+i)) + "0", Authorization: byApproval(ap.ApprovalID), Order: order})
+		hook = nil
+		if code(err) != cs.want || count(t, f.pay, "1") != 0 {
+			t.Fatalf("%s: %v, %d attempts", cs.want, err, count(t, f.pay, "1"))
+		}
 	}
 }
 
@@ -241,6 +291,14 @@ func TestMigrateApprovals(t *testing.T) {
 	if _, err := MigrateApprovals(bg, dir); err == nil {
 		t.Fatal("migrated twice")
 	}
+	// Stopped before its rename (approvals.db back in place): run again,
+	// it only finishes the rename (nothing can
+	// use signer.db meanwhile: Unmigrated refuses).
+	os.Rename(filepath.Join(dir, "approvals.db.migrated"), filepath.Join(dir, "approvals.db"))
+	if moved, err := MigrateApprovals(bg, dir); err != nil || moved["human_approvals"] != 1 || Unmigrated(dir) != nil {
+		t.Fatalf("finishing the rename: %v %v", moved, err)
+	}
+
 	db, _ := OpenDB(filepath.Join(dir, "signer.db"))
 	defer db.Close()
 	pay, err := NewCoreDB(context.Background(), cfg, map[string]*secp256k1.PrivateKey{a: keyA, b: keyB}, db, func() uint64 { return now }, reserved{})
@@ -253,10 +311,15 @@ func TestMigrateApprovals(t *testing.T) {
 	if rep, err := pay.Sign(bg, SignRequest{RequestID: "request-0000000401", Authorization: byApproval(ap.ApprovalID), Order: order}); err != nil || rep.State != "signed" {
 		t.Fatalf("pay after migration %+v %v", rep, err)
 	}
-	// Approval rows already in signer.db: a second approvals.db is refused, nothing moved.
+	// Another approvals.db (the approval paid since, one row more): refused, nothing moved.
 	os.Rename(filepath.Join(dir, "approvals.db.migrated"), filepath.Join(dir, "approvals.db"))
+	other, _ := OpenDB(filepath.Join(dir, "approvals.db"))
+	if _, err := other.Exec(`INSERT INTO approver_handles VALUES ('approver-z', 'aGFuZGxlLXo')`); err != nil {
+		t.Fatal(err)
+	}
+	other.Close()
 	if _, err := MigrateApprovals(bg, dir); err == nil || Unmigrated(dir) == nil {
-		t.Fatalf("merged into a signer.db with approvals: %v", err)
+		t.Fatalf("merged into a signer.db with other approvals: %v", err)
 	}
 }
 

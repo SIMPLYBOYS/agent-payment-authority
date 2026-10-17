@@ -283,7 +283,7 @@ func (c *Core) Sign(ctx context.Context, r SignRequest) (Reply, error) {
 		} `json:"intent"`
 	}
 	if json.Unmarshal(r.Order, &po) != nil || c.cfg.wallet(po.Intent.WalletID) == nil {
-		if _, _, _, err := c.verify(r, fp, c.clock()); err != nil { // its own code, under no lock
+		if _, _, _, err := c.verify(ctx, r, fp, c.clock()); err != nil { // its own code, under no lock
 			return Reply{}, err
 		}
 		return Reply{}, Refusal("WALLET_NOT_REGISTERED")
@@ -292,8 +292,12 @@ func (c *Core) Sign(ctx context.Context, r SignRequest) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	snap, d, amount, err := c.verify(r, fp, c.clock())
+	snap, d, amount, err := c.verify(ctx, r, fp, c.clock())
 	if err != nil {
+		unlock()
+		return Reply{}, err
+	}
+	if err := at("after-verify", r.RequestID); err != nil {
 		unlock()
 		return Reply{}, err
 	}
@@ -313,7 +317,7 @@ func (c *Core) Sign(ctx context.Context, r SignRequest) (Reply, error) {
 }
 
 // verify is design 4.3, steps 1 to 7: nothing is written.
-func (c *Core) verify(r SignRequest, fp string, now uint64) (*snapshot, *Delegation, uint64, error) {
+func (c *Core) verify(ctx context.Context, r SignRequest, fp string, now uint64) (*snapshot, *Delegation, uint64, error) {
 	var po paycontract.PurchaseOrder
 	if err := contracts.Decode(r.Order, &po); err != nil || po.Validate() != nil {
 		return nil, nil, 0, Refusal("ORDER_INVALID")
@@ -327,6 +331,10 @@ func (c *Core) verify(r SignRequest, fp string, now uint64) (*snapshot, *Delegat
 	// limit and deadline instead, checked again when it is consumed.
 	var d *Delegation
 	var per, deadline uint64
+	au := r.Authorization
+	if au.Method == "webauthn" && (au.DelegationID != "" || au.DelegationVersion != 0) || au.Method == "delegation" && au.ApprovalID != "" {
+		return nil, nil, 0, Refusal("BAD_REQUEST") // one authority per payment, never two mixed
+	}
 	switch r.Authorization.Method {
 	case "delegation":
 		d = c.cfg.delegation(r.Authorization.DelegationID)
@@ -343,7 +351,7 @@ func (c *Core) verify(r SignRequest, fp string, now uint64) (*snapshot, *Delegat
 		per, _ = units(d.PerTxMax)
 		deadline = d.ValidUntil
 	case "webauthn":
-		limit, expires, err := c.humanApproval(context.Background(), c.db, r.Authorization.ApprovalID, &po, intent, now)
+		limit, expires, err := c.humanApproval(ctx, c.db, r.Authorization.ApprovalID, &po, intent, now)
 		if err != nil {
 			return nil, nil, 0, err
 		}

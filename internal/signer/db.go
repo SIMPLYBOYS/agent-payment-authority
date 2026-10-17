@@ -41,10 +41,13 @@ func Unmigrated(dir string) error {
 
 // MigrateApprovals moves DIR/approvals.db's tables into DIR/signer.db in
 // one transaction of signer.db, checks every table's row count, and only
-// then renames approvals.db to approvals.db.migrated. No process may use
-// approvals.db meanwhile (the caller stops the Signer first). It refuses
-// when signer.db already has approval rows. It returns the rows moved per
-// table.
+// then renames approvals.db to approvals.db.migrated. The Signer must be
+// stopped first (the caller checks its socket); a process with a
+// transaction open on approvals.db makes it refuse, and the copy holds
+// approvals.db's write lock. It refuses when signer.db already has other
+// approval rows; when it has exactly approvals.db's (a migration that
+// stopped before the rename), it only finishes the rename. It returns the
+// rows per table.
 func MigrateApprovals(ctx context.Context, dir string) (map[string]int, error) {
 	old := filepath.Join(dir, "approvals.db")
 	if _, err := os.Stat(old); err != nil {
@@ -72,7 +75,8 @@ func MigrateApprovals(ctx context.Context, dir string) (map[string]int, error) {
 	if _, err := db.ExecContext(ctx, approvalsSchema+voiceSchema); err != nil {
 		return nil, err
 	}
-	if _, err := db.ExecContext(ctx, `ATTACH DATABASE ? AS old`, "file:"+old+"?mode=ro"); err != nil {
+	// Read-write: the immediate transaction below takes its write lock too.
+	if _, err := db.ExecContext(ctx, `ATTACH DATABASE ? AS old`, old); err != nil {
 		return nil, err
 	}
 	defer db.ExecContext(context.Background(), `DETACH DATABASE old`)
@@ -82,35 +86,53 @@ func MigrateApprovals(ctx context.Context, dir string) (map[string]int, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
+	already, different := 0, false
 	for _, t := range approvalTables {
-		var have, src int
+		var have, src, missing int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM main.`+t).Scan(&have); err != nil {
 			return nil, err
-		}
-		if have > 0 {
-			return nil, fmt.Errorf("signer.db already has %d rows in %s: nothing was moved", have, t)
 		}
 		cols, err := columns(ctx, tx, t)
 		if err != nil {
 			return nil, err
 		}
+		if cols != "" {
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM old.`+t).Scan(&src); err != nil {
+				return nil, err
+			}
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT `+cols+` FROM old.`+t+` EXCEPT SELECT `+cols+` FROM main.`+t+`)`).Scan(&missing); err != nil {
+				return nil, err
+			}
+		}
+		already += have
+		different = different || have != src || missing != 0
+		moved[t] = src
+	}
+	if already > 0 {
+		if different {
+			return nil, fmt.Errorf("signer.db already has %d approval rows, not approvals.db's: nothing was moved", already)
+		}
+		// Every row is there already: a migration stopped before its rename.
+		tx.Rollback()
+		db.ExecContext(ctx, `DETACH DATABASE old`)
+		return moved, os.Rename(old, old+".migrated")
+	}
+	for _, t := range approvalTables {
+		cols, err := columns(ctx, tx, t)
+		if err != nil {
+			return nil, err
+		}
 		if cols == "" {
-			moved[t] = 0 // an approvals.db from before V1 has no voice tables
-			continue
+			continue // an approvals.db from before V1 has no voice tables
 		}
 		// By name: the copy never depends on the two files' column order.
 		res, err := tx.ExecContext(ctx, `INSERT INTO main.`+t+` (`+cols+`) SELECT `+cols+` FROM old.`+t)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", t, err)
 		}
-		n, _ := res.RowsAffected()
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM old.`+t).Scan(&src); err != nil {
-			return nil, err
+		if n, _ := res.RowsAffected(); int(n) != moved[t] {
+			return nil, fmt.Errorf("%s: %d of %d rows moved", t, n, moved[t])
 		}
-		if int(n) != src {
-			return nil, fmt.Errorf("%s: %d of %d rows moved", t, n, src)
-		}
-		moved[t] = int(n)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

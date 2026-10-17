@@ -272,6 +272,7 @@ webauthn_challenge = SHA-256("agent-payment-authority/pay/v1/webauthn-challenge"
 - 摘要由 Signer 從請購產生：challenge 回覆帶 `display`，包含客人、商品、收款人、付款帳戶、金額與資產、網路、委託範圍、期限。Host 頁面顯示這份 `display`。
 - 但頁面仍是 Host 提供的。**Host 或頁面被控制時，可以顯示 A 的摘要、卻替 B 的 challenge 要求簽章**，本設計擋不住這種「看到的不是簽的」攻擊。
 - 能做的限制有兩個：每次核准只綁一筆、期限短；Signer 的每筆與累計硬上限（`signer_max`）。可信交易顯示（獨立裝置或 Signer 自己的畫面）列為後續選項，不在 A2。
+  - P2-D1 實作時（`docs/commercial-p2.md` §9.4）：`signer_max` 目前只做**每筆**上限；「累計」的範圍（全期、每日或其他）沒有定義，待 Aaron 決定後補上。
 
 ### 4.8 Go 函式庫（D4）
 
@@ -325,6 +326,7 @@ webauthn_challenge = SHA-256("agent-payment-authority/pay/v1/webauthn-challenge"
   - `webauthn: {rp_id: "localhost", origins: ["http://localhost:8402"], challenge_ttl_seconds: 120, approval_ttl_seconds: 300}`。
   - `ParseConfig` 嚴格驗證：approver 的 consumer 與 wallet 對得上 `wallets`，origins 必須是精確的 `http://localhost:<port>`。
 - **DB**（A2 的核准表全部放在 **`approvals.db`**，由 `serve-approvals` 開啟，第 6.4 節；既有付款模式的 `signer.db` 不變）：
+  - **P2-D1 已取代（`docs/commercial-p2.md` §9.4）**：核准表已搬進 `signer.db`；`serve-approvals` 與管理命令改開 `signer.db`，舊的 `approvals.db` 以 `apa-signer approver migrate` 一次搬入。
 
 | 表 | 欄位（最小） | 唯一性與檢查 |
 |---|---|---|
@@ -441,6 +443,7 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 - `serve` 的行為完全不變，仍然缺 key 就拒絕；不新增任何能略過預留驗證的設定。
 - 管理命令（`approver enroll|revoke|list`）直接開 `approvals.db`（SQLite WAL，`busy_timeout`），可以在 `serve-approvals` 執行時使用。
 - **P2 的合併**（D8，P2 時決定）：付款要在接受交易裡消耗 `human_approvals`。推薦屆時讓 `serve` 同時開 `approvals.db`，在同一個程序裡以兩階段順序處理；或把核准表搬進 `signer.db`。兩者都要另行設計，A2 不先做。
+- **P2-D1 已決定並實作**：採「核准表搬進 `signer.db`」，`serve` 同一個行程、同一個 socket 提供核准與付款，接受付款的交易裡消耗核准（`docs/commercial-p2.md` §9.4）。`serve-approvals` 因此也開 `signer.db`（其中有已簽的付款授權；同一個 uid，不另加暴露面），上面「不開 `signer.db`」的驗收不再適用。
 - 部署沿用 P1-b 的 `/opt/apa-signer`：只多 `approvals.db` 與設定段落，帳號與權限不變。
 
 ## 7 錯誤、競爭與恢復
@@ -508,6 +511,8 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 - challenge 用過即作廢，所以保存下來的欄位也不能被重放。
 
 **OS 部署**：Signer 只多設定段落與 `approvals.db`（第 6.4 節），沿用 P1-b 的 `/opt/apa-signer` 配置，不重開 OS 部署。新的 `webauthn` 設定與 approvers 由管理者寫入，未來驗收只看設定檔與 `approvals.db` 的權限，以及 `serve-approvals` 沒有開 `keys/` 或 `signer.db`。
+
+> P2-D1 之後：核准資料在 `signer.db`，驗收看 `signer.db` 的權限；`serve-approvals` 會開 `signer.db`（`docs/commercial-p2.md` §9.4）。
 
 ## 8 使用者體驗
 
