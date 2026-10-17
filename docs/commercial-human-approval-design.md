@@ -444,7 +444,7 @@ Host 與 Origin 必須精確等於 `localhost:8402`；POST 要 JSON；限速。*
 - 管理命令（`approver enroll|revoke|list`）直接開 `approvals.db`（SQLite WAL，`busy_timeout`），可以在 `serve-approvals` 執行時使用。
 - **P2 的合併**（D8，P2 時決定）：付款要在接受交易裡消耗 `human_approvals`。推薦屆時讓 `serve` 同時開 `approvals.db`，在同一個程序裡以兩階段順序處理；或把核准表搬進 `signer.db`。兩者都要另行設計，A2 不先做。
 - **P2-D1 已決定並實作**：採「核准表搬進 `signer.db`」，`serve` 同一個行程、同一個 socket 提供核准與付款，接受付款的交易裡消耗核准（`docs/commercial-p2.md` §9.4）。`serve-approvals` 因此也開 `signer.db`（其中有已簽的付款授權；同一個 uid，不另加暴露面），上面「不開 `signer.db`」的驗收不再適用。
-- 部署沿用 P1-b 的 `/opt/apa-signer`：只多 `approvals.db` 與設定段落，帳號與權限不變。
+- 部署沿用 P1-b 的 `/opt/apa-signer`：只多 `approvals.db` 與設定段落，帳號與權限不變。（P2-D1 之後：核准資料在 `signer.db`，`/opt` 的 `approvals.db` 要以 `approver migrate` 搬入。）
 
 ## 7 錯誤、競爭與恢復
 

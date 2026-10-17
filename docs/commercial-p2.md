@@ -122,10 +122,11 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
     - `TestServeAll`：真 Unix socket 上，核准在同一個 socket 驗證並付款。
   - `cmd/apa-signer`：`TestApproverMigrate`；既有測試改為 `signer.db`。
   - `go test -race ./internal/signer/... ./cmd/apa-signer/` 通過。
-  - 反向突變新增 14 項（review 後補 5 項），在工作樹的複本上執行，14／14 KILLED。既有突變中涉及 signer 的文字都仍只出現一次（mutation-check 與 m-b-reverse 的 47 項）。
+  - 反向突變新增 15 項（第一輪 review 後補 5 項、第二輪補 1 項），在工作樹的複本上執行，15／15 KILLED。既有突變中涉及 signer 的文字都仍只出現一次（mutation-check 與 m-b-reverse 的 47 項）。
 - **順手修的既有失敗**：`cmd/demo` 的 `TestTimingInterleaved` 在本分支與 `main`（e41cd5d）都固定失敗。原因是測試的競態：已結束的 run 不再顯示 `tool_calls`，B 在第二次呼叫後立刻結束，測試等不到。改成 B 也等 `x3` 才結束（ea4e397）。
 - **Review**：Claude Code 獨立 context 的 code-reviewer，結論是 APPROVE，附 3 項 Important 與 5 項建議：
   - 累計上限：待 Aaron 決定。
   - 改名前中斷會卡住：已修。
   - 測試沒有證明 3 個拒絕碼與交易內重讀：已補。
   - 建議全部處理：`verify` 改用請求的 ctx；拒絕混用兩種授權；遷移時的寫鎖與文件用語；人類核准設計文件標註已被 P2-D1 取代；表清單補上 `approver_handles`。
+  - 第二輪（7f1a563）：APPROVE，無 Critical／Important。3 項 should-fix 已處理：測試補上「筆數相同、內容不同」由 EXCEPT 擋下的情況（並加對應突變）；補完改名的路徑也檢查 Rollback 與 DETACH 的錯誤；每張表的欄位清單只查一次。

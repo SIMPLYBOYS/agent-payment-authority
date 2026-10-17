@@ -311,13 +311,9 @@ func TestMigrateApprovals(t *testing.T) {
 	if rep, err := pay.Sign(bg, SignRequest{RequestID: "request-0000000401", Authorization: byApproval(ap.ApprovalID), Order: order}); err != nil || rep.State != "signed" {
 		t.Fatalf("pay after migration %+v %v", rep, err)
 	}
-	// Another approvals.db (the approval paid since, one row more): refused, nothing moved.
+	// The old approvals.db again, now differing from signer.db with the
+	// same row counts (the approval was consumed since): refused, nothing moved.
 	os.Rename(filepath.Join(dir, "approvals.db.migrated"), filepath.Join(dir, "approvals.db"))
-	other, _ := OpenDB(filepath.Join(dir, "approvals.db"))
-	if _, err := other.Exec(`INSERT INTO approver_handles VALUES ('approver-z', 'aGFuZGxlLXo')`); err != nil {
-		t.Fatal(err)
-	}
-	other.Close()
 	if _, err := MigrateApprovals(bg, dir); err == nil || Unmigrated(dir) == nil {
 		t.Fatalf("merged into a signer.db with other approvals: %v", err)
 	}

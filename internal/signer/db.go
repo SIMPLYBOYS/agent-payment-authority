@@ -87,20 +87,22 @@ func MigrateApprovals(ctx context.Context, dir string) (map[string]int, error) {
 	}
 	defer tx.Rollback()
 	already, different := 0, false
+	cols := map[string]string{} // "" when old has no such table
 	for _, t := range approvalTables {
 		var have, src, missing int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM main.`+t).Scan(&have); err != nil {
 			return nil, err
 		}
-		cols, err := columns(ctx, tx, t)
+		cs, err := columns(ctx, tx, t)
 		if err != nil {
 			return nil, err
 		}
-		if cols != "" {
+		cols[t] = cs
+		if cs != "" {
 			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM old.`+t).Scan(&src); err != nil {
 				return nil, err
 			}
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT `+cols+` FROM old.`+t+` EXCEPT SELECT `+cols+` FROM main.`+t+`)`).Scan(&missing); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT `+cs+` FROM old.`+t+` EXCEPT SELECT `+cs+` FROM main.`+t+`)`).Scan(&missing); err != nil {
 				return nil, err
 			}
 		}
@@ -113,15 +115,16 @@ func MigrateApprovals(ctx context.Context, dir string) (map[string]int, error) {
 			return nil, fmt.Errorf("signer.db already has %d approval rows, not approvals.db's: nothing was moved", already)
 		}
 		// Every row is there already: a migration stopped before its rename.
-		tx.Rollback()
-		db.ExecContext(ctx, `DETACH DATABASE old`)
+		if err := tx.Rollback(); err != nil {
+			return nil, err
+		}
+		if _, err := db.ExecContext(ctx, `DETACH DATABASE old`); err != nil {
+			return nil, err
+		}
 		return moved, os.Rename(old, old+".migrated")
 	}
 	for _, t := range approvalTables {
-		cols, err := columns(ctx, tx, t)
-		if err != nil {
-			return nil, err
-		}
+		cols := cols[t]
 		if cols == "" {
 			continue // an approvals.db from before V1 has no voice tables
 		}

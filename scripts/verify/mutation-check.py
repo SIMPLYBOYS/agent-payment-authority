@@ -769,6 +769,8 @@ MUTATIONS = [
      'return nil, nil, 0, Refusal("BAD_REQUEST") // one authority per payment', 'au = au // one authority per payment', 'TestHumanApprovalPays'),
     ("P2 D1: another signer.db's approvals pass for a finished migration", 'internal/signer/db.go',
      'different = different || have != src || missing != 0', 'different = false && (different || have != src || missing != 0)', 'TestMigrateApprovals'),
+    ('P2 D1: equal row counts pass for a finished migration', 'internal/signer/db.go',
+     'different = different || have != src || missing != 0', 'different = different || have != src || false && missing != 0', 'TestMigrateApprovals'),
     # AE1 (docs/commercial-ae1.md): the scorer and the report.
     ('AE1 score: a pricier Ask is not a false Ask', 'internal/ae1/score.go',
      'case want == "Allow" && got == "Ask":', 'case false && want == "Allow" && got == "Ask":', 'TestScoreRun'),
