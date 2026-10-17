@@ -8,6 +8,11 @@
 //	zkbudget prove -dir D -chain C -contract A -task T -balance B -r R -amount X -rnew R2 -intent H
 //	zkbudget fixtures -dir D -out F.sol -deployer A -nonce N
 //
+// With -witness-stdin, commit and prove read the witness from stdin as
+// {"balance": B, "r": R, "rnew": R2} instead (P2: never on the command
+// line, where ps and shell history see it); -balance, -r and -rnew are
+// then refused.
+//
 // Outputs are JSON on stdout (fixtures: a Solidity file). No key, balance
 // or witness is written anywhere else.
 package main
@@ -37,13 +42,14 @@ import (
 
 func main() {
 	logger.Disable()
-	if err := run(os.Args[1:]); err != nil {
+	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "zkbudget:", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string) error {
+func run(args []string, stdin io.Reader, stdout io.Writer) error {
+	emit := func(v any) error { return emitTo(stdout, v) }
 	if len(args) == 0 {
 		return errors.New("usage: zkbudget setup|random|commit|prove|fixtures ...")
 	}
@@ -61,8 +67,25 @@ func run(args []string) error {
 	out := fs.String("out", "", "fixtures: the Solidity file")
 	deployer := fs.String("deployer", "0x7FA9385bE102ac3EAc297483Dd6233D62b3e1496", "fixtures: the test contract")
 	nonce := fs.Uint64("nonce", 2, "fixtures: the deployer's nonce of the budget contract")
+	wstdin := fs.Bool("witness-stdin", false, "commit, prove: read the witness from stdin as JSON")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
+	}
+	if *wstdin {
+		if *balance != 0 || *r != "" || *rNew != "" {
+			return errors.New("-witness-stdin: the witness comes from stdin only, not -balance, -r or -rnew")
+		}
+		var w struct {
+			Balance *uint64 `json:"balance"`
+			R       string  `json:"r"`
+			RNew    string  `json:"rnew"`
+		}
+		d := json.NewDecoder(io.LimitReader(stdin, 4096))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&w); err != nil || w.Balance == nil {
+			return errors.New("-witness-stdin: stdin must be {\"balance\": B, \"r\": R, \"rnew\": R2}")
+		}
+		*balance, *r, *rNew = *w.Balance, w.R, w.RNew
 	}
 	switch args[0] {
 	case "setup":
@@ -121,10 +144,10 @@ func run(args []string) error {
 	return fmt.Errorf("unknown command %q", args[0])
 }
 
-func emit(v any) error {
+func emitTo(w io.Writer, v any) error {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err == nil {
-		fmt.Println(string(b))
+		_, err = fmt.Fprintln(w, string(b))
 	}
 	return err
 }
@@ -214,7 +237,7 @@ func setup(dir string, n int) error {
 	if err := os.WriteFile(filepath.Join(dir, "transcript.json"), append(b, '\n'), 0o644); err != nil {
 		return err
 	}
-	return emit(t)
+	return emitTo(os.Stdout, t)
 }
 
 func writeTo(path string, v io.WriterTo) error {
