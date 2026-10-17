@@ -788,6 +788,8 @@ MUTATIONS = [
      'w1.IsUint64() && w1.Uint64() == amount {', 'w1.IsUint64() {', 'TestSpentFor'),
     ("P2 budget: the Spent matcher takes a removed log", 'internal/budget/verify.go',
      'if l.Removed || l.Address != contract ||', 'if l.Address != contract ||', 'TestSpentFor'),
+    ('P2 budget: one key may send for gas and issuer', 'internal/budget/relayer.go',
+     'if keys.Gas.Addr == keys.Issuer.Addr {', 'if false && keys.Gas.Addr == keys.Issuer.Addr {', 'TestOpenRefuses'),
     # AE1 (docs/commercial-ae1.md): the scorer and the report.
     ('AE1 score: a pricier Ask is not a false Ask', 'internal/ae1/score.go',
      'case want == "Allow" && got == "Ask":', 'case false && want == "Allow" && got == "Ask":', 'TestScoreRun'),
@@ -863,6 +865,10 @@ MUTATIONS = [
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    ('P2 budget: a blocked registration is not signed again', 'internal/budget/relayer.go',
+     '\tif err := r.resignRegistrations(ctx); err != nil {\n\t\treturn err\n\t}', '\tif err := error(nil); err != nil {\n\t\treturn err\n\t}', 'TestBlockedRegistrationIsResigned'),
+    ("P2 budget: a registration is not decided by the contract's commitment", 'internal/budget/relayer.go',
+     '\tstate := "registered"\n\tif !ok {', '\tstate := "registered"\n\tif ok {', 'TestBlockedRegistrationIsResigned'),
     ('P2 budget: a failed reservation keeps its nullifier', 'internal/budget/relayer.go',
      "ON reservations (nullifier) WHERE state <> 'failed';", "ON reservations (nullifier);", 'TestReserveAfterARevert'),
     ('P2 budget: a new reservation does not resend the written ones first', 'internal/budget/relayer.go',

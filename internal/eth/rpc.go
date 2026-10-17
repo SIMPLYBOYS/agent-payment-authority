@@ -192,8 +192,17 @@ func (m Msg) json() map[string]any {
 // Call is eth_call at latest: the return data, or the node's error (a
 // revert is an *RPCError).
 func (c *Client) Call(ctx context.Context, m Msg) ([]byte, error) {
+	return c.callAt(ctx, m, "latest")
+}
+
+// CallAt is eth_call at block n.
+func (c *Client) CallAt(ctx context.Context, m Msg, n uint64) ([]byte, error) {
+	return c.callAt(ctx, m, fmt.Sprintf("0x%x", n))
+}
+
+func (c *Client) callAt(ctx context.Context, m Msg, tag string) ([]byte, error) {
 	var s string
-	if err := c.call(ctx, "eth_call", &s, m.json(), "latest"); err != nil {
+	if err := c.call(ctx, "eth_call", &s, m.json(), tag); err != nil {
 		return nil, err
 	}
 	return hexBytes(s)

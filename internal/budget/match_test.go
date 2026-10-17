@@ -1,7 +1,9 @@
 package budget
 
 import (
+	"context"
 	"math/big"
+	"path/filepath"
 	"testing"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
@@ -31,6 +33,27 @@ func TestSpentFor(t *testing.T) {
 	} {
 		if spentFor([]eth.Log{l}, contract, task, intent, 5) {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestOpenRefuses(t *testing.T) {
+	k := func(b byte) *eth.Key {
+		s := make([]byte, 32)
+		s[31] = b
+		key, _ := eth.NewKey(s)
+		return key
+	}
+	for name, cs := range map[string]struct {
+		cfg  Config
+		keys Keys
+	}{
+		"no confirmation":            {Config{}, Keys{Gas: k(1), Issuer: k(2), Policy: k(3)}},
+		"one key for gas and issuer": {Config{Confirmations: 1}, Keys{Gas: k(1), Issuer: k(1), Policy: k(3)}},
+		"no policy key":              {Config{Confirmations: 1}, Keys{Gas: k(1), Issuer: k(2)}},
+	} {
+		if _, err := Open(context.Background(), cs.cfg, cs.keys, nil, filepath.Join(t.TempDir(), "b.db"), nil); err == nil {
+			t.Errorf("%s: opened", name)
 		}
 	}
 }

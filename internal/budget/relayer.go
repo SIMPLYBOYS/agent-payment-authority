@@ -99,6 +99,9 @@ func Open(ctx context.Context, cfg Config, keys Keys, rpc *eth.Client, path stri
 	if cfg.Confirmations == 0 {
 		return nil, errors.New("budget: at least one confirmation")
 	}
+	if keys.Gas.Addr == keys.Issuer.Addr {
+		return nil, errors.New("budget: the gas and issuer keys must differ (each has its own nonces)")
+	}
 	if f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); err == nil {
 		f.Close()
 	} else if !errors.Is(err, os.ErrExist) {
@@ -210,22 +213,98 @@ func (r *Relayer) prepare(ctx context.Context, key *eth.Key, data []byte, floor 
 	if nonce < floor {
 		// A written transaction at or above it is in no pool (its resend was
 		// refused): a new one would wait behind that gap. Retry later; it is
-		// decided once its deadline or nonce says so (settleOpen).
+		// decided once its deadline or nonce says so, or signed again
+		// (settleOpen).
 		return nil, nil, 0, signer.Refusal("RELAYER_NONCE_BLOCKED")
 	}
+	raw, hash, err = r.signAt(ctx, key, data, nonce, gas+gas/5)
+	return raw, hash, nonce, err
+}
+
+// signAt signs a call to the contract at nonce with the current fees.
+func (r *Relayer) signAt(ctx context.Context, key *eth.Key, data []byte, nonce, gas uint64) (raw, hash []byte, err error) {
 	h, err := r.rpc.LatestHeader(ctx)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, err
 	}
 	tip, err := r.rpc.MaxPriorityFee(ctx)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, err
 	}
 	to := r.cfg.Contract
 	tx := &eth.Tx{ChainID: new(big.Int).SetUint64(r.cfg.ChainID), Nonce: nonce, MaxPriorityFeePerGas: tip,
-		MaxFeePerGas: new(big.Int).Add(new(big.Int).Mul(h.BaseFee, big.NewInt(2)), tip), Gas: gas + gas/5, To: &to, Value: new(big.Int), Data: data}
-	raw, hash, err = tx.Sign(key)
-	return raw, hash, nonce, err
+		MaxFeePerGas: new(big.Int).Add(new(big.Int).Mul(h.BaseFee, big.NewInt(2)), tip), Gas: gas, To: &to, Value: new(big.Int), Data: data}
+	return tx.Sign(key)
+}
+
+// resignRegistrations signs again, at its own nonce and with the current
+// fees, every registration no pool holds (its nonce is not below the
+// issuer's pending one: its resend was refused, say for a fee cap now
+// under the base fee). Registrations have no deadline to drop them, so
+// otherwise one would keep the issuer's nonce a gap forever. The same
+// call at the same nonce: whichever version mines registers the same
+// commitment, and finishRegistration decides by that commitment.
+func (r *Relayer) resignRegistrations(ctx context.Context) error {
+	pending, err := r.rpc.PendingNonce(ctx, r.keys.Issuer.Addr)
+	if err != nil {
+		return err
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT task_id, commitment, register_nonce FROM tasks WHERE state = 'registering' AND register_nonce >= ?`, pending)
+	if err != nil {
+		return err
+	}
+	type reg struct {
+		task, c0 string
+		nonce    uint64
+	}
+	var regs []reg
+	for rows.Next() {
+		var x reg
+		if err := rows.Scan(&x.task, &x.c0, &x.nonce); err != nil {
+			rows.Close()
+			return err
+		}
+		regs = append(regs, x)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for _, x := range regs {
+		c0, err := decimal(x.c0)
+		if err != nil {
+			return err
+		}
+		data, _ := eth.Call("registerTask(string,uint256)", x.task, c0)
+		gas, err := r.rpc.EstimateGas(ctx, eth.Msg{From: r.keys.Issuer.Addr, To: r.cfg.Contract, Data: data})
+		if err != nil {
+			continue // the commitment decides it: registered meanwhile, say
+		}
+		raw, hash, err := r.signAt(ctx, r.keys.Issuer, data, x.nonce, gas+gas/5)
+		if err != nil {
+			return err
+		}
+		if _, err := r.db.ExecContext(ctx, `UPDATE tasks SET register_raw = ?, register_hash = ? WHERE task_id = ? AND state = 'registering'`,
+			hex.EncodeToString(raw), hex.EncodeToString(hash), x.task); err != nil {
+			return err
+		}
+		r.rpc.SendRaw(ctx, raw)
+	}
+	return nil
+}
+
+// registered: the contract holds commitment for taskID at confirmed depth.
+func (r *Relayer) registered(ctx context.Context, taskID, commitment string) (bool, error) {
+	latest, err := r.rpc.BlockNumber(ctx)
+	if err != nil || latest+1 < r.cfg.Confirmations {
+		return false, err
+	}
+	data, _ := eth.Call("commitment(uint256)", TaskField(r.cfg.ChainID, r.cfg.Contract, taskID))
+	out, err := r.rpc.CallAt(ctx, eth.Msg{From: r.keys.Issuer.Addr, To: r.cfg.Contract, Data: data}, latest+1-r.cfg.Confirmations)
+	if err != nil {
+		return false, err
+	}
+	c, err := eth.Uint(out, 0)
+	return err == nil && c.String() == commitment, err
 }
 
 // floor is the next nonce after key's written, unfinished transactions.
@@ -308,6 +387,9 @@ func (r *Relayer) settleOpen(ctx context.Context) error {
 	if err := r.resendOpen(ctx); err != nil {
 		return err
 	}
+	if err := r.resignRegistrations(ctx); err != nil {
+		return err
+	}
 	var intents []string
 	var regs [][4]string
 	rows, err := r.db.QueryContext(ctx, `SELECT intent_hash, '', '', '' FROM reservations WHERE state = 'sent'
@@ -330,17 +412,14 @@ func (r *Relayer) settleOpen(ctx context.Context) error {
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
-	var ref signer.Refusal
+	// Each row's own outcome is its own caller's: an error here (the node,
+	// or a row needing an administrator) never stops an unrelated call.
 	for _, i := range intents {
-		if _, _, err := r.resume(ctx, i, false); err != nil && !errors.As(err, &ref) {
-			return err
-		}
+		r.resume(ctx, i, false)
 	}
 	for _, x := range regs {
 		n, _ := strconv.ParseUint(x[3], 10, 64)
-		if err := r.finishRegistration(ctx, x[0], x[1], x[2], n, false); err != nil && !errors.As(err, &ref) {
-			return err
-		}
+		r.finishRegistration(ctx, x[0], x[1], x[2], n, false)
 	}
 	return nil
 }
@@ -352,6 +431,10 @@ func (r *Relayer) settleOpen(ctx context.Context) error {
 func (r *Relayer) RegisterTask(ctx context.Context, taskID, consumerID string, balance uint64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// First: this task's own open registration may be decided, or signed again.
+	if err := r.settleOpen(ctx); err != nil {
+		return err
+	}
 	var have struct {
 		consumer, raw, hash, state string
 		balance, nonce             uint64
@@ -387,9 +470,6 @@ func (r *Relayer) RegisterTask(ctx context.Context, taskID, consumerID string, b
 	if err != nil {
 		return err
 	}
-	if err := r.settleOpen(ctx); err != nil {
-		return err
-	}
 	floor, err := r.floor(ctx, `SELECT max(register_nonce) FROM tasks WHERE state = 'registering'`)
 	if err != nil {
 		return err
@@ -401,6 +481,9 @@ func (r *Relayer) RegisterTask(ctx context.Context, taskID, consumerID string, b
 	// Written before it is sent: a restart resends this transaction, never a new one.
 	if _, err := r.db.ExecContext(ctx, `INSERT INTO tasks (task_id, consumer_id, balance, r, commitment, register_raw, register_hash, register_nonce, state)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'registering')`, taskID, consumerID, balance, rv, c0.String(), hex.EncodeToString(raw), hex.EncodeToString(hash), nonce); err != nil {
+		return err
+	}
+	if err := at("after-register-write"); err != nil {
 		return err
 	}
 	return r.finishRegistration(ctx, taskID, hex.EncodeToString(raw), hex.EncodeToString(hash), nonce, true)
@@ -423,8 +506,18 @@ func (r *Relayer) finishRegistration(ctx context.Context, taskID, rawHex, hashHe
 	if rc == nil && err == nil {
 		return signer.Refusal("TASK_REGISTRATION_PENDING")
 	}
+	// Decided by the contract, not by this one transaction: a version
+	// signed again at the same nonce may be the one that mined.
+	var c0 string
+	if err := r.db.QueryRowContext(ctx, `SELECT commitment FROM tasks WHERE task_id = ?`, taskID).Scan(&c0); err != nil {
+		return err
+	}
+	ok, err := r.registered(ctx, taskID, c0)
+	if err != nil {
+		return err
+	}
 	state := "registered"
-	if err != nil || rc.Status != 1 {
+	if !ok {
 		state = "failed"
 	}
 	if _, err := r.db.ExecContext(ctx, `UPDATE tasks SET state = ? WHERE task_id = ? AND state = 'registering'`, state, taskID); err != nil {

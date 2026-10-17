@@ -673,3 +673,45 @@ func TestBlockedNonceClears(t *testing.T) {
 		t.Fatalf("A: %v", err)
 	}
 }
+
+// A registration written and then refused by every pool (its fee cap under
+// the base fee) has no deadline to drop it: it is signed again at its own
+// nonce with the current fees, decided by the contract's commitment, and
+// the issuer's next registration follows it.
+func TestBlockedRegistrationIsResigned(t *testing.T) {
+	w := newWorld(t)
+	ctx, cancel := context.WithTimeout(bg, 90*time.Second)
+	defer cancel()
+	r := w.relayer(t, filepath.Join(t.TempDir(), "budget.db"))
+	r.wait = 10 * time.Second
+	hook = func(stage string) error {
+		if stage == "after-register-write" {
+			return errors.New("crash")
+		}
+		return nil
+	}
+	err := r.RegisterTask(ctx, "show-a-01", "consumer-a", 1_000_000)
+	hook = nil
+	if err == nil {
+		t.Fatal("no crash")
+	}
+	issuer := key(t, 1).Addr
+	before, _ := w.rpc.PendingNonce(bg, issuer)
+	w.call(t, "anvil_setNextBlockBaseFeePerGas", "0x"+strconv.FormatInt(1000e9, 16))
+	w.call(t, "evm_mine")
+	if err := r.RegisterTask(ctx, "show-a-02", "consumer-a", 1_000_000); err != nil {
+		t.Fatalf("the next registration: %v", err)
+	}
+	if err := r.RegisterTask(ctx, "show-a-01", "consumer-a", 1_000_000); err != nil {
+		t.Fatalf("the blocked one: %v", err)
+	}
+	if after, _ := w.rpc.PendingNonce(bg, issuer); after != before+2 {
+		t.Fatalf("issuer nonce %d -> %d", before, after)
+	}
+	h, _ := w.rpc.LatestHeader(bg)
+	w.now = h.Timestamp
+	raw, _, _ := w.order("consumer-a", "show-a-01", 1, "500000")
+	if _, err := r.Reserve(ctx, raw); err != nil {
+		t.Fatalf("a reservation on the re-signed task: %v", err)
+	}
+}
