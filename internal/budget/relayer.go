@@ -219,7 +219,8 @@ func (r *Relayer) prepare(ctx context.Context, key *eth.Key, data []byte, floor 
 
 // signAt signs a call to the contract at nonce with the current fees.
 func (r *Relayer) signAt(ctx context.Context, key *eth.Key, data []byte, nonce, gas uint64) (raw, hash []byte, err error) {
-	return r.rpc.SignCall(ctx, r.cfg.ChainID, key, r.cfg.Contract, data, nonce, gas, 1)
+	raw, hash, _, err = r.rpc.SignCall(ctx, r.cfg.ChainID, key, r.cfg.Contract, data, nonce, gas, nil)
+	return raw, hash, err
 }
 
 // resignRegistrations signs again, at its own nonce and with the current

@@ -287,7 +287,8 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。全部�
     - `balanceOf` 足夠；
     - 以 `eth_call` 模擬 `transferWithAuthorization`。
   - **結算**：已簽的交易**先寫入再送出**；送新交易前先重送並逐筆判定所有未完成的結算；pending nonce 低於「未完成交易的最高 nonce＋1」時不簽，回 `settlement_busy`（202，什麼都不寫）。
-    - 一筆已因期限失敗、但仍卡在 pool 裡的轉帳（它的 nonce 還沒被用掉），下一筆轉帳會改用它的 nonce、手續費加倍，把它取代掉，不會讓之後的轉帳一直排在它後面。
+    - 一筆已因期限失敗、但 nonce 還沒被用掉的轉帳（仍卡在 pool 裡，或已被移出 pool、留下空洞），下一筆轉帳會直接改用它的 nonce，不會讓之後的轉帳一直排在它後面。手續費（tip 與 fee cap 各自）取兩者中較大的：「目前建議值的 2 倍」，或「這個 nonce 上所有已寫入轉帳的最高值 ×1.125 再加 1」。每筆轉帳都記下它用的手續費，所以連續取代多次也一定高過前一次。
+    - 若被取代的那筆最後還是上鏈了（會 revert，因為它已過期），取代它的那筆就因 nonce 被用掉而判定失敗，不會付兩次；但那位客人的授權會被商店自己這一列擋住，和被搶先送出時一樣，交給對帳處理。
     - 節點連線錯誤回 202（`settlement_node_unavailable`，什麼都不寫），不當成付款人的錯；只有合約真的 revert 才算驗證失敗。
     - 鎖只涵蓋「判定並寫入轉帳」；等待確認時不持鎖（狀態更新本身有 `state = 'sent'` 的條件保護）。
   - **交付把關**：只有轉帳達到確認數，且收據裡有代幣本身發出、金額正確、由 payer 轉給 `payTo` 的 `Transfer`，才回 200，附內容與 `PAYMENT-RESPONSE`（`success`、`transaction`、`network`、`payer`）。
@@ -318,9 +319,10 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。全部�
   - `TestConcurrentSamePayment`：4 個相同請求同時送出，只有一筆轉帳，全部交付；
   - `TestReplayWhileUnmined`：轉帳還沒上鏈時，同一份授權用在別的資源，由商店自己的紀錄擋下；
   - `TestFrontRunFails`：被搶先送出 → `settlement_failed`，不交付，`payTo` 只收到一次；
-  - `TestStuckTransferIsReplaced`：用很小的區塊 gas 上限讓轉帳留在 pool 裡，過了期限後判定為失敗；下一筆付款沿用它的 nonce（gas pending nonce 不變）、把它取代，並且交付。
+  - `TestStuckTransferIsReplaced`：用很小的區塊 gas 上限讓轉帳留在 pool 裡，過了期限後判定為失敗；下一筆付款沿用它的 nonce（gas pending nonce 不變）、把它取代。取代的那筆再次卡住、過期後，第三筆再取代它（手續費高過前兩筆），最後由第三筆交付，`payTo` 只收到一次。
+  - `TestConcurrentWhileUnmined`：關掉自動出塊，4 個相同請求同時等待確認（等待時不持鎖），出塊後全部交付，只有一筆轉帳。
   - 用「拉高 base fee」讓交易卡住的做法在 anvil 上行不通：anvil 會把付不起的交易從 pool 移除（實測確認），所以改用 gas 上限。
-- **突變**：review 後商店共 15 項，P2 全部 63 項，基準全部通過，全部 KILLED。過程中有兩項起初沒被抓到，都已修正：
+- **突變**：第二輪 review 後商店共 16 項，P2 全部 64 項，基準全部通過，全部 KILLED。過程中有兩項起初沒被抓到，都已修正：
   - high-S：測試裡的竄改把 v 從 27 變成 26，而不是 28；
   - 取代卡住的 nonce：用 base fee 的做法根本沒有讓交易留在 pool 裡。
 - **本片 §7 必驗反例中，商店這一段證明的**：verify 失敗不 settle；EIP-3009 重播；結果不明不被當成失敗、不重付；未確認就不交付。其餘反例要等 Host 端與 Reconciler 完成後才能證明。
@@ -340,3 +342,13 @@ Claude Code 獨立 context 的 code-reviewer，結論 APPROVE with should-fix，
 | 建議 | 付費內容可能被快取 | `Cache-Control: no-store` |
 | 建議 | 被搶先送出的情況沒有寫 | 寫進 §9.10，交給對帳 |
 | 建議 | 缺測試：revert、因期限失敗、驗證失敗後重試、同時送出、轉帳未上鏈時的重播 | 補上前述 6 個測試；`settlement_busy`（需要讓重送被所有 pool 拒收）沒有測試 |
+
+第二輪 review（bda8125）：結論 APPROVE with should-fix，沒有 Critical。審查者確認：不持鎖的等待不會讓一份授權產生兩筆轉帳；沿用 nonce 只會取代已不可能成功的轉帳；正規化 hash 涵蓋所有簽署欄位；`validBefore` 的上下限正確。修正：
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Important | 第二次取代同一個 nonce 時手續費只是「目前 ×2」，可能不高於 pool 裡那筆而被拒收，使一份有效授權回 402（審查者在 anvil 上重現） | 每筆轉帳記下自己用的手續費；取代時高過該 nonce 上的最高值 ×1.125；`TestStuckTransferIsReplaced` 加上第二次取代 |
+| 建議 | 卡住的交易已被移出 pool 時，要等到 busy 期限過去才能補上空洞 | 直接沿用該 nonce |
+| 建議 | 取代之後，被取代的那筆若上鏈，客人的授權會被擋住 | 寫進 §9.10 |
+| 建議 | 並行測試沒有真的重疊 | `TestConcurrentWhileUnmined` |
+| 建議 | 文件寫「手續費加倍」不夠精確 | 改寫為實際規則 |

@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS settlements (
   raw_tx       TEXT NOT NULL,
   tx_hash      TEXT NOT NULL UNIQUE,
   tx_nonce     INTEGER NOT NULL,
+  tip          TEXT NOT NULL,
+  fee_cap      TEXT NOT NULL,
   state        TEXT NOT NULL CHECK (state IN ('sent', 'settled', 'failed')),
   block        INTEGER,
   created_at   INTEGER NOT NULL,
@@ -198,14 +200,14 @@ func (s *Settler) Pay(ctx context.Context, o offer, payload json.RawMessage) Out
 	if err := s.settleOpen(ctx); err != nil {
 		return Outcome{Kind: "pending", Reason: "settlement_store_unavailable", Response: resp}
 	}
-	raw, hash, txNonce, r := s.prepare(ctx, data)
+	raw, hash, txNonce, fees, r := s.prepare(ctx, data)
 	if r != "" {
 		return Outcome{Kind: "pending", Reason: r, Response: resp} // nothing written: the same payment again tries again
 	}
 	// Written before it is sent: a retry resends this transfer, never a new one.
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO settlements (payer, auth_nonce, payload_hash, resource_url, amount, valid_before, raw_tx, tx_hash, tx_nonce, state, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'sent', ?)`, v.payer.Hex(), nonceHex, hex.EncodeToString(sum[:]), o.url, v.value, v.before,
-		hex.EncodeToString(raw), hex.EncodeToString(hash), txNonce, s.clock()); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO settlements (payer, auth_nonce, payload_hash, resource_url, amount, valid_before, raw_tx, tx_hash, tx_nonce, tip, fee_cap, state, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sent', ?)`, v.payer.Hex(), nonceHex, hex.EncodeToString(sum[:]), o.url, v.value, v.before,
+		hex.EncodeToString(raw), hex.EncodeToString(hash), txNonce, fees.Tip.String(), fees.Cap.String(), s.clock()); err != nil {
 		return Outcome{Kind: "pending", Reason: "settlement_store_unavailable", Response: resp}
 	}
 	if err := at("after-write"); err != nil {
@@ -341,44 +343,66 @@ func transferCall(v verified) ([]byte, error) {
 // nonce must not be below an unfinished settlement's next: one in no pool
 // would leave a gap the new transfer waits behind (then settlement_busy,
 // nothing signed; settleOpen decides it by its deadline).
-func (s *Settler) prepare(ctx context.Context, data []byte) (raw, hash []byte, nonce uint64, reason string) {
+func (s *Settler) prepare(ctx context.Context, data []byte) (raw, hash []byte, nonce uint64, fees eth.Fees, reason string) {
+	unavailable := func() ([]byte, []byte, uint64, eth.Fees, string) {
+		return nil, nil, 0, fees, "settlement_node_unavailable"
+	}
 	msg := eth.Msg{From: s.gas.Addr, To: s.cfg.Token, Data: data}
 	gas, err := s.rpc.EstimateGas(ctx, msg)
 	if err != nil {
-		return nil, nil, 0, "settlement_node_unavailable"
+		return unavailable()
 	}
 	if nonce, err = s.rpc.PendingNonce(ctx, s.gas.Addr); err != nil {
-		return nil, nil, 0, "settlement_node_unavailable"
+		return unavailable()
 	}
 	latest, err := s.rpc.BlockNumber(ctx)
 	if err != nil {
-		return nil, nil, 0, "settlement_node_unavailable"
+		return unavailable()
 	}
 	mined, err := s.rpc.NonceAt(ctx, s.gas.Addr, latest)
 	if err != nil {
-		return nil, nil, 0, "settlement_node_unavailable"
+		return unavailable()
 	}
 	var floor, stale sql.NullInt64
 	if err := s.db.QueryRowContext(ctx, `SELECT (SELECT max(tx_nonce) + 1 FROM settlements WHERE state = 'sent'),
 		(SELECT min(tx_nonce) FROM settlements f WHERE state = 'failed' AND tx_nonce >= ?
 			AND NOT EXISTS (SELECT 1 FROM settlements o WHERE o.state <> 'failed' AND o.tx_nonce = f.tx_nonce))`, mined).Scan(&floor, &stale); err != nil {
-		return nil, nil, 0, "settlement_store_unavailable"
+		return nil, nil, 0, fees, "settlement_store_unavailable"
 	}
-	scale := int64(1)
+	var replace *eth.Fees
 	switch {
-	case stale.Valid && uint64(stale.Int64) < nonce:
-		// A failed transfer (past its validBefore) still holds this nonce in
-		// a pool, unmined: this one replaces it there, with doubled fees, so
-		// it never leaves later transfers waiting behind it.
-		nonce, scale = uint64(stale.Int64), 2
+	case stale.Valid && uint64(stale.Int64) <= nonce:
+		// A failed transfer (past its validBefore) still holds this nonce,
+		// unmined (in a pool, or evicted and a gap): this one takes it,
+		// priced above every transfer written at it, so a pool replaces the
+		// stuck one and later transfers never wait behind it.
+		nonce = uint64(stale.Int64)
+		replace = &eth.Fees{Tip: new(big.Int), Cap: new(big.Int)}
+		rows, err := s.db.QueryContext(ctx, `SELECT tip, fee_cap FROM settlements WHERE tx_nonce = ?`, nonce)
+		if err != nil {
+			return nil, nil, 0, fees, "settlement_store_unavailable"
+		}
+		for rows.Next() {
+			var tip, fc string
+			rows.Scan(&tip, &fc)
+			if t, ok := new(big.Int).SetString(tip, 10); ok && t.Cmp(replace.Tip) > 0 {
+				replace.Tip = t
+			}
+			if c, ok := new(big.Int).SetString(fc, 10); ok && c.Cmp(replace.Cap) > 0 {
+				replace.Cap = c
+			}
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return nil, nil, 0, fees, "settlement_store_unavailable"
+		}
 	case floor.Valid && nonce < uint64(floor.Int64):
-		return nil, nil, 0, "settlement_busy"
+		return nil, nil, 0, fees, "settlement_busy"
 	}
-	raw, hash, err = s.rpc.SignCall(ctx, s.cfg.ChainID, s.gas, s.cfg.Token, data, nonce, gas+gas/5, scale)
+	raw, hash, fees, err = s.rpc.SignCall(ctx, s.cfg.ChainID, s.gas, s.cfg.Token, data, nonce, gas+gas/5, replace)
 	if err != nil {
-		return nil, nil, 0, "settlement_node_unavailable"
+		return unavailable()
 	}
-	return raw, hash, nonce, ""
+	return raw, hash, nonce, fees, ""
 }
 
 // settleOpen sends every unfinished transfer again (the same ones) and

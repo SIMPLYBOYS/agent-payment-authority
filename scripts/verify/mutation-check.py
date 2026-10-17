@@ -866,6 +866,8 @@ MUTATIONS = [
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
     # P2 merchant settlement (docs/commercial-p2.md 9.10).
+    ('P2 shop: a second replacement is priced from current fees only', 'internal/eth/send.go',
+     'if p.Cmp(v) > 0 {', 'if false && p.Cmp(v) > 0 {', 'internal/merchant:TestStuckTransferIsReplaced'),
     ('P2 shop: a re-serialized payment reads as a replay', 'internal/merchant/settle.go',
      'sum := sha256.Sum256(data)', 'sum := sha256.Sum256(payload)', 'TestSettleAndDeliver'),
     ('P2 shop: validBefore past the offer is accepted', 'internal/merchant/settle.go',
@@ -875,7 +877,7 @@ LOCAL_MUTATIONS = [
     ('P2 shop: a high-S signature is taken', 'internal/merchant/settle.go',
      '|| new(big.Int).SetBytes(v.sig[32:64]).Cmp(halfN) > 0 {', '|| false && new(big.Int).SetBytes(v.sig[32:64]).Cmp(halfN) > 0 {', 'TestVerificationFailuresSendNothing'),
     ("P2 shop: a stuck transfer's nonce is not replaced", 'internal/merchant/settle.go',
-     'case stale.Valid && uint64(stale.Int64) < nonce:', 'case false && stale.Valid && uint64(stale.Int64) < nonce:', 'TestStuckTransferIsReplaced'),
+     'case stale.Valid && uint64(stale.Int64) <= nonce:', 'case false && stale.Valid && uint64(stale.Int64) <= nonce:', 'TestStuckTransferIsReplaced'),
     ('P2 shop: a payment to another recipient settles', 'internal/merchant/settle.go',
      'case v.to != payTo:', 'case false && v.to != payTo:', 'TestVerificationFailuresSendNothing'),
     ('P2 shop: a payment of another amount settles', 'internal/merchant/settle.go',

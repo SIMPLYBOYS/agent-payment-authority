@@ -11,24 +11,45 @@ import (
 // deadline with it unmined.
 var ErrDropped = errors.New("dropped")
 
+// Fees are a transaction's tip and fee cap.
+type Fees struct{ Tip, Cap *big.Int }
+
 // SignCall signs a call of data to `to` from key at nonce, with the
-// current fees (twice the base fee plus the tip) times scale: 2 replaces a
-// transaction stuck at that nonce in a pool (which wants a fee bump).
-func (c *Client) SignCall(ctx context.Context, chainID uint64, key *Key, to Address, data []byte, nonce, gas uint64, scale int64) (raw, hash []byte, err error) {
+// current fees (the tip, and a cap of twice the base fee plus it). With
+// replace, it replaces a transaction stuck at that nonce in a pool: both
+// at least twice the current ones and above replace's by more than an
+// eighth (a pool wants a bump on each, typically 10%). It returns the fees
+// it used.
+func (c *Client) SignCall(ctx context.Context, chainID uint64, key *Key, to Address, data []byte, nonce, gas uint64, replace *Fees) (raw, hash []byte, used Fees, err error) {
 	h, err := c.LatestHeader(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, used, err
 	}
 	tip, err := c.MaxPriorityFee(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, used, err
 	}
-	k := big.NewInt(max(scale, 1))
-	tip.Mul(tip, k)
 	fee := new(big.Int).Add(new(big.Int).Mul(h.BaseFee, big.NewInt(2)), tip)
-	fee.Mul(fee, k)
+	if replace != nil {
+		bump := func(now, prior *big.Int) *big.Int {
+			v := new(big.Int).Mul(now, big.NewInt(2))
+			if prior != nil {
+				p := new(big.Int).Add(prior, new(big.Int).Rsh(prior, 3))
+				p.Add(p, big.NewInt(1))
+				if p.Cmp(v) > 0 {
+					v = p
+				}
+			}
+			return v
+		}
+		tip, fee = bump(tip, replace.Tip), bump(fee, replace.Cap)
+		if fee.Cmp(tip) < 0 {
+			fee.Set(tip)
+		}
+	}
 	tx := &Tx{ChainID: new(big.Int).SetUint64(chainID), Nonce: nonce, MaxPriorityFeePerGas: tip, MaxFeePerGas: fee, Gas: gas, To: &to, Value: new(big.Int), Data: data}
-	return tx.Sign(key)
+	raw, hash, err = tx.Sign(key)
+	return raw, hash, Fees{Tip: tip, Cap: fee}, err
 }
 
 // Check looks once at a written transaction at confirmed depth (the

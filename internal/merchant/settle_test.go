@@ -419,37 +419,83 @@ func TestFrontRunFails(t *testing.T) {
 	}
 }
 
-// A transfer stuck in the pool (here: blocks too small to hold it) past its
-// validBefore is failed, and the next payment takes its nonce with
-// doubled fees, replacing it there, instead of waiting behind it.
+// A transfer stuck in the pool (here: blocks too small to hold it) past
+// its validBefore is failed, and the next payment takes its nonce, priced
+// above it, replacing it there; stuck again, the one after that replaces
+// the replacement (above both). Later transfers never wait behind it, and
+// payTo is paid once, by the last.
 func TestStuckTransferIsReplaced(t *testing.T) {
 	s := newChainShop(t, 1)
 	s.st.wait = time.Second
 	ethtest.RPC(t, s.rpc, "evm_setAutomine", false)
-	stuck := s.header("kr-market", s.auth(500000), nil)
-	if rec, _ := s.get("kr-market", stuck); rec.Code != 202 {
-		t.Fatalf("sent: %d", rec.Code)
+	small, normal := "0x7530", "0x1c9c380" // 30000 is below a transfer's gas: it stays pooled
+	stuckFor := func(h string) {
+		t.Helper()
+		ethtest.RPC(t, s.rpc, "evm_setBlockGasLimit", small)
+		ethtest.RPC(t, s.rpc, "evm_mine")
+		ethtest.RPC(t, s.rpc, "evm_increaseTime", 120) // past its validBefore
+		ethtest.RPC(t, s.rpc, "evm_mine")
+		// Normal blocks again, none mined yet: it is still pooled.
+		ethtest.RPC(t, s.rpc, "evm_setBlockGasLimit", normal)
+		if rec, sr := s.get("kr-market", h); rec.Code != 402 || sr.ErrorReason != "settlement_failed" {
+			t.Fatalf("past its deadline: %d %+v", rec.Code, sr)
+		}
+	}
+	first := s.header("kr-market", s.auth(500000), nil)
+	if rec, _ := s.get("kr-market", first); rec.Code != 202 {
+		t.Fatalf("first sent: %d", rec.Code)
 	}
 	before := s.gasNonce()
-	ethtest.RPC(t, s.rpc, "evm_setBlockGasLimit", "0x7530") // 30000: below the transfer's gas, so it stays pooled
-	ethtest.RPC(t, s.rpc, "evm_mine")
-	ethtest.RPC(t, s.rpc, "evm_increaseTime", 120) // past its validBefore
-	ethtest.RPC(t, s.rpc, "evm_mine")
-	// Normal blocks again, none mined yet: the stuck transfer is still pooled.
-	ethtest.RPC(t, s.rpc, "evm_setBlockGasLimit", "0x1c9c380")
-	if rec, sr := s.get("kr-market", stuck); rec.Code != 402 || sr.ErrorReason != "settlement_failed" {
-		t.Fatalf("past its deadline: %d %+v", rec.Code, sr)
-	}
-	next := s.header("kr-market", s.auth(500000), nil)
-	if rec, _ := s.get("kr-market", next); rec.Code != 202 {
-		t.Fatalf("next sent: %d", rec.Code)
-	}
-	if s.gasNonce() != before {
-		t.Fatalf("the next one took a new nonce: %d -> %d", before, s.gasNonce())
+	stuckFor(first)
+	var last string
+	for i := range 2 {
+		next := s.header("kr-market", s.auth(500000), nil)
+		if rec, _ := s.get("kr-market", next); rec.Code != 202 {
+			t.Fatalf("replacement %d sent: %d", i, rec.Code)
+		}
+		if s.gasNonce() != before {
+			t.Fatalf("replacement %d took a new nonce: %d -> %d", i, before, s.gasNonce())
+		}
+		if i == 0 {
+			stuckFor(next)
+		}
+		last = next
 	}
 	ethtest.RPC(t, s.rpc, "evm_mine")
 	ethtest.RPC(t, s.rpc, "evm_setAutomine", true)
-	if rec, sr := s.get("kr-market", next); rec.Code != 200 || !sr.Success || s.balance(payTo) != 500000 {
-		t.Fatalf("next: %d %+v, payTo %d", rec.Code, sr, s.balance(payTo))
+	if rec, sr := s.get("kr-market", last); rec.Code != 200 || !sr.Success || s.balance(payTo) != 500000 {
+		t.Fatalf("last: %d %+v, payTo %d", rec.Code, sr, s.balance(payTo))
+	}
+}
+
+// Identical requests overlapping while the transfer is unmined (the wait
+// holds no lock): one transfer, all delivered once it is mined.
+func TestConcurrentWhileUnmined(t *testing.T) {
+	s := newChainShop(t, 1)
+	s.st.wait = 10 * time.Second
+	ethtest.RPC(t, s.rpc, "evm_setAutomine", false)
+	h := s.header("kr-market", s.auth(500000), nil)
+	before := s.gasNonce()
+	var wg sync.WaitGroup
+	codes := make([]int, 4)
+	for i := range codes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rec, _ := s.get("kr-market", h)
+			codes[i] = rec.Code
+		}()
+	}
+	time.Sleep(time.Second) // all four waiting
+	ethtest.RPC(t, s.rpc, "evm_mine")
+	wg.Wait()
+	ethtest.RPC(t, s.rpc, "evm_setAutomine", true)
+	for i, c := range codes {
+		if c != 200 {
+			t.Fatalf("%d: %d", i, c)
+		}
+	}
+	if s.gasNonce() != before+1 || s.balance(payTo) != 500000 {
+		t.Fatalf("gas nonce %d -> %d, payTo %d", before, s.gasNonce(), s.balance(payTo))
 	}
 }
