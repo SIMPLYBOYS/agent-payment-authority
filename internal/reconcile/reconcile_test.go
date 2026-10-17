@@ -66,11 +66,13 @@ func TestStatus(t *testing.T) {
 	tok := c.token(1)
 	paid, data := c.sign(shopAddr, 500000, 600)
 	rc := c.submit(data)
-	open, _ := c.sign(shopAddr, 100000, 600)
+	open, _ := c.sign(shopAddr, 100000, 3600) // outlives the boundary case's time jump
 	brief, _ := c.sign(shopAddr, 100000, 30)
 	other, _ := eth.ParseAddress("0x9999999999999999999999999999999999999999")
 	misrecorded := paid
 	misrecorded.To = other // the Host recorded another recipient than was paid
+	misvalued := paid
+	misvalued.Value = 499999
 
 	for name, cs := range map[string]struct {
 		a    Authorization
@@ -79,6 +81,7 @@ func TestStatus(t *testing.T) {
 		"settled":     {paid, "settled"},
 		"unused":      {open, "pending"},
 		"misrecorded": {misrecorded, "needs_review"},
+		"misvalued":   {misvalued, "needs_review"},
 	} {
 		for range 2 { // asked twice: the same answer
 			r, err := tok.Status(bg, cs.a)
@@ -98,6 +101,21 @@ func TestStatus(t *testing.T) {
 	}
 	if r, _ := c.token(1).Status(bg, late); r.State != "settled" {
 		t.Fatalf("one confirmation: %+v", r)
+	}
+	// At exactly its validBefore unused: the token refuses it from then on.
+	edge, _ := c.sign(shopAddr, 100000, 600)
+	ethtest.RPC(t, c.rpc, "evm_setNextBlockTimestamp", edge.ValidBefore-1)
+	ethtest.RPC(t, c.rpc, "evm_mine")
+	if r, _ := tok.Status(bg, edge); r.State != "pending" {
+		t.Fatalf("one second before: %+v", r)
+	}
+	ethtest.RPC(t, c.rpc, "evm_setNextBlockTimestamp", edge.ValidBefore)
+	ethtest.RPC(t, c.rpc, "evm_mine")
+	if ethtest.Now(t, c.rpc) != edge.ValidBefore {
+		t.Fatalf("block time %d, validBefore %d", ethtest.Now(t, c.rpc), edge.ValidBefore)
+	}
+	if r, _ := tok.Status(bg, edge); r.State != "not_settled_expired" {
+		t.Fatalf("at validBefore: %+v", r)
 	}
 	// Past its validBefore unused: it can never be settled.
 	ethtest.RPC(t, c.rpc, "evm_increaseTime", 60)
@@ -139,10 +157,34 @@ func TestUnauthorized(t *testing.T) {
 		spends[1].To != other || spends[1].Nonce != nil {
 		t.Fatalf("two unauthorized: %+v %v", spends, err)
 	}
+	// Unconfirmed spends are left out; so is anything before FromBlock.
+	_, d4 := c.sign(shopAddr, 100000, 600)
+	rc4 := c.submit(d4)
+	if spends, _ := c.token(2).Unauthorized(bg, []eth.Address{c.payer.Addr}, []Authorization{a1, a2}); len(spends) != 2 {
+		t.Fatalf("two confirmations: %+v", spends)
+	}
+	late := c.token(1)
+	late.FromBlock = rc4.BlockNumber
+	if spends, _ := late.Unauthorized(bg, []eth.Address{c.payer.Addr, c.payer.Addr}, nil); len(spends) != 1 || spends[0].Block != rc4.BlockNumber {
+		t.Fatalf("from block %d, the wallet twice: %+v", rc4.BlockNumber, spends)
+	}
 	// Signed for another amount than was paid: listed.
 	wrong := a2
 	wrong.Value = 300001
-	if spends, _ := tok.Unauthorized(bg, []eth.Address{c.payer.Addr}, []Authorization{a1, wrong}); len(spends) != 3 {
+	if spends, _ := tok.Unauthorized(bg, []eth.Address{c.payer.Addr}, []Authorization{a1, wrong}); len(spends) != 4 {
 		t.Fatalf("amount differs from the signed one: %+v", spends)
+	}
+}
+
+func TestStatusRefusesAPartialRecord(t *testing.T) {
+	tok := Token{}
+	for name, a := range map[string]Authorization{
+		"no validBefore": {From: eth.Address{1}, Nonce: eth.Bytes32{1}},
+		"no payer":       {ValidBefore: 1, Nonce: eth.Bytes32{1}},
+		"no nonce":       {From: eth.Address{1}, ValidBefore: 1},
+	} {
+		if _, err := tok.Status(bg, a); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }

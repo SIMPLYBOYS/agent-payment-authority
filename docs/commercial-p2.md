@@ -355,19 +355,22 @@ Claude Code 獨立 context 的 code-reviewer，結論 APPROVE with should-fix，
 
 ### 9.12 Reconciler（本機）
 
-- **`internal/reconcile`**：只讀鏈上狀態、什麼都不存，而且只在**已確認深度**讀。同一個問題問兩次，答案一定相同，所以重複處理不會改變任何事（§7 的「Reconciler 重複處理」）。
+- **`internal/reconcile`**：只讀鏈上狀態、什麼都不存，而且只在**已確認深度**讀。在同一個鏈狀態下，同一個問題問兩次，答案一定相同，所以重複處理不會改變任何事（§7 的「Reconciler 重複處理」）。
+  - 確認數 1 等於讀最新區塊本身，**沒有任何 reorg 保護**（anvil 的設定，P2-D6）。公開鏈要 2 以上；每一個狀態都只和這個深度一樣可靠。
+  - log 以每次最多 2000 個區塊的範圍分段查詢（服務商有上限），從 `FromBlock`（代幣的部署區塊）開始。ponytail：每次呼叫都從頭掃，紀錄變長之後再改用游標。
+  - 讀到的收據必須在它的 log 所在的區塊，而且不超過已確認區塊；不然就是節點不一致或兩次讀取之間發生 reorg，回錯誤，之後再問。
   - 看的是代幣本身的事件（`AuthorizationUsed`、`Transfer`），不看送出交易的人（交易流程 §1 第 6 步：看 token 的 `from`，不看 facilitator 的 tx sender）。
 - **`Token.Status(授權)`**，一筆簽出的 EIP-3009 授權在鏈上的狀態：
-  - `settled`：nonce 已用，而且同一筆交易裡有代幣從 `From` 轉 `Value` 給 `To` 的 `Transfer`；附上交易與區塊。
+  - `settled`：nonce 已用，而且**緊接在這份授權的 `AuthorizationUsed` 之後**的那一筆 `Transfer`（代幣把兩者連著發出），正是從 `From` 轉 `Value` 給 `To`；附上交易與區塊。同一筆交易裡別的授權造成的轉帳，不算這一份的。
   - `pending`：nonce 未用，在已確認深度上仍然有效。之後仍可能結算，所以**絕不能重付**。
-  - `not_settled_expired`：nonce 未用，而且已確認區塊的時間已到或超過 `validBefore`，之後任何區塊都不會再接受它。
+  - `not_settled_expired`：nonce 未用，而且已確認區塊的時間已到或超過 `validBefore`，之後任何區塊都不會再接受它。這是唯一允許 Host 再付一次的狀態，所以它只和輸入的 `validBefore` 一樣正確：必須是簽出的那個值。`validBefore` 為 0、付款人或 nonce 為零值時，一律回錯誤。
   - `needs_review`：nonce 已用，但不是用在這筆轉帳上（收款人或金額與紀錄不符、被取消，或找不到唯一的事件）。
 - **`Token.Unauthorized(錢包, 已知授權)`**：列出每一筆從付款錢包轉出、卻對不到 Signer 簽出的授權的已確認 `Transfer`，包括：
   - 一般 `transfer`（Signer 從不簽這種交易）；
   - Signer 沒有簽過的授權；
   - 收款人或金額與簽出的不同。
 
-  結果為零，就是「沒有未授權的新增支出」（AE1 待 P2 的那一項；Host 接上之後由 Host 提供已簽授權的清單）。
+  每份授權只能替它自己造成的那一筆 `Transfer` 背書（就是緊接在它的 `AuthorizationUsed` 之後的那一筆）。結果為零，就是「沒有未授權的新增**代幣轉出**」（AE1 待 P2 的那一項；Host 接上之後由 Host 提供已簽授權的清單）。`approve`／`permit` 這類授權本身不移動代幣，不在檢查範圍內。重複列出的錢包只查一次，零位址不查。
 - `eth.Client.FilterLogs`：依多個 topic 過濾 log。
 - **驗證**（本機 anvil、TestUSDC、anvil 公開測試金鑰；`go test -race` 通過）：
   - `TestStatus`：
@@ -379,5 +382,27 @@ Claude Code 獨立 context 的 code-reviewer，結論 APPROVE with should-fix，
     - 兩筆都是簽出的授權時為零，再問一次仍為零；
     - 加入一筆未簽的授權與一筆一般 `transfer` 後，恰好列出這兩筆，並分辨出有沒有 EIP-3009 nonce；
     - 簽出的金額與實際不同時，也被列出。
-  - 突變 5 項，5／5 KILLED。
-- **尚未接上**：Host 的付款紀錄、事件與 `payment_status` 推導，以及「已預留未付款 → `needs_review`」（交易流程決策 6），都要等 Host 端接線時再接上這個元件。被 reorg 移除的 log（`Removed`）會被略過，但沒有測試。
+  - review 後新增：
+    - `TestStatus`：剛好在 `validBefore` 的那一秒判定為 `not_settled_expired`，前一秒仍是 `pending`；紀錄的金額與實際不同時為 `needs_review`；
+    - `TestUnauthorized`：確認數 2 時不列入最新、尚未確認的那筆；`FromBlock` 之前的不列入；同一個錢包給兩次只算一次；
+    - `TestPairing`（不需要鏈）：同一筆交易執行兩份授權時，各自只對應自己後面那筆 `Transfer`；沒有授權在前的 `Transfer` 不算有授權；
+    - `TestStatusRefusesAPartialRecord`。
+  - 突變：review 後共 11 項，11／11 KILLED。
+- **尚未接上**：Host 的付款紀錄、事件與 `payment_status` 推導，以及「已預留未付款 → `needs_review`」（交易流程決策 6），都要等 Host 端接線時再接上這個元件。
+- **沒有測試涵蓋**：被 reorg 移除的 log（`Removed`）會被略過；收據找不到時回錯誤；真正在鏈上用 multicall 合約批次執行多份授權（配對邏輯只有不需要鏈的單元測試）。
+
+#### Reconciler 的 review（8814f03）與修正
+
+Claude Code 獨立 context 的 code-reviewer，結論 APPROVE with should-fix（目前沒有 Host 依賴它，所以沒有 Critical）。審查者確認：在 `validBefore` 正確的前提下，`not_settled_expired` 在確認深度內是終局狀態；`pending` 永遠不會允許重付。修正：
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Important | `Unauthorized` 遇到找不到的收據會 nil panic | 收據必須在 log 所在、且不超過已確認的區塊，否則回錯誤 |
+| Important | `Transfer` 沒有和它自己的 `AuthorizationUsed` 配對：同一筆交易裡的多份授權或多筆轉帳，可能讓一份授權替別的轉帳背書，使「零」不成立 | 以 log 順序配對，每份授權只對應緊接在後的那一筆；`TestPairing` |
+| Important | 呼叫端給的 `validBefore` 不檢查：0 或記錯會誤判成唯一允許重付的狀態 | 零值的 `validBefore`、付款人、nonce 一律回錯誤；文件寫明這個狀態只和輸入一樣正確 |
+| Important | log 從區塊 0 掃到底，公開服務商會拒絕；確認數 1 沒有 reorg 保護 | 分段查詢、從 `FromBlock` 開始；文件寫明確認數 1 的意思，公開鏈要 2 以上 |
+| 建議 | 收據與 log 從不同高度讀 | 收據必須在 log 所在、且不超過已確認的區塊 |
+| 建議 | 零值 topic 會變成萬用字元 | 零值的付款人、nonce、錢包都拒絕或略過 |
+| 建議 | `approve`／`permit` 沒有說明 | 寫明只檢查代幣轉出 |
+| 建議 | 重複的錢包會重複列出 | 去重 |
+| 建議 | 缺測試：期限邊界、金額記錯、確認數大於 1、`FromBlock`、批次授權 | 補上（批次只有不需要鏈的單元測試） |

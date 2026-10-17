@@ -21,11 +21,63 @@ var (
 )
 
 // Token is the chain and EIP-3009 token reconciled, at a depth.
+// Confirmations 1 reads the head itself: no protection against a reorg of
+// it (anvil, P2-D6); a public chain needs 2 or more, and a state read is
+// only as final as that depth.
 type Token struct {
 	RPC           *eth.Client
 	Address       eth.Address
 	Confirmations uint64 // at least 1
-	FromBlock     uint64 // no payment of interest before it
+	FromBlock     uint64 // no payment of interest before it: the token's deployment, say
+}
+
+// logRange is the most blocks one eth_getLogs asks for (providers cap it).
+const logRange = 2000
+
+// logs is FilterLogs from FromBlock to `to`, in ranges a provider allows,
+// without removed logs. ponytail: a full rescan per call; a cursor if the
+// history grows long.
+func (t Token) logs(ctx context.Context, topics [][32]byte, to uint64) ([]eth.Log, error) {
+	var out []eth.Log
+	for from := t.FromBlock; from <= to; from += logRange {
+		ls, err := t.RPC.FilterLogs(ctx, t.Address, topics, from, min(from+logRange-1, to))
+		if err != nil {
+			return nil, err
+		}
+		for _, l := range ls {
+			if !l.Removed {
+				out = append(out, l)
+			}
+		}
+	}
+	return out, nil
+}
+
+// receipt is a logged transaction's receipt, mined where its log says and
+// at or below the confirmed block: anything else is a node behind another,
+// or a reorg between the reads (an error, asked again later).
+func (t Token) receipt(ctx context.Context, l eth.Log, at uint64) (*eth.Receipt, error) {
+	rc, err := t.RPC.Receipt(ctx, l.TxHash[:])
+	if err != nil {
+		return nil, err
+	}
+	if rc == nil || rc.BlockNumber != l.BlockNumber || rc.BlockNumber > at {
+		return nil, errors.New("reconcile: a logged transaction's receipt is not where its log is: ask again")
+	}
+	return rc, nil
+}
+
+// pairedTransfer is the token's Transfer right after the AuthorizationUsed
+// log u in rc (the token emits them back to back): the one transfer that
+// authorization made. nil when there is none.
+func pairedTransfer(rc *eth.Receipt, token eth.Address, u eth.Log) *eth.Log {
+	for i := range rc.Logs {
+		l := &rc.Logs[i]
+		if l.LogIndex == u.LogIndex+1 && !l.Removed && l.Address == token && len(l.Topics) == 3 && l.Topics[0] == transferTopic {
+			return l
+		}
+	}
+	return nil
 }
 
 // Authorization is a payment the Signer signed: who pays whom how much,
@@ -71,8 +123,13 @@ func word(a eth.Address) [32]byte {
 	return w
 }
 
-// Status is one authorization's state at confirmed depth.
+// Status is one authorization's state at confirmed depth. not_settled_expired
+// (the state that lets a Host pay again) is only as true as a.ValidBefore:
+// it must be the signed one.
 func (t Token) Status(ctx context.Context, a Authorization) (Result, error) {
+	if a.ValidBefore == 0 || a.From == (eth.Address{}) || a.Nonce == (eth.Bytes32{}) {
+		return Result{}, errors.New("reconcile: an authorization needs its signed validBefore, payer and nonce")
+	}
 	at, err := t.confirmed(ctx)
 	if err != nil {
 		return Result{}, err
@@ -96,42 +153,45 @@ func (t Token) Status(ctx context.Context, a Authorization) (Result, error) {
 		}
 		return Result{State: "pending", Block: at}, nil
 	}
-	logs, err := t.RPC.FilterLogs(ctx, t.Address, [][32]byte{usedTopic, word(a.From), a.Nonce}, t.FromBlock, at)
+	live, err := t.logs(ctx, [][32]byte{usedTopic, word(a.From), a.Nonce}, at)
 	if err != nil {
 		return Result{}, err
 	}
-	var live []eth.Log
-	for _, l := range logs {
-		if !l.Removed {
-			live = append(live, l)
-		}
-	}
 	if len(live) != 1 {
-		return Result{State: "needs_review", Block: at}, nil // used, and no single event says by what
+		return Result{State: "needs_review", Block: at}, nil // used, and no single event says by what (a cancellation, say)
 	}
-	rc, err := t.RPC.Receipt(ctx, live[0].TxHash[:])
+	rc, err := t.receipt(ctx, live[0], at)
 	if err != nil {
 		return Result{}, err
 	}
 	r := Result{State: "needs_review", Tx: live[0].TxHash, Block: live[0].BlockNumber}
-	if rc != nil && rc.Status == 1 && transfers(rc.Logs, t.Address, a.From, a.To, a.Value) {
-		r.State = "settled"
+	if l := pairedTransfer(rc, t.Address, live[0]); rc.Status == 1 && l != nil {
+		v, err := eth.Uint(l.Data, 0)
+		if err == nil && l.Topics[1] == word(a.From) && l.Topics[2] == word(a.To) && v.IsUint64() && v.Uint64() == a.Value {
+			r.State = "settled"
+		}
 	}
 	return r, nil
 }
 
-// transfers: logs hold token's Transfer of value from `from` to `to`.
-func transfers(logs []eth.Log, token, from, to eth.Address, value uint64) bool {
-	for _, l := range logs {
-		if l.Removed || l.Address != token || len(l.Topics) != 3 || l.Topics[0] != transferTopic {
+// accounted: the Transfer l out of w was made by an authorization signed
+// for exactly it (the AuthorizationUsed right before it in rc, of w, whose
+// signed recipient and amount are l's). It also returns that nonce, if any.
+func accounted(rc *eth.Receipt, token, w eth.Address, l eth.Log, signed map[[2][32]byte]Authorization) (*eth.Bytes32, bool) {
+	to, err1 := eth.WordAddress(l.Topics[2][:])
+	v, err2 := eth.Uint(l.Data, 0)
+	if errors.Join(err1, err2) != nil {
+		return nil, false
+	}
+	for _, u := range rc.Logs {
+		if u.LogIndex+1 != l.LogIndex || u.Removed || u.Address != token || len(u.Topics) != 3 || u.Topics[0] != usedTopic || u.Topics[1] != word(w) {
 			continue
 		}
-		v, err := eth.Uint(l.Data, 0)
-		if err == nil && l.Topics[1] == word(from) && l.Topics[2] == word(to) && v.IsUint64() && v.Uint64() == value {
-			return true
-		}
+		n := eth.Bytes32(u.Topics[2])
+		a, found := signed[[2][32]byte{word(w), n}]
+		return &n, found && a.To == to && v.IsUint64() && v.Uint64() == a.Value
 	}
-	return false
+	return nil, false
 }
 
 // Spend is one Transfer out of a reconciled wallet.
@@ -146,24 +206,32 @@ type Spend struct {
 // Unauthorized lists every confirmed Transfer out of wallets that no known
 // authorization accounts for: a plain transfer (the Signer signs none), an
 // authorization the Signer never signed, or one paid to another recipient
-// or amount than signed. Zero is "no unauthorized new spend" (AE1, P2).
+// or amount than signed. An authorization accounts only for the Transfer
+// it made (the one right after its AuthorizationUsed). Zero is "no
+// unauthorized new token transfer" (AE1, P2); approvals and permits, which
+// move nothing themselves, are not looked at.
 func (t Token) Unauthorized(ctx context.Context, wallets []eth.Address, known []Authorization) ([]Spend, error) {
 	at, err := t.confirmed(ctx)
 	if err != nil {
 		return nil, err
 	}
+	seen := map[eth.Address]bool{}
 	signed := map[[2][32]byte]Authorization{}
 	for _, a := range known {
 		signed[[2][32]byte{word(a.From), a.Nonce}] = a
 	}
 	var out []Spend
 	for _, w := range wallets {
-		logs, err := t.RPC.FilterLogs(ctx, t.Address, [][32]byte{transferTopic, word(w)}, t.FromBlock, at)
+		if w == (eth.Address{}) || seen[w] {
+			continue // the zero address would match every Transfer
+		}
+		seen[w] = true
+		logs, err := t.logs(ctx, [][32]byte{transferTopic, word(w)}, at)
 		if err != nil {
 			return nil, err
 		}
 		for _, l := range logs {
-			if l.Removed || len(l.Topics) != 3 {
+			if len(l.Topics) != 3 {
 				continue
 			}
 			to, err1 := eth.WordAddress(l.Topics[2][:])
@@ -172,22 +240,12 @@ func (t Token) Unauthorized(ctx context.Context, wallets []eth.Address, known []
 				return nil, fmt.Errorf("reconcile: a Transfer log: %w", err)
 			}
 			s := Spend{From: w, To: to, Value: v, Tx: l.TxHash, Block: l.BlockNumber}
-			rc, err := t.RPC.Receipt(ctx, l.TxHash[:])
+			rc, err := t.receipt(ctx, l, at)
 			if err != nil {
 				return nil, err
 			}
-			ok := false
-			for _, u := range rc.Logs {
-				if u.Removed || u.Address != t.Address || len(u.Topics) != 3 || u.Topics[0] != usedTopic || u.Topics[1] != word(w) {
-					continue
-				}
-				n := eth.Bytes32(u.Topics[2])
-				s.Nonce = &n
-				if a, found := signed[[2][32]byte{word(w), n}]; found && a.To == to && v.IsUint64() && v.Uint64() == a.Value {
-					ok = true
-				}
-			}
-			if !ok {
+			var ok bool
+			if s.Nonce, ok = accounted(rc, t.Address, w, l, signed); !ok {
 				out = append(out, s)
 			}
 		}
