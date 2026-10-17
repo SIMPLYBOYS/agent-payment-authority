@@ -116,10 +116,10 @@ func (c *Client) PendingNonce(ctx context.Context, a Address) (uint64, error) {
 	return c.nonceAt(ctx, a, "pending")
 }
 
-// MinedNonce is the account's next nonce in the latest block: every nonce
-// below it is used by a mined transaction.
-func (c *Client) MinedNonce(ctx context.Context, a Address) (uint64, error) {
-	return c.nonceAt(ctx, a, "latest")
+// NonceAt is the account's next nonce as of block n: every nonce below it
+// is used by a transaction mined at or before n.
+func (c *Client) NonceAt(ctx context.Context, a Address, n uint64) (uint64, error) {
+	return c.nonceAt(ctx, a, fmt.Sprintf("0x%x", n))
 }
 
 func (c *Client) nonceAt(ctx context.Context, a Address, block string) (uint64, error) {
@@ -144,10 +144,19 @@ type Header struct {
 
 // LatestHeader is eth_getBlockByNumber("latest").
 func (c *Client) LatestHeader(ctx context.Context) (Header, error) {
+	return c.header(ctx, "latest")
+}
+
+// HeaderAt is block n's header.
+func (c *Client) HeaderAt(ctx context.Context, n uint64) (Header, error) {
+	return c.header(ctx, fmt.Sprintf("0x%x", n))
+}
+
+func (c *Client) header(ctx context.Context, tag string) (Header, error) {
 	var b struct {
 		Number, Timestamp, BaseFeePerGas string
 	}
-	if err := c.call(ctx, "eth_getBlockByNumber", &b, "latest", false); err != nil {
+	if err := c.call(ctx, "eth_getBlockByNumber", &b, tag, false); err != nil {
 		return Header{}, err
 	}
 	n, err1 := hexUint(b.Number)

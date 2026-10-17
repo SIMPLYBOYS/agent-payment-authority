@@ -627,3 +627,49 @@ func TestDroppedReservationFails(t *testing.T) {
 		t.Fatalf("the next order on the task: %v", err)
 	}
 }
+
+// A written transaction whose resend every pool refuses (its fee cap is
+// now below the base fee): a new transaction never takes a nonce behind
+// that gap (RELAYER_NONCE_BLOCKED, nothing written); once the chain's time
+// passes its deadline it is decided failed before the next one is
+// prepared, so neither its task nor the nonce stays blocked.
+func TestBlockedNonceClears(t *testing.T) {
+	w := newWorld(t)
+	ctx, cancel := context.WithTimeout(bg, 90*time.Second)
+	defer cancel()
+	r := w.relayer(t, filepath.Join(t.TempDir(), "budget.db"))
+	r.wait = 10 * time.Second
+	for _, task := range []string{"show-a-01", "show-a-02"} {
+		if err := r.RegisterTask(ctx, task, "consumer-a", 1_000_000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rawA, _, intentA := w.order("consumer-a", "show-a-01", 1, "500000")
+	crashAfterWrite(t, ctx, r, rawA, intentA)
+	w.call(t, "anvil_setNextBlockBaseFeePerGas", "0x"+strconv.FormatInt(1000e9, 16))
+	w.call(t, "evm_mine")
+	rawB, _, _ := w.order("consumer-a", "show-a-02", 2, "500000")
+	if _, err := r.Reserve(ctx, rawB); code(err) != "RELAYER_NONCE_BLOCKED" {
+		t.Fatalf("behind a gap: %v", err)
+	}
+	var n int
+	r.db.QueryRow(`SELECT count(*) FROM reservations`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("%d reservations written", n)
+	}
+	w.call(t, "evm_increaseTime", 400) // past A's policy deadline
+	w.call(t, "evm_mine")
+	h, _ := w.rpc.LatestHeader(bg)
+	w.now = h.Timestamp
+	rawA2, _, _ := w.order("consumer-a", "show-a-01", 3, "500000")
+	if _, err := r.Reserve(ctx, rawA2); err != nil {
+		t.Fatalf("A's task after A's deadline: %v", err)
+	}
+	rawB2, _, _ := w.order("consumer-a", "show-a-02", 4, "500000")
+	if _, err := r.Reserve(ctx, rawB2); err != nil {
+		t.Fatalf("B's task: %v", err)
+	}
+	if _, err := r.Reserve(ctx, rawA); code(err) != "RESERVATION_FAILED" {
+		t.Fatalf("A: %v", err)
+	}
+}

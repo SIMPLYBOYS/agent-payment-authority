@@ -96,6 +96,9 @@ func Open(ctx context.Context, cfg Config, keys Keys, rpc *eth.Client, path stri
 	if keys.Gas == nil || keys.Issuer == nil || keys.Policy == nil {
 		return nil, errors.New("budget: the gas, issuer and policy keys")
 	}
+	if cfg.Confirmations == 0 {
+		return nil, errors.New("budget: at least one confirmation")
+	}
 	if f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); err == nil {
 		f.Close()
 	} else if !errors.Is(err, os.ErrExist) {
@@ -185,7 +188,7 @@ func (r *Relayer) resendOpen(ctx context.Context) error {
 
 // prepare signs a call from key after a simulation that must not revert
 // (Z2 §10 S3 (c)): a transaction that would fail is never sent. Its nonce
-// is the pending one, and never below floor (the key's written,
+// is the pending one, which must not be below floor (the key's written,
 // unfinished transactions' next).
 func (r *Relayer) prepare(ctx context.Context, key *eth.Key, data []byte, floor uint64) (raw, hash []byte, nonce uint64, err error) {
 	msg := eth.Msg{From: key.Addr, To: r.cfg.Contract, Data: data}
@@ -204,7 +207,12 @@ func (r *Relayer) prepare(ctx context.Context, key *eth.Key, data []byte, floor 
 	if err != nil {
 		return nil, nil, 0, err
 	}
-	nonce = max(nonce, floor)
+	if nonce < floor {
+		// A written transaction at or above it is in no pool (its resend was
+		// refused): a new one would wait behind that gap. Retry later; it is
+		// decided once its deadline or nonce says so (settleOpen).
+		return nil, nil, 0, signer.Refusal("RELAYER_NONCE_BLOCKED")
+	}
 	h, err := r.rpc.LatestHeader(ctx)
 	if err != nil {
 		return nil, nil, 0, err
@@ -230,34 +238,59 @@ func (r *Relayer) floor(ctx context.Context, query string) (uint64, error) {
 	return uint64(n.Int64) + 1, err
 }
 
-// await sends raw again (the same transaction: never another) and waits,
-// at most r.wait, for its receipt with the configured confirmations. nil,
-// nil: not yet. errDropped: it can never succeed, because from used its
-// nonce otherwise, or the chain's time passed deadline (0: none) with it
-// still unmined (the contract refuses it in any later block).
+// check looks once at a written transaction, at confirmed depth (the
+// newest block with the configured confirmations): its receipt there, or
+// errDropped when it can never succeed there — from used its nonce
+// otherwise, or the block's time is past deadline (0: none) with it
+// unmined (the contract refuses it in any later block) — or nil, nil.
+// Judged at confirmed depth, a reorg of newer blocks never fails a
+// transaction that is then mined.
+func (r *Relayer) check(ctx context.Context, hash []byte, from eth.Address, nonce, deadline uint64) (*eth.Receipt, error) {
+	latest, err := r.rpc.BlockNumber(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if latest+1 < r.cfg.Confirmations {
+		return nil, nil
+	}
+	confirmed := latest + 1 - r.cfg.Confirmations
+	rc, err := r.rpc.Receipt(ctx, hash)
+	if err != nil {
+		return nil, err
+	}
+	if rc != nil {
+		if rc.BlockNumber <= confirmed {
+			return rc, nil
+		}
+		return nil, nil
+	}
+	used, err1 := r.rpc.NonceAt(ctx, from, confirmed)
+	h, err2 := r.rpc.HeaderAt(ctx, confirmed)
+	if err := errors.Join(err1, err2); err != nil {
+		return nil, err
+	}
+	if used > nonce || deadline > 0 && h.Timestamp > deadline {
+		// Asked again after: mined in between is not dropped.
+		if again, err := r.rpc.Receipt(ctx, hash); err == nil && again == nil {
+			return nil, errDropped
+		}
+	}
+	return nil, nil
+}
+
+// await sends raw again (the same transaction: never another) and checks
+// it until it is decided, for at most r.wait (then nil, nil: not yet).
 func (r *Relayer) await(ctx context.Context, raw []byte, hash []byte, from eth.Address, nonce, deadline uint64) (*eth.Receipt, error) {
 	ctx, cancel := context.WithTimeout(ctx, r.wait)
 	defer cancel()
 	r.rpc.SendRaw(ctx, raw) // already known, or mined: the receipt says
 	for {
-		rc, err := r.rpc.Receipt(ctx, hash)
+		rc, err := r.check(ctx, hash, from, nonce, deadline)
+		if rc != nil || errors.Is(err, errDropped) {
+			return rc, err
+		}
 		if err != nil && ctx.Err() == nil {
 			return nil, err
-		}
-		if rc != nil {
-			latest, err := r.rpc.BlockNumber(ctx)
-			if err == nil && latest >= rc.BlockNumber && latest-rc.BlockNumber+1 >= r.cfg.Confirmations {
-				return rc, nil
-			}
-		} else if err == nil {
-			mined, err1 := r.rpc.MinedNonce(ctx, from)
-			h, err2 := r.rpc.LatestHeader(ctx)
-			if errors.Join(err1, err2) == nil && (mined > nonce || deadline > 0 && h.Timestamp > deadline) {
-				// Asked again after: mined in between is not dropped.
-				if again, err := r.rpc.Receipt(ctx, hash); err == nil && again == nil {
-					return nil, errDropped
-				}
-			}
 		}
 		select {
 		case <-ctx.Done():
@@ -265,6 +298,51 @@ func (r *Relayer) await(ctx context.Context, raw []byte, hash []byte, from eth.A
 		case <-time.After(r.poll):
 		}
 	}
+}
+
+// settleOpen sends every written, unfinished transaction again and checks
+// each once without waiting: a decided one is finished (reserved, or
+// failed). It runs before a new transaction is prepared, so an abandoned
+// one never keeps its task busy or the nonce floor raised once decided.
+func (r *Relayer) settleOpen(ctx context.Context) error {
+	if err := r.resendOpen(ctx); err != nil {
+		return err
+	}
+	var intents []string
+	var regs [][4]string
+	rows, err := r.db.QueryContext(ctx, `SELECT intent_hash, '', '', '' FROM reservations WHERE state = 'sent'
+		UNION ALL SELECT task_id, register_raw, register_hash, register_nonce FROM tasks WHERE state = 'registering'`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var x [4]string
+		if err := rows.Scan(&x[0], &x[1], &x[2], &x[3]); err != nil {
+			rows.Close()
+			return err
+		}
+		if x[1] == "" {
+			intents = append(intents, x[0])
+		} else {
+			regs = append(regs, x)
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	var ref signer.Refusal
+	for _, i := range intents {
+		if _, _, err := r.resume(ctx, i, false); err != nil && !errors.As(err, &ref) {
+			return err
+		}
+	}
+	for _, x := range regs {
+		n, _ := strconv.ParseUint(x[3], 10, 64)
+		if err := r.finishRegistration(ctx, x[0], x[1], x[2], n, false); err != nil && !errors.As(err, &ref) {
+			return err
+		}
+	}
+	return nil
 }
 
 // RegisterTask gives taskID a budget of balance for consumerID: a fresh r,
@@ -291,7 +369,7 @@ func (r *Relayer) RegisterTask(ctx context.Context, taskID, consumerID string, b
 	case have.state == "failed":
 		return signer.Refusal("TASK_REGISTRATION_FAILED")
 	default:
-		return r.finishRegistration(ctx, taskID, have.raw, have.hash, have.nonce)
+		return r.finishRegistration(ctx, taskID, have.raw, have.hash, have.nonce, true)
 	}
 	rv, err := r.random(ctx)
 	if err != nil {
@@ -309,7 +387,7 @@ func (r *Relayer) RegisterTask(ctx context.Context, taskID, consumerID string, b
 	if err != nil {
 		return err
 	}
-	if err := r.resendOpen(ctx); err != nil {
+	if err := r.settleOpen(ctx); err != nil {
 		return err
 	}
 	floor, err := r.floor(ctx, `SELECT max(register_nonce) FROM tasks WHERE state = 'registering'`)
@@ -325,13 +403,20 @@ func (r *Relayer) RegisterTask(ctx context.Context, taskID, consumerID string, b
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'registering')`, taskID, consumerID, balance, rv, c0.String(), hex.EncodeToString(raw), hex.EncodeToString(hash), nonce); err != nil {
 		return err
 	}
-	return r.finishRegistration(ctx, taskID, hex.EncodeToString(raw), hex.EncodeToString(hash), nonce)
+	return r.finishRegistration(ctx, taskID, hex.EncodeToString(raw), hex.EncodeToString(hash), nonce, true)
 }
 
-func (r *Relayer) finishRegistration(ctx context.Context, taskID, rawHex, hashHex string, nonce uint64) error {
+// finishRegistration decides a registration: waiting, or checking once.
+func (r *Relayer) finishRegistration(ctx context.Context, taskID, rawHex, hashHex string, nonce uint64, wait bool) error {
 	raw, _ := hex.DecodeString(rawHex)
 	hash, _ := hex.DecodeString(hashHex)
-	rc, err := r.await(ctx, raw, hash, r.keys.Issuer.Addr, nonce, 0)
+	var rc *eth.Receipt
+	var err error
+	if wait {
+		rc, err = r.await(ctx, raw, hash, r.keys.Issuer.Addr, nonce, 0)
+	} else {
+		rc, err = r.check(ctx, hash, r.keys.Issuer.Addr, nonce, 0)
+	}
 	if err != nil && !errors.Is(err, errDropped) {
 		return err
 	}
@@ -377,12 +462,15 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if ev, done, err := r.resume(ctx, intent); done || err != nil {
+	if ev, done, err := r.resume(ctx, intent, true); done || err != nil {
 		return ev, err
 	}
 	now := r.clock()
 	if po.PaymentBinding.ValidBefore <= now {
 		return Evidence{}, signer.Refusal("ORDER_EXPIRED") // the Signer would refuse it: spend nothing on it
+	}
+	if err := r.settleOpen(ctx); err != nil {
+		return Evidence{}, err
 	}
 	taskID := po.Intent.TaskID
 	var consumer, rv, cOldS, state string
@@ -455,9 +543,6 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 	if err != nil {
 		return Evidence{}, err
 	}
-	if err := r.resendOpen(ctx); err != nil {
-		return Evidence{}, err
-	}
 	floor, err := r.floor(ctx, `SELECT max(nonce) FROM reservations WHERE state = 'sent'`)
 	if err != nil {
 		return Evidence{}, err
@@ -475,12 +560,13 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 	if err := at("after-write"); err != nil {
 		return Evidence{}, err
 	}
-	ev, _, err := r.resume(ctx, intent)
+	ev, _, err := r.resume(ctx, intent, true)
 	return ev, err
 }
 
-// resume answers an intent's reservation: done is false when there is none.
-func (r *Relayer) resume(ctx context.Context, intent string) (Evidence, bool, error) {
+// resume answers an intent's reservation, waiting for an open one or
+// checking it once: done is false when there is none.
+func (r *Relayer) resume(ctx context.Context, intent string, wait bool) (Evidence, bool, error) {
 	var ev Evidence
 	var rawHex, hashHex, state string
 	var block sql.NullInt64
@@ -502,7 +588,12 @@ func (r *Relayer) resume(ctx context.Context, intent string) (Evidence, bool, er
 	}
 	raw, _ := hex.DecodeString(rawHex)
 	hash, _ := hex.DecodeString(hashHex)
-	rc, err := r.await(ctx, raw, hash, r.keys.Gas.Addr, nonce, deadline)
+	var rc *eth.Receipt
+	if wait {
+		rc, err = r.await(ctx, raw, hash, r.keys.Gas.Addr, nonce, deadline)
+	} else {
+		rc, err = r.check(ctx, hash, r.keys.Gas.Addr, nonce, deadline)
+	}
 	if err != nil && !errors.Is(err, errDropped) {
 		return ev, true, err
 	}

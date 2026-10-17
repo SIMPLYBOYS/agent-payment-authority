@@ -171,8 +171,11 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
       - revert；
       - nonce 已被同一把金鑰的其他交易用掉（另一筆已上鏈、這筆沒有 receipt）；
       - 鏈上時間已超過 policy 期限而這筆仍未上鏈。
+      - 後兩項都以**已確認深度**的區塊判定（最新區塊往回、達到設定確認數的那一塊），所以較新區塊的 reorg 不會把之後又上鏈的交易誤判為 failed。確認數至少 1。
       - 一張請購的預留一旦 failed，該請購就不再預留，要用新的請購。
-    - **nonce**：寫入的交易存下 nonce 與期限。每次要送新交易前，先重送所有已寫入、未確認的交易；新交易的 nonce 取「節點的 pending nonce」與「已寫入未確認的最高 nonce＋1」中較大者。所以重啟後，新的預留不會搶走寫入在先的那一筆的 nonce。
+    - **nonce**：寫入的交易存下 nonce 與期限。每次要準備新交易前，先**重送並逐筆檢查**所有已寫入、未完成的交易（不等待），能判定的就收尾（reserved 或 failed）。新交易用節點的 pending nonce；若 pending nonce 低於「已寫入未完成的最高 nonce＋1」，表示有一筆已寫入的交易不在任何 pool 裡（重送被拒），這時回 `RELAYER_NONCE_BLOCKED`，不簽、不寫，避免新交易排在空洞後面永遠上不了鏈；等那一筆過了期限被判定為 failed 之後就恢復。因此：
+      - 重啟後，新的預留不會搶走寫入在先那一筆的 nonce；
+      - 沒人再來續的預留，不會讓它的 task 永遠 `TASK_BUSY`。
     - 每次呼叫最多等 2 分鐘（`wait`），等不到回 `RESERVATION_PENDING`，不會一直佔著鎖。
     - 確認後的狀態更新：先把預留從 sent 改成 reserved（必須恰好一列），再只從這筆預留花掉的那個 commitment 更新 task（必須恰好一列），防止兩個程序重複扣款。
   - ponytail：所有 task 與各金鑰的 nonce 共用一把鎖；兩位客人的預留要重疊時，再改成每個 task 一把鎖並加 nonce 管理。
@@ -200,13 +203,17 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
     - `TestDroppedReservationFails`：nonce 被同一把金鑰的另一筆交易用掉 → failed，不會一直 pending → 下一張請購可以預留。
     - `TestSpentFor`：事件比對逐欄（別的合約、別的事件、別的 task、intent、金額、被移除的 log）。
     - 拒絕表新增「已過期的請購」（`ORDER_EXPIRED`）與「別條鏈的 verifier」。
-  - 「鏈上時間超過期限而仍未上鏈」這條判定在 anvil 上測不到：anvil 收到交易會立刻打包並 revert，走的是 revert 那條路。
+  - 第二輪 review 後新增 `TestBlockedNonceClears`：
+    - 寫入的交易 A 因為 base fee 被拉高而重送失敗、不在任何 pool 裡 → 另一個 task 的新預留回 `RELAYER_NONCE_BLOCKED`，什麼都不寫；
+    - 鏈上時間過了 A 的期限後：同一個 task 的下一張請購在準備前就把 A 判定為 failed，並預留成功；另一個 task 也預留成功；A 本身回 `RESERVATION_FAILED`。
+    - 這也是「已過期限仍未上鏈」這條判定的測試。
+  - 「以已確認深度判定，不受 reorg 影響」這點在確認數 1 的 anvil 上沒有測試涵蓋。
 - **突變**：
   - 需要 `var/` 本機工具（anvil、合約 build）的項目，在 mutation-check 的容器裡會被 skip、誤判為 SURVIVED，所以放在 `LOCAL_MUTATIONS`，由新的 `scripts/verify/local-mutations.py` 在工作樹的複本上執行：
     - 以 symlink 連到 `var/`；
     - **每個目標測試先在未突變的複本上跑一次，必須通過（不能 skip），否則整批停下**；
     - 突變後測試被 skip 算錯誤，不算 KILLED。
-  - review 後，P2 全部 44 項（eth 4、D1 15、累計上限 5、預算 relayer 20）以 `local-mutations.py P2 --all` 重跑：14 個基準都通過，44／44 KILLED。
+  - 第二輪 review 後，P2 全部 45 項（eth 4、D1 15、累計上限 5、預算 relayer 21）以 `local-mutations.py P2 --all` 重跑：15 個基準都通過，45／45 KILLED。（第一輪後寫的「44 項、relayer 20」算錯了，實際是 42 項、relayer 18，同樣全部 KILLED；191795c 的 commit 訊息也寫成 44。）
   - 過程中發現並修正：交易漏了 calldata（測試抓到）；「仿冒事件」與「續送」原本沒有被測到，已補。
 - **既有、與本片無關**：
   - mutation-check 的 `B1-04 A R1 host: requested model missing from the trace`（`internal/buyer/host.go`）；
@@ -230,3 +237,15 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。全部�
 | 建議 | 期間邊界的測試沒有釘住 | 改用剛好 86400 秒，並加上 `>=` 的突變 |
 | 建議 | 委派與 approver 的總額彼此獨立 | 寫進 §9.5 |
 | 建議 | zkbudget 漏掉 `-balance 0`；stdin 的 JSON 後面接著多餘資料也接受 | 改用 `fs.Visit` 判斷有沒有給旗標；要求 JSON 之後就是 EOF；補兩個測試 |
+
+### 9.8 第三段的第二輪 review（191795c）與修正
+
+結論 APPROVE with should-fix。3 項 Important 都是活性與狀態一致的問題（審查者確認沒有任何路徑能讓同一個 commitment 被花兩次），全部修正：
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Important | `floor` 可能讓新交易排在一個不在任何 pool 裡的 nonce 後面，永遠上不了鏈；登記沒有期限，可能永遠卡住 | pending nonce 低於 floor 就回 `RELAYER_NONCE_BLOCKED`、不簽；`TestBlockedNonceClears` |
+| Important | 「永遠不會成功」用最新區塊判定，reorg 可能把之後又上鏈並花掉預算的交易誤判為 failed，使 DB 與鏈不一致 | 改用已確認深度的區塊（nonce 與時間）判定 |
+| Important | 沒人再來續的 sent 預留讓 task 永遠 `TASK_BUSY`，也讓 floor 一直偏高 | 準備新交易前，先對所有未完成的交易各檢查一次並收尾（`settleOpen`） |
+| 建議 | 被判定 failed 的登記（nonce 被別筆用掉）使該 task ID 永遠無法登記 | 不改：demo 的 task 很多，改用新的 task ID；寫在這裡 |
+| 建議 | 多個呼叫者排隊時，最長可能等「人數 × 2 分鐘」 | 已在 ponytail 註解；兩位客人並行時再改 |
