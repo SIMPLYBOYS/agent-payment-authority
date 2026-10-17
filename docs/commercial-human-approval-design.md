@@ -272,7 +272,7 @@ webauthn_challenge = SHA-256("agent-payment-authority/pay/v1/webauthn-challenge"
 - 摘要由 Signer 從請購產生：challenge 回覆帶 `display`，包含客人、商品、收款人、付款帳戶、金額與資產、網路、委託範圍、期限。Host 頁面顯示這份 `display`。
 - 但頁面仍是 Host 提供的。**Host 或頁面被控制時，可以顯示 A 的摘要、卻替 B 的 challenge 要求簽章**，本設計擋不住這種「看到的不是簽的」攻擊。
 - 能做的限制有兩個：每次核准只綁一筆、期限短；Signer 的每筆與累計硬上限（`signer_max`）。可信交易顯示（獨立裝置或 Signer 自己的畫面）列為後續選項，不在 A2。
-  - P2-D1 實作時（`docs/commercial-p2.md` §9.4）：`signer_max` 目前只做**每筆**上限；「累計」的範圍（全期、每日或其他）沒有定義，待 Aaron 決定後補上。
+  - P2：`signer_max` 是每筆上限；累計上限另設 `signer_total` 與 `signer_window_seconds`（Aaron 10/17 照建議，`docs/commercial-p2.md` §9.5）。
 
 ### 4.8 Go 函式庫（D4）
 

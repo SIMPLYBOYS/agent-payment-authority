@@ -92,7 +92,7 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
 - **付款用本人核准**：`/v1/sign` 的 `authorization` 可為 `{method: "webauthn", approval_id}`。Signer 會：
   - 從完整請購重算 intent 與 jti；
   - 要求核准是 `approve`、`verified`、未到期，credential 仍 `active`，approver 版本相同、屬於同一 consumer、錢包在其 `wallet_ids`；
-  - 單筆上限用 approver 的 `signer_max`，期限取 `min(核准到期, valid_before)`。人類核准設計 §4.7 寫的是「每筆與累計硬上限（`signer_max`）」，但沒有定義累計的範圍，目前**只做每筆**；累計怎麼算待 Aaron 決定；
+  - 單筆上限用 approver 的 `signer_max`，期限取 `min(核准到期, valid_before)`；累計上限見 §9.5；
   - 一筆付款只能有一種授權：webauthn 帶了 delegation 欄位，或 delegation 帶了 `approval_id`，都回 `BAD_REQUEST`；
   - 在**接受付款的同一筆交易**裡重讀核准、改成 `consumed`，並建立 attempt（`attempts.approval_id` UNIQUE；`delegation_id` 與 `approval_id` 恰有一個）。
   - 拒絕碼：`APPROVAL_UNKNOWN`、`APPROVAL_DENIED`、`APPROVAL_CONSUMED`、`APPROVAL_NOT_VERIFIED`、`APPROVAL_EXPIRED`、`INTENT_MISMATCH`、`CREDENTIAL_REVOKED`、`APPROVER_CHANGED`、`CONSUMER_MISMATCH`、`OVER_PER_TX`。原本的 `HUMAN_APPROVAL_UNAVAILABLE` 在 Signer 端不再出現。
@@ -125,8 +125,26 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
   - 反向突變新增 15 項（第一輪 review 後補 5 項、第二輪補 1 項），在工作樹的複本上執行，15／15 KILLED。既有突變中涉及 signer 的文字都仍只出現一次（mutation-check 與 m-b-reverse 的 47 項）。
 - **順手修的既有失敗**：`cmd/demo` 的 `TestTimingInterleaved` 在本分支與 `main`（e41cd5d）都固定失敗。原因是測試的競態：已結束的 run 不再顯示 `tool_calls`，B 在第二次呼叫後立刻結束，測試等不到。改成 B 也等 `x3` 才結束（ea4e397）。
 - **Review**：Claude Code 獨立 context 的 code-reviewer，結論是 APPROVE，附 3 項 Important 與 5 項建議：
-  - 累計上限：待 Aaron 決定。
+  - 累計上限：Aaron 決定照建議另設欄位，見 §9.5。
   - 改名前中斷會卡住：已修。
   - 測試沒有證明 3 個拒絕碼與交易內重讀：已補。
   - 建議全部處理：`verify` 改用請求的 ctx；拒絕混用兩種授權；遷移時的寫鎖與文件用語；人類核准設計文件標註已被 P2-D1 取代；表清單補上 `approver_handles`。
   - 第二輪（7f1a563）：APPROVE，無 Critical／Important。3 項 should-fix 已處理：測試補上「筆數相同、內容不同」由 EXCEPT 擋下的情況（並加對應突變）；補完改名的路徑也檢查 Rollback 與 DETACH 的錯誤；每張表的欄位清單只查一次。
+
+### 9.5 approver 的累計上限（`signer_total`）
+
+- **決定**：Aaron「你指的兩件事，都先依照建議的方案進行」（10/17）。採方案 2：與每筆上限分開，另設總額與期間。
+- **設定**：每個 approver 必填：
+  - `signer_total`：至少等於 `signer_max`；
+  - `signer_window_seconds`：大於 0，例如每日 86400；要「全期」就填一個很大的值。
+  - 缺任一欄位，`ParseConfig` 就拒絕。這是硬上限，不能因為設定漏寫而靜默關閉。
+- **檢查**：在接受付款的交易裡，加總這位 approver 的核准在期間內（`accepted_at > now - window`）已接受或已簽的 attempt，加上這一筆超過 `signer_total` 就回 `OVER_TOTAL_CAP`，什麼都不寫，核准維持 verified。放棄或過期未簽的 attempt 不計入，與委派的總額規則相同。各 approver 分開計算。
+- **設定值**：
+  - 測試設定：`signer_max` 1,000,000、`signer_total` 2,000,000、每日。
+  - `scripts/demo/v1-dev.sh`：`signer_total` 5,000,000、每日。
+  - `a2-ui.mjs`、`v1-ui.mjs`：與測試設定相同。
+  - `/opt` 的 `signer.json` 要在部署時補上（`docs/commercial-v1.md` §15）。
+- **驗證**：
+  - `TestHumanApprovalTotal`：4 筆共 2,000,000 通過，第 5 筆（1 單位）被拒且不消耗核准；B 的 approver 分開計算；第一筆離開期間後又可以付。
+  - `TestApproverTotalConfig`：缺總額、總額低於每筆上限、缺期間，都被拒。
+  - 反向突變 4／4 KILLED：不加總、忽略期間、不分 approver、接受總額低於每筆上限。

@@ -112,7 +112,7 @@ func TestServeStillNeedsEveryKey(t *testing.T) {
 	var c map[string]any
 	raw, _ := os.ReadFile(filepath.Join(dir, "signer.json"))
 	json.Unmarshal(raw, &c)
-	c["approvers"] = []map[string]any{{"approver_id": "approver-a", "consumer_id": "consumer-a", "wallet_ids": []string{"wallet-a"}, "signer_max": "1000000", "version": 1}}
+	c["approvers"] = []map[string]any{{"approver_id": "approver-a", "consumer_id": "consumer-a", "wallet_ids": []string{"wallet-a"}, "signer_max": "1000000", "signer_total": "2000000", "signer_window_seconds": 86400, "version": 1}}
 	c["webauthn"] = map[string]any{"rp_id": "localhost", "origins": []string{testOrigin}, "challenge_ttl_seconds": 120, "approval_ttl_seconds": 300}
 	raw, _ = json.Marshal(c)
 	os.WriteFile(filepath.Join(dir, "signer.json"), raw, 0o600)

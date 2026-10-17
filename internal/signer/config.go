@@ -59,13 +59,16 @@ type Delegation struct {
 // human-approval-design.md 3.1, 6.1). Version is bumped by the
 // administrator whenever the entry changes; a challenge records it and a
 // verify refuses another (APPROVER_CHANGED). SignerMax is the per-payment
-// hard limit P2 will apply; A2 only checks its form.
+// hard limit; SignerTotal caps what the approver's approvals pay together
+// within the last SignerWindowSeconds (P2; docs/commercial-p2.md 9.5).
 type Approver struct {
-	ApproverID string           `json:"approver_id"`
-	ConsumerID string           `json:"consumer_id"`
-	WalletIDs  []string         `json:"wallet_ids"`
-	SignerMax  contracts.Amount `json:"signer_max"`
-	Version    uint64           `json:"version"`
+	ApproverID          string           `json:"approver_id"`
+	ConsumerID          string           `json:"consumer_id"`
+	WalletIDs           []string         `json:"wallet_ids"`
+	SignerMax           contracts.Amount `json:"signer_max"`
+	SignerTotal         contracts.Amount `json:"signer_total"`
+	SignerWindowSeconds uint64           `json:"signer_window_seconds"`
+	Version             uint64           `json:"version"`
 }
 
 // WebAuthn is the relying party: RP ID localhost and exact origins
@@ -186,6 +189,10 @@ func (c *Config) checkApprovers(wallets map[string]Wallet) error {
 	for _, a := range c.Approvers {
 		if _, ok := units(a.SignerMax); !ok || !idPattern.MatchString(a.ApproverID) || seen[a.ApproverID] || a.Version == 0 || len(a.WalletIDs) == 0 {
 			return fmt.Errorf("config: approver %q", a.ApproverID)
+		}
+		max, _ := units(a.SignerMax)
+		if total, ok := units(a.SignerTotal); !ok || total < max || a.SignerWindowSeconds == 0 {
+			return fmt.Errorf("config: approver %q needs signer_total (at least signer_max) and signer_window_seconds", a.ApproverID)
 		}
 		if consumers[a.ConsumerID] { // a challenge finds the consumer's approver: one each
 			return fmt.Errorf("config: consumer %q has two approvers", a.ConsumerID)

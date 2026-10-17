@@ -525,6 +525,21 @@ func (c *Core) accept(ctx context.Context, s *snapshot, d *Delegation, amount ui
 		if _, _, err := c.humanApproval(ctx, tx, id, &po, s.IntentHash, now); err != nil {
 			return "", err
 		}
+		// The approver's cumulative cap over its window (design 4.7).
+		var approverID string
+		var spent uint64
+		if err := tx.QueryRowContext(ctx, `SELECT approver_id FROM human_approvals WHERE approval_id = ?`, id).Scan(&approverID); err != nil {
+			return "", err
+		}
+		ap := c.cfg.approver(approverID) // humanApproval found it
+		since := now - min(now, ap.SignerWindowSeconds)
+		if err := tx.QueryRowContext(ctx, `SELECT coalesce(sum(a.amount), 0) FROM attempts a JOIN human_approvals h ON h.approval_id = a.approval_id
+			WHERE h.approver_id = ? AND a.state IN ('accepted', 'signed') AND a.accepted_at > ?`, approverID, since).Scan(&spent); err != nil {
+			return "", err
+		}
+		if total, _ := units(ap.SignerTotal); spent+amount > total {
+			return "", Refusal("OVER_TOTAL_CAP")
+		}
 		res, err := tx.ExecContext(ctx, `UPDATE human_approvals SET state = 'consumed', closed_at = ? WHERE approval_id = ? AND state = 'verified'`, now, id)
 		if err != nil {
 			return "", err

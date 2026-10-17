@@ -61,8 +61,8 @@ writeFileSync(join(sdir, "signer.json"), JSON.stringify({ version: 1, socket: so
   wallets: [{ wallet_id: "wallet-a", consumer_id: "consumer-a", chain_id: "84532", address: "0x1111111111111111111111111111111111111111" },
     { wallet_id: "wallet-b", consumer_id: "consumer-b", chain_id: "84532", address: "0x2222222222222222222222222222222222222222" }],
   assets: [], delegations: [],
-  approvers: [{ approver_id: "approver-a", consumer_id: "consumer-a", wallet_ids: ["wallet-a"], signer_max: "1000000", version: 1 },
-    { approver_id: "approver-b", consumer_id: "consumer-b", wallet_ids: ["wallet-b"], signer_max: "1000000", version: 1 }],
+  approvers: [{ approver_id: "approver-a", consumer_id: "consumer-a", wallet_ids: ["wallet-a"], signer_max: "1000000", signer_total: "2000000", signer_window_seconds: 86400, version: 1 },
+    { approver_id: "approver-b", consumer_id: "consumer-b", wallet_ids: ["wallet-b"], signer_max: "1000000", signer_total: "2000000", signer_window_seconds: 86400, version: 1 }],
   webauthn: { rp_id: "localhost", origins: [origin], challenge_ttl_seconds: 120, approval_ttl_seconds: 300 } }), { mode: 0o600 });
 let signer = null;
 async function startSigner() {

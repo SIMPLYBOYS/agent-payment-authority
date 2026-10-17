@@ -376,3 +376,60 @@ func TestServeAll(t *testing.T) {
 		t.Fatalf("approval %v", r)
 	}
 }
+
+// The approver's cumulative cap (signer_total over signer_window_seconds):
+// within the window the payments together stay under it; a refusal
+// consumes nothing; past the window the approver pays again.
+func TestHumanApprovalTotal(t *testing.T) {
+	f := newHFX(t) // signer_total 2000000 per 86400 s
+	a := f.enroll("approver-a", nil)
+	for i := range 4 {
+		order := f.orderA("500000")
+		ap := f.approve(a, order, "approve")
+		if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-00000007" + string(rune('0'+i)) + "0", Authorization: byApproval(ap.ApprovalID), Order: order}); err != nil {
+			t.Fatalf("payment %d: %v", i, err)
+		}
+		f.now += 60
+	}
+	order := f.orderA("1")
+	ap := f.approve(a, order, "approve")
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000750", Authorization: byApproval(ap.ApprovalID), Order: order}); code(err) != "OVER_TOTAL_CAP" {
+		t.Fatalf("over the total: %v", err)
+	}
+	if f.approvalState(ap.ApprovalID) != "verified" || count(t, f.pay, "1") != 4 {
+		t.Fatal("the refusal consumed something")
+	}
+	// Consumer B's approver has its own total.
+	b := f.enroll("approver-b", nil)
+	f.n++
+	ob := signertest.Order{Consumer: "consumer-b", Agent: "agent-b", Wallet: "wallet-b", From: Address(keyB.PubKey()), PayTo: signertest.Merchant,
+		Amount: "500000", N: f.n, Now: f.now, Window: 600}.Raw()
+	apb := f.approve(b, ob, "approve")
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000760", Authorization: byApproval(apb.ApprovalID), Order: ob}); err != nil {
+		t.Fatalf("B: %v", err)
+	}
+	// The first payment leaves the window: room for 500000 again.
+	f.now = t0 + 86400 + 1
+	order = f.orderA("500000")
+	ap = f.approve(a, order, "approve")
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000770", Authorization: byApproval(ap.ApprovalID), Order: order}); err != nil {
+		t.Fatalf("after the window: %v", err)
+	}
+}
+
+func TestApproverTotalConfig(t *testing.T) {
+	a, b := Address(keyA.PubKey()), Address(keyB.PubKey())
+	for name, edit := range map[string]func(ap map[string]any){
+		"no total":        func(ap map[string]any) { delete(ap, "signer_total") },
+		"total below max": func(ap map[string]any) { ap["signer_total"] = "999999" },
+		"no window":       func(ap map[string]any) { delete(ap, "signer_window_seconds") },
+	} {
+		var c map[string]any
+		json.Unmarshal(signertest.ApprovalsConfig("/tmp/apa-test.sock", 501, t0, a, b, origin), &c)
+		edit(c["approvers"].([]any)[0].(map[string]any))
+		raw, _ := json.Marshal(c)
+		if _, err := ParseConfig(raw); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

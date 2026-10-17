@@ -84,7 +84,7 @@ const sock = join(sdir, "s.sock");
 writeFileSync(join(sdir, "signer.json"), JSON.stringify({ version: 1, socket: sock, callers: [process.getuid()], max_window_seconds: 600,
   wallets: [{ wallet_id: "wallet-a", consumer_id: "consumer-a", chain_id: "84532", address: "0x1111111111111111111111111111111111111111" }],
   assets: [{ chain_id: "84532", asset_contract: "0x4444444444444444444444444444444444444444", eip712_name: "USDC", eip712_version: "2" }], delegations: [],
-  approvers: [{ approver_id: "approver-a", consumer_id: "consumer-a", wallet_ids: ["wallet-a"], signer_max: "1000000", version: 1 }],
+  approvers: [{ approver_id: "approver-a", consumer_id: "consumer-a", wallet_ids: ["wallet-a"], signer_max: "1000000", signer_total: "2000000", signer_window_seconds: 86400, version: 1 }],
   webauthn: { rp_id: "localhost", origins: [origin], challenge_ttl_seconds: 120, approval_ttl_seconds: 300 },
   voice: { socket: vsock, timeout_ms: 10000, speaker_threshold_milli: threshold, asr_model: h.asr, speaker_model: h.speaker, decimals: 6,
     merchants: [{ pay_to: "0x3333333333333333333333333333333333333333", name: "示意商家", pinyin: "shi yi shang jia" }] } }), { mode: 0o600 });

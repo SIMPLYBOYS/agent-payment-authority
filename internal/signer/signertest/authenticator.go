@@ -136,8 +136,8 @@ func ApprovalsConfig(socket string, caller uint32, now uint64, addrA, addrB, ori
 	var c map[string]any
 	json.Unmarshal(Config(socket, caller, now, addrA, addrB), &c)
 	c["approvers"] = []map[string]any{
-		{"approver_id": "approver-a", "consumer_id": "consumer-a", "wallet_ids": []string{"wallet-a"}, "signer_max": "1000000", "version": 1},
-		{"approver_id": "approver-b", "consumer_id": "consumer-b", "wallet_ids": []string{"wallet-b"}, "signer_max": "1000000", "version": 1},
+		{"approver_id": "approver-a", "consumer_id": "consumer-a", "wallet_ids": []string{"wallet-a"}, "signer_max": "1000000", "signer_total": "2000000", "signer_window_seconds": 86400, "version": 1},
+		{"approver_id": "approver-b", "consumer_id": "consumer-b", "wallet_ids": []string{"wallet-b"}, "signer_max": "1000000", "signer_total": "2000000", "signer_window_seconds": 86400, "version": 1},
 	}
 	c["webauthn"] = map[string]any{"rp_id": "localhost", "origins": []string{origin}, "challenge_ttl_seconds": 120, "approval_ttl_seconds": 300}
 	raw, _ := json.Marshal(c)

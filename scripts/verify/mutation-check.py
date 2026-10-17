@@ -771,6 +771,15 @@ MUTATIONS = [
      'different = different || have != src || missing != 0', 'different = false && (different || have != src || missing != 0)', 'TestMigrateApprovals'),
     ('P2 D1: equal row counts pass for a finished migration', 'internal/signer/db.go',
      'different = different || have != src || missing != 0', 'different = different || have != src || false && missing != 0', 'TestMigrateApprovals'),
+    # P2 signer_total (docs/commercial-p2.md 9.5): the approver's cumulative cap.
+    ("P2 total: an approver's payments are not summed", 'internal/signer/core.go',
+     'if total, _ := units(ap.SignerTotal); spent+amount > total {', 'if total, _ := units(ap.SignerTotal); false && spent+amount > total {', 'TestHumanApprovalTotal'),
+    ('P2 total: the window is ignored', 'internal/signer/core.go',
+     'since := now - min(now, ap.SignerWindowSeconds)', 'since := 0*now - 0*min(now, ap.SignerWindowSeconds)', 'TestHumanApprovalTotal'),
+    ("P2 total: another approver's payments count", 'internal/signer/core.go',
+     'WHERE h.approver_id = ? AND', 'WHERE (h.approver_id = ? OR 1) AND', 'TestHumanApprovalTotal'),
+    ('P2 total: a total below the per-payment limit is accepted', 'internal/signer/config.go',
+     '!ok || total < max ||', '!ok || false && total < max ||', 'TestApproverTotalConfig'),
     # AE1 (docs/commercial-ae1.md): the scorer and the report.
     ('AE1 score: a pricier Ask is not a false Ask', 'internal/ae1/score.go',
      'case want == "Allow" && got == "Ask":', 'case false && want == "Allow" && got == "Ask":', 'TestScoreRun'),

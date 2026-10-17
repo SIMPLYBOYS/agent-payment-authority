@@ -60,8 +60,8 @@ cfg = {"version": 1, "socket": os.environ["SSOCK"], "callers": [int(os.environ["
                    {"wallet_id": "wallet-b", "consumer_id": "consumer-b", "chain_id": "84532", "address": "0x2222222222222222222222222222222222222222"}],
        "assets": [{"chain_id": "84532", "asset_contract": "0x4444444444444444444444444444444444444444", "eip712_name": "USDC", "eip712_version": "2"}],
        "delegations": [],
-       "approvers": [{"approver_id": "approver-a", "consumer_id": "consumer-a", "wallet_ids": ["wallet-a"], "signer_max": "1000000", "version": 1},
-                     {"approver_id": "approver-b", "consumer_id": "consumer-b", "wallet_ids": ["wallet-b"], "signer_max": "1000000", "version": 1}],
+       "approvers": [{"approver_id": "approver-a", "consumer_id": "consumer-a", "wallet_ids": ["wallet-a"], "signer_max": "1000000", "signer_total": "5000000", "signer_window_seconds": 86400, "version": 1},
+                     {"approver_id": "approver-b", "consumer_id": "consumer-b", "wallet_ids": ["wallet-b"], "signer_max": "1000000", "signer_total": "5000000", "signer_window_seconds": 86400, "version": 1}],
        "webauthn": {"rp_id": "localhost", "origins": ["http://localhost:8402"], "challenge_ttl_seconds": 120, "approval_ttl_seconds": 300},
        "voice": {"socket": os.environ["VSOCK"], "timeout_ms": 10000, "speaker_threshold_milli": 365, "asr_model": h["asr"], "speaker_model": h["speaker"],
                  "decimals": 6, "merchants": [{"pay_to": "0x3333333333333333333333333333333333333333", "name": "測試商店", "pinyin": "ce shi shang dian"}]}}
