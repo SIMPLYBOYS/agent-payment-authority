@@ -26,16 +26,19 @@ import (
 )
 
 // ReservationVerifier confirms that the order's intent has been reserved on
-// chain (Z2/P2). The only implementation in this package refuses every
-// order: before P2 the Signer signs nothing outside tests.
+// chain (Z2/P2): for the order's task and amount, from the reservation
+// evidence the Host passes on. A Refusal is its reason code. The one in
+// this package refuses every order; the chain's is internal/budget's.
 type ReservationVerifier interface {
-	Verify(intentHash string, reservation json.RawMessage) error
+	Verify(ctx context.Context, intentHash string, po *paycontract.PurchaseOrder, reservation json.RawMessage) error
 }
 
-// Unavailable is the production verifier until P2.
+// Unavailable is the verifier when no chain is configured.
 type Unavailable struct{}
 
-func (Unavailable) Verify(string, json.RawMessage) error { return Refusal("RESERVATION_UNAVAILABLE") }
+func (Unavailable) Verify(context.Context, string, *paycontract.PurchaseOrder, json.RawMessage) error {
+	return Refusal("RESERVATION_UNAVAILABLE")
+}
 
 // Refusal is a fixed reason code; it never carries request content.
 type Refusal string
@@ -380,7 +383,7 @@ func (c *Core) verify(ctx context.Context, r SignRequest, fp string, now uint64)
 		return nil, nil, 0, Refusal("WINDOW_INVALID")
 	}
 	deadline = min(deadline, b.ValidBefore)
-	if err := c.res.Verify(intent, r.Reservation); err != nil {
+	if err := c.res.Verify(ctx, intent, &po, r.Reservation); err != nil {
 		var ref Refusal
 		if errors.As(err, &ref) {
 			return nil, nil, 0, ref

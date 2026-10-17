@@ -148,3 +148,39 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
   - `TestHumanApprovalTotal`：4 筆共 2,000,000 通過，第 5 筆（1 單位）被拒且不消耗核准；B 的 approver 分開計算；第一筆離開期間後又可以付。
   - `TestApproverTotalConfig`：缺總額、總額低於每筆上限、缺期間，都被拒。
   - 反向突變 4／4 KILLED：不加總、忽略期間、不分 approver、接受總額低於每筆上限。
+
+### 9.6 預算 relayer 與 Signer 的鏈上預留核對（P2-D2，本機）
+
+- **zkbudget**：`commit`、`prove` 加 `-witness-stdin`，從 stdin 讀 `{"balance", "r", "rnew"}`。同時給旗標就拒絕。Z2 §10 的「witness 在命令列上」由此解決；relayer 只用這個方式。
+- **`internal/budget` 的 `Relayer`**：持 gas、issuer、policy 三把金鑰（P2-a 用 anvil 的公開測試金鑰）。每個 task 的私密預算狀態（餘額、`r`、commitment）存在自己的 SQLite（建立時 0600）。
+  - `RegisterTask(task, consumer, balance)`：產生新的 `r`，由 issuer 送 `registerTask`。重呼叫會補完尚未確認的登記；換 consumer 或餘額則拒絕。
+  - `Reserve(order)`：
+    - **intent 與金額都由 relayer 從完整請購自己重算**（Z2 §10 S3(b)）。
+    - task 必須屬於請購的 consumer（`CONSUMER_MISMATCH`）；餘額不足回 `OVER_BUDGET`；同一 task 已有送出未確認的預留時回 `TASK_BUSY`（A／B 不共用、同一 commitment 不併發）。
+    - 用 stdin witness 產生 proof，並核對 proof 的 task、舊 commitment、金額是自己的。
+    - policy digest **在本地計算**（測試證明與合約的 `policyDigest`、`taskField` 相同）；epoch 從鏈上讀，期限是現在加 `PolicyTTL`。
+    - **送出前先模擬**（Z2 §10 S3(c)）：模擬失敗回 `RESERVATION_SIMULATION_FAILED`，什麼都不寫、不送。
+    - 已簽的原始交易**先寫入 DB 再送出**。中斷或重啟後，同一張請購只會重送這一筆（同 hash、同 nonce），絕不產生第二筆。等不到確認回 `RESERVATION_PENDING`（unknown）。
+    - 確認數達到設定值後，在一筆寫入裡：預留改成 reserved，task 的餘額、`r`、commitment 換成新的。交易 revert 則預留改成 failed，task 不變。
+    - 回傳證據 `Evidence`（chain、合約、task、intent、金額、tx hash、區塊）。同一張請購再呼叫，回同一份證據。
+  - ponytail：所有 task 與 gas nonce 共用一把鎖；兩位客人的預留要重疊時，再改成每個 task 一把鎖並加 nonce 管理。
+- **Signer 的鏈上核對 `budget.Verifier`**（實作 `signer.ReservationVerifier`）。介面改為帶入 context 與完整請購。
+  - 證據只採信 `tx_hash`，其餘從自己的節點重讀：交易成功、確認數足夠，且**預算合約本身**發出的 `Spent` 的 task（由請購的 task 與合約算出）、intent、金額都與請購相符。
+  - 拒絕碼：`RESERVATION_MISSING`、`RESERVATION_PENDING`、`RESERVATION_FAILED`、`RESERVATION_UNCONFIRMED`、`RESERVATION_MISMATCH`；節點連不上是 `RESERVATION_UNAVAILABLE`。
+  - 尚未接進 `cmd/apa-signer`（正式組裝仍是 `Unavailable`），留到 demo 接線。
+- **驗證**（本機 anvil，chain 84532，部署 Verifier 與 Budget；`go test -race` 通過）：
+  - `TestReserveAndVerify`：
+    - 預留後 verifier 接受；同一張請購再呼叫，不送第二筆。
+    - verifier 拒絕：別的請購、別的 task、別的金額、從未送出的 hash、沒有證據、確認數不足、revert 的交易、**別的合約發出的一模一樣的仿冒 `Spent`**（自己部署一個原樣發出事件的合約）。
+    - relayer 拒絕且什麼都不寫、不送：B 的請購動用 A 的 task、超過剩餘預算、未登記的 task、不是請購、**狀態落後鏈上**（被模擬擋下）。
+    - 剩餘預算正確地跟著鏈上狀態走。
+  - `TestReserveResumesAfterACrash`：寫入之後、送出之前中斷 → 其他請購回 `TASK_BUSY` → 重啟後送出的就是寫入的那一筆（gas nonce 只加 1、鏈上只有一個 `Spent`），verifier 接受。
+  - `TestSignerSignsOnlyAReservedOrder`：真的 `signer.Core` 搭配這個 verifier：沒有預留回 `RESERVATION_MISSING`、拿別張請購的預留回 `RESERVATION_MISMATCH`、自己的預留才簽。
+  - `TestPolicyDigestIsTheContracts`。
+- **突變**：
+  - 這 10 項需要 `var/` 的本機工具（anvil、合約 build）。mutation-check 的容器裡沒有 `var/`，在那裡會被 skip、誤判為 SURVIVED，所以放在 `LOCAL_MUTATIONS`，由新的 `scripts/verify/local-mutations.py` 在工作樹的複本上執行（以 symlink 連到 `var/`；測試若被 skip 算錯誤，不算通過）。10／10 KILLED。
+  - 過程中發現並修正：交易漏了 calldata（測試抓到）；「仿冒事件」與「續送」原本沒有被測到，已補。
+- **既有、與本片無關**：
+  - mutation-check 的 `B1-04 A R1 host: requested model missing from the trace`（`internal/buyer/host.go`）；
+  - m-b-reverse 的 A2「viewer token 不能取代 assertion」（`cmd/demo/approvals.go`）；
+  - 這兩項的突變文字在 `main` 上就已經找不到，之後另外修。

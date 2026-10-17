@@ -851,6 +851,33 @@ MUTATIONS = [
      'if !(norm > 0) || math.IsInf(norm, 0) {', 'if false {', 'TestVoiceSignerTroubleAndInputs'),
 ]
 
+# Mutations whose tests need the local chain tools in var/ (anvil, the
+# contract build): this script's container has no var/, where they would
+# skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
+LOCAL_MUTATIONS = [
+    # P2 budget relayer and the Signer's chain verifier (docs/commercial-p2.md 9.6).
+    ('P2 budget: the verifier ignores the intent', 'internal/budget/verify.go',
+     'hex.EncodeToString(w0) == hex.EncodeToString(ih[:])', 'hex.EncodeToString(w0) != "" || hex.EncodeToString(ih[:]) == ""', 'TestReserveAndVerify'),
+    ('P2 budget: the verifier ignores confirmations', 'internal/budget/verify.go',
+     'latest-r.BlockNumber+1 < v.Confirmations {', 'false && latest-r.BlockNumber+1 < v.Confirmations {', 'TestReserveAndVerify'),
+    ("P2 budget: the verifier takes another contract's event", 'internal/budget/verify.go',
+     'l.Removed || l.Address != v.Contract ||', 'l.Removed || false && l.Address != v.Contract ||', 'TestReserveAndVerify'),
+    ('P2 budget: a reverted transaction is not reported failed', 'internal/budget/verify.go',
+     'case r.Status != 1:', 'case false && r.Status != 1:', 'TestReserveAndVerify'),
+    ('P2 budget: the relayer sends without simulating', 'internal/budget/relayer.go',
+     'if _, err := r.rpc.Call(ctx, msg); err != nil {', 'if _, err := r.rpc.Call(ctx, msg); false && err != nil {', 'TestReserveAndVerify'),
+    ("P2 budget: the task's state does not follow the chain", 'internal/budget/relayer.go',
+     'UPDATE tasks SET balance = balance - (SELECT amount FROM reservations WHERE intent_hash = ?),', 'UPDATE tasks SET balance = balance - 0*(SELECT amount FROM reservations WHERE intent_hash = ?),', 'TestReserveAndVerify'),
+    ("P2 budget: another consumer's order spends the task", 'internal/budget/relayer.go',
+     'case consumer != po.Intent.ConsumerID:', 'case false && consumer != po.Intent.ConsumerID:', 'TestReserveAndVerify'),
+    ('P2 budget: a second order spends an open commitment', 'internal/budget/relayer.go',
+     '} else if open > 0 {', '} else if false && open > 0 {', 'TestReserveResumesAfterACrash'),
+    ('P2 budget: a resumed reservation is not sent again', 'internal/budget/relayer.go',
+     'r.rpc.SendRaw(ctx, raw) // already known', '_ = raw // already known', 'TestReserveResumesAfterACrash'),
+    ('P2 budget: the Signer signs without a reservation', 'internal/budget/verify.go',
+     'return signer.Refusal("RESERVATION_MISMATCH")\n}', 'return nil\n}', 'TestSignerSignsOnlyAReservedOrder'),
+]
+
 
 def pkg(rel):
     """The package whose tests must kill a mutation of rel. Fixture files

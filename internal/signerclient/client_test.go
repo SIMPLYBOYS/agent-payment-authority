@@ -106,7 +106,7 @@ func (l *ledger) Payment(consumer, id string) (store.PaymentAttempt, error) {
 // already written for the intent it is asked to sign.
 type committed func(intent string) bool
 
-func (c committed) Verify(intent string, _ json.RawMessage) error {
+func (c committed) Verify(_ context.Context, intent string, _ *paycontract.PurchaseOrder, _ json.RawMessage) error {
 	if !c(intent) {
 		return signer.Refusal("REQUEST_NOT_COMMITTED")
 	}

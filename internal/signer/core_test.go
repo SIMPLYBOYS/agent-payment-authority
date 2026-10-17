@@ -44,7 +44,7 @@ var bg = context.Background()
 // unless refuse names a code.
 type reserved struct{ refuse string }
 
-func (r reserved) Verify(string, json.RawMessage) error {
+func (r reserved) Verify(context.Context, string, *paycontract.PurchaseOrder, json.RawMessage) error {
 	if r.refuse != "" {
 		return Refusal(r.refuse)
 	}

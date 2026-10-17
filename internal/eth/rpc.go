@@ -211,10 +211,11 @@ type Log struct {
 
 // Receipt is the part of a receipt P2 reads; nil when not mined yet.
 type Receipt struct {
-	Status      uint64 // 1 success, 0 reverted
-	BlockNumber uint64
-	GasUsed     uint64
-	Logs        []Log
+	Status          uint64 // 1 success, 0 reverted
+	BlockNumber     uint64
+	GasUsed         uint64
+	ContractAddress *Address // a contract creation's
+	Logs            []Log
 }
 
 type rawLog struct {
@@ -257,6 +258,7 @@ func (r rawLog) decode() (Log, error) {
 func (c *Client) Receipt(ctx context.Context, hash []byte) (*Receipt, error) {
 	var r *struct {
 		Status, BlockNumber, GasUsed string
+		ContractAddress              *string
 		Logs                         []rawLog
 	}
 	if err := c.call(ctx, "eth_getTransactionReceipt", &r, "0x"+hex.EncodeToString(hash)); err != nil {
@@ -272,6 +274,13 @@ func (c *Client) Receipt(ctx context.Context, hash []byte) (*Receipt, error) {
 		return nil, fmt.Errorf("receipt: %w", err)
 	}
 	out := &Receipt{Status: st.Uint64(), BlockNumber: bn.Uint64(), GasUsed: gu.Uint64()}
+	if r.ContractAddress != nil {
+		a, err := ParseAddress(*r.ContractAddress)
+		if err != nil {
+			return nil, fmt.Errorf("receipt: %w", err)
+		}
+		out.ContractAddress = &a
+	}
 	for _, rl := range r.Logs {
 		l, err := rl.decode()
 		if err != nil {

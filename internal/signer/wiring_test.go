@@ -32,7 +32,9 @@ const t0 = 1790726450
 
 type anyReservation struct{}
 
-func (anyReservation) Verify(string, json.RawMessage) error { return nil }
+func (anyReservation) Verify(context.Context, string, *paycontract.PurchaseOrder, json.RawMessage) error {
+	return nil
+}
 
 // ledger is a minimal stand-in for the Store's three methods.
 type ledger struct {
