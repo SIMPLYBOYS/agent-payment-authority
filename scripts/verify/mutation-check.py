@@ -731,6 +731,15 @@ MUTATIONS = [
      'return best <= len(name)/4', 'return best <= len(name)/2', 'TestPhraseMatching'),
     ('V1 signer: the merchant may start only at the transcript start', 'internal/signer/voice.go',
      'prev := row[0] // the stretch may start anywhere: row[0] stays 0', 'prev := row[0]; row[0]++', 'TestPhraseMatching'),
+    # P2-D4 (docs/commercial-p2.md): the in-process Ethereum client.
+    ('P2 eth: a long RLP string gets a short header', 'internal/eth/tx.go',
+     '\tif n < 56 {\n\t\treturn []byte{base + byte(n)}', '\tif n < 560 {\n\t\treturn []byte{base + byte(n)}', 'TestVectors'),
+    ('P2 eth: the recovery id is not the signature parity', 'internal/eth/tx.go',
+     'uintBytes(big.NewInt(int64(rec)))', 'uintBytes(big.NewInt(int64(1-rec)))', 'TestVectors'),
+    ('P2 eth: a dynamic argument points past the head', 'internal/eth/abi.go',
+     'off, _ := word(big.NewInt(int64(32*len(args) + len(tail))))', 'off, _ := word(big.NewInt(int64(len(tail))))', 'TestVectors'),
+    ('P2 eth: the access list is left out', 'internal/eth/tx.go',
+     'uintBytes(value), t.Data, []any{}}', 'uintBytes(value), t.Data}', 'TestVectors'),
     # AE1 (docs/commercial-ae1.md): the scorer and the report.
     ('AE1 score: a pricier Ask is not a false Ask', 'internal/ae1/score.go',
      'case want == "Allow" && got == "Ask":', 'case false && want == "Allow" && got == "Ask":', 'TestScoreRun'),
