@@ -16,6 +16,8 @@ import hashlib, json, os, secrets, shutil, socket, subprocess, sys, time
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 FOUNDRY = os.path.join(ROOT, "var/tools/foundry-v1.8.3/bin")
 FORGE, ANVIL, CAST = (os.path.join(FOUNDRY, b) for b in ("forge", "anvil", "cast"))
+# The deadline every policy signature here carries (P2-D5): far past any test run.
+DEADLINE = "4102444800"
 # anvil's default accounts (its documented test mnemonic): 0 deployer, 1 issuer, 2 policy signer, 3 relayer.
 KEYS = ["0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
         "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
@@ -112,16 +114,16 @@ def main():
 
         def sign(p, key=KEYS[2], amount=None):
             i = p["inputs"]
-            d = cast("call", budget, "policyDigest(uint256,bytes32,uint256,uint256,uint256)(bytes32)", i[0], p["intent"],
-                     str(amount if amount is not None else i[2]), i[4], i[3]).stdout.strip()
+            d = cast("call", budget, "policyDigest(uint256,bytes32,uint256,uint256,uint256,uint256)(bytes32)", i[0], p["intent"],
+                     str(amount if amount is not None else i[2]), i[4], i[3], DEADLINE).stdout.strip()
             return run([CAST, "wallet", "sign", "--private-key", key, d]).stdout.strip()
 
         def spend(p, sig, amount=None, key=KEYS[3], mined=False):
             i = p["inputs"]
             force = ["--gas-limit", "2000000"] if mined else []  # skip estimation: the failing transaction is mined
             return cast("send", "--private-key", key, "--json", *force, budget,
-                        "spend(string,uint256,uint256,uint256,uint256,bytes32,bytes,bytes)", task, i[1],
-                        str(amount if amount is not None else i[2]), i[3], i[4], p["intent"], p["proof"], sig, ok=False)
+                        "spend(string,uint256,uint256,uint256,uint256,bytes32,uint256,bytes,bytes)", task, i[1],
+                        str(amount if amount is not None else i[2]), i[3], i[4], p["intent"], DEADLINE, p["proof"], sig, ok=False)
 
         p1 = prove(balance, r0, 500_000, r1, "e2e-1")
         # A tampered amount, signed by the policy layer too: only the proof can refuse it.

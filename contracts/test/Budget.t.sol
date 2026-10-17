@@ -13,6 +13,7 @@ interface Vm {
     function expectRevert(bytes4 selector) external;
     function expectEmit(bool, bool, bool, bool) external;
     function store(address target, bytes32 slot, bytes32 value) external;
+    function warp(uint256 newTimestamp) external;
 }
 
 /// Z2's contract tests (docs/commercial-z2.md): synthetic data and test
@@ -23,6 +24,8 @@ contract BudgetTest {
     uint256 internal constant POLICY_KEY = 0xB0B;
     uint256 internal constant OTHER_KEY = 0xC0FFEE;
     uint256 internal constant R = 21888242871839275222246405745257275088548364400416034343698204186575808495617;
+    /// The deadline every helper signs (block.timestamp starts at 1).
+    uint256 internal constant DEADLINE = 1000;
 
     event Spent(uint256 indexed task, bytes32 intentHash, uint256 amount, uint256 nullifier, uint256 cNew);
 
@@ -48,7 +51,7 @@ contract BudgetTest {
         view
         returns (bytes memory)
     {
-        bytes32 d = budget.policyDigest(budget.taskField(taskId), intent, amount, n, cNew);
+        bytes32 d = budget.policyDigest(budget.taskField(taskId), intent, amount, n, cNew, DEADLINE);
         (uint8 v, bytes32 r, bytes32 s) =
             vm.sign(key, keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", d)));
         return abi.encodePacked(r, s, v);
@@ -89,7 +92,7 @@ contract BudgetTest {
     }
 
     function send(S memory x, bytes memory policySig) internal {
-        budget.spend(x.task, x.cOld, x.amount, x.cNew, x.n, x.intent, x.proof, policySig);
+        budget.spend(x.task, x.cOld, x.amount, x.cNew, x.n, x.intent, DEADLINE, x.proof, policySig);
     }
 
     function send(S memory x) internal {
@@ -313,11 +316,11 @@ contract BudgetTest {
         vm.prank(vm.addr(ISSUER_KEY));
         other.registerTask("show-a-01", F.C0_A);
         S memory x = a1();
-        bytes32 d = other.policyDigest(other.taskField(x.task), x.intent, x.amount, x.n, x.cNew);
+        bytes32 d = other.policyDigest(other.taskField(x.task), x.intent, x.amount, x.n, x.cNew, DEADLINE);
         (uint8 v, bytes32 r, bytes32 s) =
             vm.sign(POLICY_KEY, keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", d)));
         vm.expectRevert(Verifier.ProofInvalid.selector);
-        other.spend(x.task, x.cOld, x.amount, x.cNew, x.n, x.intent, x.proof, abi.encodePacked(r, s, v));
+        other.spend(x.task, x.cOld, x.amount, x.cNew, x.n, x.intent, DEADLINE, x.proof, abi.encodePacked(r, s, v));
     }
 
     // ---- the policy layer (Z2-D1) ----
@@ -440,5 +443,63 @@ contract BudgetTest {
 
     function spendFor(S memory x) external {
         send(x);
+    }
+
+    // ---- P2-D5: a policy signature expires, and the epoch voids it ----
+
+    event EpochRaised(uint256 epoch);
+
+    function test_ExpiredSignature() public {
+        register("show-a-01", F.C0_A);
+        S memory x = a1();
+        bytes memory ps = signed(x);
+        vm.warp(DEADLINE + 1);
+        vm.expectRevert(Budget.PolicyExpired.selector);
+        send(x, ps);
+        unchanged(x.task, F.C0_A, F.A1_N);
+        vm.warp(DEADLINE); // at the deadline itself it still holds
+        send(x, ps);
+        require(budget.nullifierUsed(F.A1_N), "at the deadline");
+    }
+
+    /// The deadline is signed: a later one with the same signature fails.
+    function test_DeadlineIsSigned() public {
+        register("show-a-01", F.C0_A);
+        S memory x = a1();
+        bytes memory ps = signed(x);
+        vm.expectRevert(Budget.PolicySignatureInvalid.selector);
+        budget.spend(x.task, x.cOld, x.amount, x.cNew, x.n, x.intent, DEADLINE + 1, x.proof, ps);
+        unchanged(x.task, F.C0_A, F.A1_N);
+    }
+
+    function test_RaisedEpochVoidsUnusedSignatures() public {
+        register("show-a-01", F.C0_A);
+        S memory x = a1();
+        bytes memory old = signed(x);
+        vm.prank(vm.addr(POLICY_KEY));
+        vm.expectEmit(false, false, false, true);
+        emit EpochRaised(1);
+        budget.raiseEpoch(1);
+        require(budget.epoch() == 1, "epoch");
+        vm.expectRevert(Budget.PolicySignatureInvalid.selector);
+        send(x, old);
+        unchanged(x.task, F.C0_A, F.A1_N);
+        send(x); // signed under epoch 1
+        require(budget.nullifierUsed(F.A1_N), "a signature under the new epoch");
+    }
+
+    function test_EpochOnlyByPolicySignerAndOnlyUp() public {
+        vm.prank(vm.addr(ISSUER_KEY));
+        vm.expectRevert(Budget.NotPolicySigner.selector);
+        budget.raiseEpoch(1);
+        vm.prank(vm.addr(POLICY_KEY));
+        budget.raiseEpoch(5);
+        vm.prank(vm.addr(POLICY_KEY));
+        vm.expectRevert(Budget.EpochNotHigher.selector);
+        budget.raiseEpoch(5);
+        vm.prank(vm.addr(POLICY_KEY));
+        vm.expectRevert(Budget.EpochNotHigher.selector);
+        budget.raiseEpoch(4);
+        require(budget.epoch() == 5, "the epoch went down or was replaced");
     }
 }

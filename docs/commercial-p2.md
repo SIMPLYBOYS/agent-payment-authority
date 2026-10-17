@@ -68,3 +68,11 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
 - 不建立、不讀取、不解鎖任何付款或 gas 金鑰，不連 RPC、faucet、facilitator 或任何鏈，直到 Aaron 對該項個別核准（P2-a 只用本機 anvil 與其公開測試金鑰）。
 - 絕不連 mainnet、不用真錢、不搬入日常錢包。
 - 不宣稱 mainnet 或 production 安全；所有成功宣稱都要有 testnet receipt 與對應的 `intent_hash`，否則記 unknown／not_evaluated。
+
+## 9 P2-a 進度
+
+### 9.1 Z2 合約：policy 授權的期限與 epoch（P2-D5）
+
+- `spend` 多一個 `deadline`：超過即 `PolicyExpired`；`policyDigest` 納入 `deadline` 與合約的 `epoch`。
+- `raiseEpoch(newEpoch)`：只有 policy 簽章者、只能往上；之後所有在較低 epoch 下的簽章都失效（`EpochRaised` 事件）。電路與 verifier 不變；storage 只在既有欄位後加 `epoch`。
+- 驗證：forge 35 個測試通過（新增 4：過期、期限在簽章內、提高 epoch 作廢舊簽章、只有 policy 簽章者且只能往上）；`scripts/verify/z2-anvil.py`（本機 anvil，簽章帶期限）PASS；`contracts/reverse.py` 14／14 caught（新增 5 項）。

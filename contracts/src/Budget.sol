@@ -10,8 +10,10 @@ interface IVerifier {
 /// @notice Holds one commitment per task and spends it with a proof that
 /// the balance covers the amount, without the balance. A spend needs, in
 /// order: a non-zero amount (Z2-D4); the task's current commitment as
-/// C_old; an unused nullifier; the policy layer's signature over the
-/// spend (Z2-D1); and a valid proof over public inputs the contract builds
+/// C_old; an unused nullifier; a deadline not passed; the policy layer's
+/// signature over the spend, its deadline and the current epoch (Z2-D1;
+/// P2-D5: a signature expires, and raising the epoch voids every one not
+/// yet used); and a valid proof over public inputs the contract builds
 /// itself (the task field from chain, contract and task ID: Z2-D2; the two
 /// intent limbs from intent_hash: Z1-D1). Then, in the same transaction,
 /// the nullifier is used, C_new stored and Spent emitted.
@@ -32,9 +34,13 @@ contract Budget {
     /// task field => current commitment (0: not registered).
     mapping(uint256 => uint256) public commitment;
     mapping(uint256 => bool) public nullifierUsed;
+    /// The policy signer's epoch: in every signature; raised, it voids
+    /// every unused one (P2-D5).
+    uint256 public epoch;
 
     event TaskRegistered(uint256 indexed task, string taskId, uint256 commitment);
     event Spent(uint256 indexed task, bytes32 intentHash, uint256 amount, uint256 nullifier, uint256 cNew);
+    event EpochRaised(uint256 epoch);
 
     error NotIssuer();
     error AlreadyRegistered();
@@ -43,6 +49,9 @@ contract Budget {
     error NullifierUsed();
     error ZeroAmount();
     error PolicySignatureInvalid();
+    error PolicyExpired();
+    error NotPolicySigner();
+    error EpochNotHigher();
 
     constructor(IVerifier verifier_, address issuer_, address policySigner_) {
         require(address(verifier_) != address(0) && issuer_ != address(0) && policySigner_ != address(0), "zero address");
@@ -67,15 +76,24 @@ contract Budget {
         emit TaskRegistered(task, taskId, c0);
     }
 
+    /// The policy signer raises the epoch: every signature made under a
+    /// lower one stops working (P2-D5). Only up.
+    function raiseEpoch(uint256 newEpoch) external {
+        if (msg.sender != policySigner) revert NotPolicySigner();
+        if (newEpoch <= epoch) revert EpochNotHigher();
+        epoch = newEpoch;
+        emit EpochRaised(newEpoch);
+    }
+
     /// What the policy layer signs (EIP-191 over this digest): the spend
     /// on this chain and contract, its intent and amount, the old state's
-    /// nullifier and the new commitment.
-    function policyDigest(uint256 task, bytes32 intentHash, uint256 amount, uint256 nullifier, uint256 cNew)
+    /// nullifier and the new commitment, its deadline and the epoch.
+    function policyDigest(uint256 task, bytes32 intentHash, uint256 amount, uint256 nullifier, uint256 cNew, uint256 deadline)
         public
         view
         returns (bytes32)
     {
-        return keccak256(abi.encode(POLICY_LABEL, block.chainid, address(this), task, intentHash, amount, nullifier, cNew));
+        return keccak256(abi.encode(POLICY_LABEL, block.chainid, address(this), task, intentHash, amount, nullifier, cNew, deadline, epoch));
     }
 
     function spend(
@@ -85,6 +103,7 @@ contract Budget {
         uint256 cNew,
         uint256 nullifier,
         bytes32 intentHash,
+        uint256 deadline,
         bytes calldata proof,
         bytes calldata policySig
     ) external {
@@ -94,7 +113,8 @@ contract Budget {
         if (current == 0 || current != cOld) revert StaleCommitment();
         if (nullifierUsed[nullifier]) revert NullifierUsed();
         if (cNew == 0) revert InvalidCommitment();
-        if (signer(policyDigest(task, intentHash, amount, nullifier, cNew), policySig) != policySigner) {
+        if (block.timestamp > deadline) revert PolicyExpired();
+        if (signer(policyDigest(task, intentHash, amount, nullifier, cNew, deadline), policySig) != policySigner) {
             revert PolicySignatureInvalid();
         }
         // The verifier refuses any input not below r, so every value used

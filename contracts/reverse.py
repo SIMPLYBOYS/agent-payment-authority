@@ -24,6 +24,13 @@ ITEMS = [  # (name, forge test, old, new)
     ("only the issuer registers", "test_RegisterOnlyIssuer", "        if (msg.sender != issuer) revert NotIssuer();\n", ""),
     ("a task registers once", "test_RegisterOnce", "        if (commitment[task] != 0) revert AlreadyRegistered();\n", ""),
     ("the proof is verified", "test_TamperedAmount", "        verifier.verifyProof(\n", "        if (false) verifier.verifyProof(\n"),
+    # P2-D5: a policy signature expires, and the epoch voids it.
+    ("a passed deadline is refused", "test_ExpiredSignature", "        if (block.timestamp > deadline) revert PolicyExpired();\n", ""),
+    ("the deadline is signed", "test_DeadlineIsSigned", "cNew, deadline, epoch));", "cNew, uint256(0) * deadline, epoch));"),
+    ("the epoch is signed", "test_RaisedEpochVoidsUnusedSignatures", "deadline, epoch));", "deadline, uint256(0) * epoch));"),
+    ("only the policy signer raises the epoch", "test_EpochOnlyByPolicySignerAndOnlyUp",
+     "        if (msg.sender != policySigner) revert NotPolicySigner();\n", ""),
+    ("the epoch only goes up", "test_EpochOnlyByPolicySignerAndOnlyUp", "        if (newEpoch <= epoch) revert EpochNotHigher();\n", ""),
 ]
 
 
