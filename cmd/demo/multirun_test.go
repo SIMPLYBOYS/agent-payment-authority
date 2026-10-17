@@ -307,8 +307,10 @@ func TestTimingInterleaved(t *testing.T) {
 	dir := t.TempDir()
 	x := func(n string) string { return filepath.Join(dir, n) }
 	h := controlHost(t, hostOpts{expiryEvery: time.Hour, scenarios: catalogOf(t, map[string]entry{
+		// b waits for x3 too: an ended run shows no tool_calls, so b must not
+		// end before the test has seen its second call.
 		"a":       {"consumer-a", []map[string]any{tool("list_products"), waitFile(x("x1")), tool("get_quote", "product_id", "kr-market"), waitFile(x("x3")), done}},
-		"b":       {"consumer-b", []map[string]any{waitFile(x("x0")), tool("list_products"), waitFile(x("x2")), tool("get_quote", "product_id", "kr-market"), done}},
+		"b":       {"consumer-b", []map[string]any{waitFile(x("x0")), tool("list_products"), waitFile(x("x2")), tool("get_quote", "product_id", "kr-market"), waitFile(x("x3")), done}},
 		"quick-a": {"consumer-a", []map[string]any{tool("list_products"), tool("get_quote", "product_id", "kr-market"), done}},
 		"quick-b": {"consumer-b", []map[string]any{tool("list_products"), tool("get_quote", "product_id", "kr-market"), done}},
 	})})
