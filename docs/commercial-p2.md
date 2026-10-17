@@ -76,3 +76,12 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
 - `spend` 多一個 `deadline`：超過即 `PolicyExpired`；`policyDigest` 納入 `deadline` 與合約的 `epoch`。
 - `raiseEpoch(newEpoch)`：只有 policy 簽章者、只能往上；之後所有在較低 epoch 下的簽章都失效（`EpochRaised` 事件）。電路與 verifier 不變；storage 只在既有欄位後加 `epoch`。
 - 驗證：forge 35 個測試通過（新增 4：過期、期限在簽章內、提高 epoch 作廢舊簽章、只有 policy 簽章者且只能往上）；`scripts/verify/z2-anvil.py`（本機 anvil，簽章帶期限）PASS；`contracts/reverse.py` 14／14 caught（新增 5 項）。
+
+### 9.2 Go 端的最小以太坊客戶端（P2-D4）
+
+`internal/eth`：Keccak256、位址、金鑰（decred secp256k1，RFC 6979、low S；`SignPersonal` 為 EIP-191，給預算合約的 policy 簽章用）、RLP、EIP-1559 交易（空 access list，在程序內簽章）、ABI（uint256、address、bytes32、uint8、bytes、string）、JSON-RPC 客戶端（有逾時與回應大小上限）。沒有新增依賴。
+- `TestVectors`：兩筆交易與一個含動態型別的呼叫，與 foundry 1.8.3 的 `cast mktx`／`cast calldata` 逐位元組相同；`TestAnvil`：在本機 anvil 上，自己簽的轉帳被打包（status 1、21000 gas）、金額移動、同一筆原始交易第二次被拒。反向突變 4／4 KILLED。
+
+### 9.3 本機測試用 USDC（P2-a）
+
+`contracts/src/TestUSDC.sol`：ERC-20 餘額＋EIP-3009 `transferWithAuthorization`，EIP-712 domain 為（`USDC`、`2`），與付款 Signer 簽的一致；只有部署者能鑄幣；**只在本機 anvil 部署**（Base Sepolia 有它自己的 USDC）。forge 10 個測試：付款、重播、過期、尚未生效、別人簽、改收款人、改金額、被改造的簽章、餘額不足（不用掉 nonce）、只有擁有者鑄幣。合約測試合計 45 個通過。
