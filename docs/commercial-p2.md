@@ -1,7 +1,7 @@
 # P2 Testnet 付款、結算、對帳與交付：設計提案
 
 > 2026-10-17，Claude Code。依 vault〈Claude-Code-P2Testnet付款結算對帳交付派工-20261013〉、roadmap §5.3 P2（驗收 7、24、25、30、31、39、44）。分支 `commercial-p2`（從 main `e41cd5d`）。
-> **狀態：提案，等 Aaron 決定第 6 節的 P2-D1–P2-D6。** 沒有建立或讀取任何付款金鑰、沒有連任何鏈、RPC、faucet 或 facilitator，也沒有動 `/opt`。
+> **Aaron 10/17：「照建議」：第 6 節 P2-D1–P2-D6 全部採用建議。** 實作 P2-a（本機整合）；只用本機 anvil 與其公開測試金鑰。沒有建立或讀取任何付款金鑰、沒有連任何鏈、RPC、faucet 或 facilitator，也沒有動 `/opt`。
 
 ## 1 要做到什麼
 
