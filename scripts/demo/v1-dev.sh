@@ -8,8 +8,9 @@
 # The Signer's configuration: the demo registry's two public wallets, one
 # approver each, the relying party http://localhost:8402, and the voice
 # section (threshold 365/1000 from the evaluation; the model versions the
-# sidecar reports). Its data (approvals.db, voice.key, the sealed voice
-# template) stays in var/v1-dev/data until you remove it.
+# sidecar reports). Its data (signer.db, voice.key, the sealed voice
+# template) stays in var/v1-dev/data until you remove it. An A2-era
+# approvals.db there is moved into signer.db by you, once (P2-D1).
 set -eu
 root=$(cd "$(dirname "$0")/../.." && pwd)
 dir="$root/var/v1-dev"
@@ -18,6 +19,9 @@ chmod 700 "$dir" "$dir/data" "$dir/run" "$dir/bin"
 py="$root/var/voice/.venv/bin/python"
 [ -x "$py" ] || { echo "v1-dev: var/voice/.venv is missing (docs/commercial-v1.md 2)" >&2; exit 1; }
 (cd "$root" && go build -o "$dir/bin/apa-signer" ./cmd/apa-signer)
+[ ! -e "$dir/data/approvals.db" ] || { echo "v1-dev: $dir/data/approvals.db is from before P2: move it into signer.db once with
+  $dir/bin/apa-signer approver migrate --dir $dir/data
+(the old file stays as approvals.db.migrated)" >&2; exit 1; }
 
 vsock="$dir/run/voice.sock"
 ssock="$dir/run/signer.sock"

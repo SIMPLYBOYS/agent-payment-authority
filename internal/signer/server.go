@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -57,6 +58,24 @@ func (c *slotConn) Close() error {
 // Serve serves a Core on a listener; log gets one fixed line per request.
 func Serve(ctx context.Context, ln net.Listener, core *Core, log func(string)) error {
 	return serveHandler(ctx, ln, Handler(core, log), timeout)
+}
+
+// ServeAll is the P2 Signer (P2-D1): the payment routes and, when ac is
+// not nil, the approval and enrollment routes on the same socket, both
+// cores on the one signer.db. Health is the payment's.
+func ServeAll(ctx context.Context, ln net.Listener, core *Core, ac *ApprovalCore, log func(string)) error {
+	if ac == nil {
+		return Serve(ctx, ln, core, log)
+	}
+	pay, appr := Handler(core, log), ApprovalsHandler(ac, log)
+	h := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, "/v1/approvals") || strings.HasPrefix(req.URL.Path, "/v1/enrollments/") {
+			appr.ServeHTTP(w, req)
+			return
+		}
+		pay.ServeHTTP(w, req)
+	})
+	return serveHandler(ctx, ln, h, core.cfg.requestTimeout())
 }
 
 // ServeApprovals serves serve-approvals' ApprovalCore the same way.

@@ -88,6 +88,14 @@ func run(args []string, out io.Writer) error {
 		return err
 	}
 	defer core.Close()
+	// P2-D1: with approvers configured, the same process serves the
+	// approvals on the same signer.db.
+	var ac *signer.ApprovalCore
+	if cfg.WebAuthn != nil && len(cfg.Approvers) > 0 {
+		if ac, err = core.Approvals(context.Background(), *dir, unixClock); err != nil {
+			return err
+		}
+	}
 	if _, err := os.Lstat(cfg.Socket); err == nil {
 		return fmt.Errorf("%s exists: another Signer may be serving; remove it yourself if not", cfg.Socket)
 	}
@@ -101,8 +109,12 @@ func run(args []string, out io.Writer) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	fmt.Fprintf(out, "apa-signer: serving on %s (reservation verification unavailable until P2: nothing is signed)\n", cfg.Socket)
-	return signer.Serve(ctx, ln, core, func(line string) { fmt.Fprintln(out, "apa-signer:", line) })
+	approvals := ""
+	if ac != nil {
+		approvals = "; approvals on the same socket"
+	}
+	fmt.Fprintf(out, "apa-signer: serving on %s (reservation verification unavailable until P2: nothing is signed%s)\n", cfg.Socket, approvals)
+	return signer.ServeAll(ctx, ln, core, ac, func(line string) { fmt.Fprintln(out, "apa-signer:", line) })
 }
 
 // recoveryTimeout bounds the startup recovery (signer.NewCore).
@@ -112,6 +124,9 @@ const recoveryTimeout = 60 * time.Second
 // keys and DB, and the Unavailable reservation verifier, always.
 func assemble(dir string, passphrase func() ([]byte, error), clock signer.Clock) (*signer.Core, *signer.Config, error) {
 	if err := private(dir); err != nil {
+		return nil, nil, err
+	}
+	if err := signer.Unmigrated(dir); err != nil {
 		return nil, nil, err
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "signer.json"))

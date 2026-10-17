@@ -112,7 +112,7 @@ func (f *a2fx) startSigner() {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	core, err := signer.NewApprovalCore(context.Background(), cfg, filepath.Join(f.sdir, "approvals.db"), func() uint64 { return uint64(time.Now().Unix()) })
+	core, err := signer.NewApprovalCore(context.Background(), cfg, filepath.Join(f.sdir, "signer.db"), func() uint64 { return uint64(time.Now().Unix()) })
 	if err != nil {
 		f.t.Fatal(err)
 	}

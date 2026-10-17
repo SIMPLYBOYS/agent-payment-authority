@@ -20,6 +20,9 @@ type Authorization struct {
 	Method            string `json:"method"`
 	DelegationID      string `json:"delegation_id,omitempty"`
 	DelegationVersion uint64 `json:"delegation_version,omitempty"`
+	// ApprovalID is a webauthn payment's verified human approval (P2): the
+	// Signer consumes it in the transaction that accepts the attempt.
+	ApprovalID string `json:"approval_id,omitempty"`
 }
 
 // SignedAuthorization is the EIP-3009 authorization: the message and its

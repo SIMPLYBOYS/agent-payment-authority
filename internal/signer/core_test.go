@@ -192,16 +192,16 @@ func TestRefusalsConsumeNothing(t *testing.T) {
 		r    SignRequest
 		want string
 	}{
-		"simulated":            {SignRequest{RequestID: "request-0000000001", Authorization: Authorization{Method: "simulated"}, Order: e.order(a(1))}, "GRANT_METHOD_NOT_ACCEPTED"},
-		"webauthn before A2":   {SignRequest{RequestID: "request-0000000002", Authorization: Authorization{Method: "webauthn"}, Order: e.order(a(1))}, "HUMAN_APPROVAL_UNAVAILABLE"},
-		"unknown delegation":   {SignRequest{RequestID: "request-0000000003", Authorization: delegation("dlg-z"), Order: e.order(a(1))}, "DELEGATION_UNKNOWN"},
-		"another version":      {SignRequest{RequestID: "request-0000000004", Authorization: Authorization{Method: "delegation", DelegationID: "dlg-a", DelegationVersion: 2}, Order: e.order(a(1))}, "DELEGATION_VERSION"},
-		"A's delegation for B": {SignRequest{RequestID: "request-0000000005", Authorization: delegation("dlg-a"), Order: e.order(b)}, "CONSUMER_MISMATCH"},
-		"B's key in A's order": {e.req("request-0000000006", spec{"consumer-a", "agent-a", "wallet-a", keyB, merchant, "500000", 3, 60}), "CONSUMER_MISMATCH"},
-		"another merchant":     {e.req("request-0000000007", spec{"consumer-a", "agent-a", "wallet-a", keyA, "0x9999999999999999999999999999999999999999", "500000", 4, 60}), "MERCHANT_NOT_ALLOWED"},
-		"over per tx":          {e.req("request-0000000008", spec{"consumer-a", "agent-a", "wallet-a", keyA, merchant, "600001", 5, 60}), "OVER_PER_TX"},
-		"window too long":      {e.req("request-0000000009", spec{"consumer-a", "agent-a", "wallet-a", keyA, merchant, "500000", 6, 601}), "WINDOW_INVALID"},
-		"not an order":         {SignRequest{RequestID: "request-0000000010", Authorization: delegation("dlg-a"), Order: json.RawMessage(`{"version":"apa.m1.v2"}`)}, "ORDER_INVALID"},
+		"simulated":             {SignRequest{RequestID: "request-0000000001", Authorization: Authorization{Method: "simulated"}, Order: e.order(a(1))}, "GRANT_METHOD_NOT_ACCEPTED"},
+		"webauthn, no approval": {SignRequest{RequestID: "request-0000000002", Authorization: Authorization{Method: "webauthn"}, Order: e.order(a(1))}, "APPROVAL_UNKNOWN"},
+		"unknown delegation":    {SignRequest{RequestID: "request-0000000003", Authorization: delegation("dlg-z"), Order: e.order(a(1))}, "DELEGATION_UNKNOWN"},
+		"another version":       {SignRequest{RequestID: "request-0000000004", Authorization: Authorization{Method: "delegation", DelegationID: "dlg-a", DelegationVersion: 2}, Order: e.order(a(1))}, "DELEGATION_VERSION"},
+		"A's delegation for B":  {SignRequest{RequestID: "request-0000000005", Authorization: delegation("dlg-a"), Order: e.order(b)}, "CONSUMER_MISMATCH"},
+		"B's key in A's order":  {e.req("request-0000000006", spec{"consumer-a", "agent-a", "wallet-a", keyB, merchant, "500000", 3, 60}), "CONSUMER_MISMATCH"},
+		"another merchant":      {e.req("request-0000000007", spec{"consumer-a", "agent-a", "wallet-a", keyA, "0x9999999999999999999999999999999999999999", "500000", 4, 60}), "MERCHANT_NOT_ALLOWED"},
+		"over per tx":           {e.req("request-0000000008", spec{"consumer-a", "agent-a", "wallet-a", keyA, merchant, "600001", 5, 60}), "OVER_PER_TX"},
+		"window too long":       {e.req("request-0000000009", spec{"consumer-a", "agent-a", "wallet-a", keyA, merchant, "500000", 6, 601}), "WINDOW_INVALID"},
+		"not an order":          {SignRequest{RequestID: "request-0000000010", Authorization: delegation("dlg-a"), Order: json.RawMessage(`{"version":"apa.m1.v2"}`)}, "ORDER_INVALID"},
 	}
 	for name, cs := range cases {
 		if _, err := c.Sign(bg, cs.r); code(err) != cs.want {

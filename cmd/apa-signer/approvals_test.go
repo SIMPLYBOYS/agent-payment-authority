@@ -1,11 +1,12 @@
 package main
 
 // serve-approvals and the administrator's commands (A2; design 6.4, R2):
-// no key and no payment database are needed or touched.
+// no key is needed or touched. Since P2-D1 their data is signer.db.
 
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,12 +20,12 @@ import (
 
 const testOrigin = "http://localhost:8402"
 
-// approvalsDir is a private Signer directory with an approvals config, a
-// keys/ directory nobody may read and a signer.db nobody may read: if
-// serve-approvals touched either, it would fail.
-func approvalsDir(t *testing.T) (dir string, signerDB []byte) {
+// approvalsDir is a private Signer directory with an approvals config and
+// a keys/ directory nobody may read: if serve-approvals touched it, it
+// would fail. The approvals live in signer.db (P2-D1).
+func approvalsDir(t *testing.T) string {
 	t.Helper()
-	dir = filepath.Join(t.TempDir(), "signer")
+	dir := filepath.Join(t.TempDir(), "signer")
 	if err := os.MkdirAll(filepath.Join(dir, "keys"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -34,24 +35,21 @@ func approvalsDir(t *testing.T) (dir string, signerDB []byte) {
 	if err := os.WriteFile(filepath.Join(dir, "signer.json"), cfg, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	signerDB = []byte("an unfinished payment attempt would be here")
-	os.WriteFile(filepath.Join(dir, "signer.db"), signerDB, 0o600)
-	os.Chmod(filepath.Join(dir, "signer.db"), 0o000)
 	os.Chmod(filepath.Join(dir, "keys"), 0o000)
-	t.Cleanup(func() { os.Chmod(filepath.Join(dir, "keys"), 0o700); os.Chmod(filepath.Join(dir, "signer.db"), 0o600) })
-	return dir, signerDB
+	t.Cleanup(func() { os.Chmod(filepath.Join(dir, "keys"), 0o700) })
+	return dir
 }
 
 func TestServeApprovalsNeedsNoKey(t *testing.T) {
-	dir, before := approvalsDir(t)
+	dir := approvalsDir(t)
 	now := uint64(t0)
 	core, cfg, err := assembleApprovals(dir, func() uint64 { return now })
 	if err != nil {
-		t.Fatalf("assemble without keys or signer.db: %v", err)
+		t.Fatalf("assemble without keys: %v", err)
 	}
 	defer core.Close()
-	if fi, err := os.Stat(filepath.Join(dir, "approvals.db")); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("approvals.db: %v %v", fi, err)
+	if fi, err := os.Stat(filepath.Join(dir, "signer.db")); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("signer.db: %v %v", fi, err)
 	}
 	// The whole flow works without a key: enroll, confirm, challenge, verify.
 	ctx := context.Background()
@@ -79,27 +77,25 @@ func TestServeApprovalsNeedsNoKey(t *testing.T) {
 	if cfg.WebAuthn == nil {
 		t.Fatal("no webauthn section")
 	}
-	// Neither keys/ nor signer.db was opened or changed: both stay unreadable,
-	// and signer.db has no WAL of its own.
-	os.Chmod(filepath.Join(dir, "signer.db"), 0o600)
-	after, _ := os.ReadFile(filepath.Join(dir, "signer.db"))
-	if string(after) != string(before) {
-		t.Fatal("signer.db changed")
-	}
-	for _, f := range []string{"signer.db-wal", "signer.db-shm"} {
-		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
-			t.Fatalf("%s exists", f)
-		}
-	}
+	// keys/ stayed unreadable throughout.
 }
 
 func TestServeApprovalsRefusesItsInputs(t *testing.T) {
 	clock := func() uint64 { return t0 }
-	dir, _ := approvalsDir(t)
-	os.WriteFile(filepath.Join(dir, "approvals.db"), nil, 0o644)
-	os.Chmod(filepath.Join(dir, "approvals.db"), 0o644)
+	dir := approvalsDir(t)
+	os.WriteFile(filepath.Join(dir, "signer.db"), nil, 0o644)
+	os.Chmod(filepath.Join(dir, "signer.db"), 0o644)
 	if _, _, err := assembleApprovals(dir, clock); err == nil || !strings.Contains(err.Error(), "0600") {
-		t.Fatalf("group-readable approvals.db: %v", err)
+		t.Fatalf("group-readable signer.db: %v", err)
+	}
+	os.Remove(filepath.Join(dir, "signer.db"))
+	// A2's approvals.db, not migrated: every command but migrate refuses it.
+	os.WriteFile(filepath.Join(dir, "approvals.db"), nil, 0o600)
+	if _, _, err := assembleApprovals(dir, clock); err == nil || !strings.Contains(err.Error(), "approver migrate") {
+		t.Fatalf("an unmigrated approvals.db: %v", err)
+	}
+	if err := approver([]string{"list", "--dir", dir}, io.Discard, nil); err == nil {
+		t.Fatal("list read past an unmigrated approvals.db")
 	}
 	os.Remove(filepath.Join(dir, "approvals.db"))
 	// A payment configuration without approvers is not an approvals one.
@@ -127,7 +123,7 @@ func TestServeStillNeedsEveryKey(t *testing.T) {
 }
 
 func TestApproverCommands(t *testing.T) {
-	dir, _ := approvalsDir(t)
+	dir := approvalsDir(t)
 	var out strings.Builder
 	if err := approver([]string{"enroll", "begin", "--dir", dir, "--approver", "approver-a"}, &out, nil); err != nil {
 		t.Fatal(err)
@@ -179,5 +175,44 @@ func TestApproverCommands(t *testing.T) {
 	}
 	if err := approver([]string{"enroll", "begin", "--dir", dir}, &out, nil); err == nil {
 		t.Fatal("begin without an approver")
+	}
+}
+
+// approver migrate moves A2's approvals.db into signer.db once (P2-D1);
+// afterwards the commands and serve read signer.db, and serve refuses a
+// directory that still has approvals.db.
+func TestApproverMigrate(t *testing.T) {
+	dir := approvalsDir(t)
+	raw, _ := os.ReadFile(filepath.Join(dir, "signer.json"))
+	cfg, err := signer.ParseConfig(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := signer.NewApprovalCore(context.Background(), cfg, filepath.Join(dir, "approvals.db"), unixClock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := old.EnrollBegin(context.Background(), "approver-a"); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+	if _, _, err := assemble(dir, passphrase, unixClock); err == nil || !strings.Contains(err.Error(), "approver migrate") {
+		t.Fatalf("serve with an unmigrated approvals.db: %v", err)
+	}
+	var out strings.Builder
+	if err := approver([]string{"migrate", "--dir", dir}, &out, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "enrollments 1 rows") || !strings.Contains(out.String(), "approvals.db.migrated") {
+		t.Fatalf("migrate printed %q", out.String())
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "signer.db")); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("signer.db: %v %v", fi, err)
+	}
+	if err := approver([]string{"migrate", "--dir", dir}, io.Discard, nil); err == nil {
+		t.Fatal("migrated twice")
+	}
+	if err := approver([]string{"list", "--dir", dir}, io.Discard, nil); err != nil {
+		t.Fatalf("list after migrate: %v", err)
 	}
 }

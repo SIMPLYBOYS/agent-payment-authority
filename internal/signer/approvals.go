@@ -120,12 +120,13 @@ CREATE TABLE IF NOT EXISTS verify_requests (
 // ApprovalCore is the Signer of serve-approvals: approver enrollment,
 // challenges, verification and queries. It holds no key.
 type ApprovalCore struct {
-	cfg   *Config
-	rp    *webauthn.WebAuthn
-	db    *sql.DB
-	clock Clock
-	dir   string   // the Signer's directory: the voice template key's
-	voice *sidecar // V1, when configured
+	cfg    *Config
+	rp     *webauthn.WebAuthn
+	db     *sql.DB
+	clock  Clock
+	dir    string   // the Signer's directory: the voice template key's
+	voice  *sidecar // V1, when configured
+	ownsDB bool     // opened by NewApprovalCore (not the shared database)
 }
 
 // challengeFailures closes a challenge after this many refused assertions.
@@ -138,33 +139,55 @@ func NewApprovalCore(ctx context.Context, cfg *Config, dbPath string, clock Cloc
 	if w == nil || len(cfg.Approvers) == 0 {
 		return nil, errors.New("config: serve-approvals needs approvers and a webauthn section")
 	}
-	ttl := time.Duration(w.ChallengeTTLSeconds) * time.Second
-	rp, err := webauthn.New(&webauthn.Config{RPID: w.RPID, RPDisplayName: "agent-payment-authority", RPOrigins: w.Origins,
-		AttestationPreference: protocol.PreferNoAttestation,
-		AuthenticatorSelection: protocol.AuthenticatorSelection{UserVerification: protocol.VerificationRequired,
-			ResidentKey: protocol.ResidentKeyRequirementPreferred},
-		Timeouts: webauthn.TimeoutsConfig{Login: webauthn.TimeoutConfig{Timeout: ttl, TimeoutUVD: ttl},
-			Registration: webauthn.TimeoutConfig{Timeout: enrollTTL * time.Second, TimeoutUVD: enrollTTL * time.Second}}})
+	rp, err := relyingParty(w)
 	if err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_pragma=foreign_keys(1)&_txlock=immediate")
+	db, err := OpenDB(dbPath)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	if _, err := db.ExecContext(ctx, approvalsSchema+voiceSchema); err != nil {
+	c, err := newApprovalCore(ctx, cfg, rp, db, filepath.Dir(dbPath), clock)
+	if err != nil {
 		db.Close()
 		return nil, err
 	}
-	c := &ApprovalCore{cfg: cfg, rp: rp, db: db, clock: clock, dir: filepath.Dir(dbPath)}
+	c.ownsDB = true
+	return c, nil
+}
+
+// NewApprovalCoreDB is the approval core on the Signer's one database
+// (P2-D1), opened by the caller and closed by it; dir holds voice.key.
+func NewApprovalCoreDB(ctx context.Context, cfg *Config, db *sql.DB, dir string, clock Clock) (*ApprovalCore, error) {
+	w := cfg.WebAuthn
+	if w == nil || len(cfg.Approvers) == 0 {
+		return nil, errors.New("config: the approval core needs approvers and a webauthn section")
+	}
+	rp, err := relyingParty(w)
+	if err != nil {
+		return nil, err
+	}
+	return newApprovalCore(ctx, cfg, rp, db, dir, clock)
+}
+
+func newApprovalCore(ctx context.Context, cfg *Config, rp *webauthn.WebAuthn, db *sql.DB, dir string, clock Clock) (*ApprovalCore, error) {
+	if _, err := db.ExecContext(ctx, approvalsSchema+voiceSchema); err != nil {
+		return nil, err
+	}
+	c := &ApprovalCore{cfg: cfg, rp: rp, db: db, clock: clock, dir: dir}
 	if cfg.Voice != nil {
 		c.voice = newSidecar(cfg.Voice)
 	}
 	return c, nil
 }
 
-func (c *ApprovalCore) Close() error { return c.db.Close() }
+// Close closes the database the core opened itself (not a shared one).
+func (c *ApprovalCore) Close() error {
+	if !c.ownsDB {
+		return nil
+	}
+	return c.db.Close()
+}
 
 // Display is the purchase as the Signer reads it from the order and its
 // own configuration, for the page to show (design 4.7): it is not a
@@ -1125,4 +1148,14 @@ func (c *ApprovalCore) Abandon(ctx context.Context, id string) (ApprovalReply, e
 		return r, Refusal("APPROVAL_NOT_VERIFIED")
 	}
 	return r, err
+}
+
+func relyingParty(w *WebAuthn) (*webauthn.WebAuthn, error) {
+	ttl := time.Duration(w.ChallengeTTLSeconds) * time.Second
+	return webauthn.New(&webauthn.Config{RPID: w.RPID, RPDisplayName: "agent-payment-authority", RPOrigins: w.Origins,
+		AttestationPreference: protocol.PreferNoAttestation,
+		AuthenticatorSelection: protocol.AuthenticatorSelection{UserVerification: protocol.VerificationRequired,
+			ResidentKey: protocol.ResidentKeyRequirementPreferred},
+		Timeouts: webauthn.TimeoutsConfig{Login: webauthn.TimeoutConfig{Timeout: ttl, TimeoutUVD: ttl},
+			Registration: webauthn.TimeoutConfig{Timeout: enrollTTL * time.Second, TimeoutUVD: enrollTTL * time.Second}}})
 }

@@ -64,6 +64,8 @@ type Core struct {
 	db    *sql.DB
 	clock Clock
 	res   ReservationVerifier
+	// ownsDB: opened by NewCore (not the shared database).
+	ownsDB bool
 
 	mu      sync.Mutex
 	wallets map[string]chan struct{} // the per-wallet signing lock
@@ -83,7 +85,8 @@ CREATE TABLE IF NOT EXISTS attempts (
   asset_contract TEXT NOT NULL,
   payer          TEXT NOT NULL,
   nonce          TEXT NOT NULL,
-  delegation_id  TEXT NOT NULL,
+  delegation_id  TEXT,
+  approval_id    TEXT UNIQUE,
   amount         INTEGER NOT NULL CHECK (amount > 0),
   state          TEXT NOT NULL CHECK (state IN ('accepted', 'signed', 'abandoned', 'expired_unsigned')),
   accepted_at    INTEGER NOT NULL,
@@ -94,6 +97,7 @@ CREATE TABLE IF NOT EXISTS attempts (
   signed_at      INTEGER,
   closed_at      INTEGER,
   UNIQUE (chain_id, asset_contract, payer, nonce),
+  CHECK ((delegation_id IS NULL) <> (approval_id IS NULL)),
   CHECK ((state = 'signed') = (signature IS NOT NULL AND signed_at IS NOT NULL)),
   CHECK ((state IN ('abandoned', 'expired_unsigned')) = (closed_at IS NOT NULL))
 ) STRICT;
@@ -110,24 +114,81 @@ func NewCore(ctx context.Context, cfg *Config, keys map[string]*secp256k1.Privat
 			return nil, fmt.Errorf("no key for wallet %s", w.WalletID)
 		}
 	}
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_txlock=immediate")
+	db, err := OpenDB(dbPath)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	if _, err := db.ExecContext(ctx, schema); err != nil {
+	c, err := NewCoreDB(ctx, cfg, keys, db, clock, res)
+	if err != nil {
 		db.Close()
+		return nil, err
+	}
+	c.ownsDB = true
+	return c, nil
+}
+
+// NewCoreDB is the payment core on the Signer's one database (P2-D1),
+// opened and closed by the caller: the same database as its approval core,
+// so a webauthn payment consumes its approval in the accepting transaction.
+func NewCoreDB(ctx context.Context, cfg *Config, keys map[string]*secp256k1.PrivateKey, db *sql.DB, clock Clock, res ReservationVerifier) (*Core, error) {
+	for _, w := range cfg.Wallets {
+		if keys[w.Address] == nil {
+			return nil, fmt.Errorf("no key for wallet %s", w.WalletID)
+		}
+	}
+	if err := migrateAttempts(ctx, db); err != nil {
+		return nil, err
+	}
+	if _, err := db.ExecContext(ctx, schema+approvalsSchema+voiceSchema); err != nil {
 		return nil, err
 	}
 	c := &Core{cfg: cfg, keys: keys, db: db, clock: clock, res: res, wallets: map[string]chan struct{}{}}
 	if err := c.recover(ctx); err != nil {
-		db.Close()
 		return nil, err
 	}
 	return c, nil
 }
 
-func (c *Core) Close() error { return c.db.Close() }
+// Approvals is the approval core on this core's database (P2-D1): the
+// payment Signer serves both; dir holds voice.key. Closing the payment
+// core closes the database.
+func (c *Core) Approvals(ctx context.Context, dir string, clock Clock) (*ApprovalCore, error) {
+	return NewApprovalCoreDB(ctx, c.cfg, c.db, dir, clock)
+}
+
+// migrateAttempts rebuilds a P1-b attempts table (delegation_id NOT NULL,
+// no approval_id) as the P2 one, its rows kept, in one transaction.
+func migrateAttempts(ctx context.Context, db *sql.DB) error {
+	var table, col int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'attempts'`).Scan(&table); err != nil || table == 0 {
+		return err
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('attempts') WHERE name = 'approval_id'`).Scan(&col); err != nil || col > 0 {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	cols := `attempt_id, request_id, fingerprint, intent_hash, wallet_id, chain_id, asset_contract, payer, nonce, delegation_id, amount, state,
+		accepted_at, auth_deadline, typed_digest, snapshot, signature, signed_at, closed_at`
+	for _, q := range []string{`ALTER TABLE attempts RENAME TO attempts_p1b`, `DROP INDEX IF EXISTS spend`, schema,
+		`INSERT INTO attempts (` + cols + `) SELECT ` + cols + ` FROM attempts_p1b`, `DROP TABLE attempts_p1b`} {
+		if _, err := tx.ExecContext(ctx, q); err != nil {
+			return fmt.Errorf("attempts migration: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// Close closes the database the core opened itself (not a shared one).
+func (c *Core) Close() error {
+	if !c.ownsDB {
+		return nil
+	}
+	return c.db.Close()
+}
 
 // lockWallet takes the wallet's signing lock, or refuses SIGNER_BUSY after
 // lockWait; it gives up sooner when ctx ends (the request's own deadline,
@@ -163,7 +224,7 @@ type snapshot struct {
 	Fingerprint   string          `json:"fingerprint"`
 	Order         json.RawMessage `json:"order"`
 	Authorization Authorization   `json:"authorization"`
-	DelegationSHA string          `json:"delegation_hash"`
+	DelegationSHA string          `json:"delegation_hash,omitempty"`
 	IntentHash    string          `json:"intent_hash"`
 	Domain        Domain          `json:"domain"`
 	Message       Transfer        `json:"message"`
@@ -261,24 +322,34 @@ func (c *Core) verify(r SignRequest, fp string, now uint64) (*snapshot, *Delegat
 	if err != nil {
 		return nil, nil, 0, Refusal("ORDER_INVALID")
 	}
+	i, b := po.Intent, po.PaymentBinding
+	// d is a delegation's payment; a webauthn one (P2) has its approval's
+	// limit and deadline instead, checked again when it is consumed.
+	var d *Delegation
+	var per, deadline uint64
 	switch r.Authorization.Method {
 	case "delegation":
+		d = c.cfg.delegation(r.Authorization.DelegationID)
+		switch {
+		case d == nil:
+			return nil, nil, 0, Refusal("DELEGATION_UNKNOWN")
+		case d.Version != r.Authorization.DelegationVersion:
+			return nil, nil, 0, Refusal("DELEGATION_VERSION")
+		case now < d.ValidFrom || now >= d.ValidUntil:
+			return nil, nil, 0, Refusal("DELEGATION_EXPIRED")
+		case d.ConsumerID != i.ConsumerID || d.WalletID != i.WalletID:
+			return nil, nil, 0, Refusal("CONSUMER_MISMATCH")
+		}
+		per, _ = units(d.PerTxMax)
+		deadline = d.ValidUntil
 	case "webauthn":
-		return nil, nil, 0, Refusal("HUMAN_APPROVAL_UNAVAILABLE") // A2
+		limit, expires, err := c.humanApproval(context.Background(), c.db, r.Authorization.ApprovalID, &po, intent, now)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		per, deadline = limit, expires
 	default:
 		return nil, nil, 0, Refusal("GRANT_METHOD_NOT_ACCEPTED") // simulated, and anything else
-	}
-	d := c.cfg.delegation(r.Authorization.DelegationID)
-	i, b := po.Intent, po.PaymentBinding
-	switch {
-	case d == nil:
-		return nil, nil, 0, Refusal("DELEGATION_UNKNOWN")
-	case d.Version != r.Authorization.DelegationVersion:
-		return nil, nil, 0, Refusal("DELEGATION_VERSION")
-	case now < d.ValidFrom || now >= d.ValidUntil:
-		return nil, nil, 0, Refusal("DELEGATION_EXPIRED")
-	case d.ConsumerID != i.ConsumerID || d.WalletID != i.WalletID:
-		return nil, nil, 0, Refusal("CONSUMER_MISMATCH")
 	}
 	w := c.cfg.wallet(i.WalletID)
 	switch {
@@ -288,20 +359,19 @@ func (c *Core) verify(r SignRequest, fp string, now uint64) (*snapshot, *Delegat
 		return nil, nil, 0, Refusal("CONSUMER_MISMATCH")
 	}
 	asset := c.cfg.asset(b.ChainID, b.AssetContract)
-	if asset == nil || b.AssetContract != d.AssetContract || b.ChainID != d.ChainID || !quoteDomainIs(po.Quote, asset) {
+	if asset == nil || d != nil && (b.AssetContract != d.AssetContract || b.ChainID != d.ChainID) || !quoteDomainIs(po.Quote, asset) {
 		return nil, nil, 0, Refusal("ASSET_NOT_ALLOWED")
 	}
 	amount, ok := units(b.Amount)
-	per, _ := units(d.PerTxMax)
 	switch {
-	case !containsString(d.Merchants, b.PayTo):
+	case d != nil && !containsString(d.Merchants, b.PayTo): // a human approved this payee
 		return nil, nil, 0, Refusal("MERCHANT_NOT_ALLOWED")
 	case !ok || amount > per:
 		return nil, nil, 0, Refusal("OVER_PER_TX")
 	case !(b.ValidAfter < now && now < b.ValidBefore) || b.ValidBefore-now > c.cfg.MaxWindowSeconds:
 		return nil, nil, 0, Refusal("WINDOW_INVALID")
 	}
-	deadline := min(d.ValidUntil, b.ValidBefore)
+	deadline = min(deadline, b.ValidBefore)
 	if err := c.res.Verify(intent, r.Reservation); err != nil {
 		var ref Refusal
 		if errors.As(err, &ref) {
@@ -317,12 +387,58 @@ func (c *Core) verify(r SignRequest, fp string, now uint64) (*snapshot, *Delegat
 		return nil, nil, 0, Refusal("ORDER_INVALID")
 	}
 	order, _ := contracts.Canonical(r.Order)
-	dh, _ := json.Marshal(d)
-	dsum := sha256.Sum256(dh)
+	var dsha string
+	if d != nil {
+		dh, _ := json.Marshal(d)
+		dsum := sha256.Sum256(dh)
+		dsha = "sha256:" + hex.EncodeToString(dsum[:])
+	}
 	return &snapshot{Version: 1, RequestID: r.RequestID, Fingerprint: fp, Order: order, Authorization: r.Authorization,
-		DelegationSHA: "sha256:" + hex.EncodeToString(dsum[:]), IntentHash: intent, Domain: dom, Message: msg,
+		DelegationSHA: dsha, IntentHash: intent, Domain: dom, Message: msg,
 		TypedDigest: "0x" + hex.EncodeToString(TypedDigest(sep, sh)), WalletID: w.WalletID, Address: w.Address,
 		AuthDeadline: deadline, ConfigHash: c.cfg.hash, Reservation: r.Reservation}, d, amount, nil
+}
+
+// humanApproval checks a webauthn payment's approval (P2-D1): verified
+// and an approve, not expired, for this order's intent and jti, its
+// credential still active, its approver unchanged and the consumer's, the
+// wallet among the approver's. It returns the approver's per-payment
+// limit and the approval's expiry. q is the DB, or the accepting
+// transaction.
+func (c *Core) humanApproval(ctx context.Context, q querier, id string, po *paycontract.PurchaseOrder, intent string, now uint64) (uint64, uint64, error) {
+	var decision, state, hIntent, jti, approverID, cred string
+	var version, expires uint64
+	err := q.QueryRowContext(ctx, `SELECT h.decision, h.state, h.intent_hash, h.jti, h.approver_id, h.approver_version, h.expires_at, coalesce(cr.state, '')
+		FROM human_approvals h LEFT JOIN credentials cr ON cr.credential_id = h.credential_id WHERE h.approval_id = ?`, id).
+		Scan(&decision, &state, &hIntent, &jti, &approverID, &version, &expires, &cred)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, Refusal("APPROVAL_UNKNOWN")
+	} else if err != nil {
+		return 0, 0, err
+	}
+	i := po.Intent
+	sp, _ := paycontract.SpecOf(po.Version) // the order was validated
+	ap := c.cfg.approver(approverID)
+	switch {
+	case decision != "approve":
+		return 0, 0, Refusal("APPROVAL_DENIED")
+	case state == "consumed":
+		return 0, 0, Refusal("APPROVAL_CONSUMED")
+	case state != "verified":
+		return 0, 0, Refusal("APPROVAL_NOT_VERIFIED")
+	case now >= expires:
+		return 0, 0, Refusal("APPROVAL_EXPIRED")
+	case hIntent != intent || jti != sp.GrantID(sp.SessionID(i.TaskID, i.PurchaseOrderID)):
+		return 0, 0, Refusal("INTENT_MISMATCH")
+	case cred != "active":
+		return 0, 0, Refusal("CREDENTIAL_REVOKED")
+	case ap == nil || ap.Version != version:
+		return 0, 0, Refusal("APPROVER_CHANGED")
+	case ap.ConsumerID != i.ConsumerID || !containsString(ap.WalletIDs, i.WalletID):
+		return 0, 0, Refusal("CONSUMER_MISMATCH")
+	}
+	limit, _ := units(ap.SignerMax)
+	return limit, expires, nil
 }
 
 func containsString(list []string, s string) bool {
@@ -380,12 +496,35 @@ func (c *Core) accept(ctx context.Context, s *snapshot, d *Delegation, amount ui
 			return "", Refusal(q.code)
 		}
 	}
-	var spent uint64
-	if err := tx.QueryRowContext(ctx, `SELECT coalesce(sum(amount), 0) FROM attempts WHERE delegation_id = ? AND state IN ('accepted', 'signed')`, d.DelegationID).Scan(&spent); err != nil {
-		return "", err
-	}
-	if total, _ := units(d.TotalCap); spent+amount > total {
-		return "", Refusal("OVER_TOTAL_CAP")
+	var delegationID, approvalID any // exactly one is set
+	if d != nil {
+		var spent uint64
+		if err := tx.QueryRowContext(ctx, `SELECT coalesce(sum(amount), 0) FROM attempts WHERE delegation_id = ? AND state IN ('accepted', 'signed')`, d.DelegationID).Scan(&spent); err != nil {
+			return "", err
+		}
+		if total, _ := units(d.TotalCap); spent+amount > total {
+			return "", Refusal("OVER_TOTAL_CAP")
+		}
+		delegationID = d.DelegationID
+	} else {
+		// The approval is read again under the write lock and consumed in
+		// this transaction: two payments never share one approval.
+		var po paycontract.PurchaseOrder
+		if err := contracts.Decode(s.Order, &po); err != nil {
+			return "", Refusal("ORDER_INVALID")
+		}
+		id := s.Authorization.ApprovalID
+		if _, _, err := c.humanApproval(ctx, tx, id, &po, s.IntentHash, now); err != nil {
+			return "", err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE human_approvals SET state = 'consumed', closed_at = ? WHERE approval_id = ? AND state = 'verified'`, now, id)
+		if err != nil {
+			return "", err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return "", Refusal("APPROVAL_NOT_VERIFIED")
+		}
+		approvalID = id
 	}
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -402,9 +541,9 @@ func (c *Core) accept(ctx context.Context, s *snapshot, d *Delegation, amount ui
 		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO attempts (attempt_id, request_id, fingerprint, intent_hash, wallet_id, chain_id, asset_contract, payer, nonce,
-		delegation_id, amount, state, accepted_at, auth_deadline, typed_digest, snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?, ?, ?)`,
+		delegation_id, approval_id, amount, state, accepted_at, auth_deadline, typed_digest, snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?, ?, ?)`,
 		id, s.RequestID, s.Fingerprint, s.IntentHash, s.WalletID, s.Domain.ChainID, s.Domain.VerifyingContract, m.From, m.Nonce,
-		d.DelegationID, amount, now, s.AuthDeadline, s.TypedDigest, string(canon)); err != nil {
+		delegationID, approvalID, amount, now, s.AuthDeadline, s.TypedDigest, string(canon)); err != nil {
 		return "", err
 	}
 	return id, tx.Commit()

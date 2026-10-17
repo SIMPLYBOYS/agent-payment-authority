@@ -10,12 +10,14 @@ package main
 //	apa-signer approver voice-enroll --dir DIR --approver ID WAV WAV WAV...  (V1: at least three recordings)
 //	apa-signer approver voice-delete --dir DIR --approver ID
 //	apa-signer approver voice-stats --dir DIR  (V1: stored voice outcomes by result and reason)
+//	apa-signer approver migrate --dir DIR  (P2-D1: once, A2's approvals.db into signer.db)
 //
 // serve-approvals reads signer.json only for the wallets' public
-// information, the approvers and the relying party; it never opens keys/
-// or signer.db, asks for no passphrase and has no payment route. Its data
-// is DIR/approvals.db (0600). The administrator's commands open the same
-// file and may run while it serves.
+// information, the approvers and the relying party; it never opens keys/,
+// asks for no passphrase and has no payment route. Its data is the
+// approval tables of DIR/signer.db (0600; P2-D1: before P2 they were
+// DIR/approvals.db, which every command but migrate now refuses). The
+// administrator's commands open the same file and may run while it serves.
 
 import (
 	"bufio"
@@ -36,10 +38,13 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
 )
 
-// approvalsDB opens (or creates, 0600) DIR/approvals.db for an
+// assembleApprovals opens (or creates, 0600) DIR/signer.db for an
 // ApprovalCore; nothing else in DIR is touched.
 func assembleApprovals(dir string, clock signer.Clock) (*signer.ApprovalCore, *signer.Config, error) {
 	if err := private(dir); err != nil {
+		return nil, nil, err
+	}
+	if err := signer.Unmigrated(dir); err != nil {
 		return nil, nil, err
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "signer.json"))
@@ -53,21 +58,66 @@ func assembleApprovals(dir string, clock signer.Clock) (*signer.ApprovalCore, *s
 	if !filepath.IsAbs(cfg.Socket) {
 		return nil, nil, errors.New("config: the socket path must be absolute")
 	}
-	path := filepath.Join(dir, "approvals.db")
+	path := filepath.Join(dir, "signer.db")
+	if err := privateFile(path); err != nil {
+		return nil, nil, err
+	}
+	core, err := signer.NewApprovalCore(context.Background(), cfg, path, clock)
+	return core, cfg, err
+}
+
+// privateFile creates path empty (0600) when missing, and refuses one
+// that is not a regular file private to its owner.
+func privateFile(path string) error {
 	switch fi, err := os.Lstat(path); {
 	case errors.Is(err, os.ErrNotExist):
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
-			return nil, nil, err
+			return err
 		}
-		f.Close()
+		return f.Close()
 	case err != nil:
-		return nil, nil, err
+		return err
 	case !fi.Mode().IsRegular() || fi.Mode().Perm()&0o077 != 0:
-		return nil, nil, fmt.Errorf("%s must be a regular file private to its owner (0600)", path)
+		return fmt.Errorf("%s must be a regular file private to its owner (0600)", path)
 	}
-	core, err := signer.NewApprovalCore(context.Background(), cfg, path, clock)
-	return core, cfg, err
+	return nil
+}
+
+// migrate moves DIR/approvals.db into DIR/signer.db (P2-D1), once, with
+// no Signer serving (its socket is there while one does).
+func migrate(dir string, out io.Writer) error {
+	if err := private(dir); err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "signer.json"))
+	if err != nil {
+		return err
+	}
+	cfg, err := signer.ParseConfig(raw)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Lstat(cfg.Socket); err == nil {
+		return fmt.Errorf("%s exists: stop the Signer first (remove it yourself if none is serving)", cfg.Socket)
+	}
+	if err := privateFile(filepath.Join(dir, "signer.db")); err != nil {
+		return err
+	}
+	moved, err := signer.MigrateApprovals(context.Background(), dir)
+	if err != nil {
+		return err
+	}
+	tables := make([]string, 0, len(moved))
+	for t := range moved {
+		tables = append(tables, t)
+	}
+	sort.Strings(tables)
+	for _, t := range tables {
+		fmt.Fprintf(out, "apa-signer: %s %d rows\n", t, moved[t])
+	}
+	fmt.Fprintf(out, "apa-signer: approvals moved into %s; the old file is %s\n", filepath.Join(dir, "signer.db"), filepath.Join(dir, "approvals.db.migrated"))
+	return nil
 }
 
 func unixClock() uint64 { return uint64(time.Now().Unix()) }
@@ -99,7 +149,7 @@ func serveApprovals(dir string, out io.Writer) error {
 // approver runs the administrator's commands; ask reads the answer to the
 // confirm question (the terminal in production).
 func approver(args []string, out io.Writer, ask func(prompt string) (string, error)) error {
-	usage := errors.New("usage: apa-signer approver enroll begin --dir DIR --approver ID | enroll confirm --dir DIR --id ENROLLMENT | revoke --dir DIR --credential FINGERPRINT | list --dir DIR | voice-enroll --dir DIR --approver ID WAV... | voice-delete --dir DIR --approver ID | voice-stats --dir DIR")
+	usage := errors.New("usage: apa-signer approver enroll begin --dir DIR --approver ID | enroll confirm --dir DIR --id ENROLLMENT | revoke --dir DIR --credential FINGERPRINT | list --dir DIR | voice-enroll --dir DIR --approver ID WAV... | voice-delete --dir DIR --approver ID | voice-stats --dir DIR | migrate --dir DIR")
 	if len(args) == 0 {
 		return usage
 	}
@@ -121,8 +171,11 @@ func approver(args []string, out io.Writer, ask func(prompt string) (string, err
 		return usage
 	}
 	need := map[string]*string{"enroll begin": id, "enroll confirm": enr, "revoke": cred, "voice-enroll": id, "voice-delete": id}[cmd]
-	if cmd != "list" && cmd != "voice-stats" && (need == nil || *need == "") {
+	if cmd != "list" && cmd != "voice-stats" && cmd != "migrate" && (need == nil || *need == "") {
 		return usage
+	}
+	if cmd == "migrate" {
+		return migrate(*dir, out)
 	}
 	core, cfg, err := assembleApprovals(*dir, unixClock)
 	if err != nil {
@@ -174,7 +227,7 @@ func approver(args []string, out io.Writer, ask func(prompt string) (string, err
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "apa-signer: voice template of %s from %d recordings (sealed in approvals.db; key %s)\n", *id, n, filepath.Join(*dir, "voice.key"))
+		fmt.Fprintf(out, "apa-signer: voice template of %s from %d recordings (sealed in signer.db; key %s)\n", *id, n, filepath.Join(*dir, "voice.key"))
 		return nil
 	case "voice-stats":
 		st, err := core.VoiceStats(ctx)

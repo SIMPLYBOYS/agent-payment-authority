@@ -85,3 +85,39 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
 ### 9.3 本機測試用 USDC（P2-a）
 
 `contracts/src/TestUSDC.sol`：ERC-20 餘額＋EIP-3009 `transferWithAuthorization`，EIP-712 domain 為（`USDC`、`2`），與付款 Signer 簽的一致；只有部署者能鑄幣；**只在本機 anvil 部署**（Base Sepolia 有它自己的 USDC）。forge 10 個測試：付款、重播、過期、尚未生效、別人簽、改收款人、改金額、被改造的簽章、餘額不足（不用掉 nonce）、只有擁有者鑄幣。合約測試合計 45 個通過。
+
+### 9.4 本人核准併入 `signer.db`，付款時一筆交易消耗（P2-D1）
+
+- **一個資料庫**：`signer.OpenDB`（WAL、full sync、foreign keys、immediate）。付款的 `attempts` 與核准表（`enrollments`、`credentials`、`approval_challenges`、`human_approvals`、`verify_requests`、語音兩表）都在 `DIR/signer.db`；核准表的 schema 沒有改。
+- **付款用本人核准**：`/v1/sign` 的 `authorization` 可為 `{method: "webauthn", approval_id}`。Signer 會：
+  - 從完整請購重算 intent 與 jti；
+  - 要求核准是 `approve`、`verified`、未到期，credential 仍 `active`，approver 版本相同、屬於同一 consumer、錢包在其 `wallet_ids`；
+  - 單筆上限用 approver 的 `signer_max`，期限取 `min(核准到期, valid_before)`；
+  - 在**接受付款的同一筆交易**裡重讀核准、改成 `consumed`，並建立 attempt（`attempts.approval_id` UNIQUE；`delegation_id` 與 `approval_id` 恰有一個）。
+  - 拒絕碼：`APPROVAL_UNKNOWN`、`APPROVAL_DENIED`、`APPROVAL_CONSUMED`、`APPROVAL_NOT_VERIFIED`、`APPROVAL_EXPIRED`、`INTENT_MISMATCH`、`CREDENTIAL_REVOKED`、`APPROVER_CHANGED`、`CONSUMER_MISMATCH`、`OVER_PER_TX`。原本的 `HUMAN_APPROVAL_UNAVAILABLE` 在 Signer 端不再出現。
+  - 委派付款的規則不變。
+- **同一個行程**：`serve` 在設定有 approvers 與 webauthn 時，同一個 socket 也提供核准與登記路由（`signer.ServeAll`）；health 仍是付款的 `unlocked`。`serve-approvals` 保留（不讀金鑰、付款路由回 `PAYMENT_MODE_OFF`），資料改為 `signer.db`。
+- **遷移**（一次性）：`apa-signer approver migrate --dir DIR`。
+  - 先確認 socket 不存在（Signer 已停）。
+  - 對舊檔做 `wal_checkpoint(TRUNCATE)`，把殘留的 WAL 併回主檔；仍有人使用時拒絕。
+  - 在 `signer.db` 的一筆交易裡依欄位名逐表複製，並核對每表筆數；`signer.db` 已有核准資料時拒絕。
+  - 完成後把舊檔改名為 `approvals.db.migrated`，不刪除。
+  - P1-b 的 `attempts` 表（`delegation_id NOT NULL`、沒有 `approval_id`）在開啟時以一筆交易重建，原有資料保留。
+  - 目錄裡還有 `approvals.db` 時，除了 `migrate` 以外的命令（`serve`、`serve-approvals`、`approver …`）一律拒絕，並提示這個命令。`scripts/demo/v1-dev.sh` 也會先停下來，提示同一個命令。
+- **還沒有做的**：
+  - Host 端仍拒絕 webauthn 付款（`internal/store` 的 `HUMAN_APPROVAL_UNAVAILABLE`），也仍以 `approvals-only` 判斷核准是否可用。這兩點留到 P2-a 的 demo 接線。
+  - 正式組裝的預留核對仍是 `Unavailable`，所以仍然什麼都不簽。
+- **既有資料**：
+  - `var/v1-dev/data`（還是 `approvals.db`）沒有遷移，也沒有讀取或複製；要不要、何時遷移，由 Aaron 決定。遷移後舊檔保留為 `.migrated`，不違反「demo 結束前不清理」。
+  - `/opt/apa-signer/data/approvals.db` 要等 P2-b 與 V1 `/opt` 部署時，經另行核准，再由 Aaron 以 `apa-signer` 帳號執行同一個命令。
+- **驗證**：
+  - `internal/signer` 新增測試：
+    - `TestHumanApprovalPays`：6 種拒絕都不寫 attempt、核准維持 verified；成功時核准與 attempt 一起寫入；重送得到同一筆；第二筆付款得到 `APPROVAL_CONSUMED`；A2 查詢顯示 consumed。
+    - `TestHumanApprovalLapses`：到期、credential 撤銷。
+    - `TestHumanApprovalRace`：8 個請求搶同一個核准，恰好一筆簽成。
+    - `TestMigrateApprovals`：使用中拒絕、P1-b attempts 保留、遷移後可付款、不能遷兩次、`signer.db` 已有核准時拒絕。
+    - `TestServeAll`：真 Unix socket 上，核准在同一個 socket 驗證並付款。
+  - `cmd/apa-signer`：`TestApproverMigrate`；既有測試改為 `signer.db`。
+  - `go test -race ./internal/signer/... ./cmd/apa-signer/` 通過。
+  - 反向突變新增 9 項，在工作樹的複本上執行，9／9 KILLED。既有突變中涉及 signer 的文字都仍只出現一次（mutation-check 與 m-b-reverse 的 47 項）。
+- **既有失敗（不是這次造成的）**：`cmd/demo` 的 `TestTimingInterleaved` 在本分支與 `main`（e41cd5d，暫時 worktree）都失敗在 `multirun_test.go:325`：B 的 run 沒有工具呼叫就 `ended`。原因尚未追查。

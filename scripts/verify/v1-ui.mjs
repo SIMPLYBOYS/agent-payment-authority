@@ -310,7 +310,7 @@ try {
   mark("scan");
   const places = [];
   for (const f of ["demo.db", "demo.db-wal"]) if (existsSync(join(state, f))) places.push([f, readFileSync(join(state, f))]);
-  for (const f of ["approvals.db", "approvals.db-wal"]) if (existsSync(join(sdir, f))) places.push(["signer " + f, readFileSync(join(sdir, f))]);
+  for (const f of ["signer.db", "signer.db-wal", "approvals.db", "approvals.db-wal"]) if (existsSync(join(sdir, f))) places.push(["signer " + f, readFileSync(join(sdir, f))]);
   places.push(["host log", Buffer.from(demo.log())], ["signer log", Buffer.from(signerLog)]);
   const found = [];
   // Each recording the page sent: 64 bytes of its sound at two places, raw,
