@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
@@ -122,6 +123,7 @@ type Merchant struct {
 	products []product
 	catalogs map[string][]byte // scene => catalog
 	offers   map[string]offer  // path + "?" + raw query
+	settle   *Settler          // P2: nil is M1's shop, which never settles
 }
 
 type catalogEntry struct {
@@ -144,6 +146,27 @@ type price struct {
 // New builds the shop for baseURL, a trusted http(s) origin with no path,
 // e.g. "http://127.0.0.1:8402".
 func New(baseURL string) (*Merchant, error) { return build(baseURL, products) }
+
+// NewSettled builds the shop that verifies and settles payments itself
+// (P2-D3): the same products, offered in the settler's token on its chain
+// to its payTo, delivered only once their transfer is confirmed.
+func NewSettled(baseURL string, st *Settler) (*Merchant, error) {
+	ps := make([]product, len(products))
+	for i, p := range products {
+		r := p.Requirement
+		r.Network = "eip155:" + strconv.FormatUint(st.cfg.ChainID, 10)
+		r.Asset, r.PayTo = st.cfg.Token.Hex(), st.cfg.PayTo.Hex()
+		r.Extra = map[string]string{"name": st.cfg.TokenName, "version": st.cfg.TokenVersion}
+		p.Requirement = r
+		ps[i] = p
+	}
+	m, err := build(baseURL, ps)
+	if err != nil {
+		return nil, err
+	}
+	m.settle = st
+	return m, nil
+}
 
 // EvalItem is one product of an AE1 evaluation catalog (docs/commercial-ae1.md
 // 3.1): the data shop only, at an amount of the fixture asset. PayTo empty is
@@ -284,9 +307,49 @@ func (m *Merchant) serveResource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status, body := http.StatusPaymentRequired, problem{Message: "PAYMENT-SIGNATURE header is required"}
+	var payload json.RawMessage
 	if sig := r.Header.Values(x402.HeaderPaymentSignature); len(sig) > 0 {
-		status, body = o.judge(sig)
+		status, body, payload = o.judge(sig)
 	}
+	if payload != nil && m.settle != nil {
+		m.settled(w, o, m.settle.Pay(r.Context(), o, payload))
+		return
+	}
+	m.paymentRequired(w, o, status, body)
+}
+
+// settled answers a settlement outcome (P2): the content and
+// PAYMENT-RESPONSE only once delivered; 402 with PAYMENT-RESPONSE success
+// false when it failed; 202 while its transfer is unconfirmed (the same
+// PAYMENT-SIGNATURE again asks again: never a second transfer).
+func (m *Merchant) settled(w http.ResponseWriter, o offer, out Outcome) {
+	switch out.Kind {
+	case "delivered":
+		h, err := x402.Encode(out.Response)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set(HeaderPaymentResponse, h)
+		w.Header().Set("Content-Type", o.MimeType)
+		w.Write([]byte(o.content))
+	case "pending":
+		w.Header().Set("Retry-After", "2")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(problem{out.Reason, "the payment is being settled; nothing is delivered until its transfer is confirmed. Send the same PAYMENT-SIGNATURE again."})
+	case "failed":
+		if h, err := x402.Encode(out.Response); err == nil {
+			w.Header().Set(HeaderPaymentResponse, h)
+		}
+		m.paymentRequired(w, o, http.StatusPaymentRequired, problem{out.Reason, "payment verification or settlement failed; nothing was delivered"})
+	default:
+		m.paymentRequired(w, o, http.StatusBadRequest, problem{x402.ErrInvalidPayload, "payload is not a valid exact EVM payment (" + out.Reason + ")"})
+	}
+}
+
+// paymentRequired answers status with the offer's PAYMENT-REQUIRED.
+func (m *Merchant) paymentRequired(w http.ResponseWriter, o offer, status int, body problem) {
 	pr := o.required
 	pr.Error = body.Message
 	h, err := x402.Encode(pr)
@@ -302,10 +365,12 @@ func (m *Merchant) serveResource(w http.ResponseWriter, r *http.Request) {
 
 // judge classifies a PAYMENT-SIGNATURE per the spec's HTTP mapping: a
 // malformed payload or one for other requirements is 400 (Invalid Payment); a
-// well-formed one for this offer is 402 (Payment Failed), because M1 cannot
-// verify or settle it. Neither path delivers anything.
-func (o offer) judge(values []string) (int, problem) {
-	bad := func(code, msg string) (int, problem) { return http.StatusBadRequest, problem{code, msg} }
+// well-formed one for this offer is 402 (Payment Failed) for M1, which cannot
+// verify or settle it, and its payload is returned for a settling shop.
+func (o offer) judge(values []string) (int, problem, json.RawMessage) {
+	bad := func(code, msg string) (int, problem, json.RawMessage) {
+		return http.StatusBadRequest, problem{code, msg}, nil
+	}
 	if len(values) != 1 {
 		return bad(x402.ErrInvalidPayload, "exactly one PAYMENT-SIGNATURE header is allowed")
 	}
@@ -338,5 +403,5 @@ func (o offer) judge(values []string) (int, problem) {
 			return bad(x402.ErrInvalidRequirements, "accepted does not match the offered requirement")
 		}
 	}
-	return http.StatusPaymentRequired, problem{"M1_PAYMENT_UNAVAILABLE", "M1 has no payment verification or settlement; nothing was charged or delivered"}
+	return http.StatusPaymentRequired, problem{"M1_PAYMENT_UNAVAILABLE", "M1 has no payment verification or settlement; nothing was charged or delivered"}, p.Payload
 }

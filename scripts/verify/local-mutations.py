@@ -8,6 +8,9 @@ Each test is first run once unmutated in the copy and must pass there
 that skips is an error, never a pass.
 
     python3 -I scripts/verify/local-mutations.py [PREFIX] [--all] [-v: the log of each one not killed]
+
+An entry's test may name another package, "internal/budget:TestName", when
+the mutated code (e.g. internal/eth's) is exercised by another's tests.
 """
 import importlib.util, os, pathlib, shutil, subprocess, sys, tempfile
 
@@ -34,9 +37,16 @@ def fresh():
     os.symlink(root / "var", tree / "var")
 
 
+def target(m):
+    """(package, test) an entry runs: its own file's package unless named."""
+    if ":" in m[4]:
+        return tuple(m[4].split(":", 1))
+    return os.path.dirname(m[1]), m[4]
+
+
 bad = 0
 chosen = [m for m in entries if m[0].startswith(prefix)]
-for pkg, test in sorted({(os.path.dirname(m[1]), m[4]) for m in chosen}):
+for pkg, test in sorted({target(m) for m in chosen}):
     fresh()
     r = subprocess.run(["go", "test", "./" + pkg, "-run", test, "-count=1", "-v", "-timeout", "300s"], cwd=tree, capture_output=True, text=True)
     ok = r.returncode == 0 and "--- SKIP" not in r.stdout + r.stderr
@@ -44,7 +54,9 @@ for pkg, test in sorted({(os.path.dirname(m[1]), m[4]) for m in chosen}):
     if not ok:
         print((r.stdout + r.stderr)[-1500:])
         sys.exit(1)
-for finding, rel, old, new, test in chosen:
+for m in chosen:
+    finding, rel, old, new, _ = m
+    pkg, test = target(m)
     fresh()
     p = tree / rel
     t = p.read_text()
@@ -53,7 +65,7 @@ for finding, rel, old, new, test in chosen:
         bad += 1
         continue
     p.write_text(t.replace(old, new))
-    r = subprocess.run(["go", "test", "./" + os.path.dirname(rel), "-run", test, "-count=1", "-v", "-timeout", "300s"],
+    r = subprocess.run(["go", "test", "./" + pkg, "-run", test, "-count=1", "-v", "-timeout", "300s"],
                        cwd=tree, capture_output=True, text=True)
     log = r.stdout + r.stderr
     if "--- SKIP" in log:

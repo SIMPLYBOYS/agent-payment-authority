@@ -271,3 +271,40 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。全部�
 | 建議 | `Open` 沒有要求 gas 與 issuer 是不同金鑰（共用時 nonce 會互搶） | 要求不同；`TestOpenRefuses` |
 
 審查者在 sandbox 裡無法啟動 anvil，所以本機鏈上的測試是由我在 sandbox 外執行並確認通過。
+
+### 9.10 商店自行 verify／settle 與交付把關（P2-D3，本機）
+
+- **共用的送交易規則**：relayer 的 `check` 與 `signAt` 移到 `internal/eth`（`Client.Check`、`Client.SignCall`），relayer 與商店共用同一份實作：
+  - 在已確認深度判定；
+  - 判定「永遠不會成功」：nonce 被別筆用掉，或過了期限仍未上鏈。
+- **`merchant.NewSettled(baseURL, settler)`**：與 M1 相同的商品，但報價改為 settler 的鏈、代幣（本機是部署的 `TestUSDC`）、`payTo` 與 EIP-712 domain。`merchant.New`（M1）完全不變，仍然從不交付；M1 的 11 個測試照舊通過。
+- **`merchant.Settler`**：自己的 SQLite（0600），以（payer、授權 nonce）為鍵。
+  - **驗證**（任何一項不過：402、`PAYMENT-RESPONSE` 的 `success:false` 附 `errorReason`，什麼都不送、不交付）：
+    - 收款人、金額必須是報價的；
+    - `validAfter < 現在 < validBefore`；
+    - EIP-712 簽章還原出的位址必須是 `from`（重用 Signer 的 `DomainSeparator`、`TransferHash`、`TypedDigest`）；
+    - 鏈上 `authorizationState` 未用過；
+    - `balanceOf` 足夠；
+    - 以 `eth_call` 模擬 `transferWithAuthorization`。
+  - **結算**：已簽的交易**先寫入再送出**；送新交易前先重送並逐筆判定所有未完成的結算；pending nonce 低於「未完成交易的最高 nonce＋1」時不簽，回 `settlement_busy`（202，什麼都不寫）。
+  - **交付把關**：只有轉帳達到確認數，且收據裡有代幣本身發出、金額正確、由 payer 轉給 `payTo` 的 `Transfer`，才回 200，附內容與 `PAYMENT-RESPONSE`（`success`、`transaction`、`network`、`payer`）。
+  - **結果不明**（等不到確認，每次最多 20 秒）：回 **202**（`settlement_pending`，`Retry-After: 2`），不附內容、不附 `PAYMENT-RESPONSE`。同一個 `PAYMENT-SIGNATURE` 再送一次只會重送同一筆、再查一次，**絕不送第二筆**。x402 的 HTTP 規格（coinbase/x402 `aeef1bf` 的 transports-v2/http.md）沒有定義「結算中」，202 是本專案自己的約定。
+  - **重播**：同一份授權（同一 payer、nonce）用在別的資源或別的 payload 上，回 402 `invalid_exact_evm_payload_authorization_nonce_used`；同一份 payload 再送一次，回同一筆結算。
+  - `errorReason` 的值除了 `insufficient_funds`（規格範例）之外都是本專案自訂的，名稱比照 x402 的寫法。
+  - 已知、刻意：
+    - 不檢查 `validBefore − 現在` 是否不超過報價的 `maxTimeoutSeconds`（期限由 Signer 的 `max_window_seconds` 管）；
+    - 模擬是第二道檢查，前面各項都會先擋下，所以沒有單獨的測試；
+    - 「轉帳成功卻沒有對應的 `Transfer`」在 TestUSDC 上不會發生，也沒有測試涵蓋；
+    - ponytail：一把鎖管所有結算與 gas nonce。
+- **驗證**（本機 anvil、部署 TestUSDC、anvil 公開測試金鑰；`go test -race` 通過）：
+  - `TestSettleAndDeliver`：200、內容、`PAYMENT-RESPONSE` 正確；餘額移動；再送一次是同一筆結算，gas nonce 只加 1。
+  - `TestVerificationFailuresSendNothing`：別人簽的、別的收款人、別的金額、過期、尚未生效、餘額不足、被竄改的簽章、鏈上已被別人送過的授權，都回 402 與各自的原因，什麼都不送、不交付。
+  - `TestReplayElsewhereRefused`：同一份授權改用在另一個商品，被拒，沒有付兩次。
+  - `TestNothingDeliveredBeforeConfirmations`（確認數 2）：一個區塊時回 202、不交付；第二個區塊後交付，沒有多送交易。
+  - `TestSlowSettlementIsNotRepaid`（關掉自動出塊）：兩次都回 202、只送一筆；出塊後交付。
+  - `TestSettleResumesAfterACrash`：寫入後、送出前中斷 → 202；再送一次就送出寫入的那一筆並交付。
+- **突變**：
+  - 商店新增 10 項；
+  - `local-mutations.py` 的測試欄位可以寫「套件:測試」，讓 `internal/eth` 的突變由 budget 或 merchant 的測試判定；
+  - P2 全部 58 項（eth 4、D1 15、累計上限 5、預算 relayer 24、商店 10）重跑，基準全部通過，58／58 KILLED。
+- **本片 §7 必驗反例中，商店這一段證明的**：verify 失敗不 settle；EIP-3009 重播；結果不明不被當成失敗、不重付；未確認就不交付。其餘反例要等 Host 端與 Reconciler 完成後才能證明。

@@ -53,10 +53,6 @@ type Relayer struct {
 	mu sync.Mutex
 }
 
-// errDropped: the transaction can never succeed (its nonce was used by
-// another, or the chain's time is past its deadline).
-var errDropped = errors.New("dropped")
-
 const schema = `
 CREATE TABLE IF NOT EXISTS tasks (
   task_id       TEXT PRIMARY KEY,
@@ -223,18 +219,7 @@ func (r *Relayer) prepare(ctx context.Context, key *eth.Key, data []byte, floor 
 
 // signAt signs a call to the contract at nonce with the current fees.
 func (r *Relayer) signAt(ctx context.Context, key *eth.Key, data []byte, nonce, gas uint64) (raw, hash []byte, err error) {
-	h, err := r.rpc.LatestHeader(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	tip, err := r.rpc.MaxPriorityFee(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	to := r.cfg.Contract
-	tx := &eth.Tx{ChainID: new(big.Int).SetUint64(r.cfg.ChainID), Nonce: nonce, MaxPriorityFeePerGas: tip,
-		MaxFeePerGas: new(big.Int).Add(new(big.Int).Mul(h.BaseFee, big.NewInt(2)), tip), Gas: gas, To: &to, Value: new(big.Int), Data: data}
-	return tx.Sign(key)
+	return r.rpc.SignCall(ctx, r.cfg.ChainID, key, r.cfg.Contract, data, nonce, gas)
 }
 
 // resignRegistrations signs again, at its own nonce and with the current
@@ -317,44 +302,10 @@ func (r *Relayer) floor(ctx context.Context, query string) (uint64, error) {
 	return uint64(n.Int64) + 1, err
 }
 
-// check looks once at a written transaction, at confirmed depth (the
-// newest block with the configured confirmations): its receipt there, or
-// errDropped when it can never succeed there — from used its nonce
-// otherwise, or the block's time is past deadline (0: none) with it
-// unmined (the contract refuses it in any later block) — or nil, nil.
-// Judged at confirmed depth, a reorg of newer blocks never fails a
-// transaction that is then mined.
+// check looks once at a written transaction at the configured confirmed
+// depth (eth.Client.Check).
 func (r *Relayer) check(ctx context.Context, hash []byte, from eth.Address, nonce, deadline uint64) (*eth.Receipt, error) {
-	latest, err := r.rpc.BlockNumber(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if latest+1 < r.cfg.Confirmations {
-		return nil, nil
-	}
-	confirmed := latest + 1 - r.cfg.Confirmations
-	rc, err := r.rpc.Receipt(ctx, hash)
-	if err != nil {
-		return nil, err
-	}
-	if rc != nil {
-		if rc.BlockNumber <= confirmed {
-			return rc, nil
-		}
-		return nil, nil
-	}
-	used, err1 := r.rpc.NonceAt(ctx, from, confirmed)
-	h, err2 := r.rpc.HeaderAt(ctx, confirmed)
-	if err := errors.Join(err1, err2); err != nil {
-		return nil, err
-	}
-	if used > nonce || deadline > 0 && h.Timestamp > deadline {
-		// Asked again after: mined in between is not dropped.
-		if again, err := r.rpc.Receipt(ctx, hash); err == nil && again == nil {
-			return nil, errDropped
-		}
-	}
-	return nil, nil
+	return r.rpc.Check(ctx, hash, from, nonce, deadline, r.cfg.Confirmations)
 }
 
 // await sends raw again (the same transaction: never another) and checks
@@ -365,7 +316,7 @@ func (r *Relayer) await(ctx context.Context, raw []byte, hash []byte, from eth.A
 	r.rpc.SendRaw(ctx, raw) // already known, or mined: the receipt says
 	for {
 		rc, err := r.check(ctx, hash, from, nonce, deadline)
-		if rc != nil || errors.Is(err, errDropped) {
+		if rc != nil || errors.Is(err, eth.ErrDropped) {
 			return rc, err
 		}
 		if err != nil && ctx.Err() == nil {
@@ -500,7 +451,7 @@ func (r *Relayer) finishRegistration(ctx context.Context, taskID, rawHex, hashHe
 	} else {
 		rc, err = r.check(ctx, hash, r.keys.Issuer.Addr, nonce, 0)
 	}
-	if err != nil && !errors.Is(err, errDropped) {
+	if err != nil && !errors.Is(err, eth.ErrDropped) {
 		return err
 	}
 	if rc == nil && err == nil {
@@ -687,7 +638,7 @@ func (r *Relayer) resume(ctx context.Context, intent string, wait bool) (Evidenc
 	} else {
 		rc, err = r.check(ctx, hash, r.keys.Gas.Addr, nonce, deadline)
 	}
-	if err != nil && !errors.Is(err, errDropped) {
+	if err != nil && !errors.Is(err, eth.ErrDropped) {
 		return ev, true, err
 	}
 	if rc == nil && err == nil {
