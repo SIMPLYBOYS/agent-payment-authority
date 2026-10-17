@@ -352,3 +352,32 @@ Claude Code 獨立 context 的 code-reviewer，結論 APPROVE with should-fix，
 | 建議 | 取代之後，被取代的那筆若上鏈，客人的授權會被擋住 | 寫進 §9.10 |
 | 建議 | 並行測試沒有真的重疊 | `TestConcurrentWhileUnmined` |
 | 建議 | 文件寫「手續費加倍」不夠精確 | 改寫為實際規則 |
+
+### 9.12 Reconciler（本機）
+
+- **`internal/reconcile`**：只讀鏈上狀態、什麼都不存，而且只在**已確認深度**讀。同一個問題問兩次，答案一定相同，所以重複處理不會改變任何事（§7 的「Reconciler 重複處理」）。
+  - 看的是代幣本身的事件（`AuthorizationUsed`、`Transfer`），不看送出交易的人（交易流程 §1 第 6 步：看 token 的 `from`，不看 facilitator 的 tx sender）。
+- **`Token.Status(授權)`**，一筆簽出的 EIP-3009 授權在鏈上的狀態：
+  - `settled`：nonce 已用，而且同一筆交易裡有代幣從 `From` 轉 `Value` 給 `To` 的 `Transfer`；附上交易與區塊。
+  - `pending`：nonce 未用，在已確認深度上仍然有效。之後仍可能結算，所以**絕不能重付**。
+  - `not_settled_expired`：nonce 未用，而且已確認區塊的時間已到或超過 `validBefore`，之後任何區塊都不會再接受它。
+  - `needs_review`：nonce 已用，但不是用在這筆轉帳上（收款人或金額與紀錄不符、被取消，或找不到唯一的事件）。
+- **`Token.Unauthorized(錢包, 已知授權)`**：列出每一筆從付款錢包轉出、卻對不到 Signer 簽出的授權的已確認 `Transfer`，包括：
+  - 一般 `transfer`（Signer 從不簽這種交易）；
+  - Signer 沒有簽過的授權；
+  - 收款人或金額與簽出的不同。
+
+  結果為零，就是「沒有未授權的新增支出」（AE1 待 P2 的那一項；Host 接上之後由 Host 提供已簽授權的清單）。
+- `eth.Client.FilterLogs`：依多個 topic 過濾 log。
+- **驗證**（本機 anvil、TestUSDC、anvil 公開測試金鑰；`go test -race` 通過）：
+  - `TestStatus`：
+    - 每種狀態各問兩次，答案相同；
+    - 已上鏈但確認數不足，仍是 `pending`；
+    - 時間過了 `validBefore` 之後變成 `not_settled_expired`，期限較長的仍是 `pending`；
+    - 紀錄的收款人與實際不同，是 `needs_review`。
+  - `TestUnauthorized`：
+    - 兩筆都是簽出的授權時為零，再問一次仍為零；
+    - 加入一筆未簽的授權與一筆一般 `transfer` 後，恰好列出這兩筆，並分辨出有沒有 EIP-3009 nonce；
+    - 簽出的金額與實際不同時，也被列出。
+  - 突變 5 項，5／5 KILLED。
+- **尚未接上**：Host 的付款紀錄、事件與 `payment_status` 推導，以及「已預留未付款 → `needs_review`」（交易流程決策 6），都要等 Host 端接線時再接上這個元件。被 reorg 移除的 log（`Removed`）會被略過，但沒有測試。

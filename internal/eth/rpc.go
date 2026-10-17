@@ -321,8 +321,20 @@ func (c *Client) Receipt(ctx context.Context, hash []byte) (*Receipt, error) {
 
 // Logs is eth_getLogs for one address and topic 0, between two blocks.
 func (c *Client) Logs(ctx context.Context, address Address, topic0 [32]byte, from, to uint64) ([]Log, error) {
+	return c.FilterLogs(ctx, address, [][32]byte{topic0}, from, to)
+}
+
+// FilterLogs is eth_getLogs for one address whose first topics are topics
+// (a zero topic matches any), between two blocks.
+func (c *Client) FilterLogs(ctx context.Context, address Address, topics [][32]byte, from, to uint64) ([]Log, error) {
+	ts := make([]any, len(topics))
+	for i, t := range topics {
+		if t != ([32]byte{}) {
+			ts[i] = "0x" + hex.EncodeToString(t[:])
+		}
+	}
 	var rs []rawLog
-	filter := map[string]any{"address": address.Hex(), "topics": []string{"0x" + hex.EncodeToString(topic0[:])},
+	filter := map[string]any{"address": address.Hex(), "topics": ts,
 		"fromBlock": fmt.Sprintf("0x%x", from), "toBlock": fmt.Sprintf("0x%x", to)}
 	if err := c.call(ctx, "eth_getLogs", &rs, filter); err != nil {
 		return nil, err

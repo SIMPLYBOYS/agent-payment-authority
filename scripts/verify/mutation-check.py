@@ -865,6 +865,17 @@ MUTATIONS = [
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    # P2 Reconciler (docs/commercial-p2.md 9.12).
+    ('P2 reconcile: a used nonce reads settled without its transfer', 'internal/reconcile/reconcile.go',
+     'if rc != nil && rc.Status == 1 && transfers(rc.Logs, t.Address, a.From, a.To, a.Value) {', 'if rc != nil && rc.Status == 1 {', 'TestStatus'),
+    ('P2 reconcile: an expired authorization reads pending', 'internal/reconcile/reconcile.go',
+     'if h.Timestamp >= a.ValidBefore {', 'if false && h.Timestamp >= a.ValidBefore {', 'TestStatus'),
+    ('P2 reconcile: the head is read as confirmed', 'internal/reconcile/reconcile.go',
+     'return latest + 1 - c, nil', 'return latest + 0*c, nil', 'TestStatus'),
+    ('P2 reconcile: a spend of another amount is accounted for', 'internal/reconcile/reconcile.go',
+     'found && a.To == to && v.IsUint64() && v.Uint64() == a.Value {', 'found && a.To == to {', 'TestUnauthorized'),
+    ('P2 reconcile: a plain transfer is accounted for', 'internal/reconcile/reconcile.go',
+     '\t\t\tok := false\n', '\t\t\tok := true\n', 'TestUnauthorized'),
     # P2 merchant settlement (docs/commercial-p2.md 9.10).
     ('P2 shop: a second replacement is priced from current fees only', 'internal/eth/send.go',
      'if p.Cmp(v) > 0 {', 'if false && p.Cmp(v) > 0 {', 'internal/merchant:TestStuckTransferIsReplaced'),
