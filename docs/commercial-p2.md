@@ -138,7 +138,10 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
   - `signer_total`：至少等於 `signer_max`；
   - `signer_window_seconds`：大於 0，例如每日 86400；要「全期」就填一個很大的值。
   - 缺任一欄位，`ParseConfig` 就拒絕。這是硬上限，不能因為設定漏寫而靜默關閉。
-- **檢查**：在接受付款的交易裡，加總這位 approver 的核准在期間內（`accepted_at > now - window`）已接受或已簽的 attempt，加上這一筆超過 `signer_total` 就回 `OVER_TOTAL_CAP`，什麼都不寫，核准維持 verified。放棄或過期未簽的 attempt 不計入，與委派的總額規則相同。各 approver 分開計算。
+- **檢查**：在接受付款的交易裡，加總這位 approver 的核准在期間內（`accepted_at > now - window`）已接受或已簽的 attempt，加上這一筆超過 `signer_total` 就回 `OVER_TOTAL_CAP`，什麼都不寫，核准維持 verified。
+  - 放棄或過期未簽的 attempt 不計入，與委派的總額規則相同。
+  - 各 approver 分開計算。
+  - 委派的總額（`total_cap`）與 approver 的總額彼此獨立：一筆付款只用一種授權，所以同一位客人在一個期間內最多可付「委派總額＋approver 總額」。
 - **設定值**：
   - 測試設定：`signer_max` 1,000,000、`signer_total` 2,000,000、每日。
   - `scripts/demo/v1-dev.sh`：`signer_total` 5,000,000、每日。
@@ -163,9 +166,23 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
     - 已簽的原始交易**先寫入 DB 再送出**。中斷或重啟後，同一張請購只會重送這一筆（同 hash、同 nonce），絕不產生第二筆。等不到確認回 `RESERVATION_PENDING`（unknown）。
     - 確認數達到設定值後，在一筆寫入裡：預留改成 reserved，task 的餘額、`r`、commitment 換成新的。交易 revert 則預留改成 failed，task 不變。
     - 回傳證據 `Evidence`（chain、合約、task、intent、金額、tx hash、區塊）。同一張請購再呼叫，回同一份證據。
-  - ponytail：所有 task 與 gas nonce 共用一把鎖；兩位客人的預留要重疊時，再改成每個 task 一把鎖並加 nonce 管理。
+    - 已過期的請購（`valid_before` 已過）回 `ORDER_EXPIRED`，不動用預算。policy 期限取「現在＋`PolicyTTL`」與 `valid_before` 中較早者。
+    - **交易永遠不會成功時**，預留改成 failed，task 的狀態不變，之後的請購可以再預留（同一個 nullifier 只在非 failed 的預留之間唯一）。「永遠不會成功」指：
+      - revert；
+      - nonce 已被同一把金鑰的其他交易用掉（另一筆已上鏈、這筆沒有 receipt）；
+      - 鏈上時間已超過 policy 期限而這筆仍未上鏈。
+      - 一張請購的預留一旦 failed，該請購就不再預留，要用新的請購。
+    - **nonce**：寫入的交易存下 nonce 與期限。每次要送新交易前，先重送所有已寫入、未確認的交易；新交易的 nonce 取「節點的 pending nonce」與「已寫入未確認的最高 nonce＋1」中較大者。所以重啟後，新的預留不會搶走寫入在先的那一筆的 nonce。
+    - 每次呼叫最多等 2 分鐘（`wait`），等不到回 `RESERVATION_PENDING`，不會一直佔著鎖。
+    - 確認後的狀態更新：先把預留從 sent 改成 reserved（必須恰好一列），再只從這筆預留花掉的那個 commitment 更新 task（必須恰好一列），防止兩個程序重複扣款。
+  - ponytail：所有 task 與各金鑰的 nonce 共用一把鎖；兩位客人的預留要重疊時，再改成每個 task 一把鎖並加 nonce 管理。
+  - **已知、刻意的取捨**：
+    - epoch 是從節點讀的。說謊的節點可以讓 relayer 簽一個未來 epoch 的授權，但仍受期限限制，而且合約只接受目前的 epoch。
+    - tx#1 上鏈後，若 Signer 拒簽（例如期限已過），這筆預算就花掉了，不會退回。預算是上限，已預留未付款的部分交給對帳處理（P2 後續）。
 - **Signer 的鏈上核對 `budget.Verifier`**（實作 `signer.ReservationVerifier`）。介面改為帶入 context 與完整請購。
-  - 證據只採信 `tx_hash`，其餘從自己的節點重讀：交易成功、確認數足夠，且**預算合約本身**發出的 `Spent` 的 task（由請購的 task 與合約算出）、intent、金額都與請購相符。
+  - 證據只採信 `tx_hash`，其餘從自己的節點重讀：交易成功、確認數足夠，且**預算合約本身**發出的 `Spent` 的 task（由請購的 task 與合約算出）、intent、金額都與請購相符，而且不是被 reorg 移除的 log。
+  - 請購的鏈必須是 verifier 設定的鏈；verifier 自己的節點也必須在這條鏈上（同一個合約地址可能存在於別條鏈）。
+  - intent hash 本身已涵蓋 task 與金額，所以 task 與金額的比對是第二道、獨立的檢查，由 `TestSpentFor` 逐欄單獨證明。
   - 拒絕碼：`RESERVATION_MISSING`、`RESERVATION_PENDING`、`RESERVATION_FAILED`、`RESERVATION_UNCONFIRMED`、`RESERVATION_MISMATCH`；節點連不上是 `RESERVATION_UNAVAILABLE`。
   - 尚未接進 `cmd/apa-signer`（正式組裝仍是 `Unavailable`），留到 demo 接線。
 - **驗證**（本機 anvil，chain 84532，部署 Verifier 與 Budget；`go test -race` 通過）：
@@ -177,10 +194,39 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
   - `TestReserveResumesAfterACrash`：寫入之後、送出之前中斷 → 其他請購回 `TASK_BUSY` → 重啟後送出的就是寫入的那一筆（gas nonce 只加 1、鏈上只有一個 `Spent`），verifier 接受。
   - `TestSignerSignsOnlyAReservedOrder`：真的 `signer.Core` 搭配這個 verifier：沒有預留回 `RESERVATION_MISSING`、拿別張請購的預留回 `RESERVATION_MISMATCH`、自己的預留才簽。
   - `TestPolicyDigestIsTheContracts`。
+  - review 後新增：
+    - `TestReserveAfterARevert`：寫入後過了 policy 期限才送出 → revert → failed → 同一個 task 的下一張請購可以預留，並通過 verifier。
+    - `TestResendBeforeANewNonce`：中斷、重啟後，先來的另一個 task 的預留不會搶走 nonce，兩筆都預留成功，gas nonce 恰好加 2。
+    - `TestDroppedReservationFails`：nonce 被同一把金鑰的另一筆交易用掉 → failed，不會一直 pending → 下一張請購可以預留。
+    - `TestSpentFor`：事件比對逐欄（別的合約、別的事件、別的 task、intent、金額、被移除的 log）。
+    - 拒絕表新增「已過期的請購」（`ORDER_EXPIRED`）與「別條鏈的 verifier」。
+  - 「鏈上時間超過期限而仍未上鏈」這條判定在 anvil 上測不到：anvil 收到交易會立刻打包並 revert，走的是 revert 那條路。
 - **突變**：
-  - 這 10 項需要 `var/` 的本機工具（anvil、合約 build）。mutation-check 的容器裡沒有 `var/`，在那裡會被 skip、誤判為 SURVIVED，所以放在 `LOCAL_MUTATIONS`，由新的 `scripts/verify/local-mutations.py` 在工作樹的複本上執行（以 symlink 連到 `var/`；測試若被 skip 算錯誤，不算通過）。10／10 KILLED。
+  - 需要 `var/` 本機工具（anvil、合約 build）的項目，在 mutation-check 的容器裡會被 skip、誤判為 SURVIVED，所以放在 `LOCAL_MUTATIONS`，由新的 `scripts/verify/local-mutations.py` 在工作樹的複本上執行：
+    - 以 symlink 連到 `var/`；
+    - **每個目標測試先在未突變的複本上跑一次，必須通過（不能 skip），否則整批停下**；
+    - 突變後測試被 skip 算錯誤，不算 KILLED。
+  - review 後，P2 全部 44 項（eth 4、D1 15、累計上限 5、預算 relayer 20）以 `local-mutations.py P2 --all` 重跑：14 個基準都通過，44／44 KILLED。
   - 過程中發現並修正：交易漏了 calldata（測試抓到）；「仿冒事件」與「續送」原本沒有被測到，已補。
 - **既有、與本片無關**：
   - mutation-check 的 `B1-04 A R1 host: requested model missing from the trace`（`internal/buyer/host.go`）；
   - m-b-reverse 的 A2「viewer token 不能取代 assertion」（`cmd/demo/approvals.go`）；
   - 這兩項的突變文字在 `main` 上就已經找不到，之後另外修。
+
+### 9.7 第三段 review（累計上限、zkbudget、relayer）與修正
+
+Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。全部處理：
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Critical | 預留 revert 後 nullifier 仍佔著 UNIQUE，該 task 之後每次都失敗 | 改成只在非 failed 的預留之間唯一；`TestReserveAfterARevert` |
+| Important | 單一 gas 金鑰：重啟後新交易可能搶走寫入在先那筆的 nonce，使它永遠 pending、task 永遠 `TASK_BUSY`；await 沒有上限而且佔著鎖 | 存 nonce 與期限；送新交易前先重送；nonce 下限；判定「永遠不會成功」改為 failed；await 最多 2 分鐘；`TestResendBeforeANewNonce`、`TestDroppedReservationFails` |
+| Important | `local-mutations.py` 沒有未突變的基準，環境壞掉也會被算成 KILLED | 加上基準，必須通過才判定 |
+| 建議 | 確認後的狀態更新沒有檢查影響列數 | 先改預留（恰好一列），再只從花掉的 commitment 更新 task（恰好一列） |
+| 建議 | task、金額的比對沒有被單獨測到 | 抽成 `spentFor`，以 `TestSpentFor` 逐欄測 |
+| 建議 | verifier 不檢查鏈 | 請購的鏈與節點的鏈都檢查 |
+| 建議 | epoch 從節點讀；Signer 在 tx#1 之後拒簽時預算不退回；failed 的請購不再預留 | 寫進 §9.6 |
+| 建議 | `Reserve` 不檢查請購是否已過期 | `ORDER_EXPIRED`；policy 期限不晚於 `valid_before` |
+| 建議 | 期間邊界的測試沒有釘住 | 改用剛好 86400 秒，並加上 `>=` 的突變 |
+| 建議 | 委派與 approver 的總額彼此獨立 | 寫進 §9.5 |
+| 建議 | zkbudget 漏掉 `-balance 0`；stdin 的 JSON 後面接著多餘資料也接受 | 改用 `fs.Visit` 判斷有沒有給旗標；要求 JSON 之後就是 EOF；補兩個測試 |

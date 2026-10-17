@@ -72,7 +72,9 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	if *wstdin {
-		if *balance != 0 || *r != "" || *rNew != "" {
+		var set bool
+		fs.Visit(func(f *flag.Flag) { set = set || f.Name == "balance" || f.Name == "r" || f.Name == "rnew" })
+		if set {
 			return errors.New("-witness-stdin: the witness comes from stdin only, not -balance, -r or -rnew")
 		}
 		var w struct {
@@ -82,7 +84,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		d := json.NewDecoder(io.LimitReader(stdin, 4096))
 		d.DisallowUnknownFields()
-		if err := d.Decode(&w); err != nil || w.Balance == nil {
+		if err := d.Decode(&w); err != nil || w.Balance == nil || d.Decode(&struct{}{}) != io.EOF {
 			return errors.New("-witness-stdin: stdin must be {\"balance\": B, \"r\": R, \"rnew\": R2}")
 		}
 		*balance, *r, *rNew = *w.Balance, w.R, w.RNew

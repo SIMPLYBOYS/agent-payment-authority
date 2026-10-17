@@ -40,6 +40,8 @@ func TestWitnessStdin(t *testing.T) {
 		args  []string
 	}{
 		"flags too":     {`{"balance": 5000000, "r": "` + r + `"}`, append(base, "-witness-stdin", "-r", r)},
+		"-balance 0":    {`{"balance": 5000000, "r": "` + r + `"}`, append(base, "-witness-stdin", "-balance", "0")},
+		"trailing data": {`{"balance": 5000000, "r": "` + r + `"} {}`, append(base, "-witness-stdin")},
 		"no balance":    {`{"r": "` + r + `"}`, append(base, "-witness-stdin")},
 		"another field": {`{"balance": 1, "r": "` + r + `", "x": 1}`, append(base, "-witness-stdin")},
 		"not JSON":      {`balance=1`, append(base, "-witness-stdin")},

@@ -780,6 +780,14 @@ MUTATIONS = [
      'WHERE h.approver_id = ? AND', 'WHERE (h.approver_id = ? OR 1) AND', 'TestHumanApprovalTotal'),
     ('P2 total: a total below the per-payment limit is accepted', 'internal/signer/config.go',
      '!ok || total < max ||', '!ok || false && total < max ||', 'TestApproverTotalConfig'),
+    ('P2 total: the window keeps a payment exactly its length old', 'internal/signer/core.go',
+     'AND a.state IN (\'accepted\', \'signed\') AND a.accepted_at > ?`', 'AND a.state IN (\'accepted\', \'signed\') AND a.accepted_at >= ?`', 'TestHumanApprovalTotal'),
+    ("P2 budget: the Spent matcher takes another task", 'internal/budget/verify.go',
+     'new(big.Int).SetBytes(l.Topics[1][:]).Cmp(task) != 0 {', 'false && new(big.Int).SetBytes(l.Topics[1][:]).Cmp(task) != 0 {', 'TestSpentFor'),
+    ("P2 budget: the Spent matcher takes another amount", 'internal/budget/verify.go',
+     'w1.IsUint64() && w1.Uint64() == amount {', 'w1.IsUint64() {', 'TestSpentFor'),
+    ("P2 budget: the Spent matcher takes a removed log", 'internal/budget/verify.go',
+     'if l.Removed || l.Address != contract ||', 'if l.Address != contract ||', 'TestSpentFor'),
     # AE1 (docs/commercial-ae1.md): the scorer and the report.
     ('AE1 score: a pricier Ask is not a false Ask', 'internal/ae1/score.go',
      'case want == "Allow" && got == "Ask":', 'case false && want == "Allow" && got == "Ask":', 'TestScoreRun'),
@@ -855,13 +863,23 @@ MUTATIONS = [
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    ('P2 budget: a failed reservation keeps its nullifier', 'internal/budget/relayer.go',
+     "ON reservations (nullifier) WHERE state <> 'failed';", "ON reservations (nullifier);", 'TestReserveAfterARevert'),
+    ('P2 budget: a new reservation does not resend the written ones first', 'internal/budget/relayer.go',
+     "\tif err := r.resendOpen(ctx); err != nil {\n\t\treturn Evidence{}, err\n\t}", "\tif err := error(nil); err != nil {\n\t\treturn Evidence{}, err\n\t}", 'TestResendBeforeANewNonce'),
+    ('P2 budget: a transaction whose nonce was used stays pending', 'internal/budget/relayer.go',
+     '(mined > nonce || deadline > 0', '(false && mined > nonce || deadline > 0', 'TestDroppedReservationFails'),
+    ('P2 budget: an expired order spends budget', 'internal/budget/relayer.go',
+     'if po.PaymentBinding.ValidBefore <= now {', 'if false && po.PaymentBinding.ValidBefore <= now {', 'TestReserveAndVerify'),
+    ("P2 budget: the verifier takes another chain's order", 'internal/budget/verify.go',
+     '|| po.PaymentBinding.ChainID != strconv.FormatUint(v.ChainID, 10) {', '|| false && po.PaymentBinding.ChainID != strconv.FormatUint(v.ChainID, 10) {', 'TestReserveAndVerify'),
     # P2 budget relayer and the Signer's chain verifier (docs/commercial-p2.md 9.6).
     ('P2 budget: the verifier ignores the intent', 'internal/budget/verify.go',
-     'hex.EncodeToString(w0) == hex.EncodeToString(ih[:])', 'hex.EncodeToString(w0) != "" || hex.EncodeToString(ih[:]) == ""', 'TestReserveAndVerify'),
+     'hex.EncodeToString(w0) == hex.EncodeToString(intent[:])', 'hex.EncodeToString(w0) != "" || hex.EncodeToString(intent[:]) == ""', 'TestReserveAndVerify'),
     ('P2 budget: the verifier ignores confirmations', 'internal/budget/verify.go',
      'latest-r.BlockNumber+1 < v.Confirmations {', 'false && latest-r.BlockNumber+1 < v.Confirmations {', 'TestReserveAndVerify'),
     ("P2 budget: the verifier takes another contract's event", 'internal/budget/verify.go',
-     'l.Removed || l.Address != v.Contract ||', 'l.Removed || false && l.Address != v.Contract ||', 'TestReserveAndVerify'),
+     'l.Address != contract || len(l.Topics)', 'false && l.Address != contract || len(l.Topics)', 'TestReserveAndVerify'),
     ('P2 budget: a reverted transaction is not reported failed', 'internal/budget/verify.go',
      'case r.Status != 1:', 'case false && r.Status != 1:', 'TestReserveAndVerify'),
     ('P2 budget: the relayer sends without simulating', 'internal/budget/relayer.go',
@@ -875,7 +893,7 @@ LOCAL_MUTATIONS = [
     ('P2 budget: a resumed reservation is not sent again', 'internal/budget/relayer.go',
      'r.rpc.SendRaw(ctx, raw) // already known', '_ = raw // already known', 'TestReserveResumesAfterACrash'),
     ('P2 budget: the Signer signs without a reservation', 'internal/budget/verify.go',
-     'return signer.Refusal("RESERVATION_MISMATCH")\n}', 'return nil\n}', 'TestSignerSignsOnlyAReservedOrder'),
+     'if err != nil || !spentFor(r.Logs, v.Contract, TaskField(v.ChainID, v.Contract, po.Intent.TaskID), ih, amount) {', 'if false && (err != nil || !spentFor(r.Logs, v.Contract, TaskField(v.ChainID, v.Contract, po.Intent.TaskID), ih, amount)) {', 'TestSignerSignsOnlyAReservedOrder'),
 ]
 
 

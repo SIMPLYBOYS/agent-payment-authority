@@ -113,7 +113,17 @@ func (c *Client) BlockNumber(ctx context.Context) (uint64, error) {
 
 // PendingNonce is the account's next nonce (eth_getTransactionCount pending).
 func (c *Client) PendingNonce(ctx context.Context, a Address) (uint64, error) {
-	n, err := quantity(ctx, c, "eth_getTransactionCount", a.Hex(), "pending")
+	return c.nonceAt(ctx, a, "pending")
+}
+
+// MinedNonce is the account's next nonce in the latest block: every nonce
+// below it is used by a mined transaction.
+func (c *Client) MinedNonce(ctx context.Context, a Address) (uint64, error) {
+	return c.nonceAt(ctx, a, "latest")
+}
+
+func (c *Client) nonceAt(ctx context.Context, a Address, block string) (uint64, error) {
+	n, err := quantity(ctx, c, "eth_getTransactionCount", a.Hex(), block)
 	if err != nil {
 		return 0, err
 	}

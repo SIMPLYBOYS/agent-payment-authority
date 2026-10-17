@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"math/big"
+	"strconv"
 	"strings"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
@@ -47,8 +48,13 @@ func (v *Verifier) Verify(ctx context.Context, intent string, po *paycontract.Pu
 		return signer.Refusal("RESERVATION_MISSING")
 	}
 	amount, err := po.PaymentBinding.Amount.Units()
-	if err != nil {
+	if err != nil || po.PaymentBinding.ChainID != strconv.FormatUint(v.ChainID, 10) {
 		return signer.Refusal("RESERVATION_MISMATCH")
+	}
+	// Its own node must be on the configured chain: the same contract
+	// address can exist on another.
+	if id, err := v.RPC.ChainID(ctx); err != nil || !id.IsUint64() || id.Uint64() != v.ChainID {
+		return signer.Refusal("RESERVATION_UNAVAILABLE")
 	}
 	r, err := v.RPC.Receipt(ctx, hash)
 	switch {
@@ -66,21 +72,27 @@ func (v *Verifier) Verify(ctx context.Context, intent string, po *paycontract.Pu
 	if latest < r.BlockNumber || latest-r.BlockNumber+1 < v.Confirmations {
 		return signer.Refusal("RESERVATION_UNCONFIRMED")
 	}
-	task := TaskField(v.ChainID, v.Contract, po.Intent.TaskID)
 	ih, err := IntentBytes(intent)
-	if err != nil {
+	if err != nil || !spentFor(r.Logs, v.Contract, TaskField(v.ChainID, v.Contract, po.Intent.TaskID), ih, amount) {
 		return signer.Refusal("RESERVATION_MISMATCH")
 	}
-	for _, l := range r.Logs {
-		if l.Removed || l.Address != v.Contract || len(l.Topics) != 2 || l.Topics[0] != spentTopic ||
+	return nil
+}
+
+// spentFor: one of logs is contract's own Spent of amount for task and
+// intent. (The intent hash covers the task and the amount too: their
+// checks are a second, independent one.)
+func spentFor(logs []eth.Log, contract eth.Address, task *big.Int, intent eth.Bytes32, amount uint64) bool {
+	for _, l := range logs {
+		if l.Removed || l.Address != contract || len(l.Topics) != 2 || l.Topics[0] != spentTopic ||
 			new(big.Int).SetBytes(l.Topics[1][:]).Cmp(task) != 0 {
 			continue
 		}
 		w0, err0 := eth.Word(l.Data, 0)
 		w1, err1 := eth.Uint(l.Data, 1)
-		if err0 == nil && err1 == nil && hex.EncodeToString(w0) == hex.EncodeToString(ih[:]) && w1.IsUint64() && w1.Uint64() == amount {
-			return nil
+		if err0 == nil && err1 == nil && hex.EncodeToString(w0) == hex.EncodeToString(intent[:]) && w1.IsUint64() && w1.Uint64() == amount {
+			return true
 		}
 	}
-	return signer.Refusal("RESERVATION_MISMATCH")
+	return false
 }

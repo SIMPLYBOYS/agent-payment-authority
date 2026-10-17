@@ -408,8 +408,9 @@ func TestHumanApprovalTotal(t *testing.T) {
 	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000760", Authorization: byApproval(apb.ApprovalID), Order: ob}); err != nil {
 		t.Fatalf("B: %v", err)
 	}
-	// The first payment leaves the window: room for 500000 again.
-	f.now = t0 + 86400 + 1
+	// The first payment (accepted at t0) leaves the window exactly when the
+	// window has passed: room for 500000 again.
+	f.now = t0 + 86400
 	order = f.orderA("500000")
 	ap = f.approve(a, order, "approve")
 	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000770", Authorization: byApproval(ap.ApprovalID), Order: order}); err != nil {

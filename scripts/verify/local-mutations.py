@@ -3,7 +3,9 @@
 whose finding starts with PREFIX) here, not in a container: each in a fresh
 copy of the working tree's tracked and new files, with var/ linked in for
 the local chain tools (anvil, the contract build). Never in the tree itself.
-A test that skips is an error, never a pass.
+Each test is first run once unmutated in the copy and must pass there
+(not skip): otherwise a broken environment would read as KILLED. A test
+that skips is an error, never a pass.
 
     python3 -I scripts/verify/local-mutations.py [PREFIX] [--all] [-v: the log of each one not killed]
 """
@@ -33,7 +35,16 @@ def fresh():
 
 
 bad = 0
-for finding, rel, old, new, test in [m for m in entries if m[0].startswith(prefix)]:
+chosen = [m for m in entries if m[0].startswith(prefix)]
+for pkg, test in sorted({(os.path.dirname(m[1]), m[4]) for m in chosen}):
+    fresh()
+    r = subprocess.run(["go", "test", "./" + pkg, "-run", test, "-count=1", "-v", "-timeout", "300s"], cwd=tree, capture_output=True, text=True)
+    ok = r.returncode == 0 and "--- SKIP" not in r.stdout + r.stderr
+    print(f"{'BASELINE' if ok else 'NO BASE '} ./{pkg} -run {test}", flush=True)
+    if not ok:
+        print((r.stdout + r.stderr)[-1500:])
+        sys.exit(1)
+for finding, rel, old, new, test in chosen:
     fresh()
     p = tree / rel
     t = p.read_text()

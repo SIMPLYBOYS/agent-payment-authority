@@ -1,12 +1,14 @@
 package budget
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math/big"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -216,13 +218,14 @@ func TestReserveAndVerify(t *testing.T) {
 		v      *Verifier
 		want   string
 	}{
-		"another order":         {intent2, po2, evRaw, v, "RESERVATION_MISMATCH"},
-		"another task":          {intentB, poB, evRaw, v, "RESERVATION_MISMATCH"},
-		"another amount":        {intentAmt, poAmt, evRaw, v, "RESERVATION_MISMATCH"},
-		"a hash never sent":     {intent, po, json.RawMessage(`{"tx_hash":"0x` + hex.EncodeToString(make([]byte, 32)) + `"}`), v, "RESERVATION_PENDING"},
-		"no evidence":           {intent, po, nil, v, "RESERVATION_MISSING"},
-		"too few confirmations": {intent, po, evRaw, &Verifier{RPC: w.rpc, ChainID: 84532, Contract: w.contract, Confirmations: 1000}, "RESERVATION_UNCONFIRMED"},
-		"a lookalike event":     {intent, po, w.lookalike(t, po, intent), v, "RESERVATION_MISMATCH"},
+		"another order":            {intent2, po2, evRaw, v, "RESERVATION_MISMATCH"},
+		"another task":             {intentB, poB, evRaw, v, "RESERVATION_MISMATCH"},
+		"another amount":           {intentAmt, poAmt, evRaw, v, "RESERVATION_MISMATCH"},
+		"a hash never sent":        {intent, po, json.RawMessage(`{"tx_hash":"0x` + hex.EncodeToString(make([]byte, 32)) + `"}`), v, "RESERVATION_PENDING"},
+		"no evidence":              {intent, po, nil, v, "RESERVATION_MISSING"},
+		"too few confirmations":    {intent, po, evRaw, &Verifier{RPC: w.rpc, ChainID: 84532, Contract: w.contract, Confirmations: 1000}, "RESERVATION_UNCONFIRMED"},
+		"a lookalike event":        {intent, po, w.lookalike(t, po, intent), v, "RESERVATION_MISMATCH"},
+		"another chain's verifier": {intent, po, evRaw, &Verifier{RPC: w.rpc, ChainID: 31337, Contract: w.contract, Confirmations: 1}, "RESERVATION_MISMATCH"},
 	} {
 		if err := cs.v.Verify(bg, cs.intent, cs.po, cs.ev); code(err) != cs.want {
 			t.Errorf("%s: %v, want %s", name, err, cs.want)
@@ -233,6 +236,8 @@ func TestReserveAndVerify(t *testing.T) {
 	rawB, _, _ := w.order("consumer-b", "show-a-01", 4, "100000")
 	rawOver, _, _ := w.order("consumer-a", "show-a-01", 5, "400001")
 	rawNone, _, _ := w.order("consumer-a", "show-a-09", 6, "100000")
+	expired := signertest.Order{Consumer: "consumer-a", Agent: "agent-a", Wallet: "wallet-a", Task: "show-a-01", From: "0x1111111111111111111111111111111111111111",
+		PayTo: signertest.Merchant, Amount: "100000", N: 10, Now: w.now - 1000, Window: 600}.Raw()
 	for name, cs := range map[string]struct {
 		raw  json.RawMessage
 		want string
@@ -240,6 +245,7 @@ func TestReserveAndVerify(t *testing.T) {
 		"B's order on A's task": {rawB, "CONSUMER_MISMATCH"},
 		"over the budget left":  {rawOver, "OVER_BUDGET"},
 		"an unregistered task":  {rawNone, "TASK_NOT_REGISTERED"},
+		"an expired order":      {expired, "ORDER_EXPIRED"},
 		"not an order":          {json.RawMessage(`{"version":"x"}`), "ORDER_INVALID"},
 	} {
 		if _, err := r.Reserve(bg, cs.raw); code(err) != cs.want {
@@ -488,5 +494,136 @@ func TestSignerSignsOnlyAReservedOrder(t *testing.T) {
 	rep, err := core.Sign(bg, signer.SignRequest{RequestID: "request-0000000803", Authorization: auth, Order: o1, Reservation: evRaw})
 	if err != nil || rep.State != "signed" {
 		t.Fatalf("sign %+v %v", rep, err)
+	}
+}
+
+// call calls a node method the client has no wrapper for (anvil's own).
+func (w *world) call(t *testing.T, method string, params ...any) {
+	t.Helper()
+	if params == nil {
+		params = []any{}
+	}
+	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+	res, err := http.Post(w.rpc.URL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+}
+
+// crashAfterWrite reserves raw and stops after its transaction is written,
+// before it is sent; it returns the written transaction's nonce.
+func crashAfterWrite(t *testing.T, ctx context.Context, r *Relayer, raw json.RawMessage, intent string) uint64 {
+	t.Helper()
+	hook = func(stage string) error {
+		if stage == "after-write" {
+			return errors.New("crash")
+		}
+		return nil
+	}
+	_, err := r.Reserve(ctx, raw)
+	hook = nil
+	if err == nil {
+		t.Fatal("no crash")
+	}
+	var n uint64
+	if err := r.db.QueryRow(`SELECT nonce FROM reservations WHERE intent_hash = ? AND state = 'sent'`, intent).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// A reservation that reverts (written, sent only after its policy deadline)
+// leaves the task's state as it was, and the next order on the task, which
+// proves the same nullifier, is reserved.
+func TestReserveAfterARevert(t *testing.T) {
+	w := newWorld(t)
+	ctx, cancel := context.WithTimeout(bg, 60*time.Second)
+	defer cancel()
+	r := w.relayer(t, filepath.Join(t.TempDir(), "budget.db"))
+	if err := r.RegisterTask(ctx, "show-a-01", "consumer-a", 1_000_000); err != nil {
+		t.Fatal(err)
+	}
+	raw, _, intent := w.order("consumer-a", "show-a-01", 1, "500000")
+	crashAfterWrite(t, ctx, r, raw, intent)
+	w.call(t, "evm_increaseTime", 400) // past the 300 s policy deadline
+	w.call(t, "evm_mine")
+	h, _ := w.rpc.LatestHeader(bg)
+	w.now = h.Timestamp
+	if _, err := r.Reserve(ctx, raw); code(err) != "RESERVATION_FAILED" {
+		t.Fatalf("sent after its deadline: %v", err)
+	}
+	raw2, po2, intent2 := w.order("consumer-a", "show-a-01", 2, "500000")
+	ev, err := r.Reserve(ctx, raw2)
+	if err != nil {
+		t.Fatalf("the next order on the task: %v", err)
+	}
+	evRaw, _ := json.Marshal(ev)
+	if err := (&Verifier{RPC: w.rpc, ChainID: 84532, Contract: w.contract, Confirmations: 1}).Verify(bg, intent2, po2, evRaw); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// After a restart, a new reservation never takes the nonce of one written
+// before the crash: that one is sent again first, and both are reserved.
+func TestResendBeforeANewNonce(t *testing.T) {
+	w := newWorld(t)
+	ctx, cancel := context.WithTimeout(bg, 60*time.Second)
+	defer cancel()
+	path := filepath.Join(t.TempDir(), "budget.db")
+	r := w.relayer(t, path)
+	r.wait = 10 * time.Second
+	for _, task := range []string{"show-a-01", "show-a-02"} {
+		if err := r.RegisterTask(ctx, task, "consumer-a", 1_000_000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gas := key(t, 3).Addr
+	before, _ := w.rpc.PendingNonce(bg, gas)
+	rawA, _, intentA := w.order("consumer-a", "show-a-01", 1, "500000")
+	crashAfterWrite(t, ctx, r, rawA, intentA)
+	r.Close()
+	r = w.relayer(t, path)
+	r.wait = 10 * time.Second
+	rawB, _, _ := w.order("consumer-a", "show-a-02", 2, "500000")
+	if _, err := r.Reserve(ctx, rawB); err != nil {
+		t.Fatalf("B: %v", err)
+	}
+	if _, err := r.Reserve(ctx, rawA); err != nil {
+		t.Fatalf("A, written before the crash: %v", err)
+	}
+	if after, _ := w.rpc.PendingNonce(bg, gas); after != before+2 {
+		t.Fatalf("gas nonce %d -> %d", before, after)
+	}
+}
+
+// A written reservation whose nonce another transaction used can never be
+// mined: it is failed, not pending forever, and the task takes the next.
+func TestDroppedReservationFails(t *testing.T) {
+	w := newWorld(t)
+	ctx, cancel := context.WithTimeout(bg, 60*time.Second)
+	defer cancel()
+	r := w.relayer(t, filepath.Join(t.TempDir(), "budget.db"))
+	r.wait = 10 * time.Second
+	if err := r.RegisterTask(ctx, "show-a-01", "consumer-a", 1_000_000); err != nil {
+		t.Fatal(err)
+	}
+	raw, _, intent := w.order("consumer-a", "show-a-01", 1, "500000")
+	n := crashAfterWrite(t, ctx, r, raw, intent)
+	// Another transaction of the gas key at that nonce (an operator's, say).
+	h, _ := w.rpc.LatestHeader(bg)
+	to := eth.Address{0xde, 0xad}
+	tx := &eth.Tx{ChainID: big.NewInt(84532), Nonce: n, MaxPriorityFeePerGas: big.NewInt(1e9), MaxFeePerGas: new(big.Int).Add(new(big.Int).Mul(h.BaseFee, big.NewInt(2)), big.NewInt(1e9)),
+		Gas: 21000, To: &to, Value: big.NewInt(1)}
+	signed, _, _ := tx.Sign(key(t, 3))
+	if _, err := w.rpc.SendRaw(bg, signed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reserve(ctx, raw); code(err) != "RESERVATION_FAILED" {
+		t.Fatalf("its nonce used by another: %v", err)
+	}
+	raw2, _, _ := w.order("consumer-a", "show-a-01", 2, "500000")
+	if _, err := r.Reserve(ctx, raw2); err != nil {
+		t.Fatalf("the next order on the task: %v", err)
 	}
 }

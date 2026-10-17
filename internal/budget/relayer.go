@@ -47,10 +47,15 @@ type Relayer struct {
 	db    *sql.DB
 	clock func() uint64
 	poll  time.Duration
-	// ponytail: one lock for every task and the gas key's nonce; per-task
-	// locks and a nonce manager if two consumers' reservations must overlap.
+	wait  time.Duration // the longest one call waits for a receipt
+	// ponytail: one lock for every task and each key's nonce; per-task locks
+	// and a nonce manager if two consumers' reservations must overlap.
 	mu sync.Mutex
 }
+
+// errDropped: the transaction can never succeed (its nonce was used by
+// another, or the chain's time is past its deadline).
+var errDropped = errors.New("dropped")
 
 const schema = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -59,8 +64,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   balance       INTEGER NOT NULL CHECK (balance >= 0),
   r             TEXT NOT NULL,
   commitment    TEXT NOT NULL,
-  register_raw  TEXT NOT NULL,
-  register_hash TEXT NOT NULL UNIQUE,
+  register_raw   TEXT NOT NULL,
+  register_hash  TEXT NOT NULL UNIQUE,
+  register_nonce INTEGER NOT NULL,
   state         TEXT NOT NULL CHECK (state IN ('registering', 'registered', 'failed'))
 ) STRICT;
 CREATE TABLE IF NOT EXISTS reservations (
@@ -70,14 +76,19 @@ CREATE TABLE IF NOT EXISTS reservations (
   c_old       TEXT NOT NULL,
   c_new       TEXT NOT NULL,
   r_new       TEXT NOT NULL,
-  nullifier   TEXT NOT NULL UNIQUE,
+  nullifier   TEXT NOT NULL,
   raw_tx      TEXT NOT NULL,
   tx_hash     TEXT NOT NULL UNIQUE,
+  nonce       INTEGER NOT NULL,
+  deadline    INTEGER NOT NULL,
   state       TEXT NOT NULL CHECK (state IN ('sent', 'reserved', 'failed')),
   block       INTEGER,
   created_at  INTEGER NOT NULL
 ) STRICT;
 CREATE UNIQUE INDEX IF NOT EXISTS one_open ON reservations (task_id) WHERE state = 'sent';
+-- A reverted or dropped reservation leaves the task's state, so its
+-- nullifier is proven again by the next one.
+CREATE UNIQUE INDEX IF NOT EXISTS one_spend ON reservations (nullifier) WHERE state <> 'failed';
 `
 
 // Open opens (or creates, 0600) the relayer's database at path.
@@ -102,7 +113,7 @@ func Open(ctx context.Context, cfg Config, keys Keys, rpc *eth.Client, path stri
 		db.Close()
 		return nil, err
 	}
-	return &Relayer{cfg: cfg, keys: keys, rpc: rpc, db: db, clock: clock, poll: 200 * time.Millisecond}, nil
+	return &Relayer{cfg: cfg, keys: keys, rpc: rpc, db: db, clock: clock, poll: 200 * time.Millisecond, wait: 2 * time.Minute}, nil
 }
 
 func (r *Relayer) Close() error { return r.db.Close() }
@@ -145,44 +156,88 @@ func decimal(s string) (*big.Int, error) {
 	return v, nil
 }
 
-// prepare signs a call from key at its pending nonce, after a simulation that
-// must not revert (Z2 §10 S3 (c)): a transaction that would fail is never
-// sent.
-func (r *Relayer) prepare(ctx context.Context, key *eth.Key, data []byte) (raw, hash []byte, err error) {
+// resendOpen sends every written, unfinished transaction again (the same
+// ones), before a new one takes a nonce: a transaction written before a
+// crash is never overtaken by a later one at its nonce.
+func (r *Relayer) resendOpen(ctx context.Context) error {
+	rows, err := r.db.QueryContext(ctx, `SELECT raw_tx FROM reservations WHERE state = 'sent' UNION ALL SELECT register_raw FROM tasks WHERE state = 'registering'`)
+	if err != nil {
+		return err
+	}
+	var raws []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			rows.Close()
+			return err
+		}
+		raws = append(raws, s)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for _, s := range raws {
+		raw, _ := hex.DecodeString(s)
+		r.rpc.SendRaw(ctx, raw) // known, mined or dropped: its own await says
+	}
+	return nil
+}
+
+// prepare signs a call from key after a simulation that must not revert
+// (Z2 §10 S3 (c)): a transaction that would fail is never sent. Its nonce
+// is the pending one, and never below floor (the key's written,
+// unfinished transactions' next).
+func (r *Relayer) prepare(ctx context.Context, key *eth.Key, data []byte, floor uint64) (raw, hash []byte, nonce uint64, err error) {
 	msg := eth.Msg{From: key.Addr, To: r.cfg.Contract, Data: data}
 	if _, err := r.rpc.Call(ctx, msg); err != nil {
 		var re *eth.RPCError
 		if errors.As(err, &re) {
-			return nil, nil, signer.Refusal("RESERVATION_SIMULATION_FAILED")
+			return nil, nil, 0, signer.Refusal("RESERVATION_SIMULATION_FAILED")
 		}
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	gas, err := r.rpc.EstimateGas(ctx, msg)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
-	nonce, err := r.rpc.PendingNonce(ctx, key.Addr)
+	nonce, err = r.rpc.PendingNonce(ctx, key.Addr)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
+	nonce = max(nonce, floor)
 	h, err := r.rpc.LatestHeader(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	tip, err := r.rpc.MaxPriorityFee(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	to := r.cfg.Contract
 	tx := &eth.Tx{ChainID: new(big.Int).SetUint64(r.cfg.ChainID), Nonce: nonce, MaxPriorityFeePerGas: tip,
 		MaxFeePerGas: new(big.Int).Add(new(big.Int).Mul(h.BaseFee, big.NewInt(2)), tip), Gas: gas + gas/5, To: &to, Value: new(big.Int), Data: data}
-	return tx.Sign(key)
+	raw, hash, err = tx.Sign(key)
+	return raw, hash, nonce, err
 }
 
-// await sends raw again (the same transaction: never another) and waits
-// for its receipt with the configured confirmations. nil, nil: not yet,
-// when ctx ends first.
-func (r *Relayer) await(ctx context.Context, raw []byte, hash []byte) (*eth.Receipt, error) {
+// floor is the next nonce after key's written, unfinished transactions.
+func (r *Relayer) floor(ctx context.Context, query string) (uint64, error) {
+	var n sql.NullInt64
+	err := r.db.QueryRowContext(ctx, query).Scan(&n)
+	if !n.Valid {
+		return 0, err
+	}
+	return uint64(n.Int64) + 1, err
+}
+
+// await sends raw again (the same transaction: never another) and waits,
+// at most r.wait, for its receipt with the configured confirmations. nil,
+// nil: not yet. errDropped: it can never succeed, because from used its
+// nonce otherwise, or the chain's time passed deadline (0: none) with it
+// still unmined (the contract refuses it in any later block).
+func (r *Relayer) await(ctx context.Context, raw []byte, hash []byte, from eth.Address, nonce, deadline uint64) (*eth.Receipt, error) {
+	ctx, cancel := context.WithTimeout(ctx, r.wait)
+	defer cancel()
 	r.rpc.SendRaw(ctx, raw) // already known, or mined: the receipt says
 	for {
 		rc, err := r.rpc.Receipt(ctx, hash)
@@ -193,6 +248,15 @@ func (r *Relayer) await(ctx context.Context, raw []byte, hash []byte) (*eth.Rece
 			latest, err := r.rpc.BlockNumber(ctx)
 			if err == nil && latest >= rc.BlockNumber && latest-rc.BlockNumber+1 >= r.cfg.Confirmations {
 				return rc, nil
+			}
+		} else if err == nil {
+			mined, err1 := r.rpc.MinedNonce(ctx, from)
+			h, err2 := r.rpc.LatestHeader(ctx)
+			if errors.Join(err1, err2) == nil && (mined > nonce || deadline > 0 && h.Timestamp > deadline) {
+				// Asked again after: mined in between is not dropped.
+				if again, err := r.rpc.Receipt(ctx, hash); err == nil && again == nil {
+					return nil, errDropped
+				}
 			}
 		}
 		select {
@@ -212,10 +276,10 @@ func (r *Relayer) RegisterTask(ctx context.Context, taskID, consumerID string, b
 	defer r.mu.Unlock()
 	var have struct {
 		consumer, raw, hash, state string
-		balance                    uint64
+		balance, nonce             uint64
 	}
-	err := r.db.QueryRowContext(ctx, `SELECT consumer_id, balance, register_raw, register_hash, state FROM tasks WHERE task_id = ?`, taskID).
-		Scan(&have.consumer, &have.balance, &have.raw, &have.hash, &have.state)
+	err := r.db.QueryRowContext(ctx, `SELECT consumer_id, balance, register_raw, register_hash, register_nonce, state FROM tasks WHERE task_id = ?`, taskID).
+		Scan(&have.consumer, &have.balance, &have.raw, &have.hash, &have.nonce, &have.state)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
@@ -227,7 +291,7 @@ func (r *Relayer) RegisterTask(ctx context.Context, taskID, consumerID string, b
 	case have.state == "failed":
 		return signer.Refusal("TASK_REGISTRATION_FAILED")
 	default:
-		return r.finishRegistration(ctx, taskID, have.raw, have.hash)
+		return r.finishRegistration(ctx, taskID, have.raw, have.hash, have.nonce)
 	}
 	rv, err := r.random(ctx)
 	if err != nil {
@@ -245,30 +309,37 @@ func (r *Relayer) RegisterTask(ctx context.Context, taskID, consumerID string, b
 	if err != nil {
 		return err
 	}
-	raw, hash, err := r.prepare(ctx, r.keys.Issuer, data)
+	if err := r.resendOpen(ctx); err != nil {
+		return err
+	}
+	floor, err := r.floor(ctx, `SELECT max(register_nonce) FROM tasks WHERE state = 'registering'`)
+	if err != nil {
+		return err
+	}
+	raw, hash, nonce, err := r.prepare(ctx, r.keys.Issuer, data, floor)
 	if err != nil {
 		return err
 	}
 	// Written before it is sent: a restart resends this transaction, never a new one.
-	if _, err := r.db.ExecContext(ctx, `INSERT INTO tasks (task_id, consumer_id, balance, r, commitment, register_raw, register_hash, state)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'registering')`, taskID, consumerID, balance, rv, c0.String(), hex.EncodeToString(raw), hex.EncodeToString(hash)); err != nil {
+	if _, err := r.db.ExecContext(ctx, `INSERT INTO tasks (task_id, consumer_id, balance, r, commitment, register_raw, register_hash, register_nonce, state)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'registering')`, taskID, consumerID, balance, rv, c0.String(), hex.EncodeToString(raw), hex.EncodeToString(hash), nonce); err != nil {
 		return err
 	}
-	return r.finishRegistration(ctx, taskID, hex.EncodeToString(raw), hex.EncodeToString(hash))
+	return r.finishRegistration(ctx, taskID, hex.EncodeToString(raw), hex.EncodeToString(hash), nonce)
 }
 
-func (r *Relayer) finishRegistration(ctx context.Context, taskID, rawHex, hashHex string) error {
+func (r *Relayer) finishRegistration(ctx context.Context, taskID, rawHex, hashHex string, nonce uint64) error {
 	raw, _ := hex.DecodeString(rawHex)
 	hash, _ := hex.DecodeString(hashHex)
-	rc, err := r.await(ctx, raw, hash)
-	if err != nil {
+	rc, err := r.await(ctx, raw, hash, r.keys.Issuer.Addr, nonce, 0)
+	if err != nil && !errors.Is(err, errDropped) {
 		return err
 	}
-	if rc == nil {
+	if rc == nil && err == nil {
 		return signer.Refusal("TASK_REGISTRATION_PENDING")
 	}
 	state := "registered"
-	if rc.Status != 1 {
+	if err != nil || rc.Status != 1 {
 		state = "failed"
 	}
 	if _, err := r.db.ExecContext(ctx, `UPDATE tasks SET state = ? WHERE task_id = ? AND state = 'registering'`, state, taskID); err != nil {
@@ -308,6 +379,10 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 	defer r.mu.Unlock()
 	if ev, done, err := r.resume(ctx, intent); done || err != nil {
 		return ev, err
+	}
+	now := r.clock()
+	if po.PaymentBinding.ValidBefore <= now {
+		return Evidence{}, signer.Refusal("ORDER_EXPIRED") // the Signer would refuse it: spend nothing on it
 	}
 	taskID := po.Intent.TaskID
 	var consumer, rv, cOldS, state string
@@ -367,7 +442,7 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 	if err != nil {
 		return Evidence{}, err
 	}
-	deadline := r.clock() + r.cfg.PolicyTTL
+	deadline := min(now+r.cfg.PolicyTTL, po.PaymentBinding.ValidBefore)
 	digest, err := PolicyDigest(r.cfg.ChainID, r.cfg.Contract, task, ih, amount, nullifier, cNew, deadline, epoch)
 	if err != nil {
 		return Evidence{}, err
@@ -380,14 +455,21 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 	if err != nil {
 		return Evidence{}, err
 	}
-	raw, hash, err := r.prepare(ctx, r.keys.Gas, data)
+	if err := r.resendOpen(ctx); err != nil {
+		return Evidence{}, err
+	}
+	floor, err := r.floor(ctx, `SELECT max(nonce) FROM reservations WHERE state = 'sent'`)
+	if err != nil {
+		return Evidence{}, err
+	}
+	raw, hash, nonce, err := r.prepare(ctx, r.keys.Gas, data, floor)
 	if err != nil {
 		return Evidence{}, err
 	}
 	// Written before it is sent: a restart resends this transaction, never a new one.
-	if _, err := r.db.ExecContext(ctx, `INSERT INTO reservations (intent_hash, task_id, amount, c_old, c_new, r_new, nullifier, raw_tx, tx_hash, state, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'sent', ?)`, intent, taskID, amount, cOld.String(), cNew.String(), rNew, nullifier.String(),
-		hex.EncodeToString(raw), hex.EncodeToString(hash), r.clock()); err != nil {
+	if _, err := r.db.ExecContext(ctx, `INSERT INTO reservations (intent_hash, task_id, amount, c_old, c_new, r_new, nullifier, raw_tx, tx_hash, nonce, deadline, state, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sent', ?)`, intent, taskID, amount, cOld.String(), cNew.String(), rNew, nullifier.String(),
+		hex.EncodeToString(raw), hex.EncodeToString(hash), nonce, deadline, now); err != nil {
 		return Evidence{}, err
 	}
 	if err := at("after-write"); err != nil {
@@ -402,8 +484,9 @@ func (r *Relayer) resume(ctx context.Context, intent string) (Evidence, bool, er
 	var ev Evidence
 	var rawHex, hashHex, state string
 	var block sql.NullInt64
-	err := r.db.QueryRowContext(ctx, `SELECT task_id, amount, raw_tx, tx_hash, state, block FROM reservations WHERE intent_hash = ?`, intent).
-		Scan(&ev.TaskID, &ev.Amount, &rawHex, &hashHex, &state, &block)
+	var nonce, deadline uint64
+	err := r.db.QueryRowContext(ctx, `SELECT task_id, amount, raw_tx, tx_hash, nonce, deadline, state, block FROM reservations WHERE intent_hash = ?`, intent).
+		Scan(&ev.TaskID, &ev.Amount, &rawHex, &hashHex, &nonce, &deadline, &state, &block)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ev, false, nil
 	} else if err != nil {
@@ -419,32 +502,46 @@ func (r *Relayer) resume(ctx context.Context, intent string) (Evidence, bool, er
 	}
 	raw, _ := hex.DecodeString(rawHex)
 	hash, _ := hex.DecodeString(hashHex)
-	rc, err := r.await(ctx, raw, hash)
-	if err != nil {
+	rc, err := r.await(ctx, raw, hash, r.keys.Gas.Addr, nonce, deadline)
+	if err != nil && !errors.Is(err, errDropped) {
 		return ev, true, err
 	}
-	if rc == nil {
+	if rc == nil && err == nil {
 		return ev, true, signer.Refusal("RESERVATION_PENDING") // unknown: never a second transaction
 	}
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return ev, true, err
+	tx, err2 := r.db.BeginTx(ctx, nil)
+	if err2 != nil {
+		return ev, true, err2
 	}
 	defer tx.Rollback()
-	if rc.Status != 1 {
-		if _, err := tx.ExecContext(ctx, `UPDATE reservations SET state = 'failed', block = ? WHERE intent_hash = ? AND state = 'sent'`, rc.BlockNumber, intent); err != nil {
+	if err != nil || rc.Status != 1 {
+		// Reverted, or never to be mined: nothing was spent, the task's state stays.
+		var at any
+		if rc != nil {
+			at = rc.BlockNumber
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE reservations SET state = 'failed', block = ? WHERE intent_hash = ? AND state = 'sent'`, at, intent); err != nil {
 			return ev, true, err
 		}
 		return ev, true, errors.Join(tx.Commit(), signer.Refusal("RESERVATION_FAILED"))
 	}
-	// Spent on chain: the task's state is the new one, in the same write.
-	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET balance = balance - (SELECT amount FROM reservations WHERE intent_hash = ?),
-		r = (SELECT r_new FROM reservations WHERE intent_hash = ?), commitment = (SELECT c_new FROM reservations WHERE intent_hash = ?)
-		WHERE task_id = ?`, intent, intent, intent, ev.TaskID); err != nil {
+	// Spent on chain: the task's state is the new one, in the same write,
+	// once only and only from the state this reservation spent.
+	res, err := tx.ExecContext(ctx, `UPDATE reservations SET state = 'reserved', block = ? WHERE intent_hash = ? AND state = 'sent'`, rc.BlockNumber, intent)
+	if err != nil {
 		return ev, true, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE reservations SET state = 'reserved', block = ? WHERE intent_hash = ? AND state = 'sent'`, rc.BlockNumber, intent); err != nil {
+	if n, _ := res.RowsAffected(); n != 1 {
+		return ev, true, errors.New("budget: the reservation was finished meanwhile")
+	}
+	res, err = tx.ExecContext(ctx, `UPDATE tasks SET balance = balance - (SELECT amount FROM reservations WHERE intent_hash = ?),
+		r = (SELECT r_new FROM reservations WHERE intent_hash = ?), commitment = (SELECT c_new FROM reservations WHERE intent_hash = ?)
+		WHERE task_id = ? AND commitment = (SELECT c_old FROM reservations WHERE intent_hash = ?)`, intent, intent, intent, ev.TaskID, intent)
+	if err != nil {
 		return ev, true, err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return ev, true, errors.New("budget: the task's state is not the one this reservation spent")
 	}
 	ev.BlockNumber = rc.BlockNumber
 	return ev, true, tx.Commit()
