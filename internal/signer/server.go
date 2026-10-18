@@ -62,14 +62,15 @@ func Serve(ctx context.Context, ln net.Listener, core *Core, log func(string)) e
 
 // ServeAll is the P2 Signer (P2-D1): the payment routes and, when ac is
 // not nil, the approval and enrollment routes on the same socket, both
-// cores on the one signer.db. Health is the payment's.
+// cores on the one signer.db. Health is the approvals': ready (payments
+// too) once a reservation verifier is configured, else approvals-only.
 func ServeAll(ctx context.Context, ln net.Listener, core *Core, ac *ApprovalCore, log func(string)) error {
 	if ac == nil {
 		return Serve(ctx, ln, core, log)
 	}
 	pay, appr := Handler(core, log), ApprovalsHandler(ac, log)
 	h := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if strings.HasPrefix(req.URL.Path, "/v1/approvals") || strings.HasPrefix(req.URL.Path, "/v1/enrollments/") {
+		if strings.HasPrefix(req.URL.Path, "/v1/approvals") || strings.HasPrefix(req.URL.Path, "/v1/enrollments/") || req.URL.Path == "/v1/health" {
 			appr.ServeHTTP(w, req)
 			return
 		}
@@ -319,7 +320,11 @@ func ApprovalsHandler(core *ApprovalCore, log func(string)) http.Handler {
 		mux.HandleFunc(route, off)
 	}
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, req *http.Request) {
-		answer(w, req, "health", &ApprovalReply{State: "approvals-only", Payment: "unavailable"}, nil)
+		h := &ApprovalReply{State: "approvals-only", Payment: "unavailable"}
+		if core.pays {
+			h = &ApprovalReply{State: "ready", Payment: "available"}
+		}
+		answer(w, req, "health", h, nil)
 	})
 	return callers(core.cfg, core.cfg.requestTimeout(), mux, func(w http.ResponseWriter, req *http.Request) {
 		answer(w, req, "caller", &ApprovalReply{}, Refusal("CALLER_NOT_ALLOWED"))

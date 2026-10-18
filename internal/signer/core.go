@@ -156,7 +156,12 @@ func NewCoreDB(ctx context.Context, cfg *Config, keys map[string]*secp256k1.Priv
 // payment Signer serves both; dir holds voice.key. Closing the payment
 // core closes the database.
 func (c *Core) Approvals(ctx context.Context, dir string, clock Clock) (*ApprovalCore, error) {
-	return NewApprovalCoreDB(ctx, c.cfg, c.db, dir, clock)
+	ac, err := NewApprovalCoreDB(ctx, c.cfg, c.db, dir, clock)
+	if err == nil {
+		_, off := c.res.(Unavailable)
+		ac.pays = !off
+	}
+	return ac, err
 }
 
 // migrateAttempts rebuilds a P1-b attempts table (delegation_id NOT NULL,

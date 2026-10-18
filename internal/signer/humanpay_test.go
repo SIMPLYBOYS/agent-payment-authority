@@ -357,9 +357,14 @@ func TestServeAll(t *testing.T) {
 		json.NewDecoder(res.Body).Decode(&m)
 		return res.StatusCode, m
 	}
-	if _, m := do("GET", "/v1/health", nil); m["state"] != "unlocked" {
+	if _, m := do("GET", "/v1/health", nil); m["state"] != "ready" || m["payment"] != "available" {
 		t.Fatalf("health %v", m)
 	}
+	ac.pays = false // as without a reservation verifier
+	if _, m := do("GET", "/v1/health", nil); m["state"] != "approvals-only" || m["payment"] != "unavailable" {
+		t.Fatalf("health without payments %v", m)
+	}
+	ac.pays = true
 	a := f.enroll("approver-a", nil)
 	order := f.orderA("500000")
 	_, c := do("POST", "/v1/approvals/challenge", ChallengeRequest{RequestID: "req-s1", ApprovalSessionID: sessionOf(order), Decision: "approve", Order: order, HostDeadline: f.now + 600})

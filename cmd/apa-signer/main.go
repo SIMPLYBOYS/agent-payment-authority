@@ -28,9 +28,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"golang.org/x/sys/unix"
@@ -113,7 +116,11 @@ func run(args []string, out io.Writer) error {
 	if ac != nil {
 		approvals = "; approvals on the same socket"
 	}
-	fmt.Fprintf(out, "apa-signer: serving on %s (reservation verification unavailable until P2: nothing is signed%s)\n", cfg.Socket, approvals)
+	reservations := "reservation verification unavailable: nothing is signed"
+	if cfg.Reservation != nil {
+		reservations = "reservations checked on chain " + cfg.Reservation.ChainID
+	}
+	fmt.Fprintf(out, "apa-signer: serving on %s (%s%s)\n", cfg.Socket, reservations, approvals)
 	return signer.ServeAll(ctx, ln, core, ac, func(line string) { fmt.Fprintln(out, "apa-signer:", line) })
 }
 
@@ -121,7 +128,8 @@ func run(args []string, out io.Writer) error {
 const recoveryTimeout = 60 * time.Second
 
 // assemble is the production assembly: the directory's configuration,
-// keys and DB, and the Unavailable reservation verifier, always.
+// keys and DB; reservations are checked on the configured chain, and
+// without a reservation section nothing is signed (Unavailable).
 func assemble(dir string, passphrase func() ([]byte, error), clock signer.Clock) (*signer.Core, *signer.Config, error) {
 	if err := private(dir); err != nil {
 		return nil, nil, err
@@ -155,7 +163,13 @@ func assemble(dir string, passphrase func() ([]byte, error), clock signer.Clock)
 	// The recovery of attempts left accepted runs before serving, bounded.
 	ctx, cancel := context.WithTimeout(context.Background(), recoveryTimeout)
 	defer cancel()
-	core, err := signer.NewCore(ctx, cfg, keys, filepath.Join(dir, "signer.db"), clock, signer.Unavailable{})
+	var res signer.ReservationVerifier = signer.Unavailable{}
+	if r := cfg.Reservation; r != nil { // P2: reservations checked on chain (ParseConfig checked the section)
+		chain, _ := strconv.ParseUint(r.ChainID, 10, 64)
+		contract, _ := eth.ParseAddress(r.BudgetContract)
+		res = &budget.Verifier{RPC: eth.NewClient(r.RPC), ChainID: chain, Contract: contract, Confirmations: r.Confirmations}
+	}
+	core, err := signer.NewCore(ctx, cfg, keys, filepath.Join(dir, "signer.db"), clock, res)
 	return core, cfg, err
 }
 

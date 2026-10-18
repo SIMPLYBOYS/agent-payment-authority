@@ -1,9 +1,10 @@
 package main
 
 // The production assembly (design 7): with a valid configuration, unlocked
-// test keys and a valid order under a delegation, it still signs nothing,
-// because its reservation verifier is Unavailable until P2. The keys are
-// one-time test keys made here; nothing is sent anywhere.
+// test keys and a valid order under a delegation, it signs nothing without
+// a reservation section (Unavailable), and with one checks the reservation
+// on chain (P2). The keys are one-time test keys made here; nothing is sent
+// anywhere (the RPC configured is a closed local port).
 
 import (
 	"context"
@@ -197,5 +198,50 @@ func TestKeygenRefuses(t *testing.T) {
 				t.Fatalf("%s: a file was written", name)
 			}
 		})
+	}
+}
+
+// With a reservation section the assembly checks reservations on its chain
+// (budget.Verifier), no longer Unavailable; a bad section is refused.
+func TestAssemblyChecksReservationsOnChain(t *testing.T) {
+	dir, a := signerDir(t)
+	path := filepath.Join(dir, "signer.json")
+	raw, _ := os.ReadFile(path)
+	write := func(r map[string]any) {
+		var cfg map[string]any
+		json.Unmarshal(raw, &cfg)
+		cfg["reservation"] = r
+		b, _ := json.Marshal(cfg)
+		os.WriteFile(path, b, 0o600)
+	}
+	good := func() map[string]any {
+		return map[string]any{"rpc": "http://127.0.0.1:1", "chain_id": signertest.Chain, "budget_contract": "0x" + strings.Repeat("4", 40), "confirmations": 1}
+	}
+	for name, change := range map[string]func(map[string]any){
+		"another scheme":     func(r map[string]any) { r["rpc"] = "file:///tmp/x" },
+		"credentials in URL": func(r map[string]any) { r["rpc"] = "http://u:p@127.0.0.1:1" },
+		"an unknown chain":   func(r map[string]any) { r["chain_id"] = "1" },
+		"no confirmations":   func(r map[string]any) { r["confirmations"] = 0 },
+		"not an address":     func(r map[string]any) { r["budget_contract"] = "0x12" },
+	} {
+		r := good()
+		change(r)
+		write(r)
+		if _, _, err := assemble(dir, passphrase, func() uint64 { return t0 }); err == nil || !strings.Contains(err.Error(), "reservation") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	write(good())
+	core, _, err := assemble(dir, passphrase, func() uint64 { return t0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer core.Close()
+	order := signertest.Order{Consumer: "consumer-a", Agent: "agent-a", Wallet: "wallet-a", From: a, PayTo: signertest.Merchant, Amount: "500000",
+		N: 1, Now: t0, Window: 60}.Raw()
+	r, err := core.Sign(bg, signer.SignRequest{RequestID: "request-0000000001",
+		Authorization: signer.Authorization{Method: "delegation", DelegationID: "dlg-a", DelegationVersion: 1}, Order: order})
+	if err == nil || err.Error() != "RESERVATION_MISSING" || r.Authorization != nil {
+		t.Fatalf("no reservation: %+v %v", r, err)
 	}
 }

@@ -171,8 +171,8 @@ func (a *api) approvalList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	signerState := "unavailable"
-	if ans := a.approve.signer.Health(); ans.Kind == signerclient.KindOK && ans.Reply.State == "approvals-only" {
-		signerState = "approvals-only"
+	if ans := a.approve.signer.Health(); ans.Kind == signerclient.KindOK && (ans.Reply.State == "approvals-only" || ans.Reply.State == "ready") {
+		signerState = ans.Reply.State // ready: payments are signed too (P2)
 	}
 	reply(w, http.StatusOK, map[string]any{"consumer_id": consumer, "served_at": a.clock(), "approvals": items, "sources": a.approve.sources(),
 		"signer": signerState, "payment_capability": paycontract.PaymentNotEnabled})

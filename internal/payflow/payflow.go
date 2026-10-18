@@ -14,6 +14,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -56,10 +58,50 @@ type ShopAnswer struct {
 	Body     []byte
 }
 
+// HTTPShop is the shop over HTTP: a GET with the PAYMENT-SIGNATURE. A body
+// over MaxBody is no answer (its hash would not be the content's). Client
+// is required, with a timeout.
+type HTTPShop struct{ Client *http.Client }
+
+// MaxBody bounds a delivered resource.
+const MaxBody = 1 << 20
+
+func (h HTTPShop) Pay(ctx context.Context, url, paymentSignature string) (ShopAnswer, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return ShopAnswer{}, err
+	}
+	req.Header.Set(x402.HeaderPaymentSignature, paymentSignature)
+	resp, err := h.Client.Do(req)
+	if err != nil {
+		return ShopAnswer{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxBody+1))
+	if err != nil {
+		return ShopAnswer{}, err
+	} else if len(body) > MaxBody {
+		return ShopAnswer{}, errors.New("payflow: the shop's answer is over MaxBody")
+	}
+	ans := ShopAnswer{Status: resp.StatusCode, Body: body}
+	if v := resp.Header.Get(merchant.HeaderPaymentResponse); v != "" {
+		var r merchant.SettlementResponse
+		if x402.Decode(v, &r) == nil {
+			ans.Response = &r
+		}
+	}
+	return ans, nil
+}
+
 // Chain is the Reconciler: an authorization's state at confirmed depth.
 type Chain interface {
 	Status(ctx context.Context, a reconcile.Authorization) (reconcile.Result, error)
 }
+
+var (
+	_ Relayer = (*budget.Relayer)(nil)
+	_ Chain   = reconcile.Token{}
+)
 
 // Worker moves payments. Margin is the seconds before valid_before after
 // which nothing new is started for a payment (a reservation, a signature):

@@ -91,11 +91,11 @@ func (c *Client) Pay(req store.PaymentRequest) (Result, error) {
 	if err != nil {
 		return Result{Attempt: a}, err
 	}
-	status, r, err := c.call("POST", "/v1/sign", body)
+	status, r, err := c.call(context.Background(), "POST", "/v1/sign", body)
 	if err == nil && status == http.StatusConflict && r.State == "" {
 		// Refused with no attempt in the reply: ask whether one exists.
 		code := r.Error
-		if status, r, err = c.call("GET", "/v1/attempts?request_id="+url.QueryEscape(a.RequestID), nil); err == nil && status == http.StatusNotFound {
+		if status, r, err = c.call(context.Background(), "GET", "/v1/attempts?request_id="+url.QueryEscape(a.RequestID), nil); err == nil && status == http.StatusNotFound {
 			return c.record(a, "rejected", "", code, nil)
 		}
 	}
@@ -109,11 +109,35 @@ func (c *Client) Resume(consumerID, requestID string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	status, r, err := c.call("GET", "/v1/attempts?request_id="+url.QueryEscape(a.RequestID), nil)
+	status, r, err := c.call(context.Background(), "GET", "/v1/attempts?request_id="+url.QueryEscape(a.RequestID), nil)
 	if err == nil && status == http.StatusNotFound && (a.State == "requested" || a.State == "unknown" || a.State == "rejected") {
 		return c.record(a, "rejected", "", "ATTEMPT_UNKNOWN", nil) // the Signer never accepted it
 	}
 	return c.settle(a, status, r, err)
+}
+
+// Sign is the P2 payment worker's call (docs/commercial-p2-host.md 12.3):
+// the request as the worker made it, under its own request ID, with the
+// reservation and a delegation or an approval ID; no ledger (the worker's
+// payments row is the record, the reservation on chain the Signer's
+// check). A refusal is a signer.Refusal; no readable answer, or a 503
+// (SIGNER_ERROR, SIGNER_TIMEOUT), is a plain error, asked again with the
+// same request ID.
+func (c *Client) Sign(ctx context.Context, req signer.SignRequest) (signer.Reply, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return signer.Reply{}, err
+	}
+	status, r, err := c.call(ctx, "POST", "/v1/sign", body)
+	switch {
+	case err != nil:
+		return signer.Reply{}, err
+	case status == http.StatusOK:
+		return r, nil
+	case r.Error != "" && (status == http.StatusConflict || status == http.StatusNotFound || status == http.StatusForbidden || status == http.StatusBadRequest):
+		return r, signer.Refusal(r.Error)
+	}
+	return signer.Reply{}, fmt.Errorf("signer: %d %s", status, r.Error)
 }
 
 // Abandon gives up consumerID's request before it is signed.
@@ -130,7 +154,7 @@ func (c *Client) Abandon(consumerID, requestID string) (Result, error) {
 		}
 		a, attempt = res.Attempt, res.Attempt.SignerAttemptID
 	}
-	status, r, err := c.call("POST", "/v1/attempts/"+url.PathEscape(attempt)+"/abandon", nil)
+	status, r, err := c.call(context.Background(), "POST", "/v1/attempts/"+url.PathEscape(attempt)+"/abandon", nil)
 	return c.settle(a, status, r, err)
 }
 
@@ -173,8 +197,8 @@ func (c *Client) record(a store.PaymentAttempt, state, attemptID, code string, a
 	return Result{Attempt: updated, Authorization: auth}, nil
 }
 
-func (c *Client) call(method, path string, body []byte) (int, signer.Reply, error) {
-	req, err := http.NewRequest(method, "http://signer"+path, bytes.NewReader(body))
+func (c *Client) call(ctx context.Context, method, path string, body []byte) (int, signer.Reply, error) {
+	req, err := http.NewRequestWithContext(ctx, method, "http://signer"+path, bytes.NewReader(body))
 	if err != nil {
 		return 0, signer.Reply{}, err
 	}

@@ -127,6 +127,7 @@ type ApprovalCore struct {
 	dir    string   // the Signer's directory: the voice template key's
 	voice  *sidecar // V1, when configured
 	ownsDB bool     // opened by NewApprovalCore (not the shared database)
+	pays   bool     // P2: the same process signs payments (a reservation verifier is configured)
 }
 
 // challengeFailures closes a challenge after this many refused assertions.

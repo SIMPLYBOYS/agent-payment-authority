@@ -549,17 +549,11 @@ func TestPaymentSignatureTheShopReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, _ := http.NewRequest("GET", offer.URL, nil)
-	req.Header.Set(x402.HeaderPaymentSignature, sig)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
+	ans, err := HTTPShop{Client: srv.Client()}.Pay(bg, offer.URL, sig)
 	var body struct{ Error string }
-	json.NewDecoder(resp.Body).Decode(&body)
-	if resp.StatusCode != 402 || body.Error != "M1_PAYMENT_UNAVAILABLE" {
-		t.Fatalf("shop: %d %s", resp.StatusCode, body.Error)
+	json.Unmarshal(ans.Body, &body)
+	if err != nil || ans.Status != 402 || body.Error != "M1_PAYMENT_UNAVAILABLE" || ans.Response != nil {
+		t.Fatalf("shop: %+v %v", ans, err)
 	}
 	var pp x402.PaymentPayload
 	if err := x402.Decode(sig, &pp); err != nil {
@@ -695,5 +689,29 @@ func TestSettledThenDelivered(t *testing.T) {
 	w.shop.answers = []ShopAnswer{verify}
 	if p, _ := w.step("po-2"); p.State != "needs_review" || p.Code != "DELIVERY_FAILED" {
 		t.Fatalf("402 once settled: %+v", p)
+	}
+}
+
+// HTTPShop reads PAYMENT-RESPONSE and the body; a body over MaxBody is no answer.
+func TestHTTPShop(t *testing.T) {
+	size := 10
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(x402.HeaderPaymentSignature) != "sig" {
+			w.WriteHeader(400)
+			return
+		}
+		h, _ := x402.Encode(merchant.SettlementResponse{Success: true, Transaction: "0x" + strings.Repeat("2", 64), Network: "eip155:84532"})
+		w.Header().Set(merchant.HeaderPaymentResponse, h)
+		w.Write([]byte(strings.Repeat("x", size)))
+	}))
+	defer srv.Close()
+	shop := HTTPShop{Client: srv.Client()}
+	ans, err := shop.Pay(bg, srv.URL, "sig")
+	if err != nil || ans.Status != 200 || ans.Response == nil || !ans.Response.Success || string(ans.Body) != "xxxxxxxxxx" {
+		t.Fatalf("%+v %v", ans, err)
+	}
+	size = MaxBody + 1
+	if _, err := shop.Pay(bg, srv.URL, "sig"); err == nil {
+		t.Fatal("a body over MaxBody was an answer")
 	}
 }

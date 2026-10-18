@@ -1238,7 +1238,7 @@ function renderA2() {
     const p = item.purchase, ap = p.approval, d = item.delegation;
     const mode = el("p", "approval-mode");
     const other = AP.recordTag(p, "device");
-    mode.append(el("span", "approval-tag", other ? other[0] : "本人核准"), other ? other[1] : AP.sourceText(lastA2 && lastA2.sources) + (lastA2 && lastA2.signer !== "approvals-only" ? "・Signer 目前無法連線" : ""));
+    mode.append(el("span", "approval-tag", other ? other[0] : "本人核准"), other ? other[1] : AP.sourceText(lastA2 && lastA2.sources) + (lastA2 && lastA2.signer !== "approvals-only" && lastA2.signer !== "ready" ? "・Signer 目前無法連線" : ""));
     parts.push(mode);
     const pending = ap.state === "pending";
     const res = AP.decidedText(ap.state, p) || closedResult(A2_RESULT, ap.state, p);

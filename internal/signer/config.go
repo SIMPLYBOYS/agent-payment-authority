@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"regexp"
 	"slices"
 
@@ -35,6 +36,16 @@ type Asset struct {
 	AssetContract string `json:"asset_contract"`
 	EIP712Name    string `json:"eip712_name"`
 	EIP712Version string `json:"eip712_version"`
+}
+
+// Reservation is where a payment's Z2 reservation is checked (P2,
+// docs/commercial-p2-host.md 6): the chain's RPC, the budget contract and
+// the confirmations a reservation needs before anything is signed.
+type Reservation struct {
+	RPC            string `json:"rpc"`
+	ChainID        string `json:"chain_id"`
+	BudgetContract string `json:"budget_contract"`
+	Confirmations  uint64 `json:"confirmations"`
 }
 
 // Delegation is a standing delegation: the administrator's terms for
@@ -91,7 +102,8 @@ type Config struct {
 	Delegations      []Delegation `json:"delegations"`
 	Approvers        []Approver   `json:"approvers,omitempty"` // A2: serve-approvals only
 	WebAuthn         *WebAuthn    `json:"webauthn,omitempty"`
-	Voice            *Voice       `json:"voice,omitempty"` // V1: approvals ask for a voice challenge
+	Voice            *Voice       `json:"voice,omitempty"`       // V1: approvals ask for a voice challenge
+	Reservation      *Reservation `json:"reservation,omitempty"` // P2: without it nothing is signed
 
 	hash string // sha256 of the canonical configuration, in each snapshot
 }
@@ -151,6 +163,18 @@ func ParseConfig(raw []byte) (*Config, error) {
 	}
 	if err := c.checkApprovers(wallets); err != nil {
 		return nil, err
+	}
+	if r := c.Reservation; r != nil {
+		u, err := url.Parse(r.RPC)
+		_, ok := units(contracts.Amount(r.ChainID))
+		switch {
+		case err != nil || u.Scheme != "http" && u.Scheme != "https" || u.Host == "" || u.User != nil:
+			return nil, errors.New("config: reservation rpc is an http(s) URL")
+		case !ok || !slices.ContainsFunc(c.Assets, func(a Asset) bool { return a.ChainID == r.ChainID }):
+			return nil, errors.New("config: reservation chain_id is a registered asset's chain")
+		case !addressPattern.MatchString(r.BudgetContract) || r.Confirmations == 0 || r.Confirmations > 64:
+			return nil, errors.New("config: reservation budget_contract and 1 to 64 confirmations")
+		}
 	}
 	if c.Voice != nil {
 		if err := c.Voice.check(&c); err != nil {

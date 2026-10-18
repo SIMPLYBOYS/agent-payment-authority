@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/payflow"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer/signertest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
@@ -352,5 +353,32 @@ func TestUnknownSaveFailure(t *testing.T) {
 	}
 	if r, err := c.Pay(pay("po-1")); err != nil || r.Attempt.RequestID != id || r.Attempt.State != "signed" || len(e.l.rows) != 1 {
 		t.Fatalf("pay after: %+v %v", r, err)
+	}
+}
+
+// Sign, the payment worker's call: signed, the same attempt for the same
+// request ID, a refusal as a signer.Refusal, no Signer as a plain error.
+func TestSignForTheWorker(t *testing.T) {
+	e := newEnvChecking(t, func(string) bool { return true })
+	c := New(e.socket, nil)
+	var _ payflow.Signer = c
+	req := func(id, po string) signer.SignRequest {
+		return signer.SignRequest{RequestID: id, Order: e.l.orders[po], Reservation: json.RawMessage(`{}`),
+			Authorization: signer.Authorization{Method: "delegation", DelegationID: "dlg-a", DelegationVersion: 1}}
+	}
+	if _, err := c.Sign(bg, req("pay-w1", "po-1")); err == nil || errors.As(err, new(signer.Refusal)) {
+		t.Fatalf("no Signer: %v", err)
+	}
+	e.listen()
+	r, err := c.Sign(bg, req("pay-w1", "po-1"))
+	if err != nil || r.State != "signed" || r.Authorization == nil {
+		t.Fatalf("sign: %+v %v", r, err)
+	}
+	if again, err := c.Sign(bg, req("pay-w1", "po-1")); err != nil || again.Authorization.Signature != r.Authorization.Signature || again.AttemptID != r.AttemptID {
+		t.Fatalf("again: %+v %v", again, err)
+	}
+	var ref signer.Refusal
+	if _, err := c.Sign(bg, req("pay-w2", "po-2")); !errors.As(err, &ref) || ref == "" {
+		t.Fatalf("over the per-payment cap: %v", err)
 	}
 }
