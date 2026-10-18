@@ -177,3 +177,44 @@ request_purchase ─→ Store：POLICY_DECIDED
 6. **H6 本機端到端**：在 anvil 上跑 §1 列出的反例與一條 Allow、一條 Ask 的完整付款，整理證據。
 
 H6 需要真的 Signer 與付款錢包，要等 H-D6 的金鑰建立好才能開始；H1 到 H5 不需要。
+
+## 12 進度
+
+### 12.1 H1 Store（schema 7）
+
+- **事件**：
+  - pay 系列新增 8 個付款事件：`BUDGET_RESERVED`、`PAYMENT_SIGNED`、`PAYMENT_SUBMITTED`、`PAYMENT_SETTLED`、`PAYMENT_NOT_SETTLED`、`PAYMENT_NEEDS_REVIEW`、`RESOURCE_DELIVERED`、`RECEIPT_ISSUED`。
+  - payload 新增 pay 系列專用的 `payment` 紀錄：預留的方法、金額、交易與區塊；結算的交易與區塊；交付內容的 SHA-256；收據 ID。每種事件只帶它該帶的欄位，所有欄位都要有，也不能多帶。
+  - 原因代碼分兩組：
+    - `PAYMENT_NOT_SETTLED`（沒有花錢）：`RESERVE_FAILED`、`NOT_PAID_EXPIRED`；
+    - `PAYMENT_NEEDS_REVIEW`：`RESERVED_NOT_PAID`、`NOT_SETTLED_EXPIRED`、`VERIFICATION_FAILED`、`RECONCILE_NEEDS_REVIEW`、`DELIVERY_FAILED`。
+  - M1 的事件一律不接受 `payment`；`schemas/m1.schema.json` 也標明它在 M1 永遠不會出現。
+- **順序規則**（`paycontract.ValidateEventOrder`）：
+  - 只有 Allow（委派）或已核准並發出 webauthn grant 的請購可以預留；模擬核准的 grant 永遠不會付款。
+  - 預留的方法必須是這張請購的授權方式；task 結束後不能再預留。
+  - 預留 → 簽名 → 送出 → 結算 → 交付 → 收據，各一次、依序進行。已經在進行中的付款，在 task 被取消後仍可走完。
+  - `NOT_SETTLED` 只能結束一筆從未預留的付款；`NEEDS_REVIEW` 用在「已預留但未結算」或「已結算但未交付」（`DELIVERY_FAILED`）的付款；結束之後不能再有任何付款事件。
+- **`payments` 表**：
+  - 以 `intent_hash` 為鍵，一張請購最多一列；欄位有方法、grant 參照（Signer 的委派 `id@version`，或 Signer 的核准 ID）、金額、狀態與原因代碼、預留證據、簽出的授權、結算交易與區塊、商店的 `PAYMENT-RESPONSE`。
+  - CHECK 規定每個狀態必須有的欄位。
+- **`receipts` 表**：已交付的付款各有一張收據，記錄 tx#1、tx#2、`PAYMENT-RESPONSE`、內容的 SHA-256 與大小，不存內容本身。
+- **Store 方法**：
+  - `StartPayment`：Allow 走委派；Ask 必須經本人核准，而且是 webauthn。其他一律拒絕且什麼都不寫：別人的 task、已結束的 task、Deny、尚未核准的 Ask、模擬核准、沒有 Signer 委派、憑證不再有效。
+  - 之後依序是 `PaymentReserved`（同一筆交易裡扣減 task 的剩餘預算）、`PaymentSigned`、`PaymentSubmitted`、`PaymentUnknown`、`PaymentSettled`、`PaymentDelivered`（同時開收據）、`PaymentFailed`，另有 `PaymentsIn`、`PaymentOf`。
+  - 每一步的狀態和事件都在同一筆交易裡寫入。同一步驟、同樣的值再呼叫一次，回傳現況；值不同回 `IDEMPOTENCY_CONFLICT`；不合法的轉移回 `INVALID_PAYMENT_TRANSITION`。
+- **檢視**：`PurchaseView.payment` 從付款事件推導，包含 `status`（即 `payment_status`）、狀態、原因代碼、tx#1、tx#2、內容 hash、收據 ID。原始決策（`decision`）仍然不改寫：它的 `payment_status` 是決策當下的合約欄位。
+- **恢復檢查**（schema 7）：
+  - 每筆付款的狀態要和它的付款事件一致；有付款事件就一定要有對應的付款列；方法要符合請購的授權。
+  - pay 系列 task 的剩餘預算，必須等於初始預算減去已預留的總額。
+  - 每筆已交付的付款恰好有一張收據。
+- **升級**：schema 6 → 7 只新增兩張表，沿用 `--upgrade-db`（先驗證、再備份）。
+- **驗證**：
+  - Store 新增測試：
+    - `TestPaymentAllowPaid`：每一步各做兩次，第二次在重啟之後，都回傳同一個狀態；事件順序、預算、收據、檢視都正確；不能倒退；別的 consumer 讀不到。
+    - `TestPaymentStepConflict`、`TestPaymentWebAuthnAsk`（模擬核准被拒）、`TestPaymentStartRefusals`。
+    - `TestPaymentFailures`：4 種結束方式各自的狀態、`payment_status` 與預算。
+    - `TestPaymentRecoveryRefuses`：狀態與事件不符、預算沒扣、收據被刪，都被恢復檢查擋下。
+    - `TestUpgradeSchema6`。
+  - paycontract 新增 `TestPaymentEventOrder`（21 種順序）、`TestPaymentEventShape`（20 種 payload）、`TestM1RefusesPaymentRecord`。
+  - 既有測試只改了 schema 版本與升級的輔助函式（新增 `toSchema6`）。
+  - `go test -race` 通過。突變 14 項，14／14 KILLED（`local-mutations.py "P2 H1" --all`，先跑未突變的基準）。

@@ -35,8 +35,9 @@ import (
 // (docs/commercial-transaction-flow.md section 10); 4 adds payment_attempts
 // (docs/commercial-p1b-design.md 6.4); 5 lets grants mirror a
 // Signer-verified webauthn decision and adds approval_attempts
-// (docs/commercial-human-approval-design.md 6.2).
-const schemaVersion = 6
+// (docs/commercial-human-approval-design.md 6.2); 6 adds apa.pay.v2 (C2b);
+// 7 adds P2's payments and receipts (docs/commercial-p2-host.md 4).
+const schemaVersion = 7
 const defaultDeadline = 30 // seconds an Ask waits for approval
 
 // Clock is the trusted host clock in Unix seconds; never a caller's value.
@@ -463,7 +464,7 @@ func (s *Store) migrate(upgrade bool) error {
 	switch v {
 	case schemaVersion:
 	case 0:
-	case 1, 2, 3, 4, 5:
+	case 1, 2, 3, 4, 5, 6:
 		if !upgrade {
 			return upgradeRequired(s.path, v)
 		}
@@ -475,7 +476,7 @@ func (s *Store) migrate(upgrade bool) error {
 		return fmt.Errorf("journal_mode WAL not set (%q, %v)", mode, err)
 	}
 	switch v {
-	case 1, 2, 3, 4, 5:
+	case 1, 2, 3, 4, 5, 6:
 		return s.upgradeFrom(v)
 	case 0:
 		return s.schemaTx(func(tx *sql.Tx) error {
@@ -486,6 +487,9 @@ func (s *Store) migrate(upgrade bool) error {
 				return err
 			}
 			if err := schema6(tx); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(schema7); err != nil {
 				return err
 			}
 			_, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion))
@@ -679,11 +683,16 @@ func (s *Store) upgradeFrom(from int) error {
 		if err := tx.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != from {
 			return fmt.Errorf("schema changed during the upgrade (%d, %v)", v, err)
 		}
-		ddl := map[int]string{1: runsSchema + schema3 + schema4 + schema5, 2: schema3 + schema4 + schema5, 3: schema4 + schema5, 4: schema5, 5: ""}[from]
+		ddl := map[int]string{1: runsSchema + schema3 + schema4 + schema5, 2: schema3 + schema4 + schema5, 3: schema4 + schema5, 4: schema5, 5: "", 6: ""}[from]
 		if _, err := tx.Exec(ddl); err != nil {
 			return err
 		}
-		if err := schema6(tx); err != nil {
+		if from < 6 {
+			if err := schema6(tx); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(schema7); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {

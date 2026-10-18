@@ -202,8 +202,18 @@ func TestPaymentSchemaChecks(t *testing.T) {
 // approval_attempts.
 // toSchema5 turns the current file into schema 5 as A2 wrote it: schema 6
 // only added the credential tables and widened three CHECKs.
+// toSchema6 turns the current file into schema 6: schema 7 only added
+// payments and receipts.
+func toSchema6(t *testing.T, path string) {
+	t.Helper()
+	if _, err := rawDB(t, path).Exec(`DROP TABLE receipts; DROP TABLE payments; PRAGMA user_version = 6`); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func toSchema5(t *testing.T, path string) {
 	t.Helper()
+	toSchema6(t, path)
 	tx, err := rawDB(t, path).Begin() // rawDB has foreign keys off
 	if err != nil {
 		t.Fatal(err)

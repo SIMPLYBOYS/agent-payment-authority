@@ -255,7 +255,7 @@ func TestUpgradeSchema5(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Close()
-	if userVersion(t, e.path) != 6 || fingerprint(t, e.path) != want {
+	if userVersion(t, e.path) != schemaVersion || fingerprint(t, e.path) != want {
 		t.Fatal("the upgrade changed the data or the version")
 	}
 	for _, table := range []string{"credential_challenges", "credential_verifications", "credential_status_seen"} {

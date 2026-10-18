@@ -872,6 +872,8 @@ type PurchaseView struct {
 	Approval               *ApprovalView            `json:"approval,omitempty"`      // apa.pay.v1 Asks: the approval session and its grant
 	// apa.pay.v2: the purchase's verification record, as its CREDENTIAL_VERIFIED event holds it.
 	Credential *contracts.CredentialCheck `json:"credential,omitempty"`
+	// P2: the purchase's payment, as its payment events record it; absent before any.
+	Payment *PaymentView `json:"payment,omitempty"`
 }
 
 // ApprovalView is an apa.pay.v1 Ask's approval session as stored, and its
@@ -938,6 +940,9 @@ func (t *taskTx) view(p *purchaseRow) PurchaseView {
 		case slices.Contains(closingEvents, e.EventType) && e.Payload.Decision != nil:
 			v.ClosedReason = e.Payload.Decision.Reason
 		}
+	}
+	if t.pay() {
+		v.Payment = t.paymentView(k.PO)
 	}
 	if ss := p.Session; ss != nil {
 		v.DeadlineAt = ss.ExpiresAt

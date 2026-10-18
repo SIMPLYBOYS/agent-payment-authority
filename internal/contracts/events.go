@@ -28,6 +28,20 @@ type EventPayload struct {
 	AuthorizationMethod string           `json:"authorization_method,omitempty"`
 	SignerApprovalID    string           `json:"signer_approval_id,omitempty"` // apa.pay.v1, A2: the Signer's verified decision
 	Credential          *CredentialCheck `json:"credential,omitempty"`         // apa.pay.v2 (C2): CREDENTIAL_VERIFIED only
+	Payment             *PaymentRecord   `json:"payment,omitempty"`            // pay family, P2: a payment event's record
+}
+
+// PaymentRecord is what a P2 payment event records (docs/commercial-p2-host.md
+// 4): the reservation's method, amount and transaction (tx#1), the
+// settlement's transaction (tx#2), the delivered content's hash, the
+// receipt. internal/paycontract says which event carries which.
+type PaymentRecord struct {
+	Method        string `json:"method,omitempty"`
+	Amount        Amount `json:"amount,omitempty"`
+	TxHash        string `json:"tx_hash,omitempty"`
+	Block         uint64 `json:"block,omitempty"`
+	ContentSHA256 string `json:"content_sha256,omitempty"`
+	ReceiptID     string `json:"receipt_id,omitempty"`
 }
 
 // CredentialCheck is apa.pay.v2's record of one purchase's BBS+ credential
@@ -95,7 +109,7 @@ func (r *Registry) ValidateEvent(e AuditEvent, order *PurchaseOrder) error {
 	if e.Payload.Code != "" && !ids(e.Payload.Code) {
 		return fmt.Errorf("invalid event code")
 	}
-	if p := e.Payload; p.DelegationID != "" || p.ApprovalSessionID != "" || p.GrantID != "" || p.AuthorizationMethod != "" || p.SignerApprovalID != "" || p.Credential != nil {
+	if p := e.Payload; p.DelegationID != "" || p.ApprovalSessionID != "" || p.GrantID != "" || p.AuthorizationMethod != "" || p.SignerApprovalID != "" || p.Credential != nil || p.Payment != nil {
 		return fmt.Errorf("delegation, approval session, grant and credential fields belong to the pay family, not M1")
 	}
 	if e.EventType == "SYSTEM_READY" {

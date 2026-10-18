@@ -798,6 +798,33 @@ MUTATIONS = [
      'if l.LogIndex == u.LogIndex+1 && !l.Removed', 'if l.LogIndex+0*u.LogIndex >= 0 && !l.Removed', 'TestPairing'),
     ('P2 reconcile: a partial record is reconciled', 'internal/reconcile/reconcile.go',
      'if a.ValidBefore == 0 || a.From == (eth.Address{}) || a.Nonce == (eth.Bytes32{}) {', 'if false && (a.ValidBefore == 0 || a.From == (eth.Address{}) || a.Nonce == (eth.Bytes32{})) {', 'TestStatusRefusesAPartialRecord'),
+    # P2 Host H1 (docs/commercial-p2-host.md 4): payment events and the Store's payments.
+    ('P2 H1: an unpayable purchase is reserved', 'internal/paycontract/events.go',
+     'payable := method == "delegation" || method == "webauthn"', 'payable := method == "delegation" || method == "webauthn" || true', 'TestPaymentEventOrder'),
+    ("P2 H1: a reservation under another method", 'internal/paycontract/events.go',
+     'if e.Payload.Payment.Method != method {', 'if false && e.Payload.Payment.Method != method {', 'TestPaymentEventOrder'),
+    ('P2 H1: a reservation after the task ended', 'internal/paycontract/events.go',
+     'if !payable || last != "" || st.stopped {', 'if !payable || last != "" {', 'TestPaymentEventOrder'),
+    ('P2 H1: payment steps out of order', 'internal/paycontract/events.go',
+     'if last != after[t] {', 'if false && last != after[t] {', 'TestPaymentEventOrder'),
+    ('P2 H1: NOT_SETTLED after a reservation', 'internal/paycontract/events.go',
+     '\t\tif !payable || last != "" {\n', '\t\tif !payable {\n', 'TestPaymentEventOrder'),
+    ('P2 H1: a reservation of another amount', 'internal/paycontract/events.go',
+     'case r.Amount != "" && (order == nil || r.Amount != order.PaymentBinding.Amount):', 'case false && r.Amount != "" && (order == nil || r.Amount != order.PaymentBinding.Amount):', 'TestPaymentEventShape'),
+    ('P2 H1: a reservation does not deduct the budget', 'internal/store/paid.go',
+     'left, err := subtract(t.row.BudgetRemaining, p.Amount)', 'left, err := subtract(t.row.BudgetRemaining, "0"+p.Amount[:0])', 'TestPaymentAllowPaid'),
+    ("P2 H1: a payment's state is not checked against its events", 'internal/store/paid.go',
+     'case last[r.po] != lastPaymentEvent[r.state]:', 'case false && last[r.po] != lastPaymentEvent[r.state]:', 'TestPaymentRecoveryRefuses'),
+    ('P2 H1: a missing receipt is not noticed', 'internal/store/paid.go',
+     '\tif n > 0 {\n\t\treturn &CorruptError{Check: "payment", Detail: "a receipt', '\tif false && n > 0 {\n\t\treturn &CorruptError{Check: "payment", Detail: "a receipt', 'TestPaymentRecoveryRefuses'),
+    ('P2 H1: a simulated grant pays', 'internal/store/paid.go',
+     'if m != "webauthn" || !signer.Valid {', 'if false && (m != "webauthn" || !signer.Valid) {', 'TestPaymentWebAuthnAsk'),
+    ('P2 H1: a step replayed with other values', 'internal/store/paid.go',
+     'if have.String != fmt.Sprint(v) {', 'if false && have.String != fmt.Sprint(v) {', 'TestPaymentStepConflict'),
+    ('P2 H1: a payment starts after the task ended', 'internal/store/paid.go',
+     'return e.EventType == "TASK_CANCELLED" || e.EventType == "TASK_TIMED_OUT"\n', 'return false && (e.EventType == "TASK_CANCELLED" || e.EventType == "TASK_TIMED_OUT")\n', 'TestPaymentStartRefusals'),
+    ('P2 H1: paid and not delivered reads as needs review', 'internal/store/paid.go',
+     '\t\tif code == "DELIVERY_FAILED" {\n\t\t\treturn "paid"', '\t\tif false && code == "DELIVERY_FAILED" {\n\t\t\treturn "paid"', 'TestPaymentFailures'),
     # AE1 (docs/commercial-ae1.md): the scorer and the report.
     ('AE1 score: a pricier Ask is not a false Ask', 'internal/ae1/score.go',
      'case want == "Allow" && got == "Ask":', 'case false && want == "Allow" && got == "Ask":', 'TestScoreRun'),
@@ -873,6 +900,8 @@ MUTATIONS = [
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    ('P2 H1: M1 takes a payment record', 'internal/contracts/events.go',
+     '|| p.Credential != nil || p.Payment != nil {', '|| p.Credential != nil || false && p.Payment != nil {', 'internal/paycontract:TestM1RefusesPaymentRecord'),
     # P2 Reconciler (docs/commercial-p2.md 9.12).
     ("P2 reconcile: a used nonce reads settled without its own transfer", 'internal/reconcile/reconcile.go',
      'if err == nil && l.Topics[1] == word(a.From) && l.Topics[2] == word(a.To) && v.IsUint64() && v.Uint64() == a.Value {', 'if err == nil && (true || l.Topics[1] == word(a.From) && l.Topics[2] == word(a.To) && v.IsUint64() && v.Uint64() == a.Value) {', 'TestStatus'),

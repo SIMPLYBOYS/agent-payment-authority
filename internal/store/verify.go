@@ -208,8 +208,12 @@ func (s *Store) verify(version int) error {
 		}
 		walletOwner[row.WalletID], payerOwner[row.Payer] = row.ConsumerID, row.ConsumerID
 
-		// 4. Budget: M1 deducts nothing.
-		if row.BudgetRemaining != string(tm.BudgetInitial) {
+		// 4. Budget: M1 deducts nothing; from schema 7 a reservation does
+		// (checked with the task's payments, step 11).
+		if version < 7 && row.BudgetRemaining != string(tm.BudgetInitial) {
+			return bad("budget", id, "budget_remaining %s is not budget_initial %s", row.BudgetRemaining, tm.BudgetInitial)
+		}
+		if version >= 7 && !paycontract.Supported(row.ContractVersion) && row.BudgetRemaining != string(tm.BudgetInitial) {
 			return bad("budget", id, "budget_remaining %s is not budget_initial %s", row.BudgetRemaining, tm.BudgetInitial)
 		}
 
@@ -347,6 +351,13 @@ func (s *Store) verify(version int) error {
 		if why := t.verifyCredentials(); why != "" {
 			return bad("credential", id, "%s", why)
 		}
+
+		// 11. P2: the payments match the payment events and the budget.
+		if version >= 7 && t.pay() {
+			if why := t.verifyPaid(tm.BudgetInitial); why != "" {
+				return bad("payment", id, "%s", why)
+			}
+		}
 	}
 	if version >= 3 {
 		if err := verifyPayTables(tx); err != nil {
@@ -365,6 +376,11 @@ func (s *Store) verify(version int) error {
 	}
 	if version >= 6 {
 		if err := verifyCredentialTables(tx); err != nil {
+			return err
+		}
+	}
+	if version >= 7 {
+		if err := verifyReceipts(tx); err != nil {
 			return err
 		}
 	}

@@ -3,6 +3,7 @@ package paycontract
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
@@ -13,12 +14,26 @@ import (
 // (contracts.ValidateEvent) refuse every one of them.
 
 // EventTypes: M1's task events plus the delegation, approval session,
-// approval closures and the grant. No SETTLED or RESOURCE_DELIVERED: P1-a
-// cannot pay or deliver.
+// approval closures and the grant, and P2's payment events
+// (docs/commercial-p2-host.md 4).
 var EventTypes = []string{"TASK_STARTED", "DELEGATION_BOUND", "PURCHASE_PROPOSED", "POLICY_DECIDED", "APPROVAL_SESSION_OPENED",
 	"APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN", "APPROVED", "APPROVAL_DENIED", "APPROVAL_SUPERSEDED", "GRANT_ISSUED",
 	"TASK_CANCELLED", "TASK_TIMED_OUT", "CLI_EXITED",
-	"VOICE_CHALLENGE_VERIFIED", "VOICE_CHALLENGE_FAILED", "VOICE_UNAVAILABLE"} // V1: a voice outcome, just before the closure it leads to
+	"VOICE_CHALLENGE_VERIFIED", "VOICE_CHALLENGE_FAILED", "VOICE_UNAVAILABLE", // V1: a voice outcome, just before the closure it leads to
+	"BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED", "PAYMENT_NEEDS_REVIEW",
+	"RESOURCE_DELIVERED", "RECEIPT_ISSUED"}
+
+// PaymentEvents are P2's payment events, in their order.
+var PaymentEvents = []string{"BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED",
+	"PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED"}
+
+// P2's payment codes. NotSettledCodes end a payment that spent nothing
+// (never reserved); NeedsReviewCodes one a person must look at: reserved
+// and not paid, or paid and not delivered (DELIVERY_FAILED).
+var (
+	NotSettledCodes  = []string{"RESERVE_FAILED", "NOT_PAID_EXPIRED"}
+	NeedsReviewCodes = []string{"RESERVED_NOT_PAID", "NOT_SETTLED_EXPIRED", "VERIFICATION_FAILED", "RECONCILE_NEEDS_REVIEW", "DELIVERY_FAILED"}
+)
 
 // V1's voice codes (docs/commercial-v1.md): the failures deny the session;
 // unavailability only degrades the approval, and says so.
@@ -92,7 +107,8 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 	d := p.Decision
 	only := func(want ...string) error { // the payload fields this type carries, all present; no other
 		have := map[string]bool{"code": p.Code != "", "decision": d != nil, "delegation": p.DelegationID != "", "session": p.ApprovalSessionID != "",
-			"grant": p.GrantID != "", "method": p.AuthorizationMethod != "", "signer": p.SignerApprovalID != "", "credential": p.Credential != nil}
+			"grant": p.GrantID != "", "method": p.AuthorizationMethod != "", "signer": p.SignerApprovalID != "", "credential": p.Credential != nil,
+			"payment": p.Payment != nil}
 		for k, v := range have {
 			if v != slices.Contains(want, k) {
 				return errf("%s: payload field %s must %s", e.EventType, k, map[bool]string{true: "be absent", false: "be present"}[v])
@@ -188,6 +204,12 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 			return err
 		}
 		return credentialCheck(p.Credential)
+	case "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED", "PAYMENT_NEEDS_REVIEW",
+		"RESOURCE_DELIVERED", "RECEIPT_ISSUED":
+		if !purchase {
+			return errf("%s needs a purchase", e.EventType)
+		}
+		return paymentEvent(e, order)
 	case "TASK_CANCELLED", "TASK_TIMED_OUT", "CLI_EXITED":
 		want := lifecycleCodes[e.EventType]
 		if p.Code == "" || (want != "" && p.Code != want) {
@@ -271,6 +293,54 @@ type chain struct {
 	granted                 map[string]bool
 	credential              map[string]string // v2: po -> verification result
 	voiced                  map[string]string // V1: po -> its session's voice outcome event
+	grantMethod             map[string]string // po -> its grant's authorization method
+	paid                    map[string]string // P2: po -> its last payment event
+}
+
+var txHashPattern, sha256Pattern = regexp.MustCompile(`^0x[0-9a-f]{64}$`), regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// paymentEvent checks a P2 payment event's payload: the record fields it
+// carries, all of them and no others, and its code.
+func paymentEvent(e contracts.AuditEvent, order *PurchaseOrder) error {
+	p := e.Payload
+	if p.Decision != nil || p.DelegationID != "" || p.ApprovalSessionID != "" || p.GrantID != "" || p.AuthorizationMethod != "" ||
+		p.SignerApprovalID != "" || p.Credential != nil {
+		return errf("%s carries only its payment record and code", e.EventType)
+	}
+	r := p.Payment
+	want := map[string][]string{ // record fields per type; nil: no record at all
+		"BUDGET_RESERVED":    {"method", "amount", "tx", "block"},
+		"PAYMENT_SIGNED":     {"method"},
+		"PAYMENT_SETTLED":    {"tx", "block"},
+		"RESOURCE_DELIVERED": {"content"},
+		"RECEIPT_ISSUED":     {"content", "receipt"},
+	}[e.EventType]
+	codes := map[string][]string{"PAYMENT_NOT_SETTLED": NotSettledCodes, "PAYMENT_NEEDS_REVIEW": NeedsReviewCodes}[e.EventType]
+	switch {
+	case codes == nil && p.Code != "", codes != nil && !slices.Contains(codes, p.Code):
+		return errf("%s code %q", e.EventType, p.Code)
+	case (want == nil) != (r == nil):
+		return errf("%s: payment record must %s", e.EventType, map[bool]string{true: "be absent", false: "be present"}[r != nil])
+	case r == nil:
+		return nil
+	}
+	have := map[string]bool{"method": r.Method != "", "amount": r.Amount != "", "tx": r.TxHash != "", "block": r.Block != 0,
+		"content": r.ContentSHA256 != "", "receipt": r.ReceiptID != ""}
+	for k, v := range have {
+		if v != slices.Contains(want, k) {
+			return errf("%s: payment field %s must %s", e.EventType, k, map[bool]string{true: "be absent", false: "be present"}[v])
+		}
+	}
+	switch {
+	case r.Method != "" && r.Method != "delegation" && r.Method != "webauthn":
+		return errf("a payment is authorized by a delegation or a human approval")
+	case r.TxHash != "" && !txHashPattern.MatchString(r.TxHash), r.ContentSHA256 != "" && !sha256Pattern.MatchString(r.ContentSHA256),
+		r.ReceiptID != "" && !ids(r.ReceiptID):
+		return errf("%s: malformed payment record", e.EventType)
+	case r.Amount != "" && (order == nil || r.Amount != order.PaymentBinding.Amount):
+		return errf("the reservation is the purchase's amount")
+	}
+	return nil
 }
 
 // ValidateEventOrder checks complete per-task streams of this version:
@@ -301,7 +371,8 @@ func ValidateEventOrder(events []contracts.AuditEvent) error {
 				return err
 			}
 			st = &chain{version: e.Version, prev: g, proposed: map[string]bool{}, verdict: map[string]string{}, intent: map[string]string{}, credential: map[string]string{},
-				session: map[string]string{}, closed: map[string]string{}, granted: map[string]bool{}, voiced: map[string]string{}}
+				session: map[string]string{}, closed: map[string]string{}, granted: map[string]bool{}, voiced: map[string]string{},
+				grantMethod: map[string]string{}, paid: map[string]string{}}
 			tasks[task] = st
 		}
 		if e.Version != st.version {
@@ -399,11 +470,61 @@ func (st *chain) apply(e contracts.AuditEvent) error {
 			return errors.New("one grant per approved session")
 		}
 		st.granted[po] = true
+		st.grantMethod[po] = e.Payload.AuthorizationMethod
+	case "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED", "PAYMENT_NEEDS_REVIEW",
+		"RESOURCE_DELIVERED", "RECEIPT_ISSUED":
+		return st.payment(e, po)
 	case "TASK_CANCELLED", "TASK_TIMED_OUT":
 		if st.lifecycleEnded {
 			return errors.New("one TASK_CANCELLED or TASK_TIMED_OUT per task")
 		}
 		st.lifecycleEnded, st.stopped = true, true
 	}
+	return nil
+}
+
+// payment is P2's order for one purchase (docs/commercial-p2-host.md 3, 4):
+// reserved only for an Allow (delegation) or an approved grant (webauthn;
+// a simulated grant never pays), and never once the task has ended; then
+// signed, submitted, settled, delivered, receipt, each once and in order.
+// NOT_SETTLED ends one that never reserved; NEEDS_REVIEW one reserved and
+// not settled, or settled and not delivered (DELIVERY_FAILED). Nothing
+// follows an end.
+func (st *chain) payment(e contracts.AuditEvent, po string) error {
+	last := st.paid[po]
+	method := map[string]string{"Allow": "delegation"}[st.verdict[po]]
+	if st.granted[po] {
+		method = st.grantMethod[po]
+	}
+	payable := method == "delegation" || method == "webauthn"
+	after := map[string]string{"PAYMENT_SIGNED": "BUDGET_RESERVED", "PAYMENT_SUBMITTED": "PAYMENT_SIGNED", "PAYMENT_SETTLED": "PAYMENT_SUBMITTED",
+		"RESOURCE_DELIVERED": "PAYMENT_SETTLED", "RECEIPT_ISSUED": "RESOURCE_DELIVERED"}
+	switch t := e.EventType; {
+	case t == "BUDGET_RESERVED":
+		if !payable || last != "" || st.stopped {
+			return errors.New("a reservation is one Allow's or approved grant's, once, before the task ends")
+		}
+		if e.Payload.Payment.Method != method {
+			return errors.New("the reservation's method is the purchase's authorization")
+		}
+	case t == "PAYMENT_SIGNED":
+		if last != after[t] || e.Payload.Payment.Method != method {
+			return errors.New("signed once, after its reservation, under its authorization")
+		}
+	case t == "PAYMENT_NOT_SETTLED":
+		if !payable || last != "" {
+			return errors.New("NOT_SETTLED ends a payment that never reserved")
+		}
+	case t == "PAYMENT_NEEDS_REVIEW":
+		reserved := slices.Contains([]string{"BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED"}, last)
+		if e.Payload.Code == "DELIVERY_FAILED" && last != "PAYMENT_SETTLED" || e.Payload.Code != "DELIVERY_FAILED" && !reserved {
+			return errors.New("NEEDS_REVIEW follows a reservation not settled, or a settlement not delivered (DELIVERY_FAILED)")
+		}
+	default:
+		if last != after[t] {
+			return fmt.Errorf("%s follows %s, once", t, after[t])
+		}
+	}
+	st.paid[po] = e.EventType
 	return nil
 }
