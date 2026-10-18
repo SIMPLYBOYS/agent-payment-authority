@@ -257,6 +257,57 @@ func TestPaymentStartOverBudget(t *testing.T) {
 	if _, _, err := s.StartPayment(payStart(pos[1])); Code(err) != "OVER_BUDGET" {
 		t.Fatalf("the second over the budget left: %v", err)
 	}
+	// The first fails before reserving: its amount is no longer held, and the second starts.
+	first, _ := s.PaymentOf("consumer-a", "task-a", pos[0])
+	if _, err := s.PaymentFailed(first.IntentHash, "RESERVE_FAILED"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.StartPayment(payStart(pos[1])); err != nil {
+		t.Fatalf("the second after the first failed: %v", err)
+	}
+}
+
+// An Ask whose grant has expired is not started.
+func TestPaymentStartGrantExpired(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	po, _ := e.webauthnApproved(s) // the grant expires at t0 + 300
+	e.clock.Set(t0 + 300)
+	if _, _, err := s.StartPayment(PaymentStart{ConsumerID: "consumer-a", TaskID: "task-a", PurchaseOrderID: po}); Code(err) != "PURCHASE_EXPIRED" {
+		t.Fatalf("past the grant's expiry: %v", err)
+	}
+}
+
+// After the task ended, a payment is still ended (not paid, or for review).
+func TestPaymentFailedAfterTheTaskEnded(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	po, intent := e.payAllowed(s)
+	s.StartPayment(payStart(po))
+	if err := s.Cancel("task-a"); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := s.PaymentFailed(intent, "TASK_ENDED"); err != nil || p.State != "not_paid_ended" {
+		t.Fatalf("ended after the cancel: %+v %v", p, err)
+	}
+	s.Close()
+	s = e.open()
+	defer s.Close()
+}
+
+// Evidence and authorizations are JSON, never empty.
+func TestPaymentStepRefusesEmptyRecords(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	po, intent := e.payAllowed(s)
+	s.StartPayment(payStart(po))
+	if _, err := s.PaymentReserved(intent, Reservation{TxHash: tx1, Block: 7}); Code(err) != "INVALID_PAYMENT_UPDATE" {
+		t.Fatalf("no evidence: %v", err)
+	}
+	s.PaymentReserved(intent, Reservation{Evidence: evidence, TxHash: tx1, Block: 7})
+	if _, err := s.PaymentSigned(intent, nil); Code(err) != "INVALID_PAYMENT_UPDATE" {
+		t.Fatalf("no authorization: %v", err)
+	}
 }
 
 // A purchase past its payment window is not started.
@@ -363,6 +414,7 @@ func TestPaymentFailures(t *testing.T) {
 	}{
 		{"reserve failed", 0, "RESERVE_FAILED", "reserve_failed", "not_paid"},
 		{"expired before reserving", 0, "NOT_PAID_EXPIRED", "not_paid_expired", "not_paid"},
+		{"the task ended before reserving", 0, "TASK_ENDED", "not_paid_ended", "not_paid"},
 		{"reserved, not paid", 1, "RESERVED_NOT_PAID", "needs_review", "needs_review"},
 		{"settled, not delivered", 4, "DELIVERY_FAILED", "needs_review", "paid"},
 	}

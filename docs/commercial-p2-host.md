@@ -52,7 +52,7 @@ request_purchase ─→ Store：POLICY_DECIDED
    Ask ─→ 本人核准 ─→ GRANT_ISSUED ────┤
                                       ▼
                   付款工作（Host，一次一筆，決策 7）
-  ① 建 payments 列（intent_hash 為鍵，requested）
+  ① 建 payments 列（intent_hash 為鍵，requested）  PAYMENT_REQUESTED
   ② relayer.Reserve(order)      tx#1 → reserved   BUDGET_RESERVED
   ③ signer /v1/sign {授權, order, reservation}
                                      → signed     PAYMENT_SIGNED（保存授權）
@@ -98,7 +98,7 @@ request_purchase ─→ Store：POLICY_DECIDED
   - 交付內容的 SHA-256 與大小、交付時間。
   - 只保存內容的 hash，不保存原文。
 - **新事件**，各自以 (`task_id`, `purchase_order_id`) 唯一：
-  - `BUDGET_RESERVED`、`PAYMENT_SIGNED`、`PAYMENT_SUBMITTED`
+  - `PAYMENT_REQUESTED`（H1 review 後加入）、`BUDGET_RESERVED`、`PAYMENT_SIGNED`、`PAYMENT_SUBMITTED`
   - `PAYMENT_SETTLED`、`PAYMENT_NOT_SETTLED`（附原因）、`PAYMENT_NEEDS_REVIEW`
   - `RESOURCE_DELIVERED`、`RECEIPT_ISSUED`
 - **其他**：
@@ -136,6 +136,9 @@ request_purchase ─→ Store：POLICY_DECIDED
   - `reserved`、`signed`：如果還沒過期，就繼續下一步；
   - `submitted`：一律改成 `unknown`，再交給 Reconciler（決策 5）；
   - `settled` 但未交付：用保存的簽章再向商店取一次內容。
+- **付款工作在呼叫 relayer 前後的兩條規則**（H1 第二輪 review）：
+  - 第一次呼叫 relayer 之前，先檢查 task 是否已結束（`paycontract.Ended`）。已結束就以 `TASK_ENDED` 結束付款（沒有花錢），不會因為它已經在佇列裡就照付。交易流程設計說「取消只阻止新的動作」，對還沒送出 tx#1 的付款，這就是新的動作。
+  - relayer 逾時或結果不明時，tx#1 可能已在鏈上。重啟後一律先再問一次 relayer（relayer 本身冪等），確定沒有預留，才可以記成 `RESERVE_FAILED`、`NOT_PAID_EXPIRED` 或 `TASK_ENDED`。不然這筆付款就停在 `requested`，它的金額也繼續占著預算。
 - **unknown 收斂**：`Reconciler.Status` 判為
   - `settled`，或
   - `not_settled_expired`（轉 `needs_review`，因為 tx#1 已花），或
@@ -241,4 +244,15 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查�
 | 建議 | 預留重送沒比對 tx 與區塊；在另一個委派下重新開始沒有被拒；已過期的請購仍可開始；收據沒比對 tx#1；`requested` 的檢視顯示「未開始」；`PaymentsIn` 在 Go 裡過濾；負的大小變成 CHECK 錯誤；M1 的錯誤訊息沒提 payment；多餘的條件 | 都已處理（付款列加 `reserve_tx`／`reserve_block`） |
 | 建議 | `PaymentSettled` 重送時若沒給 `PAYMENT-RESPONSE` 就不比對 | 不改：Reconciler 判定結算時沒有 `PAYMENT-RESPONSE` 可給 |
 | 問題 | Signer 委派代號（`DelegationRef`）是否必須是 task 綁定的那個委派 | 兩者是不同的東西：Host 的委派是 task 的業務範圍，Signer 的委派是 `signer.json` 的付款授權，Store 無法比對；由 Host 的可信設定提供 |
-| 問題（待 Aaron） | CLI 逾時（`TASK_TIMED_OUT`）之後，Ask 仍可被本人核准、發出 grant，但不會付款：本人核准了，什麼都沒付 | 目前的行為就是這樣，H4 會讓畫面寫明「task 已結束，不會付款」。要不要改成逾時後仍付款，需要你決定 |
+| 問題（待 Aaron） | CLI 逾時（`TASK_TIMED_OUT`），或同一個 task 的另一張請購被 Deny 之後，原本開著的 Ask 仍可被本人核准、發出 grant，但不會付款：本人核准了，什麼都沒付 | 目前的行為就是這樣，H4 會讓畫面寫明「task 已結束，不會付款」。要不要改成這兩種情況下仍付款，需要你決定 |
+
+第二輪 review（3777321）：結論 APPROVE。審查者確認：`paycontract.Ended` 與順序規則的三個結束條件完全相同；每一種 Store 呼叫順序都能被規則接受；開始時預先保留預算，所以 tx#1 上鏈後預留不可能因為預算不足被拒；恢復檢查的預算規則與扣減一致。處理：
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Important | 取消不會停下排隊中的付款，與交易流程設計「取消只阻止新的動作」不符 | 新增沒花錢的結束代碼 `TASK_ENDED`（狀態 `not_paid_ended`）；付款工作的規則寫進 §7，H2 實作 |
+| Important | 待決問題漏了「另一張請購被 Deny」 | 補上 |
+| 建議 | `requested` 沒有「預留結果不明」的出口 | H2 的規則寫進 §7 |
+| 建議 | 空的預留證據或授權可以寫入 | 拒絕 |
+| 建議 | 缺測試：grant 到期、失敗後預算釋放、task 結束後記錄失敗 | 補上，並加兩項突變（H1 共 24 項，24／24 KILLED） |
+| 建議 | 文件過時 | 修正 |

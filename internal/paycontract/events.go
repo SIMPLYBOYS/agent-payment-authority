@@ -46,7 +46,7 @@ func Ended(events []contracts.AuditEvent) bool {
 // (never reserved); NeedsReviewCodes one a person must look at: reserved
 // and not paid, or paid and not delivered (DELIVERY_FAILED).
 var (
-	NotSettledCodes  = []string{"RESERVE_FAILED", "NOT_PAID_EXPIRED"}
+	NotSettledCodes  = []string{"RESERVE_FAILED", "NOT_PAID_EXPIRED", "TASK_ENDED"}
 	NeedsReviewCodes = []string{"RESERVED_NOT_PAID", "NOT_SETTLED_EXPIRED", "VERIFICATION_FAILED", "RECONCILE_NEEDS_REVIEW", "DELIVERY_FAILED"}
 )
 

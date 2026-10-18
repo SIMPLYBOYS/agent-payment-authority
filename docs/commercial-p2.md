@@ -38,7 +38,7 @@ A、B 兩位客人的錢包、核准、預留、付款、收據完全隔離。**
 
 ## 4 狀態機（沿用 `docs/commercial-transaction-flow.md` §3.3）
 
-`not_started → reserved（tx#1 確認）→ signed → submitted（tx#2 送出）→ settled（確認）→ delivered`；任何一步不明 → `unknown`，只靠對帳收斂成 `settled`、`not_settled_expired` 或 `needs_review`，**從不重付**。新增事件：`BUDGET_RESERVED`、`PAYMENT_SUBMITTED`、`PAYMENT_SETTLED`、`RESOURCE_DELIVERED`、`RECEIPT_ISSUED`。`payment_status` 改由狀態推導，不再寫死。
+`not_started → requested → reserved（tx#1 確認）→ signed → submitted（tx#2 送出）→ settled（確認）→ delivered`；任何一步不明 → `unknown`，只靠對帳收斂成 `settled`、`not_settled_expired` 或 `needs_review`，**從不重付**。新增事件：`BUDGET_RESERVED`、`PAYMENT_SUBMITTED`、`PAYMENT_SETTLED`、`RESOURCE_DELIVERED`、`RECEIPT_ISSUED`。`payment_status` 改由狀態推導，不再寫死。
 
 ## 5 分段
 

@@ -33,7 +33,7 @@ CREATE TABLE payments (
   grant_ref         TEXT NOT NULL CHECK (grant_ref <> ''),
   amount            TEXT NOT NULL,
   state             TEXT NOT NULL CHECK (state IN ('requested', 'reserved', 'signed', 'submitted', 'unknown', 'settled', 'delivered',
-                                                  'reserve_failed', 'not_paid_expired', 'needs_review')),
+                                                  'reserve_failed', 'not_paid_expired', 'not_paid_ended', 'needs_review')),
   code              TEXT,
   reservation       TEXT,
   reserve_tx        TEXT,
@@ -46,10 +46,10 @@ CREATE TABLE payments (
   updated_at        INTEGER NOT NULL,
   UNIQUE (task_id, purchase_order_id),
   FOREIGN KEY (task_id, purchase_order_id) REFERENCES purchases,
-  CHECK (state IN ('requested', 'reserve_failed', 'not_paid_expired') OR (reservation IS NOT NULL AND reserve_tx IS NOT NULL AND reserve_block IS NOT NULL)),
+  CHECK (state IN ('requested', 'reserve_failed', 'not_paid_expired', 'not_paid_ended') OR (reservation IS NOT NULL AND reserve_tx IS NOT NULL AND reserve_block IS NOT NULL)),
   CHECK (state NOT IN ('signed', 'submitted', 'unknown', 'settled', 'delivered') OR authorization IS NOT NULL),
   CHECK (state NOT IN ('settled', 'delivered') OR (settle_tx IS NOT NULL AND settle_block IS NOT NULL)),
-  CHECK ((state IN ('reserve_failed', 'not_paid_expired', 'needs_review')) = (code IS NOT NULL))
+  CHECK ((state IN ('reserve_failed', 'not_paid_expired', 'not_paid_ended', 'needs_review')) = (code IS NOT NULL))
 ) STRICT;
 CREATE TABLE receipts (
   receipt_id       TEXT PRIMARY KEY,
@@ -86,7 +86,7 @@ func PaymentStatus(state, code string) string {
 		return "confirming"
 	case "settled", "delivered":
 		return "paid"
-	case "reserve_failed", "not_paid_expired":
+	case "reserve_failed", "not_paid_expired", "not_paid_ended":
 		return "not_paid"
 	case "needs_review":
 		if code == "DELIVERY_FAILED" {
@@ -329,6 +329,9 @@ type Reservation struct {
 // PaymentReserved records the reservation (BUDGET_RESERVED) and deducts the
 // amount from the task's remaining budget, in one transaction.
 func (s *Store) PaymentReserved(intent string, r Reservation) (Payment, error) {
+	if !json.Valid(r.Evidence) {
+		return Payment{}, refuse("INVALID_PAYMENT_UPDATE", "the reservation evidence is JSON")
+	}
 	p, err := s.paymentByIntent(intent)
 	if err != nil {
 		return Payment{}, err
@@ -359,6 +362,9 @@ func subtract(have string, amount contracts.Amount) (string, error) {
 // PaymentSigned records the Signer's EIP-3009 authorization (PAYMENT_SIGNED):
 // kept for the shop and for reconciliation.
 func (s *Store) PaymentSigned(intent string, authorization json.RawMessage) (Payment, error) {
+	if !json.Valid(authorization) {
+		return Payment{}, refuse("INVALID_PAYMENT_UPDATE", "the signed authorization is JSON")
+	}
 	p, err := s.paymentByIntent(intent)
 	if err != nil {
 		return Payment{}, err
@@ -433,14 +439,15 @@ func (s *Store) PaymentDelivered(intent, contentSHA256 string, size int) (Paymen
 }
 
 // PaymentFailed ends a payment that will not complete: one never reserved
-// spent nothing (PAYMENT_NOT_SETTLED: RESERVE_FAILED, NOT_PAID_EXPIRED);
+// spent nothing (PAYMENT_NOT_SETTLED: RESERVE_FAILED, NOT_PAID_EXPIRED,
+// TASK_ENDED: the task ended before its first call to the relayer);
 // one reserved and not settled, or settled and not delivered
 // (DELIVERY_FAILED), is a person's to look at (PAYMENT_NEEDS_REVIEW).
 func (s *Store) PaymentFailed(intent, code string) (Payment, error) {
 	codeOnly := func(Payment) contracts.EventPayload { return contracts.EventPayload{Code: code} }
 	switch {
 	case slices.Contains(paycontract.NotSettledCodes, code):
-		to := map[string]string{"RESERVE_FAILED": "reserve_failed", "NOT_PAID_EXPIRED": "not_paid_expired"}[code]
+		to := map[string]string{"RESERVE_FAILED": "reserve_failed", "NOT_PAID_EXPIRED": "not_paid_expired", "TASK_ENDED": "not_paid_ended"}[code]
 		return s.move(intent, step{from: []string{"requested"}, to: to, event: "PAYMENT_NOT_SETTLED", payload: codeOnly, set: map[string]any{"code": code}})
 	case code == "DELIVERY_FAILED":
 		return s.move(intent, step{from: []string{"settled"}, to: "needs_review", event: "PAYMENT_NEEDS_REVIEW", payload: codeOnly, set: map[string]any{"code": code}})
@@ -522,7 +529,7 @@ func (t *taskTx) paymentView(po string) *PaymentView {
 		}
 		v.State, v.Code = eventState[e.EventType], e.Payload.Code
 		if e.EventType == "PAYMENT_NOT_SETTLED" {
-			v.State = map[string]string{"RESERVE_FAILED": "reserve_failed", "NOT_PAID_EXPIRED": "not_paid_expired"}[e.Payload.Code]
+			v.State = map[string]string{"RESERVE_FAILED": "reserve_failed", "NOT_PAID_EXPIRED": "not_paid_expired", "TASK_ENDED": "not_paid_ended"}[e.Payload.Code]
 		}
 		if r := e.Payload.Payment; r != nil {
 			switch e.EventType {
@@ -546,7 +553,7 @@ func (t *taskTx) paymentView(po string) *PaymentView {
 // lastPaymentEvent is each state's last payment event in its purchase's chain.
 var lastPaymentEvent = map[string]string{"requested": "PAYMENT_REQUESTED", "reserved": "BUDGET_RESERVED", "signed": "PAYMENT_SIGNED", "submitted": "PAYMENT_SUBMITTED",
 	"unknown": "PAYMENT_SUBMITTED", "settled": "PAYMENT_SETTLED", "delivered": "RECEIPT_ISSUED", "reserve_failed": "PAYMENT_NOT_SETTLED",
-	"not_paid_expired": "PAYMENT_NOT_SETTLED", "needs_review": "PAYMENT_NEEDS_REVIEW"}
+	"not_paid_expired": "PAYMENT_NOT_SETTLED", "not_paid_ended": "PAYMENT_NOT_SETTLED", "needs_review": "PAYMENT_NEEDS_REVIEW"}
 
 // verifyPaid is schema 7's recovery check for one task: every payment's
 // state is its purchase's payment events (and no payment events without
@@ -599,7 +606,7 @@ func (t *taskTx) verifyPaid(initial contracts.Amount) string {
 		case last[r.po] != lastPaymentEvent[r.state]:
 			return fmt.Sprintf("payment %s is %s but its last payment event is %q", r.po, r.state, last[r.po])
 		}
-		if r.state != "requested" && r.state != "reserve_failed" && r.state != "not_paid_expired" {
+		if !slices.Contains([]string{"requested", "reserve_failed", "not_paid_expired", "not_paid_ended"}, r.state) {
 			a, _ := new(big.Int).SetString(r.amount, 10)
 			reserved.Add(reserved, a)
 		}
