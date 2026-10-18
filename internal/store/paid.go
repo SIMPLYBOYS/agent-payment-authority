@@ -458,6 +458,22 @@ func (s *Store) PaymentFailed(intent, code string) (Payment, error) {
 	return Payment{}, refuse("INVALID_PAYMENT_UPDATE", "unknown payment failure code")
 }
 
+// TaskEnded: the task has stopped taking new payments as the order rules
+// see it (paycontract.Ended). The payment worker asks before its first
+// call to the relayer for a payment (docs/commercial-p2-host.md 7).
+func (s *Store) TaskEnded(taskID string) (bool, error) {
+	tx, err := s.r.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	t, err := s.openTask(tx, 0, taskID)
+	if err != nil {
+		return false, err
+	}
+	return paycontract.Ended(t.events), nil
+}
+
 func (s *Store) paymentByIntent(intent string) (Payment, error) {
 	p, err := scanPaid(s.r.QueryRow(paidWhere(`p.intent_hash = ?`), intent))
 	if errors.Is(err, sql.ErrNoRows) {

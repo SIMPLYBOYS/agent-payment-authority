@@ -609,6 +609,28 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 	return ev, err
 }
 
+// Lookup answers an intent's reservation without ever making one, for a
+// Host that must know before it may record "nothing was spent": state is
+// "" (none), "sent" (written, not yet decided), "reserved" (with its
+// evidence) or "failed". A sent one is checked once on the way.
+func (r *Relayer) Lookup(ctx context.Context, intent string) (Evidence, string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ev, done, err := r.resume(ctx, intent, false)
+	var ref signer.Refusal
+	switch {
+	case !done:
+		return Evidence{}, "", nil
+	case err == nil:
+		return ev, "reserved", nil
+	case errors.As(err, &ref) && ref == "RESERVATION_FAILED":
+		return ev, "failed", nil
+	case errors.As(err, &ref) && ref == "RESERVATION_PENDING":
+		return ev, "sent", nil
+	}
+	return Evidence{}, "", err
+}
+
 // resume answers an intent's reservation, waiting for an open one or
 // checking it once: done is false when there is none.
 func (r *Relayer) resume(ctx context.Context, intent string, wait bool) (Evidence, bool, error) {

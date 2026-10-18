@@ -256,3 +256,40 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查�
 | 建議 | 空的預留證據或授權可以寫入 | 拒絕 |
 | 建議 | 缺測試：grant 到期、失敗後預算釋放、task 結束後記錄失敗 | 補上，並加兩項突變（H1 共 24 項，24／24 KILLED） |
 | 建議 | 文件過時 | 修正 |
+
+### 12.2 H2 付款工作（`internal/payflow`）
+
+- **`Worker`**：一次處理一筆付款（決策 7），依 Store 的狀態推進。四個外部元件都是介面，H3 再接上真的：
+  - `Relayer`：`Reserve` 對同一張請購冪等；`Lookup` 只查不建；
+  - `Signer`：`/v1/sign`，同一個 request ID 回同一個 attempt；
+  - `Shop`：送出帶 `PAYMENT-SIGNATURE` 的請求；
+  - `Chain`：Reconciler。
+- **每個狀態怎麼推進**：
+  - `requested`：**先問 relayer 這筆 intent 已經有什麼**（`Lookup`，只查不建）。
+    - 已預留：記下預留；已失敗：`RESERVE_FAILED`；送出未定：等待。
+    - 什麼都沒有時才看 task：已結束（`TaskEnded`）就 `TASK_ENDED`；已太接近 `valid_before` 就 `NOT_PAID_EXPIRED`。
+    - 否則 `Reserve`。relayer 拒絕就 `RESERVE_FAILED`（交易送出前就拒絕，或已 revert，都沒有花錢）；`RESERVATION_PENDING`、`TASK_BUSY`、`RELAYER_NONCE_BLOCKED`、連線錯誤都等下一輪，由 `Lookup` 決定。
+    - 所以中斷或回應遺失時，tx#1 只會有一筆，「沒花錢」也只在 relayer 確定沒有預留之後才會記下。
+  - `reserved`：以付款的授權向 Signer 請求簽名（委派 `id@version`，或本人核准的 `approval_id`），request ID 由 intent 決定。
+    - Signer 回「現在不行」（忙碌、逾時、預留尚未確認）就等待；其他拒絕，或太接近期限，轉 `RESERVED_NOT_PAID`（tx#1 已花，需要人工處理）。
+  - `signed`：**先記成已送出**，再向商店送出 `PAYMENT-SIGNATURE`。同一筆付款每次送的都是同一份簽章。
+  - `submitted`／`unknown`／`settled`：
+    - 連線錯誤或 5xx：轉 `unknown`。
+    - 200：**只有鏈上確認（`Chain.Status` 為 settled）才算已付款**，這時才記下結算、交付內容的 hash 與收據。鏈上還沒確認就等待；下一輪再送同一份簽章，商店是冪等的。
+    - 202：等待。
+    - 402（驗證失敗）或 400：`VERIFICATION_FAILED`，不再送出。
+    - 402 `settlement_failed`（例如被搶先送出）：交給鏈上判定。
+    - 由鏈上判定時：settled 就記下結算；之後商店交付就記為已交付，商店拒絕就是 `DELIVERY_FAILED`（已付款、未交付）。`not_settled_expired` 轉 `NOT_SETTLED_EXPIRED`；`needs_review` 轉 `RECONCILE_NEEDS_REVIEW`；pending 就等待，絕不重付。
+- **`Recover`**（啟動時）：`submitted` 一律轉 `unknown`（決策 5）。
+- **`Run`**：先恢復，再每隔一段時間（或被 `Kick` 喚醒）把所有未完成的付款各推進一次，一次一筆。
+- 新增：`budget.Relayer.Lookup`（anvil 測試確認：預留前回空、預留後回同一份證據）、`store.Store.TaskEnded`。
+- **驗證**（真的 Store、假的四個元件；`go test -race` 通過）：
+  - `TestPaidEndToEnd`：一次推進就走完，預留、簽名、送出各一次；已交付的不再移動。
+  - `TestPaidOnlyWhenTheChainSaysSo`：商店回 200 但鏈上未確認時不算已付款，確認後才交付；全程同一份簽章。
+  - `TestLostAnswersNeverPayTwice`：預留的回應遺失時，下一輪由 `Lookup` 找到，只有一筆 tx#1；Signer 的回應遺失時，用同一個 request ID 再問；商店的回應遺失時轉 `unknown`，再送同一份簽章，最後交付。
+  - `TestRecoverSubmitted`：已送出、Host 隨即中斷 → `unknown` → 由鏈上與同一份簽章完成，relayer 沒被再呼叫。
+  - `TestTaskEndedBeforeAndAfterTheReservation`：取消時還沒預留的付款是 `TASK_ENDED`，relayer 從沒被要求預留；取消前已預留的付款照常走完。
+  - `TestRefusals`：relayer 拒絕 → `RESERVE_FAILED`；Signer 拒絕 → `RESERVED_NOT_PAID`；商店驗證失敗 → `VERIFICATION_FAILED`，不再送出。
+  - `TestUnknownMovedByTheChain`：202 時等待；過期未用 → `NOT_SETTLED_EXPIRED`；被搶先送出（鏈上已付）→ `DELIVERY_FAILED`，畫面顯示已付款。
+  - `TestTooLate`、`TestWebAuthnAskPaid`（Signer 收到的是 `approval_id`，不是委派）、`TestRun`。
+- **突變**：H2 新增 11 項，11／11 KILLED。過程中修了兩項突變本身的問題：一項突變後變數沒被使用而編譯不過；另一項在 macOS 上時鐘只到微秒，`UnixNano()%1000` 永遠為 0，突變根本沒有改變 ID。

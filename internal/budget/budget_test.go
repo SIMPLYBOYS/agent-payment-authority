@@ -189,9 +189,15 @@ func TestReserveAndVerify(t *testing.T) {
 		t.Fatalf("budget.db %v", fi.Mode())
 	}
 	raw, po, intent := w.order("consumer-a", "show-a-01", 1, "600000")
+	if _, state, err := r.Lookup(bg, intent); err != nil || state != "" {
+		t.Fatalf("lookup before: %q %v", state, err)
+	}
 	ev, err := r.Reserve(bg, raw)
 	if err != nil || ev.IntentHash != intent || ev.Amount != 600000 {
 		t.Fatalf("reserve %+v %v", ev, err)
+	}
+	if got, state, err := r.Lookup(bg, intent); err != nil || state != "reserved" || got != ev {
+		t.Fatalf("lookup after: %+v %q %v", got, state, err)
 	}
 	evRaw, _ := json.Marshal(ev)
 	v := &Verifier{RPC: w.rpc, ChainID: 84532, Contract: w.contract, Confirmations: 1}
