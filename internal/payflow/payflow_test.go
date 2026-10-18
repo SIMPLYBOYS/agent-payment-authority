@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +25,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer/signertest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
 
 const t0 = 1790726450
@@ -151,6 +154,7 @@ type fakeRelayer struct {
 	reserves   int // reservations made (tx#1 sent)
 	calls      int
 	reserveErr error
+	lookupErr  error
 	lose       bool
 }
 
@@ -179,17 +183,24 @@ func (r *fakeRelayer) Reserve(_ context.Context, order json.RawMessage) (budget.
 }
 
 func (r *fakeRelayer) Lookup(_ context.Context, intent string) (budget.Evidence, string, error) {
+	if err := r.lookupErr; err != nil {
+		r.lookupErr = nil
+		return budget.Evidence{}, "", err
+	}
 	if r.state[intent] == "reserved" {
 		return r.evidence(intent), "reserved", nil
 	}
 	return budget.Evidence{}, r.state[intent], nil
 }
 
-// fakeSigner signs the order's binding; err is its next answer's error.
+// fakeSigner signs the order's binding; err is its next answer's error,
+// state its next answer's state (unsigned), other makes it sign another nonce.
 type fakeSigner struct {
 	calls map[string]int
 	last  signer.SignRequest
 	err   error
+	state string
+	other bool
 }
 
 func (f *fakeSigner) Sign(_ context.Context, r signer.SignRequest) (signer.Reply, error) {
@@ -199,9 +210,16 @@ func (f *fakeSigner) Sign(_ context.Context, r signer.SignRequest) (signer.Reply
 		f.err = nil
 		return signer.Reply{}, err
 	}
+	if st := f.state; st != "" {
+		f.state = ""
+		return signer.Reply{State: st}, nil
+	}
 	var o paycontract.PurchaseOrder
 	contracts.Decode(r.Order, &o)
 	b := o.PaymentBinding
+	if f.other {
+		b.Nonce = "0x" + strings.Repeat("9", 64)
+	}
 	return signer.Reply{State: "signed", Authorization: &signer.SignedAuthorization{Transfer: signer.Transfer{From: b.From, To: b.PayTo, Value: string(b.Amount),
 		ValidAfter: b.ValidAfter, ValidBefore: b.ValidBefore, Nonce: b.Nonce}, Signature: "0x" + strings.Repeat("ab", 65)}}, nil
 }
@@ -508,5 +526,174 @@ func TestRun(t *testing.T) {
 	}
 	if w.payment("po-1").State != "delivered" || w.payment("po-2").State != "delivered" || w.relayer.reserves != 2 {
 		t.Fatalf("po-1 %s, po-2 %s, reserves %d", w.payment("po-1").State, w.payment("po-2").State, w.relayer.reserves)
+	}
+}
+
+// The PAYMENT-SIGNATURE is one the real shop reads: for its offer (M1's
+// shop answers 402 M1_PAYMENT_UNAVAILABLE, never 400), with a payload the
+// settling shop parses.
+func TestPaymentSignatureTheShopReads(t *testing.T) {
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	shop, err := merchant.New(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shop.Register(mux)
+	offer := shop.Offers()[0]
+	o := paycontract.PurchaseOrder{Quote: offer.Quote, Intent: paycontract.Intent{ResourceURL: offer.URL}}
+	a := signer.SignedAuthorization{Transfer: signer.Transfer{From: "0x" + strings.Repeat("1", 40), To: signertest.Merchant, Value: "50000",
+		ValidAfter: t0 - 1, ValidBefore: t0 + 300, Nonce: "0x" + strings.Repeat("0", 63) + "1"}, Signature: "0x" + strings.Repeat("ab", 65)}
+	sig, err := paymentSignature(o, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest("GET", offer.URL, nil)
+	req.Header.Set(x402.HeaderPaymentSignature, sig)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct{ Error string }
+	json.NewDecoder(resp.Body).Decode(&body)
+	if resp.StatusCode != 402 || body.Error != "M1_PAYMENT_UNAVAILABLE" {
+		t.Fatalf("shop: %d %s", resp.StatusCode, body.Error)
+	}
+	var pp x402.PaymentPayload
+	if err := x402.Decode(sig, &pp); err != nil {
+		t.Fatal(err)
+	}
+	if err := merchant.ParsePayment(pp.Payload); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// What the relayer already has decides first: sent waits (never a second
+// Reserve), failed ends it, an error waits; a busy task waits, then reserves.
+func TestRelayerStates(t *testing.T) {
+	w := newWorld(t, 3)
+	for _, po := range []string{"po-1", "po-2", "po-3"} {
+		w.start(po)
+	}
+	w.relayer.state[w.payment("po-1").IntentHash] = "sent"
+	if p, err := w.step("po-1"); !errors.Is(err, ErrPending) || p.State != "requested" || w.relayer.calls != 0 {
+		t.Fatalf("sent: %+v %v, Reserve calls %d", p, err, w.relayer.calls)
+	}
+	w.relayer.state[w.payment("po-2").IntentHash] = "failed"
+	if p, _ := w.step("po-2"); p.State != "reserve_failed" || w.relayer.calls != 0 {
+		t.Fatalf("failed: %+v", p)
+	}
+	w.relayer.lookupErr = errors.New("relayer down")
+	if p, err := w.step("po-3"); !errors.Is(err, ErrPending) || p.State != "requested" || w.relayer.calls != 0 {
+		t.Fatalf("lookup error: %+v %v", p, err)
+	}
+	w.relayer.reserveErr = signer.Refusal("TASK_BUSY")
+	if p, err := w.step("po-3"); !errors.Is(err, ErrPending) || p.State != "requested" {
+		t.Fatalf("busy: %+v %v", p, err)
+	}
+	w.signer.err = signer.Refusal("SIGNER_BUSY")
+	if p, _ := w.step("po-3"); p.State != "reserved" || w.relayer.reserves != 1 {
+		t.Fatalf("after busy: %+v, reserves %d", p, w.relayer.reserves)
+	}
+}
+
+// A Signer attempt closed unsigned, or one signing another authorization,
+// is for review, never sent; one still open waits until too late.
+func TestSignerAnswers(t *testing.T) {
+	w := newWorld(t, 3)
+	for _, po := range []string{"po-1", "po-2", "po-3"} {
+		w.start(po)
+	}
+	w.signer.state = "abandoned"
+	if p, _ := w.step("po-1"); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" {
+		t.Fatalf("abandoned: %+v", p)
+	}
+	w.signer.other = true
+	if p, _ := w.step("po-2"); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" || len(w.shop.sent) != 0 {
+		t.Fatalf("another nonce: %+v, sent %d", p, len(w.shop.sent))
+	}
+	w.signer.other = false
+	w.signer.state = "signing"
+	if p, err := w.step("po-3"); !errors.Is(err, ErrPending) || p.State != "reserved" {
+		t.Fatalf("open attempt: %+v %v", p, err)
+	}
+	w.now = t0 + 300 - 5
+	w.signer.state = "signing"
+	if p, _ := w.step("po-3"); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" {
+		t.Fatalf("open attempt, too late: %+v", p)
+	}
+}
+
+// The shop's answers: a 5xx is unknown, a 429 says nothing (the chain
+// does), a 400 is a refusal; a nonce the shop calls used is the chain's.
+func TestShopAnswers(t *testing.T) {
+	w := newWorld(t, 4)
+	for _, po := range []string{"po-1", "po-2", "po-3", "po-4"} {
+		w.start(po)
+	}
+	w.shop.answers = []ShopAnswer{{Status: 503}}
+	if p, err := w.step("po-1"); !errors.Is(err, ErrPending) || p.State != "unknown" {
+		t.Fatalf("503: %+v %v", p, err)
+	}
+	w.shop.answers = []ShopAnswer{{Status: 429}}
+	if p, err := w.step("po-2"); !errors.Is(err, ErrPending) || p.State != "submitted" {
+		t.Fatalf("429: %+v %v", p, err)
+	}
+	w.shop.answers = []ShopAnswer{{Status: 400}}
+	if p, _ := w.step("po-3"); p.State != "needs_review" || p.Code != "VERIFICATION_FAILED" {
+		t.Fatalf("400: %+v", p)
+	}
+	w.shop.answers = []ShopAnswer{{Status: 402, Response: &merchant.SettlementResponse{ErrorReason: "invalid_exact_evm_payload_authorization_nonce_used"}}}
+	w.chain.state = "settled"
+	if p, _ := w.step("po-4"); p.State != "needs_review" || p.Code != "DELIVERY_FAILED" || p.SettleTx == "" {
+		t.Fatalf("nonce used, paid: %+v", p)
+	}
+}
+
+// The chain's answers: an error waits, needs_review is for review.
+func TestChainAnswers(t *testing.T) {
+	w := newWorld(t, 2)
+	w.start("po-1")
+	w.start("po-2")
+	w.shop.answers = []ShopAnswer{pending}
+	w.chain.err = errors.New("node down")
+	if p, err := w.step("po-1"); !errors.Is(err, ErrPending) || p.State != "submitted" {
+		t.Fatalf("node down: %+v %v", p, err)
+	}
+	w.chain.err = nil
+	w.chain.state = "needs_review"
+	if p, _ := w.step("po-2"); p.State != "needs_review" || p.Code != "RECONCILE_NEEDS_REVIEW" {
+		t.Fatalf("needs_review: %+v", p)
+	}
+}
+
+// Settled stays settled: a later disagreeing chain answer waits; the
+// content comes on a later round; a shop refusing to deliver is
+// DELIVERY_FAILED.
+func TestSettledThenDelivered(t *testing.T) {
+	w := newWorld(t, 2)
+	w.start("po-1")
+	w.start("po-2")
+	w.shop.answers = []ShopAnswer{pending}
+	w.chain.state = "settled"
+	for _, po := range []string{"po-1", "po-2"} {
+		if p, err := w.step(po); !errors.Is(err, ErrPending) || p.State != "settled" {
+			t.Fatalf("%s: %+v %v", po, p, err)
+		}
+	}
+	w.chain.state = "not_settled_expired"
+	if p, err := w.step("po-1"); !errors.Is(err, ErrPending) || p.State != "settled" {
+		t.Fatalf("disagreeing chain: %+v %v", p, err)
+	}
+	w.chain.state = "settled"
+	w.shop.answers = []ShopAnswer{paid}
+	if p, err := w.step("po-1"); err != nil || p.State != "delivered" {
+		t.Fatalf("later round: %+v %v", p, err)
+	}
+	w.shop.answers = []ShopAnswer{verify}
+	if p, _ := w.step("po-2"); p.State != "needs_review" || p.Code != "DELIVERY_FAILED" {
+		t.Fatalf("402 once settled: %+v", p)
 	}
 }

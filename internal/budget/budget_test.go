@@ -705,6 +705,12 @@ func TestBlockedRegistrationIsResigned(t *testing.T) {
 	before, _ := w.rpc.PendingNonce(bg, issuer)
 	w.call(t, "anvil_setNextBlockBaseFeePerGas", "0x"+strconv.FormatInt(1000e9, 16))
 	w.call(t, "evm_mine")
+	h, _ := w.rpc.LatestHeader(bg)
+	w.now = h.Timestamp
+	pendingRaw, _, _ := w.order("consumer-a", "show-a-01", 2, "100000")
+	if _, err := r.Reserve(ctx, pendingRaw); code(err) != "TASK_REGISTRATION_PENDING" {
+		t.Fatalf("a reservation on a task still registering: %v", err)
+	}
 	if err := r.RegisterTask(ctx, "show-a-02", "consumer-a", 1_000_000); err != nil {
 		t.Fatalf("the next registration: %v", err)
 	}
@@ -714,7 +720,7 @@ func TestBlockedRegistrationIsResigned(t *testing.T) {
 	if after, _ := w.rpc.PendingNonce(bg, issuer); after != before+2 {
 		t.Fatalf("issuer nonce %d -> %d", before, after)
 	}
-	h, _ := w.rpc.LatestHeader(bg)
+	h, _ = w.rpc.LatestHeader(bg)
 	w.now = h.Timestamp
 	raw, _, _ := w.order("consumer-a", "show-a-01", 1, "500000")
 	if _, err := r.Reserve(ctx, raw); err != nil {

@@ -216,6 +216,16 @@ func (s *Settler) Pay(ctx context.Context, o offer, payload json.RawMessage) Out
 	return unlockThen(func() Outcome { return s.resume(ctx, v.payer.Hex(), nonceHex, resp) })
 }
 
+// ParsePayment reads an exact-EVM payload as the shop does (its fields,
+// strictly), judging nothing: a payer's check that its payload is one the
+// shop can read.
+func ParsePayment(payload json.RawMessage) error {
+	if _, reason := parse(payload); reason != "" {
+		return errors.New("merchant: " + reason)
+	}
+	return nil
+}
+
 // parse reads the exact-EVM payload's form; nothing is judged yet.
 func parse(payload json.RawMessage) (verified, string) {
 	var v verified

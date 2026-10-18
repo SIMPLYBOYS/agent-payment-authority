@@ -523,6 +523,8 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 	err = r.db.QueryRowContext(ctx, `SELECT consumer_id, balance, r, commitment, state FROM tasks WHERE task_id = ?`, taskID).
 		Scan(&consumer, &balance, &rv, &cOldS, &state)
 	switch {
+	case err == nil && state == "registering":
+		return Evidence{}, signer.Refusal("TASK_REGISTRATION_PENDING") // not yet confirmed: ask again
 	case errors.Is(err, sql.ErrNoRows) || err == nil && state != "registered":
 		return Evidence{}, signer.Refusal("TASK_NOT_REGISTERED")
 	case err != nil:

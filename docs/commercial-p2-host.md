@@ -268,21 +268,26 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查�
   - `requested`：**先問 relayer 這筆 intent 已經有什麼**（`Lookup`，只查不建）。
     - 已預留：記下預留；已失敗：`RESERVE_FAILED`；送出未定：等待。
     - 什麼都沒有時才看 task：已結束（`TaskEnded`）就 `TASK_ENDED`；已太接近 `valid_before` 就 `NOT_PAID_EXPIRED`。
-    - 否則 `Reserve`。relayer 拒絕就 `RESERVE_FAILED`（交易送出前就拒絕，或已 revert，都沒有花錢）；`RESERVATION_PENDING`、`TASK_BUSY`、`RELAYER_NONCE_BLOCKED`、連線錯誤都等下一輪，由 `Lookup` 決定。
+    - 否則 `Reserve`。relayer 拒絕就 `RESERVE_FAILED`（交易送出前就拒絕，或已 revert，都沒有花錢）；`RESERVATION_PENDING`、`TASK_BUSY`、`RELAYER_NONCE_BLOCKED`、`TASK_REGISTRATION_PENDING`（task 的登記尚未確認）、連線錯誤都等下一輪，由 `Lookup` 決定。
     - 所以中斷或回應遺失時，tx#1 只會有一筆，「沒花錢」也只在 relayer 確定沒有預留之後才會記下。
   - `reserved`：以付款的授權向 Signer 請求簽名（委派 `id@version`，或本人核准的 `approval_id`），request ID 由 intent 決定。
     - Signer 回「現在不行」（忙碌、逾時、預留尚未確認）就等待；其他拒絕，或太接近期限，轉 `RESERVED_NOT_PAID`（tx#1 已花，需要人工處理）。
+    - Signer 的 attempt 已關閉而沒有簽（`abandoned`、`expired_unsigned`）也轉 `RESERVED_NOT_PAID`；attempt 還開著就等待，太接近期限才轉。
+    - 簽回來的授權先和請購的付款綁定比對（From、To、金額、有效期間、nonce），不符就轉 `RESERVED_NOT_PAID`，不會送出。
   - `signed`：**先記成已送出**，再向商店送出 `PAYMENT-SIGNATURE`。同一筆付款每次送的都是同一份簽章。
   - `submitted`／`unknown`／`settled`：
     - 連線錯誤或 5xx：轉 `unknown`。
     - 200：**只有鏈上確認（`Chain.Status` 為 settled）才算已付款**，這時才記下結算、交付內容的 hash 與收據。鏈上還沒確認就等待；下一輪再送同一份簽章，商店是冪等的。
     - 202：等待。
-    - 402（驗證失敗）或 400：`VERIFICATION_FAILED`，不再送出。
-    - 402 `settlement_failed`（例如被搶先送出）：交給鏈上判定。
-    - 由鏈上判定時：settled 就記下結算；之後商店交付就記為已交付，商店拒絕就是 `DELIVERY_FAILED`（已付款、未交付）。`not_settled_expired` 轉 `NOT_SETTLED_EXPIRED`；`needs_review` 轉 `RECONCILE_NEEDS_REVIEW`；pending 就等待，絕不重付。
+    - 402（驗證失敗）或 400：`VERIFICATION_FAILED`，不再送出；已經 `settled` 時則是 `DELIVERY_FAILED`（已付款、未交付）。
+    - 402 `settlement_failed`（例如被搶先送出）或 `invalid_exact_evm_payload_authorization_nonce_used`（商店說 nonce 已用過）：交給鏈上判定。
+    - 其他狀態（408、429、代理的 404）：不算商店對這筆付款的回答，交給鏈上判定。
+    - 由鏈上判定時：settled 就記下結算；之後商店交付就記為已交付，商店拒絕就是 `DELIVERY_FAILED`（已付款、未交付）。`not_settled_expired` 轉 `NOT_SETTLED_EXPIRED`；`needs_review` 轉 `RECONCILE_NEEDS_REVIEW`；pending 就等待，絕不重付。已經 `settled` 的付款只認 settled：鏈上回別的答案就等待（那是節點的問題）。
 - **`Recover`**（啟動時）：`submitted` 一律轉 `unknown`（決策 5）。
-- **`Run`**：先恢復，再每隔一段時間（或被 `Kick` 喚醒）把所有未完成的付款各推進一次，一次一筆。
-- 新增：`budget.Relayer.Lookup`（anvil 測試確認：預留前回空、預留後回同一份證據）、`store.Store.TaskEnded`。
+- **`Run`**：先恢復，再每隔一段時間（`Every`，0 時為 1 秒；或被 `Kick` 喚醒）把所有未完成的付款各推進一次，一次一筆。`ErrPending` 以外的錯誤交給 `Log`。`Run` 執行時不另外呼叫 `Step`（一次一筆；即使另外呼叫也安全，因為每個外部呼叫都是冪等的）。
+- **`Margin`**：距離 `valid_before` 多少秒以內就不再開始新的一步。必須大於商店自己的 5 秒，再加上簽名的時間，否則已預留、已簽名的付款會被商店以期限拒絕。
+- **已知限制**：`late` 只看 `valid_before`。本人核准的 grant 或委派如果比它早到期，tx#1 會先花掉，再由 Signer 拒絕（`APPROVAL_EXPIRED`／`DELEGATION_EXPIRED`），轉 `RESERVED_NOT_PAID`。H3 接上 Signer 時再考慮在預留前檢查。
+- 新增：`budget.Relayer.Lookup`（anvil 測試確認：預留前回空、預留後回同一份證據）、`store.Store.TaskEnded`、`merchant.ParsePayment`（照商店的方式讀 exact-EVM payload，不做判定）。`budget.Relayer.Reserve` 對還在登記中的 task 改回 `TASK_REGISTRATION_PENDING`。
 - **驗證**（真的 Store、假的四個元件；`go test -race` 通過）：
   - `TestPaidEndToEnd`：一次推進就走完，預留、簽名、送出各一次；已交付的不再移動。
   - `TestPaidOnlyWhenTheChainSaysSo`：商店回 200 但鏈上未確認時不算已付款，確認後才交付；全程同一份簽章。
@@ -292,4 +297,32 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查�
   - `TestRefusals`：relayer 拒絕 → `RESERVE_FAILED`；Signer 拒絕 → `RESERVED_NOT_PAID`；商店驗證失敗 → `VERIFICATION_FAILED`，不再送出。
   - `TestUnknownMovedByTheChain`：202 時等待；過期未用 → `NOT_SETTLED_EXPIRED`；被搶先送出（鏈上已付）→ `DELIVERY_FAILED`，畫面顯示已付款。
   - `TestTooLate`、`TestWebAuthnAskPaid`（Signer 收到的是 `approval_id`，不是委派）、`TestRun`。
-- **突變**：H2 新增 11 項，11／11 KILLED。過程中修了兩項突變本身的問題：一項突變後變數沒被使用而編譯不過；另一項在 macOS 上時鐘只到微秒，`UnixNano()%1000` 永遠為 0，突變根本沒有改變 ID。
+  - review 後新增：
+    - `TestPaymentSignatureTheShopReads`：`PAYMENT-SIGNATURE` 送到真的商店 handler，回 402 `M1_PAYMENT_UNAVAILABLE`（代表通過商店的判斷），payload 也能被 `merchant.ParsePayment` 讀取。
+    - `TestRelayerStates`：relayer 已送出就等待（不再 `Reserve`）、已失敗就結束、查詢錯誤就等待；task 忙碌時等待，之後預留一次。
+    - `TestSignerAnswers`：attempt 已放棄 → `RESERVED_NOT_PAID`；簽了另一個 nonce → `RESERVED_NOT_PAID`，沒有送出；attempt 還開著就等待，太接近期限才轉。
+    - `TestShopAnswers`：5xx → `unknown`；429 留在 `submitted`；400 → `VERIFICATION_FAILED`；nonce 已用過且鏈上已付 → `DELIVERY_FAILED`。
+    - `TestChainAnswers`：節點錯誤就等待；`needs_review` → `RECONCILE_NEEDS_REVIEW`。
+    - `TestSettledThenDelivered`：鏈上已付、商店回 202 → `settled`；之後鏈上回別的答案仍是 `settled`；下一輪交付；`settled` 之後商店回 402 → `DELIVERY_FAILED`。
+    - budget 的 `TestBlockedRegistrationIsResigned` 加上：登記卡住時預留回 `TASK_REGISTRATION_PENDING`（anvil）。
+- **突變**：H2 新增 11 項；review 後再加 11 項（其中 1 項在 anvil 上），共 22 項，22／22 KILLED（`local-mutations.py "P2 H2" --all`）。過程中修了兩項突變本身的問題：一項突變後變數沒被使用而編譯不過；另一項在 macOS 上時鐘只到微秒，`UnixNano()%1000` 永遠為 0，突變根本沒有改變 ID。
+
+#### H2 的 review（91ca392）與修正
+
+Claude Code 獨立 context 的 code-reviewer，結論 APPROVE（有應修項目）。審查者對照真的 relayer、Signer、商店、Store 的狀態轉換與 paycontract 的順序規則，確認沒有第二筆 tx#1、第二份簽章或 `PAYMENT-SIGNATURE`，不會在有預留時記成「沒花錢」，也不會在 `Chain.Status` 不是 settled 時記成已付款。
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Important | Signer 的 attempt 已關閉（`expired_unsigned`、`abandoned`）時回的是狀態而不是錯誤，付款永遠停在 `reserved`，tx#1 已花卻沒人處理 | 這兩種狀態轉 `RESERVED_NOT_PAID`；其他未簽的狀態只在還來得及時等待；`TestSignerAnswers` |
+| Important | 重試清單裡的 `TASK_REGISTRATION_PENDING`，`Reserve` 從不回；登記中的 task 回 `TASK_NOT_REGISTERED`，付款直接失敗 | `Reserve` 對登記中的 task 回 `TASK_REGISTRATION_PENDING`；anvil 測試 |
+| Important | `PAYMENT-SIGNATURE` 沒有對真的商店測過；欄位名稱或格式一錯，每筆付款都會在 tx#1 之後變成 `VERIFICATION_FAILED` | `TestPaymentSignatureTheShopReads`，新增 `merchant.ParsePayment` |
+| Important | 假元件漏掉整個分支（relayer 的 sent／failed／錯誤、可重試的拒絕、鏈上錯誤與 needs_review、商店 5xx 與 400、`settled` 後交付、`settled` 後 402） | 都補上測試與突變 |
+| 建議 | 簽回來的授權在記錄前沒有比對 | 和付款綁定比對，不符就 `RESERVED_NOT_PAID` |
+| 建議 | `settled` 後商店的任何非 200／202（包括 408、429）都變 `DELIVERY_FAILED` | 只有 400／402 是最終的，其他交給鏈上 |
+| 建議 | `settled` 後鏈上回 `not_settled_expired`／`needs_review` 時，Store 會拒絕轉換，每輪都出錯 | 已 `settled` 只認 settled，其他答案就等待 |
+| 建議 | 商店回 nonce 已用過時（商店遺失資料庫，或授權外洩）直接記成 `VERIFICATION_FAILED`，即使鏈上已付 | 交給鏈上判定 |
+| 建議 | `Run`：`kick` 在 `Run` 裡才建立，與 `Kick` 不同步；`Every` 為 0 時空轉；錯誤被丟掉；沒寫明不能和 `Step` 同時呼叫 | `sync.Once` 建立；預設 1 秒；`Log`；寫進註解與本節 |
+| 建議 | 寫明 `Margin` 要涵蓋什麼 | 寫進註解與本節 |
+| 建議 | `late` 只看 `valid_before`，grant 或委派可能更早到期 | 列為已知限制，H3 再處理 |
+| 建議（H3） | Signer client 必須把 503 `SIGNER_ERROR` 當成一般錯誤，不能當成拒絕，否則暫時的錯誤會變成 `RESERVED_NOT_PAID` | H3 實作 |
+| 建議 | §12.2 漏了 `settled → DELIVERY_FAILED`；Signer 那一點在修正前不正確 | 修正 |

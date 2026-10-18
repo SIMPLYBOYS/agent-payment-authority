@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
@@ -61,7 +62,12 @@ type Chain interface {
 }
 
 // Worker moves payments. Margin is the seconds before valid_before after
-// which nothing new is started for a payment (a reservation, a signature).
+// which nothing new is started for a payment (a reservation, a signature):
+// more than the shop's own margin (5 s) plus the time to sign, or the shop
+// refuses a payment already reserved and signed. Step is not called while
+// Run runs (one payment at a time; a second caller is still safe, every
+// outside call being idempotent). Log, when set, gets a line per payment
+// error other than ErrPending.
 type Worker struct {
 	Store   *store.Store
 	Relayer Relayer
@@ -70,8 +76,15 @@ type Worker struct {
 	Chain   Chain
 	Clock   func() uint64
 	Margin  uint64
-	Every   time.Duration // Run's interval
+	Every   time.Duration // Run's interval; a second when 0
+	Log     func(string)
+	once    sync.Once
 	kick    chan struct{}
+}
+
+func (w *Worker) kicks() chan struct{} {
+	w.once.Do(func() { w.kick = make(chan struct{}, 1) })
+	return w.kick
 }
 
 // open are the states a payment is still moved from.
@@ -95,7 +108,7 @@ func (w *Worker) Recover(ctx context.Context) error {
 // Kick asks Run to look at the payments now.
 func (w *Worker) Kick() {
 	select {
-	case w.kick <- struct{}{}:
+	case w.kicks() <- struct{}{}:
 	default:
 	}
 }
@@ -104,25 +117,35 @@ func (w *Worker) Kick() {
 // or when kicked, until ctx ends. A payment's error stays with it: the
 // next round asks again.
 func (w *Worker) Run(ctx context.Context) error {
-	if w.kick == nil {
-		w.kick = make(chan struct{}, 1)
+	kick, every := w.kicks(), w.Every
+	if every == 0 {
+		every = time.Second
 	}
 	if err := w.Recover(ctx); err != nil {
 		return err
 	}
 	for {
 		ps, err := w.Store.PaymentsIn(open...)
-		if err == nil {
-			for _, p := range ps {
-				w.Step(ctx, p)
+		if err != nil {
+			w.log("payments: " + err.Error())
+		}
+		for _, p := range ps {
+			if _, err := w.Step(ctx, p); err != nil && !errors.Is(err, ErrPending) {
+				w.log("payment " + p.IntentHash + ": " + err.Error())
 			}
 		}
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-w.kick:
-		case <-time.After(w.Every):
+		case <-kick:
+		case <-time.After(every):
 		}
+	}
+}
+
+func (w *Worker) log(line string) {
+	if w.Log != nil {
+		w.Log(line)
 	}
 }
 
@@ -257,8 +280,18 @@ func (w *Worker) sign(ctx context.Context, p store.Payment, o paycontract.Purcha
 		}
 		return p, ErrPending // the same request ID next time: the same attempt
 	}
-	if reply.State != "signed" || reply.Authorization == nil {
+	switch {
+	case reply.State == "abandoned" || reply.State == "expired_unsigned":
+		return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID") // the attempt closed unsigned: never signed now
+	case reply.State != "signed" || reply.Authorization == nil:
+		if w.late(o) {
+			return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID")
+		}
 		return p, ErrPending
+	}
+	if b, a := o.PaymentBinding, reply.Authorization; !strings.EqualFold(a.From, b.From) || !strings.EqualFold(a.To, b.PayTo) || a.Value != string(b.Amount) ||
+		a.ValidAfter != b.ValidAfter || a.ValidBefore != b.ValidBefore || a.Nonce != b.Nonce {
+		return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID") // not this order's authorization: never sent
 	}
 	raw, err := json.Marshal(reply.Authorization)
 	if err != nil {
@@ -328,15 +361,19 @@ func (w *Worker) submit(ctx context.Context, p store.Payment, o paycontract.Purc
 		return w.byChain(ctx, p, ra, &ans)
 	case ans.Status == 202:
 		return w.byChain(ctx, p, ra, nil)
-	case ans.Status == 402 && (ans.Response == nil || ans.Response.ErrorReason != "settlement_failed") || ans.Status == 400:
+	case ans.Status == 402 && ans.Response != nil && (ans.Response.ErrorReason == "settlement_failed" || ans.Response.ErrorReason == "invalid_exact_evm_payload_authorization_nonce_used"):
+		// Failed in settlement (a front-run, say), or a nonce the shop says is used:
+		// whether it was paid is the chain's to say.
+		return w.byChain(ctx, p, ra, &ShopAnswer{Status: ans.Status})
+	case ans.Status == 402 || ans.Status == 400:
 		if p.State == "settled" {
 			return w.Store.PaymentFailed(p.IntentHash, "DELIVERY_FAILED") // paid, and the shop does not deliver
 		}
 		// The shop refused it unsent: never paid again; a person's to look at.
 		return w.Store.PaymentFailed(p.IntentHash, "VERIFICATION_FAILED")
 	}
-	// 402 settlement_failed (a front-run, say) or anything else: the chain says what happened.
-	return w.byChain(ctx, p, ra, &ShopAnswer{Status: ans.Status})
+	// Anything else (408, 429, a proxy's 404): not an answer about the payment; the chain says.
+	return w.byChain(ctx, p, ra, nil)
 }
 
 // byChain moves a submitted, unknown or settled payment by the chain's
@@ -345,6 +382,9 @@ func (w *Worker) byChain(ctx context.Context, p store.Payment, ra reconcile.Auth
 	r, err := w.Chain.Status(ctx, ra)
 	if err != nil {
 		return p, ErrPending
+	}
+	if p.State == "settled" && r.State != "settled" {
+		return p, ErrPending // settled at confirmed depth stays so; a disagreeing answer is the node's
 	}
 	switch r.State {
 	case "settled":
@@ -363,7 +403,7 @@ func (w *Worker) byChain(ctx context.Context, p store.Payment, ra reconcile.Auth
 		case ans != nil && ans.Status == 200:
 			sum := sha256.Sum256(ans.Body)
 			return w.Store.PaymentDelivered(p.IntentHash, hex.EncodeToString(sum[:]), len(ans.Body))
-		case ans != nil && ans.Status != 202:
+		case ans != nil && (ans.Status == 400 || ans.Status == 402):
 			return w.Store.PaymentFailed(p.IntentHash, "DELIVERY_FAILED") // paid on chain, the shop refused to deliver
 		}
 		return p, ErrPending // paid: the content on the next ask
