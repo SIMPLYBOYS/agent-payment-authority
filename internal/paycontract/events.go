@@ -20,12 +20,27 @@ var EventTypes = []string{"TASK_STARTED", "DELEGATION_BOUND", "PURCHASE_PROPOSED
 	"APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN", "APPROVED", "APPROVAL_DENIED", "APPROVAL_SUPERSEDED", "GRANT_ISSUED",
 	"TASK_CANCELLED", "TASK_TIMED_OUT", "CLI_EXITED",
 	"VOICE_CHALLENGE_VERIFIED", "VOICE_CHALLENGE_FAILED", "VOICE_UNAVAILABLE", // V1: a voice outcome, just before the closure it leads to
-	"BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED", "PAYMENT_NEEDS_REVIEW",
-	"RESOURCE_DELIVERED", "RECEIPT_ISSUED"}
+	"PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED",
+	"PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED"}
 
 // PaymentEvents are P2's payment events, in their order.
-var PaymentEvents = []string{"BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED",
-	"PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED"}
+var PaymentEvents = []string{"PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED",
+	"PAYMENT_NOT_SETTLED", "PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED"}
+
+// Ended: the stream has stopped taking new purchases or payments, as the
+// order rules see it (a Deny, a cancellation, a CLI timeout). A payment
+// is requested only before; one requested is carried through after.
+func Ended(events []contracts.AuditEvent) bool {
+	for _, e := range events {
+		switch {
+		case e.EventType == "TASK_CANCELLED" || e.EventType == "TASK_TIMED_OUT":
+			return true
+		case e.EventType == "POLICY_DECIDED" && e.Payload.Decision != nil && e.Payload.Decision.PolicyVerdict == "Deny":
+			return true
+		}
+	}
+	return false
+}
 
 // P2's payment codes. NotSettledCodes end a payment that spent nothing
 // (never reserved); NeedsReviewCodes one a person must look at: reserved
@@ -204,8 +219,8 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 			return err
 		}
 		return credentialCheck(p.Credential)
-	case "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED", "PAYMENT_NEEDS_REVIEW",
-		"RESOURCE_DELIVERED", "RECEIPT_ISSUED":
+	case "PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED",
+		"PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED":
 		if !purchase {
 			return errf("%s needs a purchase", e.EventType)
 		}
@@ -309,6 +324,7 @@ func paymentEvent(e contracts.AuditEvent, order *PurchaseOrder) error {
 	}
 	r := p.Payment
 	want := map[string][]string{ // record fields per type; nil: no record at all
+		"PAYMENT_REQUESTED":  {"method", "amount"},
 		"BUDGET_RESERVED":    {"method", "amount", "tx", "block"},
 		"PAYMENT_SIGNED":     {"method"},
 		"PAYMENT_SETTLED":    {"tx", "block"},
@@ -471,8 +487,8 @@ func (st *chain) apply(e contracts.AuditEvent) error {
 		}
 		st.granted[po] = true
 		st.grantMethod[po] = e.Payload.AuthorizationMethod
-	case "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED", "PAYMENT_NEEDS_REVIEW",
-		"RESOURCE_DELIVERED", "RECEIPT_ISSUED":
+	case "PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED",
+		"PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED":
 		return st.payment(e, po)
 	case "TASK_CANCELLED", "TASK_TIMED_OUT":
 		if st.lifecycleEnded {
@@ -484,12 +500,13 @@ func (st *chain) apply(e contracts.AuditEvent) error {
 }
 
 // payment is P2's order for one purchase (docs/commercial-p2-host.md 3, 4):
-// reserved only for an Allow (delegation) or an approved grant (webauthn;
+// requested only for an Allow (delegation) or an approved grant (webauthn;
 // a simulated grant never pays), and never once the task has ended; then
-// signed, submitted, settled, delivered, receipt, each once and in order.
-// NOT_SETTLED ends one that never reserved; NEEDS_REVIEW one reserved and
-// not settled, or settled and not delivered (DELIVERY_FAILED). Nothing
-// follows an end.
+// reserved, signed, submitted, settled, delivered, receipt, each once and
+// in order, also after the task ended (a payment in flight is carried
+// through: its tx#1 may already be on chain). NOT_SETTLED ends one never
+// reserved; NEEDS_REVIEW one reserved and not settled, or settled and not
+// delivered (DELIVERY_FAILED). Nothing follows an end.
 func (st *chain) payment(e contracts.AuditEvent, po string) error {
 	last := st.paid[po]
 	method := map[string]string{"Allow": "delegation"}[st.verdict[po]]
@@ -497,23 +514,23 @@ func (st *chain) payment(e contracts.AuditEvent, po string) error {
 		method = st.grantMethod[po]
 	}
 	payable := method == "delegation" || method == "webauthn"
-	after := map[string]string{"PAYMENT_SIGNED": "BUDGET_RESERVED", "PAYMENT_SUBMITTED": "PAYMENT_SIGNED", "PAYMENT_SETTLED": "PAYMENT_SUBMITTED",
-		"RESOURCE_DELIVERED": "PAYMENT_SETTLED", "RECEIPT_ISSUED": "RESOURCE_DELIVERED"}
+	after := map[string]string{"BUDGET_RESERVED": "PAYMENT_REQUESTED", "PAYMENT_SIGNED": "BUDGET_RESERVED", "PAYMENT_SUBMITTED": "PAYMENT_SIGNED",
+		"PAYMENT_SETTLED": "PAYMENT_SUBMITTED", "RESOURCE_DELIVERED": "PAYMENT_SETTLED", "RECEIPT_ISSUED": "RESOURCE_DELIVERED"}
 	switch t := e.EventType; {
-	case t == "BUDGET_RESERVED":
+	case t == "PAYMENT_REQUESTED":
 		if !payable || last != "" || st.stopped {
-			return errors.New("a reservation is one Allow's or approved grant's, once, before the task ends")
+			return errors.New("a payment is one Allow's or approved grant's, requested once, before the task ends")
 		}
 		if e.Payload.Payment.Method != method {
-			return errors.New("the reservation's method is the purchase's authorization")
+			return errors.New("the payment's method is the purchase's authorization")
 		}
-	case t == "PAYMENT_SIGNED":
+	case t == "BUDGET_RESERVED", t == "PAYMENT_SIGNED":
 		if last != after[t] || e.Payload.Payment.Method != method {
-			return errors.New("signed once, after its reservation, under its authorization")
+			return fmt.Errorf("%s follows %s, once, under the purchase's authorization", t, after[t])
 		}
 	case t == "PAYMENT_NOT_SETTLED":
-		if !payable || last != "" {
-			return errors.New("NOT_SETTLED ends a payment that never reserved")
+		if last != "PAYMENT_REQUESTED" {
+			return errors.New("NOT_SETTLED ends a payment requested and never reserved")
 		}
 	case t == "PAYMENT_NEEDS_REVIEW":
 		reserved := slices.Contains([]string{"BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED"}, last)

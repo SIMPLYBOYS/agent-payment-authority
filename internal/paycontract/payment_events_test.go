@@ -29,6 +29,7 @@ func TestPaymentEventOrder(t *testing.T) {
 	pay := func(typ string, r *contracts.PaymentRecord, code string) step {
 		return step{typ, contracts.EventPayload{Payment: r, Code: code}, true}
 	}
+	requested := func(m string) step { return pay("PAYMENT_REQUESTED", &contracts.PaymentRecord{Method: m}, "") }
 	reserved := func(m string) step { return pay("BUDGET_RESERVED", &contracts.PaymentRecord{Method: m}, "") }
 	signed := func(m string) step { return pay("PAYMENT_SIGNED", &contracts.PaymentRecord{Method: m}, "") }
 	submitted, settled := pay("PAYMENT_SUBMITTED", nil, ""), pay("PAYMENT_SETTLED", &contracts.PaymentRecord{}, "")
@@ -37,32 +38,38 @@ func TestPaymentEventOrder(t *testing.T) {
 	deliveryFailed := pay("PAYMENT_NEEDS_REVIEW", nil, "DELIVERY_FAILED")
 	cancelled := step{"TASK_CANCELLED", contracts.EventPayload{Code: "HOST_CANCELLED"}, false}
 	then := func(base []step, s ...step) []step { return append(append([]step{}, base...), s...) }
-	line := []step{reserved("delegation"), signed("delegation"), submitted, settled, delivered, receipt}
+	d := "delegation"
+	line := []step{requested(d), reserved(d), signed(d), submitted, settled, delivered, receipt}
 	for name, c := range map[string]struct {
 		steps []step
 		ok    bool
 	}{
-		"an Allow paid":                        {then(allowed, line...), true},
-		"an Ask paid under webauthn":           {then(approvedBy("webauthn"), reserved("webauthn"), signed("webauthn"), submitted, settled, delivered, receipt), true},
-		"never reserved":                       {then(allowed, notSettled), true},
-		"reserved, not paid":                   {then(allowed, reserved("delegation"), signed("delegation"), review), true},
-		"paid, not delivered":                  {then(allowed, line[:4]...), true},
-		"paid, delivery failed":                {then(allowed, append(line[:4:4], deliveryFailed)...), true},
-		"in flight when the task is cancelled": {then(allowed, reserved("delegation"), cancelled, signed("delegation"), submitted), true},
-		"an open Ask reserved":                 {then(ask, reserved("webauthn")), false},
-		"a simulated grant reserved":           {then(approvedBy("simulated"), reserved("simulated")), false},
-		"an Allow reserved as webauthn":        {then(allowed, reserved("webauthn")), false},
-		"an Ask reserved as delegation":        {then(approvedBy("webauthn"), reserved("delegation")), false},
-		"reserved after the task ended":        {then(allowed, cancelled, reserved("delegation")), false},
-		"reserved twice":                       {then(allowed, reserved("delegation"), reserved("delegation")), false},
-		"signed before reserved":               {then(allowed, signed("delegation")), false},
-		"settled before submitted":             {then(allowed, reserved("delegation"), signed("delegation"), settled), false},
-		"delivered before settled":             {then(allowed, reserved("delegation"), signed("delegation"), submitted, delivered), false},
-		"not settled after a reservation":      {then(allowed, reserved("delegation"), notSettled), false},
-		"needs review before a reservation":    {then(allowed, review), false},
-		"delivery failed before settled":       {then(allowed, reserved("delegation"), deliveryFailed), false},
-		"anything after the receipt":           {then(allowed, append(line, deliveryFailed)...), false},
-		"anything after an end":                {then(allowed, notSettled, reserved("delegation")), false},
+		"an Allow paid":                      {then(allowed, line...), true},
+		"an Ask paid under webauthn":         {then(approvedBy("webauthn"), requested("webauthn"), reserved("webauthn"), signed("webauthn"), submitted, settled, delivered, receipt), true},
+		"never reserved":                     {then(allowed, requested(d), notSettled), true},
+		"reserved, not paid":                 {then(allowed, requested(d), reserved(d), signed(d), review), true},
+		"paid, not delivered":                {then(allowed, line[:5]...), true},
+		"paid, delivery failed":              {then(allowed, append(line[:5:5], deliveryFailed)...), true},
+		"requested, then the task cancelled": {then(allowed, requested(d), cancelled, reserved(d), signed(d), submitted), true},
+		"reserved, then the task cancelled":  {then(allowed, requested(d), reserved(d), cancelled, signed(d), submitted), true},
+		"an open Ask requested":              {then(ask, requested("webauthn")), false},
+		"a simulated grant requested":        {then(approvedBy("simulated"), requested("simulated")), false},
+		"an Allow requested as webauthn":     {then(allowed, requested("webauthn")), false},
+		"an Ask requested as delegation":     {then(approvedBy("webauthn"), requested(d)), false},
+		"requested after the task ended":     {then(allowed, cancelled, requested(d)), false},
+		"reserved without a request":         {then(allowed, reserved(d)), false},
+		"reserved under another method":      {then(allowed, requested(d), reserved("webauthn")), false},
+		"requested twice":                    {then(allowed, requested(d), requested(d)), false},
+		"reserved twice":                     {then(allowed, requested(d), reserved(d), reserved(d)), false},
+		"signed before reserved":             {then(allowed, requested(d), signed(d)), false},
+		"settled before submitted":           {then(allowed, requested(d), reserved(d), signed(d), settled), false},
+		"delivered before settled":           {then(allowed, requested(d), reserved(d), signed(d), submitted, delivered), false},
+		"not settled after a reservation":    {then(allowed, requested(d), reserved(d), notSettled), false},
+		"not settled without a request":      {then(allowed, notSettled), false},
+		"needs review before a reservation":  {then(allowed, requested(d), review), false},
+		"delivery failed before settled":     {then(allowed, requested(d), reserved(d), deliveryFailed), false},
+		"anything after the receipt":         {then(allowed, append(line, deliveryFailed)...), false},
+		"anything after an end":              {then(allowed, requested(d), notSettled, reserved(d)), false},
 	} {
 		if err := ValidateEventOrder(chainOf(t, o, c.steps...)); (err == nil) != c.ok {
 			t.Errorf("%s: %v", name, err)
@@ -87,6 +94,9 @@ func TestPaymentEventShape(t *testing.T) {
 		p         contracts.EventPayload
 		ok        bool
 	}{
+		{"requested", "PAYMENT_REQUESTED", contracts.EventPayload{Payment: r(contracts.PaymentRecord{Method: "delegation", Amount: amount})}, true},
+		{"requested, no amount", "PAYMENT_REQUESTED", contracts.EventPayload{Payment: r(contracts.PaymentRecord{Method: "delegation"})}, false},
+		{"requested, another amount", "PAYMENT_REQUESTED", contracts.EventPayload{Payment: r(contracts.PaymentRecord{Method: "delegation", Amount: amount + "0"})}, false},
 		{"reserved", "BUDGET_RESERVED", contracts.EventPayload{Payment: r(contracts.PaymentRecord{Method: "delegation", Amount: amount, TxHash: tx, Block: 3})}, true},
 		{"reserved, another amount", "BUDGET_RESERVED", contracts.EventPayload{Payment: r(contracts.PaymentRecord{Method: "delegation", Amount: amount + "0", TxHash: tx, Block: 3})}, false},
 		{"reserved, no block", "BUDGET_RESERVED", contracts.EventPayload{Payment: r(contracts.PaymentRecord{Method: "delegation", Amount: amount, TxHash: tx})}, false},

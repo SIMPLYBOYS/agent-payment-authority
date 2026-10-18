@@ -110,7 +110,7 @@ func (r *Registry) ValidateEvent(e AuditEvent, order *PurchaseOrder) error {
 		return fmt.Errorf("invalid event code")
 	}
 	if p := e.Payload; p.DelegationID != "" || p.ApprovalSessionID != "" || p.GrantID != "" || p.AuthorizationMethod != "" || p.SignerApprovalID != "" || p.Credential != nil || p.Payment != nil {
-		return fmt.Errorf("delegation, approval session, grant and credential fields belong to the pay family, not M1")
+		return fmt.Errorf("delegation, approval session, grant, credential and payment fields belong to the pay family, not M1")
 	}
 	if e.EventType == "SYSTEM_READY" {
 		if e.Scope != nil || e.Sequence != 0 || e.PrevEventHash != "" || e.Payload.Decision != nil || order != nil {

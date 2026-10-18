@@ -183,30 +183,37 @@ H6 需要真的 Signer 與付款錢包，要等 H-D6 的金鑰建立好才能開
 ### 12.1 H1 Store（schema 7）
 
 - **事件**：
-  - pay 系列新增 8 個付款事件：`BUDGET_RESERVED`、`PAYMENT_SIGNED`、`PAYMENT_SUBMITTED`、`PAYMENT_SETTLED`、`PAYMENT_NOT_SETTLED`、`PAYMENT_NEEDS_REVIEW`、`RESOURCE_DELIVERED`、`RECEIPT_ISSUED`。
+  - pay 系列新增 9 個付款事件：`PAYMENT_REQUESTED`、`BUDGET_RESERVED`、`PAYMENT_SIGNED`、`PAYMENT_SUBMITTED`、`PAYMENT_SETTLED`、`PAYMENT_NOT_SETTLED`、`PAYMENT_NEEDS_REVIEW`、`RESOURCE_DELIVERED`、`RECEIPT_ISSUED`（`PAYMENT_REQUESTED` 是 review 後加的，見下方）。
   - payload 新增 pay 系列專用的 `payment` 紀錄：預留的方法、金額、交易與區塊；結算的交易與區塊；交付內容的 SHA-256；收據 ID。每種事件只帶它該帶的欄位，所有欄位都要有，也不能多帶。
   - 原因代碼分兩組：
     - `PAYMENT_NOT_SETTLED`（沒有花錢）：`RESERVE_FAILED`、`NOT_PAID_EXPIRED`；
     - `PAYMENT_NEEDS_REVIEW`：`RESERVED_NOT_PAID`、`NOT_SETTLED_EXPIRED`、`VERIFICATION_FAILED`、`RECONCILE_NEEDS_REVIEW`、`DELIVERY_FAILED`。
   - M1 的事件一律不接受 `payment`；`schemas/m1.schema.json` 也標明它在 M1 永遠不會出現。
 - **順序規則**（`paycontract.ValidateEventOrder`）：
-  - 只有 Allow（委派）或已核准並發出 webauthn grant 的請購可以預留；模擬核准的 grant 永遠不會付款。
-  - 預留的方法必須是這張請購的授權方式；task 結束後不能再預留。
-  - 預留 → 簽名 → 送出 → 結算 → 交付 → 收據，各一次、依序進行。已經在進行中的付款，在 task 被取消後仍可走完。
-  - `NOT_SETTLED` 只能結束一筆從未預留的付款；`NEEDS_REVIEW` 用在「已預留但未結算」或「已結算但未交付」（`DELIVERY_FAILED`）的付款；結束之後不能再有任何付款事件。
+  - 只有 Allow（委派）或已核准並發出 webauthn grant 的請購可以**請求付款**（`PAYMENT_REQUESTED`）；模擬核准的 grant 永遠不會付款。
+  - 付款的方法必須是這張請購的授權方式；task 結束後（Deny、取消、CLI 逾時，`paycontract.Ended`）不能再請求付款。
+  - 請求 → 預留 → 簽名 → 送出 → 結算 → 交付 → 收據，各一次、依序進行。**已經請求的付款，在 task 結束後仍可走完**：它的 tx#1 可能已經在鏈上。
+  - `NOT_SETTLED` 只能結束一筆已請求、從未預留的付款；`NEEDS_REVIEW` 用在「已預留但未結算」或「已結算但未交付」（`DELIVERY_FAILED`）的付款；結束之後不能再有任何付款事件。
 - **`payments` 表**：
   - 以 `intent_hash` 為鍵，一張請購最多一列；欄位有方法、grant 參照（Signer 的委派 `id@version`，或 Signer 的核准 ID）、金額、狀態與原因代碼、預留證據、簽出的授權、結算交易與區塊、商店的 `PAYMENT-RESPONSE`。
   - CHECK 規定每個狀態必須有的欄位。
 - **`receipts` 表**：已交付的付款各有一張收據，記錄 tx#1、tx#2、`PAYMENT-RESPONSE`、內容的 SHA-256 與大小，不存內容本身。
 - **Store 方法**：
-  - `StartPayment`：Allow 走委派；Ask 必須經本人核准，而且是 webauthn。其他一律拒絕且什麼都不寫：別人的 task、已結束的 task、Deny、尚未核准的 Ask、模擬核准、沒有 Signer 委派、憑證不再有效。
+  - `StartPayment`：Allow 走委派；Ask 必須經本人核准，而且是 webauthn。同一筆交易寫入付款列與 `PAYMENT_REQUESTED`。其他一律拒絕且什麼都不寫：
+    - 別人的 task；
+    - 依順序規則已結束的 task（和規則用同一個判斷 `paycontract.Ended`）；
+    - Deny、尚未核准的 Ask、模擬核准；
+    - 已過 `valid_before` 或 grant 已到期；
+    - 剩餘預算扣掉其他已請求、尚未預留的付款之後，不夠這一筆（`OVER_BUDGET`）；
+    - 沒有 Signer 委派；在另一個委派下再呼叫一次（`IDEMPOTENCY_CONFLICT`）；
+    - 憑證不再有效。
   - 之後依序是 `PaymentReserved`（同一筆交易裡扣減 task 的剩餘預算）、`PaymentSigned`、`PaymentSubmitted`、`PaymentUnknown`、`PaymentSettled`、`PaymentDelivered`（同時開收據）、`PaymentFailed`，另有 `PaymentsIn`、`PaymentOf`。
   - 每一步的狀態和事件都在同一筆交易裡寫入。同一步驟、同樣的值再呼叫一次，回傳現況；值不同回 `IDEMPOTENCY_CONFLICT`；不合法的轉移回 `INVALID_PAYMENT_TRANSITION`。
-- **檢視**：`PurchaseView.payment` 從付款事件推導，包含 `status`（即 `payment_status`）、狀態、原因代碼、tx#1、tx#2、內容 hash、收據 ID。原始決策（`decision`）仍然不改寫：它的 `payment_status` 是決策當下的合約欄位。
+- **檢視**：`PurchaseView.payment` 從付款事件推導（`PAYMENT_REQUESTED` 起就顯示「付款中」），包含 `status`（即 `payment_status`）、狀態、原因代碼、tx#1、tx#2、內容 hash、收據 ID。原始決策（`decision`）仍然不改寫：它的 `payment_status` 是決策當下的合約欄位。
 - **恢復檢查**（schema 7）：
-  - 每筆付款的狀態要和它的付款事件一致；有付款事件就一定要有對應的付款列；方法要符合請購的授權。
+  - 每筆付款的狀態要和它的付款事件一致；有付款事件就一定要有對應的付款列；方法要符合請購的授權，webauthn 付款的 grant 參照必須是那個 grant 的 Signer 核准 ID。
   - pay 系列 task 的剩餘預算，必須等於初始預算減去已預留的總額。
-  - 每筆已交付的付款恰好有一張收據。
+  - 每筆已交付的付款恰好有一張收據，收據的 tx#1、tx#2 與付款列相同。
 - **升級**：schema 6 → 7 只新增兩張表，沿用 `--upgrade-db`（先驗證、再備份）。
 - **驗證**：
   - Store 新增測試：
@@ -217,4 +224,21 @@ H6 需要真的 Signer 與付款錢包，要等 H-D6 的金鑰建立好才能開
     - `TestUpgradeSchema6`。
   - paycontract 新增 `TestPaymentEventOrder`（21 種順序）、`TestPaymentEventShape`（20 種 payload）、`TestM1RefusesPaymentRecord`。
   - 既有測試只改了 schema 版本與升級的輔助函式（新增 `toSchema6`）。
-  - `go test -race` 通過。突變 14 項，14／14 KILLED（`local-mutations.py "P2 H1" --all`，先跑未突變的基準）。
+  - `go test -race` 通過。突變 review 後共 22 項，22／22 KILLED（`local-mutations.py "P2 H1" --all`，先跑未突變的基準）。
+- **狀態表（§4）的實作差異**：`not_settled_expired` 與 `delivery_failed` 都是 `needs_review` 加上原因代碼（`NOT_SETTLED_EXPIRED`、`DELIVERY_FAILED`），不另設狀態。
+
+#### H1 的 review（9b854b4）與修正
+
+Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查者確認不會讓資料庫變得無法開啟：每一步都和事件在同一筆交易裡寫入，而且寫入前會先檢查順序。但有兩項 Critical：
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Critical | `requested` 沒有事件：付款已開始、tx#1 已在鏈上之後，task 才被取消或逾時，預留就記不進去了（只能錯記成「沒花錢」，或永遠卡在 `requested`） | `StartPayment` 發出 `PAYMENT_REQUESTED`；「task 結束後不能開始」改成套在請求上，已請求的付款可以走完；`TestPaymentInFlightWhenTheTaskEnds`（取消、逾時、另一張請購被 Deny 三種） |
+| Critical | `StartPayment` 只看取消與逾時，但順序規則把任何 Deny 也視為結束 | 共用 `paycontract.Ended`；`TestPaymentNotStartedAfterADeny` |
+| Important | 交付重送沒有比對內容 | 和收據的 hash 與大小比對 |
+| Important | 預算只在預留之後才檢查：兩個 Allow 在預留前一起決定，加起來可能超過預算 | 開始時就扣掉其他已請求的付款再檢查；`TestPaymentStartOverBudget` |
+| Important | 恢復檢查沒有比對 webauthn 的 grant | 比對 grant 的方法與 Signer 核准 ID；`TestPaymentRecoveryRefusesAnotherGrant` |
+| 建議 | 預留重送沒比對 tx 與區塊；在另一個委派下重新開始沒有被拒；已過期的請購仍可開始；收據沒比對 tx#1；`requested` 的檢視顯示「未開始」；`PaymentsIn` 在 Go 裡過濾；負的大小變成 CHECK 錯誤；M1 的錯誤訊息沒提 payment；多餘的條件 | 都已處理（付款列加 `reserve_tx`／`reserve_block`） |
+| 建議 | `PaymentSettled` 重送時若沒給 `PAYMENT-RESPONSE` 就不比對 | 不改：Reconciler 判定結算時沒有 `PAYMENT-RESPONSE` 可給 |
+| 問題 | Signer 委派代號（`DelegationRef`）是否必須是 task 綁定的那個委派 | 兩者是不同的東西：Host 的委派是 task 的業務範圍，Signer 的委派是 `signer.json` 的付款授權，Store 無法比對；由 Host 的可信設定提供 |
+| 問題（待 Aaron） | CLI 逾時（`TASK_TIMED_OUT`）之後，Ask 仍可被本人核准、發出 grant，但不會付款：本人核准了，什麼都沒付 | 目前的行為就是這樣，H4 會讓畫面寫明「task 已結束，不會付款」。要不要改成逾時後仍付款，需要你決定 |

@@ -808,7 +808,9 @@ MUTATIONS = [
     ('P2 H1: payment steps out of order', 'internal/paycontract/events.go',
      'if last != after[t] {', 'if false && last != after[t] {', 'TestPaymentEventOrder'),
     ('P2 H1: NOT_SETTLED after a reservation', 'internal/paycontract/events.go',
-     '\t\tif !payable || last != "" {\n', '\t\tif !payable {\n', 'TestPaymentEventOrder'),
+     'if last != "PAYMENT_REQUESTED" {', 'if last != "PAYMENT_REQUESTED" && last != "BUDGET_RESERVED" {', 'TestPaymentEventOrder'),
+    ('P2 H1: a payment in flight is refused once the task ended', 'internal/paycontract/events.go',
+     'if last != after[t] || e.Payload.Payment.Method != method {', 'if last != after[t] || e.Payload.Payment.Method != method || st.stopped {', 'TestPaymentEventOrder'),
     ('P2 H1: a reservation of another amount', 'internal/paycontract/events.go',
      'case r.Amount != "" && (order == nil || r.Amount != order.PaymentBinding.Amount):', 'case false && r.Amount != "" && (order == nil || r.Amount != order.PaymentBinding.Amount):', 'TestPaymentEventShape'),
     ('P2 H1: a reservation does not deduct the budget', 'internal/store/paid.go',
@@ -822,7 +824,19 @@ MUTATIONS = [
     ('P2 H1: a step replayed with other values', 'internal/store/paid.go',
      'if have.String != fmt.Sprint(v) {', 'if false && have.String != fmt.Sprint(v) {', 'TestPaymentStepConflict'),
     ('P2 H1: a payment starts after the task ended', 'internal/store/paid.go',
-     'return e.EventType == "TASK_CANCELLED" || e.EventType == "TASK_TIMED_OUT"\n', 'return false && (e.EventType == "TASK_CANCELLED" || e.EventType == "TASK_TIMED_OUT")\n', 'TestPaymentStartRefusals'),
+     'case paycontract.Ended(t.events):', 'case false && paycontract.Ended(t.events):', 'TestPaymentNotStartedAfterADeny'),
+    ('P2 H1: two Allows go over the budget together', 'internal/store/paid.go',
+     'if left, err = subtract(left, a); err != nil {', 'if left, err = subtract(left, a); false && err != nil {', 'TestPaymentStartOverBudget'),
+    ('P2 H1: a purchase past its window is started', 'internal/store/paid.go',
+     'case p.V1 != nil && p.V1.PaymentBinding.ValidBefore <= now:', 'case false && p.V1 != nil && p.V1.PaymentBinding.ValidBefore <= now:', 'TestPaymentStartExpired'),
+    ('P2 H1: a delivery replayed with other content', 'internal/store/paid.go',
+     'if sum != contentSHA256 || n != size {', 'if false && (sum != contentSHA256 || n != size) {', 'TestPaymentAllowPaid'),
+    ("P2 H1: a webauthn payment of another grant passes recovery", 'internal/store/paid.go',
+     'if m != "webauthn" || signer.String != r.ref {', 'if false && (m != "webauthn" || signer.String != r.ref) {', 'TestPaymentRecoveryRefusesAnotherGrant'),
+    ('P2 H1: started again under another delegation', 'internal/store/paid.go',
+     'if p.Method == "delegation" && p.GrantRef != req.DelegationRef {', 'if false && p.Method == "delegation" && p.GrantRef != req.DelegationRef {', 'TestPaymentAllowPaid'),
+    ("P2 H1: a receipt's reservation is not checked", 'internal/store/paid.go',
+     'OR r.settle_tx != p.settle_tx OR r.reserve_tx != p.reserve_tx)', 'OR r.settle_tx != p.settle_tx)', 'TestPaymentRecoveryRefuses'),
     ('P2 H1: paid and not delivered reads as needs review', 'internal/store/paid.go',
      '\t\tif code == "DELIVERY_FAILED" {\n\t\t\treturn "paid"', '\t\tif false && code == "DELIVERY_FAILED" {\n\t\t\treturn "paid"', 'TestPaymentFailures'),
     # AE1 (docs/commercial-ae1.md): the scorer and the report.
@@ -900,6 +914,8 @@ MUTATIONS = [
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    ("P2 H1: another purchase's Deny does not end the task for payments", 'internal/paycontract/events.go',
+     'case e.EventType == "POLICY_DECIDED" && e.Payload.Decision != nil && e.Payload.Decision.PolicyVerdict == "Deny":', 'case false && e.EventType == "POLICY_DECIDED" && e.Payload.Decision != nil && e.Payload.Decision.PolicyVerdict == "Deny":', 'internal/store:TestPaymentNotStartedAfterADeny'),
     ('P2 H1: M1 takes a payment record', 'internal/contracts/events.go',
      '|| p.Credential != nil || p.Payment != nil {', '|| p.Credential != nil || false && p.Payment != nil {', 'internal/paycontract:TestM1RefusesPaymentRecord'),
     # P2 Reconciler (docs/commercial-p2.md 9.12).

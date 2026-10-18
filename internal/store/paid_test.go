@@ -101,6 +101,14 @@ func TestPaymentAllowPaid(t *testing.T) {
 	if err != nil || replay || p.State != "requested" || p.IntentHash != intent || p.Method != "delegation" || p.GrantRef != "dlg-a@1" {
 		t.Fatalf("start %+v %v %v", p, replay, err)
 	}
+	if v := e.view(s, po); v == nil || v.Status != "paying" || v.State != "requested" {
+		t.Fatalf("requested view %+v", v)
+	}
+	other := payStart(po)
+	other.DelegationRef = "dlg-a@2"
+	if _, _, err := s.StartPayment(other); Code(err) != "IDEMPOTENCY_CONFLICT" {
+		t.Fatalf("started again under another delegation: %v", err)
+	}
 	if again, replay, err := s.StartPayment(payStart(po)); err != nil || !replay || again.IntentHash != intent {
 		t.Fatalf("start again %+v %v", again, err)
 	}
@@ -130,7 +138,7 @@ func TestPaymentAllowPaid(t *testing.T) {
 			}
 		}
 	}
-	if got := e.paymentEvents(po); strings.Join(got, ",") != "BUDGET_RESERVED,PAYMENT_SIGNED,PAYMENT_SUBMITTED,PAYMENT_SETTLED,RESOURCE_DELIVERED,RECEIPT_ISSUED" {
+	if got := e.paymentEvents(po); strings.Join(got, ",") != "PAYMENT_REQUESTED,BUDGET_RESERVED,PAYMENT_SIGNED,PAYMENT_SUBMITTED,PAYMENT_SETTLED,RESOURCE_DELIVERED,RECEIPT_ISSUED" {
 		t.Fatalf("events %v", got)
 	}
 	if left := e.budgetLeft(); left == before {
@@ -153,6 +161,112 @@ func TestPaymentAllowPaid(t *testing.T) {
 	}
 	if _, err := s.PaymentOf("consumer-b", "task-a", po); Code(err) != "UNKNOWN_PAYMENT" {
 		t.Fatalf("B read A's payment: %v", err)
+	}
+	if _, err := s.PaymentDelivered(intent, strings.Repeat("d", 64), 36); Code(err) != "IDEMPOTENCY_CONFLICT" {
+		t.Fatalf("delivered again with other content: %v", err)
+	}
+	if _, err := s.PaymentDelivered(intent, content, 37); Code(err) != "IDEMPOTENCY_CONFLICT" {
+		t.Fatalf("delivered again with another size: %v", err)
+	}
+}
+
+// A payment in flight when the task ends is carried through: requested
+// before a cancellation, a CLI timeout or another purchase's Deny, its
+// reservation (whose tx#1 may be on chain) is recorded after.
+func TestPaymentInFlightWhenTheTaskEnds(t *testing.T) {
+	for _, end := range []string{"cancel", "timeout", "deny"} {
+		t.Run(end, func(t *testing.T) {
+			e := newEnv(t)
+			s := e.open()
+			po, intent := e.payAllowed(s)
+			if _, _, err := s.StartPayment(payStart(po)); err != nil {
+				t.Fatal(err)
+			}
+			switch end {
+			case "cancel":
+				if err := s.Cancel("task-a"); err != nil {
+					t.Fatal(err)
+				}
+			case "timeout":
+				if err := s.CLITimeout("task-a"); err != nil {
+					t.Fatal(err)
+				}
+			case "deny":
+				o := v1Of(t, forTask(t, e.denied, "task-a"))
+				o.PaymentBinding.Nonce = "0x" + strings.Repeat("9", 64)
+				if r := submitV1(t, s, sessA, o); r.Purchase.Decision.PolicyVerdict != "Deny" {
+					t.Fatalf("not a Deny: %+v", r.Purchase.Decision)
+				}
+			}
+			if p, err := s.PaymentReserved(intent, Reservation{Evidence: evidence, TxHash: tx1, Block: 7}); err != nil || p.State != "reserved" {
+				t.Fatalf("the reservation after the task ended: %+v %v", p, err)
+			}
+			if _, err := s.PaymentSigned(intent, auth); err != nil {
+				t.Fatal(err)
+			}
+			s.Close()
+			s = e.open()
+			defer s.Close()
+		})
+	}
+}
+
+// Another purchase's Deny ends the task for new payments, as the order
+// rules see it: an Allow decided before it is not started after it.
+func TestPaymentNotStartedAfterADeny(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	po, _ := e.payAllowed(s)
+	o := v1Of(t, forTask(t, e.denied, "task-a"))
+	o.PaymentBinding.Nonce = "0x" + strings.Repeat("9", 64)
+	submitV1(t, s, sessA, o)
+	if _, _, err := s.StartPayment(payStart(po)); Code(err) != "TASK_ALREADY_ENDED" {
+		t.Fatalf("after a Deny: %v", err)
+	}
+}
+
+// Two Allows decided before either is reserved never go over the budget
+// together: the second is refused at its start.
+func TestPaymentStartOverBudget(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	d, _, err := s.ConfirmDelegation(DelegationRequest{RequestID: "dlg-req-small-00000000", ConsumerID: "consumer-a", Scenario: "pay", Purpose: "a brief",
+		AssetID: e.profile.AssetID, Merchants: e.profile.Merchants, TaskBudget: "80000", AllowMax: "60000", ApprovalDeadlineSeconds: 30, ValidSeconds: 600,
+		ConfirmedBy: "simulated:consumer-a:host-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setup := e.setup("task-a")
+	setup.ContractVersion, setup.DelegationID = "apa.pay.v1", d.DelegationID
+	if err := s.StartTask(setup); err != nil {
+		t.Fatal(err)
+	}
+	var pos []string
+	for i := range 2 {
+		o := v1Of(t, forTask(t, e.allow, "task-a"))
+		o.Intent.PurchaseOrderID, o.RequestID = o.Intent.PurchaseOrderID+string(rune('a'+i)), o.RequestID+string(rune('a'+i))
+		o.PaymentBinding.Nonce = "0x" + strings.Repeat(string(rune('5'+i)), 64)
+		if r := submitV1(t, s, sessA, o); r.Purchase.Decision.PolicyVerdict != "Allow" {
+			t.Fatalf("purchase %d: %+v", i, r.Purchase.Decision)
+		}
+		pos = append(pos, o.Intent.PurchaseOrderID)
+	}
+	if _, _, err := s.StartPayment(payStart(pos[0])); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.StartPayment(payStart(pos[1])); Code(err) != "OVER_BUDGET" {
+		t.Fatalf("the second over the budget left: %v", err)
+	}
+}
+
+// A purchase past its payment window is not started.
+func TestPaymentStartExpired(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	po, _ := e.payAllowed(s)
+	e.clock.Add(3600)
+	if _, _, err := s.StartPayment(payStart(po)); Code(err) != "PURCHASE_EXPIRED" {
+		t.Fatalf("past valid_before: %v", err)
 	}
 }
 
@@ -311,9 +425,10 @@ func TestPaymentFailures(t *testing.T) {
 // budget that disagrees with the reservations, a missing receipt.
 func TestPaymentRecoveryRefuses(t *testing.T) {
 	for name, sql := range map[string]string{
-		"a state without its event": `UPDATE payments SET state = 'submitted'`,
-		"a budget not deducted":     `UPDATE tasks SET budget_remaining = '5000000' WHERE task_id = 'task-a'`,
-		"a receipt removed":         `DELETE FROM receipts`,
+		"a state without its event":  `UPDATE payments SET state = 'submitted'`,
+		"a budget not deducted":      `UPDATE tasks SET budget_remaining = '5000000' WHERE task_id = 'task-a'`,
+		"a receipt removed":          `DELETE FROM receipts`,
+		"a reservation's tx changed": `UPDATE receipts SET reserve_tx = '0x` + strings.Repeat("5", 64) + `'`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t)
@@ -322,7 +437,7 @@ func TestPaymentRecoveryRefuses(t *testing.T) {
 			s.StartPayment(payStart(po))
 			s.PaymentReserved(intent, Reservation{Evidence: evidence, TxHash: tx1, Block: 7})
 			s.PaymentSigned(intent, auth)
-			if name == "a receipt removed" {
+			if strings.HasPrefix(name, "a receipt") || strings.HasPrefix(name, "a reservation's") {
 				s.PaymentSubmitted(intent)
 				s.PaymentSettled(intent, tx2, 9, nil)
 				if _, err := s.PaymentDelivered(intent, content, 1); err != nil {
@@ -363,5 +478,24 @@ func TestUpgradeSchema6(t *testing.T) {
 	}
 	if p, _, err := s.StartPayment(payStart(po)); err != nil || p.IntentHash != intent {
 		t.Fatalf("pay after the upgrade: %+v %v", p, err)
+	}
+}
+
+// The recovery check refuses a webauthn payment that is not its
+// purchase's grant (another approval ID).
+func TestPaymentRecoveryRefusesAnotherGrant(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	po, _ := e.webauthnApproved(s)
+	if _, _, err := s.StartPayment(PaymentStart{ConsumerID: "consumer-a", TaskID: "task-a", PurchaseOrderID: po}); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if _, err := rawDB(t, e.path).Exec(`UPDATE payments SET grant_ref = 'hap-2'`); err != nil {
+		t.Fatal(err)
+	}
+	var ce *CorruptError
+	if err := openErr(e); !errors.As(err, &ce) || ce.Check != "payment" {
+		t.Fatalf("Open: %v, want a payment corruption", err)
 	}
 }

@@ -36,6 +36,8 @@ CREATE TABLE payments (
                                                   'reserve_failed', 'not_paid_expired', 'needs_review')),
   code              TEXT,
   reservation       TEXT,
+  reserve_tx        TEXT,
+  reserve_block     INTEGER,
   authorization     TEXT,
   settle_tx         TEXT,
   settle_block      INTEGER,
@@ -44,7 +46,7 @@ CREATE TABLE payments (
   updated_at        INTEGER NOT NULL,
   UNIQUE (task_id, purchase_order_id),
   FOREIGN KEY (task_id, purchase_order_id) REFERENCES purchases,
-  CHECK (state IN ('requested', 'reserve_failed', 'not_paid_expired') OR reservation IS NOT NULL),
+  CHECK (state IN ('requested', 'reserve_failed', 'not_paid_expired') OR (reservation IS NOT NULL AND reserve_tx IS NOT NULL AND reserve_block IS NOT NULL)),
   CHECK (state NOT IN ('signed', 'submitted', 'unknown', 'settled', 'delivered') OR authorization IS NOT NULL),
   CHECK (state NOT IN ('settled', 'delivered') OR (settle_tx IS NOT NULL AND settle_block IS NOT NULL)),
   CHECK ((state IN ('reserve_failed', 'not_paid_expired', 'needs_review')) = (code IS NOT NULL))
@@ -128,11 +130,15 @@ type PaymentStart struct {
 
 // StartPayment records the payment of an allowed purchase (method
 // delegation) or of an Ask approved by a person (method webauthn, the
-// grant's Signer approval), and commits it before anything outside is
-// asked. The purchase's existing payment is returned as it is (Replay).
-// Refused: another consumer's task, a task that ended, a purchase that is
-// not payable (Deny, an open or closed-unapproved Ask, a simulated grant),
-// a credential that no longer holds.
+// grant's Signer approval), with its PAYMENT_REQUESTED event, and commits
+// it before anything outside is asked. The purchase's existing payment is
+// returned as it is (Replay; under another delegation, a conflict).
+// Refused, nothing written: another consumer's task, a task the order
+// rules see as ended (paycontract.Ended: a Deny, a cancellation, a CLI
+// timeout), a purchase that is not payable (Deny, an open or
+// closed-unapproved Ask, a simulated grant), one past its valid_before or
+// its grant's expiry, one over the task's budget left (less what other
+// requested payments will reserve), a credential that no longer holds.
 func (s *Store) StartPayment(req PaymentStart) (Payment, bool, error) {
 	var out Payment
 	var replay bool
@@ -144,6 +150,9 @@ func (s *Store) StartPayment(req PaymentStart) (Payment, bool, error) {
 			return err
 		}
 		if p, err := scanPaid(tx.QueryRow(paidWhere(`p.task_id = ? AND p.purchase_order_id = ?`), req.TaskID, req.PurchaseOrderID)); err == nil {
+			if p.Method == "delegation" && p.GrantRef != req.DelegationRef {
+				return refuse("IDEMPOTENCY_CONFLICT", "this purchase's payment was started under another delegation")
+			}
 			out, replay = p, true
 			return nil
 		} else if !errors.Is(err, sql.ErrNoRows) {
@@ -155,10 +164,10 @@ func (s *Store) StartPayment(req PaymentStart) (Payment, bool, error) {
 			return refuse("CONTRACT_VERSION_MISMATCH", "only pay-family purchases are paid")
 		case p == nil:
 			return refuse("UNKNOWN_PURCHASE", "no such purchase in this task")
-		case slices.ContainsFunc(t.events, func(e contracts.AuditEvent) bool {
-			return e.EventType == "TASK_CANCELLED" || e.EventType == "TASK_TIMED_OUT"
-		}):
-			return refuse("TASK_ALREADY_ENDED", "the task ended: no payment is started for it")
+		case paycontract.Ended(t.events):
+			return refuse("TASK_ALREADY_ENDED", "the task ended (a Deny, a cancellation, a timeout): no payment is started for it")
+		case p.V1 != nil && p.V1.PaymentBinding.ValidBefore <= now:
+			return refuse("PURCHASE_EXPIRED", "the purchase's payment window has passed")
 		}
 		method, ref := "", ""
 		switch {
@@ -176,6 +185,9 @@ func (s *Store) StartPayment(req PaymentStart) (Payment, bool, error) {
 			if m != "webauthn" || !signer.Valid {
 				return refuse("GRANT_METHOD_NOT_ACCEPTED", "only a person's verified approval pays an Ask")
 			}
+			if g := p.Session.Grant; g == nil || g.ExpiresAt <= now {
+				return refuse("PURCHASE_EXPIRED", "the approval's grant has expired")
+			}
 			method, ref = "webauthn", signer.String
 		default:
 			return refuse("PAYMENT_NOT_ALLOWED", "only an Allow, or an Ask a person approved, is paid")
@@ -186,8 +198,38 @@ func (s *Store) StartPayment(req PaymentStart) (Payment, bool, error) {
 			return refuse(reason, "the task's credential no longer holds")
 		}
 		amount := p.terms().Amount
+		// The budget left less what payments already requested will reserve:
+		// two Allows decided before either reserved never go over it together.
+		left := t.row.BudgetRemaining
+		rows, err := tx.Query(`SELECT amount FROM payments WHERE task_id = ? AND state = 'requested'`, req.TaskID)
+		if err != nil {
+			return readErr("payment", req.TaskID, err)
+		}
+		var pending []contracts.Amount
+		for rows.Next() {
+			var a contracts.Amount
+			if err := rows.Scan(&a); err != nil {
+				rows.Close()
+				return readErr("payment", req.TaskID, err)
+			}
+			pending = append(pending, a)
+		}
+		if err := drained(rows); err != nil {
+			return readErr("payment", req.TaskID, err)
+		}
+		for _, a := range append(pending, amount) {
+			if left, err = subtract(left, a); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(`INSERT INTO payments (intent_hash, task_id, purchase_order_id, method, grant_ref, amount, state, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, 'requested', ?, ?)`, p.Decision.IntentHash, req.TaskID, req.PurchaseOrderID, method, ref, string(amount), now, now); err != nil {
+			return err
+		}
+		if err := t.emit("PAYMENT_REQUESTED", p, contracts.EventPayload{Payment: &contracts.PaymentRecord{Method: method, Amount: amount}}); err != nil {
+			return err
+		}
+		if err := t.finish(); err != nil {
 			return err
 		}
 		out, err = scanPaid(tx.QueryRow(paidWhere(`p.intent_hash = ?`), p.Decision.IntentHash))
@@ -206,6 +248,7 @@ type step struct {
 	payload func(p Payment) contracts.EventPayload
 	set     map[string]any
 	also    func(tx *sql.Tx, t *taskTx, p Payment, now uint64) error
+	same    func(tx *sql.Tx, p Payment) error // a replay's check of what set does not hold
 }
 
 func (s *Store) move(intent string, st step) (Payment, error) {
@@ -225,6 +268,11 @@ func (s *Store) move(intent string, st step) (Payment, error) {
 				}
 				if have.String != fmt.Sprint(v) {
 					return refuse("IDEMPOTENCY_CONFLICT", "this payment step was recorded with other values")
+				}
+			}
+			if st.same != nil {
+				if err := st.same(tx, p); err != nil {
+					return err
 				}
 			}
 			out = p
@@ -287,7 +335,7 @@ func (s *Store) PaymentReserved(intent string, r Reservation) (Payment, error) {
 	}
 	return s.move(intent, step{from: []string{"requested"}, to: "reserved", event: "BUDGET_RESERVED",
 		payload: record(contracts.PaymentRecord{Method: p.Method, Amount: p.Amount, TxHash: r.TxHash, Block: r.Block}),
-		set:     map[string]any{"reservation": string(r.Evidence)},
+		set:     map[string]any{"reservation": string(r.Evidence), "reserve_tx": r.TxHash, "reserve_block": r.Block},
 		also: func(tx *sql.Tx, t *taskTx, p Payment, _ uint64) error {
 			left, err := subtract(t.row.BudgetRemaining, p.Amount)
 			if err != nil {
@@ -353,18 +401,30 @@ func ReceiptID(intent string) string {
 // receipt (RECEIPT_ISSUED, a receipts row) of a settled payment: the
 // content's SHA-256 and size only, never the content.
 func (s *Store) PaymentDelivered(intent, contentSHA256 string, size int) (Payment, error) {
+	if size < 0 {
+		return Payment{}, refuse("INVALID_PAYMENT_UPDATE", "content size")
+	}
 	id := ReceiptID(intent)
 	return s.move(intent, step{from: []string{"settled"}, to: "delivered", event: "RESOURCE_DELIVERED",
 		payload: record(contracts.PaymentRecord{ContentSHA256: contentSHA256}),
+		same: func(tx *sql.Tx, p Payment) error {
+			var sum string
+			var n int
+			if err := tx.QueryRow(`SELECT content_sha256, content_size FROM receipts WHERE intent_hash = ?`, intent).Scan(&sum, &n); err != nil {
+				return readErr("payment", p.TaskID, err)
+			}
+			if sum != contentSHA256 || n != size {
+				return refuse("IDEMPOTENCY_CONFLICT", "this payment was delivered with other content")
+			}
+			return nil
+		},
 		also: func(tx *sql.Tx, t *taskTx, p Payment, now uint64) error {
 			var reserveTx string
 			if err := t.emit("RECEIPT_ISSUED", t.purchases[p.PurchaseOrderID], contracts.EventPayload{Payment: &contracts.PaymentRecord{ContentSHA256: contentSHA256, ReceiptID: id}}); err != nil {
 				return err
 			}
-			for _, e := range t.events {
-				if e.EventType == "BUDGET_RESERVED" && e.Scope.PurchaseOrderID == p.PurchaseOrderID {
-					reserveTx = e.Payload.Payment.TxHash
-				}
+			if err := tx.QueryRow(`SELECT reserve_tx FROM payments WHERE intent_hash = ?`, intent).Scan(&reserveTx); err != nil {
+				return err
 			}
 			resp := string(p.PaymentResponse)
 			_, err := tx.Exec(`INSERT INTO receipts VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, id, intent, reserveTx, p.SettleTx, resp, contentSHA256, size, now)
@@ -402,7 +462,14 @@ func (s *Store) paymentByIntent(intent string) (Payment, error) {
 // PaymentsIn lists the payments in the given states, oldest first: the
 // payment worker's queue and its recovery on start.
 func (s *Store) PaymentsIn(states ...string) ([]Payment, error) {
-	rows, err := s.r.Query(paidWhere(`1`) + ` ORDER BY p.created_at, p.intent_hash`)
+	if len(states) == 0 {
+		return nil, nil
+	}
+	in, args := "?", []any{states[0]}
+	for _, st := range states[1:] {
+		in, args = in+", ?", append(args, st)
+	}
+	rows, err := s.r.Query(paidWhere(`p.state IN (`+in+`)`)+` ORDER BY p.created_at, p.intent_hash`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -413,9 +480,7 @@ func (s *Store) PaymentsIn(states ...string) ([]Payment, error) {
 		if err != nil {
 			return nil, err
 		}
-		if slices.Contains(states, p.State) {
-			out = append(out, p)
-		}
+		out = append(out, p)
 	}
 	return out, rows.Err()
 }
@@ -442,7 +507,7 @@ type PaymentView struct {
 	ReceiptID     string `json:"receipt_id,omitempty"`
 }
 
-var eventState = map[string]string{"BUDGET_RESERVED": "reserved", "PAYMENT_SIGNED": "signed", "PAYMENT_SUBMITTED": "submitted",
+var eventState = map[string]string{"PAYMENT_REQUESTED": "requested", "BUDGET_RESERVED": "reserved", "PAYMENT_SIGNED": "signed", "PAYMENT_SUBMITTED": "submitted",
 	"PAYMENT_SETTLED": "settled", "RESOURCE_DELIVERED": "delivered", "RECEIPT_ISSUED": "delivered", "PAYMENT_NEEDS_REVIEW": "needs_review"}
 
 // paymentView is po's payment from the task's events; nil before any.
@@ -479,7 +544,7 @@ func (t *taskTx) paymentView(po string) *PaymentView {
 }
 
 // lastPaymentEvent is each state's last payment event in its purchase's chain.
-var lastPaymentEvent = map[string]string{"requested": "", "reserved": "BUDGET_RESERVED", "signed": "PAYMENT_SIGNED", "submitted": "PAYMENT_SUBMITTED",
+var lastPaymentEvent = map[string]string{"requested": "PAYMENT_REQUESTED", "reserved": "BUDGET_RESERVED", "signed": "PAYMENT_SIGNED", "submitted": "PAYMENT_SUBMITTED",
 	"unknown": "PAYMENT_SUBMITTED", "settled": "PAYMENT_SETTLED", "delivered": "RECEIPT_ISSUED", "reserve_failed": "PAYMENT_NOT_SETTLED",
 	"not_paid_expired": "PAYMENT_NOT_SETTLED", "needs_review": "PAYMENT_NEEDS_REVIEW"}
 
@@ -520,10 +585,21 @@ func (t *taskTx) verifyPaid(initial contracts.Amount) string {
 		case r.method == "delegation" && p.Decision.PolicyVerdict != "Allow",
 			r.method == "webauthn" && (p.Session == nil || p.Session.State != "approved"):
 			return "payment " + r.po + "'s method is not its purchase's authorization"
+		case r.method == "webauthn":
+			var m string
+			var signer sql.NullString
+			if err := t.tx.QueryRow(`SELECT authorization_method, signer_approval_id FROM grants WHERE approval_session_id = ?`, p.Session.ID).Scan(&m, &signer); err != nil {
+				return "payment " + r.po + ": its grant: " + err.Error()
+			}
+			if m != "webauthn" || signer.String != r.ref {
+				return "payment " + r.po + " is not its purchase's webauthn grant"
+			}
+		}
+		switch {
 		case last[r.po] != lastPaymentEvent[r.state]:
 			return fmt.Sprintf("payment %s is %s but its last payment event is %q", r.po, r.state, last[r.po])
 		}
-		if last[r.po] == "PAYMENT_NEEDS_REVIEW" || r.state != "requested" && r.state != "reserve_failed" && r.state != "not_paid_expired" {
+		if r.state != "requested" && r.state != "reserve_failed" && r.state != "not_paid_expired" {
 			a, _ := new(big.Int).SetString(r.amount, 10)
 			reserved.Add(reserved, a)
 		}
@@ -544,7 +620,7 @@ func (t *taskTx) verifyPaid(initial contracts.Amount) string {
 func verifyReceipts(tx *sql.Tx) error {
 	var n int
 	if err := tx.QueryRow(`SELECT (SELECT count(*) FROM payments p LEFT JOIN receipts r USING (intent_hash) WHERE (p.state = 'delivered') != (r.intent_hash IS NOT NULL))
-		+ (SELECT count(*) FROM receipts r LEFT JOIN payments p USING (intent_hash) WHERE p.intent_hash IS NULL OR r.settle_tx != p.settle_tx)`).Scan(&n); err != nil {
+		+ (SELECT count(*) FROM receipts r LEFT JOIN payments p USING (intent_hash) WHERE p.intent_hash IS NULL OR r.settle_tx != p.settle_tx OR r.reserve_tx != p.reserve_tx)`).Scan(&n); err != nil {
 		return readErr("payment", "", err)
 	}
 	if n > 0 {
