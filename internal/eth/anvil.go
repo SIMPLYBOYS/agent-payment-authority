@@ -2,7 +2,10 @@ package eth
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"net"
+	"net/url"
 )
 
 // anvilKeys are anvil's first default keys (its documented test mnemonic):
@@ -23,4 +26,17 @@ func AnvilKey(i int) (*Key, error) {
 	}
 	b, _ := hex.DecodeString(anvilKeys[i])
 	return NewKey(b)
+}
+
+// LocalRPC refuses any RPC but a local node's over plain http (P2-a: a
+// local anvil only; nothing reaches a public chain).
+func LocalRPC(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "http" || u.User != nil {
+		return errors.New("rpc is http://127.0.0.1:<port> (a local anvil)")
+	}
+	if ip := net.ParseIP(u.Hostname()); u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return errors.New("rpc is a loopback address (P2-a runs on a local anvil only)")
+	}
+	return nil
 }

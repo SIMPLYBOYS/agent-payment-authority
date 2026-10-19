@@ -13,9 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -63,18 +61,6 @@ type payments struct {
 	out     io.Writer
 }
 
-// loopbackRPC: P2-a is a local chain only; nothing reaches a public one.
-func loopbackRPC(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "http" || u.User != nil {
-		return errors.New("payments: rpc is http://127.0.0.1:<port> (a local anvil)")
-	}
-	if ip := net.ParseIP(u.Hostname()); u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return errors.New("payments: rpc is a loopback address (P2-a runs on a local anvil only)")
-	}
-	return nil
-}
-
 // openPayments checks the file and the chain, then opens the relayer and the
 // settler; baseURL is the shop's.
 func openPayments(ctx context.Context, path, baseURL string, clock func() uint64, out io.Writer) (*payments, *merchant.Merchant, error) {
@@ -82,8 +68,8 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 	if err := decodeFile(path, &c); err != nil {
 		return nil, nil, fmt.Errorf("payments: %w", err)
 	}
-	if err := loopbackRPC(c.RPC); err != nil {
-		return nil, nil, err
+	if err := eth.LocalRPC(c.RPC); err != nil {
+		return nil, nil, fmt.Errorf("payments: %w", err)
 	}
 	k := c.AnvilKeys
 	if idx := map[int]bool{k.RelayerGas: true, k.Issuer: true, k.Policy: true, k.ShopGas: true}; len(idx) != 4 {

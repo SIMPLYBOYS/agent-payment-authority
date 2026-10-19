@@ -36,6 +36,12 @@ type RPCError struct {
 
 func (e *RPCError) Error() string { return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message) }
 
+// Raw calls a node method the client has no wrapper for (eth_getCode,
+// anvil's own), its result decoded into out (nil: discarded).
+func (c *Client) Raw(ctx context.Context, method string, out any, params ...any) error {
+	return c.call(ctx, method, out, params...)
+}
+
 func (c *Client) call(ctx context.Context, method string, out any, params ...any) error {
 	if params == nil {
 		params = []any{}

@@ -902,8 +902,6 @@ MUTATIONS = [
      'if r := cfg.Reservation; r != nil {', 'if r := cfg.Reservation; false && r != nil {', 'TestAssemblyChecksReservationsOnChain'),
     ('P2 H3: health says payments when there are none', 'internal/signer/server.go',
      '\t\tif core.pays {', '\t\tif true || core.pays {', 'TestServeAll'),
-    ('P2 H3: payments on a LAN chain', 'cmd/demo/payments.go',
-     '(ip == nil || !ip.IsLoopback())', '(ip == nil || false && !ip.IsLoopback())', 'TestPaymentsConfigRefused'),
     ('P2 H3: one anvil key for two roles', 'cmd/demo/payments.go',
      '}; len(idx) != 4 {', '}; len(idx) < 3 {', 'TestPaymentsConfigRefused'),
     ('P2 H3: a shared payments directory', 'cmd/demo/payments.go',
@@ -1005,6 +1003,8 @@ MUTATIONS = [
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    ('P2 H3: payments on a LAN chain', 'internal/eth/anvil.go',
+     '(ip == nil || !ip.IsLoopback())', '(ip == nil || false && !ip.IsLoopback())', 'cmd/demo:TestPaymentsConfigRefused'),
     ('P2 H3: no confirmations for a reservation', 'internal/signer/config.go',
      '|| r.Confirmations == 0 || r.Confirmations > 64:', '|| false && r.Confirmations == 0 || r.Confirmations > 64:', 'cmd/apa-signer:TestAssemblyChecksReservationsOnChain'),
     ('P2 H3: a reservation RPC with credentials', 'internal/signer/config.go',
