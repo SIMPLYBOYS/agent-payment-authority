@@ -1108,7 +1108,7 @@ MUTATIONS = [
     ('P2-b B2 review: the demo trusts a socket in a shared directory', 'cmd/demo/payments.go',
      'if err := keytool.Private(filepath.Dir(c.RelayerSocket)); err != nil {', 'if err := keytool.Private(filepath.Dir(c.RelayerSocket)); false && err != nil {', 'TestTestnetConfigRefused'),
     ('P2-b B2 review: apa-relayer takes another caller uid', 'cmd/apa-relayer/main.go',
-     'if u != uint32(os.Getuid()) {', 'if false {', 'TestServe'),
+     'if u != uint32(os.Getuid()) {', 'if false && u != uint32(os.Getuid()) {', 'TestServe'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the
