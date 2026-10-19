@@ -657,3 +657,32 @@ func TestA2CancelledAfterSignerVerified(t *testing.T) {
 		t.Fatalf("Signer approval after cancel: %+v %v", a, err)
 	}
 }
+
+// Once the task ended (here a CLI timeout), its open Ask is decided by
+// nobody (cli-timeout-pending): a new challenge is 409 task_ended, a
+// person's verification already in flight is not used, the list says
+// task_ended, and no grant is issued.
+func TestA2EndedTaskAskIsNotApprovable(t *testing.T) {
+	f := startA2(t, 60)
+	sid, intent, task := f.ask("01")
+	code, r := f.challenge(sid, "att-req-0000000000001", "approve") // started before the end
+	if code != 200 {
+		t.Fatalf("challenge: %d %v", code, r)
+	}
+	if err := f.h.st.CLITimeout(task); err != nil {
+		t.Fatal(err)
+	}
+	if code, r2 := f.challenge(sid, "att-req-0000000000002", "approve"); code != 409 || r2["error"] != "task_ended" {
+		t.Fatalf("after the end: %d %v", code, r2)
+	}
+	code, r = f.assert(sid, "att-req-0000000000001", "ver-req-0000000000001", f.sign(r, sid, intent, "approve"))
+	if code != 200 || r["outcome"] != "closed" || sessionState(r) != "pending" || f.h.grants() != 0 {
+		t.Fatalf("a verification in flight: %d %v", code, r)
+	}
+	_, list := f.get("/api/approvals", f.h.tokens["viewer:consumer-a"])
+	for _, x := range list["approvals"].([]any) {
+		if it := x.(map[string]any); it["task_id"] == task && it["task_ended"] != true {
+			t.Fatalf("the list does not say the task ended: %v", it)
+		}
+	}
+}

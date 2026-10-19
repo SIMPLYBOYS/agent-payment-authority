@@ -995,10 +995,12 @@ function renderApproval(runs) {
     const other = AP.recordTag(p, "simulated");
     mode.append(el("span", "approval-tag", other ? other[0] : "模擬核准"), other ? other[1] : "fake 展示・主持人扮演客人 " + short(item.consumer_id) + "（不是本人驗證）・不會付款");
     parts.push(mode);
-    const pending = ap.state === "pending";
-    const res = AP.decidedText(ap.state, p) || closedResult(RESULT, ap.state, p);
+    // The task ended (a CLI timeout, a Deny): its open Ask is decided by nobody (cli-timeout-pending).
+    const ended = ap.state === "pending" && !!item.task_ended;
+    const pending = ap.state === "pending" && !ended;
+    const res = ended ? ENDED : AP.decidedText(ap.state, p) || closedResult(RESULT, ap.state, p);
     const head = el("div", "approval-head");
-    head.dataset.state = ap.state;
+    head.dataset.state = ended ? "ended" : ap.state;
     head.append(el("h3", "", pending ? "核准這一筆付款？" : res ? res[1] : ap.state),
       el("p", "", pending ? "客人 " + short(item.consumer_id) + " 的 Agent 想買下面這一項。你只核准這一筆，不是之後所有付款。" : res ? res[2] : ""));
     parts.push(head);
@@ -1168,7 +1170,7 @@ async function pollA2() {
     try {
       const q = await a2Call(c, "/api/approvals/" + encodeURIComponent(at.approval_session_id) + "/attempts/" + encodeURIComponent(at.request_id));
       if (g === creds.gen && currentConsumer() === c && q.status !== 0) {
-        const [kind, text] = q.status === 200 && q.body.challenge ? ["idle", "可以繼續驗證：按下按鈕才會要求裝置。"] : AP.outcomeText(q.status, q.body, at.decision);
+        const [kind, text] = q.status === 200 && q.body.challenge ? ["idle", "可以繼續驗證：按下按鈕才會要求裝置。"] : AP.outcomeText(q.status, q.body, at.decision, !!(lastA2 && lastA2.pays));
         a2Note = { target: a2Target(it), kind, text };
       }
     } finally { a2Recovering = false; }
@@ -1189,6 +1191,10 @@ function a2Item() {
 }
 
 const a2Target = (item) => A.approvalTarget(creds.gen, "a2", item);
+
+// ENDED: a pending Ask of a task that ended (a CLI timeout, or another
+// purchase denied): not decided by anyone now; it expires at its deadline.
+const ENDED = ["closed", "task 已結束：這筆不能核准", "這個 task 已結束（CLI 逾時，或另一筆請購被拒絕），這一筆不能再核准，也不會付款；到期後由後端記錄。"];
 
 const A2_RESULT = {
   // Review N-b, C: a closed session's heading never says "not approved"
@@ -1241,10 +1247,11 @@ function renderA2() {
     const other = AP.recordTag(p, "device");
     mode.append(el("span", "approval-tag", other ? other[0] : "本人核准"), other ? other[1] : AP.sourceText(lastA2 && lastA2.sources) + (lastA2 && lastA2.signer !== "approvals-only" && lastA2.signer !== "ready" ? "・Signer 目前無法連線" : ""));
     parts.push(mode);
-    const pending = ap.state === "pending";
-    const res = AP.decidedText(ap.state, p, !!(lastA2 && lastA2.pays)) || closedResult(A2_RESULT, ap.state, p);
+    const ended = ap.state === "pending" && !!item.task_ended; // nobody decides it now (cli-timeout-pending)
+    const pending = ap.state === "pending" && !ended;
+    const res = ended ? ENDED : AP.decidedText(ap.state, p, !!(lastA2 && lastA2.pays)) || closedResult(A2_RESULT, ap.state, p);
     const head = el("div", "approval-head");
-    head.dataset.state = ap.state;
+    head.dataset.state = ended ? "ended" : ap.state;
     head.append(el("h3", "", pending ? "核准這一筆付款？" : res ? res[1] : ap.state),
       el("p", "", pending ? "客人 " + short(item.consumer_id) + " 的 Agent 想買下面這一項。核准會要求你的裝置驗證；你只核准這一筆。" : res ? res[2] : ""));
     parts.push(head);
@@ -1253,7 +1260,7 @@ function renderA2() {
     const amt = el("p", "approval-amount");
     amt.append(el("b", "", units(p.amount)), el("span", "", " test USDC"));
     const vk = runVenue(item.task_id);
-    it.append(el("p", "approval-product", "商品 " + product + "（" + goodsOf(vk) + "・本片不付款）"), amt);
+    it.append(el("p", "approval-product", "商品 " + product + "（" + goodsOf(vk) + (lastA2 && lastA2.pays ? "・付款確認後交付" : "・本片不付款") + "）"), amt);
     parts.push(it);
     const dl = el("dl", "approval-rows");
     for (const [k, val] of [...venueRows(vk),
@@ -1397,7 +1404,7 @@ async function a2Act(item, decision) {
       // superseded, ...) that outcomeText words; only without one is it
       // simply already decided.
       if (r.status === 200 && at && at.state === "verified" && !r.body.outcome) return done("ok", "這筆已經有本人決定（以後端為準）。");
-      const [kind, text] = AP.outcomeText(r.status, r.body, decision);
+      const [kind, text] = AP.outcomeText(r.status, r.body, decision, !!(lastA2 && lastA2.pays));
       return done(kind, text);
     }
     if (!AP.sameChallenge(r.body.challenge, { consumer, session, intent: p.intent_hash, decision })) return done("error", "回傳的資料和你這次的操作不一致，已停止，沒有要求裝置驗證。");
@@ -1435,7 +1442,7 @@ async function a2Act(item, decision) {
       { request_id: requestId, verify_request_id: crypto.randomUUID(), assertion: AP.assertionJSON(cred), ...(voice ? { voice } : {}) });
     if (stale()) return;
     if (v.status === 0) return done("warn", "結果確認中，請不要重複操作。");
-    const [kind, text] = AP.outcomeText(v.status, v.body, decision);
+    const [kind, text] = AP.outcomeText(v.status, v.body, decision, !!(lastA2 && lastA2.pays));
     done(kind, text);
   } finally {
     if (a2Op && a2Op.gen === g && a2Op.session === session) a2Op = null;
@@ -1454,7 +1461,7 @@ async function a2Cancel(item, at) {
   try {
     const r = await a2Call(consumer, "/api/approvals/" + encodeURIComponent(session) + "/attempts/" + encodeURIComponent(at.request_id) + "/cancel", {});
     if (g !== creds.gen || currentConsumer() !== consumer) return;
-    const [kind, text] = r.status === 0 ? ["warn", "這次驗證的結果還無法確認。"] : AP.outcomeText(r.status, r.body, at.decision);
+    const [kind, text] = r.status === 0 ? ["warn", "這次驗證的結果還無法確認。"] : AP.outcomeText(r.status, r.body, at.decision, !!(lastA2 && lastA2.pays));
     a2Note = { target, kind, text };
   } finally {
     a2Op = null;

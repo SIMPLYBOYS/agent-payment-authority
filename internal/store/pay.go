@@ -530,7 +530,7 @@ func (s *Store) ResolveApproval(req ApprovalRequest) (ApprovalResult, error) {
 		if err := t.expire(); err != nil {
 			return err
 		}
-		if p.Session.State != "pending" {
+		if p.Session.State != "pending" || paycontract.Ended(t.events) { // the task ended: nobody decides it now (cli-timeout-pending)
 			out.Outcome, out.Purchase = "closed", t.view(p)
 			return t.finish() // the deadline just recorded, if any
 		}
@@ -610,6 +610,7 @@ type ApprovalItem struct {
 	Purchase   PurchaseView     `json:"purchase"`
 	Delegation *DelegationView  `json:"delegation,omitempty"`
 	Attempt    *ApprovalAttempt `json:"attempt,omitempty"` // A2: the session's latest webauthn attempt
+	TaskEnded  bool             `json:"task_ended,omitempty"` // a CLI timeout, a cancel or a Deny: a pending Ask is decided by nobody now
 }
 
 // Approvals lists consumerID's approval sessions, newest first, at most
@@ -672,7 +673,8 @@ func (s *Store) itemsOf(tx *sql.Tx, id, consumerID string) ([]ApprovalItem, erro
 	var out []ApprovalItem
 	for _, p := range t.purchases {
 		if p.Session != nil && t.row.ConsumerID == consumerID {
-			it := ApprovalItem{TaskID: id, ConsumerID: t.row.ConsumerID, WalletID: t.row.WalletID, Payer: t.row.Payer, Purchase: t.view(p), Delegation: dv}
+			it := ApprovalItem{TaskID: id, ConsumerID: t.row.ConsumerID, WalletID: t.row.WalletID, Payer: t.row.Payer, Purchase: t.view(p), Delegation: dv,
+				TaskEnded: paycontract.Ended(t.events)}
 			if err := attemptOf(tx, &it); err != nil {
 				return nil, err
 			}

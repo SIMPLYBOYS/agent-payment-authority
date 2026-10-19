@@ -7,6 +7,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -280,5 +281,59 @@ func TestUpgradeSchema5(t *testing.T) {
 	}
 	if m, _ := filepath.Glob(e.path + ".schema5-*.bak"); len(m) != 1 {
 		t.Fatalf("backups %v", m)
+	}
+}
+
+// Once the task ended, by a CLI timeout or a Deny of another of its
+// purchases, its open Ask is decided by nobody (accepted case
+// cli-timeout-pending: no APPROVED, no GRANT_ISSUED): a new attempt is
+// refused, a person's verified approval in flight is closed unrecorded, a
+// simulated approval is closed; the Ask stays pending and expires at its
+// deadline. Nothing is paid.
+func TestEndedTaskAskIsNotDecided(t *testing.T) {
+	for _, how := range []string{"cli timeout", "a deny"} {
+		e := newEnv(t)
+		s := e.open()
+		id, intent := e.payTask(s, "task-a", 60)
+		begin(t, s, "consumer-a", id, "att-req-00000001", "approve") // a person started before the end
+		switch how {
+		case "cli timeout":
+			if err := s.CLITimeout("task-a"); err != nil {
+				t.Fatal(err)
+			}
+		case "a deny":
+			d := v1Of(t, forTask(t, e.denied, "task-a"))
+			d.PaymentBinding.Nonce = fmt.Sprintf("0x%064x", 60)
+			if r := submitV1(t, s, sessA, d); r.Purchase.Decision.PolicyVerdict != "Deny" {
+				t.Fatalf("not a Deny: %+v", r.Purchase.Decision)
+			}
+		}
+		if _, err := s.BeginApprovalAttempt(AttemptRequest{ConsumerID: "consumer-a", SessionID: id, RequestID: "att-req-00000002", Decision: "approve"}); Code(err) != "TASK_ALREADY_ENDED" {
+			t.Fatalf("%s: a new attempt: %v", how, err)
+		}
+		for _, u := range []AttemptUpdate{{From: []string{"requested"}, State: "challenged", ChallengeID: "chl-1"},
+			{From: []string{"challenged"}, State: "verifying", VerifyRequestID: "ver-1"}} {
+			u.ConsumerID, u.RequestID = "consumer-a", "att-req-00000001"
+			if _, err := s.UpdateApprovalAttempt(u); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if r, err := s.ResolveWebAuthn(wa("consumer-a", "att-req-00000001", "approve", "hap-1", intent)); err != nil || r.Outcome != "closed" {
+			t.Fatalf("%s: a verified approval: %+v %v", how, r, err)
+		}
+		if r, err := approve(s, id, intent, "approve-req-000000001", "consumer-a", "approve"); err != nil || r.Outcome != "closed" {
+			t.Fatalf("%s: a simulated approval: %+v %v", how, r, err)
+		}
+		types := fmt.Sprint(eventTypes(t, s, sessA))
+		if strings.Contains(types, "APPROVED") || strings.Contains(types, "GRANT_ISSUED") || strings.Contains(types, "APPROVAL_DENIED") {
+			t.Fatalf("%s: decided after the end: %s", how, types)
+		}
+		e.clock.Set(t0 + 61)
+		if err := s.ExpireDue(); err != nil {
+			t.Fatal(err)
+		}
+		if types := fmt.Sprint(eventTypes(t, s, sessA)); !strings.HasSuffix(types, "APPROVAL_EXPIRED]") {
+			t.Fatalf("%s: not expired at its deadline: %s", how, types)
+		}
 	}
 }

@@ -962,6 +962,12 @@ MUTATIONS = [
      'var storeRetry = []string{"CREDENTIAL_STATUS_UNAVAILABLE", "CLOCK_REGRESSION"}', 'var storeRetry = []string{"CREDENTIAL_STATUS_UNAVAILABLE", "CLOCK_REGRESSION_"}', 'TestSignerStoreAnswers'),
     ("P2 §3 review 2: the Signer's 400 is an unknown outcome", 'internal/signerclient/client.go',
      '(status == http.StatusForbidden || status == http.StatusBadRequest))', '(status == http.StatusForbidden || false && status == http.StatusBadRequest))', 'TestPayCallerNotAllowedIsARefusal'),
+    ("P2 ended Ask: a new approval of an ended task's Ask is challenged", 'internal/store/approvals.go',
+     'if p.Session.State == "pending" && paycontract.Ended(t.events) {', 'if p.Session.State == "pending" && false && paycontract.Ended(t.events) {', 'TestEndedTaskAskIsNotDecided'),
+    ("P2 ended Ask: a person's approval in flight is recorded after the end", 'internal/store/approvals.go',
+     'case p.Session.State != "pending", paycontract.Ended(t.events):', 'case p.Session.State != "pending", false && paycontract.Ended(t.events):', 'TestEndedTaskAskIsNotDecided'),
+    ("P2 ended Ask: a simulated approval is recorded after the end", 'internal/store/pay.go',
+     'if p.Session.State != "pending" || paycontract.Ended(t.events) {', 'if p.Session.State != "pending" || false && paycontract.Ended(t.events) {', 'TestEndedTaskAskIsNotDecided'),
     ('P2 H2 review: a sent reservation is reserved again', 'internal/payflow/payflow.go',
      '\tcase state == "sent":\n\t\treturn p, ErrPending', '\tcase false && state == "sent":\n\t\treturn p, ErrPending', 'TestRelayerStates'),
     ('P2 H2 review: a failed reservation is tried again', 'internal/payflow/payflow.go',
@@ -1045,6 +1051,8 @@ MUTATIONS = [
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    ("P2 ended Ask: the list does not say the task ended", 'internal/store/pay.go',
+     'TaskEnded: paycontract.Ended(t.events)}', 'TaskEnded: false && paycontract.Ended(t.events)}', 'cmd/demo:TestA2EndedTaskAskIsNotApprovable'),
     ('P2 H2: another Signer request ID each time', 'internal/store/payment.go',
      'a, _, err := scanPayment(tx.QueryRow(paymentWhere(`a.task_id = ? AND a.purchase_order_id = ?`), req.TaskID, req.PurchaseOrderID))\n\t\tif err == nil {',
      'a, _, err := scanPayment(tx.QueryRow(paymentWhere(`a.task_id = ? AND a.purchase_order_id = ?`), req.TaskID, req.PurchaseOrderID))\n\t\tif false && err == nil {', 'internal/payflow:TestLostAnswersNeverPayTwice'),

@@ -142,3 +142,11 @@ test("P2: an Allow never paid (the task ended first) says not paid yet, never th
   assert.equal(c.status, "Allow：在委託範圍內，尚未付款");
   assert.ok(!c.steps.some((s) => /未啟用付款/.test(s.note)), "a step says payment is not enabled");
 });
+
+test("an Ask of an ended task: not approvable, its words say so; an approval says not yet paid with local_anvil", async () => {
+  const AP = await import("../approve.js");
+  assert.equal(AP.outcomeText(409, { error: "task_ended" }, "approve")[0], "closed");
+  assert.match(AP.outcomeText(409, { error: "task_ended" }, "approve")[1], /不能核准，也不會付款/);
+  assert.equal(AP.outcomeText(200, { outcome: "approved" }, "approve", true)[1], "本人核准已驗證，尚未付款。");
+  assert.equal(AP.outcomeText(200, { outcome: "approved" }, "approve")[1], "本人核准已驗證，付款未啟用。");
+});

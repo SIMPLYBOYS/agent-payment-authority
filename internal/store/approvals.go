@@ -189,6 +189,13 @@ func (s *Store) BeginApprovalAttempt(req AttemptRequest) (AttemptStart, error) {
 			return err
 		}
 		out.SessionState = p.Session.State
+		// The task ended (a CLI timeout, a Deny): its open Ask is no longer
+		// decided by anyone; it stays pending until its deadline (accepted
+		// case cli-timeout-pending: no APPROVED, no GRANT_ISSUED).
+		if p.Session.State == "pending" && paycontract.Ended(t.events) {
+			conflict = refuse("TASK_ALREADY_ENDED", "the task ended: this Ask is not decided now; it expires at its deadline")
+			return t.finish()
+		}
 		if cur, found, err := latestAttempt(tx, req.SessionID); err != nil {
 			return err
 		} else if found && cur.Open() {
@@ -391,7 +398,7 @@ func (s *Store) ResolveWebAuthn(r WebAuthnResult) (ApprovalResult, error) {
 		}
 		by := &resolver{a.RequestID, "webauthn:" + r.ApproverID, "webauthn", r.SignerApprovalID}
 		switch {
-		case p.Session.State != "pending":
+		case p.Session.State != "pending", paycontract.Ended(t.events): // the task ended: nobody decides it now (cli-timeout-pending)
 			out.Outcome = "closed"
 		case !s.offered(p.V1.Intent.HTTPMethod, p.V1.Intent.ResourceURL, p.V1.Quote):
 			if err := t.close(p, "APPROVAL_SUPERSEDED", "superseded", "QUOTE_CHANGED", nil); err != nil {
@@ -501,7 +508,7 @@ func (s *Store) ResolveVoiceFailure(consumer, requestID, code string) (ApprovalR
 			return err
 		}
 		out.Outcome = "closed"
-		if p.Session.State == "pending" {
+		if p.Session.State == "pending" && !paycontract.Ended(t.events) { // the task ended: nobody decides it now
 			if err := t.emit("VOICE_CHALLENGE_FAILED", p, contracts.EventPayload{ApprovalSessionID: p.Session.ID, Code: code}); err != nil {
 				return err
 			}

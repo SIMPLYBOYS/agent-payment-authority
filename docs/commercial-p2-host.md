@@ -245,7 +245,7 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查�
 | 建議 | 預留重送沒比對 tx 與區塊；在另一個委派下重新開始沒有被拒；已過期的請購仍可開始；收據沒比對 tx#1；`requested` 的檢視顯示「未開始」；`PaymentsIn` 在 Go 裡過濾；負的大小變成 CHECK 錯誤；M1 的錯誤訊息沒提 payment；多餘的條件 | 都已處理（付款列加 `reserve_tx`／`reserve_block`） |
 | 建議 | `PaymentSettled` 重送時若沒給 `PAYMENT-RESPONSE` 就不比對 | 不改：Reconciler 判定結算時沒有 `PAYMENT-RESPONSE` 可給 |
 | 問題 | Signer 委派代號（`DelegationRef`）是否必須是 task 綁定的那個委派 | 兩者是不同的東西：Host 的委派是 task 的業務範圍，Signer 的委派是 `signer.json` 的付款授權，Store 無法比對；由 Host 的可信設定提供 |
-| 問題（待 Aaron） | CLI 逾時（`TASK_TIMED_OUT`），或同一個 task 的另一張請購被 Deny 之後，原本開著的 Ask 仍可被本人核准、發出 grant，但不會付款：本人核准了，什麼都沒付 | 目前的行為就是這樣，H4 會讓畫面寫明「task 已結束，不會付款」。要不要改成這兩種情況下仍付款，需要你決定 |
+| 問題（Aaron 已決定） | CLI 逾時（`TASK_TIMED_OUT`），或同一個 task 的另一張請購被 Deny 之後，原本開著的 Ask 仍可被本人核准、發出 grant，但不會付款：本人核准了，什麼都沒付 | **Aaron：「原本開著的 Ask 應該是不可以被核准同時也不會付款」**（已接受案例 `cli-timeout-pending` 本來就規定逾時後 Ask 維持 pending、不得有 `APPROVED`、`GRANT_ISSUED`）。見 §12.6 |
 
 第二輪 review（3777321）：結論 APPROVE。審查者確認：`paycontract.Ended` 與順序規則的三個結束條件完全相同；每一種 Store 呼叫順序都能被規則接受；開始時預先保留預算，所以 tx#1 上鏈後預留不可能因為預算不足被拒；恢復檢查的預算規則與扣減一致。處理：
 
@@ -453,3 +453,14 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查�
 驗證（第二輪處理）：網頁測試 111／111；Unity EditMode 18／18、PlayMode 28／28，Web build 重建；新增 2 項突變，2／2 KILLED（§3、H2、H3 共 67 項）。
 
 驗證（第一輪處理）：網頁測試 111／111；Unity EditMode 18／18、PlayMode 28／28，Web build 重建（建置內已無「the host pays」）；§3、H2、H3 突變 65／65 KILLED（新增 4 項）。
+
+### 12.6 task 結束後的 Ask 不能核准（Aaron 決定）
+
+- **規則**：task 結束後（CLI 逾時，或同一個 task 有請購被 Deny；取消原本就會撤回 Ask），原本開著的 Ask 不再由任何人決定，維持 pending，到期時照常記錄 `APPROVAL_EXPIRED`；不會有 `APPROVED`、`GRANT_ISSUED`，也就不會付款。依據是已接受案例 `cli-timeout-pending`（`docs/persistence-design.md` 的 `CLITimeout` 列：不撤回 Ask），不新增事件或原因代碼。
+- **Store**：
+  - `BeginApprovalAttempt` 拒絕（`TASK_ALREADY_ENDED`），不會向 Signer 要求挑戰；
+  - `ResolveWebAuthn` 對結束前就開始的驗證回 `closed`、不記錄（demo 依既有流程請 Signer 放棄這個核准）；
+  - `ResolveApproval`（模擬核准）與 `ResolveVoiceFailure` 也回 `closed`、不記錄；
+  - 核准清單每一項新增 `task_ended`。
+- **demo 與網頁**：挑戰請求回 409 `task_ended`；主持人頁的模擬核准與本人核准面板不顯示核准按鈕，改寫「task 已結束：這筆不能核准」與原因；核准結果的文字在有 `--payments` 時寫「尚未付款」，不再寫「付款未啟用」；本人核准面板的商品列在有 `--payments` 時不再寫「本片不付款」。
+- **測試**：`TestEndedTaskAskIsNotDecided`（CLI 逾時與另一張請購被 Deny 兩種：新的核准被拒、進行中的本人核准與模擬核准都不記錄、之後照常到期）、`TestA2EndedTaskAskIsNotApprovable`（demo：409、進行中的驗證不採用、清單標示、沒有 grant）、網頁測試 113 個。

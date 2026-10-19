@@ -77,17 +77,20 @@ const DECISION = { approve: "核准", deny: "拒絕" };
 
 // outcomeText: what one operation's reply says, as [kind, text]. Unknown
 // is never worded as "not approved"; a refusal never as success.
-export function outcomeText(status, body, decision) {
+// pays: payment_capability local_anvil (P2-a): an approval is not yet paid,
+// rather than never paid.
+export function outcomeText(status, body, decision, pays = false) {
+  const off = pays ? "尚未付款。" : "付款未啟用。";
   const b = body || {};
   const a = b.attempt || {};
   const grant = b.item && b.item.purchase && b.item.purchase.approval && b.item.purchase.approval.grant;
-  if (status === 200 && b.outcome === "approved" && grant && grant.voice === "verified") return ["ok", "本人核准已驗證（裝置＋語音挑戰），付款未啟用。"];
-  if (status === 200 && b.outcome === "approved" && grant && grant.voice === "unavailable") return ["warn", "本人核准已驗證（裝置）；" + voiceGrant(grant) + "。付款未啟用。"];
-  if (status === 200 && b.outcome === "approved") return ["ok", "本人核准已驗證，付款未啟用。"];
+  if (status === 200 && b.outcome === "approved" && grant && grant.voice === "verified") return ["ok", "本人核准已驗證（裝置＋語音挑戰），" + off];
+  if (status === 200 && b.outcome === "approved" && grant && grant.voice === "unavailable") return ["warn", "本人核准已驗證（裝置）；" + voiceGrant(grant) + "。" + off];
+  if (status === 200 && b.outcome === "approved") return ["ok", "本人核准已驗證，" + off];
   if (status === 200 && b.outcome === "denied" && VOICE_FAILURES.includes(b.code)) return ["deny", "語音挑戰未通過（" + voiceText(b.code) + "），這筆已拒絕；不會付款。"];
   if (status === 200 && b.outcome === "denied") return ["deny", "你已拒絕這筆（已驗證裝置）。"];
   if (status === 200 && b.outcome === "mismatch") return ["error", "Signer 的結果和這次操作不一致，沒有採用。"];
-  if (status === 200 && (b.outcome === "closed" || b.outcome === "superseded")) return ["closed", "裝置的驗證沒有被採用（這筆已關閉，或 Signer 的核准已過期）；不會付款。"];
+  if (status === 200 && (b.outcome === "closed" || b.outcome === "superseded")) return ["closed", "裝置的驗證沒有被採用（這筆已關閉、task 已結束，或 Signer 的核准已過期）；不會付款。"];
   if (status === 200 && a.state === "lost") return lostText(a);
   if (status === 200 && a.state === "closed") return ["idle", "已取消這次驗證；這筆仍在等你決定。"];
   if (status === 200 && a.state === "expired") return ["closed", "已過期（後端時間為準）；這次驗證沒有完成。"];
@@ -95,6 +98,7 @@ export function outcomeText(status, body, decision) {
   if (b.error === "signer_refused") return ["error", "驗證沒有通過（" + codeText(b.code) + "）；沒有" + (DECISION[decision] || "決定") + "。"];
   if (b.error === "result_unknown") return ["warn", "結果確認中，請不要重複操作。"];
   if (b.error === "store_unavailable" && b.state_not_saved) return ["warn", "後端已收到，但這次結果還沒有存好；畫面會以同一個編號確認。"];
+  if (b.error === "task_ended") return ["closed", "task 已結束（CLI 逾時，或另一筆請購被拒絕）：這筆不能核准，也不會付款。"];
   if (b.error === "session_closed") return ["closed", "這筆已經結束，不能再" + (DECISION[decision] || "處理") + "。"];
   if (b.error === "signer_mismatch") return ["error", "回傳的資料和你這次的操作不一致，已停止，沒有要求裝置驗證。"];
   if (b.error === "not_found") return ["error", "找不到這一筆（可能不是這位客人的）"];

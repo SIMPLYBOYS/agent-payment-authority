@@ -311,6 +311,8 @@ func (h *approvals) challenge(consumer, session, requestID, decision string) (in
 		return http.StatusConflict, approvalReply{Error: "session_closed"}
 	case "IDEMPOTENCY_CONFLICT":
 		return http.StatusConflict, approvalReply{Error: "request_id_conflict"}
+	case "TASK_ALREADY_ENDED": // a CLI timeout or a Deny: nobody decides this Ask now (cli-timeout-pending)
+		return http.StatusConflict, approvalReply{Error: "task_ended"}
 	case "INVALID_APPROVAL":
 		return http.StatusBadRequest, approvalReply{Error: "bad_request"}
 	default:
