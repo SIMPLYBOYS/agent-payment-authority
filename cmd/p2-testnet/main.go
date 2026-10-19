@@ -249,7 +249,7 @@ func node(ctx context.Context, raw string, out io.Writer) (*eth.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(out, "p2-testnet: chain %d at %s (%s), block %d\n", chainID, u.Host, client, block) // the host only: a URL may carry a key
+	fmt.Fprintf(out, "p2-testnet: chain %d at %s (%q), block %d\n", chainID, u.Host, client, block) // the host only: a URL may carry a key
 	return rpc, nil
 }
 
@@ -396,48 +396,70 @@ func test402(ctx context.Context, resource string, tok eth.Address, out io.Write
 	if res.StatusCode != http.StatusPaymentRequired {
 		return fmt.Errorf("test402: status %d, not 402", res.StatusCode)
 	}
-	var pr struct {
-		X402Version int `json:"x402Version"`
-		Accepts     []struct {
-			Scheme  string          `json:"scheme"`
-			Network string          `json:"network"`
-			Amount  string          `json:"amount"`
-			Asset   string          `json:"asset"`
-			PayTo   string          `json:"payTo"`
-			Extra   json.RawMessage `json:"extra"`
-		} `json:"accepts"`
-	}
-	if err := x402.Decode(res.Header.Get(x402.HeaderPaymentRequired), &pr); err != nil {
+	return describe402(u.Host+u.Path, res.Header.Get(x402.HeaderPaymentRequired), tok, out)
+}
+
+// describe402 prints a PAYMENT-REQUIRED's accepted payments, each read
+// leniently (a server may add members), every remote string quoted.
+func describe402(where, header string, tok eth.Address, out io.Writer) error {
+	var pr x402.PaymentRequired
+	if err := x402.Decode(header, &pr); err != nil {
 		return fmt.Errorf("test402: PAYMENT-REQUIRED: %w", err)
-	}
-	for _, a := range pr.Accepts {
-		fmt.Fprintf(out, "p2-testnet: test402 %s: x402 v%d, %s on %s, amount %s, asset %s, payTo %s, extra %s\n",
-			u.Host+u.Path, pr.X402Version, a.Scheme, a.Network, a.Amount, a.Asset, a.PayTo, a.Extra)
-		if as, _ := eth.ParseAddress(a.Asset); a.Network != "eip155:84532" || as != tok {
-			fmt.Fprintln(out, "p2-testnet: test402: this one is not Base Sepolia USDC")
-		}
 	}
 	if len(pr.Accepts) == 0 {
 		return errors.New("test402: no accepted payment")
 	}
+	for _, raw := range pr.Accepts {
+		var a struct {
+			Scheme, Network, Amount, Asset, PayTo string
+			MaxTimeoutSeconds                     uint64
+			Extra                                 json.RawMessage
+		}
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return fmt.Errorf("test402: an accepted payment: %w", err)
+		}
+		fmt.Fprintf(out, "p2-testnet: test402 %q: x402 v%d, %q on %q, amount %q, asset %q, payTo %q, %d s, extra %q\n",
+			where, pr.X402Version, a.Scheme, a.Network, a.Amount, a.Asset, a.PayTo, a.MaxTimeoutSeconds, a.Extra)
+		if as, _ := eth.ParseAddress(a.Asset); a.Network != "eip155:84532" || as != tok {
+			fmt.Fprintln(out, "p2-testnet: test402: this one is not Base Sepolia USDC")
+		}
+	}
 	return nil
 }
 
-// journal is DIR/deploy.json: every deploy transaction, written before it is sent.
+// journal is DIR/deploy.json: every deploy transaction, written before it
+// is sent, then its contract and block once it is confirmed.
 type journal struct {
-	Chain uint64   `json:"chain_id"`
-	From  string   `json:"from"`
-	Txs   []string `json:"txs"` // hashes, in order
+	Chain uint64      `json:"chain_id"`
+	From  string      `json:"from"`
+	Txs   []journalTx `json:"txs"`
+}
+
+type journalTx struct {
+	Hash     string `json:"hash"`
+	Contract string `json:"contract,omitempty"`
+	Block    uint64 `json:"block,omitempty"`
 }
 
 // deploy sends the verifier and the budget contract from the issuer, then
-// writes the files apa-relayer and the Host start from.
+// writes the files apa-relayer and the Host start from. Everything that
+// can be checked is checked before "yes"; a journal with both contracts
+// confirmed (the files not yet written) is finished without sending.
 func deploy(ctx context.Context, rpc *eth.Client, tok token, r roles, bal []balance, o options, ask asker, out io.Writer) error {
 	jpath := filepath.Join(o.dir, "deploy.json")
-	for _, p := range []string{jpath, filepath.Join(o.dir, "relayer.json"), filepath.Join(o.dir, "host"), filepath.Join(o.dir, "run", "relayer.sock")} {
+	host, run := filepath.Join(o.dir, "host"), filepath.Join(o.dir, "run")
+	for _, p := range []string{filepath.Join(o.dir, "relayer.json"), host, run} {
 		if _, err := os.Lstat(p); !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("%s exists: deploy has run (or apa-relayer runs); nothing was sent", p)
 		}
+	}
+	files, err := prepare(o, tok, r)
+	if err != nil {
+		return err
+	}
+	var j journal
+	if _, err := os.Lstat(jpath); !errors.Is(err, os.ErrNotExist) {
+		return resume(ctx, rpc, jpath, r, files, out)
 	}
 	if missing := short(bal); missing != "" {
 		return errors.New(missing)
@@ -468,6 +490,7 @@ func deploy(ctx context.Context, rpc *eth.Client, tok token, r roles, bal []bala
 	if err := errors.Join(err1, err2); err != nil {
 		return fmt.Errorf("estimate: %w", err)
 	}
+	gv, gb = gv+gv/5, gb+gb/5 // the limits sent
 	nonce, err := rpc.PendingNonce(ctx, from)
 	if err != nil {
 		return err
@@ -481,7 +504,9 @@ func deploy(ctx context.Context, rpc *eth.Client, tok token, r roles, bal []bala
 		return err
 	}
 	fee := new(big.Int).Add(new(big.Int).Mul(h.BaseFee, big.NewInt(2)), tip)
-	most := new(big.Int).Mul(fee, new(big.Int).SetUint64(gv+gb))
+	// The node checks limit x fee cap, plus Base's L1 data fee, against the
+	// balance for each: twice the limits' cost covers that data fee here.
+	most := new(big.Int).Mul(new(big.Int).Mul(fee, new(big.Int).SetUint64(gv+gb)), big.NewInt(2))
 	var have *big.Int
 	for _, b := range bal {
 		if b.who == "issuer" {
@@ -489,9 +514,9 @@ func deploy(ctx context.Context, rpc *eth.Client, tok token, r roles, bal []bala
 		}
 	}
 	fmt.Fprintf(out, "p2-testnet: deploy plan on chain %d, from the issuer %s:\n", chainID, from.Hex())
-	fmt.Fprintf(out, "p2-testnet:   1. the Z2 verifier (nonce %d, gas %d)\n", nonce, gv)
-	fmt.Fprintf(out, "p2-testnet:   2. the budget contract, issuer %s, policy signer %s (nonce %d, gas %d)\n", r["issuer"].Hex(), r["policy"].Hex(), nonce+1, gb)
-	fmt.Fprintf(out, "p2-testnet:   at most %s test ETH in all (fee cap %s wei); the issuer holds %s\n", ether(most), fee, ether(have))
+	fmt.Fprintf(out, "p2-testnet:   1. the Z2 verifier (nonce %d, gas limit %d)\n", nonce, gv)
+	fmt.Fprintf(out, "p2-testnet:   2. the budget contract, issuer %s, policy signer %s (nonce %d, gas limit %d)\n", r["issuer"].Hex(), r["policy"].Hex(), nonce+1, gb)
+	fmt.Fprintf(out, "p2-testnet:   at most %s test ETH in all, with room for the L1 data fee (fee cap %s wei); the issuer holds %s\n", ether(most), fee, ether(have))
 	if have.Cmp(most) < 0 {
 		return errors.New("the issuer holds less than the plan can cost; nothing was sent")
 	}
@@ -510,51 +535,180 @@ func deploy(ctx context.Context, rpc *eth.Client, tok token, r roles, bal []bala
 	if key.Addr != from {
 		return errors.New("the issuer key is not its file's address")
 	}
-	j := journal{Chain: chainID, From: from.Hex()}
+	// Fees may have moved while the questions were answered: a cap under
+	// 1.5x the base fee now could leave the verifier stuck in a pool.
+	if now, err := rpc.LatestHeader(ctx); err != nil {
+		return err
+	} else if new(big.Int).Mul(fee, big.NewInt(2)).Cmp(new(big.Int).Mul(now.BaseFee, big.NewInt(3))) < 0 {
+		return fmt.Errorf("the base fee rose to %s wei since the plan (fee cap %s); nothing was sent: run deploy again for a new plan", now.BaseFee, fee)
+	}
+	j = journal{Chain: chainID, From: from.Hex()}
 	send := func(n uint64, data []byte, gas uint64) (*eth.Receipt, error) {
 		tx := &eth.Tx{ChainID: big.NewInt(chainID), Nonce: n, MaxPriorityFeePerGas: tip, MaxFeePerGas: fee, Gas: gas, Value: new(big.Int), Data: data}
 		raw, hash, err := tx.Sign(key)
 		if err != nil {
 			return nil, err
 		}
-		j.Txs = append(j.Txs, "0x"+hex.EncodeToString(hash))
+		j.Txs = append(j.Txs, journalTx{Hash: "0x" + hex.EncodeToString(hash)})
 		if err := writeJSON(jpath, j); err != nil { // written before it is sent: deploy never sends it twice
 			return nil, err
 		}
-		fmt.Fprintf(out, "p2-testnet: sending %s\n", j.Txs[len(j.Txs)-1])
+		fmt.Fprintf(out, "p2-testnet: sending %s\n", j.Txs[len(j.Txs)-1].Hash)
 		if _, err := rpc.SendRaw(ctx, raw); err != nil {
-			return nil, fmt.Errorf("sending %s: %w (unknown: look it up before anything else; deploy will not run again)", j.Txs[len(j.Txs)-1], err)
+			return nil, fmt.Errorf("sending %s: %w (unknown: look it up before anything else; deploy will not send again)", j.Txs[len(j.Txs)-1].Hash, err)
 		}
-		return confirmed(ctx, rpc, hash)
+		rc, err := confirmed(ctx, rpc, hash)
+		if err != nil {
+			return nil, err
+		}
+		if rc.ContractAddress == nil {
+			return nil, fmt.Errorf("%s: the receipt has no contract address", j.Txs[len(j.Txs)-1].Hash)
+		}
+		last := &j.Txs[len(j.Txs)-1]
+		last.Contract, last.Block = rc.ContractAddress.Hex(), rc.BlockNumber
+		return rc, writeJSON(jpath, j)
 	}
-	vr, err := send(nonce, vcode, gv+gv/5)
+	vr, err := send(nonce, vcode, gv)
 	if err != nil {
 		return err
 	}
-	if vr.ContractAddress == nil {
-		return errors.New("the verifier's receipt has no contract address")
-	}
-	br, err := send(nonce+1, ctor(*vr.ContractAddress), gb+gb/5)
-	if err != nil {
+	if _, err := send(nonce+1, ctor(*vr.ContractAddress), gb); err != nil {
 		return err
 	}
-	if br.ContractAddress == nil {
-		return errors.New("the budget contract's receipt has no contract address")
+	return finish(ctx, rpc, j, r, files, out)
+}
+
+// resume finishes a deploy whose two transactions the journal holds
+// confirmed: their receipts are read again and nothing is sent.
+func resume(ctx context.Context, rpc *eth.Client, jpath string, r roles, files hostFiles, out io.Writer) error {
+	var j journal
+	if err := readJSON(jpath, &j); err != nil {
+		return err
 	}
-	budget := *br.ContractAddress
-	// The deployed contract names the verifier, issuer and policy signer this plan named.
-	for sig, want := range map[string]eth.Address{"verifier()": *vr.ContractAddress, "issuer()": r["issuer"], "policySigner()": r["policy"]} {
-		b, err := rpc.Call(ctx, eth.Msg{To: budget, Data: eth.Selector(sig)})
+	if j.Chain != chainID || j.From != r["issuer"].Hex() || len(j.Txs) != 2 || j.Txs[0].Contract == "" || j.Txs[1].Contract == "" {
+		return fmt.Errorf("%s holds a deploy that did not finish: look its transactions up before anything else; nothing was sent", jpath)
+	}
+	for _, t := range j.Txs {
+		h, _ := hex.DecodeString(strings.TrimPrefix(t.Hash, "0x"))
+		rc, err := confirmed(ctx, rpc, h)
 		if err != nil {
 			return err
 		}
-		w, _ := eth.Word(b, 0)
-		if got, err := eth.WordAddress(w); err != nil || got != want {
-			return fmt.Errorf("the budget contract's %s is not %s", sig, want.Hex())
+		if rc.ContractAddress == nil || rc.ContractAddress.Hex() != t.Contract {
+			return fmt.Errorf("%s: its receipt is not the journal's contract", t.Hash)
 		}
 	}
-	fmt.Fprintf(out, "p2-testnet: verifier %s (block %d, %s), budget %s (block %d, %s)\n", vr.ContractAddress.Hex(), vr.BlockNumber, j.Txs[0], budget.Hex(), br.BlockNumber, j.Txs[1])
-	return writeFiles(o, tok, r, budget, vr.BlockNumber, out)
+	fmt.Fprintln(out, "p2-testnet: the journal's deploy is confirmed; writing its files (nothing is sent)")
+	return finish(ctx, rpc, j, r, files, out)
+}
+
+// finish checks the deployed budget contract, then writes the files.
+func finish(ctx context.Context, rpc *eth.Client, j journal, r roles, files hostFiles, out io.Writer) error {
+	verifier, _ := eth.ParseAddress(j.Txs[0].Contract)
+	budget, _ := eth.ParseAddress(j.Txs[1].Contract)
+	// The deployed contract names the verifier, issuer and policy signer
+	// planned; a node behind on the newest block is asked again.
+	for sig, want := range map[string]eth.Address{"verifier()": verifier, "issuer()": r["issuer"], "policySigner()": r["policy"]} {
+		var got eth.Address
+		for i := 0; i < 10 && got != want; i++ {
+			if i > 0 {
+				time.Sleep(confirmPoll)
+			}
+			if b, err := rpc.Call(ctx, eth.Msg{To: budget, Data: eth.Selector(sig)}); err == nil {
+				if w, err := eth.Word(b, 0); err == nil {
+					got, _ = eth.WordAddress(w)
+				}
+			}
+		}
+		if got != want {
+			return fmt.Errorf("the budget contract's %s is not %s (ask again: deploy resumes from its journal)", sig, want.Hex())
+		}
+	}
+	fmt.Fprintf(out, "p2-testnet: verifier %s (block %d, %s), budget %s (block %d, %s)\n", verifier.Hex(), j.Txs[0].Block, j.Txs[0].Hash, budget.Hex(), j.Txs[1].Block, j.Txs[1].Hash)
+	return files.write(budget, j.Txs[0].Block, out)
+}
+
+// hostFiles are the files deploy writes, all but the deployment checked
+// before anything is sent.
+type hostFiles struct {
+	o    options
+	tok  token
+	shop eth.Address
+	reg  contracts.RegistryConfig
+	prof map[string]any
+	zk   string
+}
+
+// prepare builds and checks the registry and profile, and the paths the
+// written files name, before anything is sent.
+func prepare(o options, tok token, r roles) (hostFiles, error) {
+	f := hostFiles{o: o, tok: tok, shop: r["shop"]}
+	root, _ := filepath.Abs(".")
+	f.zk = filepath.Join(root, "zk/setup")
+	for _, p := range []string{o.zkbudget, filepath.Join(f.zk, "pk.bin"), filepath.Join(f.zk, "vk.bin")} {
+		if fi, err := os.Stat(p); err != nil || !fi.Mode().IsRegular() {
+			return f, fmt.Errorf("%s is missing (run from the repo; build zkbudget first); nothing was sent", p)
+		}
+	}
+	if err := readJSON(o.registry, &f.reg); err != nil {
+		return f, err
+	}
+	var ia, ib = -1, -1
+	for i, w := range f.reg.Wallets {
+		switch w.WalletID {
+		case "wallet-a":
+			ia = i
+		case "wallet-b":
+			ib = i
+		}
+	}
+	if ia < 0 || ib < 0 || len(f.reg.Assets) != 1 {
+		return f, errors.New("the registry has no wallet-a, wallet-b or one asset")
+	}
+	f.reg.Wallets[ia].From, f.reg.Wallets[ib].From = o.walletA.Hex(), o.walletB.Hex()
+	a := &f.reg.Assets[0]
+	a.AssetID, a.AssetContract, a.EIP712Name, a.EIP712Version = assetID, tok.addr.Hex(), tok.name, tok.version
+	f.reg.MerchantPayTo = f.shop.Hex()
+	if _, err := contracts.NewRegistry(f.reg); err != nil {
+		return f, fmt.Errorf("the registry to write: %w", err)
+	}
+	if err := readJSON(o.profile, &f.prof); err != nil {
+		return f, err
+	}
+	f.prof["asset_id"], f.prof["merchants"] = assetID, []string{f.shop.Hex()}
+	raw, _ := json.Marshal(f.prof)
+	if _, err := policy.LoadProfile(raw); err != nil {
+		return f, fmt.Errorf("the profile to write: %w", err)
+	}
+	return f, nil
+}
+
+// write writes apa-relayer's relayer.json and the Host's files.
+func (f hostFiles) write(budget eth.Address, from uint64, out io.Writer) error {
+	o := f.o
+	host, run := filepath.Join(o.dir, "host"), filepath.Join(o.dir, "run")
+	for _, d := range []string{host, run} {
+		if err := os.Mkdir(d, 0o700); err != nil {
+			return err
+		}
+	}
+	sock := filepath.Join(run, "relayer.sock")
+	pay := map[string]any{"environment": "base_sepolia", "rpc": o.rpc, "chain_id": chainID, "confirmations": confirmations, "token": f.tok.addr.Hex(),
+		"token_name": f.tok.name, "token_version": f.tok.version, "token_from_block": from, "pay_to": f.shop.Hex(), "budget_contract": budget.Hex(),
+		"policy_ttl": policyTTL, "zkbudget": o.zkbudget, "zk_setup_dir": f.zk, "relayer_socket": sock,
+		"shop_key_dir": o.dir, "shop_daily_tx_cap": shopCap, "dir": host,
+		"delegations": map[string]string{"consumer-a": "dlg-ta@1", "consumer-b": "dlg-tb@1"}} // new IDs: /opt's signer.db may know dlg-a/dlg-b (P2b-D5)
+	rel := map[string]any{"socket": sock, "callers": []int{os.Getuid()}, "rpc": o.rpc, "chain_id": chainID, "budget_contract": budget.Hex(),
+		"confirmations": confirmations, "policy_ttl": policyTTL, "zkbudget": o.zkbudget, "zk_setup_dir": f.zk, "daily_tx_cap": relayerCap}
+	for path, v := range map[string]any{filepath.Join(o.dir, "relayer.json"): rel, filepath.Join(host, "payments.json"): pay,
+		filepath.Join(host, "registry.json"): f.reg, filepath.Join(host, "profile.json"): f.prof} {
+		if err := writeJSON(path, v); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(out, "p2-testnet: wrote %s and %s/{payments,registry,profile}.json; the reconciliation starts at block %d\n", filepath.Join(o.dir, "relayer.json"), host, from)
+	fmt.Fprintf(out, "p2-testnet: next: apa-relayer serve --dir %s, then make present-testnet SIGNER=<the Signer's socket>\n", o.dir)
+	return nil
 }
 
 func estimate(ctx context.Context, rpc *eth.Client, from eth.Address, data []byte) (uint64, error) {
@@ -587,66 +741,7 @@ func confirmed(ctx context.Context, rpc *eth.Client, hash []byte) (*eth.Receipt,
 		}
 		time.Sleep(confirmPoll)
 	}
-	return nil, fmt.Errorf("0x%x is not %d blocks deep after %s: unknown; look it up before anything else (deploy will not run again)", hash, confirmations, confirmWait)
-}
-
-// writeFiles writes apa-relayer's relayer.json and the Host's files.
-func writeFiles(o options, tok token, r roles, budget eth.Address, from uint64, out io.Writer) error {
-	root, _ := filepath.Abs(".")
-	host, run := filepath.Join(o.dir, "host"), filepath.Join(o.dir, "run")
-	for _, d := range []string{host, run} {
-		if err := os.Mkdir(d, 0o700); err != nil {
-			return err
-		}
-	}
-	var reg contracts.RegistryConfig
-	if err := readJSON(o.registry, &reg); err != nil {
-		return err
-	}
-	var ia, ib = -1, -1
-	for i, w := range reg.Wallets {
-		switch w.WalletID {
-		case "wallet-a":
-			ia = i
-		case "wallet-b":
-			ib = i
-		}
-	}
-	if ia < 0 || ib < 0 || len(reg.Assets) != 1 {
-		return errors.New("the registry has no wallet-a, wallet-b or one asset")
-	}
-	reg.Wallets[ia].From, reg.Wallets[ib].From = o.walletA.Hex(), o.walletB.Hex()
-	reg.Assets[0].AssetID, reg.Assets[0].AssetContract, reg.Assets[0].EIP712Name, reg.Assets[0].EIP712Version = assetID, tok.addr.Hex(), tok.name, tok.version
-	reg.MerchantPayTo = r["shop"].Hex()
-	if _, err := contracts.NewRegistry(reg); err != nil {
-		return fmt.Errorf("the written registry: %w", err)
-	}
-	var prof map[string]any
-	if err := readJSON(o.profile, &prof); err != nil {
-		return err
-	}
-	prof["asset_id"], prof["merchants"] = assetID, []string{r["shop"].Hex()}
-	raw, _ := json.Marshal(prof)
-	if _, err := policy.LoadProfile(raw); err != nil {
-		return fmt.Errorf("the written profile: %w", err)
-	}
-	sock := filepath.Join(run, "relayer.sock")
-	pay := map[string]any{"environment": "base_sepolia", "rpc": o.rpc, "chain_id": chainID, "confirmations": confirmations, "token": tok.addr.Hex(),
-		"token_name": tok.name, "token_version": tok.version, "token_from_block": from, "pay_to": r["shop"].Hex(), "budget_contract": budget.Hex(),
-		"policy_ttl": policyTTL, "zkbudget": o.zkbudget, "zk_setup_dir": filepath.Join(root, "zk/setup"), "relayer_socket": sock,
-		"shop_key_dir": o.dir, "shop_daily_tx_cap": shopCap, "dir": host,
-		"delegations": map[string]string{"consumer-a": "dlg-ta@1", "consumer-b": "dlg-tb@1"}} // new IDs: /opt's signer.db may know dlg-a/dlg-b (P2b-D5)
-	rel := map[string]any{"socket": sock, "callers": []int{os.Getuid()}, "rpc": o.rpc, "chain_id": chainID, "budget_contract": budget.Hex(),
-		"confirmations": confirmations, "policy_ttl": policyTTL, "zkbudget": o.zkbudget, "zk_setup_dir": filepath.Join(root, "zk/setup"), "daily_tx_cap": relayerCap}
-	for path, v := range map[string]any{filepath.Join(o.dir, "relayer.json"): rel, filepath.Join(host, "payments.json"): pay,
-		filepath.Join(host, "registry.json"): reg, filepath.Join(host, "profile.json"): prof} {
-		if err := writeJSON(path, v); err != nil {
-			return err
-		}
-	}
-	fmt.Fprintf(out, "p2-testnet: wrote %s and %s/{payments,registry,profile}.json; the reconciliation starts at block %d\n", filepath.Join(o.dir, "relayer.json"), host, from)
-	fmt.Fprintf(out, "p2-testnet: next: apa-relayer serve --dir %s, then make present-testnet SIGNER=<the Signer's socket>\n", o.dir)
-	return nil
+	return nil, fmt.Errorf("0x%x is not %d blocks deep after %s: unknown; look it up before anything else (deploy will not send again)", hash, confirmations, confirmWait)
 }
 
 func readJSON(path string, v any) error {

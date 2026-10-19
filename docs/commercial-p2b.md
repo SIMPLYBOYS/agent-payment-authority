@@ -106,6 +106,14 @@ B3b 的 review（546a990）：REQUEST CHANGES，沒有 Critical；三項 Importa
 - 測試：`TestRefusals`（http、這台機器、帳密、別的代幣、目錄權限，全部在連線之前就拒絕）、`TestPreflightAndDeploy`（本機 anvil 冒充，只有測試能這樣：缺幣時的說明、沒輸入 yes 什麼都不送、送兩筆、檔案內容與權限、不印密語與 RPC 網址、不能跑第二次）。沒有任何測試連外。
 - 部署用的 Z2 verifier 對應 repo 裡的 `zk/setup`（測試用的可信設定），與 P2-a 相同；這是 testnet，不宣稱 production 安全。
 
+B4 的 review（b8bda11）：REQUEST CHANGES，沒有 Critical；五項 Important 都已處理：
+- RPC 網址可能出現在錯誤訊息裡（網址的路徑或參數可能帶 API key）→ `eth.Client` 的連線錯誤只寫方法名稱與原因，不寫網址；demo、relayer、商店一併受益。
+- 有些檢查要到兩筆交易都上鏈後才做，失敗了也無法續做 → registry、profile、`zkbudget` 與 `zk/setup` 都在輸入 `yes` 之前檢查；每筆交易確認後把合約位址與區塊寫進 `deploy.json`；兩筆都已確認但檔案還沒寫時，再跑一次 deploy 會重新讀 receipt、確認合約，然後只寫檔、**不送任何交易**；沒做完的紀錄一律拒絕，請你先查。
+- 「最多花費」少算了 → 以實際送出的 gas 上限計算，再乘 2 涵蓋 Base 的 L1 資料費；輸入密語後再讀一次 base fee，fee cap 不到它的 1.5 倍就不送。
+- `--test402` 讀不了真的回應（未知欄位會被拒）→ 先以 `x402.PaymentRequired` 解，再寬鬆地讀每個 accepted payment；遠端字串一律加引號印出。
+- `make present-testnet` 會沿用這個 Signer socket 既有的 Host 資料庫 → 場次與 Host 資料庫改放 `var/p2-testnet/present/`，是新的。
+- 建議也照做：腳本的目錄改為絕對路徑；deploy 前確認 `contracts/src/Verifier.sol` 與 `zk/setup/Verifier.sol` 相同、合約建置比原始碼新（不在腳本裡跑 forge，避免它去下載編譯器）；node 的版本字串加引號。
+
 **B6 `/opt` 的產生器**（完成，待 review）：`p2-testnet opt-signer`（見 §6.1）：只讀兩個檔，不讀金鑰、不連任何節點；產生的設定以 `signer.ParseConfig` 驗證後才以 0600 寫出，目標檔已存在就拒絕；`--base` 的 WebAuthn 必須是 `localhost` 且含 `http://localhost:8402`。測試 `TestOptSigner`：保留與替換的每一段、`dlg-t402` 恰好一筆 0.0001、核准者版本加 1、語音商家改到商店位址、不覆寫、別的來源被拒。§6.1 寫出第 2 步與第 5 步在 `/opt` 的做法；實際的執行檔、設定與雜湊在第 5 步才產生。
 
 ## 5 要你決定的事

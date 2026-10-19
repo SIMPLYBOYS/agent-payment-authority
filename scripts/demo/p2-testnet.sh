@@ -17,6 +17,7 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 dir=${P2_TESTNET_DIR:-$root/var/p2-testnet}
 mkdir -p "$dir/keys" "$dir/bin" && chmod 700 "$dir" "$dir/keys" "$dir/bin"
+dir=$(cd "$dir" && pwd) # absolute: zkbudget is built from zk/
 build() {
   go build -o "$dir/bin/apa-relayer" ./cmd/apa-relayer
   go build -o "$dir/bin/p2-testnet" ./cmd/p2-testnet
@@ -34,6 +35,11 @@ keygen)
   done ;;
 preflight|deploy)
   [ $# -ge 2 ] || { echo "usage: sh scripts/demo/p2-testnet.sh $cmd 0x<wallet-a> 0x<wallet-b>" >&2; exit 2; }
+  # The verifier deployed must be zk/setup's, from a build newer than its sources.
+  cmp -s contracts/src/Verifier.sol zk/setup/Verifier.sol || { echo "p2-testnet: contracts/src/Verifier.sol is not zk/setup's" >&2; exit 1; }
+  for c in Verifier Budget; do
+    [ "var/contracts/out/$c.sol/$c.json" -nt "contracts/src/$c.sol" ] || { echo "p2-testnet: var/contracts/out/$c.sol is older than contracts/src/$c.sol: build the contracts first (forge build in contracts/)" >&2; exit 1; }
+  done
   a=$1; b=$2; shift 2
   "$dir/bin/p2-testnet" "$cmd" --dir "$dir" --rpc "$rpc" --wallet-a "$a" --wallet-b "$b" "$@" ;;
 relayer)

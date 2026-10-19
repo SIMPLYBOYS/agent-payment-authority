@@ -125,10 +125,12 @@ present-p2:
 # SIGNER is the socket of the running apa-signer serve (on /opt, P2b-D2);
 # apa-relayer serve --dir var/p2-testnet must be running; the host files are
 # the ones p2-testnet deploy wrote (default var/p2-testnet/host/). The host
-# asks the shop key's passphrase on this terminal before it is ready.
+# asks the shop key's passphrase on this terminal before it is ready. Its
+# sessions and Host database are under var/p2-testnet/present (§6 step 6: a
+# new Host database, not the one kept for this Signer socket in var/).
 present-testnet:
 	@test -n "$(SIGNER)" || { echo "usage: make present-testnet SIGNER=/path/of/signer.sock [HOST=var/p2-testnet/host] (docs/commercial-p2b.md 6)" >&2; exit 2; }
-	@h="$(or $(HOST),var/p2-testnet/host)"; APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$$h/registry.json" APA_PRESENT_PAYMENTS="$$h/payments.json" APA_PRESENT_PROFILE="$$h/profile.json" APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p2.json sh scripts/demo/present.sh fake
+	@h="$(or $(HOST),var/p2-testnet/host)"; mkdir -p var/p2-testnet/present && chmod 700 var/p2-testnet/present; APA_PRESENT_DIR="$(CURDIR)/var/p2-testnet/present" APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$$h/registry.json" APA_PRESENT_PAYMENTS="$$h/payments.json" APA_PRESENT_PROFILE="$$h/profile.json" APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p2.json sh scripts/demo/present.sh fake
 
 # docs/m1-evidence.md: the M1 fixture evidence bundle, a new
 # artifacts/m1/<run-id>/ each time (manifest.json, its evidence, run-end.json).

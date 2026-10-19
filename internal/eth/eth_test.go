@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -177,5 +178,19 @@ func TestAnvil(t *testing.T) {
 	logs, err := c.Logs(ctx, to, Topic("Transfer(address,address,uint256)"), 0, r.BlockNumber)
 	if err != nil || len(logs) != 0 {
 		t.Fatalf("logs %v %v", logs, err)
+	}
+}
+
+// A node that does not answer is named by the method, never by its URL:
+// an API key in a URL's path or query stays out of every error.
+func TestRPCErrorsHideTheURL(t *testing.T) {
+	c := NewClient("http://127.0.0.1:1/v2/SECRET-KEY?key=SECRET-KEY")
+	_, err := c.ChainID(context.Background())
+	if err == nil || strings.Contains(err.Error(), "SECRET") || strings.Contains(err.Error(), "127.0.0.1:1/") {
+		t.Fatalf("%v", err)
+	}
+	err = c.Raw(context.Background(), "web3_clientVersion", nil)
+	if err == nil || strings.Contains(err.Error(), "SECRET") || !strings.Contains(err.Error(), "web3_clientVersion") {
+		t.Fatalf("%v", err)
 	}
 }

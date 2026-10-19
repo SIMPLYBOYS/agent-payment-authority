@@ -15,6 +15,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/keytool"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer/signertest"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
 
 // answers is a terminal: the lines, then the passphrase.
@@ -105,6 +106,9 @@ func TestPreflightAndDeploy(t *testing.T) {
 	}()
 	usdcAddr := ethtest.Deploy(t, c, "TestUSDC.sol/TestUSDC")
 	dir, r := keysDir(t)
+	cwd, _ := os.Getwd()
+	os.Chdir(ethtest.Root()) // zk/setup is the repo's, as when the script runs it
+	defer os.Chdir(cwd)
 	wa, wb := eth.Address{0x11}, eth.Address{0x22}
 	args := func(cmd string) []string {
 		return []string{cmd, "--dir", dir, "--rpc", c.URL, "--token", usdcAddr.Hex(), "--wallet-a", wa.Hex(), "--wallet-b", wb.Hex(),
@@ -118,6 +122,10 @@ func TestPreflightAndDeploy(t *testing.T) {
 	if !strings.Contains(out.String(), `name "USDC", version "2", decimals 6`) || !strings.Contains(out.String(), "not ready for deploy: no test funds yet for relayer-gas, issuer, shop, wallet-a, wallet-b") {
 		t.Fatalf("preflight before the faucets:\n%s", out.String())
 	}
+	if err := run(context.Background(), args("deploy"), &out, &answers{line: "yes", pass: pass}); err == nil || !strings.Contains(err.Error(), "zkbudget is missing") {
+		t.Fatalf("deploy without the prover: %v", err) // checked before anything is sent
+	}
+	os.WriteFile(filepath.Join(dir, "zkbudget"), []byte("#!/bin/sh\n"), 0o700)
 	if err := run(context.Background(), args("deploy"), &out, &answers{line: "yes", pass: pass}); err == nil || !strings.Contains(err.Error(), "no test funds") {
 		t.Fatalf("deploy without funds: %v", err)
 	}
@@ -179,7 +187,7 @@ func TestPreflightAndDeploy(t *testing.T) {
 	}
 	var j journal
 	readJSON(filepath.Join(dir, "deploy.json"), &j)
-	if len(j.Txs) != 2 || j.From != r["issuer"].Hex() {
+	if len(j.Txs) != 2 || j.From != r["issuer"].Hex() || j.Txs[1].Contract != budget.Hex() || j.Txs[0].Block == 0 {
 		t.Fatalf("journal %+v", j)
 	}
 	if strings.Contains(out.String(), pass) || strings.Contains(out.String(), c.URL) {
@@ -191,6 +199,53 @@ func TestPreflightAndDeploy(t *testing.T) {
 	}
 	if n, _ := c.PendingNonce(context.Background(), r["issuer"]); n != nonce+2 {
 		t.Fatal("a second deploy sent a transaction")
+	}
+	// Stopped after both were confirmed, before the files: deploy resumes from
+	// its journal and sends nothing.
+	for _, p := range []string{"relayer.json", "host", "run"} {
+		os.RemoveAll(filepath.Join(dir, p))
+	}
+	out.Reset()
+	if err := run(context.Background(), args("deploy"), &out, &answers{}); err != nil || !strings.Contains(out.String(), "nothing is sent") {
+		t.Fatalf("resume: %v\n%s", err, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "host", "payments.json")); err != nil {
+		t.Fatal("resume wrote no payments.json")
+	}
+	// A journal that did not finish is refused, nothing sent.
+	for _, p := range []string{"relayer.json", "host", "run"} {
+		os.RemoveAll(filepath.Join(dir, p))
+	}
+	j.Txs[1].Contract = ""
+	writeJSON(filepath.Join(dir, "deploy.json"), j)
+	if err := run(context.Background(), args("deploy"), &out, &answers{line: "yes", pass: pass}); err == nil || !strings.Contains(err.Error(), "did not finish") {
+		t.Fatalf("an unfinished journal: %v", err)
+	}
+	if n, _ := c.PendingNonce(context.Background(), r["issuer"]); n != nonce+2 {
+		t.Fatal("an unfinished journal sent a transaction")
+	}
+}
+
+// test402's header is read leniently (members this tool does not know),
+// every remote string quoted.
+func TestDescribe402(t *testing.T) {
+	tok, _ := eth.ParseAddress(circleUSDC)
+	accept := json.RawMessage(`{"scheme":"exact","network":"eip155:84532","amount":"100","asset":"` + circleUSDC + `","payTo":"0x` + strings.Repeat("7", 40) +
+		`","maxTimeoutSeconds":60,"extra":{"name":"USDC","version":"2","assetTransferMethod":"eip3009"},"future":"\u001b[31m"}`)
+	h, err := x402.Encode(x402.PaymentRequired{X402Version: 2, Resource: x402.ResourceInfo{URL: "https://test402.com/api/x402"}, Accepts: []json.RawMessage{accept},
+		Extensions: json.RawMessage(`{"x":{}}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := describe402("test402.com/api/x402", h, tok, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `amount "100"`) || !strings.Contains(out.String(), `payTo "0x777`) || strings.Contains(out.String(), "not Base Sepolia") {
+		t.Fatalf("%s", out.String())
+	}
+	if err := describe402("x", "not base64", tok, &out); err == nil {
+		t.Fatal("a broken header was read")
 	}
 }
 

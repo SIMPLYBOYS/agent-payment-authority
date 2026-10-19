@@ -1117,12 +1117,18 @@ MUTATIONS = [
      'w.RPID != "localhost" || !slices.Contains(w.Origins, hostOrigin) {', 'w.RPID != "localhost" || false && !slices.Contains(w.Origins, hostOrigin) {', 'TestOptSigner'),
     ('P2-b B6: opt-signer keeps the approver version', 'cmd/p2-testnet/main.go',
      '\t\ta.Version++', '\t\ta.Version += 0', 'TestOptSigner'),
+    ("P2-b B4 review: an RPC error names the node's URL", 'internal/eth/rpc.go',
+     'if errors.As(err, &ue) {', 'if false && errors.As(err, &ue) {', 'TestRPCErrorsHideTheURL'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    ('P2-b B4 review: deploy sends before checking its paths', 'cmd/p2-testnet/main.go',
+     'if fi, err := os.Stat(p); err != nil || !fi.Mode().IsRegular() {', 'if fi, err := os.Stat(p); false && (err != nil || !fi.Mode().IsRegular()) {', 'cmd/p2-testnet:TestPreflightAndDeploy'),
+    ('P2-b B4 review: an unfinished journal is resumed', 'cmd/p2-testnet/main.go',
+     ' || j.Txs[0].Contract == "" || j.Txs[1].Contract == "" {', ' {', 'cmd/p2-testnet:TestPreflightAndDeploy'),
     ('P2-b B4: deploy sends without "yes"', 'cmd/p2-testnet/main.go',
      'err != nil || ans != "yes" {', 'false && (err != nil || ans != "yes") {', 'cmd/p2-testnet:TestPreflightAndDeploy'),
     ('P2-b B4: deploy runs twice', 'cmd/p2-testnet/main.go',

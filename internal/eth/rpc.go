@@ -10,6 +10,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -57,6 +58,11 @@ func (c *Client) call(ctx context.Context, method string, out any, params ...any
 	req.Header.Set("Content-Type", "application/json")
 	res, err := c.HTTP.Do(req)
 	if err != nil {
+		// Not the URL: a node's URL may carry an API key in its path or query.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			return fmt.Errorf("%s: %w", method, ue.Err)
+		}
 		return err
 	}
 	defer res.Body.Close()
