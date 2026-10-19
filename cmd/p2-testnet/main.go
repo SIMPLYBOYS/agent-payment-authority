@@ -68,6 +68,9 @@ const (
 	assetID       = "usdc-base-sepolia"
 )
 
+// beforeSend runs just before a transaction is sent (tests only; nil otherwise).
+var beforeSend func(hash string)
+
 // local lets a test use a local anvil (http, loopback, answering as anvil)
 // and its own token; never set outside tests.
 var local = false
@@ -554,6 +557,9 @@ func deploy(ctx context.Context, rpc *eth.Client, tok token, r roles, bal []bala
 			return nil, err
 		}
 		fmt.Fprintf(out, "p2-testnet: sending %s\n", j.Txs[len(j.Txs)-1].Hash)
+		if beforeSend != nil {
+			beforeSend(j.Txs[len(j.Txs)-1].Hash)
+		}
 		if _, err := rpc.SendRaw(ctx, raw); err != nil {
 			return nil, fmt.Errorf("sending %s: %w (unknown: look it up before anything else; deploy will not send again)", j.Txs[len(j.Txs)-1].Hash, err)
 		}

@@ -152,8 +152,19 @@ func TestPreflightAndDeploy(t *testing.T) {
 		t.Fatal("an unconfirmed deploy wrote its journal")
 	}
 	out.Reset()
+	journaled := 0
+	beforeSend = func(hash string) { // the journal holds each transaction before it is sent
+		var j journal
+		if err := readJSON(filepath.Join(dir, "deploy.json"), &j); err == nil && len(j.Txs) > 0 && j.Txs[len(j.Txs)-1].Hash == hash {
+			journaled++
+		}
+	}
+	defer func() { beforeSend = nil }()
 	if err := run(context.Background(), args("deploy"), &out, &answers{line: "yes", pass: pass}); err != nil {
 		t.Fatalf("deploy: %v\n%s", err, out.String())
+	}
+	if journaled != 2 {
+		t.Fatalf("%d of 2 transactions were in the journal before they were sent", journaled)
 	}
 	if n, _ := c.PendingNonce(context.Background(), r["issuer"]); n != nonce+2 {
 		t.Fatalf("deploy sent %d transactions", n-nonce)
