@@ -169,7 +169,13 @@ func assemble(dir string, passphrase func() ([]byte, error), clock signer.Clock)
 		contract, _ := eth.ParseAddress(r.BudgetContract)
 		res = &budget.Verifier{RPC: eth.NewClient(r.RPC), ChainID: chain, Contract: contract, Confirmations: r.Confirmations}
 	}
-	core, err := signer.NewCore(ctx, cfg, keys, filepath.Join(dir, "signer.db"), clock, res)
+	// Made 0600 before SQLite opens it (its WAL and shm follow the file's
+	// mode): the approver commands refuse a signer.db readable by others.
+	path := filepath.Join(dir, "signer.db")
+	if err := privateFile(path); err != nil {
+		return nil, nil, err
+	}
+	core, err := signer.NewCore(ctx, cfg, keys, path, clock, res)
 	return core, cfg, err
 }
 

@@ -1002,6 +1002,8 @@ MUTATIONS = [
      '\t\tif err := r.Reconciled(*rec); err != nil {\n\t\t\treturn err // nothing written', '\t\tif err := r.Reconciled(*rec); false && err != nil {\n\t\t\treturn err // nothing written', 'TestReportReconciliation'),
     ('P2 H5 review: a Store failure reads as the chain', 'cmd/demo/api.go',
      'if errors.Is(err, errReconcileStore) {', 'if false && errors.Is(err, errReconcileStore) {', 'TestReconciliationRoute'),
+    ('P2 H6: serve leaves signer.db readable by others', 'cmd/apa-signer/main.go',
+     '\tpath := filepath.Join(dir, "signer.db")\n\tif err := privateFile(path); err != nil {', '\tpath := filepath.Join(dir, "signer.db")\n\tif err := privateFile(path + ".x"); err != nil {', 'TestAssemblyChecksReservationsOnChain'),
     ('P2 H2 review: a sent reservation is reserved again', 'internal/payflow/payflow.go',
      '\tcase state == "sent":\n\t\treturn p, ErrPending', '\tcase false && state == "sent":\n\t\treturn p, ErrPending', 'TestRelayerStates'),
     ('P2 H2 review: a failed reservation is tried again', 'internal/payflow/payflow.go',

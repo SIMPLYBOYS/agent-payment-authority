@@ -244,4 +244,8 @@ func TestAssemblyChecksReservationsOnChain(t *testing.T) {
 	if err == nil || err.Error() != "RESERVATION_MISSING" || r.Authorization != nil {
 		t.Fatalf("no reservation: %+v %v", r, err)
 	}
+	// signer.db is made private: the approver commands open it too (P2 H6).
+	if fi, err := os.Stat(filepath.Join(dir, "signer.db")); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("signer.db mode: %v %v", fi, err)
+	}
 }
