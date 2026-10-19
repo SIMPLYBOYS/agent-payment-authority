@@ -133,12 +133,18 @@ const notEvaluatedNote = "Unauthorized new spend needs P2's on-chain reconciliat
 // can close acceptance 18 (D6: the injection cases reconciled on testnet);
 // a local anvil one is said to be that, and closes nothing.
 func (r *Report) Reconciled(rec reconcile.Report) error {
-	if rec.Version != reconcile.ReportVersion || !slices.Contains(reconcile.Environments, rec.Environment) || rec.Unauthorized == nil || len(rec.Wallets) == 0 {
-		return errors.New("ae1: not a reconciliation report (version, environment, wallets, unauthorized)")
+	if rec.Version != reconcile.ReportVersion || !slices.Contains(reconcile.Environments, rec.Environment) || rec.Unauthorized == nil || len(rec.Wallets) == 0 ||
+		rec.ToBlock < rec.FromBlock || rec.Environment == "base_sepolia" && rec.ChainID != 84532 {
+		return errors.New("ae1: not a reconciliation report (version, environment and its chain, wallets, unauthorized, block range)")
 	}
 	r.Reconciliation = &rec
 	r.UnauthorizedSpend = strconv.Itoa(len(rec.Unauthorized))
-	notes := slices.DeleteFunc(r.Notes, func(n string) bool { return n == notEvaluatedNote })
+	if rec.Environment == "local_anvil" { // in the field itself: a reader of report.json never takes it for testnet's
+		r.UnauthorizedSpend += " (local_anvil)"
+	}
+	notes := slices.DeleteFunc(r.Notes, func(n string) bool {
+		return n == notEvaluatedNote || strings.HasPrefix(n, "Unauthorized new spend reconciled")
+	})
 	where := fmt.Sprintf("chain %d, token %s, blocks %d–%d, %d wallets, %d recorded authorizations", rec.ChainID, rec.Token, rec.FromBlock, rec.ToBlock, len(rec.Wallets), rec.Known)
 	if rec.Environment == "local_anvil" {
 		r.Notes = append(notes, "Unauthorized new spend reconciled on a LOCAL ANVIL (P2-a, test keys; "+where+"): it does not close acceptance 18, "+
@@ -385,7 +391,7 @@ func (r Report) Markdown() string {
 	spend := r.UnauthorizedSpend
 	if c := r.Reconciliation; c != nil {
 		where := map[string]string{"local_anvil": "本機 anvil（P2-a，測試金鑰；不關閉驗收 18）", "base_sepolia": "Base Sepolia"}[c.Environment]
-		spend += fmt.Sprintf(" 筆（%s；鏈 %d、區塊 %d–%d、錢包 %d 個、已記錄授權 %d 筆）", where, c.ChainID, c.FromBlock, c.ToBlock, len(c.Wallets), c.Known)
+		spend = strconv.Itoa(len(c.Unauthorized)) + fmt.Sprintf(" 筆（%s；鏈 %d、區塊 %d–%d、錢包 %d 個、已記錄授權 %d 筆）", where, c.ChainID, c.FromBlock, c.ToBlock, len(c.Wallets), c.Known)
 	}
 	fmt.Fprintf(&w, "- 語料：`%s`（sha256 `%s`）\n- 模式：%s\n- 未授權新增支出：**%s**\n\n", r.Corpus, r.CorpusSHA, r.Mode, spend)
 	if c := r.Reconciliation; c != nil && len(c.Unauthorized) > 0 {

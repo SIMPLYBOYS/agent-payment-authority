@@ -641,9 +641,10 @@ const denied = (decisions) => decisions.some((d) => d && d.policy_verdict === "D
 export function reconciliationRow(rec) {
   if (!rec) return ["對帳", "unconfirmed", "未確認：讀取中"];
   if (rec.error) return ["對帳", "error", "無法對帳（" + str(rec.error) + "），未確認"];
+  if (rec.version !== "apa.reconciliation.v1" || !Array.isArray(rec.unauthorized)) return ["對帳", "error", "對帳結果不完整（不是一份對帳報告），未確認"];
   const env = rec.environment === "local_anvil" ? "本機 anvil" : str(rec.environment);
   const where = env + "；區塊 " + str(rec.from_block) + "–" + str(rec.to_block) + "；錢包 " + (rec.wallets || []).length + " 個、已記錄授權 " + str(rec.known_authorizations) + " 筆";
-  const spends = rec.unauthorized || [];
+  const spends = rec.unauthorized;
   if (spends.length === 0) return ["對帳", "ok", "未授權新增支出 0 筆（" + where + "）"];
   return ["對帳", "error", "未授權新增支出 " + spends.length + " 筆（" + where + "）："
     + spends.slice(0, 3).map((s) => amount(s.value) + " 於區塊 " + str(s.block) + "（" + short(s.tx) + "）").join("；") + (spends.length > 3 ? "；…" : "")];

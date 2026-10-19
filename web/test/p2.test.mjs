@@ -192,4 +192,7 @@ test("the host page's reconciliation row: zero is ok, a spend is an error, unrea
   assert.match(bad[2], /^未授權新增支出 1 筆/);
   assert.equal(A.reconciliationRow(undefined)[1], "unconfirmed");
   assert.deepEqual(A.reconciliationRow({ error: "chain_unavailable" }), ["對帳", "error", "無法對帳（chain_unavailable），未確認"]);
+  for (const broken of [{ ...rec, unauthorized: null }, { ...rec, unauthorized: undefined }, { ...rec, version: "x" }]) {
+    assert.equal(A.reconciliationRow(broken)[1], "error", JSON.stringify(broken)); // never a green zero
+  }
 });

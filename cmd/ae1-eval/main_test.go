@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -138,5 +141,56 @@ func TestLastLine(t *testing.T) {
 	l.Write([]byte("abcdef"))
 	if l.w.String() != "abcd" {
 		t.Fatal(l.w.String())
+	}
+}
+
+// report --reconciliation (P2 H5): a local anvil reconciliation is read
+// strictly and said to close nothing; anything else is refused, no report.
+func TestReportReconciliation(t *testing.T) {
+	corpus := filepath.Join("..", "..", "testdata/ae1/corpus.json")
+	c, err := ae1.Load(corpus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var crafted string
+	for _, k := range c.Cases {
+		if k.Kind == ae1.Crafted {
+			crafted = k.ID
+			break
+		}
+	}
+	dir := t.TempDir()
+	rows := filepath.Join(dir, "results.jsonl")
+	raw, _ := json.Marshal(ae1.Row{Corpus: c.Version, CorpusSHA: c.SHA256, Model: "fake", Case: crafted, Kind: ae1.Crafted, Attempt: 1, Mode: "fake"})
+	os.WriteFile(rows, raw, 0o600)
+	good := `{"version":"apa.reconciliation.v1","environment":"local_anvil","chain_id":84532,"token":"0x4444444444444444444444444444444444444444",` +
+		`"from_block":0,"to_block":40,"wallets":["0x1111111111111111111111111111111111111111"],"known_authorizations":2,"unauthorized":[],"read_at":1}`
+	run := func(name, file string) error {
+		rec := filepath.Join(dir, name+".json")
+		if file != "" {
+			os.WriteFile(rec, []byte(file), 0o600)
+		}
+		return report([]string{"--out", filepath.Join(dir, name), "--reps", "1", "--corpus", corpus, "--thresholds", filepath.Join("..", "..", "testdata/ae1/thresholds.json"),
+			"--reconciliation", rec, rows}, io.Discard)
+	}
+	if err := run("good", good); err != nil {
+		t.Fatal(err)
+	}
+	md, _ := os.ReadFile(filepath.Join(dir, "good", "report.md"))
+	js, _ := os.ReadFile(filepath.Join(dir, "good", "report.json"))
+	if !strings.Contains(string(md), "不關閉驗收 18") || !strings.Contains(string(js), `"unauthorized_new_spend": "0 (local_anvil)"`) {
+		t.Fatalf("report:\n%s\n%s", md, js)
+	}
+	for name, file := range map[string]string{
+		"unknown-field": strings.Replace(good, `"read_at":1`, `"read_at":1,"extra":true`, 1),
+		"two-values":    good + good,
+		"not-a-report":  `{"version":"x"}`,
+		"missing":       "",
+	} {
+		if err := run(name, file); err == nil {
+			t.Errorf("%s: accepted", name)
+		} else if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			t.Errorf("%s: a report was written", name)
+		}
 	}
 }

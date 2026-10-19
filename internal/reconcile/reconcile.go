@@ -254,8 +254,8 @@ func (t Token) unauthorizedAt(ctx context.Context, wallets []eth.Address, known 
 			return nil, 0, err
 		}
 		for _, l := range logs {
-			if len(l.Topics) != 3 {
-				continue
+			if len(l.Topics) != 3 { // not an ERC-20 Transfer the token emits: not checked, so no report
+				return nil, 0, fmt.Errorf("reconcile: a Transfer log with %d topics in %x", len(l.Topics), l.TxHash)
 			}
 			to, err1 := eth.WordAddress(l.Topics[2][:])
 			v, err2 := eth.Uint(l.Data, 0)
@@ -315,9 +315,15 @@ func (t Token) Report(ctx context.Context, environment string, chainID uint64, w
 	if !slices.Contains(Environments, environment) {
 		return Report{}, fmt.Errorf("reconcile: environment %q", environment)
 	}
+	if len(wallets) == 0 || slices.Contains(wallets, eth.Address{}) {
+		return Report{}, errors.New("reconcile: wallets, none of them the zero address")
+	}
 	spends, at, err := t.unauthorizedAt(ctx, wallets, known)
 	if err != nil {
 		return Report{}, err
+	}
+	if t.FromBlock > at { // nothing read: the chain is behind the deployment (a restarted anvil, too few blocks)
+		return Report{}, fmt.Errorf("reconcile: the confirmed block %d is before the token's block %d", at, t.FromBlock)
 	}
 	r := Report{Version: ReportVersion, Environment: environment, ChainID: chainID, Token: t.Address.Hex(), FromBlock: t.FromBlock, ToBlock: at,
 		Known: len(known), Unauthorized: []SpendView{}, ReadAt: now}

@@ -504,8 +504,8 @@ func report(args []string, out io.Writer) error {
 		d := json.NewDecoder(bytes.NewReader(raw))
 		d.DisallowUnknownFields()
 		rec = &reconcile.Report{}
-		if err := d.Decode(rec); err != nil {
-			return fmt.Errorf("--reconciliation: %w", err)
+		if err := d.Decode(rec); err != nil || d.More() {
+			return fmt.Errorf("--reconciliation: not one reconciliation report (%v)", err)
 		}
 	}
 	corpus, err := ae1.Load(*corpusPath)
@@ -534,14 +534,14 @@ func report(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Mkdir(*outDir, 0o700); err != nil {
-		return fmt.Errorf("--out must be a new directory: %w", err)
-	}
 	r := ae1.Build(rows, plans, thr)
 	if rec != nil {
 		if err := r.Reconciled(*rec); err != nil {
-			return err
+			return err // nothing written
 		}
+	}
+	if err := os.Mkdir(*outDir, 0o700); err != nil {
+		return fmt.Errorf("--out must be a new directory: %w", err)
 	}
 	return writeReport(*outDir, r, out)
 }

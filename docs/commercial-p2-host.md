@@ -492,3 +492,22 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES（沒有 C
 - **demo**：`GET /api/host/reconciliation`（主持人或操作員；沒有 `--payments` 時回 404 `payments_off`；鏈不回應時回 503）。錢包是 registry 的付款人，環境固定為 `local_anvil`（P2-a 只接受本機 anvil）。主持人頁的就緒表顯示付款環境與對帳結果；未授權支出不為 0 時列為錯誤並顯示警示。
 - **AE1 報告**：`ae1-eval report --reconciliation <檔案>` 讀入這份報告（嚴格解碼），未授權新增支出改為筆數，並列出每一筆。**本機 anvil 的結果明寫不關閉驗收 18**：依 AE1 D6，要在 Base Sepolia 上讓注入案例實際付款後再對帳（P2-c）。
 - **測試**：`TestPaidOnAnvil` 付款後對帳為 0、錢包自己直接轉出的一筆被列為未授權；`TestReconciliationRoute`；`TestReconciled`；網頁 `reconciliationRow`（網頁測試 115 個）。突變 8 項，8／8 KILLED。
+
+#### H5 的 review（c5b7491）與處理
+
+Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES（沒有 Critical）。審查者確認對帳本身正確：以同一個確認區塊讀 log 與 receipt，每一筆轉出都和恰好一份已記錄的授權比對（付款人、nonce、收款人、金額，以及緊接在前的 AuthorizationUsed），任何錯誤都讓整份報告失敗而不是給出 0；已知授權就是 Host 記錄的那些；找不到讓未授權支出被當成已授權的路徑。
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Important | 本機 anvil 時 `report.json` 最上層仍是 `"0"`，讀 JSON 的程式會以為驗收 18 已關閉 | 欄位本身寫成 `0 (local_anvil)`；測試檢查 JSON |
+| Important | 頁面把缺少的 `unauthorized` 當成綠色的 0 | 版本不符或清單不是陣列時列為錯誤；anvil 測試確認 JSON 是 `[]` 不是 null |
+| Important | `report --reconciliation` 沒有測試；檔案後面多一份也會接受 | `TestReportReconciliation`（多出欄位、兩份、不是報告、檔案不存在都被拒，且不留下報告目錄）；`d.More()` |
+| 建議 | 所有失敗都回 `chain_unavailable`、沒有紀錄 | Store 讀不到授權回 `reconcile_failed`；兩者都記固定文字 |
+| 建議 | 鏈的確認區塊早於代幣部署（anvil 重開而 demo 還在跑）時，報告是空範圍的 0 | `Report` 拒絕；`Reconciled` 也拒絕倒退的區塊範圍 |
+| 建議 | 沒有錢包或有零位址時，報告仍給 0 | `Report` 拒絕；demo 的 registry 錢包位址讀不到時不啟動 |
+| 建議 | 主題數不是 3 的 Transfer log 被略過 | 視為錯誤：沒檢查到就不出報告 |
+| 建議 | `Reconciled` 只看環境字串 | `base_sepolia` 必須是鏈 84532；呼叫兩次不會重複加註 |
+| 建議 | 就緒表要等對帳讀完才更新 | 對帳讀取 5 秒逾時，只影響這一列 |
+| 建議 | 操作員角色沒有測試 | 補上 |
+
+H5 突變共 17 項，17／17 KILLED。

@@ -409,9 +409,11 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	if pay != nil {
 		var wallets []eth.Address
 		for _, w := range regCfg.Wallets {
-			if wa, err := eth.ParseAddress(w.From); err == nil {
-				wallets = append(wallets, wa)
+			wa, err := eth.ParseAddress(w.From)
+			if err != nil {
+				return fmt.Errorf("registry wallet %s: %w", w.WalletID, err)
 			}
+			wallets = append(wallets, wa)
 		}
 		ui.recon = func(ctx context.Context) (reconcile.Report, error) {
 			return pay.reconciliation(ctx, st, wallets, d.clock())

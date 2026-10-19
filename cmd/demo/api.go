@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -147,7 +148,12 @@ func (a *api) reconciliation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rep, err := a.recon(r.Context())
-	if err != nil {
+	if errors.Is(err, errReconcileStore) {
+		fmt.Fprintln(a.out, "demo: reconciliation: the recorded authorizations are unreadable")
+		fail(w, http.StatusServiceUnavailable, "reconcile_failed")
+		return
+	} else if err != nil {
+		fmt.Fprintln(a.out, "demo: reconciliation: the chain did not answer, or answered short")
 		fail(w, http.StatusServiceUnavailable, "chain_unavailable")
 		return
 	}

@@ -210,6 +210,17 @@ func TestPaidOnAnvil(t *testing.T) {
 	if err != nil || rep.Version != reconcile.ReportVersion || rep.Known != 1 || len(rep.Unauthorized) != 0 || rep.ToBlock == 0 {
 		t.Fatalf("reconciliation: %+v %v", rep, err)
 	}
+	if raw, _ := json.Marshal(rep); !strings.Contains(string(raw), `"unauthorized":[]`) {
+		t.Fatalf("an empty list, never null: %s", raw)
+	}
+	if _, err := token.Report(bg, "local_anvil", ethtest.Chain, nil, known, clock()); err == nil {
+		t.Fatal("a report of no wallet")
+	}
+	ahead := token
+	ahead.FromBlock = rep.ToBlock + 1000 // a chain behind the token's deployment (a restarted anvil)
+	if _, err := ahead.Report(bg, "local_anvil", ethtest.Chain, []eth.Address{payer}, known, clock()); err == nil {
+		t.Fatal("a report of no block")
+	}
 	// A transfer the payer's key makes itself, no Signer: it is unauthorized.
 	pk, _ := eth.NewKey(func() []byte { b := sha256.Sum256([]byte("payflow anvil test payer a")); return b[:] }())
 	ethtest.RPC(t, rpc, "anvil_setBalance", pk.Addr.Hex(), "0xde0b6b3a7640000")

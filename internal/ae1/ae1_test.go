@@ -247,10 +247,12 @@ func TestReconciled(t *testing.T) {
 	rec := reconcile.Report{Version: reconcile.ReportVersion, Environment: "local_anvil", ChainID: 84532, Token: "0x" + strings.Repeat("4", 40),
 		ToBlock: 40, Wallets: []string{"0x" + strings.Repeat("1", 40)}, Known: 3, Unauthorized: []reconcile.SpendView{}}
 	for name, bad := range map[string]func(*reconcile.Report){
-		"another version":     func(x *reconcile.Report) { x.Version = "apa.reconciliation.v0" },
-		"another environment": func(x *reconcile.Report) { x.Environment = "mainnet" },
-		"no wallets":          func(x *reconcile.Report) { x.Wallets = nil },
-		"no spend list":       func(x *reconcile.Report) { x.Unauthorized = nil },
+		"another version":      func(x *reconcile.Report) { x.Version = "apa.reconciliation.v0" },
+		"another environment":  func(x *reconcile.Report) { x.Environment = "mainnet" },
+		"no wallets":           func(x *reconcile.Report) { x.Wallets = nil },
+		"no spend list":        func(x *reconcile.Report) { x.Unauthorized = nil },
+		"blocks backwards":     func(x *reconcile.Report) { x.FromBlock = 41 },
+		"testnet, other chain": func(x *reconcile.Report) { x.Environment = "base_sepolia"; x.ChainID = 31337 },
 	} {
 		x := rec
 		bad(&x)
@@ -258,8 +260,16 @@ func TestReconciled(t *testing.T) {
 			t.Fatalf("%s: %v %s", name, err, r.UnauthorizedSpend)
 		}
 	}
-	if err := r.Reconciled(rec); err != nil || r.UnauthorizedSpend != "0" {
+	if err := r.Reconciled(rec); err != nil || r.UnauthorizedSpend != "0 (local_anvil)" {
 		t.Fatalf("zero: %v %s", err, r.UnauthorizedSpend)
+	}
+	// report.json itself never reads like a testnet zero; a second reconciliation replaces the note.
+	if raw, _ := json.Marshal(r); !strings.Contains(string(raw), `"unauthorized_new_spend":"0 (local_anvil)"`) {
+		t.Fatalf("json: %s", raw)
+	}
+	r.Reconciled(rec)
+	if n := len(slices.DeleteFunc(slices.Clone(r.Notes), func(n string) bool { return !strings.HasPrefix(n, "Unauthorized new spend reconciled") })); n != 1 {
+		t.Fatalf("%d reconciliation notes", n)
 	}
 	md := r.Markdown()
 	if !strings.Contains(md, "**0 筆（本機 anvil（P2-a，測試金鑰；不關閉驗收 18）") || slices.Contains(r.Notes, notEvaluatedNote) ||
@@ -268,7 +278,13 @@ func TestReconciled(t *testing.T) {
 	}
 	rec.Unauthorized = []reconcile.SpendView{{From: rec.Wallets[0], To: "0x" + strings.Repeat("9", 40), Value: "1000", Tx: "0x" + strings.Repeat("a", 64), Block: 39}}
 	r2 := Build(nil, map[string]Plan{}, Thresholds{})
-	if err := r2.Reconciled(rec); err != nil || r2.UnauthorizedSpend != "1" || !strings.Contains(r2.Markdown(), "| 1000 |") {
+	if err := r2.Reconciled(rec); err != nil || r2.UnauthorizedSpend != "1 (local_anvil)" || !strings.Contains(r2.Markdown(), "| 1000 |") {
 		t.Fatalf("one spend: %v %s\n%s", err, r2.UnauthorizedSpend, r2.Markdown())
+	}
+	testnet := rec
+	testnet.Environment, testnet.Unauthorized = "base_sepolia", []reconcile.SpendView{}
+	r3 := Build(nil, map[string]Plan{}, Thresholds{})
+	if err := r3.Reconciled(testnet); err != nil || r3.UnauthorizedSpend != "0" {
+		t.Fatalf("testnet: %v %s", err, r3.UnauthorizedSpend)
 	}
 }

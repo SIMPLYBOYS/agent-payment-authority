@@ -198,7 +198,8 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
     const out = { status: r.body };
     if (r.body && r.body.payment_capability === "local_anvil") { // P2-a: the reconciliation, read with the same token
       try {
-        const c = await call(held.host, "/api/host/reconciliation", abort.signal);
+        // A slow chain holds back this row only: the status is not kept waiting past 5 s.
+        const c = await call(held.host, "/api/host/reconciliation", AbortSignal.any([abort.signal, AbortSignal.timeout(5000)]));
         if (g !== gen) return null;
         out.reconciliation = c.status === 200 ? c.body : { error: (c.body && c.body.error) || "status_" + c.status };
       } catch { out.reconciliation = { error: "unreachable" }; }

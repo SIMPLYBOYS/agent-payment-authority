@@ -132,6 +132,9 @@ func paymentSigner(socket string) error {
 	return nil
 }
 
+// errReconcileStore: the recorded authorizations could not be read (not the chain).
+var errReconcileStore = errors.New("RECONCILE_STORE")
+
 // reconciliation is the Host's reconciliation on this local chain
 // (docs/commercial-p2-host.md 7; AE1 acceptance 18): every confirmed
 // transfer out of the payer wallets against every authorization the Store
@@ -139,7 +142,7 @@ func paymentSigner(socket string) error {
 func (p *payments) reconciliation(ctx context.Context, st *store.Store, wallets []eth.Address, now uint64) (reconcile.Report, error) {
 	known, err := payflow.Known(st)
 	if err != nil {
-		return reconcile.Report{}, err
+		return reconcile.Report{}, fmt.Errorf("%w: %w", errReconcileStore, err)
 	}
 	token, _ := eth.ParseAddress(p.cfg.Token)
 	t := reconcile.Token{RPC: p.rpc, Address: token, Confirmations: p.cfg.Confirmations, FromBlock: p.cfg.TokenFromBlock}
