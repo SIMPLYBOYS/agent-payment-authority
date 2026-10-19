@@ -699,7 +699,8 @@ export function card(view, chosen, ctx) {
     closing || ended ? step("收尾", closing || ended, (closing || ended).event_type)
       : waiting ? { label: "收尾", state: "wait", note: hist ? "執行結束時仍待核准（歷史快照，不是即時狀態；期限已過）" : pay(t) ? (simulated() ? "等你核准（模擬）" : "等你核准（本人裝置）") : "等待中（M1 無核准能力）" }
       : p && p.decision && p.decision.policy_verdict === "Deny" ? { label: "收尾", state: "none", note: "Deny 即結束；沒有收尾事件" }
-      : p && p.decision && p.decision.policy_verdict === "Allow" ? { label: "收尾", state: "none", note: paying ? "Allow：由 Host 付款，見下列步驟" : pay(t) ? "未啟用付款；沒有後續事件" : "M1 無付款；沒有後續事件" }
+      : p && p.decision && p.decision.policy_verdict === "Allow" ? { label: "收尾", state: "none", note: paying ? "Allow：由 Host 付款，見下列步驟"
+        : t.payment_capability === "local_anvil" ? "尚未付款；付款開始後見下列步驟" : pay(t) ? "未啟用付款；沒有後續事件" : "M1 無付款；沒有後續事件" }
       : step("收尾", null),
     ...(paying ? paymentSteps(at, step, pv) : []),
   ];

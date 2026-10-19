@@ -141,7 +141,7 @@ const DONE = {
   simulated: { approved: ["ok", "已核准（模擬），未啟用付款", "這筆只留下模擬授權（grant）；它不能付款，也不會交付商品。"],
     denied: ["deny", "已拒絕", "Agent 不會取得這一筆；沒有付款。"] }, // P1-a's words
 };
-const PAID_NOTE = "核准後由 Host 付款（本機 anvil、測試 USDC）；是否已付款、是否交付，以請購卡片為準。";
+const PAID_NOTE = "task 仍進行時，Host 會為核准的這一筆開始付款（本機 anvil、測試 USDC）；是否已付款、是否交付，以請購卡片為準。";
 // V1: a voice outcome words its record: denied by the voice (never as the
 // approver's own deny), approved with the voice, or approved degraded.
 // pays: the host pays a person's approval (payment_capability local_anvil,

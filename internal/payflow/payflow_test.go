@@ -848,6 +848,10 @@ func TestSignerStoreAnswers(t *testing.T) {
 	if p, err := w.step("po-2"); !errors.Is(err, ErrPending) || p.State != "reserved" {
 		t.Fatalf("status list not read: %+v %v", p, err)
 	}
+	w.signer.err = &store.Error{Code: "CLOCK_REGRESSION"}
+	if p, err := w.step("po-2"); !errors.Is(err, ErrPending) || p.State != "reserved" {
+		t.Fatalf("clock behind: %+v %v", p, err)
+	}
 	w.signer.err = &store.Error{Code: "CREDENTIAL_REVOKED"}
 	if p, _ := w.step("po-3"); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" || len(w.shop.sent) != 0 {
 		t.Fatalf("revoked: %+v", p)

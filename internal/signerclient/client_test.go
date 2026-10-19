@@ -418,13 +418,22 @@ func TestPaySendsTheApprovalAndReservation(t *testing.T) {
 }
 
 // The Signer's 403 and 400 carry a code: refusals, not unknown outcomes.
+// Nothing is written: they come before the Signer looks the request up, so
+// an earlier send under the same request ID keeps what it was recorded as.
 func TestPayCallerNotAllowedIsARefusal(t *testing.T) {
-	sock, _ := stubSigner(t, http.StatusForbidden, `{"error":"CALLER_NOT_ALLOWED"}`)
-	l := &ledger{orders: map[string]json.RawMessage{"po-1": signertest.Order{Consumer: "consumer-a", Agent: "agent-a", Wallet: "wallet-a",
-		From: "0x1111111111111111111111111111111111111111", PayTo: signertest.Merchant, Amount: "500000", N: 1, Now: t0, Window: 60}.Raw()}, rows: map[string]*row{}}
-	_, err := New(sock, l).Pay(pay("po-1"), nil)
-	var r Refused
-	if !errors.As(err, &r) || r != "CALLER_NOT_ALLOWED" || errors.Is(err, Unknown) {
-		t.Fatalf("403: %v", err)
+	for status, code := range map[int]string{http.StatusForbidden: "CALLER_NOT_ALLOWED", http.StatusBadRequest: "BAD_REQUEST"} {
+		sock, _ := stubSigner(t, status, `{"error":"`+code+`"}`)
+		l := &ledger{orders: map[string]json.RawMessage{"po-1": signertest.Order{Consumer: "consumer-a", Agent: "agent-a", Wallet: "wallet-a",
+			From: "0x1111111111111111111111111111111111111111", PayTo: signertest.Merchant, Amount: "500000", N: 1, Now: t0, Window: 60}.Raw()}, rows: map[string]*row{}}
+		_, err := New(sock, l).Pay(pay("po-1"), nil)
+		var r Refused
+		if !errors.As(err, &r) || string(r) != code || errors.Is(err, Unknown) {
+			t.Fatalf("%d: %v", status, err)
+		}
+		for _, a := range l.rows {
+			if a.State != "requested" || a.ErrorCode != "" {
+				t.Fatalf("%d: the attempt was rewritten: %+v", status, a.PaymentAttempt)
+			}
+		}
 	}
 }

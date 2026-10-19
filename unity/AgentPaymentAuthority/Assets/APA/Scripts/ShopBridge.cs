@@ -158,7 +158,11 @@ namespace APA
                 Report("layout", scene.Scene, 0, view.LayoutKey); // the room each new scene shows
             }
             else if (slotReset) view.Reset(m.consumer);
-            if (sceneReset) scenePays = false;
+            if (sceneReset)
+            {
+                scenePays = false;
+                view.Payments(false); // a cleared scene says nothing of payments until a customer does
+            }
             if (outcome == Outcome.Applied)
             {
                 // Scene-wide: one customer's pay task says so for the scene; an M1

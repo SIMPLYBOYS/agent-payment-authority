@@ -138,4 +138,7 @@ test("P2: an Allow never paid (the task ended first) says not paid yet, never th
   v.task.payment_capability = "local_anvil";
   const m = A.projection({ snapshot: v, gen: 1 }, false);
   assert.equal(A.shopLabel(m.phase, m.cause_seq, m.task_end, ""), "ALLOW (#3) - not paid yet");
+  const c = A.card(v, null, { mode: "live", catalog: null });
+  assert.equal(c.status, "Allow：在委託範圍內，尚未付款");
+  assert.ok(!c.steps.some((s) => /未啟用付款/.test(s.note)), "a step says payment is not enabled");
 });

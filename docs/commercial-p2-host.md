@@ -145,6 +145,7 @@ request_purchase ─→ Store：POLICY_DECIDED
   - `needs_review`。
 
   `pending` 就繼續等，**任何一種結果都不會讓 Host 再付一次**。
+- **向 Signer 請求簽名時**（`signerclient.Pay`）：結果不明（沒有可讀回應、503）在期限前等待，用同一個 request ID 再問；Signer 的拒絕，以及它的 403 `CALLER_NOT_ALLOWED`、400 `BAD_REQUEST`（設定或請求錯誤，再問也一樣），在 tx#1 已花之後轉 `RESERVED_NOT_PAID` 由人處理；Store 的 `CREDENTIAL_STATUS_UNAVAILABLE`、`CLOCK_REGRESSION` 在期限前等待。
 - **AE1**：`reconcile.Unauthorized(兩位客人的錢包, payments 裡所有簽出的授權)` 的結果寫進 Host 的對帳頁與 AE1 報告。
 
 ## 8 Agent 看到什麼
@@ -431,11 +432,24 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查�
 | Critical | 本人核准後付款的路徑上，Unity 整段停在 `approved`，每一步還被當成新請購重播挑選動畫，交付後也不離店 | 有付款事件時一律送付款階段；`p2.test.mjs` 新增「核准後付款」測試（每一步的階段、不是規則 2、不重播） |
 | Important | Allow 在付款沒有開始時也顯示「the host pays」（task 已取消、開始付款被拒、以有 `--payments` 的 host 看舊 task） | 付款事件出現前一律「not paid yet／尚未付款」；測試涵蓋取消後的 Allow |
 | Important | 已花 tx#1 之後，憑證狀態暫時讀不到（`CREDENTIAL_STATUS_UNAVAILABLE`）就轉人工處理 | 它與 `CLOCK_REGRESSION` 在期限前等待；撤銷、過期與 grant 到期照舊是最終的；`TestSignerStoreAnswers` |
-| 建議 | Signer 的 403、400 被記成 unknown | 有代碼時記為拒絕；`TestPayCallerNotAllowedIsARefusal` |
+| 建議 | Signer 的 403、400 被記成 unknown | 有代碼時回傳為拒絕、不改 attempt 的記錄（它們發生在 Signer 查詢請求之前，同一個 request ID 先前的送出可能已被接受）；`TestPayCallerNotAllowedIsARefusal` 涵蓋 403、400 與記錄不變 |
 | 建議 | 結果不明且附上 Store 代碼時，被當成 Store 拒絕 | 先判斷 `Unknown`：一律等待 |
 | 建議 | `call` 沒有 context，停止時最多等 10 秒 | 不改：與 P1-b 相同，Timeout 有上限 |
 | 建議 | §3 仍寫「request ID 由 `intent_hash` 決定」 | 修正 |
 | 建議 | schema 7 在分支內原地修改，早期分支建立的 schema 7 資料庫無法開啟 | 不改：var/ 沒有 schema 7 的資料庫（最高 6），且無法開啟是安全的失敗 |
 | 建議 | 雙客人場景裡 M1 與 pay task 交錯時，標題列來回切換 | 版本 2：同一個場景內只要有一方的 host 付款就維持 |
 
-驗證：網頁測試 111／111；Unity EditMode 18／18、PlayMode 28／28，Web build 重建（建置內已無「the host pays」）；§3、H2、H3 突變 65／65 KILLED（新增 4 項）。
+第二輪 review（c968c50）：結論 REQUEST CHANGES（只剩一項）。審查者確認：Unity 在兩條路徑都收到付款階段、核准後的每一步都不是新請購；網頁與 Unity 的標籤一致；`sign()` 的順序讓最終拒絕維持最終、暫時的情況等待。處理：
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Important | 有付款能力、付款尚未開始時，卡片的收尾步驟仍寫「未啟用付款」 | 改為「尚未付款；付款開始後見下列步驟」；測試確認沒有步驟寫「未啟用付款」 |
+| 建議 | 文件把 403／400 寫成「記為拒絕」，實際上不寫入 | 文件改為「回傳為拒絕、不改 attempt 的記錄」 |
+| 建議 | `CALLER_NOT_ALLOWED` 現在會立即結束已預留的付款（以前等到期限） | 保留；寫進 §7 |
+| 建議 | 缺 `CLOCK_REGRESSION`、400 與「記錄不變」的測試 | 補上，並加突變 |
+| 建議 | 場景清除後標題列仍顯示「P2-a」直到客人出現 | 場景重置時同步更新 |
+| 建議 | 核准頁的說明「核准後由 Host 付款」在 task 先結束時不成立 | 改為「task 仍進行時，Host 會為核准的這一筆開始付款」 |
+
+驗證（第二輪處理）：網頁測試 111／111；Unity EditMode 18／18、PlayMode 28／28，Web build 重建；新增 2 項突變，2／2 KILLED（§3、H2、H3 共 67 項）。
+
+驗證（第一輪處理）：網頁測試 111／111；Unity EditMode 18／18、PlayMode 28／28，Web build 重建（建置內已無「the host pays」）；§3、H2、H3 突變 65／65 KILLED（新增 4 項）。
