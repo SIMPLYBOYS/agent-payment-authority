@@ -95,6 +95,9 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 	if id, err := rpc.ChainID(ctx); err != nil || !id.IsUint64() || id.Uint64() != c.ChainID {
 		return nil, nil, fmt.Errorf("payments: the chain at rpc is not chain %d (or did not answer)", c.ChainID)
 	}
+	if err := eth.Anvil(ctx, rpc); err != nil { // a loopback port may be a tunnel to a public node
+		return nil, nil, fmt.Errorf("payments: %w", err)
+	}
 	relayer, err := budget.Open(ctx, budget.Config{ChainID: c.ChainID, Contract: contract, Confirmations: c.Confirmations, PolicyTTL: c.PolicyTTL,
 		Zkbudget: c.Zkbudget, SetupDir: c.ZkSetupDir}, budget.Keys{Gas: keys[0], Issuer: keys[1], Policy: keys[2]}, rpc, filepath.Join(c.Dir, "relayer.db"), clock)
 	if err != nil {
@@ -117,6 +120,18 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 
 func (p *payments) Close() error { return errors.Join(p.relayer.Close(), p.settler.Close()) }
 
+// paymentSigner: with --payments the Signer must sign payments (health
+// ready: apa-signer serve with a reservation section). A Signer for
+// approvals only would refuse each payment after its tx#1 was spent.
+func paymentSigner(socket string) error {
+	ans := signerclient.NewApprovals(socket).Health()
+	if ans.Kind != signerclient.KindOK || ans.Reply.State != "ready" {
+		return fmt.Errorf("--payments needs a Signer that signs payments (apa-signer serve with a reservation section) on %s; its health is %s %s; nothing was started",
+			socket, ans.Kind, ans.Reply.State)
+	}
+	return nil
+}
+
 // payMargin: no new step this close to valid_before; more than the shop's
 // own 5 s plus signing.
 const payMargin = 30
@@ -131,7 +146,16 @@ func (p *payments) run(ctx context.Context, st *store.Store, socket string, cloc
 		Chain: reconcile.Token{RPC: p.rpc, Address: token, Confirmations: p.cfg.Confirmations, FromBlock: p.cfg.TokenFromBlock},
 		Clock: clock, Margin: payMargin, Before: starter.Start,
 		Log: func(intent string, err error) { fmt.Fprintln(p.out, "demo: payment", intent, store.CodeOf(err)) }}
-	if err := w.Run(ctx); err != nil {
-		fmt.Fprintln(p.out, "demo: payments stopped:", store.CodeOf(err))
+	for { // Run returns only when its recovery failed (or ctx ended): try again
+		err := w.Run(ctx)
+		if err == nil || ctx.Err() != nil {
+			return
+		}
+		fmt.Fprintln(p.out, "demo: payments: recovery", store.CodeOf(err))
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
 	}
 }

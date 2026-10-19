@@ -119,7 +119,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	pairingOn := fs.Bool("pairing", false, "with --scenarios: show a one-time code on this terminal; /host trades it once for this run's tokens (docs/cli-poc.md 56)")
 	maxRuns := fs.Int("max-runs", 0, "with --scenarios: running or stopping runs at most (a deployment setting; default 2, at most one per consumer)")
 	readyFile := fs.String("ready-file", "", "write {addr, pid} here once serving (for scripts/demo/present.sh)")
-	approvalsSigner := fs.String("approvals-signer", "", "A2: the Unix socket of apa-signer serve-approvals; the person's approval then runs on http://localhost:<port> (fake mode with --scenarios only; payment stays disabled)")
+	approvalsSigner := fs.String("approvals-signer", "", "A2: the Unix socket of apa-signer serve-approvals (approvals only), or of apa-signer serve (P2: approvals and, with --payments, payments); the person's approval then runs on http://localhost:<port> (fake mode with --scenarios only)")
 	credentialDir := fs.String("credential-dir", "", "C2: the credential directory (apa-issuer init) for apa.pay.v2 scenarios: test issuer, status list, holders")
 	authSource := fs.String("authenticator-source", "device", "A2: device or virtual, the authenticator's source as shown and logged (a label, not evidence)")
 	paymentsPath := fs.String("payments", "", "P2-a: the local anvil payment configuration (docs/commercial-p2-host.md 12.3); with --approvals-signer, whose Signer then signs payments too")
@@ -307,6 +307,9 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	var shop *merchant.Merchant
 	var pay *payments
 	if *paymentsPath != "" {
+		if err := paymentSigner(*approvalsSigner); err != nil {
+			return err
+		}
 		if pay, shop, err = openPayments(ctx, *paymentsPath, "http://"+addr, d.clock, d.out); err != nil {
 			return err
 		}
@@ -368,9 +371,6 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		})
 	})
 	defer func() { stopExpiry(); expiry.Wait(); d.at("expiry_stopped") }()
-	if pay != nil {
-		expiry.Go(func() { pay.run(expiryCtx, st, *approvalsSigner, d.clock) })
-	}
 	if creds != nil {
 		refreshEvery := d.refreshEvery
 		if refreshEvery == 0 {
@@ -392,6 +392,11 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 
 	runCtx, cancelRuns := context.WithCancel(ctx)
 	defer cancelRuns()
+	if pay != nil {
+		// Stopped with the runs, before the HTTP server (the shop) stops; waited
+		// for with expiry, before the Store closes.
+		expiry.Go(func() { pay.run(runCtx, st, *approvalsSigner, d.clock) })
+	}
 	var runs sync.WaitGroup
 	mux := newMux(shop)
 	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: runner != nil && !live, out: d.out}

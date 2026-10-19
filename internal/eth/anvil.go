@@ -1,11 +1,13 @@
 package eth
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
+	"strings"
 )
 
 // anvilKeys are anvil's first default keys (its documented test mnemonic):
@@ -26,6 +28,15 @@ func AnvilKey(i int) (*Key, error) {
 	}
 	b, _ := hex.DecodeString(anvilKeys[i])
 	return NewKey(b)
+}
+
+// Anvil refuses a node that is not anvil (web3_clientVersion anvil/...).
+func Anvil(ctx context.Context, c *Client) error {
+	var v string
+	if err := c.Raw(ctx, "web3_clientVersion", &v); err != nil || !strings.HasPrefix(v, "anvil/") {
+		return fmt.Errorf("the node is not a local anvil (client %q)", v)
+	}
+	return nil
 }
 
 // LocalRPC refuses any RPC but a local node's over plain http (P2-a: a

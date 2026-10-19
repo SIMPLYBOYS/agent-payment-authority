@@ -6,7 +6,10 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,7 +40,7 @@ func TestPaymentsConfigRefused(t *testing.T) {
 		"a key past anvil's": {func(c map[string]any) {
 			c["anvil_keys"] = map[string]int{"relayer_gas": 9, "issuer": 1, "policy": 2, "shop_gas": 4}
 		}, "anvil key 9"},
-		"a key in the file":   {func(c map[string]any) { c["gas_key"] = strings.Repeat("ab", 32) }, "payments:"},
+		"a key in the file":   {func(c map[string]any) { c["gas_key"] = strings.Repeat("ab", 32) }, "unknown field gas_key"},
 		"no delegations":      {func(c map[string]any) { delete(c, "delegations") }, "delegations"},
 		"a shared directory":  {func(c map[string]any) { os.Chmod(priv, 0o750) }, "0700"},
 		"no chain at the RPC": {func(c map[string]any) {}, "did not answer"},
@@ -56,6 +59,37 @@ func TestPaymentsConfigRefused(t *testing.T) {
 func TestPaymentsNeedTheSigner(t *testing.T) {
 	err := serve(t.Context(), []string{"--payments", "x.json"}, deps{getenv: func(string) string { return "" }, out: io.Discard, clock: wallClock})
 	if err == nil || !strings.Contains(err.Error(), "--approvals-signer") {
+		t.Fatal(err)
+	}
+}
+
+// --payments needs a Signer whose health is ready (it signs payments); an
+// approvals-only one, or none, stops the start.
+func TestPaymentsNeedAReadySigner(t *testing.T) {
+	dir, err := os.MkdirTemp("", "ps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "s")
+	if err := paymentSigner(sock); err == nil {
+		t.Fatal("no Signer was accepted")
+	}
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Skip("no Unix socket listening here:", err)
+	}
+	state := "approvals-only"
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `{"state":%q}`, state)
+	})}
+	go srv.Serve(ln)
+	defer srv.Close()
+	if err := paymentSigner(sock); err == nil || !strings.Contains(err.Error(), "approvals-only") {
+		t.Fatalf("approvals only: %v", err)
+	}
+	state = "ready"
+	if err := paymentSigner(sock); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -625,6 +625,10 @@ func TestSignerAnswers(t *testing.T) {
 		}
 	}
 	w.signer.tamper = nil
+	w.signer.err = signer.Refusal("PAYMENT_MODE_OFF") // a Signer restarted for approvals only
+	if p, err := w.step("po-9"); !errors.Is(err, ErrPending) || p.State != "reserved" {
+		t.Fatalf("payment mode off: %+v %v", p, err)
+	}
 	w.signer.state = "accepted"
 	if p, err := w.step("po-9"); !errors.Is(err, ErrPending) || p.State != "reserved" {
 		t.Fatalf("open attempt: %+v %v", p, err)
@@ -687,7 +691,7 @@ func TestChainAnswers(t *testing.T) {
 // content comes on a later round; a shop refusing to deliver is
 // DELIVERY_FAILED.
 func TestSettledThenDelivered(t *testing.T) {
-	w := newWorld(t, 2)
+	w := newWorld(t, 3)
 	w.start("po-1")
 	w.start("po-2")
 	w.shop.answers = []ShopAnswer{pending}
@@ -711,6 +715,14 @@ func TestSettledThenDelivered(t *testing.T) {
 	if p, _ := w.step("po-2"); p.State != "needs_review" || p.Code != "DELIVERY_FAILED" {
 		t.Fatalf("402 once settled: %+v", p)
 	}
+	w.start("po-3")
+	w.chain.err = nil
+	w.shop.answers = []ShopAnswer{pending}
+	w.step("po-3") // settled, nothing delivered yet
+	w.shop.err = ErrTooLarge
+	if p, _ := w.step("po-3"); p.State != "needs_review" || p.Code != "DELIVERY_FAILED" {
+		t.Fatalf("over MaxBody once settled: %+v", p)
+	}
 }
 
 // HTTPShop reads PAYMENT-RESPONSE and the body; a body over MaxBody is no answer.
@@ -732,8 +744,14 @@ func TestHTTPShop(t *testing.T) {
 		t.Fatalf("%+v %v", ans, err)
 	}
 	size = MaxBody + 1
-	if _, err := shop.Pay(bg, srv.URL, "sig"); err == nil {
-		t.Fatal("a body over MaxBody was an answer")
+	if _, err := shop.Pay(bg, srv.URL, "sig"); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("a body over MaxBody: %v", err)
+	}
+	// Never redirected: the 3xx itself is the answer, the signature stays here.
+	moved := httptest.NewServer(http.RedirectHandler(srv.URL, http.StatusFound))
+	defer moved.Close()
+	if ans, err := shop.Pay(bg, moved.URL, "sig"); err != nil || ans.Status != http.StatusFound {
+		t.Fatalf("redirect: %+v %v", ans, err)
 	}
 }
 
@@ -755,15 +773,18 @@ func TestStarter(t *testing.T) {
 			return err
 		},
 		Log: func(what string, err error) { logged = append(logged, what) }}
-	s.Start(bg)
+	s.Start(bg) // still registering
+	s.Start(bg) // a node error
+	if _, err := w.s.PaymentOf("consumer-a", "task-a", "po-1"); err == nil {
+		t.Fatal("a payment started before its task's registration")
+	}
+	s.Start(bg) // registered: the payments start
 	if p := w.payment("po-1"); p.State != "requested" || p.Method != "delegation" || p.GrantRef != "dlg-a@1" {
 		t.Fatalf("the Allow: %+v", p)
 	}
 	if p := w.payment(w.askPO); p.Method != "webauthn" || p.GrantRef != "hap-1" {
 		t.Fatalf("the approved Ask: %+v", p)
 	}
-	s.Start(bg)
-	s.Start(bg)
 	s.Start(bg) // registered on the third: not asked a fourth time
 	if len(registered) != 3 || registered[0] != "task-a consumer-a 5000000" {
 		t.Fatalf("registrations %v", registered)

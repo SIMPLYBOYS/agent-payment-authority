@@ -58,13 +58,17 @@ type ShopAnswer struct {
 	Body     []byte
 }
 
-// HTTPShop is the shop over HTTP: a GET with the PAYMENT-SIGNATURE. A body
-// over MaxBody is no answer (its hash would not be the content's). Client
-// is required, with a timeout.
+// HTTPShop is the shop over HTTP: a GET with the PAYMENT-SIGNATURE, never
+// redirected (a 3xx is no answer, the chain decides). A body over MaxBody
+// is ErrTooLarge (its hash would not be the content's). Client is
+// required, with a timeout.
 type HTTPShop struct{ Client *http.Client }
 
 // MaxBody bounds a delivered resource.
 const MaxBody = 1 << 20
+
+// ErrTooLarge: the shop answered with more than MaxBody.
+var ErrTooLarge = errors.New("payflow: the shop's answer is over MaxBody")
 
 func (h HTTPShop) Pay(ctx context.Context, url, paymentSignature string) (ShopAnswer, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -72,7 +76,9 @@ func (h HTTPShop) Pay(ctx context.Context, url, paymentSignature string) (ShopAn
 		return ShopAnswer{}, err
 	}
 	req.Header.Set(x402.HeaderPaymentSignature, paymentSignature)
-	resp, err := h.Client.Do(req)
+	c := *h.Client
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := c.Do(req)
 	if err != nil {
 		return ShopAnswer{}, err
 	}
@@ -81,7 +87,7 @@ func (h HTTPShop) Pay(ctx context.Context, url, paymentSignature string) (ShopAn
 	if err != nil {
 		return ShopAnswer{}, err
 	} else if len(body) > MaxBody {
-		return ShopAnswer{}, errors.New("payflow: the shop's answer is over MaxBody")
+		return ShopAnswer{}, ErrTooLarge
 	}
 	ans := ShopAnswer{Status: resp.StatusCode, Body: body}
 	if v := resp.Header.Get(merchant.HeaderPaymentResponse); v != "" {
@@ -299,7 +305,8 @@ func SignerRequestID(intent string) string {
 }
 
 // signerRetry are the Signer's answers that mean "not now".
-var signerRetry = []signer.Refusal{"SIGNER_BUSY", "SIGNER_TIMEOUT", "RESERVATION_PENDING", "RESERVATION_UNCONFIRMED", "RESERVATION_UNAVAILABLE"}
+// PAYMENT_MODE_OFF: a Signer restarted for approvals only; it may come back.
+var signerRetry = []signer.Refusal{"SIGNER_BUSY", "SIGNER_TIMEOUT", "RESERVATION_PENDING", "RESERVATION_UNCONFIRMED", "RESERVATION_UNAVAILABLE", "PAYMENT_MODE_OFF"}
 
 // sign asks the Signer under the payment's authorization: a delegation
 // (id@version) or the person's approval (its Signer approval ID).
@@ -399,8 +406,8 @@ func (w *Worker) submit(ctx context.Context, p store.Payment, o paycontract.Purc
 		switch {
 		case err == nil && ans.Status == 200:
 			return w.delivered(p, ans)
-		case err == nil && (ans.Status == 400 || ans.Status == 402):
-			return w.Store.PaymentFailed(p.IntentHash, "DELIVERY_FAILED") // paid, and the shop does not deliver
+		case err == nil && (ans.Status == 400 || ans.Status == 402) || errors.Is(err, ErrTooLarge):
+			return w.Store.PaymentFailed(p.IntentHash, "DELIVERY_FAILED") // paid, and the shop does not deliver (or not within MaxBody)
 		}
 		return p, ErrPending
 	}
@@ -477,9 +484,12 @@ func (w *Worker) delivered(p store.Payment, ans ShopAnswer) (store.Payment, erro
 // Run's Before: each open pay task's budget registered (H-D4 A; Register
 // finishes one left unconfirmed), and each purchase decided for payment
 // started once per process, an Allow under its consumer's Signer
-// delegation (Delegations, id@version), an approved Ask under its grant. A
-// refusal is logged, not asked again until a restart; a registration not
-// refused (a node, or one still pending) is asked again next round.
+// delegation (Delegations, id@version), an approved Ask under its grant,
+// once the task's registration has succeeded (or was refused for good: the
+// payment then fails where it is seen). A Store refusal is logged, not
+// asked again until a restart; a registration not refused (a node, or one
+// still pending), or a start that failed without a code, is asked again
+// next round.
 type Starter struct {
 	Store       *store.Store
 	Register    func(ctx context.Context, taskID, consumerID string, budget uint64) error
@@ -512,6 +522,9 @@ func (s *Starter) Start(ctx context.Context) {
 				s.log("registration "+t.TaskID, err)
 			}
 		}
+		if !s.registered[t.TaskID] {
+			continue // not registered yet: a payment now would end TASK_NOT_REGISTERED
+		}
 		for _, po := range t.Allowed {
 			s.begin(t, po, s.Delegations[t.ConsumerID])
 		}
@@ -526,8 +539,9 @@ func (s *Starter) begin(t store.PayTask, po, delegation string) {
 	if s.tried[key] {
 		return
 	}
-	s.tried[key] = true
-	if _, _, err := s.Store.StartPayment(store.PaymentStart{ConsumerID: t.ConsumerID, TaskID: t.TaskID, PurchaseOrderID: po, DelegationRef: delegation}); err != nil {
+	_, _, err := s.Store.StartPayment(store.PaymentStart{ConsumerID: t.ConsumerID, TaskID: t.TaskID, PurchaseOrderID: po, DelegationRef: delegation})
+	s.tried[key] = err == nil || store.Code(err) != "" // a Store refusal; anything else is asked again
+	if err != nil {
 		s.log("start "+key, err)
 	}
 }

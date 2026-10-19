@@ -359,3 +359,26 @@ H2 突變共 28 項，28／28 KILLED。
   - starter 改為 `payflow.Starter`（`Worker.Before`），demo 只負責接線；`TestStarter` 測登記的重試規則（仍在登記中或節點錯誤：下一輪再試；拒絕：不再試）、Allow 用客人的委派、核准的 Ask 用 grant、每張請購只開始一次、被拒絕的不再試、已結束的 task 不登記。
   - `TestPaidOnAnvil`：所有真元件一起在本機 anvil 上跑。部署 Verifier、Budget、TestUSDC，以這次產生的一次性測試金鑰當付款人並鑄幣；Signer 在 Unix socket 上以 `budget.Verifier` 在鏈上確認預留；relayer 與會結算的商店（HTTP）用 anvil 公開金鑰付 gas；Reconciler 判定。一筆 Allow：登記預算 → 預留 → 簽名 → 結算 → 交付；商店收到 500000、付款人剩 4500000；再推進一次不會多送任何東西；`Unauthorized` 對帳為零。**這是虛擬結果**：金鑰是測試裡產生的，不是 `apa-signer keygen` 與真的 keystore（H6 才用你建立的金鑰）。
   - H3 突變 19 項，19／19 KILLED（2 項跨套件、1 項在 anvil 上，放在 LOCAL_MUTATIONS）。
+- **H3d（2e20d40）本機 anvil 設定**：`cmd/p2-local` 在全新的 84532 anvil 上部署 Verifier、Budget（issuer 與 policy 為 anvil 金鑰 1、2）與 TestUSDC，把 TestUSDC 的程式碼放到 registry fixture 的資產位址（`0x4444…`，它的 EIP-712 domain 讀自己的位址，所以 registry、profile、scenarios 與 `signer.json` 都不必改），鑄幣給兩個付款錢包，在 `var/p2-local`（0700）寫出 `payments.json` 與列出這兩個錢包的 `registry.json`，並印出 `signer.json` 的 `reservation` 段。`scripts/demo/p2-local.sh 0x<wallet-a> 0x<wallet-b>` 啟動 anvil、建 zkbudget、執行它。在全新 anvil 上部署位址固定。
+
+#### H3 的 review（404b61a、5b6e967、1e13b7f）與修正
+
+Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES（沒有 Critical）。審查者確認：沒有重付、沒有未經鏈上確認就記成已付款、沒有從檔案讀金鑰、沒有第二筆 tx#1、簽名或 `PAYMENT-SIGNATURE`；`Client.Sign` 對 Signer 每一種回應的對應都正確；停止順序（付款工作 → Store → `pay.Close`）正確。
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Important | 沒有檢查 Signer 能簽付款就開始 tx#1：照說明啟動 `serve-approvals` 時每筆 Allow 花掉 tx#1 後被 `PAYMENT_MODE_OFF` 拒絕；沒有 `reservation` 段時等到期限才結束 | `--payments` 時 Signer health 必須是 `ready`，否則不啟動；`PAYMENT_MODE_OFF` 加入等待清單；修正 `--approvals-signer` 說明；`TestPaymentsNeedAReadySigner` |
+| Important | starter 在 task 登記成功前就開始付款：登記因節點錯誤失敗時，同一輪的付款得到 `TASK_NOT_REGISTERED`，永久變成 `RESERVE_FAILED` | 登記成功（或被拒絕）之前不開始該 task 的付款；`TestStarter` 改為驗證這個順序 |
+| Important | 503 → 一般錯誤沒有測試 | `TestSignUnavailableIsNotARefusal`（`SIGNER_ERROR`、`SIGNER_TIMEOUT`）與突變 |
+| 建議 | `begin` 在任何錯誤後都不再試 | 只有 Store 的拒絕（有代碼）不再試 |
+| 建議 | loopback 不能證明是本機鏈（`ssh -L` 到公開節點也能通過，鏈 ID 84532 也相同） | demo 與 p2-local 都要求 `web3_clientVersion` 以 `anvil/` 開頭；`TestAnvilOnly` |
+| 建議 | Signer 的 `max_window_seconds` 小於 300、或確認數高於 relayer 時，每筆付款都會在 tx#1 之後失敗 | p2-local 印出的說明寫明 `max_window_seconds` 至少 300；確認數與 relayer 相同（1）。H6 的 `signer.json` 依此設定 |
+| 建議 | 已 `settled` 時內容超過 1 MiB，每秒重抓、永遠不結束 | `ErrTooLarge`：已 `settled` 時轉 `DELIVERY_FAILED` |
+| 建議 | 預設 client 會跟隨轉址並帶上 `PAYMENT-SIGNATURE` | 不跟隨轉址：3xx 就是回應，交給鏈上判定 |
+| 建議 | 停止順序：HTTP 伺服器（商店）先停，付款工作之後才停 | 付款工作改用 runs 的 context，在 HTTP 伺服器停止前停止；仍在 Store 關閉前等它結束 |
+| 建議 | 啟動時恢復失敗一次，整個程序就沒有付款 | 5 秒後再試 |
+| 建議 | `a key in the file` 的測試期待的字串太寬 | 改為 `unknown field gas_key` |
+| 建議 | `/health` 與 `payment_capability` 仍寫「不能付款」 | H4 處理（畫面與文字） |
+| 建議 | `ac.pays` 以值的型別判斷 `Unavailable{}` | 不改：只有 `assemble` 建立它 |
+
+H3 突變共 26 項，26／26 KILLED。

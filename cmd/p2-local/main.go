@@ -74,6 +74,9 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if id, err := rpc.ChainID(ctx); err != nil || !id.IsUint64() || id.Uint64() != chainID {
 		return fmt.Errorf("the node at %s is not a chain %d anvil (or did not answer)", *rpcURL, chainID)
 	}
+	if err := eth.Anvil(ctx, rpc); err != nil {
+		return err
+	}
 	var code string
 	if err := rpc.Raw(ctx, "eth_getCode", &code, asset.Hex(), "latest"); err != nil {
 		return err

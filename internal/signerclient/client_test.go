@@ -382,3 +382,31 @@ func TestSignForTheWorker(t *testing.T) {
 		t.Fatalf("over the per-payment cap: %v", err)
 	}
 }
+
+// A Signer's 503 (SIGNER_ERROR, SIGNER_TIMEOUT) is a plain error, asked
+// again: never a refusal, which would end a paid-for reservation.
+func TestSignUnavailableIsNotARefusal(t *testing.T) {
+	dir, err := os.MkdirTemp("", "sc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "s")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Skip("no Unix socket listening here:", err)
+	}
+	code := "SIGNER_ERROR"
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprintf(w, `{"error":%q}`, code)
+	})}
+	go srv.Serve(ln)
+	defer srv.Close()
+	c := New(sock, nil)
+	for _, code = range []string{"SIGNER_ERROR", "SIGNER_TIMEOUT"} {
+		if _, err := c.Sign(bg, signer.SignRequest{RequestID: "pay-x"}); err == nil || errors.As(err, new(signer.Refusal)) {
+			t.Fatalf("503 %s: %v", code, err)
+		}
+	}
+}
