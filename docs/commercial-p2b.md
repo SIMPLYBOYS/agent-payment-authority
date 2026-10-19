@@ -116,6 +116,8 @@ B4 的 review（b8bda11）：REQUEST CHANGES，沒有 Critical；五項 Importan
 
 **B6 `/opt` 的產生器**（完成，待 review）：`p2-testnet opt-signer`（見 §6.1）：只讀兩個檔，不讀金鑰、不連任何節點；產生的設定以 `signer.ParseConfig` 驗證後才以 0600 寫出，目標檔已存在就拒絕；`--base` 的 WebAuthn 必須是 `localhost` 且含 `http://localhost:8402`。測試 `TestOptSigner`：保留與替換的每一段、`dlg-t402` 恰好一筆 0.0001、核准者版本加 1、語音商家改到商店位址、不覆寫、別的來源被拒。§6.1 寫出第 2 步與第 5 步在 `/opt` 的做法；實際的執行檔、設定與雜湊在第 5 步才產生。
 
+**B5 test402**（暫停，等 §6 第 1 步）：Agent 只能經由商店的目錄請購，而且 bridge 會自己去取那筆 402；test402 的商品等於讓 bridge 信任一個外部的 resource URL，Store 的報價簿也要放進 test402 **現在**實際回的報價（要與它逐欄相同，否則 test402 會拒絕，雖然不會花到錢，但 tx#1 已用掉）。所以 B5 要在第 1 步（唯讀：preflight 與對 test402 的一次 GET）核准並取得現在的 402 之後才設計與實作；其他各段不受影響。要做的事已列在 §4 B5：委派依收款方選、policy 的 merchants、目錄商品，以及 bridge 對外部 resource 的信任規則。
+
 ## 5 要你決定的事
 
 | # | 問題 | 選項 | 建議 |
