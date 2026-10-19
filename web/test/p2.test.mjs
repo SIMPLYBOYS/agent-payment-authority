@@ -107,6 +107,9 @@ test("P2: a person's approval says not paid yet with local_anvil", async () => {
   const AP = await import("../approve.js");
   const dev = { approval: { resolved_by: "webauthn:approver-a", grant: { authorization_method: "webauthn" } } };
   assert.equal(AP.decidedText("approved", dev, true)[1], "本人核准已驗證，尚未付款。");
+  // H6: once paid, the panel says so (it said "not yet paid" after the payment).
+  const paidDev = { ...dev, payment: { status: "paid", state: "delivered", settle_block: 11 } };
+  assert.equal(AP.decidedText("approved", paidDev, true)[1], "本人核准已驗證；已付款、已交付（區塊 11），附收據。");
   assert.equal(AP.decidedText("approved", dev)[1], "本人核准已驗證，付款未啟用。");
   dev.approval.grant.voice = "verified";
   assert.equal(AP.decidedText("approved", dev, true)[1], "本人核准已驗證（裝置＋語音），尚未付款。");

@@ -5,7 +5,7 @@
 // the device is asked, converts WebAuthn's binary fields, and words each
 // state with fixed texts (never "approved" for something unknown).
 
-import { b64u, unb64u, byDevice, VOICE, VOICE_FAILURES, voiceText } from "./adapter.js";
+import { b64u, unb64u, byDevice, VOICE, VOICE_FAILURES, voiceText, paymentText } from "./adapter.js";
 
 export { VOICE, VOICE_FAILURES };
 
@@ -152,13 +152,15 @@ const PAID_NOTE = "task 仍進行時，Host 會為核准的這一筆開始付款
 // P2-a); a simulated one never pays.
 export const decidedText = (state, p, pays = false) => {
   const g = p && p.approval && p.approval.grant;
-  const paid = (t) => (pays ? t.replace("，付款未啟用。", "，尚未付款。") : t);
+  // With payments, the payment as the card says it once there is one; "not yet paid" before.
+  const now = () => (p && p.payment ? "；" + paymentText(p.payment) + "。" : "，尚未付款。");
+  const paid = (t) => (pays ? t.replace("，付款未啟用。", now()) : t);
   if (state === "denied" && p && p.closed_reason === "VOICE_CHALLENGE_FAILED") return ["deny", "語音挑戰未通過，這筆已拒絕。", "沒有發出授權，不會付款；這筆不能再核准。"];
   if (state === "approved" && byDevice(p) && g && g.voice === "unavailable") {
     return ["warn", paid("本人核准已驗證（語音降級），付款未啟用。"), "語音不可用（" + voiceText(g.voice_reason) + "）：只憑摘要確認與裝置驗證核准，這筆記為降級。"];
   }
   if (state === "approved" && byDevice(p) && g && g.voice === "verified") return ["ok", paid("本人核准已驗證（裝置＋語音），付款未啟用。"), pays ? PAID_NOTE : DONE.device.approved[2]];
-  if (state === "approved" && byDevice(p) && pays) return ["ok", "本人核准已驗證，尚未付款。", PAID_NOTE];
+  if (state === "approved" && byDevice(p) && pays) return ["ok", "本人核准已驗證" + now(), PAID_NOTE];
   return DONE[byDevice(p) ? "device" : "simulated"][state] || null;
 };
 
