@@ -80,12 +80,14 @@ func TestServe(t *testing.T) {
 		c := good
 		cs.change(&c)
 		write(c)
-		if err := serve(context.Background(), dir, ask, io.Discard); err == nil || !strings.Contains(err.Error(), cs.want) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second) // one served by mistake ends, and fails here
+		if err := serve(ctx, dir, ask, io.Discard); err == nil || !strings.Contains(err.Error(), cs.want) {
 			t.Errorf("%s: %v, want %q", name, err, cs.want)
 		}
+		cancel()
 		os.Remove(sock)
 	}
-	if asked != 1 { // only "another chain" got as far as the keys
+	if asked != 1 && !t.Failed() { // only "another chain" got as far as the keys
 		t.Fatalf("the passphrase was asked %d times", asked)
 	}
 	write(good)
