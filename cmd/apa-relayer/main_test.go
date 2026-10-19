@@ -61,7 +61,7 @@ func TestServe(t *testing.T) {
 	defer rpc.Close()
 	sock := filepath.Join(dir, "r.sock")
 	good := relayerConfig{Socket: sock, Callers: []uint32{uint32(os.Getuid())}, RPC: rpc.URL, ChainID: 84532,
-		BudgetContract: "0x" + strings.Repeat("4", 40), Confirmations: 2, PolicyTTL: 600, Zkbudget: "zkbudget", ZkSetupDir: "zk", DailyTxCap: 12}
+		BudgetContract: "0x" + strings.Repeat("4", 40), Confirmations: 2, PolicyTTL: 600, Zkbudget: "/opt/zkbudget", ZkSetupDir: "/opt/zk", DailyTxCap: 12}
 	write := func(c relayerConfig) {
 		raw, _ := json.Marshal(c)
 		os.WriteFile(filepath.Join(dir, "relayer.json"), raw, 0o600)
@@ -73,6 +73,8 @@ func TestServe(t *testing.T) {
 		want   string
 	}{
 		"no cap":            {func(c *relayerConfig) { c.DailyTxCap = 0 }, "daily_tx_cap"},
+		"a relative prover": {func(c *relayerConfig) { c.Zkbudget = "zkbudget" }, "absolute paths"},
+		"another caller":    {func(c *relayerConfig) { c.Callers = []uint32{uint32(os.Getuid()) + 1} }, "this user's uid"},
 		"a long policy ttl": {func(c *relayerConfig) { c.PolicyTTL = 601 }, "policy_ttl"},
 		"another chain":     {func(c *relayerConfig) { c.ChainID = 8453 }, "not chain 8453"},
 		"a socket in place": {func(c *relayerConfig) { os.WriteFile(sock, nil, 0o600) }, "exists"},
@@ -97,13 +99,13 @@ func TestServe(t *testing.T) {
 	go func() { done <- serve(ctx, dir, ask, &out) }()
 	c := budget.NewClient(sock)
 	var h budget.Health
-	for i := 0; i < 100; i++ {
+	for end := time.Now().Add(60 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) { // three scrypt opens first
 		if h, err = c.Health(context.Background()); err == nil {
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
 	}
 	if err != nil || h.State != "ready" || h.ChainID != 84532 || h.Contract != good.BudgetContract || h.DailyTxCap != 12 {
+		cancel()
 		t.Fatalf("health %+v %v", h, err)
 	}
 	if fi, err := os.Stat(sock); err != nil || fi.Mode().Perm()&0o077 != 0 {

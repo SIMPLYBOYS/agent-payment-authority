@@ -55,7 +55,7 @@ func TestPaymentsConfigRefused(t *testing.T) {
 		"no delegations":               {func(c map[string]any) { delete(c, "delegations") }, "delegations"},
 		"a shared directory":           {func(c map[string]any) { os.Chmod(priv, 0o750) }, "0700"},
 		"no chain at the RPC":          {func(c map[string]any) {}, "did not answer"},
-		"no apa-relayer on its socket": {func(c map[string]any) { c["relayer_socket"] = filepath.Join(dir, "none.sock") }, "apa-relayer on"},
+		"no apa-relayer on its socket": {func(c map[string]any) { c["relayer_socket"] = filepath.Join(priv, "none.sock") }, "apa-relayer on"},
 	} {
 		os.Chmod(priv, 0o700)
 		c := good()
@@ -244,18 +244,19 @@ func TestTestnetConfigRefused(t *testing.T) {
 		"anvil keys": {func(c map[string]any) {
 			c["anvil_keys"] = map[string]int{"relayer_gas": 3, "issuer": 1, "policy": 2, "shop_gas": 4}
 		}, "no anvil key"},
-		"an http node":        {func(c map[string]any) { c["rpc"] = "http://sepolia.base.org" }, "https URL"},
-		"a node with a login": {func(c map[string]any) { c["rpc"] = "https://user:secret@sepolia.base.org" }, "without user info"},
-		"another chain":       {func(c map[string]any) { c["chain_id"] = 8453 }, "is chain 84532"},
-		"one confirmation":    {func(c map[string]any) { c["confirmations"] = 1 }, "at least 2 confirmations"},
-		"no shop cap":         {func(c map[string]any) { delete(c, "shop_daily_tx_cap") }, "shop_daily_tx_cap"},
-		"no start block":      {func(c map[string]any) { c["token_from_block"] = 0 }, "token_from_block"},
-		"no apa-relayer":      {func(c map[string]any) { delete(c, "relayer_socket") }, "needs relayer_socket"},
-		"no shop key":         {func(c map[string]any) { delete(c, "shop_key_dir") }, "needs relayer_socket (apa-relayer) and shop_key_dir"},
-		"a long policy ttl":   {func(c map[string]any) { c["policy_ttl"] = 601 }, "policy_ttl is 1 to 600"},
-		"otherwise good":      {func(c map[string]any) {}, "apa-relayer on"}, // the rules pass: the relayer is asked next
+		"an http node":              {func(c map[string]any) { c["rpc"] = "http://sepolia.base.org" }, "https URL"},
+		"a node with a login":       {func(c map[string]any) { c["rpc"] = "https://user:secret@sepolia.base.org" }, "without user info"},
+		"another chain":             {func(c map[string]any) { c["chain_id"] = 8453 }, "is chain 84532"},
+		"one confirmation":          {func(c map[string]any) { c["confirmations"] = 1 }, "at least 2 confirmations"},
+		"no shop cap":               {func(c map[string]any) { delete(c, "shop_daily_tx_cap") }, "shop_daily_tx_cap"},
+		"no start block":            {func(c map[string]any) { c["token_from_block"] = 0 }, "token_from_block"},
+		"no apa-relayer":            {func(c map[string]any) { delete(c, "relayer_socket") }, "needs relayer_socket"},
+		"no shop key":               {func(c map[string]any) { delete(c, "shop_key_dir") }, "needs relayer_socket (apa-relayer) and shop_key_dir"},
+		"a long policy ttl":         {func(c map[string]any) { c["policy_ttl"] = 601 }, "policy_ttl is 1 to 600"},
+		"otherwise good":            {func(c map[string]any) {}, "apa-relayer on"}, // the rules pass: the relayer is asked next
+		"a shared socket directory": {func(c map[string]any) { c["relayer_socket"] = "/private/tmp/r.sock" }, "relayer_socket's directory"},
 	} {
-		c := testnetConfig(priv, filepath.Join(dir, "none.sock"), dir, "https://sepolia.base.org")
+		c := testnetConfig(priv, filepath.Join(priv, "none.sock"), dir, "https://sepolia.base.org")
 		cs.change(c)
 		raw, _ := json.Marshal(c)
 		os.WriteFile(path, raw, 0o600)

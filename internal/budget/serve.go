@@ -39,8 +39,10 @@ type Health struct {
 }
 
 const (
-	maxBody     = 64 << 10
-	answerLimit = 4 * time.Minute // longer than Relayer.wait
+	maxBody = 64 << 10
+	// answerLimit: longer than Relayer.wait; a call queued behind another's
+	// wait may pass it, and is then pending to the Host (Lookup decides).
+	answerLimit = 4 * time.Minute
 )
 
 type uidKey struct{}
@@ -58,8 +60,10 @@ func Handler(s Service, h Health, callers []uint32, log func(string)) http.Handl
 		if !decode(w, req, &in) {
 			return
 		}
-		err := s.RegisterTask(req.Context(), in.TaskID, in.ConsumerID, in.Balance)
-		log("register " + in.TaskID + " " + codeOf(err))
+		// Not cancelled when the Host hangs up: a written transaction is sent
+		// and decided (bounded by Relayer.wait); the Host's Lookup reads it.
+		err := s.RegisterTask(context.WithoutCancel(req.Context()), in.TaskID, in.ConsumerID, in.Balance)
+		log("register " + in.TaskID + " " + why(err))
 		reply(w, struct{}{}, err)
 	})
 	mux.HandleFunc("POST /v1/reserve", func(w http.ResponseWriter, req *http.Request) {
@@ -69,8 +73,8 @@ func Handler(s Service, h Health, callers []uint32, log func(string)) http.Handl
 		if !decode(w, req, &in) {
 			return
 		}
-		ev, err := s.Reserve(req.Context(), in.Order)
-		log("reserve " + ev.IntentHash + " " + codeOf(err))
+		ev, err := s.Reserve(context.WithoutCancel(req.Context()), in.Order)
+		log("reserve " + ev.IntentHash + " " + why(err))
 		reply(w, ev, err)
 	})
 	mux.HandleFunc("POST /v1/lookup", func(w http.ResponseWriter, req *http.Request) {
@@ -81,6 +85,9 @@ func Handler(s Service, h Health, callers []uint32, log func(string)) http.Handl
 			return
 		}
 		ev, state, err := s.Lookup(req.Context(), in.Intent)
+		if codeOf(err) == "RELAYER_UNAVAILABLE" {
+			log("lookup " + in.Intent + " " + why(err))
+		}
 		reply(w, lookup{ev, state}, err)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -97,6 +104,15 @@ func Handler(s Service, h Health, callers []uint32, log func(string)) http.Handl
 type lookup struct {
 	Evidence Evidence `json:"evidence"`
 	State    string   `json:"state"`
+}
+
+// why is the local log's reason: the code, and for an unavailable relayer
+// the error itself (the operator's terminal only; never on the socket).
+func why(err error) string {
+	if c := codeOf(err); c != "RELAYER_UNAVAILABLE" {
+		return c
+	}
+	return "RELAYER_UNAVAILABLE: " + err.Error()
 }
 
 func codeOf(err error) string {

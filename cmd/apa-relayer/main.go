@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -127,8 +128,14 @@ func readConfig(path string) (relayerConfig, error) {
 		return c, fmt.Errorf("%s: not a relayer configuration", path)
 	}
 	if !filepath.IsAbs(c.Socket) || len(c.Callers) == 0 || c.RPC == "" || c.ChainID == 0 || c.Confirmations == 0 ||
-		c.PolicyTTL == 0 || c.PolicyTTL > 600 || c.Zkbudget == "" || c.ZkSetupDir == "" || c.DailyTxCap == 0 {
-		return c, fmt.Errorf("%s: socket (absolute), callers, rpc, chain_id, confirmations, policy_ttl (1-600 s), zkbudget, zk_setup_dir and daily_tx_cap are required", path)
+		c.PolicyTTL == 0 || c.PolicyTTL > 600 || !filepath.IsAbs(c.Zkbudget) || !filepath.IsAbs(c.ZkSetupDir) || c.DailyTxCap == 0 {
+		return c, fmt.Errorf("%s: socket, zkbudget and zk_setup_dir (absolute paths), callers, rpc, chain_id, confirmations, policy_ttl (1-600 s) and daily_tx_cap are required", path)
+	}
+	// The socket is this user's only (umask 077), so only this uid can ever connect.
+	for _, u := range c.Callers {
+		if u != uint32(os.Getuid()) {
+			return c, fmt.Errorf("%s: callers is this user's uid %d only (the socket is private to it)", path, os.Getuid())
+		}
 	}
 	return c, nil
 }
@@ -149,6 +156,9 @@ func serve(ctx context.Context, dir string, passphrase func() ([]byte, error), o
 	if err != nil {
 		return fmt.Errorf("budget_contract: %w", err)
 	}
+	if err := keytool.Private(filepath.Dir(c.Socket)); err != nil { // nobody else can put a socket there
+		return fmt.Errorf("the socket's directory: %w", err)
+	}
 	if _, err := os.Lstat(c.Socket); !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("%s exists: another relayer may be running; stop it (or remove the file if nothing runs)", c.Socket)
 	}
@@ -156,15 +166,18 @@ func serve(ctx context.Context, dir string, passphrase func() ([]byte, error), o
 	if err != nil {
 		return err
 	}
-	defer clear(pass)
 	var keys budget.Keys
 	for _, k := range []struct {
 		role string
 		to   **eth.Key
 	}{{"relayer-gas", &keys.Gas}, {"issuer", &keys.Issuer}, {"policy", &keys.Policy}} {
 		if *k.to, err = keytool.Load(dir, keytool.RelayerLabel, k.role, pass); err != nil {
-			return err
+			break
 		}
+	}
+	clear(pass) // the keys are open: the passphrase is not kept for the process's life
+	if err != nil {
+		return err
 	}
 	rpc := eth.NewClient(c.RPC)
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -190,6 +203,6 @@ func serve(ctx context.Context, dir string, passphrase func() ([]byte, error), o
 	fmt.Fprintf(out, "apa-relayer: serving on %s (chain %d, budget %s, gas %s, issuer %s, policy %s, at most %d transactions a day)\n",
 		c.Socket, c.ChainID, contract.Hex(), keys.Gas.Addr.Hex(), keys.Issuer.Addr.Hex(), keys.Policy.Addr.Hex(), c.DailyTxCap)
 	h := budget.Handler(r, budget.Health{State: "ready", ChainID: c.ChainID, Contract: contract.Hex(), DailyTxCap: c.DailyTxCap}, c.Callers,
-		func(line string) { fmt.Fprintln(out, "apa-relayer:", line) })
+		func(line string) { fmt.Fprintln(out, "apa-relayer:", strings.ReplaceAll(line, c.RPC, "<rpc>")) }) // a node's URL may carry an API key
 	return budget.Serve(ctx, ln, h)
 }

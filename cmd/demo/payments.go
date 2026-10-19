@@ -181,6 +181,9 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 	}
 	var rc *budget.Client // apa-relayer: ready for this chain and budget before anything else
 	if c.RelayerSocket != "" {
+		if err := keytool.Private(filepath.Dir(c.RelayerSocket)); err != nil { // nobody else can stand in for apa-relayer there
+			return nil, nil, fmt.Errorf("payments: relayer_socket's directory: %w", err)
+		}
 		rc = budget.NewClient(c.RelayerSocket)
 		hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		h, err := rc.Health(hctx)

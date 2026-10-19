@@ -75,6 +75,8 @@ B1 的 review（04006c2、0c7ac6b）：APPROVE，兩項 Important 已處理：
 - demo：`payments.json` 的 `relayer_socket`（選填）指向 `apa-relayer`；開始前先確認它 ready，且鏈與預算合約和設定相同，否則不啟動。
 - 測試：socket 傳遞答案與拒絕、拒絕別的 uid、`apa-relayer serve` 的拒絕與實際啟動（以只回 `eth_chainId` 的假 RPC）；anvil 上的 `TestDailyTxCap`；`TestPaidOnAnvil` 改經 socket 呼叫 relayer，仍付款、交付、對帳 0。
 
+B2 的 review（c29b0c6、221c71e）：APPROVE，一項 Important 已處理：`apa-relayer` 的密語在三把金鑰打開後立刻清除，不再留到程序結束。建議也照做：relayer 與 demo 都要求 socket 所在目錄只屬於這個使用者（別人無法放一個假的 relayer）；`callers` 只能是 `apa-relayer` 自己的 uid（socket 本來就只有它能連）；`zkbudget` 與 `zk_setup_dir` 必須是絕對路徑；register／reserve 不因 Host 斷線而中止（已寫入的交易照樣送出並判定，Host 下次以 Lookup 讀到）；`RELAYER_UNAVAILABLE` 在 relayer 自己的終端機記下原因（RPC 位址遮蔽），socket 上仍不帶文字；`TestServe` 等待 60 秒，不因 scrypt 慢而誤判。
+
 **B3a `base_sepolia` 環境（Go 端）**（完成，待 review）：
 - `payments.json` 的 `environment`：`local_anvil`（預設，P2-a 的檔案不用改）或 `base_sepolia`。
 - `base_sepolia` 的規則（什麼都還沒打開前就檢查）：鏈 84532；RPC 是 `https`、不含帳密；不接受任何 anvil 金鑰；必須有 `relayer_socket`（`apa-relayer`）與 `shop_key_dir`；確認數至少 2；`shop_daily_tx_cap`；`token_from_block`（部署區塊）。任何環境的 `policy_ttl` 都是 1–600 秒。
