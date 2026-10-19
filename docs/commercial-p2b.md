@@ -38,24 +38,31 @@ P2-b 的交付物：
 
 ## 4 程式分段（全部在本機 anvil 上證明；每段提交與 review）
 
-- **B1 金鑰檔**：沿用 Signer 的加密格式（scrypt＋AES-256-GCM，`internal/signer/keystore.go`），讓 relayer 與商店的金鑰也能這樣存。新增 `apa-relayer keygen --dir DIR --role relayer-gas|issuer|policy|shop`，與 `apa-signer keygen` 相同：密語只在終端機輸入兩次，只印出位址。
-- **B2 `apa-relayer`**：獨立程序，Unix socket（0600，檢查對端 uid），啟動時輸入一次密語，持有 relayer-gas、issuer、policy 三把。介面就是 demo 現在呼叫的 `RegisterTask`／`Reserve`。每日交易數上限記在它自己的資料庫，超過就拒絕（新碼 `RELAYER_DAILY_CAP`，付款工作視為最終拒絕，不重試）。
+- **B1 金鑰檔**：沿用 Signer 的加密格式（scrypt＋AES-256-GCM，`internal/signer/keystore.go`），讓 relayer 與商店的金鑰也能這樣存；但驗證資料（AAD）的標籤改成每個程式各自的（例如 `apa-relayer-key/v1`），relayer 的金鑰檔不能被當成 Signer 的錢包解開，反之亦然。新增 `apa-relayer keygen --dir DIR --role relayer-gas|issuer|policy|shop`，與 `apa-signer keygen` 相同：密語只在終端機輸入兩次，只印出位址。
+- **B2 `apa-relayer`**：獨立程序，Unix socket（0600，檢查對端 uid），啟動時輸入一次密語，持有 relayer-gas、issuer、policy 三把。介面就是付款工作現在呼叫的三個：`RegisterTask`、`Reserve`，以及恢復時用來判斷「什麼都沒花」的 `Lookup`。每日交易數上限記在它自己的資料庫，**以 nonce 計**：同一個 nonce 因卡住而重新定價、重新簽名的不另計，所以上限算的就是鏈上最多會多出幾筆。超過就拒絕（新碼 `RELAYER_DAILY_CAP`，付款工作視為最終拒絕，不重試）。商店的每日上限同樣以 nonce 計。
 - **B3 `base_sepolia` 環境**：demo 的閘門、`payment_capability`、畫面標示、對帳的 `environment` 與起點、確認數 2、逾時設定、商店的金鑰檔與每日上限。本機測試用 anvil 加 `--chain-id 84532`；只有測試能把 `base_sepolia` 指向 loopback，正式旗標不行。
 - **B4 `p2-testnet`**：
   - `preflight`（唯讀）：`eth_chainId`、USDC 的 `name`／`version`／`decimals`、各位址的 ETH 與 USDC 餘額，和預期不符就停。
-  - `deploy`：先印出要送的兩筆交易（部署 Verifier 與 Budget）、送出者、估計 gas，要你輸入 `yes` 才送；送出後等 2 個確認，寫出 `payments.json` 與 `registry.json`（錢包位址、Circle USDC、商店收款位址、部署區塊）。目錄已存在就拒絕。
-- **B5 test402**：照 §5 P2b-D7 的決定做。
-- **B6 `/opt` 重建**：依 V1 §15 與 P2 帶來的變更，重新建置 `apa-signer`，產生 `/opt` 用的 `signer.json`（Base Sepolia 的 `reservation`、§5 P2b-D5 的上限），更新 §15 的步驟與核對值（含 `approver migrate`）。只在 `var/` 準備，不動 `/opt`。
+  - `deploy`：先印出要送的兩筆交易（部署 Verifier 與 Budget）、送出者、估計 gas，要你輸入 `yes` 才送；送出後等 2 個確認，寫出 `payments.json` 與 `registry.json`（錢包位址、Circle USDC、商店收款位址、部署區塊）。目錄已存在就拒絕。部署者就是 issuer（P2b-D3），所以 `apa-relayer` 必須是停著的（檢查它的 socket），兩個程序才不會用到同一個 nonce。
+- **B5 test402**（照 P2b-D7 A）：
+  - 委派依「客人＋收款方」選：`payments.json` 的 `delegations` 現在是一位客人一個（`cmd/demo/payments.go`、`internal/payflow` 的 `Starter`），付給 test402 會被拿 `dlg-tb` 去簽，而 Signer 會因收款方不在 `dlg-tb` 的 merchants 而拒絕。改成依收款方選擇委派。
+  - Policy profile 的 `merchants` 加入 test402 的收款位址（`internal/policy`）。
+  - 目錄加一個 test402 的商品／場景，Agent 才請購得到（Agent 只能買目錄上的商品）；它的商店是外部的 x402 resource，交付內容照 H-D2 只存 hash。
+  - 先在 P2-c 第 1 步重新確認 test402 現在的 402，再定商品的價格與收款方。
+- **B6 `/opt` 重建的工具**：`/opt` 的 `signer.json` 需要的錢包位址（§6 第 2 步）與預算合約位址（第 4 步）在 P2-b 還不存在，所以這一段只做**產生器與檢查**：
+  - 由 `p2-testnet` 寫出的 `payments.json` 產生 `/opt` 用的 `signer.json`：Base Sepolia 的 `reservation`、P2b-D5 的上限、`rp_id` `localhost` 與 P2-c 用的 Host 位址（`http://localhost:8402`），以及語音核准用的商家表（新的商店收款位址；test402 的也要列，否則語音核准回 `VOICE_MERCHANT_UNKNOWN`）；
+  - 委派用新的 ID（例如 `dlg-ta`、`dlg-tb`），讓累計上限從 0 開始，不和 `/opt` 的 `signer.db` 裡可能已有的紀錄混在一起；
+  - 更新 V1 §15 的步驟（含 `approver migrate`）。實際的 `signer.json`、執行檔與核對值，在 §6 第 5 步才產生。只在 `var/` 準備，不動 `/opt`。
 
 ## 5 要你決定的事
 
 | # | 問題 | 選項 | 建議 |
 |---|---|---|---|
-| P2b-D1 | RPC | **A** 公開的 `https://sepolia.base.org`（不用帳號、沒有 API key，有未公開的速率限制）；**B** 需要 API key 的服務（例如 Alchemy），key 存在 0600 的設定檔 | **A**：整個 P2-c 不到 15 筆交易，對帳又從部署區塊開始，量很小。被限速才改 B，改之前再問你 |
+| P2b-D1 | RPC | **A** 公開的 `https://sepolia.base.org`（不用帳號、沒有 API key，有未公開的速率限制）；**B** 需要 API key 的服務（例如 Alchemy），key 存在 0600 的設定檔 | **A**：整個 P2-c 只有十幾筆交易，對帳從部署區塊開始，量很小（對帳每一輪都從部署區塊重掃，所以部署要排在跑場之前不久）。被限速才改 B，改之前再問你。注意：Signer 的預留核對與 relayer 用同一個 RPC，證據裡會寫明這一點 |
 | P2b-D2 | testnet 的 Signer 跑在哪裡 | **A** `/opt`（`apa-signer` 帳號，P1-b 隔離），與 V1 `/opt` 部署一起做；**B** 先用開發模式 `var/p2-dev`（你的帳號），之後再搬到 `/opt` | **A**：V1 §15 已寫明開發模式不能當最終驗收的證據；B 要建兩次錢包、領兩次測試幣，證據還要重做 |
-| P2b-D3 | 要建哪些金鑰（全部是新的測試金鑰，由你建立） | 付款錢包 wallet-a、wallet-b（`/opt` 的 Signer）；relayer-gas（送 tx#1）；issuer（`registerTask`，**兼部署者**）；policy（只簽名，不需要 gas）；shop（送 tx#2，**兼收款位址**） | 照這樣，共 6 把。部署者與 issuer 合併、收款與 shop 合併，可以少領兩次 ETH；角色仍各自記錄。日常錢包一律不用 |
+| P2b-D3 | 要建哪些金鑰（全部是新的測試金鑰，由你建立） | 付款錢包 wallet-a、wallet-b（`/opt` 的 Signer）；relayer-gas（送 tx#1）；issuer（`registerTask`，**兼部署者**）；policy（只簽 `spend` 的授權，不送交易，不需要 gas）；shop（送 tx#2，**兼收款位址**） | 照這樣，共 6 把。部署者與 issuer 合併、收款與 shop 合併，可以少領兩次 ETH；角色仍各自記錄。Budget 部署後沒有擁有者權限，部署者合併 issuer 不多給權限。日常錢包一律不用 |
 | P2b-D4 | relayer 與商店金鑰放哪裡 | **A** `var/p2-testnet/keys`（你的帳號，0700，加密），relayer 三把由 `apa-relayer` 持有，shop 由 demo 在啟動時要密語；**B** 也放進 `/opt`，以 `apa-signer` 帳號執行 | **A**：P2-D2 決定這些是 Host 端的金鑰；放進 `/opt` 會讓 Signer 帳號同時持有預算與商店的金鑰，模糊信任邊界 |
-| P2b-D5 | 上限 | Signer：`dlg-a`、`dlg-b` 每筆 0.10、總額 0.30；approver-a、approver-b 每筆 1.00、24 小時 1.50；test402 專用委派恰好一筆 0.0001。relayer 每日 12 筆、商店每日 4 筆。每把 gas 帳戶只領一次 ETH，每個付款錢包只領一次 USDC | 照這樣：夠跑一輪 §6，再重跑一次 Allow 或 Ask；超過任何一項就停在那裡，不能自己繞過 |
+| P2b-D5 | 上限 | Signer：`dlg-ta`、`dlg-tb` 每筆 0.10、總額 0.30；approver-a、approver-b 每筆 1.00、24 小時 1.50；test402 專用委派恰好一筆 0.0001。relayer 每日 12 筆、商店每日 4 筆。每把 gas 帳戶只領一次 ETH，每個付款錢包只領一次 USDC | 照這樣：夠跑一輪 §6，再重跑一次 Allow 或 Ask；超過任何一項就停在那裡，不能自己繞過 |
 | P2b-D6 | 測試幣從哪裡來 | 你在瀏覽器上自己領：USDC 用 Circle 的 faucet；ETH 從你選的 faucet（例如 Coinbase CDP） | 照這樣：我不連 faucet，也不經手 faucet 的帳號 |
 | P2b-D7 | test402 那一筆怎麼付 | **A** 走同一條 Host 路徑：專用委派 `dlg-t402`（wallet-b，收款方是 test402 的位址，恰好一筆 0.0001），一樣先預留 tx#1、Signer 核對後才簽，test402 自己結算；**B** 另寫一個工具直接請 Signer 簽 | **A**：Signer 規定沒有鏈上預留不簽，B 得另開例外；A 證明的就是產品本身的路徑。細節在 B5 確認 test402 現在的 402 之後再定 |
 | P2b-D8 | `cancelAuthorization`（撤回已簽未送的授權） | 做或不做 | **不做**：未知狀態本來就不重付，授權也有期限；多一筆鏈上交易沒有必要 |
@@ -69,9 +76,11 @@ P2-b 的交付物：
 | 3 領測試幣 | 你 | relayer-gas、issuer、shop 各領一次 ETH；wallet-a、wallet-b 各領一次 USDC | faucet 的 5 筆（不是我們送的） |
 | 4 部署 | Claude Code（`p2-testnet deploy`，issuer 送出；你輸入密語） | RPC | 2 |
 | 5 `/opt` 部署 | 你（依更新後的 V1 §15；sudo 只由你輸入） | `/opt` | 0 |
-| 6 跑四場 | 你核准／拒絕；Allow 與取消可由 Claude Code 代按 | RPC | Allow：tx#0、tx#1、tx#2；Ask 核准：tx#0、tx#1、tx#2；Ask 拒絕：tx#0 |
+| 6 跑三場 | 你核准／拒絕；Allow 可由 Claude Code 代按 | RPC；**新的 Host 資料庫**（舊的保留不動） | Allow：tx#0、tx#1、tx#2；Ask 核准：tx#0、tx#1、tx#2；Ask 拒絕：tx#0 |
 | 7 test402 | 同上 | test402、RPC | tx#0、tx#1（tx#2 由 test402 那邊送） |
 | 8 對帳 | Claude Code（`p2-reconcile.sh`） | RPC 唯讀 | 0；報告是 `base_sepolia`，可結 AE1 驗收 18 |
+
+H6 的第四場「task 結束後不能核准」不在 testnet 重跑：停止點不需要它，本機已證明；而且每個開始的 task 都會先送一筆登記 tx#0（H-D4），多跑一場就多一筆。Host 資料庫一定要用新的：舊資料庫裡還開著的付款 task 會各自觸發一筆登記。
 
 我們自己送的交易合計 **11 筆**：部署 2（issuer）、登記 4 與預留 3（relayer，共 7 筆，在每日 12 筆之內）、結算 2（商店，在每日 4 筆之內）；test402 那一筆的結算由對方送，不算在內。每一筆的 hash、receipt、區塊與對應的 `intent_hash` 都寫進證據；沒有 receipt 的成功宣稱一律記 unknown／not_evaluated。
 
@@ -83,7 +92,8 @@ P2-b 的交付物：
 1. 主持人頁停止 run，然後在終端機按 Ctrl-C 停 Host。之後不會再開始新的付款。
 2. 停 `apa-relayer`，之後不會再送 tx#1。
 3. 停 Signer，之後不會再簽。
-4. 需要讓已發出的預算授權全部失效時，由 policy 金鑰呼叫 Budget 的 `raiseEpoch`（這是一筆交易，要你另外核准）。
+
+不使用 Budget 的 `raiseEpoch`：它只能由 policy 金鑰送出，而 policy 金鑰沒有 gas；已發出但沒用到的預算授權本來就會到期（期限是「現在＋10 分鐘」與付款期限較早的那個）。
 
 **之後**：已簽或已送出的付款不能撤回，只能以對帳收斂。不自動重試、不另開錢包、不追加測試幣。原因寫進證據後，再決定下一步。
 
@@ -93,3 +103,22 @@ P2-b 的交付物：
 - 金鑰全部由你建立；密語不出現在命令參數、環境變數、檔案或對話裡。我不讀金鑰檔，也不列出金鑰目錄。
 - 在 §6 的對應步驟核准之前，不連 RPC、faucet、facilitator、test402 或任何鏈，不動 `/opt`。
 - 不宣稱 mainnet 或 production 安全。
+
+## 9 review（976b307）與處理
+
+結論 REQUEST CHANGES，沒有 Critical。§3 的現況逐行核對無誤。
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Important | §7 的 `raiseEpoch` 只能由 policy 金鑰送，但它沒有 gas，出事時得再領測試幣 | 拿掉這一步；未用的預算授權本來就會到期 |
+| Important | §6 寫「四場」只列三場；取消那場也會送一筆登記，總數會變 12；舊 Host 資料庫裡開著的 task 也各送一筆 | 不在 testnet 跑取消那場，維持 11 筆；規定用新的 Host 資料庫 |
+| Important | test402 走 Host 路徑還缺三件事：委派依收款方選、policy 的 merchants、目錄商品 | 寫進 B5 |
+| Important | B6 要的錢包與合約位址在 P2-b 還不存在；`/opt` 的語音商家表沒有新的收款方會讓語音核准失敗 | B6 只做產生器與檢查，實際檔案在 §6 第 5 步產生；語音商家表列入 |
+| Important | `apa-relayer` 的介面少了恢復時用的 `Lookup` | 補上 |
+| 建議 | 每日上限要定義算什麼 | 以 nonce 計，重新定價不另計 |
+| 建議 | 對帳每輪從部署區塊重掃 | 部署排在跑場之前不久；寫在 P2b-D1 |
+| 建議 | Signer 與 relayer 共用 RPC | 證據裡寫明 |
+| 建議 | 沿用金鑰檔格式會讓 relayer 的檔被當成 Signer 錢包解開 | AAD 標籤每個程式各自的 |
+| 建議 | 部署者＝issuer 時兩個程序可能用到同一個 nonce | 部署時 `apa-relayer` 必須停著 |
+| 建議 | `/opt` 的 `signer.db` 可能已有 `dlg-a`／`dlg-b` 的紀錄 | testnet 用新的委派 ID `dlg-ta`／`dlg-tb` |
+| 建議 | `/opt` 的 WebAuthn 來源要含 P2-c 用的 Host 位址 | 寫進 B6 |
