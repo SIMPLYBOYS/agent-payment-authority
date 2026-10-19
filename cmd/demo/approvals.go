@@ -61,6 +61,7 @@ type approvals struct {
 	st     approvalStore
 	signer approvalSigner
 	source string // device | virtual: what the operator says verifies (a label, not evidence)
+	pays   bool   // P2-a: --payments, a person's approval is paid (sources say local_anvil)
 	out    io.Writer
 	mu     sync.Mutex // ponytail: one approval operation at a time on this host; per-session locks if it ever matters
 }
@@ -73,7 +74,11 @@ type sources struct {
 }
 
 func (h *approvals) sources() sources {
-	return sources{Agent: "fake", Authenticator: h.source, Payment: "disabled"}
+	payment := "disabled"
+	if h.pays {
+		payment = LocalAnvil
+	}
+	return sources{Agent: "fake", Authenticator: h.source, Payment: payment}
 }
 
 type challengeView struct {
@@ -312,6 +317,9 @@ func (h *approvals) challenge(consumer, session, requestID, decision string) (in
 	case "IDEMPOTENCY_CONFLICT":
 		return http.StatusConflict, approvalReply{Error: "request_id_conflict"}
 	case "TASK_ALREADY_ENDED": // a CLI timeout or a Deny: nobody decides this Ask now (cli-timeout-pending)
+		if st.Attempt.Open() {
+			return h.closeOnEnd(consumer, st)
+		}
 		return http.StatusConflict, approvalReply{Error: "task_ended"}
 	case "INVALID_APPROVAL":
 		return http.StatusBadRequest, approvalReply{Error: "bad_request"}
@@ -333,6 +341,8 @@ func (h *approvals) drive(consumer string, st store.AttemptStart, fresh bool) (i
 		return http.StatusOK, approvalReply{Attempt: &a}
 	case st.SessionState != "pending":
 		return h.closeOnSession(consumer, st)
+	case st.TaskEnded: // no new challenge, no verification: closed (cli-timeout-pending)
+		return h.closeOnEnd(consumer, st)
 	case a.State == "verifying" || a.State == "unknown" && a.VerifyRequestID != "":
 		return h.recoverVerify(consumer, st)
 	case a.ChallengeID != "":
@@ -409,6 +419,8 @@ func (h *approvals) assertion(consumer, session, requestID, verifyID string, ass
 		return h.onVerify(consumer, st, h.signer.ByVerifyRequest(verifyID))
 	case a.Open() && st.SessionState != "pending": // nothing is sent to the Signer (review R3)
 		return h.closeOnSession(consumer, st)
+	case a.Open() && st.TaskEnded: // the task ended: nothing is sent to the Signer
+		return h.closeOnEnd(consumer, st)
 	case !a.Open() || a.ChallengeID == "":
 		return http.StatusConflict, approvalReply{Error: "attempt_not_ready", Attempt: &a}
 	case a.VerifyRequestID != "" && a.VerifyRequestID != verifyID && (a.State == "verifying" || a.State == "unknown"):
@@ -562,6 +574,16 @@ func (h *approvals) closeOnSession(consumer string, st store.AttemptStart) (int,
 	status, out := h.closeAttempt(consumer, st)
 	if status == http.StatusOK && out.Outcome == "" {
 		status, out.Error = http.StatusConflict, "session_closed"
+	}
+	return status, out
+}
+
+// closeOnEnd closes an open attempt of a task that ended: 409 task_ended
+// once closed (the session stays pending until its deadline).
+func (h *approvals) closeOnEnd(consumer string, st store.AttemptStart) (int, approvalReply) {
+	status, out := h.closeAttempt(consumer, st)
+	if status == http.StatusOK && out.Outcome == "" {
+		status, out.Error = http.StatusConflict, "task_ended"
 	}
 	return status, out
 }

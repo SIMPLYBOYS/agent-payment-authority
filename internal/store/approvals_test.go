@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 )
 
 func wa(consumer, req, decision, signer, intent string) WebAuthnResult {
@@ -335,5 +337,30 @@ func TestEndedTaskAskIsNotDecided(t *testing.T) {
 		if types := fmt.Sprint(eventTypes(t, s, sessA)); !strings.HasSuffix(types, "APPROVAL_EXPIRED]") {
 			t.Fatalf("%s: not expired at its deadline: %s", how, types)
 		}
+	}
+}
+
+// A failed voice challenge after the task ended denies nothing: the
+// attempt closes, no VOICE_CHALLENGE_FAILED or APPROVAL_DENIED is written,
+// and a repeat of it answers closed (the session is still pending).
+func TestEndedTaskVoiceFailureIsNotRecorded(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	id, _ := e.payTask(s, "task-a", 60)
+	begin(t, s, "consumer-a", id, "att-req-00000001", "approve")
+	if _, err := s.UpdateApprovalAttempt(AttemptUpdate{ConsumerID: "consumer-a", RequestID: "att-req-00000001", From: []string{"requested"}, State: "challenged", ChallengeID: "chl-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CLITimeout("task-a"); err != nil {
+		t.Fatal(err)
+	}
+	code := paycontract.VoiceFailures[0]
+	for i := range 2 { // the second: a repeat
+		if r, err := s.ResolveVoiceFailure("consumer-a", "att-req-00000001", code); err != nil || r.Outcome != "closed" {
+			t.Fatalf("#%d: %+v %v", i, r, err)
+		}
+	}
+	if types := fmt.Sprint(eventTypes(t, s, sessA)); strings.Contains(types, "VOICE_CHALLENGE_FAILED") || strings.Contains(types, "APPROVAL_DENIED") {
+		t.Fatalf("decided after the end: %s", types)
 	}
 }

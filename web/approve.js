@@ -165,10 +165,11 @@ export const decidedText = (state, p, pays = false) => {
 // recordTag (review A): the tag and source line of a record decided by the
 // other method than the panel's ("simulated" or "device"); null for a
 // pending record, a record nobody decided, or one of the panel's method.
-export function recordTag(p, panel) {
+export function recordTag(p, panel, pays = false) {
   const ap = p && p.approval;
   if (!ap || ap.state === "pending" || !ap.resolved_by || (byDevice(p) ? "device" : "simulated") === panel) return null;
-  return byDevice(p) ? ["本人核准", "這筆由 Signer 驗證已登記的裝置・付款：未啟用"] : ["模擬核准", "這筆是 fake 模擬核准（主持人扮演，不是本人驗證）・付款：未啟用"];
+  return byDevice(p) ? ["本人核准", "這筆由 Signer 驗證已登記的裝置・付款：" + (pays ? "由 Host 依核准付款（見請購卡片）" : "未啟用")]
+    : ["模擬核准", "這筆是 fake 模擬核准（主持人扮演，不是本人驗證）・付款：未啟用"];
 }
 
 // panelNote (review B): a closed session's stored attempt text (design 7:
@@ -181,18 +182,20 @@ export function panelNote(note, stored, pending) {
   return s || (note && ["ok", "deny", "closed"].includes(note.kind) ? note : null);
 }
 
-// grantLine: a grant by its own method.
-export function grantLine(g) {
+// grantLine: a grant by its own method (pays: payment_capability local_anvil).
+export function grantLine(g, pays = false) {
   const id = String(g.jti).slice(0, 18) + "…";
   return g.authorization_method === "webauthn"
-    ? "本人核准紀錄 " + id + "（authorization_method webauthn，由 Signer 驗證；Host 只記錄）" + (g.voice ? "・" + voiceGrant(g) : "") + "・付款未啟用"
+    ? "本人核准紀錄 " + id + "（authorization_method webauthn，由 Signer 驗證；Host 只記錄）" + (g.voice ? "・" + voiceGrant(g) : "")
+      + (pays ? "・付款依據（是否已付款見請購卡片）" : "・付款未啟用")
     : "模擬授權 " + id + "（authorization_method " + g.authorization_method + "，audience " + g.audience + "）· Signer 樁：拒絕模擬授權（GRANT_METHOD_NOT_ACCEPTED）· 未啟用付款";
 }
 
 // sourceText: the three sources, apart (design 2, 8).
 export function sourceText(s) {
   const auth = s && s.authenticator === "virtual" ? "virtual authenticator（測試用）" : "已登記的裝置";
-  return "Agent：" + (s && s.agent === "fake" ? "fake" : "?") + "・驗證器：" + auth + "・付款：" + (s && s.payment === "disabled" ? "未啟用" : "?");
+  const pay = s && s.payment === "disabled" ? "未啟用" : s && s.payment === "local_anvil" ? "本機 anvil（測試 USDC）" : "?";
+  return "Agent：" + (s && s.agent === "fake" ? "fake" : "?") + "・驗證器：" + auth + "・付款：" + pay;
 }
 
 // V1: a recording as the Signer takes it: a WAV, 16 kHz mono 16-bit PCM,

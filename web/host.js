@@ -952,7 +952,8 @@ const RESULT = {
 function pickItem(runs) {
   const a = lastApprovals;
   if (!a || a.gen !== creds.gen || a.simId !== creds.view().simId || !a.items) return null;
-  const pending = a.items.find((x) => x.purchase.approval && x.purchase.approval.state === "pending");
+  // the newest pending one a person can still decide (an ended task's Ask cannot be)
+  const pending = a.items.find((x) => x.purchase.approval && x.purchase.approval.state === "pending" && !x.task_ended);
   if (pending) return pending;
   const run = runs.find((r) => r.consumer_id === a.consumer);
   return (run && a.items.find((x) => x.task_id === run.task_id)) || null;
@@ -1040,7 +1041,7 @@ function renderApproval(runs) {
       }
       parts.push(acts);
     } else if (ap.grant) {
-      parts.push(el("p", "approval-grant", AP.grantLine(ap.grant)));
+      parts.push(el("p", "approval-grant", AP.grantLine(ap.grant, !!(lastA2 && lastA2.pays))));
     }
     const ev = el("button", "approval-evidence", "查看技術證據 ›");
     ev.type = "button";
@@ -1183,7 +1184,7 @@ async function pollA2() {
 function a2Item() {
   const a = lastA2;
   if (!a || a.gen !== creds.gen || !a.items || a.consumer !== currentConsumer()) return null;
-  const pending = a.items.find((x) => x.purchase.approval && x.purchase.approval.state === "pending");
+  const pending = a.items.find((x) => x.purchase.approval && x.purchase.approval.state === "pending" && !x.task_ended);
   if (pending) return pending;
   const runs = (lastRuns && lastRuns.gen === creds.gen && lastRuns.runs) || [];
   const run = runs.find((r) => r.consumer_id === a.consumer);
@@ -1244,7 +1245,7 @@ function renderA2() {
   } else {
     const p = item.purchase, ap = p.approval, d = item.delegation;
     const mode = el("p", "approval-mode");
-    const other = AP.recordTag(p, "device");
+    const other = AP.recordTag(p, "device", !!(lastA2 && lastA2.pays));
     mode.append(el("span", "approval-tag", other ? other[0] : "本人核准"), other ? other[1] : AP.sourceText(lastA2 && lastA2.sources) + (lastA2 && lastA2.signer !== "approvals-only" && lastA2.signer !== "ready" ? "・Signer 目前無法連線" : ""));
     parts.push(mode);
     const ended = ap.state === "pending" && !!item.task_ended; // nobody decides it now (cli-timeout-pending)
@@ -1273,7 +1274,7 @@ function renderA2() {
     parts.push(dl);
     if (!other) parts.push(el("p", "approval-note", "瀏覽器的裝置提示只會顯示網站（localhost），不會顯示金額：請以這裡的摘要為準。這個頁面由 demo host 提供，不是獨立的可信顯示。"));
     const at = item.attempt;
-    const stored = AP.attemptText(at, ap.state);
+    const stored = ended ? null : AP.attemptText(at, ap.state); // ended: no button to use; the heading says why
     if (pending) {
       const dl2 = el("div", "approval-deadline");
       const cd = el("b", "", "");
@@ -1316,7 +1317,7 @@ function renderA2() {
       micRow.append(sel);
       parts.push(micRow);
     } else if (ap.grant) {
-      parts.push(el("p", "approval-grant", AP.grantLine(ap.grant)));
+      parts.push(el("p", "approval-grant", AP.grantLine(ap.grant, !!(lastA2 && lastA2.pays))));
     }
     const shown = a2Op && a2Op.session === ap.approval_session_id ? null : AP.panelNote(a2Note, stored, pending);
     if (a2Op && a2Op.session === ap.approval_session_id) {

@@ -463,4 +463,22 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查�
   - `ResolveApproval`（模擬核准）與 `ResolveVoiceFailure` 也回 `closed`、不記錄；
   - 核准清單每一項新增 `task_ended`。
 - **demo 與網頁**：挑戰請求回 409 `task_ended`；主持人頁的模擬核准與本人核准面板不顯示核准按鈕，改寫「task 已結束：這筆不能核准」與原因；核准結果的文字在有 `--payments` 時寫「尚未付款」，不再寫「付款未啟用」；本人核准面板的商品列在有 `--payments` 時不再寫「本片不付款」。
-- **測試**：`TestEndedTaskAskIsNotDecided`（CLI 逾時與另一張請購被 Deny 兩種：新的核准被拒、進行中的本人核准與模擬核准都不記錄、之後照常到期）、`TestA2EndedTaskAskIsNotApprovable`（demo：409、進行中的驗證不採用、清單標示、沒有 grant）、網頁測試 113 個。
+- **不再接觸 Signer**：開始、重送、恢復（狀態查詢）與送出驗證都先看 task 是否已結束（`AttemptStart.TaskEnded`）；已結束時關閉開著的驗證（Signer 端的挑戰一併關閉），回 409 `task_ended`，不再要求新的挑戰、不送驗證。
+- **測試**：`TestEndedTaskAskIsNotDecided`（CLI 逾時與另一張請購被 Deny 兩種：新的核准被拒、進行中的本人核准與模擬核准都不記錄、之後照常到期）、`TestEndedTaskVoiceFailureIsNotRecorded`、`TestA2EndedTaskAskIsNotApprovable`（demo：送出驗證時關閉、不送 Signer、清單標示、沒有 grant）、`TestA2EndedTaskClosesTheOpenAttempt`（新請求與重送兩條路徑都關閉開著的驗證）；網頁測試 114 個。
+
+#### review（285e32c）與處理
+
+Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES（沒有 Critical）。審查者確認 Store 的規則正確完整：結束後沒有任何路徑記錄 `APPROVED`、`GRANT_ISSUED` 或 `APPROVAL_DENIED`；Ask 仍會到期、取消仍會撤回；M1 不受影響。
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Important | 場景、請購卡片與 Unity 仍寫「等你核准…核准後由 Host 付款」；卡片的「已結束」沒算進 Deny | pay task 結束（生命週期或任一 Deny）後，開著的 Ask 在場景、卡片狀態與收尾步驟都寫「task 已結束：這筆不能核准，到期後關閉；不會付款」；網頁測試涵蓋兩種結束 |
+| Important | 已結束的本人核准面板仍顯示「可以繼續／重新核准」等叫人按已隱藏按鈕的提示 | 已結束時不顯示這類提示，標題寫明原因 |
+| Important | 結束時開著的驗證不會關閉；重送、恢復仍可能向 Signer 要新挑戰；送出驗證仍會送到 Signer | `AttemptStart.TaskEnded`（開始、重送、查詢都帶）；demo 在這些路徑關閉開著的驗證、回 409 `task_ended`，不再接觸 Signer |
+| 建議 | 語音路徑沒有測試；結束後語音失敗重送回 `pending` | 測試與突變；重送回 `closed` |
+| 建議 | 「最新的待核准」會挑到已結束 task 的 Ask，蓋住較新的結果 | 挑選時跳過 `task_ended` |
+| 建議 | 兩個面板的隱藏按鈕沒有測試 | 不另加 DOM 測試：決定 `ended` 的資料（`task_ended`）由 demo 測試涵蓋，文字由網頁測試涵蓋 |
+| 建議 | 提交訊息與文件寫網頁測試 113 個，實際 112 | 更正（本輪後 114） |
+| 建議 | 有 `--payments` 時 `grantLine`、`recordTag`（以及 `sourceText`）仍寫「付款未啟用」 | 依付款能力改寫；demo 的 `sources.payment` 有 `--payments` 時為 `local_anvil` |
+
+突變：本輪新增 5 項，「P2 ended Ask」共 9 項，9／9 KILLED。

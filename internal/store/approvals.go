@@ -135,6 +135,7 @@ type AttemptStart struct {
 	Deadline     uint64          `json:"deadline"`
 	IntentHash   string          `json:"intent_hash"`
 	TaskID       string          `json:"task_id"`
+	TaskEnded    bool            `json:"task_ended,omitempty"` // a CLI timeout, a cancel or a Deny: a pending session is decided by nobody now
 }
 
 // sessionFor reads a session of consumer (OWNERSHIP_MISMATCH for another's
@@ -175,7 +176,7 @@ func (s *Store) BeginApprovalAttempt(req AttemptRequest) (AttemptStart, error) {
 			return err
 		}
 		out.Order, out.Deadline, out.IntentHash, out.TaskID = json.RawMessage(p.Body), p.Session.ExpiresAt, p.Session.IntentHash, t.row.TaskID
-		out.SessionState = p.Session.State
+		out.SessionState, out.TaskEnded = p.Session.State, paycontract.Ended(t.events)
 		if a, found, err := attemptBy(tx, "request_id", req.RequestID); err != nil {
 			return err
 		} else if found {
@@ -191,11 +192,9 @@ func (s *Store) BeginApprovalAttempt(req AttemptRequest) (AttemptStart, error) {
 		out.SessionState = p.Session.State
 		// The task ended (a CLI timeout, a Deny): its open Ask is no longer
 		// decided by anyone; it stays pending until its deadline (accepted
-		// case cli-timeout-pending: no APPROVED, no GRANT_ISSUED).
-		if p.Session.State == "pending" && paycontract.Ended(t.events) {
-			conflict = refuse("TASK_ALREADY_ENDED", "the task ended: this Ask is not decided now; it expires at its deadline")
-			return t.finish()
-		}
+		// case cli-timeout-pending: no APPROVED, no GRANT_ISSUED). An open
+		// attempt comes with the refusal, for the Host to close.
+		ended := refuse("TASK_ALREADY_ENDED", "the task ended: this Ask is not decided now; it expires at its deadline")
 		if cur, found, err := latestAttempt(tx, req.SessionID); err != nil {
 			return err
 		} else if found && cur.Open() {
@@ -203,6 +202,8 @@ func (s *Store) BeginApprovalAttempt(req AttemptRequest) (AttemptStart, error) {
 			switch {
 			case p.Session.State != "pending": // the Host closes it (review R3); nothing is shared
 				conflict = refuse("SESSION_CLOSED", "the session is "+p.Session.State)
+			case out.TaskEnded:
+				conflict = ended
 			case cur.Decision != req.Decision:
 				conflict = refuse("DECISION_CONFLICT", "the session's open attempt has the other decision")
 			default:
@@ -213,6 +214,10 @@ func (s *Store) BeginApprovalAttempt(req AttemptRequest) (AttemptStart, error) {
 		if p.Session.State != "pending" {
 			conflict = refuse("SESSION_CLOSED", "the session is "+p.Session.State)
 			return t.finish() // the deadline just recorded, if any
+		}
+		if out.TaskEnded {
+			conflict = ended
+			return t.finish()
 		}
 		if _, err := tx.Exec(`INSERT INTO approval_attempts (request_id, approval_session_id, decision, state, requested_at, updated_at) VALUES (?, ?, ?, 'requested', ?, ?)`,
 			req.RequestID, req.SessionID, req.Decision, now, now); err != nil {
@@ -323,7 +328,12 @@ func (s *Store) ApprovalAttemptOf(consumer, requestID string) (ApprovalAttempt, 
 			if err := tx.QueryRow(`SELECT body FROM purchases WHERE task_id = ? AND purchase_order_id = ?`, ss.TaskID, ss.PO).Scan(&body); err != nil {
 				return a, st, &ReadError{Check: "approval", Err: err}
 			}
-			st = AttemptStart{Attempt: a, Order: json.RawMessage(body), Deadline: ss.ExpiresAt, IntentHash: ss.IntentHash, TaskID: ss.TaskID, SessionState: ss.State}
+			t, err := s.openTask(tx, 0, ss.TaskID)
+			if err != nil {
+				return a, st, err
+			}
+			st = AttemptStart{Attempt: a, Order: json.RawMessage(body), Deadline: ss.ExpiresAt, IntentHash: ss.IntentHash, TaskID: ss.TaskID, SessionState: ss.State,
+				TaskEnded: paycontract.Ended(t.events)}
 			return a, st, nil
 		}
 	}
@@ -496,6 +506,9 @@ func (s *Store) ResolveVoiceFailure(consumer, requestID, code string) (ApprovalR
 		out.TaskID = t.row.TaskID
 		if a.State == "closed" && a.ErrorCode == code {
 			out.Replay, out.Outcome, out.Purchase = true, p.Session.State, t.view(p)
+			if p.Session.State == "pending" { // the task ended first: nothing was decided
+				out.Outcome = "closed"
+			}
 			return nil
 		}
 		if a.Decision != "approve" || !slices.Contains([]string{"challenged", "verifying", "unknown", "refused"}, a.State) {

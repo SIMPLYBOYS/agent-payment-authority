@@ -150,3 +150,37 @@ test("an Ask of an ended task: not approvable, its words say so; an approval say
   assert.equal(AP.outcomeText(200, { outcome: "approved" }, "approve", true)[1], "本人核准已驗證，尚未付款。");
   assert.equal(AP.outcomeText(200, { outcome: "approved" }, "approve")[1], "本人核准已驗證，付款未啟用。");
 });
+
+test("an Ask of an ended pay task (a CLI timeout, or another purchase denied) reads as not approvable on the scene and the card", () => {
+  const askDecision = { version: A.V1, policy_verdict: "Ask", reason: "HUMAN_APPROVAL_REQUIRED", approval_status: "pending", payment_status: "not_enabled" };
+  const asked = [ev(1, "TASK_STARTED", { purchase_order_id: "" }), ev(2, "PURCHASE_PROPOSED"), ev(3, "POLICY_DECIDED", { decision: askDecision })];
+  const ask = { purchase_order_id: "po-1", amount: "500000", asset_id: "fixture-usdc", resource_url: "http://x/r", decision: askDecision };
+  const task = (evs, purchases) => ({ task_id: "show-a-01", consumer_id: "consumer-a", status: "running", as_of_sequence: evs.length, served_at: 1790726470,
+    purchases, contract_version: A.V1, payment_capability: "local_anvil" });
+  // a CLI timeout
+  const timed = [...asked, ev(4, "TASK_TIMED_OUT", { purchase_order_id: "" })];
+  const v1 = { task: task(timed, [ask]), events: timed };
+  assert.equal(A.scene(v1).label, "task 已結束：這筆不能核准，到期後關閉；不會付款");
+  assert.equal(A.card(v1, null, { mode: "live", catalog: null }).status, "task 已結束：這筆不能核准，到期後關閉；不會付款");
+  // another purchase denied: the Ask's card, picked by hand
+  const denyDecision = { version: A.V1, policy_verdict: "Deny", reason: "INSUFFICIENT_BUDGET", approval_status: "not_requested", payment_status: "not_enabled" };
+  const other = [...asked, ev(4, "PURCHASE_PROPOSED", { purchase_order_id: "po-2" }), ev(5, "POLICY_DECIDED", { purchase_order_id: "po-2", decision: denyDecision })];
+  const v2 = { task: task(other, [ask, { ...ask, purchase_order_id: "po-2", decision: denyDecision }]), events: other };
+  const c = A.card(v2, "po-1", { mode: "live", catalog: null });
+  assert.equal(c.status, "task 已結束：這筆不能核准，到期後關閉；不會付款");
+  assert.ok(!c.steps.some((s) => /等你核准/.test(s.note)), "a step still asks for approval");
+  // a task still running: as before
+  const v3 = { task: task(asked, [ask]), events: asked };
+  assert.match(A.scene(v3).label, /^等你核准/);
+});
+
+test("with local_anvil a person's grant, a record by the other method and the sources do not say payment is off", async () => {
+  const AP = await import("../approve.js");
+  const g = { jti: "grant-0123456789abcdefghij", authorization_method: "webauthn" };
+  assert.match(AP.grantLine(g, true), /付款依據/);
+  assert.match(AP.grantLine(g), /付款未啟用$/);
+  const p = { approval: { state: "approved", resolved_by: "webauthn:approver-a", grant: g } };
+  assert.ok(!/未啟用/.test(AP.recordTag(p, "simulated", true)[1]));
+  assert.match(AP.sourceText({ agent: "fake", authenticator: "virtual", payment: "local_anvil" }), /付款：本機 anvil/);
+  assert.match(AP.sourceText({ agent: "fake", authenticator: "virtual", payment: "disabled" }), /付款：未啟用/);
+});

@@ -660,8 +660,8 @@ func TestA2CancelledAfterSignerVerified(t *testing.T) {
 
 // Once the task ended (here a CLI timeout), its open Ask is decided by
 // nobody (cli-timeout-pending): a new challenge is 409 task_ended, a
-// person's verification already in flight is not used, the list says
-// task_ended, and no grant is issued.
+// verification already in flight is not sent (its challenge is closed),
+// the list says task_ended, and no grant is issued.
 func TestA2EndedTaskAskIsNotApprovable(t *testing.T) {
 	f := startA2(t, 60)
 	sid, intent, task := f.ask("01")
@@ -672,17 +672,40 @@ func TestA2EndedTaskAskIsNotApprovable(t *testing.T) {
 	if err := f.h.st.CLITimeout(task); err != nil {
 		t.Fatal(err)
 	}
+	// The verification started before the end is not sent: its challenge is closed.
+	code, r = f.assert(sid, "att-req-0000000000001", "ver-req-0000000000001", f.sign(r, sid, intent, "approve"))
+	if code != 409 || r["error"] != "task_ended" || attempt(r)["state"] != "closed" || f.h.grants() != 0 {
+		t.Fatalf("a verification in flight: %d %v", code, r)
+	}
 	if code, r2 := f.challenge(sid, "att-req-0000000000002", "approve"); code != 409 || r2["error"] != "task_ended" {
 		t.Fatalf("after the end: %d %v", code, r2)
 	}
-	code, r = f.assert(sid, "att-req-0000000000001", "ver-req-0000000000001", f.sign(r, sid, intent, "approve"))
-	if code != 200 || r["outcome"] != "closed" || sessionState(r) != "pending" || f.h.grants() != 0 {
-		t.Fatalf("a verification in flight: %d %v", code, r)
+	if code, r := f.challenge(sid, "att-req-0000000000001", "approve"); code != 200 || attempt(r)["state"] != "closed" { // a resend: its closed attempt
+		t.Fatalf("a resend: %d %v", code, r)
 	}
 	_, list := f.get("/api/approvals", f.h.tokens["viewer:consumer-a"])
 	for _, x := range list["approvals"].([]any) {
 		if it := x.(map[string]any); it["task_id"] == task && it["task_ended"] != true {
 			t.Fatalf("the list does not say the task ended: %v", it)
+		}
+	}
+}
+
+// An attempt left open when the task ended is closed by the next request
+// (here a new challenge): it is never driven to the Signer again.
+func TestA2EndedTaskClosesTheOpenAttempt(t *testing.T) {
+	for _, next := range []string{"att-req-0000000000002", "att-req-0000000000001"} { // a new request, then a resend of the open one
+		f := startA2(t, 60)
+		sid, _, task := f.ask("01")
+		if code, r := f.challenge(sid, "att-req-0000000000001", "approve"); code != 200 {
+			t.Fatalf("challenge: %d %v", code, r)
+		}
+		if err := f.h.st.CLITimeout(task); err != nil {
+			t.Fatal(err)
+		}
+		code, r := f.challenge(sid, next, "approve")
+		if code != 409 || r["error"] != "task_ended" || attempt(r)["request_id"] != "att-req-0000000000001" || attempt(r)["state"] != "closed" {
+			t.Fatalf("%s: the open attempt: %d %v", next, code, r)
 		}
 	}
 }

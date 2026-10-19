@@ -439,7 +439,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	if *approvalsSigner != "" {
 		_, port, _ := net.SplitHostPort(addr)
 		ui.alias = "localhost:" + port
-		ui.approve = &approvals{st: st, signer: signerclient.NewApprovals(*approvalsSigner), source: *authSource, out: d.out}
+		ui.approve = &approvals{st: st, signer: signerclient.NewApprovals(*approvalsSigner), source: *authSource, out: d.out, pays: pay != nil}
 		if d.onApprovals != nil {
 			d.onApprovals(ui.approve)
 		}

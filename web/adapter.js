@@ -176,6 +176,7 @@ export function scene(snapshot) {
     delivery_failed: "已付款，交付失敗：待人工處理", not_paid: "未付款（沒有花錢）：離店", payment_review: "待人工處理：預算已預留但未付款",
   };
   if (pay(task)) labels.waiting = simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；" + (pays ? "核准後由 Host 付款）" : "不會付款）");
+  if (pay(task) && (end || denied([...purchases.values()].map((x) => x.decision)))) labels.waiting = ENDED_ASK;
   if (cur && CREDENTIAL_CLOSED[cur.closedReason]) labels.withdrawn = CREDENTIAL_CLOSED[cur.closedReason] + "：離店"; // C2: not the task's cancellation
   if (cur && cur.method === "webauthn") labels.approved = pays ? "本人核准已驗證：尚未付款" : "本人核准已驗證：未啟用付款，不會取貨"; // the record's own method (review R4)
   const d = cur && cur.decision ? cur.decision : null;
@@ -628,6 +629,12 @@ export function paymentText(pv) {
   return "付款狀態不明：" + str(pv.status);
 }
 
+// ENDED_ASK: an open Ask of a pay task that ended (a CLI timeout, or a Deny
+// of another purchase): nobody decides it now; it expires at its deadline
+// (accepted case cli-timeout-pending).
+const ENDED_ASK = "task 已結束：這筆不能核准，到期後關閉；不會付款";
+const denied = (decisions) => decisions.some((d) => d && d.policy_verdict === "Deny");
+
 // paymentSteps are the payment's steps from its Store events; an ending
 // (not paid, or for review) replaces the steps it cut off.
 function paymentSteps(at, step, pv) {
@@ -641,7 +648,7 @@ function paymentSteps(at, step, pv) {
   return steps;
 }
 
-function purchaseStatus(p, live, servedAt, task) {
+function purchaseStatus(p, live, servedAt, task, ended) {
   if (!p) return "此 task 尚無請購";
   const d = p.decision;
   if (!d) return "已提出請購，尚無裁決";
@@ -651,6 +658,7 @@ function purchaseStatus(p, live, servedAt, task) {
     if (d.policy_verdict === "Deny") return "Deny：" + reasonText(d.reason, task);
     if (d.policy_verdict === "Allow") return task.payment_capability === "local_anvil" ? "Allow：在委託範圍內，尚未付款" : "Allow：在委託範圍內，但未啟用付款（不會自動付款）";
     const pays = task.payment_capability === "local_anvil";
+    if (ended && !p.approval_closed) return ENDED_ASK;
     return { approved: byDevice(p) ? (pays ? "本人核准已驗證，尚未付款" : "本人核准已驗證，未啟用付款") : "已核准（模擬），未啟用付款", denied: byDevice(p) ? "已拒絕（本人，已驗證裝置）" : "已拒絕（模擬核准者）",
       superseded: "報價已改變：這次核准作廢，需要重新請購", expired: "已過期，無法核准（後端已記錄）", withdrawn: withdrawnText(p) }[p.approval_closed]
       || (simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；" + (pays ? "核准後由 Host 付款）" : "不會付款）")) + (reached ? "；已達期限，等待後端確認" : "");
@@ -688,6 +696,8 @@ export function card(view, chosen, ctx) {
   const waiting = p && p.decision && p.decision.policy_verdict === "Ask" && !p.approval_closed;
   const pv = p && p.payment;
   const paying = !!(p && (pv || at("PAYMENT_REQUESTED")));
+  // A pay task ended by its lifecycle or a Deny: its open Ask is decided by nobody now.
+  const endedPay = pay(t) && (!!ended || denied(evs.filter((e) => e.event_type === "POLICY_DECIDED").map((e) => e.decision)));
   const steps = [
     step("進店", evs.find((e) => e.event_type === "TASK_STARTED"), "TASK_STARTED"),
     { label: "選商品", state: "none", note: hist ? "無 Store 事件；工具呼叫見查證面板（真實執行 trace）"
@@ -697,6 +707,7 @@ export function card(view, chosen, ctx) {
     step("請購", p && at("PURCHASE_PROPOSED"), "PURCHASE_PROPOSED"),
     step("裁決", p && at("POLICY_DECIDED"), p && p.decision ? str(p.decision.policy_verdict) : ""),
     closing || ended ? step("收尾", closing || ended, (closing || ended).event_type)
+      : waiting && endedPay ? { label: "收尾", state: "none", note: ENDED_ASK }
       : waiting ? { label: "收尾", state: "wait", note: hist ? "執行結束時仍待核准（歷史快照，不是即時狀態；期限已過）" : pay(t) ? (simulated() ? "等你核准（模擬）" : "等你核准（本人裝置）") : "等待中（M1 無核准能力）" }
       : p && p.decision && p.decision.policy_verdict === "Deny" ? { label: "收尾", state: "none", note: "Deny 即結束；沒有收尾事件" }
       : p && p.decision && p.decision.policy_verdict === "Allow" ? { label: "收尾", state: "none", note: paying ? "Allow：由 Host 付款，見下列步驟"
@@ -732,7 +743,7 @@ export function card(view, chosen, ctx) {
     title: "客人 " + (CUSTOMER[t.consumer_id] || str(t.consumer_id)) + " · " + str(t.consumer_id) + " · " + str(t.task_id),
     po: po || null, scenePo: sc.po || null, differs: !!(po && sc.po && po !== sc.po), options: live ? ids : [],
     steps, status: hist && p && p.decision && p.decision.policy_verdict === "Ask" && !p.approval_closed
-      ? "Ask：執行結束時待人工核准（歷史快照；不是仍有效的核准）" : purchaseStatus(p, live, t.served_at, t),
+      ? "Ask：執行結束時待人工核准（歷史快照；不是仍有效的核准）" : purchaseStatus(p, live, t.served_at, t, endedPay),
     history: hist ? hist.label : null,
     live: ctx.live ? ctx.live.label : null,
     task: "task 狀態：" + (STATUS_LABELS[t.status] || str(t.status)) + (t.deny_reason ? "（" + t.deny_reason + "）" : "") + (t.derived ? "（依已回放事件推導，網頁）" : "（Store）")
