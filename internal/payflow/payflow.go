@@ -301,6 +301,10 @@ func (w *Worker) reserved(p store.Payment, ev budget.Evidence) (store.Payment, e
 	return w.Store.PaymentReserved(p.IntentHash, store.Reservation{Evidence: raw, TxHash: ev.TxHash, Block: ev.BlockNumber})
 }
 
+// storeRetry are the Store's refusals of a request that mean "not now": its
+// credential's status list or its clock, a moment away from being read.
+var storeRetry = []string{"CREDENTIAL_STATUS_UNAVAILABLE", "CLOCK_REGRESSION"}
+
 // signerRetry are the Signer's answers that mean "not now".
 // PAYMENT_MODE_OFF: a Signer restarted for approvals only; it may come back.
 var signerRetry = []signer.Refusal{"SIGNER_BUSY", "SIGNER_TIMEOUT", "RESERVATION_PENDING", "RESERVATION_UNCONFIRMED", "RESERVATION_UNAVAILABLE", "PAYMENT_MODE_OFF"}
@@ -316,11 +320,20 @@ func (w *Worker) sign(ctx context.Context, p store.Payment, o paycontract.Purcha
 	res, err := w.Signer.Pay(req, p.Reservation)
 	var r signerclient.Refused
 	switch {
+	case errors.Is(err, signerclient.Unknown):
+		// No readable answer (a 503, say), recorded unknown or not: the same
+		// request ID next time, whatever else was joined to it.
+		if w.late(o) {
+			return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID")
+		}
+		return p, ErrPending
 	case errors.As(err, &r):
 		if slices.Contains(signerRetry, signer.Refusal(r)) && !w.late(o) {
 			return p, ErrPending
 		}
 		return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID") // tx#1 spent: a person's to look at (decision 6)
+	case slices.Contains(storeRetry, store.Code(err)) && !w.late(o):
+		return p, ErrPending
 	case store.Code(err) != "":
 		return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID") // the Store refused the request: never sent
 	case err != nil:

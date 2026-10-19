@@ -71,7 +71,7 @@ request_purchase ─→ Store：POLICY_DECIDED
   - Ask 用本人核准（`method=webauthn`，`approval_id = grants.signer_approval_id`）。Signer 在接受付款的交易裡消耗核准（§9.4），也套用 approver 的單筆與累計上限（§9.5）。
 - **冪等**：
   - `payments` 以 `intent_hash` 為唯一鍵；每一步都先寫狀態再呼叫外部。
-  - Signer 的 request ID 由 `intent_hash` 決定。relayer 與商店本身也各自冪等（§9.6、§9.10）。
+  - Signer 的 request ID 由 Store 在 `payment_attempts` 產生並提交（每張請購一個，`intent_hash` 唯一），之後只用這一個。relayer 與商店本身也各自冪等（§9.6、§9.10）。
   - 因此重啟或重送都只會接著做同一筆，絕不會出現第二筆。
 - **時間**：
   - 第 ② 到 ④ 步必須在 `valid_before` 之前完成，Ask 還要在 grant 到期之前完成。
@@ -408,10 +408,10 @@ H3 突變共 29 項，29／29 KILLED。
 - **H4b 網頁（H-D8 A）**：
   - 請購卡片：付款開始後依 Store 事件加上「預留、簽名、送出、鏈上確認、交付」步驟；未付款或待人工處理時，以結束事件與代碼取代被截斷的步驟。狀態文字依 §5 的表（付款中、等待鏈上確認、已付款／已交付／交付失敗、未付款、待人工處理）；明細列出 tx#1、tx#2（區塊）、收據與內容 sha256（內容只交給 Host）。
   - 場景：新增 paying、confirming、paid、delivered、delivery_failed、not_paid、payment_review 階段與文字；回放時與 Unity 回報比對的改為送給 Unity 的階段。
-  - `payment_capability`：有 `--payments` 時，`/healthz`、主持人狀態、pay task 與核准清單都回 `local_anvil`（模擬核准者照舊 `not_enabled`：模擬授權不能付款）。Allow、等待核准、本人核准後的文字依此改為「由 Host 付款」；沒有 `--payments` 時與之前相同。
+  - `payment_capability`：有 `--payments` 時，`/healthz`、主持人狀態、pay task 與核准清單都回 `local_anvil`（模擬核准者照舊 `not_enabled`：模擬授權不能付款）。Allow 與本人核准後、付款事件出現前的文字改為「尚未付款」（無論之後是否真的開始付款都成立），等待核准時寫明「核准後由 Host 付款」；沒有 `--payments` 時與之前相同。
   - 測試：`web/test/p2.test.mjs`（6 個）、`TestPaymentCapabilityStated`；網頁測試 109 個全過。
 - **H4c Unity 如實顯示付款（Aaron：「Unity 的文字不正確問題請優先處理好」）**：
-  - Unity 新增九個階段：裁決 `allowed`（Allow，由 Host 付款）與 `approved`（本人核准，由 Host 付款），以及付款的 `paying`、`confirming`、`paid`、`delivered`、`delivery_failed`、`not_paid`、`payment_review`，各有如實的英文標籤（例如「PAID AND DELIVERED (#10) - leaving with a receipt」）。沒有 `--payments` 時照舊是 `allowed_unpaid`「ALLOW - no payment capability」。
+  - Unity 新增九個階段：裁決 `allowed`（Allow）與 `approved`（本人核准），標籤是「not paid yet」，直到出現付款事件；以及付款的 `paying`、`confirming`、`paid`、`delivered`、`delivery_failed`、`not_paid`、`payment_review`，各有如實的英文標籤（例如「PAID AND DELIVERED (#10) - leaving with a receipt」）。沒有 `--payments` 時照舊是 `allowed_unpaid`「ALLOW - no payment capability」。
   - 位置：付款進行中、已付款待交付、交付失敗、待人工處理都留在櫃台；已交付與未付款離店。付款的每一步都有新的事件序號，但不算櫃台的新請購，不會重播挑選動畫；新的一筆請購照舊會。
   - 網頁直接送這些階段與它們自己的事件序號給 Unity（取代先前「Unity 停在裁決階段」的權宜作法）。訊息新增選填欄位 `payments`（`local_anvil` 或空，bridge 版本不變）；Unity 的標題列據此顯示「P2-a / local test payments」或照舊「M1 / no payment」。
   - 共用轉場向量新增 4 個付款案例（共 24 個），網頁與 Unity 的規則測試都用它。Unity：EditMode 18／18、PlayMode 28／28（新增 `PaymentPhasesAreKnownAndSayTheHostPays`、`APaymentWaitsAtTheCounterAndLeavesDelivered`）；網頁測試 109／109。Web build 已用 `scripts/unity/unity.sh webgl` 重建（git 不追蹤），建置內含新文字。
@@ -421,3 +421,21 @@ H3 突變共 29 項，29／29 KILLED。
 
 - 實作見 §12.3 的「Signer 握手照 §3」。測試：`TestBeginPaymentWebAuthn`（記錄、重送、不能改用委派、重啟後的恢復檢查、改掉 `approval_id` 會被擋、grant 過期）、`TestBeginPaymentAfterTheTaskEnded`、`TestUpgradeSchema6`（P1-b 的 attempt 在重建後保留）、`TestPaySendsTheApprovalAndReservation`；付款工作的測試改為經由真的 Store `BeginPayment`；`TestPaidOnAnvil` 以 Store 為 Signer client 的帳本，真的 Signer 在鏈上確認預留後簽名。
 - 突變：§3 新增 7 項；H2、H3 的相關項目改到新程式碼，移除 3 項只針對已刪除程式碼的項目。§3、H2、H3 共 61 項，61／61 KILLED。
+
+#### Unity 與 §3 修正的 review（6445e26、83c7ca8）與處理
+
+Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查者確認：網頁與 Unity 的規則、標籤與位置一致；`payments` 欄位無法被濫用；`payment_attempts` 的重建、CHECK、升級與版本化的恢復檢查都正確；`BeginPayment` 自己從 grant 讀核准、不能改用另一種依據；每張請購只會有一個 request ID。
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Critical | 本人核准後付款的路徑上，Unity 整段停在 `approved`，每一步還被當成新請購重播挑選動畫，交付後也不離店 | 有付款事件時一律送付款階段；`p2.test.mjs` 新增「核准後付款」測試（每一步的階段、不是規則 2、不重播） |
+| Important | Allow 在付款沒有開始時也顯示「the host pays」（task 已取消、開始付款被拒、以有 `--payments` 的 host 看舊 task） | 付款事件出現前一律「not paid yet／尚未付款」；測試涵蓋取消後的 Allow |
+| Important | 已花 tx#1 之後，憑證狀態暫時讀不到（`CREDENTIAL_STATUS_UNAVAILABLE`）就轉人工處理 | 它與 `CLOCK_REGRESSION` 在期限前等待；撤銷、過期與 grant 到期照舊是最終的；`TestSignerStoreAnswers` |
+| 建議 | Signer 的 403、400 被記成 unknown | 有代碼時記為拒絕；`TestPayCallerNotAllowedIsARefusal` |
+| 建議 | 結果不明且附上 Store 代碼時，被當成 Store 拒絕 | 先判斷 `Unknown`：一律等待 |
+| 建議 | `call` 沒有 context，停止時最多等 10 秒 | 不改：與 P1-b 相同，Timeout 有上限 |
+| 建議 | §3 仍寫「request ID 由 `intent_hash` 決定」 | 修正 |
+| 建議 | schema 7 在分支內原地修改，早期分支建立的 schema 7 資料庫無法開啟 | 不改：var/ 沒有 schema 7 的資料庫（最高 6），且無法開啟是安全的失敗 |
+| 建議 | 雙客人場景裡 M1 與 pay task 交錯時，標題列來回切換 | 版本 2：同一個場景內只要有一方的 host 付款就維持 |
+
+驗證：網頁測試 111／111；Unity EditMode 18／18、PlayMode 28／28，Web build 重建（建置內已無「the host pays」）；§3、H2、H3 突變 65／65 KILLED（新增 4 項）。

@@ -582,7 +582,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ALLOW (#3) - the host pays"
+     "label": "ALLOW (#3) - not paid yet"
     },
     {
      "m": {
@@ -671,7 +671,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "APPROVED (#4) - the host pays"
+     "label": "APPROVED (#4) - not paid yet"
     },
     {
      "m": {
@@ -724,7 +724,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ALLOW (#11) - the host pays"
+     "label": "ALLOW (#11) - not paid yet"
     },
     {
      "m": {
@@ -736,7 +736,7 @@
      },
      "rule": 2,
      "browse": true,
-     "label": "ALLOW (#14) - the host pays"
+     "label": "ALLOW (#14) - not paid yet"
     }
    ]
   },

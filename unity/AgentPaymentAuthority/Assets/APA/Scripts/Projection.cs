@@ -104,9 +104,10 @@ namespace APA
                     var why = (cause > 0 ? "#" + cause : "") + (cause > 0 && Code(reason) != "" ? ", " : "") + Code(reason);
                     return "DENY" + (why != "" ? " (" + why + ")" : "") + " - leaving";
                 case "allowed_unpaid": return "ALLOW - no payment capability";
-                // P2 (docs/commercial-p2-host.md 5): the host pays.
-                case "allowed": return "ALLOW" + n + " - the host pays";
-                case "approved": return "APPROVED" + n + " - the host pays";
+                // P2 (docs/commercial-p2-host.md 5). Until a payment event:
+                // true whether or not a payment ever starts.
+                case "allowed": return "ALLOW" + n + " - not paid yet";
+                case "approved": return "APPROVED" + n + " - not paid yet";
                 case "paying": return "PAYING" + n + " - reserving and signing";
                 case "confirming": return "PAYMENT SENT" + n + " - waiting for the chain";
                 case "paid": return "PAID" + n + " - delivery next";

@@ -102,9 +102,10 @@ public class SceneRulesTests
     }
 
     // P2 (docs/commercial-p2-host.md 5): the payment's phases are known and
-    // say what is true of them: ASCII, never "no payment capability".
+    // say what is true of them: ASCII, never "no payment capability", and
+    // a decision never says paid.
     [Test]
-    public void PaymentPhasesAreKnownAndSayTheHostPays()
+    public void PaymentPhasesAreKnownAndTrue()
     {
         string[] phases = { "allowed", "approved", "paying", "confirming", "paid", "delivered", "delivery_failed", "not_paid", "payment_review" };
         foreach (var p in phases)
@@ -116,6 +117,8 @@ public class SceneRulesTests
             StringAssert.DoesNotContain("no payment", l);
             StringAssert.DoesNotStartWith("unknown", l);
         }
+        StringAssert.EndsWith("not paid yet", SceneRules.Label("allowed", 3, "", ""));
+        StringAssert.EndsWith("not paid yet", SceneRules.Label("approved", 4, "", ""));
         // Each step of one payment is never a new purchase at the counter.
         var s = new ProjectionState();
         int seq = 3;

@@ -171,20 +171,20 @@ export function scene(snapshot) {
     // apa.pay.v1 (P1-a): the simulated approval's outcomes.
     approved: "已核准（模擬）：未啟用付款，不會取貨", approval_denied: "核准者拒絕：離店", superseded: "報價已改變：需要重新請購",
     // P2: the payment.
-    allowed: "Allow：在委託範圍內，由 Host 付款",
+    allowed: "Allow：在委託範圍內，尚未付款",
     paying: "付款中：預算預留與簽名", confirming: "已送出，等待鏈上確認（不會自動再付）", paid: "已付款，準備交付", delivered: "已付款、已交付",
     delivery_failed: "已付款，交付失敗：待人工處理", not_paid: "未付款（沒有花錢）：離店", payment_review: "待人工處理：預算已預留但未付款",
   };
   if (pay(task)) labels.waiting = simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；" + (pays ? "核准後由 Host 付款）" : "不會付款）");
   if (cur && CREDENTIAL_CLOSED[cur.closedReason]) labels.withdrawn = CREDENTIAL_CLOSED[cur.closedReason] + "：離店"; // C2: not the task's cancellation
-  if (cur && cur.method === "webauthn") labels.approved = pays ? "本人核准已驗證：由 Host 付款" : "本人核准已驗證：未啟用付款，不會取貨"; // the record's own method (review R4)
+  if (cur && cur.method === "webauthn") labels.approved = pays ? "本人核准已驗證：尚未付款" : "本人核准已驗證：未啟用付款，不會取貨"; // the record's own method (review R4)
   const d = cur && cur.decision ? cur.decision : null;
   const causeOf = { entered: startedSeq, quoted: cur && cur.proposedSeq, waiting: cur && cur.decidedSeq, denied: cur && cur.decidedSeq,
     allowed_unpaid: cur && cur.decidedSeq, allowed: cur && cur.decidedSeq, expired: cur && cur.closedSeq, withdrawn: cur && cur.closedSeq,
     approved: cur && cur.closedSeq, approval_denied: cur && cur.closedSeq, superseded: cur && cur.closedSeq };
   const cause = cur && cur.pay ? cur.paySeq : causeOf[phase];
   return { phase, label: labels[phase] || UNKNOWN, notes, po: shown, verdict: d ? d.policy_verdict || "" : "", reason: d ? d.reason || null : null,
-    cause: Number.isInteger(cause) && cause > 0 ? cause : 0, end: firstEnd, unity: paidApproval ? "approved" : UNITY_PHASE[phase] || phase };
+    cause: Number.isInteger(cause) && cause > 0 ? cause : 0, end: firstEnd, unity: cur && cur.pay ? phase : paidApproval ? "approved" : UNITY_PHASE[phase] || phase };
 }
 
 // fresh returns the sequences not seen before and marks them seen: an event
@@ -312,8 +312,9 @@ export function shopLabel(phase, cause, end, reason) {
       return "DENY" + (why ? " (" + why + ")" : "") + " - leaving";
     }
     case "allowed_unpaid": return "ALLOW - no payment capability";
-    case "allowed": return "ALLOW" + n + " - the host pays";
-    case "approved": return "APPROVED" + n + " - the host pays";
+    // Until a payment event: true whether or not a payment ever starts.
+    case "allowed": return "ALLOW" + n + " - not paid yet";
+    case "approved": return "APPROVED" + n + " - not paid yet";
     case "paying": return "PAYING" + n + " - reserving and signing";
     case "confirming": return "PAYMENT SENT" + n + " - waiting for the chain";
     case "paid": return "PAID" + n + " - delivery next";
@@ -648,9 +649,9 @@ function purchaseStatus(p, live, servedAt, task) {
     if (p.payment) return paymentText(p.payment);
     const reached = live && typeof servedAt === "number" && typeof p.deadline_at === "number" && servedAt >= p.deadline_at;
     if (d.policy_verdict === "Deny") return "Deny：" + reasonText(d.reason, task);
-    if (d.policy_verdict === "Allow") return task.payment_capability === "local_anvil" ? "Allow：在委託範圍內，由 Host 付款" : "Allow：在委託範圍內，但未啟用付款（不會自動付款）";
+    if (d.policy_verdict === "Allow") return task.payment_capability === "local_anvil" ? "Allow：在委託範圍內，尚未付款" : "Allow：在委託範圍內，但未啟用付款（不會自動付款）";
     const pays = task.payment_capability === "local_anvil";
-    return { approved: byDevice(p) ? (pays ? "本人核准已驗證，由 Host 付款" : "本人核准已驗證，未啟用付款") : "已核准（模擬），未啟用付款", denied: byDevice(p) ? "已拒絕（本人，已驗證裝置）" : "已拒絕（模擬核准者）",
+    return { approved: byDevice(p) ? (pays ? "本人核准已驗證，尚未付款" : "本人核准已驗證，未啟用付款") : "已核准（模擬），未啟用付款", denied: byDevice(p) ? "已拒絕（本人，已驗證裝置）" : "已拒絕（模擬核准者）",
       superseded: "報價已改變：這次核准作廢，需要重新請購", expired: "已過期，無法核准（後端已記錄）", withdrawn: withdrawnText(p) }[p.approval_closed]
       || (simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；" + (pays ? "核准後由 Host 付款）" : "不會付款）")) + (reached ? "；已達期限，等待後端確認" : "");
   }

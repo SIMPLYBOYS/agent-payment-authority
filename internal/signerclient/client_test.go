@@ -416,3 +416,15 @@ func TestPaySendsTheApprovalAndReservation(t *testing.T) {
 		}
 	}
 }
+
+// The Signer's 403 and 400 carry a code: refusals, not unknown outcomes.
+func TestPayCallerNotAllowedIsARefusal(t *testing.T) {
+	sock, _ := stubSigner(t, http.StatusForbidden, `{"error":"CALLER_NOT_ALLOWED"}`)
+	l := &ledger{orders: map[string]json.RawMessage{"po-1": signertest.Order{Consumer: "consumer-a", Agent: "agent-a", Wallet: "wallet-a",
+		From: "0x1111111111111111111111111111111111111111", PayTo: signertest.Merchant, Amount: "500000", N: 1, Now: t0, Window: 60}.Raw()}, rows: map[string]*row{}}
+	_, err := New(sock, l).Pay(pay("po-1"), nil)
+	var r Refused
+	if !errors.As(err, &r) || r != "CALLER_NOT_ALLOWED" || errors.Is(err, Unknown) {
+		t.Fatalf("403: %v", err)
+	}
+}

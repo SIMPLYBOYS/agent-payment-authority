@@ -146,7 +146,8 @@ func (c *Client) Abandon(consumerID, requestID string) (Result, error) {
 // unknown when there was no readable answer.
 func (c *Client) settle(a store.PaymentAttempt, status int, r signer.Reply, err error) (Result, error) {
 	switch {
-	case err != nil || status != http.StatusOK && status != http.StatusConflict && status != http.StatusNotFound:
+	case err != nil || status != http.StatusOK && status != http.StatusConflict && status != http.StatusNotFound &&
+		!(r.Error != "" && (status == http.StatusForbidden || status == http.StatusBadRequest)): // CALLER_NOT_ALLOWED, BAD_REQUEST: refusals
 		if a.State == "requested" || a.State == "unknown" {
 			updated, uerr := c.ledger.UpdatePayment(a.RequestID, "unknown", a.SignerAttemptID, "")
 			if uerr != nil {

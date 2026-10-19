@@ -86,28 +86,56 @@ test("P2: the scene follows the payment, and Unity is sent the same phase and it
   assert.equal(A.projection({ snapshot: pays, gen: 1 }, false).phase, "allowed"); // the host will pay it: never "no payment capability"
 });
 
-test("P2: with local_anvil an Allow and a person's approval say the Host pays; a simulated one never", () => {
+test("P2: with local_anvil an Allow and a person's approval say not paid yet; a simulated one never pays", () => {
   const v = view(allowed(), undefined);
   v.task.payment_capability = "local_anvil";
-  assert.equal(A.card(v, null, { mode: "live", catalog: null }).status, "Allow：在委託範圍內，由 Host 付款");
+  assert.equal(A.card(v, null, { mode: "live", catalog: null }).status, "Allow：在委託範圍內，尚未付款");
   v.task.payment_capability = "not_enabled";
   assert.equal(A.card(v, null, { mode: "live", catalog: null }).status, "Allow：在委託範圍內，但未啟用付款（不會自動付款）");
   const asked = [ev(1, "TASK_STARTED", { purchase_order_id: "" }), ev(2, "PURCHASE_PROPOSED"),
     ev(3, "POLICY_DECIDED", { decision: { version: A.V1, policy_verdict: "Ask", reason: "HUMAN_APPROVAL_REQUIRED", approval_status: "pending", payment_status: "not_enabled" } }),
     ev(4, "APPROVED", { authorization_method: "webauthn", decision: { reason: "HUMAN_APPROVED" } })];
   const s = { task: { ...v.task, payment_capability: "local_anvil" }, events: asked };
-  assert.equal(A.scene(s).label, "本人核准已驗證：由 Host 付款");
+  assert.equal(A.scene(s).label, "本人核准已驗證：尚未付款");
   assert.equal(A.projection({ snapshot: s, gen: 1 }, false).phase, "approved");
   s.task.payment_capability = "not_enabled";
   assert.equal(A.scene(s).label, "本人核准已驗證：未啟用付款，不會取貨");
   assert.equal(A.projection({ snapshot: s, gen: 1 }, false).phase, "allowed_unpaid");
 });
 
-test("P2: a person's approval says the Host pays only with local_anvil", async () => {
+test("P2: a person's approval says not paid yet with local_anvil", async () => {
   const AP = await import("../approve.js");
   const dev = { approval: { resolved_by: "webauthn:approver-a", grant: { authorization_method: "webauthn" } } };
-  assert.equal(AP.decidedText("approved", dev, true)[1], "本人核准已驗證，由 Host 付款。");
+  assert.equal(AP.decidedText("approved", dev, true)[1], "本人核准已驗證，尚未付款。");
   assert.equal(AP.decidedText("approved", dev)[1], "本人核准已驗證，付款未啟用。");
   dev.approval.grant.voice = "verified";
-  assert.equal(AP.decidedText("approved", dev, true)[1], "本人核准已驗證（裝置＋語音），由 Host 付款。");
+  assert.equal(AP.decidedText("approved", dev, true)[1], "本人核准已驗證（裝置＋語音），尚未付款。");
+});
+
+test("P2: a person's approval, then its payment: Unity follows the payment, never browsing again", () => {
+  const asked = [ev(1, "TASK_STARTED", { purchase_order_id: "" }), ev(2, "PURCHASE_PROPOSED"),
+    ev(3, "POLICY_DECIDED", { decision: { version: A.V1, policy_verdict: "Ask", reason: "HUMAN_APPROVAL_REQUIRED", approval_status: "pending", payment_status: "not_enabled" } }),
+    ev(4, "APPROVED", { authorization_method: "webauthn", decision: { reason: "HUMAN_APPROVED" } })];
+  const task = { ...view(allowed(), undefined).task, payment_capability: "local_anvil" };
+  let t = A.transition(null, A.projection({ snapshot: { task, events: asked }, gen: 1 }, false));
+  assert.equal(t.target.phase, "approved");
+  const rest = [[ev(5, "PAYMENT_REQUESTED"), "paying"], [ev(6, "BUDGET_RESERVED"), "paying"], [ev(7, "PAYMENT_SIGNED"), "paying"], [ev(8, "PAYMENT_SUBMITTED"), "confirming"],
+    [ev(9, "PAYMENT_SETTLED"), "paid"], [ev(10, "RESOURCE_DELIVERED"), "paid"], [ev(11, "RECEIPT_ISSUED"), "delivered"]];
+  const evs = [...asked];
+  for (const [e, phase] of rest) {
+    evs.push(e);
+    const m = A.projection({ snapshot: { task, events: evs }, gen: 1 }, false);
+    assert.equal(m.phase, phase, e.event_type);
+    t = A.transition(t.target, m);
+    assert.notEqual(t.rule, 2, e.event_type); // never a new purchase
+    assert.equal(t.browse, false, e.event_type);
+  }
+  assert.equal(t.target.label, "PAID AND DELIVERED (#11) - leaving with a receipt");
+});
+
+test("P2: an Allow never paid (the task ended first) says not paid yet, never that the host pays", () => {
+  const v = view([...allowed(), ev(4, "TASK_CANCELLED", { purchase_order_id: "" })], undefined);
+  v.task.payment_capability = "local_anvil";
+  const m = A.projection({ snapshot: v, gen: 1 }, false);
+  assert.equal(A.shopLabel(m.phase, m.cause_seq, m.task_end, ""), "ALLOW (#3) - not paid yet");
 });

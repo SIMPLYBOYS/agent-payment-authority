@@ -831,3 +831,30 @@ func TestStarter(t *testing.T) {
 	s3 := &Starter{Store: w2.s, Register: func(context.Context, string, string, uint64) error { t.Fatal("an ended task registered"); return nil }}
 	s3.Start(bg)
 }
+
+// The Store's and the client's answers to a request: an unknown outcome
+// waits (even with a Store code joined to it); a status list or clock not
+// read yet waits; any other Store refusal is final, never sent.
+func TestSignerStoreAnswers(t *testing.T) {
+	w := newWorld(t, 3)
+	for _, po := range []string{"po-1", "po-2", "po-3"} {
+		w.start(po)
+	}
+	w.signer.err = errors.Join(signerclient.Unknown, &store.Error{Code: "PAYMENT_FINAL"})
+	if p, err := w.step("po-1"); !errors.Is(err, ErrPending) || p.State != "reserved" {
+		t.Fatalf("unknown: %+v %v", p, err)
+	}
+	w.signer.err = &store.Error{Code: "CREDENTIAL_STATUS_UNAVAILABLE"}
+	if p, err := w.step("po-2"); !errors.Is(err, ErrPending) || p.State != "reserved" {
+		t.Fatalf("status list not read: %+v %v", p, err)
+	}
+	w.signer.err = &store.Error{Code: "CREDENTIAL_REVOKED"}
+	if p, _ := w.step("po-3"); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" || len(w.shop.sent) != 0 {
+		t.Fatalf("revoked: %+v", p)
+	}
+	w.now = t0 + 300 - 5
+	w.signer.err = &store.Error{Code: "CREDENTIAL_STATUS_UNAVAILABLE"}
+	if p, _ := w.step("po-2"); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" {
+		t.Fatalf("status list not read, too late: %+v", p)
+	}
+}

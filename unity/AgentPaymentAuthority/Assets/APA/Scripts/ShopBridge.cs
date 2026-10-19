@@ -142,6 +142,8 @@ namespace APA
             Report("applied", m != null ? m.gen : -1, m != null ? m.seq : -1, outcome.ToString());
         }
 
+        bool scenePays; // version 2: whether this scene generation's host pays
+
         void ReceiveV2(ProjectionMessage m)
         {
             Switch(2);
@@ -156,9 +158,13 @@ namespace APA
                 Report("layout", scene.Scene, 0, view.LayoutKey); // the room each new scene shows
             }
             else if (slotReset) view.Reset(m.consumer);
+            if (sceneReset) scenePays = false;
             if (outcome == Outcome.Applied)
             {
-                view.Payments(m.payments == "local_anvil");
+                // Scene-wide: one customer's pay task says so for the scene; an M1
+                // task beside it (no payments) does not take it back.
+                scenePays |= m.payments == "local_anvil";
+                view.Payments(scenePays);
                 var s = scene.Of(m.consumer);
                 int sc = scene.Scene, gen = s.Gen;
                 // rendered only once the customer shows the target, for its
