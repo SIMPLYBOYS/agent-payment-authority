@@ -393,6 +393,17 @@ func (w *Worker) submit(ctx context.Context, p store.Payment, o paycontract.Purc
 		return p, err
 	}
 	ans, err := w.Shop.Pay(ctx, o.Intent.ResourceURL, sig)
+	if p.State == "settled" {
+		// Paid at confirmed depth, recorded: the shop's answer alone decides
+		// the delivery; the chain is not asked again.
+		switch {
+		case err == nil && ans.Status == 200:
+			return w.delivered(p, ans)
+		case err == nil && (ans.Status == 400 || ans.Status == 402):
+			return w.Store.PaymentFailed(p.IntentHash, "DELIVERY_FAILED") // paid, and the shop does not deliver
+		}
+		return p, ErrPending
+	}
 	if err != nil || ans.Status >= 500 {
 		if p.State == "submitted" {
 			next, err := w.Store.PaymentUnknown(p.IntentHash)
@@ -412,10 +423,11 @@ func (w *Worker) submit(ctx context.Context, p store.Payment, o paycontract.Purc
 		// Failed in settlement (a front-run, say), or a nonce the shop says is used:
 		// whether it was paid is the chain's to say.
 		return w.byChain(ctx, p, ra, &ShopAnswer{Status: ans.Status})
+	case (ans.Status == 402 || ans.Status == 400) && p.State == "unknown":
+		// An earlier send's result is not known: tx#2 may be on chain, whatever
+		// the shop says now. The chain says how it ends.
+		return w.byChain(ctx, p, ra, nil)
 	case ans.Status == 402 || ans.Status == 400:
-		if p.State == "settled" {
-			return w.Store.PaymentFailed(p.IntentHash, "DELIVERY_FAILED") // paid, and the shop does not deliver
-		}
 		// The shop refused it unsent: never paid again; a person's to look at.
 		return w.Store.PaymentFailed(p.IntentHash, "VERIFICATION_FAILED")
 	}
@@ -423,41 +435,40 @@ func (w *Worker) submit(ctx context.Context, p store.Payment, o paycontract.Purc
 	return w.byChain(ctx, p, ra, nil)
 }
 
-// byChain moves a submitted, unknown or settled payment by the chain's
-// state of its authorization; ans is the shop's answer when it had one.
+// byChain moves a submitted or unknown payment by the chain's state of its
+// authorization; ans is the shop's answer when it had one (a 200, or a 402
+// that failed in settlement).
 func (w *Worker) byChain(ctx context.Context, p store.Payment, ra reconcile.Authorization, ans *ShopAnswer) (store.Payment, error) {
 	r, err := w.Chain.Status(ctx, ra)
 	if err != nil {
 		return p, ErrPending
 	}
-	if p.State == "settled" && r.State != "settled" {
-		return p, ErrPending // settled at confirmed depth stays so; a disagreeing answer is the node's
-	}
 	switch r.State {
 	case "settled":
-		if p.State != "settled" {
-			var resp json.RawMessage
-			if ans != nil && ans.Response != nil {
-				resp, _ = json.Marshal(ans.Response)
-			}
-			next, err := w.Store.PaymentSettled(p.IntentHash, "0x"+hex.EncodeToString(r.Tx[:]), r.Block, resp)
-			if err != nil {
-				return p, err
-			}
-			p = next
+		var resp json.RawMessage
+		if ans != nil && ans.Response != nil {
+			resp, _ = json.Marshal(ans.Response)
+		}
+		next, err := w.Store.PaymentSettled(p.IntentHash, "0x"+hex.EncodeToString(r.Tx[:]), r.Block, resp)
+		if err != nil {
+			return p, err
 		}
 		switch {
 		case ans != nil && ans.Status == 200:
-			sum := sha256.Sum256(ans.Body)
-			return w.Store.PaymentDelivered(p.IntentHash, hex.EncodeToString(sum[:]), len(ans.Body))
-		case ans != nil && (ans.Status == 400 || ans.Status == 402):
+			return w.delivered(next, *ans)
+		case ans != nil && ans.Status == 402:
 			return w.Store.PaymentFailed(p.IntentHash, "DELIVERY_FAILED") // paid on chain, the shop refused to deliver
 		}
-		return p, ErrPending // paid: the content on the next ask
+		return next, ErrPending // paid: the content on the next ask
 	case "not_settled_expired":
 		return w.Store.PaymentFailed(p.IntentHash, "NOT_SETTLED_EXPIRED")
 	case "needs_review":
 		return w.Store.PaymentFailed(p.IntentHash, "RECONCILE_NEEDS_REVIEW")
 	}
 	return p, ErrPending // pending: it may yet settle; never paid again
+}
+
+func (w *Worker) delivered(p store.Payment, ans ShopAnswer) (store.Payment, error) {
+	sum := sha256.Sum256(ans.Body)
+	return w.Store.PaymentDelivered(p.IntentHash, hex.EncodeToString(sum[:]), len(ans.Body))
 }

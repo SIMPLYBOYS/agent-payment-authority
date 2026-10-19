@@ -327,7 +327,16 @@ Claude Code 獨立 context 的 code-reviewer，結論 APPROVE（有應修項目�
 | 建議（H3） | Signer client 必須把 503 `SIGNER_ERROR` 當成一般錯誤，不能當成拒絕，否則暫時的錯誤會變成 `RESERVED_NOT_PAID` | H3 實作 |
 | 建議 | §12.2 漏了 `settled → DELIVERY_FAILED`；Signer 那一點在修正前不正確 | 修正 |
 
-第二輪 review（a7d6876）：結論 APPROVE。審查者確認：Signer 的簽名是由請購自己的付款綁定組成，所以正確的簽名一定通過比對；每一個要求的 Store 轉換都被 from-set 與順序規則接受；22 項突變的原句各只出現一次。建議與處理見 12.2 之後的修正提交。
+第二輪 review（a7d6876）：結論 APPROVE。審查者確認：Signer 的簽名是由請購自己的付款綁定組成，所以正確的簽名一定通過比對；每一個要求的 Store 轉換都被 from-set 與順序規則接受；22 項突變的原句各只出現一次。處理：
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| 建議 | 已 `settled` 的付款交付前仍要問鏈；節點找不到舊 log 時（修剪、範圍限制）就永遠不交付 | 已 `settled` 時不再問鏈，只看商店：200 交付、400／402 `DELIVERY_FAILED`、其他等待；先前的保護條件移除 |
+| 建議 | `unknown` 的付款收到 400／402 記成 `VERIFICATION_FAILED`，但 tx#2 可能已在鏈上 | `unknown` 時交給鏈上判定（`valid_before` 之後收斂為 settled 或 `NOT_SETTLED_EXPIRED`） |
+| 建議 | `expired_unsigned`、授權的 From／To／金額／有效期間沒有會失敗的測試；測試用了 Signer 不會回的狀態 `signing` | `TestSignerAnswers` 改為兩種已關閉狀態、六個欄位各改一個、`accepted`；加突變 |
+| 建議 | `byChain` 裡 `ans.Status == 400` 已不可能 | 改為只看 402 |
+
+H2 突變共 28 項，28／28 KILLED。
 
 ### 12.3 H3 接線
 

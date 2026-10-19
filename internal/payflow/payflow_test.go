@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -194,13 +195,13 @@ func (r *fakeRelayer) Lookup(_ context.Context, intent string) (budget.Evidence,
 }
 
 // fakeSigner signs the order's binding; err is its next answer's error,
-// state its next answer's state (unsigned), other makes it sign another nonce.
+// state its next answer's state (unsigned), tamper changes what it signs.
 type fakeSigner struct {
-	calls map[string]int
-	last  signer.SignRequest
-	err   error
-	state string
-	other bool
+	calls  map[string]int
+	last   signer.SignRequest
+	err    error
+	state  string
+	tamper func(*signer.Transfer)
 }
 
 func (f *fakeSigner) Sign(_ context.Context, r signer.SignRequest) (signer.Reply, error) {
@@ -217,11 +218,11 @@ func (f *fakeSigner) Sign(_ context.Context, r signer.SignRequest) (signer.Reply
 	var o paycontract.PurchaseOrder
 	contracts.Decode(r.Order, &o)
 	b := o.PaymentBinding
-	if f.other {
-		b.Nonce = "0x" + strings.Repeat("9", 64)
+	tr := signer.Transfer{From: b.From, To: b.PayTo, Value: string(b.Amount), ValidAfter: b.ValidAfter, ValidBefore: b.ValidBefore, Nonce: b.Nonce}
+	if f.tamper != nil {
+		f.tamper(&tr)
 	}
-	return signer.Reply{State: "signed", Authorization: &signer.SignedAuthorization{Transfer: signer.Transfer{From: b.From, To: b.PayTo, Value: string(b.Amount),
-		ValidAfter: b.ValidAfter, ValidBefore: b.ValidBefore, Nonce: b.Nonce}, Signature: "0x" + strings.Repeat("ab", 65)}}, nil
+	return signer.Reply{State: "signed", Authorization: &signer.SignedAuthorization{Transfer: tr, Signature: "0x" + strings.Repeat("ab", 65)}}, nil
 }
 
 // fakeShop answers from a script, then repeats its last answer; it keeps
@@ -595,29 +596,42 @@ func TestRelayerStates(t *testing.T) {
 	}
 }
 
-// A Signer attempt closed unsigned, or one signing another authorization,
-// is for review, never sent; one still open waits until too late.
+// A Signer attempt closed unsigned (abandoned, expired_unsigned), or one
+// signing another authorization in any field, is for review, never sent;
+// one still open (accepted) waits until too late.
 func TestSignerAnswers(t *testing.T) {
-	w := newWorld(t, 3)
-	for _, po := range []string{"po-1", "po-2", "po-3"} {
-		w.start(po)
+	w := newWorld(t, 9)
+	for i := 1; i <= 9; i++ {
+		w.start(fmt.Sprintf("po-%d", i))
 	}
-	w.signer.state = "abandoned"
-	if p, _ := w.step("po-1"); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" {
-		t.Fatalf("abandoned: %+v", p)
+	for i, st := range []string{"abandoned", "expired_unsigned"} {
+		w.signer.state = st
+		if p, _ := w.step(fmt.Sprintf("po-%d", i+1)); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" {
+			t.Fatalf("%s: %+v", st, p)
+		}
 	}
-	w.signer.other = true
-	if p, _ := w.step("po-2"); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" || len(w.shop.sent) != 0 {
-		t.Fatalf("another nonce: %+v, sent %d", p, len(w.shop.sent))
+	other := "0x" + strings.Repeat("9", 40)
+	for i, tamper := range []func(*signer.Transfer){
+		func(tr *signer.Transfer) { tr.From = other },
+		func(tr *signer.Transfer) { tr.To = other },
+		func(tr *signer.Transfer) { tr.Value = "50001" },
+		func(tr *signer.Transfer) { tr.ValidAfter++ },
+		func(tr *signer.Transfer) { tr.ValidBefore++ },
+		func(tr *signer.Transfer) { tr.Nonce = "0x" + strings.Repeat("9", 64) },
+	} {
+		w.signer.tamper = tamper
+		if p, _ := w.step(fmt.Sprintf("po-%d", i+3)); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" || len(w.shop.sent) != 0 {
+			t.Fatalf("field %d: %+v, sent %d", i, p, len(w.shop.sent))
+		}
 	}
-	w.signer.other = false
-	w.signer.state = "signing"
-	if p, err := w.step("po-3"); !errors.Is(err, ErrPending) || p.State != "reserved" {
+	w.signer.tamper = nil
+	w.signer.state = "accepted"
+	if p, err := w.step("po-9"); !errors.Is(err, ErrPending) || p.State != "reserved" {
 		t.Fatalf("open attempt: %+v %v", p, err)
 	}
 	w.now = t0 + 300 - 5
-	w.signer.state = "signing"
-	if p, _ := w.step("po-3"); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" {
+	w.signer.state = "accepted"
+	if p, _ := w.step("po-9"); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" {
 		t.Fatalf("open attempt, too late: %+v", p)
 	}
 }
@@ -632,6 +646,10 @@ func TestShopAnswers(t *testing.T) {
 	w.shop.answers = []ShopAnswer{{Status: 503}}
 	if p, err := w.step("po-1"); !errors.Is(err, ErrPending) || p.State != "unknown" {
 		t.Fatalf("503: %+v %v", p, err)
+	}
+	w.shop.answers = []ShopAnswer{verify}
+	if p, err := w.step("po-1"); !errors.Is(err, ErrPending) || p.State != "unknown" {
+		t.Fatalf("402 after an unknown send: %+v %v", p, err) // tx#2 may be on chain: the chain says
 	}
 	w.shop.answers = []ShopAnswer{{Status: 429}}
 	if p, err := w.step("po-2"); !errors.Is(err, ErrPending) || p.State != "submitted" {
@@ -679,11 +697,12 @@ func TestSettledThenDelivered(t *testing.T) {
 			t.Fatalf("%s: %+v %v", po, p, err)
 		}
 	}
-	w.chain.state = "not_settled_expired"
 	if p, err := w.step("po-1"); !errors.Is(err, ErrPending) || p.State != "settled" {
-		t.Fatalf("disagreeing chain: %+v %v", p, err)
+		t.Fatalf("202 once settled: %+v %v", p, err)
 	}
-	w.chain.state = "settled"
+	// The chain is not asked again: a node that no longer finds the logs
+	// does not hold back the delivery.
+	w.chain.err = errors.New("logs pruned")
 	w.shop.answers = []ShopAnswer{paid}
 	if p, err := w.step("po-1"); err != nil || p.State != "delivered" {
 		t.Fatalf("later round: %+v %v", p, err)
