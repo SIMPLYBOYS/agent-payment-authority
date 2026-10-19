@@ -32,10 +32,11 @@ type Service interface {
 // Health is GET /v1/health: what the Host checks against its own
 // configuration before it pays through this relayer.
 type Health struct {
-	State      string `json:"state"` // ready
-	ChainID    uint64 `json:"chain_id"`
-	Contract   string `json:"contract"`
-	DailyTxCap uint64 `json:"daily_tx_cap"`
+	State         string `json:"state"` // ready
+	ChainID       uint64 `json:"chain_id"`
+	Contract      string `json:"contract"`
+	DailyTxCap    uint64 `json:"daily_tx_cap"`
+	Confirmations uint64 `json:"confirmations"` // a reservation's depth before the Host takes it
 }
 
 const (

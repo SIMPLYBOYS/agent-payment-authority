@@ -125,7 +125,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	approvalsSigner := fs.String("approvals-signer", "", "A2: the Unix socket of apa-signer serve-approvals (approvals only), or of apa-signer serve (P2: approvals and, with --payments, payments); the person's approval then runs on http://localhost:<port> (fake mode with --scenarios only)")
 	credentialDir := fs.String("credential-dir", "", "C2: the credential directory (apa-issuer init) for apa.pay.v2 scenarios: test issuer, status list, holders")
 	authSource := fs.String("authenticator-source", "device", "A2: device or virtual, the authenticator's source as shown and logged (a label, not evidence)")
-	paymentsPath := fs.String("payments", "", "P2-a: the local anvil payment configuration (docs/commercial-p2-host.md 12.3); with --approvals-signer, whose Signer then signs payments too")
+	paymentsPath := fs.String("payments", "", "P2: the payment configuration, a local anvil or the Base Sepolia testnet (docs/commercial-p2-host.md 12.3, docs/commercial-p2b.md B3); with --approvals-signer, whose Signer then signs payments too")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -469,7 +469,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		case pay != nil && pay.cfg.Environment == BaseSepolia:
 			payState = "payments on the Base Sepolia testnet (chain " + strconv.FormatUint(pay.cfg.ChainID, 10) + ", test USDC, apa-relayer and caps)"
 		case pay != nil:
-			payState = "payments on local chain " + strconv.FormatUint(pay.cfg.ChainID, 10) + " (P2-a, anvil test keys)"
+			payState = "payments on local chain " + strconv.FormatUint(pay.cfg.ChainID, 10) + " (P2-a, test keys)"
 		}
 		fmt.Fprintf(d.out, "demo: human approval (A2) on http://%s through %s (signer %s); authenticator source %s; %s\n", ui.alias, *approvalsSigner, state, *authSource, payState)
 	}

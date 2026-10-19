@@ -245,6 +245,7 @@ func TestTestnetConfigRefused(t *testing.T) {
 			c["anvil_keys"] = map[string]int{"relayer_gas": 3, "issuer": 1, "policy": 2, "shop_gas": 4}
 		}, "no anvil key"},
 		"an http node":              {func(c map[string]any) { c["rpc"] = "http://sepolia.base.org" }, "https URL"},
+		"this machine's node":       {func(c map[string]any) { c["rpc"] = "https://127.0.0.1:8545" }, "public node"},
 		"a node with a login":       {func(c map[string]any) { c["rpc"] = "https://user:secret@sepolia.base.org" }, "without user info"},
 		"another chain":             {func(c map[string]any) { c["chain_id"] = 8453 }, "is chain 84532"},
 		"one confirmation":          {func(c map[string]any) { c["confirmations"] = 1 }, "at least 2 confirmations"},
@@ -282,7 +283,7 @@ func relayerStub(t *testing.T, contract string) string {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- budget.Serve(ctx, ln, budget.Handler(nil, budget.Health{State: "ready", ChainID: 84532, Contract: contract}, []uint32{uint32(os.Getuid())}, func(string) {}))
+		done <- budget.Serve(ctx, ln, budget.Handler(nil, budget.Health{State: "ready", ChainID: 84532, Contract: contract, Confirmations: 2}, []uint32{uint32(os.Getuid())}, func(string) {}))
 	}()
 	t.Cleanup(func() { cancel(); <-done })
 	return sock
@@ -339,6 +340,9 @@ func TestTestnetPaymentsOpen(t *testing.T) {
 	geth := nodeStub(t, "Geth/v1.14")
 	if _, err := open(geth, func(c map[string]any) { c["budget_contract"] = "0x" + strings.Repeat("5", 40) }, pass); err == nil || !strings.Contains(err.Error(), "not ready for chain") {
 		t.Fatalf("a relayer for another budget: %v", err)
+	}
+	if _, err := open(geth, func(c map[string]any) { c["confirmations"] = 3 }, pass); err == nil || !strings.Contains(err.Error(), "3 confirmations") {
+		t.Fatalf("a relayer taking fewer confirmations: %v", err)
 	}
 	if _, err := open(geth, same, pass+"x"); err == nil || !strings.Contains(err.Error(), "wrong passphrase") {
 		t.Fatalf("a wrong passphrase: %v", err)

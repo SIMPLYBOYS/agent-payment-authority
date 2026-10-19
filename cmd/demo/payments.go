@@ -93,6 +93,7 @@ type payments struct {
 	relayer hostRelayer
 	closeR  func() error
 	settler *merchant.Settler
+	shopFor time.Duration // the worker's wait for the shop: above the settler's own wait
 	out     io.Writer
 }
 
@@ -117,6 +118,8 @@ func checkEnvironment(c *payConfig) error {
 			return fmt.Errorf("base_sepolia is chain %d", baseSepoliaChain)
 		case err != nil || u.User != nil || u.Host == "" || u.Scheme != "https" && !(testnetOnLoopback && u.Scheme == "http"):
 			return errors.New("base_sepolia's rpc is an https URL without user info")
+		case eth.LocalRPC("http://"+u.Host) == nil && !testnetOnLoopback:
+			return errors.New("base_sepolia's rpc is a public node, not this machine")
 		case c.AnvilKeys != nil:
 			return errors.New("base_sepolia takes no anvil key")
 		case c.RelayerSocket == "" || c.ShopKeyDir == "":
@@ -188,8 +191,9 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 		hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		h, err := rc.Health(hctx)
 		cancel()
-		if err != nil || h.State != "ready" || h.ChainID != c.ChainID || h.Contract != contract.Hex() {
-			return nil, nil, fmt.Errorf("payments: apa-relayer on %s is not ready for chain %d and budget %s (%+v %v); nothing was started", c.RelayerSocket, c.ChainID, contract.Hex(), h, err)
+		if err != nil || h.State != "ready" || h.ChainID != c.ChainID || h.Contract != contract.Hex() || h.Confirmations < c.Confirmations {
+			return nil, nil, fmt.Errorf("payments: apa-relayer on %s is not ready for chain %d, budget %s and %d confirmations (%+v %v); nothing was started",
+				c.RelayerSocket, c.ChainID, contract.Hex(), c.Confirmations, h, err)
 		}
 	}
 	rpc := eth.NewClient(c.RPC)
@@ -222,8 +226,10 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 	}
 	sc := merchant.SettleConfig{ChainID: c.ChainID, Token: token, TokenName: c.TokenName, TokenVersion: c.TokenVersion, PayTo: payTo,
 		Confirmations: c.Confirmations, DailyTxCap: c.ShopDailyTxCap}
+	shopFor := 30 * time.Second       // above the settler's default 20 s
 	if c.Environment == BaseSepolia { // public blocks, a public node: ask less often, wait longer
 		sc.Poll, sc.Wait = time.Second, 2*time.Minute
+		shopFor = sc.Wait + 15*time.Second // the worker waits out the settler's wait, not the other way
 	}
 	settler, err := merchant.OpenSettler(ctx, sc, keys[3], rpc, filepath.Join(c.Dir, "settle.db"), clock)
 	if err != nil {
@@ -236,7 +242,7 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 		settler.Close()
 		return nil, nil, err
 	}
-	return &payments{cfg: c, rpc: rpc, relayer: relayer, closeR: closeR, settler: settler, out: out}, shop, nil
+	return &payments{cfg: c, rpc: rpc, relayer: relayer, closeR: closeR, settler: settler, shopFor: shopFor, out: out}, shop, nil
 }
 
 func (p *payments) Close() error { return errors.Join(p.closeR(), p.settler.Close()) }
@@ -280,7 +286,7 @@ func (p *payments) run(ctx context.Context, st *store.Store, socket string, cloc
 	starter := &payflow.Starter{Store: st, Register: p.relayer.RegisterTask, Delegations: p.cfg.Delegations,
 		Log: func(what string, err error) { fmt.Fprintln(p.out, "demo: payment", what, store.CodeOf(err)) }}
 	w := &payflow.Worker{Store: st, Relayer: p.relayer, Signer: signerclient.New(socket, st),
-		Shop:  payflow.HTTPShop{Client: &http.Client{Timeout: 30 * time.Second}},
+		Shop:  payflow.HTTPShop{Client: &http.Client{Timeout: p.shopFor}},
 		Chain: reconcile.Token{RPC: p.rpc, Address: token, Confirmations: p.cfg.Confirmations, FromBlock: p.cfg.TokenFromBlock},
 		Clock: clock, Margin: payMargin, Before: starter.Start,
 		Log: func(intent string, err error) { fmt.Fprintln(p.out, "demo: payment", intent, store.CodeOf(err)) }}

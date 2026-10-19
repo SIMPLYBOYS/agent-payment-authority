@@ -207,3 +207,24 @@ test("the host page's reconciliation row: zero is ok, a spend is an error, unrea
     assert.equal(A.reconciliationRow(broken)[1], "error", JSON.stringify(broken)); // never a green zero
   }
 });
+
+test("base_sepolia pays as local_anvil does, and is named the testnet (docs/commercial-p2b.md B3)", async () => {
+  const AP = await import("../approve.js");
+  for (const [cap, want] of [["local_anvil", true], ["base_sepolia", true], ["not_enabled", false], ["unavailable", false], ["toString", false], [undefined, false]]) {
+    assert.equal(A.paysOn(cap), want, String(cap));
+  }
+  const pays = view(allowed(), undefined);
+  pays.task.payment_capability = "base_sepolia";
+  const m = A.projection({ snapshot: pays, gen: 1 }, false);
+  assert.equal(m.phase, "allowed"); // an Allow the host will pay, not "allowed, never paid"
+  assert.equal(m.payments, "base_sepolia"); // Unity's banner
+  const insp = Object.fromEntries(A.inspector(pays));
+  assert.match(insp["付款"], /^Base Sepolia testnet 付款/);
+  assert.match(AP.sourceText({ agent: "fake", authenticator: "device", payment: "base_sepolia" }), /付款：Base Sepolia testnet（測試 USDC）/);
+  const rec = { version: "apa.reconciliation.v1", environment: "base_sepolia", chain_id: 84532, from_block: 100, to_block: 140, wallets: ["0x1", "0x2"],
+    known_authorizations: 2, unauthorized: [] };
+  assert.deepEqual(A.reconciliationRow(rec), ["對帳", "ok", "未授權新增支出 0 筆（Base Sepolia testnet；區塊 100–140；錢包 2 個、已記錄授權 2 筆）"]);
+  const other = view(allowed(), undefined);
+  other.task.payment_capability = "base_mainnet"; // an unknown capability never pays, never names a banner
+  assert.equal(A.projection({ snapshot: other, gen: 1 }, false).payments, "");
+});

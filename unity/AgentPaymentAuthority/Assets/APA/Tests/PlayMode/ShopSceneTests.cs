@@ -477,5 +477,12 @@ public class ShopSceneTests
         bridge.Receive(D2(1, "consumer-a", 11, "delivered", 10)); // a page without the field: no payment said
         yield return null;
         StringAssert.StartsWith("M1 / no payment", Banner());
+        // The testnet's own banner (docs/commercial-p2b.md B3); an unknown capability says no payment.
+        bridge.Receive(D2(1, "consumer-a", 12, "delivered", 10).Replace("}", ",\"payments\":\"base_sepolia\"}"));
+        yield return null;
+        StringAssert.StartsWith("P2 / Base Sepolia testnet payments", Banner());
+        bridge.Receive(D2(1, "consumer-a", 13, "delivered", 10).Replace("}", ",\"payments\":\"base_mainnet\"}"));
+        yield return null;
+        StringAssert.StartsWith("M1 / no payment", Banner());
     }
 }

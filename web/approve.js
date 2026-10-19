@@ -5,7 +5,7 @@
 // the device is asked, converts WebAuthn's binary fields, and words each
 // state with fixed texts (never "approved" for something unknown).
 
-import { b64u, unb64u, byDevice, VOICE, VOICE_FAILURES, voiceText, paymentText } from "./adapter.js";
+import { b64u, unb64u, byDevice, VOICE, VOICE_FAILURES, voiceText, paymentText, paysOn, PAYING } from "./adapter.js";
 
 export { VOICE, VOICE_FAILURES };
 
@@ -77,7 +77,7 @@ const DECISION = { approve: "核准", deny: "拒絕" };
 
 // outcomeText: what one operation's reply says, as [kind, text]. Unknown
 // is never worded as "not approved"; a refusal never as success.
-// pays: payment_capability local_anvil (P2-a): an approval is not yet paid,
+// pays: a paying capability (adapter.js PAYING): an approval is not yet paid,
 // rather than never paid.
 export function outcomeText(status, body, decision, pays = false) {
   const off = pays ? "尚未付款。" : "付款未啟用。";
@@ -148,8 +148,8 @@ const DONE = {
 const PAID_NOTE = "task 仍進行時，Host 會為核准的這一筆開始付款（本機 anvil、測試 USDC）；是否已付款、是否交付，以請購卡片為準。";
 // V1: a voice outcome words its record: denied by the voice (never as the
 // approver's own deny), approved with the voice, or approved degraded.
-// pays: the host pays a person's approval (payment_capability local_anvil,
-// P2-a); a simulated one never pays.
+// pays: the host pays a person's approval (a paying capability, adapter.js
+// PAYING); a simulated one never pays.
 export const decidedText = (state, p, pays = false) => {
   const g = p && p.approval && p.approval.grant;
   // With payments, the payment as the card says it once there is one; "not yet paid" before.
@@ -183,7 +183,7 @@ export function panelNote(note, stored, pending) {
   return s || (note && ["ok", "deny", "closed"].includes(note.kind) ? note : null);
 }
 
-// grantLine: a grant by its own method (pays: payment_capability local_anvil).
+// grantLine: a grant by its own method (pays: a paying capability).
 export function grantLine(g, pays = false) {
   const id = String(g.jti).slice(0, 18) + "…";
   return g.authorization_method === "webauthn"
@@ -195,7 +195,7 @@ export function grantLine(g, pays = false) {
 // sourceText: the three sources, apart (design 2, 8).
 export function sourceText(s) {
   const auth = s && s.authenticator === "virtual" ? "virtual authenticator（測試用）" : "已登記的裝置";
-  const pay = s && s.payment === "disabled" ? "未啟用" : s && s.payment === "local_anvil" ? "本機 anvil（測試 USDC）" : "?";
+  const pay = s && s.payment === "disabled" ? "未啟用" : s && paysOn(s.payment) ? PAYING[s.payment] + "（測試 USDC）" : "?";
   return "Agent：" + (s && s.agent === "fake" ? "fake" : "?") + "・驗證器：" + auth + "・付款：" + pay;
 }
 

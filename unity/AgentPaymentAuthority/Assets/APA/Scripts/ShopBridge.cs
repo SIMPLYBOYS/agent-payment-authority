@@ -122,7 +122,7 @@ namespace APA
                     viewGen = m.gen;
                     break;
                 case Outcome.Applied:
-                    view.Payments(m.payments == "local_anvil");
+                    view.Payments(SceneRules.Paying(m.payments));
                     if (state.Gen == m.gen && m.seq >= 0)
                     {
                         // A new generation without a clear also drops the old one's walks.
@@ -142,7 +142,7 @@ namespace APA
             Report("applied", m != null ? m.gen : -1, m != null ? m.seq : -1, outcome.ToString());
         }
 
-        bool scenePays; // version 2: whether this scene generation's host pays
+        string scenePays = ""; // version 2: how this scene generation's host pays ("" not at all)
 
         void ReceiveV2(ProjectionMessage m)
         {
@@ -160,14 +160,14 @@ namespace APA
             else if (slotReset) view.Reset(m.consumer);
             if (sceneReset)
             {
-                scenePays = false;
-                view.Payments(false); // a cleared scene says nothing of payments until a customer does
+                scenePays = "";
+                view.Payments(""); // a cleared scene says nothing of payments until a customer does
             }
             if (outcome == Outcome.Applied)
             {
                 // Scene-wide: one customer's pay task says so for the scene; an M1
                 // task beside it (no payments) does not take it back.
-                scenePays |= m.payments == "local_anvil";
+                if (SceneRules.Paying(m.payments) != "") scenePays = SceneRules.Paying(m.payments);
                 view.Payments(scenePays);
                 var s = scene.Of(m.consumer);
                 int sc = scene.Scene, gen = s.Gen;

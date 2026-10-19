@@ -1109,6 +1109,10 @@ MUTATIONS = [
      'if err := keytool.Private(filepath.Dir(c.RelayerSocket)); err != nil {', 'if err := keytool.Private(filepath.Dir(c.RelayerSocket)); false && err != nil {', 'TestTestnetConfigRefused'),
     ('P2-b B2 review: apa-relayer takes another caller uid', 'cmd/apa-relayer/main.go',
      'if u != uint32(os.Getuid()) {', 'if false && u != uint32(os.Getuid()) {', 'TestServe'),
+    ('P2-b B3 review: a testnet node on this machine', 'cmd/demo/payments.go',
+     'case eth.LocalRPC("http://"+u.Host) == nil && !testnetOnLoopback:', 'case false:', 'TestTestnetConfigRefused'),
+    ('P2-b B3 review: a relayer taking fewer confirmations', 'cmd/demo/payments.go',
+     '|| h.Confirmations < c.Confirmations {', '{', 'TestTestnetPaymentsOpen'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the

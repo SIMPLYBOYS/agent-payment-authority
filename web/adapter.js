@@ -5,6 +5,12 @@
 
 export const UNKNOWN = "未知／未提供";
 
+// PAYING: the payment capabilities under which the host pays an Allow and a
+// person's approval (P2), by name: a local anvil (P2-a) or the Base Sepolia
+// testnet (docs/commercial-p2b.md B3). Anything else pays nothing.
+export const PAYING = { local_anvil: "本機 anvil", base_sepolia: "Base Sepolia testnet" };
+export const paysOn = (cap) => typeof cap === "string" && Object.hasOwn(PAYING, cap);
+
 // Task status codes as the task list shows them (GET /api/tasks, section 14
 // of docs/demo-operation-design.md); an unknown code is shown as it is.
 export const STATUS_LABELS = {
@@ -149,8 +155,8 @@ export function scene(snapshot) {
   if (!cur && orphanDecision) phase = "unknown";
   const notes = [];
   if (phase === "waiting" && cur.closed) phase = CLOSED_PHASE[cur.closed] || phase;
-  // P2 (local_anvil): the host pays an Allow and a person's approval.
-  const pays = !!task && task.payment_capability === "local_anvil";
+  // P2 (PAYING): the host pays an Allow and a person's approval.
+  const pays = !!task && paysOn(task.payment_capability);
   if (pays && phase === "allowed_unpaid") phase = "allowed";
   const paidApproval = pays && phase === "approved" && cur.method === "webauthn";
   if (cur && cur.pay) phase = cur.pay;
@@ -227,6 +233,7 @@ export function inspector(snapshot) {
     ["task 狀態", str(t.status)], ["快照序號", str(t.as_of_sequence)],
     ["fixture 餘額", UNKNOWN + "（M1 無鏈上餘額）"], ["剩餘預算", UNKNOWN + "（預算不是鏈上餘額）"],
     ["付款", t.payment_capability === "local_anvil" ? "本機 anvil 付款（P2-a：測試金鑰、測試 USDC；payment_capability：local_anvil）"
+      : t.payment_capability === "base_sepolia" ? "Base Sepolia testnet 付款（測試 USDC；payment_capability：base_sepolia）"
       : "未付款（payment_capability：" + str(t.payment_capability) + "）"],
     ...(t.contract_version ? [["契約", str(t.contract_version) + (t.delegation_id ? " · 委託 " + str(t.delegation_id) : "")]] : []),
   ];
@@ -279,7 +286,7 @@ export function projection(state, animate) {
     v: BRIDGE_VERSION, gen: state.gen, clear: false, consumer: task.consumer_id, task_id: task.task_id,
     seq, phase: sc.unity, verdict: sc.verdict, reason: sc.phase === "approval_denied" ? "APPROVER_DENIED" : sc.reason || "", animate: !!animate,
     cause_seq: sc.cause > 0 && sc.cause <= seq ? sc.cause : 0, task_end: sc.end,
-    payments: task.payment_capability === "local_anvil" ? "local_anvil" : "", // P2: the banner
+    payments: paysOn(task.payment_capability) ? task.payment_capability : "", // P2: the banner
   };
 }
 
@@ -642,7 +649,7 @@ export function reconciliationRow(rec) {
   if (!rec) return ["對帳", "unconfirmed", "未確認：讀取中"];
   if (rec.error) return ["對帳", "error", "無法對帳（" + str(rec.error) + "），未確認"];
   if (rec.version !== "apa.reconciliation.v1" || !Array.isArray(rec.unauthorized)) return ["對帳", "error", "對帳結果不完整（不是一份對帳報告），未確認"];
-  const env = rec.environment === "local_anvil" ? "本機 anvil" : str(rec.environment);
+  const env = paysOn(rec.environment) ? PAYING[rec.environment] : str(rec.environment);
   const where = env + "；區塊 " + str(rec.from_block) + "–" + str(rec.to_block) + "；錢包 " + (rec.wallets || []).length + " 個、已記錄授權 " + str(rec.known_authorizations) + " 筆";
   const spends = rec.unauthorized;
   if (spends.length === 0) return ["對帳", "ok", "未授權新增支出 0 筆（" + where + "）"];
@@ -671,8 +678,8 @@ function purchaseStatus(p, live, servedAt, task, ended) {
     if (p.payment) return paymentText(p.payment);
     const reached = live && typeof servedAt === "number" && typeof p.deadline_at === "number" && servedAt >= p.deadline_at;
     if (d.policy_verdict === "Deny") return "Deny：" + reasonText(d.reason, task);
-    if (d.policy_verdict === "Allow") return task.payment_capability === "local_anvil" ? "Allow：在委託範圍內，尚未付款" : "Allow：在委託範圍內，但未啟用付款（不會自動付款）";
-    const pays = task.payment_capability === "local_anvil";
+    if (d.policy_verdict === "Allow") return paysOn(task.payment_capability) ? "Allow：在委託範圍內，尚未付款" : "Allow：在委託範圍內，但未啟用付款（不會自動付款）";
+    const pays = paysOn(task.payment_capability);
     if (ended && !p.approval_closed) return ENDED_ASK + (reached ? "；已達期限，等待後端確認" : "");
     return { approved: byDevice(p) ? (pays ? "本人核准已驗證，尚未付款" : "本人核准已驗證，未啟用付款") : "已核准（模擬），未啟用付款", denied: byDevice(p) ? "已拒絕（本人，已驗證裝置）" : "已拒絕（模擬核准者）",
       superseded: "報價已改變：這次核准作廢，需要重新請購", expired: "已過期，無法核准（後端已記錄）", withdrawn: withdrawnText(p) }[p.approval_closed]
@@ -726,7 +733,7 @@ export function card(view, chosen, ctx) {
       : waiting ? { label: "收尾", state: "wait", note: hist ? "執行結束時仍待核准（歷史快照，不是即時狀態；期限已過）" : pay(t) ? (simulated() ? "等你核准（模擬）" : "等你核准（本人裝置）") : "等待中（M1 無核准能力）" }
       : p && p.decision && p.decision.policy_verdict === "Deny" ? { label: "收尾", state: "none", note: "Deny 即結束；沒有收尾事件" }
       : p && p.decision && p.decision.policy_verdict === "Allow" ? { label: "收尾", state: "none", note: paying ? "Allow：由 Host 付款，見下列步驟"
-        : t.payment_capability === "local_anvil" ? "尚未付款；付款開始後見下列步驟" : pay(t) ? "未啟用付款；沒有後續事件" : "M1 無付款；沒有後續事件" }
+        : paysOn(t.payment_capability) ? "尚未付款；付款開始後見下列步驟" : pay(t) ? "未啟用付款；沒有後續事件" : "M1 無付款；沒有後續事件" }
       : step("收尾", null),
     ...(paying ? paymentSteps(at, step, pv) : []),
   ];

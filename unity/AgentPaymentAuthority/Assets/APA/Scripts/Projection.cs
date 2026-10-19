@@ -35,8 +35,9 @@ namespace APA
         // UX3, version 2 only: the scene's room (a layout key). A scene
         // generation has one layout; another room is a new scene.
         public string layout;
-        // P2, optional (v stays): "local_anvil" when the host pays on a local
-        // anvil (payment_capability); anything else is no payment.
+        // P2, optional (v stays): the payment capability when the host pays,
+        // "local_anvil" (a local anvil) or "base_sepolia" (the testnet);
+        // anything else is no payment (SceneRules.Paying).
         public string payments;
     }
 
@@ -58,6 +59,9 @@ namespace APA
     // different (a new purchase); 3 only the label kind changed; 4 the same.
     public static class SceneRules
     {
+        // Paying: the message's payments when it names a capability that pays, else "".
+        public static string Paying(string payments) => payments == "local_anvil" || payments == "base_sepolia" ? payments : "";
+
         // The decisions at the counter. A payment's own phases (P2) stand at
         // the counter too, but are not decisions: each of its steps has a new
         // cause and is never a new purchase.

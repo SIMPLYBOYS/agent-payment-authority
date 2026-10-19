@@ -69,7 +69,7 @@ func socketPair(t *testing.T, s Service, callers []uint32) *Client {
 func TestSocketCarriesTheRelayersAnswers(t *testing.T) {
 	f := &fake{}
 	c := socketPair(t, f, []uint32{uint32(os.Getuid())})
-	if h, err := c.Health(bg); err != nil || h != (Health{"ready", 84532, "0xc0", 12}) {
+	if h, err := c.Health(bg); err != nil || h != (Health{"ready", 84532, "0xc0", 12, 0}) {
 		t.Fatalf("health %+v %v", h, err)
 	}
 	if err := c.RegisterTask(bg, "show-a-01", "consumer-a", 100); err != nil || len(f.registered) != 1 || f.registered[0] != "show-a-01/consumer-a" {

@@ -326,8 +326,9 @@ function renderReadiness() {
       : ["真實 CLI", "off", hist ? "未執行（歷史模式：顯示已保存的真實執行紀錄）" : "未啟用（fake 模式）"]);
     rows.push(["Unity 建置", st.unity_build.state, st.unity_build.state === "ok" ? "就緒（4 個建置檔）" : "缺少 " + missing.join("、") + "：請先完成首次準備"]);
     if (st.capacity) rows.push(["同時執行上限", "info", st.capacity.max_runs + " 場（部署設定 --max-runs；目錄中 " + st.capacity.consumers + " 位客人，每位一次一場）"]);
-    if (st.payment_capability === "local_anvil") {
-      rows.push(["付款", "info", "本機 anvil（P2-a：測試金鑰、測試 USDC；不是 testnet）"]);
+    if (A.paysOn(st.payment_capability)) {
+      rows.push(["付款", "info", st.payment_capability === "base_sepolia" ? "Base Sepolia testnet（測試 USDC；apa-relayer、每日上限；不是 mainnet）"
+        : "本機 anvil（P2-a：測試金鑰、測試 USDC；不是 testnet）"]);
       rows.push(A.reconciliationRow(lastReady.reconciliation));
     } else rows.push(["付款", "off", "無付款能力"]);
     // The binary's own record of its source (docs/cli-poc.md 56): a dirty
@@ -1164,7 +1165,7 @@ async function pollA2() {
   const r = await a2Call(c, "/api/approvals");
   if (g !== creds.gen || currentConsumer() !== c) return;
   lastA2 = r.status === 200 ? { gen: g, consumer: c, servedAt: r.body.served_at, at: Date.now(), items: r.body.approvals || [], signer: r.body.signer, sources: r.body.sources,
-    pays: r.body.payment_capability === "local_anvil" }
+    pays: A.paysOn(r.body.payment_capability) }
     : { gen: g, consumer: c, error: (r.body && r.body.error) || "status_" + r.status };
   renderControl();
   const it = a2Item();

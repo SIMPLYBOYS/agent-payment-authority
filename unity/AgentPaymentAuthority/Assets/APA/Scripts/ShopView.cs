@@ -196,20 +196,21 @@ namespace APA
             ResetAll();
         }
 
-        // Payments: whether the host pays (P2-a, a local anvil), as the last
-        // applied message said; the banner says so.
-        bool payments;
-        public void Payments(bool on)
+        // Payments: how the host pays (SceneRules.Paying: "" not at all, a
+        // local anvil or the Base Sepolia testnet), as the last applied
+        // message said; the banner says so.
+        string payments = "";
+        public void Payments(string mode)
         {
-            if (on == payments) return;
-            payments = on;
+            if (mode == payments) return;
+            payments = mode;
             Banner();
         }
 
         void Banner()
         {
             if (banner == null) return;
-            banner.text = (payments ? "P2-a / local test payments - " : "M1 / no payment - ") + layout.title + (UsingPlaceholders ? "   [LimeZu pending: placeholder art]" : "   Art: LimeZu (limezu.itch.io)");
+            banner.text = (payments == "base_sepolia" ? "P2 / Base Sepolia testnet payments - " : payments == "local_anvil" ? "P2-a / local test payments - " : "M1 / no payment - ") + layout.title + (UsingPlaceholders ? "   [LimeZu pending: placeholder art]" : "   Art: LimeZu (limezu.itch.io)");
         }
 
         // UseLayout: another room. Every customer goes back outside at once,

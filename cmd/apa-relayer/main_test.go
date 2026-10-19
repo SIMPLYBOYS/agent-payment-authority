@@ -104,7 +104,7 @@ func TestServe(t *testing.T) {
 			break
 		}
 	}
-	if err != nil || h.State != "ready" || h.ChainID != 84532 || h.Contract != good.BudgetContract || h.DailyTxCap != 12 {
+	if err != nil || h.State != "ready" || h.ChainID != 84532 || h.Contract != good.BudgetContract || h.DailyTxCap != 12 || h.Confirmations != 2 {
 		cancel()
 		t.Fatalf("health %+v %v", h, err)
 	}

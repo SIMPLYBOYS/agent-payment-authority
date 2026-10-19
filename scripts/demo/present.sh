@@ -142,6 +142,10 @@ pid=$!
 trap 'kill -INT "$pid" 2>/dev/null' INT TERM
 
 # Ready means this process says so: its ready file, with its own pid.
+# With payments the host may first ask the shop key's passphrase on this
+# terminal (docs/commercial-p2b.md B3): five minutes then.
+limit=1200
+[ -z "$payments" ] || limit=3000
 i=0
 while :; do
 	if ! kill -0 "$pid" 2>/dev/null; then
@@ -152,10 +156,10 @@ while :; do
 		break
 	fi
 	i=$((i + 1))
-	if [ "$i" -ge 1200 ]; then
+	if [ "$i" -ge "$limit" ]; then
 		kill -INT "$pid" 2>/dev/null
 		wait "$pid"
-		stop "120 秒內沒有就緒；已停止本次啟動的 host"
+		stop "$((limit / 10)) 秒內沒有就緒；已停止本次啟動的 host"
 	fi
 	sleep 0.1
 done

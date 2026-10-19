@@ -160,7 +160,7 @@ func currentBuild() buildInfo {
 	return b
 }
 
-// capability is the host's payment capability: LocalAnvil with --payments.
+// capability is the host's payment capability: --payments' environment (LocalAnvil, BaseSepolia).
 func (a *api) capability() string {
 	if a.payCap != "" {
 		return a.payCap

@@ -85,7 +85,13 @@ B2 的 review（c29b0c6、221c71e）：APPROVE，一項 Important 已處理：`a
 - 商店每日上限：`merchant.SettleConfig.DailyTxCap`，以交易 nonce 第一次使用的日子計；超過回 402 `settlement_daily_cap`，什麼都不送（付款工作記為驗證失敗，不再付）。testnet 上商店每秒查一次、最多等 2 分鐘；`apa-relayer` 每秒查一次。
 - `payment_capability` 與 approvals 的 `sources.payment` 就是環境值；對帳報告的 `environment` 也是。
 - 測試：`TestTestnetConfigRefused`（12 種）、`TestTestnetPaymentsOpen`（anvil 冒充、relayer 是別的預算合約、密語錯、商店金鑰不是 pay_to、正常開啟）、merchant 的 `TestDailyTxCap`（anvil）。
-- **B3b**（下一段）：網頁與 Unity 對 `base_sepolia` 的文字與橫幅。
+
+B3a 的 review（eaac5a3）：APPROVE，一項 Important 已處理：付款工作等商店的時間（原為 30 秒）短於 testnet 上商店自己的等待（2 分鐘），慢的付款都會先變成「結果不明」再由鏈判定；改為 testnet 上等商店 2 分 15 秒。建議也照做：`base_sepolia` 的 RPC 不能是這台機器（loopback）；`apa-relayer` 的 health 回報確認數，demo 要求不少於自己的設定；商店因每日上限拒絕時，終端機記下 `shop: settlement_daily_cap`（畫面仍顯示「商店驗證未通過，沒有送出」，不新增付款代碼）；有付款時 `present.sh` 等就緒 5 分鐘（要先輸入商店金鑰的密語）；文字與註解更新。未做：以 nonce 計的上限沒有「卡住的轉帳被取代」的測試（要模擬卡住的 nonce，留到 P2-c 前補）；密語輸入中按 Ctrl-C 不會中斷（要按 Enter），`apa-signer` 亦同。
+
+**B3b 網頁與 Unity**（完成，待 review）：
+- `web/adapter.js` 的 `PAYING`／`paysOn`：`local_anvil` 與 `base_sepolia` 都是「Host 會付款」；其他值一律不付款。卡片、明細、核准面板的來源、主持人頁的就緒表與對帳列、讀對帳的時機都改用它；`base_sepolia` 顯示為「Base Sepolia testnet」。
+- Unity：`SceneRules.Paying`；橫幅分三種：`M1 / no payment`、`P2-a / local test payments`、`P2 / Base Sepolia testnet payments`；未知的值不顯示付款。
+- 測試：網頁 116／116；Unity scene／editmode／playmode 全部通過（playmode 加上 testnet 橫幅與未知值）。WebGL 建置已重做。
 
 ## 5 要你決定的事
 

@@ -466,6 +466,9 @@ func (w *Worker) submit(ctx context.Context, p store.Payment, o paycontract.Purc
 		return w.byChain(ctx, p, ra, nil)
 	case ans.Status == 402 || ans.Status == 400:
 		// The shop refused it unsent: never paid again; a person's to look at.
+		if w.Log != nil && ans.Response != nil && ans.Response.ErrorReason != "" {
+			w.Log(p.IntentHash, errors.New("shop: "+ans.Response.ErrorReason)) // settlement_daily_cap, say: told apart on the terminal
+		}
 		return w.Store.PaymentFailed(p.IntentHash, "VERIFICATION_FAILED")
 	}
 	// Anything else (408, 429, a proxy's 404): not an answer about the payment; the chain says.

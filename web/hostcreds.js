@@ -10,6 +10,8 @@
 // belongs to the current generation. Nothing here writes storage, a URL,
 // a cookie or the console, and no message carries file content or a token.
 
+import { paysOn } from "./adapter.js";
+
 export const MAX_FILE_BYTES = 16 * 1024;
 const TOKEN = /^[0-9a-f]{64}$/;
 const CONSUMER = /^[A-Za-z0-9._-]{1,64}$/;
@@ -196,7 +198,7 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
     if (r.status === 401) { unauthorized(g); return null; }
     if (r.status !== 200) return { error: "status_" + r.status };
     const out = { status: r.body };
-    if (r.body && r.body.payment_capability === "local_anvil") { // P2-a: the reconciliation, read with the same token
+    if (r.body && paysOn(r.body.payment_capability)) { // P2: the reconciliation, read with the same token
       try {
         // A slow chain holds back this row only: the status is not kept waiting past 5 s.
         const c = await call(held.host, "/api/host/reconciliation", AbortSignal.any([abort.signal, AbortSignal.timeout(5000)]));

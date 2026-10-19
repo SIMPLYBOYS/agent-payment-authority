@@ -202,7 +202,7 @@ func serve(ctx context.Context, dir string, passphrase func() ([]byte, error), o
 	defer ln.Close()
 	fmt.Fprintf(out, "apa-relayer: serving on %s (chain %d, budget %s, gas %s, issuer %s, policy %s, at most %d transactions a day)\n",
 		c.Socket, c.ChainID, contract.Hex(), keys.Gas.Addr.Hex(), keys.Issuer.Addr.Hex(), keys.Policy.Addr.Hex(), c.DailyTxCap)
-	h := budget.Handler(r, budget.Health{State: "ready", ChainID: c.ChainID, Contract: contract.Hex(), DailyTxCap: c.DailyTxCap}, c.Callers,
+	h := budget.Handler(r, budget.Health{State: "ready", ChainID: c.ChainID, Contract: contract.Hex(), DailyTxCap: c.DailyTxCap, Confirmations: c.Confirmations}, c.Callers,
 		func(line string) { fmt.Fprintln(out, "apa-relayer:", strings.ReplaceAll(line, c.RPC, "<rpc>")) }) // a node's URL may carry an API key
 	return budget.Serve(ctx, ln, h)
 }
