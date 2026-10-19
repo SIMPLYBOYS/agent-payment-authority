@@ -621,3 +621,5 @@ H6 用你以 `apa-signer keygen` 建立的兩把本機測試金鑰（H-D6），�
 | 建議 | 核准面板只有 Host 頁傳入 `pays` 時才讀付款，其他呼叫者在付款後仍顯示「尚未付款」 | 有付款紀錄就讀付款；補測待人工處理、模擬核准絕不顯示已付款 |
 | 建議 | `TestP2ShippedCatalog` 忽略 `NewRegistry` 的錯誤，也沒驗證價格與 allow_max 的關係 | 檢查錯誤；以商店報價驗證咖啡 ≤ allow_max、簡報 > allow_max |
 | 建議 | 文件沒有重跑的說明 | 加上「重跑時」 |
+
+第二輪 review（824ce60）：APPROVE，沒有 Critical 或 Important。六項建議都已處理：語音核准的面板有付款時說明文字與標題一致、商店報價缺場景或解析失敗時測試失敗、`registry.json` 不存在時 `p2-dev.sh` 給明確訊息、`p2-reconcile.sh` 失敗時顯示回應內容前 300 字並把既有的輸出檔改為 0600、測試也檢查核准者的 24 小時總額。

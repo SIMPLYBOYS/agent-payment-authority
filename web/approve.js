@@ -159,7 +159,7 @@ export const decidedText = (state, p, pays = false) => {
   if (state === "approved" && byDevice(p) && g && g.voice === "unavailable") {
     return ["warn", paid("本人核准已驗證（語音降級），付款未啟用。"), "語音不可用（" + voiceText(g.voice_reason) + "）：只憑摘要確認與裝置驗證核准，這筆記為降級。"];
   }
-  if (state === "approved" && byDevice(p) && g && g.voice === "verified") return ["ok", paid("本人核准已驗證（裝置＋語音），付款未啟用。"), pays ? PAID_NOTE : DONE.device.approved[2]];
+  if (state === "approved" && byDevice(p) && g && g.voice === "verified") return ["ok", paid("本人核准已驗證（裝置＋語音），付款未啟用。"), pays || p.payment ? PAID_NOTE : DONE.device.approved[2]];
   if (state === "approved" && byDevice(p) && (pays || p.payment)) return ["ok", "本人核准已驗證" + now(), PAID_NOTE];
   return DONE[byDevice(p) ? "device" : "simulated"][state] || null;
 };

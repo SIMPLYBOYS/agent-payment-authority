@@ -31,6 +31,7 @@ for w in wallet-a wallet-b; do
 (build it with: go build -o $dir/bin/apa-signer ./cmd/apa-signer)" >&2; exit 1; }
 done
 [ -f "$local_dir/payments.json" ] || { echo "p2-dev: no $local_dir/payments.json: run scripts/demo/p2-local.sh first" >&2; exit 1; }
+[ -f "$local_dir/registry.json" ] || { echo "p2-dev: no $local_dir/registry.json: run scripts/demo/p2-local.sh first" >&2; exit 1; }
 # The same addresses p2-local minted to and wrote into its registry.
 python3 -I -c 'import json,sys; w={x["wallet_id"]: x["from"] for x in json.load(open(sys.argv[1]))["wallets"]}; sys.exit(0 if (w.get("wallet-a"), w.get("wallet-b")) == (sys.argv[2], sys.argv[3]) else 1)' \
   "$local_dir/registry.json" "$1" "$2" || { echo "p2-dev: $1, $2 are not wallet-a, wallet-b of $local_dir/registry.json (p2-local was given others)" >&2; exit 1; }

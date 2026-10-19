@@ -113,7 +113,7 @@ func TestDevSignerConfig(t *testing.T) {
 		t.Fatalf("config: %+v", cfg)
 	}
 	// The Host starts payments under payments.json's delegations: the Signer's are those; the caps outlast rehearsals.
-	if d := cfg.Delegations; d[0].DelegationID != "dlg-a" || d[0].Version != 1 || d[1].DelegationID != "dlg-b" || d[1].Version != 2 || d[0].TotalCap != "20000000" {
+	if d := cfg.Delegations; d[0].DelegationID != "dlg-a" || d[0].Version != 1 || d[1].DelegationID != "dlg-b" || d[1].Version != 2 || d[0].TotalCap != "20000000" || cfg.Approvers[0].SignerTotal != "20000000" {
 		t.Fatalf("delegations: %+v", d)
 	}
 }

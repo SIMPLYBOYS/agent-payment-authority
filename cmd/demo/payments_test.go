@@ -191,11 +191,18 @@ func TestP2ShippedCatalog(t *testing.T) {
 	price := map[string]uint64{}
 	for _, o := range shop.Offers() {
 		var req struct{ Amount contracts.Amount }
-		json.Unmarshal(o.Quote.SelectedRequirement, &req)
-		price[o.Scene], _ = req.Amount.Units()
+		if err := json.Unmarshal(o.Quote.SelectedRequirement, &req); err != nil {
+			t.Fatal(err)
+		}
+		if price[o.Scene], err = req.Amount.Units(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for id, sc := range scs {
-		allow, _ := sc.Delegation.AllowMax.Units()
+		allow, err := sc.Delegation.AllowMax.Units()
+		if _, ok := price[sc.Scene]; !ok || err != nil {
+			t.Fatalf("%s: no offer for scene %q or allow_max: %v", id, sc.Scene, err)
+		}
 		if want := map[string]bool{"cafe": true, "": false}[sc.Scene]; (price[sc.Scene] <= allow) != want {
 			t.Fatalf("%s: price %d, allow_max %d", id, price[sc.Scene], allow)
 		}

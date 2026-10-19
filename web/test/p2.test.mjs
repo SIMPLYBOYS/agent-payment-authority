@@ -118,6 +118,9 @@ test("P2: a person's approval says not paid yet with local_anvil", async () => {
   assert.equal(AP.decidedText("approved", dev)[1], "本人核准已驗證，付款未啟用。");
   dev.approval.grant.voice = "verified";
   assert.equal(AP.decidedText("approved", dev, true)[1], "本人核准已驗證（裝置＋語音），尚未付款。");
+  const voicePaid = AP.decidedText("approved", { ...dev, payment: paidDev.payment }); // a recorded payment: headline and note agree
+  assert.equal(voicePaid[1], "本人核准已驗證（裝置＋語音）；已付款、已交付（區塊 11），附收據。");
+  assert.equal(voicePaid[2], AP.decidedText("approved", paidDev)[2]);
 });
 
 test("P2: a person's approval, then its payment: Unity follows the payment, never browsing again", () => {
