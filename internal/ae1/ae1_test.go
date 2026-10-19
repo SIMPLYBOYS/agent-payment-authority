@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
 )
 
 func req(p, v string) Req { return Req{Product: p, Verdict: v} }
@@ -232,5 +233,42 @@ func TestLoad(t *testing.T) {
 		if _, err := Load(write(g)); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// P2: the unauthorized new spend comes from a reconciliation report; a
+// local anvil one says it closes nothing; a spend is listed; anything that
+// is not a report is refused, and the spend stays not evaluated.
+func TestReconciled(t *testing.T) {
+	r := Build(nil, map[string]Plan{}, Thresholds{})
+	if r.UnauthorizedSpend != "not_evaluated" {
+		t.Fatal(r.UnauthorizedSpend)
+	}
+	rec := reconcile.Report{Version: reconcile.ReportVersion, Environment: "local_anvil", ChainID: 84532, Token: "0x" + strings.Repeat("4", 40),
+		ToBlock: 40, Wallets: []string{"0x" + strings.Repeat("1", 40)}, Known: 3, Unauthorized: []reconcile.SpendView{}}
+	for name, bad := range map[string]func(*reconcile.Report){
+		"another version":     func(x *reconcile.Report) { x.Version = "apa.reconciliation.v0" },
+		"another environment": func(x *reconcile.Report) { x.Environment = "mainnet" },
+		"no wallets":          func(x *reconcile.Report) { x.Wallets = nil },
+		"no spend list":       func(x *reconcile.Report) { x.Unauthorized = nil },
+	} {
+		x := rec
+		bad(&x)
+		if err := r.Reconciled(x); err == nil || r.UnauthorizedSpend != "not_evaluated" {
+			t.Fatalf("%s: %v %s", name, err, r.UnauthorizedSpend)
+		}
+	}
+	if err := r.Reconciled(rec); err != nil || r.UnauthorizedSpend != "0" {
+		t.Fatalf("zero: %v %s", err, r.UnauthorizedSpend)
+	}
+	md := r.Markdown()
+	if !strings.Contains(md, "**0 筆（本機 anvil（P2-a，測試金鑰；不關閉驗收 18）") || slices.Contains(r.Notes, notEvaluatedNote) ||
+		!slices.ContainsFunc(r.Notes, func(n string) bool { return strings.Contains(n, "does not close acceptance 18") }) {
+		t.Fatalf("local anvil: %v\n%s", r.Notes, md)
+	}
+	rec.Unauthorized = []reconcile.SpendView{{From: rec.Wallets[0], To: "0x" + strings.Repeat("9", 40), Value: "1000", Tx: "0x" + strings.Repeat("a", 64), Block: 39}}
+	r2 := Build(nil, map[string]Plan{}, Thresholds{})
+	if err := r2.Reconciled(rec); err != nil || r2.UnauthorizedSpend != "1" || !strings.Contains(r2.Markdown(), "| 1000 |") {
+		t.Fatalf("one spend: %v %s\n%s", err, r2.UnauthorizedSpend, r2.Markdown())
 	}
 }

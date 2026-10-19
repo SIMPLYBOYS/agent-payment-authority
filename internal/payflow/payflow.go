@@ -61,6 +61,28 @@ type ShopAnswer struct {
 	Body     []byte
 }
 
+// Known are the authorizations the Store recorded as signed, for the
+// reconciliation (reconcile.Token.Report).
+func Known(st *store.Store) ([]reconcile.Authorization, error) {
+	raws, err := st.SignedAuthorizations()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]reconcile.Authorization, 0, len(raws))
+	for _, raw := range raws {
+		var a signer.SignedAuthorization
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return nil, err
+		}
+		ra, err := authorization(a)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ra)
+	}
+	return out, nil
+}
+
 // HTTPShop is the shop over HTTP: a GET with the PAYMENT-SIGNATURE, never
 // redirected (a 3xx is no answer, the chain decides). A body over MaxBody
 // is ErrTooLarge (its hash would not be the content's). Client is

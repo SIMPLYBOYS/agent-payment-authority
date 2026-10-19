@@ -5,7 +5,9 @@ package main
 // file names. No chain runs here (the RPC is a closed local port).
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -17,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
 )
 
 func TestPaymentsConfigRefused(t *testing.T) {
@@ -121,5 +124,38 @@ func TestPaymentCapabilityStated(t *testing.T) {
 	on, off := &api{payments: true}, &api{}
 	if on.capability() != LocalAnvil || off.capability() != "unavailable" || on.approvalsCapability() != LocalAnvil || off.approvalsCapability() != "not_enabled" {
 		t.Fatal("capability")
+	}
+}
+
+// GET /api/host/reconciliation: the host's (or operator's) only; 404
+// payments_off without --payments; the report as the Reconciler made it;
+// 503 when the chain does not answer.
+func TestReconciliationRoute(t *testing.T) {
+	a := &api{addr: "127.0.0.1:8402", tokens: []demoToken{{grant{Role: "host"}, "tok-host"}, {grant{Role: "viewer", ConsumerID: "consumer-a"}, "tok-viewer"}}}
+	get := func(tok string) (int, map[string]any) {
+		req := httptest.NewRequest("GET", "http://127.0.0.1:8402/api/host/reconciliation", nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		rec := httptest.NewRecorder()
+		a.reconciliation(rec, req)
+		var m map[string]any
+		json.NewDecoder(rec.Body).Decode(&m)
+		return rec.Code, m
+	}
+	if code, m := get("tok-host"); code != 404 || m["error"] != "payments_off" {
+		t.Fatalf("without --payments: %d %v", code, m)
+	}
+	var fail error
+	a.recon = func(context.Context) (reconcile.Report, error) {
+		return reconcile.Report{Version: reconcile.ReportVersion, Environment: "local_anvil", Known: 2, Unauthorized: []reconcile.SpendView{}}, fail
+	}
+	if code, m := get("tok-viewer"); code != 403 {
+		t.Fatalf("a viewer: %d %v", code, m)
+	}
+	if code, m := get("tok-host"); code != 200 || m["environment"] != "local_anvil" || m["known_authorizations"] != float64(2) {
+		t.Fatalf("the host: %d %v", code, m)
+	}
+	fail = errors.New("node down")
+	if code, m := get("tok-host"); code != 503 || m["error"] != "chain_unavailable" {
+		t.Fatalf("no chain: %d %v", code, m)
 	}
 }

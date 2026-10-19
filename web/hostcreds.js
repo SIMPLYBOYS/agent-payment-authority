@@ -195,7 +195,15 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
     if (g !== gen) return null;
     if (r.status === 401) { unauthorized(g); return null; }
     if (r.status !== 200) return { error: "status_" + r.status };
-    return { status: r.body };
+    const out = { status: r.body };
+    if (r.body && r.body.payment_capability === "local_anvil") { // P2-a: the reconciliation, read with the same token
+      try {
+        const c = await call(held.host, "/api/host/reconciliation", abort.signal);
+        if (g !== gen) return null;
+        out.reconciliation = c.status === 200 ? c.body : { error: (c.body && c.body.error) || "status_" + c.status };
+      } catch { out.reconciliation = { error: "unreachable" }; }
+    }
+    return out;
   }
 
   // operatorCall sends one control request of generation g; null when the

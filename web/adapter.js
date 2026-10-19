@@ -635,6 +635,20 @@ export function paymentText(pv) {
 const ENDED_ASK = "task 已結束：這筆不能核准，到期後關閉；不會付款";
 const denied = (decisions) => decisions.some((d) => d && d.policy_verdict === "Deny");
 
+// reconciliationRow is the host page's reconciliation row (P2,
+// docs/commercial-p2-host.md 7) from GET /api/host/reconciliation: an
+// unauthorized new spend is an error; one not read is unconfirmed.
+export function reconciliationRow(rec) {
+  if (!rec) return ["對帳", "unconfirmed", "未確認：讀取中"];
+  if (rec.error) return ["對帳", "error", "無法對帳（" + str(rec.error) + "），未確認"];
+  const env = rec.environment === "local_anvil" ? "本機 anvil" : str(rec.environment);
+  const where = env + "；區塊 " + str(rec.from_block) + "–" + str(rec.to_block) + "；錢包 " + (rec.wallets || []).length + " 個、已記錄授權 " + str(rec.known_authorizations) + " 筆";
+  const spends = rec.unauthorized || [];
+  if (spends.length === 0) return ["對帳", "ok", "未授權新增支出 0 筆（" + where + "）"];
+  return ["對帳", "error", "未授權新增支出 " + spends.length + " 筆（" + where + "）："
+    + spends.slice(0, 3).map((s) => amount(s.value) + " 於區塊 " + str(s.block) + "（" + short(s.tx) + "）").join("；") + (spends.length > 3 ? "；…" : "")];
+}
+
 // paymentSteps are the payment's steps from its Store events; an ending
 // (not paid, or for review) replaces the steps it cut off.
 function paymentSteps(at, step, pv) {

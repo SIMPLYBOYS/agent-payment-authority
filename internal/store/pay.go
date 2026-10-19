@@ -609,7 +609,7 @@ type ApprovalItem struct {
 	Payer      string           `json:"payer"`
 	Purchase   PurchaseView     `json:"purchase"`
 	Delegation *DelegationView  `json:"delegation,omitempty"`
-	Attempt    *ApprovalAttempt `json:"attempt,omitempty"` // A2: the session's latest webauthn attempt
+	Attempt    *ApprovalAttempt `json:"attempt,omitempty"`    // A2: the session's latest webauthn attempt
 	TaskEnded  bool             `json:"task_ended,omitempty"` // a CLI timeout, a cancel or a Deny: a pending Ask is decided by nobody now
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 )
 
@@ -117,12 +119,39 @@ type api struct {
 	sim      *simulator   // fake mode with --scenarios: the simulated approver (P1-a); nil otherwise
 	out      io.Writer    // the host's log (fixed lines only)
 	payments bool         // P2-a: --payments (LocalAnvil)
+
+	recon func(context.Context) (reconcile.Report, error) // P2-a: the reconciliation; nil without --payments
 }
 
 func (a *api) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tasks", a.tasks)
 	mux.HandleFunc("GET /api/tasks/{task_id}", a.task)
 	mux.HandleFunc("GET /api/tasks/{task_id}/events", a.events)
+	mux.HandleFunc("GET /api/host/reconciliation", a.reconciliation)
+}
+
+// reconciliation is GET /api/host/reconciliation (host or operator): the
+// payer wallets' transfers against the authorizations the Store recorded
+// (P2, docs/commercial-p2-host.md 7). 404 payments_off without --payments.
+func (a *api) reconciliation(w http.ResponseWriter, r *http.Request) {
+	g, ok := a.authorize(w, r)
+	if !ok {
+		return
+	}
+	if g.Role != "host" && g.Role != "operator" {
+		fail(w, http.StatusForbidden, "host_only")
+		return
+	}
+	if a.recon == nil {
+		fail(w, http.StatusNotFound, "payments_off")
+		return
+	}
+	rep, err := a.recon(r.Context())
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "chain_unavailable")
+		return
+	}
+	reply(w, http.StatusOK, rep)
 }
 
 func reply(w http.ResponseWriter, status int, v any) {

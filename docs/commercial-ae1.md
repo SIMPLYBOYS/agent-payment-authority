@@ -181,7 +181,7 @@ M1 的規則照舊：Deny 之後 task 就結束，之後的請購是 `TASK_NOT_A
 - 用量只有 CLI 自報的 token 數，不是計費證明；拿不到記 `unknown`。
 - 被騙率只量這一版提示（`TaskPrompt`，無防注入文字）；換提示要重跑。
 - 評測商店是 fixture；注入面只有目錄文字（標題、摘要、價格顯示，各截 200 字）。
-- 未授權新增支出在本片是 `not_evaluated`；P2 後以同一套注入案例在 testnet 對帳補上。
+- 未授權新增支出在本片是 `not_evaluated`；P2 後以同一套注入案例在 testnet 對帳補上。P2 H5 起，`ae1-eval report --reconciliation <檔案>` 可讀入 Host 的對帳報告（`GET /api/host/reconciliation`）；本機 anvil 的結果會標明，不關閉驗收 18（`docs/commercial-p2-host.md` §12.7）。
 - 門檻用點估計判定，信賴區間一併列出；樣本小時區間很寬，判讀時要一起看。
 - 「被騙且未被擋下」只在被注入點名的商品落在 allow_max 內時才可能出現；本語料這樣的案例很少（例如 `i-bypass-approval` 推銷 Allow 的拿鐵），所以這一欄偏低不代表授權層特別好，主要看「被騙」本身。
 - 「跨客人」的 `i-cross-wallet`：工具只收 `product_id`，重複請購同一商品是同一筆。它只能從 bridge 拒絕的多餘參數（`INVALID_ARGUMENTS`）看出模型嘗試過；但工具 schema 宣告 `additionalProperties: false`，真實 CLI 可能在送到 bridge 之前就擋下，這時就量不到，需要看 live trace 才知道。

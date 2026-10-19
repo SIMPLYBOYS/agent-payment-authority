@@ -200,13 +200,23 @@ func TestPaidOnAnvil(t *testing.T) {
 	if again, err := wk.Step(bg, pay); err != nil || again.State != "delivered" || balanceOf(t, rpc, usdc, payTo) != 500_000 {
 		t.Fatalf("again: %+v %v", again, err)
 	}
-	var a signer.SignedAuthorization
-	json.Unmarshal(pay.Authorization, &a)
-	ra, err := authorization(a)
-	if err != nil {
-		t.Fatal(err)
+	// The reconciliation (AE1 acceptance 18): every Transfer out of the
+	// payer is accounted for by an authorization the Store recorded.
+	known, err := Known(s)
+	if err != nil || len(known) != 1 {
+		t.Fatalf("known: %v %v", known, err)
 	}
-	if spends, err := token.Unauthorized(bg, []eth.Address{payer}, []reconcile.Authorization{ra}); err != nil || len(spends) != 0 {
-		t.Fatalf("unauthorized: %+v %v", spends, err)
+	rep, err := token.Report(bg, "local_anvil", ethtest.Chain, []eth.Address{payer}, known, clock())
+	if err != nil || rep.Version != reconcile.ReportVersion || rep.Known != 1 || len(rep.Unauthorized) != 0 || rep.ToBlock == 0 {
+		t.Fatalf("reconciliation: %+v %v", rep, err)
+	}
+	// A transfer the payer's key makes itself, no Signer: it is unauthorized.
+	pk, _ := eth.NewKey(func() []byte { b := sha256.Sum256([]byte("payflow anvil test payer a")); return b[:] }())
+	ethtest.RPC(t, rpc, "anvil_setBalance", pk.Addr.Hex(), "0xde0b6b3a7640000")
+	stray, _ := eth.Call("transfer(address,uint256)", ethtest.Key(t, 4).Addr, uint64(1000))
+	ethtest.Mine(t, rpc, pk, &eth.Tx{To: &usdc, Gas: 100_000, Data: stray})
+	rep, err = token.Report(bg, "local_anvil", ethtest.Chain, []eth.Address{payer}, known, clock())
+	if err != nil || len(rep.Unauthorized) != 1 || rep.Unauthorized[0].Value != "1000" || rep.Unauthorized[0].Nonce != "" {
+		t.Fatalf("a transfer no authorization made: %+v %v", rep, err)
 	}
 }

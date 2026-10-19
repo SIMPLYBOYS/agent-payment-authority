@@ -38,6 +38,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/ae1"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/toolbridge"
 )
 
@@ -487,11 +488,25 @@ func report(args []string, out io.Writer) error {
 	corpusPath := fs.String("corpus", "testdata/ae1/corpus.json", "the frozen corpus every row must come from")
 	thresholdsPath := fs.String("thresholds", "testdata/ae1/thresholds.json", "D2's thresholds")
 	reps := fs.Int("reps", 0, "runs per case and model the batches meant to make (D4: 3)")
+	reconciliation := fs.String("reconciliation", "", "P2: the host's reconciliation report (GET /api/host/reconciliation) for the unauthorized new spend")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *outDir == "" || fs.NArg() == 0 || *reps < 1 {
-		return errors.New("usage: ae1-eval report --out DIR --reps N [--corpus FILE] RESULTS.jsonl...")
+		return errors.New("usage: ae1-eval report --out DIR --reps N [--corpus FILE] [--reconciliation FILE] RESULTS.jsonl...")
+	}
+	var rec *reconcile.Report
+	if *reconciliation != "" {
+		raw, err := os.ReadFile(*reconciliation)
+		if err != nil {
+			return err
+		}
+		d := json.NewDecoder(bytes.NewReader(raw))
+		d.DisallowUnknownFields()
+		rec = &reconcile.Report{}
+		if err := d.Decode(rec); err != nil {
+			return fmt.Errorf("--reconciliation: %w", err)
+		}
 	}
 	corpus, err := ae1.Load(*corpusPath)
 	if err != nil {
@@ -522,7 +537,13 @@ func report(args []string, out io.Writer) error {
 	if err := os.Mkdir(*outDir, 0o700); err != nil {
 		return fmt.Errorf("--out must be a new directory: %w", err)
 	}
-	return writeReport(*outDir, ae1.Build(rows, plans, thr), out)
+	r := ae1.Build(rows, plans, thr)
+	if rec != nil {
+		if err := r.Reconciled(*rec); err != nil {
+			return err
+		}
+	}
+	return writeReport(*outDir, r, out)
 }
 
 // checkMerge refuses rows that cannot be one evaluation (review 2): another

@@ -182,3 +182,14 @@ test("with local_anvil a person's grant, a record by the other method and the so
   assert.match(AP.sourceText({ agent: "fake", authenticator: "virtual", payment: "local_anvil" }), /付款：本機 anvil/);
   assert.match(AP.sourceText({ agent: "fake", authenticator: "virtual", payment: "disabled" }), /付款：未啟用/);
 });
+
+test("the host page's reconciliation row: zero is ok, a spend is an error, unread is unconfirmed", () => {
+  const rec = { version: "apa.reconciliation.v1", environment: "local_anvil", chain_id: 84532, from_block: 0, to_block: 40, wallets: ["0x1", "0x2"],
+    known_authorizations: 3, unauthorized: [] };
+  assert.deepEqual(A.reconciliationRow(rec), ["對帳", "ok", "未授權新增支出 0 筆（本機 anvil；區塊 0–40；錢包 2 個、已記錄授權 3 筆）"]);
+  const bad = A.reconciliationRow({ ...rec, unauthorized: [{ from: "0x1", to: "0x9", value: "1000", tx: "0x" + "a".repeat(64), block: 39 }] });
+  assert.equal(bad[1], "error");
+  assert.match(bad[2], /^未授權新增支出 1 筆/);
+  assert.equal(A.reconciliationRow(undefined)[1], "unconfirmed");
+  assert.deepEqual(A.reconciliationRow({ error: "chain_unavailable" }), ["對帳", "error", "無法對帳（chain_unavailable），未確認"]);
+});

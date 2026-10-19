@@ -132,6 +132,20 @@ func paymentSigner(socket string) error {
 	return nil
 }
 
+// reconciliation is the Host's reconciliation on this local chain
+// (docs/commercial-p2-host.md 7; AE1 acceptance 18): every confirmed
+// transfer out of the payer wallets against every authorization the Store
+// recorded as signed.
+func (p *payments) reconciliation(ctx context.Context, st *store.Store, wallets []eth.Address, now uint64) (reconcile.Report, error) {
+	known, err := payflow.Known(st)
+	if err != nil {
+		return reconcile.Report{}, err
+	}
+	token, _ := eth.ParseAddress(p.cfg.Token)
+	t := reconcile.Token{RPC: p.rpc, Address: token, Confirmations: p.cfg.Confirmations, FromBlock: p.cfg.TokenFromBlock}
+	return t.Report(ctx, "local_anvil", p.cfg.ChainID, wallets, known, now) // P2-a: openPayments took a local anvil only
+}
+
 // payMargin: no new step this close to valid_before; more than the shop's
 // own 5 s plus signing.
 const payMargin = 30

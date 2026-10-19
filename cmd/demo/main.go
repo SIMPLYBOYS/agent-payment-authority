@@ -33,9 +33,11 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/config"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signerclient"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/toolbridge"
@@ -404,6 +406,17 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	}
 	mux := newMux(shop, capability)
 	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: runner != nil && !live, out: d.out, payments: pay != nil}
+	if pay != nil {
+		var wallets []eth.Address
+		for _, w := range regCfg.Wallets {
+			if wa, err := eth.ParseAddress(w.From); err == nil {
+				wallets = append(wallets, wa)
+			}
+		}
+		ui.recon = func(ctx context.Context) (reconcile.Report, error) {
+			return pay.reconciliation(ctx, st, wallets, d.clock())
+		}
+	}
 	var pairCode string
 	if *pairingOn {
 		if ui.pairing, pairCode, err = newPairing(now); err != nil {

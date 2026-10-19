@@ -8,6 +8,7 @@ package reconcile
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -223,16 +224,22 @@ type Spend struct {
 // unauthorized new token transfer" (AE1, P2); approvals and permits, which
 // move nothing themselves, are not looked at.
 func (t Token) Unauthorized(ctx context.Context, wallets []eth.Address, known []Authorization) ([]Spend, error) {
+	out, _, err := t.unauthorizedAt(ctx, wallets, known)
+	return out, err
+}
+
+// unauthorizedAt is Unauthorized and the confirmed block it read up to.
+func (t Token) unauthorizedAt(ctx context.Context, wallets []eth.Address, known []Authorization) ([]Spend, uint64, error) {
 	at, err := t.confirmed(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	seen := map[eth.Address]bool{}
 	signed := map[[2][32]byte]Authorization{}
 	for _, a := range known {
 		k := [2][32]byte{word(a.From), a.Nonce}
 		if _, dup := signed[k]; dup {
-			return nil, fmt.Errorf("reconcile: two known authorizations of %s share a nonce", a.From.Hex())
+			return nil, 0, fmt.Errorf("reconcile: two known authorizations of %s share a nonce", a.From.Hex())
 		}
 		signed[k] = a
 	}
@@ -244,7 +251,7 @@ func (t Token) Unauthorized(ctx context.Context, wallets []eth.Address, known []
 		seen[w] = true
 		logs, err := t.logs(ctx, [][32]byte{transferTopic, word(w)}, at)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		for _, l := range logs {
 			if len(l.Topics) != 3 {
@@ -253,12 +260,12 @@ func (t Token) Unauthorized(ctx context.Context, wallets []eth.Address, known []
 			to, err1 := eth.WordAddress(l.Topics[2][:])
 			v, err2 := eth.Uint(l.Data, 0)
 			if err := errors.Join(err1, err2); err != nil {
-				return nil, fmt.Errorf("reconcile: a Transfer log: %w", err)
+				return nil, 0, fmt.Errorf("reconcile: a Transfer log: %w", err)
 			}
 			s := Spend{From: w, To: to, Value: v, Tx: l.TxHash, Block: l.BlockNumber}
 			rc, err := t.receipt(ctx, l, at)
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			var ok bool
 			if s.Nonce, ok = accounted(rc, t.Address, w, l, signed); !ok {
@@ -266,5 +273,63 @@ func (t Token) Unauthorized(ctx context.Context, wallets []eth.Address, known []
 			}
 		}
 	}
-	return out, nil
+	return out, at, nil
+}
+
+// ReportVersion is the reconciliation report's format.
+const ReportVersion = "apa.reconciliation.v1"
+
+// Environments a report may come from: a local anvil (P2-a, test keys;
+// never closes AE1 acceptance 18) or Base Sepolia (P2-c).
+var Environments = []string{"local_anvil", "base_sepolia"}
+
+// Report is one reconciliation of wallets (P2, docs/commercial-p2-host.md 7;
+// AE1 acceptance 18): every confirmed Transfer out of them, from FromBlock
+// to ToBlock, that none of the Known authorizations the Host recorded
+// accounts for. Unauthorized empty is "unauthorized new spend = 0" there.
+type Report struct {
+	Version      string      `json:"version"`
+	Environment  string      `json:"environment"`
+	ChainID      uint64      `json:"chain_id"`
+	Token        string      `json:"token"`
+	FromBlock    uint64      `json:"from_block"`
+	ToBlock      uint64      `json:"to_block"` // the confirmed block it read up to
+	Wallets      []string    `json:"wallets"`
+	Known        int         `json:"known_authorizations"`
+	Unauthorized []SpendView `json:"unauthorized"`
+	ReadAt       uint64      `json:"read_at"` // the host's clock
+}
+
+// SpendView is a Spend as the report writes it.
+type SpendView struct {
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Value string `json:"value"`
+	Tx    string `json:"tx"`
+	Block uint64 `json:"block"`
+	Nonce string `json:"nonce,omitempty"` // its EIP-3009 nonce, when it used one
+}
+
+// Report reconciles wallets against known on environment's chain.
+func (t Token) Report(ctx context.Context, environment string, chainID uint64, wallets []eth.Address, known []Authorization, now uint64) (Report, error) {
+	if !slices.Contains(Environments, environment) {
+		return Report{}, fmt.Errorf("reconcile: environment %q", environment)
+	}
+	spends, at, err := t.unauthorizedAt(ctx, wallets, known)
+	if err != nil {
+		return Report{}, err
+	}
+	r := Report{Version: ReportVersion, Environment: environment, ChainID: chainID, Token: t.Address.Hex(), FromBlock: t.FromBlock, ToBlock: at,
+		Known: len(known), Unauthorized: []SpendView{}, ReadAt: now}
+	for _, w := range wallets {
+		r.Wallets = append(r.Wallets, w.Hex())
+	}
+	for _, s := range spends {
+		v := SpendView{From: s.From.Hex(), To: s.To.Hex(), Value: s.Value.String(), Tx: "0x" + hex.EncodeToString(s.Tx[:]), Block: s.Block}
+		if s.Nonce != nil {
+			v.Nonce = "0x" + hex.EncodeToString(s.Nonce[:])
+		}
+		r.Unauthorized = append(r.Unauthorized, v)
+	}
+	return r, nil
 }

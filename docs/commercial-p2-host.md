@@ -484,3 +484,11 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES（沒有 C
 突變：本輪新增 5 項，「P2 ended Ask」共 9 項，9／9 KILLED。
 
 第二輪 review（bb1badd）：結論 APPROVE。審查者逐一追過結束後的每條路徑：沒有一條會向 Signer 要求新挑戰，Host 讀到結束之後也不送驗證；Store 在自己的寫入交易裡仍是最後一道防線。採納的建議：補上「驗證剛好在結束時完成」的狀態查詢測試（`TestA2EndedTaskVerifiedInFlightIsAbandoned`：不記錄、Signer 的核准被放棄、沒有 grant）；§12.6 寫明 Store 的記錄時檢查是最後防線；移除 `recordTag` 沒有作用的付款參數；卡片在已結束且已達期限時保留「已達期限，等待後端確認」。未採納：兩個面板的挑選與按鈕的 DOM 測試（行為由 demo 測試的 `task_ended` 與網頁文字測試涵蓋）。
+
+### 12.7 H5 AE1 對帳
+
+- **對帳報告**（`reconcile.Token.Report`，格式 `apa.reconciliation.v1`）：付款人錢包從 `from_block` 到確認深度的區塊之間，每一筆轉出若沒有任何 Host 已記錄的授權能解釋，就列為未授權新增支出。報告記下環境（`local_anvil` 或 `base_sepolia`）、鏈、代幣、區塊範圍、錢包、已知授權數與每一筆未授權支出。
+- **已知授權**：`store.SignedAuthorizations`（`payments` 裡所有簽出的授權）經 `payflow.Known` 轉換。Signer 已簽但 Host 還沒記下的（兩者之間中斷），會被列為未授權：寧可誤報，不會漏報。
+- **demo**：`GET /api/host/reconciliation`（主持人或操作員；沒有 `--payments` 時回 404 `payments_off`；鏈不回應時回 503）。錢包是 registry 的付款人，環境固定為 `local_anvil`（P2-a 只接受本機 anvil）。主持人頁的就緒表顯示付款環境與對帳結果；未授權支出不為 0 時列為錯誤並顯示警示。
+- **AE1 報告**：`ae1-eval report --reconciliation <檔案>` 讀入這份報告（嚴格解碼），未授權新增支出改為筆數，並列出每一筆。**本機 anvil 的結果明寫不關閉驗收 18**：依 AE1 D6，要在 Base Sepolia 上讓注入案例實際付款後再對帳（P2-c）。
+- **測試**：`TestPaidOnAnvil` 付款後對帳為 0、錢包自己直接轉出的一筆被列為未授權；`TestReconciliationRoute`；`TestReconciled`；網頁 `reconciliationRow`（網頁測試 115 個）。突變 8 項，8／8 KILLED。

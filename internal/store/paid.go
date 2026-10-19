@@ -574,6 +574,28 @@ func (s *Store) PayTasks() ([]PayTask, error) {
 	return out, nil
 }
 
+// SignedAuthorizations are every authorization the Signer signed that a
+// payment recorded (PaymentSigned), in no order: what the reconciliation
+// counts as authorized (docs/commercial-p2-host.md 7). One signed but not
+// yet recorded (the Host stopped in between) is not among them, so its
+// transfer would read as unauthorized: the safe side.
+func (s *Store) SignedAuthorizations() ([]json.RawMessage, error) {
+	rows, err := s.r.Query(`SELECT authorization FROM payments WHERE authorization IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	var out []json.RawMessage
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out = append(out, json.RawMessage(a))
+	}
+	return out, drained(rows)
+}
+
 func (s *Store) paymentByIntent(intent string) (Payment, error) {
 	p, err := scanPaid(s.r.QueryRow(paidWhere(`p.intent_hash = ?`), intent))
 	if errors.Is(err, sql.ErrNoRows) {
