@@ -141,7 +141,7 @@ func (p *payments) run(ctx context.Context, st *store.Store, socket string, cloc
 	token, _ := eth.ParseAddress(p.cfg.Token)
 	starter := &payflow.Starter{Store: st, Register: p.relayer.RegisterTask, Delegations: p.cfg.Delegations,
 		Log: func(what string, err error) { fmt.Fprintln(p.out, "demo: payment", what, store.CodeOf(err)) }}
-	w := &payflow.Worker{Store: st, Relayer: p.relayer, Signer: signerclient.New(socket, nil),
+	w := &payflow.Worker{Store: st, Relayer: p.relayer, Signer: signerclient.New(socket, st),
 		Shop:  payflow.HTTPShop{Client: &http.Client{Timeout: 30 * time.Second}},
 		Chain: reconcile.Token{RPC: p.rpc, Address: token, Confirmations: p.cfg.Confirmations, FromBlock: p.cfg.TokenFromBlock},
 		Clock: clock, Margin: payMargin, Before: starter.Start,

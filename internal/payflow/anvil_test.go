@@ -176,7 +176,7 @@ func TestPaidOnAnvil(t *testing.T) {
 		t.Fatal(err)
 	}
 	token := reconcile.Token{RPC: rpc, Address: usdc, Confirmations: 1}
-	wk := &Worker{Store: s, Relayer: relayer, Signer: signerclient.New(socket, nil), Shop: HTTPShop{Client: srv.Client()}, Chain: token,
+	wk := &Worker{Store: s, Relayer: relayer, Signer: signerclient.New(socket, s), Shop: HTTPShop{Client: srv.Client()}, Chain: token,
 		Clock: clock, Margin: 30}
 	deadline := time.Now().Add(90 * time.Second)
 	for pay.State != "delivered" && time.Now().Before(deadline) {

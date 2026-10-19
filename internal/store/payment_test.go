@@ -121,14 +121,16 @@ func TestPaymentRefusals(t *testing.T) {
 		edit func(*PaymentRequest)
 		want string
 	}{
-		"webauthn":         {func(r *PaymentRequest) { r.Method = "webauthn" }, "HUMAN_APPROVAL_UNAVAILABLE"},
-		"simulated":        {func(r *PaymentRequest) { r.Method = "simulated" }, "GRANT_METHOD_NOT_ACCEPTED"},
-		"no delegation":    {func(r *PaymentRequest) { r.DelegationRef = "" }, "DELEGATION_REF_REQUIRED"},
-		"no version":       {func(r *PaymentRequest) { r.DelegationRef = "dlg-a" }, "DELEGATION_REF_REQUIRED"},
-		"another consumer": {func(r *PaymentRequest) { r.ConsumerID = "consumer-b" }, "OWNERSHIP_MISMATCH"},
-		"unknown task":     {func(r *PaymentRequest) { r.TaskID = "task-z" }, "OWNERSHIP_MISMATCH"},
-		"unknown purchase": {func(r *PaymentRequest) { r.PurchaseOrderID = "po-none" }, "UNKNOWN_PURCHASE"},
-		"an Ask":           {func(r *PaymentRequest) { r.PurchaseOrderID = ask }, "PAYMENT_NOT_ALLOWED"},
+		"webauthn naming a delegation": {func(r *PaymentRequest) { r.Method = "webauthn" }, "GRANT_METHOD_NOT_ACCEPTED"},
+		"webauthn for an Allow":        {func(r *PaymentRequest) { r.Method, r.DelegationRef = "webauthn", "" }, "PAYMENT_NOT_ALLOWED"},
+		"webauthn for an open Ask":     {func(r *PaymentRequest) { r.Method, r.DelegationRef, r.PurchaseOrderID = "webauthn", "", ask }, "PAYMENT_NOT_ALLOWED"},
+		"simulated":                    {func(r *PaymentRequest) { r.Method = "simulated" }, "GRANT_METHOD_NOT_ACCEPTED"},
+		"no delegation":                {func(r *PaymentRequest) { r.DelegationRef = "" }, "DELEGATION_REF_REQUIRED"},
+		"no version":                   {func(r *PaymentRequest) { r.DelegationRef = "dlg-a" }, "DELEGATION_REF_REQUIRED"},
+		"another consumer":             {func(r *PaymentRequest) { r.ConsumerID = "consumer-b" }, "OWNERSHIP_MISMATCH"},
+		"unknown task":                 {func(r *PaymentRequest) { r.TaskID = "task-z" }, "OWNERSHIP_MISMATCH"},
+		"unknown purchase":             {func(r *PaymentRequest) { r.PurchaseOrderID = "po-none" }, "UNKNOWN_PURCHASE"},
+		"an Ask":                       {func(r *PaymentRequest) { r.PurchaseOrderID = ask }, "PAYMENT_NOT_ALLOWED"},
 		"an M1 task": {func(r *PaymentRequest) {
 			r.ConsumerID, r.TaskID, r.PurchaseOrderID = "consumer-b", "task-b", forTask(t, e.allow, "task-b").Intent.PurchaseOrderID
 		}, "CONTRACT_VERSION_MISMATCH"},
@@ -206,7 +208,10 @@ func TestPaymentSchemaChecks(t *testing.T) {
 // payments and receipts.
 func toSchema6(t *testing.T, path string) {
 	t.Helper()
-	if _, err := rawDB(t, path).Exec(`DROP TABLE receipts; DROP TABLE payments; PRAGMA user_version = 6`); err != nil {
+	// payment_attempts as schema 4 made it (delegation only, no approval_id).
+	cols := `request_id, task_id, purchase_order_id, intent_hash, method, delegation_ref, signer_attempt_id, state, error_code, requested_at, updated_at`
+	if _, err := rawDB(t, path).Exec(`DROP TABLE receipts; DROP TABLE payments; ALTER TABLE payment_attempts RENAME TO pa7;` + schema4 +
+		`INSERT INTO payment_attempts (` + cols + `) SELECT ` + cols + ` FROM pa7; DROP TABLE pa7; PRAGMA user_version = 6`); err != nil {
 		t.Fatal(err)
 	}
 }

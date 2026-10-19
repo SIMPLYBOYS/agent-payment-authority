@@ -1,11 +1,12 @@
 package store
 
 // The Host's mirror of payment attempts (P1-b; docs/commercial-p1b-design.md
-// 6.4): one row per allowed apa.pay.v1 purchase sent to the Signer under a
-// standing delegation. The request ID is made and committed here before the
-// Signer is called, and is the only key the Host ever uses for it. The row
-// holds no signature and no grant: schema 4 cannot refer to a simulated
-// grant, and the only method is delegation (webauthn is A2's migration).
+// 6.4): one row per purchase sent to the Signer, an Allow under a standing
+// delegation or (P2, docs/commercial-p2-host.md 3) an Ask a person approved
+// under the grant's Signer approval. The request ID is made and committed
+// here before the Signer is called, and is the only key the Host ever uses
+// for it. The row holds no signature and no grant (schema 7 adds the
+// approval ID; a simulated grant never pays).
 
 import (
 	"crypto/rand"
@@ -42,32 +43,33 @@ CREATE TABLE payment_attempts (
 // delegationRefPattern is a standing delegation's ID and version, id@version.
 var delegationRefPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}@[1-9][0-9]{0,9}$`)
 
-// PaymentRequest asks to pay one allowed purchase. ConsumerID and
-// DelegationRef come from the Host's trusted configuration and session,
-// never from the Agent.
+// PaymentRequest asks to pay one purchase. ConsumerID and DelegationRef
+// come from the Host's trusted configuration and session, never from the
+// Agent; a webauthn request names no grant (the Store reads its own).
 type PaymentRequest struct {
 	ConsumerID, TaskID, PurchaseOrderID string
-	Method                              string // delegation; anything else is refused before any write
-	DelegationRef                       string // id@version
+	Method                              string // delegation | webauthn; anything else is refused before any write
+	DelegationRef                       string // id@version, for delegation
 }
 
 // PaymentAttempt is a payment_attempts row; Order is its purchase's stored
 // apa.pay.v1 order, what the Signer is sent.
 type PaymentAttempt struct {
 	RequestID, TaskID, PurchaseOrderID, IntentHash string
-	Method, DelegationRef, SignerAttemptID         string
+	Method, DelegationRef, ApprovalID              string // DelegationRef or (webauthn) ApprovalID, the grant's Signer approval
+	SignerAttemptID                                string
 	State, ErrorCode                               string
 	RequestedAt, UpdatedAt                         uint64
 	Order                                          json.RawMessage
 }
 
-const paymentCols = `a.request_id, a.task_id, a.purchase_order_id, a.intent_hash, a.method, a.delegation_ref, coalesce(a.signer_attempt_id, ''),
+const paymentCols = `a.request_id, a.task_id, a.purchase_order_id, a.intent_hash, a.method, coalesce(a.delegation_ref, ''), coalesce(a.approval_id, ''), coalesce(a.signer_attempt_id, ''),
   a.state, coalesce(a.error_code, ''), a.requested_at, a.updated_at, p.body, t.consumer_id`
 
 func scanPayment(row interface{ Scan(...any) error }) (PaymentAttempt, string, error) {
 	var a PaymentAttempt
 	var body, consumer string
-	err := row.Scan(&a.RequestID, &a.TaskID, &a.PurchaseOrderID, &a.IntentHash, &a.Method, &a.DelegationRef, &a.SignerAttemptID,
+	err := row.Scan(&a.RequestID, &a.TaskID, &a.PurchaseOrderID, &a.IntentHash, &a.Method, &a.DelegationRef, &a.ApprovalID, &a.SignerAttemptID,
 		&a.State, &a.ErrorCode, &a.RequestedAt, &a.UpdatedAt, &body, &consumer)
 	a.Order = json.RawMessage(body)
 	return a, consumer, err
@@ -77,22 +79,26 @@ func paymentWhere(cond string) string {
 	return `SELECT ` + paymentCols + ` FROM payment_attempts a JOIN purchases p USING (task_id, purchase_order_id) JOIN tasks t USING (task_id) WHERE ` + cond
 }
 
-// BeginPayment records the request to pay an allowed purchase of the
-// consumer's apa.pay.v1 task, and commits it, before the Signer is called.
+// BeginPayment records the request to pay a purchase of the consumer's
+// pay-family task, and commits it, before the Signer is called: an Allow
+// under a delegation, or an Ask a person approved under its webauthn
+// grant's Signer approval (an unexpired grant).
 // The purchase's existing row is returned as it is (Replay): the Host never
 // makes a second request ID for a purchase. Once the task's cancellation is
 // committed it refuses, the existing row too, so neither a new attempt nor a
 // resend of a requested or unknown one reaches the Signer; Payment still
 // reads it, and the Signer's abandon still applies. A cancellation committed
-// after this transaction does not recall a request already sent.
+// after this transaction does not recall a request already sent. P2: a
+// purchase whose payment has reserved its budget (tx#1 spent) may still be
+// signed after the task ends (docs/commercial-p2-host.md 7).
 func (s *Store) BeginPayment(req PaymentRequest) (PaymentAttempt, bool, error) {
 	switch {
-	case req.Method == "webauthn":
-		return PaymentAttempt{}, false, refuse("HUMAN_APPROVAL_UNAVAILABLE", "webauthn payments are A2's")
-	case req.Method != "delegation":
-		return PaymentAttempt{}, false, refuse("GRANT_METHOD_NOT_ACCEPTED", "a payment is authorized by a standing delegation only")
-	case !delegationRefPattern.MatchString(req.DelegationRef):
+	case req.Method != "delegation" && req.Method != "webauthn":
+		return PaymentAttempt{}, false, refuse("GRANT_METHOD_NOT_ACCEPTED", "a payment is authorized by a standing delegation or a person's approval")
+	case req.Method == "delegation" && !delegationRefPattern.MatchString(req.DelegationRef):
 		return PaymentAttempt{}, false, refuse("DELEGATION_REF_REQUIRED", "delegation_ref is id@version")
+	case req.Method == "webauthn" && req.DelegationRef != "":
+		return PaymentAttempt{}, false, refuse("GRANT_METHOD_NOT_ACCEPTED", "a person's approval names no delegation")
 	}
 	var out PaymentAttempt
 	var replay bool
@@ -104,15 +110,36 @@ func (s *Store) BeginPayment(req PaymentRequest) (PaymentAttempt, bool, error) {
 			return err
 		}
 		p := t.purchases[req.PurchaseOrderID]
+		var reserved int // P2: this purchase's budget already reserved (tx#1 spent)
+		if err := tx.QueryRow(`SELECT count(*) FROM payments WHERE task_id = ? AND purchase_order_id = ? AND reserve_tx IS NOT NULL`, req.TaskID, req.PurchaseOrderID).Scan(&reserved); err != nil {
+			return readErr("payment", req.TaskID, err)
+		}
+		approval := ""
 		switch {
-		case slices.ContainsFunc(t.events, func(e contracts.AuditEvent) bool { return e.EventType == "TASK_CANCELLED" }):
+		case reserved == 0 && slices.ContainsFunc(t.events, func(e contracts.AuditEvent) bool { return e.EventType == "TASK_CANCELLED" }):
 			return refuse("TASK_ALREADY_ENDED", "the task was cancelled: no payment is sent for it")
 		case !t.pay():
 			return refuse("CONTRACT_VERSION_MISMATCH", "only apa.pay.v1 purchases are paid")
 		case p == nil:
 			return refuse("UNKNOWN_PURCHASE", "no such purchase in this task")
-		case p.Decision.PolicyVerdict != "Allow":
+		case req.Method == "delegation" && p.Decision.PolicyVerdict != "Allow":
 			return refuse("PAYMENT_NOT_ALLOWED", "only a purchase the policy allowed is paid under a delegation")
+		case req.Method == "webauthn":
+			if p.Decision.PolicyVerdict != "Ask" || p.Session == nil || p.Session.State != "approved" {
+				return refuse("PAYMENT_NOT_ALLOWED", "only an Ask a person approved is paid under an approval")
+			}
+			var m string
+			var id sql.NullString
+			if err := tx.QueryRow(`SELECT authorization_method, signer_approval_id FROM grants WHERE approval_session_id = ?`, p.Session.ID).Scan(&m, &id); err != nil {
+				return readErr("payment", req.TaskID, err)
+			}
+			if m != "webauthn" || !id.Valid {
+				return refuse("GRANT_METHOD_NOT_ACCEPTED", "only a person's verified approval pays an Ask")
+			}
+			if g := p.Session.Grant; g == nil || g.ExpiresAt <= now {
+				return refuse("PURCHASE_EXPIRED", "the approval's grant has expired")
+			}
+			approval = id.String
 		}
 		// Design 7.1: the credential again, before anything reaches the
 		// Signer; a refusal writes nothing (the status versions seen too).
@@ -123,7 +150,7 @@ func (s *Store) BeginPayment(req PaymentRequest) (PaymentAttempt, bool, error) {
 		}
 		a, _, err := scanPayment(tx.QueryRow(paymentWhere(`a.task_id = ? AND a.purchase_order_id = ?`), req.TaskID, req.PurchaseOrderID))
 		if err == nil {
-			if a.Method != req.Method || a.DelegationRef != req.DelegationRef {
+			if a.Method != req.Method || a.DelegationRef != req.DelegationRef || a.ApprovalID != approval {
 				return refuse("IDEMPOTENCY_CONFLICT", "this purchase was requested under another authorization")
 			}
 			out, replay = a, true
@@ -136,9 +163,9 @@ func (s *Store) BeginPayment(req PaymentRequest) (PaymentAttempt, bool, error) {
 			return err
 		}
 		out = PaymentAttempt{RequestID: "pay-" + hex.EncodeToString(b), TaskID: req.TaskID, PurchaseOrderID: req.PurchaseOrderID, IntentHash: p.Decision.IntentHash,
-			Method: req.Method, DelegationRef: req.DelegationRef, State: "requested", RequestedAt: now, UpdatedAt: now, Order: json.RawMessage(p.Body)}
-		_, err = tx.Exec(`INSERT INTO payment_attempts (request_id, task_id, purchase_order_id, intent_hash, method, delegation_ref, state, requested_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, 'requested', ?, ?)`, out.RequestID, out.TaskID, out.PurchaseOrderID, out.IntentHash, out.Method, out.DelegationRef, now, now)
+			Method: req.Method, DelegationRef: req.DelegationRef, ApprovalID: approval, State: "requested", RequestedAt: now, UpdatedAt: now, Order: json.RawMessage(p.Body)}
+		_, err = tx.Exec(`INSERT INTO payment_attempts (request_id, task_id, purchase_order_id, intent_hash, method, delegation_ref, approval_id, state, requested_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?)`, out.RequestID, out.TaskID, out.PurchaseOrderID, out.IntentHash, out.Method, nullable(out.DelegationRef), nullable(approval), now, now)
 		return err
 	})
 	return out, replay, err
@@ -200,18 +227,26 @@ func (s *Store) Payment(consumerID, requestID string) (PaymentAttempt, error) {
 	return a, err
 }
 
-// verifyPayments is schema 4's recovery check: every row is an allowed
-// purchase of an apa.pay.v1 task with that purchase's intent, under a
-// delegation.
-func verifyPayments(tx *sql.Tx) error {
+// verifyPayments is the recovery check of payment_attempts: every row is a
+// purchase of a pay-family task with that purchase's intent, an Allow under
+// a delegation or (schema 7) an Ask under its webauthn grant's Signer
+// approval; before schema 7 a row is a delegation's only.
+func verifyPayments(tx *sql.Tx, version int) error {
+	methods := `a.method != 'delegation' OR p.policy_verdict != 'Allow' OR a.delegation_ref = ''`
+	if version >= 7 {
+		methods = `a.method = 'delegation' AND (p.policy_verdict != 'Allow' OR a.delegation_ref IS NULL)
+		OR a.method = 'webauthn' AND (p.policy_verdict != 'Ask' OR NOT EXISTS (SELECT 1 FROM approval_sessions s JOIN grants g USING (approval_session_id)
+			WHERE s.task_id = a.task_id AND s.purchase_order_id = a.purchase_order_id AND g.authorization_method = 'webauthn' AND g.signer_approval_id = a.approval_id))
+		OR a.method NOT IN ('delegation', 'webauthn')`
+	}
 	var n int
 	if err := tx.QueryRow(`SELECT count(*) FROM payment_attempts a LEFT JOIN purchases p USING (task_id, purchase_order_id) LEFT JOIN tasks t USING (task_id)
-		WHERE p.task_id IS NULL OR t.contract_version NOT IN ('apa.pay.v1', 'apa.pay.v2') OR p.intent_hash != a.intent_hash OR p.policy_verdict != 'Allow'
-		OR a.method != 'delegation' OR a.delegation_ref = '' OR a.updated_at < a.requested_at`).Scan(&n); err != nil {
+		WHERE p.task_id IS NULL OR t.contract_version NOT IN ('apa.pay.v1', 'apa.pay.v2') OR p.intent_hash != a.intent_hash OR a.updated_at < a.requested_at
+		OR ` + methods).Scan(&n); err != nil {
 		return readErr("payment", "", err)
 	}
 	if n > 0 {
-		return &CorruptError{Check: "payment", Detail: "a payment attempt is not an allowed apa.pay.v1 purchase under a delegation, or its intent differs"}
+		return &CorruptError{Check: "payment", Detail: "a payment attempt is not an Allow under a delegation or an Ask under its person's approval, or its intent differs"}
 	}
 	return nil
 }

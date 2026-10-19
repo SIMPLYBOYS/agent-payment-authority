@@ -25,6 +25,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer/signertest"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signerclient"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
@@ -102,7 +103,7 @@ func newWorld(t *testing.T, n int) *world {
 			w.askSession, w.askIntent, w.askPO = r.Purchase.Approval.SessionID, r.Purchase.IntentHash, r.Purchase.PurchaseOrderID
 		}
 	}
-	w.s = s
+	w.s, w.signer.st = s, s
 	return w
 }
 
@@ -194,35 +195,52 @@ func (r *fakeRelayer) Lookup(_ context.Context, intent string) (budget.Evidence,
 	return budget.Evidence{}, r.state[intent], nil
 }
 
-// fakeSigner signs the order's binding; err is its next answer's error,
-// state its next answer's state (unsigned), tamper changes what it signs.
+// fakeSigner is the Host's Signer client with a stand-in Signer: each
+// request is recorded through the real Store (BeginPayment: the request ID
+// made and committed there, the same one ever after), then answered. err is
+// its next answer's error, state its next answer's state (unsigned), tamper
+// changes what it signs.
 type fakeSigner struct {
-	calls  map[string]int
-	last   signer.SignRequest
-	err    error
-	state  string
-	tamper func(*signer.Transfer)
+	st          *store.Store
+	calls       map[string]int // request ID -> calls
+	last        store.PaymentRequest
+	attempt     store.PaymentAttempt
+	reservation json.RawMessage
+	err         error
+	state       string
+	tamper      func(*signer.Transfer)
 }
 
-func (f *fakeSigner) Sign(_ context.Context, r signer.SignRequest) (signer.Reply, error) {
-	f.calls[r.RequestID]++
-	f.last = r
+func (f *fakeSigner) Pay(req store.PaymentRequest, reservation json.RawMessage) (signerclient.Result, error) {
+	a, _, err := f.st.BeginPayment(req)
+	if err != nil {
+		return signerclient.Result{}, err
+	}
+	f.calls[a.RequestID]++
+	f.last, f.attempt, f.reservation = req, a, reservation
 	if err := f.err; err != nil {
 		f.err = nil
-		return signer.Reply{}, err
+		return signerclient.Result{Attempt: a}, err
 	}
 	if st := f.state; st != "" {
 		f.state = ""
-		return signer.Reply{State: st}, nil
+		a.State = st
+		return signerclient.Result{Attempt: a}, nil
 	}
+	a.State = "signed"
+	return signerclient.Result{Attempt: a, Authorization: f.authorization(a.Order)}, nil
+}
+
+// authorization is the order's binding signed (tampered when asked).
+func (f *fakeSigner) authorization(order json.RawMessage) *signer.SignedAuthorization {
 	var o paycontract.PurchaseOrder
-	contracts.Decode(r.Order, &o)
+	contracts.Decode(order, &o)
 	b := o.PaymentBinding
 	tr := signer.Transfer{From: b.From, To: b.PayTo, Value: string(b.Amount), ValidAfter: b.ValidAfter, ValidBefore: b.ValidBefore, Nonce: b.Nonce}
 	if f.tamper != nil {
 		f.tamper(&tr)
 	}
-	return signer.Reply{State: "signed", Authorization: &signer.SignedAuthorization{Transfer: tr, Signature: "0x" + strings.Repeat("ab", 65)}}, nil
+	return &signer.SignedAuthorization{Transfer: tr, Signature: "0x" + strings.Repeat("ab", 65)}
 }
 
 // fakeShop answers from a script, then repeats its last answer; it keeps
@@ -295,8 +313,8 @@ func TestPaidEndToEnd(t *testing.T) {
 	if w.relayer.reserves != 1 || len(w.signer.calls) != 1 || len(w.shop.sent) != 1 {
 		t.Fatalf("reserves %d, sign requests %d, sent %d", w.relayer.reserves, len(w.signer.calls), len(w.shop.sent))
 	}
-	if a := w.signer.last.Authorization; a.Method != "delegation" || a.DelegationID != "dlg-a" || a.DelegationVersion != 1 || len(w.signer.last.Reservation) == 0 {
-		t.Fatalf("sign request %+v", w.signer.last)
+	if r := w.signer.last; r.Method != "delegation" || r.DelegationRef != "dlg-a@1" || len(w.signer.reservation) == 0 || w.signer.attempt.RequestID == "" {
+		t.Fatalf("sign request %+v %+v", r, w.signer.attempt)
 	}
 	if again, err := w.step("po-1"); err != nil || again.State != "delivered" || w.relayer.calls != 1 {
 		t.Fatalf("a delivered payment moved: %+v %v", again, err)
@@ -343,8 +361,8 @@ func TestLostAnswersNeverPayTwice(t *testing.T) {
 	if p, err := w.step("po-1"); err != nil || p.State != "delivered" {
 		t.Fatalf("again: %+v %v", p, err)
 	}
-	for id, n := range w.signer.calls {
-		if n != 2 || id != SignerRequestID(w.payment("po-1").IntentHash) {
+	for _, n := range w.signer.calls {
+		if n != 2 || len(w.signer.calls) != 1 { // one request ID, the Store's, asked again
 			t.Fatalf("sign requests %v", w.signer.calls)
 		}
 	}
@@ -362,8 +380,7 @@ func TestRecoverSubmitted(t *testing.T) {
 	ev, _ := json.Marshal(w.relayer.evidence(p.IntentHash))
 	w.relayer.state[p.IntentHash] = "reserved"
 	w.s.PaymentReserved(p.IntentHash, store.Reservation{Evidence: ev, TxHash: "0x" + strings.Repeat("1", 64), Block: 7})
-	reply, _ := w.signer.Sign(bg, signer.SignRequest{Order: p.Order})
-	auth, _ := json.Marshal(reply.Authorization)
+	auth, _ := json.Marshal(w.signer.authorization(p.Order))
 	w.s.PaymentSigned(p.IntentHash, auth)
 	if _, err := w.s.PaymentSubmitted(p.IntentHash); err != nil {
 		t.Fatal(err)
@@ -387,7 +404,7 @@ func TestTaskEndedBeforeAndAfterTheReservation(t *testing.T) {
 	w := newWorld(t, 2)
 	w.start("po-1")
 	w.start("po-2")
-	w.signer.err = signer.Refusal("SIGNER_BUSY")
+	w.signer.err = signerclient.Refused("SIGNER_BUSY")
 	w.step("po-2") // reserved, then the Signer is busy
 	if err := w.s.Cancel("task-a"); err != nil {
 		t.Fatal(err)
@@ -414,7 +431,7 @@ func TestRefusals(t *testing.T) {
 	if p, _ := w.step("po-1"); p.State != "reserve_failed" {
 		t.Fatalf("relayer refusal: %+v", p)
 	}
-	w.signer.err = signer.Refusal("OVER_PER_TX")
+	w.signer.err = signerclient.Refused("OVER_PER_TX")
 	if p, _ := w.step("po-2"); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" {
 		t.Fatalf("Signer refusal: %+v", p)
 	}
@@ -473,13 +490,13 @@ func TestTooLate(t *testing.T) {
 	w := newWorld(t, 2)
 	w.start("po-1")
 	w.start("po-2")
-	w.signer.err = signer.Refusal("SIGNER_BUSY")
+	w.signer.err = signerclient.Refused("SIGNER_BUSY")
 	w.step("po-2") // reserved
 	w.now = t0 + 300 - 5
 	if p, _ := w.step("po-1"); p.State != "not_paid_expired" || w.relayer.calls != 1 {
 		t.Fatalf("too late to reserve: %+v, relayer calls %d", p, w.relayer.calls)
 	}
-	w.signer.err = signer.Refusal("SIGNER_BUSY")
+	w.signer.err = signerclient.Refused("SIGNER_BUSY")
 	if p, _ := w.step("po-2"); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" {
 		t.Fatalf("too late to sign: %+v", p)
 	}
@@ -499,8 +516,8 @@ func TestWebAuthnAskPaid(t *testing.T) {
 	if got, err := w.worker().Step(bg, p); err != nil || got.State != "delivered" {
 		t.Fatalf("step %s %v", got.State, err)
 	}
-	if a := w.signer.last.Authorization; a.Method != "webauthn" || a.ApprovalID != "hap-1" || a.DelegationID != "" {
-		t.Fatalf("sign authorization %+v", a)
+	if r, a := w.signer.last, w.signer.attempt; r.Method != "webauthn" || r.DelegationRef != "" || a.ApprovalID != "hap-1" {
+		t.Fatalf("sign request %+v, attempt %+v", r, a)
 	}
 }
 
@@ -590,7 +607,7 @@ func TestRelayerStates(t *testing.T) {
 	if p, err := w.step("po-3"); !errors.Is(err, ErrPending) || p.State != "requested" {
 		t.Fatalf("busy: %+v %v", p, err)
 	}
-	w.signer.err = signer.Refusal("SIGNER_BUSY")
+	w.signer.err = signerclient.Refused("SIGNER_BUSY")
 	if p, _ := w.step("po-3"); p.State != "reserved" || w.relayer.reserves != 1 {
 		t.Fatalf("after busy: %+v, reserves %d", p, w.relayer.reserves)
 	}
@@ -625,7 +642,7 @@ func TestSignerAnswers(t *testing.T) {
 		}
 	}
 	w.signer.tamper = nil
-	w.signer.err = signer.Refusal("PAYMENT_MODE_OFF") // a Signer restarted for approvals only
+	w.signer.err = signerclient.Refused("PAYMENT_MODE_OFF") // a Signer restarted for approvals only
 	if p, err := w.step("po-9"); !errors.Is(err, ErrPending) || p.State != "reserved" {
 		t.Fatalf("payment mode off: %+v %v", p, err)
 	}

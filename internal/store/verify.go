@@ -365,7 +365,7 @@ func (s *Store) verify(version int) error {
 		}
 	}
 	if version >= 4 {
-		if err := verifyPayments(tx); err != nil {
+		if err := verifyPayments(tx, version); err != nil {
 			return err
 		}
 	}

@@ -187,7 +187,7 @@ var pay = store.PaymentRequest{ConsumerID: "consumer-a", TaskID: "task-consumer-
 func TestClientAfterAccept(t *testing.T) {
 	w := wire(t)
 	w.endAfterAccept(t)
-	r, err := w.client.Pay(pay)
+	r, err := w.client.Pay(pay, nil)
 	signer.SetHook(nil)
 	id := r.Attempt.RequestID
 	if !errors.Is(err, signerclient.Unknown) || errors.Is(err, signerclient.NotSaved) {
@@ -205,7 +205,7 @@ func TestClientAfterAccept(t *testing.T) {
 		t.Fatalf("resume: %+v %v, %d sign requests", got.Attempt, err, w.signCount())
 	}
 	// The existing same-ID path finishes it; then it reads back signed.
-	done, err := w.client.Pay(pay)
+	done, err := w.client.Pay(pay, nil)
 	if err != nil || done.Attempt.State != "signed" || done.Attempt.RequestID != id || done.Attempt.SignerAttemptID != got.Attempt.SignerAttemptID {
 		t.Fatalf("pay again: %+v %v", done.Attempt, err)
 	}
@@ -220,7 +220,7 @@ func TestClientAfterAcceptNotSaved(t *testing.T) {
 	w := wire(t)
 	w.endAfterAccept(t)
 	w.l.fail = errors.New("disk I/O error")
-	r, err := w.client.Pay(pay)
+	r, err := w.client.Pay(pay, nil)
 	if !errors.Is(err, signerclient.Unknown) || !errors.Is(err, signerclient.NotSaved) {
 		t.Fatalf("save failure hidden: %v", err)
 	}

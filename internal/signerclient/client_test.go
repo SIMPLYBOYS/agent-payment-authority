@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
-	"github.com/SIMPLYBOYS/agent-payment-authority/internal/payflow"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer/signertest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
@@ -75,6 +74,9 @@ func (l *ledger) BeginPayment(req store.PaymentRequest) (store.PaymentAttempt, b
 	l.n++
 	a := store.PaymentAttempt{RequestID: fmt.Sprintf("pay-%032d", l.n), TaskID: req.TaskID, PurchaseOrderID: req.PurchaseOrderID, IntentHash: intent,
 		Method: req.Method, DelegationRef: req.DelegationRef, State: "requested", Order: l.orders[req.PurchaseOrderID]}
+	if req.Method == "webauthn" {
+		a.ApprovalID = "hap-1" // the Store reads it from the grant
+	}
 	l.rows[a.RequestID] = &row{a, req.ConsumerID}
 	return a, false, nil
 }
@@ -199,7 +201,7 @@ func TestPay(t *testing.T) {
 	e := newEnv(t)
 	e.listen()
 	c := New(e.socket, e.l)
-	r, err := c.Pay(pay("po-1"))
+	r, err := c.Pay(pay("po-1"), nil)
 	if err != nil || r.Attempt.State != "signed" || r.Attempt.SignerAttemptID == "" || r.Authorization == nil {
 		t.Fatalf("pay: %+v %v", r, err)
 	}
@@ -207,12 +209,12 @@ func TestPay(t *testing.T) {
 	if recovers(t, r.Authorization, got.TypedDigest) != signer.Address(keyA.PubKey()) || got.RequestID != r.Attempt.RequestID {
 		t.Fatal("the authorization is not wallet-a's for this request")
 	}
-	again, err := c.Pay(pay("po-1"))
+	again, err := c.Pay(pay("po-1"), nil)
 	if err != nil || again.Attempt.RequestID != r.Attempt.RequestID || again.Authorization.Signature != r.Authorization.Signature || len(e.l.rows) != 1 {
 		t.Fatalf("pay again: %+v %v", again, err)
 	}
 	// Over the delegation's per-transaction limit: refused, recorded rejected.
-	if r, err := c.Pay(pay("po-2")); err == nil || err.Error() != "OVER_PER_TX" || r.Attempt.State != "rejected" || r.Attempt.ErrorCode != "OVER_PER_TX" {
+	if r, err := c.Pay(pay("po-2"), nil); err == nil || err.Error() != "OVER_PER_TX" || r.Attempt.State != "rejected" || r.Attempt.ErrorCode != "OVER_PER_TX" {
 		t.Fatalf("over the limit: %+v %v", r, err)
 	}
 	// Abandon after signing: refused, the row stays signed.
@@ -232,7 +234,7 @@ func TestPay(t *testing.T) {
 func TestUnknownThenResume(t *testing.T) {
 	e := newEnv(t)
 	c := New(e.socket, e.l)
-	r, err := c.Pay(pay("po-1"))
+	r, err := c.Pay(pay("po-1"), nil)
 	if !errors.Is(err, Unknown) || errors.Is(err, NotSaved) || r.Attempt.State != "unknown" || e.l.rows[r.Attempt.RequestID].State != "unknown" {
 		t.Fatalf("no Signer: %+v %v", r, err)
 	}
@@ -241,7 +243,7 @@ func TestUnknownThenResume(t *testing.T) {
 	if r, err := c.Resume("consumer-a", id); err == nil || r.Attempt.State != "rejected" || r.Attempt.ErrorCode != "ATTEMPT_UNKNOWN" {
 		t.Fatalf("resume of a request the Signer never saw: %+v %v", r, err)
 	}
-	if r, err := c.Pay(pay("po-1")); err != nil || r.Attempt.RequestID != id || r.Attempt.State != "signed" {
+	if r, err := c.Pay(pay("po-1"), nil); err != nil || r.Attempt.RequestID != id || r.Attempt.State != "signed" {
 		t.Fatalf("pay after: %+v %v", r, err)
 	}
 	if len(e.l.rows) != 1 {
@@ -287,7 +289,7 @@ func TestReplyLost(t *testing.T) {
 		}
 	}()
 	c := New(e.socket, e.l)
-	r, err := c.Pay(pay("po-1"))
+	r, err := c.Pay(pay("po-1"), nil)
 	if !errors.Is(err, Unknown) || e.l.rows[r.Attempt.RequestID].State != "unknown" {
 		t.Fatalf("lost reply: %+v %v", r, err)
 	}
@@ -338,7 +340,7 @@ func TestUnknownSaveFailure(t *testing.T) {
 	e := newEnv(t)
 	c, tr := countingClient(e.socket, e.l) // no Signer listening
 	e.l.fail = errors.New("disk I/O error")
-	r, err := c.Pay(pay("po-1"))
+	r, err := c.Pay(pay("po-1"), nil)
 	if !errors.Is(err, Unknown) || !errors.Is(err, NotSaved) {
 		t.Fatalf("save failure hidden: %v", err)
 	}
@@ -351,62 +353,66 @@ func TestUnknownSaveFailure(t *testing.T) {
 	if r, err := c.Resume("consumer-a", id); err == nil || r.Attempt.State != "rejected" || r.Attempt.RequestID != id {
 		t.Fatalf("resume: %+v %v", r, err)
 	}
-	if r, err := c.Pay(pay("po-1")); err != nil || r.Attempt.RequestID != id || r.Attempt.State != "signed" || len(e.l.rows) != 1 {
+	if r, err := c.Pay(pay("po-1"), nil); err != nil || r.Attempt.RequestID != id || r.Attempt.State != "signed" || len(e.l.rows) != 1 {
 		t.Fatalf("pay after: %+v %v", r, err)
 	}
 }
 
-// Sign, the payment worker's call: signed, the same attempt for the same
-// request ID, a refusal as a signer.Refusal, no Signer as a plain error.
-func TestSignForTheWorker(t *testing.T) {
-	e := newEnvChecking(t, func(string) bool { return true })
-	c := New(e.socket, nil)
-	var _ payflow.Signer = c
-	req := func(id, po string) signer.SignRequest {
-		return signer.SignRequest{RequestID: id, Order: e.l.orders[po], Reservation: json.RawMessage(`{}`),
-			Authorization: signer.Authorization{Method: "delegation", DelegationID: "dlg-a", DelegationVersion: 1}}
-	}
-	if _, err := c.Sign(bg, req("pay-w1", "po-1")); err == nil || errors.As(err, new(signer.Refusal)) {
-		t.Fatalf("no Signer: %v", err)
-	}
-	e.listen()
-	r, err := c.Sign(bg, req("pay-w1", "po-1"))
-	if err != nil || r.State != "signed" || r.Authorization == nil {
-		t.Fatalf("sign: %+v %v", r, err)
-	}
-	if again, err := c.Sign(bg, req("pay-w1", "po-1")); err != nil || again.Authorization.Signature != r.Authorization.Signature || again.AttemptID != r.AttemptID {
-		t.Fatalf("again: %+v %v", again, err)
-	}
-	var ref signer.Refusal
-	if _, err := c.Sign(bg, req("pay-w2", "po-2")); !errors.As(err, &ref) || ref == "" {
-		t.Fatalf("over the per-payment cap: %v", err)
-	}
-}
-
-// A Signer's 503 (SIGNER_ERROR, SIGNER_TIMEOUT) is a plain error, asked
-// again: never a refusal, which would end a paid-for reservation.
-func TestSignUnavailableIsNotARefusal(t *testing.T) {
+// stubSigner answers every call with status and body on a Unix socket, and
+// keeps each POST /v1/sign body.
+func stubSigner(t *testing.T, status int, body string) (string, *[]signer.SignRequest) {
+	t.Helper()
 	dir, err := os.MkdirTemp("", "sc")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+	t.Cleanup(func() { os.RemoveAll(dir) })
 	sock := filepath.Join(dir, "s")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Skip("no Unix socket listening here:", err)
 	}
-	code := "SIGNER_ERROR"
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(w, `{"error":%q}`, code)
+	var mu sync.Mutex
+	var got []signer.SignRequest
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/v1/sign" {
+			var sr signer.SignRequest
+			json.NewDecoder(r.Body).Decode(&sr)
+			mu.Lock()
+			got = append(got, sr)
+			mu.Unlock()
+		}
+		w.WriteHeader(status)
+		io.WriteString(w, body)
 	})}
 	go srv.Serve(ln)
-	defer srv.Close()
-	c := New(sock, nil)
-	for _, code = range []string{"SIGNER_ERROR", "SIGNER_TIMEOUT"} {
-		if _, err := c.Sign(bg, signer.SignRequest{RequestID: "pay-x"}); err == nil || errors.As(err, new(signer.Refusal)) {
-			t.Fatalf("503 %s: %v", code, err)
+	t.Cleanup(func() { srv.Close() })
+	return sock, &got
+}
+
+// P2 (docs/commercial-p2-host.md 3): Pay sends the order's reservation and,
+// for a person's approval, the approval ID the Store read from its grant.
+func TestPaySendsTheApprovalAndReservation(t *testing.T) {
+	sock, got := stubSigner(t, http.StatusServiceUnavailable, `{"error":"SIGNER_ERROR"}`)
+	l := &ledger{orders: map[string]json.RawMessage{"po-1": signertest.Order{Consumer: "consumer-a", Agent: "agent-a", Wallet: "wallet-a",
+		From: "0x1111111111111111111111111111111111111111", PayTo: signertest.Merchant, Amount: "500000", N: 1, Now: t0, Window: 60}.Raw()}, rows: map[string]*row{}}
+	c := New(sock, l)
+	reservation := json.RawMessage(`{"tx_hash":"0x01"}`)
+	_, err := c.Pay(store.PaymentRequest{ConsumerID: "consumer-a", TaskID: "task-consumer-a", PurchaseOrderID: "po-1", Method: "webauthn"}, reservation)
+	// A 503 (SIGNER_ERROR, SIGNER_TIMEOUT) is no answer: unknown, asked again, never a refusal.
+	if !errors.Is(err, Unknown) || errors.As(err, new(Refused)) {
+		t.Fatalf("503: %v", err)
+	}
+	if len(*got) != 1 {
+		t.Fatalf("%d sign requests", len(*got))
+	}
+	r := (*got)[0]
+	if r.Authorization.Method != "webauthn" || r.Authorization.ApprovalID != "hap-1" || r.Authorization.DelegationID != "" || string(r.Reservation) != string(reservation) {
+		t.Fatalf("sign request %+v", r)
+	}
+	for _, a := range l.rows {
+		if a.State != "unknown" {
+			t.Fatalf("recorded %s", a.State)
 		}
 	}
 }

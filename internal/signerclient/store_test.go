@@ -119,17 +119,17 @@ func TestRealStoreCancel(t *testing.T) {
 	c, tr := countingClient(e.socket, s)
 
 	// po-1: paid once; the resend keeps its request ID and signature.
-	paid, err := c.Pay(storePay("po-1"))
+	paid, err := c.Pay(storePay("po-1"), nil)
 	if err != nil || paid.Attempt.State != "signed" || paid.Authorization == nil {
 		t.Fatalf("pay: %+v %v", paid, err)
 	}
-	again, err := c.Pay(storePay("po-1"))
+	again, err := c.Pay(storePay("po-1"), nil)
 	if err != nil || again.Attempt.RequestID != paid.Attempt.RequestID || again.Authorization.Signature != paid.Authorization.Signature {
 		t.Fatalf("resend: %+v %v", again, err)
 	}
 	// po-2: the sign request fails on the way: unknown in the Store.
 	tr.fail = true
-	lost, err := c.Pay(storePay("po-2"))
+	lost, err := c.Pay(storePay("po-2"), nil)
 	tr.fail = false
 	if !errors.Is(err, Unknown) || lost.Attempt.State != "unknown" {
 		t.Fatalf("lost: %+v %v", lost, err)
@@ -141,7 +141,7 @@ func TestRealStoreCancel(t *testing.T) {
 	rows, signs := attempts(t, path), tr.signs()
 	// po-3, never paid, and po-2's unknown attempt: refused, nothing sent.
 	for _, po := range []string{"po-3", "po-2"} {
-		if _, err := c.Pay(storePay(po)); store.Code(err) != "TASK_ALREADY_ENDED" || tr.signs() != signs || attempts(t, path) != rows {
+		if _, err := c.Pay(storePay(po), nil); store.Code(err) != "TASK_ALREADY_ENDED" || tr.signs() != signs || attempts(t, path) != rows {
 			t.Fatalf("%s after cancel: %v; sign sent after cancel: %d -> %d, attempts %d -> %d", po, err, signs, tr.signs(), rows, attempts(t, path))
 		}
 	}

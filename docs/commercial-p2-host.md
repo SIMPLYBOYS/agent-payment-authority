@@ -261,7 +261,7 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查�
 
 - **`Worker`**：一次處理一筆付款（決策 7），依 Store 的狀態推進。四個外部元件都是介面，H3 再接上真的：
   - `Relayer`：`Reserve` 對同一張請購冪等；`Lookup` 只查不建；
-  - `Signer`：`/v1/sign`，同一個 request ID 回同一個 attempt；
+  - `Signer`：Host 的 Signer client（`signerclient.Pay`）：請求先記入 `payment_attempts`（request ID 由 Store 產生並提交），再送 `/v1/sign`；再問時用同一個 request ID（§3）；
   - `Shop`：送出帶 `PAYMENT-SIGNATURE` 的請求；
   - `Chain`：Reconciler。
 - **每個狀態怎麼推進**：
@@ -270,7 +270,7 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查�
     - 什麼都沒有時才看 task：已結束（`TaskEnded`）就 `TASK_ENDED`；已太接近 `valid_before` 就 `NOT_PAID_EXPIRED`。
     - 否則 `Reserve`。relayer 拒絕就 `RESERVE_FAILED`（交易送出前就拒絕，或已 revert，都沒有花錢）；`RESERVATION_PENDING`、`TASK_BUSY`、`RELAYER_NONCE_BLOCKED`、`TASK_REGISTRATION_PENDING`（task 的登記尚未確認）、連線錯誤都等下一輪，由 `Lookup` 決定。
     - 所以中斷或回應遺失時，tx#1 只會有一筆，「沒花錢」也只在 relayer 確定沒有預留之後才會記下。
-  - `reserved`：以付款的授權向 Signer 請求簽名（委派 `id@version`，或本人核准的 `approval_id`），request ID 由 intent 決定。
+  - `reserved`：以付款的授權經 `signerclient.Pay` 向 Signer 請求簽名（委派 `id@version`，或本人核准：Store 從 grant 讀出 `signer_approval_id`），帶上預留證據；request ID 是 `payment_attempts` 的那一個。
     - Signer 回「現在不行」（忙碌、逾時、預留尚未確認）就等待；其他拒絕，或太接近期限，轉 `RESERVED_NOT_PAID`（tx#1 已花，需要人工處理）。
     - Signer 的 attempt 已關閉而沒有簽（`abandoned`、`expired_unsigned`）也轉 `RESERVED_NOT_PAID`；attempt 還開著就等待，太接近期限才轉。
     - 簽回來的授權先和請購的付款綁定比對（From、To、金額、有效期間、nonce），不符就轉 `RESERVED_NOT_PAID`，不會送出。
@@ -291,7 +291,7 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查�
 - **驗證**（真的 Store、假的四個元件；`go test -race` 通過）：
   - `TestPaidEndToEnd`：一次推進就走完，預留、簽名、送出各一次；已交付的不再移動。
   - `TestPaidOnlyWhenTheChainSaysSo`：商店回 200 但鏈上未確認時不算已付款，確認後才交付；全程同一份簽章。
-  - `TestLostAnswersNeverPayTwice`：預留的回應遺失時，下一輪由 `Lookup` 找到，只有一筆 tx#1；Signer 的回應遺失時，用同一個 request ID 再問；商店的回應遺失時轉 `unknown`，再送同一份簽章，最後交付。
+  - `TestLostAnswersNeverPayTwice`：預留的回應遺失時，下一輪由 `Lookup` 找到，只有一筆 tx#1；Signer 的回應遺失時，用 `payment_attempts` 的同一個 request ID 再問；商店的回應遺失時轉 `unknown`，再送同一份簽章，最後交付。
   - `TestRecoverSubmitted`：已送出、Host 隨即中斷 → `unknown` → 由鏈上與同一份簽章完成，relayer 沒被再呼叫。
   - `TestTaskEndedBeforeAndAfterTheReservation`：取消時還沒預留的付款是 `TASK_ENDED`，relayer 從沒被要求預留；取消前已預留的付款照常走完。
   - `TestRefusals`：relayer 拒絕 → `RESERVE_FAILED`；Signer 拒絕 → `RESERVED_NOT_PAID`；商店驗證失敗 → `VERIFICATION_FAILED`，不再送出。
@@ -341,8 +341,12 @@ H2 突變共 28 項，28／28 KILLED。
 ### 12.3 H3 接線
 
 - **H3a（404b61a）付款工作的真元件**：
-  - `signerclient.Client.Sign`：付款工作自己的 request ID，原樣送 `/v1/sign`（帶 reservation 與委派或 `approval_id`），不經過 `payment_attempts`。拒絕回 `signer.Refusal`；503（`SIGNER_ERROR`、`SIGNER_TIMEOUT`）或沒有可讀的回應回一般錯誤，用同一個 request ID 再問。
-    - **與 §3 的差異**：§3 原本寫「`payment_attempts` 保留給 Signer 握手，`BeginPayment` 改為接受 webauthn」。P2 的 Signer 改在鏈上確認預留（`budget.Verifier`），不再需要 P1-b 的「先寫入再呼叫」握手；付款的紀錄是 `payments` 這一列。兩份狀態並存只會互相不一致，所以 `payment_attempts` 與 `BeginPayment` 維持 P1-b 原樣，只供 `delegation` 的舊路徑使用。
+  - **Signer 握手照 §3（Aaron：「修正回原有設計應該有的規範」）**：
+    - `payment_attempts` 是 Signer 的握手紀錄：`signerclient.Pay` 先以 `BeginPayment` 記下請求並提交（request ID 由 Store 產生，同一張請購永遠是同一個），再送 `/v1/sign`；回應記回這一列（accepted、signed、rejected、unknown…）。
+    - `BeginPayment` 接受 webauthn：只限本人核准過的 Ask，且 grant 是 webauthn、未過期；Store 自己從 grant 讀出 `signer_approval_id`，呼叫端不能指定。schema 7 重建 `payment_attempts`（新增 `approval_id`，方法與依據以 CHECK 一一對應）；schema 7 只在這個分支，升級時舊列原樣保留。恢復檢查要求 webauthn 列就是該請購 grant 的核准。
+    - `signerclient.Pay(req, reservation)` 帶上預留證據，委派送 `delegation_id@version`，本人核准送 `approval_id`。503（`SIGNER_ERROR`、`SIGNER_TIMEOUT`）或沒有可讀的回應記成 unknown、回一般錯誤，下一輪用同一個 request ID 再問；拒絕回 `Refused`。
+    - 依 H1 的規則（已請求的付款可以走完），已預留（tx#1 已花）的請購在 task 取消後仍可 `BeginPayment`；尚未預留的照舊拒絕（`TASK_ALREADY_ENDED`）。
+    - 先前的版本（404b61a 的 `signerclient.Client.Sign` 與付款工作自己由 intent 算出的 request ID）不經過 `payment_attempts`，偏離了 §3，已移除。
   - `payflow.HTTPShop`：帶 `PAYMENT-SIGNATURE` 的 GET；任何狀態都解讀 `PAYMENT-RESPONSE`；內容超過 1 MiB 當成沒有回應（hash 不會是內容的）。
   - `budget.Relayer` 與 `reconcile.Token` 直接就是 `Relayer` 與 `Chain`。
   - `signer.json` 新增 `reservation` 段（`rpc`、`chain_id`、`budget_contract`、`confirmations`）：有這段時 `apa-signer serve` 用 `budget.Verifier` 在鏈上確認預留；沒有就照舊 `Unavailable`，什麼都不簽。`rpc` 必須是 http(s) 且不含帳密，`chain_id` 必須是已登記資產的鏈，確認數 1 到 64。
@@ -369,7 +373,7 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES（沒有 C
 |---|---|---|
 | Important | 沒有檢查 Signer 能簽付款就開始 tx#1：照說明啟動 `serve-approvals` 時每筆 Allow 花掉 tx#1 後被 `PAYMENT_MODE_OFF` 拒絕；沒有 `reservation` 段時等到期限才結束 | `--payments` 時 Signer health 必須是 `ready`，否則不啟動；`PAYMENT_MODE_OFF` 加入等待清單；修正 `--approvals-signer` 說明；`TestPaymentsNeedAReadySigner` |
 | Important | starter 在 task 登記成功前就開始付款：登記因節點錯誤失敗時，同一輪的付款得到 `TASK_NOT_REGISTERED`，永久變成 `RESERVE_FAILED` | 登記成功（或被拒絕）之前不開始該 task 的付款；`TestStarter` 改為驗證這個順序 |
-| Important | 503 → 一般錯誤沒有測試 | `TestSignUnavailableIsNotARefusal`（`SIGNER_ERROR`、`SIGNER_TIMEOUT`）與突變 |
+| Important | 503 → 一般錯誤沒有測試 | 當時加了 `TestSignUnavailableIsNotARefusal`；改回 §3 後由 `TestPaySendsTheApprovalAndReservation` 測 `Pay` 的 503（記成 unknown、不是拒絕）與突變 |
 | 建議 | `begin` 在任何錯誤後都不再試 | 只有 Store 的拒絕（有代碼）不再試 |
 | 建議 | loopback 不能證明是本機鏈（`ssh -L` 到公開節點也能通過，鏈 ID 84532 也相同） | demo 與 p2-local 都要求 `web3_clientVersion` 以 `anvil/` 開頭；`TestAnvilOnly` |
 | 建議 | Signer 的 `max_window_seconds` 小於 300、或確認數高於 relayer 時，每筆付款都會在 tx#1 之後失敗 | p2-local 印出的說明寫明 `max_window_seconds` 至少 300；確認數與 relayer 相同（1）。H6 的 `signer.json` 依此設定 |
@@ -412,3 +416,8 @@ H3 突變共 29 項，29／29 KILLED。
   - 網頁直接送這些階段與它們自己的事件序號給 Unity（取代先前「Unity 停在裁決階段」的權宜作法）。訊息新增選填欄位 `payments`（`local_anvil` 或空，bridge 版本不變）；Unity 的標題列據此顯示「P2-a / local test payments」或照舊「M1 / no payment」。
   - 共用轉場向量新增 4 個付款案例（共 24 個），網頁與 Unity 的規則測試都用它。Unity：EditMode 18／18、PlayMode 28／28（新增 `PaymentPhasesAreKnownAndSayTheHostPays`、`APaymentWaitsAtTheCounterAndLeavesDelivered`）；網頁測試 109／109。Web build 已用 `scripts/unity/unity.sh webgl` 重建（git 不追蹤），建置內含新文字。
 - 待做：對帳頁（H5，AE1 的 `Unauthorized`）。
+
+### 12.5 改回 §3 的 Signer 握手（Aaron 指示）
+
+- 實作見 §12.3 的「Signer 握手照 §3」。測試：`TestBeginPaymentWebAuthn`（記錄、重送、不能改用委派、重啟後的恢復檢查、改掉 `approval_id` 會被擋、grant 過期）、`TestBeginPaymentAfterTheTaskEnded`、`TestUpgradeSchema6`（P1-b 的 attempt 在重建後保留）、`TestPaySendsTheApprovalAndReservation`；付款工作的測試改為經由真的 Store `BeginPayment`；`TestPaidOnAnvil` 以 Store 為 Signer client 的帳本，真的 Signer 在鏈上確認預留後簽名。
+- 突變：§3 新增 7 項；H2、H3 的相關項目改到新程式碼，移除 3 項只針對已刪除程式碼的項目。§3、H2、H3 共 61 項，61／61 KILLED。

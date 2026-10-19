@@ -29,6 +29,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signerclient"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
@@ -40,10 +41,12 @@ type Relayer interface {
 	Lookup(ctx context.Context, intent string) (budget.Evidence, string, error)
 }
 
-// Signer is the payment Signer's /v1/sign: the same request ID is answered
-// as the same attempt.
+// Signer is the Host's Signer client (signerclient.Client, docs/commercial-p2-host.md
+// 3): Pay records the request in payment_attempts (its request ID made and
+// committed by the Store before the call, the same one ever after) and sends
+// it with the reservation; asked again it resends that request ID.
 type Signer interface {
-	Sign(ctx context.Context, r signer.SignRequest) (signer.Reply, error)
+	Pay(req store.PaymentRequest, reservation json.RawMessage) (signerclient.Result, error)
 }
 
 // Shop sends one resource request with a PAYMENT-SIGNATURE: its status,
@@ -298,56 +301,48 @@ func (w *Worker) reserved(p store.Payment, ev budget.Evidence) (store.Payment, e
 	return w.Store.PaymentReserved(p.IntentHash, store.Reservation{Evidence: raw, TxHash: ev.TxHash, Block: ev.BlockNumber})
 }
 
-// SignerRequestID is a payment's one Signer request ID, from its intent.
-func SignerRequestID(intent string) string {
-	h := sha256.Sum256([]byte("agent-payment-authority/signer-request\x00" + intent))
-	return "pay-" + hex.EncodeToString(h[:16])
-}
-
 // signerRetry are the Signer's answers that mean "not now".
 // PAYMENT_MODE_OFF: a Signer restarted for approvals only; it may come back.
 var signerRetry = []signer.Refusal{"SIGNER_BUSY", "SIGNER_TIMEOUT", "RESERVATION_PENDING", "RESERVATION_UNCONFIRMED", "RESERVATION_UNAVAILABLE", "PAYMENT_MODE_OFF"}
 
-// sign asks the Signer under the payment's authorization: a delegation
-// (id@version) or the person's approval (its Signer approval ID).
+// sign asks the Signer through the Host's client under the payment's
+// authorization: a delegation (id@version), or the person's approval (the
+// Store reads its grant's Signer approval ID).
 func (w *Worker) sign(ctx context.Context, p store.Payment, o paycontract.PurchaseOrder) (store.Payment, error) {
-	auth := signer.Authorization{Method: p.Method}
+	req := store.PaymentRequest{ConsumerID: p.ConsumerID, TaskID: p.TaskID, PurchaseOrderID: p.PurchaseOrderID, Method: p.Method}
 	if p.Method == "delegation" {
-		id, v, ok := strings.Cut(p.GrantRef, "@")
-		n, err := strconv.ParseUint(v, 10, 64)
-		if !ok || err != nil {
-			return p, errors.New("payflow: a delegation reference is id@version")
-		}
-		auth.DelegationID, auth.DelegationVersion = id, n
-	} else {
-		auth.ApprovalID = p.GrantRef
+		req.DelegationRef = p.GrantRef
 	}
-	reply, err := w.Signer.Sign(ctx, signer.SignRequest{RequestID: SignerRequestID(p.IntentHash), Authorization: auth, Order: p.Order, Reservation: p.Reservation})
-	if r, ok := refusal(err); ok {
-		if slices.Contains(signerRetry, r) && !w.late(o) {
+	res, err := w.Signer.Pay(req, p.Reservation)
+	var r signerclient.Refused
+	switch {
+	case errors.As(err, &r):
+		if slices.Contains(signerRetry, signer.Refusal(r)) && !w.late(o) {
 			return p, ErrPending
 		}
 		return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID") // tx#1 spent: a person's to look at (decision 6)
-	} else if err != nil {
+	case store.Code(err) != "":
+		return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID") // the Store refused the request: never sent
+	case err != nil:
 		if w.late(o) {
 			return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID")
 		}
-		return p, ErrPending // the same request ID next time: the same attempt
+		return p, ErrPending // unknown, or the Store not written: the same request ID next time
 	}
-	switch {
-	case reply.State == "abandoned" || reply.State == "expired_unsigned":
+	switch st := res.Attempt.State; {
+	case st == "abandoned" || st == "expired_unsigned":
 		return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID") // the attempt closed unsigned: never signed now
-	case reply.State != "signed" || reply.Authorization == nil:
+	case st != "signed" || res.Authorization == nil:
 		if w.late(o) {
 			return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID")
 		}
 		return p, ErrPending
 	}
-	if b, a := o.PaymentBinding, reply.Authorization; !strings.EqualFold(a.From, b.From) || !strings.EqualFold(a.To, b.PayTo) || a.Value != string(b.Amount) ||
+	if b, a := o.PaymentBinding, res.Authorization; !strings.EqualFold(a.From, b.From) || !strings.EqualFold(a.To, b.PayTo) || a.Value != string(b.Amount) ||
 		a.ValidAfter != b.ValidAfter || a.ValidBefore != b.ValidBefore || a.Nonce != b.Nonce {
 		return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID") // not this order's authorization: never sent
 	}
-	raw, err := json.Marshal(reply.Authorization)
+	raw, err := json.Marshal(res.Authorization)
 	if err != nil {
 		return p, err
 	}

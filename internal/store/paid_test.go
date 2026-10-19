@@ -514,13 +514,17 @@ func TestUpgradeSchema6(t *testing.T) {
 	e := newEnv(t)
 	s := e.open()
 	po, intent := e.payAllowed(s)
+	attempt, _, err := s.BeginPayment(payReq(po)) // a P1-b attempt, kept across the rebuild of payment_attempts
+	if err != nil {
+		t.Fatal(err)
+	}
 	s.Close()
 	toSchema6(t, e.path)
 	want := fingerprint(t, e.path)
 	if _, err := openOpt(e, false); Code(err) != "SCHEMA_UPGRADE_REQUIRED" {
 		t.Fatalf("without the flag: %v", err)
 	}
-	s, err := openOpt(e, true)
+	s, err = openOpt(e, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,6 +534,9 @@ func TestUpgradeSchema6(t *testing.T) {
 	}
 	if p, _, err := s.StartPayment(payStart(po)); err != nil || p.IntentHash != intent {
 		t.Fatalf("pay after the upgrade: %+v %v", p, err)
+	}
+	if a, err := s.Payment("consumer-a", attempt.RequestID); err != nil || a.DelegationRef != "dlg-a@1" || a.ApprovalID != "" || a.State != "requested" {
+		t.Fatalf("the attempt after the upgrade: %+v %v", a, err)
 	}
 }
 
@@ -581,5 +588,71 @@ func TestPayTasks(t *testing.T) {
 	po2, _ := e2.webauthnApproved(s2)
 	if ts, err := s2.PayTasks(); err != nil || len(ts) != 1 || len(ts[0].Approved) != 1 || ts[0].Approved[0] != po2 {
 		t.Fatalf("approved: %+v %v", ts, err)
+	}
+}
+
+// P2 (docs/commercial-p2-host.md 3): the Signer handshake for a person's
+// approval. BeginPayment records an approved Ask under its grant's Signer
+// approval ID (the caller names none), replays it, refuses it past the
+// grant's expiry; the recovery check holds it to that grant.
+func TestBeginPaymentWebAuthn(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	po, intent := e.webauthnApproved(s)
+	req := PaymentRequest{ConsumerID: "consumer-a", TaskID: "task-a", PurchaseOrderID: po, Method: "webauthn"}
+	a, replay, err := s.BeginPayment(req)
+	if err != nil || replay || a.Method != "webauthn" || a.ApprovalID != "hap-1" || a.DelegationRef != "" || a.IntentHash != intent || a.State != "requested" {
+		t.Fatalf("begin %+v %v %v", a, replay, err)
+	}
+	if again, replay, err := s.BeginPayment(req); err != nil || !replay || again.RequestID != a.RequestID {
+		t.Fatalf("again %+v %v %v", again, replay, err)
+	}
+	other := req
+	other.Method, other.DelegationRef = "delegation", "dlg-a@1"
+	if _, _, err := s.BeginPayment(other); Code(err) == "" {
+		t.Fatal("an approved Ask paid under a delegation")
+	}
+	s.Close()
+	s = e.open() // the recovery check holds for a webauthn row
+	if got, err := s.Payment("consumer-a", a.RequestID); err != nil || got.ApprovalID != "hap-1" {
+		t.Fatalf("after a restart %+v %v", got, err)
+	}
+	s.Close()
+	if _, err := rawDB(t, e.path).Exec(`UPDATE payment_attempts SET approval_id = 'hap-other' WHERE request_id = ?`, a.RequestID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(Config{Path: e.path, Registry: e.reg, Offers: e.offers, Clock: e.clock.clock()}); err == nil {
+		t.Fatal("a payment attempt under another approval passed the recovery check")
+	}
+
+	e2 := newEnv(t)
+	s2 := e2.open()
+	po2, _ := e2.webauthnApproved(s2) // the grant expires at t0 + 300
+	e2.clock.Set(t0 + 300)
+	if _, _, err := s2.BeginPayment(PaymentRequest{ConsumerID: "consumer-a", TaskID: "task-a", PurchaseOrderID: po2, Method: "webauthn"}); Code(err) != "PURCHASE_EXPIRED" {
+		t.Fatalf("past the grant's expiry: %v", err)
+	}
+}
+
+// After a cancellation, a payment whose budget was reserved (tx#1 spent) is
+// still signed; one not yet reserved is not (docs/commercial-p2-host.md 7).
+func TestBeginPaymentAfterTheTaskEnded(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	po, intent := e.payAllowed(s)
+	if _, _, err := s.StartPayment(payStart(po)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Cancel("task-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.BeginPayment(payReq(po)); Code(err) != "TASK_ALREADY_ENDED" {
+		t.Fatalf("not reserved: %v", err)
+	}
+	if _, err := s.PaymentReserved(intent, Reservation{Evidence: evidence, TxHash: tx1, Block: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if a, _, err := s.BeginPayment(payReq(po)); err != nil || a.State != "requested" {
+		t.Fatalf("reserved: %+v %v", a, err)
 	}
 }

@@ -25,6 +25,29 @@ import (
 
 // schema7 is schema 7's addition.
 const schema7 = `
+ALTER TABLE payment_attempts RENAME TO payment_attempts_v6;
+CREATE TABLE payment_attempts (
+  request_id        TEXT PRIMARY KEY,
+  task_id           TEXT NOT NULL,
+  purchase_order_id TEXT NOT NULL,
+  intent_hash       TEXT NOT NULL UNIQUE,
+  method            TEXT NOT NULL CHECK (method IN ('delegation', 'webauthn')),
+  delegation_ref    TEXT CHECK (delegation_ref <> ''),
+  approval_id       TEXT CHECK (approval_id <> ''),
+  signer_attempt_id TEXT UNIQUE,
+  state             TEXT NOT NULL CHECK (state IN ('requested', 'accepted', 'signed', 'abandoned', 'expired_unsigned', 'rejected', 'unknown')),
+  error_code        TEXT,
+  requested_at      INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL,
+  FOREIGN KEY (task_id, purchase_order_id) REFERENCES purchases,
+  CHECK ((method = 'delegation') = (delegation_ref IS NOT NULL)),
+  CHECK ((method = 'webauthn') = (approval_id IS NOT NULL)),
+  CHECK (state NOT IN ('accepted', 'signed', 'abandoned', 'expired_unsigned') OR signer_attempt_id IS NOT NULL),
+  CHECK (state <> 'rejected' OR error_code IS NOT NULL)
+) STRICT;
+INSERT INTO payment_attempts (request_id, task_id, purchase_order_id, intent_hash, method, delegation_ref, signer_attempt_id, state, error_code, requested_at, updated_at)
+  SELECT request_id, task_id, purchase_order_id, intent_hash, method, delegation_ref, signer_attempt_id, state, error_code, requested_at, updated_at FROM payment_attempts_v6;
+DROP TABLE payment_attempts_v6;
 CREATE TABLE payments (
   intent_hash       TEXT PRIMARY KEY,
   task_id           TEXT NOT NULL,
