@@ -355,3 +355,7 @@ H2 突變共 28 項，28／28 KILLED。
     - 每個 task 以初始預算向 relayer 登記一次（H-D4；未確認的登記由 relayer 自己完成）。relayer 拒絕就不再試；節點錯誤或仍在登記中就下一輪再試。
     - 每張請購在這個程序裡只 `StartPayment` 一次：Allow 用設定裡該客人的 Signer 委派，Ask 用 grant 的核准。被拒絕就記下代碼，重啟前不再試。
     - 以掃描而不是在三個地方掛勾子，Host 在「決定」與「開始付款」之間中斷時，重啟後仍會開始付款。
+- **H3c 端到端（anvil，虛擬）與 starter 搬進 payflow**：
+  - starter 改為 `payflow.Starter`（`Worker.Before`），demo 只負責接線；`TestStarter` 測登記的重試規則（仍在登記中或節點錯誤：下一輪再試；拒絕：不再試）、Allow 用客人的委派、核准的 Ask 用 grant、每張請購只開始一次、被拒絕的不再試、已結束的 task 不登記。
+  - `TestPaidOnAnvil`：所有真元件一起在本機 anvil 上跑。部署 Verifier、Budget、TestUSDC，以這次產生的一次性測試金鑰當付款人並鑄幣；Signer 在 Unix socket 上以 `budget.Verifier` 在鏈上確認預留；relayer 與會結算的商店（HTTP）用 anvil 公開金鑰付 gas；Reconciler 判定。一筆 Allow：登記預算 → 預留 → 簽名 → 結算 → 交付；商店收到 500000、付款人剩 4500000；再推進一次不會多送任何東西；`Unauthorized` 對帳為零。**這是虛擬結果**：金鑰是測試裡產生的，不是 `apa-signer keygen` 與真的 keystore（H6 才用你建立的金鑰）。
+  - H3 突變 19 項，19／19 KILLED（2 項跨套件、1 項在 anvil 上，放在 LOCAL_MUTATIONS）。

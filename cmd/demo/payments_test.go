@@ -29,10 +29,14 @@ func TestPaymentsConfigRefused(t *testing.T) {
 		change func(map[string]any)
 		want   string
 	}{
-		"a public RPC":        {func(c map[string]any) { c["rpc"] = "https://sepolia.base.org" }, "local anvil"},
-		"a LAN RPC":           {func(c map[string]any) { c["rpc"] = "http://192.168.1.2:8545" }, "loopback"},
-		"one key twice":       {func(c map[string]any) { c["anvil_keys"] = map[string]int{"relayer_gas": 1, "issuer": 1, "policy": 2, "shop_gas": 4} }, "four different"},
-		"a key past anvil's":  {func(c map[string]any) { c["anvil_keys"] = map[string]int{"relayer_gas": 9, "issuer": 1, "policy": 2, "shop_gas": 4} }, "anvil key 9"},
+		"a public RPC": {func(c map[string]any) { c["rpc"] = "https://sepolia.base.org" }, "local anvil"},
+		"a LAN RPC":    {func(c map[string]any) { c["rpc"] = "http://192.168.1.2:8545" }, "loopback"},
+		"one key twice": {func(c map[string]any) {
+			c["anvil_keys"] = map[string]int{"relayer_gas": 1, "issuer": 1, "policy": 2, "shop_gas": 4}
+		}, "four different"},
+		"a key past anvil's": {func(c map[string]any) {
+			c["anvil_keys"] = map[string]int{"relayer_gas": 9, "issuer": 1, "policy": 2, "shop_gas": 4}
+		}, "anvil key 9"},
 		"a key in the file":   {func(c map[string]any) { c["gas_key"] = strings.Repeat("ab", 32) }, "payments:"},
 		"no delegations":      {func(c map[string]any) { delete(c, "delegations") }, "delegations"},
 		"a shared directory":  {func(c map[string]any) { os.Chmod(priv, 0o750) }, "0700"},

@@ -736,3 +736,60 @@ func TestHTTPShop(t *testing.T) {
 		t.Fatal("a body over MaxBody was an answer")
 	}
 }
+
+// The starter: a task's budget registered until it is (a pending or failed
+// node call again, a refusal not); an Allow started under its consumer's
+// delegation, an approved Ask under its grant, each once; a refusal not
+// asked again; an ended task neither.
+func TestStarter(t *testing.T) {
+	w := newWorld(t, 1)
+	w.approveAsk()
+	var registered []string
+	answers := []error{signer.Refusal("TASK_REGISTRATION_PENDING"), errors.New("node down"), nil}
+	var logged []string
+	s := &Starter{Store: w.s, Delegations: map[string]string{"consumer-a": "dlg-a@1"},
+		Register: func(_ context.Context, task, consumer string, budget uint64) error {
+			registered = append(registered, fmt.Sprintf("%s %s %d", task, consumer, budget))
+			err := answers[0]
+			answers = answers[1:]
+			return err
+		},
+		Log: func(what string, err error) { logged = append(logged, what) }}
+	s.Start(bg)
+	if p := w.payment("po-1"); p.State != "requested" || p.Method != "delegation" || p.GrantRef != "dlg-a@1" {
+		t.Fatalf("the Allow: %+v", p)
+	}
+	if p := w.payment(w.askPO); p.Method != "webauthn" || p.GrantRef != "hap-1" {
+		t.Fatalf("the approved Ask: %+v", p)
+	}
+	s.Start(bg)
+	s.Start(bg)
+	s.Start(bg) // registered on the third: not asked a fourth time
+	if len(registered) != 3 || registered[0] != "task-a consumer-a 5000000" {
+		t.Fatalf("registrations %v", registered)
+	}
+	// A refusal is not asked again until a restart.
+	w2 := newWorld(t, 1)
+	tries := 0
+	starts := 0
+	s2 := &Starter{Store: w2.s, Delegations: map[string]string{}, // no delegation: StartPayment refuses
+		Register: func(context.Context, string, string, uint64) error {
+			tries++
+			return signer.Refusal("CONSUMER_MISMATCH")
+		},
+		Log: func(what string, err error) {
+			if strings.HasPrefix(what, "start ") {
+				starts++
+			}
+		}}
+	s2.Start(bg)
+	s2.Start(bg)
+	if _, err := w2.s.PaymentOf("consumer-a", "task-a", "po-1"); err == nil || tries != 1 || starts != 1 {
+		t.Fatalf("refused: started %v, registrations %d, start refusals %d", err, tries, starts)
+	}
+	if err := w2.s.Cancel("task-a"); err != nil {
+		t.Fatal(err)
+	}
+	s3 := &Starter{Store: w2.s, Register: func(context.Context, string, string, uint64) error { t.Fatal("an ended task registered"); return nil }}
+	s3.Start(bg)
+}

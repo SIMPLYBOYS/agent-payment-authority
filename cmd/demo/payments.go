@@ -25,7 +25,6 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/payflow"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
-	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signerclient"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 )
@@ -57,15 +56,11 @@ type payConfig struct {
 
 // payments is the demo's payment side once opened.
 type payments struct {
-	cfg      payConfig
-	rpc      *eth.Client
-	relayer  *budget.Relayer
-	settler  *merchant.Settler
-	worker   *payflow.Worker
-	st       *store.Store
-	out      io.Writer
-	tried    map[string]bool // task/purchase: StartPayment asked once per process
-	register map[string]bool // tasks registered (or refused) by this process
+	cfg     payConfig
+	rpc     *eth.Client
+	relayer *budget.Relayer
+	settler *merchant.Settler
+	out     io.Writer
 }
 
 // loopbackRPC: P2-a is a local chain only; nothing reaches a public one.
@@ -131,7 +126,7 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 		settler.Close()
 		return nil, nil, err
 	}
-	return &payments{cfg: c, rpc: rpc, relayer: relayer, settler: settler, out: out, tried: map[string]bool{}, register: map[string]bool{}}, shop, nil
+	return &payments{cfg: c, rpc: rpc, relayer: relayer, settler: settler, out: out}, shop, nil
 }
 
 func (p *payments) Close() error { return errors.Join(p.relayer.Close(), p.settler.Close()) }
@@ -143,59 +138,14 @@ const payMargin = 30
 // run is the worker's loop until ctx ends, the Store being open.
 func (p *payments) run(ctx context.Context, st *store.Store, socket string, clock func() uint64) {
 	token, _ := eth.ParseAddress(p.cfg.Token)
-	p.st = st
-	p.worker = &payflow.Worker{Store: st, Relayer: p.relayer, Signer: signerclient.New(socket, nil),
+	starter := &payflow.Starter{Store: st, Register: p.relayer.RegisterTask, Delegations: p.cfg.Delegations,
+		Log: func(what string, err error) { fmt.Fprintln(p.out, "demo: payment", what, store.CodeOf(err)) }}
+	w := &payflow.Worker{Store: st, Relayer: p.relayer, Signer: signerclient.New(socket, nil),
 		Shop:  payflow.HTTPShop{Client: &http.Client{Timeout: 30 * time.Second}},
 		Chain: reconcile.Token{RPC: p.rpc, Address: token, Confirmations: p.cfg.Confirmations, FromBlock: p.cfg.TokenFromBlock},
-		Clock: clock, Margin: payMargin, Before: p.start,
+		Clock: clock, Margin: payMargin, Before: starter.Start,
 		Log: func(intent string, err error) { fmt.Fprintln(p.out, "demo: payment", intent, store.CodeOf(err)) }}
-	if err := p.worker.Run(ctx); err != nil {
+	if err := w.Run(ctx); err != nil {
 		fmt.Fprintln(p.out, "demo: payments stopped:", store.CodeOf(err))
-	}
-}
-
-// start is the starter: each open pay task's budget registered once (the
-// relayer finishes a registration left unconfirmed), and each purchase
-// decided for payment started once per process (a refusal is logged with
-// its code, not asked again until a restart).
-func (p *payments) start(ctx context.Context) {
-	ts, err := p.st.PayTasks()
-	if err != nil {
-		fmt.Fprintln(p.out, "demo: payment starter:", store.CodeOf(err))
-		return
-	}
-	for _, t := range ts {
-		if !p.register[t.TaskID] {
-			b, err := t.BudgetInitial.Units()
-			if err == nil {
-				err = p.relayer.RegisterTask(ctx, t.TaskID, t.ConsumerID, b)
-			}
-			if err != nil && ctx.Err() == nil {
-				fmt.Fprintln(p.out, "demo: budget registration", t.TaskID, store.CodeOf(err))
-			}
-			// Registered, or refused for good (a relayer refusal); a node error, or one still
-			// pending, is asked again next round.
-			var r signer.Refusal
-			if err == nil || errors.As(err, &r) && r != "TASK_REGISTRATION_PENDING" {
-				p.register[t.TaskID] = true
-			}
-		}
-		for _, po := range t.Allowed {
-			p.begin(t, po, p.cfg.Delegations[t.ConsumerID])
-		}
-		for _, po := range t.Approved {
-			p.begin(t, po, "")
-		}
-	}
-}
-
-func (p *payments) begin(t store.PayTask, po, delegation string) {
-	key := t.TaskID + "/" + po
-	if p.tried[key] {
-		return
-	}
-	p.tried[key] = true
-	if _, _, err := p.st.StartPayment(store.PaymentStart{ConsumerID: t.ConsumerID, TaskID: t.TaskID, PurchaseOrderID: po, DelegationRef: delegation}); err != nil {
-		fmt.Fprintln(p.out, "demo: payment not started", key, store.CodeOf(err))
 	}
 }

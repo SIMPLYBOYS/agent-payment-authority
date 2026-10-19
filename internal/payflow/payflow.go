@@ -472,3 +472,68 @@ func (w *Worker) delivered(p store.Payment, ans ShopAnswer) (store.Payment, erro
 	sum := sha256.Sum256(ans.Body)
 	return w.Store.PaymentDelivered(p.IntentHash, hex.EncodeToString(sum[:]), len(ans.Body))
 }
+
+// Starter starts payments (H-D1 A, docs/commercial-p2-host.md 12.3), as
+// Run's Before: each open pay task's budget registered (H-D4 A; Register
+// finishes one left unconfirmed), and each purchase decided for payment
+// started once per process, an Allow under its consumer's Signer
+// delegation (Delegations, id@version), an approved Ask under its grant. A
+// refusal is logged, not asked again until a restart; a registration not
+// refused (a node, or one still pending) is asked again next round.
+type Starter struct {
+	Store       *store.Store
+	Register    func(ctx context.Context, taskID, consumerID string, budget uint64) error
+	Delegations map[string]string
+	Log         func(what string, err error)
+	tried       map[string]bool
+	registered  map[string]bool
+}
+
+func (s *Starter) Start(ctx context.Context) {
+	if s.tried == nil {
+		s.tried, s.registered = map[string]bool{}, map[string]bool{}
+	}
+	ts, err := s.Store.PayTasks()
+	if err != nil {
+		s.log("payments", err)
+		return
+	}
+	for _, t := range ts {
+		if !s.registered[t.TaskID] {
+			b, err := t.BudgetInitial.Units()
+			if err == nil {
+				err = s.Register(ctx, t.TaskID, t.ConsumerID, b)
+			}
+			r, refused := refusal(err)
+			if err == nil || refused && r != "TASK_REGISTRATION_PENDING" {
+				s.registered[t.TaskID] = true
+			}
+			if err != nil && ctx.Err() == nil {
+				s.log("registration "+t.TaskID, err)
+			}
+		}
+		for _, po := range t.Allowed {
+			s.begin(t, po, s.Delegations[t.ConsumerID])
+		}
+		for _, po := range t.Approved {
+			s.begin(t, po, "")
+		}
+	}
+}
+
+func (s *Starter) begin(t store.PayTask, po, delegation string) {
+	key := t.TaskID + "/" + po
+	if s.tried[key] {
+		return
+	}
+	s.tried[key] = true
+	if _, _, err := s.Store.StartPayment(store.PaymentStart{ConsumerID: t.ConsumerID, TaskID: t.TaskID, PurchaseOrderID: po, DelegationRef: delegation}); err != nil {
+		s.log("start "+key, err)
+	}
+}
+
+func (s *Starter) log(what string, err error) {
+	if s.Log != nil {
+		s.Log(what, err)
+	}
+}
