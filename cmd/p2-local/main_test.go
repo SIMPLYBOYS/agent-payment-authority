@@ -56,8 +56,20 @@ func TestSetup(t *testing.T) {
 			t.Fatalf("balance of %s: %x %v", w, res, err)
 		}
 	}
-	if err := run(t.Context(), args, io.Discard); err == nil || !strings.Contains(err.Error(), "already has code") {
-		t.Fatalf("a second run: %v", err)
+	if !strings.Contains(log.String(), "--registry "+filepath.Join(out, "registry.json")) || !strings.Contains(log.String(), "dlg-a") {
+		t.Fatalf("next steps not printed: %s", log.String())
+	}
+	// Again on the same anvil: refused (its token is set up). Into another
+	// directory on it, or into the same directory on a fresh anvil: the
+	// first because of the chain, the second because of the old files.
+	other := filepath.Join(t.TempDir(), "p2b")
+	if err := run(t.Context(), append(args[:6:6], append([]string{"--out", other}, args[8:]...)...), io.Discard); err == nil || !strings.Contains(err.Error(), "already has code") {
+		t.Fatalf("a second run on the same anvil: %v", err)
+	}
+	fresh := ethtest.Anvil(t)
+	again := append([]string{"--rpc", fresh.URL}, args[2:]...)
+	if err := run(t.Context(), again, io.Discard); err == nil || !strings.Contains(err.Error(), "earlier chain") {
+		t.Fatalf("the same directory on a fresh anvil: %v", err)
 	}
 	if err := run(t.Context(), []string{"--rpc", "https://sepolia.base.org", "--wallet-a", a, "--wallet-b", b}, io.Discard); err == nil {
 		t.Fatal("a public RPC was accepted")

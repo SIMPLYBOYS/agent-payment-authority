@@ -763,7 +763,7 @@ func TestStarter(t *testing.T) {
 	w := newWorld(t, 1)
 	w.approveAsk()
 	var registered []string
-	answers := []error{signer.Refusal("TASK_REGISTRATION_PENDING"), errors.New("node down"), nil}
+	answers := []error{signer.Refusal("TASK_REGISTRATION_PENDING"), signer.Refusal("RELAYER_NONCE_BLOCKED"), nil}
 	var logged []string
 	s := &Starter{Store: w.s, Delegations: map[string]string{"consumer-a": "dlg-a@1"},
 		Register: func(_ context.Context, task, consumer string, budget uint64) error {
@@ -774,7 +774,7 @@ func TestStarter(t *testing.T) {
 		},
 		Log: func(what string, err error) { logged = append(logged, what) }}
 	s.Start(bg) // still registering
-	s.Start(bg) // a node error
+	s.Start(bg) // a nonce gap: transient as well
 	if _, err := w.s.PaymentOf("consumer-a", "task-a", "po-1"); err == nil {
 		t.Fatal("a payment started before its task's registration")
 	}

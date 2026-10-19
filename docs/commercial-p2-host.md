@@ -383,6 +383,21 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES（沒有 C
 
 H3 突變共 26 項，26／26 KILLED。
 
+第二輪 review（2e20d40、af43f1a）：結論 REQUEST CHANGES（沒有 Critical）。審查者確認：付款工作在每一條返回路徑都會在 Store 關閉前停止、不會 deadlock；TestUSDC 放到 fixture 位址後，鑄幣、EIP-3009、對帳與 Signer 的 domain 都一致；`verifyingContract` 是 `0x4444…`，簽名不可能在真的 Base Sepolia 重放。
+
+| 等級 | 問題 | 處理 |
+|---|---|---|
+| Important | 重用同一個 `var/p2-local` 開新鏈：舊的 `relayer.db` 以為 task 已登記（task ID 與合約位址在新 anvil 上都相同），每筆付款都 `RESERVE_FAILED`，舊的已簽交易還可能在新鏈上送出 | p2-local 拒絕已有 `payments.json`、`relayer.db` 或 `settle.db` 的目錄；腳本說明改為新鏈用新的 `P2_LOCAL_DIR`；TestSetup 在新的 anvil 上用同一目錄驗證被拒 |
+| Important | 登記時的 `RELAYER_NONCE_BLOCKED` 被 starter 當成永久拒絕 | 與 `TASK_REGISTRATION_PENDING` 一樣下一輪再試；TestStarter 與突變 |
+| 建議 | 輸出沒說要用新的 registry、委派 ID 寫死且沒說明 | 印出 `--registry`、`--payments` 的路徑，以及 `signer.json` 要用的委派 ID、資產與商家 |
+| 建議 | 以位置取 registry 的錢包與資產 | 以 `wallet_id` 查；只接受一個資產 |
+| 建議 | 8545 已被佔用時，腳本的等待會連到別的節點 | 先檢查 8545 沒人聽、等待時確認 anvil 還活著、`curl --max-time` |
+| 建議 | `setCode` 之後失敗，anvil 無法再設定 | 錯誤訊息說明要重開 anvil |
+| 建議 | 沒有代碼的 `StartPayment` 錯誤重試、恢復失敗的 5 秒重試、`paymentSigner` 與 `eth.Anvil` 的呼叫點沒有測試 | 不另加：前兩者需要讓 Store 或 relayer 故障的替身，呼叫點由函式本身的測試與 H6 的實跑涵蓋 |
+| 建議 | 已 `settled` 時商店回 200／400／402 以外的狀態，會一直重抓 | 不改：商店是同一程序內的 `merchant.NewSettled`，不會轉址或回 404；換成外部商店時再設上限 |
+
+H3 突變共 29 項，29／29 KILLED。
+
 ### 12.4 H4 畫面與 Agent 看到的付款狀態
 
 - **H4a Agent 看到什麼（§8）**：`request_purchase` 的 `payment` 在付款開始後改為 `payment_status`（`paying`、`confirming`、`paid`、`not_paid`、`needs_review`），並附固定的說明文字；付款前照舊是 `none`。Agent 看不到任何交易 hash、內容 hash 或內容本身（H-D2）。`paid` 但交付失敗時，說明寫明商店沒有交付、由人處理。`TestPaymentStatusProjected`；突變 2 項，2／2 KILLED。

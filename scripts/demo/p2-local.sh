@@ -8,14 +8,19 @@
 #
 # It writes var/p2-local (0700; P2_LOCAL_DIR names another): payments.json, registry.json, the
 # zkbudget binary and, once the demo runs, the relayer's and shop's
-# databases. Ctrl-C stops anvil; its chain is gone with it (start this
-# again, and the demo with a new APA_DB_PATH, for a new one).
+# databases. Ctrl-C stops anvil; its chain is gone with it. For a new
+# chain, give a new P2_LOCAL_DIR (the old directory's databases name tasks
+# and transactions the new chain never saw; p2-local refuses it) and start
+# the demo with a new APA_DB_PATH.
 set -eu
 [ $# -eq 2 ] || { echo "usage: sh scripts/demo/p2-local.sh 0x<wallet-a> 0x<wallet-b>" >&2; exit 2; }
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 anvil=var/tools/foundry-v1.8.3/bin/anvil
 [ -x "$anvil" ] || { echo "no local anvil at $anvil" >&2; exit 1; }
+if curl -s --max-time 2 -o /dev/null http://127.0.0.1:8545; then
+  echo "something already listens on 127.0.0.1:8545; stop it first" >&2; exit 1
+fi
 out=${P2_LOCAL_DIR:-var/p2-local}
 mkdir -p "$out" && chmod 700 "$out"
 out=$(cd "$out" && pwd)
@@ -24,7 +29,8 @@ out=$(cd "$out" && pwd)
 pid=$!
 trap 'kill $pid 2>/dev/null' INT TERM EXIT
 i=0
-until curl -s -o /dev/null -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' http://127.0.0.1:8545; do
+until curl -s --max-time 2 -o /dev/null -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' http://127.0.0.1:8545; do
+  kill -0 $pid 2>/dev/null || { echo "anvil exited" >&2; exit 1; }
   i=$((i + 1)); [ $i -lt 50 ] || { echo "anvil did not answer" >&2; exit 1; }; sleep 0.2
 done
 go run ./cmd/p2-local --wallet-a "$1" --wallet-b "$2" --out "$out" --zkbudget "$out/zkbudget"

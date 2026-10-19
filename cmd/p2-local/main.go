@@ -53,6 +53,13 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if err := eth.LocalRPC(*rpcURL); err != nil {
 		return err
 	}
+	// A previous chain's databases name tasks and transactions this chain
+	// never saw (the same task IDs and contract addresses on a fresh anvil).
+	for _, f := range []string{"payments.json", "relayer.db", "settle.db"} {
+		if _, err := os.Lstat(filepath.Join(*outDir, f)); !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%s already holds %s from an earlier chain: remove the directory yourself, or name another (--out / P2_LOCAL_DIR)", *outDir, f)
+		}
+	}
 	a, errA := eth.ParseAddress(*walletA)
 	b, errB := eth.ParseAddress(*walletB)
 	if errors.Join(errA, errB) != nil || a == b {
@@ -65,6 +72,15 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	}
 	if err := contracts.Decode(raw, &reg); err != nil {
 		return fmt.Errorf("registry: %w", err)
+	}
+	wallet := map[string]int{}
+	for i, w := range reg.Wallets {
+		wallet[w.WalletID] = i
+	}
+	ia, okA := wallet["wallet-a"]
+	ib, okB := wallet["wallet-b"]
+	if !okA || !okB || len(reg.Assets) != 1 {
+		return errors.New("the registry names wallet-a, wallet-b and one asset")
 	}
 	asset, err := eth.ParseAddress(reg.Assets[0].AssetContract)
 	if err != nil {
@@ -114,7 +130,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	for _, w := range []eth.Address{a, b} {
 		data, _ := eth.Call("mint(address,uint256)", w, *mint)
 		if _, err := send(ctx, rpc, keys[0], &eth.Tx{To: &asset, Gas: 200_000, Data: data}); err != nil {
-			return fmt.Errorf("mint: %w", err)
+			return fmt.Errorf("mint (start a fresh anvil to set up again): %w", err)
 		}
 	}
 	block, err := rpc.BlockNumber(ctx)
@@ -135,7 +151,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		"anvil_keys":  map[string]int{"relayer_gas": 3, "issuer": 1, "policy": 2, "shop_gas": 4},
 		"dir":         abs(root, *outDir),
 		"delegations": map[string]string{"consumer-a": "dlg-a@1", "consumer-b": "dlg-b@1"}}
-	reg.Wallets[0].From, reg.Wallets[1].From = a.Hex(), b.Hex()
+	reg.Wallets[ia].From, reg.Wallets[ib].From = a.Hex(), b.Hex()
 	if _, err := contracts.NewRegistry(reg); err != nil {
 		return fmt.Errorf("the written registry: %w", err)
 	}
@@ -150,7 +166,10 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	fmt.Fprintf(out, "p2-local: chain %d at %s (block %d): budget %s, verifier %s, TestUSDC at %s; minted %d to %s and %s\n",
 		chainID, *rpcURL, block, budget.Hex(), verifier.Hex(), asset.Hex(), *mint, a.Hex(), b.Hex())
 	fmt.Fprintf(out, "p2-local: wrote %s and %s\n", filepath.Join(*outDir, "payments.json"), filepath.Join(*outDir, "registry.json"))
-	fmt.Fprintf(out, "p2-local: add to signer.json (max_window_seconds at least 300):\n%s\n", section)
+	fmt.Fprintf(out, "p2-local: add to signer.json (max_window_seconds at least 300; delegations dlg-a and dlg-b, version 1, for consumer-a and consumer-b, asset %s, merchant %s):\n%s\n",
+		asset.Hex(), reg.MerchantPayTo, section)
+	fmt.Fprintf(out, "p2-local: start the demo with --registry %s --payments %s, --approvals-signer on apa-signer serve, and a new APA_DB_PATH\n",
+		filepath.Join(*outDir, "registry.json"), filepath.Join(*outDir, "payments.json"))
 	return nil
 }
 

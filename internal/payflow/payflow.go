@@ -515,7 +515,7 @@ func (s *Starter) Start(ctx context.Context) {
 				err = s.Register(ctx, t.TaskID, t.ConsumerID, b)
 			}
 			r, refused := refusal(err)
-			if err == nil || refused && r != "TASK_REGISTRATION_PENDING" {
+			if err == nil || refused && r != "TASK_REGISTRATION_PENDING" && r != "RELAYER_NONCE_BLOCKED" {
 				s.registered[t.TaskID] = true
 			}
 			if err != nil && ctx.Err() == nil {
