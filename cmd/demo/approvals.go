@@ -175,7 +175,7 @@ func (a *api) approvalList(w http.ResponseWriter, r *http.Request) {
 		signerState = ans.Reply.State // ready: payments are signed too (P2)
 	}
 	reply(w, http.StatusOK, map[string]any{"consumer_id": consumer, "served_at": a.clock(), "approvals": items, "sources": a.approve.sources(),
-		"signer": signerState, "payment_capability": paycontract.PaymentNotEnabled})
+		"signer": signerState, "payment_capability": a.approvalsCapability()})
 }
 
 func (a *api) approvalItem(w http.ResponseWriter, r *http.Request) {
@@ -656,4 +656,13 @@ func (a *api) enrollRelay(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	w.Write(out)
+}
+
+// approvalsCapability: a person's approval pays with --payments (P2-a);
+// otherwise it is not a payment.
+func (a *api) approvalsCapability() string {
+	if a.payments {
+		return LocalAnvil
+	}
+	return paycontract.PaymentNotEnabled
 }

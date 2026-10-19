@@ -1157,7 +1157,8 @@ async function pollA2() {
   const g = creds.gen;
   const r = await a2Call(c, "/api/approvals");
   if (g !== creds.gen || currentConsumer() !== c) return;
-  lastA2 = r.status === 200 ? { gen: g, consumer: c, servedAt: r.body.served_at, at: Date.now(), items: r.body.approvals || [], signer: r.body.signer, sources: r.body.sources }
+  lastA2 = r.status === 200 ? { gen: g, consumer: c, servedAt: r.body.served_at, at: Date.now(), items: r.body.approvals || [], signer: r.body.signer, sources: r.body.sources,
+    pays: r.body.payment_capability === "local_anvil" }
     : { gen: g, consumer: c, error: (r.body && r.body.error) || "status_" + r.status };
   renderControl();
   const it = a2Item();
@@ -1241,7 +1242,7 @@ function renderA2() {
     mode.append(el("span", "approval-tag", other ? other[0] : "本人核准"), other ? other[1] : AP.sourceText(lastA2 && lastA2.sources) + (lastA2 && lastA2.signer !== "approvals-only" && lastA2.signer !== "ready" ? "・Signer 目前無法連線" : ""));
     parts.push(mode);
     const pending = ap.state === "pending";
-    const res = AP.decidedText(ap.state, p) || closedResult(A2_RESULT, ap.state, p);
+    const res = AP.decidedText(ap.state, p, !!(lastA2 && lastA2.pays)) || closedResult(A2_RESULT, ap.state, p);
     const head = el("div", "approval-head");
     head.dataset.state = ap.state;
     head.append(el("h3", "", pending ? "核准這一筆付款？" : res ? res[1] : ap.state),

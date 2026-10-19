@@ -10,10 +10,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 )
 
 func TestPaymentsConfigRefused(t *testing.T) {
@@ -91,5 +94,32 @@ func TestPaymentsNeedAReadySigner(t *testing.T) {
 	state = "ready"
 	if err := paymentSigner(sock); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// With --payments the host says local_anvil (health, status, a pay task,
+// the approvals list); without it, as before.
+func TestPaymentCapabilityStated(t *testing.T) {
+	shop, err := merchant.New("http://127.0.0.1:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"unavailable", LocalAnvil} {
+		srv := httptest.NewServer(newMux(shop, want))
+		res, err := http.Get(srv.URL + "/healthz")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var h health
+		json.NewDecoder(res.Body).Decode(&h)
+		res.Body.Close()
+		srv.Close()
+		if h.PaymentCapability != want {
+			t.Errorf("healthz %q, want %q", h.PaymentCapability, want)
+		}
+	}
+	on, off := &api{payments: true}, &api{}
+	if on.capability() != LocalAnvil || off.capability() != "unavailable" || on.approvalsCapability() != LocalAnvil || off.approvalsCapability() != "not_enabled" {
+		t.Fatal("capability")
 	}
 }

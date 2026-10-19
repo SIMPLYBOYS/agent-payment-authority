@@ -1,0 +1,107 @@
+// Tests of P2 in the page (docs/commercial-p2-host.md 5): a purchase's
+// payment on its card, from the Store's payment view and events. Nothing
+// reads as paid before the Store says so.
+// Run: node --test web/test/p2.test.mjs
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import * as A from "../adapter.js";
+
+let n = 0;
+const ev = (seq, type, extra = {}) => ({ event_id: "e" + n++, event_type: type, sequence: seq, evidence_mode: "fixture", source: "host", observed_at: 1790726450 + seq, purchase_order_id: "po-1", ...extra });
+const allowed = () => [ev(1, "TASK_STARTED", { purchase_order_id: "" }), ev(2, "PURCHASE_PROPOSED"),
+  ev(3, "POLICY_DECIDED", { decision: { version: A.V1, policy_verdict: "Allow", reason: "WITHIN_ALLOW_MAX", approval_status: "not_requested", payment_status: "not_enabled" } })];
+const purchase = (payment) => ({ purchase_order_id: "po-1", amount: "500000", asset_id: "fixture-usdc", resource_url: "http://x/r",
+  decision: { version: A.V1, policy_verdict: "Allow", reason: "WITHIN_ALLOW_MAX", approval_status: "not_requested", payment_status: "not_enabled" }, payment });
+const view = (events, payment) => ({ task: { task_id: "show-a-01", consumer_id: "consumer-a", status: "running", as_of_sequence: events.length, served_at: 1790726470,
+  purchases: [purchase(payment)], contract_version: A.V1 }, events });
+const card = (events, payment) => A.card(view(events, payment), null, { mode: "live", catalog: null });
+const labels = (c) => c.steps.map((s) => s.label + ":" + s.state).slice(5);
+const tx1 = "0x" + "1".repeat(64), tx2 = "0x" + "2".repeat(64);
+
+test("P2: an Allow paid and delivered: every payment step done, both transactions and the receipt", () => {
+  const evs = [...allowed(), ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED"), ev(6, "PAYMENT_SIGNED"), ev(7, "PAYMENT_SUBMITTED"), ev(8, "PAYMENT_SETTLED"),
+    ev(9, "RESOURCE_DELIVERED"), ev(10, "RECEIPT_ISSUED")];
+  const c = card(evs, { status: "paid", state: "delivered", reserve_tx: tx1, settle_tx: tx2, settle_block: 12, content_sha256: "c".repeat(64), receipt_id: "rcpt-1" });
+  assert.equal(c.status, "已付款、已交付（區塊 12），附收據");
+  assert.deepEqual(labels(c), ["收尾:none", "預留:done", "簽名:done", "送出:done", "鏈上確認:done", "交付:done"]);
+  const rows = Object.fromEntries(c.rows.map((r) => [r[0], r[1]]));
+  assert.ok(rows["預算預留 tx#1"].startsWith("0x1111"));
+  assert.ok(rows["付款 tx#2"].includes("區塊 12"));
+  assert.ok(rows["收據"].startsWith("rcpt-1"));
+});
+
+test("P2: in flight it is paying, then confirming; never paid before the chain", () => {
+  const reserved = card([...allowed(), ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED")], { status: "paying", state: "reserved" });
+  assert.equal(reserved.status, "付款中：預算已預留");
+  assert.deepEqual(labels(reserved), ["收尾:none", "預留:done", "簽名:future", "送出:future", "鏈上確認:future", "交付:future"]);
+  const sent = card([...allowed(), ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED"), ev(6, "PAYMENT_SIGNED"), ev(7, "PAYMENT_SUBMITTED")], { status: "confirming", state: "submitted" });
+  assert.equal(sent.status, "已送出，等待鏈上確認（不會自動再付）");
+  assert.ok(!/已付款/.test(sent.status + sent.rows.map((r) => r[1]).join()));
+});
+
+test("P2: an ending replaces the steps it cut off, with its code", () => {
+  const review = card([...allowed(), ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED"), ev(6, "PAYMENT_NEEDS_REVIEW")], { status: "needs_review", state: "needs_review", code: "RESERVED_NOT_PAID" });
+  assert.match(review.status, /^待人工處理：預算已預留，沒有簽名或送出/);
+  assert.deepEqual(labels(review), ["收尾:none", "預留:done", "待人工處理:done"]);
+  const notPaid = card([...allowed(), ev(4, "PAYMENT_REQUESTED"), ev(5, "PAYMENT_NOT_SETTLED")], { status: "not_paid", state: "reserve_failed", code: "RESERVE_FAILED" });
+  assert.equal(notPaid.status, "未付款：預算預留失敗，沒有花錢");
+  assert.deepEqual(labels(notPaid), ["收尾:none", "未付款:done"]);
+  const failed = card([...allowed(), ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED"), ev(6, "PAYMENT_SIGNED"), ev(7, "PAYMENT_SUBMITTED"), ev(8, "PAYMENT_SETTLED"),
+    ev(9, "PAYMENT_NEEDS_REVIEW")], { status: "paid", state: "needs_review", code: "DELIVERY_FAILED", settle_block: 12 });
+  assert.equal(failed.status, "已付款（區塊 12），交付失敗，待人工處理");
+  assert.deepEqual(labels(failed).slice(-2), ["鏈上確認:done", "待人工處理:done"]);
+});
+
+test("P2: without a payment the Allow card is as before", () => {
+  const c = card(allowed(), undefined);
+  assert.equal(c.status, "Allow：在委託範圍內，但未啟用付款（不會自動付款）");
+  assert.equal(c.steps.length, 6);
+});
+
+test("P2: the scene follows the payment; Unity keeps the decision's phase and cause", () => {
+  const base = allowed();
+  for (const [extra, phase] of [
+    [[ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED")], "paying"],
+    [[ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED"), ev(6, "PAYMENT_SIGNED"), ev(7, "PAYMENT_SUBMITTED")], "confirming"],
+    [[ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED"), ev(6, "PAYMENT_SIGNED"), ev(7, "PAYMENT_SUBMITTED"), ev(8, "PAYMENT_SETTLED")], "paid"],
+    [[ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED"), ev(6, "PAYMENT_SIGNED"), ev(7, "PAYMENT_SUBMITTED"), ev(8, "PAYMENT_SETTLED"), ev(9, "RESOURCE_DELIVERED"), ev(10, "RECEIPT_ISSUED")], "delivered"],
+    [[ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED"), ev(6, "PAYMENT_SIGNED"), ev(7, "PAYMENT_SUBMITTED"), ev(8, "PAYMENT_SETTLED"), ev(9, "PAYMENT_NEEDS_REVIEW")], "delivery_failed"],
+    [[ev(4, "PAYMENT_REQUESTED"), ev(5, "PAYMENT_NOT_SETTLED")], "not_paid"],
+    [[ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED"), ev(6, "PAYMENT_NEEDS_REVIEW")], "payment_review"],
+  ]) {
+    const evs = [...base, ...extra];
+    const v = view(evs, undefined);
+    const sc = A.scene(v);
+    assert.equal(sc.phase, phase);
+    assert.equal(sc.cause, evs[evs.length - 1].sequence, phase);
+    assert.ok(sc.label && !sc.label.includes("未知"), phase);
+    const m = A.projection({ snapshot: v, gen: 1 }, false);
+    assert.equal(m.phase, "allowed_unpaid", phase); // Unity's build has no payment phase yet
+    assert.equal(m.cause_seq, 3, phase); // its own event: the decision
+  }
+  assert.equal(A.scene(view(base, undefined)).phase, "allowed_unpaid");
+});
+
+test("P2: with local_anvil an Allow and a person's approval say the Host pays; a simulated one never", () => {
+  const v = view(allowed(), undefined);
+  v.task.payment_capability = "local_anvil";
+  assert.equal(A.card(v, null, { mode: "live", catalog: null }).status, "Allow：在委託範圍內，由 Host 付款");
+  v.task.payment_capability = "not_enabled";
+  assert.equal(A.card(v, null, { mode: "live", catalog: null }).status, "Allow：在委託範圍內，但未啟用付款（不會自動付款）");
+  const asked = [ev(1, "TASK_STARTED", { purchase_order_id: "" }), ev(2, "PURCHASE_PROPOSED"),
+    ev(3, "POLICY_DECIDED", { decision: { version: A.V1, policy_verdict: "Ask", reason: "HUMAN_APPROVAL_REQUIRED", approval_status: "pending", payment_status: "not_enabled" } }),
+    ev(4, "APPROVED", { authorization_method: "webauthn", decision: { reason: "HUMAN_APPROVED" } })];
+  const s = { task: { ...v.task, payment_capability: "local_anvil" }, events: asked };
+  assert.equal(A.scene(s).label, "本人核准已驗證：由 Host 付款");
+  s.task.payment_capability = "not_enabled";
+  assert.equal(A.scene(s).label, "本人核准已驗證：未啟用付款，不會取貨");
+});
+
+test("P2: a person's approval says the Host pays only with local_anvil", async () => {
+  const AP = await import("../approve.js");
+  const dev = { approval: { resolved_by: "webauthn:approver-a", grant: { authorization_method: "webauthn" } } };
+  assert.equal(AP.decidedText("approved", dev, true)[1], "本人核准已驗證，由 Host 付款。");
+  assert.equal(AP.decidedText("approved", dev)[1], "本人核准已驗證，付款未啟用。");
+  dev.approval.grant.voice = "verified";
+  assert.equal(AP.decidedText("approved", dev, true)[1], "本人核准已驗證（裝置＋語音），由 Host 付款。");
+});

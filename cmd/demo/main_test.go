@@ -105,7 +105,7 @@ func TestHealthHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(newMux(shop))
+	srv := httptest.NewServer(newMux(shop, "unavailable"))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/healthz")

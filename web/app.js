@@ -721,8 +721,9 @@ async function replay() {
     const sc = A.scene(step);
     replayPos = { n: seq, m: last };
     replaySc = { ...sc, label: "回放 #" + seq + "：" + sc.label };
-    sent = { gen, task: snap.task.task_id, seq, phase: sc.phase, po: sc.po };
-    sendShop(A.projection({ gen, snapshot: step }, true));
+    const msg = A.projection({ gen, snapshot: step }, true);
+    sent = { gen, task: snap.task.task_id, seq, phase: msg.phase, po: sc.po }; // Unity's phase, as it reports it
+    sendShop(msg);
     draw();
     await renderedBy(gen, seq, 6000);
     await new Promise((r) => setTimeout(r, 400));

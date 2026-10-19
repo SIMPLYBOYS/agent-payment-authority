@@ -141,15 +141,20 @@ const DONE = {
   simulated: { approved: ["ok", "已核准（模擬），未啟用付款", "這筆只留下模擬授權（grant）；它不能付款，也不會交付商品。"],
     denied: ["deny", "已拒絕", "Agent 不會取得這一筆；沒有付款。"] }, // P1-a's words
 };
+const PAID_NOTE = "Host 會為這一筆付款（本機 anvil、測試 USDC）；付款與交付的進度見請購卡片。";
 // V1: a voice outcome words its record: denied by the voice (never as the
 // approver's own deny), approved with the voice, or approved degraded.
-export const decidedText = (state, p) => {
+// pays: the host pays a person's approval (payment_capability local_anvil,
+// P2-a); a simulated one never pays.
+export const decidedText = (state, p, pays = false) => {
   const g = p && p.approval && p.approval.grant;
+  const paid = (t) => (pays ? t.replace("，付款未啟用。", "，由 Host 付款。") : t);
   if (state === "denied" && p && p.closed_reason === "VOICE_CHALLENGE_FAILED") return ["deny", "語音挑戰未通過，這筆已拒絕。", "沒有發出授權，不會付款；這筆不能再核准。"];
   if (state === "approved" && byDevice(p) && g && g.voice === "unavailable") {
-    return ["warn", "本人核准已驗證（語音降級），付款未啟用。", "語音不可用（" + voiceText(g.voice_reason) + "）：只憑摘要確認與裝置驗證核准，這筆記為降級。"];
+    return ["warn", paid("本人核准已驗證（語音降級），付款未啟用。"), "語音不可用（" + voiceText(g.voice_reason) + "）：只憑摘要確認與裝置驗證核准，這筆記為降級。"];
   }
-  if (state === "approved" && byDevice(p) && g && g.voice === "verified") return ["ok", "本人核准已驗證（裝置＋語音），付款未啟用。", DONE.device.approved[2]];
+  if (state === "approved" && byDevice(p) && g && g.voice === "verified") return ["ok", paid("本人核准已驗證（裝置＋語音），付款未啟用。"), pays ? PAID_NOTE : DONE.device.approved[2]];
+  if (state === "approved" && byDevice(p) && pays) return ["ok", "本人核准已驗證，由 Host 付款。", PAID_NOTE];
   return DONE[byDevice(p) ? "device" : "simulated"][state] || null;
 };
 

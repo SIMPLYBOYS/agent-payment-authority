@@ -116,6 +116,7 @@ type api struct {
 	pairing  *pairing     // --pairing: the host page's one-time code; nil otherwise
 	sim      *simulator   // fake mode with --scenarios: the simulated approver (P1-a); nil otherwise
 	out      io.Writer    // the host's log (fixed lines only)
+	payments bool         // P2-a: --payments (LocalAnvil)
 }
 
 func (a *api) register(mux *http.ServeMux) {
@@ -225,6 +226,9 @@ func (a *api) task(w http.ResponseWriter, r *http.Request) {
 	capability := "unavailable" // M1 cannot pay
 	if paycontract.Supported(v.ContractVersion) {
 		capability = paycontract.PaymentNotEnabled // P1-a: an approval, simulated, is not a payment
+		if a.payments {
+			capability = LocalAnvil
+		}
 	}
 	reply(w, http.StatusOK, taskReply{TaskID: b.TaskID, ContractVersion: v.ContractVersion, DelegationID: v.DelegationID, ConsumerID: b.ConsumerID,
 		AgentID: b.AgentID, WalletID: b.WalletID, Payer: b.Payer,

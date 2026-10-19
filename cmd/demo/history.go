@@ -254,7 +254,7 @@ func serveHistory(ctx context.Context, dbPath, tracePath, registryPath, unityDir
 	if err != nil {
 		return err
 	}
-	mux := newMux(shop)
+	mux := newMux(shop, "unavailable")
 	frozen := func() uint64 { return asOf }
 	ui := &api{st: st, tokens: tokens, addr: addr, clock: frozen, expiry: &expiryHealth{}, history: info}
 	if root, err := os.OpenRoot(unityDir); err == nil {

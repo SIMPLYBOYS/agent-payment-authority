@@ -106,7 +106,7 @@ func (a *api) hostStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := statusReply{CallerRole: g.Role, HTTP: "ok", Store: a.expiry.view(), FakeCLI: stateOnly{"off"}, LiveCLI: "off",
-		UnityBuild: unityBuildStatus{State: "missing", Files: []string{}}, PaymentCapability: "unavailable", ServedAt: a.clock(), History: a.historyFor(g), Live: a.live}
+		UnityBuild: unityBuildStatus{State: "missing", Files: []string{}}, PaymentCapability: a.capability(), ServedAt: a.clock(), History: a.historyFor(g), Live: a.live}
 	if a.fake {
 		out.FakeCLI.State = "ok"
 	}
@@ -158,4 +158,12 @@ func currentBuild() buildInfo {
 		}
 	}
 	return b
+}
+
+// capability is the host's payment capability: LocalAnvil with --payments.
+func (a *api) capability() string {
+	if a.payments {
+		return LocalAnvil
+	}
+	return "unavailable"
 }

@@ -94,6 +94,13 @@ const pay = (task) => !!task && isPay(task.contract_version); // the pay family:
 // say what really happened.
 export const UNITY_PHASE = { approved: "allowed_unpaid", approval_denied: "denied", superseded: "withdrawn" };
 
+// PAY_PHASE (P2, docs/commercial-p2-host.md 5): a purchase's payment
+// events as the page's phases. Unity has no phase that is true of them
+// (it would say "no payment capability"), so it keeps the decision's
+// phase (UNITY_PAY_PHASE) until its build shows payments.
+const PAY_PHASE = { PAYMENT_REQUESTED: "paying", BUDGET_RESERVED: "paying", PAYMENT_SIGNED: "paying", PAYMENT_SUBMITTED: "confirming",
+  PAYMENT_SETTLED: "paid", RESOURCE_DELIVERED: "paid", RECEIPT_ISSUED: "delivered", PAYMENT_NOT_SETTLED: "not_paid", PAYMENT_NEEDS_REVIEW: "payment_review" };
+
 export function scene(snapshot) {
   if (!snapshot) return { phase: "empty", label: "尚無資料", notes: [], po: null, verdict: "", reason: null, cause: 0, end: "" };
   const { task, events } = snapshot;
@@ -119,6 +126,15 @@ export function scene(snapshot) {
         if (po) Object.assign(of(po), { closed: CLOSED[e.event_type], closedSeq: e.sequence, method: e.authorization_method || "",
           closedReason: (e.decision && e.decision.reason) || "" });
         break;
+      case "PAYMENT_REQUESTED": case "BUDGET_RESERVED": case "PAYMENT_SIGNED": case "PAYMENT_SUBMITTED": case "PAYMENT_SETTLED":
+      case "RESOURCE_DELIVERED": case "RECEIPT_ISSUED": case "PAYMENT_NOT_SETTLED": case "PAYMENT_NEEDS_REVIEW":
+        if (po) {
+          const p = of(po);
+          // Review after settlement is a failed delivery: paid, not delivered.
+          p.pay = e.event_type === "PAYMENT_NEEDS_REVIEW" && p.pay === "paid" ? "delivery_failed" : PAY_PHASE[e.event_type];
+          p.paySeq = e.sequence;
+        }
+        break;
       case "TASK_CANCELLED": end = "cancelled"; firstEnd = firstEnd || end; break;
       case "TASK_TIMED_OUT": end = "timed_out"; firstEnd = firstEnd || end; break;
     }
@@ -135,6 +151,8 @@ export function scene(snapshot) {
   if (!cur && orphanDecision) phase = "unknown";
   const notes = [];
   if (phase === "waiting" && cur.closed) phase = CLOSED_PHASE[cur.closed] || phase;
+  const decided = phase; // Unity's phase while a payment runs
+  if (cur && cur.pay) phase = cur.pay;
   if (phase === "waiting") {
     const p = (task.purchases || []).find((x) => x.purchase_order_id === shown);
     // The server's clock decides, never the browser's: past the deadline
@@ -151,16 +169,23 @@ export function scene(snapshot) {
     withdrawn: "Ask 已撤回（task 取消）：離店", unknown: "未知裁決",
     // apa.pay.v1 (P1-a): the simulated approval's outcomes.
     approved: "已核准（模擬）：未啟用付款，不會取貨", approval_denied: "核准者拒絕：離店", superseded: "報價已改變：需要重新請購",
+    // P2: the payment.
+    paying: "付款中：預算預留與簽名", confirming: "已送出，等待鏈上確認（不會自動再付）", paid: "已付款，準備交付", delivered: "已付款、已交付",
+    delivery_failed: "已付款，交付失敗：待人工處理", not_paid: "未付款（沒有花錢）：離店", payment_review: "待人工處理：預算已預留但未付款",
   };
-  if (pay(task)) labels.waiting = simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；不會付款）";
+  const pays = !!task && task.payment_capability === "local_anvil"; // P2-a: a person's approval is paid
+  if (pay(task)) labels.waiting = simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；" + (pays ? "核准後由 Host 付款）" : "不會付款）");
   if (cur && CREDENTIAL_CLOSED[cur.closedReason]) labels.withdrawn = CREDENTIAL_CLOSED[cur.closedReason] + "：離店"; // C2: not the task's cancellation
-  if (cur && cur.method === "webauthn") labels.approved = "本人核准已驗證：未啟用付款，不會取貨"; // the record's own method (review R4)
+  if (cur && cur.method === "webauthn") labels.approved = pays ? "本人核准已驗證：由 Host 付款" : "本人核准已驗證：未啟用付款，不會取貨"; // the record's own method (review R4)
   const d = cur && cur.decision ? cur.decision : null;
-  const cause = { entered: startedSeq, quoted: cur && cur.proposedSeq, waiting: cur && cur.decidedSeq, denied: cur && cur.decidedSeq,
+  const causeOf = { entered: startedSeq, quoted: cur && cur.proposedSeq, waiting: cur && cur.decidedSeq, denied: cur && cur.decidedSeq,
     allowed_unpaid: cur && cur.decidedSeq, expired: cur && cur.closedSeq, withdrawn: cur && cur.closedSeq,
-    approved: cur && cur.closedSeq, approval_denied: cur && cur.closedSeq, superseded: cur && cur.closedSeq }[phase];
+    approved: cur && cur.closedSeq, approval_denied: cur && cur.closedSeq, superseded: cur && cur.closedSeq };
+  const seqOr0 = (n) => (Number.isInteger(n) && n > 0 ? n : 0);
+  const cause = cur && cur.pay ? cur.paySeq : causeOf[phase];
+  // decided and decidedCause: the phase Unity is sent while a payment runs, and its event.
   return { phase, label: labels[phase] || UNKNOWN, notes, po: shown, verdict: d ? d.policy_verdict || "" : "", reason: d ? d.reason || null : null,
-    cause: Number.isInteger(cause) && cause > 0 ? cause : 0, end: firstEnd };
+    cause: seqOr0(cause), end: firstEnd, decided, decidedCause: seqOr0(causeOf[decided]) };
 }
 
 // fresh returns the sequences not seen before and marks them seen: an event
@@ -201,7 +226,8 @@ export function inspector(snapshot) {
     ["wallet 證據", str(t.wallet_evidence_mode)], ["task", str(t.task_id)], ["payer", str(t.payer)],
     ["task 狀態", str(t.status)], ["快照序號", str(t.as_of_sequence)],
     ["fixture 餘額", UNKNOWN + "（M1 無鏈上餘額）"], ["剩餘預算", UNKNOWN + "（預算不是鏈上餘額）"],
-    ["付款", "未付款（payment_capability：" + str(t.payment_capability) + "）"],
+    ["付款", t.payment_capability === "local_anvil" ? "本機 anvil 付款（P2-a：測試金鑰、測試 USDC；payment_capability：local_anvil）"
+      : "未付款（payment_capability：" + str(t.payment_capability) + "）"],
     ...(t.contract_version ? [["契約", str(t.contract_version) + (t.delegation_id ? " · 委託 " + str(t.delegation_id) : "")]] : []),
   ];
   for (const p of t.purchases || []) {
@@ -251,8 +277,8 @@ export function projection(state, animate) {
   const seq = Math.max(task.as_of_sequence, last);
   return {
     v: BRIDGE_VERSION, gen: state.gen, clear: false, consumer: task.consumer_id, task_id: task.task_id,
-    seq, phase: UNITY_PHASE[sc.phase] || sc.phase, verdict: sc.verdict, reason: sc.phase === "approval_denied" ? "APPROVER_DENIED" : sc.reason || "", animate: !!animate,
-    cause_seq: sc.cause > 0 && sc.cause <= seq ? sc.cause : 0, task_end: sc.end,
+    seq, phase: UNITY_PHASE[sc.decided] || sc.decided, verdict: sc.verdict, reason: sc.phase === "approval_denied" ? "APPROVER_DENIED" : sc.reason || "", animate: !!animate,
+    cause_seq: sc.decidedCause > 0 && sc.decidedCause <= seq ? sc.decidedCause : 0, task_end: sc.end,
   };
 }
 
@@ -569,17 +595,51 @@ function catalogFor(catalog, p) {
   return list.find((x) => x && p && x.resource_url === p.resource_url && x.price) || null;
 }
 
+// P2 (docs/commercial-p2-host.md 5): a purchase's payment as the page
+// says it, from the Store's payment view (status, state, code).
+const NOT_PAID = { RESERVE_FAILED: "預算預留失敗，沒有花錢", NOT_PAID_EXPIRED: "已過付款期限，沒有花錢", TASK_ENDED: "task 已結束，沒有花錢" };
+const REVIEW = { RESERVED_NOT_PAID: "預算已預留，沒有簽名或送出", NOT_SETTLED_EXPIRED: "已送出，過期未結算", VERIFICATION_FAILED: "商店驗證未通過，沒有送出",
+  RECONCILE_NEEDS_REVIEW: "鏈上對帳需人工判斷" };
+export function paymentText(pv) {
+  const block = typeof pv.settle_block === "number" ? "（區塊 " + pv.settle_block + "）" : "";
+  switch (pv.status) {
+    case "paying": return "付款中：" + ({ reserved: "預算已預留", signed: "已簽名" }[pv.state] || "已請求付款");
+    case "confirming": return "已送出，等待鏈上確認（不會自動再付）";
+    case "paid":
+      if (pv.code === "DELIVERY_FAILED") return "已付款" + block + "，交付失敗，待人工處理";
+      return pv.state === "delivered" ? "已付款、已交付" + block + "，附收據" : "已付款" + block + "，準備交付";
+    case "not_paid": return "未付款：" + (NOT_PAID[pv.code] || str(pv.code));
+    case "needs_review": return "待人工處理：" + (REVIEW[pv.code] || str(pv.code)) + "（預算的預留與付款是兩筆交易）";
+  }
+  return "付款狀態不明：" + str(pv.status);
+}
+
+// paymentSteps are the payment's steps from its Store events; an ending
+// (not paid, or for review) replaces the steps it cut off.
+function paymentSteps(at, step, pv) {
+  const steps = [["預留", "BUDGET_RESERVED"], ["簽名", "PAYMENT_SIGNED"], ["送出", "PAYMENT_SUBMITTED"], ["鏈上確認", "PAYMENT_SETTLED"], ["交付", "RECEIPT_ISSUED"]]
+    .map(([label, type]) => step(label, at(type), type));
+  const end = at("PAYMENT_NOT_SETTLED") || at("PAYMENT_NEEDS_REVIEW");
+  if (end) {
+    const cut = steps.findIndex((s) => s.state !== "done");
+    steps.splice(cut < 0 ? steps.length : cut, steps.length, step(end.event_type === "PAYMENT_NOT_SETTLED" ? "未付款" : "待人工處理", end, end.event_type + (pv && pv.code ? " " + pv.code : "")));
+  }
+  return steps;
+}
+
 function purchaseStatus(p, live, servedAt, task) {
   if (!p) return "此 task 尚無請購";
   const d = p.decision;
   if (!d) return "已提出請購，尚無裁決";
   if (pay(task)) {
+    if (p.payment) return paymentText(p.payment);
     const reached = live && typeof servedAt === "number" && typeof p.deadline_at === "number" && servedAt >= p.deadline_at;
     if (d.policy_verdict === "Deny") return "Deny：" + reasonText(d.reason, task);
-    if (d.policy_verdict === "Allow") return "Allow：在委託範圍內，但未啟用付款（不會自動付款）";
-    return { approved: byDevice(p) ? "本人核准已驗證，未啟用付款" : "已核准（模擬），未啟用付款", denied: byDevice(p) ? "已拒絕（本人，已驗證裝置）" : "已拒絕（模擬核准者）",
+    if (d.policy_verdict === "Allow") return task.payment_capability === "local_anvil" ? "Allow：在委託範圍內，由 Host 付款" : "Allow：在委託範圍內，但未啟用付款（不會自動付款）";
+    const pays = task.payment_capability === "local_anvil";
+    return { approved: byDevice(p) ? (pays ? "本人核准已驗證，由 Host 付款" : "本人核准已驗證，未啟用付款") : "已核准（模擬），未啟用付款", denied: byDevice(p) ? "已拒絕（本人，已驗證裝置）" : "已拒絕（模擬核准者）",
       superseded: "報價已改變：這次核准作廢，需要重新請購", expired: "已過期，無法核准（後端已記錄）", withdrawn: withdrawnText(p) }[p.approval_closed]
-      || (simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；不會付款）") + (reached ? "；已達期限，等待後端確認" : "");
+      || (simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；" + (pays ? "核准後由 Host 付款）" : "不會付款）")) + (reached ? "；已達期限，等待後端確認" : "");
   }
   if (d.policy_verdict === "Deny") return "Deny：" + reasonText(d.reason);
   if (d.policy_verdict === "Allow") return "Allow：政策允許，M1 未付款（PAYMENT_CAPABILITY_UNAVAILABLE）";
@@ -612,6 +672,8 @@ export function card(view, chosen, ctx) {
   const step = (label, ev, note) => ({ label, state: ev ? "done" : "future", note: ev ? "#" + ev.sequence + (note ? " " + note : "") : later });
   const closing = p && (at("APPROVAL_EXPIRED") || at("APPROVAL_WITHDRAWN") || at("APPROVED") || at("APPROVAL_DENIED") || at("APPROVAL_SUPERSEDED"));
   const waiting = p && p.decision && p.decision.policy_verdict === "Ask" && !p.approval_closed;
+  const pv = p && p.payment;
+  const paying = !!(p && (pv || at("PAYMENT_REQUESTED")));
   const steps = [
     step("進店", evs.find((e) => e.event_type === "TASK_STARTED"), "TASK_STARTED"),
     { label: "選商品", state: "none", note: hist ? "無 Store 事件；工具呼叫見查證面板（真實執行 trace）"
@@ -623,8 +685,9 @@ export function card(view, chosen, ctx) {
     closing || ended ? step("收尾", closing || ended, (closing || ended).event_type)
       : waiting ? { label: "收尾", state: "wait", note: hist ? "執行結束時仍待核准（歷史快照，不是即時狀態；期限已過）" : pay(t) ? (simulated() ? "等你核准（模擬）" : "等你核准（本人裝置）") : "等待中（M1 無核准能力）" }
       : p && p.decision && p.decision.policy_verdict === "Deny" ? { label: "收尾", state: "none", note: "Deny 即結束；沒有收尾事件" }
-      : p && p.decision && p.decision.policy_verdict === "Allow" ? { label: "收尾", state: "none", note: pay(t) ? "未啟用付款；沒有後續事件" : "M1 無付款；沒有後續事件" }
+      : p && p.decision && p.decision.policy_verdict === "Allow" ? { label: "收尾", state: "none", note: paying ? "Allow：由 Host 付款，見下列步驟" : pay(t) ? "未啟用付款；沒有後續事件" : "M1 無付款；沒有後續事件" }
       : step("收尾", null),
+    ...(paying ? paymentSteps(at, step, pv) : []),
   ];
   const cat = catalogFor(ctx.catalog, p);
   const rows = [];
@@ -638,8 +701,16 @@ export function card(view, chosen, ctx) {
     }
     if (p.credential) rows.push(["憑證檢查", credentialText(p.credential), "Store 事件 CREDENTIAL_VERIFIED"]);
     if (typeof p.deadline_at === "number") rows.push(["期限", hhmmss(p.deadline_at), hist ? "Store 時間；當時的期限，早已過，不是倒數" : "Store 時間；裁決時決定"]);
-    rows.push(["付款", "未付款（payment_status：" + str(p.decision ? p.decision.payment_status : "unavailable") + "）", "Store"]);
-    if (p.approval && p.approval.grant) rows.push(["授權", grantText(p.approval.grant) + short(p.approval.grant.jti) + "（" + str(p.approval.grant.authorization_method) + "）：不能付款", "Store"]);
+    if (pv) {
+      rows.push(["付款", paymentText(pv) + "（payment_status：" + str(pv.status) + "，state：" + str(pv.state) + "）", "Store"]);
+      if (pv.reserve_tx) rows.push(["預算預留 tx#1", short(pv.reserve_tx), "Store（Z2 預留的鏈上交易）"]);
+      if (pv.settle_tx) rows.push(["付款 tx#2", short(pv.settle_tx) + (typeof pv.settle_block === "number" ? "，區塊 " + pv.settle_block : ""), "Store（鏈上確認後才記下）"]);
+      if (pv.receipt_id) rows.push(["收據", str(pv.receipt_id) + "；內容 sha256 " + short(pv.content_sha256), "Store（內容只交給 Host，不交給 Agent）"]);
+    } else {
+      rows.push(["付款", "未付款（payment_status：" + str(p.decision ? p.decision.payment_status : "unavailable") + "）", "Store"]);
+    }
+    if (p.approval && p.approval.grant) rows.push(["授權", grantText(p.approval.grant) + short(p.approval.grant.jti) + "（" + str(p.approval.grant.authorization_method) + "）："
+      + (pv && p.approval.grant.authorization_method === "webauthn" ? "這筆付款的依據" : "不能付款"), "Store"]);
   }
   return {
     mode: live ? "live" : "replay", n: ctx.n, m: ctx.m,

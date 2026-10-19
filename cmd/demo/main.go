@@ -398,8 +398,12 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		expiry.Go(func() { pay.run(runCtx, st, *approvalsSigner, d.clock) })
 	}
 	var runs sync.WaitGroup
-	mux := newMux(shop)
-	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: runner != nil && !live, out: d.out}
+	capability := "unavailable"
+	if pay != nil {
+		capability = LocalAnvil
+	}
+	mux := newMux(shop, capability)
+	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: runner != nil && !live, out: d.out, payments: pay != nil}
 	var pairCode string
 	if *pairingOn {
 		if ui.pairing, pairCode, err = newPairing(now); err != nil {
@@ -595,9 +599,15 @@ func lockDB(dbPath string) (func(), error) {
 	return func() { f.Close() }, nil // closing releases the lock
 }
 
-func newMux(shop *merchant.Merchant) *http.ServeMux {
+// LocalAnvil is the payment capability with --payments (P2-a): payments on
+// a local anvil, with test keys and test USDC.
+const LocalAnvil = "local_anvil"
+
+// newMux serves /healthz and the shop; capability is unavailable or
+// LocalAnvil.
+func newMux(shop *merchant.Merchant, capability string) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", handleHealth)
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { handleHealth(w, r, capability) })
 	shop.Register(mux)
 	return mux
 }
@@ -620,14 +630,14 @@ type health struct {
 	PaymentCapability string `json:"payment_capability"`
 }
 
-func handleHealth(w http.ResponseWriter, _ *http.Request) {
+func handleHealth(w http.ResponseWriter, _ *http.Request, capability string) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(health{
 		Status:            "ok",
 		Mode:              "fixture",
 		LiveCLI:           false,
 		ClaudeLogin:       "not_checked",
-		PaymentCapability: "unavailable",
+		PaymentCapability: capability,
 	})
 }
 
