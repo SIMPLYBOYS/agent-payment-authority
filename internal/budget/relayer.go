@@ -32,6 +32,10 @@ type Config struct {
 	PolicyTTL     uint64 // seconds a policy signature stays valid (the contract's deadline)
 	Zkbudget      string // the zkbudget binary
 	SetupDir      string // its pk.bin and vk.bin (the deployed verifier's)
+	// DailyTxCap bounds the transactions sent a UTC day (0: none, a local
+	// chain), counted per nonce: a transaction signed again at its own
+	// nonce is not another one (docs/commercial-p2b.md B2, P2b-D5).
+	DailyTxCap uint64
 }
 
 // Keys are the relayer's three test keys (P2-D2): gas sends, the issuer
@@ -85,6 +89,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_open ON reservations (task_id) WHERE state
 -- A reverted or dropped reservation leaves the task's state, so its
 -- nullifier is proven again by the next one.
 CREATE UNIQUE INDEX IF NOT EXISTS one_spend ON reservations (nullifier) WHERE state <> 'failed';
+-- Each nonce a key took, by UTC day, for DailyTxCap: recorded before its
+-- transaction is written, so a crash between counts it rather than not.
+CREATE TABLE IF NOT EXISTS sent (
+  address TEXT NOT NULL,
+  nonce   INTEGER NOT NULL,
+  day     INTEGER NOT NULL,
+  PRIMARY KEY (address, nonce)
+) STRICT;
 `
 
 // Open opens (or creates, 0600) the relayer's database at path.
@@ -406,6 +418,9 @@ func (r *Relayer) RegisterTask(ctx context.Context, taskID, consumerID string, b
 	default:
 		return r.finishRegistration(ctx, taskID, have.raw, have.hash, have.nonce, true)
 	}
+	if err := r.capped(ctx); err != nil {
+		return err
+	}
 	rv, err := r.random(ctx)
 	if err != nil {
 		return err
@@ -428,6 +443,9 @@ func (r *Relayer) RegisterTask(ctx context.Context, taskID, consumerID string, b
 	}
 	raw, hash, nonce, err := r.prepare(ctx, r.keys.Issuer, data, floor)
 	if err != nil {
+		return err
+	}
+	if err := r.count(ctx, r.keys.Issuer, nonce); err != nil {
 		return err
 	}
 	// Written before it is sent: a restart resends this transaction, never a new one.
@@ -540,6 +558,9 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 	} else if open > 0 {
 		return Evidence{}, signer.Refusal("TASK_BUSY") // the commitment is being spent by another order
 	}
+	if err := r.capped(ctx); err != nil {
+		return Evidence{}, err
+	}
 	rNew, err := r.random(ctx)
 	if err != nil {
 		return Evidence{}, err
@@ -596,6 +617,9 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 	}
 	raw, hash, nonce, err := r.prepare(ctx, r.keys.Gas, data, floor)
 	if err != nil {
+		return Evidence{}, err
+	}
+	if err := r.count(ctx, r.keys.Gas, nonce); err != nil {
 		return Evidence{}, err
 	}
 	// Written before it is sent: a restart resends this transaction, never a new one.
@@ -705,6 +729,28 @@ func (r *Relayer) resume(ctx context.Context, intent string, wait bool) (Evidenc
 	}
 	ev.BlockNumber = rc.BlockNumber
 	return ev, true, tx.Commit()
+}
+
+// capped refuses a new transaction once today's are DailyTxCap.
+func (r *Relayer) capped(ctx context.Context) error {
+	if r.cfg.DailyTxCap == 0 {
+		return nil
+	}
+	var n uint64
+	if err := r.db.QueryRowContext(ctx, `SELECT count(*) FROM sent WHERE day = ?`, r.clock()/86400).Scan(&n); err != nil {
+		return err
+	}
+	if n >= r.cfg.DailyTxCap {
+		return signer.Refusal("RELAYER_DAILY_CAP")
+	}
+	return nil
+}
+
+// count records the nonce key is about to use; one already recorded (the
+// same nonce again) is not counted twice.
+func (r *Relayer) count(ctx context.Context, key *eth.Key, nonce uint64) error {
+	_, err := r.db.ExecContext(ctx, `INSERT OR IGNORE INTO sent (address, nonce, day) VALUES (?, ?, ?)`, key.Addr.Hex(), nonce, r.clock()/86400)
+	return err
 }
 
 // hook runs at the named points (tests only; nil in production).

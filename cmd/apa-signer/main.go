@@ -180,6 +180,9 @@ func assemble(dir string, passphrase func() ([]byte, error), clock signer.Clock)
 // (keytool.Keygen under the Signer's label) and prints the wallet ID and the
 // address only.
 func keygen(dir, walletID string, passphrase func() ([]byte, error), out io.Writer) error {
+	if !signer.ValidWalletID(walletID) {
+		return fmt.Errorf("wallet ID %q is not valid", walletID)
+	}
 	addr, err := keytool.Keygen(dir, signer.SignerLabel, walletID, passphrase)
 	if err != nil {
 		return err

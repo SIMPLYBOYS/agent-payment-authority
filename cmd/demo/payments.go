@@ -48,15 +48,27 @@ type payConfig struct {
 		Policy     int `json:"policy"`
 		ShopGas    int `json:"shop_gas"`
 	} `json:"anvil_keys"`
-	Dir         string            `json:"dir"`         // relayer.db and settle.db, a private directory
-	Delegations map[string]string `json:"delegations"` // consumer ID -> its Signer delegation, id@version
+	// RelayerSocket: apa-relayer's socket (docs/commercial-p2b.md B2); the
+	// relayer then runs there with its own keys and database, and
+	// anvil_keys' relayer_gas, issuer and policy are not used.
+	RelayerSocket string            `json:"relayer_socket,omitempty"`
+	Dir           string            `json:"dir"`         // relayer.db and settle.db, a private directory
+	Delegations   map[string]string `json:"delegations"` // consumer ID -> its Signer delegation, id@version
+}
+
+// hostRelayer is the budget relayer as the Host uses it: in this process
+// (*budget.Relayer) or apa-relayer's socket (*budget.Client).
+type hostRelayer interface {
+	payflow.Relayer
+	RegisterTask(ctx context.Context, taskID, consumerID string, balance uint64) error
 }
 
 // payments is the demo's payment side once opened.
 type payments struct {
 	cfg     payConfig
 	rpc     *eth.Client
-	relayer *budget.Relayer
+	relayer hostRelayer
+	closeR  func() error
 	settler *merchant.Settler
 	out     io.Writer
 }
@@ -72,7 +84,7 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 		return nil, nil, fmt.Errorf("payments: %w", err)
 	}
 	k := c.AnvilKeys
-	if idx := map[int]bool{k.RelayerGas: true, k.Issuer: true, k.Policy: true, k.ShopGas: true}; len(idx) != 4 {
+	if idx := map[int]bool{k.RelayerGas: true, k.Issuer: true, k.Policy: true, k.ShopGas: true}; c.RelayerSocket == "" && len(idx) != 4 {
 		return nil, nil, errors.New("payments: the four anvil keys are four different ones (each has its own nonces)")
 	}
 	var keys [4]*eth.Key
@@ -91,6 +103,16 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 	if fi, err := os.Stat(c.Dir); err != nil || !fi.IsDir() || fi.Mode().Perm()&0o077 != 0 {
 		return nil, nil, errors.New("payments: dir is an existing directory private to its owner (0700)")
 	}
+	var rc *budget.Client // apa-relayer: ready for this chain and budget before anything else
+	if c.RelayerSocket != "" {
+		rc = budget.NewClient(c.RelayerSocket)
+		hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		h, err := rc.Health(hctx)
+		cancel()
+		if err != nil || h.State != "ready" || h.ChainID != c.ChainID || h.Contract != contract.Hex() {
+			return nil, nil, fmt.Errorf("payments: apa-relayer on %s is not ready for chain %d and budget %s (%+v %v); nothing was started", c.RelayerSocket, c.ChainID, contract.Hex(), h, err)
+		}
+	}
 	rpc := eth.NewClient(c.RPC)
 	if id, err := rpc.ChainID(ctx); err != nil || !id.IsUint64() || id.Uint64() != c.ChainID {
 		return nil, nil, fmt.Errorf("payments: the chain at rpc is not chain %d (or did not answer)", c.ChainID)
@@ -98,27 +120,32 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 	if err := eth.Anvil(ctx, rpc); err != nil { // a loopback port may be a tunnel to a public node
 		return nil, nil, fmt.Errorf("payments: %w", err)
 	}
-	relayer, err := budget.Open(ctx, budget.Config{ChainID: c.ChainID, Contract: contract, Confirmations: c.Confirmations, PolicyTTL: c.PolicyTTL,
-		Zkbudget: c.Zkbudget, SetupDir: c.ZkSetupDir}, budget.Keys{Gas: keys[0], Issuer: keys[1], Policy: keys[2]}, rpc, filepath.Join(c.Dir, "relayer.db"), clock)
-	if err != nil {
-		return nil, nil, err
+	var relayer hostRelayer = rc
+	closeR := func() error { return nil }
+	if rc == nil {
+		r, err := budget.Open(ctx, budget.Config{ChainID: c.ChainID, Contract: contract, Confirmations: c.Confirmations, PolicyTTL: c.PolicyTTL,
+			Zkbudget: c.Zkbudget, SetupDir: c.ZkSetupDir}, budget.Keys{Gas: keys[0], Issuer: keys[1], Policy: keys[2]}, rpc, filepath.Join(c.Dir, "relayer.db"), clock)
+		if err != nil {
+			return nil, nil, err
+		}
+		relayer, closeR = r, r.Close
 	}
 	settler, err := merchant.OpenSettler(ctx, merchant.SettleConfig{ChainID: c.ChainID, Token: token, TokenName: c.TokenName, TokenVersion: c.TokenVersion,
 		PayTo: payTo, Confirmations: c.Confirmations}, keys[3], rpc, filepath.Join(c.Dir, "settle.db"), clock)
 	if err != nil {
-		relayer.Close()
+		closeR()
 		return nil, nil, err
 	}
 	shop, err := merchant.NewSettled(baseURL, settler)
 	if err != nil {
-		relayer.Close()
+		closeR()
 		settler.Close()
 		return nil, nil, err
 	}
-	return &payments{cfg: c, rpc: rpc, relayer: relayer, settler: settler, out: out}, shop, nil
+	return &payments{cfg: c, rpc: rpc, relayer: relayer, closeR: closeR, settler: settler, out: out}, shop, nil
 }
 
-func (p *payments) Close() error { return errors.Join(p.relayer.Close(), p.settler.Close()) }
+func (p *payments) Close() error { return errors.Join(p.closeR(), p.settler.Close()) }
 
 // paymentSigner: with --payments the Signer must sign payments (health
 // ready: apa-signer serve with a reservation section). A Signer for

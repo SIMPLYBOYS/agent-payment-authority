@@ -27,8 +27,16 @@ const (
 	ShopLabel    = "apa-shop-key/v1"
 )
 
-// Roles are the Host's keys by ID, each with its label.
-var Roles = map[string]string{"relayer-gas": RelayerLabel, "issuer": RelayerLabel, "policy": RelayerLabel, "shop": ShopLabel}
+// Role is the label of one of the Host's keys by its ID.
+func Role(id string) (string, bool) {
+	switch id {
+	case "relayer-gas", "issuer", "policy":
+		return RelayerLabel, true
+	case "shop":
+		return ShopLabel, true
+	}
+	return "", false
+}
 
 // MinPassphrase is the shortest passphrase Keygen accepts.
 const MinPassphrase = 12
@@ -114,8 +122,15 @@ func Keygen(dir, label, id string, passphrase func() ([]byte, error)) (string, e
 	return f.Address, nil
 }
 
-// Load opens DIR/keys/<id>.key under label with the passphrase.
+// Load opens DIR/keys/<id>.key under label with the passphrase; DIR and
+// DIR/keys must be this user's alone, as for apa-signer's wallets.
 func Load(dir, label, id string, pass []byte) (*eth.Key, error) {
+	if err := Private(dir); err != nil {
+		return nil, err
+	}
+	if err := Private(filepath.Join(dir, "keys")); err != nil {
+		return nil, err
+	}
 	f, err := signer.ReadKeyFile(filepath.Join(dir, "keys", id+".key"))
 	if err != nil {
 		return nil, err

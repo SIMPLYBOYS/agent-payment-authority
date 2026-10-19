@@ -63,6 +63,18 @@ P2-b 的交付物：
 - 測試：同一把金鑰只在自己的標籤與 ID 下打得開（relayer 的不是錢包、也不是商店的，反之亦然）；拒絕兩次不同、太短、不合法的 ID、已存在、目錄權限太寬。`apa-signer` 原有的 keygen 測試不變並通過。
 - 突變：新增 2 項；`m-b-reverse.py` 的 keygen 三項改指向 `internal/keytool`，「沒有預留段就什麼都不簽」那一項的錨點在 P2 H3 後已失效，一併改正。
 
+B1 的 review（04006c2、0c7ac6b）：APPROVE，兩項 Important 已處理：
+- 沒有測試證明既有的錢包金鑰檔還打得開 → 以改動前的程式（8157530）產生一個固定的測試金鑰檔，`TestKeyFileFromBeforeLabels` 確認它仍以 Signer 的標籤打開、在別的標籤下打不開；並加上「改了 Signer 標籤」的突變。
+- `keytool.Load` 沒有檢查目錄 → 與 `apa-signer` 一樣，`DIR` 與 `DIR/keys` 必須只屬於這個使用者；測試涵蓋缺檔、別的 ID 的檔、權限太寬的目錄。
+- 建議也照做：`apa-signer` 的錯誤訊息恢復為「wallet ID … is not valid」；角色改為函式 `keytool.Role`（不是可被改寫的 map）；`apa-relayer` 沒有終端機時什麼都不寫的測試；跨標籤的突變改由 `internal/signer` 自己的測試抓。
+
+**B2 `apa-relayer`**（完成，待 review）：
+- `apa-relayer serve --dir DIR`：讀 `DIR/relayer.json`（socket、可呼叫的 uid、RPC、鏈、預算合約、確認數、`policy_ttl` 1–600 秒、zkbudget、每日交易上限，全部必填），確認 socket 不存在，問一次密語打開三把金鑰（relayer-gas、issuer、policy），以 `eth_chainId` 確認鏈，再在 socket（只有這個使用者能用）上服務；中斷時移除 socket。輸出只有位址與上限，沒有密語或金鑰。
+- `internal/budget/serve.go`：路由 `GET /v1/health`、`POST /v1/register`、`/v1/reserve`、`/v1/lookup`；先檢查對端 uid；拒絕以代碼傳回（付款工作照原規則判斷），其他錯誤只回 `RELAYER_UNAVAILABLE`，不帶錯誤文字；`Client` 是 Host 這一端。
+- 每日上限：`budget.Config.DailyTxCap`，以 nonce 計（`sent` 表，記在交易寫入之前）；同一 nonce 重簽不另計；超過回 `RELAYER_DAILY_CAP`，在任何交易之前。
+- demo：`payments.json` 的 `relayer_socket`（選填）指向 `apa-relayer`；開始前先確認它 ready，且鏈與預算合約和設定相同，否則不啟動。
+- 測試：socket 傳遞答案與拒絕、拒絕別的 uid、`apa-relayer serve` 的拒絕與實際啟動（以只回 `eth_chainId` 的假 RPC）；anvil 上的 `TestDailyTxCap`；`TestPaidOnAnvil` 改經 socket 呼叫 relayer，仍付款、交付、對帳 0。
+
 ## 5 要你決定的事
 
 | # | 問題 | 選項 | 建議 |

@@ -1082,15 +1082,27 @@ MUTATIONS = [
     ('V1 review: a zero embedding enrolls', 'internal/signer/voice.go',
      'if !(norm > 0) || math.IsInf(norm, 0) {', 'if false {', 'TestVoiceSignerTroubleAndInputs'),
     ('P2-b B1: the shop key has the relayer label', 'internal/keytool/keytool.go',
-     '"shop": ShopLabel}', '"shop": RelayerLabel}', 'TestKeygenAndLoadByLabel'),
+     'case "shop":\n\t\treturn ShopLabel, true', 'case "shop":\n\t\treturn RelayerLabel, true', 'TestKeygenAndLoadByLabel'),
+    ('P2-b B1: Load takes a keys directory others can write', 'internal/keytool/keytool.go',
+     '\tif err := Private(filepath.Join(dir, "keys")); err != nil {\n\t\treturn nil, err', '\tif err := Private(filepath.Join(dir, "keys")); false && err != nil {\n\t\treturn nil, err', 'TestKeygenAndLoadByLabel'),
+    ("P2-b B1: a key file opens under any program's label", 'internal/signer/keystore.go',
+     'return []byte(label + "\\x00" + walletID', 'return []byte(SignerLabel + "\\x00" + walletID', 'TestKeyFileFromBeforeLabels'),
+    ('P2-b B1: the wallets\' label changes and old key files no longer open', 'internal/signer/keystore.go',
+     'const SignerLabel = "apa-signer-key/v1"', 'const SignerLabel = "apa-signer-key/v2"', 'TestKeyFileFromBeforeLabels'),
+    ('P2-b B2: the relayer socket serves any uid', 'internal/budget/serve.go',
+     'if !ok || uid < 0 || !slices.Contains(callers, uint32(uid)) {', 'if !ok || uid < 0 || false && !slices.Contains(callers, uint32(uid)) {', 'TestSocketRefusesOtherCallers'),
+    ('P2-b B2: a relayer refusal reaches the Host as a plain error', 'internal/budget/serve.go',
+     '\t\treturn signer.Refusal(e.Code)', '\t\treturn errors.New(e.Code)', 'TestSocketCarriesTheRelayersAnswers'),
+    ('P2-b B2: apa-relayer serves without a daily cap', 'cmd/apa-relayer/main.go',
+     '|| c.DailyTxCap == 0 {', '{', 'TestServe'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
-    ("P2-b B1: a key file opens under any program's label", 'internal/signer/keystore.go',
-     'return []byte(label + "\\x00" + walletID', 'return []byte(SignerLabel + "\\x00" + walletID', 'internal/keytool:TestKeygenAndLoadByLabel'),
+    ('P2-b B2: the daily transaction cap is not enforced', 'internal/budget/relayer.go',
+     'if n >= r.cfg.DailyTxCap {', 'if false && n >= r.cfg.DailyTxCap {', 'internal/budget:TestDailyTxCap'),
     ('P2 H5 review: a report of no block reads as zero', 'internal/reconcile/reconcile.go',
      'if t.FromBlock > at { // nothing read', 'if false && t.FromBlock > at { // nothing read', 'internal/payflow:TestPaidOnAnvil'),
     ('P2 H5 review: a report of no wallet reads as zero', 'internal/reconcile/reconcile.go',

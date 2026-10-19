@@ -727,3 +727,47 @@ func TestBlockedRegistrationIsResigned(t *testing.T) {
 		t.Fatalf("a reservation on the re-signed task: %v", err)
 	}
 }
+
+// DailyTxCap counts nonces a UTC day (docs/commercial-p2b.md B2, P2b-D5):
+// a registration and a reservation are two; the third is refused before
+// any transaction, and the next day it goes.
+func TestDailyTxCap(t *testing.T) {
+	w := newWorld(t)
+	cfg := Config{ChainID: 84532, Contract: w.contract, Confirmations: 1, PolicyTTL: 300, Zkbudget: w.zkb, SetupDir: filepath.Join(root(), "zk/setup"), DailyTxCap: 2}
+	r, err := Open(bg, cfg, Keys{Gas: key(t, 3), Issuer: key(t, 1), Policy: key(t, 2)}, w.rpc, filepath.Join(t.TempDir(), "budget.db"), func() uint64 { return w.now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if err := r.RegisterTask(bg, "show-a-01", "consumer-a", 1_000_000); err != nil {
+		t.Fatal(err)
+	}
+	raw, _, _ := w.order("consumer-a", "show-a-01", 1, "100000")
+	if _, err := r.Reserve(bg, raw); err != nil {
+		t.Fatal(err)
+	}
+	issuer, gas := key(t, 1).Addr, key(t, 3).Addr
+	ni, _ := w.rpc.PendingNonce(bg, issuer)
+	ng, _ := w.rpc.PendingNonce(bg, gas)
+	if err := r.RegisterTask(bg, "show-a-02", "consumer-a", 1_000_000); code(err) != "RELAYER_DAILY_CAP" {
+		t.Fatalf("a third transaction today: %v", err)
+	}
+	raw2, _, _ := w.order("consumer-a", "show-a-01", 2, "100000")
+	if _, err := r.Reserve(bg, raw2); code(err) != "RELAYER_DAILY_CAP" {
+		t.Fatalf("a third transaction today: %v", err)
+	}
+	if a, _ := w.rpc.PendingNonce(bg, issuer); a != ni {
+		t.Fatal("a capped registration sent a transaction")
+	}
+	if b, _ := w.rpc.PendingNonce(bg, gas); b != ng {
+		t.Fatal("a capped reservation sent a transaction")
+	}
+	// The same reservation again is no new transaction, so not refused.
+	if _, err := r.Reserve(bg, raw); err != nil {
+		t.Fatalf("the same order again: %v", err)
+	}
+	w.now += 86400
+	if err := r.RegisterTask(bg, "show-a-02", "consumer-a", 1_000_000); err != nil {
+		t.Fatalf("the next day: %v", err)
+	}
+}

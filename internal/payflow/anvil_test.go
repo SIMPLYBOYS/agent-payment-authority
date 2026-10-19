@@ -113,6 +113,18 @@ func TestPaidOnAnvil(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { relayer.Close() })
+	// The Host reaches it as apa-relayer serves it (docs/commercial-p2b.md B2): over its socket.
+	rln, err := net.Listen("unix", filepath.Join(sockDir, "r"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rctx, rstop := context.WithCancel(bg)
+	rserved := make(chan error, 1)
+	go func() {
+		rserved <- budget.Serve(rctx, rln, budget.Handler(relayer, budget.Health{State: "ready"}, []uint32{uint32(os.Getuid())}, func(string) {}))
+	}()
+	t.Cleanup(func() { rstop(); <-rserved })
+	host := budget.NewClient(filepath.Join(sockDir, "r"))
 	settler, err := merchant.OpenSettler(bg, merchant.SettleConfig{ChainID: ethtest.Chain, Token: usdc, TokenName: "USDC", TokenVersion: "2", PayTo: payTo,
 		Confirmations: 1}, ethtest.Key(t, 4), rpc, filepath.Join(t.TempDir(), "settle.db"), clock)
 	if err != nil {
@@ -168,7 +180,7 @@ func TestPaidOnAnvil(t *testing.T) {
 	}
 
 	// H-D4: the task's budget registered; then the payment, end to end.
-	if err := relayer.RegisterTask(bg, "task-a", "consumer-a", 5_000_000); err != nil {
+	if err := host.RegisterTask(bg, "task-a", "consumer-a", 5_000_000); err != nil {
 		t.Fatal(err)
 	}
 	pay, _, err := s.StartPayment(store.PaymentStart{ConsumerID: "consumer-a", TaskID: "task-a", PurchaseOrderID: "po-1", DelegationRef: "dlg-a@1"})
@@ -176,7 +188,7 @@ func TestPaidOnAnvil(t *testing.T) {
 		t.Fatal(err)
 	}
 	token := reconcile.Token{RPC: rpc, Address: usdc, Confirmations: 1}
-	wk := &Worker{Store: s, Relayer: relayer, Signer: signerclient.New(socket, s), Shop: HTTPShop{Client: srv.Client()}, Chain: token,
+	wk := &Worker{Store: s, Relayer: host, Signer: signerclient.New(socket, s), Shop: HTTPShop{Client: srv.Client()}, Chain: token,
 		Clock: clock, Margin: 30}
 	deadline := time.Now().Add(90 * time.Second)
 	for pay.State != "delivered" && time.Now().Before(deadline) {

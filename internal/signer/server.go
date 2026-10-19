@@ -330,3 +330,7 @@ func ApprovalsHandler(core *ApprovalCore, log func(string)) http.Handler {
 		answer(w, req, "caller", &ApprovalReply{}, Refusal("CALLER_NOT_ALLOWED"))
 	})
 }
+
+// PeerUID is the uid of the process at the other end of a Unix socket, for
+// the Host's own socket services (apa-relayer).
+func PeerUID(c *net.UnixConn) (uint32, error) { return peerUID(c) }

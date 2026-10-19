@@ -57,8 +57,23 @@ func TestKeygenAndLoadByLabel(t *testing.T) {
 	if _, err := Load(dir, RelayerLabel, "wallet-a", []byte(pass)); err == nil {
 		t.Fatal("a wallet key opened as the relayer's")
 	}
-	if Roles["shop"] != ShopLabel || Roles["policy"] != RelayerLabel || len(Roles) != 4 {
-		t.Fatalf("roles %v", Roles)
+	for id, want := range map[string]string{"relayer-gas": RelayerLabel, "issuer": RelayerLabel, "policy": RelayerLabel, "shop": ShopLabel, "wallet-a": ""} {
+		if got, ok := Role(id); got != want || ok != (want != "") {
+			t.Fatalf("role %s: %q %v", id, got, ok)
+		}
+	}
+	// Load refuses a missing file, another ID's file and a keys directory others can write.
+	if _, err := Load(dir, RelayerLabel, "policy", []byte(pass)); err == nil {
+		t.Fatal("a missing key file loaded")
+	}
+	os.Rename(filepath.Join(dir, "keys", "issuer.key"), filepath.Join(dir, "keys", "policy.key"))
+	if _, err := Load(dir, RelayerLabel, "policy", []byte(pass)); err == nil {
+		t.Fatal("the issuer's file loaded as the policy key")
+	}
+	os.Rename(filepath.Join(dir, "keys", "policy.key"), filepath.Join(dir, "keys", "issuer.key"))
+	os.Chmod(filepath.Join(dir, "keys"), 0o777)
+	if _, err := Load(dir, RelayerLabel, "issuer", []byte(pass)); err == nil || !strings.Contains(err.Error(), "0700") {
+		t.Fatalf("a keys directory others can write: %v", err)
 	}
 }
 

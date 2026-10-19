@@ -49,10 +49,11 @@ func TestPaymentsConfigRefused(t *testing.T) {
 		"a key past anvil's": {func(c map[string]any) {
 			c["anvil_keys"] = map[string]int{"relayer_gas": 9, "issuer": 1, "policy": 2, "shop_gas": 4}
 		}, "anvil key 9"},
-		"a key in the file":   {func(c map[string]any) { c["gas_key"] = strings.Repeat("ab", 32) }, "unknown field gas_key"},
-		"no delegations":      {func(c map[string]any) { delete(c, "delegations") }, "delegations"},
-		"a shared directory":  {func(c map[string]any) { os.Chmod(priv, 0o750) }, "0700"},
-		"no chain at the RPC": {func(c map[string]any) {}, "did not answer"},
+		"a key in the file":            {func(c map[string]any) { c["gas_key"] = strings.Repeat("ab", 32) }, "unknown field gas_key"},
+		"no delegations":               {func(c map[string]any) { delete(c, "delegations") }, "delegations"},
+		"a shared directory":           {func(c map[string]any) { os.Chmod(priv, 0o750) }, "0700"},
+		"no chain at the RPC":          {func(c map[string]any) {}, "did not answer"},
+		"no apa-relayer on its socket": {func(c map[string]any) { c["relayer_socket"] = filepath.Join(dir, "none.sock") }, "apa-relayer on"},
 	} {
 		os.Chmod(priv, 0o700)
 		c := good()

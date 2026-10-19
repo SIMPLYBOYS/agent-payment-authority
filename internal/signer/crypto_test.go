@@ -3,6 +3,7 @@ package signer
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -103,5 +104,34 @@ func TestKeyFile(t *testing.T) {
 	}
 	if _, err := DecryptKey(weak, "wallet-a", []byte("pass phrase")); err == nil {
 		t.Error("weak scrypt: accepted")
+	}
+}
+
+// A wallet key file made before the keystore had labels (8157530: the
+// fixed bytes 1..32, a test key) still opens as the Signer's, and only as
+// the Signer's: /opt's wallets stay readable (docs/commercial-p2b.md B1).
+func TestKeyFileFromBeforeLabels(t *testing.T) {
+	var f KeyFile
+	if err := json.Unmarshal([]byte(`{"version":1,"wallet_id":"wallet-a","address":"0x6370ef2f4db3611d657b90667de398a2cc2a370c","kdf":"scrypt","n":16384,"r":8,"p":1,"salt":"f759a023e8cb3a58f61048b087e729d9","nonce":"c91b52a17380470fb0e31b97","ciphertext":"9135862b32a9b6531de34c5999866bb2c8287d6b7cec8c5481f72c32aff807a601f191f8501701485321b97e8ddfae24"}`), &f); err != nil {
+		t.Fatal(err)
+	}
+	pass := []byte("a fixed test passphrase")
+	k, err := DecryptKey(f, "wallet-a", pass)
+	if err != nil || Address(k.PubKey()) != "0x6370ef2f4db3611d657b90667de398a2cc2a370c" {
+		t.Fatalf("an existing wallet key file: %v", err)
+	}
+	if _, err := DecryptKeyFor("apa-relayer-key/v1", f, "wallet-a", pass); err == nil {
+		t.Fatal("a wallet key file opened under another label")
+	}
+	// And a file made under one label never opens under another.
+	g, err := EncryptKeyFor("apa-relayer-key/v1", "issuer", k.Serialize(), pass, 1<<14)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecryptKeyFor("apa-shop-key/v1", g, "issuer", pass); err == nil {
+		t.Fatal("a key opened under another program's label")
+	}
+	if _, err := DecryptKeyFor("apa-relayer-key/v1", g, "issuer", pass); err != nil {
+		t.Fatal(err)
 	}
 }
