@@ -1,5 +1,6 @@
 # P2 Host 接線：設計提案
 
+> **P2-a Done（Aaron 10/19：「P2-a 請標記為 done 並做 merge」）。** 本機 anvil 上的付款迴圈完成：Signer、預算 relayer、商店、Reconciler、Host 接線（H1–H6）、畫面與 Unity；H6 以 Aaron 的金鑰與裝置在本機鏈實跑（`docs/commercial-p2-host.md` §12.9）。P2-b（Base Sepolia 準備）與 P2-c 尚未開始；AE1 驗收 18 仍待 testnet 對帳。
 > **狀態：Aaron 10/18 決定 H-D1～H-D8 全部照建議**（「8 件事基於我看過設計文件的前提，我們都先依照建議的方向執行」）。實作照 §11 分段進行。H-D6 的付款錢包金鑰由 Aaron 自己建立，要等到 H6 才需要；在那之前我不建立、不讀取任何金鑰，也不連任何鏈或外部服務、不動 `/opt`。
 
 P2-a 已經有各自完成並 review 過的元件（`docs/commercial-p2.md` §9）：
