@@ -76,6 +76,10 @@ registry=${APA_PRESENT_REGISTRY:-testdata/demo/registry.json}
 [ -f "$registry" ] || stop "APA_PRESENT_REGISTRY=${registry} 不是檔案"
 [ -z "$creds" ] || [ "$mode" = fake ] || stop "APA_PRESENT_CREDENTIALS 只用於 fake 展示（C2 的 v2 場景只用 fake Agent）"
 payments=${APA_PRESENT_PAYMENTS:-}
+# APA_PRESENT_PROFILE (fake only; make present-testnet): the consumer profile
+# (its merchants are the testnet shop's address); default the demo's own.
+profile=${APA_PRESENT_PROFILE:-}
+[ -z "$profile" ] || [ -f "$profile" ] || stop "APA_PRESENT_PROFILE=${profile} 不是檔案"
 [ -z "$payments" ] || [ -n "$signer" ] || stop "APA_PRESENT_PAYMENTS 需要 APA_APPROVALS_SIGNER（同一個 Signer 也簽付款）"
 [ -z "$payments" ] || [ -f "$payments" ] || stop "APA_PRESENT_PAYMENTS=${payments} 不是檔案"
 [ -z "$payments" ] || [ -S "$signer" ] || stop "APA_APPROVALS_SIGNER=${signer} 不是 socket：先以 scripts/demo/p2-dev.sh 啟動 apa-signer serve"
@@ -134,6 +138,7 @@ else
 	[ -z "$signer" ] || set -- --approvals-signer "$signer" --authenticator-source "$authsrc"
 	[ -z "$creds" ] || set -- "$@" --credential-dir "$w/cred"
 	[ -z "$payments" ] || set -- "$@" --payments "$payments"
+	[ -z "$profile" ] || set -- "$@" --profile "$profile"
 	APA_ADDR=$addr APA_DB_PATH=$db/fake.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \
 		--fake-cli "$w/fake-claude" --scenarios "${APA_PRESENT_SCENARIOS:-testdata/demo/scenarios.json}" --registry "$registry" \
 		--trace-dir "$runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" "$@" &

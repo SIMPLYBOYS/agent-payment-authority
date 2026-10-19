@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
@@ -276,6 +277,20 @@ func (p *payments) reconciliation(ctx context.Context, st *store.Store, wallets 
 	return t.Report(ctx, p.cfg.Environment, p.cfg.ChainID, wallets, known, now) // checkChain: local_anvil is an anvil, base_sepolia is not
 }
 
+// logged is a payment error as the terminal says it: its code, or (a
+// shop's refusal reason, say) its text, quoted and bounded: it may come
+// from the shop's JSON.
+func logged(err error) string {
+	if store.Code(err) != "" {
+		return store.CodeOf(err)
+	}
+	s := err.Error()
+	if len(s) > 120 {
+		s = s[:120]
+	}
+	return strconv.Quote(s)
+}
+
 // payMargin: no new step this close to valid_before; more than the shop's
 // own 5 s plus signing.
 const payMargin = 30
@@ -289,7 +304,7 @@ func (p *payments) run(ctx context.Context, st *store.Store, socket string, cloc
 		Shop:  payflow.HTTPShop{Client: &http.Client{Timeout: p.shopFor}},
 		Chain: reconcile.Token{RPC: p.rpc, Address: token, Confirmations: p.cfg.Confirmations, FromBlock: p.cfg.TokenFromBlock},
 		Clock: clock, Margin: payMargin, Before: starter.Start,
-		Log: func(intent string, err error) { fmt.Fprintln(p.out, "demo: payment", intent, store.CodeOf(err)) }}
+		Log: func(intent string, err error) { fmt.Fprintln(p.out, "demo: payment", intent, logged(err)) }}
 	for { // Run returns only when its recovery failed (or ctx ended): try again
 		err := w.Run(ctx)
 		if err == nil || ctx.Err() != nil {

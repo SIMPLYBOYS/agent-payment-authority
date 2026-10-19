@@ -1,4 +1,4 @@
-.PHONY: check check-m1-e3 check-contracts build dev demo-fake demo-integration demo present-live present-fake present-rehearsal present-p1a present-c2 present-ux3 present-a2 present-p2 m1-fixture verify-m1 m1-live-cli
+.PHONY: check check-m1-e3 check-contracts build dev demo-fake demo-integration demo present-live present-fake present-rehearsal present-p1a present-c2 present-ux3 present-a2 present-p2 present-testnet m1-fixture verify-m1 m1-live-cli
 
 # Compile, vet and unit-test. Calls no paid model and touches no testnet.
 check:
@@ -120,6 +120,15 @@ present-a2:
 present-p2:
 	@test -n "$(SIGNER)" || { echo "usage: make present-p2 SIGNER=/path/of/signer.sock [PAYMENTS=var/p2-local/payments.json] [REGISTRY=var/p2-local/registry.json] (docs/commercial-p2-host.md 12.8)" >&2; exit 2; }
 	@APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$(or $(REGISTRY),var/p2-local/registry.json)" APA_PRESENT_PAYMENTS="$(or $(PAYMENTS),var/p2-local/payments.json)" APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p2.json sh scripts/demo/present.sh fake
+
+# present-testnet: P2 on the Base Sepolia testnet (docs/commercial-p2b.md 6):
+# SIGNER is the socket of the running apa-signer serve (on /opt, P2b-D2);
+# apa-relayer serve --dir var/p2-testnet must be running; the host files are
+# the ones p2-testnet deploy wrote (default var/p2-testnet/host/). The host
+# asks the shop key's passphrase on this terminal before it is ready.
+present-testnet:
+	@test -n "$(SIGNER)" || { echo "usage: make present-testnet SIGNER=/path/of/signer.sock [HOST=var/p2-testnet/host] (docs/commercial-p2b.md 6)" >&2; exit 2; }
+	@h="$(or $(HOST),var/p2-testnet/host)"; APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$$h/registry.json" APA_PRESENT_PAYMENTS="$$h/payments.json" APA_PRESENT_PROFILE="$$h/profile.json" APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p2.json sh scripts/demo/present.sh fake
 
 # docs/m1-evidence.md: the M1 fixture evidence bundle, a new
 # artifacts/m1/<run-id>/ each time (manifest.json, its evidence, run-end.json).

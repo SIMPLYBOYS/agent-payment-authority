@@ -25,6 +25,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 )
 
 func TestPaymentsConfigRefused(t *testing.T) {
@@ -357,5 +358,19 @@ func TestTestnetPaymentsOpen(t *testing.T) {
 	defer pay.Close()
 	if pay.cfg.Environment != BaseSepolia {
 		t.Fatalf("environment %q", pay.cfg.Environment)
+	}
+}
+
+// The terminal's line for a payment error: a code as itself; a shop's
+// refusal reason (no code) quoted and bounded, never a Store error.
+func TestLoggedPaymentError(t *testing.T) {
+	if got := logged(errors.New("shop: settlement_daily_cap")); got != `"shop: settlement_daily_cap"` {
+		t.Fatalf("%s", got)
+	}
+	if got := logged(errors.New(strings.Repeat("x", 500))); len(got) != 122 {
+		t.Fatalf("not bounded: %d", len(got))
+	}
+	if got := logged(&store.Error{Code: "TASK_ENDED"}); got != "TASK_ENDED" {
+		t.Fatalf("%s", got)
 	}
 }

@@ -1119,6 +1119,12 @@ MUTATIONS = [
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    ('P2-b B4: deploy sends without "yes"', 'cmd/p2-testnet/main.go',
+     'err != nil || ans != "yes" {', 'false && (err != nil || ans != "yes") {', 'cmd/p2-testnet:TestPreflightAndDeploy'),
+    ('P2-b B4: deploy runs twice', 'cmd/p2-testnet/main.go',
+     'if _, err := os.Lstat(p); !errors.Is(err, os.ErrNotExist) {\n\t\t\treturn fmt.Errorf("%s exists: deploy has run', 'if _, err := os.Lstat(p); false && !errors.Is(err, os.ErrNotExist) {\n\t\t\treturn fmt.Errorf("%s exists: deploy has run', 'cmd/p2-testnet:TestPreflightAndDeploy'),
+    ('P2-b B4: the journal is written after the send', 'cmd/p2-testnet/main.go',
+     'if err := writeJSON(jpath, j); err != nil { // written before it is sent', 'if err := writeJSON(jpath+".x", j); err != nil { // written before it is sent', 'cmd/p2-testnet:TestPreflightAndDeploy'),
     ('P2-b B3: the shop sends past its daily cap', 'internal/merchant/settle.go',
      'if n >= s.cfg.DailyTxCap {', 'if false && n >= s.cfg.DailyTxCap {', 'internal/merchant:TestDailyTxCap'),
     ('P2-b B2: the daily transaction cap is not enforced', 'internal/budget/relayer.go',

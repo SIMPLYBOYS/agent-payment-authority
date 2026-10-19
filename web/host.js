@@ -851,7 +851,12 @@ async function start(sc, delegationId) {
 
 const focusIn = (sel) => { const x = document.querySelector(sel); if (x && !x.disabled) x.focus(); };
 const units = (a) => (typeof a === "string" && /^[0-9]+$/.test(a) ? (Number(a) / 1e6).toFixed(2) : "?"); // fixture-usdc: 6 decimals
-const NETWORK = { "84532": "Base Sepolia（84532）" };
+// network names the chain by the host's own payment capability: the
+// testnet only when the host pays on it (a local anvil also runs as 84532).
+const network = (id) => {
+  const cap = lastReady && lastReady.status && lastReady.status.payment_capability;
+  return cap === "base_sepolia" ? "Base Sepolia testnet（" + id + "）" : cap === "local_anvil" ? "本機 anvil（chain " + id + "）" : "chain " + id + "（不付款）";
+};
 const addr = (x) => (typeof x === "string" && x.length > 12 ? x.slice(0, 6) + "…" + x.slice(-4) : String(x || "?"));
 const clock = (sec) => (typeof sec === "number" ? new Date(sec * 1000).toLocaleTimeString("zh-TW", { hour12: false }) : "?");
 
@@ -887,7 +892,7 @@ function delegationBox(sc, { busy, full, simC }) {
   box.append(el("p", "delegation-title", "委託內容（主持人設定，客人確認）"));
   const dl = el("dl", "delegation-rows");
   for (const [k, v] of [["需求", d.purpose], ["商家範圍", (d.merchants || []).map(addr).join("、") + "（示意商店）"],
-    ["資產與網路", "test USDC（" + (d.asset_id || "?") + "）· Base Sepolia 測試網"], ["任務預算", units(d.task_budget) + " test USDC"],
+    ["資產與網路", "test USDC（" + (d.asset_id || "?") + "）· " + network(d.chain_id || "84532")], ["任務預算", units(d.task_budget) + " test USDC"],
     ["自動範圍", "超過 " + units(d.allow_max) + " 一律要你核准"], ["核准期限", (d.approval_deadline_seconds || "?") + " 秒（後端時間為準）"],
     ["委託有效", Math.round((d.valid_seconds || 0) / 60) + " 分鐘內開始"]]) {
     dl.append(el("dt", "", k), el("dd", "", String(v)));
@@ -1019,7 +1024,7 @@ function renderApproval(runs) {
     const dl = el("dl", "approval-rows");
     for (const [k, val] of [...venueRows(vk),
       ["收款人", addr(p.pay_to) + " · 與報價相同（payTo）"], ["付款帳戶", "客人 " + short(item.consumer_id) + " 的測試錢包 " + addr(item.payer) + " · " + item.wallet_id],
-      ["網路與資產", (NETWORK[p.chain_id] || p.chain_id) + " · test USDC（" + (p.asset_id || "?") + "），不是真錢"],
+      ["網路與資產", network(p.chain_id) + " · test USDC（" + (p.asset_id || "?") + "），不是真錢"],
       ["委託範圍", d ? "預算 " + units(d.task_budget) + "；超過 " + units(d.allow_max) + " 一律要你核准" : "未取得"],
       ["intent", (p.intent_hash || "").slice(0, 23) + "…（後端比對這一份）"],
       ["語音", "未評估（模擬核准不含語音挑戰）"]]) { // V1 D9: the simulated path asks for no voice
@@ -1270,7 +1275,7 @@ function renderA2() {
     const dl = el("dl", "approval-rows");
     for (const [k, val] of [...venueRows(vk),
       ["收款人", addr(p.pay_to) + " · 與報價相同（payTo）"], ["付款帳戶", "客人 " + short(item.consumer_id) + " 的測試錢包 " + addr(item.payer) + " · " + item.wallet_id],
-      ["網路與資產", (NETWORK[p.chain_id] || p.chain_id) + " · test USDC（" + (p.asset_id || "?") + "），不是真錢"],
+      ["網路與資產", network(p.chain_id) + " · test USDC（" + (p.asset_id || "?") + "），不是真錢"],
       ["委託範圍", d ? "預算 " + units(d.task_budget) + "；超過 " + units(d.allow_max) + " 一律要你核准" : "未取得"],
       ["intent", (p.intent_hash || "").slice(0, 23) + (other ? "…（後端比對這一份）" : "…（Signer 依完整請購重算比對）")]]) { // review S-A: a simulated record never reached the Signer
       dl.append(el("dt", "", k), el("dd", "", val));

@@ -93,6 +93,19 @@ B3a 的 review（eaac5a3）：APPROVE，一項 Important 已處理：付款工�
 - Unity：`SceneRules.Paying`；橫幅分三種：`M1 / no payment`、`P2-a / local test payments`、`P2 / Base Sepolia testnet payments`；未知的值不顯示付款。
 - 測試：網頁 116／116；Unity scene／editmode／playmode 全部通過（playmode 加上 testnet 橫幅與未知值）。WebGL 建置已重做。
 
+B3b 的 review（546a990）：REQUEST CHANGES，沒有 Critical；三項 Important 已處理：
+- 商店拒絕的原因在終端機上顯示成 `STORE_ERROR` → 沒有代碼的錯誤改以引號、最多 120 字印出（例如 `"shop: settlement_daily_cap"`），付款工作也有測試確認它把原因交給記錄。
+- 本人核准面板的說明在 testnet 上仍寫「本機 anvil」→ 說明不再寫網路名稱。
+- 委託與核准面板的「網路」一律寫 Base Sepolia（本機 anvil 也用 84532）→ 依主持人頁自己的 `payment_capability` 命名：`Base Sepolia testnet（84532）`、`本機 anvil（chain 84532）`或 `chain 84532（不付款）`。
+- 未做：`localhost.`、`127.1` 這類寫法或解析到本機的網域名稱仍能通過「不是這台機器」的檢查（https＋不是 anvil 兩道檢查還在，設定也是操作者自己的）；Unity 兩位客人路徑沒有 testnet 的專屬測試。
+
+**B4 `p2-testnet`**（完成，待 review）：
+- `p2-testnet preflight`（唯讀）：RPC 必須是公開的 https、不含帳密、不是這台機器；鏈 84532、不是 anvil；Circle USDC 的 `name`／`version`／`decimals`（必須是 `USDC`、有版本、6 位）；四個角色的位址取自金鑰檔裡明文的位址（**不解密**），列出 ETH 與兩個付款錢包的 USDC 餘額，說明還缺哪些測試幣；`--test402 URL`：對 test402.com 打一次 GET，印出 PAYMENT-REQUIRED 的內容。輸出只有主機名稱，不印 RPC 完整網址。
+- `p2-testnet deploy`：同樣的檢查；印出兩筆交易（Z2 verifier、預算合約）的送出者、nonce、gas 與最多花費，issuer 餘額不夠就停；輸入 `yes` 才問 issuer 金鑰的密語並送出。每一筆在送出**之前**寫進 `DIR/deploy.json`，所以 deploy 永遠不會跑第二次；每一筆等 2 個區塊確認，沒等到就停在「不明」、不重送。部署後確認合約的 verifier、issuer、policy 與計畫相同，再寫出 `DIR/relayer.json`（每日 12 筆）與 `DIR/host/`：`payments.json`（`base_sepolia`、Circle USDC、對帳從部署區塊開始、委派 `dlg-ta@1`／`dlg-tb@1`、商店每日 4 筆）、`registry.json`、`profile.json`（merchants 是商店位址）。
+- `scripts/demo/p2-testnet.sh keygen|preflight|deploy|relayer` 建置並執行各步；`make present-testnet SIGNER=…` 用 `DIR/host/` 的檔案（`present.sh` 新增 `APA_PRESENT_PROFILE`）。
+- 測試：`TestRefusals`（http、這台機器、帳密、別的代幣、目錄權限，全部在連線之前就拒絕）、`TestPreflightAndDeploy`（本機 anvil 冒充，只有測試能這樣：缺幣時的說明、沒輸入 yes 什麼都不送、送兩筆、檔案內容與權限、不印密語與 RPC 網址、不能跑第二次）。沒有任何測試連外。
+- 部署用的 Z2 verifier 對應 repo 裡的 `zk/setup`（測試用的可信設定），與 P2-a 相同；這是 testnet，不宣稱 production 安全。
+
 ## 5 要你決定的事
 
 | # | 問題 | 選項 | 建議 |

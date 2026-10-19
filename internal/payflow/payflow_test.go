@@ -436,8 +436,14 @@ func TestRefusals(t *testing.T) {
 		t.Fatalf("Signer refusal: %+v", p)
 	}
 	w.shop.answers = []ShopAnswer{verify}
-	if p, _ := w.step("po-3"); p.State != "needs_review" || p.Code != "VERIFICATION_FAILED" {
+	var said []string
+	wk := w.worker()
+	wk.Log = func(_ string, err error) { said = append(said, err.Error()) }
+	if p, _ := wk.Step(bg, w.payment("po-3")); p.State != "needs_review" || p.Code != "VERIFICATION_FAILED" {
 		t.Fatalf("shop verification: %+v", p)
+	}
+	if len(said) != 1 || said[0] != "shop: "+verify.Response.ErrorReason { // settlement_daily_cap, say, told apart on the terminal
+		t.Fatalf("logged %q", said)
 	}
 	sent := len(w.shop.sent)
 	w.step("po-3")
