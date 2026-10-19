@@ -658,7 +658,7 @@ function purchaseStatus(p, live, servedAt, task, ended) {
     if (d.policy_verdict === "Deny") return "Deny：" + reasonText(d.reason, task);
     if (d.policy_verdict === "Allow") return task.payment_capability === "local_anvil" ? "Allow：在委託範圍內，尚未付款" : "Allow：在委託範圍內，但未啟用付款（不會自動付款）";
     const pays = task.payment_capability === "local_anvil";
-    if (ended && !p.approval_closed) return ENDED_ASK;
+    if (ended && !p.approval_closed) return ENDED_ASK + (reached ? "；已達期限，等待後端確認" : "");
     return { approved: byDevice(p) ? (pays ? "本人核准已驗證，尚未付款" : "本人核准已驗證，未啟用付款") : "已核准（模擬），未啟用付款", denied: byDevice(p) ? "已拒絕（本人，已驗證裝置）" : "已拒絕（模擬核准者）",
       superseded: "報價已改變：這次核准作廢，需要重新請購", expired: "已過期，無法核准（後端已記錄）", withdrawn: withdrawnText(p) }[p.approval_closed]
       || (simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；" + (pays ? "核准後由 Host 付款）" : "不會付款）")) + (reached ? "；已達期限，等待後端確認" : "");

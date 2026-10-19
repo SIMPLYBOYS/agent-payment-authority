@@ -1245,7 +1245,7 @@ function renderA2() {
   } else {
     const p = item.purchase, ap = p.approval, d = item.delegation;
     const mode = el("p", "approval-mode");
-    const other = AP.recordTag(p, "device", !!(lastA2 && lastA2.pays));
+    const other = AP.recordTag(p, "device");
     mode.append(el("span", "approval-tag", other ? other[0] : "本人核准"), other ? other[1] : AP.sourceText(lastA2 && lastA2.sources) + (lastA2 && lastA2.signer !== "approvals-only" && lastA2.signer !== "ready" ? "・Signer 目前無法連線" : ""));
     parts.push(mode);
     const ended = ap.state === "pending" && !!item.task_ended; // nobody decides it now (cli-timeout-pending)

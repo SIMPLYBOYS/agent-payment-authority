@@ -165,11 +165,10 @@ export const decidedText = (state, p, pays = false) => {
 // recordTag (review A): the tag and source line of a record decided by the
 // other method than the panel's ("simulated" or "device"); null for a
 // pending record, a record nobody decided, or one of the panel's method.
-export function recordTag(p, panel, pays = false) {
+export function recordTag(p, panel) {
   const ap = p && p.approval;
   if (!ap || ap.state === "pending" || !ap.resolved_by || (byDevice(p) ? "device" : "simulated") === panel) return null;
-  return byDevice(p) ? ["本人核准", "這筆由 Signer 驗證已登記的裝置・付款：" + (pays ? "由 Host 依核准付款（見請購卡片）" : "未啟用")]
-    : ["模擬核准", "這筆是 fake 模擬核准（主持人扮演，不是本人驗證）・付款：未啟用"];
+  return byDevice(p) ? ["本人核准", "這筆由 Signer 驗證已登記的裝置・付款：未啟用"] : ["模擬核准", "這筆是 fake 模擬核准（主持人扮演，不是本人驗證）・付款：未啟用"];
 }
 
 // panelNote (review B): a closed session's stored attempt text (design 7:

@@ -463,7 +463,7 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查�
   - `ResolveApproval`（模擬核准）與 `ResolveVoiceFailure` 也回 `closed`、不記錄；
   - 核准清單每一項新增 `task_ended`。
 - **demo 與網頁**：挑戰請求回 409 `task_ended`；主持人頁的模擬核准與本人核准面板不顯示核准按鈕，改寫「task 已結束：這筆不能核准」與原因；核准結果的文字在有 `--payments` 時寫「尚未付款」，不再寫「付款未啟用」；本人核准面板的商品列在有 `--payments` 時不再寫「本片不付款」。
-- **不再接觸 Signer**：開始、重送、恢復（狀態查詢）與送出驗證都先看 task 是否已結束（`AttemptStart.TaskEnded`）；已結束時關閉開著的驗證（Signer 端的挑戰一併關閉），回 409 `task_ended`，不再要求新的挑戰、不送驗證。
+- **不再接觸 Signer**：開始、重送、恢復（狀態查詢）與送出驗證都先看 task 是否已結束（`AttemptStart.TaskEnded`）；已結束時關閉開著的驗證（Signer 端的挑戰一併關閉），回 409 `task_ended`，不再要求新的挑戰、不送驗證。Host 讀到結束之前就已送出（或剛好同時送出）的驗證，由 Store 在記錄時的檢查擋下：不記錄、Host 請 Signer 放棄該核准（`TestA2EndedTaskVerifiedInFlightIsAbandoned`）；這是最後一道防線。
 - **測試**：`TestEndedTaskAskIsNotDecided`（CLI 逾時與另一張請購被 Deny 兩種：新的核准被拒、進行中的本人核准與模擬核准都不記錄、之後照常到期）、`TestEndedTaskVoiceFailureIsNotRecorded`、`TestA2EndedTaskAskIsNotApprovable`（demo：送出驗證時關閉、不送 Signer、清單標示、沒有 grant）、`TestA2EndedTaskClosesTheOpenAttempt`（新請求與重送兩條路徑都關閉開著的驗證）；網頁測試 114 個。
 
 #### review（285e32c）與處理
@@ -482,3 +482,5 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES（沒有 C
 | 建議 | 有 `--payments` 時 `grantLine`、`recordTag`（以及 `sourceText`）仍寫「付款未啟用」 | 依付款能力改寫；demo 的 `sources.payment` 有 `--payments` 時為 `local_anvil` |
 
 突變：本輪新增 5 項，「P2 ended Ask」共 9 項，9／9 KILLED。
+
+第二輪 review（bb1badd）：結論 APPROVE。審查者逐一追過結束後的每條路徑：沒有一條會向 Signer 要求新挑戰，Host 讀到結束之後也不送驗證；Store 在自己的寫入交易裡仍是最後一道防線。採納的建議：補上「驗證剛好在結束時完成」的狀態查詢測試（`TestA2EndedTaskVerifiedInFlightIsAbandoned`：不記錄、Signer 的核准被放棄、沒有 grant）；§12.6 寫明 Store 的記錄時檢查是最後防線；移除 `recordTag` 沒有作用的付款參數；卡片在已結束且已達期限時保留「已達期限，等待後端確認」。未採納：兩個面板的挑選與按鈕的 DOM 測試（行為由 demo 測試的 `task_ended` 與網頁文字測試涵蓋）。

@@ -709,3 +709,29 @@ func TestA2EndedTaskClosesTheOpenAttempt(t *testing.T) {
 		}
 	}
 }
+
+// A verification the Signer completed just as the task ended (here a CLI
+// timeout): recovered by the status route, the decision is not recorded
+// (closed, the session still pending), the Signer's approval is abandoned,
+// and no grant is issued.
+func TestA2EndedTaskVerifiedInFlightIsAbandoned(t *testing.T) {
+	f := startA2(t, 60)
+	sid, intent, task := f.ask("01")
+	_, r := f.challenge(sid, "att-req-0000000000001", "approve")
+	chID := r["challenge"].(map[string]any)["challenge_id"].(string)
+	used, err := f.core.Verify(context.Background(), signer.VerifyRequest{VerifyRequestID: "ver-req-0000000000000", ChallengeID: chID,
+		Order: orderOf(t, f, "att-req-0000000000001"), Assertion: f.sign(r, sid, intent, "approve")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.h.st.CLITimeout(task); err != nil {
+		t.Fatal(err)
+	}
+	code, s := f.status(sid, "att-req-0000000000001")
+	if code != 200 || s["outcome"] != "closed" || sessionState(s) != "pending" || f.h.grants() != 0 {
+		t.Fatalf("after the end: %d %v", code, s)
+	}
+	if a, err := f.core.ApprovalByID(context.Background(), used.ApprovalID); err != nil || a.State != "abandoned" {
+		t.Fatalf("Signer approval after the end: %+v %v", a, err)
+	}
+}

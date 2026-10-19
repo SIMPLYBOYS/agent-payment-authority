@@ -179,8 +179,6 @@ test("with local_anvil a person's grant, a record by the other method and the so
   const g = { jti: "grant-0123456789abcdefghij", authorization_method: "webauthn" };
   assert.match(AP.grantLine(g, true), /付款依據/);
   assert.match(AP.grantLine(g), /付款未啟用$/);
-  const p = { approval: { state: "approved", resolved_by: "webauthn:approver-a", grant: g } };
-  assert.ok(!/未啟用/.test(AP.recordTag(p, "simulated", true)[1]));
   assert.match(AP.sourceText({ agent: "fake", authenticator: "virtual", payment: "local_anvil" }), /付款：本機 anvil/);
   assert.match(AP.sourceText({ agent: "fake", authenticator: "virtual", payment: "disabled" }), /付款：未啟用/);
 });
