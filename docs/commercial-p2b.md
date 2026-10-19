@@ -41,17 +41,17 @@ P2-b 的交付物：
 - **B1 金鑰檔**：沿用 Signer 的加密格式（scrypt＋AES-256-GCM，`internal/signer/keystore.go`），讓 relayer 與商店的金鑰也能這樣存；但驗證資料（AAD）的標籤改成每個程式各自的（例如 `apa-relayer-key/v1`），relayer 的金鑰檔不能被當成 Signer 的錢包解開，反之亦然。新增 `apa-relayer keygen --dir DIR --role relayer-gas|issuer|policy|shop`，與 `apa-signer keygen` 相同：密語只在終端機輸入兩次，只印出位址。
 - **B2 `apa-relayer`**：獨立程序，Unix socket（0600，檢查對端 uid），啟動時輸入一次密語，持有 relayer-gas、issuer、policy 三把。介面就是付款工作現在呼叫的三個：`RegisterTask`、`Reserve`，以及恢復時用來判斷「什麼都沒花」的 `Lookup`。每日交易數上限記在它自己的資料庫，**以 nonce 計**：同一個 nonce 因卡住而重新定價、重新簽名的不另計，所以上限算的就是鏈上最多會多出幾筆。超過就拒絕（新碼 `RELAYER_DAILY_CAP`，付款工作視為最終拒絕，不重試）。商店的每日上限同樣以 nonce 計。
 - **B3 `base_sepolia` 環境**：demo 的閘門、`payment_capability`、畫面標示、對帳的 `environment` 與起點、確認數 2、逾時設定、商店的金鑰檔與每日上限。本機測試用 anvil 加 `--chain-id 84532`；只有測試能把 `base_sepolia` 指向 loopback，正式旗標不行。
-- **B4 `p2-testnet`**：
+- **B4 `p2-testnet`**（寫出的 `payments.json` 用新的委派 ID `dlg-ta`、`dlg-tb`，`policy_ttl` 固定 600；demo 拒絕超過 600 的 `policy_ttl`，§7「預算授權 10 分鐘內到期」才不依賴設定檔）：
   - `preflight`（唯讀）：`eth_chainId`、USDC 的 `name`／`version`／`decimals`、各位址的 ETH 與 USDC 餘額，和預期不符就停。
   - `deploy`：先印出要送的兩筆交易（部署 Verifier 與 Budget）、送出者、估計 gas，要你輸入 `yes` 才送；送出後等 2 個確認，寫出 `payments.json` 與 `registry.json`（錢包位址、Circle USDC、商店收款位址、部署區塊）。目錄已存在就拒絕。部署者就是 issuer（P2b-D3），所以 `apa-relayer` 必須是停著的（檢查它的 socket），兩個程序才不會用到同一個 nonce。
 - **B5 test402**（照 P2b-D7 A）：
-  - 委派依「客人＋收款方」選：`payments.json` 的 `delegations` 現在是一位客人一個（`cmd/demo/payments.go`、`internal/payflow` 的 `Starter`），付給 test402 會被拿 `dlg-tb` 去簽，而 Signer 會因收款方不在 `dlg-tb` 的 merchants 而拒絕。改成依收款方選擇委派。
+  - 委派依「客人＋收款方」選：`payments.json` 的 `delegations` 現在是一位客人一個（`cmd/demo/payments.go`、`internal/payflow` 的 `Starter`），付給 test402 會被拿 `dlg-tb` 去簽，而 Signer 會因收款方不在 `dlg-tb` 的 merchants 而拒絕。改成 `delegations` 以（客人、收款方）對應委派，Store 交給 `Starter` 的付款 task 帶上每筆的收款方。沒有對應的委派時照現在的規則：Store 拒絕、記錄、不重試，這筆不付款。
   - Policy profile 的 `merchants` 加入 test402 的收款位址（`internal/policy`）。
   - 目錄加一個 test402 的商品／場景，Agent 才請購得到（Agent 只能買目錄上的商品）；它的商店是外部的 x402 resource，交付內容照 H-D2 只存 hash。
   - 先在 P2-c 第 1 步重新確認 test402 現在的 402，再定商品的價格與收款方。
 - **B6 `/opt` 重建的工具**：`/opt` 的 `signer.json` 需要的錢包位址（§6 第 2 步）與預算合約位址（第 4 步）在 P2-b 還不存在，所以這一段只做**產生器與檢查**：
-  - 由 `p2-testnet` 寫出的 `payments.json` 產生 `/opt` 用的 `signer.json`：Base Sepolia 的 `reservation`、P2b-D5 的上限、`rp_id` `localhost` 與 P2-c 用的 Host 位址（`http://localhost:8402`），以及語音核准用的商家表（新的商店收款位址；test402 的也要列，否則語音核准回 `VOICE_MERCHANT_UNKNOWN`）；
-  - 委派用新的 ID（例如 `dlg-ta`、`dlg-tb`），讓累計上限從 0 開始，不和 `/opt` 的 `signer.db` 裡可能已有的紀錄混在一起；
+  - 由 `p2-testnet` 寫出的 `payments.json` 產生 `/opt` 用的 `signer.json`：Base Sepolia 的 `reservation`、P2b-D5 的上限、`rp_id` `localhost` 與 P2-c 用的 Host 位址（`http://localhost:8402`），以及語音核准用的商家表（新的商店收款位址，否則 Ask 的語音核准回 `VOICE_MERCHANT_UNKNOWN`；test402 那一筆 0.0001 低於 allow_max，是 Allow，不需要）；
+  - 委派用新的 ID（例如 `dlg-ta`、`dlg-tb`），讓累計上限從 0 開始，不和 `/opt` 的 `signer.db` 裡可能已有的紀錄混在一起；另有 `dlg-t402`（wallet-b，merchants 只有 test402 的收款位址，每筆與總額都是 0.0001），收款位址在 §6 第 1 步確認後才作為輸入傳給產生器；
   - 更新 V1 §15 的步驟（含 `approver migrate`）。實際的 `signer.json`、執行檔與核對值，在 §6 第 5 步才產生。只在 `var/` 準備，不動 `/opt`。
 
 ## 5 要你決定的事
@@ -122,3 +122,5 @@ H6 的第四場「task 結束後不能核准」不在 testnet 重跑：停止點
 | 建議 | 部署者＝issuer 時兩個程序可能用到同一個 nonce | 部署時 `apa-relayer` 必須停著 |
 | 建議 | `/opt` 的 `signer.db` 可能已有 `dlg-a`／`dlg-b` 的紀錄 | testnet 用新的委派 ID `dlg-ta`／`dlg-tb` |
 | 建議 | `/opt` 的 WebAuthn 來源要含 P2-c 用的 Host 位址 | 寫進 B6 |
+
+第二輪 review（e75ab40）：APPROVE，五項 Important 都已解決。四項建議已寫進 B4–B6：`dlg-t402` 列入產生器、`Starter` 取得收款方的方式與沒有對應委派時的處理、`policy_ttl` 固定 600 並由 demo 檢查、`p2-testnet` 寫新的委派 ID。
