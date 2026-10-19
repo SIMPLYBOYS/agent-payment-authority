@@ -1,0 +1,95 @@
+# P2-b Testnet 準備：設計提案
+
+> 2026-10-19，Claude Code。依 vault〈Claude-Code-P2Testnet付款結算對帳交付派工-20261013〉的 P2-b、`docs/commercial-p2.md` §5 與 §6 的「P2-b 再決定」、`docs/commercial-p2-host.md` H-D5。分支 `commercial-p2b`（從 main `897cca7`）。
+> **狀態：提案，等 Aaron 決定 §5。** 這一段只做準備：程式改動都只在本機 anvil 上測試。沒有建立或讀取任何金鑰，也沒有連 RPC、faucet、facilitator、test402 或任何鏈，沒有動 `/opt`。§2 的查證只讀了公開文件網頁。
+
+## 1 要做到什麼
+
+讓 P2-a 的付款流程（預留 tx#1 → Signer 簽 EIP-3009 → 商店 verify／settle tx#2 → 對帳 → 交付）能在 Base Sepolia 上執行，並把 P2-c 要做的每一件外部操作列成清單，經 review 與你核准後才執行。P2-c 的停止點不變：一條成功 Ask、一條 Deny 的 testnet 證據，以及 test402.com 一筆真 402。
+
+P2-b 的交付物：
+1. 本文件：部署差異、地址、RPC、facilitator、測試資金與 gas、A／B 錢包隔離、金鑰保管、上限、交易清單、停止流程（派工列的各項）。
+2. 程式：§4 的 B1–B6，每段各自提交與 review，全部在本機 anvil 上證明。
+3. P2-c 的執行清單（§6）：每一步標明誰做、碰到什麼、要你核准的是什麼。
+
+## 2 查證（只讀公開文件，10/19）
+
+| 項目 | 結果 | 來源 | 還沒確定的 |
+|---|---|---|---|
+| Base Sepolia USDC | `0x036CbD53842c5426634e7929541eC2318f3dCF7e`（鏈 84532） | Circle 的 USDC 合約地址表；x402 文件；9/22 test402 的 402 也是這個 asset | — |
+| EIP-712 domain | name 是 `USDC` | x402 文件的網路與代幣表 | **version** 文件沒寫，只說取自合約的 `version()`。P2-c 第 1 步以唯讀呼叫讀 `name()`、`version()`、`decimals()`，不符就停 |
+| 公開 RPC | `https://sepolia.base.org` | Base 文件 | 沒有公開的速率上限。Base 建議 `eth_getLogs` 每次少於 2,000 個區塊（我們的對帳本來就是 2,000 一段） |
+| USDC faucet | Circle 公開 faucet | 第三方整理 | 數量兩種說法：每 2 小時 20 USDC，或每 24 小時 10 USDC。用多少都夠，見 §5 P2b-D5 |
+| x402.org facilitator | 支援 Base Sepolia，標示「Testnet only」 | x402 文件 | 我們的主路徑不用它（P2-D3）。test402.com 那一筆由 test402 自己找 facilitator 結算 |
+| test402.com | 9/22 實測回 402：`eip155:84532`、`exact`、amount 100（0.0001 USDC）、asset 是上面的 USDC | `執行計畫.md` §10 | 現在是否仍在線、付款資訊是否改了，要在 P2-c 以一次唯讀 GET 重新確認 |
+
+## 3 現況：P2-a 只認本機鏈的地方
+
+| 部分 | 現在 | P2-b 要改成 |
+|---|---|---|
+| demo 的鏈 | `--payments` 只接受 loopback 的 `http`（`eth.LocalRPC`），且 `web3_clientVersion` 必須是 anvil（`cmd/demo/payments.go`）；`payment_capability` 只有 `local_anvil` | 新增 `base_sepolia` 環境：允許 `https`；以 `eth_chainId` 確認是 84532；不是 anvil 才算 testnet。畫面標示「P2 / Base Sepolia testnet」 |
+| 預算 relayer 的金鑰 | gas、issuer、policy 都是 anvil 的公開金鑰，依索引取（`payments.json` 的 `anvil_keys`） | 獨立程序 `apa-relayer`（H-D5 已承諾 P2-b 前做）：加密金鑰檔，啟動時輸入密語 |
+| 商店的 gas 金鑰（tx#2） | anvil 公開金鑰 4 | 加密金鑰檔，啟動時輸入密語 |
+| 部署 | `p2-local`：部署 TestUSDC、`anvil_setCode`、鑄幣，只能用在 anvil | 新命令 `p2-testnet`：只部署 Verifier 與 Budget，資產用 Circle 的 USDC，不鑄幣 |
+| 對帳起點 | `token_from_block` 寫 0，每次從頭掃 | 寫成部署 Budget 的區塊（錢包是新建的，之前沒有支出）。從 0 掃 Base Sepolia 要幾萬次 `eth_getLogs` |
+| 等待與逾時 | 商店等 receipt 20 秒，`p2-local` 自己送交易用固定 1 gwei、只等 10 秒 | 確認數 2（P2-D6）；商店與 relayer 的等待改由設定決定，預設照公開鏈調大；`p2-testnet` 用 `eth.SignCall` 的 EIP-1559 定價 |
+| 上限與停止 | Signer 有每筆與累計上限；沒有每日交易數上限、沒有停止開關 | relayer 與商店各自有每日交易數上限（記在自己的資料庫）；§7 的停止流程 |
+| Signer 的預留核對 | `signer.json` 的 `reservation` 段接受任何 `https` RPC，並核對 `eth_chainId` | 不用改，只換設定值 |
+
+## 4 程式分段（全部在本機 anvil 上證明；每段提交與 review）
+
+- **B1 金鑰檔**：沿用 Signer 的加密格式（scrypt＋AES-256-GCM，`internal/signer/keystore.go`），讓 relayer 與商店的金鑰也能這樣存。新增 `apa-relayer keygen --dir DIR --role relayer-gas|issuer|policy|shop`，與 `apa-signer keygen` 相同：密語只在終端機輸入兩次，只印出位址。
+- **B2 `apa-relayer`**：獨立程序，Unix socket（0600，檢查對端 uid），啟動時輸入一次密語，持有 relayer-gas、issuer、policy 三把。介面就是 demo 現在呼叫的 `RegisterTask`／`Reserve`。每日交易數上限記在它自己的資料庫，超過就拒絕（新碼 `RELAYER_DAILY_CAP`，付款工作視為最終拒絕，不重試）。
+- **B3 `base_sepolia` 環境**：demo 的閘門、`payment_capability`、畫面標示、對帳的 `environment` 與起點、確認數 2、逾時設定、商店的金鑰檔與每日上限。本機測試用 anvil 加 `--chain-id 84532`；只有測試能把 `base_sepolia` 指向 loopback，正式旗標不行。
+- **B4 `p2-testnet`**：
+  - `preflight`（唯讀）：`eth_chainId`、USDC 的 `name`／`version`／`decimals`、各位址的 ETH 與 USDC 餘額，和預期不符就停。
+  - `deploy`：先印出要送的兩筆交易（部署 Verifier 與 Budget）、送出者、估計 gas，要你輸入 `yes` 才送；送出後等 2 個確認，寫出 `payments.json` 與 `registry.json`（錢包位址、Circle USDC、商店收款位址、部署區塊）。目錄已存在就拒絕。
+- **B5 test402**：照 §5 P2b-D7 的決定做。
+- **B6 `/opt` 重建**：依 V1 §15 與 P2 帶來的變更，重新建置 `apa-signer`，產生 `/opt` 用的 `signer.json`（Base Sepolia 的 `reservation`、§5 P2b-D5 的上限），更新 §15 的步驟與核對值（含 `approver migrate`）。只在 `var/` 準備，不動 `/opt`。
+
+## 5 要你決定的事
+
+| # | 問題 | 選項 | 建議 |
+|---|---|---|---|
+| P2b-D1 | RPC | **A** 公開的 `https://sepolia.base.org`（不用帳號、沒有 API key，有未公開的速率限制）；**B** 需要 API key 的服務（例如 Alchemy），key 存在 0600 的設定檔 | **A**：整個 P2-c 不到 15 筆交易，對帳又從部署區塊開始，量很小。被限速才改 B，改之前再問你 |
+| P2b-D2 | testnet 的 Signer 跑在哪裡 | **A** `/opt`（`apa-signer` 帳號，P1-b 隔離），與 V1 `/opt` 部署一起做；**B** 先用開發模式 `var/p2-dev`（你的帳號），之後再搬到 `/opt` | **A**：V1 §15 已寫明開發模式不能當最終驗收的證據；B 要建兩次錢包、領兩次測試幣，證據還要重做 |
+| P2b-D3 | 要建哪些金鑰（全部是新的測試金鑰，由你建立） | 付款錢包 wallet-a、wallet-b（`/opt` 的 Signer）；relayer-gas（送 tx#1）；issuer（`registerTask`，**兼部署者**）；policy（只簽名，不需要 gas）；shop（送 tx#2，**兼收款位址**） | 照這樣，共 6 把。部署者與 issuer 合併、收款與 shop 合併，可以少領兩次 ETH；角色仍各自記錄。日常錢包一律不用 |
+| P2b-D4 | relayer 與商店金鑰放哪裡 | **A** `var/p2-testnet/keys`（你的帳號，0700，加密），relayer 三把由 `apa-relayer` 持有，shop 由 demo 在啟動時要密語；**B** 也放進 `/opt`，以 `apa-signer` 帳號執行 | **A**：P2-D2 決定這些是 Host 端的金鑰；放進 `/opt` 會讓 Signer 帳號同時持有預算與商店的金鑰，模糊信任邊界 |
+| P2b-D5 | 上限 | Signer：`dlg-a`、`dlg-b` 每筆 0.10、總額 0.30；approver-a、approver-b 每筆 1.00、24 小時 1.50；test402 專用委派恰好一筆 0.0001。relayer 每日 12 筆、商店每日 4 筆。每把 gas 帳戶只領一次 ETH，每個付款錢包只領一次 USDC | 照這樣：夠跑一輪 §6，再重跑一次 Allow 或 Ask；超過任何一項就停在那裡，不能自己繞過 |
+| P2b-D6 | 測試幣從哪裡來 | 你在瀏覽器上自己領：USDC 用 Circle 的 faucet；ETH 從你選的 faucet（例如 Coinbase CDP） | 照這樣：我不連 faucet，也不經手 faucet 的帳號 |
+| P2b-D7 | test402 那一筆怎麼付 | **A** 走同一條 Host 路徑：專用委派 `dlg-t402`（wallet-b，收款方是 test402 的位址，恰好一筆 0.0001），一樣先預留 tx#1、Signer 核對後才簽，test402 自己結算；**B** 另寫一個工具直接請 Signer 簽 | **A**：Signer 規定沒有鏈上預留不簽，B 得另開例外；A 證明的就是產品本身的路徑。細節在 B5 確認 test402 現在的 402 之後再定 |
+| P2b-D8 | `cancelAuthorization`（撤回已簽未送的授權） | 做或不做 | **不做**：未知狀態本來就不重付，授權也有期限；多一筆鏈上交易沒有必要 |
+
+## 6 P2-c 執行清單（核准後才做；每一步各自核准）
+
+| 步驟 | 誰 | 碰到什麼 | 交易 |
+|---|---|---|---|
+| 1 preflight | Claude Code（`p2-testnet preflight`） | RPC 唯讀；test402 一次唯讀 GET | 0 |
+| 2 建金鑰 | 你（`apa-relayer keygen` 4 把；在 `/opt` 以 `sudo -u apa-signer` 執行 `apa-signer keygen` 2 把） | 本機 | 0 |
+| 3 領測試幣 | 你 | relayer-gas、issuer、shop 各領一次 ETH；wallet-a、wallet-b 各領一次 USDC | faucet 的 5 筆（不是我們送的） |
+| 4 部署 | Claude Code（`p2-testnet deploy`，issuer 送出；你輸入密語） | RPC | 2 |
+| 5 `/opt` 部署 | 你（依更新後的 V1 §15；sudo 只由你輸入） | `/opt` | 0 |
+| 6 跑四場 | 你核准／拒絕；Allow 與取消可由 Claude Code 代按 | RPC | Allow：tx#0、tx#1、tx#2；Ask 核准：tx#0、tx#1、tx#2；Ask 拒絕：tx#0 |
+| 7 test402 | 同上 | test402、RPC | tx#0、tx#1（tx#2 由 test402 那邊送） |
+| 8 對帳 | Claude Code（`p2-reconcile.sh`） | RPC 唯讀 | 0；報告是 `base_sepolia`，可結 AE1 驗收 18 |
+
+我們自己送的交易合計 **11 筆**：部署 2（issuer）、登記 4 與預留 3（relayer，共 7 筆，在每日 12 筆之內）、結算 2（商店，在每日 4 筆之內）；test402 那一筆的結算由對方送，不算在內。每一筆的 hash、receipt、區塊與對應的 `intent_hash` 都寫進證據；沒有 receipt 的成功宣稱一律記 unknown／not_evaluated。
+
+## 7 停止流程
+
+**遇到就停**：任何付款變成 unknown 或 needs_review；對帳不是 0；交易 revert；碰到 §5 的任何上限；餘額和預期不符；RPC 回錯的鏈。
+
+**怎麼停**（照順序）：
+1. 主持人頁停止 run，然後在終端機按 Ctrl-C 停 Host。之後不會再開始新的付款。
+2. 停 `apa-relayer`，之後不會再送 tx#1。
+3. 停 Signer，之後不會再簽。
+4. 需要讓已發出的預算授權全部失效時，由 policy 金鑰呼叫 Budget 的 `raiseEpoch`（這是一筆交易，要你另外核准）。
+
+**之後**：已簽或已送出的付款不能撤回，只能以對帳收斂。不自動重試、不另開錢包、不追加測試幣。原因寫進證據後，再決定下一步。
+
+## 8 界線
+
+- 只用 Base Sepolia 與測試幣。絕不連 mainnet、不用真錢、不搬入日常錢包。
+- 金鑰全部由你建立；密語不出現在命令參數、環境變數、檔案或對話裡。我不讀金鑰檔，也不列出金鑰目錄。
+- 在 §6 的對應步驟核准之前，不連 RPC、faucet、facilitator、test402 或任何鏈，不動 `/opt`。
+- 不宣稱 mainnet 或 production 安全。
