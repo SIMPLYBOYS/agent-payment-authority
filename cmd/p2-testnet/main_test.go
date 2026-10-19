@@ -13,6 +13,8 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth/ethtest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/keytool"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer/signertest"
 )
 
 // answers is a terminal: the lines, then the passphrase.
@@ -189,5 +191,73 @@ func TestPreflightAndDeploy(t *testing.T) {
 	}
 	if n, _ := c.PendingNonce(context.Background(), r["issuer"]); n != nonce+2 {
 		t.Fatal("a second deploy sent a transaction")
+	}
+}
+
+// opt-signer (B6): /opt's signer.json for the testnet, from its current one
+// and deploy's files: what is kept, what is replaced, and the refusals.
+func TestOptSigner(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host")
+	os.Mkdir(host, 0o700)
+	shop, wa, wb := "0x"+strings.Repeat("5", 40), "0x"+strings.Repeat("a", 40), "0x"+strings.Repeat("b", 40)
+	writeJSON(filepath.Join(host, "payments.json"), map[string]any{"environment": "base_sepolia", "rpc": "https://sepolia.base.org", "chain_id": chainID,
+		"confirmations": 2, "token": circleUSDC, "token_name": "USDC", "token_version": "2", "pay_to": shop, "budget_contract": "0x" + strings.Repeat("6", 40),
+		"delegations": map[string]string{"consumer-a": "dlg-ta@1", "consumer-b": "dlg-tb@1"}})
+	writeJSON(filepath.Join(host, "registry.json"), map[string]any{"wallets": []map[string]string{{"wallet_id": "wallet-a", "from": wa}, {"wallet_id": "wallet-b", "from": wb}}})
+	var c map[string]any
+	json.Unmarshal(signertest.Config("/opt/apa-signer/run/signer.sock", 501, 1790000000, "0x"+strings.Repeat("1", 40), "0x"+strings.Repeat("2", 40)), &c)
+	c["approvers"] = []map[string]any{{"approver_id": "approver-a", "consumer_id": "consumer-a", "wallet_ids": []string{"wallet-a"}, "signer_max": "500000",
+		"signer_total": "500000", "signer_window_seconds": 3600, "version": 3}}
+	c["webauthn"] = map[string]any{"rp_id": "localhost", "origins": []string{"http://localhost:8402"}, "challenge_ttl_seconds": 120, "approval_ttl_seconds": 300}
+	c["voice"] = map[string]any{"socket": "/opt/apa-signer/voice-run/voice.sock", "timeout_ms": 8000, "speaker_threshold_milli": 365, "asr_model": "asr@t",
+		"speaker_model": "spk@t", "decimals": 6, "merchants": []map[string]string{{"pay_to": "0x" + strings.Repeat("3", 40), "name": "測試商店", "pinyin": "ce shi shang dian"}}}
+	base := filepath.Join(dir, "signer.json")
+	writeJSON(base, c)
+	dst := filepath.Join(dir, "new.json")
+	args := []string{"opt-signer", "--dir", dir, "--base", base, "--out", dst, "--test402-pay-to", "0x" + strings.Repeat("7", 40)}
+	var out strings.Builder
+	if err := run(context.Background(), args, &out, &answers{}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(dst)
+	cfg, err := signer.ParseConfig(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(dst); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", fi.Mode())
+	}
+	if cfg.Socket != "/opt/apa-signer/run/signer.sock" || len(cfg.Callers) != 1 || cfg.Callers[0] != 501 { // kept
+		t.Fatalf("socket and callers %+v", cfg)
+	}
+	if len(cfg.Wallets) != 2 || cfg.Wallets[0].Address != wa || cfg.Wallets[1].Address != wb || cfg.Assets[0].AssetContract != circleUSDC {
+		t.Fatalf("wallets %+v assets %+v", cfg.Wallets, cfg.Assets)
+	}
+	d := cfg.Delegations
+	if len(d) != 3 || d[0].DelegationID != "dlg-ta" || d[1].DelegationID != "dlg-tb" || d[0].Merchants[0] != shop || d[0].TotalCap != dlgTotal ||
+		d[2].DelegationID != "dlg-t402" || d[2].WalletID != "wallet-b" || d[2].PerTxMax != t402Units || d[2].TotalCap != t402Units {
+		t.Fatalf("delegations %+v", d)
+	}
+	if a := cfg.Approvers[0]; a.SignerMax != approverMax || a.SignerTotal != approverSum || a.SignerWindowSeconds != 86400 || a.Version != 4 {
+		t.Fatalf("approver %+v", a)
+	}
+	if m := cfg.Voice.Merchants; len(m) != 1 || m[0].PayTo != shop || m[0].Name != "測試商店" {
+		t.Fatalf("voice merchants %+v", m)
+	}
+	if r := cfg.Reservation; r == nil || r.ChainID != "84532" || r.Confirmations != 2 || r.BudgetContract != "0x"+strings.Repeat("6", 40) {
+		t.Fatalf("reservation %+v", r)
+	}
+	if !strings.Contains(out.String(), "SHA-256 ") {
+		t.Fatalf("output %s", out.String())
+	}
+	if err := run(context.Background(), args, &out, &answers{}); err == nil || !strings.Contains(err.Error(), "exists") {
+		t.Fatalf("written over: %v", err)
+	}
+	// A base whose relying party is not the Host's origin is refused.
+	c["webauthn"] = map[string]any{"rp_id": "localhost", "origins": []string{"http://localhost:9000"}, "challenge_ttl_seconds": 120, "approval_ttl_seconds": 300}
+	writeJSON(base, c)
+	if err := run(context.Background(), []string{"opt-signer", "--dir", dir, "--base", base, "--out", dst + "2"}, &out, &answers{}); err == nil || !strings.Contains(err.Error(), "origin") {
+		t.Fatalf("another origin: %v", err)
 	}
 }

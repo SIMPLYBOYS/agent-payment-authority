@@ -2,8 +2,16 @@
 // testnet (docs/commercial-p2b.md B4; its §6 steps 1 and 4, each run only
 // once Aaron approves it).
 //
-//	p2-testnet preflight --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL] [--test402 URL]
-//	p2-testnet deploy    --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL]
+//	p2-testnet preflight  --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL] [--test402 URL]
+//	p2-testnet deploy     --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL]
+//	p2-testnet opt-signer --dir DIR --base SIGNER.JSON --out NEW.JSON [--test402-pay-to 0x...]
+//
+// opt-signer (B6, §6 step 5) writes /opt's new signer.json from its current
+// one (--base: the socket, callers, approvers, webauthn and voice are kept)
+// and deploy's DIR/host files: the two testnet wallets, Circle's USDC, the
+// delegations dlg-ta and dlg-tb (and dlg-t402 for exactly one test402
+// payment), the approvers' caps (P2b-D5), the voice merchant at the shop's
+// address and the reservation section. It reads no key and reaches no node.
 //
 // DIR is apa-relayer's directory: DIR/keys holds the relayer-gas, issuer,
 // policy and shop key files (apa-relayer keygen). Their addresses are read
@@ -24,6 +32,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -35,6 +44,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -120,6 +130,9 @@ type options struct {
 
 func run(ctx context.Context, args []string, out io.Writer, ask asker) error {
 	usage := errors.New("usage: p2-testnet preflight|deploy --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL] [--test402 URL]")
+	if len(args) > 0 && args[0] == "opt-signer" {
+		return optSigner(args[1:], out)
+	}
 	if len(args) == 0 || args[0] != "preflight" && args[0] != "deploy" {
 		return usage
 	}
@@ -659,4 +672,120 @@ func writeJSON(path string, v any) error {
 		return err
 	}
 	return errors.Join(f.Sync(), f.Close())
+}
+
+// The testnet Signer's caps (P2b-D5), in USDC units.
+const (
+	dlgPerTx, dlgTotal       = "100000", "300000"   // 0.10 a payment, 0.30 in all
+	approverMax, approverSum = "1000000", "1500000" // 1.00 a payment, 1.50 in 24 hours
+	t402Units                = "100"                // exactly one 0.0001 payment
+	hostOrigin               = "http://localhost:8402"
+)
+
+// optSigner writes /opt's signer.json for the testnet (B6).
+func optSigner(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("opt-signer", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	dir := fs.String("dir", "", "p2-testnet's directory (DIR/host: deploy wrote it)")
+	base := fs.String("base", "", "/opt's current signer.json (a copy)")
+	dst := fs.String("out", "", "the new signer.json (must not exist)")
+	t402 := fs.String("test402-pay-to", "", "test402's payTo (preflight --test402 printed it): adds dlg-t402")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *dir == "" || *base == "" || *dst == "" {
+		return errors.New("usage: p2-testnet opt-signer --dir DIR --base SIGNER.JSON --out NEW.JSON [--test402-pay-to 0x...]")
+	}
+	if _, err := os.Lstat(*dst); !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%s exists; nothing was written", *dst)
+	}
+	raw, err := os.ReadFile(*base)
+	if err != nil {
+		return err
+	}
+	cfg, err := signer.ParseConfig(raw)
+	if err != nil {
+		return fmt.Errorf("--base: %w", err)
+	}
+	var pay struct {
+		RPC            string            `json:"rpc"`
+		ChainID        uint64            `json:"chain_id"`
+		Confirmations  uint64            `json:"confirmations"`
+		Token          string            `json:"token"`
+		TokenName      string            `json:"token_name"`
+		TokenVersion   string            `json:"token_version"`
+		PayTo          string            `json:"pay_to"`
+		BudgetContract string            `json:"budget_contract"`
+		Environment    string            `json:"environment"`
+		Delegations    map[string]string `json:"delegations"`
+	}
+	var reg contracts.RegistryConfig
+	host := filepath.Join(*dir, "host")
+	if err := errors.Join(readJSON(filepath.Join(host, "payments.json"), &pay), readJSON(filepath.Join(host, "registry.json"), &reg)); err != nil {
+		return fmt.Errorf("deploy's files: %w", err)
+	}
+	if pay.Environment != "base_sepolia" || pay.ChainID != chainID || pay.Delegations["consumer-a"] != "dlg-ta@1" || pay.Delegations["consumer-b"] != "dlg-tb@1" {
+		return errors.New("DIR/host/payments.json is not p2-testnet deploy's")
+	}
+	if w := cfg.WebAuthn; w == nil || w.RPID != "localhost" || !slices.Contains(w.Origins, hostOrigin) {
+		return fmt.Errorf("--base's webauthn is not rp_id localhost with origin %s (make present-testnet's)", hostOrigin)
+	}
+	chain := fmt.Sprint(chainID)
+	cfg.Wallets = nil
+	for _, w := range reg.Wallets {
+		if w.WalletID == "wallet-a" || w.WalletID == "wallet-b" {
+			cfg.Wallets = append(cfg.Wallets, signer.Wallet{WalletID: w.WalletID, ConsumerID: "consumer-" + w.WalletID[len(w.WalletID)-1:], ChainID: chain, Address: strings.ToLower(w.From)})
+		}
+	}
+	if len(cfg.Wallets) != 2 {
+		return errors.New("the registry has no wallet-a and wallet-b")
+	}
+	cfg.Assets = []signer.Asset{{ChainID: chain, AssetContract: strings.ToLower(pay.Token), EIP712Name: pay.TokenName, EIP712Version: pay.TokenVersion}}
+	now := uint64(time.Now().Unix())
+	dlg := func(id, x, merchant string, perTx, total string) signer.Delegation {
+		return signer.Delegation{DelegationID: id, Version: 1, ConsumerID: "consumer-" + x, WalletID: "wallet-" + x, ChainID: chain, AssetContract: strings.ToLower(pay.Token),
+			Merchants: []string{strings.ToLower(merchant)}, PerTxMax: contracts.Amount(perTx), TotalCap: contracts.Amount(total), ValidFrom: now - 60, ValidUntil: now + 7*86400}
+	}
+	cfg.Delegations = []signer.Delegation{dlg("dlg-ta", "a", pay.PayTo, dlgPerTx, dlgTotal), dlg("dlg-tb", "b", pay.PayTo, dlgPerTx, dlgTotal)}
+	if *t402 != "" {
+		a, err := eth.ParseAddress(*t402)
+		if err != nil {
+			return fmt.Errorf("--test402-pay-to: %w", err)
+		}
+		cfg.Delegations = append(cfg.Delegations, dlg("dlg-t402", "b", a.Hex(), t402Units, t402Units))
+	}
+	for i := range cfg.Approvers {
+		a := &cfg.Approvers[i]
+		a.SignerMax, a.SignerTotal, a.SignerWindowSeconds = approverMax, approverSum, 86400
+		a.Version++ // the entry changed: a challenge made under the old one is refused (APPROVER_CHANGED)
+	}
+	if v := cfg.Voice; v != nil {
+		if len(v.Merchants) == 0 {
+			return errors.New("--base's voice section names no merchant to keep")
+		}
+		m := v.Merchants[0] // the shop's spoken name, now at its testnet address
+		m.PayTo = strings.ToLower(pay.PayTo)
+		v.Merchants = []signer.VoiceMerchant{m}
+	}
+	cfg.MaxWindowSeconds = max(cfg.MaxWindowSeconds, 600) // the settling shop's 300 s window fits
+	cfg.Reservation = &signer.Reservation{RPC: pay.RPC, ChainID: chain, BudgetContract: strings.ToLower(pay.BudgetContract), Confirmations: pay.Confirmations}
+	b, err := json.MarshalIndent(cfg, "", " ")
+	if err != nil {
+		return err
+	}
+	if _, err := signer.ParseConfig(b); err != nil {
+		return fmt.Errorf("the new signer.json: %w", err)
+	}
+	f, err := os.OpenFile(*dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		f.Close()
+		return err
+	}
+	if err := errors.Join(f.Sync(), f.Close()); err != nil {
+		return err
+	}
+	sum := sha256.Sum256(append(b, '\n'))
+	fmt.Fprintf(out, "p2-testnet: wrote %s (SHA-256 %x): wallets %s and %s, delegations %d, approvers %d, reservation on chain %s at %s\n",
+		*dst, sum, cfg.Wallets[0].Address, cfg.Wallets[1].Address, len(cfg.Delegations), len(cfg.Approvers), chain, cfg.Reservation.BudgetContract)
+	return nil
 }

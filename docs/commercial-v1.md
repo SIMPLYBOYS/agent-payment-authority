@@ -418,6 +418,7 @@ Aaron 10/16「先做開發模式（A）」。這一輪用你的帳號在 `var/v1
 - `signer.json` 的每個 approver 要加 `signer_total` 與 `signer_window_seconds`，新執行檔缺這兩個欄位就拒絕啟動（`docs/commercial-p2.md` §9.5）。
 - 核准表搬進 `signer.db`。停掉 Signer 後，以 `apa-signer` 帳號執行一次 `apa-signer approver migrate --dir /opt/apa-signer/data`，舊檔保留為 `approvals.db.migrated`（§9.4）。
 - 本節以下寫的 `approvals.db`、`signer.json` 與執行檔的 hash 都是 P2 之前的值，部署前要重新產生。
+- **P2-b（10/20）**：testnet 的 `/opt` 部署照 `docs/commercial-p2b.md` §6.1 進行：新的 `signer.json` 由 `p2-testnet opt-signer` 從現在的設定產生，Signer 改用 `serve`（付款與核准同一個行程）；本節的停止、備份、安裝與語音步驟沿用。
 
 **為什麼不直接用開發模式的 venv**：語音服務必須以 `apa-signer` 執行（Signer 會檢查 socket 對端的 uid），所以它載入的任何東西都不能讓其他帳號改寫（P1-b 隔離）。Homebrew 的 Python、標準函式庫，以及 openssl、sqlite、xz、mpdecimal 都屬於 mac；wheel 裡還留著指向 `/usr/local/lib`（mac 的）和 `/tmp/vendor/lib`（任何人都能寫）的 rpath。所以改用 python-build-standalone 3.12.6，離線裝入固定版本的套件，刪掉所有絕對路徑的 rpath（16 個檔案）後重新 ad-hoc 簽章，再整包以 root 擁有的方式裝進 `/opt`（`scripts/demo/v1-opt-stage.sh`）。
 

@@ -106,6 +106,8 @@ B3b 的 review（546a990）：REQUEST CHANGES，沒有 Critical；三項 Importa
 - 測試：`TestRefusals`（http、這台機器、帳密、別的代幣、目錄權限，全部在連線之前就拒絕）、`TestPreflightAndDeploy`（本機 anvil 冒充，只有測試能這樣：缺幣時的說明、沒輸入 yes 什麼都不送、送兩筆、檔案內容與權限、不印密語與 RPC 網址、不能跑第二次）。沒有任何測試連外。
 - 部署用的 Z2 verifier 對應 repo 裡的 `zk/setup`（測試用的可信設定），與 P2-a 相同；這是 testnet，不宣稱 production 安全。
 
+**B6 `/opt` 的產生器**（完成，待 review）：`p2-testnet opt-signer`（見 §6.1）：只讀兩個檔，不讀金鑰、不連任何節點；產生的設定以 `signer.ParseConfig` 驗證後才以 0600 寫出，目標檔已存在就拒絕；`--base` 的 WebAuthn 必須是 `localhost` 且含 `http://localhost:8402`。測試 `TestOptSigner`：保留與替換的每一段、`dlg-t402` 恰好一筆 0.0001、核准者版本加 1、語音商家改到商店位址、不覆寫、別的來源被拒。§6.1 寫出第 2 步與第 5 步在 `/opt` 的做法；實際的執行檔、設定與雜湊在第 5 步才產生。
+
 ## 5 要你決定的事
 
 | # | 問題 | 選項 | 建議 |
@@ -135,6 +137,26 @@ B3b 的 review（546a990）：REQUEST CHANGES，沒有 Critical；三項 Importa
 H6 的第四場「task 結束後不能核准」不在 testnet 重跑：停止點不需要它，本機已證明；而且每個開始的 task 都會先送一筆登記 tx#0（H-D4），多跑一場就多一筆。Host 資料庫一定要用新的：舊資料庫裡還開著的付款 task 會各自觸發一筆登記。
 
 我們自己送的交易合計 **11 筆**：部署 2（issuer）、登記 4 與預留 3（relayer，共 7 筆，在每日 12 筆之內）、結算 2（商店，在每日 4 筆之內）；test402 那一筆的結算由對方送，不算在內。每一筆的 hash、receipt、區塊與對應的 `intent_hash` 都寫進證據；沒有 receipt 的成功宣稱一律記 unknown／not_evaluated。
+
+### 6.1 第 2 步與第 5 步在 `/opt` 的做法（B6）
+
+sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目錄。
+
+**第 2 步的 `/opt` 部分：兩個付款錢包**（在部署之前，因為 `p2-testnet deploy` 要它們的位址）
+- 用 `/opt` **現有的**執行檔建立：`sudo -u apa-signer /opt/apa-signer/bin/apa-signer keygen --dir /opt/apa-signer/data --wallet wallet-a`，再 `--wallet wallet-b`，兩把用**同一個**密語（`serve` 只問一次）。金鑰檔格式與新版相同（B1 的固定測試向量證明新版打得開舊格式）。
+- 印出的 `wallet … address 0x…` 兩行可以貼回（位址是公開的）。若 `/opt/apa-signer/data/keys` 已有同名檔，keygen 會拒絕，什麼都不寫；那時先問我。
+
+**第 5 步：`/opt` 部署**（第 4 步部署完成、`var/p2-testnet/host/` 已寫出之後）
+1. 建置（W-host，mac）：從乾淨的 worktree 建置 `apa-signer`（`GOFLAGS=-mod=readonly GOPROXY=off GOTOOLCHAIN=local`）到 `var/p2-opt/apa-signer`，記下 SHA-256；語音檔案依 V1 §15 重新產生（`scripts/demo/v1-opt-stage.sh`）。
+2. 取得目前的設定：`sudo cat /opt/apa-signer/data/signer.json > $P/var/p2-opt/signer.base.json`（`var/p2-opt` 是 0700）。
+3. 產生新設定：`var/p2-testnet/bin/p2-testnet opt-signer --dir var/p2-testnet --base var/p2-opt/signer.base.json --out var/p2-opt/signer.json`，有 test402 那一筆時加 `--test402-pay-to 0x…`（第 1 步 preflight 印出的）。它保留 socket、callers、核准者、WebAuthn 與語音段，換掉錢包、資產、委派（`dlg-ta`、`dlg-tb`、`dlg-t402`）、核准者上限（版本加 1：當時進行中的核准挑戰會回 `APPROVER_CHANGED`，已登記的裝置不受影響）、語音的商家位址，並加上 `reservation` 段；印出新檔的 SHA-256。
+4. 停止與備份：照 V1 §15 的「開始前」與 D 部署第 1、2 步（`pgrep -fl '/opt/apa-signer/'` 應無輸出；`signer.json`、`approvals.db`、執行檔各留一份備份，不刪）。
+5. 安裝：照 V1 §15 D 第 3 步安裝執行檔與語音檔，`signer.json` 改用 `var/p2-opt/signer.json`；第 4 步核對新的雜湊。
+6. 核准表遷移（只有 `/opt/apa-signer/data/approvals.db` 還在時）：`sudo -u apa-signer /opt/apa-signer/bin/apa-signer approver migrate --dir /opt/apa-signer/data`；舊檔留為 `approvals.db.migrated`。
+7. 啟動：語音服務照 V1 §15 S1；Signer 改用 **`serve`**（不是 `serve-approvals`）：`cd /; sudo -u apa-signer /opt/apa-signer/bin/apa-signer serve --dir /opt/apa-signer/data`，輸入錢包的密語。預期 `apa-signer: serving on /opt/apa-signer/run/signer.sock (reservations checked on chain 84532; approvals on the same socket)`，這一行可以貼回。
+8. 之後第 6 步：`sh scripts/demo/p2-testnet.sh relayer`（另一個終端機，輸入 relayer 金鑰的密語），再 `make present-testnet SIGNER=/opt/apa-signer/run/signer.sock`（輸入商店金鑰的密語）。
+
+回滾：停掉 Signer，把第 4 步的備份放回原位（舊執行檔仍能打開補過表的資料庫，V1 §15）；testnet 上已發生的交易不能撤回，照 §7 處理。
 
 ## 7 停止流程
 
