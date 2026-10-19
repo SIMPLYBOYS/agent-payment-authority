@@ -1081,12 +1081,16 @@ MUTATIONS = [
      'if err != nil {\n\t\t\treturn c.refuse(ctx, r, fp, &a, "VOICE_SIGNER_UNAVAILABLE"', 'if false && err != nil {\n\t\t\treturn c.refuse(ctx, r, fp, &a, "VOICE_SIGNER_UNAVAILABLE"', 'TestVoiceSignerTroubleAndInputs'),
     ('V1 review: a zero embedding enrolls', 'internal/signer/voice.go',
      'if !(norm > 0) || math.IsInf(norm, 0) {', 'if false {', 'TestVoiceSignerTroubleAndInputs'),
+    ('P2-b B1: the shop key has the relayer label', 'internal/keytool/keytool.go',
+     '"shop": ShopLabel}', '"shop": RelayerLabel}', 'TestKeygenAndLoadByLabel'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    ("P2-b B1: a key file opens under any program's label", 'internal/signer/keystore.go',
+     'return []byte(label + "\\x00" + walletID', 'return []byte(SignerLabel + "\\x00" + walletID', 'internal/keytool:TestKeygenAndLoadByLabel'),
     ('P2 H5 review: a report of no block reads as zero', 'internal/reconcile/reconcile.go',
      'if t.FromBlock > at { // nothing read', 'if false && t.FromBlock > at { // nothing read', 'internal/payflow:TestPaidOnAnvil'),
     ('P2 H5 review: a report of no wallet reads as zero', 'internal/reconcile/reconcile.go',

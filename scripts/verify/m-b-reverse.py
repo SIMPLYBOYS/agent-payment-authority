@@ -49,6 +49,7 @@ CR = "internal/credential/credential.go"
 CD = "internal/credential/dir.go"
 SCR = "internal/store/credential.go"
 SOP = "internal/store/ops.go"
+KT = "internal/keytool/keytool.go"
 
 
 def node(path, test, regex):
@@ -202,8 +203,8 @@ ITEMS = [
      [(SG, '\tcase "delegation":\n', '\tcase "delegation", "simulated":\n')]),
     ("P1b: the production assembly signs nothing before P2", go("./cmd/apa-signer/", "^TestAssemblyRefusesEveryOrder$", ("TestAssemblyRefusesEveryOrder", r"the production assembly signed")),
      [(AS, '\t"context"\n', '\t"context"\n\t"encoding/json"\n'),
-      (AS, "clock, signer.Unavailable{})", "clock, open{})"),
-      (AS, "// private refuses a directory", "type open struct{}\n\nfunc (open) Verify(string, json.RawMessage) error { return nil }\n\n// private refuses a directory")]),
+      (AS, "var res signer.ReservationVerifier = signer.Unavailable{}", "var res signer.ReservationVerifier = open{}"),
+      (AS, "// keygen writes one new payment wallet key file", "type open struct{}\n\nfunc (open) Verify(string, json.RawMessage) error { return nil }\n\n// keygen writes one new payment wallet key file")]),
     ("P1b: R2 recovery finishes from the snapshot before serving", go("./internal/signer/", "^TestInterruptions$", ("TestInterruptions/after-accept", r"recovery used the request, not the snapshot")),
      [(SG, "\tfor _, p := range pending {", "\tfor _, p := range pending[:0] {")]),
     ("P1b: R2 the same request ID with other content is refused", go("./internal/signer/", "^TestResendConflictReplay$", ("TestResendConflictReplay", r"same ID, other content")),
@@ -422,12 +423,12 @@ ITEMS = [
      [(PP, 'case credentialDeny != "":', 'case false && credentialDeny != "":')]),
     # D4 of the OS isolation plan (keygen); run them alone with "^P1b-D4:".
     ("P1b-D4: keygen never replaces a key file", go("./cmd/apa-signer/", "^TestKeygen$", ("TestKeygen", r"an existing key file was replaced")),
-     [(AS, "if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {", "if _, err := os.Lstat(path); false && !errors.Is(err, os.ErrNotExist) {"),
-      (AS, "os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)", "os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)")]),
+     [(KT, "if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {", "if _, err := os.Lstat(path); false && !errors.Is(err, os.ErrNotExist) {"),
+      (KT, "os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)", "os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)")]),
     ("P1b-D4: keygen needs the same passphrase twice", go("./cmd/apa-signer/", "^TestKeygenRefuses$", ("TestKeygenRefuses/passphrases_differ", r"passphrases differ: accepted")),
-     [(AS, "case !bytes.Equal(pass, again):", "case false && !bytes.Equal(pass, again):")]),
+     [(KT, "case !bytes.Equal(pass, again):", "case false && !bytes.Equal(pass, again):")]),
     ("P1b-D4: keygen writes the key file 0600", go("./cmd/apa-signer/", "^TestKeygen$", ("TestKeygen", r"key file mode")),
-     [(AS, "os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)", "os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)")]),
+     [(KT, "os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)", "os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)")]),
 ]
 
 ITEM_TIMEOUT = 900

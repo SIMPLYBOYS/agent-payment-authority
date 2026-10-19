@@ -1,7 +1,7 @@
 # P2-b Testnet 準備：設計提案
 
 > 2026-10-19，Claude Code。依 vault〈Claude-Code-P2Testnet付款結算對帳交付派工-20261013〉的 P2-b、`docs/commercial-p2.md` §5 與 §6 的「P2-b 再決定」、`docs/commercial-p2-host.md` H-D5。分支 `commercial-p2b`（從 main `897cca7`）。
-> **狀態：提案，等 Aaron 決定 §5。** 這一段只做準備：程式改動都只在本機 anvil 上測試。沒有建立或讀取任何金鑰，也沒有連 RPC、faucet、facilitator、test402 或任何鏈，沒有動 `/opt`。§2 的查證只讀了公開文件網頁。
+> **Aaron 10/19：「照建議進行」：§5 的 P2b-D1–D8 全部採用建議。** 依 §4 分段實作。 這一段只做準備：程式改動都只在本機 anvil 上測試。沒有建立或讀取任何金鑰，也沒有連 RPC、faucet、facilitator、test402 或任何鏈，沒有動 `/opt`。§2 的查證只讀了公開文件網頁。
 
 ## 1 要做到什麼
 
@@ -53,6 +53,15 @@ P2-b 的交付物：
   - 由 `p2-testnet` 寫出的 `payments.json` 產生 `/opt` 用的 `signer.json`：Base Sepolia 的 `reservation`、P2b-D5 的上限、`rp_id` `localhost` 與 P2-c 用的 Host 位址（`http://localhost:8402`），以及語音核准用的商家表（新的商店收款位址，否則 Ask 的語音核准回 `VOICE_MERCHANT_UNKNOWN`；test402 那一筆 0.0001 低於 allow_max，是 Allow，不需要）；
   - 委派用新的 ID（例如 `dlg-ta`、`dlg-tb`），讓累計上限從 0 開始，不和 `/opt` 的 `signer.db` 裡可能已有的紀錄混在一起；另有 `dlg-t402`（wallet-b，merchants 只有 test402 的收款位址，每筆與總額都是 0.0001），收款位址在 §6 第 1 步確認後才作為輸入傳給產生器；
   - 更新 V1 §15 的步驟（含 `approver migrate`）。實際的 `signer.json`、執行檔與核對值，在 §6 第 5 步才產生。只在 `var/` 準備，不動 `/opt`。
+
+### 4.1 進度
+
+**B1 金鑰檔**（完成，待 review）：
+- `internal/signer/keystore.go`：AAD 改為「標籤＋ID＋位址」；`EncryptKey`／`DecryptKey` 用 Signer 的標籤 `apa-signer-key/v1`，與既有的錢包金鑰檔逐位元組相容；新增 `EncryptKeyFor`／`DecryptKeyFor` 與 `ReadKeyFile`。
+- `internal/keytool`：讀密語（關掉回顯）、私有目錄檢查、產生金鑰檔（`Keygen`）、開啟金鑰檔（`Load`），從 `apa-signer` 移出，兩個程式共用；Host 的四個角色與標籤：relayer-gas、issuer、policy 用 `apa-relayer-key/v1`，shop 用 `apa-shop-key/v1`。
+- `apa-relayer keygen --dir DIR --role …`：與 `apa-signer keygen` 相同的規則（目錄 0700、密語在終端機輸入兩次且至少 12 字、不覆寫既有檔、只印位址）。
+- 測試：同一把金鑰只在自己的標籤與 ID 下打得開（relayer 的不是錢包、也不是商店的，反之亦然）；拒絕兩次不同、太短、不合法的 ID、已存在、目錄權限太寬。`apa-signer` 原有的 keygen 測試不變並通過。
+- 突變：新增 2 項；`m-b-reverse.py` 的 keygen 三項改指向 `internal/keytool`，「沒有預留段就什麼都不簽」那一項的錨點在 P2 H3 後已失效，一併改正。
 
 ## 5 要你決定的事
 

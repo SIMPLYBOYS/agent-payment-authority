@@ -17,9 +17,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -34,9 +32,8 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/keytool"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
-	"github.com/decred/dcrd/dcrec/secp256k1/v4"
-	"golang.org/x/sys/unix"
 )
 
 func main() {
@@ -131,7 +128,7 @@ const recoveryTimeout = 60 * time.Second
 // keys and DB; reservations are checked on the configured chain, and
 // without a reservation section nothing is signed (Unavailable).
 func assemble(dir string, passphrase func() ([]byte, error), clock signer.Clock) (*signer.Core, *signer.Config, error) {
-	if err := private(dir); err != nil {
+	if err := keytool.Private(dir); err != nil {
 		return nil, nil, err
 	}
 	if err := signer.Unmigrated(dir); err != nil {
@@ -148,7 +145,7 @@ func assemble(dir string, passphrase func() ([]byte, error), clock signer.Clock)
 	if !filepath.IsAbs(cfg.Socket) {
 		return nil, nil, errors.New("config: the socket path must be absolute")
 	}
-	if err := private(filepath.Join(dir, "keys")); err != nil {
+	if err := keytool.Private(filepath.Join(dir, "keys")); err != nil {
 		return nil, nil, err
 	}
 	pass, err := passphrase()
@@ -179,115 +176,18 @@ func assemble(dir string, passphrase func() ([]byte, error), clock signer.Clock)
 	return core, cfg, err
 }
 
-// minPassphrase is the shortest passphrase keygen accepts.
-const minPassphrase = 12
-
-// keygen writes one new key file DIR/keys/<walletID>.key: a fresh random
-// key, encrypted with a passphrase read twice (they must match). An existing
-// file is never replaced. It prints the wallet ID and the address only.
+// keygen writes one new payment wallet key file DIR/keys/<walletID>.key
+// (keytool.Keygen under the Signer's label) and prints the wallet ID and the
+// address only.
 func keygen(dir, walletID string, passphrase func() ([]byte, error), out io.Writer) error {
-	if err := private(dir); err != nil {
-		return err
-	}
-	keys := filepath.Join(dir, "keys")
-	if err := private(keys); err != nil {
-		return err
-	}
-	if !signer.ValidWalletID(walletID) {
-		return fmt.Errorf("wallet ID %q is not valid", walletID)
-	}
-	path := filepath.Join(keys, walletID+".key")
-	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("%s exists or cannot be checked; nothing was written", path)
-	}
-	pass, err := passphrase()
+	addr, err := keytool.Keygen(dir, signer.SignerLabel, walletID, passphrase)
 	if err != nil {
 		return err
 	}
-	defer clear(pass)
-	again, err := passphrase()
-	if err != nil {
-		return err
-	}
-	defer clear(again)
-	switch {
-	case !bytes.Equal(pass, again):
-		return errors.New("the passphrases differ; nothing was written")
-	case len(pass) < minPassphrase:
-		return fmt.Errorf("the passphrase must be at least %d characters; nothing was written", minPassphrase)
-	}
-	key, err := secp256k1.GeneratePrivateKey()
-	if err != nil {
-		return err
-	}
-	defer key.Zero()
-	priv := key.Serialize()
-	defer clear(priv)
-	f, err := signer.EncryptKey(walletID, priv, pass, signer.ScryptN)
-	if err != nil {
-		return err
-	}
-	if k, err := signer.DecryptKey(f, walletID, pass); err != nil || signer.Address(k.PubKey()) != f.Address {
-		return errors.New("the new key file does not decrypt to its address; nothing was written")
-	}
-	raw, err := json.Marshal(f)
-	if err != nil {
-		return err
-	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := file.Write(raw); err != nil {
-		file.Close()
-		os.Remove(path)
-		return err
-	}
-	if err := errors.Join(file.Sync(), file.Close()); err != nil {
-		os.Remove(path)
-		return err
-	}
-	fmt.Fprintf(out, "apa-signer: wallet %s address %s\n", walletID, f.Address)
+	fmt.Fprintf(out, "apa-signer: wallet %s address %s\n", walletID, addr)
 	return nil
 }
 
-// private refuses a directory that is not this user's alone.
-func private(dir string) error {
-	fi, err := os.Lstat(dir)
-	if err != nil {
-		return err
-	}
-	st, ok := fi.Sys().(*syscall.Stat_t)
-	if !fi.IsDir() || fi.Mode().Perm()&0o077 != 0 || !ok || st.Uid != uint32(os.Getuid()) {
-		return fmt.Errorf("%s must be a directory owned by this user, mode 0700", dir)
-	}
-	return nil
-}
-
-// readPassphrase reads one line from the terminal with echo off.
 func readPassphrase(tty *os.File, prompt string) ([]byte, error) {
-	fmt.Fprint(tty, "apa-signer "+prompt)
-	fd := int(tty.Fd())
-	old, err := unix.IoctlGetTermios(fd, getTermios)
-	if err != nil {
-		return nil, err
-	}
-	quiet := *old
-	quiet.Lflag &^= unix.ECHO
-	if err := unix.IoctlSetTermios(fd, setTermios, &quiet); err != nil {
-		return nil, err
-	}
-	defer func() { unix.IoctlSetTermios(fd, setTermios, old); fmt.Fprintln(tty) }()
-	var line []byte
-	b := make([]byte, 1)
-	for len(line) < 1024 {
-		if n, err := tty.Read(b); err != nil || n == 0 {
-			return nil, errors.New("no passphrase")
-		}
-		if b[0] == '\n' || b[0] == '\r' {
-			return line, nil
-		}
-		line = append(line, b[0])
-	}
-	return nil, errors.New("passphrase too long")
+	return keytool.ReadPassphrase(tty, "apa-signer", prompt)
 }

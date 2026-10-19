@@ -35,13 +35,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/keytool"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
 )
 
 // assembleApprovals opens (or creates, 0600) DIR/signer.db for an
 // ApprovalCore; nothing else in DIR is touched.
 func assembleApprovals(dir string, clock signer.Clock) (*signer.ApprovalCore, *signer.Config, error) {
-	if err := private(dir); err != nil {
+	if err := keytool.Private(dir); err != nil {
 		return nil, nil, err
 	}
 	if err := signer.Unmigrated(dir); err != nil {
@@ -87,7 +88,7 @@ func privateFile(path string) error {
 // migrate moves DIR/approvals.db into DIR/signer.db (P2-D1), once, with
 // no Signer serving (its socket is there while one does).
 func migrate(dir string, out io.Writer) error {
-	if err := private(dir); err != nil {
+	if err := keytool.Private(dir); err != nil {
 		return err
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "signer.json"))

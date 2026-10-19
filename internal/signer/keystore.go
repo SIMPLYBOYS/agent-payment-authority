@@ -6,6 +6,10 @@ package signer
 // wallets or edited does not decrypt. A wrong passphrase, a changed byte or
 // parameters outside the bounds are refused; there is no plaintext form and
 // no other key source.
+//
+// The same format holds the Host's own keys (apa-relayer's and the shop's,
+// docs/commercial-p2b.md B1) under another label: a file made for one
+// program never decrypts as another's.
 
 import (
 	"bytes"
@@ -41,8 +45,11 @@ type KeyFile struct {
 // 2^14 to 2^20 with r=8, p=1, nothing else.
 const ScryptN = 1 << 17
 
-func aad(walletID, address string) []byte {
-	return []byte("apa-signer-key/v1\x00" + walletID + "\x00" + address)
+// SignerLabel labels the payment wallets' key files.
+const SignerLabel = "apa-signer-key/v1"
+
+func aad(label, walletID, address string) []byte {
+	return []byte(label + "\x00" + walletID + "\x00" + address)
 }
 
 func gcmFor(pass []byte, salt []byte, n int) (cipher.AEAD, error) {
@@ -63,6 +70,11 @@ func ValidWalletID(id string) bool { return idPattern.MatchString(id) }
 
 // EncryptKey makes a version 1 key file for a 32-byte private key.
 func EncryptKey(walletID string, priv, pass []byte, n int) (KeyFile, error) {
+	return EncryptKeyFor(SignerLabel, walletID, priv, pass, n)
+}
+
+// EncryptKeyFor is EncryptKey under label (a program's own; see SignerLabel).
+func EncryptKeyFor(label, walletID string, priv, pass []byte, n int) (KeyFile, error) {
 	if len(priv) != 32 || len(pass) == 0 || !ValidWalletID(walletID) {
 		return KeyFile{}, errors.New("a 32-byte key, a passphrase and a valid wallet ID are required")
 	}
@@ -79,12 +91,17 @@ func EncryptKey(walletID string, priv, pass []byte, n int) (KeyFile, error) {
 		return KeyFile{}, err
 	}
 	return KeyFile{Version: 1, WalletID: walletID, Address: addr, KDF: "scrypt", N: n, R: 8, P: 1, Salt: hex.EncodeToString(salt),
-		Nonce: hex.EncodeToString(nonce), Ciphertext: hex.EncodeToString(g.Seal(nil, nonce, priv, aad(walletID, addr)))}, nil
+		Nonce: hex.EncodeToString(nonce), Ciphertext: hex.EncodeToString(g.Seal(nil, nonce, priv, aad(label, walletID, addr)))}, nil
 }
 
 // DecryptKey opens a key file for walletID and checks the key gives the
 // file's address.
 func DecryptKey(f KeyFile, walletID string, pass []byte) (*secp256k1.PrivateKey, error) {
+	return DecryptKeyFor(SignerLabel, f, walletID, pass)
+}
+
+// DecryptKeyFor is DecryptKey under label.
+func DecryptKeyFor(label string, f KeyFile, walletID string, pass []byte) (*secp256k1.PrivateKey, error) {
 	if f.Version != 1 || f.KDF != "scrypt" || f.R != 8 || f.P != 1 || f.N < 1<<14 || f.N > 1<<20 || f.N&(f.N-1) != 0 || f.WalletID != walletID {
 		return nil, errors.New("key file: unsupported version, parameters or wallet")
 	}
@@ -98,7 +115,7 @@ func DecryptKey(f KeyFile, walletID string, pass []byte) (*secp256k1.PrivateKey,
 	if err != nil {
 		return nil, err
 	}
-	priv, err := g.Open(nil, nonce, ct, aad(walletID, f.Address))
+	priv, err := g.Open(nil, nonce, ct, aad(label, walletID, f.Address))
 	if err != nil || len(priv) != 32 {
 		return nil, errors.New("key file: wrong passphrase or changed content")
 	}
@@ -110,9 +127,9 @@ func DecryptKey(f KeyFile, walletID string, pass []byte) (*secp256k1.PrivateKey,
 	return key, nil
 }
 
-// readKeyFile reads one key file, which must be a regular file readable by
+// ReadKeyFile reads one key file, which must be a regular file readable by
 // its owner only.
-func readKeyFile(path string) (KeyFile, error) {
+func ReadKeyFile(path string) (KeyFile, error) {
 	fi, err := os.Lstat(path)
 	if err != nil {
 		return KeyFile{}, err
@@ -138,7 +155,7 @@ func readKeyFile(path string) (KeyFile, error) {
 func LoadKeys(dir string, cfg *Config, pass []byte) (map[string]*secp256k1.PrivateKey, error) {
 	keys := map[string]*secp256k1.PrivateKey{}
 	for _, w := range cfg.Wallets {
-		f, err := readKeyFile(filepath.Join(dir, w.WalletID+".key"))
+		f, err := ReadKeyFile(filepath.Join(dir, w.WalletID+".key"))
 		if err != nil {
 			return nil, err
 		}
