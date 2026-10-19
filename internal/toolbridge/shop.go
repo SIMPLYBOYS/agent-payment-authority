@@ -196,14 +196,30 @@ func projection(product string, v store.PurchaseView, replay bool) map[string]an
 	if v.ApprovalClosed != "" {
 		approval = v.ApprovalClosed
 	}
-	note := "No payment was made and no content was delivered; M1 cannot pay. An Ask waits for a human."
+	payment, note := "none", "No payment was made and no content was delivered; M1 cannot pay. An Ask waits for a human."
 	if paycontract.Supported(v.Decision.Version) {
 		note = "No payment was made and no content was delivered; payment is not enabled. An Ask waits for a human."
 	}
+	if pv := v.Payment; pv != nil { // P2 (docs/commercial-p2-host.md 8): the status, never its transactions
+		payment, note = pv.Status, paymentNotes[pv.Status]
+		if pv.Code == "DELIVERY_FAILED" {
+			note = "Paid, but the shop did not deliver the content; a person handles it. Nothing more is paid."
+		}
+	}
 	return map[string]any{
 		"product_id": product, "decision": v.Decision.PolicyVerdict, "reason": v.Decision.Reason,
-		"approval": approval, "already_requested": replay, "payment": "none", "note": note,
+		"approval": approval, "already_requested": replay, "payment": payment, "note": note,
 	}
+}
+
+// paymentNotes say what a payment's status means to the model. The
+// content goes to the host, never to the model (H-D2).
+var paymentNotes = map[string]string{
+	"paying":       "The host is paying for this purchase. Request it again later for its status; the content goes to the host, not to you.",
+	"confirming":   "The payment was sent and waits for the chain to confirm it; it is never paid twice. Request it again later for its status.",
+	"paid":         "Paid. The content went to the host, which shows its receipt; it is not given to you.",
+	"not_paid":     "Not paid: nothing was charged and no content was delivered.",
+	"needs_review": "The payment needs a person's review; nothing more is paid automatically and no content was given to you.",
 }
 
 func (s *Shop) get(ctx context.Context, url string) (*http.Response, []byte, error) {

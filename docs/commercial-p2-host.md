@@ -382,3 +382,8 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES（沒有 C
 | 建議 | `ac.pays` 以值的型別判斷 `Unavailable{}` | 不改：只有 `assemble` 建立它 |
 
 H3 突變共 26 項，26／26 KILLED。
+
+### 12.4 H4 畫面與 Agent 看到的付款狀態
+
+- **H4a Agent 看到什麼（§8）**：`request_purchase` 的 `payment` 在付款開始後改為 `payment_status`（`paying`、`confirming`、`paid`、`not_paid`、`needs_review`），並附固定的說明文字；付款前照舊是 `none`。Agent 看不到任何交易 hash、內容 hash 或內容本身（H-D2）。`paid` 但交付失敗時，說明寫明商店沒有交付、由人處理。`TestPaymentStatusProjected`；突變 2 項，2／2 KILLED。
+- 待做：網頁的卡片步驟、`payment_status` 文字、交付區、收據與對帳頁（H-D8 A），以及 `/health` 與 `payment_capability` 在 `--payments` 時的文字。
