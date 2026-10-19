@@ -1114,7 +1114,7 @@ MUTATIONS = [
     ('P2-b B3 review: a relayer taking fewer confirmations', 'cmd/demo/payments.go',
      '|| h.Confirmations < c.Confirmations {', '{', 'TestTestnetPaymentsOpen'),
     ('P2-b B6: opt-signer takes another origin', 'cmd/p2-testnet/main.go',
-     'w.RPID != "localhost" || !slices.Contains(w.Origins, hostOrigin) {', 'w.RPID != "localhost" {', 'TestOptSigner'),
+     'w.RPID != "localhost" || !slices.Contains(w.Origins, hostOrigin) {', 'w.RPID != "localhost" || false && !slices.Contains(w.Origins, hostOrigin) {', 'TestOptSigner'),
     ('P2-b B6: opt-signer keeps the approver version', 'cmd/p2-testnet/main.go',
      '\t\ta.Version++', '\t\ta.Version += 0', 'TestOptSigner'),
 ]
