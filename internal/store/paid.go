@@ -474,6 +474,83 @@ func (s *Store) TaskEnded(taskID string) (bool, error) {
 	return paycontract.Ended(t.events), nil
 }
 
+// PayTask is an open pay-family task as the Host's payment starter sees
+// it (docs/commercial-p2-host.md 12.3): the budget its Z2 registration
+// carries (H-D4), and its purchases decided for payment, an Allow or an Ask
+// a person approved, whose payment has not started.
+type PayTask struct {
+	TaskID, ConsumerID string
+	BudgetInitial      contracts.Amount
+	Allowed, Approved  []string // purchase order IDs, sorted
+}
+
+// PayTasks lists the pay-family tasks not ended, oldest first. ponytail:
+// every such task's events on each call; a cursor once a database holds
+// many tasks (a P2 demo database is new, H-D7).
+func (s *Store) PayTasks() ([]PayTask, error) {
+	tx, err := s.r.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT task_id FROM tasks WHERE contract_version <> ? ORDER BY started_at, task_id`, contracts.Version)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := drained(rows); err != nil {
+		return nil, err
+	}
+	var out []PayTask
+	for _, id := range ids {
+		t, err := s.openTask(tx, 0, id)
+		if err != nil {
+			return nil, err
+		}
+		if !t.pay() || paycontract.Ended(t.events) {
+			continue
+		}
+		started := map[string]bool{}
+		rows, err := tx.Query(`SELECT purchase_order_id FROM payments WHERE task_id = ?`, id)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var po string
+			if err := rows.Scan(&po); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			started[po] = true
+		}
+		if err := drained(rows); err != nil {
+			return nil, err
+		}
+		pt := PayTask{TaskID: id, ConsumerID: t.row.ConsumerID, BudgetInitial: t.terms.BudgetInitial}
+		for po, p := range t.purchases {
+			switch {
+			case started[po]:
+			case p.Decision.PolicyVerdict == "Allow":
+				pt.Allowed = append(pt.Allowed, po)
+			case p.Decision.PolicyVerdict == "Ask" && p.Session != nil && p.Session.State == "approved":
+				pt.Approved = append(pt.Approved, po)
+			}
+		}
+		slices.Sort(pt.Allowed)
+		slices.Sort(pt.Approved)
+		out = append(out, pt)
+	}
+	return out, nil
+}
+
 func (s *Store) paymentByIntent(intent string) (Payment, error) {
 	p, err := scanPaid(s.r.QueryRow(paidWhere(`p.intent_hash = ?`), intent))
 	if errors.Is(err, sql.ErrNoRows) {

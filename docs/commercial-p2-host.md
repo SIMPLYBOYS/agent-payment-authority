@@ -326,3 +326,23 @@ Claude Code 獨立 context 的 code-reviewer，結論 APPROVE（有應修項目�
 | 建議 | `late` 只看 `valid_before`，grant 或委派可能更早到期 | 列為已知限制，H3 再處理 |
 | 建議（H3） | Signer client 必須把 503 `SIGNER_ERROR` 當成一般錯誤，不能當成拒絕，否則暫時的錯誤會變成 `RESERVED_NOT_PAID` | H3 實作 |
 | 建議 | §12.2 漏了 `settled → DELIVERY_FAILED`；Signer 那一點在修正前不正確 | 修正 |
+
+第二輪 review（a7d6876）：結論 APPROVE。審查者確認：Signer 的簽名是由請購自己的付款綁定組成，所以正確的簽名一定通過比對；每一個要求的 Store 轉換都被 from-set 與順序規則接受；22 項突變的原句各只出現一次。建議與處理見 12.2 之後的修正提交。
+
+### 12.3 H3 接線
+
+- **H3a（404b61a）付款工作的真元件**：
+  - `signerclient.Client.Sign`：付款工作自己的 request ID，原樣送 `/v1/sign`（帶 reservation 與委派或 `approval_id`），不經過 `payment_attempts`。拒絕回 `signer.Refusal`；503（`SIGNER_ERROR`、`SIGNER_TIMEOUT`）或沒有可讀的回應回一般錯誤，用同一個 request ID 再問。
+    - **與 §3 的差異**：§3 原本寫「`payment_attempts` 保留給 Signer 握手，`BeginPayment` 改為接受 webauthn」。P2 的 Signer 改在鏈上確認預留（`budget.Verifier`），不再需要 P1-b 的「先寫入再呼叫」握手；付款的紀錄是 `payments` 這一列。兩份狀態並存只會互相不一致，所以 `payment_attempts` 與 `BeginPayment` 維持 P1-b 原樣，只供 `delegation` 的舊路徑使用。
+  - `payflow.HTTPShop`：帶 `PAYMENT-SIGNATURE` 的 GET；任何狀態都解讀 `PAYMENT-RESPONSE`；內容超過 1 MiB 當成沒有回應（hash 不會是內容的）。
+  - `budget.Relayer` 與 `reconcile.Token` 直接就是 `Relayer` 與 `Chain`。
+  - `signer.json` 新增 `reservation` 段（`rpc`、`chain_id`、`budget_contract`、`confirmations`）：有這段時 `apa-signer serve` 用 `budget.Verifier` 在鏈上確認預留；沒有就照舊 `Unavailable`，什麼都不簽。`rpc` 必須是 http(s) 且不含帳密，`chain_id` 必須是已登記資產的鏈，確認數 1 到 64。
+  - health：`ServeAll` 有預留確認時回 `ready`／`payment: available`，否則 `approvals-only`；demo 與網頁兩種都視為核准可用。
+- **H3b 付款接進 demo**：
+  - `--payments <file>`（需要 `--approvals-signer`：同一個 Signer 也簽付款）。檔案只有本機鏈的部署資訊與資料庫目錄，**沒有任何金鑰**：relayer 的 gas、issuer、policy 與商店的 gas 以 anvil 公開測試金鑰的編號指定（`eth.AnvilKey`，H-D5），四把必須不同。`rpc` 必須是 loopback 的 http，且鏈 ID 要和檔案相符；目錄必須是 0700。
+  - 有 `--payments` 時，商店改用 `merchant.NewSettled`（自己驗證與結算），報價的 `maxTimeoutSeconds` 為 300（H-D3）；M1 商店維持 60。
+  - 付款工作在 expiry 的 goroutine 群組裡跑（Store 關閉前停止），`Margin` 30 秒；錯誤只記固定代碼。
+  - **starter**（付款工作每一輪開始前執行，同一個 goroutine）：讀 `store.PayTasks()`，即未結束的 pay 系列 task、它的初始預算，以及已決定要付款（Allow，或本人核准的 Ask）但還沒開始付款的請購。
+    - 每個 task 以初始預算向 relayer 登記一次（H-D4；未確認的登記由 relayer 自己完成）。relayer 拒絕就不再試；節點錯誤或仍在登記中就下一輪再試。
+    - 每張請購在這個程序裡只 `StartPayment` 一次：Allow 用設定裡該客人的 Signer 委派，Ask 用 grant 的核准。被拒絕就記下代碼，重啟前不再試。
+    - 以掃描而不是在三個地方掛勾子，Host 在「決定」與「開始付款」之間中斷時，重啟後仍會開始付款。

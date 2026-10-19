@@ -512,6 +512,8 @@ func TestRun(t *testing.T) {
 	w.chain.state = "settled"
 	wk := w.worker()
 	wk.Every = 10 * time.Millisecond
+	rounds := 0
+	wk.Before = func(context.Context) { rounds++ }
 	ctx, cancel := context.WithCancel(bg)
 	done := make(chan error, 1)
 	go func() { done <- wk.Run(ctx) }()
@@ -521,8 +523,8 @@ func TestRun(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	if err := <-done; err != nil || rounds == 0 {
+		t.Fatal(err, rounds)
 	}
 	if w.payment("po-1").State != "delivered" || w.payment("po-2").State != "delivered" || w.relayer.reserves != 2 {
 		t.Fatalf("po-1 %s, po-2 %s, reserves %d", w.payment("po-1").State, w.payment("po-2").State, w.relayer.reserves)

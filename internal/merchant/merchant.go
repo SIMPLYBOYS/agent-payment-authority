@@ -147,9 +147,15 @@ type price struct {
 // e.g. "http://127.0.0.1:8402".
 func New(baseURL string) (*Merchant, error) { return build(baseURL, products) }
 
+// SettledTimeout is the settling shop's maxTimeoutSeconds (H-D3,
+// docs/commercial-p2-host.md 9): the approval TTL, so a person has time to
+// approve an Ask. M1's shop keeps 60.
+const SettledTimeout = 300
+
 // NewSettled builds the shop that verifies and settles payments itself
 // (P2-D3): the same products, offered in the settler's token on its chain
-// to its payTo, delivered only once their transfer is confirmed.
+// to its payTo for SettledTimeout, delivered only once their transfer is
+// confirmed.
 func NewSettled(baseURL string, st *Settler) (*Merchant, error) {
 	ps := make([]product, len(products))
 	for i, p := range products {
@@ -157,6 +163,7 @@ func NewSettled(baseURL string, st *Settler) (*Merchant, error) {
 		r.Network = "eip155:" + strconv.FormatUint(st.cfg.ChainID, 10)
 		r.Asset, r.PayTo = st.cfg.Token.Hex(), st.cfg.PayTo.Hex()
 		r.Extra = map[string]string{"name": st.cfg.TokenName, "version": st.cfg.TokenVersion}
+		r.MaxTimeoutSeconds = SettledTimeout
 		p.Requirement = r
 		ps[i] = p
 	}

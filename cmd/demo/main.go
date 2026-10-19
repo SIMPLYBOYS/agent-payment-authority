@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -121,6 +122,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	approvalsSigner := fs.String("approvals-signer", "", "A2: the Unix socket of apa-signer serve-approvals; the person's approval then runs on http://localhost:<port> (fake mode with --scenarios only; payment stays disabled)")
 	credentialDir := fs.String("credential-dir", "", "C2: the credential directory (apa-issuer init) for apa.pay.v2 scenarios: test issuer, status list, holders")
 	authSource := fs.String("authenticator-source", "device", "A2: device or virtual, the authenticator's source as shown and logged (a label, not evidence)")
+	paymentsPath := fs.String("payments", "", "P2-a: the local anvil payment configuration (docs/commercial-p2-host.md 12.3); with --approvals-signer, whose Signer then signs payments too")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -184,6 +186,8 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		return errors.New("--pairing is for a host that starts runs (--scenarios)")
 	case *approvalsSigner != "" && (live || *fakePath == "" || *scenariosPath == ""):
 		return errors.New("--approvals-signer is for a fake host that starts runs (--fake-cli and --scenarios): A2 uses the fake Agent only")
+	case *paymentsPath != "" && *approvalsSigner == "":
+		return errors.New("--payments needs --approvals-signer: that Signer signs the payments")
 	case *authSource != "device" && *authSource != "virtual":
 		return errors.New("--authenticator-source is device or virtual")
 	}
@@ -300,8 +304,14 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 
 	// The shop states URLs on the address actually bound, never on the Host
 	// header a client sends; the Store's offer book is this configuration.
-	shop, err := merchant.New("http://" + addr)
-	if err != nil {
+	var shop *merchant.Merchant
+	var pay *payments
+	if *paymentsPath != "" {
+		if pay, shop, err = openPayments(ctx, *paymentsPath, "http://"+addr, d.clock, d.out); err != nil {
+			return err
+		}
+		defer pay.Close() // after the worker (stopped with expiry) and the Store
+	} else if shop, err = merchant.New("http://" + addr); err != nil {
 		return err
 	}
 	offers := store.OfferBook{}
@@ -358,6 +368,9 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		})
 	})
 	defer func() { stopExpiry(); expiry.Wait(); d.at("expiry_stopped") }()
+	if pay != nil {
+		expiry.Go(func() { pay.run(expiryCtx, st, *approvalsSigner, d.clock) })
+	}
 	if creds != nil {
 		refreshEvery := d.refreshEvery
 		if refreshEvery == 0 {
@@ -426,7 +439,11 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		if ans := ui.approve.signer.Health(); ans.Kind == signerclient.KindOK {
 			state = ans.Reply.State
 		}
-		fmt.Fprintf(d.out, "demo: human approval (A2) on http://%s through %s (signer %s); authenticator source %s; payment disabled\n", ui.alias, *approvalsSigner, state, *authSource)
+		payState := "payment disabled"
+		if pay != nil {
+			payState = "payments on local chain " + strconv.FormatUint(pay.cfg.ChainID, 10) + " (P2-a, anvil test keys)"
+		}
+		fmt.Fprintf(d.out, "demo: human approval (A2) on http://%s through %s (signer %s); authenticator source %s; %s\n", ui.alias, *approvalsSigner, state, *authSource, payState)
 	}
 	ui.register(mux)
 	ui.registerUI(mux)

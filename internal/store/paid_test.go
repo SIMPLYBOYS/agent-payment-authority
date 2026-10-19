@@ -551,3 +551,35 @@ func TestPaymentRecoveryRefusesAnotherGrant(t *testing.T) {
 		t.Fatalf("Open: %v, want a payment corruption", err)
 	}
 }
+
+// PayTasks: an open pay task's budget and its purchases decided for
+// payment until their payment starts; an ended task is not listed.
+func TestPayTasks(t *testing.T) {
+	e := newEnv(t)
+	s := e.open()
+	po, _ := e.payAllowed(s)
+	ts, err := s.PayTasks()
+	if err != nil || len(ts) != 1 || ts[0].TaskID != "task-a" || ts[0].ConsumerID != "consumer-a" || ts[0].BudgetInitial == "" ||
+		len(ts[0].Allowed) != 1 || ts[0].Allowed[0] != po || len(ts[0].Approved) != 0 {
+		t.Fatalf("allowed: %+v %v", ts, err)
+	}
+	if _, _, err := s.StartPayment(payStart(po)); err != nil {
+		t.Fatal(err)
+	}
+	if ts, err := s.PayTasks(); err != nil || len(ts) != 1 || len(ts[0].Allowed) != 0 {
+		t.Fatalf("started: %+v %v", ts, err)
+	}
+	if err := s.Cancel("task-a"); err != nil {
+		t.Fatal(err)
+	}
+	if ts, err := s.PayTasks(); err != nil || len(ts) != 0 {
+		t.Fatalf("ended: %+v %v", ts, err)
+	}
+
+	e2 := newEnv(t)
+	s2 := e2.open()
+	po2, _ := e2.webauthnApproved(s2)
+	if ts, err := s2.PayTasks(); err != nil || len(ts) != 1 || len(ts[0].Approved) != 1 || ts[0].Approved[0] != po2 {
+		t.Fatalf("approved: %+v %v", ts, err)
+	}
+}

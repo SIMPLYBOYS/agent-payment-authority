@@ -108,8 +108,9 @@ var (
 // more than the shop's own margin (5 s) plus the time to sign, or the shop
 // refuses a payment already reserved and signed. Step is not called while
 // Run runs (one payment at a time; a second caller is still safe, every
-// outside call being idempotent). Log, when set, gets a line per payment
-// error other than ErrPending.
+// outside call being idempotent). Log, when set, gets each payment error
+// other than ErrPending (intent "" for the Store's list). Before, when set,
+// runs in Run's goroutine before each round: the Host's payment starter.
 type Worker struct {
 	Store   *store.Store
 	Relayer Relayer
@@ -119,7 +120,8 @@ type Worker struct {
 	Clock   func() uint64
 	Margin  uint64
 	Every   time.Duration // Run's interval; a second when 0
-	Log     func(string)
+	Log     func(intent string, err error)
+	Before  func(context.Context)
 	once    sync.Once
 	kick    chan struct{}
 }
@@ -167,13 +169,16 @@ func (w *Worker) Run(ctx context.Context) error {
 		return err
 	}
 	for {
+		if w.Before != nil {
+			w.Before(ctx)
+		}
 		ps, err := w.Store.PaymentsIn(open...)
 		if err != nil {
-			w.log("payments: " + err.Error())
+			w.log("", err)
 		}
 		for _, p := range ps {
 			if _, err := w.Step(ctx, p); err != nil && !errors.Is(err, ErrPending) {
-				w.log("payment " + p.IntentHash + ": " + err.Error())
+				w.log(p.IntentHash, err)
 			}
 		}
 		select {
@@ -185,9 +190,9 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 }
 
-func (w *Worker) log(line string) {
+func (w *Worker) log(intent string, err error) {
 	if w.Log != nil {
-		w.Log(line)
+		w.Log(intent, err)
 	}
 }
 
