@@ -569,3 +569,29 @@ H6 用你以 `apa-signer keygen` 建立的兩把本機測試金鑰（H-D6），�
 16. 結束：依序在終端機 3、2、1 按 Ctrl-C。`var/p2-local`、`var/p2-dev` 與 Host 資料庫都保留（demo 結束前不清理）。
 
 **記錄方式**：這一輪是「實機（本機鏈）」：你的裝置與你的金鑰，但鏈是本機 anvil、資產是測試 USDC，不能寫成 testnet 結果。對帳結果標 `local_anvil`，不關閉 AE1 驗收 18。
+
+### 12.9 H6 本機實跑結果（10/19）
+
+**性質**：實機（本機鏈）。Aaron 以 `apa-signer keygen` 建立的兩把金鑰（同一密語）、真的 `apa-signer serve`（`var/p2-dev`）、Aaron 以 Google 密碼管理工具＋PIN 登記並核准／拒絕的裝置；鏈是本機 anvil（84532），資產是測試 USDC，gas 用 anvil 公開金鑰。**不是 testnet 結果。**
+
+- 錢包：wallet-a `0x4d4772cfc246a7817abe284f36b5da08ee987041`、wallet-b `0x5fc5b3747fe72687bfce2a722dfac25c0b8d6676`；預算合約 `0xe7f1725e7734ce288f8367e1bb143e90bb3f0512`；TestUSDC 在 `0x4444…4444`。
+- 第 5～10 步由 Aaron 操作（本機鏈、Signer、Host、兩位核准者登記）；第 11、14 步由 Claude Code 以 Host 的 API 代為操作（與頁面按鈕相同的請求：模擬客人、確認委託、開始、取消）；第 12、13 步由 Aaron 在頁面以裝置核准／拒絕。
+
+| 步驟 | task | 事件（Host 資料庫，唯讀） | 付款 |
+|---|---|---|---|
+| 11 Allow | `show-b-01` | … `POLICY_DECIDED` → `PAYMENT_REQUESTED` → `BUDGET_RESERVED` → `PAYMENT_SIGNED` → `PAYMENT_SUBMITTED` → `PAYMENT_SETTLED` → `RESOURCE_DELIVERED` → `RECEIPT_ISSUED` | `delegation` `dlg-b@1`，80000；tx#1 `0x2b957dcc…a729bb`（區塊 7），tx#2 `0x56d1ff3f…bc28e3`（區塊 8）；收據 `rcpt-0c60cba5…`，付款人 wallet-b |
+| 12 Ask 核准 | `show-a-02` | … `APPROVAL_SESSION_OPENED` → `APPROVED` → `GRANT_ISSUED` → `PAYMENT_REQUESTED` → … → `RECEIPT_ISSUED` | `webauthn` `hap-152a6222…`，500000；tx#1 `0x11bef5c6…e9ede9`（區塊 10），tx#2 `0xf9f30c3c…0fd9ef7`（區塊 11）；收據 `rcpt-32cbc05c…`，付款人 wallet-a |
+| 13 Ask 拒絕 | `show-a-03` | … `APPROVAL_SESSION_OPENED` → `APPROVAL_DENIED` | 沒有 |
+| 14 取消 | `show-a-01` | … `APPROVAL_SESSION_OPENED` → `APPROVAL_WITHDRAWN` → `TASK_CANCELLED` | 沒有 |
+
+- Signer 握手：`payment_attempts` 兩列（`delegation` `dlg-b@1`、`webauthn` 該核准），都是 `signed`；每筆付款一個 request ID。
+- 對帳（`p2-reconcile.sh`）：`local_anvil`，區塊 0–12，2 個錢包，2 筆已記錄授權，**未授權新增支出 0 筆**；存於 `var/p2-local/reconciliation-20261019-165238.json`（不關閉 AE1 驗收 18）。
+- Host 資料庫 `var/a2-host-8824f2896d05/db/fake.db`：schema 7，`demo --verify-db` 恢復檢查通過。
+- anvil 已關閉（鏈狀態隨之消失）；上述交易 hash 以 Host 資料庫、收據與對帳檔為證。
+
+**實跑中發現並修正**
+
+| 問題 | 處理 |
+|---|---|
+| `apa-signer serve` 讓 SQLite 以預設權限建立 `signer.db`，`approver enroll begin` 因此拒絕（V1 用 `serve-approvals` 會先建成 0600，所以沒遇過） | Aaron 先手動 `chmod 600` 繼續；程式改為 `serve` 先以 0600 建檔（f7e9deb），測試與突變 |
+| 本人核准面板在付款完成後仍寫「本人核准已驗證，尚未付款」 | 有付款紀錄時，面板標題用卡片的付款文字（7e9c2b1），網頁測試 |
