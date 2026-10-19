@@ -1,8 +1,10 @@
 package main
 
-// P2-a payments in the demo (docs/commercial-p2-host.md 6, 12.3): on a
-// local anvil only, the budget relayer and the settling shop run in this
-// process with anvil's public test keys, named by index (H-D5); the
+// P2 payments in the demo (docs/commercial-p2-host.md 6, 12.3;
+// docs/commercial-p2b.md B2, B3): on a local anvil, the budget relayer and
+// the settling shop run in this process with anvil's public test keys,
+// named by index (H-D5), or apa-relayer and the shop's key file; on Base
+// Sepolia always the latter, with daily caps; the
 // Signer is the one on --approvals-signer's socket (payments and approvals,
 // P2-D1); the worker pays one payment at a time (H-D1 A), and before each
 // round the starter registers new tasks' budgets (H-D4 A) and starts the
@@ -14,12 +16,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/keytool"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/payflow"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
@@ -27,9 +31,14 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 )
 
-// payConfig is --payments' file: the local chain's deployment and where
-// the relayer's and shop's databases live. It holds no key.
+// payConfig is --payments' file: the chain's deployment and where the
+// relayer's and shop's databases live. It holds no key.
 type payConfig struct {
+	// Environment: local_anvil (the default; P2-a) or base_sepolia
+	// (docs/commercial-p2b.md B3): the Base Sepolia testnet, which takes
+	// no anvil key, apa-relayer on relayer_socket, the shop's key file in
+	// shop_key_dir and the caps.
+	Environment    string `json:"environment,omitempty"`
 	RPC            string `json:"rpc"`
 	ChainID        uint64 `json:"chain_id"`
 	Confirmations  uint64 `json:"confirmations"`
@@ -42,19 +51,33 @@ type payConfig struct {
 	PolicyTTL      uint64 `json:"policy_ttl"`
 	Zkbudget       string `json:"zkbudget"`
 	ZkSetupDir     string `json:"zk_setup_dir"`
-	AnvilKeys      struct {
+	AnvilKeys      *struct {
 		RelayerGas int `json:"relayer_gas"`
 		Issuer     int `json:"issuer"`
 		Policy     int `json:"policy"`
 		ShopGas    int `json:"shop_gas"`
-	} `json:"anvil_keys"`
+	} `json:"anvil_keys,omitempty"`
 	// RelayerSocket: apa-relayer's socket (docs/commercial-p2b.md B2); the
-	// relayer then runs there with its own keys and database, and
-	// anvil_keys' relayer_gas, issuer and policy are not used.
-	RelayerSocket string            `json:"relayer_socket,omitempty"`
-	Dir           string            `json:"dir"`         // relayer.db and settle.db, a private directory
-	Delegations   map[string]string `json:"delegations"` // consumer ID -> its Signer delegation, id@version
+	// relayer then runs there with its own keys and database.
+	RelayerSocket string `json:"relayer_socket,omitempty"`
+	// ShopKeyDir: the shop's key file DIR/keys/shop.key (apa-relayer
+	// keygen --role shop), opened with a passphrase asked at start.
+	ShopKeyDir     string            `json:"shop_key_dir,omitempty"`
+	ShopDailyTxCap uint64            `json:"shop_daily_tx_cap,omitempty"`
+	Dir            string            `json:"dir"`         // relayer.db and settle.db, a private directory
+	Delegations    map[string]string `json:"delegations"` // consumer ID -> its Signer delegation, id@version
 }
+
+// BaseSepolia is the payment capability on the Base Sepolia testnet
+// (docs/commercial-p2b.md B3); LocalAnvil the one on a local anvil.
+const BaseSepolia = "base_sepolia"
+
+// baseSepoliaChain is Base Sepolia's chain ID.
+const baseSepoliaChain = 84532
+
+// testnetOnLoopback lets a test give base_sepolia an http URL (its stub
+// node); never set outside tests. A node answering as anvil is refused anyway.
+var testnetOnLoopback = false
 
 // hostRelayer is the budget relayer as the Host uses it: in this process
 // (*budget.Relayer) or apa-relayer's socket (*budget.Client).
@@ -73,32 +96,85 @@ type payments struct {
 	out     io.Writer
 }
 
-// openPayments checks the file and the chain, then opens the relayer and the
-// settler; baseURL is the shop's.
-func openPayments(ctx context.Context, path, baseURL string, clock func() uint64, out io.Writer) (*payments, *merchant.Merchant, error) {
+// checkEnvironment is the file's environment rules, before anything is opened.
+func checkEnvironment(c *payConfig) error {
+	switch c.Environment {
+	case "", LocalAnvil:
+		c.Environment = LocalAnvil
+		if err := eth.LocalRPC(c.RPC); err != nil {
+			return err
+		}
+		if c.AnvilKeys == nil && (c.RelayerSocket == "" || c.ShopKeyDir == "") {
+			return errors.New("anvil_keys, unless both relayer_socket and shop_key_dir are given")
+		}
+		if k := c.AnvilKeys; k != nil && c.RelayerSocket == "" && len(map[int]bool{k.RelayerGas: true, k.Issuer: true, k.Policy: true, k.ShopGas: true}) != 4 {
+			return errors.New("the four anvil keys are four different ones (each has its own nonces)")
+		}
+	case BaseSepolia:
+		u, err := url.Parse(c.RPC)
+		switch {
+		case c.ChainID != baseSepoliaChain:
+			return fmt.Errorf("base_sepolia is chain %d", baseSepoliaChain)
+		case err != nil || u.User != nil || u.Host == "" || u.Scheme != "https" && !(testnetOnLoopback && u.Scheme == "http"):
+			return errors.New("base_sepolia's rpc is an https URL without user info")
+		case c.AnvilKeys != nil:
+			return errors.New("base_sepolia takes no anvil key")
+		case c.RelayerSocket == "" || c.ShopKeyDir == "":
+			return errors.New("base_sepolia needs relayer_socket (apa-relayer) and shop_key_dir")
+		case c.Confirmations < 2 || c.ShopDailyTxCap == 0 || c.TokenFromBlock == 0:
+			return errors.New("base_sepolia needs at least 2 confirmations, shop_daily_tx_cap and token_from_block (the deployment's block)")
+		}
+	default:
+		return fmt.Errorf("environment %q is local_anvil or base_sepolia", c.Environment)
+	}
+	if c.PolicyTTL == 0 || c.PolicyTTL > 600 {
+		return errors.New("policy_ttl is 1 to 600 seconds (a reservation's authorization expires within it)")
+	}
+	return nil
+}
+
+// checkChain: the RPC is the configured chain, and an anvil exactly when
+// the environment is local_anvil (a loopback port may be a tunnel to a
+// public node; a testnet must not be a local stand-in).
+func checkChain(ctx context.Context, c payConfig, rpc *eth.Client) error {
+	if id, err := rpc.ChainID(ctx); err != nil || !id.IsUint64() || id.Uint64() != c.ChainID {
+		return fmt.Errorf("the chain at rpc is not chain %d (or did not answer)", c.ChainID)
+	}
+	anvil := eth.Anvil(ctx, rpc)
+	switch {
+	case c.Environment == LocalAnvil:
+		return anvil
+	case anvil == nil:
+		return errors.New("base_sepolia's rpc answers as a local anvil")
+	}
+	return nil
+}
+
+// openPayments checks the file and the chain, then opens the relayer and
+// the settler; baseURL is the shop's; shopPass asks the shop key's
+// passphrase (shop_key_dir).
+func openPayments(ctx context.Context, path, baseURL string, clock func() uint64, shopPass func() ([]byte, error), out io.Writer) (*payments, *merchant.Merchant, error) {
 	var c payConfig
 	if err := decodeFile(path, &c); err != nil {
 		return nil, nil, fmt.Errorf("payments: %w", err)
 	}
-	if err := eth.LocalRPC(c.RPC); err != nil {
+	if err := checkEnvironment(&c); err != nil {
 		return nil, nil, fmt.Errorf("payments: %w", err)
 	}
-	k := c.AnvilKeys
-	if idx := map[int]bool{k.RelayerGas: true, k.Issuer: true, k.Policy: true, k.ShopGas: true}; c.RelayerSocket == "" && len(idx) != 4 {
-		return nil, nil, errors.New("payments: the four anvil keys are four different ones (each has its own nonces)")
-	}
-	var keys [4]*eth.Key
-	for i, n := range []int{k.RelayerGas, k.Issuer, k.Policy, k.ShopGas} {
-		var err error
-		if keys[i], err = eth.AnvilKey(n); err != nil {
-			return nil, nil, fmt.Errorf("payments: %w", err)
+	var keys [4]*eth.Key // anvil's: relayer gas, issuer, policy, shop gas
+	if k := c.AnvilKeys; k != nil {
+		for i, n := range []int{k.RelayerGas, k.Issuer, k.Policy, k.ShopGas} {
+			var err error
+			if keys[i], err = eth.AnvilKey(n); err != nil {
+				return nil, nil, fmt.Errorf("payments: %w", err)
+			}
 		}
 	}
 	token, err1 := eth.ParseAddress(c.Token)
 	payTo, err2 := eth.ParseAddress(c.PayTo)
 	contract, err3 := eth.ParseAddress(c.BudgetContract)
-	if err := errors.Join(err1, err2, err3); err != nil || c.Confirmations == 0 || c.PolicyTTL == 0 || len(c.Delegations) == 0 {
-		return nil, nil, errors.New("payments: token, pay_to and budget_contract addresses, confirmations, policy_ttl and delegations")
+	if err := errors.Join(err1, err2, err3); err != nil || c.Confirmations == 0 || len(c.Delegations) == 0 {
+		return nil, nil, errors.New("payments: token, pay_to and budget_contract addresses, confirmations and delegations")
 	}
 	if fi, err := os.Stat(c.Dir); err != nil || !fi.IsDir() || fi.Mode().Perm()&0o077 != 0 {
 		return nil, nil, errors.New("payments: dir is an existing directory private to its owner (0700)")
@@ -114,11 +190,22 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 		}
 	}
 	rpc := eth.NewClient(c.RPC)
-	if id, err := rpc.ChainID(ctx); err != nil || !id.IsUint64() || id.Uint64() != c.ChainID {
-		return nil, nil, fmt.Errorf("payments: the chain at rpc is not chain %d (or did not answer)", c.ChainID)
-	}
-	if err := eth.Anvil(ctx, rpc); err != nil { // a loopback port may be a tunnel to a public node
+	if err := checkChain(ctx, c, rpc); err != nil {
 		return nil, nil, fmt.Errorf("payments: %w", err)
+	}
+	if c.ShopKeyDir != "" {
+		pass, err := shopPass()
+		if err != nil {
+			return nil, nil, fmt.Errorf("payments: the shop key's passphrase: %w", err)
+		}
+		keys[3], err = keytool.Load(c.ShopKeyDir, keytool.ShopLabel, "shop", pass)
+		clear(pass)
+		if err != nil {
+			return nil, nil, fmt.Errorf("payments: %w", err)
+		}
+		if keys[3].Addr != payTo {
+			return nil, nil, fmt.Errorf("payments: the shop key is %s, not pay_to %s (the shop pays its own gas and is paid; P2b-D3)", keys[3].Addr.Hex(), payTo.Hex())
+		}
 	}
 	var relayer hostRelayer = rc
 	closeR := func() error { return nil }
@@ -130,8 +217,12 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 		}
 		relayer, closeR = r, r.Close
 	}
-	settler, err := merchant.OpenSettler(ctx, merchant.SettleConfig{ChainID: c.ChainID, Token: token, TokenName: c.TokenName, TokenVersion: c.TokenVersion,
-		PayTo: payTo, Confirmations: c.Confirmations}, keys[3], rpc, filepath.Join(c.Dir, "settle.db"), clock)
+	sc := merchant.SettleConfig{ChainID: c.ChainID, Token: token, TokenName: c.TokenName, TokenVersion: c.TokenVersion, PayTo: payTo,
+		Confirmations: c.Confirmations, DailyTxCap: c.ShopDailyTxCap}
+	if c.Environment == BaseSepolia { // public blocks, a public node: ask less often, wait longer
+		sc.Poll, sc.Wait = time.Second, 2*time.Minute
+	}
+	settler, err := merchant.OpenSettler(ctx, sc, keys[3], rpc, filepath.Join(c.Dir, "settle.db"), clock)
 	if err != nil {
 		closeR()
 		return nil, nil, err
@@ -162,7 +253,7 @@ func paymentSigner(socket string) error {
 // errReconcileStore: the recorded authorizations could not be read (not the chain).
 var errReconcileStore = errors.New("RECONCILE_STORE")
 
-// reconciliation is the Host's reconciliation on this local chain
+// reconciliation is the Host's reconciliation on this chain
 // (docs/commercial-p2-host.md 7; AE1 acceptance 18): every confirmed
 // transfer out of the payer wallets against every authorization the Store
 // recorded as signed.
@@ -173,7 +264,7 @@ func (p *payments) reconciliation(ctx context.Context, st *store.Store, wallets 
 	}
 	token, _ := eth.ParseAddress(p.cfg.Token)
 	t := reconcile.Token{RPC: p.rpc, Address: token, Confirmations: p.cfg.Confirmations, FromBlock: p.cfg.TokenFromBlock}
-	return t.Report(ctx, "local_anvil", p.cfg.ChainID, wallets, known, now) // P2-a: openPayments took a local anvil only
+	return t.Report(ctx, p.cfg.Environment, p.cfg.ChainID, wallets, known, now) // checkChain: local_anvil is an anvil, base_sepolia is not
 }
 
 // payMargin: no new step this close to valid_before; more than the shop's

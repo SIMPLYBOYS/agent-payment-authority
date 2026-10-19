@@ -499,3 +499,23 @@ func TestConcurrentWhileUnmined(t *testing.T) {
 		t.Fatalf("gas nonce %d -> %d, payTo %d", before, s.gasNonce(), s.balance(payTo))
 	}
 }
+
+// DailyTxCap (docs/commercial-p2b.md B3, P2b-D5): one transfer a day here;
+// the second payment is answered 402 settlement_daily_cap and sends
+// nothing; the first one asked again is the same settlement, not refused.
+func TestDailyTxCap(t *testing.T) {
+	s := newChainShop(t, 1)
+	s.st.cfg.DailyTxCap = 1
+	h := s.header("kr-market", s.auth(500000), nil)
+	if rec, _ := s.get("kr-market", h); rec.Code != 200 {
+		t.Fatalf("first: %d %s", rec.Code, rec.Body)
+	}
+	before := s.gasNonce()
+	rec, sr := s.get("kr-market", s.header("kr-market", s.auth(500000), nil))
+	if rec.Code != 402 || sr.Success || sr.ErrorReason != "settlement_daily_cap" || s.gasNonce() != before || s.balance(payTo) != 500000 {
+		t.Fatalf("second: %d %+v, gas nonce %d -> %d", rec.Code, sr, before, s.gasNonce())
+	}
+	if rec, _ := s.get("kr-market", h); rec.Code != 200 {
+		t.Fatalf("the first again: %d", rec.Code)
+	}
+}

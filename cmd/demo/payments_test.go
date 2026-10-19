@@ -18,7 +18,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/keytool"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
@@ -60,7 +62,7 @@ func TestPaymentsConfigRefused(t *testing.T) {
 		cs.change(c)
 		raw, _ := json.Marshal(c)
 		os.WriteFile(path, raw, 0o600)
-		if _, _, err := openPayments(t.Context(), path, "http://127.0.0.1:2", wallClock, io.Discard); err == nil || !strings.Contains(err.Error(), cs.want) {
+		if _, _, err := openPayments(t.Context(), path, "http://127.0.0.1:2", wallClock, noPass, io.Discard); err == nil || !strings.Contains(err.Error(), cs.want) {
 			t.Errorf("%s: %v, want %q", name, err, cs.want)
 		}
 	}
@@ -125,7 +127,7 @@ func TestPaymentCapabilityStated(t *testing.T) {
 			t.Errorf("healthz %q, want %q", h.PaymentCapability, want)
 		}
 	}
-	on, off := &api{payments: true}, &api{}
+	on, off := &api{payCap: LocalAnvil}, &api{}
 	if on.capability() != LocalAnvil || off.capability() != "unavailable" || on.approvalsCapability() != LocalAnvil || off.approvalsCapability() != "not_enabled" {
 		t.Fatal("capability")
 	}
@@ -211,5 +213,144 @@ func TestP2ShippedCatalog(t *testing.T) {
 	raw, _ := os.ReadFile("testdata/policy/m1-demo-profile.json")
 	if p, err := policy.LoadProfile(raw); err != nil || checkDelegations(scs, p) != nil {
 		t.Fatalf("profile: %v", err)
+	}
+}
+
+func noPass() ([]byte, error) { return nil, errors.New("no terminal in a test") }
+
+// testnetConfig is a base_sepolia payments.json that passes the file's
+// rules (docs/commercial-p2b.md B3).
+func testnetConfig(priv, sock, keys, rpc string) map[string]any {
+	return map[string]any{"environment": "base_sepolia", "rpc": rpc, "chain_id": 84532, "confirmations": 2,
+		"token": "0x036cbd53842c5426634e7929541ec2318f3dcf7e", "token_name": "USDC", "token_version": "2", "token_from_block": 100,
+		"pay_to": "0x" + strings.Repeat("3", 40), "budget_contract": "0x" + strings.Repeat("4", 40), "policy_ttl": 600, "zkbudget": "zkbudget",
+		"zk_setup_dir": "zk", "dir": priv, "relayer_socket": sock, "shop_key_dir": keys, "shop_daily_tx_cap": 4,
+		"delegations": map[string]string{"consumer-a": "dlg-ta@1"}}
+}
+
+// base_sepolia's rules, before anything is opened: no anvil key, an https
+// node, chain 84532, apa-relayer and the shop's key file, 2 confirmations,
+// the caps and a start block; and any environment's policy_ttl at most 600.
+func TestTestnetConfigRefused(t *testing.T) {
+	dir := t.TempDir()
+	priv := filepath.Join(dir, "p2")
+	os.Mkdir(priv, 0o700)
+	path := filepath.Join(dir, "payments.json")
+	for name, cs := range map[string]struct {
+		change func(map[string]any)
+		want   string
+	}{
+		"another environment": {func(c map[string]any) { c["environment"] = "base_mainnet" }, "local_anvil or base_sepolia"},
+		"anvil keys": {func(c map[string]any) {
+			c["anvil_keys"] = map[string]int{"relayer_gas": 3, "issuer": 1, "policy": 2, "shop_gas": 4}
+		}, "no anvil key"},
+		"an http node":        {func(c map[string]any) { c["rpc"] = "http://sepolia.base.org" }, "https URL"},
+		"a node with a login": {func(c map[string]any) { c["rpc"] = "https://user:secret@sepolia.base.org" }, "without user info"},
+		"another chain":       {func(c map[string]any) { c["chain_id"] = 8453 }, "is chain 84532"},
+		"one confirmation":    {func(c map[string]any) { c["confirmations"] = 1 }, "at least 2 confirmations"},
+		"no shop cap":         {func(c map[string]any) { delete(c, "shop_daily_tx_cap") }, "shop_daily_tx_cap"},
+		"no start block":      {func(c map[string]any) { c["token_from_block"] = 0 }, "token_from_block"},
+		"no apa-relayer":      {func(c map[string]any) { delete(c, "relayer_socket") }, "needs relayer_socket"},
+		"no shop key":         {func(c map[string]any) { delete(c, "shop_key_dir") }, "needs relayer_socket (apa-relayer) and shop_key_dir"},
+		"a long policy ttl":   {func(c map[string]any) { c["policy_ttl"] = 601 }, "policy_ttl is 1 to 600"},
+		"otherwise good":      {func(c map[string]any) {}, "apa-relayer on"}, // the rules pass: the relayer is asked next
+	} {
+		c := testnetConfig(priv, filepath.Join(dir, "none.sock"), dir, "https://sepolia.base.org")
+		cs.change(c)
+		raw, _ := json.Marshal(c)
+		os.WriteFile(path, raw, 0o600)
+		if _, _, err := openPayments(t.Context(), path, "http://127.0.0.1:2", wallClock, noPass, io.Discard); err == nil || !strings.Contains(err.Error(), cs.want) {
+			t.Errorf("%s: %v, want %q", name, err, cs.want)
+		}
+	}
+}
+
+// relayerStub serves apa-relayer's health for chain 84532 and contract.
+func relayerStub(t *testing.T, contract string) string {
+	t.Helper()
+	d, err := os.MkdirTemp("", "dr") // short: a socket path is at most 104 bytes
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(d) })
+	sock := filepath.Join(d, "r")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Skip("no Unix sockets here:", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- budget.Serve(ctx, ln, budget.Handler(nil, budget.Health{State: "ready", ChainID: 84532, Contract: contract}, []uint32{uint32(os.Getuid())}, func(string) {}))
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+	return sock
+}
+
+// nodeStub answers eth_chainId 84532 and web3_clientVersion client.
+func nodeStub(t *testing.T, client string) string {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Method string }
+		json.NewDecoder(r.Body).Decode(&req)
+		res := `"0x14a34"`
+		if req.Method == "web3_clientVersion" {
+			res = `"` + client + `"`
+		}
+		io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":`+res+`}`)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// Opened on a testnet: apa-relayer ready for the same chain and budget, a
+// node that is not an anvil, the shop's key under its own label and equal
+// to pay_to; the capability is base_sepolia and the shop has its cap.
+func TestTestnetPaymentsOpen(t *testing.T) {
+	testnetOnLoopback = true // the stub node is http
+	defer func() { testnetOnLoopback = false }()
+	dir := t.TempDir()
+	priv := filepath.Join(dir, "p2")
+	os.Mkdir(priv, 0o700)
+	keys := filepath.Join(dir, "k")
+	os.MkdirAll(filepath.Join(keys, "keys"), 0o700)
+	os.Chmod(keys, 0o700)
+	const pass = "a long enough passphrase"
+	shopAddr, err := keytool.Keygen(keys, keytool.ShopLabel, "shop", func() ([]byte, error) { return []byte(pass), nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract := "0x" + strings.Repeat("4", 40)
+	sock := relayerStub(t, contract)
+	path := filepath.Join(dir, "payments.json")
+	open := func(rpc string, change func(map[string]any), p string) (*payments, error) {
+		c := testnetConfig(priv, sock, keys, rpc)
+		c["pay_to"] = shopAddr
+		change(c)
+		raw, _ := json.Marshal(c)
+		os.WriteFile(path, raw, 0o600)
+		pay, _, err := openPayments(t.Context(), path, "http://127.0.0.1:2", wallClock, func() ([]byte, error) { return []byte(p), nil }, io.Discard)
+		return pay, err
+	}
+	same := func(map[string]any) {}
+	if _, err := open(nodeStub(t, "anvil/v1.8.3"), same, pass); err == nil || !strings.Contains(err.Error(), "answers as a local anvil") {
+		t.Fatalf("a local anvil as the testnet: %v", err)
+	}
+	geth := nodeStub(t, "Geth/v1.14")
+	if _, err := open(geth, func(c map[string]any) { c["budget_contract"] = "0x" + strings.Repeat("5", 40) }, pass); err == nil || !strings.Contains(err.Error(), "not ready for chain") {
+		t.Fatalf("a relayer for another budget: %v", err)
+	}
+	if _, err := open(geth, same, pass+"x"); err == nil || !strings.Contains(err.Error(), "wrong passphrase") {
+		t.Fatalf("a wrong passphrase: %v", err)
+	}
+	if _, err := open(geth, func(c map[string]any) { c["pay_to"] = "0x" + strings.Repeat("3", 40) }, pass); err == nil || !strings.Contains(err.Error(), "not pay_to") {
+		t.Fatalf("a shop key that is not pay_to: %v", err)
+	}
+	pay, err := open(geth, same, pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pay.Close()
+	if pay.cfg.Environment != BaseSepolia {
+		t.Fatalf("environment %q", pay.cfg.Environment)
 	}
 }

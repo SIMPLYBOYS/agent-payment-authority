@@ -36,6 +36,8 @@ type Config struct {
 	// chain), counted per nonce: a transaction signed again at its own
 	// nonce is not another one (docs/commercial-p2b.md B2, P2b-D5).
 	DailyTxCap uint64
+	// Poll: how often a call checks its receipt (0: 200 ms, a local chain).
+	Poll time.Duration
 }
 
 // Keys are the relayer's three test keys (P2-D2): gas sends, the issuer
@@ -127,7 +129,11 @@ func Open(ctx context.Context, cfg Config, keys Keys, rpc *eth.Client, path stri
 		db.Close()
 		return nil, err
 	}
-	return &Relayer{cfg: cfg, keys: keys, rpc: rpc, db: db, clock: clock, poll: 200 * time.Millisecond, wait: 2 * time.Minute}, nil
+	r := &Relayer{cfg: cfg, keys: keys, rpc: rpc, db: db, clock: clock, poll: 200 * time.Millisecond, wait: 2 * time.Minute}
+	if cfg.Poll > 0 {
+		r.poll = cfg.Poll
+	}
+	return r, nil
 }
 
 func (r *Relayer) Close() error { return r.db.Close() }

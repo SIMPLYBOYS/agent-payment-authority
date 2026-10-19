@@ -61,7 +61,7 @@ type approvals struct {
 	st     approvalStore
 	signer approvalSigner
 	source string // device | virtual: what the operator says verifies (a label, not evidence)
-	pays   bool   // P2-a: --payments, a person's approval is paid (sources say local_anvil)
+	payCap string // P2: --payments' environment, a person's approval is paid (sources say it); "" without
 	out    io.Writer
 	mu     sync.Mutex // ponytail: one approval operation at a time on this host; per-session locks if it ever matters
 }
@@ -75,8 +75,8 @@ type sources struct {
 
 func (h *approvals) sources() sources {
 	payment := "disabled"
-	if h.pays {
-		payment = LocalAnvil
+	if h.payCap != "" {
+		payment = h.payCap
 	}
 	return sources{Agent: "fake", Authenticator: h.source, Payment: payment}
 }
@@ -685,8 +685,8 @@ func (a *api) enrollRelay(w http.ResponseWriter, r *http.Request) {
 // approvalsCapability: a person's approval pays with --payments (P2-a);
 // otherwise it is not a payment.
 func (a *api) approvalsCapability() string {
-	if a.payments {
-		return LocalAnvil
+	if a.payCap != "" {
+		return a.payCap
 	}
 	return paycontract.PaymentNotEnabled
 }

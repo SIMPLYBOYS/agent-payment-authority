@@ -34,6 +34,13 @@ type SettleConfig struct {
 	TokenVersion  string
 	PayTo         eth.Address // the offers' payTo
 	Confirmations uint64      // before anything is delivered (P2-D6)
+	// DailyTxCap bounds the transfers sent a UTC day (0: none, a local
+	// chain), counted per transaction nonce: a stuck transfer replaced at
+	// its nonce is not another one (docs/commercial-p2b.md B3, P2b-D5).
+	DailyTxCap uint64
+	// Poll and Wait: how often and how long one request checks its
+	// transfer (0: 200 ms and 20 s, an instant local chain).
+	Poll, Wait time.Duration
 }
 
 // Settler verifies and settles payments and decides when a resource may be
@@ -93,7 +100,14 @@ func OpenSettler(ctx context.Context, cfg SettleConfig, gas *eth.Key, rpc *eth.C
 		db.Close()
 		return nil, err
 	}
-	return &Settler{cfg: cfg, gas: gas, rpc: rpc, db: db, clock: clock, poll: 200 * time.Millisecond, wait: 20 * time.Second}, nil
+	st := &Settler{cfg: cfg, gas: gas, rpc: rpc, db: db, clock: clock, poll: 200 * time.Millisecond, wait: 20 * time.Second}
+	if cfg.Poll > 0 {
+		st.poll = cfg.Poll
+	}
+	if cfg.Wait > 0 {
+		st.wait = cfg.Wait
+	}
+	return st, nil
 }
 
 func (s *Settler) Close() error { return s.db.Close() }
@@ -199,6 +213,10 @@ func (s *Settler) Pay(ctx context.Context, o offer, payload json.RawMessage) Out
 	}
 	if err := s.settleOpen(ctx); err != nil {
 		return Outcome{Kind: "pending", Reason: "settlement_store_unavailable", Response: resp}
+	}
+	if r := s.capped(ctx); r != "" {
+		resp.ErrorReason = r // nothing written or sent: the authorization stays unused until it expires
+		return Outcome{Kind: "failed", Reason: r, Response: resp}
 	}
 	raw, hash, txNonce, fees, r := s.prepare(ctx, data)
 	if r != "" {
@@ -413,6 +431,23 @@ func (s *Settler) prepare(ctx context.Context, data []byte) (raw, hash []byte, n
 		return unavailable()
 	}
 	return raw, hash, nonce, fees, ""
+}
+
+// capped refuses a new transfer once today's are DailyTxCap: the nonces
+// first used today.
+func (s *Settler) capped(ctx context.Context) string {
+	if s.cfg.DailyTxCap == 0 {
+		return ""
+	}
+	var n uint64
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT tx_nonce FROM settlements GROUP BY tx_nonce HAVING min(created_at) / 86400 = ?)`,
+		s.clock()/86400).Scan(&n); err != nil {
+		return "settlement_store_unavailable"
+	}
+	if n >= s.cfg.DailyTxCap {
+		return "settlement_daily_cap"
+	}
+	return ""
 }
 
 // settleOpen sends every unfinished transfer again (the same ones) and

@@ -1095,12 +1095,24 @@ MUTATIONS = [
      '\t\treturn signer.Refusal(e.Code)', '\t\treturn errors.New(e.Code)', 'TestSocketCarriesTheRelayersAnswers'),
     ('P2-b B2: apa-relayer serves without a daily cap', 'cmd/apa-relayer/main.go',
      '|| c.DailyTxCap == 0 {', '{', 'TestServe'),
+    ('P2-b B3: a testnet node over http', 'cmd/demo/payments.go',
+     'u.Scheme != "https" && !(testnetOnLoopback && u.Scheme == "http")', 'false', 'TestTestnetConfigRefused'),
+    ('P2-b B3: a testnet with anvil keys', 'cmd/demo/payments.go',
+     '\t\tcase c.AnvilKeys != nil:', '\t\tcase false:', 'TestTestnetConfigRefused'),
+    ('P2-b B3: a policy_ttl past 600 s', 'cmd/demo/payments.go',
+     'if c.PolicyTTL == 0 || c.PolicyTTL > 600 {', 'if c.PolicyTTL == 0 {', 'TestTestnetConfigRefused'),
+    ('P2-b B3: a local anvil taken for the testnet', 'cmd/demo/payments.go',
+     '\tcase anvil == nil:\n', '\tcase false:\n', 'TestTestnetPaymentsOpen'),
+    ('P2-b B3: a shop key that is not pay_to', 'cmd/demo/payments.go',
+     'if keys[3].Addr != payTo {', 'if false {', 'TestTestnetPaymentsOpen'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    ('P2-b B3: the shop sends past its daily cap', 'internal/merchant/settle.go',
+     'if n >= s.cfg.DailyTxCap {', 'if false && n >= s.cfg.DailyTxCap {', 'internal/merchant:TestDailyTxCap'),
     ('P2-b B2: the daily transaction cap is not enforced', 'internal/budget/relayer.go',
      'if n >= r.cfg.DailyTxCap {', 'if false && n >= r.cfg.DailyTxCap {', 'internal/budget:TestDailyTxCap'),
     ('P2 H5 review: a report of no block reads as zero', 'internal/reconcile/reconcile.go',

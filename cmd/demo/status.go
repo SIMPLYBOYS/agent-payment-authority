@@ -162,8 +162,8 @@ func currentBuild() buildInfo {
 
 // capability is the host's payment capability: LocalAnvil with --payments.
 func (a *api) capability() string {
-	if a.payments {
-		return LocalAnvil
+	if a.payCap != "" {
+		return a.payCap
 	}
 	return "unavailable"
 }

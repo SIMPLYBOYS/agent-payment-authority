@@ -34,6 +34,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/keytool"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
@@ -312,7 +313,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		if err := paymentSigner(*approvalsSigner); err != nil {
 			return err
 		}
-		if pay, shop, err = openPayments(ctx, *paymentsPath, "http://"+addr, d.clock, d.out); err != nil {
+		if pay, shop, err = openPayments(ctx, *paymentsPath, "http://"+addr, d.clock, shopPassphrase, d.out); err != nil {
 			return err
 		}
 		defer pay.Close() // after the worker (stopped with expiry) and the Store
@@ -400,12 +401,12 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		expiry.Go(func() { pay.run(runCtx, st, *approvalsSigner, d.clock) })
 	}
 	var runs sync.WaitGroup
-	capability := "unavailable"
+	capability, payCap := "unavailable", ""
 	if pay != nil {
-		capability = LocalAnvil
+		capability, payCap = pay.cfg.Environment, pay.cfg.Environment
 	}
 	mux := newMux(shop, capability)
-	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: runner != nil && !live, out: d.out, payments: pay != nil}
+	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: runner != nil && !live, out: d.out, payCap: payCap}
 	if pay != nil {
 		var wallets []eth.Address
 		for _, w := range regCfg.Wallets {
@@ -454,7 +455,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	if *approvalsSigner != "" {
 		_, port, _ := net.SplitHostPort(addr)
 		ui.alias = "localhost:" + port
-		ui.approve = &approvals{st: st, signer: signerclient.NewApprovals(*approvalsSigner), source: *authSource, out: d.out, pays: pay != nil}
+		ui.approve = &approvals{st: st, signer: signerclient.NewApprovals(*approvalsSigner), source: *authSource, out: d.out, payCap: payCap}
 		if d.onApprovals != nil {
 			d.onApprovals(ui.approve)
 		}
@@ -464,7 +465,10 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 			state = ans.Reply.State
 		}
 		payState := "payment disabled"
-		if pay != nil {
+		switch {
+		case pay != nil && pay.cfg.Environment == BaseSepolia:
+			payState = "payments on the Base Sepolia testnet (chain " + strconv.FormatUint(pay.cfg.ChainID, 10) + ", test USDC, apa-relayer and caps)"
+		case pay != nil:
 			payState = "payments on local chain " + strconv.FormatUint(pay.cfg.ChainID, 10) + " (P2-a, anvil test keys)"
 		}
 		fmt.Fprintf(d.out, "demo: human approval (A2) on http://%s through %s (signer %s); authenticator source %s; %s\n", ui.alias, *approvalsSigner, state, *authSource, payState)
@@ -614,9 +618,19 @@ func lockDB(dbPath string) (func(), error) {
 	return func() { f.Close() }, nil // closing releases the lock
 }
 
-// LocalAnvil is the payment capability with --payments (P2-a): payments on
-// a local anvil, with test keys and test USDC.
+// LocalAnvil is the payment capability with --payments on a local anvil
+// (P2-a): test keys and test USDC. BaseSepolia (payments.go) is the testnet's.
 const LocalAnvil = "local_anvil"
+
+// shopPassphrase asks the shop key's passphrase on this terminal (P2b-D4).
+func shopPassphrase() ([]byte, error) {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return nil, errors.New("it is read from a terminal (/dev/tty), and there is none")
+	}
+	defer tty.Close()
+	return keytool.ReadPassphrase(tty, "demo", "shop key passphrase: ")
+}
 
 // newMux serves /healthz and the shop; capability is unavailable or
 // LocalAnvil.

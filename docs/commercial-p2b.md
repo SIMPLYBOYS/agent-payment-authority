@@ -75,6 +75,16 @@ B1 的 review（04006c2、0c7ac6b）：APPROVE，兩項 Important 已處理：
 - demo：`payments.json` 的 `relayer_socket`（選填）指向 `apa-relayer`；開始前先確認它 ready，且鏈與預算合約和設定相同，否則不啟動。
 - 測試：socket 傳遞答案與拒絕、拒絕別的 uid、`apa-relayer serve` 的拒絕與實際啟動（以只回 `eth_chainId` 的假 RPC）；anvil 上的 `TestDailyTxCap`；`TestPaidOnAnvil` 改經 socket 呼叫 relayer，仍付款、交付、對帳 0。
 
+**B3a `base_sepolia` 環境（Go 端）**（完成，待 review）：
+- `payments.json` 的 `environment`：`local_anvil`（預設，P2-a 的檔案不用改）或 `base_sepolia`。
+- `base_sepolia` 的規則（什麼都還沒打開前就檢查）：鏈 84532；RPC 是 `https`、不含帳密；不接受任何 anvil 金鑰；必須有 `relayer_socket`（`apa-relayer`）與 `shop_key_dir`；確認數至少 2；`shop_daily_tx_cap`；`token_from_block`（部署區塊）。任何環境的 `policy_ttl` 都是 1–600 秒。
+- 鏈：`eth_chainId` 必須相符；`local_anvil` 必須是 anvil，`base_sepolia` **不能**是 anvil（本機鏈冒充 testnet 一律拒絕）。
+- 商店金鑰：`shop_key_dir/keys/shop.key`，啟動時在終端機問密語（`demo shop key passphrase:`），必須等於 `pay_to`（P2b-D3：商店自己付 gas、自己收款）。
+- 商店每日上限：`merchant.SettleConfig.DailyTxCap`，以交易 nonce 第一次使用的日子計；超過回 402 `settlement_daily_cap`，什麼都不送（付款工作記為驗證失敗，不再付）。testnet 上商店每秒查一次、最多等 2 分鐘；`apa-relayer` 每秒查一次。
+- `payment_capability` 與 approvals 的 `sources.payment` 就是環境值；對帳報告的 `environment` 也是。
+- 測試：`TestTestnetConfigRefused`（12 種）、`TestTestnetPaymentsOpen`（anvil 冒充、relayer 是別的預算合約、密語錯、商店金鑰不是 pay_to、正常開啟）、merchant 的 `TestDailyTxCap`（anvil）。
+- **B3b**（下一段）：網頁與 Unity 對 `base_sepolia` 的文字與橫幅。
+
 ## 5 要你決定的事
 
 | # | 問題 | 選項 | 建議 |

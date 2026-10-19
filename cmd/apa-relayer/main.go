@@ -174,7 +174,7 @@ func serve(ctx context.Context, dir string, passphrase func() ([]byte, error), o
 		return fmt.Errorf("the chain at rpc is not chain %d (or did not answer)", c.ChainID)
 	}
 	r, err := budget.Open(ctx, budget.Config{ChainID: c.ChainID, Contract: contract, Confirmations: c.Confirmations, PolicyTTL: c.PolicyTTL,
-		Zkbudget: c.Zkbudget, SetupDir: c.ZkSetupDir, DailyTxCap: c.DailyTxCap}, keys, rpc, filepath.Join(dir, "relayer.db"), func() uint64 { return uint64(time.Now().Unix()) })
+		Zkbudget: c.Zkbudget, SetupDir: c.ZkSetupDir, DailyTxCap: c.DailyTxCap, Poll: time.Second}, keys, rpc, filepath.Join(dir, "relayer.db"), func() uint64 { return uint64(time.Now().Unix()) })
 	if err != nil {
 		return err
 	}
