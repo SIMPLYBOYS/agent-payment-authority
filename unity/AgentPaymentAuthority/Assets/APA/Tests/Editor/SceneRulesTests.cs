@@ -100,4 +100,30 @@ public class SceneRulesTests
                 Assert.IsFalse(l.StartsWith("[anim]"), "an event's label is not a display segment: " + l);
             }
     }
+
+    // P2 (docs/commercial-p2-host.md 5): the payment's phases are known and
+    // say what is true of them: ASCII, never "no payment capability".
+    [Test]
+    public void PaymentPhasesAreKnownAndSayTheHostPays()
+    {
+        string[] phases = { "allowed", "approved", "paying", "confirming", "paid", "delivered", "delivery_failed", "not_paid", "payment_review" };
+        foreach (var p in phases)
+        {
+            CollectionAssert.Contains(ProjectionState.Phases, p);
+            var l = SceneRules.Label(p, 7, "", "");
+            foreach (var ch in l) Assert.Less((int)ch, 128, l);
+            StringAssert.Contains("(#7)", l);
+            StringAssert.DoesNotContain("no payment", l);
+            StringAssert.DoesNotStartWith("unknown", l);
+        }
+        // Each step of one payment is never a new purchase at the counter.
+        var s = new ProjectionState();
+        int seq = 3;
+        foreach (var p in new[] { "allowed", "paying", "paying", "confirming", "paid" })
+        {
+            s.Apply(new ProjectionMessage { v = 1, gen = 1, consumer = "consumer-a", task_id = "task-a", seq = seq, phase = p, cause_seq = seq, animate = true }, out _);
+            if (p != "allowed") Assert.IsFalse(s.Browse, p + " #" + seq + " browses");
+            seq++;
+        }
+    }
 }

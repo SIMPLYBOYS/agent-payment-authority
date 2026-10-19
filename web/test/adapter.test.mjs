@@ -124,7 +124,7 @@ test("the Unity projection carries no token and follows the committed snapshot",
   const { task, events } = snapshot("task-a", askEvents());
   A.commit(s, gen, task, events);
   const m = A.projection(s, false);
-  assert.deepEqual(Object.keys(m).sort(), ["animate", "cause_seq", "clear", "consumer", "gen", "phase", "reason", "seq", "task_end", "task_id", "v", "verdict"]);
+  assert.deepEqual(Object.keys(m).sort(), ["animate", "cause_seq", "clear", "consumer", "gen", "payments", "phase", "reason", "seq", "task_end", "task_id", "v", "verdict"]);
   assert.equal(m.cause_seq, 3, "the Ask's POLICY_DECIDED");
   assert.equal(m.task_end, "");
   assert.equal(m.v, A.BRIDGE_VERSION);

@@ -452,4 +452,30 @@ public class ShopSceneTests
         yield return null;
         Assert.AreEqual("", view.LabelOf("consumer-a"));
     }
+
+    // P2: a payment in progress waits at the counter, a delivered one leaves;
+    // the banner says payments only when the page says the host pays.
+    [UnityTest]
+    public IEnumerator APaymentWaitsAtTheCounterAndLeavesDelivered()
+    {
+        string Banner() => Object.FindObjectsByType<TextMesh>(FindObjectsSortMode.None).Select(t => t.text).First(t => t.Contains(" - ") && (t.StartsWith("M1") || t.StartsWith("P2")));
+        StringAssert.StartsWith("M1 / no payment", Banner());
+        string Pay(int seq, string phase) => D2(1, "consumer-a", seq, phase, seq).Replace("}", ",\"payments\":\"local_anvil\"}");
+        bridge.Receive(Pay(3, "allowed"));
+        yield return Arrive("consumer-a");
+        StringAssert.StartsWith("P2-a / local test payments", Banner());
+        foreach (var (seq, phase) in new[] { (5, "paying"), (7, "confirming"), (8, "paid") })
+        {
+            bridge.Receive(Pay(seq, phase));
+            yield return Arrive("consumer-a");
+            Assert.AreEqual(view.Point("consumer-a", ShopView.Counter), view.PositionOf("consumer-a"), phase);
+        }
+        Assert.AreEqual("PAID (#8) - delivery next", view.LabelOf("consumer-a"));
+        bridge.Receive(Pay(10, "delivered"));
+        yield return Arrive("consumer-a");
+        Assert.AreEqual(view.Point("consumer-a", ShopView.Out), view.PositionOf("consumer-a"));
+        bridge.Receive(D2(1, "consumer-a", 11, "delivered", 10)); // a page without the field: no payment said
+        yield return null;
+        StringAssert.StartsWith("M1 / no payment", Banner());
+    }
 }

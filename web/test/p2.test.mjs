@@ -58,7 +58,7 @@ test("P2: without a payment the Allow card is as before", () => {
   assert.equal(c.steps.length, 6);
 });
 
-test("P2: the scene follows the payment; Unity keeps the decision's phase and cause", () => {
+test("P2: the scene follows the payment, and Unity is sent the same phase and its cause", () => {
   const base = allowed();
   for (const [extra, phase] of [
     [[ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED")], "paying"],
@@ -76,10 +76,14 @@ test("P2: the scene follows the payment; Unity keeps the decision's phase and ca
     assert.equal(sc.cause, evs[evs.length - 1].sequence, phase);
     assert.ok(sc.label && !sc.label.includes("未知"), phase);
     const m = A.projection({ snapshot: v, gen: 1 }, false);
-    assert.equal(m.phase, "allowed_unpaid", phase); // Unity's build has no payment phase yet
-    assert.equal(m.cause_seq, 3, phase); // its own event: the decision
+    assert.equal(m.phase, phase);
+    assert.equal(m.cause_seq, sc.cause, phase);
+    assert.ok(!/no payment capability/.test(A.shopLabel(m.phase, m.cause_seq, "", "")), phase);
   }
   assert.equal(A.scene(view(base, undefined)).phase, "allowed_unpaid");
+  const pays = view(base, undefined);
+  pays.task.payment_capability = "local_anvil";
+  assert.equal(A.projection({ snapshot: pays, gen: 1 }, false).phase, "allowed"); // the host will pay it: never "no payment capability"
 });
 
 test("P2: with local_anvil an Allow and a person's approval say the Host pays; a simulated one never", () => {
@@ -93,8 +97,10 @@ test("P2: with local_anvil an Allow and a person's approval say the Host pays; a
     ev(4, "APPROVED", { authorization_method: "webauthn", decision: { reason: "HUMAN_APPROVED" } })];
   const s = { task: { ...v.task, payment_capability: "local_anvil" }, events: asked };
   assert.equal(A.scene(s).label, "本人核准已驗證：由 Host 付款");
+  assert.equal(A.projection({ snapshot: s, gen: 1 }, false).phase, "approved");
   s.task.payment_capability = "not_enabled";
   assert.equal(A.scene(s).label, "本人核准已驗證：未啟用付款，不會取貨");
+  assert.equal(A.projection({ snapshot: s, gen: 1 }, false).phase, "allowed_unpaid");
 });
 
 test("P2: a person's approval says the Host pays only with local_anvil", async () => {

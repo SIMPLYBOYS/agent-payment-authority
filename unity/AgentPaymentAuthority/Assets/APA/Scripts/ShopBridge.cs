@@ -122,6 +122,7 @@ namespace APA
                     viewGen = m.gen;
                     break;
                 case Outcome.Applied:
+                    view.Payments(m.payments == "local_anvil");
                     if (state.Gen == m.gen && m.seq >= 0)
                     {
                         // A new generation without a clear also drops the old one's walks.
@@ -157,6 +158,7 @@ namespace APA
             else if (slotReset) view.Reset(m.consumer);
             if (outcome == Outcome.Applied)
             {
+                view.Payments(m.payments == "local_anvil");
                 var s = scene.Of(m.consumer);
                 int sc = scene.Scene, gen = s.Gen;
                 // rendered only once the customer shows the target, for its

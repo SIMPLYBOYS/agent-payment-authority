@@ -125,6 +125,8 @@ namespace APA
                 case "entered": return Door;
                 case "quoted": case "unknown": return Shelf;
                 case "waiting": case "allowed_unpaid": return Counter;
+                // P2: a payment in progress, or one a person handles, waits at the counter.
+                case "paying": case "confirming": case "paid": case "delivery_failed": case "payment_review": return Counter;
                 default: return Out;
             }
         }
@@ -194,10 +196,20 @@ namespace APA
             ResetAll();
         }
 
+        // Payments: whether the host pays (P2-a, a local anvil), as the last
+        // applied message said; the banner says so.
+        bool payments;
+        public void Payments(bool on)
+        {
+            if (on == payments) return;
+            payments = on;
+            Banner();
+        }
+
         void Banner()
         {
             if (banner == null) return;
-            banner.text = "M1 / no payment - " + layout.title + (UsingPlaceholders ? "   [LimeZu pending: placeholder art]" : "   Art: LimeZu (limezu.itch.io)");
+            banner.text = (payments ? "P2-a / local test payments - " : "M1 / no payment - ") + layout.title + (UsingPlaceholders ? "   [LimeZu pending: placeholder art]" : "   Art: LimeZu (limezu.itch.io)");
         }
 
         // UseLayout: another room. Every customer goes back outside at once,

@@ -568,6 +568,206 @@
      "label": "ALLOW - no payment capability"
     }
    ]
+  },
+  {
+   "name": "P2: an Allow the host pays, through to delivery: one browse, no step is a new purchase",
+   "steps": [
+    {
+     "m": {
+      "phase": "allowed",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 3,
+      "reason": "WITHIN_ALLOW_MAX"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ALLOW (#3) - the host pays"
+    },
+    {
+     "m": {
+      "phase": "paying",
+      "cause_seq": 4,
+      "task_end": "",
+      "seq": 4,
+      "reason": ""
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "PAYING (#4) - reserving and signing"
+    },
+    {
+     "m": {
+      "phase": "paying",
+      "cause_seq": 5,
+      "task_end": "",
+      "seq": 5,
+      "reason": ""
+     },
+     "rule": 4,
+     "browse": false,
+     "label": "PAYING (#5) - reserving and signing"
+    },
+    {
+     "m": {
+      "phase": "confirming",
+      "cause_seq": 7,
+      "task_end": "",
+      "seq": 7,
+      "reason": ""
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "PAYMENT SENT (#7) - waiting for the chain"
+    },
+    {
+     "m": {
+      "phase": "paid",
+      "cause_seq": 8,
+      "task_end": "",
+      "seq": 8,
+      "reason": ""
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "PAID (#8) - delivery next"
+    },
+    {
+     "m": {
+      "phase": "delivered",
+      "cause_seq": 10,
+      "task_end": "",
+      "seq": 10,
+      "reason": ""
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "PAID AND DELIVERED (#10) - leaving with a receipt"
+    }
+   ]
+  },
+  {
+   "name": "P2: a person's approval paid, then not paid",
+   "steps": [
+    {
+     "m": {
+      "phase": "waiting",
+      "cause_seq": 3,
+      "task_end": "",
+      "seq": 3,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ASK (#3) - waiting for a human"
+    },
+    {
+     "m": {
+      "phase": "approved",
+      "cause_seq": 4,
+      "task_end": "",
+      "seq": 4,
+      "reason": "HUMAN_APPROVAL_REQUIRED"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "APPROVED (#4) - the host pays"
+    },
+    {
+     "m": {
+      "phase": "paying",
+      "cause_seq": 5,
+      "task_end": "",
+      "seq": 5,
+      "reason": ""
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "PAYING (#5) - reserving and signing"
+    },
+    {
+     "m": {
+      "phase": "not_paid",
+      "cause_seq": 6,
+      "task_end": "",
+      "seq": 6,
+      "reason": ""
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "NOT PAID (#6) - nothing charged, leaving"
+    }
+   ]
+  },
+  {
+   "name": "P2: paid, then a new purchase at the counter browses again",
+   "steps": [
+    {
+     "m": {
+      "phase": "paid",
+      "cause_seq": 8,
+      "task_end": "",
+      "seq": 8,
+      "reason": ""
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "PAID (#8) - delivery next"
+    },
+    {
+     "m": {
+      "phase": "allowed",
+      "cause_seq": 11,
+      "task_end": "",
+      "seq": 11,
+      "reason": "WITHIN_ALLOW_MAX"
+     },
+     "rule": 1,
+     "browse": true,
+     "label": "ALLOW (#11) - the host pays"
+    },
+    {
+     "m": {
+      "phase": "allowed",
+      "cause_seq": 14,
+      "task_end": "",
+      "seq": 14,
+      "reason": "WITHIN_ALLOW_MAX"
+     },
+     "rule": 2,
+     "browse": true,
+     "label": "ALLOW (#14) - the host pays"
+    }
+   ]
+  },
+  {
+   "name": "P2: a payment for review and a failed delivery stay at the counter",
+   "steps": [
+    {
+     "m": {
+      "phase": "payment_review",
+      "cause_seq": 6,
+      "task_end": "",
+      "seq": 6,
+      "reason": ""
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "PAYMENT REVIEW (#6) - budget reserved, not paid"
+    },
+    {
+     "m": {
+      "phase": "delivery_failed",
+      "cause_seq": 9,
+      "task_end": "",
+      "seq": 9,
+      "reason": ""
+     },
+     "rule": 1,
+     "browse": false,
+     "label": "PAID (#9) - not delivered, a person handles it"
+    }
+   ]
   }
  ]
 }

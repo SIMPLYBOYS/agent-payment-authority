@@ -95,9 +95,7 @@ const pay = (task) => !!task && isPay(task.contract_version); // the pay family:
 export const UNITY_PHASE = { approved: "allowed_unpaid", approval_denied: "denied", superseded: "withdrawn" };
 
 // PAY_PHASE (P2, docs/commercial-p2-host.md 5): a purchase's payment
-// events as the page's phases. Unity has no phase that is true of them
-// (it would say "no payment capability"), so it keeps the decision's
-// phase (UNITY_PAY_PHASE) until its build shows payments.
+// events as phases, the page's and Unity's (its build knows them).
 const PAY_PHASE = { PAYMENT_REQUESTED: "paying", BUDGET_RESERVED: "paying", PAYMENT_SIGNED: "paying", PAYMENT_SUBMITTED: "confirming",
   PAYMENT_SETTLED: "paid", RESOURCE_DELIVERED: "paid", RECEIPT_ISSUED: "delivered", PAYMENT_NOT_SETTLED: "not_paid", PAYMENT_NEEDS_REVIEW: "payment_review" };
 
@@ -151,7 +149,10 @@ export function scene(snapshot) {
   if (!cur && orphanDecision) phase = "unknown";
   const notes = [];
   if (phase === "waiting" && cur.closed) phase = CLOSED_PHASE[cur.closed] || phase;
-  const decided = phase; // Unity's phase while a payment runs
+  // P2 (local_anvil): the host pays an Allow and a person's approval.
+  const pays = !!task && task.payment_capability === "local_anvil";
+  if (pays && phase === "allowed_unpaid") phase = "allowed";
+  const paidApproval = pays && phase === "approved" && cur.method === "webauthn";
   if (cur && cur.pay) phase = cur.pay;
   if (phase === "waiting") {
     const p = (task.purchases || []).find((x) => x.purchase_order_id === shown);
@@ -170,22 +171,20 @@ export function scene(snapshot) {
     // apa.pay.v1 (P1-a): the simulated approval's outcomes.
     approved: "已核准（模擬）：未啟用付款，不會取貨", approval_denied: "核准者拒絕：離店", superseded: "報價已改變：需要重新請購",
     // P2: the payment.
+    allowed: "Allow：在委託範圍內，由 Host 付款",
     paying: "付款中：預算預留與簽名", confirming: "已送出，等待鏈上確認（不會自動再付）", paid: "已付款，準備交付", delivered: "已付款、已交付",
     delivery_failed: "已付款，交付失敗：待人工處理", not_paid: "未付款（沒有花錢）：離店", payment_review: "待人工處理：預算已預留但未付款",
   };
-  const pays = !!task && task.payment_capability === "local_anvil"; // P2-a: a person's approval is paid
   if (pay(task)) labels.waiting = simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；" + (pays ? "核准後由 Host 付款）" : "不會付款）");
   if (cur && CREDENTIAL_CLOSED[cur.closedReason]) labels.withdrawn = CREDENTIAL_CLOSED[cur.closedReason] + "：離店"; // C2: not the task's cancellation
   if (cur && cur.method === "webauthn") labels.approved = pays ? "本人核准已驗證：由 Host 付款" : "本人核准已驗證：未啟用付款，不會取貨"; // the record's own method (review R4)
   const d = cur && cur.decision ? cur.decision : null;
   const causeOf = { entered: startedSeq, quoted: cur && cur.proposedSeq, waiting: cur && cur.decidedSeq, denied: cur && cur.decidedSeq,
-    allowed_unpaid: cur && cur.decidedSeq, expired: cur && cur.closedSeq, withdrawn: cur && cur.closedSeq,
+    allowed_unpaid: cur && cur.decidedSeq, allowed: cur && cur.decidedSeq, expired: cur && cur.closedSeq, withdrawn: cur && cur.closedSeq,
     approved: cur && cur.closedSeq, approval_denied: cur && cur.closedSeq, superseded: cur && cur.closedSeq };
-  const seqOr0 = (n) => (Number.isInteger(n) && n > 0 ? n : 0);
   const cause = cur && cur.pay ? cur.paySeq : causeOf[phase];
-  // decided and decidedCause: the phase Unity is sent while a payment runs, and its event.
   return { phase, label: labels[phase] || UNKNOWN, notes, po: shown, verdict: d ? d.policy_verdict || "" : "", reason: d ? d.reason || null : null,
-    cause: seqOr0(cause), end: firstEnd, decided, decidedCause: seqOr0(causeOf[decided]) };
+    cause: Number.isInteger(cause) && cause > 0 ? cause : 0, end: firstEnd, unity: paidApproval ? "approved" : UNITY_PHASE[phase] || phase };
 }
 
 // fresh returns the sequences not seen before and marks them seen: an event
@@ -277,8 +276,9 @@ export function projection(state, animate) {
   const seq = Math.max(task.as_of_sequence, last);
   return {
     v: BRIDGE_VERSION, gen: state.gen, clear: false, consumer: task.consumer_id, task_id: task.task_id,
-    seq, phase: UNITY_PHASE[sc.decided] || sc.decided, verdict: sc.verdict, reason: sc.phase === "approval_denied" ? "APPROVER_DENIED" : sc.reason || "", animate: !!animate,
-    cause_seq: sc.decidedCause > 0 && sc.decidedCause <= seq ? sc.decidedCause : 0, task_end: sc.end,
+    seq, phase: sc.unity, verdict: sc.verdict, reason: sc.phase === "approval_denied" ? "APPROVER_DENIED" : sc.reason || "", animate: !!animate,
+    cause_seq: sc.cause > 0 && sc.cause <= seq ? sc.cause : 0, task_end: sc.end,
+    payments: task.payment_capability === "local_anvil" ? "local_anvil" : "", // P2: the banner
   };
 }
 
@@ -292,7 +292,9 @@ export const sameShown = (sent, rep) => !!sent && !!rep && rep.gen === sent.gen 
 // The same table as Unity's SceneRules (Projection.cs); both are tested with
 // testdata/demo/scene-transitions.json. The page uses it only to explain the
 // move in words; Unity decides its own moves from the message.
-const COUNTER = new Set(["waiting", "denied", "allowed_unpaid"]);
+// The decisions at the counter; a payment's own phases stand there too but
+// are not decisions (each step has a new cause, never a new purchase).
+const COUNTER = new Set(["waiting", "denied", "allowed_unpaid", "allowed", "approved"]);
 const labelKind = (phase, end) => (phase === "waiting" && end === "timed_out" ? "waiting/timed_out" : phase);
 const fixedCode = (r) => (typeof r === "string" && /^[A-Z0-9_]{1,40}$/.test(r) ? r : "");
 
@@ -310,13 +312,24 @@ export function shopLabel(phase, cause, end, reason) {
       return "DENY" + (why ? " (" + why + ")" : "") + " - leaving";
     }
     case "allowed_unpaid": return "ALLOW - no payment capability";
+    case "allowed": return "ALLOW" + n + " - the host pays";
+    case "approved": return "APPROVED" + n + " - the host pays";
+    case "paying": return "PAYING" + n + " - reserving and signing";
+    case "confirming": return "PAYMENT SENT" + n + " - waiting for the chain";
+    case "paid": return "PAID" + n + " - delivery next";
+    case "delivered": return "PAID AND DELIVERED" + n + " - leaving with a receipt";
+    case "delivery_failed": return "PAID" + n + " - not delivered, a person handles it";
+    case "not_paid": return "NOT PAID" + n + " - nothing charged, leaving";
+    case "payment_review": return "PAYMENT REVIEW" + n + " - budget reserved, not paid";
     case "expired": return "ask expired" + n + " - leaving";
     case "withdrawn": return "ask withdrawn" + n + " - leaving";
     default: return "unknown state" + n;
   }
 }
 
-const BASIS = { entered: "進店事件", quoted: "請購", waiting: "裁決", denied: "裁決", allowed_unpaid: "裁決", expired: "到期", withdrawn: "撤回" };
+const BASIS = { entered: "進店事件", quoted: "請購", waiting: "裁決", denied: "裁決", allowed_unpaid: "裁決", expired: "到期", withdrawn: "撤回",
+  allowed: "裁決", approved: "本人核准", paying: "付款", confirming: "付款送出", paid: "鏈上確認", delivered: "交付與收據", delivery_failed: "交付失敗",
+  not_paid: "未付款", payment_review: "付款待人工處理" };
 
 // transition compares a projection m with the target t the shop was last
 // given (null: nothing yet), first match wins: 1 another phase; 2 the same
@@ -338,7 +351,7 @@ export function transition(t, m) {
   else {
     const anim = [...(browse ? ["選商品"] : []), ...(COUNTER.has(phase) ? ["到櫃檯"] : [])];
     const parts = [...(anim.length ? ["展示動畫：" + anim.join(" → ") + "（沒有獨立事件）"] : []),
-      ...(phase === "entered" ? ["進店"] : []), ...(["denied", "expired", "withdrawn"].includes(phase) ? ["離店"] : [])];
+      ...(phase === "entered" ? ["進店"] : []), ...(["denied", "expired", "withdrawn", "delivered", "not_paid"].includes(phase) ? ["離店"] : [])];
     const basis = BASIS[phase] ? BASIS[phase] + (cause ? "已在 #" + cause + " 記錄" : "已記錄（序號未知）") : "未知狀態";
     text = (rule === 2 ? "新的一筆請購：" : "") + (parts.length ? parts.join(" → ") + "；" : "") + basis;
   }

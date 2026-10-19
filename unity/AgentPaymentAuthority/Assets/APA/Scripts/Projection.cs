@@ -35,6 +35,9 @@ namespace APA
         // UX3, version 2 only: the scene's room (a layout key). A scene
         // generation has one layout; another room is a new scene.
         public string layout;
+        // P2, optional (v stays): "local_anvil" when the host pays on a local
+        // anvil (payment_capability); anything else is no payment.
+        public string payments;
     }
 
     // Target: what the shop is to show for a customer (16.4 "T"). The page's
@@ -55,7 +58,10 @@ namespace APA
     // different (a new purchase); 3 only the label kind changed; 4 the same.
     public static class SceneRules
     {
-        public static bool Counter(string phase) => phase == "waiting" || phase == "denied" || phase == "allowed_unpaid";
+        // The decisions at the counter. A payment's own phases (P2) stand at
+        // the counter too, but are not decisions: each of its steps has a new
+        // cause and is never a new purchase.
+        public static bool Counter(string phase) => phase == "waiting" || phase == "denied" || phase == "allowed_unpaid" || phase == "allowed" || phase == "approved";
         public static int Cause(int cause, int seq) => cause > 0 && cause <= seq ? cause : 0;
         public static string End(string end) => end == "cancelled" || end == "timed_out" ? end : "";
         // Only a waiting Ask says the CLI timed out; a Deny, an expiry or a
@@ -98,6 +104,16 @@ namespace APA
                     var why = (cause > 0 ? "#" + cause : "") + (cause > 0 && Code(reason) != "" ? ", " : "") + Code(reason);
                     return "DENY" + (why != "" ? " (" + why + ")" : "") + " - leaving";
                 case "allowed_unpaid": return "ALLOW - no payment capability";
+                // P2 (docs/commercial-p2-host.md 5): the host pays.
+                case "allowed": return "ALLOW" + n + " - the host pays";
+                case "approved": return "APPROVED" + n + " - the host pays";
+                case "paying": return "PAYING" + n + " - reserving and signing";
+                case "confirming": return "PAYMENT SENT" + n + " - waiting for the chain";
+                case "paid": return "PAID" + n + " - delivery next";
+                case "delivered": return "PAID AND DELIVERED" + n + " - leaving with a receipt";
+                case "delivery_failed": return "PAID" + n + " - not delivered, a person handles it";
+                case "not_paid": return "NOT PAID" + n + " - nothing charged, leaving";
+                case "payment_review": return "PAYMENT REVIEW" + n + " - budget reserved, not paid";
                 case "expired": return "ask expired" + n + " - leaving";
                 case "withdrawn": return "ask withdrawn" + n + " - leaving";
                 default: return "unknown state" + n;
@@ -112,7 +128,8 @@ namespace APA
     public class ProjectionState
     {
         public const int Version = 1;
-        public static readonly string[] Phases = { "empty", "entered", "quoted", "waiting", "denied", "allowed_unpaid", "expired", "withdrawn", "unknown" };
+        public static readonly string[] Phases = { "empty", "entered", "quoted", "waiting", "denied", "allowed_unpaid", "expired", "withdrawn", "unknown",
+            "allowed", "approved", "paying", "confirming", "paid", "delivered", "delivery_failed", "not_paid", "payment_review" };
         public static readonly string[] Consumers = { "consumer-a", "consumer-b" };
 
         public int Gen { get; private set; } = -1;

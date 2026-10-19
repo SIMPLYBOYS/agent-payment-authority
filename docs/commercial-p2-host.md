@@ -403,8 +403,12 @@ H3 突變共 29 項，29／29 KILLED。
 - **H4a Agent 看到什麼（§8）**：`request_purchase` 的 `payment` 在付款開始後改為 `payment_status`（`paying`、`confirming`、`paid`、`not_paid`、`needs_review`），並附固定的說明文字；付款前照舊是 `none`。Agent 看不到任何交易 hash、內容 hash 或內容本身（H-D2）。`paid` 但交付失敗時，說明寫明商店沒有交付、由人處理。`TestPaymentStatusProjected`；突變 2 項，2／2 KILLED。
 - **H4b 網頁（H-D8 A）**：
   - 請購卡片：付款開始後依 Store 事件加上「預留、簽名、送出、鏈上確認、交付」步驟；未付款或待人工處理時，以結束事件與代碼取代被截斷的步驟。狀態文字依 §5 的表（付款中、等待鏈上確認、已付款／已交付／交付失敗、未付款、待人工處理）；明細列出 tx#1、tx#2（區塊）、收據與內容 sha256（內容只交給 Host）。
-  - 場景：新增 paying、confirming、paid、delivered、delivery_failed、not_paid、payment_review 階段與文字。**Unity 不變**：它的建置沒有能如實表達付款的階段（`allowed_unpaid` 會說「no payment capability」），所以 Unity 仍收到裁決的階段與裁決的事件序號；回放時與 Unity 回報比對的也改為送給 Unity 的階段。
+  - 場景：新增 paying、confirming、paid、delivered、delivery_failed、not_paid、payment_review 階段與文字；回放時與 Unity 回報比對的改為送給 Unity 的階段。
   - `payment_capability`：有 `--payments` 時，`/healthz`、主持人狀態、pay task 與核准清單都回 `local_anvil`（模擬核准者照舊 `not_enabled`：模擬授權不能付款）。Allow、等待核准、本人核准後的文字依此改為「由 Host 付款」；沒有 `--payments` 時與之前相同。
   - 測試：`web/test/p2.test.mjs`（6 個）、`TestPaymentCapabilityStated`；網頁測試 109 個全過。
-- **待 Aaron 決定**：Unity 在付款進行中與付款後仍顯示「ALLOW - no payment capability」。要如實顯示，需要新增 Unity 階段並重建 Web build（Unity 編輯器，H-D8 說另開 UX 片）。在那之前是否接受這個不一致（網頁的文字為準）？
+- **H4c Unity 如實顯示付款（Aaron：「Unity 的文字不正確問題請優先處理好」）**：
+  - Unity 新增九個階段：裁決 `allowed`（Allow，由 Host 付款）與 `approved`（本人核准，由 Host 付款），以及付款的 `paying`、`confirming`、`paid`、`delivered`、`delivery_failed`、`not_paid`、`payment_review`，各有如實的英文標籤（例如「PAID AND DELIVERED (#10) - leaving with a receipt」）。沒有 `--payments` 時照舊是 `allowed_unpaid`「ALLOW - no payment capability」。
+  - 位置：付款進行中、已付款待交付、交付失敗、待人工處理都留在櫃台；已交付與未付款離店。付款的每一步都有新的事件序號，但不算櫃台的新請購，不會重播挑選動畫；新的一筆請購照舊會。
+  - 網頁直接送這些階段與它們自己的事件序號給 Unity（取代先前「Unity 停在裁決階段」的權宜作法）。訊息新增選填欄位 `payments`（`local_anvil` 或空，bridge 版本不變）；Unity 的標題列據此顯示「P2-a / local test payments」或照舊「M1 / no payment」。
+  - 共用轉場向量新增 4 個付款案例（共 24 個），網頁與 Unity 的規則測試都用它。Unity：EditMode 18／18、PlayMode 28／28（新增 `PaymentPhasesAreKnownAndSayTheHostPays`、`APaymentWaitsAtTheCounterAndLeavesDelivered`）；網頁測試 109／109。Web build 已用 `scripts/unity/unity.sh webgl` 重建（git 不追蹤），建置內含新文字。
 - 待做：對帳頁（H5，AE1 的 `Unauthorized`）。

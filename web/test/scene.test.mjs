@@ -107,7 +107,7 @@ test("version 2 reports, bridge reports and messages", () => {
   const r = reply("show-a-01", "consumer-a", askEvents());
   A.commit(st, st.gen, r.task, r.events);
   const m = A.projection2(st, 5, 2, true);
-  assert.deepEqual(Object.keys(m).sort(), ["animate", "cause_seq", "clear", "consumer", "phase", "reason", "scene", "seq", "slot", "task_end", "task_id", "v", "verdict"]);
+  assert.deepEqual(Object.keys(m).sort(), ["animate", "cause_seq", "clear", "consumer", "payments", "phase", "reason", "scene", "seq", "slot", "task_end", "task_id", "v", "verdict"]);
   assert.equal(m.v, 2);
   assert.equal(m.phase, "waiting");
 });
