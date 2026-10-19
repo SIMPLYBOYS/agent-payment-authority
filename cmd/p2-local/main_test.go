@@ -85,13 +85,18 @@ func TestDevSignerConfig(t *testing.T) {
 	dir := t.TempDir()
 	pay := filepath.Join(dir, "payments.json")
 	os.WriteFile(pay, []byte(`{"rpc":"http://127.0.0.1:8545","chain_id":84532,"confirmations":1,"token":"0x4444444444444444444444444444444444444444",
-		"token_name":"USDC","token_version":"2","pay_to":"0x3333333333333333333333333333333333333333","budget_contract":"0xe7f1725e7734ce288f8367e1bb143e90bb3f0512"}`), 0o600)
+		"token_name":"USDC","token_version":"2","pay_to":"0x3333333333333333333333333333333333333333","budget_contract":"0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+		"delegations":{"consumer-a":"dlg-a@1","consumer-b":"dlg-b@2"}}`), 0o600)
 	out := filepath.Join(dir, "signer.json")
 	a, b := "0x"+strings.Repeat("a1", 20), "0x"+strings.Repeat("b2", 20)
-	cmd := exec.Command("python3", "-I", filepath.Join(ethtest.Root(), "scripts/demo/p2-signer-config.py"))
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("no python3 here")
+	}
+	cmd := exec.Command(py, "-I", filepath.Join(ethtest.Root(), "scripts/demo/p2-signer-config.py"))
 	cmd.Env = append(os.Environ(), "A="+a, "B="+b, "SSOCK=/tmp/p2-dev-test.sock", "PAY="+pay, "OUT="+out, "UID_=501")
 	if msg, err := cmd.CombinedOutput(); err != nil {
-		t.Skip("no python3 here:", err, string(msg))
+		t.Fatalf("the script failed: %v\n%s", err, msg)
 	}
 	raw, _ := os.ReadFile(out)
 	if fi, err := os.Stat(out); err != nil || fi.Mode().Perm() != 0o600 {
@@ -106,5 +111,9 @@ func TestDevSignerConfig(t *testing.T) {
 	}
 	if len(cfg.Wallets) != 2 || cfg.Wallets[0].Address != a || cfg.Wallets[1].Address != b || len(cfg.Delegations) != 2 || cfg.MaxWindowSeconds < 300 {
 		t.Fatalf("config: %+v", cfg)
+	}
+	// The Host starts payments under payments.json's delegations: the Signer's are those; the caps outlast rehearsals.
+	if d := cfg.Delegations; d[0].DelegationID != "dlg-a" || d[0].Version != 1 || d[1].DelegationID != "dlg-b" || d[1].Version != 2 || d[0].TotalCap != "20000000" {
+		t.Fatalf("delegations: %+v", d)
 	}
 }

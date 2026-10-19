@@ -10,11 +10,11 @@
 #
 # The addresses are the ones apa-signer keygen printed (and p2-local.sh was
 # given). The configuration: those wallets, test USDC at the fixture asset
-# address, delegations dlg-a and dlg-b (0.10 test USDC a payment, 1.00 in
+# address, payments.json's delegations (0.10 test USDC a payment, 20.00 in
 # all, for a week from now) to the fixture merchant, one approver each on
 # http://localhost:8402, and the reservation section of the local anvil's
 # budget contract (from var/p2-local/payments.json; P2_LOCAL_DIR names
-# another). Ctrl-C stops the Signer.
+# another). The addresses must be p2-local's. Ctrl-C stops the Signer.
 set -eu
 [ $# -eq 2 ] || { echo "usage: sh scripts/demo/p2-dev.sh 0x<wallet-a> 0x<wallet-b>" >&2; exit 2; }
 for a in "$1" "$2"; do
@@ -31,6 +31,9 @@ for w in wallet-a wallet-b; do
 (build it with: go build -o $dir/bin/apa-signer ./cmd/apa-signer)" >&2; exit 1; }
 done
 [ -f "$local_dir/payments.json" ] || { echo "p2-dev: no $local_dir/payments.json: run scripts/demo/p2-local.sh first" >&2; exit 1; }
+# The same addresses p2-local minted to and wrote into its registry.
+python3 -I -c 'import json,sys; w={x["wallet_id"]: x["from"] for x in json.load(open(sys.argv[1]))["wallets"]}; sys.exit(0 if (w.get("wallet-a"), w.get("wallet-b")) == (sys.argv[2], sys.argv[3]) else 1)' \
+  "$local_dir/registry.json" "$1" "$2" || { echo "p2-dev: $1, $2 are not wallet-a, wallet-b of $local_dir/registry.json (p2-local was given others)" >&2; exit 1; }
 (cd "$root" && go build -o "$dir/bin/apa-signer" ./cmd/apa-signer)
 ssock="$dir/run/signer.sock"
 [ ! -e "$ssock" ] || { echo "p2-dev: $ssock exists: another Signer may be running; stop it (or remove the file if nothing runs)" >&2; exit 1; }

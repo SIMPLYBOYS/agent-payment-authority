@@ -178,10 +178,27 @@ func TestP2ShippedCatalog(t *testing.T) {
 	if err := decodeFile("testdata/demo/registry.json", &regCfg); err != nil {
 		t.Fatal(err)
 	}
-	reg, _ := contracts.NewRegistry(regCfg)
+	reg, err := contracts.NewRegistry(regCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	scs, err := loadScenarios("testdata/demo/scenarios-p2.json", reg, regCfg, false)
 	if err != nil || len(scs) != 4 || scs["cafe-a"].Scene != "cafe" || scs["data-b"].Scene != "" || scs["cafe-b"].version() != paycontract.Version {
 		t.Fatalf("catalog: %v %v", scs, err)
+	}
+	// The shop's prices against the delegations' allow_max: the cafe's lunch is an Allow, the brief an Ask.
+	shop, _ := merchant.New("http://127.0.0.1:1")
+	price := map[string]uint64{}
+	for _, o := range shop.Offers() {
+		var req struct{ Amount contracts.Amount }
+		json.Unmarshal(o.Quote.SelectedRequirement, &req)
+		price[o.Scene], _ = req.Amount.Units()
+	}
+	for id, sc := range scs {
+		allow, _ := sc.Delegation.AllowMax.Units()
+		if want := map[string]bool{"cafe": true, "": false}[sc.Scene]; (price[sc.Scene] <= allow) != want {
+			t.Fatalf("%s: price %d, allow_max %d", id, price[sc.Scene], allow)
+		}
 	}
 	raw, _ := os.ReadFile("testdata/policy/m1-demo-profile.json")
 	if p, err := policy.LoadProfile(raw); err != nil || checkDelegations(scs, p) != nil {

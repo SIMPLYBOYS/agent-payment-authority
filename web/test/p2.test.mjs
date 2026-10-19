@@ -110,6 +110,11 @@ test("P2: a person's approval says not paid yet with local_anvil", async () => {
   // H6: once paid, the panel says so (it said "not yet paid" after the payment).
   const paidDev = { ...dev, payment: { status: "paid", state: "delivered", settle_block: 11 } };
   assert.equal(AP.decidedText("approved", paidDev, true)[1], "本人核准已驗證；已付款、已交付（區塊 11），附收據。");
+  assert.equal(AP.decidedText("approved", paidDev)[1], "本人核准已驗證；已付款、已交付（區塊 11），附收據。"); // a recorded payment, said on any host
+  const review = { ...dev, payment: { status: "needs_review", state: "needs_review", code: "RESERVED_NOT_PAID" } };
+  assert.match(AP.decidedText("approved", review, true)[1], /^本人核准已驗證；待人工處理：預算已預留，沒有簽名或送出/);
+  const sim = { approval: { resolved_by: "simulated:consumer-a:host", grant: { authorization_method: "simulated" } }, payment: { status: "paid", state: "delivered" } };
+  assert.equal(AP.decidedText("approved", sim, true)[1], "已核准（模擬），未啟用付款"); // a simulated approval never reads as paid
   assert.equal(AP.decidedText("approved", dev)[1], "本人核准已驗證，付款未啟用。");
   dev.approval.grant.voice = "verified";
   assert.equal(AP.decidedText("approved", dev, true)[1], "本人核准已驗證（裝置＋語音），尚未付款。");

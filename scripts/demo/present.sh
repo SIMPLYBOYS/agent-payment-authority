@@ -78,6 +78,7 @@ registry=${APA_PRESENT_REGISTRY:-testdata/demo/registry.json}
 payments=${APA_PRESENT_PAYMENTS:-}
 [ -z "$payments" ] || [ -n "$signer" ] || stop "APA_PRESENT_PAYMENTS 需要 APA_APPROVALS_SIGNER（同一個 Signer 也簽付款）"
 [ -z "$payments" ] || [ -f "$payments" ] || stop "APA_PRESENT_PAYMENTS=${payments} 不是檔案"
+[ -z "$payments" ] || [ -S "$signer" ] || stop "APA_APPROVALS_SIGNER=${signer} 不是 socket：先以 scripts/demo/p2-dev.sh 啟動 apa-signer serve"
 [ -z "$signer" ] || [ -S "$signer" ] || stop "APA_APPROVALS_SIGNER=${signer} 不是 socket：請先啟動 apa-signer serve-approvals（docs/commercial-a2.md）"
 
 if [ "$mode" = live ]; then
