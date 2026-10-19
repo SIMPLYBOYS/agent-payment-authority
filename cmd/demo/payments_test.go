@@ -18,7 +18,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
 )
 
@@ -131,7 +134,8 @@ func TestPaymentCapabilityStated(t *testing.T) {
 // payments_off without --payments; the report as the Reconciler made it;
 // 503 when the chain does not answer.
 func TestReconciliationRoute(t *testing.T) {
-	a := &api{addr: "127.0.0.1:8402", tokens: []demoToken{{grant{Role: "host"}, "tok-host"}, {grant{Role: "viewer", ConsumerID: "consumer-a"}, "tok-viewer"}}}
+	a := &api{addr: "127.0.0.1:8402", out: io.Discard, tokens: []demoToken{{grant{Role: "host"}, "tok-host"}, {grant{Role: "operator"}, "tok-operator"},
+		{grant{Role: "viewer", ConsumerID: "consumer-a"}, "tok-viewer"}}}
 	get := func(tok string) (int, map[string]any) {
 		req := httptest.NewRequest("GET", "http://127.0.0.1:8402/api/host/reconciliation", nil)
 		req.Header.Set("Authorization", "Bearer "+tok)
@@ -151,11 +155,36 @@ func TestReconciliationRoute(t *testing.T) {
 	if code, m := get("tok-viewer"); code != 403 {
 		t.Fatalf("a viewer: %d %v", code, m)
 	}
-	if code, m := get("tok-host"); code != 200 || m["environment"] != "local_anvil" || m["known_authorizations"] != float64(2) {
-		t.Fatalf("the host: %d %v", code, m)
+	for _, tok := range []string{"tok-host", "tok-operator"} {
+		if code, m := get(tok); code != 200 || m["environment"] != "local_anvil" || m["known_authorizations"] != float64(2) {
+			t.Fatalf("%s: %d %v", tok, code, m)
+		}
+	}
+	fail = fmt.Errorf("%w: a row", errReconcileStore)
+	if code, m := get("tok-host"); code != 503 || m["error"] != "reconcile_failed" {
+		t.Fatalf("an unreadable authorization: %d %v", code, m)
 	}
 	fail = errors.New("node down")
 	if code, m := get("tok-host"); code != 503 || m["error"] != "chain_unavailable" {
 		t.Fatalf("no chain: %d %v", code, m)
+	}
+}
+
+// The P2-a catalog (make present-p2) loads under the demo registry and the
+// profile: two scenes per customer, the cafe's lunch an Allow (0.08 within
+// allow_max 0.10), the brief an Ask.
+func TestP2ShippedCatalog(t *testing.T) {
+	var regCfg contracts.RegistryConfig
+	if err := decodeFile("testdata/demo/registry.json", &regCfg); err != nil {
+		t.Fatal(err)
+	}
+	reg, _ := contracts.NewRegistry(regCfg)
+	scs, err := loadScenarios("testdata/demo/scenarios-p2.json", reg, regCfg, false)
+	if err != nil || len(scs) != 4 || scs["cafe-a"].Scene != "cafe" || scs["data-b"].Scene != "" || scs["cafe-b"].version() != paycontract.Version {
+		t.Fatalf("catalog: %v %v", scs, err)
+	}
+	raw, _ := os.ReadFile("testdata/policy/m1-demo-profile.json")
+	if p, err := policy.LoadProfile(raw); err != nil || checkDelegations(scs, p) != nil {
+		t.Fatalf("profile: %v", err)
 	}
 }

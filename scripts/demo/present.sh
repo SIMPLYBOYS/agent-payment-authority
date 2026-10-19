@@ -48,6 +48,10 @@
 # APA_PRESENT_REGISTRY (fake only; default testdata/demo/registry.json): another
 # demo registry, e.g. V1 development mode's var/v1-dev/registry.json (the
 # same plus more show-* tasks: a kept A2 database uses them up).
+# APA_PRESENT_PAYMENTS (fake only, with APA_APPROVALS_SIGNER; make present-p2):
+# the local anvil payment configuration (cmd/p2-local's payments.json); the
+# host then pays through that Signer, which must be apa-signer serve with a
+# reservation section (docs/commercial-p2-host.md 12.8).
 # APA_PRESENT_CREDENTIALS=1 (fake only; make present-c2): build apa-issuer,
 # make a credential directory of test keys in the session directory (holders
 # for consumer-a and consumer-b) and start the host with --credential-dir.
@@ -71,6 +75,9 @@ registry=${APA_PRESENT_REGISTRY:-testdata/demo/registry.json}
 [ "$registry" = testdata/demo/registry.json ] || [ "$mode" = fake ] || stop "APA_PRESENT_REGISTRY 只用於 fake 展示"
 [ -f "$registry" ] || stop "APA_PRESENT_REGISTRY=${registry} 不是檔案"
 [ -z "$creds" ] || [ "$mode" = fake ] || stop "APA_PRESENT_CREDENTIALS 只用於 fake 展示（C2 的 v2 場景只用 fake Agent）"
+payments=${APA_PRESENT_PAYMENTS:-}
+[ -z "$payments" ] || [ -n "$signer" ] || stop "APA_PRESENT_PAYMENTS 需要 APA_APPROVALS_SIGNER（同一個 Signer 也簽付款）"
+[ -z "$payments" ] || [ -f "$payments" ] || stop "APA_PRESENT_PAYMENTS=${payments} 不是檔案"
 [ -z "$signer" ] || [ -S "$signer" ] || stop "APA_APPROVALS_SIGNER=${signer} 不是 socket：請先啟動 apa-signer serve-approvals（docs/commercial-a2.md）"
 
 if [ "$mode" = live ]; then
@@ -125,6 +132,7 @@ else
 	set --
 	[ -z "$signer" ] || set -- --approvals-signer "$signer" --authenticator-source "$authsrc"
 	[ -z "$creds" ] || set -- "$@" --credential-dir "$w/cred"
+	[ -z "$payments" ] || set -- "$@" --payments "$payments"
 	APA_ADDR=$addr APA_DB_PATH=$db/fake.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \
 		--fake-cli "$w/fake-claude" --scenarios "${APA_PRESENT_SCENARIOS:-testdata/demo/scenarios.json}" --registry "$registry" \
 		--trace-dir "$runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" "$@" &

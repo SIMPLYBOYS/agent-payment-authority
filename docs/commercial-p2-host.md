@@ -511,3 +511,61 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES（沒有 C
 | 建議 | 操作員角色沒有測試 | 補上 |
 
 H5 突變共 17 項，17／17 KILLED。
+
+### 12.8 H6 本機實跑（準備好的工具與操作步驟）
+
+H6 用你以 `apa-signer keygen` 建立的兩把本機測試金鑰（H-D6），在本機 anvil 上以真的 `apa-signer serve`、真的 keystore 跑一條 Allow、一條 Ask 與幾個反例，並保存對帳結果。只用本機鏈與測試 USDC；不碰 testnet、`/opt` 或 V1 開發模式的資料（`var/v1-dev` 不動，H6 用新的 `var/p2-dev`）。
+
+**工具**（這一段已實作並測試，沒有實際執行任何金鑰操作）：
+
+- `testdata/demo/scenarios-p2.json`：apa.pay.v1，兩位客人各有「資料研究室：韓國市場簡報」（0.50，超過 allow_max 0.10，是 Ask）與「街角咖啡：午餐套餐」（0.08，是 Allow）。
+- `make present-p2 SIGNER=…`：fake CLI、`--approvals-signer` 與 `--payments`；registry 與付款設定預設讀 `var/p2-local/`。
+- `scripts/demo/p2-dev.sh 0x<a> 0x<b>`：在 `var/p2-dev`（0700）寫出 Signer 設定並啟動 `apa-signer serve`。設定內容：兩個錢包、測試 USDC、委派 `dlg-a`／`dlg-b`（每筆 0.10、總額 1.00、一週）、各一位核准者（`http://localhost:8402`）、本機鏈的 `reservation` 段。它只確認 key 檔存在，**不讀 key 檔**；位址由你傳入；密語由 `apa-signer` 自己在終端機詢問。
+- `scripts/demo/p2-reconcile.sh`：把對帳結果存成檔（給 `ae1-eval report --reconciliation`），token 不會顯示。
+- `p2-local` 改以 demo registry（`testdata/demo/registry.json`，有 `show-*` task）為底。
+- 測試：`TestDevSignerConfig`（產生的設定被 `signer.ParseConfig` 接受）、`TestP2ShippedCatalog`、`TestSetup`。
+
+**要你決定的事**
+
+| # | 問題 | 選項 | 建議 |
+|---|---|---|---|
+| H6-D1 | 核准用哪一種驗證器 | **A** 真實裝置：在新的 Signer 登記，會在你的 Google 密碼管理工具新增一筆 `localhost` 的 passkey（由你操作；V1 那一筆不受影響）；**B** Chrome 的 virtual authenticator（`AUTH=virtual`），不碰你的裝置，結果標示 virtual | **A**：這是商業 demo 要呈現的路徑；V1 開發模式實機輪也是這樣做 |
+| H6-D2 | 兩把金鑰的密語 | `apa-signer serve` 啟動時只問一次密語，所以兩把要用**同一個**密語 | 照做 |
+
+**步驟**（終端機都在 repo 根目錄；可以貼回的是每一步標示的那一行）
+
+終端機 1：金鑰（只有你能做）
+
+1. `mkdir -p var/p2-dev/data/keys var/p2-dev/bin && chmod 700 var/p2-dev var/p2-dev/data var/p2-dev/data/keys var/p2-dev/bin`
+2. `go build -o var/p2-dev/bin/apa-signer ./cmd/apa-signer`
+3. `var/p2-dev/bin/apa-signer keygen --dir var/p2-dev/data --wallet wallet-a`：輸入兩次密語。輸出 `apa-signer: wallet wallet-a address 0x…` 這一行可以貼回（位址是公開的）。
+4. 同上，`--wallet wallet-b`，**用同一個密語**。
+
+終端機 1：本機鏈（開著不關）
+
+5. `sh scripts/demo/p2-local.sh 0x<wallet-a 的位址> 0x<wallet-b 的位址>`：最後一行是 `p2-local: anvil is running`。整段輸出沒有秘密，可以貼回。
+
+終端機 2：Signer（開著不關）
+
+6. `sh scripts/demo/p2-dev.sh 0x<wallet-a> 0x<wallet-b>`：在提示時輸入密語。看到 `apa-signer: serving on … (reservations checked on chain 84532; approvals on the same socket)` 這一行可以貼回。
+
+終端機 3：Host
+
+7. `make present-p2 SIGNER=var/p2-dev/run/signer.sock`（選 B 時加 `AUTH=virtual`）：會打開 `http://localhost:8402/host`。終端機上的**配對代碼不要貼回**。
+
+終端機 4：裝置登記（選 A 時；要核准 Ask 的客人各做一次，先做 approver-a）
+
+8. `var/p2-dev/bin/apa-signer approver enroll begin --dir var/p2-dev/data --approver approver-a`：輸出含**一次性代碼**，不要貼回；記下登記 ID（`enr-…`）和代碼。
+9. **瀏覽器**：打開 `http://localhost:8402/approve/enroll`，輸入登記 ID 和代碼，選 Google 密碼管理工具，用 PIN 完成；頁面會顯示指紋。
+10. **一定要在第 9 步完成之後**：`var/p2-dev/bin/apa-signer approver enroll confirm --dir var/p2-dev/data --id enr-…`，核對終端機和頁面的指紋相同後輸入 `yes`。`… is active` 這一行可以貼回。
+
+主持人頁上（每一場都看卡片步驟、狀態文字與 Unity）
+
+11. **Allow**：客人 B「街角咖啡」，確認委託後開始。預期：付款中 → 已送出 → 已付款 → 已交付，收據與 tx#1、tx#2 出現在明細；Unity 依序顯示 `PAYING`、`PAYMENT SENT`、`PAID`、`PAID AND DELIVERED`。
+12. **Ask 核准**：客人 A「資料研究室」。在「需要你處理」按「用已登記的裝置核准」，用 PIN 完成。預期同上，付款依據是你的核准。
+13. **Ask 拒絕**：客人 A 再一場「資料研究室」，按拒絕。預期：未付款，沒有任何交易。
+14. **task 結束後不能核准**：客人 A 再一場「資料研究室」，在 Ask 等待中由主持人取消 task。預期：Ask 撤回，面板沒有核准按鈕，沒有付款。
+15. **對帳**：就緒表的「對帳」列應為「未授權新增支出 0 筆（本機 anvil…）」。終端機 4 執行 `sh scripts/demo/p2-reconcile.sh`，最後一行可以貼回。
+16. 結束：依序在終端機 3、2、1 按 Ctrl-C。`var/p2-local`、`var/p2-dev` 與 Host 資料庫都保留（demo 結束前不清理）。
+
+**記錄方式**：這一輪是「實機（本機鏈）」：你的裝置與你的金鑰，但鏈是本機 anvil、資產是測試 USDC，不能寫成 testnet 結果。對帳結果標 `local_anvil`，不關閉 AE1 驗收 18。

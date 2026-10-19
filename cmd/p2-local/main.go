@@ -45,7 +45,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	outDir := fs.String("out", "var/p2-local", "where payments.json, registry.json and the relayer and shop databases go (created 0700)")
 	contractsOut := fs.String("contracts", "var/contracts/out", "the contract build")
 	zkbudget := fs.String("zkbudget", "var/p2-local/zkbudget", "the zkbudget binary the relayer runs")
-	registryPath := fs.String("registry", "testdata/contracts/registry.json", "the registry fixture the written one is made from")
+	registryPath := fs.String("registry", "testdata/demo/registry.json", "the demo registry the written one is made from (its show-* tasks are the runs')")
 	mint := fs.Uint64("mint", 20_000_000, "test USDC units minted to each wallet")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return errors.New("usage: p2-local --wallet-a 0x... --wallet-b 0x... [--rpc URL] [--out DIR]")

@@ -1,0 +1,18 @@
+#!/bin/sh
+# Saves the running P2 host's reconciliation (GET /api/host/reconciliation;
+# docs/commercial-p2-host.md 12.7) to OUT (default
+# var/p2-local/reconciliation-<time>.json) and prints its counts, for
+# ae1-eval report --reconciliation. The host token is read from the newest
+# present session's token file and never printed.
+#
+#   sh scripts/demo/p2-reconcile.sh [OUT]
+set -eu
+root=$(cd "$(dirname "$0")/../.." && pwd)
+tok=$(ls -td "$root"/var/present-*/tok/tokens.json 2>/dev/null | head -1)
+[ -n "$tok" ] || { echo "p2-reconcile: no var/present-*/tok/tokens.json: is make present-p2 running?" >&2; exit 1; }
+out=${1:-$root/var/p2-local/reconciliation-$(date +%Y%m%d-%H%M%S).json}
+host=$(python3 -I -c 'import json,sys; print(next(t["token"] for t in json.load(open(sys.argv[1]))["tokens"] if t["role"] == "host"))' "$tok")
+code=$(curl -s -o "$out" -w '%{http_code}' --max-time 30 -H "Authorization: Bearer $host" http://127.0.0.1:8402/api/host/reconciliation)
+[ "$code" = 200 ] || { echo "p2-reconcile: the host answered $code: $(cat "$out")" >&2; exit 1; }
+chmod 600 "$out"
+python3 -I -c 'import json,sys; r=json.load(open(sys.argv[1])); print("p2-reconcile: %s, blocks %d-%d, %d wallets, %d recorded authorizations: %d unauthorized new spend(s); saved %s" % (r["environment"], r["from_block"], r["to_block"], len(r["wallets"]), r["known_authorizations"], len(r["unauthorized"]), sys.argv[1]))' "$out"
