@@ -29,8 +29,17 @@ cp -R "$src" "$out/voice/python"
 UV_CACHE_DIR="$root/var/voice/.uv-cache" uv pip install --offline --python "$out/voice/python/bin/python3.12" --break-system-packages -q -r "$root/var/voice/requirements.txt"
 # The wheels' scripts are not used (the sidecar runs python3.12 -I) and their
 # shebangs name the staging path.
-cp -R "$root/var/voice/models" "$out/voice/models"
+# -L: the speech model's label_encoder.ckpt is a symlink to an absolute path
+# under this repo, which apa-signer cannot read (found at P2-b's /opt step):
+# its file is copied instead.
+cp -RL "$root/var/voice/models" "$out/voice/models"
 cp "$root/voice/sidecar.py" "$out/voice/sidecar.py"
+# No symlink may point outside the stage (apa-signer reads none of mac's files).
+if find "$out/voice" -type l -lname '/*' | grep -q .; then
+  find "$out/voice" -type l -lname '/*' >&2
+  echo "v1-opt-stage: absolute symlinks in the stage (above); nothing to install" >&2
+  exit 1
+fi
 
 n=0
 find "$out/voice/python" -type f \( -name '*.so' -o -name '*.dylib' -o -perm -u+x \) | while read -r f; do
