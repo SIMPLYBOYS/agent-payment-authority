@@ -212,6 +212,11 @@ sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目�
 - 第 2 步的六個位址：relayer-gas `0x83ee3c45b42834d31ec0832b47d8ec4c4b71e9d2`、issuer `0xccd7bec96111b217ccc92632e6e0173878ab4c6a`、policy `0xe27fb36cf960ec633da6ef05dd8c5106e7fe05fd`、shop `0x30d9c45f7bab98561004d25b27aed474180a7b99`、wallet-a `0x245664a4bfb21a9e9d47f232f6d691223b833554`、wallet-b `0xba5f348020f9ec76c4a5a24dea20f4d7c0828667`；餘額全部為 0（還沒領測試幣）。
 - 第 1 步完成。
 
+**第 3 步：領測試幣**（Aaron 10/21，在瀏覽器自己領；每個位址一次）：
+- 測試 ETH：Coinbase CDP 的 faucet。官方文件寫的 `portal.cdp.coinbase.com/products/faucet` 已失效（Page not found）；現在在 CDP Portal 左側 **Onchain Tools → Faucet**（路徑 `/onchain-tools/faucet`），每次 0.0001 ETH、每天最多 0.1 ETH。relayer-gas、issuer、shop 各領一次。
+- 測試 USDC：`https://faucet.circle.com`（Base Sepolia），wallet-a、wallet-b 各領一次，各 20 USDC。
+- 之後的 preflight（區塊 48374673）：relayer-gas、issuer、shop 各 0.000100 ETH；policy 0；wallet-a、wallet-b 各 20.000000 USDC；`ready for deploy`。第 3 步完成。
+
 ## 7 停止流程
 
 **遇到就停**：任何付款變成 unknown 或 needs_review；對帳不是 0；交易 revert；碰到 §5 的任何上限；餘額和預期不符；RPC 回錯的鏈。
