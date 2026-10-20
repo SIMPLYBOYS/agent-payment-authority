@@ -217,6 +217,13 @@ sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目�
 - 測試 USDC：`https://faucet.circle.com`（Base Sepolia），wallet-a、wallet-b 各領一次，各 20 USDC。
 - 之後的 preflight（區塊 48374673）：relayer-gas、issuer、shop 各 0.000100 ETH；policy 0；wallet-a、wallet-b 各 20.000000 USDC；`ready for deploy`。第 3 步完成。
 
+**第 4 步：部署**（Aaron 10/21 執行 `p2-testnet.sh deploy`，看過計畫後輸入 yes；issuer 送出）：
+- 計畫：verifier（nonce 0，gas 上限 1442492）、預算合約（nonce 1，gas 上限 761796）；最多 0.000048 測試 ETH（fee cap 11000000 wei），issuer 持有 0.0001。
+- Z2 verifier `0x5c262a916c02c6afffa57ad591ebd8c457474751`，區塊 48374723，交易 `0x22e9682ff0de8075e72f42f8a18227a6d3f7ed5954dab816242d2111a18a6190`。
+- 預算合約 `0xeb5d2964082c33b13f7e5f841495f86a928b31dd`，區塊 48374726，交易 `0x5ffd2b4b7f5327d6cdfab932ed1d5a3fbb1cdc0eacd7f0b065986a04d6b0d972`；部署後核對 verifier、issuer、policy 與計畫相同。
+- 寫出的檔：`var/p2-testnet/relayer.json`（每日 12 筆、確認 2）、`var/p2-testnet/host/payments.json`（對帳從區塊 48374723 開始；委派 `consumer-a/<shop>`→`dlg-ta@1`、`consumer-b/<shop>`→`dlg-tb@1`、`consumer-b/0x…0402`→`dlg-t402@1`；`test402_offer`）、`registry.json`、`profile.json`（merchants：商店與 test402）。Claude Code 讀過這些公開設定核對無誤（未讀金鑰目錄）。
+- 第 4 步完成；我們自己送的交易目前 2 筆（§6 預計 11 筆）。
+
 ## 7 停止流程
 
 **遇到就停**：任何付款變成 unknown 或 needs_review；對帳不是 0；交易 revert；碰到 §5 的任何上限；餘額和預期不符；RPC 回錯的鏈。
