@@ -4,6 +4,7 @@
 //
 //	p2-testnet preflight  --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL] [--test402 URL]
 //	p2-testnet deploy     --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL]
+//	p2-testnet test402    URL
 //	p2-testnet opt-signer --dir DIR --base SIGNER.JSON [--voice SIGNER.JSON] --out NEW.JSON [--test402-pay-to 0x...]
 //
 // opt-signer (B6, §6 step 5) writes /opt's new signer.json from its current
@@ -21,6 +22,9 @@
 // from the files, which hold them in the clear; no key is decrypted except
 // the issuer's, by deploy, which sends from it (the issuer is the deployer,
 // P2b-D3), with a passphrase asked on this terminal.
+//
+// test402 asks test402's resource once (one GET, no redirect, no key, no
+// payment) and prints its PAYMENT-REQUIRED: §6 step 1's part B5 needs.
 //
 // preflight reads only: the chain (84532, not an anvil), Circle's USDC
 // (name, version, decimals), every address's balance, and, with --test402,
@@ -140,6 +144,10 @@ func run(ctx context.Context, args []string, out io.Writer, ask asker) error {
 	usage := errors.New("usage: p2-testnet preflight|deploy --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL] [--test402 URL]")
 	if len(args) > 0 && args[0] == "opt-signer" {
 		return optSigner(args[1:], out)
+	}
+	if len(args) == 2 && args[0] == "test402" {
+		tok, _ := eth.ParseAddress(circleUSDC)
+		return test402(ctx, args[1], tok, out)
 	}
 	if len(args) == 0 || args[0] != "preflight" && args[0] != "deploy" {
 		return usage

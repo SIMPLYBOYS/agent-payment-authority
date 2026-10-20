@@ -357,3 +357,13 @@ func TestOptSigner(t *testing.T) {
 		t.Fatalf("two voice merchants: %v", err)
 	}
 }
+
+// test402 alone: only an https URL on test402.com is asked (refused here
+// before any connection).
+func TestTest402Refusals(t *testing.T) {
+	for _, u := range []string{"http://test402.com/api/x402", "https://example.com/api/x402", "https://test402.com.evil.example/x", "not a url"} {
+		if err := run(context.Background(), []string{"test402", u}, os.Stdout, &answers{}); err == nil || !strings.Contains(err.Error(), "test402.com") {
+			t.Fatalf("%s: %v", u, err)
+		}
+	}
+}
