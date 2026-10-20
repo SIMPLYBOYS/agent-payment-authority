@@ -206,7 +206,11 @@ sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目�
 - test402 自己宣告的 EIP-712 version 是 `2`；部署前 preflight 仍會從鏈上讀 `version()` 核對。
 - B5 的 `dlg-t402` 收款方就是這個 payTo。第二次 GET（B5-D2，2026-10-20T02:16:29Z）把 402 原文存於 `var/p2-testnet/test402-offer.json`，內容與第一次相同；deploy 看到這個檔就把 test402 加進 profile 的 merchants、`payments.json` 的 `test402_offer` 與委派。
 
-**鏈上的唯讀 preflight**：要等第 2 步的金鑰建立後，由 Aaron 執行（金鑰目錄 Claude Code 不讀）。
+**鏈上的唯讀 preflight**（Aaron 10/21 執行 `p2-testnet.sh preflight`，貼回輸出）：
+- 鏈 84532，`sepolia.base.org`，節點 `reth/v2.5.2-7134be3/x86_64-unknown-linux-gnu/base/v1.5.0`（不是 anvil），區塊 48373279。
+- Circle USDC `0x036cbd53842c5426634e7929541ec2318f3dcf7e`：name `USDC`、version `2`、decimals 6，與 test402 宣告的 domain 相同。
+- 第 2 步的六個位址：relayer-gas `0x83ee3c45b42834d31ec0832b47d8ec4c4b71e9d2`、issuer `0xccd7bec96111b217ccc92632e6e0173878ab4c6a`、policy `0xe27fb36cf960ec633da6ef05dd8c5106e7fe05fd`、shop `0x30d9c45f7bab98561004d25b27aed474180a7b99`、wallet-a `0x245664a4bfb21a9e9d47f232f6d691223b833554`、wallet-b `0xba5f348020f9ec76c4a5a24dea20f4d7c0828667`；餘額全部為 0（還沒領測試幣）。
+- 第 1 步完成。
 
 ## 7 停止流程
 
