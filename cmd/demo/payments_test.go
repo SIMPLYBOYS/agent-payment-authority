@@ -258,6 +258,7 @@ func TestTestnetConfigRefused(t *testing.T) {
 		"no shop key":               {func(c map[string]any) { delete(c, "shop_key_dir") }, "needs relayer_socket (apa-relayer) and shop_key_dir"},
 		"a long policy ttl":         {func(c map[string]any) { c["policy_ttl"] = 601 }, "policy_ttl is 1 to 600"},
 		"a consumer-wide line":      {func(c map[string]any) { c["delegations"] = map[string]string{"consumer-a": "dlg-ta@1"} }, "by consumer and payee"},
+		"a line with no payee":      {func(c map[string]any) { c["delegations"] = map[string]string{"consumer-a/": "dlg-ta@1"} }, "by consumer and payee"},
 		"otherwise good":            {func(c map[string]any) {}, "apa-relayer on"}, // the rules pass: the relayer is asked next
 		"a shared socket directory": {func(c map[string]any) { c["relayer_socket"] = "/private/tmp/r.sock" }, "relayer_socket's directory"},
 	} {

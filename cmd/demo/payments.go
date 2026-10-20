@@ -19,8 +19,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
@@ -79,6 +79,9 @@ type payConfig struct {
 // (docs/commercial-p2b.md B3); LocalAnvil the one on a local anvil.
 const BaseSepolia = "base_sepolia"
 
+// payeeLine is a testnet delegation line's key: a consumer and a payee.
+var payeeLine = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/0x[0-9a-f]{40}$`)
+
 // baseSepoliaChain is Base Sepolia's chain ID.
 const baseSepoliaChain = 84532
 
@@ -135,7 +138,7 @@ func checkEnvironment(c *payConfig) error {
 			return errors.New("base_sepolia needs at least 2 confirmations, shop_daily_tx_cap and token_from_block (the deployment's block)")
 		}
 		for k := range c.Delegations {
-			if !strings.Contains(k, "/") { // a consumer-wide line would start a payment to any payee the policy allows
+			if !payeeLine.MatchString(k) { // a consumer-wide line would start a payment to any payee the policy allows
 				return fmt.Errorf("base_sepolia's delegations are by consumer and payee (%q is not)", k)
 			}
 		}
@@ -358,7 +361,7 @@ func (p *payments) run(ctx context.Context, st *store.Store, socket string, cloc
 		Log: func(what string, err error) { fmt.Fprintln(p.out, "demo: payment", what, store.CodeOf(err)) }}
 	w := &payflow.Worker{Store: st, Relayer: p.relayer, Signer: signerclient.New(socket, st),
 		// No proxy from the environment, bounded headers: as the bridge's client (a shop may be outside, B5).
-		Shop:  payflow.HTTPShop{Client: &http.Client{Timeout: p.shopFor, Transport: &http.Transport{Proxy: nil, MaxResponseHeaderBytes: 64 << 10}}},
+		Shop:  payflow.HTTPShop{Client: &http.Client{Timeout: p.shopFor, Transport: &http.Transport{Proxy: nil, MaxResponseHeaderBytes: 64 << 10, IdleConnTimeout: 90 * time.Second}}},
 		Chain: reconcile.Token{RPC: p.rpc, Address: token, Confirmations: p.cfg.Confirmations, FromBlock: p.cfg.TokenFromBlock},
 		Clock: clock, Margin: payMargin, Before: starter.Start,
 		Log: func(intent string, err error) { fmt.Fprintln(p.out, "demo: payment", intent, logged(err)) }}

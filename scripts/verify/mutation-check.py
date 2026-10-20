@@ -1142,7 +1142,7 @@ MUTATIONS = [
     ("P2-b B5 review: an outside 402's network reaches the Agent as it came", 'internal/toolbridge/shop.go',
      '"network": Clean(req.Network, 80),', '"network": req.Network,', 'TestQuoteFieldsCleaned'),
     ('P2-b B5 review: a consumer-wide line on the testnet', 'cmd/demo/payments.go',
-     'if !strings.Contains(k, "/") {', 'if false && !strings.Contains(k, "/") {', 'TestTestnetConfigRefused'),
+     'if !payeeLine.MatchString(k) {', 'if false && !payeeLine.MatchString(k) {', 'TestTestnetConfigRefused'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the
