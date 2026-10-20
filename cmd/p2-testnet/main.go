@@ -4,10 +4,13 @@
 //
 //	p2-testnet preflight  --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL] [--test402 URL]
 //	p2-testnet deploy     --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL]
-//	p2-testnet opt-signer --dir DIR --base SIGNER.JSON --out NEW.JSON [--test402-pay-to 0x...]
+//	p2-testnet opt-signer --dir DIR --base SIGNER.JSON [--voice SIGNER.JSON] --out NEW.JSON [--test402-pay-to 0x...]
 //
 // opt-signer (B6, §6 step 5) writes /opt's new signer.json from its current
-// one (--base: the socket, callers, approvers, webauthn and voice are kept)
+// one (--base: the socket, callers, approvers and webauthn are kept; A2's,
+// before P2's approver caps, is read too) and the voice section (--base's,
+// or --voice's: V1's staged signer.json; a config without one is refused:
+// voice is the Signer's only check of an approval's payee)
 // and deploy's DIR/host files: the two testnet wallets, Circle's USDC, the
 // delegations dlg-ta and dlg-tb (and dlg-t402 for exactly one test402
 // payment), the approvers' caps (P2b-D5), the voice merchant at the shop's
@@ -31,8 +34,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -405,23 +410,28 @@ func test402(ctx context.Context, resource string, tok eth.Address, out io.Write
 // describe402 prints a PAYMENT-REQUIRED's accepted payments, each read
 // leniently (a server may add members), every remote string quoted.
 func describe402(where, header string, tok eth.Address, out io.Writer) error {
-	var pr x402.PaymentRequired
-	if err := x402.Decode(header, &pr); err != nil {
-		return fmt.Errorf("test402: PAYMENT-REQUIRED: %w", err)
+	shown := header
+	if len(shown) > 600 {
+		shown = shown[:600]
 	}
-	if len(pr.Accepts) == 0 {
-		return errors.New("test402: no accepted payment")
+	raw, err := base64.StdEncoding.DecodeString(header)
+	var pr struct {
+		X402Version json.RawMessage   `json:"x402Version"`
+		Accepts     []json.RawMessage `json:"accepts"`
+	}
+	if err != nil || json.Unmarshal(raw, &pr) != nil || len(pr.Accepts) == 0 {
+		return fmt.Errorf("test402: a PAYMENT-REQUIRED this cannot read (kept for the record): %q", shown)
 	}
 	for _, raw := range pr.Accepts {
 		var a struct {
 			Scheme, Network, Amount, Asset, PayTo string
-			MaxTimeoutSeconds                     uint64
+			MaxTimeoutSeconds                     json.RawMessage
 			Extra                                 json.RawMessage
 		}
 		if err := json.Unmarshal(raw, &a); err != nil {
-			return fmt.Errorf("test402: an accepted payment: %w", err)
+			return fmt.Errorf("test402: an accepted payment this cannot read: %q", raw)
 		}
-		fmt.Fprintf(out, "p2-testnet: test402 %q: x402 v%d, %q on %q, amount %q, asset %q, payTo %q, %d s, extra %q\n",
+		fmt.Fprintf(out, "p2-testnet: test402 %q: x402 %s, %q on %q, amount %q, asset %q, payTo %q, timeout %s, extra %q\n",
 			where, pr.X402Version, a.Scheme, a.Network, a.Amount, a.Asset, a.PayTo, a.MaxTimeoutSeconds, a.Extra)
 		if as, _ := eth.ParseAddress(a.Asset); a.Network != "eip155:84532" || as != tok {
 			fmt.Fprintln(out, "p2-testnet: test402: this one is not Base Sepolia USDC")
@@ -764,7 +774,9 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600)
+	// A new file renamed into place: a crash never leaves a half-written journal.
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return err
 	}
@@ -772,7 +784,10 @@ func writeJSON(path string, v any) error {
 		f.Close()
 		return err
 	}
-	return errors.Join(f.Sync(), f.Close())
+	if err := errors.Join(f.Sync(), f.Close()); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // The testnet Signer's caps (P2b-D5), in USDC units.
@@ -790,20 +805,45 @@ func optSigner(args []string, out io.Writer) error {
 	dir := fs.String("dir", "", "p2-testnet's directory (DIR/host: deploy wrote it)")
 	base := fs.String("base", "", "/opt's current signer.json (a copy)")
 	dst := fs.String("out", "", "the new signer.json (must not exist)")
+	voiceFrom := fs.String("voice", "", "a signer.json whose voice section is used (V1's staged one), when --base has none")
 	t402 := fs.String("test402-pay-to", "", "test402's payTo (preflight --test402 printed it): adds dlg-t402")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *dir == "" || *base == "" || *dst == "" {
-		return errors.New("usage: p2-testnet opt-signer --dir DIR --base SIGNER.JSON --out NEW.JSON [--test402-pay-to 0x...]")
+		return errors.New("usage: p2-testnet opt-signer --dir DIR --base SIGNER.JSON [--voice SIGNER.JSON] --out NEW.JSON [--test402-pay-to 0x...]")
 	}
 	if _, err := os.Lstat(*dst); !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("%s exists; nothing was written", *dst)
 	}
-	raw, err := os.ReadFile(*base)
+	// Read strictly but not checked yet: /opt's may be A2's, without the
+	// approver caps this fills in; the result is checked whole below.
+	strict := func(path string) (*signer.Config, error) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		var c signer.Config
+		d := json.NewDecoder(bytes.NewReader(raw))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&c); err != nil || d.More() {
+			return nil, fmt.Errorf("%s: not a signer configuration", path)
+		}
+		return &c, nil
+	}
+	cfg, err := strict(*base)
 	if err != nil {
 		return err
 	}
-	cfg, err := signer.ParseConfig(raw)
-	if err != nil {
-		return fmt.Errorf("--base: %w", err)
+	if *voiceFrom != "" {
+		if cfg.Voice != nil {
+			return errors.New("--base has a voice section already: no --voice")
+		}
+		v, err := strict(*voiceFrom)
+		if err != nil {
+			return err
+		}
+		cfg.Voice = v.Voice
+	}
+	if cfg.Voice == nil || len(cfg.Voice.Merchants) != 1 {
+		return errors.New("the voice section (--base's or --voice's) with exactly one merchant, the shop, is needed: without it an approval's payee is not checked")
 	}
 	var pay struct {
 		RPC            string            `json:"rpc"`
@@ -822,8 +862,9 @@ func optSigner(args []string, out io.Writer) error {
 	if err := errors.Join(readJSON(filepath.Join(host, "payments.json"), &pay), readJSON(filepath.Join(host, "registry.json"), &reg)); err != nil {
 		return fmt.Errorf("deploy's files: %w", err)
 	}
-	if pay.Environment != "base_sepolia" || pay.ChainID != chainID || pay.Delegations["consumer-a"] != "dlg-ta@1" || pay.Delegations["consumer-b"] != "dlg-tb@1" {
-		return errors.New("DIR/host/payments.json is not p2-testnet deploy's")
+	if pay.Environment != "base_sepolia" || pay.ChainID != chainID || pay.Delegations["consumer-a"] != "dlg-ta@1" || pay.Delegations["consumer-b"] != "dlg-tb@1" ||
+		!strings.EqualFold(pay.Token, circleUSDC) && !local || pay.TokenName != "USDC" || !strings.HasPrefix(pay.RPC, "https://") {
+		return errors.New("DIR/host/payments.json is not p2-testnet deploy's (base_sepolia, Circle's USDC, an https node)")
 	}
 	if w := cfg.WebAuthn; w == nil || w.RPID != "localhost" || !slices.Contains(w.Origins, hostOrigin) {
 		return fmt.Errorf("--base's webauthn is not rp_id localhost with origin %s (make present-testnet's)", hostOrigin)
@@ -857,14 +898,9 @@ func optSigner(args []string, out io.Writer) error {
 		a.SignerMax, a.SignerTotal, a.SignerWindowSeconds = approverMax, approverSum, 86400
 		a.Version++ // the entry changed: a challenge made under the old one is refused (APPROVER_CHANGED)
 	}
-	if v := cfg.Voice; v != nil {
-		if len(v.Merchants) == 0 {
-			return errors.New("--base's voice section names no merchant to keep")
-		}
-		m := v.Merchants[0] // the shop's spoken name, now at its testnet address
-		m.PayTo = strings.ToLower(pay.PayTo)
-		v.Merchants = []signer.VoiceMerchant{m}
-	}
+	v := cfg.Voice
+	v.Merchants[0].PayTo = strings.ToLower(pay.PayTo)     // the shop's spoken name, now at its testnet address
+	v.Decimals = 6                                        // Circle's USDC (deploy read it)
 	cfg.MaxWindowSeconds = max(cfg.MaxWindowSeconds, 600) // the settling shop's 300 s window fits
 	cfg.Reservation = &signer.Reservation{RPC: pay.RPC, ChainID: chain, BudgetContract: strings.ToLower(pay.BudgetContract), Confirmations: pay.Confirmations}
 	b, err := json.MarshalIndent(cfg, "", " ")

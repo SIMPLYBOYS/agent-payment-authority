@@ -116,6 +116,11 @@ B4 的 review（b8bda11）：REQUEST CHANGES，沒有 Critical；五項 Importan
 
 **B6 `/opt` 的產生器**（完成，待 review）：`p2-testnet opt-signer`（見 §6.1）：只讀兩個檔，不讀金鑰、不連任何節點；產生的設定以 `signer.ParseConfig` 驗證後才以 0600 寫出，目標檔已存在就拒絕；`--base` 的 WebAuthn 必須是 `localhost` 且含 `http://localhost:8402`。測試 `TestOptSigner`：保留與替換的每一段、`dlg-t402` 恰好一筆 0.0001、核准者版本加 1、語音商家改到商店位址、不覆寫、別的來源被拒。§6.1 寫出第 2 步與第 5 步在 `/opt` 的做法；實際的執行檔、設定與雜湊在第 5 步才產生。
 
+B6 與 B4 第二輪的 review（af668a1、a4e79e9）：REQUEST CHANGES；沒有任何路徑會簽超過上限，B4 的修正都成立。
+- Critical：`opt-signer` 讀不了 `/opt` 現在的 A2 設定（核准者沒有 `signer_total`）→ 改為先嚴格解碼、補上上限後才整份驗證。
+- Important：沒有語音段時會產生沒有語音的設定（核准的收款方就不受 Signer 檢查）→ 一律拒絕，語音段可由 `--voice` 取自 V1 準備好的設定；§6.1 漏了聲紋登記 → 補上第 7 步；test402 的解碼仍有一半是嚴格的 → 整個 header 寬鬆讀取，讀不了時把內容（加引號、截斷）印出以便記錄。
+- 建議也照做：`opt-signer` 確認 `payments.json` 是 Circle USDC、https 節點；語音商家必須恰好一個；小數位數設為 6；`deploy.json` 等檔案改為寫暫存檔再改名（當機不會留下半份 journal）；網址無法解析時的錯誤也不帶網址。
+
 **B5 test402**（暫停，等 §6 第 1 步）：Agent 只能經由商店的目錄請購，而且 bridge 會自己去取那筆 402；test402 的商品等於讓 bridge 信任一個外部的 resource URL，Store 的報價簿也要放進 test402 **現在**實際回的報價（要與它逐欄相同，否則 test402 會拒絕，雖然不會花到錢，但 tx#1 已用掉）。所以 B5 要在第 1 步（唯讀：preflight 與對 test402 的一次 GET）核准並取得現在的 402 之後才設計與實作；其他各段不受影響。要做的事已列在 §4 B5：委派依收款方選、policy 的 merchants、目錄商品，以及 bridge 對外部 resource 的信任規則。
 
 ## 5 要你決定的事
@@ -159,12 +164,13 @@ sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目�
 **第 5 步：`/opt` 部署**（第 4 步部署完成、`var/p2-testnet/host/` 已寫出之後）
 1. 建置（W-host，mac）：從乾淨的 worktree 建置 `apa-signer`（`GOFLAGS=-mod=readonly GOPROXY=off GOTOOLCHAIN=local`）到 `var/p2-opt/apa-signer`，記下 SHA-256；語音檔案依 V1 §15 重新產生（`scripts/demo/v1-opt-stage.sh`）。
 2. 取得目前的設定：`sudo cat /opt/apa-signer/data/signer.json > $P/var/p2-opt/signer.base.json`（`var/p2-opt` 是 0700）。
-3. 產生新設定：`var/p2-testnet/bin/p2-testnet opt-signer --dir var/p2-testnet --base var/p2-opt/signer.base.json --out var/p2-opt/signer.json`，有 test402 那一筆時加 `--test402-pay-to 0x…`（第 1 步 preflight 印出的）。它保留 socket、callers、核准者、WebAuthn 與語音段，換掉錢包、資產、委派（`dlg-ta`、`dlg-tb`、`dlg-t402`）、核准者上限（版本加 1：當時進行中的核准挑戰會回 `APPROVER_CHANGED`，已登記的裝置不受影響）、語音的商家位址，並加上 `reservation` 段；印出新檔的 SHA-256。
+3. 產生新設定：`var/p2-testnet/bin/p2-testnet opt-signer --dir var/p2-testnet --base var/p2-opt/signer.base.json --voice var/v1-opt/signer.json --out var/p2-opt/signer.json`，有 test402 那一筆時加 `--test402-pay-to 0x…`（第 1 步 preflight 印出的）。`/opt` 現在是 A2 的設定（核准者沒有 P2 的上限、沒有語音段），所以語音段取自 V1 準備好的 `var/v1-opt/signer.json`；沒有語音段一律拒絕（語音是 Signer 檢查「核准的這筆付給誰」的唯一一關），語音商家也必須恰好一個。它保留 socket、callers、核准者與 WebAuthn，換掉錢包、資產、委派（`dlg-ta`、`dlg-tb`、`dlg-t402`）、核准者上限（版本加 1：當時進行中的核准挑戰會回 `APPROVER_CHANGED`，已登記的裝置不受影響）、語音的商家位址與小數位數，並加上 `reservation` 段；印出新檔的 SHA-256。
 4. 停止與備份：照 V1 §15 的「開始前」與 D 部署第 1、2 步（`pgrep -fl '/opt/apa-signer/'` 應無輸出；`signer.json`、`approvals.db`、執行檔各留一份備份，不刪）。
 5. 安裝：照 V1 §15 D 第 3 步安裝執行檔與語音檔，`signer.json` 改用 `var/p2-opt/signer.json`；第 4 步核對新的雜湊。
 6. 核准表遷移（只有 `/opt/apa-signer/data/approvals.db` 還在時）：`sudo -u apa-signer /opt/apa-signer/bin/apa-signer approver migrate --dir /opt/apa-signer/data`；舊檔留為 `approvals.db.migrated`。
-7. 啟動：語音服務照 V1 §15 S1；Signer 改用 **`serve`**（不是 `serve-approvals`）：`cd /; sudo -u apa-signer /opt/apa-signer/bin/apa-signer serve --dir /opt/apa-signer/data`，輸入錢包的密語。預期 `apa-signer: serving on /opt/apa-signer/run/signer.sock (reservations checked on chain 84532; approvals on the same socket)`，這一行可以貼回。
-8. 之後第 6 步：`sh scripts/demo/p2-testnet.sh relayer`（另一個終端機，輸入 relayer 金鑰的密語），再 `make present-testnet SIGNER=/opt/apa-signer/run/signer.sock`（輸入商店金鑰的密語）。
+7. 聲紋登記：語音服務照 V1 §15 S1 啟動後，照 V1 §15「V」為要核准 Ask 的核准者登記聲紋（approver-a；approver-b 也要核准時一樣）。`/opt` 的 A2 沒有登記過，不登記的話每一筆 Ask 的核准都會回 `VOICE_NOT_ENROLLED`。
+8. 啟動：Signer 改用 **`serve`**（不是 `serve-approvals`）：`cd /; sudo -u apa-signer /opt/apa-signer/bin/apa-signer serve --dir /opt/apa-signer/data`，輸入錢包的密語。預期 `apa-signer: serving on /opt/apa-signer/run/signer.sock (reservations checked on chain 84532; approvals on the same socket)`，這一行可以貼回。
+9. 之後第 6 步：`sh scripts/demo/p2-testnet.sh relayer`（另一個終端機，輸入 relayer 金鑰的密語），再 `make present-testnet SIGNER=/opt/apa-signer/run/signer.sock`（輸入商店金鑰的密語）。
 
 回滾：停掉 Signer，把第 4 步的備份放回原位（舊執行檔仍能打開補過表的資料庫，V1 §15）；testnet 上已發生的交易不能撤回，照 §7 處理。
 

@@ -1119,6 +1119,8 @@ MUTATIONS = [
      '\t\ta.Version++', '\t\ta.Version += 0', 'TestOptSigner'),
     ("P2-b B4 review: an RPC error names the node's URL", 'internal/eth/rpc.go',
      'if errors.As(err, &ue) {', 'if false && errors.As(err, &ue) {', 'TestRPCErrorsHideTheURL'),
+    ('P2-b B6 review: opt-signer writes a config without voice', 'cmd/p2-testnet/main.go',
+     'if cfg.Voice == nil || len(cfg.Voice.Merchants) != 1 {', 'if false && (cfg.Voice == nil || len(cfg.Voice.Merchants) != 1) {', 'TestOptSigner'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the

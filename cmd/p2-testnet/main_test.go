@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -255,8 +256,13 @@ func TestDescribe402(t *testing.T) {
 	if !strings.Contains(out.String(), `amount "100"`) || !strings.Contains(out.String(), `payTo "0x777`) || strings.Contains(out.String(), "not Base Sepolia") {
 		t.Fatalf("%s", out.String())
 	}
-	if err := describe402("x", "not base64", tok, &out); err == nil {
-		t.Fatal("a broken header was read")
+	if err := describe402("x", "not base64", tok, &out); err == nil || !strings.Contains(err.Error(), `"not base64"`) {
+		t.Fatalf("a broken header: %v", err) // shown, quoted, for the record
+	}
+	// x402 v1's shape (no resource, a string timeout, more members) is read too.
+	v1h := base64.StdEncoding.EncodeToString([]byte(`{"x402Version":1,"error":"x","accepts":[{"scheme":"exact","network":"eip155:84532","maxAmountRequired":"100","maxTimeoutSeconds":"60","payTo":"0x1"}],"more":1}`))
+	if err := describe402("x", v1h, tok, &out); err != nil {
+		t.Fatalf("v1: %v", err)
 	}
 }
 
@@ -273,16 +279,26 @@ func TestOptSigner(t *testing.T) {
 	writeJSON(filepath.Join(host, "registry.json"), map[string]any{"wallets": []map[string]string{{"wallet_id": "wallet-a", "from": wa}, {"wallet_id": "wallet-b", "from": wb}}})
 	var c map[string]any
 	json.Unmarshal(signertest.Config("/opt/apa-signer/run/signer.sock", 501, 1790000000, "0x"+strings.Repeat("1", 40), "0x"+strings.Repeat("2", 40)), &c)
-	c["approvers"] = []map[string]any{{"approver_id": "approver-a", "consumer_id": "consumer-a", "wallet_ids": []string{"wallet-a"}, "signer_max": "500000",
-		"signer_total": "500000", "signer_window_seconds": 3600, "version": 3}}
+	// /opt's today is A2's: approvers without P2's caps, no voice section (V1's is staged apart).
+	c["approvers"] = []map[string]any{{"approver_id": "approver-a", "consumer_id": "consumer-a", "wallet_ids": []string{"wallet-a"}, "signer_max": "500000", "version": 3}}
 	c["webauthn"] = map[string]any{"rp_id": "localhost", "origins": []string{"http://localhost:8402"}, "challenge_ttl_seconds": 120, "approval_ttl_seconds": 300}
-	c["voice"] = map[string]any{"socket": "/opt/apa-signer/voice-run/voice.sock", "timeout_ms": 8000, "speaker_threshold_milli": 365, "asr_model": "asr@t",
-		"speaker_model": "spk@t", "decimals": 6, "merchants": []map[string]string{{"pay_to": "0x" + strings.Repeat("3", 40), "name": "測試商店", "pinyin": "ce shi shang dian"}}}
-	base := filepath.Join(dir, "signer.json")
+	voice := map[string]any{"socket": "/opt/apa-signer/voice-run/voice.sock", "timeout_ms": 8000, "speaker_threshold_milli": 365, "asr_model": "asr@t",
+		"speaker_model": "spk@t", "decimals": 18, "merchants": []map[string]string{{"pay_to": "0x" + strings.Repeat("3", 40), "name": "測試商店", "pinyin": "ce shi shang dian"}}}
+	staged := map[string]any{}
+	for k, v := range c {
+		staged[k] = v
+	}
+	staged["voice"] = voice
+	base, v1 := filepath.Join(dir, "signer.json"), filepath.Join(dir, "v1-signer.json")
 	writeJSON(base, c)
+	writeJSON(v1, staged)
 	dst := filepath.Join(dir, "new.json")
-	args := []string{"opt-signer", "--dir", dir, "--base", base, "--out", dst, "--test402-pay-to", "0x" + strings.Repeat("7", 40)}
 	var out strings.Builder
+	// Without a voice section the approval's payee is not checked: refused.
+	if err := run(context.Background(), []string{"opt-signer", "--dir", dir, "--base", base, "--out", dst}, &out, &answers{}); err == nil || !strings.Contains(err.Error(), "voice section") {
+		t.Fatalf("no voice: %v", err)
+	}
+	args := []string{"opt-signer", "--dir", dir, "--base", base, "--voice", v1, "--out", dst, "--test402-pay-to", "0x" + strings.Repeat("7", 40)}
 	if err := run(context.Background(), args, &out, &answers{}); err != nil {
 		t.Fatal(err)
 	}
@@ -308,8 +324,8 @@ func TestOptSigner(t *testing.T) {
 	if a := cfg.Approvers[0]; a.SignerMax != approverMax || a.SignerTotal != approverSum || a.SignerWindowSeconds != 86400 || a.Version != 4 {
 		t.Fatalf("approver %+v", a)
 	}
-	if m := cfg.Voice.Merchants; len(m) != 1 || m[0].PayTo != shop || m[0].Name != "測試商店" {
-		t.Fatalf("voice merchants %+v", m)
+	if m := cfg.Voice.Merchants; len(m) != 1 || m[0].PayTo != shop || m[0].Name != "測試商店" || cfg.Voice.Decimals != 6 {
+		t.Fatalf("voice %+v", cfg.Voice)
 	}
 	if r := cfg.Reservation; r == nil || r.ChainID != "84532" || r.Confirmations != 2 || r.BudgetContract != "0x"+strings.Repeat("6", 40) {
 		t.Fatalf("reservation %+v", r)
@@ -323,7 +339,14 @@ func TestOptSigner(t *testing.T) {
 	// A base whose relying party is not the Host's origin is refused.
 	c["webauthn"] = map[string]any{"rp_id": "localhost", "origins": []string{"http://localhost:9000"}, "challenge_ttl_seconds": 120, "approval_ttl_seconds": 300}
 	writeJSON(base, c)
-	if err := run(context.Background(), []string{"opt-signer", "--dir", dir, "--base", base, "--out", dst + "2"}, &out, &answers{}); err == nil || !strings.Contains(err.Error(), "origin") {
+	if err := run(context.Background(), []string{"opt-signer", "--dir", dir, "--base", base, "--voice", v1, "--out", dst + "2"}, &out, &answers{}); err == nil || !strings.Contains(err.Error(), "origin") {
 		t.Fatalf("another origin: %v", err)
+	}
+	// Two voice merchants: which one is the shop is not guessed.
+	voice["merchants"] = []map[string]string{{"pay_to": "0x" + strings.Repeat("3", 40), "name": "測試商店", "pinyin": "ce shi shang dian"},
+		{"pay_to": "0x" + strings.Repeat("8", 40), "name": "街角咖啡", "pinyin": "jie jiao ka fei"}}
+	writeJSON(v1, staged)
+	if err := run(context.Background(), []string{"opt-signer", "--dir", dir, "--base", base, "--voice", v1, "--out", dst + "3"}, &out, &answers{}); err == nil || !strings.Contains(err.Error(), "exactly one merchant") {
+		t.Fatalf("two voice merchants: %v", err)
 	}
 }

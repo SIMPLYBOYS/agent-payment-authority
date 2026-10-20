@@ -53,7 +53,7 @@ func (c *Client) call(ctx context.Context, method string, out any, params ...any
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: the node's URL does not parse", method) // not the URL itself
 	}
 	req.Header.Set("Content-Type", "application/json")
 	res, err := c.HTTP.Do(req)
