@@ -176,6 +176,25 @@ sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目�
 
 回滾：停掉 Signer，把第 4 步的備份放回原位（舊執行檔仍能打開補過表的資料庫，V1 §15）；testnet 上已發生的交易不能撤回，照 §7 處理。
 
+### 6.2 第 1 步的結果
+
+**test402 的 402**（Aaron 10/20 核准第 1 步；Claude Code 以 `p2-testnet test402` 執行，2026-10-20T02:05:08Z，一次 GET、不跟隨轉址、不帶金鑰、不付款。第一次嘗試在沙箱裡憑證驗證失敗，連線沒有送出任何請求，改在沙箱外重試同一次）：
+
+| 欄位 | 值 |
+|---|---|
+| x402 版本、scheme、網路 | 2、`exact`、`eip155:84532` |
+| amount | `100`（0.0001 USDC） |
+| asset | `0x036CbD53842c5426634e7929541eC2318f3dCF7e`（Circle USDC，與 §2 相同） |
+| payTo | `0x0000000000000000000000000000000000000402` |
+| maxTimeoutSeconds | 300 |
+| extra | `name` `USDC`、`version` `2`、`assetTransferMethod` `eip3009` |
+
+- payTo 是一個好記的位址（結尾 `0402`），很可能沒有人持有它的私鑰：付過去的 0.0001 測試 USDC 等於燒掉，這對證明相容性沒有影響。
+- test402 自己宣告的 EIP-712 version 是 `2`；部署前 preflight 仍會從鏈上讀 `version()` 核對。
+- B5 的 `dlg-t402` 收款方就是這個 payTo；`opt-signer --test402-pay-to 0x0000000000000000000000000000000000000402`。
+
+**鏈上的唯讀 preflight**：要等第 2 步的金鑰建立後，由 Aaron 執行（金鑰目錄 Claude Code 不讀）。
+
 ## 7 停止流程
 
 **遇到就停**：任何付款變成 unknown 或 needs_review；對帳不是 0；交易 revert；碰到 §5 的任何上限；餘額和預期不符；RPC 回錯的鏈。
