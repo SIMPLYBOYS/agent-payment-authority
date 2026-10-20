@@ -4,7 +4,7 @@
 //
 //	p2-testnet preflight  --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL] [--test402 URL]
 //	p2-testnet deploy     --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL]
-//	p2-testnet test402    URL
+//	p2-testnet test402    URL [--save FILE]
 //	p2-testnet opt-signer --dir DIR --base SIGNER.JSON [--voice SIGNER.JSON] --out NEW.JSON [--test402-pay-to 0x...]
 //
 // opt-signer (B6, §6 step 5) writes /opt's new signer.json from its current
@@ -25,6 +25,8 @@
 //
 // test402 asks test402's resource once (one GET, no redirect, no key, no
 // payment) and prints its PAYMENT-REQUIRED: §6 step 1's part B5 needs.
+// --save keeps the header as received (an Offer file, B5-D2): the Host's
+// trusted quote for test402, never re-read from a 402 it happens to get.
 //
 // preflight reads only: the chain (84532, not an anvil), Circle's USDC
 // (name, version, decimals), every address's balance, and, with --test402,
@@ -145,9 +147,19 @@ func run(ctx context.Context, args []string, out io.Writer, ask asker) error {
 	if len(args) > 0 && args[0] == "opt-signer" {
 		return optSigner(args[1:], out)
 	}
-	if len(args) == 2 && args[0] == "test402" {
+	if len(args) > 0 && args[0] == "test402" {
+		save := ""
+		switch {
+		case len(args) == 4 && args[2] == "--save":
+			save = args[3]
+			if _, err := os.Lstat(save); !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("%s exists; nothing was asked", save)
+			}
+		case len(args) != 2:
+			return errors.New("usage: p2-testnet test402 URL [--save FILE]")
+		}
 		tok, _ := eth.ParseAddress(circleUSDC)
-		return test402(ctx, args[1], tok, out)
+		return test402(ctx, args[1], tok, out, save)
 	}
 	if len(args) == 0 || args[0] != "preflight" && args[0] != "deploy" {
 		return usage
@@ -204,7 +216,7 @@ func run(ctx context.Context, args []string, out io.Writer, ask asker) error {
 	}
 	if args[0] == "preflight" {
 		if o.test402 != "" {
-			if err := test402(ctx, o.test402, tok.addr, out); err != nil {
+			if err := test402(ctx, o.test402, tok.addr, out, ""); err != nil {
 				return err
 			}
 		}
@@ -394,7 +406,7 @@ func units(v *big.Int, dec int) string {
 
 // test402 asks test402's resource once and prints its PAYMENT-REQUIRED:
 // the B5 product is made from what it says now (docs/commercial-p2b.md B5).
-func test402(ctx context.Context, resource string, tok eth.Address, out io.Writer) error {
+func test402(ctx context.Context, resource string, tok eth.Address, out io.Writer, save string) error {
 	u, err := url.Parse(resource)
 	if err != nil || u.Scheme != "https" || u.Host != "test402.com" {
 		return errors.New("--test402 is an https URL on test402.com")
@@ -412,7 +424,33 @@ func test402(ctx context.Context, resource string, tok eth.Address, out io.Write
 	if res.StatusCode != http.StatusPaymentRequired {
 		return fmt.Errorf("test402: status %d, not 402", res.StatusCode)
 	}
-	return describe402(u.Host+u.Path, res.Header.Get(x402.HeaderPaymentRequired), tok, out)
+	header := res.Header.Get(x402.HeaderPaymentRequired)
+	if err := describe402(u.Host+u.Path, header, tok, out); err != nil || save == "" {
+		return err
+	}
+	f := Offer{ResourceURL: resource, PaymentRequired: header, FetchedAt: time.Now().UTC().Format(time.RFC3339)}
+	raw, _ := json.MarshalIndent(f, "", "  ")
+	w, err := os.OpenFile(save, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(append(raw, '\n')); err != nil {
+		w.Close()
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "p2-testnet: saved the PAYMENT-REQUIRED as received in %s\n", save)
+	return nil
+}
+
+// Offer is a saved external 402 (B5-D2): the resource asked and its
+// PAYMENT-REQUIRED header exactly as received.
+type Offer struct {
+	ResourceURL     string `json:"resource_url"`
+	PaymentRequired string `json:"payment_required"`
+	FetchedAt       string `json:"fetched_at"`
 }
 
 // describe402 prints a PAYMENT-REQUIRED's accepted payments, each read

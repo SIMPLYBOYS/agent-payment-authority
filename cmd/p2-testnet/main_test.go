@@ -366,4 +366,9 @@ func TestTest402Refusals(t *testing.T) {
 			t.Fatalf("%s: %v", u, err)
 		}
 	}
+	f := filepath.Join(t.TempDir(), "offer.json")
+	os.WriteFile(f, nil, 0o600)
+	if err := run(context.Background(), []string{"test402", "https://test402.com/api/x402", "--save", f}, os.Stdout, &answers{}); err == nil || !strings.Contains(err.Error(), "exists") {
+		t.Fatalf("a save over a file: %v", err) // refused before asking
+	}
 }
