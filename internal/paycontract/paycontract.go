@@ -33,8 +33,11 @@ const PaymentNotEnabled = "not_enabled"
 var (
 	idPattern      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 	addressPattern = regexp.MustCompile(`^0x[0-9a-f]{40}$`)
-	noncePattern   = regexp.MustCompile(`^0x[0-9a-f]{64}$`)
-	digestPattern  = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	// quotedAddress: a 402 may write an address in either case (EIP-55,
+	// docs/commercial-p2b.md B5-D1); the binding's is lowercase.
+	quotedAddress = regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`)
+	noncePattern  = regexp.MustCompile(`^0x[0-9a-f]{64}$`)
+	digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
 
 // Error carries a stable code, like contracts.CodedError.
@@ -181,7 +184,7 @@ func (p PurchaseOrder) Validate() error {
 	}
 	for _, pair := range [][2]string{{"scheme", i.Scheme}, {"network", "eip155:" + b.ChainID}, {"asset", b.AssetContract}, {"payTo", b.PayTo}, {"amount", string(b.Amount)}} {
 		var got string
-		if err := json.Unmarshal(req[pair[0]], &got); err != nil || got != pair[1] {
+		if err := json.Unmarshal(req[pair[0]], &got); err != nil || !sameAsBinding(pair[0], got, pair[1]) {
 			return coded("INVALID_PURCHASE", "requirement "+pair[0]+" differs from the binding")
 		}
 	}
@@ -308,3 +311,14 @@ func ValidateDecision(d contracts.PolicyDecision) error {
 func ValidID(s string) bool { return ids(s) }
 
 func errf(format string, a ...any) error { return coded("INVALID_EVENT", fmt.Sprintf(format, a...)) }
+
+// sameAsBinding: the quote's field says what the binding says. Its asset
+// and payTo are the binding's address in any case (a 402 may use EIP-55's
+// mixed case; B5-D1); every other field is the binding's exactly. The
+// binding itself stays lowercase, and the quote is hashed as received.
+func sameAsBinding(field, quoted, bound string) bool {
+	if field == "asset" || field == "payTo" {
+		return quotedAddress.MatchString(quoted) && strings.ToLower(quoted) == bound
+	}
+	return quoted == bound
+}

@@ -260,3 +260,45 @@ func TestGrantAndDelegation(t *testing.T) {
 		t.Error("allow_max above the budget accepted")
 	}
 }
+
+// A 402 writing the asset and payTo in EIP-55's mixed case is the same
+// purchase (B5-D1, docs/commercial-p2b.md): accepted, the binding
+// lowercase; another address, another prefix or a non-hex character in
+// either is still refused.
+func TestQuoteAddressInEitherCase(t *testing.T) {
+	_, p := base(t)
+	sp, _ := SpecOf(Version)
+	const usdc, usdc55 = "0x036cbd53842c5426634e7929541ec2318f3dcf7e", "0x036CbD53842c5426634e7929541eC2318f3dCF7e" // as test402 writes it
+	const shop, shopMixed = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", "0xAbCdEfAbCdEfAbCdEfAbCdEfAbCdEfAbCdEfAbCd"
+	// order: the binding's asset and payTo, and the quote's as written.
+	order := func(asset, payTo, quotedAsset, quotedPayTo string) PurchaseOrder {
+		q := p
+		q.PaymentBinding.AssetContract, q.PaymentBinding.PayTo = asset, payTo
+		var req map[string]any
+		json.Unmarshal(p.Quote.SelectedRequirement, &req)
+		req["asset"], req["payTo"] = quotedAsset, quotedPayTo
+		q.Quote.SelectedRequirement, _ = json.Marshal(req)
+		h, err := sp.RequirementHash(q.Quote)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q.Intent.PaymentRequirementHash = h
+		return q
+	}
+	if err := order(usdc, shop, usdc, shop).Validate(); err != nil {
+		t.Fatalf("lowercase as before: %v", err)
+	}
+	if err := order(usdc, shop, usdc55, shopMixed).Validate(); err != nil {
+		t.Fatalf("the quote in EIP-55's case: %v", err)
+	}
+	for name, q := range map[string]PurchaseOrder{
+		"another asset":        order(usdc, shop, "0x036CbD53842c5426634e7929541eC2318f3dCF7f", shop),
+		"a non-hex asset":      order(usdc, shop, "0x036CbD53842c5426634e7929541eC2318f3dCF7g", shop),
+		"a 0X payTo":           order(usdc, shop, usdc, "0X"+shop[2:]),
+		"a mixed-case binding": order(usdc55, shop, usdc55, shop),
+	} {
+		if err := q.Validate(); Code(err) != "INVALID_PURCHASE" {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}

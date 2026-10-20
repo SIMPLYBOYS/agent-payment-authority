@@ -341,7 +341,8 @@ func (s *Shop) assemblePay(b *Binding, p Product, po string, q contracts.Quote, 
 			PurchaseOrderID: po, ResourceHash: rh, HTTPMethod: http.MethodGet, ResourceURL: p.URL,
 			X402Version: q.X402Version, Scheme: req.Scheme, PaymentRequirementHash: qh,
 		},
-		PaymentBinding: paycontract.PaymentBinding{Method: "eip3009", ChainID: chain, AssetContract: req.Asset, From: b.From, PayTo: req.PayTo,
+		// The binding's addresses lowercase; the quote keeps a 402's own case (EIP-55, B5-D1).
+		PaymentBinding: paycontract.PaymentBinding{Method: "eip3009", ChainID: chain, AssetContract: strings.ToLower(req.Asset), From: b.From, PayTo: strings.ToLower(req.PayTo),
 			Amount: req.Amount, ValidAfter: now - 1, ValidBefore: now + window, Nonce: "0x" + hex.EncodeToString(nonce[:])},
 	}
 	return order, order.Validate()

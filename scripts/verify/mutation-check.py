@@ -1121,6 +1121,12 @@ MUTATIONS = [
      'if errors.As(err, &ue) {', 'if false && errors.As(err, &ue) {', 'TestRPCErrorsHideTheURL'),
     ('P2-b B6 review: opt-signer writes a config without voice', 'cmd/p2-testnet/main.go',
      'if cfg.Voice == nil || len(cfg.Voice.Merchants) != 1 {', 'if false && (cfg.Voice == nil || len(cfg.Voice.Merchants) != 1) {', 'TestOptSigner'),
+    ('P2-b B5-D1: a quoted address must match the binding case for case', 'internal/paycontract/paycontract.go',
+     'strings.ToLower(quoted) == bound', 'quoted == bound', 'TestQuoteAddressInEitherCase'),
+    ('P2-b B5-D1: any string folding to the binding passes as an address', 'internal/paycontract/paycontract.go',
+     'return quotedAddress.MatchString(quoted) && strings.ToLower', 'return true && strings.ToLower', 'TestQuoteAddressInEitherCase'),
+    ("P2-b B5-D1: the bridge binds a 402's mixed-case payee", 'internal/toolbridge/shop.go',
+     'PayTo: strings.ToLower(req.PayTo),', 'PayTo: req.PayTo,', 'TestEIP55QuoteGetsALowercaseBinding'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the

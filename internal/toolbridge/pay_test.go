@@ -1,13 +1,16 @@
 package toolbridge
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
 
 // An apa.pay.v1 task (its version stored with it, not named by the model)
@@ -90,5 +93,56 @@ func TestPaymentStatusProjected(t *testing.T) {
 	}
 	if out, _ := e.call(b, "request_purchase", "kr-market"); out["payment"] != "paying" || out["already_requested"] != true {
 		t.Fatalf("being paid: %v", out)
+	}
+}
+
+// An outside 402 that writes its addresses in EIP-55's mixed case (test402,
+// docs/commercial-p2b.md B5-D1): the purchase is built, the binding
+// lowercase, the quote kept as received.
+func TestEIP55QuoteGetsALowercaseBinding(t *testing.T) {
+	e := newEnv(t)
+	const usdc, usdc55 = "0x036cbd53842c5426634e7929541ec2318f3dcf7e", "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+	const payee, payee55 = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", "0xAbCdEfAbCdEfAbCdEfAbCdEfAbCdEfAbCdEfAbCd"
+	ext := e.srv.URL + "/ext"
+	accept, _ := json.Marshal(map[string]any{"scheme": "exact", "network": "eip155:84532", "amount": "100", "asset": usdc55, "payTo": payee55,
+		"maxTimeoutSeconds": 300, "extra": map[string]string{"name": "USDC", "version": "2", "assetTransferMethod": "eip3009"}})
+	pr := x402.PaymentRequired{X402Version: 2, Resource: x402.ResourceInfo{URL: ext}, Accepts: []json.RawMessage{accept}, Extensions: json.RawMessage(`{}`)}
+	h, err := x402.Encode(pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.setTamper(func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/ext" {
+			return false
+		}
+		w.Header().Set(x402.HeaderPaymentRequired, h)
+		w.WriteHeader(http.StatusPaymentRequired)
+		return true
+	})
+	q, _ := pr.Quote(0)
+	e.st.Close()
+	e.reg.Assets[0].AssetContract = usdc
+	e.open(store.OfferBook{{Method: "GET", URL: ext}: {q}})
+	e.sh.Products["ext"] = Product{ID: "ext", URL: ext}
+	p := e.profile
+	p.Merchants = []string{payee}
+	d, _, err := e.st.ConfirmDelegation(store.DelegationRequest{RequestID: "dlg-req-0000000000000001", ConsumerID: "consumer-a", Scenario: "pay", Purpose: "a check",
+		AssetID: p.AssetID, Merchants: p.Merchants, TaskBudget: "5000000", AllowMax: "100000", ApprovalDeadlineSeconds: 30, ValidSeconds: 600,
+		ConfirmedBy: "simulated:consumer-a:host-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cred := policy.Credential{ConsumerID: "consumer-a", ValidUntil: t0 + 86400, EvidenceMode: "fixture"}
+	if err := e.st.StartTask(store.TaskSetup{TaskID: "task-a", Profile: &p, Credential: &cred, ContractVersion: paycontract.Version, DelegationID: d.DelegationID}); err != nil {
+		t.Fatal(err)
+	}
+	b := &Binding{Session: sessA, WalletID: "wallet-a", From: "0x1111111111111111111111111111111111111111"}
+	b.Arm()
+	if out, rec := e.call(b, "request_purchase", "ext"); rec.Outcome != "Allow" {
+		t.Fatalf("request_purchase: %v %v", out, rec)
+	}
+	ps := e.purchases(sessA)
+	if len(ps) != 1 || ps[0].PayTo != payee || ps[0].AssetContract != usdc || ps[0].AssetID == "" {
+		t.Fatalf("stored: %+v", ps)
 	}
 }
