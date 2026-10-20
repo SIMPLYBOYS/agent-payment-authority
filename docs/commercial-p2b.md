@@ -224,6 +224,8 @@ sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目�
 - 寫出的檔：`var/p2-testnet/relayer.json`（每日 12 筆、確認 2）、`var/p2-testnet/host/payments.json`（對帳從區塊 48374723 開始；委派 `consumer-a/<shop>`→`dlg-ta@1`、`consumer-b/<shop>`→`dlg-tb@1`、`consumer-b/0x…0402`→`dlg-t402@1`；`test402_offer`）、`registry.json`、`profile.json`（merchants：商店與 test402）。Claude Code 讀過這些公開設定核對無誤（未讀金鑰目錄）。
 - 第 4 步完成；我們自己送的交易目前 2 筆（§6 預計 11 筆）。
 
+**第 5 步的準備**（Claude Code，10/21，不動 `/opt`）：`var/p2-opt/apa-signer` 從乾淨的 worktree 建置（commit `c0bc0c5fd91861e2fd1d1f4d155b351449267d7f`，`GOFLAGS=-mod=readonly GOPROXY=off GOTOOLCHAIN=local`），SHA-256 `85c240c00b7607ef90e53601a17312727b506e0d09c5ea10ef2bcb1829a14edc`。語音服務的檔案自 V1 準備時（f81517a）沒有變動，沿用 `var/v1-opt/stage`。
+
 ## 7 停止流程
 
 **遇到就停**：任何付款變成 unknown 或 needs_review；對帳不是 0；交易 revert；碰到 §5 的任何上限；餘額和預期不符；RPC 回錯的鏈。
