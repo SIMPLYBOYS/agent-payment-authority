@@ -455,3 +455,36 @@ func TestNewEval(t *testing.T) {
 		}
 	}
 }
+
+// B5: an outside product is listed in the data shop's catalog with its own
+// resource URL and quote; this shop serves nothing for it.
+func TestExternalProductListedNotServed(t *testing.T) {
+	q := contracts.Quote{X402Version: 2, SelectedRequirement: json.RawMessage(`{"amount":"100","payTo":"0x0000000000000000000000000000000000000402"}`), Extensions: json.RawMessage(`{}`)}
+	m, err := build("http://127.0.0.1:8402", products, External{ID: "test402", Title: "t", Summary: "s", AssetDisplay: "0.0001 test USDC",
+		ResourceURL: "https://test402.com/api/x402", Quote: q})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cat struct{ Products []catalogEntry }
+	json.Unmarshal(m.catalogs[""], &cat)
+	last := cat.Products[len(cat.Products)-1]
+	if last.ProductID != "test402" || last.ResourceURL != "https://test402.com/api/x402" || last.Price.AssetAmount != "100" {
+		t.Fatalf("catalog %+v", cat.Products)
+	}
+	offers := m.Offers()
+	if o := offers[len(offers)-1]; o.ProductID != "test402" || o.URL != "https://test402.com/api/x402" || string(o.Quote.SelectedRequirement) != string(q.SelectedRequirement) {
+		t.Fatalf("offer %+v", o)
+	}
+	mux := http.NewServeMux()
+	m.Register(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/x402", nil))
+	if rec.Code != 404 {
+		t.Fatalf("served %d", rec.Code)
+	}
+	for _, bad := range []External{{ID: "Test402", ResourceURL: "https://test402.com/x", Quote: q}, {ID: "t", ResourceURL: "http://test402.com/x", Quote: q}, {ID: "t", ResourceURL: "https://x/y"}} {
+		if _, err := build("http://127.0.0.1:8402", products, bad); err == nil {
+			t.Fatalf("accepted %+v", bad)
+		}
+	}
+}

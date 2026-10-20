@@ -868,3 +868,54 @@ func TestSignerStoreAnswers(t *testing.T) {
 		t.Fatalf("status list not read, too late: %+v", p)
 	}
 }
+
+// B5: an Allow's delegation is its consumer and payee's when there is one
+// (test402's own, dlg-t402), else its consumer's.
+func TestStarterByPayee(t *testing.T) {
+	ok := func(context.Context, string, string, uint64) error { return nil }
+	w := newWorld(t, 1)
+	payee := signertest.Merchant
+	s := &Starter{Store: w.s, Register: ok, Log: func(string, error) {},
+		Delegations: map[string]string{"consumer-a": "dlg-a@1", "consumer-a/" + payee: "dlg-shop@2", "consumer-a/0x" + strings.Repeat("9", 40): "dlg-other@1"}}
+	s.Start(bg)
+	if p := w.payment("po-1"); p.GrantRef != "dlg-shop@2" {
+		t.Fatalf("by payee: %+v", p)
+	}
+	w2 := newWorld(t, 1)
+	s2 := &Starter{Store: w2.s, Register: ok, Log: func(string, error) {}, Delegations: map[string]string{"consumer-a/0x" + strings.Repeat("9", 40): "dlg-other@1"}}
+	s2.Start(bg)
+	if _, err := w2.s.PaymentOf("consumer-a", "task-a", "po-1"); err == nil {
+		t.Fatal("a payment started under another payee's delegation, or none")
+	}
+}
+
+// B5-D1: the payment's authorization.to is written as the quote writes
+// payTo (EIP-55 from test402), the same address the Signer signed.
+func TestPaymentSignatureKeepsTheQuotesCase(t *testing.T) {
+	const payee, payee55 = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", "0xAbCdEfAbCdEfAbCdEfAbCdEfAbCdEfAbCdEfAbCd"
+	var o paycontract.PurchaseOrder
+	o.Intent.ResourceURL = "https://test402.com/api/x402"
+	o.Quote.SelectedRequirement = json.RawMessage(`{"payTo":"` + payee55 + `"}`)
+	a := signer.SignedAuthorization{Transfer: signer.Transfer{From: "0x" + strings.Repeat("1", 40), To: payee, Value: "100", Nonce: "0x" + strings.Repeat("0", 64)}}
+	h, err := paymentSignature(o, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p x402.PaymentPayload
+	if err := x402.Decode(h, &p); err != nil {
+		t.Fatal(err)
+	}
+	var pl struct{ Authorization map[string]string }
+	json.Unmarshal(p.Payload, &pl)
+	if pl.Authorization["to"] != payee55 || string(p.Accepted) != `{"payTo":"`+payee55+`"}` {
+		t.Fatalf("to %q, accepted %s", pl.Authorization["to"], p.Accepted)
+	}
+	// Another address in the quote than the one signed: the signed one goes out.
+	o.Quote.SelectedRequirement = json.RawMessage(`{"payTo":"0x` + strings.Repeat("9", 40) + `"}`)
+	h, _ = paymentSignature(o, a)
+	x402.Decode(h, &p)
+	json.Unmarshal(p.Payload, &pl)
+	if pl.Authorization["to"] != payee {
+		t.Fatalf("to %q", pl.Authorization["to"])
+	}
+}

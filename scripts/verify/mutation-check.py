@@ -1127,12 +1127,26 @@ MUTATIONS = [
      'return quotedAddress.MatchString(quoted) && strings.ToLower', 'return true && strings.ToLower', 'TestQuoteAddressInEitherCase'),
     ("P2-b B5-D1: the bridge binds a 402's mixed-case payee", 'internal/toolbridge/shop.go',
      'PayTo: strings.ToLower(req.PayTo),', 'PayTo: req.PayTo,', 'TestEIP55QuoteGetsALowercaseBinding'),
+    ("P2-b B5-D1: the bridge binds a 402's mixed-case asset", 'internal/toolbridge/shop.go',
+     'AssetContract: strings.ToLower(req.Asset),', 'AssetContract: req.Asset,', 'TestEIP55QuoteGetsALowercaseBinding'),
+    ("P2-b B5: an Allow's payee does not pick its delegation", 'internal/payflow/payflow.go',
+     'if d, ok := s.Delegations[consumer+"/"+payTo]; ok {', 'if d, ok := s.Delegations[consumer+"/"+payTo]; false && ok {', 'TestStarterByPayee'),
+    ("P2-b B5: authorization.to loses the quote's case", 'internal/payflow/payflow.go',
+     '&& strings.EqualFold(req.PayTo, a.To) {', '&& false && strings.EqualFold(req.PayTo, a.To) {', 'TestPaymentSignatureKeepsTheQuotesCase'),
+    ('P2-b B5: test402 on a local anvil', 'cmd/demo/payments.go',
+     'if c.Test402Offer != "" && c.Environment != BaseSepolia {', 'if false && c.Test402Offer != "" && c.Environment != BaseSepolia {', 'TestPaymentsConfigRefused'),
+    ("P2-b B5: a saved 402 for another resource", 'cmd/demo/payments.go',
+     'if pr.Resource.URL != f.ResourceURL || len(pr.Accepts) != 1 {', 'if len(pr.Accepts) != 1 {', 'TestTest402Product'),
+    ('P2-b B5: an outside product over http', 'internal/merchant/merchant.go',
+     'err != nil || u.Scheme != "https" || u.User != nil', 'err != nil || u.User != nil', 'TestExternalProductListedNotServed'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    ("P2-b B5: deploy gives test402 consumer B's shop delegation", 'cmd/p2-testnet/main.go',
+     'd["consumer-b/"+f.t402.Hex()] = "dlg-t402@1"', 'd["consumer-b/"+f.t402.Hex()] = "dlg-tb@1"', 'cmd/p2-testnet:TestPreflightAndDeploy'),
     ('P2-b B4 review: deploy sends before checking its paths', 'cmd/p2-testnet/main.go',
      'if fi, err := os.Stat(p); err != nil || !fi.Mode().IsRegular() {', 'if fi, err := os.Stat(p); false && (err != nil || !fi.Mode().IsRegular()) {', 'cmd/p2-testnet:TestPreflightAndDeploy'),
     ('P2-b B4 review: an unfinished journal is resumed', 'cmd/p2-testnet/main.go',

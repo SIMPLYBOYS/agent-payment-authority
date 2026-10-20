@@ -5,7 +5,7 @@
 //	p2-testnet preflight  --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL] [--test402 URL]
 //	p2-testnet deploy     --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL]
 //	p2-testnet test402    URL [--save FILE]
-//	p2-testnet opt-signer --dir DIR --base SIGNER.JSON [--voice SIGNER.JSON] --out NEW.JSON [--test402-pay-to 0x...]
+//	p2-testnet opt-signer --dir DIR --base SIGNER.JSON [--voice SIGNER.JSON] --out NEW.JSON
 //
 // opt-signer (B6, §6 step 5) writes /opt's new signer.json from its current
 // one (--base: the socket, callers, approvers and webauthn are kept; A2's,
@@ -13,7 +13,7 @@
 // or --voice's: V1's staged signer.json; a config without one is refused:
 // voice is the Signer's only check of an approval's payee)
 // and deploy's DIR/host files: the two testnet wallets, Circle's USDC, the
-// delegations dlg-ta and dlg-tb (and dlg-t402 for exactly one test402
+// delegations dlg-ta and dlg-tb (and dlg-t402, when deploy wrote test402's line, for exactly one test402
 // payment), the approvers' caps (P2b-D5), the voice merchant at the shop's
 // address and the reservation section. It reads no key and reaches no node.
 //
@@ -699,6 +699,10 @@ type hostFiles struct {
 	reg  contracts.RegistryConfig
 	prof map[string]any
 	zk   string
+	// t402, t402Offer: test402's payee and its saved 402 (DIR/test402-offer.json,
+	// test402 --save; B5), when that file is there.
+	t402      eth.Address
+	t402Offer string
 }
 
 // prepare builds and checks the registry and profile, and the paths the
@@ -737,13 +741,39 @@ func prepare(o options, tok token, r roles) (hostFiles, error) {
 	if err := readJSON(o.profile, &f.prof); err != nil {
 		return f, err
 	}
-	f.prof["asset_id"], f.prof["merchants"] = assetID, []string{f.shop.Hex()}
+	merchants := []string{f.shop.Hex()}
+	if p := filepath.Join(o.dir, "test402-offer.json"); fileExists(p) {
+		var off Offer
+		var pr x402.PaymentRequired
+		var req struct{ PayTo, Asset string }
+		if err := readJSON(p, &off); err != nil || x402.Decode(off.PaymentRequired, &pr) != nil || len(pr.Accepts) != 1 || json.Unmarshal(pr.Accepts[0], &req) != nil {
+			return f, fmt.Errorf("%s is not test402's saved 402", p)
+		}
+		a, err := eth.ParseAddress(strings.ToLower(req.PayTo))
+		if as, _ := eth.ParseAddress(strings.ToLower(req.Asset)); err != nil || as != tok.addr || a == f.shop {
+			return f, fmt.Errorf("%s: its payTo or asset is not test402's Circle USDC payment", p)
+		}
+		f.t402, f.t402Offer = a, p
+		merchants = append(merchants, a.Hex()) // the policy allows test402 as a payee too
+	}
+	f.prof["asset_id"], f.prof["merchants"] = assetID, merchants
 	raw, _ := json.Marshal(f.prof)
 	if _, err := policy.LoadProfile(raw); err != nil {
 		return f, fmt.Errorf("the profile to write: %w", err)
 	}
 	return f, nil
 }
+
+// delegations are the Host's lines consumer/payee -> Signer delegation.
+func (f hostFiles) delegations() map[string]string {
+	d := map[string]string{"consumer-a/" + f.shop.Hex(): "dlg-ta@1", "consumer-b/" + f.shop.Hex(): "dlg-tb@1"}
+	if f.t402Offer != "" {
+		d["consumer-b/"+f.t402.Hex()] = "dlg-t402@1" // exactly one 0.0001 payment, wallet-b (P2b-D5, D7)
+	}
+	return d
+}
+
+func fileExists(p string) bool { _, err := os.Lstat(p); return err == nil }
 
 // write writes apa-relayer's relayer.json and the Host's files.
 func (f hostFiles) write(budget eth.Address, from uint64, out io.Writer) error {
@@ -759,7 +789,12 @@ func (f hostFiles) write(budget eth.Address, from uint64, out io.Writer) error {
 		"token_name": f.tok.name, "token_version": f.tok.version, "token_from_block": from, "pay_to": f.shop.Hex(), "budget_contract": budget.Hex(),
 		"policy_ttl": policyTTL, "zkbudget": o.zkbudget, "zk_setup_dir": f.zk, "relayer_socket": sock,
 		"shop_key_dir": o.dir, "shop_daily_tx_cap": shopCap, "dir": host,
-		"delegations": map[string]string{"consumer-a": "dlg-ta@1", "consumer-b": "dlg-tb@1"}} // new IDs: /opt's signer.db may know dlg-a/dlg-b (P2b-D5)
+		// By consumer and payee (B5): a purchase from a payee no line names starts
+		// no payment. New IDs: /opt's signer.db may know dlg-a/dlg-b (P2b-D5).
+		"delegations": f.delegations()}
+	if f.t402Offer != "" {
+		pay["test402_offer"] = f.t402Offer
+	}
 	rel := map[string]any{"socket": sock, "callers": []int{os.Getuid()}, "rpc": o.rpc, "chain_id": chainID, "budget_contract": budget.Hex(),
 		"confirmations": confirmations, "policy_ttl": policyTTL, "zkbudget": o.zkbudget, "zk_setup_dir": f.zk, "daily_tx_cap": relayerCap}
 	for path, v := range map[string]any{filepath.Join(o.dir, "relayer.json"): rel, filepath.Join(host, "payments.json"): pay,
@@ -852,9 +887,8 @@ func optSigner(args []string, out io.Writer) error {
 	base := fs.String("base", "", "/opt's current signer.json (a copy)")
 	dst := fs.String("out", "", "the new signer.json (must not exist)")
 	voiceFrom := fs.String("voice", "", "a signer.json whose voice section is used (V1's staged one), when --base has none")
-	t402 := fs.String("test402-pay-to", "", "test402's payTo (preflight --test402 printed it): adds dlg-t402")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *dir == "" || *base == "" || *dst == "" {
-		return errors.New("usage: p2-testnet opt-signer --dir DIR --base SIGNER.JSON [--voice SIGNER.JSON] --out NEW.JSON [--test402-pay-to 0x...]")
+		return errors.New("usage: p2-testnet opt-signer --dir DIR --base SIGNER.JSON [--voice SIGNER.JSON] --out NEW.JSON")
 	}
 	if _, err := os.Lstat(*dst); !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("%s exists; nothing was written", *dst)
@@ -911,7 +945,15 @@ func optSigner(args []string, out io.Writer) error {
 	if err := errors.Join(readJSON(filepath.Join(host, "payments.json"), &pay), readJSON(filepath.Join(host, "registry.json"), &reg)); err != nil {
 		return fmt.Errorf("deploy's files: %w", err)
 	}
-	if pay.Environment != "base_sepolia" || pay.ChainID != chainID || pay.Delegations["consumer-a"] != "dlg-ta@1" || pay.Delegations["consumer-b"] != "dlg-tb@1" ||
+	shopKey := strings.ToLower(pay.PayTo)
+	var t402 string // test402's payee, when deploy wrote its line (B5)
+	for k, v := range pay.Delegations {
+		if c, payee, _ := strings.Cut(k, "/"); v == "dlg-t402@1" && c == "consumer-b" && payee != shopKey {
+			t402 = payee
+		}
+	}
+	if pay.Environment != "base_sepolia" || pay.ChainID != chainID || pay.Delegations["consumer-a/"+shopKey] != "dlg-ta@1" || pay.Delegations["consumer-b/"+shopKey] != "dlg-tb@1" ||
+		len(pay.Delegations) != map[bool]int{true: 3, false: 2}[t402 != ""] ||
 		!strings.EqualFold(pay.Token, circleUSDC) && !local || pay.TokenName != "USDC" || !strings.HasPrefix(pay.RPC, "https://") {
 		return errors.New("DIR/host/payments.json is not p2-testnet deploy's (base_sepolia, Circle's USDC, an https node)")
 	}
@@ -935,10 +977,10 @@ func optSigner(args []string, out io.Writer) error {
 			Merchants: []string{strings.ToLower(merchant)}, PerTxMax: contracts.Amount(perTx), TotalCap: contracts.Amount(total), ValidFrom: now - 60, ValidUntil: now + 7*86400}
 	}
 	cfg.Delegations = []signer.Delegation{dlg("dlg-ta", "a", pay.PayTo, dlgPerTx, dlgTotal), dlg("dlg-tb", "b", pay.PayTo, dlgPerTx, dlgTotal)}
-	if *t402 != "" {
-		a, err := eth.ParseAddress(*t402)
+	if t402 != "" {
+		a, err := eth.ParseAddress(t402)
 		if err != nil {
-			return fmt.Errorf("--test402-pay-to: %w", err)
+			return fmt.Errorf("payments.json's test402 payee: %w", err)
 		}
 		cfg.Delegations = append(cfg.Delegations, dlg("dlg-t402", "b", a.Hex(), t402Units, t402Units))
 	}

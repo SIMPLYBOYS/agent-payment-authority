@@ -26,6 +26,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
 
 func TestPaymentsConfigRefused(t *testing.T) {
@@ -56,6 +57,7 @@ func TestPaymentsConfigRefused(t *testing.T) {
 		"no delegations":               {func(c map[string]any) { delete(c, "delegations") }, "delegations"},
 		"a shared directory":           {func(c map[string]any) { os.Chmod(priv, 0o750) }, "0700"},
 		"no chain at the RPC":          {func(c map[string]any) {}, "did not answer"},
+		"test402 on a local anvil":     {func(c map[string]any) { c["test402_offer"] = "/x/test402-offer.json" }, "base_sepolia's only"},
 		"no apa-relayer on its socket": {func(c map[string]any) { c["relayer_socket"] = filepath.Join(priv, "none.sock") }, "apa-relayer on"},
 	} {
 		os.Chmod(priv, 0o700)
@@ -355,9 +357,26 @@ func TestTestnetPaymentsOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pay.Close()
 	if pay.cfg.Environment != BaseSepolia {
 		t.Fatalf("environment %q", pay.cfg.Environment)
+	}
+	pay.Close()
+	// B5: with test402's saved 402 the data shop also offers test402, at test402.
+	c := testnetConfig(priv, sock, keys, geth)
+	c["pay_to"], c["test402_offer"] = shopAddr, test402Offer(t, "https://test402.com/api/x402")
+	raw, _ := json.Marshal(c)
+	os.WriteFile(path, raw, 0o600)
+	pay, shop, err := openPayments(t.Context(), path, "http://127.0.0.1:2", wallClock, func() ([]byte, error) { return []byte(pass), nil }, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pay.Close()
+	var found bool
+	for _, o := range shop.Offers() {
+		found = found || o.ProductID == "test402" && o.URL == "https://test402.com/api/x402" && o.Scene == ""
+	}
+	if !found {
+		t.Fatalf("offers %+v", shop.Offers())
 	}
 }
 
@@ -372,5 +391,72 @@ func TestLoggedPaymentError(t *testing.T) {
 	}
 	if got := logged(&store.Error{Code: "TASK_ENDED"}); got != "TASK_ENDED" {
 		t.Fatalf("%s", got)
+	}
+}
+
+// test402Offer writes a saved test402 402 (as p2-testnet test402 --save does).
+func test402Offer(t *testing.T, resource string) string {
+	t.Helper()
+	accept := json.RawMessage(`{"scheme":"exact","network":"eip155:84532","amount":"100","asset":"0x036CbD53842c5426634e7929541eC2318f3dCF7e",` +
+		`"payTo":"0x0000000000000000000000000000000000000402","maxTimeoutSeconds":300,"extra":{"name":"USDC","version":"2","assetTransferMethod":"eip3009"}}`)
+	h, err := x402.Encode(x402.PaymentRequired{X402Version: 2, Error: "PAYMENT-SIGNATURE header is required",
+		Resource: x402.ResourceInfo{URL: resource, Description: "test402 challenge", MimeType: "application/json"}, Accepts: []json.RawMessage{accept},
+		Extensions: json.RawMessage(`{"https://test402.com/extensions/facilitator":{"id":"x402org","url":"https://x402.org/facilitator"}}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "test402-offer.json")
+	raw, _ := json.Marshal(map[string]string{"resource_url": "https://test402.com/api/x402", "payment_required": h, "fetched_at": "2026-10-20T02:16:31Z"})
+	os.WriteFile(path, raw, 0o600)
+	return path
+}
+
+// B5: test402's saved 402 is the data shop's outside product with that
+// quote; another host, or a 402 for another resource, is refused.
+func TestTest402Product(t *testing.T) {
+	x, err := test402Product(test402Offer(t, "https://test402.com/api/x402"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req struct{ PayTo, Amount string }
+	json.Unmarshal(x.Quote.SelectedRequirement, &req)
+	if x.ID != "test402" || x.ResourceURL != "https://test402.com/api/x402" || req.PayTo != "0x0000000000000000000000000000000000000402" || req.Amount != "100" {
+		t.Fatalf("%+v", x)
+	}
+	if _, err := test402Product(test402Offer(t, "https://test402.com/api/other")); err == nil {
+		t.Fatal("a 402 for another resource")
+	}
+}
+
+// make present-testnet's catalog (B5): P2's four, labelled testnet, and
+// test402 for consumer B in the data shop, its script asking for test402.
+func TestTestnetShippedCatalog(t *testing.T) {
+	var regCfg contracts.RegistryConfig
+	if err := decodeFile("testdata/demo/registry.json", &regCfg); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := contracts.NewRegistry(regCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scs, err := loadScenarios("testdata/demo/scenarios-testnet.json", reg, regCfg, false)
+	if err != nil || len(scs) != 5 {
+		t.Fatalf("catalog: %v %v", scs, err)
+	}
+	x := scs["t402-b"]
+	if x.ConsumerID != "consumer-b" || x.Scene != "" || x.version() != paycontract.Version {
+		t.Fatalf("t402-b %+v", x)
+	}
+	if allow, _ := x.Delegation.AllowMax.Units(); allow < 100 {
+		t.Fatalf("test402's 0.0001 is not an Allow under %d", allow)
+	}
+	raw, err := os.ReadFile("testdata/cli/test402.json")
+	if err != nil || !strings.Contains(string(raw), `"request_purchase","args":{"product_id":"test402"}`) {
+		t.Fatalf("script: %v", err)
+	}
+	for id, sc := range scs {
+		if strings.Contains(sc.Label, "本機") {
+			t.Errorf("%s says local: %s", id, sc.Label)
+		}
 	}
 }

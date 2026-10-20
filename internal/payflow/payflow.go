@@ -387,8 +387,18 @@ func (w *Worker) sign(ctx context.Context, p store.Payment, o paycontract.Purcha
 // paymentSignature is the x402 PAYMENT-SIGNATURE of the signed authorization
 // for the order's quote: always the same for a payment.
 func paymentSignature(o paycontract.PurchaseOrder, a signer.SignedAuthorization) (string, error) {
+	// `to` as the quote writes payTo (a 402 may use EIP-55's case, B5-D1): a
+	// server comparing the two strings as they are finds them equal; the
+	// signature covers the address, not its case.
+	to := a.To
+	var req struct {
+		PayTo string `json:"payTo"`
+	}
+	if json.Unmarshal(o.Quote.SelectedRequirement, &req) == nil && strings.EqualFold(req.PayTo, a.To) {
+		to = req.PayTo
+	}
 	payload, err := json.Marshal(map[string]any{"signature": a.Signature, "authorization": map[string]string{
-		"from": a.From, "to": a.To, "value": a.Value, "validAfter": strconv.FormatUint(a.ValidAfter, 10),
+		"from": a.From, "to": to, "value": a.Value, "validAfter": strconv.FormatUint(a.ValidAfter, 10),
 		"validBefore": strconv.FormatUint(a.ValidBefore, 10), "nonce": a.Nonce}})
 	if err != nil {
 		return "", err
@@ -516,8 +526,9 @@ func (w *Worker) delivered(p store.Payment, ans ShopAnswer) (store.Payment, erro
 // Starter starts payments (H-D1 A, docs/commercial-p2-host.md 12.3), as
 // Run's Before: each open pay task's budget registered (H-D4 A; Register
 // finishes one left unconfirmed), and each purchase decided for payment
-// started once per process, an Allow under its consumer's Signer
-// delegation (Delegations, id@version), an approved Ask under its grant,
+// started once per process, an Allow under its Signer delegation
+// (Delegations, id@version: "consumer/payee" first, then the consumer's
+// own; docs/commercial-p2b.md B5), an approved Ask under its grant,
 // once the task's registration has succeeded (or was refused for good: the
 // payment then fails where it is seen). A Store refusal is logged, not
 // asked again until a restart; a registration not refused (a node, or one
@@ -559,12 +570,22 @@ func (s *Starter) Start(ctx context.Context) {
 			continue // not registered yet: a payment now would end TASK_NOT_REGISTERED
 		}
 		for _, po := range t.Allowed {
-			s.begin(t, po, s.Delegations[t.ConsumerID])
+			s.begin(t, po, s.delegation(t.ConsumerID, t.PayTo[po]))
 		}
 		for _, po := range t.Approved {
 			s.begin(t, po, "")
 		}
 	}
+}
+
+// delegation is an Allow's delegation: the one for its consumer and payee
+// (test402's dlg-t402, say), else its consumer's. None: "" (the Store
+// refuses it; nothing is reserved).
+func (s *Starter) delegation(consumer, payTo string) string {
+	if d, ok := s.Delegations[consumer+"/"+payTo]; ok {
+		return d
+	}
+	return s.Delegations[consumer]
 }
 
 func (s *Starter) begin(t store.PayTask, po, delegation string) {

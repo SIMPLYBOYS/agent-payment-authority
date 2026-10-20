@@ -1,0 +1,8 @@
+{"description":"P2-b B5 (docs/commercial-p2b.md): catalog, quote and purchase request for test402.com's outside product, 0.0001 test USDC; within allow_max the host records an Allow and pays it on Base Sepolia under dlg-t402. The closing text claims more than the host knows, which it must ignore.",
+ "steps":[
+  {"do":"tool","tool":"list_products"},
+  {"do":"tool","tool":"get_quote","args":{"product_id":"test402"}},
+  {"do":"tool","tool":"request_purchase","args":{"product_id":"test402"}},
+  {"do":"text","text":"Paid test402 and got the resource."},
+  {"do":"result","text":"test402 compatibility check requested."}
+ ]}

@@ -130,7 +130,7 @@ present-p2:
 # new Host database, not the one kept for this Signer socket in var/).
 present-testnet:
 	@test -n "$(SIGNER)" || { echo "usage: make present-testnet SIGNER=/path/of/signer.sock [HOST=var/p2-testnet/host] (docs/commercial-p2b.md 6)" >&2; exit 2; }
-	@h="$(or $(HOST),var/p2-testnet/host)"; mkdir -p var/p2-testnet/present && chmod 700 var/p2-testnet/present; APA_PRESENT_DIR="$(CURDIR)/var/p2-testnet/present" APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$$h/registry.json" APA_PRESENT_PAYMENTS="$$h/payments.json" APA_PRESENT_PROFILE="$$h/profile.json" APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p2.json sh scripts/demo/present.sh fake
+	@h="$(or $(HOST),var/p2-testnet/host)"; mkdir -p var/p2-testnet/present && chmod 700 var/p2-testnet/present; APA_PRESENT_DIR="$(CURDIR)/var/p2-testnet/present" APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$$h/registry.json" APA_PRESENT_PAYMENTS="$$h/payments.json" APA_PRESENT_PROFILE="$$h/profile.json" APA_PRESENT_SCENARIOS=testdata/demo/scenarios-testnet.json sh scripts/demo/present.sh fake
 
 # docs/m1-evidence.md: the M1 fixture evidence bundle, a new
 # artifacts/m1/<run-id>/ each time (manifest.json, its evidence, run-end.json).

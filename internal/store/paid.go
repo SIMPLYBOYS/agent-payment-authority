@@ -504,7 +504,8 @@ func (s *Store) TaskEnded(taskID string) (bool, error) {
 type PayTask struct {
 	TaskID, ConsumerID string
 	BudgetInitial      contracts.Amount
-	Allowed, Approved  []string // purchase order IDs, sorted
+	Allowed, Approved  []string          // purchase order IDs, sorted
+	PayTo              map[string]string // an allowed purchase's payee (B5: its delegation may be its own)
 }
 
 // PayTasks lists the pay-family tasks not ended, oldest first. ponytail:
@@ -557,12 +558,13 @@ func (s *Store) PayTasks() ([]PayTask, error) {
 		if err := drained(rows); err != nil {
 			return nil, err
 		}
-		pt := PayTask{TaskID: id, ConsumerID: t.row.ConsumerID, BudgetInitial: t.terms.BudgetInitial}
+		pt := PayTask{TaskID: id, ConsumerID: t.row.ConsumerID, BudgetInitial: t.terms.BudgetInitial, PayTo: map[string]string{}}
 		for po, p := range t.purchases {
 			switch {
 			case started[po]:
 			case p.Decision.PolicyVerdict == "Allow":
 				pt.Allowed = append(pt.Allowed, po)
+				pt.PayTo[po] = p.terms().PayTo
 			case p.Decision.PolicyVerdict == "Ask" && p.Session != nil && p.Session.State == "approved":
 				pt.Approved = append(pt.Approved, po)
 			}

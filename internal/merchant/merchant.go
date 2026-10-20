@@ -124,6 +124,17 @@ type Merchant struct {
 	catalogs map[string][]byte // scene => catalog
 	offers   map[string]offer  // path + "?" + raw query
 	settle   *Settler          // P2: nil is M1's shop, which never settles
+	external []External        // B5: listed in the data shop's catalog, sold elsewhere
+}
+
+// External is a product another x402 server sells (B5: test402.com,
+// docs/commercial-p2b.md): the data shop's catalog lists it with its
+// resource URL, and its Offer carries the quote the Host saved from that
+// server's 402 (B5-D2). This shop serves neither its resource nor its 402.
+type External struct {
+	ID, Title, Summary, AssetDisplay string
+	ResourceURL                      string // https
+	Quote                            contracts.Quote
 }
 
 type catalogEntry struct {
@@ -156,7 +167,7 @@ const SettledTimeout = 300
 // (P2-D3): the same products, offered in the settler's token on its chain
 // to its payTo for SettledTimeout, delivered only once their transfer is
 // confirmed.
-func NewSettled(baseURL string, st *Settler) (*Merchant, error) {
+func NewSettled(baseURL string, st *Settler, ext ...External) (*Merchant, error) {
 	ps := make([]product, len(products))
 	for i, p := range products {
 		r := p.Requirement
@@ -167,7 +178,7 @@ func NewSettled(baseURL string, st *Settler) (*Merchant, error) {
 		p.Requirement = r
 		ps[i] = p
 	}
-	m, err := build(baseURL, ps)
+	m, err := build(baseURL, ps, ext...)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +226,7 @@ func NewEval(baseURL string, items []EvalItem) (*Merchant, error) {
 
 var productID = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
 
-func build(baseURL string, products []product) (*Merchant, error) {
+func build(baseURL string, products []product, ext ...External) (*Merchant, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 		return nil, fmt.Errorf("merchant base URL %q must be an http(s) origin with no path", baseURL)
@@ -246,6 +257,16 @@ func build(baseURL string, products []product) (*Merchant, error) {
 			ProductID: p.ID, Title: p.Title, Summary: p.Summary, HTTPMethod: "GET", ResourceURL: o.url, Price: pr,
 		})
 	}
+	for _, x := range ext {
+		u, err := url.Parse(x.ResourceURL)
+		var req struct{ Amount string }
+		if !productID.MatchString(x.ID) || err != nil || u.Scheme != "https" || u.User != nil || json.Unmarshal(x.Quote.SelectedRequirement, &req) != nil || req.Amount == "" {
+			return nil, fmt.Errorf("external product %q: an [a-z0-9-] ID, an https resource and a quote with an amount", x.ID)
+		}
+		entries[""] = append(entries[""], catalogEntry{ProductID: x.ID, Title: x.Title, Summary: x.Summary, HTTPMethod: "GET", ResourceURL: x.ResourceURL,
+			Price: price{AssetAmount: req.Amount, AssetDisplay: x.AssetDisplay}})
+	}
+	m.external = ext
 	for scene, e := range entries {
 		name := "APA fixture data shop"
 		if scene != "" {
@@ -280,6 +301,9 @@ func (m *Merchant) Offers() []Offer {
 		o := m.offers[p.Path+"?"+p.Query]
 		out = append(out, Offer{Scene: p.Scene, CatalogURL: m.base + CatalogPath(p.Scene), ProductID: p.ID, Method: "GET", URL: o.url,
 			Quote: contracts.Quote{X402Version: o.required.X402Version, SelectedRequirement: o.accepts, Extensions: o.required.Extensions}})
+	}
+	for _, x := range m.external {
+		out = append(out, Offer{CatalogURL: m.base + CatalogPath(""), ProductID: x.ID, Method: "GET", URL: x.ResourceURL, Quote: x.Quote})
 	}
 	return out
 }

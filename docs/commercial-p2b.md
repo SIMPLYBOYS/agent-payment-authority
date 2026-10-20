@@ -123,7 +123,16 @@ B6 與 B4 第二輪的 review（af668a1、a4e79e9）：REQUEST CHANGES；沒有�
 
 第二輪（de0a9ad）：APPROVE。建議也照做：語音 socket 必須在 Signer 自己的 `/opt/apa-signer` 之下（拒絕別台機器或 repo 的語音段），輸出列出語音 socket 與模型以便第 5 步前核對；補上網址無法解析時的測試。
 
-**B5 test402 的阻礙（10/20，第 1 步之後）**：test402 的 402 以 EIP-55 大小寫混合的寫法給出 asset（`0x036CbD53…CF7e`），而 apa.pay.v1 要求付款綁定的位址一律小寫，且報價裡的 `asset`、`payTo` 必須與綁定**逐字**相同（`internal/paycontract` 的 Validate；Store、Signer、bridge 共用）。所以現在的契約無法表示 test402 的報價，請購會在組單時被拒（不會花到錢）。要繼續有兩件事要 Aaron 決定，見對話（B5-D1 契約比對大小寫、B5-D2 再取一次 402 存下原文作為 Host 報價簿的固定報價）。
+**B5 test402**（完成，待 review；Aaron 10/20：B5-D1 A、B5-D2 A）：
+- 契約（B5-D1，c69d2df，review APPROVE）：報價裡的 asset、payTo 可以是任一大小寫，比對時視為同一個位址；綁定仍一律小寫；bridge 組單時把位址轉成小寫。付款的 `authorization.to` 照報價的寫法送出（簽章只涵蓋位址，不涵蓋大小寫），對方若逐字比對也相同。apa.pay.v2 共用同一個 Validate，同樣適用。
+- 委派依收款方選：`payments.json` 的 `delegations` 可寫 `consumer/payee`，先找這一行，再找 consumer 自己的；testnet 一律寫成 `consumer/payee`，所以沒有對應那一行的購買不會開始付款（不會預留）。Store 的 `PayTask` 帶上每筆 Allow 的收款方。
+- 外部商品：`merchant.External`：資料商店的目錄列出 test402，resource URL 是 test402 的，報價是 B5-D2 存下的原文；這家商店不提供它的 resource 也不回它的 402。demo 的 `payments.json` 的 `test402_offer`（只限 `base_sepolia`）讀那個檔，以 bridge 讀 402 的同一套規則檢查（一個報價、resource 就是要的 URL、host 是 test402.com）。
+- `p2-testnet deploy`：`DIR/test402-offer.json` 在時，profile 的 merchants 加入 test402 的收款方（必須是 Circle USDC 的付款）、`payments.json` 加 `test402_offer` 與 `consumer-b/0x…0402 → dlg-t402@1`；`opt-signer` 從這一行產生 `dlg-t402`（恰好一筆 0.0001），不再需要 `--test402-pay-to`。
+- 目錄：`testdata/demo/scenarios-testnet.json`（P2 的四場，標為 testnet，加上 consumer B 的 `t402-b`）與 `testdata/cli/test402.json`；`make present-testnet` 用它。
+- 測試：`TestQuoteAddressInEitherCase`、`TestEIP55QuoteGetsALowercaseBinding`、`TestStarterByPayee`、`TestPaymentSignatureKeepsTheQuotesCase`、`TestExternalProductListedNotServed`、`TestTest402Product`、`TestTestnetPaymentsOpen`（有 test402 時商店多一個報價）、`TestTestnetShippedCatalog`、`TestPreflightAndDeploy`（test402 的三處）、`TestOptSigner`（`dlg-t402` 由委派產生）。
+- 未知：test402 那邊的 facilitator 如何驗證我們的付款，要到第 7 步實際付款才知道；不通過的話會是「驗證未通過，沒有送出」，只有 tx#1 用掉。
+
+B5 的阻礙（10/20，第 1 步之後；已由 B5-D1 A 解決）：test402 的 402 以 EIP-55 大小寫混合的寫法給出 asset（`0x036CbD53…CF7e`），而 apa.pay.v1 要求付款綁定的位址一律小寫，且報價裡的 `asset`、`payTo` 必須與綁定**逐字**相同（`internal/paycontract` 的 Validate；Store、Signer、bridge 共用）。所以現在的契約無法表示 test402 的報價，請購會在組單時被拒（不會花到錢）。要繼續有兩件事要 Aaron 決定，見對話（B5-D1 契約比對大小寫、B5-D2 再取一次 402 存下原文作為 Host 報價簿的固定報價）。
 
 **B5 test402**（暫停，等 §6 第 1 步）：Agent 只能經由商店的目錄請購，而且 bridge 會自己去取那筆 402；test402 的商品等於讓 bridge 信任一個外部的 resource URL，Store 的報價簿也要放進 test402 **現在**實際回的報價（要與它逐欄相同，否則 test402 會拒絕，雖然不會花到錢，但 tx#1 已用掉）。所以 B5 要在第 1 步（唯讀：preflight 與對 test402 的一次 GET）核准並取得現在的 402 之後才設計與實作；其他各段不受影響。要做的事已列在 §4 B5：委派依收款方選、policy 的 merchants、目錄商品，以及 bridge 對外部 resource 的信任規則。
 
@@ -168,7 +177,7 @@ sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目�
 **第 5 步：`/opt` 部署**（第 4 步部署完成、`var/p2-testnet/host/` 已寫出之後）
 1. 建置（W-host，mac）：從乾淨的 worktree 建置 `apa-signer`（`GOFLAGS=-mod=readonly GOPROXY=off GOTOOLCHAIN=local`）到 `var/p2-opt/apa-signer`，記下 SHA-256；語音檔案依 V1 §15 重新產生（`scripts/demo/v1-opt-stage.sh`）。
 2. 取得目前的設定：`sudo cat /opt/apa-signer/data/signer.json > $P/var/p2-opt/signer.base.json`（`var/p2-opt` 是 0700）。
-3. 產生新設定：`var/p2-testnet/bin/p2-testnet opt-signer --dir var/p2-testnet --base var/p2-opt/signer.base.json --voice var/v1-opt/signer.json --out var/p2-opt/signer.json`，有 test402 那一筆時加 `--test402-pay-to 0x…`（第 1 步 preflight 印出的）。`/opt` 現在是 A2 的設定（核准者沒有 P2 的上限、沒有語音段），所以語音段取自 V1 準備好的 `var/v1-opt/signer.json`；沒有語音段一律拒絕（語音是 Signer 檢查「核准的這筆付給誰」的唯一一關），語音商家也必須恰好一個。它保留 socket、callers、核准者與 WebAuthn，換掉錢包、資產、委派（`dlg-ta`、`dlg-tb`、`dlg-t402`）、核准者上限（版本加 1：當時進行中的核准挑戰會回 `APPROVER_CHANGED`，已登記的裝置不受影響）、語音的商家位址與小數位數，並加上 `reservation` 段；印出新檔的 SHA-256。
+3. 產生新設定：`var/p2-testnet/bin/p2-testnet opt-signer --dir var/p2-testnet --base var/p2-opt/signer.base.json --voice var/v1-opt/signer.json --out var/p2-opt/signer.json`。deploy 寫進 `payments.json` 的 test402 那一行（`consumer-b/0x…0402`）會自動產生 `dlg-t402`，不必另外指定。`/opt` 現在是 A2 的設定（核准者沒有 P2 的上限、沒有語音段），所以語音段取自 V1 準備好的 `var/v1-opt/signer.json`；沒有語音段一律拒絕（語音是 Signer 檢查「核准的這筆付給誰」的唯一一關），語音商家也必須恰好一個。它保留 socket、callers、核准者與 WebAuthn，換掉錢包、資產、委派（`dlg-ta`、`dlg-tb`、`dlg-t402`）、核准者上限（版本加 1：當時進行中的核准挑戰會回 `APPROVER_CHANGED`，已登記的裝置不受影響）、語音的商家位址與小數位數，並加上 `reservation` 段；印出新檔的 SHA-256。
 4. 停止與備份：照 V1 §15 的「開始前」與 D 部署第 1、2 步（`pgrep -fl '/opt/apa-signer/'` 應無輸出；`signer.json`、`approvals.db`、執行檔各留一份備份，不刪）。
 5. 安裝：照 V1 §15 D 第 3 步安裝執行檔與語音檔，`signer.json` 改用 `var/p2-opt/signer.json`；第 4 步核對新的雜湊。
 6. 核准表遷移（只有 `/opt/apa-signer/data/approvals.db` 還在時）：`sudo -u apa-signer /opt/apa-signer/bin/apa-signer approver migrate --dir /opt/apa-signer/data`；舊檔留為 `approvals.db.migrated`。
@@ -193,7 +202,7 @@ sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目�
 
 - payTo 是一個好記的位址（結尾 `0402`），很可能沒有人持有它的私鑰：付過去的 0.0001 測試 USDC 等於燒掉，這對證明相容性沒有影響。
 - test402 自己宣告的 EIP-712 version 是 `2`；部署前 preflight 仍會從鏈上讀 `version()` 核對。
-- B5 的 `dlg-t402` 收款方就是這個 payTo；`opt-signer --test402-pay-to 0x0000000000000000000000000000000000000402`。
+- B5 的 `dlg-t402` 收款方就是這個 payTo。第二次 GET（B5-D2，2026-10-20T02:16:29Z）把 402 原文存於 `var/p2-testnet/test402-offer.json`，內容與第一次相同；deploy 看到這個檔就把 test402 加進 profile 的 merchants、`payments.json` 的 `test402_offer` 與委派。
 
 **鏈上的唯讀 preflight**：要等第 2 步的金鑰建立後，由 Aaron 執行（金鑰目錄 Claude Code 不讀）。
 

@@ -30,6 +30,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signerclient"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
 
 // payConfig is --payments' file: the chain's deployment and where the
@@ -63,10 +64,14 @@ type payConfig struct {
 	RelayerSocket string `json:"relayer_socket,omitempty"`
 	// ShopKeyDir: the shop's key file DIR/keys/shop.key (apa-relayer
 	// keygen --role shop), opened with a passphrase asked at start.
-	ShopKeyDir     string            `json:"shop_key_dir,omitempty"`
-	ShopDailyTxCap uint64            `json:"shop_daily_tx_cap,omitempty"`
-	Dir            string            `json:"dir"`         // relayer.db and settle.db, a private directory
-	Delegations    map[string]string `json:"delegations"` // consumer ID -> its Signer delegation, id@version
+	ShopKeyDir     string `json:"shop_key_dir,omitempty"`
+	ShopDailyTxCap uint64 `json:"shop_daily_tx_cap,omitempty"`
+	// Test402Offer: test402's 402 as saved (p2-testnet test402 --save;
+	// B5): the data shop lists test402 as an outside product with that
+	// quote. base_sepolia only.
+	Test402Offer string            `json:"test402_offer,omitempty"`
+	Dir          string            `json:"dir"`         // relayer.db and settle.db, a private directory
+	Delegations  map[string]string `json:"delegations"` // consumer ID -> its Signer delegation, id@version
 }
 
 // BaseSepolia is the payment capability on the Base Sepolia testnet
@@ -131,10 +136,45 @@ func checkEnvironment(c *payConfig) error {
 	default:
 		return fmt.Errorf("environment %q is local_anvil or base_sepolia", c.Environment)
 	}
+	if c.Test402Offer != "" && c.Environment != BaseSepolia {
+		return errors.New("test402_offer is base_sepolia's only (test402 is on Base Sepolia)")
+	}
 	if c.PolicyTTL == 0 || c.PolicyTTL > 600 {
 		return errors.New("policy_ttl is 1 to 600 seconds (a reservation's authorization expires within it)")
 	}
 	return nil
+}
+
+// test402Product is test402's 402 as saved (B5-D2) as the data shop's
+// outside product: its resource and quote exactly as that 402 said, read as
+// the bridge reads a 402 (one offer, its resource the URL asked).
+func test402Product(path string) (merchant.External, error) {
+	var f struct {
+		ResourceURL     string `json:"resource_url"`
+		PaymentRequired string `json:"payment_required"`
+		FetchedAt       string `json:"fetched_at"`
+	}
+	if err := decodeFile(path, &f); err != nil {
+		return merchant.External{}, err
+	}
+	u, err := url.Parse(f.ResourceURL)
+	if err != nil || u.Scheme != "https" || u.Host != "test402.com" {
+		return merchant.External{}, errors.New("not a test402.com https resource")
+	}
+	var pr x402.PaymentRequired
+	if err := x402.Decode(f.PaymentRequired, &pr); err != nil {
+		return merchant.External{}, err
+	}
+	if pr.Resource.URL != f.ResourceURL || len(pr.Accepts) != 1 {
+		return merchant.External{}, errors.New("its 402 is not one offer for its resource")
+	}
+	q, err := pr.Quote(0)
+	if err != nil {
+		return merchant.External{}, err
+	}
+	return merchant.External{ID: "test402", Title: "test402.com：x402 相容性檢查（外部商店）",
+		Summary:      "外部的 x402 測試資源，付 0.0001 測試 USDC 取得一份 JSON；用來證明與真的 x402 伺服器相容（報價取於 " + f.FetchedAt + "）。",
+		AssetDisplay: "0.0001 test USDC", ResourceURL: f.ResourceURL, Quote: q}, nil
 }
 
 // checkChain: the RPC is the configured chain, and an anvil exactly when
@@ -237,7 +277,17 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 		closeR()
 		return nil, nil, err
 	}
-	shop, err := merchant.NewSettled(baseURL, settler)
+	var ext []merchant.External
+	if c.Test402Offer != "" {
+		x, err := test402Product(c.Test402Offer)
+		if err != nil {
+			closeR()
+			settler.Close()
+			return nil, nil, fmt.Errorf("payments: test402_offer: %w", err)
+		}
+		ext = append(ext, x)
+	}
+	shop, err := merchant.NewSettled(baseURL, settler, ext...)
 	if err != nil {
 		closeR()
 		settler.Close()

@@ -1,0 +1,80 @@
+{
+ "description": "P2-b Base Sepolia catalog (docs/commercial-p2b.md 6; make present-testnet): apa.pay.v1 on the Base Sepolia testnet with Circle's test USDC, apa-relayer and the caps, the person's approval on a registered device, the host paying through apa-signer serve on /opt. The data scene's brief (0.50 test USDC, above allow_max 0.10) asks; the cafe's lunch set (0.08) is an Allow the host pays at once; test402.com's outside check (0.0001) is consumer B's Allow under dlg-t402. Fake CLI only: no model.",
+ "scenarios": [
+  {
+   "id": "data-a",
+   "consumer_id": "consumer-a",
+   "scene": "data",
+   "contract": "apa.pay.v1",
+   "scenario": "testdata/cli/ask-mainline.json",
+   "label": "資料研究室：韓國市場簡報（需要你核准・testnet 付款）",
+   "delegation": {
+    "purpose": "買一份韓國市場簡報（數位資料）",
+    "task_budget": "5000000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "cafe-a",
+   "consumer_id": "consumer-a",
+   "scene": "cafe",
+   "contract": "apa.pay.v1",
+   "scenario": "testdata/cli/cafe-lunch.json",
+   "label": "街角咖啡：12:30 取餐的午餐套餐（範圍內自動付款・testnet 付款）",
+   "delegation": {
+    "purpose": "訂 12:30 取餐的午餐套餐（示意菜單）",
+    "task_budget": "5000000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "data-b",
+   "consumer_id": "consumer-b",
+   "scene": "data",
+   "contract": "apa.pay.v1",
+   "scenario": "testdata/cli/ask-mainline.json",
+   "label": "資料研究室：韓國市場簡報（需要你核准・testnet 付款）",
+   "delegation": {
+    "purpose": "買一份韓國市場簡報（數位資料）",
+    "task_budget": "5000000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "cafe-b",
+   "consumer_id": "consumer-b",
+   "scene": "cafe",
+   "contract": "apa.pay.v1",
+   "scenario": "testdata/cli/cafe-lunch.json",
+   "label": "街角咖啡：12:30 取餐的午餐套餐（範圍內自動付款・testnet 付款）",
+   "delegation": {
+    "purpose": "訂 12:30 取餐的午餐套餐（示意菜單）",
+    "task_budget": "5000000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "t402-b",
+   "consumer_id": "consumer-b",
+   "scene": "",
+   "contract": "apa.pay.v1",
+   "scenario": "testdata/cli/test402.json",
+   "label": "test402.com：x402 相容性檢查（外部商店・testnet 付款 0.0001）",
+   "delegation": {
+    "purpose": "向 test402.com 付 0.0001 測試 USDC，證明與真的 x402 伺服器相容",
+    "task_budget": "1000000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  }
+ ]
+}

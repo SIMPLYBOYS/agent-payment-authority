@@ -292,10 +292,10 @@ func TestQuoteAddressInEitherCase(t *testing.T) {
 		t.Fatalf("the quote in EIP-55's case: %v", err)
 	}
 	for name, q := range map[string]PurchaseOrder{
-		"another asset":        order(usdc, shop, "0x036CbD53842c5426634e7929541eC2318f3dCF7f", shop),
-		"a non-hex asset":      order(usdc, shop, "0x036CbD53842c5426634e7929541eC2318f3dCF7g", shop),
-		"a 0X payTo":           order(usdc, shop, usdc, "0X"+shop[2:]),
-		"a mixed-case binding": order(usdc55, shop, usdc55, shop),
+		"another asset":          order(usdc, shop, "0x036CbD53842c5426634e7929541eC2318f3dCF7f", shop),
+		"another asset, non-hex": order(usdc, shop, "0x036CbD53842c5426634e7929541eC2318f3dCF7g", shop),
+		"a 0X payTo":             order(usdc, shop, usdc, "0X"+shop[2:]),
+		"a mixed-case binding":   order(usdc55, shop, usdc55, shop),
 	} {
 		if err := q.Validate(); Code(err) != "INVALID_PURCHASE" {
 			t.Errorf("%s: %v", name, err)

@@ -107,6 +107,8 @@ func TestPreflightAndDeploy(t *testing.T) {
 	}()
 	usdcAddr := ethtest.Deploy(t, c, "TestUSDC.sol/TestUSDC")
 	dir, r := keysDir(t)
+	const t402 = "0x0000000000000000000000000000000000000402"
+	saved402(t, dir, usdcAddr, t402)
 	cwd, _ := os.Getwd()
 	os.Chdir(ethtest.Root()) // zk/setup is the repo's, as when the script runs it
 	defer os.Chdir(cwd)
@@ -187,14 +189,15 @@ func TestPreflightAndDeploy(t *testing.T) {
 		rel["budget_contract"] != budget.Hex() || rel["daily_tx_cap"].(float64) != relayerCap || pay["shop_daily_tx_cap"].(float64) != shopCap {
 		t.Fatalf("payments %v\nrelayer %v", pay, rel)
 	}
-	if d := pay["delegations"].(map[string]any); d["consumer-a"] != "dlg-ta@1" || d["consumer-b"] != "dlg-tb@1" {
-		t.Fatalf("delegations %v", d)
+	if d := pay["delegations"].(map[string]any); len(d) != 3 || d["consumer-a/"+r["shop"].Hex()] != "dlg-ta@1" || d["consumer-b/"+r["shop"].Hex()] != "dlg-tb@1" ||
+		d["consumer-b/"+t402] != "dlg-t402@1" || pay["test402_offer"] != filepath.Join(dir, "test402-offer.json") {
+		t.Fatalf("delegations %v, test402 %v", d, pay["test402_offer"])
 	}
 	raw, _ := json.Marshal(reg)
 	if !strings.Contains(string(raw), wa.Hex()) || reg["merchant_pay_to"] != r["shop"].Hex() || !strings.Contains(string(raw), usdcAddr.Hex()) {
 		t.Fatalf("registry %s", raw)
 	}
-	if m := prof["merchants"].([]any); len(m) != 1 || m[0] != r["shop"].Hex() || prof["asset_id"] != assetID {
+	if m := prof["merchants"].([]any); len(m) != 2 || m[0] != r["shop"].Hex() || m[1] != t402 || prof["asset_id"] != assetID {
 		t.Fatalf("profile %v", prof)
 	}
 	var j journal
@@ -275,7 +278,7 @@ func TestOptSigner(t *testing.T) {
 	shop, wa, wb := "0x"+strings.Repeat("5", 40), "0x"+strings.Repeat("a", 40), "0x"+strings.Repeat("b", 40)
 	writeJSON(filepath.Join(host, "payments.json"), map[string]any{"environment": "base_sepolia", "rpc": "https://sepolia.base.org", "chain_id": chainID,
 		"confirmations": 2, "token": circleUSDC, "token_name": "USDC", "token_version": "2", "pay_to": shop, "budget_contract": "0x" + strings.Repeat("6", 40),
-		"delegations": map[string]string{"consumer-a": "dlg-ta@1", "consumer-b": "dlg-tb@1"}})
+		"delegations": map[string]string{"consumer-a/" + shop: "dlg-ta@1", "consumer-b/" + shop: "dlg-tb@1", "consumer-b/0x" + strings.Repeat("7", 40): "dlg-t402@1"}})
 	writeJSON(filepath.Join(host, "registry.json"), map[string]any{"wallets": []map[string]string{{"wallet_id": "wallet-a", "from": wa}, {"wallet_id": "wallet-b", "from": wb}}})
 	var c map[string]any
 	json.Unmarshal(signertest.Config("/opt/apa-signer/run/signer.sock", 501, 1790000000, "0x"+strings.Repeat("1", 40), "0x"+strings.Repeat("2", 40)), &c)
@@ -298,7 +301,7 @@ func TestOptSigner(t *testing.T) {
 	if err := run(context.Background(), []string{"opt-signer", "--dir", dir, "--base", base, "--out", dst}, &out, &answers{}); err == nil || !strings.Contains(err.Error(), "voice section") {
 		t.Fatalf("no voice: %v", err)
 	}
-	args := []string{"opt-signer", "--dir", dir, "--base", base, "--voice", v1, "--out", dst, "--test402-pay-to", "0x" + strings.Repeat("7", 40)}
+	args := []string{"opt-signer", "--dir", dir, "--base", base, "--voice", v1, "--out", dst}
 	if err := run(context.Background(), args, &out, &answers{}); err != nil {
 		t.Fatal(err)
 	}
@@ -370,5 +373,19 @@ func TestTest402Refusals(t *testing.T) {
 	os.WriteFile(f, nil, 0o600)
 	if err := run(context.Background(), []string{"test402", "https://test402.com/api/x402", "--save", f}, os.Stdout, &answers{}); err == nil || !strings.Contains(err.Error(), "exists") {
 		t.Fatalf("a save over a file: %v", err) // refused before asking
+	}
+}
+
+// saved402 writes DIR/test402-offer.json as test402 --save does.
+func saved402(t *testing.T, dir string, asset eth.Address, payTo string) {
+	t.Helper()
+	accept, _ := json.Marshal(map[string]any{"scheme": "exact", "network": "eip155:84532", "amount": "100", "asset": asset.Hex(), "payTo": payTo,
+		"maxTimeoutSeconds": 300, "extra": map[string]string{"name": "USDC", "version": "2", "assetTransferMethod": "eip3009"}})
+	h, err := x402.Encode(x402.PaymentRequired{X402Version: 2, Resource: x402.ResourceInfo{URL: "https://test402.com/api/x402"}, Accepts: []json.RawMessage{accept}, Extensions: json.RawMessage(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(dir, "test402-offer.json"), Offer{ResourceURL: "https://test402.com/api/x402", PaymentRequired: h, FetchedAt: "2026-10-20T02:16:31Z"}); err != nil {
+		t.Fatal(err)
 	}
 }
