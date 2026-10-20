@@ -123,6 +123,8 @@ B6 與 B4 第二輪的 review（af668a1、a4e79e9）：REQUEST CHANGES；沒有�
 
 第二輪（de0a9ad）：APPROVE。建議也照做：語音 socket 必須在 Signer 自己的 `/opt/apa-signer` 之下（拒絕別台機器或 repo 的語音段），輸出列出語音 socket 與模型以便第 5 步前核對；補上網址無法解析時的測試。
 
+**B5 test402 的阻礙（10/20，第 1 步之後）**：test402 的 402 以 EIP-55 大小寫混合的寫法給出 asset（`0x036CbD53…CF7e`），而 apa.pay.v1 要求付款綁定的位址一律小寫，且報價裡的 `asset`、`payTo` 必須與綁定**逐字**相同（`internal/paycontract` 的 Validate；Store、Signer、bridge 共用）。所以現在的契約無法表示 test402 的報價，請購會在組單時被拒（不會花到錢）。要繼續有兩件事要 Aaron 決定，見對話（B5-D1 契約比對大小寫、B5-D2 再取一次 402 存下原文作為 Host 報價簿的固定報價）。
+
 **B5 test402**（暫停，等 §6 第 1 步）：Agent 只能經由商店的目錄請購，而且 bridge 會自己去取那筆 402；test402 的商品等於讓 bridge 信任一個外部的 resource URL，Store 的報價簿也要放進 test402 **現在**實際回的報價（要與它逐欄相同，否則 test402 會拒絕，雖然不會花到錢，但 tx#1 已用掉）。所以 B5 要在第 1 步（唯讀：preflight 與對 test402 的一次 GET）核准並取得現在的 402 之後才設計與實作；其他各段不受影響。要做的事已列在 §4 B5：委派依收款方選、policy 的 merchants、目錄商品，以及 bridge 對外部 resource 的信任規則。
 
 ## 5 要你決定的事
