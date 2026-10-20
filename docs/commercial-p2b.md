@@ -121,6 +121,8 @@ B6 與 B4 第二輪的 review（af668a1、a4e79e9）：REQUEST CHANGES；沒有�
 - Important：沒有語音段時會產生沒有語音的設定（核准的收款方就不受 Signer 檢查）→ 一律拒絕，語音段可由 `--voice` 取自 V1 準備好的設定；§6.1 漏了聲紋登記 → 補上第 7 步；test402 的解碼仍有一半是嚴格的 → 整個 header 寬鬆讀取，讀不了時把內容（加引號、截斷）印出以便記錄。
 - 建議也照做：`opt-signer` 確認 `payments.json` 是 Circle USDC、https 節點；語音商家必須恰好一個；小數位數設為 6；`deploy.json` 等檔案改為寫暫存檔再改名（當機不會留下半份 journal）；網址無法解析時的錯誤也不帶網址。
 
+第二輪（de0a9ad）：APPROVE。建議也照做：語音 socket 必須在 Signer 自己的 `/opt/apa-signer` 之下（拒絕別台機器或 repo 的語音段），輸出列出語音 socket 與模型以便第 5 步前核對；補上網址無法解析時的測試。
+
 **B5 test402**（暫停，等 §6 第 1 步）：Agent 只能經由商店的目錄請購，而且 bridge 會自己去取那筆 402；test402 的商品等於讓 bridge 信任一個外部的 resource URL，Store 的報價簿也要放進 test402 **現在**實際回的報價（要與它逐欄相同，否則 test402 會拒絕，雖然不會花到錢，但 tx#1 已用掉）。所以 B5 要在第 1 步（唯讀：preflight 與對 test402 的一次 GET）核准並取得現在的 402 之後才設計與實作；其他各段不受影響。要做的事已列在 §4 B5：委派依收款方選、policy 的 merchants、目錄商品，以及 bridge 對外部 resource 的信任規則。
 
 ## 5 要你決定的事

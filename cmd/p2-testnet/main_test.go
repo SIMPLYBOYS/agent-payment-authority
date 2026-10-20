@@ -342,6 +342,13 @@ func TestOptSigner(t *testing.T) {
 	if err := run(context.Background(), []string{"opt-signer", "--dir", dir, "--base", base, "--voice", v1, "--out", dst + "2"}, &out, &answers{}); err == nil || !strings.Contains(err.Error(), "origin") {
 		t.Fatalf("another origin: %v", err)
 	}
+	// A voice section from elsewhere (its socket outside /opt/apa-signer) is refused.
+	voice["socket"] = "/Users/someone/repo/var/v1-dev/voice.sock"
+	writeJSON(v1, staged)
+	if err := run(context.Background(), []string{"opt-signer", "--dir", dir, "--base", base, "--voice", v1, "--out", dst + "4"}, &out, &answers{}); err == nil || !strings.Contains(err.Error(), "not under the Signer's own") {
+		t.Fatalf("a voice section from elsewhere: %v", err)
+	}
+	voice["socket"] = "/opt/apa-signer/voice-run/voice.sock"
 	// Two voice merchants: which one is the shop is not guessed.
 	voice["merchants"] = []map[string]string{{"pay_to": "0x" + strings.Repeat("3", 40), "name": "測試商店", "pinyin": "ce shi shang dian"},
 		{"pay_to": "0x" + strings.Repeat("8", 40), "name": "街角咖啡", "pinyin": "jie jiao ka fei"}}

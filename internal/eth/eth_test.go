@@ -189,6 +189,9 @@ func TestRPCErrorsHideTheURL(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), "SECRET") || strings.Contains(err.Error(), "127.0.0.1:1/") {
 		t.Fatalf("%v", err)
 	}
+	if _, err := NewClient("http://[::1/SECRET-KEY").ChainID(context.Background()); err == nil || strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("a URL that does not parse: %v", err)
+	}
 	err = c.Raw(context.Background(), "web3_clientVersion", nil)
 	if err == nil || strings.Contains(err.Error(), "SECRET") || !strings.Contains(err.Error(), "web3_clientVersion") {
 		t.Fatalf("%v", err)

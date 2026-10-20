@@ -845,6 +845,9 @@ func optSigner(args []string, out io.Writer) error {
 	if cfg.Voice == nil || len(cfg.Voice.Merchants) != 1 {
 		return errors.New("the voice section (--base's or --voice's) with exactly one merchant, the shop, is needed: without it an approval's payee is not checked")
 	}
+	if home := filepath.Dir(filepath.Dir(cfg.Socket)); !strings.HasPrefix(cfg.Voice.Socket, home+"/") {
+		return fmt.Errorf("the voice socket %q is not under the Signer's own %s (another machine's or the repo's voice section?)", cfg.Voice.Socket, home)
+	}
 	var pay struct {
 		RPC            string            `json:"rpc"`
 		ChainID        uint64            `json:"chain_id"`
@@ -922,7 +925,7 @@ func optSigner(args []string, out io.Writer) error {
 		return err
 	}
 	sum := sha256.Sum256(append(b, '\n'))
-	fmt.Fprintf(out, "p2-testnet: wrote %s (SHA-256 %x): wallets %s and %s, delegations %d, approvers %d, reservation on chain %s at %s\n",
-		*dst, sum, cfg.Wallets[0].Address, cfg.Wallets[1].Address, len(cfg.Delegations), len(cfg.Approvers), chain, cfg.Reservation.BudgetContract)
+	fmt.Fprintf(out, "p2-testnet: wrote %s (SHA-256 %x): wallets %s and %s, delegations %d, approvers %d, reservation on chain %s at %s; voice socket %q, models %q and %q\n",
+		*dst, sum, cfg.Wallets[0].Address, cfg.Wallets[1].Address, len(cfg.Delegations), len(cfg.Approvers), chain, cfg.Reservation.BudgetContract, v.Socket, v.ASRModel, v.SpeakerModel)
 	return nil
 }
