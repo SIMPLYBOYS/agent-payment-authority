@@ -108,7 +108,7 @@ func TestPreflightAndDeploy(t *testing.T) {
 	usdcAddr := ethtest.Deploy(t, c, "TestUSDC.sol/TestUSDC")
 	dir, r := keysDir(t)
 	const t402 = "0x0000000000000000000000000000000000000402"
-	saved402(t, dir, usdcAddr, t402)
+	saved402(t, dir, usdcAddr, "0x0000000000000000000000000000000000000403") // test402 changed its payee
 	cwd, _ := os.Getwd()
 	os.Chdir(ethtest.Root()) // zk/setup is the repo's, as when the script runs it
 	defer os.Chdir(cwd)
@@ -129,6 +129,10 @@ func TestPreflightAndDeploy(t *testing.T) {
 		t.Fatalf("deploy without the prover: %v", err) // checked before anything is sent
 	}
 	os.WriteFile(filepath.Join(dir, "zkbudget"), []byte("#!/bin/sh\n"), 0o700)
+	if err := run(context.Background(), args("deploy"), &out, &answers{line: "yes", pass: pass}); err == nil || !strings.Contains(err.Error(), "§6.2's test402 payment") {
+		t.Fatalf("deploy with another test402 payee: %v", err) // checked before anything is sent
+	}
+	saved402(t, dir, usdcAddr, t402)
 	if err := run(context.Background(), args("deploy"), &out, &answers{line: "yes", pass: pass}); err == nil || !strings.Contains(err.Error(), "no test funds") {
 		t.Fatalf("deploy without funds: %v", err)
 	}
@@ -321,7 +325,8 @@ func TestOptSigner(t *testing.T) {
 	}
 	d := cfg.Delegations
 	if len(d) != 3 || d[0].DelegationID != "dlg-ta" || d[1].DelegationID != "dlg-tb" || d[0].Merchants[0] != shop || d[0].TotalCap != dlgTotal ||
-		d[2].DelegationID != "dlg-t402" || d[2].WalletID != "wallet-b" || d[2].PerTxMax != t402Units || d[2].TotalCap != t402Units {
+		d[2].DelegationID != "dlg-t402" || d[2].WalletID != "wallet-b" || d[2].ConsumerID != "consumer-b" || d[2].Merchants[0] != "0x"+strings.Repeat("7", 40) ||
+		d[2].PerTxMax != t402Units || d[2].TotalCap != t402Units {
 		t.Fatalf("delegations %+v", d)
 	}
 	if a := cfg.Approvers[0]; a.SignerMax != approverMax || a.SignerTotal != approverSum || a.SignerWindowSeconds != 86400 || a.Version != 4 {

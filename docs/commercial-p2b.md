@@ -132,6 +132,8 @@ B6 與 B4 第二輪的 review（af668a1、a4e79e9）：REQUEST CHANGES；沒有�
 - 測試：`TestQuoteAddressInEitherCase`、`TestEIP55QuoteGetsALowercaseBinding`、`TestStarterByPayee`、`TestPaymentSignatureKeepsTheQuotesCase`、`TestExternalProductListedNotServed`、`TestTest402Product`、`TestTestnetPaymentsOpen`（有 test402 時商店多一個報價）、`TestTestnetShippedCatalog`、`TestPreflightAndDeploy`（test402 的三處）、`TestOptSigner`（`dlg-t402` 由委派產生）。
 - 未知：test402 那邊的 facilitator 如何驗證我們的付款，要到第 7 步實際付款才知道；不通過的話會是「驗證未通過，沒有送出」，只有 tx#1 用掉。
 
+B5 的 review（11397d5）：REQUEST CHANGES，沒有 Critical；付款路徑都成立（consumer A 買 test402 不會開始付款、不會預留；dlg-t402 只有 wallet-b 恰好一筆；test402 當下的 402 與存下的不同時被拒；對帳把 test402 那筆算為已授權）。一項 Important 已處理：`get_quote` 會把外部 402 的 amount、asset、network 原樣交給 Agent → 改為與目錄文字一樣清理並截斷。建議也照做：付款工作連商店的 HTTP client 不用環境變數的 proxy、header 有上限；`base_sepolia` 的委派一律要是「客人／收款方」；deploy 確認存下的 402 就是 §6.2 記錄的（`/api/x402`、payTo `0x…0402`），否則不送；測試也檢查 dlg-t402 的收款方與客人。未做：test402 列在資料商店的目錄裡，consumer A 的 Agent 若請購它，會記為 Allow 但不付款（沒有對應的委派）；腳本化的 fake 場次不會這樣做。
+
 B5 的阻礙（10/20，第 1 步之後；已由 B5-D1 A 解決）：test402 的 402 以 EIP-55 大小寫混合的寫法給出 asset（`0x036CbD53…CF7e`），而 apa.pay.v1 要求付款綁定的位址一律小寫，且報價裡的 `asset`、`payTo` 必須與綁定**逐字**相同（`internal/paycontract` 的 Validate；Store、Signer、bridge 共用）。所以現在的契約無法表示 test402 的報價，請購會在組單時被拒（不會花到錢）。要繼續有兩件事要 Aaron 決定，見對話（B5-D1 契約比對大小寫、B5-D2 再取一次 402 存下原文作為 Host 報價簿的固定報價）。
 
 **B5 test402**（暫停，等 §6 第 1 步）：Agent 只能經由商店的目錄請購，而且 bridge 會自己去取那筆 402；test402 的商品等於讓 bridge 信任一個外部的 resource URL，Store 的報價簿也要放進 test402 **現在**實際回的報價（要與它逐欄相同，否則 test402 會拒絕，雖然不會花到錢，但 tx#1 已用掉）。所以 B5 要在第 1 步（唯讀：preflight 與對 test402 的一次 GET）核准並取得現在的 402 之後才設計與實作；其他各段不受影響。要做的事已列在 §4 B5：委派依收款方選、policy 的 merchants、目錄商品，以及 bridge 對外部 resource 的信任規則。

@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
@@ -132,6 +133,11 @@ func checkEnvironment(c *payConfig) error {
 			return errors.New("base_sepolia needs relayer_socket (apa-relayer) and shop_key_dir")
 		case c.Confirmations < 2 || c.ShopDailyTxCap == 0 || c.TokenFromBlock == 0:
 			return errors.New("base_sepolia needs at least 2 confirmations, shop_daily_tx_cap and token_from_block (the deployment's block)")
+		}
+		for k := range c.Delegations {
+			if !strings.Contains(k, "/") { // a consumer-wide line would start a payment to any payee the policy allows
+				return fmt.Errorf("base_sepolia's delegations are by consumer and payee (%q is not)", k)
+			}
 		}
 	default:
 		return fmt.Errorf("environment %q is local_anvil or base_sepolia", c.Environment)
@@ -351,7 +357,8 @@ func (p *payments) run(ctx context.Context, st *store.Store, socket string, cloc
 	starter := &payflow.Starter{Store: st, Register: p.relayer.RegisterTask, Delegations: p.cfg.Delegations,
 		Log: func(what string, err error) { fmt.Fprintln(p.out, "demo: payment", what, store.CodeOf(err)) }}
 	w := &payflow.Worker{Store: st, Relayer: p.relayer, Signer: signerclient.New(socket, st),
-		Shop:  payflow.HTTPShop{Client: &http.Client{Timeout: p.shopFor}},
+		// No proxy from the environment, bounded headers: as the bridge's client (a shop may be outside, B5).
+		Shop:  payflow.HTTPShop{Client: &http.Client{Timeout: p.shopFor, Transport: &http.Transport{Proxy: nil, MaxResponseHeaderBytes: 64 << 10}}},
 		Chain: reconcile.Token{RPC: p.rpc, Address: token, Confirmations: p.cfg.Confirmations, FromBlock: p.cfg.TokenFromBlock},
 		Clock: clock, Margin: payMargin, Before: starter.Start,
 		Log: func(intent string, err error) { fmt.Fprintln(p.out, "demo: payment", intent, logged(err)) }}

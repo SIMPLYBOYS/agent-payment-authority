@@ -103,7 +103,8 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 			return fail("QUOTE_REFUSED", "the shop quote failed a host check")
 		}
 		rec.Outcome = "ok"
-		return textResult(map[string]any{"product_id": p.ID, "amount": req.Amount, "asset": req.Asset, "network": req.Network,
+		// A 402 may be an outside server's (test402, B5): its text is cleaned and cut as a catalog's is.
+		return textResult(map[string]any{"product_id": p.ID, "amount": Clean(string(req.Amount), 80), "asset": Clean(req.Asset, 80), "network": Clean(req.Network, 80),
 			"note": "Quote only. Nothing is paid; a purchase request needs a human's approval."}, false), rec
 	}
 

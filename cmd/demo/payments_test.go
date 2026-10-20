@@ -228,7 +228,7 @@ func testnetConfig(priv, sock, keys, rpc string) map[string]any {
 		"token": "0x036cbd53842c5426634e7929541ec2318f3dcf7e", "token_name": "USDC", "token_version": "2", "token_from_block": 100,
 		"pay_to": "0x" + strings.Repeat("3", 40), "budget_contract": "0x" + strings.Repeat("4", 40), "policy_ttl": 600, "zkbudget": "zkbudget",
 		"zk_setup_dir": "zk", "dir": priv, "relayer_socket": sock, "shop_key_dir": keys, "shop_daily_tx_cap": 4,
-		"delegations": map[string]string{"consumer-a": "dlg-ta@1"}}
+		"delegations": map[string]string{"consumer-a/0x" + strings.Repeat("3", 40): "dlg-ta@1"}}
 }
 
 // base_sepolia's rules, before anything is opened: no anvil key, an https
@@ -257,6 +257,7 @@ func TestTestnetConfigRefused(t *testing.T) {
 		"no apa-relayer":            {func(c map[string]any) { delete(c, "relayer_socket") }, "needs relayer_socket"},
 		"no shop key":               {func(c map[string]any) { delete(c, "shop_key_dir") }, "needs relayer_socket (apa-relayer) and shop_key_dir"},
 		"a long policy ttl":         {func(c map[string]any) { c["policy_ttl"] = 601 }, "policy_ttl is 1 to 600"},
+		"a consumer-wide line":      {func(c map[string]any) { c["delegations"] = map[string]string{"consumer-a": "dlg-ta@1"} }, "by consumer and payee"},
 		"otherwise good":            {func(c map[string]any) {}, "apa-relayer on"}, // the rules pass: the relayer is asked next
 		"a shared socket directory": {func(c map[string]any) { c["relayer_socket"] = "/private/tmp/r.sock" }, "relayer_socket's directory"},
 	} {

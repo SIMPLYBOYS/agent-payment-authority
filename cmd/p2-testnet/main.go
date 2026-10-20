@@ -77,6 +77,8 @@ const (
 	shopCap       = 4
 	policyTTL     = 600
 	assetID       = "usdc-base-sepolia"
+	test402URL    = "https://test402.com/api/x402" // docs/commercial-p2b.md 6.2
+	test402PayTo  = "0x0000000000000000000000000000000000000402"
 )
 
 // beforeSend runs just before a transaction is sent (tests only; nil otherwise).
@@ -750,8 +752,10 @@ func prepare(o options, tok token, r roles) (hostFiles, error) {
 			return f, fmt.Errorf("%s is not test402's saved 402", p)
 		}
 		a, err := eth.ParseAddress(strings.ToLower(req.PayTo))
-		if as, _ := eth.ParseAddress(strings.ToLower(req.Asset)); err != nil || as != tok.addr || a == f.shop {
-			return f, fmt.Errorf("%s: its payTo or asset is not test402's Circle USDC payment", p)
+		as, _ := eth.ParseAddress(strings.ToLower(req.Asset))
+		if err != nil || as != tok.addr || a.Hex() != test402PayTo || off.ResourceURL != test402URL || pr.Resource.URL != test402URL {
+			// What §6.2 recorded: another payee or resource is test402 changing, for a person to look at first.
+			return f, fmt.Errorf("%s is not §6.2's test402 payment (%s, payTo %s, Circle USDC); nothing was sent", p, test402URL, test402PayTo)
 		}
 		f.t402, f.t402Offer = a, p
 		merchants = append(merchants, a.Hex()) // the policy allows test402 as a payee too
