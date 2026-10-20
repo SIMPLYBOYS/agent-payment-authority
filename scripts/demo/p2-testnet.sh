@@ -35,11 +35,18 @@ keygen)
   done ;;
 preflight|deploy)
   [ $# -ge 2 ] || { echo "usage: sh scripts/demo/p2-testnet.sh $cmd 0x<wallet-a> 0x<wallet-b>" >&2; exit 2; }
-  # The verifier deployed must be zk/setup's, from a build newer than its sources.
-  cmp -s contracts/src/Verifier.sol zk/setup/Verifier.sol || { echo "p2-testnet: contracts/src/Verifier.sol is not zk/setup's" >&2; exit 1; }
-  for c in Verifier Budget; do
-    [ "var/contracts/out/$c.sol/$c.json" -nt "contracts/src/$c.sol" ] || { echo "p2-testnet: var/contracts/out/$c.sol is older than contracts/src/$c.sol: build the contracts first (forge build in contracts/)" >&2; exit 1; }
-  done
+  if [ "$cmd" = deploy ]; then
+    # The verifier deployed must be zk/setup's, and the build made from the
+    # two deployed sources (Budget.sol imports nothing) as committed: neither
+    # changed since it (by content, in git; a checkout's file times say
+    # nothing), neither uncommitted.
+    cmp -s contracts/src/Verifier.sol zk/setup/Verifier.sol || { echo "p2-testnet: contracts/src/Verifier.sol is not zk/setup's" >&2; exit 1; }
+    for c in Verifier Budget; do
+      built=$(date -r "var/contracts/out/$c.sol/$c.json" +%s) || { echo "p2-testnet: no var/contracts/out/$c.sol: build the contracts first (forge build in contracts/)" >&2; exit 1; }
+      [ -z "$(git log --since="@$built" --format=%h -- "contracts/src/$c.sol")" ] || { echo "p2-testnet: contracts/src/$c.sol changed after var/contracts/out/$c.sol was built: build the contracts first (forge build in contracts/)" >&2; exit 1; }
+    done
+    git diff --quiet HEAD -- contracts/src/Verifier.sol contracts/src/Budget.sol || { echo "p2-testnet: the deployed contracts' sources have uncommitted changes" >&2; exit 1; }
+  fi
   a=$1; b=$2; shift 2
   "$dir/bin/p2-testnet" "$cmd" --dir "$dir" --rpc "$rpc" --wallet-a "$a" --wallet-b "$b" "$@" ;;
 relayer)
