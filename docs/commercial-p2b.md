@@ -242,6 +242,8 @@ sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目�
 - `Status` 只讀那筆授權可能被用掉的區塊：EIP-3009 只在 `validAfter` 之後、`validBefore` 之前有效，以區塊時間二分搜尋找出這段（一筆付款的窗口最多幾百個區塊），不再從部署區塊讀到現在；`Authorization` 因此多了 `validAfter`。
 - 完整的對帳報告仍從部署區塊讀起（每個錢包每 200 區塊一次），`p2-reconcile.sh` 等候上限改為 600 秒；主持人頁的對帳列只等 5 秒，可能顯示「未確認」，以報告為準。
 - 測試：`TestUnderABlockRangeCap`（本機 anvil 前放一個同樣拒絕超過 200 區塊的代理：付款狀態只讀它自己的窗口，報告分段讀完）；突變 2 項。
+- review（b12fcbc）APPROVE；補上窗口兩端的測試（`TestStatusWindowEdges`），授權已用但在它之後的窗口內沒有事件（例如被取消）時改回交人工處理（cc5f564）。
+- 主持人頁每幾秒就問一次對帳，而一次完整對帳要從部署區塊讀起（約每錢包一百次查詢）：每問一次就重讀整條鏈會壓垮公開節點、拖累付款判斷。改為同一時間只讀一次、不受頁面等待中斷、結果保留一分鐘；第一次還沒讀完時回 503 `reconciliation_pending`，頁面顯示「未確認：對帳計算中」，`p2-reconcile.sh` 每 10 秒再問。測試 `TestCachedReconciliation`。
 
 ## 7 停止流程
 

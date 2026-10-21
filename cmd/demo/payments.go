@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
@@ -321,6 +322,45 @@ func paymentSigner(socket string) error {
 
 // errReconcileStore: the recorded authorizations could not be read (not the chain).
 var errReconcileStore = errors.New("RECONCILE_STORE")
+
+// errReconcilePending: the first reconciliation is still being read.
+var errReconcilePending = errors.New("RECONCILE_PENDING")
+
+// reconEvery is how long one reconciliation answers before another is read.
+const reconEvery = time.Minute
+
+// cachedRecon runs one reconciliation at a time, apart from any request
+// (a page that stops waiting does not cancel it; a full one reads the chain
+// from the deployment in 200-block ranges, minutes on a public node), and
+// answers the last one for reconEvery: the host page asks every few seconds,
+// which would otherwise read the whole chain each time. Before the first
+// is read it answers errReconcilePending.
+func cachedRecon(read func(context.Context) (reconcile.Report, error)) func(context.Context) (reconcile.Report, error) {
+	var mu sync.Mutex
+	var running, have bool
+	var at time.Time
+	var rep reconcile.Report
+	var last error
+	return func(context.Context) (reconcile.Report, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !running && (!have || time.Since(at) >= reconEvery) {
+			running = true
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				r, err := read(ctx)
+				cancel()
+				mu.Lock()
+				rep, last, at, have, running = r, err, time.Now(), true, false
+				mu.Unlock()
+			}()
+		}
+		if !have {
+			return reconcile.Report{}, errReconcilePending
+		}
+		return rep, last
+	}
+}
 
 // reconciliation is the Host's reconciliation on this chain
 // (docs/commercial-p2-host.md 7; AE1 acceptance 18): every confirmed

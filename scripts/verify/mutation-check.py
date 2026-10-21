@@ -1147,6 +1147,8 @@ MUTATIONS = [
      'case !bytes.Equal(pass, again):\n\t\treturn "", errors.New("the new passphrases differ', 'case false && !bytes.Equal(pass, again):\n\t\treturn "", errors.New("the new passphrases differ', 'TestRekey'),
     ('P2-b rekey: the new key file never replaces the old', 'internal/keytool/keytool.go',
      'if err := os.Rename(tmp, path); err != nil {', 'if err := os.Rename(tmp, path+".x"); err != nil {', 'TestRekey'),
+    ("P2-b step 6: every reconciliation asked reads the chain again", 'cmd/demo/payments.go',
+     'if !running && (!have || time.Since(at) >= reconEvery) {', 'if !running {', 'TestCachedReconciliation'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the

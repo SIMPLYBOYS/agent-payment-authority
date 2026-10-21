@@ -16,7 +16,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
@@ -173,6 +175,45 @@ func TestReconciliationRoute(t *testing.T) {
 	fail = errors.New("node down")
 	if code, m := get("tok-host"); code != 503 || m["error"] != "chain_unavailable" {
 		t.Fatalf("no chain: %d %v", code, m)
+	}
+	fail = errReconcilePending
+	if code, m := get("tok-host"); code != 503 || m["error"] != "reconciliation_pending" {
+		t.Fatalf("still reading: %d %v", code, m)
+	}
+}
+
+// One reconciliation at a time, not cancelled by the asker, answered again
+// for reconEvery: "pending" until the first is read.
+func TestCachedReconciliation(t *testing.T) {
+	var reads atomic.Int32
+	release := make(chan struct{})
+	r := cachedRecon(func(ctx context.Context) (reconcile.Report, error) {
+		reads.Add(1)
+		<-release
+		return reconcile.Report{Known: 3}, ctx.Err()
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the asker gave up at once: the read goes on
+	for range 5 {
+		if _, err := r(ctx); !errors.Is(err, errReconcilePending) {
+			t.Fatalf("before the first read: %v", err)
+		}
+	}
+	close(release)
+	var rep reconcile.Report
+	var err error
+	for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+		if rep, err = r(context.Background()); !errors.Is(err, errReconcilePending) {
+			break
+		}
+	}
+	if err != nil || rep.Known != 3 {
+		t.Fatalf("the read: %+v %v", rep, err)
+	}
+	r(context.Background())
+	time.Sleep(200 * time.Millisecond) // a second read, if one were started, has begun by now
+	if n := reads.Load(); n != 1 {
+		t.Fatalf("%d reads within a minute", n)
 	}
 }
 

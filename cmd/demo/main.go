@@ -416,9 +416,9 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 			}
 			wallets = append(wallets, wa)
 		}
-		ui.recon = func(ctx context.Context) (reconcile.Report, error) {
+		ui.recon = cachedRecon(func(ctx context.Context) (reconcile.Report, error) {
 			return pay.reconciliation(ctx, st, wallets, d.clock())
-		}
+		})
 	}
 	var pairCode string
 	if *pairingOn {

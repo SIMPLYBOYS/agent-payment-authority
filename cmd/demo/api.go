@@ -148,7 +148,10 @@ func (a *api) reconciliation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rep, err := a.recon(r.Context())
-	if errors.Is(err, errReconcileStore) {
+	if errors.Is(err, errReconcilePending) {
+		fail(w, http.StatusServiceUnavailable, "reconciliation_pending")
+		return
+	} else if errors.Is(err, errReconcileStore) {
 		fmt.Fprintln(a.out, "demo: reconciliation: the recorded authorizations are unreadable")
 		fail(w, http.StatusServiceUnavailable, "reconcile_failed")
 		return

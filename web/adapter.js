@@ -647,6 +647,7 @@ const denied = (decisions) => decisions.some((d) => d && d.policy_verdict === "D
 // unauthorized new spend is an error; one not read is unconfirmed.
 export function reconciliationRow(rec) {
   if (!rec) return ["對帳", "unconfirmed", "未確認：讀取中"];
+  if (rec.error === "reconciliation_pending") return ["對帳", "unconfirmed", "未確認：對帳計算中（從部署區塊讀起，可能要幾分鐘）"];
   if (rec.error) return ["對帳", "error", "無法對帳（" + str(rec.error) + "），未確認"];
   if (rec.version !== "apa.reconciliation.v1" || !Array.isArray(rec.unauthorized)) return ["對帳", "error", "對帳結果不完整（不是一份對帳報告），未確認"];
   const env = paysOn(rec.environment) ? PAYING[rec.environment] : str(rec.environment);
