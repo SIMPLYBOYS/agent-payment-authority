@@ -245,6 +245,24 @@ sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目�
 - review（b12fcbc）APPROVE；補上窗口兩端的測試（`TestStatusWindowEdges`），授權已用但在它之後的窗口內沒有事件（例如被取消）時改回交人工處理（cc5f564）。
 - 主持人頁每幾秒就問一次對帳，而一次完整對帳要從部署區塊讀起（約每錢包一百次查詢）：每問一次就重讀整條鏈會壓垮公開節點、拖累付款判斷。改為同一時間只讀一次、不受頁面等待中斷、結果保留一分鐘；第一次還沒讀完時回 503 `reconciliation_pending`，頁面顯示「未確認：對帳計算中」，`p2-reconcile.sh` 每 10 秒再問。測試 `TestCachedReconciliation`。
 
+### 6.3 第 6、7 步的結果（10/21）
+
+Aaron 核准第 6、7 步；① 與 ④ 由 Claude Code 以 Host 的 API 代按（與頁面按鈕相同的請求），② 與 ③ 由 Aaron 以已登記的裝置與語音操作。Host 資料庫是新的（`var/p2-testnet/present/a2-host-*`），場次 `present-9IZvfy`，建置 `09f0b0b`。
+
+| 場次 | task | 結果 | 鏈上 |
+|---|---|---|---|
+| ① Allow（客人 B、街角咖啡 0.08） | `show-b-01` | **已付款、已交付**（約 26 秒） | tx#1 `0xac13bccda6224af949c6a089cc4353a3fd8e4e311109461af16e110d7d6673dd`；tx#2 `0xd81074ac3525a3d67535b85c610b4eecc299516f52e8db0bd66155098650a212`（區塊 48394045）；收據 `rcpt-c8e74cd8cf875c9a1a453239baa0acee` |
+| （中斷）Ask | `show-a-01` | Signer 回 `SESSION_DECIDED`，沒有核准、沒有付款，Ask 到期 | 只有登記 tx#0 |
+| ② Ask 核准（客人 A、簡報 0.50） | `show-a-04` | **本人核准（裝置＋語音挑戰通過，webauthn）；已付款、已交付** | tx#1 `0x3e613417d568f327acfb3423bdfcd955075440e0f5b2d5b3971b0582b995a9c8`；tx#2 `0xacec387caf770cb404cda87ba6f56390203f0f8a94fedbed042d7211b9fc58e0`（區塊 48394895）；收據 `rcpt-ac76ed10b3fa6b43139877f35a518dc2` |
+| ③ Ask 拒絕（客人 A、簡報 0.50） | `show-a-05` | **本人以裝置拒絕；沒有付款** | 只有登記 tx#0 |
+| ④ test402（客人 B、0.0001） | `show-b-02` | 預留、Signer 簽名、送出給 test402；**test402 沒有結算**，授權到期（5 分鐘）後鏈上確認沒有被用掉 → `needs_review`（`NOT_SETTLED_EXPIRED`）；沒有付款紀錄的回應（PAYMENT-RESPONSE） | tx#1 `0x06de1e742ea40b2d20ab7a73c24813915589ac7fba1e3c5a572a72efb5d464a3`（區塊 48394953）；沒有 tx#2 |
+
+- **對帳**（第 8 步，`p2-reconcile.sh`）：`base_sepolia`，區塊 48374723–48395131，2 個錢包，3 筆已記錄授權，**未授權新增支出 0 筆**；存於 `var/p2-testnet/reconciliation-20261021-125707.json`。
+- **`show-a-01` 的中斷**：`/opt` 的 Signer 在 A2（10/13）已決定過 `show-a-01`～`03`，遷移後仍在 `signer.db`；新的 Host 資料庫不知道，又從 `show-a-01` 開始。Aaron 從 testnet 的 registry 移除 `show-a-02`、`show-a-03`（原檔留為 `registry.json.before-skip-decided`），重啟 Host 後客人 A 從 `show-a-04` 開始。之後要避免：新 Host 資料庫接上既有 Signer 時，先排除 Signer 已決定的 task。
+- **停止點**：一條成功 Ask（②）與一條 Deny（③）的 testnet 證據 ✅；test402.com 一筆真 402：**402 取得了，付款沒有完成**（test402 沒有結算）。依 §7 停在這裡，沒有重試。
+- **我們送出的交易**：部署 2、登記 5（① ② ③ ④ 與中斷的 `show-a-01`）、預留 3、結算 2，共 **12 筆**；relayer 今天 8 筆（上限 12）、商店 2 筆（上限 4）。
+- **待查**：test402 為什麼沒有結算（我們沒有記下它的回應）；付款工作在「已送出」期間每一輪都重送同一個 PAYMENT-SIGNATURE（對外部商店太頻繁）；頁面上「模擬中……不會付款」與「核准只留下模擬授權，未啟用付款」兩段舊文字在 testnet 上是錯的；核准面板在付款送出後仍寫「尚未付款」。
+
 ## 7 停止流程
 
 **遇到就停**：任何付款變成 unknown 或 needs_review；對帳不是 0；交易 revert；碰到 §5 的任何上限；餘額和預期不符；RPC 回錯的鏈。

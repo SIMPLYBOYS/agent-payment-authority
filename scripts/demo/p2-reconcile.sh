@@ -9,7 +9,7 @@
 set -eu
 umask 077
 root=$(cd "$(dirname "$0")/../.." && pwd)
-tok=$(ls -td "$root"/var/present-*/tok/tokens.json 2>/dev/null | head -1)
+tok=$(ls -td ${P2_PRESENT_DIR:-$root/var}/present-*/tok/tokens.json 2>/dev/null | head -1)
 [ -n "$tok" ] || { echo "p2-reconcile: no var/present-*/tok/tokens.json: is make present-p2 running?" >&2; exit 1; }
 out=${1:-$root/var/p2-local/reconciliation-$(date +%Y%m%d-%H%M%S).json}
 host=$(python3 -I -c 'import json,sys; print(next(t["token"] for t in json.load(open(sys.argv[1]))["tokens"] if t["role"] == "host"))' "$tok")
