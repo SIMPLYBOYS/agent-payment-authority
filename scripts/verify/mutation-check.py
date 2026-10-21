@@ -1151,8 +1151,6 @@ MUTATIONS = [
      'if !running && (!have || time.Since(at) >= reconEvery) {', 'if !running && (true || !have || time.Since(at) >= reconEvery) {', 'TestCachedReconciliation'),
     ('P2-b after step 7: a sent payment asks the shop every round', 'internal/payflow/payflow.go',
      '\tif now < s[0] {\n\t\treturn false', '\tif false && now < s[0] {\n\t\treturn false', 'TestShopAskedAtGrowingIntervals'),
-    ("P2-b after step 7: an approval's line says not paid on a paying host", 'web/approve.js',
-     'const off = pays ? "Host 隨後付款；付款進度以上方與請購卡片為準。" : "付款未啟用。";', 'const off = pays ? "尚未付款。" : "付款未啟用。";', 'web/test/p2.test.mjs'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the

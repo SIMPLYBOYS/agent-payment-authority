@@ -429,6 +429,8 @@ ITEMS = [
      [(KT, "case !bytes.Equal(pass, again):", "case false && !bytes.Equal(pass, again):")]),
     ("P1b-D4: keygen writes the key file 0600", go("./cmd/apa-signer/", "^TestKeygen$", ("TestKeygen", r"key file mode")),
      [(KT, "os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)", "os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)")]),
+    ("P2-b after step 7: an approval's line says not paid on a paying host", node("web/test/p2.test.mjs", "an Ask of an ended task: not approvable, its words say so; an approval says not yet paid with local_anvil", r"Host 隨後付款"),
+     [("web/approve.js", 'const off = pays ? "Host 隨後付款；付款進度以上方與請購卡片為準。" : "付款未啟用。";', 'const off = pays ? "尚未付款。" : "付款未啟用。";')]),
 ]
 
 ITEM_TIMEOUT = 900
