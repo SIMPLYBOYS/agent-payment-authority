@@ -54,6 +54,8 @@ func balanceOf(t *testing.T, c *eth.Client, token, who eth.Address) uint64 {
 type anvilWorld struct {
 	rpc          *eth.Client
 	usdc         eth.Address
+	budget       eth.Address // the budget contract
+	verify       eth.Address // its Z2 verifier
 	payer, payTo eth.Address
 	addrs        []string
 	socket       string
@@ -155,7 +157,7 @@ func newAnvilWorld(t *testing.T) *anvilWorld {
 		t.Fatal(err)
 	}
 	shop.Register(mux)
-	return &anvilWorld{rpc: rpc, usdc: usdc, payer: payer, payTo: payTo, addrs: addrs, socket: socket, host: host, srv: srv,
+	return &anvilWorld{rpc: rpc, usdc: usdc, budget: contract, verify: verifier, payer: payer, payTo: payTo, addrs: addrs, socket: socket, host: host, srv: srv,
 		offer: shop.Offers()[0], clock: clock, now: now} // the offer: kr-market, 500000
 }
 

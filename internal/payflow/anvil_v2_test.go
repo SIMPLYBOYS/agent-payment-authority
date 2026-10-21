@@ -1,22 +1,29 @@
 package payflow
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/e1evidence"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth/ethtest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer/signertest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signerclient"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/verification"
 )
 
 // E1a-3 (docs/commercial-e1a.md 4.3): an apa.pay.v2 purchase, its BBS+
@@ -42,7 +49,8 @@ func TestV2PaidOnAnvil(t *testing.T) {
 	k := store.OfferKey{Method: w.offer.Method, URL: w.offer.URL}
 	dir := filepath.Join(t.TempDir(), "db")
 	os.Mkdir(dir, 0o700)
-	s, err := store.Open(store.Config{Path: filepath.Join(dir, "apa.db"), Registry: reg, Offers: store.OfferBook{k: {w.offer.Quote}}, Clock: w.clock,
+	dbPath := filepath.Join(dir, "apa.db")
+	s, err := store.Open(store.Config{Path: dbPath, Registry: reg, Offers: store.OfferBook{k: {w.offer.Quote}}, Clock: w.clock,
 		Credentials: creds, VerifierID: "host-test"})
 	if err != nil {
 		t.Fatal(err)
@@ -92,6 +100,16 @@ func TestV2PaidOnAnvil(t *testing.T) {
 		t.Fatalf("submit: %+v %+v %v", r.Purchase.Decision, r.Purchase.Credential, err)
 	}
 
+	// E1-a's start, before anything is registered or paid (§4.7).
+	hostDir := t.TempDir()
+	os.WriteFile(filepath.Join(hostDir, "payments.json"), []byte(`{"environment":"local_anvil","chain_id":`+strconv.FormatUint(ethtest.Chain, 10)+
+		`,"token":"`+w.usdc.Hex()+`","pay_to":"`+w.payTo.Hex()+`","budget_contract":"`+w.budget.Hex()+`"}`), 0o600)
+	regRaw, _ := json.Marshal(reg)
+	os.WriteFile(filepath.Join(hostDir, "registry.json"), regRaw, 0o600)
+	start, err := e1evidence.Start(bg, w.rpc, hostDir)
+	if err != nil || start.Verifier != w.verify.Hex() {
+		t.Fatalf("start %+v %v", start, err)
+	}
 	if err := w.host.RegisterTask(bg, "task-a", "consumer-a", 5_000_000); err != nil {
 		t.Fatal(err)
 	}
@@ -134,5 +152,57 @@ func TestV2PaidOnAnvil(t *testing.T) {
 		"PAYMENT_SETTLED=fixture/local_anvil RESOURCE_DELIVERED=fixture/host_merchant RECEIPT_ISSUED=fixture/host_merchant"
 	if strings.Join(got, " ") != want {
 		t.Fatalf("events:\n got %s\nwant %s", strings.Join(got, " "), want)
+	}
+
+	// E1-a's pack of this run, checked with the chain itself: every claim holds.
+	s.Close()
+	if _, err := e1evidence.Start(bg, w.rpc, hostDir); err == nil {
+		t.Error("a start after task-a was registered")
+	}
+	packDir := filepath.Join(t.TempDir(), "pack")
+	if _, err := e1evidence.Pack(e1evidence.PackInput{DB: dbPath, Start: start, Tasks: []verification.E1aTask{{TaskID: "task-a", Scenario: "e1a-ask"}}}, packDir); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := verification.VerifyE1a(packDir, ethtest.Root(), w.rpc)
+	if err != nil || rep.Verdict != verification.Pass {
+		t.Fatalf("the pack: %v %+v", err, rep)
+	}
+	// What the chain alone can catch: another start, and a spend the Host never made.
+	restart := func(change func(*verification.E1aStart)) string {
+		dir := filepath.Join(t.TempDir(), "pack")
+		if _, err := e1evidence.Pack(e1evidence.PackInput{DB: dbPath, Start: start, Tasks: []verification.E1aTask{{TaskID: "task-a", Scenario: "e1a-ask"}}}, dir); err != nil {
+			t.Fatal(err)
+		}
+		var m verification.E1aManifest
+		raw, _ := os.ReadFile(filepath.Join(dir, "manifest.json"))
+		json.Unmarshal(raw, &m)
+		change(&m.Start)
+		raw, _ = json.Marshal(m)
+		os.WriteFile(filepath.Join(dir, "manifest.json"), raw, 0o600)
+		sum := sha256.Sum256(raw)
+		end, _ := json.Marshal(verification.E1aEnd{RunID: m.RunID, State: "complete", ManifestSHA256: hex.EncodeToString(sum[:])})
+		os.WriteFile(filepath.Join(dir, "run-end.json"), end, 0o600)
+		return dir
+	}
+	for name, c := range map[string]struct {
+		change func(*verification.E1aStart)
+		claim  string
+	}{
+		"another verifier": {func(s *verification.E1aStart) { s.Verifier = w.payTo.Hex() }, "E4"},
+		"another chain":    {func(s *verification.E1aStart) { s.ChainID = ethtest.Chain + 1 }, "E4"},
+		"another budget":   {func(s *verification.E1aStart) { s.BudgetContract = w.usdc.Hex() }, "E4"},
+	} {
+		r, err := verification.VerifyE1a(restart(c.change), ethtest.Root(), w.rpc)
+		if err != nil || r.Claims[c.claim] != verification.Fail {
+			t.Errorf("%s: %s is %v (%v)", name, c.claim, r.Claims[c.claim], err)
+		}
+	}
+	// The payer's key moves funds itself, no Signer, no purchase: unauthorized (E8).
+	payerKey, _ := eth.NewKey(func() []byte { b := sha256.Sum256([]byte("payflow anvil test payer a")); return b[:] }())
+	ethtest.RPC(t, w.rpc, "anvil_setBalance", payerKey.Addr.Hex(), "0xde0b6b3a7640000")
+	stray, _ := eth.Call("transfer(address,uint256)", ethtest.Key(t, 4).Addr, uint64(1000))
+	ethtest.Mine(t, w.rpc, payerKey, &eth.Tx{To: &w.usdc, Gas: 100_000, Data: stray})
+	if r, _ := verification.VerifyE1a(packDir, ethtest.Root(), w.rpc); r.Claims["E8"] != verification.Fail || r.Claims["E4"] != verification.Pass {
+		t.Fatalf("a transfer no purchase made: E8 %s, E4 %s", r.Claims["E8"], r.Claims["E4"])
 	}
 }

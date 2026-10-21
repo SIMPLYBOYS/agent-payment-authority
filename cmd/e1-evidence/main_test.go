@@ -224,6 +224,39 @@ func TestPackAndCheck(t *testing.T) {
 				return append(es[:i], es[i+1:]...)
 			})
 		}},
+		"delivered without its receipt and reservation": {"E2", func(dir string) {
+			events(t, dir, func(es []contracts.AuditEvent) []contracts.AuditEvent {
+				var out []contracts.AuditEvent
+				for _, e := range es {
+					if e.EventType != "RECEIPT_ISSUED" && e.EventType != "BUDGET_RESERVED" {
+						out = append(out, e)
+					}
+				}
+				return out
+			})
+		}},
+		"delivered on a Deny": {"E2", func(dir string) {
+			events(t, dir, func(es []contracts.AuditEvent) []contracts.AuditEvent {
+				d := *es[index(es, "POLICY_DECIDED")].Payload.Decision
+				d.PolicyVerdict = "Deny"
+				es[index(es, "POLICY_DECIDED")].Payload.Decision = &d
+				return es
+			})
+		}},
+		"paid on a simulated grant": {"E2", func(dir string) {
+			events(t, dir, func(es []contracts.AuditEvent) []contracts.AuditEvent {
+				i := index(es, "POLICY_DECIDED")
+				d := *es[i].Payload.Decision
+				d.PolicyVerdict = "Ask"
+				es[i].Payload.Decision = &d
+				approved, grant := es[i], es[i]
+				approved.EventType, approved.EvidenceMode, approved.Source = "APPROVED", "fixture", "simulated"
+				approved.Payload.AuthorizationMethod = "simulated"
+				grant.EventType, grant.EvidenceMode, grant.Source = "GRANT_ISSUED", "fixture", "simulated"
+				grant.Payload = contracts.EventPayload{AuthorizationMethod: "simulated", GrantID: "grant-sim"}
+				return append(es[:i+1], append([]contracts.AuditEvent{approved, grant}, es[i+1:]...)...)
+			})
+		}},
 		"settled twice": {"E5", func(dir string) {
 			events(t, dir, func(es []contracts.AuditEvent) []contracts.AuditEvent {
 				i := index(es, "PAYMENT_SETTLED")
@@ -289,6 +322,7 @@ func TestLiveTrace(t *testing.T) {
 		traces := t.TempDir()
 		if c.prompt != "" {
 			sum := sha256.Sum256([]byte(c.prompt))
+			os.WriteFile(filepath.Join(traces, "task-a-b-9.jsonl"), []byte("{}\n"), 0o600) // another task's, never packed for task-a
 			os.WriteFile(filepath.Join(traces, "task-a-1.jsonl"), []byte(`{"event":"run_start","task_id":"task-a","prompt_sha256":"`+hex.EncodeToString(sum[:])+`"}
 {"event":"tool_call","tool":"request_purchase","product_id":"kr-market","outcome":"recorded"}
 `), 0o600)

@@ -337,6 +337,8 @@
 
 | E1a-5（一）證據包與 checker | （本段） | `cmd/e1-evidence pack`：唯讀讀 Host 的 Store（事件、請購單、registry 快照），加上 live 的 trace、對帳報告與事先記錄的起點，逐檔 sha256，`run-end.json` 收尾；`verify-demo --mode e1a`（`internal/verification/e1a.go`）：E1、E2、E3、E5、E6（checker 自己一份對照表；live 要有 trace、付款主機提示詞的 SHA、每筆請購都有 `request_purchase`）、E7、E9（只有摘要欄位可以是不帶前綴的 64 位 hex）、E10。E4、E8 要讀鏈，下一段做；沒做之前是 INCONCLUSIVE | 待 review |
 
+| E1a-5（二）讀鏈 | （本段） | `e1-evidence start`（實跑前：下一個區塊、Verifier、registry 的 task 都還沒登記）；E4：tx#1 是對預算合約的 `spend`、intent 與金額相符、有 `Spent` log、Verifier 的位址與 bytecode 是本 repo 編出來的、以 `eth_call` 重跑 `verifyProof`；tx#2 是付款人到收款人的轉帳、用的是這筆請購自己的 EIP-3009 nonce；E8：從起點到最新區塊，自己分段向鏈查付款錢包的每一筆轉出，都要是證據包裡的結算。`TestV2PaidOnAnvil` 以真實的本機鏈產生證據包並檢查：E1～E10 全部 PASS；換 Verifier、換鏈、換預算合約時 E4 FAIL；付款人自己轉帳時 E8 FAIL。（一）的 review（REQUEST CHANGES，2 個 Critical）一併修正：已交付必須有完整的鏈、只能是 Allow 或本人裝置核准的 Ask；E9 依欄位判斷；E7 跨 task；缺檔是 FAIL；trace 全收、每一次執行都要對；checker 的對照表與 Store 的逐項比對 | 待 review |
+
 **E1a-2 的 review**：REQUEST CHANGES，沒有 Critical；已確認 live 主機上模擬核准不能決定 Ask（兩道檢查：只能確認委託的模擬者、有 Signer 時 `simResolve` 一律拒絕）。修正：live 各模式允許什麼集中在 `hostRoles`（有測試與 mutation）；live 啟動紀錄寫實際的標籤與付款狀態；兩個新的拒絕啟動條件有測試；頁面上按鈕寫「確認委託（模擬）」，只能確認委託時不讀核准清單（第二輪 review 發現頁面沒有收到 `delegation_only`，`web/hostcreds.js` 已改為傳遞並加測試）；`present.sh` 的說明與 live 目錄（不付款的 live 主機仍只用 `scenarios-live.json`）。
 
 **要在本機彩排確認的**：v2 的 Ask 經本人核准再付款（見 E1a-3）。live 付款主機沒有 profile 時，目前會用預設的 demo profile（Policy 之後會因商家不符而拒絕，不會付錯）；`make present-e1a` 一定帶 profile。提示詞的 SHA 由 E1a-5 的證據包記錄。這些需要一個同時有 live CLI、Signer 與鏈的 Host，單元測試做不到。

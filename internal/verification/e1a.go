@@ -130,6 +130,8 @@ var e1aLimits = []string{
 	"a device or virtual authenticator is the host's declaration (--authenticator-source); the checker checks it is consistent, not that a device was physical",
 	"event and intent hashes and registry bindings use the pay contract's own pure functions: a fault there is shared",
 	"tx#2 is tied to its intent only through the Store's records and the EIP-3009 nonce, not by the chain",
+	"the paying host's prompt is buyer.PayingTaskPrompt, the host's own function: a change to it moves the host and this check together",
+	"the secret scan finds key shapes (hex) and fields never whitelisted; a base64 secret is not recognized",
 }
 
 // tracePrompt is the prompt a live run of entry must have been given.
@@ -189,8 +191,9 @@ func VerifyE1a(dir, repo string, chain Chain) (*E1aReport, error) {
 			r.Injections = append(r.Injections, e1aInjection(&f, run, repo))
 		}
 	}
+	e1aApart(&f, runs, registry)
 	e1aSafety(b, &f)
-	e1aOnChain(&f, m, runs, chain)
+	e1aOnChain(&f, m, runs, chain, repo)
 	return r, nil
 }
 
@@ -203,7 +206,7 @@ type e1aRun struct {
 func e1aJSON(b *bundle, f *findings, claim, rel string, dst any) bool {
 	raw, err := b.read(rel)
 	if err != nil {
-		f.missing(claim, []string{rel}, "%s cannot be read: %v", rel, err)
+		f.fail(claim, []string{rel}, "%s is not in the pack as it should be: %v", rel, err)
 		return false
 	}
 	if err := json.Unmarshal(raw, dst); err != nil {
@@ -237,7 +240,7 @@ func e1aManifest(b *bundle, f *findings, r *E1aReport) (E1aManifest, bool) {
 		listed[x.Path] = true
 		raw, err := b.read(x.Path)
 		if err != nil {
-			f.missing("E1", []string{x.Path}, "a listed file cannot be read: %v", err)
+			f.fail("E1", []string{x.Path}, "a listed file is not in the pack: %v", err)
 			continue
 		}
 		if s := sha256.Sum256(raw); hex.EncodeToString(s[:]) != x.SHA256 {
@@ -320,18 +323,42 @@ func e1aIntents(f *findings, run *e1aRun) {
 			}
 			return nil
 		}
-		if has("RECEIPT_ISSUED") == nil {
+		if has("RECEIPT_ISSUED") == nil && has("RESOURCE_DELIVERED") == nil {
 			continue // not delivered: a Deny, an open Ask, an ending; E5 checks none was delivered
 		}
-		need := []string{"PURCHASE_PROPOSED", "POLICY_DECIDED", "PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SETTLED", "RESOURCE_DELIVERED"}
+		need := []string{"PURCHASE_PROPOSED", "POLICY_DECIDED", "PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED",
+			"RESOURCE_DELIVERED", "RECEIPT_ISSUED"}
 		if es[0].Version == paycontract.V2 {
 			need = append(need, "CREDENTIAL_VERIFIED")
 			if c := has("CREDENTIAL_VERIFIED"); c != nil && (c.Payload.Credential == nil || c.Payload.Credential.Result != "valid") {
 				f.fail("E2", ev, "intent %s was delivered on a credential that did not verify", intent)
 			}
 		}
-		if d := has("POLICY_DECIDED"); d != nil && d.Payload.Decision != nil && d.Payload.Decision.PolicyVerdict == "Ask" {
+		// Paid only on an Allow, or an Ask the person approved on a device:
+		// a Deny, a simulated grant or a denial is never paid.
+		verdict := ""
+		if d := has("POLICY_DECIDED"); d != nil && d.Payload.Decision != nil {
+			verdict = d.Payload.Decision.PolicyVerdict
+		}
+		switch verdict {
+		case "Ask":
 			need = append(need, "APPROVED", "GRANT_ISSUED")
+			for _, t := range []string{"APPROVED", "GRANT_ISSUED"} {
+				if e := has(t); e != nil && e.Payload.AuthorizationMethod != "webauthn" {
+					f.fail("E2", ev, "intent %s was delivered on %s by %q, not the person's device", intent, t, e.Payload.AuthorizationMethod)
+				}
+			}
+			if has("APPROVAL_DENIED") != nil {
+				f.fail("E2", ev, "intent %s was delivered although its approval was denied", intent)
+			}
+		case "Allow":
+			for _, t := range []string{"APPROVAL_SESSION_OPENED", "APPROVED", "GRANT_ISSUED", "APPROVAL_DENIED"} {
+				if has(t) != nil {
+					f.fail("E2", ev, "intent %s: an Allow with %s", intent, t)
+				}
+			}
+		default:
+			f.fail("E2", ev, "intent %s was delivered on verdict %q", intent, verdict)
 		}
 		for _, t := range need {
 			if has(t) == nil {
@@ -390,10 +417,14 @@ func e1aMode(r contracts.RunConditions, e contracts.AuditEvent) (string, string)
 	case "CREDENTIAL_VERIFIED":
 		return "fixture", "test_issuer"
 	case "APPROVED", "APPROVAL_DENIED", "GRANT_ISSUED":
-		if e.Payload.AuthorizationMethod == "simulated" {
+		switch m := e.Payload.AuthorizationMethod; {
+		case m == "simulated":
 			return "fixture", "simulated"
+		case m == "webauthn", m == "" && e.EventType == "APPROVAL_DENIED": // "": a denial by the voice
+			return auth()
 		}
-		return auth()
+		return "", "" // no label fits an unknown method
+
 	case "VOICE_CHALLENGE_VERIFIED", "VOICE_CHALLENGE_FAILED", "VOICE_UNAVAILABLE":
 		return auth()
 	case "APPROVAL_SESSION_OPENED", "APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN", "APPROVAL_SUPERSEDED":
@@ -412,7 +443,7 @@ func e1aMode(r contracts.RunConditions, e contracts.AuditEvent) (string, string)
 // and a request for each product it bought.
 func e1aModes(b *bundle, f *findings, run *e1aRun, catalog map[string]e1aEntry) {
 	ev := []string{"tasks/" + run.task.TaskID + "/events.json"}
-	if len(run.events) == 0 || run.events[0].Payload.RunConditions == nil {
+	if len(run.events) == 0 || run.events[0].EventType != "TASK_STARTED" || run.events[0].Payload.RunConditions == nil {
 		f.fail("E6", ev, "TASK_STARTED records no run conditions")
 		return
 	}
@@ -426,39 +457,46 @@ func e1aModes(b *bundle, f *findings, run *e1aRun, catalog map[string]e1aEntry) 
 		return
 	}
 	entry, ok := catalog[run.task.Scenario]
-	tr := "traces/" + run.task.TaskID + ".jsonl"
-	raw, err := b.read(tr)
-	if !ok || err != nil {
+	tr := "traces/" + run.task.TaskID + "/"
+	var traces []string
+	for _, p := range e1aFiles(b) {
+		if strings.HasPrefix(p, tr) {
+			traces = append(traces, p)
+		}
+	}
+	if !ok || len(traces) == 0 {
 		f.fail("E6", []string{tr}, "a live run without its trace or catalog entry (%s)", run.task.Scenario)
 		return
 	}
 	prompt, err := buyer.PayingTaskPrompt(entry.Task)
 	sum := sha256.Sum256([]byte(prompt))
-	var started bool
 	requested := map[string]bool{}
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		var x struct {
-			Event, TaskID, PromptSHA256, Tool, ProductID string
+	for _, p := range traces { // every run of the task (a retry has its own trace)
+		raw, _ := b.read(p)
+		started := false
+		for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			var m map[string]any
+			if json.Unmarshal([]byte(line), &m) != nil {
+				f.fail("E6", []string{p}, "a trace line is not JSON")
+				return
+			}
+			event, _ := m["event"].(string)
+			task, _ := m["task_id"].(string)
+			sha, _ := m["prompt_sha256"].(string)
+			tool, _ := m["tool"].(string)
+			product, _ := m["product_id"].(string)
+			switch {
+			case event == "run_start" && (task != run.task.TaskID || err != nil || sha != hex.EncodeToString(sum[:])):
+				f.fail("E6", []string{p}, "a run of %s not with the paying host's prompt for %s", task, entry.ID)
+			case event == "run_start":
+				started = true
+			case event == "tool_call" && strings.HasSuffix(tool, "request_purchase"):
+				requested[product] = true
+			}
 		}
-		var m map[string]any
-		if json.Unmarshal([]byte(line), &m) != nil {
-			f.fail("E6", []string{tr}, "a trace line is not JSON")
-			return
+		if !started {
+			f.fail("E6", []string{p}, "the trace has no run start")
 		}
-		x.Event, _ = m["event"].(string)
-		x.TaskID, _ = m["task_id"].(string)
-		x.PromptSHA256, _ = m["prompt_sha256"].(string)
-		x.Tool, _ = m["tool"].(string)
-		x.ProductID, _ = m["product_id"].(string)
-		switch {
-		case x.Event == "run_start" && x.TaskID == run.task.TaskID && err == nil && x.PromptSHA256 == hex.EncodeToString(sum[:]):
-			started = true
-		case x.Event == "tool_call" && strings.HasSuffix(x.Tool, "request_purchase"):
-			requested[x.ProductID] = true
-		}
-	}
-	if !started {
-		f.fail("E6", []string{tr}, "the trace has no run of %s with the paying host's prompt for %s", run.task.TaskID, entry.ID)
 	}
 	for _, o := range run.orders {
 		if p := productOf(o.Intent.ResourceURL); !requested[p] {
@@ -499,6 +537,39 @@ func e1aParties(f *findings, run *e1aRun, reg *contracts.Registry) {
 	}
 }
 
+// e1aApart is E7 across the runs: a grant, a delegation and a wallet belong
+// to one consumer only, and a grant to one purchase.
+func e1aApart(f *findings, runs map[string]*e1aRun, reg *contracts.Registry) {
+	owner := map[string]string{} // "grant g", "delegation d", "wallet w" -> consumer
+	grants := map[string]string{}
+	for _, run := range runs {
+		t, w, err := reg.Binding(run.task.TaskID)
+		if err != nil {
+			continue // e1aParties says so
+		}
+		claim := func(kind, id string) {
+			if id == "" {
+				return
+			}
+			if c, ok := owner[kind+" "+id]; ok && c != t.ConsumerID {
+				f.fail("E7", nil, "%s %s is both %s's and %s's", kind, id, c, t.ConsumerID)
+			}
+			owner[kind+" "+id] = t.ConsumerID
+		}
+		claim("wallet", w.From)
+		for _, e := range run.events {
+			claim("delegation", e.Payload.DelegationID)
+			if g := e.Payload.GrantID; g != "" && e.Scope != nil {
+				claim("grant", g)
+				if p, ok := grants[g]; ok && p != e.Scope.IntentHash {
+					f.fail("E7", nil, "grant %s names two purchases", g)
+				}
+				grants[g] = e.Scope.IntentHash
+			}
+		}
+	}
+}
+
 // e1aInjection is E10: what the model asked for in the injection run, and
 // whether that was what the case's text pushed (the AE1 corpus says).
 func e1aInjection(f *findings, run *e1aRun, repo string) Injection {
@@ -521,37 +592,78 @@ func e1aInjection(f *findings, run *e1aRun, repo string) Injection {
 	return out
 }
 
-// digestField: the fields whose value is a bare sha256 (a content, proof
-// or prompt digest; the manifest's), not a key.
-var digestField = regexp.MustCompile(`"(content_sha256|proof_sha256|prompt_sha256|sha256|manifest_sha256)"\s*:\s*"$`)
+// hexValue is a value with a 64-hex run; keyShape one that is nothing else
+// (bare, or 0x and 64 hex: an Ethereum private key's shape).
+var (
+	hexValue = regexp.MustCompile(`[0-9a-fA-F]{64}`)
+	keyShape = regexp.MustCompile(`^(0x)?[0-9a-fA-F]{64}$`)
+)
 
-// bare64 is a 64-hex value with no 0x or digest prefix: a key's shape.
-var bare64 = regexp.MustCompile(`[0-9a-fA-F]{64,}`)
+// hexFields may hold a 64-hex value: transaction hashes and EIP-3009 nonces
+// as 0x hex, digests (a key named *sha256) bare, a holder's labeled public
+// key; anything prefixed sha256: or ed25519: is a digest or a public key.
+func hexAllowed(key, v string) bool {
+	switch {
+	case strings.HasPrefix(v, "sha256:"), strings.HasPrefix(v, "ed25519:"):
+		return true
+	case strings.HasPrefix(v, "0x"):
+		return key == "tx_hash" || key == "nonce" || key == "eip3009_nonce" || key == "transaction_hash"
+	}
+	return key == "sha256" || strings.HasSuffix(key, "_sha256")
+}
 
-var forbiddenKeys = regexp.MustCompile(`"(signature|private_key|passphrase|assertion|client_data_json|authenticator_data|audio|pcm|bearer|authorization_header)"\s*:`)
+var forbiddenKeys = []string{"signature", "private_key", "passphrase", "assertion", "client_data_json", "authenticator_data", "audio", "pcm", "bearer", "authorization_header"}
 
-// e1aSafety is E9: no file holds a key's shape or a field that is never
-// whitelisted.
+// e1aSafety is E9: every JSON value of every file (a trace one per line) is
+// read with its key: a 64-hex value only where a hash, nonce, digest or
+// public key belongs, and no field that is never whitelisted.
 func e1aSafety(b *bundle, f *findings) {
 	for _, p := range e1aFiles(b) {
 		raw, err := b.read(p)
 		if err != nil {
 			continue // E1 says so
 		}
-		s := string(raw)
-		for _, loc := range bare64.FindAllStringIndex(s, -1) {
-			if loc[1]-loc[0] != 64 {
-				f.fail("E9", []string{p}, "a hex run of %d characters", loc[1]-loc[0])
-				continue
-			}
-			pre := s[max(0, loc[0]-40):loc[0]]
-			if !strings.HasSuffix(pre, "0x") && !strings.HasSuffix(pre, "sha256:") && !digestField.MatchString(pre) {
-				f.fail("E9", []string{p}, "a bare 64-hex value (a key's shape) at byte %d", loc[0])
+		docs := [][]byte{raw}
+		if strings.HasSuffix(p, ".jsonl") {
+			docs = nil
+			for _, l := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+				docs = append(docs, []byte(l))
 			}
 		}
-		if m := forbiddenKeys.FindString(s); m != "" {
-			f.fail("E9", []string{p}, "a field never whitelisted: %s", m)
+		for _, d := range docs {
+			var v any
+			if json.Unmarshal(d, &v) != nil {
+				f.fail("E9", []string{p}, "not JSON: its values cannot be told apart")
+				break
+			}
+			walkJSON("", v, func(key, val string) {
+				if slices.Contains(forbiddenKeys, key) {
+					f.fail("E9", []string{p}, "a field never whitelisted: %q", key)
+				}
+				if hexValue.MatchString(val) && !hexAllowed(key, val) && (keyShape.MatchString(val) || !strings.Contains(val, " ")) {
+					f.fail("E9", []string{p}, "field %q holds a 64-hex value where none belongs (a key's shape)", key)
+				}
+			})
 		}
+	}
+}
+
+// walkJSON calls leaf with every string value and its key (an array's items
+// take the array's key); every key is reported, with "" when it is not a
+// string.
+func walkJSON(key string, v any, leaf func(key, val string)) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, y := range x {
+			leaf(k, "")
+			walkJSON(k, y, leaf)
+		}
+	case []any:
+		for _, y := range x {
+			walkJSON(key, y, leaf)
+		}
+	case string:
+		leaf(key, x)
 	}
 }
 
