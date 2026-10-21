@@ -27,7 +27,8 @@ import (
 
 // PackInput is what Pack packs: the Host's Store database (read only), the
 // start, the runs, the Host's trace directory ("" none), its reconciliation
-// report ("" none) and the code the runs ran.
+// report ("" none) and the code the runs ran. Start.ToBlock is the pack's
+// last block (E8 counts to it); 0 takes the reconciliation report's.
 type PackInput struct {
 	DB, Traces, Reconciliation, Commit string
 	Start                              verification.E1aStart
@@ -68,7 +69,9 @@ func Pack(in PackInput, dst string) (string, error) {
 		if json.Unmarshal(raw, &rep) != nil {
 			return "", errors.New("the reconciliation is not a report")
 		}
-		m.Start.ToBlock = rep.ToBlock
+		if m.Start.ToBlock == 0 {
+			m.Start.ToBlock = rep.ToBlock
+		}
 		files["reconciliation.json"] = raw
 	}
 	if err := os.Mkdir(dst, 0o700); err != nil {

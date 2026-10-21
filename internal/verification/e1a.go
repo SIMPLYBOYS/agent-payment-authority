@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/ae1"
@@ -315,13 +316,16 @@ func e1aIntents(f *findings, run *e1aRun) {
 		by[want] = append(by[want], e)
 	}
 	for intent, es := range by {
-		has := func(t string) *contracts.AuditEvent {
-			for i := range es {
-				if es[i].EventType == t {
-					return &es[i]
+		has := func(t string) *contracts.AuditEvent { return eventOf(es, t) }
+		// Any step of a payment needs a purchase entitled to it (E1-a review):
+		// an Allow, or an Ask the person approved on a device.
+		for _, t := range []string{"PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED"} {
+			if has(t) != nil {
+				if why := paymentRight(es); why != "" {
+					f.fail("E2", ev, "intent %s was paid %s", intent, why)
 				}
+				break
 			}
-			return nil
 		}
 		if has("RECEIPT_ISSUED") == nil && has("RESOURCE_DELIVERED") == nil {
 			continue // not delivered: a Deny, an open Ask, an ending; E5 checks none was delivered
@@ -334,31 +338,8 @@ func e1aIntents(f *findings, run *e1aRun) {
 				f.fail("E2", ev, "intent %s was delivered on a credential that did not verify", intent)
 			}
 		}
-		// Paid only on an Allow, or an Ask the person approved on a device:
-		// a Deny, a simulated grant or a denial is never paid.
-		verdict := ""
-		if d := has("POLICY_DECIDED"); d != nil && d.Payload.Decision != nil {
-			verdict = d.Payload.Decision.PolicyVerdict
-		}
-		switch verdict {
-		case "Ask":
+		if d := has("POLICY_DECIDED"); d != nil && d.Payload.Decision != nil && d.Payload.Decision.PolicyVerdict == "Ask" {
 			need = append(need, "APPROVED", "GRANT_ISSUED")
-			for _, t := range []string{"APPROVED", "GRANT_ISSUED"} {
-				if e := has(t); e != nil && e.Payload.AuthorizationMethod != "webauthn" {
-					f.fail("E2", ev, "intent %s was delivered on %s by %q, not the person's device", intent, t, e.Payload.AuthorizationMethod)
-				}
-			}
-			if has("APPROVAL_DENIED") != nil {
-				f.fail("E2", ev, "intent %s was delivered although its approval was denied", intent)
-			}
-		case "Allow":
-			for _, t := range []string{"APPROVAL_SESSION_OPENED", "APPROVED", "GRANT_ISSUED", "APPROVAL_DENIED"} {
-				if has(t) != nil {
-					f.fail("E2", ev, "intent %s: an Allow with %s", intent, t)
-				}
-			}
-		default:
-			f.fail("E2", ev, "intent %s was delivered on verdict %q", intent, verdict)
 		}
 		for _, t := range need {
 			if has(t) == nil {
@@ -366,6 +347,46 @@ func e1aIntents(f *findings, run *e1aRun) {
 			}
 		}
 	}
+}
+
+func eventOf(es []contracts.AuditEvent, t string) *contracts.AuditEvent {
+	for i := range es {
+		if es[i].EventType == t {
+			return &es[i]
+		}
+	}
+	return nil
+}
+
+// paymentRight is "" when a purchase's events entitle it to be paid: an
+// Allow with no approval, or an Ask approved and granted by the person's
+// device and never denied; otherwise why not. A Deny, a simulated grant or
+// a denial is never paid.
+func paymentRight(es []contracts.AuditEvent) string {
+	verdict := ""
+	if d := eventOf(es, "POLICY_DECIDED"); d != nil && d.Payload.Decision != nil {
+		verdict = d.Payload.Decision.PolicyVerdict
+	}
+	switch verdict {
+	case "Allow":
+		for _, t := range []string{"APPROVAL_SESSION_OPENED", "APPROVED", "GRANT_ISSUED", "APPROVAL_DENIED"} {
+			if eventOf(es, t) != nil {
+				return "as an Allow with " + t
+			}
+		}
+		return ""
+	case "Ask":
+		for _, t := range []string{"APPROVED", "GRANT_ISSUED"} {
+			if e := eventOf(es, t); e == nil || e.Payload.AuthorizationMethod != "webauthn" {
+				return "on an Ask without " + t + " by the person's device"
+			}
+		}
+		if eventOf(es, "APPROVAL_DENIED") != nil {
+			return "although its approval was denied"
+		}
+		return ""
+	}
+	return "on verdict " + strconv.Quote(verdict)
 }
 
 // e1aOnce is E5: one reservation and one settlement per intent at most;

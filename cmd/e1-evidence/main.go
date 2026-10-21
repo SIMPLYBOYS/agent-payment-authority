@@ -3,7 +3,7 @@
 //
 //	e1-evidence start --rpc URL --host HOSTDIR --out START.json
 //	e1-evidence pack --db HOST.db --start START.json --task TASK=ENTRY[=AE1CASE]... \
-//	    [--traces RUNS] [--reconciliation REPORT.json] [--commit SHA] --out artifacts/e1a/<new>
+//	    [--traces RUNS] [--reconciliation REPORT.json] [--to-block N] [--commit SHA] --out artifacts/e1a/<new>
 //
 // start, before the runs, reads the chain only: the next block, the
 // verifier, and that no task of the host directory's registry is
@@ -87,6 +87,7 @@ func run(args []string, out io.Writer) error {
 		fs.StringVar(&in.Traces, "traces", "", "the Host's trace directory (live runs)")
 		fs.StringVar(&in.Reconciliation, "reconciliation", "", "the Host's reconciliation report")
 		fs.StringVar(&in.Commit, "commit", "", "the code the runs ran")
+		toBlock := fs.Uint64("to-block", 0, "the last block of the runs (E8 counts to it); default the reconciliation report's")
 		var tasks taskFlags
 		fs.Var(&tasks, "task", "TASK=ENTRY[=AE1CASE], once per run")
 		if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || in.DB == "" || *start == "" || *dst == "" || len(tasks) == 0 {
@@ -97,6 +98,9 @@ func run(args []string, out io.Writer) error {
 			return fmt.Errorf("--start %s is not a recorded start (%v)", *start, err)
 		}
 		in.Tasks = tasks
+		if *toBlock != 0 {
+			in.Start.ToBlock = *toBlock
+		}
 		id, err := e1evidence.Pack(in, *dst)
 		if err != nil {
 			return err

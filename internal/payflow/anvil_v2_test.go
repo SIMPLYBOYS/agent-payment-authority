@@ -159,6 +159,9 @@ func TestV2PaidOnAnvil(t *testing.T) {
 	if _, err := e1evidence.Start(bg, w.rpc, hostDir); err == nil {
 		t.Error("a start after task-a was registered")
 	}
+	if start.ToBlock, err = w.rpc.BlockNumber(bg); err != nil {
+		t.Fatal(err)
+	}
 	packDir := filepath.Join(t.TempDir(), "pack")
 	if _, err := e1evidence.Pack(e1evidence.PackInput{DB: dbPath, Start: start, Tasks: []verification.E1aTask{{TaskID: "task-a", Scenario: "e1a-ask"}}}, packDir); err != nil {
 		t.Fatal(err)
@@ -202,7 +205,15 @@ func TestV2PaidOnAnvil(t *testing.T) {
 	ethtest.RPC(t, w.rpc, "anvil_setBalance", payerKey.Addr.Hex(), "0xde0b6b3a7640000")
 	stray, _ := eth.Call("transfer(address,uint256)", ethtest.Key(t, 4).Addr, uint64(1000))
 	ethtest.Mine(t, w.rpc, payerKey, &eth.Tx{To: &w.usdc, Gas: 100_000, Data: stray})
-	if r, _ := verification.VerifyE1a(packDir, ethtest.Root(), w.rpc); r.Claims["E8"] != verification.Fail || r.Claims["E4"] != verification.Pass {
+	if r, _ := verification.VerifyE1a(packDir, ethtest.Root(), w.rpc); r.Verdict != verification.Pass {
+		t.Fatalf("a transfer after the pack's end block counted: %+v", r.Findings)
+	}
+	later := restart(func(s *verification.E1aStart) { s.ToBlock, _ = w.rpc.BlockNumber(bg) })
+	if r, _ := verification.VerifyE1a(later, ethtest.Root(), w.rpc); r.Claims["E8"] != verification.Fail || r.Claims["E4"] != verification.Pass {
 		t.Fatalf("a transfer no purchase made: E8 %s, E4 %s", r.Claims["E8"], r.Claims["E4"])
+	}
+	before := restart(func(s *verification.E1aStart) { s.FromBlock = s.ToBlock })
+	if r, _ := verification.VerifyE1a(before, ethtest.Root(), w.rpc); r.Claims["E8"] != verification.Fail {
+		t.Fatalf("blocks that do not hold the transactions: E8 %s", r.Claims["E8"])
 	}
 }
