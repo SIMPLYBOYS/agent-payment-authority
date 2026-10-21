@@ -449,4 +449,22 @@ func TestE1aHost(t *testing.T) {
 	if err := e1aHost(args, io.Discard); err == nil {
 		t.Error("a template of show-a- tasks was taken")
 	}
+	// The local rehearsal: p2-local's directory (no profile), a local anvil.
+	local := t.TempDir()
+	writeJSON(filepath.Join(local, "payments.json"), map[string]any{"chain_id": 84532, "dir": local})
+	writeJSON(filepath.Join(local, "registry.json"), reg)
+	out := filepath.Join(dir, "e1a-local")
+	if err := e1aHost([]string{"--from", local, "--out", out, "--registry", "../../testdata/demo/registry-e1a.json", "--shop-eval", "data", "--label", "r2"}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var lr contracts.RegistryConfig
+	if readJSON(filepath.Join(out, "registry.json"), &lr); lr.Tasks[0].TaskID != "show-e1a-r2-a-01" {
+		t.Errorf("--label: %s", lr.Tasks[0].TaskID)
+	}
+	if _, err := os.Stat(filepath.Join(out, "profile.json")); !os.IsNotExist(err) {
+		t.Errorf("a profile written from none: %v", err)
+	}
+	if err := e1aHost([]string{"--dir", dir, "--from", local, "--out", filepath.Join(dir, "x")}, io.Discard); err == nil {
+		t.Error("--dir and --from both taken")
+	}
 }

@@ -6,7 +6,7 @@
 //	p2-testnet deploy     --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL]
 //	p2-testnet test402    URL [--save FILE]
 //	p2-testnet opt-signer --dir DIR --base SIGNER.JSON [--voice SIGNER.JSON] --out NEW.JSON
-//	p2-testnet e1a-host   --dir DIR --out NEWDIR [--registry TEMPLATE] [--shop-eval NAME]
+//	p2-testnet e1a-host   --dir DIR | --from SRCDIR --out NEWDIR [--registry TEMPLATE] [--label L] [--shop-eval NAME]
 //
 // e1a-host (E1-a, docs/commercial-e1a.md 4.7, 4.8) writes a new host
 // directory for one set of E1-a runs from deploy's DIR/host: the same chain,
@@ -15,7 +15,9 @@
 // the shop's database still deploy's (its daily cap is the key's); no
 // test402 line; and, with
 // --shop-eval, the AE1 catalog or case the shop sells. DIR/host is left as
-// it is. It reads no key and reaches no node.
+// it is. --from takes the host files from SRCDIR instead (a local anvil's
+// p2-local directory, for the local rehearsal; its profile is optional).
+// It reads no key and reaches no node.
 //
 // opt-signer (B6, §6 step 5) writes /opt's new signer.json from its current
 // one (--base: the socket, callers, approvers and webauthn are kept; A2's,
@@ -65,6 +67,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -1040,26 +1043,48 @@ func e1aHost(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("e1a-host", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	dir := fs.String("dir", "", "apa-relayer's directory, whose host/ deploy wrote")
+	from := fs.String("from", "", "the directory holding payments.json and registry.json instead (p2-local's)")
 	dst := fs.String("out", "", "the new host directory (must not exist)")
 	tmpl := fs.String("registry", "testdata/demo/registry-e1a.json", "the registry template: its show-e1a- task IDs")
 	eval := fs.String("shop-eval", "", "the AE1 catalog or case the shop sells (payments.json shop_eval)")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *dir == "" || *dst == "" {
-		return errors.New("usage: p2-testnet e1a-host --dir DIR --out NEWDIR [--registry TEMPLATE] [--shop-eval NAME]")
+	label := fs.String("label", "", "this run set's label in the task IDs (show-e1a-<label>-a-01), instead of the template's")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || (*dir == "") == (*from == "") || *dst == "" {
+		return errors.New("usage: p2-testnet e1a-host --dir DIR | --from SRCDIR --out NEWDIR [--registry TEMPLATE] [--shop-eval NAME]")
 	}
-	host := filepath.Join(*dir, "host")
+	host := *from
+	if host == "" {
+		host = filepath.Join(*dir, "host")
+	}
 	var pay map[string]any
 	var reg, t contracts.RegistryConfig
 	var prof json.RawMessage
-	if err := errors.Join(readJSON(filepath.Join(host, "payments.json"), &pay), readJSON(filepath.Join(host, "registry.json"), &reg),
-		readJSON(filepath.Join(host, "profile.json"), &prof), readJSON(*tmpl, &t)); err != nil {
+	if err := errors.Join(readJSON(filepath.Join(host, "payments.json"), &pay), readJSON(filepath.Join(host, "registry.json"), &reg), readJSON(*tmpl, &t)); err != nil {
 		return fmt.Errorf("e1a-host: %w", err)
 	}
-	if pay["environment"] != "base_sepolia" {
-		return errors.New("e1a-host: DIR/host/payments.json is not base_sepolia's")
+	if fileExists(filepath.Join(host, "profile.json")) {
+		if err := readJSON(filepath.Join(host, "profile.json"), &prof); err != nil {
+			return fmt.Errorf("e1a-host: %w", err)
+		}
+	} else if *from == "" {
+		return errors.New("e1a-host: DIR/host/profile.json is missing")
 	}
-	for _, task := range t.Tasks {
-		if !strings.HasPrefix(task.TaskID, "show-e1a-") {
-			return fmt.Errorf("e1a-host: template task %s is not show-e1a-…: it may be registered on chain already", task.TaskID)
+	switch env := pay["environment"]; {
+	case env == "base_sepolia":
+	case *from != "" && (env == nil || env == "local_anvil"): // the local rehearsal
+	default:
+		return errors.New("e1a-host: the payments are not base_sepolia's (or, with --from, a local anvil's)")
+	}
+	if *label != "" && !regexp.MustCompile(`^[a-z0-9]{1,12}$`).MatchString(*label) {
+		return errors.New("e1a-host: --label is 1 to 12 of [a-z0-9]")
+	}
+	for i, task := range t.Tasks {
+		p := strings.Split(task.TaskID, "-")
+		if !strings.HasPrefix(task.TaskID, "show-e1a-") || len(p) != 5 {
+			return fmt.Errorf("e1a-host: template task %s is not show-e1a-<label>-<x>-<n>: it may be registered on chain already", task.TaskID)
+		}
+		if *label != "" {
+			p[2] = *label
+			t.Tasks[i].TaskID = strings.Join(p, "-")
 		}
 	}
 	t.Wallets, t.Assets, t.MerchantPayTo = reg.Wallets, reg.Assets, reg.MerchantPayTo
@@ -1086,7 +1111,11 @@ func e1aHost(args []string, out io.Writer) error {
 	if *eval != "" {
 		pay["shop_eval"] = *eval
 	}
-	for path, v := range map[string]any{"payments.json": pay, "registry.json": t, "profile.json": prof} {
+	files := map[string]any{"payments.json": pay, "registry.json": t}
+	if prof != nil {
+		files["profile.json"] = prof
+	}
+	for path, v := range files {
 		if err := writeJSON(filepath.Join(abs, path), v); err != nil {
 			return err
 		}

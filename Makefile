@@ -134,11 +134,12 @@ present-testnet:
 
 # E1-a (docs/commercial-e1a.md 6): the live Claude Code Agent on a host
 # that pays on Base Sepolia, from a host directory p2-testnet e1a-host wrote
-# (HOST=, a new one per run set), apa.pay.v2 with a test issuer's
+# (HOST=, a new one per run set; --from p2-local's directory for the local
+# rehearsal), apa.pay.v2 with a test issuer's
 # credentials. AUTH= is required. The model runs only when Start is pressed.
 present-e1a:
 	@test -n "$(SIGNER)" && test -n "$(HOST)" && test -n "$(AUTH)" || { echo "usage: make present-e1a SIGNER=/opt/apa-signer/run/signer.sock HOST=<p2-testnet e1a-host's directory> AUTH=device|virtual (docs/commercial-e1a.md 6)" >&2; exit 2; }
-	@h="$(abspath $(HOST))"; APA_PRESENT_DIR="$$h/present" APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$$h/registry.json" APA_PRESENT_PAYMENTS="$$h/payments.json" APA_PRESENT_PROFILE="$$h/profile.json" APA_PRESENT_CREDENTIALS=1 APA_PRESENT_SCENARIOS=testdata/demo/scenarios-e1a.json sh scripts/demo/present.sh live
+	@h="$(abspath $(HOST))"; APA_PRESENT_DIR="$$h/present" APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$$h/registry.json" APA_PRESENT_PAYMENTS="$$h/payments.json" APA_PRESENT_PROFILE="$$( [ -f "$$h/profile.json" ] && echo "$$h/profile.json" )" APA_PRESENT_CREDENTIALS=1 APA_PRESENT_SCENARIOS=testdata/demo/scenarios-e1a.json sh scripts/demo/present.sh live
 
 # docs/m1-evidence.md: the M1 fixture evidence bundle, a new
 # artifacts/m1/<run-id>/ each time (manifest.json, its evidence, run-end.json).

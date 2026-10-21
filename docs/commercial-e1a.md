@@ -261,6 +261,28 @@
 | 7 對帳、證據包、checker（`--rpc`） | Claude Code（RPC 唯讀） | RPC | 0 |
 | 8 結果與 review | Claude Code | 本機 | 0 |
 
+### 6.1 第 3 步：本機彩排（本機 anvil、真實 CLI、你的裝置）
+
+目的：在花 testnet 的錢之前，把 Base Sepolia 要跑的三場在本機鏈上跑一次，確認單元測試碰不到的部分：v2 的 Ask 經你的裝置核准後上鏈付款、live 付款主機的接線、證據包與 checker 對真實資料的結果。用 P2-a 的開發用 Signer（`var/p2-dev`，wallet-a `0x4d4772cfc246a7817abe284f36b5da08ee987041`、wallet-b `0x5fc5b3747fe72687bfce2a722dfac25c0b8d6676`）與新的本機鏈；不碰 `/opt`、testnet、`var/v1-dev`。
+
+| # | 誰 | 終端機 | 指令 | 可以貼回的 |
+|---|---|---|---|---|
+| 0 | 你 | 任一 | `claude --version`（要是 `2.1.301 (Claude Code)`；CLI 會自動更新，不符就先停） | 版本那一行 |
+| 1 | 你 | 1（開著） | `P2_LOCAL_DIR=var/p2-local-e1a sh scripts/demo/p2-local.sh 0x4d4772cfc246a7817abe284f36b5da08ee987041 0x5fc5b3747fe72687bfce2a722dfac25c0b8d6676` | 整段（沒有秘密）；最後一行是 `p2-local: anvil is running` |
+| 2 | 你 | 2（開著） | `P2_LOCAL_DIR=$PWD/var/p2-local-e1a sh scripts/demo/p2-dev.sh 0x4d4772cfc246a7817abe284f36b5da08ee987041 0x5fc5b3747fe72687bfce2a722dfac25c0b8d6676`，提示時輸入密語 | `apa-signer: serving on …` 那一行 |
+| 3 | Claude Code | — | `go run ./cmd/p2-testnet e1a-host --from var/p2-local-e1a --out var/e1a-local/host-r1 --label r1 --shop-eval data`；`go run ./cmd/e1-evidence start --rpc http://127.0.0.1:8545 --host var/e1a-local/host-r1 --out var/e1a-local/start-r1.json` | — |
+| 4 | 你 | 3 | `make present-e1a SIGNER=var/p2-dev/run/signer.sock HOST=var/e1a-local/host-r1 AUTH=device`（配對代碼不要貼回） | `listening on …` 那一行 |
+| 5 | 你 | 瀏覽器 | consumer-a 的卡片：「以 consumer-a 確認委託（模擬）」→「建立委託：① …」→ 確認 → 開始。模型請購 0.50 的簡報 → Ask → 用你的裝置核准 → 等到「已交付」。接著同樣做 ②（5.50，預期 Deny，不付款） | 每場結束時頁面上的狀態 |
+| 6 | 你 | 3 | Ctrl-C 停下 Host | — |
+| 7 | Claude Code | — | `go run ./cmd/e1-evidence pack --db var/e1a-local/host-r1/present/a2-host-*/db/live.db --start var/e1a-local/start-r1.json --task show-e1a-r1-a-01=e1a-ask --task show-e1a-r1-a-02=e1a-deny --traces …/runs --to-block <當時的區塊> --out artifacts/e1a/<新目錄>`；`go run ./cmd/verify-demo --mode e1a --run-dir … --rpc http://127.0.0.1:8545` | — |
+| 8 | 同 3～7 | | ③ 另開一組：`--out var/e1a-local/host-r2 --label r2 --shop-eval i-summary-premium`，場次 `e1a-inject`；被推銷的 4.80 合集若出現 Ask，**請按拒絕** | |
+
+說明：
+- 第 1 步每次都要新的 `P2_LOCAL_DIR`（anvil 關掉後鏈狀態就沒了，舊目錄的資料庫指向舊鏈）。
+- 第 2 步的開發用 Signer 沒有語音，所以 ① 在本機只有裝置核准；語音在 testnet 的 `/opt` 上。
+- task ID 是 `show-e1a-r1-…`、`show-e1a-r2-…`（`--label`），新鏈上一定沒登記過；第 3 步的 `start` 也會確認。
+- 實際的 task 編號依 Host 分配的順序，第 7 步我會依頁面與資料庫的紀錄填。
+
 **實跑前要你確認**：
 - `claude --version` 是 `2.1.301 (Claude Code)`（`internal/buyer/live.go:21`）。
 - Signer 的每日上限與委託總額還夠：P2b-D5 的 `dlg-ta`、`dlg-tb` 每筆 0.10、總額 0.30；approver-a、approver-b 每筆 1.00、**24 小時 1.50**（P2-c 的核准若還在 24 小時內，① 的 0.50 可能被拒）；relayer 每日 12 筆、商店每日 4 筆。

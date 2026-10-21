@@ -1187,6 +1187,8 @@ MUTATIONS = [
      '\tdelete(pay, "test402_offer")', '\tpay["dir"] = abs\n\tdelete(pay, "test402_offer")', 'TestE1aHost'),
     ('E1a-7: e1a-host keeps test402', 'cmd/p2-testnet/main.go',
      'delete(pay, "test402_offer")', 'delete(pay, "test402_offer_")', 'TestE1aHost'),
+    ('E1a-7 rehearsal: e1a-host ignores --label', 'cmd/p2-testnet/main.go',
+     '\t\t\tp[2] = *label\n', '\t\t\tp[2] = p[2]\n', 'TestE1aHost'),
     ('E1a-2: a live host that does not pay loads a pay entry', 'cmd/demo/scenarios.go',
      'if live && !livePay || d == nil', 'if false && live && !livePay || d == nil', 'TestE1aCatalog'),
     ('E1a-2: a live pay entry runs without its task', 'cmd/demo/scenarios.go',
