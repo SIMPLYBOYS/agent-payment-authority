@@ -137,9 +137,6 @@ func word(a eth.Address) [32]byte {
 	return w
 }
 
-// Status is one authorization's state at confirmed depth. not_settled_expired
-// (the state that lets a Host pay again) is only as true as a.ValidBefore:
-// it must be the signed one.
 // window is the blocks from FromBlock to at whose time could have used a:
 // the first after validAfter to the last before validBefore, found by the
 // blocks' own timestamps; some is false when there is no such block.
@@ -177,6 +174,9 @@ func (t Token) window(ctx context.Context, a Authorization, at uint64) (lo, hi u
 	return lo, end - 1, true, nil
 }
 
+// Status is one authorization's state at confirmed depth. not_settled_expired
+// (the state that lets a Host pay again) is only as true as a.ValidBefore:
+// it must be the signed one.
 func (t Token) Status(ctx context.Context, a Authorization) (Result, error) {
 	if a.ValidBefore == 0 || a.From == (eth.Address{}) || a.Nonce == (eth.Bytes32{}) {
 		return Result{}, errors.New("reconcile: an authorization needs its signed validBefore, payer and nonce")
@@ -217,10 +217,11 @@ func (t Token) Status(ctx context.Context, a Authorization) (Result, error) {
 			return Result{}, err
 		}
 	}
-	if len(live) == 0 && lo > 0 {
-		// Used, and no event in its window: it may be before FromBlock (a
-		// misconfigured FromBlock), not a matter for review.
-		return Result{}, fmt.Errorf("reconcile: the nonce is used and no AuthorizationUsed in blocks %d-%d: is FromBlock too late?", lo, hi)
+	if len(live) == 0 && lo == t.FromBlock && t.FromBlock > 0 {
+		// Used, and no event from FromBlock on: it may be before it (a
+		// misconfigured FromBlock), not a matter for review. Used with no
+		// event inside a later window (a cancellation) is for review, below.
+		return Result{}, fmt.Errorf("reconcile: the nonce is used and no AuthorizationUsed since block %d: is FromBlock too late?", t.FromBlock)
 	}
 	if len(live) != 1 {
 		return Result{State: "needs_review", Block: at}, nil // used, and no single event says by what (a cancellation, say)

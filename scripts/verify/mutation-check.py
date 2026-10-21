@@ -1153,6 +1153,8 @@ MUTATIONS = [
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    ("P2-b step 6: the window drops its last block (before validBefore)", 'internal/reconcile/reconcile.go',
+     'return lo, end - 1, true, nil', 'return lo, end - 2, true, nil', 'internal/reconcile:TestStatusWindowEdges'),
     ("P2-b step 6: a payment's status reads more than a provider allows", 'internal/reconcile/reconcile.go',
      'const logRange = 200', 'const logRange = 2000', 'internal/reconcile:TestUnderABlockRangeCap'),
     ("P2-b step 6: a payment's status reads the whole chain, not its window", 'internal/reconcile/reconcile.go',

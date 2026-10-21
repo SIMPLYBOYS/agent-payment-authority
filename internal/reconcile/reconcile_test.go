@@ -254,3 +254,53 @@ func TestUnderABlockRangeCap(t *testing.T) {
 		t.Fatalf("report: %+v %v", rep, err)
 	}
 }
+
+// signWindow is sign with its own validAfter and validBefore.
+func (c *chain) signWindow(to eth.Address, value, after, before uint64) (Authorization, []byte) {
+	a := Authorization{From: c.payer.Addr, To: to, Value: value, ValidAfter: after, ValidBefore: before}
+	rand.Read(a.Nonce[:])
+	dom := signer.Domain{Name: "USDC", Version: "2", ChainID: strconv.Itoa(ethtest.Chain), VerifyingContract: c.usdc.Hex()}
+	msg := signer.Transfer{From: a.From.Hex(), To: a.To.Hex(), Value: strconv.FormatUint(value, 10), ValidAfter: after, ValidBefore: before,
+		Nonce: "0x" + hex.EncodeToString(a.Nonce[:])}
+	sep, _ := signer.DomainSeparator(dom)
+	th, _ := signer.TransferHash(msg)
+	rs, rec, _ := c.payer.Sign(signer.TypedDigest(sep, th))
+	var r, s eth.Bytes32
+	copy(r[:], rs[:32])
+	copy(s[:], rs[32:])
+	data, _ := eth.Call("transferWithAuthorization(address,address,uint256,uint256,uint256,bytes32,uint8,bytes32,bytes32)",
+		a.From, a.To, value, after, before, a.Nonce, uint8(27+rec), r, s)
+	return a, data
+}
+
+// The window's edges (EIP-3009: after validAfter, before validBefore): a
+// transfer in the first block after validAfter and one in the last block
+// before validBefore are both found, blocks at validAfter or validBefore
+// around them being left out.
+func TestStatusWindowEdges(t *testing.T) {
+	c := newChain(t)
+	ethtest.RPC(t, c.rpc, "anvil_mine", "0x190", "0x2") // 400 blocks before
+	tok := c.token(1)
+	at := func(ts uint64) { ethtest.RPC(t, c.rpc, "evm_setNextBlockTimestamp", ts) }
+	t0 := ethtest.Now(t, c.rpc) + 100
+	first, data := c.signWindow(shopAddr, 100000, t0, t0+50)
+	at(t0)
+	ethtest.RPC(t, c.rpc, "evm_mine") // a block at validAfter: not in the window
+	at(t0 + 1)
+	rc1 := c.submit(data) // the first block after validAfter
+	last, data2 := c.signWindow(shopAddr, 100000, t0, t0+50)
+	at(t0 + 49)
+	rc2 := c.submit(data2) // the last block before validBefore
+	at(t0 + 50)
+	ethtest.RPC(t, c.rpc, "evm_mine") // a block at validBefore: not in the window
+	ethtest.RPC(t, c.rpc, "evm_mine")
+	for name, cs := range map[string]struct {
+		a  Authorization
+		rc *eth.Receipt
+	}{"first": {first, rc1}, "last": {last, rc2}} {
+		r, err := tok.Status(bg, cs.a)
+		if err != nil || r.State != "settled" || r.Block != cs.rc.BlockNumber {
+			t.Fatalf("%s: %+v %v (mined in %d)", name, r, err, cs.rc.BlockNumber)
+		}
+	}
+}
