@@ -77,3 +77,29 @@ func TestDelegationOnlySimulator(t *testing.T) {
 		t.Errorf("delegation: %d %s", code, body)
 	}
 }
+
+// E1-a review: what each mode allows, and the starts a live host refuses.
+func TestHostRoles(t *testing.T) {
+	for _, c := range []struct {
+		live, paying bool
+		want         roles
+	}{
+		{false, false, roles{agent: "fake", sim: true}},
+		{false, true, roles{agent: "fake", sim: true}},
+		{true, false, roles{label: liveLabel, agent: "live"}},
+		{true, true, roles{label: liveLabelPaying, agent: "live", sim: true, delegationOnly: true}},
+	} {
+		if got := hostRoles(c.live, c.paying); got != c.want {
+			t.Errorf("live %v, paying %v: %+v, want %+v", c.live, c.paying, got, c.want)
+		}
+	}
+	d := deps{getenv: func(string) string { return "" }, out: io.Discard, clock: wallClock}
+	for args, want := range map[string]string{
+		"--live-cli /x --scenarios x.json --approvals-signer s.sock --authenticator-source device": "only to pay",
+		"--approvals-signer s.sock --authenticator-source device":                                  "a host that starts runs",
+	} {
+		if err := serve(t.Context(), strings.Fields(args), d); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", args, err, want)
+		}
+	}
+}

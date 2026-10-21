@@ -32,9 +32,9 @@
 # APA_PRESENT_OPEN (the command that opens the page; default open),
 # APA_PRESENT_GO (default go). APA_PRESENT_SCENARIOS (default
 # testdata/demo/scenarios.json): another trusted fake catalog, e.g. the
-# rehearsal one (make present-rehearsal); live, scenarios-live.json unless a
-# host that pays (E1-a, make present-e1a) names scenarios-e1a.json.
-# APA_APPROVALS_SIGNER (fake only; make present-a2): the Unix socket of a
+# rehearsal one (make present-rehearsal); live, always scenarios-live.json,
+# but on a host that pays (E1-a, make present-e1a; default scenarios-e1a.json).
+# APA_APPROVALS_SIGNER (fake, or live with APA_PRESENT_PAYMENTS; make present-a2): the Unix socket of a
 # running apa-signer serve-approvals; the person's approval then runs on
 # http://localhost:<port>/host, which is the page opened (WebAuthn needs
 # localhost, not 127.0.0.1; docs/commercial-a2.md). Its database and traces
@@ -47,14 +47,14 @@
 # APA_AUTHENTICATOR_SOURCE (required with it): device or virtual, what the
 # page declares the authenticator to be (review N17); E1-a labels the
 # approvals live (device) or fixture (virtual) by it.
-# APA_PRESENT_REGISTRY (fake only; default testdata/demo/registry.json): another
+# APA_PRESENT_REGISTRY (fake, or a live host that pays; default testdata/demo/registry.json): another
 # demo registry, e.g. V1 development mode's var/v1-dev/registry.json (the
 # same plus more show-* tasks: a kept A2 database uses them up).
-# APA_PRESENT_PAYMENTS (fake only, with APA_APPROVALS_SIGNER; make present-p2):
+# APA_PRESENT_PAYMENTS (with APA_APPROVALS_SIGNER; make present-p2, live: make present-e1a):
 # the local anvil payment configuration (cmd/p2-local's payments.json); the
 # host then pays through that Signer, which must be apa-signer serve with a
 # reservation section (docs/commercial-p2-host.md 12.8).
-# APA_PRESENT_CREDENTIALS=1 (fake only; make present-c2): build apa-issuer,
+# APA_PRESENT_CREDENTIALS=1 (fake, or a live host that pays; make present-c2): build apa-issuer,
 # make a credential directory of test keys in the session directory (holders
 # for consumer-a and consumer-b) and start the host with --credential-dir.
 set -u
@@ -82,7 +82,7 @@ registry=${APA_PRESENT_REGISTRY:-testdata/demo/registry.json}
 [ -f "$registry" ] || stop "APA_PRESENT_REGISTRY=${registry} 不是檔案"
 [ -z "$creds" ] || [ "$mode" = fake ] || [ -n "$livepay" ] || stop "APA_PRESENT_CREDENTIALS 只用於 fake 展示或付款的 live 展示（E1-a）"
 payments=${APA_PRESENT_PAYMENTS:-}
-# APA_PRESENT_PROFILE (fake only; make present-testnet): the consumer profile
+# APA_PRESENT_PROFILE (fake, or a live host that pays; make present-testnet): the consumer profile
 # (its merchants are the testnet shop's address); default the demo's own.
 profile=${APA_PRESENT_PROFILE:-}
 [ -z "$profile" ] || [ -f "$profile" ] || stop "APA_PRESENT_PROFILE=${profile} 不是檔案"
@@ -135,13 +135,15 @@ if [ "$mode" = live ]; then
 	extra=""
 	[ "$dev" = true ] && extra=--dev-demo-plugins
 	echo "present: 真實 Agent 即時展示（開發展示例外：${dev}）。啟動時 host 執行一次 ${cli} --version（不送出模型請求）；按「開始」才執行模型。" >&2
+	livecat=testdata/demo/scenarios-live.json # a live host that does not pay keeps the one live catalog
+	[ -z "$livepay" ] || livecat=${APA_PRESENT_SCENARIOS:-testdata/demo/scenarios-e1a.json}
 	set --
 	[ -z "$livepay" ] || set -- --approvals-signer "$signer" --authenticator-source "$authsrc" --payments "$payments"
 	[ -z "$creds" ] || set -- "$@" --credential-dir "$w/cred"
 	[ -z "$profile" ] || set -- "$@" --profile "$profile"
 	[ -z "$livepay" ] || echo "present: 付款的 live 展示（E1-a）：委託是模擬，Ask 由本人以已登記的裝置核准，付款 ${payments}" >&2
 	APA_ADDR=$addr APA_LIVE_CLI=true APA_DB_PATH=$db/live.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \
-		--live-cli "$cli" $extra --scenarios "${APA_PRESENT_SCENARIOS:-testdata/demo/scenarios-live.json}" --registry "$registry" \
+		--live-cli "$cli" $extra --scenarios "$livecat" --registry "$registry" \
 		--trace-dir "$runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" "$@" &
 else
 	echo "present: fake 展示（不執行模型）。" >&2

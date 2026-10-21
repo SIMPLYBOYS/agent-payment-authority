@@ -414,6 +414,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		capability, payCap = pay.cfg.Environment, pay.cfg.Environment
 	}
 	mux := newMux(shop, capability)
+	roles := hostRoles(live, pay != nil)
 	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: runner != nil && !live, out: d.out, payCap: payCap}
 	if pay != nil {
 		ui.payContract = pay.cfg.BudgetContract
@@ -439,10 +440,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		mux.HandleFunc("POST /api/host/pair", ui.pair)
 	}
 	if live {
-		ui.live = &liveInfo{Record: "live_demo", Label: liveLabel, DevDemoPlugins: *devDemo, CLIVersion: runner.live.want}
-		if pay != nil {
-			ui.live.Label = liveLabelPaying
-		}
+		ui.live = &liveInfo{Record: "live_demo", Label: roles.label, DevDemoPlugins: *devDemo, CLIVersion: runner.live.want}
 		ui.traceDir = *traceDir
 		mux.HandleFunc("GET /api/tasks/{task_id}/trace", ui.taskTrace)
 	}
@@ -450,15 +448,12 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		ui.control = &control{st: st, runner: runner, bridge: bridge, scenarios: scenarios, ctx: runCtx, wg: &runs, out: d.out,
 			active: map[string]*liveRun{}, ended: map[string]*liveRun{}, maxRuns: effMaxRuns, consumers: nConsumers, instance: instance, started: hostStart, profile: profile}
 		ui.control.register(mux, ui)
-		// The simulated approver exists in fake mode; a live host that pays
-		// (E1-a, E1a-D1 A) has it for confirming delegations only; any other
-		// live host answers simulation_unavailable.
-		if !live || *paymentsPath != "" {
+		if roles.sim {
 			var ids []string
 			for _, c := range regCfg.Consumers {
 				ids = append(ids, c.ConsumerID)
 			}
-			ui.sim = &simulator{consumers: ids, now: now, instance: instance, delegationOnly: live}
+			ui.sim = &simulator{consumers: ids, now: now, instance: instance, delegationOnly: roles.delegationOnly}
 		}
 		ui.registerSim(mux)
 		fmt.Fprintf(d.out, "demo: concurrent runs: at most %d (deployment setting --max-runs) of %d consumers in the scenario catalog; host instance %s\n", effMaxRuns, nConsumers, instance)
@@ -472,11 +467,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	if *approvalsSigner != "" {
 		_, port, _ := net.SplitHostPort(addr)
 		ui.alias = "localhost:" + port
-		agent := "fake"
-		if live {
-			agent = "live"
-		}
-		ui.approve = &approvals{st: st, signer: signerclient.NewApprovals(*approvalsSigner), source: *authSource, agent: agent, out: d.out, payCap: payCap}
+		ui.approve = &approvals{st: st, signer: signerclient.NewApprovals(*approvalsSigner), source: *authSource, agent: roles.agent, out: d.out, payCap: payCap}
 		if d.onApprovals != nil {
 			d.onApprovals(ui.approve)
 		}
@@ -500,8 +491,12 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	if live {
-		fmt.Fprintf(d.out, "listening on http://%s (LIVE MODE: %s; a run starts only when the operator starts one, and then runs %s on the APA-only config directory, which may use your own subscription; dev demo plugin exception %t; no payment capability); Store %s; demo tokens in %s\n",
-			addr, liveLabel, *liveCLI, *devDemo, dbPath, tokenPath)
+		payState := "no payment capability"
+		if pay != nil {
+			payState = "payments on " + pay.cfg.Environment + " (test USDC)"
+		}
+		fmt.Fprintf(d.out, "listening on http://%s (LIVE MODE: %s; a run starts only when the operator starts one, and then runs %s on the APA-only config directory, which may use your own subscription; dev demo plugin exception %t; %s); Store %s; demo tokens in %s\n",
+			addr, roles.label, *liveCLI, *devDemo, payState, dbPath, tokenPath)
 	} else {
 		fmt.Fprintf(d.out, "listening on http://%s (fixture mode, live CLI off, no payment capability); Store %s; demo tokens in %s\n", addr, dbPath, tokenPath)
 	}
@@ -731,4 +726,23 @@ func runConditions(live bool, pay *payments, authenticator string) paycontract.R
 		r.Chain = pay.cfg.Environment
 	}
 	return r
+}
+
+// roles are what a host's mode allows (E1-a): the live label, the Agent the
+// approvals name, and the simulated customer: in fake mode for delegations
+// and approvals; on a live host that pays (E1a-D1 A) for delegations only;
+// on any other live host none (simulation_unavailable).
+type roles struct {
+	label, agent        string
+	sim, delegationOnly bool
+}
+
+func hostRoles(live, paying bool) roles {
+	switch {
+	case !live:
+		return roles{label: "", agent: "fake", sim: true}
+	case paying:
+		return roles{label: liveLabelPaying, agent: "live", sim: true, delegationOnly: true}
+	}
+	return roles{label: liveLabel, agent: "live"}
 }

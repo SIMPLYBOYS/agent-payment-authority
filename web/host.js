@@ -695,7 +695,7 @@ function agentCard(m, scs, { live, busy, full, simC }) {
   const payScs = scs.filter((sc) => A.isPay(sc.contract));
   if (payScs.length) {
     if (simC !== m.c) {
-      const b = el("button", "agent-sim", "以 " + short(m.c) + " 模擬（fake）");
+      const b = el("button", "agent-sim", live ? "以 " + short(m.c) + " 確認委託（模擬）" : "以 " + short(m.c) + " 模擬（fake）");
       b.type = "button";
       b.disabled = simulating;
       b.title = A.paysOn(lastReady && lastReady.status && lastReady.status.payment_capability)
@@ -867,7 +867,12 @@ const network = (id) => {
 const addr = (x) => (typeof x === "string" && x.length > 12 ? x.slice(0, 6) + "…" + x.slice(-4) : String(x || "?"));
 const clock = (sec) => (typeof sec === "number" ? new Date(sec * 1000).toLocaleTimeString("zh-TW", { hour12: false }) : "?");
 
-// simulateAs asks the host to let this page act as consumer c (fake only).
+// simDelegationOnly: the simulated customer may confirm delegations only
+// (E1-a: a live host that pays); its approvals are never read.
+let simDelegationOnly = false;
+
+// simulateAs asks the host to let this page act as consumer c (fake mode; on
+// a live host that pays, for its delegations only).
 async function simulateAs(c) {
   if (simulating) return;
   const g = creds.gen;
@@ -878,7 +883,9 @@ async function simulateAs(c) {
   simulating = false;
   if (!r || r.error) setRunStatus("沒有收到回覆：角色模擬未確認", "error");
   else if (r.status === 200) {
-    setRunStatus("角色模擬：客人 " + short(c) + "（主持人扮演，不是本人驗證；只在 fake 模式）", "ok");
+    simDelegationOnly = !!(r.body && r.body.delegation_only); // E1-a: a live host that pays
+    setRunStatus(simDelegationOnly ? "角色模擬：客人 " + short(c) + "（主持人扮演，只能確認委託，不是本人驗證；Ask 由本人以已登記的裝置核准）"
+      : "角色模擬：客人 " + short(c) + "（主持人扮演，不是本人驗證；只在 fake 模式）", "ok");
     lastApprovals = null;
     approvalNote = null;
     pollRuns();
@@ -944,7 +951,7 @@ async function confirmAndStart(sc) {
 // capability); a reply of an older generation or customer is dropped.
 async function pollApprovals() {
   const { simConsumer: c, simId } = creds.view();
-  if (!c) { if (lastApprovals) { lastApprovals = null; renderControl(); } return; }
+  if (!c || simDelegationOnly) { if (lastApprovals) { lastApprovals = null; renderControl(); } return; }
   const g = creds.gen;
   const r = await creds.approvals();
   if (!r || r.superseded || g !== creds.gen || creds.view().simId !== simId) return;

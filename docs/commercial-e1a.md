@@ -335,4 +335,6 @@
 
 | E1a-4 畫面 | （本段） | Inspector：執行條件（取自 `TASK_STARTED`）、預算合約、tx#1 與 tx#2 的完整 hash 與區塊、Base Sepolia 的 explorer 網址（本機鏈寫「沒有 explorer」）、收據；ZK 一列寫明 proof 在 tx#1 的 calldata、本頁不自行宣稱已驗證。Timeline：付款事件顯示方法、金額、tx、區塊、收據。API：付款檢視多 `reserve_block`，task 多 `budget_contract`。頁面只顯示文字，explorer 網址可以複製，沒有做成可點的連結 | 待 review |
 
-**測不到的接線**（在本機彩排時確認）：`main.go` 在 live 付款主機上建立「只能確認委託」的模擬者、live 付款主機的標籤、`sources.agent`、task 回覆裡的 `budget_contract`。這些需要一個同時有 live CLI、Signer 與鏈的 Host，單元測試做不到。
+**E1a-2 的 review**：REQUEST CHANGES，沒有 Critical；已確認 live 主機上模擬核准不能決定 Ask（兩道檢查：只能確認委託的模擬者、有 Signer 時 `simResolve` 一律拒絕）。修正：live 各模式允許什麼集中在 `hostRoles`（有測試與 mutation）；live 啟動紀錄寫實際的標籤與付款狀態；兩個新的拒絕啟動條件有測試；頁面上按鈕寫「確認委託（模擬）」，只能確認委託時不讀核准清單；`present.sh` 的說明與 live 目錄（不付款的 live 主機仍只用 `scenarios-live.json`）。
+
+**測不到的接線**（在本機彩排時確認）：task 回覆裡的 `budget_contract`。live 付款主機沒有 profile 時，目前會用預設的 demo profile（Policy 之後會因商家不符而拒絕，不會付錯）；`make present-e1a` 一定帶 profile。提示詞的 SHA 由 E1a-5 的證據包記錄。這些需要一個同時有 live CLI、Signer 與鏈的 Host，單元測試做不到。

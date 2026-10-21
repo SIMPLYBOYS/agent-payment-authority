@@ -1197,6 +1197,12 @@ MUTATIONS = [
      'return strings.Replace(p, notPaying,', 'return strings.Replace(p, notPaying+"x",', 'TestPayingTaskPrompt'),
     ('E1a-2: the delegation-only capability approves too', 'cmd/demo/sim.go',
      'if a.sim == nil || a.sim.delegationOnly && !delegation {', 'if a.sim == nil || false && a.sim.delegationOnly && !delegation {', 'TestDelegationOnlySimulator'),
+    ('E1a-2 review: a live host without payments takes a Signer', 'cmd/demo/main.go',
+     '\tcase live && *approvalsSigner != "" && *paymentsPath == "":', '\tcase false && live && *approvalsSigner != "" && *paymentsPath == "":', 'TestHostRoles'),
+    ('E1a-2 review: a live paying host simulates approvals too', 'cmd/demo/main.go',
+     'return roles{label: liveLabelPaying, agent: "live", sim: true, delegationOnly: true}', 'return roles{label: liveLabelPaying, agent: "live", sim: true}', 'TestHostRoles'),
+    ('E1a-2 review: a live host that does not pay simulates', 'cmd/demo/main.go',
+     '\treturn roles{label: liveLabel, agent: "live"}', '\treturn roles{label: liveLabel, agent: "live", sim: true}', 'TestHostRoles'),
     ("E1a-4: the payment view drops tx#1's block", 'internal/store/paid.go',
      'v.ReserveTx, v.ReserveBlock = r.TxHash, r.Block', 'v.ReserveTx, v.ReserveBlock = r.TxHash, 0', 'TestPaymentEvidence'),
 ]
