@@ -1151,6 +1151,8 @@ MUTATIONS = [
      'if !running && (!have || time.Since(at) >= reconEvery) {', 'if !running && (true || !have || time.Since(at) >= reconEvery) {', 'TestCachedReconciliation'),
     ('P2-b after step 7: a sent payment asks the shop every round', 'internal/payflow/payflow.go',
      '\tif now < s[0] {\n\t\treturn false', '\tif false && now < s[0] {\n\t\treturn false', 'TestShopAskedAtGrowingIntervals'),
+    ('P2-b after step 7: the shop is asked again at most 60 s apart', 'internal/payflow/payflow.go',
+     'wait := min(max(s[1]*2, 2), 60)', 'wait := max(s[1]*2, 2)', 'TestShopAskedAtGrowingIntervals'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the

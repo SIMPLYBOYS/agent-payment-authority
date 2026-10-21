@@ -940,8 +940,15 @@ func TestShopAskedAtGrowingIntervals(t *testing.T) {
 		w.now++
 		p, _ = wk.Step(bg, w.payment("po-1"))
 	}
-	if n := len(w.shop.sent); n < 3 || n > 6 {
+	if n := len(w.shop.sent); n != 5 { // 0, +2, +6, +14, +30
 		t.Fatalf("the shop was asked %d times in 30 s", n)
+	}
+	for range 220 {
+		w.now++
+		p, _ = wk.Step(bg, w.payment("po-1"))
+	}
+	if n := len(w.shop.sent); n != 9 { // then +62, +122, +182, +242: never more than 60 s apart
+		t.Fatalf("the shop was asked %d times in 250 s", n)
 	}
 	w.chain.state = "settled"
 	w.shop.answers = []ShopAnswer{paid}
