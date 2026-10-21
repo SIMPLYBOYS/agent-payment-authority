@@ -122,6 +122,85 @@ func Keygen(dir, label, id string, passphrase func() ([]byte, error)) (string, e
 	return f.Address, nil
 }
 
+// Rekey encrypts DIR/keys/<id>.key again under a new passphrase: the
+// current one opens it (and the key must give the file's address), the new
+// one is read twice (they must match, at least MinPassphrase), and the new
+// file, checked to open to the same address, replaces the old by rename.
+// The key itself, and so the address, never changes; on any refusal the
+// file is as it was. It returns the address.
+func Rekey(dir, label, id string, current, next func() ([]byte, error)) (string, error) {
+	if err := Private(dir); err != nil {
+		return "", err
+	}
+	keys := filepath.Join(dir, "keys")
+	if err := Private(keys); err != nil {
+		return "", err
+	}
+	path := filepath.Join(keys, id+".key")
+	f, err := signer.ReadKeyFile(path)
+	if err != nil {
+		return "", err
+	}
+	old, err := current()
+	if err != nil {
+		return "", err
+	}
+	k, err := signer.DecryptKeyFor(label, f, id, old)
+	clear(old)
+	if err != nil {
+		return "", fmt.Errorf("key %s: %w; nothing was changed", id, err)
+	}
+	defer k.Zero()
+	pass, err := next()
+	if err != nil {
+		return "", err
+	}
+	defer clear(pass)
+	again, err := next()
+	if err != nil {
+		return "", err
+	}
+	defer clear(again)
+	switch {
+	case !bytes.Equal(pass, again):
+		return "", errors.New("the new passphrases differ; nothing was changed")
+	case len(pass) < MinPassphrase:
+		return "", fmt.Errorf("the new passphrase must be at least %d characters; nothing was changed", MinPassphrase)
+	}
+	priv := k.Serialize()
+	defer clear(priv)
+	nf, err := signer.EncryptKeyFor(label, id, priv, pass, signer.ScryptN)
+	if err != nil {
+		return "", err
+	}
+	if nk, err := signer.DecryptKeyFor(label, nf, id, pass); err != nil || signer.Address(nk.PubKey()) != f.Address || nf.Address != f.Address {
+		return "", errors.New("the new key file does not open to the same address; nothing was changed")
+	}
+	raw, err := json.Marshal(nf)
+	if err != nil {
+		return "", err
+	}
+	tmp := path + ".rekey"
+	w, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w (a rekey stopped midway leaves it: look, then remove it); nothing was changed", tmp, err)
+	}
+	if _, err := w.Write(raw); err != nil {
+		w.Close()
+		os.Remove(tmp)
+		return "", err
+	}
+	if err := errors.Join(w.Sync(), w.Close()); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	return f.Address, nil
+}
+
 // Load opens DIR/keys/<id>.key under label with the passphrase; DIR and
 // DIR/keys must be this user's alone, as for apa-signer's wallets.
 func Load(dir, label, id string, pass []byte) (*eth.Key, error) {

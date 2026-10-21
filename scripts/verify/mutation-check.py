@@ -1143,6 +1143,10 @@ MUTATIONS = [
      '"network": Clean(req.Network, 80),', '"network": req.Network,', 'TestQuoteFieldsCleaned'),
     ('P2-b B5 review: a consumer-wide line on the testnet', 'cmd/demo/payments.go',
      'if !payeeLine.MatchString(k) {', 'if false && !payeeLine.MatchString(k) {', 'TestTestnetConfigRefused'),
+    ('P2-b rekey: new passphrases that differ are taken', 'internal/keytool/keytool.go',
+     'case !bytes.Equal(pass, again):\n\t\treturn "", errors.New("the new passphrases differ', 'case false && !bytes.Equal(pass, again):\n\t\treturn "", errors.New("the new passphrases differ', 'TestRekey'),
+    ('P2-b rekey: the new key file never replaces the old', 'internal/keytool/keytool.go',
+     'if err := os.Rename(tmp, path); err != nil {', 'if err := os.Rename(tmp, path+".x"); err != nil {', 'TestRekey'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the

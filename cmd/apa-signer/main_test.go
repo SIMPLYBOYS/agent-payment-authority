@@ -249,3 +249,29 @@ func TestAssemblyChecksReservationsOnChain(t *testing.T) {
 		t.Fatalf("signer.db mode: %v %v", fi, err)
 	}
 }
+
+// rekey: wallet-b made under another passphrase is made to open with
+// wallet-a's, so serve's one passphrase opens both; the address is printed.
+func TestRekeyWallet(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "d")
+	os.MkdirAll(filepath.Join(dir, "keys"), 0o700)
+	os.Chmod(dir, 0o700)
+	const a, b = "wallet a passphrase", "wallet b passphrase"
+	ans := func(ps ...string) func() ([]byte, error) {
+		return func() ([]byte, error) { p := ps[0]; ps = ps[1:]; return []byte(p), nil }
+	}
+	if err := keygen(dir, "wallet-b", ans(b, b), io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := rekey(dir, "wallet-b", ans(b), ans(a, a), &out); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := signer.ReadKeyFile(filepath.Join(dir, "keys", "wallet-b.key"))
+	if _, err := signer.DecryptKey(f, "wallet-b", []byte(a)); err != nil || !strings.Contains(out.String(), f.Address) || strings.Contains(out.String(), a) {
+		t.Fatalf("%v %q", err, out.String())
+	}
+	if err := run([]string{"rekey", "--dir", dir}, io.Discard); err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("no wallet: %v", err)
+	}
+}

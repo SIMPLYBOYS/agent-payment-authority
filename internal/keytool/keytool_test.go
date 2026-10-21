@@ -103,3 +103,54 @@ func TestKeygenRefuses(t *testing.T) {
 		t.Fatal("a directory others can read")
 	}
 }
+
+// Rekey (P2-b, a wallet made under another passphrase than the others):
+// the same key and address under the new passphrase, the old one no longer
+// opening it; a wrong current passphrase, new ones that differ or a short
+// one change nothing.
+func TestRekey(t *testing.T) {
+	dir := keyDir(t)
+	const old, next = "the first long passphrase", "the second long passphrase"
+	addr, err := Keygen(dir, RelayerLabel, "issuer", answers(old, old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "keys", "issuer.key")
+	before, _ := os.ReadFile(path)
+	for name, c := range map[string]struct {
+		cur  string
+		news []string
+		why  string
+	}{
+		"a wrong current passphrase":  {old + "x", []string{next, next}, "wrong passphrase"},
+		"new passphrases that differ": {old, []string{next, next + "x"}, "differ"},
+		"a short new passphrase":      {old, []string{"short", "short"}, "at least"},
+	} {
+		if _, err := Rekey(dir, RelayerLabel, "issuer", answers(c.cur), answers(c.news...)); err == nil || !strings.Contains(err.Error(), c.why) {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if now, _ := os.ReadFile(path); string(now) != string(before) {
+			t.Fatalf("%s changed the file", name)
+		}
+	}
+	got, err := Rekey(dir, RelayerLabel, "issuer", answers(old), answers(next, next))
+	if err != nil || got != addr {
+		t.Fatalf("rekey: %s %v", got, err)
+	}
+	if k, err := Load(dir, RelayerLabel, "issuer", []byte(next)); err != nil || k.Addr.Hex() != addr {
+		t.Fatalf("the new passphrase: %v", err)
+	}
+	if _, err := Load(dir, RelayerLabel, "issuer", []byte(old)); err == nil {
+		t.Fatal("the old passphrase still opens it")
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", fi.Mode())
+	}
+	if _, err := os.Lstat(path + ".rekey"); !os.IsNotExist(err) {
+		t.Fatal("the temporary file was left")
+	}
+	// Under another program's label it does not open, so it is not rekeyed.
+	if _, err := Rekey(dir, signer.SignerLabel, "issuer", answers(next), answers(old, old)); err == nil {
+		t.Fatal("rekeyed under another label")
+	}
+}

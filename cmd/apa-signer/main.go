@@ -5,6 +5,7 @@
 //
 //	apa-signer serve --dir DIR
 //	apa-signer keygen --dir DIR --wallet ID
+//	apa-signer rekey --dir DIR --wallet ID       (P2-b: the same key under a new passphrase)
 //	apa-signer serve-approvals --dir DIR        (A2: human approval only, approvals.go)
 //	apa-signer approver enroll|revoke|list ...  (A2: the administrator's commands)
 //
@@ -13,7 +14,9 @@
 // as its own OS user (apa-signer; docs/commercial-p1b-os-isolation.md).
 // Until P2 its reservation verifier refuses every order, so it signs
 // nothing; no flag or variable changes that. keygen makes one new key file
-// (decision D4 of the OS isolation plan: a one-time test key).
+// (decision D4 of the OS isolation plan: a one-time test key). rekey
+// encrypts one wallet's key file again under a new passphrase, the key and
+// its address unchanged: serve asks one passphrase for every wallet.
 package main
 
 import (
@@ -44,7 +47,7 @@ func main() {
 }
 
 func run(args []string, out io.Writer) error {
-	usage := errors.New("usage: apa-signer serve --dir DIR | keygen --dir DIR --wallet ID | serve-approvals --dir DIR | approver ...")
+	usage := errors.New("usage: apa-signer serve --dir DIR | keygen --dir DIR --wallet ID | rekey --dir DIR --wallet ID | serve-approvals --dir DIR | approver ...")
 	if len(args) > 0 && args[0] == "approver" {
 		return approver(args[1:], out, askTTY)
 	}
@@ -56,6 +59,9 @@ func run(args []string, out io.Writer) error {
 			return usage
 		}
 		return serveApprovals(*dir, out) // no terminal, no passphrase, no key
+	}
+	if len(args) > 0 && args[0] == "rekey" {
+		return rekeyCmd(args[1:], out)
 	}
 	if len(args) == 0 || args[0] != "serve" && args[0] != "keygen" {
 		return usage
@@ -188,6 +194,43 @@ func keygen(dir, walletID string, passphrase func() ([]byte, error), out io.Writ
 		return err
 	}
 	fmt.Fprintf(out, "apa-signer: wallet %s address %s\n", walletID, addr)
+	return nil
+}
+
+// rekeyCmd is apa-signer rekey --dir DIR --wallet ID: the wallet's key file
+// encrypted again under a new passphrase (serve asks one passphrase for
+// every wallet). The key and its address stay; the passphrases are read
+// from this terminal only.
+func rekeyCmd(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("rekey", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	dir := fs.String("dir", "", "the Signer's private directory")
+	wallet := fs.String("wallet", "", "the wallet ID whose key file to encrypt again")
+	if err := fs.Parse(args); err != nil || *dir == "" || fs.NArg() != 0 || !signer.ValidWalletID(*wallet) {
+		return errors.New("usage: apa-signer rekey --dir DIR --wallet ID")
+	}
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return errors.New("the passphrase is read from a terminal (/dev/tty), and there is none")
+	}
+	defer tty.Close()
+	return rekey(*dir, *wallet, func() ([]byte, error) { return readPassphrase(tty, "current passphrase: ") },
+		func() func() ([]byte, error) {
+			prompts := []string{"new passphrase: ", "the same new passphrase again: "}
+			return func() ([]byte, error) {
+				p := prompts[0]
+				prompts = prompts[1:]
+				return readPassphrase(tty, p)
+			}
+		}(), out)
+}
+
+func rekey(dir, walletID string, current, next func() ([]byte, error), out io.Writer) error {
+	addr, err := keytool.Rekey(dir, signer.SignerLabel, walletID, current, next)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "apa-signer: wallet %s address %s: its key file now opens with the new passphrase (the key and address are unchanged)\n", walletID, addr)
 	return nil
 }
 
