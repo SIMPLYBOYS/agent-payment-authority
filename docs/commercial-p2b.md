@@ -261,7 +261,8 @@ Aaron 核准第 6、7 步；① 與 ④ 由 Claude Code 以 Host 的 API 代按�
 - **`show-a-01` 的中斷**：`/opt` 的 Signer 在 A2（10/13）已決定過 `show-a-01`～`03`，遷移後仍在 `signer.db`；新的 Host 資料庫不知道，又從 `show-a-01` 開始。Aaron 從 testnet 的 registry 移除 `show-a-02`、`show-a-03`（原檔留為 `registry.json.before-skip-decided`），重啟 Host 後客人 A 從 `show-a-04` 開始。之後要避免：新 Host 資料庫接上既有 Signer 時，先排除 Signer 已決定的 task。
 - **停止點**：一條成功 Ask（②）與一條 Deny（③）的 testnet 證據 ✅；test402.com 一筆真 402：**402 取得了，付款沒有完成**（test402 沒有結算）。依 §7 停在這裡，沒有重試。
 - **我們送出的交易**：部署 2、登記 5（① ② ③ ④ 與中斷的 `show-a-01`）、預留 3、結算 2，共 **12 筆**；relayer 今天 8 筆（上限 12）、商店 2 筆（上限 4）。
-- **待查**：test402 為什麼沒有結算（我們沒有記下它的回應）；付款工作在「已送出」期間每一輪都重送同一個 PAYMENT-SIGNATURE（對外部商店太頻繁）；頁面上「模擬中……不會付款」與「核准只留下模擬授權，未啟用付款」兩段舊文字在 testnet 上是錯的；核准面板在付款送出後仍寫「尚未付款」。
+- **test402 為什麼沒有結算**（Aaron 10/21 選 A：把 ④ 已過期的 PAYMENT-SIGNATURE 原樣再送給 test402 一次，過期的授權不可能被結算；05:14:49Z，一次 GET）：test402 回 `200 OK`，內容是 `{"ok":true,"note":"test402 checked only that a PAYMENT-SIGNATURE header was present. It does not verify x402 credentials or settle payments.", "config":{"protocol":"x402","network":"eip155:84532","scheme":"exact","amount":"100","facilitator":"x402org","maxTimeoutSeconds":300,"offerReceipt":"off","quirk":"none"}}`，沒有 PAYMENT-RESPONSE。也就是說 **test402.com 只檢查 header 存在，不驗證、也不結算**：它能證明的是 x402 wire 的相容性（402 的格式我們讀得懂、我們送的 PAYMENT-SIGNATURE 它收下並回 200），不能證明一筆真的結算。我們的系統在這種情況的行為正確：沒有因為商店回 200 就當作已付款或交付；等鏈上確認，授權到期仍未使用就交人工（`NOT_SETTLED_EXPIRED`），沒有錢移動。
+- **其他待查**：付款工作在「已送出」期間每一輪都重送同一個 PAYMENT-SIGNATURE（對外部商店太頻繁）；頁面上「模擬中……不會付款」與「核准只留下模擬授權，未啟用付款」兩段舊文字在 testnet 上是錯的；核准面板在付款送出後仍寫「尚未付款」。
 
 ## 7 停止流程
 
