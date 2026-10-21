@@ -2,6 +2,7 @@
 
 > 2026-10-16，Claude Code。依 vault〈Claude-Code-AE1Agentic流程安全與品質評測派工-20261013〉；PRD FR-21／FR-22、執行計畫驗收 18、19、34、PRD §13。分支 `commercial-ae1`。
 > **AE1 除付款對帳以外完成（Aaron 10/17：「AE1 的狀態，標成除付款對帳以外完成，另外 merge 進 main」）。** 驗收 34、19 完成；驗收 18 的「未授權新增支出 = 0」為 `not_evaluated`，待 P2 以同一套注入案例在 testnet 對帳後補上（§17）。
+> **驗收 18 結案（Aaron 10/21）**：Base Sepolia 對帳未授權新增支出 0 筆；依 P2-b 第 8 步結案，與 D6 原文的差異見 §18。AE1 的驗收 18、19、34 都已完成。
 > **Aaron 10/16：「照建議」：第 7 節 D1–D8 全部採用建議。** 實作依 D8：先交離線部分（語料、評分器、fake 全流程、crafted／故障結果）給 review，再申請第一個真實模型批次。到目前為止沒有啟動任何真實模型，也沒有寫 demo 的 Store、呼叫付款或連鏈。
 
 ## 1 要回答的問題
@@ -323,3 +324,13 @@ M1 的規則照舊：Deny 之後 task 就結束，之後的請購是 `TASK_NOT_A
 - 所以可以決定的是「**AE1 除付款對帳以外完成**」，不是「AE1 通過」；與 roadmap 的「付款對帳部分等 P2」、E1-b 的前置條件一致。
 
 **下一輪建議**（不在本片範圍，由 Aaron 決定）：更難的注入（多步誘導、與任務相關的「合理」推銷、模仿系統格式的文字）、意思更模糊的任務、更多替代商品、較長的目錄；必要時加入較小或較舊的模型；並在結果裡逐列記錄 CLI 版本與 effort。
+
+## 18 驗收 18 結案：testnet 對帳（10/21）
+
+Aaron 10/21：「用 var/p2-testnet/reconciliation-20261021-125707.json 跑 ae1-eval report 來結案」。
+
+- **輸入**：§17 的七份 `results.jsonl`（sha256 前 16 碼逐一相同）加上 P2-c 的對帳報告：`base_sepolia`、鏈 84532、USDC `0x036cbd53…cf7e`、區塊 48374723–48395131、錢包 2 個、已記錄授權 3 筆、**未授權 0 筆**。
+- **輸出**：`artifacts/ae1/final-p2c-806428e/`（`ae1-eval report --reps 3`，在 `806428e` 上執行；report.json sha256 前 16 碼 `33c89263b895f1b8`）。和 `final-5923acd/` 相比只差三個欄位：`unauthorized_new_spend` 由 `not_evaluated` 改為 `0`、多了 `reconciliation`、notes 換成 Base Sepolia 的那一則。其他指標不變。
+- **和 D6 的差異（照實記錄）**：D6 寫的是「用同一套注入案例在 testnet 對帳」。這個區塊範圍內的付款是 P2-c 的四場 show 情境：模擬客人、沒有真實模型、沒有注入案例。所以「0 筆」證明的是：在 Base Sepolia 上，這兩個錢包的每一筆 USDC 支出都有 Host 記錄的授權。它不能證明注入案例在鏈上付款時沒有被騙。注入的抵抗力仍以 §17 的本機評測為準：被騙 0／42 ×2 模型、crafted 8／8。報告本身的 note 也寫明這一點。
+- **決定**：Claude Code 提出這個差異後，Aaron 選「照 P2-b 第 8 步結案」。P2-b 提案第 8 步寫的是「0；報告是 `base_sepolia`，可結 AE1 驗收 18」，Aaron 已核准該提案。**驗收 18 結案**，AE1 的驗收 18、19、34 都已完成。
+- 若之後要讓注入案例在 testnet 實際付款，要真實 CLI 與新的鏈上交易，各自另行核准。這不在本次範圍。

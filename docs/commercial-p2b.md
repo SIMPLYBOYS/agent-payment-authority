@@ -264,11 +264,12 @@ Aaron 核准第 6、7 步；① 與 ④ 由 Claude Code 以 Host 的 API 代按�
 - **test402 為什麼沒有結算**（Aaron 10/21 選 A：把 ④ 已過期的 PAYMENT-SIGNATURE 原樣再送給 test402 一次，過期的授權不可能被結算；05:14:49Z，一次 GET）：test402 回 `200 OK`，內容是 `{"ok":true,"note":"test402 checked only that a PAYMENT-SIGNATURE header was present. It does not verify x402 credentials or settle payments.", "config":{"protocol":"x402","network":"eip155:84532","scheme":"exact","amount":"100","facilitator":"x402org","maxTimeoutSeconds":300,"offerReceipt":"off","quirk":"none"}}`，沒有 PAYMENT-RESPONSE。也就是說 **test402.com 只檢查 header 存在，不驗證、也不結算**：它能證明的是 x402 wire 的相容性（402 的格式我們讀得懂、我們送的 PAYMENT-SIGNATURE 它收下並回 200），不能證明一筆真的結算。我們的系統在這種情況的行為正確：沒有因為商店回 200 就當作已付款或交付；等鏈上確認，授權到期仍未使用就交人工（`NOT_SETTLED_EXPIRED`），沒有錢移動。
 - **驗收 7 的認定**（Aaron 10/21：「關於問題 1 我們先走 option a」）：「test402.com 一筆真 402」認定為 **x402 wire 相容性已由 test402.com 證明**（它的 402 我們讀得懂；我們送出的 PAYMENT-SIGNATURE 它收下並回 200），並寫明 test402.com 本身不驗證、不結算，無法以它證明真結算；**真結算由我們自己的商店在 Base Sepolia 證明**（① Allow 與 ② 本人核准，各有預留 tx#1、結算 tx#2、確認後交付與收據）。
 - **三個待修的問題**（Aaron 10/21：「先依建議的方向進行」）：
-  - 付款送出後，付款工作每一輪（1 秒）都把同一個 PAYMENT-SIGNATURE 重送給商店（④ 對 test402 送了約五分鐘）→ 改為 2 秒起、每次加倍、最多 60 秒才再問商店，其間每輪只讀鏈；鏈上確認已結算後立刻向商店取內容（`TestShopAskedAtGrowingIntervals`：30 秒內只問 3～6 次，結算後兩輪內交付）。
+  - 付款送出後，付款工作每一輪（1 秒）都把同一個 PAYMENT-SIGNATURE 重送給商店（④ 對 test402 送了約五分鐘）→ 改為 2 秒起、每次加倍、最多 60 秒才再問商店，其間每輪只讀鏈；鏈上確認已結算後立刻向商店取內容（`TestShopAskedAtGrowingIntervals`：30 秒內問 5 次（0、2、6、14、30 秒），之後間隔不超過 60 秒，結算後兩輪內交付）。
   - 頁面在付款主機上的兩段舊文字 → 「委託是 fake 模擬：主持人扮演客人確認委託（不是本人驗證）。Ask 由本人以已登記的裝置核准；Allow 與本人核准的請購由 Host 付款（Base Sepolia testnet／本機 anvil、測試 USDC）」與「模擬中：主持人扮演客人 X 確認委託（不是本人驗證；付款仍由 Host 實際進行）」；沒有付款能力時文字不變。
   - 核准操作的結果列在付款開始後仍寫「尚未付款」→ 付款主機上改為「Host 隨後付款；付款進度以上方與請購卡片為準。」
   - 修正 b9383c7、c8d263a、053a195；review APPROVE（測試改為精確次數：0、2、6、14、30 秒，之後間隔不超過 60 秒）；三個修正檢查都被抓到。Host 要重新啟動才會用新版。
-- **其他待查**：付款工作在「已送出」期間每一輪都重送同一個 PAYMENT-SIGNATURE（對外部商店太頻繁）；頁面上「模擬中……不會付款」與「核准只留下模擬授權，未啟用付款」兩段舊文字在 testnet 上是錯的；核准面板在付款送出後仍寫「尚未付款」。
+- **第 8 步：AE1 驗收 18 結案**（Aaron 10/21：「用 var/p2-testnet/reconciliation-20261021-125707.json 跑 ae1-eval report 來結案」；問到與 D6 的差異時選「照 P2-b 第 8 步結案」）：`ae1-eval report --reps 3 --reconciliation …` 合併 AE1 §17 同樣七份輸入（sha256 前 16 碼逐一相同），輸出 `artifacts/ae1/final-p2c-806428e/`（report.json sha256 前 16 碼 `33c89263b895f1b8`）。和 `final-5923acd/` 相比只差三個欄位：`unauthorized_new_spend` 由 `not_evaluated` 改為 `0`、多了 `reconciliation`、notes 換成 Base Sepolia 的那一則。詳見 `docs/commercial-ae1.md` §18。
+- **其他待查**：（已修，見上一項「三個待修的問題」）
 
 ## 7 停止流程
 

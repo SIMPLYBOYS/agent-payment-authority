@@ -183,7 +183,7 @@
 |---|---|
 | C1 選庫 | **C2** 接入 Policy：等 C1 結論與契約 review |
 | A1 實機 | **A2** 接入 Approval／grant：等 A1 與 P1；**V1**：等 A2 |
-| AE1 評測設計 | AE1 含付款對帳的部分：等 P2 |
+| AE1 評測設計 | AE1 含付款對帳的部分：已完成（10/21，Base Sepolia 對帳 0；`docs/commercial-ae1.md` §18） |
 | E1-a 的投影與 checker 設計 | **E1-b** 最終驗收：等 C2、A2、V1、AE1 全部通過 |
 | Z1 電路 v1 與負向測試（gnark 本機） | Z2 合約部署到 testnet：等 P0、測試網權限與資金 |
 | C1 BBS+ 選庫與正反測試 | 發證接入 Policy：等 C1 結論與契約升版 review |
