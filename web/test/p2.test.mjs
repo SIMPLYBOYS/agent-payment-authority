@@ -232,3 +232,20 @@ test("base_sepolia pays as local_anvil does, and is named the testnet (docs/comm
   other.task.payment_capability = "base_mainnet"; // an unknown capability never pays, never names a banner
   assert.equal(A.projection({ snapshot: other, gen: 1 }, false).payments, "");
 });
+
+test("E1-a: the Inspector shows the run conditions, both transactions with Base Sepolia's explorer, and makes no ZK claim; the Timeline shows a payment event's record", () => {
+  const events = [ev(1, "TASK_STARTED", { purchase_order_id: "", run_conditions: { agent: "live", chain: "base_sepolia", authenticator: "device" } }),
+    ev(2, "BUDGET_RESERVED", { payment: { method: "delegation", amount: "500000", tx_hash: tx1, block: 48394045 } })];
+  const v = view(events, { status: "paid", state: "delivered", reserve_tx: tx1, reserve_block: 48394045, settle_tx: tx2, settle_block: 48394047, receipt_id: "rcpt-1", content_sha256: "sha256:ab" });
+  v.task.payment_capability = "base_sepolia";
+  v.task.budget_contract = "0xbudget";
+  const rows = Object.fromEntries(A.inspector(v));
+  assert.match(rows["執行條件"], /^真實 Agent（live CLI） · Base Sepolia · 實體裝置（主持人宣告）/);
+  assert.equal(rows["預算合約（Z2）"], "0xbudget");
+  assert.equal(rows["tx#1 預留（Z2）"], tx1 + " · https://sepolia.basescan.org/tx/" + tx1 + " · 區塊 48394045");
+  assert.equal(rows["tx#2 結算"], tx2 + " · https://sepolia.basescan.org/tx/" + tx2 + " · 區塊 48394047");
+  assert.match(rows["ZK proof"], /不自行宣稱已驗證/);
+  assert.match(A.timeline(v)[1].detail, new RegExp("tx " + tx1 + " · 區塊 48394045"));
+  v.task.payment_capability = "local_anvil";
+  assert.match(Object.fromEntries(A.inspector(v))["tx#1 預留（Z2）"], /本機鏈，沒有 explorer/);
+});

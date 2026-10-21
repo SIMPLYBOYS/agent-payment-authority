@@ -333,4 +333,6 @@
 
 | E1a-3 v2 加付款 | （本段） | 只加測試：`TestV2PaidOnAnvil`（`internal/payflow/anvil_v2_test.go`）在本機 anvil 上以真實的 Signer、relayer（Z2 預留）、結算商店與 Store，付一筆 `apa.pay.v2` 的 Allow：BBS+ 憑證驗證、tx#1、簽章、tx#2、交付、收據；全部事件同一個 `intent_hash`，標籤依執行條件（fake／local_anvil）。程式不用改：付款路徑本來就不分 v1、v2 | 待 review |
 
-**測不到的接線**（在本機彩排時確認）：`main.go` 在 live 付款主機上建立「只能確認委託」的模擬者、live 付款主機的標籤、`sources.agent`。這些需要一個同時有 live CLI、Signer 與鏈的 Host，單元測試做不到。
+| E1a-4 畫面 | （本段） | Inspector：執行條件（取自 `TASK_STARTED`）、預算合約、tx#1 與 tx#2 的完整 hash 與區塊、Base Sepolia 的 explorer 網址（本機鏈寫「沒有 explorer」）、收據；ZK 一列寫明 proof 在 tx#1 的 calldata、本頁不自行宣稱已驗證。Timeline：付款事件顯示方法、金額、tx、區塊、收據。API：付款檢視多 `reserve_block`，task 多 `budget_contract`。頁面只顯示文字，explorer 網址可以複製，沒有做成可點的連結 | 待 review |
+
+**測不到的接線**（在本機彩排時確認）：`main.go` 在 live 付款主機上建立「只能確認委託」的模擬者、live 付款主機的標籤、`sources.agent`、task 回覆裡的 `budget_contract`。這些需要一個同時有 live CLI、Signer 與鏈的 Host，單元測試做不到。

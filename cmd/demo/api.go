@@ -103,23 +103,24 @@ func newTokens(cfg contracts.RegistryConfig, path, db string, inputs ...string) 
 // api is the authenticated read-only task API. Every handler reads the
 // Store only: no StartTask, Submit, Cancel or ExpireDue.
 type api struct {
-	st       *store.Store
-	tokens   []demoToken
-	addr     string     // the bound address, the Host and Origin accepted (with alias)
-	alias    string     // A2: localhost:<port>, the trusted name WebAuthn needs (decision D3); "" otherwise
-	approve  *approvals // A2: the human approval relay (--approvals-signer); nil otherwise
-	clock    store.Clock
-	unity    *os.Root // the Unity Web build's Build/ directory; nil without a build
-	expiry   *expiryHealth
-	fake     bool         // a fake CLI passed its --version check at start
-	control  *control     // host-started runs (--scenarios); nil otherwise
-	history  *historyInfo // history mode (--history-db); nil otherwise
-	live     *liveInfo    // live mode (--live-cli); nil otherwise
-	traceDir string       // live mode: where the run traces are
-	pairing  *pairing     // --pairing: the host page's one-time code; nil otherwise
-	sim      *simulator   // fake mode with --scenarios: the simulated approver (P1-a); nil otherwise
-	out      io.Writer    // the host's log (fixed lines only)
-	payCap   string       // P2: --payments' environment (LocalAnvil, BaseSepolia); "" without
+	st          *store.Store
+	tokens      []demoToken
+	addr        string     // the bound address, the Host and Origin accepted (with alias)
+	alias       string     // A2: localhost:<port>, the trusted name WebAuthn needs (decision D3); "" otherwise
+	approve     *approvals // A2: the human approval relay (--approvals-signer); nil otherwise
+	clock       store.Clock
+	unity       *os.Root // the Unity Web build's Build/ directory; nil without a build
+	expiry      *expiryHealth
+	fake        bool         // a fake CLI passed its --version check at start
+	control     *control     // host-started runs (--scenarios); nil otherwise
+	history     *historyInfo // history mode (--history-db); nil otherwise
+	live        *liveInfo    // live mode (--live-cli); nil otherwise
+	traceDir    string       // live mode: where the run traces are
+	pairing     *pairing     // --pairing: the host page's one-time code; nil otherwise
+	sim         *simulator   // fake mode with --scenarios: the simulated approver (P1-a); nil otherwise
+	out         io.Writer    // the host's log (fixed lines only)
+	payContract string       // E1-a: --payments' budget contract
+	payCap      string       // P2: --payments' environment (LocalAnvil, BaseSepolia); "" without
 
 	recon func(context.Context) (reconcile.Report, error) // P2-a: the reconciliation; nil without --payments
 }
@@ -253,6 +254,8 @@ type taskReply struct {
 	ServedAt           uint64               `json:"served_at"`
 	Purchases          []store.PurchaseView `json:"purchases"`
 	PaymentCapability  string               `json:"payment_capability"`
+	// BudgetContract (E1-a): the Z2 budget contract tx#1 calls, with --payments.
+	BudgetContract string `json:"budget_contract,omitempty"`
 }
 
 func (a *api) task(w http.ResponseWriter, r *http.Request) {
@@ -261,17 +264,17 @@ func (a *api) task(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, v := rec.Binding, rec.Task
-	capability := "unavailable" // M1 cannot pay
+	capability, contract := "unavailable", "" // M1 cannot pay
 	if paycontract.Supported(v.ContractVersion) {
 		capability = paycontract.PaymentNotEnabled // P1-a: an approval, simulated, is not a payment
 		if a.payCap != "" {
-			capability = a.payCap
+			capability, contract = a.payCap, a.payContract
 		}
 	}
 	reply(w, http.StatusOK, taskReply{TaskID: b.TaskID, ContractVersion: v.ContractVersion, DelegationID: v.DelegationID, ConsumerID: b.ConsumerID,
 		AgentID: b.AgentID, WalletID: b.WalletID, Payer: b.Payer,
 		WalletEvidenceMode: b.WalletEvidenceMode, Status: v.Status, DenyReason: v.DenyReason, AsOfSequence: v.AsOfSequence,
-		AsOfObservedAt: v.AsOfObservedAt, ServedAt: a.clock(), Purchases: v.Purchases, PaymentCapability: capability})
+		AsOfObservedAt: v.AsOfObservedAt, ServedAt: a.clock(), Purchases: v.Purchases, PaymentCapability: capability, BudgetContract: contract})
 }
 
 // eventView is the whitelisted projection of one stored event, copied as

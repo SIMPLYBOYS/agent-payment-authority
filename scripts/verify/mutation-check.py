@@ -1197,6 +1197,8 @@ MUTATIONS = [
      'return strings.Replace(p, notPaying,', 'return strings.Replace(p, notPaying+"x",', 'TestPayingTaskPrompt'),
     ('E1a-2: the delegation-only capability approves too', 'cmd/demo/sim.go',
      'if a.sim == nil || a.sim.delegationOnly && !delegation {', 'if a.sim == nil || false && a.sim.delegationOnly && !delegation {', 'TestDelegationOnlySimulator'),
+    ("E1a-4: the payment view drops tx#1's block", 'internal/store/paid.go',
+     'v.ReserveTx, v.ReserveBlock = r.TxHash, r.Block', 'v.ReserveTx, v.ReserveBlock = r.TxHash, 0', 'TestPaymentEvidence'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the

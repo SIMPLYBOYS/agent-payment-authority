@@ -416,6 +416,9 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	mux := newMux(shop, capability)
 	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: runner != nil && !live, out: d.out, payCap: payCap}
 	if pay != nil {
+		ui.payContract = pay.cfg.BudgetContract
+	}
+	if pay != nil {
 		var wallets []eth.Address
 		for _, w := range regCfg.Wallets {
 			wa, err := eth.ParseAddress(w.From)

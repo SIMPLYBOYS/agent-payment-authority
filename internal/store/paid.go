@@ -648,6 +648,7 @@ type PaymentView struct {
 	State         string `json:"state"`  // submitted also when the Host does not know its result
 	Code          string `json:"code,omitempty"`
 	ReserveTx     string `json:"reserve_tx,omitempty"`
+	ReserveBlock  uint64 `json:"reserve_block,omitempty"` // E1-a: tx#1's block
 	SettleTx      string `json:"settle_tx,omitempty"`
 	SettleBlock   uint64 `json:"settle_block,omitempty"`
 	ContentSHA256 string `json:"content_sha256,omitempty"`
@@ -674,7 +675,7 @@ func (t *taskTx) paymentView(po string) *PaymentView {
 		if r := e.Payload.Payment; r != nil {
 			switch e.EventType {
 			case "BUDGET_RESERVED":
-				v.ReserveTx = r.TxHash
+				v.ReserveTx, v.ReserveBlock = r.TxHash, r.Block
 			case "PAYMENT_SETTLED":
 				v.SettleTx, v.SettleBlock = r.TxHash, r.Block
 			case "RESOURCE_DELIVERED":

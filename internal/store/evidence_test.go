@@ -96,6 +96,9 @@ func TestPaymentEvidence(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+		if v := e.view(s, po); v == nil || v.ReserveTx != tx1 || v.ReserveBlock != 7 {
+			t.Fatalf("view %+v", v) // E1-a: tx#1 and its block for the Inspector
+		}
 		events, err := s.Events(sessA)
 		if err != nil {
 			t.Fatal(err)

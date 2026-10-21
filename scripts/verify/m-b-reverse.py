@@ -431,6 +431,12 @@ ITEMS = [
      [(KT, "os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)", "os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)")]),
     ("P2-b after step 7: an approval's line says not paid on a paying host", node("web/test/p2.test.mjs", "an Ask of an ended task: not approvable, its words say so; an approval says payment follows on a paying host, not enabled without one", r"Host 隨後付款"),
      [("web/approve.js", 'const off = pays ? "Host 隨後付款；付款進度以上方與請購卡片為準。" : "付款未啟用。";', 'const off = pays ? "尚未付款。" : "付款未啟用。";')]),
+    ("E1a-4: the Inspector gives no explorer link", node("web/test/p2.test.mjs", "E1-a: the Inspector shows the run conditions, both transactions with Base Sepolia's explorer, and makes no ZK claim; the Timeline shows a payment event's record", r"sepolia\.basescan\.org"),
+     [("web/adapter.js", 'str(hash) + (EXPLORER[cap] ? " · " + EXPLORER[cap] + hash :', 'str(hash) + (false ? " · " + EXPLORER[cap] + hash :')]),
+    ("E1a-4: the Inspector claims the proof verified", node("web/test/p2.test.mjs", "E1-a: the Inspector shows the run conditions, both transactions with Base Sepolia's explorer, and makes no ZK claim; the Timeline shows a payment event's record", r"不自行宣稱已驗證"),
+     [("web/adapter.js", '["ZK proof", "在 tx#1 的 calldata 裡，由預算合約呼叫 verifier 驗證；本頁不自行宣稱已驗證（由獨立 checker 重驗）"]', '["ZK proof", "已驗證"]')]),
+    ("E1a-4: the Timeline hides a payment event's tx", node("web/test/p2.test.mjs", "E1-a: the Inspector shows the run conditions, both transactions with Base Sepolia's explorer, and makes no ZK claim; the Timeline shows a payment event's record", r"tx 0x1111"),
+     [("web/adapter.js", ': e.payment ? payDetail(e.payment) : e.code', ': e.code')]),
 ]
 
 ITEM_TIMEOUT = 900

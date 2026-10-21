@@ -9,6 +9,11 @@ export const UNKNOWN = "未知／未提供";
 // person's approval (P2), by name: a local anvil (P2-a) or the Base Sepolia
 // testnet (docs/commercial-p2b.md B3). Anything else pays nothing.
 export const PAYING = { local_anvil: "本機 anvil", base_sepolia: "Base Sepolia testnet" };
+// EXPLORER (E1-a): a public chain's transaction page; a local anvil has none.
+export const EXPLORER = { base_sepolia: "https://sepolia.basescan.org/tx/" };
+const txRef = (cap, hash) => str(hash) + (EXPLORER[cap] ? " · " + EXPLORER[cap] + hash : cap === "local_anvil" ? "（本機鏈，沒有 explorer）" : "");
+const RUN = { agent: { live: "真實 Agent（live CLI）", fake: "fake Agent" }, chain: { base_sepolia: "Base Sepolia", local_anvil: "本機 anvil", none: "不付款" },
+  authenticator: { device: "實體裝置（主持人宣告）", virtual: "virtual authenticator", none: "沒有 Signer" } };
 export const paysOn = (cap) => typeof cap === "string" && Object.hasOwn(PAYING, cap);
 
 // Task status codes as the task list shows them (GET /api/tasks, section 14
@@ -237,6 +242,10 @@ export function inspector(snapshot) {
       : "未付款（payment_capability：" + str(t.payment_capability) + "）"],
     ...(t.contract_version ? [["契約", str(t.contract_version) + (t.delegation_id ? " · 委託 " + str(t.delegation_id) : "")]] : []),
   ];
+  // E1-a: what this task's events come from (its TASK_STARTED), and the budget contract tx#1 calls.
+  const rc = ((snapshot.events || []).find((e) => e.event_type === "TASK_STARTED") || {}).run_conditions;
+  if (rc) rows.push(["執行條件", [RUN.agent[rc.agent], RUN.chain[rc.chain], RUN.authenticator[rc.authenticator]].map(str).join(" · ") + "（記在 TASK_STARTED；每個事件依此標 live 或 fixture）"]);
+  if (t.budget_contract) rows.push(["預算合約（Z2）", str(t.budget_contract)]);
   for (const p of t.purchases || []) {
     const d = p.decision || {};
     rows.push(
@@ -246,9 +255,18 @@ export function inspector(snapshot) {
       ["approval", str(d.approval_status) + (p.approval_closed ? "，收尾：" + str(p.approval_closed) : "")],
       ["payment_status", str(d.payment_status)],
     );
+    const pv = p.payment;
+    if (pv && pv.reserve_tx) rows.push(["tx#1 預留（Z2）", txRef(t.payment_capability, pv.reserve_tx) + (typeof pv.reserve_block === "number" ? " · 區塊 " + pv.reserve_block : "")],
+      ["ZK proof", "在 tx#1 的 calldata 裡，由預算合約呼叫 verifier 驗證；本頁不自行宣稱已驗證（由獨立 checker 重驗）"]);
+    if (pv && pv.settle_tx) rows.push(["tx#2 結算", txRef(t.payment_capability, pv.settle_tx) + (typeof pv.settle_block === "number" ? " · 區塊 " + pv.settle_block : "")]);
+    if (pv && pv.receipt_id) rows.push(["收據", str(pv.receipt_id) + " · 內容 sha256 " + str(pv.content_sha256)]);
   }
   return rows;
 }
+
+// payDetail is a payment event's record in a Timeline row (E1-a).
+const payDetail = (r) => [r.method && "方法 " + r.method, r.amount && "金額 " + amount(r.amount), r.tx_hash && "tx " + r.tx_hash,
+  typeof r.block === "number" && "區塊 " + r.block, r.receipt_id && "收據 " + r.receipt_id].filter(Boolean).join(" · ");
 
 // timeline rows, one per event; json is the API's whitelisted event, not
 // CLI output and not a raw log.
@@ -261,7 +279,8 @@ export function timeline(snapshot) {
     time: typeof e.observed_at === "number" ? new Date(e.observed_at * 1000).toISOString() : UNKNOWN,
     detail: e.decision ? str(e.decision.policy_verdict) + " / " + str(e.decision.reason) + (e.decision.approval_status && e.decision.approval_status !== "pending" && e.decision.approval_status !== "not_requested" ? " / " + e.decision.approval_status : "")
       : e.grant_id ? "grant " + short(e.grant_id) + "（" + str(e.authorization_method) + "）" : e.approval_session_id ? "session " + short(e.approval_session_id)
-      : e.delegation_id ? "delegation " + str(e.delegation_id) : e.code ? str(e.code) : "",
+      : e.delegation_id ? "delegation " + str(e.delegation_id)
+      : e.payment ? payDetail(e.payment) : e.code ? str(e.code) : "",
     source: str(e.source) + " · " + str(e.evidence_mode),
     json: JSON.stringify(e, null, 2),
   }));
