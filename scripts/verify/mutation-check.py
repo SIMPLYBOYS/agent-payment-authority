@@ -1218,7 +1218,7 @@ LOCAL_MUTATIONS = [
     ('E1a-5 review: E2 takes a simulated grant paid', 'internal/verification/e1a.go',
      '\t\t\tif e := eventOf(es, t); e == nil || e.Payload.AuthorizationMethod != "webauthn" {', '\t\t\tif e := eventOf(es, t); e == nil {', 'cmd/e1-evidence:TestPackAndCheck'),
     ('E1a-5 review: E2 takes a Deny delivered', 'internal/verification/e1a.go',
-     '\treturn "on verdict " + strconv.Quote(verdict)', '\treturn ""', 'cmd/e1-evidence:TestPackAndCheck'),
+     '\treturn "on verdict " + strconv.Quote(verdict)', '\treturn strconv.Quote(verdict)[:0]', 'cmd/e1-evidence:TestPackAndCheck'),
     ('E1a-5 review 2: E4 takes a payment event without its transaction', 'internal/verification/e1a_chain.go',
      '\t\t\tcase reserved && tx1 == "", settledEv && tx2 == "":', '\t\t\tcase false && (reserved && tx1 == "" || settledEv && tx2 == ""):', 'internal/verification:TestE1aChainClaims'),
     ('E1a-5 review 2: E8 lets an unentitled settlement move funds', 'internal/verification/e1a_chain.go',
