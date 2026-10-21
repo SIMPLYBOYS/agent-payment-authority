@@ -226,6 +226,10 @@ sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目�
 
 **第 5 步的準備**（Claude Code，10/21，不動 `/opt`）：`var/p2-opt/apa-signer` 從乾淨的 worktree 建置（commit `c0bc0c5fd91861e2fd1d1f4d155b351449267d7f`，`GOFLAGS=-mod=readonly GOPROXY=off GOTOOLCHAIN=local`），SHA-256 `85c240c00b7607ef90e53601a17312727b506e0d09c5ea10ef2bcb1829a14edc`。語音服務的檔案自 V1 準備時（f81517a）沒有變動，沿用 `var/v1-opt/stage`。
 
+**第 5 步的實際經過**（Aaron 10/21）：核對、產生新 `signer.json`（SHA-256 `c7f6c47681e697a6ec51a565daeeb931bf7cb07b793506a9cbdd72199f743c19`：兩個錢包、3 筆委派、2 位核准者、鏈 84532 的預留核對、語音段）、備份三個 `.a2`、安裝、核准表遷移（credentials 2、approver_handles 2、其他紀錄各 4；舊檔留為 `approvals.db.migrated`）都照 §6.1 完成。遇到兩個問題：
+- 語音服務載入失敗：模型的 `label_encoder.ckpt` 是指向 repo 內絕對路徑的連結，`apa-signer` 讀不到（V1 只以 mac 驗證過，所以沒發現）。Aaron 在 `/opt` 改為指向同目錄 `label_encoder.txt` 的相對連結，並確認 `/opt/apa-signer/voice` 沒有其他絕對連結；health `ok`。`v1-opt-stage.sh` 改為複製時把連結換成檔案，並拒絕任何絕對連結（5c09328）。approver-a 的聲紋登記完成（3 段，存於 `signer.db`）。
+- `serve` 只問一次密語，wallet-b 當初用了另一個密語，啟動被拒（沒有簽任何東西）。Aaron 記得 wallet-b 的密語，選擇加上 `apa-signer rekey`（3dee9b4，review APPROVE，修正 261cfc8）：用目前的密語解開、確認位址不變，以新密語重新加密，寫入的檔案讀回驗證後才改名取代，並同步目錄。執行檔因此重建：commit `261cfc87828bde415950f96e8601fa0d00da088f`，SHA-256 `560e32fa161e505f280aa34a0b26b107f2646c888f10cf9ba32f01da6e1ac4c8`（取代 `85c240c0…`）。
+
 ## 7 停止流程
 
 **遇到就停**：任何付款變成 unknown 或 needs_review；對帳不是 0；交易 revert；碰到 §5 的任何上限；餘額和預期不符；RPC 回錯的鏈。
