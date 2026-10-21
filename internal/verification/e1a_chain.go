@@ -80,6 +80,7 @@ func e1aOnChain(f *findings, m E1aManifest, runs map[string]*e1aRun, chain Chain
 	}
 	e1aVerifier(ctx, f, chain, s, budget, repo)
 	allowed := map[string]*allowance{} // tx#2 (lower case) -> the one transfer it may carry
+	claimed := map[string]bool{}       // tx#2 claimed by a purchase
 	low, high := uint64(0), uint64(0)  // the blocks the pack's transactions are in
 	seen := func(b uint64) {
 		if b != 0 && (low == 0 || b < low) {
@@ -124,6 +125,9 @@ func e1aOnChain(f *findings, m E1aManifest, runs map[string]*e1aRun, chain Chain
 			case reserved && tx1 == "", settledEv && tx2 == "":
 				f.fail("E4", nil, "%s: a reservation or settlement event without its transaction", po)
 				continue
+			case tx2 != "" && tx1 == "":
+				f.fail("E4", nil, "%s: settled with no reservation (outside the ZK budget)", po)
+				continue
 			case tx1 != "" && strings.EqualFold(tx1, tx2):
 				f.fail("E4", nil, "%s: tx#1 and tx#2 are the same transaction", po)
 				continue
@@ -139,10 +143,11 @@ func e1aOnChain(f *findings, m E1aManifest, runs map[string]*e1aRun, chain Chain
 			}
 			seen(e1aSettlement(ctx, f, chain, latest, s, token, tx2, o.PaymentBinding.From, o.PaymentBinding.PayTo, o.PaymentBinding.Nonce, amount))
 			k := strings.ToLower(tx2)
-			if allowed[k] != nil {
+			if claimed[k] {
 				f.fail("E4", nil, "tx#2 %s is claimed by two purchases", tx2)
 				continue
 			}
+			claimed[k] = true
 			// Only a payment its purchase was entitled to (E2's rule) may move funds.
 			if why := paymentRight(es); why == "" {
 				allowed[k] = &allowance{to: strings.ToLower(o.PaymentBinding.PayTo), amount: amount}
@@ -260,9 +265,9 @@ func e1aReservation(ctx context.Context, f *findings, chain Chain, latest uint64
 	if err == nil {
 		_, err = chain.Call(ctx, eth.Msg{To: to, Data: data})
 	}
-	var reverted *eth.RPCError
+	var rpcErr *eth.RPCError
 	switch {
-	case errors.As(err, &reverted): // the verifier refused it
+	case errors.As(err, &rpcErr) && (rpcErr.Code == 3 || strings.Contains(strings.ToLower(rpcErr.Message), "revert")): // the verifier refused it
 		f.fail("E4", nil, "tx#1 %s: its proof does not verify again: %v", h, err)
 	case err != nil:
 		f.missing("E4", nil, "tx#1 %s: the proof could not be run again: %v", h, err)
@@ -370,8 +375,11 @@ func e1aTransfers(ctx context.Context, f *findings, chain Chain, s E1aStart, tok
 	case s.ToBlock > latest:
 		f.missing("E8", []string{"manifest.json"}, "the node is at block %d, before the pack's end %d", latest, s.ToBlock)
 		return
-	case low != 0 && low < s.FromBlock, high > s.ToBlock:
-		f.fail("E8", []string{"manifest.json"}, "the pack's blocks %d-%d do not hold its transactions (blocks %d-%d)", s.FromBlock, s.ToBlock, low, high)
+	case low != 0 && low < s.FromBlock:
+		f.fail("E8", []string{"manifest.json"}, "the pack's start %d is after its first transaction (block %d): the start was not recorded before the runs", s.FromBlock, low)
+		return
+	case high > s.ToBlock:
+		f.missing("E8", []string{"manifest.json"}, "the pack's end %d is before its last transaction (block %d): pack again with a later --to-block", s.ToBlock, high)
 		return
 	}
 	for _, w := range s.Wallets {

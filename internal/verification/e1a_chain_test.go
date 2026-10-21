@@ -26,6 +26,7 @@ type stubChain struct {
 	verifier   eth.Address
 	field      []byte
 	proofFails bool
+	proofErr   int // the RPC error code when the proof call fails (0: 3, a revert)
 	logs       []eth.Log
 }
 
@@ -44,6 +45,8 @@ func (c *stubChain) Call(_ context.Context, m eth.Msg) ([]byte, error) {
 		return w, nil
 	case strings.HasPrefix(hex.EncodeToString(m.Data), hex.EncodeToString(eth.Selector("taskField(string)"))):
 		return c.field, nil
+	case c.proofFails && c.proofErr != 0:
+		return nil, &eth.RPCError{Code: c.proofErr, Message: "limit exceeded"}
 	case c.proofFails:
 		return nil, &eth.RPCError{Code: 3, Message: "execution reverted"}
 	}
@@ -145,19 +148,31 @@ func TestE1aChainClaims(t *testing.T) {
 		claim  string
 		want   Verdict
 	}{
-		"tx#1 reverted":                {func(c *chainCase) { c.chain.receipts[tx1].Status = 0 }, "E4", Fail},
-		"tx#2 not deep enough":         {func(c *chainCase) { c.chain.latest = 12 }, "E4", Inconclusive},
-		"tx#1 is tx#2":                 {func(c *chainCase) { c.run.events[2].Payload.Payment.TxHash = tx1 }, "E4", Fail},
-		"a reservation without tx":     {func(c *chainCase) { c.run.events[1].Payload.Payment = nil }, "E4", Fail},
-		"Spent for another intent":     {func(c *chainCase) { c.chain.receipts[tx1].Logs[0].Data[0] ^= 1 }, "E4", Fail},
-		"the proof refused":            {func(c *chainCase) { c.chain.proofFails = true }, "E4", Fail},
-		"another verifier's code":      {func(c *chainCase) { c.chain.code = "0x6000" }, "E4", Fail},
-		"tx#2 another amount":          {func(c *chainCase) { one := word(big.NewInt(1).Bytes()); c.chain.receipts[tx2].Logs[0].Data = one[:] }, "E4", Fail},
-		"tx#2 another nonce":           {func(c *chainCase) { c.chain.receipts[tx2].Logs[1].Topics[2][0] ^= 1 }, "E4", Fail},
-		"a second transfer in tx#2":    {func(c *chainCase) { c.chain.logs = append(c.chain.logs, c.chain.logs[0]) }, "E8", Fail},
-		"a payer the start leaves out": {func(c *chainCase) { c.m.Start.Wallets = []string{"0x2222222222222222222222222222222222222222"} }, "E8", Fail},
-		"blocks that miss tx#1":        {func(c *chainCase) { c.m.Start.FromBlock = 11 }, "E8", Fail},
-		"no end block":                 {func(c *chainCase) { c.m.Start.ToBlock = 0 }, "E8", Inconclusive},
+		"tx#1 reverted":                  {func(c *chainCase) { c.chain.receipts[tx1].Status = 0 }, "E4", Fail},
+		"tx#2 not deep enough":           {func(c *chainCase) { c.chain.latest = 12 }, "E4", Inconclusive},
+		"tx#1 is tx#2":                   {func(c *chainCase) { c.run.events[2].Payload.Payment.TxHash = tx1 }, "E4", Fail},
+		"a reservation without tx":       {func(c *chainCase) { c.run.events[1].Payload.Payment = nil }, "E4", Fail},
+		"Spent for another intent":       {func(c *chainCase) { c.chain.receipts[tx1].Logs[0].Data[0] ^= 1 }, "E4", Fail},
+		"the proof refused":              {func(c *chainCase) { c.chain.proofFails = true }, "E4", Fail},
+		"another verifier's code":        {func(c *chainCase) { c.chain.code = "0x6000" }, "E4", Fail},
+		"tx#2 another amount":            {func(c *chainCase) { one := word(big.NewInt(1).Bytes()); c.chain.receipts[tx2].Logs[0].Data = one[:] }, "E4", Fail},
+		"tx#2 another nonce":             {func(c *chainCase) { c.chain.receipts[tx2].Logs[1].Topics[2][0] ^= 1 }, "E4", Fail},
+		"a second transfer in tx#2":      {func(c *chainCase) { c.chain.logs = append(c.chain.logs, c.chain.logs[0]) }, "E8", Fail},
+		"a payer the start leaves out":   {func(c *chainCase) { c.m.Start.Wallets = []string{"0x2222222222222222222222222222222222222222"} }, "E8", Fail},
+		"blocks that miss tx#1":          {func(c *chainCase) { c.m.Start.FromBlock = 11 }, "E8", Fail},
+		"an end before tx#2":             {func(c *chainCase) { c.m.Start.ToBlock = 11 }, "E8", Inconclusive},
+		"settled with no reservation":    {func(c *chainCase) { c.run.events = append(c.run.events[:1], c.run.events[2]) }, "E4", Fail},
+		"a settlement without tx":        {func(c *chainCase) { c.run.events[2].Payload.Payment = nil }, "E4", Fail},
+		"the proof not run (node error)": {func(c *chainCase) { c.chain.proofFails, c.chain.proofErr = true, -32005 }, "E4", Inconclusive},
+		"a transfer to another payee":    {func(c *chainCase) { c.chain.logs[0].Topics[2][31] ^= 1 }, "E8", Fail},
+		"an Ask paid on a simulated grant": {func(c *chainCase) {
+			d := *c.run.events[0].Payload.Decision
+			d.PolicyVerdict = "Ask"
+			c.run.events[0].Payload.Decision = &d
+			c.run.events = append(c.run.events, contracts.AuditEvent{EventType: "APPROVED", Scope: c.run.events[0].Scope, Payload: contracts.EventPayload{AuthorizationMethod: "simulated"}},
+				contracts.AuditEvent{EventType: "GRANT_ISSUED", Scope: c.run.events[0].Scope, Payload: contracts.EventPayload{AuthorizationMethod: "simulated"}})
+		}, "E8", Fail},
+		"no end block": {func(c *chainCase) { c.m.Start.ToBlock = 0 }, "E8", Inconclusive},
 		"settled on a Deny, never delivered": {func(c *chainCase) {
 			d := *c.run.events[0].Payload.Decision
 			d.PolicyVerdict = "Deny"
