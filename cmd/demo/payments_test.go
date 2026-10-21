@@ -132,9 +132,18 @@ func TestPaymentCapabilityStated(t *testing.T) {
 			t.Errorf("healthz %q, want %q", h.PaymentCapability, want)
 		}
 	}
-	on, off := &api{payCap: LocalAnvil}, &api{}
+	on, off := &api{payCap: LocalAnvil, payContract: "0xbudget"}, &api{}
 	if on.capability() != LocalAnvil || off.capability() != "unavailable" || on.approvalsCapability() != LocalAnvil || off.approvalsCapability() != "not_enabled" {
 		t.Fatal("capability")
+	}
+	// A task's (E1-a: with the budget contract when the host pays).
+	for _, c := range []struct {
+		a                  *api
+		version, cap, addr string
+	}{{on, paycontract.Version, LocalAnvil, "0xbudget"}, {on, contracts.Version, "unavailable", ""}, {off, paycontract.V2, "not_enabled", ""}} {
+		if cp, addr := c.a.payOf(c.version); cp != c.cap || addr != c.addr {
+			t.Errorf("%s: %s %q, want %s %q", c.version, cp, addr, c.cap, c.addr)
+		}
 	}
 }
 

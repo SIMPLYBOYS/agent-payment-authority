@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer/signertest"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
@@ -125,6 +126,32 @@ func TestHumanApprovalPays(t *testing.T) {
 	// The A2 query sees the approval consumed.
 	if r, err := f.core.ApprovalByID(bg, ap.ApprovalID); err != nil || r.State != "consumed" {
 		t.Fatalf("approval query %+v %v", r, err)
+	}
+}
+
+// E1-a review: an apa.pay.v2 purchase approved by the person's device is
+// signed once, as a v1 one is: the grant and intent under v2's own domain.
+func TestHumanApprovalPaysV2(t *testing.T) {
+	f := newHFX(t)
+	a := f.enroll("approver-a", nil)
+	f.n++
+	order := signertest.Order{Consumer: "consumer-a", Agent: "agent-a", Wallet: "wallet-a", From: Address(keyA.PubKey()), PayTo: signertest.Merchant,
+		Amount: "500000", N: f.n, Now: f.now, Window: 600, Contract: paycontract.V2}.Raw()
+	var po paycontract.PurchaseOrder
+	json.Unmarshal(order, &po)
+	sp, _ := paycontract.SpecOf(paycontract.V2)
+	c, err := f.core.Challenge(bgA, ChallengeRequest{RequestID: "req-v2-pay", ApprovalSessionID: sp.SessionID(po.Intent.TaskID, po.Intent.PurchaseOrderID),
+		Decision: "approve", Order: order, HostDeadline: f.now + 600})
+	if err != nil {
+		t.Fatalf("v2 challenge: %v", err)
+	}
+	ap, err := f.verify("ver-v2-pay", c.ChallengeID, order, a.Get(c.Options, origin))
+	if err != nil {
+		t.Fatalf("v2 verify: %v", err)
+	}
+	rep, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000210", Authorization: byApproval(ap.ApprovalID), Order: order})
+	if err != nil || rep.State != "signed" || f.approvalState(ap.ApprovalID) != "consumed" {
+		t.Fatalf("sign %+v %v (approval %s)", rep, err, f.approvalState(ap.ApprovalID))
 	}
 }
 

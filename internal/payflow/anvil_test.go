@@ -52,16 +52,16 @@ func balanceOf(t *testing.T, c *eth.Client, token, who eth.Address) uint64 {
 // contracts, the payers (wallet-a funded), the Signer and the relayer on
 // their sockets, the settling shop over HTTP.
 type anvilWorld struct {
-	rpc            *eth.Client
-	usdc, contract eth.Address
-	payer, payTo   eth.Address
-	addrs          []string
-	socket         string
-	host           *budget.Client
-	srv            *httptest.Server
-	offer          merchant.Offer
-	clock          func() uint64
-	now            uint64
+	rpc          *eth.Client
+	usdc         eth.Address
+	payer, payTo eth.Address
+	addrs        []string
+	socket       string
+	host         *budget.Client
+	srv          *httptest.Server
+	offer        merchant.Offer
+	clock        func() uint64
+	now          uint64
 }
 
 func newAnvilWorld(t *testing.T) *anvilWorld {
@@ -155,7 +155,7 @@ func newAnvilWorld(t *testing.T) *anvilWorld {
 		t.Fatal(err)
 	}
 	shop.Register(mux)
-	return &anvilWorld{rpc: rpc, usdc: usdc, contract: contract, payer: payer, payTo: payTo, addrs: addrs, socket: socket, host: host, srv: srv,
+	return &anvilWorld{rpc: rpc, usdc: usdc, payer: payer, payTo: payTo, addrs: addrs, socket: socket, host: host, srv: srv,
 		offer: shop.Offers()[0], clock: clock, now: now} // the offer: kr-market, 500000
 }
 

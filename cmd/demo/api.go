@@ -264,17 +264,23 @@ func (a *api) task(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, v := rec.Binding, rec.Task
-	capability, contract := "unavailable", "" // M1 cannot pay
-	if paycontract.Supported(v.ContractVersion) {
-		capability = paycontract.PaymentNotEnabled // P1-a: an approval, simulated, is not a payment
-		if a.payCap != "" {
-			capability, contract = a.payCap, a.payContract
-		}
-	}
+	capability, contract := a.payOf(v.ContractVersion)
 	reply(w, http.StatusOK, taskReply{TaskID: b.TaskID, ContractVersion: v.ContractVersion, DelegationID: v.DelegationID, ConsumerID: b.ConsumerID,
 		AgentID: b.AgentID, WalletID: b.WalletID, Payer: b.Payer,
 		WalletEvidenceMode: b.WalletEvidenceMode, Status: v.Status, DenyReason: v.DenyReason, AsOfSequence: v.AsOfSequence,
 		AsOfObservedAt: v.AsOfObservedAt, ServedAt: a.clock(), Purchases: v.Purchases, PaymentCapability: capability, BudgetContract: contract})
+}
+
+// payOf is a task's payment capability and, when the host pays, the budget
+// contract (E1-a): M1 cannot pay; a pay task is paid only with --payments.
+func (a *api) payOf(version string) (capability, contract string) {
+	switch {
+	case !paycontract.Supported(version):
+		return "unavailable", ""
+	case a.payCap == "":
+		return paycontract.PaymentNotEnabled, "" // P1-a: an approval, simulated, is not a payment
+	}
+	return a.payCap, a.payContract
 }
 
 // eventView is the whitelisted projection of one stored event, copied as

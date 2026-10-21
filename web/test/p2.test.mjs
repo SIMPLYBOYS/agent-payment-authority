@@ -241,7 +241,8 @@ test("E1-a: the Inspector shows the run conditions, both transactions with Base 
   v.task.budget_contract = "0xbudget";
   const rows = Object.fromEntries(A.inspector(v));
   assert.match(rows["執行條件"], /^真實 Agent（live CLI） · Base Sepolia · 實體裝置（主持人宣告）/);
-  assert.equal(rows["預算合約（Z2）"], "0xbudget");
+  assert.equal(rows["預算合約（Z2，主機設定）"], "0xbudget");
+  assert.ok(!A.inspector(v).some(([k, val]) => k !== "ZK proof" && /已驗證/.test(val)), "no row claims the proof verified");
   assert.equal(rows["tx#1 預留（Z2）"], tx1 + " · https://sepolia.basescan.org/tx/" + tx1 + " · 區塊 48394045");
   assert.equal(rows["tx#2 結算"], tx2 + " · https://sepolia.basescan.org/tx/" + tx2 + " · 區塊 48394047");
   assert.match(rows["ZK proof"], /不自行宣稱已驗證/);

@@ -114,6 +114,9 @@ func TestV2PaidOnAnvil(t *testing.T) {
 		t.Fatalf("not delivered: %+v", pay)
 	}
 
+	if want, _ := po.IntentHash(); po.Intent.Domain != paycontract.DomainV2 || pay.IntentHash != want {
+		t.Fatalf("not v2's domain and intent: %s %s", po.Intent.Domain, pay.IntentHash)
+	}
 	// One intent from the purchase to the receipt; each event's label.
 	events, err := s.Events(sess)
 	if err != nil {

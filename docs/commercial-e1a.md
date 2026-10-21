@@ -331,10 +331,10 @@
 | E1a-7 商店目錄 | `692f7bb`、`71cee97` | 結算商店可賣 AE1 的目錄或案例（`shop_eval`）；`p2-testnet e1a-host` 寫新的 host 目錄；商店的資料庫沿用 deploy 的（每日上限是同一把金鑰的） | APPROVE（Important：每個目錄各自的資料庫會讓每日上限重算 → 改為沿用） |
 | E1a-2 live 與付款 | （本段） | live 加付款：Signer、payments、registry、profile、憑證；`scenarios-e1a.json` 三場；`make present-e1a`；付款主機的提示詞（`buyer.PayingTaskPrompt`）；live 付款主機上，模擬者只能確認委託（同一套發證，`delegationOnly`，其他模擬路由回 `simulation_unavailable`）；live 的標籤與 `sources.agent`；證據抽屜的兩段舊文字 | 待 review |
 
-| E1a-3 v2 加付款 | （本段） | 只加測試：`TestV2PaidOnAnvil`（`internal/payflow/anvil_v2_test.go`）在本機 anvil 上以真實的 Signer、relayer（Z2 預留）、結算商店與 Store，付一筆 `apa.pay.v2` 的 Allow：BBS+ 憑證驗證、tx#1、簽章、tx#2、交付、收據；全部事件同一個 `intent_hash`，標籤依執行條件（fake／local_anvil）。程式不用改：付款路徑本來就不分 v1、v2 | 待 review |
+| E1a-3 v2 加付款 | `6d615dc`、（review 修正） | 只加測試。`TestV2PaidOnAnvil`（`internal/payflow/anvil_v2_test.go`）在本機 anvil 上以真實的 Signer、relayer（Z2 預留）、結算商店與 Store，付一筆 `apa.pay.v2` 的 **Allow**：BBS+ 憑證驗證、tx#1、簽章、tx#2、交付、收據；全部事件同一個 `intent_hash`（v2 的 domain），標籤依執行條件（fake／local_anvil）。本人核准這一段：`TestHumanApprovalPaysV2`（Signer）以 v2 的 session 與 grant 核准後簽一次。**v2 的 Ask 經本人核准、再上鏈付款，整條沒有自動化測試**，在本機彩排（§6 第 3 步）確認 | review REQUEST CHANGES（只測了 Allow、ZK 那列說 checker 會重驗但 checker 還沒做、`budget_contract` 可以單元測試）→ 修正 |
 
 | E1a-4 畫面 | （本段） | Inspector：執行條件（取自 `TASK_STARTED`）、預算合約、tx#1 與 tx#2 的完整 hash 與區塊、Base Sepolia 的 explorer 網址（本機鏈寫「沒有 explorer」）、收據；ZK 一列寫明 proof 在 tx#1 的 calldata、本頁不自行宣稱已驗證。Timeline：付款事件顯示方法、金額、tx、區塊、收據。API：付款檢視多 `reserve_block`，task 多 `budget_contract`。頁面只顯示文字，explorer 網址可以複製，沒有做成可點的連結 | 待 review |
 
 **E1a-2 的 review**：REQUEST CHANGES，沒有 Critical；已確認 live 主機上模擬核准不能決定 Ask（兩道檢查：只能確認委託的模擬者、有 Signer 時 `simResolve` 一律拒絕）。修正：live 各模式允許什麼集中在 `hostRoles`（有測試與 mutation）；live 啟動紀錄寫實際的標籤與付款狀態；兩個新的拒絕啟動條件有測試；頁面上按鈕寫「確認委託（模擬）」，只能確認委託時不讀核准清單（第二輪 review 發現頁面沒有收到 `delegation_only`，`web/hostcreds.js` 已改為傳遞並加測試）；`present.sh` 的說明與 live 目錄（不付款的 live 主機仍只用 `scenarios-live.json`）。
 
-**測不到的接線**（在本機彩排時確認）：task 回覆裡的 `budget_contract`。live 付款主機沒有 profile 時，目前會用預設的 demo profile（Policy 之後會因商家不符而拒絕，不會付錯）；`make present-e1a` 一定帶 profile。提示詞的 SHA 由 E1a-5 的證據包記錄。這些需要一個同時有 live CLI、Signer 與鏈的 Host，單元測試做不到。
+**要在本機彩排確認的**：v2 的 Ask 經本人核准再付款（見 E1a-3）。live 付款主機沒有 profile 時，目前會用預設的 demo profile（Policy 之後會因商家不符而拒絕，不會付錯）；`make present-e1a` 一定帶 profile。提示詞的 SHA 由 E1a-5 的證據包記錄。這些需要一個同時有 live CLI、Signer 與鏈的 Host，單元測試做不到。

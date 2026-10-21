@@ -11,7 +11,7 @@ export const UNKNOWN = "未知／未提供";
 export const PAYING = { local_anvil: "本機 anvil", base_sepolia: "Base Sepolia testnet" };
 // EXPLORER (E1-a): a public chain's transaction page; a local anvil has none.
 export const EXPLORER = { base_sepolia: "https://sepolia.basescan.org/tx/" };
-const txRef = (cap, hash) => str(hash) + (EXPLORER[cap] ? " · " + EXPLORER[cap] + hash : cap === "local_anvil" ? "（本機鏈，沒有 explorer）" : "");
+const txRef = (cap, hash) => str(hash) + (Object.hasOwn(EXPLORER, cap) ? " · " + EXPLORER[cap] + hash : cap === "local_anvil" ? "（本機鏈，沒有 explorer）" : "");
 const RUN = { agent: { live: "真實 Agent（live CLI）", fake: "fake Agent" }, chain: { base_sepolia: "Base Sepolia", local_anvil: "本機 anvil", none: "不付款" },
   authenticator: { device: "實體裝置（主持人宣告）", virtual: "virtual authenticator", none: "沒有 Signer" } };
 export const paysOn = (cap) => typeof cap === "string" && Object.hasOwn(PAYING, cap);
@@ -245,7 +245,7 @@ export function inspector(snapshot) {
   // E1-a: what this task's events come from (its TASK_STARTED), and the budget contract tx#1 calls.
   const rc = ((snapshot.events || []).find((e) => e.event_type === "TASK_STARTED") || {}).run_conditions;
   if (rc) rows.push(["執行條件", [RUN.agent[rc.agent], RUN.chain[rc.chain], RUN.authenticator[rc.authenticator]].map(str).join(" · ") + "（記在 TASK_STARTED；每個事件依此標 live 或 fixture）"]);
-  if (t.budget_contract) rows.push(["預算合約（Z2）", str(t.budget_contract)]);
+  if (t.budget_contract) rows.push(["預算合約（Z2，主機設定）", str(t.budget_contract)]);
   for (const p of t.purchases || []) {
     const d = p.decision || {};
     rows.push(
@@ -257,7 +257,7 @@ export function inspector(snapshot) {
     );
     const pv = p.payment;
     if (pv && pv.reserve_tx) rows.push(["tx#1 預留（Z2）", txRef(t.payment_capability, pv.reserve_tx) + (typeof pv.reserve_block === "number" ? " · 區塊 " + pv.reserve_block : "")],
-      ["ZK proof", "在 tx#1 的 calldata 裡，由預算合約呼叫 verifier 驗證；本頁不自行宣稱已驗證（由獨立 checker 重驗）"]);
+      ["ZK proof", "在 tx#1 的 calldata 裡，由預算合約呼叫 verifier 驗證；本頁不自行宣稱已驗證（要宣稱已驗證，須看獨立 checker 的結果）"]);
     if (pv && pv.settle_tx) rows.push(["tx#2 結算", txRef(t.payment_capability, pv.settle_tx) + (typeof pv.settle_block === "number" ? " · 區塊 " + pv.settle_block : "")]);
     if (pv && pv.receipt_id) rows.push(["收據", str(pv.receipt_id) + " · 內容 sha256 " + str(pv.content_sha256)]);
   }
@@ -265,8 +265,8 @@ export function inspector(snapshot) {
 }
 
 // payDetail is a payment event's record in a Timeline row (E1-a).
-const payDetail = (r) => [r.method && "方法 " + r.method, r.amount && "金額 " + amount(r.amount), r.tx_hash && "tx " + r.tx_hash,
-  typeof r.block === "number" && "區塊 " + r.block, r.receipt_id && "收據 " + r.receipt_id].filter(Boolean).join(" · ");
+const payDetail = (r) => [r.method && "方法 " + str(r.method), r.amount && "金額 " + amount(r.amount), r.tx_hash && "tx " + str(r.tx_hash),
+  typeof r.block === "number" && "區塊 " + r.block, r.receipt_id && "收據 " + str(r.receipt_id)].filter(Boolean).join(" · ");
 
 // timeline rows, one per event; json is the API's whitelisted event, not
 // CLI output and not a raw log.

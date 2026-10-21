@@ -1205,6 +1205,10 @@ MUTATIONS = [
      '\treturn roles{label: liveLabel, agent: "live"}', '\treturn roles{label: liveLabel, agent: "live", sim: true}', 'TestHostRoles'),
     ("E1a-4: the payment view drops tx#1's block", 'internal/store/paid.go',
      'v.ReserveTx, v.ReserveBlock = r.TxHash, r.Block', 'v.ReserveTx, v.ReserveBlock = r.TxHash, 0', 'TestPaymentEvidence'),
+    ('E1a-4 review: the task reply omits the budget contract', 'cmd/demo/api.go',
+     '\treturn a.payCap, a.payContract', '\treturn a.payCap, ""', 'TestPaymentCapabilityStated'),
+    ('E1a-3 review: the Signer pays a v2 approval by v1\'s grant', 'internal/signer/core.go',
+     'jti != sp.GrantID(sp.SessionID(i.TaskID, i.PurchaseOrderID)):', 'jti != paycontract.GrantID(paycontract.SessionID(i.TaskID, i.PurchaseOrderID)) && sp.Version != "":', 'TestHumanApprovalPaysV2'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the
