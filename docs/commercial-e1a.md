@@ -335,6 +335,8 @@
 
 | E1a-4 畫面 | （本段） | Inspector：執行條件（取自 `TASK_STARTED`）、預算合約、tx#1 與 tx#2 的完整 hash 與區塊、Base Sepolia 的 explorer 網址（本機鏈寫「沒有 explorer」）、收據；ZK 一列寫明 proof 在 tx#1 的 calldata、本頁不自行宣稱已驗證。Timeline：付款事件顯示方法、金額、tx、區塊、收據。API：付款檢視多 `reserve_block`，task 多 `budget_contract`。頁面只顯示文字，explorer 網址可以複製，沒有做成可點的連結 | 待 review |
 
+| E1a-5（一）證據包與 checker | （本段） | `cmd/e1-evidence pack`：唯讀讀 Host 的 Store（事件、請購單、registry 快照），加上 live 的 trace、對帳報告與事先記錄的起點，逐檔 sha256，`run-end.json` 收尾；`verify-demo --mode e1a`（`internal/verification/e1a.go`）：E1、E2、E3、E5、E6（checker 自己一份對照表；live 要有 trace、付款主機提示詞的 SHA、每筆請購都有 `request_purchase`）、E7、E9（只有摘要欄位可以是不帶前綴的 64 位 hex）、E10。E4、E8 要讀鏈，下一段做；沒做之前是 INCONCLUSIVE | 待 review |
+
 **E1a-2 的 review**：REQUEST CHANGES，沒有 Critical；已確認 live 主機上模擬核准不能決定 Ask（兩道檢查：只能確認委託的模擬者、有 Signer 時 `simResolve` 一律拒絕）。修正：live 各模式允許什麼集中在 `hostRoles`（有測試與 mutation）；live 啟動紀錄寫實際的標籤與付款狀態；兩個新的拒絕啟動條件有測試；頁面上按鈕寫「確認委託（模擬）」，只能確認委託時不讀核准清單（第二輪 review 發現頁面沒有收到 `delegation_only`，`web/hostcreds.js` 已改為傳遞並加測試）；`present.sh` 的說明與 live 目錄（不付款的 live 主機仍只用 `scenarios-live.json`）。
 
 **要在本機彩排確認的**：v2 的 Ask 經本人核准再付款（見 E1a-3）。live 付款主機沒有 profile 時，目前會用預設的 demo profile（Policy 之後會因商家不符而拒絕，不會付錯）；`make present-e1a` 一定帶 profile。提示詞的 SHA 由 E1a-5 的證據包記錄。這些需要一個同時有 live CLI、Signer 與鏈的 Host，單元測試做不到。

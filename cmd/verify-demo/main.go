@@ -2,6 +2,7 @@
 // scope; docs/m1-evidence.md section 15):
 //
 //	verify-demo --run-dir artifacts/m1/<run-id> [--repo .] [--mode fixture|live]
+//	verify-demo --run-dir artifacts/e1a/<run-id> [--repo .] --mode e1a   (docs/commercial-e1a.md 4.5)
 //
 // It reads the run directory and the repository's frozen case list and
 // fixtures, writes a JSON report to stdout and diagnostics to stderr, and
@@ -36,10 +37,28 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 	fl.SetOutput(stderr)
 	dir := fl.String("run-dir", "", "the run directory to check (artifacts/m1/<run-id>)")
 	repo := fl.String("repo", ".", "the repository holding the frozen case list and fixtures")
-	mode := fl.String("mode", "fixture", "fixture (the full case bundle) or live (the single-Ask bundle)")
+	mode := fl.String("mode", "fixture", "fixture (the full case bundle), live (the single-Ask bundle) or e1a (E1-a's pack)")
 	if fl.Parse(args) != nil || fl.NArg() != 0 || *dir == "" {
-		fmt.Fprintln(stderr, "usage: verify-demo --run-dir DIR [--repo .] [--mode fixture|live]")
+		fmt.Fprintln(stderr, "usage: verify-demo --run-dir DIR [--repo .] [--mode fixture|live|e1a]")
 		return 3
+	}
+	if *mode == "e1a" { // docs/commercial-e1a.md 4.5
+		r, err := verification.VerifyE1a(*dir, *repo, nil)
+		if err != nil {
+			fmt.Fprintf(stderr, "verify-demo: %v; nothing was verified\n", err)
+			return 3
+		}
+		r.Checker.Build = build()
+		body, err := json.MarshalIndent(r, "", "  ")
+		if err == nil {
+			_, err = stdout.Write(append(body, '\n'))
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "verify-demo: the report could not be written: %v\n", err)
+			return 3
+		}
+		fmt.Fprintf(stderr, "verify-demo: %s: %s (exit %d)\n", r.RunID, r.Verdict, r.ExitCode())
+		return r.ExitCode()
 	}
 	tr, err := verification.LoadTrusted(*repo)
 	if err != nil {
