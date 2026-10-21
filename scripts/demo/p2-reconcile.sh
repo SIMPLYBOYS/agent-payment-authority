@@ -20,7 +20,7 @@ i=0
 while :; do
   code=$(printf 'Authorization: Bearer %s\n' "$host" | curl -s -o "$out" -w '%{http_code}' --max-time 60 -H @- http://127.0.0.1:8402/api/host/reconciliation) || code=000
   [ "$code" = 503 ] && grep -q reconciliation_pending "$out" 2>/dev/null || break
-  i=$((i + 1)); [ $i -lt 60 ] || break
+  i=$((i + 1)); [ $i -lt 70 ] || { echo "p2-reconcile: the host is still reading after 12 minutes; ask again later" >&2; exit 1; }
   echo "p2-reconcile: the host is still reading the chain; asking again in 10 s" >&2
   sleep 10
 done

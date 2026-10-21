@@ -347,12 +347,17 @@ func cachedRecon(read func(context.Context) (reconcile.Report, error)) func(cont
 		if !running && (!have || time.Since(at) >= reconEvery) {
 			running = true
 			go func() {
+				var r reconcile.Report
+				err := errors.New("reconciliation: the read stopped") // a panic in it is an error, not the host's end
+				defer func() {
+					recover()
+					mu.Lock()
+					rep, last, at, have, running = r, err, time.Now(), true, false
+					mu.Unlock()
+				}()
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-				r, err := read(ctx)
-				cancel()
-				mu.Lock()
-				rep, last, at, have, running = r, err, time.Now(), true, false
-				mu.Unlock()
+				defer cancel()
+				r, err = read(ctx)
 			}()
 		}
 		if !have {
