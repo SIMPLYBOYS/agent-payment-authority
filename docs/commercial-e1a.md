@@ -87,6 +87,8 @@
   - 執行條件在 Host 啟動時決定，傳進 Store：Agent 是 live 或 fake、鏈的環境、authenticator 的來源（`--authenticator-source` 現在只在 `cmd/demo`，`cmd/demo/main.go:127`，要一併傳入）。
   - 執行條件在 `TASK_STARTED` 時記下來，之後這個 task 的事件都依這份紀錄，不依目前的啟動參數。否則用不同參數重啟後，同一條 hash chain 會混進兩種模式。
   - 記在 pay 類 `TASK_STARTED` 的 payload（新的選填欄位 `run_conditions`）。payload 在 hash chain 裡，checker 可以直接讀；`tasks` 表（`internal/store/store.go:315`）不加欄位。沒有這個欄位的舊 task 一律視為 `fixture`／`host`。
+  - 只能往前升級：寫過 `run_conditions` 的資料庫，E1-a 之前的程式讀不了（未知欄位會被拒絕）。
+  - 有 Signer 時，authenticator 的來源一定要明寫：`--authenticator-source device|virtual`；`make` 目標要帶 `AUTH=device` 或 `AUTH=virtual`。以前預設是 device，現在沒寫就拒絕啟動，避免忘了寫 virtual 卻被標成 live。
   - 程式裡只有這一份表，文件照抄。checker 的 E6 用同一份表的副本檢查，不呼叫被測程式。
   - **完整性在測試與啟動時檢查，不在寫入時**：
     - 測試逐一確認每一種事件類型 × 執行條件都有對應；

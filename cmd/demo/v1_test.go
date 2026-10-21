@@ -190,7 +190,7 @@ func TestV1VoicePass(t *testing.T) {
 	}
 	// After a restart the record (voice event included) passes recovery.
 	f.h.stop()
-	f.h = controlHost(t, hostOpts{dir: f.h.dir, expiryEvery: time.Hour, scenarios: payCatalog(t, 60), args: []string{"--approvals-signer", f.sock}})
+	f.h = controlHost(t, hostOpts{dir: f.h.dir, expiryEvery: time.Hour, scenarios: payCatalog(t, 60), args: []string{"--approvals-signer", f.sock, "--authenticator-source", "virtual"}})
 	if g := f.h.task(task).Purchases[0].Approval.Grant; g == nil || g.Voice != "verified" {
 		t.Fatalf("after restart %+v", g)
 	}
@@ -219,7 +219,7 @@ func TestV1VoiceFailDenies(t *testing.T) {
 		t.Fatalf("a new challenge after the denial: %d %v", code, again)
 	}
 	f.h.stop()
-	f.h = controlHost(t, hostOpts{dir: f.h.dir, expiryEvery: time.Hour, scenarios: payCatalog(t, 60), args: []string{"--approvals-signer", f.sock}})
+	f.h = controlHost(t, hostOpts{dir: f.h.dir, expiryEvery: time.Hour, scenarios: payCatalog(t, 60), args: []string{"--approvals-signer", f.sock, "--authenticator-source", "virtual"}})
 	if v := f.h.task(task); v.Purchases[0].Approval.State != "denied" {
 		t.Fatalf("after restart %+v", v.Purchases[0].Approval)
 	}

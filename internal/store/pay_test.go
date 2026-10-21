@@ -53,7 +53,7 @@ func (e *env) payTask(s *Store, task string, deadline uint64) (string, string) {
 	e.t.Helper()
 	consumer := map[string]string{"task-a": "consumer-a", "task-a-next": "consumer-a", "task-b": "consumer-b"}[task]
 	setup := e.setup(task)
-	setup.ContractVersion, setup.DelegationID = paycontract.Version, e.delegation(s, consumer, "dlg-req-"+task+"-000000000", deadline)
+	setup.ContractVersion, setup.DelegationID, setup.Run = paycontract.Version, e.delegation(s, consumer, "dlg-req-"+task+"-000000000", deadline), e.run
 	if err := s.StartTask(setup); err != nil {
 		e.t.Fatalf("StartTask: %v", err)
 	}

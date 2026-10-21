@@ -240,7 +240,7 @@ func TestA2Approve(t *testing.T) {
 	}
 	// After a restart the stored result is the same and passes recovery.
 	f.h.stop()
-	f.h = controlHost(t, hostOpts{dir: f.h.dir, expiryEvery: time.Hour, scenarios: payCatalog(t, 60), args: []string{"--approvals-signer", f.sock}})
+	f.h = controlHost(t, hostOpts{dir: f.h.dir, expiryEvery: time.Hour, scenarios: payCatalog(t, 60), args: []string{"--approvals-signer", f.sock, "--authenticator-source", "virtual"}})
 	if v := f.h.task(task); v.Purchases[0].Approval.State != "approved" || v.Purchases[0].Approval.Grant.AuthorizationMethod != "webauthn" {
 		t.Fatalf("after restart %+v", v.Purchases[0].Approval)
 	}

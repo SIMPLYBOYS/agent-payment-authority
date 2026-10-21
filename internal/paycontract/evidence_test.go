@@ -12,8 +12,8 @@ func TestEvidenceTable(t *testing.T) {
 	if err := CheckEvidenceTable(); err != nil {
 		t.Fatal(err)
 	}
-	live := &RunConditions{"live", "base_sepolia", "device"}
-	fake := &RunConditions{"fake", "local_anvil", "virtual"}
+	live := &RunConditions{Agent: "live", Chain: "base_sepolia", Authenticator: "device"}
+	fake := &RunConditions{Agent: "fake", Chain: "local_anvil", Authenticator: "virtual"}
 	ev := func(typ, method string) contracts.AuditEvent {
 		return contracts.AuditEvent{EventType: typ, Payload: contracts.EventPayload{AuthorizationMethod: method}}
 	}
@@ -35,7 +35,7 @@ func TestEvidenceTable(t *testing.T) {
 		{live, ev("APPROVAL_DENIED", ""), "live", "signer_webauthn"}, // denied by the voice
 		{live, ev("VOICE_CHALLENGE_FAILED", ""), "live", "signer_webauthn"},
 		{live, ev("APPROVAL_SESSION_OPENED", ""), "live", "signer_webauthn"},
-		{&RunConditions{"fake", "base_sepolia", "device"}, ev("APPROVAL_EXPIRED", ""), "fixture", "host"},
+		{&RunConditions{Agent: "fake", Chain: "base_sepolia", Authenticator: "device"}, ev("APPROVAL_EXPIRED", ""), "fixture", "host"},
 		{live, ev("PAYMENT_SETTLED", ""), "live", "base_sepolia"},
 		{fake, ev("PAYMENT_SETTLED", ""), "fixture", "local_anvil"},
 		{live, ev("RECEIPT_ISSUED", ""), "live", "host_merchant"},
@@ -51,10 +51,10 @@ func TestEvidenceTable(t *testing.T) {
 			t.Errorf("%s (%q): not in the table, yet ok", e.EventType, e.Payload.AuthorizationMethod)
 		}
 	}
-	if _, _, ok := Evidence(&RunConditions{"live", "none", "none"}, ev("BUDGET_RESERVED", "")); ok {
+	if _, _, ok := Evidence(&RunConditions{Agent: "live", Chain: "none", Authenticator: "none"}, ev("BUDGET_RESERVED", "")); ok {
 		t.Error("a payment event without a chain: ok")
 	}
-	if (RunConditions{"live", "mainnet", "device"}).Validate() == nil {
+	if ValidRun(RunConditions{Agent: "live", Chain: "mainnet", Authenticator: "device"}) == nil {
 		t.Error("mainnet accepted")
 	}
 }

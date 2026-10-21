@@ -102,6 +102,28 @@ func TestEventShape(t *testing.T) {
 	if reg.ValidateEvent(m1, nil) == nil {
 		t.Error("M1 took delegation_id")
 	}
+	// E1-a: run conditions on TASK_STARTED only, valid values only; never M1's.
+	run := &contracts.RunConditions{Agent: "live", Chain: "base_sepolia", Authenticator: "device"}
+	started := es[0]
+	started.Payload.RunConditions = run
+	if err := ValidateEvent(reg, started, nil); err != nil {
+		t.Errorf("TASK_STARTED with run conditions: %v", err)
+	}
+	bad := *run
+	bad.Chain = "mainnet"
+	started.Payload.RunConditions = &bad
+	if ValidateEvent(reg, started, nil) == nil {
+		t.Error("TASK_STARTED took chain mainnet")
+	}
+	bound := es[1]
+	bound.Payload.RunConditions = run
+	if ValidateEvent(reg, bound, nil) == nil {
+		t.Error("DELEGATION_BOUND took run conditions")
+	}
+	started.Payload.RunConditions, started.Version = run, contracts.Version
+	if reg.ValidateEvent(started, nil) == nil {
+		t.Error("M1 took run conditions")
+	}
 }
 
 // A2: a decision verified by the Signer is recorded with method webauthn

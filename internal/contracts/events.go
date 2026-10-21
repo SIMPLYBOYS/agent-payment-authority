@@ -29,6 +29,20 @@ type EventPayload struct {
 	SignerApprovalID    string           `json:"signer_approval_id,omitempty"` // apa.pay.v1, A2: the Signer's verified decision
 	Credential          *CredentialCheck `json:"credential,omitempty"`         // apa.pay.v2 (C2): CREDENTIAL_VERIFIED only
 	Payment             *PaymentRecord   `json:"payment,omitempty"`            // pay family, P2: a payment event's record
+	RunConditions       *RunConditions   `json:"run_conditions,omitempty"`     // pay family, E1-a: TASK_STARTED only
+}
+
+// RunConditions are what a pay task's events come from, fixed when the task
+// starts and recorded in its TASK_STARTED (docs/commercial-e1a.md 4.1,
+// E1a-D4): the Agent (a live Claude Code CLI or the fake), the chain
+// payments go to, and the authenticator the host declared for WebAuthn
+// approvals. The last is the host's word (--authenticator-source): nothing
+// here proves a physical device. internal/paycontract.Evidence maps them to
+// each event's evidence_mode and source.
+type RunConditions struct {
+	Agent         string `json:"agent"`         // live | fake
+	Chain         string `json:"chain"`         // base_sepolia | local_anvil | none
+	Authenticator string `json:"authenticator"` // device | virtual | none
 }
 
 // PaymentRecord is what a P2 payment event records (docs/commercial-p2-host.md
@@ -109,7 +123,7 @@ func (r *Registry) ValidateEvent(e AuditEvent, order *PurchaseOrder) error {
 	if e.Payload.Code != "" && !ids(e.Payload.Code) {
 		return fmt.Errorf("invalid event code")
 	}
-	if p := e.Payload; p.DelegationID != "" || p.ApprovalSessionID != "" || p.GrantID != "" || p.AuthorizationMethod != "" || p.SignerApprovalID != "" || p.Credential != nil || p.Payment != nil {
+	if p := e.Payload; p.DelegationID != "" || p.ApprovalSessionID != "" || p.GrantID != "" || p.AuthorizationMethod != "" || p.SignerApprovalID != "" || p.Credential != nil || p.Payment != nil || p.RunConditions != nil {
 		return fmt.Errorf("delegation, approval session, grant, credential and payment fields belong to the pay family, not M1")
 	}
 	if e.EventType == "SYSTEM_READY" {

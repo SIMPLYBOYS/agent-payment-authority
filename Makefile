@@ -106,7 +106,7 @@ present-ux3:
 # device (docs/commercial-a2.md): SIGNER is the socket of a running
 # apa-signer serve-approvals whose origin is http://localhost:8402; the page
 # opened is http://localhost:8402/host. Fake CLI only; payment stays off.
-# AUTH=virtual declares a virtual authenticator (default device).
+# AUTH=device or AUTH=virtual is required with SIGNER: the authenticator the page declares (E1-a labels approvals by it).
 # REGISTRY=FILE another demo registry (V1 development mode's has more tasks).
 present-a2:
 	@test -n "$(SIGNER)" || { echo "usage: make present-a2 SIGNER=/path/of/serve-approvals.sock (docs/commercial-a2.md)" >&2; exit 2; }

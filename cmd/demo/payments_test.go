@@ -514,6 +514,37 @@ func TestEventViewCarriesThePayment(t *testing.T) {
 	if v.Payment == nil || *v.Payment != *rec || strings.Contains(string(raw), "sa-1") {
 		t.Fatalf("view %s", raw)
 	}
+	// The record's fields are the whitelist: a new one must be looked at here.
+	full, _ := json.Marshal(contracts.PaymentRecord{Method: "m", Amount: "1", TxHash: "t", Block: 1, ContentSHA256: "c", ReceiptID: "r"})
+	var keys map[string]any
+	json.Unmarshal(full, &keys)
+	if len(keys) != 6 {
+		t.Fatalf("PaymentRecord has new fields: %s", full)
+	}
+}
+
+// E1-a: the host's run conditions from its flags (E1a-D4).
+func TestRunConditions(t *testing.T) {
+	on := func(env string) *payments { return &payments{cfg: payConfig{Environment: env}} }
+	for _, c := range []struct {
+		live bool
+		pay  *payments
+		auth string
+		want string
+	}{
+		{false, nil, "", "{fake none none}"},
+		{true, on("base_sepolia"), "device", "{live base_sepolia device}"},
+		{false, on("local_anvil"), "virtual", "{fake local_anvil virtual}"},
+	} {
+		if got := fmt.Sprint(runConditions(c.live, c.pay, c.auth)); got != c.want {
+			t.Errorf("%v %q: %s, want %s", c.live, c.auth, got, c.want)
+		}
+	}
+	// With a Signer the authenticator is declared, never assumed (E1-a review).
+	err := serve(t.Context(), []string{"--fake-cli", "/x", "--scenarios", "x.json", "--approvals-signer", "x.sock"}, deps{getenv: func(string) string { return "" }, out: io.Discard, clock: wallClock})
+	if err == nil || !strings.Contains(err.Error(), "--authenticator-source") {
+		t.Fatalf("a Signer without an authenticator source: %v", err)
+	}
 }
 
 // E1-a: shop_eval names an AE1 catalog as it is, or a case's catalog with

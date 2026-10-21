@@ -294,11 +294,13 @@ type eventView struct {
 	Credential *contracts.CredentialCheck `json:"credential,omitempty"`
 	// P2's payment events (E1-a): the record as stored, all whitelisted
 	// (method, amount, tx, block, content digest, receipt; no signature).
-	Payment      *contracts.PaymentRecord `json:"payment,omitempty"`
-	Version      string                   `json:"version,omitempty"`
-	EvidenceMode string                   `json:"evidence_mode"`
-	Source       string                   `json:"source"`
-	ObservedAt   uint64                   `json:"observed_at"`
+	Payment *contracts.PaymentRecord `json:"payment,omitempty"`
+	// E1-a: TASK_STARTED's run conditions (Agent, chain, declared authenticator).
+	RunConditions *contracts.RunConditions `json:"run_conditions,omitempty"`
+	Version       string                   `json:"version,omitempty"`
+	EvidenceMode  string                   `json:"evidence_mode"`
+	Source        string                   `json:"source"`
+	ObservedAt    uint64                   `json:"observed_at"`
 }
 
 type eventsReply struct {
@@ -325,7 +327,7 @@ func viewOf(e contracts.AuditEvent) eventView {
 	v := eventView{EventID: e.EventID, EventType: e.EventType, Sequence: e.Sequence, PrevEventHash: e.PrevEventHash,
 		Code: e.Payload.Code, Decision: e.Payload.Decision, EvidenceMode: e.EvidenceMode, Source: e.Source, ObservedAt: e.ObservedAt,
 		DelegationID: e.Payload.DelegationID, ApprovalSessionID: e.Payload.ApprovalSessionID, GrantID: e.Payload.GrantID, AuthorizationMethod: e.Payload.AuthorizationMethod,
-		Credential: e.Payload.Credential, Payment: e.Payload.Payment}
+		Credential: e.Payload.Credential, Payment: e.Payload.Payment, RunConditions: e.Payload.RunConditions}
 	if paycontract.Supported(e.Version) { // an M1 event's view is what it always was
 		v.Version = e.Version
 	}

@@ -778,9 +778,6 @@ type terms struct {
 	BudgetInitial           contracts.Amount `json:"budget_initial"`
 	AssetID                 string           `json:"asset_id"`
 	ApprovalDeadlineSeconds uint64           `json:"approval_deadline_seconds"`
-	// Run is a pay task's run conditions (E1-a): its events' evidence mode
-	// and source follow them (paycontract.Evidence). Absent before E1-a.
-	Run *paycontract.RunConditions `json:"run,omitempty"`
 }
 
 func (t terms) validate(cfg contracts.RegistryConfig, p *policy.Profile) error {
@@ -826,8 +823,9 @@ type TaskSetup struct {
 	// BBS is an apa.pay.v2 task's issued credential (Credential stays nil;
 	// CredentialAbsent declares a consumer without a registered holder).
 	BBS *BBSCredential
-	// Run is a pay task's run conditions (E1-a, docs/commercial-e1a.md 4.1);
-	// nil keeps its events fixture/host, as before E1-a. Never an M1 task's.
+	// Run is a pay task's run conditions (E1-a, docs/commercial-e1a.md 4.1),
+	// recorded in its TASK_STARTED; nil keeps its events fixture/host, as
+	// before E1-a. Never an M1 task's.
 	Run *paycontract.RunConditions
 }
 

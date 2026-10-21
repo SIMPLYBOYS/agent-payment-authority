@@ -43,8 +43,9 @@
 # database would start again at show-a-01 and be refused SESSION_DECIDED
 # (V1 device round). Its 20 show-* tasks per consumer then last for that
 # Signer's lifetime; removing that directory brings the refusals back.
-# APA_AUTHENTICATOR_SOURCE (with it): device (default) or virtual, what the
-# page declares the authenticator to be (review N17).
+# APA_AUTHENTICATOR_SOURCE (required with it): device or virtual, what the
+# page declares the authenticator to be (review N17); E1-a labels the
+# approvals live (device) or fixture (virtual) by it.
 # APA_PRESENT_REGISTRY (fake only; default testdata/demo/registry.json): another
 # demo registry, e.g. V1 development mode's var/v1-dev/registry.json (the
 # same plus more show-* tasks: a kept A2 database uses them up).
@@ -68,8 +69,8 @@ OPEN=${APA_PRESENT_OPEN:-open}
 addr=${APA_ADDR:-127.0.0.1:8402}
 signer=${APA_APPROVALS_SIGNER:-}
 [ -z "$signer" ] || [ "$mode" = fake ] || stop "APA_APPROVALS_SIGNER 只用於 fake 展示（A2 使用 fake Agent）"
-authsrc=${APA_AUTHENTICATOR_SOURCE:-device}
-case $authsrc in device|virtual) ;; *) stop "APA_AUTHENTICATOR_SOURCE=${authsrc}：只接受 device 或 virtual" ;; esac
+authsrc=${APA_AUTHENTICATOR_SOURCE:-}
+[ -z "$signer" ] || case $authsrc in device|virtual) ;; *) stop "AUTH=${authsrc}：有 Signer 時要寫明 AUTH=device（實體裝置）或 AUTH=virtual；它決定核准事件標成 live 或 fixture（docs/commercial-e1a.md E1a-D4）" ;; esac
 creds=${APA_PRESENT_CREDENTIALS:-}
 registry=${APA_PRESENT_REGISTRY:-testdata/demo/registry.json}
 [ "$registry" = testdata/demo/registry.json ] || [ "$mode" = fake ] || stop "APA_PRESENT_REGISTRY 只用於 fake 展示"

@@ -123,7 +123,7 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 	only := func(want ...string) error { // the payload fields this type carries, all present; no other
 		have := map[string]bool{"code": p.Code != "", "decision": d != nil, "delegation": p.DelegationID != "", "session": p.ApprovalSessionID != "",
 			"grant": p.GrantID != "", "method": p.AuthorizationMethod != "", "signer": p.SignerApprovalID != "", "credential": p.Credential != nil,
-			"payment": p.Payment != nil}
+			"payment": p.Payment != nil, "conditions": p.RunConditions != nil}
 		for k, v := range have {
 			if v != slices.Contains(want, k) {
 				return errf("%s: payload field %s must %s", e.EventType, k, map[bool]string{true: "be absent", false: "be present"}[v])
@@ -135,6 +135,12 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 	case "TASK_STARTED":
 		if purchase {
 			return errf("task start cannot imply purchase")
+		}
+		if r := p.RunConditions; r != nil { // E1-a: the run its events come from
+			if err := ValidRun(*r); err != nil {
+				return errf("%v", err)
+			}
+			return only("conditions")
 		}
 		return only()
 	case "DELEGATION_BOUND":

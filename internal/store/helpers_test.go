@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 )
 
@@ -47,6 +48,7 @@ type env struct {
 	allow   contracts.PurchaseOrder // 0.05: Allow-unavailable
 	denied  contracts.PurchaseOrder // untrusted asset: Deny ASSET_NOT_ALLOWED
 	profile policy.Profile
+	run     *paycontract.RunConditions // E1-a: payTask's run conditions
 }
 
 func readFixture(t *testing.T, path string, dst any) {

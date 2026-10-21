@@ -124,7 +124,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	readyFile := fs.String("ready-file", "", "write {addr, pid} here once serving (for scripts/demo/present.sh)")
 	approvalsSigner := fs.String("approvals-signer", "", "A2: the Unix socket of apa-signer serve-approvals (approvals only), or of apa-signer serve (P2: approvals and, with --payments, payments); the person's approval then runs on http://localhost:<port> (fake mode with --scenarios only)")
 	credentialDir := fs.String("credential-dir", "", "C2: the credential directory (apa-issuer init) for apa.pay.v2 scenarios: test issuer, status list, holders")
-	authSource := fs.String("authenticator-source", "device", "A2: device or virtual, the authenticator's source as shown and logged (a label, not evidence)")
+	authSource := fs.String("authenticator-source", "", "A2: device or virtual, the authenticator's source as shown and logged (a label, not evidence); required with --approvals-signer (E1-a: it sets the approvals' evidence mode)")
 	paymentsPath := fs.String("payments", "", "P2: the payment configuration, a local anvil or the Base Sepolia testnet (docs/commercial-p2-host.md 12.3, docs/commercial-p2b.md B3); with --approvals-signer, whose Signer then signs payments too")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -191,8 +191,9 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		return errors.New("--approvals-signer is for a fake host that starts runs (--fake-cli and --scenarios): A2 uses the fake Agent only")
 	case *paymentsPath != "" && *approvalsSigner == "":
 		return errors.New("--payments needs --approvals-signer: that Signer signs the payments")
-	case *authSource != "device" && *authSource != "virtual":
-		return errors.New("--authenticator-source is device or virtual")
+	case *approvalsSigner != "" && *authSource != "device" && *authSource != "virtual",
+		*approvalsSigner == "" && *authSource != "":
+		return errors.New("--authenticator-source is device or virtual, given with --approvals-signer")
 	}
 	// The pairing code goes to the operator's terminal only.
 	pairOut := d.pairOut
@@ -387,18 +388,8 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		tools := &toolbridge.Shop{Store: st, CatalogURL: "http://" + addr + "/catalog", Scenes: scenes, Products: products, Client: toolbridge.NewClient(), Now: d.clock,
 			Credentials: creds}
 		runner.creds = creds
-		// E1-a: what this host's pay tasks' events come from (E1a-D4).
-		cond := paycontract.RunConditions{Agent: "fake", Chain: "none", Authenticator: "none"}
-		if live {
-			cond.Agent = "live"
-		}
-		if pay != nil {
-			cond.Chain = pay.cfg.Environment
-		}
-		if *approvalsSigner != "" {
-			cond.Authenticator = *authSource
-		}
-		if err := errors.Join(paycontract.CheckEvidenceTable(), cond.Validate()); err != nil {
+		cond := runConditions(live, pay, *authSource)
+		if err := errors.Join(paycontract.CheckEvidenceTable(), paycontract.ValidRun(cond)); err != nil {
 			return err
 		}
 		runner.cond = &cond
@@ -711,4 +702,18 @@ func writeReady(path, addr string) error {
 		return fmt.Errorf("%s already exists or cannot be made; nothing was replaced (%w)", path, err)
 	}
 	return nil
+}
+
+// runConditions are what this host's pay tasks' events come from (E1-a,
+// E1a-D4): the Agent, the payments' chain (none without payments), the
+// authenticator declared with the Signer ("" = none).
+func runConditions(live bool, pay *payments, authenticator string) paycontract.RunConditions {
+	r := paycontract.RunConditions{Agent: "fake", Chain: "none", Authenticator: cmp(authenticator, "none")}
+	if live {
+		r.Agent = "live"
+	}
+	if pay != nil {
+		r.Chain = pay.cfg.Environment
+	}
+	return r
 }

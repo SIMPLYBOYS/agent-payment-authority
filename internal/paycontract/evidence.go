@@ -8,16 +8,9 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 )
 
-// RunConditions are what a pay task's events come from, fixed when the task
-// starts (docs/commercial-e1a.md 4.1, E1a-D4): the Agent (a live Claude Code
-// CLI or the fake), the chain payments go to, and the authenticator the
-// host declared for WebAuthn approvals. The last is the host's word
-// (--authenticator-source): nothing here proves a physical device.
-type RunConditions struct {
-	Agent         string `json:"agent"`         // live | fake
-	Chain         string `json:"chain"`         // base_sepolia | local_anvil | none
-	Authenticator string `json:"authenticator"` // device | virtual | none
-}
+// RunConditions: contracts.RunConditions, the run a pay task's events come
+// from, in its TASK_STARTED.
+type RunConditions = contracts.RunConditions
 
 var (
 	runAgents         = []string{"live", "fake"}
@@ -25,7 +18,8 @@ var (
 	runAuthenticators = []string{"device", "virtual", "none"}
 )
 
-func (r RunConditions) Validate() error {
+// ValidRun checks r's values.
+func ValidRun(r RunConditions) error {
 	if !slices.Contains(runAgents, r.Agent) || !slices.Contains(runChains, r.Chain) || !slices.Contains(runAuthenticators, r.Authenticator) {
 		return fmt.Errorf("run conditions %+v: agent live|fake, chain base_sepolia|local_anvil|none, authenticator device|virtual|none", r)
 	}
@@ -33,8 +27,8 @@ func (r RunConditions) Validate() error {
 }
 
 // Evidence is the closed table of a pay event's evidence_mode and source
-// under its task's run conditions (E1a-D4). A task started without run
-// conditions (before E1-a) keeps fixture/host. ok is false only for an
+// under its task's run conditions (E1a-D4), those of its TASK_STARTED. A
+// task started without them (before E1-a) keeps fixture/host. ok is false only for an
 // event type or method the table does not know: CheckEvidenceTable proves
 // there is none, and the Store still writes such an event as fixture/host
 // rather than refuse it (on a payment path a refused write loses a record).
@@ -110,7 +104,7 @@ func CheckEvidenceTable() error {
 	for _, a := range runAgents {
 		for _, c := range runChains {
 			for _, au := range runAuthenticators {
-				r := &RunConditions{a, c, au}
+				r := &RunConditions{Agent: a, Chain: c, Authenticator: au}
 				for _, typ := range types {
 					methods := []string{""}
 					switch typ {
