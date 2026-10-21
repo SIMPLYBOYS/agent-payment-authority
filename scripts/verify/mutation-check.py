@@ -1162,7 +1162,7 @@ MUTATIONS = [
     ('E1a-1: the host does not pass its run conditions to a pay task', 'cmd/demo/fakeruns.go',
      '\t\t\tsetup.Run = f.cond', '\t\t\tsetup.Run = nil', 'TestP1aMainLine'),
     ('E1a-1: the events API drops the payment record', 'cmd/demo/api.go',
-     'Credential: e.Payload.Credential, Payment: e.Payload.Payment}', 'Credential: e.Payload.Credential}', 'TestEventViewCarriesThePayment'),
+     'Credential: e.Payload.Credential, Payment: e.Payload.Payment, RunConditions', 'Credential: e.Payload.Credential, RunConditions', 'TestEventViewCarriesThePayment'),
     ('E1a-1 review: TASK_STARTED does not record the run conditions', 'internal/store/ops.go',
      'contracts.EventPayload{RunConditions: setup.Run}', 'contracts.EventPayload{}', 'TestRunConditionsEvidence'),
     ('E1a-1 review: a later event reads its own payload, not TASK_STARTED', 'internal/store/ops.go',
