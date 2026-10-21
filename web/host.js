@@ -565,9 +565,10 @@ function renderControl() {
     keepFocus(pick, () => pick.replaceChildren(...models.map((m) => agentCard(m, scenarios.filter((x) => x.consumer_id === m.c), { live, busy, full, simC }))));
   }
   const pay = scenarios.some((x) => A.isPay(x.contract));
-  $("control-note").textContent = pay
-    ? "委託與核准是 fake 模擬：主持人扮演客人，不是本人驗證；核准只留下模擬授權，未啟用付款。開始只建立新的 task。"
-    : "M1 無核准能力：Ask 30 秒後由後端記錄到期。開始只建立新的 task。";
+  const paying = A.paysOn(lastReady && lastReady.status && lastReady.status.payment_capability);
+  $("control-note").textContent = !pay ? "M1 無核准能力：Ask 30 秒後由後端記錄到期。開始只建立新的 task。"
+    : paying ? "委託是 fake 模擬：主持人扮演客人確認委託（不是本人驗證）。Ask 由本人以已登記的裝置核准；Allow 與本人核准的請購由 Host 付款（" + A.PAYING[lastReady.status.payment_capability] + "、測試 USDC）。開始只建立新的 task。"
+    : "委託與核准是 fake 模擬：主持人扮演客人，不是本人驗證；核准只留下模擬授權，未啟用付款。開始只建立新的 task。";
   const chip = $("sim-chip");
   chip.hidden = !simC;
   chip.textContent = simC ? "角色模擬：客人 " + short(simC) + "（主持人扮演，不是本人驗證）" : "";
@@ -697,7 +698,9 @@ function agentCard(m, scs, { live, busy, full, simC }) {
       const b = el("button", "agent-sim", "以 " + short(m.c) + " 模擬（fake）");
       b.type = "button";
       b.disabled = simulating;
-      b.title = "主持人扮演客人 " + short(m.c) + "：確認委託與核准都只在 fake 模式，不是本人驗證；一次扮演一位";
+      b.title = A.paysOn(lastReady && lastReady.status && lastReady.status.payment_capability)
+        ? "主持人扮演客人 " + short(m.c) + " 確認委託（不是本人驗證；Ask 仍由本人以已登記的裝置核准）；一次扮演一位"
+        : "主持人扮演客人 " + short(m.c) + "：確認委託與核准都只在 fake 模式，不是本人驗證；一次扮演一位";
       b.addEventListener("click", () => simulateAs(m.c));
       acts.append(b);
     }
@@ -733,7 +736,11 @@ function agentCard(m, scs, { live, busy, full, simC }) {
   }
   if (m.cancel) acts.append(cancelButton(m.cancel, "row-cancel", "取消請購／task"));
   card.append(acts);
-  if (simC === m.c) card.append(el("p", "agent-sim-on", "模擬中：主持人扮演客人 " + short(m.c) + "（不是本人驗證；不會付款）"));
+  if (simC === m.c) {
+    // The role play is the delegation's confirmation; on a paying host the payment is real.
+    const paying = A.paysOn(lastReady && lastReady.status && lastReady.status.payment_capability);
+    card.append(el("p", "agent-sim-on", "模擬中：主持人扮演客人 " + short(m.c) + (paying ? " 確認委託（不是本人驗證；付款仍由 Host 實際進行）" : "（不是本人驗證；不會付款）")));
+  }
   const open = delegating && delegating.consumer === m.c && payScs.find((sc) => sc.id === delegating.scenario);
   if (open) card.append(delegationBox(open, { busy, full, simC }));
   if (m.cancel && confirming && confirming.task === m.cancel && confirming.where === "card") card.append(confirmBox(m.cancel));

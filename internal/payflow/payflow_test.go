@@ -919,3 +919,37 @@ func TestPaymentSignatureKeepsTheQuotesCase(t *testing.T) {
 		t.Fatalf("to %q", pl.Authorization["to"])
 	}
 }
+
+// A sent payment the chain does not yet show settled: the shop is asked
+// again at growing intervals (2 s, 4 s, 8 s ...), the chain every round;
+// once the chain shows it settled, the content is asked for at once.
+func TestShopAskedAtGrowingIntervals(t *testing.T) {
+	w := newWorld(t, 1)
+	w.start("po-1")
+	w.shop.answers = []ShopAnswer{pending}
+	w.chain.state = "pending"
+	wk := w.worker()
+	p := w.payment("po-1")
+	for p.State != "submitted" {
+		var err error
+		if p, err = wk.Step(bg, p); err != nil && !errors.Is(err, ErrPending) {
+			t.Fatalf("%s: %v", p.State, err)
+		}
+	}
+	for range 30 { // 30 rounds, a second apart
+		w.now++
+		p, _ = wk.Step(bg, w.payment("po-1"))
+	}
+	if n := len(w.shop.sent); n < 3 || n > 6 {
+		t.Fatalf("the shop was asked %d times in 30 s", n)
+	}
+	w.chain.state = "settled"
+	w.shop.answers = []ShopAnswer{paid}
+	for range 2 {
+		w.now++
+		p, _ = wk.Step(bg, w.payment("po-1"))
+	}
+	if p.State != "delivered" {
+		t.Fatalf("settled on chain, then: %+v", p)
+	}
+}

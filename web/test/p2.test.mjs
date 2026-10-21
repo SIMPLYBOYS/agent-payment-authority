@@ -158,7 +158,10 @@ test("an Ask of an ended task: not approvable, its words say so; an approval say
   const AP = await import("../approve.js");
   assert.equal(AP.outcomeText(409, { error: "task_ended" }, "approve")[0], "closed");
   assert.match(AP.outcomeText(409, { error: "task_ended" }, "approve")[1], /不能核准，也不會付款/);
-  assert.equal(AP.outcomeText(200, { outcome: "approved" }, "approve", true)[1], "本人核准已驗證，尚未付款。");
+  // On a paying host the operation's line outlives the payment's start: it points to the card, never "not paid".
+  assert.equal(AP.outcomeText(200, { outcome: "approved" }, "approve", true)[1], "本人核准已驗證，Host 隨後付款；付款進度以上方與請購卡片為準。");
+  const voiced = { outcome: "approved", item: { purchase: { approval: { grant: { voice: "verified" } } } } };
+  assert.doesNotMatch(AP.outcomeText(200, voiced, "approve", true)[1], /尚未付款/);
   assert.equal(AP.outcomeText(200, { outcome: "approved" }, "approve")[1], "本人核准已驗證，付款未啟用。");
 });
 

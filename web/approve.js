@@ -80,7 +80,9 @@ const DECISION = { approve: "核准", deny: "拒絕" };
 // pays: a paying capability (adapter.js PAYING): an approval is not yet paid,
 // rather than never paid.
 export function outcomeText(status, body, decision, pays = false) {
-  const off = pays ? "尚未付款。" : "付款未啟用。";
+  // On a paying host the operation's line stays on the panel while the payment
+  // goes on: it names where that is told, not a "not paid" that turns false.
+  const off = pays ? "Host 隨後付款；付款進度以上方與請購卡片為準。" : "付款未啟用。";
   const b = body || {};
   const a = b.attempt || {};
   const grant = b.item && b.item.purchase && b.item.purchase.approval && b.item.purchase.approval.grant;

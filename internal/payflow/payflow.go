@@ -155,6 +155,27 @@ type Worker struct {
 	Before  func(context.Context)
 	once    sync.Once
 	kick    chan struct{}
+	mu      sync.Mutex
+	asked   map[string][2]uint64 // intent -> the next time the shop is asked again, the wait before it
+}
+
+// shopDue: a payment sent and not yet seen settled asks the shop again (the
+// same PAYMENT-SIGNATURE) after 2 s, then twice as long each time, at most a
+// minute; the chain is read every round between. An outside shop (test402)
+// is not sent the same request every second for the authorization's life.
+func (w *Worker) shopDue(intent string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.asked == nil {
+		w.asked = map[string][2]uint64{}
+	}
+	now, s := w.Clock(), w.asked[intent]
+	if now < s[0] {
+		return false
+	}
+	wait := min(max(s[1]*2, 2), 60)
+	w.asked[intent] = [2]uint64{now + wait, wait}
+	return true
 }
 
 func (w *Worker) kicks() chan struct{} {
@@ -258,8 +279,14 @@ func (w *Worker) step(ctx context.Context, p store.Payment) (store.Payment, erro
 		if err != nil {
 			return p, err
 		}
+		w.shopDue(p.IntentHash) // the first send starts the waits
 		return w.submit(ctx, next, o)
-	case "submitted", "unknown", "settled":
+	case "settled":
+		return w.submit(ctx, p, o) // paid: the shop is asked for the content at once
+	case "submitted", "unknown":
+		if !w.shopDue(p.IntentHash) {
+			return w.chainOnly(ctx, p)
+		}
 		return w.submit(ctx, p, o)
 	}
 	return p, nil
@@ -418,6 +445,19 @@ func authorization(a signer.SignedAuthorization) (reconcile.Authorization, error
 	r := reconcile.Authorization{From: from, To: to, Value: value, ValidAfter: a.ValidAfter, ValidBefore: a.ValidBefore}
 	copy(r.Nonce[:], n)
 	return r, nil
+}
+
+// chainOnly reads a sent payment's state on chain without asking the shop.
+func (w *Worker) chainOnly(ctx context.Context, p store.Payment) (store.Payment, error) {
+	var a signer.SignedAuthorization
+	if err := json.Unmarshal(p.Authorization, &a); err != nil {
+		return p, err
+	}
+	ra, err := authorization(a)
+	if err != nil {
+		return p, err
+	}
+	return w.byChain(ctx, p, ra, nil)
 }
 
 // submit is tx#2 and the delivery: the same PAYMENT-SIGNATURE every time.
