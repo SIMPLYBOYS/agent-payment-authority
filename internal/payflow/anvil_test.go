@@ -48,7 +48,23 @@ func balanceOf(t *testing.T, c *eth.Client, token, who eth.Address) uint64 {
 	return new(big.Int).SetBytes(out).Uint64()
 }
 
-func TestPaidOnAnvil(t *testing.T) {
+// anvilWorld is every real part but the Store, on a fresh anvil: the
+// contracts, the payers (wallet-a funded), the Signer and the relayer on
+// their sockets, the settling shop over HTTP.
+type anvilWorld struct {
+	rpc            *eth.Client
+	usdc, contract eth.Address
+	payer, payTo   eth.Address
+	addrs          []string
+	socket         string
+	host           *budget.Client
+	srv            *httptest.Server
+	offer          merchant.Offer
+	clock          func() uint64
+	now            uint64
+}
+
+func newAnvilWorld(t *testing.T) *anvilWorld {
 	rpc := ethtest.Anvil(t)
 	verifier := ethtest.Deploy(t, rpc, "Verifier.sol/Verifier")
 	ctor, _ := eth.Encode(verifier, ethtest.Key(t, 1).Addr, ethtest.Key(t, 2).Addr)
@@ -133,13 +149,24 @@ func TestPaidOnAnvil(t *testing.T) {
 	t.Cleanup(func() { settler.Close() })
 	mux := http.NewServeMux()
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 	shop, err := merchant.NewSettled(srv.URL, settler)
 	if err != nil {
 		t.Fatal(err)
 	}
 	shop.Register(mux)
-	offer := shop.Offers()[0] // kr-market, 500000
+	return &anvilWorld{rpc: rpc, usdc: usdc, contract: contract, payer: payer, payTo: payTo, addrs: addrs, socket: socket, host: host, srv: srv,
+		offer: shop.Offers()[0], clock: clock, now: now} // the offer: kr-market, 500000
+}
+
+// reconcileToken reads w's test USDC, one block deep.
+func reconcileToken(w *anvilWorld) reconcile.Token {
+	return reconcile.Token{RPC: w.rpc, Address: w.usdc, Confirmations: 1}
+}
+
+func TestPaidOnAnvil(t *testing.T) {
+	w := newAnvilWorld(t)
+	rpc, usdc, payer, payTo, addrs, socket, host, srv, offer, clock, now := w.rpc, w.usdc, w.payer, w.payTo, w.addrs, w.socket, w.host, w.srv, w.offer, w.clock, w.now
 
 	// The Store: the registry's wallet-a is the test payer, its asset the
 	// token deployed here; the offer book is the shop's.
@@ -187,7 +214,7 @@ func TestPaidOnAnvil(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token := reconcile.Token{RPC: rpc, Address: usdc, Confirmations: 1}
+	token := reconcileToken(w)
 	wk := &Worker{Store: s, Relayer: host, Signer: signerclient.New(socket, s), Shop: HTTPShop{Client: srv.Client()}, Chain: token,
 		Clock: clock, Margin: 30}
 	deadline := time.Now().Add(90 * time.Second)

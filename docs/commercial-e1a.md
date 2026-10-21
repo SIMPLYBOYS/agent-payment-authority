@@ -331,4 +331,6 @@
 | E1a-7 商店目錄 | `692f7bb`、`71cee97` | 結算商店可賣 AE1 的目錄或案例（`shop_eval`）；`p2-testnet e1a-host` 寫新的 host 目錄；商店的資料庫沿用 deploy 的（每日上限是同一把金鑰的） | APPROVE（Important：每個目錄各自的資料庫會讓每日上限重算 → 改為沿用） |
 | E1a-2 live 與付款 | （本段） | live 加付款：Signer、payments、registry、profile、憑證；`scenarios-e1a.json` 三場；`make present-e1a`；付款主機的提示詞（`buyer.PayingTaskPrompt`）；live 付款主機上，模擬者只能確認委託（同一套發證，`delegationOnly`，其他模擬路由回 `simulation_unavailable`）；live 的標籤與 `sources.agent`；證據抽屜的兩段舊文字 | 待 review |
 
+| E1a-3 v2 加付款 | （本段） | 只加測試：`TestV2PaidOnAnvil`（`internal/payflow/anvil_v2_test.go`）在本機 anvil 上以真實的 Signer、relayer（Z2 預留）、結算商店與 Store，付一筆 `apa.pay.v2` 的 Allow：BBS+ 憑證驗證、tx#1、簽章、tx#2、交付、收據；全部事件同一個 `intent_hash`，標籤依執行條件（fake／local_anvil）。程式不用改：付款路徑本來就不分 v1、v2 | 待 review |
+
 **測不到的接線**（在本機彩排時確認）：`main.go` 在 live 付款主機上建立「只能確認委託」的模擬者、live 付款主機的標籤、`sources.agent`。這些需要一個同時有 live CLI、Signer 與鏈的 Host，單元測試做不到。
