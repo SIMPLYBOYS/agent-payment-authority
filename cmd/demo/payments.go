@@ -310,8 +310,10 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 	var shop *merchant.Merchant
 	if c.ShopEval != "" {
 		var items []merchant.EvalItem
-		if items, err = evalItems(evalCorpus, c.ShopEval); err == nil {
+		var sha string
+		if items, sha, err = evalItems(evalCorpus, c.ShopEval); err == nil {
 			shop, err = merchant.NewSettledEval(baseURL, settler, items)
+			fmt.Fprintf(out, "demo: the shop sells AE1's %s (%d items) from %s, sha256 %s\n", c.ShopEval, len(items), evalCorpus, sha)
 		}
 	} else {
 		shop, err = merchant.NewSettled(baseURL, settler, ext...)
@@ -447,18 +449,20 @@ const evalCorpus = "testdata/ae1/corpus.json"
 
 // evalItems is name's items in the corpus at path: a catalog as it is, or a
 // case's catalog with the case's patch (E1-a's injection run).
-func evalItems(path, name string) ([]merchant.EvalItem, error) {
+// It returns the corpus's sha256 too, for the host's log.
+func evalItems(path, name string) ([]merchant.EvalItem, string, error) {
 	c, err := ae1.Load(path)
 	if err != nil {
-		return nil, fmt.Errorf("payments: shop_eval: %w", err)
+		return nil, "", fmt.Errorf("payments: shop_eval: %w", err)
 	}
 	if items, ok := c.Catalogs[name]; ok {
-		return items, nil
+		return items, c.SHA256, nil
 	}
 	for _, k := range c.Cases {
 		if k.ID == name {
-			return c.Items(k)
+			items, err := c.Items(k)
+			return items, c.SHA256, err
 		}
 	}
-	return nil, fmt.Errorf("payments: shop_eval %q is neither a catalog nor a case of %s", name, path)
+	return nil, "", fmt.Errorf("payments: shop_eval %q is neither a catalog nor a case of %s", name, path)
 }

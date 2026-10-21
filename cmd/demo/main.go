@@ -187,8 +187,10 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		return errors.New("--fake-cli goes with --plan or --scenarios")
 	case *pairingOn && *scenariosPath == "":
 		return errors.New("--pairing is for a host that starts runs (--scenarios)")
-	case *approvalsSigner != "" && (live || *fakePath == "" || *scenariosPath == ""):
-		return errors.New("--approvals-signer is for a fake host that starts runs (--fake-cli and --scenarios): A2 uses the fake Agent only")
+	case *approvalsSigner != "" && (*scenariosPath == "" || !live && *fakePath == ""):
+		return errors.New("--approvals-signer is for a host that starts runs (--scenarios, with --fake-cli or --live-cli)")
+	case live && *approvalsSigner != "" && *paymentsPath == "":
+		return errors.New("a live host takes --approvals-signer only to pay (E1-a): with --payments")
 	case *paymentsPath != "" && *approvalsSigner == "":
 		return errors.New("--payments needs --approvals-signer: that Signer signs the payments")
 	case *approvalsSigner != "" && *authSource != "device" && *authSource != "virtual",
@@ -248,7 +250,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	var scenarios map[string]*scenario
 	var effMaxRuns, nConsumers int
 	if *scenariosPath != "" {
-		if scenarios, err = loadScenarios(*scenariosPath, reg, regCfg, live); err != nil {
+		if scenarios, err = loadScenarios(*scenariosPath, reg, regCfg, live, live && *paymentsPath != ""); err != nil {
 			return err
 		}
 		if err := checkDelegations(scenarios, profile); err != nil {
@@ -435,6 +437,9 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	}
 	if live {
 		ui.live = &liveInfo{Record: "live_demo", Label: liveLabel, DevDemoPlugins: *devDemo, CLIVersion: runner.live.want}
+		if pay != nil {
+			ui.live.Label = liveLabelPaying
+		}
 		ui.traceDir = *traceDir
 		mux.HandleFunc("GET /api/tasks/{task_id}/trace", ui.taskTrace)
 	}
@@ -442,12 +447,15 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		ui.control = &control{st: st, runner: runner, bridge: bridge, scenarios: scenarios, ctx: runCtx, wg: &runs, out: d.out,
 			active: map[string]*liveRun{}, ended: map[string]*liveRun{}, maxRuns: effMaxRuns, consumers: nConsumers, instance: instance, started: hostStart, profile: profile}
 		ui.control.register(mux, ui)
-		if !live { // the simulated approver exists in fake mode only; a live host answers simulation_unavailable
+		// The simulated approver exists in fake mode; a live host that pays
+		// (E1-a, E1a-D1 A) has it for confirming delegations only; any other
+		// live host answers simulation_unavailable.
+		if !live || *paymentsPath != "" {
 			var ids []string
 			for _, c := range regCfg.Consumers {
 				ids = append(ids, c.ConsumerID)
 			}
-			ui.sim = &simulator{consumers: ids, now: now, instance: instance}
+			ui.sim = &simulator{consumers: ids, now: now, instance: instance, delegationOnly: live}
 		}
 		ui.registerSim(mux)
 		fmt.Fprintf(d.out, "demo: concurrent runs: at most %d (deployment setting --max-runs) of %d consumers in the scenario catalog; host instance %s\n", effMaxRuns, nConsumers, instance)
@@ -461,7 +469,11 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	if *approvalsSigner != "" {
 		_, port, _ := net.SplitHostPort(addr)
 		ui.alias = "localhost:" + port
-		ui.approve = &approvals{st: st, signer: signerclient.NewApprovals(*approvalsSigner), source: *authSource, out: d.out, payCap: payCap}
+		agent := "fake"
+		if live {
+			agent = "live"
+		}
+		ui.approve = &approvals{st: st, signer: signerclient.NewApprovals(*approvalsSigner), source: *authSource, agent: agent, out: d.out, payCap: payCap}
 		if d.onApprovals != nil {
 			d.onApprovals(ui.approve)
 		}

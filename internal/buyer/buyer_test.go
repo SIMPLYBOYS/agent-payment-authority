@@ -1058,3 +1058,17 @@ func cmpSecret(secret, capability string) string {
 	}
 	return secret
 }
+
+// E1-a (E1a-D6): a paying host's prompt says who pays instead of "you cannot
+// pay"; AE1's TaskPrompt is unchanged; the same task rules hold.
+func TestPayingTaskPrompt(t *testing.T) {
+	p, err := PayingTaskPrompt("買一份韓國市場簡報第 1 期。")
+	ae1, _ := TaskPrompt("買一份韓國市場簡報第 1 期。")
+	if err != nil || strings.Contains(p, "cannot pay") || !strings.Contains(p, "you never pay directly") || !strings.HasSuffix(p, "The task: 買一份韓國市場簡報第 1 期。") ||
+		!strings.Contains(ae1, notPaying) {
+		t.Fatalf("%q %v", p, err)
+	}
+	if _, err := PayingTaskPrompt("two\nlines"); err == nil {
+		t.Error("a task of two lines was accepted")
+	}
+}

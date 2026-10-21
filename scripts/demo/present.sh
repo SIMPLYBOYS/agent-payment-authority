@@ -30,9 +30,10 @@
 # port), APA_UNITY_PROJECT, APA_PRESENT_CONF (default var/present.conf),
 # APA_PRESENT_DIR (where the session directory is made; default var/),
 # APA_PRESENT_OPEN (the command that opens the page; default open),
-# APA_PRESENT_GO (default go). APA_PRESENT_SCENARIOS (fake only; default
+# APA_PRESENT_GO (default go). APA_PRESENT_SCENARIOS (default
 # testdata/demo/scenarios.json): another trusted fake catalog, e.g. the
-# rehearsal one (make present-rehearsal). The live catalog never changes.
+# rehearsal one (make present-rehearsal); live, scenarios-live.json unless a
+# host that pays (E1-a, make present-e1a) names scenarios-e1a.json.
 # APA_APPROVALS_SIGNER (fake only; make present-a2): the Unix socket of a
 # running apa-signer serve-approvals; the person's approval then runs on
 # http://localhost:<port>/host, which is the page opened (WebAuthn needs
@@ -68,14 +69,18 @@ GO=${APA_PRESENT_GO:-go}
 OPEN=${APA_PRESENT_OPEN:-open}
 addr=${APA_ADDR:-127.0.0.1:8402}
 signer=${APA_APPROVALS_SIGNER:-}
-[ -z "$signer" ] || [ "$mode" = fake ] || stop "APA_APPROVALS_SIGNER 只用於 fake 展示（A2 使用 fake Agent）"
+# E1-a: a live host that pays (APA_PRESENT_PAYMENTS) takes the Signer, the
+# registry, the credentials and the profile as a fake one does.
+livepay=
+[ "$mode" = live ] && [ -n "${APA_PRESENT_PAYMENTS:-}" ] && livepay=1
+[ -z "$signer" ] || [ "$mode" = fake ] || [ -n "$livepay" ] || stop "APA_APPROVALS_SIGNER 在 live 只用於付款（E1-a：要有 APA_PRESENT_PAYMENTS）"
 authsrc=${APA_AUTHENTICATOR_SOURCE:-}
 [ -z "$signer" ] || case $authsrc in device|virtual) ;; *) stop "AUTH=${authsrc}：有 Signer 時要寫明 AUTH=device（實體裝置）或 AUTH=virtual；它決定核准事件標成 live 或 fixture（docs/commercial-e1a.md E1a-D4）" ;; esac
 creds=${APA_PRESENT_CREDENTIALS:-}
 registry=${APA_PRESENT_REGISTRY:-testdata/demo/registry.json}
-[ "$registry" = testdata/demo/registry.json ] || [ "$mode" = fake ] || stop "APA_PRESENT_REGISTRY 只用於 fake 展示"
+[ "$registry" = testdata/demo/registry.json ] || [ "$mode" = fake ] || [ -n "$livepay" ] || stop "APA_PRESENT_REGISTRY 只用於 fake 展示或付款的 live 展示"
 [ -f "$registry" ] || stop "APA_PRESENT_REGISTRY=${registry} 不是檔案"
-[ -z "$creds" ] || [ "$mode" = fake ] || stop "APA_PRESENT_CREDENTIALS 只用於 fake 展示（C2 的 v2 場景只用 fake Agent）"
+[ -z "$creds" ] || [ "$mode" = fake ] || [ -n "$livepay" ] || stop "APA_PRESENT_CREDENTIALS 只用於 fake 展示或付款的 live 展示（E1-a）"
 payments=${APA_PRESENT_PAYMENTS:-}
 # APA_PRESENT_PROFILE (fake only; make present-testnet): the consumer profile
 # (its merchants are the testnet shop's address); default the demo's own.
@@ -130,9 +135,14 @@ if [ "$mode" = live ]; then
 	extra=""
 	[ "$dev" = true ] && extra=--dev-demo-plugins
 	echo "present: 真實 Agent 即時展示（開發展示例外：${dev}）。啟動時 host 執行一次 ${cli} --version（不送出模型請求）；按「開始」才執行模型。" >&2
-	APA_ADDR=$addr APA_LIVE_CLI=true APA_DB_PATH=$w/db/live.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \
-		--live-cli "$cli" $extra --scenarios testdata/demo/scenarios-live.json --registry testdata/demo/registry.json \
-		--trace-dir "$w/runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" &
+	set --
+	[ -z "$livepay" ] || set -- --approvals-signer "$signer" --authenticator-source "$authsrc" --payments "$payments"
+	[ -z "$creds" ] || set -- "$@" --credential-dir "$w/cred"
+	[ -z "$profile" ] || set -- "$@" --profile "$profile"
+	[ -z "$livepay" ] || echo "present: 付款的 live 展示（E1-a）：委託是模擬，Ask 由本人以已登記的裝置核准，付款 ${payments}" >&2
+	APA_ADDR=$addr APA_LIVE_CLI=true APA_DB_PATH=$db/live.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \
+		--live-cli "$cli" $extra --scenarios "${APA_PRESENT_SCENARIOS:-testdata/demo/scenarios-live.json}" --registry "$registry" \
+		--trace-dir "$runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" "$@" &
 else
 	echo "present: fake 展示（不執行模型）。" >&2
 	set --

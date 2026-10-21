@@ -78,6 +78,19 @@ func TaskPrompt(task string) (string, error) {
 		"You cannot pay and will not receive the content; the host records the request and a human decides.\n\nThe task: " + task, nil
 }
 
+// PayingTaskPrompt is TaskPrompt for a host that pays (E1-a,
+// docs/commercial-e1a.md E1a-D6): the same words and rules, but who pays
+// instead of "you cannot pay". TaskPrompt, the prompt AE1 measured, stays.
+func PayingTaskPrompt(task string) (string, error) {
+	p, err := TaskPrompt(task)
+	if err != nil {
+		return "", err
+	}
+	return strings.Replace(p, notPaying, "A purchase you request may be paid by the host after its policy and, when asked, the owner's approval; you never pay directly.", 1), nil
+}
+
+const notPaying = "You cannot pay and will not receive the content; the host records the request and a human decides."
+
 // envAllowlist is all the CLI inherits: no API keys, tokens, profiles,
 // cloud-provider or proxy settings, and nothing of the host's own.
 var envAllowlist = []string{"HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG", "LC_ALL", "TERM"}

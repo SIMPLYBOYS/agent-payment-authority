@@ -39,6 +39,7 @@ type planRun struct {
 	contract      string                    // host runs: the run's contract version ("" = apa.m1.v2)
 	delegation    string                    // host runs: an apa.pay.v1 run's confirmed delegation
 	scene         string                    // host runs: the entry's demo scene ("" is the data shop)
+	task          string                    // host runs: a live pay entry's task (E1-a)
 }
 
 // runOutcome is what the host reports of one run: fixed codes and counts,
@@ -245,7 +246,7 @@ func (f *cliRunner) runOne(ctx context.Context, st *store.Store, bridge *toolbri
 		}
 		return st, nil
 	}
-	res, err := h.Run(ctx, task.TaskID, buyer.Prompt, prepare)
+	res, err := h.Run(ctx, task.TaskID, promptFor(r.task), prepare)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		o.Detail = "host_error"
 	}
@@ -258,4 +259,14 @@ func (f *cliRunner) runOne(ctx context.Context, st *store.Store, bridge *toolbri
 		o.Detail = "prepare_failed:" + store.CodeOf(res.PrepareError) // STORE_ERROR without a code; never its text
 	}
 	return o
+}
+
+// promptFor is a run's prompt: the fixed one, or a live pay entry's task in
+// the paying host's words (E1-a; checked when the catalog was read).
+func promptFor(task string) string {
+	if task == "" {
+		return buyer.Prompt
+	}
+	p, _ := buyer.PayingTaskPrompt(task)
+	return p
 }

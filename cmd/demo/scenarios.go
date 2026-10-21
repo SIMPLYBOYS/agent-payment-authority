@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
@@ -37,6 +38,9 @@ type scenario struct {
 	// "cafe" or "mart" picks that storefront's products and the page's
 	// layout; omitted or "data" is the data shop (kept as "").
 	Scene string `json:"scene,omitempty"`
+	// Task is a live pay entry's task, the person's words the model is
+	// given (E1-a: buyer.PayingTaskPrompt); live pay entries only.
+	Task string `json:"task,omitempty"`
 
 	digest     string   // sha256 of this entry and its scenario file's bytes
 	candidates []string // the consumer's demo tasks (show-*), in registry order
@@ -66,8 +70,9 @@ var scenarioID = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 //
 // In live mode (docs/cli-poc.md 55) an entry names no scenario file: the
 // real CLI runs, not a script; a live catalog with one, or a fake catalog
-// without one, is refused.
-func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.RegistryConfig, live bool) (map[string]*scenario, error) {
+// without one, is refused. A live pay entry (E1-a) needs a host that pays
+// (livePay: the Signer and payments) and its task's words.
+func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.RegistryConfig, live, livePay bool) (map[string]*scenario, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -108,12 +113,20 @@ func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.Regist
 			}
 		case paycontract.Version, paycontract.V2:
 			d := sc.Delegation
-			if live || d == nil || sc.BudgetInitial != "" || d.Purpose == "" || len(d.Purpose) > 200 || d.ApprovalDeadlineSeconds == 0 || d.ApprovalDeadlineSeconds > 600 ||
+			if live && !livePay || d == nil || sc.BudgetInitial != "" || d.Purpose == "" || len(d.Purpose) > 200 || d.ApprovalDeadlineSeconds == 0 || d.ApprovalDeadlineSeconds > 600 ||
 				d.ValidSeconds == 0 || d.ValidSeconds > 86400 || !amount(d.TaskBudget) || !amount(d.AllowMax) {
-				return nil, fmt.Errorf("scenarios %s: %s: a pay-family entry is fake only and needs a whole delegation (no budget_initial)", path, sc.ID)
+				return nil, fmt.Errorf("scenarios %s: %s: a pay-family entry needs a whole delegation (no budget_initial), and live, a host that pays", path, sc.ID)
 			}
 		default:
 			return nil, fmt.Errorf("scenarios %s: %s: unknown contract %q", path, sc.ID, sc.Contract)
+		}
+		if (sc.Task != "") != (live && sc.Contract != "" && sc.Contract != contracts.Version) {
+			return nil, fmt.Errorf("scenarios %s: %s: a live pay entry, and only one, has its task's words", path, sc.ID)
+		}
+		if sc.Task != "" {
+			if _, err := buyer.PayingTaskPrompt(sc.Task); err != nil {
+				return nil, fmt.Errorf("scenarios %s: %s: %w", path, sc.ID, err)
+			}
 		}
 		if len(sc.candidates) == 0 {
 			return nil, fmt.Errorf("scenarios %s: %s: consumer %q has no show-* task in the registry", path, sc.ID, sc.ConsumerID)
@@ -139,7 +152,8 @@ func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.Regist
 			Contract                      string           `json:",omitempty"`
 			Delegation                    *delegationTerms `json:",omitempty"`
 			Scene                         string           `json:",omitempty"`
-		}{sc.ID, sc.ConsumerID, string(sc.BudgetInitial), sc.Contract, sc.Delegation, sc.Scene})
+			Task                          string           `json:",omitempty"`
+		}{sc.ID, sc.ConsumerID, string(sc.BudgetInitial), sc.Contract, sc.Delegation, sc.Scene, sc.Task})
 		h := sha256.New()
 		h.Write(entry)
 		h.Write([]byte{0})

@@ -345,7 +345,7 @@ func (c *control) runOne(ctx context.Context, lr *liveRun, sc *scenario) {
 	defer lr.cancel()
 	bound := func(b *toolbridge.Binding) { c.mu.Lock(); lr.binding = b; c.mu.Unlock() }
 	o := c.runner.runOne(ctx, c.st, c.bridge, planRun{TaskID: lr.run.TaskID, Scenario: sc.Scenario, BudgetInitial: sc.BudgetInitial, bound: bound,
-		contract: lr.run.ContractVersion, delegation: lr.run.DelegationID, scene: sc.Scene})
+		contract: lr.run.ContractVersion, delegation: lr.run.DelegationID, scene: sc.Scene, task: sc.Task})
 	end := runEnd(o)
 	c.mu.Lock() // from here a stop is refused: the process is over
 	lr.reaped = true

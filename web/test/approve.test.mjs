@@ -92,6 +92,12 @@ test("a decided record is worded by its own method, never the host's mode", asyn
       assert.match(g(sim), /模擬：Signer 樁拒絕/, mode);
       assert.match(rows(dev).note, /Signer 驗證本人已登記的裝置/, mode);
       assert.match(rows(sim).note, /fake 模擬/, mode);
+      // E1-a: on a paying host the person's grant is what the Host pays by.
+      const paid = snap("webauthn");
+      paid.task.payment_capability = "base_sepolia";
+      assert.match(g(paid), /本人核准；Host 依此付款/, mode);
+      assert.doesNotMatch(rows(paid).note, /沒有付款或交付/, mode);
+      assert.match(rows(paid).note, /由 Host 付款（Base Sepolia/, mode);
     }
   } finally {
     A.setApprovalMode("simulated");

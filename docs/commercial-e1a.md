@@ -322,3 +322,13 @@
 | 建議 | 執行條件記在哪裡；範本的 ID 每次怎麼換 | 記在 `TASK_STARTED` 的 payload（§4.1）；實跑前改範本的日期與序號（§4.8） |
 
 這一輪只改了一行判斷規則和兩處說明，引用的程式位置由 Claude Code 確認，沒有再開第五輪 review。
+
+## 9 實作進度
+
+| 段 | commit | 內容 | review |
+|---|---|---|---|
+| E1a-1 證據模式 | `260ce77`、`cef65c0`、`2a3189c`、`71cee97`、`671717b` | 封閉對照表（`internal/paycontract/evidence.go`），執行條件記在 pay 類 `TASK_STARTED` 的 `run_conditions`；事件 API 帶出付款紀錄與執行條件；有 Signer 時 `AUTH=` 必填 | 第一輪 REQUEST CHANGES（執行條件放錯地方、鏈與 authenticator 的接線沒有測試）→ 修正；第二輪 REQUEST CHANGES（一筆 mutation 指到別的 package、runbook 少了 `AUTH=`）→ 修正 |
+| E1a-7 商店目錄 | `692f7bb`、`71cee97` | 結算商店可賣 AE1 的目錄或案例（`shop_eval`）；`p2-testnet e1a-host` 寫新的 host 目錄；商店的資料庫沿用 deploy 的（每日上限是同一把金鑰的） | APPROVE（Important：每個目錄各自的資料庫會讓每日上限重算 → 改為沿用） |
+| E1a-2 live 與付款 | （本段） | live 加付款：Signer、payments、registry、profile、憑證；`scenarios-e1a.json` 三場；`make present-e1a`；付款主機的提示詞（`buyer.PayingTaskPrompt`）；live 付款主機上，模擬者只能確認委託（同一套發證，`delegationOnly`，其他模擬路由回 `simulation_unavailable`）；live 的標籤與 `sources.agent`；證據抽屜的兩段舊文字 | 待 review |
+
+**測不到的接線**（在本機彩排時確認）：`main.go` 在 live 付款主機上建立「只能確認委託」的模擬者、live 付款主機的標籤、`sources.agent`。這些需要一個同時有 live CLI、Signer 與鏈的 Host，單元測試做不到。

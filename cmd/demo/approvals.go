@@ -61,6 +61,7 @@ type approvals struct {
 	st     approvalStore
 	signer approvalSigner
 	source string // device | virtual: what the operator says verifies (a label, not evidence)
+	agent  string // fake | live (E1-a): the host's Agent
 	payCap string // P2: --payments' environment, a person's approval is paid (sources say it); "" without
 	out    io.Writer
 	mu     sync.Mutex // ponytail: one approval operation at a time on this host; per-session locks if it ever matters
@@ -68,7 +69,7 @@ type approvals struct {
 
 // sources are the three origins every answer names apart (design 2).
 type sources struct {
-	Agent         string `json:"agent"`         // fake
+	Agent         string `json:"agent"`         // fake | live
 	Authenticator string `json:"authenticator"` // device | virtual
 	Payment       string `json:"payment"`       // disabled
 }
@@ -78,7 +79,7 @@ func (h *approvals) sources() sources {
 	if h.payCap != "" {
 		payment = h.payCap
 	}
-	return sources{Agent: "fake", Authenticator: h.source, Payment: payment}
+	return sources{Agent: h.agent, Authenticator: h.source, Payment: payment}
 }
 
 type challengeView struct {

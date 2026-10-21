@@ -37,6 +37,9 @@ type simulator struct {
 	consumers []string  // the registry's
 	now       func() time.Time
 	instance  string
+	// delegationOnly (a live host that pays; E1-a, E1a-D1 A): the
+	// capability confirms delegations and nothing else.
+	delegationOnly bool
 }
 
 func (s *simulator) issue(consumer string) (string, time.Time, error) {
@@ -95,15 +98,27 @@ func (a *api) simulate(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "host_error")
 		return
 	}
-	fmt.Fprintf(a.out, "demo: simulated approver: %s (fake only; not a person's verification)\n", req.ConsumerID)
-	reply(w, http.StatusOK, map[string]any{"token": tok, "consumer_id": req.ConsumerID, "expires_in_seconds": int(time.Until(until).Seconds()),
-		"note": "角色模擬：主持人扮演，不是本人驗證；只在 fake 模式；不會付款"})
+	note := "角色模擬：主持人扮演，不是本人驗證；只在 fake 模式；不會付款"
+	if a.sim.delegationOnly {
+		note = "角色模擬：主持人扮演客人確認委託，不是本人驗證；只能確認委託，Ask 由本人以已登記的裝置核准"
+		fmt.Fprintf(a.out, "demo: simulated customer for delegations: %s (not a person's verification)\n", req.ConsumerID)
+	} else {
+		fmt.Fprintf(a.out, "demo: simulated approver: %s (fake only; not a person's verification)\n", req.ConsumerID)
+	}
+	reply(w, http.StatusOK, map[string]any{"token": tok, "consumer_id": req.ConsumerID, "expires_in_seconds": int(time.Until(until).Seconds()), "note": note,
+		"delegation_only": a.sim.delegationOnly})
 }
 
 // simGuard admits the simulated approver's capability only: Host, Origin
 // (required on a POST), then the bearer. A demo token is the wrong role; a
 // live host has no simulation at all.
 func (a *api) simGuard(w http.ResponseWriter, r *http.Request, post bool, dst any) (string, bool) {
+	return a.simGuardFor(w, r, post, dst, false)
+}
+
+// simGuardFor is simGuard; delegation is the delegation route, the only one
+// a delegation-only capability (a live host that pays) is admitted to.
+func (a *api) simGuardFor(w http.ResponseWriter, r *http.Request, post bool, dst any, delegation bool) (string, bool) {
 	if !a.ourHost(r.Host) {
 		fail(w, http.StatusForbidden, "forbidden_host")
 		return "", false
@@ -112,7 +127,7 @@ func (a *api) simGuard(w http.ResponseWriter, r *http.Request, post bool, dst an
 		fail(w, http.StatusForbidden, "forbidden_origin")
 		return "", false
 	}
-	if a.sim == nil {
+	if a.sim == nil || a.sim.delegationOnly && !delegation {
 		fail(w, http.StatusForbidden, "simulation_unavailable")
 		return "", false
 	}
@@ -158,7 +173,7 @@ func (a *api) simDelegation(w http.ResponseWriter, r *http.Request) {
 		RequestID string `json:"request_id"`
 		Scenario  string `json:"scenario"`
 	}
-	consumer, ok := a.simGuard(w, r, true, &req)
+	consumer, ok := a.simGuardFor(w, r, true, &req, true)
 	if !ok {
 		return
 	}

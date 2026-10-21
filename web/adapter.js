@@ -846,7 +846,8 @@ export function evidence(snapshot, po, ctx) {
       ["PURCHASE_PROPOSED", proposed ? "#" + proposed.sequence + " · " + hhmmss(proposed.observed_at) : UNKNOWN, "Store 事件"],
     ] : [] },
     { title: "裁決", note: pay(t) ? (byDevice(p) || !(p && p.approval && p.approval.resolved_by) && !simulated()
-      ? "固定原因代碼；核准由 Signer 驗證本人已登記的裝置；grant 不能取得付款能力，沒有付款或交付。"
+      ? (paysOn(t.payment_capability) ? "固定原因代碼；核准由 Signer 驗證本人已登記的裝置；本人核准的 grant 由 Host 付款（" + PAYING[t.payment_capability] + "），付款與交付見付款列。"
+        : "固定原因代碼；核准由 Signer 驗證本人已登記的裝置；grant 不能取得付款能力，沒有付款或交付。")
       : "固定原因代碼；核准是 fake 模擬（主持人扮演，不是本人驗證）；模擬 grant 不能取得付款能力，沒有付款或交付。")
       : "固定原因代碼；M1 沒有核准、付款或交付。", rows: p ? [
       ["verdict", str(d.policy_verdict), "Store"], ["reason", reasonText(d.reason, t), "Store"], ["approval_status", str(d.approval_status), "Store"],
@@ -862,7 +863,7 @@ export function evidence(snapshot, po, ctx) {
       ...(p.approval ? [
         ["核准會話", str(p.approval.approval_session_id) + " · " + str(p.approval.state) + (p.approval.resolved_by ? " · " + str(p.approval.resolved_by) : ""), "Store"],
         ["grant", p.approval.grant ? str(p.approval.grant.jti) + " · " + str(p.approval.grant.authorization_method) + " · audience " + str(p.approval.grant.audience)
-          + " · 到期 " + hhmmss(p.approval.grant.expires_at) + (p.approval.grant.authorization_method === "webauthn" ? "（本人核准；付款未啟用，不能付款）" : "（模擬：Signer 樁拒絕，不能付款）") : "無", "Store"],
+          + " · 到期 " + hhmmss(p.approval.grant.expires_at) + (p.approval.grant.authorization_method === "webauthn" ? (paysOn(t.payment_capability) ? "（本人核准；Host 依此付款）" : "（本人核准；付款未啟用，不能付款）") : "（模擬：Signer 樁拒絕，不能付款）") : "無", "Store"],
       ] : []),
     ] : [] },
     { title: "Store 事件", note: "hash chain 只表示這份事件序列前後相連，不是 ZKP，也不是 B1-07 獨立驗證。", rows: mine.map((e) => [

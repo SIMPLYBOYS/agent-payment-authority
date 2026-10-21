@@ -22,7 +22,7 @@ func TestUX3ShippedCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg, _ := contracts.NewRegistry(regCfg)
-	scs, err := loadScenarios("testdata/demo/scenarios-ux3.json", reg, regCfg, false)
+	scs, err := loadScenarios("testdata/demo/scenarios-ux3.json", reg, regCfg, false, false)
 	if err != nil || len(scs) != 3 || scs["data-a"].Scene != "" || scs["cafe-b"].Scene != "cafe" || scs["mart-a"].Scene != "mart" {
 		t.Fatalf("catalog: %v %v", scs, err)
 	}
@@ -41,16 +41,16 @@ func TestUX3ShippedCatalog(t *testing.T) {
 		os.WriteFile(p, raw, 0o600)
 		return p
 	}
-	plain, err1 := loadScenarios(entry(""), reg, regCfg, false)
-	data, err2 := loadScenarios(entry("data"), reg, regCfg, false)
+	plain, err1 := loadScenarios(entry(""), reg, regCfg, false, false)
+	data, err2 := loadScenarios(entry("data"), reg, regCfg, false, false)
 	if err1 != nil || err2 != nil || plain["ask"].digest != data["ask"].digest {
 		t.Fatalf("data scene digest: %v %v", err1, err2)
 	}
-	cafe, err := loadScenarios(entry("cafe"), reg, regCfg, false)
+	cafe, err := loadScenarios(entry("cafe"), reg, regCfg, false, false)
 	if err != nil || cafe["ask"].digest == plain["ask"].digest {
 		t.Fatalf("a scene must change the digest: %v", err)
 	}
-	if _, err := loadScenarios(entry("zoo"), reg, regCfg, false); err == nil {
+	if _, err := loadScenarios(entry("zoo"), reg, regCfg, false, false); err == nil {
 		t.Fatal("an unknown scene loaded")
 	}
 }

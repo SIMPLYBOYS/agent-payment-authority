@@ -412,11 +412,11 @@ func TestLoadScenarios(t *testing.T) {
 	raw, _ := os.ReadFile("testdata/demo/registry.json")
 	contracts.Decode(raw, &regCfg)
 	reg, _ := contracts.NewRegistry(regCfg)
-	if s, err := loadScenarios("testdata/demo/scenarios.json", reg, regCfg, false); err != nil || len(s) != 3 || s["ask-b"].ConsumerID != "consumer-b" || len(s["ask"].candidates) != 20 || s["ask"].digest == "" {
+	if s, err := loadScenarios("testdata/demo/scenarios.json", reg, regCfg, false, false); err != nil || len(s) != 3 || s["ask-b"].ConsumerID != "consumer-b" || len(s["ask"].candidates) != 20 || s["ask"].digest == "" {
 		t.Fatalf("the shipped catalog: %v %v", s, err)
 	}
 	// The acceptance catalog (slice 3.5): the shipped two, unchanged, and a run that waits.
-	if s, err := loadScenarios("testdata/demo/scenarios-acceptance.json", reg, regCfg, false); err != nil || len(s) != 3 || s["ask-wait"] == nil ||
+	if s, err := loadScenarios("testdata/demo/scenarios-acceptance.json", reg, regCfg, false, false); err != nil || len(s) != 3 || s["ask-wait"] == nil ||
 		s["ask-wait"].ConsumerID != "consumer-a" || s["deny-budget"].BudgetInitial != "250000" {
 		t.Fatalf("the acceptance catalog: %v %v", s, err)
 	}
@@ -430,7 +430,7 @@ func TestLoadScenarios(t *testing.T) {
 	} {
 		p := filepath.Join(t.TempDir(), "c.json")
 		os.WriteFile(p, []byte(body), 0o600)
-		if _, err := loadScenarios(p, reg, regCfg, false); err == nil {
+		if _, err := loadScenarios(p, reg, regCfg, false, false); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}

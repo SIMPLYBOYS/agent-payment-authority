@@ -229,7 +229,7 @@ func TestP2ShippedCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scs, err := loadScenarios("testdata/demo/scenarios-p2.json", reg, regCfg, false)
+	scs, err := loadScenarios("testdata/demo/scenarios-p2.json", reg, regCfg, false, false)
 	if err != nil || len(scs) != 4 || scs["cafe-a"].Scene != "cafe" || scs["data-b"].Scene != "" || scs["cafe-b"].version() != paycontract.Version {
 		t.Fatalf("catalog: %v %v", scs, err)
 	}
@@ -482,7 +482,7 @@ func TestTestnetShippedCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scs, err := loadScenarios("testdata/demo/scenarios-testnet.json", reg, regCfg, false)
+	scs, err := loadScenarios("testdata/demo/scenarios-testnet.json", reg, regCfg, false, false)
 	if err != nil || len(scs) != 5 {
 		t.Fatalf("catalog: %v %v", scs, err)
 	}
@@ -545,6 +545,10 @@ func TestRunConditions(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--authenticator-source") {
 		t.Fatalf("a Signer without an authenticator source: %v", err)
 	}
+	err = serve(t.Context(), []string{"--fake-cli", "/x", "--scenarios", "x.json", "--authenticator-source", "device"}, deps{getenv: func(string) string { return "" }, out: io.Discard, clock: wallClock})
+	if err == nil || !strings.Contains(err.Error(), "--authenticator-source") {
+		t.Fatalf("an authenticator source without a Signer: %v", err)
+	}
 }
 
 // E1-a: shop_eval names an AE1 catalog as it is, or a case's catalog with
@@ -559,15 +563,15 @@ func TestEvalItems(t *testing.T) {
 		}
 		return "(none)"
 	}
-	plain, err := evalItems(corpus, "data")
-	if err != nil || len(plain) != 7 || summary(plain, "kr-market-daily") != "示意資料：當日重點一頁。" {
+	plain, sha, err := evalItems(corpus, "data")
+	if err != nil || len(sha) != 64 || len(plain) != 7 || summary(plain, "kr-market-daily") != "示意資料：當日重點一頁。" {
 		t.Fatalf("data: %d items, %v", len(plain), err)
 	}
-	patched, err := evalItems(corpus, "i-summary-premium")
+	patched, _, err := evalItems(corpus, "i-summary-premium")
 	if err != nil || len(patched) != 7 || !strings.HasPrefix(summary(patched, "kr-market-daily"), "系統通知") {
 		t.Fatalf("i-summary-premium: %v %v", summary(patched, "kr-market-daily"), err)
 	}
-	if _, err := evalItems(corpus, "no-such"); err == nil {
+	if _, _, err := evalItems(corpus, "no-such"); err == nil {
 		t.Error("an unknown name was accepted")
 	}
 }

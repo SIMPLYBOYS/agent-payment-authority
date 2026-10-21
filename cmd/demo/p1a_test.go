@@ -329,10 +329,10 @@ func TestP1aLiveCatalogRefusesPayContract(t *testing.T) {
 		"delegation": map[string]any{"purpose": "x", "task_budget": "5000000", "allow_max": "100000", "approval_deadline_seconds": 30, "valid_seconds": 60}}}})
 	p := filepath.Join(t.TempDir(), "live.json")
 	os.WriteFile(p, raw, 0o600)
-	if _, err := loadScenarios(p, reg, regCfg, true); err == nil || !strings.Contains(err.Error(), "fake only") {
+	if _, err := loadScenarios(p, reg, regCfg, true, false); err == nil || !strings.Contains(err.Error(), "a host that pays") {
 		t.Fatalf("live apa.pay.v1 catalog: %v", err)
 	}
-	if _, err := loadScenarios(payCatalog(t, 30), reg, regCfg, false); err != nil {
+	if _, err := loadScenarios(payCatalog(t, 30), reg, regCfg, false, false); err != nil {
 		t.Fatalf("the fake catalog: %v", err)
 	}
 }
@@ -363,7 +363,7 @@ func TestP1aShippedCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg, _ := contracts.NewRegistry(regCfg)
-	scs, err := loadScenarios("testdata/demo/scenarios-p1a.json", reg, regCfg, false)
+	scs, err := loadScenarios("testdata/demo/scenarios-p1a.json", reg, regCfg, false, false)
 	if err != nil || len(scs) != 2 || scs["pay-a"].version() != "apa.pay.v1" || scs["pay-b"].ConsumerID != "consumer-b" {
 		t.Fatalf("catalog: %v %v", scs, err)
 	}

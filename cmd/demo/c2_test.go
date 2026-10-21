@@ -170,7 +170,7 @@ func TestC2ShippedCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg, _ := contracts.NewRegistry(regCfg)
-	scs, err := loadScenarios("testdata/demo/scenarios-c2.json", reg, regCfg, false)
+	scs, err := loadScenarios("testdata/demo/scenarios-c2.json", reg, regCfg, false, false)
 	if err != nil || len(scs) != 2 || scs["v2-a"].version() != "apa.pay.v2" || scs["v2-b"].ConsumerID != "consumer-b" {
 		t.Fatalf("catalog: %v %v", scs, err)
 	}
@@ -178,7 +178,7 @@ func TestC2ShippedCatalog(t *testing.T) {
 	if p, err := policy.LoadProfile(raw); err != nil || checkDelegations(scs, p) != nil {
 		t.Fatalf("profile: %v", err)
 	}
-	if _, err := loadScenarios("testdata/demo/scenarios-c2.json", reg, regCfg, true); err == nil {
+	if _, err := loadScenarios("testdata/demo/scenarios-c2.json", reg, regCfg, true, false); err == nil {
 		t.Fatal("a v2 catalog loaded as live")
 	}
 }
