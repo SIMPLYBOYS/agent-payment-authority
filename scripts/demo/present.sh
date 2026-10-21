@@ -82,7 +82,7 @@ profile=${APA_PRESENT_PROFILE:-}
 [ -z "$profile" ] || [ -f "$profile" ] || stop "APA_PRESENT_PROFILE=${profile} 不是檔案"
 [ -z "$payments" ] || [ -n "$signer" ] || stop "APA_PRESENT_PAYMENTS 需要 APA_APPROVALS_SIGNER（同一個 Signer 也簽付款）"
 [ -z "$payments" ] || [ -f "$payments" ] || stop "APA_PRESENT_PAYMENTS=${payments} 不是檔案"
-[ -z "$payments" ] || [ -S "$signer" ] || stop "APA_APPROVALS_SIGNER=${signer} 不是 socket：先以 scripts/demo/p2-dev.sh 啟動 apa-signer serve"
+[ -z "$payments" ] || [ -S "$signer" ] || stop "APA_APPROVALS_SIGNER=${signer} 不是 socket：先啟動 apa-signer serve（本機 anvil：scripts/demo/p2-dev.sh；testnet：/opt 的 serve，docs/commercial-p2b.md 6.1），或檢查它是否還在執行"
 [ -z "$signer" ] || [ -S "$signer" ] || stop "APA_APPROVALS_SIGNER=${signer} 不是 socket：請先啟動 apa-signer serve-approvals（docs/commercial-a2.md）"
 
 if [ "$mode" = live ]; then
