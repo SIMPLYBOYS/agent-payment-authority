@@ -90,7 +90,9 @@ func paidStore(t *testing.T, agent string) string {
 			return s.PaymentSigned(intent, json.RawMessage(`{"from":"`+reg.Wallets[0].From+`","signature":"0xab"}`))
 		},
 		func() (store.Payment, error) { return s.PaymentSubmitted(intent) },
-		func() (store.Payment, error) { return s.PaymentSettled(intent, tx2, 9, json.RawMessage(`{"success":true}`)) },
+		func() (store.Payment, error) {
+			return s.PaymentSettled(intent, tx2, 9, json.RawMessage(`{"success":true}`))
+		},
 		func() (store.Payment, error) { return s.PaymentDelivered(intent, hex.EncodeToString(sum[:]), 9) },
 	} {
 		if _, err := step(); err != nil {
