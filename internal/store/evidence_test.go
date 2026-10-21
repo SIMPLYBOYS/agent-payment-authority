@@ -84,7 +84,9 @@ func TestPaymentEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, step := range []func() (Payment, error){
-			func() (Payment, error) { return s.PaymentReserved(intent, Reservation{Evidence: evidence, TxHash: tx1, Block: 7}) },
+			func() (Payment, error) {
+				return s.PaymentReserved(intent, Reservation{Evidence: evidence, TxHash: tx1, Block: 7})
+			},
 			func() (Payment, error) { return s.PaymentSigned(intent, auth) },
 			func() (Payment, error) { return s.PaymentSubmitted(intent) },
 			func() (Payment, error) { return s.PaymentSettled(intent, tx2, 9, json.RawMessage(`{"success":true}`)) },

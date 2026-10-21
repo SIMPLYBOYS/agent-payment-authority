@@ -503,14 +503,8 @@ func (s *Store) buildTerms(setup TaskSetup) (terms, error) {
 	task, _, _ := s.registry.Binding(setup.TaskID)
 	tm := terms{TaskID: setup.TaskID, ProfileState: "absent", CredentialState: "absent", BudgetInitial: setup.BudgetInitial,
 		AssetID: setup.AssetID, ApprovalDeadlineSeconds: setup.ApprovalDeadlineSeconds}
-	if r := setup.Run; r != nil {
-		if !paycontract.Supported(setup.ContractVersion) {
-			return tm, errors.New("run conditions are a pay task's")
-		}
-		if err := paycontract.ValidRun(*r); err != nil {
-			return tm, err
-		}
-	}
+	// ponytail: setup.Run is checked where it is written, TASK_STARTED's
+	// validation (paycontract; contracts refuses it on an M1 event).
 	hasCred := setup.Credential != nil || setup.BBS != nil
 	if (setup.Profile == nil) != setup.ProfileAbsent || hasCred == setup.CredentialAbsent || setup.Credential != nil && setup.BBS != nil {
 		return tm, errors.New("declare a missing profile or credential explicitly; never pass both or neither")
