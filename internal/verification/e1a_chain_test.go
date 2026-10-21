@@ -146,7 +146,7 @@ func TestE1aChainClaims(t *testing.T) {
 		want   Verdict
 	}{
 		"tx#1 reverted":                {func(c *chainCase) { c.chain.receipts[tx1].Status = 0 }, "E4", Fail},
-		"tx#1 not deep enough":         {func(c *chainCase) { c.chain.latest = 10 }, "E4", Inconclusive},
+		"tx#2 not deep enough":         {func(c *chainCase) { c.chain.latest = 12 }, "E4", Inconclusive},
 		"tx#1 is tx#2":                 {func(c *chainCase) { c.run.events[2].Payload.Payment.TxHash = tx1 }, "E4", Fail},
 		"a reservation without tx":     {func(c *chainCase) { c.run.events[1].Payload.Payment = nil }, "E4", Fail},
 		"Spent for another intent":     {func(c *chainCase) { c.chain.receipts[tx1].Logs[0].Data[0] ^= 1 }, "E4", Fail},

@@ -1246,7 +1246,7 @@ LOCAL_MUTATIONS = [
     ('E1a-5: E4 takes another chain', 'internal/verification/e1a_chain.go',
      'if id.Uint64() != s.ChainID || confirmationsOf[s.Chain] == 0 {', 'if false && (id.Uint64() != s.ChainID || confirmationsOf[s.Chain] == 0) {', 'internal/payflow:TestV2PaidOnAnvil'),
     ('E1a-5: E8 takes a transfer no purchase made', 'internal/verification/e1a_chain.go',
-     'if !settled["0x"+hex.EncodeToString(l.TxHash[:])] {', 'if false && !settled["0x"+hex.EncodeToString(l.TxHash[:])] {', 'internal/payflow:TestV2PaidOnAnvil'),
+     '\t\t\t\tx := allowed["0x"+hex.EncodeToString(l.TxHash[:])]\n', '\t\t\t\tx := allowed["0x"+hex.EncodeToString(l.TxHash[:])]\n\t\t\t\tif x == nil {\n\t\t\t\t\tcontinue\n\t\t\t\t}\n', 'internal/payflow:TestV2PaidOnAnvil'),
     ("E1a-5: E9 takes a key's shape", 'internal/verification/e1a.go',
      'if hexValue.MatchString(val) && !hexAllowed(key, val)', 'if false && hexValue.MatchString(val) && !hexAllowed(key, val)', 'cmd/e1-evidence:TestPackAndCheck'),
     ('E1a-5 review: E2 takes a delivery without its receipt', 'internal/verification/e1a.go',
