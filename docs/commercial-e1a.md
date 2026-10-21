@@ -209,6 +209,8 @@
   - Budget 與 Verifier 的位址。
   
   這些放進證據包，E8 從這個起始區塊開始算。
+- **一個證據包涵蓋這段區塊裡用到這些錢包的每一次執行**：錢包在各組實跑之間沿用，所以 [起點, 終點] 之間任何不在這個證據包裡的轉出都會讓 E8 FAIL。起點在實跑前記錄（`e1-evidence start`）；終點在全部執行結束、Host 停下之後才定（`pack --to-block` 當時的區塊）。終點早於最後一筆交易時 E8 是 INCONCLUSIVE，要以較晚的終點重新打包。
+- 已上鏈但 Store 停在 needs_review、沒有 `PAYMENT_SETTLED` 的付款，E8 會判為未授權（錢動了，紀錄沒有結算）：要先由人查清、Host 記下結算，或照實記為 FAIL。
 - **task ID 一定要是新的**：新的 Host 資料庫會從 `show-a-01` 重新開始，但：
   - Signer 已經決定過 show-a-01～05 與 show-b-01～02 的核准會話（`docs/commercial-p2b.md` §6.3），會回 `SESSION_DECIDED`；
   - Base Sepolia 上的 Budget 也已經登記過這些 task，`registerTask` 會 revert（`AlreadyRegistered`，`contracts/src/Budget.sol:70`），tx#0 會失敗。
@@ -337,7 +339,7 @@
 
 | E1a-5（一）證據包與 checker | （本段） | `cmd/e1-evidence pack`：唯讀讀 Host 的 Store（事件、請購單、registry 快照），加上 live 的 trace、對帳報告與事先記錄的起點，逐檔 sha256，`run-end.json` 收尾；`verify-demo --mode e1a`（`internal/verification/e1a.go`）：E1、E2、E3、E5、E6（checker 自己一份對照表；live 要有 trace、付款主機提示詞的 SHA、每筆請購都有 `request_purchase`）、E7、E9（只有摘要欄位可以是不帶前綴的 64 位 hex）、E10。E4、E8 要讀鏈，下一段做；沒做之前是 INCONCLUSIVE | 待 review |
 
-| E1a-5（二）讀鏈 | （本段） | `e1-evidence start`（實跑前：下一個區塊、Verifier、registry 的 task 都還沒登記）；E4：tx#1 是對預算合約的 `spend`、intent 與金額相符、有 `Spent` log、Verifier 的位址與 bytecode 是本 repo 編出來的、以 `eth_call` 重跑 `verifyProof`；tx#2 是付款人到收款人的轉帳、用的是這筆請購自己的 EIP-3009 nonce；E8：從起點到最新區塊，自己分段向鏈查付款錢包的每一筆轉出，都要是證據包裡的結算。`TestV2PaidOnAnvil` 以真實的本機鏈產生證據包並檢查：E1～E10 全部 PASS；換 Verifier、換鏈、換預算合約時 E4 FAIL；付款人自己轉帳時 E8 FAIL。（一）的 review（REQUEST CHANGES，2 個 Critical）一併修正：已交付必須有完整的鏈、只能是 Allow 或本人裝置核准的 Ask；E9 依欄位判斷；E7 跨 task；缺檔是 FAIL；trace 全收、每一次執行都要對；checker 的對照表與 Store 的逐項比對 | 待 review |
+| E1a-5（二）讀鏈 | （本段） | `e1-evidence start`（實跑前：下一個區塊、Verifier、registry 的 task 都還沒登記）；E4：tx#1 是對預算合約的 `spend`、intent 與金額相符、有 `Spent` log、Verifier 的位址與 bytecode 是本 repo 編出來的、以 `eth_call` 重跑 `verifyProof`；tx#2 是付款人到收款人的轉帳、用的是這筆請購自己的 EIP-3009 nonce；E8：從起點到終點（`pack --to-block`），自己分段向鏈查付款錢包的每一筆轉出，都要是證據包裡有權付款的結算。`TestV2PaidOnAnvil` 以真實的本機鏈產生證據包並檢查：E1～E10 全部 PASS；換 Verifier、換鏈、換預算合約時 E4 FAIL；付款人自己轉帳時 E8 FAIL。（一）的 review（REQUEST CHANGES，2 個 Critical）一併修正：已交付必須有完整的鏈、只能是 Allow 或本人裝置核准的 Ask；E9 依欄位判斷；E7 跨 task；缺檔是 FAIL；trace 全收、每一次執行都要對；checker 的對照表與 Store 的逐項比對 | 待 review |
 
 **E1a-5（二）的 review**：REQUEST CHANGES，2 個 Critical（有付款事件卻沒有 tx 時 E4 沒檢查；沒交付但已付款的請購不檢查授權，E8 也照收）→ 修正：任何付款步驟都要有 Allow 或本人裝置核准的 Ask（`paymentRight`，E2 與 E8 共用），只有這樣的結算才能讓錢移動；預留或結算事件缺 tx 就 FAIL。Important：E8 只數起點到終點（`pack --to-block`，或對帳報告的），兩端必須包住每一筆交易；起點的錢包要涵蓋每筆請購的付款人；每筆結算只能有一次、到它的收款人、它的金額；鏈不回應時 E4、E8 都不再顯示 PASS。另以假節點（`TestE1aChainClaims`）測：交易失敗、深度不夠、tx#1 等於 tx#2、預留事件沒有 tx、`Spent` 的 intent 不同、proof 被拒、Verifier 的 code 不同（比對時去掉編譯器的 metadata）、tx#2 金額或 nonce 不同、一筆結算兩次轉出、起點漏了付款人、區段沒包住交易、沒有終點、Deny 卻已結算。建議也採納：`verifyProof` 只有被拒才 FAIL、網路錯誤是 INCONCLUSIVE；沒有 receipt 是 INCONCLUSIVE；calldata 的位移有邊界檢查；`Spent` 的 task 也比對。§4.7 要記錄的 Signer 已用額度、relayer 筆數、錢包餘額，由實跑前的步驟人工記錄，`start` 不讀（需要 Signer 或 relayer 的權限）。
 

@@ -1215,6 +1215,8 @@ MUTATIONS = [
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    ('E1a-5 review 3: E4 takes a settlement with no reservation', 'internal/verification/e1a_chain.go',
+     '\t\t\tcase tx2 != "" && tx1 == "":', '\t\t\tcase false:', 'internal/verification:TestE1aChainClaims'),
     ('E1a-5 review: E2 takes a simulated grant paid', 'internal/verification/e1a.go',
      '\t\t\tif e := eventOf(es, t); e == nil || e.Payload.AuthorizationMethod != "webauthn" {', '\t\t\tif e := eventOf(es, t); e == nil {', 'cmd/e1-evidence:TestPackAndCheck'),
     ('E1a-5 review: E2 takes a Deny delivered', 'internal/verification/e1a.go',
@@ -1228,7 +1230,7 @@ LOCAL_MUTATIONS = [
     ('E1a-5 review 2: E8 counts a payer the start leaves out', 'internal/verification/e1a_chain.go',
      '\t\t\tif !wallets[strings.ToLower(o.PaymentBinding.From)] {', '\t\t\tif false && !wallets[strings.ToLower(o.PaymentBinding.From)] {', 'internal/verification:TestE1aChainClaims'),
     ('E1a-5 review 2: E8 takes blocks that miss the transactions', 'internal/verification/e1a_chain.go',
-     '\tcase low != 0 && low < s.FromBlock, high > s.ToBlock:', '\tcase false:', 'internal/verification:TestE1aChainClaims'),
+     '\tcase low != 0 && low < s.FromBlock:', '\tcase false:', 'internal/verification:TestE1aChainClaims'),
     ('E1a-5 review 2: E4 takes tx#2 of another amount', 'internal/verification/e1a_chain.go',
      '\t\t\tnew(big.Int).SetBytes(l.Data).Cmp(amount) == 0:\n\t\t\tmoved = true', '\t\t\ttrue:\n\t\t\tmoved = true', 'internal/verification:TestE1aChainClaims'),
     ('E1a-5 review 2: E4 takes a Spent log of another intent', 'internal/verification/e1a_chain.go',
