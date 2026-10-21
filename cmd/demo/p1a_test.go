@@ -164,6 +164,15 @@ func TestP1aMainLine(t *testing.T) {
 	if want := "TASK_STARTED,DELEGATION_BOUND,PURCHASE_PROPOSED,POLICY_DECIDED,APPROVAL_SESSION_OPENED,APPROVED,GRANT_ISSUED"; code != 200 || strings.Join(types, ",") != want {
 		t.Fatalf("events %v, want %s", types, want)
 	}
+	// E1-a: the host's run conditions (fake Agent, no chain, no Signer) reach
+	// the task, and each event says where it came from.
+	var labels []string
+	for _, e := range ev.Events {
+		labels = append(labels, e.EvidenceMode+"/"+e.Source)
+	}
+	if want := "fixture/host,fixture/simulated,fixture/fake_cli,fixture/host,fixture/host,fixture/simulated,fixture/simulated"; strings.Join(labels, ",") != want {
+		t.Fatalf("evidence %v, want %s", labels, want)
+	}
 }
 
 func TestP1aPermissions(t *testing.T) {

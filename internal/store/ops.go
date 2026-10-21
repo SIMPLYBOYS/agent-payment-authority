@@ -217,10 +217,16 @@ func (t *taskTx) emit(typ string, p *purchaseRow, payload contracts.EventPayload
 	if p != nil {
 		scope.PurchaseOrderID, scope.IntentHash = p.terms().PO, p.Decision.IntentHash
 	}
-	t.events = append(t.events, contracts.AuditEvent{
+	e := contracts.AuditEvent{
 		Version: t.row.ContractVersion, EventID: eventID(t.row.TaskID, seq), EventType: typ, Scope: scope,
 		Sequence: seq, PrevEventHash: prev, Payload: payload, EvidenceMode: "fixture", Source: "host", ObservedAt: t.now,
-	})
+	}
+	// E1-a: a pay task's evidence mode and source by its run conditions; an
+	// entry the table lacks stays fixture/host, never a refused write.
+	if mode, src, ok := paycontract.Evidence(t.terms.Run, e); ok && paycontract.Supported(e.Version) {
+		e.EvidenceMode, e.Source = mode, src
+	}
+	t.events = append(t.events, e)
 	return nil
 }
 
@@ -491,7 +497,15 @@ func (s *Store) StartTask(setup TaskSetup) error {
 func (s *Store) buildTerms(setup TaskSetup) (terms, error) {
 	task, _, _ := s.registry.Binding(setup.TaskID)
 	tm := terms{TaskID: setup.TaskID, ProfileState: "absent", CredentialState: "absent", BudgetInitial: setup.BudgetInitial,
-		AssetID: setup.AssetID, ApprovalDeadlineSeconds: setup.ApprovalDeadlineSeconds}
+		AssetID: setup.AssetID, ApprovalDeadlineSeconds: setup.ApprovalDeadlineSeconds, Run: setup.Run}
+	if r := setup.Run; r != nil {
+		if !paycontract.Supported(setup.ContractVersion) {
+			return tm, errors.New("run conditions are a pay task's")
+		}
+		if err := r.Validate(); err != nil {
+			return tm, err
+		}
+	}
 	hasCred := setup.Credential != nil || setup.BBS != nil
 	if (setup.Profile == nil) != setup.ProfileAbsent || hasCred == setup.CredentialAbsent || setup.Credential != nil && setup.BBS != nil {
 		return tm, errors.New("declare a missing profile or credential explicitly; never pass both or neither")

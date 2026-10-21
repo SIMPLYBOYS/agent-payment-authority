@@ -387,6 +387,21 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		tools := &toolbridge.Shop{Store: st, CatalogURL: "http://" + addr + "/catalog", Scenes: scenes, Products: products, Client: toolbridge.NewClient(), Now: d.clock,
 			Credentials: creds}
 		runner.creds = creds
+		// E1-a: what this host's pay tasks' events come from (E1a-D4).
+		cond := paycontract.RunConditions{Agent: "fake", Chain: "none", Authenticator: "none"}
+		if live {
+			cond.Agent = "live"
+		}
+		if pay != nil {
+			cond.Chain = pay.cfg.Environment
+		}
+		if *approvalsSigner != "" {
+			cond.Authenticator = *authSource
+		}
+		if err := errors.Join(paycontract.CheckEvidenceTable(), cond.Validate()); err != nil {
+			return err
+		}
+		runner.cond = &cond
 		if bridge, err = toolbridge.Listen(tools); err != nil {
 			return err
 		}

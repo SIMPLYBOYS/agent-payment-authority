@@ -503,3 +503,15 @@ func TestTestnetShippedCatalog(t *testing.T) {
 		}
 	}
 }
+
+// E1-a: a payment event's record reaches the events API (tx and block for
+// the Timeline); the Signer's approval ID still does not.
+func TestEventViewCarriesThePayment(t *testing.T) {
+	rec := &contracts.PaymentRecord{Method: "budget", Amount: "500000", TxHash: "0x" + strings.Repeat("ab", 32), Block: 48394045}
+	v := viewOf(contracts.AuditEvent{Version: paycontract.Version, EventType: "BUDGET_RESERVED",
+		Payload: contracts.EventPayload{Payment: rec, SignerApprovalID: "sa-1"}})
+	raw, _ := json.Marshal(v)
+	if v.Payment == nil || *v.Payment != *rec || strings.Contains(string(raw), "sa-1") {
+		t.Fatalf("view %s", raw)
+	}
+}

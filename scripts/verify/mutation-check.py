@@ -1153,6 +1153,19 @@ MUTATIONS = [
      '\tif now < s[0] {\n\t\treturn false', '\tif false && now < s[0] {\n\t\treturn false', 'TestShopAskedAtGrowingIntervals'),
     ('P2-b after step 7: the shop is asked again at most 60 s apart', 'internal/payflow/payflow.go',
      'wait := min(max(s[1]*2, 2), 60)', 'wait := max(s[1]*2, 2)', 'TestShopAskedAtGrowingIntervals'),
+    ("E1a-1: a pay task's events keep fixture/host whatever its run conditions", 'internal/store/ops.go',
+     'ok && paycontract.Supported(e.Version) {', 'false && ok && paycontract.Supported(e.Version) {', 'TestRunConditionsEvidence'),
+    ('E1a-1: an M1 task takes run conditions', 'internal/store/ops.go',
+     '\t\tif !paycontract.Supported(setup.ContractVersion) {\n\t\t\treturn tm, errors.New("run conditions are a pay task\'s")',
+     '\t\tif false && !paycontract.Supported(setup.ContractVersion) {\n\t\t\treturn tm, errors.New("run conditions are a pay task\'s")', 'TestRunConditionsEvidence'),
+    ('E1a-1: a simulated delegation is labeled live on a live run', 'internal/paycontract/evidence.go',
+     '\t\treturn "fixture", "simulated", true\n\tcase "CREDENTIAL_VERIFIED"', '\t\treturn agent, "simulated", true\n\tcase "CREDENTIAL_VERIFIED"', 'TestEvidenceTable'),
+    ('E1a-1: the table misses the voice events', 'internal/paycontract/evidence.go',
+     'case "VOICE_CHALLENGE_VERIFIED", "VOICE_CHALLENGE_FAILED", "VOICE_UNAVAILABLE":', 'case "VOICE_CHALLENGE_VERIFIED", "VOICE_CHALLENGE_FAILED":', 'TestEvidenceTable'),
+    ('E1a-1: the host does not pass its run conditions to a pay task', 'cmd/demo/fakeruns.go',
+     '\t\t\tsetup.Run = f.cond', '\t\t\tsetup.Run = nil', 'TestP1aMainLine'),
+    ('E1a-1: the events API drops the payment record', 'cmd/demo/api.go',
+     'Credential: e.Payload.Credential, Payment: e.Payload.Payment}', 'Credential: e.Payload.Credential}', 'TestEventViewCarriesThePayment'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the

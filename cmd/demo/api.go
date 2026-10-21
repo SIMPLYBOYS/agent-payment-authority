@@ -291,11 +291,14 @@ type eventView struct {
 	GrantID             string `json:"grant_id,omitempty"`
 	AuthorizationMethod string `json:"authorization_method,omitempty"`
 	// apa.pay.v2's CREDENTIAL_VERIFIED: the verification record as stored.
-	Credential   *contracts.CredentialCheck `json:"credential,omitempty"`
-	Version      string                     `json:"version,omitempty"`
-	EvidenceMode string                     `json:"evidence_mode"`
-	Source       string                     `json:"source"`
-	ObservedAt   uint64                     `json:"observed_at"`
+	Credential *contracts.CredentialCheck `json:"credential,omitempty"`
+	// P2's payment events (E1-a): the record as stored, all whitelisted
+	// (method, amount, tx, block, content digest, receipt; no signature).
+	Payment      *contracts.PaymentRecord `json:"payment,omitempty"`
+	Version      string                   `json:"version,omitempty"`
+	EvidenceMode string                   `json:"evidence_mode"`
+	Source       string                   `json:"source"`
+	ObservedAt   uint64                   `json:"observed_at"`
 }
 
 type eventsReply struct {
@@ -311,20 +314,25 @@ func (a *api) events(w http.ResponseWriter, r *http.Request) {
 	}
 	out := eventsReply{TaskID: rec.Binding.TaskID, Events: []eventView{}}
 	for _, e := range rec.Events {
-		v := eventView{EventID: e.EventID, EventType: e.EventType, Sequence: e.Sequence, PrevEventHash: e.PrevEventHash,
-			Code: e.Payload.Code, Decision: e.Payload.Decision, EvidenceMode: e.EvidenceMode, Source: e.Source, ObservedAt: e.ObservedAt,
-			DelegationID: e.Payload.DelegationID, ApprovalSessionID: e.Payload.ApprovalSessionID, GrantID: e.Payload.GrantID, AuthorizationMethod: e.Payload.AuthorizationMethod,
-			Credential: e.Payload.Credential}
-		if paycontract.Supported(e.Version) { // an M1 event's view is what it always was
-			v.Version = e.Version
-		}
-		if e.Scope != nil {
-			v.PurchaseOrderID, v.IntentHash = e.Scope.PurchaseOrderID, e.Scope.IntentHash
-		}
-		out.Events = append(out.Events, v)
+		out.Events = append(out.Events, viewOf(e))
 		out.AsOfSequence = e.Sequence
 	}
 	reply(w, http.StatusOK, out)
+}
+
+// viewOf is one event as the events API shows it: the whitelisted fields.
+func viewOf(e contracts.AuditEvent) eventView {
+	v := eventView{EventID: e.EventID, EventType: e.EventType, Sequence: e.Sequence, PrevEventHash: e.PrevEventHash,
+		Code: e.Payload.Code, Decision: e.Payload.Decision, EvidenceMode: e.EvidenceMode, Source: e.Source, ObservedAt: e.ObservedAt,
+		DelegationID: e.Payload.DelegationID, ApprovalSessionID: e.Payload.ApprovalSessionID, GrantID: e.Payload.GrantID, AuthorizationMethod: e.Payload.AuthorizationMethod,
+		Credential: e.Payload.Credential, Payment: e.Payload.Payment}
+	if paycontract.Supported(e.Version) { // an M1 event's view is what it always was
+		v.Version = e.Version
+	}
+	if e.Scope != nil {
+		v.PurchaseOrderID, v.IntentHash = e.Scope.PurchaseOrderID, e.Scope.IntentHash
+	}
+	return v
 }
 
 // tasksReply is GET /api/tasks: the caller's visible tasks, newest first

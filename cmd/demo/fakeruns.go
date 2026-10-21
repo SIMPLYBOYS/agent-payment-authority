@@ -67,7 +67,8 @@ type cliRunner struct {
 	profile  policy.Profile
 	d        deps
 	live     *liveSettings
-	creds    *credential.Dir // C2: apa.pay.v2 tasks' issuer and holders
+	creds    *credential.Dir            // C2: apa.pay.v2 tasks' issuer and holders
+	cond     *paycontract.RunConditions // E1-a: a pay task's run conditions
 }
 
 // liveSettings are a live runner's: the approved version and whether the
@@ -226,6 +227,9 @@ func (f *cliRunner) runOne(ctx context.Context, st *store.Store, bridge *toolbri
 		Gate: gate, TraceDir: f.traceDir, Bound: r.bound, Scene: r.scene}
 	prepare := func() (*store.Store, error) {
 		setup := store.TaskSetup{TaskID: task.TaskID, Profile: &f.profile, BudgetInitial: r.BudgetInitial, ContractVersion: r.contract, DelegationID: r.delegation}
+		if paycontract.Supported(r.contract) {
+			setup.Run = f.cond
+		}
 		if r.contract == paycontract.V2 {
 			// C2: the BBS+ credential, issued now; verified at each purchase.
 			if err := taskCredential(f.creds, &setup, task.ConsumerID, f.d.clock()); err != nil {
