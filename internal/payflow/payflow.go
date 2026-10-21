@@ -415,7 +415,7 @@ func authorization(a signer.SignedAuthorization) (reconcile.Authorization, error
 	if err := errors.Join(err1, err2, err3, err4); err != nil || len(n) != 32 {
 		return reconcile.Authorization{}, errors.New("payflow: the signed authorization does not read")
 	}
-	r := reconcile.Authorization{From: from, To: to, Value: value, ValidBefore: a.ValidBefore}
+	r := reconcile.Authorization{From: from, To: to, Value: value, ValidAfter: a.ValidAfter, ValidBefore: a.ValidBefore}
 	copy(r.Nonce[:], n)
 	return r, nil
 }

@@ -1153,6 +1153,10 @@ MUTATIONS = [
 # contract build): this script's container has no var/, where they would
 # skip and read SURVIVED. scripts/verify/local-mutations.py runs them.
 LOCAL_MUTATIONS = [
+    ("P2-b step 6: a payment's status reads more than a provider allows", 'internal/reconcile/reconcile.go',
+     'const logRange = 200', 'const logRange = 2000', 'internal/reconcile:TestUnderABlockRangeCap'),
+    ("P2-b step 6: a payment's status reads the whole chain, not its window", 'internal/reconcile/reconcile.go',
+     'if a.ValidAfter > 0 {', 'if false && a.ValidAfter > 0 {', 'internal/reconcile:TestUnderABlockRangeCap'),
     ("P2-b B5 review: deploy takes another test402 payee", 'cmd/p2-testnet/main.go',
      'as != tok.addr || a.Hex() != test402PayTo ||', 'as != tok.addr ||', 'cmd/p2-testnet:TestPreflightAndDeploy'),
     ("P2-b B5: deploy gives test402 consumer B's shop delegation", 'cmd/p2-testnet/main.go',

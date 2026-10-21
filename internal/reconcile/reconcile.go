@@ -33,15 +33,20 @@ type Token struct {
 	FromBlock     uint64 // no payment of interest before it: the token's deployment, say
 }
 
-// logRange is the most blocks one eth_getLogs asks for (providers cap it).
-const logRange = 2000
+// logRange is the most blocks one eth_getLogs asks for: providers cap it,
+// Base Sepolia's public node at 200 (docs/commercial-p2b.md 6, step 6).
+const logRange = 200
 
 // logs is FilterLogs from FromBlock to `to`, in ranges a provider allows,
-// without removed logs. ponytail: a full rescan per call; a cursor if the
-// history grows long.
+// without removed logs. ponytail: a full rescan per call (the report's); a
+// cursor if the history grows long.
 func (t Token) logs(ctx context.Context, topics [][32]byte, to uint64) ([]eth.Log, error) {
+	return t.logsIn(ctx, topics, t.FromBlock, to)
+}
+
+func (t Token) logsIn(ctx context.Context, topics [][32]byte, lo, to uint64) ([]eth.Log, error) {
 	var out []eth.Log
-	for from := t.FromBlock; from <= to; from += logRange {
+	for from := lo; from <= to; from += logRange {
 		ls, err := t.RPC.FilterLogs(ctx, t.Address, topics, from, min(from+logRange-1, to))
 		if err != nil {
 			return nil, err
@@ -93,6 +98,7 @@ func pairedTransfer(rc *eth.Receipt, token eth.Address, u eth.Log) *eth.Log {
 type Authorization struct {
 	From, To    eth.Address
 	Value       uint64
+	ValidAfter  uint64 // 0: not known (the search starts at FromBlock)
 	ValidBefore uint64
 	Nonce       eth.Bytes32
 }
@@ -134,6 +140,43 @@ func word(a eth.Address) [32]byte {
 // Status is one authorization's state at confirmed depth. not_settled_expired
 // (the state that lets a Host pay again) is only as true as a.ValidBefore:
 // it must be the signed one.
+// window is the blocks from FromBlock to at whose time could have used a:
+// the first after validAfter to the last before validBefore, found by the
+// blocks' own timestamps; some is false when there is no such block.
+func (t Token) window(ctx context.Context, a Authorization, at uint64) (lo, hi uint64, some bool, err error) {
+	// first is the lowest block in [lo, hi+1) whose time passes ok, or hi+1.
+	first := func(lo, hi uint64, ok func(uint64) bool) (uint64, error) {
+		end := hi + 1
+		for lo < end {
+			mid := lo + (end-lo)/2
+			h, err := t.RPC.HeaderAt(ctx, mid)
+			if err != nil {
+				return 0, err
+			}
+			if ok(h.Timestamp) {
+				end = mid
+			} else {
+				lo = mid + 1
+			}
+		}
+		return lo, nil
+	}
+	lo = t.FromBlock
+	if a.ValidAfter > 0 {
+		if lo, err = first(t.FromBlock, at, func(ts uint64) bool { return ts > a.ValidAfter }); err != nil {
+			return 0, 0, false, err
+		}
+	}
+	if lo > at {
+		return lo, at, false, nil
+	}
+	end, err := first(lo, at, func(ts uint64) bool { return ts >= a.ValidBefore })
+	if err != nil || end == lo {
+		return lo, lo, false, err // no block in the window
+	}
+	return lo, end - 1, true, nil
+}
+
 func (t Token) Status(ctx context.Context, a Authorization) (Result, error) {
 	if a.ValidBefore == 0 || a.From == (eth.Address{}) || a.Nonce == (eth.Bytes32{}) {
 		return Result{}, errors.New("reconcile: an authorization needs its signed validBefore, payer and nonce")
@@ -161,14 +204,23 @@ func (t Token) Status(ctx context.Context, a Authorization) (Result, error) {
 		}
 		return Result{State: "pending", Block: at}, nil
 	}
-	live, err := t.logs(ctx, [][32]byte{usedTopic, word(a.From), a.Nonce}, at)
+	// EIP-3009: used only in a block whose time is after validAfter and
+	// before validBefore; only those blocks are read (a few hundred, however
+	// long the chain since FromBlock).
+	lo, hi, some, err := t.window(ctx, a, at)
 	if err != nil {
 		return Result{}, err
 	}
-	if len(live) == 0 && t.FromBlock > 0 {
-		// Used, and no event since FromBlock: it may be before it (a
+	var live []eth.Log
+	if some {
+		if live, err = t.logsIn(ctx, [][32]byte{usedTopic, word(a.From), a.Nonce}, lo, hi); err != nil {
+			return Result{}, err
+		}
+	}
+	if len(live) == 0 && lo > 0 {
+		// Used, and no event in its window: it may be before FromBlock (a
 		// misconfigured FromBlock), not a matter for review.
-		return Result{}, fmt.Errorf("reconcile: the nonce is used and no AuthorizationUsed since block %d: is FromBlock too late?", t.FromBlock)
+		return Result{}, fmt.Errorf("reconcile: the nonce is used and no AuthorizationUsed in blocks %d-%d: is FromBlock too late?", lo, hi)
 	}
 	if len(live) != 1 {
 		return Result{State: "needs_review", Block: at}, nil // used, and no single event says by what (a cancellation, say)

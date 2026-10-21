@@ -235,6 +235,13 @@ sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目�
 - Aaron 把舊檔改名為 `keys/shop.key.lost-20261021`（不刪），以 `apa-relayer keygen --role shop` 建立新的：shop `0x6bbe84371eab1a980ba862b90474a7e8e9bb773e`。
 - Claude Code 把 `host/payments.json`（`pay_to` 與 `consumer-a/…`、`consumer-b/…` 兩行委派）、`registry.json`（`merchant_pay_to`）、`profile.json`（merchants）中的舊商店位址換成新的；原檔留為 `*.before-shop-change`。合約、relayer 與 test402 那一行都不受影響。
 - 之後：新位址領一次測試 ETH；以 `opt-signer` 重產 `/opt` 的 `signer.json`（dlg-ta、dlg-tb 的收款方與語音商家改為新位址），重裝並重啟 Signer。
+- Aaron 為新 shop 領了 0.0001 測試 ETH，重產並安裝 `/opt` 的 `signer.json`（SHA-256 `b3dbb4e1374b882ab8d2c76d3602cffdf13ee56c4b80727292ff6a1f8a23fd97`；dlg-ta、dlg-tb 與語音商家改為新 shop），重啟 Signer。
+
+**第 6 步前：公開節點的 `eth_getLogs` 上限**（10/21）：Host 就緒後，對帳回 503 `chain_unavailable`。原因是 `sepolia.base.org` 每次 `eth_getLogs` 最多 200 個區塊（`-32614 eth_getLogs is limited to a 200 range`），而 Reconciler 一次問 2000。這也會讓付款工作永遠判斷不了「已付款」（它在 `Status` 也讀 log），所以第 ① 場之前先修：
+- 每次 `eth_getLogs` 改為 200 個區塊。
+- `Status` 只讀那筆授權可能被用掉的區塊：EIP-3009 只在 `validAfter` 之後、`validBefore` 之前有效，以區塊時間二分搜尋找出這段（一筆付款的窗口最多幾百個區塊），不再從部署區塊讀到現在；`Authorization` 因此多了 `validAfter`。
+- 完整的對帳報告仍從部署區塊讀起（每個錢包每 200 區塊一次），`p2-reconcile.sh` 等候上限改為 600 秒；主持人頁的對帳列只等 5 秒，可能顯示「未確認」，以報告為準。
+- 測試：`TestUnderABlockRangeCap`（本機 anvil 前放一個同樣拒絕超過 200 區塊的代理：付款狀態只讀它自己的窗口，報告分段讀完）；突變 2 項。
 
 ## 7 停止流程
 

@@ -1,11 +1,17 @@
 package reconcile
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"io"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
@@ -186,5 +192,65 @@ func TestStatusRefusesAPartialRecord(t *testing.T) {
 		if _, err := tok.Status(bg, a); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// capped is a node that refuses eth_getLogs over more than 200 blocks, as
+// Base Sepolia's public node does (docs/commercial-p2b.md 6, step 6), in
+// front of the local anvil; it counts the logs queries.
+func capped(t *testing.T, c *eth.Client) (*eth.Client, *int) {
+	n := new(int)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Method string
+			Params []map[string]any
+		}
+		json.Unmarshal(body, &req)
+		if req.Method == "eth_getLogs" && len(req.Params) == 1 {
+			*n++
+			from, _ := strconv.ParseUint(strings.TrimPrefix(req.Params[0]["fromBlock"].(string), "0x"), 16, 64)
+			to, _ := strconv.ParseUint(strings.TrimPrefix(req.Params[0]["toBlock"].(string), "0x"), 16, 64)
+			if to-from+1 > 200 {
+				io.WriteString(w, `{"jsonrpc":"2.0","id":1,"error":{"code":-32614,"message":"eth_getLogs is limited to a 200 range"}}`)
+				return
+			}
+		}
+		res, err := http.Post(c.URL, "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer res.Body.Close()
+		io.Copy(w, res.Body)
+	}))
+	t.Cleanup(srv.Close)
+	return eth.NewClient(srv.URL), n
+}
+
+// Under a 200-block cap with a long chain since FromBlock: a payment's
+// status reads only its own window's blocks; the report reads them all in
+// ranges the node allows.
+func TestUnderABlockRangeCap(t *testing.T) {
+	c := newChain(t)
+	ethtest.RPC(t, c.rpc, "anvil_mine", "0x1c2", "0x2") // 450 blocks 2 s apart, as on Base: more than two ranges
+	paid, data := c.sign(shopAddr, 500000, 600)
+	paid.ValidAfter = ethtest.Now(t, c.rpc) - 1
+	// The authorization signed with validAfter 0 still sits in this window; the window only narrows the search.
+	rc := c.submit(data)
+	ethtest.RPC(t, c.rpc, "anvil_mine", "0x5")
+	rpc, n := capped(t, c.rpc)
+	tok := Token{RPC: rpc, Address: c.usdc, Confirmations: 1}
+	r, err := tok.Status(bg, paid)
+	if err != nil || r.State != "settled" || r.Block != rc.BlockNumber {
+		t.Fatalf("status: %+v %v", r, err)
+	}
+	if *n > 2 {
+		t.Fatalf("the status read %d log ranges, not its window's", *n)
+	}
+	known := []Authorization{paid}
+	rep, err := tok.Report(bg, "local_anvil", ethtest.Chain, []eth.Address{c.payer.Addr}, known, ethtest.Now(t, c.rpc))
+	if err != nil || len(rep.Unauthorized) != 0 {
+		t.Fatalf("report: %+v %v", rep, err)
 	}
 }
