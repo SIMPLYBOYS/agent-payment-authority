@@ -1,5 +1,6 @@
 # P2 Testnet 付款、結算、對帳與交付：設計提案
 
+> **P2 Done（Aaron 10/21：「P2（P2-b／P2-c）先標記為 done」）。** P2-a（本機 anvil）、P2-b（Base Sepolia 準備）與 P2-c（Base Sepolia 實跑）都完成：Allow 與本人核准（裝置＋語音）各一筆已付款、已交付，一筆拒絕未付款，test402.com 一筆送出（wire 相容；test402 不結算），對帳未授權新增支出 0，AE1 驗收 18 已結案（`docs/commercial-p2b.md` §6.3、`docs/commercial-ae1.md` §18）。
 > **P2-a Done（Aaron 10/19：「P2-a 請標記為 done 並做 merge」）。** 本機 anvil 上的付款迴圈完成：Signer、預算 relayer、商店、Reconciler、Host 接線（H1–H6）、畫面與 Unity；H6 以 Aaron 的金鑰與裝置在本機鏈實跑（`docs/commercial-p2-host.md` §12.9）。P2-b（Base Sepolia 準備）與 P2-c 尚未開始；AE1 驗收 18 仍待 testnet 對帳。
 > 2026-10-17，Claude Code。依 vault〈Claude-Code-P2Testnet付款結算對帳交付派工-20261013〉、roadmap §5.3 P2（驗收 7、24、25、30、31、39、44）。分支 `commercial-p2`（從 main `e41cd5d`）。
 > **Aaron 10/17：「照建議」：第 6 節 P2-D1–P2-D6 全部採用建議。** 實作 P2-a（本機整合）；只用本機 anvil 與其公開測試金鑰。沒有建立或讀取任何付款金鑰、沒有連任何鏈、RPC、faucet 或 facilitator，也沒有動 `/opt`。

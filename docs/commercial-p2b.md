@@ -1,5 +1,6 @@
 # P2-b Testnet 準備：設計提案
 
+> **P2 Done（Aaron 10/21：「P2（P2-b／P2-c）先標記為 done」）。** P2-a（本機 anvil）、P2-b（Base Sepolia 準備）與 P2-c（Base Sepolia 實跑）都完成：Allow 與本人核准（裝置＋語音）各一筆已付款、已交付，一筆拒絕未付款，test402.com 一筆送出（wire 相容；test402 不結算），對帳未授權新增支出 0，AE1 驗收 18 已結案（`docs/commercial-p2b.md` §6.3、`docs/commercial-ae1.md` §18）。
 > 2026-10-19，Claude Code。依 vault〈Claude-Code-P2Testnet付款結算對帳交付派工-20261013〉的 P2-b、`docs/commercial-p2.md` §5 與 §6 的「P2-b 再決定」、`docs/commercial-p2-host.md` H-D5。分支 `commercial-p2b`（從 main `897cca7`）。
 > **Aaron 10/19：「照建議進行」：§5 的 P2b-D1–D8 全部採用建議。** 依 §4 分段實作。 這一段只做準備：程式改動都只在本機 anvil 上測試。沒有建立或讀取任何金鑰，也沒有連 RPC、faucet、facilitator、test402 或任何鏈，沒有動 `/opt`。§2 的查證只讀了公開文件網頁。
 

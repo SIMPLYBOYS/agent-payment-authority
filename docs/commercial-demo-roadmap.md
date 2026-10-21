@@ -170,7 +170,7 @@
 | W2「憑證存進 keystore；CLI 出示」、W3 verifier 與選擇性揭露；FR-1–3；驗收 1–3、12、26、28、29、35 | **C2 Done（Aaron 10/14）**；review pass（10/14；fake、測試金鑰；[commercial-c2.md](commercial-c2.md)） | x402 credential extension（第 26 項）屬 P2 | **C2**（必要；C1 之後） |
 | W4、W9、W10 電路 v1／v2、MPC、有狀態合約；驗收 10、11、15、16、17、27 | 未實作 | 全部 | Z1 → **Z2** |
 | W7–8 語音核准；FR-9；驗收 20、36；PRD §7 三態 | 未實作 | 全部 | **V1**（必要；A2 之後） |
-| W11 x402＋testnet 真簽名；驗收 7、24、25、30、31、39、44 | **P2-a Done（Aaron 10/19）**：本機 anvil 付款迴圈與實跑（[commercial-p2-host.md](commercial-p2-host.md) §12.9）；**P2-b 完成、P2-c 已在 Base Sepolia 實跑（10/21）**：Allow 與本人核准（裝置＋語音）各一筆已付款、已交付，一筆拒絕未付款，對帳未授權新增支出 0（[commercial-p2b.md](commercial-p2b.md) §6.3）；驗收 7 依 Aaron 認定為 test402.com 的 wire 相容性（test402 不結算），真結算由自家商店證明 | Signer 簽章、verify／settle、兩筆 tx、對帳、交付 | **P2** |
+| W11 x402＋testnet 真簽名；驗收 7、24、25、30、31、39、44 | **P2-a Done（Aaron 10/19）**：本機 anvil 付款迴圈與實跑（[commercial-p2-host.md](commercial-p2-host.md) §12.9）；**P2 Done（Aaron 10/21）**：P2-b 完成、P2-c 已在 Base Sepolia 實跑：Allow 與本人核准（裝置＋語音）各一筆已付款、已交付，一筆拒絕未付款，對帳未授權新增支出 0（[commercial-p2b.md](commercial-p2b.md) §6.3）；驗收 7 依 Aaron 認定為 test402.com 的 wire 相容性（test402 不結算），真結算由自家商店證明 | Signer 簽章、verify／settle、兩筆 tx、對帳、交付 | **P2** |
 | W12 E2E、恢復、對帳、UI 骨架；W13 素材、37–40、公開 | 展示骨架先做了（fake） | 端到端真實證據與三區呈現 proof／grant／tx | **E1-a**（部分整合）→ **E1-b**（最終驗收） |
 | FR-21、22（AI 評測）；驗收 18、19、34 | 未實作 | 評測集與報告 | **AE1**（必要；L2 之後，付款對帳部分等 P2） |
 | 一次一個 active task、Host 同時一場（PRD §3.2、§5；計畫 L444；3.2 設計） | 刻意的單場基線 | 多 Agent 體驗與基線不同 | **M-A** 範圍修訂 → M-B、M-C、M-D（§6.8） |
