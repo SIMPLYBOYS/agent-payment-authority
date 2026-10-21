@@ -72,7 +72,7 @@ function fakeHost() {
   const answer = (token, path, post) => {
     if (path === "/api/host/status") return { status: 200, body: { caller_role: token === "c".repeat(64) ? "host" : "operator" } };
     if (path === "/api/viewer") return { status: 200, body: { role: "viewer", consumer_id: token === "a".repeat(64) ? "consumer-a" : "consumer-b" } };
-    if (path === "/api/host/simulate") { current = { token: String(++nextTok).padStart(64, "0"), consumer: post.body.consumer_id }; return { status: 200, body: { token: current.token, consumer_id: current.consumer } }; }
+    if (path === "/api/host/simulate") { current = { token: String(++nextTok).padStart(64, "0"), consumer: post.body.consumer_id }; return { status: 200, body: { token: current.token, consumer_id: current.consumer, delegation_only: post.body.consumer_id === "consumer-live" } }; }
     if (path.startsWith("/api/sim/")) return current && token === current.token ? { status: 200, body: { consumer_id: current.consumer, approvals: [], served_at: 1 } } : { status: 401, body: { error: "unauthenticated" } };
     return { status: 404, body: null };
   };
@@ -95,7 +95,9 @@ test("the simulated customer: one at a time, per generation; a late reply after 
   await c.load(file());
   assert.equal(c.view().simConsumer, null);
   assert.equal(await c.approvals(), null, "nothing without a capability");
-  assert.equal((await c.simulate("consumer-a")).status, 200);
+  const first = await c.simulate("consumer-a");
+  assert.equal(first.status, 200);
+  assert.equal(first.body.delegation_only, false, "a fake host: delegations and approvals");
   assert.equal(c.view().simConsumer, "consumer-a");
   assert.equal((await c.approvals()).consumer, "consumer-a");
   host.hold(true);
@@ -206,4 +208,13 @@ test("R1: sameTarget: the same item of the same capability and generation; never
   assert.equal(A.sameTarget(asData, A.approvalTarget(3, 8, item("aps-1")), true), false, "another capability (A again)");
   assert.equal(A.sameTarget(asData, A.approvalTarget(4, 7, item("aps-1")), true), false, "another generation");
   assert.equal(A.sameTarget(asData, A.approvalTarget(3, 7, null), true), false, "no item");
+});
+
+test("E1-a: a live host that pays says its simulated customer confirms delegations only, and the page hears it", async () => {
+  const host = fakeHost();
+  const c = createHostCreds({ call: host.call, onChange: () => {} });
+  await c.load(file());
+  const r = await c.simulate("consumer-live");
+  assert.equal(r.status, 200);
+  assert.equal(r.body.delegation_only, true);
 });

@@ -310,7 +310,8 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
         sim = { id: ++simSeq, consumer, token: r.body.token };
         changed();
       }
-      return { gen: g, status: r.status, body: r.status === 200 ? { consumer_id: consumer } : r.body };
+      // delegation_only (E1-a): a live host that pays lets the customer confirm delegations only.
+      return { gen: g, status: r.status, body: r.status === 200 ? { consumer_id: consumer, delegation_only: r.body.delegation_only === true } : r.body };
     } catch {
       return g === gen ? { gen: g, error: "unreachable" } : null;
     }
