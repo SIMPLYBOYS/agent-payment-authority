@@ -5,12 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth/ethtest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/keytool"
@@ -392,5 +394,54 @@ func saved402(t *testing.T, dir string, asset eth.Address, payTo string) {
 	}
 	if err := writeJSON(filepath.Join(dir, "test402-offer.json"), Offer{ResourceURL: "https://test402.com/api/x402", PaymentRequired: h, FetchedAt: "2026-10-20T02:16:31Z"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// E1-a: e1a-host writes a new host directory from deploy's, with the
+// template's show-e1a- tasks on deploy's wallets, the shop's database in the
+// new directory and no test402 line; deploy's directory is left as it was.
+func TestE1aHost(t *testing.T) {
+	dir := t.TempDir()
+	host := filepath.Join(dir, "host")
+	os.Mkdir(host, 0o700)
+	var reg contracts.RegistryConfig
+	if err := readJSON("../../testdata/demo/registry.json", &reg); err != nil {
+		t.Fatal(err)
+	}
+	reg.Wallets[0].From = "0x245664a4bfb21a9e9d47f232f6d691223b833554"
+	pay := map[string]any{"environment": "base_sepolia", "dir": host, "test402_offer": "x.json",
+		"delegations": map[string]any{"consumer-a/0xshop": "dlg-ta@1", "consumer-b/0xshop": "dlg-tb@1", "consumer-b/0x0402": "dlg-t402@1"}}
+	for name, v := range map[string]any{"payments.json": pay, "registry.json": reg, "profile.json": map[string]any{"p": 1}} {
+		if err := writeJSON(filepath.Join(host, name), v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, _ := os.ReadFile(filepath.Join(host, "payments.json"))
+	dst := filepath.Join(dir, "e1a-1")
+	args := []string{"--dir", dir, "--out", dst, "--registry", "../../testdata/demo/registry-e1a.json", "--shop-eval", "i-summary-premium"}
+	if err := e1aHost(args, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	var r contracts.RegistryConfig
+	if err := errors.Join(readJSON(filepath.Join(dst, "payments.json"), &got), readJSON(filepath.Join(dst, "registry.json"), &r)); err != nil {
+		t.Fatal(err)
+	}
+	d := got["delegations"].(map[string]any)
+	if got["dir"] != dst || got["test402_offer"] != nil || got["shop_eval"] != "i-summary-premium" || len(d) != 2 || d["consumer-b/0x0402"] != nil {
+		t.Fatalf("payments %v", got)
+	}
+	if r.Wallets[0].From != reg.Wallets[0].From || len(r.Tasks) != 10 || r.Tasks[0].TaskID != "show-e1a-1021-a-01" {
+		t.Fatalf("registry %+v", r)
+	}
+	if after, _ := os.ReadFile(filepath.Join(host, "payments.json")); string(after) != string(before) {
+		t.Error("deploy's payments.json changed")
+	}
+	if err := e1aHost(args, io.Discard); err == nil {
+		t.Error("an existing --out was written again")
+	}
+	args[3], args[5] = filepath.Join(dir, "e1a-2"), "../../testdata/demo/registry.json" // show-a-…: maybe on chain
+	if err := e1aHost(args, io.Discard); err == nil {
+		t.Error("a template of show-a- tasks was taken")
 	}
 }

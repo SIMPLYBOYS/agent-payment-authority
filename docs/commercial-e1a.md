@@ -230,7 +230,7 @@
 - task ID：
   - 格式是 `show-e1a-<日期>-a-<序號>`，例如 `show-e1a-1021-a-01`。Host 只選 `show-` 開頭的 task（`cmd/demo/scenarios.go:93`），所以保留這個前綴。
   - 每組實跑換一個日期與序號：實跑前先改範本 `registry-e1a.json` 裡的日期與序號，再產生 registry，並以 RPC 確認未登記（§4.7）。
-  - 來源：新增範本 `testdata/demo/registry-e1a.json`，再用 `p2-testnet --registry testdata/demo/registry-e1a.json` 填入真正的錢包，作法和 P2-c 相同（`cmd/p2-testnet/main.go:180`）。
+  - 來源：範本 `testdata/demo/registry-e1a.json`，由新的 `p2-testnet e1a-host --dir DIR --out 新目錄 [--shop-eval 名稱]` 填入 deploy 時的錢包、資產與收款位址，寫成一個新的 host 目錄（payments、registry、profile；商店的資料庫也在新目錄裡；沒有 test402 那一行）。實作時發現 `p2-testnet deploy --registry` 會在 deploy 完成後重寫 P2-c 原本的 host 檔，所以改用這個不讀金鑰、不連鏈、不動原目錄的子命令。
 
 ## 5 要你決定的事
 

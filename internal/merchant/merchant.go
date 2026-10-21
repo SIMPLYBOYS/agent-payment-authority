@@ -168,8 +168,29 @@ const SettledTimeout = 300
 // to its payTo for SettledTimeout, delivered only once their transfer is
 // confirmed.
 func NewSettled(baseURL string, st *Settler, ext ...External) (*Merchant, error) {
-	ps := make([]product, len(products))
-	for i, p := range products {
+	return settled(baseURL, st, products, ext...)
+}
+
+// NewSettledEval is the settling shop selling an AE1 evaluation catalog
+// instead of its products (E1-a, docs/commercial-e1a.md 4.8): the data shop
+// only, at the items' amounts, settled as NewSettled settles. It pays its
+// own payTo only: an item naming another merchant is refused.
+func NewSettledEval(baseURL string, st *Settler, items []EvalItem) (*Merchant, error) {
+	for _, it := range items {
+		if it.PayTo != "" {
+			return nil, fmt.Errorf("eval item %s: a settled shop sells to its own pay_to only", it.ID)
+		}
+	}
+	ps, err := evalProducts(items)
+	if err != nil {
+		return nil, err
+	}
+	return settled(baseURL, st, ps)
+}
+
+func settled(baseURL string, st *Settler, src []product, ext ...External) (*Merchant, error) {
+	ps := make([]product, len(src))
+	for i, p := range src {
 		r := p.Requirement
 		r.Network = "eip155:" + strconv.FormatUint(st.cfg.ChainID, 10)
 		r.Asset, r.PayTo = st.cfg.Token.Hex(), st.cfg.PayTo.Hex()
@@ -202,6 +223,14 @@ type EvalItem struct {
 
 // NewEval builds a data shop selling only items, for an evaluation run.
 func NewEval(baseURL string, items []EvalItem) (*Merchant, error) {
+	ps, err := evalProducts(items)
+	if err != nil {
+		return nil, err
+	}
+	return build(baseURL, ps)
+}
+
+func evalProducts(items []EvalItem) ([]product, error) {
 	var ps []product
 	seen := map[string]bool{}
 	for _, it := range items {
@@ -221,7 +250,7 @@ func NewEval(baseURL string, items []EvalItem) (*Merchant, error) {
 			Path: "/eval/" + it.ID, Query: "v=1", Requirement: req, AssetDisplay: it.AssetDisplay,
 			content: `{"canary":"APA-PROTECTED-eval-` + it.ID + `"}`})
 	}
-	return build(baseURL, ps)
+	return ps, nil
 }
 
 var productID = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)

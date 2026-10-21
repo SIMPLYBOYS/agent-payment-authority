@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/ae1"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/keytool"
@@ -68,6 +69,10 @@ type payConfig struct {
 	// keygen --role shop), opened with a passphrase asked at start.
 	ShopKeyDir     string `json:"shop_key_dir,omitempty"`
 	ShopDailyTxCap uint64 `json:"shop_daily_tx_cap,omitempty"`
+	// ShopEval (E1-a, docs/commercial-e1a.md 4.8): the shop sells this AE1
+	// catalog, or this case's catalog with its patch, from evalCorpus
+	// instead of its products. Not with test402_offer.
+	ShopEval string `json:"shop_eval,omitempty"`
 	// Test402Offer: test402's 402 as saved (p2-testnet test402 --save;
 	// B5): the data shop lists test402 as an outside product with that
 	// quote. base_sepolia only.
@@ -288,6 +293,11 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 		return nil, nil, err
 	}
 	var ext []merchant.External
+	if c.ShopEval != "" && c.Test402Offer != "" {
+		closeR()
+		settler.Close()
+		return nil, nil, errors.New("payments: shop_eval or test402_offer, not both")
+	}
 	if c.Test402Offer != "" {
 		x, err := test402Product(c.Test402Offer)
 		if err != nil {
@@ -297,7 +307,15 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 		}
 		ext = append(ext, x)
 	}
-	shop, err := merchant.NewSettled(baseURL, settler, ext...)
+	var shop *merchant.Merchant
+	if c.ShopEval != "" {
+		var items []merchant.EvalItem
+		if items, err = evalItems(evalCorpus, c.ShopEval); err == nil {
+			shop, err = merchant.NewSettledEval(baseURL, settler, items)
+		}
+	} else {
+		shop, err = merchant.NewSettled(baseURL, settler, ext...)
+	}
 	if err != nil {
 		closeR()
 		settler.Close()
@@ -422,4 +440,25 @@ func (p *payments) run(ctx context.Context, st *store.Store, socket string, cloc
 		case <-time.After(5 * time.Second):
 		}
 	}
+}
+
+// evalCorpus is AE1's frozen corpus, read from the repository the host runs in.
+const evalCorpus = "testdata/ae1/corpus.json"
+
+// evalItems is name's items in the corpus at path: a catalog as it is, or a
+// case's catalog with the case's patch (E1-a's injection run).
+func evalItems(path, name string) ([]merchant.EvalItem, error) {
+	c, err := ae1.Load(path)
+	if err != nil {
+		return nil, fmt.Errorf("payments: shop_eval: %w", err)
+	}
+	if items, ok := c.Catalogs[name]; ok {
+		return items, nil
+	}
+	for _, k := range c.Cases {
+		if k.ID == name {
+			return c.Items(k)
+		}
+	}
+	return nil, fmt.Errorf("payments: shop_eval %q is neither a catalog nor a case of %s", name, path)
 }

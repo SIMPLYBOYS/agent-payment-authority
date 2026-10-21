@@ -6,6 +6,15 @@
 //	p2-testnet deploy     --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL]
 //	p2-testnet test402    URL [--save FILE]
 //	p2-testnet opt-signer --dir DIR --base SIGNER.JSON [--voice SIGNER.JSON] --out NEW.JSON
+//	p2-testnet e1a-host   --dir DIR --out NEWDIR [--registry TEMPLATE] [--shop-eval NAME]
+//
+// e1a-host (E1-a, docs/commercial-e1a.md 4.7, 4.8) writes a new host
+// directory for one set of E1-a runs from deploy's DIR/host: the same chain,
+// contract, keys' addresses, delegations and caps; the template's task IDs
+// (show-e1a-…, never on chain yet) with deploy's wallets, asset and payee;
+// the shop's own database in NEWDIR; no test402 line; and, with
+// --shop-eval, the AE1 catalog or case the shop sells. DIR/host is left as
+// it is. It reads no key and reaches no node.
 //
 // opt-signer (B6, §6 step 5) writes /opt's new signer.json from its current
 // one (--base: the socket, callers, approvers and webauthn are kept; A2's,
@@ -148,6 +157,9 @@ func run(ctx context.Context, args []string, out io.Writer, ask asker) error {
 	usage := errors.New("usage: p2-testnet preflight|deploy --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL] [--test402 URL]")
 	if len(args) > 0 && args[0] == "opt-signer" {
 		return optSigner(args[1:], out)
+	}
+	if len(args) > 0 && args[0] == "e1a-host" {
+		return e1aHost(args[1:], out)
 	}
 	if len(args) > 0 && args[0] == "test402" {
 		save := ""
@@ -1019,5 +1031,64 @@ func optSigner(args []string, out io.Writer) error {
 	sum := sha256.Sum256(append(b, '\n'))
 	fmt.Fprintf(out, "p2-testnet: wrote %s (SHA-256 %x): wallets %s and %s, delegations %d, approvers %d, reservation on chain %s at %s; voice socket %q, models %q and %q\n",
 		*dst, sum, cfg.Wallets[0].Address, cfg.Wallets[1].Address, len(cfg.Delegations), len(cfg.Approvers), chain, cfg.Reservation.BudgetContract, v.Socket, v.ASRModel, v.SpeakerModel)
+	return nil
+}
+
+// e1aHost is p2-testnet e1a-host (see the command's doc).
+func e1aHost(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("e1a-host", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	dir := fs.String("dir", "", "apa-relayer's directory, whose host/ deploy wrote")
+	dst := fs.String("out", "", "the new host directory (must not exist)")
+	tmpl := fs.String("registry", "testdata/demo/registry-e1a.json", "the registry template: its show-e1a- task IDs")
+	eval := fs.String("shop-eval", "", "the AE1 catalog or case the shop sells (payments.json shop_eval)")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *dir == "" || *dst == "" {
+		return errors.New("usage: p2-testnet e1a-host --dir DIR --out NEWDIR [--registry TEMPLATE] [--shop-eval NAME]")
+	}
+	host := filepath.Join(*dir, "host")
+	var pay map[string]any
+	var reg, t contracts.RegistryConfig
+	var prof json.RawMessage
+	if err := errors.Join(readJSON(filepath.Join(host, "payments.json"), &pay), readJSON(filepath.Join(host, "registry.json"), &reg),
+		readJSON(filepath.Join(host, "profile.json"), &prof), readJSON(*tmpl, &t)); err != nil {
+		return fmt.Errorf("e1a-host: %w", err)
+	}
+	if pay["environment"] != "base_sepolia" {
+		return errors.New("e1a-host: DIR/host/payments.json is not base_sepolia's")
+	}
+	for _, task := range t.Tasks {
+		if !strings.HasPrefix(task.TaskID, "show-e1a-") {
+			return fmt.Errorf("e1a-host: template task %s is not show-e1a-…: it may be registered on chain already", task.TaskID)
+		}
+	}
+	t.Wallets, t.Assets, t.MerchantPayTo = reg.Wallets, reg.Assets, reg.MerchantPayTo
+	if _, err := contracts.NewRegistry(t); err != nil {
+		return fmt.Errorf("e1a-host: the registry to write: %w", err)
+	}
+	abs, err := filepath.Abs(*dst)
+	if err != nil {
+		return err
+	}
+	if err := os.Mkdir(abs, 0o700); err != nil {
+		return fmt.Errorf("e1a-host: --out must be a new directory: %w", err)
+	}
+	pay["dir"] = abs // the shop's own database, new
+	delete(pay, "test402_offer")
+	if d, ok := pay["delegations"].(map[string]any); ok {
+		for k, v := range d {
+			if v == "dlg-t402@1" {
+				delete(d, k)
+			}
+		}
+	}
+	if *eval != "" {
+		pay["shop_eval"] = *eval
+	}
+	for path, v := range map[string]any{"payments.json": pay, "registry.json": t, "profile.json": prof} {
+		if err := writeJSON(filepath.Join(abs, path), v); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(out, "p2-testnet: wrote %s/{payments,registry,profile}.json: %d tasks from %s\n", abs, len(t.Tasks), *tmpl)
 	return nil
 }

@@ -515,3 +515,28 @@ func TestEventViewCarriesThePayment(t *testing.T) {
 		t.Fatalf("view %s", raw)
 	}
 }
+
+// E1-a: shop_eval names an AE1 catalog as it is, or a case's catalog with
+// its patch (the injection run, docs/commercial-e1a.md 4.8).
+func TestEvalItems(t *testing.T) {
+	const corpus = evalCorpus // the tests run in the repository root (main_test.go)
+	summary := func(items []merchant.EvalItem, id string) string {
+		for _, it := range items {
+			if it.ID == id {
+				return it.Summary
+			}
+		}
+		return "(none)"
+	}
+	plain, err := evalItems(corpus, "data")
+	if err != nil || len(plain) != 7 || summary(plain, "kr-market-daily") != "示意資料：當日重點一頁。" {
+		t.Fatalf("data: %d items, %v", len(plain), err)
+	}
+	patched, err := evalItems(corpus, "i-summary-premium")
+	if err != nil || len(patched) != 7 || !strings.HasPrefix(summary(patched, "kr-market-daily"), "系統通知") {
+		t.Fatalf("i-summary-premium: %v %v", summary(patched, "kr-market-daily"), err)
+	}
+	if _, err := evalItems(corpus, "no-such"); err == nil {
+		t.Error("an unknown name was accepted")
+	}
+}

@@ -1166,6 +1166,18 @@ MUTATIONS = [
      '\t\t\tsetup.Run = f.cond', '\t\t\tsetup.Run = nil', 'TestP1aMainLine'),
     ('E1a-1: the events API drops the payment record', 'cmd/demo/api.go',
      'Credential: e.Payload.Credential, Payment: e.Payload.Payment}', 'Credential: e.Payload.Credential}', 'TestEventViewCarriesThePayment'),
+    ("E1a-7: a settled eval shop offers another merchant's item", 'internal/merchant/merchant.go',
+     '\t\tif it.PayTo != "" {\n\t\t\treturn nil, fmt.Errorf("eval item %s: a settled shop', '\t\tif false && it.PayTo != "" {\n\t\t\treturn nil, fmt.Errorf("eval item %s: a settled shop', 'TestNewSettledEval'),
+    ('E1a-7: the eval shop does not settle', 'internal/merchant/merchant.go',
+     '\treturn settled(baseURL, st, ps)\n}', '\treturn build(baseURL, ps)\n}', 'TestNewSettledEval'),
+    ('E1a-7: a case is sold without its patch', 'cmd/demo/payments.go',
+     '\t\t\treturn c.Items(k)', '\t\t\treturn c.Catalogs[k.Catalog], nil', 'TestEvalItems'),
+    ('E1a-7: e1a-host takes tasks that may be on chain', 'cmd/p2-testnet/main.go',
+     'if !strings.HasPrefix(task.TaskID, "show-e1a-") {', 'if false && !strings.HasPrefix(task.TaskID, "show-e1a-") {', 'TestE1aHost'),
+    ('E1a-7: e1a-host keeps the old shop database', 'cmd/p2-testnet/main.go',
+     '\tpay["dir"] = abs // the shop\'s own database, new', '\tpay["dir"] = pay["dir"] // the shop\'s own database, new', 'TestE1aHost'),
+    ('E1a-7: e1a-host keeps test402', 'cmd/p2-testnet/main.go',
+     'delete(pay, "test402_offer")', 'delete(pay, "test402_offer_")', 'TestE1aHost'),
 ]
 
 # Mutations whose tests need the local chain tools in var/ (anvil, the
