@@ -129,6 +129,9 @@ func Keygen(dir, label, id string, passphrase func() ([]byte, error)) (string, e
 // The key itself, and so the address, never changes; on any refusal the
 // file is as it was. It returns the address.
 func Rekey(dir, label, id string, current, next func() ([]byte, error)) (string, error) {
+	if !signer.ValidWalletID(id) {
+		return "", fmt.Errorf("key ID %q is not valid", id)
+	}
 	if err := Private(dir); err != nil {
 		return "", err
 	}
@@ -173,9 +176,6 @@ func Rekey(dir, label, id string, current, next func() ([]byte, error)) (string,
 	if err != nil {
 		return "", err
 	}
-	if nk, err := signer.DecryptKeyFor(label, nf, id, pass); err != nil || signer.Address(nk.PubKey()) != f.Address || nf.Address != f.Address {
-		return "", errors.New("the new key file does not open to the same address; nothing was changed")
-	}
 	raw, err := json.Marshal(nf)
 	if err != nil {
 		return "", err
@@ -194,9 +194,28 @@ func Rekey(dir, label, id string, current, next func() ([]byte, error)) (string,
 		os.Remove(tmp)
 		return "", err
 	}
+	// The file as written opens with the new passphrase to the same address, or it replaces nothing.
+	if wf, err := signer.ReadKeyFile(tmp); err != nil || wf.Address != f.Address {
+		os.Remove(tmp)
+		return "", errors.New("the new key file does not read back; nothing was changed")
+	} else if nk, err := signer.DecryptKeyFor(label, wf, id, pass); err != nil || signer.Address(nk.PubKey()) != f.Address {
+		os.Remove(tmp)
+		return "", errors.New("the new key file does not open to the same address; nothing was changed")
+	} else {
+		nk.Zero()
+	}
 	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
 		return "", err
+	}
+	// The rename on disk before success is said: a power loss after this
+	// leaves the new file, not the old passphrase's.
+	d, err := os.Open(keys)
+	if err == nil {
+		err = errors.Join(d.Sync(), d.Close())
+	}
+	if err != nil {
+		return "", fmt.Errorf("the key file was replaced, but its directory did not sync (%w): open it with the new passphrase to be sure", err)
 	}
 	return f.Address, nil
 }

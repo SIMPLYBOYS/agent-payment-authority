@@ -149,6 +149,16 @@ func TestRekey(t *testing.T) {
 	if _, err := os.Lstat(path + ".rekey"); !os.IsNotExist(err) {
 		t.Fatal("the temporary file was left")
 	}
+	// A .rekey left by a stopped rekey: refused, the file unchanged.
+	os.WriteFile(path+".rekey", nil, 0o600)
+	after, _ := os.ReadFile(path)
+	if _, err := Rekey(dir, RelayerLabel, "issuer", answers(next), answers(old, old)); err == nil || !strings.Contains(err.Error(), ".rekey") {
+		t.Fatalf("a leftover .rekey: %v", err)
+	}
+	if now, _ := os.ReadFile(path); string(now) != string(after) {
+		t.Fatal("a leftover .rekey changed the file")
+	}
+	os.Remove(path + ".rekey")
 	// Under another program's label it does not open, so it is not rekeyed.
 	if _, err := Rekey(dir, signer.SignerLabel, "issuer", answers(next), answers(old, old)); err == nil {
 		t.Fatal("rekeyed under another label")
