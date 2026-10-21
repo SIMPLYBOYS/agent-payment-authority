@@ -231,6 +231,11 @@ sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目�
 - `serve` 只問一次密語，wallet-b 當初用了另一個密語，啟動被拒（沒有簽任何東西）。Aaron 記得 wallet-b 的密語，選擇加上 `apa-signer rekey`（3dee9b4，review APPROVE，修正 261cfc8）：用目前的密語解開、確認位址不變，以新密語重新加密，寫入的檔案讀回驗證後才改名取代，並同步目錄。執行檔因此重建：commit `261cfc87828bde415950f96e8601fa0d00da088f`，SHA-256 `560e32fa161e505f280aa34a0b26b107f2646c888f10cf9ba32f01da6e1ac4c8`（取代 `85c240c0…`）。
 - Aaron 安裝新執行檔、以 `rekey` 把 wallet-b 改為與 wallet-a 相同的密語，再以 `serve` 啟動：health `{"state":"ready","payment":"available"}`（兩把錢包都已解開、預留核對在鏈 84532）。第 5 步完成。
 
+**第 6 步前：換掉 shop 金鑰**（10/21）：啟動 Host 時 shop 金鑰的密語不對，Aaron 確定想不起來，那把金鑰無法再打開（位址 `0x30d9c45f7bab98561004d25b27aed474180a7b99` 上的 0.0001 測試 ETH 留在那裡；還沒有任何付款付到它）。Aaron 選 A：維持 P2b-D3（商店自己付 gas、自己收款），換一把新金鑰：
+- Aaron 把舊檔改名為 `keys/shop.key.lost-20261021`（不刪），以 `apa-relayer keygen --role shop` 建立新的：shop `0x6bbe84371eab1a980ba862b90474a7e8e9bb773e`。
+- Claude Code 把 `host/payments.json`（`pay_to` 與 `consumer-a/…`、`consumer-b/…` 兩行委派）、`registry.json`（`merchant_pay_to`）、`profile.json`（merchants）中的舊商店位址換成新的；原檔留為 `*.before-shop-change`。合約、relayer 與 test402 那一行都不受影響。
+- 之後：新位址領一次測試 ETH；以 `opt-signer` 重產 `/opt` 的 `signer.json`（dlg-ta、dlg-tb 的收款方與語音商家改為新位址），重裝並重啟 Signer。
+
 ## 7 停止流程
 
 **遇到就停**：任何付款變成 unknown 或 needs_review；對帳不是 0；交易 revert；碰到 §5 的任何上限；餘額和預期不符；RPC 回錯的鏈。
