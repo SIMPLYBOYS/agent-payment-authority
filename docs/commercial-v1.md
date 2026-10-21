@@ -328,7 +328,7 @@ Aaron 10/16「先做開發模式（A）」。這一輪用你的帳號在 `var/v1
 6. 執行下面這行，會打開 `http://localhost:8402/host`：
 
    ```
-   make present-a2 SIGNER=$PWD/var/v1-dev/run/signer.sock REGISTRY=$PWD/var/v1-dev/registry.json
+   make present-a2 SIGNER=$PWD/var/v1-dev/run/signer.sock AUTH=device REGISTRY=$PWD/var/v1-dev/registry.json
    ```
 
    - 頁面要你輸入終端機上的配對碼，**配對碼不要貼回來**；
@@ -531,7 +531,7 @@ curl -sS --unix-socket /opt/apa-signer/run/signer.sock http://signer/v1/health  
 **H 啟動 Host（W-host，repo 目錄）**
 
 ```
-make present-a2 SIGNER=/opt/apa-signer/run/signer.sock REGISTRY=$P/var/v1-dev/registry.json
+make present-a2 SIGNER=/opt/apa-signer/run/signer.sock AUTH=device REGISTRY=$P/var/v1-dev/registry.json
 ```
 
 - 確認終端機印出「A2 的 Host 資料庫沿用 …a2-host-b6424086acbc」，然後配對（配對碼不要貼回來）。

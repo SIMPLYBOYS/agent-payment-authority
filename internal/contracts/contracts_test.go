@@ -302,7 +302,9 @@ func TestEventAndStateBoundaries(t *testing.T) {
 		e.EventType = kind
 		mustFail(t, r.ValidateEvent(e, &p))
 	}
-	for _, mutation := range []func(*AuditEvent){func(e *AuditEvent) { e.EvidenceMode = "" }, func(e *AuditEvent) { e.Source = "" }, func(e *AuditEvent) { e.Scope.ConsumerID = "consumer-b" }, func(e *AuditEvent) { e.Scope.IntentHash = "sha256:" + strings.Repeat("0", 64) }, func(e *AuditEvent) { e.Sequence = 0 }, func(e *AuditEvent) { e.Payload.Decision.ApprovalStatus = "approved" }, func(e *AuditEvent) { e.Payload.Decision.PaymentStatus = "Settled" }} {
+	for _, mutation := range []func(*AuditEvent){func(e *AuditEvent) { e.EvidenceMode = "" }, func(e *AuditEvent) { e.Source = "" }, func(e *AuditEvent) { e.Scope.ConsumerID = "consumer-b" }, func(e *AuditEvent) { e.Scope.IntentHash = "sha256:" + strings.Repeat("0", 64) }, func(e *AuditEvent) { e.Sequence = 0 }, func(e *AuditEvent) { e.Payload.Decision.ApprovalStatus = "approved" }, func(e *AuditEvent) { e.Payload.Decision.PaymentStatus = "Settled" }, func(e *AuditEvent) {
+		e.Payload.RunConditions = &RunConditions{Agent: "live", Chain: "none", Authenticator: "none"} // E1-a: pay family only
+	}} {
 		e, p, r := event(t)
 		mutation(&e)
 		mustFail(t, r.ValidateEvent(e, &p))

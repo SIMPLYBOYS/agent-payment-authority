@@ -96,7 +96,7 @@ v1-dev: ready (sidecar $(echo "$health" | sed -E 's/.*"asr": "([^"]+)", "speaker
   Signer socket:  $ssock
   Signer data:    $dir/data
   admin command:  $dir/bin/apa-signer approver ... --dir $dir/data
-  host (another terminal):  make present-a2 SIGNER=$ssock REGISTRY=$dir/registry.json
+  host (another terminal):  make present-a2 SIGNER=$ssock AUTH=device REGISTRY=$dir/registry.json
 Leave this running; Ctrl-C stops the sidecar and the Signer.
 EOF
 wait

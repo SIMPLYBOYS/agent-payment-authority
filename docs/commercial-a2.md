@@ -19,7 +19,7 @@
 | Store | schema 5：`grants` 重建（webauthn 必有 `signer_approval_id`）、`approval_attempts`；attempt 的開始、共用與衝突；Signer 結果的落地；恢復檢查；`--upgrade-db` 1～4 → 5 | `internal/store/approvals.go`、`store.go`、`pay.go` | `9a76073` |
 | Host | `--approvals-signer`、`--authenticator-source`；Host／Origin 的精確清單；核准路由；登記中繼與 `/approve/enroll`；主持人狀態 | `cmd/demo/approvals.go`、`api.go`、`main.go`、`status.go` | `d88573a` |
 | 頁面 | 「需要你處理」的本人核准面板；登記頁；依核准方式切換的文字與頁首 | `web/host.js`、`web/approve.js`、`web/enroll.*`、`web/adapter.js`、`web/app.js` | `7595f01`、`71b094b`、`9d3c2aa` |
-| 入口 | `make present-a2 SIGNER=<socket>`：P1-a 的目錄、固定 `127.0.0.1:8402`、打開 `http://localhost:8402/host` | `Makefile`、`scripts/demo/present.sh` | `a8f1c52` |
+| 入口 | `make present-a2 SIGNER=<socket> AUTH=device`：P1-a 的目錄、固定 `127.0.0.1:8402`、打開 `http://localhost:8402/host` | `Makefile`、`scripts/demo/present.sh` | `a8f1c52` |
 | 驗證工具 | 計畫 `a2-check-plan.json`；反向項目 `^A2:`（11 項）；瀏覽器 `a2-ui.mjs` | `scripts/verify/` | `8a90a4d`、`1f9d966`、`70c9dc5` |
 
 ## 2 與設計的差異（review 時請特別看）
@@ -153,7 +153,7 @@
    - health 回 `approvals-only`。
 
 **操作**：
-1. `make present-a2 SIGNER=/opt/apa-signer/run/<socket>`，打開的是 `http://localhost:8402/host`。
+1. `make present-a2 SIGNER=/opt/apa-signer/run/<socket> AUTH=device`，打開的是 `http://localhost:8402/host`。
 2. 登記：
    - 終端機執行 `sudo -u apa-signer … approver enroll begin --dir /opt/apa-signer/data --approver approver-a`，記下登記 ID 與確認碼；
    - Chrome 打開 `http://localhost:8402/approve/enroll`，選 Google 密碼管理工具，用 PIN 完成；

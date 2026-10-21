@@ -521,7 +521,7 @@ H6 用你以 `apa-signer keygen` 建立的兩把本機測試金鑰（H-D6），�
 **工具**（這一段已實作並測試，沒有實際執行任何金鑰操作）：
 
 - `testdata/demo/scenarios-p2.json`：apa.pay.v1，兩位客人各有「資料研究室：韓國市場簡報」（0.50，超過 allow_max 0.10，是 Ask）與「街角咖啡：午餐套餐」（0.08，是 Allow）。
-- `make present-p2 SIGNER=…`：fake CLI、`--approvals-signer` 與 `--payments`；registry 與付款設定預設讀 `var/p2-local/`。
+- `make present-p2 SIGNER=… AUTH=device`：fake CLI、`--approvals-signer` 與 `--payments`；registry 與付款設定預設讀 `var/p2-local/`。
 - `scripts/demo/p2-dev.sh 0x<a> 0x<b>`：在 `var/p2-dev`（0700）寫出 Signer 設定並啟動 `apa-signer serve`。設定內容：兩個錢包、測試 USDC、委派（ID 與版本取自 `payments.json`，即 Host 開始付款時用的那兩個；每筆 0.10、總額 20.00、一週）、各一位核准者（每筆 1.00、24 小時 20.00；`http://localhost:8402`）、本機鏈的 `reservation` 段。總額等於鑄給每個錢包的 20.00 測試 USDC：委派總額計入 `signer.db` 存在期間簽過的每一筆，而 `signer.db` 在 demo 結束前保留，所以排練多次也不會用完。傳入的位址必須與 `var/p2-local/registry.json` 的錢包相同，否則不啟動。它只確認 key 檔存在，**不讀 key 檔**；設定檔以 0600 寫出；密語由 `apa-signer` 自己在終端機詢問。
 - `scripts/demo/p2-reconcile.sh`：把對帳結果存成檔（0600，給 `ae1-eval report --reconciliation`）；token 經 curl 的標準輸入傳入，不出現在畫面或程序列表。Host 沒有回應時顯示 `000`。
 - `make present-p2` 在 Signer socket 不存在時，提示先以 `p2-dev.sh` 啟動 `apa-signer serve`。
@@ -554,7 +554,7 @@ H6 用你以 `apa-signer keygen` 建立的兩把本機測試金鑰（H-D6），�
 
 終端機 3：Host
 
-7. `make present-p2 SIGNER=var/p2-dev/run/signer.sock`（選 B 時加 `AUTH=virtual`）：會打開 `http://localhost:8402/host`。終端機上的**配對代碼不要貼回**。
+7. `make present-p2 SIGNER=var/p2-dev/run/signer.sock AUTH=device`（選 B 時改成 `AUTH=virtual`）：會打開 `http://localhost:8402/host`。終端機上的**配對代碼不要貼回**。
 
 終端機 4：裝置登記（選 A 時；要核准 Ask 的客人各做一次，先做 approver-a）
 
@@ -573,7 +573,7 @@ H6 用你以 `apa-signer keygen` 建立的兩把本機測試金鑰（H-D6），�
 
 **重跑時**：
 
-- anvil 關掉後鏈狀態就沒了。重跑要用新的 `P2_LOCAL_DIR`（`p2-local` 不覆寫既有目錄），並以 `make present-p2 SIGNER=… PAYMENTS=<新目錄>/payments.json REGISTRY=<新目錄>/registry.json` 指向它；`p2-dev.sh` 也要以同一個 `P2_LOCAL_DIR` 重寫設定。
+- anvil 關掉後鏈狀態就沒了。重跑要用新的 `P2_LOCAL_DIR`（`p2-local` 不覆寫既有目錄），並以 `make present-p2 SIGNER=… AUTH=device PAYMENTS=<新目錄>/payments.json REGISTRY=<新目錄>/registry.json` 指向它；`p2-dev.sh` 也要以同一個 `P2_LOCAL_DIR` 重寫設定。
 - Host 資料庫依 Signer socket 保留（`var/a2-host-*`），前一輪的 task 與付款紀錄都還在（H6 的四場都已結束，沒有進行中的付款）；它們的交易 hash 指向已關掉的鏈，新鏈上的對帳不含它們。
 - `p2-dev.sh` 重寫 `signer.json` 會改變設定雜湊：當時還在進行的核准挑戰會回 `APPROVER_CHANGED`，重新按一次核准即可。已登記的裝置不受影響。
 - f7e9deb 之前建立的 `signer.db*` 若是 0644，先 `chmod 600 var/p2-dev/data/signer.db*`。

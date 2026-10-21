@@ -30,7 +30,7 @@ func TestRunConditionsEvidence(t *testing.T) {
 	id, intent := start("task-a", "consumer-a", run)
 	start("task-b", "consumer-b", nil)
 	s.Close()
-	s = e.open() // the run conditions come back from the task's terms
+	s = e.open() // the run conditions come back from the task's TASK_STARTED
 	if r, err := approve(s, id, intent, "approve-req-000000001", "consumer-a", "approve"); err != nil || r.Outcome != "approved" {
 		t.Fatalf("approve: %+v %v", r, err)
 	}

@@ -186,7 +186,7 @@ sudo 一律由你輸入；我不執行 sudo、不動 `/opt`。`$P` 是 repo 目�
 6. 核准表遷移（只有 `/opt/apa-signer/data/approvals.db` 還在時）：`sudo -u apa-signer /opt/apa-signer/bin/apa-signer approver migrate --dir /opt/apa-signer/data`；舊檔留為 `approvals.db.migrated`。
 7. 聲紋登記：語音服務照 V1 §15 S1 啟動後，照 V1 §15「V」為要核准 Ask 的核准者登記聲紋（approver-a；approver-b 也要核准時一樣）。`/opt` 的 A2 沒有登記過，不登記的話每一筆 Ask 的核准都會回 `VOICE_NOT_ENROLLED`。
 8. 啟動：Signer 改用 **`serve`**（不是 `serve-approvals`）：`cd /; sudo -u apa-signer /opt/apa-signer/bin/apa-signer serve --dir /opt/apa-signer/data`，輸入錢包的密語。預期 `apa-signer: serving on /opt/apa-signer/run/signer.sock (reservations checked on chain 84532; approvals on the same socket)`，這一行可以貼回。
-9. 之後第 6 步：`sh scripts/demo/p2-testnet.sh relayer`（另一個終端機，輸入 relayer 金鑰的密語），再 `make present-testnet SIGNER=/opt/apa-signer/run/signer.sock`（輸入商店金鑰的密語）。
+9. 之後第 6 步：`sh scripts/demo/p2-testnet.sh relayer`（另一個終端機，輸入 relayer 金鑰的密語），再 `make present-testnet SIGNER=/opt/apa-signer/run/signer.sock AUTH=device`（輸入商店金鑰的密語）。
 
 回滾：停掉 Signer，把第 4 步的備份放回原位（舊執行檔仍能打開補過表的資料庫，V1 §15）；testnet 上已發生的交易不能撤回，照 §7 處理。
 

@@ -398,8 +398,9 @@ func saved402(t *testing.T, dir string, asset eth.Address, payTo string) {
 }
 
 // E1-a: e1a-host writes a new host directory from deploy's, with the
-// template's show-e1a- tasks on deploy's wallets, the shop's database in the
-// new directory and no test402 line; deploy's directory is left as it was.
+// template's show-e1a- tasks on deploy's wallets, the shop's database still
+// deploy's (one daily cap per key) and no test402 line; deploy's directory
+// is left as it was; numbers come back as integers.
 func TestE1aHost(t *testing.T) {
 	dir := t.TempDir()
 	host := filepath.Join(dir, "host")
@@ -409,7 +410,7 @@ func TestE1aHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg.Wallets[0].From = "0x245664a4bfb21a9e9d47f232f6d691223b833554"
-	pay := map[string]any{"environment": "base_sepolia", "dir": host, "test402_offer": "x.json",
+	pay := map[string]any{"environment": "base_sepolia", "dir": host, "test402_offer": "x.json", "chain_id": 84532, "token_from_block": 48374723,
 		"delegations": map[string]any{"consumer-a/0xshop": "dlg-ta@1", "consumer-b/0xshop": "dlg-tb@1", "consumer-b/0x0402": "dlg-t402@1"}}
 	for name, v := range map[string]any{"payments.json": pay, "registry.json": reg, "profile.json": map[string]any{"p": 1}} {
 		if err := writeJSON(filepath.Join(host, name), v); err != nil {
@@ -428,7 +429,11 @@ func TestE1aHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := got["delegations"].(map[string]any)
-	if got["dir"] != dst || got["test402_offer"] != nil || got["shop_eval"] != "i-summary-premium" || len(d) != 2 || d["consumer-b/0x0402"] != nil {
+	raw, _ := os.ReadFile(filepath.Join(dst, "payments.json"))
+	if !strings.Contains(string(raw), `"chain_id": 84532,`) || !strings.Contains(string(raw), `"token_from_block": 48374723`) {
+		t.Fatalf("numbers: %s", raw)
+	}
+	if got["dir"] != host || got["test402_offer"] != nil || got["shop_eval"] != "i-summary-premium" || len(d) != 2 || d["consumer-b/0x0402"] != nil {
 		t.Fatalf("payments %v", got)
 	}
 	if r.Wallets[0].From != reg.Wallets[0].From || len(r.Tasks) != 10 || r.Tasks[0].TaskID != "show-e1a-1021-a-01" {

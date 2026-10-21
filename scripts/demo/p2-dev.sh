@@ -45,7 +45,7 @@ cat <<EOF >&2
 p2-dev: $dir/data/signer.json written (wallets $1, $2; reservations on $(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["rpc"])' "$local_dir/payments.json"))
   Signer socket:  $ssock
   admin command:  $dir/bin/apa-signer approver ... --dir $dir/data
-  host (another terminal):  make present-p2 SIGNER=$ssock
+  host (another terminal):  make present-p2 SIGNER=$ssock AUTH=device
 apa-signer asks for the wallets' passphrase now; Ctrl-C stops it.
 EOF
 exec "$dir/bin/apa-signer" serve --dir "$dir/data"

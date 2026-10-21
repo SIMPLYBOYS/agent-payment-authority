@@ -109,7 +109,7 @@ present-ux3:
 # AUTH=device or AUTH=virtual is required with SIGNER: the authenticator the page declares (E1-a labels approvals by it).
 # REGISTRY=FILE another demo registry (V1 development mode's has more tasks).
 present-a2:
-	@test -n "$(SIGNER)" || { echo "usage: make present-a2 SIGNER=/path/of/serve-approvals.sock (docs/commercial-a2.md)" >&2; exit 2; }
+	@test -n "$(SIGNER)" || { echo "usage: make present-a2 SIGNER=/path/of/serve-approvals.sock AUTH=device|virtual (docs/commercial-a2.md)" >&2; exit 2; }
 	@APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$(REGISTRY)" APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p1a.json sh scripts/demo/present.sh fake
 
 # present-p2: P2-a local payments (docs/commercial-p2-host.md 12.8): SIGNER is
@@ -118,7 +118,7 @@ present-a2:
 # scripts/demo/p2-local.sh wrote (default var/p2-local/). Fake CLI only; the
 # chain is the local anvil, the keys test keys.
 present-p2:
-	@test -n "$(SIGNER)" || { echo "usage: make present-p2 SIGNER=/path/of/signer.sock [PAYMENTS=var/p2-local/payments.json] [REGISTRY=var/p2-local/registry.json] (docs/commercial-p2-host.md 12.8)" >&2; exit 2; }
+	@test -n "$(SIGNER)" || { echo "usage: make present-p2 SIGNER=/path/of/signer.sock AUTH=device|virtual [PAYMENTS=var/p2-local/payments.json] [REGISTRY=var/p2-local/registry.json] (docs/commercial-p2-host.md 12.8)" >&2; exit 2; }
 	@APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$(or $(REGISTRY),var/p2-local/registry.json)" APA_PRESENT_PAYMENTS="$(or $(PAYMENTS),var/p2-local/payments.json)" APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p2.json sh scripts/demo/present.sh fake
 
 # present-testnet: P2 on the Base Sepolia testnet (docs/commercial-p2b.md 6):
@@ -129,7 +129,7 @@ present-p2:
 # sessions and Host database are under var/p2-testnet/present (§6 step 6: a
 # new Host database, not the one kept for this Signer socket in var/).
 present-testnet:
-	@test -n "$(SIGNER)" || { echo "usage: make present-testnet SIGNER=/path/of/signer.sock [HOST=var/p2-testnet/host] (docs/commercial-p2b.md 6)" >&2; exit 2; }
+	@test -n "$(SIGNER)" || { echo "usage: make present-testnet SIGNER=/path/of/signer.sock AUTH=device|virtual [HOST=var/p2-testnet/host] (docs/commercial-p2b.md 6)" >&2; exit 2; }
 	@h="$(or $(HOST),var/p2-testnet/host)"; mkdir -p var/p2-testnet/present && chmod 700 var/p2-testnet/present; APA_PRESENT_DIR="$(CURDIR)/var/p2-testnet/present" APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$$h/registry.json" APA_PRESENT_PAYMENTS="$$h/payments.json" APA_PRESENT_PROFILE="$$h/profile.json" APA_PRESENT_SCENARIOS=testdata/demo/scenarios-testnet.json sh scripts/demo/present.sh fake
 
 # docs/m1-evidence.md: the M1 fixture evidence bundle, a new

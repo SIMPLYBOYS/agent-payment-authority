@@ -12,7 +12,8 @@
 // directory for one set of E1-a runs from deploy's DIR/host: the same chain,
 // contract, keys' addresses, delegations and caps; the template's task IDs
 // (show-e1a-…, never on chain yet) with deploy's wallets, asset and payee;
-// the shop's own database in NEWDIR; no test402 line; and, with
+// the shop's database still deploy's (its daily cap is the key's); no
+// test402 line; and, with
 // --shop-eval, the AE1 catalog or case the shop sells. DIR/host is left as
 // it is. It reads no key and reaches no node.
 //
@@ -1072,7 +1073,8 @@ func e1aHost(args []string, out io.Writer) error {
 	if err := os.Mkdir(abs, 0o700); err != nil {
 		return fmt.Errorf("e1a-host: --out must be a new directory: %w", err)
 	}
-	pay["dir"] = abs // the shop's own database, new
+	// ponytail: "dir" stays deploy's, so the shop's settle.db (its daily cap
+	// per key, its nonces) is one for every run set; one host at a time.
 	delete(pay, "test402_offer")
 	if d, ok := pay["delegations"].(map[string]any); ok {
 		for k, v := range d {
