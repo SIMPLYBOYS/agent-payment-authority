@@ -15,13 +15,15 @@
 # http://localhost:8402, and the reservation section of the local anvil's
 # budget contract (from var/p2-local/payments.json; P2_LOCAL_DIR names
 # another). The addresses must be p2-local's. Ctrl-C stops the Signer.
+# P2_DEV_DIR (absolute) names another Signer directory than var/p2-dev, with
+# its own keys and signer.db (E1-a's local rehearsal; docs/commercial-e1a.md 6.1).
 set -eu
 [ $# -eq 2 ] || { echo "usage: sh scripts/demo/p2-dev.sh 0x<wallet-a> 0x<wallet-b>" >&2; exit 2; }
 for a in "$1" "$2"; do
   echo "$a" | grep -Eq '^0x[0-9a-f]{40}$' || { echo "p2-dev: $a is not a lowercase 0x address (as keygen printed it)" >&2; exit 2; }
 done
 root=$(cd "$(dirname "$0")/../.." && pwd)
-dir="$root/var/p2-dev"
+dir=${P2_DEV_DIR:-$root/var/p2-dev} # E1-a rehearsal: another directory, other keys
 local_dir=${P2_LOCAL_DIR:-$root/var/p2-local}
 mkdir -p "$dir/data/keys" "$dir/run" "$dir/bin"
 chmod 700 "$dir" "$dir/data" "$dir/data/keys" "$dir/run" "$dir/bin"
