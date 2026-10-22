@@ -305,6 +305,16 @@
 
 **彩排結論**：三場都照預期；兩個證據包 E1～E10 全部 PASS。彩排中發現並修正一個問題（憑證目錄沒有跟著 Host 資料庫保留，`4319ff7`）。另一個小問題：核准面板寫「Agent：?」（頁面還不認得 `live`），已修為「真實 Agent（live CLI）」。
 
+### 6.2 第 5～8 步：Base Sepolia 實跑
+
+> **Aaron 10/23：「核准 Base Sepolia 實跑」。**
+
+實跑前（Claude Code，只讀公開鏈與設定）：
+- 服務都沒有在跑；E1-a 沒改 Signer、relayer 的程式，`/opt` 不重新部署（第 4 步省略）。
+- 餘額（區塊 48846764）：relayer-gas 0.0000946 ETH、issuer 0.0000876 ETH、shop 0.0000989 ETH；wallet-a 19.50、wallet-b 19.92 test USDC。P2-c 每筆交易的 gas 遠低於 0.000001 ETH，足夠。
+- 委託與核准上限：`dlg-ta` 沒用過（P2-c 的 consumer-a 只有本人核准的一筆，用 approver 上限）；approver-a 24 小時 1.50 的視窗已過（P2-c 是 10/21）。
+- host 目錄 `var/e1a-testnet/host-t1`（`p2-testnet e1a-host --dir var/p2-testnet --label t1 --shop-eval data`），起點 `start-t1.json`：區塊 48846980，Verifier `0x5c262a91…4751` 與部署紀錄相同，`show-e1a-t1-…` 都沒登記。
+
 **實跑前要你確認**：
 - `claude --version` 是 `2.1.301 (Claude Code)`（`internal/buyer/live.go:21`）。
 - Signer 的每日上限與委託總額還夠：P2b-D5 的 `dlg-ta`、`dlg-tb` 每筆 0.10、總額 0.30；approver-a、approver-b 每筆 1.00、**24 小時 1.50**（P2-c 的核准若還在 24 小時內，① 的 0.50 可能被拒）；relayer 每日 12 筆、商店每日 4 筆。
