@@ -60,6 +60,8 @@ test("a stored attempt says where it stands; past the deadline an unknown one sa
 test("the three sources are named apart", () => {
   assert.equal(AP.sourceText({ agent: "fake", authenticator: "virtual", payment: "disabled" }), "Agent：fake・驗證器：virtual authenticator（測試用）・付款：未啟用");
   assert.match(AP.sourceText({ agent: "fake", authenticator: "device", payment: "disabled" }), /已登記的裝置/);
+  assert.match(AP.sourceText({ agent: "live", authenticator: "device", payment: "local_anvil" }), /^Agent：真實 Agent（live CLI）・/); // E1-a, seen as "?" in the rehearsal
+  assert.match(AP.sourceText({ agent: "other" }), /^Agent：\?/);
 });
 
 // Review R4/R5: a decided record is worded by its own method, whatever the

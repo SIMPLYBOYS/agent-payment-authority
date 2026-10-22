@@ -198,7 +198,8 @@ export function grantLine(g, pays = false) {
 export function sourceText(s) {
   const auth = s && s.authenticator === "virtual" ? "virtual authenticator（測試用）" : "已登記的裝置";
   const pay = s && s.payment === "disabled" ? "未啟用" : s && paysOn(s.payment) ? PAYING[s.payment] + "（測試 USDC）" : "?";
-  return "Agent：" + (s && s.agent === "fake" ? "fake" : "?") + "・驗證器：" + auth + "・付款：" + pay;
+  const agent = { fake: "fake", live: "真實 Agent（live CLI）" }[s && s.agent] || "?"; // live: E1-a
+  return "Agent：" + agent + "・驗證器：" + auth + "・付款：" + pay;
 }
 
 // V1: a recording as the Signer takes it: a WAV, 16 kHz mono 16-bit PCM,

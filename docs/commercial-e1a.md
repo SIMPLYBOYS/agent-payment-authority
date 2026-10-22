@@ -303,7 +303,7 @@
 - 證據包 `artifacts/e1a/rehearsal-r2`（`e1a-20261022T174304Z-3d7fea`，區塊 12～14），`verify-demo --mode e1a --rpc`：**E1～E10 全部 PASS**；E10：`fooled: false`，請購 `[kr-market-daily]`；E8：區塊內沒有未授權轉出。
 - 這是一次執行的結果（AE1 是每案三次、兩個模型），付款主機的提示詞與 AE1 不同，只當作 E1-a 的反例，不補 AE1。
 
-**彩排結論**：三場都照預期；兩個證據包 E1～E10 全部 PASS。彩排中發現並修正一個問題（憑證目錄沒有跟著 Host 資料庫保留，`4319ff7`）。另一個待修的小問題：核准面板寫「Agent：?」（頁面還不認得 `live`）。
+**彩排結論**：三場都照預期；兩個證據包 E1～E10 全部 PASS。彩排中發現並修正一個問題（憑證目錄沒有跟著 Host 資料庫保留，`4319ff7`）。另一個小問題：核准面板寫「Agent：?」（頁面還不認得 `live`），已修為「真實 Agent（live CLI）」。
 
 **實跑前要你確認**：
 - `claude --version` 是 `2.1.301 (Claude Code)`（`internal/buyer/live.go:21`）。
