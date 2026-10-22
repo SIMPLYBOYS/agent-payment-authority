@@ -263,6 +263,8 @@
 
 ### 6.1 第 3 步：本機彩排（本機 anvil、真實 CLI、你的裝置）
 
+> **Aaron 10/22：「核准本機彩排」。** 開始前確認：8545、8402 都沒有程式在聽，`var/p2-dev/run` 沒有 Signer socket，`var/p2-local-e1a`、`var/e1a-local` 都還不存在。
+
 目的：在花 testnet 的錢之前，把 Base Sepolia 要跑的三場在本機鏈上跑一次，確認單元測試碰不到的部分：v2 的 Ask 經你的裝置核准後上鏈付款、live 付款主機的接線、證據包與 checker 對真實資料的結果。用 P2-a 的開發用 Signer（`var/p2-dev`，wallet-a `0x4d4772cfc246a7817abe284f36b5da08ee987041`、wallet-b `0x5fc5b3747fe72687bfce2a722dfac25c0b8d6676`）與新的本機鏈；不碰 `/opt`、testnet、`var/v1-dev`。
 
 | # | 誰 | 終端機 | 指令 | 可以貼回的 |
