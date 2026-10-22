@@ -269,7 +269,7 @@
 
 | # | 誰 | 終端機 | 指令 | 可以貼回的 |
 |---|---|---|---|---|
-| 0 | 你 | 任一 | `claude --version`（要是 `2.1.301 (Claude Code)`；CLI 會自動更新，不符就先停） | 版本那一行 |
+| 0 | 你 | 任一 | `var/cli/claude-2.1.301 --version`（`var/present.conf` 的 `cli=` 指向這份保存的 2.1.301；PATH 上的 `claude` 會自動更新，10/23 已是 2.1.308，Host 不用它）。要是 `2.1.301 (Claude Code)`，不符就先停 | 版本那一行 |
 | 1 | 你 | 1（開著） | `P2_LOCAL_DIR=var/p2-local-e1a sh scripts/demo/p2-local.sh 0x4d4772cfc246a7817abe284f36b5da08ee987041 0x5fc5b3747fe72687bfce2a722dfac25c0b8d6676` | 整段（沒有秘密）；最後一行是 `p2-local: anvil is running` |
 | 2 | 你 | 2（開著） | `P2_LOCAL_DIR=$PWD/var/p2-local-e1a sh scripts/demo/p2-dev.sh 0x4d4772cfc246a7817abe284f36b5da08ee987041 0x5fc5b3747fe72687bfce2a722dfac25c0b8d6676`，提示時輸入密語 | `apa-signer: serving on …` 那一行 |
 | 3 | Claude Code | — | `go run ./cmd/p2-testnet e1a-host --from var/p2-local-e1a --out var/e1a-local/host-r1 --label r1 --shop-eval data`；`go run ./cmd/e1-evidence start --rpc http://127.0.0.1:8545 --host var/e1a-local/host-r1 --out var/e1a-local/start-r1.json` | — |
