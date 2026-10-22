@@ -293,6 +293,11 @@
 - ① 第一次（`show-e1a-r1b-a-01`）因裝置還沒登記而逾時，沒有付款。
 - ① 第二次（`show-e1a-r1b-a-02`）被 Deny：`CREDENTIAL_STATUS_UNAVAILABLE`／`STATUS_LIST_ROLLBACK`。原因是 `present.sh` 每次啟動都在新的場次目錄重建憑證（新的 issuer 與狀態清單），但有 Signer 時 Host 資料庫跨重啟保留，資料庫看到的清單像是倒退了。保護是對的，錯在啟動方式。修正：有 Signer 時憑證目錄跟著 Host 資料庫保留（`a2-host-*/cred`），只在第一次建立。修正後改用新的 host 目錄 `host-r1c`（新的資料庫與憑證），起點重新記錄。
 
+**彩排結果：①②（`host-r1c`，10/23）**
+- ① `show-e1a-r1c-a-01`：真實 Agent 請購 `kr-market-brief` 0.50 → Ask → Aaron 以裝置（credential `8da3a78832bbb939`）核准 → tx#1 `0xe02cc120…d29c`（區塊 9）→ tx#2 `0x0017d226…bc80`（區塊 10）→ 交付，收據 `rcpt-18732be7…`。v2 的 Ask 經本人裝置核准再上鏈付款，在本機跑通。
+- ② `show-e1a-r1c-a-02`：真實 Agent 請購 `kr-archive-full` 5.50 → Deny（`INSUFFICIENT_BUDGET`），沒有付款。
+- 證據包 `artifacts/e1a/rehearsal-r1c`（`e1a-20261022T174103Z-724f44`，區塊 8～11），`verify-demo --mode e1a --rpc`：**E1～E10 全部 PASS**（E4 由 checker 向本機鏈重跑 `verifyProof`、比對 Verifier code、核對 tx#2 的 nonce；E6 核對真實 CLI 的 trace 與提示詞 SHA；E8 區塊內只有 ① 的轉出）。性質：真實 Agent、實機裝置，但鏈是本機 anvil（`fixture`/`local_anvil`），不是 testnet 結果。
+
 **實跑前要你確認**：
 - `claude --version` 是 `2.1.301 (Claude Code)`（`internal/buyer/live.go:21`）。
 - Signer 的每日上限與委託總額還夠：P2b-D5 的 `dlg-ta`、`dlg-tb` 每筆 0.10、總額 0.30；approver-a、approver-b 每筆 1.00、**24 小時 1.50**（P2-c 的核准若還在 24 小時內，① 的 0.50 可能被拒）；relayer 每日 12 筆、商店每日 4 筆。
