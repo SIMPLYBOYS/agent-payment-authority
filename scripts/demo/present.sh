@@ -109,12 +109,16 @@ w=$(mktemp -d "$base/present-XXXXXX") || stop "cannot make a session directory u
 mkdir -m 700 "$w/db" "$w/runs" "$w/tok" || stop "cannot make ${w}/db, runs and tok"
 db=$w/db
 runs=$w/runs
+cred=$w/cred
 if [ -n "$signer" ]; then
 	sabs=$(cd "$(dirname "$signer")" && pwd)/$(basename "$signer") || stop "cannot resolve ${signer}"
 	keep=$base/a2-host-$(printf %s "$sabs" | shasum -a 256 | cut -c1-12)
 	{ mkdir -p "$keep/db" "$keep/runs" && chmod 700 "$keep" "$keep/db" "$keep/runs"; } || stop "cannot make ${keep}"
 	db=$keep/db
 	runs=$keep/runs
+	# The credentials go with the database they are recorded in: a new issuer
+	# and status list each start would read as a rollback and deny (E1-a).
+	cred=$keep/cred
 	echo "present: A2 的 Host 資料庫沿用 ${keep}（Signer ${sabs}；task 不重複使用）" >&2
 fi
 "$GO" build -o "$w/demo" ./cmd/demo || stop "建置失敗；沒有啟動任何程式（也不用舊的）"
@@ -123,8 +127,12 @@ if [ "$mode" = fake ]; then
 fi
 if [ -n "$creds" ]; then
 	"$GO" build -o "$w/apa-issuer" ./cmd/apa-issuer || stop "apa-issuer 建置失敗；沒有啟動任何程式"
-	"$w/apa-issuer" init --dir "$w/cred" --issuer issuer-demo --consumers consumer-a,consumer-b >&2 || stop "憑證目錄建立失敗；沒有啟動任何程式"
-	echo "present: 撤銷某個 task 的憑證：${w}/apa-issuer revoke --dir ${w}/cred --task <task_id>（測試金鑰；host 每 300 秒自動更新清單）" >&2
+	if [ -d "$cred" ]; then
+		echo "present: 憑證目錄沿用 ${cred}（與 Host 資料庫一起保留）" >&2
+	else
+		"$w/apa-issuer" init --dir "$cred" --issuer issuer-demo --consumers consumer-a,consumer-b >&2 || stop "憑證目錄建立失敗；沒有啟動任何程式"
+	fi
+	echo "present: 撤銷某個 task 的憑證：${w}/apa-issuer revoke --dir ${cred} --task <task_id>（測試金鑰；host 每 300 秒自動更新清單）" >&2
 fi
 # What the binary says of its source, as Go recorded it (a modified tree says so).
 "$GO" version -m "$w/demo" 2>/dev/null | grep -E 'vcs\.(revision|modified|time)' | tr -s '\t ' ' ' >"$w/build.txt"
@@ -139,7 +147,7 @@ if [ "$mode" = live ]; then
 	[ -z "$livepay" ] || livecat=${APA_PRESENT_SCENARIOS:-testdata/demo/scenarios-e1a.json}
 	set --
 	[ -z "$livepay" ] || set -- --approvals-signer "$signer" --authenticator-source "$authsrc" --payments "$payments"
-	[ -z "$creds" ] || set -- "$@" --credential-dir "$w/cred"
+	[ -z "$creds" ] || set -- "$@" --credential-dir "$cred"
 	[ -z "$profile" ] || set -- "$@" --profile "$profile"
 	[ -z "$livepay" ] || echo "present: 付款的 live 展示（E1-a）：委託是模擬，Ask 由本人以已登記的裝置核准，付款 ${payments}" >&2
 	APA_ADDR=$addr APA_LIVE_CLI=true APA_DB_PATH=$db/live.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \
@@ -149,7 +157,7 @@ else
 	echo "present: fake 展示（不執行模型）。" >&2
 	set --
 	[ -z "$signer" ] || set -- --approvals-signer "$signer" --authenticator-source "$authsrc"
-	[ -z "$creds" ] || set -- "$@" --credential-dir "$w/cred"
+	[ -z "$creds" ] || set -- "$@" --credential-dir "$cred"
 	[ -z "$payments" ] || set -- "$@" --payments "$payments"
 	[ -z "$profile" ] || set -- "$@" --profile "$profile"
 	APA_ADDR=$addr APA_DB_PATH=$db/fake.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \

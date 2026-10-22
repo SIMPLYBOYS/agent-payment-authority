@@ -287,6 +287,12 @@
 
 **10/23 改用新的本機測試金鑰**（第 2 步：`var/p2-dev` 的密語打不開 wallet-a 的金鑰檔；Aaron 選 A）：`var/p2-dev` 原封不動；新金鑰在 `var/p2-dev-e1a`（`apa-signer keygen`，兩把同一密語），本機鏈以新位址重開（`P2_LOCAL_DIR=var/p2-local-e1a2`；`var/p2-local-e1a` 保留不用），`p2-dev.sh` 以 `P2_DEV_DIR=$PWD/var/p2-dev-e1a` 啟動。新的 `signer.db` 沒有登記過裝置，所以 Host 啟動後先照 P2-a 的步驟（`docs/commercial-p2-host.md` §12.8 第 8～10 步，目錄換成 `var/p2-dev-e1a`）登記 approver-a 的 localhost passkey，再開始第 5 步。
 
+**10/23 彩排中發現並修正**：
+- 第 2 步的 Signer 和本機鏈曾一起停掉（終端機被重用），改用 `P2_LOCAL_DIR=var/p2-local-e1a3` 重開；host 目錄 `host-r1b`。
+- 新的 Signer 目錄要重新登記裝置：approver-a 的 credential `8da3a78832bbb939` 已啟用。
+- ① 第一次（`show-e1a-r1b-a-01`）因裝置還沒登記而逾時，沒有付款。
+- ① 第二次（`show-e1a-r1b-a-02`）被 Deny：`CREDENTIAL_STATUS_UNAVAILABLE`／`STATUS_LIST_ROLLBACK`。原因是 `present.sh` 每次啟動都在新的場次目錄重建憑證（新的 issuer 與狀態清單），但有 Signer 時 Host 資料庫跨重啟保留，資料庫看到的清單像是倒退了。保護是對的，錯在啟動方式。修正：有 Signer 時憑證目錄跟著 Host 資料庫保留（`a2-host-*/cred`），只在第一次建立。修正後改用新的 host 目錄 `host-r1c`（新的資料庫與憑證），起點重新記錄。
+
 **實跑前要你確認**：
 - `claude --version` 是 `2.1.301 (Claude Code)`（`internal/buyer/live.go:21`）。
 - Signer 的每日上限與委託總額還夠：P2b-D5 的 `dlg-ta`、`dlg-tb` 每筆 0.10、總額 0.30；approver-a、approver-b 每筆 1.00、**24 小時 1.50**（P2-c 的核准若還在 24 小時內，① 的 0.50 可能被拒）；relayer 每日 12 筆、商店每日 4 筆。
