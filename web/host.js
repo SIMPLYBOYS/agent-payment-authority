@@ -262,6 +262,7 @@ function renderScene() {
 onUnauthorized(() => { if (!creds.unauthorized(viewerGen)) forget(); });
 
 function render(v) {
+  if (checker && checkerGen !== creds.gen) setChecker(null); // new credentials: the report may be of another show
   if (v.gen !== shownGen) {
     // New generation: the previous identity leaves the panels and the shop.
     shownGen = v.gen;

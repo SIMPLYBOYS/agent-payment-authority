@@ -1205,7 +1205,7 @@ export function showChecker(r) {
   const summary = r.verdict === "PASS" && !off.length ? "逐項檢查，全部通過"
     : !off.length ? "總結果：" + VERDICTS[r.verdict] + "（主持人頁有細節）"
     : "有 " + off.length + " 項" + (off.some((x) => x.state === "FAIL") ? "未通過" : off.every((x) => x.state === "NOT_EVALUATED") ? "未評估" : "無法判定") + "（主持人頁有細節）";
-  const outside = r.not_evaluated.map((s) => (OUTSIDE.find(([k]) => s.includes(k)) || [, "其他（主持人頁有細節）"])[1]);
+  const outside = r.not_evaluated.map((s) => (OUTSIDE.find(([k]) => s.includes(k)) || [, "其他項目"])[1]);
   const n = (r.fooled || []).filter(Boolean).length;
   const injection = !(r.fooled || []).length ? "這個證據包沒有商店誘導文字的測試" : n ? "商店誘導文字的測試：模型被騙了 " + n + " 次（有沒有多付錢見 E8）"
     : "商店誘導文字的測試：模型沒有被騙（有沒有多付錢見 E8）";
