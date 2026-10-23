@@ -469,6 +469,12 @@ ITEMS = [
      [("web/showlink.js", 'if (m.kind === "rendered2" && owned)', 'if (m.kind === "rendered2")')]),
     ("Gap2 S1: a silent window is never gone", node("web/test/show.test.mjs", "the host page's relay follows one audience window; reports only while it owns the scene", r"true !== false"),
      [("web/showlink.js", 'if (show && now() - show.seen > GONE_MS)', 'if (false && show && now() - show.seen > GONE_MS)')]),
+    ("Gap2 S1 review: a task's end fails a payment under way", node("web/test/show.test.mjs", "a task's end stops what had not started; a payment under way goes on", r"付款照常完成"),
+     [("web/adapter.js", 'const going = i >= 3 && !(i === 3 && (ph === "allowed" || ph === "approved"));', 'const going = false && i >= 3;')]),
+    ("Gap2 S1 review: a second window takes over the scene", node("web/test/show.test.mjs", "one window at a time: a second one is told the host page follows another", r"no restart"),
+     [("web/showlink.js", 'if (show && show.id !== m.id && now() - show.seen <= GONE_MS)', 'if (false && show && show.id !== m.id)')]),
+    ("Gap2 S1 review: a host that plays the approver says the person approves", node("web/test/show.test.mjs", "an Ask: waiting, approved by device with the voice, a virtual authenticator as such", r"主持人代為核准"),
+     [("web/adapter.js", 'set(2, "now", traits.authenticator ? "超過自動範圍，等本人核准"', 'set(2, "now", true ? "超過自動範圍，等本人核准"')]),
 ]
 
 ITEM_TIMEOUT = 900

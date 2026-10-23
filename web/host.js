@@ -123,6 +123,7 @@ function useShow(on) {
   sceneUnity.target = want;
   $("show-note").hidden = !on;
   document.querySelector(".canvas-frame").hidden = on;
+  $("unity-status").hidden = on; // it speaks of this page's own (hidden) shop
   ensureScene();
 }
 function restartScene() {
@@ -165,7 +166,13 @@ const goodsOf = (vk) => (vk ? A.venue(vk).goods : vk === null ? "商品・情境
 const venueRows = (vk) => (vk ? [["情境", A.venue(vk).name + (A.venue(vk).demo ? "（示範情境）" : "")], ["交付方式", A.venue(vk).delivery]]
   : vk === null ? [["情境", "未確認（不在最近的場次中，或目錄已改）"]] : []);
 setVenueOf(runVenue);
-onReplayMode((on) => (on ? scene.pause() : scene.resume()));
+onReplayMode((on) => {
+  if (on) scene.pause();
+  else scene.resume();
+  // A replay plays on this page's own shop: shown while it plays, even with the audience window open (review 5).
+  document.querySelector(".canvas-frame").hidden = sceneUnity.target === relay && !on;
+  $("unity-status").hidden = sceneUnity.target === relay && !on;
+});
 const short = (c) => (c === "consumer-a" ? "A" : c === "consumer-b" ? "B" : c);
 
 // hosting: this host starts runs (not history mode) and the page holds its credentials.
@@ -1705,7 +1712,13 @@ let pairTried = false;
 let pairedGen = -1;
 const PAIR_NOTE = "配對只取得本次服務的主持人憑證，不會執行模型；按「開始」才執行一場。";
 // The audience window: a second window of this origin, put on the projector.
-$("show-open").addEventListener("click", () => window.open("/show", "apa-show"));
+// An open window is only brought forward, never loaded again (its Unity would start over).
+$("show-open").addEventListener("click", () => {
+  const w = window.open("", "apa-show");
+  if (!w) return;
+  if (w.location.href === "about:blank") w.location.href = "/show";
+  w.focus();
+});
 $("pair-form").addEventListener("submit", (ev) => {
   ev.preventDefault();
   const input = $("pair-code");

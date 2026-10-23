@@ -1014,12 +1014,13 @@ export const SHOW_STEPS = ["委託", "選購", "核准", "付款", "交付"]; //
 export const PLAIN = {
   INSUFFICIENT_BUDGET: "超出預算", MERCHANT_NOT_ALLOWED: "不在允許的商店", ASSET_NOT_ALLOWED: "不是允許的幣別",
   CREDENTIAL_INVALID: "憑證檢查沒通過", CREDENTIAL_REVOKED: "憑證已撤銷", CREDENTIAL_STATUS_UNAVAILABLE: "憑證狀態無法確認",
-  AUTHORIZATION_EXPIRED: "憑證已過期", CONFIG_MISSING: "缺少憑證", TASK_NOT_ACTIVE: "任務已結束", CONTRACT_VERSION_MISMATCH: "版本不符",
+  AUTHORIZATION_EXPIRED: "授權或報價已過期", CONFIG_MISSING: "缺少設定或憑證", TASK_NOT_ACTIVE: "任務已結束", CONTRACT_VERSION_MISMATCH: "版本不符",
   OWNERSHIP_MISMATCH: "不是這位客人的請購", PAYMENT_CAPABILITY_UNAVAILABLE: "這場展示不能付款", APPROVER_UNAVAILABLE: "沒有可核准的人",
   VOICE_CHALLENGE_FAILED: "唸的內容或聲音不符",
 };
 export const plainReason = (code) => PLAIN[code] || "其他原因（主持人頁有細節）";
-export const usdc = (v) => (typeof v === "string" && /^[0-9]+$/.test(v) ? (Number(v) / 1e6).toFixed(2) + " USDC" : "金額未提供");
+// usdc: base units (6 decimals) as USDC, never rounded: at least two decimals, more when they matter.
+export const usdc = (v) => (typeof v === "string" && /^[0-9]+$/.test(v) ? (Number(v) / 1e6).toFixed(6).replace(/(\.\d\d\d*?)0+$/, "$1") + " USDC" : "金額未提供");
 const PAID = ["paying", "confirming", "paid", "delivered", "delivery_failed", "not_paid", "payment_review"];
 
 // showCustomer: one customer's five steps for the audience (state: todo,
@@ -1049,7 +1050,8 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
   if (sc.verdict === "Allow") { set(2, "done", "在委託範圍內，自動放行"); decided = true; }
   else if (sc.verdict === "Deny") set(2, "fail", plainReason(sc.reason) + "，已拒絕");
   else if (sc.verdict === "Ask") {
-    if (ph === "waiting") set(2, "now", "超過自動範圍，等本人核准");
+    if (ph === "waiting") set(2, "now", traits.authenticator ? "超過自動範圍，等本人核准"
+      : isPay(task.contract_version) ? "超過自動範圍，等核准（示範：由主持人代為核准）" : "超過自動範圍；這場展示無法核准");
     else if (ph === "approved" || PAID.includes(ph)) { set(2, "done", approved()); decided = true; }
     else if (ph === "approval_denied") set(2, "fail", p && p.closed_reason === "VOICE_CHALLENGE_FAILED" ? "唸的內容或聲音不符，已拒絕" : "本人拒絕了");
     else if (ph === "expired") set(2, "fail", "核准期限已過");
@@ -1057,24 +1059,27 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
     else if (ph === "withdrawn") set(2, "fail", CREDENTIAL_CLOSED[p && p.closed_reason] || "已取消");
     else set(2, "unknown", "結果未確認");
   } else if (ph === "unknown") set(2, "unknown", "結果未確認");
-  if (steps[2].state === "fail") set(3, "off", "沒有付款（沒有花錢）");
+  if (steps[2].state === "fail") set(3, "off", "這筆沒有付款（沒有花錢）");
   else if (decided && !pays) { set(3, "off", "這場展示不付款"); set(4, "off", "付款後才交付"); }
   else if (decided) {
     if (ph === "allowed" || ph === "approved") set(3, "now", "準備付款");
     else if (ph === "paying") set(3, "now", "預留預算中（第 1 筆鏈上交易）");
     else if (ph === "confirming") set(3, "now", "已送出付款，等鏈上確認（第 2 筆）");
-    else if (ph === "not_paid") set(3, "fail", "沒有付款（沒有花錢）");
-    else if (ph === "payment_review") set(3, "unknown", "待人工處理：預算已預留，付款未完成");
+    else if (ph === "not_paid") set(3, "fail", "這筆沒有付款（沒有花錢）");
+    else if (ph === "payment_review") set(3, "unknown", "付款結果未確認，待人工處理");
     else set(3, "done", "已付款：預留與付款，兩筆鏈上交易");
     if (ph === "paid") set(4, "now", "付款完成，正在交付");
     else if (ph === "delivered") set(4, "done", "已交付，附收據");
     else if (ph === "delivery_failed") set(4, "fail", "已付款，交付失敗，待人工處理");
   }
+  // A task's end stops what had not started; a payment already reserved goes on (payflow).
   if (sc.end) {
-    const now = steps.find((s) => s.state === "now");
-    if (now) Object.assign(now, { state: "fail", text: sc.end === "cancelled" ? "任務已取消" : "任務逾時結束" });
+    const i = steps.findIndex((s) => s.state === "now");
+    const going = i >= 3 && !(i === 3 && (ph === "allowed" || ph === "approved"));
+    if (i >= 0 && going) steps[i].text += "（任務已結束，付款照常完成）";
+    else if (i >= 0) Object.assign(steps[i], { state: "fail", text: sc.end === "cancelled" ? "任務已取消" : "任務逾時結束" });
   }
-  const name = "客人 " + (CUSTOMER[consumer] || consumer);
+  const name = "客人 " + (CUSTOMER[consumer] || (/^consumer-[a-z0-9]+$/.test(consumer) ? consumer.slice(9).toUpperCase() : consumer));
   const last = [...steps].reverse().find((s) => s.state !== "todo" && s.state !== "off") || steps[0];
   return { consumer, name, steps, caption: name + "・" + last.label + "：" + last.text, amount: p ? usdc(p.amount) : "" };
 }

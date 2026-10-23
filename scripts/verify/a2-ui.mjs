@@ -171,7 +171,7 @@ try {
   // ---- 3 on localhost: A's Ask, approved with the device ----
   mark("approve");
   check("the localhost page loads the token file; the header says A2, the person's approval by device, no payment", await loadPage(origin)
-    && await b.waitFor(`document.querySelector("header .badge").textContent === "A2／fake agent／本人核准（裝置）／不付款"`, 15000), await text("header .badge"));
+    && await b.waitFor(`document.querySelector("header .badge").textContent === "A2／fake agent／本人核准（virtual authenticator）／不付款"`, 15000), await text("header .badge"));
   check("A's run with its delegation (confirmed by the simulated customer, as in P1-a)", await startRun("consumer-a", "pay-a", "show-a-01"), await text("#run-status"));
   check("需要你處理: A's Ask with the summary, the sources apart, and the device actions", await pendingShown()
     && await b.waitFor(`(() => { const x = document.getElementById("approval-body").textContent; return x.includes("本人核准") && x.includes("Agent：fake") && x.includes("virtual authenticator（測試用）")

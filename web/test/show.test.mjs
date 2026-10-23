@@ -45,6 +45,11 @@ test("an Ask: waiting, approved by device with the voice, a virtual authenticato
   const w = A.showCustomer("consumer-a", snap(ask), DLG, { authenticator: "device" });
   assert.equal(steps(w), "done done now todo todo");
   assert.equal(w.caption, "客人 A・核准：超過自動範圍，等本人核准");
+  // Who approves, as the host can (review 4): the host plays the approver, or nobody can.
+  assert.equal(A.showCustomer("consumer-a", snap(ask), DLG, {}).steps[2].text, "超過自動範圍，等核准（示範：由主持人代為核准）");
+  const m1 = snap(ask, { cap: "unavailable" });
+  m1.task.contract_version = "";
+  assert.equal(A.showCustomer("consumer-a", m1, DLG, {}).steps[2].text, "超過自動範圍；這場展示無法核准");
   const approval = { state: "approved", resolved_by: "webauthn:approver-a", grant: { authorization_method: "webauthn", voice: "verified" } };
   const ok = [...ask, ev(4, "APPROVED", { authorization_method: "webauthn" })];
   const dev = A.showCustomer("consumer-a", snap(ok, { purchase: { approval } }), DLG, { authenticator: "device" });
@@ -63,7 +68,7 @@ test("an Ask: waiting, approved by device with the voice, a virtual authenticato
 test("a refusal stops at the approval step; nothing is paid", () => {
   const deny = A.showCustomer("consumer-a", snap(base("Deny", "INSUFFICIENT_BUDGET")), DLG);
   assert.equal(steps(deny), "done done fail off todo");
-  assert.deepEqual(texts(deny).slice(2, 4), ["超出預算，已拒絕", "沒有付款（沒有花錢）"]);
+  assert.deepEqual(texts(deny).slice(2, 4), ["超出預算，已拒絕", "這筆沒有付款（沒有花錢）"]);
   assert.equal(A.showCustomer("consumer-a", snap(base("Deny", "SOMETHING_NEW")), DLG).steps[2].text, "其他原因（主持人頁有細節），已拒絕");
   const ask = base("Ask", "HUMAN_APPROVAL_REQUIRED");
   const voice = A.showCustomer("consumer-a", snap([...ask, ev(4, "APPROVAL_DENIED")], { purchase: { closed_reason: "VOICE_CHALLENGE_FAILED" } }), DLG);
@@ -74,9 +79,31 @@ test("a refusal stops at the approval step; nothing is paid", () => {
   assert.equal(cancelled.steps[2].state, "fail");
 });
 
+test("a task's end stops what had not started; a payment under way goes on", () => {
+  const end = (k) => ev(20, "TASK_TIMED_OUT", { purchase_order_id: "" });
+  const sent = A.showCustomer("consumer-a", snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid.slice(0, 4), end()]), DLG);
+  assert.equal(steps(sent), "done done done now todo");
+  assert.equal(sent.steps[3].text, "已送出付款，等鏈上確認（第 2 筆）（任務已結束，付款照常完成）");
+  const delivering = A.showCustomer("consumer-a", snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid.slice(0, 5), end()]), DLG);
+  assert.equal(steps(delivering), "done done done done now");
+  const before = A.showCustomer("consumer-a", snap([...base("Allow", "WITHIN_ALLOW_MAX"), end()]), DLG);
+  assert.deepEqual([before.steps[3].state, before.steps[3].text], ["fail", "任務逾時結束"]);
+});
+
+test("amounts are never rounded; any consumer has a name", () => {
+  assert.equal(A.usdc("500000"), "0.50 USDC");
+  assert.equal(A.usdc("104000"), "0.104 USDC");
+  assert.equal(A.usdc("5000000"), "5.00 USDC");
+  assert.equal(A.usdc("1"), "0.000001 USDC");
+  assert.equal(A.usdc("x"), "金額未提供");
+  assert.equal(A.showCustomer("consumer-c", null, null).name, "客人 C");
+  assert.equal(A.plainReason("AUTHORIZATION_EXPIRED"), "授權或報價已過期");
+});
+
 test("an unknown result is never shown as done", () => {
   const review = A.showCustomer("consumer-a", snap([...base("Allow", "WITHIN_ALLOW_MAX"), pay(4, "PAYMENT_REQUESTED"), pay(5, "BUDGET_RESERVED"), pay(6, "PAYMENT_NEEDS_REVIEW")]), DLG);
   assert.equal(steps(review), "done done done unknown todo");
+  assert.equal(review.steps[3].text, "付款結果未確認，待人工處理");
   const notPaid = A.showCustomer("consumer-a", snap([...base("Allow", "WITHIN_ALLOW_MAX"), pay(4, "PAYMENT_REQUESTED"), pay(5, "PAYMENT_NOT_SETTLED")]), DLG);
   assert.equal(notPaid.steps[3].state, "fail");
   const failedDelivery = A.showCustomer("consumer-a", snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid.slice(0, 5), pay(9, "PAYMENT_NEEDS_REVIEW")]), DLG);
@@ -159,4 +186,22 @@ test("a window that says goodbye is gone; a report of another window is dropped"
   leave();
   assert.equal(relay.connected, false);
   assert.deepEqual(got.at(-1), ["show", null]);
+});
+
+test("one window at a time: a second one is told the host page follows another", () => {
+  const make = channels();
+  let t = 1000;
+  const got = [];
+  const relay = createRelay((k, d) => got.push([k, d && d.id]), { channel: make(), now: () => t, setTimer: () => {} });
+  const beats = [];
+  const open = () => listen({ own() {}, send2() {}, select2() {}, view() {} }, { channel: make(), setTimer: (f) => beats.push(f), onLeave: () => {}, now: () => t });
+  const first = open();
+  first.status({ ready: true, supports2: true });
+  const shows = got.filter(([k]) => k === "show").length;
+  const second = open();
+  second.status({ ready: true, supports2: true });
+  for (let i = 0; i < 3; i++) { t += 2000; for (const f of beats) f(); } // both beat; the first stays followed
+  assert.equal(got.filter(([k]) => k === "show").length, shows, "no restart while the followed window is alive");
+  assert.equal(second.otherWindow, true);
+  assert.equal(first.otherWindow, false);
 });

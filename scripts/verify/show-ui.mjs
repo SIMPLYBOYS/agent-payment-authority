@@ -98,12 +98,22 @@ try {
     && await b.waitFor(`document.getElementById("run-status").textContent.includes("已開始 show-a-01")`, 20000));
   const card = `document.querySelector('.show-card[data-consumer="consumer-a"]')`;
   const states = `[...${card}.querySelectorAll(".show-step")].map((e) => e.dataset.state).join(" ")`;
-  check("the window: A waits for the person's approval (done done now todo todo)", await s.waitFor(`!!${card} && ${states} === "done done now todo todo"`, 40000),
+  check("the window: A waits for the approval (done done now todo todo)", await s.waitFor(`!!${card} && ${states} === "done done now todo todo"`, 40000),
     await s.evaluate(`${card} ? ${card}.textContent : "no card"`));
   check("the steps in plain words: the delegation, the quote, the approval", await s.evaluate(`${card}.textContent.includes("客人交代 Agent：預算 5.00 USDC，超過 0.10 USDC 要問本人")
-    && ${card}.textContent.includes("報價") && ${card}.textContent.includes("超過自動範圍，等本人核准")`), await s.evaluate(`${card}.textContent`));
-  check("the caption under the scene", (await s.evaluate(`document.getElementById("show-captions").textContent`)) === "客人 A・核准：超過自動範圍，等本人核准");
+    && ${card}.textContent.includes("報價") && ${card}.textContent.includes("超過自動範圍，等核准（示範：由主持人代為核准）")`), await s.evaluate(`${card}.textContent`));
+  check("the caption under the scene", (await s.evaluate(`document.getElementById("show-captions").textContent`)) === "客人 A・核准：超過自動範圍，等核准（示範：由主持人代為核准）");
   check("Unity's report comes back to the host page (the slot shown)", await drawn(s, hostShown("consumer-a")));
+  // A reloaded host page counts its scenes from 0 again: the window's Unity still takes them (review 1).
+  await b.send("Page.reload");
+  await b.waitFor(`document.readyState === "complete"`);
+  const doc2 = await b.send("DOM.getDocument", {});
+  const q2 = await b.send("DOM.querySelector", { nodeId: doc2.root.nodeId, selector: "#token-file" });
+  await b.send("DOM.setFileInputFiles", { nodeId: q2.nodeId, files: [tokenFile] });
+  check("after a reload of the host page, the window shows A again and Unity reports back", await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`, 20000)
+    && await b.waitFor(`!document.getElementById("show-note").hidden`, 20000) && await drawn(s, hostShown("consumer-a"), 40000));
+  check("act as A again (a reload chooses no one)", await b.waitFor(`!!document.querySelector('.agent-card[data-consumer="consumer-a"] .agent-sim')`, 20000)
+    && await click(`.agent-card[data-consumer="consumer-a"] .agent-sim`) && await b.waitFor(`document.getElementById("sim-chip").textContent.includes("客人 A")`, 10000));
   await shot(s, "show-1920x1080-1-waiting", 1920, 1080);
 
   // ---- 4 approved (simulated): never worded as the person's ----

@@ -17,8 +17,17 @@ const el = (tag, cls, text) => {
 
 let unity = null;
 let lastView = null;
+let owned = false;
+let shownKey = "";
 const link = listen({
-  own: (on) => unity.own(on),
+  own: (on) => {
+    // A host page that loaded again counts its scenes from 0: a version 1
+    // clear first makes Unity start the next version 2 scene afresh (review 1).
+    if (on) unity.post(A.clearMessage(0));
+    unity.own(on);
+    owned = on;
+    render();
+  },
   send2: (msg) => unity.send2(msg),
   select2: (msg) => unity.select2(msg),
   view: (v) => { lastView = v; render(); },
@@ -36,10 +45,16 @@ function render() {
   const v = lastView;
   const there = link.hostThere;
   document.body.dataset.host = there ? "on" : "off";
+  if (link.otherWindow) { $("show-network").textContent = "另一個展示視窗正在使用；請關閉這一個"; return; }
   if (!v) return;
   $("show-title").textContent = v.venue ? A.venue(v.venue).name : "示範商店";
   $("show-network").textContent = A.networkText(v.payments) + (there ? "" : "・主持人頁未連線（停在最後狀態）");
   const shown = (v.customers || []).map((c) => A.showCustomer(c.consumer, c.snapshot, c.delegation, v));
+  // Redrawn only when something changed: the captions are a live region.
+  const key = JSON.stringify([shown, owned]);
+  if (key === shownKey) return;
+  shownKey = key;
+  if (!owned) $("show-captions").replaceChildren(el("p", "", "場景暫停：主持人頁正在回放或切換"));
   const box = $("show-customers");
   if (!shown.length) box.replaceChildren(el("p", "show-wait", "還沒有客人進店。"));
   else box.replaceChildren(...shown.map((m) => {
@@ -56,7 +71,7 @@ function render() {
     card.append(ol);
     return card;
   }));
-  $("show-captions").replaceChildren(...shown.map((m) => el("p", "", m.caption)));
+  if (owned) $("show-captions").replaceChildren(...shown.map((m) => el("p", "", m.caption)));
 }
 setInterval(render, 2000); // the host page's presence, even when nothing changes
 unity.load();

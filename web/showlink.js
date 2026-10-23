@@ -31,6 +31,8 @@ export function createRelay(onStatus, { channel = new BroadcastChannel(CHANNEL),
       return;
     }
     if (m.kind === "status") {
+      // One window at a time: another one waits while the followed one is alive (review 2).
+      if (show && show.id !== m.id && now() - show.seen <= GONE_MS) { post("busy", { to: m.id }); return; }
       const was = show;
       show = { id: m.id, ready: !!m.ready, supports2: !!m.supports2, select: !!m.select, seen: now() };
       post("ack", { to: m.id }); // the window knows a host page is there
@@ -71,11 +73,15 @@ export function listen(handlers, { channel = new BroadcastChannel(CHANNEL), setT
   const id = newId();
   let state = { ready: false, supports2: false, select: false };
   let hostSeen = 0;
+  let busy = 0; // when the host page last said it follows another window
   const post = (kind, body = {}) => channel.postMessage({ from: "show", id, kind, ...body });
   channel.onmessage = (e) => {
     const m = e.data;
     if (!m || m.from !== "host") return;
+    if (m.to !== undefined && m.to !== id) return; // addressed to another window
     hostSeen = now();
+    if (m.kind === "busy") { busy = now(); return; }
+    if (m.kind === "ack") busy = 0;
     if (m.kind === "hello") post("status", state);
     else if (m.kind === "own") handlers.own(!!m.on);
     else if (m.kind === "send2" && m.msg) handlers.send2(m.msg);
@@ -90,5 +96,7 @@ export function listen(handlers, { channel = new BroadcastChannel(CHANNEL), setT
     report(kind, r) { post(kind, { r }); },
     // hostThere: a host page answered within GONE_MS.
     get hostThere() { return hostSeen > 0 && now() - hostSeen <= GONE_MS; },
+    // otherWindow: the host page follows another audience window.
+    get otherWindow() { return busy > 0 && now() - busy <= GONE_MS; },
   };
 }
