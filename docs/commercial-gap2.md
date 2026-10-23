@@ -80,7 +80,7 @@
 ## 5 交付與收據（B6）
 
 - **網頁收據卡**：交付後在場景上方浮出收據卡，欄位照概念稿 `docs/mockups/commerce/3-receipt.html`：商品、金額、網路、核准方式、兩筆交易（標「不是同一筆」）、收據編號、內容摘要。gas 與模型用量不在本批。
-- **Unity 交付**：現在 `ShopView.Station()` 把 `delivered` 直接送到出口（`ShopView.cs:121-131`），客人沒有經過交付區。改成：`paid` 走到交付區，`delivered` 在交付區停留約 2 秒後出店。Unity 的建置與測試用 `scripts/unity/unity.sh`（batch mode），由 Claude Code 執行。
+- **Unity 交付**：現在 `ShopView.Station()` 把 `delivered` 直接送到出口（`ShopView.cs:121-131`），客人沒有經過交付區。改成：`paid` 走到交付區等候（付款完成到交付之間，客人一直站在交付區），`delivered` 經過交付區短暫停留後出店。原本寫「停留約 2 秒」，但單次過場上限 2.5 秒（`docs/demo-presentation-design.md` 16.5 規則 4）會把它壓到約 0.5 秒；畫面上「在交付區」主要由 `paid` 這一段呈現。Unity 的建置與測試用 `scripts/unity/unity.sh`（batch mode），由 Claude Code 執行。
 
 ## 6 資料怎麼到觀眾畫面
 
@@ -133,12 +133,13 @@
 - checker 報告（GD4-A）：場次後在主持人頁選取 JSON；只讀固定欄位，只放在這一頁的記憶體；展示視窗顯示 E1～E10 的白話、總結果、模型有沒有被誘導文字騙到、這次驗證不涵蓋的項目；標題寫明「不一定是畫面上這一場」；可移除，換憑證時自動移除；沒有 `--rpc` 時寫「無法判定（沒有向鏈查詢）」。
 - 版面：1920×1080 與 1280×720 都不捲動（瀏覽器檢查會驗）；文字在 1920 寬時 24 px，隨寬度縮放，所以 1280 寬時約 16 px，比 §2 的 24 px 小（為了讓收據卡留在場景內）。
 
-### S4 Unity（進行中，未 commit）
+### S4 Unity（`592c108`，review 修正 `84688c3`；review 一輪 REQUEST CHANGES，已修正）
 
 - 中文字型（GD3-B）：Noto Sans TC（SIL OFL 1.1）以 `scripts/unity/font-subset.py` 裁成場景用到的 278 個字（約 70 KB），授權檔一起放在 `Assets/APA/Resources/`；EditMode 測試檢查每個標籤、房間名稱與區域說明的每個字都在字型裡。字型與 fonttools 的下載經 Aaron 10/23 核准。
 - 標籤改成和網頁同一套白話，不再顯示事件編號與代碼；網頁的 `shopLabel` 與共用測試向量 `testdata/demo/scene-transitions.json` 一起改。
-- 交付區（B6）：已付款的客人走到交付區等候，交付後經過交付區再出店；三個房間各有交付點，走道測試檢查不碰到家具。
-- Unity 測試：EditMode 19/19、PlayMode 29/29；WebGL 已重建。
+- 交付區（B6）：已付款的客人走到交付區等候，交付後經過交付區再出店；三個房間各有交付點，走道測試檢查不碰到家具。交付時的停留受 2.5 秒上限，約 0.5 秒（見 §5）。
+- review 修正：模擬核准停在 `allowed_unpaid`，所以這個標籤改成「已放行，這筆不會付款」；`paid` 改成「已付款，在交付區等交付」。`Font.HasCharacter` 對動態字型一律回答有，原本的字型測試抓不到缺字（手動驗證過）；改成比對字型實際收錄的字（腳本一併寫出清單），放一個不在字型裡的字，測試會失敗（手動驗證過）。共用測試向量加上每一步的 cause 與 end，網頁與 Unity 都檢查。
+- Unity 測試：EditMode 19/19、PlayMode 29/29；WebGL 已重建；瀏覽器檢查 show-ui、ux3-ui、a2-ui、c2-ui 通過（v1-ui 需要語音服務，沒有跑）。
 
 ### 已知、不在本批
 
