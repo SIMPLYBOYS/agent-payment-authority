@@ -1076,7 +1076,7 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
   if (sc.end) {
     const i = steps.findIndex((s) => s.state === "now");
     const going = i >= 3 && !(i === 3 && (ph === "allowed" || ph === "approved"));
-    if (i >= 0 && going) steps[i].text += "（任務已結束，付款照常完成）";
+    if (i >= 0 && going) steps[i].text += i === 4 ? "（任務已結束，交付照常進行）" : "（任務已結束，付款照常完成）";
     else if (i >= 0) Object.assign(steps[i], { state: "fail", text: sc.end === "cancelled" ? "任務已取消" : "任務逾時結束" });
   }
   const name = "客人 " + (CUSTOMER[consumer] || (/^consumer-[a-z0-9]+$/.test(consumer) ? consumer.slice(9).toUpperCase() : consumer));

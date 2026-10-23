@@ -86,6 +86,7 @@ test("a task's end stops what had not started; a payment under way goes on", () 
   assert.equal(sent.steps[3].text, "已送出付款，等鏈上確認（第 2 筆）（任務已結束，付款照常完成）");
   const delivering = A.showCustomer("consumer-a", snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid.slice(0, 5), end()]), DLG);
   assert.equal(steps(delivering), "done done done done now");
+  assert.equal(delivering.steps[4].text, "付款完成，正在交付（任務已結束，交付照常進行）");
   const before = A.showCustomer("consumer-a", snap([...base("Allow", "WITHIN_ALLOW_MAX"), end()]), DLG);
   assert.deepEqual([before.steps[3].state, before.steps[3].text], ["fail", "任務逾時結束"]);
 });

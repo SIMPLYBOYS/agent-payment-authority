@@ -21,6 +21,7 @@ let owned = false;
 let shownKey = "";
 const link = listen({
   own: (on) => {
+    if (link.otherWindow) return; // the host page follows another window: this one shows nothing of it
     // A host page that loaded again counts its scenes from 0: a version 1
     // clear first makes Unity start the next version 2 scene afresh (review 1).
     if (on) unity.post(A.clearMessage(0));
@@ -28,8 +29,8 @@ const link = listen({
     owned = on;
     render();
   },
-  send2: (msg) => unity.send2(msg),
-  select2: (msg) => unity.select2(msg),
+  send2: (msg) => { if (!link.otherWindow) unity.send2(msg); },
+  select2: (msg) => { if (!link.otherWindow) unity.select2(msg); },
   view: (v) => { lastView = v; render(); },
 });
 const tell = () => link.status({ ready: unity.ready, supports2: unity.supports2, select: !!(unity.bridge && unity.bridge.select) });
