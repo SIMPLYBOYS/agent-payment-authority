@@ -56,6 +56,12 @@ if [ $resume = yes ]; then
   contract=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["budget_contract"])' "$out/payments.json")
   code=$(curl -s --max-time 5 -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_getCode","params":["'"$contract"'","latest"]}' $rpc | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("result",""))')
   [ ${#code} -gt 4 ] || { echo "p2-local: the kept chain has no budget contract at $contract (anvil-state.json is not this directory's chain, or was not saved)" >&2; exit 1; }
+  # Anvil resumes its clock at the saved block's time, so a chain that was off
+  # for an hour runs an hour behind; the Signer's authorization (valid after
+  # now - 1, by this machine's clock) would then be "not yet valid" on chain
+  # and the shop refuses it (VERIFICATION_FAILED, 10/24). Set to now.
+  curl -s --max-time 5 -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"evm_setTime","params":['"$(date +%s)"']}' $rpc | grep -q '"result"' ||
+    { echo "p2-local: the kept chain's clock could not be set to now (evm_setTime)" >&2; exit 1; }
   mv "$state.bak.tmp" "$state.bak" # the chain as it resumed: a later half-written save still leaves this one
   echo "p2-local: resumed the kept chain of $out (budget $contract, block $(curl -s -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' $rpc | python3 -I -c 'import json,sys; print(int(json.load(sys.stdin)["result"],16))'))"
 else
