@@ -59,9 +59,13 @@ if [ $resume = yes ]; then
   # Anvil resumes its clock at the saved block's time, so a chain that was off
   # for an hour runs an hour behind; the Signer's authorization (valid after
   # now - 1, by this machine's clock) would then be "not yet valid" on chain
-  # and the shop refuses it (VERIFICATION_FAILED, 10/24). Set to now.
-  curl -s --max-time 5 -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"evm_setTime","params":['"$(date +%s)"']}' $rpc | grep -q '"result"' ||
-    { echo "p2-local: the kept chain's clock could not be set to now (evm_setTime)" >&2; exit 1; }
+  # and the shop refuses it (VERIFICATION_FAILED, 10/24). Set to now, and one
+  # block mined at now: the shop's check is an eth_call at "latest", which runs
+  # at the last mined block's time (review).
+  for m in '"evm_setTime","params":['"$(date +%s)"']' '"evm_mine","params":[]'; do
+    curl -s --max-time 5 -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":'"$m"'}' $rpc | grep -q '"result"' ||
+      { echo "p2-local: the kept chain's clock could not be set to now ($m)" >&2; exit 1; }
+  done
   mv "$state.bak.tmp" "$state.bak" # the chain as it resumed: a later half-written save still leaves this one
   echo "p2-local: resumed the kept chain of $out (budget $contract, block $(curl -s -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' $rpc | python3 -I -c 'import json,sys; print(int(json.load(sys.stdin)["result"],16))'))"
 else

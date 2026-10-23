@@ -1022,8 +1022,9 @@ export const plainReason = (code) => PLAIN[code] || "其他原因（主持人頁
 // usdc: base units (6 decimals) as USDC, never rounded: at least two decimals, more when they matter.
 export const usdc = (v) => (typeof v === "string" && /^[0-9]+$/.test(v) ? (Number(v) / 1e6).toFixed(6).replace(/(\.\d\d\d*?)0+$/, "$1") + " USDC" : "金額未提供");
 const PAID = ["paying", "confirming", "paid", "delivered", "delivery_failed", "not_paid", "payment_review"];
-// UNMOVED: the review codes whose result is known: no payment was made (payflow: never signed or sent, or expired unused on chain).
-const UNMOVED = { RESERVED_NOT_PAID: "預算已預留，但付款沒有簽名送出", VERIFICATION_FAILED: "商店沒有接受，付款沒有送出", NOT_SETTLED_EXPIRED: "付款授權已過期，鏈上沒有用過" };
+// UNMOVED: the review codes whose result is known: no payment was made (payflow: never sent, or expired unused on chain).
+// Not VERIFICATION_FAILED (review): that is the shop's word only, and a shop the Host does not run could still send it.
+const UNMOVED = { RESERVED_NOT_PAID: "預算已預留，但付款沒有送出", NOT_SETTLED_EXPIRED: "付款授權已過期，鏈上沒有用過" };
 
 // showCustomer: one customer's five steps for the audience (state: todo,
 // now, done, fail, unknown, off) and the caption under the scene. Nothing
@@ -1069,10 +1070,11 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
     else if (ph === "confirming") set(3, "now", "已送出付款，等鏈上確認（第 2 筆）");
     else if (ph === "not_paid") set(3, "fail", "這筆沒有付款（沒有花錢）");
     else if (ph === "payment_review") {
-      // By its code (Aaron 10/24): three of the four are known, the money did not move;
-      // only a chain that does not add up is for a person to look at.
+      // By its code (Aaron 10/24): two are known, the money did not move; the shop's
+      // refusal is said as the shop's; a chain that does not add up is for a person.
       const code = p && p.payment && p.payment.code;
       if (Object.hasOwn(UNMOVED, code)) set(3, "fail", "沒有付款（錢沒有動）：" + UNMOVED[code]);
+      else if (code === "VERIFICATION_FAILED") set(3, "unknown", "商店回覆沒有接受、沒有送出（商店的說法，鏈上未確認）");
       else if (code === "RECONCILE_NEEDS_REVIEW") set(3, "unknown", "鏈上的付款結果對不起來，待人工確認");
       else set(3, "unknown", "付款結果未確認");
     }
