@@ -335,6 +335,7 @@ func (w *Worker) reserve(ctx context.Context, p store.Payment, o paycontract.Pur
 		case "RESERVATION_PENDING", "TASK_BUSY", "RELAYER_NONCE_BLOCKED", "TASK_REGISTRATION_PENDING":
 			return p, ErrPending
 		}
+		w.log(p.IntentHash, err) // the relayer's reason (RELAYER_DAILY_CAP, ...) is said on the Host's terminal (10/24: it was found only from the chain)
 		return w.Store.PaymentFailed(p.IntentHash, "RESERVE_FAILED") // refused before a transaction, or reverted: nothing spent
 	} else if err != nil {
 		return p, ErrPending // a node or the relayer itself: Lookup decides next time
