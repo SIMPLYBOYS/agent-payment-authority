@@ -143,7 +143,7 @@ namespace APA
                 case "delivered": return "已交付，帶著收據離店";
                 case "delivery_failed": return "已付款，交付失敗（待人工處理）";
                 case "not_paid": return "沒有付款（沒有花錢），離店";
-                case "payment_review": return "付款結果未確認，待人工處理";
+                case "payment_review": return "付款沒有照預期完成，待主持人確認"; // true of every review code
                 case "expired": return "核准期限已過，離店";
                 case "withdrawn": return "已取消，離店";
                 default: return "狀態未確認";

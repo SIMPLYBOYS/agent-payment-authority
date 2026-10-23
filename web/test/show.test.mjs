@@ -104,7 +104,7 @@ test("amounts are never rounded; any consumer has a name", () => {
 test("an unknown result is never shown as done", () => {
   const review = A.showCustomer("consumer-a", snap([...base("Allow", "WITHIN_ALLOW_MAX"), pay(4, "PAYMENT_REQUESTED"), pay(5, "BUDGET_RESERVED"), pay(6, "PAYMENT_NEEDS_REVIEW")]), DLG);
   assert.equal(steps(review), "done done done unknown todo");
-  assert.equal(review.steps[3].text, "付款結果未確認，待人工處理");
+  assert.equal(review.steps[3].text, "付款結果未確認"); // no code: not known
   const notPaid = A.showCustomer("consumer-a", snap([...base("Allow", "WITHIN_ALLOW_MAX"), pay(4, "PAYMENT_REQUESTED"), pay(5, "PAYMENT_NOT_SETTLED")]), DLG);
   assert.equal(notPaid.steps[3].state, "fail");
   const failedDelivery = A.showCustomer("consumer-a", snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid.slice(0, 5), pay(9, "PAYMENT_NEEDS_REVIEW")]), DLG);
@@ -319,4 +319,13 @@ test("on the chain (O2): each transaction as the Host read it, only for the hash
   assert.match(A.chainLine({ status: "success", block: 10, transfer: { amount: "500000", to_shop: false } }, 12, "settle"), /收款人不是這筆請購的商店/); // never "→商店" unchecked
   assert.equal(A.chainLine({ status: "reverted", block: 9 }, 12, "reserve"), "鏈上：區塊 #9，執行失敗");
   assert.equal(A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { purchase: p }), {})[2].chain, ""); // no chain read: nothing
+});
+
+test("a payment under review says what is known by its code: three never moved money", () => {
+  const evs = [...base("Allow", "WITHIN_ALLOW_MAX"), pay(4, "PAYMENT_REQUESTED"), pay(5, "BUDGET_RESERVED"), pay(6, "PAYMENT_NEEDS_REVIEW")];
+  const at = (code) => A.showCustomer("consumer-a", snap(evs, { purchase: { payment: { status: "needs_review", state: "needs_review", code } } }), DLG).steps[3];
+  assert.deepEqual([at("RESERVED_NOT_PAID").state, at("RESERVED_NOT_PAID").text], ["fail", "沒有付款（錢沒有動）：預算已預留，但付款沒有簽名送出"]);
+  assert.equal(at("VERIFICATION_FAILED").text, "沒有付款（錢沒有動）：商店沒有接受，付款沒有送出");
+  assert.equal(at("NOT_SETTLED_EXPIRED").text, "沒有付款（錢沒有動）：付款授權已過期，鏈上沒有用過");
+  assert.deepEqual([at("RECONCILE_NEEDS_REVIEW").state, at("RECONCILE_NEEDS_REVIEW").text], ["unknown", "鏈上的付款結果對不起來，待人工確認"]);
 });
