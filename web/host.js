@@ -74,6 +74,7 @@ let delegating = null;    // P1-a: { gen, consumer, scenario } whose delegation 
 let simulating = false;   // a 「以 X 模擬」 request is in flight
 let resolving = false;    // an approve or deny is in flight
 let approvalNote = null;  // { gen, kind, text } the last approval action's outcome
+let a2Waiting = null;    // batch 3: { gen, consumer, items: [{ consumer, product, amount }] }, the other customers' Asks waiting
 let lastA2 = null;        // A2: { gen, consumer, servedAt, at, items, signer, sources } of the selected customer, or { gen, consumer, error }
 let a2Op = null;          // A2: the operation in flight { gen, consumer, session, intent, decision, phase }
 let a2Note = null;        // A2: { target, kind, text } the last operation's outcome, for its own item only
@@ -310,6 +311,7 @@ function render(v) {
     resolving = false;
     approvalNote = null;
     lastA2 = null;
+    a2Waiting = null;
     a2Op = null;
     a2Note = null;
     clearTimeout(readyTimer);
@@ -693,13 +695,14 @@ function renderControl() {
   renderApproval(runs);
   // 一起開始: each consumer's first scenario, as separate requests; not one
   // atomic start (docs/multi-agent-demo-design.md 3.5).
-  // An apa.pay.v1 scenario starts only with its own confirmed delegation:
-  // never from 一起開始.
-  const pair = consumers.map((c) => scenarios.find((x) => x.consumer_id === c && !A.isPay(x.contract))).filter(Boolean);
+  // An apa.pay.v1 scenario starts only with its own confirmed delegation: the
+  // host plays each customer in turn and confirms it first (batch 3, Aaron 10/24).
+  const pair = consumers.map((c) => scenarios.find((x) => x.consumer_id === c && !A.isPay(x.contract)) || scenarios.find((x) => x.consumer_id === c)).filter(Boolean);
   const all = $("start-all");
   all.hidden = pair.length < 2 || maxRuns < 2;
-  all.textContent = "一起開始：" + pair.map((sc) => sc.id + "（" + short(sc.consumer_id) + "）").join(" ＋ ") + "（各自送出，不保證都成功）";
-  all.disabled = starting || pair.every((sc) => busy.has(sc.consumer_id)) || full;
+  all.textContent = "一起開始：" + pair.map((sc) => sc.id + "（" + short(sc.consumer_id) + "）").join(" ＋ ")
+    + (pair.some((sc) => A.isPay(sc.contract)) ? "（依序：主持人扮演每位客人確認委託（模擬）再開始；各自送出，不保證都成功）" : "（各自送出，不保證都成功）");
+  all.disabled = starting || simulating || pair.every((sc) => busy.has(sc.consumer_id)) || full;
   all.onclick = () => startAll(pair);
   renderNext(runs);
   // What the folded runs list would hide stays in its summary and in the
@@ -1074,6 +1077,23 @@ async function confirmAndStart(sc) {
   await start(sc, r.body.delegation.delegation_id);
 }
 
+// asCustomer: the host plays sc's customer and confirms sc's delegation, as
+// 「以 A 模擬」 and 「確認委託並開始（模擬）」 do: { id } of the delegation, or
+// { fail } saying what is known; null once the credentials changed.
+async function asCustomer(sc, g) {
+  const s = await creds.simulate(sc.consumer_id);
+  if (g !== creds.gen || !s) return null;
+  if (s.error || s.status !== 200) return { fail: s.error ? "角色模擬沒有收到回覆，未確認" : "角色模擬未開始（" + s.status + "）" };
+  simDelegationOnly = !!(s.body && s.body.delegation_only);
+  lastApprovals = null;
+  approvalNote = null;
+  const r = await creds.confirmDelegation(sc.id);
+  if (g !== creds.gen || !r) return null;
+  if (r.superseded) return { fail: "模擬身分已更換，委託結果未確認" };
+  if (r.error || !(r.status === 201 || r.status === 200) || !r.body || !r.body.delegation) return { fail: r.error ? "委託沒有收到回覆，未確認" : "委託未確認（" + ((r.body && r.body.error) || r.status) + "）" };
+  return { id: r.body.delegation.delegation_id };
+}
+
 // pollApprovals reads the simulated customer's approval sessions (its own
 // capability); a reply of an older generation or customer is dropped.
 async function pollApprovals() {
@@ -1304,8 +1324,9 @@ async function a2Call(consumer, path, body) {
 // generation or customer is dropped. An attempt whose result is not known
 // is asked about again by its own IDs (never a new challenge or prompt).
 async function pollA2() {
-  if (!a2Mode() || !a2OnOrigin()) { if (lastA2) { lastA2 = null; renderControl(); } return; }
+  if (!a2Mode() || !a2OnOrigin()) { if (lastA2 || a2Waiting) { lastA2 = null; a2Waiting = null; renderControl(); } return; }
   const c = currentConsumer();
+  await pollA2Waiting(c);
   if (!c || !creds.viewerToken(c)) { if (lastA2) { lastA2 = null; renderControl(); } return; }
   const g = creds.gen;
   const r = await a2Call(c, "/api/approvals");
@@ -1327,6 +1348,22 @@ async function pollA2() {
     } finally { a2Recovering = false; }
     renderControl();
   }
+}
+
+// pollA2Waiting (batch 3): the other customers' Asks waiting for the person,
+// read with each one's own viewer token. They are only named, with a switch:
+// an Ask is acted on from its own customer's panel, as always.
+async function pollA2Waiting(c) {
+  const g = creds.gen;
+  const items = [];
+  for (const o of creds.view().consumers.filter((x) => x !== c)) {
+    const r = await a2Call(o, "/api/approvals");
+    if (g !== creds.gen || currentConsumer() !== c) return;
+    const it = r.status === 200 && (r.body.approvals || []).find((x) => x.purchase.approval && x.purchase.approval.state === "pending" && !x.task_ended);
+    if (it) items.push({ consumer: o, product: productOf(it.purchase), amount: it.purchase.amount });
+  }
+  const next = { gen: g, consumer: c, items };
+  if (JSON.stringify(next) !== JSON.stringify(a2Waiting)) { a2Waiting = next; renderControl(); }
 }
 
 // a2Item: the newest pending item of the selected customer; else the
@@ -1375,7 +1412,8 @@ function renderA2() {
   const item = a2Item();
   const target = a2Target(item);
   if (a2Note && !A.sameTarget(a2Note.target, target, false)) a2Note = null;
-  const key = JSON.stringify([currentConsumer(), item, lastA2 && lastA2.error, a2Note, a2Op && a2Op.phase, a2Op && !!a2Op.stop, a2Op && a2Op.mic, micChoice, micList, a2OnOrigin(), lastA2 && lastA2.signer]); // V1: the recording's stop and microphone, and the microphone list, redraw it
+  const waiting = a2Waiting && a2Waiting.gen === creds.gen && a2Waiting.consumer === currentConsumer() ? a2Waiting.items : [];
+  const key = JSON.stringify([currentConsumer(), item, waiting, lastA2 && lastA2.error, a2Note, a2Op && a2Op.phase, a2Op && !!a2Op.stop, a2Op && a2Op.mic, micChoice, micList, a2OnOrigin(), lastA2 && lastA2.signer]); // V1: the recording's stop and microphone, and the microphone list, redraw it
   if (key === shownA2) return updateA2Countdown();
   shownA2 = key;
   const body = $("approval-body");
@@ -1504,6 +1542,20 @@ function renderA2() {
     ev.addEventListener("click", async () => { if (currentTask() !== item.task_id) openTask(item.task_id); openDrawer(); });
     parts.push(ev);
   }
+  if (a2OnOrigin() && waiting.length) {
+    // Batch 3: another customer's Ask is named here, with a switch; nothing is decided from this line.
+    const others = el("div", "approval-others");
+    for (const w of waiting) {
+      const row = el("p", "approval-other", "客人 " + short(w.consumer) + (currentConsumer() ? " 也有" : " 有") + "一筆請購等你核准：" + w.product + " " + units(w.amount) + " test USDC ");
+      const sw = el("button", "approval-switch", "切換到客人 " + short(w.consumer));
+      sw.type = "button";
+      sw.dataset.kind = "a2-switch-" + w.consumer;
+      sw.addEventListener("click", () => selectConsumer(w.consumer));
+      row.append(sw);
+      others.append(row);
+    }
+    parts.unshift(others);
+  }
   body.replaceChildren(...parts);
   updateA2Countdown();
   // The focus comes back to the same control of the same item only; else
@@ -1622,24 +1674,36 @@ async function a2Cancel(item, at) {
 
 // startAll sends one start per consumer, one after the other, each with its
 // own request ID; each reply is shown as it is, and a refused one is not
-// retried. The panels open the first one accepted.
+// retried. An apa.pay.v1 scenario's customer confirms its delegation first
+// (asCustomer); one not confirmed is not started. The panels open the first
+// one accepted.
 async function startAll(pair) {
-  if (starting) return;
+  if (starting || simulating) return;
   const g = creds.gen;
   starting = true;
+  simulating = true; // the cards' role play waits: a switch midway would supersede a confirmation
   renderControl();
   setRunStatus("一起開始：送出 " + pair.length + " 個獨立的開始請求…", "busy");
   const results = [];
   for (const sc of pair) {
-    const r = await creds.startRun(sc.id);
+    let delegation;
+    if (A.isPay(sc.contract)) {
+      setRunStatus("一起開始：客人 " + short(sc.consumer_id) + " 確認委託中（模擬）…", "busy");
+      const d = await asCustomer(sc, g);
+      if (!d) return; // cleared or replaced: nothing acts
+      if (d.fail) { results.push([sc, d]); continue; }
+      delegation = d.id;
+    }
+    const r = await creds.startRun(sc.id, delegation);
     if (g !== creds.gen || !r || r.gen !== creds.gen) return; // cleared or replaced: nothing acts
     results.push([sc, r]);
   }
   starting = false;
+  simulating = false;
   renderControl();
-  const ok = results.filter(([, r]) => !r.error && (r.status === 202 || r.status === 200));
+  const ok = results.filter(([, r]) => !r.fail && !r.error && (r.status === 202 || r.status === 200));
   setRunStatus("一起開始（各自送出，不是一次成功或一次失敗）：" + results.map(([sc, r]) => short(sc.consumer_id) + " "
-    + (r.error ? "沒有收到回覆，未確認" : r.status === 202 ? "已開始 " + r.body.task_id : r.status === 200 ? "已受理（同一請求）" + r.body.task_id
+    + (r.fail ? "未開始：" + r.fail : r.error ? "沒有收到回覆，未確認" : r.status === 202 ? "已開始 " + r.body.task_id : r.status === 200 ? "已受理（同一請求）" + r.body.task_id
       : ERRORS[r.body && r.body.error] || "未開始（" + r.status + "）")).join("；"), ok.length === results.length ? "ok" : ok.length ? "warn" : "error");
   if (ok.length) await openRun(ok[0][1].body, g);
   pollRuns();

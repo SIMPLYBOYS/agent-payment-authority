@@ -7,10 +7,10 @@
 // answered on a pseudo-terminal, as a person types it), then on
 // http://localhost:<port>/host: approve, deny by keyboard, the other
 // decision while one is open, 取消這次驗證, the Signer down (result unknown, no
-// prompt by itself), a customer switch while a reply is held, and the
-// 127.0.0.1 page. No key, no payment, no model; a new Chrome profile; no
-// token, code or capability is logged, and screenshots are taken with the
-// token fields empty.
+// prompt by itself), a customer switch while a reply is held, the
+// 127.0.0.1 page, and 一起開始 with both customers' Asks named (batch 3). No
+// key, no payment, no model; a new Chrome profile; no token, code or
+// capability is logged, and screenshots are taken with the token fields empty.
 //
 //   node scripts/verify/a2-ui.mjs [--unity-build DIR] [--out DIR]
 
@@ -261,6 +261,29 @@ try {
   await sleep(3000);
   check("B's late reply asks no device and says nothing on A's panel", (await signs()) === s3 && !(await text("#approval-body")).includes("請在裝置上完成驗證"), await text("#approval-body"));
   await shot("a2-1440x900-4-main");
+
+  // ---- 8 batch 3: 一起開始 with payment scenarios, both Asks named ----
+  mark("start together");
+  // B's Ask of 7 is still open: closed first (approved on B's own panel), so B has one Ask below.
+  await click(`.agent-card[data-consumer="consumer-b"] .agent-select`);
+  check("B's open Ask of 7 approved first, on B's panel", await b.waitFor(`document.getElementById("approval-body").textContent.includes("客人 B 的 Agent") && !!document.querySelector("#approval .approval-approve:not([disabled])")`, 30000)
+    && await click("#approval .approval-approve") && await headIs("approved", "本人核准已驗證，付款未啟用。"), await text("#approval-body"));
+  check("一起開始 offers both customers' scenarios, saying each delegation is confirmed first (simulated)",
+    await b.waitFor(`!document.querySelector(".agent-card .row-stop") && (() => { const x = document.getElementById("start-all"); return !x.hidden && !x.disabled && x.textContent.includes("pay-a（A）") && x.textContent.includes("pay-b（B）") && x.textContent.includes("確認委託（模擬）"); })()`, 60000),
+    await text("#start-all"));
+  await click("#start-all");
+  check("one click: A's and B's delegations confirmed, both runs started", await b.waitFor(`/A 已開始 show-a-\\d+；B 已開始 show-b-\\d+/.test(document.getElementById("run-status").textContent)`, 30000),
+    await text("#run-status"));
+  check("A's panel shows A's Ask and names B's, with a switch (nothing decided from that line)", await pendingShown()
+    && await b.waitFor(`(document.querySelector("#approval .approval-other") || {}).textContent?.startsWith("客人 B 也有一筆請購等你核准：kr-market 0.50 test USDC")`, 30000)
+    && await b.evaluate(`!document.querySelector("#approval .approval-other .approval-approve")`), await text("#approval-body"));
+  await shot("a2-1440x900-5-together");
+  const s4 = await signs();
+  check("A approved on A's panel", await click("#approval .approval-approve") && await headIs("approved", "本人核准已驗證，付款未啟用。") && (await signs()) === s4 + 1, await text("#approval-body"));
+  check("the switch shows B's own Ask, and names no one else now", await click("#approval .approval-switch")
+    && await b.waitFor(`document.getElementById("approval-body").textContent.includes("客人 B 的 Agent") && !document.querySelector("#approval .approval-others")`, 30000), await text("#approval-body"));
+  const s5 = await signs();
+  check("B approved on B's own panel", await click("#approval .approval-approve") && await headIs("approved", "本人核准已驗證，付款未啟用。") && (await signs()) === s5 + 1, await text("#approval-body"));
 } catch (e) {
   check("the run completed", false, e.message);
 } finally {

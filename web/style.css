@@ -194,6 +194,9 @@ details.live-warning > p { font-weight: normal; margin: 4px 0 0; }
 .approval h2:focus { outline: 2px solid #6b4b00; outline-offset: -2px; }
 #approval-body { padding: 10px 12px 12px; display: grid; gap: 8px; }
 .approval-empty { margin: 0; color: #5d6280; }
+.approval-others { margin: 0 0 10px; padding: 8px 10px; border: 1px solid #d9b45a; border-radius: 6px; background: #fff6dc; }
+.approval-other { margin: 0; }
+.approval-other + .approval-other { margin-top: 6px; }
 .approval-mode { margin: 0; font-size: 13px; font-weight: bold; color: #6b4b00; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .approval-tag { background: #6b4b00; color: #fff1cf; border-radius: 4px; padding: 1px 6px; }
 .approval-head h3 { margin: 0; font-size: 20px; }
@@ -283,6 +286,7 @@ body[data-page="show"] #unity-canvas { background: #10131a; border-radius: 6px; 
 .show-step[data-state="fail"] { border-color: #d9534f; color: var(--text); }
 .show-step[data-state="off"] { opacity: 0.6; }
 .show-wait { color: var(--muted); }
+.show-queue { color: var(--muted); margin: 0 0 16px; }
 @media (max-width: 1100px) { .show-main { grid-template-columns: 1fr; } }
 .checker-pick { margin-left: 12px; }
 .show-checker { margin-top: 12px; border: 1px solid #44506a; border-radius: 8px; padding: 8px 14px; }

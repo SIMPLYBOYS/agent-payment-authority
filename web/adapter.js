@@ -1065,7 +1065,7 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
   if (steps[2].state === "fail") set(3, "off", "這筆沒有付款（沒有花錢）");
   else if (decided && !pays) { set(3, "off", "這場展示不付款"); set(4, "off", "付款後才交付"); }
   else if (decided) {
-    if (ph === "allowed" || ph === "approved") set(3, "now", "準備付款");
+    if (ph === "allowed" || ph === "approved") set(3, "now", READY);
     else if (ph === "paying") set(3, "now", "預留預算中（第 1 筆鏈上交易）");
     else if (ph === "confirming") set(3, "now", "已送出付款，等鏈上確認（第 2 筆）");
     else if (ph === "not_paid") set(3, "fail", "這筆沒有付款（沒有花錢）");
@@ -1093,6 +1093,22 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
   const name = "客人 " + (CUSTOMER[consumer] || (/^consumer-[a-z0-9]+$/.test(consumer) ? consumer.slice(9).toUpperCase() : consumer));
   const last = [...steps].reverse().find((s) => s.state !== "todo" && s.state !== "off") || steps[0];
   return { consumer, name, steps, caption: name + "・" + last.label + "：" + last.text, amount: p ? usdc(p.amount) : "" };
+}
+
+const READY = "準備付款";
+const QUEUED = "等前一筆付款完成（Host 一次付一筆）";
+// showQueue (batch 3, Aaron 10/24): customers shop at once, but the Host pays
+// one payment at a time (one payment worker; docs/commercial-gap-review.md
+// A4). A payment ready while another customer's is on its way waits for it,
+// and the window says so; with one customer, or no payment, nothing changes.
+export function showQueue(models, cap) {
+  if (models.length < 2 || !paysOn(cap)) return { models, note: "" };
+  const ready = (m) => m.steps[3].state === "now" && m.steps[3].text === READY;
+  const going = models.some((m) => m.steps[3].state === "now" && !ready(m));
+  return {
+    note: "客人同時選購；付款由 Host 一次處理一筆，前一筆完成才付下一筆。",
+    models: models.map((m) => (going && ready(m) ? { ...m, steps: m.steps.map((s, i) => (i === 3 ? { ...s, text: QUEUED } : s)), caption: m.name + "・" + m.steps[3].label + "：" + QUEUED } : m)),
+  };
 }
 
 // networkText: what the audience is told of the money, from the host's own capability.
