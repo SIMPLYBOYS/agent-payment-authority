@@ -122,6 +122,27 @@ type viewerReply struct {
 	Note       string       `json:"note"`
 	History    *historyInfo `json:"history,omitempty"` // history mode only
 	Live       *liveInfo    `json:"live,omitempty"`    // live mode only
+	hostTraits
+}
+
+// hostTraits are what every page says of a host that approves by a person's
+// authenticator or pays (gap review B4): fixed labels, nothing of a task.
+// History mode has none: it replays a record, it approves and pays nothing.
+type hostTraits struct {
+	Payments      string `json:"payments,omitempty"`      // local_anvil | base_sepolia: the host pays (--payments)
+	Approval      string `json:"approval,omitempty"`      // webauthn: a person approves (--approvals-signer)
+	Authenticator string `json:"authenticator,omitempty"` // device | virtual: what the operator says verifies
+}
+
+func (a *api) traits() hostTraits {
+	if a.history != nil {
+		return hostTraits{}
+	}
+	t := hostTraits{Payments: a.payCap}
+	if a.approve != nil {
+		t.Approval, t.Authenticator = "webauthn", a.approve.source
+	}
+	return t
 }
 
 // viewer answers GET /api/viewer for viewer tokens only: the host token is
@@ -137,7 +158,7 @@ func (a *api) viewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(w, http.StatusOK, viewerReply{Role: g.Role, ConsumerID: g.ConsumerID,
-		Note: "Local demo capability for this run of the demo host; not a user login.", History: a.historyFor(g), Live: a.live})
+		Note: "Local demo capability for this run of the demo host; not a user login.", History: a.historyFor(g), Live: a.live, hostTraits: a.traits()})
 }
 
 // mode is GET /api/mode, the one answer without a token: which demo this
@@ -156,8 +177,11 @@ func (a *api) mode(w http.ResponseWriter, r *http.Request) {
 	case a.live != nil:
 		m = map[string]any{"mode": "live", "record": a.live.Record, "label": a.live.Label, "dev_demo_plugins": a.live.DevDemoPlugins}
 	}
-	if a.payCap != "" && a.history == nil {
-		m["payments"] = a.payCap // a host that pays says so on every page (gap review B4)
+	t := a.traits() // a host that pays or approves by a person says so on every page (gap review B4)
+	for k, v := range map[string]string{"payments": t.Payments, "approval": t.Approval, "authenticator": t.Authenticator} {
+		if v != "" {
+			m[k] = v
+		}
 	}
 	reply(w, http.StatusOK, m)
 }

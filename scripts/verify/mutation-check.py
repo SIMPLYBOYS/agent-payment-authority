@@ -1416,7 +1416,7 @@ LOCAL_MUTATIONS = [
     ('P2 budget: the Signer signs without a reservation', 'internal/budget/verify.go',
      'if err != nil || !spentFor(r.Logs, v.Contract, TaskField(v.ChainID, v.Contract, po.Intent.TaskID), ih, amount) {', 'if false && (err != nil || !spentFor(r.Logs, v.Contract, TaskField(v.ChainID, v.Contract, po.Intent.TaskID), ih, amount)) {', 'TestSignerSignsOnlyAReservedOrder'),
     ('Gap C2: a relayer that is not ready reads as ready', 'cmd/demo/status.go',
-     '\t\tif h, err := a.relayer.Health(ctx); err == nil && h.State == "ready" {', '\t\tif h, err := a.relayer.Health(ctx); err == nil && (h.State == "ready" || true) {', 'cmd/demo:TestServicesStatus'),
+     '\t\t\tif err == nil && h.State == "ready" {', '\t\t\tif err == nil && (h.State == "ready" || true) {', 'cmd/demo:TestServicesStatus'),
     ("Gap C2: the Signer's voice state is not passed on", 'cmd/demo/status.go',
      '\t\tif ans.Reply.Voice != "" {', '\t\tif false && ans.Reply.Voice != "" {', 'cmd/demo:TestServicesStatus'),
     ('Gap C2: the host status leaves out the services', 'cmd/demo/status.go',
@@ -1428,9 +1428,15 @@ LOCAL_MUTATIONS = [
     ('Gap C2: a sidecar with another ASR model reads as healthy', 'internal/signer/voice.go',
      ' || !h.OK || h.ASR != s.cfg.ASRModel || ', ' || !h.OK || ', 'internal/signer:TestVoiceHealthState'),
     ('Gap B4: /api/mode leaves out the payments', 'cmd/demo/ui.go',
-     '\t\tm["payments"] = a.payCap // a host that pays says so on every page (gap review B4)', '\t\t_ = m', 'cmd/demo:TestModeSaysPayments'),
+     '\tt := hostTraits{Payments: a.payCap}', '\tt := hostTraits{}', 'cmd/demo:TestModeSaysPayments'),
     ("Gap B4: history mode claims the host's payments", 'cmd/demo/ui.go',
-     '\tif a.payCap != "" && a.history == nil {', '\tif a.payCap != "" {', 'cmd/demo:TestModeSaysPayments'),
+     '\tif a.history != nil {\n\t\treturn hostTraits{}', '\tif false && a.history != nil {\n\t\treturn hostTraits{}', 'cmd/demo:TestModeSaysPayments'),
+    ('Gap B4 review: /api/mode and /api/viewer leave out the approval', 'cmd/demo/ui.go',
+     '\t\tt.Approval, t.Authenticator = "webauthn", a.approve.source', '\t\t_ = a.approve', 'cmd/demo:TestModeSaysPayments'),
+    ('Gap B4 review: /api/viewer leaves out the traits', 'cmd/demo/ui.go',
+     'History: a.historyFor(g), Live: a.live, hostTraits: a.traits()})', 'History: a.historyFor(g), Live: a.live})', 'cmd/demo:TestA2PaymentModeOff'),
+    ('Gap C2 review: the probes wait for a slow service', 'cmd/demo/status.go',
+     '\tctx, cancel := context.WithTimeout(ctx, servicesWait)', '\tctx, cancel := context.WithCancel(ctx)', 'cmd/demo:TestServicesStatus'),
 ]
 
 

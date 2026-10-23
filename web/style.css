@@ -109,7 +109,7 @@ h2 { margin: 0 0 8px; font-size: 15px; color: var(--accent); }
 .scene-status li { margin: 0.15em 0; }
 .scene-status li[data-shown="true"]::before { content: "● "; color: #3a7; }
 .scene-status li[data-shown="false"]::before { content: "○ "; color: #b80; }
-.scene-cap, .view-note { margin: 0.3em 0; padding: 0.3em 0.5em; border-left: 3px solid #b80; background: #fff8e6; font-size: 0.9em; }
+.scene-cap, .view-note { margin: 0.3em 0; padding: 0.3em 0.5em; border-left: 3px solid #b80; background: #fff8e6; font-size: 13px; }
 .consumer-row { display: inline-flex; flex-wrap: wrap; gap: 0.3em; align-items: center; margin-right: 0.8em; }
 
 /* UX1 (docs/commercial-ux1.md): the host page. The scene is the main view,

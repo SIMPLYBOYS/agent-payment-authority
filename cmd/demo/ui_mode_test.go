@@ -17,6 +17,8 @@ func TestModeSaysPayments(t *testing.T) {
 		{&api{addr: "127.0.0.1:1"}, `{"mode":"fake"}`},
 		{&api{addr: "127.0.0.1:1", payCap: BaseSepolia}, `{"mode":"fake","payments":"base_sepolia"}`},
 		{&api{addr: "127.0.0.1:1", payCap: LocalAnvil, live: &liveInfo{Record: "live_demo", Label: "L"}}, `"payments":"local_anvil"`},
+		{&api{addr: "127.0.0.1:1", payCap: BaseSepolia, approve: &approvals{source: "virtual"}}, `{"approval":"webauthn","authenticator":"virtual","mode":"fake","payments":"base_sepolia"}`},
+		{&api{addr: "127.0.0.1:1", approve: &approvals{source: "device"}}, `{"approval":"webauthn","authenticator":"device","mode":"fake"}`},
 		{&api{addr: "127.0.0.1:1", payCap: LocalAnvil, history: &historyInfo{Record: "live_history", Label: "H"}}, `{"label":"H","mode":"history","record":"live_history"}`},
 	} {
 		w := httptest.NewRecorder()

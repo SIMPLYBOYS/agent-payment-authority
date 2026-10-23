@@ -443,6 +443,18 @@ ITEMS = [
      [("web/adapter.js", '...(s.relayer ? [row("relayer", "relayer")] : [])', 'row("relayer", "relayer")')]),
     ("Gap B4: a paid device record says payment not enabled", node("web/test/approve.test.mjs", "a decided record's tag follows the record; a closed session's attempt text wins", r"見請購卡片"),
      [("web/approve.js", '(p.payment ? "見請購卡片" : "未啟用")', '"未啟用"')]),
+    ("Gap B4 review: a viewer's sign-in drops the host's approval", node("web/test/gap1.test.mjs", "a mode or viewer answer keeps the host's payments and approval", r"fake_a2"),
+     [("web/app.js", 'return human ? { record: "fake_a2", ...traits } : null;', 'return null;')]),
+    ("Gap B4 review: the viewer page words approvals as simulated", node("web/test/gap1.test.mjs", "a mode or viewer answer keeps the host's payments and approval", r"false"),
+     [("web/app.js", 'A.setApprovalMode(human ? "webauthn" : "simulated");', 'A.setApprovalMode("simulated");')]),
+    ("Gap B4: a paying host's caps say payment not implemented", node("web/test/gap1.test.mjs", "a paying host's header and live note never say it does not pay", r"付款"),
+     [("web/app.js", 'if (caps && pays && !history) caps.textContent', 'if (caps && false && pays && !history) caps.textContent')]),
+    ("Gap B4 review: a virtual authenticator worded as a device", node("web/test/gap1.test.mjs", "a virtual authenticator is never worded as a device", r"virtual authenticator"),
+     [("web/adapter.js", '(auth === "virtual" ? "本人以 virtual authenticator（測試用，不是實體裝置）" : "本人以已登記的裝置")', '"本人以已登記的裝置"')]),
+    ("Gap B4 review: a paid Allow's reason says payment not enabled", node("web/test/gap1.test.mjs", "a paid Allow's reason is not 'payment not enabled'", r"由 Host 付款"),
+     [("web/adapter.js", 'w.replace("；未啟用付款", "；由 Host 付款（測試 USDC）")', 'w')]),
+    ("Gap B4 review: the live note drops 合成資料", node("web/test/gap1.test.mjs", "a paying host's header and live note never say it does not pay", r"合成資料"),
+     [("web/app.js", '"合成資料、付款以" + payText', '"付款以" + payText')]),
 ]
 
 ITEM_TIMEOUT = 900

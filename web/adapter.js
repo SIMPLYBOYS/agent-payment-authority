@@ -27,6 +27,8 @@ export function serviceRows(s) {
   const row = (k, name) => [name, ...(SERVICE[k][s[k]] || ["unconfirmed", "未確認（" + str(s[k]) + "）"])];
   return [row("signer", "Signer"), row("voice", "語音服務"), ...(s.relayer ? [row("relayer", "relayer")] : [])];
 }
+// approverText: who approves, by the authenticator the host names (never a virtual one as a device).
+export const approverText = (auth) => (auth === "virtual" ? "本人以 virtual authenticator（測試用，不是實體裝置）" : "本人以已登記的裝置");
 export const paysOn = (cap) => typeof cap === "string" && Object.hasOwn(PAYING, cap);
 
 // Task status codes as the task list shows them (GET /api/tasks, section 14
@@ -639,7 +641,12 @@ export const simulated = () => approvalMode !== "webauthn";
 // (review R4): the Signer's decisions are resolved_by "webauthn:…".
 export const byDevice = (p) => !!(p && p.approval && typeof p.approval.resolved_by === "string" && p.approval.resolved_by.startsWith("webauthn:"));
 const grantText = (g) => (g.authorization_method === "webauthn" ? "本人核准 grant " : "模擬 grant ");
-const reasonText = (r, task) => (typeof r === "string" && r !== "" ? r + ((pay(task) ? REASONS_V1 : REASONS)[r] ? "（" + (pay(task) ? REASONS_V1 : REASONS)[r] + "）" : "") : UNKNOWN);
+// reasonText: a paid Allow is not "payment not enabled" (gap review B4).
+const reasonText = (r, task) => {
+  if (typeof r !== "string" || r === "") return UNKNOWN;
+  const w = (pay(task) ? REASONS_V1 : REASONS)[r];
+  return r + (w ? "（" + (paysOn(task && task.payment_capability) ? w.replace("；未啟用付款", "；由 Host 付款（測試 USDC）") : w) + "）" : "");
+};
 const hhmmss = (s) => (typeof s === "number" ? new Date(s * 1000).toISOString().slice(11, 19) + " UTC" : UNKNOWN);
 const CUSTOMER = { "consumer-a": "A", "consumer-b": "B" };
 
@@ -871,7 +878,7 @@ export function evidence(snapshot, po, ctx) {
       ["FX", cat ? str(cat.price.fx_rate) + "（" + str(cat.price.fx_source) + "）" : "目錄未取得", "商店 HTTP /catalog"],
       ["完整 402 內容", "未提供（API 未開放；D4 暫緩）", "—"],
     ] : [] },
-    { title: "請購", note: pay(t) ? str(t.contract_version) + "：intent_hash 一起涵蓋業務意圖與付款綁定（EIP-3009：收款人、金額、網路、資產、nonce、時間窗；agent-payment-authority/pay/" + (t.contract_version === V2 ? "v2" : "v1") + "）；不會付款。"
+    { title: "請購", note: pay(t) ? str(t.contract_version) + "：intent_hash 一起涵蓋業務意圖與付款綁定（EIP-3009：收款人、金額、網路、資產、nonce、時間窗；agent-payment-authority/pay/" + (t.contract_version === V2 ? "v2" : "v1") + "）" + (paysOn(t.payment_capability) ? "；付款與交付見付款列。" : "；不會付款。")
       : "intent_hash 為 fixture domain（agent-payment-authority/m1-fixture/v2/verifier-not-deployed），不是真實付款綁定。", rows: p ? [
       ["purchase_order_id", str(p.purchase_order_id), "Store"], ["request_id", str(p.request_id), "Store"],
       ["intent_hash", str(p.intent_hash), "Store"], ["payment_requirement_hash", str(p.payment_requirement_hash), "Store"],

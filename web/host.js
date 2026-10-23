@@ -270,10 +270,11 @@ async function pollReadiness() {
         const scs = (r.status && r.status.runs && r.status.runs.scenarios) || [];
         const credential = scs.some((x) => x.contract === A.V2); // C2: a BBS+ credential catalog
         const payments = r.status && r.status.payment_capability;
-        const p1a = r.status && r.status.human_approval ? { record: "fake_a2", credential, payments }
+        const authenticator = r.status && r.status.human_approval && r.status.human_approval.sources && r.status.human_approval.sources.authenticator;
+        const p1a = r.status && r.status.human_approval ? { record: "fake_a2", credential, payments, authenticator }
           : scs.some((x) => A.isPay(x.contract)) ? { record: "fake_p1a", credential } : null;
         if (r.status) confirmMode(mseq, r.status.history && r.status.history.record === "live_history" ? r.status.history
-          : r.status.live && r.status.live.record === "live_demo" ? { ...r.status.live, payments, credential } : p1a);
+          : r.status.live && r.status.live.record === "live_demo" ? { ...r.status.live, payments, credential, authenticator } : p1a);
         renderReadiness();
         renderControl();
         ensureScene();
@@ -536,7 +537,7 @@ function renderControl() {
   $("live-warning").hidden = !live;
   for (const x of $("live-warning").querySelectorAll("summary, p")) {
     if (!x.dataset.plain) x.dataset.plain = x.textContent;
-    x.textContent = live && payingNow() ? x.dataset.plain.replace(/合成資料[・、]不付款/, "委託是模擬・付款以測試 USDC 實際進行") : x.dataset.plain;
+    x.textContent = live && payingNow() ? x.dataset.plain.replace(/合成資料([・、])不付款/, "合成資料$1付款以" + A.PAYING[lastReady.status.payment_capability] + "（測試 USDC）實際進行$1委託是模擬") : x.dataset.plain;
   }
   const runs = (lastRuns && lastRuns.gen === creds.gen && lastRuns.runs) || [];
   // M-B: one running or stopping run per consumer, at most max_runs in all
@@ -573,8 +574,8 @@ function renderControl() {
   }
   const pay = scenarios.some((x) => A.isPay(x.contract));
   $("control-note").textContent = !pay ? "M1 無核准能力：Ask 30 秒後由後端記錄到期。開始只建立新的 task。"
-    : payingNow() ? "委託是 fake 模擬：主持人扮演客人確認委託（不是本人驗證）。Ask 由本人以已登記的裝置核准；Allow 與本人核准的請購由 Host 付款（" + A.PAYING[lastReady.status.payment_capability] + "、測試 USDC）。開始只建立新的 task。"
-    : humanNow() ? "委託是 fake 模擬：主持人扮演客人確認委託（不是本人驗證）。Ask 由本人以已登記的裝置核准；未啟用付款。開始只建立新的 task。"
+    : payingNow() ? "委託是 fake 模擬：主持人扮演客人確認委託（不是本人驗證）。Ask 由" + approver() + "核准；Allow 與本人核准的請購由 Host 付款（" + A.PAYING[lastReady.status.payment_capability] + "、測試 USDC）。開始只建立新的 task。"
+    : humanNow() ? "委託是 fake 模擬：主持人扮演客人確認委託（不是本人驗證）。Ask 由" + approver() + "核准；未啟用付款。開始只建立新的 task。"
     : "委託與核准是 fake 模擬：主持人扮演客人，不是本人驗證；核准只留下模擬授權，未啟用付款。開始只建立新的 task。";
   const chip = $("sim-chip");
   chip.hidden = !simC;
@@ -706,7 +707,7 @@ function agentCard(m, scs, { live, busy, full, simC }) {
       b.type = "button";
       b.disabled = simulating;
       b.title = A.paysOn(lastReady && lastReady.status && lastReady.status.payment_capability)
-        ? "主持人扮演客人 " + short(m.c) + " 確認委託（不是本人驗證；Ask 仍由本人以已登記的裝置核准）；一次扮演一位"
+        ? "主持人扮演客人 " + short(m.c) + " 確認委託（不是本人驗證；Ask 仍由" + approver() + "核准）；一次扮演一位"
         : "主持人扮演客人 " + short(m.c) + "：確認委託與核准都只在 fake 模式，不是本人驗證；一次扮演一位";
       b.addEventListener("click", () => simulateAs(m.c));
       acts.append(b);
@@ -774,6 +775,7 @@ function cancelButton(taskId, cls, text) {
 }
 
 const CANCEL_SCOPE = "取消整個 task：未到期的 Ask 會撤回、已到期的記為到期，task 記錄為已取消（TASK_CANCELLED）；不付款，無法復原。";
+const cancelScope = () => (payingNow() ? CANCEL_SCOPE.replace("；不付款，", "；之後不再付款，已完成的付款不會撤回；") : CANCEL_SCOPE);
 
 function confirmBox(taskId) {
   const box = document.createElement("div");
@@ -782,7 +784,7 @@ function confirmBox(taskId) {
   box.setAttribute("role", "group");
   box.setAttribute("aria-label", "確認取消 task " + taskId);
   const p = document.createElement("p");
-  p.textContent = "確認取消 task " + taskId + "？" + CANCEL_SCOPE;
+  p.textContent = "確認取消 task " + taskId + "？" + cancelScope();
   const yes = document.createElement("button");
   yes.type = "button";
   yes.className = "cancel-confirm";
@@ -810,7 +812,7 @@ function renderNext(runs) {
   if (run) {
     if (run.live === "running") text = "可用操作：停止 Agent（只停這一場）";
     else if (run.live === "stopping") text = "停止中：等待程序結束（仍占名額）";
-    else if (cancellable(run)) text = A.isPay(run.contract_version) ? "可用操作：在「需要你處理」核准或拒絕（" + (humanNow() ? "本人以已登記的裝置" : "模擬") + "）；或取消請購／task。"
+    else if (cancellable(run)) text = A.isPay(run.contract_version) ? "可用操作：在「需要你處理」核准或拒絕（" + (humanNow() ? approver() : "模擬") + "）；或取消請購／task。"
       + (payingNow() ? "放行與核准的請購由 Host 付款（測試 USDC）。" : "不會付款。")
       : "可用操作：取消請購／task。M1 沒有核准功能，Ask 不會付款，到期後由後端記錄。";
     else if (lastTasks && lastTasks.gen === creds.gen && lastTasks.list && lastTasks.list.get(run.task_id)) text = "沒有可用操作：task 已收尾。";
@@ -868,6 +870,8 @@ const units = (a) => (typeof a === "string" && /^[0-9]+$/.test(a) ? (Number(a) /
 // payingNow, humanNow: the host pays (P2), the person approves by device (A2), by its own status.
 const payingNow = () => A.paysOn(lastReady && lastReady.status && lastReady.status.payment_capability);
 const humanNow = () => !!(lastReady && lastReady.status && lastReady.status.human_approval);
+// approver: who approves, by the authenticator the operator says verifies (never a virtual one as a device).
+const approver = () => A.approverText(humanNow() && lastReady.status.human_approval.sources && lastReady.status.human_approval.sources.authenticator);
 // network names the chain by the host's own payment capability: the
 // testnet only when the host pays on it (a local anvil also runs as 84532).
 const network = (id) => {
@@ -896,7 +900,7 @@ async function simulateAs(c) {
   if (!r || r.error) setRunStatus("沒有收到回覆：角色模擬未確認", "error");
   else if (r.status === 200) {
     simDelegationOnly = !!(r.body && r.body.delegation_only); // E1-a: a live host that pays
-    setRunStatus(simDelegationOnly ? "角色模擬：客人 " + short(c) + "（主持人扮演，只能確認委託，不是本人驗證；Ask 由本人以已登記的裝置核准）"
+    setRunStatus(simDelegationOnly ? "角色模擬：客人 " + short(c) + "（主持人扮演，只能確認委託，不是本人驗證；Ask 由" + approver() + "核准）"
       : "角色模擬：客人 " + short(c) + "（主持人扮演，不是本人驗證；只在 fake 模式）", "ok");
     lastApprovals = null;
     approvalNote = null;

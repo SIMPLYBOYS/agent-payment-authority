@@ -99,24 +99,48 @@ type services struct {
 	Relayer string `json:"relayer,omitempty"` // ready | unavailable | in_process (local anvil); "" without --payments
 }
 
+// servicesWait bounds both probes together: the status is not kept waiting
+// past it (a service that does not answer in time reads as timeout).
+var servicesWait = 3 * time.Second
+
 func (a *api) services(ctx context.Context) *services {
-	s := &services{Signer: "unavailable", Voice: "unknown"}
-	if ans := a.approve.signer.Health(); ans.Kind == signerclient.KindOK && (ans.Reply.State == "approvals-only" || ans.Reply.State == "ready") {
-		s.Signer = ans.Reply.State
-		if ans.Reply.Voice != "" {
-			s.Voice = ans.Reply.Voice
-		}
-	}
+	ctx, cancel := context.WithTimeout(ctx, servicesWait)
+	defer cancel()
+	s := &services{Signer: "timeout", Voice: "unknown"}
+	// ponytail: Health takes no context; a hung Signer's call ends at its own client timeout, after this answer.
+	signerC := make(chan signerclient.Answer, 1)
+	go func() { signerC <- a.approve.signer.Health() }()
+	relayerC := make(chan string, 1)
+	pending := 1
 	switch {
 	case a.payCap == "":
 	case a.relayer == nil:
 		s.Relayer = "in_process"
 	default:
-		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		defer cancel()
-		s.Relayer = "unavailable"
-		if h, err := a.relayer.Health(ctx); err == nil && h.State == "ready" {
-			s.Relayer = "ready"
+		s.Relayer, pending = "timeout", 2
+		go func() {
+			h, err := a.relayer.Health(ctx)
+			if err == nil && h.State == "ready" {
+				relayerC <- "ready"
+				return
+			}
+			relayerC <- "unavailable"
+		}()
+	}
+	for ; pending > 0; pending-- {
+		select {
+		case ans := <-signerC:
+			s.Signer = "unavailable"
+			if ans.Kind == signerclient.KindOK && (ans.Reply.State == "approvals-only" || ans.Reply.State == "ready") {
+				s.Signer = ans.Reply.State
+				if ans.Reply.Voice != "" {
+					s.Voice = ans.Reply.Voice
+				}
+			}
+		case r := <-relayerC:
+			s.Relayer = r
+		case <-ctx.Done():
+			return s
 		}
 	}
 	return s
@@ -130,8 +154,9 @@ type humanApproval struct {
 }
 
 // hostStatus answers the host and the operator tokens
-// (docs/demo-operation-design.md sections 6.1, 13.8 R4). It reads what the host already knows and stats the build
-// files; it calls nothing of the Store, so asking never writes.
+// (docs/demo-operation-design.md sections 6.1, 13.8 R4). It reads what the host already knows, stats the build
+// files and, with --approvals-signer, asks the Signer and the relayer for their health (at most servicesWait);
+// it calls nothing of the Store, so asking never writes.
 func (a *api) hostStatus(w http.ResponseWriter, r *http.Request) {
 	g, ok := a.authorize(w, r)
 	if !ok {

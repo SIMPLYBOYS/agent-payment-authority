@@ -569,10 +569,14 @@ func TestA2PaymentModeOff(t *testing.T) {
 		st.Services == nil || *st.Services != (services{Signer: "approvals-only", Voice: "off"}) {
 		t.Fatalf("status %d %s", code, raw)
 	}
+	// A viewer's sign-in says the same of the host (gap review B4, review 1).
+	if code, raw, _ := f.h.get("/api/viewer", f.h.tokens["viewer:consumer-a"]); code != 200 || !strings.Contains(string(raw), `"approval":"webauthn","authenticator":"virtual"`) {
+		t.Fatalf("viewer %d %s", code, raw)
+	}
 }
 
-// healthOn serves one fixed /v1/health answer on a Unix socket.
-func healthOn(t *testing.T, body string) string {
+// healthOn serves one fixed /v1/health answer on a Unix socket, after delay.
+func healthOn(t *testing.T, body string, delay time.Duration) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "h") // a Unix socket path must be short
 	if err != nil {
@@ -589,6 +593,7 @@ func healthOn(t *testing.T, body string) string {
 			http.NotFound(w, r)
 			return
 		}
+		time.Sleep(delay)
 		w.Write([]byte(body))
 	})}
 	go srv.Serve(ln)
@@ -614,12 +619,12 @@ func TestServicesStatus(t *testing.T) {
 	} {
 		a := &api{approve: &approvals{signer: signerclient.NewApprovals(gone)}, payCap: c.payCap}
 		if c.signer != "" {
-			a.approve.signer = signerclient.NewApprovals(healthOn(t, c.signer))
+			a.approve.signer = signerclient.NewApprovals(healthOn(t, c.signer, 0))
 		}
 		if c.payCap != "" {
 			a.relayer = budget.NewClient(gone)
 			if c.relayer != "" {
-				a.relayer = budget.NewClient(healthOn(t, c.relayer))
+				a.relayer = budget.NewClient(healthOn(t, c.relayer, 0))
 			}
 		}
 		if got := a.services(ctx); *got != c.want {
@@ -629,6 +634,28 @@ func TestServicesStatus(t *testing.T) {
 	a := &api{approve: &approvals{signer: signerclient.NewApprovals(gone)}, payCap: LocalAnvil}
 	if got := a.services(ctx); got.Relayer != "in_process" {
 		t.Errorf("a relayer in process: %+v", *got)
+	}
+	// A service that does not answer in time keeps nothing waiting (review 5).
+	defer func(w time.Duration) { servicesWait = w }(servicesWait)
+	servicesWait = 200 * time.Millisecond
+	ready := `{"state":"ready","payment":"available","voice":"ready"}`
+	for name, c := range map[string]struct {
+		signer, relayer time.Duration
+		want            services
+	}{
+		"a slow Signer":  {time.Second, 0, services{"timeout", "unknown", "ready"}},
+		"a slow relayer": {0, time.Second, services{"ready", "ready", "timeout"}},
+	} {
+		a := &api{approve: &approvals{signer: signerclient.NewApprovals(healthOn(t, ready, c.signer))}, payCap: BaseSepolia,
+			relayer: budget.NewClient(healthOn(t, `{"state":"ready"}`, c.relayer))}
+		start := time.Now()
+		got := a.services(ctx)
+		if *got != c.want && !(name == "a slow relayer" && *got == services{"ready", "ready", "unavailable"}) { // the relayer's own call may end first, on the same deadline
+			t.Errorf("%s: %+v, want %+v", name, *got, c.want)
+		}
+		if d := time.Since(start); d > 700*time.Millisecond {
+			t.Errorf("%s: waited %v", name, d)
+		}
 	}
 }
 

@@ -381,10 +381,10 @@ function mirrorScene(sv, older) {
 // run, docs/cli-poc.md 54): the fixed label replaces the fake-agent badge
 // and capability line, and a note by the scene says the shop shows a
 // replay of that record. Nothing else changes: the data are the Store's.
-function applyHistory(seq, h, l) {
+function applyHistory(seq, h, l, traits) {
   history = h && h.record === "live_history" ? h : null;
   live = !history && l && l.record === "live_demo" ? l : null;
-  confirmMode(seq, history || live);
+  confirmMode(seq, hostInfo(history || live, traits));
   shownCard = shownEvidence = ""; // relabel the card and the evidence panel
 }
 
@@ -408,6 +408,19 @@ function modeUnconfirmed(seq) {
   labelPage({ record: "unknown", failed: true });
 }
 
+// hostInfo (gap review B4): labelPage's info from a mode or viewer answer
+// (t: its payments, approval, authenticator) and its history or live info
+// (h): a host that pays or approves by a person keeps saying so after a
+// viewer signs in. The page's approval wording follows the host's.
+export function hostInfo(h, t) {
+  const human = !!t && t.approval === "webauthn";
+  A.setApprovalMode(human ? "webauthn" : "simulated");
+  if (h && h.record === "live_history") return h;
+  const traits = { payments: t && A.paysOn(t.payments) ? t.payments : "", authenticator: t && t.authenticator };
+  if (h) return { ...h, ...traits };
+  return human ? { record: "fake_a2", ...traits } : null;
+}
+
 // labelPage sets the header and the note by the scene for history mode (h)
 // or the fake demo (null). /host calls it from its readiness poll too, so
 // the label is there before a viewer is chosen.
@@ -416,7 +429,8 @@ export function labelPage(h) {
   const live = h && h.record === "live_demo" ? h : null; // live mode (docs/cli-poc.md 55)
   const unknown = !!h && h.record === "unknown"; // not confirmed (docs/cli-poc.md 56.8)
   const p1a = !!h && h.record === "fake_p1a"; // the fake demo with an apa.pay.v1 catalog (docs/commercial-p1a.md)
-  const a2 = !!h && (h.record === "fake_a2" || h.record === "fake_pay"); // the same with the person's approval by device (docs/commercial-a2.md)
+  const a2 = !!h && h.record === "fake_a2"; // the same with the person's approval by device (docs/commercial-a2.md)
+  const who = A.approverText(h && h.authenticator); // never a virtual authenticator as a device
   // A host that pays (P2, E1-a) says so: the capability line and the notes
   // never say "no payment" while transactions go on chain (gap review B4).
   const pays = !!h && A.paysOn(h.payments);
@@ -426,17 +440,17 @@ export function labelPage(h) {
   const cred = (s) => (!!h && h.credential ? s.replace("憑證／ZK 未實作", "憑證 BBS+ 舊版（非 W3C bbs-2023；測試 issuer，與 host 同一程序）· ZK 未實作") : s);
   if (badge) {
     badge.textContent = unknown ? (h.failed ? "模式未確認：讀取失敗（重試中）" : "模式未確認（讀取中）")
-      : history ? history.label : live ? live.label : a2 ? (h.credential ? "C2＋A2／fake agent／BBS+ 憑證／本人核准（裝置）／" : "A2／fake agent／本人核准（裝置）／") + (pays ? payText + "付款" : "不付款")
+      : history ? history.label : live ? live.label : a2 ? (h.credential ? "C2＋A2／fake agent／BBS+ 憑證／本人核准（" + (h.authenticator === "virtual" ? "virtual authenticator" : "裝置") + "）／" : "A2／fake agent／本人核准（" + (h.authenticator === "virtual" ? "virtual authenticator" : "裝置") + "）／") + (pays ? payText + "付款" : "不付款")
       : p1a ? (h.credential ? "C2／fake agent／BBS+ 憑證／模擬核准／不付款" : "P1-a／fake agent／模擬核准／不付款") : "M1／fake agent／不付款";
     badge.dataset.mode = unknown ? (h.failed ? "failed" : "unknown") : history ? "history" : live ? "live" : "fake";
   }
   if (caps && pays && !history) caps.textContent = "能力：" + (live ? "真實 Agent（" + (live.dev_demo_plugins ? "開發展示例外：plugins 內容與行為未確認" : "嚴格模式") + "）" : "fake Agent")
-    + " · 核准 本人以已登記的裝置（Signer 驗證；委託確認仍是模擬） · 付款 " + payText
+    + " · 核准 " + who + "（Signer 驗證；委託確認仍是模擬） · 付款 " + payText
     + (h.credential ? " · 憑證 BBS+ 舊版（測試 issuer）" : "") + " · ZK 預算證明（由鏈上的預算合約驗證） · 獨立驗證：場次後以 verify-demo 檢查（不在本頁）";
   else if (caps) caps.textContent = unknown ? "能力：模式未確認（不代表 fake 或真實 Agent）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
     : history ? "能力：真實 Agent 執行紀錄（開發展示例外，非即時）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
     : live ? "能力：真實 Agent（" + (live.dev_demo_plugins ? "開發展示例外：plugins 內容與行為未確認，不是嚴格零 plugin 模式" : "嚴格模式") + "）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
-    : a2 ? cred("能力：真實 Agent 未啟用 · 核准 本人以已登記的裝置（Signer 驗證；委託確認仍是模擬） · 付款 未啟用 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行")
+    : a2 ? cred("能力：真實 Agent 未啟用 · 核准 " + who + "（Signer 驗證；委託確認仍是模擬） · 付款 未啟用 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行")
     : p1a ? cred("能力：真實 Agent 未啟用 · 核准 僅 fake 模擬（不是本人驗證） · 付款 未啟用 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行")
     : "能力：真實 Agent 未啟用 · 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行";
   const note = $("history-note");
@@ -445,7 +459,7 @@ export function labelPage(h) {
   if (ln) {
     ln.hidden = !live;
     if (!ln.dataset.plain) ln.dataset.plain = ln.textContent;
-    ln.textContent = live && pays ? ln.dataset.plain.replace("合成資料、不付款", "付款以" + payText + "實際進行，委託確認仍是模擬") : ln.dataset.plain;
+    ln.textContent = live && pays ? ln.dataset.plain.replace("合成資料、不付款", "合成資料、付款以" + payText + "實際進行，委託確認仍是模擬") : ln.dataset.plain;
   }
 }
 
@@ -475,7 +489,7 @@ export async function useViewer(typed) {
     const v = await res.json();
     if (gen !== state.gen) return; // the body came after a switch, a clear or pagehide: shows nothing
     state.consumer = v.consumer_id;
-    applyHistory(mseq, v.history || null, v.live || null);
+    applyHistory(mseq, v.history || null, v.live || null, v);
     $("task-pick").dataset.state = "loading";
     listNote("清單讀取中…", "");
     // The viewer is verified: signed in. The list has its own state; its
@@ -784,8 +798,8 @@ async function queryMode() {
   try {
     const r = await fetch("/api/mode", { cache: "no-store", credentials: "omit", signal: AbortSignal.timeout(5000) });
     const m = r.ok ? await r.json() : null;
-    if (m && m.mode === "fake") return confirmMode(seq, A.paysOn(m.payments) ? { record: "fake_pay", payments: m.payments } : null);
-    if (m && ((m.mode === "live" && m.record === "live_demo") || (m.mode === "history" && m.record === "live_history")) && typeof m.label === "string") return confirmMode(seq, m);
+    if (m && m.mode === "fake") return confirmMode(seq, hostInfo(null, m));
+    if (m && ((m.mode === "live" && m.record === "live_demo") || (m.mode === "history" && m.record === "live_history")) && typeof m.label === "string") return confirmMode(seq, hostInfo(m, m));
   } catch { /* below */ }
   modeUnconfirmed(seq);
   setTimeout(queryMode, 3000);
