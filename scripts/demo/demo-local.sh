@@ -25,31 +25,38 @@ logs=$base/logs
 sock=$dev/run/signer.sock
 say() { printf 'demo-local: %s\n' "$*" >&2; }
 stuck() { printf 'demo-local: 卡在%s\n' "$*" >&2; exit 1; }
+answers() { python3 -I -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.settimeout(1); s.connect(sys.argv[1])' "$1" 2>/dev/null; }
+[ -t 0 ] || stuck "啟動前：要在終端機執行（Signer 的密語從終端機輸入）"
 
 # Before anything starts: the ports free and no Signer left over.
 for p in 8545 8402; do
   if lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null 2>&1; then stuck "啟動前：127.0.0.1:$p 已有程式在用（上一次沒停乾淨？lsof -nP -iTCP:$p 看是誰）"; fi
 done
-[ ! -e "$sock" ] || stuck "啟動前：$sock 還在。上一個 Signer 可能還在跑；確定沒有在跑就刪掉這個檔"
+if [ -e "$sock" ]; then
+  if answers "$sock"; then stuck "啟動前：Signer 已在跑（$sock）"; fi
+  rm -f "$sock" # a leftover nothing answers on (a crash): the Signer refuses an existing socket
+fi
 [ -f "$dev/data/keys/wallet-a.key" ] && [ -f "$dev/data/keys/wallet-b.key" ] || stuck "啟動前：$dev 沒有兩個錢包的金鑰檔（P2_DEV_DIR）"
 mkdir -p "$base" "$logs"
 chmod 700 "$base" "$logs"
 
 # Ctrl-C or any stop: every process of this run, the chain saved on its way out.
+tty=$(stty -g 2>/dev/null || true)
 stopping=no
 stop() {
   [ $stopping = no ] || return 0
   stopping=yes
-  trap '' INT TERM
+  trap '' INT TERM HUP
   say "停下中…"
   kill -TERM 0 2>/dev/null || true
   wait 2>/dev/null || true
+  [ -z "$tty" ] || stty "$tty" 2>/dev/null || true # a passphrase prompt stopped mid-way leaves echo off
   # A socket nothing answers on is a leftover of this run: gone, so the next run starts.
-  if [ -S "$sock" ] && ! python3 -I -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.settimeout(1); s.connect(sys.argv[1])' "$sock" 2>/dev/null; then rm -f "$sock"; fi
+  if [ -S "$sock" ] && ! answers "$sock"; then rm -f "$sock"; fi
   say "已停下；鏈保存在 $chain/anvil-state.json，下次同一個指令會接著用"
 }
 trap stop EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' INT TERM HUP
 
 # 1 the chain (kept, or set up the first time).
 say "1/3 本機鏈啟動中（紀錄 $logs/chain.log）"
@@ -71,7 +78,8 @@ say "1/3 本機鏈就緒：$(grep -E '^p2-local: (resumed|wrote)' "$logs/chain.l
     sleep 1
   done
   say "3/3 Host 啟動中（fake Agent；頁面會自動打開；配對碼在下面）"
-  APA_PRESENT_DIR=$base/host make present-p2 SIGNER="$sock" AUTH=device PAYMENTS="$chain/payments.json" REGISTRY="$chain/registry.json"
+  APA_PRESENT_DIR=$base/host make present-p2 SIGNER="$sock" AUTH=device PAYMENTS="$chain/payments.json" REGISTRY="$chain/registry.json" ||
+    { say "卡在第 3 步：Host 停了（上面是它的訊息）；全部停下"; kill -TERM 0; }
 ) &
 
 # 2 the Signer, here in the foreground: its passphrase is typed on this terminal.

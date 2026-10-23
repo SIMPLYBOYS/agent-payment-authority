@@ -44,3 +44,9 @@ sh scripts/demo/demo-testnet.sh live t3    # 真實 Agent，E1-a 的 host 檔（
 - 啟動前檢查：8402 沒有程式在用；`/opt` 的 Signer、語音服務沒有在跑；relayer 的 socket 若是上次留下、沒有人回應，自動移除（apa-relayer 不接受已存在的 socket）。
 - 順序：sudo 密碼一次 → 語音服務（背景，等健康檢查，約 2～3 分鐘）→ relayer 密語 → Signer 密語 → Host（打開頁面、印出配對碼）。每一步卡住會說卡在哪。Ctrl-C 停下這次啟動的全部。
 - 每一場實際付款仍照往例先請 Aaron 核准（測試 USDC 與 gas）；開始前照 `docs/commercial-e1a.md` 6.2 確認餘額、每日上限與委託總額。
+
+## 已知的界線（review）
+
+- 本機鏈每秒存檔一次，停下時（Ctrl-C、關視窗）會等最後一次存檔完成。但程序被強制終止或當機時，最多會少掉最後 1 秒的鏈。若剛好落在一筆付款之間，Store、relayer、Signer 記得的交易鏈上沒有：畫面會寫「還查不到」，之後的預留也會失敗，只能換新目錄重來。每次重開成功都會備份一份 `anvil-state.json.bak`（重開當時的鏈）。
+- 重開時只檢查「預算合約在設定的位址」。anvil 每條新鏈的位址都一樣，所以這只是基本檢查，不能證明存檔是這個目錄的。
+- `make demo-local` 沿用 `var/p2-dev-e1a` 的 Signer（已登記你的裝置），它的資料庫也有 E1-a 彩排的紀錄；本人核准的每日上限是跨鏈累計的。

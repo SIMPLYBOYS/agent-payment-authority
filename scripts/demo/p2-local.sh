@@ -37,17 +37,23 @@ fi
 [ -x "$out/zkbudget" ] || (cd zk && go build -o "$out/zkbudget" ./cmd/zkbudget)
 "$anvil" --host 127.0.0.1 --port "$port" --chain-id 84532 --silent --state "$state" --state-interval 1 &
 pid=$!
-trap 'kill $pid 2>/dev/null' INT TERM EXIT
+# Stopping waits for anvil's last save (review): a run started right after never reads a half-written state.
+trap 'kill $pid 2>/dev/null; wait $pid 2>/dev/null' INT TERM HUP EXIT
 i=0
 until curl -s --max-time 2 -o /dev/null -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' $rpc; do
   kill -0 $pid 2>/dev/null || { echo "anvil exited" >&2; exit 1; }
   i=$((i + 1)); [ $i -lt 50 ] || { echo "anvil did not answer" >&2; exit 1; }; sleep 0.2
 done
 if [ $resume = yes ]; then
-  # The kept chain must be this directory's: its budget contract has code.
+  # The Host and the Signer ask payments.json's node: it must be this one.
+  kept_rpc=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["rpc"])' "$out/payments.json")
+  [ "$kept_rpc" = "$rpc" ] || { echo "p2-local: $out's chain was on $kept_rpc, not $rpc (P2_LOCAL_PORT)" >&2; exit 1; }
+  # The kept chain has a budget contract where payments.json says (anvil's
+  # addresses are the same on every new chain, so this is a sanity check only).
   contract=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["budget_contract"])' "$out/payments.json")
   code=$(curl -s --max-time 5 -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_getCode","params":["'"$contract"'","latest"]}' $rpc | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("result",""))')
-  [ ${#code} -gt 4 ] || { echo "p2-local: the kept chain has no budget contract at $contract: anvil-state.json is not this directory's chain" >&2; exit 1; }
+  [ ${#code} -gt 4 ] || { echo "p2-local: the kept chain has no budget contract at $contract (anvil-state.json is not this directory's chain, or was not saved)" >&2; exit 1; }
+  cp "$state" "$state.bak" # the chain as it resumed: a later half-written save still leaves this one
   echo "p2-local: resumed the kept chain of $out (budget $contract, block $(curl -s -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' $rpc | python3 -I -c 'import json,sys; print(int(json.load(sys.stdin)["result"],16))'))"
 else
   go run ./cmd/p2-local --rpc "$rpc" --wallet-a "$1" --wallet-b "$2" --out "$out" --zkbudget "$out/zkbudget"
