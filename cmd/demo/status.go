@@ -94,9 +94,9 @@ type statusReply struct {
 // Host finds them at this status (gap review C2): asked each time, so a
 // service that stopped shows before an approval needs it.
 type services struct {
-	Signer  string `json:"signer"`            // ready | approvals-only | unavailable
+	Signer  string `json:"signer"`            // ready | approvals-only | unavailable | timeout
 	Voice   string `json:"voice"`             // ready | unavailable | off | unknown (the Signer did not say)
-	Relayer string `json:"relayer,omitempty"` // ready | unavailable | in_process (local anvil); "" without --payments
+	Relayer string `json:"relayer,omitempty"` // ready | unavailable | timeout | in_process (local anvil); "" without --payments
 }
 
 // servicesWait bounds both probes together: the status is not kept waiting

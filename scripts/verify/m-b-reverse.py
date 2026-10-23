@@ -455,6 +455,8 @@ ITEMS = [
      [("web/adapter.js", 'w.replace("；未啟用付款", "；由 Host 付款（測試 USDC）")', 'w')]),
     ("Gap B4 review: the live note drops 合成資料", node("web/test/gap1.test.mjs", "a paying host's header and live note never say it does not pay", r"合成資料"),
      [("web/app.js", '"合成資料、付款以" + payText', '"付款以" + payText')]),
+    ("Gap C2 review: a hung Signer reads as unconfirmed", node("web/test/p2.test.mjs", "the services' readiness rows", r"Signer:error"),
+     [("web/adapter.js", 'timeout: ["error", "3 秒內沒有回應：核准可能失敗，請檢查 Signer"] },', '},')]),
 ]
 
 ITEM_TIMEOUT = 900

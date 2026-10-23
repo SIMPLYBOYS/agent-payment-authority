@@ -414,7 +414,7 @@ function modeUnconfirmed(seq) {
 // viewer signs in. The page's approval wording follows the host's.
 export function hostInfo(h, t) {
   const human = !!t && t.approval === "webauthn";
-  A.setApprovalMode(human ? "webauthn" : "simulated");
+  A.setApprovalMode(human ? "webauthn" : "simulated"); // before confirmMode's order check: a host's traits are fixed for its run
   if (h && h.record === "live_history") return h;
   const traits = { payments: t && A.paysOn(t.payments) ? t.payments : "", authenticator: t && t.authenticator };
   if (h) return { ...h, ...traits };

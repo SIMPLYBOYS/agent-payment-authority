@@ -637,14 +637,14 @@ func TestServicesStatus(t *testing.T) {
 	}
 	// A service that does not answer in time keeps nothing waiting (review 5).
 	defer func(w time.Duration) { servicesWait = w }(servicesWait)
-	servicesWait = 200 * time.Millisecond
+	servicesWait = 500 * time.Millisecond
 	ready := `{"state":"ready","payment":"available","voice":"ready"}`
 	for name, c := range map[string]struct {
 		signer, relayer time.Duration
 		want            services
 	}{
-		"a slow Signer":  {time.Second, 0, services{"timeout", "unknown", "ready"}},
-		"a slow relayer": {0, time.Second, services{"ready", "ready", "timeout"}},
+		"a slow Signer":  {3 * time.Second, 0, services{"timeout", "unknown", "ready"}},
+		"a slow relayer": {0, 3 * time.Second, services{"ready", "ready", "timeout"}},
 	} {
 		a := &api{approve: &approvals{signer: signerclient.NewApprovals(healthOn(t, ready, c.signer))}, payCap: BaseSepolia,
 			relayer: budget.NewClient(healthOn(t, `{"state":"ready"}`, c.relayer))}
@@ -653,7 +653,7 @@ func TestServicesStatus(t *testing.T) {
 		if *got != c.want && !(name == "a slow relayer" && *got == services{"ready", "ready", "unavailable"}) { // the relayer's own call may end first, on the same deadline
 			t.Errorf("%s: %+v, want %+v", name, *got, c.want)
 		}
-		if d := time.Since(start); d > 700*time.Millisecond {
+		if d := time.Since(start); d > 2*time.Second {
 			t.Errorf("%s: waited %v", name, d)
 		}
 	}

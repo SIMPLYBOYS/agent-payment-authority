@@ -262,5 +262,6 @@ test("the services' readiness rows", () => {
   assert.match(down.relayer[1], /apa-relayer/);
   assert.deepEqual(A.serviceRows({ signer: "approvals-only", voice: "off", relayer: "" }).map(([k, s]) => k + ":" + s), ["Signer:ok", "語音服務:off"]); // no --payments: no relayer row
   assert.equal(A.serviceRows({ signer: "new", voice: "ready" })[0][1], "unconfirmed"); // a state this page does not know is not ready
+  assert.deepEqual(A.serviceRows({ signer: "timeout", voice: "unknown", relayer: "timeout" }).map(([k, s]) => k + ":" + s), ["Signer:error", "語音服務:unconfirmed", "relayer:error"]); // a hung service is an error
   assert.equal(A.voiceText(""), "原因未回報");
 });

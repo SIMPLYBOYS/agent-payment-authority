@@ -82,4 +82,12 @@
 - **C2 就緒表**：Signer 的 `/v1/health` 回報語音服務（`off`／`ready`／`unavailable`）；Host 狀態新增 `services`（Signer、語音服務、relayer），每次輪詢都重新詢問；就緒表多三列，停掉的服務會在核准前就標為錯誤。
 - 驗證：Go（`cmd/demo`、`internal/signer`、`internal/signerclient`、`internal/budget`）與 web 119 項測試通過；反向檢查 Go 8 項、web 2 項全數抓到；頁首在瀏覽器以假的 `/api/mode` 實際檢查過。
 
+Review 兩輪（`9ce0813` 與其後的修正）：viewer 登入後頁首不再被蓋回「不付款」（`/api/mode` 與 `/api/viewer` 都帶付款能力、核准方式、驗證器）；viewer 頁的核准用語跟著主機；virtual authenticator 不再寫成「已登記的裝置」；漏掉的「未啟用付款／不會付款」補上；Signer 與 relayer 的檢查並行、合計最多 3 秒，逾時在就緒表標為錯誤；`labelPage` 以假的 document 測試。
+
+留待之後（不在批次 1）：
+- `adapter.js` 裡仍有幾處把核准寫成「已登記的裝置」（等你核准、`WEBAUTHN_APPROVAL`、裁決說明、已拒絕），它拿不到驗證器資訊；用 virtual authenticator 彩排時會說成裝置。
+- `/api/mode`、`/api/viewer` 不帶憑證資訊：viewer 登入後，C2 主機的標章少了「C2＋」與「憑證 BBS+」。
+- `UNKNOWN`「未知／未提供」仍到處使用（B5 的一部分，批次 2 的觀眾畫面一併處理）。
+- 主持人頁的幾處替換（live 警告、取消確認）依賴 `host.html` 的原字，沒有測試。
+
 注意：語音那一列要等 `/opt/apa-signer` 換成這一版 Signer 才會顯示「就緒」；舊版 Signer 不回報語音，這一列會顯示「未確認（Signer 未回報）」。換版要 sudo，由 Aaron 執行。

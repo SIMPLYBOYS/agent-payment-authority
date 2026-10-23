@@ -17,10 +17,12 @@ const RUN = { agent: { live: "真實 Agent（live CLI）", fake: "fake Agent" },
 // serviceRows (gap review C2): the readiness rows of the Signer, its voice
 // service and the budget relayer, from the host's status (services).
 const SERVICE = {
-  signer: { ready: ["ok", "就緒（核准與付款簽章）"], "approvals-only": ["ok", "就緒（只核准，不簽付款）"], unavailable: ["error", "無法連線：核准會失敗，請先啟動 Signer"] },
+  signer: { ready: ["ok", "就緒（核准與付款簽章）"], "approvals-only": ["ok", "就緒（只核准，不簽付款）"], unavailable: ["error", "無法連線：核准會失敗，請先啟動 Signer"],
+    timeout: ["error", "3 秒內沒有回應：核准可能失敗，請檢查 Signer"] },
   voice: { ready: ["ok", "就緒（模型已核對）"], off: ["off", "未設定（核准不含語音）"], unavailable: ["error", "無法使用：核准會記為語音降級，請先啟動語音服務"],
     unknown: ["unconfirmed", "未確認（Signer 未回報；Signer 無法連線或是舊版）"] },
-  relayer: { ready: ["ok", "就緒"], in_process: ["ok", "Host 程序內（本機 anvil）"], unavailable: ["error", "無法連線：付款會失敗，請先啟動 apa-relayer"] },
+  relayer: { ready: ["ok", "就緒"], in_process: ["ok", "Host 程序內（本機 anvil）"], unavailable: ["error", "無法連線：付款會失敗，請先啟動 apa-relayer"],
+    timeout: ["error", "3 秒內沒有回應：付款可能失敗，請檢查 apa-relayer"] },
 };
 export function serviceRows(s) {
   if (!s) return [];
