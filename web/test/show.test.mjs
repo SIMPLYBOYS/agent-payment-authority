@@ -40,15 +40,15 @@ test("in flight: paying, then confirming; never paid before the chain says so", 
   assert.equal(at(5).steps[4].text, "付款完成，正在交付");
 });
 
-test("two customers: a payment ready while another's reservation is under way waits for it; the window says payments go in order", () => {
+test("two customers: a payment ready while another is in progress is behind it; the window says payments go in order", () => {
   const at = (c, k) => A.showCustomer(c, snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid.slice(0, k)]), DLG);
   const q = A.showQueue([at("consumer-a", 2), at("consumer-b", 0)], "local_anvil");
-  assert.equal(q.note, "客人同時選購；付款由 Host 依序處理，一次做一筆的一步，等鏈上確認時才接著處理下一筆。");
+  assert.equal(q.note, "客人同時選購；付款由 Host 依序處理，一次處理一筆；一筆等鏈上確認太久時，會先處理下一筆。");
   assert.equal(q.models[0].steps[3].text, "預留預算中（第 1 筆鏈上交易）");
-  assert.equal(q.models[1].steps[3].text, "等前一筆預留完成（Host 依序處理付款）");
-  assert.equal(q.models[1].caption, "客人 B・付款：等前一筆預留完成（Host 依序處理付款）");
-  // A waiting for the chain (confirming) lets B go on (review): B is not said to wait for A.
-  assert.equal(A.showQueue([at("consumer-a", 4), at("consumer-b", 0)], "local_anvil").models[1].steps[3].text, "準備付款");
+  assert.equal(q.models[1].steps[3].text, "排在前一筆付款之後（Host 依序處理付款）");
+  assert.equal(q.models[1].caption, "客人 B・付款：排在前一筆付款之後（Host 依序處理付款）");
+  // A confirming: the worker still waits in A's shop call, and B is started only at its next round (review 2).
+  assert.equal(A.showQueue([at("consumer-a", 4), at("consumer-b", 0)], "local_anvil").models[1].steps[3].text, "排在前一筆付款之後（Host 依序處理付款）");
   // Nothing on its way (the other one is paid, or both only ready): "準備付款" as it is.
   assert.equal(A.showQueue([at("consumer-a", 7), at("consumer-b", 0)], "local_anvil").models[1].steps[3].text, "準備付款");
   assert.equal(A.showQueue([at("consumer-a", 0), at("consumer-b", 0)], "local_anvil").models[1].steps[3].text, "準備付款");
