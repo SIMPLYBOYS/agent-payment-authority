@@ -359,8 +359,11 @@ test("D2 projection: cause_seq names the event behind the phase; task_end the fi
   assert.deepEqual(at(msg([...denyEvents(), ev(4, "TASK_TIMED_OUT"), ev(5, "TASK_CANCELLED")])), ["denied", 3, "timed_out", 5], "the first ending");
   const orphan = [ev(1, "TASK_STARTED"), ev(2, "POLICY_DECIDED", { decision: { policy_verdict: "Ask" } })];
   assert.deepEqual(at(msg(orphan)), ["unknown", 0, "", 2], "no purchase: no number");
-  assert.equal(A.shopLabel("expired", 4, "cancelled", ""), "ask expired (#4) - leaving");
-  assert.equal(A.shopLabel("waiting", 0, "", ""), "ASK - waiting for a human", "unknown: no number");
+  assert.equal(A.shopLabel("expired", 4, "cancelled", ""), "核准期限已過，離店");
+  assert.equal(A.shopLabel("waiting", 0, "", ""), "超過自動範圍，等核准");
+  assert.equal(A.shopLabel("denied", 3, "", "INSUFFICIENT_BUDGET"), "超出預算，已拒絕，離店");
+  assert.equal(A.shopLabel("denied", 3, "", "SOMETHING_NEW"), "已拒絕，離店"); // no code for the audience
+  assert.ok(!/#|[A-Z_]{6,}/.test(A.shopLabel("denied", 3, "cancelled", "INSUFFICIENT_BUDGET")), "no event number, no code (gap review B3)");
 });
 
 test("D2 projection: every replay step of the Store-built histories sends fields in range", () => {

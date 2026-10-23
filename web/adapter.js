@@ -342,33 +342,33 @@ const COUNTER = new Set(["waiting", "denied", "allowed_unpaid", "allowed", "appr
 const labelKind = (phase, end) => (phase === "waiting" && end === "timed_out" ? "waiting/timed_out" : phase);
 const fixedCode = (r) => (typeof r === "string" && /^[A-Z0-9_]{1,40}$/.test(r) ? r : "");
 
-// shopLabel is the customer's ASCII label in Unity: #n is the cause, never
-// the snapshot sequence; an unknown cause (0) shows no number.
+// shopLabel is the customer's label in Unity, in plain words (gap review
+// B3, GD3): no code, no event number (the cause still decides the rule).
+// Unity's SceneRules.Label says the same; both are tested with the shared vectors.
 export function shopLabel(phase, cause, end, reason) {
-  const n = cause > 0 ? " (#" + cause + ")" : "";
   switch (phase) {
     case "empty": return "";
-    case "entered": return "entered" + n;
-    case "quoted": return "request proposed" + n;
-    case "waiting": return end === "timed_out" ? "CLI timeout - ask still pending" : "ASK" + n + " - waiting for a human";
+    case "entered": return "進店";
+    case "quoted": return "選好商品，送出請購";
+    case "waiting": return end === "timed_out" ? "Agent 已逾時，請購仍在等核准" : "超過自動範圍，等核准";
     case "denied": {
-      const why = [cause > 0 ? "#" + cause : "", fixedCode(reason)].filter(Boolean).join(", ");
-      return "DENY" + (why ? " (" + why + ")" : "") + " - leaving";
+      const why = PLAIN[fixedCode(reason)] || "";
+      return (why ? why + "，" : "") + "已拒絕，離店";
     }
-    case "allowed_unpaid": return "ALLOW - no payment capability";
+    case "allowed_unpaid": return "在範圍內放行（這場不付款）";
     // Until a payment event: true whether or not a payment ever starts.
-    case "allowed": return "ALLOW" + n + " - not paid yet";
-    case "approved": return "APPROVED" + n + " - not paid yet";
-    case "paying": return "PAYING" + n + " - reserving and signing";
-    case "confirming": return "PAYMENT SENT" + n + " - waiting for the chain";
-    case "paid": return "PAID" + n + " - delivery next";
-    case "delivered": return "PAID AND DELIVERED" + n + " - leaving with a receipt";
-    case "delivery_failed": return "PAID" + n + " - not delivered, a person handles it";
-    case "not_paid": return "NOT PAID" + n + " - nothing charged, leaving";
-    case "payment_review": return "PAYMENT REVIEW" + n + " - budget reserved, not paid";
-    case "expired": return "ask expired" + n + " - leaving";
-    case "withdrawn": return "ask withdrawn" + n + " - leaving";
-    default: return "unknown state" + n;
+    case "allowed": return "在範圍內放行，尚未付款";
+    case "approved": return "已核准，尚未付款";
+    case "paying": return "付款中：預留預算";
+    case "confirming": return "付款已送出，等鏈上確認";
+    case "paid": return "已付款，到交付區取貨";
+    case "delivered": return "已交付，帶著收據離店";
+    case "delivery_failed": return "已付款，交付失敗（待人工處理）";
+    case "not_paid": return "沒有付款（沒有花錢），離店";
+    case "payment_review": return "付款結果未確認，待人工處理";
+    case "expired": return "核准期限已過，離店";
+    case "withdrawn": return "已取消，離店";
+    default: return "狀態未確認";
   }
 }
 

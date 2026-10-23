@@ -169,6 +169,20 @@ try {
       .map((type, i) => ({ event_id: "e" + i, event_type: type, sequence: i + 1, purchase_order_id: type === "TASK_STARTED" ? "" : "po-1", authorization_method: type === "APPROVED" ? "webauthn" : undefined,
         decision: type === "POLICY_DECIDED" ? { policy_verdict: "Ask", reason: "HUMAN_APPROVAL_REQUIRED" } : undefined })) } }] };
   await s.evaluate(`(() => { const c = new BroadcastChannel("apa-show-v1"); c.postMessage({ from: "host", kind: "own", on: true }); c.postMessage({ from: "host", kind: "view", view: ${JSON.stringify(view)} }); return true; })()`);
+  // Unity in the same window, as the host page's scene would drive it: A paid at the delivery zone (B6), in Chinese (GD3).
+  const u2 = (seq, phase) => ({ v: 2, scene: 1, slot: 1, clear: false, consumer: "consumer-a", task_id: "show-a-09", seq, phase, verdict: "Ask", reason: "", animate: true,
+    cause_seq: seq, task_end: "", payments: "base_sepolia", layout: "data" });
+  const send2 = (m) => s.evaluate(`(() => { new BroadcastChannel("apa-show-v1").postMessage({ from: "host", kind: "send2", msg: ${JSON.stringify(m)} }); return true; })()`);
+  await send2({ v: 2, scene: 1, clear: true, layout: "data" });
+  for (const [seq, phase] of [[4, "approved"], [6, "paying"], [9, "paid"]]) {
+    await send2(u2(seq, phase));
+    for (let i = 0; i < 4; i++) { await s.send("Page.captureScreenshot", { format: "png" }); await sleep(800); } // headless Chrome draws when asked
+  }
+  await s.evaluate(`(() => { const r = document.getElementById("show-receipts"); r.dataset.keep = r.style.visibility; r.style.visibility = "hidden"; return true; })()`);
+  await shot(s, "show-1920x1080-3a-unity-paid-at-pickup", 1920, 1080);
+  await s.evaluate(`(() => { const r = document.getElementById("show-receipts"); r.style.visibility = r.dataset.keep || ""; return true; })()`);
+  await send2(u2(11, "delivered"));
+  for (let i = 0; i < 4; i++) { await s.send("Page.captureScreenshot", { format: "png" }); await sleep(800); }
   const sc7 = `document.querySelector('.show-card[data-consumer="consumer-a"]')`;
   check("synthetic paid view: five steps done", await s.waitFor(`!!${sc7} && [...${sc7}.querySelectorAll(".show-step")].map((e) => e.dataset.state).join(" ") === "done done done done done"`, 10000),
     await s.evaluate(`${sc7} ? ${sc7}.textContent : "no card"`));

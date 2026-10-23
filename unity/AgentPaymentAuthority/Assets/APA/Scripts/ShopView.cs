@@ -17,10 +17,12 @@ namespace APA
     [System.Serializable]
     public class Layout
     {
-        public string key, title;      // title: the banner's name for the room (ASCII)
+        public string key, title;      // title: the banner's name for the room (the scene's font has its characters)
         public string floor = "floor", wall = "wall";
         public Color floorTint = Color.white, wallTint = Color.white;
         public Vector2 door, aisle, shelf, bend, front, counter;
+        public Vector2 pickup;         // the delivery zone (gap review B6): from bend up or down to pickupRow, along it, then to pickup
+        public float pickupRow;        // 0: bend's own row
         public Prop[] props = new Prop[0];
         public Note[] notes = new Note[0]; // zone labels; the delivery zone's says "after payment"
 
@@ -39,6 +41,7 @@ namespace APA
         public RectInt[] artRects = new RectInt[0];
 
         public const string DefaultLayout = "data"; // the main scene (UX2-D1)
+        public const string FontName = "NotoSansTC-APA";
         readonly Dictionary<string, Layout> layouts = new Dictionary<string, Layout>();
         Layout layout;
         GameObject room;
@@ -78,8 +81,10 @@ namespace APA
         // The corridor (16.3): fixed points joined by horizontal and vertical
         // lines that keep clear of the props. A customer only walks along it.
         // Units are 32 px tiles; the room is 12 x 8.
-        public const int Out = 0, OutRow = 1, Door = 2, Aisle = 3, Shelf = 4, Bend = 5, Front = 6, Counter = 7;
-        public static readonly int[,] Lines = { { Out, OutRow }, { OutRow, Door }, { Door, Aisle }, { OutRow, Aisle }, { Aisle, Shelf }, { Shelf, Bend }, { Bend, Front }, { Front, Counter } };
+        public const int Out = 0, OutRow = 1, Door = 2, Aisle = 3, Shelf = 4, Bend = 5, Front = 6, Counter = 7, PickupUp = 8, PickupRow = 9, Pickup = 10;
+        public static readonly int[,] Lines = { { Out, OutRow }, { OutRow, Door }, { Door, Aisle }, { OutRow, Aisle }, { Aisle, Shelf }, { Shelf, Bend }, { Bend, Front }, { Front, Counter },
+            { Bend, PickupUp }, { PickupUp, PickupRow }, { PickupRow, Pickup } };
+        const int PointCount = 11;
 
         // Each customer waits, and leaves to, its own row outside the door;
         // inside, the points are the layout's.
@@ -97,14 +102,19 @@ namespace APA
                 case Shelf: return layout.shelf;
                 case Bend: return layout.bend;
                 case Front: return layout.front;
+                case PickupUp: return new Vector2(layout.bend.x, Row());
+                case PickupRow: return new Vector2(layout.pickup.x, Row());
+                case Pickup: return layout.pickup;
                 default: return layout.counter;
             }
         }
 
-        // Shortest ways between the eight points (Floyd-Warshall).
+        float Row() => layout.pickupRow != 0f ? layout.pickupRow : layout.bend.y;
+
+        // Shortest ways between the points (Floyd-Warshall).
         void Ways(string consumer, out float[,] d, out int[,] next)
         {
-            const int N = 8;
+            const int N = PointCount;
             d = new float[N, N];
             next = new int[N, N];
             for (int i = 0; i < N; i++) for (int j = 0; j < N; j++) { d[i, j] = i == j ? 0f : float.MaxValue; next[i, j] = j; }
@@ -125,8 +135,10 @@ namespace APA
                 case "entered": return Door;
                 case "quoted": case "unknown": return Shelf;
                 case "waiting": case "allowed_unpaid": return Counter;
-                // P2: a payment in progress, or one a person handles, waits at the counter.
-                case "paying": case "confirming": case "paid": case "delivery_failed": case "payment_review": return Counter;
+                // P2: a payment in progress, or one a person handles, waits at the counter;
+                // once paid the customer waits at the delivery zone (gap review B6).
+                case "paying": case "confirming": case "payment_review": return Counter;
+                case "paid": case "delivery_failed": return Pickup;
                 default: return Out;
             }
         }
@@ -171,7 +183,9 @@ namespace APA
 
         void Awake()
         {
-            font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            // GD3-B: a subset of Noto Sans TC (SIL OFL 1.1) with every character the scene shows
+            // (scripts/unity/font-subset.py); the built-in font has no Chinese.
+            font = Resources.Load<Font>(FontName) ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             pixel = Shape(1, 1, (x, y) => 1f);
             disc = Shape(32, 16, (x, y) => x * x + y * y <= 1f ? 1f : 0f);
             circle = Shape(48, 24, (x, y) => { float r = x * x + y * y; return r <= 1f && r >= 0.62f ? 1f : 0f; });
@@ -182,8 +196,8 @@ namespace APA
             }
             if (!layouts.TryGetValue(DefaultLayout, out layout)) layouts[DefaultLayout] = layout = new Layout { key = DefaultLayout, title = "" }; // never without a default room (review note)
             BuildRoom();
-            customers["consumer-a"] = MakeCustomer("consumer-a", customerA, "Customer A", new Color(0.55f, 0.75f, 1f));
-            customers["consumer-b"] = MakeCustomer("consumer-b", customerB, "Customer B", new Color(1f, 0.7f, 0.5f));
+            customers["consumer-a"] = MakeCustomer("consumer-a", customerA, "客人 A", new Color(0.55f, 0.75f, 1f));
+            customers["consumer-b"] = MakeCustomer("consumer-b", customerB, "客人 B", new Color(1f, 0.7f, 0.5f));
             // UX1: the title is small, in the top left corner of the view.
             banner = MakeText("banner", new Vector2(-2.05f, 8.8f), 0.055f, new Color(1f, 1f, 1f, 0.8f));
             banner.anchor = TextAnchor.UpperLeft;
@@ -210,7 +224,7 @@ namespace APA
         void Banner()
         {
             if (banner == null) return;
-            banner.text = (payments == "base_sepolia" ? "P2 / Base Sepolia testnet payments - " : payments == "local_anvil" ? "P2-a / local test payments - " : "M1 / no payment - ") + layout.title + (UsingPlaceholders ? "   [LimeZu pending: placeholder art]" : "   Art: LimeZu (limezu.itch.io)");
+            banner.text = (payments == "base_sepolia" ? "Base Sepolia 測試網路付款・" : payments == "local_anvil" ? "本機測試鏈付款・" : "這場不付款・") + layout.title + (UsingPlaceholders ? "　（素材未匯入：簡易圖形）" : "　像素素材：LimeZu（limezu.itch.io）");
         }
 
         // UseLayout: another room. Every customer goes back outside at once,
@@ -393,7 +407,7 @@ namespace APA
         public void ResetAll()
         {
             foreach (var c in customers.Values) Clear(c);
-            if (status != null) status.text = Multi ? StatusLines() : "No task shown";
+            if (status != null) status.text = Multi ? StatusLines() : NoTask;
             // UX1: with two customers the page's cards carry each status; the
             // text stays (tests read it) but is not drawn over the shop.
             if (status != null) status.GetComponent<MeshRenderer>().enabled = !Multi;
@@ -429,7 +443,7 @@ namespace APA
             foreach (var kv in customers)
             {
                 var label = LabelNow(kv.Value);
-                lines.Add((kv.Key == "consumer-a" ? "A" : "B") + ": " + (label == "" ? (kv.Value.target.Phase == "empty" ? "no task shown" : kv.Value.target.Phase) : label));
+                lines.Add((kv.Key == "consumer-a" ? "A" : "B") + "：" + (label == "" ? (kv.Value.target.Phase == "empty" ? NoTask : kv.Value.target.Phase) : label));
             }
             return string.Join("\n", lines);
         }
@@ -522,6 +536,13 @@ namespace APA
                     steps.Add(new Step { to = p, node = Counter, seg = "final", pause = DenyPause });
                     Leg(c.id, ref p, ref a, ref b, Out, "final", steps);
                 }
+            }
+            else if (t.Phase == "delivered")
+            {
+                // Delivered: by the delivery zone, a moment there, then out with the receipt.
+                Leg(c.id, ref p, ref a, ref b, Pickup, "final", steps);
+                steps.Add(new Step { to = p, node = Pickup, seg = "final", pause = DenyPause });
+                Leg(c.id, ref p, ref a, ref b, Out, "final", steps);
             }
             else if (!(browse && t.Phase == "quoted")) Leg(c.id, ref p, ref a, ref b, Station(t.Phase), "final", steps);
             ahead = false;
@@ -707,13 +728,15 @@ namespace APA
         }
 
         // LabelNow: the label of the segment on now; a display-only segment
-        // says [anim] and that no event of its own stands behind it.
+        // carries AnimMark and says no event of its own stands behind it.
+        public const string AnimMark = "（動畫）", NoTask = "沒有客人";
+        public const string Browsing = "逛商品中" + AnimMark, ToCounter = "走向櫃台" + AnimMark;
         static string LabelNow(Customer c)
         {
             switch (c.seg)
             {
-                case "browse": return "[anim] browsing - no event";
-                case "counter": return "[anim] to counter - quote bound in request";
+                case "browse": return Browsing + "：沒有對應的事件";
+                case "counter": return ToCounter + "：報價已綁在請購裡";
                 default: return c.target.Label;
             }
         }
@@ -724,7 +747,7 @@ namespace APA
             // UX1: with two customers the canvas keeps a display-only
             // segment's [anim] mark and drops its explanation (the page's
             // card says it), so a walking label does not cover the other.
-            var shown = Multi && c.seg == "browse" ? "[anim] browsing" : Multi && c.seg == "counter" ? "[anim] to counter" : label;
+            var shown = Multi && c.seg == "browse" ? Browsing : Multi && c.seg == "counter" ? ToCounter : label;
             c.tag.text = shown == "" ? c.name : c.name + "\n" + shown;
             // Kept inside the view: to the right of a customer on the left
             // half of the room, to the left on the right half.
@@ -736,7 +759,7 @@ namespace APA
             c.tag.transform.localPosition = new Vector3(left ? -0.4f : 0.4f, below ? -0.1f : 2.05f, 0f);
             if (status == null) return;
             if (Multi) status.text = StatusLines();
-            else if (c.body.color.a > 0.9f) status.text = (c.id == "consumer-a" ? "A" : "B") + ": " + (label == "" ? c.target.Phase : label);
+            else if (c.body.color.a > 0.9f) status.text = (c.id == "consumer-a" ? "A" : "B") + "：" + (label == "" ? c.target.Phase : label);
         }
     }
 }

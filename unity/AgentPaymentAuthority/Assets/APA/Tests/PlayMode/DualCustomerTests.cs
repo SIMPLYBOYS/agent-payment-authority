@@ -62,8 +62,8 @@ public class DualCustomerTests
         CollectionAssert.IsSupersetOf(Rendered(), new[] {
             "rendered:1:3:consumer-a|1|show-a-01|waiting||",
             "rendered:1:2:consumer-b|1|show-b-01|quoted||" });
-        StringAssert.Contains("A: ASK (#3)", view.StatusText);
-        StringAssert.Contains("B: request proposed (#2)", view.StatusText);
+        StringAssert.Contains("A：超過自動範圍", view.StatusText);
+        StringAssert.Contains("B：選好商品", view.StatusText);
         // Two customers never stand on one spot inside the shop.
         Assert.AreNotEqual(view.P("consumer-a", ShopView.Counter), view.P("consumer-b", ShopView.Counter));
         Assert.AreEqual(view.P("consumer-a", ShopView.Counter), view.PositionOf("consumer-a"));
@@ -130,9 +130,9 @@ public class DualCustomerTests
         Assert.AreEqual("cafe", view.LayoutKey);
         Assert.AreEqual("waiting", view.PhaseOf("consumer-a"));
         var texts = Object.FindObjectsByType<TextMesh>(FindObjectsSortMode.None).Select(t => t.text).ToList();
-        Assert.That(texts, Has.Some.StartsWith("M1 / no payment - Street cafe"));
-        Assert.That(texts, Has.Some.EqualTo("Pickup - after payment"));
-        Assert.That(texts, Has.None.EqualTo("Download - after payment"), "the old room's notes are gone");
+        Assert.That(texts, Has.Some.StartsWith("這場不付款・街角咖啡"));
+        Assert.That(texts, Has.Some.EqualTo("取餐區・付款後才交付"));
+        Assert.That(texts, Has.None.EqualTo("下載區・付款後才交付"), "the old room's notes are gone");
 
         bridge.Receive(V2(1, "consumer-b", 1, "show-b-01", 2, "quoted").Replace("{", "{\"layout\":\"mart\","));
         Assert.That(bridge.reports.Last(), Is.EqualTo("applied:1:2:consumer-b|Invalid"));

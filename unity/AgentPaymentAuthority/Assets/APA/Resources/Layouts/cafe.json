@@ -1,10 +1,11 @@
 {
   "key": "cafe",
-  "title": "Street cafe (demo scene)",
+  "title": "街角咖啡（示範情境）",
   "floor": "floor", "wall": "wall",
   "floorTint": {"r": 1, "g": 0.9, "b": 0.78, "a": 1}, "wallTint": {"r": 1, "g": 0.94, "b": 0.86, "a": 1},
   "door": {"x": 1.5, "y": 1.2}, "aisle": {"x": 1.5, "y": 3.2}, "shelf": {"x": 4.5, "y": 3.2},
   "bend": {"x": 7.5, "y": 3.2}, "front": {"x": 7.5, "y": 1.6}, "counter": {"x": 8.5, "y": 1.6},
+  "pickup": {"x": 8.6, "y": 4.6},
   "props": [
     {"key": "menu-board", "x": 4.5, "y": 6.6}, {"key": "ice-display", "x": 3.3, "y": 4.0}, {"key": "ice-display", "x": 5.7, "y": 4.0},
     {"key": "sign-open", "x": 1.5, "y": 7.3},
@@ -14,8 +15,8 @@
     {"key": "ice-display", "x": 11.4, "y": 3.9}
   ],
   "notes": [
-    {"text": "Menu - pick & quote", "x": 4.5, "y": 6.35},
-    {"text": "Counter - order", "x": 10.1, "y": 0.45},
-    {"text": "Pickup - after payment", "x": 10.4, "y": 5.75}
+    {"text": "菜單・選購與報價", "x": 4.5, "y": 6.35},
+    {"text": "櫃台・點餐", "x": 10.1, "y": 0.45},
+    {"text": "取餐區・付款後才交付", "x": 10.4, "y": 5.75}
   ]
 }

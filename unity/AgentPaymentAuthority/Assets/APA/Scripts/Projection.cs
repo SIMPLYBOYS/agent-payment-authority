@@ -93,35 +93,58 @@ namespace APA
         // Code keeps a fixed reason code (A-Z, 0-9, _) and drops anything else.
         static string Code(string r) => !string.IsNullOrEmpty(r) && r.Length <= 40 && Regex.IsMatch(r, "^[A-Z0-9_]+$") ? r : "";
 
-        // Label: the customer's ASCII label. #n is always the cause, never
-        // the snapshot sequence; an unknown cause shows no number.
+        // Plain: a reason as the audience reads it (the page's PLAIN, web/adapter.js); codes stay on the host page.
+        static string Plain(string reason)
+        {
+            switch (Code(reason))
+            {
+                case "INSUFFICIENT_BUDGET": return "超出預算";
+                case "MERCHANT_NOT_ALLOWED": return "不在允許的商店";
+                case "ASSET_NOT_ALLOWED": return "不是允許的幣別";
+                case "CREDENTIAL_INVALID": return "憑證檢查沒通過";
+                case "CREDENTIAL_REVOKED": return "憑證已撤銷";
+                case "CREDENTIAL_STATUS_UNAVAILABLE": return "憑證狀態無法確認";
+                case "AUTHORIZATION_EXPIRED": return "授權或報價已過期";
+                case "CONFIG_MISSING": return "缺少設定或憑證";
+                case "TASK_NOT_ACTIVE": return "任務已結束";
+                case "CONTRACT_VERSION_MISMATCH": return "版本不符";
+                case "OWNERSHIP_MISMATCH": return "不是這位客人的請購";
+                case "PAYMENT_CAPABILITY_UNAVAILABLE": return "這場展示不能付款";
+                case "APPROVER_UNAVAILABLE": return "沒有可核准的人";
+                case "VOICE_CHALLENGE_FAILED": return "唸的內容或聲音不符";
+                default: return "";
+            }
+        }
+
+        // Label: the customer's label in plain words (gap review B3, GD3):
+        // no code, no event number. The cause still decides what is new
+        // (Rule); it is no longer printed.
         public static string Label(string phase, int cause, string end, string reason)
         {
-            var n = cause > 0 ? " (#" + cause + ")" : "";
             switch (phase)
             {
                 case "empty": return "";
-                case "entered": return "entered" + n;
-                case "quoted": return "request proposed" + n;
-                case "waiting": return end == "timed_out" ? "CLI timeout - ask still pending" : "ASK" + n + " - waiting for a human";
+                case "entered": return "進店";
+                case "quoted": return "選好商品，送出請購";
+                case "waiting": return end == "timed_out" ? "Agent 已逾時，請購仍在等核准" : "超過自動範圍，等核准";
                 case "denied":
-                    var why = (cause > 0 ? "#" + cause : "") + (cause > 0 && Code(reason) != "" ? ", " : "") + Code(reason);
-                    return "DENY" + (why != "" ? " (" + why + ")" : "") + " - leaving";
-                case "allowed_unpaid": return "ALLOW - no payment capability";
+                    var why = Plain(reason);
+                    return (why != "" ? why + "，" : "") + "已拒絕，離店";
+                case "allowed_unpaid": return "在範圍內放行（這場不付款）";
                 // P2 (docs/commercial-p2-host.md 5). Until a payment event:
                 // true whether or not a payment ever starts.
-                case "allowed": return "ALLOW" + n + " - not paid yet";
-                case "approved": return "APPROVED" + n + " - not paid yet";
-                case "paying": return "PAYING" + n + " - reserving and signing";
-                case "confirming": return "PAYMENT SENT" + n + " - waiting for the chain";
-                case "paid": return "PAID" + n + " - delivery next";
-                case "delivered": return "PAID AND DELIVERED" + n + " - leaving with a receipt";
-                case "delivery_failed": return "PAID" + n + " - not delivered, a person handles it";
-                case "not_paid": return "NOT PAID" + n + " - nothing charged, leaving";
-                case "payment_review": return "PAYMENT REVIEW" + n + " - budget reserved, not paid";
-                case "expired": return "ask expired" + n + " - leaving";
-                case "withdrawn": return "ask withdrawn" + n + " - leaving";
-                default: return "unknown state" + n;
+                case "allowed": return "在範圍內放行，尚未付款";
+                case "approved": return "已核准，尚未付款";
+                case "paying": return "付款中：預留預算";
+                case "confirming": return "付款已送出，等鏈上確認";
+                case "paid": return "已付款，到交付區取貨";
+                case "delivered": return "已交付，帶著收據離店";
+                case "delivery_failed": return "已付款，交付失敗（待人工處理）";
+                case "not_paid": return "沒有付款（沒有花錢），離店";
+                case "payment_review": return "付款結果未確認，待人工處理";
+                case "expired": return "核准期限已過，離店";
+                case "withdrawn": return "已取消，離店";
+                default: return "狀態未確認";
             }
         }
     }

@@ -14,7 +14,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     }
    ]
   },
@@ -31,7 +31,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "entered (#1)"
+     "label": "進店"
     },
     {
      "m": {
@@ -43,7 +43,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     }
    ]
   },
@@ -60,7 +60,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "entered (#1)"
+     "label": "進店"
     },
     {
      "m": {
@@ -72,7 +72,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "request proposed (#2)"
+     "label": "選好商品，送出請購"
     },
     {
      "m": {
@@ -84,7 +84,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     }
    ]
   },
@@ -101,7 +101,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     },
     {
      "m": {
@@ -113,7 +113,7 @@
      },
      "rule": 3,
      "browse": false,
-     "label": "CLI timeout - ask still pending"
+     "label": "Agent 已逾時，請購仍在等核准"
     }
    ]
   },
@@ -130,7 +130,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "CLI timeout - ask still pending"
+     "label": "Agent 已逾時，請購仍在等核准"
     },
     {
      "m": {
@@ -142,7 +142,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "ask expired (#5) - leaving"
+     "label": "核准期限已過，離店"
     }
    ]
   },
@@ -159,7 +159,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "DENY (#3, INSUFFICIENT_BUDGET) - leaving"
+     "label": "超出預算，已拒絕，離店"
     },
     {
      "m": {
@@ -171,7 +171,7 @@
      },
      "rule": 4,
      "browse": false,
-     "label": "DENY (#3, INSUFFICIENT_BUDGET) - leaving"
+     "label": "超出預算，已拒絕，離店"
     }
    ]
   },
@@ -188,7 +188,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "ask expired (#4) - leaving"
+     "label": "核准期限已過，離店"
     },
     {
      "m": {
@@ -200,7 +200,7 @@
      },
      "rule": 4,
      "browse": false,
-     "label": "ask expired (#4) - leaving"
+     "label": "核准期限已過，離店"
     }
    ]
   },
@@ -217,7 +217,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "ask withdrawn (#4) - leaving"
+     "label": "已取消，離店"
     },
     {
      "m": {
@@ -229,7 +229,7 @@
      },
      "rule": 4,
      "browse": false,
-     "label": "ask withdrawn (#4) - leaving"
+     "label": "已取消，離店"
     }
    ]
   },
@@ -246,7 +246,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "ask expired (#4) - leaving"
+     "label": "核准期限已過，離店"
     },
     {
      "m": {
@@ -258,7 +258,7 @@
      },
      "rule": 4,
      "browse": false,
-     "label": "ask expired (#4) - leaving"
+     "label": "核准期限已過，離店"
     }
    ]
   },
@@ -275,7 +275,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     },
     {
      "m": {
@@ -287,7 +287,7 @@
      },
      "rule": 4,
      "browse": false,
-     "label": "ASK - waiting for a human"
+     "label": "超過自動範圍，等核准"
     }
    ]
   },
@@ -304,7 +304,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ASK - waiting for a human"
+     "label": "超過自動範圍，等核准"
     },
     {
      "m": {
@@ -316,7 +316,7 @@
      },
      "rule": 4,
      "browse": false,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     }
    ]
   },
@@ -333,7 +333,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     },
     {
      "m": {
@@ -345,7 +345,7 @@
      },
      "rule": 2,
      "browse": true,
-     "label": "ASK (#6) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     }
    ]
   },
@@ -362,7 +362,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ASK - waiting for a human"
+     "label": "超過自動範圍，等核准"
     },
     {
      "m": {
@@ -374,7 +374,7 @@
      },
      "rule": 4,
      "browse": false,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     },
     {
      "m": {
@@ -386,7 +386,7 @@
      },
      "rule": 2,
      "browse": true,
-     "label": "ASK (#6) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     }
    ]
   },
@@ -403,7 +403,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     },
     {
      "m": {
@@ -415,7 +415,7 @@
      },
      "rule": 4,
      "browse": false,
-     "label": "ASK - waiting for a human"
+     "label": "超過自動範圍，等核准"
     },
     {
      "m": {
@@ -427,7 +427,7 @@
      },
      "rule": 4,
      "browse": false,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     }
    ]
   },
@@ -444,7 +444,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     },
     {
      "m": {
@@ -456,7 +456,7 @@
      },
      "rule": 4,
      "browse": false,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     }
    ]
   },
@@ -473,7 +473,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     },
     {
      "m": {
@@ -485,7 +485,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "DENY (#6, INSUFFICIENT_BUDGET) - leaving"
+     "label": "超出預算，已拒絕，離店"
     }
    ]
   },
@@ -502,7 +502,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ASK - waiting for a human"
+     "label": "超過自動範圍，等核准"
     }
    ]
   },
@@ -519,7 +519,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ASK - waiting for a human"
+     "label": "超過自動範圍，等核准"
     },
     {
      "m": {
@@ -531,7 +531,7 @@
      },
      "rule": 4,
      "browse": false,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     }
    ]
   },
@@ -548,7 +548,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "DENY (#3) - leaving"
+     "label": "已拒絕，離店"
     }
    ]
   },
@@ -565,7 +565,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ALLOW - no payment capability"
+     "label": "在範圍內放行（這場不付款）"
     }
    ]
   },
@@ -582,7 +582,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ALLOW (#3) - not paid yet"
+     "label": "在範圍內放行，尚未付款"
     },
     {
      "m": {
@@ -594,7 +594,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "PAYING (#4) - reserving and signing"
+     "label": "付款中：預留預算"
     },
     {
      "m": {
@@ -606,7 +606,7 @@
      },
      "rule": 4,
      "browse": false,
-     "label": "PAYING (#5) - reserving and signing"
+     "label": "付款中：預留預算"
     },
     {
      "m": {
@@ -618,7 +618,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "PAYMENT SENT (#7) - waiting for the chain"
+     "label": "付款已送出，等鏈上確認"
     },
     {
      "m": {
@@ -630,7 +630,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "PAID (#8) - delivery next"
+     "label": "已付款，到交付區取貨"
     },
     {
      "m": {
@@ -642,7 +642,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "PAID AND DELIVERED (#10) - leaving with a receipt"
+     "label": "已交付，帶著收據離店"
     }
    ]
   },
@@ -659,7 +659,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ASK (#3) - waiting for a human"
+     "label": "超過自動範圍，等核准"
     },
     {
      "m": {
@@ -671,7 +671,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "APPROVED (#4) - not paid yet"
+     "label": "已核准，尚未付款"
     },
     {
      "m": {
@@ -683,7 +683,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "PAYING (#5) - reserving and signing"
+     "label": "付款中：預留預算"
     },
     {
      "m": {
@@ -695,7 +695,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "NOT PAID (#6) - nothing charged, leaving"
+     "label": "沒有付款（沒有花錢），離店"
     }
    ]
   },
@@ -712,7 +712,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "PAID (#8) - delivery next"
+     "label": "已付款，到交付區取貨"
     },
     {
      "m": {
@@ -724,7 +724,7 @@
      },
      "rule": 1,
      "browse": true,
-     "label": "ALLOW (#11) - not paid yet"
+     "label": "在範圍內放行，尚未付款"
     },
     {
      "m": {
@@ -736,7 +736,7 @@
      },
      "rule": 2,
      "browse": true,
-     "label": "ALLOW (#14) - not paid yet"
+     "label": "在範圍內放行，尚未付款"
     }
    ]
   },
@@ -753,7 +753,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "PAYMENT REVIEW (#6) - budget reserved, not paid"
+     "label": "付款結果未確認，待人工處理"
     },
     {
      "m": {
@@ -765,7 +765,7 @@
      },
      "rule": 1,
      "browse": false,
-     "label": "PAID (#9) - not delivered, a person handles it"
+     "label": "已付款，交付失敗（待人工處理）"
     }
    ]
   }

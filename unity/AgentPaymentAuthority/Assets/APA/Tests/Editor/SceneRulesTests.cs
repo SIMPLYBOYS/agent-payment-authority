@@ -49,7 +49,7 @@ public class SceneRulesTests
         Assert.AreEqual(Outcome.Applied, s.Apply(ProjectionState.Parse(Json(3, "waiting", "")), out _), "an old page's message");
         Assert.AreEqual(0, s.T.Cause);
         Assert.AreEqual("", s.T.End);
-        Assert.AreEqual("ASK - waiting for a human", s.T.Label);
+        Assert.AreEqual("超過自動範圍，等核准", s.T.Label);
         string[] bad = { ",\"cause_seq\":-1", ",\"cause_seq\":99", ",\"cause_seq\":0", ",\"task_end\":\"paid\"", ",\"task_end\":\"\"" };
         int seq = 3;
         foreach (var extra in bad)
@@ -58,7 +58,7 @@ public class SceneRulesTests
             Assert.AreEqual(4, s.Rule, extra + ": the same place, nothing played again");
             Assert.AreEqual(0, s.T.Cause, extra);
             Assert.AreEqual("", s.T.End, extra);
-            Assert.AreEqual("ASK - waiting for a human", s.T.Label, extra);
+            Assert.AreEqual("超過自動範圍，等核准", s.T.Label, extra);
         }
     }
 
@@ -79,31 +79,32 @@ public class SceneRulesTests
             Assert.AreEqual(Outcome.Applied, s.Apply(m, out _), extra);
             Assert.AreEqual(0, s.T.Cause, extra);
             Assert.AreEqual("", s.T.End, extra);
-            Assert.AreEqual("ASK - waiting for a human", s.T.Label, extra);
+            Assert.AreEqual("超過自動範圍，等核准", s.T.Label, extra);
         }
         var ok = new ProjectionState();
         ok.Apply(ProjectionState.Parse(Json(5, "waiting", ",\"cause_seq\": 3 ,\"task_end\": \"timed_out\"")), out _);
         Assert.AreEqual(3, ok.T.Cause);
-        Assert.AreEqual("CLI timeout - ask still pending", ok.T.Label);
+        Assert.AreEqual("Agent 已逾時，請購仍在等核准", ok.T.Label);
     }
 
     [Test]
-    public void LabelsAreAsciiAndDisplaySegmentsAreMarked()
+    public void LabelsAreInTheFontAndDisplaySegmentsAreMarked()
     {
         string[] phases = { "entered", "quoted", "waiting", "denied", "allowed_unpaid", "expired", "withdrawn", "unknown" };
         foreach (var p in phases)
             foreach (var end in new[] { "", "cancelled", "timed_out" })
             {
                 var l = SceneRules.Label(p, 3, end, "INSUFFICIENT_BUDGET");
-                foreach (var ch in l) Assert.Less((int)ch, 128, l);
-                StringAssert.DoesNotContain("paid", l.ToLowerInvariant().Replace("unpaid", ""));
-                Assert.IsFalse(l.StartsWith("[anim]"), "an event's label is not a display segment: " + l);
+                LayoutTests.InFont(l);
+                StringAssert.DoesNotContain("已付款", l);
+                StringAssert.DoesNotContain("#", l, "no event number for the audience (gap review B3)");
+                StringAssert.DoesNotContain(ShopView.AnimMark, l, "an event's label is not a display segment: " + l);
             }
     }
 
     // P2 (docs/commercial-p2-host.md 5): the payment's phases are known and
-    // say what is true of them: ASCII, never "no payment capability", and
-    // a decision never says paid.
+    // say what is true of them: in the scene's font, never "this demo does
+    // not pay", and a decision never says paid.
     [Test]
     public void PaymentPhasesAreKnownAndTrue()
     {
@@ -112,13 +113,13 @@ public class SceneRulesTests
         {
             CollectionAssert.Contains(ProjectionState.Phases, p);
             var l = SceneRules.Label(p, 7, "", "");
-            foreach (var ch in l) Assert.Less((int)ch, 128, l);
-            StringAssert.Contains("(#7)", l);
-            StringAssert.DoesNotContain("no payment", l);
-            StringAssert.DoesNotStartWith("unknown", l);
+            LayoutTests.InFont(l);
+            StringAssert.DoesNotContain("#", l);
+            StringAssert.DoesNotContain("不付款", l);
+            Assert.AreNotEqual("狀態未確認", l);
         }
-        StringAssert.EndsWith("not paid yet", SceneRules.Label("allowed", 3, "", ""));
-        StringAssert.EndsWith("not paid yet", SceneRules.Label("approved", 4, "", ""));
+        StringAssert.EndsWith("尚未付款", SceneRules.Label("allowed", 3, "", ""));
+        StringAssert.EndsWith("尚未付款", SceneRules.Label("approved", 4, "", ""));
         // Each step of one payment is never a new purchase at the counter.
         var s = new ProjectionState();
         int seq = 3;

@@ -141,14 +141,14 @@ test("P2: a person's approval, then its payment: Unity follows the payment, neve
     assert.notEqual(t.rule, 2, e.event_type); // never a new purchase
     assert.equal(t.browse, false, e.event_type);
   }
-  assert.equal(t.target.label, "PAID AND DELIVERED (#11) - leaving with a receipt");
+  assert.equal(t.target.label, "已交付，帶著收據離店");
 });
 
 test("P2: an Allow never paid (the task ended first) says not paid yet, never that the host pays", () => {
   const v = view([...allowed(), ev(4, "TASK_CANCELLED", { purchase_order_id: "" })], undefined);
   v.task.payment_capability = "local_anvil";
   const m = A.projection({ snapshot: v, gen: 1 }, false);
-  assert.equal(A.shopLabel(m.phase, m.cause_seq, m.task_end, ""), "ALLOW (#3) - not paid yet");
+  assert.equal(A.shopLabel(m.phase, m.cause_seq, m.task_end, ""), "在範圍內放行，尚未付款");
   const c = A.card(v, null, { mode: "live", catalog: null });
   assert.equal(c.status, "Allow：在委託範圍內，尚未付款");
   assert.ok(!c.steps.some((s) => /未啟用付款/.test(s.note)), "a step says payment is not enabled");

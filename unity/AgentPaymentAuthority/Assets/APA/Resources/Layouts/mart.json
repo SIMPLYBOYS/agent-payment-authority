@@ -1,10 +1,11 @@
 {
   "key": "mart",
-  "title": "Corner mart (demo scene)",
+  "title": "巷口便利商店（示範情境）",
   "floor": "floor", "wall": "wall",
   "floorTint": {"r": 1, "g": 1, "b": 1, "a": 1}, "wallTint": {"r": 1, "g": 1, "b": 1, "a": 1},
   "door": {"x": 1.5, "y": 1.2}, "aisle": {"x": 1.5, "y": 3.2}, "shelf": {"x": 4.5, "y": 3.2},
   "bend": {"x": 7.5, "y": 3.2}, "front": {"x": 7.5, "y": 1.6}, "counter": {"x": 8.5, "y": 1.6},
+  "pickup": {"x": 8.8, "y": 4.3},
   "props": [
     {"key": "shelf-1", "x": 2.5, "y": 4.2}, {"key": "shelf-2", "x": 3.5, "y": 4.2}, {"key": "shelf-3", "x": 5.5, "y": 4.2},
     {"key": "shelf-4", "x": 6.5, "y": 4.2}, {"key": "fridge-1", "x": 8.6, "y": 5.3},
@@ -13,8 +14,8 @@
     {"key": "parcel-locker", "x": 10.75, "y": 4.6}
   ],
   "notes": [
-    {"text": "Shelves - pick & quote", "x": 4.5, "y": 7.45},
-    {"text": "Counter - approval", "x": 10.3, "y": 0.55},
-    {"text": "Lockers - after payment", "x": 10.6, "y": 7.45}
+    {"text": "貨架・選購與報價", "x": 4.5, "y": 7.45},
+    {"text": "櫃台・核准", "x": 10.3, "y": 0.55},
+    {"text": "取貨櫃・付款後才交付", "x": 10.6, "y": 7.45}
   ]
 }

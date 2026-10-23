@@ -19,6 +19,33 @@ public class ShopSceneTests
         ",\"phase\":\"" + phase + "\",\"verdict\":\"\",\"reason\":\"\",\"animate\":" + (animate ? "true" : "false") + "}";
 
     // D2: with cause_seq and task_end (docs/demo-presentation-design.md 16.4).
+    static Font font;
+    static void InFont(string s)
+    {
+        font = font ?? Resources.Load<Font>(ShopView.FontName);
+        Assert.NotNull(font, "the scene's font");
+        foreach (var ch in s ?? "") Assert.IsTrue(font.HasCharacter(ch), "not in the font: '" + ch + "' in " + s);
+    }
+
+    // B6: delivered from the counter, the customer goes by the delivery zone, then out.
+    [UnityTest]
+    public IEnumerator ADeliveryGoesByTheDeliveryZone()
+    {
+        string Pay(int seq, string phase) => D2(1, "consumer-a", seq, phase, seq).Replace("}", ",\"payments\":\"base_sepolia\"}");
+        bridge.Receive(Pay(3, "allowed"));
+        yield return Arrive("consumer-a");
+        bridge.Receive(Pay(7, "confirming"));
+        yield return Arrive("consumer-a");
+        bridge.Receive(Pay(10, "delivered"));
+        var route = view.RouteOf("consumer-a");
+        var pickup = view.P("consumer-a", ShopView.Pickup);
+        Assert.That(route, Has.Some.EqualTo(pickup), "the way out passes the delivery zone");
+        Assert.AreEqual(view.P("consumer-a", ShopView.Out), route.Last());
+        yield return Arrive("consumer-a");
+        Assert.AreEqual(view.Point("consumer-a", ShopView.Out), view.PositionOf("consumer-a"));
+        Assert.AreEqual("已交付，帶著收據離店", view.LabelOf("consumer-a"));
+    }
+
     static string D2(int gen, string consumer, int seq, string phase, int cause, string end = "", bool animate = true, string reason = "") =>
         "{\"v\":1,\"gen\":" + gen + ",\"consumer\":\"" + consumer + "\",\"task_id\":\"task-" + consumer.Substring(9) + "\",\"seq\":" + seq +
         ",\"phase\":\"" + phase + "\",\"verdict\":\"\",\"reason\":\"" + reason + "\",\"animate\":" + (animate ? "true" : "false") +
@@ -59,14 +86,15 @@ public class ShopSceneTests
     public void SceneTextIsNeutralAboutTheAgent()
     {
         var texts = Object.FindObjectsByType<TextMesh>(FindObjectsSortMode.None).Select(t => t.text).ToList();
-        Assert.That(texts, Has.Some.StartsWith("M1 / no payment"));
-        Assert.That(texts, Has.Some.EqualTo("Customer A"));
-        Assert.That(texts, Has.Some.EqualTo("Customer B"));
+        Assert.That(texts, Has.Some.StartsWith("這場不付款"));
+        Assert.That(texts, Has.Some.EqualTo("客人 A"));
+        Assert.That(texts, Has.Some.EqualTo("客人 B"));
         foreach (var t in texts)
         {
             StringAssert.DoesNotContain("fake", t.ToLowerInvariant());
             StringAssert.DoesNotContain("sim agent", t.ToLowerInvariant());
             StringAssert.DoesNotContain("real", t.ToLowerInvariant());
+            StringAssert.DoesNotContain("真實", t);
         }
     }
 
@@ -183,7 +211,7 @@ public class ShopSceneTests
     }
 
     [UnityTest]
-    public IEnumerator RoutesKeepClearOfPropsInFourDirectionsWithAsciiLabels()
+    public IEnumerator RoutesKeepClearOfPropsInFourDirectionsWithLabelsInTheFont()
     {
         var facings = new HashSet<string>();
         var labels = new HashSet<string>();
@@ -230,14 +258,13 @@ public class ShopSceneTests
         CollectionAssert.IsSupersetOf(facings, new[] { "right", "up", "left", "down" }, "four walking directions");
         foreach (var l in labels)
         {
-            foreach (var ch in l) Assert.Less((int)ch, 128, "ASCII only: " + l);
-            if (l.Contains("browsing") || l.Contains("to counter")) StringAssert.StartsWith("[anim] ", l, "a display segment says so");
+            InFont(l);
+            if (l.StartsWith("逛商品中") || l.StartsWith("走向櫃台")) StringAssert.Contains(ShopView.AnimMark, l, "a display segment says so");
         }
         CollectionAssert.IsSupersetOf(labels, new[]
         {
-            "entered (#1)", "request proposed (#2)", "[anim] browsing - no event", "[anim] to counter - quote bound in request",
-            "ASK (#3) - waiting for a human", "ask expired (#4) - leaving", "ASK (#6) - waiting for a human",
-            "DENY (#9, INSUFFICIENT_BUDGET) - leaving", "ask withdrawn (#4) - leaving",
+            "進店", "選好商品，送出請購", "逛商品中（動畫）：沒有對應的事件", "走向櫃台（動畫）：報價已綁在請購裡",
+            "超過自動範圍，等核准", "核准期限已過，離店", "超出預算，已拒絕，離店", "已取消，離店",
         });
         Debug.Log("APA ShopSceneTests: routes clear in rooms " + string.Join(",", view.LayoutKeys) + "; facings " + string.Join(",", facings) + "; labels " + string.Join(" | ", labels));
     }
@@ -285,7 +312,7 @@ public class ShopSceneTests
         bridge.Receive(D2(1, "consumer-a", 1, "entered", 1));
         yield return Arrive("consumer-a");
         bridge.Receive(D2(1, "consumer-a", 3, "waiting", 3));
-        yield return Until(() => view.LabelOf("consumer-a").StartsWith("[anim] to counter"), "left the shelf");
+        yield return Until(() => view.LabelOf("consumer-a").StartsWith(ShopView.ToCounter), "left the shelf");
         var route = view.RouteOf("consumer-a");
         float len = 0;
         for (int i = 1; i < route.Count; i++) len += (route[i] - route[i - 1]).magnitude;
@@ -295,7 +322,7 @@ public class ShopSceneTests
         yield return Arrive("consumer-a");
         float took = Time.realtimeSinceStartup - start;
         Assert.Less(took, len / (ShopView.Walk * 1.5f), "twice the walking speed over " + len + " units, took " + took);
-        Assert.AreEqual("ALLOW - no payment capability", view.LabelOf("consumer-a"));
+        Assert.AreEqual("在範圍內放行（這場不付款）", view.LabelOf("consumer-a"));
         Assert.AreEqual(new[] { "rendered:1:1:entered|task-a||", "rendered:1:4:allowed_unpaid|task-a||" }, Rendered().ToArray());
     }
 
@@ -305,7 +332,7 @@ public class ShopSceneTests
     {
         var props = PropRects();
         bridge.Receive(D2(1, "consumer-b", 3, "waiting", 3));
-        yield return Until(() => view.LabelOf("consumer-b").StartsWith("[anim] to counter"), "on the way to the counter");
+        yield return Until(() => view.LabelOf("consumer-b").StartsWith(ShopView.ToCounter), "on the way to the counter");
         yield return new WaitForSeconds(0.2f);
         float start = Time.realtimeSinceStartup;
         bridge.Receive(D2(1, "consumer-b", 4, "expired", 4));
@@ -340,7 +367,7 @@ public class ShopSceneTests
             Assert.AreEqual(2.5f, took, 0.15f, "jumped at the limit");
             Assert.AreEqual(view.Point("consumer-a", ShopView.Counter), view.PositionOf("consumer-a"));
             Assert.AreEqual(new[] { "rendered:1:5:waiting|task-a||" }, Rendered().ToArray(), "once, for the newest sequence");
-            Assert.AreEqual("CLI timeout - ask still pending", view.LabelOf("consumer-a"));
+            Assert.AreEqual("Agent 已逾時，請購仍在等核准", view.LabelOf("consumer-a"));
         }
         finally { view.Pace = 1f; }
     }
@@ -355,22 +382,22 @@ public class ShopSceneTests
         int started = view.AnimationsStarted;
         yield return new WaitForSeconds(0.3f);
         bridge.Receive(D2(1, "consumer-a", 4, "waiting", 0));   // 3 -> 0
-        Assert.AreEqual("ASK - waiting for a human", bridge.state.T.Label, "no stale #3");
+        Assert.AreEqual(0, bridge.state.T.Cause, "no stale #3");
         bridge.Receive(D2(1, "consumer-a", 5, "waiting", 3));   // 0 -> 3
-        Assert.AreEqual("ASK (#3) - waiting for a human", bridge.state.T.Label);
+        Assert.AreEqual(3, bridge.state.T.Cause);
         Assert.AreEqual(started, view.AnimationsStarted, "nothing played again");
         Assert.IsTrue(view.Moving("consumer-a"));
         Assert.IsEmpty(Rendered());
         yield return Arrive("consumer-a");
         Assert.AreEqual(new[] { "rendered:1:5:waiting|task-a||" }, Rendered().ToArray());
-        Assert.AreEqual("ASK (#3) - waiting for a human", view.LabelOf("consumer-a"));
+        Assert.AreEqual("超過自動範圍，等核准", view.LabelOf("consumer-a"));
 
         var at = view.PositionOf("consumer-a");
         bridge.Receive(D2(1, "consumer-a", 6, "waiting", 3));   // another purchase's event
         Assert.AreEqual("rendered:1:6:waiting|task-a||", Rendered().Last(), "arrived: reported at once");
         bridge.Receive(D2(1, "consumer-a", 7, "waiting", 3, "timed_out"));
         Assert.AreEqual("rendered:1:7:waiting|task-a||", Rendered().Last());
-        Assert.AreEqual("CLI timeout - ask still pending", view.LabelOf("consumer-a"), "11.1: stays at the counter");
+        Assert.AreEqual("Agent 已逾時，請購仍在等核准", view.LabelOf("consumer-a"), "11.1: stays at the counter");
         Assert.IsFalse(view.Moving("consumer-a"));
         Assert.AreEqual(at, view.PositionOf("consumer-a"));
         Assert.AreEqual(started, view.AnimationsStarted);
@@ -386,13 +413,14 @@ public class ShopSceneTests
         yield return new WaitForSeconds(0.3f);
         bridge.Receive(D2(1, "consumer-b", 4, "waiting", 3));
         Assert.AreEqual(started, view.AnimationsStarted, "0 -> 3 is no new purchase");
-        Assert.AreEqual("ASK (#3) - waiting for a human", bridge.state.T.Label);
+        Assert.AreEqual(3, bridge.state.T.Cause);
         yield return new WaitForSeconds(0.3f);
         bridge.Receive(D2(1, "consumer-b", 6, "waiting", 6));
         Assert.AreEqual(2, bridge.state.Rule);
         Assert.AreEqual(started + 1, view.AnimationsStarted, "3 -> 6 browses again");
         yield return Arrive("consumer-b");
-        Assert.AreEqual("ASK (#6) - waiting for a human", view.LabelOf("consumer-b"));
+        Assert.AreEqual("超過自動範圍，等核准", view.LabelOf("consumer-b"));
+        Assert.AreEqual(6, bridge.state.T.Cause);
         Assert.AreEqual(new[] { "rendered:1:6:waiting|task-b||" }, Rendered().ToArray());
     }
 
@@ -429,7 +457,7 @@ public class ShopSceneTests
     {
         bridge.Receive(D2(1, "consumer-a", 3, "waiting", 3));
         Assert.IsTrue(view.Moving("consumer-a"));
-        StringAssert.StartsWith("[anim]", view.LabelOf("consumer-a"));
+        StringAssert.Contains(ShopView.AnimMark, view.LabelOf("consumer-a"));
         bridge.Receive("{\"v\":1,\"gen\":2,\"clear\":true}");
         Assert.IsFalse(view.Moving("consumer-a"));
         Assert.AreEqual("empty", view.PhaseOf("consumer-a"));
@@ -442,47 +470,52 @@ public class ShopSceneTests
     public IEnumerator AnotherCustomersGenerationDuringABrowseLeavesNoLabel()
     {
         bridge.Receive(D2(1, "consumer-a", 3, "waiting", 3));
-        StringAssert.StartsWith("[anim]", view.LabelOf("consumer-a"));
+        StringAssert.Contains(ShopView.AnimMark, view.LabelOf("consumer-a"));
         bridge.Receive(D2(2, "consumer-b", 3, "denied", 3, animate: false, reason: "INSUFFICIENT_BUDGET")); // no clear first
         Assert.IsFalse(view.Moving("consumer-a"));
         Assert.AreEqual("empty", view.PhaseOf("consumer-a"));
         Assert.That(bridge.reports, Has.Some.StartsWith("rendered:2:3:denied"));
         Assert.AreEqual("", view.LabelOf("consumer-a"), "the inactive customer does not say it is browsing");
-        Assert.AreEqual("DENY (#3, INSUFFICIENT_BUDGET) - leaving", view.LabelOf("consumer-b"));
+        Assert.AreEqual("超出預算，已拒絕，離店", view.LabelOf("consumer-b"));
         yield return null;
         Assert.AreEqual("", view.LabelOf("consumer-a"));
     }
 
-    // P2: a payment in progress waits at the counter, a delivered one leaves;
-    // the banner says payments only when the page says the host pays.
+    // P2: a payment in progress waits at the counter, a paid one at the
+    // delivery zone (gap review B6), a delivered one leaves by it; the banner
+    // says payments only when the page says the host pays.
     [UnityTest]
     public IEnumerator APaymentWaitsAtTheCounterAndLeavesDelivered()
     {
-        string Banner() => Object.FindObjectsByType<TextMesh>(FindObjectsSortMode.None).Select(t => t.text).First(t => t.Contains(" - ") && (t.StartsWith("M1") || t.StartsWith("P2")));
-        StringAssert.StartsWith("M1 / no payment", Banner());
+        string Banner() => Object.FindObjectsByType<TextMesh>(FindObjectsSortMode.None).Select(t => t.text)
+            .First(t => t.StartsWith("這場不付款・") || t.StartsWith("本機測試鏈付款・") || t.StartsWith("Base Sepolia 測試網路付款・"));
+        StringAssert.StartsWith("這場不付款", Banner());
         string Pay(int seq, string phase) => D2(1, "consumer-a", seq, phase, seq).Replace("}", ",\"payments\":\"local_anvil\"}");
         bridge.Receive(Pay(3, "allowed"));
         yield return Arrive("consumer-a");
-        StringAssert.StartsWith("P2-a / local test payments", Banner());
-        foreach (var (seq, phase) in new[] { (5, "paying"), (7, "confirming"), (8, "paid") })
+        StringAssert.StartsWith("本機測試鏈付款", Banner());
+        foreach (var (seq, phase) in new[] { (5, "paying"), (7, "confirming") })
         {
             bridge.Receive(Pay(seq, phase));
             yield return Arrive("consumer-a");
             Assert.AreEqual(view.Point("consumer-a", ShopView.Counter), view.PositionOf("consumer-a"), phase);
         }
-        Assert.AreEqual("PAID (#8) - delivery next", view.LabelOf("consumer-a"));
+        bridge.Receive(Pay(8, "paid"));
+        yield return Arrive("consumer-a");
+        Assert.AreEqual(view.Point("consumer-a", ShopView.Pickup), view.PositionOf("consumer-a"), "paid: at the delivery zone");
+        Assert.AreEqual("已付款，到交付區取貨", view.LabelOf("consumer-a"));
         bridge.Receive(Pay(10, "delivered"));
         yield return Arrive("consumer-a");
         Assert.AreEqual(view.Point("consumer-a", ShopView.Out), view.PositionOf("consumer-a"));
         bridge.Receive(D2(1, "consumer-a", 11, "delivered", 10)); // a page without the field: no payment said
         yield return null;
-        StringAssert.StartsWith("M1 / no payment", Banner());
+        StringAssert.StartsWith("這場不付款", Banner());
         // The testnet's own banner (docs/commercial-p2b.md B3); an unknown capability says no payment.
         bridge.Receive(D2(1, "consumer-a", 12, "delivered", 10).Replace("}", ",\"payments\":\"base_sepolia\"}"));
         yield return null;
-        StringAssert.StartsWith("P2 / Base Sepolia testnet payments", Banner());
+        StringAssert.StartsWith("Base Sepolia 測試網路付款", Banner());
         bridge.Receive(D2(1, "consumer-a", 13, "delivered", 10).Replace("}", ",\"payments\":\"base_mainnet\"}"));
         yield return null;
-        StringAssert.StartsWith("M1 / no payment", Banner());
+        StringAssert.StartsWith("這場不付款", Banner());
     }
 }
