@@ -81,6 +81,10 @@ let a2Recovering = false; // A2: a status query by the same IDs is in flight
 const RUNS_MS = 2000;
 const DETAILS_MAX = 5; // ponytail: task reads per poll for the Ask notes; more runs waiting would read in turn
 
+// checker (GD4-A): the report of `verify-demo --mode e1a` the host chose after
+// the show, kept in this page's memory only and shown in the audience window.
+let checker = null;
+let checkerGen = -1; // new credentials drop the report: it may be of another show
 const creds = createHostCreds({ call, onChange: render });
 
 // M-B (docs/multi-agent-demo-design.md 5): with a Unity build that shows
@@ -90,10 +94,6 @@ const creds = createHostCreds({ call, onChange: render });
 // The audience window (docs/commercial-gap2.md, GD1-A, GD5): while it is
 // open, the scene's Unity is the window's (relay) and this page's own shop
 // is hidden; when it goes, the scene comes back here.
-// checker (GD4-A): the report of `verify-demo --mode e1a` the host chose after
-// the show, kept in this page's memory only and shown in the audience window.
-let checker = null;
-let checkerGen = -1; // new credentials drop the report: it may be of another show
 const relay = createRelay((kind, d) => {
   if (kind === "rendered2") scene.rendered(d);
   else if (kind === "select2") pick(d);
