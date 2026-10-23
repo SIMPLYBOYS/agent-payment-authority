@@ -39,3 +39,5 @@
 
 - 實作：一起開始、核准面板的「也有一筆等你核准」、展示視窗的付款依序說明。
 - 測試：網頁單元測試全部通過（show 18，含付款依序）；`scripts/verify/a2-ui.mjs` 新增第 8 段（一起開始兩位客人的付款情境、A 的面板列出 B 的請購並可切換、A 與 B 各自用裝置核准），全部通過（CDP virtual authenticator，不是實體裝置結果，不付款）。
+- review：三輪（2fad463 → 21f49e9 → f6282cc），第三輪 APPROVE；建議另補 677c29d（交付中也算進行中）。
+- Aaron 10/24 本機彩排（`make demo-local`，fake Agent，本機 anvil，實體裝置）：本機 Signer 替 approver-b 登記裝置後，資料研究室按「一起開始」，A、B 各自核准、付款依序完成，展示視窗的說明與第 2 節描述「完全一致」。testnet（approver-b 在 `/opt` 的裝置與聲紋、B 的測試幣）還沒做。
