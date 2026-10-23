@@ -1155,3 +1155,51 @@ export function showReceipt(snapshot, traits = {}) {
     { label: "內容摘要", text: typeof pv.content_sha256 === "string" && pv.content_sha256 ? "sha256 " + pv.content_sha256.replace(/^sha256:/, "").slice(0, 12) + "…" : "未提供" },
   ] };
 }
+
+// ---- the checker's report on the audience window (docs/commercial-gap2.md GD4-A) ----
+
+const VERDICTS = { PASS: "通過", FAIL: "未通過", INCONCLUSIVE: "無法判定", NOT_EVALUATED: "未評估" };
+// CLAIMS: E1-E10 as an audience reads them (docs/commercial-e1a.md 4.5).
+export const CLAIMS = {
+  E1: "證據檔案完整、沒有被改動", E2: "每一步都對到同一筆請購", E3: "事件紀錄前後相連、順序正確", E4: "兩筆鏈上交易與 ZK 預算證明（向鏈查證）",
+  E5: "結果未知時沒有重複付款", E6: "每筆紀錄如實標示是模擬或真實", E7: "兩位客人的身分與錢包互不混用", E8: "期間沒有未經授權的付款（向鏈重算）",
+  E9: "證據不含祕密", E10: "商店誘導文字的測試結果已記錄（見下）", // E10 records; whether the model was fooled is the report's injections
+};
+const OUTSIDE = [["BBS+", "憑證證明由 checker 重新驗算"], ["voice", "語音的誤判率"], ["Admin", "Admin 彙總"], ["delegation", "委託由本人確認"]];
+
+// parseChecker: a report of `verify-demo --mode e1a`, read as data: only
+// its fixed fields, every claim E1-E10 with a known verdict; else an error.
+export function parseChecker(text) {
+  let r;
+  try { r = JSON.parse(text); } catch { return { error: "不是 JSON" }; }
+  if (!r || r.mode !== "e1a") return { error: "不是 e1a 的 checker 報告" };
+  if (typeof r.run_id !== "string" || !/^[A-Za-z0-9._-]{1,80}$/.test(r.run_id)) return { error: "缺少證據包編號（run_id）" };
+  if (!Object.hasOwn(VERDICTS, r.verdict)) return { error: "總結果不明" };
+  const claims = {};
+  for (const id of Object.keys(CLAIMS)) {
+    const v = r.claims && r.claims[id];
+    if (!Object.hasOwn(VERDICTS, v)) return { error: id + " 的結果不明" };
+    claims[id] = v;
+  }
+  const c = r.checker || {};
+  const checker = [c.name, c.version].filter((x) => typeof x === "string" && x).join(" ").slice(0, 80) || "checker";
+  const notEvaluated = (Array.isArray(r.not_evaluated) ? r.not_evaluated : []).filter((x) => typeof x === "string").slice(0, 10);
+  const fooled = (Array.isArray(r.injections) ? r.injections : []).filter((x) => x && typeof x.fooled === "boolean").map((x) => x.fooled).slice(0, 10);
+  return { report: { run_id: r.run_id, verdict: r.verdict, claims, checker, not_evaluated: notEvaluated, fooled } };
+}
+
+// showChecker: the report as the audience reads it; the page says only what the report says.
+export function showChecker(r) {
+  if (!r) return null;
+  const items = Object.keys(CLAIMS).map((id) => ({ id, label: CLAIMS[id], state: r.claims[id], text: VERDICTS[r.claims[id]] }));
+  const off = items.filter((x) => x.state !== "PASS" && x.state !== "NOT_EVALUATED");
+  const summary = r.verdict === "PASS" && !off.length ? "逐項檢查，全部通過"
+    : !off.length ? "總結果：" + VERDICTS[r.verdict] + "（主持人頁有細節）"
+    : "有 " + off.length + " 項" + (off.some((x) => x.state === "FAIL") ? "未通過" : "無法判定") + "（主持人頁有細節）";
+  const outside = r.not_evaluated.map((s) => (OUTSIDE.find(([k]) => s.includes(k)) || [, "其他（主持人頁有細節）"])[1]);
+  const n = (r.fooled || []).filter(Boolean).length;
+  const injection = !(r.fooled || []).length ? "" : n ? "商店誘導文字的測試：模型被騙了 " + n + " 次（有沒有多付錢見 E8）"
+    : "商店誘導文字的測試：模型沒有被騙（有沒有多付錢見 E8）";
+  return { title: "獨立驗證：證據包 " + r.run_id, by: "由 " + r.checker + " 在場次後產生；本頁只顯示它的報告", summary, items, injection,
+    outside: outside.length ? "不在這次驗證範圍：" + outside.join("、") : "" };
+}

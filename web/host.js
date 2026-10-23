@@ -90,6 +90,9 @@ const creds = createHostCreds({ call, onChange: render });
 // The audience window (docs/commercial-gap2.md, GD1-A, GD5): while it is
 // open, the scene's Unity is the window's (relay) and this page's own shop
 // is hidden; when it goes, the scene comes back here.
+// checker (GD4-A): the report of `verify-demo --mode e1a` the host chose after
+// the show, kept in this page's memory only and shown in the audience window.
+let checker = null;
 const relay = createRelay((kind, d) => {
   if (kind === "rendered2") scene.rendered(d);
   else if (kind === "select2") pick(d);
@@ -137,8 +140,18 @@ function publishView() {
   const st = (lastReady && lastReady.status) || {};
   const ha = st.human_approval;
   relay.view({ payments: A.paysOn(st.payment_capability) ? st.payment_capability : "", authenticator: (ha && ha.sources && ha.sources.authenticator) || "",
-    venue: venue || "", customers: scene.slots().map((s) => ({ consumer: s.consumer, snapshot: scene.snapshot(s.consumer), delegation: delegationOf(s.task) })) });
+    venue: venue || "", checker, customers: scene.slots().map((s) => ({ consumer: s.consumer, snapshot: scene.snapshot(s.consumer), delegation: delegationOf(s.task) })) });
 }
+$("checker-file").addEventListener("change", async (ev) => {
+  const f = ev.target.files && ev.target.files[0];
+  if (!f) return;
+  const r = f.size > 1 << 20 ? { error: "檔案太大" } : A.parseChecker(await f.text());
+  ev.target.value = "";
+  if (r.error) { $("checker-note").textContent = "沒有載入：" + r.error; return; }
+  checker = r.report;
+  $("checker-note").textContent = "已載入：證據包 " + checker.run_id + "，總結果 " + checker.verdict + "（只在這一頁的記憶體，不寫任何檔案）";
+  publishView();
+});
 // delegationOf: the delegation of a task's run's scenario (the catalog's), or null.
 function delegationOf(task) {
   const r = lastRuns && lastRuns.gen === creds.gen && (lastRuns.runs || []).find((x) => x.task_id === task);

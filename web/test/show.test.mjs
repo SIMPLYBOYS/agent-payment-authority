@@ -250,3 +250,35 @@ test("the receipt card: only once delivered with a receipt; two transactions, no
   assert.equal(A.productName("https://x/eval/q-17?v=1"), "評測資料（q-17）");
   assert.equal(A.productName("not a url"), "商品");
 });
+
+const REPORT = { checker: { name: "verify-demo", version: "0.4.0", build: "x" }, mode: "e1a", run_id: "e1a-20261023T011857Z-ace831", manifest_sha256: "sha256:00", verdict: "PASS",
+  claims: Object.fromEntries(Object.keys(A.CLAIMS).map((k) => [k, "PASS"])), findings: [], injections: [],
+  not_evaluated: ["the BBS+ proof re-verified by the checker (the pack keeps its sha256 only)", "voice FAR/FRR (V1's evaluation)", "Admin aggregation (M-D)",
+    "the delegation confirmed by the person (E1a-D1 A: the host plays the customer)"], limits: ["x"] };
+
+test("the checker's report: read as data, shown only as it says", () => {
+  const { report } = A.parseChecker(JSON.stringify(REPORT));
+  assert.deepEqual(Object.keys(report), ["run_id", "verdict", "claims", "checker", "not_evaluated", "fooled"]); // nothing else of the file goes on
+  const c = A.showChecker(report);
+  assert.equal(c.title, "獨立驗證：證據包 e1a-20261023T011857Z-ace831");
+  assert.equal(c.summary, "逐項檢查，全部通過");
+  assert.equal(c.items.length, 10);
+  assert.equal(c.items[3].label, "兩筆鏈上交易與 ZK 預算證明（向鏈查證）");
+  assert.equal(c.by, "由 verify-demo 0.4.0 在場次後產生；本頁只顯示它的報告");
+  assert.equal(c.outside, "不在這次驗證範圍：憑證證明由 checker 重新驗算、語音的誤判率、Admin 彙總、委託由本人確認");
+  const failed = A.showChecker(A.parseChecker(JSON.stringify({ ...REPORT, verdict: "FAIL", claims: { ...REPORT.claims, E8: "FAIL", E4: "INCONCLUSIVE" } })).report);
+  assert.equal(failed.summary, "有 2 項未通過（主持人頁有細節）");
+  assert.equal(failed.items[7].text, "未通過");
+  const unsure = A.showChecker(A.parseChecker(JSON.stringify({ ...REPORT, verdict: "INCONCLUSIVE", claims: { ...REPORT.claims, E4: "INCONCLUSIVE" } })).report);
+  assert.equal(unsure.summary, "有 1 項無法判定（主持人頁有細節）");
+  for (const [bad, why] of [["nope", "不是 JSON"], [JSON.stringify({ ...REPORT, mode: "m1" }), "不是 e1a 的 checker 報告"], [JSON.stringify({ ...REPORT, run_id: "../x y" }), "缺少證據包編號（run_id）"],
+    [JSON.stringify({ ...REPORT, verdict: "OK" }), "總結果不明"], [JSON.stringify({ ...REPORT, claims: { ...REPORT.claims, E10: undefined } }), "E10 的結果不明"]]) {
+    assert.equal(A.parseChecker(bad).error, why);
+  }
+  assert.equal(A.showChecker(null), null);
+  // E10 passes when the injection run is recorded; whether the model was fooled is said apart.
+  const inj = (f) => A.showChecker(A.parseChecker(JSON.stringify({ ...REPORT, injections: [{ task_id: "t", case: "c", fooled: f, requested: [] }] })).report).injection;
+  assert.equal(inj(false), "商店誘導文字的測試：模型沒有被騙（有沒有多付錢見 E8）");
+  assert.equal(inj(true), "商店誘導文字的測試：模型被騙了 1 次（有沒有多付錢見 E8）");
+  assert.equal(c.injection, "");
+});

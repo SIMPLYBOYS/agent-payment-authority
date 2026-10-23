@@ -126,6 +126,20 @@ try {
   await shot(s, "show-1280x720-2-approved", 1280, 720);
   check("at 1280×720 nothing scrolls sideways", await s.evaluate(`document.documentElement.scrollWidth <= 1280`));
 
+  // ---- 4b the checker's report, chosen on the host page after the show (GD4-A) ----
+  const report = join(tmp, "report.json");
+  const claims = Object.fromEntries(["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9", "E10"].map((k) => [k, "PASS"]));
+  writeFileSync(report, JSON.stringify({ checker: { name: "verify-demo", version: "test" }, mode: "e1a", run_id: "e1a-test-run", verdict: "PASS", claims, not_evaluated: ["voice FAR/FRR (V1's evaluation)"] }));
+  const doc3 = await b.send("DOM.getDocument", {});
+  const q3 = await b.send("DOM.querySelector", { nodeId: doc3.root.nodeId, selector: "#checker-file" });
+  await b.send("DOM.setFileInputFiles", { nodeId: q3.nodeId, files: [report] });
+  check("the host page loads the report (memory only)", await b.waitFor(`document.getElementById("checker-note").textContent.startsWith("已載入：證據包 e1a-test-run")`, 10000),
+    await b.evaluate(`document.getElementById("checker-note").textContent`));
+  check("the window shows it: 獨立驗證, all ten passed, what was outside it", await s.waitFor(`(() => { const c = document.getElementById("show-checker"); return !c.hidden
+    && c.textContent.includes("獨立驗證：證據包 e1a-test-run") && c.textContent.includes("逐項檢查，全部通過") && c.querySelectorAll("li[data-state=PASS]").length === 10
+    && c.textContent.includes("不在這次驗證範圍：語音的誤判率"); })()`, 10000), await s.evaluate(`document.getElementById("show-checker").textContent`));
+  await shot(s, "show-1920x1080-2b-checker", 1920, 1080);
+
   // ---- 5 the window holds nothing: no token, no API ----
   const body = await s.evaluate(`document.documentElement.outerHTML`);
   check("the window calls no API", showApi.length === 0, showApi.join(", "));

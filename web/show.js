@@ -63,7 +63,8 @@ function render() {
   const shown = (v.customers || []).map((c) => ({ ...A.showCustomer(c.consumer, c.snapshot, c.delegation, v),
     evidence: A.showEvidence(c.snapshot, v), receipt: A.showReceipt(c.snapshot, v) }));
   // Redrawn only when something changed: the captions are a live region.
-  const key = JSON.stringify([shown, owned]);
+  const chk = A.showChecker(v.checker);
+  const key = JSON.stringify([shown, owned, chk]);
   if (key === shownKey) return;
   shownKey = key;
   if (!owned) $("show-captions").replaceChildren(el("p", "", "場景暫停：主持人頁正在回放或切換"));
@@ -98,6 +99,18 @@ function render() {
     row.append(ul);
     return row;
   }));
+  const cb = $("show-checker");
+  cb.hidden = !chk;
+  if (chk) {
+    const ol = el("ol", "");
+    for (const it of chk.items) {
+      const li = el("li", "");
+      li.dataset.state = it.state;
+      li.append(el("b", "", it.id + " " + it.text), el("span", "", it.label));
+      ol.append(li);
+    }
+    cb.replaceChildren(el("h3", "", chk.title), el("p", "show-checker-sum", chk.summary), ol, ...(chk.injection ? [el("p", "show-checker-sum", chk.injection)] : []), el("p", "show-checker-by", chk.by + (chk.outside ? "。" + chk.outside : "")));
+  }
   $("show-receipts").replaceChildren(...shown.filter((m) => m.receipt).map((m) => {
     const card = el("section", "show-receipt");
     card.dataset.consumer = m.consumer;

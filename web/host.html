@@ -41,7 +41,9 @@
     <p id="history-note" class="replay-note" hidden>真實執行紀錄・歷史回放：商店場景重播一筆已保存的真實請購（開發展示例外、未付款）。「待核准」是執行結束時的快照，期限早已過，不是即時倒數。</p>
     <p id="live-note" class="replay-note" hidden>真實 Agent 即時展示：主持人按「開始」才會實際執行 Claude Code CLI（可能使用本人訂閱額度）；開發展示例外，plugins 內容與行為未確認，不是嚴格零 plugin 模式；合成資料、不付款。商店場景只呈現 Store 已提交的狀態，過場是展示動畫。</p>
     <p class="show-open"><button id="show-open" type="button">開啟展示視窗</button>
-      <span id="show-note" hidden>場景顯示在展示視窗（這一頁的場景已隱藏）</span></p>
+      <span id="show-note" hidden>場景顯示在展示視窗（這一頁的場景已隱藏）</span>
+      <label class="checker-pick">場次後的 checker 報告（JSON）<input id="checker-file" type="file" accept="application/json,.json"></label>
+      <span id="checker-note"></span></p>
     <div class="canvas-frame"><canvas id="unity-canvas" width="960" height="640" aria-label="商店場景（Unity）：點選客人可選取"></canvas></div>
     <p id="unity-status" data-state="loading">Unity 場景載入中…</p>
     <p id="scene-cap" class="scene-cap" hidden></p>
