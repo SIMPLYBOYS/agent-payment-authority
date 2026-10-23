@@ -135,6 +135,40 @@ try {
   await s.send("Page.close");
   check("the host page shows its shop again", await b.waitFor(`document.getElementById("show-note").hidden && !document.querySelector(".canvas-frame").hidden`, 15000));
   check("the host page's Unity shows A again", await drawn(b, hostShown("consumer-a")));
+
+  // ---- 7 the paying layout, from a synthetic view (no chain, no payment) ----
+  // The fake host does not pay. With the host page gone, a view of a paid
+  // and delivered purchase on Base Sepolia is sent to a new window the way
+  // the host page would, to see the evidence, the links and the receipt.
+  await b.send("Page.navigate", { url: "about:blank" });
+  await sleep(500);
+  s = await b.openPage("http://" + addr + "/show");
+  await s.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
+  await s.waitFor(`document.getElementById("unity-status").dataset.state === "ready"`, 90000);
+  const tx1 = "0x" + "a1".repeat(32), tx2 = "0x" + "b2".repeat(32);
+  const view = { payments: "base_sepolia", authenticator: "device", venue: "data", customers: [{ consumer: "consumer-a", delegation: { task_budget: "5000000", allow_max: "100000" },
+    snapshot: { task: { task_id: "show-a-09", consumer_id: "consumer-a", status: "running", as_of_sequence: 12, served_at: 1, contract_version: "apa.pay.v2", payment_capability: "base_sepolia",
+      purchases: [{ purchase_order_id: "po-1", amount: "500000", resource_url: "https://shop.example/resources/kr-market", credential: { result: "valid" },
+        approval: { state: "approved", resolved_by: "webauthn:approver-a", grant: { authorization_method: "webauthn", voice: "verified" } },
+        payment: { status: "paid", state: "delivered", reserve_tx: tx1, settle_tx: tx2, settle_block: 48979135, content_sha256: "sha256:" + "c".repeat(64), receipt_id: "rcpt-show-a-09" } }] },
+    events: ["TASK_STARTED", "PURCHASE_PROPOSED", "POLICY_DECIDED", "APPROVED", "PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "RESOURCE_DELIVERED", "RECEIPT_ISSUED"]
+      .map((type, i) => ({ event_id: "e" + i, event_type: type, sequence: i + 1, purchase_order_id: type === "TASK_STARTED" ? "" : "po-1", authorization_method: type === "APPROVED" ? "webauthn" : undefined,
+        decision: type === "POLICY_DECIDED" ? { policy_verdict: "Ask", reason: "HUMAN_APPROVAL_REQUIRED" } : undefined })) } }] };
+  await s.evaluate(`(() => { const c = new BroadcastChannel("apa-show-v1"); c.postMessage({ from: "host", kind: "own", on: true }); c.postMessage({ from: "host", kind: "view", view: ${JSON.stringify(view)} }); return true; })()`);
+  const sc7 = `document.querySelector('.show-card[data-consumer="consumer-a"]')`;
+  check("synthetic paid view: five steps done", await s.waitFor(`!!${sc7} && [...${sc7}.querySelectorAll(".show-step")].map((e) => e.dataset.state).join(" ") === "done done done done done"`, 10000),
+    await s.evaluate(`${sc7} ? ${sc7}.textContent : "no card"`));
+  check("why trustworthy: the device and the voice, both transactions linked to basescan, the receipt", await s.evaluate(`(() => {
+    const t = document.getElementById("show-trust"); const hrefs = [...t.querySelectorAll("a")].map((a) => a.href);
+    return t.textContent.includes("本人以已登記的裝置核准，聲音也相符") && hrefs.length === 2 && hrefs[0].endsWith("${tx1}") && hrefs[1].endsWith("${tx2}")
+      && [...t.querySelectorAll("a")].every((a) => a.target === "_blank" && a.rel === "noopener noreferrer") && t.textContent.includes("rcpt-show-a-09"); })()`),
+    await s.evaluate(`document.getElementById("show-trust").textContent`));
+  check("the receipt card: 韓國市場簡報, 0.50 USDC, two transactions, not one", await s.evaluate(`(() => { const r = document.querySelector("#show-receipts .show-receipt"); return !!r
+    && r.textContent.includes("韓國市場簡報") && r.textContent.includes("0.50 USDC") && r.textContent.includes("不是同一筆，也不是一次完成"); })()`),
+    await s.evaluate(`document.getElementById("show-receipts").textContent`));
+  await shot(s, "show-1920x1080-3-paid-synthetic", 1920, 1080);
+  await shot(s, "show-1280x720-3-paid-synthetic", 1280, 720);
+  check("at 1280×720 nothing scrolls sideways (paid)", await s.evaluate(`document.documentElement.scrollWidth <= 1280`));
   check("the flow ran to its end", true);
 } catch (e) {
   check("the flow ran to its end", false, String(e && e.stack || e).slice(0, 400));

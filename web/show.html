@@ -17,9 +17,13 @@
 </header>
 <main class="show-main">
   <section class="show-stage">
-    <canvas id="unity-canvas" width="1280" height="720" aria-label="Unity 商店場景"></canvas>
+    <div class="show-frame">
+      <canvas id="unity-canvas" width="960" height="640" aria-label="Unity 商店場景"></canvas>
+      <div id="show-receipts" class="show-receipts"></div>
+    </div>
     <p id="unity-status" class="show-unity" data-state="loading">場景載入中…</p>
     <div id="show-captions" class="show-captions" aria-live="polite"></div>
+    <section id="show-trust" class="show-trust" aria-label="為什麼可信"></section>
   </section>
   <aside id="show-customers" class="show-customers">
     <p class="show-wait">等待主持人頁：請在主持人頁按「開啟展示視窗」。</p>

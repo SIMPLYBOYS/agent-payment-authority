@@ -42,6 +42,16 @@ unity = new UnityHost($("unity-canvas"), (s, d) => {
   tell();
 });
 
+// anchor: a public explorer page, opened apart from this window.
+function anchor(text, href) {
+  const a = el("a", "", text);
+  a.href = href;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  return a;
+}
+const wrap = (x) => { const dd = el("dd", ""); dd.append(x); return dd; };
+
 function render() {
   const v = lastView;
   const there = link.hostThere;
@@ -50,7 +60,8 @@ function render() {
   if (!v) return;
   $("show-title").textContent = v.venue ? A.venue(v.venue).name : "示範商店";
   $("show-network").textContent = A.networkText(v.payments) + (there ? "" : "・主持人頁未連線（停在最後狀態）");
-  const shown = (v.customers || []).map((c) => A.showCustomer(c.consumer, c.snapshot, c.delegation, v));
+  const shown = (v.customers || []).map((c) => ({ ...A.showCustomer(c.consumer, c.snapshot, c.delegation, v),
+    evidence: A.showEvidence(c.snapshot, v), receipt: A.showReceipt(c.snapshot, v) }));
   // Redrawn only when something changed: the captions are a live region.
   const key = JSON.stringify([shown, owned]);
   if (key === shownKey) return;
@@ -73,6 +84,29 @@ function render() {
     return card;
   }));
   if (owned) $("show-captions").replaceChildren(...shown.map((m) => el("p", "", m.caption)));
+  $("show-trust").replaceChildren(...shown.filter((m) => m.evidence.length).map((m) => {
+    const row = el("div", "show-trust-row");
+    row.dataset.consumer = m.consumer;
+    row.append(el("h3", "", m.name + "・為什麼可信"));
+    const ul = el("ul", "");
+    for (const it of m.evidence) {
+      const li = el("li", "");
+      li.append(el("b", "", it.label), it.href ? anchor(it.text, it.href) : el("span", "", it.text));
+      if (it.note) li.append(el("small", "", it.note));
+      ul.append(li);
+    }
+    row.append(ul);
+    return row;
+  }));
+  $("show-receipts").replaceChildren(...shown.filter((m) => m.receipt).map((m) => {
+    const card = el("section", "show-receipt");
+    card.dataset.consumer = m.consumer;
+    card.append(el("h3", "", m.name + "・" + m.receipt.title));
+    const dl = el("dl", "");
+    for (const r of m.receipt.rows) dl.append(el("dt", "", r.label), r.href ? wrap(anchor(r.text, r.href)) : el("dd", "", r.text));
+    card.append(dl);
+    return card;
+  }));
 }
 setInterval(render, 2000); // the host page's presence, even when nothing changes
 unity.load();

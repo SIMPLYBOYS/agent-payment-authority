@@ -475,6 +475,12 @@ ITEMS = [
      [("web/showlink.js", 'if (show && show.id !== m.id && now() - show.seen <= GONE_MS)', 'if (false && show && show.id !== m.id)')]),
     ("Gap2 S1 review: a host that plays the approver says the person approves", node("web/test/show.test.mjs", "an Ask: waiting, approved by device with the voice, a virtual authenticator as such", r"主持人代為核准"),
      [("web/adapter.js", 'set(2, "now", traits.authenticator ? "超過自動範圍，等本人核准"', 'set(2, "now", true ? "超過自動範圍，等本人核准"')]),
+    ("Gap2 S2: a local chain's transaction links to an explorer", node("web/test/show.test.mjs", "why trustworthy: each item only what a record says, links only on a public testnet", r"undefined"),
+     [("web/adapter.js", 'return Object.hasOwn(EXPLORER, cap) ? { text, href: EXPLORER[cap] + hash }', 'return true ? { text, href: EXPLORER[cap] + hash }')]),
+    ("Gap2 S2: a receipt card before the delivery", node("web/test/show.test.mjs", "the receipt card: only once delivered with a receipt; two transactions, not one", r"null"),
+     [("web/adapter.js", 'if (sc.phase !== "delivered" || !pv || !pv.receipt_id) return null;', 'if (!pv) return null;')]),
+    ("Gap2 S2: a simulated approval's evidence worded as the person's", node("web/test/show.test.mjs", "why trustworthy: each item only what a record says, links only on a public testnet", r"主持人代為核准"),
+     [("web/adapter.js", 'if (!byDevice(p)) return "主持人代為核准（示範，不是本人）";', 'if (false) return "主持人代為核准（示範，不是本人）";')]),
 ]
 
 ITEM_TIMEOUT = 900

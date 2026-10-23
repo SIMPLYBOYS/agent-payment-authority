@@ -1087,3 +1087,71 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
 // networkText: what the audience is told of the money, from the host's own capability.
 export const networkText = (cap) => (cap === "base_sepolia" ? "Base Sepolia 測試網路・測試 USDC（不是真錢）"
   : cap === "local_anvil" ? "本機測試鏈・測試 USDC（不是真錢）" : "這場展示不付款");
+
+// productName: the item a purchase names, by its resource path; the
+// catalog's titles are English fixtures, so the audience's words are here.
+const PRODUCTS = { "/resources/kr-market": "韓國市場簡報", "/scenes/cafe/lunch-set": "午餐套餐（12:30 取餐）", "/scenes/mart/coffee-beans": "辦公室咖啡豆 ×2" };
+export function productName(url) {
+  let path = "";
+  try { path = new URL(url).pathname; } catch { return "商品"; }
+  if (PRODUCTS[path]) return PRODUCTS[path];
+  if (path.startsWith("/eval/")) return "評測資料（" + path.slice(6) + "）";
+  return "商品（" + (path.split("/").pop() || "未命名") + "）";
+}
+
+// txLink: a transaction for the audience: short, with its public explorer
+// page only on a public testnet; a local chain says it cannot be looked up.
+export function txLink(cap, hash) {
+  if (typeof hash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(hash)) return { text: "交易編號未提供", href: "" };
+  const text = hash.slice(0, 10) + "…" + hash.slice(-6);
+  return Object.hasOwn(EXPLORER, cap) ? { text, href: EXPLORER[cap] + hash } : { text: text + "（本機鏈，無法公開查詢）", href: "" };
+}
+
+const approvalWords = (p, traits) => {
+  const g = p && p.approval && p.approval.grant;
+  if (!byDevice(p)) return "主持人代為核准（示範，不是本人）";
+  return approverText(traits.authenticator) + "核准" + (g && g.voice === "verified" ? "，聲音也相符" : g && g.voice === "unavailable" ? "（語音無法使用，記為降級）" : "");
+};
+
+// showEvidence (gap review B2): one customer's "why trustworthy" items, each
+// only what a stored record says; nothing here says "verified" (the
+// independent checker's report does, docs/commercial-e1a.md 4).
+export function showEvidence(snapshot, traits = {}) {
+  const task = snapshot && snapshot.task;
+  if (!task) return [];
+  const sc = scene(snapshot);
+  const p = sc.po ? (task.purchases || []).find((x) => x.purchase_order_id === sc.po) : null;
+  const items = [{ label: "委託", text: "主持人代客人確認（示範，不是本人）" }];
+  if (!p) return items;
+  if (p.credential) items.push({ label: "憑證", text: p.credential.result === "valid" ? "Agent 出示了客人的憑證，檢查通過（測試發行者）" : "憑證檢查沒通過" });
+  if (sc.verdict === "Allow") items.push({ label: "核准", text: "在委託範圍內，自動放行" }); // the events' verdict, as the five steps
+  else if (sc.verdict === "Deny") items.push({ label: "核准", text: plainReason(sc.reason) + "，已拒絕" });
+  else if (p.approval && p.approval.state === "approved") items.push({ label: "核准", text: approvalWords(p, traits) });
+  const pv = p.payment || {};
+  if (pv.reserve_tx) items.push({ label: "預算預留", ...txLink(task.payment_capability, pv.reserve_tx), note: "第 1 筆鏈上交易，含 ZK 預算證明" });
+  if (pv.settle_tx) items.push({ label: "付款", ...txLink(task.payment_capability, pv.settle_tx), note: "第 2 筆鏈上交易，和第 1 筆不是同一筆" });
+  if (pv.receipt_id) items.push({ label: "收據", text: String(pv.receipt_id), note: "收據記錄了交付內容的 sha256" });
+  return items;
+}
+
+// showReceipt (gap review B6): the receipt card once the Store says the
+// purchase was delivered with a receipt; null before.
+export function showReceipt(snapshot, traits = {}) {
+  const task = snapshot && snapshot.task;
+  const sc = scene(snapshot);
+  const p = task && sc.po ? (task.purchases || []).find((x) => x.purchase_order_id === sc.po) : null;
+  const pv = p && p.payment;
+  if (sc.phase !== "delivered" || !pv || !pv.receipt_id) return null;
+  const cap = task.payment_capability;
+  return { title: "收據", rows: [
+    { label: "商品", text: productName(p.resource_url) },
+    { label: "金額", text: usdc(p.amount) + "（測試 USDC）" },
+    { label: "網路", text: networkText(cap) },
+    { label: "核准", text: sc.verdict === "Allow" ? "在委託範圍內，自動放行" : approvalWords(p, traits) },
+    { label: "預算預留", ...txLink(cap, pv.reserve_tx) },
+    { label: "付款", ...txLink(cap, pv.settle_tx) },
+    { label: "兩筆交易", text: "不是同一筆，也不是一次完成" },
+    { label: "收據編號", text: String(pv.receipt_id) },
+    { label: "內容摘要", text: typeof pv.content_sha256 === "string" && pv.content_sha256 ? "sha256 " + pv.content_sha256.replace(/^sha256:/, "").slice(0, 12) + "…" : "未提供" },
+  ] };
+}

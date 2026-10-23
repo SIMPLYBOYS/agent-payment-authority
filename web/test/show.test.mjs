@@ -206,3 +206,47 @@ test("one window at a time: a second one is told the host page follows another",
   assert.equal(second.otherWindow, true);
   assert.equal(first.otherWindow, false);
 });
+
+const TX1 = "0x" + "1".repeat(64), TX2 = "0x" + "2".repeat(64);
+const delivered = { status: "paid", state: "delivered", reserve_tx: TX1, settle_tx: TX2, settle_block: 12, content_sha256: "sha256:" + "c".repeat(64), receipt_id: "rcpt-1" };
+
+test("why trustworthy: each item only what a record says, links only on a public testnet", () => {
+  const p = { resource_url: "https://shop.example/resources/kr-market", credential: { result: "valid" }, payment: delivered };
+  const ev = A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { purchase: p }), {});
+  assert.deepEqual(ev.map((x) => x.label), ["委託", "憑證", "核准", "預算預留", "付款", "收據"]);
+  assert.equal(ev[0].text, "主持人代客人確認（示範，不是本人）");
+  assert.equal(ev[1].text, "Agent 出示了客人的憑證，檢查通過（測試發行者）");
+  assert.equal(ev[3].href, "https://sepolia.basescan.org/tx/" + TX1);
+  assert.equal(ev[3].text, "0x11111111…111111");
+  assert.match(ev[4].note, /和第 1 筆不是同一筆/);
+  assert.ok(!/驗證通過|已驗證|ZK 已/.test(JSON.stringify(ev)), "no 'verified' claim of the page's own");
+  const local = A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { cap: "local_anvil", purchase: p }), {});
+  assert.equal(local[3].href, "");
+  assert.match(local[3].text, /本機鏈，無法公開查詢/);
+  const bad = A.showEvidence(snap(base("Allow", "WITHIN_ALLOW_MAX"), { purchase: { credential: { result: "revoked" } } }), {});
+  assert.equal(bad[1].text, "憑證檢查沒通過");
+  assert.deepEqual(A.showEvidence(null), []);
+  const deny = A.showEvidence(snap(base("Deny", "INSUFFICIENT_BUDGET")), {});
+  assert.equal(deny.at(-1).text, "超出預算，已拒絕");
+  const sim = A.showEvidence(snap([...base("Ask", "HUMAN_APPROVAL_REQUIRED"), ev4()], { purchase: { approval: { state: "approved", resolved_by: "sim-approver-a" } } }), {});
+  assert.equal(sim.at(-1).text, "主持人代為核准（示範，不是本人）");
+  assert.equal(A.txLink("base_sepolia", "0x12").text, "交易編號未提供");
+});
+const ev4 = () => ev(4, "APPROVED", { authorization_method: "simulated" });
+
+test("the receipt card: only once delivered with a receipt; two transactions, not one", () => {
+  const p = { resource_url: "https://shop.example/resources/kr-market", payment: delivered };
+  assert.equal(A.showReceipt(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid.slice(0, 5)], { purchase: { ...p, payment: { ...delivered, state: "settled", receipt_id: "" } } })), null);
+  const r = A.showReceipt(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { purchase: p }), {});
+  const rows = Object.fromEntries(r.rows.map((x) => [x.label, x]));
+  assert.equal(rows["商品"].text, "韓國市場簡報");
+  assert.equal(rows["金額"].text, "0.50 USDC（測試 USDC）");
+  assert.equal(rows["網路"].text, "Base Sepolia 測試網路・測試 USDC（不是真錢）");
+  assert.equal(rows["核准"].text, "在委託範圍內，自動放行");
+  assert.equal(rows["付款"].href, "https://sepolia.basescan.org/tx/" + TX2);
+  assert.equal(rows["兩筆交易"].text, "不是同一筆，也不是一次完成");
+  assert.equal(rows["內容摘要"].text, "sha256 cccccccccccc…");
+  assert.equal(A.productName("https://x/scenes/cafe/lunch-set"), "午餐套餐（12:30 取餐）");
+  assert.equal(A.productName("https://x/eval/q-17?v=1"), "評測資料（q-17）");
+  assert.equal(A.productName("not a url"), "商品");
+});
