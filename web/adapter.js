@@ -1116,7 +1116,18 @@ const approvalWords = (p, traits) => {
 // showEvidence (gap review B2): one customer's "why trustworthy" items, each
 // only what a stored record says; nothing here says "verified" (the
 // independent checker's report does, docs/commercial-e1a.md 4).
-export function showEvidence(snapshot, traits = {}) {
+// chainLine (O2): one transaction as the Host read it from the chain.
+export function chainLine(tx, head, kind) {
+  if (!tx) return "";
+  if (tx.status === "not_found") return "鏈上：還查不到這筆交易";
+  if (tx.status === "reverted") return "鏈上：區塊 #" + tx.block + "，執行失敗";
+  const at = "鏈上：區塊 #" + tx.block + (head >= tx.block ? "・" + (head - tx.block + 1) + " 個確認" : "");
+  if (kind === "reserve" && tx.spent) return at + "・合約記下 " + usdc(tx.spent);
+  if (kind === "settle" && tx.transfer) return at + "・" + usdc(tx.transfer.amount) + " 客人錢包→商店";
+  return at;
+}
+
+export function showEvidence(snapshot, traits = {}, chain = null) {
   const task = snapshot && snapshot.task;
   if (!task) return [];
   const sc = scene(snapshot);
@@ -1128,10 +1139,13 @@ export function showEvidence(snapshot, traits = {}) {
   else if (sc.verdict === "Deny") items.push({ label: "核准", text: plainReason(sc.reason) + "，已拒絕" });
   else if (p.approval && p.approval.state === "approved") items.push({ label: "核准", text: approvalWords(p, traits) });
   const pv = p.payment || {};
-  if (pv.reserve_tx) items.push({ label: "預算預留", ...txLink(task.payment_capability, pv.reserve_tx), note: "第 1 筆鏈上交易，含 ZK 預算證明" });
+  const onChain = chain && chain.purchases && chain.purchases[p.purchase_order_id];
+  if (pv.reserve_tx) items.push({ label: "預算預留", ...txLink(task.payment_capability, pv.reserve_tx), note: "第 1 筆・含 ZK 預算證明",
+    chain: onChain && onChain.reserve && onChain.reserve.hash === pv.reserve_tx ? chainLine(onChain.reserve, chain.head, "reserve") : "" });
   if (pv.settle_tx) items.push({ label: "付款", ...txLink(task.payment_capability, pv.settle_tx),
-    note: pv.settle_tx !== pv.reserve_tx ? "第 2 筆鏈上交易，和第 1 筆不是同一筆" : "第 2 筆鏈上交易（交易編號和第 1 筆相同，未確認）" });
-  if (pv.receipt_id) items.push({ label: "收據", text: String(pv.receipt_id), note: "收據記錄了交付內容的 sha256" });
+    note: pv.settle_tx !== pv.reserve_tx ? "第 2 筆・和第 1 筆不是同一筆" : "第 2 筆（交易編號和第 1 筆相同，未確認）",
+    chain: onChain && onChain.settle && onChain.settle.hash === pv.settle_tx ? chainLine(onChain.settle, chain.head, "settle") : "" });
+  if (pv.receipt_id) items.push({ label: "收據", text: String(pv.receipt_id), note: "記錄了交付內容的 sha256" });
   return items;
 }
 

@@ -265,7 +265,7 @@ body[data-page="show"] #unity-canvas { background: #10131a; border-radius: 6px; 
 .show-trust { margin-top: 6px; grid-column: 1 / -1; } /* under both columns: the scene keeps its height */
 .show-trust-row h3 { margin: 4px 0; font-size: clamp(16px, 1.25vw, 24px); color: var(--accent); }
 .show-trust-row ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 6px; }
-.show-trust-row li { border: 1px solid #44506a; border-radius: 6px; padding: 4px 10px; font-size: clamp(15px, 1.25vw, 24px); display: grid; } /* 24 px at 1920 wide */
+.show-trust-row li { border: 1px solid #44506a; border-radius: 6px; padding: 4px 10px; font-size: clamp(13px, calc(2.2vw - 18px), 24px); display: grid; } /* 24 px at 1920 wide, about 14 px at 1280 */
 .show-trust-row li b { color: var(--ok); font-size: 0.85em; }
 .show-trust-row li small { color: var(--muted); font-size: 0.85em; }
 .show-trust-row a, .show-receipt a { color: var(--accent); }
@@ -294,3 +294,4 @@ body[data-page="show"] #unity-canvas { background: #10131a; border-radius: 6px; 
 .show-checker li[data-state="FAIL"] { border-color: #d9534f; }
 .show-checker li[data-state="INCONCLUSIVE"] { border-color: #9b6bd6; }
 .show-checker-by { margin: 6px 0 0; color: var(--muted); font-size: 20px; }
+.show-trust-row li small.show-chain { color: var(--text); } /* read from the chain by the Host (O2) */

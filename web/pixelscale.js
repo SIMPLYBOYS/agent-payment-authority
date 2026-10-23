@@ -7,11 +7,12 @@
 export const NATIVE_W = 480, NATIVE_H = 320;
 export const MAX_ZOOM = 6;
 
-// fitScale: the largest whole multiple that fits; on a screen too small
-// for its own pixels (a phone), the fraction that fits: it is never cut off.
+// fitScale: the largest whole multiple that fits, at least its own pixels;
+// only a screen narrower than them (a phone) gets the fraction of its
+// width, so the scene is never cut off at the side.
 export function fitScale(w, h) {
-  const k = Math.min(w / NATIVE_W, h / NATIVE_H);
-  return k >= 1 ? Math.min(MAX_ZOOM, Math.floor(k)) : Math.max(0.25, Math.floor(k * 100) / 100);
+  if (w < NATIVE_W) return Math.max(0.25, Math.floor((w / NATIVE_W) * 100) / 100);
+  return Math.max(1, Math.min(MAX_ZOOM, Math.floor(Math.min(w / NATIVE_W, h / NATIVE_H))));
 }
 
 // attachZoom: sizes canvas inside frame and wires the controls (a box for

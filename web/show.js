@@ -62,7 +62,7 @@ function render() {
   $("show-title").textContent = v.venue ? A.venue(v.venue).name : "示範商店";
   $("show-network").textContent = A.networkText(v.payments) + (there ? "" : "・主持人頁未連線（停在最後狀態）");
   const shown = (v.customers || []).map((c) => ({ ...A.showCustomer(c.consumer, c.snapshot, c.delegation, v),
-    evidence: A.showEvidence(c.snapshot, v), receipt: A.showReceipt(c.snapshot, v) }));
+    evidence: A.showEvidence(c.snapshot, v, c.chain), receipt: A.showReceipt(c.snapshot, v) }));
   // Redrawn only when something changed: the captions are a live region.
   const chk = A.showChecker(v.checker);
   const key = JSON.stringify([shown, owned, chk]);
@@ -96,6 +96,7 @@ function render() {
       const li = el("li", "");
       li.append(el("b", "", it.label), it.href ? anchor(it.text, it.href) : el("span", "", it.text));
       if (it.note) li.append(el("small", "", it.note));
+      if (it.chain) li.append(el("small", "show-chain", it.chain));
       ul.append(li);
     }
     row.append(ul);
@@ -126,7 +127,7 @@ function render() {
 // The scene at whole multiples of its pixels (pixelscale.js): what fits above the caption and the evidence.
 const frame = document.querySelector(".show-frame");
 const zoom = attachZoom({ canvas: $("unity-canvas"), frame, controls: $("scene-zoom"), key: "apa-zoom-show",
-  avail: () => ({ w: frame.parentElement.clientWidth, h: innerHeight - frame.getBoundingClientRect().top - $("show-captions").offsetHeight - $("show-trust").offsetHeight - 24 }) });
+  avail: () => ({ w: frame.parentElement.clientWidth, h: innerHeight - frame.getBoundingClientRect().top - $("show-captions").offsetHeight - $("show-trust").offsetHeight - 12 }) });
 // place: the receipt over the scene when the scene is big enough (2× and up),
 // else in the side column; the side column never makes the row taller than the scene.
 function place() {

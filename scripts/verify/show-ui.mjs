@@ -160,7 +160,9 @@ try {
   await s.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
   await s.waitFor(`document.getElementById("unity-status").dataset.state === "ready"`, 90000);
   const tx1 = "0x" + "a1".repeat(32), tx2 = "0x" + "b2".repeat(32);
-  const view = { payments: "base_sepolia", authenticator: "device", venue: "data", customers: [{ consumer: "consumer-a", delegation: { task_budget: "5000000", allow_max: "100000" },
+  const chain = { chain: "base_sepolia", head: 48979140, purchases: { "po-1": { reserve: { hash: tx1, status: "success", block: 48979110, time: 1790726400, spent: "500000" },
+    settle: { hash: tx2, status: "success", block: 48979135, time: 1790726450, transfer: { from: "0x833405a796c3300afcc582a3e251adf1a4d3c477", to: "0x" + "33".repeat(20), amount: "500000" } } } } };
+  const view = { payments: "base_sepolia", authenticator: "device", venue: "data", customers: [{ consumer: "consumer-a", delegation: { task_budget: "5000000", allow_max: "100000" }, chain,
     snapshot: { task: { task_id: "show-a-09", consumer_id: "consumer-a", status: "running", as_of_sequence: 12, served_at: 1, contract_version: "apa.pay.v2", payment_capability: "base_sepolia",
       purchases: [{ purchase_order_id: "po-1", amount: "500000", resource_url: "https://shop.example/resources/kr-market", credential: { result: "valid" },
         approval: { state: "approved", resolved_by: "webauthn:approver-a", grant: { authorization_method: "webauthn", voice: "verified" } },
@@ -189,7 +191,8 @@ try {
   check("why trustworthy: the device and the voice, both transactions linked to basescan, the receipt", await s.evaluate(`(() => {
     const t = document.getElementById("show-trust"); const hrefs = [...t.querySelectorAll("a")].map((a) => a.href);
     return t.textContent.includes("本人以已登記的裝置核准，聲音也相符") && hrefs.length === 2 && hrefs[0].endsWith("${tx1}") && hrefs[1].endsWith("${tx2}")
-      && [...t.querySelectorAll("a")].every((a) => a.target === "_blank" && a.rel === "noopener noreferrer") && t.textContent.includes("rcpt-show-a-09"); })()`),
+      && [...t.querySelectorAll("a")].every((a) => a.target === "_blank" && a.rel === "noopener noreferrer") && t.textContent.includes("rcpt-show-a-09")
+      && t.textContent.includes("鏈上：區塊 #48979110・31 個確認・合約記下 0.50 USDC") && t.textContent.includes("0.50 USDC 客人錢包→商店"); })()`),
     await s.evaluate(`document.getElementById("show-trust").textContent`));
   check("the receipt card: 韓國市場簡報, 0.50 USDC, two transactions, not one", await s.evaluate(`(() => { const r = document.querySelector("#show-receipts .show-receipt"); return !!r
     && r.textContent.includes("韓國市場簡報") && r.textContent.includes("0.50 USDC") && r.textContent.includes("不是同一筆，也不是一次完成"); })()`),
@@ -210,7 +213,9 @@ try {
   await sleep(500);
   check("at 1920×1080 nothing scrolls down (paid, with the evidence)", await s.evaluate(`document.documentElement.scrollHeight <= 1080`), await s.evaluate(`String(document.documentElement.scrollHeight)`));
   const g1080 = await geo();
-  check("at 1920×1080 the scene is twice its pixels (960×640)", g1080.w === 960 && g1080.h === 640, JSON.stringify(g1080));
+  const room = await s.evaluate(`JSON.stringify({ inner: innerHeight, frameTop: Math.round(document.querySelector(".show-frame").getBoundingClientRect().top),
+    captions: document.getElementById("show-captions").offsetHeight, trust: document.getElementById("show-trust").offsetHeight, stageW: document.querySelector(".show-stage").clientWidth })`);
+  check("at 1920×1080 the scene is twice its pixels (960×640)", g1080.w === 960 && g1080.h === 640, JSON.stringify(g1080) + " " + room);
   check("＋ zooms to 3× and the frame scrolls; 符合 goes back", await s.evaluate(`(() => { const b = [...document.querySelectorAll("#scene-zoom button")]; b[1].click();
     const c = document.getElementById("unity-canvas"), f = document.querySelector(".show-frame"); const big = c.dataset.scale === "3" && f.dataset.zoomed === "true";
     b[2].click(); return big && c.dataset.scale === "2" && f.dataset.zoomed === "false"; })()`));

@@ -123,6 +123,7 @@ type api struct {
 	payContract string         // E1-a: --payments' budget contract
 	payCap      string         // P2: --payments' environment (LocalAnvil, BaseSepolia); "" without
 	relayer     *budget.Client // P2-b: apa-relayer's socket, for its health; nil in process or without --payments
+	chainRead   *chainReader   // O2: the payments read from the chain; nil without --payments
 
 	recon func(context.Context) (reconcile.Report, error) // P2-a: the reconciliation; nil without --payments
 }
@@ -130,6 +131,7 @@ type api struct {
 func (a *api) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tasks", a.tasks)
 	mux.HandleFunc("GET /api/tasks/{task_id}", a.task)
+	mux.HandleFunc("GET /api/tasks/{task_id}/chain", a.chain) // O2: the payments as the chain has them
 	mux.HandleFunc("GET /api/tasks/{task_id}/events", a.events)
 	mux.HandleFunc("GET /api/host/reconciliation", a.reconciliation)
 }

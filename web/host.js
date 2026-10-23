@@ -142,7 +142,33 @@ function publishView() {
   const st = (lastReady && lastReady.status) || {};
   const ha = st.human_approval;
   relay.view({ payments: A.paysOn(st.payment_capability) ? st.payment_capability : "", authenticator: (ha && ha.sources && ha.sources.authenticator) || "",
-    venue: venue || "", checker: checker && { ...checker, findings: checker.findings.map(({ claim, verdict, noChain }) => ({ claim, verdict, noChain })) }, customers: scene.slots().map((s) => ({ consumer: s.consumer, snapshot: scene.snapshot(s.consumer), delegation: delegationOf(s.task) })) });
+    venue: venue || "", checker: checker && { ...checker, findings: checker.findings.map(({ claim, verdict, noChain }) => ({ claim, verdict, noChain })) }, customers: scene.slots().map((s) => ({ consumer: s.consumer, snapshot: scene.snapshot(s.consumer), delegation: delegationOf(s.task), chain: chainOf(s) })) });
+}
+// chainOf (docs/commercial-ops.md O2): what the chain says of a slot's
+// payments, read by the Host (GET /api/tasks/{id}/chain) with that
+// customer's own viewer token, again every few seconds while the window is open.
+const chains = new Map(); // task -> { at, gen, data, busy }
+const CHAIN_MS = 5000;
+function chainOf(s) {
+  const snap = scene.snapshot(s.consumer);
+  const pays = snap && (snap.task.purchases || []).some((p) => p.payment && (p.payment.reserve_tx || p.payment.settle_tx));
+  if (!pays) return null;
+  const c = chains.get(s.task);
+  if (!c || (c.gen === creds.gen && Date.now() - c.at > CHAIN_MS && !c.busy)) readChain(s.consumer, s.task);
+  return c && c.gen === creds.gen ? c.data : null;
+}
+async function readChain(consumer, task) {
+  const t = creds.viewerToken(consumer);
+  if (!t) return;
+  const prev = chains.get(task);
+  chains.set(task, { at: Date.now(), gen: creds.gen, data: prev ? prev.data : null, busy: true });
+  let data = prev ? prev.data : null;
+  try {
+    const r = await fetch("/api/tasks/" + encodeURIComponent(task) + "/chain", { headers: { Authorization: "Bearer " + t }, cache: "no-store", credentials: "omit" });
+    if (r.ok) data = await r.json();
+  } catch { /* the last read stays */ }
+  chains.set(task, { at: Date.now(), gen: creds.gen, data, busy: false });
+  publishView();
 }
 $("checker-file").addEventListener("change", async (ev) => {
   const f = ev.target.files && ev.target.files[0];

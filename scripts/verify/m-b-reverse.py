@@ -495,6 +495,8 @@ ITEMS = [
      [("web/adapter.js", 'r.claims[id] !== "PASS" && noChain.has(id) ? "（沒有向鏈查詢）"', 'false ? "（沒有向鏈查詢）"')]),
     ("Gap2 S2 review: one hash twice reads as two transactions", node("web/test/show.test.mjs", "why trustworthy: each item only what a record says, links only on a public testnet", r"未確認"),
      [("web/adapter.js", 'note: pv.settle_tx !== pv.reserve_tx ? "第 2 筆鏈上交易，和第 1 筆不是同一筆"', 'note: true ? "第 2 筆鏈上交易，和第 1 筆不是同一筆"')]),
+    ("O2: a chain read of another hash is shown", node("web/test/show.test.mjs", "on the chain (O2): each transaction as the Host read it, only for the hash the Store recorded", r"鏈上"),
+     [("web/adapter.js", 'chain: onChain && onChain.reserve && onChain.reserve.hash === pv.reserve_tx ?', 'chain: onChain && onChain.reserve ?')]),
 ]
 
 ITEM_TIMEOUT = 900

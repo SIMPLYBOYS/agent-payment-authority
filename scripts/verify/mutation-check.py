@@ -1439,6 +1439,10 @@ LOCAL_MUTATIONS = [
      '\tctx, cancel := context.WithTimeout(ctx, servicesWait)', '\tctx, cancel := context.WithCancel(ctx)', 'cmd/demo:TestServicesStatus'),
     ('Gap2 S1: /show is not served', 'cmd/demo/ui.go',
      '\tmux.HandleFunc("GET /show", a.page("show.html"))', '\t_ = a.page("show.html")', 'cmd/demo:TestHostPage'),
+    ("O2: another contract's Spent log is taken", 'cmd/demo/chain.go',
+     '\t\tcase l.Address == c.contract && len(l.Topics) > 0 && l.Topics[0] == chainSpentTopic && len(l.Data) >= 64:', '\t\tcase len(l.Topics) > 0 && l.Topics[0] == chainSpentTopic && len(l.Data) >= 64:', 'cmd/demo:TestChainReaderReadsWhatTheChainSays'),
+    ('O2: a shallow receipt is kept', 'cmd/demo/chain.go',
+     '\tif head >= r.BlockNumber+c.depth {', '\tif true {', 'cmd/demo:TestChainReaderReadsWhatTheChainSays'),
 ]
 
 
