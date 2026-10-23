@@ -482,7 +482,7 @@ ITEMS = [
     ("Gap2 S2: a simulated approval's evidence worded as the person's", node("web/test/show.test.mjs", "why trustworthy: each item only what a record says, links only on a public testnet", r"主持人代為核准"),
      [("web/adapter.js", 'if (!byDevice(p)) return "主持人代為核准（示範，不是本人）";', 'if (false) return "主持人代為核准（示範，不是本人）";')]),
     ("Gap2 S3: a report with an unknown claim result is taken", node("web/test/show.test.mjs", "the checker's report: read as data, shown only as it says", r"E10 的結果不明"),
-     [("web/adapter.js", 'if (!Object.hasOwn(VERDICTS, v)) return { error: id + " 的結果不明" };', 'if (false) return { error: id + " 的結果不明" };')]),
+     [("web/adapter.js", 'if (typeof v !== "string" || !Object.hasOwn(VERDICTS, v)) return { error: id + " 的結果不明" };', 'if (false) return { error: id + " 的結果不明" };')]),
     ("Gap2 S3: a failed report reads as all passed", node("web/test/show.test.mjs", "the checker's report: read as data, shown only as it says", r"未通過"),
      [("web/adapter.js", 'const summary = r.verdict === "PASS" && !off.length ? "逐項檢查，全部通過"', 'const summary = true ? "逐項檢查，全部通過"')]),
     ("Gap2 S3: a fooled model reads as not fooled", node("web/test/show.test.mjs", "the checker's report: read as data, shown only as it says", r"被騙了"),
