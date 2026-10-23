@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"math/big"
 	"net/http"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 )
 
 var (
@@ -132,25 +134,34 @@ func (a *api) chain(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	head, err := a.chainRead.node.BlockNumber(ctx)
+	out, err := a.chainRead.view(ctx, a.payCap, rec)
 	if err != nil {
-		fail(w, http.StatusServiceUnavailable, "chain_unavailable")
+		fail(w, http.StatusServiceUnavailable, "chain_unavailable") // the node's text stays here
 		return
 	}
-	out := chainReply{Chain: a.payCap, Head: head, Purchases: map[string]chainPurchase{}}
+	reply(w, http.StatusOK, out)
+}
+
+// view: a task's recorded transactions as the chain has them; the payer
+// is the task's own wallet, the shop each purchase's pay-to.
+func (c *chainReader) view(ctx context.Context, capability string, rec store.TaskRecord) (chainReply, error) {
+	head, err := c.node.BlockNumber(ctx)
+	if err != nil {
+		return chainReply{}, err
+	}
+	out := chainReply{Chain: capability, Head: head, Purchases: map[string]chainPurchase{}}
 	payer, _ := eth.ParseAddress(rec.Binding.Payer) // a zero address matches no transfer
 	for _, p := range rec.Task.Purchases {
 		if p.Payment == nil || (p.Payment.ReserveTx == "" && p.Payment.SettleTx == "") {
 			continue
 		}
 		payTo, _ := eth.ParseAddress(strings.ToLower(p.PayTo))
-		res, err1 := a.chainRead.tx(ctx, p.Payment.ReserveTx, head, payer, payTo)
-		set, err2 := a.chainRead.tx(ctx, p.Payment.SettleTx, head, payer, payTo)
-		if err1 != nil || err2 != nil {
-			fail(w, http.StatusServiceUnavailable, "chain_unavailable") // the node's text stays here
-			return
+		res, err1 := c.tx(ctx, p.Payment.ReserveTx, head, payer, payTo)
+		set, err2 := c.tx(ctx, p.Payment.SettleTx, head, payer, payTo)
+		if err := errors.Join(err1, err2); err != nil {
+			return chainReply{}, err
 		}
 		out.Purchases[p.PurchaseOrderID] = chainPurchase{Reserve: res, Settle: set}
 	}
-	reply(w, http.StatusOK, out)
+	return out, nil
 }

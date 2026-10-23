@@ -63,8 +63,17 @@ stop() {
   stopping=yes
   trap '' INT TERM HUP
   say "停下中…"
-  # sudo passes the signal on to what it runs; this user cannot signal sudo itself.
-  for p in $spid $vpid; do sudo -n kill -TERM "$p" 2>/dev/null || true; done
+  # The services under /opt are stopped as root, by what they are (review:
+  # this user cannot signal sudo, and sudo may not pass a signal from its
+  # own group on); the preflight saw neither running before this run.
+  if [ -n "$vpid$spid" ]; then
+    if sudo -n true 2>/dev/null; then
+      sudo -n /usr/bin/pkill -TERM -u apa-signer -f "$opt/voice/sidecar.py" 2>/dev/null || true
+      sudo -n /usr/bin/pkill -TERM -u apa-signer -f "$opt/bin/apa-signer serve" 2>/dev/null || true
+    else
+      say "sudo 已過期，/opt 的服務可能還在跑；請執行：sudo /usr/bin/pkill -TERM -u apa-signer -f $opt/voice/sidecar.py; sudo /usr/bin/pkill -TERM -u apa-signer -f '$opt/bin/apa-signer serve'"
+    fi
+  fi
   kill -TERM 0 2>/dev/null || true
   wait 2>/dev/null || true
   [ -z "$tty" ] || stty "$tty" 2>/dev/null || true # a passphrase prompt stopped mid-way leaves echo off
@@ -74,6 +83,8 @@ stop() {
 }
 trap stop EXIT
 trap 'exit 130' INT TERM HUP
+# sudo's time stamp kept the whole run, so stop() can stop the /opt services as root.
+(while sleep 60; do sudo -n -v 2>/dev/null || exit 0; done) &
 
 # 1 the voice service: its models load in 2-3 minutes.
 say "1/4 語音服務啟動中（模型載入約 2～3 分鐘；紀錄 $logs/voice.log）"

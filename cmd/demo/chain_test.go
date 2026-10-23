@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 )
 
 // stubNode is a node the test writes: receipts by hash, one block time.
@@ -115,5 +116,39 @@ func TestChainRouteRules(t *testing.T) {
 		if code != c.code || !strings.Contains(string(body), c.err) {
 			t.Errorf("%s: %d %s", name, code, body)
 		}
+	}
+}
+
+// The view takes the payer from the task's own binding and the shop from
+// each purchase (review); a node error is an error, not an empty answer.
+func TestChainViewUsesTheTasksPayerAndEachShop(t *testing.T) {
+	token, payer, shop := eth.Address{0x36}, eth.Address{0x11}, eth.Address{0x33}
+	amount := w32(big.NewInt(500000).Bytes())
+	tx2 := "0x" + strings.Repeat("2", 64)
+	n := &stubNode{head: 20, receipts: map[string]*eth.Receipt{
+		tx2: {Status: 1, BlockNumber: 10, Logs: []eth.Log{{Address: token, Topics: [][32]byte{chainTransferTopic, w32(payer[:]), w32(shop[:])}, Data: amount[:]}}},
+	}}
+	c := &chainReader{node: n, token: token, depth: 2, kept: map[string]chainTx{}}
+	rec := store.TaskRecord{Binding: store.TaskBinding{Payer: strings.ToUpper(payer.Hex()[2:])}, Task: store.TaskView{Purchases: []store.PurchaseView{
+		{PurchaseOrderID: "po-1", PayTo: shop.Hex(), Payment: &store.PaymentView{SettleTx: tx2}},
+		{PurchaseOrderID: "po-2", PayTo: shop.Hex()}, // no payment: not asked
+	}}}
+	rec.Binding.Payer = "0x" + rec.Binding.Payer
+	out, err := c.view(context.Background(), "local_anvil", rec)
+	if err != nil || out.Head != 20 || len(out.Purchases) != 1 {
+		t.Fatalf("view: %+v %v", out, err)
+	}
+	if tr := out.Purchases["po-1"].Settle.Transfer; tr == nil || !tr.ToShop || out.Purchases["po-1"].Reserve != nil {
+		t.Fatalf("po-1: %+v", out.Purchases["po-1"])
+	}
+	rec.Task.Purchases[0].PayTo = eth.Address{0x44}.Hex() // another shop than the transfer's
+	c.kept = map[string]chainTx{}
+	if out, _ := c.view(context.Background(), "local_anvil", rec); out.Purchases["po-1"].Settle.Transfer.ToShop {
+		t.Fatal("a transfer to another address reads as the shop's")
+	}
+	n.err = errors.New("timeout")
+	c.kept = map[string]chainTx{}
+	if _, err := c.view(context.Background(), "local_anvil", rec); err == nil {
+		t.Fatal("a node error reads as an answer")
 	}
 }

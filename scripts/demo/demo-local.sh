@@ -74,7 +74,7 @@ say "1/3 本機鏈就緒：$(grep -E '^p2-local: (resumed|wrote)' "$logs/chain.l
 (
   i=0
   until [ -S "$sock" ]; do
-    i=$((i + 1)); [ $i -lt 900 ] || { say "第 3 步：15 分鐘內沒有 Signer，Host 沒有啟動"; exit 1; }
+    i=$((i + 1)); [ $i -lt 900 ] || { say "卡在第 3 步：15 分鐘內沒有 Signer，Host 沒有啟動；全部停下"; kill -TERM 0; }
     sleep 1
   done
   say "3/3 Host 啟動中（fake Agent；頁面會自動打開；配對碼在下面）"
