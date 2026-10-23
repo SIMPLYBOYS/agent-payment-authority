@@ -28,6 +28,19 @@ public class ShopSceneTests
         foreach (var ch in s ?? "") Assert.IsTrue(chars.IndexOf(ch) >= 0, "not in the font: '" + ch + "' in " + s);
     }
 
+    // Aaron 10/23 (the cafe): a room whose bar is along the back wall has the
+    // customer face it at the counter and at the delivery zone.
+    [UnityTest]
+    public IEnumerator InTheCafeTheCustomerFacesTheBar()
+    {
+        Assert.IsTrue(view.UseLayout("cafe"));
+        bridge.Receive(D2(1, "consumer-a", 3, "waiting", 3));
+        yield return Arrive("consumer-a");
+        Assert.AreEqual(view.Point("consumer-a", ShopView.Counter), view.PositionOf("consumer-a"));
+        Assert.AreEqual("up", view.FacingOf("consumer-a"), "at the bar it faces the bar");
+        Assert.IsTrue(view.UseLayout(ShopView.DefaultLayout));
+    }
+
     // B6: delivered from the counter, the customer goes by the delivery zone, then out.
     [UnityTest]
     public IEnumerator ADeliveryGoesByTheDeliveryZone()

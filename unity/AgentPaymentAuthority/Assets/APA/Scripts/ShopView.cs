@@ -23,10 +23,12 @@ namespace APA
         public Vector2 door, aisle, shelf, bend, front, counter;
         public Vector2 pickup;         // the delivery zone (gap review B6): from bend up or down to pickupRow, along it, then to pickup
         public float pickupRow;        // 0: bend's own row
+        public string facing = "right"; // where a customer faces at the counter and the delivery zone: right | up (a bar along the back wall)
         public Prop[] props = new Prop[0];
         public Note[] notes = new Note[0]; // zone labels; the delivery zone's says 付款後才交付
 
-        [System.Serializable] public class Prop { public string key; public float x, y; }
+        // lift: drawn that much higher but in front as if at y (an item on a counter).
+        [System.Serializable] public class Prop { public string key; public float x, y, lift; }
         [System.Serializable] public class Note { public string text; public float x, y; }
     }
 
@@ -154,7 +156,7 @@ namespace APA
             public SpriteRenderer body;
             public TextMesh tag;
             public SpriteRenderer plate, marker, ring; // UX1: the label's backing, the colour under the feet, the selection ring
-            public Sprite idleDown, idleRight;
+            public Sprite idleDown, idleRight, idleUp;
             public Sprite[][] walk;          // right, up, left, down
             public int facing = 3;
             public Target target = new Target(); // what it is to show (T)
@@ -301,6 +303,7 @@ namespace APA
             notePlates.Clear();
             UsingPlaceholders = customerA == null || customerB == null;
             var floor = Art(layout.floor, new Color(0.78f, 0.8f, 0.84f), 32, 32);
+            var stone = Art("floor", new Color(0.78f, 0.8f, 0.84f), 32, 32); // the sidewalk is the street's, whatever the room's floor
             var wall = Art(layout.wall, new Color(0.85f, 0.85f, 0.9f), 32, 64);
             for (int x = 0; x < 12; x++)
             {
@@ -310,13 +313,14 @@ namespace APA
             // UX1: the sidewalk outside the door, where a customer waits and
             // leaves to: the same floor, darker, so outside reads as ground.
             for (int x = -2; x < 0; x++)
-                for (int y = 0; y < 7; y++) Put("sidewalk", floor, new Vector2(x + 0.5f, y), -100).color = new Color(0.55f, 0.6f, 0.56f);
+                for (int y = 0; y < 7; y++) Put("sidewalk", stone, new Vector2(x + 0.5f, y), -100).color = new Color(0.55f, 0.6f, 0.56f);
             foreach (var p in layout.props)
             {
                 var at = new Vector2(p.x, p.y);
                 var s = Art(p.key, new Color(0.6f, 0.5f, 0.4f), 32, 48);
-                Put(p.key, s, at, -(int)(at.y * 10));
-                Placed.Add((p.key, at, s));
+                var drawn = at + new Vector2(0f, p.lift); // an item on a counter: drawn on its top, in front of it
+                Put(p.key, s, drawn, -(int)(at.y * 10));
+                Placed.Add((p.key, drawn, s));
             }
             // The zone notes, each on a dark plate (readable on a light
             // wall): over the props, under the customers' labels.
@@ -342,13 +346,14 @@ namespace APA
                 // Premade LimeZu sheet, 32 x 64 frames: row 1 idle, row 2
                 // walk; in each row right 0-5, up 6-11, left 12-17, down 18-23.
                 c.idleRight = Frames(sheet, 64, 0)[0];
+                c.idleUp = Frames(sheet, 64, 6)[0];
                 c.idleDown = Frames(sheet, 64, 18)[0];
                 c.walk = new[] { Frames(sheet, 128, 0), Frames(sheet, 128, 6), Frames(sheet, 128, 12), Frames(sheet, 128, 18) };
             }
             else
             {
                 var p = new[] { Placeholder(tint, 20, 40) };
-                c.idleRight = c.idleDown = p[0];
+                c.idleRight = c.idleDown = c.idleUp = p[0];
                 c.walk = new[] { p, p, p, p };
             }
             c.id = id;
@@ -725,8 +730,9 @@ namespace APA
         {
             var here = (Vector2)c.go.transform.localPosition;
             bool atCounter = (here - P(c.id, Counter)).sqrMagnitude < 1e-4f || (here - P(c.id, Pickup)).sqrMagnitude < 1e-4f;
-            c.facing = atCounter ? 0 : 3;
-            c.body.sprite = atCounter ? c.idleRight : c.idleDown;
+            bool up = atCounter && layout.facing == "up";
+            c.facing = up ? 1 : atCounter ? 0 : 3;
+            c.body.sprite = up ? c.idleUp : atCounter ? c.idleRight : c.idleDown;
         }
 
         // LabelNow: the label of the segment on now; a display-only segment
