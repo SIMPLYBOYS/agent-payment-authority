@@ -8,7 +8,7 @@
 |---|---|---|
 | O1 | 本機鏈可續用；本機一鍵啟動與停止 | 完成（見下） |
 | O2 | 展示視窗的「鏈上紀錄」：Host 向鏈讀出兩筆交易的區塊、轉帳與預算合約事件；本機鏈與 Base Sepolia 都顯示，Base Sepolia 另附 basescan | 完成（見下） |
-| O3 | Base Sepolia 一鍵啟動（語音服務、`/opt` 的 Signer、relayer、Host）；sudo 由腳本向 Aaron 要 | 完成，待 Aaron 實際試（sudo 的部分 Claude Code 不能執行） |
+| O3 | Base Sepolia 一鍵啟動（語音服務、`/opt` 的 Signer、relayer、Host）；sudo 由腳本向 Aaron 要 | 完成；Aaron 10/23 實測：啟動到 Host，Ctrl-C、relayer 密語錯誤（卡住）、直接關視窗三種停法之後，`pgrep -lu apa-signer` 與 8402 都沒有殘留 |
 
 ## O1 本機鏈可續用、一鍵啟動
 
@@ -51,3 +51,8 @@ sh scripts/demo/demo-testnet.sh live t3    # 真實 Agent，E1-a 的 host 檔（
 - 重開時只檢查「預算合約在設定的位址」。anvil 每條新鏈的位址都一樣，所以這只是基本檢查，不能證明存檔是這個目錄的。
 - `make demo-local` 沿用 `var/p2-dev-e1a` 的 Signer（已登記你的裝置），它的資料庫也有 E1-a 彩排的紀錄；本人核准的每日上限是跨鏈累計的。
 - `make demo-testnet` 在整場執行期間每分鐘延續一次 sudo 的授權（`sudo -n -v`），停下時才能以 root 停掉 `/opt` 的語音服務與 Signer；停下後就不再延續。
+
+## 實測（Aaron，10/23）
+
+- 本機：`make demo-local` 啟動、付款後展示視窗顯示鏈上區塊與確認數、合約記錄與轉帳；Ctrl-C 後重開接著用同一條鏈（block 8）。
+- Base Sepolia：`make demo-testnet` 啟動前發現 E1-a 實跑留下的 `/opt` Signer socket 並提示清除指令；清除後啟動到 Host；Ctrl-C、卡住、關視窗之後都沒有殘留程序。沒有跑場次、沒有交易。
