@@ -26,6 +26,10 @@ logs=$root/var/demo-testnet/logs
 say() { printf 'demo-testnet: %s\n' "$*" >&2; }
 stuck() { printf 'demo-testnet: 卡在%s\n' "$*" >&2; exit 1; }
 answers() { python3 -I -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.settimeout(1); s.connect(sys.argv[1])' "$1" 2>/dev/null; }
+# alive: a process of this run is still there (ps: a sudo process cannot be signalled by this user, not even kill -0).
+alive() { ps -p "$1" >/dev/null 2>&1; }
+voice_ok() { (cd / && sudo -n -u apa-signer /usr/bin/curl -s --max-time 2 --unix-socket "$vsock" http://voice/v1/health) 2>/dev/null | grep -q '"ok": *true'; }
+[ -t 0 ] || stuck "啟動前：要在終端機執行（密語從終端機輸入）"
 
 case $mode in
 fake) ;;
@@ -36,9 +40,10 @@ esac
 # Before anything starts.
 if lsof -nP -iTCP:8402 -sTCP:LISTEN >/dev/null 2>&1; then stuck "啟動前：127.0.0.1:8402 已有程式在用（上一個 Host？）"; fi
 [ -f "$tn/relayer.json" ] || stuck "啟動前：沒有 $tn/relayer.json（P2-b 的部署）"
-for s in "$ssock" "$vsock"; do
-  if [ -S "$s" ] && answers "$s"; then stuck "啟動前：$s 已有服務在跑（上一次沒停？）"; fi
-done
+if [ -S "$ssock" ]; then
+  if answers "$ssock"; then stuck "啟動前：/opt 的 Signer 已在跑（$ssock）"; fi
+  stuck "啟動前：$ssock 是上一次留下的；請先執行：sudo -u apa-signer /bin/rm $ssock"
+fi
 if [ -S "$rsock" ]; then
   if answers "$rsock"; then stuck "啟動前：relayer 已在跑（$rsock）"; fi
   rm -f "$rsock" # a leftover nothing answers on: apa-relayer refuses an existing socket
@@ -46,22 +51,29 @@ fi
 mkdir -p "$logs"
 chmod 700 "$root/var/demo-testnet" "$logs"
 
-say "需要 sudo 的密碼一次（語音服務與 Signer 以 apa-signer 身分執行）"
+say "需要 sudo 的密碼（這是你的登入密碼，不是錢包或 relayer 的密語；語音服務與 Signer 以 apa-signer 身分執行）"
 sudo -v || stuck "第 0 步：sudo 沒有通過"
+if voice_ok; then stuck "啟動前：/opt 的語音服務已在跑（上一次沒停？）"; fi
 
+tty=$(stty -g 2>/dev/null || true)
+vpid=; spid=
 stopping=no
 stop() {
   [ $stopping = no ] || return 0
   stopping=yes
-  trap '' INT TERM
+  trap '' INT TERM HUP
   say "停下中…"
+  # sudo passes the signal on to what it runs; this user cannot signal sudo itself.
+  for p in $spid $vpid; do sudo -n kill -TERM "$p" 2>/dev/null || true; done
   kill -TERM 0 2>/dev/null || true
   wait 2>/dev/null || true
+  [ -z "$tty" ] || stty "$tty" 2>/dev/null || true # a passphrase prompt stopped mid-way leaves echo off
   [ ! -S "$rsock" ] || answers "$rsock" || rm -f "$rsock"
+  if [ -S "$ssock" ] && ! answers "$ssock"; then say "（$ssock 留下了：下次啟動前請執行 sudo -u apa-signer /bin/rm $ssock）"; fi
   say "已停下"
 }
 trap stop EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' INT TERM HUP
 
 # 1 the voice service: its models load in 2-3 minutes.
 say "1/4 語音服務啟動中（模型載入約 2～3 分鐘；紀錄 $logs/voice.log）"
@@ -69,11 +81,11 @@ say "1/4 語音服務啟動中（模型載入約 2～3 分鐘；紀錄 $logs/voi
   --socket "$vsock" --models "$opt/voice/models") >"$logs/voice.log" 2>&1 &
 vpid=$!
 i=0
-until (cd / && sudo -n -u apa-signer /usr/bin/curl -s --max-time 2 --unix-socket "$vsock" http://voice/v1/health) 2>/dev/null | grep -q '"ok": *true'; do
-  kill -0 $vpid 2>/dev/null || { tail -5 "$logs/voice.log" >&2; stuck "第 1 步：語音服務沒有起來（上面是它最後的訊息）"; }
-  i=$((i + 1)); [ $i -lt 360 ] || stuck "第 1 步：語音服務 6 分鐘內沒有就緒（$logs/voice.log）"
+until voice_ok; do
+  alive $vpid || { tail -5 "$logs/voice.log" >&2; stuck "第 1 步：語音服務沒有起來（上面是它最後的訊息）"; }
+  i=$((i + 1)); [ $i -lt 120 ] || stuck "第 1 步：語音服務 6 分鐘內沒有就緒（$logs/voice.log）"
   sudo -n -v 2>/dev/null || true # keep sudo's time stamp while the models load
-  sleep 1
+  sleep 3
 done
 say "1/4 語音服務就緒"
 
@@ -83,19 +95,23 @@ sh scripts/demo/p2-testnet.sh relayer &
 rpid=$!
 i=0
 until [ -S "$rsock" ]; do
-  kill -0 $rpid 2>/dev/null || stuck "第 2 步：relayer 停了（密語不對、或上面有錯誤訊息）"
+  alive $rpid || stuck "第 2 步：relayer 停了（密語不對、或上面有錯誤訊息）"
   i=$((i + 1)); [ $i -lt 900 ] || stuck "第 2 步：relayer 15 分鐘內沒有就緒"
+  sudo -n -v 2>/dev/null || true
   sleep 1
 done
 say "2/4 relayer 就緒"
 
-# 3 the Signer under /opt: its passphrase on this terminal.
+# 3 the Signer under /opt: sudo first, here and on its own, so the wallet
+# passphrase is never typed into a sudo prompt (review).
+say "3/4 Signer：sudo 若再問密碼，是你的登入密碼"
+sudo -v || stuck "第 3 步：sudo 沒有通過"
 say "3/4 Signer：請輸入錢包的密語"
-(cd / && exec sudo -u apa-signer "$opt/bin/apa-signer" serve --dir "$opt/data") &
+(cd / && exec sudo -n -u apa-signer "$opt/bin/apa-signer" serve --dir "$opt/data") &
 spid=$!
 i=0
 until [ -S "$ssock" ]; do
-  kill -0 $spid 2>/dev/null || stuck "第 3 步：Signer 停了（密語不對、或上面有錯誤訊息）"
+  alive $spid || stuck "第 3 步：Signer 停了（密語不對、或上面有錯誤訊息）"
   i=$((i + 1)); [ $i -lt 900 ] || stuck "第 3 步：Signer 15 分鐘內沒有就緒"
   sleep 1
 done

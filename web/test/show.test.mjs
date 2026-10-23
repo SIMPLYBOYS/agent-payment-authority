@@ -309,13 +309,14 @@ test("on the chain (O2): each transaction as the Host read it, only for the hash
   const payer = "0x" + "4d".repeat(20), shop = "0x" + "33".repeat(20);
   const chain = { chain: "local_anvil", head: 12, purchases: { "po-1": {
     reserve: { hash: TX1, status: "success", block: 9, time: 1790726400, spent: "500000" },
-    settle: { hash: TX2, status: "success", block: 10, time: 1790726412, transfer: { from: payer, to: shop, amount: "500000" } } } } };
+    settle: { hash: TX2, status: "success", block: 10, time: 1790726412, transfer: { from: payer, to: shop, amount: "500000", to_shop: true } } } } };
   const ev = A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { cap: "local_anvil", purchase: p }), {}, chain);
   assert.equal(ev[2].chain, "鏈上：區塊 #9・4 個確認・合約記下 0.50 USDC");
   assert.equal(ev[3].chain, "鏈上：區塊 #10・3 個確認・0.50 USDC 客人錢包→商店");
   const other = { ...chain, purchases: { "po-1": { ...chain.purchases["po-1"], reserve: { ...chain.purchases["po-1"].reserve, hash: "0x" + "9".repeat(64) } } } };
   assert.equal(A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { purchase: p }), {}, other)[2].chain, ""); // not the recorded hash: nothing said
   assert.equal(A.chainLine({ status: "not_found" }, 12, "reserve"), "鏈上：還查不到這筆交易");
+  assert.match(A.chainLine({ status: "success", block: 10, transfer: { amount: "500000", to_shop: false } }, 12, "settle"), /收款人不是這筆請購的商店/); // never "→商店" unchecked
   assert.equal(A.chainLine({ status: "reverted", block: 9 }, 12, "reserve"), "鏈上：區塊 #9，執行失敗");
   assert.equal(A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { purchase: p }), {})[2].chain, ""); // no chain read: nothing
 });

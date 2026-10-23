@@ -154,20 +154,24 @@ function chainOf(s) {
   const pays = snap && (snap.task.purchases || []).some((p) => p.payment && (p.payment.reserve_tx || p.payment.settle_tx));
   if (!pays) return null;
   const c = chains.get(s.task);
-  if (!c || (c.gen === creds.gen && Date.now() - c.at > CHAIN_MS && !c.busy)) readChain(s.consumer, s.task);
+  // New credentials (a Host started again) read again at once (review).
+  if (!c || c.gen !== creds.gen || (Date.now() - c.at > CHAIN_MS && !c.busy)) readChain(s.consumer, s.task);
   return c && c.gen === creds.gen ? c.data : null;
 }
 async function readChain(consumer, task) {
   const t = creds.viewerToken(consumer);
   if (!t) return;
+  const g = creds.gen; // a reply under older credentials is dropped
   const prev = chains.get(task);
-  chains.set(task, { at: Date.now(), gen: creds.gen, data: prev ? prev.data : null, busy: true });
-  let data = prev ? prev.data : null;
+  const kept = prev && prev.gen === g ? prev.data : null;
+  chains.set(task, { at: Date.now(), gen: g, data: kept, busy: true });
+  let data = kept;
   try {
     const r = await fetch("/api/tasks/" + encodeURIComponent(task) + "/chain", { headers: { Authorization: "Bearer " + t }, cache: "no-store", credentials: "omit" });
     if (r.ok) data = await r.json();
   } catch { /* the last read stays */ }
-  chains.set(task, { at: Date.now(), gen: creds.gen, data, busy: false });
+  if (g !== creds.gen) return;
+  chains.set(task, { at: Date.now(), gen: g, data, busy: false });
   publishView();
 }
 $("checker-file").addEventListener("change", async (ev) => {

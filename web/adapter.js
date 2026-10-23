@@ -1123,7 +1123,7 @@ export function chainLine(tx, head, kind) {
   if (tx.status === "reverted") return "鏈上：區塊 #" + tx.block + "，執行失敗";
   const at = "鏈上：區塊 #" + tx.block + (head >= tx.block ? "・" + (head - tx.block + 1) + " 個確認" : "");
   if (kind === "reserve" && tx.spent) return at + "・合約記下 " + usdc(tx.spent);
-  if (kind === "settle" && tx.transfer) return at + "・" + usdc(tx.transfer.amount) + " 客人錢包→商店";
+  if (kind === "settle" && tx.transfer) return at + "・" + usdc(tx.transfer.amount) + (tx.transfer.to_shop ? " 客人錢包→商店" : " 從客人錢包轉出（收款人不是這筆請購的商店）");
   return at;
 }
 

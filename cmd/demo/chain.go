@@ -28,7 +28,6 @@ var (
 type chainNode interface {
 	BlockNumber(ctx context.Context) (uint64, error)
 	Receipt(ctx context.Context, hash []byte) (*eth.Receipt, error)
-	Raw(ctx context.Context, method string, out any, params ...any) error
 }
 
 // chainTx is one transaction as the chain has it.
@@ -36,17 +35,20 @@ type chainTx struct {
 	Hash   string `json:"hash"`
 	Status string `json:"status"` // success | reverted | not_found (no receipt yet, or not on this chain)
 	Block  uint64 `json:"block,omitempty"`
-	Time   uint64 `json:"time,omitempty"` // the block's timestamp
 	// Spent: tx#1's amount as the budget contract recorded it (base units).
 	Spent string `json:"spent,omitempty"`
 	// Transfer: tx#2's token transfer.
 	Transfer *chainTransfer `json:"transfer,omitempty"`
 }
 
+// chainTransfer: the token's transfer out of the task's own payer wallet
+// (review: never another transfer in the same transaction); ToShop says it
+// went to the purchase's pay-to address.
 type chainTransfer struct {
 	From   string `json:"from"`
 	To     string `json:"to"`
 	Amount string `json:"amount"` // base units
+	ToShop bool   `json:"to_shop"`
 }
 
 type chainPurchase struct {
@@ -70,34 +72,33 @@ type chainReader struct {
 	kept     map[string]chainTx
 }
 
-func (c *chainReader) tx(ctx context.Context, hash string, head uint64) *chainTx {
+// tx: one recorded transaction. A node that does not answer is an error
+// (the page keeps its last read); no receipt is not_found.
+func (c *chainReader) tx(ctx context.Context, hash string, head uint64, payer, payTo eth.Address) (*chainTx, error) {
 	if hash == "" {
-		return nil
+		return nil, nil
 	}
 	c.mu.Lock()
 	t, ok := c.kept[hash]
 	c.mu.Unlock()
 	if ok {
-		return &t
+		return &t, nil
 	}
 	t = chainTx{Hash: hash, Status: "not_found"}
 	raw, err := hex.DecodeString(strings.TrimPrefix(hash, "0x"))
 	if err != nil || len(raw) != 32 {
-		return &t
+		return &t, nil
 	}
 	r, err := c.node.Receipt(ctx, raw)
-	if err != nil || r == nil {
-		return &t
+	if err != nil {
+		return nil, err
+	}
+	if r == nil {
+		return &t, nil
 	}
 	t.Status, t.Block = "reverted", r.BlockNumber
 	if r.Status == 1 {
 		t.Status = "success"
-	}
-	var blk struct{ Timestamp string }
-	if c.node.Raw(ctx, "eth_getBlockByNumber", &blk, "0x"+new(big.Int).SetUint64(r.BlockNumber).Text(16), false) == nil {
-		if n, ok := new(big.Int).SetString(strings.TrimPrefix(blk.Timestamp, "0x"), 16); ok {
-			t.Time = n.Uint64()
-		}
 	}
 	for _, l := range r.Logs {
 		switch {
@@ -107,7 +108,9 @@ func (c *chainReader) tx(ctx context.Context, hash string, head uint64) *chainTx
 			var from, to eth.Address
 			copy(from[:], l.Topics[1][12:])
 			copy(to[:], l.Topics[2][12:])
-			t.Transfer = &chainTransfer{From: from.Hex(), To: to.Hex(), Amount: new(big.Int).SetBytes(l.Data[:32]).String()}
+			if from == payer { // the task's own wallet only
+				t.Transfer = &chainTransfer{From: from.Hex(), To: to.Hex(), Amount: new(big.Int).SetBytes(l.Data[:32]).String(), ToShop: to == payTo}
+			}
 		}
 	}
 	if head >= r.BlockNumber+c.depth {
@@ -115,7 +118,7 @@ func (c *chainReader) tx(ctx context.Context, hash string, head uint64) *chainTx
 		c.kept[hash] = t
 		c.mu.Unlock()
 	}
-	return &t
+	return &t, nil
 }
 
 func (a *api) chain(w http.ResponseWriter, r *http.Request) {
@@ -135,11 +138,19 @@ func (a *api) chain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := chainReply{Chain: a.payCap, Head: head, Purchases: map[string]chainPurchase{}}
+	payer, _ := eth.ParseAddress(rec.Binding.Payer) // a zero address matches no transfer
 	for _, p := range rec.Task.Purchases {
 		if p.Payment == nil || (p.Payment.ReserveTx == "" && p.Payment.SettleTx == "") {
 			continue
 		}
-		out.Purchases[p.PurchaseOrderID] = chainPurchase{Reserve: a.chainRead.tx(ctx, p.Payment.ReserveTx, head), Settle: a.chainRead.tx(ctx, p.Payment.SettleTx, head)}
+		payTo, _ := eth.ParseAddress(strings.ToLower(p.PayTo))
+		res, err1 := a.chainRead.tx(ctx, p.Payment.ReserveTx, head, payer, payTo)
+		set, err2 := a.chainRead.tx(ctx, p.Payment.SettleTx, head, payer, payTo)
+		if err1 != nil || err2 != nil {
+			fail(w, http.StatusServiceUnavailable, "chain_unavailable") // the node's text stays here
+			return
+		}
+		out.Purchases[p.PurchaseOrderID] = chainPurchase{Reserve: res, Settle: set}
 	}
 	reply(w, http.StatusOK, out)
 }

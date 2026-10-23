@@ -161,7 +161,7 @@ try {
   await s.waitFor(`document.getElementById("unity-status").dataset.state === "ready"`, 90000);
   const tx1 = "0x" + "a1".repeat(32), tx2 = "0x" + "b2".repeat(32);
   const chain = { chain: "base_sepolia", head: 48979140, purchases: { "po-1": { reserve: { hash: tx1, status: "success", block: 48979110, time: 1790726400, spent: "500000" },
-    settle: { hash: tx2, status: "success", block: 48979135, time: 1790726450, transfer: { from: "0x833405a796c3300afcc582a3e251adf1a4d3c477", to: "0x" + "33".repeat(20), amount: "500000" } } } } };
+    settle: { hash: tx2, status: "success", block: 48979135, time: 1790726450, transfer: { from: "0x833405a796c3300afcc582a3e251adf1a4d3c477", to: "0x" + "33".repeat(20), amount: "500000", to_shop: true } } } } };
   const view = { payments: "base_sepolia", authenticator: "device", venue: "data", customers: [{ consumer: "consumer-a", delegation: { task_budget: "5000000", allow_max: "100000" }, chain,
     snapshot: { task: { task_id: "show-a-09", consumer_id: "consumer-a", status: "running", as_of_sequence: 12, served_at: 1, contract_version: "apa.pay.v2", payment_capability: "base_sepolia",
       purchases: [{ purchase_order_id: "po-1", amount: "500000", resource_url: "https://shop.example/resources/kr-market", credential: { result: "valid" },
