@@ -142,6 +142,12 @@ present-testnet:
 demo-local:
 	@sh scripts/demo/demo-local.sh
 
+# The Base Sepolia demo in one terminal (scripts/demo/demo-testnet.sh): the
+# voice service and the Signer under /opt by sudo, apa-relayer, the Host
+# with the fake Agent; the real Agent: sh scripts/demo/demo-testnet.sh live <label>.
+demo-testnet:
+	@sh scripts/demo/demo-testnet.sh
+
 present-e1a:
 	@test -n "$(SIGNER)" && test -n "$(HOST)" && test -n "$(AUTH)" || { echo "usage: make present-e1a SIGNER=/opt/apa-signer/run/signer.sock HOST=<p2-testnet e1a-host's directory> AUTH=device|virtual (docs/commercial-e1a.md 6)" >&2; exit 2; }
 	@h="$(abspath $(HOST))"; APA_PRESENT_DIR="$$h/present" APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$$h/registry.json" APA_PRESENT_PAYMENTS="$$h/payments.json" APA_PRESENT_PROFILE="$$( [ -f "$$h/profile.json" ] && echo "$$h/profile.json" )" APA_PRESENT_CREDENTIALS=1 APA_PRESENT_SCENARIOS=testdata/demo/scenarios-e1a.json sh scripts/demo/present.sh live
