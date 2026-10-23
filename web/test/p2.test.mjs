@@ -41,7 +41,7 @@ test("P2: in flight it is paying, then confirming; never paid before the chain",
 
 test("P2: an ending replaces the steps it cut off, with its code", () => {
   const review = card([...allowed(), ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED"), ev(6, "PAYMENT_NEEDS_REVIEW")], { status: "needs_review", state: "needs_review", code: "RESERVED_NOT_PAID" });
-  assert.match(review.status, /^待人工處理：預算已預留，沒有簽名或送出/);
+  assert.match(review.status, /^待人工處理：預算已預留，但付款沒有送出/);
   assert.deepEqual(labels(review), ["收尾:none", "預留:done", "待人工處理:done"]);
   const notPaid = card([...allowed(), ev(4, "PAYMENT_REQUESTED"), ev(5, "PAYMENT_NOT_SETTLED")], { status: "not_paid", state: "reserve_failed", code: "RESERVE_FAILED" });
   assert.equal(notPaid.status, "未付款：預算預留失敗，沒有花錢");
@@ -112,7 +112,7 @@ test("P2: a person's approval says not paid yet with local_anvil", async () => {
   assert.equal(AP.decidedText("approved", paidDev, true)[1], "本人核准已驗證；已付款、已交付（區塊 11），附收據。");
   assert.equal(AP.decidedText("approved", paidDev)[1], "本人核准已驗證；已付款、已交付（區塊 11），附收據。"); // a recorded payment, said on any host
   const review = { ...dev, payment: { status: "needs_review", state: "needs_review", code: "RESERVED_NOT_PAID" } };
-  assert.match(AP.decidedText("approved", review, true)[1], /^本人核准已驗證；待人工處理：預算已預留，沒有簽名或送出/);
+  assert.match(AP.decidedText("approved", review, true)[1], /^本人核准已驗證；待人工處理：預算已預留，但付款沒有送出/);
   const sim = { approval: { resolved_by: "simulated:consumer-a:host", grant: { authorization_method: "simulated" } }, payment: { status: "paid", state: "delivered" } };
   assert.equal(AP.decidedText("approved", sim, true)[1], "已核准（模擬），未啟用付款"); // a simulated approval never reads as paid
   assert.equal(AP.decidedText("approved", dev)[1], "本人核准已驗證，付款未啟用。");

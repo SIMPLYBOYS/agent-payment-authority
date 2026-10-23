@@ -661,7 +661,7 @@ function catalogFor(catalog, p) {
 // P2 (docs/commercial-p2-host.md 5): a purchase's payment as the page
 // says it, from the Store's payment view (status, state, code).
 const NOT_PAID = { RESERVE_FAILED: "預算預留失敗，沒有花錢", NOT_PAID_EXPIRED: "已過付款期限，沒有花錢", TASK_ENDED: "task 已結束，沒有花錢" };
-const REVIEW = { RESERVED_NOT_PAID: "預算已預留，沒有簽名或送出", NOT_SETTLED_EXPIRED: "已送出，過期未結算", VERIFICATION_FAILED: "商店驗證未通過，沒有送出",
+const REVIEW = { RESERVED_NOT_PAID: "預算已預留，但付款沒有送出", NOT_SETTLED_EXPIRED: "已送出，過期未結算", VERIFICATION_FAILED: "商店回覆驗證未通過、沒有送出（商店的說法）",
   RECONCILE_NEEDS_REVIEW: "鏈上對帳需人工判斷" };
 export function paymentText(pv) {
   const block = typeof pv.settle_block === "number" ? "（區塊 " + pv.settle_block + "）" : "";
