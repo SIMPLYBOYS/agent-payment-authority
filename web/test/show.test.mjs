@@ -47,8 +47,9 @@ test("two customers: a payment ready while another is in progress is behind it; 
   assert.equal(q.models[0].steps[3].text, "預留預算中（第 1 筆鏈上交易）");
   assert.equal(q.models[1].steps[3].text, "排在前一筆付款之後（Host 依序處理付款）");
   assert.equal(q.models[1].caption, "客人 B・付款：排在前一筆付款之後（Host 依序處理付款）");
-  // A confirming: the worker still waits in A's shop call, and B is started only at its next round (review 2).
+  // A confirming, or A delivering: B is started only at the worker's next round (reviews 2, 3).
   assert.equal(A.showQueue([at("consumer-a", 4), at("consumer-b", 0)], "local_anvil").models[1].steps[3].text, "排在前一筆付款之後（Host 依序處理付款）");
+  assert.equal(A.showQueue([at("consumer-a", 5), at("consumer-b", 0)], "local_anvil").models[1].steps[3].text, "排在前一筆付款之後（Host 依序處理付款）");
   // Nothing on its way (the other one is paid, or both only ready): "準備付款" as it is.
   assert.equal(A.showQueue([at("consumer-a", 7), at("consumer-b", 0)], "local_anvil").models[1].steps[3].text, "準備付款");
   assert.equal(A.showQueue([at("consumer-a", 0), at("consumer-b", 0)], "local_anvil").models[1].steps[3].text, "準備付款");

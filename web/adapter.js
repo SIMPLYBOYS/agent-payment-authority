@@ -1106,7 +1106,7 @@ const QUEUED = "排在前一筆付款之後（Host 依序處理付款）";
 export function showQueue(models, cap) {
   if (models.filter((m) => m.steps[0].state === "done").length < 2 || !paysOn(cap)) return { models, note: "" };
   const ready = (m) => m.steps[3].state === "now" && m.steps[3].text === READY;
-  const going = models.some((m) => m.steps[3].state === "now" && !ready(m));
+  const going = models.some((m) => (m.steps[3].state === "now" && !ready(m)) || m.steps[4].state === "now"); // delivering is the worker's too (review 3)
   return {
     note: "客人同時選購；付款由 Host 依序處理，一次處理一筆；一筆等鏈上確認太久時，會先處理下一筆。",
     models: models.map((m) => (going && ready(m) ? { ...m, steps: m.steps.map((s, i) => (i === 3 ? { ...s, text: QUEUED } : s)), caption: m.name + "・" + m.steps[3].label + "：" + QUEUED } : m)),
