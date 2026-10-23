@@ -353,7 +353,7 @@ export function shopLabel(phase, cause, end, reason) {
     case "waiting": return end === "timed_out" ? "Agent 已逾時，請購仍在等核准" : "超過自動範圍，等核准";
     case "denied": {
       const why = PLAIN[fixedCode(reason)] || "";
-      return (why ? why + "，" : "") + "已拒絕，離店";
+      return why === "核准者拒絕" ? "核准者拒絕，離店" : (why ? why + "，" : "") + "已拒絕，離店";
     }
     case "allowed_unpaid": return "已放行，這筆不會付款"; // also a simulated approval's (UNITY_PHASE)
     // Until a payment event: true whether or not a payment ever starts.

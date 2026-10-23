@@ -365,6 +365,7 @@ test("D2 projection: cause_seq names the event behind the phase; task_end the fi
   assert.equal(A.shopLabel("waiting", 0, "", ""), "超過自動範圍，等核准");
   assert.equal(A.shopLabel("denied", 3, "", "INSUFFICIENT_BUDGET"), "超出預算，已拒絕，離店");
   assert.equal(A.shopLabel("denied", 3, "", "SOMETHING_NEW"), "已拒絕，離店"); // no code for the audience
+  assert.equal(A.shopLabel("denied", 3, "", "APPROVER_DENIED"), "核准者拒絕，離店");
   assert.ok(!/#|[A-Z_]{6,}/.test(A.shopLabel("denied", 3, "cancelled", "INSUFFICIENT_BUDGET")), "no event number, no code (gap review B3)");
 });
 

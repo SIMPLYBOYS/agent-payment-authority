@@ -79,7 +79,7 @@ namespace APA
             return Kind(t.Phase, t.End) != Kind(phase, end) ? 3 : 4;
         }
 
-        // Browse: whether the move plays "（動畫） browsing" at the shelf.
+        // Browse: whether the move plays the shelf's display segment (逛商品中（動畫）).
         public static bool Browse(Target t, int rule, string phase, int cause)
         {
             if (rule == 2) return true;
@@ -130,7 +130,7 @@ namespace APA
                 case "waiting": return end == "timed_out" ? "Agent 已逾時，請購仍在等核准" : "超過自動範圍，等核准";
                 case "denied":
                     var why = Plain(reason);
-                    return (why != "" ? why + "，" : "") + "已拒絕，離店";
+                    return why == "核准者拒絕" ? "核准者拒絕，離店" : (why != "" ? why + "，" : "") + "已拒絕，離店";
                 // allowed_unpaid is also where a simulated approval stands (the page's UNITY_PHASE): true of both.
                 case "allowed_unpaid": return "已放行，這筆不會付款";
                 // P2 (docs/commercial-p2-host.md 5). Until a payment event:

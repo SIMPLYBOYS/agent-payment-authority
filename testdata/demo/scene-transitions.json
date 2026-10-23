@@ -1,5 +1,5 @@
 {
- "description": "Shared test vectors for the shop scene's transition rules (docs/demo-presentation-design.md 16.4, 16.9 items 11-13). web/adapter.js (Node) and Unity SceneRules (EditMode) must both give these results. Each case starts from nothing shown (phase empty); every step is one projection compared with the target the step before left. rule: 1 another phase, 2 a new purchase at the counter, 3 only the label kind, 4 the same place. browse: the move plays the [anim] browsing segment. label: the customer's label and the cause and end it keeps for the target after the step.",
+ "description": "Shared test vectors for the shop scene's transition rules (docs/demo-presentation-design.md 16.4, 16.9 items 11-13). web/adapter.js (Node) and Unity SceneRules (EditMode) must both give these results. Each case starts from nothing shown (phase empty); every step is one projection compared with the target the step before left. rule: 1 another phase, 2 a new purchase at the counter, 3 only the label kind, 4 the same place. browse: the move plays the display segment at the shelf (逛商品中（動畫）). label: the customer's label and the cause and end it keeps for the target after the step.",
  "cases": [
   {
    "name": "an Ask from nothing shown",
