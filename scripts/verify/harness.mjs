@@ -40,7 +40,15 @@ export async function startChrome(profile, extra = [], { headless = true } = {})
   let port;
   for (let i = 0; i < 100 && !port; i++) { await sleep(100); try { port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0]; } catch {} }
   const targets = await (await fetch("http://127.0.0.1:" + port + "/json/list")).json();
-  const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
+  const page = await connect(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
+  // openPage: a second tab of the same browser (the audience window).
+  const openPage = async (url) => connect((await (await fetch("http://127.0.0.1:" + port + "/json/new?" + encodeURIComponent(url), { method: "PUT" })).json()).webSocketDebuggerUrl);
+  return { ...page, openPage, close: () => { page.ws.close(); c.kill(); } };
+}
+
+// connect: one page's DevTools session.
+async function connect(url) {
+  const ws = new WebSocket(url);
   await new Promise((r) => ws.addEventListener("open", r, { once: true }));
   let id = 0;
   const waiting = new Map();
@@ -73,5 +81,5 @@ export async function startChrome(profile, extra = [], { headless = true } = {})
     return false;
   };
   const on = (method, fn) => { listeners.set(method, [...(listeners.get(method) || []), fn]); };
-  return { send, evaluate, waitFor, on, consoleText, close: () => { ws.close(); c.kill(); } };
+  return { send, evaluate, waitFor, on, consoleText, ws, close: () => ws.close() };
 }

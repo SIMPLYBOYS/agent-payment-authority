@@ -1437,6 +1437,8 @@ LOCAL_MUTATIONS = [
      'History: a.historyFor(g), Live: a.live, hostTraits: a.traits()})', 'History: a.historyFor(g), Live: a.live})', 'cmd/demo:TestA2PaymentModeOff'),
     ('Gap C2 review: the probes wait for a slow service', 'cmd/demo/status.go',
      '\tctx, cancel := context.WithTimeout(ctx, servicesWait)', '\tctx, cancel := context.WithCancel(ctx)', 'cmd/demo:TestServicesStatus'),
+    ('Gap2 S1: /show is not served', 'cmd/demo/ui.go',
+     '\tmux.HandleFunc("GET /show", a.page("show.html"))', '\t_ = a.page("show.html")', 'cmd/demo:TestHostPage'),
 ]
 
 

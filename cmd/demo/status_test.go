@@ -211,6 +211,20 @@ func TestHostPage(t *testing.T) {
 	if code, _, _ := h.get("/host", "", func(r *http.Request) { r.Host = "evil.example" }); code != 403 {
 		t.Errorf("/host with a foreign Host: %d", code)
 	}
+	// The audience window (docs/commercial-gap2.md): the same headers, no token file, no host script.
+	code, body, hdr = h.get("/show", "")
+	if code != 200 || hdr.Get("Content-Security-Policy") == "" || !bytes.Contains(body, []byte(`/ui/show.js`)) ||
+		bytes.Contains(body, []byte(`type="file"`)) || bytes.Contains(body, []byte("host.js")) {
+		t.Errorf("/show: %d %s", code, body)
+	}
+	for _, a := range []string{"show.js", "showlink.js"} {
+		if code, _, hdr := h.get("/ui/"+a, ""); code != 200 || !strings.HasPrefix(hdr.Get("Content-Type"), "text/javascript") {
+			t.Errorf("/ui/%s: %d", a, code)
+		}
+	}
+	if code, _, _ := h.get("/show", "", func(r *http.Request) { r.Host = "evil.example" }); code != 403 {
+		t.Errorf("/show with a foreign Host: %d", code)
+	}
 }
 
 // scriptBin builds the demo once and names the test binary fake-claude

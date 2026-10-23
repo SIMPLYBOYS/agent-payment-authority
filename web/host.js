@@ -37,6 +37,7 @@ import { nextModeSeq, confirmMode, setStatus, forget, useViewer, onUnauthorized,
   shop, onSceneReport, onScenePick, setSceneView, setVenueOf, onReplayMode, refreshPanels } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
 import { createScene } from "./scene.js";
+import { createRelay } from "./showlink.js";
 import * as A from "./adapter.js";
 import * as AP from "./approve.js";
 import * as V from "./voice.js";
@@ -86,16 +87,63 @@ const creds = createHostCreds({ call, onChange: render });
 // version 2 and a host that starts runs, the shop is the scene: every
 // consumer's newest run at once, each read with its own viewer token. The
 // panels (app.js) follow the chosen consumer and task only.
-const scene = createScene({ unity: shop(), token: (c) => creds.viewerToken(c), onChange: () => { renderScene(); refreshPanels(); } });
-onSceneReport((r) => scene.rendered(r));
+// The audience window (docs/commercial-gap2.md, GD1-A, GD5): while it is
+// open, the scene's Unity is the window's (relay) and this page's own shop
+// is hidden; when it goes, the scene comes back here.
+const relay = createRelay((kind, d) => {
+  if (kind === "rendered2") scene.rendered(d);
+  else if (kind === "select2") pick(d);
+  else if (kind === "show") useShow(!!(d && d.ready && d.supports2));
+});
+const sceneUnity = {
+  target: shop(),
+  get ready() { return this.target.ready; },
+  get supports2() { return this.target.supports2; },
+  own(on) { this.target.own(on); },
+  send2(m) { this.target.send2(m); },
+  select2(m) { this.target.select2(m); },
+};
+const scene = createScene({ unity: sceneUnity, token: (c) => creds.viewerToken(c), onChange: () => { renderScene(); refreshPanels(); publishView(); } });
+onSceneReport((r) => { if (sceneUnity.target !== relay) scene.rendered(r); });
 // A click on a customer in the shop: taken only when it names a customer of
 // the current scene and slot (scene.picked); otherwise counted and dropped.
 let picksDropped = 0;
-onScenePick((r) => {
+function pick(r) {
   if (scene.picked(r)) return selectConsumer(r.consumer);
   picksDropped++;
   $("unity-canvas").dataset.picksDropped = String(picksDropped);
-});
+}
+onScenePick((r) => { if (sceneUnity.target !== relay) pick(r); });
+// useShow moves the scene to the audience window (on) or back here; either
+// way the scene starts over on its new Unity, every slot shown again.
+function useShow(on) {
+  const want = on ? relay : shop();
+  if (sceneUnity.target === want) { if (on) restartScene(); return; } // the window loaded again
+  if (scene.started) scene.stop();
+  sceneUnity.target = want;
+  $("show-note").hidden = !on;
+  document.querySelector(".canvas-frame").hidden = on;
+  ensureScene();
+}
+function restartScene() {
+  if (scene.started) scene.stop();
+  ensureScene();
+}
+// publishView: what the audience window shows beside the scene: the host's
+// payment and approval traits and each slot's read (task and events, no token).
+function publishView() {
+  if (sceneUnity.target !== relay) return;
+  const st = (lastReady && lastReady.status) || {};
+  const ha = st.human_approval;
+  relay.view({ payments: A.paysOn(st.payment_capability) ? st.payment_capability : "", authenticator: (ha && ha.sources && ha.sources.authenticator) || "",
+    venue: venue || "", customers: scene.slots().map((s) => ({ consumer: s.consumer, snapshot: scene.snapshot(s.consumer), delegation: delegationOf(s.task) })) });
+}
+// delegationOf: the delegation of a task's run's scenario (the catalog's), or null.
+function delegationOf(task) {
+  const r = lastRuns && lastRuns.gen === creds.gen && (lastRuns.runs || []).find((x) => x.task_id === task);
+  const sc = r && allScenarios().find((x) => x.id === r.scenario);
+  return (sc && sc.delegation) || null;
+}
 setSceneView((c) => scene.view(c));
 // UX3 (docs/commercial-scenes.md): the scene the page shows, chosen first
 // (UX2-D3); the customers' cards and the shop follow it. null until the
@@ -126,7 +174,7 @@ const hosting = () => !!(creds.view().hasHost && lastReady && lastReady.status &
 // ensureScene starts the scene once the shop and the host allow it, and
 // stops it when they no longer do (the shop goes back to the Dashboard).
 function ensureScene() {
-  const u = shop();
+  const u = sceneUnity;
   if (hosting() && u.ready && u.supports2) {
     if (!scene.started) {
       scene.start();
@@ -1656,6 +1704,8 @@ $("clear-all").addEventListener("click", () => { pairTried = false; creds.clearA
 let pairTried = false;
 let pairedGen = -1;
 const PAIR_NOTE = "配對只取得本次服務的主持人憑證，不會執行模型；按「開始」才執行一場。";
+// The audience window: a second window of this origin, put on the projector.
+$("show-open").addEventListener("click", () => window.open("/show", "apa-show"));
 $("pair-form").addEventListener("submit", (ev) => {
   ev.preventDefault();
   const input = $("pair-code");

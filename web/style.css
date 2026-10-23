@@ -236,3 +236,31 @@ details.live-warning > p { font-weight: normal; margin: 4px 0 0; }
 .approval-voice-label { margin: 0 0 6px; font-weight: 700; color: #7a4b00; }
 .approval-voice-phrase { margin: 0 0 8px; font-size: 22px; font-weight: 700; line-height: 1.4; color: #1d1d2b; }
 .approval-voice-note, .approval-voice-mic { margin: 0 0 6px; font-size: 13px; color: #7a7f99; }
+
+/* The audience window (docs/commercial-gap2.md): projector type, the scene
+   large, five steps per customer. Colour only means state
+   (docs/commercial-transaction-flow.md:224). */
+.show-open { margin: 0 0 6px; }
+.show-open span { margin-left: 8px; color: var(--muted); }
+body[data-page="show"] { font-size: 24px; margin: 0; }
+.show-top { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 12px 24px; border-bottom: 1px solid #44506a; }
+.show-top strong { font-size: 32px; }
+.show-network { color: var(--warn); }
+body[data-host="off"] .show-network { color: #c9a0ff; }
+.show-main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 20px; padding: 16px 24px; }
+.show-stage canvas { width: 100%; height: auto; aspect-ratio: 16 / 9; background: #10131a; border-radius: 6px; display: block; }
+.show-unity:empty { display: none; }
+.show-captions p { margin: 10px 0 0; font-size: 28px; }
+.show-card { border: 1px solid #44506a; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
+.show-card h2 { font-size: 28px; margin: 0 0 8px; color: var(--text); }
+.show-steps { list-style: none; margin: 0; padding: 0; }
+.show-step { display: grid; grid-template-columns: 4.5em 1fr; gap: 8px; padding: 8px 10px; border-left: 6px solid #44506a; margin: 6px 0; color: var(--muted); }
+.show-step b { white-space: nowrap; }
+.show-step[data-state="now"] { border-color: #f0a020; color: var(--text); background: rgba(240, 160, 32, 0.12); }
+.show-step[data-state="done"] { border-color: #3cb371; color: var(--text); }
+.show-step:last-child[data-state="done"] { border-color: #4a90e2; }
+.show-step[data-state="unknown"] { border-color: #9b6bd6; color: var(--text); }
+.show-step[data-state="fail"] { border-color: #d9534f; color: var(--text); }
+.show-step[data-state="off"] { opacity: 0.6; }
+.show-wait { color: var(--muted); }
+@media (max-width: 1100px) { .show-main { grid-template-columns: 1fr; } }

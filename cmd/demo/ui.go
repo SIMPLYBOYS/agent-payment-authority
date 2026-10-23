@@ -27,6 +27,7 @@ func pageHeaders(h http.Header, contentType string) {
 func (a *api) registerUI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", a.page("index.html"))
 	mux.HandleFunc("GET /host", a.page("host.html"))
+	mux.HandleFunc("GET /show", a.page("show.html")) // the audience window (docs/commercial-gap2.md): no token, no API
 	mux.HandleFunc("GET /api/host/status", a.hostStatus)
 	mux.HandleFunc("GET /ui/{name}", a.asset)
 	mux.HandleFunc("GET /unity/{name}", a.unityFile)

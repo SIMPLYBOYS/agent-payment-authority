@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>APA 展示畫面</title>
+<link rel="stylesheet" href="/ui/style.css">
+</head>
+<body data-page="show">
+<!-- The audience window (docs/commercial-gap2.md): the host page sends it
+     the scene and what each customer's slot has read; it holds no token
+     and calls no API. -->
+<header class="show-top">
+  <strong id="show-title">示範商店</strong>
+  <span id="show-network" class="show-network">等待主持人頁</span>
+</header>
+<main class="show-main">
+  <section class="show-stage">
+    <canvas id="unity-canvas" width="1280" height="720" aria-label="Unity 商店場景"></canvas>
+    <p id="unity-status" class="show-unity" data-state="loading">場景載入中…</p>
+    <div id="show-captions" class="show-captions" aria-live="polite"></div>
+  </section>
+  <aside id="show-customers" class="show-customers">
+    <p class="show-wait">等待主持人頁：請在主持人頁按「開啟展示視窗」。</p>
+  </aside>
+</main>
+<script type="module" src="/ui/show.js"></script>
+</body>
+</html>

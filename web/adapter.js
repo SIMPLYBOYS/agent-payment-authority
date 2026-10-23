@@ -1006,3 +1006,79 @@ export function runCard(run, runsError) {
 // (A2: the Signer's options in, the browser's credential out).
 export const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 export const unb64u = (s) => Uint8Array.from(atob(String(s).replace(/-/g, "+").replace(/_/g, "/") + "===".slice((String(s).length + 3) % 4)), (c) => c.charCodeAt(0));
+
+// ---- the audience window (docs/commercial-gap2.md): five steps in plain words ----
+
+export const SHOW_STEPS = ["委託", "選購", "核准", "付款", "交付"]; // GD2
+// PLAIN: a reason as the audience reads it; the codes stay on the host page.
+export const PLAIN = {
+  INSUFFICIENT_BUDGET: "超出預算", MERCHANT_NOT_ALLOWED: "不在允許的商店", ASSET_NOT_ALLOWED: "不是允許的幣別",
+  CREDENTIAL_INVALID: "憑證檢查沒通過", CREDENTIAL_REVOKED: "憑證已撤銷", CREDENTIAL_STATUS_UNAVAILABLE: "憑證狀態無法確認",
+  AUTHORIZATION_EXPIRED: "憑證已過期", CONFIG_MISSING: "缺少憑證", TASK_NOT_ACTIVE: "任務已結束", CONTRACT_VERSION_MISMATCH: "版本不符",
+  OWNERSHIP_MISMATCH: "不是這位客人的請購", PAYMENT_CAPABILITY_UNAVAILABLE: "這場展示不能付款", APPROVER_UNAVAILABLE: "沒有可核准的人",
+  VOICE_CHALLENGE_FAILED: "唸的內容或聲音不符",
+};
+export const plainReason = (code) => PLAIN[code] || "其他原因（主持人頁有細節）";
+export const usdc = (v) => (typeof v === "string" && /^[0-9]+$/.test(v) ? (Number(v) / 1e6).toFixed(2) + " USDC" : "金額未提供");
+const PAID = ["paying", "confirming", "paid", "delivered", "delivery_failed", "not_paid", "payment_review"];
+
+// showCustomer: one customer's five steps for the audience (state: todo,
+// now, done, fail, unknown, off) and the caption under the scene. Nothing
+// reads as done before the Store says so; an unknown result is unknown.
+// traits: the host's (authenticator: device | virtual).
+export function showCustomer(consumer, snapshot, delegation, traits = {}) {
+  const sc = scene(snapshot);
+  const task = snapshot && snapshot.task;
+  const p = task && sc.po ? (task.purchases || []).find((x) => x.purchase_order_id === sc.po) : null;
+  const pays = !!task && paysOn(task.payment_capability);
+  const steps = SHOW_STEPS.map((label) => ({ label, state: "todo", text: "" }));
+  const set = (i, state, text) => Object.assign(steps[i], { state, text });
+  const ph = sc.phase;
+  const d = delegation;
+  if (!task) set(0, "now", "等待開始");
+  else {
+    set(0, "done", d && d.task_budget ? "客人交代 Agent：預算 " + usdc(d.task_budget) + "，超過 " + usdc(d.allow_max) + " 要問本人" : "客人已交代 Agent 預算與範圍");
+    if (ph === "empty" || ph === "entered") set(1, "now", "Agent 正在挑選商品");
+    else set(1, "done", "Agent 選好商品，報價 " + usdc(p && p.amount));
+  }
+  const g = p && p.approval && p.approval.grant;
+  // approved: by the record's own method; a simulated approval is the host's, never the person's.
+  const approved = () => (!byDevice(p) ? "主持人代為核准（示範，不是本人）"
+    : approverText(traits.authenticator) + "核准了" + (g && g.voice === "verified" ? "，聲音也相符" : g && g.voice === "unavailable" ? "（語音無法使用，記為降級）" : ""));
+  let decided = false; // the approval step let the purchase through
+  if (sc.verdict === "Allow") { set(2, "done", "在委託範圍內，自動放行"); decided = true; }
+  else if (sc.verdict === "Deny") set(2, "fail", plainReason(sc.reason) + "，已拒絕");
+  else if (sc.verdict === "Ask") {
+    if (ph === "waiting") set(2, "now", "超過自動範圍，等本人核准");
+    else if (ph === "approved" || PAID.includes(ph)) { set(2, "done", approved()); decided = true; }
+    else if (ph === "approval_denied") set(2, "fail", p && p.closed_reason === "VOICE_CHALLENGE_FAILED" ? "唸的內容或聲音不符，已拒絕" : "本人拒絕了");
+    else if (ph === "expired") set(2, "fail", "核准期限已過");
+    else if (ph === "superseded") set(2, "fail", "報價改變，要重新選購");
+    else if (ph === "withdrawn") set(2, "fail", CREDENTIAL_CLOSED[p && p.closed_reason] || "已取消");
+    else set(2, "unknown", "結果未確認");
+  } else if (ph === "unknown") set(2, "unknown", "結果未確認");
+  if (steps[2].state === "fail") set(3, "off", "沒有付款（沒有花錢）");
+  else if (decided && !pays) { set(3, "off", "這場展示不付款"); set(4, "off", "付款後才交付"); }
+  else if (decided) {
+    if (ph === "allowed" || ph === "approved") set(3, "now", "準備付款");
+    else if (ph === "paying") set(3, "now", "預留預算中（第 1 筆鏈上交易）");
+    else if (ph === "confirming") set(3, "now", "已送出付款，等鏈上確認（第 2 筆）");
+    else if (ph === "not_paid") set(3, "fail", "沒有付款（沒有花錢）");
+    else if (ph === "payment_review") set(3, "unknown", "待人工處理：預算已預留，付款未完成");
+    else set(3, "done", "已付款：預留與付款，兩筆鏈上交易");
+    if (ph === "paid") set(4, "now", "付款完成，正在交付");
+    else if (ph === "delivered") set(4, "done", "已交付，附收據");
+    else if (ph === "delivery_failed") set(4, "fail", "已付款，交付失敗，待人工處理");
+  }
+  if (sc.end) {
+    const now = steps.find((s) => s.state === "now");
+    if (now) Object.assign(now, { state: "fail", text: sc.end === "cancelled" ? "任務已取消" : "任務逾時結束" });
+  }
+  const name = "客人 " + (CUSTOMER[consumer] || consumer);
+  const last = [...steps].reverse().find((s) => s.state !== "todo" && s.state !== "off") || steps[0];
+  return { consumer, name, steps, caption: name + "・" + last.label + "：" + last.text, amount: p ? usdc(p.amount) : "" };
+}
+
+// networkText: what the audience is told of the money, from the host's own capability.
+export const networkText = (cap) => (cap === "base_sepolia" ? "Base Sepolia 測試網路・測試 USDC（不是真錢）"
+  : cap === "local_anvil" ? "本機測試鏈・測試 USDC（不是真錢）" : "這場展示不付款");

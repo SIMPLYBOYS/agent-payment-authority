@@ -246,6 +246,11 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
         verdict: s.report.verdict, reason: s.report.reason };
       return { task: s.task, sent, report, shown: A.sameShown2(s.sent, s.report), motion: s.motion && { rule: s.motion.rule, text: s.motion.text, first: s.motion.first } };
     },
+    // snapshot: one consumer's last committed read (task and events), for the audience window.
+    snapshot(consumer) {
+      const s = slots.get(consumer);
+      return (s && s.task && s.st.snapshot) || null;
+    },
     // slots: every slot's state for the page, by consumer.
     slots() {
       return [...slots.values()].sort((a, b) => a.consumer.localeCompare(b.consumer)).map((s) => {
