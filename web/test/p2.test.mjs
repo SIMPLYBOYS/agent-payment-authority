@@ -78,7 +78,7 @@ test("P2: the scene follows the payment, and Unity is sent the same phase and it
     const m = A.projection({ snapshot: v, gen: 1 }, false);
     assert.equal(m.phase, phase);
     assert.equal(m.cause_seq, sc.cause, phase);
-    assert.ok(!/no payment capability/.test(A.shopLabel(m.phase, m.cause_seq, "", "")), phase);
+    assert.ok(!/不付款|不會付款/.test(A.shopLabel(m.phase, m.cause_seq, "", "")), phase);
   }
   assert.equal(A.scene(view(base, undefined)).phase, "allowed_unpaid");
   const pays = view(base, undefined);

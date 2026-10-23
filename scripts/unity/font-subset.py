@@ -10,6 +10,10 @@ LayoutTests fails on a character the font does not have.
 
 Needs fontTools (pip install fonttools). The full font is not kept in the
 repository; the subset and the licence are, under Assets/APA/Resources.
+The source used (Aaron approved the download, 10/23):
+    https://raw.githubusercontent.com/google/fonts/main/ofl/notosanstc/NotoSansTC%5Bwght%5D.ttf
+    Version 2.004, sha256 864727d210d54f2537bbe23b3a839436c3992af72de9322af5270897246bd44f
+    and OFL.txt beside it (copied to Resources/NotoSansTC-OFL.txt).
 """
 import argparse
 import glob
@@ -22,6 +26,9 @@ from fontTools.varLib import instancer
 ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "../.."))
 APA = os.path.join(ROOT, "unity/AgentPaymentAuthority/Assets/APA")
 OUT = os.path.join(APA, "Resources/NotoSansTC-APA.ttf")
+# CHARS: the characters the saved font maps, one string; the Unity tests read
+# it (Font.HasCharacter says yes to any character of a dynamic font).
+CHARS = os.path.join(APA, "Resources/NotoSansTC-APA-chars.txt")
 PUNCT = "，。、：；？！「」『』（）・…—～×　"
 
 
@@ -39,13 +46,22 @@ def main():
     a = ap.parse_args()
     font = TTFont(a.src)
     if "fvar" in font:
-        font = instancer.instantiateVariableFont(font, {"wght": 400})  # one static weight: Regular
+        font = instancer.instantiateVariableFont(font, {"wght": 400}, updateFontNames=True)  # one static weight: Regular
     text = characters()
-    sub = subset.Subsetter(subset.Options())
+    opts = subset.Options()
+    opts.name_IDs = ["*"]  # keep the licence description and URL (13, 14) in the file
+    sub = subset.Subsetter(opts)
     sub.populate(text=text)
     sub.subset(font)
+    cmap = font.getBestCmap()
+    missing = [c for c in text if ord(c) not in cmap]
+    if missing:
+        raise SystemExit("not in the source font: " + "".join(missing))
     font.save(OUT)
-    print(f"{OUT}: {len(text)} characters, {os.path.getsize(OUT)} bytes")
+    have = "".join(sorted(chr(c) for c in TTFont(OUT).getBestCmap() if c >= 0x20))
+    with open(CHARS, "w", encoding="utf-8") as f:
+        f.write(have + "\n")
+    print(f"{OUT}: {len(text)} characters, {os.path.getsize(OUT)} bytes; {CHARS}: {len(have)}")
 
 
 if __name__ == "__main__":

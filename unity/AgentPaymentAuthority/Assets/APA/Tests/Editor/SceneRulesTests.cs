@@ -10,7 +10,7 @@ using UnityEngine;
 public class SceneRulesTests
 {
     [Serializable] public class VMsg { public string phase; public int cause_seq; public string task_end; public int seq; public string reason; }
-    [Serializable] public class VStep { public VMsg m; public int rule; public bool browse; public string label; }
+    [Serializable] public class VStep { public VMsg m; public int rule; public bool browse; public string label; public int cause; public string end; }
     [Serializable] public class VCase { public string name; public VStep[] steps; }
     [Serializable] public class VFile { public VCase[] cases; }
 
@@ -34,6 +34,8 @@ public class SceneRulesTests
                 Assert.AreEqual(st.rule, s.Rule, c.name + " #" + st.m.seq + " rule");
                 Assert.AreEqual(st.browse, s.Browse, c.name + " #" + st.m.seq + " browse");
                 Assert.AreEqual(st.label, s.T.Label, c.name + " #" + st.m.seq + " label");
+                Assert.AreEqual(st.cause, s.T.Cause, c.name + " #" + st.m.seq + " cause"); // the label no longer shows it (gap review B3)
+                Assert.AreEqual(st.end, s.T.End, c.name + " #" + st.m.seq + " end");
                 steps++;
             }
         }
@@ -96,7 +98,7 @@ public class SceneRulesTests
             {
                 var l = SceneRules.Label(p, 3, end, "INSUFFICIENT_BUDGET");
                 LayoutTests.InFont(l);
-                StringAssert.DoesNotContain("已付款", l);
+                foreach (var paid in new[] { "已付款", "付款中", "付款已送出", "已交付" }) StringAssert.DoesNotContain(paid, l, "a decision never says a payment happened");
                 StringAssert.DoesNotContain("#", l, "no event number for the audience (gap review B3)");
                 StringAssert.DoesNotContain(ShopView.AnimMark, l, "an event's label is not a display segment: " + l);
             }

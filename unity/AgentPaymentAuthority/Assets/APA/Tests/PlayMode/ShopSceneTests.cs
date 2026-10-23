@@ -19,12 +19,13 @@ public class ShopSceneTests
         ",\"phase\":\"" + phase + "\",\"verdict\":\"\",\"reason\":\"\",\"animate\":" + (animate ? "true" : "false") + "}";
 
     // D2: with cause_seq and task_end (docs/demo-presentation-design.md 16.4).
-    static Font font;
+    static string chars;
+    // InFont: as LayoutTests.InFont, from the font's character list (Font.HasCharacter says yes to anything).
     static void InFont(string s)
     {
-        font = font ?? Resources.Load<Font>(ShopView.FontName);
-        Assert.NotNull(font, "the scene's font");
-        foreach (var ch in s ?? "") Assert.IsTrue(font.HasCharacter(ch), "not in the font: '" + ch + "' in " + s);
+        chars = chars ?? Resources.Load<TextAsset>(ShopView.FontName + "-chars")?.text;
+        Assert.NotNull(chars, "the font's character list");
+        foreach (var ch in s ?? "") Assert.IsTrue(chars.IndexOf(ch) >= 0, "not in the font: '" + ch + "' in " + s);
     }
 
     // B6: delivered from the counter, the customer goes by the delivery zone, then out.
@@ -322,7 +323,7 @@ public class ShopSceneTests
         yield return Arrive("consumer-a");
         float took = Time.realtimeSinceStartup - start;
         Assert.Less(took, len / (ShopView.Walk * 1.5f), "twice the walking speed over " + len + " units, took " + took);
-        Assert.AreEqual("在範圍內放行（這場不付款）", view.LabelOf("consumer-a"));
+        Assert.AreEqual("已放行，這筆不會付款", view.LabelOf("consumer-a"));
         Assert.AreEqual(new[] { "rendered:1:1:entered|task-a||", "rendered:1:4:allowed_unpaid|task-a||" }, Rendered().ToArray());
     }
 
@@ -503,7 +504,8 @@ public class ShopSceneTests
         bridge.Receive(Pay(8, "paid"));
         yield return Arrive("consumer-a");
         Assert.AreEqual(view.Point("consumer-a", ShopView.Pickup), view.PositionOf("consumer-a"), "paid: at the delivery zone");
-        Assert.AreEqual("已付款，到交付區取貨", view.LabelOf("consumer-a"));
+        Assert.AreEqual("已付款，在交付區等交付", view.LabelOf("consumer-a"));
+        Assert.AreEqual("right", view.FacingOf("consumer-a"), "at the delivery zone it faces it");
         bridge.Receive(Pay(10, "delivered"));
         yield return Arrive("consumer-a");
         Assert.AreEqual(view.Point("consumer-a", ShopView.Out), view.PositionOf("consumer-a"));

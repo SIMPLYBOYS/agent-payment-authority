@@ -355,13 +355,13 @@ export function shopLabel(phase, cause, end, reason) {
       const why = PLAIN[fixedCode(reason)] || "";
       return (why ? why + "，" : "") + "已拒絕，離店";
     }
-    case "allowed_unpaid": return "在範圍內放行（這場不付款）";
+    case "allowed_unpaid": return "已放行，這筆不會付款"; // also a simulated approval's (UNITY_PHASE)
     // Until a payment event: true whether or not a payment ever starts.
     case "allowed": return "在範圍內放行，尚未付款";
     case "approved": return "已核准，尚未付款";
     case "paying": return "付款中：預留預算";
     case "confirming": return "付款已送出，等鏈上確認";
-    case "paid": return "已付款，到交付區取貨";
+    case "paid": return "已付款，在交付區等交付";
     case "delivered": return "已交付，帶著收據離店";
     case "delivery_failed": return "已付款，交付失敗（待人工處理）";
     case "not_paid": return "沒有付款（沒有花錢），離店";
@@ -1016,7 +1016,7 @@ export const PLAIN = {
   CREDENTIAL_INVALID: "憑證檢查沒通過", CREDENTIAL_REVOKED: "憑證已撤銷", CREDENTIAL_STATUS_UNAVAILABLE: "憑證狀態無法確認",
   AUTHORIZATION_EXPIRED: "授權或報價已過期", CONFIG_MISSING: "缺少設定或憑證", TASK_NOT_ACTIVE: "任務已結束", CONTRACT_VERSION_MISMATCH: "版本不符",
   OWNERSHIP_MISMATCH: "不是這位客人的請購", PAYMENT_CAPABILITY_UNAVAILABLE: "這場展示不能付款", APPROVER_UNAVAILABLE: "沒有可核准的人",
-  VOICE_CHALLENGE_FAILED: "唸的內容或聲音不符",
+  VOICE_CHALLENGE_FAILED: "唸的內容或聲音不符", APPROVER_DENIED: "核准者拒絕",
 };
 export const plainReason = (code) => PLAIN[code] || "其他原因（主持人頁有細節）";
 // usdc: base units (6 decimals) as USDC, never rounded: at least two decimals, more when they matter.

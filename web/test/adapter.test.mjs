@@ -333,6 +333,8 @@ test("D2 transition: the shared vectors give the same rules and labels as Unity'
       assert.equal(tr.rule, st.rule, c.name + " #" + st.m.seq + " rule");
       assert.equal(tr.browse, st.browse, c.name + " #" + st.m.seq + " browse");
       assert.equal(tr.target.label, st.label, c.name + " #" + st.m.seq + " label");
+      assert.equal(tr.target.cause, st.cause, c.name + " #" + st.m.seq + " cause"); // the label no longer shows it (gap review B3)
+      assert.equal(tr.target.end, st.end, c.name + " #" + st.m.seq + " end");
       t = tr.target;
       steps++;
     }

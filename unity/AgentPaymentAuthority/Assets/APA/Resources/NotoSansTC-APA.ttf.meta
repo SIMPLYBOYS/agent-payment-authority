@@ -9,7 +9,7 @@ TrueTypeFontImporter:
   characterPadding: 1
   includeFontData: 1
   fontNames:
-  - Noto Sans TC Thin
+  - Noto Sans TC
   fallbackFontReferences: []
   customCharacters: 
   fontRenderingMode: 0

@@ -24,7 +24,7 @@ namespace APA
         public Vector2 pickup;         // the delivery zone (gap review B6): from bend up or down to pickupRow, along it, then to pickup
         public float pickupRow;        // 0: bend's own row
         public Prop[] props = new Prop[0];
-        public Note[] notes = new Note[0]; // zone labels; the delivery zone's says "after payment"
+        public Note[] notes = new Note[0]; // zone labels; the delivery zone's says 付款後才交付
 
         [System.Serializable] public class Prop { public string key; public float x, y; }
         [System.Serializable] public class Note { public string text; public float x, y; }
@@ -144,7 +144,7 @@ namespace APA
         }
 
         // One leg of a route: walk to a point, then wait there. seg names the
-        // label while on it: browse, counter (both [anim]) or final.
+        // label while on it: browse, counter (both （動畫）) or final.
         class Step { public Vector2 to; public int node; public string seg; public float pause; }
 
         class Customer
@@ -427,7 +427,7 @@ namespace APA
         {
             c.route = null;
             c.done = null;
-            c.seg = "final"; // a dropped walk's [anim] label goes too (review of d7070af)
+            c.seg = "final"; // a dropped walk's （動畫） label goes too (review of d7070af)
             c.target = new Target();
             c.from = c.to = Out;
             c.go.transform.localPosition = P(c.id, Out);
@@ -719,10 +719,12 @@ namespace APA
             done?.Invoke(c.gen);
         }
 
-        // Standing still faces down; at the counter it faces the counter.
+        // Standing still faces down; at the counter or the delivery zone it
+        // faces them (their props stand to the right in every room).
         void Idle(Customer c)
         {
-            bool atCounter = ((Vector2)c.go.transform.localPosition - P(c.id, Counter)).sqrMagnitude < 1e-4f;
+            var here = (Vector2)c.go.transform.localPosition;
+            bool atCounter = (here - P(c.id, Counter)).sqrMagnitude < 1e-4f || (here - P(c.id, Pickup)).sqrMagnitude < 1e-4f;
             c.facing = atCounter ? 0 : 3;
             c.body.sprite = atCounter ? c.idleRight : c.idleDown;
         }
@@ -745,7 +747,7 @@ namespace APA
         {
             var label = LabelNow(c);
             // UX1: with two customers the canvas keeps a display-only
-            // segment's [anim] mark and drops its explanation (the page's
+            // segment's （動畫） mark and drops its explanation (the page's
             // card says it), so a walking label does not cover the other.
             var shown = Multi && c.seg == "browse" ? Browsing : Multi && c.seg == "counter" ? ToCounter : label;
             c.tag.text = shown == "" ? c.name : c.name + "\n" + shown;

@@ -14,14 +14,17 @@ public class LayoutTests
     static List<(string name, Layout l)> All() =>
         Resources.LoadAll<TextAsset>("Layouts").Select(t => (t.name, JsonUtility.FromJson<Layout>(t.text))).ToList();
 
-    static Font font;
+    static string chars;
     // InFont: every character of a text the scene shows is in its font
-    // (GD3-B: a subset, scripts/unity/font-subset.py; a missing one draws nothing).
+    // (GD3-B: a subset, scripts/unity/font-subset.py; a missing one draws
+    // nothing). The script writes the characters the font maps beside it:
+    // Font.HasCharacter says yes to any character of a dynamic font.
     public static void InFont(string s)
     {
-        font = font ?? Resources.Load<Font>(ShopView.FontName);
-        Assert.NotNull(font, "the scene's font " + ShopView.FontName);
-        foreach (var ch in s ?? "") Assert.IsTrue(font.HasCharacter(ch), "not in the font: '" + ch + "' in " + s + " (run scripts/unity/font-subset.py)");
+        Assert.NotNull(Resources.Load<Font>(ShopView.FontName), "the scene's font " + ShopView.FontName);
+        chars = chars ?? Resources.Load<TextAsset>(ShopView.FontName + "-chars")?.text;
+        Assert.NotNull(chars, "the font's character list (scripts/unity/font-subset.py)");
+        foreach (var ch in s ?? "") Assert.IsTrue(chars.IndexOf(ch) >= 0, "not in the font: '" + ch + "' in " + s + " (run scripts/unity/font-subset.py)");
     }
 
     // Every character of the scene's scripts and rooms is in the font, so a
@@ -32,6 +35,7 @@ public class LayoutTests
         var files = Directory.GetFiles(Path.Combine(Application.dataPath, "APA/Scripts"), "*.cs").Concat(Directory.GetFiles(Path.Combine(Application.dataPath, "APA/Resources/Layouts"), "*.json")).ToList();
         Assert.IsNotEmpty(files);
         foreach (var f in files) InFont(new string(File.ReadAllText(f).Where(c => c > 0x7F).Distinct().ToArray()));
+        InFont(new string(Enumerable.Range(0x20, 0x5F).Select(i => (char)i).ToArray())); // printable ASCII too
     }
 
     [Test]
@@ -60,7 +64,7 @@ public class LayoutTests
             Assert.AreEqual(1.5f, l.aisle.x, name + " aisle (joined to the door row)");
             for (int i = 1; i < pts.Length; i++)
                 Assert.IsTrue(pts[i - 1].x == pts[i].x || pts[i - 1].y == pts[i].y, name + ": " + pts[i - 1] + " -> " + pts[i] + " is not horizontal or vertical");
-            foreach (var p in pts.Append(l.pickup)) Assert.IsTrue(p.x > 0f && p.x < 12f && p.y > 0f && p.y < 7f, name + ": " + p + " outside the room");
+            foreach (var p in pts.Append(l.pickup).Append(new Vector2(l.bend.x, l.pickupRow != 0f ? l.pickupRow : l.bend.y))) Assert.IsTrue(p.x > 0f && p.x < 12f && p.y > 0f && p.y < 7f, name + ": " + p + " outside the room");
             Assert.AreNotEqual(l.counter, l.pickup, name + ": the delivery zone is its own place (gap review B6)");
         }
     }

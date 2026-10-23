@@ -63,8 +63,8 @@ namespace APA
         public static string Paying(string payments) => payments == "local_anvil" || payments == "base_sepolia" ? payments : "";
 
         // The decisions at the counter. A payment's own phases (P2) stand at
-        // the counter too, but are not decisions: each of its steps has a new
-        // cause and is never a new purchase.
+        // the counter too until paid (then at the delivery zone), but are not
+        // decisions: each of its steps has a new cause and is never a new purchase.
         public static bool Counter(string phase) => phase == "waiting" || phase == "denied" || phase == "allowed_unpaid" || phase == "allowed" || phase == "approved";
         public static int Cause(int cause, int seq) => cause > 0 && cause <= seq ? cause : 0;
         public static string End(string end) => end == "cancelled" || end == "timed_out" ? end : "";
@@ -79,7 +79,7 @@ namespace APA
             return Kind(t.Phase, t.End) != Kind(phase, end) ? 3 : 4;
         }
 
-        // Browse: whether the move plays "[anim] browsing" at the shelf.
+        // Browse: whether the move plays "（動畫） browsing" at the shelf.
         public static bool Browse(Target t, int rule, string phase, int cause)
         {
             if (rule == 2) return true;
@@ -112,6 +112,7 @@ namespace APA
                 case "PAYMENT_CAPABILITY_UNAVAILABLE": return "這場展示不能付款";
                 case "APPROVER_UNAVAILABLE": return "沒有可核准的人";
                 case "VOICE_CHALLENGE_FAILED": return "唸的內容或聲音不符";
+                case "APPROVER_DENIED": return "核准者拒絕";
                 default: return "";
             }
         }
@@ -130,14 +131,15 @@ namespace APA
                 case "denied":
                     var why = Plain(reason);
                     return (why != "" ? why + "，" : "") + "已拒絕，離店";
-                case "allowed_unpaid": return "在範圍內放行（這場不付款）";
+                // allowed_unpaid is also where a simulated approval stands (the page's UNITY_PHASE): true of both.
+                case "allowed_unpaid": return "已放行，這筆不會付款";
                 // P2 (docs/commercial-p2-host.md 5). Until a payment event:
                 // true whether or not a payment ever starts.
                 case "allowed": return "在範圍內放行，尚未付款";
                 case "approved": return "已核准，尚未付款";
                 case "paying": return "付款中：預留預算";
                 case "confirming": return "付款已送出，等鏈上確認";
-                case "paid": return "已付款，到交付區取貨";
+                case "paid": return "已付款，在交付區等交付";
                 case "delivered": return "已交付，帶著收據離店";
                 case "delivery_failed": return "已付款，交付失敗（待人工處理）";
                 case "not_paid": return "沒有付款（沒有花錢），離店";
