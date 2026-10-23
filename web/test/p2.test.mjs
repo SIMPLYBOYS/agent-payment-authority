@@ -42,6 +42,8 @@ test("P2: in flight it is paying, then confirming; never paid before the chain",
 test("P2: an ending replaces the steps it cut off, with its code", () => {
   const review = card([...allowed(), ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED"), ev(6, "PAYMENT_NEEDS_REVIEW")], { status: "needs_review", state: "needs_review", code: "RESERVED_NOT_PAID" });
   assert.match(review.status, /^待人工處理：預算已預留，但付款沒有送出/);
+  const refused = card([...allowed(), ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED"), ev(6, "PAYMENT_NEEDS_REVIEW")], { status: "needs_review", state: "needs_review", code: "VERIFICATION_FAILED" });
+  assert.match(refused.status, /^待人工處理：商店回覆驗證未通過、沒有送出（商店的說法）/); // the shop's word, never "not paid"
   assert.deepEqual(labels(review), ["收尾:none", "預留:done", "待人工處理:done"]);
   const notPaid = card([...allowed(), ev(4, "PAYMENT_REQUESTED"), ev(5, "PAYMENT_NOT_SETTLED")], { status: "not_paid", state: "reserve_failed", code: "RESERVE_FAILED" });
   assert.equal(notPaid.status, "未付款：預算預留失敗，沒有花錢");
