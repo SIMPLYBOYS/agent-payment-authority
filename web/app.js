@@ -28,6 +28,7 @@
 import * as A from "./adapter.js";
 import { renderInspector, renderTimeline, renderSceneText, renderCard, renderEvidence } from "./render.js";
 import { UnityHost } from "./unity.js";
+import { attachZoom } from "./pixelscale.js";
 
 const $ = (id) => document.getElementById(id);
 const POLL_MS = 1000;   // a target, not a latency promise
@@ -815,4 +816,10 @@ fetch("/catalog", { cache: "no-store", credentials: "omit" }).then((r) => (r.ok 
 }).catch(() => {});
 
 forget();
+// The scene at whole multiples of its pixels, zoom on demand (pixelscale.js).
+{
+  const canvas = $("unity-canvas"), frame = canvas.parentElement, host = document.body.dataset.page === "host";
+  attachZoom({ canvas, frame, controls: $("scene-zoom"), key: "apa-zoom-" + (host ? "host" : "viewer"),
+    avail: () => ({ w: frame.parentElement.clientWidth, h: Math.max(320, innerHeight - (host ? 150 : 520)) }) });
+}
 unity.load();

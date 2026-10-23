@@ -45,7 +45,8 @@
       <label class="checker-pick">場次後的 checker 報告（JSON）<input id="checker-file" type="file" accept="application/json,.json"></label>
       <button id="checker-clear" type="button" hidden>移除報告</button>
       <span id="checker-note"></span></p>
-    <div class="canvas-frame"><canvas id="unity-canvas" width="960" height="640" aria-label="商店場景（Unity）：點選客人可選取"></canvas></div>
+    <div id="scene-zoom" class="zoom-controls"></div>
+    <div class="canvas-frame scene-frame"><canvas id="unity-canvas" width="960" height="640" aria-label="商店場景（Unity）：點選客人可選取"></canvas></div>
     <p id="unity-status" data-state="loading">Unity 場景載入中…</p>
     <p id="scene-cap" class="scene-cap" hidden></p>
     <ul id="scene-status" class="scene-status visually-hidden" aria-label="場景狀態" hidden></ul>

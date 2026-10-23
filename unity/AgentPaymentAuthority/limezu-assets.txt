@@ -34,3 +34,9 @@ cafe-table	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/2
 cafe-chair	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/24_Ice_Cream_Shop_Singles_32x32/Ice_Cream_Shop_Singles_32x32_76.png	-
 # UX3, Aaron 10/15 ("取貨櫃素材可以更換"): the Gym 114/115 pair read as a grey panel; the mart's parcel locker is the condominium mailbox bank.
 parcel-locker	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/26_Condominium_Singles_32x32/Condominium_Singles_32x32_82.png	-
+# Aaron 10/23 ("可以更像是咖啡店一點"): the cafe's own pieces, cut from the Kitchen and Living Room theme sheets and the animated cake fridge (first frame).
+espresso-machine	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/12_Kitchen_32x32.png	416,944,48,48
+pastry-case	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/12_Kitchen_32x32.png	128,1240,64,40
+wood-counter	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/12_Kitchen_32x32.png	160,1280,64,56
+plant	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/2_LivingRoom_32x32.png	336,16,32,72
+cake-fridge	Modern_Interiors_v41.4/3_Animated_objects/32x32/spritesheets/animated_canteen_fridge_cake_1_32x32.png	0,0,32,96

@@ -115,7 +115,7 @@ try {
     check(w + "x" + h + " " + what + ": no sideways scroll", !r.overflow);
     if (w >= 1000) {
       check(w + "x" + h + " " + what + ": the whole scene, both states and the starts in the first screen",
-        r.canvasShown > 0.98 && r.canvasW > 700 && r.states.length === 2 && r.states.every(Boolean) && r.starts.length >= 2 && r.starts.every(Boolean), JSON.stringify(r));
+        r.canvasShown > 0.98 && r.canvasW >= 480 && r.canvasW % 480 === 0 /* whole multiples of the scene's pixels (Aaron 10/23) */ && r.states.length === 2 && r.states.every(Boolean) && r.starts.length >= 2 && r.starts.every(Boolean), JSON.stringify(r));
     } else {
       check(w + "x" + h + " " + what + ": the scene first, full width", r.canvasTop < h / 3 && r.canvasShown > 0.98 && r.canvasW > w - 40, JSON.stringify(r));
     }
@@ -135,11 +135,11 @@ try {
     return loadFile();
   }
   // clickShop clicks a point of the shop (Unity units; the camera of
-  // ShopBuilder: centre 5.1, 4.1, half height 4.8), after a move as a hand would.
+  // ShopBuilder: centre 5, 4.5, half height 5), after a move as a hand would.
   async function clickShop(wx, wy) {
     const r = JSON.parse(await b.evaluate(`JSON.stringify(document.getElementById("unity-canvas").getBoundingClientRect())`));
-    const half = 4.8 * r.width / r.height;
-    const x = r.x + r.width * (wx - (5.1 - half)) / (2 * half), y = r.y + r.height * (4.1 + 4.8 - wy) / 9.6;
+    const half = 5 * r.width / r.height;
+    const x = r.x + r.width * (wx - (5 - half)) / (2 * half), y = r.y + r.height * (4.5 + 5 - wy) / 10;
     await b.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
     await sleep(200);
     for (const type of ["mousePressed", "mouseReleased"]) { await b.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: 1, clickCount: 1 }); await sleep(100); }

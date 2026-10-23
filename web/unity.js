@@ -43,6 +43,7 @@ export class UnityHost {
       window.createUnityInstance(this.canvas, {
         dataUrl: "/unity/WebGL.data", frameworkUrl: "/unity/WebGL.framework.js", codeUrl: "/unity/WebGL.wasm",
         companyName: "APA", productName: "AgentPaymentAuthority", productVersion: "1",
+        devicePixelRatio: 1, // drawn 1:1 at a whole multiple of its pixels; the browser scales it pixelated (pixelscale.js)
       }).then((inst) => { this.instance = inst; this.flush(); })
         .catch(() => this.onStatus("failed", "start"));
     };

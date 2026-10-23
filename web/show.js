@@ -6,6 +6,7 @@
 import { UnityHost } from "./unity.js";
 import * as A from "./adapter.js";
 import { listen } from "./showlink.js";
+import { attachZoom } from "./pixelscale.js";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -85,6 +86,7 @@ function render() {
     return card;
   }));
   if (owned) $("show-captions").replaceChildren(...shown.map((m) => el("p", "", m.caption)));
+  queueMicrotask(() => { zoom.apply(); place(); }); // the evidence below may have changed the room the scene has
   $("show-trust").replaceChildren(...shown.filter((m) => m.evidence.length).map((m) => {
     const row = el("div", "show-trust-row");
     row.dataset.consumer = m.consumer;
@@ -121,5 +123,22 @@ function render() {
     return card;
   }));
 }
+// The scene at whole multiples of its pixels (pixelscale.js): what fits above the caption and the evidence.
+const frame = document.querySelector(".show-frame");
+const zoom = attachZoom({ canvas: $("unity-canvas"), frame, controls: $("scene-zoom"), key: "apa-zoom-show",
+  avail: () => ({ w: frame.parentElement.clientWidth, h: innerHeight - frame.getBoundingClientRect().top - $("show-captions").offsetHeight - $("show-trust").offsetHeight - 24 }) });
+// place: the receipt over the scene when the scene is big enough (2× and up),
+// else in the side column; the side column never makes the row taller than the scene.
+function place() {
+  const big = Number($("unity-canvas").dataset.scale) >= 2;
+  const r = $("show-receipts"), side = document.querySelector(".show-side");
+  const want = big ? frame : side;
+  if (r.parentElement !== want) want.append(r);
+  r.classList.toggle("overlay", big);
+  side.style.maxHeight = document.querySelector(".show-stage").offsetHeight + "px";
+}
+addEventListener("resize", () => queueMicrotask(place));
+if (typeof ResizeObserver === "function") new ResizeObserver(() => queueMicrotask(place)).observe(document.documentElement);
+place();
 setInterval(render, 2000); // the host page's presence, even when nothing changes
 unity.load();

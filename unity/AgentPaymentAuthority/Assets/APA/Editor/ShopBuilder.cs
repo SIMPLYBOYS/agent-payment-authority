@@ -71,9 +71,11 @@ namespace APA.EditorTools
             cam.tag = "MainCamera";
             cam.orthographic = true;
             // UX1: the room fills the view (3:2): the sidewalk outside the door
-            // on the left, the wall at the top, nothing much beyond.
-            cam.orthographicSize = 4.8f;
-            cam.transform.position = new Vector3(5.1f, 4.1f, -10f);
+            // on the left, the wall at the top, nothing much beyond. Exactly
+            // 480 x 320 art pixels (32 a unit) with whole-pixel edges, so the
+            // page draws it at a whole multiple (web/pixelscale.js; Aaron 10/23).
+            cam.orthographicSize = 5f;
+            cam.transform.position = new Vector3(5f, 4.5f, -10f); // half a tile around the room on every side
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = new Color(0.12f, 0.12f, 0.16f);
 

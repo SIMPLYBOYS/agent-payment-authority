@@ -8,13 +8,16 @@ import * as A from "../adapter.js";
 
 // app.js runs in a page: a stub document, a fetch that never answers.
 const el = () => ({ textContent: "", hidden: true, dataset: {}, style: {}, classList: { add() {}, remove() {}, toggle() {} }, addEventListener() {}, append() {},
-  replaceChildren() {}, setAttribute() {}, querySelector: () => null, querySelectorAll: () => [] });
+  replaceChildren() {}, setAttribute() {}, querySelector: () => null, querySelectorAll: () => [], clientWidth: 1000,
+  get parentElement() { return el(); } });
 const els = {};
 globalThis.document = { getElementById: (id) => (els[id] ||= el()), querySelector: (s) => (els[s] ||= el()), querySelectorAll: () => [], addEventListener() {},
   dispatchEvent() {}, createElement: el, hidden: false, body: el(), head: el() };
 globalThis.window = { addEventListener() {}, location: { search: "", hash: "" } };
 globalThis.location = globalThis.window.location;
 globalThis.fetch = () => new Promise(() => {});
+globalThis.addEventListener = () => {};
+globalThis.innerHeight = 900;
 const app = await import("../app.js");
 const NOTE = "真實 Agent 即時展示：主持人按「開始」才會實際執行 Claude Code CLI；合成資料、不付款。商店場景只呈現 Store 已提交的狀態。";
 els["live-note"] = { ...el(), textContent: NOTE };

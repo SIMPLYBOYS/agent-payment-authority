@@ -58,7 +58,13 @@ button:disabled { opacity: 0.5; cursor: default; }
 .timeline li[data-ahead="1"] { opacity: 0.45; }
 .timeline li[data-ahead="1"] .event-head .type::after { content: "（回放尚未到此）"; color: var(--warn); font-weight: normal; }
 h2 { margin: 0 0 8px; font-size: 15px; color: var(--accent); }
-#unity-canvas { width: min(100%, calc((100vh - 520px) * 1.5)); min-width: min(100%, 480px); height: auto; aspect-ratio: 3 / 2; background: #000; display: block; margin: 0 auto; image-rendering: pixelated; }
+/* The scene's size is set by pixelscale.js: whole multiples of 480 x 320. */
+#unity-canvas { background: #000; display: block; image-rendering: pixelated; }
+.scene-frame { width: fit-content; max-width: 100%; margin: 0 auto; overflow: hidden; }
+.scene-frame[data-zoomed="true"] { overflow: auto; }
+.zoom-controls { display: flex; gap: 4px; align-items: center; justify-content: flex-end; margin: 0 0 4px; font-size: 13px; }
+.zoom-controls button { min-width: 2.2em; }
+.zoom-level { min-width: 5em; text-align: center; color: var(--muted); }
 #unity-status[data-state="failed"] { color: var(--err); font-weight: bold; }
 #unity-status[data-state="ready"], #unity-status[data-state="rendered"] { color: var(--ok); }
 .scene-label { font-weight: bold; margin: 6px 0 2px; }
@@ -86,7 +92,6 @@ h2 { margin: 0 0 8px; font-size: 15px; color: var(--accent); }
   .timeline-box { margin: 12px 12px 0; }
   .below { padding: 12px 12px 24px; }
   .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  #unity-canvas { width: 100%; min-width: 0; }
 }
 #creds[data-mode="file"] { color: var(--ok); }
 .readiness { border-collapse: collapse; margin: 6px 0; }
@@ -125,8 +130,7 @@ body[data-page="host"] .top #status { font-size: 13px; }
 .stage.ux > .side { grid-area: side; display: grid; gap: 12px; align-content: start; min-width: 0; }
 .stage.ux > .side > section, .stage.ux > .side > aside { background: var(--panel); border-radius: 6px; padding: 10px 12px; min-width: 0; }
 .stage.ux .card { grid-area: auto; }
-.canvas-frame { background: #000; border-radius: 4px; overflow: hidden; }
-body[data-page="host"] #unity-canvas { width: min(100%, calc((100vh - 150px) * 1.5)); min-width: 0; margin: 0 auto; }
+.canvas-frame { background: #000; border-radius: 4px; }
 body[data-page="host"] #unity-status, body[data-page="host"] .credit { font-size: 13px; margin: 4px 0 0; }
 body[data-page="host"] #scene-text .scene-label { margin-top: 4px; }
 .scene-cap, .view-note { color: #3a2a00; }
@@ -176,7 +180,6 @@ details.live-warning > p { font-weight: normal; margin: 4px 0 0; }
   .stage.ux { grid-template-columns: minmax(0, 1fr); grid-template-areas: "shop" "side"; padding: 8px 8px 0; }
   body[data-page="host"] .top { padding: 6px 8px; }
   body[data-page="host"] #current { display: none; }
-  body[data-page="host"] #unity-canvas { width: 100%; }
   .advanced { margin: 12px 8px 24px; }
   .host-bar { margin: 8px 8px 0; }
 }
@@ -242,26 +245,26 @@ details.live-warning > p { font-weight: normal; margin: 4px 0 0; }
    (docs/commercial-transaction-flow.md:224). */
 .show-open { margin: 0 0 6px; }
 .show-open span { margin-left: 8px; color: var(--muted); }
-body[data-page="show"] { font-size: 24px; margin: 0; }
+body[data-page="show"] { font-size: clamp(15px, 1.25vw, 24px); margin: 0; } /* 24 px at 1920 wide */
 .show-top { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 8px 24px; border-bottom: 1px solid #44506a; font-size: clamp(16px, 1.25vw, 24px); }
 .show-top strong { font-size: 1.3em; }
 .show-network { color: var(--warn); }
 body[data-host="off"] .show-network { color: #c9a0ff; }
 .show-main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 20px; padding: 10px 24px 8px; }
-/* An explicit width: Unity sizes its canvas to what it is shown at, so a
-   frame sized by the canvas would shrink with it. 76vh is about 51vh at
-   3:2, which leaves room below for the caption and the evidence. */
-.show-frame { position: relative; width: min(100%, 76vh); margin: 0 auto; }
-body[data-page="show"] #unity-canvas { display: block; width: 100%; min-width: 0; height: auto; aspect-ratio: 3 / 2; background: #10131a; border-radius: 6px; } /* over the index page's #unity-canvas */
-.show-receipts { position: absolute; top: 12px; right: 12px; display: grid; gap: 12px; max-width: 72%; }
+.show-frame { position: relative; }
+.show-stage { align-self: start; } /* its own height: the side column is capped to it (show.js place) */
+body[data-page="show"] #unity-canvas { background: #10131a; border-radius: 6px; }
+.show-receipts { display: grid; gap: 12px; margin-top: 12px; }
+.show-receipts.overlay { position: absolute; top: 12px; right: 12px; margin: 0; max-width: 62%; }
+.show-side { overflow-y: auto; align-self: start; }
 .show-receipt { background: rgba(21, 22, 28, 0.94); border: 2px solid #4a90e2; border-radius: 8px; padding: 8px 12px; font-size: clamp(15px, 1.25vw, 24px); } /* 24 px at 1920 wide; it stays inside the scene at 1280 */
 .show-receipt h3 { margin: 0 0 4px; font-size: 1.1em; color: #8fb8ff; }
 .show-receipt dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; }
 .show-receipt dt { color: var(--muted); }
 .show-receipt dd { margin: 0; }
-.show-trust { margin-top: 6px; }
+.show-trust { margin-top: 6px; grid-column: 1 / -1; } /* under both columns: the scene keeps its height */
 .show-trust-row h3 { margin: 4px 0; font-size: clamp(16px, 1.25vw, 24px); color: var(--accent); }
-.show-trust-row ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.show-trust-row ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 6px; }
 .show-trust-row li { border: 1px solid #44506a; border-radius: 6px; padding: 4px 10px; font-size: clamp(15px, 1.25vw, 24px); display: grid; } /* 24 px at 1920 wide */
 .show-trust-row li b { color: var(--ok); font-size: 0.85em; }
 .show-trust-row li small { color: var(--muted); font-size: 0.85em; }
@@ -269,7 +272,7 @@ body[data-page="show"] #unity-canvas { display: block; width: 100%; min-width: 0
 .show-unity:empty { display: none; }
 .show-captions p { margin: 4px 0 0; font-size: clamp(17px, 1.45vw, 28px); }
 .show-card { border: 1px solid #44506a; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
-.show-card h2 { font-size: 28px; margin: 0 0 8px; color: var(--text); }
+.show-card h2 { font-size: 1.15em; margin: 0 0 8px; color: var(--text); }
 .show-steps { list-style: none; margin: 0; padding: 0; }
 .show-step { display: grid; grid-template-columns: 4.5em 1fr; gap: 8px; padding: 8px 10px; border-left: 6px solid #44506a; margin: 6px 0; color: var(--muted); }
 .show-step b { white-space: nowrap; }

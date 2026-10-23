@@ -196,15 +196,24 @@ try {
     await s.evaluate(`document.getElementById("show-receipts").textContent`));
   await shot(s, "show-1920x1080-3-paid-synthetic", 1920, 1080);
   await shot(s, "show-1280x720-3-paid-synthetic", 1280, 720);
-  // The scene's size and the receipt inside it (review S3-1): the scene keeps its share; the card never leaves it.
-  const geo = await s.evaluate(`(() => { const c = document.getElementById("unity-canvas").getBoundingClientRect(), r = document.querySelector(".show-receipt").getBoundingClientRect();
-    return JSON.stringify({ w: c.width, inside: r.bottom <= c.bottom + 1 && r.right <= c.right + 1 && r.left >= c.left - 1 }); })()`);
-  check("at 1280×720 the scene is at least 540 px wide and the receipt card stays inside it", JSON.parse(geo).w >= 540 && JSON.parse(geo).inside, geo);
-  check("at 1280×720 nothing scrolls down (paid, with the evidence)", await s.evaluate(`document.documentElement.scrollHeight <= 720`), await s.evaluate(`String(document.documentElement.scrollHeight)`));
+  // The scene at a whole multiple of 480 x 320 art pixels (Aaron 10/23: never blurred; zoom on demand).
+  const geo = async () => JSON.parse(await s.evaluate(`(() => { const c = document.getElementById("unity-canvas").getBoundingClientRect();
+    return JSON.stringify({ w: c.width, h: c.height, scale: document.getElementById("unity-canvas").dataset.scale }); })()`));
+  const g720 = await geo();
+  check("at 1280×720 the scene is a whole multiple of 480×320", g720.w % 480 === 0 && g720.h === g720.w / 1.5 && g720.w === 480 * Number(g720.scale), JSON.stringify(g720));
+  const heights = `JSON.stringify({ page: document.documentElement.scrollHeight, ...Object.fromEntries([".show-top", ".show-stage", ".show-side", "#show-trust", "#scene-zoom", "#show-captions", ".show-frame", "#unity-canvas"].map((q) => {
+    const e = document.querySelector(q); return [q, e ? Math.round(e.getBoundingClientRect().top) + "+" + Math.round(e.getBoundingClientRect().height) + (e.style.maxHeight ? "/max " + e.style.maxHeight : "") : "-"]; })),
+    scale: document.getElementById("unity-canvas").dataset.scale, inner: innerWidth + "x" + innerHeight })`;
+  check("at 1280×720 nothing scrolls down (paid, with the evidence)", await s.evaluate(`document.documentElement.scrollHeight <= 720`), await s.evaluate(heights));
   check("at 1280×720 nothing scrolls sideways (paid)", await s.evaluate(`document.documentElement.scrollWidth <= 1280`));
   await s.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
   await sleep(500);
   check("at 1920×1080 nothing scrolls down (paid, with the evidence)", await s.evaluate(`document.documentElement.scrollHeight <= 1080`), await s.evaluate(`String(document.documentElement.scrollHeight)`));
+  const g1080 = await geo();
+  check("at 1920×1080 the scene is twice its pixels (960×640)", g1080.w === 960 && g1080.h === 640, JSON.stringify(g1080));
+  check("＋ zooms to 3× and the frame scrolls; 符合 goes back", await s.evaluate(`(() => { const b = [...document.querySelectorAll("#scene-zoom button")]; b[1].click();
+    const c = document.getElementById("unity-canvas"), f = document.querySelector(".show-frame"); const big = c.dataset.scale === "3" && f.dataset.zoomed === "true";
+    b[2].click(); return big && c.dataset.scale === "2" && f.dataset.zoomed === "false"; })()`));
   check("the flow ran to its end", true);
 } catch (e) {
   check("the flow ran to its end", false, String(e && e.stack || e).slice(0, 400));

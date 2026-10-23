@@ -294,3 +294,11 @@ test("the checker's report: read as data, shown only as it says", () => {
   assert.equal(A.parseChecker(JSON.stringify({ ...REPORT, verdict: ["PASS"] })).error, "總結果不明");
   assert.equal(A.parseChecker(JSON.stringify({ ...REPORT, claims: { ...REPORT.claims, E2: ["PASS"] } })).error, "E2 的結果不明");
 });
+
+test("the scene's whole multiples: the largest that fits, at most six; a phone gets the fraction that fits", async () => {
+  const { fitScale } = await import("../pixelscale.js");
+  assert.equal(fitScale(1250, 680), 2);
+  assert.equal(fitScale(800, 400), 1);
+  assert.equal(fitScale(360, 600), 0.75); // a phone: the fraction that fits, never cut off
+  assert.equal(fitScale(5000, 5000), 6);
+});
