@@ -182,7 +182,15 @@ try {
     await s.evaluate(`document.getElementById("show-receipts").textContent`));
   await shot(s, "show-1920x1080-3-paid-synthetic", 1920, 1080);
   await shot(s, "show-1280x720-3-paid-synthetic", 1280, 720);
+  // The scene's size and the receipt inside it (review S3-1): the scene keeps its share; the card never leaves it.
+  const geo = await s.evaluate(`(() => { const c = document.getElementById("unity-canvas").getBoundingClientRect(), r = document.querySelector(".show-receipt").getBoundingClientRect();
+    return JSON.stringify({ w: c.width, inside: r.bottom <= c.bottom + 1 && r.right <= c.right + 1 && r.left >= c.left - 1 }); })()`);
+  check("at 1280×720 the scene is at least 540 px wide and the receipt card stays inside it", JSON.parse(geo).w >= 540 && JSON.parse(geo).inside, geo);
+  check("at 1280×720 nothing scrolls down (paid, with the evidence)", await s.evaluate(`document.documentElement.scrollHeight <= 720`), await s.evaluate(`String(document.documentElement.scrollHeight)`));
   check("at 1280×720 nothing scrolls sideways (paid)", await s.evaluate(`document.documentElement.scrollWidth <= 1280`));
+  await s.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
+  await sleep(500);
+  check("at 1920×1080 nothing scrolls down (paid, with the evidence)", await s.evaluate(`document.documentElement.scrollHeight <= 1080`), await s.evaluate(`String(document.documentElement.scrollHeight)`));
   check("the flow ran to its end", true);
 } catch (e) {
   check("the flow ran to its end", false, String(e && e.stack || e).slice(0, 400));

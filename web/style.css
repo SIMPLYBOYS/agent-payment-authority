@@ -243,30 +243,31 @@ details.live-warning > p { font-weight: normal; margin: 4px 0 0; }
 .show-open { margin: 0 0 6px; }
 .show-open span { margin-left: 8px; color: var(--muted); }
 body[data-page="show"] { font-size: 24px; margin: 0; }
-.show-top { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 12px 24px; border-bottom: 1px solid #44506a; }
-.show-top strong { font-size: 32px; }
+.show-top { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 8px 24px; border-bottom: 1px solid #44506a; font-size: clamp(16px, 1.25vw, 24px); }
+.show-top strong { font-size: 1.3em; }
 .show-network { color: var(--warn); }
 body[data-host="off"] .show-network { color: #c9a0ff; }
-.show-main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 20px; padding: 16px 24px; }
+.show-main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 20px; padding: 10px 24px 8px; }
 /* An explicit width: Unity sizes its canvas to what it is shown at, so a
-   frame sized by the canvas would shrink with it. 93vh is 62vh at 3:2. */
-.show-frame { position: relative; width: min(100%, 93vh); margin: 0 auto; }
-.show-stage canvas { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; background: #10131a; border-radius: 6px; }
-.show-receipts { position: absolute; top: 12px; right: 12px; display: grid; gap: 12px; max-width: 60%; }
-.show-receipt { background: rgba(21, 22, 28, 0.94); border: 2px solid #4a90e2; border-radius: 8px; padding: 10px 14px; font-size: 20px; }
-.show-receipt h3 { margin: 0 0 6px; font-size: 24px; color: #8fb8ff; }
+   frame sized by the canvas would shrink with it. 76vh is about 51vh at
+   3:2, which leaves room below for the caption and the evidence. */
+.show-frame { position: relative; width: min(100%, 76vh); margin: 0 auto; }
+body[data-page="show"] #unity-canvas { display: block; width: 100%; min-width: 0; height: auto; aspect-ratio: 3 / 2; background: #10131a; border-radius: 6px; } /* over the index page's #unity-canvas */
+.show-receipts { position: absolute; top: 12px; right: 12px; display: grid; gap: 12px; max-width: 72%; }
+.show-receipt { background: rgba(21, 22, 28, 0.94); border: 2px solid #4a90e2; border-radius: 8px; padding: 8px 12px; font-size: clamp(15px, 1.25vw, 24px); } /* 24 px at 1920 wide; it stays inside the scene at 1280 */
+.show-receipt h3 { margin: 0 0 4px; font-size: 1.1em; color: #8fb8ff; }
 .show-receipt dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; }
 .show-receipt dt { color: var(--muted); }
 .show-receipt dd { margin: 0; }
-.show-trust { margin-top: 12px; }
-.show-trust-row h3 { margin: 8px 0 4px; font-size: 24px; color: var(--accent); }
-.show-trust-row ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
-.show-trust-row li { border: 1px solid #44506a; border-radius: 6px; padding: 6px 10px; font-size: 20px; display: grid; }
-.show-trust-row li b { color: var(--ok); font-size: 18px; }
-.show-trust-row li small { color: var(--muted); font-size: 16px; }
+.show-trust { margin-top: 6px; }
+.show-trust-row h3 { margin: 4px 0; font-size: clamp(16px, 1.25vw, 24px); color: var(--accent); }
+.show-trust-row ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.show-trust-row li { border: 1px solid #44506a; border-radius: 6px; padding: 4px 10px; font-size: clamp(15px, 1.25vw, 24px); display: grid; } /* 24 px at 1920 wide */
+.show-trust-row li b { color: var(--ok); font-size: 0.85em; }
+.show-trust-row li small { color: var(--muted); font-size: 0.85em; }
 .show-trust-row a, .show-receipt a { color: var(--accent); }
 .show-unity:empty { display: none; }
-.show-captions p { margin: 10px 0 0; font-size: 28px; }
+.show-captions p { margin: 4px 0 0; font-size: clamp(17px, 1.45vw, 28px); }
 .show-card { border: 1px solid #44506a; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
 .show-card h2 { font-size: 28px; margin: 0 0 8px; color: var(--text); }
 .show-steps { list-style: none; margin: 0; padding: 0; }
@@ -284,9 +285,9 @@ body[data-host="off"] .show-network { color: #c9a0ff; }
 .show-checker { margin-top: 12px; border: 1px solid #44506a; border-radius: 8px; padding: 8px 14px; }
 .show-checker h3 { margin: 0 0 4px; font-size: 24px; color: var(--accent); }
 .show-checker-sum { margin: 0 0 6px; font-size: 24px; }
-.show-checker ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 18px; }
-.show-checker li { display: grid; grid-template-columns: 7em 1fr; gap: 6px; border-left: 5px solid #44506a; padding-left: 6px; }
+.show-checker ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: clamp(14px, 1.15vw, 22px); }
+.show-checker li { display: grid; grid-template-columns: 6.5em 1fr; gap: 6px; border-left: 5px solid #44506a; padding-left: 6px; }
 .show-checker li[data-state="PASS"] { border-color: #3cb371; }
 .show-checker li[data-state="FAIL"] { border-color: #d9534f; }
 .show-checker li[data-state="INCONCLUSIVE"] { border-color: #9b6bd6; }
-.show-checker-by { margin: 6px 0 0; color: var(--muted); font-size: 16px; }
+.show-checker-by { margin: 6px 0 0; color: var(--muted); font-size: 20px; }

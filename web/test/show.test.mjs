@@ -231,6 +231,8 @@ test("why trustworthy: each item only what a record says, links only on a public
   const sim = A.showEvidence(snap([...base("Ask", "HUMAN_APPROVAL_REQUIRED"), ev4()], { purchase: { approval: { state: "approved", resolved_by: "sim-approver-a" } } }), {});
   assert.equal(sim.at(-1).text, "主持人代為核准（示範，不是本人）");
   assert.equal(A.txLink("base_sepolia", "0x12").text, "交易編號未提供");
+  const same = A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { purchase: { ...p, payment: { ...delivered, settle_tx: TX1 } } }), {});
+  assert.match(same[4].note, /未確認/); // "not one" only when the two hashes differ
 });
 const ev4 = () => ev(4, "APPROVED", { authorization_method: "simulated" });
 
@@ -240,8 +242,8 @@ test("the receipt card: only once delivered with a receipt; two transactions, no
   const r = A.showReceipt(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { purchase: p }), {});
   const rows = Object.fromEntries(r.rows.map((x) => [x.label, x]));
   assert.equal(rows["商品"].text, "韓國市場簡報");
-  assert.equal(rows["金額"].text, "0.50 USDC（測試 USDC）");
-  assert.equal(rows["網路"].text, "Base Sepolia 測試網路・測試 USDC（不是真錢）");
+  assert.equal(rows["金額"].text, "0.50 USDC（測試幣）");
+  assert.equal(rows["網路"].text, "Base Sepolia 測試網路");
   assert.equal(rows["核准"].text, "在委託範圍內，自動放行");
   assert.equal(rows["付款"].href, "https://sepolia.basescan.org/tx/" + TX2);
   assert.equal(rows["兩筆交易"].text, "不是同一筆，也不是一次完成");
@@ -258,9 +260,9 @@ const REPORT = { checker: { name: "verify-demo", version: "0.4.0", build: "x" },
 
 test("the checker's report: read as data, shown only as it says", () => {
   const { report } = A.parseChecker(JSON.stringify(REPORT));
-  assert.deepEqual(Object.keys(report), ["run_id", "verdict", "claims", "checker", "not_evaluated", "fooled"]); // nothing else of the file goes on
+  assert.deepEqual(Object.keys(report), ["run_id", "verdict", "claims", "checker", "not_evaluated", "fooled", "findings"]); // nothing else of the file goes on
   const c = A.showChecker(report);
-  assert.equal(c.title, "獨立驗證：證據包 e1a-20261023T011857Z-ace831");
+  assert.equal(c.title, "獨立驗證：證據包 e1a-20261023T011857Z-ace831 的結果（不一定是畫面上這一場）");
   assert.equal(c.summary, "逐項檢查，全部通過");
   assert.equal(c.items.length, 10);
   assert.equal(c.items[3].label, "兩筆鏈上交易與 ZK 預算證明（向鏈查證）");
@@ -280,5 +282,15 @@ test("the checker's report: read as data, shown only as it says", () => {
   const inj = (f) => A.showChecker(A.parseChecker(JSON.stringify({ ...REPORT, injections: [{ task_id: "t", case: "c", fooled: f, requested: [] }] })).report).injection;
   assert.equal(inj(false), "商店誘導文字的測試：模型沒有被騙（有沒有多付錢見 E8）");
   assert.equal(inj(true), "商店誘導文字的測試：模型被騙了 1 次（有沒有多付錢見 E8）");
-  assert.equal(c.injection, "");
+  assert.equal(c.injection, "這個證據包沒有商店誘導文字的測試"); // E10 passes with no injection run: nothing reads as recorded
+  assert.equal(c.items[9].label, "商店誘導文字的測試");
+  // Only every claim PASS is all passed (review S3-5); a run without --rpc says why it could not tell.
+  const ne = A.showChecker(A.parseChecker(JSON.stringify({ ...REPORT, claims: { ...REPORT.claims, E4: "NOT_EVALUATED" } })).report);
+  assert.equal(ne.summary, "有 1 項未評估（主持人頁有細節）");
+  const norpc = A.parseChecker(JSON.stringify({ ...REPORT, verdict: "INCONCLUSIVE", claims: { ...REPORT.claims, E4: "INCONCLUSIVE", E8: "INCONCLUSIVE" },
+    findings: [{ claim: "E4", verdict: "INCONCLUSIVE", reason: "no --rpc: the transactions were not read" }, { claim: "E8", verdict: "INCONCLUSIVE", reason: "no --rpc: no chain scan" }, { claim: "E1", verdict: "PASS", reason: "x" }] })).report;
+  assert.deepEqual(norpc.findings.map((f) => f.claim + f.noChain), ["E4true", "E8true"]);
+  assert.equal(A.showChecker(norpc).items[3].text, "無法判定（沒有向鏈查詢）");
+  assert.equal(A.parseChecker(JSON.stringify({ ...REPORT, verdict: ["PASS"] })).error, "總結果不明");
+  assert.equal(A.parseChecker(JSON.stringify({ ...REPORT, claims: { ...REPORT.claims, E2: ["PASS"] } })).error, "E2 的結果不明");
 });

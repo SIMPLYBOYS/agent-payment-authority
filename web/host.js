@@ -93,6 +93,7 @@ const creds = createHostCreds({ call, onChange: render });
 // checker (GD4-A): the report of `verify-demo --mode e1a` the host chose after
 // the show, kept in this page's memory only and shown in the audience window.
 let checker = null;
+let checkerGen = -1; // new credentials drop the report: it may be of another show
 const relay = createRelay((kind, d) => {
   if (kind === "rendered2") scene.rendered(d);
   else if (kind === "select2") pick(d);
@@ -137,21 +138,31 @@ function restartScene() {
 // payment and approval traits and each slot's read (task and events, no token).
 function publishView() {
   if (sceneUnity.target !== relay) return;
+  if (checker && checkerGen !== creds.gen) { setChecker(null); return; }
   const st = (lastReady && lastReady.status) || {};
   const ha = st.human_approval;
   relay.view({ payments: A.paysOn(st.payment_capability) ? st.payment_capability : "", authenticator: (ha && ha.sources && ha.sources.authenticator) || "",
-    venue: venue || "", checker, customers: scene.slots().map((s) => ({ consumer: s.consumer, snapshot: scene.snapshot(s.consumer), delegation: delegationOf(s.task) })) });
+    venue: venue || "", checker: checker && { ...checker, findings: checker.findings.map(({ claim, verdict, noChain }) => ({ claim, verdict, noChain })) }, customers: scene.slots().map((s) => ({ consumer: s.consumer, snapshot: scene.snapshot(s.consumer), delegation: delegationOf(s.task) })) });
 }
 $("checker-file").addEventListener("change", async (ev) => {
   const f = ev.target.files && ev.target.files[0];
   if (!f) return;
-  const r = f.size > 1 << 20 ? { error: "檔案太大" } : A.parseChecker(await f.text());
+  let r;
+  try { r = f.size > 1 << 20 ? { error: "檔案太大" } : A.parseChecker(await f.text()); } catch { r = { error: "讀不到檔案" }; }
   ev.target.value = "";
   if (r.error) { $("checker-note").textContent = "沒有載入：" + r.error; return; }
-  checker = r.report;
-  $("checker-note").textContent = "已載入：證據包 " + checker.run_id + "，總結果 " + checker.verdict + "（只在這一頁的記憶體，不寫任何檔案）";
-  publishView();
+  setChecker(r.report);
 });
+$("checker-clear").addEventListener("click", () => setChecker(null));
+// setChecker: the report shown (null: none); the findings' reasons are this page's only.
+function setChecker(r) {
+  checker = r;
+  checkerGen = creds.gen;
+  $("checker-clear").hidden = !r;
+  $("checker-note").textContent = !r ? "" : "已載入：證據包 " + r.run_id + "，總結果 " + r.verdict + "（只在這一頁的記憶體，不寫任何檔案）"
+    + r.findings.map((x) => "；" + x.claim + " " + x.verdict + (x.reason ? "：" + x.reason : "")).join("");
+  publishView();
+}
 // delegationOf: the delegation of a task's run's scenario (the catalog's), or null.
 function delegationOf(task) {
   const r = lastRuns && lastRuns.gen === creds.gen && (lastRuns.runs || []).find((x) => x.task_id === task);

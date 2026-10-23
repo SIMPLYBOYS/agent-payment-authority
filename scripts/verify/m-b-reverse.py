@@ -487,6 +487,14 @@ ITEMS = [
      [("web/adapter.js", 'const summary = r.verdict === "PASS" && !off.length ? "逐項檢查，全部通過"', 'const summary = true ? "逐項檢查，全部通過"')]),
     ("Gap2 S3: a fooled model reads as not fooled", node("web/test/show.test.mjs", "the checker's report: read as data, shown only as it says", r"被騙了"),
      [("web/adapter.js", 'n ? "商店誘導文字的測試：模型被騙了 "', 'false ? "商店誘導文字的測試：模型被騙了 "')]),
+    ("Gap2 S3 review: a pack with no injection run reads as recorded", node("web/test/show.test.mjs", "the checker's report: read as data, shown only as it says", r"沒有商店誘導文字"),
+     [("web/adapter.js", 'const injection = !(r.fooled || []).length ? "這個證據包沒有商店誘導文字的測試"', 'const injection = !(r.fooled || []).length ? ""')]),
+    ("Gap2 S3 review: a claim not evaluated reads as all passed", node("web/test/show.test.mjs", "the checker's report: read as data, shown only as it says", r"未評估"),
+     [("web/adapter.js", 'const off = items.filter((x) => x.state !== "PASS");', 'const off = items.filter((x) => x.state !== "PASS" && x.state !== "NOT_EVALUATED");')]),
+    ("Gap2 S3 review: a report without --rpc does not say why", node("web/test/show.test.mjs", "the checker's report: read as data, shown only as it says", r"沒有向鏈查詢"),
+     [("web/adapter.js", 'r.claims[id] !== "PASS" && noChain.has(id) ? "（沒有向鏈查詢）"', 'false ? "（沒有向鏈查詢）"')]),
+    ("Gap2 S2 review: one hash twice reads as two transactions", node("web/test/show.test.mjs", "why trustworthy: each item only what a record says, links only on a public testnet", r"未確認"),
+     [("web/adapter.js", 'note: pv.settle_tx !== pv.reserve_tx ? "第 2 筆鏈上交易，和第 1 筆不是同一筆"', 'note: true ? "第 2 筆鏈上交易，和第 1 筆不是同一筆"')]),
 ]
 
 ITEM_TIMEOUT = 900
