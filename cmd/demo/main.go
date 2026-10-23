@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/config"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
@@ -418,6 +419,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: runner != nil && !live, out: d.out, payCap: payCap}
 	if pay != nil {
 		ui.payContract = pay.cfg.BudgetContract
+		ui.relayer, _ = pay.relayer.(*budget.Client)
 	}
 	if pay != nil {
 		var wallets []eth.Address

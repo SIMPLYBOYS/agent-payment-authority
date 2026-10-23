@@ -61,7 +61,9 @@ test("the three sources are named apart", () => {
   assert.equal(AP.sourceText({ agent: "fake", authenticator: "virtual", payment: "disabled" }), "Agent：fake・驗證器：virtual authenticator（測試用）・付款：未啟用");
   assert.match(AP.sourceText({ agent: "fake", authenticator: "device", payment: "disabled" }), /已登記的裝置/);
   assert.match(AP.sourceText({ agent: "live", authenticator: "device", payment: "local_anvil" }), /^Agent：真實 Agent（live CLI）・/); // E1-a, seen as "?" in the rehearsal
-  assert.match(AP.sourceText({ agent: "other" }), /^Agent：\?/);
+  assert.equal(AP.sourceText({ agent: "other" }), "Agent：未回報・驗證器：已登記的裝置・付款：未回報"); // gap review B5: no "?"
+  assert.equal(AP.sourceText(undefined), "來源讀取中");
+  assert.equal(AP.codeText(""), "未通過（未回報代碼）");
 });
 
 // Review R4/R5: a decided record is worded by its own method, whatever the
@@ -140,6 +142,8 @@ test("a decided record's tag follows the record; a closed session's attempt text
   assert.deepEqual(AP.recordTag(rec("approved", "sim-approver-a"), "device")[0], "模擬核准");
   assert.ok(!AP.recordTag(rec("approved", "sim-approver-a"), "device")[1].includes("裝置"));
   assert.equal(AP.recordTag(rec("approved", "webauthn:approver-a"), "simulated")[0], "本人核准");
+  assert.match(AP.recordTag(rec("approved", "webauthn:approver-a"), "simulated")[1], /付款：未啟用$/);
+  assert.match(AP.recordTag({ ...rec("approved", "webauthn:approver-a"), payment: { state: "settled" } }, "simulated")[1], /付款：見請購卡片$/); // gap review B4
   assert.equal(AP.recordTag(rec("approved", "webauthn:approver-a"), "device"), null);
   assert.equal(AP.recordTag(rec("pending", undefined), "device"), null);
   assert.equal(AP.recordTag(rec("expired", undefined), "simulated"), null);

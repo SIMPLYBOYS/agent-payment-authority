@@ -269,9 +269,11 @@ async function pollReadiness() {
         A.setApprovalMode(r.status && r.status.human_approval ? "webauthn" : "simulated");
         const scs = (r.status && r.status.runs && r.status.runs.scenarios) || [];
         const credential = scs.some((x) => x.contract === A.V2); // C2: a BBS+ credential catalog
-        const p1a = r.status && r.status.human_approval ? { record: "fake_a2", credential }
+        const payments = r.status && r.status.payment_capability;
+        const p1a = r.status && r.status.human_approval ? { record: "fake_a2", credential, payments }
           : scs.some((x) => A.isPay(x.contract)) ? { record: "fake_p1a", credential } : null;
-        if (r.status) confirmMode(mseq, r.status.history && r.status.history.record === "live_history" ? r.status.history : r.status.live && r.status.live.record === "live_demo" ? r.status.live : p1a);
+        if (r.status) confirmMode(mseq, r.status.history && r.status.history.record === "live_history" ? r.status.history
+          : r.status.live && r.status.live.record === "live_demo" ? { ...r.status.live, payments, credential } : p1a);
         renderReadiness();
         renderControl();
         ensureScene();
@@ -331,6 +333,7 @@ function renderReadiness() {
         : "本機 anvil（P2-a：測試金鑰、測試 USDC；不是 testnet）"]);
       rows.push(A.reconciliationRow(lastReady.reconciliation));
     } else rows.push(["付款", "off", "無付款能力"]);
+    rows.push(...A.serviceRows(st.services)); // gap review C2: the Signer, its voice service, the relayer
     // The binary's own record of its source (docs/cli-poc.md 56): a dirty
     // build is shown as such (Go counts untracked files as modified too).
     const bi = st.build || {};
@@ -531,6 +534,10 @@ function renderControl() {
   renderVenues(vs);
   const live = !!(lastReady && lastReady.status && lastReady.status.live);
   $("live-warning").hidden = !live;
+  for (const x of $("live-warning").querySelectorAll("summary, p")) {
+    if (!x.dataset.plain) x.dataset.plain = x.textContent;
+    x.textContent = live && payingNow() ? x.dataset.plain.replace(/合成資料[・、]不付款/, "委託是模擬・付款以測試 USDC 實際進行") : x.dataset.plain;
+  }
   const runs = (lastRuns && lastRuns.gen === creds.gen && lastRuns.runs) || [];
   // M-B: one running or stopping run per consumer, at most max_runs in all
   // (a deployment setting; the server decides again).
@@ -565,9 +572,9 @@ function renderControl() {
     keepFocus(pick, () => pick.replaceChildren(...models.map((m) => agentCard(m, scenarios.filter((x) => x.consumer_id === m.c), { live, busy, full, simC }))));
   }
   const pay = scenarios.some((x) => A.isPay(x.contract));
-  const paying = A.paysOn(lastReady && lastReady.status && lastReady.status.payment_capability);
   $("control-note").textContent = !pay ? "M1 無核准能力：Ask 30 秒後由後端記錄到期。開始只建立新的 task。"
-    : paying ? "委託是 fake 模擬：主持人扮演客人確認委託（不是本人驗證）。Ask 由本人以已登記的裝置核准；Allow 與本人核准的請購由 Host 付款（" + A.PAYING[lastReady.status.payment_capability] + "、測試 USDC）。開始只建立新的 task。"
+    : payingNow() ? "委託是 fake 模擬：主持人扮演客人確認委託（不是本人驗證）。Ask 由本人以已登記的裝置核准；Allow 與本人核准的請購由 Host 付款（" + A.PAYING[lastReady.status.payment_capability] + "、測試 USDC）。開始只建立新的 task。"
+    : humanNow() ? "委託是 fake 模擬：主持人扮演客人確認委託（不是本人驗證）。Ask 由本人以已登記的裝置核准；未啟用付款。開始只建立新的 task。"
     : "委託與核准是 fake 模擬：主持人扮演客人，不是本人驗證；核准只留下模擬授權，未啟用付款。開始只建立新的 task。";
   const chip = $("sim-chip");
   chip.hidden = !simC;
@@ -738,8 +745,7 @@ function agentCard(m, scs, { live, busy, full, simC }) {
   card.append(acts);
   if (simC === m.c) {
     // The role play is the delegation's confirmation; on a paying host the payment is real.
-    const paying = A.paysOn(lastReady && lastReady.status && lastReady.status.payment_capability);
-    card.append(el("p", "agent-sim-on", "模擬中：主持人扮演客人 " + short(m.c) + (paying ? " 確認委託（不是本人驗證；付款仍由 Host 實際進行）" : "（不是本人驗證；不會付款）")));
+    card.append(el("p", "agent-sim-on", "模擬中：主持人扮演客人 " + short(m.c) + (payingNow() ? " 確認委託（不是本人驗證；付款仍由 Host 實際進行）" : "（不是本人驗證；不會付款）")));
   }
   const open = delegating && delegating.consumer === m.c && payScs.find((sc) => sc.id === delegating.scenario);
   if (open) card.append(delegationBox(open, { busy, full, simC }));
@@ -804,7 +810,8 @@ function renderNext(runs) {
   if (run) {
     if (run.live === "running") text = "可用操作：停止 Agent（只停這一場）";
     else if (run.live === "stopping") text = "停止中：等待程序結束（仍占名額）";
-    else if (cancellable(run)) text = A.isPay(run.contract_version) ? "可用操作：在「需要你處理」核准或拒絕（模擬）；或取消請購／task。不會付款。"
+    else if (cancellable(run)) text = A.isPay(run.contract_version) ? "可用操作：在「需要你處理」核准或拒絕（" + (humanNow() ? "本人以已登記的裝置" : "模擬") + "）；或取消請購／task。"
+      + (payingNow() ? "放行與核准的請購由 Host 付款（測試 USDC）。" : "不會付款。")
       : "可用操作：取消請購／task。M1 沒有核准功能，Ask 不會付款，到期後由後端記錄。";
     else if (lastTasks && lastTasks.gen === creds.gen && lastTasks.list && lastTasks.list.get(run.task_id)) text = "沒有可用操作：task 已收尾。";
     else text = "task 狀態讀取中（未確認）";
@@ -857,15 +864,20 @@ async function start(sc, delegationId) {
 // ---- P1-a: the simulated customer, the delegation and the approval ----
 
 const focusIn = (sel) => { const x = document.querySelector(sel); if (x && !x.disabled) x.focus(); };
-const units = (a) => (typeof a === "string" && /^[0-9]+$/.test(a) ? (Number(a) / 1e6).toFixed(2) : "?"); // fixture-usdc: 6 decimals
+const units = (a) => (typeof a === "string" && /^[0-9]+$/.test(a) ? (Number(a) / 1e6).toFixed(2) : "（金額未提供）"); // fixture-usdc: 6 decimals
+// payingNow, humanNow: the host pays (P2), the person approves by device (A2), by its own status.
+const payingNow = () => A.paysOn(lastReady && lastReady.status && lastReady.status.payment_capability);
+const humanNow = () => !!(lastReady && lastReady.status && lastReady.status.human_approval);
 // network names the chain by the host's own payment capability: the
 // testnet only when the host pays on it (a local anvil also runs as 84532).
 const network = (id) => {
   const cap = lastReady && lastReady.status && lastReady.status.payment_capability;
   return cap === "base_sepolia" ? "Base Sepolia testnet（" + id + "）" : cap === "local_anvil" ? "本機 anvil（chain " + id + "）" : "chain " + id + "（不付款）";
 };
-const addr = (x) => (typeof x === "string" && x.length > 12 ? x.slice(0, 6) + "…" + x.slice(-4) : String(x || "?"));
-const clock = (sec) => (typeof sec === "number" ? new Date(sec * 1000).toLocaleTimeString("zh-TW", { hour12: false }) : "?");
+const addr = (x) => (typeof x === "string" && x.length > 12 ? x.slice(0, 6) + "…" + x.slice(-4) : String(x || "（未提供）"));
+// productOf: the item's name from its resource URL's last segment.
+const productOf = (p) => { try { return new URL(p.resource_url).pathname.split("/").pop() || "（未命名）"; } catch { return "（未命名）"; } };
+const clock = (sec) => (typeof sec === "number" ? new Date(sec * 1000).toLocaleTimeString("zh-TW", { hour12: false }) : "（時間未提供）");
 
 // simDelegationOnly: the simulated customer may confirm delegations only
 // (E1-a: a live host that pays); its approvals are never read.
@@ -906,12 +918,13 @@ function delegationBox(sc, { busy, full, simC }) {
   box.append(el("p", "delegation-title", "委託內容（主持人設定，客人確認）"));
   const dl = el("dl", "delegation-rows");
   for (const [k, v] of [["需求", d.purpose], ["商家範圍", (d.merchants || []).map(addr).join("、") + "（示意商店）"],
-    ["資產與網路", "test USDC（" + (d.asset_id || "?") + "）· " + network(d.chain_id || "84532")], ["任務預算", units(d.task_budget) + " test USDC"],
-    ["自動範圍", "超過 " + units(d.allow_max) + " 一律要你核准"], ["核准期限", (d.approval_deadline_seconds || "?") + " 秒（後端時間為準）"],
+    ["資產與網路", "test USDC" + (d.asset_id ? "（" + d.asset_id + "）" : "") + " · " + network(d.chain_id || "84532")], ["任務預算", units(d.task_budget) + " test USDC"],
+    ["自動範圍", "超過 " + units(d.allow_max) + " 一律要你核准"], ["核准期限", (d.approval_deadline_seconds ? d.approval_deadline_seconds + " 秒（後端時間為準）" : "依後端設定")],
     ["委託有效", Math.round((d.valid_seconds || 0) / 60) + " 分鐘內開始"]]) {
     dl.append(el("dt", "", k), el("dd", "", String(v)));
   }
-  box.append(dl, el("p", "delegation-note", "委託不是付款核准：每一筆超過範圍的請購仍要你單筆核准。這是 fake 模擬，不會付款。"));
+  box.append(dl, el("p", "delegation-note", "委託不是付款核准：每一筆超過範圍的請購仍要你單筆核准。"
+    + (payingNow() ? "委託確認是 fake 模擬（主持人扮演客人）；範圍內與你核准的請購由 Host 實際付款（測試 USDC）。" : "這是 fake 模擬，不會付款。")));
   const yes = el("button", "delegation-confirm", "確認委託並開始（模擬）");
   yes.type = "button";
   yes.dataset.scenario = sc.id;
@@ -1028,7 +1041,7 @@ function renderApproval(runs) {
     head.append(el("h3", "", pending ? "核准這一筆付款？" : res ? res[1] : ap.state),
       el("p", "", pending ? "客人 " + short(item.consumer_id) + " 的 Agent 想買下面這一項。你只核准這一筆，不是之後所有付款。" : res ? res[2] : ""));
     parts.push(head);
-    const product = (() => { try { return new URL(p.resource_url).pathname.split("/").pop() || "?"; } catch { return "?"; } })();
+    const product = productOf(p);
     const it = el("div", "approval-item");
     const amt = el("p", "approval-amount");
     amt.append(el("b", "", units(p.amount)), el("span", "", " test USDC"));
@@ -1038,7 +1051,7 @@ function renderApproval(runs) {
     const dl = el("dl", "approval-rows");
     for (const [k, val] of [...venueRows(vk),
       ["收款人", addr(p.pay_to) + " · 與報價相同（payTo）"], ["付款帳戶", "客人 " + short(item.consumer_id) + " 的測試錢包 " + addr(item.payer) + " · " + item.wallet_id],
-      ["網路與資產", network(p.chain_id) + " · test USDC（" + (p.asset_id || "?") + "），不是真錢"],
+      ["網路與資產", network(p.chain_id) + " · test USDC" + (p.asset_id ? "（" + p.asset_id + "）" : "") + "，不是真錢"],
       ["委託範圍", d ? "預算 " + units(d.task_budget) + "；超過 " + units(d.allow_max) + " 一律要你核准" : "未取得"],
       ["intent", (p.intent_hash || "").slice(0, 23) + "…（後端比對這一份）"],
       ["語音", "未評估（模擬核准不含語音挑戰）"]]) { // V1 D9: the simulated path asks for no voice
@@ -1279,7 +1292,7 @@ function renderA2() {
     head.append(el("h3", "", pending ? "核准這一筆付款？" : res ? res[1] : ap.state),
       el("p", "", pending ? "客人 " + short(item.consumer_id) + " 的 Agent 想買下面這一項。核准會要求你的裝置驗證；你只核准這一筆。" : res ? res[2] : ""));
     parts.push(head);
-    const product = (() => { try { return new URL(p.resource_url).pathname.split("/").pop() || "?"; } catch { return "?"; } })();
+    const product = productOf(p);
     const it = el("div", "approval-item");
     const amt = el("p", "approval-amount");
     amt.append(el("b", "", units(p.amount)), el("span", "", " test USDC"));
@@ -1289,7 +1302,7 @@ function renderA2() {
     const dl = el("dl", "approval-rows");
     for (const [k, val] of [...venueRows(vk),
       ["收款人", addr(p.pay_to) + " · 與報價相同（payTo）"], ["付款帳戶", "客人 " + short(item.consumer_id) + " 的測試錢包 " + addr(item.payer) + " · " + item.wallet_id],
-      ["網路與資產", network(p.chain_id) + " · test USDC（" + (p.asset_id || "?") + "），不是真錢"],
+      ["網路與資產", network(p.chain_id) + " · test USDC" + (p.asset_id ? "（" + p.asset_id + "）" : "") + "，不是真錢"],
       ["委託範圍", d ? "預算 " + units(d.task_budget) + "；超過 " + units(d.allow_max) + " 一律要你核准" : "未取得"],
       ["intent", (p.intent_hash || "").slice(0, 23) + (other ? "…（後端比對這一份）" : "…（Signer 依完整請購重算比對）")]]) { // review S-A: a simulated record never reached the Signer
       dl.append(el("dt", "", k), el("dd", "", val));

@@ -255,6 +255,7 @@ type ApprovalReply struct {
 	VerifiedAt        uint64          `json:"verified_at,omitempty"`
 	VoiceResult       *VoiceResult    `json:"voice_result,omitempty"` // V1: an approval's, or a voice refusal's
 	Payment           string          `json:"payment,omitempty"`      // health
+	Voice             string          `json:"voice,omitempty"`        // health: the voice sidecar, off | ready | unavailable
 	Error             string          `json:"error,omitempty"`        // a fixed code
 }
 

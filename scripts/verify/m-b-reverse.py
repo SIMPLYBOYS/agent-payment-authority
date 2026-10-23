@@ -439,6 +439,10 @@ ITEMS = [
      [("web/adapter.js", ': e.payment ? payDetail(e.payment) : e.code', ': e.code')]),
     ("E1a-2 review: the page drops delegation_only", node("web/test/p1a.test.mjs", 'E1-a: a live host that pays says its simulated customer confirms delegations only, and the page hears it', r"true"),
      [("web/hostcreds.js", 'delegation_only: r.body.delegation_only === true', 'delegation_only: false')]),
+    ("Gap C2: a host without --payments gets a relayer row", node("web/test/p2.test.mjs", "the services' readiness rows", r"relayer"),
+     [("web/adapter.js", '...(s.relayer ? [row("relayer", "relayer")] : [])', 'row("relayer", "relayer")')]),
+    ("Gap B4: a paid device record says payment not enabled", node("web/test/approve.test.mjs", "a decided record's tag follows the record; a closed session's attempt text wins", r"見請購卡片"),
+     [("web/approve.js", '(p.payment ? "見請購卡片" : "未啟用")', '"未啟用"')]),
 ]
 
 ITEM_TIMEOUT = 900

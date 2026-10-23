@@ -416,17 +416,24 @@ export function labelPage(h) {
   const live = h && h.record === "live_demo" ? h : null; // live mode (docs/cli-poc.md 55)
   const unknown = !!h && h.record === "unknown"; // not confirmed (docs/cli-poc.md 56.8)
   const p1a = !!h && h.record === "fake_p1a"; // the fake demo with an apa.pay.v1 catalog (docs/commercial-p1a.md)
-  const a2 = !!h && h.record === "fake_a2"; // the same with the person's approval by device (docs/commercial-a2.md)
+  const a2 = !!h && (h.record === "fake_a2" || h.record === "fake_pay"); // the same with the person's approval by device (docs/commercial-a2.md)
+  // A host that pays (P2, E1-a) says so: the capability line and the notes
+  // never say "no payment" while transactions go on chain (gap review B4).
+  const pays = !!h && A.paysOn(h.payments);
+  const payText = pays ? A.PAYING[h.payments] + "（測試 USDC）" : "";
   const badge = document.querySelector("header .badge"), caps = document.querySelector("header .caps");
   // C2: a fake catalog with apa.pay.v2 runs the BBS+ credential step (old BBS+, test issuer in the host process).
   const cred = (s) => (!!h && h.credential ? s.replace("憑證／ZK 未實作", "憑證 BBS+ 舊版（非 W3C bbs-2023；測試 issuer，與 host 同一程序）· ZK 未實作") : s);
   if (badge) {
     badge.textContent = unknown ? (h.failed ? "模式未確認：讀取失敗（重試中）" : "模式未確認（讀取中）")
-      : history ? history.label : live ? live.label : a2 ? (h.credential ? "C2＋A2／fake agent／BBS+ 憑證／本人核准（裝置）／不付款" : "A2／fake agent／本人核准（裝置）／不付款")
+      : history ? history.label : live ? live.label : a2 ? (h.credential ? "C2＋A2／fake agent／BBS+ 憑證／本人核准（裝置）／" : "A2／fake agent／本人核准（裝置）／") + (pays ? payText + "付款" : "不付款")
       : p1a ? (h.credential ? "C2／fake agent／BBS+ 憑證／模擬核准／不付款" : "P1-a／fake agent／模擬核准／不付款") : "M1／fake agent／不付款";
     badge.dataset.mode = unknown ? (h.failed ? "failed" : "unknown") : history ? "history" : live ? "live" : "fake";
   }
-  if (caps) caps.textContent = unknown ? "能力：模式未確認（不代表 fake 或真實 Agent）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
+  if (caps && pays && !history) caps.textContent = "能力：" + (live ? "真實 Agent（" + (live.dev_demo_plugins ? "開發展示例外：plugins 內容與行為未確認" : "嚴格模式") + "）" : "fake Agent")
+    + " · 核准 本人以已登記的裝置（Signer 驗證；委託確認仍是模擬） · 付款 " + payText
+    + (h.credential ? " · 憑證 BBS+ 舊版（測試 issuer）" : "") + " · ZK 預算證明（由鏈上的預算合約驗證） · 獨立驗證：場次後以 verify-demo 檢查（不在本頁）";
+  else if (caps) caps.textContent = unknown ? "能力：模式未確認（不代表 fake 或真實 Agent）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
     : history ? "能力：真實 Agent 執行紀錄（開發展示例外，非即時）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
     : live ? "能力：真實 Agent（" + (live.dev_demo_plugins ? "開發展示例外：plugins 內容與行為未確認，不是嚴格零 plugin 模式" : "嚴格模式") + "）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
     : a2 ? cred("能力：真實 Agent 未啟用 · 核准 本人以已登記的裝置（Signer 驗證；委託確認仍是模擬） · 付款 未啟用 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行")
@@ -435,7 +442,11 @@ export function labelPage(h) {
   const note = $("history-note");
   if (note) note.hidden = !history;
   const ln = $("live-note");
-  if (ln) ln.hidden = !live;
+  if (ln) {
+    ln.hidden = !live;
+    if (!ln.dataset.plain) ln.dataset.plain = ln.textContent;
+    ln.textContent = live && pays ? ln.dataset.plain.replace("合成資料、不付款", "付款以" + payText + "實際進行，委託確認仍是模擬") : ln.dataset.plain;
+  }
 }
 
 async function signIn(ev) {
@@ -773,7 +784,7 @@ async function queryMode() {
   try {
     const r = await fetch("/api/mode", { cache: "no-store", credentials: "omit", signal: AbortSignal.timeout(5000) });
     const m = r.ok ? await r.json() : null;
-    if (m && m.mode === "fake") return confirmMode(seq, null);
+    if (m && m.mode === "fake") return confirmMode(seq, A.paysOn(m.payments) ? { record: "fake_pay", payments: m.payments } : null);
     if (m && ((m.mode === "live" && m.record === "live_demo") || (m.mode === "history" && m.record === "live_history")) && typeof m.label === "string") return confirmMode(seq, m);
   } catch { /* below */ }
   modeUnconfirmed(seq);

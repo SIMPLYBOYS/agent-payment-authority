@@ -281,6 +281,30 @@ func TestVoiceFailuresDenyTheSession(t *testing.T) {
 	}
 }
 
+// The Signer's health names the sidecar's state (gap review C2).
+func TestVoiceHealthState(t *testing.T) {
+	s := newFakeSidecar(t)
+	f := newVoiceAFX(t, s)
+	ctx := context.Background()
+	if got := f.core.voice.voiceState(ctx); got != "ready" {
+		t.Fatalf("a healthy sidecar: %s", got)
+	}
+	s.mu.Lock()
+	s.models[0] = "asr@other"
+	s.mu.Unlock()
+	if got := f.core.voice.voiceState(ctx); got != "unavailable" {
+		t.Fatalf("other models: %s", got)
+	}
+	s.srv.Close()
+	os.Remove(s.socket)
+	if got := f.core.voice.voiceState(ctx); got != "unavailable" {
+		t.Fatalf("down: %s", got)
+	}
+	if got := (*sidecar)(nil).voiceState(ctx); got != "off" {
+		t.Fatalf("no voice configured: %s", got)
+	}
+}
+
 func TestVoiceUnavailableIsDegradedNotFailed(t *testing.T) {
 	s := newFakeSidecar(t)
 	f := newVoiceAFX(t, s)

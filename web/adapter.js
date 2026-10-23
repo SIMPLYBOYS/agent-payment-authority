@@ -14,6 +14,19 @@ export const EXPLORER = { base_sepolia: "https://sepolia.basescan.org/tx/" };
 const txRef = (cap, hash) => str(hash) + (Object.hasOwn(EXPLORER, cap) ? " · " + EXPLORER[cap] + hash : cap === "local_anvil" ? "（本機鏈，沒有 explorer）" : "");
 const RUN = { agent: { live: "真實 Agent（live CLI）", fake: "fake Agent" }, chain: { base_sepolia: "Base Sepolia", local_anvil: "本機 anvil", none: "不付款" },
   authenticator: { device: "實體裝置（主持人宣告）", virtual: "virtual authenticator", none: "沒有 Signer" } };
+// serviceRows (gap review C2): the readiness rows of the Signer, its voice
+// service and the budget relayer, from the host's status (services).
+const SERVICE = {
+  signer: { ready: ["ok", "就緒（核准與付款簽章）"], "approvals-only": ["ok", "就緒（只核准，不簽付款）"], unavailable: ["error", "無法連線：核准會失敗，請先啟動 Signer"] },
+  voice: { ready: ["ok", "就緒（模型已核對）"], off: ["off", "未設定（核准不含語音）"], unavailable: ["error", "無法使用：核准會記為語音降級，請先啟動語音服務"],
+    unknown: ["unconfirmed", "未確認（Signer 未回報；Signer 無法連線或是舊版）"] },
+  relayer: { ready: ["ok", "就緒"], in_process: ["ok", "Host 程序內（本機 anvil）"], unavailable: ["error", "無法連線：付款會失敗，請先啟動 apa-relayer"] },
+};
+export function serviceRows(s) {
+  if (!s) return [];
+  const row = (k, name) => [name, ...(SERVICE[k][s[k]] || ["unconfirmed", "未確認（" + str(s[k]) + "）"])];
+  return [row("signer", "Signer"), row("voice", "語音服務"), ...(s.relayer ? [row("relayer", "relayer")] : [])];
+}
 export const paysOn = (cap) => typeof cap === "string" && Object.hasOwn(PAYING, cap);
 
 // Task status codes as the task list shows them (GET /api/tasks, section 14
@@ -591,7 +604,7 @@ export const VOICE = {
   VOICE_TIMEOUT: "語音服務逾時",
 };
 export const VOICE_FAILURES = ["VOICE_REPLAY", "VOICE_PHRASE_MISMATCH", "VOICE_SPEAKER_MISMATCH", "VOICE_AUDIO_INVALID"];
-export const voiceText = (c) => VOICE[c] || c || "?";
+export const voiceText = (c) => VOICE[c] || c || "原因未回報";
 
 // voiceEventText: a voice outcome event, in words (V1).
 export function voiceEventText(e) {

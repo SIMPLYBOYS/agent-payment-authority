@@ -71,7 +71,7 @@ export function voiceGrant(g) {
   if (!g || !g.voice) return "";
   return g.voice === "verified" ? "語音挑戰通過" : "降級：語音不可用（" + voiceText(g.voice_reason) + "）";
 }
-export const codeText = (c) => CODES[c] || "未通過（" + (c || "?") + "）";
+export const codeText = (c) => CODES[c] || "未通過（" + (c || "未回報代碼") + "）";
 
 const DECISION = { approve: "核准", deny: "拒絕" };
 
@@ -172,7 +172,7 @@ export const decidedText = (state, p, pays = false) => {
 export function recordTag(p, panel) {
   const ap = p && p.approval;
   if (!ap || ap.state === "pending" || !ap.resolved_by || (byDevice(p) ? "device" : "simulated") === panel) return null;
-  return byDevice(p) ? ["本人核准", "這筆由 Signer 驗證已登記的裝置・付款：未啟用"] : ["模擬核准", "這筆是 fake 模擬核准（主持人扮演，不是本人驗證）・付款：未啟用"];
+  return byDevice(p) ? ["本人核准", "這筆由 Signer 驗證已登記的裝置・付款：" + (p.payment ? "見請購卡片" : "未啟用")] : ["模擬核准", "這筆是 fake 模擬核准（主持人扮演，不是本人驗證）・付款：未啟用"];
 }
 
 // panelNote (review B): a closed session's stored attempt text (design 7:
@@ -196,9 +196,10 @@ export function grantLine(g, pays = false) {
 
 // sourceText: the three sources, apart (design 2, 8).
 export function sourceText(s) {
+  if (!s) return "來源讀取中";
   const auth = s && s.authenticator === "virtual" ? "virtual authenticator（測試用）" : "已登記的裝置";
-  const pay = s && s.payment === "disabled" ? "未啟用" : s && paysOn(s.payment) ? PAYING[s.payment] + "（測試 USDC）" : "?";
-  const agent = { fake: "fake", live: "真實 Agent（live CLI）" }[s && s.agent] || "?"; // live: E1-a
+  const pay = s && s.payment === "disabled" ? "未啟用" : s && paysOn(s.payment) ? PAYING[s.payment] + "（測試 USDC）" : "未回報";
+  const agent = { fake: "fake", live: "真實 Agent（live CLI）" }[s.agent] || "未回報"; // live: E1-a
   return "Agent：" + agent + "・驗證器：" + auth + "・付款：" + pay;
 }
 

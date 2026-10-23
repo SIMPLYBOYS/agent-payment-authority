@@ -250,3 +250,17 @@ test("E1-a: the Inspector shows the run conditions, both transactions with Base 
   v.task.payment_capability = "local_anvil";
   assert.match(Object.fromEntries(A.inspector(v))["tx#1 預留（Z2）"], /本機鏈，沒有 explorer/);
 });
+
+// Gap review C2: the Signer, its voice service and the relayer in the readiness table.
+test("the services' readiness rows", () => {
+  assert.deepEqual(A.serviceRows(undefined), []);
+  const rows = A.serviceRows({ signer: "ready", voice: "ready", relayer: "ready" });
+  assert.deepEqual(rows.map(([k, s]) => k + ":" + s), ["Signer:ok", "語音服務:ok", "relayer:ok"]);
+  const down = Object.fromEntries(A.serviceRows({ signer: "unavailable", voice: "unknown", relayer: "unavailable" }).map(([k, s, t]) => [k, [s, t]]));
+  assert.equal(down.Signer[0], "error");
+  assert.equal(down["語音服務"][0], "unconfirmed");
+  assert.match(down.relayer[1], /apa-relayer/);
+  assert.deepEqual(A.serviceRows({ signer: "approvals-only", voice: "off", relayer: "" }).map(([k, s]) => k + ":" + s), ["Signer:ok", "語音服務:off"]); // no --payments: no relayer row
+  assert.equal(A.serviceRows({ signer: "new", voice: "ready" })[0][1], "unconfirmed"); // a state this page does not know is not ready
+  assert.equal(A.voiceText(""), "原因未回報");
+});

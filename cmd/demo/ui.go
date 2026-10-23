@@ -149,12 +149,15 @@ func (a *api) mode(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, "forbidden_host")
 		return
 	}
+	m := map[string]any{"mode": "fake"}
 	switch {
 	case a.history != nil:
-		reply(w, http.StatusOK, map[string]any{"mode": "history", "record": a.history.Record, "label": a.history.Label})
+		m = map[string]any{"mode": "history", "record": a.history.Record, "label": a.history.Label}
 	case a.live != nil:
-		reply(w, http.StatusOK, map[string]any{"mode": "live", "record": a.live.Record, "label": a.live.Label, "dev_demo_plugins": a.live.DevDemoPlugins})
-	default:
-		reply(w, http.StatusOK, map[string]any{"mode": "fake"})
+		m = map[string]any{"mode": "live", "record": a.live.Record, "label": a.live.Label, "dev_demo_plugins": a.live.DevDemoPlugins}
 	}
+	if a.payCap != "" && a.history == nil {
+		m["payments"] = a.payCap // a host that pays says so on every page (gap review B4)
+	}
+	reply(w, http.StatusOK, m)
 }

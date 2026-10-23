@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"runtime/debug"
 	"sync"
+	"time"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signerclient"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 )
 
@@ -84,6 +87,39 @@ type statusReply struct {
 	Live              *liveInfo        `json:"live,omitempty"`           // live mode only
 	Build             buildInfo        `json:"build"`                    // what this binary says of its source, as Go recorded it
 	HumanApproval     *humanApproval   `json:"human_approval,omitempty"` // A2 (--approvals-signer) only
+	Services          *services        `json:"services,omitempty"`       // A2 (--approvals-signer) only
+}
+
+// services are the Signer, its voice sidecar and the budget relayer as the
+// Host finds them at this status (gap review C2): asked each time, so a
+// service that stopped shows before an approval needs it.
+type services struct {
+	Signer  string `json:"signer"`            // ready | approvals-only | unavailable
+	Voice   string `json:"voice"`             // ready | unavailable | off | unknown (the Signer did not say)
+	Relayer string `json:"relayer,omitempty"` // ready | unavailable | in_process (local anvil); "" without --payments
+}
+
+func (a *api) services(ctx context.Context) *services {
+	s := &services{Signer: "unavailable", Voice: "unknown"}
+	if ans := a.approve.signer.Health(); ans.Kind == signerclient.KindOK && (ans.Reply.State == "approvals-only" || ans.Reply.State == "ready") {
+		s.Signer = ans.Reply.State
+		if ans.Reply.Voice != "" {
+			s.Voice = ans.Reply.Voice
+		}
+	}
+	switch {
+	case a.payCap == "":
+	case a.relayer == nil:
+		s.Relayer = "in_process"
+	default:
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		s.Relayer = "unavailable"
+		if h, err := a.relayer.Health(ctx); err == nil && h.State == "ready" {
+			s.Relayer = "ready"
+		}
+	}
+	return s
 }
 
 // humanApproval is what the page needs to offer the person's approval:
@@ -126,6 +162,7 @@ func (a *api) hostStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.approve != nil {
 		out.HumanApproval = &humanApproval{Origin: "http://" + a.alias, Sources: a.approve.sources()}
+		out.Services = a.services(r.Context())
 	}
 	if a.control != nil {
 		out.Runs = a.control.summary()

@@ -324,6 +324,7 @@ func ApprovalsHandler(core *ApprovalCore, log func(string)) http.Handler {
 		if core.pays {
 			h = &ApprovalReply{State: "ready", Payment: "available"}
 		}
+		h.Voice = core.voice.voiceState(req.Context())
 		answer(w, req, "health", h, nil)
 	})
 	return callers(core.cfg, core.cfg.requestTimeout(), mux, func(w http.ResponseWriter, req *http.Request) {

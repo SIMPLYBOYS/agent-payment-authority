@@ -381,30 +381,28 @@ type analysis struct {
 // errUnavailable is the sidecar not answering as it should (D4).
 var errUnavailable = errors.New("voice sidecar unavailable")
 
-// analyze checks the sidecar's health and models, then has it score wav.
-// A 400 is the recording's fault (failed); anything else that goes wrong
-// is the service's (unavailable), and so is the context's deadline.
-func (s *sidecar) analyze(ctx context.Context, wav []byte) (analysis, error) {
-	var a analysis
-	get := func(method, path string, body []byte) (int, []byte, error) {
-		req, err := http.NewRequestWithContext(ctx, method, "http://voice"+path, bytes.NewReader(body))
-		if err != nil {
-			return 0, nil, err
-		}
-		if body != nil {
-			req.Header.Set("Content-Type", "audio/wav")
-		}
-		resp, err := s.client.Do(req)
-		if err != nil {
-			return 0, nil, err
-		}
-		defer resp.Body.Close()
-		raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		return resp.StatusCode, raw, err
-	}
-	code, raw, err := get(http.MethodGet, "/v1/health", nil)
+func (s *sidecar) get(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, "http://voice"+path, bytes.NewReader(body))
 	if err != nil {
-		return a, errors.Join(errUnavailable, err)
+		return 0, nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "audio/wav")
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	return resp.StatusCode, raw, err
+}
+
+// healthy is the sidecar answering its health with the configured models.
+func (s *sidecar) healthy(ctx context.Context) error {
+	code, raw, err := s.get(ctx, http.MethodGet, "/v1/health", nil)
+	if err != nil {
+		return errors.Join(errUnavailable, err)
 	}
 	var h struct {
 		OK      bool   `json:"ok"`
@@ -412,9 +410,34 @@ func (s *sidecar) analyze(ctx context.Context, wav []byte) (analysis, error) {
 		Speaker string `json:"speaker"`
 	}
 	if code != http.StatusOK || json.Unmarshal(raw, &h) != nil || !h.OK || h.ASR != s.cfg.ASRModel || h.Speaker != s.cfg.SpeakerModel {
-		return a, errUnavailable
+		return errUnavailable
 	}
-	code, raw, err = get(http.MethodPost, "/v1/analyze", wav)
+	return nil
+}
+
+// voiceState is the Signer's health line for the sidecar (gap review C2):
+// off without a voice configuration, else ready or unavailable.
+func (s *sidecar) voiceState(ctx context.Context) string {
+	if s == nil {
+		return "off"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if s.healthy(ctx) != nil {
+		return "unavailable"
+	}
+	return "ready"
+}
+
+// analyze checks the sidecar's health and models, then has it score wav.
+// A 400 is the recording's fault (failed); anything else that goes wrong
+// is the service's (unavailable), and so is the context's deadline.
+func (s *sidecar) analyze(ctx context.Context, wav []byte) (analysis, error) {
+	var a analysis
+	if err := s.healthy(ctx); err != nil {
+		return a, err
+	}
+	code, raw, err := s.get(ctx, http.MethodPost, "/v1/analyze", wav)
 	if err != nil {
 		return a, errors.Join(errUnavailable, err)
 	}

@@ -1415,6 +1415,22 @@ LOCAL_MUTATIONS = [
      'r.rpc.SendRaw(ctx, raw) // already known', '_ = raw // already known', 'TestReserveResumesAfterACrash'),
     ('P2 budget: the Signer signs without a reservation', 'internal/budget/verify.go',
      'if err != nil || !spentFor(r.Logs, v.Contract, TaskField(v.ChainID, v.Contract, po.Intent.TaskID), ih, amount) {', 'if false && (err != nil || !spentFor(r.Logs, v.Contract, TaskField(v.ChainID, v.Contract, po.Intent.TaskID), ih, amount)) {', 'TestSignerSignsOnlyAReservedOrder'),
+    ('Gap C2: a relayer that is not ready reads as ready', 'cmd/demo/status.go',
+     '\t\tif h, err := a.relayer.Health(ctx); err == nil && h.State == "ready" {', '\t\tif h, err := a.relayer.Health(ctx); err == nil && (h.State == "ready" || true) {', 'cmd/demo:TestServicesStatus'),
+    ("Gap C2: the Signer's voice state is not passed on", 'cmd/demo/status.go',
+     '\t\tif ans.Reply.Voice != "" {', '\t\tif false && ans.Reply.Voice != "" {', 'cmd/demo:TestServicesStatus'),
+    ('Gap C2: the host status leaves out the services', 'cmd/demo/status.go',
+     '\t\tout.Services = a.services(r.Context())', '\t\t_ = a.services', 'cmd/demo:TestA2PaymentModeOff'),
+    ("Gap C2: the Signer's health leaves out the voice service", 'internal/signer/server.go',
+     '\t\th.Voice = core.voice.voiceState(req.Context())', '\t\t_ = core.voice', 'cmd/demo:TestA2PaymentModeOff'),
+    ('Gap C2: a sidecar that does not answer reads as ready', 'internal/signer/voice.go',
+     '\tif s.healthy(ctx) != nil {', '\tif false && s.healthy(ctx) != nil {', 'internal/signer:TestVoiceHealthState'),
+    ('Gap C2: a sidecar with another ASR model reads as healthy', 'internal/signer/voice.go',
+     ' || !h.OK || h.ASR != s.cfg.ASRModel || ', ' || !h.OK || ', 'internal/signer:TestVoiceHealthState'),
+    ('Gap B4: /api/mode leaves out the payments', 'cmd/demo/ui.go',
+     '\t\tm["payments"] = a.payCap // a host that pays says so on every page (gap review B4)', '\t\t_ = m', 'cmd/demo:TestModeSaysPayments'),
+    ("Gap B4: history mode claims the host's payments", 'cmd/demo/ui.go',
+     '\tif a.payCap != "" && a.history == nil {', '\tif a.payCap != "" {', 'cmd/demo:TestModeSaysPayments'),
 ]
 
 

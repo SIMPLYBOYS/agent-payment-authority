@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer/signertest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signerclient"
@@ -564,8 +565,70 @@ func TestA2PaymentModeOff(t *testing.T) {
 	code, raw, _ := f.h.get("/api/host/status", f.h.tokens["host"])
 	var st statusReply
 	json.Unmarshal(raw, &st)
-	if code != 200 || st.HumanApproval == nil || st.HumanApproval.Origin != f.origin || st.HumanApproval.Sources.Payment != "disabled" || st.PaymentCapability != "unavailable" {
+	if code != 200 || st.HumanApproval == nil || st.HumanApproval.Origin != f.origin || st.HumanApproval.Sources.Payment != "disabled" || st.PaymentCapability != "unavailable" ||
+		st.Services == nil || *st.Services != (services{Signer: "approvals-only", Voice: "off"}) {
 		t.Fatalf("status %d %s", code, raw)
+	}
+}
+
+// healthOn serves one fixed /v1/health answer on a Unix socket.
+func healthOn(t *testing.T, body string) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "h") // a Unix socket path must be short
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "s")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/health" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(body))
+	})}
+	go srv.Serve(ln)
+	t.Cleanup(func() { srv.Close() })
+	return sock
+}
+
+// The readiness rows (gap review C2): each service as the Host finds it.
+func TestServicesStatus(t *testing.T) {
+	gone := filepath.Join(t.TempDir(), "gone")
+	ctx := context.Background()
+	for name, c := range map[string]struct {
+		signer, relayer string // a socket's answer; "" for nothing there
+		payCap          string
+		want            services
+	}{
+		"all ready":          {`{"state":"ready","payment":"available","voice":"ready"}`, `{"state":"ready"}`, BaseSepolia, services{"ready", "ready", "ready"}},
+		"a Signer of before": {`{"state":"ready","payment":"available"}`, `{"state":"ready"}`, BaseSepolia, services{"ready", "unknown", "ready"}},
+		"voice down":         {`{"state":"ready","payment":"available","voice":"unavailable"}`, `{"state":"ready"}`, BaseSepolia, services{"ready", "unavailable", "ready"}},
+		"relayer not ready":  {`{"state":"ready","payment":"available","voice":"ready"}`, `{"state":"starting"}`, BaseSepolia, services{"ready", "ready", "unavailable"}},
+		"nothing there":      {"", "", BaseSepolia, services{"unavailable", "unknown", "unavailable"}},
+		"a Signer locked":    {`{"state":"unlocked"}`, "", "", services{"unavailable", "unknown", ""}},
+	} {
+		a := &api{approve: &approvals{signer: signerclient.NewApprovals(gone)}, payCap: c.payCap}
+		if c.signer != "" {
+			a.approve.signer = signerclient.NewApprovals(healthOn(t, c.signer))
+		}
+		if c.payCap != "" {
+			a.relayer = budget.NewClient(gone)
+			if c.relayer != "" {
+				a.relayer = budget.NewClient(healthOn(t, c.relayer))
+			}
+		}
+		if got := a.services(ctx); *got != c.want {
+			t.Errorf("%s: %+v, want %+v", name, *got, c.want)
+		}
+	}
+	a := &api{approve: &approvals{signer: signerclient.NewApprovals(gone)}, payCap: LocalAnvil}
+	if got := a.services(ctx); got.Relayer != "in_process" {
+		t.Errorf("a relayer in process: %+v", *got)
 	}
 }
 
