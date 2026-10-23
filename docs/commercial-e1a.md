@@ -1,5 +1,6 @@
 # E1-a 端到端部分整合：設計提案
 
+> **E1-a Done（Aaron 10/23：「把 E1-a 標為 Done，並把 commercial-e1a merge 回 main」）。** 部分整合完成：真實 Agent 的請購、v2 憑證、Policy、本人裝置加語音核准、ZK 預留 tx#1、Signer 簽章、結算 tx#2、交付與收據，在 Base Sepolia 上以同一個 `intent_hash` 串起；兩個證據包經 `verify-demo --mode e1a --rpc` 向鏈查證，E1～E10 全部 PASS（§6.2）。範圍外仍 `not_evaluated`：checker 重驗 BBS+ proof、語音 FAR／FRR、Admin 聚合、委託由本人確認。這不是 E1-b 的最終驗收。
 > 2026-10-21，Claude Code。依 vault〈Claude-Code-E1a端到端部分整合派工-20261013〉、roadmap §5.4 E1 與 §7。分支 `commercial-e1a`（從 main `c8d3759`）。
 > 前置：L2、P1、Z2、P2 都已 Done（P2 Done 是 Aaron 10/21 的決定）。本文只是提案。沒有改程式，沒有執行真實模型，沒有連鏈，也沒有動 `/opt`。§5 的決定、§6 的每一次執行都要 Aaron 另行核准。
 > E1-a 完成後只能稱為「**部分整合**」。不使用「最終商業 demo 完成」或「end-to-end verified」的字樣。E1-b 另外派工。
