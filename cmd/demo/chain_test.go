@@ -42,9 +42,11 @@ func TestChainReaderReadsWhatTheChainSays(t *testing.T) {
 	payer, shop := eth.Address{0x11}, eth.Address{0x33}
 	amount := w32(big.NewInt(500000).Bytes())
 	spent := append(append(make([]byte, 32), amount[:]...), make([]byte, 64)...)
+	nine := w32(big.NewInt(999).Bytes())
+	otherSpent := append(append(make([]byte, 32), nine[:]...), make([]byte, 64)...) // another contract's: never taken
 	tx1, tx2, tx3 := "0x"+strings.Repeat("1", 64), "0x"+strings.Repeat("2", 64), "0x"+strings.Repeat("3", 64)
 	n := &stubNode{head: 20, receipts: map[string]*eth.Receipt{
-		tx1: {Status: 1, BlockNumber: 9, Logs: []eth.Log{{Address: other, Topics: [][32]byte{chainSpentTopic}, Data: spent}, {Address: budget, Topics: [][32]byte{chainSpentTopic}, Data: spent}}},
+		tx1: {Status: 1, BlockNumber: 9, Logs: []eth.Log{{Address: budget, Topics: [][32]byte{chainSpentTopic}, Data: spent}, {Address: other, Topics: [][32]byte{chainSpentTopic}, Data: otherSpent}}},
 		tx2: {Status: 1, BlockNumber: 10, Logs: []eth.Log{{Address: token, Topics: [][32]byte{chainTransferTopic, w32(payer[:]), w32(shop[:])}, Data: amount[:]}}},
 		tx3: {Status: 0, BlockNumber: 19},
 	}}
