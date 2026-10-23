@@ -1082,13 +1082,16 @@ async function confirmAndStart(sc) {
 // { fail } saying what is known; null once the credentials changed.
 async function asCustomer(sc, g) {
   const s = await creds.simulate(sc.consumer_id);
-  if (g !== creds.gen || !s) return null;
-  if (s.error || s.status !== 200) return { fail: s.error ? "角色模擬沒有收到回覆，未確認" : "角色模擬未開始（" + s.status + "）" };
+  if (g !== creds.gen) return null;
+  if (!s || s.error || s.status !== 200) return { fail: s && s.error ? "角色模擬沒有收到回覆，未確認" : "角色模擬未開始（" + ((s && s.status) || "無回覆") + "）" };
+  // The page must now act as this customer (review): never confirm under another one's capability.
+  if (creds.view().simConsumer !== sc.consumer_id) return { fail: "角色模擬沒有換成這位客人，委託未確認" };
   simDelegationOnly = !!(s.body && s.body.delegation_only);
   lastApprovals = null;
   approvalNote = null;
   const r = await creds.confirmDelegation(sc.id);
-  if (g !== creds.gen || !r) return null;
+  if (g !== creds.gen) return null;
+  if (!r) return { fail: "模擬身分已失效，委託未確認" };
   if (r.superseded) return { fail: "模擬身分已更換，委託結果未確認" };
   if (r.error || !(r.status === 201 || r.status === 200) || !r.body || !r.body.delegation) return { fail: r.error ? "委託沒有收到回覆，未確認" : "委託未確認（" + ((r.body && r.body.error) || r.status) + "）" };
   return { id: r.body.delegation.delegation_id };
@@ -1326,8 +1329,7 @@ async function a2Call(consumer, path, body) {
 async function pollA2() {
   if (!a2Mode() || !a2OnOrigin()) { if (lastA2 || a2Waiting) { lastA2 = null; a2Waiting = null; renderControl(); } return; }
   const c = currentConsumer();
-  await pollA2Waiting(c);
-  if (!c || !creds.viewerToken(c)) { if (lastA2) { lastA2 = null; renderControl(); } return; }
+  if (!c || !creds.viewerToken(c)) { if (lastA2) { lastA2 = null; renderControl(); } return pollA2Waiting(c); }
   const g = creds.gen;
   const r = await a2Call(c, "/api/approvals");
   if (g !== creds.gen || currentConsumer() !== c) return;
@@ -1335,6 +1337,8 @@ async function pollA2() {
     pays: A.paysOn(r.body.payment_capability) }
     : { gen: g, consumer: c, error: (r.body && r.body.error) || "status_" + r.status };
   renderControl();
+  await pollA2Waiting(c); // after the selected customer's own read (review)
+  if (g !== creds.gen || currentConsumer() !== c) return;
   const it = a2Item();
   const at = it && it.attempt;
   if (at && !a2Op && !a2Recovering && (at.state === "unknown" || at.state === "verifying" || at.state === "requested")) {
@@ -1682,6 +1686,11 @@ async function startAll(pair) {
   const g = creds.gen;
   starting = true;
   simulating = true; // the cards' role play waits: a switch midway would supersede a confirmation
+  try { await startEach(pair, g); } finally {
+    if (g === creds.gen && (starting || simulating)) { starting = false; simulating = false; renderControl(); } // review: never left stuck
+  }
+}
+async function startEach(pair, g) {
   renderControl();
   setRunStatus("一起開始：送出 " + pair.length + " 個獨立的開始請求…", "busy");
   const results = [];

@@ -1066,7 +1066,7 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
   else if (decided && !pays) { set(3, "off", "這場展示不付款"); set(4, "off", "付款後才交付"); }
   else if (decided) {
     if (ph === "allowed" || ph === "approved") set(3, "now", READY);
-    else if (ph === "paying") set(3, "now", "預留預算中（第 1 筆鏈上交易）");
+    else if (ph === "paying") set(3, "now", RESERVING);
     else if (ph === "confirming") set(3, "now", "已送出付款，等鏈上確認（第 2 筆）");
     else if (ph === "not_paid") set(3, "fail", "這筆沒有付款（沒有花錢）");
     else if (ph === "payment_review") {
@@ -1096,17 +1096,20 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
 }
 
 const READY = "準備付款";
-const QUEUED = "等前一筆付款完成（Host 一次付一筆）";
-// showQueue (batch 3, Aaron 10/24): customers shop at once, but the Host pays
-// one payment at a time (one payment worker; docs/commercial-gap-review.md
-// A4). A payment ready while another customer's is on its way waits for it,
-// and the window says so; with one customer, or no payment, nothing changes.
+const RESERVING = "預留預算中（第 1 筆鏈上交易）";
+const QUEUED = "等前一筆預留完成（Host 依序處理付款）";
+// showQueue (batch 3, Aaron 10/24): customers shop at once, but the Host's
+// payment worker moves one payment a step at a time (internal/payflow Run;
+// docs/commercial-gap-review.md A4); one waiting for the chain lets the next
+// go on (review). A payment ready while another's reservation is under way
+// waits for it, and the window says so; with one customer shopping, or no
+// payment, nothing changes.
 export function showQueue(models, cap) {
-  if (models.length < 2 || !paysOn(cap)) return { models, note: "" };
+  if (models.filter((m) => m.steps[0].state === "done").length < 2 || !paysOn(cap)) return { models, note: "" };
   const ready = (m) => m.steps[3].state === "now" && m.steps[3].text === READY;
-  const going = models.some((m) => m.steps[3].state === "now" && !ready(m));
+  const going = models.some((m) => m.steps[3].state === "now" && m.steps[3].text === RESERVING);
   return {
-    note: "客人同時選購；付款由 Host 一次處理一筆，前一筆完成才付下一筆。",
+    note: "客人同時選購；付款由 Host 依序處理，一次做一筆的一步，等鏈上確認時才接著處理下一筆。",
     models: models.map((m) => (going && ready(m) ? { ...m, steps: m.steps.map((s, i) => (i === 3 ? { ...s, text: QUEUED } : s)), caption: m.name + "・" + m.steps[3].label + "：" + QUEUED } : m)),
   };
 }
