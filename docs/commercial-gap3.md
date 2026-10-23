@@ -29,6 +29,23 @@
 2. 本機彩排：資料研究室按「一起開始」，A、B 各自核准，看展示視窗的付款依序說明。
 3. testnet 之後再做：approver-b 在 `/opt` 的裝置與聲紋、B 的測試幣與每日上限（逐場核准）。
 
+### 3.1 testnet（Aaron 10/24：「先補完批次 3 的 testnet」）
+
+10/24 讀鏈（Base Sepolia，唯讀）：wallet-a 18.91、wallet-b 19.92 test USDC；relayer-gas 0.0000910、shop（`0x6bbe…773e`）0.0000978 ETH，都夠。
+
+- approver-b 的裝置在 A2（10/13）登記到 `/opt`（credential `663f78ce86cf48fc`，`docs/commercial-a2.md` 13.6），但**沒有聲紋**；`/opt` 的核准要語音，沒登記會回 `VOICE_NOT_ENROLLED`。聲紋存在 `signer.db`，Signer 每次核准時才讀，所以可以在 `make demo-testnet` 執行中登記（語音服務在第 1 步就緒後）。
+- Host 資料庫沿用 `var/p2-testnet/present/a2-host-*`，task 編號接著用，不會撞到 Signer 已決定過的 `show-b-01`、`show-b-02`。
+- 上限：approver-b 每筆 1.00、24 小時 1.50（0.50 可以）；relayer 每日 12 筆、商店每日 4 筆。一場會送 6 筆交易：登記 2（每位客人的 task 一筆）、預留 2、結算 2。
+- 兩位核准人實際上是同一個人（Aaron）、同一台裝置、同一個聲音；展示時照實說明（`docs/commercial-gap-review.md` A5）。
+
+步驟：
+1. `make demo-testnet`，照提示輸入 sudo、relayer 與錢包的密語。
+2. 第 1 步「語音服務就緒」之後，另開終端機：
+   - `cd /; sudo -u apa-signer /opt/apa-signer/bin/apa-signer approver list --dir /opt/apa-signer/data`：approver-b 應是 active。
+   - 照 `docs/commercial-v1.md` §15「V」錄 3 段並登記，把 `--approver approver-a` 改成 `--approver approver-b`；應看到 `voice template of approver-b from 3 recordings`。錄音照步驟立刻刪除。
+3. Host 就緒、頁面打開後：選資料研究室，按「一起開始」，A、B 各自用裝置＋語音核准。
+4. 結束後跑對帳（`p2-reconcile.sh`，同 P2-c 第 8 步）。
+
 ## 4 已知、不在本批
 
 - 非 A2 的模擬核准（`AUTH` 沒有 Signer 的 fake 主持人頁）仍一次只扮演一位客人：一起開始後角色模擬停在最後一位，另一位要按「以 A 模擬」再核准。
