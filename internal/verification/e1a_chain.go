@@ -35,8 +35,8 @@ var (
 	spentTopic      = eth.Topic("Spent(uint256,bytes32,uint256,uint256,uint256)")
 	transferTopic   = eth.Topic("Transfer(address,address,uint256)")
 	usedTopic       = eth.Topic("AuthorizationUsed(address,bytes32)")
-	chainLogRange   = uint64(200) // a public node's eth_getLogs cap
-	chainTimeout    = 2 * time.Minute
+	chainLogRange   = uint64(200)      // a public node's eth_getLogs cap
+	chainTimeout    = 20 * time.Minute // a run set on a public chain spans many 200-block ranges (E8)
 	confirmationsOf = map[string]uint64{"base_sepolia": 2, "local_anvil": 1}
 )
 
