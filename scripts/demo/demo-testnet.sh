@@ -59,6 +59,7 @@ tty=$(stty -g 2>/dev/null || true)
 vpid=; spid=
 stopping=no
 stop() {
+  set +e # a closed window's terminal cannot be written to: the rest still runs
   [ $stopping = no ] || return 0
   stopping=yes
   trap '' INT TERM HUP

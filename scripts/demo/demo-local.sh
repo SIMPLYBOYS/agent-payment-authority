@@ -44,6 +44,7 @@ chmod 700 "$base" "$logs"
 tty=$(stty -g 2>/dev/null || true)
 stopping=no
 stop() {
+  set +e # a closed window's terminal cannot be written to: the rest still runs
   [ $stopping = no ] || return 0
   stopping=yes
   trap '' INT TERM HUP

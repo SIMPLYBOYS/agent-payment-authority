@@ -50,3 +50,4 @@ sh scripts/demo/demo-testnet.sh live t3    # 真實 Agent，E1-a 的 host 檔（
 - 本機鏈每秒存檔一次，停下時（Ctrl-C、關視窗）會等最後一次存檔完成。但程序被強制終止或當機時，最多會少掉最後 1 秒的鏈。若剛好落在一筆付款之間，Store、relayer、Signer 記得的交易鏈上沒有：畫面會寫「還查不到」，之後的預留也會失敗，只能換新目錄重來。每次重開成功都會備份一份 `anvil-state.json.bak`（重開當時的鏈）。
 - 重開時只檢查「預算合約在設定的位址」。anvil 每條新鏈的位址都一樣，所以這只是基本檢查，不能證明存檔是這個目錄的。
 - `make demo-local` 沿用 `var/p2-dev-e1a` 的 Signer（已登記你的裝置），它的資料庫也有 E1-a 彩排的紀錄；本人核准的每日上限是跨鏈累計的。
+- `make demo-testnet` 在整場執行期間每分鐘延續一次 sudo 的授權（`sudo -n -v`），停下時才能以 root 停掉 `/opt` 的語音服務與 Signer；停下後就不再延續。
