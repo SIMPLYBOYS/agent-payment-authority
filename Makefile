@@ -137,6 +137,11 @@ present-testnet:
 # (HOST=, a new one per run set; --from p2-local's directory for the local
 # rehearsal), apa.pay.v2 with a test issuer's
 # credentials. AUTH= is required. The model runs only when Start is pressed.
+# The local demo in one terminal: the kept local chain, the dev Signer (its
+# passphrase typed here) and the Host with the fake Agent (scripts/demo/demo-local.sh).
+demo-local:
+	@sh scripts/demo/demo-local.sh
+
 present-e1a:
 	@test -n "$(SIGNER)" && test -n "$(HOST)" && test -n "$(AUTH)" || { echo "usage: make present-e1a SIGNER=/opt/apa-signer/run/signer.sock HOST=<p2-testnet e1a-host's directory> AUTH=device|virtual (docs/commercial-e1a.md 6)" >&2; exit 2; }
 	@h="$(abspath $(HOST))"; APA_PRESENT_DIR="$$h/present" APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$$h/registry.json" APA_PRESENT_PAYMENTS="$$h/payments.json" APA_PRESENT_PROFILE="$$( [ -f "$$h/profile.json" ] && echo "$$h/profile.json" )" APA_PRESENT_CREDENTIALS=1 APA_PRESENT_SCENARIOS=testdata/demo/scenarios-e1a.json sh scripts/demo/present.sh live

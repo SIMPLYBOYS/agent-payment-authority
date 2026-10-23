@@ -1,0 +1,79 @@
+#!/bin/sh
+# The local demo in one terminal (Aaron 10/23: the chain and the Signer may
+# be off between takes, but must start again any time and work): the kept
+# local chain (p2-local.sh, resumed when it was kept), the development
+# Signer (p2-dev.sh; it asks its passphrase on this terminal, as always),
+# then the Host with the fake Agent (make present-p2), which opens the page.
+# Each step waits for the one before and says where it is stuck. Ctrl-C
+# stops all three; the chain is kept for the next time.
+#
+#   sh scripts/demo/demo-local.sh        (or: make demo-local)
+#
+# DEMO_LOCAL_DIR (default var/demo-local) holds the chain, the Host's
+# session and the logs, and is kept between runs. P2_DEV_DIR (default
+# var/p2-dev-e1a) is the Signer's directory with its two test wallets;
+# DEMO_WALLET_A/B are their addresses. No key file is read here.
+set -eu
+root=$(cd "$(dirname "$0")/../.." && pwd)
+cd "$root"
+base=${DEMO_LOCAL_DIR:-$root/var/demo-local}
+dev=${P2_DEV_DIR:-$root/var/p2-dev-e1a}
+A=${DEMO_WALLET_A:-0x833405a796c3300afcc582a3e251adf1a4d3c477}
+B=${DEMO_WALLET_B:-0x42c318751644a1be96f102dc46c828400fe58bd6}
+chain=$base/chain
+logs=$base/logs
+sock=$dev/run/signer.sock
+say() { printf 'demo-local: %s\n' "$*" >&2; }
+stuck() { printf 'demo-local: 卡在%s\n' "$*" >&2; exit 1; }
+
+# Before anything starts: the ports free and no Signer left over.
+for p in 8545 8402; do
+  if lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null 2>&1; then stuck "啟動前：127.0.0.1:$p 已有程式在用（上一次沒停乾淨？lsof -nP -iTCP:$p 看是誰）"; fi
+done
+[ ! -e "$sock" ] || stuck "啟動前：$sock 還在。上一個 Signer 可能還在跑；確定沒有在跑就刪掉這個檔"
+[ -f "$dev/data/keys/wallet-a.key" ] && [ -f "$dev/data/keys/wallet-b.key" ] || stuck "啟動前：$dev 沒有兩個錢包的金鑰檔（P2_DEV_DIR）"
+mkdir -p "$base" "$logs"
+chmod 700 "$base" "$logs"
+
+# Ctrl-C or any stop: every process of this run, the chain saved on its way out.
+stopping=no
+stop() {
+  [ $stopping = no ] || return 0
+  stopping=yes
+  trap '' INT TERM
+  say "停下中…"
+  kill -TERM 0 2>/dev/null || true
+  wait 2>/dev/null || true
+  # A socket nothing answers on is a leftover of this run: gone, so the next run starts.
+  if [ -S "$sock" ] && ! python3 -I -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.settimeout(1); s.connect(sys.argv[1])' "$sock" 2>/dev/null; then rm -f "$sock"; fi
+  say "已停下；鏈保存在 $chain/anvil-state.json，下次同一個指令會接著用"
+}
+trap stop EXIT
+trap 'exit 130' INT TERM
+
+# 1 the chain (kept, or set up the first time).
+say "1/3 本機鏈啟動中（紀錄 $logs/chain.log）"
+P2_LOCAL_DIR=$chain sh scripts/demo/p2-local.sh "$A" "$B" >"$logs/chain.log" 2>&1 &
+cpid=$!
+i=0
+until grep -q "anvil is running" "$logs/chain.log" 2>/dev/null; do
+  kill -0 $cpid 2>/dev/null || { tail -5 "$logs/chain.log" >&2; stuck "第 1 步：本機鏈沒有起來（上面是它最後的訊息）"; }
+  i=$((i + 1)); [ $i -lt 300 ] || stuck "第 1 步：本機鏈 5 分鐘內沒有就緒（$logs/chain.log）"
+  sleep 1
+done
+say "1/3 本機鏈就緒：$(grep -E '^p2-local: (resumed|wrote)' "$logs/chain.log" | tail -1 | sed 's/^p2-local: //')"
+
+# 3 the Host, once the Signer's socket is there (it starts after the passphrase).
+(
+  i=0
+  until [ -S "$sock" ]; do
+    i=$((i + 1)); [ $i -lt 900 ] || { say "第 3 步：15 分鐘內沒有 Signer，Host 沒有啟動"; exit 1; }
+    sleep 1
+  done
+  say "3/3 Host 啟動中（fake Agent；頁面會自動打開；配對碼在下面）"
+  APA_PRESENT_DIR=$base/host make present-p2 SIGNER="$sock" AUTH=device PAYMENTS="$chain/payments.json" REGISTRY="$chain/registry.json"
+) &
+
+# 2 the Signer, here in the foreground: its passphrase is typed on this terminal.
+say "2/3 Signer：請輸入錢包的密語（Ctrl-C 會把三個都停下）"
+P2_DEV_DIR=$dev P2_LOCAL_DIR=$chain sh scripts/demo/p2-dev.sh "$A" "$B" || stuck "第 2 步：Signer 停了（密語不對、或上面有錯誤訊息）"
