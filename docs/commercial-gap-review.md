@@ -91,3 +91,13 @@ Review 兩輪（`9ce0813` 與其後的修正）：viewer 登入後頁首不再�
 - 主持人頁的幾處替換（live 警告、取消確認）依賴 `host.html` 的原字，沒有測試。
 
 注意：語音那一列要等 `/opt/apa-signer` 換成這一版 Signer 才會顯示「就緒」；舊版 Signer 不回報語音，這一列會顯示「未確認（Signer 未回報）」。換版要 sudo，由 Aaron 執行。
+
+### 批次 2、3
+
+見 `docs/commercial-gap2.md`、`docs/commercial-gap3.md`。
+
+### 批次 5（部分，10/24）
+
+- **C1 一鍵啟動**：`make demo-local`、`make demo-testnet`（`docs/commercial-ops.md` O1、O3）。
+- **C4 開場前檢查**：`make demo-testnet` 在 relayer 就緒後唯讀檢查今天的交易數與餘額，不夠一場兩位客人就停下；主持人頁就緒表有「relayer 今天」「商店今天」（`e5ecee4`；`docs/commercial-ops.md` O3）。
+- **C3 主持人手冊**：`docs/host-manual.md`（開場前檢查表、開場、一場的流程、收場、每種錯誤的下一步、展示時要照實說的事）。頁面上出錯時直接寫下一步，還沒做。
