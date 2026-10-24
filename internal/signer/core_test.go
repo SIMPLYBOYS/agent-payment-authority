@@ -197,6 +197,7 @@ func TestRefusalsConsumeNothing(t *testing.T) {
 		"unknown delegation":    {SignRequest{RequestID: "request-0000000003", Authorization: delegation("dlg-z"), Order: e.order(a(1))}, "DELEGATION_UNKNOWN"},
 		"another version":       {SignRequest{RequestID: "request-0000000004", Authorization: Authorization{Method: "delegation", DelegationID: "dlg-a", DelegationVersion: 2}, Order: e.order(a(1))}, "DELEGATION_VERSION"},
 		"A's delegation for B":  {SignRequest{RequestID: "request-0000000005", Authorization: delegation("dlg-a"), Order: e.order(b)}, "CONSUMER_MISMATCH"},
+		"a confirmation here":   {SignRequest{RequestID: "request-0000000020", Authorization: Authorization{Method: "delegation", DelegationID: "dlg-a", DelegationVersion: 1, DelegationConfirmationID: "hap-1"}, Order: e.order(a(1))}, "BAD_REQUEST"}, // gap 4: a payment-only Signer keeps none
 		"B's key in A's order":  {e.req("request-0000000006", spec{"consumer-a", "agent-a", "wallet-a", keyB, merchant, "500000", 3, 60}), "CONSUMER_MISMATCH"},
 		"another merchant":      {e.req("request-0000000007", spec{"consumer-a", "agent-a", "wallet-a", keyA, "0x9999999999999999999999999999999999999999", "500000", 4, 60}), "MERCHANT_NOT_ALLOWED"},
 		"over per tx":           {e.req("request-0000000008", spec{"consumer-a", "agent-a", "wallet-a", keyA, merchant, "600001", 5, 60}), "OVER_PER_TX"},

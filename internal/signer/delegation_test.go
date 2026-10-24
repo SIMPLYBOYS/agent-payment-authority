@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer/signertest"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 // terms are a delegation's terms for consumer x ("a" or "b").
@@ -277,4 +279,84 @@ func (f *hfx) order2(amount, task string) json.RawMessage {
 	f.n++
 	return signertest.Order{Consumer: "consumer-a", Agent: "agent-a", Wallet: "wallet-a", Task: task, From: Address(keyA.PubKey()), PayTo: signertest.Merchant,
 		Amount: amount, N: f.n, Now: f.now, Window: 600}.Raw()
+}
+
+// Review of S1-S3: an abandoned confirmation, a changed approver and an
+// expired confirmation each pay nothing, on their own.
+func TestConfirmationEndsAndChanges(t *testing.T) {
+	f := newHFX(t)
+	a := f.enroll("approver-a", nil)
+	confirm := func(id string) string {
+		terms := f.terms("a", id)
+		c, err := f.dchallenge("dreq-"+id, terms)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := f.dverify("dver-"+id, c.ChallengeID, terms, a.Get(c.Options, origin))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.ApprovalID
+	}
+	allow := func(id string) Authorization {
+		return Authorization{Method: "delegation", DelegationID: "dlg-a", DelegationVersion: 1, DelegationConfirmationID: id}
+	}
+	n := 950
+	sign := func(au Authorization, order json.RawMessage) error {
+		n++
+		_, err := f.pay.Sign(bg, SignRequest{RequestID: fmt.Sprintf("request-%010d", n), Authorization: au, Order: order})
+		return err
+	}
+	abandoned := confirm("dlg-1")
+	if _, err := f.core.Abandon(bgA, abandoned); err != nil {
+		t.Fatal(err)
+	}
+	if err := sign(allow(abandoned), f.order2("50000", "task-1")); refusal(err) != "DELEGATION_NOT_CONFIRMED" {
+		t.Errorf("abandoned: %v", err)
+	}
+	changed := confirm("dlg-2")
+	ap := f.pay.cfg.approver("approver-a")
+	ap.WalletIDs = []string{"wallet-z"} // the wallet taken from the approver, its version kept
+	if err := sign(allow(changed), f.order2("50000", "task-2")); refusal(err) != "APPROVER_CHANGED" {
+		t.Errorf("wallet taken from the approver: %v", err)
+	}
+	ap.WalletIDs = []string{"wallet-a"}
+	expiring := confirm("dlg-3")
+	f.now += DelegationPayTTL // an Ask, so no static delegation's own validity is in the way
+	o := f.order2("500000", "task-3")
+	ask := Authorization{Method: "webauthn", ApprovalID: f.approve(a, o, "approve").ApprovalID, DelegationConfirmationID: expiring}
+	if err := sign(ask, o); refusal(err) != "DELEGATION_EXPIRED" {
+		t.Errorf("expired: %v", err)
+	}
+}
+
+// An attempts table from before gap 4 gains confirmation_id, its rows kept.
+func TestMigrateConfirmation(t *testing.T) {
+	db, err := OpenDB(filepath.Join(t.TempDir(), "signer.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	old := strings.Replace(schema, "  confirmation_id TEXT,\n", "", 1)
+	if old == schema {
+		t.Fatal("the schema has no confirmation_id line to drop")
+	}
+	if _, err := db.Exec(old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO attempts (attempt_id, request_id, fingerprint, intent_hash, wallet_id, chain_id, asset_contract, payer, nonce, delegation_id, amount, state,
+		accepted_at, auth_deadline, typed_digest, snapshot, closed_at) VALUES ('att-old', 'request-old', 'fp', 'ih', 'wallet-a', 'c', 'x', 'p', 'n', 'dlg-a', 1, 'abandoned', 1, 2, 'd', '{}', 3)`); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseConfig(signertest.ApprovalsConfig("/tmp/apa-test.sock", 501, t0, Address(keyA.PubKey()), Address(keyB.PubKey()), origin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewCoreDB(bg, cfg, map[string]*secp256k1.PrivateKey{Address(keyA.PubKey()): keyA, Address(keyB.PubKey()): keyB}, db, func() uint64 { return t0 }, reserved{}); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM attempts WHERE attempt_id = 'att-old' AND confirmation_id IS NULL`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("the old row %d %v", n, err)
+	}
 }

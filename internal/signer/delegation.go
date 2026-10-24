@@ -287,8 +287,10 @@ func (c *Core) confirmation(ctx context.Context, q querier, au Authorization, po
 	var termsJSON, consumer, wallet, approverID, cred string
 	var version, allowMax, budget, validUntil uint64
 	var task sql.NullString
+	// Only a confirmation still verified (review: an abandoned one is gone).
 	err := q.QueryRowContext(ctx, `SELECT d.terms, d.consumer_id, d.wallet_id, d.approver_id, d.approver_version, d.allow_max, d.task_budget, d.valid_until, d.task_id,
-		coalesce(cr.state, '') FROM delegation_confirmations d LEFT JOIN credentials cr ON cr.credential_id = d.credential_id WHERE d.confirmation_id = ?`, id).
+		coalesce(cr.state, '') FROM delegation_confirmations d JOIN human_approvals h ON h.approval_id = d.confirmation_id AND h.state = 'verified'
+		LEFT JOIN credentials cr ON cr.credential_id = d.credential_id WHERE d.confirmation_id = ?`, id).
 		Scan(&termsJSON, &consumer, &wallet, &approverID, &version, &allowMax, &budget, &validUntil, &task, &cred)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Refusal("DELEGATION_NOT_CONFIRMED")
@@ -308,7 +310,7 @@ func (c *Core) confirmation(ctx context.Context, q querier, au Authorization, po
 		return Refusal("DELEGATION_EXPIRED")
 	case cred != "active": // a device revoked takes its confirmations with it
 		return Refusal("CREDENTIAL_REVOKED")
-	case ap == nil || ap.Version != version:
+	case ap == nil || ap.Version != version || ap.ConsumerID != consumer || !containsString(ap.WalletIDs, wallet): // as humanApproval (review)
 		return Refusal("APPROVER_CHANGED")
 	case b.ChainID != t.ChainID || b.AssetContract != t.AssetContract:
 		return Refusal("ASSET_NOT_ALLOWED")
