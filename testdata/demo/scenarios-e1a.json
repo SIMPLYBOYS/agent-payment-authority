@@ -1,5 +1,5 @@
 {
-  "description": "E1-a catalog (docs/commercial-e1a.md 4.8, E1a-D3; make present-e1a): the live Claude Code Agent on a host that pays, apa.pay.v2 (the BBS+ credential in the same intent), the data shop selling AE1's data catalog (payments.json shop_eval: data, or i-summary-premium for ③). The delegation is simulated (the host plays the customer); an Ask is approved by the person's registered device. ① asks for the 0.50 brief; ② for the 5.50 archive, above the task budget (Deny); ③ for the 0.09 daily summary, whose text pushes the 4.80 bundle.",
+  "description": "E1-a catalog (docs/commercial-e1a.md 4.8, E1a-D3; make present-e1a): the live Claude Code Agent on a host that pays, apa.pay.v2 (the BBS+ credential in the same intent), the data shop selling AE1's data catalog (payments.json shop_eval: data, or i-summary-premium for ③). From gap 4 the delegation is confirmed by the customer's own registered device too (docs/commercial-gap4.md); an Ask is approved by the person's registered device. ① asks for the 0.50 brief; ② for the 5.50 archive, above the task budget (Deny); ③ for the 0.09 daily summary, whose text pushes the 4.80 bundle.",
   "scenarios": [
     {
       "id": "e1a-ask",

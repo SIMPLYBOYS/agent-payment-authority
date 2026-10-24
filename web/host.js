@@ -1038,6 +1038,7 @@ const deviceDelegations = () => a2Mode();
 // { id } of the delegation, { fail } saying what is known, or null once the
 // credentials changed.
 async function deviceDelegation(sc, g) {
+  if (!a2OnOrigin()) return { fail: "要從 " + a2Info().origin + "/host 開啟這個頁面才能用裝置確認（WebAuthn 只接受 localhost）" };
   const c = sc.consumer_id;
   const requestId = "dlg-" + crypto.randomUUID();
   const r = await a2Call(c, "/api/delegations/challenge", { request_id: requestId, scenario: sc.id });
@@ -1056,23 +1057,24 @@ async function deviceDelegation(sc, g) {
   }
   if (g !== creds.gen) return null;
   const body = { request_id: requestId, scenario: sc.id, challenge_id: ch.challenge_id, verify_request_id: "dver-" + crypto.randomUUID(), assertion: AP.assertionJSON(cred) };
-  for (let i = 0; i < 3; i++) {
-    const v = await a2Call(c, "/api/delegations/assertion", body);
+  let v;
+  for (let i = 0; i < 4; i++) { // the same verify again on no answer (review: about 7 s in all)
+    if (i) await new Promise((res) => setTimeout(res, 1000 * 2 ** (i - 1)));
+    v = await a2Call(c, "/api/delegations/assertion", body);
     if (g !== creds.gen) return null;
     if ((v.status === 201 || v.status === 200) && v.body && v.body.delegation) return { id: v.body.delegation.delegation_id };
-    if (v.status !== 0 && v.status !== 503) return { fail: delegationFail(v) };
-    await new Promise((res) => setTimeout(res, 500));
+    if (v.status !== 0 && v.status !== 503 || v.body && v.body.error === "no_viewer") break;
   }
-  return { fail: "沒有收到回覆，結果未確認（不會自動開始）" };
+  return { fail: delegationFail(v) + "（不會自動開始）" };
 }
 
 // delegationFail: a refused confirmation in the host's words.
 function delegationFail(r) {
   const b = r.body || {};
-  if (r.status === 0) return "沒有收到回覆，結果未確認";
+  if (r.status === 0 && !(r.body && r.body.error === "no_viewer")) return "沒有收到回覆，結果未確認";
   if (b.error === "signer_refused") return AP.CODES[b.code] || "Signer 拒絕（" + b.code + "）";
   return { delegation_unavailable: "這個主機沒有這位客人的錢包或資產設定", forbidden_consumer: "不是這位客人的情境", signer_unknown: "Signer 沒有回覆，結果未確認",
-    store_unavailable: "已驗證，但主機沒能記下；請再確認一次" }[b.error] || "未確認（" + (b.error || r.status) + "）";
+    store_unavailable: "裝置已驗證，但主機沒能記下；請再確認一次（會是新的一份委託）", no_viewer: "這位客人沒有 viewer token" }[b.error] || "未確認（" + (b.error || r.status) + "）";
 }
 
 // delegationBox shows the host's terms of an apa.pay.v1 scenario: the
@@ -1099,7 +1101,7 @@ function delegationBox(sc, { busy, full, simC }) {
   const yes = el("button", "delegation-confirm", device ? "用已登記的裝置確認委託並開始" : "確認委託並開始（模擬）");
   yes.type = "button";
   yes.dataset.scenario = sc.id;
-  yes.disabled = starting || busy.has(sc.consumer_id) || full || !device && simC !== sc.consumer_id;
+  yes.disabled = starting || simulating || busy.has(sc.consumer_id) || full || !device && simC !== sc.consumer_id;
   yes.addEventListener("click", () => confirmAndStart(sc));
   const no = el("button", "delegation-back", "返回");
   no.type = "button";
@@ -1115,8 +1117,12 @@ async function confirmAndStart(sc) {
   if (starting) return;
   const g = creds.gen;
   if (deviceDelegations()) { // gap 4: the customer's own device, not the host
+    if (simulating) return; // one confirmation at a time (review: a second prompt, or 一起開始 meanwhile)
+    simulating = true;
+    renderControl();
     setRunStatus("客人 " + short(sc.consumer_id) + "：請用已登記的裝置確認委託…", "busy");
-    const d = await deviceDelegation(sc, g);
+    let d;
+    try { d = await deviceDelegation(sc, g); } finally { if (g === creds.gen) { simulating = false; renderControl(); } }
     if (!d) return;
     if (d.fail) return setRunStatus("客人 " + short(sc.consumer_id) + " 的委託未確認：" + d.fail + "（沒有開始場次）", "error");
     delegating = null;
@@ -1756,17 +1762,21 @@ async function startAll(pair) {
 async function startEach(pair, g) {
   renderControl();
   setRunStatus("一起開始：送出 " + pair.length + " 個獨立的開始請求…", "busy");
+  // Every customer's delegation is confirmed first, one after the other; only
+  // then are the runs started (Aaron 10/24: 兩位都確認後各自開始). One not
+  // confirmed is not started; the others still are, each on its own.
+  const delegations = new Map();
   const results = [];
+  for (const sc of pair.filter((x) => A.isPay(x.contract))) {
+    setRunStatus("一起開始：客人 " + short(sc.consumer_id) + (deviceDelegations() ? "：請用已登記的裝置確認委託…" : " 確認委託中（模擬）…"), "busy");
+    const d = await asCustomer(sc, g);
+    if (!d) return; // cleared or replaced: nothing acts
+    if (d.fail) results.push([sc, d]);
+    else delegations.set(sc.id, d.id);
+  }
   for (const sc of pair) {
-    let delegation;
-    if (A.isPay(sc.contract)) {
-      setRunStatus("一起開始：客人 " + short(sc.consumer_id) + " 確認委託中（模擬）…", "busy");
-      const d = await asCustomer(sc, g);
-      if (!d) return; // cleared or replaced: nothing acts
-      if (d.fail) { results.push([sc, d]); continue; }
-      delegation = d.id;
-    }
-    const r = await creds.startRun(sc.id, delegation);
+    if (A.isPay(sc.contract) && !delegations.has(sc.id)) continue; // not confirmed: said above, not started
+    const r = await creds.startRun(sc.id, delegations.get(sc.id));
     if (g !== creds.gen || !r || r.gen !== creds.gen) return; // cleared or replaced: nothing acts
     results.push([sc, r]);
   }

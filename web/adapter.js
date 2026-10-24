@@ -1076,7 +1076,7 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
     const bound = ((snapshot && snapshot.events) || []).find((e) => e.event_type === "DELEGATION_BOUND");
     const terms = d && d.task_budget ? "預算 " + usdc(d.task_budget) + "，超過 " + usdc(d.allow_max) + " 要問本人" : "預算與範圍";
     set(0, "done", !bound ? (d && d.task_budget ? "客人交代 Agent：" + terms : "客人已交代 Agent 預算與範圍")
-      : bound.authorization_method === "webauthn" ? "客人用自己的裝置確認了委託：" + terms
+      : bound.authorization_method === "webauthn" ? approverText(traits.authenticator) + "確認了委託：" + terms // never a virtual authenticator called a device (review)
       : "主持人代為確認委託（示範，不是本人）：" + terms);
     if (ph === "empty" || ph === "entered") set(1, "now", "Agent 正在挑選商品");
     else set(1, "done", "Agent 選好商品，報價 " + usdc(p && p.amount));

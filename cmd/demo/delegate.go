@@ -87,7 +87,9 @@ func termsRefused(w http.ResponseWriter, code string) {
 }
 
 // delegationChallenge is POST /api/delegations/challenge {request_id,
-// scenario}: the Signer's challenge over the terms (a resend, the same one).
+// scenario}: the Signer's challenge over the terms. The Host's deadline is
+// part of the request, so a resend later is a conflict: the page asks once
+// per confirmation (review).
 func (a *api) delegationChallenge(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RequestID string `json:"request_id"`

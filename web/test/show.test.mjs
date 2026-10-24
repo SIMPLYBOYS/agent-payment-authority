@@ -32,8 +32,10 @@ test("an Allow paid and delivered: five steps done, in plain words", () => {
 
 test("step 1 says who confirmed the delegation: the person's device, or the host for the customer (gap 4)", () => {
   const bound = (method) => ev(2, "DELEGATION_BOUND", { purchase_order_id: "", ...(method ? { authorization_method: method } : {}) });
-  const at = (method) => A.showCustomer("consumer-a", snap([ev(1, "TASK_STARTED", { purchase_order_id: "" }), bound(method), ev(3, "PURCHASE_PROPOSED")]), { task_budget: "1500000", allow_max: "100000" }).steps[0];
-  assert.deepEqual(at("webauthn"), { label: at("webauthn").label, state: "done", text: "客人用自己的裝置確認了委託：預算 1.50 USDC，超過 0.10 USDC 要問本人" });
+  const at = (method, authenticator = "device") => A.showCustomer("consumer-a", snap([ev(1, "TASK_STARTED", { purchase_order_id: "" }), bound(method), ev(3, "PURCHASE_PROPOSED")]),
+    { task_budget: "1500000", allow_max: "100000" }, { authenticator }).steps[0];
+  assert.deepEqual(at("webauthn"), { label: at("webauthn").label, state: "done", text: "本人以已登記的裝置確認了委託：預算 1.50 USDC，超過 0.10 USDC 要問本人" });
+  assert.equal(at("webauthn", "virtual").text, "本人以 virtual authenticator（測試用，不是實體裝置）確認了委託：預算 1.50 USDC，超過 0.10 USDC 要問本人");
   assert.equal(at("").text, "主持人代為確認委託（示範，不是本人）：預算 1.50 USDC，超過 0.10 USDC 要問本人");
 });
 
