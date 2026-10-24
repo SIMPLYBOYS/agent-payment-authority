@@ -300,3 +300,58 @@ body[data-page="show"] #unity-canvas { background: #10131a; border-radius: 6px; 
 .show-checker li[data-state="INCONCLUSIVE"] { border-color: #9b6bd6; }
 .show-checker-by { margin: 6px 0 0; color: var(--muted); font-size: 20px; }
 .show-trust-row li small.show-chain { color: var(--text); } /* read from the chain by the Host (O2) */
+
+/* 簡報模式 (docs/commercial-town.md T1, after the HEART policy island): the
+   pixel scene fills the screen on a warm light ground; the brand, the steps,
+   the venues and the approval float over it as rounded cards; one accent. */
+#present-toggle { margin-left: auto; }
+body[data-present="on"] { --bg: #f3ede2; --ink: #1d1a15; --soft: #6e675b; --accent: #e0582f; background: var(--bg); overflow: hidden; }
+body[data-present="on"] .top, body[data-present="on"] #host-bar, body[data-present="on"] #advanced, body[data-present="on"] .summary,
+body[data-present="on"] #control, body[data-present="on"] .show-open, body[data-present="on"] #scene-zoom, body[data-present="on"] #unity-status,
+body[data-present="on"] #scene-cap, body[data-present="on"] #scene-text, body[data-present="on"] .credit, body[data-present="on"] .replay-note { display: none !important; }
+body[data-present="on"] .stage { display: block; padding: 0; }
+body[data-present="on"] .stage > .shop { background: transparent; padding: 0; border-radius: 0; height: 100vh; display: grid; place-items: center; }
+body[data-present="on"] .scene-frame { margin: 0; border-radius: 0; }
+body[data-present="on"] .side { display: contents; }
+.present[hidden] { display: none; }
+.present-col { position: fixed; z-index: 5; top: 20px; bottom: 70px; display: flex; flex-direction: column; gap: 12px; pointer-events: none; }
+.present-col > * { pointer-events: auto; }
+.present-left { left: 20px; width: 360px; }
+.present-right { right: 20px; width: 380px; bottom: 20px; }
+.present-card { background: #fffdf8; color: var(--ink, #1d1a15); border-radius: 18px; box-shadow: 0 10px 30px rgba(50, 35, 10, 0.16); padding: 16px 20px; }
+.present .eyebrow { margin: 0 0 4px; font: 600 11px/1.4 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.12em; color: var(--accent, #e0582f); }
+.present-brand { flex: none; }
+.present-title { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: 0.02em; }
+.present-sub { margin: 6px 0 0; color: var(--soft, #6e675b); font-size: 13px; }
+.present-steps { min-height: 0; overflow: auto; }
+.present-steps h3 { margin: 0 0 8px; font-size: 18px; }
+.present-steps + .present-steps { margin-top: 8px; }
+.present-cust + .present-cust { margin-top: 14px; padding-top: 12px; border-top: 1px solid #ece4d6; }
+.present-step-list { list-style: none; margin: 0; padding: 0; }
+.present-step-list li { display: grid; grid-template-columns: 34px 1fr; gap: 6px; padding: 5px 0; color: #b3ab9d; }
+.present-step-list li[data-state="done"] { color: var(--ink, #1d1a15); }
+.present-step-list li[data-state="now"] { color: var(--ink, #1d1a15); font-weight: 700; }
+.present-step-list li[data-state="fail"], .present-step-list li[data-state="unknown"] { color: #b4321b; }
+.present-step-list .n { font: italic 600 20px/1.1 Georgia, "Times New Roman", serif; color: inherit; }
+.present-step-list li[data-state="now"] .n { color: var(--accent, #e0582f); }
+.present-step-list small { display: block; font-size: 12px; font-weight: 400; color: var(--soft, #6e675b); }
+.present-receipt { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+.present-receipt span, .present-receipt a { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: #f4ece0; color: var(--ink, #1d1a15); text-decoration: none; }
+.present-queue { margin: 10px 0 0; font-size: 12px; color: var(--soft, #6e675b); }
+.present-venues { flex: none; }
+.present-venues h2 { margin: 0 0 10px; font-size: 20px; }
+.present-venue-list { list-style: none; margin: 0; padding: 0; }
+.present-venue-list li + li { border-top: 1px solid #ece4d6; }
+.venue-item { width: 100%; display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 8px; padding: 10px 4px; background: none; border: 0; border-radius: 10px; color: var(--ink, #1d1a15); text-align: left; }
+.venue-item:hover, .venue-item[aria-pressed="true"] { background: #fbf3e8; }
+.venue-item .n { font: italic 600 26px/1 Georgia, "Times New Roman", serif; color: var(--accent, #e0582f); }
+.venue-item .name { font-weight: 700; font-size: 15px; }
+.venue-item small { display: block; font-weight: 400; font-size: 12px; color: var(--soft, #6e675b); }
+.venue-item .state { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #efe7da; color: var(--soft, #6e675b); }
+.venue-item .state[data-state="busy"] { background: var(--accent, #e0582f); color: #fff; }
+.venue-go { margin: 4px 0 10px 52px; background: var(--ink, #1d1a15); color: #fff; border: 0; border-radius: 999px; padding: 8px 16px; font-weight: 700; }
+.present-status { margin: 8px 0 0; font-size: 12px; color: var(--soft, #6e675b); }
+body[data-present="on"] #approval { min-height: 0; overflow: auto; background: #fffdf8; color: #1a1d2e; border: 2px solid #f0c46b; padding: 0; border-radius: 18px; box-shadow: 0 10px 30px rgba(50, 35, 10, 0.2); }
+body[data-present="on"] #approval[hidden] { display: none; }
+body[data-present="on"] .scene-frame { background: transparent; }
+.present-exit { position: fixed; z-index: 5; left: 20px; bottom: 20px; background: #fffdf8; color: var(--soft, #6e675b); border: 0; border-radius: 999px; padding: 6px 14px; box-shadow: 0 4px 14px rgba(50, 35, 10, 0.12); }

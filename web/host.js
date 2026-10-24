@@ -108,7 +108,7 @@ const sceneUnity = {
   send2(m) { this.target.send2(m); },
   select2(m) { this.target.select2(m); },
 };
-const scene = createScene({ unity: sceneUnity, token: (c) => creds.viewerToken(c), onChange: () => { renderScene(); refreshPanels(); publishView(); } });
+const scene = createScene({ unity: sceneUnity, token: (c) => creds.viewerToken(c), onChange: () => { renderScene(); refreshPanels(); publishView(); renderPresent(); } });
 onSceneReport((r) => { if (sceneUnity.target !== relay) scene.rendered(r); });
 // A click on a customer in the shop: taken only when it names a customer of
 // the current scene and slot (scene.picked); otherwise counted and dropped.
@@ -631,6 +631,113 @@ function renderVenues(vs) {
   })));
 }
 
+// ---- 簡報模式 (docs/commercial-town.md T1) ----
+// The scene fills the screen; the brand, the venues (numbered, with their
+// state), the selected customers' five steps and the approval float over it.
+// A venue is chosen by its row; its own button starts it, as 一起開始 does
+// for that venue (each customer's delegation confirmed first). Nothing here
+// is a new way in: the same operations, the same credentials.
+let presenting = (() => { try { return localStorage.getItem("apa-present") === "1"; } catch { return false; } })();
+function setPresenting(on) {
+  presenting = on;
+  try { localStorage.setItem("apa-present", on ? "1" : "0"); } catch { /* not kept */ }
+  renderPresent();
+  dispatchEvent(new Event("resize")); // the scene refits to the whole window (pixelscale.js)
+}
+$("present-toggle").addEventListener("click", () => setPresenting(true));
+$("present-exit").addEventListener("click", () => setPresenting(false));
+addEventListener("keydown", (e) => { if (e.key === "Escape" && presenting && !document.querySelector("dialog[open]")) setPresenting(false); });
+
+// pairFor: a venue's first scenario per customer, as 一起開始 takes them.
+function pairFor(k) {
+  const scs = multiVenue() ? allScenarios().filter((x) => (x.scene || "data") === k) : allScenarios();
+  return [...new Set(scs.map((sc) => sc.consumer_id))].sort()
+    .map((c) => scs.find((x) => x.consumer_id === c && !A.isPay(x.contract)) || scs.find((x) => x.consumer_id === c)).filter(Boolean);
+}
+
+let shownPresent = "";
+function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRuns.runs) || []) {
+  const v = creds.view();
+  $("present-toggle").hidden = !v.hasHost;
+  const on = presenting && v.hasHost;
+  document.body.dataset.present = on ? "on" : "off";
+  $("present").hidden = !on;
+  // The approval panel stacks under the venues while presenting, and goes back to its side after.
+  const ap = $("approval"), right = document.querySelector(".present-right"), side = document.querySelector(".side");
+  if (on && ap.parentElement !== right) right.append(ap);
+  else if (!on && ap.parentElement !== side) side.prepend(ap);
+  if (!on) return;
+  const st = (lastReady && lastReady.status) || {};
+  const ha = st.human_approval;
+  const traits = { payments: A.paysOn(st.payment_capability) ? st.payment_capability : "", authenticator: (ha && ha.sources && ha.sources.authenticator) || "" };
+  const vs = A.venues(allScenarios());
+  const active = runs.filter((r) => r.live === "running" || r.live === "stopping");
+  const venues = vs.map((k, i) => {
+    const scs = allScenarios().filter((x) => (x.scene || "data") === k);
+    const first = scs[0];
+    return { k, n: String(i + 1).padStart(2, "0"), name: A.venue(k).name, demo: !!A.venue(k).demo,
+      sub: first ? String(first.label || "").replace(/^[^：]*：/, "") : "", busy: active.some((r) => (r.scene || "data") === k) };
+  });
+  const slots = scene.started ? scene.slots().filter((s) => s.task) : [];
+  const custs = A.showQueue(slots.map((s) => ({ ...A.showCustomer(s.consumer, scene.snapshot(s.consumer), delegationOf(s.task), traits),
+    receipt: A.showReceipt(scene.snapshot(s.consumer), traits) })), traits.payments);
+  const key = JSON.stringify([venues, venue, custs, starting, simulating, $("run-status").textContent]);
+  if (key === shownPresent) return;
+  shownPresent = key;
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+  keepFocus($("present-venue-list"), () => $("present-venue-list").replaceChildren(...venues.map((x) => {
+    const li = el("li");
+    const b = el("button", "venue-item");
+    b.type = "button";
+    b.dataset.venue = x.k;
+    b.setAttribute("aria-pressed", String(x.k === venue));
+    const name = el("span", "name", x.name);
+    name.append(el("small", "", (x.demo ? "示範情境・" : "") + x.sub));
+    const state = el("span", "state", x.busy ? "交易中" : "待命");
+    state.dataset.state = x.busy ? "busy" : "idle";
+    b.append(el("span", "n", x.n), name, state);
+    b.addEventListener("click", () => { if (venue === x.k) return; venue = x.k; shownControl = ""; renderControl(); refreshPanels(); });
+    li.append(b);
+    if (x.k === venue) {
+      const go = el("button", "venue-go", "開始這個場域的交易");
+      go.type = "button";
+      go.disabled = starting || simulating || x.busy;
+      go.title = x.busy ? "這個場域的交易還在進行" : "每位客人先確認委託，再各自開始";
+      go.addEventListener("click", () => startAll(pairFor(x.k)));
+      li.append(go);
+    }
+    return li;
+  })));
+  $("present-status").textContent = $("run-status").textContent;
+  const steps = $("present-steps");
+  steps.hidden = !custs.models.length;
+  steps.replaceChildren(el("p", "eyebrow", "THE TRANSACTION"), ...custs.models.map((m) => {
+    const box = el("div", "present-cust");
+    box.dataset.consumer = m.consumer;
+    box.append(el("h3", "", m.name + " 的 Agent" + (m.amount ? "・" + m.amount : "")));
+    const ol = el("ol", "present-step-list");
+    m.steps.forEach((s, i) => {
+      const li = el("li");
+      li.dataset.state = s.state;
+      const body = el("span", "", s.label);
+      if (s.text) body.append(el("small", "", s.text));
+      li.append(el("span", "n", String(i + 1).padStart(2, "0")), body);
+      ol.append(li);
+    });
+    box.append(ol);
+    if (m.receipt) {
+      const r = el("div", "present-receipt");
+      for (const row of m.receipt.rows) {
+        const chip = row.href ? el("a", "", row.label + " ↗") : el("span", "", row.label + "：" + row.text);
+        if (row.href) { chip.href = row.href; chip.target = "_blank"; chip.rel = "noopener noreferrer"; }
+        r.append(chip);
+      }
+      box.append(r);
+    }
+    return box;
+  }), ...(custs.note ? [el("p", "present-queue", custs.note)] : []));
+}
+
 function renderControl() {
   const v = creds.view();
   const box = $("control");
@@ -707,6 +814,7 @@ function renderControl() {
   all.disabled = starting || simulating || pair.every((sc) => busy.has(sc.consumer_id)) || full;
   all.onclick = () => startAll(pair);
   renderNext(runs);
+  renderPresent(runs);
   // What the folded runs list would hide stays in its summary and in the
   // status bar: the runs' history (interrupted, a record not written) apart
   // from what cannot be read now (review of 7ffc45d, R2).

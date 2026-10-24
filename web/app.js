@@ -820,6 +820,8 @@ forget();
 {
   const canvas = $("unity-canvas"), frame = canvas.parentElement, host = document.body.dataset.page === "host";
   attachZoom({ canvas, frame, controls: $("scene-zoom"), key: "apa-zoom-" + (host ? "host" : "viewer"),
-    avail: () => ({ w: frame.parentElement.clientWidth, h: Math.max(320, innerHeight - (host ? 150 : 520)) }) });
+    // 簡報模式 (docs/commercial-town.md T1): the whole window is the scene's.
+    avail: () => (document.body.dataset.present === "on" ? { w: innerWidth, h: innerHeight }
+      : { w: frame.parentElement.clientWidth, h: Math.max(320, innerHeight - (host ? 150 : 520)) }) });
 }
 unity.load();

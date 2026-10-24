@@ -100,7 +100,7 @@ try {
   const states = `[...${card}.querySelectorAll(".show-step")].map((e) => e.dataset.state).join(" ")`;
   check("the window: A waits for the approval (done done now todo todo)", await s.waitFor(`!!${card} && ${states} === "done done now todo todo"`, 40000),
     await s.evaluate(`${card} ? ${card}.textContent : "no card"`));
-  check("the steps in plain words: the delegation, the quote, the approval", await s.evaluate(`${card}.textContent.includes("客人交代 Agent：預算 5.00 USDC，超過 0.10 USDC 要問本人")
+  check("the steps in plain words: the delegation, the quote, the approval", await s.evaluate(`${card}.textContent.includes("主持人代為確認委託（示範，不是本人）：預算 5.00 USDC，超過 0.10 USDC 要問本人")
     && ${card}.textContent.includes("報價") && ${card}.textContent.includes("超過自動範圍，等核准（示範：由主持人代為核准）")`), await s.evaluate(`${card}.textContent`));
   check("the caption under the scene", (await s.evaluate(`document.getElementById("show-captions").textContent`)) === "客人 A・核准：超過自動範圍，等核准（示範：由主持人代為核准）");
   check("Unity's report comes back to the host page (the slot shown)", await drawn(s, hostShown("consumer-a")));
