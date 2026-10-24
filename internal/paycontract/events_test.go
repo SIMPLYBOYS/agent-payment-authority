@@ -120,6 +120,19 @@ func TestEventShape(t *testing.T) {
 	if ValidateEvent(reg, bound, nil) == nil {
 		t.Error("DELEGATION_BOUND took run conditions")
 	}
+	// Gap 4: a delegation confirmed by the person's device names the Signer's confirmation; nothing else does.
+	byDevice := es[1]
+	byDevice.Payload.AuthorizationMethod, byDevice.Payload.SignerApprovalID = "webauthn", "dconf-1"
+	if err := ValidateEvent(reg, byDevice, nil); err != nil {
+		t.Errorf("DELEGATION_BOUND confirmed by device: %v", err)
+	}
+	for _, c := range [][2]string{{"webauthn", ""}, {"simulated", "dconf-1"}, {"simulated", ""}, {"", "dconf-1"}} {
+		x := es[1]
+		x.Payload.AuthorizationMethod, x.Payload.SignerApprovalID = c[0], c[1]
+		if ValidateEvent(reg, x, nil) == nil {
+			t.Errorf("DELEGATION_BOUND took method %q with Signer %q", c[0], c[1])
+		}
+	}
 	started.Payload.RunConditions, started.Version = run, contracts.Version
 	if reg.ValidateEvent(started, nil) == nil {
 		t.Error("M1 took run conditions")

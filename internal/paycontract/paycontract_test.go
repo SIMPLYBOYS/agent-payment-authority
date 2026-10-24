@@ -3,6 +3,7 @@ package paycontract
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -258,6 +259,66 @@ func TestGrantAndDelegation(t *testing.T) {
 	d.AllowMax = "5000001"
 	if Code(d.Validate()) != "INVALID_DELEGATION" {
 		t.Error("allow_max above the budget accepted")
+	}
+	// Gap 4: a device confirmation names the Signer's confirmation and the credential; a simulated one neither.
+	d.AllowMax = "100000"
+	dev := d
+	dev.ConfirmMethod, dev.ConfirmedBy, dev.SignerConfirmationID, dev.CredentialRef = "webauthn", "webauthn:approver-a", "dconf-1", "sha256:"+strings.Repeat("ab", 32)
+	if err := dev.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, x := range map[string]Delegation{
+		"webauthn without the Signer's":   func() Delegation { y := dev; y.SignerConfirmationID = ""; return y }(),
+		"webauthn without the credential": func() Delegation { y := dev; y.CredentialRef = "x"; return y }(),
+		"simulated naming the Signer's":   func() Delegation { y := d; y.SignerConfirmationID = "dconf-1"; return y }(),
+		"another method":                  func() Delegation { y := dev; y.ConfirmMethod = "voice"; return y }(),
+	} {
+		if Code(x.Validate()) != "INVALID_DELEGATION" {
+			t.Errorf("%s accepted", name)
+		}
+	}
+}
+
+// Gap 4: the terms the person confirms hash the same every time, change
+// with any field, and are refused when malformed.
+func TestDelegationTerms(t *testing.T) {
+	terms := DelegationTerms{Version: Version, DelegationID: DelegationID("r"), ConsumerID: "consumer-a", WalletID: "wallet-a", ChainID: "84532",
+		AssetContract: "0x" + strings.Repeat("4", 40), Merchants: []string{"0x" + strings.Repeat("3", 40)}, Purpose: "買一份簡報",
+		TaskBudget: "1500000", AllowMax: "100000", ApprovalDeadlineSeconds: 180, ValidSeconds: 1800}
+	h, err := terms.Hash()
+	if err != nil || !digestPattern.MatchString(h) {
+		t.Fatalf("hash %q %v", h, err)
+	}
+	if h2, _ := terms.Hash(); h2 != h {
+		t.Fatal("the same terms hashed differently")
+	}
+	changed := terms
+	changed.TaskBudget = "1500001"
+	if h3, _ := changed.Hash(); h3 == h || h3 == "" {
+		t.Error("another budget, the same hash")
+	}
+	v2 := terms
+	v2.Version = V2
+	if h4, _ := v2.Hash(); h4 == h || h4 == "" {
+		t.Error("another version's domain, the same hash")
+	}
+	for name, f := range map[string]func(*DelegationTerms){
+		"no wallet":          func(x *DelegationTerms) { x.WalletID = "" },
+		"chain 0":            func(x *DelegationTerms) { x.ChainID = "0" },
+		"chain 084532":       func(x *DelegationTerms) { x.ChainID = "084532" },
+		"mixed-case asset":   func(x *DelegationTerms) { x.AssetContract = "0x" + strings.Repeat("A", 40) },
+		"no merchant":        func(x *DelegationTerms) { x.Merchants = nil },
+		"allow above budget": func(x *DelegationTerms) { x.AllowMax = "1500001" },
+		"no validity":        func(x *DelegationTerms) { x.ValidSeconds = 0 },
+		"deadline above 600": func(x *DelegationTerms) { x.ApprovalDeadlineSeconds = 601 },
+		"another version":    func(x *DelegationTerms) { x.Version = "apa.pay.v9" },
+	} {
+		x := terms
+		x.Merchants = slices.Clone(terms.Merchants)
+		f(&x)
+		if _, err := x.Hash(); Code(err) != "INVALID_DELEGATION_TERMS" {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }
 

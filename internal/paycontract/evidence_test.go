@@ -27,7 +27,9 @@ func TestEvidenceTable(t *testing.T) {
 		{fake, ev("TASK_STARTED", ""), "fixture", "host"},
 		{live, ev("PURCHASE_PROPOSED", ""), "live", "live_cli"},
 		{fake, ev("PURCHASE_PROPOSED", ""), "fixture", "fake_cli"},
-		{live, ev("DELEGATION_BOUND", ""), "fixture", "simulated"}, // never live
+		{live, ev("DELEGATION_BOUND", ""), "fixture", "simulated"},            // a simulated confirmation is never live
+		{live, ev("DELEGATION_BOUND", "webauthn"), "live", "signer_webauthn"}, // gap 4: the person's device
+		{fake, ev("DELEGATION_BOUND", "webauthn"), "fixture", "virtual_authenticator"},
 		{live, ev("CREDENTIAL_VERIFIED", ""), "fixture", "test_issuer"},
 		{live, ev("APPROVED", "simulated"), "fixture", "simulated"},
 		{live, ev("APPROVED", "webauthn"), "live", "signer_webauthn"},

@@ -433,7 +433,10 @@ func e1aMode(r contracts.RunConditions, e contracts.AuditEvent) (string, string)
 		return "fixture", "fake_cli"
 	case "TASK_STARTED", "POLICY_DECIDED", "TASK_CANCELLED", "TASK_TIMED_OUT", "CLI_EXITED":
 		return agent, "host"
-	case "DELEGATION_BOUND":
+	case "DELEGATION_BOUND": // by its confirmation's method (gap 4); a record without one is simulated
+		if e.Payload.AuthorizationMethod == "webauthn" {
+			return auth()
+		}
 		return "fixture", "simulated"
 	case "CREDENTIAL_VERIFIED":
 		return "fixture", "test_issuer"

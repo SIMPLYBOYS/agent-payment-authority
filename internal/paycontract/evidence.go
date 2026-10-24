@@ -66,7 +66,10 @@ func Evidence(r *RunConditions, e contracts.AuditEvent) (mode, source string, ok
 		return "fixture", "fake_cli", true
 	case "TASK_STARTED", "POLICY_DECIDED", "TASK_CANCELLED", "TASK_TIMED_OUT", "CLI_EXITED":
 		return agent, "host", true
-	case "DELEGATION_BOUND": // the only confirmation there is: simulated (store ConfirmMethod)
+	case "DELEGATION_BOUND": // by its confirmation's method (gap 4); a record without one is simulated
+		if e.Payload.AuthorizationMethod == "webauthn" {
+			return auth()
+		}
 		return "fixture", "simulated", true
 	case "CREDENTIAL_VERIFIED": // a test issuer's credential
 		return "fixture", "test_issuer", true

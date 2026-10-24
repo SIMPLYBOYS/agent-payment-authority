@@ -147,6 +147,12 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 		if purchase {
 			return errf("a delegation is bound to the task, not a purchase")
 		}
+		if p.AuthorizationMethod != "" { // gap 4: confirmed by the person's device, the Signer's confirmation named; a simulated one says nothing more (as before)
+			if p.AuthorizationMethod != "webauthn" || !ids(p.SignerApprovalID) {
+				return errf("a delegation's confirmation is webauthn with the Signer's confirmation")
+			}
+			return only("delegation", "method", "signer")
+		}
 		return only("delegation")
 	case "PURCHASE_PROPOSED":
 		if !purchase {

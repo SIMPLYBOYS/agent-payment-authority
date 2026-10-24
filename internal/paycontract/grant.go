@@ -9,7 +9,9 @@ import (
 // Delegation is what a consumer confirmed before a task (section 3.2): the
 // need, the merchants, the asset, the task budget and allow_max, all from
 // the host's trusted catalog and profile; the confirmer only confirms. In
-// P1-a the confirmer is the fake-only simulated approver.
+// P1-a the confirmer is the fake-only simulated approver; from gap 4 a host
+// that pays takes the person's registered device only (webauthn), which the
+// Signer verified and keeps (docs/commercial-gap4.md).
 type Delegation struct {
 	Version                 string           `json:"version"`
 	DelegationID            string           `json:"delegation_id"`
@@ -22,9 +24,13 @@ type Delegation struct {
 	AllowMax                contracts.Amount `json:"allow_max"`
 	ApprovalDeadlineSeconds uint64           `json:"approval_deadline_seconds"`
 	ConfirmedBy             string           `json:"confirmed_by"`
-	ConfirmMethod           string           `json:"confirm_method"` // simulated (P1-a)
+	ConfirmMethod           string           `json:"confirm_method"` // simulated (P1-a) | webauthn (gap 4)
 	ConfirmedAt             uint64           `json:"confirmed_at"`
 	ExpiresAt               uint64           `json:"expires_at"`
+	// webauthn only: the Signer's confirmation (every payment names it) and
+	// the credential's reference (sha256 of its ID).
+	SignerConfirmationID string `json:"signer_confirmation_id,omitempty"`
+	CredentialRef        string `json:"credential_ref,omitempty"`
 }
 
 // DelegationID, SessionID and GrantID are apa.pay.v1's (Spec has every
@@ -50,8 +56,12 @@ func (d Delegation) Validate() error {
 		return coded("INVALID_DELEGATION", "task_budget must be positive and allow_max within it")
 	case d.ApprovalDeadlineSeconds == 0 || d.ApprovalDeadlineSeconds > 600:
 		return coded("INVALID_DELEGATION", "approval deadline must be 1 to 600 seconds")
-	case d.ConfirmMethod != "simulated":
-		return coded("INVALID_DELEGATION", "P1-a confirms by simulation only")
+	case d.ConfirmMethod == "simulated" && (d.SignerConfirmationID != "" || d.CredentialRef != ""):
+		return coded("INVALID_DELEGATION", "a simulated confirmation is the host's, with no Signer confirmation")
+	case d.ConfirmMethod == "webauthn" && (!ids(d.SignerConfirmationID) || !digestPattern.MatchString(d.CredentialRef)):
+		return coded("INVALID_DELEGATION", "a webauthn confirmation names the Signer's confirmation and the credential")
+	case d.ConfirmMethod != "simulated" && d.ConfirmMethod != "webauthn":
+		return coded("INVALID_DELEGATION", "confirmed by simulation or by the person's device (webauthn)")
 	case !timestamp(d.ConfirmedAt) || d.ExpiresAt <= d.ConfirmedAt:
 		return coded("INVALID_DELEGATION", "times")
 	}
