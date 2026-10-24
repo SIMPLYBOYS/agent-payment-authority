@@ -161,7 +161,7 @@ export const decidedText = (state, p, pays = false) => {
   const r = decided(state, p, pays, g, now, paid);
   // C3: a payment that did not go through says the host's next step, in place of "see the card".
   const nx = r && p && p.payment ? paymentNext(p.payment) : "";
-  return nx ? [r[0], r[1], nx] : r;
+  return !nx ? r : r[0] === "warn" ? [r[0], r[1], r[2] + nx] : [r[0], r[1], nx]; // a degraded approval keeps its reason (review)
 };
 const decided = (state, p, pays, g, now, paid) => {
   if (state === "approved" && byDevice(p) && g && g.voice === "unavailable") {

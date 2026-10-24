@@ -38,7 +38,8 @@ function todayRow(name, { sent, cap }, need) {
   const left = Math.max(cap - sent, 0);
   const head = "已送 " + sent + "／" + cap + " 筆（UTC 日，台北 08:00 歸零）";
   return left === 0 ? [name, "error", head + "：已達上限，今天不能再付款。下一步：台北 08:00 後再開場，或改用本機場"]
-    : left < need ? [name, "unconfirmed", head + "：剩 " + left + " 筆，不夠一場兩位客人（要 " + need + " 筆）。下一步：只跑一位客人，或台北 08:00 後再開場"]
+    : left < need ? [name, "unconfirmed", head + "：剩 " + left + " 筆，不夠一場兩位客人（要 " + need + " 筆）。下一步："
+      + (left >= need / 2 ? "只跑一位客人，或台北 08:00 後再開場" : "不夠一位客人（review：登記後就沒有預留的額度）；台北 08:00 後再開場，或改用本機場")]
     : [name, "ok", head + "：剩 " + left + " 筆"];
 }
 // approverText: who approves, by the authenticator the host names (never a virtual one as a device).
@@ -677,7 +678,7 @@ const REVIEW = { RESERVED_NOT_PAID: "預算已預留，但付款沒有送出", N
   RECONCILE_NEEDS_REVIEW: "鏈上對帳需人工判斷" };
 // paymentNext (C3, docs/host-manual.md 6.4): what the host does next about a
 // payment that did not go through, by its code; "" when nothing is to be done.
-export const AGAIN = "要再買這一筆，等這位客人的場次結束（或按卡片上的「停止 Agent」）後再開始一次";
+export const AGAIN = "要再買這一筆，等這位客人的場次結束（或按 Agent 卡片上的「停止 Agent」）後再開始一次";
 const NEXT = {
   not_paid: { RESERVE_FAILED: "看啟動 demo 的終端機上 relayer 拒絕的原因，與就緒表的「relayer 今天」；今天的額度用完就等台北 08:00 後再開場，今天不要再試",
     NOT_PAID_EXPIRED: AGAIN, TASK_ENDED: AGAIN },

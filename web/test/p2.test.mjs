@@ -121,7 +121,11 @@ test("P2: a person's approval says not paid yet with local_anvil", async () => {
   assert.equal(AP.decidedText("approved", paidDev, true)[1], "本人核准已驗證；已付款、已交付（區塊 11），附收據。");
   assert.equal(AP.decidedText("approved", paidDev)[1], "本人核准已驗證；已付款、已交付（區塊 11），附收據。"); // a recorded payment, said on any host
   const review = { ...dev, payment: { status: "needs_review", state: "needs_review", code: "RESERVED_NOT_PAID" } };
-  assert.match(AP.decidedText("approved", review, true)[2], /^下一步：錢沒有動/); // the panel's line under the heading: the next step, not "see the card"
+  assert.match(AP.decidedText("approved", review, true)[2], /^下一步：錢沒有動/);
+  // A voice refusal and a degraded approval: the next step, and a degraded one keeps its reason.
+  assert.match(AP.decidedText("denied", { ...dev, closed_reason: "VOICE_CHALLENGE_FAILED" })[2], /下一步：要再買這一筆.*等「錄音中」出現再唸/);
+  const degraded = { ...review, approval: { ...review.approval, grant: { ...review.approval.grant, voice: "unavailable", voice_reason: "VOICE_UNAVAILABLE" } } };
+  assert.match(AP.decidedText("approved", degraded, true)[2], /^語音不可用.*下一步：錢沒有動/); // the panel's line under the heading: the next step, not "see the card"
   assert.match(AP.decidedText("approved", review, true)[1], /^本人核准已驗證；待人工處理：預算已預留，但付款沒有送出/);
   const sim = { approval: { resolved_by: "simulated:consumer-a:host", grant: { authorization_method: "simulated" } }, payment: { status: "paid", state: "delivered" } };
   assert.equal(AP.decidedText("approved", sim, true)[1], "已核准（模擬），未啟用付款"); // a simulated approval never reads as paid
@@ -270,6 +274,9 @@ test("the services' readiness rows", () => {
   assert.deepEqual(t["relayer 今天"], ["error", "已送 12／12 筆（UTC 日，台北 08:00 歸零）：已達上限，今天不能再付款。下一步：台北 08:00 後再開場，或改用本機場"]);
   assert.deepEqual(t["商店今天"], ["unconfirmed", "已送 3／4 筆（UTC 日，台北 08:00 歸零）：剩 1 筆，不夠一場兩位客人（要 2 筆）。下一步：只跑一位客人，或台北 08:00 後再開場"]);
   assert.deepEqual(today({ sent: 8, cap: 12 }, { sent: 0, cap: 4 })["relayer 今天"], ["ok", "已送 8／12 筆（UTC 日，台北 08:00 歸零）：剩 4 筆"]);
+  // One customer needs half (review): with 1 left the relayer cannot register and reserve, so no "只跑一位客人".
+  assert.match(today({ sent: 11, cap: 12 }, { sent: 0, cap: 4 })["relayer 今天"][1], /不夠一位客人/);
+  assert.match(today({ sent: 10, cap: 12 }, { sent: 0, cap: 4 })["relayer 今天"][1], /只跑一位客人/);
   assert.ok(!("relayer 今天" in Object.fromEntries(A.serviceRows({ signer: "ready", voice: "ready", relayer: "ready" }))), "not read: no row, no guess");
   const rows = A.serviceRows({ signer: "ready", voice: "ready", relayer: "ready" });
   assert.deepEqual(rows.map(([k, s]) => k + ":" + s), ["Signer:ok", "語音服務:ok", "relayer:ok"]);

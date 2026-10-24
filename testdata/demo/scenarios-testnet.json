@@ -12,7 +12,7 @@
     "purpose": "買一份韓國市場簡報（數位資料）",
     "task_budget": "5000000",
     "allow_max": "100000",
-    "approval_deadline_seconds": 120,
+    "approval_deadline_seconds": 180,
     "valid_seconds": 1800
    }
   },
@@ -42,7 +42,7 @@
     "purpose": "買一份韓國市場簡報（數位資料）",
     "task_budget": "5000000",
     "allow_max": "100000",
-    "approval_deadline_seconds": 120,
+    "approval_deadline_seconds": 180,
     "valid_seconds": 1800
    }
   },

@@ -481,7 +481,7 @@ function setRunStatus(text, state) {
 
 const ERRORS = {
   run_active: "上一場尚未結束；請先等它結束或停止它",
-  consumer_busy: "這位客人的場次尚未結束；請先等它結束，或按卡片上的「停止 Agent」",
+  consumer_busy: "這位客人的場次尚未結束；請先等它結束，或按 Agent 卡片上的「停止 Agent」",
   capacity_full: "同時執行的場次已達上限（部署設定）；請先等一場結束或停止一場",
   no_free_task: "展示 task 已用完。下一步：找開發者擴充 registry；不要換新的資料庫（Signer 記得做過的 task，會拒絕重複的）", // C3 review: never a new APA_DB_PATH
   request_id_conflict: "請求編號與另一個情境衝突，未開始",

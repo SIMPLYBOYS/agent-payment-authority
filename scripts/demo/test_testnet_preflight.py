@@ -6,6 +6,7 @@ Needs local sockets (outside a sandbox that forbids them).
 """
 import json
 import os
+import shutil
 import socketserver
 import subprocess
 import sys
@@ -60,6 +61,8 @@ def run(health, usdc, gas, price=GWEI // 100):
     finally:
         node.shutdown()
         relayer.shutdown()
+        relayer.server_close()
+        shutil.rmtree(d, ignore_errors=True)
 
 
 READY = {"state": "ready", "daily_tx_cap": 12, "sent_today": 8, "gas": "0x" + "1" * 40, "issuer": "0x" + "2" * 40}
