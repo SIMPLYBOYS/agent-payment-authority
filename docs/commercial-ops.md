@@ -45,7 +45,7 @@ sh scripts/demo/demo-testnet.sh live t3    # 真實 Agent，E1-a 的 host 檔（
 - 順序：sudo 密碼一次 → 語音服務（背景，等健康檢查，約 2～3 分鐘）→ relayer 密語 → Signer 密語 → Host（打開頁面、印出配對碼）。每一步卡住會說卡在哪。Ctrl-C 停下這次啟動的全部。
 - 每一場實際付款仍照往例先請 Aaron 核准（測試 USDC 與 gas）；開始前照 `docs/commercial-e1a.md` 6.2 確認餘額、每日上限與委託總額。
 - **開場前檢查（C4，10/24）**：relayer 就緒後、Signer 之前，`scripts/demo/testnet-preflight.py`（唯讀）問 relayer 今天已送幾筆（`/v1/health` 的 `sent_today`，與每日上限同一個計數：UTC 日、含 issuer 的登記），並讀鏈上兩個錢包的測試 USDC、relayer-gas、issuer、商店的 gas。
-  - 不夠一場兩位客人（relayer 4 筆、每個錢包 0.50、每把 gas 0.00001 ETH）就停下，說哪一項不夠；查不到就說原因、繼續啟動。
+  - 不夠一場兩位客人（relayer 4 筆、每個錢包 0.50、每把 gas 夠兩筆交易：依當下 gas price 計算，10/24 約 0.000012 ETH）就停下，說哪一項不夠；查不到或有一項沒檢查（例如舊版 relayer 不回報筆數）就說原因、繼續啟動（exit 2，不會當成通過）。
   - 主持人頁就緒表多兩列：「relayer 今天」「商店今天」（已送／上限，剩幾筆；不夠一場時標黃，已達上限標紅）。商店的計數只在 Host 裡讀得到，所以只在就緒表。
   - 起因：10/24 第一次批次 3 testnet 實跑，A 核准後預留被 `RELAYER_DAILY_CAP` 拒絕，事前看不到（`docs/commercial-gap3.md` 3.2）。
   - 測試：`go test ./internal/budget ./internal/merchant ./cmd/demo ./cmd/apa-relayer`；網頁 `p2.test.mjs`；preflight 以假的 relayer socket 與假節點測過足夠（exit 0）、不夠（exit 1，逐項說明）、查不到（exit 2）三種。

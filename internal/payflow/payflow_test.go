@@ -428,8 +428,14 @@ func TestRefusals(t *testing.T) {
 		w.start(po)
 	}
 	w.relayer.reserveErr = signer.Refusal("OVER_BUDGET")
-	if p, _ := w.step("po-1"); p.State != "reserve_failed" {
+	var refused []string
+	rk := w.worker()
+	rk.Log = func(_ string, err error) { refused = append(refused, err.Error()) }
+	if p, _ := rk.Step(bg, w.payment("po-1")); p.State != "reserve_failed" {
 		t.Fatalf("relayer refusal: %+v", p)
+	}
+	if len(refused) != 1 || !strings.Contains(refused[0], "OVER_BUDGET") { // the relayer's reason on the terminal (10/24: RELAYER_DAILY_CAP)
+		t.Fatalf("logged %q", refused)
 	}
 	w.signer.err = signerclient.Refused("OVER_PER_TX")
 	if p, _ := w.step("po-2"); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" {

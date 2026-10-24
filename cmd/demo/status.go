@@ -177,7 +177,8 @@ type humanApproval struct {
 
 // hostStatus answers the host and the operator tokens
 // (docs/demo-operation-design.md sections 6.1, 13.8 R4). It reads what the host already knows, stats the build
-// files and, with --approvals-signer, asks the Signer and the relayer for their health (at most servicesWait);
+// files and, with --approvals-signer, asks the Signer and the relayer for their health and the shop's
+// settlements today (C4) (at most servicesWait);
 // it calls nothing of the Store, so asking never writes.
 func (a *api) hostStatus(w http.ResponseWriter, r *http.Request) {
 	g, ok := a.authorize(w, r)

@@ -35,6 +35,15 @@ func (f *fake) Reserve(_ context.Context, order json.RawMessage) (Evidence, erro
 	return Evidence{IntentHash: "sha256:x", Amount: 5, TxHash: "0xab", BlockNumber: 7}, nil
 }
 
+// plain serves without counting; failing counts with an error.
+type plain struct{ *fake }
+
+func (plain) SentToday() {} // not the counter's signature: not a sentCounter
+
+type failing struct{ *fake }
+
+func (failing) SentToday(context.Context) (uint64, error) { return 0, errors.New("db") }
+
 // SentToday: today's count, as a *Relayer answers it (C4).
 func (f *fake) SentToday(context.Context) (uint64, error) { return 7, nil }
 
@@ -76,6 +85,12 @@ func TestSocketCarriesTheRelayersAnswers(t *testing.T) {
 		t.Fatalf("health %+v %v", h, err)
 	} else if h.SentToday = nil; h != (Health{State: "ready", ChainID: 84532, Contract: "0xc0", DailyTxCap: 12}) {
 		t.Fatalf("health %+v", h)
+	}
+	// A Service that does not count, or a count that fails: no sent_today, never a guess.
+	for _, s := range []Service{plain{f}, failing{f}} {
+		if h, err := socketPair(t, s, []uint32{uint32(os.Getuid())}).Health(bg); err != nil || h.SentToday != nil {
+			t.Fatalf("%T: %+v %v", s, h, err)
+		}
 	}
 	if err := c.RegisterTask(bg, "show-a-01", "consumer-a", 100); err != nil || len(f.registered) != 1 || f.registered[0] != "show-a-01/consumer-a" {
 		t.Fatalf("register %v %v", err, f.registered)

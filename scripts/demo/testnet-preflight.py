@@ -6,8 +6,10 @@ against its cap, and the balances the show spends from, read-only.
 
 Prints one line per check. Exit 0: enough for one show of two customers
 (the relayer 4: two registrations, two reservations; each wallet one 0.50
-brief); 1: not enough, with why; 2: could not check. The shop's own count
-is in the Host's readiness table (its database is the Host's).
+brief; each gas key two transactions at today's gas price); 1: not enough,
+with why; 2: something could not be checked (review: never a clean pass
+then). The shop's own count is in the Host's readiness table (its database
+is the Host's).
 """
 import http.client
 import json
@@ -17,7 +19,8 @@ import urllib.request
 
 NEED_RELAYER = 4           # two registrations, two reservations
 NEED_USDC = 500000         # one 0.50 brief per customer (6 decimals)
-NEED_GAS = 10**13          # 0.00001 ETH: about ten transactions at Base Sepolia's fees
+TX_GAS = 500000            # one transaction's gas, above a reservation's (~420k); the L1 data fee on top is small on Base Sepolia
+TXS = {"relayer-gas": 2, "issuer": 2, "shop": 2}  # a show of two customers: reservations, registrations, settlements
 
 
 class UnixHTTP(http.client.HTTPConnection):
@@ -53,22 +56,29 @@ def rpc(url, method, params):
 def main():
     sock, host = sys.argv[1], sys.argv[2]
     try:
-        h = health(sock)
-        pay = json.load(open(host + "/payments.json"))
-        reg = json.load(open(host + "/registry.json"))
-    except Exception as e:  # noqa: BLE001 - one line says what could not be read
-        print("preflight: 無法檢查（%s）" % e)
+        return check(sock, host)
+    except Exception as e:  # noqa: BLE001 - one line says what could not be checked; a crash is never "short"
+        print("preflight: 無法檢查（%s）" % e)  # the relayer's socket or the host files: no node URL in it
         return 2
-    short = []
+
+
+def check(sock, host):
+    h = health(sock)
+    pay = json.load(open(host + "/payments.json"))
+    reg = json.load(open(host + "/registry.json"))
+    url, token = pay["rpc"], pay["token"]
+    short, unchecked = [], False
     if "sent_today" not in h:
-        print("preflight: relayer 沒有回報今天的筆數（舊版？），未檢查")
+        unchecked = True
+        print("preflight: relayer 沒有回報今天的筆數（舊版，或讀不到），未檢查")
     else:
         left = max(h["daily_tx_cap"] - h["sent_today"], 0)
         print("preflight: relayer 今天已送 %d／%d 筆（UTC 日，台北 08:00 歸零），剩 %d" % (h["sent_today"], h["daily_tx_cap"], left))
         if left < NEED_RELAYER:
             short.append("relayer 今天只剩 %d 筆，一場兩位客人要 %d 筆（登記 2、預留 2）" % (left, NEED_RELAYER))
-    url, token = pay["rpc"], pay["token"]
     try:
+        price = rpc(url, "eth_gasPrice", [])
+        print("preflight: gas price %.4f gwei" % (price / 1e9))
         for w in reg["wallets"]:
             n = rpc(url, "eth_call", [{"to": token, "data": "0x70a08231" + w["from"][2:].lower().rjust(64, "0")}, "latest"])
             print("preflight: %s %s：%.2f test USDC" % (w["wallet_id"], w["from"], n / 1e6))
@@ -76,18 +86,20 @@ def main():
                 short.append("%s 只有 %.2f test USDC，一筆簡報要 0.50" % (w["wallet_id"], n / 1e6))
         for name, a in (("relayer-gas", h.get("gas")), ("issuer", h.get("issuer")), ("shop", pay.get("pay_to"))):
             if not a:
+                unchecked = True
                 print("preflight: %s 的位址未知，未檢查 gas" % name)
                 continue
             n = rpc(url, "eth_getBalance", [a, "latest"])
-            print("preflight: %s %s：%.7f ETH" % (name, a, n / 1e18))
-            if n < NEED_GAS:
-                short.append("%s 的 gas 只有 %.7f ETH" % (name, n / 1e18))
+            need = TXS[name] * TX_GAS * 2 * price  # the node admits a transaction at about twice the base fee
+            print("preflight: %s %s：%.7f ETH（一場約要 %.7f）" % (name, a, n / 1e18, need / 1e18))
+            if n < need:
+                short.append("%s 的 gas 只有 %.7f ETH，一場約要 %.7f" % (name, n / 1e18, need / 1e18))
     except Exception as e:  # noqa: BLE001
-        print("preflight: 讀鏈失敗（%s），餘額未檢查" % e)
-        return 2
+        print("preflight: 讀鏈失敗（%s），其餘未檢查" % str(e).replace(url, "<rpc>"))  # a node's URL may carry an API key
+        unchecked = True
     for s in short:
         print("preflight: 不夠：" + s)
-    return 1 if short else 0
+    return 1 if short else 2 if unchecked else 0
 
 
 if __name__ == "__main__":
