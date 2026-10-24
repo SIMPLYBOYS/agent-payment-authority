@@ -10,7 +10,7 @@
    "label": "資料研究室：韓國市場簡報（需要你核准・testnet 付款）",
    "delegation": {
     "purpose": "買一份韓國市場簡報（數位資料）",
-    "task_budget": "5000000",
+    "task_budget": "1500000",
     "allow_max": "100000",
     "approval_deadline_seconds": 180,
     "valid_seconds": 1800
@@ -25,7 +25,7 @@
    "label": "街角咖啡：12:30 取餐的午餐套餐（範圍內自動付款・testnet 付款）",
    "delegation": {
     "purpose": "訂 12:30 取餐的午餐套餐（示意菜單）",
-    "task_budget": "5000000",
+    "task_budget": "1500000",
     "allow_max": "100000",
     "approval_deadline_seconds": 120,
     "valid_seconds": 1800
@@ -40,7 +40,7 @@
    "label": "資料研究室：韓國市場簡報（需要你核准・testnet 付款）",
    "delegation": {
     "purpose": "買一份韓國市場簡報（數位資料）",
-    "task_budget": "5000000",
+    "task_budget": "1500000",
     "allow_max": "100000",
     "approval_deadline_seconds": 180,
     "valid_seconds": 1800
@@ -55,7 +55,7 @@
    "label": "街角咖啡：12:30 取餐的午餐套餐（範圍內自動付款・testnet 付款）",
    "delegation": {
     "purpose": "訂 12:30 取餐的午餐套餐（示意菜單）",
-    "task_budget": "5000000",
+    "task_budget": "1500000",
     "allow_max": "100000",
     "approval_deadline_seconds": 120,
     "valid_seconds": 1800

@@ -649,7 +649,7 @@ function renderControl() {
   $("live-warning").hidden = !live;
   for (const x of $("live-warning").querySelectorAll("summary, p")) {
     if (!x.dataset.plain) x.dataset.plain = x.textContent;
-    x.textContent = live && payingNow() ? x.dataset.plain.replace(/合成資料([・、])不付款/, "合成資料$1付款以" + A.PAYING[lastReady.status.payment_capability] + "（測試 USDC）實際進行$1委託是模擬") : x.dataset.plain;
+    x.textContent = live && payingNow() ? x.dataset.plain.replace(/合成資料([・、])不付款/, "合成資料$1付款以" + A.PAYING[lastReady.status.payment_capability] + "（測試 USDC）實際進行$1" + (deviceDelegations() ? "委託由客人本人以裝置確認" : "委託是模擬")) : x.dataset.plain;
   }
   const runs = (lastRuns && lastRuns.gen === creds.gen && lastRuns.runs) || [];
   // M-B: one running or stopping run per consumer, at most max_runs in all
@@ -679,13 +679,14 @@ function renderControl() {
   // nothing keeps the focus and an open confirmation where they are.
   if (delegating && delegating.gen !== creds.gen) delegating = null;
   const simC = v.simConsumer;
-  const key = JSON.stringify([models, scenarios, live, starting, cancelling, full, [...busy], confirming, simC, delegating, simulating]);
+  const key = JSON.stringify([models, scenarios, live, starting, cancelling, full, [...busy], confirming, simC, delegating, simulating, deviceDelegations()]);
   if (key !== shownControl) {
     shownControl = key;
     keepFocus(pick, () => pick.replaceChildren(...models.map((m) => agentCard(m, scenarios.filter((x) => x.consumer_id === m.c), { live, busy, full, simC }))));
   }
   const pay = scenarios.some((x) => A.isPay(x.contract));
   $("control-note").textContent = !pay ? "M1 無核准能力：Ask 30 秒後由後端記錄到期。開始只建立新的 task。"
+    : deviceDelegations() ? "委託由客人用已登記的裝置確認（本人；Signer 驗證），Ask 由" + approver() + "核准；" + (payingNow() ? "Allow 與本人核准的請購由 Host 付款（" + A.PAYING[lastReady.status.payment_capability] + "、測試 USDC），Signer 只在客人確認的委託範圍內簽。" : "未啟用付款。") + "開始只建立新的 task。"
     : payingNow() ? "委託是 fake 模擬：主持人扮演客人確認委託（不是本人驗證）。Ask 由" + approver() + "核准；Allow 與本人核准的請購由 Host 付款（" + A.PAYING[lastReady.status.payment_capability] + "、測試 USDC）。開始只建立新的 task。"
     : humanNow() ? "委託是 fake 模擬：主持人扮演客人確認委託（不是本人驗證）。Ask 由" + approver() + "核准；未啟用付款。開始只建立新的 task。"
     : "委託與核准是 fake 模擬：主持人扮演客人，不是本人驗證；核准只留下模擬授權，未啟用付款。開始只建立新的 task。";
@@ -701,7 +702,8 @@ function renderControl() {
   const all = $("start-all");
   all.hidden = pair.length < 2 || maxRuns < 2;
   all.textContent = "一起開始：" + pair.map((sc) => sc.id + "（" + short(sc.consumer_id) + "）").join(" ＋ ")
-    + (pair.some((sc) => A.isPay(sc.contract)) ? "（依序：主持人扮演每位客人確認委託（模擬）再開始；各自送出，不保證都成功）" : "（各自送出，不保證都成功）");
+    + (!pair.some((sc) => A.isPay(sc.contract)) ? "（各自送出，不保證都成功）"
+      : deviceDelegations() ? "（依序：每位客人用自己的裝置確認委託，再開始；各自送出，不保證都成功）" : "（依序：主持人扮演每位客人確認委託（模擬）再開始；各自送出，不保證都成功）");
   all.disabled = starting || simulating || pair.every((sc) => busy.has(sc.consumer_id)) || full;
   all.onclick = () => startAll(pair);
   renderNext(runs);
@@ -815,7 +817,7 @@ function agentCard(m, scs, { live, busy, full, simC }) {
   acts.append(sel);
   const payScs = scs.filter((sc) => A.isPay(sc.contract));
   if (payScs.length) {
-    if (simC !== m.c) {
+    if (simC !== m.c && !deviceDelegations()) { // gap 4: with the person's device, nobody plays the customer
       const b = el("button", "agent-sim", live ? "以 " + short(m.c) + " 確認委託（模擬）" : "以 " + short(m.c) + " 模擬（fake）");
       b.type = "button";
       b.disabled = simulating;
@@ -829,8 +831,9 @@ function agentCard(m, scs, { live, busy, full, simC }) {
       const b = el("button", "agent-delegate", "建立委託" + (payScs.length > 1 ? "：" + sc.label : ""));
       b.type = "button";
       b.dataset.scenario = sc.id;
-      b.disabled = starting || busy.has(m.c) || full || simC !== m.c;
-      b.title = simC !== m.c ? "先「以 " + short(m.c) + " 模擬」" : busy.has(m.c) ? "這位客人的場次尚未結束" : full ? "同時執行的場次已達上限" : "看委託內容，確認後開始";
+      const needSim = !deviceDelegations() && simC !== m.c;
+      b.disabled = starting || busy.has(m.c) || full || needSim;
+      b.title = needSim ? "先「以 " + short(m.c) + " 模擬」" : busy.has(m.c) ? "這位客人的場次尚未結束" : full ? "同時執行的場次已達上限" : "看委託內容，確認後開始";
       b.addEventListener("click", () => { delegating = { gen: creds.gen, consumer: m.c, scenario: sc.id }; renderControl(); focusIn('.delegation[data-scenario="' + CSS.escape(sc.id) + '"] .delegation-confirm'); });
       acts.append(b);
     }
@@ -1023,6 +1026,55 @@ async function simulateAs(c) {
   focusIn('.agent-card[data-consumer="' + CSS.escape(c) + '"] .agent-delegate');
 }
 
+// deviceDelegations (gap 4; docs/commercial-gap4.md 2.3): on a host with the
+// person's approval by device (A2), a delegation is confirmed by the
+// customer's own registered device too, through the Host and the Signer.
+const deviceDelegations = () => a2Mode();
+
+// deviceDelegation: the customer confirms sc's delegation with their device.
+// The challenge is checked to be this one's (the consumer, the delegation
+// it names, approve) before the device is asked; a verify left without an
+// answer is sent again as it was (the Signer answers what it kept).
+// { id } of the delegation, { fail } saying what is known, or null once the
+// credentials changed.
+async function deviceDelegation(sc, g) {
+  const c = sc.consumer_id;
+  const requestId = "dlg-" + crypto.randomUUID();
+  const r = await a2Call(c, "/api/delegations/challenge", { request_id: requestId, scenario: sc.id });
+  if (g !== creds.gen) return null;
+  if (r.status !== 200) return { fail: delegationFail(r) };
+  const ch = r.body && r.body.challenge, t = r.body && r.body.terms;
+  if (!ch || !t || ch.consumer_id !== c || t.consumer_id !== c || ch.approval_session_id !== t.delegation_id || ch.decision !== "approve" || !ch.options || !ch.options.publicKey) {
+    return { fail: "回傳的資料和這次確認不一致，已停止，沒有要求裝置驗證" };
+  }
+  let cred;
+  try {
+    cred = await navigator.credentials.get({ publicKey: AP.requestOptions(ch.options) });
+  } catch (e) {
+    if (g !== creds.gen) return null;
+    return { fail: e && e.name === "NotAllowedError" ? "裝置驗證沒有完成（取消、逾時或沒有可用的裝置）" : "瀏覽器拒絕這次驗證（" + (e && e.name) + "）" };
+  }
+  if (g !== creds.gen) return null;
+  const body = { request_id: requestId, scenario: sc.id, challenge_id: ch.challenge_id, verify_request_id: "dver-" + crypto.randomUUID(), assertion: AP.assertionJSON(cred) };
+  for (let i = 0; i < 3; i++) {
+    const v = await a2Call(c, "/api/delegations/assertion", body);
+    if (g !== creds.gen) return null;
+    if ((v.status === 201 || v.status === 200) && v.body && v.body.delegation) return { id: v.body.delegation.delegation_id };
+    if (v.status !== 0 && v.status !== 503) return { fail: delegationFail(v) };
+    await new Promise((res) => setTimeout(res, 500));
+  }
+  return { fail: "沒有收到回覆，結果未確認（不會自動開始）" };
+}
+
+// delegationFail: a refused confirmation in the host's words.
+function delegationFail(r) {
+  const b = r.body || {};
+  if (r.status === 0) return "沒有收到回覆，結果未確認";
+  if (b.error === "signer_refused") return AP.CODES[b.code] || "Signer 拒絕（" + b.code + "）";
+  return { delegation_unavailable: "這個主機沒有這位客人的錢包或資產設定", forbidden_consumer: "不是這位客人的情境", signer_unknown: "Signer 沒有回覆，結果未確認",
+    store_unavailable: "已驗證，但主機沒能記下；請再確認一次" }[b.error] || "未確認（" + (b.error || r.status) + "）";
+}
+
 // delegationBox shows the host's terms of an apa.pay.v1 scenario: the
 // customer only confirms them (nothing here is editable).
 function delegationBox(sc, { busy, full, simC }) {
@@ -1040,12 +1092,14 @@ function delegationBox(sc, { busy, full, simC }) {
     ["委託有效", Math.round((d.valid_seconds || 0) / 60) + " 分鐘內開始"]]) {
     dl.append(el("dt", "", k), el("dd", "", String(v)));
   }
+  const device = deviceDelegations();
   box.append(dl, el("p", "delegation-note", "委託不是付款核准：每一筆超過範圍的請購仍要你單筆核准。"
-    + (payingNow() ? "委託確認是 fake 模擬（主持人扮演客人）；範圍內與你核准的請購由 Host 實際付款（測試 USDC）。" : "這是 fake 模擬，不會付款。")));
-  const yes = el("button", "delegation-confirm", "確認委託並開始（模擬）");
+    + (device ? "客人用自己已登記的裝置確認這份委託（Signer 驗證，本人確認）；Signer 只在這份委託的範圍內簽付款。" + (payingNow() ? "範圍內與你核准的請購由 Host 實際付款（測試 USDC）。" : "")
+      : payingNow() ? "委託確認是 fake 模擬（主持人扮演客人）；範圍內與你核准的請購由 Host 實際付款（測試 USDC）。" : "這是 fake 模擬，不會付款。")));
+  const yes = el("button", "delegation-confirm", device ? "用已登記的裝置確認委託並開始" : "確認委託並開始（模擬）");
   yes.type = "button";
   yes.dataset.scenario = sc.id;
-  yes.disabled = starting || busy.has(sc.consumer_id) || full || simC !== sc.consumer_id;
+  yes.disabled = starting || busy.has(sc.consumer_id) || full || !device && simC !== sc.consumer_id;
   yes.addEventListener("click", () => confirmAndStart(sc));
   const no = el("button", "delegation-back", "返回");
   no.type = "button";
@@ -1060,6 +1114,14 @@ function delegationBox(sc, { busy, full, simC }) {
 async function confirmAndStart(sc) {
   if (starting) return;
   const g = creds.gen;
+  if (deviceDelegations()) { // gap 4: the customer's own device, not the host
+    setRunStatus("客人 " + short(sc.consumer_id) + "：請用已登記的裝置確認委託…", "busy");
+    const d = await deviceDelegation(sc, g);
+    if (!d) return;
+    if (d.fail) return setRunStatus("客人 " + short(sc.consumer_id) + " 的委託未確認：" + d.fail + "（沒有開始場次）", "error");
+    delegating = null;
+    return start(sc, d.id);
+  }
   setRunStatus("確認委託中…", "busy");
   const r = await creds.confirmDelegation(sc.id);
   if (g !== creds.gen || !r) return;
@@ -1081,6 +1143,7 @@ async function confirmAndStart(sc) {
 // 「以 A 模擬」 and 「確認委託並開始（模擬）」 do: { id } of the delegation, or
 // { fail } saying what is known; null once the credentials changed.
 async function asCustomer(sc, g) {
+  if (deviceDelegations()) return deviceDelegation(sc, g); // gap 4: each customer's own device, in turn
   const s = await creds.simulate(sc.consumer_id);
   if (g !== creds.gen) return null;
   if (!s || s.error || s.status !== 200) return { fail: s && s.error ? "角色模擬沒有收到回覆，未確認" : "角色模擬未開始（" + ((s && s.status) || "無回覆") + "）" };

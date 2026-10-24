@@ -30,7 +30,7 @@ import (
 // E1aVersion is the pack's version; E1aChecker this checker's rules.
 const (
 	E1aVersion = "apa.e1a.v1"
-	E1aChecker = "e1a.1"
+	E1aChecker = "e1a.2"
 )
 
 // E1aClaims are §4.5's claims.
@@ -124,11 +124,29 @@ var e1aNotEvaluated = []string{
 	"the BBS+ proof re-verified by the checker (the pack keeps its sha256 only)",
 	"voice FAR/FRR (V1's evaluation)",
 	"Admin aggregation (M-D)",
-	"the delegation confirmed by the person (E1a-D1 A: the host plays the customer)",
+	delegationNotEvaluated,
 }
+
+// delegationsByDevice (gap 4): every run's delegation was confirmed by the
+// person's device, so that item is off not_evaluated (E6 labels it); one
+// confirmed by the host, or none read, keeps it.
+func delegationsByDevice(runs map[string]*e1aRun) bool {
+	byDevice := len(runs) > 0
+	for _, run := range runs {
+		i := slices.IndexFunc(run.events, func(e contracts.AuditEvent) bool { return e.EventType == "DELEGATION_BOUND" })
+		byDevice = byDevice && i >= 0 && run.events[i].Payload.AuthorizationMethod == "webauthn"
+	}
+	return byDevice
+}
+
+// delegationNotEvaluated is said only while a run's delegation was confirmed
+// by the host for the customer; from gap 4 (e1a.2) one confirmed by the
+// person's device is E6's to label, by its DELEGATION_BOUND.
+const delegationNotEvaluated = "the delegation confirmed by the person (E1a-D1 A: the host plays the customer)"
 
 var e1aLimits = []string{
 	"a device or virtual authenticator is the host's declaration (--authenticator-source); the checker checks it is consistent, not that a device was physical",
+	"a delegation confirmed by the person is read from its DELEGATION_BOUND (method webauthn, the Signer's confirmation named); the Signer's own record of it is not in the pack",
 	"event and intent hashes and registry bindings use the pay contract's own pure functions: a fault there is shared",
 	"tx#2 is tied to its intent only through the Store's records and the EIP-3009 nonce, not by the chain",
 	"the paying host's prompt is buyer.PayingTaskPrompt, the host's own function: a change to it moves the host and this check together",
@@ -191,6 +209,9 @@ func VerifyE1a(dir, repo string, chain Chain) (*E1aReport, error) {
 		if t.InjectionCase != "" {
 			r.Injections = append(r.Injections, e1aInjection(&f, run, repo))
 		}
+	}
+	if delegationsByDevice(runs) {
+		r.NotEvaluated = slices.DeleteFunc(slices.Clone(r.NotEvaluated), func(s string) bool { return s == delegationNotEvaluated })
 	}
 	e1aApart(&f, runs, registry)
 	e1aSafety(b, &f)

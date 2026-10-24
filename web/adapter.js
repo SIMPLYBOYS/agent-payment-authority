@@ -1072,7 +1072,12 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
   const d = delegation;
   if (!task) set(0, "now", "等待開始");
   else {
-    set(0, "done", d && d.task_budget ? "客人交代 Agent：預算 " + usdc(d.task_budget) + "，超過 " + usdc(d.allow_max) + " 要問本人" : "客人已交代 Agent 預算與範圍");
+    // Gap 4: who confirmed the delegation, by its DELEGATION_BOUND (the person's device, or the host for the customer).
+    const bound = ((snapshot && snapshot.events) || []).find((e) => e.event_type === "DELEGATION_BOUND");
+    const terms = d && d.task_budget ? "預算 " + usdc(d.task_budget) + "，超過 " + usdc(d.allow_max) + " 要問本人" : "預算與範圍";
+    set(0, "done", !bound ? (d && d.task_budget ? "客人交代 Agent：" + terms : "客人已交代 Agent 預算與範圍")
+      : bound.authorization_method === "webauthn" ? "客人用自己的裝置確認了委託：" + terms
+      : "主持人代為確認委託（示範，不是本人）：" + terms);
     if (ph === "empty" || ph === "entered") set(1, "now", "Agent 正在挑選商品");
     else set(1, "done", "Agent 選好商品，報價 " + usdc(p && p.amount));
   }

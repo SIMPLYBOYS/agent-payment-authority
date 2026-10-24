@@ -30,6 +30,13 @@ test("an Allow paid and delivered: five steps done, in plain words", () => {
   assert.ok(!/[A-Z_]{6,}|500000/.test(JSON.stringify(m)), "no code and no base units for the audience");
 });
 
+test("step 1 says who confirmed the delegation: the person's device, or the host for the customer (gap 4)", () => {
+  const bound = (method) => ev(2, "DELEGATION_BOUND", { purchase_order_id: "", ...(method ? { authorization_method: method } : {}) });
+  const at = (method) => A.showCustomer("consumer-a", snap([ev(1, "TASK_STARTED", { purchase_order_id: "" }), bound(method), ev(3, "PURCHASE_PROPOSED")]), { task_budget: "1500000", allow_max: "100000" }).steps[0];
+  assert.deepEqual(at("webauthn"), { label: at("webauthn").label, state: "done", text: "客人用自己的裝置確認了委託：預算 1.50 USDC，超過 0.10 USDC 要問本人" });
+  assert.equal(at("").text, "主持人代為確認委託（示範，不是本人）：預算 1.50 USDC，超過 0.10 USDC 要問本人");
+});
+
 test("in flight: paying, then confirming; never paid before the chain says so", () => {
   const at = (k) => A.showCustomer("consumer-a", snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid.slice(0, k)]), DLG);
   assert.equal(steps(at(0)), "done done done now todo");

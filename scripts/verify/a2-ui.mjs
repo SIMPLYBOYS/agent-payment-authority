@@ -60,7 +60,7 @@ const sock = join(sdir, "s.sock");
 writeFileSync(join(sdir, "signer.json"), JSON.stringify({ version: 1, socket: sock, callers: [process.getuid()], max_window_seconds: 600,
   wallets: [{ wallet_id: "wallet-a", consumer_id: "consumer-a", chain_id: "84532", address: "0x1111111111111111111111111111111111111111" },
     { wallet_id: "wallet-b", consumer_id: "consumer-b", chain_id: "84532", address: "0x2222222222222222222222222222222222222222" }],
-  assets: [], delegations: [],
+  assets: [{ chain_id: "84532", asset_contract: "0x4444444444444444444444444444444444444444", eip712_name: "USDC", eip712_version: "2" }], delegations: [], // gap 4: the asset a delegation names
   approvers: [{ approver_id: "approver-a", consumer_id: "consumer-a", wallet_ids: ["wallet-a"], signer_max: "1000000", signer_total: "2000000", signer_window_seconds: 86400, version: 1 },
     { approver_id: "approver-b", consumer_id: "consumer-b", wallet_ids: ["wallet-b"], signer_max: "1000000", signer_total: "2000000", signer_window_seconds: 86400, version: 1 }],
   webauthn: { rp_id: "localhost", origins: [origin], challenge_ttl_seconds: 120, approval_ttl_seconds: 300 } }), { mode: 0o600 });
@@ -143,9 +143,8 @@ try {
     const confirmed = admin(["approver", "enroll", "confirm", "--dir", sdir, "--id", m[1]], "yes\n");
     return { ok: ok && confirmed.includes("credential " + fp) && confirmed.includes("is active") && /UV=1/.test(await text("#enroll-flags")), fp };
   }
+  // Gap 4: with the person's device, the customer confirms the delegation by device too (nobody plays the customer).
   const startRun = async (c, scenarioId, task) => {
-    await click(`.agent-card[data-consumer="${c}"] .agent-sim`);
-    await b.waitFor(`document.getElementById("sim-chip").textContent.includes("客人 ${c === "consumer-a" ? "A" : "B"}")`, 10000);
     await click(`.agent-card[data-consumer="${c}"] .agent-delegate[data-scenario="${scenarioId}"]`);
     await click(`.delegation[data-scenario="${scenarioId}"] .delegation-confirm`);
     return b.waitFor(`document.getElementById("run-status").textContent.includes("已開始 ${task}")`, 20000);
@@ -172,7 +171,9 @@ try {
   mark("approve");
   check("the localhost page loads the token file; the header says A2, the person's approval by device, no payment", await loadPage(origin)
     && await b.waitFor(`document.querySelector("header .badge").textContent === "A2／fake agent／本人核准（virtual authenticator）／不付款"`, 15000), await text("header .badge"));
-  check("A's run with its delegation (confirmed by the simulated customer, as in P1-a)", await startRun("consumer-a", "pay-a", "show-a-01"), await text("#run-status"));
+  const sd = await signs();
+  check("A's run with its delegation, confirmed by A's own device (gap 4): the device asked once, no role play offered", await startRun("consumer-a", "pay-a", "show-a-01")
+    && (await signs()) === sd + 1 && !(await b.evaluate(`!!document.querySelector(".agent-card .agent-sim")`)), await text("#run-status"));
   check("需要你處理: A's Ask with the summary, the sources apart, and the device actions", await pendingShown()
     && await b.waitFor(`(() => { const x = document.getElementById("approval-body").textContent; return x.includes("本人核准") && x.includes("Agent：fake") && x.includes("virtual authenticator（測試用）")
       && x.includes("付款：未啟用") && x.includes("0.50") && x.includes("用裝置拒絕這筆") && !x.includes("模擬核准"); })()`, 10000), await text("#approval-body"));
@@ -268,8 +269,8 @@ try {
   await click(`.agent-card[data-consumer="consumer-b"] .agent-select`);
   check("B's open Ask of 7 approved first, on B's panel", await b.waitFor(`document.getElementById("approval-body").textContent.includes("客人 B 的 Agent") && !!document.querySelector("#approval .approval-approve:not([disabled])")`, 30000)
     && await click("#approval .approval-approve") && await headIs("approved", "本人核准已驗證，付款未啟用。"), await text("#approval-body"));
-  check("一起開始 offers both customers' scenarios, saying each delegation is confirmed first (simulated)",
-    await b.waitFor(`!document.querySelector(".agent-card .row-stop") && (() => { const x = document.getElementById("start-all"); return !x.hidden && !x.disabled && x.textContent.includes("pay-a（A）") && x.textContent.includes("pay-b（B）") && x.textContent.includes("確認委託（模擬）"); })()`, 60000),
+  check("一起開始 offers both customers' scenarios, saying each confirms the delegation with their own device first",
+    await b.waitFor(`!document.querySelector(".agent-card .row-stop") && (() => { const x = document.getElementById("start-all"); return !x.hidden && !x.disabled && x.textContent.includes("pay-a（A）") && x.textContent.includes("pay-b（B）") && x.textContent.includes("用自己的裝置確認委託"); })()`, 60000),
     await text("#start-all"));
   await click("#start-all");
   check("one click: A's and B's delegations confirmed, both runs started", await b.waitFor(`/A 已開始 show-a-\\d+；B 已開始 show-b-\\d+/.test(document.getElementById("run-status").textContent)`, 30000),

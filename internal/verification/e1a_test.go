@@ -64,3 +64,24 @@ func TestE1aApart(t *testing.T) {
 		}
 	}
 }
+
+// Gap 4: "the delegation confirmed by the person" is off not_evaluated only
+// when every run's DELEGATION_BOUND says the person's device.
+func TestDelegationsByDevice(t *testing.T) {
+	run := func(method string) *e1aRun {
+		return &e1aRun{events: []contracts.AuditEvent{{EventType: "TASK_STARTED"}, {EventType: "DELEGATION_BOUND", Payload: contracts.EventPayload{AuthorizationMethod: method}}}}
+	}
+	for name, c := range map[string]struct {
+		runs map[string]*e1aRun
+		want bool
+	}{
+		"all by device":       {map[string]*e1aRun{"a": run("webauthn"), "b": run("webauthn")}, true},
+		"one by the host":     {map[string]*e1aRun{"a": run("webauthn"), "b": run("")}, false},
+		"no delegation event": {map[string]*e1aRun{"a": {events: []contracts.AuditEvent{{EventType: "TASK_STARTED"}}}}, false},
+		"no run read":         {map[string]*e1aRun{}, false},
+	} {
+		if got := delegationsByDevice(c.runs); got != c.want {
+			t.Errorf("%s: %v", name, got)
+		}
+	}
+}

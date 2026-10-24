@@ -189,8 +189,7 @@ try {
   const q = await b.send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: "#token-file" });
   await b.send("DOM.setFileInputFiles", { nodeId: q.nodeId, files: [tokenFile] });
   check("the host page loads the token file", await b.waitFor(`document.getElementById("creds").dataset.mode === "file"`, 20000));
-  await click(`.agent-card[data-consumer="consumer-a"] .agent-sim`);
-  await b.waitFor(`document.getElementById("sim-chip").textContent.includes("客人 A")`, 10000);
+  // Gap 4: the delegation is confirmed by A's own device (nobody plays the customer).
 
   let n = 0;
   async function ask() {
