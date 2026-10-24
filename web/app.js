@@ -446,12 +446,12 @@ export function labelPage(h) {
     badge.dataset.mode = unknown ? (h.failed ? "failed" : "unknown") : history ? "history" : live ? "live" : "fake";
   }
   if (caps && pays && !history) caps.textContent = "能力：" + (live ? "真實 Agent（" + (live.dev_demo_plugins ? "開發展示例外：plugins 內容與行為未確認" : "嚴格模式") + "）" : "fake Agent")
-    + " · 核准 " + who + "（Signer 驗證；委託確認仍是模擬） · 付款 " + payText
+    + " · 核准 " + who + "（Signer 驗證；委託也由客人本人以裝置確認） · 付款 " + payText
     + (h.credential ? " · 憑證 BBS+ 舊版（測試 issuer）" : "") + " · ZK 預算證明（由鏈上的預算合約驗證） · 獨立驗證：場次後以 verify-demo 檢查（不在本頁）";
   else if (caps) caps.textContent = unknown ? "能力：模式未確認（不代表 fake 或真實 Agent）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
     : history ? "能力：真實 Agent 執行紀錄（開發展示例外，非即時）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
     : live ? "能力：真實 Agent（" + (live.dev_demo_plugins ? "開發展示例外：plugins 內容與行為未確認，不是嚴格零 plugin 模式" : "嚴格模式") + "）· 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行"
-    : a2 ? cred("能力：真實 Agent 未啟用 · 核准 " + who + "（Signer 驗證；委託確認仍是模擬） · 付款 未啟用 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行")
+    : a2 ? cred("能力：真實 Agent 未啟用 · 核准 " + who + "（Signer 驗證；委託也由客人本人以裝置確認） · 付款 未啟用 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行")
     : p1a ? cred("能力：真實 Agent 未啟用 · 核准 僅 fake 模擬（不是本人驗證） · 付款 未啟用 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行")
     : "能力：真實 Agent 未啟用 · 付款 未實作 · 憑證／ZK 未實作 · B1-07 獨立驗證 未執行";
   const note = $("history-note");
@@ -460,7 +460,7 @@ export function labelPage(h) {
   if (ln) {
     ln.hidden = !live;
     if (!ln.dataset.plain) ln.dataset.plain = ln.textContent;
-    ln.textContent = live && pays ? ln.dataset.plain.replace("合成資料、不付款", "合成資料、付款以" + payText + "實際進行，委託確認仍是模擬") : ln.dataset.plain;
+    ln.textContent = live && pays ? ln.dataset.plain.replace("合成資料、不付款", "合成資料、付款以" + payText + "實際進行，委託由客人本人以裝置確認") : ln.dataset.plain;
   }
 }
 

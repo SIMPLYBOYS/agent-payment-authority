@@ -46,7 +46,7 @@ test("a paying host's header and live note never say it does not pay", () => {
   assert.match(fake.caps, /本人以已登記的裝置/);
   const l = header(app.hostInfo(live, { payments: "local_anvil", approval: "webauthn", authenticator: "device" }));
   assert.match(l.caps, /^能力：真實 Agent（開發展示例外/);
-  assert.match(l.note, /合成資料、付款以本機 anvil（測試 USDC）實際進行，委託確認仍是模擬/);
+  assert.match(l.note, /合成資料、付款以本機 anvil（測試 USDC）實際進行，委託由客人本人以裝置確認/);
   for (const h of [fake, l]) assert.ok(!/不付款|未實作|未啟用/.test(h.badge + h.caps + h.note), h.badge + h.caps + h.note);
 });
 
