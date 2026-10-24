@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS verify_requests (
   received_at       INTEGER NOT NULL,
   CHECK ((outcome = 'verified') = (approval_id IS NOT NULL))
 ) STRICT;
-`
+` + delegationSchema
 
 // ApprovalCore is the Signer of serve-approvals: approver enrollment,
 // challenges, verification and queries. It holds no key.
@@ -256,6 +256,8 @@ type ApprovalReply struct {
 	VoiceResult       *VoiceResult    `json:"voice_result,omitempty"` // V1: an approval's, or a voice refusal's
 	Payment           string          `json:"payment,omitempty"`      // health
 	Voice             string          `json:"voice,omitempty"`        // health: the voice sidecar, off | ready | unavailable
+	Delegations       string          `json:"delegations,omitempty"`  // health (gap 4): "device", the person's confirmation is required to pay
+	Terms             json.RawMessage `json:"terms,omitempty"`        // gap 4: a delegation challenge's terms, as the Signer read them
 	Error             string          `json:"error,omitempty"`        // a fixed code
 }
 
@@ -392,6 +394,7 @@ type challengeRecord struct {
 	ConfigHash        string `json:"config_hash"`
 	ExpiresAt         uint64 `json:"expires_at"`
 	VoiceNonce        string `json:"voice_nonce,omitempty"` // V1: the phrase's code; the WebAuthn challenge covers it
+	Kind              string `json:"kind,omitempty"`        // gap 4: "delegation" for a delegation's confirmation; "" a purchase's
 }
 
 var decisionPattern = regexp.MustCompile(`^(approve|deny)$`)
@@ -438,34 +441,9 @@ func (c *ApprovalCore) Challenge(ctx context.Context, r ChallengeRequest) (Appro
 	case ap == nil || !containsString(ap.WalletIDs, w.WalletID):
 		return ApprovalReply{}, Refusal("APPROVER_UNKNOWN")
 	}
-	u, states, err := c.user(ctx, c.db, ap.ApproverID)
+	u, allow, err := c.allowed(ctx, ap.ApproverID)
 	if err != nil {
 		return ApprovalReply{}, err
-	}
-	var allow []protocol.CredentialDescriptor
-	pending, suspect, revoked := false, false, false
-	for _, cr := range u.creds {
-		switch states[b64(cr.ID)] {
-		case "active":
-			allow = append(allow, cr.Descriptor())
-		case "pending":
-			pending = true
-		case "suspect":
-			suspect = true
-		default:
-			revoked = true
-		}
-	}
-	switch {
-	case len(allow) > 0:
-	case pending:
-		return ApprovalReply{}, Refusal("CREDENTIAL_PENDING")
-	case suspect:
-		return ApprovalReply{}, Refusal("CREDENTIAL_SUSPECT")
-	case revoked:
-		return ApprovalReply{}, Refusal("CREDENTIAL_REVOKED")
-	default:
-		return ApprovalReply{}, Refusal("CREDENTIAL_UNKNOWN")
 	}
 	voice := c.cfg.Voice != nil && r.Decision == "approve" // a deny needs no voice
 	if voice {
@@ -576,6 +554,40 @@ func (c *ApprovalCore) Challenge(ctx context.Context, r ChallengeRequest) (Appro
 		Options: optsJSON, Display: &disp}, nil
 }
 
+// allowed is the approver with its active credentials, the ones a
+// challenge may name; none active is refused by the best reason there is.
+func (c *ApprovalCore) allowed(ctx context.Context, approverID string) (*rpUser, []protocol.CredentialDescriptor, error) {
+	u, states, err := c.user(ctx, c.db, approverID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var allow []protocol.CredentialDescriptor
+	pending, suspect, revoked := false, false, false
+	for _, cr := range u.creds {
+		switch states[b64(cr.ID)] {
+		case "active":
+			allow = append(allow, cr.Descriptor())
+		case "pending":
+			pending = true
+		case "suspect":
+			suspect = true
+		default:
+			revoked = true
+		}
+	}
+	switch {
+	case len(allow) > 0:
+		return u, allow, nil
+	case pending:
+		return nil, nil, Refusal("CREDENTIAL_PENDING")
+	case suspect:
+		return nil, nil, Refusal("CREDENTIAL_SUSPECT")
+	case revoked:
+		return nil, nil, Refusal("CREDENTIAL_REVOKED")
+	}
+	return nil, nil, Refusal("CREDENTIAL_UNKNOWN")
+}
+
 // inTx runs fn in one write transaction with the time taken inside it.
 func (c *ApprovalCore) inTx(ctx context.Context, fn func(tx *sql.Tx, now uint64) error) error {
 	tx, err := c.db.BeginTx(ctx, nil)
@@ -640,8 +652,9 @@ func (c *ApprovalCore) answerChallenge(ctx context.Context, a challengeRow) (App
 	}
 	r := ApprovalReply{ChallengeID: a.id, RequestID: a.requestID, State: a.state, ApprovalSessionID: a.sessionID, Decision: a.decision,
 		ConsumerID: a.consumer, WalletID: a.wallet, IntentHash: a.intent, ApproverID: a.approver, ExpiresAt: a.expiresAt}
-	var d Display
-	if json.Unmarshal([]byte(a.display), &d) == nil {
+	if strings.HasPrefix(a.jti, delegationJTI) { // gap 4: a delegation's challenge keeps its terms where a purchase keeps its display
+		r.Terms = json.RawMessage(a.display)
+	} else if d := (Display{}); json.Unmarshal([]byte(a.display), &d) == nil {
 		r.Display = &d
 	}
 	switch a.state {
@@ -742,7 +755,8 @@ func (c *ApprovalCore) Verify(ctx context.Context, r VerifyRequest) (ApprovalRep
 	if !found {
 		return c.refuse(ctx, r, fp, nil, "CHALLENGE_UNKNOWN", false)
 	}
-	code, cred, parsed := c.check(ctx, a, r)
+	po, intent, _ := readOrder(r.Order) // a bad order matches no challenge: INTENT_MISMATCH below
+	code, cred, parsed := c.check(ctx, a, intent, r.Assertion)
 	if code != "" {
 		return c.refuse(ctx, r, fp, &a, code, true)
 	}
@@ -771,7 +785,10 @@ func (c *ApprovalCore) Verify(ctx context.Context, r VerifyRequest) (ApprovalRep
 	if err := at("verify-checked", a.id); err != nil {
 		return ApprovalReply{}, err
 	}
-	return c.commit(ctx, r, fp, a, cred, parsed, vo)
+	// The approval never outlives the order's valid_before (the order's intent was checked against the challenge's).
+	return c.commit(ctx, r, fp, a, cred, parsed, vo, func(now uint64) uint64 {
+		return min(now+c.cfg.WebAuthn.ApprovalTTLSeconds, po.PaymentBinding.ValidBefore)
+	}, nil)
 }
 
 // verifyAnswer is the saved outcome of a verify request, if there is one.
@@ -803,7 +820,9 @@ func (c *ApprovalCore) verifyAnswer(ctx context.Context, id, fp string) (Approva
 
 // check is the verification of the assertion against the challenge, the
 // order and the credential, before anything is written (design 4.4).
-func (c *ApprovalCore) check(ctx context.Context, a challengeRow, r VerifyRequest) (string, *webauthn.Credential, *protocol.ParsedCredentialAssertionData) {
+// hash is what the challenge was bound to, as the caller read it again:
+// a purchase's intent, or a delegation's terms (gap 4).
+func (c *ApprovalCore) check(ctx context.Context, a challengeRow, hash string, assertion json.RawMessage) (string, *webauthn.Credential, *protocol.ParsedCredentialAssertionData) {
 	now := c.clock()
 	switch {
 	case a.state == "used":
@@ -813,14 +832,14 @@ func (c *ApprovalCore) check(ctx context.Context, a challengeRow, r VerifyReques
 	case a.state == "expired" || now >= a.expiresAt:
 		return "CHALLENGE_EXPIRED", nil, nil
 	}
-	if _, intent, err := readOrder(r.Order); err != nil || intent != a.intent {
+	if hash == "" || hash != a.intent {
 		return "INTENT_MISMATCH", nil, nil
 	}
 	ap := c.cfg.approver(a.approver)
 	if ap == nil || ap.Version != a.approverVersion || c.cfg.hash != a.configHash {
 		return "APPROVER_CHANGED", nil, nil
 	}
-	parsed, err := protocol.ParseCredentialRequestResponseBytes(r.Assertion)
+	parsed, err := protocol.ParseCredentialRequestResponseBytes(assertion)
 	if err != nil {
 		return "ASSERTION_INVALID", nil, nil
 	}
@@ -945,7 +964,10 @@ func (c *ApprovalCore) refuse(ctx context.Context, r VerifyRequest, fp string, a
 // transaction, writes the decision and the verify request, together. The
 // credential's state and counter are read again inside it. Otherwise the
 // row is read again in the same transaction and the refusal saved.
-func (c *ApprovalCore) commit(ctx context.Context, r VerifyRequest, fp string, a challengeRow, cred *webauthn.Credential, p *protocol.ParsedCredentialAssertionData, vo *voiceOutcome) (ApprovalReply, error) {
+// expiry is the approval's end from the time inside the transaction; then
+// (gap 4: a delegation's confirmation) writes more in the same transaction.
+func (c *ApprovalCore) commit(ctx context.Context, r VerifyRequest, fp string, a challengeRow, cred *webauthn.Credential, p *protocol.ParsedCredentialAssertionData, vo *voiceOutcome,
+	expiry func(now uint64) uint64, then func(tx *sql.Tx, now uint64, approvalID, credID string) error) (ApprovalReply, error) {
 	ad := p.Response.AuthenticatorData
 	approvalID, err := newID("hap-")
 	if err != nil {
@@ -1021,13 +1043,7 @@ func (c *ApprovalCore) commit(ctx context.Context, r VerifyRequest, fp string, a
 		if k, _ := res.RowsAffected(); k != 1 { // the state read above holds in this transaction
 			return errors.New("challenge changed inside its write transaction")
 		}
-		// The approval never outlives the order's valid_before (the order's
-		// intent was checked against the challenge's).
-		po, _, err := readOrder(r.Order)
-		if err != nil {
-			return err
-		}
-		expires := min(now+c.cfg.WebAuthn.ApprovalTTLSeconds, po.PaymentBinding.ValidBefore)
+		expires := expiry(now)
 		fresh.Authenticator.SignCount = ad.Counter
 		fresh.Flags.BackupState = ad.Flags.HasBackupState()
 		updated, err := json.Marshal(fresh)
@@ -1047,6 +1063,11 @@ func (c *ApprovalCore) commit(ctx context.Context, r VerifyRequest, fp string, a
 		if vo != nil {
 			// ponytail: the same recording racing in under two challenges at once fails here (the UNIQUE sha256) and writes nothing
 			if err := c.saveVoice(ctx, tx, now, a, r.VerifyRequestID, *vo); err != nil {
+				return err
+			}
+		}
+		if then != nil {
+			if err := then(tx, now, approvalID, credID); err != nil {
 				return err
 			}
 		}

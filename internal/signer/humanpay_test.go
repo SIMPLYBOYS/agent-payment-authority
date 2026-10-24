@@ -5,10 +5,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -20,9 +22,11 @@ import (
 // hfx is the P2 Signer: the approval and payment cores on one signer.db.
 type hfx struct {
 	*afx
-	pay *Core
-	db  *sql.DB
-	dir string
+	pay   *Core
+	db    *sql.DB
+	dir   string
+	auths map[string]*signertest.Authenticator // gap 4: each approver's device, to confirm its delegation
+	confs map[string]confirmed
 }
 
 func newHFX(t *testing.T) *hfx {
@@ -66,7 +70,60 @@ func (f *hfx) approve(a *signertest.Authenticator, order json.RawMessage, decisi
 	return r
 }
 
-func byApproval(id string) Authorization { return Authorization{Method: "webauthn", ApprovalID: id} }
+// byApproval is a webauthn payment's authority under its consumer's
+// confirmed delegation (gap 4): confirmed here once per consumer with its
+// enrolled device (again once expired), with a budget wide enough that the
+// approver's own limits are what these tests meet.
+func (f *hfx) byApproval(id string) Authorization {
+	consumer := "consumer-a" // an unknown approval: the payment's own refusal is what is tested
+	f.db.QueryRow(`SELECT c.consumer_id FROM human_approvals h JOIN approval_challenges c ON c.challenge_id = h.challenge_id WHERE h.approval_id = ?`, id).Scan(&consumer)
+	return Authorization{Method: "webauthn", ApprovalID: id, DelegationConfirmationID: f.confirmed(consumer)}
+}
+
+type confirmed struct {
+	id    string
+	until uint64
+}
+
+func (f *hfx) enroll(approver string, a *signertest.Authenticator) *signertest.Authenticator {
+	a = f.afx.enroll(approver, a)
+	if f.auths == nil {
+		f.auths = map[string]*signertest.Authenticator{}
+	}
+	f.auths[approver] = a
+	return a
+}
+
+func (f *hfx) confirmed(consumer string) string {
+	f.t.Helper()
+	if c, ok := f.confs[consumer]; ok && f.now < c.until {
+		return c.id
+	}
+	x := strings.TrimPrefix(consumer, "consumer-")
+	a := f.auths["approver-"+x]
+	if a == nil {
+		return "" // no device: refused as DELEGATION_NOT_CONFIRMED, after the payment's own checks
+	}
+	f.n++
+	id := fmt.Sprintf("dlg-t%d", f.n)
+	var tt paycontract.DelegationTerms
+	json.Unmarshal(f.terms(x, id), &tt)
+	tt.TaskBudget = "100000000"
+	terms, _ := json.Marshal(tt)
+	c, err := f.dchallenge("dreq-"+id, terms)
+	if err != nil {
+		f.t.Fatalf("delegation challenge: %v", err)
+	}
+	r, err := f.dverify("dver-"+id, c.ChallengeID, terms, a.Get(c.Options, origin))
+	if err != nil {
+		f.t.Fatalf("delegation verify: %v", err)
+	}
+	if f.confs == nil {
+		f.confs = map[string]confirmed{}
+	}
+	f.confs[consumer] = confirmed{r.ApprovalID, r.ExpiresAt}
+	return r.ApprovalID
+}
 
 func (f *hfx) approvalState(id string) string {
 	var s string
@@ -93,11 +150,11 @@ func TestHumanApprovalPays(t *testing.T) {
 		r    SignRequest
 		want string
 	}{
-		"no approval":             {SignRequest{RequestID: "request-0000000101", Authorization: byApproval(""), Order: order}, "APPROVAL_UNKNOWN"},
-		"unknown approval":        {SignRequest{RequestID: "request-0000000102", Authorization: byApproval("hap-00"), Order: order}, "APPROVAL_UNKNOWN"},
-		"another purchase":        {SignRequest{RequestID: "request-0000000103", Authorization: byApproval(ap.ApprovalID), Order: other}, "INTENT_MISMATCH"},
-		"a deny":                  {SignRequest{RequestID: "request-0000000104", Authorization: byApproval(denied.ApprovalID), Order: deny}, "APPROVAL_DENIED"},
-		"over the approver":       {SignRequest{RequestID: "request-0000000105", Authorization: byApproval(bigAp.ApprovalID), Order: big}, "OVER_PER_TX"},
+		"no approval":             {SignRequest{RequestID: "request-0000000101", Authorization: f.byApproval(""), Order: order}, "APPROVAL_UNKNOWN"},
+		"unknown approval":        {SignRequest{RequestID: "request-0000000102", Authorization: f.byApproval("hap-00"), Order: order}, "APPROVAL_UNKNOWN"},
+		"another purchase":        {SignRequest{RequestID: "request-0000000103", Authorization: f.byApproval(ap.ApprovalID), Order: other}, "INTENT_MISMATCH"},
+		"a deny":                  {SignRequest{RequestID: "request-0000000104", Authorization: f.byApproval(denied.ApprovalID), Order: deny}, "APPROVAL_DENIED"},
+		"over the approver":       {SignRequest{RequestID: "request-0000000105", Authorization: f.byApproval(bigAp.ApprovalID), Order: big}, "OVER_PER_TX"},
 		"mixed with a delegation": {SignRequest{RequestID: "request-0000000106", Authorization: Authorization{Method: "webauthn", ApprovalID: ap.ApprovalID, DelegationID: "dlg-a", DelegationVersion: 1}, Order: order}, "BAD_REQUEST"},
 		"a delegation naming it":  {SignRequest{RequestID: "request-0000000107", Authorization: Authorization{Method: "delegation", ApprovalID: ap.ApprovalID, DelegationID: "dlg-a", DelegationVersion: 1}, Order: order}, "BAD_REQUEST"},
 	} {
@@ -109,7 +166,7 @@ func TestHumanApprovalPays(t *testing.T) {
 		t.Fatalf("refusals wrote %d attempts, approval %s", n, f.approvalState(ap.ApprovalID))
 	}
 
-	rep, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000110", Authorization: byApproval(ap.ApprovalID), Order: order})
+	rep, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000110", Authorization: f.byApproval(ap.ApprovalID), Order: order})
 	if err != nil || rep.State != "signed" {
 		t.Fatalf("sign %+v %v", rep, err)
 	}
@@ -117,10 +174,10 @@ func TestHumanApprovalPays(t *testing.T) {
 		t.Fatal("the approval was not consumed with its attempt")
 	}
 	// The same request again is its resend; another request with the same approval is refused.
-	if again, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000110", Authorization: byApproval(ap.ApprovalID), Order: order}); err != nil || again.AttemptID != rep.AttemptID {
+	if again, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000110", Authorization: f.byApproval(ap.ApprovalID), Order: order}); err != nil || again.AttemptID != rep.AttemptID {
 		t.Fatalf("resend %+v %v", again, err)
 	}
-	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000111", Authorization: byApproval(ap.ApprovalID), Order: order}); code(err) != "APPROVAL_CONSUMED" {
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000111", Authorization: f.byApproval(ap.ApprovalID), Order: order}); code(err) != "APPROVAL_CONSUMED" {
 		t.Fatalf("a second payment: %v", err)
 	}
 	// The A2 query sees the approval consumed.
@@ -149,7 +206,7 @@ func TestHumanApprovalPaysV2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("v2 verify: %v", err)
 	}
-	rep, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000210", Authorization: byApproval(ap.ApprovalID), Order: order})
+	rep, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000210", Authorization: f.byApproval(ap.ApprovalID), Order: order})
 	if err != nil || rep.State != "signed" || f.approvalState(ap.ApprovalID) != "consumed" {
 		t.Fatalf("sign %+v %v (approval %s)", rep, err, f.approvalState(ap.ApprovalID))
 	}
@@ -167,30 +224,30 @@ func TestHumanApprovalLapses(t *testing.T) {
 	if _, err := f.core.Abandon(bg, ap3.ApprovalID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000203", Authorization: byApproval(ap3.ApprovalID), Order: o3}); code(err) != "APPROVAL_NOT_VERIFIED" {
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000203", Authorization: f.byApproval(ap3.ApprovalID), Order: o3}); code(err) != "APPROVAL_NOT_VERIFIED" {
 		t.Fatalf("abandoned: %v", err)
 	}
 	ar := &f.pay.cfg.Approvers[0]
 	ar.WalletIDs = []string{"wallet-b"}
-	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000204", Authorization: byApproval(ap4.ApprovalID), Order: o4}); code(err) != "CONSUMER_MISMATCH" {
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000204", Authorization: f.byApproval(ap4.ApprovalID), Order: o4}); code(err) != "CONSUMER_MISMATCH" {
 		t.Fatalf("the wallet is no longer the approver's: %v", err)
 	}
 	ar.WalletIDs = []string{"wallet-a"}
 	ar.Version++
-	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000205", Authorization: byApproval(ap5.ApprovalID), Order: o5}); code(err) != "APPROVER_CHANGED" {
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000205", Authorization: f.byApproval(ap5.ApprovalID), Order: o5}); code(err) != "APPROVER_CHANGED" {
 		t.Fatalf("another approver version: %v", err)
 	}
 	ar.Version--
 
 	f.now += 300 // approval_ttl_seconds
-	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000201", Authorization: byApproval(ap1.ApprovalID), Order: o1}); code(err) != "APPROVAL_EXPIRED" {
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000201", Authorization: f.byApproval(ap1.ApprovalID), Order: o1}); code(err) != "APPROVAL_EXPIRED" {
 		t.Fatalf("expired: %v", err)
 	}
 	f.now -= 300
 	if err := f.core.Revoke(bg, Fingerprint(a.ID)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000202", Authorization: byApproval(ap2.ApprovalID), Order: o2}); code(err) != "CREDENTIAL_REVOKED" {
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000202", Authorization: f.byApproval(ap2.ApprovalID), Order: o2}); code(err) != "CREDENTIAL_REVOKED" {
 		t.Fatalf("revoked: %v", err)
 	}
 	if count(t, f.pay, "1") != 0 {
@@ -219,7 +276,7 @@ func TestHumanApprovalChangesBeforeAccept(t *testing.T) {
 			}
 			return nil
 		}
-		_, err := f.pay.Sign(bg, SignRequest{RequestID: "request-00000006" + string(rune('0'+i)) + "0", Authorization: byApproval(ap.ApprovalID), Order: order})
+		_, err := f.pay.Sign(bg, SignRequest{RequestID: "request-00000006" + string(rune('0'+i)) + "0", Authorization: f.byApproval(ap.ApprovalID), Order: order})
 		hook = nil
 		if code(err) != cs.want || count(t, f.pay, "1") != 0 {
 			t.Fatalf("%s: %v, %d attempts", cs.want, err, count(t, f.pay, "1"))
@@ -240,7 +297,7 @@ func TestHumanApprovalRace(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = f.pay.Sign(bg, SignRequest{RequestID: "request-00000003" + string(rune('0'+i)) + "0", Authorization: byApproval(ap.ApprovalID), Order: order})
+			_, errs[i] = f.pay.Sign(bg, SignRequest{RequestID: "request-00000003" + string(rune('0'+i)) + "0", Authorization: f.byApproval(ap.ApprovalID), Order: order})
 		}()
 	}
 	wg.Wait()
@@ -277,6 +334,7 @@ func TestMigrateApprovals(t *testing.T) {
 	auth := f.enroll("approver-a", nil)
 	order := f.orderA("500000")
 	ap := f.approve(auth, order, "approve")
+	conf := f.confirmed("consumer-a") // gap 4: confirmed in approvals.db, moved with it
 	// Still in use (a read open on it): refused, nothing moved.
 	tx, err := old.db.BeginTx(bg, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -306,7 +364,7 @@ func TestMigrateApprovals(t *testing.T) {
 	p1b.Close()
 
 	moved, err := MigrateApprovals(bg, dir)
-	if err != nil || moved["human_approvals"] != 1 || moved["credentials"] != 1 || moved["approval_challenges"] != 1 {
+	if err != nil || moved["human_approvals"] != 2 || moved["credentials"] != 1 || moved["approval_challenges"] != 2 || moved["delegation_confirmations"] != 1 {
 		t.Fatalf("moved %v %v", moved, err)
 	}
 	if Unmigrated(dir) != nil {
@@ -322,7 +380,7 @@ func TestMigrateApprovals(t *testing.T) {
 	// it only finishes the rename (nothing can
 	// use signer.db meanwhile: Unmigrated refuses).
 	os.Rename(filepath.Join(dir, "approvals.db.migrated"), filepath.Join(dir, "approvals.db"))
-	if moved, err := MigrateApprovals(bg, dir); err != nil || moved["human_approvals"] != 1 || Unmigrated(dir) != nil {
+	if moved, err := MigrateApprovals(bg, dir); err != nil || moved["human_approvals"] != 2 || Unmigrated(dir) != nil {
 		t.Fatalf("finishing the rename: %v %v", moved, err)
 	}
 
@@ -335,7 +393,7 @@ func TestMigrateApprovals(t *testing.T) {
 	if count(t, pay, "attempt_id = 'att-old' AND approval_id IS NULL") != 1 {
 		t.Fatal("the P1-b attempt was lost")
 	}
-	if rep, err := pay.Sign(bg, SignRequest{RequestID: "request-0000000401", Authorization: byApproval(ap.ApprovalID), Order: order}); err != nil || rep.State != "signed" {
+	if rep, err := pay.Sign(bg, SignRequest{RequestID: "request-0000000401", Authorization: Authorization{Method: "webauthn", ApprovalID: ap.ApprovalID, DelegationConfirmationID: conf}, Order: order}); err != nil || rep.State != "signed" {
 		t.Fatalf("pay after migration %+v %v", rep, err)
 	}
 	// The old approvals.db again, now differing from signer.db with the
@@ -401,7 +459,7 @@ func TestServeAll(t *testing.T) {
 	if v["state"] != "verified" || id == "" {
 		t.Fatalf("verify %v", v)
 	}
-	if st, r := do("POST", "/v1/sign", SignRequest{RequestID: "request-0000000501", Authorization: byApproval(id), Order: order}); st != 200 || r["state"] != "signed" {
+	if st, r := do("POST", "/v1/sign", SignRequest{RequestID: "request-0000000501", Authorization: f.byApproval(id), Order: order}); st != 200 || r["state"] != "signed" {
 		t.Fatalf("sign %d %v", st, r)
 	}
 	if _, r := do("GET", "/v1/approvals/"+id, nil); r["state"] != "consumed" {
@@ -418,14 +476,14 @@ func TestHumanApprovalTotal(t *testing.T) {
 	for i := range 4 {
 		order := f.orderA("500000")
 		ap := f.approve(a, order, "approve")
-		if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-00000007" + string(rune('0'+i)) + "0", Authorization: byApproval(ap.ApprovalID), Order: order}); err != nil {
+		if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-00000007" + string(rune('0'+i)) + "0", Authorization: f.byApproval(ap.ApprovalID), Order: order}); err != nil {
 			t.Fatalf("payment %d: %v", i, err)
 		}
 		f.now += 60
 	}
 	order := f.orderA("1")
 	ap := f.approve(a, order, "approve")
-	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000750", Authorization: byApproval(ap.ApprovalID), Order: order}); code(err) != "OVER_TOTAL_CAP" {
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000750", Authorization: f.byApproval(ap.ApprovalID), Order: order}); code(err) != "OVER_TOTAL_CAP" {
 		t.Fatalf("over the total: %v", err)
 	}
 	if f.approvalState(ap.ApprovalID) != "verified" || count(t, f.pay, "1") != 4 {
@@ -437,7 +495,7 @@ func TestHumanApprovalTotal(t *testing.T) {
 	ob := signertest.Order{Consumer: "consumer-b", Agent: "agent-b", Wallet: "wallet-b", From: Address(keyB.PubKey()), PayTo: signertest.Merchant,
 		Amount: "500000", N: f.n, Now: f.now, Window: 600}.Raw()
 	apb := f.approve(b, ob, "approve")
-	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000760", Authorization: byApproval(apb.ApprovalID), Order: ob}); err != nil {
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000760", Authorization: f.byApproval(apb.ApprovalID), Order: ob}); err != nil {
 		t.Fatalf("B: %v", err)
 	}
 	// The first payment (accepted at t0) leaves the window exactly when the
@@ -445,7 +503,7 @@ func TestHumanApprovalTotal(t *testing.T) {
 	f.now = t0 + 86400
 	order = f.orderA("500000")
 	ap = f.approve(a, order, "approve")
-	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000770", Authorization: byApproval(ap.ApprovalID), Order: order}); err != nil {
+	if _, err := f.pay.Sign(bg, SignRequest{RequestID: "request-0000000770", Authorization: f.byApproval(ap.ApprovalID), Order: order}); err != nil {
 		t.Fatalf("after the window: %v", err)
 	}
 }

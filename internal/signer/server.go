@@ -199,7 +199,7 @@ func ApprovalsHandler(core *ApprovalCore, log func(string)) http.Handler {
 			case errors.As(err, &ref):
 				status = http.StatusConflict
 				switch ref {
-				case "CHALLENGE_UNKNOWN", "VERIFY_UNKNOWN", "APPROVAL_UNKNOWN", "ENROLLMENT_UNKNOWN":
+				case "CHALLENGE_UNKNOWN", "VERIFY_UNKNOWN", "APPROVAL_UNKNOWN", "ENROLLMENT_UNKNOWN", "DELEGATION_NOT_CONFIRMED":
 					status = http.StatusNotFound
 				case "CALLER_NOT_ALLOWED":
 					status = http.StatusForbidden
@@ -280,6 +280,28 @@ func ApprovalsHandler(core *ApprovalCore, log func(string)) http.Handler {
 		r, err := core.Verify(req.Context(), vr)
 		answer(w, req, "verify", &r, err)
 	})
+	// Gap 4: the person's confirmation of a delegation (no voice).
+	mux.HandleFunc("POST /v1/approvals/delegations/challenge", func(w http.ResponseWriter, req *http.Request) {
+		var dr DelegationChallengeRequest
+		if !read(w, req, &dr) {
+			answer(w, req, "delegation-challenge", &ApprovalReply{}, Refusal("BAD_REQUEST"))
+			return
+		}
+		r, err := core.DelegationChallenge(req.Context(), dr)
+		answer(w, req, "delegation-challenge", &r, err)
+	})
+	mux.HandleFunc("POST /v1/approvals/delegations/verify", func(w http.ResponseWriter, req *http.Request) {
+		var dv DelegationVerifyRequest
+		if !read(w, req, &dv) {
+			answer(w, req, "delegation-verify", &ApprovalReply{}, Refusal("BAD_REQUEST"))
+			return
+		}
+		r, err := core.DelegationVerify(req.Context(), dv)
+		answer(w, req, "delegation-verify", &r, err)
+	})
+	mux.HandleFunc("GET /v1/approvals/delegations/{delegation_id}", approval("delegation-get", func(ctx context.Context, req *http.Request) (ApprovalReply, error) {
+		return core.DelegationConfirmation(ctx, req.PathValue("delegation_id"))
+	}))
 	mux.HandleFunc("GET /v1/approvals", approval("approval-get", func(ctx context.Context, req *http.Request) (ApprovalReply, error) {
 		return core.ApprovalByVerifyRequest(ctx, req.URL.Query().Get("verify_request_id"))
 	}))
@@ -325,6 +347,7 @@ func ApprovalsHandler(core *ApprovalCore, log func(string)) http.Handler {
 			h = &ApprovalReply{State: "ready", Payment: "available"}
 		}
 		h.Voice = core.voice.voiceState(req.Context())
+		h.Delegations = "device" // gap 4: this Signer pays only under a delegation the person confirmed (a Host checks before it pays)
 		answer(w, req, "health", h, nil)
 	})
 	return callers(core.cfg, core.cfg.requestTimeout(), mux, func(w http.ResponseWriter, req *http.Request) {

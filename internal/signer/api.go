@@ -23,6 +23,10 @@ type Authorization struct {
 	// ApprovalID is a webauthn payment's verified human approval (P2): the
 	// Signer consumes it in the transaction that accepts the attempt.
 	ApprovalID string `json:"approval_id,omitempty"`
+	// DelegationConfirmationID (gap 4): the person's confirmation of the
+	// delegation this payment falls under; a Signer that takes approvals
+	// pays nothing without one (docs/commercial-gap4.md 2.2).
+	DelegationConfirmationID string `json:"delegation_confirmation_id,omitempty"`
 }
 
 // SignedAuthorization is the EIP-3009 authorization: the message and its

@@ -25,7 +25,7 @@ func OpenDB(path string) (*sql.DB, error) {
 
 // approvalTables are the human-approval tables, in an order their foreign
 // keys allow copying.
-var approvalTables = []string{"approver_handles", "enrollments", "credentials", "approval_challenges", "human_approvals", "verify_requests", "voice_templates", "voice_results"}
+var approvalTables = []string{"approver_handles", "enrollments", "credentials", "approval_challenges", "human_approvals", "delegation_confirmations", "verify_requests", "voice_templates", "voice_results"}
 
 // Unmigrated refuses a directory that still holds A2's separate
 // approvals.db: its approvals must be moved into signer.db first

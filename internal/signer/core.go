@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS attempts (
   nonce          TEXT NOT NULL,
   delegation_id  TEXT,
   approval_id    TEXT UNIQUE,
+  confirmation_id TEXT,
   amount         INTEGER NOT NULL CHECK (amount > 0),
   state          TEXT NOT NULL CHECK (state IN ('accepted', 'signed', 'abandoned', 'expired_unsigned')),
   accepted_at    INTEGER NOT NULL,
@@ -106,6 +107,17 @@ CREATE TABLE IF NOT EXISTS attempts (
 ) STRICT;
 CREATE INDEX IF NOT EXISTS spend ON attempts (delegation_id, state);
 `
+
+// migrateConfirmation adds gap 4's confirmation_id to an attempts table
+// made before it (its rows keep NULL: paid before any confirmation).
+func migrateConfirmation(ctx context.Context, db *sql.DB) error {
+	var col int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('attempts') WHERE name = 'confirmation_id'`).Scan(&col); err != nil || col > 0 {
+		return err
+	}
+	_, err := db.ExecContext(ctx, `ALTER TABLE attempts ADD COLUMN confirmation_id TEXT`)
+	return err
+}
 
 // NewCore opens the Signer DB at dbPath with an unlocked key per configured
 // wallet. A wallet without its key is refused. Accepted attempts left by a
@@ -143,6 +155,9 @@ func NewCoreDB(ctx context.Context, cfg *Config, keys map[string]*secp256k1.Priv
 		return nil, err
 	}
 	if _, err := db.ExecContext(ctx, schema+approvalsSchema+voiceSchema); err != nil {
+		return nil, err
+	}
+	if err := migrateConfirmation(ctx, db); err != nil {
 		return nil, err
 	}
 	c := &Core{cfg: cfg, keys: keys, db: db, clock: clock, res: res, wallets: map[string]chan struct{}{}}
@@ -388,6 +403,13 @@ func (c *Core) verify(ctx context.Context, r SignRequest, fp string, now uint64)
 		return nil, nil, 0, Refusal("WINDOW_INVALID")
 	}
 	deadline = min(deadline, b.ValidBefore)
+	if c.cfg.confirms() {
+		if err := c.confirmation(ctx, c.db, r.Authorization, &po, amount, now); err != nil {
+			return nil, nil, 0, err
+		}
+	} else if r.Authorization.DelegationConfirmationID != "" {
+		return nil, nil, 0, Refusal("BAD_REQUEST") // a Signer without approvals keeps no confirmation
+	}
 	if err := c.res.Verify(ctx, intent, &po, r.Reservation); err != nil {
 		var ref Refusal
 		if errors.As(err, &ref) {
@@ -557,6 +579,28 @@ func (c *Core) accept(ctx context.Context, s *snapshot, d *Delegation, amount ui
 		}
 		approvalID = id
 	}
+	var confirmationID any
+	if c.cfg.confirms() {
+		// Read again under the write lock, then bound to this task: two
+		// payments never take the same budget, nor one confirmation two tasks.
+		var po paycontract.PurchaseOrder
+		if err := contracts.Decode(s.Order, &po); err != nil {
+			return "", Refusal("ORDER_INVALID")
+		}
+		cid := s.Authorization.DelegationConfirmationID
+		if err := c.confirmation(ctx, tx, s.Authorization, &po, amount, now); err != nil {
+			return "", err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE delegation_confirmations SET task_id = ? WHERE confirmation_id = ? AND (task_id IS NULL OR task_id = ?)`,
+			po.Intent.TaskID, cid, po.Intent.TaskID)
+		if err != nil {
+			return "", err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return "", Refusal("DELEGATION_OTHER_TASK")
+		}
+		confirmationID = cid
+	}
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -572,9 +616,9 @@ func (c *Core) accept(ctx context.Context, s *snapshot, d *Delegation, amount ui
 		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO attempts (attempt_id, request_id, fingerprint, intent_hash, wallet_id, chain_id, asset_contract, payer, nonce,
-		delegation_id, approval_id, amount, state, accepted_at, auth_deadline, typed_digest, snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?, ?, ?)`,
+		delegation_id, approval_id, confirmation_id, amount, state, accepted_at, auth_deadline, typed_digest, snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?, ?, ?)`,
 		id, s.RequestID, s.Fingerprint, s.IntentHash, s.WalletID, s.Domain.ChainID, s.Domain.VerifyingContract, m.From, m.Nonce,
-		delegationID, approvalID, amount, now, s.AuthDeadline, s.TypedDigest, string(canon)); err != nil {
+		delegationID, approvalID, confirmationID, amount, now, s.AuthDeadline, s.TypedDigest, string(canon)); err != nil {
 		return "", err
 	}
 	return id, tx.Commit()
