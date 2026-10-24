@@ -86,6 +86,28 @@
 - `scripts/verify/a2-ui.mjs` 修正後跑 4 次，3 次全過；1 次在第一筆核准時沒有完成（面板停在待核准，裝置被要求的次數比預期多），原因未查明（記錄被截斷）。之後追查，彩排時留意。
 - 付款主機上 `/api/host/simulate` 仍會發出只能確認委託的角色模擬（E1-a 時代的 delegationOnly），但確認委託的路由一律拒絕；之後清掉。
 
+### 2.7 S7：Aaron 的步驟
+
+**本機彩排（不用 sudo）**：`make demo-local`（`p2-dev.sh` 每次從 repo 重建開發用 Signer；它的 `signer.db` 第一次啟動時自動加上新表與新欄位）。資料研究室按「一起開始」：依序跳出 A、B 的委託確認（各輸入一次 PIN），兩位都確認後各自開始；之後照常核准兩筆請購。展示視窗第 1 步應寫「本人以已登記的裝置確認了委託：預算 1.50…」。
+
+**testnet：`/opt` 換新的 Signer（Aaron 以 sudo）**：執行檔已建好 `var/gap4-opt/apa-signer`（commit `8db1ce2`，SHA-256 `816a54bdd47701d925850f12e07a4c8463442ecc997d11ee03de3c3856d45d7f`）。
+1. 確定 `make demo-testnet` 已停下（Ctrl-C 看到「已停下」）。
+2. 備份（留著，不刪）：
+   ```
+   sudo /bin/cp -p /opt/apa-signer/bin/apa-signer /opt/apa-signer/bin/apa-signer.gap3
+   sudo -u apa-signer /bin/cp -p /opt/apa-signer/data/signer.db /opt/apa-signer/data/signer.db.gap3
+   ```
+3. 安裝並核對：
+   ```
+   sudo install -o root -g wheel -m 0755 var/gap4-opt/apa-signer /opt/apa-signer/bin/apa-signer
+   shasum -a 256 /opt/apa-signer/bin/apa-signer
+   ```
+   應與上面的 SHA-256 相同。
+4. `make demo-testnet`：Signer 第一次啟動時自動加上新表與新欄位；Host 確認 Signer 回報 `delegations: device` 才啟動。
+5. 資料研究室按「一起開始」：A、B 各自用裝置確認委託，再各自用裝置＋語音核准請購。
+
+回滾（需要時，先停下）：`sudo install -o root -g wheel -m 0755 /opt/apa-signer/bin/apa-signer.gap3 /opt/apa-signer/bin/apa-signer`（舊版會忽略新表與新欄位；但新版 Host 不會在舊版 Signer 上啟動付款模式）。
+
 ## 4 預設的做法（照建議，不另外問）
 
 - 管理者的固定上限保留（2.2）。
