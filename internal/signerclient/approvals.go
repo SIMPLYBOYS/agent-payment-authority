@@ -117,6 +117,19 @@ func (c *Approvals) Abandon(id string) Answer {
 
 func (c *Approvals) Health() Answer { return c.do("GET", "/v1/health", nil) }
 
+// Gap 4: the person's confirmation of a delegation (docs/commercial-gap4.md 2.1).
+func (c *Approvals) DelegationChallenge(r signer.DelegationChallengeRequest) Answer {
+	return c.do("POST", "/v1/approvals/delegations/challenge", r)
+}
+
+func (c *Approvals) DelegationVerify(r signer.DelegationVerifyRequest) Answer {
+	return c.do("POST", "/v1/approvals/delegations/verify", r)
+}
+
+func (c *Approvals) DelegationConfirmation(delegationID string) Answer {
+	return c.do("GET", "/v1/approvals/delegations/"+url.PathEscape(delegationID), nil)
+}
+
 // EnrollRelay sends the enrollment page's request on as it is: the
 // options (code only) or the new credential (code and credential).
 func (c *Approvals) EnrollRelay(id string, body map[string]any) (int, json.RawMessage) {

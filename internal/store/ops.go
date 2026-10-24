@@ -491,7 +491,11 @@ func (s *Store) StartTask(setup TaskSetup) error {
 			if n, _ := res.RowsAffected(); n != 1 {
 				return refuse("DELEGATION_UNAVAILABLE", "the delegation was bound meanwhile")
 			}
-			if err := t.emit("DELEGATION_BOUND", nil, contracts.EventPayload{DelegationID: dlg.DelegationID}); err != nil {
+			bound := contracts.EventPayload{DelegationID: dlg.DelegationID}
+			if dlg.ConfirmMethod == "webauthn" { // gap 4: the person's confirmation, named as the Signer keeps it
+				bound.AuthorizationMethod, bound.SignerApprovalID = "webauthn", dlg.SignerConfirmationID
+			}
+			if err := t.emit("DELEGATION_BOUND", nil, bound); err != nil {
 				return err
 			}
 		}

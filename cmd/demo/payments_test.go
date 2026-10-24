@@ -96,16 +96,20 @@ func TestPaymentsNeedAReadySigner(t *testing.T) {
 	if err != nil {
 		t.Skip("no Unix socket listening here:", err)
 	}
-	state := "approvals-only"
+	state := `{"state":"approvals-only"}`
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintf(w, `{"state":%q}`, state)
+		fmt.Fprint(w, state)
 	})}
 	go srv.Serve(ln)
 	defer srv.Close()
 	if err := paymentSigner(sock); err == nil || !strings.Contains(err.Error(), "approvals-only") {
 		t.Fatalf("approvals only: %v", err)
 	}
-	state = "ready"
+	state = `{"state":"ready"}`
+	if err := paymentSigner(sock); err == nil || !strings.Contains(err.Error(), "older apa-signer") { // gap 4: one that does not require the confirmation
+		t.Fatalf("a Signer from before gap 4: %v", err)
+	}
+	state = `{"state":"ready","delegations":"device"}`
 	if err := paymentSigner(sock); err != nil {
 		t.Fatal(err)
 	}

@@ -266,6 +266,9 @@ type DelegationRequest struct {
 	Merchants                                                      []string
 	TaskBudget, AllowMax                                           contracts.Amount
 	ApprovalDeadlineSeconds, ValidSeconds                          uint64
+	// Gap 4: confirmed by the person's device (webauthn), as the Signer
+	// verified and keeps it; "" is the simulated confirmation of P1-a.
+	ConfirmMethod, SignerConfirmationID, CredentialRef string
 }
 
 // DelegationView is a delegation as stored, and the task bound to it.
@@ -292,7 +295,8 @@ func (s *Store) ConfirmDelegation(req DelegationRequest) (DelegationView, bool, 
 		id := sp.DelegationID(req.RequestID)
 		d := paycontract.Delegation{Version: version, DelegationID: id, ConsumerID: req.ConsumerID, Scenario: req.Scenario, Purpose: req.Purpose,
 			Merchants: req.Merchants, AssetID: req.AssetID, TaskBudget: req.TaskBudget, AllowMax: req.AllowMax, ApprovalDeadlineSeconds: req.ApprovalDeadlineSeconds,
-			ConfirmedBy: req.ConfirmedBy, ConfirmMethod: "simulated", ConfirmedAt: now, ExpiresAt: now + req.ValidSeconds}
+			ConfirmedBy: req.ConfirmedBy, ConfirmMethod: cmp.Or(req.ConfirmMethod, "simulated"), ConfirmedAt: now, ExpiresAt: now + req.ValidSeconds,
+			SignerConfirmationID: req.SignerConfirmationID, CredentialRef: req.CredentialRef}
 		old, bound, err := readDelegation(tx, id)
 		if err != nil {
 			return err

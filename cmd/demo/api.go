@@ -125,7 +125,10 @@ type api struct {
 	payCap      string            // P2: --payments' environment (LocalAnvil, BaseSepolia); "" without
 	relayer     *budget.Client    // P2-b: apa-relayer's socket, for its health; nil in process or without --payments
 	settler     *merchant.Settler // C4: the shop's settlements today; nil without --payments
-	chainRead   *chainReader      // O2: the payments read from the chain; nil without --payments
+	// Gap 4: the registry, for a delegation's terms as the Signer names them
+	// (the consumer's wallet, its chain, the profile's asset contract).
+	registry  contracts.RegistryConfig
+	chainRead *chainReader // O2: the payments read from the chain; nil without --payments
 
 	recon func(context.Context) (reconcile.Report, error) // P2-a: the reconciliation; nil without --payments
 }

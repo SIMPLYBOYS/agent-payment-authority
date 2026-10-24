@@ -478,6 +478,8 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 			d.onApprovals(ui.approve)
 		}
 		ui.registerApprovals(mux)
+		ui.registry = regCfg
+		ui.registerDelegations(mux)
 		state := "unavailable"
 		if ans := ui.approve.signer.Health(); ans.Kind == signerclient.KindOK {
 			state = ans.Reply.State

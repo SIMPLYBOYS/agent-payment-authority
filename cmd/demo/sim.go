@@ -177,6 +177,10 @@ func (a *api) simDelegation(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if a.payCap != "" { // gap 4: a host that pays takes the person's device only (/api/delegations); the Signer would refuse to pay a simulated one
+		fail(w, http.StatusForbidden, "device_confirmation_required")
+		return
+	}
 	sc := a.control.scenarios[req.Scenario]
 	switch {
 	case !requestIDFormat.MatchString(req.RequestID):

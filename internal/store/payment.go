@@ -58,19 +58,23 @@ type PaymentAttempt struct {
 	RequestID, TaskID, PurchaseOrderID, IntentHash string
 	Method, DelegationRef, ApprovalID              string // DelegationRef or (webauthn) ApprovalID, the grant's Signer approval
 	SignerAttemptID                                string
-	State, ErrorCode                               string
-	RequestedAt, UpdatedAt                         uint64
-	Order                                          json.RawMessage
+	// ConfirmationID (gap 4): the Signer's confirmation of the task's
+	// delegation, the person's; "" for a delegation confirmed by simulation.
+	ConfirmationID         string
+	State, ErrorCode       string
+	RequestedAt, UpdatedAt uint64
+	Order                  json.RawMessage
 }
 
 const paymentCols = `a.request_id, a.task_id, a.purchase_order_id, a.intent_hash, a.method, coalesce(a.delegation_ref, ''), coalesce(a.approval_id, ''), coalesce(a.signer_attempt_id, ''),
-  a.state, coalesce(a.error_code, ''), a.requested_at, a.updated_at, p.body, t.consumer_id`
+  a.state, coalesce(a.error_code, ''), a.requested_at, a.updated_at, p.body, t.consumer_id,
+  coalesce((SELECT json_extract(d.body, '$.signer_confirmation_id') FROM delegations d WHERE d.task_id = a.task_id), '')`
 
 func scanPayment(row interface{ Scan(...any) error }) (PaymentAttempt, string, error) {
 	var a PaymentAttempt
 	var body, consumer string
 	err := row.Scan(&a.RequestID, &a.TaskID, &a.PurchaseOrderID, &a.IntentHash, &a.Method, &a.DelegationRef, &a.ApprovalID, &a.SignerAttemptID,
-		&a.State, &a.ErrorCode, &a.RequestedAt, &a.UpdatedAt, &body, &consumer)
+		&a.State, &a.ErrorCode, &a.RequestedAt, &a.UpdatedAt, &body, &consumer, &a.ConfirmationID)
 	a.Order = json.RawMessage(body)
 	return a, consumer, err
 }
@@ -164,8 +168,11 @@ func (s *Store) BeginPayment(req PaymentRequest) (PaymentAttempt, bool, error) {
 		}
 		out = PaymentAttempt{RequestID: "pay-" + hex.EncodeToString(b), TaskID: req.TaskID, PurchaseOrderID: req.PurchaseOrderID, IntentHash: p.Decision.IntentHash,
 			Method: req.Method, DelegationRef: req.DelegationRef, ApprovalID: approval, State: "requested", RequestedAt: now, UpdatedAt: now, Order: json.RawMessage(p.Body)}
-		_, err = tx.Exec(`INSERT INTO payment_attempts (request_id, task_id, purchase_order_id, intent_hash, method, delegation_ref, approval_id, state, requested_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?)`, out.RequestID, out.TaskID, out.PurchaseOrderID, out.IntentHash, out.Method, nullable(out.DelegationRef), nullable(approval), now, now)
+		if _, err = tx.Exec(`INSERT INTO payment_attempts (request_id, task_id, purchase_order_id, intent_hash, method, delegation_ref, approval_id, state, requested_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?)`, out.RequestID, out.TaskID, out.PurchaseOrderID, out.IntentHash, out.Method, nullable(out.DelegationRef), nullable(approval), now, now); err != nil {
+			return err
+		}
+		out, _, err = scanPayment(tx.QueryRow(paymentWhere(`a.request_id = ?`), out.RequestID)) // as every later read has it: with the delegation's confirmation (gap 4)
 		return err
 	})
 	return out, replay, err

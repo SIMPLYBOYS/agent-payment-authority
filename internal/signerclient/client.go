@@ -84,7 +84,7 @@ func (c *Client) Pay(req store.PaymentRequest, reservation json.RawMessage) (Res
 	if a.State == "abandoned" || a.State == "expired_unsigned" {
 		return Result{Attempt: a}, nil
 	}
-	auth := signer.Authorization{Method: a.Method}
+	auth := signer.Authorization{Method: a.Method, DelegationConfirmationID: a.ConfirmationID} // gap 4: the person's confirmation, every payment
 	if a.Method == "webauthn" {
 		auth.ApprovalID = a.ApprovalID
 	} else {

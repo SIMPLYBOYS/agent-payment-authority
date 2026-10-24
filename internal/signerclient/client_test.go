@@ -75,7 +75,8 @@ func (l *ledger) BeginPayment(req store.PaymentRequest) (store.PaymentAttempt, b
 	a := store.PaymentAttempt{RequestID: fmt.Sprintf("pay-%032d", l.n), TaskID: req.TaskID, PurchaseOrderID: req.PurchaseOrderID, IntentHash: intent,
 		Method: req.Method, DelegationRef: req.DelegationRef, State: "requested", Order: l.orders[req.PurchaseOrderID]}
 	if req.Method == "webauthn" {
-		a.ApprovalID = "hap-1" // the Store reads it from the grant
+		a.ApprovalID = "hap-1"         // the Store reads it from the grant
+		a.ConfirmationID = "hap-dconf" // gap 4: the Store reads it from the task's delegation (these tests' payment-only Signer keeps none)
 	}
 	l.rows[a.RequestID] = &row{a, req.ConsumerID}
 	return a, false, nil
@@ -407,7 +408,8 @@ func TestPaySendsTheApprovalAndReservation(t *testing.T) {
 		t.Fatalf("%d sign requests", len(*got))
 	}
 	r := (*got)[0]
-	if r.Authorization.Method != "webauthn" || r.Authorization.ApprovalID != "hap-1" || r.Authorization.DelegationID != "" || string(r.Reservation) != string(reservation) {
+	if r.Authorization.Method != "webauthn" || r.Authorization.ApprovalID != "hap-1" || r.Authorization.DelegationID != "" || string(r.Reservation) != string(reservation) ||
+		r.Authorization.DelegationConfirmationID != "hap-dconf" {
 		t.Fatalf("sign request %+v", r)
 	}
 	for _, a := range l.rows {

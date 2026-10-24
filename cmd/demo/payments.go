@@ -337,6 +337,12 @@ func paymentSigner(socket string) error {
 		return fmt.Errorf("--payments needs a Signer that signs payments (apa-signer serve with a reservation section) on %s; its health is %s %s; nothing was started",
 			socket, ans.Kind, ans.Reply.State)
 	}
+	// Gap 4 (docs/commercial-gap4.md 2.4): a Signer from before would sign
+	// without the person's confirmation of the delegation (it ignores the
+	// field it does not know): never paid through.
+	if ans.Reply.Delegations != "device" {
+		return fmt.Errorf("--payments needs a Signer that pays only under a delegation the person confirmed (gap 4) on %s; this one does not say so (an older apa-signer?): install the new one; nothing was started", socket)
+	}
 	return nil
 }
 
