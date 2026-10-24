@@ -108,6 +108,11 @@
 
 回滾（需要時，先停下）：`sudo install -o root -g wheel -m 0755 /opt/apa-signer/bin/apa-signer.gap3 /opt/apa-signer/bin/apa-signer`（舊版會忽略新表與新欄位；但新版 Host 不會在舊版 Signer 上啟動付款模式）。
 
+### 2.8 進度
+
+- Aaron 10/24 本機彩排（`make demo-local`，fake Agent，本機 anvil，實體裝置）：「本機彩排執行正常」。新版開發用 Signer、裝置確認委託、一起開始、核准與付款都照 §2.7 完成。
+- 待做：`/opt` 換新的 Signer 後一場 testnet。
+
 ## 4 預設的做法（照建議，不另外問）
 
 - 管理者的固定上限保留（2.2）。
