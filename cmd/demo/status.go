@@ -97,6 +97,15 @@ type services struct {
 	Signer  string `json:"signer"`            // ready | approvals-only | unavailable | timeout
 	Voice   string `json:"voice"`             // ready | unavailable | off | unknown (the Signer did not say)
 	Relayer string `json:"relayer,omitempty"` // ready | unavailable | timeout | in_process (local anvil); "" without --payments
+	// C4 (10/24: a show ran into the relayer's cap unseen): this UTC day's
+	// transactions against each daily cap; absent when not read or no cap.
+	RelayerToday *quota `json:"relayer_today,omitempty"`
+	ShopToday    *quota `json:"shop_today,omitempty"`
+}
+
+type quota struct {
+	Sent uint64 `json:"sent"`
+	Cap  uint64 `json:"cap"`
 }
 
 // servicesWait bounds both probes together: the status is not kept waiting
@@ -110,7 +119,11 @@ func (a *api) services(ctx context.Context) *services {
 	// ponytail: Health takes no context; a hung Signer's call ends at its own client timeout, after this answer.
 	signerC := make(chan signerclient.Answer, 1)
 	go func() { signerC <- a.approve.signer.Health() }()
-	relayerC := make(chan string, 1)
+	type relayerHealth struct {
+		state string
+		today *quota
+	}
+	relayerC := make(chan relayerHealth, 1)
 	pending := 1
 	switch {
 	case a.payCap == "":
@@ -121,11 +134,20 @@ func (a *api) services(ctx context.Context) *services {
 		go func() {
 			h, err := a.relayer.Health(ctx)
 			if err == nil && h.State == "ready" {
-				relayerC <- "ready"
+				var q *quota
+				if h.SentToday != nil && h.DailyTxCap > 0 {
+					q = &quota{Sent: *h.SentToday, Cap: h.DailyTxCap}
+				}
+				relayerC <- relayerHealth{"ready", q}
 				return
 			}
-			relayerC <- "unavailable"
+			relayerC <- relayerHealth{"unavailable", nil}
 		}()
+	}
+	if a.settler != nil && a.settler.DailyTxCap() > 0 {
+		if n, err := a.settler.SentToday(ctx); err == nil {
+			s.ShopToday = &quota{Sent: n, Cap: a.settler.DailyTxCap()}
+		}
 	}
 	for ; pending > 0; pending-- {
 		select {
@@ -138,7 +160,7 @@ func (a *api) services(ctx context.Context) *services {
 				}
 			}
 		case r := <-relayerC:
-			s.Relayer = r
+			s.Relayer, s.RelayerToday = r.state, r.today
 		case <-ctx.Done():
 			return s
 		}

@@ -113,6 +113,15 @@ until [ -S "$rsock" ]; do
   sleep 1
 done
 say "2/4 relayer 就緒"
+# C4 (10/24: a show ran into the relayer's daily cap unseen): enough for a
+# show of two customers, before the Signer and the Host start (read-only).
+pre=0
+python3 -I scripts/demo/testnet-preflight.py "$rsock" "$tn/host" >&2 || pre=$?
+case $pre in
+0) ;;
+1) stuck "開場前檢查：上面「不夠」的項目（交易數在 UTC 午夜、台北 08:00 歸零）" ;;
+*) say "開場前檢查沒有完成（上面是原因）；繼續啟動，請看主持人頁就緒表的 relayer 今天、商店今天" ;;
+esac
 
 # 3 the Signer under /opt: sudo first, here and on its own, so the wallet
 # passphrase is never typed into a sudo prompt (review).

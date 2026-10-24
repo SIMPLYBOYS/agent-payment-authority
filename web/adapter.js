@@ -27,7 +27,19 @@ const SERVICE = {
 export function serviceRows(s) {
   if (!s) return [];
   const row = (k, name) => [name, ...(SERVICE[k][s[k]] || ["unconfirmed", "未確認（" + str(s[k]) + "）"])];
-  return [row("signer", "Signer"), row("voice", "語音服務"), ...(s.relayer ? [row("relayer", "relayer")] : [])];
+  return [row("signer", "Signer"), row("voice", "語音服務"), ...(s.relayer ? [row("relayer", "relayer")] : []),
+    ...TODAY.filter(([k]) => s[k]).map(([k, name, need]) => todayRow(name, s[k], need))];
+}
+// C4 (10/24: a show ran into the relayer's cap unseen): today's transactions
+// against each daily cap, a UTC day. One show of two customers needs the
+// relayer 4 (two registrations, two reservations) and the shop 2.
+const TODAY = [["relayer_today", "relayer 今天", 4], ["shop_today", "商店今天", 2]];
+function todayRow(name, { sent, cap }, need) {
+  const left = Math.max(cap - sent, 0);
+  const head = "已送 " + sent + "／" + cap + " 筆（UTC 日，台北 08:00 歸零）";
+  return left === 0 ? [name, "error", head + "：已達上限，今天不能再付款"]
+    : left < need ? [name, "unconfirmed", head + "：剩 " + left + " 筆，不夠一場兩位客人（要 " + need + " 筆）"]
+    : [name, "ok", head + "：剩 " + left + " 筆"];
 }
 // approverText: who approves, by the authenticator the host names (never a virtual one as a device).
 export const approverText = (auth) => (auth === "virtual" ? "本人以 virtual authenticator（測試用，不是實體裝置）" : "本人以已登記的裝置");

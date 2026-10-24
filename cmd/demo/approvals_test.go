@@ -610,12 +610,12 @@ func TestServicesStatus(t *testing.T) {
 		payCap          string
 		want            services
 	}{
-		"all ready":          {`{"state":"ready","payment":"available","voice":"ready"}`, `{"state":"ready"}`, BaseSepolia, services{"ready", "ready", "ready"}},
-		"a Signer of before": {`{"state":"ready","payment":"available"}`, `{"state":"ready"}`, BaseSepolia, services{"ready", "unknown", "ready"}},
-		"voice down":         {`{"state":"ready","payment":"available","voice":"unavailable"}`, `{"state":"ready"}`, BaseSepolia, services{"ready", "unavailable", "ready"}},
-		"relayer not ready":  {`{"state":"ready","payment":"available","voice":"ready"}`, `{"state":"starting"}`, BaseSepolia, services{"ready", "ready", "unavailable"}},
-		"nothing there":      {"", "", BaseSepolia, services{"unavailable", "unknown", "unavailable"}},
-		"a Signer locked":    {`{"state":"unlocked"}`, "", "", services{"unavailable", "unknown", ""}},
+		"all ready":          {`{"state":"ready","payment":"available","voice":"ready"}`, `{"state":"ready"}`, BaseSepolia, services{Signer: "ready", Voice: "ready", Relayer: "ready"}},
+		"a Signer of before": {`{"state":"ready","payment":"available"}`, `{"state":"ready"}`, BaseSepolia, services{Signer: "ready", Voice: "unknown", Relayer: "ready"}},
+		"voice down":         {`{"state":"ready","payment":"available","voice":"unavailable"}`, `{"state":"ready"}`, BaseSepolia, services{Signer: "ready", Voice: "unavailable", Relayer: "ready"}},
+		"relayer not ready":  {`{"state":"ready","payment":"available","voice":"ready"}`, `{"state":"starting"}`, BaseSepolia, services{Signer: "ready", Voice: "ready", Relayer: "unavailable"}},
+		"nothing there":      {"", "", BaseSepolia, services{Signer: "unavailable", Voice: "unknown", Relayer: "unavailable"}},
+		"a Signer locked":    {`{"state":"unlocked"}`, "", "", services{Signer: "unavailable", Voice: "unknown", Relayer: ""}},
 	} {
 		a := &api{approve: &approvals{signer: signerclient.NewApprovals(gone)}, payCap: c.payCap}
 		if c.signer != "" {
@@ -631,6 +631,16 @@ func TestServicesStatus(t *testing.T) {
 			t.Errorf("%s: %+v, want %+v", name, *got, c.want)
 		}
 	}
+	// C4: the relayer's count today goes on to the page as it said it; one that does not say is not guessed.
+	q := &api{approve: &approvals{signer: signerclient.NewApprovals(healthOn(t, `{"state":"ready","payment":"available","voice":"ready"}`, 0))}, payCap: BaseSepolia,
+		relayer: budget.NewClient(healthOn(t, `{"state":"ready","daily_tx_cap":12,"sent_today":12}`, 0))}
+	if got := q.services(ctx); got.RelayerToday == nil || *got.RelayerToday != (quota{Sent: 12, Cap: 12}) || got.ShopToday != nil {
+		t.Errorf("relayer today %+v, shop %+v", got.RelayerToday, got.ShopToday)
+	}
+	q.relayer = budget.NewClient(healthOn(t, `{"state":"ready","daily_tx_cap":12}`, 0))
+	if got := q.services(ctx); got.RelayerToday != nil {
+		t.Errorf("a relayer of before: %+v", got.RelayerToday)
+	}
 	a := &api{approve: &approvals{signer: signerclient.NewApprovals(gone)}, payCap: LocalAnvil}
 	if got := a.services(ctx); got.Relayer != "in_process" {
 		t.Errorf("a relayer in process: %+v", *got)
@@ -643,14 +653,14 @@ func TestServicesStatus(t *testing.T) {
 		signer, relayer time.Duration
 		want            services
 	}{
-		"a slow Signer":  {3 * time.Second, 0, services{"timeout", "unknown", "ready"}},
-		"a slow relayer": {0, 3 * time.Second, services{"ready", "ready", "timeout"}},
+		"a slow Signer":  {3 * time.Second, 0, services{Signer: "timeout", Voice: "unknown", Relayer: "ready"}},
+		"a slow relayer": {0, 3 * time.Second, services{Signer: "ready", Voice: "ready", Relayer: "timeout"}},
 	} {
 		a := &api{approve: &approvals{signer: signerclient.NewApprovals(healthOn(t, ready, c.signer))}, payCap: BaseSepolia,
 			relayer: budget.NewClient(healthOn(t, `{"state":"ready"}`, c.relayer))}
 		start := time.Now()
 		got := a.services(ctx)
-		if *got != c.want && !(name == "a slow relayer" && *got == services{"ready", "ready", "unavailable"}) { // the relayer's own call may end first, on the same deadline
+		if *got != c.want && !(name == "a slow relayer" && *got == services{Signer: "ready", Voice: "ready", Relayer: "unavailable"}) { // the relayer's own call may end first, on the same deadline
 			t.Errorf("%s: %+v, want %+v", name, *got, c.want)
 		}
 		if d := time.Since(start); d > 2*time.Second {

@@ -439,9 +439,8 @@ func (s *Settler) capped(ctx context.Context) string {
 	if s.cfg.DailyTxCap == 0 {
 		return ""
 	}
-	var n uint64
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT tx_nonce FROM settlements GROUP BY tx_nonce HAVING min(created_at) / 86400 = ?)`,
-		s.clock()/86400).Scan(&n); err != nil {
+	n, err := s.SentToday(ctx)
+	if err != nil {
 		return "settlement_store_unavailable"
 	}
 	if n >= s.cfg.DailyTxCap {
@@ -449,6 +448,18 @@ func (s *Settler) capped(ctx context.Context) string {
 	}
 	return ""
 }
+
+// SentToday is this UTC day's transfers as DailyTxCap counts them (the
+// nonces first used today), and DailyTxCap itself (0: none).
+func (s *Settler) SentToday(ctx context.Context) (uint64, error) {
+	var n uint64
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT tx_nonce FROM settlements GROUP BY tx_nonce HAVING min(created_at) / 86400 = ?)`,
+		s.clock()/86400).Scan(&n)
+	return n, err
+}
+
+// DailyTxCap is the configured cap on transfers a UTC day (0: none).
+func (s *Settler) DailyTxCap() uint64 { return s.cfg.DailyTxCap }
 
 // settleOpen sends every unfinished transfer again (the same ones) and
 // decides each it can without waiting, before a new one takes a nonce.

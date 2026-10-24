@@ -256,6 +256,13 @@ test("E1-a: the Inspector shows the run conditions, both transactions with Base 
 // Gap review C2: the Signer, its voice service and the relayer in the readiness table.
 test("the services' readiness rows", () => {
   assert.deepEqual(A.serviceRows(undefined), []);
+  // C4: today's counts against the daily caps; not enough for two customers is said before the show.
+  const today = (r, s) => Object.fromEntries(A.serviceRows({ signer: "ready", voice: "ready", relayer: "ready", relayer_today: r, shop_today: s }).map(([k, st, t]) => [k, [st, t]]));
+  const t = today({ sent: 12, cap: 12 }, { sent: 3, cap: 4 });
+  assert.deepEqual(t["relayer 今天"], ["error", "已送 12／12 筆（UTC 日，台北 08:00 歸零）：已達上限，今天不能再付款"]);
+  assert.deepEqual(t["商店今天"], ["unconfirmed", "已送 3／4 筆（UTC 日，台北 08:00 歸零）：剩 1 筆，不夠一場兩位客人（要 2 筆）"]);
+  assert.deepEqual(today({ sent: 8, cap: 12 }, { sent: 0, cap: 4 })["relayer 今天"], ["ok", "已送 8／12 筆（UTC 日，台北 08:00 歸零）：剩 4 筆"]);
+  assert.ok(!("relayer 今天" in Object.fromEntries(A.serviceRows({ signer: "ready", voice: "ready", relayer: "ready" }))), "not read: no row, no guess");
   const rows = A.serviceRows({ signer: "ready", voice: "ready", relayer: "ready" });
   assert.deepEqual(rows.map(([k, s]) => k + ":" + s), ["Signer:ok", "語音服務:ok", "relayer:ok"]);
   const down = Object.fromEntries(A.serviceRows({ signer: "unavailable", voice: "unknown", relayer: "unavailable" }).map(([k, s, t]) => [k, [s, t]]));

@@ -29,6 +29,11 @@ type Service interface {
 	Lookup(ctx context.Context, intent string) (Evidence, string, error)
 }
 
+// sentCounter: a Service that counts its transactions as DailyTxCap does (a *Relayer).
+type sentCounter interface {
+	SentToday(ctx context.Context) (uint64, error)
+}
+
 // Health is GET /v1/health: what the Host checks against its own
 // configuration before it pays through this relayer.
 type Health struct {
@@ -37,6 +42,12 @@ type Health struct {
 	Contract      string `json:"contract"`
 	DailyTxCap    uint64 `json:"daily_tx_cap"`
 	Confirmations uint64 `json:"confirmations"` // a reservation's depth before the Host takes it
+	// Gas and Issuer: the keys that pay gas (their balances are checked before a show, C4).
+	Gas    string `json:"gas,omitempty"`
+	Issuer string `json:"issuer,omitempty"`
+	// SentToday: this UTC day's transactions as DailyTxCap counts them (C4,
+	// 10/24: a show ran into the cap unseen); absent when it cannot be read.
+	SentToday *uint64 `json:"sent_today,omitempty"`
 }
 
 const (
@@ -51,7 +62,15 @@ type uidKey struct{}
 // Handler is the fixed set of routes; every request first passes the caller check.
 func Handler(s Service, h Health, callers []uint32, log func(string)) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) { reply(w, h, nil) })
+	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, req *http.Request) {
+		out := h
+		if t, ok := s.(sentCounter); ok {
+			if n, err := t.SentToday(req.Context()); err == nil {
+				out.SentToday = &n
+			}
+		}
+		reply(w, out, nil)
+	})
 	mux.HandleFunc("POST /v1/register", func(w http.ResponseWriter, req *http.Request) {
 		var in struct {
 			TaskID     string `json:"task_id"`

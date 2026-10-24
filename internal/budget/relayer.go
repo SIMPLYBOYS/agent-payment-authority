@@ -737,13 +737,20 @@ func (r *Relayer) resume(ctx context.Context, intent string, wait bool) (Evidenc
 	return ev, true, tx.Commit()
 }
 
+// SentToday is this UTC day's transactions, as DailyTxCap counts them.
+func (r *Relayer) SentToday(ctx context.Context) (uint64, error) {
+	var n uint64
+	err := r.db.QueryRowContext(ctx, `SELECT count(*) FROM sent WHERE day = ?`, r.clock()/86400).Scan(&n)
+	return n, err
+}
+
 // capped refuses a new transaction once today's are DailyTxCap.
 func (r *Relayer) capped(ctx context.Context) error {
 	if r.cfg.DailyTxCap == 0 {
 		return nil
 	}
-	var n uint64
-	if err := r.db.QueryRowContext(ctx, `SELECT count(*) FROM sent WHERE day = ?`, r.clock()/86400).Scan(&n); err != nil {
+	n, err := r.SentToday(ctx)
+	if err != nil {
 		return err
 	}
 	if n >= r.cfg.DailyTxCap {

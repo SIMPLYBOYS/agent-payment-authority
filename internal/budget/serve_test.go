@@ -35,6 +35,9 @@ func (f *fake) Reserve(_ context.Context, order json.RawMessage) (Evidence, erro
 	return Evidence{IntentHash: "sha256:x", Amount: 5, TxHash: "0xab", BlockNumber: 7}, nil
 }
 
+// SentToday: today's count, as a *Relayer answers it (C4).
+func (f *fake) SentToday(context.Context) (uint64, error) { return 7, nil }
+
 func (f *fake) Lookup(_ context.Context, intent string) (Evidence, string, error) {
 	if intent == "broken" {
 		return Evidence{}, "", errors.New("node down")
@@ -69,8 +72,10 @@ func socketPair(t *testing.T, s Service, callers []uint32) *Client {
 func TestSocketCarriesTheRelayersAnswers(t *testing.T) {
 	f := &fake{}
 	c := socketPair(t, f, []uint32{uint32(os.Getuid())})
-	if h, err := c.Health(bg); err != nil || h != (Health{"ready", 84532, "0xc0", 12, 0}) {
+	if h, err := c.Health(bg); err != nil || h.SentToday == nil || *h.SentToday != 7 {
 		t.Fatalf("health %+v %v", h, err)
+	} else if h.SentToday = nil; h != (Health{State: "ready", ChainID: 84532, Contract: "0xc0", DailyTxCap: 12}) {
+		t.Fatalf("health %+v", h)
 	}
 	if err := c.RegisterTask(bg, "show-a-01", "consumer-a", 100); err != nil || len(f.registered) != 1 || f.registered[0] != "show-a-01/consumer-a" {
 		t.Fatalf("register %v %v", err, f.registered)

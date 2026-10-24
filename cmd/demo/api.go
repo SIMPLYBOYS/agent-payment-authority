@@ -16,6 +16,7 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
@@ -112,18 +113,19 @@ type api struct {
 	clock       store.Clock
 	unity       *os.Root // the Unity Web build's Build/ directory; nil without a build
 	expiry      *expiryHealth
-	fake        bool           // a fake CLI passed its --version check at start
-	control     *control       // host-started runs (--scenarios); nil otherwise
-	history     *historyInfo   // history mode (--history-db); nil otherwise
-	live        *liveInfo      // live mode (--live-cli); nil otherwise
-	traceDir    string         // live mode: where the run traces are
-	pairing     *pairing       // --pairing: the host page's one-time code; nil otherwise
-	sim         *simulator     // fake mode with --scenarios: the simulated approver (P1-a); nil otherwise
-	out         io.Writer      // the host's log (fixed lines only)
-	payContract string         // E1-a: --payments' budget contract
-	payCap      string         // P2: --payments' environment (LocalAnvil, BaseSepolia); "" without
-	relayer     *budget.Client // P2-b: apa-relayer's socket, for its health; nil in process or without --payments
-	chainRead   *chainReader   // O2: the payments read from the chain; nil without --payments
+	fake        bool              // a fake CLI passed its --version check at start
+	control     *control          // host-started runs (--scenarios); nil otherwise
+	history     *historyInfo      // history mode (--history-db); nil otherwise
+	live        *liveInfo         // live mode (--live-cli); nil otherwise
+	traceDir    string            // live mode: where the run traces are
+	pairing     *pairing          // --pairing: the host page's one-time code; nil otherwise
+	sim         *simulator        // fake mode with --scenarios: the simulated approver (P1-a); nil otherwise
+	out         io.Writer         // the host's log (fixed lines only)
+	payContract string            // E1-a: --payments' budget contract
+	payCap      string            // P2: --payments' environment (LocalAnvil, BaseSepolia); "" without
+	relayer     *budget.Client    // P2-b: apa-relayer's socket, for its health; nil in process or without --payments
+	settler     *merchant.Settler // C4: the shop's settlements today; nil without --payments
+	chainRead   *chainReader      // O2: the payments read from the chain; nil without --payments
 
 	recon func(context.Context) (reconcile.Report, error) // P2-a: the reconciliation; nil without --payments
 }

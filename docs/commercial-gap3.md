@@ -52,6 +52,7 @@
 - 原因（讀鏈，唯讀）：relayer 的每日上限（P2b-D5：12 筆）以 UTC 日計，而且算 relayer 管的所有金鑰：UTC 10/23 relayer-gas 送了 2 筆、issuer 送了 10 筆（每開一個付款場次就在鏈上登記一筆 task，不論之後有沒有付款），合計 12，所以這筆預留在送出交易前就被拒（`RELAYER_DAILY_CAP`），沒有送出任何交易，沒有花錢。商店今天 2 筆（上限 4）。
 - 修正：Host 被 relayer 拒絕預留時，把拒絕原因印在終端機（payflow reserve）；之前只有 RESERVE_FAILED，原因只能從鏈上推算。
 - 下一次：UTC 午夜（台北 08:00）後計數歸零。一場兩位客人用 relayer 4 筆（登記 2、預留 2）、商店 2 筆；開場前不要多開沒有要付款的場次。
+- 之後：`make demo-testnet` 在 relayer 就緒後先檢查今天的筆數與餘額，不夠就停下（`docs/commercial-ops.md` O3 開場前檢查）。
 
 ## 4 已知、不在本批
 
