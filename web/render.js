@@ -96,7 +96,7 @@ export function renderCard(root, c, on) {
     li.append(el("span", "step-note", st.note));
     ol.append(li);
   });
-  root.append(ol, el("p", "card-status", c.status), el("p", "card-task", c.task));
+  root.append(ol, el("p", "card-status", c.status), ...(c.next ? [el("p", "card-next", c.next)] : []), el("p", "card-task", c.task));
   const dl = el("dl", "card-rows");
   for (const [k, v, src] of c.rows) {
     const dd = el("dd", null, v);

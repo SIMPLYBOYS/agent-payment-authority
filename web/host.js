@@ -481,9 +481,9 @@ function setRunStatus(text, state) {
 
 const ERRORS = {
   run_active: "上一場尚未結束；請先等它結束或停止它",
-  consumer_busy: "這位客人的場次尚未結束；請先等它結束或停止它",
+  consumer_busy: "這位客人的場次尚未結束；請先等它結束，或按卡片上的「停止 Agent」",
   capacity_full: "同時執行的場次已達上限（部署設定）；請先等一場結束或停止一場",
-  no_free_task: "展示 task 已用完：請設定新的 APA_DB_PATH 後重啟，或擴充 demo registry",
+  no_free_task: "展示 task 已用完。下一步：找開發者擴充 registry；不要換新的資料庫（Signer 記得做過的 task，會拒絕重複的）", // C3 review: never a new APA_DB_PATH
   request_id_conflict: "請求編號與另一個情境衝突，未開始",
   unknown_scenario: "沒有這個情境",
   store_unavailable: "Store 不可用，未開始",
@@ -1386,13 +1386,13 @@ const a2Target = (item) => A.approvalTarget(creds.gen, "a2", item);
 
 // ENDED: a pending Ask of a task that ended (a CLI timeout, or another
 // purchase denied): not decided by anyone now; it expires at its deadline.
-const ENDED = ["closed", "task 已結束：這筆不能核准", "這個 task 已結束（CLI 逾時，或另一筆請購被拒絕），這一筆不能再核准，也不會付款；到期後由後端記錄。"];
+const ENDED = ["closed", "task 已結束：這筆不能核准", "這個 task 已結束（CLI 逾時，或另一筆請購被拒絕），這一筆不能再核准，也不會付款；到期後由後端記錄。下一步：" + A.AGAIN + "。"];
 
 const A2_RESULT = {
   // Review N-b, C: a closed session's heading never says "not approved"
   // (an attempt's result may be unknown; design 7, 8); the panel's message
   // says what is known.
-  expired: ["closed", "已過期（後端時間為準）。", "需要重新請購。"],
+  expired: ["closed", "已過期（後端時間為準）。", "沒有付款。下一步：" + A.AGAIN + "。"],
   withdrawn: ["closed", "主持人已取消這個任務；這筆不是你拒絕的。", "不會付款。"],
   superseded: ["closed", "報價已改變：這筆已關閉", "需要重新請購；沒有付款。"],
 };
@@ -1640,7 +1640,7 @@ async function a2Act(item, decision) {
       if (stale()) return;
       // NotAllowedError covers a cancel, a timeout and no usable device:
       // the page cannot tell them apart and does not claim which.
-      return done("idle", e && e.name === "NotAllowedError" ? "裝置驗證沒有完成（取消、逾時或沒有可用的裝置）；這筆仍在等你決定。" : "瀏覽器拒絕這次驗證（" + (e && e.name) + "）；沒有" + (decision === "approve" ? "核准" : "拒絕") + "。");
+      return done("idle", e && e.name === "NotAllowedError" ? "裝置驗證沒有完成（取消、逾時或沒有可用的裝置）；這筆仍在等你決定，期限內可以再按一次核准。" : "瀏覽器拒絕這次驗證（" + (e && e.name) + "）；沒有" + (decision === "approve" ? "核准" : "拒絕") + "。");
     }
     if (stale()) return; // never sent for another customer or generation
     a2Op.phase = "verify";

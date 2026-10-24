@@ -496,15 +496,15 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
+	payState := "no payment capability"
+	if pay != nil {
+		payState = "payments on " + pay.cfg.Environment + " (test USDC)"
+	}
 	if live {
-		payState := "no payment capability"
-		if pay != nil {
-			payState = "payments on " + pay.cfg.Environment + " (test USDC)"
-		}
 		fmt.Fprintf(d.out, "listening on http://%s (LIVE MODE: %s; a run starts only when the operator starts one, and then runs %s on the APA-only config directory, which may use your own subscription; dev demo plugin exception %t; %s); Store %s; demo tokens in %s\n",
 			addr, roles.label, *liveCLI, *devDemo, payState, dbPath, tokenPath)
 	} else {
-		fmt.Fprintf(d.out, "listening on http://%s (fixture mode, live CLI off, no payment capability); Store %s; demo tokens in %s\n", addr, dbPath, tokenPath)
+		fmt.Fprintf(d.out, "listening on http://%s (fixture mode, live CLI off, %s); Store %s; demo tokens in %s\n", addr, payState, dbPath, tokenPath) // review of C3: a host that pays said it did not
 	}
 	if *pairingOn {
 		if err := showPairingCode(pairOut, pairCode, addr); err != nil {

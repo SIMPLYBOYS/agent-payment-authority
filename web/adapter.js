@@ -17,11 +17,11 @@ const RUN = { agent: { live: "真實 Agent（live CLI）", fake: "fake Agent" },
 // serviceRows (gap review C2): the readiness rows of the Signer, its voice
 // service and the budget relayer, from the host's status (services).
 const SERVICE = {
-  signer: { ready: ["ok", "就緒（核准與付款簽章）"], "approvals-only": ["ok", "就緒（只核准，不簽付款）"], unavailable: ["error", "無法連線：核准會失敗，請先啟動 Signer"],
+  signer: { ready: ["ok", "就緒（核准與付款簽章）"], "approvals-only": ["ok", "就緒（只核准，不簽付款）"], unavailable: ["error", "無法連線：核准會失敗。下一步：看啟動 demo 的終端機；通常要 Ctrl-C 後重新啟動"],
     timeout: ["error", "3 秒內沒有回應：核准可能失敗，請檢查 Signer"] },
-  voice: { ready: ["ok", "就緒（模型已核對）"], off: ["off", "未設定（核准不含語音）"], unavailable: ["error", "無法使用：核准會記為語音降級，請先啟動語音服務"],
+  voice: { ready: ["ok", "就緒（模型已核對）"], off: ["off", "未設定（核准不含語音）"], unavailable: ["error", "無法使用：核准會記為語音降級（展示時要照實說）。下一步：Ctrl-C 後重新啟動"],
     unknown: ["unconfirmed", "未確認（Signer 未回報；Signer 無法連線或是舊版）"] },
-  relayer: { ready: ["ok", "就緒"], in_process: ["ok", "Host 程序內（本機 anvil）"], unavailable: ["error", "無法連線：付款會失敗，請先啟動 apa-relayer"],
+  relayer: { ready: ["ok", "就緒"], in_process: ["ok", "Host 程序內（本機 anvil）"], unavailable: ["error", "無法連線：付款會失敗。下一步：看啟動 demo 的終端機；通常要 Ctrl-C 後重新啟動"],
     timeout: ["error", "3 秒內沒有回應：付款可能失敗，請檢查 apa-relayer"] },
 };
 export function serviceRows(s) {
@@ -37,8 +37,8 @@ const TODAY = [["relayer_today", "relayer 今天", 4], ["shop_today", "商店今
 function todayRow(name, { sent, cap }, need) {
   const left = Math.max(cap - sent, 0);
   const head = "已送 " + sent + "／" + cap + " 筆（UTC 日，台北 08:00 歸零）";
-  return left === 0 ? [name, "error", head + "：已達上限，今天不能再付款"]
-    : left < need ? [name, "unconfirmed", head + "：剩 " + left + " 筆，不夠一場兩位客人（要 " + need + " 筆）"]
+  return left === 0 ? [name, "error", head + "：已達上限，今天不能再付款。下一步：台北 08:00 後再開場，或改用本機場"]
+    : left < need ? [name, "unconfirmed", head + "：剩 " + left + " 筆，不夠一場兩位客人（要 " + need + " 筆）。下一步：只跑一位客人，或台北 08:00 後再開場"]
     : [name, "ok", head + "：剩 " + left + " 筆"];
 }
 // approverText: who approves, by the authenticator the host names (never a virtual one as a device).
@@ -675,6 +675,22 @@ function catalogFor(catalog, p) {
 const NOT_PAID = { RESERVE_FAILED: "預算預留失敗，沒有花錢", NOT_PAID_EXPIRED: "已過付款期限，沒有花錢", TASK_ENDED: "task 已結束，沒有花錢" };
 const REVIEW = { RESERVED_NOT_PAID: "預算已預留，但付款沒有送出", NOT_SETTLED_EXPIRED: "已送出，過期未結算", VERIFICATION_FAILED: "商店回覆驗證未通過、沒有送出（商店的說法）",
   RECONCILE_NEEDS_REVIEW: "鏈上對帳需人工判斷" };
+// paymentNext (C3, docs/host-manual.md 6.4): what the host does next about a
+// payment that did not go through, by its code; "" when nothing is to be done.
+export const AGAIN = "要再買這一筆，等這位客人的場次結束（或按卡片上的「停止 Agent」）後再開始一次";
+const NEXT = {
+  not_paid: { RESERVE_FAILED: "看啟動 demo 的終端機上 relayer 拒絕的原因，與就緒表的「relayer 今天」；今天的額度用完就等台北 08:00 後再開場，今天不要再試",
+    NOT_PAID_EXPIRED: AGAIN, TASK_ENDED: AGAIN },
+  needs_review: { RESERVED_NOT_PAID: "錢沒有動；記下時間找開發者，不要重試這一筆（常見原因：核准人 24 小時內的核准額度已用完）",
+    VERIFICATION_FAILED: "看終端機上這一筆的 shop 原因與就緒表的「商店今天」，記下來找開發者；不要重試這一筆",
+    NOT_SETTLED_EXPIRED: "錢沒有動（授權已過期、鏈上確認沒有被用掉）；不用處理", RECONCILE_NEEDS_REVIEW: "停下這一場，不要重試，找開發者" },
+};
+export function paymentNext(pv) {
+  if (!pv) return "";
+  if (pv.status === "paid" && pv.code === "DELIVERY_FAILED") return "下一步：錢已付；記下時間找開發者處理交付，不要重新購買。";
+  const t = NEXT[pv.status] && (NEXT[pv.status][pv.code] || (pv.status === "needs_review" ? "記下代碼 " + str(pv.code) + " 與時間，找開發者" : ""));
+  return t ? "下一步：" + t + "。" : "";
+}
 export function paymentText(pv) {
   const block = typeof pv.settle_block === "number" ? "（區塊 " + pv.settle_block + "）" : "";
   switch (pv.status) {
@@ -818,6 +834,8 @@ export function card(view, chosen, ctx) {
     mode: live ? "live" : "replay", n: ctx.n, m: ctx.m,
     title: "客人 " + (CUSTOMER[t.consumer_id] || str(t.consumer_id)) + " · " + str(t.consumer_id) + " · " + str(t.task_id),
     po: po || null, scenePo: sc.po || null, differs: !!(po && sc.po && po !== sc.po), options: live ? ids : [],
+    // C3: the host's next step about a payment that did not go through (live only: a replay or a record is not acted on).
+    next: live && !hist ? paymentNext(pv) : "",
     steps, status: hist && p && p.decision && p.decision.policy_verdict === "Ask" && !p.approval_closed
       ? "Ask：執行結束時待人工核准（歷史快照；不是仍有效的核准）" : purchaseStatus(p, live, t.served_at, t, endedPay),
     history: hist ? hist.label : null,

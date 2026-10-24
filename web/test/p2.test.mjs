@@ -47,6 +47,13 @@ test("P2: an ending replaces the steps it cut off, with its code", () => {
   assert.deepEqual(labels(review), ["收尾:none", "預留:done", "待人工處理:done"]);
   const notPaid = card([...allowed(), ev(4, "PAYMENT_REQUESTED"), ev(5, "PAYMENT_NOT_SETTLED")], { status: "not_paid", state: "reserve_failed", code: "RESERVE_FAILED" });
   assert.equal(notPaid.status, "未付款：預算預留失敗，沒有花錢");
+  // C3: the host's next step, on its own line; a payment under way or paid has none.
+  assert.match(notPaid.next, /^下一步：看啟動 demo 的終端機上 relayer 拒絕的原因，與就緒表的「relayer 今天」/);
+  assert.match(review.next, /^下一步：錢沒有動；記下時間找開發者，不要重試這一筆/);
+  assert.match(refused.next, /^下一步：看終端機上這一筆的 shop 原因與就緒表的「商店今天」/);
+  assert.equal(A.paymentNext({ status: "needs_review", code: "NOT_SETTLED_EXPIRED" }), "下一步：錢沒有動（授權已過期、鏈上確認沒有被用掉）；不用處理。");
+  assert.equal(A.paymentNext({ status: "needs_review", code: "SOMETHING_NEW" }), "下一步：記下代碼 SOMETHING_NEW 與時間，找開發者。");
+  for (const pv of [{ status: "paying", state: "reserved" }, { status: "confirming" }, { status: "paid", state: "delivered" }, null]) assert.equal(A.paymentNext(pv), "");
   assert.deepEqual(labels(notPaid), ["收尾:none", "未付款:done"]);
   const failed = card([...allowed(), ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED"), ev(6, "PAYMENT_SIGNED"), ev(7, "PAYMENT_SUBMITTED"), ev(8, "PAYMENT_SETTLED"),
     ev(9, "PAYMENT_NEEDS_REVIEW")], { status: "paid", state: "needs_review", code: "DELIVERY_FAILED", settle_block: 12 });
@@ -114,6 +121,7 @@ test("P2: a person's approval says not paid yet with local_anvil", async () => {
   assert.equal(AP.decidedText("approved", paidDev, true)[1], "本人核准已驗證；已付款、已交付（區塊 11），附收據。");
   assert.equal(AP.decidedText("approved", paidDev)[1], "本人核准已驗證；已付款、已交付（區塊 11），附收據。"); // a recorded payment, said on any host
   const review = { ...dev, payment: { status: "needs_review", state: "needs_review", code: "RESERVED_NOT_PAID" } };
+  assert.match(AP.decidedText("approved", review, true)[2], /^下一步：錢沒有動/); // the panel's line under the heading: the next step, not "see the card"
   assert.match(AP.decidedText("approved", review, true)[1], /^本人核准已驗證；待人工處理：預算已預留，但付款沒有送出/);
   const sim = { approval: { resolved_by: "simulated:consumer-a:host", grant: { authorization_method: "simulated" } }, payment: { status: "paid", state: "delivered" } };
   assert.equal(AP.decidedText("approved", sim, true)[1], "已核准（模擬），未啟用付款"); // a simulated approval never reads as paid
@@ -259,8 +267,8 @@ test("the services' readiness rows", () => {
   // C4: today's counts against the daily caps; not enough for two customers is said before the show.
   const today = (r, s) => Object.fromEntries(A.serviceRows({ signer: "ready", voice: "ready", relayer: "ready", relayer_today: r, shop_today: s }).map(([k, st, t]) => [k, [st, t]]));
   const t = today({ sent: 12, cap: 12 }, { sent: 3, cap: 4 });
-  assert.deepEqual(t["relayer 今天"], ["error", "已送 12／12 筆（UTC 日，台北 08:00 歸零）：已達上限，今天不能再付款"]);
-  assert.deepEqual(t["商店今天"], ["unconfirmed", "已送 3／4 筆（UTC 日，台北 08:00 歸零）：剩 1 筆，不夠一場兩位客人（要 2 筆）"]);
+  assert.deepEqual(t["relayer 今天"], ["error", "已送 12／12 筆（UTC 日，台北 08:00 歸零）：已達上限，今天不能再付款。下一步：台北 08:00 後再開場，或改用本機場"]);
+  assert.deepEqual(t["商店今天"], ["unconfirmed", "已送 3／4 筆（UTC 日，台北 08:00 歸零）：剩 1 筆，不夠一場兩位客人（要 2 筆）。下一步：只跑一位客人，或台北 08:00 後再開場"]);
   assert.deepEqual(today({ sent: 8, cap: 12 }, { sent: 0, cap: 4 })["relayer 今天"], ["ok", "已送 8／12 筆（UTC 日，台北 08:00 歸零）：剩 4 筆"]);
   assert.ok(!("relayer 今天" in Object.fromEntries(A.serviceRows({ signer: "ready", voice: "ready", relayer: "ready" }))), "not read: no row, no guess");
   const rows = A.serviceRows({ signer: "ready", voice: "ready", relayer: "ready" });
@@ -268,7 +276,7 @@ test("the services' readiness rows", () => {
   const down = Object.fromEntries(A.serviceRows({ signer: "unavailable", voice: "unknown", relayer: "unavailable" }).map(([k, s, t]) => [k, [s, t]]));
   assert.equal(down.Signer[0], "error");
   assert.equal(down["語音服務"][0], "unconfirmed");
-  assert.match(down.relayer[1], /apa-relayer/);
+  assert.match(down.relayer[1], /下一步：看啟動 demo 的終端機/); // C3: a service down says what to do
   assert.deepEqual(A.serviceRows({ signer: "approvals-only", voice: "off", relayer: "" }).map(([k, s]) => k + ":" + s), ["Signer:ok", "語音服務:off"]); // no --payments: no relayer row
   assert.equal(A.serviceRows({ signer: "new", voice: "ready" })[0][1], "unconfirmed"); // a state this page does not know is not ready
   assert.deepEqual(A.serviceRows({ signer: "timeout", voice: "unknown", relayer: "timeout" }).map(([k, s]) => k + ":" + s), ["Signer:error", "語音服務:unconfirmed", "relayer:error"]); // a hung service is an error

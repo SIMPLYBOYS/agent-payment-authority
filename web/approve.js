@@ -5,7 +5,7 @@
 // the device is asked, converts WebAuthn's binary fields, and words each
 // state with fixed texts (never "approved" for something unknown).
 
-import { b64u, unb64u, byDevice, VOICE, VOICE_FAILURES, voiceText, paymentText, paysOn, PAYING } from "./adapter.js";
+import { paymentNext, AGAIN, b64u, unb64u, byDevice, VOICE, VOICE_FAILURES, voiceText, paymentText, paysOn, PAYING } from "./adapter.js";
 
 export { VOICE, VOICE_FAILURES };
 
@@ -157,7 +157,13 @@ export const decidedText = (state, p, pays = false) => {
   // With payments, the payment as the card says it once there is one; "not yet paid" before.
   const now = () => (p && p.payment ? "；" + paymentText(p.payment) + "。" : "，尚未付款。");
   const paid = (t) => (pays || p && p.payment ? t.replace("，付款未啟用。", now()) : t); // a recorded payment is said even on a host without --payments
-  if (state === "denied" && p && p.closed_reason === "VOICE_CHALLENGE_FAILED") return ["deny", "語音挑戰未通過，這筆已拒絕。", "沒有發出授權，不會付款；這筆不能再核准。"];
+  if (state === "denied" && p && p.closed_reason === "VOICE_CHALLENGE_FAILED") return ["deny", "語音挑戰未通過，這筆已拒絕。", "沒有發出授權，不會付款；這筆不能再核准。下一步：" + AGAIN + "，等「錄音中」出現再唸。"];
+  const r = decided(state, p, pays, g, now, paid);
+  // C3: a payment that did not go through says the host's next step, in place of "see the card".
+  const nx = r && p && p.payment ? paymentNext(p.payment) : "";
+  return nx ? [r[0], r[1], nx] : r;
+};
+const decided = (state, p, pays, g, now, paid) => {
   if (state === "approved" && byDevice(p) && g && g.voice === "unavailable") {
     return ["warn", paid("本人核准已驗證（語音降級），付款未啟用。"), "語音不可用（" + voiceText(g.voice_reason) + "）：只憑摘要確認與裝置驗證核准，這筆記為降級。"];
   }

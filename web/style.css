@@ -47,6 +47,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .steps li[data-state="none"], .steps li[data-state="future"] { border-style: dashed; color: var(--muted); }
 .step-note { display: block; font-size: 13px; color: var(--muted); }
 .card-status { font-weight: bold; margin: 4px 0 0; }
+.card-next { margin: 4px 0 0; color: var(--warn); }
 .card-task { color: var(--muted); margin: 0 0 6px; }
 .card-rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 0; }
 .card-rows dt { color: var(--muted); }
