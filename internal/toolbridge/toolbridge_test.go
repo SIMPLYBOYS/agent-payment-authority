@@ -406,7 +406,7 @@ func TestMainLineAsk(t *testing.T) {
 	b := e.start("task-a")
 	list, rec := e.call(b, "list_products", "")
 	items := list["products"].([]any)
-	if rec.Outcome != "ok" || len(items) != 1 || items[0].(map[string]any)["product_id"] != "kr-market" {
+	if rec.Outcome != "ok" || len(items) != 2 || items[0].(map[string]any)["product_id"] != "kr-market" { // and the note (Aaron 10/27)
 		t.Fatalf("list_products: %v %v", list, rec)
 	}
 	q, rec := e.call(b, "get_quote", "kr-market")
@@ -475,14 +475,14 @@ func TestScenesAreSeparate(t *testing.T) {
 	if q, rec := e.call(data, "get_quote", "cafe-lunch-set"); q["refused"] == nil || rec.Outcome != "UNKNOWN_PRODUCT" || rec.ProductID != "" {
 		t.Errorf("data run, cafe product: %v %+v", q, rec)
 	}
-	if list, _ := e.call(data, "list_products", ""); len(list["products"].([]any)) != 1 {
+	if list, _ := e.call(data, "list_products", ""); len(list["products"].([]any)) != 2 { // the brief and the semiconductor note (Aaron 10/27)
 		t.Errorf("data run lists %v", list)
 	}
 	cafe := e.start("task-b")
 	cafe.Scene = "cafe"
 	list, rec := e.call(cafe, "list_products", "")
 	items := list["products"].([]any)
-	if rec.Outcome != "ok" || len(items) != 1 || items[0].(map[string]any)["product_id"] != "cafe-lunch-set" {
+	if rec.Outcome != "ok" || len(items) != 2 || items[0].(map[string]any)["product_id"] != "cafe-lunch-set" || items[1].(map[string]any)["product_id"] != "cafe-meeting-coffee" {
 		t.Fatalf("cafe list_products: %v %+v", list, rec)
 	}
 	if q, rec := e.call(cafe, "request_purchase", "kr-market"); q["refused"] == nil || rec.Outcome != "UNKNOWN_PRODUCT" {

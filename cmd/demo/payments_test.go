@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -246,26 +247,41 @@ func TestP2ShippedCatalog(t *testing.T) {
 	if err != nil || len(scs) != 4 || scs["cafe-a"].Scene != "cafe" || scs["data-b"].Scene != "" || scs["cafe-b"].version() != paycontract.Version {
 		t.Fatalf("catalog: %v %v", scs, err)
 	}
-	// The shop's prices against the delegations' allow_max: the cafe's lunch is an Allow, the brief an Ask.
+	// The shop's prices against the delegations' allow_max, by the product each script buys (Aaron 10/27:
+	// in a scene the two customers buy different things): one Ask and one Allow in each scene.
 	shop, _ := merchant.New("http://127.0.0.1:1")
 	price := map[string]uint64{}
+	scene := map[string]string{}
 	for _, o := range shop.Offers() {
 		var req struct{ Amount contracts.Amount }
 		if err := json.Unmarshal(o.Quote.SelectedRequirement, &req); err != nil {
 			t.Fatal(err)
 		}
-		if price[o.Scene], err = req.Amount.Units(); err != nil {
+		if price[o.ProductID], err = req.Amount.Units(); err != nil {
 			t.Fatal(err)
 		}
+		scene[o.ProductID] = o.Scene
 	}
+	buys := regexp.MustCompile(`"request_purchase","args":\{"product_id":"([a-z0-9-]+)"\}`)
+	bought := map[string]string{}
 	for id, sc := range scs {
-		allow, err := sc.Delegation.AllowMax.Units()
-		if _, ok := price[sc.Scene]; !ok || err != nil {
-			t.Fatalf("%s: no offer for scene %q or allow_max: %v", id, sc.Scene, err)
+		raw, err := os.ReadFile(sc.Scenario)
+		m := buys.FindSubmatch(raw)
+		allow, aerr := sc.Delegation.AllowMax.Units()
+		if err != nil || m == nil || aerr != nil {
+			t.Fatalf("%s: script %s: %v %v", id, sc.Scenario, err, aerr)
 		}
-		if want := map[string]bool{"cafe": true, "": false}[sc.Scene]; (price[sc.Scene] <= allow) != want {
-			t.Fatalf("%s: price %d, allow_max %d", id, price[sc.Scene], allow)
+		product := string(m[1])
+		if _, ok := price[product]; !ok || scene[product] != sc.Scene {
+			t.Fatalf("%s buys %s, not an offer of its scene %q", id, product, sc.Scene)
 		}
+		if want := map[string]bool{"data-a": false, "data-b": true, "cafe-a": true, "cafe-b": false}[id]; (price[product] <= allow) != want {
+			t.Fatalf("%s: %s at %d, allow_max %d: want Allow %v", id, product, price[product], allow, want)
+		}
+		bought[id] = product
+	}
+	if bought["data-a"] == bought["data-b"] || bought["cafe-a"] == bought["cafe-b"] {
+		t.Fatalf("the two customers of a scene buy the same: %v", bought)
 	}
 	raw, _ := os.ReadFile("testdata/policy/m1-demo-profile.json")
 	if p, err := policy.LoadProfile(raw); err != nil || checkDelegations(scs, p) != nil {

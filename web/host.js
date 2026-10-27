@@ -689,11 +689,21 @@ addEventListener("keydown", (e) => { if (e.key === "Escape" && presenting && !do
 
 // renderCaption: the narration under the scene: each customer's step on screen, in plain words (the cards'
 // caption), and, while the screen trails the real task, that it is playing the steps in order. A new step
-// flashes once so the eye catches it.
+// flashes once so the eye catches it. A finished transaction (no step going, the screen caught up) keeps
+// its line CAPTION_KEEP ms, then leaves the scene to the next (Aaron 10/27: it lingered in the town).
+const CAPTION_KEEP = 6000;
 let shownCaption = "";
+const captionDone = new Map(); // consumer -> [its final caption, when it was first shown]
 function renderCaption(models) {
   const box = $("present-caption");
-  const lines = presenting ? models.filter((m) => m.steps[0].state !== "now" || m.steps[0].text !== "等待開始") : [];
+  const now = Date.now();
+  const lines = presenting ? models.filter((m) => {
+    if (m.steps[0].state === "now" && m.steps[0].text === "等待開始") return false;
+    if (m.ahead || m.steps.some((s) => s.state === "now")) { captionDone.delete(m.consumer); return true; }
+    const d = captionDone.get(m.consumer);
+    if (!d || d[0] !== m.caption) { captionDone.set(m.consumer, [m.caption, now]); setTimeout(() => renderPresent(), CAPTION_KEEP + 50); return true; }
+    return now - d[1] < CAPTION_KEEP;
+  }) : [];
   box.hidden = !lines.length;
   const key = JSON.stringify(lines.map((m) => [m.caption, !!m.ahead]));
   if (key === shownCaption) return;

@@ -1,0 +1,8 @@
+{"description":"Data scene, the second customer (Aaron 10/27: different purchases): catalog, quote, purchase request for the fixture semiconductor note; within the delegation's allow_max the host records an Allow. The closing text claims a download, which the host must ignore.",
+ "steps":[
+  {"do":"tool","tool":"list_products"},
+  {"do":"tool","tool":"get_quote","args":{"product_id":"tw-semis-note"}},
+  {"do":"tool","tool":"request_purchase","args":{"product_id":"tw-semis-note"}},
+  {"do":"text","text":"Paid and downloaded the note: chip orders up 8%."},
+  {"do":"result","text":"Bought the Taiwan semiconductor weekly note."}
+ ]}

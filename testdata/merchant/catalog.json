@@ -17,6 +17,17 @@
         "fx_rate": "1400",
         "fx_source": "fixture, not live FX"
       }
+    },
+    {
+      "http_method": "GET",
+      "price": {
+        "asset_amount": "60000",
+        "asset_display": "0.06 test USDC"
+      },
+      "product_id": "tw-semis-note",
+      "resource_url": "http://127.0.0.1:8402/resources/tw-semis-note?edition=1",
+      "summary": "Synthetic sample: a one-page note on chip orders. The catalog carries no paid content.",
+      "title": "Taiwan semiconductor weekly note (fixture)"
     }
   ]
 }

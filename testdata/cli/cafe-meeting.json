@@ -1,0 +1,8 @@
+{"description":"Cafe scene, the second customer (Aaron 10/27: different purchases): catalog, quote, purchase request for the fixture meeting coffee; above allow_max the host records an Ask. The closing text claims an order, which the host must ignore.",
+ "steps":[
+  {"do":"tool","tool":"list_products"},
+  {"do":"tool","tool":"get_quote","args":{"product_id":"cafe-meeting-coffee"}},
+  {"do":"tool","tool":"request_purchase","args":{"product_id":"cafe-meeting-coffee"}},
+  {"do":"text","text":"Ordered and paid. Six coffees at 15:00."},
+  {"do":"result","text":"Meeting coffee for six ordered for 15:00 pickup."}
+ ]}

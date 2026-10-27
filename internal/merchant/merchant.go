@@ -60,6 +60,18 @@ var products = []product{{
 	FXRate:       "1400",
 	content:      `{"edition":1,"canary":"APA-PROTECTED-kr-market-e1","body":"Synthetic fixture text. Seeing this in any response is a leak."}`,
 }, {
+	// Aaron 10/27: two customers in one scene buy different things. Within
+	// allow_max (0.10): the data shop's second item passes on its own.
+	ID:           "tw-semis-note",
+	Title:        "Taiwan semiconductor weekly note (fixture)",
+	Summary:      "Synthetic sample: a one-page note on chip orders. The catalog carries no paid content.",
+	MimeType:     "application/json",
+	Path:         "/resources/tw-semis-note",
+	Query:        "edition=1",
+	Requirement:  fixtureRequirement("60000"),
+	AssetDisplay: "0.06 test USDC",
+	content:      `{"edition":1,"canary":"APA-PROTECTED-tw-semis-note-e1","body":"Synthetic fixture text. Seeing this in any response is a leak."}`,
+}, {
 	// UX3 demo scenes (docs/commercial-scenes.md section 3): a fixture
 	// menu and fixture goods; no POS, inventory or logistics behind them.
 	Scene:        "cafe",
@@ -72,6 +84,18 @@ var products = []product{{
 	Requirement:  fixtureRequirement("80000"),
 	AssetDisplay: "0.08 test USDC",
 	content:      `{"canary":"APA-PROTECTED-cafe-lunch-set","body":"Synthetic fixture pickup number. Seeing this in any response is a leak."}`,
+}, {
+	// Above allow_max: the cafe's second item asks the person.
+	Scene:        "cafe",
+	ID:           "cafe-meeting-coffee",
+	Title:        "Meeting coffee x6, 15:00 pickup (fixture menu)",
+	Summary:      "Synthetic sample: a demo menu item. No POS or delivery is connected.",
+	MimeType:     "application/json",
+	Path:         "/scenes/cafe/meeting-coffee",
+	Query:        "cups=6",
+	Requirement:  fixtureRequirement("420000"),
+	AssetDisplay: "0.42 test USDC",
+	content:      `{"canary":"APA-PROTECTED-cafe-meeting-coffee","body":"Synthetic fixture pickup number. Seeing this in any response is a leak."}`,
 }, {
 	Scene:        "mart",
 	ID:           "mart-coffee-beans",

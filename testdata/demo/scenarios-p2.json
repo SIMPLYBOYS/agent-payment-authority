@@ -1,5 +1,5 @@
 {
- "description": "P2-a local payments catalog (docs/commercial-p2-host.md 12.8; make present-p2): apa.pay.v1 on a local anvil with test keys, the person's approval on a registered device or a virtual authenticator, the host paying through apa-signer serve. The data scene's brief (0.50 test USDC, above allow_max 0.10) asks; the cafe's lunch set (0.08) is an Allow the host pays at once. Fake CLI only: no model.",
+ "description": "P2-a local payments catalog (docs/commercial-p2-host.md 12.8; make present-p2): apa.pay.v1 on a local anvil with test keys, the person's approval on a registered device or a virtual authenticator, the host paying through apa-signer serve. The data scene's brief (0.50 test USDC, above allow_max 0.10) asks; the cafe's lunch set (0.08) is an Allow the host pays at once. Fake CLI only: no model. Aaron 10/27: in a scene the two customers buy different things (data: A the brief, an Ask; B the semiconductor note, an Allow. cafe: A the lunch set, an Allow; B the meeting coffee 0.42, an Ask).",
  "scenarios": [
   {
    "id": "data-a",
@@ -36,10 +36,10 @@
    "consumer_id": "consumer-b",
    "scene": "data",
    "contract": "apa.pay.v1",
-   "scenario": "testdata/cli/ask-mainline.json",
-   "label": "資料研究室：韓國市場簡報（需要你核准・本機付款）",
+   "scenario": "testdata/cli/data-semis.json",
+   "label": "資料研究室：台灣半導體週報摘要（範圍內自動付款・本機付款）",
    "delegation": {
-    "purpose": "買一份韓國市場簡報（數位資料）",
+    "purpose": "買一份台灣半導體週報摘要（數位資料）",
     "task_budget": "1500000",
     "allow_max": "100000",
     "approval_deadline_seconds": 180,
@@ -51,13 +51,13 @@
    "consumer_id": "consumer-b",
    "scene": "cafe",
    "contract": "apa.pay.v1",
-   "scenario": "testdata/cli/cafe-lunch.json",
-   "label": "街角咖啡：12:30 取餐的午餐套餐（範圍內自動付款・本機付款）",
+   "scenario": "testdata/cli/cafe-meeting.json",
+   "label": "街角咖啡：下午會議的咖啡 6 杯（需要你核准・本機付款）",
    "delegation": {
-    "purpose": "訂 12:30 取餐的午餐套餐（示意菜單）",
+    "purpose": "訂 15:00 取餐、下午會議的咖啡 6 杯（示意菜單）",
     "task_budget": "1500000",
     "allow_max": "100000",
-    "approval_deadline_seconds": 120,
+    "approval_deadline_seconds": 180,
     "valid_seconds": 1800
    }
   }
