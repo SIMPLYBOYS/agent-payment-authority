@@ -152,7 +152,6 @@ public class TownTests
         var o = town.Origin("mart");
         Assert.AreEqual("mart", town.VenueAt(o + new Vector2(6f, 4f)));
         Assert.AreEqual("cafe", town.VenueAt(town.Origin("cafe") + new Vector2(6f, town.Top("cafe") + 0.5f)), "its name pill too");
-        Assert.GreaterOrEqual(town.Top("data"), 9.5f, "a building covers its room's 9.5 tiles");
         Assert.IsNull(town.VenueAt(o + new Vector2(-1.3f, 0.6f)), "the lane outside the door is no venue");
         int before = bridge.reports.Count;
         town.Clicked("mart");

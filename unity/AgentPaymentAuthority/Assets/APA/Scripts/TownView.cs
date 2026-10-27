@@ -83,9 +83,9 @@ namespace APA
                     var r = Piece(root, v.exterior[i], 150 + i, Vector2.zero);
                     if (r != null) parts.Add(r);
                 }
-                // The building's top, over its room's 9.5 tiles: the pill sits just above it.
-                float top = 9.5f;
-                foreach (var r in parts) top = Mathf.Max(top, r.bounds.max.y - root.position.y);
+                // The building's top, from the data (a repeated piece's h, else its file's height): the pill sits just above it.
+                float top = 0f;
+                foreach (var e in v.exterior) top = Mathf.Max(top, e.y + (e.h > 0f ? e.h : Height(e.key)));
                 venues[v.layout] = (v, parts, Pill(root, v, parts, top), top);
             }
         }
@@ -96,6 +96,12 @@ namespace APA
             int i = System.Array.IndexOf(artKeys, key);
             var tex = i >= 0 && i < art.Length ? art[i] : null;
             return tex == null ? null : UnityEngine.Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), pivot, PPU, 0, SpriteMeshType.FullRect);
+        }
+
+        float Height(string key)
+        {
+            int i = System.Array.IndexOf(artKeys, key);
+            return i >= 0 && i < art.Length && art[i] != null ? art[i].height / (float)PPU : 0f;
         }
 
         SpriteRenderer Piece(Transform parent, Town.Piece p, int order, Vector2 pivot)

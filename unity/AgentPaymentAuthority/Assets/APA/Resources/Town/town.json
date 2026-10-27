@@ -58,11 +58,11 @@
     {"key": "x-bed-c", "x": 47, "y": 7, "w": 4, "h": 8}
   ],
   "props": [
-    {"key": "x-lamp", "x": 13, "y": 22.4},
-    {"key": "x-lamp", "x": 22.5, "y": 22.4},
-    {"key": "x-lamp", "x": 41, "y": 22.4},
-    {"key": "x-lamp", "x": 50.5, "y": 22.4},
-    {"key": "x-light", "x": 31, "y": 22.3},
+    {"key": "x-lamp", "x": 13, "y": 22.3},
+    {"key": "x-lamp", "x": 22.5, "y": 22.3},
+    {"key": "x-lamp", "x": 41, "y": 22.3},
+    {"key": "x-lamp", "x": 50.5, "y": 22.3},
+    {"key": "x-light", "x": 32.6, "y": 22.3},
     {"key": "x-light-2", "x": 34.5, "y": 16.2},
     {"key": "x-hydrant", "x": 28.5, "y": 22.5},
     {"key": "x-bin", "x": 26, "y": 22.5},
@@ -73,11 +73,11 @@
     {"key": "x-phone", "x": 53, "y": 22.5},
     {"key": "x-meter", "x": 38, "y": 22.5},
     {"key": "x-manhole", "x": 36, "y": 23.2},
-    {"key": "x-flowers-box", "x": 25, "y": 25.6},
-    {"key": "x-flowers-box-2", "x": 28.2, "y": 25.6},
-    {"key": "x-flowers-box-3", "x": 44.5, "y": 25.6},
-    {"key": "x-pot", "x": 17.2, "y": 26.1},
-    {"key": "x-pot", "x": 35.2, "y": 26.1},
+    {"key": "x-flowers-box", "x": 25, "y": 25.0},
+    {"key": "x-flowers-box-2", "x": 28.2, "y": 25.0},
+    {"key": "x-flowers-box-3", "x": 44.5, "y": 25.0},
+    {"key": "x-pot", "x": 15.6, "y": 25.2},
+    {"key": "x-pot", "x": 33.6, "y": 25.2},
     {"key": "x-pigeon", "x": 24, "y": 23.6},
     {"key": "x-pigeon-2", "x": 24.7, "y": 23.3},
     {"key": "x-tree-big", "x": 10, "y": 27},
@@ -108,8 +108,6 @@
     {"key": "x-info", "x": 29.2, "y": 7.1},
     {"key": "x-pigeon", "x": 19.6, "y": 7.4},
     {"key": "x-pigeon-2", "x": 23, "y": 8.6},
-    {"key": "x-bin", "x": 23.8, "y": 13.4},
-    {"key": "x-flowers-box", "x": 14.8, "y": 14.9},
     {"key": "x-tree", "x": 48, "y": 7.5},
     {"key": "x-tree-big", "x": 50.5, "y": 10.5},
     {"key": "x-flowers", "x": 47.5, "y": 13.5},
@@ -123,15 +121,21 @@
     {"key": "x-npc-20", "x": 19.6, "y": 12.7},
     {"key": "x-npc-08", "x": 37.2, "y": 16.3},
     {"key": "x-npc-14", "x": 33.2, "y": 22.6},
-    {"key": "x-car-a", "x": 21, "y": 20.2},
-    {"key": "x-car-b", "x": 46, "y": 18.3}
+    {"key": "x-car-a", "x": 21, "y": 19.4},
+    {"key": "x-car-b", "x": 46, "y": 18.4}
   ],
   "venues": [
     {"layout": "data", "number": "01", "name": "資料研究室", "x": 18, "y": 26, "exterior": [
       {"key": "x-office-ground", "x": 0, "y": 0},
+      {"key": "x-office-ground-rest", "x": 2, "y": 0},
       {"key": "x-office-sign", "x": 0, "y": 2.4375},
+      {"key": "x-office-sign-rest", "x": 2, "y": 2.4375},
       {"key": "x-office-roof", "x": 0, "y": 5.9375},
-      {"key": "x-office-top", "x": 0, "y": 9.875}]},
+      {"key": "x-office-roof-col", "x": 10, "y": 5.9375},
+      {"key": "x-office-roof-end", "x": 11, "y": 5.9375},
+      {"key": "x-office-top-l", "x": 0, "y": 9.875},
+      {"key": "x-office-top", "x": 0.5, "y": 9.875, "w": 11, "h": 0.5},
+      {"key": "x-office-top-r", "x": 11.5, "y": 9.875}]},
     {"layout": "cafe", "number": "02", "name": "街角咖啡", "x": 36, "y": 26, "exterior": [
       {"key": "x-front-win", "x": 0, "y": 0},
       {"key": "x-upper", "x": 0, "y": 3},
@@ -147,11 +151,11 @@
       {"key": "x-fan", "x": 1.6, "y": 8.2},
       {"key": "x-grate", "x": 4.2, "y": 7.9}]},
     {"layout": "mart", "number": "03", "name": "巷口便利商店", "x": 34, "y": 6, "exterior": [
-      {"key": "x-mart-front-cap", "x": 0, "y": 0},
-      {"key": "x-mart-front", "x": 0.75, "y": 0},
-      {"key": "x-mart-roof-b-cap", "x": 0, "y": 5.59375},
-      {"key": "x-mart-roof-b", "x": 0.75, "y": 5.59375},
-      {"key": "x-mart-roof-a-cap", "x": 0, "y": 7.0},
-      {"key": "x-mart-roof-a", "x": 0.75, "y": 7.0}]}
+      {"key": "x-mart-front-cap", "x": 0, "y": -0.25},
+      {"key": "x-mart-front", "x": 0.25, "y": -0.25},
+      {"key": "x-mart-roof-b-cap", "x": 0, "y": 5.09375},
+      {"key": "x-mart-roof-b", "x": 0.25, "y": 5.09375},
+      {"key": "x-mart-roof-a-cap", "x": 0, "y": 7.4375},
+      {"key": "x-mart-roof-a", "x": 0.25, "y": 7.4375}]}
   ]
 }
