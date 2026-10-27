@@ -148,3 +148,12 @@ x-mart-roof-b-cap	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_
 x-mart-roof-b	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	196,130,376,75
 x-mart-front-cap	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	16,205,8,171
 x-mart-front	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	196,205,376,171
+x-pose-19-down	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_19.png	576,64,192,64
+x-pose-20-read	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_20.png	32,448,192,64
+x-pose-10-phone	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_10.png	128,384,192,64
+x-pose-17-down	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_17.png	576,64,192,64
+x-pose-03-sit-right	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_03.png	0,256,192,64
+x-pose-06-sit-left	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_06.png	192,256,192,64
+x-pose-18-sit-left	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_18.png	192,256,192,64
+x-pose-15-left	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_15.png	384,64,192,64
+x-pose-12-phone	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_12.png	128,384,192,64

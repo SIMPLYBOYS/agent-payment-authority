@@ -159,6 +159,40 @@ public class TownTests
         foreach (var p in after) Assert.IsTrue(p.x >= 0f && p.x <= 64f && p.y >= 0f && p.y <= 48f, "on the map: " + p);
     }
 
+    // Aaron 10/27: a clerk and other customers in each shop (illustrative): only that shop's, and never on A's or B's way.
+    [UnityTest]
+    public IEnumerator EachShopHasItsOwnPeopleOffTheCustomersWay()
+    {
+        var data = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
+        bridge.Receive("{\"v\":2,\"scene\":1,\"clear\":true}"); // the two-customer scene: B's points stand aside (ShopView.P)
+        foreach (var layout in new[] { "data", "cafe", "mart" })
+        {
+            Assert.IsTrue(view.UseLayout(layout));
+            yield return null;
+            var g = data.inside.First(x => x.layout == layout);
+            var shown = town.PeopleInside.ToList();
+            Assert.AreEqual(g.people.Length, shown.Count, layout + ": its own people, and only them");
+            Assert.GreaterOrEqual(g.people.Length, 3, layout + ": a clerk and customers");
+            foreach (var w in g.people)
+                foreach (var c in new[] { "consumer-a", "consumer-b" })
+                    for (int n = 0; n <= ShopView.Pickup; n++)
+                    {
+                        var at = view.P(c, n);
+                        float d = w.path.Length == 1 ? (w.path[0] - at).magnitude
+                            : Enumerable.Range(0, w.path.Length - 1).Min(i => DistanceToSegment(at, w.path[i], w.path[i + 1]));
+                        Assert.GreaterOrEqual(d, 0.6f, layout + ": " + w.key + " on " + c + "'s point " + n + " " + at);
+                    }
+        }
+        Assert.IsTrue(view.UseLayout(ShopView.DefaultLayout));
+    }
+
+    static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
+    {
+        var ab = b - a;
+        float t = ab.sqrMagnitude > 0f ? Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude) : 0f;
+        return (p - (a + ab * t)).magnitude;
+    }
+
     static string V2(int scene, string consumer, string phase, int seq = 3, string end = "") =>
         "{\"v\":2,\"scene\":" + scene + ",\"consumer\":\"" + consumer + "\",\"slot\":1,\"task_id\":\"t-" + consumer + "\",\"seq\":" + seq + ",\"phase\":\"" + phase +
         "\",\"verdict\":\"\",\"reason\":\"\",\"animate\":false,\"cause_seq\":" + seq + ",\"task_end\":\"" + end + "\",\"layout\":\"cafe\"}";

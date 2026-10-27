@@ -27,6 +27,7 @@ namespace APA
         public Vector2 focus, frame;   // the town view: its centre, and the box it must show whole
         public Piece[] ground = new Piece[0], props = new Piece[0];
         public Walker[] walkers = new Walker[0];
+        public Inside[] inside = new Inside[0];
         public Venue[] venues = new Venue[0];
 
         [System.Serializable] public class Piece { public string key; public float x, y, w, h; }
@@ -37,7 +38,12 @@ namespace APA
         // A passer-by (illustrative): a premade character's walk row (24 frames of 32 x
         // 64: right, up, left, down), along a path of horizontal and vertical
         // legs; a path that ends where it starts loops, any other goes back.
+        // A path of one point is a pose there: its piece's frames (sitting,
+        // reading, a clerk standing) play in a loop.
         [System.Serializable] public class Walker { public string key; public float speed = 1.2f; public Vector2[] path = new Vector2[0]; }
+        // The people in a shop (Aaron 10/27: a clerk, other customers; illustrative,
+        // never A or B), in its room's coordinates, shown with that room only.
+        [System.Serializable] public class Inside { public string layout; public Walker[] people = new Walker[0]; }
     }
 
     public class TownView : MonoBehaviour
@@ -105,7 +111,15 @@ namespace APA
                 venues[v.layout] = (v, top);
                 Pill(root, v, top);
             }
-            foreach (var w in town.walkers) MakeWalker(w);
+            foreach (var w in town.walkers) MakeWalker(w, transform, false);
+            foreach (var g in town.inside)
+            {
+                var room = new GameObject("inside-" + g.layout).transform;
+                room.SetParent(transform, false);
+                room.localPosition = Interior;
+                foreach (var w in g.people) MakeWalker(w, room, true);
+                insides[g.layout] = room.gameObject;
+            }
             foreach (var c in new[] { "consumer-a", "consumer-b" }) MakeStand(c);
         }
 
@@ -253,26 +267,42 @@ namespace APA
         }
 
         // ---- passers-by (illustrative) ----
-        class WalkerState { public Town.Walker w; public SpriteRenderer r; public Sprite[] frames; public int leg; public int dir = 1; public float tick; public int frame; }
+        class WalkerState { public Town.Walker w; public SpriteRenderer r; public Sprite[] frames; public bool room; public int leg; public int dir = 1; public float tick; public int frame; }
         readonly List<WalkerState> walkers = new List<WalkerState>();
-        public IEnumerable<Vector2> WalkerPositions { get { foreach (var s in walkers) yield return s.r.transform.localPosition; } } // tests
+        readonly Dictionary<string, GameObject> insides = new Dictionary<string, GameObject>();
+        public IEnumerable<Vector2> WalkerPositions { get { foreach (var s in walkers) if (!s.room) yield return s.r.transform.localPosition; } } // tests
+        // The people shown in the room now, in its coordinates (tests).
+        public IEnumerable<(string key, Vector2 at)> PeopleInside { get { foreach (var s in walkers) if (s.room && s.r.gameObject.activeInHierarchy) yield return (s.w.key, s.r.transform.localPosition); } }
 
-        void MakeWalker(Town.Walker w)
+        void MakeWalker(Town.Walker w, Transform parent, bool room)
         {
             var tex = Tex(w.key);
-            if (tex == null || w.path.Length < 2) return;
+            if (tex == null || w.path.Length < 1) return;
             var frames = new Sprite[tex.width / 32];
             for (int i = 0; i < frames.Length; i++) frames[i] = UnityEngine.Sprite.Create(tex, new Rect(i * 32, 0, 32, tex.height), new Vector2(0.5f, 0f), PPU);
             var r = new GameObject(w.key).AddComponent<SpriteRenderer>();
-            r.transform.SetParent(transform, false);
+            r.transform.SetParent(parent, false);
             r.transform.localPosition = w.path[0];
             r.sprite = frames[0];
-            walkers.Add(new WalkerState { w = w, r = r, frames = frames });
+            var s = new WalkerState { w = w, r = r, frames = frames, room = room };
+            s.r.sortingOrder = Depth(s, w.path[0].y);
+            walkers.Add(s);
         }
+
+        // Depth: on the street, the town's scale; in a room, the room's own (ShopView: a prop at y draws at
+        // -(y * 10)), just in front of a prop on the same row; always under A and B (50).
+        static int Depth(WalkerState s, float y) => s.room ? -(int)(y * 10f) + 1 : Order(y);
 
         void Walk(WalkerState s, float dt)
         {
             var path = s.w.path;
+            if (path.Length == 1)
+            {
+                // A pose: its frames in a loop, in place.
+                s.tick += dt;
+                if (s.tick > 0.18f) { s.tick = 0f; s.frame = (s.frame + 1) % s.frames.Length; s.r.sprite = s.frames[s.frame]; }
+                return;
+            }
             bool loop = path[0] == path[path.Length - 1];
             var p = (Vector2)s.r.transform.localPosition;
             float go = s.w.speed * dt;
@@ -290,7 +320,7 @@ namespace APA
                 else if (!loop && (s.leg == path.Length - 1 || s.leg == 0)) s.dir = -s.dir;
             }
             s.r.transform.localPosition = p;
-            s.r.sortingOrder = Order(p.y);
+            s.r.sortingOrder = Depth(s, p.y);
             if (d.sqrMagnitude > 1e-6f)
             {
                 int facing = Mathf.Abs(d.x) >= Mathf.Abs(d.y) ? (d.x > 0 ? 0 : 2) : (d.y > 0 ? 1 : 3); // right, up, left, down
@@ -514,6 +544,8 @@ namespace APA
                 if (phase != 0) Circle(radius);
             }
             if (stands.Count > 0) PlaceStands();
+            var room = shop != null ? shop.LayoutKey : null;
+            foreach (var kv in insides) if (kv.Value.activeSelf != (kv.Key == room)) kv.Value.SetActive(kv.Key == room); // the shop's own people only
             foreach (var (plate, text) in plates)
             {
                 var b = text.GetComponent<MeshRenderer>().bounds;
