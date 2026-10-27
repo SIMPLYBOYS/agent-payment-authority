@@ -652,6 +652,7 @@ function setPresenting(on) {
   inTown = true;
   try { localStorage.setItem("apa-present", on ? "1" : "0"); } catch { /* not kept */ }
   renderPresent();
+  decorateCards();
   dispatchEvent(new Event("resize")); // the scene refits to the whole window (pixelscale.js), and sendView follows
 }
 // enterVenue: the venue's room, as its row in the list chooses it.
@@ -669,7 +670,11 @@ function sendView() {
   const on = presenting && creds.view().hasHost;
   let safe = null;
   if (on) {
-    const c = $("unity-canvas").getBoundingClientRect(), l = document.querySelector(".present-left").getBoundingClientRect(), r = document.querySelector(".present-right").getBoundingClientRect();
+    // The columns' cards that are open (a folded card is a button at the edge; the scene runs under it).
+    const c = $("unity-canvas").getBoundingClientRect();
+    const open = (col) => [...document.querySelectorAll(col + " > :not([hidden]), " + col + " > * > :not([hidden])")].filter((e) => (e.matches(".present-card, #approval")) && !e.classList.contains("folded") && e.getClientRects().length);
+    const edge = (col, side) => open(col).reduce((v, e) => (side === "right" ? Math.max(v, e.getBoundingClientRect().right) : Math.min(v, e.getBoundingClientRect().left)), side === "right" ? c.left - 12 : c.right + 12);
+    const l = { right: edge(".present-left", "right") }, r = { left: edge(".present-right", "left") };
     // In the canvas's own pixels, by its real backing ratio (whatever ratio Unity took at load; review); the caption keeps the bottom.
     const d = c.width > 0 ? $("unity-canvas").width / c.width : 1, x = Math.max(0, Math.round(l.right + 12 - c.left)), right = Math.min(c.width, Math.round(r.left - 12 - c.left));
     const bottom = Math.min(c.height, 140);
@@ -687,6 +692,52 @@ addEventListener("resize", () => requestAnimationFrame(() => renderPresent())); 
 $("present-toggle").addEventListener("click", () => setPresenting(true));
 $("present-exit").addEventListener("click", () => setPresenting(false));
 $("present-town").addEventListener("click", () => { inTown = true; renderPresent(); });
+
+// ---- 沉浸模式 (Aaron 10/28: "圖卡能夠選擇最小化成按鈕") ----
+// Each card folds into a small button with its name (its own "－"), or all at once by 沉浸模式; the scene
+// then takes the space the cards gave up. Kept in this browser. A request that needs the person's
+// approval opens the approval card again, once per request: a deadline is never hidden behind a button.
+const CARDS = [["brand", ".present-brand", "AI 幫你買"], ["steps", "#present-steps", "交易步驟"], ["venues", ".present-venues", "場域"], ["approval", "#approval", "需要你處理"]];
+let folded = (() => { try { return JSON.parse(localStorage.getItem("apa-present-folded")) || {}; } catch { return {}; } })();
+const allFolded = () => CARDS.every(([k]) => folded[k]);
+function decorateCards() {
+  for (const [key, sel, label] of CARDS) {
+    const card = document.querySelector(sel);
+    if (!card) continue;
+    let b = card.querySelector(":scope > .present-fold");
+    if (!b) {
+      b = document.createElement("button");
+      b.type = "button";
+      b.className = "present-fold";
+      b.addEventListener("click", () => setFolded({ ...folded, [key]: !folded[key] }));
+      card.prepend(b);
+    }
+    const on = !!folded[key];
+    card.classList.toggle("folded", on);
+    b.textContent = on ? label : "－";
+    b.title = on ? "展開「" + label + "」" : "收起成按鈕";
+    b.setAttribute("aria-label", b.title);
+    b.setAttribute("aria-expanded", String(!on));
+  }
+  const all = allFolded();
+  $("present-immerse").textContent = all ? "結束沉浸模式" : "沉浸模式";
+  $("present-immerse").setAttribute("aria-pressed", String(all));
+}
+function setFolded(next) {
+  folded = next;
+  try { localStorage.setItem("apa-present-folded", JSON.stringify(folded)); } catch { /* not kept */ }
+  decorateCards();
+  requestAnimationFrame(sendView); // the scene takes the space a card gave up, or gives it back
+}
+$("present-immerse").addEventListener("click", () => { const on = !allFolded(); setFolded(Object.fromEntries(CARDS.map(([k]) => [k, on]))); });
+const opened = new Set(); // the approval sessions that already opened the card once
+new MutationObserver(() => {
+  const yes = $("approval-body").querySelector(".approval-approve:not([disabled])");
+  const session = yes && yes.dataset.session;
+  if (!session || opened.has(session)) return;
+  opened.add(session);
+  if (presenting && folded.approval) setFolded({ ...folded, approval: false });
+}).observe($("approval-body"), { childList: true, subtree: true });
 addEventListener("keydown", (e) => { if (e.key === "Escape" && presenting && !document.querySelector("dialog[open]")) setPresenting(false); });
 
 // renderCaption: the narration under the scene: each customer's step on screen, in plain words (the cards'
@@ -823,6 +874,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
     }
     return box;
   }), ...(custs.note ? [el("p", "present-queue", custs.note)] : []));
+  decorateCards(); // the steps card was rebuilt: its fold button again
 }
 
 function renderControl() {

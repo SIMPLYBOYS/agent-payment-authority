@@ -352,6 +352,16 @@ body[data-present="on"] .side { display: contents; }
 .venue-go { margin: 4px 0 10px 52px; background: var(--ink, #1d1a15); color: #fff; border: 0; border-radius: 999px; padding: 8px 16px; font-weight: 700; }
 .present-town { margin: 8px 0 0; background: none; border: 1px solid #d9cfbf; border-radius: 999px; padding: 6px 14px; color: var(--ink, #1d1a15); font-weight: 600; }
 .present-credit { margin: 8px 0 0; font-size: 11px; color: var(--soft, #6e675b); }
+/* 沉浸模式 (Aaron 10/28): a card folds into a button with its name; its "－" sits in its corner. */
+.present-card, body[data-present="on"] #approval { position: relative; }
+.present-fold { position: absolute; top: 10px; right: 12px; z-index: 1; min-width: 28px; height: 26px; padding: 0 8px; border: 1px solid #e2d8c6; border-radius: 999px;
+  background: #fffdf8; color: var(--soft, #6e675b); font-weight: 700; line-height: 1; cursor: pointer; }
+.present-fold:hover { color: var(--ink, #1d1a15); border-color: #cdbfa8; }
+.present-card.folded, body[data-present="on"] #approval.folded { width: max-content; max-width: 100%; padding: 0; background: none; box-shadow: none; border: 0; min-height: 0; overflow: visible; flex: none; }
+.present-card.folded > :not(.present-fold), body[data-present="on"] #approval.folded > :not(.present-fold) { display: none; }
+.folded > .present-fold { position: static; height: auto; padding: 8px 16px; font-size: 14px; color: var(--ink, #1d1a15); box-shadow: 0 6px 18px rgba(50, 35, 10, 0.18); }
+.present-right .folded { align-self: flex-end; }
+.present-exit.present-immerse { left: 150px; } /* beside 離開簡報模式, not on it */
 /* The narration under the scene (Aaron 10/27): the step on screen in plain words, big enough to read from the room. */
 .present-caption { position: fixed; z-index: 5; left: 50%; bottom: 24px; transform: translateX(-50%); max-width: min(760px, calc(100vw - 820px));
   display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
