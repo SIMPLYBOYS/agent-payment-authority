@@ -229,25 +229,6 @@ namespace APA
             banner.text = (payments == "base_sepolia" ? "Base Sepolia 測試網路付款・" : payments == "local_anvil" ? "本機測試鏈付款・" : "這場不付款・") + layout.title + (UsingPlaceholders ? "　（素材未匯入：簡易圖形）" : "　像素素材：LimeZu（limezu.itch.io）");
         }
 
-        // ShowWords: the title in the corner and the zone notes, off while
-        // the town is shown (TownView): the page says the same and credits
-        // LimeZu, and a roofed room's notes would show past its walls.
-        bool words = true;
-        public void ShowWords(bool on)
-        {
-            if (words == on) return;
-            words = on;
-            ApplyWords();
-        }
-
-        // ApplyWords: also for a room built while the words are off.
-        void ApplyWords()
-        {
-            if (banner != null) { banner.GetComponent<MeshRenderer>().enabled = words; bannerPlate.enabled = words; }
-            foreach (var (plate, text) in notePlates) { plate.enabled = words; text.GetComponent<MeshRenderer>().enabled = words; }
-        }
-        public bool WordsShown => words; // tests
-
         // UseLayout: another room. Every customer goes back outside at once,
         // as in ResetAll; false (and nothing changes) for an unknown key.
         public bool UseLayout(string key)
@@ -328,8 +309,8 @@ namespace APA
                 for (int y = 0; y < 7; y++) Put("floor", floor, new Vector2(x + 0.5f, y), -100).color = layout.floorTint;
                 Put("wall", wall, new Vector2(x + 0.5f, 7f), -90).color = layout.wallTint;
             }
-            // Outside the door, where a customer waits and leaves to, is the
-            // town's pavement (TownView, T2), no longer a strip of the room's.
+            // Outside the door, where a customer waits and leaves to, is
+            // TownView's pavement by the room (T2), no longer a strip of the room's.
             foreach (var p in layout.props)
             {
                 var at = new Vector2(p.x, p.y);
@@ -348,7 +329,6 @@ namespace APA
                 t.GetComponent<MeshRenderer>().sortingOrder = 61;
                 notePlates.Add((Child(room, "note-plate", pixel, 60, new Color(0.08f, 0.08f, 0.12f, 0.7f)), t));
             }
-            ApplyWords();
         }
 
         Customer MakeCustomer(string id, Texture2D sheet, string label, Color tint)

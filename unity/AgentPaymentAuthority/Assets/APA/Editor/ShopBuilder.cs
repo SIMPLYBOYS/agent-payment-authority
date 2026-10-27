@@ -221,7 +221,7 @@ namespace APA.EditorTools
                 scenes = new[] { ScenePath },
                 locationPathName = "Build/WebGL",
                 target = BuildTarget.WebGL,
-                options = BuildOptions.None,
+                options = System.Environment.GetEnvironmentVariable("APA_WEBGL_DEV") == "1" ? BuildOptions.Development : BuildOptions.None, // a development build logs stack traces in the browser
             });
             Debug.Log("APA ShopBuilder: WebGL build " + report.summary.result + ", " + report.summary.totalSize + " bytes");
             if (report.summary.result != BuildResult.Succeeded) throw new System.Exception("WebGL build " + report.summary.result);

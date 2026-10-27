@@ -52,6 +52,7 @@ pastry-plate	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/12_Kitc
 # T2 (docs/commercial-town.md): the town, LimeZu Modern Exteriors v42.3 (32x32; the pack Aaron downloaded). The
 # builder cuts each x-* piece into its own file (Assets/LimeZu/_cut), read by TownView by key. Round 2 (Aaron 10/27:
 # as fine as the pack's own samples): singles for curbs, beds, street furniture; the LIME CORP office and the mall cut down.
+# Option A (Aaron 10/27): the rooms stand apart; walking passers-by are the premade characters' walk rows (never 01, 05: A, B).
 license-exteriors	Modern_Exteriors_v42.3/Modern_Exteriors_License.pdf	-
 x-grass	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/1_Terrains_and_Fences_Singles_32x32/ME_Singles_Terrains_and_Fences_32x32_Grass_Fenced_1_9.png	-
 x-pave	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/2_City_Terrains_Singles_32x32/ME_Singles_City_Terrains_32x32_Sidewalk_1_25.png	-
@@ -126,15 +127,21 @@ x-cafe-roof-bot-r	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_
 x-ac	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/5_Floor_Modular_Buildings_32x32.png	934,664,54,72
 x-fan	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/5_Floor_Modular_Buildings_32x32.png	704,592,30,32
 x-grate	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/5_Floor_Modular_Buildings_32x32.png	738,738,62,26
+x-walk-02	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_02.png	0,128,768,64
+x-walk-04	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_04.png	0,128,768,64
+x-walk-06	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_06.png	0,128,768,64
+x-walk-07	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_07.png	0,128,768,64
+x-walk-08	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_08.png	0,128,768,64
+x-walk-09	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_09.png	0,128,768,64
+x-walk-11	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_11.png	0,128,768,64
+x-walk-12	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_12.png	0,128,768,64
+x-walk-13	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_13.png	0,128,768,64
+x-walk-14	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_14.png	0,128,768,64
+x-walk-16	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_16.png	0,128,768,64
 x-npc-03	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_03.png	96,0,32,64
-x-npc-07	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_07.png	64,0,32,64
 x-npc-10	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_10.png	128,384,32,64
-x-npc-12	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_12.png	32,0,32,64
-x-npc-15	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_15.png	0,0,32,64
 x-npc-18	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_18.png	128,384,32,64
 x-npc-20	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_20.png	96,0,32,64
-x-npc-08	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_08.png	64,0,32,64
-x-npc-14	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_14.png	0,0,32,64
 x-mart-roof-a-cap	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	16,26,8,70
 x-mart-roof-a	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	196,26,376,70
 x-mart-roof-b-cap	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	16,130,8,75

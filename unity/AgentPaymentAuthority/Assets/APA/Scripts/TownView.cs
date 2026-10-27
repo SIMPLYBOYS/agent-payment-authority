@@ -1,13 +1,15 @@
-// TownView (T2, docs/commercial-town.md): the town the shop stands in. Its
-// ground, props and the venues' outsides are Resources/Town/town.json; the
-// room ShopView shows stands inside its own venue (Aaron 10/24, option B:
-// the roof lifts in place). Two views: the town (every venue roofed, a click
-// on one is reported, the page decides) and a venue (its roof lifted, the
-// room as before). The camera is always at a whole number of screen pixels
-// per art pixel: the town at the largest its frame fits, a venue at the
-// largest its room fits, and a move between them steps through the
-// multiples between (web/pixelscale.js; a canvas smaller than the room
-// shows it at a fraction, as before). It shows; it never decides.
+// TownView (T2, docs/commercial-town.md): the town around the shop. Its
+// ground, props, walking passers-by and the venues' outsides are
+// Resources/Town/town.json. The room ShopView shows is a place of its own,
+// away from the map (Aaron 10/27, option A: enter a shop through a
+// transition, leave the same way). Two views: the town (a click on a venue
+// is reported, the page decides; customers A and B, while they have a task,
+// stand at their venue's door) and a venue (the room as before). Between
+// them a circle closes on the door being entered or left and opens on the
+// other side. The camera is always at a whole number of screen pixels per
+// art pixel: the town at the largest its frame fits, a venue at the largest
+// its room fits (web/pixelscale.js; a canvas smaller than the room shows it
+// at a fraction, as before). It shows; it never decides.
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -16,7 +18,7 @@ namespace APA
     // Town: Resources/Town/town.json. Units are 32 px tiles, y up; a piece
     // with w (and h) repeats its sprite over that box from its bottom left,
     // in whole repeats. Ground and outsides are anchored at their bottom
-    // left, props at their bottom centre (as a room's props).
+    // left, props and walkers at their bottom centre (as a room's props).
     [System.Serializable]
     public class Town
     {
@@ -24,19 +26,25 @@ namespace APA
         public int w, h;               // the map
         public Vector2 focus, frame;   // the town view: its centre, and the box it must show whole
         public Piece[] ground = new Piece[0], props = new Piece[0];
+        public Walker[] walkers = new Walker[0];
         public Venue[] venues = new Venue[0];
 
         [System.Serializable] public class Piece { public string key; public float x, y, w, h; }
         // A venue: the room (layout) it holds, its number and name on the
-        // map, where its room's origin is, and its outside over the room.
-        [System.Serializable] public class Venue { public string layout, number, name; public float x, y; public Piece[] exterior = new Piece[0]; }
+        // map, its outside, and its door (from its origin): where the
+        // transition closes and A and B stand.
+        [System.Serializable] public class Venue { public string layout, number, name; public float x, y; public Vector2 door; public Piece[] exterior = new Piece[0]; }
+        // A passer-by (illustrative): a premade character's walk row (24 frames of 32 x
+        // 64: right, up, left, down), along a path of horizontal and vertical
+        // legs; a path that ends where it starts loops, any other goes back.
+        [System.Serializable] public class Walker { public string key; public float speed = 1.2f; public Vector2[] path = new Vector2[0]; }
     }
 
     public class TownView : MonoBehaviour
     {
         // Assigned by ShopBuilder: the town's pieces, each its own file
-        // (cut from the Modern Exteriors sheets at build time); null when
-        // not imported (the town then draws nothing of that piece).
+        // (cut at build time); null when not imported (the town then draws
+        // nothing of that piece).
         public Texture2D[] art = new Texture2D[0];
         public string[] artKeys = new string[0];
         public ShopView shop;
@@ -44,65 +52,118 @@ namespace APA
         public const string Accent = "#e0582f"; // the page's accent (web/style.css), for the venue numbers
         public const int PPU = ShopView.PPU;
         public const float RoomW = 15f, RoomH = 10f, RoomCX = 5f, RoomCY = 4.5f; // what a venue view shows of its room (ShopBuilder's old camera)
-        public const float Step = 0.55f; // seconds for a move between the views
+        public static readonly Vector2 Interior = new Vector2(120f, 0f); // where the room stands, away from the map
+        public static readonly Vector2 RoomDoor = new Vector2(1.5f, 1.2f); // the room's door (every layout's), from the room's origin
+        public const float Half = 0.35f; // seconds for the circle to close, and again to open
 
         Town town;
         Camera cam;
-        readonly Dictionary<string, (Town.Venue v, List<SpriteRenderer> outside, TextMesh name, float top)> venues = new Dictionary<string, (Town.Venue, List<SpriteRenderer>, TextMesh, float)>();
-        readonly List<(SpriteRenderer plate, TextMesh text)> pills = new List<(SpriteRenderer, TextMesh)>();
-        public bool HasTown => town != null && System.Array.Exists(art, t => t != null); // a build without the pack has no town (its room keeps the old camera)
-        public string Mode { get; private set; } = "venue"; // venue | town
+        readonly Dictionary<string, (Town.Venue v, float top)> venues = new Dictionary<string, (Town.Venue, float)>();
+        readonly List<(SpriteRenderer plate, TextMesh text)> plates = new List<(SpriteRenderer, TextMesh)>();
+        public bool HasTown => town != null && System.Array.Exists(art, t => t != null); // a build without the pack has no town (the room keeps its old camera)
+        public string Mode { get; private set; } = "venue"; // venue | town: what the page asked for
+        string shown = "venue";                               // what the camera shows (they differ during a transition)
         public System.Action<string> Clicked; // town view: a click on a venue, with its layout
-        string placed;                        // the layout the room was last placed for
         Rect safe;                            // the part of the canvas the page leaves uncovered, CSS pixels from its top left; empty: all of it
         Vector2Int screen;
-
-        // The running move: from (k, c, lift) to the target over Step.
-        float k0, k1, t = 1f;
-        Vector2 c0, c1;
-        string lifted, lowered; // the venue whose roof lifts, and the one whose roof comes back, during the move
         public float Scale { get; private set; } = 1f; // screen pixels per art pixel now (tests)
-        public bool Moving => t < 1f;
+
+        // The transition: the screen goes dark but for a circle, closing on
+        // one side and opening on the other. A ring (dark outside a clear
+        // circle) and four dark bands around it, plain sprites: the Web build
+        // has no SpriteMask (it came back null there, in a scene or not).
+        readonly SpriteRenderer[] iris = new SpriteRenderer[5]; // ring, top, bottom, left, right
+        Vector2 irisAt;
+        int phase;    // 0 none, 1 closing, 2 opening
+        float radius; // the circle's radius now (world units)
+        public bool Moving => phase != 0;
+        public bool Opening => phase == 2; // tests
+        public bool CoverOn => iris[0] != null && iris[0].enabled; // tests
 
         void Awake()
         {
             cam = Camera.main;
             var file = Resources.Load<TextAsset>("Town/town");
             town = file != null ? JsonUtility.FromJson<Town>(file.text) : null;
+            if (shop != null) shop.transform.position = Interior;
+            Backdrop();
             if (town == null) return;
             for (int i = 0; i < town.ground.Length; i++) Piece(transform, town.ground[i], -1000 + i, Vector2.zero); // in file order: a later piece over an earlier one
-            foreach (var p in town.props) Piece(transform, p, 100 - Mathf.RoundToInt(p.y), new Vector2(0.5f, 0f));
+            foreach (var p in town.props) Piece(transform, p, Order(p.y), new Vector2(0.5f, 0f));
             foreach (var v in town.venues)
             {
                 var root = new GameObject("venue-" + v.layout).transform;
                 root.SetParent(transform, false);
                 root.localPosition = new Vector2(v.x, v.y);
-                var parts = new List<SpriteRenderer>();
-                for (int i = 0; i < v.exterior.Length; i++)
-                {
-                    var r = Piece(root, v.exterior[i], 150 + i, Vector2.zero);
-                    if (r != null) parts.Add(r);
-                }
+                for (int i = 0; i < v.exterior.Length; i++) Piece(root, v.exterior[i], 150 + i, Vector2.zero);
                 // The building's top, from the data (a repeated piece's h, else its file's height): the pill sits just above it.
                 float top = 0f;
                 foreach (var e in v.exterior) top = Mathf.Max(top, e.y + (e.h > 0f ? e.h : Height(e.key)));
-                venues[v.layout] = (v, parts, Pill(root, v, parts, top), top);
+                venues[v.layout] = (v, top);
+                Pill(root, v, top);
             }
+            foreach (var w in town.walkers) MakeWalker(w);
+            foreach (var c in new[] { "consumer-a", "consumer-b" }) MakeStand(c);
+        }
+
+        // Order: drawn by depth, as a room's props are (lower is nearer), always under the outsides' 150.
+        static int Order(float y) => 100 - Mathf.RoundToInt(y);
+
+        // Backdrop: the room's surroundings, where it stands away from the
+        // map: dark, as a game's inside is, and the pavement outside its door
+        // where a customer waits and leaves to.
+        void Backdrop()
+        {
+            var dark = new GameObject("interior-backdrop").AddComponent<SpriteRenderer>();
+            dark.transform.SetParent(transform, false);
+            dark.sprite = Pixel();
+            dark.color = new Color(0.12f, 0.11f, 0.1f);
+            dark.sortingOrder = -1100;
+            dark.transform.localPosition = Interior + new Vector2(6f, 4.5f);
+            dark.transform.localScale = new Vector3(120f, 80f, 1f);
+            Piece(transform, new Town.Piece { key = "x-pave", x = Interior.x - 4f, y = Interior.y, w = 4f, h = 8f }, -1050, Vector2.zero);
+        }
+
+        static Sprite pixel, circle, rounded;
+        static Sprite Pixel()
+        {
+            if (pixel != null) return pixel;
+            var t = new Texture2D(1, 1) { filterMode = FilterMode.Point };
+            t.SetPixel(0, 0, Color.white);
+            t.Apply();
+            return pixel = UnityEngine.Sprite.Create(t, new Rect(0, 0, 1, 1), new Vector2(0.5f, 0.5f), 1);
+        }
+
+        // Ring: a square 2 units wide at scale 1, white outside a clear circle that touches its sides; chunky at the edge (point filtered).
+        static Sprite Ring()
+        {
+            if (circle != null) return circle;
+            const int n = 32;
+            var t = new Texture2D(n, n) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                {
+                    float dx = x + 0.5f - n / 2f, dy = y + 0.5f - n / 2f;
+                    t.SetPixel(x, y, dx * dx + dy * dy <= n * n / 4f ? Color.clear : Color.white);
+                }
+            t.Apply();
+            return circle = UnityEngine.Sprite.Create(t, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), n / 2f);
+        }
+
+        Texture2D Tex(string key)
+        {
+            int i = System.Array.IndexOf(artKeys, key);
+            return i >= 0 && i < art.Length ? art[i] : null;
         }
 
         // Sprite: a piece's whole file, anchored at pivot; FullRect so it can repeat.
         Sprite Sprite(string key, Vector2 pivot)
         {
-            int i = System.Array.IndexOf(artKeys, key);
-            var tex = i >= 0 && i < art.Length ? art[i] : null;
+            var tex = Tex(key);
             return tex == null ? null : UnityEngine.Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), pivot, PPU, 0, SpriteMeshType.FullRect);
         }
 
-        float Height(string key)
-        {
-            int i = System.Array.IndexOf(artKeys, key);
-            return i >= 0 && i < art.Length && art[i] != null ? art[i].height / (float)PPU : 0f;
-        }
+        float Height(string key) => Tex(key) != null ? Tex(key).height / (float)PPU : 0f;
 
         SpriteRenderer Piece(Transform parent, Town.Piece p, int order, Vector2 pivot)
         {
@@ -121,46 +182,52 @@ namespace APA
                 r.tileMode = SpriteTileMode.Continuous;
                 r.size = new Vector2(p.w, p.h > 0f ? p.h : s.bounds.size.y);
                 go.transform.localPosition += (Vector3)(r.size / 2f);
-                s = UnityEngine.Sprite.Create(s.texture, s.rect, new Vector2(0.5f, 0.5f), PPU, 0, SpriteMeshType.FullRect);
-                r.sprite = s;
+                r.sprite = UnityEngine.Sprite.Create(s.texture, s.rect, new Vector2(0.5f, 0.5f), PPU, 0, SpriteMeshType.FullRect);
             }
             return r;
         }
 
-        // Pill: the venue's number (in the accent) and name, on a light
-        // plate over its roof, as the page's venue list numbers them. Part
-        // of the outside: it lifts with the roof.
-        TextMesh Pill(Transform root, Town.Venue v, List<SpriteRenderer> outside, float top)
+        TextMesh Words(Transform parent, string name, Vector2 at, float size, Color color, int order)
         {
-            var go = new GameObject("pill");
-            go.transform.SetParent(root, false);
-            go.transform.localPosition = new Vector2(6f, top + 0.5f);
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = at;
             var text = go.AddComponent<TextMesh>();
             var font = Resources.Load<Font>(ShopView.FontName) ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             text.font = font;
             text.GetComponent<MeshRenderer>().material = font.material;
-            text.GetComponent<MeshRenderer>().sortingOrder = 301;
+            text.GetComponent<MeshRenderer>().sortingOrder = order + 1;
             text.richText = true;
             text.fontSize = 48;
-            text.characterSize = 0.085f;
+            text.characterSize = size;
             text.anchor = TextAnchor.MiddleCenter;
-            text.color = Ink;
-            text.text = Label(v, 1f);
-            var plate = new GameObject("pill-plate").AddComponent<SpriteRenderer>();
-            plate.transform.SetParent(root, false);
-            plate.sprite = Rounded();
-            plate.drawMode = SpriteDrawMode.Sliced;
-            plate.sortingOrder = 300;
-            pills.Add((plate, text));
-            outside.Add(plate);
+            text.color = color;
             return text;
         }
 
-        static readonly Color Ink = new Color(0.114f, 0.102f, 0.082f);
-        // Label: the pill's words at opacity a (the number's colour tag carries its own alpha).
-        static string Label(Town.Venue v, float a) => "<color=" + Accent + ((int)(a * 255)).ToString("x2") + ">" + v.number + "</color>  " + v.name;
+        SpriteRenderer Plate(Transform parent, TextMesh text, Sprite s, Color color, int order)
+        {
+            var plate = new GameObject(text.name + "-plate").AddComponent<SpriteRenderer>();
+            plate.transform.SetParent(parent, false);
+            plate.sprite = s;
+            plate.color = color;
+            if (s == Rounded()) plate.drawMode = SpriteDrawMode.Sliced;
+            plate.sortingOrder = order;
+            plates.Add((plate, text));
+            return plate;
+        }
 
-        static Sprite rounded;
+        static readonly Color Ink = new Color(0.114f, 0.102f, 0.082f);
+
+        // Pill: the venue's number (in the accent) and name on a light plate
+        // over its roof, as the page's venue list numbers them.
+        void Pill(Transform root, Town.Venue v, float top)
+        {
+            var text = Words(root, "pill", new Vector2(6f, top + 0.5f), 0.085f, Ink, 300);
+            text.text = "<color=" + Accent + ">" + v.number + "</color>  " + v.name;
+            Plate(root, text, Rounded(), Color.white, 300);
+        }
+
         // Rounded: a light plate with round ends, sliced to any width.
         static Sprite Rounded()
         {
@@ -180,25 +247,117 @@ namespace APA
             return rounded = UnityEngine.Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), PPU, 0, SpriteMeshType.FullRect, new Vector4(7, 7, 7, 7));
         }
 
-        // Origin: where a layout's room stands; a layout with no venue stays at the town's origin.
+        // ---- passers-by (illustrative) ----
+        class WalkerState { public Town.Walker w; public SpriteRenderer r; public Sprite[] frames; public int leg; public int dir = 1; public float tick; public int frame; }
+        readonly List<WalkerState> walkers = new List<WalkerState>();
+        public IEnumerable<Vector2> WalkerPositions { get { foreach (var s in walkers) yield return s.r.transform.localPosition; } } // tests
+
+        void MakeWalker(Town.Walker w)
+        {
+            var tex = Tex(w.key);
+            if (tex == null || w.path.Length < 2) return;
+            var frames = new Sprite[tex.width / 32];
+            for (int i = 0; i < frames.Length; i++) frames[i] = UnityEngine.Sprite.Create(tex, new Rect(i * 32, 0, 32, tex.height), new Vector2(0.5f, 0f), PPU);
+            var r = new GameObject(w.key).AddComponent<SpriteRenderer>();
+            r.transform.SetParent(transform, false);
+            r.transform.localPosition = w.path[0];
+            r.sprite = frames[0];
+            walkers.Add(new WalkerState { w = w, r = r, frames = frames });
+        }
+
+        void Walk(WalkerState s, float dt)
+        {
+            var path = s.w.path;
+            bool loop = path[0] == path[path.Length - 1];
+            var p = (Vector2)s.r.transform.localPosition;
+            float go = s.w.speed * dt;
+            Vector2 d = Vector2.zero;
+            for (int guard = 0; go > 0f && guard < 8; guard++)
+            {
+                int next = s.leg + s.dir;
+                var to = path[next];
+                d = to - p;
+                if (d.magnitude > go) { p += d.normalized * go; go = 0f; break; }
+                go -= d.magnitude;
+                p = to;
+                s.leg = next;
+                if (loop && s.leg == path.Length - 1) { s.leg = 0; p = path[0]; }
+                else if (!loop && (s.leg == path.Length - 1 || s.leg == 0)) s.dir = -s.dir;
+            }
+            s.r.transform.localPosition = p;
+            s.r.sortingOrder = Order(p.y);
+            if (d.sqrMagnitude > 1e-6f)
+            {
+                int facing = Mathf.Abs(d.x) >= Mathf.Abs(d.y) ? (d.x > 0 ? 0 : 2) : (d.y > 0 ? 1 : 3); // right, up, left, down
+                s.tick += dt;
+                if (s.tick > 0.1f) { s.tick = 0f; s.frame = (s.frame + 1) % 6; }
+                int i = facing * 6 + s.frame;
+                if (i < s.frames.Length) s.r.sprite = s.frames[i];
+            }
+        }
+
+        // ---- A and B at their venue's door, while they have a task ----
+        readonly Dictionary<string, (SpriteRenderer body, TextMesh tag, SpriteRenderer plate)> stands = new Dictionary<string, (SpriteRenderer, TextMesh, SpriteRenderer)>();
+
+        void MakeStand(string consumer)
+        {
+            var sheet = shop != null ? (consumer == "consumer-a" ? shop.customerA : shop.customerB) : null;
+            if (sheet == null) return;
+            var body = new GameObject(consumer + "-at-door").AddComponent<SpriteRenderer>();
+            body.transform.SetParent(transform, false);
+            // The premade sheet's idle row, facing down (as ShopView's idleDown).
+            body.sprite = UnityEngine.Sprite.Create(sheet, new Rect(18 * 32, sheet.height - 64 - 64, 32, 64), new Vector2(0.5f, 0f), PPU);
+            var tag = Words(body.transform, consumer + "-door-tag", new Vector2(0f, 2.3f), 0.065f, Color.white, 400); // not "-tag": ShopView's own label is found by that name; over the outsides (150+), which it overlaps at a door
+            tag.text = consumer == "consumer-a" ? "客人 A" : "客人 B";
+            var tint = consumer == "consumer-a" ? new Color(0.55f, 0.75f, 1f) : new Color(1f, 0.7f, 0.5f); // ShopView's colours
+            var plate = Plate(body.transform, tag, Pixel(), new Color(tint.r * 0.35f, tint.g * 0.35f, tint.b * 0.35f, 0.92f), 400);
+            stands[consumer] = (body, tag, plate);
+        }
+
+        public bool StandsAtDoor(string consumer) => stands.TryGetValue(consumer, out var s) && s.body.enabled; // tests
+        public Vector2 StandOf(string consumer) => stands.TryGetValue(consumer, out var s) ? (Vector2)s.body.transform.localPosition : Vector2.zero; // tests
+
+        void PlaceStands()
+        {
+            var key = shop != null ? shop.LayoutKey : null;
+            bool there = venues.TryGetValue(key ?? "", out var e);
+            int i = 0;
+            foreach (var kv in stands)
+            {
+                var phase = shop.PhaseOf(kv.Key);
+                bool on = there && phase != null && phase != "empty";
+                kv.Value.body.enabled = kv.Value.tag.GetComponent<MeshRenderer>().enabled = kv.Value.plate.enabled = on;
+                if (!on) continue;
+                var at = new Vector2(e.v.x, e.v.y) + e.v.door + new Vector2(i++ == 0 ? -0.6f : 0.6f, 0f);
+                kv.Value.body.transform.localPosition = at;
+                kv.Value.body.sortingOrder = Order(at.y) + 1;
+            }
+        }
+
+        // ---- views ----
         public Vector2 Origin(string layout) => layout != null && venues.TryGetValue(layout, out var e) ? new Vector2(e.v.x, e.v.y) : Vector2.zero;
         public bool HasVenue(string layout) => layout != null && venues.ContainsKey(layout);
-        public float Alpha(string layout) => venues.TryGetValue(layout ?? "", out var e) && e.outside.Count > 0 ? e.outside[0].color.a : -1f; // tests
+        // Door: where the circle closes or opens in the town: the current venue's door (its middle), else the town's centre.
+        Vector2 Door() => venues.TryGetValue(shop != null ? shop.LayoutKey ?? "" : "", out var e) ? new Vector2(e.v.x, e.v.y) + e.v.door + new Vector2(0f, 1f) : (town != null ? town.focus : Vector2.zero);
+        Vector2 Inside() => Interior + RoomDoor + new Vector2(0f, 0.8f);
 
         // Show: the page's view. safe is the uncovered part of the canvas in
         // CSS pixels from its top left (the page draws the canvas 1:1); empty
         // or missing: all of it. False (nothing changes) for an unknown mode
-        // or a town view without a town.
+        // or a town view without a town. Another view than the one shown
+        // goes through the circle; the same one only refits.
         public bool Show(string mode, Rect cssSafe)
         {
             if (mode != "venue" && (mode != "town" || !HasTown)) return false;
             safe = cssSafe.width > 0f && cssSafe.height > 0f ? cssSafe : new Rect();
-            if (mode == Mode) { Retarget(false); return true; }
-            var key = shop != null ? shop.LayoutKey : null;
-            lifted = mode == "venue" ? key : null;
-            lowered = mode == "town" ? key : null;
             Mode = mode;
-            Retarget(true);
+            if (mode == shown)
+            {
+                if (phase == 1) phase = 2; // asked back before the switch: open again where it closed
+                else Retarget();           // the view shown, maybe with a new uncovered part (the page measures again once the canvas fills): refit, even while it opens
+                return true;
+            }
+            if (phase != 1) { phase = 1; Cover(true, shown == "town" ? Door() : Inside()); if (radius <= 0f) radius = Full(); }
             return true;
         }
 
@@ -220,26 +379,23 @@ namespace APA
             return f >= 1f ? Mathf.Floor(f) : f;
         }
 
-        // Target: the scale and camera centre of the current view.
+        // Target: the scale and camera centre of the view shown.
         void Target(out float k, out Vector2 c)
         {
             var s = Safe();
             Vector2 at;
             // The town never below one screen pixel per art pixel: a narrow window crops it rather than blur it.
-            if (Mode == "town") { k = Mathf.Max(1f, Mathf.Floor(Fit(s, town.frame.x, town.frame.y))); at = town.focus; }
-            else { k = Fit(s, RoomW, RoomH); at = Origin(shop != null ? shop.LayoutKey : null) + new Vector2(RoomCX, RoomCY); }
+            if (shown == "town") { k = Mathf.Max(1f, Mathf.Floor(Fit(s, town.frame.x, town.frame.y))); at = town.focus; }
+            else { k = Fit(s, RoomW, RoomH); at = Interior + new Vector2(RoomCX, RoomCY); }
             // The target at the safe part's centre, not the canvas's.
             c = at - (s.center - new Vector2(Screen.width, Screen.height) / 2f) / (k * PPU);
         }
 
-        void Retarget(bool animate)
+        void Retarget()
         {
             if (Screen.width < 1 || Screen.height < 1) return; // a hidden canvas: nothing to fit until it is back
-            Target(out k1, out c1);
-            if (!animate || cam == null) { t = 1f; Apply(k1, c1); Lift(1f); return; }
-            k0 = Scale;
-            c0 = cam.transform.position;
-            t = 0f;
+            Target(out float k, out Vector2 c);
+            Apply(k, c);
         }
 
         // Snap: the camera centre such that art pixel edges fall on screen
@@ -259,24 +415,53 @@ namespace APA
             cam.transform.position = new Vector3(Snap(c.x, k, Screen.width), Snap(c.y, k, Screen.height), -10f);
         }
 
-        // Lift: how far the move has gone (0..1): the roof of the venue being
-        // entered fades out, the one being left fades back in; every other
-        // roof is on in the town view and on in a venue view too.
-        void Lift(float f)
+        // Full: a radius that clears the whole view from the circle's centre.
+        float Full()
         {
-            foreach (var kv in venues)
-            {
-                float a = 1f;
-                if (Mode == "venue" && kv.Key == (shop != null ? shop.LayoutKey : null)) a = kv.Key == lifted ? 1f - f : 0f;
-                else if (kv.Key == lowered) a = f;
-                foreach (var r in kv.Value.outside) r.color = new Color(1f, 1f, 1f, a);
-                if (kv.Value.name.color.a != a) { kv.Value.name.color = new Color(Ink.r, Ink.g, Ink.b, a); kv.Value.name.text = Label(kv.Value.v, a); }
-            }
+            if (cam == null) return 0f;
+            float h = cam.orthographicSize, w = h * cam.aspect;
+            var c = (Vector2)cam.transform.position - irisAt;
+            return new Vector2(Mathf.Abs(c.x) + w, Mathf.Abs(c.y) + h).magnitude + 1f;
+        }
+
+        void Cover(bool on, Vector2 at)
+        {
+            if (iris[0] == null)
+                for (int i = 0; i < iris.Length; i++)
+                {
+                    iris[i] = new GameObject("transition-" + i).AddComponent<SpriteRenderer>();
+                    iris[i].transform.SetParent(transform, false);
+                    iris[i].sprite = i == 0 ? Ring() : Pixel();
+                    iris[i].color = new Color(0.08f, 0.07f, 0.06f);
+                    iris[i].sortingOrder = 1000;
+                }
+            foreach (var r in iris) r.enabled = on;
+            irisAt = at;
+        }
+
+        // Circle: the ring at the radius (in whole steps of 4 art pixels), the bands beyond it to well past the view.
+        void Circle(float r)
+        {
+            const float far = 200f;
+            r = Mathf.Floor(r / (4f / PPU)) * (4f / PPU);
+            iris[0].transform.position = irisAt;
+            iris[0].transform.localScale = new Vector3(r, r, 1f);
+            Band(iris[1], irisAt + new Vector2(0f, r + far / 2f), new Vector2(2f * far, far));
+            Band(iris[2], irisAt - new Vector2(0f, r + far / 2f), new Vector2(2f * far, far));
+            Band(iris[3], irisAt - new Vector2(r + far / 2f, 0f), new Vector2(far, 2f * r));
+            Band(iris[4], irisAt + new Vector2(r + far / 2f, 0f), new Vector2(far, 2f * r));
+        }
+
+        static void Band(SpriteRenderer b, Vector2 at, Vector2 size)
+        {
+            b.transform.position = at;
+            b.transform.localScale = new Vector3(size.x, size.y, 1f);
         }
 
         void Update()
         {
-            if (!HasTown || Mode != "town" || Clicked == null || !Input.GetMouseButtonDown(0) || cam == null) return;
+            foreach (var s in walkers) Walk(s, Time.deltaTime);
+            if (!HasTown || shown != "town" || phase != 0 || Clicked == null || !Input.GetMouseButtonDown(0) || cam == null) return;
             var p = (Vector2)transform.InverseTransformPoint(cam.ScreenToWorldPoint(Input.mousePosition));
             var hit = VenueAt(p);
             if (hit != null) Clicked(hit);
@@ -299,38 +484,38 @@ namespace APA
         void LateUpdate()
         {
             if (cam == null) return;
-            // The room stands in its venue and is placed there at once. In a
-            // venue view the camera then goes on to it (the page's View may
-            // come before the scene's new room); the first placing and the
-            // town view (every roof on) move nothing.
-            var key = shop != null ? shop.LayoutKey : null;
-            if (shop != null && key != placed)
-            {
-                bool first = placed == null;
-                placed = key;
-                shop.transform.position = Origin(key);
-                lowered = null;
-                lifted = Mode == "venue" && !first ? key : null;
-                Retarget(lifted != null);
-            }
-            if (shop != null) shop.ShowWords(Mode != "town"); // the room's words would float over its roof and in the lane
             var now = new Vector2Int(Screen.width, Screen.height);
-            if (now != screen) { screen = now; Retarget(false); } // a new canvas size: at once
-            if (t < 1f)
+            if (now != screen) { screen = now; Retarget(); } // a new canvas size: at once
+            if (phase != 0)
             {
-                t = Mathf.Min(1f, t + Time.unscaledDeltaTime / Step);
-                float e = t * t * (3f - 2f * t);
-                // Whole multiples on the way: the scale steps, the centre glides.
-                float k = k0 >= 1f && k1 >= 1f ? Mathf.Round(Mathf.Lerp(k0, k1, e)) : Mathf.Lerp(k0, k1, e);
-                Apply(k, Vector2.Lerp(c0, c1, e));
-                Lift(e);
-                if (t >= 1f) { lifted = lowered = null; Lift(1f); }
+                // The circle runs on the real clock, in steps of a few art pixels (chunky, as the art).
+                float step = Full() / Half * Time.unscaledDeltaTime;
+                if (phase == 1)
+                {
+                    radius = Mathf.Max(0f, radius - step);
+                    if (radius <= 0f)
+                    {
+                        shown = Mode; // closed: the other side
+                        Retarget();
+                        Cover(true, shown == "town" ? Door() : Inside());
+                        phase = 2;
+                    }
+                }
+                else
+                {
+                    radius += step;
+                    if (radius >= Full()) { phase = 0; radius = 0f; Cover(false, Vector2.zero); }
+                }
+                if (phase != 0) Circle(radius);
             }
-            foreach (var (plate, text) in pills)
+            if (stands.Count > 0) PlaceStands();
+            foreach (var (plate, text) in plates)
             {
                 var b = text.GetComponent<MeshRenderer>().bounds;
                 plate.transform.position = new Vector3(b.center.x, b.center.y, 0f);
-                plate.size = new Vector2(b.size.x + 0.6f, b.size.y + 0.25f);
+                var size = new Vector2(b.size.x + (plate.drawMode == SpriteDrawMode.Sliced ? 0.6f : 0.2f), b.size.y + (plate.drawMode == SpriteDrawMode.Sliced ? 0.25f : 0.1f));
+                if (plate.drawMode == SpriteDrawMode.Sliced) plate.size = size;
+                else plate.transform.localScale = new Vector3(size.x / plate.transform.parent.lossyScale.x, size.y / plate.transform.parent.lossyScale.y, 1f);
             }
         }
     }

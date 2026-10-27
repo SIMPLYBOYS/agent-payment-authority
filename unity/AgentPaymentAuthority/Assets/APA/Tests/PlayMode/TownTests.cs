@@ -1,6 +1,8 @@
-// PlayMode tests of the town (T2, docs/commercial-town.md): the room stands
-// in its venue, the page's View moves only the camera and the roofs, and a
-// click on a venue is reported, never acted on.
+// PlayMode tests of the town (T2, docs/commercial-town.md; option A, Aaron
+// 10/27): the room is a place of its own, the page's View goes there and
+// back through a closing and opening circle, passers-by walk, A and B stand
+// at their venue's door while they have a task, and a click on a venue is
+// reported, never acted on.
 using System.Collections;
 using System.Linq;
 using APA;
@@ -29,7 +31,7 @@ public class TownTests
 
     IEnumerator Settle()
     {
-        for (float end = Time.realtimeSinceStartup + 3f; town.Moving && Time.realtimeSinceStartup < end;) yield return null; // a move is TownView.Step seconds of real time
+        for (float end = Time.realtimeSinceStartup + 3f; town.Moving && Time.realtimeSinceStartup < end;) yield return null; // a transition is twice TownView.Half seconds of real time
         Assert.IsFalse(town.Moving, "the move ends");
     }
 
@@ -62,6 +64,21 @@ public class TownTests
         Assert.AreEqual(h - h / 4f, at.y, 1f + town.Scale, "y: the top half's centre (screen y is up)");
     }
 
+    // The page measures the uncovered part again once the canvas fills the window: a second View for the
+    // same view, arriving while the circle opens, still moves the camera (review of the first option A build).
+    [UnityTest]
+    public IEnumerator ANewUncoveredPartWhileTheCircleOpens()
+    {
+        int w = Screen.width, h = Screen.height;
+        bridge.View("{\"mode\":\"town\"}");
+        for (float end = Time.realtimeSinceStartup + 3f; town.Moving && !town.Opening && Time.realtimeSinceStartup < end;) yield return null;
+        Assert.IsTrue(town.Opening, "the circle opens on the town");
+        bridge.View("{\"mode\":\"town\",\"safe\":{\"x\":" + w / 2 + ",\"y\":0,\"width\":" + (w - w / 2) + ",\"height\":" + h + "}}");
+        yield return Settle();
+        var at = Camera.main.WorldToScreenPoint(town.transform.TransformPoint((Vector3)town.Focus));
+        Assert.AreEqual(w / 2 + (w - w / 2) / 2f, at.x, 1f + town.Scale, "x: the right half's centre");
+    }
+
     // The page's View and the scene's new room may come in either order in one frame; the camera ends on the new room.
     [UnityTest]
     public IEnumerator ViewAndANewRoomInEitherOrder()
@@ -74,10 +91,10 @@ public class TownTests
             else { Assert.IsTrue(view.UseLayout("cafe")); bridge.View("{\"mode\":\"venue\"}"); }
             yield return null;
             yield return Settle();
-            Assert.AreEqual(0f, town.Alpha("cafe"), "the new room's roof lifted");
-            Assert.AreEqual(1f, town.Alpha("data"), "the old one's back");
+            Assert.AreEqual("cafe", view.LayoutKey);
             var c = (Vector2)Camera.main.transform.position;
-            Assert.Less((c - (town.Origin("cafe") + new Vector2(TownView.RoomCX, TownView.RoomCY))).magnitude, 1f, "the camera on the cafe: " + c);
+            Assert.Less((c - (TownView.Interior + new Vector2(TownView.RoomCX, TownView.RoomCY))).magnitude, 1f, "the camera on the room: " + c);
+            Assert.IsFalse(town.CoverOn, "the circle is gone");
             Crisp();
             Assert.IsTrue(view.UseLayout(ShopView.DefaultLayout));
             yield return null;
@@ -88,32 +105,61 @@ public class TownTests
     [Test]
     public void TheGroundIsDrawnInFileOrder()
     {
-        var ground = town.GetComponentsInChildren<SpriteRenderer>().Where(r => r.transform.parent == town.transform && r.sortingOrder < -500).ToList();
+        var ground = town.GetComponentsInChildren<SpriteRenderer>().Where(r => r.transform.parent == town.transform && r.sortingOrder >= -1000 && r.sortingOrder < -500).ToList(); // the room's backdrop and doorstep lie below
         Assert.Greater(ground.Count, 1);
         Assert.AreEqual(ground.Count, ground.Select(r => r.sortingOrder).Distinct().Count(), "each ground piece its own order");
         Assert.AreEqual("x-grass", ground.OrderBy(r => r.sortingOrder).First().name, "the grass under everything");
     }
 
-    bool NotesDrawn() => view.GetComponentsInChildren<TextMesh>().Where(t => t.name == "note").Any(t => t.GetComponent<MeshRenderer>().enabled);
-
     [UnityTest]
-    public IEnumerator TheRoomStandsInItsVenueAndItsRoofIsLifted()
+    public IEnumerator TheRoomIsAPlaceOfItsOwn()
     {
         Assert.AreEqual("venue", town.Mode, "the page's usual view: the room, as before");
-        Assert.AreEqual(town.Origin("data"), (Vector2)view.transform.position);
-        Assert.AreEqual(0f, town.Alpha("data"), "the room's own roof is off");
-        Assert.AreEqual(1f, town.Alpha("cafe"), "a neighbour keeps its roof");
+        Assert.AreEqual(TownView.Interior, (Vector2)view.transform.position, "away from the map");
+        var c = (Vector2)Camera.main.transform.position;
+        Assert.Less((c - (TownView.Interior + new Vector2(TownView.RoomCX, TownView.RoomCY))).magnitude, 1f);
         Crisp();
         Assert.IsTrue(view.UseLayout("cafe"));
         yield return null;
-        Assert.AreEqual(town.Origin("cafe"), (Vector2)view.transform.position, "another room stands in its own venue");
-        yield return Settle();
-        Assert.AreEqual(0f, town.Alpha("cafe"));
-        Assert.AreEqual(1f, town.Alpha("data"));
-        Crisp();
+        Assert.AreEqual(TownView.Interior, (Vector2)view.transform.position, "every room in the same place");
+        Assert.IsFalse(town.Moving, "a new room in the venue view is no transition");
         // The customers' places are the room's own, wherever it stands.
         Assert.AreEqual(view.Point("consumer-a", ShopView.Out), view.PositionOf("consumer-a"));
         Assert.IsTrue(view.UseLayout(ShopView.DefaultLayout));
+    }
+
+    // Passers-by walk (illustrative): they move and stay on the map.
+    [UnityTest]
+    public IEnumerator PassersByWalk()
+    {
+        var before = town.WalkerPositions.ToList();
+        Assert.Greater(before.Count, 5, "more passers-by (Aaron 10/27)");
+        for (float end = Time.realtimeSinceStartup + 0.6f; Time.realtimeSinceStartup < end;) yield return null;
+        var after = town.WalkerPositions.ToList();
+        Assert.IsTrue(before.Zip(after, (a, b) => (a - b).magnitude > 0.05f).Any(m => m), "someone walked");
+        foreach (var p in after) Assert.IsTrue(p.x >= 0f && p.x <= 64f && p.y >= 0f && p.y <= 48f, "on the map: " + p);
+    }
+
+    static string V2(int scene, string consumer, string phase) =>
+        "{\"v\":2,\"scene\":" + scene + ",\"consumer\":\"" + consumer + "\",\"slot\":1,\"task_id\":\"t-" + consumer + "\",\"seq\":3,\"phase\":\"" + phase +
+        "\",\"verdict\":\"\",\"reason\":\"\",\"animate\":false,\"cause_seq\":3,\"task_end\":\"\",\"layout\":\"cafe\"}";
+
+    // The customers who transact are A and B (Aaron 10/27: passers-by are only illustrative): in the town, while one has a task, it stands at its venue's door.
+    [UnityTest]
+    public IEnumerator AAndBStandAtTheirVenuesDoor()
+    {
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        Assert.IsFalse(town.StandsAtDoor("consumer-a") || town.StandsAtDoor("consumer-b"), "no task, no one at a door");
+        bridge.Receive(V2(1, "consumer-a", "waiting"));
+        yield return null;
+        yield return null;
+        Assert.AreEqual("cafe", view.LayoutKey);
+        Assert.IsTrue(town.StandsAtDoor("consumer-a"), "A has a task in the cafe");
+        Assert.IsFalse(town.StandsAtDoor("consumer-b"), "B has none");
+        Assert.Less((town.StandOf("consumer-a") - town.Origin("cafe")).magnitude, 14f, "at the cafe: " + town.StandOf("consumer-a"));
+        var tag = GameObject.Find("consumer-a-door-tag").GetComponent<MeshRenderer>();
+        Assert.IsTrue(tag.enabled && tag.sortingOrder > 150 + 20, "its label over the building fronts it stands at");
     }
 
     [UnityTest]
@@ -123,18 +169,19 @@ public class TownTests
         Assert.AreEqual("view:0:0:town|Applied", bridge.reports.Last());
         yield return Settle();
         Assert.AreEqual("town", town.Mode);
-        foreach (var k in new[] { "data", "cafe", "mart" }) Assert.AreEqual(1f, town.Alpha(k), k + ": every roof on in the town");
+        Assert.IsFalse(town.CoverOn);
+        var c = (Vector2)Camera.main.transform.position;
+        Assert.Less((c - town.Focus).magnitude, 1f, "the camera on the town: " + c);
         Crisp();
-        Assert.IsFalse(view.WordsShown || NotesDrawn(), "the room's title and notes are off under its roof");
-        Assert.IsTrue(view.UseLayout("cafe"));
-        yield return null;
-        Assert.IsFalse(NotesDrawn(), "a room built in the town view hides its notes too");
-        Assert.IsTrue(view.UseLayout(ShopView.DefaultLayout));
         bridge.View("{\"mode\":\"venue\",\"safe\":{\"x\":0,\"y\":0,\"width\":0,\"height\":0}}");
         Assert.IsTrue(town.Moving);
+        yield return null;
+        Assert.IsTrue(town.CoverOn, "the circle closes on the door first");
+        Assert.Less(((Vector2)Camera.main.transform.position - town.Focus).magnitude, 1f, "still the town while it closes");
         yield return Settle();
-        Assert.AreEqual(0f, town.Alpha("data"), "the roof lifts in place");
-        Assert.IsTrue(view.WordsShown && NotesDrawn());
+        c = (Vector2)Camera.main.transform.position;
+        Assert.Less((c - (TownView.Interior + new Vector2(TownView.RoomCX, TownView.RoomCY))).magnitude, 1f, "then the room: " + c);
+        Assert.IsFalse(town.CoverOn);
         Crisp();
         bridge.View("{\"mode\":\"street\"}");
         Assert.AreEqual("view:0:0:street|Invalid", bridge.reports.Last());
