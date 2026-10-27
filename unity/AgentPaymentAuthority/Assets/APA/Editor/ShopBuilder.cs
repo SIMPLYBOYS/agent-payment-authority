@@ -7,9 +7,10 @@
 // themselves are the layout files in Assets/APA/Resources/Layouts (UX3), read
 // at run time. Missing LimeZu files leave their entries empty; ShopView then
 // uses placeholders and says "LimeZu pending". The town's pieces (T2,
-// keys x-*, Modern Exteriors) are cut from their sheets into files of their
-// own under Assets/LimeZu/_cut (ignored too), so the build carries pieces,
-// not whole sheets of up to 8288 px; TownView takes them by key.
+// keys x-*, Modern Exteriors and the premade passers-by) are cut from their
+// files into files of their own under Assets/LimeZu/_cut (ignored too), so
+// the build carries pieces, not whole sheets of up to 8288 px; TownView
+// takes them by key.
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
@@ -72,8 +73,9 @@ namespace APA.EditorTools
         // sheet was not imported.
         static Texture2D CutPiece(string key, string path, RectInt r)
         {
-            if (!File.Exists(path) || r.width <= 0) return null;
+            if (!File.Exists(path)) return null;
             if (!sheets.TryGetValue(path, out var src)) sheets[path] = src = ReadPng(File.ReadAllBytes(path));
+            if (r.width <= 0) r = new RectInt(0, 0, src.w, src.h); // "-": the whole file (a single)
             if (r.x < 0 || r.y < 0 || r.x + r.width > src.w || r.y + r.height > src.h) throw new System.Exception(key + ": rect outside " + path);
             var px = new Color32[r.width * r.height];
             for (int y = 0; y < r.height; y++)

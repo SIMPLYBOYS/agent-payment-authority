@@ -48,7 +48,7 @@ namespace APA
 
         Town town;
         Camera cam;
-        readonly Dictionary<string, (Town.Venue v, List<SpriteRenderer> outside, TextMesh name)> venues = new Dictionary<string, (Town.Venue, List<SpriteRenderer>, TextMesh)>();
+        readonly Dictionary<string, (Town.Venue v, List<SpriteRenderer> outside, TextMesh name, float top)> venues = new Dictionary<string, (Town.Venue, List<SpriteRenderer>, TextMesh, float)>();
         readonly List<(SpriteRenderer plate, TextMesh text)> pills = new List<(SpriteRenderer, TextMesh)>();
         public bool HasTown => town != null && System.Array.Exists(art, t => t != null); // a build without the pack has no town (its room keeps the old camera)
         public string Mode { get; private set; } = "venue"; // venue | town
@@ -83,7 +83,10 @@ namespace APA
                     var r = Piece(root, v.exterior[i], 150 + i, Vector2.zero);
                     if (r != null) parts.Add(r);
                 }
-                venues[v.layout] = (v, parts, Pill(root, v, parts));
+                // The building's top, over its room's 9.5 tiles: the pill sits just above it.
+                float top = 9.5f;
+                foreach (var r in parts) top = Mathf.Max(top, r.bounds.max.y - root.position.y);
+                venues[v.layout] = (v, parts, Pill(root, v, parts, top), top);
             }
         }
 
@@ -121,11 +124,11 @@ namespace APA
         // Pill: the venue's number (in the accent) and name, on a light
         // plate over its roof, as the page's venue list numbers them. Part
         // of the outside: it lifts with the roof.
-        TextMesh Pill(Transform root, Town.Venue v, List<SpriteRenderer> outside)
+        TextMesh Pill(Transform root, Town.Venue v, List<SpriteRenderer> outside, float top)
         {
             var go = new GameObject("pill");
             go.transform.SetParent(root, false);
-            go.transform.localPosition = new Vector2(6f, 9.75f);
+            go.transform.localPosition = new Vector2(6f, top + 0.5f);
             var text = go.AddComponent<TextMesh>();
             var font = Resources.Load<Font>(ShopView.FontName) ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             text.font = font;
@@ -133,7 +136,7 @@ namespace APA
             text.GetComponent<MeshRenderer>().sortingOrder = 301;
             text.richText = true;
             text.fontSize = 48;
-            text.characterSize = 0.1f;
+            text.characterSize = 0.085f;
             text.anchor = TextAnchor.MiddleCenter;
             text.color = Ink;
             text.text = Label(v, 1f);
@@ -273,17 +276,19 @@ namespace APA
             if (hit != null) Clicked(hit);
         }
 
-        // VenueAt: the venue whose outside (its room's 12 x 9.5 tiles, the
-        // pill over it) holds a point in town units.
+        // VenueAt: the venue whose outside (12 tiles wide, up to its top,
+        // the pill over it) holds a point in town units.
         public string VenueAt(Vector2 p)
         {
             foreach (var kv in venues)
             {
                 var o = new Vector2(kv.Value.v.x, kv.Value.v.y);
-                if (p.x >= o.x && p.x <= o.x + 12f && p.y >= o.y && p.y <= o.y + 10.3f) return kv.Key;
+                if (p.x >= o.x && p.x <= o.x + 12f && p.y >= o.y && p.y <= o.y + kv.Value.top + 1f) return kv.Key;
             }
             return null;
         }
+        public Vector2 Focus => town != null ? town.focus : Vector2.zero; // tests
+        public float Top(string layout) => venues.TryGetValue(layout ?? "", out var e) ? e.top : 0f; // tests
 
         void LateUpdate()
         {

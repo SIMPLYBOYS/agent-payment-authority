@@ -57,7 +57,7 @@ public class TownTests
         bridge.View("{\"mode\":\"town\",\"safe\":{\"x\":" + w / 2 + ",\"y\":0,\"width\":" + (w - w / 2) + ",\"height\":" + h / 2 + "}}");
         yield return Settle();
         Crisp();
-        var at = Camera.main.WorldToScreenPoint(town.transform.TransformPoint(new Vector3(32f, 18.5f, 0f))); // town.json's focus
+        var at = Camera.main.WorldToScreenPoint(town.transform.TransformPoint((Vector3)town.Focus));
         Assert.AreEqual(w / 2 + (w - w / 2) / 2f, at.x, 1f + town.Scale, "x: the right half's centre");
         Assert.AreEqual(h - h / 4f, at.y, 1f + town.Scale, "y: the top half's centre (screen y is up)");
     }
@@ -151,7 +151,8 @@ public class TownTests
         yield return Settle();
         var o = town.Origin("mart");
         Assert.AreEqual("mart", town.VenueAt(o + new Vector2(6f, 4f)));
-        Assert.AreEqual("cafe", town.VenueAt(town.Origin("cafe") + new Vector2(6f, 10f)), "its name pill too");
+        Assert.AreEqual("cafe", town.VenueAt(town.Origin("cafe") + new Vector2(6f, town.Top("cafe") + 0.5f)), "its name pill too");
+        Assert.GreaterOrEqual(town.Top("data"), 9.5f, "a building covers its room's 9.5 tiles");
         Assert.IsNull(town.VenueAt(o + new Vector2(-1.3f, 0.6f)), "the lane outside the door is no venue");
         int before = bridge.reports.Count;
         town.Clicked("mart");
