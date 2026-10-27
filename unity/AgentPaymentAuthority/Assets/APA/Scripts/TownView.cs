@@ -301,7 +301,7 @@ namespace APA
             }
         }
 
-        // ---- A and B at their venue's door, while they have a task ----
+        // ---- A and B at their venue's door, while they are in it (Aaron 10/27: gone once the task ends) ----
         readonly Dictionary<string, (SpriteRenderer body, TextMesh tag, SpriteRenderer plate)> stands = new Dictionary<string, (SpriteRenderer, TextMesh, SpriteRenderer)>();
 
         void MakeStand(string consumer)
@@ -328,8 +328,7 @@ namespace APA
             bool there = venues.TryGetValue(key ?? "", out var e);
             foreach (var kv in stands)
             {
-                var phase = shop.PhaseOf(kv.Key);
-                bool on = there && phase != null && phase != "empty";
+                bool on = there && shop.Transacting(kv.Key); // done (delivered, denied, any end): gone from the door
                 kv.Value.body.enabled = kv.Value.tag.GetComponent<MeshRenderer>().enabled = kv.Value.plate.enabled = on;
                 if (!on) continue;
                 var at = new Vector2(e.v.x, e.v.y) + e.v.door + new Vector2(kv.Key == "consumer-a" ? -0.6f : 0.6f, 0f); // a side each, whoever else is there

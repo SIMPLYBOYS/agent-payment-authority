@@ -159,9 +159,30 @@ public class TownTests
         foreach (var p in after) Assert.IsTrue(p.x >= 0f && p.x <= 64f && p.y >= 0f && p.y <= 48f, "on the map: " + p);
     }
 
-    static string V2(int scene, string consumer, string phase) =>
-        "{\"v\":2,\"scene\":" + scene + ",\"consumer\":\"" + consumer + "\",\"slot\":1,\"task_id\":\"t-" + consumer + "\",\"seq\":3,\"phase\":\"" + phase +
-        "\",\"verdict\":\"\",\"reason\":\"\",\"animate\":false,\"cause_seq\":3,\"task_end\":\"\",\"layout\":\"cafe\"}";
+    static string V2(int scene, string consumer, string phase, int seq = 3, string end = "") =>
+        "{\"v\":2,\"scene\":" + scene + ",\"consumer\":\"" + consumer + "\",\"slot\":1,\"task_id\":\"t-" + consumer + "\",\"seq\":" + seq + ",\"phase\":\"" + phase +
+        "\",\"verdict\":\"\",\"reason\":\"\",\"animate\":false,\"cause_seq\":" + seq + ",\"task_end\":\"" + end + "\",\"layout\":\"cafe\"}";
+
+    // Aaron 10/27: once a task ends, its customer leaves the door, as the room walks it out.
+    [UnityTest]
+    public IEnumerator AnEndedTaskLeavesTheDoor()
+    {
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        int sc = 0;
+        foreach (var (phase, seq, end) in new[] { ("delivered", 9, ""), ("denied", 6, ""), ("expired", 6, ""), ("allowed_unpaid", 6, ""), ("delivery_failed", 9, ""), ("waiting", 6, "cancelled"), ("waiting", 6, "timed_out") })
+        {
+            sc++; // each case a scene of its own: a new scene starts every slot over
+            bridge.Receive(V2(sc, "consumer-a", "waiting"));
+            bridge.Receive(V2(sc, "consumer-b", "paid", 7));
+            yield return null;
+            Assert.IsTrue(town.StandsAtDoor("consumer-a") && town.StandsAtDoor("consumer-b"), "both in the cafe");
+            bridge.Receive(V2(sc, "consumer-a", phase, seq, end));
+            yield return null;
+            Assert.IsFalse(town.StandsAtDoor("consumer-a"), "A's task ended (" + phase + (end != "" ? "/" + end : "") + "): gone from the door");
+            Assert.IsTrue(town.StandsAtDoor("consumer-b"), "B's goes on: still there");
+        }
+    }
 
     // The customers who transact are A and B (Aaron 10/27: passers-by are only illustrative): in the town, while one has a task, it stands at its venue's door.
     [UnityTest]

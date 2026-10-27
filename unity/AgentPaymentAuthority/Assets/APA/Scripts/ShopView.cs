@@ -451,6 +451,22 @@ namespace APA
         }
 
         // For the PlayMode tests: observations only.
+        // Transacting: the customer's task goes on in the shop. Inside by the
+        // room's own rule (a decision at the counter, the shelf, the delivery
+        // zone; a Deny, a delivery or any other end phase walks it out, as
+        // does a cancelled or timed-out task), and not at a phase that ends
+        // the task where it stands: an Allow that will not be paid (a host
+        // that does not pay; a paying one goes on to payment) or a delivery
+        // that failed (a person takes it from there). TownView stands A and
+        // B at the door only while true (Aaron 10/27: gone once it ends).
+        public bool Transacting(string consumer)
+        {
+            if (!customers.TryGetValue(consumer, out var c)) return false;
+            var p = c.target.Phase;
+            if (p == "empty" || p == "allowed_unpaid" || p == "delivery_failed" || c.target.End != "") return false;
+            return SceneRules.Counter(p) ? p != "denied" : Station(p) != Out;
+        }
+
         public string PhaseOf(string consumer) => customers.TryGetValue(consumer, out var c) ? c.target.Phase : null;
         public Vector2 PositionOf(string consumer) => customers.TryGetValue(consumer, out var c) ? (Vector2)c.go.transform.localPosition : Vector2.zero;
         public bool Moving(string consumer) => customers.TryGetValue(consumer, out var c) && c.route != null;
