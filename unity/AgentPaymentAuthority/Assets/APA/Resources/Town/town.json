@@ -134,19 +134,18 @@
   ],
   "inside": [
     {"layout": "data", "people": [
-      {"key": "x-pose-19-down", "speed": 0, "path": [{"x": 8.9, "y": 2.4}]},
-      {"key": "x-pose-20-read", "speed": 0, "path": [{"x": 9.7, "y": 5.4}]},
-      {"key": "x-pose-10-phone", "speed": 0, "path": [{"x": 4.3, "y": 0.7}]}]},
+      {"key": "x-pose-19-down", "speed": 0, "path": [{"x": 11.4, "y": 2.4}]},
+      {"key": "x-pose-20-read", "speed": 0, "path": [{"x": 0.5, "y": 5.2}]},
+      {"key": "x-pose-10-phone", "speed": 0, "path": [{"x": 11.4, "y": 5.4}]}]},
     {"layout": "cafe", "people": [
-      {"key": "x-pose-17-down", "speed": 0, "path": [{"x": 10.2, "y": 5.8}]},
+      {"key": "x-pose-17-down", "speed": 0, "path": [{"x": 6.4, "y": 6.3}]},
       {"key": "x-pose-03-sit-right", "speed": 0, "path": [{"x": 2.9, "y": 0.55}]},
       {"key": "x-pose-06-sit-left", "speed": 0, "path": [{"x": 4.3, "y": 0.55}]},
-      {"key": "x-pose-18-sit-left", "speed": 0, "path": [{"x": 7.0, "y": 0.55}]},
-      {"key": "x-walk-09", "speed": 0.6, "path": [{"x": 8.8, "y": 1.9}, {"x": 5.5, "y": 1.9}]}]},
+      {"key": "x-pose-18-sit-left", "speed": 0, "path": [{"x": 7.0, "y": 0.55}]}]},
     {"layout": "mart", "people": [
       {"key": "x-pose-15-left", "speed": 0, "path": [{"x": 11.4, "y": 1.8}]},
-      {"key": "x-walk-13", "speed": 0.6, "path": [{"x": 3.0, "y": 1.9}, {"x": 6.2, "y": 1.9}]},
-      {"key": "x-pose-12-phone", "speed": 0, "path": [{"x": 7.4, "y": 5.0}]}]}
+      {"key": "x-pose-13-down", "speed": 0, "path": [{"x": 0.5, "y": 5.2}]},
+      {"key": "x-pose-12-phone", "speed": 0, "path": [{"x": 3.9, "y": 0.2}]}]}
   ],
   "venues": [
     {"layout": "data", "number": "01", "name": "資料研究室", "x": 18, "y": 26, "door": {"x": 7.4, "y": -0.9}, "exterior": [

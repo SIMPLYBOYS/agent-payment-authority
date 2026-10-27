@@ -4,6 +4,7 @@
 // at their venue's door while they have a task, and a click on a venue is
 // reported, never acted on.
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using APA;
 using NUnit.Framework;
@@ -159,43 +160,66 @@ public class TownTests
         foreach (var p in after) Assert.IsTrue(p.x >= 0f && p.x <= 64f && p.y >= 0f && p.y <= 48f, "on the map: " + p);
     }
 
-    // Aaron 10/27: a clerk and other customers in each shop (illustrative): only that shop's, and never on A's or B's way.
+    // Aaron 10/27: a clerk and other customers in each shop (illustrative): only that shop's, and never under A or B, who
+    // draw on top: no body box meets A's or B's anywhere along their legs, nor their labels where they wait (review of 9420431).
     [UnityTest]
-    public IEnumerator EachShopHasItsOwnPeopleOffTheCustomersWay()
+    public IEnumerator EachShopHasItsOwnPeopleClearOfAAndB()
     {
         var data = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
         bridge.Receive("{\"v\":2,\"scene\":1,\"clear\":true}"); // the two-customer scene: B's points stand aside (ShopView.P)
+        int sc = 1;
         foreach (var layout in new[] { "data", "cafe", "mart" })
         {
             Assert.IsTrue(view.UseLayout(layout));
             yield return null;
             var g = data.inside.First(x => x.layout == layout);
-            var shown = town.PeopleInside.ToList();
-            Assert.AreEqual(g.people.Length, shown.Count, layout + ": its own people, and only them");
+            CollectionAssert.AreEquivalent(g.people.Select(w => w.key), town.PeopleInside.Select(x => x.key), layout + ": its own people, and only them");
             Assert.GreaterOrEqual(g.people.Length, 3, layout + ": a clerk and customers");
-            foreach (var w in g.people)
+            var people = g.people.SelectMany(w => Samples(w.path).Select(at => (w.key, box: Body(at), face: Face(at)))).ToList();
+            // Bodies, all along every leg of A's and B's corridor.
+            foreach (var c in new[] { "consumer-a", "consumer-b" })
+                for (int e = 0; e < ShopView.Lines.GetLength(0); e++)
+                    foreach (var at in Samples(new[] { view.P(c, ShopView.Lines[e, 0]), view.P(c, ShopView.Lines[e, 1]) }))
+                        foreach (var (key, box, _) in people)
+                            Assert.IsFalse(box.Overlaps(Body(at)), layout + ": " + key + " under " + c + " at " + at);
+            // Labels, where A and B wait: the shelf, the counter, the delivery zone.
+            foreach (var phase in new[] { "quoted", "waiting", "paid" })
+            {
+                sc++;
+                bridge.Receive(V2(sc, "consumer-a", phase, 3, "", layout));
+                bridge.Receive(V2(sc, "consumer-b", phase, 3, "", layout));
+                yield return null;
+                yield return null; // the plates fit their labels in LateUpdate
                 foreach (var c in new[] { "consumer-a", "consumer-b" })
-                    for (int n = 0; n <= ShopView.Pickup; n++)
-                    {
-                        var at = view.P(c, n);
-                        float d = w.path.Length == 1 ? (w.path[0] - at).magnitude
-                            : Enumerable.Range(0, w.path.Length - 1).Min(i => DistanceToSegment(at, w.path[i], w.path[i + 1]));
-                        Assert.GreaterOrEqual(d, 0.6f, layout + ": " + w.key + " on " + c + "'s point " + n + " " + at);
-                    }
+                {
+                    var b = GameObject.Find(c + "-plate").GetComponent<SpriteRenderer>().bounds;
+                    var o = (Vector2)view.transform.position;
+                    var label = Rect.MinMaxRect(b.min.x - o.x, b.min.y - o.y, b.max.x - o.x, b.max.y - o.y);
+                    foreach (var (key, _, face) in people) Assert.IsFalse(face.Overlaps(label), layout + ": " + key + " " + face + " under " + c + "'s label " + label + " at " + phase);
+                }
+            }
         }
         Assert.IsTrue(view.UseLayout(ShopView.DefaultLayout));
     }
 
-    static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
+    // Body: a character's opaque box from its feet (premade sheets: 42 to 50 px of 64, standing or seated, about 30 px wide).
+    // Face: the same below the top of the hair: a label passing over may touch a head's top (the cafe's seats lie under
+    // B's label at the shelf, about 0.3 tile of hair, while B waits there), never a face or a body.
+    static Rect Body(Vector2 feet) => new Rect(feet.x - 0.45f, feet.y, 0.9f, 1.4f);
+    static Rect Face(Vector2 feet) => new Rect(feet.x - 0.45f, feet.y, 0.9f, 1.1f);
+
+    // Samples: the points of a path, and every 0.1 tile along its legs.
+    static IEnumerable<Vector2> Samples(Vector2[] path)
     {
-        var ab = b - a;
-        float t = ab.sqrMagnitude > 0f ? Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude) : 0f;
-        return (p - (a + ab * t)).magnitude;
+        if (path.Length == 1) { yield return path[0]; yield break; }
+        for (int i = 0; i + 1 < path.Length; i++)
+            for (float t = 0f; t <= 1f; t += 0.1f / Mathf.Max(0.1f, (path[i + 1] - path[i]).magnitude)) yield return Vector2.Lerp(path[i], path[i + 1], t);
+        yield return path[path.Length - 1];
     }
 
-    static string V2(int scene, string consumer, string phase, int seq = 3, string end = "") =>
+    static string V2(int scene, string consumer, string phase, int seq = 3, string end = "", string layout = "cafe") =>
         "{\"v\":2,\"scene\":" + scene + ",\"consumer\":\"" + consumer + "\",\"slot\":1,\"task_id\":\"t-" + consumer + "\",\"seq\":" + seq + ",\"phase\":\"" + phase +
-        "\",\"verdict\":\"\",\"reason\":\"\",\"animate\":false,\"cause_seq\":" + seq + ",\"task_end\":\"" + end + "\",\"layout\":\"cafe\"}";
+        "\",\"verdict\":\"\",\"reason\":\"\",\"animate\":false,\"cause_seq\":" + seq + ",\"task_end\":\"" + end + "\",\"layout\":\"" + layout + "\"}";
 
     // Aaron 10/27: once a task ends, its customer leaves the door, as the room walks it out.
     [UnityTest]

@@ -517,6 +517,8 @@ namespace APA
 
         void LateUpdate()
         {
+            var room = shop != null ? shop.LayoutKey : null;
+            foreach (var kv in insides) if (kv.Value.activeSelf != (kv.Key == room)) kv.Value.SetActive(kv.Key == room); // the shop's own people only
             if (cam == null) return;
             var now = new Vector2Int(Screen.width, Screen.height);
             if (now != screen) { screen = now; Retarget(); } // a new canvas size: at once
@@ -544,8 +546,6 @@ namespace APA
                 if (phase != 0) Circle(radius);
             }
             if (stands.Count > 0) PlaceStands();
-            var room = shop != null ? shop.LayoutKey : null;
-            foreach (var kv in insides) if (kv.Value.activeSelf != (kv.Key == room)) kv.Value.SetActive(kv.Key == room); // the shop's own people only
             foreach (var (plate, text) in plates)
             {
                 var b = text.GetComponent<MeshRenderer>().bounds;

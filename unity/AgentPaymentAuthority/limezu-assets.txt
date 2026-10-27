@@ -156,4 +156,5 @@ x-pose-03-sit-right	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Pr
 x-pose-06-sit-left	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_06.png	192,256,192,64
 x-pose-18-sit-left	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_18.png	192,256,192,64
 x-pose-15-left	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_15.png	384,64,192,64
+x-pose-13-down	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_13.png	576,64,192,64
 x-pose-12-phone	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_12.png	128,384,192,64
