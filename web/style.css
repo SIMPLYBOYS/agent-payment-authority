@@ -353,15 +353,15 @@ body[data-present="on"] .side { display: contents; }
 .present-town { margin: 8px 0 0; background: none; border: 1px solid #d9cfbf; border-radius: 999px; padding: 6px 14px; color: var(--ink, #1d1a15); font-weight: 600; }
 .present-credit { margin: 8px 0 0; font-size: 11px; color: var(--soft, #6e675b); }
 /* The narration under the scene (Aaron 10/27): the step on screen in plain words, big enough to read from the room. */
-.present-caption { position: fixed; z-index: 5; left: 50%; bottom: 24px; transform: translateX(-50%); max-width: min(760px, calc(100vw - 820px)); min-width: 320px;
+.present-caption { position: fixed; z-index: 5; left: 50%; bottom: 24px; transform: translateX(-50%); max-width: min(760px, calc(100vw - 820px));
   display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
-.present-caption p { margin: 0; display: flex; align-items: baseline; gap: 12px; background: rgba(29, 26, 21, 0.9); color: #fffdf8; border-radius: 14px; padding: 10px 18px;
+.present-caption p { margin: 0; display: flex; align-items: baseline; gap: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; /* one line each: the scene keeps 140 px for them */ background: rgba(29, 26, 21, 0.9); color: #fffdf8; border-radius: 14px; padding: 10px 18px;
   font-size: 20px; font-weight: 700; line-height: 1.35; box-shadow: 0 10px 30px rgba(20, 14, 6, 0.3); }
 .present-caption .n { font: italic 600 24px/1 Georgia, "Times New Roman", serif; color: var(--accent, #e0582f); }
 .present-caption small { margin-left: auto; font-size: 12px; font-weight: 600; color: #f0c46b; white-space: nowrap; }
-.present-caption.flash p { animation: caption-in 0.5s ease-out; }
+.present-caption p.flash { animation: caption-in 0.5s ease-out; }
 @keyframes caption-in { from { transform: translateY(8px); opacity: 0.2; } to { transform: none; opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .present-caption.flash p { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .present-caption p.flash { animation: none; } }
 .present-ahead { margin: 2px 0 6px; font-size: 12px; color: #a26a00; }
 .present-status { margin: 8px 0 0; font-size: 12px; color: var(--soft, #6e675b); }
 body[data-present="on"] #approval { min-height: 0; overflow: auto; background: #fffdf8; color: #1a1d2e; border: 2px solid #f0c46b; padding: 0; border-radius: 18px; box-shadow: 0 10px 30px rgba(50, 35, 10, 0.2); }

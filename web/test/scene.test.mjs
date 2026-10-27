@@ -451,3 +451,51 @@ test("pacing: one step at a time, the real task ahead said so", async () => {
     scene.stop();
   }
 });
+
+// Review of f548706: a paced step is the latest task with a prefix of its events; the window's evidence says only
+// what the step's own events say, though the purchase's record already holds approval, payment and receipt.
+test("pacing: a step's evidence is its own events', not the record's", () => {
+  const purchase = { purchase_order_id: "po-1", amount: "500000", approval: { state: "approved", grant: { authorization_method: "webauthn" } },
+    payment: { reserve_tx: "0x" + "a".repeat(64), settle_tx: "0x" + "b".repeat(64), receipt_id: "rcpt-1" } };
+  const full = reply("t-1", "consumer-a", [...askEvents(), ev(4, "APPROVED", { purchase_order_id: "po-1", authorization_method: "webauthn" }),
+    ev(5, "BUDGET_RESERVED", { purchase_order_id: "po-1" }), ev(6, "PAYMENT_SETTLED", { purchase_order_id: "po-1" }), ev(7, "RECEIPT_ISSUED", { purchase_order_id: "po-1" })]);
+  full.task.purchases = [purchase];
+  full.task.payment_capability = "local_anvil";
+  const step = (n) => ({ task: { ...full.task, as_of_sequence: n }, events: full.events.events.filter((e) => e.sequence <= n) });
+  const labels = (n) => A.showEvidence(step(n)).map((x) => x.label);
+  assert.deepEqual(labels(3), ["委託"], "waiting: no approval, no payment, no receipt yet");
+  assert.deepEqual(labels(4), ["委託", "核准"]);
+  assert.deepEqual(labels(5), ["委託", "核准", "預算預留"]);
+  assert.deepEqual(labels(7), ["委託", "核准", "預算預留", "付款", "收據"], "the whole read: all of it");
+});
+
+test("pacing: a read with no new phase takes no extra hold; pacing turned off shows the newest at once", async () => {
+  let paced = true;
+  const host = fakeHost();
+  const unity = fakeUnity();
+  const scene = createScene({ unity, token: () => "token-a", onChange: () => {}, fetchFn: host.fetchFn, paced: () => paced, paceMs: 600 });
+  scenes.push(scene);
+  host.data.set("show-a-01", reply("show-a-01", "consumer-a", askEvents().slice(0, 1)));
+  scene.start();
+  scene.setRuns(runs(["consumer-a", "show-a-01"]));
+  await settle();
+  const sent = () => unity.sent.filter((m) => m.consumer === "consumer-a" && !m.clear).map((m) => m.phase + "#" + m.seq);
+  host.data.set("show-a-01", reply("show-a-01", "consumer-a", askEvents())); // quoted (2), waiting (3)
+  for (const end = Date.now() + 3000; Date.now() < end && sent().length < 2;) await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(sent(), ["entered#1", "quoted#2"]);
+  host.data.set("show-a-01", reply("show-a-01", "consumer-a", [...askEvents(), ev(4, "APPROVAL_SESSION_OPENED", { purchase_order_id: "po-1" })])); // still waiting
+  const t0 = Date.now();
+  for (const end = Date.now() + 3000; Date.now() < end && !sent().includes("waiting#4");) await new Promise((r) => setTimeout(r, 20));
+  const phases = sent().map((x) => x.split("#")[0]).filter((p, i, a) => p !== a[i - 1]);
+  assert.deepEqual(phases, ["entered", "quoted", "waiting"], "no extra step for a read in the same phase");
+  assert.ok(sent().includes("waiting#4") && Date.now() - t0 < 1700, "the newer read shown without another hold: " + sent());
+  // Off mid-queue: the next read shows the newest at once.
+  host.data.set("show-a-01", reply("show-a-01", "consumer-a", [...askEvents(), ev(4, "APPROVAL_SESSION_OPENED", { purchase_order_id: "po-1" }),
+    ev(5, "APPROVAL_EXPIRED", { purchase_order_id: "po-1" })]));
+  await new Promise((r) => setTimeout(r, 50));
+  paced = false;
+  for (const end = Date.now() + 2500; Date.now() < end && !sent().some((x) => x.startsWith("expired"));) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(sent()[sent().length - 1], "expired#5", "unpaced: the newest at once");
+  assert.equal(scene.behind("consumer-a"), false);
+  scene.stop();
+});

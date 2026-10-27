@@ -1,8 +1,9 @@
 // pixelscale.js: the Unity scene at whole multiples of its art pixels (Aaron
 // 10/23: a basic scale by default, zoom on demand, never blurred). The camera
 // shows 480 x 320 art pixels (ShopBuilder: orthographic size 5, 32 px a
-// unit); the canvas is N times that in CSS pixels, drawn 1:1 (unity.js:
-// devicePixelRatio 1) and scaled by the browser with image-rendering: pixelated.
+// unit); the canvas is N times that in CSS pixels, rendered at the screen's
+// density (unity.js; a whole multiple again on a whole-number density) and
+// scaled by the browser with image-rendering: pixelated.
 
 export const NATIVE_W = 480, NATIVE_H = 320;
 export const MAX_ZOOM = 6;

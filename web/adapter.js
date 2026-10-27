@@ -1156,7 +1156,8 @@ export const networkText = (cap) => (cap === "base_sepolia" ? "Base Sepolia 測�
 
 // productName: the item a purchase names, by its resource path; the
 // catalog's titles are English fixtures, so the audience's words are here.
-const PRODUCTS = { "/resources/kr-market": "韓國市場簡報", "/scenes/cafe/lunch-set": "午餐套餐（12:30 取餐）", "/scenes/mart/coffee-beans": "辦公室咖啡豆 ×2" };
+const PRODUCTS = { "/resources/kr-market": "韓國市場簡報", "/resources/tw-semis-note": "台灣半導體週報摘要", "/scenes/cafe/lunch-set": "午餐套餐（12:30 取餐）",
+  "/scenes/cafe/meeting-coffee": "會議咖啡 6 杯（15:00 取餐）", "/scenes/mart/coffee-beans": "辦公室咖啡豆 ×2" };
 export function productName(url) {
   let path = "";
   try { path = new URL(url).pathname; } catch { return "商品"; }
@@ -1193,25 +1194,30 @@ export function chainLine(tx, head, kind) {
   return at;
 }
 
+// recorded: the snapshot's own events have type for po. A paced step (scene.js) is the latest task with a prefix of its
+// events: a purchase's record may already hold what its events do not yet say, and the window says only what they do (review).
+export const recorded = (snapshot, po, type) => ((snapshot && snapshot.events) || []).some((e) => e.event_type === type && e.purchase_order_id === po);
+
 export function showEvidence(snapshot, traits = {}, chain = null) {
   const task = snapshot && snapshot.task;
   if (!task) return [];
   const sc = scene(snapshot);
   const p = sc.po ? (task.purchases || []).find((x) => x.purchase_order_id === sc.po) : null;
+  const has = (type) => recorded(snapshot, sc.po, type);
   const items = [{ label: "委託", text: "主持人代客人確認（示範，不是本人）" }];
   if (!p) return items;
   if (p.credential) items.push({ label: "憑證", text: p.credential.result === "valid" ? "Agent 出示了客人的憑證，檢查通過（測試發行者）" : "憑證檢查沒通過" });
   if (sc.verdict === "Allow") items.push({ label: "核准", text: "在委託範圍內，自動放行" }); // the events' verdict, as the five steps
   else if (sc.verdict === "Deny") items.push({ label: "核准", text: plainReason(sc.reason) + "，已拒絕" });
-  else if (p.approval && p.approval.state === "approved") items.push({ label: "核准", text: approvalWords(p, traits) });
+  else if (p.approval && p.approval.state === "approved" && has("APPROVED")) items.push({ label: "核准", text: approvalWords(p, traits) });
   const pv = p.payment || {};
   const onChain = chain && chain.purchases && chain.purchases[p.purchase_order_id];
-  if (pv.reserve_tx) items.push({ label: "預算預留", ...txLink(task.payment_capability, pv.reserve_tx), note: "第 1 筆・含 ZK 預算證明",
+  if (pv.reserve_tx && has("BUDGET_RESERVED")) items.push({ label: "預算預留", ...txLink(task.payment_capability, pv.reserve_tx), note: "第 1 筆・含 ZK 預算證明",
     chain: onChain && onChain.reserve && onChain.reserve.hash === pv.reserve_tx ? chainLine(onChain.reserve, chain.head, "reserve") : "" });
-  if (pv.settle_tx) items.push({ label: "付款", ...txLink(task.payment_capability, pv.settle_tx),
+  if (pv.settle_tx && has("PAYMENT_SETTLED")) items.push({ label: "付款", ...txLink(task.payment_capability, pv.settle_tx),
     note: pv.settle_tx !== pv.reserve_tx ? "第 2 筆・和第 1 筆不是同一筆" : "第 2 筆（交易編號和第 1 筆相同，未確認）",
     chain: onChain && onChain.settle && onChain.settle.hash === pv.settle_tx ? chainLine(onChain.settle, chain.head, "settle") : "" });
-  if (pv.receipt_id) items.push({ label: "收據", text: String(pv.receipt_id), note: "記錄了交付內容的 sha256" });
+  if (pv.receipt_id && has("RECEIPT_ISSUED")) items.push({ label: "收據", text: String(pv.receipt_id), note: "記錄了交付內容的 sha256" });
   return items;
 }
 

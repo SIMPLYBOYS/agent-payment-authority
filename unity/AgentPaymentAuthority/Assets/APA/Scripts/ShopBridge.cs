@@ -117,7 +117,7 @@ namespace APA
         public class ViewMessage
         {
             public string mode;  // town | venue
-            public Area safe = new Area(); // the canvas's uncovered part, CSS pixels from its top left; zero: all of it
+            public Area safe = new Area(); // the canvas's uncovered part, in its own pixels (Screen's) from its top left; zero: all of it
         }
 
         // Area: {x, y, width, height} as the page sends it (JsonUtility does not fill a Rect from those names).

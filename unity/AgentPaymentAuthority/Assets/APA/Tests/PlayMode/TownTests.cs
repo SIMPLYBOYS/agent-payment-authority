@@ -68,13 +68,15 @@ public class TownTests
     [UnityTest]
     public IEnumerator ARoomFillsTheUncoveredPart()
     {
-        int w = Screen.width, h = Screen.height;
-        bridge.View("{\"mode\":\"venue\",\"safe\":{\"x\":0,\"y\":0,\"width\":" + w + ",\"height\":" + (h * 3 / 4) + "}}");
-        yield return Settle();
-        float f = Mathf.Min(w / (TownView.RoomW * TownView.PPU), h * 3 / 4 / (TownView.RoomH * TownView.PPU));
-        float want = f >= 1f && f - Mathf.Floor(f) < 0.1f ? Mathf.Floor(f) : f;
-        Assert.AreEqual(want, town.Scale, 1e-3f, "the room as large as the part allows");
-        Crisp();
+        // Fixed cases (review: not the formula again): the room is 480 x 320 at scale 1.
+        if (Screen.width < 600 || Screen.height < 400) Assert.Ignore("the batch screen is smaller than the cases: " + Screen.width + "x" + Screen.height);
+        foreach (var (w, h, want) in new[] { (600, 400, 1.25f), (504, 400, 1f), (480, 320, 1f), (400, 300, 0.8333f) })
+        {
+            bridge.View("{\"mode\":\"venue\",\"safe\":{\"x\":0,\"y\":0,\"width\":" + w + ",\"height\":" + h + "}}");
+            yield return Settle();
+            Assert.AreEqual(want, town.Scale, 1e-3f, w + "x" + h + ": a fraction where one is needed, a whole multiple within a tenth");
+            Crisp();
+        }
     }
 
     // The page measures the uncovered part again once the canvas fills the window: a second View for the

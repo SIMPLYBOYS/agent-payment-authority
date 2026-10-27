@@ -132,7 +132,7 @@ export class UnityHost {
 
   // view sends the page's camera choice (T2, docs/commercial-town.md): the
   // town or the current venue, and the canvas's uncovered part ({x, y,
-  // width, height} in CSS pixels from its top left; null: all of it).
+  // width, height} in the canvas's own pixels from its top left; null: all of it).
   view(mode, safe) {
     if (!(this.bridge && this.bridge.town)) return;
     this.pendingView = { mode, safe: safe || { x: 0, y: 0, width: 0, height: 0 } };

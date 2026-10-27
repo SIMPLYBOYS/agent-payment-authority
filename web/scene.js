@@ -99,6 +99,13 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
   function show(s, first) {
     const fresh = A.fresh(s.st, first);
     const snap = s.st.snapshot;
+    // Pacing turned off (簡報模式 left) with steps still to show: the newest at once (review).
+    if (!paced() && snap && (s.queue.length || s.pace)) {
+      clearTimeout(s.pace);
+      s.pace = null;
+      s.queue = [];
+      if (snap.task.as_of_sequence !== s.shownSeq) display(s, snap, true);
+    }
     if (snap && snap.task.as_of_sequence !== s.queuedSeq) {
       s.queuedSeq = snap.task.as_of_sequence;
       if ((first && !s.news) || !paced()) {
@@ -108,8 +115,16 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
         s.queue = [];
         display(s, snap, !first && fresh.length > 0);
       } else {
-        s.queue.push(...steps(s, snap));
-        if (!s.pace) advance(s);
+        const parts = steps(s, snap);
+        const last = s.queue.length ? s.queue[s.queue.length - 1] : s.shown;
+        if (last && parts.length === 1 && A.scene(parts[0]).phase === A.scene(last).phase) {
+          // No new step (payment events within one phase, a binding): the newer read stands in for the last, no extra hold (review).
+          if (s.queue.length) s.queue[s.queue.length - 1] = parts[0];
+          else display(s, parts[0], true);
+        } else {
+          s.queue.push(...parts);
+          if (!s.pace) advance(s);
+        }
       }
     }
     onChange();
@@ -294,8 +309,9 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
     view(consumer) {
       const s = slots.get(consumer);
       if (!s || !s.task) return null;
+      const shown = s.shown || s.st.snapshot;
       const sent = s.sent && { gen: s.sent.scene, consumer, slot: s.sent.slot, task: s.sent.task_id, seq: s.sent.seq, phase: s.sent.phase,
-        po: s.st.snapshot ? A.scene(s.st.snapshot).po : null };
+        po: shown ? A.scene(shown).po : null };
       const report = s.report && { gen: s.report.scene, consumer: s.report.consumer, slot: s.report.slot, task: s.report.task, seq: s.report.seq, phase: s.report.phase,
         verdict: s.report.verdict, reason: s.report.reason };
       return { task: s.task, sent, report, shown: A.sameShown2(s.sent, s.report), motion: s.motion && { rule: s.motion.rule, text: s.motion.text, first: s.motion.first } };

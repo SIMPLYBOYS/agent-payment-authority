@@ -71,7 +71,7 @@ namespace APA
         public string Mode { get; private set; } = "venue"; // venue | town: what the page asked for
         string shown = "venue";                               // what the camera shows (they differ during a transition)
         public System.Action<string> Clicked; // town view: a click on a venue, with its layout
-        Rect safe;                            // the part of the canvas the page leaves uncovered, CSS pixels from its top left; empty: all of it
+        Rect safe;                            // the part of the canvas the page leaves uncovered, in Screen pixels from its top left; empty: all of it
         Vector2Int screen;
         public float Scale { get; private set; } = 1f; // screen pixels per art pixel now (tests)
 
@@ -376,14 +376,14 @@ namespace APA
         Vector2 Inside() => Interior + RoomDoor + new Vector2(0f, 0.8f);
 
         // Show: the page's view. safe is the uncovered part of the canvas in
-        // CSS pixels from its top left (the page draws the canvas 1:1); empty
+        // the canvas's own pixels (Screen's) from its top left; empty
         // or missing: all of it. False (nothing changes) for an unknown mode
         // or a town view without a town. Another view than the one shown
         // goes through the circle; the same one only refits.
-        public bool Show(string mode, Rect cssSafe)
+        public bool Show(string mode, Rect topLeftSafe)
         {
             if (mode != "venue" && (mode != "town" || !HasTown)) return false;
-            safe = cssSafe.width > 0f && cssSafe.height > 0f ? cssSafe : new Rect();
+            safe = topLeftSafe.width > 0f && topLeftSafe.height > 0f ? topLeftSafe : new Rect();
             Mode = mode;
             if (mode == shown)
             {

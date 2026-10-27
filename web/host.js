@@ -154,7 +154,9 @@ const chains = new Map(); // task -> { at, gen, data, busy }
 const CHAIN_MS = 5000;
 function chainOf(s) {
   const snap = scene.snapshot(s.consumer);
-  const pays = snap && (snap.task.purchases || []).some((p) => p.payment && (p.payment.reserve_tx || p.payment.settle_tx));
+  // By the step on screen's own events, as the evidence lines (A.recorded): a paced step does not read the chain ahead of itself.
+  const pays = snap && (snap.task.purchases || []).some((p) => p.payment && ((p.payment.reserve_tx && A.recorded(snap, p.purchase_order_id, "BUDGET_RESERVED"))
+    || (p.payment.settle_tx && A.recorded(snap, p.purchase_order_id, "PAYMENT_SETTLED"))));
   if (!pays) return null;
   const c = chains.get(s.task);
   // New credentials (a Host started again) read again at once (review).
@@ -668,8 +670,8 @@ function sendView() {
   let safe = null;
   if (on) {
     const c = $("unity-canvas").getBoundingClientRect(), l = document.querySelector(".present-left").getBoundingClientRect(), r = document.querySelector(".present-right").getBoundingClientRect();
-    // In the canvas's own pixels (unity.js renders at the screen's density); the caption keeps the bottom.
-    const d = window.devicePixelRatio || 1, x = Math.max(0, Math.round(l.right + 12 - c.left)), right = Math.min(c.width, Math.round(r.left - 12 - c.left));
+    // In the canvas's own pixels, by its real backing ratio (whatever ratio Unity took at load; review); the caption keeps the bottom.
+    const d = c.width > 0 ? $("unity-canvas").width / c.width : 1, x = Math.max(0, Math.round(l.right + 12 - c.left)), right = Math.min(c.width, Math.round(r.left - 12 - c.left));
     const bottom = Math.min(c.height, 140);
     if (right - x >= 120) safe = { x: Math.round(x * d), y: 0, width: Math.round((right - x) * d), height: Math.round((c.height - bottom) * d) };
   }
@@ -693,24 +695,27 @@ addEventListener("keydown", (e) => { if (e.key === "Escape" && presenting && !do
 // its line CAPTION_KEEP ms, then leaves the scene to the next (Aaron 10/27: it lingered in the town).
 const CAPTION_KEEP = 6000;
 let shownCaption = "";
-const captionDone = new Map(); // consumer -> [its final caption, when it was first shown]
+const captionDone = new Map(); // consumer -> [its task and final caption, when it was first shown]
 function renderCaption(models) {
   const box = $("present-caption");
   const now = Date.now();
   const lines = presenting ? models.filter((m) => {
     if (m.steps[0].state === "now" && m.steps[0].text === "等待開始") return false;
     if (m.ahead || m.steps.some((s) => s.state === "now")) { captionDone.delete(m.consumer); return true; }
-    const d = captionDone.get(m.consumer);
-    if (!d || d[0] !== m.caption) { captionDone.set(m.consumer, [m.caption, now]); setTimeout(() => renderPresent(), CAPTION_KEEP + 50); return true; }
+    const d = captionDone.get(m.consumer), done = m.task + "|" + m.caption;
+    if (!d || d[0] !== done) { captionDone.set(m.consumer, [done, now]); setTimeout(() => renderPresent(), CAPTION_KEEP + 50); return true; }
     return now - d[1] < CAPTION_KEEP;
   }) : [];
   box.hidden = !lines.length;
   const key = JSON.stringify(lines.map((m) => [m.caption, !!m.ahead]));
   if (key === shownCaption) return;
   shownCaption = key;
+  const before = new Map([...box.querySelectorAll("p")].map((p) => [p.dataset.consumer, p.dataset.caption]));
   box.replaceChildren(...lines.map((m) => {
     const p = document.createElement("p");
     p.dataset.consumer = m.consumer;
+    p.dataset.caption = m.caption;
+    if (before.get(m.consumer) !== m.caption) p.className = "flash"; // a new step flashes; a line that stays does not
     const step = m.steps.findIndex((s) => s.state === "now");
     const n = document.createElement("span");
     n.className = "n";
@@ -721,9 +726,6 @@ function renderCaption(models) {
     if (m.ahead) { const a = document.createElement("small"); a.textContent = "依序播放中"; p.append(a); }
     return p;
   }));
-  box.classList.remove("flash");
-  void box.offsetWidth; // restart the animation
-  box.classList.add("flash");
 }
 
 // pairFor: a venue's first scenario per customer, as 一起開始 takes them.
@@ -759,7 +761,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
   });
   const slots = scene.started ? scene.slots().filter((s) => s.task) : [];
   const custs = A.showQueue(slots.map((s) => ({ ...A.showCustomer(s.consumer, scene.snapshot(s.consumer), delegationOf(s.task), traits),
-    receipt: A.showReceipt(scene.snapshot(s.consumer), traits),
+    receipt: A.showReceipt(scene.snapshot(s.consumer), traits), task: s.task,
     // The screen plays the steps in order: when it trails, where the real task already is.
     ahead: scene.behind(s.consumer) ? A.showCustomer(s.consumer, scene.latest(s.consumer), delegationOf(s.task), traits).caption : "" })), traits.payments);
   renderCaption(custs.models);
