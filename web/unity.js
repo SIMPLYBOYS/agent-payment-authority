@@ -25,6 +25,7 @@ export class UnityHost {
     this.pendingScene = null;       // version 2: the latest scene clear, while not ready
     this.pending2 = new Map();      // version 2: the latest message per customer, while not ready
     this.pendingSelect = null;      // UX1: the latest Select, sent after the scene's messages
+    this.pendingView = null;        // T2: the latest View, for a build with the town
     window.apaUnityReport = (kind, gen, seq, detail) => this.report(String(kind), Number(gen), Number(seq), String(detail));
   }
 
@@ -64,6 +65,9 @@ export class UnityHost {
       // UX1: a click on a customer, with its scene and slot; the scene
       // (scene.js) decides whether it names a current customer.
       if (/^consumer-[a-z0-9-]{1,32}$/.test(detail)) this.onStatus("select2", { scene: gen, slot: seq, consumer: detail });
+    } else if (kind === "venue" && this.bridge && this.bridge.town) {
+      // T2: a click on a venue in the town view; the page decides.
+      if (/^[a-z0-9-]{1,32}$/.test(detail)) this.onStatus("venue", detail);
     } else if (kind === "rendered" && this.sceneOwned) {
       // version 2: the scene matches it to the one customer and slot it names
       const r = parseReport2(gen, seq, detail);
@@ -124,8 +128,21 @@ export class UnityHost {
     this.flush();
   }
 
+  // view sends the page's camera choice (T2, docs/commercial-town.md): the
+  // town or the current venue, and the canvas's uncovered part ({x, y,
+  // width, height} in CSS pixels from its top left; null: all of it).
+  view(mode, safe) {
+    if (!(this.bridge && this.bridge.town)) return;
+    this.pendingView = { mode, safe: safe || { x: 0, y: 0, width: 0, height: 0 } };
+    this.flush();
+  }
+
   flush() {
     if (!this.ready || !this.instance) return;
+    if (this.pendingView) {
+      this.instance.SendMessage("Bridge", "View", JSON.stringify(this.pendingView));
+      this.pendingView = null;
+    }
     if (this.sceneOwned) {
       const sc = this.pendingScene;
       this.pendingScene = null;

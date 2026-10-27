@@ -18,8 +18,9 @@ export function fitScale(w, h) {
 // attachZoom: sizes canvas inside frame and wires the controls (a box for
 // the −, label and ＋ buttons and 符合). avail() is the space the page gives
 // the scene; zooming past it scrolls the frame. The choice is remembered per
-// page in this browser only.
-export function attachZoom({ canvas, frame, controls, avail, key }) {
+// page in this browser only. fill() true (簡報模式, T2): the canvas is the
+// whole of avail() and Unity picks its own whole multiples (TownView).
+export function attachZoom({ canvas, frame, controls, avail, key, fill = () => false }) {
   let zoom = 0; // 0: fit
   try { zoom = Number(localStorage.getItem(key)) || 0; } catch { /* no storage: fit */ }
   const btn = (text, label, on) => {
@@ -42,6 +43,16 @@ export function attachZoom({ canvas, frame, controls, avail, key }) {
   if (controls) controls.replaceChildren(btn("－", "縮小場景", () => set(Math.max(1, Math.ceil(current()) - 1))), shown,
     btn("＋", "放大場景", () => set(Math.min(MAX_ZOOM, Math.floor(current()) + 1))), btn("符合", "場景符合畫面", () => set(0)));
   function apply() {
+    if (fill()) {
+      const a = avail();
+      canvas.style.width = Math.floor(a.w) + "px";
+      canvas.style.height = Math.floor(a.h) + "px";
+      shown.textContent = "符合畫面";
+      frame.dataset.zoomed = "false";
+      frame.style.maxWidth = frame.style.maxHeight = "";
+      canvas.dataset.scale = "fill";
+      return;
+    }
     const n = current();
     canvas.style.width = Math.round(NATIVE_W * n) + "px";
     canvas.style.height = Math.round(NATIVE_H * n) + "px";

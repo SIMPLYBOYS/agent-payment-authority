@@ -13,6 +13,10 @@
 // never selects anything here. UX3 (docs/commercial-scenes.md): a version 2
 // message names the scene's layout (none: the default room); the room
 // changes only with a new scene generation, and is reported as "layout".
+// T2 (docs/commercial-town.md): "View" takes {mode: town | venue, safe} from
+// the page and moves the camera (TownView); in the town view a click on a
+// venue is reported as "venue" with its layout. The page decides what a
+// click starts; the town only shows.
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -22,6 +26,7 @@ namespace APA
     public class ShopBridge : MonoBehaviour
     {
         public ShopView view;
+        public TownView town; // null: a build without the town (no View, no venue clicks)
         public ProjectionState state = new ProjectionState();
         public SceneState scene = new SceneState();
         int mode = 1; // the version of the last message taken; a switch resets the scene
@@ -46,9 +51,11 @@ namespace APA
         void Start()
         {
             view.Picked = Picked;
+            bool hasTown = town != null && town.HasTown;
+            if (hasTown) town.Clicked = layout => Report("venue", scene.Scene, 0, layout);
             var rooms = new List<string>(view.LayoutKeys);
             rooms.Sort(System.StringComparer.Ordinal);
-            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers) + ";select=1;layouts=" + string.Join(",", rooms));
+            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers) + ";select=1;layouts=" + string.Join(",", rooms) + (hasTown ? ";town=1" : ""));
             Report("ready", -1, -1, view.UsingPlaceholders ? "placeholder" : "limezu");
         }
 
@@ -103,6 +110,22 @@ namespace APA
             else if (System.Array.IndexOf(ProjectionState.Consumers, m.consumer) < 0) outcome = "Invalid";
             else { view.Highlight(m.consumer); outcome = "Applied"; }
             Report("selected", m != null ? m.scene : -1, 0, (m != null ? m.consumer ?? "" : "") + "|" + outcome);
+        }
+
+        [System.Serializable]
+        public class ViewMessage
+        {
+            public string mode;  // town | venue
+            public Rect safe;    // the canvas's uncovered part, CSS pixels from its top left; zero: all of it
+        }
+
+        // View: the page's camera choice; only what is shown changes.
+        public void View(string json)
+        {
+            ViewMessage m = null;
+            try { m = JsonUtility.FromJson<ViewMessage>(json); } catch (System.Exception) { }
+            bool ok = m != null && town != null && town.Show(m.mode, m.safe);
+            Report("view", 0, 0, (m != null ? m.mode ?? "" : "") + "|" + (ok ? "Applied" : "Invalid"));
         }
 
         public void Receive(string json)

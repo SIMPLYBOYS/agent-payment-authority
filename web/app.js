@@ -105,6 +105,10 @@ const unity = new UnityHost($("unity-canvas"), (s, detail) => {
     if (scenePick) scenePick(detail);
     return;
   }
+  if (s === "venue") { // T2: a click on a venue in the town; /host decides
+    if (venuePick) venuePick(detail);
+    return;
+  }
   if (s === "rendered") {
     // detail: what the shop says it shows, for the generation last sent
     // (unity.js drops older reports, so a late one cannot bring back a
@@ -119,7 +123,10 @@ const unity = new UnityHost($("unity-canvas"), (s, detail) => {
     renderPanels();
     return;
   }
-  if (s === "ready") return shopReset(state.taskId ? "syncing" : "ready");
+  if (s === "ready") {
+    dispatchEvent(new Event("resize")); // T2: a build with the town may now fill the window (pixelscale.js fill)
+    return shopReset(state.taskId ? "syncing" : "ready");
+  }
   box.dataset.state = s;
   box.textContent = s === "loading" ? "Unity 場景載入中…" : "Unity 場景未就緒";
 });
@@ -147,8 +154,10 @@ let sceneReport = null;
 let sceneView = null;
 let replayMode = null;
 let scenePick = null;
+let venuePick = null;
 export function onSceneReport(fn) { sceneReport = fn; }
 export function onScenePick(fn) { scenePick = fn; }
+export function onVenuePick(fn) { venuePick = fn; }
 export function setSceneView(fn) { sceneView = fn; }
 // UX3: the host page tells the evidence panel a task's scene ("" none).
 let venueOf = null;
@@ -822,6 +831,8 @@ forget();
   attachZoom({ canvas, frame, controls: $("scene-zoom"), key: "apa-zoom-" + (host ? "host" : "viewer"),
     // 簡報模式 (docs/commercial-town.md T1): the whole window is the scene's.
     avail: () => (document.body.dataset.present === "on" ? { w: innerWidth, h: innerHeight }
-      : { w: frame.parentElement.clientWidth, h: Math.max(320, innerHeight - (host ? 150 : 520)) }) });
+      : { w: frame.parentElement.clientWidth, h: Math.max(320, innerHeight - (host ? 150 : 520)) }),
+    // T2: a build with the town fills the window and keeps its own whole multiples.
+    fill: () => document.body.dataset.present === "on" && !!(unity.bridge && unity.bridge.town) });
 }
 unity.load();

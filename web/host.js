@@ -34,7 +34,7 @@
 // action. An approval leaves a simulated grant and enables no payment.
 
 import { nextModeSeq, confirmMode, setStatus, forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, currentConsumer, setAlert,
-  shop, onSceneReport, onScenePick, setSceneView, setVenueOf, onReplayMode, refreshPanels } from "./app.js";
+  shop, onSceneReport, onScenePick, onVenuePick, setSceneView, setVenueOf, onReplayMode, refreshPanels } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
 import { createScene } from "./scene.js";
 import { createRelay } from "./showlink.js";
@@ -637,15 +637,48 @@ function renderVenues(vs) {
 // A venue is chosen by its row; its own button starts it, as 一起開始 does
 // for that venue (each customer's delegation confirmed first). Nothing here
 // is a new way in: the same operations, the same credentials.
+// T2: with a build that has the town, presenting starts in the town (every
+// venue roofed); a venue's row or a click on its building enters it (its
+// roof lifts, the camera steps in) and 回到城鎮 goes back. Unity only shows.
 let presenting = (() => { try { return localStorage.getItem("apa-present") === "1"; } catch { return false; } })();
+let inTown = true;
+const hasTown = () => !!(shop().bridge && shop().bridge.town);
 function setPresenting(on) {
   presenting = on;
+  inTown = true;
   try { localStorage.setItem("apa-present", on ? "1" : "0"); } catch { /* not kept */ }
   renderPresent();
-  dispatchEvent(new Event("resize")); // the scene refits to the whole window (pixelscale.js)
+  dispatchEvent(new Event("resize")); // the scene refits to the whole window (pixelscale.js), and sendView follows
 }
+// enterVenue: the venue's room, as its row in the list chooses it.
+function enterVenue(k) {
+  inTown = false;
+  if (venue !== k) { venue = k; shownControl = ""; renderControl(); refreshPanels(); }
+  renderPresent();
+}
+onVenuePick((k) => { if (presenting && inTown && A.venues(allScenarios()).includes(k)) enterVenue(k); });
+// sendView: the camera Unity should show, and the canvas's part the cards
+// leave uncovered (between the two columns); sent when either changes.
+let sentView = "";
+function sendView() {
+  if (!hasTown()) return; // a build without the town: its one camera, as before
+  const on = presenting && creds.view().hasHost;
+  let safe = null;
+  if (on) {
+    const c = $("unity-canvas").getBoundingClientRect(), l = document.querySelector(".present-left").getBoundingClientRect(), r = document.querySelector(".present-right").getBoundingClientRect();
+    const x = Math.max(0, Math.round(l.right + 12 - c.left)), right = Math.min(c.width, Math.round(r.left - 12 - c.left));
+    if (right - x >= 120) safe = { x, y: 0, width: right - x, height: Math.round(c.height) };
+  }
+  const v = { mode: on && inTown ? "town" : "venue", safe };
+  const key = JSON.stringify(v);
+  if (key === sentView) return;
+  sentView = key;
+  shop().view(v.mode, v.safe);
+}
+addEventListener("resize", () => requestAnimationFrame(sendView));
 $("present-toggle").addEventListener("click", () => setPresenting(true));
 $("present-exit").addEventListener("click", () => setPresenting(false));
+$("present-town").addEventListener("click", () => { inTown = true; renderPresent(); });
 addEventListener("keydown", (e) => { if (e.key === "Escape" && presenting && !document.querySelector("dialog[open]")) setPresenting(false); });
 
 // pairFor: a venue's first scenario per customer, as 一起開始 takes them.
@@ -666,6 +699,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
   const ap = $("approval"), right = document.querySelector(".present-right"), side = document.querySelector(".side");
   if (on && ap.parentElement !== right) right.append(ap);
   else if (!on && ap.parentElement !== side) side.prepend(ap);
+  sendView();
   if (!on) return;
   const st = (lastReady && lastReady.status) || {};
   const ha = st.human_approval;
@@ -681,7 +715,8 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
   const slots = scene.started ? scene.slots().filter((s) => s.task) : [];
   const custs = A.showQueue(slots.map((s) => ({ ...A.showCustomer(s.consumer, scene.snapshot(s.consumer), delegationOf(s.task), traits),
     receipt: A.showReceipt(scene.snapshot(s.consumer), traits) })), traits.payments);
-  const key = JSON.stringify([venues, venue, custs, starting, simulating, $("run-status").textContent]);
+  const town = hasTown() && inTown;
+  const key = JSON.stringify([venues, venue, town, hasTown(), custs, starting, simulating, $("run-status").textContent]);
   if (key === shownPresent) return;
   shownPresent = key;
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -690,15 +725,15 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
     const b = el("button", "venue-item");
     b.type = "button";
     b.dataset.venue = x.k;
-    b.setAttribute("aria-pressed", String(x.k === venue));
+    b.setAttribute("aria-pressed", String(x.k === venue && !town));
     const name = el("span", "name", x.name);
     name.append(el("small", "", (x.demo ? "示範情境・" : "") + x.sub));
     const state = el("span", "state", x.busy ? "交易中" : "待命");
     state.dataset.state = x.busy ? "busy" : "idle";
     b.append(el("span", "n", x.n), name, state);
-    b.addEventListener("click", () => { if (venue === x.k) return; venue = x.k; shownControl = ""; renderControl(); refreshPanels(); });
+    b.addEventListener("click", () => enterVenue(x.k));
     li.append(b);
-    if (x.k === venue) {
+    if (x.k === venue && !town) {
       const go = el("button", "venue-go", "開始這個場域的交易");
       go.type = "button";
       go.disabled = starting || simulating || x.busy;
@@ -708,6 +743,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
     }
     return li;
   })));
+  $("present-town").hidden = !(hasTown() && !inTown);
   $("present-status").textContent = $("run-status").textContent;
   const steps = $("present-steps");
   steps.hidden = !custs.models.length;

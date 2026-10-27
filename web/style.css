@@ -350,6 +350,8 @@ body[data-present="on"] .side { display: contents; }
 .venue-item .state { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #efe7da; color: var(--soft, #6e675b); }
 .venue-item .state[data-state="busy"] { background: var(--accent, #e0582f); color: #fff; }
 .venue-go { margin: 4px 0 10px 52px; background: var(--ink, #1d1a15); color: #fff; border: 0; border-radius: 999px; padding: 8px 16px; font-weight: 700; }
+.present-town { margin: 8px 0 0; background: none; border: 1px solid #d9cfbf; border-radius: 999px; padding: 6px 14px; color: var(--ink, #1d1a15); font-weight: 600; }
+.present-credit { margin: 8px 0 0; font-size: 11px; color: var(--soft, #6e675b); }
 .present-status { margin: 8px 0 0; font-size: 12px; color: var(--soft, #6e675b); }
 body[data-present="on"] #approval { min-height: 0; overflow: auto; background: #fffdf8; color: #1a1d2e; border: 2px solid #f0c46b; padding: 0; border-radius: 18px; box-shadow: 0 10px 30px rgba(50, 35, 10, 0.2); }
 body[data-present="on"] #approval[hidden] { display: none; }

@@ -1,12 +1,13 @@
 #!/bin/sh
 # Copies exactly the LimeZu files listed in unity/AgentPaymentAuthority/
 # limezu-assets.txt from LIMEZU_DIR (the folder holding
-# Modern_Interiors_v41.4/) into the Unity project's Assets/LimeZu/, which
-# git ignores, and records each copy's sha256 in Assets/LimeZu/IMPORTED.txt.
-# Nothing else is read or copied. Usage:
+# Modern_Interiors_v41.4/ and, for the town, Modern_Exteriors_v42.3/) into
+# the Unity project's Assets/LimeZu/, which git ignores, and records each
+# copy's sha256 in Assets/LimeZu/IMPORTED.txt. A file already there with
+# the same bytes is left as it is. Nothing else is read or copied. Usage:
 #   LIMEZU_DIR=/path/to/limezu sh scripts/unity/import-limezu.sh
 set -eu
-: "${LIMEZU_DIR:?set LIMEZU_DIR to the folder that holds Modern_Interiors_v41.4/}"
+: "${LIMEZU_DIR:?set LIMEZU_DIR to the folder that holds Modern_Interiors_v41.4/ and Modern_Exteriors_v42.3/}"
 root=$(cd "$(dirname "$0")/../.." && pwd)
 proj="$root/unity/AgentPaymentAuthority"
 dest="$proj/Assets/LimeZu"
@@ -23,7 +24,7 @@ grep -v '^#' "$proj/limezu-assets.txt" | while IFS="$(printf '\t')" read -r key 
 		continue
 	fi
 	mkdir -p "$dest/$(dirname "$rel")"
-	cp "$src" "$dest/$rel"
+	cmp -s "$src" "$dest/$rel" || cp "$src" "$dest/$rel"
 	printf '%s  %s  %s\n' "$(shasum -a 256 "$dest/$rel" | cut -d' ' -f1)" "$key" "$rel" >>"$record"
 done
 cat "$record"

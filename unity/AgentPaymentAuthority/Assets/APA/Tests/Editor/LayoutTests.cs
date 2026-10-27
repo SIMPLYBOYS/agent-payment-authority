@@ -32,7 +32,8 @@ public class LayoutTests
     [Test]
     public void EveryCharacterTheSceneCanShowIsInTheFont()
     {
-        var files = Directory.GetFiles(Path.Combine(Application.dataPath, "APA/Scripts"), "*.cs").Concat(Directory.GetFiles(Path.Combine(Application.dataPath, "APA/Resources/Layouts"), "*.json")).ToList();
+        var files = Directory.GetFiles(Path.Combine(Application.dataPath, "APA/Scripts"), "*.cs").Concat(Directory.GetFiles(Path.Combine(Application.dataPath, "APA/Resources/Layouts"), "*.json"))
+            .Concat(Directory.GetFiles(Path.Combine(Application.dataPath, "APA/Resources/Town"), "*.json")).ToList();
         Assert.IsNotEmpty(files);
         foreach (var f in files) InFont(new string(File.ReadAllText(f).Where(c => c > 0x7F).Distinct().ToArray()));
         InFont(new string(Enumerable.Range(0x20, 0x5F).Select(i => (char)i).ToArray())); // printable ASCII too

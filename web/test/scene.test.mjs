@@ -339,6 +339,10 @@ test("UX3: bridge layouts, rooms in messages, the scenes in order", () => {
   assert.equal(b.select, true);
   assert.deepEqual(A.parseBridge("versions=1,2;customers=consumer-a;select=1").layouts, [], "an older build names no rooms");
   assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;layouts=Cafe"), null);
+  // T2 (docs/commercial-town.md): a build with the town says so last; an older one does not.
+  assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=cafe,data;town=1").town, true);
+  assert.equal(b.town, false);
+  assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=data;town=2"), null);
   assert.deepEqual(A.sceneClear2(4, "cafe"), { v: 2, scene: 4, clear: true, layout: "cafe" });
   assert.deepEqual(A.slotClear2(4, "consumer-a", 2, "mart"), { v: 2, scene: 4, consumer: "consumer-a", slot: 2, clear: true, layout: "mart" });
   assert.deepEqual(A.venues([{ scene: "mart" }, { scene: "zoo" }, {}, { scene: "cafe" }, { scene: "mart" }]), ["data", "cafe", "mart", "zoo"]);

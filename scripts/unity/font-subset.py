@@ -34,7 +34,7 @@ PUNCT = "，。、：；？！「」『』（）・…—～×　"
 
 def characters():
     chars = {chr(c) for c in range(0x20, 0x7F)} | set(PUNCT)
-    for path in glob.glob(os.path.join(APA, "Scripts/*.cs")) + glob.glob(os.path.join(APA, "Resources/Layouts/*.json")):
+    for path in glob.glob(os.path.join(APA, "Scripts/*.cs")) + glob.glob(os.path.join(APA, "Resources/Layouts/*.json")) + glob.glob(os.path.join(APA, "Resources/Town/*.json")):
         with open(path, encoding="utf-8") as f:
             chars |= {c for c in f.read() if ord(c) > 0x7F}
     return "".join(sorted(chars))
