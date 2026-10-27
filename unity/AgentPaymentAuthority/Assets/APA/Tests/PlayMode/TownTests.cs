@@ -36,13 +36,12 @@ public class TownTests
         Assert.IsFalse(town.Moving, "the move ends");
     }
 
-    // At whole screen pixels per art pixel (or the fraction of a canvas smaller than the room).
+    // The camera at the scale it says; at a whole multiple, on the art's pixel grid.
     void Crisp()
     {
         var cam = Camera.main;
-        Assert.IsTrue(town.Scale < 1f || town.Scale == Mathf.Floor(town.Scale), "a whole multiple: " + town.Scale);
         Assert.AreEqual(Screen.height / (2f * TownView.PPU * town.Scale), cam.orthographicSize, 1e-4f);
-        if (town.Scale < 1f) return;
+        if (town.Scale != Mathf.Floor(town.Scale)) return; // a fraction (Aaron 10/27, as pixel-office): no whole pixel grid
         // Snapped: the view's edges, in art pixels, at multiples of 1/k (art pixel edges on screen pixel edges).
         float k = town.Scale;
         foreach (var (c, px) in new[] { (cam.transform.position.x, Screen.width), (cam.transform.position.y, Screen.height) })
@@ -63,6 +62,19 @@ public class TownTests
         var at = Camera.main.WorldToScreenPoint(town.transform.TransformPoint((Vector3)town.Focus));
         Assert.AreEqual(w / 2 + (w - w / 2) / 2f, at.x, 1f + town.Scale, "x: the right half's centre");
         Assert.AreEqual(h - h / 4f, at.y, 1f + town.Scale, "y: the top half's centre (screen y is up)");
+    }
+
+    // A room fills the uncovered part (Aaron 10/27: the cafe was too small): the largest scale at which it fits, a fraction allowed.
+    [UnityTest]
+    public IEnumerator ARoomFillsTheUncoveredPart()
+    {
+        int w = Screen.width, h = Screen.height;
+        bridge.View("{\"mode\":\"venue\",\"safe\":{\"x\":0,\"y\":0,\"width\":" + w + ",\"height\":" + (h * 3 / 4) + "}}");
+        yield return Settle();
+        float f = Mathf.Min(w / (TownView.RoomW * TownView.PPU), h * 3 / 4 / (TownView.RoomH * TownView.PPU));
+        float want = f >= 1f && f - Mathf.Floor(f) < 0.1f ? Mathf.Floor(f) : f;
+        Assert.AreEqual(want, town.Scale, 1e-3f, "the room as large as the part allows");
+        Crisp();
     }
 
     // The page measures the uncovered part again once the canvas fills the window: a second View for the

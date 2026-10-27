@@ -44,7 +44,9 @@ export class UnityHost {
       window.createUnityInstance(this.canvas, {
         dataUrl: "/unity/WebGL.data", frameworkUrl: "/unity/WebGL.framework.js", codeUrl: "/unity/WebGL.wasm",
         companyName: "APA", productName: "AgentPaymentAuthority", productVersion: "1",
-        devicePixelRatio: 1, // drawn 1:1 at a whole multiple of its pixels; the browser scales it pixelated (pixelscale.js)
+        // The screen's own pixel density (Aaron 10/27, as pixel-office): a HiDPI screen gets its pixels; the
+        // canvas is still a whole multiple of the art on the operator's page (pixelscale.js).
+        devicePixelRatio: window.devicePixelRatio || 1,
       }).then((inst) => { this.instance = inst; this.flush(); })
         .catch(() => this.onStatus("failed", "start"));
     };

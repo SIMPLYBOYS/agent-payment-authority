@@ -18,8 +18,15 @@ import * as A from "./adapter.js";
 
 const POLL_MS = 1000;
 const MAX_REREAD = 3;
+export const PACE_MS = 3000;
 
-export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(...a) }) {
+// Pacing (簡報模式, Aaron 10/27: "畫面依序播放"): when paced() says so, a slot
+// shows each step it reads one after another, at least paceMs apart, instead
+// of jumping to the newest: a step is the snapshot after an event that
+// changes the scene's phase (the same task, the events up to it). Display
+// only: the reads, the Store and every decision go on at their own pace;
+// latest() and behind() say how far the real task is when the display trails.
+export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(...a), paced = () => false, paceMs = PACE_MS }) {
   let scene = 0;
   let active = false;
   let paused = false;
@@ -32,7 +39,7 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
   const slots = new Map(); // consumer -> slot
 
   const newSlot = (consumer) => ({ consumer, slot: 0, task: null, st: A.newState(), timer: null, abort: null, inFlight: false,
-    shownSeq: -1, sent: null, report: null, target: null, motion: null, read: "idle" });
+    shownSeq: -1, sent: null, report: null, target: null, motion: null, read: "idle", shown: null, queue: [], queuedSeq: -1, pace: null });
 
   // current: the slot is still its consumer's slot and gen still its
   // generation; only then may a read's work go on.
@@ -41,6 +48,9 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
   function stopSlot(s) {
     clearTimeout(s.timer);
     s.timer = null;
+    clearTimeout(s.pace);
+    s.pace = null;
+    s.queue = [];
     if (s.abort) s.abort.abort();
     s.abort = null;
     s.inFlight = false;
@@ -89,20 +99,59 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
   function show(s, first) {
     const fresh = A.fresh(s.st, first);
     const snap = s.st.snapshot;
-    if (snap && snap.task.as_of_sequence !== s.shownSeq) {
-      s.shownSeq = snap.task.as_of_sequence;
-      const msg = A.projection2(s.st, scene, s.slot, !first && fresh.length > 0, layout);
-      const tr = A.transition(s.target, msg);
-      s.target = tr.target;
-      if (tr.rule <= 2 || !s.motion) s.motion = { rule: tr.rule, text: tr.text, first: !msg.animate, done: false };
-      s.sent = msg;
-      unity.send2(msg);
+    if (snap && snap.task.as_of_sequence !== s.queuedSeq) {
+      s.queuedSeq = snap.task.as_of_sequence;
+      if ((first && !s.news) || !paced()) {
+        // At once: a first load (not news), or no pacing; anything still queued is dropped for the newest.
+        clearTimeout(s.pace);
+        s.pace = null;
+        s.queue = [];
+        display(s, snap, !first && fresh.length > 0);
+      } else {
+        s.queue.push(...steps(s, snap));
+        if (!s.pace) advance(s);
+      }
     }
     onChange();
   }
 
+  // steps: the snapshots between the last one queued and snap, one per change of the scene's phase, ending with snap itself.
+  function steps(s, snap) {
+    const before = s.queue.length ? s.queue[s.queue.length - 1] : s.shown;
+    let phase = A.scene(before).phase;
+    const out = [];
+    for (const e of snap.events) {
+      if (before && e.sequence <= before.task.as_of_sequence) continue;
+      const part = { task: { ...snap.task, as_of_sequence: e.sequence }, events: snap.events.filter((x) => x.sequence <= e.sequence) };
+      const ph = A.scene(part).phase;
+      if (ph !== phase) { out.push(part); phase = ph; }
+    }
+    if (out.length && A.scene(out[out.length - 1]).phase === A.scene(snap).phase) out[out.length - 1] = snap; // the newest read stands for its own phase
+    else out.push(snap);
+    return out;
+  }
+
+  // advance: the next queued step now, and the one after no sooner than paceMs.
+  function advance(s) {
+    s.pace = null;
+    if (!slots.has(s.consumer) || slots.get(s.consumer) !== s || !s.queue.length) return;
+    display(s, s.queue.shift(), true);
+    s.pace = setTimeout(() => { advance(s); onChange(); }, paceMs); // the last step is held too: a newer read waits its turn
+  }
+
+  function display(s, snap, animate) {
+    s.shown = snap;
+    s.shownSeq = snap.task.as_of_sequence;
+    const msg = A.projection2({ ...s.st, snapshot: snap }, scene, s.slot, animate, layout);
+    const tr = A.transition(s.target, msg);
+    s.target = tr.target;
+    if (tr.rule <= 2 || !s.motion) s.motion = { rule: tr.rule, text: tr.text, first: !msg.animate, done: false };
+    s.sent = msg;
+    unity.send2(msg);
+  }
+
   // follow points a slot at a task (a new slot generation), or keeps it.
-  function follow(consumer, task) {
+  function follow(consumer, task, news = false) {
     let s = slots.get(consumer);
     if (!s) slots.set(consumer, (s = newSlot(consumer)));
     if (s.task === task) return;
@@ -110,7 +159,9 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
     s.slot += 1;
     s.task = task;
     A.reset(s.st, consumer, task);
-    s.shownSeq = -1;
+    s.shownSeq = s.queuedSeq = -1;
+    s.shown = null;
+    s.news = news;
     s.sent = s.report = s.target = s.motion = null;
     s.read = "loading";
     s.abort = new AbortController();
@@ -190,9 +241,12 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
     },
     // setRuns: each consumer's scene task is its newest run's task (of the venue, UX3).
     setRuns(runs) {
+      // News: a task the last list did not have (a run started now), whose first read is paced too; a page's
+      // first list, a restart or another venue only shows what is already there.
+      const known = lastRuns && new Set(lastRuns.map((r) => r && r.task_id));
       lastRuns = runs;
       if (!active || paused) return;
-      for (const [consumer, r] of A.sceneTasks(runs, venue)) follow(consumer, r.task);
+      for (const [consumer, r] of A.sceneTasks(runs, venue)) follow(consumer, r.task, !!known && !known.has(r.task));
     },
     // setVenue (UX3): another scene the page chose, shown in room layout. A
     // change is a new scene: no slot is kept; the venue's runs come back.
@@ -246,15 +300,27 @@ export function createScene({ unity, token, onChange, fetchFn = (...a) => fetch(
         verdict: s.report.verdict, reason: s.report.reason };
       return { task: s.task, sent, report, shown: A.sameShown2(s.sent, s.report), motion: s.motion && { rule: s.motion.rule, text: s.motion.text, first: s.motion.first } };
     },
-    // snapshot: one consumer's last committed read (task and events), for the audience window.
+    // snapshot: what one consumer's slot shows now (paced: the step on screen; else the last committed read),
+    // for the cards and the audience window, so they say what the scene shows.
     snapshot(consumer) {
       const s = slots.get(consumer);
+      return (s && s.task && (s.shown || s.st.snapshot)) || null;
+    },
+    // latest: the last committed read, whatever the display shows.
+    latest(consumer) {
+      const s = slots.get(consumer);
       return (s && s.task && s.st.snapshot) || null;
+    },
+    // behind: the display trails the real task (steps still to show).
+    behind(consumer) {
+      const s = slots.get(consumer);
+      return !!(s && s.task && s.st.snapshot && s.shown && s.shown.task.as_of_sequence !== s.st.snapshot.task.as_of_sequence);
     },
     // slots: every slot's state for the page, by consumer.
     slots() {
       return [...slots.values()].sort((a, b) => a.consumer.localeCompare(b.consumer)).map((s) => {
-        const sc = s.st.snapshot ? A.scene(s.st.snapshot) : null;
+        const shown = s.shown || s.st.snapshot;
+        const sc = shown ? A.scene(shown) : null;
         return { consumer: s.consumer, task: s.task, slot: s.slot, scene, seq: s.sent ? s.sent.seq : -1, phase: s.sent ? s.sent.phase : "",
           label: sc ? sc.label : "", shown: A.sameShown2(s.sent, s.report), moving: !!(s.motion && s.motion.rule <= 2 && !s.motion.done && !s.motion.first), read: s.read };
       });

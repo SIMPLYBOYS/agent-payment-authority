@@ -406,3 +406,48 @@ test("T2: View waits for a town build; venue clicks only from one", async () => 
   u.report("venue", 1, 0, "Mart; drop");
   assert.deepEqual(seen.filter(([s]) => s === "venue"), [["venue", "mart"]]);
 });
+
+// Pacing (簡報模式, Aaron 10/27: 畫面依序播放): steps that arrive in one read are shown one after another, at least paceMs
+// apart; the cards' snapshot follows the screen and behind() says the real task is ahead. Off, the newest shows at once.
+test("pacing: one step at a time, the real task ahead said so", async () => {
+  for (const paced of [true, false]) {
+    const host = fakeHost();
+    const unity = fakeUnity();
+    const scene = createScene({ unity, token: () => "token-a", onChange: () => {}, fetchFn: host.fetchFn, paced: () => paced, paceMs: 150 });
+    scenes.push(scene);
+    host.data.set("show-a-01", reply("show-a-01", "consumer-a", askEvents().slice(0, 1)));
+    scene.start();
+    scene.setRuns(runs(["consumer-a", "show-a-01"]));
+    await settle();
+    const phases = () => unity.sent.filter((m) => m.consumer === "consumer-a" && !m.clear).map((m) => m.phase);
+    assert.deepEqual(phases(), ["entered"], "a first load at once");
+    host.data.set("show-a-01", reply("show-a-01", "consumer-a", askEvents())); // proposed and decided (Ask) arrive together
+    for (const end = Date.now() + 3000; Date.now() < end && phases().length < 2;) await new Promise((r) => setTimeout(r, 20));
+    if (!paced) {
+      assert.deepEqual(phases(), ["entered", "waiting"], "unpaced: the newest at once");
+      assert.equal(scene.behind("consumer-a"), false);
+      scene.stop();
+      continue;
+    }
+    assert.deepEqual(phases(), ["entered", "quoted"], "paced: the quote first");
+    assert.equal(A.scene(scene.snapshot("consumer-a")).phase, "quoted", "the cards say what the screen shows");
+    assert.equal(A.scene(scene.latest("consumer-a")).phase, "waiting", "the real task is ahead");
+    assert.equal(scene.behind("consumer-a"), true);
+    await new Promise((r) => setTimeout(r, 60));
+    assert.deepEqual(phases(), ["entered", "quoted"], "held for its time");
+    await new Promise((r) => setTimeout(r, 160));
+    assert.deepEqual(phases(), ["entered", "quoted", "waiting"], "then the decision");
+    assert.equal(scene.behind("consumer-a"), false, "caught up");
+    const last = unity.sent[unity.sent.length - 1];
+    assert.equal(last.animate, true, "a paced step moves the customer");
+    // A run started now: its first read is news, paced from its start (a page's first list is not).
+    host.data.set("show-a-02", reply("show-a-02", "consumer-a", askEvents()));
+    scene.setRuns(runs(["consumer-a", "show-a-02"]));
+    await settle();
+    const fresh = () => unity.sent.filter((m) => m.task_id === "show-a-02" && !m.clear).map((m) => m.phase);
+    assert.deepEqual(fresh(), ["entered"], "a new run starts at its first step");
+    for (const end = Date.now() + 2000; Date.now() < end && fresh().length < 3;) await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(fresh(), ["entered", "quoted", "waiting"], "then each step in turn");
+    scene.stop();
+  }
+});

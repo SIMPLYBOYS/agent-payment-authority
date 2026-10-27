@@ -108,7 +108,9 @@ const sceneUnity = {
   send2(m) { this.target.send2(m); },
   select2(m) { this.target.select2(m); },
 };
-const scene = createScene({ unity: sceneUnity, token: (c) => creds.viewerToken(c), onChange: () => { renderScene(); refreshPanels(); publishView(); renderPresent(); } });
+// 簡報模式 paces the scene (Aaron 10/27: 畫面依序播放): each step holds a few seconds; the operator's page stays live.
+const scene = createScene({ unity: sceneUnity, token: (c) => creds.viewerToken(c), onChange: () => { renderScene(); refreshPanels(); publishView(); renderPresent(); },
+  paced: () => presenting && creds.view().hasHost });
 onSceneReport((r) => { if (sceneUnity.target !== relay) scene.rendered(r); });
 // A click on a customer in the shop: taken only when it names a customer of
 // the current scene and slot (scene.picked); otherwise counted and dropped.
@@ -666,8 +668,10 @@ function sendView() {
   let safe = null;
   if (on) {
     const c = $("unity-canvas").getBoundingClientRect(), l = document.querySelector(".present-left").getBoundingClientRect(), r = document.querySelector(".present-right").getBoundingClientRect();
-    const x = Math.max(0, Math.round(l.right + 12 - c.left)), right = Math.min(c.width, Math.round(r.left - 12 - c.left));
-    if (right - x >= 120) safe = { x, y: 0, width: right - x, height: Math.round(c.height) };
+    // In the canvas's own pixels (unity.js renders at the screen's density); the caption keeps the bottom.
+    const d = window.devicePixelRatio || 1, x = Math.max(0, Math.round(l.right + 12 - c.left)), right = Math.min(c.width, Math.round(r.left - 12 - c.left));
+    const bottom = Math.min(c.height, 140);
+    if (right - x >= 120) safe = { x: Math.round(x * d), y: 0, width: Math.round((right - x) * d), height: Math.round((c.height - bottom) * d) };
   }
   // A venue whose room the build lacks would show the default room's roof lifting: the town stays (review).
   const room = shop().bridge.layouts.includes(venue);
@@ -682,6 +686,35 @@ $("present-toggle").addEventListener("click", () => setPresenting(true));
 $("present-exit").addEventListener("click", () => setPresenting(false));
 $("present-town").addEventListener("click", () => { inTown = true; renderPresent(); });
 addEventListener("keydown", (e) => { if (e.key === "Escape" && presenting && !document.querySelector("dialog[open]")) setPresenting(false); });
+
+// renderCaption: the narration under the scene: each customer's step on screen, in plain words (the cards'
+// caption), and, while the screen trails the real task, that it is playing the steps in order. A new step
+// flashes once so the eye catches it.
+let shownCaption = "";
+function renderCaption(models) {
+  const box = $("present-caption");
+  const lines = presenting ? models.filter((m) => m.steps[0].state !== "now" || m.steps[0].text !== "等待開始") : [];
+  box.hidden = !lines.length;
+  const key = JSON.stringify(lines.map((m) => [m.caption, !!m.ahead]));
+  if (key === shownCaption) return;
+  shownCaption = key;
+  box.replaceChildren(...lines.map((m) => {
+    const p = document.createElement("p");
+    p.dataset.consumer = m.consumer;
+    const step = m.steps.findIndex((s) => s.state === "now");
+    const n = document.createElement("span");
+    n.className = "n";
+    n.textContent = String((step >= 0 ? step : m.steps.reduce((i, s, j) => (s.state !== "todo" && s.state !== "off" ? j : i), 0)) + 1).padStart(2, "0");
+    const t = document.createElement("span");
+    t.textContent = m.caption;
+    p.append(n, t);
+    if (m.ahead) { const a = document.createElement("small"); a.textContent = "依序播放中"; p.append(a); }
+    return p;
+  }));
+  box.classList.remove("flash");
+  void box.offsetWidth; // restart the animation
+  box.classList.add("flash");
+}
 
 // pairFor: a venue's first scenario per customer, as 一起開始 takes them.
 function pairFor(k) {
@@ -716,7 +749,10 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
   });
   const slots = scene.started ? scene.slots().filter((s) => s.task) : [];
   const custs = A.showQueue(slots.map((s) => ({ ...A.showCustomer(s.consumer, scene.snapshot(s.consumer), delegationOf(s.task), traits),
-    receipt: A.showReceipt(scene.snapshot(s.consumer), traits) })), traits.payments);
+    receipt: A.showReceipt(scene.snapshot(s.consumer), traits),
+    // The screen plays the steps in order: when it trails, where the real task already is.
+    ahead: scene.behind(s.consumer) ? A.showCustomer(s.consumer, scene.latest(s.consumer), delegationOf(s.task), traits).caption : "" })), traits.payments);
+  renderCaption(custs.models);
   const town = hasTown() && inTown;
   const key = JSON.stringify([venues, venue, town, hasTown(), custs, starting, simulating, $("run-status").textContent]);
   if (key === shownPresent) return;
@@ -753,6 +789,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
     const box = el("div", "present-cust");
     box.dataset.consumer = m.consumer;
     box.append(el("h3", "", m.name + " 的 Agent" + (m.amount ? "・" + m.amount : "")));
+    if (m.ahead) box.append(el("p", "present-ahead", "依序播放中（實際已到：" + m.ahead.replace(/^[^・]*・/, "") + "）"));
     const ol = el("ol", "present-step-list");
     m.steps.forEach((s, i) => {
       const li = el("li");

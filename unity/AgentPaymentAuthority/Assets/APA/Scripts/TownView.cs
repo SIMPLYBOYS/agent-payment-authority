@@ -6,10 +6,11 @@
 // is reported, the page decides; customers A and B, while they have a task,
 // stand at their venue's door) and a venue (the room as before). Between
 // them a circle closes on the door being entered or left and opens on the
-// other side. The camera is always at a whole number of screen pixels per
-// art pixel: the town at the largest its frame fits, a venue at the largest
-// its room fits (web/pixelscale.js; a canvas smaller than the room shows it
-// at a fraction, as before). It shows; it never decides.
+// other side. The camera fills the canvas's uncovered part: the town with
+// its frame, a venue with its room, at a whole number of screen pixels per
+// art pixel when one fits within a tenth, else the exact fraction (Aaron
+// 10/27, as pixel-office; the page renders at the screen's own density, so
+// a fraction is fine-grained). It shows; it never decides.
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -405,12 +406,12 @@ namespace APA
             return r.width >= 1f && r.height >= 1f ? r : all;
         }
 
-        // Fit: the largest whole multiple at which w x h tiles fit in r, or
-        // the fraction when even one screen pixel per art pixel does not.
+        // Fit: the scale at which w x h tiles fill r: a whole multiple when one is within a tenth (crisp, as the
+        // operator's page whose canvas is a whole multiple), else the exact fraction.
         static float Fit(Rect r, float w, float h)
         {
             float f = Mathf.Min(r.width / (w * PPU), r.height / (h * PPU));
-            return f >= 1f ? Mathf.Floor(f) : f;
+            return f >= 1f && f - Mathf.Floor(f) < 0.1f ? Mathf.Floor(f) : f;
         }
 
         // Target: the scale and camera centre of the view shown.
@@ -418,8 +419,9 @@ namespace APA
         {
             var s = Safe();
             Vector2 at;
-            // The town never below one screen pixel per art pixel: a narrow window crops it rather than blur it.
-            if (shown == "town") { k = Mathf.Max(1f, Mathf.Floor(Fit(s, town.frame.x, town.frame.y))); at = town.focus; }
+            // As large as the uncovered part allows (Aaron 10/27, as pixel-office: a fraction where it must be); the
+            // town never below one screen pixel per art pixel (a narrow window crops it rather than shrink it).
+            if (shown == "town") { k = Mathf.Max(1f, Fit(s, town.frame.x, town.frame.y)); at = town.focus; }
             else { k = Fit(s, RoomW, RoomH); at = Interior + new Vector2(RoomCX, RoomCY); }
             // The target at the safe part's centre, not the canvas's.
             c = at - (s.center - new Vector2(Screen.width, Screen.height) / 2f) / (k * PPU);
@@ -436,7 +438,7 @@ namespace APA
         // pixel edges (the view's left edge, in art pixels, a multiple of 1/k).
         static float Snap(float c, float k, int screenPx)
         {
-            if (k < 1f) return c;
+            if (k != Mathf.Floor(k)) return c; // a fraction has no whole pixel grid to snap to
             float half = screenPx / (2f * k);
             return (Mathf.Round((c * PPU - half) * k) / k + half) / PPU;
         }
