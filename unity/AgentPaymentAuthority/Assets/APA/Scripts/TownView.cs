@@ -50,11 +50,11 @@ namespace APA
         Camera cam;
         readonly Dictionary<string, (Town.Venue v, List<SpriteRenderer> outside, TextMesh name)> venues = new Dictionary<string, (Town.Venue, List<SpriteRenderer>, TextMesh)>();
         readonly List<(SpriteRenderer plate, TextMesh text)> pills = new List<(SpriteRenderer, TextMesh)>();
-        public bool HasTown => town != null;
+        public bool HasTown => town != null && System.Array.Exists(art, t => t != null); // a build without the pack has no town (its room keeps the old camera)
         public string Mode { get; private set; } = "venue"; // venue | town
         public System.Action<string> Clicked; // town view: a click on a venue, with its layout
         string placed;                        // the layout the room was last placed for
-        Rect safe;                            // the part of the canvas the page leaves uncovered, in screen pixels (bottom left); empty: all of it
+        Rect safe;                            // the part of the canvas the page leaves uncovered, CSS pixels from its top left; empty: all of it
         Vector2Int screen;
 
         // The running move: from (k, c, lift) to the target over Step.
@@ -182,8 +182,8 @@ namespace APA
         // or a town view without a town.
         public bool Show(string mode, Rect cssSafe)
         {
-            if (mode != "venue" && (mode != "town" || town == null)) return false;
-            safe = cssSafe.width > 0f && cssSafe.height > 0f ? new Rect(cssSafe.x, Screen.height - cssSafe.y - cssSafe.height, cssSafe.width, cssSafe.height) : new Rect();
+            if (mode != "venue" && (mode != "town" || !HasTown)) return false;
+            safe = cssSafe.width > 0f && cssSafe.height > 0f ? cssSafe : new Rect();
             if (mode == Mode) { Retarget(false); return true; }
             var key = shop != null ? shop.LayoutKey : null;
             lifted = mode == "venue" ? key : null;
@@ -197,7 +197,9 @@ namespace APA
         {
             var all = new Rect(0, 0, Screen.width, Screen.height);
             if (safe.width <= 0f) return all;
-            var r = Rect.MinMaxRect(Mathf.Max(0f, safe.xMin), Mathf.Max(0f, safe.yMin), Mathf.Min(all.xMax, safe.xMax), Mathf.Min(all.yMax, safe.yMax));
+            // Flipped against the screen as it is now: the canvas may have been resized since the page measured (review).
+            var s = new Rect(safe.x, Screen.height - safe.y - safe.height, safe.width, safe.height);
+            var r = Rect.MinMaxRect(Mathf.Max(0f, s.xMin), Mathf.Max(0f, s.yMin), Mathf.Min(all.xMax, s.xMax), Mathf.Min(all.yMax, s.yMax));
             return r.width >= 1f && r.height >= 1f ? r : all;
         }
 
@@ -223,6 +225,7 @@ namespace APA
 
         void Retarget(bool animate)
         {
+            if (Screen.width < 1 || Screen.height < 1) return; // a hidden canvas: nothing to fit until it is back
             Target(out k1, out c1);
             if (!animate || cam == null) { t = 1f; Apply(k1, c1); Lift(1f); return; }
             k0 = Scale;
@@ -241,7 +244,7 @@ namespace APA
 
         void Apply(float k, Vector2 c)
         {
-            if (cam == null) return;
+            if (cam == null || Screen.width < 1 || Screen.height < 1) return;
             Scale = k;
             cam.orthographicSize = Screen.height / (2f * PPU * k);
             cam.transform.position = new Vector3(Snap(c.x, k, Screen.width), Snap(c.y, k, Screen.height), -10f);
@@ -264,7 +267,7 @@ namespace APA
 
         void Update()
         {
-            if (town == null || Mode != "town" || Clicked == null || !Input.GetMouseButtonDown(0) || cam == null) return;
+            if (!HasTown || Mode != "town" || Clicked == null || !Input.GetMouseButtonDown(0) || cam == null) return;
             var p = (Vector2)transform.InverseTransformPoint(cam.ScreenToWorldPoint(Input.mousePosition));
             var hit = VenueAt(p);
             if (hit != null) Clicked(hit);

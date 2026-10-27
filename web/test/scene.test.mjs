@@ -377,3 +377,32 @@ test("UX3: a scene change is a new scene with its room, and only its runs", asyn
   assert.ok(mart.some((m) => m.consumer === "consumer-a" && m.phase === "waiting"));
   assert.ok(!mart.some((m) => m.consumer === "consumer-b"), "B's cafe slot is gone");
 });
+
+// T2 (docs/commercial-town.md): the page's View waits for a ready build with
+// the town and goes before the scene's messages; a venue click is passed on
+// only from such a build, and only as a plain key.
+test("T2: View waits for a town build; venue clicks only from one", async () => {
+  globalThis.window = globalThis.window || {};
+  const { UnityHost } = await import("../unity.js");
+  const seen = [];
+  const u = new UnityHost(null, (s, d) => seen.push([s, d]));
+  const sent = [];
+  u.instance = { SendMessage: (o, m, json) => sent.push(m + " " + json) };
+  u.view("town", null);
+  assert.equal(u.pendingView, null, "a build that has not said town=1 gets no View");
+  u.report("venue", 0, 0, "mart");
+  assert.deepEqual(seen, [], "nor are its venue reports taken");
+  u.report("bridge", 0, 0, "versions=1,2;customers=consumer-a;select=1;layouts=data,mart;town=1");
+  u.own(true);
+  u.send2({ v: 2, scene: 1, clear: true, layout: "mart" });
+  u.view("venue", { x: 392, y: 0, width: 1116, height: 1080 });
+  assert.deepEqual(sent, [], "nothing before ready");
+  u.report("ready", -1, -1, "limezu");
+  assert.equal(sent[0], 'View {"mode":"venue","safe":{"x":392,"y":0,"width":1116,"height":1080}}');
+  assert.match(sent[1], /^Receive /);
+  u.view("town", null);
+  assert.equal(sent[2], 'View {"mode":"town","safe":{"x":0,"y":0,"width":0,"height":0}}', "null: all of the canvas, in JsonUtility's Rect shape");
+  u.report("venue", 1, 0, "mart");
+  u.report("venue", 1, 0, "Mart; drop");
+  assert.deepEqual(seen.filter(([s]) => s === "venue"), [["venue", "mart"]]);
+});

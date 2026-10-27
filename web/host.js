@@ -669,13 +669,15 @@ function sendView() {
     const x = Math.max(0, Math.round(l.right + 12 - c.left)), right = Math.min(c.width, Math.round(r.left - 12 - c.left));
     if (right - x >= 120) safe = { x, y: 0, width: right - x, height: Math.round(c.height) };
   }
-  const v = { mode: on && inTown ? "town" : "venue", safe };
+  // A venue whose room the build lacks would show the default room's roof lifting: the town stays (review).
+  const room = shop().bridge.layouts.includes(venue);
+  const v = { mode: on && (inTown || !room) ? "town" : "venue", safe };
   const key = JSON.stringify(v);
   if (key === sentView) return;
   sentView = key;
   shop().view(v.mode, v.safe);
 }
-addEventListener("resize", () => requestAnimationFrame(sendView));
+addEventListener("resize", () => requestAnimationFrame(() => renderPresent())); // renderPresent sends the view; on ready the list learns of the town too
 $("present-toggle").addEventListener("click", () => setPresenting(true));
 $("present-exit").addEventListener("click", () => setPresenting(false));
 $("present-town").addEventListener("click", () => { inTown = true; renderPresent(); });

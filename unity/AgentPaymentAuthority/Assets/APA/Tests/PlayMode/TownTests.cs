@@ -39,6 +39,49 @@ public class TownTests
         var cam = Camera.main;
         Assert.IsTrue(town.Scale < 1f || town.Scale == Mathf.Floor(town.Scale), "a whole multiple: " + town.Scale);
         Assert.AreEqual(Screen.height / (2f * TownView.PPU * town.Scale), cam.orthographicSize, 1e-4f);
+        if (town.Scale < 1f) return;
+        // Snapped: the view's edges, in art pixels, at multiples of 1/k (art pixel edges on screen pixel edges).
+        float k = town.Scale;
+        foreach (var (c, px) in new[] { (cam.transform.position.x, Screen.width), (cam.transform.position.y, Screen.height) })
+        {
+            float edge = (c * TownView.PPU - px / (2f * k)) * k;
+            Assert.AreEqual(Mathf.Round(edge), edge, 1e-2f, "snapped: " + edge);
+        }
+    }
+
+    // The page's uncovered part, in CSS pixels from the top left: the target sits at its centre.
+    [UnityTest]
+    public IEnumerator TheTownSitsInTheUncoveredPart()
+    {
+        int w = Screen.width, h = Screen.height;
+        bridge.View("{\"mode\":\"town\",\"safe\":{\"x\":" + w / 2 + ",\"y\":0,\"width\":" + (w - w / 2) + ",\"height\":" + h / 2 + "}}");
+        yield return Settle();
+        Crisp();
+        var at = Camera.main.WorldToScreenPoint(town.transform.TransformPoint(new Vector3(32f, 18.5f, 0f))); // town.json's focus
+        Assert.AreEqual(w / 2 + (w - w / 2) / 2f, at.x, 1f + town.Scale, "x: the right half's centre");
+        Assert.AreEqual(h - h / 4f, at.y, 1f + town.Scale, "y: the top half's centre (screen y is up)");
+    }
+
+    // The page's View and the scene's new room may come in either order in one frame; the camera ends on the new room.
+    [UnityTest]
+    public IEnumerator ViewAndANewRoomInEitherOrder()
+    {
+        foreach (var viewFirst in new[] { true, false })
+        {
+            bridge.View("{\"mode\":\"town\"}");
+            yield return Settle();
+            if (viewFirst) { bridge.View("{\"mode\":\"venue\"}"); Assert.IsTrue(view.UseLayout("cafe")); }
+            else { Assert.IsTrue(view.UseLayout("cafe")); bridge.View("{\"mode\":\"venue\"}"); }
+            yield return null;
+            yield return Settle();
+            Assert.AreEqual(0f, town.Alpha("cafe"), "the new room's roof lifted");
+            Assert.AreEqual(1f, town.Alpha("data"), "the old one's back");
+            var c = (Vector2)Camera.main.transform.position;
+            Assert.Less((c - (town.Origin("cafe") + new Vector2(TownView.RoomCX, TownView.RoomCY))).magnitude, 1f, "the camera on the cafe: " + c);
+            Crisp();
+            Assert.IsTrue(view.UseLayout(ShopView.DefaultLayout));
+            yield return null;
+        }
     }
 
     // The ground is drawn in its file's order (the grass first, the road over it), never in an order left to the renderer.

@@ -97,7 +97,7 @@ namespace APA.EditorTools
         // ReadPng: an 8-bit RGBA, non-interlaced PNG (the LimeZu sheets) as
         // rows from the top. Texture2D.LoadImage refuses a sheet taller than
         // the batch editor's 8192 (5_Floor_Modular_Buildings is 8288).
-        static (int w, int h, byte[] rgba) ReadPng(byte[] b)
+        public static (int w, int h, byte[] rgba) ReadPng(byte[] b) // public for the EditMode test
         {
             int Be(int o) => (b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3];
             int w = 0, h = 0;
@@ -119,11 +119,16 @@ namespace APA.EditorTools
             var raw = new byte[h * (stride + 1)];
             idat.Position = 2; // the zlib header; DeflateStream reads the rest
             using (var z = new System.IO.Compression.DeflateStream(idat, System.IO.Compression.CompressionMode.Decompress))
-                for (int n = 0, got; n < raw.Length && (got = z.Read(raw, n, raw.Length - n)) > 0;) n += got;
+            {
+                int n = 0;
+                for (int got; n < raw.Length && (got = z.Read(raw, n, raw.Length - n)) > 0;) n += got;
+                if (n < raw.Length) throw new System.Exception("PNG data ends early");
+            }
             var px = new byte[h * stride];
             for (int y = 0; y < h; y++)
             {
                 int f = raw[y * (stride + 1)], src = y * (stride + 1) + 1, dst = y * stride;
+                if (f > 4) throw new System.Exception("PNG filter " + f);
                 for (int x = 0; x < stride; x++)
                 {
                     int a = x >= 4 ? px[dst + x - 4] : 0, up = y > 0 ? px[dst + x - stride] : 0, c = x >= 4 && y > 0 ? px[dst + x - stride - 4] : 0;
@@ -179,6 +184,7 @@ namespace APA.EditorTools
                 if (!key.StartsWith("x-")) continue;
                 townTex.Add(CutPiece(key, path, rect)); townKeys.Add(key);
             }
+            sheets.Clear(); // the decoded sheets (one is 8288 px) are not kept past the cutting
             town.art = townTex.ToArray();
             town.artKeys = townKeys.ToArray();
             tex.AddRange(townTex);

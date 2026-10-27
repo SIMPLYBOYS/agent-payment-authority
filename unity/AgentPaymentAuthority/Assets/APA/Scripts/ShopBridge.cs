@@ -94,6 +94,7 @@ namespace APA
         void Picked(string consumer)
         {
             if (mode != SceneState.Version || scene.Scene < 0) return;
+            if (town != null && town.Mode == "town") return; // under a roof: the click is the venue's (TownView)
             Report("select", scene.Scene, scene.Of(consumer).Gen, consumer);
         }
 
@@ -116,15 +117,19 @@ namespace APA
         public class ViewMessage
         {
             public string mode;  // town | venue
-            public Rect safe;    // the canvas's uncovered part, CSS pixels from its top left; zero: all of it
+            public Area safe = new Area(); // the canvas's uncovered part, CSS pixels from its top left; zero: all of it
         }
+
+        // Area: {x, y, width, height} as the page sends it (JsonUtility does not fill a Rect from those names).
+        [System.Serializable]
+        public class Area { public float x, y, width, height; }
 
         // View: the page's camera choice; only what is shown changes.
         public void View(string json)
         {
             ViewMessage m = null;
             try { m = JsonUtility.FromJson<ViewMessage>(json); } catch (System.Exception) { }
-            bool ok = m != null && town != null && town.Show(m.mode, m.safe);
+            bool ok = m != null && town != null && town.Show(m.mode, new Rect(m.safe.x, m.safe.y, m.safe.width, m.safe.height));
             Report("view", 0, 0, (m != null ? m.mode ?? "" : "") + "|" + (ok ? "Applied" : "Invalid"));
         }
 
