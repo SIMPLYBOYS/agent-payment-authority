@@ -95,7 +95,10 @@ namespace APA
                 var root = new GameObject("venue-" + v.layout).transform;
                 root.SetParent(transform, false);
                 root.localPosition = new Vector2(v.x, v.y);
-                for (int i = 0; i < v.exterior.Length; i++) Piece(root, v.exterior[i], 150 + i, Vector2.zero);
+                // By depth, as everything on the street: a building by its bottom row, its pieces in file order within it.
+                float bottom = float.MaxValue;
+                foreach (var e in v.exterior) bottom = Mathf.Min(bottom, e.y);
+                for (int i = 0; i < v.exterior.Length; i++) Piece(root, v.exterior[i], Order(v.y + bottom) + i, Vector2.zero);
                 // The building's top, from the data (a repeated piece's h, else its file's height): the pill sits just above it.
                 float top = 0f;
                 foreach (var e in v.exterior) top = Mathf.Max(top, e.y + (e.h > 0f ? e.h : Height(e.key)));
@@ -106,8 +109,10 @@ namespace APA
             foreach (var c in new[] { "consumer-a", "consumer-b" }) MakeStand(c);
         }
 
-        // Order: drawn by depth, as a room's props are (lower is nearer), always under the outsides' 150.
-        static int Order(float y) => 100 - Mathf.RoundToInt(y);
+        // Order: drawn by depth (lower is nearer), in steps of 1/20 tile; a building's pieces take the next
+        // few orders (Awake), so anyone 0.75 tile in front of its bottom row is drawn over it. Labels: 3000+.
+        public static int Order(float y) => 2000 - Mathf.RoundToInt(y * 20f);
+        const int Labels = 3000, Transition = 5000;
 
         // Backdrop: the room's surroundings, where it stands away from the
         // map: dark, as a game's inside is, and the pavement outside its door
@@ -120,7 +125,7 @@ namespace APA
             dark.color = new Color(0.12f, 0.11f, 0.1f);
             dark.sortingOrder = -1100;
             dark.transform.localPosition = Interior + new Vector2(6f, 4.5f);
-            dark.transform.localScale = new Vector3(120f, 80f, 1f);
+            dark.transform.localScale = new Vector3(44f, 30f, 1f); // a venue view is at most 30 x 20 units; the town's widest view stops short of it
             Piece(transform, new Town.Piece { key = "x-pave", x = Interior.x - 4f, y = Interior.y, w = 4f, h = 8f }, -1050, Vector2.zero);
         }
 
@@ -138,7 +143,7 @@ namespace APA
         static Sprite Ring()
         {
             if (circle != null) return circle;
-            const int n = 32;
+            const int n = 128;
             var t = new Texture2D(n, n) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
             for (int y = 0; y < n; y++)
                 for (int x = 0; x < n; x++)
@@ -147,7 +152,7 @@ namespace APA
                     t.SetPixel(x, y, dx * dx + dy * dy <= n * n / 4f ? Color.clear : Color.white);
                 }
             t.Apply();
-            return circle = UnityEngine.Sprite.Create(t, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), n / 2f);
+            return circle = UnityEngine.Sprite.Create(t, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), n / 2f, 0, SpriteMeshType.FullRect);
         }
 
         Texture2D Tex(string key)
@@ -223,9 +228,9 @@ namespace APA
         // over its roof, as the page's venue list numbers them.
         void Pill(Transform root, Town.Venue v, float top)
         {
-            var text = Words(root, "pill", new Vector2(6f, top + 0.5f), 0.085f, Ink, 300);
+            var text = Words(root, "pill", new Vector2(6f, top + 0.5f), 0.085f, Ink, Labels);
             text.text = "<color=" + Accent + ">" + v.number + "</color>  " + v.name;
-            Plate(root, text, Rounded(), Color.white, 300);
+            Plate(root, text, Rounded(), Color.white, Labels);
         }
 
         // Rounded: a light plate with round ends, sliced to any width.
@@ -307,10 +312,10 @@ namespace APA
             body.transform.SetParent(transform, false);
             // The premade sheet's idle row, facing down (as ShopView's idleDown).
             body.sprite = UnityEngine.Sprite.Create(sheet, new Rect(18 * 32, sheet.height - 64 - 64, 32, 64), new Vector2(0.5f, 0f), PPU);
-            var tag = Words(body.transform, consumer + "-door-tag", new Vector2(0f, 2.3f), 0.065f, Color.white, 400); // not "-tag": ShopView's own label is found by that name; over the outsides (150+), which it overlaps at a door
+            var tag = Words(body.transform, consumer + "-door-tag", new Vector2(0f, 2.4f), 0.085f, Color.white, Labels + 10); // the pills' size: read at the town's scale // not "-tag": ShopView's own label is found by that name; over the buildings, which it overlaps at a door
             tag.text = consumer == "consumer-a" ? "客人 A" : "客人 B";
             var tint = consumer == "consumer-a" ? new Color(0.55f, 0.75f, 1f) : new Color(1f, 0.7f, 0.5f); // ShopView's colours
-            var plate = Plate(body.transform, tag, Pixel(), new Color(tint.r * 0.35f, tint.g * 0.35f, tint.b * 0.35f, 0.92f), 400);
+            var plate = Plate(body.transform, tag, Pixel(), new Color(tint.r * 0.35f, tint.g * 0.35f, tint.b * 0.35f, 0.92f), Labels + 10);
             stands[consumer] = (body, tag, plate);
         }
 
@@ -321,14 +326,13 @@ namespace APA
         {
             var key = shop != null ? shop.LayoutKey : null;
             bool there = venues.TryGetValue(key ?? "", out var e);
-            int i = 0;
             foreach (var kv in stands)
             {
                 var phase = shop.PhaseOf(kv.Key);
                 bool on = there && phase != null && phase != "empty";
                 kv.Value.body.enabled = kv.Value.tag.GetComponent<MeshRenderer>().enabled = kv.Value.plate.enabled = on;
                 if (!on) continue;
-                var at = new Vector2(e.v.x, e.v.y) + e.v.door + new Vector2(i++ == 0 ? -0.6f : 0.6f, 0f);
+                var at = new Vector2(e.v.x, e.v.y) + e.v.door + new Vector2(kv.Key == "consumer-a" ? -0.6f : 0.6f, 0f); // a side each, whoever else is there
                 kv.Value.body.transform.localPosition = at;
                 kv.Value.body.sortingOrder = Order(at.y) + 1;
             }
@@ -354,10 +358,11 @@ namespace APA
             if (mode == shown)
             {
                 if (phase == 1) phase = 2; // asked back before the switch: open again where it closed
-                else Retarget();           // the view shown, maybe with a new uncovered part (the page measures again once the canvas fills): refit, even while it opens
+                Retarget();                // the view shown, maybe with a new uncovered part (the page measures again once the canvas fills): refit, even while the circle moves
                 return true;
             }
-            if (phase != 1) { phase = 1; Cover(true, shown == "town" ? Door() : Inside()); if (radius <= 0f) radius = Full(); }
+            if (phase == 0) { Cover(true, shown == "town" ? Door() : Inside()); radius = Full(); }
+            phase = 1; // while opening, it closes back from where it is
             return true;
         }
 
@@ -433,7 +438,7 @@ namespace APA
                     iris[i].transform.SetParent(transform, false);
                     iris[i].sprite = i == 0 ? Ring() : Pixel();
                     iris[i].color = new Color(0.08f, 0.07f, 0.06f);
-                    iris[i].sortingOrder = 1000;
+                    iris[i].sortingOrder = Transition;
                 }
             foreach (var r in iris) r.enabled = on;
             irisAt = at;
@@ -442,14 +447,14 @@ namespace APA
         // Circle: the ring at the radius (in whole steps of 4 art pixels), the bands beyond it to well past the view.
         void Circle(float r)
         {
-            const float far = 200f;
+            const float far = 200f, o = 1f / PPU; // each band reaches one art pixel into the ring's square: no hairline seam
             r = Mathf.Floor(r / (4f / PPU)) * (4f / PPU);
             iris[0].transform.position = irisAt;
             iris[0].transform.localScale = new Vector3(r, r, 1f);
-            Band(iris[1], irisAt + new Vector2(0f, r + far / 2f), new Vector2(2f * far, far));
-            Band(iris[2], irisAt - new Vector2(0f, r + far / 2f), new Vector2(2f * far, far));
-            Band(iris[3], irisAt - new Vector2(r + far / 2f, 0f), new Vector2(far, 2f * r));
-            Band(iris[4], irisAt + new Vector2(r + far / 2f, 0f), new Vector2(far, 2f * r));
+            Band(iris[1], irisAt + new Vector2(0f, r - o + far / 2f), new Vector2(2f * far, far));
+            Band(iris[2], irisAt - new Vector2(0f, r - o + far / 2f), new Vector2(2f * far, far));
+            Band(iris[3], irisAt - new Vector2(r - o + far / 2f, 0f), new Vector2(far, 2f * r));
+            Band(iris[4], irisAt + new Vector2(r - o + far / 2f, 0f), new Vector2(far, 2f * r));
         }
 
         static void Band(SpriteRenderer b, Vector2 at, Vector2 size)
@@ -492,6 +497,7 @@ namespace APA
                 float step = Full() / Half * Time.unscaledDeltaTime;
                 if (phase == 1)
                 {
+                    if (shown == "town") irisAt = Door(); // the room may change after the View (the scene's message comes later): close on the door being entered
                     radius = Mathf.Max(0f, radius - step);
                     if (radius <= 0f)
                     {

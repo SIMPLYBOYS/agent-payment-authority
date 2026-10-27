@@ -79,6 +79,25 @@ public class TownTests
         Assert.AreEqual(w / 2 + (w - w / 2) / 2f, at.x, 1f + town.Scale, "x: the right half's centre");
     }
 
+    // Turning back while the circle closes: it opens again on the side it closed on, and the camera never left it.
+    [UnityTest]
+    public IEnumerator TurningBackWhileItCloses()
+    {
+        var room = TownView.Interior + new Vector2(TownView.RoomCX, TownView.RoomCY);
+        bridge.View("{\"mode\":\"town\"}");
+        yield return null;
+        Assert.IsTrue(town.Moving && !town.Opening, "closing");
+        bridge.View("{\"mode\":\"venue\"}");
+        Assert.IsTrue(town.Opening, "opens again where it closed");
+        for (float end = Time.realtimeSinceStartup + 3f; town.Moving && Time.realtimeSinceStartup < end;)
+        {
+            Assert.Less(((Vector2)Camera.main.transform.position - room).magnitude, 1f, "never went to the town");
+            yield return null;
+        }
+        Assert.IsFalse(town.Moving);
+        Assert.AreEqual("venue", town.Mode);
+    }
+
     // The page's View and the scene's new room may come in either order in one frame; the camera ends on the new room.
     [UnityTest]
     public IEnumerator ViewAndANewRoomInEitherOrder()
@@ -157,9 +176,13 @@ public class TownTests
         Assert.AreEqual("cafe", view.LayoutKey);
         Assert.IsTrue(town.StandsAtDoor("consumer-a"), "A has a task in the cafe");
         Assert.IsFalse(town.StandsAtDoor("consumer-b"), "B has none");
-        Assert.Less((town.StandOf("consumer-a") - town.Origin("cafe")).magnitude, 14f, "at the cafe: " + town.StandOf("consumer-a"));
+        var cafe = GameObject.Find("venue-cafe").GetComponentsInChildren<SpriteRenderer>().Where(r => !r.name.Contains("pill")).ToList();
+        var at = town.StandOf("consumer-a");
+        Assert.IsTrue(at.x > town.Origin("cafe").x && at.x < town.Origin("cafe").x + 12f && at.y < town.Origin("cafe").y, "in front of the cafe: " + at);
+        var body = GameObject.Find("consumer-a-at-door").GetComponent<SpriteRenderer>();
+        Assert.Greater(body.sortingOrder, cafe.Max(r => r.sortingOrder), "drawn over the front it stands at, head and all");
         var tag = GameObject.Find("consumer-a-door-tag").GetComponent<MeshRenderer>();
-        Assert.IsTrue(tag.enabled && tag.sortingOrder > 150 + 20, "its label over the building fronts it stands at");
+        Assert.IsTrue(tag.enabled && tag.sortingOrder > body.sortingOrder, "its label too");
     }
 
     [UnityTest]
