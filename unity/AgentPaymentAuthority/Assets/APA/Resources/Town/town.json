@@ -198,7 +198,7 @@
       {"key": "x-ac", "x": 8.6, "y": 7.6},
       {"key": "x-fan", "x": 1.6, "y": 8.2},
       {"key": "x-grate", "x": 4.2, "y": 7.9}]},
-    {"layout": "mart", "number": "03", "name": "巷口便利商店", "x": 34, "y": 6, "door": {"x": 3.0, "y": -1.1}, "doorway": {"key": "x-door-mart", "x": 2.125, "y": -0.5, "frames": 14}, "exterior": [
+    {"layout": "mart", "number": "03", "name": "巷口便利商店", "x": 34, "y": 6, "door": {"x": 3.0, "y": -1.1}, "doorway": {"key": "x-door-mart", "x": 2.125, "y": -0.0625, "frames": 14}, "exterior": [
       {"key": "x-mart-front-cap", "x": 0, "y": -0.25},
       {"key": "x-mart-front", "x": 0.25, "y": -0.25},
       {"key": "x-mart-roof-b-cap", "x": 0, "y": 5.09375},

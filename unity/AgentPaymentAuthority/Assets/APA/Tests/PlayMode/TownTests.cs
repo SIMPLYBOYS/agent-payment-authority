@@ -355,11 +355,12 @@ public class TownTests
         Assert.Less(took, 2f, "its door opens wide for the one going in (Aaron 10/28)");
         yield return Until(() => InThere("x-walk-11", "mart"), 3f, t => took = t); // a tile at 4 a second, then the fade
         Assert.Less(took, 3f, "gone into the mart, out of sight");
-        yield return Until(() => town.DoorFrame("mart") == 0, 3f, t => took = t);
-        Assert.Less(took, 3f, "and shuts behind it");
+        float shut = 0f;
+        yield return Until(() => town.DoorFrame("mart") == 0, 3f, t => shut = t);
+        Assert.Less(shut, 3f, "and shuts behind it");
         yield return Until(() => InSight("x-walk-11"), 6f, t => after = t);
         Assert.Less(after, 6f, "out again, in sight");
-        Assert.Greater(after, 3.5f, "after a while in there");
+        Assert.Greater(shut + after, 3.5f, "after a while in there");
     }
 
     [UnityTest]
@@ -380,9 +381,10 @@ public class TownTests
         Assert.IsTrue(town.StandsAtDoor("consumer-a"), "A at the cafe's door");
         // and one along the lane: past the door, not in, and on (not stuck)
         town.AddWalker(new Town.Walker { key = "x-walk-04", speed = 4f, path = new[] { door - Vector2.up - 2f * Vector2.right, door - Vector2.up, door, door - Vector2.up, door - Vector2.up + 2f * Vector2.right } });
-        float x0 = town.Passer("x-walk-04").at.x, far = 0f;
+        float x0 = town.Passer("x-walk-04").at.x, far = 0f, came = Time.realtimeSinceStartup;
         for (float end = Time.realtimeSinceStartup + 6f; Time.realtimeSinceStartup < end;)
         {
+            if (Time.realtimeSinceStartup - came > 0.6f) Assert.AreEqual(0, town.DoorFrame("cafe"), "the door shut while A stands there"); // after the one caught going up
             var o = town.Passer("x-walk-04");
             Assert.IsTrue(o.shop == null && o.at.y <= door.y - 0.99f, "walks on below A, not in: " + o.at);
             far = Mathf.Max(far, o.at.x - x0);
@@ -397,7 +399,7 @@ public class TownTests
         Assert.IsFalse(town.StandsAtDoor("consumer-a"));
         float after = 0f;
         yield return Until(() => InSight("x-walk-14"), 2f, t => after = t);
-        Assert.Less(after, 1f, "out once A has gone");
+        Assert.Less(after, 1.5f, "out once A has gone, the door open first");
     }
 
     // Aaron 10/28: the plaza's fountain plays.
@@ -406,7 +408,7 @@ public class TownTests
     {
         var f = GameObject.Find("x-fountain").GetComponent<SpriteRenderer>();
         var seen = new HashSet<Sprite>();
-        for (float end = Time.realtimeSinceStartup + 1f; Time.realtimeSinceStartup < end;) { seen.Add(f.sprite); yield return null; }
+        for (float t0 = Time.time, end = Time.realtimeSinceStartup + 5f; Time.time - t0 < 1f && Time.realtimeSinceStartup < end;) { seen.Add(f.sprite); yield return null; } // a second of its time
         Assert.Greater(seen.Count, 3, "its frames go round");
         Assert.AreEqual(2f, f.sprite.bounds.size.x, 1e-3f, "one frame wide, as the still one was");
     }

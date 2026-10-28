@@ -376,7 +376,7 @@ namespace APA
             {
                 // In a shop: fades out facing its door, stays, and fades in facing the street, once the door is clear.
                 s.inside += dt;
-                if (Busy(s.doorOf[s.leg])) s.inside = Mathf.Clamp(s.inside, Fade, Stay - Fade); // out of sight until they have gone
+                if (Busy(s.doorOf[s.leg])) s.inside = Mathf.Clamp(s.inside, Fade, Stay - Fade - DoorTime); // out of sight until they have gone; then the door opens first
                 s.r.color = new Color(1f, 1f, 1f, Mathf.Clamp01(Mathf.Max(Fade - s.inside, s.inside - (Stay - Fade)) / Fade));
                 int f = (s.inside < Stay / 2f ? 1 : 3) * 6; // up, down
                 if (f < s.frames.Length) s.r.sprite = s.frames[f];

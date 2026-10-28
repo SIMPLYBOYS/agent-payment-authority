@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using APA;
+using APA.EditorTools;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -23,6 +24,55 @@ public class LayoutTests
         int At(int o) => b[o] << 24 | b[o + 1] << 16 | b[o + 2] << 8 | b[o + 3];
         return new Vector2(At(16), At(20)) / 32f;
     }
+
+    // A doorway's shut frame lies over its facade without changing a pixel, composited as drawn (review of 67461a1:
+    // the mart's door carried the facade's half-clear shadow again, a darker strip; their values match, alpha over them doesn't).
+    [Test]
+    public void EachDoorwayShutIsItsFacade()
+    {
+        var town = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
+        int checkedDoors = 0;
+        foreach (var v in town.venues)
+        {
+            if (v.doorway == null || string.IsNullOrEmpty(v.doorway.key)) continue;
+            var door = Cut(v.doorway.key);
+            if (door.rgba == null) continue; // no LimeZu files here: nothing drawn to compare
+            int fw = door.w / Mathf.Max(1, v.doorway.frames), x0 = Px(v.doorway.x), y0 = Px(v.doorway.y);
+            var pieces = v.exterior.Select(e => (e, c: Cut(e.key))).ToList();
+            for (int y = 0; y < door.h; y++)
+                for (int x = 0; x < fw; x++)
+                {
+                    int X = x0 + x, Y = y0 + door.h - 1 - y; // the venue's pixels, y up
+                    var under = Vector4.zero;
+                    foreach (var (e, c) in pieces) under = Over(At(c, e, X, Y), under);
+                    Assert.Less((Over(Pixel(door, x, y), under) - under).magnitude, 2f / 255f, v.layout + ": its shut door changes the facade at " + X + "," + Y);
+                }
+            checkedDoors++;
+        }
+        if (checkedDoors == 0) Assert.Ignore("no LimeZu files: nothing to composite");
+    }
+
+    static int Px(float tiles) => Mathf.RoundToInt(tiles * 32f);
+    static (int w, int h, byte[] rgba) Cut(string key)
+    {
+        var f = Path.Combine(Application.dataPath, "LimeZu/_cut", key + ".png");
+        return File.Exists(f) ? ShopBuilder.ReadPng(File.ReadAllBytes(f)) : (0, 0, null);
+    }
+    // Pixel: premultiplied, rows from the top; At: a piece's pixel at a venue pixel (y up), a tiled one repeating over its w x h.
+    static Vector4 Pixel((int w, int h, byte[] rgba) c, int x, int y)
+    {
+        int i = (y * c.w + x) * 4;
+        float a = c.rgba[i + 3] / 255f;
+        return new Vector4(c.rgba[i] / 255f * a, c.rgba[i + 1] / 255f * a, c.rgba[i + 2] / 255f * a, a);
+    }
+    static Vector4 At((int w, int h, byte[] rgba) c, Town.Piece e, int X, int Y)
+    {
+        if (c.rgba == null) return Vector4.zero;
+        int lx = X - Px(e.x), ly = Y - Px(e.y), bw = e.w > 0 ? Px(e.w) : c.w, bh = e.w > 0 && e.h > 0 ? Px(e.h) : c.h;
+        if (lx < 0 || ly < 0 || lx >= bw || ly >= bh) return Vector4.zero;
+        return Pixel(c, lx % c.w, c.h - 1 - ly % c.h);
+    }
+    static Vector4 Over(Vector4 src, Vector4 dst) => src + dst * (1f - src.w);
 
     static string chars;
     // InFont: every character of a text the scene shows is in its font
@@ -83,6 +133,12 @@ public class LayoutTests
         var pieces = town.ground.Concat(town.props).Concat(town.venues.SelectMany(v => v.exterior)).Concat(town.venues.Where(v => v.doorway != null && !string.IsNullOrEmpty(v.doorway.key)).Select(v => v.doorway)).Select(p => p.key)
             .Concat(town.walkers.Concat(town.inside.SelectMany(g => g.people)).Select(w => w.key));
         foreach (var k in pieces) CollectionAssert.Contains(keys, k, "town: " + k + " not in limezu-assets.txt");
+        // A sheet of frames splits evenly, and is never also tiled (Frames() makes no tiled sprite).
+        foreach (var p in town.props.Concat(town.venues.Select(v => v.doorway)).Where(p => p != null && p.frames > 1))
+        {
+            Assert.AreEqual(0f, p.w, "town: " + p.key + " has frames and is tiled");
+            Assert.AreEqual(0, Mathf.RoundToInt(CutSize(p.key).x * 32f) % p.frames, "town: " + p.key + "'s " + p.frames + " frames don't split its width");
+        }
         // Nothing stands on a doorstep (Aaron 10/28: flower boxes in front of the doors): the two
         // tiles in front of a door, 2 either side of it, where A and B stand and people go in and out.
         foreach (var v in town.venues)
