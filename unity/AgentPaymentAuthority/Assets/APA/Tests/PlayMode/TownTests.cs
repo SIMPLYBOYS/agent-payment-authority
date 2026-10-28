@@ -323,4 +323,67 @@ public class TownTests
         Assert.AreEqual("data", view.LayoutKey, "the room is the page's to change");
         Assert.AreEqual("town", town.Mode);
     }
+
+    // Aaron 10/28: passers-by go in and out of the shops: a path through a venue's door goes in there, fading out
+    // facing it, stays a while, and comes out again; never over A or B, who transact at that door.
+    static Vector2 DoorOf(string layout)
+    {
+        var v = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text).venues.First(x => x.layout == layout);
+        return new Vector2(v.x, v.y) + v.door;
+    }
+
+    static IEnumerator Wait(float s) { for (float end = Time.realtimeSinceStartup + s; Time.realtimeSinceStartup < end;) yield return null; }
+
+    // Out: waits up to s seconds for that passer-by to be back on the street in full sight (its short path then takes it in again).
+    IEnumerator Out(string key, float s, System.Action<float> when)
+    {
+        float t0 = Time.realtimeSinceStartup;
+        while (Time.realtimeSinceStartup - t0 < s && !(town.Passer(key).shop == null && town.Passer(key).shown == 1f)) yield return null;
+        when(Time.realtimeSinceStartup - t0);
+    }
+
+    static Town.Walker Visit(string key, Vector2 door) => new Town.Walker { key = key, speed = 4f, path = new[] { door - Vector2.up, door, door - Vector2.up } };
+
+    [UnityTest]
+    public IEnumerator APasserByGoesInAndComesOut()
+    {
+        Assert.IsTrue(JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text).walkers.Count(w => w.path.Any(p => new[] { "data", "cafe", "mart" }.Any(l => (p - DoorOf(l)).sqrMagnitude < 0.01f))) >= 3, "the town's own passers-by visit the shops");
+        town.AddWalker(Visit("x-walk-11", DoorOf("mart")));
+        yield return Wait(0.8f); // a tile at 4 a second, then the fade
+        var p = town.Passer("x-walk-11");
+        Assert.AreEqual("mart", p.shop, "gone into the mart");
+        Assert.Less(p.shown, 0.05f, "out of sight");
+        float after = 0f;
+        yield return Out("x-walk-11", 6f, t => after = t);
+        Assert.Less(after, 6f, "out again, in sight");
+        Assert.Greater(after, 3.5f, "after a while in there");
+    }
+
+    [UnityTest]
+    public IEnumerator NoOneGoesInOrComesOutOverAAndB()
+    {
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        var door = DoorOf("cafe");
+        town.AddWalker(Visit("x-walk-14", door));
+        yield return Wait(0.8f);
+        Assert.AreEqual("cafe", town.Passer("x-walk-14").shop, "in before A comes");
+        bridge.Receive(V2(1, "consumer-a", "waiting"));
+        yield return null;
+        Assert.IsTrue(town.StandsAtDoor("consumer-a"), "A at the cafe's door");
+        town.AddWalker(Visit("x-walk-04", door));
+        for (float end = Time.realtimeSinceStartup + 6f; Time.realtimeSinceStartup < end;)
+        {
+            var o = town.Passer("x-walk-04");
+            Assert.IsTrue(o.shop == null && o.at.y <= door.y - 0.99f, "walks on below A, not in: " + o.at);
+            Assert.Less(town.Passer("x-walk-14").shown, 0.05f, "the one inside waits there");
+            yield return null;
+        }
+        bridge.Receive(V2(1, "consumer-a", "delivered", 9));
+        yield return null;
+        Assert.IsFalse(town.StandsAtDoor("consumer-a"));
+        float after = 0f;
+        yield return Out("x-walk-14", 2f, t => after = t);
+        Assert.Less(after, 1f, "out once A has gone");
+    }
 }

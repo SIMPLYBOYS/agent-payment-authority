@@ -268,12 +268,21 @@ namespace APA
         }
 
         // ---- passers-by (illustrative) ----
-        class WalkerState { public Town.Walker w; public SpriteRenderer r; public Sprite[] frames; public bool room; public int leg; public int dir = 1; public float tick; public int frame; }
+        // doorOf: for each point of its path, the venue whose door it is (null for the street); inside: seconds in that shop, or -1.
+        class WalkerState { public Town.Walker w; public SpriteRenderer r; public Sprite[] frames; public bool room; public int leg; public int dir = 1; public float tick; public int frame; public string[] doorOf; public float inside = -1f; }
         readonly List<WalkerState> walkers = new List<WalkerState>();
         readonly Dictionary<string, GameObject> insides = new Dictionary<string, GameObject>();
         public IEnumerable<Vector2> WalkerPositions { get { foreach (var s in walkers) if (!s.room) yield return s.r.transform.localPosition; } } // tests
         // The people shown in the room now, in its coordinates (tests).
         public IEnumerable<(string key, Vector2 at)> PeopleInside { get { foreach (var s in walkers) if (s.room && s.r.gameObject.activeInHierarchy) yield return (s.w.key, s.r.transform.localPosition); } }
+        // Tests: a passer-by of their own, and the last one of a key: the shop it is in (null on the street), how much of it shows, where.
+        public void AddWalker(Town.Walker w) => MakeWalker(w, transform, false);
+        public (string shop, float shown, Vector2 at) Passer(string key)
+        {
+            (string, float, Vector2) found = (null, 0f, Vector2.zero);
+            foreach (var s in walkers) if (!s.room && s.w.key == key) found = (s.inside >= 0f ? s.doorOf[s.leg] : null, s.r.color.a, s.r.transform.localPosition);
+            return found;
+        }
 
         void MakeWalker(Town.Walker w, Transform parent, bool room)
         {
@@ -285,7 +294,11 @@ namespace APA
             r.transform.SetParent(parent, false);
             r.transform.localPosition = w.path[0];
             r.sprite = frames[0];
-            var s = new WalkerState { w = w, r = r, frames = frames, room = room };
+            var s = new WalkerState { w = w, r = r, frames = frames, room = room, doorOf = new string[w.path.Length] };
+            // A point at a venue's door is a way in (Aaron 10/28: people go in and out of the shops).
+            for (int i = 0; i < w.path.Length && !room; i++)
+                foreach (var e in venues.Values)
+                    if ((w.path[i] - (new Vector2(e.v.x, e.v.y) + e.v.door)).sqrMagnitude < 0.01f) s.doorOf[i] = e.v.layout;
             s.r.sortingOrder = Depth(s, w.path[0].y);
             walkers.Add(s);
         }
@@ -294,9 +307,30 @@ namespace APA
         // -(y * 10)), just in front of a prop on the same row; always under A and B (50).
         static int Depth(WalkerState s, float y) => s.room ? -(int)(y * 10f) + 1 : Order(y);
 
+        const float Stay = 5f, Fade = 0.35f; // seconds in a shop; to go in or come out
+        // Busy: A or B stands at that venue's door (they transact there): no one else goes in or comes out over them.
+        bool Busy(string layout)
+        {
+            if (shop == null || shop.LayoutKey != layout) return false;
+            foreach (var st in stands.Values) if (st.body.enabled) return true;
+            return false;
+        }
+
         void Walk(WalkerState s, float dt)
         {
             var path = s.w.path;
+            if (s.inside >= 0f)
+            {
+                // In a shop: fades out facing its door, stays, and fades in facing the street, once the door is clear.
+                s.inside += dt;
+                if (Busy(s.doorOf[s.leg])) s.inside = Mathf.Min(s.inside, Stay - Fade);
+                s.r.color = new Color(1f, 1f, 1f, Mathf.Clamp01(Mathf.Max(Fade - s.inside, s.inside - (Stay - Fade)) / Fade));
+                int f = (s.inside < Stay / 2f ? 1 : 3) * 6; // up, down
+                if (f < s.frames.Length) s.r.sprite = s.frames[f];
+                if (s.inside < Stay) return;
+                s.inside = -1f;
+                s.r.color = Color.white;
+            }
             if (path.Length == 1)
             {
                 // A pose: its frames in a loop, in place.
@@ -311,14 +345,20 @@ namespace APA
             for (int guard = 0; go > 0f && guard < 8; guard++)
             {
                 int next = s.leg + s.dir;
-                var to = path[next];
-                d = to - p;
-                if (d.magnitude > go) { p += d.normalized * go; go = 0f; break; }
-                go -= d.magnitude;
-                p = to;
+                bool skip = s.doorOf[next] != null && Busy(s.doorOf[next]); // A or B at that door: on past it, from where it is
+                if (!skip)
+                {
+                    var to = path[next];
+                    d = to - p;
+                    if (d.magnitude > go) { p += d.normalized * go; go = 0f; break; }
+                    go -= d.magnitude;
+                    p = to;
+                }
                 s.leg = next;
+                bool enter = !skip && s.doorOf[s.leg] != null;
                 if (loop && s.leg == path.Length - 1) { s.leg = 0; p = path[0]; }
                 else if (!loop && (s.leg == path.Length - 1 || s.leg == 0)) s.dir = -s.dir;
+                if (enter) { s.inside = 0f; break; }
             }
             s.r.transform.localPosition = p;
             s.r.sortingOrder = Depth(s, p.y);
