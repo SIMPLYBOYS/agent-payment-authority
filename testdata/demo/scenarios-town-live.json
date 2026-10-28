@@ -1,0 +1,65 @@
+{
+  "description": "The town on the real Agent (docs/commercial-live-town.md L1; make present-e1a SCENARIOS=testdata/demo/scenarios-town-live.json, demo-testnet.sh live L town, demo-local.sh live): the live Claude Code Agent on a host that pays, apa.pay.v2 (the BBS+ credential in the same intent), the settling shop selling its own products (no shop_eval). The town's two scenes, two customers each buying something different (Aaron 10/27): data: A the brief 0.50, an Ask; B the semiconductor note 0.06, an Allow. cafe: A the lunch set 0.08, an Allow; B the meeting coffee 0.42, an Ask. The delegation is confirmed by the customer's own registered device (docs/commercial-gap4.md); an Ask is approved by the person's registered device.",
+  "scenarios": [
+    {
+      "id": "town-data-a",
+      "consumer_id": "consumer-a",
+      "scene": "data",
+      "contract": "apa.pay.v2",
+      "label": "資料研究室：韓國市場簡報（需要你核准・testnet 付款・真實 Agent）",
+      "task": "買一份韓國市場簡報。",
+      "delegation": {
+        "purpose": "買一份韓國市場簡報（數位資料）",
+        "task_budget": "1500000",
+        "allow_max": "100000",
+        "approval_deadline_seconds": 180,
+        "valid_seconds": 1800
+      }
+    },
+    {
+      "id": "town-cafe-a",
+      "consumer_id": "consumer-a",
+      "scene": "cafe",
+      "contract": "apa.pay.v2",
+      "label": "街角咖啡：12:30 取餐的午餐套餐（範圍內自動付款・testnet 付款・真實 Agent）",
+      "task": "訂 12:30 取餐的午餐套餐。",
+      "delegation": {
+        "purpose": "訂 12:30 取餐的午餐套餐（示意菜單）",
+        "task_budget": "1500000",
+        "allow_max": "100000",
+        "approval_deadline_seconds": 120,
+        "valid_seconds": 1800
+      }
+    },
+    {
+      "id": "town-data-b",
+      "consumer_id": "consumer-b",
+      "scene": "data",
+      "contract": "apa.pay.v2",
+      "label": "資料研究室：台灣半導體週報摘要（範圍內自動付款・testnet 付款・真實 Agent）",
+      "task": "買一份台灣半導體週報摘要。",
+      "delegation": {
+        "purpose": "買一份台灣半導體週報摘要（數位資料）",
+        "task_budget": "1500000",
+        "allow_max": "100000",
+        "approval_deadline_seconds": 180,
+        "valid_seconds": 1800
+      }
+    },
+    {
+      "id": "town-cafe-b",
+      "consumer_id": "consumer-b",
+      "scene": "cafe",
+      "contract": "apa.pay.v2",
+      "label": "街角咖啡：下午會議的咖啡 6 杯（需要你核准・testnet 付款・真實 Agent）",
+      "task": "訂 15:00 取餐、下午會議的咖啡 6 杯。",
+      "delegation": {
+        "purpose": "訂 15:00 取餐、下午會議的咖啡 6 杯（示意菜單）",
+        "task_budget": "1500000",
+        "allow_max": "100000",
+        "approval_deadline_seconds": 180,
+        "valid_seconds": 1800
+      }
+    }
+  ]
+}

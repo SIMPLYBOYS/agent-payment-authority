@@ -85,3 +85,16 @@ func TestDelegationsByDevice(t *testing.T) {
 		}
 	}
 }
+
+// The checker knows the town's live entries too (docs/commercial-live-town.md L4), each with its task and v2.
+func TestE1aCatalogHasTheTown(t *testing.T) {
+	c, err := e1aCatalog("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"e1a-ask", "e1a-deny", "e1a-inject", "town-data-a", "town-data-b", "town-cafe-a", "town-cafe-b"} {
+		if e, ok := c[id]; !ok || e.Task == "" || e.Contract != "apa.pay.v2" {
+			t.Errorf("%s: %+v %v", id, e, ok)
+		}
+	}
+}

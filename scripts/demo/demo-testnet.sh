@@ -10,6 +10,8 @@
 #   sh scripts/demo/demo-testnet.sh            the fake Agent (make present-testnet)
 #   sh scripts/demo/demo-testnet.sh live L     the real Agent, E1-a's host files for label L
 #                                              (made once from var/p2-testnet; task IDs show-e1a-L-…)
+#   sh scripts/demo/demo-testnet.sh live L town  the town on the real Agent (docs/commercial-live-town.md):
+#                                              its own host files for L (the shop's own products), the town's catalog
 #
 # The real Agent runs Claude Code CLI only when the host presses 開始.
 set -eu
@@ -17,6 +19,7 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 mode=${1:-fake}
 label=${2:-}
+what=${3:-e1a}
 opt=/opt/apa-signer
 ssock=$opt/run/signer.sock
 vsock=$opt/voice-run/voice.sock
@@ -33,7 +36,8 @@ voice_ok() { (cd / && sudo -n -u apa-signer /usr/bin/curl -s --max-time 2 --unix
 
 case $mode in
 fake) ;;
-live) echo "$label" | grep -Eq '^[a-z0-9]{1,12}$' || stuck "參數：live 要一個標籤（小寫英數，例如 t3），task 會是 show-e1a-標籤-…" ;;
+live) echo "$label" | grep -Eq '^[a-z0-9]{1,12}$' || stuck "參數：live 要一個標籤（小寫英數，例如 t3），task 會是 show-e1a-標籤-…"
+  case $what in e1a | town) ;; *) stuck "參數：live 標籤之後只能是 town（城鎮）或不寫（E1-a）" ;; esac ;;
 *) stuck "參數：fake 或 live 標籤" ;;
 esac
 
@@ -139,7 +143,17 @@ done
 say "3/4 Signer 就緒"
 
 # 4 the Host (the page opens; the pairing code below).
-if [ "$mode" = live ]; then
+if [ "$mode" = live ] && [ "$what" = town ]; then
+  # The town: the shop sells its own products (no --shop-eval), so its own host files.
+  host=$root/var/e1a-testnet/town-$label
+  # Made once for the label, with the evidence's start (the next block; no task registered yet) recorded before any run (docs/commercial-live-town.md L4).
+  if [ ! -d "$host" ]; then
+    go run ./cmd/p2-testnet e1a-host --dir "$tn" --out "$host" --label "$label" || stuck "第 4 步：建不出城鎮的 host 檔（$host）"
+    go run ./cmd/e1-evidence start --rpc https://sepolia.base.org --host "$host" --out "$host/start.json" || stuck "第 4 步：記不下證據的起點（$host/start.json；task 已登記過就換一個標籤）"
+  fi
+  say "4/4 Host 啟動中（城鎮・真實 Agent：按「開始」才執行 Claude Code CLI，一個場域兩位客人；task 是 show-e1a-$label-…）"
+  make present-e1a SIGNER="$ssock" HOST="$host" AUTH=device SCENARIOS=testdata/demo/scenarios-town-live.json || stuck "第 4 步：Host 停了"
+elif [ "$mode" = live ]; then
   host=$root/var/e1a-testnet/host-$label
   [ -d "$host" ] || go run ./cmd/p2-testnet e1a-host --dir "$tn" --out "$host" --label "$label" --shop-eval data || stuck "第 4 步：建不出 E1-a 的 host 檔（$host）"
   say "4/4 Host 啟動中（真實 Agent：按「開始」才執行 Claude Code CLI；task 是 show-e1a-$label-…）"

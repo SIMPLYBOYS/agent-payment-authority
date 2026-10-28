@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"path"
@@ -712,17 +713,27 @@ func walkJSON(key string, v any, leaf func(key, val string)) {
 	}
 }
 
-// e1aCatalog is the trusted E1-a catalog's entries by ID.
+// liveCatalogs are the trusted live catalogs a pack's runs come from: E1-a's,
+// and the town on the real Agent (docs/commercial-live-town.md L4).
+var liveCatalogs = []string{"testdata/demo/scenarios-e1a.json", "testdata/demo/scenarios-town-live.json"}
+
+// e1aCatalog is the trusted live catalogs' entries by ID; an ID in two of
+// them is refused, as a run's entry would be either.
 func e1aCatalog(repo string) (map[string]e1aEntry, error) {
-	var c struct {
-		Scenarios []e1aEntry `json:"scenarios"`
-	}
-	if err := readTrustedJSON(repo, "testdata/demo/scenarios-e1a.json", &c); err != nil {
-		return nil, err
-	}
 	out := map[string]e1aEntry{}
-	for _, e := range c.Scenarios {
-		out[e.ID] = e
+	for _, file := range liveCatalogs {
+		var c struct {
+			Scenarios []e1aEntry `json:"scenarios"`
+		}
+		if err := readTrustedJSON(repo, file, &c); err != nil {
+			return nil, err
+		}
+		for _, e := range c.Scenarios {
+			if _, dup := out[e.ID]; dup {
+				return nil, fmt.Errorf("live catalogs: %s is in two of them (%s)", e.ID, file)
+			}
+			out[e.ID] = e
+		}
 	}
 	return out, nil
 }

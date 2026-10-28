@@ -3,11 +3,15 @@
 # be off between takes, but must start again any time and work): the kept
 # local chain (p2-local.sh, resumed when it was kept), the development
 # Signer (p2-dev.sh; it asks its passphrase on this terminal, as always),
-# then the Host with the fake Agent (make present-p2), which opens the page.
+# then the Host with the fake Agent (make present-p2), which opens the page;
+# with live L, the town on the real Agent instead (docs/commercial-live-town.md
+# L3: make present-e1a with the town's catalog, host files made once for L
+# from the chain's directory, task IDs show-e1a-L-…; var/present.conf names the CLI).
 # Each step waits for the one before and says where it is stuck. Ctrl-C
 # stops all three; the chain is kept for the next time.
 #
 #   sh scripts/demo/demo-local.sh        (or: make demo-local)
+#   sh scripts/demo/demo-local.sh live L the town on the real Agent (L: a label, a new one when the tasks are used up)
 #
 # DEMO_LOCAL_DIR (default var/demo-local) holds the chain, the Host's
 # session and the logs, and is kept between runs. P2_DEV_DIR (default
@@ -23,10 +27,17 @@ B=${DEMO_WALLET_B:-0x42c318751644a1be96f102dc46c828400fe58bd6}
 chain=$base/chain
 logs=$base/logs
 sock=$dev/run/signer.sock
+mode=${1:-fake}
+label=${2:-}
 say() { printf 'demo-local: %s\n' "$*" >&2; }
 stuck() { printf 'demo-local: 卡在%s\n' "$*" >&2; exit 1; }
 answers() { python3 -I -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.settimeout(1); s.connect(sys.argv[1])' "$1" 2>/dev/null; }
 [ -t 0 ] || stuck "啟動前：要在終端機執行（Signer 的密語從終端機輸入）"
+case $mode in
+fake) ;;
+live) echo "$label" | grep -Eq '^[a-z0-9]{1,12}$' || stuck "參數：live 要一個標籤（小寫英數，例如 r1），task 會是 show-e1a-標籤-…" ;;
+*) stuck "參數：不寫（fake Agent）或 live 標籤（城鎮・真實 Agent）" ;;
+esac
 
 # Before anything starts: the ports free and no Signer left over.
 for p in 8545 8402; do
@@ -78,9 +89,24 @@ say "1/3 本機鏈就緒：$(grep -E '^p2-local: (resumed|wrote)' "$logs/chain.l
     i=$((i + 1)); [ $i -lt 900 ] || { say "卡在第 3 步：15 分鐘內沒有 Signer，Host 沒有啟動；全部停下"; kill -TERM 0; }
     sleep 1
   done
-  say "3/3 Host 啟動中（fake Agent；頁面會自動打開；配對碼在下面）"
-  APA_PRESENT_DIR=$base/host make present-p2 SIGNER="$sock" AUTH=device PAYMENTS="$chain/payments.json" REGISTRY="$chain/registry.json" ||
-    { say "卡在第 3 步：Host 停了（上面是它的訊息）；全部停下"; kill -TERM 0; }
+  if [ "$mode" = live ]; then
+    # The town on the real Agent: host files made once for the label from the chain's directory (the shop's own products).
+    host=$base/live-$label
+    # Made once for the label, with the evidence's start recorded before any run (docs/commercial-live-town.md L4).
+    if [ ! -d "$host" ]; then
+      go run ./cmd/p2-testnet e1a-host --from "$chain" --out "$host" --label "$label" ||
+        { say "卡在第 3 步：建不出城鎮的 host 檔（$host）；全部停下"; kill -TERM 0; }
+      go run ./cmd/e1-evidence start --rpc http://127.0.0.1:8545 --host "$host" --out "$host/start.json" ||
+        { say "卡在第 3 步：記不下證據的起點（$host/start.json；task 已登記過就換一個標籤）；全部停下"; kill -TERM 0; }
+    fi
+    say "3/3 Host 啟動中（城鎮・真實 Agent：按「開始」才執行 Claude Code CLI，一個場域兩位客人；頁面會自動打開；配對碼在下面）"
+    make present-e1a SIGNER="$sock" HOST="$host" AUTH=device SCENARIOS=testdata/demo/scenarios-town-live.json ||
+      { say "卡在第 3 步：Host 停了（上面是它的訊息）；全部停下"; kill -TERM 0; }
+  else
+    say "3/3 Host 啟動中（fake Agent；頁面會自動打開；配對碼在下面）"
+    APA_PRESENT_DIR=$base/host make present-p2 SIGNER="$sock" AUTH=device PAYMENTS="$chain/payments.json" REGISTRY="$chain/registry.json" ||
+      { say "卡在第 3 步：Host 停了（上面是它的訊息）；全部停下"; kill -TERM 0; }
+  fi
 ) &
 
 # 2 the Signer, here in the foreground: its passphrase is typed on this terminal.

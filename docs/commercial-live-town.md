@@ -70,4 +70,30 @@ S1～S3 我做（含 review）；S4、S5 要你操作，模型每場都會真的
 
 ## 6 進度
 
-（尚未開始，等 D1～D5。）
+Aaron 10/29：D1～D5「照建議」。
+
+- **S1** `testdata/demo/scenarios-town-live.json`（id 加 `town-` 前綴，和 fake 的城鎮、E1-a 的都不重複）；`TestTownLiveCatalog`：只在付款主機的 live 下載入，每一筆都是 fake 城鎮同一筆的場景、客人與委託（fake 那份的測試保證每個場域一 Ask 一 Allow），合約都是 v2。
+- **S2**
+  - `make present-e1a SCENARIOS=…`（預設仍是 E1-a 的目錄）。
+  - `sh scripts/demo/demo-testnet.sh live <標籤> town`：host 檔放 `var/e1a-testnet/town-<標籤>`（不帶 `--shop-eval`）。
+  - `sh scripts/demo/demo-local.sh live <標籤>`：本機鏈、開發用 Signer、真實 CLI，host 檔放 `var/demo-local/live-<標籤>`。
+  - 兩支腳本第一次建 host 檔時，就用 `e1-evidence start` 記下證據的起點（本機 `127.0.0.1:8545`；testnet `https://sepolia.base.org`，唯讀）。同一個標籤之後再啟動，沿用同一份 host 檔、資料庫與起點，task 依序往下用（每位客人 5 個，用完換標籤）。
+  - 以本機鏈的目錄試產 host 檔：兩位客人各 5 個 task、兩人都有委託、沒有評測目錄。
+- **S3** checker 的 `e1a` 模式讀兩份受信任的 live 目錄（同一個 id 出現在兩份就拒絕）；`TestE1aCatalogHasTheTown`。
+- 測試：`internal/verification`、`cmd/demo`、`cmd/e1-evidence`、`cmd/p2-testnet` 全過（`cmd/demo` 的 loopback 測試在沙盒外跑）。
+
+### 6.1 S4：Aaron 的本機彩排（真實 CLI、本機鏈、你的裝置）
+
+模型每一場都會真的執行：兩個場域，共四場。
+
+| # | 誰 | 做什麼 | 可以貼回的 |
+|---|---|---|---|
+| 0 | 你 | 確認 `var/present.conf` 的 `cli=` 指向 `var/cli/claude-2.1.301`，而且那個檔案還在（不用執行它） | 有或沒有 |
+| 1 | 你 | `sh scripts/demo/demo-local.sh live town1`，提示時輸入 Signer 的密語（標籤不能用 E1-a 在同一個開發用 Signer 上用過的 r1、r1b、r1c、r2：Signer 記得它決定過的每一場）；頁面會自動打開，配對碼不要貼回 | 啟動到 `3/3 Host 啟動中` 之後的訊息（沒有秘密） |
+| 2 | 你 | 簡報模式 → 01 資料研究室 → 開始：客人 A、B 依序用裝置確認委託；兩位真實 Agent 同時執行；A 的簡報 0.50 要你用裝置核准，B 的週報 0.06 自動付款；等兩位都「已交付」 | 畫面上兩位的最後狀態 |
+| 3 | 你 | 02 街角咖啡 → 開始：同樣確認兩位；B 的會議咖啡 0.42 要你核准，A 的午餐 0.08 自動付款；等兩位都「已交付」 | 同上 |
+| 4 | 你 | **先不要停**，告訴我做完了 | — |
+| 5 | Claude Code | `e1-evidence pack`（四場、`--task show-e1a-town1-…=town-…`）＋`verify-demo --mode e1a --rpc http://127.0.0.1:8545` | — |
+| 6 | 你 | 我回報後再 Ctrl-C | — |
+
+預期：四場的請購分別是 `kr-market`（Ask）、`tw-semis-note`（Allow）、`cafe-lunch-set`（Allow）、`cafe-meeting-coffee`（Ask），全部付款、交付；E1～E9 PASS（E10 只看注入的場次，這四場不適用）。Agent 若買錯或多買，照實記下，不重跑當作沒發生。

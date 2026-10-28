@@ -12,6 +12,7 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 )
 
 // E1-a (docs/commercial-e1a.md 4.2): the live pay catalog loads only on a
@@ -43,6 +44,45 @@ func TestE1aCatalog(t *testing.T) {
 	// The model is given the entry's task in the paying host's words; a fake run, the fixed prompt.
 	if got := promptFor(scs["e1a-deny"].Task); !strings.Contains(got, "you never pay directly") || !strings.HasSuffix(got, "買韓國市場完整歷史資料庫。") || promptFor("") != buyer.Prompt {
 		t.Errorf("prompt %q", got)
+	}
+}
+
+// The town on the real Agent (docs/commercial-live-town.md L1): the live
+// catalog loads only on a host that pays, apa.pay.v2 throughout, and each
+// entry is its fake town scene's (scenarios-p2.json, whose test holds one Ask
+// and one Allow a scene) with the task in words: scene, customer, delegation.
+func TestTownLiveCatalog(t *testing.T) {
+	var regCfg contracts.RegistryConfig
+	if err := decodeFile("testdata/demo/registry.json", &regCfg); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := contracts.NewRegistry(regCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := loadScenarios("testdata/demo/scenarios-town-live.json", reg, regCfg, true, true)
+	if err != nil || len(live) != 4 {
+		t.Fatalf("live, paying: %v %v", live, err)
+	}
+	if _, err := loadScenarios("testdata/demo/scenarios-town-live.json", reg, regCfg, true, false); err == nil {
+		t.Error("the town's live catalog loaded on a host that does not pay")
+	}
+	fake, err := loadScenarios("testdata/demo/scenarios-p2.json", reg, regCfg, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, f := range fake {
+		l := live["town-"+id]
+		if l == nil {
+			t.Fatalf("no town-%s", id)
+		}
+		if l.Contract != "apa.pay.v2" || l.Scene != f.Scene || l.ConsumerID != f.ConsumerID || *l.Delegation != *f.Delegation || l.Task == "" {
+			t.Errorf("town-%s: %+v, not %s's %+v", id, l, id, f)
+		}
+	}
+	raw, _ := os.ReadFile("testdata/policy/m1-demo-profile.json")
+	if p, err := policy.LoadProfile(raw); err != nil || checkDelegations(live, p) != nil {
+		t.Fatalf("profile: %v", err)
 	}
 }
 
