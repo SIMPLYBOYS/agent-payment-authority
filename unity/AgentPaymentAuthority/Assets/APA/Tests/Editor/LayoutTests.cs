@@ -14,6 +14,16 @@ public class LayoutTests
     static List<(string name, Layout l)> All() =>
         Resources.LoadAll<TextAsset>("Layouts").Select(t => (t.name, JsonUtility.FromJson<Layout>(t.text))).ToList();
 
+    // A town piece's size in tiles, from its cut PNG's header (32 px a tile); 1 x 1 without the LimeZu files.
+    static Vector2 CutSize(string key)
+    {
+        var f = Path.Combine(Application.dataPath, "LimeZu/_cut", key + ".png");
+        if (!File.Exists(f)) return Vector2.one;
+        var b = File.ReadAllBytes(f);
+        int At(int o) => b[o] << 24 | b[o + 1] << 16 | b[o + 2] << 8 | b[o + 3];
+        return new Vector2(At(16), At(20)) / 32f;
+    }
+
     static string chars;
     // InFont: every character of a text the scene shows is in its font
     // (GD3-B: a subset, scripts/unity/font-subset.py; a missing one draws
@@ -77,7 +87,13 @@ public class LayoutTests
         // tiles in front of a door, 2 either side of it, where A and B stand and people go in and out.
         foreach (var v in town.venues)
             foreach (var p in town.props)
-                Assert.IsFalse(Mathf.Abs(p.x - (v.x + v.door.x)) < 2f && p.y > v.y - 2f && p.y < v.y, "town: " + p.key + " at " + p.x + "," + p.y + " stands at the door of " + v.layout);
+            {
+                float d = v.x + v.door.x;
+                Assert.IsFalse(Mathf.Abs(p.x - d) < 2f && p.y > v.y - 2f && p.y < v.y, "town: " + p.key + " at " + p.x + "," + p.y + " stands at the door of " + v.layout);
+                // and no wide or tall piece standing beside it reaches over the door, A or B (door ± 1.2, its step)
+                var s = CutSize(p.key);
+                Assert.IsFalse(p.x - s.x / 2f < d + 1.2f && p.x + s.x / 2f > d - 1.2f && p.y < v.y && p.y + s.y > v.y - 1.5f, "town: " + p.key + " at " + p.x + "," + p.y + " covers the door of " + v.layout);
+            }
     }
 
     // Every scene the host's UX3 catalog names has its room.
