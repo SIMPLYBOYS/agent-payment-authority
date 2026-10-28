@@ -134,6 +134,21 @@ public class LayoutTests
             .Concat(town.walkers.Concat(town.inside.SelectMany(g => g.people)).Select(w => w.key))
             .Concat(town.traffic != null ? town.traffic.cars.Select(c => c.key).Concat(town.traffic.lights) : Enumerable.Empty<string>());
         foreach (var k in pieces) CollectionAssert.Contains(keys, k, "town: " + k + " not in limezu-assets.txt");
+        // Traffic (review of 54435f5): a crossing walker makes it over within the red; the cars of a lane start apart.
+        if (town.traffic != null && town.traffic.cycle.Length == 3)
+        {
+            var t = town.traffic;
+            foreach (var w in town.walkers)
+                for (int i = 1; i < w.path.Length; i++)
+                {
+                    Vector2 a = w.path[i - 1], b = w.path[i];
+                    if (a.x == b.x && a.x >= t.from && a.x <= t.to && Mathf.Min(a.y, b.y) <= t.bottom && Mathf.Max(a.y, b.y) >= t.top)
+                        Assert.Less((b - a).magnitude / w.speed + 0.5f, t.cycle[2], "town: " + w.key + " can't cross within the red");
+                }
+            foreach (var a in t.cars)
+                foreach (var b in t.cars)
+                    if (a != b && a.y == b.y) Assert.GreaterOrEqual(Mathf.Abs(a.x - b.x), (CutSize(a.key).x + CutSize(b.key).x) / 2f + 0.8f, "town: " + a.key + " and " + b.key + " start on each other");
+        }
         // A sheet of frames splits evenly, and is never also tiled (Frames() makes no tiled sprite).
         foreach (var p in town.props.Concat(town.venues.Select(v => v.doorway)).Where(p => p != null && p.frames > 1))
         {

@@ -451,7 +451,8 @@ namespace APA
         readonly List<SpriteRenderer> signals = new List<SpriteRenderer>();
         Sprite[] lightSprites = new Sprite[0];
         static readonly string[] LightNames = { "green", "amber", "red" };
-        const float WrapFrom = -10f, WrapTo = 74f, Gap = 0.8f, Line = 0.3f; // off the widest view; between cars; the stop line before the crossing
+        const float Gap = 0.8f, Line = 0.3f; // between cars; the stop line before the crossing
+        float roadFrom, roadTo; // where the ground ends: a car goes round there, a half car past it (review of 54435f5: a wide view shows -12.7..77)
         public string Light => LightNames[LightState(out _)]; // tests
         public IEnumerable<(float x, float half, float y, float speed)> Cars { get { foreach (var c in cars) yield return (c.x, c.half, c.c.y, c.c.speed); } } // tests
 
@@ -462,6 +463,8 @@ namespace APA
             lightSprites = new Sprite[3];
             for (int i = 0; i < 3; i++) lightSprites[i] = Sprite(t.lights[i], new Vector2(0.5f, 0f));
             foreach (Transform c in transform) if (c.name == t.lights[0] && c.TryGetComponent<SpriteRenderer>(out var r)) signals.Add(r);
+            roadFrom = float.MaxValue; roadTo = float.MinValue;
+            foreach (var g in town.ground) { roadFrom = Mathf.Min(roadFrom, g.x); roadTo = Mathf.Max(roadTo, g.x + g.w); }
             foreach (var car in t.cars)
             {
                 var r = Piece(transform, new Town.Piece { key = car.key, x = car.x, y = car.y }, Order(car.y), new Vector2(0.5f, 0f));
@@ -496,10 +499,10 @@ namespace APA
 
         void Drive(float dt)
         {
-            if (cars.Count == 0) return;
-            var t = town.traffic;
             int st = LightState(out var left);
             foreach (var r in signals) r.sprite = lightSprites[st];
+            if (cars.Count == 0) return;
+            var t = town.traffic;
             bool someoneOn = false; // a walker on the crossing: every car waits at the line
             foreach (var w in walkers)
             {
@@ -523,8 +526,8 @@ namespace APA
                 }
                 float go = Mathf.Abs(c.c.speed) * dt * Mathf.Clamp(room / 1.5f, 0.3f, 1f); // slows to a stop
                 c.x += dir * Mathf.Clamp(go, 0f, Mathf.Max(0f, room));
-                if (dir > 0f && c.x > WrapTo) c.x = WrapFrom;
-                if (dir < 0f && c.x < WrapFrom) c.x = WrapTo;
+                if (dir > 0f && c.x > roadTo + c.half) c.x = roadFrom - c.half;
+                if (dir < 0f && c.x < roadFrom - c.half) c.x = roadTo + c.half;
                 c.r.transform.localPosition = new Vector2(c.x, c.c.y);
             }
         }
