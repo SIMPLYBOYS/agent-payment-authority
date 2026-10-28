@@ -332,15 +332,15 @@ public class TownTests
         return new Vector2(v.x, v.y) + v.door;
     }
 
-    static IEnumerator Wait(float s) { for (float end = Time.realtimeSinceStartup + s; Time.realtimeSinceStartup < end;) yield return null; }
-
-    // Out: waits up to s seconds for that passer-by to be back on the street in full sight (its short path then takes it in again).
-    IEnumerator Out(string key, float s, System.Action<float> when)
+    // Until: waits up to s seconds for a condition, and says how long it took (s if never: polled, as batch mode's frames can stall).
+    static IEnumerator Until(System.Func<bool> ok, float s, System.Action<float> took)
     {
         float t0 = Time.realtimeSinceStartup;
-        while (Time.realtimeSinceStartup - t0 < s && !(town.Passer(key).shop == null && town.Passer(key).shown == 1f)) yield return null;
-        when(Time.realtimeSinceStartup - t0);
+        while (Time.realtimeSinceStartup - t0 < s && !ok()) yield return null;
+        took(Time.realtimeSinceStartup - t0);
     }
+    bool InSight(string key) => town.Passer(key).shop == null && town.Passer(key).shown == 1f; // back on the street (its short path then takes it in again)
+    bool InThere(string key, string layout) => town.Passer(key).shop == layout && town.Passer(key).shown < 0.05f;
 
     static Town.Walker Visit(string key, Vector2 door) => new Town.Walker { key = key, speed = 4f, path = new[] { door - Vector2.up, door, door - Vector2.up } };
 
@@ -349,12 +349,10 @@ public class TownTests
     {
         Assert.IsTrue(JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text).walkers.Count(w => w.path.Any(p => new[] { "data", "cafe", "mart" }.Any(l => (p - DoorOf(l)).sqrMagnitude < 0.01f))) >= 3, "the town's own passers-by visit the shops");
         town.AddWalker(Visit("x-walk-11", DoorOf("mart")));
-        yield return Wait(0.8f); // a tile at 4 a second, then the fade
-        var p = town.Passer("x-walk-11");
-        Assert.AreEqual("mart", p.shop, "gone into the mart");
-        Assert.Less(p.shown, 0.05f, "out of sight");
-        float after = 0f;
-        yield return Out("x-walk-11", 6f, t => after = t);
+        float took = 0f, after = 0f;
+        yield return Until(() => InThere("x-walk-11", "mart"), 3f, t => took = t); // a tile at 4 a second, then the fade
+        Assert.Less(took, 3f, "gone into the mart, out of sight");
+        yield return Until(() => InSight("x-walk-11"), 6f, t => after = t);
         Assert.Less(after, 6f, "out again, in sight");
         Assert.Greater(after, 3.5f, "after a while in there");
     }
@@ -365,25 +363,35 @@ public class TownTests
         bridge.View("{\"mode\":\"town\"}");
         yield return Settle();
         var door = DoorOf("cafe");
+        float took = 0f;
         town.AddWalker(Visit("x-walk-14", door));
-        yield return Wait(0.8f);
-        Assert.AreEqual("cafe", town.Passer("x-walk-14").shop, "in before A comes");
+        yield return Until(() => InThere("x-walk-14", "cafe"), 3f, t => took = t);
+        Assert.Less(took, 3f, "in before A comes");
+        // one on its way up to the door as A comes (review of 10feaa0): in at once, not over A
+        town.AddWalker(new Town.Walker { key = "x-walk-02", speed = 1f, path = new[] { door - Vector2.up, door, door - Vector2.up } });
+        yield return Until(() => town.Passer("x-walk-02").at.y > door.y - 0.6f, 3f, t => took = t);
         bridge.Receive(V2(1, "consumer-a", "waiting"));
         yield return null;
         Assert.IsTrue(town.StandsAtDoor("consumer-a"), "A at the cafe's door");
-        town.AddWalker(Visit("x-walk-04", door));
+        // and one along the lane: past the door, not in, and on (not stuck)
+        town.AddWalker(new Town.Walker { key = "x-walk-04", speed = 4f, path = new[] { door - Vector2.up - 2f * Vector2.right, door - Vector2.up, door, door - Vector2.up, door - Vector2.up + 2f * Vector2.right } });
+        float x0 = town.Passer("x-walk-04").at.x, far = 0f;
         for (float end = Time.realtimeSinceStartup + 6f; Time.realtimeSinceStartup < end;)
         {
             var o = town.Passer("x-walk-04");
             Assert.IsTrue(o.shop == null && o.at.y <= door.y - 0.99f, "walks on below A, not in: " + o.at);
+            far = Mathf.Max(far, o.at.x - x0);
             Assert.Less(town.Passer("x-walk-14").shown, 0.05f, "the one inside waits there");
+            var up = town.Passer("x-walk-02");
+            Assert.IsTrue(up.shop == "cafe" && up.shown < 0.05f, "the one going up went in: " + up.at + " " + up.shown);
             yield return null;
         }
+        Assert.Greater(far, 3f, "walked on past the door");
         bridge.Receive(V2(1, "consumer-a", "delivered", 9));
         yield return null;
         Assert.IsFalse(town.StandsAtDoor("consumer-a"));
         float after = 0f;
-        yield return Out("x-walk-14", 2f, t => after = t);
+        yield return Until(() => InSight("x-walk-14"), 2f, t => after = t);
         Assert.Less(after, 1f, "out once A has gone");
     }
 }

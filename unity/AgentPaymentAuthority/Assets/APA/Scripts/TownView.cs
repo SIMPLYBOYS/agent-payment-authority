@@ -308,11 +308,11 @@ namespace APA
         static int Depth(WalkerState s, float y) => s.room ? -(int)(y * 10f) + 1 : Order(y);
 
         const float Stay = 5f, Fade = 0.35f; // seconds in a shop; to go in or come out
-        // Busy: A or B stands at that venue's door (they transact there): no one else goes in or comes out over them.
+        // Busy: A or B stands at that venue's door (they transact there; PlaceStands' rule, this frame): no one else goes in or comes out over them.
         bool Busy(string layout)
         {
-            if (shop == null || shop.LayoutKey != layout) return false;
-            foreach (var st in stands.Values) if (st.body.enabled) return true;
+            if (layout == null || shop == null || shop.LayoutKey != layout) return false;
+            foreach (var k in stands.Keys) if (shop.Transacting(k)) return true;
             return false;
         }
 
@@ -323,7 +323,7 @@ namespace APA
             {
                 // In a shop: fades out facing its door, stays, and fades in facing the street, once the door is clear.
                 s.inside += dt;
-                if (Busy(s.doorOf[s.leg])) s.inside = Mathf.Min(s.inside, Stay - Fade);
+                if (Busy(s.doorOf[s.leg])) s.inside = Mathf.Clamp(s.inside, Fade, Stay - Fade); // out of sight until they have gone
                 s.r.color = new Color(1f, 1f, 1f, Mathf.Clamp01(Mathf.Max(Fade - s.inside, s.inside - (Stay - Fade)) / Fade));
                 int f = (s.inside < Stay / 2f ? 1 : 3) * 6; // up, down
                 if (f < s.frames.Length) s.r.sprite = s.frames[f];
@@ -340,6 +340,15 @@ namespace APA
             }
             bool loop = path[0] == path[path.Length - 1];
             var p = (Vector2)s.r.transform.localPosition;
+            // Caught between the street and a door (going in, or just out) as A or B arrive there: in at once, out of their way.
+            int nx = s.leg + s.dir;
+            if (p != path[s.leg] && (Busy(s.doorOf[nx]) || Busy(s.doorOf[s.leg])))
+            {
+                if (s.doorOf[nx] != null) s.leg = nx;
+                s.inside = Fade;
+                s.r.color = Color.clear;
+                return;
+            }
             float go = s.w.speed * dt;
             Vector2 d = Vector2.zero;
             for (int guard = 0; go > 0f && guard < 8; guard++)
@@ -356,7 +365,7 @@ namespace APA
                 }
                 s.leg = next;
                 bool enter = !skip && s.doorOf[s.leg] != null;
-                if (loop && s.leg == path.Length - 1) { s.leg = 0; p = path[0]; }
+                if (loop && s.leg == path.Length - 1) { s.leg = 0; if (!skip) p = path[0]; }
                 else if (!loop && (s.leg == path.Length - 1 || s.leg == 0)) s.dir = -s.dir;
                 if (enter) { s.inside = 0f; break; }
             }

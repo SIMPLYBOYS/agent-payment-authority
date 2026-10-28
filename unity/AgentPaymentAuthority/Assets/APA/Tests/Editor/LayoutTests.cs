@@ -94,6 +94,16 @@ public class LayoutTests
                 var s = CutSize(p.key);
                 Assert.IsFalse(p.x - s.x / 2f < d + 1.2f && p.x + s.x / 2f > d - 1.2f && p.y < v.y && p.y + s.y > v.y - 1.5f, "town: " + p.key + " at " + p.x + "," + p.y + " covers the door of " + v.layout);
             }
+        // A lane past a door runs a tile below it: a passer-by there draws over A and B, but only to their feet (review of 10feaa0).
+        foreach (var v in town.venues)
+            foreach (var w in town.walkers)
+                for (int i = 1; i < w.path.Length; i++)
+                {
+                    Vector2 a = w.path[i - 1], b = w.path[i];
+                    float d = v.x + v.door.x, door = v.y + v.door.y;
+                    if (a.y != b.y || Mathf.Max(a.x, b.x) < d - 1.2f || Mathf.Min(a.x, b.x) > d + 1.2f) continue;
+                    Assert.IsFalse(a.y > door - 0.9f && a.y < v.y, "town: " + w.key + "'s lane at y " + a.y + " passes over A and B at the door of " + v.layout);
+                }
     }
 
     // Every scene the host's UX3 catalog names has its room.
