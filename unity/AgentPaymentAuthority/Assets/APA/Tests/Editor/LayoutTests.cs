@@ -73,6 +73,11 @@ public class LayoutTests
         var pieces = town.ground.Concat(town.props).Concat(town.venues.SelectMany(v => v.exterior)).Select(p => p.key)
             .Concat(town.walkers.Concat(town.inside.SelectMany(g => g.people)).Select(w => w.key));
         foreach (var k in pieces) CollectionAssert.Contains(keys, k, "town: " + k + " not in limezu-assets.txt");
+        // Nothing stands on a doorstep (Aaron 10/28: flower boxes in front of the doors): the two
+        // tiles in front of a door, 2 either side of it, where A and B stand and people go in and out.
+        foreach (var v in town.venues)
+            foreach (var p in town.props)
+                Assert.IsFalse(Mathf.Abs(p.x - (v.x + v.door.x)) < 2f && p.y > v.y - 2f && p.y < v.y, "town: " + p.key + " at " + p.x + "," + p.y + " stands at the door of " + v.layout);
     }
 
     // Every scene the host's UX3 catalog names has its room.

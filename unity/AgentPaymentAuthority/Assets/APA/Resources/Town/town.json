@@ -58,9 +58,9 @@
     {"key": "x-bed-c", "x": 47, "y": 7, "w": 4, "h": 8}
   ],
   "props": [
-    {"key": "x-flowers-box", "x": 25, "y": 25.3},
-    {"key": "x-flowers-box-2", "x": 28.2, "y": 25.3},
-    {"key": "x-flowers-box-3", "x": 44.5, "y": 25.3},
+    {"key": "x-flowers-box", "x": 19.3, "y": 25.3},
+    {"key": "x-flowers-box-2", "x": 21.3, "y": 25.3},
+    {"key": "x-flowers-box-3", "x": 38.7, "y": 25.3},
     {"key": "x-pot", "x": 13.2, "y": 25.2},
     {"key": "x-pot", "x": 33.6, "y": 25.2},
     {"key": "x-pigeon", "x": 24, "y": 23.2},
@@ -91,7 +91,7 @@
     {"key": "x-tree", "x": 48, "y": 7.5},
     {"key": "x-tree-big", "x": 50.5, "y": 10.5},
     {"key": "x-flowers", "x": 47.5, "y": 13.5},
-    {"key": "x-npc-03", "x": 20.6, "y": 25.4},
+    {"key": "x-npc-03", "x": 28.4, "y": 25.4},
     {"key": "x-npc-10", "x": 41.5, "y": 25.4},
     {"key": "x-npc-18", "x": 29.4, "y": 7.6},
     {"key": "x-npc-20", "x": 19.6, "y": 12.9},
@@ -184,7 +184,7 @@
       {"key": "x-office-top-l", "x": 0, "y": 9.875},
       {"key": "x-office-top", "x": 0.5, "y": 9.875, "w": 11, "h": 0.5},
       {"key": "x-office-top-r", "x": 11.5, "y": 9.875}]},
-    {"layout": "cafe", "number": "02", "name": "街角咖啡", "x": 36, "y": 26, "door": {"x": 10.6, "y": -0.9}, "exterior": [
+    {"layout": "cafe", "number": "02", "name": "街角咖啡", "x": 36, "y": 26, "door": {"x": 9.55, "y": -0.9}, "exterior": [
       {"key": "x-front-win", "x": 0, "y": 0},
       {"key": "x-upper", "x": 0, "y": 3},
       {"key": "x-upper-end", "x": 9, "y": 3},
