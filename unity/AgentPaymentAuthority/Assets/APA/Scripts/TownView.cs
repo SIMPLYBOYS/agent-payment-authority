@@ -31,11 +31,13 @@ namespace APA
         public Inside[] inside = new Inside[0];
         public Venue[] venues = new Venue[0];
 
-        [System.Serializable] public class Piece { public string key; public float x, y, w, h; }
+        // frames: the file is that many frames side by side (Aaron 10/28: a fountain that plays, doors that open).
+        [System.Serializable] public class Piece { public string key; public float x, y, w, h; public int frames; }
         // A venue: the room (layout) it holds, its number and name on the
         // map, its outside, and its door (from its origin): where the
         // transition closes and A and B stand.
-        [System.Serializable] public class Venue { public string layout, number, name; public float x, y; public Vector2 door; public Piece[] exterior = new Piece[0]; }
+        // doorway: its door's frames (closed, opening, open at the middle, closing), over the door in its outside.
+        [System.Serializable] public class Venue { public string layout, number, name; public float x, y; public Vector2 door; public Piece[] exterior = new Piece[0]; public Piece doorway; }
         // A passer-by (illustrative): a premade character's walk row (24 frames of 32 x
         // 64: right, up, left, down), along a path of horizontal and vertical
         // legs; a path that ends where it starts loops, any other goes back.
@@ -96,7 +98,11 @@ namespace APA
             Backdrop();
             if (town == null) return;
             for (int i = 0; i < town.ground.Length; i++) Piece(transform, town.ground[i], -1000 + i, Vector2.zero); // in file order: a later piece over an earlier one
-            foreach (var p in town.props) Piece(transform, p, Order(p.y), new Vector2(0.5f, 0f));
+            foreach (var p in town.props)
+            {
+                var r = Piece(transform, p, Order(p.y), new Vector2(0.5f, 0f));
+                if (r != null && p.frames > 1) loops.Add((r, Frames(p.key, p.frames, new Vector2(0.5f, 0f))));
+            }
             foreach (var v in town.venues)
             {
                 var root = new GameObject("venue-" + v.layout).transform;
@@ -106,6 +112,11 @@ namespace APA
                 float bottom = float.MaxValue;
                 foreach (var e in v.exterior) bottom = Mathf.Min(bottom, e.y);
                 for (int i = 0; i < v.exterior.Length; i++) Piece(root, v.exterior[i], Order(v.y + bottom) + i, Vector2.zero);
+                if (v.doorway != null && !string.IsNullOrEmpty(v.doorway.key))
+                {
+                    var r = Piece(root, v.doorway, Order(v.y + bottom) + v.exterior.Length, Vector2.zero);
+                    if (r != null) doors[v.layout] = new DoorState { r = r, frames = Frames(v.doorway.key, Mathf.Max(1, v.doorway.frames), Vector2.zero) };
+                }
                 // The building's top, from the data (a repeated piece's h, else its file's height): the pill sits just above it.
                 float top = 0f;
                 foreach (var e in v.exterior) top = Mathf.Max(top, e.y + (e.h > 0f ? e.h : Height(e.key)));
@@ -176,18 +187,60 @@ namespace APA
             return i >= 0 && i < art.Length ? art[i] : null;
         }
 
-        // Sprite: a piece's whole file, anchored at pivot; FullRect so it can repeat.
-        Sprite Sprite(string key, Vector2 pivot)
+        // Sprite: a piece's whole file (its first frame), anchored at pivot; FullRect so it can repeat.
+        Sprite Sprite(string key, Vector2 pivot, int frames = 1)
         {
             var tex = Tex(key);
-            return tex == null ? null : UnityEngine.Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), pivot, PPU, 0, SpriteMeshType.FullRect);
+            return tex == null ? null : UnityEngine.Sprite.Create(tex, new Rect(0, 0, tex.width / Mathf.Max(1, frames), tex.height), pivot, PPU, 0, SpriteMeshType.FullRect);
+        }
+
+        Sprite[] Frames(string key, int n, Vector2 pivot)
+        {
+            var tex = Tex(key);
+            var f = new Sprite[n];
+            for (int i = 0; i < n; i++) f[i] = UnityEngine.Sprite.Create(tex, new Rect(i * tex.width / n, 0, tex.width / n, tex.height), pivot, PPU);
+            return f;
+        }
+
+        // ---- what plays: a prop's frames in a loop; a door opening for whoever goes in or comes out ----
+        readonly List<(SpriteRenderer r, Sprite[] frames)> loops = new List<(SpriteRenderer, Sprite[])>();
+        class DoorState { public SpriteRenderer r; public Sprite[] frames; public float open; }
+        readonly Dictionary<string, DoorState> doors = new Dictionary<string, DoorState>();
+        public int DoorFrame(string layout) => doors.TryGetValue(layout, out var d) ? System.Array.IndexOf(d.frames, d.r.sprite) : -1; // tests
+        const float DoorTime = 0.4f; // to open, or to close
+
+        // Opens: someone goes in or comes out there: between the street and the door, or just in, or about to come out.
+        bool Opens(string layout)
+        {
+            if (Busy(layout)) return false; // no one does while A or B stand there
+            foreach (var s in walkers)
+            {
+                if (s.room || s.doorOf == null) continue;
+                if (s.inside >= 0f) { if (s.doorOf[s.leg] == layout && (s.inside < Fade + DoorTime || s.inside > Stay - Fade - DoorTime)) return true; continue; }
+                var p = (Vector2)s.r.transform.localPosition;
+                int nx = s.leg + s.dir;
+                if (nx >= 0 && nx < s.doorOf.Length && s.doorOf[nx] == layout && p != s.w.path[s.leg]) return true; // on the way up
+                if (s.doorOf[s.leg] == layout) return true; // just out, on the way down
+            }
+            return false;
+        }
+
+        void Play(float dt)
+        {
+            foreach (var (r, f) in loops) r.sprite = f[(int)(Time.time * 8f) % f.Length];
+            foreach (var kv in doors)
+            {
+                var d = kv.Value;
+                d.open = Mathf.MoveTowards(d.open, Opens(kv.Key) ? 1f : 0f, dt / DoorTime);
+                d.r.sprite = d.frames[Mathf.RoundToInt(d.open * (d.frames.Length / 2))]; // the opening half, backwards to close
+            }
         }
 
         float Height(string key) => Tex(key) != null ? Tex(key).height / (float)PPU : 0f;
 
         SpriteRenderer Piece(Transform parent, Town.Piece p, int order, Vector2 pivot)
         {
-            var s = Sprite(p.key, pivot);
+            var s = Sprite(p.key, pivot, p.frames);
             if (s == null) return null;
             var go = new GameObject(p.key);
             go.transform.SetParent(parent, false);
@@ -546,6 +599,7 @@ namespace APA
         void Update()
         {
             foreach (var s in walkers) Walk(s, Time.deltaTime);
+            Play(Time.deltaTime);
             if (!HasTown || shown != "town" || phase != 0 || Clicked == null || !Input.GetMouseButtonDown(0) || cam == null) return;
             var p = (Vector2)transform.InverseTransformPoint(cam.ScreenToWorldPoint(Input.mousePosition));
             var hit = VenueAt(p);

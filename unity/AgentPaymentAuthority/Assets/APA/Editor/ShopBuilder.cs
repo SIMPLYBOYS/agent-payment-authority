@@ -96,13 +96,14 @@ namespace APA.EditorTools
             return Load(m, key);
         }
 
-        // ReadPng: an 8-bit RGBA, non-interlaced PNG (the LimeZu sheets) as
-        // rows from the top. Texture2D.LoadImage refuses a sheet taller than
+        // ReadPng: an 8-bit RGBA or 8-bit palette (the animated sheets), non-interlaced PNG (the LimeZu sheets) as
+        // RGBA rows from the top. Texture2D.LoadImage refuses a sheet taller than
         // the batch editor's 8192 (5_Floor_Modular_Buildings is 8288).
         public static (int w, int h, byte[] rgba) ReadPng(byte[] b) // public for the EditMode test
         {
             int Be(int o) => (b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3];
-            int w = 0, h = 0;
+            int w = 0, h = 0, bpp = 4;
+            byte[] plte = null, trns = new byte[0];
             var idat = new MemoryStream();
             for (int o = 8; o + 8 <= b.Length;)
             {
@@ -111,13 +112,17 @@ namespace APA.EditorTools
                 if (type == "IHDR")
                 {
                     w = Be(o + 8); h = Be(o + 12);
-                    if (b[o + 16] != 8 || b[o + 17] != 6 || b[o + 20] != 0) throw new System.Exception("not an 8-bit RGBA non-interlaced PNG");
+                    if (b[o + 16] != 8 || (b[o + 17] != 6 && b[o + 17] != 3) || b[o + 20] != 0) throw new System.Exception("not an 8-bit RGBA or palette non-interlaced PNG");
+                    if (b[o + 17] == 3) bpp = 1; // one index a pixel
                 }
+                else if (type == "PLTE") plte = b[(o + 8)..(o + 8 + len)];
+                else if (type == "tRNS") trns = b[(o + 8)..(o + 8 + len)];
                 else if (type == "IDAT") idat.Write(b, o + 8, len);
                 else if (type == "IEND") break;
                 o += 12 + len;
             }
-            int stride = w * 4;
+            if (bpp == 1 && plte == null) throw new System.Exception("a palette PNG without its palette");
+            int stride = w * bpp;
             var raw = new byte[h * (stride + 1)];
             idat.Position = 2; // the zlib header; DeflateStream reads the rest
             using (var z = new System.IO.Compression.DeflateStream(idat, System.IO.Compression.CompressionMode.Decompress))
@@ -133,13 +138,22 @@ namespace APA.EditorTools
                 if (f > 4) throw new System.Exception("PNG filter " + f);
                 for (int x = 0; x < stride; x++)
                 {
-                    int a = x >= 4 ? px[dst + x - 4] : 0, up = y > 0 ? px[dst + x - stride] : 0, c = x >= 4 && y > 0 ? px[dst + x - stride - 4] : 0;
+                    int a = x >= bpp ? px[dst + x - bpp] : 0, up = y > 0 ? px[dst + x - stride] : 0, c = x >= bpp && y > 0 ? px[dst + x - stride - bpp] : 0;
                     int p = a + up - c, pa = System.Math.Abs(p - a), pb = System.Math.Abs(p - up), pc = System.Math.Abs(p - c);
                     int pred = f == 1 ? a : f == 2 ? up : f == 3 ? (a + up) / 2 : f == 4 ? (pa <= pb && pa <= pc ? a : pb <= pc ? up : c) : 0;
                     px[dst + x] = (byte)(raw[src + x] + pred);
                 }
             }
-            return (w, h, px);
+            if (bpp == 4) return (w, h, px);
+            var rgba = new byte[w * h * 4];
+            for (int i = 0; i < w * h; i++)
+            {
+                int k = px[i];
+                if (k * 3 + 2 >= plte.Length) throw new System.Exception("PNG palette index " + k);
+                rgba[i * 4] = plte[k * 3]; rgba[i * 4 + 1] = plte[k * 3 + 1]; rgba[i * 4 + 2] = plte[k * 3 + 2];
+                rgba[i * 4 + 3] = k < trns.Length ? trns[k] : (byte)255;
+            }
+            return (w, h, rgba);
         }
 
         public static void Build()

@@ -80,7 +80,7 @@ public class LayoutTests
         }
         // The town too: a key missing from the manifest just doesn't draw (review of 7c71cfd).
         var town = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
-        var pieces = town.ground.Concat(town.props).Concat(town.venues.SelectMany(v => v.exterior)).Select(p => p.key)
+        var pieces = town.ground.Concat(town.props).Concat(town.venues.SelectMany(v => v.exterior)).Concat(town.venues.Where(v => v.doorway != null && !string.IsNullOrEmpty(v.doorway.key)).Select(v => v.doorway)).Select(p => p.key)
             .Concat(town.walkers.Concat(town.inside.SelectMany(g => g.people)).Select(w => w.key));
         foreach (var k in pieces) CollectionAssert.Contains(keys, k, "town: " + k + " not in limezu-assets.txt");
         // Nothing stands on a doorstep (Aaron 10/28: flower boxes in front of the doors): the two
@@ -92,6 +92,7 @@ public class LayoutTests
                 Assert.IsFalse(Mathf.Abs(p.x - d) < 2f && p.y > v.y - 2f && p.y < v.y, "town: " + p.key + " at " + p.x + "," + p.y + " stands at the door of " + v.layout);
                 // and no wide or tall piece standing beside it reaches over the door, A or B (door ± 1.2, its step)
                 var s = CutSize(p.key);
+                s.x /= Mathf.Max(1, p.frames); // a sheet: one frame's width
                 Assert.IsFalse(p.x - s.x / 2f < d + 1.2f && p.x + s.x / 2f > d - 1.2f && p.y < v.y && p.y + s.y > v.y - 1.5f, "town: " + p.key + " at " + p.x + "," + p.y + " covers the door of " + v.layout);
             }
         // A lane past a door runs a tile below it: a passer-by there draws over A and B, but only to their feet (review of 10feaa0).

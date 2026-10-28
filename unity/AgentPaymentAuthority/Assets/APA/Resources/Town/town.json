@@ -77,7 +77,7 @@
     {"key": "x-flowers-2", "x": 31, "y": 34.5},
     {"key": "x-flowers", "x": 9.5, "y": 34.5},
     {"key": "x-kiosk", "x": 25.5, "y": 7.2},
-    {"key": "x-fountain", "x": 18.5, "y": 9.4},
+    {"key": "x-fountain", "x": 18.5, "y": 9.4, "frames": 8},
     {"key": "x-bench-side", "x": 15.3, "y": 10},
     {"key": "x-bench", "x": 18.5, "y": 13.4},
     {"key": "x-bench", "x": 21.5, "y": 6.2},
@@ -173,7 +173,7 @@
       {"key": "x-pose-12-phone", "speed": 0, "path": [{"x": 3.9, "y": 0.2}]}]}
   ],
   "venues": [
-    {"layout": "data", "number": "01", "name": "資料研究室", "x": 18, "y": 26, "door": {"x": 7.4, "y": -0.9}, "exterior": [
+    {"layout": "data", "number": "01", "name": "資料研究室", "x": 18, "y": 26, "door": {"x": 7.4, "y": -0.9}, "doorway": {"key": "x-door-data", "x": 6, "y": 0, "frames": 14}, "exterior": [
       {"key": "x-office-ground", "x": 0, "y": 0},
       {"key": "x-office-ground-rest", "x": 2, "y": 0},
       {"key": "x-office-sign", "x": 0, "y": 2.4375},
@@ -184,7 +184,7 @@
       {"key": "x-office-top-l", "x": 0, "y": 9.875},
       {"key": "x-office-top", "x": 0.5, "y": 9.875, "w": 11, "h": 0.5},
       {"key": "x-office-top-r", "x": 11.5, "y": 9.875}]},
-    {"layout": "cafe", "number": "02", "name": "街角咖啡", "x": 36, "y": 26, "door": {"x": 9.55, "y": -0.9}, "exterior": [
+    {"layout": "cafe", "number": "02", "name": "街角咖啡", "x": 36, "y": 26, "door": {"x": 9.55, "y": -0.9}, "doorway": {"key": "x-door-cafe", "x": 8, "y": 0, "frames": 14}, "exterior": [
       {"key": "x-front-win", "x": 0, "y": 0},
       {"key": "x-upper", "x": 0, "y": 3},
       {"key": "x-upper-end", "x": 9, "y": 3},
@@ -198,7 +198,7 @@
       {"key": "x-ac", "x": 8.6, "y": 7.6},
       {"key": "x-fan", "x": 1.6, "y": 8.2},
       {"key": "x-grate", "x": 4.2, "y": 7.9}]},
-    {"layout": "mart", "number": "03", "name": "巷口便利商店", "x": 34, "y": 6, "door": {"x": 3.0, "y": -1.1}, "exterior": [
+    {"layout": "mart", "number": "03", "name": "巷口便利商店", "x": 34, "y": 6, "door": {"x": 3.0, "y": -1.1}, "doorway": {"key": "x-door-mart", "x": 2.125, "y": -0.5, "frames": 14}, "exterior": [
       {"key": "x-mart-front-cap", "x": 0, "y": -0.25},
       {"key": "x-mart-front", "x": 0.25, "y": -0.25},
       {"key": "x-mart-roof-b-cap", "x": 0, "y": 5.09375},

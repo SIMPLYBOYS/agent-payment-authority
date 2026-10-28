@@ -1,6 +1,7 @@
 // The builder's own PNG reader (T2): it cuts the town's pieces from sheets
 // taller than Texture2D.LoadImage takes in batch mode, so it must read what
 // Unity writes, pixel for pixel, and refuse what it cannot read.
+using System.IO;
 using APA.EditorTools;
 using NUnit.Framework;
 using UnityEngine;
@@ -33,5 +34,36 @@ public class PngTests
         var t = new Texture2D(16, 16, TextureFormat.RGBA32, false);
         var png = t.EncodeToPNG();
         Assert.Catch<System.Exception>(() => ShopBuilder.ReadPng(png[..(png.Length / 2)]));
+    }
+
+    // The animated sheets are 8-bit palette PNGs (Aaron 10/28: doors, the fountain): Unity writes none,
+    // so a 3 x 2 one by hand, its rows filtered Sub and Up a byte a pixel, its last colour without tRNS.
+    [Test]
+    public void ReadsAPalettePng()
+    {
+        var png = new MemoryStream();
+        png.Write(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
+        void Chunk(string type, byte[] data)
+        {
+            png.Write(new[] { (byte)(data.Length >> 24), (byte)(data.Length >> 16), (byte)(data.Length >> 8), (byte)data.Length });
+            png.Write(System.Text.Encoding.ASCII.GetBytes(type));
+            png.Write(data);
+            png.Write(new byte[4]); // the reader keeps no CRC
+        }
+        Chunk("IHDR", new byte[] { 0, 0, 0, 3, 0, 0, 0, 2, 8, 3, 0, 0, 0 });
+        Chunk("PLTE", new byte[] { 10, 20, 30, 40, 50, 60, 70, 80, 90 });
+        Chunk("tRNS", new byte[] { 0, 128 });
+        var z = new MemoryStream();
+        z.Write(new byte[] { 0x78, 0x9C });
+        using (var d = new System.IO.Compression.DeflateStream(z, System.IO.Compression.CompressionMode.Compress, true))
+            d.Write(new byte[] { 1, 0, 1, 1, 2, 2, 0, 254 }); // Sub: 0 1 2; Up: 2 1 0
+        z.Write(new byte[4]);
+        Chunk("IDAT", z.ToArray());
+        Chunk("IEND", new byte[0]);
+        var (w, h, rgba) = ShopBuilder.ReadPng(png.ToArray());
+        Assert.AreEqual((3, 2), (w, h));
+        var colour = new[] { new Color32(10, 20, 30, 0), new Color32(40, 50, 60, 128), new Color32(70, 80, 90, 255) };
+        int[] want = { 0, 1, 2, 2, 1, 0 };
+        for (int i = 0; i < 6; i++) Assert.AreEqual(colour[want[i]], new Color32(rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2], rgba[i * 4 + 3]), "pixel " + i);
     }
 }

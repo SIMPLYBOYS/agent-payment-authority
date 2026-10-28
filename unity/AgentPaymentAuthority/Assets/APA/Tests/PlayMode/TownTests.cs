@@ -350,8 +350,13 @@ public class TownTests
         Assert.IsTrue(JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text).walkers.Count(w => w.path.Any(p => new[] { "data", "cafe", "mart" }.Any(l => (p - DoorOf(l)).sqrMagnitude < 0.01f))) >= 3, "the town's own passers-by visit the shops");
         town.AddWalker(Visit("x-walk-11", DoorOf("mart")));
         float took = 0f, after = 0f;
+        Assert.AreEqual(0, town.DoorFrame("mart"), "the mart's door shut");
+        yield return Until(() => town.DoorFrame("mart") == 7, 2f, t => took = t);
+        Assert.Less(took, 2f, "its door opens wide for the one going in (Aaron 10/28)");
         yield return Until(() => InThere("x-walk-11", "mart"), 3f, t => took = t); // a tile at 4 a second, then the fade
         Assert.Less(took, 3f, "gone into the mart, out of sight");
+        yield return Until(() => town.DoorFrame("mart") == 0, 3f, t => took = t);
+        Assert.Less(took, 3f, "and shuts behind it");
         yield return Until(() => InSight("x-walk-11"), 6f, t => after = t);
         Assert.Less(after, 6f, "out again, in sight");
         Assert.Greater(after, 3.5f, "after a while in there");
@@ -393,5 +398,16 @@ public class TownTests
         float after = 0f;
         yield return Until(() => InSight("x-walk-14"), 2f, t => after = t);
         Assert.Less(after, 1f, "out once A has gone");
+    }
+
+    // Aaron 10/28: the plaza's fountain plays.
+    [UnityTest]
+    public IEnumerator TheFountainPlays()
+    {
+        var f = GameObject.Find("x-fountain").GetComponent<SpriteRenderer>();
+        var seen = new HashSet<Sprite>();
+        for (float end = Time.realtimeSinceStartup + 1f; Time.realtimeSinceStartup < end;) { seen.Add(f.sprite); yield return null; }
+        Assert.Greater(seen.Count, 3, "its frames go round");
+        Assert.AreEqual(2f, f.sprite.bounds.size.x, 1e-3f, "one frame wide, as the still one was");
     }
 }
