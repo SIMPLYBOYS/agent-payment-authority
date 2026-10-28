@@ -314,8 +314,8 @@ public class TownTests
         yield return Settle();
         var o = town.Origin("mart");
         Assert.AreEqual("mart", town.VenueAt(o + new Vector2(6f, 4f)));
-        Assert.AreEqual("mart", town.VenueAt(o + new Vector2(15f, 4f)), "as wide as the shopping centre (18 tiles)");
-        Assert.AreEqual(o.x + 9f, GameObject.Find("venue-mart").transform.Find("pill").position.x, 1e-3f, "its name over its middle");
+        Assert.AreEqual("mart", town.VenueAt(o + new Vector2(15f, 4f)), "as wide as the shopping centre (18 tiles, its AC to 19)");
+        Assert.AreEqual(o.x + 9.5f, GameObject.Find("venue-mart").transform.Find("pill").position.x, 1e-3f, "its name over its middle");
         Assert.AreEqual("cafe", town.VenueAt(town.Origin("cafe") + new Vector2(6f, town.Top("cafe") + 0.5f)), "its name pill too");
         Assert.IsNull(town.VenueAt(o + new Vector2(-1.3f, 0.6f)), "the lane outside the door is no venue");
         int before = bridge.reports.Count;
