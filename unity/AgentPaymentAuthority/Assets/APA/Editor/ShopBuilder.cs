@@ -42,8 +42,10 @@ namespace APA.EditorTools
                 var rs = new List<RectInt>();
                 foreach (var part in f.Length > 2 ? f[2].Split(';') : new string[0])
                 {
+                    if (part == "-" || part == "sheet" || part.Trim() == "") continue;
                     var n = part.Split(',');
-                    if (n.Length == 4) rs.Add(new RectInt(int.Parse(n[0]), int.Parse(n[1]), int.Parse(n[2]), int.Parse(n[3])));
+                    if (n.Length != 4) throw new System.Exception(f[0] + ": not a rect x,y,w,h: " + part); // a strip would lose a frame quietly
+                    rs.Add(new RectInt(int.Parse(n[0]), int.Parse(n[1]), int.Parse(n[2]), int.Parse(n[3])));
                 }
                 if (rs.Count > 1) strips[f[0]] = rs.ToArray();
                 list.Add((f[0], LimeZuRoot + f[1], rs.Count > 0 ? rs[0] : new RectInt()));
@@ -88,7 +90,7 @@ namespace APA.EditorTools
             foreach (var q in rs)
             {
                 if (q.x < 0 || q.y < 0 || q.x + q.width > src.w || q.y + q.height > src.h) throw new System.Exception(key + ": rect outside " + path);
-                if (q.height != h) throw new System.Exception(key + ": a strip's frames differ in height");
+                if (q.height != h || q.width != rs[0].width) throw new System.Exception(key + ": a strip's frames differ in size"); // Frames() cuts it evenly
                 w += q.width;
             }
             var px = new Color32[w * h];

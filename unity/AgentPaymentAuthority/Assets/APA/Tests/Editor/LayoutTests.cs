@@ -15,6 +15,8 @@ public class LayoutTests
     static List<(string name, Layout l)> All() =>
         Resources.LoadAll<TextAsset>("Layouts").Select(t => (t.name, JsonUtility.FromJson<Layout>(t.text))).ToList();
 
+    static bool HasCut(string key) => File.Exists(Path.Combine(Application.dataPath, "LimeZu/_cut", key + ".png")); // without the LimeZu files: nothing to measure
+
     // A town piece's size in tiles, from its cut PNG's header (32 px a tile); 1 x 1 without the LimeZu files.
     static Vector2 CutSize(string key)
     {
@@ -149,13 +151,13 @@ public class LayoutTests
                 foreach (var b in t.cars)
                     if (a != b && a.y == b.y) Assert.GreaterOrEqual(Mathf.Abs(a.x - b.x), (CutSize(a.key).x / Mathf.Max(1, a.frames) + CutSize(b.key).x / Mathf.Max(1, b.frames)) / 2f + 0.8f, "town: " + a.key + " and " + b.key + " start on each other");
             foreach (var c in t.cars)
-                Assert.AreEqual(0, Mathf.RoundToInt(CutSize(c.key).x * 32f) % Mathf.Max(1, c.frames), "town: " + c.key + "'s " + c.frames + " frames don't split its width");
+                if (HasCut(c.key)) Assert.AreEqual(0, Mathf.RoundToInt(CutSize(c.key).x * 32f) % Mathf.Max(1, c.frames), "town: " + c.key + "'s " + c.frames + " frames don't split its width");
         }
         // A sheet of frames splits evenly, and is never also tiled (Frames() makes no tiled sprite).
         foreach (var p in town.props.Concat(town.venues.Select(v => v.doorway)).Where(p => p != null && p.frames > 1))
         {
             Assert.AreEqual(0f, p.w, "town: " + p.key + " has frames and is tiled");
-            Assert.AreEqual(0, Mathf.RoundToInt(CutSize(p.key).x * 32f) % p.frames, "town: " + p.key + "'s " + p.frames + " frames don't split its width");
+            if (HasCut(p.key)) Assert.AreEqual(0, Mathf.RoundToInt(CutSize(p.key).x * 32f) % p.frames, "town: " + p.key + "'s " + p.frames + " frames don't split its width");
         }
         // Nothing stands on a doorstep (Aaron 10/28: flower boxes in front of the doors): the two
         // tiles in front of a door, 2 either side of it, where A and B stand and people go in and out.

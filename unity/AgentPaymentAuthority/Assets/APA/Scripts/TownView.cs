@@ -528,7 +528,7 @@ namespace APA
                 float go = Mathf.Abs(c.c.speed) * dt * Mathf.Clamp(room / 1.5f, 0.3f, 1f); // slows to a stop
                 go = Mathf.Clamp(go, 0f, Mathf.Max(0f, room));
                 c.x += dir * go;
-                c.rolled += go;
+                c.rolled = (c.rolled + go) % (c.frames.Length / WheelFrames); // round and round: a float that only grows would freeze the wheels after days
                 c.r.sprite = c.frames[(int)(c.rolled * WheelFrames) % c.frames.Length]; // the wheels turn as far as it goes: still when it stops
                 if (dir > 0f && c.x > roadTo + c.half) c.x = roadFrom - c.half;
                 if (dir < 0f && c.x < roadFrom - c.half) c.x = roadTo + c.half;
