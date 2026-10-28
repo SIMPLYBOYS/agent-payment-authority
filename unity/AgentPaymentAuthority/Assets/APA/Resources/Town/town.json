@@ -156,10 +156,10 @@
     {"key": "x-walk-16", "speed": 1.4, "path": [{"x": 50, "y": 17.3}, {"x": 38, "y": 17.3}]}
   ],
   "traffic": {"from": 30, "to": 34, "bottom": 18, "top": 22, "cycle": [8, 3, 8], "lights": ["x-signal", "x-signal-amber", "x-signal-red"], "cars": [
-    {"key": "x-car-blue", "x": 4, "y": 18.3, "speed": 3.2},
-    {"key": "x-car-grey", "x": 44, "y": 18.3, "speed": 2.8},
-    {"key": "x-car-orange", "x": 18, "y": 20.1, "speed": -3.0},
-    {"key": "x-car-teal", "x": 56, "y": 20.1, "speed": -2.6}]},
+    {"key": "x-car-blue", "x": 4, "y": 18.3, "speed": 3.2, "frames": 6},
+    {"key": "x-car-grey", "x": 44, "y": 18.3, "speed": 2.8, "frames": 6},
+    {"key": "x-car-orange", "x": 18, "y": 20.1, "speed": -3.0, "frames": 6},
+    {"key": "x-car-green", "x": 56, "y": 20.1, "speed": -2.6, "frames": 6}]},
   "inside": [
     {"layout": "data", "people": [
       {"key": "x-pose-19-down", "speed": 0, "path": [{"x": 11.4, "y": 2.4}]},

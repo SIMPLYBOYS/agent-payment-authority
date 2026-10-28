@@ -428,6 +428,8 @@ public class TownTests
         var start = town.Cars.Select(c => c.x).ToList();
         float t0 = Time.time, redSince = -1f;
         bool crossed = false, moved = false;
+        var turned = new HashSet<int>(); // the wheels (Aaron 10/28): frames go round while it drives, and stay while it waits
+        var last = town.Cars.ToList();
         for (float end = Time.realtimeSinceStartup + 60f; Time.time - t0 < t.cycle.Sum() + (t.top - t.bottom + 1f) + 1f && Time.realtimeSinceStartup < end;) // a cycle, and the time to cross after the red it waited for
         {
             yield return null;
@@ -437,6 +439,9 @@ public class TownTests
             redSince = light != "red" ? -1f : redSince < 0f ? Time.time : redSince;
             var cars = town.Cars.ToList();
             moved |= cars.Select(c => c.x).Zip(start, (a, b) => Mathf.Abs(a - b) > 1f).Any(m => m);
+            foreach (var c in cars) turned.Add(c.frame);
+            for (int i = 0; i < cars.Count; i++) if (cars[i].x == last[i].x) Assert.AreEqual(last[i].frame, cars[i].frame, "a car standing still turns no wheel");
+            last = cars;
             if (redSince >= 0f && Time.time - redSince > 1.5f) // the last to go on amber has gone over
                 foreach (var c in cars) Assert.IsFalse(c.x + c.half > t.from && c.x - c.half < t.to, "a car on the crossing on red at " + c.x);
             foreach (var a in cars)
@@ -453,6 +458,7 @@ public class TownTests
         CollectionAssert.AreEquivalent(new[] { "green", "amber", "red" }, seen, "the lights go round");
         Assert.AreEqual(3, sprites.Count, "the signal shows each");
         Assert.IsTrue(moved, "the cars drive");
+        Assert.AreEqual(t.cars[0].frames, turned.Count, "their wheels turn: every driving frame shows");
         Assert.IsTrue(crossed, "the walker went over in a cycle");
     }
 }

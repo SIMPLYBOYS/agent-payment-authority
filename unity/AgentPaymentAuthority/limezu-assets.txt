@@ -107,10 +107,11 @@ x-pot	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City
 x-meter	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Parking_Meter_1.png	-
 x-drink	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Drinking_Fountain_1.png	-
 x-ebox	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Electric_Box_1.png	-
-x-car-blue	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_32x32.png	6,54,122,74
-x-car-grey	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_32x32.png	390,310,122,74
-x-car-orange	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_32x32.png	576,180,122,74
-x-car-teal	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_32x32.png	192,308,122,74
+# the cars: 6 frames driving (the wheels turn), east from x 38 of each 160, west from 1344, the exhaust left out
+x-car-blue	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_blue_complete_32x32.png	38,150,122,74;198,150,122,74;358,150,122,74;518,150,122,74;678,150,122,74;838,150,122,74
+x-car-grey	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_grey_complete_32x32.png	38,150,122,74;198,150,122,74;358,150,122,74;518,150,122,74;678,150,122,74;838,150,122,74
+x-car-orange	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_orange_complete_32x32.png	1344,150,122,74;1504,150,122,74;1664,150,122,74;1824,150,122,74;1984,150,122,74;2144,150,122,74
+x-car-green	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_green_complete_32x32.png	1344,150,122,74;1504,150,122,74;1664,150,122,74;1824,150,122,74;1984,150,122,74;2144,150,122,74
 x-office-roof	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/16_Office_Singles_32x32/ME_Singles_Office_32x32_Example_1.png	0,136,320,126
 x-office-roof-col	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/16_Office_Singles_32x32/ME_Singles_Office_32x32_Example_1.png	288,136,32,126
 x-office-roof-end	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/16_Office_Singles_32x32/ME_Singles_Office_32x32_Example_1.png	320,136,32,126

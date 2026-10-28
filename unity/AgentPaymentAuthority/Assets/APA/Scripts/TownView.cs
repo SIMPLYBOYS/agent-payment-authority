@@ -52,7 +52,8 @@ namespace APA
         // y bottom..top; the lights' seconds green, amber, red and a prop key for each (the props of the first are
         // the signals); cars along a lane at y, at speed (tiles a second, + east, - west), wrapping round off the map.
         [System.Serializable] public class Traffic { public float from, to, bottom, top; public float[] cycle = new float[0]; public string[] lights = new string[0]; public Car[] cars = new Car[0]; }
-        [System.Serializable] public class Car { public string key; public float x, y, speed; }
+        // frames: its sheet's driving frames (the wheels turn, Aaron 10/28), played as it goes.
+        [System.Serializable] public class Car { public string key; public float x, y, speed; public int frames; }
     }
 
     public class TownView : MonoBehaviour
@@ -446,15 +447,15 @@ namespace APA
         }
 
         // ---- traffic ----
-        class CarState { public Town.Car c; public SpriteRenderer r; public float x, half; }
+        class CarState { public Town.Car c; public SpriteRenderer r; public Sprite[] frames; public float x, half, rolled; }
         readonly List<CarState> cars = new List<CarState>();
         readonly List<SpriteRenderer> signals = new List<SpriteRenderer>();
         Sprite[] lightSprites = new Sprite[0];
         static readonly string[] LightNames = { "green", "amber", "red" };
-        const float Gap = 0.8f, Line = 0.3f; // between cars; the stop line before the crossing
+        const float Gap = 0.8f, Line = 0.3f, WheelFrames = 4f; // between cars; the stop line before the crossing; driving frames a tile
         float roadFrom, roadTo; // where the ground ends: a car goes round there, a half car past it (review of 54435f5: a wide view shows -12.7..77)
         public string Light => LightNames[LightState(out _)]; // tests
-        public IEnumerable<(float x, float half, float y, float speed)> Cars { get { foreach (var c in cars) yield return (c.x, c.half, c.c.y, c.c.speed); } } // tests
+        public IEnumerable<(float x, float half, float y, float speed, int frame)> Cars { get { foreach (var c in cars) yield return (c.x, c.half, c.c.y, c.c.speed, System.Array.IndexOf(c.frames, c.r.sprite)); } } // tests
 
         void MakeTraffic()
         {
@@ -467,8 +468,8 @@ namespace APA
             foreach (var g in town.ground) { roadFrom = Mathf.Min(roadFrom, g.x); roadTo = Mathf.Max(roadTo, g.x + g.w); }
             foreach (var car in t.cars)
             {
-                var r = Piece(transform, new Town.Piece { key = car.key, x = car.x, y = car.y }, Order(car.y), new Vector2(0.5f, 0f));
-                if (r != null) cars.Add(new CarState { c = car, r = r, x = car.x, half = r.sprite.bounds.size.x / 2f });
+                var r = Piece(transform, new Town.Piece { key = car.key, x = car.x, y = car.y, frames = car.frames }, Order(car.y), new Vector2(0.5f, 0f));
+                if (r != null) cars.Add(new CarState { c = car, r = r, x = car.x, half = r.sprite.bounds.size.x / 2f, frames = Frames(car.key, Mathf.Max(1, car.frames), new Vector2(0.5f, 0f)) });
             }
         }
 
@@ -525,7 +526,10 @@ namespace APA
                     if (back >= 0f) room = Mathf.Min(room, back - Gap);
                 }
                 float go = Mathf.Abs(c.c.speed) * dt * Mathf.Clamp(room / 1.5f, 0.3f, 1f); // slows to a stop
-                c.x += dir * Mathf.Clamp(go, 0f, Mathf.Max(0f, room));
+                go = Mathf.Clamp(go, 0f, Mathf.Max(0f, room));
+                c.x += dir * go;
+                c.rolled += go;
+                c.r.sprite = c.frames[(int)(c.rolled * WheelFrames) % c.frames.Length]; // the wheels turn as far as it goes: still when it stops
                 if (dir > 0f && c.x > roadTo + c.half) c.x = roadFrom - c.half;
                 if (dir < 0f && c.x < roadFrom - c.half) c.x = roadTo + c.half;
                 c.r.transform.localPosition = new Vector2(c.x, c.c.y);

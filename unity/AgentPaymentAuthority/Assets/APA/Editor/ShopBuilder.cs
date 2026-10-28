@@ -28,18 +28,25 @@ namespace APA.EditorTools
 
         // Manifest: key => (path, rect), in file order. The rect is x,y,w,h
         // from the top left; "-" (the whole file) and "sheet" are width 0.
+        // Several rects (";" between them) are a town piece's frames, cut side by side (strips).
+        static readonly Dictionary<string, RectInt[]> strips = new Dictionary<string, RectInt[]>();
         static List<(string key, string path, RectInt rect)> Manifest()
         {
             var list = new List<(string, string, RectInt)>();
+            strips.Clear();
             foreach (var line in File.ReadAllLines("limezu-assets.txt"))
             {
                 if (line.StartsWith("#") || line.Trim() == "") continue;
                 var f = line.Split('\t');
                 if (f.Length < 2) continue;
-                var r = new RectInt();
-                var n = f.Length > 2 ? f[2].Split(',') : new string[0];
-                if (n.Length == 4) r = new RectInt(int.Parse(n[0]), int.Parse(n[1]), int.Parse(n[2]), int.Parse(n[3]));
-                list.Add((f[0], LimeZuRoot + f[1], r));
+                var rs = new List<RectInt>();
+                foreach (var part in f.Length > 2 ? f[2].Split(';') : new string[0])
+                {
+                    var n = part.Split(',');
+                    if (n.Length == 4) rs.Add(new RectInt(int.Parse(n[0]), int.Parse(n[1]), int.Parse(n[2]), int.Parse(n[3])));
+                }
+                if (rs.Count > 1) strips[f[0]] = rs.ToArray();
+                list.Add((f[0], LimeZuRoot + f[1], rs.Count > 0 ? rs[0] : new RectInt()));
             }
             return list;
         }
@@ -76,15 +83,27 @@ namespace APA.EditorTools
             if (!File.Exists(path)) return null;
             if (!sheets.TryGetValue(path, out var src)) sheets[path] = src = ReadPng(File.ReadAllBytes(path));
             if (r.width <= 0) r = new RectInt(0, 0, src.w, src.h); // "-": the whole file (a single)
-            if (r.x < 0 || r.y < 0 || r.x + r.width > src.w || r.y + r.height > src.h) throw new System.Exception(key + ": rect outside " + path);
-            var px = new Color32[r.width * r.height];
-            for (int y = 0; y < r.height; y++)
-                for (int x = 0; x < r.width; x++)
-                {
-                    int i = ((r.y + y) * src.w + r.x + x) * 4; // rects are from the top left; a texture's rows from the bottom
-                    px[(r.height - 1 - y) * r.width + x] = new Color32(src.rgba[i], src.rgba[i + 1], src.rgba[i + 2], src.rgba[i + 3]);
-                }
-            var t = new Texture2D(r.width, r.height, TextureFormat.RGBA32, false);
+            var rs = strips.TryGetValue(key, out var strip) ? strip : new[] { r };
+            int w = 0, h = rs[0].height;
+            foreach (var q in rs)
+            {
+                if (q.x < 0 || q.y < 0 || q.x + q.width > src.w || q.y + q.height > src.h) throw new System.Exception(key + ": rect outside " + path);
+                if (q.height != h) throw new System.Exception(key + ": a strip's frames differ in height");
+                w += q.width;
+            }
+            var px = new Color32[w * h];
+            int at = 0;
+            foreach (var q in rs)
+            {
+                for (int y = 0; y < h; y++)
+                    for (int x = 0; x < q.width; x++)
+                    {
+                        int i = ((q.y + y) * src.w + q.x + x) * 4; // rects are from the top left; a texture's rows from the bottom
+                        px[(h - 1 - y) * w + at + x] = new Color32(src.rgba[i], src.rgba[i + 1], src.rgba[i + 2], src.rgba[i + 3]);
+                    }
+                at += q.width;
+            }
+            var t = new Texture2D(w, h, TextureFormat.RGBA32, false);
             t.SetPixels32(px);
             t.Apply();
             Directory.CreateDirectory(CutRoot);
