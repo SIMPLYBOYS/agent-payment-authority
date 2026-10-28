@@ -127,7 +127,7 @@ namespace APA
                 // The building's top, from the data (a repeated piece's h, else its file's height): the pill sits just above it.
                 float top = 0f;
                 foreach (var e in v.exterior) top = Mathf.Max(top, e.y + (e.h > 0f ? e.h : Height(e.key)));
-                float right = 0f; // its width, the same way (the mart is 18 tiles, the others 12)
+                float right = 0f; // its width, the same way (the mart 18 tiles, the cafe 12, the data lab 12.7 with its sign)
                 foreach (var e in v.exterior) right = Mathf.Max(right, e.x + (e.w > 0f ? e.w : Width(e.key)));
                 venues[v.layout] = (v, top, right);
                 Pill(root, v, top, right);

@@ -150,14 +150,14 @@ x-npc-03	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Chara
 x-npc-10	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_10.png	128,384,32,64
 x-npc-18	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_18.png	128,384,32,64
 x-npc-20	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_20.png	96,0,32,64
-# the mart as LimeZu's shopping centre (Aaron 10/28): Mall_1 whole, the roof's plain upper part shortened; under its two
-# awning doors the front stops 6 rows short, so a door's own half-clear shadow is the only one there
-x-mart-body-l	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	0,80,224,296
-x-mart-body-m	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	224,80,128,290
-x-mart-body-c	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	352,80,64,296
-x-mart-body-n	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	416,80,128,290
-x-mart-body-r	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	544,80,32,296
-x-mart-roof-top	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	0,26,576,22
+# the mart as LimeZu's shopping centre (Aaron 10/28): Mall_1, its roof shortened by rows 34..65 (only the panel joints run
+# there); under its two awning doors the front stops 6 rows short, so a door's own half-clear shadow is the only one there
+x-mart-body-l	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	0,66,224,318
+x-mart-body-m	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	224,66,128,304
+x-mart-body-c	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	352,66,64,310
+x-mart-body-n	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	416,66,128,304
+x-mart-body-r	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	544,66,32,310
+x-mart-roof-top	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_1.png	0,26,576,8
 x-mart-sign	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_Signboard_1.png	-
 x-mart-door-2	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_Door_2.png	-
 x-mart-sale	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Mall_Props_3.png	-

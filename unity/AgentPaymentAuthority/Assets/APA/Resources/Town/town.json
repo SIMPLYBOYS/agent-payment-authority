@@ -4,7 +4,7 @@
     {"key": "x-grass", "x": -16, "y": -8, "w": 96, "h": 64},
     {"key": "x-pave", "x": -16, "y": 2, "w": 96, "h": 4},
     {"key": "x-plaza", "x": 14, "y": 6, "w": 18, "h": 10},
-    {"key": "x-pave", "x": 30, "y": 6, "w": 4, "h": 10},
+    {"key": "x-pave", "x": 30, "y": 6, "w": 5, "h": 10},
     {"key": "x-pave", "x": -16, "y": 16, "w": 96, "h": 2},
     {"key": "x-road-b", "x": -16, "y": 18, "w": 96, "h": 1},
     {"key": "x-road", "x": -16, "y": 19, "w": 96, "h": 2},
@@ -82,7 +82,7 @@
     {"key": "x-pigeon", "x": 19.6, "y": 7.4},
     {"key": "x-pigeon-2", "x": 23, "y": 8.6},
     {"key": "x-npc-03", "x": 28.4, "y": 25.4},
-    {"key": "x-npc-10", "x": 41.5, "y": 25.4},
+    {"key": "x-npc-10", "x": 41.5, "y": 25.2},
     {"key": "x-npc-18", "x": 29.4, "y": 7.6},
     {"key": "x-npc-20", "x": 19.6, "y": 12.9},
     {"key": "x-tree-pot", "x": 2.5, "y": 22.15},
@@ -129,8 +129,8 @@
     {"key": "x-bench", "x": 15.8, "y": 25.2},
     {"key": "x-bench", "x": 50.8, "y": 25.2},
     {"key": "x-carts", "x": 35.7, "y": 4.0},
-    {"key": "x-mart-sale", "x": 46.0, "y": 5.4},
-    {"key": "x-mart-sale-2", "x": 40.3, "y": 5.4}
+    {"key": "x-mart-sale", "x": 46.0, "y": 5.0},
+    {"key": "x-mart-sale-2", "x": 40.3, "y": 5.0}
   ],
   "walkers": [
     {"key": "x-walk-02", "speed": 1.4, "path": [{"x": 10, "y": 23.7}, {"x": 25.4, "y": 23.7}, {"x": 25.4, "y": 25.1}, {"x": 25.4, "y": 23.7}, {"x": 54, "y": 23.7}]},
@@ -192,12 +192,12 @@
       {"key": "x-fan", "x": 1.6, "y": 8.2},
       {"key": "x-grate", "x": 4.2, "y": 7.9}]},
     {"layout": "mart", "number": "03", "name": "巷口便利商店", "x": 34, "y": 6, "door": {"x": 9.0, "y": -1.1}, "doorway": {"key": "x-door-mart", "x": 7, "y": -0.5, "frames": 14}, "exterior": [
-      {"key": "x-mart-body-l", "x": 0, "y": -0.25},
+      {"key": "x-mart-body-l", "x": 0, "y": -0.5},
       {"key": "x-mart-body-m", "x": 7, "y": -0.0625},
       {"key": "x-mart-body-c", "x": 11, "y": -0.25},
       {"key": "x-mart-body-n", "x": 13, "y": -0.0625},
       {"key": "x-mart-body-r", "x": 17, "y": -0.25},
-      {"key": "x-mart-roof-top", "x": 0, "y": 9.0},
+      {"key": "x-mart-roof-top", "x": 0, "y": 9.4375},
       {"key": "x-mart-sign", "x": 10, "y": 3.5},
       {"key": "x-mart-door-2", "x": 13, "y": -0.5}]}
   ]

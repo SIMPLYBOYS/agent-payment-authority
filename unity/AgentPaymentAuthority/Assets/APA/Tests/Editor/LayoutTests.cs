@@ -27,9 +27,10 @@ public class LayoutTests
         return new Vector2(At(16), At(20)) / 32f;
     }
 
-    // No half-clear pixel of a shut door lies over its facade, composited as drawn (review of 67461a1: the mart's door
-    // carried the facade's half-clear shadow again, a darker strip; their values match, alpha over them doesn't). A door
-    // may add to its front (the mart's has an awning, Aaron 10/28), so this is the doubling only, not the whole picture.
+    // Composited as drawn: no half-clear pixel of a venue's piece or shut door lies over a half-clear one drawn before it,
+    // a shadow drawn twice (review of 67461a1: the mart's door carried the facade's shadow again, a darker strip; their
+    // values match, alpha over them doesn't; over an opaque roof it is shading, as the cafe's AC's); and a shut door is its
+    // front exactly, but for the mart's, which adds an awning (Aaron 10/28).
     [Test]
     public void NoDoorwayDoublesItsFacadesShadow()
     {
@@ -42,6 +43,22 @@ public class LayoutTests
             if (door.rgba == null) continue; // no LimeZu files here: nothing drawn to compare
             int fw = door.w / Mathf.Max(1, v.doorway.frames), x0 = Px(v.doorway.x), y0 = Px(v.doorway.y);
             var pieces = v.exterior.Select(e => (e, c: Cut(e.key))).ToList();
+            for (int i = 1; i < pieces.Count; i++)
+            {
+                var (pe, pc) = pieces[i];
+                if (pc.rgba == null) continue;
+                int bw = pe.w > 0 ? Px(pe.w) : pc.w, bh = pe.w > 0 && pe.h > 0 ? Px(pe.h) : pc.h;
+                for (int ly = 0; ly < bh; ly++)
+                    for (int lx = 0; lx < bw; lx++)
+                    {
+                        float a = Pixel(pc, lx % pc.w, pc.h - 1 - ly % pc.h).w;
+                        if (a <= 0f || a >= 1f) continue;
+                        int X = Px(pe.x) + lx, Y = Px(pe.y) + ly;
+                        var under = Vector4.zero;
+                        for (int k = 0; k < i; k++) under = Over(At(pieces[k].c, pieces[k].e, X, Y), under);
+                        Assert.IsFalse(under.w > 0f && under.w < 1f, v.layout + ": " + pe.key + "'s half-clear pixel over a half-clear one at " + X + "," + Y);
+                    }
+            }
             for (int y = 0; y < door.h; y++)
                 for (int x = 0; x < fw; x++)
                 {
@@ -49,7 +66,8 @@ public class LayoutTests
                     var under = Vector4.zero;
                     foreach (var (e, c) in pieces) under = Over(At(c, e, X, Y), under);
                     float a = Pixel(door, x, y).w;
-                    Assert.IsFalse(a > 0f && a < 1f && under.w > 0f, v.layout + ": its shut door's half-clear pixel over the front at " + X + "," + Y);
+                    Assert.IsFalse(a > 0f && a < 1f && under.w > 0f && under.w < 1f, v.layout + ": its shut door's half-clear pixel over a half-clear one at " + X + "," + Y);
+                    if (v.layout != "mart") Assert.Less((Over(Pixel(door, x, y), under) - under).magnitude, 2f / 255f, v.layout + ": its shut door changes the front at " + X + "," + Y);
                 }
             checkedDoors++;
         }
@@ -154,6 +172,20 @@ public class LayoutTests
                     if (a != b && a.y == b.y) Assert.GreaterOrEqual(Mathf.Abs(a.x - b.x), (CutSize(a.key).x / Mathf.Max(1, a.frames) + CutSize(b.key).x / Mathf.Max(1, b.frames)) / 2f + 0.8f, "town: " + a.key + " and " + b.key + " start on each other");
             foreach (var c in t.cars)
                 if (HasCut(c.key)) Assert.AreEqual(0, Mathf.RoundToInt(CutSize(c.key).x * 32f) % Mathf.Max(1, c.frames), "town: " + c.key + "'s " + c.frames + " frames don't split its width");
+        }
+        // A prop over a building never takes one of its orders (review of 3fa65e3: a SALE rack tied with the wall behind it).
+        foreach (var v in town.venues)
+        {
+            float bottom = v.exterior.Min(e => e.y), top = v.exterior.Max(e => e.y + (e.h > 0f ? e.h : CutSize(e.key).y)), right = v.exterior.Max(e => e.x + (e.w > 0f ? e.w : CutSize(e.key).x));
+            int from = TownView.Order(v.y + bottom), to = from + v.exterior.Length; // its pieces, then its doorway
+            foreach (var p in town.props)
+            {
+                var s = CutSize(p.key);
+                s.x /= Mathf.Max(1, p.frames);
+                bool over = p.x + s.x / 2f > v.x && p.x - s.x / 2f < v.x + right && p.y + s.y > v.y + bottom && p.y < v.y + top;
+                int o = TownView.Order(p.y);
+                Assert.IsFalse(over && o >= from && o <= to, "town: " + p.key + " at " + p.x + "," + p.y + " draws at " + o + ", among " + v.layout + "'s " + from + ".." + to);
+            }
         }
         // A sheet of frames splits evenly, and is never also tiled (Frames() makes no tiled sprite).
         foreach (var p in town.props.Concat(town.venues.Select(v => v.doorway)).Where(p => p != null && p.frames > 1))
