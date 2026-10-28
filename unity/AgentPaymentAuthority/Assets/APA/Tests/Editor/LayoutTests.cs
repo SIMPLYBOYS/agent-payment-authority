@@ -68,6 +68,11 @@ public class LayoutTests
             foreach (var p in pts.Append(l.pickup).Append(new Vector2(l.bend.x, l.pickupRow != 0f ? l.pickupRow : l.bend.y))) Assert.IsTrue(p.x > 0f && p.x < 12f && p.y > 0f && p.y < 7f, name + ": " + p + " outside the room");
             Assert.AreNotEqual(l.counter, l.pickup, name + ": the delivery zone is its own place (gap review B6)");
         }
+        // The town too: a key missing from the manifest just doesn't draw (review of 7c71cfd).
+        var town = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
+        var pieces = town.ground.Concat(town.props).Concat(town.venues.SelectMany(v => v.exterior)).Select(p => p.key)
+            .Concat(town.walkers.Concat(town.inside.SelectMany(g => g.people)).Select(w => w.key));
+        foreach (var k in pieces) CollectionAssert.Contains(keys, k, "town: " + k + " not in limezu-assets.txt");
     }
 
     // Every scene the host's UX3 catalog names has its room.
