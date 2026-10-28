@@ -131,7 +131,8 @@ public class LayoutTests
         // The town too: a key missing from the manifest just doesn't draw (review of 7c71cfd).
         var town = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
         var pieces = town.ground.Concat(town.props).Concat(town.venues.SelectMany(v => v.exterior)).Concat(town.venues.Where(v => v.doorway != null && !string.IsNullOrEmpty(v.doorway.key)).Select(v => v.doorway)).Select(p => p.key)
-            .Concat(town.walkers.Concat(town.inside.SelectMany(g => g.people)).Select(w => w.key));
+            .Concat(town.walkers.Concat(town.inside.SelectMany(g => g.people)).Select(w => w.key))
+            .Concat(town.traffic != null ? town.traffic.cars.Select(c => c.key).Concat(town.traffic.lights) : Enumerable.Empty<string>());
         foreach (var k in pieces) CollectionAssert.Contains(keys, k, "town: " + k + " not in limezu-assets.txt");
         // A sheet of frames splits evenly, and is never also tiled (Frames() makes no tiled sprite).
         foreach (var p in town.props.Concat(town.venues.Select(v => v.doorway)).Where(p => p != null && p.frames > 1))

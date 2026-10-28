@@ -30,6 +30,7 @@ namespace APA
         public Walker[] walkers = new Walker[0];
         public Inside[] inside = new Inside[0];
         public Venue[] venues = new Venue[0];
+        public Traffic traffic;
 
         // frames: the file is that many frames side by side (Aaron 10/28: a fountain that plays, doors that open).
         [System.Serializable] public class Piece { public string key; public float x, y, w, h; public int frames; }
@@ -47,6 +48,11 @@ namespace APA
         // The people in a shop (Aaron 10/27: a clerk, other customers; illustrative,
         // never A or B), in its room's coordinates, shown with that room only.
         [System.Serializable] public class Inside { public string layout; public Walker[] people = new Walker[0]; }
+        // Traffic (Aaron 10/28: the signals change, the cars drive): the crossing's x from..to over the road's
+        // y bottom..top; the lights' seconds green, amber, red and a prop key for each (the props of the first are
+        // the signals); cars along a lane at y, at speed (tiles a second, + east, - west), wrapping round off the map.
+        [System.Serializable] public class Traffic { public float from, to, bottom, top; public float[] cycle = new float[0]; public string[] lights = new string[0]; public Car[] cars = new Car[0]; }
+        [System.Serializable] public class Car { public string key; public float x, y, speed; }
     }
 
     public class TownView : MonoBehaviour
@@ -124,6 +130,7 @@ namespace APA
                 Pill(root, v, top);
             }
             foreach (var w in town.walkers) MakeWalker(w, transform, false);
+            MakeTraffic();
             foreach (var g in town.inside)
             {
                 var room = new GameObject("inside-" + g.layout).transform;
@@ -404,9 +411,12 @@ namespace APA
             }
             float go = s.w.speed * dt;
             Vector2 d = Vector2.zero;
+            bool wait = false;
             for (int guard = 0; go > 0f && guard < 8; guard++)
             {
                 int next = s.leg + s.dir;
+                // At the kerb of the crossing: over only on red, with the time to reach the other side.
+                if (p == path[s.leg] && Crosses(path[s.leg], path[next]) && !MayCross((path[next] - p).magnitude / Mathf.Max(0.1f, s.w.speed))) { wait = true; d = path[next] - p; break; }
                 bool skip = s.doorOf[next] != null && Busy(s.doorOf[next]); // A or B at that door: on past it, from where it is
                 if (!skip)
                 {
@@ -427,10 +437,95 @@ namespace APA
             if (d.sqrMagnitude > 1e-6f)
             {
                 int facing = Mathf.Abs(d.x) >= Mathf.Abs(d.y) ? (d.x > 0 ? 0 : 2) : (d.y > 0 ? 1 : 3); // right, up, left, down
+                if (wait) { if (facing * 6 < s.frames.Length) s.r.sprite = s.frames[facing * 6]; return; } // stands, facing the road
                 s.tick += dt;
                 if (s.tick > 0.1f) { s.tick = 0f; s.frame = (s.frame + 1) % 6; }
                 int i = facing * 6 + s.frame;
                 if (i < s.frames.Length) s.r.sprite = s.frames[i];
+            }
+        }
+
+        // ---- traffic ----
+        class CarState { public Town.Car c; public SpriteRenderer r; public float x, half; }
+        readonly List<CarState> cars = new List<CarState>();
+        readonly List<SpriteRenderer> signals = new List<SpriteRenderer>();
+        Sprite[] lightSprites = new Sprite[0];
+        static readonly string[] LightNames = { "green", "amber", "red" };
+        const float WrapFrom = -10f, WrapTo = 74f, Gap = 0.8f, Line = 0.3f; // off the widest view; between cars; the stop line before the crossing
+        public string Light => LightNames[LightState(out _)]; // tests
+        public IEnumerable<(float x, float half, float y, float speed)> Cars { get { foreach (var c in cars) yield return (c.x, c.half, c.c.y, c.c.speed); } } // tests
+
+        void MakeTraffic()
+        {
+            var t = town.traffic;
+            if (t == null || t.cycle.Length != 3 || t.lights.Length != 3) return;
+            lightSprites = new Sprite[3];
+            for (int i = 0; i < 3; i++) lightSprites[i] = Sprite(t.lights[i], new Vector2(0.5f, 0f));
+            foreach (Transform c in transform) if (c.name == t.lights[0] && c.TryGetComponent<SpriteRenderer>(out var r)) signals.Add(r);
+            foreach (var car in t.cars)
+            {
+                var r = Piece(transform, new Town.Piece { key = car.key, x = car.x, y = car.y }, Order(car.y), new Vector2(0.5f, 0f));
+                if (r != null) cars.Add(new CarState { c = car, r = r, x = car.x, half = r.sprite.bounds.size.x / 2f });
+            }
+        }
+
+        // LightState: 0 green, 1 amber, 2 red (for the cars; the crossing's walkers go on red), and the seconds it has left.
+        int LightState(out float left)
+        {
+            left = 0f;
+            var c = town != null && town.traffic != null ? town.traffic.cycle : null;
+            if (c == null || c.Length != 3) return 0;
+            float t = Time.time % (c[0] + c[1] + c[2]);
+            for (int i = 0; i < 3; t -= c[i], i++) if (t < c[i]) { left = c[i] - t; return i; }
+            return 0;
+        }
+
+        bool Crosses(Vector2 a, Vector2 b)
+        {
+            var t = town != null ? town.traffic : null;
+            return t != null && t.cycle.Length == 3 && a.x == b.x && a.x >= t.from && a.x <= t.to && Mathf.Min(a.y, b.y) <= t.bottom && Mathf.Max(a.y, b.y) >= t.top;
+        }
+
+        // MayCross: red for the cars with the time to cross left, and no car on the crossing.
+        bool MayCross(float seconds)
+        {
+            if (LightState(out var left) != 2 || left < seconds + 0.5f) return false;
+            foreach (var c in cars) if (c.x + c.half > town.traffic.from && c.x - c.half < town.traffic.to) return false;
+            return true;
+        }
+
+        void Drive(float dt)
+        {
+            if (cars.Count == 0) return;
+            var t = town.traffic;
+            int st = LightState(out var left);
+            foreach (var r in signals) r.sprite = lightSprites[st];
+            bool someoneOn = false; // a walker on the crossing: every car waits at the line
+            foreach (var w in walkers)
+            {
+                if (w.room || w.inside >= 0f) continue;
+                var p = (Vector2)w.r.transform.localPosition;
+                if (p.x > t.from - Line && p.x < t.to + Line && p.y > t.bottom && p.y < t.top) someoneOn = true;
+            }
+            foreach (var c in cars)
+            {
+                float dir = Mathf.Sign(c.c.speed), front = c.x + dir * c.half;
+                float toLine = ((dir > 0 ? t.from - Line : t.to + Line) - front) * dir;
+                float room = float.MaxValue; // how far its front may go
+                // Amber: one that would be over the crossing before red goes on; red, or someone on the crossing: it stops at the line.
+                bool over = (toLine + t.to - t.from + 2f * c.half + Line) / Mathf.Abs(c.c.speed) < left;
+                if (toLine > -0.01f && (someoneOn || st == 2 || st == 1 && !over)) room = Mathf.Max(0f, toLine); // -0.01: one stopped on the line is still before it (float error)
+                foreach (var o in cars)
+                {
+                    if (o == c || o.c.y != c.c.y) continue;
+                    float back = (o.x - dir * o.half - front) * dir;
+                    if (back >= 0f) room = Mathf.Min(room, back - Gap);
+                }
+                float go = Mathf.Abs(c.c.speed) * dt * Mathf.Clamp(room / 1.5f, 0.3f, 1f); // slows to a stop
+                c.x += dir * Mathf.Clamp(go, 0f, Mathf.Max(0f, room));
+                if (dir > 0f && c.x > WrapTo) c.x = WrapFrom;
+                if (dir < 0f && c.x < WrapFrom) c.x = WrapTo;
+                c.r.transform.localPosition = new Vector2(c.x, c.c.y);
             }
         }
 
@@ -600,6 +695,7 @@ namespace APA
         {
             foreach (var s in walkers) Walk(s, Time.deltaTime);
             Play(Time.deltaTime);
+            Drive(Time.deltaTime);
             if (!HasTown || shown != "town" || phase != 0 || Clicked == null || !Input.GetMouseButtonDown(0) || cam == null) return;
             var p = (Vector2)transform.InverseTransformPoint(cam.ScreenToWorldPoint(Input.mousePosition));
             var hit = VenueAt(p);

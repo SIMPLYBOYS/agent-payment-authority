@@ -90,6 +90,8 @@ x-flowers-2	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/
 x-shrubs	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Shrub_11.png	-
 x-phone	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Phone_Booth_1.png	-
 x-signal	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Traffic_Light_2.png	-
+x-signal-amber	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Traffic_Light_3.png	-
+x-signal-red	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Traffic_Light_4.png	-
 x-bollard	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Pedestrian_Barrier_Post_1.png	-
 x-fountain	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Animated_sheets_32x32/Fountain_32x32.png	-
 x-door-data	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Animated_sheets_32x32/Office_Door_Lime_Corp_1_32x32.png	-
@@ -105,8 +107,10 @@ x-pot	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City
 x-meter	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Parking_Meter_1.png	-
 x-drink	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Drinking_Fountain_1.png	-
 x-ebox	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Electric_Box_1.png	-
-x-car-a	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_32x32.png	6,54,122,74
-x-car-b	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_32x32.png	390,182,122,74
+x-car-blue	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_32x32.png	6,54,122,74
+x-car-grey	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_32x32.png	390,310,122,74
+x-car-orange	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_32x32.png	576,180,122,74
+x-car-teal	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_32x32.png	192,308,122,74
 x-office-roof	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/16_Office_Singles_32x32/ME_Singles_Office_32x32_Example_1.png	0,136,320,126
 x-office-roof-col	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/16_Office_Singles_32x32/ME_Singles_Office_32x32_Example_1.png	288,136,32,126
 x-office-roof-end	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/16_Office_Singles_32x32/ME_Singles_Office_32x32_Example_1.png	320,136,32,126

@@ -412,4 +412,47 @@ public class TownTests
         Assert.Greater(seen.Count, 3, "its frames go round");
         Assert.AreEqual(2f, f.sprite.bounds.size.x, 1e-3f, "one frame wide, as the still one was");
     }
+
+    // Aaron 10/28: the signals change and the cars drive: they stop at the crossing on red, keep apart in a lane,
+    // and a walker at its kerb steps out only on red (and the cars wait for whoever is on it). A whole cycle of the lights and a crossing.
+    [UnityTest]
+    public IEnumerator TheLightsChangeAndTheCarsStopForTheCrossing()
+    {
+        var t = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text).traffic;
+        Assert.IsNotNull(t, "the town has traffic");
+        float x = (t.from + t.to) / 2f + 0.4f;
+        town.AddWalker(new Town.Walker { key = "x-walk-07", speed = 1f, path = new[] { new Vector2(x, t.top + 0.4f), new Vector2(x, t.bottom - 0.4f) } });
+        var signal = GameObject.Find(t.lights[0]).GetComponent<SpriteRenderer>();
+        var seen = new HashSet<string>();
+        var sprites = new HashSet<Sprite>();
+        var start = town.Cars.Select(c => c.x).ToList();
+        float t0 = Time.time, redSince = -1f;
+        bool crossed = false, moved = false;
+        for (float end = Time.realtimeSinceStartup + 60f; Time.time - t0 < t.cycle.Sum() + (t.top - t.bottom + 1f) + 1f && Time.realtimeSinceStartup < end;) // a cycle, and the time to cross after the red it waited for
+        {
+            yield return null;
+            string light = town.Light;
+            seen.Add(light);
+            sprites.Add(signal.sprite);
+            redSince = light != "red" ? -1f : redSince < 0f ? Time.time : redSince;
+            var cars = town.Cars.ToList();
+            moved |= cars.Select(c => c.x).Zip(start, (a, b) => Mathf.Abs(a - b) > 1f).Any(m => m);
+            if (redSince >= 0f && Time.time - redSince > 1.5f) // the last to go on amber has gone over
+                foreach (var c in cars) Assert.IsFalse(c.x + c.half > t.from && c.x - c.half < t.to, "a car on the crossing on red at " + c.x);
+            foreach (var a in cars)
+                foreach (var b in cars)
+                    if (a.x < b.x && a.y == b.y) Assert.GreaterOrEqual(b.x - b.half - (a.x + a.half), 0.3f, "two cars in a lane apart");
+            var w = town.Passer("x-walk-07").at;
+            if (w.y < t.top && w.y > t.bottom)
+            {
+                Assert.AreEqual("red", light, "on the crossing only on red: " + w);
+                foreach (var c in cars) Assert.IsFalse(c.x + c.half > t.from && c.x - c.half < t.to, "no car on the crossing while someone is on it");
+            }
+            crossed |= w.y <= t.bottom - 0.39f;
+        }
+        CollectionAssert.AreEquivalent(new[] { "green", "amber", "red" }, seen, "the lights go round");
+        Assert.AreEqual(3, sprites.Count, "the signal shows each");
+        Assert.IsTrue(moved, "the cars drive");
+        Assert.IsTrue(crossed, "the walker went over in a cycle");
+    }
 }
