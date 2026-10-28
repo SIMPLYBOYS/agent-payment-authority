@@ -92,13 +92,13 @@ say "1/3 本機鏈就緒：$(grep -E '^p2-local: (resumed|wrote)' "$logs/chain.l
   if [ "$mode" = live ]; then
     # The town on the real Agent: host files made once for the label from the chain's directory (the shop's own products).
     host=$base/live-$label
-    # Made once for the label, with the evidence's start recorded before any run (docs/commercial-live-town.md L4).
-    if [ ! -d "$host" ]; then
-      go run ./cmd/p2-testnet e1a-host --from "$chain" --out "$host" --label "$label" ||
-        { say "卡在第 3 步：建不出城鎮的 host 檔（$host）；全部停下"; kill -TERM 0; }
-      go run ./cmd/e1-evidence start --rpc http://127.0.0.1:8545 --host "$host" --out "$host/start.json" ||
-        { say "卡在第 3 步：記不下證據的起點（$host/start.json；task 已登記過就換一個標籤）；全部停下"; kill -TERM 0; }
-    fi
+    # Made once for the label, and the evidence's start recorded before any run (docs/commercial-live-town.md L4);
+    # each on its own, so a start that failed is tried again.
+    [ -d "$host" ] || go run ./cmd/p2-testnet e1a-host --from "$chain" --out "$host" --label "$label" ||
+      { say "卡在第 3 步：建不出城鎮的 host 檔（$host）；全部停下"; kill -TERM 0; }
+    [ -f "$host/start.json" ] || go run ./cmd/e1-evidence start --rpc http://127.0.0.1:8545 --host "$host" --out "$host/start.json" ||
+      { say "卡在第 3 步：記不下證據的起點（$host/start.json；task 已登記過就換一個標籤）；全部停下"; kill -TERM 0; }
+    say "3/3 一個標籤就是一次彩排：做完先出證據包，之後再從這兩個錢包付款（包括 make demo-local 的 fake 城鎮）就換一個標籤"
     say "3/3 Host 啟動中（城鎮・真實 Agent：按「開始」才執行 Claude Code CLI，一個場域兩位客人；頁面會自動打開；配對碼在下面）"
     make present-e1a SIGNER="$sock" HOST="$host" AUTH=device SCENARIOS=testdata/demo/scenarios-town-live.json ||
       { say "卡在第 3 步：Host 停了（上面是它的訊息）；全部停下"; kill -TERM 0; }

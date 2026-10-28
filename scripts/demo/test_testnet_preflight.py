@@ -25,7 +25,7 @@ class UnixServer(socketserver.ThreadingUnixStreamServer):
         return r, ("local", 0)
 
 
-def run(health, usdc, gas, price=GWEI // 100):
+def run(health, usdc, gas, price=GWEI // 100, town=False):
     """The script's exit code and output with these answers."""
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -56,7 +56,7 @@ def run(health, usdc, gas, price=GWEI // 100):
     for s in (node, relayer):
         threading.Thread(target=s.serve_forever, daemon=True).start()
     try:
-        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "testnet-preflight.py"), d + "/r.sock", d + "/host"], capture_output=True, text=True, timeout=30)
+        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "testnet-preflight.py"), d + "/r.sock", d + "/host"] + (["town"] if town else []), capture_output=True, text=True, timeout=30)
         return r.returncode, r.stdout
     finally:
         node.shutdown()
@@ -73,6 +73,15 @@ class Preflight(unittest.TestCase):
         code, out = run(READY, 19920000, 9 * 10**13)
         self.assertEqual(code, 0, out)
         self.assertIn("relayer 今天已送 8／12 筆", out)
+
+    def test_town_needs_two_scenes(self):
+        # The town on the real Agent (docs/commercial-live-town.md): 8 relayer transactions, 0.58 a wallet.
+        code, out = run({**READY, "sent_today": 5}, 550000, 9 * 10**13, town=True)
+        self.assertEqual(code, 1, out)
+        self.assertIn("relayer 今天只剩 7 筆，兩個場域、每場兩位客人要 8 筆", out)
+        self.assertIn("只有 0.55 test USDC，兩個場域、每場兩位客人要 0.58", out)
+        code, out = run({**READY, "sent_today": 4}, 580000, 9 * 10**13, town=True)
+        self.assertEqual(code, 0, out)
 
     def test_short_says_each(self):
         code, out = run({**READY, "sent_today": 12}, 300000, 1000)

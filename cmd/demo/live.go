@@ -16,7 +16,7 @@ import (
 // liveLabelPaying a live host's that pays (E1-a).
 const (
 	liveLabel       = "真實 Agent 即時展示・開發展示例外・合成資料・不付款"
-	liveLabelPaying = "真實 Agent 即時展示・開發展示例外・測試 USDC 付款（委託是模擬，Ask 由本人核准）"
+	liveLabelPaying = "真實 Agent 即時展示・開發展示例外・測試 USDC 付款（委託與 Ask 由本人確認）" // the Signer pays a person-confirmed delegation only (docs/commercial-gap4.md G3=B)
 )
 
 // liveInfo goes with /api/viewer and /api/host/status in live mode.

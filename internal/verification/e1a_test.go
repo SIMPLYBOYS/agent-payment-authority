@@ -1,6 +1,7 @@
 package verification
 
 import (
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"slices"
 	"testing"
 
@@ -96,5 +97,22 @@ func TestE1aCatalogHasTheTown(t *testing.T) {
 		if e, ok := c[id]; !ok || e.Task == "" || e.Contract != "apa.pay.v2" {
 			t.Errorf("%s: %+v %v", id, e, ok)
 		}
+	}
+}
+
+// E6 and E10 match an order to the trace's request_purchase by product: every product the shop sells, the
+// town's cafe ones too (/scenes/cafe/lunch-set is cafe-lunch-set), reads back as its own ID from its URL.
+func TestProductOfEveryOffer(t *testing.T) {
+	shop, err := merchant.New("http://127.0.0.1:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range shop.Offers() {
+		if got := productOf(o.URL); got != o.ProductID {
+			t.Errorf("%s: %s reads as %q", o.ProductID, o.URL, got)
+		}
+	}
+	if got := productOf("http://127.0.0.1:1/eval/kr-market-brief?v=1"); got != "kr-market-brief" {
+		t.Errorf("an AE1 item: %q", got)
 	}
 }

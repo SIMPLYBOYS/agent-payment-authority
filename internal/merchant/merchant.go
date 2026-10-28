@@ -345,6 +345,17 @@ type Offer struct {
 	Quote                  contracts.Quote
 }
 
+// ProductAt is the ID of the shop's own product at a resource path ("" if
+// none): a cafe's path is /scenes/cafe/lunch-set, its ID cafe-lunch-set.
+func ProductAt(path string) string {
+	for _, p := range products {
+		if p.Path == path {
+			return p.ID
+		}
+	}
+	return ""
+}
+
 // Offers lists the quotes the shop's 402 serves, in product order. A host
 // builds its trusted offer book from this configuration, never from a 402
 // it happened to receive.

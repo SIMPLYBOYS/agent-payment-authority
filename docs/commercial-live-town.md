@@ -51,6 +51,11 @@
 
 S1～S3 我做（含 review）；S4、S5 要你操作，模型每場都會真的執行。
 
+S5 之前要先確認（testnet 的量是兩個場域的）：
+- `demo-testnet.sh live <標籤> town` 的開場前檢查改成兩個場域：relayer 要 8 筆（每位客人登記 1、預留 1）、兩個錢包各要 0.58 test USDC、gas 金鑰兩倍。
+- 商店一天結算上限是 4 筆，兩個場域剛好 4 筆：那一天（UTC）不能有其他結算，就緒表的「商店今天」要是 0。
+- 委託 `dlg-ta`、`dlg-tb` 在 Signer 的累計額度：自動付款會用掉額度，E1-a ③ 與之前 fake 城鎮的午餐已用過一部分；S5 前我先唯讀核對剩多少，不夠再請你決定。
+
 ## 4 要你決定的事
 
 | # | 問題 | 建議 |
@@ -77,9 +82,11 @@ Aaron 10/29：D1～D5「照建議」。
   - `make present-e1a SCENARIOS=…`（預設仍是 E1-a 的目錄）。
   - `sh scripts/demo/demo-testnet.sh live <標籤> town`：host 檔放 `var/e1a-testnet/town-<標籤>`（不帶 `--shop-eval`）。
   - `sh scripts/demo/demo-local.sh live <標籤>`：本機鏈、開發用 Signer、真實 CLI，host 檔放 `var/demo-local/live-<標籤>`。
-  - 兩支腳本第一次建 host 檔時，就用 `e1-evidence start` 記下證據的起點（本機 `127.0.0.1:8545`；testnet `https://sepolia.base.org`，唯讀）。同一個標籤之後再啟動，沿用同一份 host 檔、資料庫與起點，task 依序往下用（每位客人 5 個，用完換標籤）。
+  - 兩支腳本建 host 檔之後、第一場之前，用 `e1-evidence start` 記下證據的起點（本機 `127.0.0.1:8545`；testnet `https://sepolia.base.org`，唯讀）；兩步各自判斷，起點沒記成（節點沒回應）再跑一次會補記。
+  - **一個標籤就是一次彩排（或一次實跑）**：E8 會核對起點之後兩個錢包的每一筆轉出，所以做完先出證據包；之後再從這兩個錢包付款（`make demo-local` 的 fake 城鎮、testnet 的 fake 城鎮或 E1-a），下一次就換一個標籤。同一個標籤已用在 E1-a（`host-<標籤>`）或城鎮（`town-<標籤>`）時，另一邊拒絕啟動（task 會重複）。
   - 以本機鏈的目錄試產 host 檔：兩位客人各 5 個 task、兩人都有委託、沒有評測目錄。
 - **S3** checker 的 `e1a` 模式讀兩份受信任的 live 目錄（同一個 id 出現在兩份就拒絕）；`TestE1aCatalogHasTheTown`。
+- **review（b3278a9）修正**：checker 原本取商品網址的最後一段當商品 id，咖啡店的網址是 `/scenes/cafe/lunch-set`，會讀成 `lunch-set`，和 Agent 請購的 `cafe-lunch-set` 對不上，E6 會把每一場咖啡店判失敗（資料研究室與 E1-a 的網址剛好就是 id，所以之前沒抓到）；改成向商店的商品表查（`merchant.ProductAt`），`TestProductOfEveryOffer` 涵蓋商店賣的每一樣。腳本建 host 檔與記起點分開判斷；開場前檢查加上城鎮的量；live 付款主機的標籤從「委託是模擬」改為「委託與 Ask 由本人確認」（Signer 只付本人確認過的委託）。
 - 測試：`internal/verification`、`cmd/demo`、`cmd/e1-evidence`、`cmd/p2-testnet` 全過（`cmd/demo` 的 loopback 測試在沙盒外跑）。
 
 ### 6.1 S4：Aaron 的本機彩排（真實 CLI、本機鏈、你的裝置）
@@ -96,4 +103,6 @@ Aaron 10/29：D1～D5「照建議」。
 | 5 | Claude Code | `e1-evidence pack`（四場、`--task show-e1a-town1-…=town-…`）＋`verify-demo --mode e1a --rpc http://127.0.0.1:8545` | — |
 | 6 | 你 | 我回報後再 Ctrl-C | — |
 
-預期：四場的請購分別是 `kr-market`（Ask）、`tw-semis-note`（Allow）、`cafe-lunch-set`（Allow）、`cafe-meeting-coffee`（Ask），全部付款、交付；E1～E9 PASS（E10 只看注入的場次，這四場不適用）。Agent 若買錯或多買，照實記下，不重跑當作沒發生。
+預期：四場的請購分別是 `kr-market`（Ask）、`tw-semis-note`（Allow）、`cafe-lunch-set`（Allow）、`cafe-meeting-coffee`（Ask），全部付款、交付；E1～E10 PASS（E10 只看注入的場次，這四場沒有注入，報告上是「沒有注入場次」的 PASS）。Agent 若買錯或多買，照實記下，不重跑當作沒發生。
+
+要留意：兩位真實 CLI 同時執行在這裡是第一次（E1-a 一次一場；M-C 的兩位同時沒有付款），兩者共用同一個 CLI 設定目錄。若其中一位啟動就失敗（例如登入狀態），照實記下，改成一位一位開始（D2 的退路）。

@@ -2,7 +2,12 @@
 ran into the relayer's daily cap unseen): the relayer's transactions today
 against its cap, and the balances the show spends from, read-only.
 
-    python3 -I scripts/demo/testnet-preflight.py RELAYER_SOCK HOST_DIR
+    python3 -I scripts/demo/testnet-preflight.py RELAYER_SOCK HOST_DIR [town]
+
+town: the town on the real Agent (docs/commercial-live-town.md), two scenes of two customers:
+twice the relayer's and the gas keys' transactions, and a wallet pays up to 0.58 (A: the brief
+0.50 and the lunch 0.08; B: 0.06 and 0.42). The shop then settles 4: its whole daily cap, so no
+other settlement that UTC day (its count is in the Host's readiness table).
 
 Prints one line per check. Exit 0: enough for one show of two customers
 (the relayer 4: two registrations, two reservations; each wallet one 0.50
@@ -55,14 +60,18 @@ def rpc(url, method, params):
 
 def main():
     sock, host = sys.argv[1], sys.argv[2]
+    town = sys.argv[3:] == ["town"]
     try:
-        return check(sock, host)
+        return check(sock, host, town)
     except Exception as e:  # noqa: BLE001 - one line says what could not be checked; a crash is never "short"
         print("preflight: 無法檢查（%s）" % e)  # the relayer's socket or the host files: no node URL in it
         return 2
 
 
-def check(sock, host):
+def check(sock, host, town=False):
+    scenes = 2 if town else 1
+    need_relayer, need_usdc = NEED_RELAYER * scenes, 580000 if town else NEED_USDC
+    show = "兩個場域、每場兩位客人" if town else "一場兩位客人"
     h = health(sock)
     pay = json.load(open(host + "/payments.json"))
     reg = json.load(open(host + "/registry.json"))
@@ -74,23 +83,23 @@ def check(sock, host):
     else:
         left = max(h["daily_tx_cap"] - h["sent_today"], 0)
         print("preflight: relayer 今天已送 %d／%d 筆（UTC 日，台北 08:00 歸零），剩 %d" % (h["sent_today"], h["daily_tx_cap"], left))
-        if left < NEED_RELAYER:
-            short.append("relayer 今天只剩 %d 筆，一場兩位客人要 %d 筆（登記 2、預留 2）" % (left, NEED_RELAYER))
+        if left < need_relayer:
+            short.append("relayer 今天只剩 %d 筆，%s要 %d 筆（每位客人登記 1、預留 1）" % (left, show, need_relayer))
     try:
         price = rpc(url, "eth_gasPrice", [])
         print("preflight: gas price %.4f gwei" % (price / 1e9))
         for w in reg["wallets"]:
             n = rpc(url, "eth_call", [{"to": token, "data": "0x70a08231" + w["from"][2:].lower().rjust(64, "0")}, "latest"])
             print("preflight: %s %s：%.2f test USDC" % (w["wallet_id"], w["from"], n / 1e6))
-            if n < NEED_USDC:
-                short.append("%s 只有 %.2f test USDC，一筆簡報要 0.50" % (w["wallet_id"], n / 1e6))
+            if n < need_usdc:
+                short.append("%s 只有 %.2f test USDC，%s要 %.2f" % (w["wallet_id"], n / 1e6, show, need_usdc / 1e6))
         for name, a in (("relayer-gas", h.get("gas")), ("issuer", h.get("issuer")), ("shop", pay.get("pay_to"))):
             if not a:
                 unchecked = True
                 print("preflight: %s 的位址未知，未檢查 gas" % name)
                 continue
             n = rpc(url, "eth_getBalance", [a, "latest"])
-            need = TXS[name] * TX_GAS * 2 * price  # the node admits a transaction at about twice the base fee
+            need = TXS[name] * scenes * TX_GAS * 2 * price  # the node admits a transaction at about twice the base fee
             print("preflight: %s %s：%.7f ETH（一場約要 %.7f）" % (name, a, n / 1e18, need / 1e18))
             if n < need:
                 short.append("%s 的 gas 只有 %.7f ETH，一場約要 %.7f" % (name, n / 1e18, need / 1e18))

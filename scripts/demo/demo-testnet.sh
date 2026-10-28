@@ -120,7 +120,7 @@ say "2/4 relayer 就緒"
 # C4 (10/24: a show ran into the relayer's daily cap unseen): enough for a
 # show of two customers, before the Signer and the Host start (read-only).
 pre=0
-python3 -I scripts/demo/testnet-preflight.py "$rsock" "$tn/host" >&2 || pre=$?
+python3 -I scripts/demo/testnet-preflight.py "$rsock" "$tn/host" $( [ "$mode" = live ] && [ "$what" = town ] && echo town ) >&2 || pre=$?
 case $pre in
 0) ;;
 1) stuck "開場前檢查：上面「不夠」的項目（交易數在 UTC 午夜、台北 08:00 歸零）" ;;
@@ -146,14 +146,16 @@ say "3/4 Signer 就緒"
 if [ "$mode" = live ] && [ "$what" = town ]; then
   # The town: the shop sells its own products (no --shop-eval), so its own host files.
   host=$root/var/e1a-testnet/town-$label
-  # Made once for the label, with the evidence's start (the next block; no task registered yet) recorded before any run (docs/commercial-live-town.md L4).
-  if [ ! -d "$host" ]; then
-    go run ./cmd/p2-testnet e1a-host --dir "$tn" --out "$host" --label "$label" || stuck "第 4 步：建不出城鎮的 host 檔（$host）"
-    go run ./cmd/e1-evidence start --rpc https://sepolia.base.org --host "$host" --out "$host/start.json" || stuck "第 4 步：記不下證據的起點（$host/start.json；task 已登記過就換一個標籤）"
-  fi
+  [ ! -d "$root/var/e1a-testnet/host-$label" ] || stuck "第 4 步：標籤 $label 已用在 E1-a（host-$label）：兩邊的 task 會重複，換一個標籤"
+  # Made once for the label, and the evidence's start (the next block; no task registered yet) recorded before
+  # any run (docs/commercial-live-town.md L4); each on its own, so a start that failed is tried again.
+  [ -d "$host" ] || go run ./cmd/p2-testnet e1a-host --dir "$tn" --out "$host" --label "$label" || stuck "第 4 步：建不出城鎮的 host 檔（$host）"
+  [ -f "$host/start.json" ] || go run ./cmd/e1-evidence start --rpc https://sepolia.base.org --host "$host" --out "$host/start.json" || stuck "第 4 步：記不下證據的起點（$host/start.json：節點沒回應就再跑一次；task 已登記過就換一個標籤）"
+  say "4/4 一個標籤就是一次實跑：做完先出證據包，之後再從這兩個錢包付款（包括 fake 的城鎮、E1-a）就換一個標籤"
   say "4/4 Host 啟動中（城鎮・真實 Agent：按「開始」才執行 Claude Code CLI，一個場域兩位客人；task 是 show-e1a-$label-…）"
   make present-e1a SIGNER="$ssock" HOST="$host" AUTH=device SCENARIOS=testdata/demo/scenarios-town-live.json || stuck "第 4 步：Host 停了"
 elif [ "$mode" = live ]; then
+  [ ! -d "$root/var/e1a-testnet/town-$label" ] || stuck "第 4 步：標籤 $label 已用在城鎮（town-$label）：兩邊的 task 會重複，換一個標籤"
   host=$root/var/e1a-testnet/host-$label
   [ -d "$host" ] || go run ./cmd/p2-testnet e1a-host --dir "$tn" --out "$host" --label "$label" --shop-eval data || stuck "第 4 步：建不出 E1-a 的 host 檔（$host）"
   say "4/4 Host 啟動中（真實 Agent：按「開始」才執行 Claude Code CLI；task 是 show-e1a-$label-…）"

@@ -149,7 +149,7 @@ if [ "$mode" = live ]; then
 	[ -z "$livepay" ] || set -- --approvals-signer "$signer" --authenticator-source "$authsrc" --payments "$payments"
 	[ -z "$creds" ] || set -- "$@" --credential-dir "$cred"
 	[ -z "$profile" ] || set -- "$@" --profile "$profile"
-	[ -z "$livepay" ] || echo "present: 付款的 live 展示（E1-a）：委託是模擬，Ask 由本人以已登記的裝置核准，付款 ${payments}" >&2
+	[ -z "$livepay" ] || echo "present: 付款的 live 展示（E1-a 的路線）：委託與 Ask 由本人確認（AUTH=${authsrc}），付款 ${payments}" >&2
 	APA_ADDR=$addr APA_LIVE_CLI=true APA_DB_PATH=$db/live.db APA_DEMO_TOKEN_FILE=$w/tok/tokens.json "$w/demo" \
 		--live-cli "$cli" $extra --scenarios "$livecat" --registry "$registry" \
 		--trace-dir "$runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" "$@" &

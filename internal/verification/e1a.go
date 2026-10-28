@@ -25,6 +25,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/ae1"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 )
 
@@ -557,7 +558,10 @@ func productOf(resource string) string {
 	if err != nil {
 		return ""
 	}
-	return path.Base(u.Path)
+	if id := merchant.ProductAt(u.Path); id != "" { // the shop's own products (review of b3278a9: a cafe's path is not its ID)
+		return id
+	}
+	return path.Base(u.Path) // an AE1 catalog's /eval/<id>
 }
 
 // e1aParties is E7: each event and purchase on its task's own consumer,
@@ -730,7 +734,7 @@ func e1aCatalog(repo string) (map[string]e1aEntry, error) {
 		}
 		for _, e := range c.Scenarios {
 			if _, dup := out[e.ID]; dup {
-				return nil, fmt.Errorf("live catalogs: %s is in two of them (%s)", e.ID, file)
+				return nil, fmt.Errorf("live catalogs: %s twice (the second in %s)", e.ID, file)
 			}
 			out[e.ID] = e
 		}
