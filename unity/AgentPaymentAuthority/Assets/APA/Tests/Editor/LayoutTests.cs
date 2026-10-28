@@ -27,10 +27,11 @@ public class LayoutTests
         return new Vector2(At(16), At(20)) / 32f;
     }
 
-    // A doorway's shut frame lies over its facade without changing a pixel, composited as drawn (review of 67461a1:
-    // the mart's door carried the facade's half-clear shadow again, a darker strip; their values match, alpha over them doesn't).
+    // No half-clear pixel of a shut door lies over its facade, composited as drawn (review of 67461a1: the mart's door
+    // carried the facade's half-clear shadow again, a darker strip; their values match, alpha over them doesn't). A door
+    // may add to its front (the mart's has an awning, Aaron 10/28), so this is the doubling only, not the whole picture.
     [Test]
-    public void EachDoorwayShutIsItsFacade()
+    public void NoDoorwayDoublesItsFacadesShadow()
     {
         var town = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
         int checkedDoors = 0;
@@ -47,7 +48,8 @@ public class LayoutTests
                     int X = x0 + x, Y = y0 + door.h - 1 - y; // the venue's pixels, y up
                     var under = Vector4.zero;
                     foreach (var (e, c) in pieces) under = Over(At(c, e, X, Y), under);
-                    Assert.Less((Over(Pixel(door, x, y), under) - under).magnitude, 2f / 255f, v.layout + ": its shut door changes the facade at " + X + "," + Y);
+                    float a = Pixel(door, x, y).w;
+                    Assert.IsFalse(a > 0f && a < 1f && under.w > 0f, v.layout + ": its shut door's half-clear pixel over the front at " + X + "," + Y);
                 }
             checkedDoors++;
         }

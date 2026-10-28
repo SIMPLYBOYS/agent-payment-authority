@@ -74,7 +74,7 @@ namespace APA
 
         Town town;
         Camera cam;
-        readonly Dictionary<string, (Town.Venue v, float top)> venues = new Dictionary<string, (Town.Venue, float)>();
+        readonly Dictionary<string, (Town.Venue v, float top, float right)> venues = new Dictionary<string, (Town.Venue, float, float)>();
         readonly List<(SpriteRenderer plate, TextMesh text)> plates = new List<(SpriteRenderer, TextMesh)>();
         public bool HasTown => town != null && System.Array.Exists(art, t => t != null); // a build without the pack has no town (the room keeps its old camera)
         public string Mode { get; private set; } = "venue"; // venue | town: what the page asked for
@@ -127,8 +127,10 @@ namespace APA
                 // The building's top, from the data (a repeated piece's h, else its file's height): the pill sits just above it.
                 float top = 0f;
                 foreach (var e in v.exterior) top = Mathf.Max(top, e.y + (e.h > 0f ? e.h : Height(e.key)));
-                venues[v.layout] = (v, top);
-                Pill(root, v, top);
+                float right = 0f; // its width, the same way (the mart is 18 tiles, the others 12)
+                foreach (var e in v.exterior) right = Mathf.Max(right, e.x + (e.w > 0f ? e.w : Width(e.key)));
+                venues[v.layout] = (v, top, right);
+                Pill(root, v, top, right);
             }
             foreach (var w in town.walkers) MakeWalker(w, transform, false);
             MakeTraffic();
@@ -245,6 +247,7 @@ namespace APA
         }
 
         float Height(string key) => Tex(key) != null ? Tex(key).height / (float)PPU : 0f;
+        float Width(string key) => Tex(key) != null ? Tex(key).width / (float)PPU : 0f;
 
         SpriteRenderer Piece(Transform parent, Town.Piece p, int order, Vector2 pivot)
         {
@@ -302,9 +305,9 @@ namespace APA
 
         // Pill: the venue's number (in the accent) and name on a light plate
         // over its roof, as the page's venue list numbers them.
-        void Pill(Transform root, Town.Venue v, float top)
+        void Pill(Transform root, Town.Venue v, float top, float right)
         {
-            var text = Words(root, "pill", new Vector2(6f, top + 0.5f), 0.085f, Ink, Labels);
+            var text = Words(root, "pill", new Vector2(right / 2f, top + 0.5f), 0.085f, Ink, Labels);
             text.text = "<color=" + Accent + ">" + v.number + "</color>  " + v.name;
             Plate(root, text, Rounded(), Color.white, Labels);
         }
@@ -709,14 +712,14 @@ namespace APA
             if (hit != null) Clicked(hit);
         }
 
-        // VenueAt: the venue whose outside (12 tiles wide, up to its top,
+        // VenueAt: the venue whose outside (as wide as its pieces, up to its top,
         // the pill over it) holds a point in town units.
         public string VenueAt(Vector2 p)
         {
             foreach (var kv in venues)
             {
                 var o = new Vector2(kv.Value.v.x, kv.Value.v.y);
-                if (p.x >= o.x && p.x <= o.x + 12f && p.y >= o.y && p.y <= o.y + kv.Value.top + 1f) return kv.Key;
+                if (p.x >= o.x && p.x <= o.x + kv.Value.right && p.y >= o.y && p.y <= o.y + kv.Value.top + 1f) return kv.Key;
             }
             return null;
         }
