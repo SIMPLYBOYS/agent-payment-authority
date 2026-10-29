@@ -343,6 +343,10 @@ test("UX3: bridge layouts, rooms in messages, the scenes in order", () => {
   assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=cafe,data;town=1").town, true);
   assert.equal(b.town, false);
   assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=data;town=2"), null);
+  // The game (Aaron 10/29): after the town; only with it.
+  assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=data;town=1;play=1").play, true);
+  assert.equal(b.play, false);
+  assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=data;play=1"), null, "no game without the town");
   assert.deepEqual(A.sceneClear2(4, "cafe"), { v: 2, scene: 4, clear: true, layout: "cafe" });
   assert.deepEqual(A.slotClear2(4, "consumer-a", 2, "mart"), { v: 2, scene: 4, consumer: "consumer-a", slot: 2, clear: true, layout: "mart" });
   assert.deepEqual(A.venues([{ scene: "mart" }, { scene: "zoo" }, {}, { scene: "cafe" }, { scene: "mart" }]), ["data", "cafe", "mart", "zoo"]);

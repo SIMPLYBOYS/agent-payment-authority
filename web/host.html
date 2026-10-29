@@ -105,6 +105,13 @@
   <aside class="present-card present-venues" aria-label="場域">
     <p class="eyebrow">THE VENUES</p>
     <h2>點一個場域，看一筆真實交易。</h2>
+    <div id="present-play" class="present-play" role="group" aria-label="遊戲模式" hidden>
+      <span class="present-play-name">遊戲模式</span>
+      <button type="button" data-play="" aria-pressed="true">關（A、B 一起）</button>
+      <button type="button" data-play="consumer-a" aria-pressed="false">走客人 A</button>
+      <button type="button" data-play="consumer-b" aria-pressed="false">走客人 B</button>
+      <small id="present-play-hint" hidden>方向鍵／WASD，或點地面、點建築走過去；走到店門口就進店，再按開始。</small>
+    </div>
     <ol id="present-venue-list" class="present-venue-list"></ol>
     <button type="button" id="present-town" class="present-town" hidden>← 回到城鎮</button>
     <p class="present-credit">街上的行人與店裡的店員、其他客人只是示意；只有客人 A、B 在你點的場域會真的交易。</p>

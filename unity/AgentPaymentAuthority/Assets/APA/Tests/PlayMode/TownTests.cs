@@ -463,4 +463,54 @@ public class TownTests
         Assert.AreEqual(t.cars[0].frames, turned.Count, "their wheels turn: every driving frame shows");
         Assert.IsTrue(crossed, "the walker went over in a cycle");
     }
+
+    // The game (Aaron 10/29): the person walks A or B; the keys and a click move it over the pavement only; at a
+    // door, walked up into or reached by a click on the building, the venue is reported once, as a click is.
+    [UnityTest]
+    public IEnumerator ThePersonWalksACustomerIntoAVenue()
+    {
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        bridge.Play("{\"consumer\":\"consumer-x\"}");
+        Assert.AreEqual("play:0:0:consumer-x|Invalid", bridge.reports.Last());
+        bridge.Play("{\"consumer\":\"consumer-b\"}");
+        Assert.AreEqual("play:0:0:consumer-b|Applied", bridge.reports.Last());
+        yield return null;
+        var start = town.PlayerAt;
+        Assert.IsTrue(town.Walkable(start), "it starts on the pavement");
+        Assert.IsTrue(town.StandsAtDoor("consumer-b"), "shown, with no task");
+        // Up against the shops' fronts: it stops at the pavement's edge.
+        bridge.Steer("{\"x\":0,\"y\":1}");
+        for (float end = Time.realtimeSinceStartup + 2f; Time.realtimeSinceStartup < end;) yield return null;
+        bridge.Steer("{\"x\":0,\"y\":0}");
+        Assert.Greater(town.PlayerAt.y, start.y, "it walked up");
+        Assert.IsTrue(town.Walkable(town.PlayerAt), "never off the pavement: " + town.PlayerAt);
+        // A click on the cafe: along the pavement to its door, then reported once.
+        int before = bridge.reports.Count(r => r.StartsWith("venue:"));
+        Assert.IsTrue(town.GoTo(town.DoorAt("cafe"), "cafe"));
+        float took = 0f;
+        yield return Until(() => bridge.reports.Count(r => r.StartsWith("venue:")) > before, 15f, t => took = t);
+        Assert.AreEqual("venue:" + bridge.scene.Scene + ":0:cafe", bridge.reports.Last(r => r.StartsWith("venue:")), "at the door: the venue, as a click on it");
+        Assert.Less((town.PlayerAt - town.DoorAt("cafe")).magnitude, TownView.DoorReach);
+        for (int i = 0; i < 10; i++) yield return null;
+        Assert.AreEqual(before + 1, bridge.reports.Count(r => r.StartsWith("venue:")), "once, while it stays there");
+        // Across the road to the mart: over the crossing, down the alley.
+        Assert.IsTrue(town.GoTo(town.DoorAt("mart"), "mart"));
+        bool off = false;
+        for (float end = Time.realtimeSinceStartup + 25f; town.RouteLeft > 0 && Time.realtimeSinceStartup < end;) { yield return null; off |= !town.Walkable(town.PlayerAt); }
+        Assert.IsFalse(off, "the way stays on the pavement");
+        yield return null;
+        Assert.AreEqual("venue:" + bridge.scene.Scene + ":0:mart", bridge.reports.Last(r => r.StartsWith("venue:")));
+        Assert.AreEqual("town", town.Mode, "the view is the page's to change");
+        // Into a room and out: it comes back on that room's door step, facing the street.
+        bridge.View("{\"mode\":\"venue\"}");
+        yield return Settle();
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        Assert.AreEqual(town.DoorAt(view.LayoutKey) - new Vector2(0f, 0.8f), town.PlayerAt);
+        Assert.IsTrue(town.Walkable(town.PlayerAt));
+        bridge.Play("{\"consumer\":\"\"}");
+        Assert.AreEqual("play:0:0:|Applied", bridge.reports.Last());
+        Assert.AreEqual(Vector2.zero, town.PlayerAt, "no one walked");
+    }
 }

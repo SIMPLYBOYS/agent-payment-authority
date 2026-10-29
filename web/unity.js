@@ -26,6 +26,7 @@ export class UnityHost {
     this.pending2 = new Map();      // version 2: the latest message per customer, while not ready
     this.pendingSelect = null;      // UX1: the latest Select, sent after the scene's messages
     this.pendingView = null;        // T2: the latest View, for a build with the town
+    this.pendingPlay = null;        // the game (Aaron 10/29): the latest Play, for a build that walks a customer
     window.apaUnityReport = (kind, gen, seq, detail) => this.report(String(kind), Number(gen), Number(seq), String(detail));
   }
 
@@ -139,8 +140,26 @@ export class UnityHost {
     this.flush();
   }
 
+  // play names the customer the person walks in the town ("" none); steer is
+  // the direction of the keys held, sent at once and never kept (a key let go
+  // before Unity is ready walks no one).
+  play(consumer) {
+    if (!(this.bridge && this.bridge.play)) return;
+    this.pendingPlay = { consumer: consumer || "" };
+    this.flush();
+  }
+
+  steer(x, y) {
+    if (!(this.bridge && this.bridge.play) || !this.ready || !this.instance) return;
+    this.instance.SendMessage("Bridge", "Steer", JSON.stringify({ x, y }));
+  }
+
   flush() {
     if (!this.ready || !this.instance) return;
+    if (this.pendingPlay) {
+      this.instance.SendMessage("Bridge", "Play", JSON.stringify(this.pendingPlay));
+      this.pendingPlay = null;
+    }
     if (this.pendingView) {
       this.instance.SendMessage("Bridge", "View", JSON.stringify(this.pendingView));
       this.pendingView = null;

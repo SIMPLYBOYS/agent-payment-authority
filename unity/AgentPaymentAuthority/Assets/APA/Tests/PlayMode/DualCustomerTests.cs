@@ -43,7 +43,7 @@ public class DualCustomerTests
     {
         var rooms = view.LayoutKeys.ToList();
         rooms.Sort(System.StringComparer.Ordinal); // every layout file, whatever is added (review S4)
-        Assert.AreEqual("bridge:0:0:versions=1,2;customers=consumer-a,consumer-b;select=1;layouts=" + string.Join(",", rooms) + ";town=1", bridge.reports[0]); // T2: the build has the town
+        Assert.AreEqual("bridge:0:0:versions=1,2;customers=consumer-a,consumer-b;select=1;layouts=" + string.Join(",", rooms) + ";town=1;play=1", bridge.reports[0]); // T2: the build has the town; the game (Aaron 10/29)
         CollectionAssert.IsSupersetOf(rooms, new[] { "cafe", "data", "mart" });
         StringAssert.StartsWith("ready:", bridge.reports[1]);
     }

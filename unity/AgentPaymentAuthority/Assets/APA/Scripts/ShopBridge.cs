@@ -55,7 +55,7 @@ namespace APA
             if (hasTown) town.Clicked = layout => Report("venue", scene.Scene, 0, layout);
             var rooms = new List<string>(view.LayoutKeys);
             rooms.Sort(System.StringComparer.Ordinal);
-            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers) + ";select=1;layouts=" + string.Join(",", rooms) + (hasTown ? ";town=1" : ""));
+            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers) + ";select=1;layouts=" + string.Join(",", rooms) + (hasTown ? ";town=1;play=1" : ""));
             Report("ready", -1, -1, view.UsingPlaceholders ? "placeholder" : "limezu");
         }
 
@@ -131,6 +131,26 @@ namespace APA
             try { m = JsonUtility.FromJson<ViewMessage>(json); } catch (System.Exception) { }
             bool ok = m != null && town != null && town.Show(m.mode, new Rect(m.safe.x, m.safe.y, m.safe.width, m.safe.height));
             Report("view", 0, 0, (m != null ? m.mode ?? "" : "") + "|" + (ok ? "Applied" : "Invalid"));
+        }
+
+        // Play and Steer (the game, Aaron 10/29): the customer the person walks ("" none) and the keys
+        // held. Only the town changes: where the customer walks; a door is reported as "venue".
+        [System.Serializable]
+        public class PlayMessage { public string consumer; public float x, y; }
+
+        public void Play(string json)
+        {
+            PlayMessage m = null;
+            try { m = JsonUtility.FromJson<PlayMessage>(json); } catch (System.Exception) { }
+            bool ok = m != null && town != null && town.Play(m.consumer);
+            Report("play", 0, 0, (m != null ? m.consumer ?? "" : "") + "|" + (ok ? "Applied" : "Invalid"));
+        }
+
+        public void Steer(string json)
+        {
+            PlayMessage m = null;
+            try { m = JsonUtility.FromJson<PlayMessage>(json); } catch (System.Exception) { }
+            if (m != null && town != null) town.Steer(new Vector2(Mathf.Clamp(m.x, -1f, 1f), Mathf.Clamp(m.y, -1f, 1f))); // every key: no report
         }
 
         public void Receive(string json)

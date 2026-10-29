@@ -217,6 +217,49 @@ public class LayoutTests
                 }
     }
 
+    // The game's pavement (Aaron 10/29): in the view's frame, off the buildings, over the road only at the
+    // crossing; the start on it, every door on it, and every door reachable from the start in half-tile steps.
+    [Test]
+    public void TheGameWalksThePavementToEveryDoor()
+    {
+        var town = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
+        Assert.IsNotEmpty(town.walk);
+        bool On(Vector2 p) => town.walk.Any(a => a.Holds(p));
+        var t = town.traffic;
+        foreach (var a in town.walk)
+        {
+            Assert.IsTrue(a.x >= town.focus.x - town.frame.x / 2f && a.x + a.w <= town.focus.x + town.frame.x / 2f && a.y >= town.focus.y - town.frame.y / 2f && a.y + a.h <= town.focus.y + town.frame.y / 2f, "walk " + a.x + "," + a.y + " outside the frame");
+            bool road = a.y < t.top && a.y + a.h > t.bottom;
+            Assert.IsFalse(road && (a.x < t.from || a.x + a.w > t.to), "walk " + a.x + "," + a.y + " on the road off the crossing");
+            foreach (var v in town.venues)
+            {
+                float bottom = v.y + v.exterior.Min(e => e.y), top = v.y + v.exterior.Max(e => e.y + (e.h > 0f ? e.h : CutSize(e.key).y)), right = v.exterior.Max(e => e.x + (e.w > 0f ? e.w : CutSize(e.key).x));
+                Assert.IsFalse(a.x < v.x + right && a.x + a.w > v.x && a.y + a.h > bottom && a.y < top, "walk " + a.x + "," + a.y + " reaches into " + v.layout);
+            }
+        }
+        Assert.IsTrue(On(town.start), "the start is on the pavement");
+        // Every door, and the step one comes back out on (TownView: 0.8 below it).
+        var doors = town.venues.Select(v => new Vector2(v.x, v.y) + v.door).ToList();
+        foreach (var d in doors) { Assert.IsTrue(On(d), "door " + d + " off the pavement"); Assert.IsTrue(On(d - new Vector2(0f, 0.8f)), "the step below door " + d); }
+        // Reachable: the areas' cells, flooded from the start's (the door's own cell may be the pavement's edge).
+        const float c = TownView.Cell;
+        var seen = new HashSet<Vector2Int>();
+        var todo = new Queue<Vector2Int>();
+        var first = new Vector2Int((int)(town.start.x / c), (int)(town.start.y / c));
+        seen.Add(first); todo.Enqueue(first);
+        while (todo.Count > 0)
+        {
+            var at = todo.Dequeue();
+            foreach (var n in new[] { at + Vector2Int.right, at + Vector2Int.left, at + Vector2Int.up, at + Vector2Int.down })
+                if (!seen.Contains(n) && On(new Vector2((n.x + 0.5f) * c, (n.y + 0.5f) * c))) { seen.Add(n); todo.Enqueue(n); }
+        }
+        foreach (var d in doors)
+        {
+            var cell = new Vector2Int((int)(d.x / c), (int)(d.y / c));
+            Assert.IsTrue(seen.Contains(cell) || seen.Contains(cell + Vector2Int.down) || seen.Contains(cell + Vector2Int.up), "door " + d + " unreachable from the start");
+        }
+    }
+
     // Every scene the host's UX3 catalog names has its room.
     [Test]
     public void EveryCatalogSceneHasALayout()

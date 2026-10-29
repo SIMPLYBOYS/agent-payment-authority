@@ -644,6 +644,9 @@ function renderVenues(vs) {
 // T2: with a build that has the town, presenting starts in the town (every
 // venue roofed); a venue's row or a click on its building enters it (its
 // roof lifts, the camera steps in) and 回到城鎮 goes back. Unity only shows.
+let playAs = "", sentPlay = ""; // 遊戲模式 (below): the customer picked, and the one Unity walks now
+const held = new Set();          // its keys held
+let steered = "0,0";
 let presenting = (() => { try { return localStorage.getItem("apa-present") === "1"; } catch { return false; } })();
 let inTown = true;
 const hasTown = () => !!(shop().bridge && shop().bridge.town);
@@ -688,6 +691,43 @@ function sendView() {
   sentView = key;
   shop().view(v.mode, v.safe);
 }
+// ---- 遊戲模式 (Aaron 10/29: 選擇人物，自由移動) ----
+// While presenting, with a build that walks a customer: the person picks A or B and walks it round the town
+// (the keys here, a click in Unity); at a door Unity reports the venue as a click on it, and the room opens.
+// Its start runs that customer only; off, the show runs A and B together as before. Kept in this page only.
+const canPlay = () => hasTown() && !!shop().bridge.play;
+function sendPlay() {
+  const want = presenting && creds.view().hasHost && canPlay() ? playAs : "";
+  $("present-play").hidden = !(presenting && canPlay());
+  $("present-play-hint").hidden = !want;
+  for (const b of $("present-play").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.play === playAs));
+  if (want === sentPlay) return;
+  sentPlay = want;
+  held.clear();
+  steered = "0,0";
+  shop().play(want);
+}
+for (const b of document.querySelectorAll("#present-play button")) b.addEventListener("click", () => { playAs = b.dataset.play; renderPresent(); });
+// The keys: arrows or WASD while a customer is walked; never while typing in a field.
+const KEYS = { ArrowUp: [0, 1], KeyW: [0, 1], ArrowDown: [0, -1], KeyS: [0, -1], ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0] };
+function steer() {
+  let x = 0, y = 0;
+  for (const k of held) { x += KEYS[k][0]; y += KEYS[k][1]; }
+  const v = Math.sign(x) + "," + Math.sign(y);
+  if (v === steered) return;
+  steered = v;
+  shop().steer(Math.sign(x), Math.sign(y));
+}
+addEventListener("keydown", (e) => {
+  if (!KEYS[e.code] || !sentPlay || !inTown || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable]")) return;
+  e.preventDefault(); // the arrows walk; the page does not scroll
+  held.add(e.code);
+  steer();
+});
+addEventListener("keyup", (e) => { if (held.delete(e.code)) steer(); });
+addEventListener("blur", () => { held.clear(); steer(); });
+
 addEventListener("resize", () => requestAnimationFrame(() => renderPresent())); // renderPresent sends the view; on ready the list learns of the town too
 $("present-toggle").addEventListener("click", () => setPresenting(true));
 $("present-exit").addEventListener("click", () => setPresenting(false));
@@ -798,6 +838,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
   if (on && ap.parentElement !== right) right.append(ap);
   else if (!on && ap.parentElement !== side) side.prepend(ap);
   sendView();
+  sendPlay();
   if (!on) return;
   const st = (lastReady && lastReady.status) || {};
   const ha = st.human_approval;
@@ -817,7 +858,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
     ahead: scene.behind(s.consumer) ? A.showCustomer(s.consumer, scene.latest(s.consumer), delegationOf(s.task), traits).caption : "" })), traits.payments);
   renderCaption(custs.models);
   const town = hasTown() && inTown;
-  const key = JSON.stringify([venues, venue, town, hasTown(), custs, starting, simulating, $("run-status").textContent]);
+  const key = JSON.stringify([venues, venue, town, hasTown(), sentPlay, custs, starting, simulating, $("run-status").textContent]);
   if (key === shownPresent) return;
   shownPresent = key;
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -835,11 +876,13 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
     b.addEventListener("click", () => enterVenue(x.k));
     li.append(b);
     if (x.k === venue && !town) {
-      const go = el("button", "venue-go", "開始這個場域的交易");
+      // The game: only the customer the person walks (Aaron 10/29); the show's A and B together otherwise.
+      const pair = sentPlay ? pairFor(x.k).filter((sc) => sc.consumer_id === sentPlay) : pairFor(x.k);
+      const go = el("button", "venue-go", sentPlay ? "開始客人 " + short(sentPlay) + " 的交易" : "開始這個場域的交易");
       go.type = "button";
-      go.disabled = starting || simulating || x.busy;
-      go.title = x.busy ? "這個場域的交易還在進行" : "每位客人先確認委託，再各自開始";
-      go.addEventListener("click", () => startAll(pairFor(x.k)));
+      go.disabled = starting || simulating || x.busy || !pair.length;
+      go.title = x.busy ? "這個場域的交易還在進行" : !pair.length ? "這位客人在這個場域沒有情境" : sentPlay ? "先確認這位客人的委託，再開始" : "每位客人先確認委託，再各自開始";
+      go.addEventListener("click", () => startAll(pair));
       li.append(go);
     }
     return li;

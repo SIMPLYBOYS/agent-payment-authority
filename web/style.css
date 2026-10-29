@@ -351,6 +351,11 @@ body[data-present="on"] .side { display: contents; }
 .venue-item .state[data-state="busy"] { background: var(--accent, #e0582f); color: #fff; }
 .venue-go { margin: 4px 0 10px 52px; background: var(--ink, #1d1a15); color: #fff; border: 0; border-radius: 999px; padding: 8px 16px; font-weight: 700; }
 .present-town { margin: 8px 0 0; background: none; border: 1px solid #d9cfbf; border-radius: 999px; padding: 6px 14px; color: var(--ink, #1d1a15); font-weight: 600; }
+.present-play { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; }
+.present-play-name { font-size: 12px; font-weight: 700; color: var(--muted, #6b6255); margin-right: 2px; }
+.present-play button { background: none; border: 1px solid #d9cfbf; border-radius: 999px; padding: 4px 10px; font-size: 13px; color: var(--ink, #1d1a15); }
+.present-play button[aria-pressed="true"] { background: var(--ink, #1d1a15); border-color: var(--ink, #1d1a15); color: #fff; }
+.present-play small { flex-basis: 100%; color: var(--muted, #6b6255); font-size: 12px; }
 .present-credit { margin: 8px 0 0; font-size: 11px; color: var(--soft, #6e675b); }
 /* 沉浸模式 (Aaron 10/28): a card folds into a button with its name; its "－" sits in its corner. */
 .present-card, body[data-present="on"] #approval { position: relative; }

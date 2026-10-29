@@ -31,6 +31,8 @@ namespace APA
         public Inside[] inside = new Inside[0];
         public Venue[] venues = new Venue[0];
         public Traffic traffic;
+        public Area[] walk = new Area[0]; // the game (Aaron 10/29): where the person's customer may stand, by its feet: the pavement, the crossing
+        public Vector2 start;             // and where they start
 
         // frames: the file is that many frames side by side (Aaron 10/28: a fountain that plays, doors that open).
         [System.Serializable] public class Piece { public string key; public float x, y, w, h; public int frames; }
@@ -54,6 +56,7 @@ namespace APA
         [System.Serializable] public class Traffic { public float from, to, bottom, top; public float[] cycle = new float[0]; public string[] lights = new string[0]; public Car[] cars = new Car[0]; }
         // frames: its sheet's driving frames (the wheels turn, Aaron 10/28), played as it goes.
         [System.Serializable] public class Car { public string key; public float x, y, speed; public int frames; }
+        [System.Serializable] public class Area { public float x, y, w, h; public bool Holds(Vector2 p) => p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h; }
     }
 
     public class TownView : MonoBehaviour
@@ -222,6 +225,7 @@ namespace APA
         // Opens: someone goes in or comes out there: between the street and the door, or just in, or about to come out.
         bool Opens(string layout)
         {
+            if (Player != "" && shown == "town" && venues.TryGetValue(layout, out var e) && (PlayerAt - DoorOf(e.v)).magnitude < 1.2f) return true; // the person's customer on its step
             if (Busy(layout)) return false; // no one does while A or B stand there
             foreach (var s in walkers)
             {
@@ -376,7 +380,7 @@ namespace APA
         bool Busy(string layout)
         {
             if (layout == null || shop == null || shop.LayoutKey != layout) return false;
-            foreach (var k in stands.Keys) if (shop.Transacting(k)) return true;
+            foreach (var k in stands.Keys) if (k != Player && shop.Transacting(k)) return true; // the person's customer walks; it never stands there
             return false;
         }
 
@@ -514,6 +518,7 @@ namespace APA
                 var p = (Vector2)w.r.transform.localPosition;
                 if (p.x > t.from - Line && p.x < t.to + Line && p.y > t.bottom && p.y < t.top) someoneOn = true;
             }
+            if (Player != "" && PlayerAt.x > t.from - Line && PlayerAt.x < t.to + Line && PlayerAt.y > t.bottom && PlayerAt.y < t.top) someoneOn = true; // the person's customer crosses when it likes: the cars wait
             foreach (var c in cars)
             {
                 float dir = Mathf.Sign(c.c.speed), front = c.x + dir * c.half;
@@ -566,12 +571,163 @@ namespace APA
             bool there = venues.TryGetValue(key ?? "", out var e);
             foreach (var kv in stands)
             {
-                bool on = there && shop.Transacting(kv.Key); // done (delivered, denied, any end): gone from the door
+                bool on = kv.Key == Player || there && shop.Transacting(kv.Key); // done (delivered, denied, any end): gone from the door
                 kv.Value.body.enabled = kv.Value.tag.GetComponent<MeshRenderer>().enabled = kv.Value.plate.enabled = on;
-                if (!on) continue;
+                if (!on || kv.Key == Player) continue; // the person's customer is where it walked
                 var at = new Vector2(e.v.x, e.v.y) + e.v.door + new Vector2(kv.Key == "consumer-a" ? -0.6f : 0.6f, 0f); // a side each, whoever else is there
                 kv.Value.body.transform.localPosition = at;
                 kv.Value.body.sortingOrder = Order(at.y) + 1;
+            }
+        }
+
+        // ---- the game (Aaron 10/29: the game mode, choose a customer and walk it round the town) ----
+        // The page names the customer (Play) and steers it with the keys held
+        // (Steer); a click on the ground or a building walks it there along
+        // the pavement. At a door, walked up into or reached by a click on its
+        // building, the venue is reported as a click on it is: the page
+        // decides. It crosses the road at the crossing only, when it likes
+        // (the cars wait), and walks through the street's props and people.
+        public string Player { get; private set; } = ""; // the customer the person walks; "" none
+        public const float PlayerSpeed = 3.2f, DoorReach = 0.4f, Cell = 0.5f;
+        Sprite[][] playerWalk = new Sprite[0][];
+        Sprite[] playerIdle = new Sprite[0]; // right, up, left, down
+        Vector2 steer;
+        readonly List<Vector2> route = new List<Vector2>();
+        string routeTo; // the venue a click walks it to: in on arrival
+        string atDoor;  // the door it was last reported at: once, until it steps away
+        int pFacing = 3, pFrame;
+        float pTick;
+        public Vector2 PlayerAt => Player != "" ? (Vector2)stands[Player].body.transform.localPosition : Vector2.zero;
+        public int RouteLeft => route.Count; // tests
+        static Vector2 DoorOf(Town.Venue v) => new Vector2(v.x, v.y) + v.door;
+        public Vector2 DoorAt(string layout) => venues.TryGetValue(layout ?? "", out var e) ? DoorOf(e.v) : Vector2.zero; // tests
+        public bool Walkable(Vector2 p) => town != null && System.Array.Exists(town.walk, a => a.Holds(p));
+
+        // Play: the customer to walk (consumer-a or consumer-b), at the start; "" or null: none (A and B
+        // stand at their door again while they have a task). False for one this build does not show.
+        public bool Play(string consumer)
+        {
+            consumer = consumer ?? "";
+            if (!HasTown || consumer != "" && !stands.ContainsKey(consumer)) return false;
+            route.Clear(); routeTo = null; steer = Vector2.zero;
+            if (consumer == Player) return true;
+            if (Player != "") stands[Player].body.sprite = playerIdle[3]; // back to standing
+            Player = consumer;
+            if (Player == "") return true;
+            var sheet = Player == "consumer-a" ? shop.customerA : shop.customerB;
+            // The premade sheet (ShopView's rows): idle at 64 from the top, walk at 128; right 0, up 6, left 12, down 18.
+            Sprite[] Row(int top, int first) { var f = new Sprite[6]; for (int i = 0; i < 6; i++) f[i] = UnityEngine.Sprite.Create(sheet, new Rect((first + i) * 32, sheet.height - top - 64, 32, 64), new Vector2(0.5f, 0f), PPU); return f; }
+            playerWalk = new[] { Row(128, 0), Row(128, 6), Row(128, 12), Row(128, 18) };
+            playerIdle = new[] { Row(64, 0)[0], Row(64, 6)[0], Row(64, 12)[0], Row(64, 18)[0] };
+            pFacing = 3;
+            var body = stands[Player].body;
+            body.sprite = playerIdle[3];
+            body.transform.localPosition = town.start;
+            body.sortingOrder = Order(town.start.y) + 1;
+            atDoor = null;
+            return true;
+        }
+
+        // Steer: the direction of the keys held (each of x, y in -1..1); zero: stop. It ends a walk a click started.
+        public void Steer(Vector2 d)
+        {
+            steer = d;
+            if (d != Vector2.zero) { route.Clear(); routeTo = null; }
+        }
+
+        // GoTo: walk to a point (the nearest pavement to it), and in at a venue's door when one is named. False: no way there.
+        public bool GoTo(Vector2 to, string venue = null)
+        {
+            route.Clear(); routeTo = null;
+            if (Player == "") return false;
+            var way = Way(PlayerAt, to);
+            if (way == null) return false;
+            route.AddRange(way);
+            routeTo = venue;
+            return true;
+        }
+
+        // Way: from one point to another over the pavement: half-tile cells, breadth first, then
+        // straightened (each point on to the farthest one in a clear line). Null when none.
+        List<Vector2> Way(Vector2 from, Vector2 to)
+        {
+            int W = Mathf.CeilToInt(town.w / Cell), H = Mathf.CeilToInt(town.h / Cell);
+            Vector2 C(int i) => new Vector2((i % W + 0.5f) * Cell, (i / W + 0.5f) * Cell);
+            int Of(Vector2 p) => Mathf.Clamp((int)(p.x / Cell), 0, W - 1) + Mathf.Clamp((int)(p.y / Cell), 0, H - 1) * W;
+            if (!Walkable(to))
+            {
+                int best = -1;
+                for (int i = 0; i < W * H; i++) if (Walkable(C(i)) && (best < 0 || (C(i) - to).sqrMagnitude < (C(best) - to).sqrMagnitude)) best = i;
+                if (best < 0) return null;
+                to = C(best);
+            }
+            int a = Of(from), b = Of(to);
+            var prev = new int[W * H];
+            for (int i = 0; i < prev.Length; i++) prev[i] = -1;
+            prev[a] = a;
+            var queue = new Queue<int>();
+            queue.Enqueue(a);
+            while (queue.Count > 0 && prev[b] < 0)
+            {
+                int i = queue.Dequeue(), x = i % W;
+                foreach (int n in new[] { x + 1 < W ? i + 1 : -1, x > 0 ? i - 1 : -1, i + W < W * H ? i + W : -1, i - W })
+                    if (n >= 0 && prev[n] < 0 && (n == b || Walkable(C(n)))) { prev[n] = i; queue.Enqueue(n); } // the end's cell may be the door's, on the pavement's edge
+            }
+            if (prev[b] < 0) return null;
+            var cells = new List<Vector2> { to };
+            for (int i = prev[b]; i != a; i = prev[i]) cells.Insert(0, C(i));
+            var way = new List<Vector2>();
+            for (var at = from; way.Count == 0 || way[way.Count - 1] != to;)
+            {
+                int j = cells.Count - 1;
+                while (j > 0 && !Clear(at, cells[j])) j--;
+                way.Add(cells[j]);
+                at = cells[j];
+                cells.RemoveRange(0, j + 1);
+            }
+            return way;
+        }
+
+        bool Clear(Vector2 a, Vector2 b)
+        {
+            int n = Mathf.CeilToInt((b - a).magnitude / 0.1f);
+            for (int i = 1; i <= n; i++) if (!Walkable(Vector2.Lerp(a, b, i / (float)n))) return false;
+            return true;
+        }
+
+        void Move(float dt)
+        {
+            if (Player == "" || shown != "town" || phase != 0) return;
+            var body = stands[Player].body;
+            var p = (Vector2)body.transform.localPosition;
+            float go = PlayerSpeed * dt;
+            var d = steer != Vector2.zero ? steer.normalized * go : Vector2.zero;
+            if (d == Vector2.zero && route.Count > 0)
+            {
+                d = Vector2.ClampMagnitude(route[0] - p, go);
+                if ((route[0] - p).magnitude <= go) route.RemoveAt(0);
+            }
+            var q = p;
+            if (Walkable(new Vector2(q.x + d.x, q.y))) q.x += d.x; // an axis at a time: along a kerb, not stuck at it
+            if (Walkable(new Vector2(q.x, q.y + d.y))) q.y += d.y;
+            body.transform.localPosition = q;
+            body.sortingOrder = Order(q.y) + 1;
+            if (d != Vector2.zero)
+            {
+                pFacing = Mathf.Abs(d.x) >= Mathf.Abs(d.y) ? (d.x > 0 ? 0 : 2) : (d.y > 0 ? 1 : 3); // as it means to go, even against a wall
+                pTick += dt;
+                if (pTick > 0.1f) { pTick = 0f; pFrame = (pFrame + 1) % 6; }
+            }
+            body.sprite = q != p ? playerWalk[pFacing][pFrame] : playerIdle[pFacing];
+            // A door: walked up into, or the end of a click's walk to it; once until it steps away.
+            string door = null;
+            foreach (var kv in venues) if ((q - DoorOf(kv.Value.v)).magnitude < DoorReach) door = kv.Key;
+            if (door == null) atDoor = null;
+            else if (door != atDoor && (steer.y > 0f || route.Count == 0 && routeTo == door))
+            {
+                atDoor = door;
+                routeTo = null;
+                Clicked?.Invoke(door);
             }
         }
 
@@ -706,10 +862,12 @@ namespace APA
             foreach (var s in walkers) Walk(s, Time.deltaTime);
             Play(Time.deltaTime);
             Drive(Time.deltaTime);
-            if (!HasTown || shown != "town" || phase != 0 || Clicked == null || !Input.GetMouseButtonDown(0) || cam == null) return;
+            Move(Time.deltaTime);
+            if (!HasTown || shown != "town" || phase != 0 || !Input.GetMouseButtonDown(0) || cam == null) return;
             var p = (Vector2)transform.InverseTransformPoint(cam.ScreenToWorldPoint(Input.mousePosition));
             var hit = VenueAt(p);
-            if (hit != null) Clicked(hit);
+            if (Player != "") GoTo(hit != null ? DoorOf(venues[hit].v) : p, hit); // the game: it walks there; at a building, to its door and in
+            else if (hit != null && Clicked != null) Clicked(hit);
         }
 
         // VenueAt: the venue whose outside (as wide as its pieces, up to its top,
@@ -744,6 +902,12 @@ namespace APA
                     if (radius <= 0f)
                     {
                         shown = Mode; // closed: the other side
+                        if (shown == "town" && Player != "" && venues.TryGetValue(shop != null ? shop.LayoutKey ?? "" : "", out var left))
+                        {
+                            stands[Player].body.transform.localPosition = DoorOf(left.v) - new Vector2(0f, 0.8f); // out on its step, facing the street
+                            pFacing = 3;
+                            stands[Player].body.sprite = playerIdle[3];
+                        }
                         Retarget();
                         Cover(true, shown == "town" ? Door() : Inside());
                         phase = 2;
