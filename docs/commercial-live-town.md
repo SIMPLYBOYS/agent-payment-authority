@@ -106,3 +106,13 @@ Aaron 10/29：D1～D5「照建議」。
 預期：四場的請購分別是 `kr-market`（Ask）、`tw-semis-note`（Allow）、`cafe-lunch-set`（Allow）、`cafe-meeting-coffee`（Ask），全部付款、交付；E1～E10 PASS（E10 只看注入的場次，這四場沒有注入，報告上是「沒有注入場次」的 PASS）。Agent 若買錯或多買，照實記下，不重跑當作沒發生。
 
 要留意：兩位真實 CLI 同時執行在這裡是第一次（E1-a 一次一場；M-C 的兩位同時沒有付款），兩者共用同一個 CLI 設定目錄。若其中一位啟動就失敗（例如登入狀態），照實記下，改成一位一位開始（D2 的退路）。
+
+### 6.2 S4 結果（Aaron 10/30，標籤 town1）
+- 四場都已交付，結果和預期一致：
+  - 資料研究室：A 的簡報 0.50 走 Ask，Aaron 用裝置核准（`webauthn:approver-a`）；B 的週報 0.06 走 Allow，自動付款。
+  - 街角咖啡：A 的午餐 0.08 走 Allow；B 的會議咖啡 0.42 走 Ask（`webauthn:approver-b`）。
+  - 本機鏈上的區塊：93、95、99、101。
+- 兩位真實 CLI 同時執行，沒有出問題（6.1 的疑慮）。
+- 證據包 `artifacts/e1a/rehearsal-town1`（run `e1a-20261029T165855Z-9e7969`，起點區塊 90，終點區塊 101，Host 建置 d5518cf）。`verify-demo --mode e1a --rpc http://127.0.0.1:8545`：E1～E10 全部 PASS，沒有 findings。not_evaluated 和 limits 跟 E1-a 相同。
+- 小事：請購表的 `approval_status` 在兩筆 Ask 上仍是 `pending`，核准的結果記在 `approval_sessions`（approved）。查核讀的是後者，不影響結果。這是現有的寫法，不是這次造成的。
+- 下一步：S5 testnet 實跑。實跑前，先唯讀查 dlg-ta、dlg-tb 還剩多少額度；當天（UTC）商店不能有其他結算。
