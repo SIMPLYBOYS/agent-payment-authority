@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -25,10 +27,12 @@ const MaxBodyBytes = 64 << 10
 
 // Product is a host-trusted resource the model may ask about, by ID only.
 // Scene is its demo scene ("" is the data shop): a run sees and buys only
-// its own scene's products.
+// its own scene's products. Require is what its venue asks of the buyer's
+// credential (docs/commercial-venues.md 3.2): attribute -> required value ("" any).
 type Product struct {
 	ID, URL string
 	Scene   string
+	Require map[string]string
 }
 
 // PurchaseOrderID is the one purchase order ID of a task and product: a
@@ -139,7 +143,7 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 	var res store.Result
 	err = b.Commit(func() (err error) {
 		if task.ContractVersion == paycontract.V2 {
-			res, err = s.submitV2(b, raw)
+			res, err = s.submitV2(b, raw, p.Require)
 		} else {
 			res, err = s.Store.Submit(b.Session, raw)
 		}
@@ -162,12 +166,12 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 // the Store's challenge, the holder's presentation, the submit. Missing
 // or wrong holder material is submitted as such (a decided Deny); a proof
 // that failed to build submits nothing and leaves the challenge issued.
-func (s *Shop) submitV2(b *Binding, raw []byte) (store.Result, error) {
-	ch, ok, err := s.Store.IssueChallenge(b.Session, raw)
+func (s *Shop) submitV2(b *Binding, raw []byte, require map[string]string) (store.Result, error) {
+	ch, ok, err := s.Store.IssueChallenge(b.Session, raw, slices.Collect(maps.Keys(require)))
 	if err != nil {
 		return store.Result{}, err
 	}
-	var pr store.Presented
+	pr := store.Presented{Require: require}
 	if ok {
 		if s.Credentials == nil {
 			pr.Unavailable = true

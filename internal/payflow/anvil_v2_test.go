@@ -82,7 +82,7 @@ func TestV2PaidOnAnvil(t *testing.T) {
 	po.Intent.PaymentRequirementHash, _ = sp.RequirementHash(w.offer.Quote)
 	order, _ := json.Marshal(po)
 	sess := contracts.Session{ConsumerID: "consumer-a", AgentID: "agent-a", TaskID: "task-a"}
-	ch, ok, err := s.IssueChallenge(sess, order)
+	ch, ok, err := s.IssueChallenge(sess, order, nil)
 	if err != nil || !ok {
 		t.Fatalf("challenge: %v %v", ok, err)
 	}

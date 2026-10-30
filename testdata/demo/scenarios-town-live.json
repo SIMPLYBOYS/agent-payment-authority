@@ -1,5 +1,5 @@
 {
-  "description": "The town on the real Agent (docs/commercial-live-town.md L1; make present-e1a SCENARIOS=testdata/demo/scenarios-town-live.json, demo-testnet.sh live L town, demo-local.sh live): the live Claude Code Agent on a host that pays, apa.pay.v2 (the BBS+ credential in the same intent), the settling shop selling its own products (no shop_eval). The town's two scenes, two customers each buying something different (Aaron 10/27): data: A the brief 0.50, an Ask; B the semiconductor note 0.06, an Allow. cafe: A the lunch set 0.08, an Allow; B the meeting coffee 0.42, an Ask. The delegation is confirmed by the customer's own registered device (docs/commercial-gap4.md); an Ask is approved by the person's registered device.",
+  "description": "The town on the real Agent (docs/commercial-live-town.md L1; make present-e1a SCENARIOS=testdata/demo/scenarios-town-live.json, demo-testnet.sh live L town, demo-local.sh live): the live Claude Code Agent on a host that pays, apa.pay.v2 (the BBS+ credential in the same intent), the settling shop selling its own products (no shop_eval). The town's two scenes, two customers each buying something different (Aaron 10/27): data: A the brief 0.50, an Ask; B the semiconductor note 0.06, an Allow. cafe: A the lunch set 0.08, an Allow; B the meeting coffee 0.42, an Ask. The delegation is confirmed by the customer's own registered device (docs/commercial-gap4.md); an Ask is approved by the person's registered device. mart (docs/commercial-venues.md, Aaron 10/30): A and B both buy the beer 0.09, within allow_max, sold to 18+ only: A's credential says age_over_18=true and is paid; B's says false and is denied CREDENTIAL_CLAIM_UNMET before any money moves.",
   "scenarios": [
     {
       "id": "town-data-a",
@@ -58,6 +58,36 @@
         "task_budget": "1500000",
         "allow_max": "100000",
         "approval_deadline_seconds": 180,
+        "valid_seconds": 1800
+      }
+    },
+    {
+      "id": "town-mart-a",
+      "consumer_id": "consumer-a",
+      "scene": "mart",
+      "contract": "apa.pay.v2",
+      "label": "巷口便利商店：團隊聚會的啤酒 6 罐（限 18 歲以上・範圍內自動付款・testnet 付款・真實 Agent）",
+      "task": "買 6 罐團隊聚會要喝的啤酒。",
+      "delegation": {
+        "purpose": "買 6 罐團隊聚會的啤酒（示意商品，限 18 歲以上）",
+        "task_budget": "1500000",
+        "allow_max": "100000",
+        "approval_deadline_seconds": 120,
+        "valid_seconds": 1800
+      }
+    },
+    {
+      "id": "town-mart-b",
+      "consumer_id": "consumer-b",
+      "scene": "mart",
+      "contract": "apa.pay.v2",
+      "label": "巷口便利商店：團隊聚會的啤酒 6 罐（限 18 歲以上・範圍內自動付款・testnet 付款・真實 Agent）",
+      "task": "買 6 罐團隊聚會要喝的啤酒。",
+      "delegation": {
+        "purpose": "買 6 罐團隊聚會的啤酒（示意商品，限 18 歲以上）",
+        "task_budget": "1500000",
+        "allow_max": "100000",
+        "approval_deadline_seconds": 120,
         "valid_seconds": 1800
       }
     }

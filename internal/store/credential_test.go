@@ -247,7 +247,7 @@ func (v *v2env) present(ch Challenge) *credential.Presentation {
 func (v *v2env) buy(s *Store, sess contracts.Session, o paycontract.PurchaseOrder) (Result, error) {
 	v.t.Helper()
 	body, _ := json.Marshal(o)
-	ch, ok, err := s.IssueChallenge(sess, body)
+	ch, ok, err := s.IssueChallenge(sess, body, nil)
 	if err != nil {
 		return Result{}, err
 	}
@@ -335,7 +335,7 @@ func TestSubmitV2Denies(t *testing.T) {
 	}{
 		"no registered holder": {sessB, nil, "absent", "", "CONFIG_MISSING", false},
 		"holder material unavailable": {sessA, func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) {
-			if _, _, err := s.IssueChallenge(sessA, body); err != nil {
+			if _, _, err := s.IssueChallenge(sessA, body, nil); err != nil {
 				t.Fatal(err)
 			}
 			return s.SubmitV2(sessA, body, Presented{Unavailable: true})
@@ -344,25 +344,25 @@ func TestSubmitV2Denies(t *testing.T) {
 			return s.SubmitV2(sessA, body, Presented{Presentation: &credential.Presentation{ChallengeID: "chl-none"}})
 		}, "invalid", "CHALLENGE_MISSING", "CREDENTIAL_INVALID", false},
 		"challenge expired": {sessA, func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) {
-			ch, _, _ := s.IssueChallenge(sessA, body)
+			ch, _, _ := s.IssueChallenge(sessA, body, nil)
 			p := v.present(ch)
 			v.clock.Add(ChallengeSeconds)
 			return s.SubmitV2(sessA, body, Presented{Presentation: p})
 		}, "invalid", "CHALLENGE_EXPIRED", "CREDENTIAL_INVALID", true},
 		"a presentation for another challenge": {sessA, func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) {
-			ch, _, _ := s.IssueChallenge(sessA, body)
+			ch, _, _ := s.IssueChallenge(sessA, body, nil)
 			ch.ID = "chl-replayed"
 			return s.SubmitV2(sessA, body, Presented{Presentation: v.present(ch)})
 		}, "invalid", "CHALLENGE_MISMATCH", "CREDENTIAL_INVALID", true},
 		"the challenge's intent is not the order's": {sessA, func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) {
-			ch, _, _ := s.IssueChallenge(sessA, body)
+			ch, _, _ := s.IssueChallenge(sessA, body, nil)
 			if _, err := rawDB(t, v.path).Exec(`UPDATE credential_challenges SET intent_hash = 'sha256:other'`); err != nil {
 				t.Fatal(err)
 			}
 			return s.SubmitV2(sessA, body, Presented{Presentation: v.present(ch)})
 		}, "invalid", "INTENT_MISMATCH", "CREDENTIAL_INVALID", true},
 		"a tampered proof": {sessA, func(t *testing.T, v *v2env, s *Store, body []byte) (Result, error) {
-			ch, _, _ := s.IssueChallenge(sessA, body)
+			ch, _, _ := s.IssueChallenge(sessA, body, nil)
 			p := v.present(ch)
 			p.Proof[len(p.Proof)-1] ^= 1
 			return s.SubmitV2(sessA, body, Presented{Presentation: p})
@@ -484,7 +484,7 @@ func TestSubmitV2Refuses(t *testing.T) {
 	v := newV2(t)
 	s := v.started()
 	body, _ := json.Marshal(v2Of(t, v.allow))
-	if _, _, err := s.IssueChallenge(sessA, body); err != nil {
+	if _, _, err := s.IssueChallenge(sessA, body, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.SubmitV2(sessA, body, Presented{}); Code(err) != "PRESENTATION_REQUIRED" {
@@ -514,11 +514,11 @@ func TestIssueChallenge(t *testing.T) {
 	v := newV2(t)
 	s := v.started()
 	body, _ := json.Marshal(v2Of(t, v.allow))
-	a, ok, err := s.IssueChallenge(sessA, body)
+	a, ok, err := s.IssueChallenge(sessA, body, nil)
 	if err != nil || !ok || a.VerifierID != "host-test" || a.ExpiresAt != t0+ChallengeSeconds || !slices.Equal(a.Disclose, credential.Mandatory) {
 		t.Fatalf("first: %+v %t %v", a, ok, err)
 	}
-	if b, _, _ := s.IssueChallenge(sessA, body); b.ID != a.ID {
+	if b, _, _ := s.IssueChallenge(sessA, body, nil); b.ID != a.ID {
 		t.Fatal("the same intent got another challenge")
 	}
 	// A retry with another intent (its time window moved) within the 60 s:
@@ -526,12 +526,12 @@ func TestIssueChallenge(t *testing.T) {
 	moved := v2Of(t, v.allow)
 	moved.PaymentBinding.ValidBefore++
 	mb, _ := json.Marshal(moved)
-	c, _, err := s.IssueChallenge(sessA, mb)
+	c, _, err := s.IssueChallenge(sessA, mb, nil)
 	if err != nil || c.ID == a.ID || c.IntentHash == a.IntentHash {
 		t.Fatalf("another intent: %+v %v", c, err)
 	}
 	v.clock.Add(ChallengeSeconds)
-	b, _, _ := s.IssueChallenge(sessA, body)
+	b, _, _ := s.IssueChallenge(sessA, body, nil)
 	if b.ID == a.ID || b.ID == c.ID {
 		t.Fatal("an expired challenge was reused")
 	}
@@ -543,11 +543,11 @@ func TestIssueChallenge(t *testing.T) {
 	if _, err := s.SubmitV2(sessA, body, Presented{Presentation: v.present(b)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, err := s.IssueChallenge(sessA, body); ok || err != nil {
+	if _, ok, err := s.IssueChallenge(sessA, body, nil); ok || err != nil {
 		t.Fatalf("a stored purchase got a challenge: %v", err)
 	}
 	bb, _ := json.Marshal(v2Of(t, forTask(t, v.allow, "task-b")))
-	if _, ok, err := s.IssueChallenge(sessB, bb); ok || err != nil {
+	if _, ok, err := s.IssueChallenge(sessB, bb, nil); ok || err != nil {
 		t.Fatalf("an absent credential got a challenge: %v", err)
 	}
 }
@@ -566,7 +566,7 @@ func TestV2CredentialRecovery(t *testing.T) {
 			t.Fatal(err)
 		}
 		body, _ := json.Marshal(v2Of(t, v.base))
-		if _, _, err := s.IssueChallenge(sessA, body); err != nil { // never presented
+		if _, _, err := s.IssueChallenge(sessA, body, nil); err != nil { // never presented
 			t.Fatal(err)
 		}
 		s.Close()
@@ -784,13 +784,71 @@ func TestChallengeReuseMargin(t *testing.T) {
 	v := newV2(t)
 	s := v.started()
 	body, _ := json.Marshal(v2Of(t, v.allow))
-	a, _, _ := s.IssueChallenge(sessA, body)
+	a, _, _ := s.IssueChallenge(sessA, body, nil)
 	v.clock.Add(ChallengeSeconds - ChallengeReuseMargin - 1)
-	if b, _, _ := s.IssueChallenge(sessA, body); b.ID != a.ID {
+	if b, _, _ := s.IssueChallenge(sessA, body, nil); b.ID != a.ID {
 		t.Fatal("a challenge with time left was not reused")
 	}
 	v.clock.Add(1)
-	if c, _, _ := s.IssueChallenge(sessA, body); c.ID == a.ID {
+	if c, _, _ := s.IssueChallenge(sessA, body, nil); c.ID == a.ID {
 		t.Fatal("a challenge about to expire was reused")
+	}
+}
+
+// buyAt is buy at a venue that asks require of the subject (docs/commercial-venues.md 3.2).
+func (v *v2env) buyAt(s *Store, sess contracts.Session, o paycontract.PurchaseOrder, require map[string]string) (Result, error) {
+	v.t.Helper()
+	body, _ := json.Marshal(o)
+	var ask []string
+	for a := range require {
+		ask = append(ask, a)
+	}
+	ch, ok, err := s.IssueChallenge(sess, body, ask)
+	if err != nil {
+		return Result{}, err
+	}
+	pr := Presented{Require: require}
+	if ok {
+		pr.Presentation = v.present(ch)
+	}
+	return s.SubmitV2(sess, body, pr)
+}
+
+// The venue matrix (docs/commercial-venues.md): one v2 credential discloses at each venue only what it asks;
+// a valid credential that does not say what the venue requires is denied CREDENTIAL_CLAIM_UNMET (its record
+// stays valid, detail CLAIM_UNMET); a v1 credential has nothing to say it with. The Store reopens on it.
+func TestVenueClaims(t *testing.T) {
+	v := newV2(t)
+	if err := v.dir.SetSubjects(map[string]map[string]string{"consumer-a": {"buyer_type": "business", "country": "TW", "age_over_18": "false"}}); err != nil {
+		t.Fatal(err)
+	}
+	s := v.started()
+	data := v2Of(t, v.allow)
+	r, err := v.buyAt(s, sessA, data, map[string]string{"buyer_type": "business", "country": ""})
+	if err != nil || r.Purchase.Decision.PolicyVerdict != "Allow" {
+		t.Fatalf("data: %+v %v", r.Purchase.Decision, err)
+	}
+	if c := r.Purchase.Credential; c == nil || c.Result != "valid" || c.Claims != "buyer_type=business,country=TW" || c.CredentialSchema != credential.SchemaV2 {
+		t.Fatalf("data's claims: %+v", c)
+	}
+	beer := v2Of(t, variant(t, v.allow, 51))
+	r, err = v.buyAt(s, sessA, beer, map[string]string{"age_over_18": "true"})
+	if err != nil || r.Purchase.Decision.PolicyVerdict != "Deny" || r.Purchase.Decision.Reason != "CREDENTIAL_CLAIM_UNMET" {
+		t.Fatalf("beer: %+v %v", r.Purchase.Decision, err)
+	}
+	if c := r.Purchase.Credential; c.Claims != "age_over_18=false" || c.Detail != "CLAIM_UNMET" {
+		t.Fatalf("beer's claims: %+v", c)
+	}
+	if res, detail, _ := verification(t, v.path, beer.Intent.PurchaseOrderID); res != "valid" || detail != "CLAIM_UNMET" {
+		t.Fatalf("beer's record: %s/%s", res, detail)
+	}
+	s.Close()
+	v.open() // recovery's cross-check: the records and their events agree
+	// A v1 credential (no subjects.json): a venue that asks for an attribute gets none, and the purchase is denied.
+	w := newV2(t)
+	s1 := w.started()
+	r, err = w.buyAt(s1, sessA, v2Of(t, w.allow), map[string]string{"age_over_18": "true"})
+	if err != nil || r.Purchase.Decision.Reason != "CREDENTIAL_CLAIM_UNMET" || r.Purchase.Credential.Claims != "" || r.Purchase.Credential.CredentialSchema != credential.Schema {
+		t.Fatalf("v1 at the beer: %+v %+v %v", r.Purchase.Decision, r.Purchase.Credential, err)
 	}
 }

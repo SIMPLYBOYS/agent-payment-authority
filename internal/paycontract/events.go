@@ -247,6 +247,18 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 	return errf("unsupported apa.pay.v1 event %s; cannot settle or deliver", e.EventType)
 }
 
+// CredentialOutcome is what a record decides, by CredentialDeny: its result, or "unmet" for a valid one whose
+// claims did not say what the venue asked (docs/commercial-venues.md 3.2; the record keeps result valid).
+func CredentialOutcome(c *contracts.CredentialCheck) string {
+	if c.Result == "valid" && c.Detail == "CLAIM_UNMET" {
+		return "unmet"
+	}
+	return c.Result
+}
+
+// claimsPattern: v2's disclosed attributes, "name=value" joined by "," (credential.Attributes).
+var claimsPattern = regexp.MustCompile(`^(buyer_type=(business|individual)|country=[A-Z]{2}|age_over_18=(true|false))(,(buyer_type=(business|individual)|country=[A-Z]{2}|age_over_18=(true|false)))*$`)
+
 // credentialCheck is a verification record's shape (design 3.2, 3.3): a
 // result with its fixed detail; a challenge exactly when one was stored;
 // what was established when the presentation verified; the status list it
@@ -266,11 +278,20 @@ func credentialCheck(c *contracts.CredentialCheck) error {
 		return errf("credential challenge ID")
 	}
 	established := c.Result == "valid" || c.Result == "revoked" || c.Result == "expired" || (c.Result == "status_unavailable" && c.Issuer != "")
-	if established && (c.CredentialSchema != "apa.credential.v1" || c.Issuer == "" || c.Holder == "" || c.StatusIndex == "" || c.Expiry == 0 || c.ProofSHA256 == "") {
+	if established && (c.CredentialSchema != "apa.credential.v1" && c.CredentialSchema != "apa.credential.v2" || c.Issuer == "" || c.Holder == "" || c.StatusIndex == "" || c.Expiry == 0 || c.ProofSHA256 == "") {
 		return errf("a verified presentation records what it established")
 	}
 	if (c.Result == "valid" || c.Result == "revoked" || c.Result == "expired") && (c.StatusListVersion == 0 || c.StatusListIssuedAt == 0 || c.StatusListSHA256 == "") {
 		return errf("a status decision records the list it read")
+	}
+	// v2's claims (docs/commercial-venues.md 3.2): the disclosed attributes, only of an established v2
+	// presentation; CLAIM_UNMET only on a valid one (the venue asked for what it did not say; a v1 credential
+	// has no attribute to say it with).
+	switch {
+	case c.Claims != "" && (!established || c.CredentialSchema != "apa.credential.v2" || !claimsPattern.MatchString(c.Claims)):
+		return errf("credential claims %q", c.Claims)
+	case c.Detail == "CLAIM_UNMET" && c.Result != "valid":
+		return errf("CLAIM_UNMET is a valid credential's")
 	}
 	if (c.Result == "absent" || c.Result == "invalid") && (c.Issuer != "" || c.StatusListVersion != 0) {
 		return errf("a presentation that did not verify establishes nothing")
@@ -450,7 +471,7 @@ func (st *chain) apply(e contracts.AuditEvent) error {
 		if st.version != V2 || st.stopped || !st.proposed[po] || st.verdict[po] != "" || st.credential[po] != "" {
 			return errors.New("one credential verification per v2 purchase, after its proposal and before its decision")
 		}
-		st.credential[po] = e.Payload.Credential.Result
+		st.credential[po] = CredentialOutcome(e.Payload.Credential)
 	case "POLICY_DECIDED":
 		if st.stopped || !st.proposed[po] || st.verdict[po] != "" {
 			return errors.New("one decision per proposed purchase, none after the task ended")

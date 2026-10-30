@@ -33,7 +33,8 @@ func v2Catalog(t *testing.T) string {
 	return p
 }
 
-// credDir is a credential directory of test keys for consumers.
+// credDir is a credential directory of test keys for consumers, each an adult business buyer in TW (as
+// present.sh writes them; docs/commercial-venues.md): the data shop asks for buyer_type and country.
 func credDir(t *testing.T, consumers ...string) (string, *credential.Dir) {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "cred")
@@ -42,6 +43,13 @@ func credDir(t *testing.T, consumers ...string) (string, *credential.Dir) {
 	}
 	d, err := credential.OpenDir(p)
 	if err != nil {
+		t.Fatal(err)
+	}
+	subjects := map[string]map[string]string{}
+	for _, c := range consumers {
+		subjects[c] = map[string]string{"buyer_type": "business", "country": "TW", "age_over_18": "true"}
+	}
+	if err := d.SetSubjects(subjects); err != nil {
 		t.Fatal(err)
 	}
 	return p, d

@@ -131,6 +131,7 @@ func TestV2CredentialStep(t *testing.T) {
 		{valid, "Allow", "WITHIN_ALLOW_MAX"},
 		{&contracts.CredentialCheck{Result: "invalid", Detail: "PROOF_INVALID", Verifier: "host-1"}, "Deny", "CREDENTIAL_INVALID"},
 		{&contracts.CredentialCheck{Result: "revoked", Verifier: "host-1"}, "Deny", "CREDENTIAL_REVOKED"},
+		{&contracts.CredentialCheck{Result: "valid", Detail: "CLAIM_UNMET", Expiry: 1790726450 + 3600, Verifier: "host-1"}, "Deny", "CREDENTIAL_CLAIM_UNMET"}, // the venue matrix
 		{&contracts.CredentialCheck{Result: "status_unavailable", Verifier: "host-1"}, "Deny", "CREDENTIAL_STATUS_UNAVAILABLE"},
 		{&contracts.CredentialCheck{Result: "expired", Verifier: "host-1"}, "Deny", "AUTHORIZATION_EXPIRED"},
 		{&contracts.CredentialCheck{Result: "absent", Verifier: "host-1"}, "Deny", "CONFIG_MISSING"},

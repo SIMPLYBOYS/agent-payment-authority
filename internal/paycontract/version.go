@@ -22,19 +22,23 @@ const (
 )
 
 // CredentialReasons are apa.pay.v2's Deny reasons for a credential that
-// does not verify, is revoked, or whose status cannot be read.
-var CredentialReasons = []string{"CREDENTIAL_INVALID", "CREDENTIAL_REVOKED", "CREDENTIAL_STATUS_UNAVAILABLE"}
+// does not verify, is revoked, whose status cannot be read, or (v2,
+// docs/commercial-venues.md 3.2) that verifies but does not say what the
+// venue asks (age_over_18=false at the beer).
+var CredentialReasons = []string{"CREDENTIAL_INVALID", "CREDENTIAL_REVOKED", "CREDENTIAL_STATUS_UNAVAILABLE", "CREDENTIAL_CLAIM_UNMET"}
 
 // CredentialDeny is the Deny reason each non-valid verification result
 // must decide (design 3.3): no credential is CONFIG_MISSING (as in M1), an
-// expired one AUTHORIZATION_EXPIRED; "valid" has none.
+// expired one AUTHORIZATION_EXPIRED; "valid" has none. "unmet" is never a
+// record's result: it is a valid one with detail CLAIM_UNMET (CredentialOutcome).
 var CredentialDeny = map[string]string{"absent": "CONFIG_MISSING", "invalid": "CREDENTIAL_INVALID", "revoked": "CREDENTIAL_REVOKED",
-	"status_unavailable": "CREDENTIAL_STATUS_UNAVAILABLE", "expired": "AUTHORIZATION_EXPIRED"}
+	"status_unavailable": "CREDENTIAL_STATUS_UNAVAILABLE", "expired": "AUTHORIZATION_EXPIRED", "unmet": "CREDENTIAL_CLAIM_UNMET"}
 
 // CredentialDetails are the fixed detail codes of a verification record.
 var CredentialDetails = []string{"PRESENTATION_FORMAT", "DISCLOSURE_MISMATCH", "FIELD_MISSING", "FORMAT_INVALID", "PROOF_INVALID",
 	"ISSUER_UNTRUSTED", "HOLDER_MISMATCH", "HOLDER_BINDING_INVALID", "SNAPSHOT_MISMATCH", "STATUS_LIST_UNAVAILABLE", "STATUS_LIST_ROLLBACK",
-	"CHALLENGE_MISSING", "CHALLENGE_EXPIRED", "CHALLENGE_MISMATCH", "INTENT_MISMATCH", "HOLDER_MATERIAL_UNAVAILABLE"}
+	"CHALLENGE_MISSING", "CHALLENGE_EXPIRED", "CHALLENGE_MISMATCH", "INTENT_MISMATCH", "HOLDER_MATERIAL_UNAVAILABLE",
+	"SCHEMA_MISMATCH", "CLAIM_UNMET"}
 
 // NoChallenge are the details of a record made without a stored challenge.
 var NoChallenge = []string{"HOLDER_MATERIAL_UNAVAILABLE", "CHALLENGE_MISSING"}
