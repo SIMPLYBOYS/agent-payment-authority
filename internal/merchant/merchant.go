@@ -367,6 +367,17 @@ type Offer struct {
 	Requires               map[string]string // what the venue asks of the buyer's credential (product.Requires)
 }
 
+// RequiresAt is what the venue of the shop's own product at a resource path asks of the buyer's credential
+// (nil: nothing, or no such product); the checker compares a purchase's disclosed claims with it.
+func RequiresAt(path string) map[string]string {
+	for _, p := range products {
+		if p.Path == path {
+			return p.Requires
+		}
+	}
+	return nil
+}
+
 // ProductAt is the ID of the shop's own product at a resource path ("" if
 // none): a cafe's path is /scenes/cafe/lunch-set, its ID cafe-lunch-set.
 func ProductAt(path string) string {
