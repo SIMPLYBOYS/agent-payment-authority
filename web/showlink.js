@@ -43,6 +43,7 @@ export function createRelay(onStatus, { channel = new BroadcastChannel(CHANNEL),
     if (!show || show.id !== m.id) return; // reports of a window this page does not follow
     if (m.kind === "rendered2" && owned) onStatus("rendered2", m.r);
     else if (m.kind === "select2" && owned) onStatus("select2", m.r);
+    else if (m.kind === "venue" && owned && typeof m.r === "string") onStatus("venue", m.r); // T4: a door reached on the window's Unity
   };
   setTimer(() => {
     if (show && now() - show.seen > GONE_MS) { show = null; onStatus("show", null); }
@@ -56,6 +57,10 @@ export function createRelay(onStatus, { channel = new BroadcastChannel(CHANNEL),
     own(on) { owned = on; post("own", { on }); },
     send2(msg) { if (owned) post("send2", { msg }); },
     select2(msg) { if (owned && show && show.select) post("select2", { msg }); },
+    // T4 (docs/commercial-town.md): the town's camera and the walked customer, on the window's Unity as on this page's.
+    cam(mode, safe) { if (owned) post("cam", { mode, safe: safe || null }); },
+    play(consumer) { if (owned) post("play", { consumer: consumer || "" }); },
+    steer(x, y) { if (owned) post("steer", { x, y }); },
     // view: what the audience window shows beside the scene; sent when it changed.
     view(v) {
       const key = JSON.stringify(v);
@@ -67,7 +72,7 @@ export function createRelay(onStatus, { channel = new BroadcastChannel(CHANNEL),
 }
 
 // listen is the audience window's side. handlers: own(on), send2(msg),
-// select2(msg), view(v). It returns report(kind, r) for Unity's reports and
+// select2(msg), view(v), and (T4) cam(mode, safe), play(consumer), steer(x, y). It returns report(kind, r) for Unity's reports and
 // status(s) for this window's Unity state ({ ready, supports2, select }).
 export function listen(handlers, { channel = new BroadcastChannel(CHANNEL), setTimer = setInterval, onLeave = (f) => addEventListener("pagehide", f), now = () => Date.now() } = {}) {
   const id = newId();
@@ -87,6 +92,9 @@ export function listen(handlers, { channel = new BroadcastChannel(CHANNEL), setT
     else if (m.kind === "send2" && m.msg) handlers.send2(m.msg);
     else if (m.kind === "select2" && m.msg) handlers.select2(m.msg);
     else if (m.kind === "view" && m.view) handlers.view(m.view);
+    else if (m.kind === "cam" && (m.mode === "town" || m.mode === "venue") && handlers.cam) handlers.cam(m.mode, m.safe || null);
+    else if (m.kind === "play" && typeof m.consumer === "string" && handlers.play) handlers.play(m.consumer);
+    else if (m.kind === "steer" && handlers.steer) handlers.steer(Math.sign(Number(m.x) || 0), Math.sign(Number(m.y) || 0));
   };
   setTimer(() => post("status", state), BEAT_MS);
   onLeave(() => post("bye"));

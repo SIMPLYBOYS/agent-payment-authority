@@ -1064,6 +1064,13 @@ const PAID = ["paying", "confirming", "paid", "delivered", "delivery_failed", "n
 // Not VERIFICATION_FAILED (review): that is the shop's word only, and a shop the Host does not run could still send it.
 const UNMOVED = { RESERVED_NOT_PAID: "預算已預留，但付款沒有送出", NOT_SETTLED_EXPIRED: "付款授權已過期，鏈上沒有用過" };
 
+// customerName: a consumer as the audience reads it (客人 A).
+export const customerName = (consumer) => "客人 " + (CUSTOMER[consumer] || (/^consumer-[a-z0-9]+$/.test(consumer) ? consumer.slice(9).toUpperCase() : consumer));
+
+// showTownCaption (T4, Aaron 10/30: 依階段切換): the audience window's one line while the scene is the town;
+// walking: the customer the person walks ("" both, as the show runs them).
+export const showTownCaption = (walking) => (walking ? customerName(walking) + " 走在城鎮裡：走進哪一間店，就在那裡購物" : "兩位客人在城鎮裡，各自前往要去的店");
+
 // showCustomer: one customer's five steps for the audience (state: todo,
 // now, done, fail, unknown, off) and the caption under the scene. Nothing
 // reads as done before the Store says so; an unknown result is unknown.
@@ -1130,7 +1137,7 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
     if (i >= 0 && going) steps[i].text += i === 4 ? "（任務已結束，交付照常進行）" : "（任務已結束，付款照常完成）";
     else if (i >= 0) Object.assign(steps[i], { state: "fail", text: sc.end === "cancelled" ? "任務已取消" : "任務逾時結束" });
   }
-  const name = "客人 " + (CUSTOMER[consumer] || (/^consumer-[a-z0-9]+$/.test(consumer) ? consumer.slice(9).toUpperCase() : consumer));
+  const name = customerName(consumer);
   const last = [...steps].reverse().find((s) => s.state !== "todo" && s.state !== "off") || steps[0];
   return { consumer, name, steps, caption: name + "・" + last.label + "：" + last.text, amount: p ? usdc(p.amount) : "" };
 }

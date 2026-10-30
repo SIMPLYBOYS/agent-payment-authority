@@ -99,7 +99,10 @@ const relay = createRelay((kind, d) => {
   if (kind === "rendered2") scene.rendered(d);
   else if (kind === "select2") pick(d);
   else if (kind === "show") useShow(!!(d && d.ready && d.supports2));
+  else if (kind === "venue") venuePicked(d);
 });
+// town (T4): where the town's camera and walk go: the audience window's Unity while it has the scene, else this page's.
+const town = () => (sceneUnity.target === relay ? relay : shop());
 const sceneUnity = {
   target: shop(),
   get ready() { return this.target.ready; },
@@ -125,13 +128,18 @@ onScenePick((r) => { if (sceneUnity.target !== relay) pick(r); });
 // way the scene starts over on its new Unity, every slot shown again.
 function useShow(on) {
   const want = on ? relay : shop();
-  if (sceneUnity.target === want) { if (on) restartScene(); return; } // the window loaded again
+  if (sceneUnity.target === want) { // the window loaded again
+    if (on) { restartScene(); sentView = sentPlay = ""; renderPresent(); }
+    return;
+  }
   if (scene.started) scene.stop();
   sceneUnity.target = want;
   $("show-note").hidden = !on;
   document.querySelector(".canvas-frame").hidden = on;
   $("unity-status").hidden = on; // it speaks of this page's own (hidden) shop
   ensureScene();
+  sentView = sentPlay = ""; // the town's camera and walk again, on the scene's new Unity (T4)
+  renderPresent();
 }
 function restartScene() {
   if (scene.started) scene.stop();
@@ -672,7 +680,8 @@ function enterVenue(k) {
   if (venue !== k) { venue = k; shownControl = ""; renderControl(); refreshPanels(); }
   renderPresent();
 }
-onVenuePick((k) => { if (presenting && inTown && A.venues(allScenarios()).includes(k)) enterVenue(k); });
+function venuePicked(k) { if (presenting && inTown && A.venues(allScenarios()).includes(k)) enterVenue(k); }
+onVenuePick((k) => { if (sceneUnity.target !== relay) venuePicked(k); });
 // sendView: the camera Unity should show, and the canvas's part the cards
 // leave uncovered (between the two columns); sent when either changes.
 let sentView = "";
@@ -680,7 +689,7 @@ function sendView() {
   if (!hasTown()) return; // a build without the town: its one camera, as before
   const on = presenting && creds.view().hasHost;
   let safe = null;
-  if (on) {
+  if (on && town() !== relay) { // the audience window covers none of its scene: all of it (T4)
     // The columns' cards that are open (a folded card is a button at the edge; the scene runs under it).
     const c = $("unity-canvas").getBoundingClientRect();
     const open = (col) => [...document.querySelectorAll(col + " > :not([hidden]), " + col + " > * > :not([hidden])")].filter((e) => (e.matches(".present-card, #approval")) && !e.classList.contains("folded") && e.getClientRects().length);
@@ -697,7 +706,8 @@ function sendView() {
   const key = JSON.stringify(v);
   if (key === sentView) return;
   sentView = key;
-  shop().view(v.mode, v.safe);
+  if (town() === relay) relay.cam(v.mode, v.safe);
+  else shop().view(v.mode, v.safe);
 }
 // ---- 遊戲模式 (Aaron 10/29: 選擇人物，自由移動) ----
 // While presenting, with a build that walks a customer: the person picks A or B and walks it round the town
@@ -713,7 +723,7 @@ function sendPlay() {
   sentPlay = want;
   held.clear();
   steered = "0,0";
-  shop().play(want);
+  town().play(want);
 }
 for (const b of document.querySelectorAll("#present-play button")) b.addEventListener("click", () => { playAs = b.dataset.play; renderPresent(); });
 // The keys: arrows or WASD while a customer is walked; never while typing in a field.
@@ -724,7 +734,7 @@ function steer() {
   const v = Math.sign(x) + "," + Math.sign(y);
   if (v === steered) return;
   steered = v;
-  shop().steer(Math.sign(x), Math.sign(y));
+  town().steer(Math.sign(x), Math.sign(y));
 }
 addEventListener("keydown", (e) => {
   if (!KEYS[e.code] || !sentPlay || !inTown || e.altKey || e.ctrlKey || e.metaKey) return;

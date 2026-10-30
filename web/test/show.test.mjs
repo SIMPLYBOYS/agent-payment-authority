@@ -202,6 +202,32 @@ test("the host page's relay follows one audience window; reports only while it o
   assert.equal(show.hostThere, false);
 });
 
+test("T4: the town's camera and walk go to the window's Unity while it has the scene; a door it reaches comes back", () => {
+  const make = channels();
+  const got = [];
+  const relay = createRelay((k, d) => got.push([k, d]), { channel: make(), setTimer: () => {} });
+  const seen = [];
+  const show = listen({ own() {}, send2() {}, select2() {}, view() {}, cam: (m, safe) => seen.push(["cam", m, safe]), play: (c) => seen.push(["play", c]), steer: (x, y) => seen.push(["steer", x, y]) },
+    { channel: make(), setTimer: () => {}, onLeave: () => {} });
+  relay.cam("town", null);
+  relay.play("consumer-a");
+  assert.deepEqual(seen, [], "not owned: nothing goes");
+  relay.own(true);
+  relay.cam("town", null);
+  relay.play("consumer-a");
+  relay.steer(1, 0);
+  relay.cam("venue", { x: 1, y: 2, width: 3, height: 4 });
+  assert.deepEqual(seen, [["cam", "town", null], ["play", "consumer-a"], ["steer", 1, 0], ["cam", "venue", { x: 1, y: 2, width: 3, height: 4 }]]);
+  show.report("venue", "cafe");
+  assert.deepEqual(got.at(-1), ["venue", "cafe"]);
+  relay.own(false);
+  show.report("venue", "data");
+  assert.notDeepEqual(got.at(-1), ["venue", "data"], "not owned: a door on the window is not this page's");
+  // The audience's one line in the town.
+  assert.equal(A.showTownCaption("consumer-b"), "客人 B 走在城鎮裡：走進哪一間店，就在那裡購物");
+  assert.equal(A.showTownCaption(""), "兩位客人在城鎮裡，各自前往要去的店");
+});
+
 test("a window that says goodbye is gone; a report of another window is dropped", () => {
   const make = channels();
   const got = [];

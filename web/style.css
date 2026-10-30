@@ -289,6 +289,10 @@ body[data-page="show"] #unity-canvas { background: #10131a; border-radius: 6px; 
 .show-wait { color: var(--muted); }
 .show-queue { color: var(--muted); margin: 0 0 16px; }
 @media (max-width: 1100px) { .show-main { grid-template-columns: 1fr; } }
+/* T4 (Aaron 10/30: 依階段切換): the town fills the window under one big line; the steps and evidence come back in a venue. */
+body[data-page="show"][data-phase="town"] .show-main { grid-template-columns: 1fr; }
+body[data-page="show"][data-phase="town"] :is(.show-side, .show-trust, #scene-zoom) { display: none; }
+.show-captions p.show-town-caption { font-size: clamp(22px, 2.2vw, 40px); text-align: center; }
 .checker-pick { margin-left: 12px; }
 .show-checker { margin-top: 12px; border: 1px solid #44506a; border-radius: 8px; padding: 8px 14px; }
 .show-checker h3 { margin: 0 0 4px; font-size: 24px; color: var(--accent); }
