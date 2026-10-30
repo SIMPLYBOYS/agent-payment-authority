@@ -216,3 +216,44 @@ func TestC2HolderMaterialMissing(t *testing.T) {
 		t.Fatalf("holder material missing: %s", types(h.events(task)))
 	}
 }
+
+// The venue matrix end to end (docs/commercial-venues.md): the mart's beer asks age_over_18=true of the
+// buyer's v2 credential; A (an adult) is allowed, B (under 18) denied CREDENTIAL_CLAIM_UNMET, and each
+// CREDENTIAL_VERIFIED carries only that attribute.
+func TestVenueBeer(t *testing.T) {
+	path, dir := credDir(t, "consumer-a", "consumer-b")
+	adult, minor := map[string]string{"buyer_type": "business", "country": "TW", "age_over_18": "true"}, map[string]string{"buyer_type": "business", "country": "TW", "age_over_18": "false"}
+	if err := dir.SetSubjects(map[string]map[string]string{"consumer-a": adult, "consumer-b": minor}); err != nil {
+		t.Fatal(err)
+	}
+	d := map[string]any{"purpose": "買 6 罐團隊聚會的啤酒", "task_budget": "5000000", "allow_max": "100000", "approval_deadline_seconds": 60, "valid_seconds": 1800}
+	raw, _ := json.Marshal(map[string]any{"description": "test", "scenarios": []map[string]any{
+		{"id": "beer-a", "consumer_id": "consumer-a", "scene": "mart", "contract": "apa.pay.v2", "scenario": "testdata/cli/mart-beer.json", "label": "beer A", "delegation": d},
+		{"id": "beer-b", "consumer_id": "consumer-b", "scene": "mart", "contract": "apa.pay.v2", "scenario": "testdata/cli/mart-beer.json", "label": "beer B", "delegation": d},
+	}})
+	catalog := filepath.Join(t.TempDir(), "scenarios.json")
+	os.WriteFile(catalog, raw, 0o600)
+	h := controlHost(t, hostOpts{expiryEvery: time.Hour, scenarios: catalog, args: []string{"--credential-dir", path}})
+	defer h.stop()
+	for _, c := range []struct{ consumer, scenario, req, claims, verdict, reason string }{
+		{"consumer-a", "beer-a", "01", "age_over_18=true", "Allow", "WITHIN_ALLOW_MAX"},
+		{"consumer-b", "beer-b", "02", "age_over_18=false", "Deny", "CREDENTIAL_CLAIM_UNMET"},
+	} {
+		sim := h.simulate(c.consumer)
+		task := h.delegateAndRunAs(sim, c.scenario, c.req, "apa.pay.v2")["task_id"].(string)
+		evs := h.events(task).Events
+		var cred *contracts.CredentialCheck
+		var dec *contracts.PolicyDecision
+		for _, e := range evs {
+			if e.EventType == "CREDENTIAL_VERIFIED" {
+				cred = e.Credential
+			}
+			if e.EventType == "POLICY_DECIDED" {
+				dec = e.Decision
+			}
+		}
+		if cred == nil || dec == nil || cred.Result != "valid" || cred.CredentialSchema != credential.SchemaV2 || cred.Claims != c.claims || dec.PolicyVerdict != c.verdict || dec.Reason != c.reason {
+			t.Fatalf("%s: %+v %+v", c.consumer, cred, dec)
+		}
+	}
+}
