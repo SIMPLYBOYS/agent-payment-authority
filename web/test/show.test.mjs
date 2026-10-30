@@ -390,3 +390,15 @@ test("a payment under review says what is known by its code: two never moved mon
   assert.equal(at("NOT_SETTLED_EXPIRED").text, "沒有付款（錢沒有動）：付款授權已過期，鏈上沒有用過");
   assert.deepEqual([at("RECONCILE_NEEDS_REVIEW").state, at("RECONCILE_NEEDS_REVIEW").text], ["unknown", "鏈上的付款結果對不起來，待人工確認"]);
 });
+
+test("the venue matrix: what a venue saw of the buyer, in plain words (docs/commercial-venues.md)", () => {
+  assert.equal(A.claimsText("buyer_type=business,country=TW"), "企業買方、國家 台灣");
+  assert.equal(A.claimsText("age_over_18=false"), "未滿 18 歲");
+  assert.equal(A.claimsText(""), "沒有任何個人資料");
+  assert.equal(A.plainReason("CREDENTIAL_CLAIM_UNMET"), "不符合這間店的要求");
+  const p = { purchase_order_id: "po-1", amount: "90000", credential: { result: "valid", credential_schema: "apa.credential.v2", claims: "age_over_18=true" } };
+  const m = A.showCustomer("consumer-a", snap(base("Allow", "WITHIN_ALLOW_MAX"), { purchase: p }), null, {});
+  assert.match(m.steps[1].text, /；這間店看到：已滿 18 歲$/);
+  const v1 = A.showCustomer("consumer-a", snap(base("Allow", "WITHIN_ALLOW_MAX"), { purchase: { ...p, credential: { result: "valid", credential_schema: "apa.credential.v1" } } }), null, {});
+  assert.ok(!v1.steps[1].text.includes("這間店看到"), "a v1 credential says nothing of a venue");
+});

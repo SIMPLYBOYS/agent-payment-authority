@@ -285,6 +285,8 @@ export function inspector(snapshot) {
       ["approval", str(d.approval_status) + (p.approval_closed ? "，收尾：" + str(p.approval_closed) : "")],
       ["payment_status", str(d.payment_status)],
     );
+    const seen = p.credential && p.credential.credential_schema === "apa.credential.v2" ? claimsText(p.credential.claims) : "";
+    if (seen) rows.push(["這間店看到", seen + (p.credential.detail === "CLAIM_UNMET" ? "（不符合這間店的要求）" : "")]);
     const pv = p.payment;
     if (pv && pv.reserve_tx) rows.push(["tx#1 預留（Z2）", txRef(t.payment_capability, pv.reserve_tx) + (typeof pv.reserve_block === "number" ? " · 區塊 " + pv.reserve_block : "")],
       ["ZK proof", "在 tx#1 的 calldata 裡，由預算合約呼叫 verifier 驗證；本頁不自行宣稱已驗證（要宣稱已驗證，須看獨立 checker 的結果）"]);
@@ -609,6 +611,7 @@ export const REASONS_V1 = {
   VOICE_CHALLENGE_FAILED: "語音挑戰未通過，這筆已拒絕", // V1
   CREDENTIAL_INVALID: "憑證驗證未通過", CREDENTIAL_REVOKED: "憑證已撤銷", CREDENTIAL_STATUS_UNAVAILABLE: "憑證狀態無法確認",
   AUTHORIZATION_EXPIRED: "憑證已過期", CONFIG_MISSING: "缺少設定（沒有憑證）",
+  CREDENTIAL_CLAIM_UNMET: "憑證有效，但不符合這間店的要求", // the venue matrix (docs/commercial-venues.md)
 };
 
 // V1: the voice outcome codes, in words. A failure denies the purchase; an
@@ -1055,7 +1058,20 @@ export const PLAIN = {
   AUTHORIZATION_EXPIRED: "授權或報價已過期", CONFIG_MISSING: "缺少設定或憑證", TASK_NOT_ACTIVE: "任務已結束", CONTRACT_VERSION_MISMATCH: "版本不符",
   OWNERSHIP_MISMATCH: "不是這位客人的請購", PAYMENT_CAPABILITY_UNAVAILABLE: "這場展示不能付款", APPROVER_UNAVAILABLE: "沒有可核准的人",
   VOICE_CHALLENGE_FAILED: "唸的內容或聲音不符", APPROVER_DENIED: "核准者拒絕",
+  CREDENTIAL_CLAIM_UNMET: "不符合這間店的要求",
 };
+// claimsText (the venue matrix, docs/commercial-venues.md): what a venue saw of the buyer, in plain words; the
+// mandatory fields are always there and never named. "" claims: nothing about the person.
+const CLAIM_WORDS = { buyer_type: { business: "企業買方", individual: "個人買方" }, age_over_18: { true: "已滿 18 歲", false: "未滿 18 歲" } };
+const COUNTRY = { TW: "台灣", KR: "韓國", JP: "日本" };
+export function claimsText(claims) {
+  if (typeof claims !== "string" || claims === "") return "沒有任何個人資料";
+  return claims.split(",").map((kv) => {
+    const [k, v] = kv.split("=");
+    if (k === "country") return "國家 " + (COUNTRY[v] || v);
+    return (CLAIM_WORDS[k] && CLAIM_WORDS[k][v]) || kv;
+  }).join("、");
+}
 export const plainReason = (code) => PLAIN[code] || "其他原因（主持人頁有細節）";
 // usdc: base units (6 decimals) as USDC, never rounded: at least two decimals, more when they matter.
 export const usdc = (v) => (typeof v === "string" && /^[0-9]+$/.test(v) ? (Number(v) / 1e6).toFixed(6).replace(/(\.\d\d\d*?)0+$/, "$1") + " USDC" : "金額未提供");
@@ -1090,7 +1106,7 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
     const who = confirmedBy(snapshot, traits);
     set(0, "done", who ? who + "：" + terms : d && d.task_budget ? "客人交代 Agent：" + terms : "客人已交代 Agent 預算與範圍");
     if (ph === "empty" || ph === "entered") set(1, "now", "Agent 正在挑選商品");
-    else set(1, "done", "Agent 選好商品，報價 " + usdc(p && p.amount));
+    else set(1, "done", "Agent 選好商品，報價 " + usdc(p && p.amount) + (p && p.credential && p.credential.credential_schema === "apa.credential.v2" ? "；這間店看到：" + claimsText(p.credential.claims) : ""));
   }
   const g = p && p.approval && p.approval.grant;
   // approved: by the record's own method; a simulated approval is the host's, never the person's.
