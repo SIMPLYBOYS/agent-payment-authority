@@ -77,3 +77,20 @@ Agent 每次請購，都由 verifier 依「這間店要什麼」發出 challenge
 | D3 | 要不要演一個被擋下的例子 | (a) 要：B 的 `age_over_18=false`，B 的 Agent 想買啤酒被 Deny，錢沒有動；(b) 不要，兩位都滿 18 歲 | (a)：對投資人最直觀，「Agent 不能替不符資格的人買」。B 在其他兩間店照常 |
 | D4 | 兩位客人的 `buyer_type` | (a) A、B 都是 `business`；(b) A `business`、B `individual` | (a)：兩位在資料研究室都買得到，不用改現有情境 |
 | D5 | testnet 上便利商店那一筆 | (a) 和另外兩間一起跑：一場變成三個場域、六位次，relayer 和商店的每日上限要重算（商店一天 4 筆會不夠）；(b) 便利商店只跑本機，testnet 仍跑兩個場域 | 先問 D3。如果 B 被擋下，便利商店只多 1 筆真付款，但仍超過商店一天 4 筆。建議 (a)，並在設計時一起提高商店的每日上限設定（要改 `payments.json`，由你決定） |
+
+## 6 實作（10/30，分支 `commercial-complete`）
+
+| 切片 | commit 內容 | 狀態 |
+|---|---|---|
+| V1 | `apa.credential.v2`：v1 的 8 個欄位後加 `buyer_type`、`country`、`age_over_18`。憑證目錄有 `subjects.json` 才發 v2（名單上沒有的客人不發，不會 v1、v2 混著發）；沒有就照舊發 v1。`apa-issuer subjects` 寫這個檔 | 完成 |
+| V2 | 商品帶 `Requires`（`internal/merchant`）：資料研究室兩項要求 `buyer_type=business` 並揭露 `country`；便利商店新增「啤酒 6 罐」0.09，要求 `age_over_18=true`；咖啡店不要求。challenge 依商品要求，揭露 v2 憑證的對應屬性；驗證有效但不符要求時，紀錄仍是 `valid`、detail 記 `CLAIM_UNMET`，Policy 以 `CREDENTIAL_CLAIM_UNMET` Deny。v1 憑證遇到有要求的商品一律 `CLAIM_UNMET`。揭露的屬性放在 `CREDENTIAL_VERIFIED` 事件的 `claims`；**不改 Store 的資料表**（舊資料庫不用升級） | 完成 |
+| V3 | 城鎮 live 目錄加 `town-mart-a`、`town-mart-b`（A、B 都買啤酒）；fake 的 ux3 目錄加 `mart-beer-a`、`-b`；`present.sh` 每次開場寫入兩位客人的屬性（都是台灣的企業買方；B 未滿 18 歲） | 完成；Unity 的便利商店房間沿用 ux3 的 |
+| V4 | checker e1a.3 的 E2：v2 憑證揭露的屬性必須正好等於商品的要求（最少揭露），而且只有在不符要求時才是 `CLAIM_UNMET`；`CLAIM_UNMET` 的請購不得交付。v1 紀錄（E1-a、S4、S5）照舊：S4 的證據包在 e1a.3 下 E2 仍是 PASS | 完成 |
+| V5 | 主持人頁的請購卡片「這間店看到：企業買方、國家 台灣」；展示視窗第 2 步同一句；`CREDENTIAL_CLAIM_UNMET` 白話為「不符合這間店的要求」。Unity 字幕寫「憑證不符商店」（字型子集裡沒有「合、間、要、求」） | 完成；Unity 要重建才會顯示 |
+| testnet | 開場前檢查以三個場域計：relayer 11 筆（登記 6、預留 5）、每個錢包 0.67；`demo-testnet.sh live L town` 建 host 時 `e1a-host --shop-cap 6`（一場結算 5 筆） | 完成 |
+
+**還沒做／要注意**
+- 本機彩排（完成清單第 5 項）：A 的啤酒付款交付，B 的啤酒在付款前被擋下；兩位在資料研究室都看到「企業買方、國家 台灣」。
+- Unity 要重建（`scripts/unity/unity.sh webgl`），字幕才會出現「憑證不符商店」。
+- **testnet 的 `dlg-ta` 總額 0.30 不夠正式錄影**：E1-a 0.09＋S5 0.08＋錄影那場 A 的午餐 0.08、啤酒 0.09＝0.34。11/6 前本來就要重產 `signer.json`，重產時要不要把 `dlgTotal` 調高（例如 1.00），由 Aaron 決定。
+- `age_over_18` 是 issuer 簽的布林值，不是範圍證明；issuer、holder、verifier 仍在同一個程序（C2 §5）。

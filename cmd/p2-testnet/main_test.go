@@ -442,6 +442,17 @@ func TestE1aHost(t *testing.T) {
 	if after, _ := os.ReadFile(filepath.Join(host, "payments.json")); string(after) != string(before) {
 		t.Error("deploy's payments.json changed")
 	}
+	// The town's three venues (docs/commercial-venues.md D5): its own host's shop cap; deploy's stays.
+	town := filepath.Join(dir, "town-1")
+	if err := e1aHost([]string{"--dir", dir, "--out", town, "--registry", "../../testdata/demo/registry-e1a.json", "--shop-cap", "6"}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if err := readJSON(filepath.Join(town, "payments.json"), &got); err != nil || got["shop_daily_tx_cap"] != float64(6) {
+		t.Fatalf("the town's shop cap: %v %v", got["shop_daily_tx_cap"], err)
+	}
+	if after, _ := os.ReadFile(filepath.Join(host, "payments.json")); string(after) != string(before) {
+		t.Error("deploy's payments.json changed")
+	}
 	if err := e1aHost(args, io.Discard); err == nil {
 		t.Error("an existing --out was written again")
 	}
