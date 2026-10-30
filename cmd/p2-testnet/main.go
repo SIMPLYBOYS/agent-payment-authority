@@ -893,7 +893,7 @@ func writeJSON(path string, v any) error {
 
 // The testnet Signer's caps (P2b-D5), in USDC units.
 const (
-	dlgPerTx, dlgTotal       = "100000", "300000"   // 0.10 a payment, 0.30 in all
+	dlgPerTx, dlgTotal       = "100000", "1000000"  // 0.10 a payment, 1.00 in all (Aaron 10/30: 0.30 was short of the recording run, docs/commercial-venues.md)
 	approverMax, approverSum = "1000000", "1500000" // 1.00 a payment, 1.50 in 24 hours
 	t402Units                = "100"                // exactly one 0.0001 payment
 	hostOrigin               = "http://localhost:8402"
