@@ -235,3 +235,18 @@ test("V1 review 1/4: a chosen microphone that fails is chosen again, never a deg
   assert.deepEqual(AP.micOptions([{ id: "b", label: "Built-in" }], "a"), [["", "Chrome 預設"], ["b", "Built-in"], ["a", "之前選的麥克風（目前找不到）"]]);
   assert.deepEqual(AP.micOptions([{ id: "a", label: "Wireless" }], "a"), [["", "Chrome 預設"], ["a", "Wireless"]]);
 });
+
+test("C3: every Signer refusal and ended approval says the host's next step (10/30)", () => {
+  assert.equal(AP.codeNext("CHALLENGE_EXPIRED"), "下一步：再按一次，裝置跳出時完成驗證。");
+  assert.equal(AP.codeNext("SESSION_DECIDED"), "下一步：看這筆的結果，不要重做。");
+  assert.equal(AP.codeNext("ASSERTION_COUNTER"), "下一步：記下代碼 ASSERTION_COUNTER 與時間，找開發者。");
+  assert.equal(AP.codeNext(""), "下一步：記下代碼 （未回報） 與時間，找開發者。");
+  const [k, t] = AP.outcomeText(200, { error: "signer_refused", code: "APPROVER_CHANGED" }, "approve");
+  assert.equal(k, "error");
+  assert.match(t, /^驗證沒有通過（核准設定已變更，請重新核准）；沒有核准。下一步：再按一次/);
+  for (const [s, b] of [[200, { outcome: "denied", code: AP.VOICE_FAILURES[0] }], [409, { error: "task_ended" }], [200, { error: "signer_mismatch" }]])
+    assert.match(AP.outcomeText(s, b, "approve")[1], /下一步：/, JSON.stringify(b));
+  // Gap 4's codes on a delegation's confirmation are worded, never a bare code; the developer is the one to call.
+  for (const c of ["DELEGATION_EXPIRED", "DELEGATION_NOT_CONFIRMED", "OVER_TOTAL_CAP", "TERMS_INVALID", "MERCHANT_NOT_ALLOWED"]) assert.ok(AP.CODES[c], c);
+  assert.ok(!Object.values(AP.CODES).some((v) => v.includes("找管理者")), "the manual says 找開發者");
+});

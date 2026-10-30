@@ -414,7 +414,7 @@ function storeText(st) {
 function unitySceneText() {
   const u = unityInfo();
   const s = $("unity-status").dataset.state;
-  if (s === "failed") return ["failed", "未就緒（載入或啟動失敗）"];
+  if (s === "failed") return ["failed", "未就緒（載入或啟動失敗）。下一步：不要重新整理（配對會失效）；終端機 Ctrl-C 重新啟動"];
   if (!u.ready) return ["loading", "載入中（未確認）"];
   return ["ok", u.art === "limezu" ? "已載入（LimeZu 素材）" : "已載入（placeholder，LimeZu 待接入）"];
 }
@@ -429,7 +429,7 @@ function renderReadiness() {
   } else if (!lastReady) {
     rows.push(["就緒狀態", "unconfirmed", "未確認：讀取中"]);
   } else if (lastReady.error) {
-    rows.push(["就緒狀態", "error", "無法取得就緒狀態（" + lastReady.error + "），未確認"]);
+    rows.push(["就緒狀態", "error", "無法取得就緒狀態（" + lastReady.error + "），未確認。下一步：看終端機的 Host 是否還在跑；停了就重新啟動"]);
   } else {
     const st = lastReady.status;
     const missing = ["WebGL.data", "WebGL.framework.js", "WebGL.loader.js", "WebGL.wasm"].filter((f) => !st.unity_build.files.includes(f));
@@ -520,6 +520,14 @@ function runText(r) {
   if (r.detail && r.detail.startsWith("prepare_failed")) return "未建立 task（" + r.detail + "）";
   if (r.outcome === "ok") return "場次完成";
   return "場次結束：" + r.outcome + (r.detail ? "（" + r.detail + "）" : "");
+}
+
+// runNext (C3): the host's next step after a run that did not end well; "" when there is none.
+function runNext(r) {
+  if (r.record_error || r.state === "interrupted" || r.store_end_error) return "下一步：記下時間找開發者";
+  if (r.outcome === "skipped" || (r.detail || "").startsWith("prepare_failed")) return "下一步：看終端機上這一場的原因，找開發者";
+  if (r.outcome === "timeout") return "下一步：" + A.AGAIN;
+  return "";
 }
 
 // A task whose details were not read (a failed read, or beyond
@@ -1024,7 +1032,8 @@ function renderControl() {
     li.dataset.live = r.live || "";
     li.dataset.gen = String(creds.gen);
     const now = taskNow(r);
-    li.textContent = r.task_id + "（" + r.consumer_id + "，" + r.scenario + "）：" + runText(r) + (now ? "；" + now : "");
+    const next = r.live ? "" : runNext(r);
+    li.textContent = r.task_id + "（" + r.consumer_id + "，" + r.scenario + "）：" + runText(r) + (now ? "；" + now : "") + (next ? "。" + next : "");
     if (cancellable(r)) {
       li.append(" ", cancelButton(r.task_id, "task-cancel", "取消 task " + r.task_id));
       if (confirming && confirming.task === r.task_id && confirming.where === "runs") li.append(confirmBox(r.task_id));
@@ -1336,14 +1345,15 @@ async function deviceDelegation(sc, g) {
   if (r.status !== 200) return { fail: delegationFail(r) };
   const ch = r.body && r.body.challenge, t = r.body && r.body.terms;
   if (!ch || !t || ch.consumer_id !== c || t.consumer_id !== c || ch.approval_session_id !== t.delegation_id || ch.decision !== "approve" || !ch.options || !ch.options.publicKey) {
-    return { fail: "回傳的資料和這次確認不一致，已停止，沒有要求裝置驗證" };
+    return { fail: "回傳的資料和這次確認不一致，已停止，沒有要求裝置驗證。下一步：記下時間找開發者" };
   }
   let cred;
   try {
     cred = await navigator.credentials.get({ publicKey: AP.requestOptions(ch.options) });
   } catch (e) {
     if (g !== creds.gen) return null;
-    return { fail: e && e.name === "NotAllowedError" ? "裝置驗證沒有完成（取消、逾時或沒有可用的裝置）" : "瀏覽器拒絕這次驗證（" + (e && e.name) + "）" };
+    return { fail: e && e.name === "NotAllowedError" ? "裝置驗證沒有完成（取消、逾時或沒有可用的裝置）。下一步：再按開始，裝置跳出時輸入 PIN（視窗可能在另一個螢幕）"
+      : "瀏覽器拒絕這次驗證（" + (e && e.name) + "）。下一步：記下時間找開發者" };
   }
   if (g !== creds.gen) return null;
   const body = { request_id: requestId, scenario: sc.id, challenge_id: ch.challenge_id, verify_request_id: "dver-" + crypto.randomUUID(), assertion: AP.assertionJSON(cred) };
@@ -1361,8 +1371,8 @@ async function deviceDelegation(sc, g) {
 // delegationFail: a refused confirmation in the host's words.
 function delegationFail(r) {
   const b = r.body || {};
-  if (r.status === 0 && !(r.body && r.body.error === "no_viewer")) return "沒有收到回覆，結果未確認";
-  if (b.error === "signer_refused") return AP.CODES[b.code] || "Signer 拒絕（" + b.code + "）";
+  if (r.status === 0 && !(r.body && r.body.error === "no_viewer")) return "沒有收到回覆，結果未確認。下一步：看終端機的 Host 是否還在跑；在跑就再按開始一次";
+  if (b.error === "signer_refused") return (AP.CODES[b.code] || "Signer 拒絕（" + b.code + "）") + "。" + AP.codeNext(b.code);
   return { delegation_unavailable: "這個主機沒有這位客人的錢包或資產設定", forbidden_consumer: "不是這位客人的情境", signer_unknown: "Signer 沒有回覆，結果未確認",
     store_unavailable: "裝置已驗證，但主機沒能記下；請再確認一次（會是新的一份委託）", no_viewer: "這位客人沒有 viewer token" }[b.error] || "未確認（" + (b.error || r.status) + "）";
 }

@@ -44,9 +44,9 @@ export const CODES = {
   ASSERTION_INVALID_TYPE: "驗證的種類不符",
   ASSERTION_INVALID_FLAGS: "裝置沒有完成本人驗證",
   ASSERTION_INVALID_SIGNATURE: "裝置的簽章不正確",
-  ASSERTION_COUNTER: "裝置的計數器異常，已停用待管理者處理",
-  CREDENTIAL_REVOKED: "這個裝置已停用，請找管理者重新登記",
-  CREDENTIAL_SUSPECT: "這個裝置已停用，請找管理者重新登記",
+  ASSERTION_COUNTER: "裝置的計數器異常，已停用",
+  CREDENTIAL_REVOKED: "這個裝置已停用",
+  CREDENTIAL_SUSPECT: "這個裝置已停用",
   CREDENTIAL_PENDING: "這個裝置還沒有經管理者確認",
   CREDENTIAL_UNKNOWN: "這位客人還沒有登記核准裝置",
   APPROVER_UNKNOWN: "這位客人沒有設定核准者",
@@ -60,10 +60,32 @@ export const CODES = {
   INTENT_MISMATCH: "請購內容與這次驗證不一致",
   // V1 (docs/commercial-v1.md)
   VOICE_REQUIRED: "這次核准需要語音挑戰",
-  VOICE_NOT_ENROLLED: "核准者還沒有登記聲紋，無法核准（請找管理者）",
+  VOICE_NOT_ENROLLED: "核准者還沒有登記聲紋，無法核准",
   VOICE_MERCHANT_UNKNOWN: "Signer 沒有這個收款人的唸法設定，無法核准",
-  VOICE_SIGNER_UNAVAILABLE: "Signer 讀不到聲紋設定，這次沒有核准（請找管理者）",
+  VOICE_SIGNER_UNAVAILABLE: "Signer 讀不到聲紋設定，這次沒有核准",
+  // Gap 4: the Signer on a delegation's confirmation (and its checks at payment).
+  DELEGATION_CONFIRMED: "這份委託已經確認過",
+  DELEGATION_NOT_CONFIRMED: "這份委託還沒有經本人確認",
+  DELEGATION_EXPIRED: "Signer 設定裡的委派已過期",
+  DELEGATION_UNKNOWN: "Signer 沒有這份委派的設定",
+  DELEGATION_VERSION: "委派的版本和 Signer 的設定不符",
+  DELEGATION_OTHER_TASK: "這份委託已經用在另一個 task",
+  TERMS_INVALID: "委託的條款不正確",
+  OVER_TASK_BUDGET: "超過委託的任務預算",
+  OVER_TOTAL_CAP: "委派的總額或核准人 24 小時內的額度已用完",
+  OVER_PER_TX: "超過每筆上限",
+  OVER_ALLOW_MAX: "超過自動放行的範圍",
+  MERCHANT_NOT_ALLOWED: "收款人不在委託的商家內",
+  ASSET_NOT_ALLOWED: "資產不在委託內",
+  WALLET_NOT_REGISTERED: "這位客人的錢包沒有在 Signer 登記",
+  CONSUMER_MISMATCH: "客人或錢包和委託不符",
 };
+
+// codeNext (C3, docs/host-manual.md 6): the host's next step after the Signer's code: again, when a new try can
+// pass; look, when the person already decided; else the developer's (manual: 「找開發者」表示不要自己處理).
+const AGAIN_CODES = ["ASSERTION_INVALID_FLAGS", "CHALLENGE_EXPIRED", "CHALLENGE_CLOSED", "CHALLENGE_USED", "APPROVER_CHANGED", "CHALLENGE_OPEN"];
+export const codeNext = (c) => "下一步：" + (AGAIN_CODES.includes(c) ? "再按一次，裝置跳出時完成驗證"
+  : c === "SESSION_DECIDED" ? "看這筆的結果，不要重做" : "記下代碼 " + (c || "（未回報）") + " 與時間，找開發者") + "。";
 
 
 // voiceGrant: what a webauthn grant says of its voice ("" when none was asked).
@@ -89,7 +111,7 @@ export function outcomeText(status, body, decision, pays = false) {
   if (status === 200 && b.outcome === "approved" && grant && grant.voice === "verified") return ["ok", "本人核准已驗證（裝置＋語音挑戰），" + off];
   if (status === 200 && b.outcome === "approved" && grant && grant.voice === "unavailable") return ["warn", "本人核准已驗證（裝置）；" + voiceGrant(grant) + "。" + off];
   if (status === 200 && b.outcome === "approved") return ["ok", "本人核准已驗證，" + off];
-  if (status === 200 && b.outcome === "denied" && VOICE_FAILURES.includes(b.code)) return ["deny", "語音挑戰未通過（" + voiceText(b.code) + "），這筆已拒絕；不會付款。"];
+  if (status === 200 && b.outcome === "denied" && VOICE_FAILURES.includes(b.code)) return ["deny", "語音挑戰未通過（" + voiceText(b.code) + "），這筆已拒絕；不會付款。下一步：" + AGAIN + "。"];
   if (status === 200 && b.outcome === "denied") return ["deny", "你已拒絕這筆（已驗證裝置）。"];
   if (status === 200 && b.outcome === "mismatch") return ["error", "Signer 的結果和這次操作不一致，沒有採用。"];
   if (status === 200 && (b.outcome === "closed" || b.outcome === "superseded")) return ["closed", "裝置的驗證沒有被採用（這筆已關閉、task 已結束，或 Signer 的核准已過期）；不會付款。"];
@@ -97,12 +119,12 @@ export function outcomeText(status, body, decision, pays = false) {
   if (status === 200 && a.state === "closed") return ["idle", "已取消這次驗證；這筆仍在等你決定。"];
   if (status === 200 && a.state === "expired") return ["closed", "已過期（後端時間為準）；這次驗證沒有完成。"];
   if (b.error === "decision_conflict") return ["warn", "另一個視窗正在" + (DECISION[a.decision] || "處理") + "這筆。要改變決定，請先「取消這次驗證」。"];
-  if (b.error === "signer_refused") return ["error", "驗證沒有通過（" + codeText(b.code) + "）；沒有" + (DECISION[decision] || "決定") + "。"];
+  if (b.error === "signer_refused") return ["error", "驗證沒有通過（" + codeText(b.code) + "）；沒有" + (DECISION[decision] || "決定") + "。" + codeNext(b.code)];
   if (b.error === "result_unknown") return ["warn", "結果確認中，請不要重複操作。"];
   if (b.error === "store_unavailable" && b.state_not_saved) return ["warn", "後端已收到，但這次結果還沒有存好；畫面會以同一個編號確認。"];
-  if (b.error === "task_ended") return ["closed", "task 已結束（CLI 逾時，或另一筆請購被拒絕）：這筆不能核准，也不會付款。"];
+  if (b.error === "task_ended") return ["closed", "task 已結束（CLI 逾時，或另一筆請購被拒絕）：這筆不能核准，也不會付款。下一步：" + AGAIN + "。"];
   if (b.error === "session_closed") return ["closed", "這筆已經結束，不能再" + (DECISION[decision] || "處理") + "。"];
-  if (b.error === "signer_mismatch") return ["error", "回傳的資料和你這次的操作不一致，已停止，沒有要求裝置驗證。"];
+  if (b.error === "signer_mismatch") return ["error", "回傳的資料和你這次的操作不一致，已停止，沒有要求裝置驗證。下一步：記下時間找開發者。"];
   if (b.error === "not_found") return ["error", "找不到這一筆（可能不是這位客人的）"];
   if (b.error === "attempt_busy") return ["warn", "另一次驗證的結果還在確認中，請稍候。"];
   return ["error", "未完成（" + (b.error || status) + "）"];
