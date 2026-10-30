@@ -53,3 +53,24 @@ func TestIssuerCommands(t *testing.T) {
 		t.Fatalf("list %+v %v", l, err)
 	}
 }
+
+func TestIssuerSubjects(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cred")
+	at := func() int64 { return now }
+	if err := run([]string{"init", "--dir", dir, "--issuer", "issuer-demo", "--consumers", "consumer-a,consumer-b"}, io.Discard, at); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"", "consumer-a", "consumer-a:buyer_type=business", "consumer-a:buyer_type=business,country=TW,age_over_18=true;consumer-a:buyer_type=business,country=TW,age_over_18=true"} {
+		if run([]string{"subjects", "--dir", dir, "--subjects", bad}, io.Discard, at) == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+	ok := "consumer-a:buyer_type=business,country=TW,age_over_18=true;consumer-b:buyer_type=business,country=TW,age_over_18=false"
+	if err := run([]string{"subjects", "--dir", dir, "--subjects", ok}, io.Discard, at); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := credential.OpenDir(dir)
+	if s, _, err := d.IssueTask("show-b-01", "consumer-b", now+3600); err != nil || s.Credential["schema"] != credential.SchemaV2 || s.Credential["age_over_18"] != "false" {
+		t.Fatalf("%v %v", s.Credential, err)
+	}
+}

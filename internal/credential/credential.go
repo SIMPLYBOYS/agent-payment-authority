@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/IBM/idemix/bbs"
 	ml "github.com/IBM/mathlib"
@@ -29,11 +30,27 @@ var curve = ml.Curves[ml.BLS12_381_BBS]
 // Schema names the envelope; it is also the credential's version.
 const Schema = "apa.credential.v1"
 
+// SchemaV2 adds the subject's attributes (docs/commercial-venues.md 3.1):
+// a venue asks for some of them, and only those are disclosed.
+const SchemaV2 = "apa.credential.v2"
+
 // PresentationVersion names the presentation envelope.
 const PresentationVersion = "apa.presentation.v1"
 
 // Fields is the fixed message order; each message is "name=value".
 var Fields = []string{"schema", "issuer", "task_id", "consumer_id", "c0", "expiry", "holder", "status"}
+
+// Attributes are v2's subject attributes, after Fields, in this order. age_over_18 is a boolean the issuer
+// signed, disclosed as it is: not a range proof, and no birth date is in the credential at all.
+var Attributes = []string{"buyer_type", "country", "age_over_18"}
+
+// fieldsOf is a schema's message order (v1's for any other name: Check refuses it).
+func fieldsOf(schema string) []string {
+	if schema == SchemaV2 {
+		return slices.Concat(Fields, Attributes)
+	}
+	return Fields
+}
 
 // Mandatory are disclosed in every presentation (consumer_id and c0 never).
 var Mandatory = []string{"schema", "issuer", "task_id", "expiry", "holder", "status"}
@@ -43,12 +60,16 @@ var Mandatory = []string{"schema", "issuer", "task_id", "expiry", "holder", "sta
 const C0Placeholder = "0x0000000000000000000000000000000000000000000000000000000000000000"
 
 var formats = map[string]*regexp.Regexp{
-	"schema": regexp.MustCompile(`^apa\.credential\.v1$`),
+	"schema": regexp.MustCompile(`^apa\.credential\.v[12]$`),
 	"issuer": regexp.MustCompile(`^[a-z0-9-]{1,64}$`),
 	"c0":     regexp.MustCompile(`^0x[0-9a-f]{64}$`),
 	"expiry": regexp.MustCompile(`^[1-9][0-9]{0,17}$`),
 	"holder": regexp.MustCompile(`^ed25519:[0-9a-f]{64}$`),
 	"status": regexp.MustCompile(`^(0|[1-9][0-9]{0,8})$`),
+	// v2's attributes
+	"buyer_type":  regexp.MustCompile(`^(business|individual)$`),
+	"country":     regexp.MustCompile(`^[A-Z]{2}$`),
+	"age_over_18": regexp.MustCompile(`^(true|false)$`),
 }
 
 // validField is the one spelling a field's value may have.
@@ -68,10 +89,11 @@ type Credential map[string]string
 
 // Check reports a missing or misspelled field.
 func (c Credential) Check() error {
-	if len(c) != len(Fields) {
-		return errors.New("credential: exactly the eight fields")
+	fs := fieldsOf(c["schema"])
+	if len(c) != len(fs) {
+		return errors.New("credential: exactly the schema's fields")
 	}
-	for _, f := range Fields {
+	for _, f := range fs {
 		if !validField(f, c[f]) {
 			return fmt.Errorf("credential: %s", f)
 		}
@@ -80,8 +102,9 @@ func (c Credential) Check() error {
 }
 
 func (c Credential) messages() [][]byte {
-	out := make([][]byte, len(Fields))
-	for i, f := range Fields {
+	fs := fieldsOf(c["schema"])
+	out := make([][]byte, len(fs))
+	for i, f := range fs {
 		out[i] = []byte(f + "=" + c[f])
 	}
 	return out
@@ -130,18 +153,21 @@ func (k *IssuerKey) Issue(c Credential) ([]byte, error) {
 }
 
 // Request is a challenge as the verifier stored it: its ID, the verifier,
-// the purchase intent it is for and the fields to disclose (design 7).
+// the purchase intent it is for and the fields to disclose (design 7);
+// Schema the task's credential's ("" is v1).
 type Request struct {
 	VerifierID, ChallengeID, IntentHash string
 	Disclose                            []string
+	Schema                              string
 }
 
 // indexes is Disclose as sorted message indexes; false for an unknown or
 // repeated field.
-func indexes(disclose []string) ([]int, bool) {
+func indexes(schema string, disclose []string) ([]int, bool) {
+	fs := fieldsOf(schema)
 	var idx []int
 	for _, f := range disclose {
-		i := slices.Index(Fields, f)
+		i := slices.Index(fs, f)
 		if i < 0 || slices.Contains(idx, i) {
 			return nil, false
 		}
@@ -154,10 +180,11 @@ func indexes(disclose []string) ([]int, bool) {
 // Nonce binds a proof to one verifier, one challenge, one intent and one
 // disclosure list; every part is length-prefixed.
 func (r Request) Nonce() []byte {
-	idx, _ := indexes(r.Disclose)
+	fs := fieldsOf(r.Schema)
+	idx, _ := indexes(r.Schema, r.Disclose)
 	list := make([]string, 0, len(idx))
 	for _, i := range idx {
-		list = append(list, Fields[i])
+		list = append(list, fs[i])
 	}
 	h := sha256.New()
 	for _, p := range append([]string{"agent-payment-authority/credential/v1/presentation", r.VerifierID, r.ChallengeID, r.IntentHash}, list...) {
@@ -189,13 +216,17 @@ func Present(c Credential, sig, issuerPK []byte, holder ed25519.PrivateKey, r Re
 	if err := c.Check(); err != nil {
 		return Presentation{}, err
 	}
-	idx, ok := indexes(r.Disclose)
+	if schemaOf(r.Schema) != c["schema"] {
+		return Presentation{}, errors.New("present: the request is for another schema's credential")
+	}
+	fs := fieldsOf(c["schema"])
+	idx, ok := indexes(c["schema"], r.Disclose)
 	if !ok || len(idx) == 0 {
 		return Presentation{}, errors.New("present: unknown, repeated or no field")
 	}
 	disclosed := map[string]string{}
 	for _, i := range idx {
-		disclosed[Fields[i]] = c[Fields[i]]
+		disclosed[fs[i]] = c[fs[i]]
 	}
 	nonce := r.Nonce()
 	proof, err := bbs.New(curve).DeriveProof(c.messages(), sig, nonce, issuerPK, idx)
@@ -204,6 +235,14 @@ func Present(c Credential, sig, issuerPK []byte, holder ed25519.PrivateKey, r Re
 	}
 	return Presentation{Version: PresentationVersion, ChallengeID: r.ChallengeID, Disclosed: disclosed, Proof: proof,
 		HolderSig: ed25519.Sign(holder, holderPayload(nonce, proof))}, nil
+}
+
+// schemaOf is a request's schema, v1 when it names none (a challenge stored before v2).
+func schemaOf(s string) string {
+	if s == "" {
+		return Schema
+	}
+	return s
 }
 
 // Expect is what this task's verification must find, from the trusted
@@ -235,6 +274,7 @@ type Outcome struct {
 	Status             string
 	Expiry             int64
 	ProofSHA256        string
+	Claims             string // v2: the disclosed attributes, "name=value" joined by "," in Attributes' order
 	StatusListVersion  uint64
 	StatusListIssuedAt int64
 	StatusListSHA256   string
@@ -257,12 +297,13 @@ func Verify(r Request, p Presentation, e Expect, st Status, now int64) Outcome {
 	if p.Version != PresentationVersion || p.ChallengeID != r.ChallengeID {
 		return invalid("PRESENTATION_FORMAT")
 	}
-	idx, ok := indexes(r.Disclose)
+	fs := fieldsOf(schemaOf(r.Schema))
+	idx, ok := indexes(schemaOf(r.Schema), r.Disclose)
 	if !ok || len(p.Disclosed) != len(idx) {
 		return invalid("DISCLOSURE_MISMATCH")
 	}
 	for _, i := range idx {
-		if _, ok := p.Disclosed[Fields[i]]; !ok {
+		if _, ok := p.Disclosed[fs[i]]; !ok {
 			return invalid("DISCLOSURE_MISMATCH")
 		}
 	}
@@ -276,14 +317,14 @@ func Verify(r Request, p Presentation, e Expect, st Status, now int64) Outcome {
 			return invalid("FORMAT_INVALID")
 		}
 	}
-	// The proof reveals exactly these indexes of exactly len(Fields)
+	// The proof reveals exactly these indexes of exactly the schema's
 	// messages: the library takes both from the proof (C1 review).
-	if pl, err := bbs.ParsePoKPayload(p.Proof); err != nil || pl.MessagesCount != len(Fields) || !slices.Equal(pl.Revealed, idx) {
+	if pl, err := bbs.ParsePoKPayload(p.Proof); err != nil || pl.MessagesCount != len(fs) || !slices.Equal(pl.Revealed, idx) {
 		return invalid("PROOF_INVALID")
 	}
 	msgs := make([][]byte, 0, len(idx))
 	for _, i := range idx {
-		msgs = append(msgs, []byte(Fields[i]+"="+p.Disclosed[Fields[i]]))
+		msgs = append(msgs, []byte(fs[i]+"="+p.Disclosed[fs[i]]))
 	}
 	nonce := r.Nonce()
 	hp := holderPayload(nonce, p.Proof)
@@ -292,6 +333,8 @@ func Verify(r Request, p Presentation, e Expect, st Status, now int64) Outcome {
 	}
 	d := p.Disclosed
 	switch {
+	case d["schema"] != schemaOf(r.Schema):
+		return invalid("SCHEMA_MISMATCH")
 	case d["issuer"] != e.IssuerID:
 		return invalid("ISSUER_UNTRUSTED")
 	case d["holder"] != e.Holder:
@@ -305,7 +348,14 @@ func Verify(r Request, p Presentation, e Expect, st Status, now int64) Outcome {
 		return invalid("SNAPSHOT_MISMATCH")
 	}
 	exp, _ := strconv.ParseInt(d["expiry"], 10, 64)
-	o := Outcome{Result: Valid, Issuer: d["issuer"], Holder: d["holder"], Status: d["status"], Expiry: exp, ProofSHA256: Fingerprint(p.Proof)}
+	var claims []string
+	for _, a := range Attributes {
+		if v, ok := d[a]; ok {
+			claims = append(claims, a+"="+v)
+		}
+	}
+	o := Outcome{Result: Valid, Issuer: d["issuer"], Holder: d["holder"], Status: d["status"], Expiry: exp, ProofSHA256: Fingerprint(p.Proof),
+		Claims: strings.Join(claims, ",")}
 	if st.Err != nil || st.List == nil {
 		o.Result, o.Detail = StatusUnavailable, "STATUS_LIST_UNAVAILABLE"
 		return o

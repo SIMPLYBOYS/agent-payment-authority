@@ -6,6 +6,9 @@
 //	apa-issuer revoke --dir D --task T                    revoke task T's issued credential
 //	apa-issuer revoke --dir D --status N                  revoke status index N
 //	apa-issuer refresh --dir D                            re-sign the list (a running Host does this every 300 s)
+//	apa-issuer subjects --dir D --subjects 'consumer-a:buyer_type=business,country=TW,age_over_18=true;consumer-b:…'
+//	                                                      the consumers' attributes: the directory then issues apa.credential.v2
+//	                                                      (docs/commercial-venues.md 3.1; replaces subjects.json whole)
 //
 // Every write goes through the directory's lock: a revocation is never
 // overwritten. Nothing secret is printed.
@@ -30,7 +33,7 @@ func main() {
 	}
 }
 
-const usage = "usage: apa-issuer init|revoke|refresh --dir D ..."
+const usage = "usage: apa-issuer init|revoke|refresh|subjects --dir D ..."
 
 func run(args []string, out io.Writer, now func() int64) error {
 	if len(args) == 0 {
@@ -43,6 +46,7 @@ func run(args []string, out io.Writer, now func() int64) error {
 	consumers := fs.String("consumers", "", "init: the consumers given a holder, comma-separated")
 	task := fs.String("task", "", "revoke: the task whose credential is revoked")
 	status := fs.String("status", "", "revoke: the status index revoked")
+	subjects := fs.String("subjects", "", "subjects: consumer:name=value,… for each consumer, ';'-separated")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || *dir == "" {
 		return errors.New(usage)
 	}
@@ -61,6 +65,24 @@ func run(args []string, out io.Writer, now func() int64) error {
 		return err
 	}
 	switch args[0] {
+	case "subjects":
+		m := map[string]map[string]string{}
+		for _, one := range strings.Split(*subjects, ";") {
+			c, attrs, ok := strings.Cut(one, ":")
+			if !ok || m[c] != nil {
+				return errors.New("subjects: consumer:name=value,… for each consumer, ';'-separated, each once")
+			}
+			m[c] = map[string]string{}
+			for _, kv := range strings.Split(attrs, ",") {
+				k, v, _ := strings.Cut(kv, "=")
+				m[c][k] = v
+			}
+		}
+		if err := d.SetSubjects(m); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "apa-issuer: subjects.json written for %d consumer(s); new tasks get apa.credential.v2\n", len(m))
+		return nil
 	case "refresh":
 		if err := d.Refresh(now()); err != nil {
 			return err

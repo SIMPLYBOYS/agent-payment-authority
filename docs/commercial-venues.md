@@ -2,7 +2,7 @@
 
 > 2026-10-30，Claude Code。完成清單第 2 項（`docs/commercial-gap-review.md` §9）。
 > 概念借自 vault〈CrossHub 產品架構分析〉§4.1。依 vault〈執行計畫〉§7 的紅線，repo 和畫面都不寫 CrossHub 的名字。
-> 本文是設計，還沒改程式。
+> **Aaron 10/30：「D1～D5 照建議方式進行」**：三個屬性；每間店的要求由 Host 的情境設定；B 未滿 18 歲、買啤酒被擋下；A、B 都是 `business`；便利商店也上 testnet，商店的每日上限一併調高。照第 4 節的切片實作。
 
 ## 1 一段話
 
