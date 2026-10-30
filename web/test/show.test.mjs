@@ -245,7 +245,7 @@ const boundEvents = (m) => [ev(1, "TASK_STARTED", { purchase_order_id: "" }), ev
 test("why trustworthy: each item only what a record says, links only on a public testnet", () => {
   const p = { resource_url: "https://shop.example/resources/kr-market", credential: { result: "valid" }, payment: delivered };
   const ev = A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { purchase: p }), {});
-  assert.deepEqual(ev.map((x) => x.label), ["委託", "憑證", "核准", "預算預留", "付款", "收據"]);
+  assert.deepEqual(ev.map((x) => x.label), ["1 委託", "2 選購", "3 核准", "4 付款・預留", "4 付款・結算", "5 交付"]); // the five steps (10/30)
   assert.equal(ev[0].text, "客人已交代 Agent 預算與範圍"); // no DELEGATION_BOUND in these events
   assert.equal(ev[1].text, "Agent 出示了客人的 BBS+ 憑證，檢查通過（測試發行者）");
   // 10/30: the list says who confirmed, as step 1 does (it said the host's always, against step 1's person's device).

@@ -1216,20 +1216,21 @@ export function showEvidence(snapshot, traits = {}, chain = null) {
   const sc = scene(snapshot);
   const p = sc.po ? (task.purchases || []).find((x) => x.purchase_order_id === sc.po) : null;
   const has = (type) => recorded(snapshot, sc.po, type);
-  const items = [{ label: "委託", text: confirmedBy(snapshot, traits) || "客人已交代 Agent 預算與範圍" }];
+  // Labelled by the five steps (10/30, docs/commercial-gap-review.md §9 item 3): the evidence of each step beside it.
+  const items = [{ label: "1 委託", text: confirmedBy(snapshot, traits) || "客人已交代 Agent 預算與範圍" }];
   if (!p) return items;
-  if (p.credential) items.push({ label: "憑證", text: p.credential.result === "valid" ? "Agent 出示了客人的 BBS+ 憑證，檢查通過（測試發行者）" : "憑證檢查沒通過" });
-  if (sc.verdict === "Allow") items.push({ label: "核准", text: "在委託範圍內，自動放行" }); // the events' verdict, as the five steps
-  else if (sc.verdict === "Deny") items.push({ label: "核准", text: plainReason(sc.reason) + "，已拒絕" });
-  else if (p.approval && p.approval.state === "approved" && has("APPROVED")) items.push({ label: "核准", text: approvalWords(p, traits) });
+  if (p.credential) items.push({ label: "2 選購", text: p.credential.result === "valid" ? "Agent 出示了客人的 BBS+ 憑證，檢查通過（測試發行者）" : "憑證檢查沒通過" });
+  if (sc.verdict === "Allow") items.push({ label: "3 核准", text: "在委託範圍內，自動放行" }); // the events' verdict, as the five steps
+  else if (sc.verdict === "Deny") items.push({ label: "3 核准", text: plainReason(sc.reason) + "，已拒絕" });
+  else if (p.approval && p.approval.state === "approved" && has("APPROVED")) items.push({ label: "3 核准", text: approvalWords(p, traits) });
   const pv = p.payment || {};
   const onChain = chain && chain.purchases && chain.purchases[p.purchase_order_id];
-  if (pv.reserve_tx && has("BUDGET_RESERVED")) items.push({ label: "預算預留", ...txLink(task.payment_capability, pv.reserve_tx), note: "第 1 筆・含 ZK 預算證明",
+  if (pv.reserve_tx && has("BUDGET_RESERVED")) items.push({ label: "4 付款・預留", ...txLink(task.payment_capability, pv.reserve_tx), note: "第 1 筆・含 ZK 預算證明",
     chain: onChain && onChain.reserve && onChain.reserve.hash === pv.reserve_tx ? chainLine(onChain.reserve, chain.head, "reserve") : "" });
-  if (pv.settle_tx && has("PAYMENT_SETTLED")) items.push({ label: "付款", ...txLink(task.payment_capability, pv.settle_tx),
+  if (pv.settle_tx && has("PAYMENT_SETTLED")) items.push({ label: "4 付款・結算", ...txLink(task.payment_capability, pv.settle_tx),
     note: pv.settle_tx !== pv.reserve_tx ? "第 2 筆・和第 1 筆不是同一筆" : "第 2 筆（交易編號和第 1 筆相同，未確認）",
     chain: onChain && onChain.settle && onChain.settle.hash === pv.settle_tx ? chainLine(onChain.settle, chain.head, "settle") : "" });
-  if (pv.receipt_id && has("RECEIPT_ISSUED")) items.push({ label: "收據", text: String(pv.receipt_id), note: "記錄了交付內容的 sha256" });
+  if (pv.receipt_id && has("RECEIPT_ISSUED")) items.push({ label: "5 交付", text: "收據 " + String(pv.receipt_id), note: "記錄了交付內容的 sha256" });
   return items;
 }
 
