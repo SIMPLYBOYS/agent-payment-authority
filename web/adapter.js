@@ -1079,12 +1079,9 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
   const d = delegation;
   if (!task) set(0, "now", "等待開始");
   else {
-    // Gap 4: who confirmed the delegation, by its DELEGATION_BOUND (the person's device, or the host for the customer).
-    const bound = ((snapshot && snapshot.events) || []).find((e) => e.event_type === "DELEGATION_BOUND");
     const terms = d && d.task_budget ? "預算 " + usdc(d.task_budget) + "，超過 " + usdc(d.allow_max) + " 要問本人" : "預算與範圍";
-    set(0, "done", !bound ? (d && d.task_budget ? "客人交代 Agent：" + terms : "客人已交代 Agent 預算與範圍")
-      : bound.authorization_method === "webauthn" ? approverText(traits.authenticator) + "確認了委託：" + terms // never a virtual authenticator called a device (review)
-      : "主持人代為確認委託（示範，不是本人）：" + terms);
+    const who = confirmedBy(snapshot, traits);
+    set(0, "done", who ? who + "：" + terms : d && d.task_budget ? "客人交代 Agent：" + terms : "客人已交代 Agent 預算與範圍");
     if (ph === "empty" || ph === "entered") set(1, "now", "Agent 正在挑選商品");
     else set(1, "done", "Agent 選好商品，報價 " + usdc(p && p.amount));
   }
@@ -1204,15 +1201,24 @@ export function chainLine(tx, head, kind) {
 // events: a purchase's record may already hold what its events do not yet say, and the window says only what they do (review).
 export const recorded = (snapshot, po, type) => ((snapshot && snapshot.events) || []).some((e) => e.event_type === type && e.purchase_order_id === po);
 
+// confirmedBy (gap 4): who confirmed the delegation, by its DELEGATION_BOUND (the person's device, or the host for
+// the customer); "" before it. The five steps and the trust list say the same (10/30: the list said the host's always).
+function confirmedBy(snapshot, traits = {}) {
+  const bound = ((snapshot && snapshot.events) || []).find((e) => e.event_type === "DELEGATION_BOUND");
+  if (!bound) return "";
+  return bound.authorization_method === "webauthn" ? approverText(traits.authenticator) + "確認了委託" // never a virtual authenticator called a device (review)
+    : "主持人代為確認委託（示範，不是本人）";
+}
+
 export function showEvidence(snapshot, traits = {}, chain = null) {
   const task = snapshot && snapshot.task;
   if (!task) return [];
   const sc = scene(snapshot);
   const p = sc.po ? (task.purchases || []).find((x) => x.purchase_order_id === sc.po) : null;
   const has = (type) => recorded(snapshot, sc.po, type);
-  const items = [{ label: "委託", text: "主持人代客人確認（示範，不是本人）" }];
+  const items = [{ label: "委託", text: confirmedBy(snapshot, traits) || "客人已交代 Agent 預算與範圍" }];
   if (!p) return items;
-  if (p.credential) items.push({ label: "憑證", text: p.credential.result === "valid" ? "Agent 出示了客人的憑證，檢查通過（測試發行者）" : "憑證檢查沒通過" });
+  if (p.credential) items.push({ label: "憑證", text: p.credential.result === "valid" ? "Agent 出示了客人的 BBS+ 憑證，檢查通過（測試發行者）" : "憑證檢查沒通過" });
   if (sc.verdict === "Allow") items.push({ label: "核准", text: "在委託範圍內，自動放行" }); // the events' verdict, as the five steps
   else if (sc.verdict === "Deny") items.push({ label: "核准", text: plainReason(sc.reason) + "，已拒絕" });
   else if (p.approval && p.approval.state === "approved" && has("APPROVED")) items.push({ label: "核准", text: approvalWords(p, traits) });

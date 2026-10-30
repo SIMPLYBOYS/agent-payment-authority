@@ -239,12 +239,18 @@ test("one window at a time: a second one is told the host page follows another",
 const TX1 = "0x" + "1".repeat(64), TX2 = "0x" + "2".repeat(64);
 const delivered = { status: "paid", state: "delivered", reserve_tx: TX1, settle_tx: TX2, settle_block: 12, content_sha256: "sha256:" + "c".repeat(64), receipt_id: "rcpt-1" };
 
+// A task whose delegation was confirmed by method m ("" the host's).
+const boundEvents = (m) => [ev(1, "TASK_STARTED", { purchase_order_id: "" }), ev(2, "DELEGATION_BOUND", { purchase_order_id: "", ...(m ? { authorization_method: m } : {}) })];
+
 test("why trustworthy: each item only what a record says, links only on a public testnet", () => {
   const p = { resource_url: "https://shop.example/resources/kr-market", credential: { result: "valid" }, payment: delivered };
   const ev = A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { purchase: p }), {});
   assert.deepEqual(ev.map((x) => x.label), ["委託", "憑證", "核准", "預算預留", "付款", "收據"]);
-  assert.equal(ev[0].text, "主持人代客人確認（示範，不是本人）");
-  assert.equal(ev[1].text, "Agent 出示了客人的憑證，檢查通過（測試發行者）");
+  assert.equal(ev[0].text, "客人已交代 Agent 預算與範圍"); // no DELEGATION_BOUND in these events
+  assert.equal(ev[1].text, "Agent 出示了客人的 BBS+ 憑證，檢查通過（測試發行者）");
+  // 10/30: the list says who confirmed, as step 1 does (it said the host's always, against step 1's person's device).
+  assert.equal(A.showEvidence(snap(boundEvents("webauthn")), { authenticator: "device" })[0].text, "本人以已登記的裝置確認了委託");
+  assert.equal(A.showEvidence(snap(boundEvents("")), {})[0].text, "主持人代為確認委託（示範，不是本人）");
   assert.equal(ev[3].href, "https://sepolia.basescan.org/tx/" + TX1);
   assert.equal(ev[3].text, "0x11111111…111111");
   assert.match(ev[4].note, /和第 1 筆不是同一筆/);
