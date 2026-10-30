@@ -91,6 +91,6 @@ Agent 每次請購，都由 verifier 依「這間店要什麼」發出 challenge
 
 **還沒做／要注意**
 - 本機彩排（完成清單第 5 項）：A 的啤酒付款交付，B 的啤酒在付款前被擋下；兩位在資料研究室都看到「企業買方、國家 台灣」。
-- Unity 要重建（`scripts/unity/unity.sh webgl`），字幕才會出現「憑證不符商店」。
+- Unity 已在 worktree 重建（10/30，Aaron：「Unity 也請進行重建」）：場景、EditMode 24/24、PlayMode 48/48、WebGL（`var/wt-complete/unity/AgentPaymentAuthority/Build/WebGL`，git 不追蹤）。LimeZu 素材從主目錄 clone 過來；主目錄的 Unity 匯入快取（Library）clone 過來會讓 PlayMode 全部找不到腳本，改用全新的快取才全過（舊的那份留在 worktree 的 `Library.cloned`，可刪）。主目錄的 Unity 建置沒有動（S5 用它）。
 - **testnet 的 `dlg-ta` 總額 0.30 不夠正式錄影**（E1-a 0.09＋S5 0.08＋錄影那場 A 的午餐 0.08、啤酒 0.09＝0.34）。Aaron 10/30：「請調整上限」。`opt-signer` 的 `dlgTotal` 改為 1.00（每筆 0.10 不變；`dlg-t402` 不變）；以 `var/p2-opt/signer.base-3.json` 產生 `var/p2-opt/signer-4.json`（SHA-256 `b953c73a832ec09b6befe05bb050447245c564f035bf23e7c2a33c11dce8cbbb`），和 `signer-3.json` 只差兩份委派的總額與有效期（到 11/6 05:23 UTC）。安裝由 Aaron 執行，正式錄影前裝上即可。
 - `age_over_18` 是 issuer 簽的布林值，不是範圍證明；issuer、holder、verifier 仍在同一個程序（C2 §5）。
