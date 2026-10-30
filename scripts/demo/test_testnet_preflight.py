@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -25,7 +26,16 @@ class UnixServer(socketserver.ThreadingUnixStreamServer):
         return r, ("local", 0)
 
 
-def run(health, usdc, gas, price=GWEI // 100, town=False):
+DAY = 86400
+
+
+def signer_json(left=7 * DAY):
+    now = int(time.time())
+    return {"delegations": [{"delegation_id": i, "version": 1, "valid_from": now - DAY, "valid_until": now + left} for i in ("dlg-ta", "dlg-tb")]
+            + [{"delegation_id": "dlg-t402", "version": 1, "valid_from": now - 9 * DAY, "valid_until": now - DAY}]}  # test402's, expired: not a show's
+
+
+def run(health, usdc, gas, price=GWEI // 100, town=False, signer=None):
     """The script's exit code and output with these answers."""
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -49,14 +59,17 @@ def run(health, usdc, gas, price=GWEI // 100, town=False):
     os.makedirs(d + "/host")
     node = HTTPServer(("127.0.0.1", 0), H)
     with open(d + "/host/payments.json", "w") as f:
-        json.dump({"rpc": "http://127.0.0.1:%d" % node.server_address[1], "token": "0x" + "4" * 40, "pay_to": "0x" + "3" * 40}, f)
+        json.dump({"rpc": "http://127.0.0.1:%d" % node.server_address[1], "token": "0x" + "4" * 40, "pay_to": "0x" + "3" * 40,
+                   "delegations": {"consumer-a/0x" + "3" * 40: "dlg-ta@1", "consumer-b/0x" + "3" * 40: "dlg-tb@1", "consumer-b/0x" + "0" * 37 + "402": "dlg-t402@1"}}, f)
+    with open(d + "/signer.json", "w") as f:
+        json.dump(signer or signer_json(), f)
     with open(d + "/host/registry.json", "w") as f:
         json.dump({"wallets": [{"wallet_id": "wallet-a", "from": "0x" + "a" * 40}, {"wallet_id": "wallet-b", "from": "0x" + "b" * 40}]}, f)
     relayer = UnixServer(d + "/r.sock", H)
     for s in (node, relayer):
         threading.Thread(target=s.serve_forever, daemon=True).start()
     try:
-        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "testnet-preflight.py"), d + "/r.sock", d + "/host"] + (["town"] if town else []), capture_output=True, text=True, timeout=30)
+        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "testnet-preflight.py"), d + "/r.sock", d + "/host", "--signer", d + "/signer.json"] + (["town"] if town else []), capture_output=True, text=True, timeout=30)
         return r.returncode, r.stdout
     finally:
         node.shutdown()
@@ -99,6 +112,27 @@ class Preflight(unittest.TestCase):
         code, out = run(old, 19920000, 9 * 10**13)
         self.assertEqual(code, 2, out)
         self.assertIn("未檢查", out)
+
+    def test_delegations_outlast_the_show(self):
+        # 10/30: dlg-ta and dlg-tb had expired on 10/28; every Allow was refused after its reservation.
+        code, out = run(READY, 19920000, 9 * 10**13, signer=signer_json(left=-3600))
+        self.assertEqual(code, 1, out)
+        self.assertIn("不夠：委派 dlg-ta@1 到台北", out)
+        self.assertIn("不夠：委派 dlg-tb@1 到台北", out)
+        self.assertNotIn("dlg-t402", out)
+        code, out = run(READY, 19920000, 9 * 10**13, signer=signer_json(left=2 * 3600))  # less than a show
+        self.assertEqual(code, 1, out)
+        code, out = run(READY, 19920000, 9 * 10**13, signer={"delegations": signer_json()["delegations"][:1]})
+        self.assertIn("不夠：signer.json 沒有委派 dlg-tb@1", out)
+        code, out = run(READY, 19920000, 9 * 10**13)
+        self.assertEqual(code, 0, out)
+        self.assertIn("委派 dlg-ta@1 到台北", out)
+        self.assertRegex(out, "還有 (7 天 0|6 天 23) 小時")  # the same second, or the next
+
+    def test_an_unreadable_signer_json_is_unchecked(self):
+        code, out = run(READY, 19920000, 9 * 10**13, signer="not json")
+        self.assertEqual(code, 2, out)
+        self.assertIn("讀不到 signer.json", out)
 
     def test_nothing_there(self):
         r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "testnet-preflight.py"), "/nonexistent.sock", "/nonexistent"], capture_output=True, text=True)

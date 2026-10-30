@@ -116,3 +116,16 @@ Aaron 10/29：D1～D5「照建議」。
 - 證據包 `artifacts/e1a/rehearsal-town1`（run `e1a-20261029T165855Z-9e7969`，起點區塊 90，終點區塊 101，Host 建置 d5518cf）。`verify-demo --mode e1a --rpc http://127.0.0.1:8545`：E1～E10 全部 PASS，沒有 findings。not_evaluated 和 limits 跟 E1-a 相同。
 - 小事：請購表的 `approval_status` 在兩筆 Ask 上仍是 `pending`，核准的結果記在 `approval_sessions`（approved）。查核讀的是後者，不影響結果。這是現有的寫法，不是這次造成的。
 - 下一步：S5 testnet 實跑。實跑前，先唯讀查 dlg-ta、dlg-tb 還剩多少額度；當天（UTC）商店不能有其他結算。
+
+### 6.3 S5 第一次（Aaron 10/30，標籤 t3）：中止
+- `/opt` 已是 gap4 的 Signer：兩位客人都用裝置確認了委託。
+- A 的簡報 0.50 走 Ask，以裝置核准，在 testnet 上付款並交付（`show-e1a-t3-a-03`）。
+- B 的三筆 Allow（`show-e1a-t3-b-01`～`03`，各 0.06）都在鏈上預留之後被 Signer 拒絕（`DELEGATION_EXPIRED`），停在「待人工處理：預算已預留，但付款沒有送出」，錢沒有動。
+- 原因：`p2-testnet opt-signer` 寫的 `dlg-ta`、`dlg-tb`、`dlg-t402` 只有 7 天有效期。10/21 重產的那一份在 10/28 03:45 UTC 到期，Ask 不經過這些委派，所以不受影響。
+- 拒絕原因只記在 Host Store 的 `payment_attempts.error_code`，頁面和終端機都看不到，是 Aaron 用唯讀的 sqlite 查出來的。
+- 處理：
+  - 以 `opt-signer` 重產 `var/p2-opt/signer-3.json`，和現有設定只差委派的有效期（到 11/6 02:25 UTC）與核准人版本（3 改為 4）。安裝由 Aaron 執行。
+  - `t3` 不出證據包，S5 改用新的標籤重跑。這一天（UTC）商店已結算 1 筆，四筆一場要等台北 08:00 之後。
+- 補上的兩件事：
+  - Signer 拒絕一筆已預留的付款時，Host 終端機印出它的 code。主持人頁付款狀態的 `signer_code` 帶出這個 code，「下一步」寫出原因與要做的事。
+  - 開場前檢查（`testnet-preflight.py --signer`，`demo-testnet.sh` 以 sudo 讀 `/opt` 的 `signer.json`）列出商店用的每一份委派到期的時間；剩不到 3 小時就算「不夠」。

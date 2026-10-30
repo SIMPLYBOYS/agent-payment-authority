@@ -381,10 +381,12 @@ func (w *Worker) sign(ctx context.Context, p store.Payment, o paycontract.Purcha
 		if slices.Contains(signerRetry, signer.Refusal(r)) && !w.late(o) {
 			return p, ErrPending
 		}
+		w.log(p.IntentHash, err) // the Signer's reason on the terminal (10/30: DELEGATION_EXPIRED was found only in the Store)
 		return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID") // tx#1 spent: a person's to look at (decision 6)
 	case slices.Contains(storeRetry, store.Code(err)) && !w.late(o):
 		return p, ErrPending
 	case store.Code(err) != "":
+		w.log(p.IntentHash, err)
 		return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID") // the Store refused the request: never sent
 	case err != nil:
 		if w.late(o) {

@@ -443,11 +443,22 @@ func TestPaymentFailures(t *testing.T) {
 					t.Fatalf("needs review before a reservation: %v", err)
 				}
 			}
+			signerCode := ""
+			if c.code == "RESERVED_NOT_PAID" { // the Signer refused the request: its reason in the view (10/30)
+				a, _, err := s.BeginPayment(payReq(po))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.UpdatePayment(a.RequestID, "rejected", "", "DELEGATION_EXPIRED"); err != nil {
+					t.Fatal(err)
+				}
+				signerCode = "DELEGATION_EXPIRED"
+			}
 			p, err := s.PaymentFailed(intent, c.code)
 			if err != nil || p.State != c.state || p.Code != c.code {
 				t.Fatalf("failed: %+v %v", p, err)
 			}
-			if v := e.view(s, po); v == nil || v.Status != c.status || v.Code != c.code {
+			if v := e.view(s, po); v == nil || v.Status != c.status || v.Code != c.code || v.SignerCode != signerCode {
 				t.Fatalf("view %+v", v)
 			}
 			if spent := e.budgetLeft() != before; spent != (c.upTo > 0) {

@@ -118,9 +118,11 @@ until [ -S "$rsock" ]; do
 done
 say "2/4 relayer 就緒"
 # C4 (10/24: a show ran into the relayer's daily cap unseen): enough for a
-# show of two customers, before the Signer and the Host start (read-only).
+# show of two customers, before the Signer and the Host start (read-only);
+# and the Signer's delegations still valid (10/30: expired, every Allow refused).
 pre=0
-python3 -I scripts/demo/testnet-preflight.py "$rsock" "$tn/host" $( [ "$mode" = live ] && [ "$what" = town ] && echo town ) >&2 || pre=$?
+(cd / && exec sudo -n -u apa-signer /bin/cat "$opt/data/signer.json") 2>/dev/null |
+  python3 -I scripts/demo/testnet-preflight.py "$rsock" "$tn/host" --signer /dev/stdin $( [ "$mode" = live ] && [ "$what" = town ] && echo town ) >&2 || pre=$?
 case $pre in
 0) ;;
 1) stuck "開場前檢查：上面「不夠」的項目（交易數在 UTC 午夜、台北 08:00 歸零）" ;;

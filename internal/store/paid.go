@@ -647,6 +647,7 @@ type PaymentView struct {
 	Status        string `json:"status"` // PaymentStatus
 	State         string `json:"state"`  // submitted also when the Host does not know its result
 	Code          string `json:"code,omitempty"`
+	SignerCode    string `json:"signer_code,omitempty"` // RESERVED_NOT_PAID: the Signer's (or the Store's) refusal of the request (10/30)
 	ReserveTx     string `json:"reserve_tx,omitempty"`
 	ReserveBlock  uint64 `json:"reserve_block,omitempty"` // E1-a: tx#1's block
 	SettleTx      string `json:"settle_tx,omitempty"`
@@ -687,6 +688,9 @@ func (t *taskTx) paymentView(po string) *PaymentView {
 	}
 	if v != nil {
 		v.Status = PaymentStatus(v.State, v.Code)
+		if v.Code == "RESERVED_NOT_PAID" { // a view: no attempt (or no row) leaves it empty
+			t.tx.QueryRow(`SELECT coalesce(error_code, '') FROM payment_attempts WHERE task_id = ? AND purchase_order_id = ?`, t.row.TaskID, po).Scan(&v.SignerCode)
+		}
 	}
 	return v
 }

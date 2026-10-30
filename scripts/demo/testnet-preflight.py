@@ -1,8 +1,10 @@
 """Before a Base Sepolia show (docs/commercial-gap-review.md C4; 10/24 a show
 ran into the relayer's daily cap unseen): the relayer's transactions today
-against its cap, and the balances the show spends from, read-only.
+against its cap, and the balances the show spends from, read-only; and
+(10/30: every Allow refused DELEGATION_EXPIRED after its reservation) how long
+the Signer's delegations for the shop still run, from its signer.json.
 
-    python3 -I scripts/demo/testnet-preflight.py RELAYER_SOCK HOST_DIR [town]
+    python3 -I scripts/demo/testnet-preflight.py RELAYER_SOCK HOST_DIR [--signer SIGNER.JSON] [town]
 
 town: the town on the real Agent (docs/commercial-live-town.md), two scenes of two customers:
 twice the relayer's and the gas keys' transactions, and a wallet pays up to 0.58 (A: the brief
@@ -20,12 +22,16 @@ import http.client
 import json
 import socket
 import sys
+import time
 import urllib.request
+from datetime import datetime, timedelta, timezone
 
 NEED_RELAYER = 4           # two registrations, two reservations
 NEED_USDC = 500000         # one 0.50 brief per customer (6 decimals)
 TX_GAS = 500000            # one transaction's gas, above a reservation's (~420k); the L1 data fee on top is small on Base Sepolia
 TXS = {"relayer-gas": 2, "issuer": 2, "shop": 2}  # a show of two customers: reservations, registrations, settlements
+SHOW_SECONDS = 3 * 3600    # a delegation must outlast the show: its device confirmation pays for 2 hours
+TAIPEI = timezone(timedelta(hours=8))
 
 
 class UnixHTTP(http.client.HTTPConnection):
@@ -59,16 +65,40 @@ def rpc(url, method, params):
 
 
 def main():
-    sock, host = sys.argv[1], sys.argv[2]
-    town = sys.argv[3:] == ["town"]
+    sock, host, rest, signer = sys.argv[1], sys.argv[2], sys.argv[3:], None
+    if "--signer" in rest:
+        i = rest.index("--signer")
+        signer = rest[i + 1]
+        del rest[i:i + 2]
+    town = rest == ["town"]
     try:
-        return check(sock, host, town)
+        return check(sock, host, town, signer)
     except Exception as e:  # noqa: BLE001 - one line says what could not be checked; a crash is never "short"
         print("preflight: 無法檢查（%s）" % e)  # the relayer's socket or the host files: no node URL in it
         return 2
 
 
-def check(sock, host, town=False):
+def delegations(pay, signer, now):
+    """The shop's delegations in signer.json: (lines, short)."""
+    have = {d["delegation_id"]: d for d in json.load(open(signer)).get("delegations", [])}
+    lines, short = [], []
+    for k, ref in sorted(pay.get("delegations", {}).items()):
+        if k.partition("/")[2].lower() != pay["pay_to"].lower():
+            continue  # test402's: not paid in a show
+        dlg, _, ver = ref.partition("@")
+        d = have.get(dlg)
+        if d is None or str(d.get("version")) != ver:
+            short.append("signer.json 沒有委派 %s" % ref)
+            continue
+        until = datetime.fromtimestamp(d["valid_until"], TAIPEI).strftime("%m/%d %H:%M")
+        left = d["valid_until"] - now
+        lines.append("preflight: 委派 %s 到台北 %s，還有 %d 天 %d 小時" % (ref, until, max(left, 0) // 86400, max(left, 0) % 86400 // 3600))
+        if d["valid_from"] > now or left < SHOW_SECONDS:
+            short.append("委派 %s 到台北 %s 為止，一場要還有 %d 小時（重產 /opt 的 signer.json：p2-testnet opt-signer）" % (ref, until, SHOW_SECONDS // 3600))
+    return lines, short
+
+
+def check(sock, host, town=False, signer=None):
     scenes = 2 if town else 1
     need_relayer, need_usdc = NEED_RELAYER * scenes, 580000 if town else NEED_USDC
     show = "兩個場域、每場兩位客人" if town else "一場兩位客人"
@@ -77,6 +107,15 @@ def check(sock, host, town=False):
     reg = json.load(open(host + "/registry.json"))
     url, token = pay["rpc"], pay["token"]
     short, unchecked = [], False
+    try:
+        lines, s = delegations(pay, signer, int(time.time())) if signer else (["preflight: 沒有 signer.json，委派的期限未檢查"], [])
+        unchecked = unchecked or not signer
+        for line in lines:
+            print(line)
+        short += s
+    except Exception as e:  # noqa: BLE001 - an unreadable signer.json (sudo expired): unchecked, the rest still checked
+        print("preflight: 讀不到 signer.json（%s），委派的期限未檢查" % e.__class__.__name__)
+        unchecked = True
     if "sent_today" not in h:
         unchecked = True
         print("preflight: relayer 沒有回報今天的筆數（舊版，或讀不到），未檢查")

@@ -438,8 +438,12 @@ func TestRefusals(t *testing.T) {
 		t.Fatalf("logged %q", refused)
 	}
 	w.signer.err = signerclient.Refused("OVER_PER_TX")
-	if p, _ := w.step("po-2"); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" {
+	refused = nil
+	if p, _ := rk.Step(bg, w.payment("po-2")); p.State != "needs_review" || p.Code != "RESERVED_NOT_PAID" {
 		t.Fatalf("Signer refusal: %+v", p)
+	}
+	if len(refused) != 1 || refused[0] != "OVER_PER_TX" { // the Signer's reason on the terminal too (10/30: DELEGATION_EXPIRED)
+		t.Fatalf("logged %q", refused)
 	}
 	w.shop.answers = []ShopAnswer{verify}
 	var said []string

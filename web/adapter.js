@@ -688,8 +688,13 @@ const NEXT = {
     VERIFICATION_FAILED: "看終端機上這一筆的 shop 原因與就緒表的「商店今天」，記下來找開發者；不要重試這一筆",
     NOT_SETTLED_EXPIRED: "錢沒有動（授權已過期、鏈上確認沒有被用掉）；不用處理", RECONCILE_NEEDS_REVIEW: "停下這一場，不要重試，找開發者" },
 };
+// SIGNER_NEXT: what the host does about the Signer's refusal of a reserved payment (pv.signer_code, 10/30).
+const SIGNER_NEXT = { DELEGATION_EXPIRED: "/opt 的 signer.json 裡的委派已過期：停下這一場，重產並安裝 signer.json 後換一個標籤再開場",
+  OVER_TOTAL_CAP: "委派的總額或核准人 24 小時內的額度已用完：今天不要再開這位客人的場次" };
 export function paymentNext(pv) {
   if (!pv) return "";
+  if (pv.code === "RESERVED_NOT_PAID" && pv.signer_code)
+    return "下一步：錢沒有動；Signer 拒絕的原因：" + str(pv.signer_code) + "；" + (SIGNER_NEXT[pv.signer_code] || "記下代碼與時間找開發者") + "；不要重試這一筆。";
   if (pv.status === "paid" && pv.code === "DELIVERY_FAILED") return "下一步：錢已付；記下時間找開發者處理交付，不要重新購買。";
   const t = NEXT[pv.status] && (NEXT[pv.status][pv.code] || (pv.status === "needs_review" ? "記下代碼 " + str(pv.code) + " 與時間，找開發者" : ""));
   return t ? "下一步：" + t + "。" : "";
