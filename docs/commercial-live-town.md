@@ -129,3 +129,16 @@ Aaron 10/29：D1～D5「照建議」。
 - 補上的兩件事：
   - Signer 拒絕一筆已預留的付款時，Host 終端機印出它的 code。主持人頁付款狀態的 `signer_code` 帶出這個 code，「下一步」寫出原因與要做的事。
   - 開場前檢查（`testnet-preflight.py --signer`，`demo-testnet.sh` 以 sudo 讀 `/opt` 的 `signer.json`）列出商店用的每一份委派到期的時間；剩不到 3 小時就算「不夠」。
+
+### 6.4 S5 結果（Aaron 10/31，標籤 t4，Base Sepolia）
+- `/opt` 的 Signer 已換成 gap4 版，`signer.json` 已重產（委派有效到 11/6）。程式 `9d22e3e`。
+- 六個 task（UTC）：
+  - 01:37 資料研究室：A 的簡報 0.50 走 Ask，本人以裝置加語音核准，付款並交付（a-01）；B 的週報 0.06 走 Allow，付款並交付（b-01）。
+  - 01:39 街角咖啡：A 的午餐 0.08 走 Allow，付款並交付（a-02）。B 的會議咖啡 0.42 走 Ask，**語音挑戰沒有通過**（`VOICE_PHRASE_MISMATCH`），這筆被拒絕，錢沒有動（b-02）。
+  - 01:40 街角咖啡再以「一起開始」重開：A 的午餐**又付了一次**（a-03）。B 的會議咖啡這次核准成功，但商店當天（UTC）的結算已滿 4 筆（`settlement_daily_cap`），沒有送出，錢沒有動，記為待人工處理（b-03）。
+- 兩位 Agent 每次都只買自己該買的，沒有多買。多出來的那筆是重開時 A 也跟著重開。
+- 證據包 `artifacts/e1a/testnet-town-t4`（run `e1a-20261031T015010Z-6dc14e`，結束區塊 52447705）。`verify-demo --mode e1a --rpc https://sepolia.base.org`：**E1～E10 全部 PASS**，沒有 findings；報告在 `artifacts/e1a/testnet-town-t4.report.json`。第一次打包漏了 `--to-block`（E8 INCONCLUSIVE），那一份改名為 `testnet-town-t4.no-end-block`，留著不用。
+- 學到的：
+  - 只想重開一位客人時，用那位客人的「開始」；「一起開始」會讓兩位都重開，Allow 的那位會再付一次。
+  - 商店每日 4 筆的上限，一場兩個場域剛好用完，沒有重來的餘地：`commercial-complete` 已把城鎮 host 的上限調為 6。
+  - 商店的拒絕原因只印在終端機上（`demo: payment … "shop: settlement_daily_cap"`），頁面只寫「看終端機」。之後要像 Signer 的拒絕代碼一樣，直接顯示在頁面上。
