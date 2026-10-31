@@ -33,6 +33,10 @@ export function startDemo({ repo, bin, catalog, unityBuild, state, home, extra =
 }
 
 // startChrome: one headless page; send, evaluate, waitFor, on (events).
+// SUBJECTS: the consumers' attributes as present.sh writes them (docs/commercial-venues.md): both business
+// buyers in TW, B under 18; apa-issuer subjects --subjects SUBJECTS after init, so tasks get apa.credential.v2.
+export const SUBJECTS = "consumer-a:buyer_type=business,country=TW,age_over_18=true;consumer-b:buyer_type=business,country=TW,age_over_18=false";
+
 export async function startChrome(profile, extra = [], { headless = true } = {}) {
   const c = spawn(CHROME, [...(headless ? ["--headless=new"] : []), "--user-data-dir=" + profile, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check",
     "--disable-extensions", "--disable-sync", "--disable-background-networking", "--disable-component-update", "--use-angle=swiftshader",

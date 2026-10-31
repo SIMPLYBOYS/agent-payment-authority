@@ -18,7 +18,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, chmodSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { startDemo, startChrome, sleep } from "./harness.mjs";
+import { startDemo, startChrome, sleep, SUBJECTS } from "./harness.mjs";
 
 const repo = resolve(new URL("../..", import.meta.url).pathname);
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
@@ -46,6 +46,7 @@ for (const c of ["demo", "fake-claude", "apa-issuer"]) execFileSync("go", ["buil
 const cred = join(tmp, "cred");
 const issuer = (...a) => execFileSync(join(bin, "apa-issuer"), [a[0], "--dir", cred, ...a.slice(1)]).toString().trim();
 log(issuer("init", "--issuer", "issuer-demo", "--consumers", "consumer-a,consumer-b"));
+log(issuer("subjects", "--subjects", SUBJECTS)); // the data shop asks for a business buyer (docs/commercial-venues.md)
 
 const tool = (name, product) => ({ do: "tool", tool: name, ...(product ? { args: { product_id: product } } : {}) });
 const main = join(tmp, "main.json");

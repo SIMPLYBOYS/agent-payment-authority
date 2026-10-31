@@ -17,7 +17,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { startDemo, startChrome, sleep } from "./harness.mjs";
+import { startDemo, startChrome, sleep, SUBJECTS } from "./harness.mjs";
 
 const repo = resolve(new URL("../..", import.meta.url).pathname);
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
@@ -45,6 +45,7 @@ for (const c of ["demo", "fake-claude", "apa-issuer"]) execFileSync("go", ["buil
 const cred = join(tmp, "cred");
 const issuer = (...a) => execFileSync(join(bin, "apa-issuer"), [a[0], "--dir", cred, ...a.slice(1)]).toString().trim();
 log(issuer("init", "--issuer", "issuer-demo", "--consumers", "consumer-a,consumer-b"));
+log(issuer("subjects", "--subjects", SUBJECTS)); // the data shop asks for a business buyer (docs/commercial-venues.md)
 const catalog = join(repo, "testdata/demo/scenarios-ux3.json");
 
 let demo, b;
@@ -147,8 +148,9 @@ try {
 
   // ---- 3 the mart: A's coffee beans ask; revoked while waiting; closed ----
   mark("mart");
-  check("choose 巷口便利商店: Unity shows the mart; B's cafe customer leaves the scene; the cards are A's (mart-a)",
-    await choose("mart") && await inRoom("mart") && await b.waitFor(`![...document.querySelectorAll("#scene-status li")].some((e) => e.dataset.consumer === "consumer-b")`, 10000) && (await cards()) === "consumer-a",
+  // The mart has A's beans and the beer for A and B (docs/commercial-venues.md): both customers' cards.
+  check("choose 巷口便利商店: Unity shows the mart; B's cafe customer leaves the scene; the cards are A's and B's",
+    await choose("mart") && await inRoom("mart") && await b.waitFor(`![...document.querySelectorAll("#scene-status li")].some((e) => e.dataset.consumer === "consumer-b")`, 10000) && (await cards()) === "consumer-a,consumer-b",
     (await room()) + " scene " + (await sceneCustomers()) + " cards " + (await cards()));
   check("以 A 模擬, 建立委託, 確認: A's mart run asks", await start("consumer-a", "mart-a", "show-a-01")
     && await b.waitFor(`!!document.querySelector("#approval .approval-head[data-state=pending]")`, 30000), await text("#approval-body"));

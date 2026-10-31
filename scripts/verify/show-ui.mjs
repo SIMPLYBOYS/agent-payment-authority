@@ -14,7 +14,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { startDemo, startChrome, sleep } from "./harness.mjs";
+import { startDemo, startChrome, sleep, SUBJECTS } from "./harness.mjs";
 
 const repo = resolve(new URL("../..", import.meta.url).pathname);
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
@@ -39,6 +39,7 @@ mkdirSync(bin);
 for (const c of ["demo", "fake-claude", "apa-issuer"]) execFileSync("go", ["build", "-o", join(bin, c), "./cmd/" + c], { cwd: repo, stdio: "inherit" });
 const cred = join(tmp, "cred");
 log(execFileSync(join(bin, "apa-issuer"), ["init", "--dir", cred, "--issuer", "issuer-demo", "--consumers", "consumer-a,consumer-b"]).toString().trim());
+log(execFileSync(join(bin, "apa-issuer"), ["subjects", "--dir", cred, "--subjects", SUBJECTS]).toString().trim()); // docs/commercial-venues.md
 const catalog = join(repo, "testdata/demo/scenarios-ux3.json");
 
 let demo, b, s;
