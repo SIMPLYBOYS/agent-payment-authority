@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
@@ -44,10 +45,13 @@ type BBSCredential struct {
 
 // validate checks every field's spelling, by the envelope's own rules.
 func (b BBSCredential) validate() error {
-	c := credential.Credential{"schema": b.Schema, "issuer": b.Issuer, "task_id": b.TaskID, "consumer_id": b.ConsumerID, "c0": credential.C0Placeholder,
+	// v1's fields spelled as v1's (the snapshot keeps no v2 attribute: a venue asks for those at the purchase).
+	c := credential.Credential{"schema": credential.Schema, "issuer": b.Issuer, "task_id": b.TaskID, "consumer_id": b.ConsumerID, "c0": credential.C0Placeholder,
 		"expiry": strconv.FormatUint(b.Expiry, 10), "holder": b.Holder, "status": b.Status}
 	pk, err := hex.DecodeString(b.IssuerPK)
 	switch {
+	case b.Schema != credential.Schema && b.Schema != credential.SchemaV2:
+		return errors.New("credential_bbs: schema")
 	case c.Check() != nil:
 		return c.Check()
 	case err != nil || len(pk) == 0 || hex.EncodeToString(pk) != b.IssuerPK:
@@ -102,20 +106,24 @@ type Challenge struct {
 	ID, TaskID, PurchaseOrderID, IntentHash, VerifierID string
 	Disclose                                            []string
 	IssuedAt, ExpiresAt                                 uint64
+	Schema                                              string // the task's credential's (its snapshot's)
 }
 
 // Request is what the holder answers and the verifier checks.
 func (c Challenge) Request() credential.Request {
-	return credential.Request{VerifierID: c.VerifierID, ChallengeID: c.ID, IntentHash: c.IntentHash, Disclose: c.Disclose}
+	return credential.Request{VerifierID: c.VerifierID, ChallengeID: c.ID, IntentHash: c.IntentHash, Disclose: c.Disclose, Schema: c.Schema}
 }
 
 // Presented is the Host holder's answer to a challenge: a presentation, or
 // Unavailable when the holder material is missing, corrupt or not the
 // registered key (design 7 step 3: a decided Deny). A proof that failed to
 // build is not presented at all (C2-D12): no submit, no decision.
+// Require is what the product's venue asks of the subject (docs/commercial-venues.md 3.2): attribute ->
+// the value it must have ("" any); the Host's, from the shop's catalog, as the challenge's Ask was.
 type Presented struct {
 	Presentation *credential.Presentation
 	Unavailable  bool
+	Require      map[string]string
 }
 
 // payTask opens sess's task for a pay-family order of po's version: the
@@ -147,7 +155,9 @@ func decodePay(raw []byte) (paycontract.PurchaseOrder, error) {
 // already stored (SubmitV2 returns it), or the task's credential is absent.
 // An issued challenge of the same intent with ChallengeReuseMargin left is reused;
 // any other issued one of this purchase is marked expired first.
-func (s *Store) IssueChallenge(sess contracts.Session, raw []byte) (Challenge, bool, error) {
+// ask: the attributes the product's venue asks for (docs/commercial-venues.md 3.2), disclosed besides the
+// mandatory fields when the task's credential is v2; a v1 credential has none to disclose.
+func (s *Store) IssueChallenge(sess contracts.Session, raw []byte, ask []string) (Challenge, bool, error) {
 	po, err := decodePay(raw)
 	if err != nil {
 		return Challenge{}, false, err
@@ -164,7 +174,8 @@ func (s *Store) IssueChallenge(sess contracts.Session, raw []byte) (Challenge, b
 		} else if replay != nil {
 			return t.finish() // an Ask that expired meanwhile is recorded, as Submit's replay does
 		}
-		if b, err := t.bbs(); err != nil {
+		b, err := t.bbs()
+		if err != nil {
 			return err
 		} else if b == nil {
 			return t.finish()
@@ -178,7 +189,7 @@ func (s *Store) IssueChallenge(sess contracts.Session, raw []byte) (Challenge, b
 			AND (expires_at <= ? OR intent_hash != ?)`, t.row.TaskID, poID, now+ChallengeReuseMargin, intent); err != nil {
 			return err
 		}
-		out = Challenge{TaskID: t.row.TaskID, PurchaseOrderID: poID}
+		out = Challenge{TaskID: t.row.TaskID, PurchaseOrderID: poID, Schema: b.Schema}
 		var disclose string
 		err = tx.QueryRow(`SELECT challenge_id, intent_hash, disclose, verifier_id, issued_at, expires_at FROM credential_challenges
 			WHERE task_id = ? AND purchase_order_id = ? AND state = 'issued'`, t.row.TaskID, poID).
@@ -190,11 +201,18 @@ func (s *Store) IssueChallenge(sess contracts.Session, raw []byte) (Challenge, b
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
 		}
-		b := make([]byte, 16)
-		if _, err := rand.Read(b); err != nil {
+		rnd := make([]byte, 16)
+		if _, err := rand.Read(rnd); err != nil {
 			return err
 		}
-		out.ID, out.IntentHash, out.VerifierID, out.Disclose = "chl-"+hex.EncodeToString(b), intent, s.verifier, credential.Mandatory
+		out.ID, out.IntentHash, out.VerifierID, out.Disclose = "chl-"+hex.EncodeToString(rnd), intent, s.verifier, credential.Mandatory
+		if b.Schema == credential.SchemaV2 {
+			for _, a := range credential.Attributes { // in their order; an unknown name is never asked
+				if slices.Contains(ask, a) {
+					out.Disclose = append(slices.Clone(out.Disclose), a)
+				}
+			}
+		}
 		out.IssuedAt, out.ExpiresAt = now, now+ChallengeSeconds
 		d, err := canonical(out.Disclose)
 		if err != nil {
@@ -265,6 +283,7 @@ func (s *Store) verifyCredential(t *taskTx, po paycontract.PurchaseOrder, pr Pre
 	if err := json.Unmarshal([]byte(disclose), &ch.Disclose); err != nil {
 		return nil, err
 	}
+	ch.Schema = b.Schema
 	if _, err := t.tx.Exec(`UPDATE credential_challenges SET state = 'used' WHERE challenge_id = ?`, ch.ID); err != nil {
 		return nil, err
 	}
@@ -296,10 +315,29 @@ func (s *Store) verifyCredential(t *taskTx, po paycontract.PurchaseOrder, pr Pre
 		c.Detail = "STATUS_LIST_ROLLBACK"
 	}
 	if o.Issuer != "" {
-		c.CredentialSchema, c.Issuer, c.Holder, c.StatusIndex, c.Expiry, c.ProofSHA256 = credential.Schema, o.Issuer, o.Holder, o.Status, uint64(o.Expiry), o.ProofSHA256
+		c.CredentialSchema, c.Issuer, c.Holder, c.StatusIndex, c.Expiry, c.ProofSHA256, c.Claims = b.Schema, o.Issuer, o.Holder, o.Status, uint64(o.Expiry), o.ProofSHA256, o.Claims
+	}
+	if c.Result == credential.Valid && !meets(o.Claims, pr.Require) {
+		c.Detail = "CLAIM_UNMET" // the credential is valid; it does not say what the venue asks (Deny CREDENTIAL_CLAIM_UNMET)
 	}
 	c.StatusListVersion, c.StatusListIssuedAt, c.StatusListSHA256 = o.StatusListVersion, uint64(o.StatusListIssuedAt), o.StatusListSHA256
 	return c, nil
+}
+
+// meets: the disclosed claims ("name=value,…") say each required attribute, with its value when one is required.
+func meets(claims string, require map[string]string) bool {
+	got := map[string]string{}
+	for _, kv := range strings.Split(claims, ",") {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			got[k] = v
+		}
+	}
+	for a, want := range require {
+		if v, ok := got[a]; !ok || want != "" && v != want {
+			return false
+		}
+	}
+	return true
 }
 
 var errNoDirectory = errors.New("status list: no credential directory")
@@ -381,10 +419,14 @@ func (t *taskTx) verifyCredentials() string {
 			&c.StatusListVersion, &c.StatusListIssuedAt, &c.StatusListSHA256, &c.ProofSHA256, &c.Verifier, &at); err != nil {
 			return "credential records: " + err.Error()
 		}
+		e, ok := events[po]
 		if c.Issuer != "" {
 			c.CredentialSchema = credential.Schema
+			if b != nil {
+				c.CredentialSchema = b.Schema
+			}
 		}
-		e, ok := events[po]
+		c.Claims = e.Claims // the event carries the claims; the record keeps the result and its detail (no schema change)
 		p := t.purchases[po]
 		switch {
 		case !ok || e != c:

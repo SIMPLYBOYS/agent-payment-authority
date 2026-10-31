@@ -202,6 +202,32 @@ test("the host page's relay follows one audience window; reports only while it o
   assert.equal(show.hostThere, false);
 });
 
+test("T4: the town's camera and walk go to the window's Unity while it has the scene; a door it reaches comes back", () => {
+  const make = channels();
+  const got = [];
+  const relay = createRelay((k, d) => got.push([k, d]), { channel: make(), setTimer: () => {} });
+  const seen = [];
+  const show = listen({ own() {}, send2() {}, select2() {}, view() {}, cam: (m, safe) => seen.push(["cam", m, safe]), play: (c) => seen.push(["play", c]), steer: (x, y) => seen.push(["steer", x, y]) },
+    { channel: make(), setTimer: () => {}, onLeave: () => {} });
+  relay.cam("town", null);
+  relay.play("consumer-a");
+  assert.deepEqual(seen, [], "not owned: nothing goes");
+  relay.own(true);
+  relay.cam("town", null);
+  relay.play("consumer-a");
+  relay.steer(1, 0);
+  relay.cam("venue", { x: 1, y: 2, width: 3, height: 4 });
+  assert.deepEqual(seen, [["cam", "town", null], ["play", "consumer-a"], ["steer", 1, 0], ["cam", "venue", { x: 1, y: 2, width: 3, height: 4 }]]);
+  show.report("venue", "cafe");
+  assert.deepEqual(got.at(-1), ["venue", "cafe"]);
+  relay.own(false);
+  show.report("venue", "data");
+  assert.notDeepEqual(got.at(-1), ["venue", "data"], "not owned: a door on the window is not this page's");
+  // The audience's one line in the town.
+  assert.equal(A.showTownCaption("consumer-b"), "客人 B 走在城鎮裡：走進哪一間店，就在那裡購物");
+  assert.equal(A.showTownCaption(""), "兩位客人在城鎮裡，各自前往要去的店");
+});
+
 test("a window that says goodbye is gone; a report of another window is dropped", () => {
   const make = channels();
   const got = [];
@@ -239,12 +265,18 @@ test("one window at a time: a second one is told the host page follows another",
 const TX1 = "0x" + "1".repeat(64), TX2 = "0x" + "2".repeat(64);
 const delivered = { status: "paid", state: "delivered", reserve_tx: TX1, settle_tx: TX2, settle_block: 12, content_sha256: "sha256:" + "c".repeat(64), receipt_id: "rcpt-1" };
 
+// A task whose delegation was confirmed by method m ("" the host's).
+const boundEvents = (m) => [ev(1, "TASK_STARTED", { purchase_order_id: "" }), ev(2, "DELEGATION_BOUND", { purchase_order_id: "", ...(m ? { authorization_method: m } : {}) })];
+
 test("why trustworthy: each item only what a record says, links only on a public testnet", () => {
   const p = { resource_url: "https://shop.example/resources/kr-market", credential: { result: "valid" }, payment: delivered };
   const ev = A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { purchase: p }), {});
-  assert.deepEqual(ev.map((x) => x.label), ["委託", "憑證", "核准", "預算預留", "付款", "收據"]);
-  assert.equal(ev[0].text, "主持人代客人確認（示範，不是本人）");
-  assert.equal(ev[1].text, "Agent 出示了客人的憑證，檢查通過（測試發行者）");
+  assert.deepEqual(ev.map((x) => x.label), ["1 委託", "2 選購", "3 核准", "4 付款・預留", "4 付款・結算", "5 交付"]); // the five steps (10/30)
+  assert.equal(ev[0].text, "客人已交代 Agent 預算與範圍"); // no DELEGATION_BOUND in these events
+  assert.equal(ev[1].text, "Agent 出示了客人的 BBS+ 憑證，檢查通過（測試發行者）");
+  // 10/30: the list says who confirmed, as step 1 does (it said the host's always, against step 1's person's device).
+  assert.equal(A.showEvidence(snap(boundEvents("webauthn")), { authenticator: "device" })[0].text, "本人以已登記的裝置確認了委託");
+  assert.equal(A.showEvidence(snap(boundEvents("")), {})[0].text, "主持人代為確認委託（示範，不是本人）");
   assert.equal(ev[3].href, "https://sepolia.basescan.org/tx/" + TX1);
   assert.equal(ev[3].text, "0x11111111…111111");
   assert.match(ev[4].note, /和第 1 筆不是同一筆/);
@@ -357,4 +389,16 @@ test("a payment under review says what is known by its code: two never moved mon
   assert.deepEqual([at("VERIFICATION_FAILED").state, at("VERIFICATION_FAILED").text], ["unknown", "商店回覆沒有接受、沒有送出（商店的說法，鏈上未確認）"]);
   assert.equal(at("NOT_SETTLED_EXPIRED").text, "沒有付款（錢沒有動）：付款授權已過期，鏈上沒有用過");
   assert.deepEqual([at("RECONCILE_NEEDS_REVIEW").state, at("RECONCILE_NEEDS_REVIEW").text], ["unknown", "鏈上的付款結果對不起來，待人工確認"]);
+});
+
+test("the venue matrix: what a venue saw of the buyer, in plain words (docs/commercial-venues.md)", () => {
+  assert.equal(A.claimsText("buyer_type=business,country=TW"), "企業買方、國家 台灣");
+  assert.equal(A.claimsText("age_over_18=false"), "未滿 18 歲");
+  assert.equal(A.claimsText(""), "沒有任何個人資料");
+  assert.equal(A.plainReason("CREDENTIAL_CLAIM_UNMET"), "不符合這間店的要求");
+  const p = { purchase_order_id: "po-1", amount: "90000", credential: { result: "valid", credential_schema: "apa.credential.v2", claims: "age_over_18=true" } };
+  const m = A.showCustomer("consumer-a", snap(base("Allow", "WITHIN_ALLOW_MAX"), { purchase: p }), null, {});
+  assert.match(m.steps[1].text, /；這間店看到：已滿 18 歲$/);
+  const v1 = A.showCustomer("consumer-a", snap(base("Allow", "WITHIN_ALLOW_MAX"), { purchase: { ...p, credential: { result: "valid", credential_schema: "apa.credential.v1" } } }), null, {});
+  assert.ok(!v1.steps[1].text.includes("這間店看到"), "a v1 credential says nothing of a venue");
 });

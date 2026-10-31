@@ -137,6 +137,55 @@ type holdersFile struct {
 
 const fileVersion = "apa.credential-dir.v1"
 
+// subjectsFile is the issuer's attributes of each consumer (docs/commercial-venues.md 3.1): with it, the
+// directory issues apa.credential.v2; without it, v1 as before.
+type subjectsFile struct {
+	Version  string                       `json:"version"`
+	Subjects map[string]map[string]string `json:"subjects"` // consumer -> attribute -> value
+}
+
+// Subjects reads subjects.json; ok false when the directory has none (it issues v1).
+func (d *Dir) Subjects() (subjects map[string]map[string]string, ok bool, err error) {
+	if _, err := os.Lstat(d.file("subjects.json")); errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	raw, err := d.read("subjects.json")
+	if err != nil {
+		return nil, false, err
+	}
+	var f subjectsFile
+	if json.Unmarshal(raw, &f) != nil || f.Version != fileVersion || checkSubjects(f.Subjects) != nil {
+		return nil, false, errors.New("subjects.json: format")
+	}
+	return f.Subjects, true, nil
+}
+
+// SetSubjects writes subjects.json: every consumer with exactly the v2 attributes, each well formed.
+func (d *Dir) SetSubjects(subjects map[string]map[string]string) error {
+	if err := checkSubjects(subjects); err != nil {
+		return err
+	}
+	raw, _ := json.Marshal(subjectsFile{Version: fileVersion, Subjects: subjects})
+	return d.write("subjects.json", raw)
+}
+
+func checkSubjects(subjects map[string]map[string]string) error {
+	if len(subjects) == 0 {
+		return errors.New("subjects: none")
+	}
+	for c, attrs := range subjects {
+		if !validField("consumer_id", c) || len(attrs) != len(Attributes) {
+			return fmt.Errorf("subjects: %s: a consumer ID and exactly %v", c, Attributes)
+		}
+		for _, a := range Attributes {
+			if !validField(a, attrs[a]) {
+				return fmt.Errorf("subjects: %s: %s", c, a)
+			}
+		}
+	}
+	return nil
+}
+
 // InitDir creates a new credential directory with test keys for issuer
 // and one holder per consumer, the first status list and its counter. It
 // refuses an existing status list: re-initialising would reset the list
@@ -337,6 +386,13 @@ func (d *Dir) IssueTask(task, consumer string, expiry int64) (s Stored, ok bool,
 	if !ok {
 		return s, false, nil
 	}
+	subjects, v2, err := d.Subjects()
+	if err != nil {
+		return s, false, err
+	}
+	if v2 && subjects[consumer] == nil {
+		return s, false, fmt.Errorf("subjects.json: no attributes for %s", consumer) // fail closed: never a v1 credential beside v2 ones
+	}
 	k, err := d.IssuerKey()
 	if err != nil {
 		return s, false, err
@@ -347,6 +403,12 @@ func (d *Dir) IssueTask(task, consumer string, expiry int64) (s Stored, ok bool,
 	}
 	c := Credential{"schema": Schema, "issuer": k.ID, "task_id": task, "consumer_id": consumer, "c0": C0Placeholder,
 		"expiry": strconv.FormatInt(expiry, 10), "holder": holder, "status": idx}
+	if v2 {
+		c["schema"] = SchemaV2
+		for _, a := range Attributes {
+			c[a] = subjects[consumer][a]
+		}
+	}
 	sig, err := k.Issue(c)
 	if err != nil {
 		return s, false, err

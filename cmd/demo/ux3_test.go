@@ -23,7 +23,7 @@ func TestUX3ShippedCatalog(t *testing.T) {
 	}
 	reg, _ := contracts.NewRegistry(regCfg)
 	scs, err := loadScenarios("testdata/demo/scenarios-ux3.json", reg, regCfg, false, false)
-	if err != nil || len(scs) != 3 || scs["data-a"].Scene != "" || scs["cafe-b"].Scene != "cafe" || scs["mart-a"].Scene != "mart" {
+	if err != nil || len(scs) != 5 || scs["mart-beer-b"].Scene != "mart" || scs["data-a"].Scene != "" || scs["cafe-b"].Scene != "cafe" || scs["mart-a"].Scene != "mart" {
 		t.Fatalf("catalog: %v %v", scs, err)
 	}
 	raw, _ := os.ReadFile("testdata/policy/m1-demo-profile.json")

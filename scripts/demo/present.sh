@@ -132,6 +132,10 @@ if [ -n "$creds" ]; then
 	else
 		"$w/apa-issuer" init --dir "$cred" --issuer issuer-demo --consumers consumer-a,consumer-b >&2 || stop "憑證目錄建立失敗；沒有啟動任何程式"
 	fi
+	# The venue matrix (docs/commercial-venues.md, Aaron 10/30): both business buyers in TW; B is under 18, so the
+	# mart's beer is denied for B. Written every start (a kept directory gets it too): new tasks get apa.credential.v2.
+	"$w/apa-issuer" subjects --dir "$cred" --subjects "consumer-a:buyer_type=business,country=TW,age_over_18=true;consumer-b:buyer_type=business,country=TW,age_over_18=false" >&2 ||
+		stop "憑證的客人屬性寫入失敗；沒有啟動任何程式"
 	echo "present: 撤銷某個 task 的憑證：${w}/apa-issuer revoke --dir ${cred} --task <task_id>（測試金鑰；host 每 300 秒自動更新清單）" >&2
 fi
 # What the binary says of its source, as Go recorded it (a modified tree says so).

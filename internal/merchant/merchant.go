@@ -34,7 +34,13 @@ type product struct {
 	FiatAmount, FiatCurrency     string
 	FXRate                       string // fiat units per whole asset unit; fixture, not live FX
 	content                      string // protected; M1 never serves it
+	// Requires is what the venue asks of the buyer's credential (docs/commercial-venues.md 3.2, Aaron
+	// 10/30: set by the host): attribute -> required value ("" any, disclosed only). Nil asks nothing.
+	Requires map[string]string
 }
+
+// business: the data shop sells licensed reports to verified business buyers, and invoices across the border.
+var business = map[string]string{"buyer_type": "business", "country": ""}
 
 // products is fixture data. PayTo, asset and extra must match the trusted
 // registry in testdata/contracts/registry.json; a test checks that they do.
@@ -59,6 +65,7 @@ var products = []product{{
 	FiatCurrency: "KRW",
 	FXRate:       "1400",
 	content:      `{"edition":1,"canary":"APA-PROTECTED-kr-market-e1","body":"Synthetic fixture text. Seeing this in any response is a leak."}`,
+	Requires:     business,
 }, {
 	// Aaron 10/27: two customers in one scene buy different things. Within
 	// allow_max (0.10): the data shop's second item passes on its own.
@@ -71,6 +78,7 @@ var products = []product{{
 	Requirement:  fixtureRequirement("60000"),
 	AssetDisplay: "0.06 test USDC",
 	content:      `{"edition":1,"canary":"APA-PROTECTED-tw-semis-note-e1","body":"Synthetic fixture text. Seeing this in any response is a leak."}`,
+	Requires:     business,
 }, {
 	// UX3 demo scenes (docs/commercial-scenes.md section 3): a fixture
 	// menu and fixture goods; no POS, inventory or logistics behind them.
@@ -107,6 +115,19 @@ var products = []product{{
 	Requirement:  fixtureRequirement("360000"),
 	AssetDisplay: "0.36 test USDC",
 	content:      `{"canary":"APA-PROTECTED-mart-coffee-beans","body":"Synthetic fixture locker code. Seeing this in any response is a leak."}`,
+}, {
+	// The venue matrix (docs/commercial-venues.md 3.3): within allow_max, but only for a buyer of 18 or over.
+	Scene:        "mart",
+	ID:           "mart-beer-6",
+	Title:        "Beer x6 for the team evening (fixture goods; 18+)",
+	Summary:      "Synthetic sample: a demo shelf item sold only to buyers of 18 or over. No inventory or logistics is connected.",
+	MimeType:     "application/json",
+	Path:         "/scenes/mart/beer-6",
+	Query:        "qty=6",
+	Requirement:  fixtureRequirement("90000"),
+	AssetDisplay: "0.09 test USDC",
+	content:      `{"canary":"APA-PROTECTED-mart-beer-6","body":"Synthetic fixture locker code. Seeing this in any response is a leak."}`,
+	Requires:     map[string]string{"age_over_18": "true"},
 }}
 
 // fixtureRequirement is kr-market's requirement at another amount.
@@ -343,6 +364,18 @@ type Offer struct {
 	Scene, CatalogURL      string // the product's scene ("" is the data shop) and its catalog
 	ProductID, Method, URL string
 	Quote                  contracts.Quote
+	Requires               map[string]string // what the venue asks of the buyer's credential (product.Requires)
+}
+
+// RequiresAt is what the venue of the shop's own product at a resource path asks of the buyer's credential
+// (nil: nothing, or no such product); the checker compares a purchase's disclosed claims with it.
+func RequiresAt(path string) map[string]string {
+	for _, p := range products {
+		if p.Path == path {
+			return p.Requires
+		}
+	}
+	return nil
 }
 
 // ProductAt is the ID of the shop's own product at a resource path ("" if
@@ -364,7 +397,7 @@ func (m *Merchant) Offers() []Offer {
 	for _, p := range m.products {
 		o := m.offers[p.Path+"?"+p.Query]
 		out = append(out, Offer{Scene: p.Scene, CatalogURL: m.base + CatalogPath(p.Scene), ProductID: p.ID, Method: "GET", URL: o.url,
-			Quote: contracts.Quote{X402Version: o.required.X402Version, SelectedRequirement: o.accepts, Extensions: o.required.Extensions}})
+			Quote: contracts.Quote{X402Version: o.required.X402Version, SelectedRequirement: o.accepts, Extensions: o.required.Extensions}, Requires: p.Requires})
 	}
 	for _, x := range m.external {
 		out = append(out, Offer{CatalogURL: m.base + CatalogPath(""), ProductID: x.ID, Method: "GET", URL: x.ResourceURL, Quote: x.Quote})

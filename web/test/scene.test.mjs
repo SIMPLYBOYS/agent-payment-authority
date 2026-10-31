@@ -467,10 +467,10 @@ test("pacing: a step's evidence is its own events', not the record's", () => {
   full.task.payment_capability = "local_anvil";
   const step = (n) => ({ task: { ...full.task, as_of_sequence: n }, events: full.events.events.filter((e) => e.sequence <= n) });
   const labels = (n) => A.showEvidence(step(n)).map((x) => x.label);
-  assert.deepEqual(labels(3), ["委託"], "waiting: no approval, no payment, no receipt yet");
-  assert.deepEqual(labels(4), ["委託", "核准"]);
-  assert.deepEqual(labels(5), ["委託", "核准", "預算預留"]);
-  assert.deepEqual(labels(7), ["委託", "核准", "預算預留", "付款", "收據"], "the whole read: all of it");
+  assert.deepEqual(labels(3), ["1 委託"], "waiting: no approval, no payment, no receipt yet");
+  assert.deepEqual(labels(4), ["1 委託", "3 核准"]);
+  assert.deepEqual(labels(5), ["1 委託", "3 核准", "4 付款・預留"]);
+  assert.deepEqual(labels(7), ["1 委託", "3 核准", "4 付款・預留", "4 付款・結算", "5 交付"], "the whole read: all of it");
 });
 
 test("pacing: a read with no new phase takes no extra hold; pacing turned off shows the newest at once", async () => {

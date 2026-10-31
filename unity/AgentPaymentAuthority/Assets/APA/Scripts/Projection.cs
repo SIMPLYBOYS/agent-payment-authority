@@ -104,6 +104,7 @@ namespace APA
                 case "CREDENTIAL_INVALID": return "憑證檢查沒通過";
                 case "CREDENTIAL_REVOKED": return "憑證已撤銷";
                 case "CREDENTIAL_STATUS_UNAVAILABLE": return "憑證狀態無法確認";
+                case "CREDENTIAL_CLAIM_UNMET": return "憑證不符商店"; // the venue matrix; the page says it whole (the font's subset has these characters)
                 case "AUTHORIZATION_EXPIRED": return "授權或報價已過期";
                 case "CONFIG_MISSING": return "缺少設定或憑證";
                 case "TASK_NOT_ACTIVE": return "任務已結束";

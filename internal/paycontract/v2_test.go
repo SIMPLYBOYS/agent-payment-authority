@@ -97,7 +97,7 @@ func TestDecisionReasonsByVersion(t *testing.T) {
 		version, reason string
 		ok              bool
 	}{
-		{V2, "CREDENTIAL_REVOKED", true}, {V2, "CREDENTIAL_INVALID", true}, {V2, "CREDENTIAL_STATUS_UNAVAILABLE", true},
+		{V2, "CREDENTIAL_REVOKED", true}, {V2, "CREDENTIAL_INVALID", true}, {V2, "CREDENTIAL_STATUS_UNAVAILABLE", true}, {V2, "CREDENTIAL_CLAIM_UNMET", true}, {Version, "CREDENTIAL_CLAIM_UNMET", false},
 		{V2, "INSUFFICIENT_BUDGET", true}, {Version, "CREDENTIAL_REVOKED", false}, {"apa.pay.v9", "INSUFFICIENT_BUDGET", false},
 	} {
 		d := contracts.PolicyDecision{Version: c.version, IntentHash: mustHash(t, p1), PolicyVerdict: "Deny", ApprovalStatus: "not_requested",
@@ -107,7 +107,7 @@ func TestDecisionReasonsByVersion(t *testing.T) {
 		}
 	}
 	sp, _ := SpecOf(V2)
-	if got := sp.ReasonCodes(); len(got) != len(ReasonCodes)+3 {
+	if got := sp.ReasonCodes(); len(got) != len(ReasonCodes)+4 { // v2 (docs/commercial-venues.md): CREDENTIAL_CLAIM_UNMET too
 		t.Fatalf("v2 reasons %v", got)
 	}
 }

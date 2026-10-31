@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"path"
@@ -32,7 +33,7 @@ import (
 // E1aVersion is the pack's version; E1aChecker this checker's rules.
 const (
 	E1aVersion = "apa.e1a.v1"
-	E1aChecker = "e1a.2"
+	E1aChecker = "e1a.3"
 )
 
 // E1aClaims are §4.5's claims.
@@ -313,6 +314,34 @@ func e1aChain(f *findings, run *e1aRun) {
 	}
 }
 
+// venueClaims (e1a.3, docs/commercial-venues.md): a v2 credential disclosed exactly the attributes the
+// product's venue asks for, no more and no fewer; and it is CLAIM_UNMET exactly when they do not say what the
+// venue requires. A v1 credential at a venue that asks is CLAIM_UNMET. "" when it holds.
+func venueClaims(c *contracts.CredentialCheck, require map[string]string) string {
+	if c.Result != "valid" || c.CredentialSchema != "apa.credential.v2" && c.Detail != "CLAIM_UNMET" {
+		return "" // nothing was established; or a v1 record from before the venue matrix (E1-a, S4, S5 packs)
+	}
+	got := map[string]string{}
+	for _, kv := range strings.Split(c.Claims, ",") {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			got[k] = v
+		}
+	}
+	met := true
+	for a, want := range require {
+		if v, ok := got[a]; !ok || want != "" && v != want {
+			met = false
+		}
+	}
+	switch {
+	case c.CredentialSchema == "apa.credential.v2" && !slices.Equal(slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(require))):
+		return fmt.Sprintf("the credential disclosed %q, and the venue asks for %v (minimal disclosure)", c.Claims, slices.Sorted(maps.Keys(require)))
+	case met == (c.Detail == "CLAIM_UNMET"):
+		return fmt.Sprintf("claims %q against the venue's %v, recorded %q", c.Claims, require, c.Detail)
+	}
+	return ""
+}
+
 // e1aIntents is E2: every purchase's events name its intent, recomputed from
 // the order; a delivered one has every link from its request to its receipt.
 func e1aIntents(f *findings, run *e1aRun) {
@@ -338,8 +367,21 @@ func e1aIntents(f *findings, run *e1aRun) {
 		}
 		by[want] = append(by[want], e)
 	}
+	paths := map[string]string{} // intent -> the order's resource path
+	for _, o := range run.orders {
+		if h, err := o.IntentHash(); err == nil {
+			if u, err := url.Parse(o.Intent.ResourceURL); err == nil {
+				paths[h] = u.Path
+			}
+		}
+	}
 	for intent, es := range by {
 		has := func(t string) *contracts.AuditEvent { return eventOf(es, t) }
+		if c := has("CREDENTIAL_VERIFIED"); c != nil && c.Payload.Credential != nil {
+			if why := venueClaims(c.Payload.Credential, merchant.RequiresAt(paths[intent])); why != "" {
+				f.fail("E2", ev, "intent %s: %s", intent, why)
+			}
+		}
 		// Any step of a payment needs a purchase entitled to it (E1-a review):
 		// an Allow, or an Ask the person approved on a device.
 		for _, t := range []string{"PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED"} {
@@ -357,7 +399,7 @@ func e1aIntents(f *findings, run *e1aRun) {
 			"RESOURCE_DELIVERED", "RECEIPT_ISSUED"}
 		if es[0].Version == paycontract.V2 {
 			need = append(need, "CREDENTIAL_VERIFIED")
-			if c := has("CREDENTIAL_VERIFIED"); c != nil && (c.Payload.Credential == nil || c.Payload.Credential.Result != "valid") {
+			if c := has("CREDENTIAL_VERIFIED"); c != nil && (c.Payload.Credential == nil || paycontract.CredentialOutcome(c.Payload.Credential) != "valid") {
 				f.fail("E2", ev, "intent %s was delivered on a credential that did not verify", intent)
 			}
 		}

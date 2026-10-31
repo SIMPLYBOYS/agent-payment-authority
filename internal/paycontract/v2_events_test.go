@@ -99,6 +99,13 @@ func check(result, detail, challenge string) *contracts.CredentialCheck {
 	return c
 }
 
+// claims is a valid v2 record with the disclosed attributes (docs/commercial-venues.md 3.2).
+func claims(detail, claims string) *contracts.CredentialCheck {
+	c := check("valid", detail, "chl-1")
+	c.CredentialSchema, c.Claims = "apa.credential.v2", claims
+	return c
+}
+
 func deny(t *testing.T, o PurchaseOrder, reason string) *contracts.PolicyDecision {
 	return &contracts.PolicyDecision{Version: o.Version, IntentHash: mustHash(t, o), PolicyVerdict: "Deny", ApprovalStatus: "not_requested", PaymentStatus: PaymentNotEnabled, Reason: reason}
 }
@@ -130,6 +137,10 @@ func TestCredentialVerifiedOrder(t *testing.T) {
 		"revoked, Deny another reason":        {[]step{verified(check("revoked", "", "chl-1")), decided(deny(t, o, "CREDENTIAL_INVALID"))}, false},
 		"valid, Deny CREDENTIAL_REVOKED":      {[]step{verified(check("valid", "", "chl-1")), decided(deny(t, o, "CREDENTIAL_REVOKED"))}, false},
 		"two verifications":                   {[]step{verified(check("valid", "", "chl-1")), verified(check("valid", "", "chl-1")), decided(deny(t, o, "INSUFFICIENT_BUDGET"))}, false},
+		// The venue matrix (docs/commercial-venues.md 3.2): a valid credential the venue's claim is not met by.
+		"unmet, Deny CREDENTIAL_CLAIM_UNMET": {[]step{verified(claims("CLAIM_UNMET", "age_over_18=false")), decided(deny(t, o, "CREDENTIAL_CLAIM_UNMET"))}, true},
+		"unmet, Allow":                       {[]step{verified(claims("CLAIM_UNMET", "age_over_18=false")), decided(decision(t, o, "pending", "HUMAN_APPROVAL_REQUIRED"))}, false},
+		"met, Deny CREDENTIAL_CLAIM_UNMET":   {[]step{verified(claims("", "age_over_18=true")), decided(deny(t, o, "CREDENTIAL_CLAIM_UNMET"))}, false},
 	} {
 		err := ValidateEventOrder(chainOf(t, o, append(append([]step{}, start...), c.steps...)...))
 		if (err == nil) != c.ok {
@@ -167,6 +178,12 @@ func TestCredentialPayload(t *testing.T) {
 		"challenge missing":             {check("invalid", "CHALLENGE_MISSING", ""), true},
 		"holder material":               {check("invalid", "HOLDER_MATERIAL_UNAVAILABLE", ""), true},
 		"unknown result":                {check("maybe", "", "chl-1"), false},
+		"v2 claims":                     {claims("", "buyer_type=business,country=TW"), true},
+		"v2 unmet":                      {claims("CLAIM_UNMET", "age_over_18=false"), true},
+		"v1 unmet (no attribute)":       {check("valid", "CLAIM_UNMET", "chl-1"), true},
+		"claims on v1":                  {func() *contracts.CredentialCheck { c := check("valid", "", "chl-1"); c.Claims = "country=TW"; return c }(), false},
+		"claims malformed":              {claims("", "age_over_18=maybe"), false},
+		"unmet on an invalid one":       {check("invalid", "CLAIM_UNMET", "chl-1"), false},
 		"unknown detail":                {check("invalid", "SOMETHING", "chl-1"), false},
 		"invalid without a challenge":   {check("invalid", "PROOF_INVALID", ""), false},
 		"absent with a challenge":       {check("absent", "", "chl-1"), false},

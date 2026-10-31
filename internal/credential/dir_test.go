@@ -193,3 +193,82 @@ func TestInitRefusesConsumerIDs(t *testing.T) {
 		}
 	}
 }
+
+// v2 (docs/commercial-venues.md 3.1): with subjects.json the directory issues apa.credential.v2; a venue's
+// request discloses only the attributes it names, and Verify reports them as the claims.
+func TestSubjectsIssueV2AndDiscloseOnlyWhatIsAsked(t *testing.T) {
+	d, _ := newDir(t)
+	if _, ok, err := d.Subjects(); ok || err != nil {
+		t.Fatalf("no subjects.json: v1 (%v %v)", ok, err)
+	}
+	if s, _, err := d.IssueTask("show-a-01", "consumer-a", now+3600); err != nil || s.Credential["schema"] != Schema {
+		t.Fatalf("without subjects: %v %v", s.Credential["schema"], err)
+	}
+	for _, bad := range []map[string]map[string]string{
+		{"consumer-a": {"buyer_type": "business", "country": "TW"}},                                       // one missing
+		{"consumer-a": {"buyer_type": "business", "country": "tw", "age_over_18": "true"}},                // lowercase country
+		{"consumer-a": {"buyer_type": "company", "country": "TW", "age_over_18": "true"}},                 // not a value
+		{"consumer-a": {"buyer_type": "business", "country": "TW", "age_over_18": "yes"}},                 // not a boolean
+		{"Consumer A": {"buyer_type": "business", "country": "TW", "age_over_18": "true"}},                // not an ID
+	} {
+		if d.SetSubjects(bad) == nil {
+			t.Fatalf("accepted %v", bad)
+		}
+	}
+	subjects := map[string]map[string]string{"consumer-a": {"buyer_type": "business", "country": "TW", "age_over_18": "true"},
+		"consumer-b": {"buyer_type": "business", "country": "TW", "age_over_18": "false"}}
+	if err := d.SetSubjects(subjects); err != nil {
+		t.Fatal(err)
+	}
+	s, ok, err := d.IssueTask("show-b-02", "consumer-b", now+3600)
+	if err != nil || !ok || s.Credential["schema"] != SchemaV2 || s.Credential["age_over_18"] != "false" {
+		t.Fatalf("v2: %v %v %v", s.Credential, ok, err)
+	}
+	holders, _ := d.Holders()
+	_, pk, _ := d.IssuerPublic()
+	e := Expect{IssuerID: "issuer-demo", IssuerPK: pk, Holder: holders["consumer-b"], TaskID: "show-b-02", Expiry: s.Credential["expiry"], Status: s.Credential["status"]}
+	list, sum, _ := d.ReadStatus("issuer-demo", mustFP(t, d), now)
+	for _, c := range []struct {
+		attrs  []string
+		claims string
+	}{{nil, ""}, {[]string{"age_over_18"}, "age_over_18=false"}, {[]string{"buyer_type", "country"}, "buyer_type=business,country=TW"}} {
+		r := Request{VerifierID: "host-1", ChallengeID: "chl-1", IntentHash: "0x" + "ab", Disclose: slices.Concat(Mandatory, c.attrs), Schema: SchemaV2}
+		p, err := d.Present("show-b-02", "consumer-b", r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p.Disclosed) != len(Mandatory)+len(c.attrs) || p.Disclosed["consumer_id"] != "" {
+			t.Fatalf("disclosed %v", p.Disclosed)
+		}
+		if o := Verify(r, p, e, Status{List: list, SHA256: sum}, now); o.Result != Valid || o.Claims != c.claims {
+			t.Fatalf("%v: %+v", c.attrs, o)
+		}
+		// The same proof checked as a v1 request: the message count and the schema do not match.
+		v1 := r
+		v1.Schema, v1.Disclose = "", Mandatory
+		if o := Verify(v1, p, e, Status{List: list, SHA256: sum}, now); o.Result != Invalid {
+			t.Fatalf("a v2 proof passed as v1: %+v", o)
+		}
+	}
+	// A v1 credential cannot answer for an attribute.
+	if _, err := d.Present("show-a-01", "consumer-a", Request{VerifierID: "host-1", ChallengeID: "chl-2", IntentHash: "0xab", Disclose: slices.Concat(Mandatory, []string{"age_over_18"}), Schema: SchemaV2}); err == nil {
+		t.Fatal("a v1 credential presented an attribute")
+	}
+	// A consumer the subjects do not name gets no credential at all (never v1 beside v2).
+	delete(subjects, "consumer-a")
+	if err := d.SetSubjects(subjects); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := d.IssueTask("show-a-02", "consumer-a", now+3600); err == nil {
+		t.Fatal("issued without the consumer's attributes")
+	}
+}
+
+func mustFP(t *testing.T, d *Dir) string {
+	t.Helper()
+	fp, err := d.StatusKeyFingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fp
+}

@@ -1,0 +1,8 @@
+{"description":"The venue matrix (docs/commercial-venues.md): catalog, quote, purchase request for the fixture beer, sold to 18+ only; within allow_max. The host asks the credential for age_over_18: an adult's is paid, a minor's denied CREDENTIAL_CLAIM_UNMET. The closing text claims a delivery, which the host must ignore.",
+ "steps":[
+  {"do":"tool","tool":"list_products"},
+  {"do":"tool","tool":"get_quote","args":{"product_id":"mart-beer-6"}},
+  {"do":"tool","tool":"request_purchase","args":{"product_id":"mart-beer-6"}},
+  {"do":"text","text":"Paid. The beer is in locker 4."},
+  {"do":"result","text":"Bought six cans of beer for the team evening."}
+ ]}

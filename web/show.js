@@ -20,6 +20,8 @@ let unity = null;
 let lastView = null;
 let owned = false;
 let shownKey = "";
+// T4 (Aaron 10/30: 依階段切換): the town fills the window with one line; in a venue, the scene, the steps and the evidence.
+let phase = "venue", walking = "";
 const link = listen({
   own: (on) => {
     if (link.otherWindow) return; // the host page follows another window: this one shows nothing of it
@@ -33,10 +35,20 @@ const link = listen({
   send2: (msg) => { if (!link.otherWindow) unity.send2(msg); },
   select2: (msg) => { if (!link.otherWindow) unity.select2(msg); },
   view: (v) => { lastView = v; render(); },
+  cam: (mode, safe) => {
+    if (link.otherWindow) return;
+    phase = mode;
+    document.body.dataset.phase = mode;
+    unity.view(mode, safe);
+    zoom.apply();
+    render();
+  },
+  play: (c) => { if (!link.otherWindow) { walking = c; unity.play(c); render(); } },
+  steer: (x, y) => { if (!link.otherWindow) unity.steer(x, y); },
 });
 const tell = () => link.status({ ready: unity.ready, supports2: unity.supports2, select: !!(unity.bridge && unity.bridge.select) });
 unity = new UnityHost($("unity-canvas"), (s, d) => {
-  if (s === "rendered2" || s === "select2") return link.report(s, d);
+  if (s === "rendered2" || s === "select2" || s === "venue") return link.report(s, d); // venue: a door reached (T4)
   const box = $("unity-status");
   box.dataset.state = s;
   box.textContent = s === "ready" ? "" : s === "loading" ? "場景載入中…" : "場景未就緒";
@@ -59,17 +71,18 @@ function render() {
   document.body.dataset.host = there ? "on" : "off";
   if (link.otherWindow) { $("show-network").textContent = "另一個展示視窗正在使用；請關閉這一個"; return; }
   if (!v) return;
-  $("show-title").textContent = v.venue ? A.venue(v.venue).name : "示範商店";
+  $("show-title").textContent = phase === "town" ? "城鎮" : v.venue ? A.venue(v.venue).name : "示範商店";
   $("show-network").textContent = A.networkText(v.payments) + (there ? "" : "・主持人頁未連線（停在最後狀態）");
   const queue = A.showQueue((v.customers || []).map((c) => ({ ...A.showCustomer(c.consumer, c.snapshot, c.delegation, v),
     evidence: A.showEvidence(c.snapshot, v, c.chain), receipt: A.showReceipt(c.snapshot, v) })), v.payments);
   const shown = queue.models;
   // Redrawn only when something changed: the captions are a live region.
   const chk = A.showChecker(v.checker);
-  const key = JSON.stringify([shown, queue.note, owned, chk]);
+  const key = JSON.stringify([shown, queue.note, owned, chk, phase, walking]);
   if (key === shownKey) return;
   shownKey = key;
   if (!owned) $("show-captions").replaceChildren(el("p", "", "場景暫停：主持人頁正在回放或切換"));
+  else if (phase === "town") $("show-captions").replaceChildren(el("p", "show-town-caption", A.showTownCaption(walking)));
   const box = $("show-customers");
   if (!shown.length) box.replaceChildren(el("p", "show-wait", "還沒有客人進店。"));
   else box.replaceChildren(...shown.map((m) => {
@@ -86,7 +99,7 @@ function render() {
     card.append(ol);
     return card;
   }), ...(queue.note ? [el("p", "show-queue", queue.note)] : []));
-  if (owned) $("show-captions").replaceChildren(...shown.map((m) => el("p", "", m.caption)));
+  if (owned && phase !== "town") $("show-captions").replaceChildren(...shown.map((m) => el("p", "", m.caption)));
   queueMicrotask(() => { zoom.apply(); place(); }); // the evidence below may have changed the room the scene has
   $("show-trust").replaceChildren(...shown.filter((m) => m.evidence.length).map((m) => {
     const row = el("div", "show-trust-row");
@@ -127,7 +140,7 @@ function render() {
 }
 // The scene at whole multiples of its pixels (pixelscale.js): what fits above the caption and the evidence.
 const frame = document.querySelector(".show-frame");
-const zoom = attachZoom({ canvas: $("unity-canvas"), frame, controls: $("scene-zoom"), key: "apa-zoom-show",
+const zoom = attachZoom({ canvas: $("unity-canvas"), frame, controls: $("scene-zoom"), key: "apa-zoom-show", fill: () => phase === "town",
   avail: () => ({ w: frame.parentElement.clientWidth, h: innerHeight - frame.getBoundingClientRect().top - $("show-captions").offsetHeight - $("show-trust").offsetHeight - 12 }) });
 // place: the receipt over the scene when the scene is big enough (2× and up),
 // else in the side column; the side column never makes the row taller than the scene.

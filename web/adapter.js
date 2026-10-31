@@ -285,6 +285,8 @@ export function inspector(snapshot) {
       ["approval", str(d.approval_status) + (p.approval_closed ? "，收尾：" + str(p.approval_closed) : "")],
       ["payment_status", str(d.payment_status)],
     );
+    const seen = p.credential && p.credential.credential_schema === "apa.credential.v2" ? claimsText(p.credential.claims) : "";
+    if (seen) rows.push(["這間店看到", seen + (p.credential.detail === "CLAIM_UNMET" ? "（不符合這間店的要求）" : "")]);
     const pv = p.payment;
     if (pv && pv.reserve_tx) rows.push(["tx#1 預留（Z2）", txRef(t.payment_capability, pv.reserve_tx) + (typeof pv.reserve_block === "number" ? " · 區塊 " + pv.reserve_block : "")],
       ["ZK proof", "在 tx#1 的 calldata 裡，由預算合約呼叫 verifier 驗證；本頁不自行宣稱已驗證（要宣稱已驗證，須看獨立 checker 的結果）"]);
@@ -609,6 +611,7 @@ export const REASONS_V1 = {
   VOICE_CHALLENGE_FAILED: "語音挑戰未通過，這筆已拒絕", // V1
   CREDENTIAL_INVALID: "憑證驗證未通過", CREDENTIAL_REVOKED: "憑證已撤銷", CREDENTIAL_STATUS_UNAVAILABLE: "憑證狀態無法確認",
   AUTHORIZATION_EXPIRED: "憑證已過期", CONFIG_MISSING: "缺少設定（沒有憑證）",
+  CREDENTIAL_CLAIM_UNMET: "憑證有效，但不符合這間店的要求", // the venue matrix (docs/commercial-venues.md)
 };
 
 // V1: the voice outcome codes, in words. A failure denies the purchase; an
@@ -1055,7 +1058,20 @@ export const PLAIN = {
   AUTHORIZATION_EXPIRED: "授權或報價已過期", CONFIG_MISSING: "缺少設定或憑證", TASK_NOT_ACTIVE: "任務已結束", CONTRACT_VERSION_MISMATCH: "版本不符",
   OWNERSHIP_MISMATCH: "不是這位客人的請購", PAYMENT_CAPABILITY_UNAVAILABLE: "這場展示不能付款", APPROVER_UNAVAILABLE: "沒有可核准的人",
   VOICE_CHALLENGE_FAILED: "唸的內容或聲音不符", APPROVER_DENIED: "核准者拒絕",
+  CREDENTIAL_CLAIM_UNMET: "不符合這間店的要求",
 };
+// claimsText (the venue matrix, docs/commercial-venues.md): what a venue saw of the buyer, in plain words; the
+// mandatory fields are always there and never named. "" claims: nothing about the person.
+const CLAIM_WORDS = { buyer_type: { business: "企業買方", individual: "個人買方" }, age_over_18: { true: "已滿 18 歲", false: "未滿 18 歲" } };
+const COUNTRY = { TW: "台灣", KR: "韓國", JP: "日本" };
+export function claimsText(claims) {
+  if (typeof claims !== "string" || claims === "") return "沒有任何個人資料";
+  return claims.split(",").map((kv) => {
+    const [k, v] = kv.split("=");
+    if (k === "country") return "國家 " + (COUNTRY[v] || v);
+    return (CLAIM_WORDS[k] && CLAIM_WORDS[k][v]) || kv;
+  }).join("、");
+}
 export const plainReason = (code) => PLAIN[code] || "其他原因（主持人頁有細節）";
 // usdc: base units (6 decimals) as USDC, never rounded: at least two decimals, more when they matter.
 export const usdc = (v) => (typeof v === "string" && /^[0-9]+$/.test(v) ? (Number(v) / 1e6).toFixed(6).replace(/(\.\d\d\d*?)0+$/, "$1") + " USDC" : "金額未提供");
@@ -1063,6 +1079,13 @@ const PAID = ["paying", "confirming", "paid", "delivered", "delivery_failed", "n
 // UNMOVED: the review codes whose result is known: no payment was made (payflow: never sent, or expired unused on chain).
 // Not VERIFICATION_FAILED (review): that is the shop's word only, and a shop the Host does not run could still send it.
 const UNMOVED = { RESERVED_NOT_PAID: "預算已預留，但付款沒有送出", NOT_SETTLED_EXPIRED: "付款授權已過期，鏈上沒有用過" };
+
+// customerName: a consumer as the audience reads it (客人 A).
+export const customerName = (consumer) => "客人 " + (CUSTOMER[consumer] || (/^consumer-[a-z0-9]+$/.test(consumer) ? consumer.slice(9).toUpperCase() : consumer));
+
+// showTownCaption (T4, Aaron 10/30: 依階段切換): the audience window's one line while the scene is the town;
+// walking: the customer the person walks ("" both, as the show runs them).
+export const showTownCaption = (walking) => (walking ? customerName(walking) + " 走在城鎮裡：走進哪一間店，就在那裡購物" : "兩位客人在城鎮裡，各自前往要去的店");
 
 // showCustomer: one customer's five steps for the audience (state: todo,
 // now, done, fail, unknown, off) and the caption under the scene. Nothing
@@ -1079,14 +1102,11 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
   const d = delegation;
   if (!task) set(0, "now", "等待開始");
   else {
-    // Gap 4: who confirmed the delegation, by its DELEGATION_BOUND (the person's device, or the host for the customer).
-    const bound = ((snapshot && snapshot.events) || []).find((e) => e.event_type === "DELEGATION_BOUND");
     const terms = d && d.task_budget ? "預算 " + usdc(d.task_budget) + "，超過 " + usdc(d.allow_max) + " 要問本人" : "預算與範圍";
-    set(0, "done", !bound ? (d && d.task_budget ? "客人交代 Agent：" + terms : "客人已交代 Agent 預算與範圍")
-      : bound.authorization_method === "webauthn" ? approverText(traits.authenticator) + "確認了委託：" + terms // never a virtual authenticator called a device (review)
-      : "主持人代為確認委託（示範，不是本人）：" + terms);
+    const who = confirmedBy(snapshot, traits);
+    set(0, "done", who ? who + "：" + terms : d && d.task_budget ? "客人交代 Agent：" + terms : "客人已交代 Agent 預算與範圍");
     if (ph === "empty" || ph === "entered") set(1, "now", "Agent 正在挑選商品");
-    else set(1, "done", "Agent 選好商品，報價 " + usdc(p && p.amount));
+    else set(1, "done", "Agent 選好商品，報價 " + usdc(p && p.amount) + (p && p.credential && p.credential.credential_schema === "apa.credential.v2" ? "；這間店看到：" + claimsText(p.credential.claims) : ""));
   }
   const g = p && p.approval && p.approval.grant;
   // approved: by the record's own method; a simulated approval is the host's, never the person's.
@@ -1133,7 +1153,7 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
     if (i >= 0 && going) steps[i].text += i === 4 ? "（任務已結束，交付照常進行）" : "（任務已結束，付款照常完成）";
     else if (i >= 0) Object.assign(steps[i], { state: "fail", text: sc.end === "cancelled" ? "任務已取消" : "任務逾時結束" });
   }
-  const name = "客人 " + (CUSTOMER[consumer] || (/^consumer-[a-z0-9]+$/.test(consumer) ? consumer.slice(9).toUpperCase() : consumer));
+  const name = customerName(consumer);
   const last = [...steps].reverse().find((s) => s.state !== "todo" && s.state !== "off") || steps[0];
   return { consumer, name, steps, caption: name + "・" + last.label + "：" + last.text, amount: p ? usdc(p.amount) : "" };
 }
@@ -1204,26 +1224,36 @@ export function chainLine(tx, head, kind) {
 // events: a purchase's record may already hold what its events do not yet say, and the window says only what they do (review).
 export const recorded = (snapshot, po, type) => ((snapshot && snapshot.events) || []).some((e) => e.event_type === type && e.purchase_order_id === po);
 
+// confirmedBy (gap 4): who confirmed the delegation, by its DELEGATION_BOUND (the person's device, or the host for
+// the customer); "" before it. The five steps and the trust list say the same (10/30: the list said the host's always).
+function confirmedBy(snapshot, traits = {}) {
+  const bound = ((snapshot && snapshot.events) || []).find((e) => e.event_type === "DELEGATION_BOUND");
+  if (!bound) return "";
+  return bound.authorization_method === "webauthn" ? approverText(traits.authenticator) + "確認了委託" // never a virtual authenticator called a device (review)
+    : "主持人代為確認委託（示範，不是本人）";
+}
+
 export function showEvidence(snapshot, traits = {}, chain = null) {
   const task = snapshot && snapshot.task;
   if (!task) return [];
   const sc = scene(snapshot);
   const p = sc.po ? (task.purchases || []).find((x) => x.purchase_order_id === sc.po) : null;
   const has = (type) => recorded(snapshot, sc.po, type);
-  const items = [{ label: "委託", text: "主持人代客人確認（示範，不是本人）" }];
+  // Labelled by the five steps (10/30, docs/commercial-gap-review.md §9 item 3): the evidence of each step beside it.
+  const items = [{ label: "1 委託", text: confirmedBy(snapshot, traits) || "客人已交代 Agent 預算與範圍" }];
   if (!p) return items;
-  if (p.credential) items.push({ label: "憑證", text: p.credential.result === "valid" ? "Agent 出示了客人的憑證，檢查通過（測試發行者）" : "憑證檢查沒通過" });
-  if (sc.verdict === "Allow") items.push({ label: "核准", text: "在委託範圍內，自動放行" }); // the events' verdict, as the five steps
-  else if (sc.verdict === "Deny") items.push({ label: "核准", text: plainReason(sc.reason) + "，已拒絕" });
-  else if (p.approval && p.approval.state === "approved" && has("APPROVED")) items.push({ label: "核准", text: approvalWords(p, traits) });
+  if (p.credential) items.push({ label: "2 選購", text: p.credential.result === "valid" ? "Agent 出示了客人的 BBS+ 憑證，檢查通過（測試發行者）" : "憑證檢查沒通過" });
+  if (sc.verdict === "Allow") items.push({ label: "3 核准", text: "在委託範圍內，自動放行" }); // the events' verdict, as the five steps
+  else if (sc.verdict === "Deny") items.push({ label: "3 核准", text: plainReason(sc.reason) + "，已拒絕" });
+  else if (p.approval && p.approval.state === "approved" && has("APPROVED")) items.push({ label: "3 核准", text: approvalWords(p, traits) });
   const pv = p.payment || {};
   const onChain = chain && chain.purchases && chain.purchases[p.purchase_order_id];
-  if (pv.reserve_tx && has("BUDGET_RESERVED")) items.push({ label: "預算預留", ...txLink(task.payment_capability, pv.reserve_tx), note: "第 1 筆・含 ZK 預算證明",
+  if (pv.reserve_tx && has("BUDGET_RESERVED")) items.push({ label: "4 付款・預留", ...txLink(task.payment_capability, pv.reserve_tx), note: "第 1 筆・含 ZK 預算證明",
     chain: onChain && onChain.reserve && onChain.reserve.hash === pv.reserve_tx ? chainLine(onChain.reserve, chain.head, "reserve") : "" });
-  if (pv.settle_tx && has("PAYMENT_SETTLED")) items.push({ label: "付款", ...txLink(task.payment_capability, pv.settle_tx),
+  if (pv.settle_tx && has("PAYMENT_SETTLED")) items.push({ label: "4 付款・結算", ...txLink(task.payment_capability, pv.settle_tx),
     note: pv.settle_tx !== pv.reserve_tx ? "第 2 筆・和第 1 筆不是同一筆" : "第 2 筆（交易編號和第 1 筆相同，未確認）",
     chain: onChain && onChain.settle && onChain.settle.hash === pv.settle_tx ? chainLine(onChain.settle, chain.head, "settle") : "" });
-  if (pv.receipt_id && has("RECEIPT_ISSUED")) items.push({ label: "收據", text: String(pv.receipt_id), note: "記錄了交付內容的 sha256" });
+  if (pv.receipt_id && has("RECEIPT_ISSUED")) items.push({ label: "5 交付", text: "收據 " + String(pv.receipt_id), note: "記錄了交付內容的 sha256" });
   return items;
 }
 

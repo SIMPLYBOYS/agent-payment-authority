@@ -61,7 +61,7 @@ func TestTownLiveCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	live, err := loadScenarios("testdata/demo/scenarios-town-live.json", reg, regCfg, true, true)
-	if err != nil || len(live) != 4 {
+	if err != nil || len(live) != 6 || live["town-mart-b"].Scene != "mart" { // the mart's beer (docs/commercial-venues.md)
 		t.Fatalf("live, paying: %v %v", live, err)
 	}
 	if _, err := loadScenarios("testdata/demo/scenarios-town-live.json", reg, regCfg, true, false); err == nil {

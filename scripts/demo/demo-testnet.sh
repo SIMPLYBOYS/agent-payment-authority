@@ -151,7 +151,7 @@ if [ "$mode" = live ] && [ "$what" = town ]; then
   [ ! -d "$root/var/e1a-testnet/host-$label" ] || stuck "第 4 步：標籤 $label 已用在 E1-a（host-$label）：兩邊的 task 會重複，換一個標籤"
   # Made once for the label, and the evidence's start (the next block; no task registered yet) recorded before
   # any run (docs/commercial-live-town.md L4); each on its own, so a start that failed is tried again.
-  [ -d "$host" ] || go run ./cmd/p2-testnet e1a-host --dir "$tn" --out "$host" --label "$label" || stuck "第 4 步：建不出城鎮的 host 檔（$host）"
+  [ -d "$host" ] || go run ./cmd/p2-testnet e1a-host --dir "$tn" --out "$host" --label "$label" --shop-cap 6 || stuck "第 4 步：建不出城鎮的 host 檔（$host）"
   [ -f "$host/start.json" ] || go run ./cmd/e1-evidence start --rpc https://sepolia.base.org --host "$host" --out "$host/start.json" || stuck "第 4 步：記不下證據的起點（$host/start.json：節點沒回應就再跑一次；task 已登記過就換一個標籤）"
   say "4/4 一個標籤就是一次實跑：做完先出證據包，之後再從這兩個錢包付款（包括 fake 的城鎮、E1-a）就換一個標籤"
   say "4/4 Host 啟動中（城鎮・真實 Agent：按「開始」才執行 Claude Code CLI，一個場域兩位客人；task 是 show-e1a-$label-…）"

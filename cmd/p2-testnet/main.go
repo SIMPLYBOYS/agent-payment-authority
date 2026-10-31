@@ -6,7 +6,7 @@
 //	p2-testnet deploy     --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL]
 //	p2-testnet test402    URL [--save FILE]
 //	p2-testnet opt-signer --dir DIR --base SIGNER.JSON [--voice SIGNER.JSON] --out NEW.JSON
-//	p2-testnet e1a-host   --dir DIR | --from SRCDIR --out NEWDIR [--registry TEMPLATE] [--label L] [--shop-eval NAME]
+//	p2-testnet e1a-host   --dir DIR | --from SRCDIR --out NEWDIR [--registry TEMPLATE] [--label L] [--shop-eval NAME] [--shop-cap N]
 //
 // e1a-host (E1-a, docs/commercial-e1a.md 4.7, 4.8) writes a new host
 // directory for one set of E1-a runs from deploy's DIR/host: the same chain,
@@ -893,7 +893,7 @@ func writeJSON(path string, v any) error {
 
 // The testnet Signer's caps (P2b-D5), in USDC units.
 const (
-	dlgPerTx, dlgTotal       = "100000", "300000"   // 0.10 a payment, 0.30 in all
+	dlgPerTx, dlgTotal       = "100000", "1000000"  // 0.10 a payment, 1.00 in all (Aaron 10/30: 0.30 was short of the recording run, docs/commercial-venues.md)
 	approverMax, approverSum = "1000000", "1500000" // 1.00 a payment, 1.50 in 24 hours
 	t402Units                = "100"                // exactly one 0.0001 payment
 	hostOrigin               = "http://localhost:8402"
@@ -1048,6 +1048,7 @@ func e1aHost(args []string, out io.Writer) error {
 	tmpl := fs.String("registry", "testdata/demo/registry-e1a.json", "the registry template: its show-e1a- task IDs")
 	eval := fs.String("shop-eval", "", "the AE1 catalog or case the shop sells (payments.json shop_eval)")
 	label := fs.String("label", "", "this run set's label in the task IDs (show-e1a-<label>-a-01), instead of the template's")
+	shopCap := fs.Uint64("shop-cap", 0, "the shop's daily settlements for this host, instead of deploy's (0: deploy's)")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || (*dir == "") == (*from == "") || *dst == "" {
 		return errors.New("usage: p2-testnet e1a-host --dir DIR | --from SRCDIR --out NEWDIR [--registry TEMPLATE] [--shop-eval NAME]")
 	}
@@ -1110,6 +1111,9 @@ func e1aHost(args []string, out io.Writer) error {
 	}
 	if *eval != "" {
 		pay["shop_eval"] = *eval
+	}
+	if *shopCap > 0 { // the town's three venues settle 5 (docs/commercial-venues.md D5, Aaron 10/30)
+		pay["shop_daily_tx_cap"] = *shopCap
 	}
 	files := map[string]any{"payments.json": pay, "registry.json": t}
 	if prof != nil {

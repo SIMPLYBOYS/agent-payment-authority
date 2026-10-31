@@ -99,7 +99,10 @@ const relay = createRelay((kind, d) => {
   if (kind === "rendered2") scene.rendered(d);
   else if (kind === "select2") pick(d);
   else if (kind === "show") useShow(!!(d && d.ready && d.supports2));
+  else if (kind === "venue") venuePicked(d);
 });
+// town (T4): where the town's camera and walk go: the audience window's Unity while it has the scene, else this page's.
+const town = () => (sceneUnity.target === relay ? relay : shop());
 const sceneUnity = {
   target: shop(),
   get ready() { return this.target.ready; },
@@ -125,13 +128,18 @@ onScenePick((r) => { if (sceneUnity.target !== relay) pick(r); });
 // way the scene starts over on its new Unity, every slot shown again.
 function useShow(on) {
   const want = on ? relay : shop();
-  if (sceneUnity.target === want) { if (on) restartScene(); return; } // the window loaded again
+  if (sceneUnity.target === want) { // the window loaded again
+    if (on) { restartScene(); sentView = sentPlay = ""; renderPresent(); }
+    return;
+  }
   if (scene.started) scene.stop();
   sceneUnity.target = want;
   $("show-note").hidden = !on;
   document.querySelector(".canvas-frame").hidden = on;
   $("unity-status").hidden = on; // it speaks of this page's own (hidden) shop
   ensureScene();
+  sentView = sentPlay = ""; // the town's camera and walk again, on the scene's new Unity (T4)
+  renderPresent();
 }
 function restartScene() {
   if (scene.started) scene.stop();
@@ -414,7 +422,7 @@ function storeText(st) {
 function unitySceneText() {
   const u = unityInfo();
   const s = $("unity-status").dataset.state;
-  if (s === "failed") return ["failed", "未就緒（載入或啟動失敗）"];
+  if (s === "failed") return ["failed", "未就緒（載入或啟動失敗）。下一步：不要重新整理（配對會失效）；終端機 Ctrl-C 重新啟動"];
   if (!u.ready) return ["loading", "載入中（未確認）"];
   return ["ok", u.art === "limezu" ? "已載入（LimeZu 素材）" : "已載入（placeholder，LimeZu 待接入）"];
 }
@@ -429,7 +437,7 @@ function renderReadiness() {
   } else if (!lastReady) {
     rows.push(["就緒狀態", "unconfirmed", "未確認：讀取中"]);
   } else if (lastReady.error) {
-    rows.push(["就緒狀態", "error", "無法取得就緒狀態（" + lastReady.error + "），未確認"]);
+    rows.push(["就緒狀態", "error", "無法取得就緒狀態（" + lastReady.error + "），未確認。下一步：看終端機的 Host 是否還在跑；停了就重新啟動"]);
   } else {
     const st = lastReady.status;
     const missing = ["WebGL.data", "WebGL.framework.js", "WebGL.loader.js", "WebGL.wasm"].filter((f) => !st.unity_build.files.includes(f));
@@ -520,6 +528,14 @@ function runText(r) {
   if (r.detail && r.detail.startsWith("prepare_failed")) return "未建立 task（" + r.detail + "）";
   if (r.outcome === "ok") return "場次完成";
   return "場次結束：" + r.outcome + (r.detail ? "（" + r.detail + "）" : "");
+}
+
+// runNext (C3): the host's next step after a run that did not end well; "" when there is none.
+function runNext(r) {
+  if (r.record_error || r.state === "interrupted" || r.store_end_error) return "下一步：記下時間找開發者";
+  if (r.outcome === "skipped" || (r.detail || "").startsWith("prepare_failed")) return "下一步：看終端機上這一場的原因，找開發者";
+  if (r.outcome === "timeout") return "下一步：" + A.AGAIN;
+  return "";
 }
 
 // A task whose details were not read (a failed read, or beyond
@@ -664,7 +680,8 @@ function enterVenue(k) {
   if (venue !== k) { venue = k; shownControl = ""; renderControl(); refreshPanels(); }
   renderPresent();
 }
-onVenuePick((k) => { if (presenting && inTown && A.venues(allScenarios()).includes(k)) enterVenue(k); });
+function venuePicked(k) { if (presenting && inTown && A.venues(allScenarios()).includes(k)) enterVenue(k); }
+onVenuePick((k) => { if (sceneUnity.target !== relay) venuePicked(k); });
 // sendView: the camera Unity should show, and the canvas's part the cards
 // leave uncovered (between the two columns); sent when either changes.
 let sentView = "";
@@ -672,7 +689,7 @@ function sendView() {
   if (!hasTown()) return; // a build without the town: its one camera, as before
   const on = presenting && creds.view().hasHost;
   let safe = null;
-  if (on) {
+  if (on && town() !== relay) { // the audience window covers none of its scene: all of it (T4)
     // The columns' cards that are open (a folded card is a button at the edge; the scene runs under it).
     const c = $("unity-canvas").getBoundingClientRect();
     const open = (col) => [...document.querySelectorAll(col + " > :not([hidden]), " + col + " > * > :not([hidden])")].filter((e) => (e.matches(".present-card, #approval")) && !e.classList.contains("folded") && e.getClientRects().length);
@@ -689,7 +706,8 @@ function sendView() {
   const key = JSON.stringify(v);
   if (key === sentView) return;
   sentView = key;
-  shop().view(v.mode, v.safe);
+  if (town() === relay) relay.cam(v.mode, v.safe);
+  else shop().view(v.mode, v.safe);
 }
 // ---- 遊戲模式 (Aaron 10/29: 選擇人物，自由移動) ----
 // While presenting, with a build that walks a customer: the person picks A or B and walks it round the town
@@ -705,7 +723,7 @@ function sendPlay() {
   sentPlay = want;
   held.clear();
   steered = "0,0";
-  shop().play(want);
+  town().play(want);
 }
 for (const b of document.querySelectorAll("#present-play button")) b.addEventListener("click", () => { playAs = b.dataset.play; renderPresent(); });
 // The keys: arrows or WASD while a customer is walked; never while typing in a field.
@@ -716,7 +734,7 @@ function steer() {
   const v = Math.sign(x) + "," + Math.sign(y);
   if (v === steered) return;
   steered = v;
-  shop().steer(Math.sign(x), Math.sign(y));
+  town().steer(Math.sign(x), Math.sign(y));
 }
 addEventListener("keydown", (e) => {
   if (!KEYS[e.code] || !sentPlay || !inTown || e.altKey || e.ctrlKey || e.metaKey) return;
@@ -1024,7 +1042,8 @@ function renderControl() {
     li.dataset.live = r.live || "";
     li.dataset.gen = String(creds.gen);
     const now = taskNow(r);
-    li.textContent = r.task_id + "（" + r.consumer_id + "，" + r.scenario + "）：" + runText(r) + (now ? "；" + now : "");
+    const next = r.live ? "" : runNext(r);
+    li.textContent = r.task_id + "（" + r.consumer_id + "，" + r.scenario + "）：" + runText(r) + (now ? "；" + now : "") + (next ? "。" + next : "");
     if (cancellable(r)) {
       li.append(" ", cancelButton(r.task_id, "task-cancel", "取消 task " + r.task_id));
       if (confirming && confirming.task === r.task_id && confirming.where === "runs") li.append(confirmBox(r.task_id));
@@ -1336,14 +1355,15 @@ async function deviceDelegation(sc, g) {
   if (r.status !== 200) return { fail: delegationFail(r) };
   const ch = r.body && r.body.challenge, t = r.body && r.body.terms;
   if (!ch || !t || ch.consumer_id !== c || t.consumer_id !== c || ch.approval_session_id !== t.delegation_id || ch.decision !== "approve" || !ch.options || !ch.options.publicKey) {
-    return { fail: "回傳的資料和這次確認不一致，已停止，沒有要求裝置驗證" };
+    return { fail: "回傳的資料和這次確認不一致，已停止，沒有要求裝置驗證。下一步：記下時間找開發者" };
   }
   let cred;
   try {
     cred = await navigator.credentials.get({ publicKey: AP.requestOptions(ch.options) });
   } catch (e) {
     if (g !== creds.gen) return null;
-    return { fail: e && e.name === "NotAllowedError" ? "裝置驗證沒有完成（取消、逾時或沒有可用的裝置）" : "瀏覽器拒絕這次驗證（" + (e && e.name) + "）" };
+    return { fail: e && e.name === "NotAllowedError" ? "裝置驗證沒有完成（取消、逾時或沒有可用的裝置）。下一步：再按開始，裝置跳出時輸入 PIN（視窗可能在另一個螢幕）"
+      : "瀏覽器拒絕這次驗證（" + (e && e.name) + "）。下一步：記下時間找開發者" };
   }
   if (g !== creds.gen) return null;
   const body = { request_id: requestId, scenario: sc.id, challenge_id: ch.challenge_id, verify_request_id: "dver-" + crypto.randomUUID(), assertion: AP.assertionJSON(cred) };
@@ -1361,8 +1381,8 @@ async function deviceDelegation(sc, g) {
 // delegationFail: a refused confirmation in the host's words.
 function delegationFail(r) {
   const b = r.body || {};
-  if (r.status === 0 && !(r.body && r.body.error === "no_viewer")) return "沒有收到回覆，結果未確認";
-  if (b.error === "signer_refused") return AP.CODES[b.code] || "Signer 拒絕（" + b.code + "）";
+  if (r.status === 0 && !(r.body && r.body.error === "no_viewer")) return "沒有收到回覆，結果未確認。下一步：看終端機的 Host 是否還在跑；在跑就再按開始一次";
+  if (b.error === "signer_refused") return (AP.CODES[b.code] || "Signer 拒絕（" + b.code + "）") + "。" + AP.codeNext(b.code);
   return { delegation_unavailable: "這個主機沒有這位客人的錢包或資產設定", forbidden_consumer: "不是這位客人的情境", signer_unknown: "Signer 沒有回覆，結果未確認",
     store_unavailable: "裝置已驗證，但主機沒能記下；請再確認一次（會是新的一份委託）", no_viewer: "這位客人沒有 viewer token" }[b.error] || "未確認（" + (b.error || r.status) + "）";
 }

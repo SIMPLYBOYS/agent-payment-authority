@@ -57,9 +57,9 @@ func Decide(reg *contracts.Registry, in Input) (contracts.PolicyDecision, error)
 		if in.Credential != nil || c == nil {
 			return contracts.PolicyDecision{}, fmt.Errorf("an apa.pay.v2 decision takes the verifier's record, never a fixture credential")
 		}
-		if c.Result == "valid" {
+		if r := paycontract.CredentialOutcome(c); r == "valid" {
 			in.Credential = &policy.Credential{ConsumerID: in.Session.ConsumerID, ValidUntil: c.Expiry, EvidenceMode: "bbs"}
-		} else if credentialDeny = paycontract.CredentialDeny[c.Result]; credentialDeny == "" {
+		} else if credentialDeny = paycontract.CredentialDeny[r]; credentialDeny == "" {
 			return contracts.PolicyDecision{}, fmt.Errorf("credential result %q", c.Result)
 		}
 	} else if c := in.Credential; in.Check != nil || c != nil && (c.ConsumerID != in.Session.ConsumerID || c.EvidenceMode != "fixture") {

@@ -76,6 +76,7 @@ type CredentialCheck struct {
 	StatusListIssuedAt uint64 `json:"status_list_issued_at,omitempty"`
 	StatusListSHA256   string `json:"status_list_sha256,omitempty"`
 	ProofSHA256        string `json:"proof_sha256,omitempty"`
+	Claims             string `json:"claims,omitempty"` // apa.credential.v2: the attributes the venue asked for, as disclosed (docs/commercial-venues.md 3.2)
 	Verifier           string `json:"verifier"`
 }
 
