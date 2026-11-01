@@ -182,7 +182,7 @@ public class TownTests
         var data = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
         bridge.Receive("{\"v\":2,\"scene\":1,\"clear\":true}"); // the two-customer scene: B's points stand aside (ShopView.P)
         int sc = 1;
-        foreach (var layout in new[] { "data", "cafe", "mart" })
+        foreach (var layout in new[] { "books", "cafe", "mart" }) // the town's venues (docs/commercial-consumer.md: the bookshop)
         {
             Assert.IsTrue(view.UseLayout(layout));
             yield return null;
@@ -349,7 +349,7 @@ public class TownTests
     [UnityTest]
     public IEnumerator APasserByGoesInAndComesOut()
     {
-        Assert.IsTrue(JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text).walkers.Count(w => w.path.Any(p => new[] { "data", "cafe", "mart" }.Any(l => (p - DoorOf(l)).sqrMagnitude < 0.01f))) >= 3, "the town's own passers-by visit the shops");
+        Assert.IsTrue(JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text).walkers.Count(w => w.path.Any(p => new[] { "books", "cafe", "mart" }.Any(l => (p - DoorOf(l)).sqrMagnitude < 0.01f))) >= 3, "the town's own passers-by visit the shops");
         town.AddWalker(Visit("x-walk-11", DoorOf("mart")));
         float took = 0f, after = 0f;
         Assert.AreEqual(0, town.DoorFrame("mart"), "the mart's door shut");
@@ -502,7 +502,9 @@ public class TownTests
         yield return null;
         Assert.AreEqual("venue:" + bridge.scene.Scene + ":0:mart", bridge.reports.Last(r => r.StartsWith("venue:")));
         Assert.AreEqual("town", town.Mode, "the view is the page's to change");
-        // Into a room and out: it comes back on that room's door step, facing the street.
+        // Into a room and out: it comes back on that room's door step, facing the street. A town venue's room (the
+        // default room is the data shop's, no building in the town since the bookshop, docs/commercial-consumer.md).
+        Assert.IsTrue(view.UseLayout("mart"));
         bridge.View("{\"mode\":\"venue\"}");
         yield return Settle();
         bridge.View("{\"mode\":\"town\"}");

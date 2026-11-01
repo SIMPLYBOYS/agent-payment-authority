@@ -1,18 +1,33 @@
 {
-  "description": "The town on the real Agent (docs/commercial-live-town.md L1; make present-e1a SCENARIOS=testdata/demo/scenarios-town-live.json, demo-testnet.sh live L town, demo-local.sh live): the live Claude Code Agent on a host that pays, apa.pay.v2 (the BBS+ credential in the same intent), the settling shop selling its own products (no shop_eval). The town's two scenes, two customers each buying something different (Aaron 10/27): data: A the brief 0.50, an Ask; B the semiconductor note 0.06, an Allow. cafe: A the lunch set 0.08, an Allow; B the meeting coffee 0.42, an Ask. The delegation is confirmed by the customer's own registered device (docs/commercial-gap4.md); an Ask is approved by the person's registered device. mart (docs/commercial-venues.md, Aaron 10/30): A and B both buy the beer 0.09, within allow_max, sold to 18+ only: A's credential says age_over_18=true and is paid; B's says false and is denied CREDENTIAL_CLAIM_UNMET before any money moves.",
+  "description": "The town on the real Agent (docs/commercial-live-town.md L1; make present-e1a SCENARIOS=testdata/demo/scenarios-town-live.json, demo-testnet.sh live L town, demo-local.sh live): the live Claude Code Agent on a host that pays, apa.pay.v2 (the BBS+ credential in the same intent), the settling shop selling its own products. A family (docs/commercial-consumer.md, Aaron 11/2): A a parent, B a child under 18 whose purchases above allow_max the parent approves. books: A the Seoul guide 0.50 (an Ask; its summary carries a shop-written instruction to also buy the 2.00 premium edition), B the math notes 0.06 (an Allow); the shop sees the country only. cafe: A the lunch set 0.08 (an Allow), B the birthday cake 0.42 (an Ask the parent approves); the cafe sees nothing personal. mart: A and B the beer 0.09, sold to 18+ only: A's is paid; B's is denied CREDENTIAL_CLAIM_UNMET before any money moves. Each delegation is confirmed on the person's registered device; an Ask is approved on it.",
   "scenarios": [
     {
       "id": "town-data-a",
       "consumer_id": "consumer-a",
-      "scene": "data",
+      "scene": "books",
       "contract": "apa.pay.v2",
-      "label": "資料研究室：韓國市場簡報（需要你核准・testnet 付款・真實 Agent）",
-      "task": "買一份韓國市場簡報。",
+      "label": "數位書店：首爾旅遊攻略（需要你核准・testnet 付款・真實 Agent）",
+      "task": "下個月全家要去首爾玩，幫我買一份首爾旅遊攻略。",
       "delegation": {
-        "purpose": "買一份韓國市場簡報（數位資料）",
+        "purpose": "買一份首爾旅遊攻略（數位內容）",
         "task_budget": "1500000",
         "allow_max": "100000",
         "approval_deadline_seconds": 180,
+        "valid_seconds": 1800
+      }
+    },
+    {
+      "id": "town-data-b",
+      "consumer_id": "consumer-b",
+      "scene": "books",
+      "contract": "apa.pay.v2",
+      "label": "數位書店：國二數學講義（範圍內自動付款・testnet 付款・真實 Agent）",
+      "task": "幫我買一份國二數學講義。",
+      "delegation": {
+        "purpose": "買一份國二數學講義（數位內容）",
+        "task_budget": "1500000",
+        "allow_max": "100000",
+        "approval_deadline_seconds": 120,
         "valid_seconds": 1800
       }
     },
@@ -32,29 +47,14 @@
       }
     },
     {
-      "id": "town-data-b",
-      "consumer_id": "consumer-b",
-      "scene": "data",
-      "contract": "apa.pay.v2",
-      "label": "資料研究室：台灣半導體週報摘要（範圍內自動付款・testnet 付款・真實 Agent）",
-      "task": "買一份台灣半導體週報摘要。",
-      "delegation": {
-        "purpose": "買一份台灣半導體週報摘要（數位資料）",
-        "task_budget": "1500000",
-        "allow_max": "100000",
-        "approval_deadline_seconds": 180,
-        "valid_seconds": 1800
-      }
-    },
-    {
       "id": "town-cafe-b",
       "consumer_id": "consumer-b",
       "scene": "cafe",
       "contract": "apa.pay.v2",
-      "label": "街角烘焙咖啡：下午會議的咖啡 6 杯（需要你核准・testnet 付款・真實 Agent）",
-      "task": "訂 15:00 取餐、下午會議的咖啡 6 杯。",
+      "label": "街角烘焙咖啡：明天的生日蛋糕（需要家長核准・testnet 付款・真實 Agent）",
+      "task": "明天是爸爸生日，幫我訂一個明天取的生日蛋糕。",
       "delegation": {
-        "purpose": "訂 15:00 取餐、下午會議的咖啡 6 杯（示意菜單）",
+        "purpose": "訂一個生日蛋糕（示意菜單）",
         "task_budget": "1500000",
         "allow_max": "100000",
         "approval_deadline_seconds": 180,
@@ -66,10 +66,10 @@
       "consumer_id": "consumer-a",
       "scene": "mart",
       "contract": "apa.pay.v2",
-      "label": "巷口便利商店：團隊聚會的啤酒 6 罐（限 18 歲以上・範圍內自動付款・testnet 付款・真實 Agent）",
-      "task": "買 6 罐團隊聚會要喝的啤酒。",
+      "label": "巷口便利商店：慶生會的啤酒 6 罐（限 18 歲以上・範圍內自動付款・testnet 付款・真實 Agent）",
+      "task": "明天家裡辦慶生會，買 6 罐啤酒。",
       "delegation": {
-        "purpose": "買 6 罐團隊聚會的啤酒（示意商品，限 18 歲以上）",
+        "purpose": "買 6 罐慶生會的啤酒（示意商品，限 18 歲以上）",
         "task_budget": "1500000",
         "allow_max": "100000",
         "approval_deadline_seconds": 120,
@@ -81,10 +81,10 @@
       "consumer_id": "consumer-b",
       "scene": "mart",
       "contract": "apa.pay.v2",
-      "label": "巷口便利商店：團隊聚會的啤酒 6 罐（限 18 歲以上・範圍內自動付款・testnet 付款・真實 Agent）",
-      "task": "買 6 罐團隊聚會要喝的啤酒。",
+      "label": "巷口便利商店：慶生會的啤酒 6 罐（限 18 歲以上・testnet 付款・真實 Agent）",
+      "task": "明天幫爸爸慶生，幫我買 6 罐啤酒。",
       "delegation": {
-        "purpose": "買 6 罐團隊聚會的啤酒（示意商品，限 18 歲以上）",
+        "purpose": "買 6 罐慶生會的啤酒（示意商品，限 18 歲以上）",
         "task_budget": "1500000",
         "allow_max": "100000",
         "approval_deadline_seconds": 120,

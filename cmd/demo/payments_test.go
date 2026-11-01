@@ -244,7 +244,7 @@ func TestP2ShippedCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	scs, err := loadScenarios("testdata/demo/scenarios-p2.json", reg, regCfg, false, false)
-	if err != nil || len(scs) != 4 || scs["cafe-a"].Scene != "cafe" || scs["data-b"].Scene != "" || scs["cafe-b"].version() != paycontract.Version {
+	if err != nil || len(scs) != 5 || scs["books-fooled-a"].Scene != "books" || scs["cafe-a"].Scene != "cafe" || scs["data-b"].Scene != "" || scs["cafe-b"].version() != paycontract.Version {
 		t.Fatalf("catalog: %v %v", scs, err)
 	}
 	// The shop's prices against the delegations' allow_max, by the product each script buys (Aaron 10/27:

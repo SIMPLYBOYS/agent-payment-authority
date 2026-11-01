@@ -482,7 +482,8 @@ func TestScenesAreSeparate(t *testing.T) {
 	cafe.Scene = "cafe"
 	list, rec := e.call(cafe, "list_products", "")
 	items := list["products"].([]any)
-	if rec.Outcome != "ok" || len(items) != 2 || items[0].(map[string]any)["product_id"] != "cafe-lunch-set" || items[1].(map[string]any)["product_id"] != "cafe-meeting-coffee" {
+	if rec.Outcome != "ok" || len(items) != 3 || items[0].(map[string]any)["product_id"] != "cafe-lunch-set" || items[1].(map[string]any)["product_id"] != "cafe-meeting-coffee" ||
+		items[2].(map[string]any)["product_id"] != "cafe-birthday-cake" { // the family's cake (docs/commercial-consumer.md)
 		t.Fatalf("cafe list_products: %v %+v", list, rec)
 	}
 	if q, rec := e.call(cafe, "request_purchase", "kr-market"); q["refused"] == nil || rec.Outcome != "UNKNOWN_PRODUCT" {

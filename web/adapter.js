@@ -449,6 +449,7 @@ export const slotClear2 = (scene, consumer, slot, layout) => ({ v: BRIDGE_V2, sc
 // them. cafe and mart are demo scenes: fixture products, no POS, inventory
 // or logistics. Delivery waits for payment (UX2-D4); nothing pays here.
 export const VENUES = {
+  books: { name: "數位書店", demo: true, goods: "數位內容・示意商品", delivery: "下載終端（付款後才交付）" }, // docs/commercial-consumer.md
   data: { name: "資料研究室", demo: false, goods: "數位資料", delivery: "下載終端（付款後才交付）" },
   cafe: { name: "街角烘焙咖啡", demo: true, goods: "餐點・示意菜單", delivery: "出餐口叫號（付款後才交付）" },
   mart: { name: "巷口便利商店", demo: true, goods: "商品・示意商品", delivery: "取貨櫃（付款後才交付）" },

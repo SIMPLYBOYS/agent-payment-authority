@@ -13,6 +13,9 @@ func TestVenueClaims(t *testing.T) {
 		return &contracts.CredentialCheck{Result: "valid", Detail: detail, CredentialSchema: "apa.credential.v2", Claims: claims}
 	}
 	data, beer, cafe := merchant.RequiresAt("/resources/kr-market"), merchant.RequiresAt("/scenes/mart/beer-6"), merchant.RequiresAt("/scenes/cafe/lunch-set")
+	if books := merchant.RequiresAt("/scenes/books/seoul-guide"); len(books) != 1 || books["country"] != "" {
+		t.Fatalf("the bookshop asks for the country only: %v", books)
+	}
 	if data == nil || beer == nil || cafe != nil {
 		t.Fatalf("the shop's requirements: %v %v %v", data, beer, cafe)
 	}
@@ -21,10 +24,10 @@ func TestVenueClaims(t *testing.T) {
 		req  map[string]string
 		pass bool
 	}{
-		"data, business TW":             {v2("", "buyer_type=business,country=TW"), data, true},
-		"data, an individual not unmet": {v2("", "buyer_type=individual,country=TW"), data, false},
-		"data, an individual unmet":     {v2("CLAIM_UNMET", "buyer_type=individual,country=TW"), data, true},
-		"data, the age too":             {v2("", "buyer_type=business,country=TW,age_over_18=true"), data, false},
+		"data, the country":             {v2("", "country=TW"), data, true}, // docs/commercial-consumer.md D4: the country only
+		"data, called unmet":            {v2("CLAIM_UNMET", "country=TW"), data, false},
+		"data, the buyer type too":      {v2("", "buyer_type=individual,country=TW"), data, false},
+		"data, the age too":             {v2("", "country=TW,age_over_18=true"), data, false},
 		"beer, an adult":                {v2("", "age_over_18=true"), beer, true},
 		"beer, a minor unmet":           {v2("CLAIM_UNMET", "age_over_18=false"), beer, true},
 		"beer, a minor let through":     {v2("", "age_over_18=false"), beer, false},

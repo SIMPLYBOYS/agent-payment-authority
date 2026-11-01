@@ -67,17 +67,15 @@ func TestTownLiveCatalog(t *testing.T) {
 	if _, err := loadScenarios("testdata/demo/scenarios-town-live.json", reg, regCfg, true, false); err == nil {
 		t.Error("the town's live catalog loaded on a host that does not pay")
 	}
-	fake, err := loadScenarios("testdata/demo/scenarios-p2.json", reg, regCfg, false, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for id, f := range fake {
-		l := live["town-"+id]
-		if l == nil {
-			t.Fatalf("no town-%s", id)
-		}
-		if l.Contract != "apa.pay.v2" || l.Scene != f.Scene || l.ConsumerID != f.ConsumerID || *l.Delegation != *f.Delegation || l.Task == "" {
-			t.Errorf("town-%s: %+v, not %s's %+v", id, l, id, f)
+	// The family's town (docs/commercial-consumer.md): each venue has both customers' runs, each a v2 entry with
+	// the person's task and a whole delegation.
+	for _, scene := range []string{"books", "cafe", "mart"} {
+		for _, c := range []string{"a", "b"} {
+			id := "town-" + map[string]string{"books": "data", "cafe": "cafe", "mart": "mart"}[scene] + "-" + c
+			l := live[id]
+			if l == nil || l.Scene != scene || l.ConsumerID != "consumer-"+c || l.Contract != "apa.pay.v2" || l.Task == "" || l.Delegation == nil {
+				t.Errorf("%s: %+v", id, l)
+			}
 		}
 	}
 	raw, _ := os.ReadFile("testdata/policy/m1-demo-profile.json")

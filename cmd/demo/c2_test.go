@@ -257,3 +257,31 @@ func TestVenueBeer(t *testing.T) {
 		}
 	}
 }
+
+// The family's fooled agent (docs/commercial-consumer.md D1, a simulation): it believes the guide's
+// shop-written notice and requests the 2.00 premium edition; beyond the 1.50 task budget, the Policy denies it
+// INSUFFICIENT_BUDGET and nothing is paid.
+func TestFooledAgentDenied(t *testing.T) {
+	d := map[string]any{"purpose": "買一份首爾旅遊攻略（數位內容）", "task_budget": "1500000", "allow_max": "100000", "approval_deadline_seconds": 60, "valid_seconds": 1800}
+	raw, _ := json.Marshal(map[string]any{"description": "test", "scenarios": []map[string]any{
+		{"id": "books-fooled-a", "consumer_id": "consumer-a", "scene": "books", "contract": "apa.pay.v1", "scenario": "testdata/cli/books-fooled.json", "label": "fooled", "delegation": d},
+	}})
+	catalog := filepath.Join(t.TempDir(), "scenarios.json")
+	os.WriteFile(catalog, raw, 0o600)
+	h := controlHost(t, hostOpts{expiryEvery: time.Hour, scenarios: catalog})
+	defer h.stop()
+	sim := h.simulate("consumer-a")
+	task := h.delegateAndRunAs(sim, "books-fooled-a", "01", "apa.pay.v1")["task_id"].(string)
+	var dec *contracts.PolicyDecision
+	for _, e := range h.events(task).Events {
+		if e.EventType == "POLICY_DECIDED" {
+			dec = e.Decision
+		}
+		if strings.HasPrefix(e.EventType, "PAYMENT_") || e.EventType == "BUDGET_RESERVED" {
+			t.Fatalf("a payment event: %s", e.EventType)
+		}
+	}
+	if dec == nil || dec.PolicyVerdict != "Deny" || dec.Reason != "INSUFFICIENT_BUDGET" {
+		t.Fatalf("the premium edition: %+v", dec)
+	}
+}
