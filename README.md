@@ -1,11 +1,42 @@
 # agent-payment-authority
 
-建立在 x402 之上的 Agent 付款授權與證據層：Agent 可以提出付款，但不能自己批准，也不能自己簽名。
+**AI Agent 可以替人提出付款，但不能自己批准，也不能自己簽名；每一步都留下任何人都能向鏈上查證的證據。**
 
-> **目前狀態：B1-00～03 已驗收（B1-02 共用契約 `apa.m1.v2` fixture，10/1 於 `2dc8d93` 結案；B1-03 最小資料商店（目錄＋402），10/1 於 `ebd3f44` 結案）；B1-05 確定性 Policy＋Store（`internal/policy`、`internal/store`）10/2 結案，程式驗收基準 `cb33768`，main 已 fast-forward 至 `7ad304a`（[docs/persistence-design.md](docs/persistence-design.md)）；主持人事件 HTTP 端點移至 B1-06；B1-04 Buyer wrapper 10/2 開始（分支 `b1-04-buyer`）：**fake 首個交付點 10/3 於 `b3c66f6` 通過技術 review**；**live 階段 A（開關、init 閘門、fake 驗證）10/3 於 `e8f6719` 通過技術 review**；C0 init 探測（`apa-buyer probe-init`，不送任何使用者訊息、不開 Store）10/4 於 `5f34a7b` 通過技術 review；**10/4 經 Aaron 核准對真實 CLI 執行一次 C0，30 秒內逾時，未取得 init**（未送任何使用者訊息；CLI 的背景行為與用量未知）。C0′（`probe-init --send-one-message`，只送一則固定訊息）10/4 已實作，fake 驗證於 `05e03e2` 通過技術 review；10/4 經核准執行一次，在版本檢查即停止、未送出訊息，核准版本隨後改為 `2.1.289 (Claude Code)`，`1f0b260` 通過限定範圍 review；10/4 再經核准執行一次，取得真實 init（Codex 已核對證據）；正式 live 仍不能放行（plugins 2、agents 5 會被 Gate 拒絕，`apiKeySource` 為 `none` 也不在接受清單），plugins／agents 的官方文件查證與只顯示身分的觀測已完成並驗收（程式 `b46e332`；正式 Gate 不變）；10/7 L1-a 在分支 `b1-04-live` 以固定環境變數停用內建 agents（`79a4a5f`／`418f0de`，只有 fake 驗證；10/8 通過 Codex 限定範圍技術 review，L1-a 關閉，不證明真實 CLI 的 agents 已清空；[docs/cli-poc.md](docs/cli-poc.md) 第 35、36 節）；未執行真實 CLI，真實 C0′、受管設定讀取與清單調整仍須另行核准。階段 B／C 未執行，live 認證接受清單為空。B1-04 整體 InProgress；真實 Claude 的登入、模型與計費方式都還沒驗證。**B1-06 交付點 1（Store 接線、已認證唯讀事件 HTTP、fake 端到端整合）已實作，修正後於 `f2d63fb` 通過 Codex 限定範圍 review（R1、R2 關閉）；交付點 2（Unity＋LimeZu 商店與 Dashboard，接上同一條 fake 資料鏈）經兩輪修正，於 `6aee7f0` 通過 Codex 限定範圍技術 review（R1～R3 與第二輪兩項關閉；只代表 fake 展示資料鏈，素材與 Web 建置公開發布未核准）；Aaron 10/5 實際操作後初步接受 fake 展示資料鏈；展示操作流程設計（[docs/demo-operation-design.md](docs/demo-operation-design.md)）中**交付點 3.1 於 `b2b7daa` 通過 Codex 限定範圍技術 review，R1～R3 關閉**（一鍵啟動、主持人唯讀頁 `/host`、token 檔載入、憑證清除與世代控制、就緒面板；不代表 B1-06、M1 或真實模型／付款流程整體完成）；3.2（主持人控制與場次持久化，同一 SQLite 內的協調資料表）依 `a845dcb` 的已審查設計實作於 `718aa91`，**於 `69ae9b2` 通過 Codex 限定範圍技術 review**（最近一次完整容器驗證屬 `c0d4c96`）；3.3（動態 task 清單：`GET /api/tasks`，頁面清單改由 Store 提供）實作於 `843ca4a`，經兩輪 review 後修正（`0818db8` 請求序號、`2c55835` 更新失敗可見），**於 `2c55835` 通過 Codex 限定範圍技術 review，R1、R2 關閉**（最近一次完整容器驗證屬 `843ca4a`，`2c55835` 未跑完整容器）；3.4（取消 task、錯誤呈現與中斷收尾：`POST /api/host/tasks/{task_id}/cancel`，`/host` 分開顯示場次歷史與 task 目前狀態）實作於 `d61771c`，review 後修正 R1～R3，**於 `3a6af59` 通過 Codex 限定範圍技術 review，R1～R3 關閉**（瀏覽器測試補充 `3b24cd4`；最近一次完整容器驗證屬 `d61771c`，修正後未重跑）；3.5（fake 展示流程整體操作驗收）已通過 Codex 技術 review（自動化部分 `667e933` 完整容器 247／247；最近的產品修正 `d18efa2`），Aaron 已實際操作並初步確認基本操作可用，設計文件第 16.3 節的完整人工清單未逐項確認；下一步的商店展示深化設計見 [docs/demo-presentation-design.md](docs/demo-presentation-design.md)（D1 設計於 `15d705a` 通過 Codex 限定 review，R1、R2 關閉；Aaron 核准後 D1 實作於 `7ffc45d`：場景優先版面、請購卡片、證據面板與回放當步；**於 `6338fd2` 通過 Codex 限定範圍技術 review，R1、R2、C1 關閉**，範圍為 fake 展示的網頁呈現，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成；一般 Chrome 長流程的可見性問題仍未確認；D2 設計（同文件 §16，`9b70c0c`）經 Aaron 核准後實作：場景路徑與四向走路、轉換表與兩個選填 bridge 欄位（`cause_seq`、`task_end`）、追上與只回報最新序號、網頁過場說明，程式與測試 `bc79677`、計時修正 `d7070af`，依 review 修正 `78cb2cc`／`6137708`（§17.6），於產品程式 `78cb2cc`、瀏覽器測試補充 `6137708` 通過 Codex 限定範圍技術 review，R1、R2、C1 關閉（§17.7；範圍為 fake 場景動畫與網頁呈現，不代表真實 Agent、付款、區塊鏈、ZK 或整體 M1 完成）；`R2 order` 測試穩定性另行派工；D3–D6 未開始）；尚無真實模型請購；B1-06 仍 InProgress。** M1 尚未完成。** 可啟動 loopback 服務、回應 health、提供商品目錄與 HTTP 402 報價、跑契約與雜湊測試；規格見 [docs/contracts.md](docs/contracts.md)、[docs/merchant.md](docs/merchant.md) 與 [docs/policy.md](docs/policy.md)。
-> 尚未實作：真實 Claude Code（live）請購、真實使用者認證（Dashboard 只用本機 demo viewer capability）、任何付款、簽章或付費內容交付。`cmd/demo` 已開啟 Store、到期 worker 與已認證唯讀 API（[docs/demo-integration.md](docs/demo-integration.md)），並提供 Dashboard 與 Unity 商店（[docs/demo-ui.md](docs/demo-ui.md)）。
-> 第一個里程碑 M1 的終點是 **請購與 Ask／Deny**，沒有真付款。邊界見 [docs/m1-boundaries.md](docs/m1-boundaries.md)。
-> **商業展示版交付路線**：[docs/commercial-demo-roadmap.md](docs/commercial-demo-roadmap.md)（現況與缺口、完整消費主線、真實 AI／授權與 ZK／鏈上付款／多 Agent 營運的切片與順序）。**路線提案；已依 Codex 對 `638c9f7` 的 review 修訂 R1–R4（該文件 §11），待限定複核與 Aaron 核准；未核准實作。**
+*An authorization and evidence layer for AI agent payments on x402: the agent may propose a payment, never approve or sign it; every step leaves evidence anyone can verify against the chain.*
+
+## 它解決什麼問題
+
+Agent 開始替人花錢了。錢包知道「花多少」，卻不知道「為了哪個任務、誰同意的」。這個專案把任務、請購、本人授權、預算、付款與交付綁成同一個 `intent_hash`，並把權力拆開：
+
+- **Agent** 只能看商品、取報價、提出請購。
+- **本人** 用已登記的裝置確認委託（預算、自動放行上限）；超過上限的單筆，要用裝置加唸一句綁定商家與金額的句子核准。
+- **Signer** 是另一個 OS 帳號裡的程序，握有錢包私鑰，只在本人確認過的委託範圍內簽名。
+- **憑證** 用 BBS+ 選擇性揭露：每間店只看到它要求的屬性（企業身分、國家、是否已滿 18 歲），其他一律不揭露。
+- **付款** 是兩筆 Base Sepolia 交易：Groth16 證明預留預算，再以 EIP-3009 結算 test USDC。
+- **checker** 只讀證據包與鏈，獨立判定 E1～E10。
+
+架構、一筆付款怎麼走、威脅模型與限制：[docs/architecture.md](docs/architecture.md)。
+
+## 自己查證
+
+Base Sepolia 上的一場實跑（2026-10-31，真實 Claude Code Agent、兩位客人、本人裝置確認）：
+
+```sh
+go run ./cmd/verify-demo --mode e1a --run-dir artifacts/e1a/testnet-town-t4 --rpc https://sepolia.base.org
+```
+
+E1～E10 全部 PASS。證據包不進版控（`artifacts/`），要的話向作者索取。
+
+## 現況
+
+- 真實 Agent 在 Base Sepolia 上完成付款與交付；本人以裝置確認委託、以裝置加語音核准；ZK 預算預留；checker 向鏈查證通過。
+- 三個場域（資料研究室、咖啡店、便利商店）的選擇性揭露：本機彩排兩次全部通過，未滿 18 歲的客人買酒在付款前被擋下。
+- 照實說的限制（issuer／holder／verifier 同一程序、兩位核准人同一人、沒有抗合成語音、只在測試鏈）：[docs/architecture.md](docs/architecture.md#照實說的限制)。
+- 進度與完成清單：[docs/commercial-gap-review.md](docs/commercial-gap-review.md) §9；過去的里程碑紀錄：[docs/status-history.md](docs/status-history.md)。
+
+---
+
+以下是開發者用的說明。
 
 ## 需求
 
