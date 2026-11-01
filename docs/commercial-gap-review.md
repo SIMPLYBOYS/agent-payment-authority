@@ -115,7 +115,7 @@ Review 兩輪（`9ce0813` 與其後的修正）：viewer 登入後頁首不再�
 | 2 | 場域矩陣：資料研究室、咖啡店、便利商店各自要求不同的揭露（借自 vault 的 CrossHub 分析 §4.1） | 程式完成（`docs/commercial-venues.md` §6）；待本機彩排、Unity 重建，以及 testnet `dlg-ta` 總額的決定 |
 | 3 | 展示視窗的可信度區（B2＋T4）：每一步一個證據、explorer 可點、checker 結果在畫面上 | 完成，待第 5 項的彩排實際看過。大半在批次 2 已做（`docs/commercial-gap2.md`：可信度區、兩筆交易的 explorer 連結、收據卡、手選的 checker 報告）。10/30 修正：可信度區的「委託」原本寫死成主持人代按，和第 1 步的本人裝置矛盾。證據和五步一一對齊（委託｜選購（BBS+ 憑證）｜核准｜付款（tx#1 預留＋tx#2 結算）｜交付（收據））10/30 已做。T4（城鎮上展示視窗）10/30 已做（`docs/commercial-town.md` T4 一節）。T4 版面：Aaron 10/30 選「依階段切換」：在城鎮時場景佔滿全螢幕、只有一行大字幕；客人進店後換成店內版面（場景、五步卡片、可信度） |
 | 4 | 出錯時頁面寫出下一步（C3 的頁面部分）；10/30 已補 Signer 拒絕原因 | 頁面部分完成（10/30）：裝置確認委託失敗、Unity 載入失敗、就緒狀態讀不到、CLI 未啟動／未建立 task／逾時、場次紀錄失敗、核准時 Signer 的每一個代碼都寫出下一步（`codeNext`：可再試寫「再按一次」，其餘寫「找開發者」，和手冊一致）；手冊 6.2 補上這幾類。待第 5 項的彩排實際看過 |
-| 5 | 穩定：連續 3 次本機彩排通過，加上 1 次 testnet 一次跑完；開場前檢查全部通過 | 進行中。自動化（11/1，`a03eb61`）：Go、頁面 150、show-ui 33、ux3-ui 38、c2-ui 23 全過。本機彩排 1/3：`town2`（Aaron 11/1「皆符合預期結果」）三個場域六個場次，證據包 `artifacts/e1a/rehearsal-town2`（run `e1a-20261101T152742Z-596183`）e1a.3 E1～E10 全部 PASS；B 的啤酒 `age_over_18=false`／`CLAIM_UNMET`，Deny `CREDENTIAL_CLAIM_UNMET`，沒有付款 |
+| 5 | 穩定：連續 3 次本機彩排通過，加上 1 次 testnet 一次跑完；開場前檢查全部通過 | 進行中。自動化（11/1，`a03eb61`）：Go、頁面 150、show-ui 33、ux3-ui 38、c2-ui 23 全過。本機彩排 1/3：`town2`（Aaron 11/1「皆符合預期結果」）三個場域六個場次，證據包 `artifacts/e1a/rehearsal-town2`（run `e1a-20261101T152742Z-596183`）e1a.3 E1～E10 全部 PASS；B 的啤酒 `age_over_18=false`／`CLAIM_UNMET`，Deny `CREDENTIAL_CLAIM_UNMET`，沒有付款。本機彩排 2/3：`town3`（Aaron 11/1「結果符合預期」），證據包 `artifacts/e1a/rehearsal-town3`（run `e1a-20261101T153307Z-21560e`）e1a.3 E1～E10 全部 PASS，六個場次與 `town2` 相同 |
 | 6 | README 開頭、一頁架構與威脅模型 | 未開始 |
 
 照實寫成已知限制、不在清單內：真正同時付款（A4，現在排隊）、抗合成語音、兩位核准人其實是同一人同一台裝置（A5）、E1-b、遊戲模式的限制。
