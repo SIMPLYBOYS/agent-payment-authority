@@ -117,9 +117,9 @@ try {
   mark("load");
   await size(1440, 900);
   check("the page loads with the token file; the scene owns the shop", await loadPage() && await b.waitFor(`!document.getElementById("scene-status").hidden`, 90000));
-  check("the scene choice: 資料研究室, 街角咖啡 示範情境, 巷口便利商店 示範情境, the main scene chosen",
+  check("the scene choice: 資料研究室, 街角烘焙咖啡 示範情境, 巷口便利商店 示範情境, the main scene chosen",
     await b.waitFor(`(() => { const bs = [...document.querySelectorAll("#venue-picker .venue-pick")]; return !document.getElementById("venue-picker").hidden && bs.map((x) => x.dataset.venue).join() === "data,cafe,mart"
-      && bs[0].getAttribute("aria-pressed") === "true" && !bs[0].querySelector(".venue-demo") && bs[1].textContent === "街角咖啡 示範情境" && bs[2].textContent === "巷口便利商店 示範情境"; })()`, 15000), await text("#venue-picker"));
+      && bs[0].getAttribute("aria-pressed") === "true" && !bs[0].querySelector(".venue-demo") && bs[1].textContent === "街角烘焙咖啡 示範情境" && bs[2].textContent === "巷口便利商店 示範情境"; })()`, 15000), await text("#venue-picker"));
   check("Unity shows the data room", await inRoom("data"), await room());
   check("the header names the scene", (await text("#venue-chip")) === "情境：資料研究室", await text("#venue-chip"));
   check("the data room's cards: A only (data-a)", (await cards()) === "consumer-a" && await b.evaluate(`!!document.querySelector('.agent-delegate[data-scenario="data-a"]')`), await cards());
@@ -128,10 +128,10 @@ try {
   // ---- 2 the cafe: B's lunch set, within the delegation: Allow ----
   mark("cafe");
   await b.evaluate(`(window.__cafeButton = document.querySelector('#venue-picker .venue-pick[data-venue="cafe"]'), true)`);
-  check("choose 街角咖啡: Unity shows the cafe; the cards are B's (cafe-b)", await choose("cafe") && await inRoom("cafe") && (await cards()) === "consumer-b", (await room()) + " " + (await cards()));
+  check("choose 街角烘焙咖啡: Unity shows the cafe; the cards are B's (cafe-b)", await choose("cafe") && await inRoom("cafe") && (await cards()) === "consumer-b", (await room()) + " " + (await cards()));
   check("the chosen button is the same element (a choice does not rebuild the buttons, so the focus stays)",
     await b.evaluate(`window.__cafeButton === document.querySelector('#venue-picker .venue-pick[data-venue="cafe"]') && window.__cafeButton.isConnected`));
-  check("the header says the cafe is a demo scene", (await text("#venue-chip")) === "情境：街角咖啡（示範情境・示意商品）", await text("#venue-chip"));
+  check("the header says the cafe is a demo scene", (await text("#venue-chip")) === "情境：街角烘焙咖啡（示範情境・示意商品）", await text("#venue-chip"));
   check("以 B 模擬, 建立委託, 確認: B's cafe run starts", await start("consumer-b", "cafe-b", "show-b-01"), await text("#run-status"));
   check("the scene: B at the counter, within the delegation (allowed_unpaid)", await shows("consumer-b", "show-b-01", "allowed_unpaid"));
   const tb = await hostTask("show-b-01");
@@ -139,8 +139,8 @@ try {
     tb.purchases.length === 1 && tb.purchases[0].purchase_order_id === "po-show-b-01-cafe-lunch-set" && tb.purchases[0].decision.policy_verdict === "Allow"
       && tb.purchases[0].decision.reason === "WITHIN_ALLOW_MAX" && tb.purchases[0].decision.payment_status === "not_enabled", JSON.stringify(tb.purchases.map((p) => [p.purchase_order_id, p.decision])));
   check("nothing to approve for B", await b.waitFor(`!document.querySelector("#approval .approval-head[data-state=pending]")`, 5000));
-  check("the drawer's 情境 row: 街角咖啡, a demo scene, delivery after payment", await click("#show-evidence")
-    && await b.waitFor(`(() => { const x = document.getElementById("evidence-drawer").textContent; return x.includes("街角咖啡（示範情境・示意商品，沒有接 POS、庫存或物流）・交付：出餐口叫號（付款後才交付）"); })()`, 15000),
+  check("the drawer's 情境 row: 街角烘焙咖啡, a demo scene, delivery after payment", await click("#show-evidence")
+    && await b.waitFor(`(() => { const x = document.getElementById("evidence-drawer").textContent; return x.includes("街角烘焙咖啡（示範情境・示意商品，沒有接 POS、庫存或物流）・交付：出餐口叫號（付款後才交付）"); })()`, 15000),
     (await text("#evidence")).slice(0, 300));
   await shot("ux3-1440x900-2-cafe-allow");
   await b.evaluate(`(document.getElementById("drawer-close").click(), true)`);

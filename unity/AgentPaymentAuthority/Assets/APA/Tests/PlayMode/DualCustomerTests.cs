@@ -130,7 +130,7 @@ public class DualCustomerTests
         Assert.AreEqual("cafe", view.LayoutKey);
         Assert.AreEqual("waiting", view.PhaseOf("consumer-a"));
         var texts = Object.FindObjectsByType<TextMesh>(FindObjectsSortMode.None).Select(t => t.text).ToList();
-        Assert.That(texts, Has.Some.StartsWith("這場不付款・街角咖啡"));
+        Assert.That(texts, Has.Some.StartsWith("這場不付款・街角烘焙咖啡"));
         Assert.That(texts, Has.Some.EqualTo("取餐區・付款後才交付"));
         Assert.That(texts, Has.None.EqualTo("下載區・付款後才交付"), "the old room's notes are gone");
 

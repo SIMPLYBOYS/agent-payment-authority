@@ -21,7 +21,7 @@
       "consumer_id": "consumer-a",
       "scene": "cafe",
       "contract": "apa.pay.v2",
-      "label": "街角咖啡：12:30 取餐的午餐套餐（範圍內自動付款・testnet 付款・真實 Agent）",
+      "label": "街角烘焙咖啡：12:30 取餐的午餐套餐（範圍內自動付款・testnet 付款・真實 Agent）",
       "task": "訂 12:30 取餐的午餐套餐。",
       "delegation": {
         "purpose": "訂 12:30 取餐的午餐套餐（示意菜單）",
@@ -51,7 +51,7 @@
       "consumer_id": "consumer-b",
       "scene": "cafe",
       "contract": "apa.pay.v2",
-      "label": "街角咖啡：下午會議的咖啡 6 杯（需要你核准・testnet 付款・真實 Agent）",
+      "label": "街角烘焙咖啡：下午會議的咖啡 6 杯（需要你核准・testnet 付款・真實 Agent）",
       "task": "訂 15:00 取餐、下午會議的咖啡 6 杯。",
       "delegation": {
         "purpose": "訂 15:00 取餐、下午會議的咖啡 6 杯（示意菜單）",

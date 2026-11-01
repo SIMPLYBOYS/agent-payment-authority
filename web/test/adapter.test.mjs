@@ -595,7 +595,7 @@ test("UX3 evidence: the scene row", () => {
   const rows = (venue) => A.evidence(snap, "po-1", { mode: "live", catalog: null, venue }).sections.find((x) => x.title === "報價").rows;
   const [k, v, src] = rows("cafe")[0];
   assert.equal(k, "情境");
-  assert.ok(v.startsWith("街角咖啡（示範情境") && v.includes("沒有接 POS") && v.endsWith("出餐口叫號（付款後才交付）"), v);
+  assert.ok(v.startsWith("街角烘焙咖啡（示範情境") && v.includes("沒有接 POS") && v.endsWith("出餐口叫號（付款後才交付）"), v);
   assert.equal(src, "Host 場景目錄");
   assert.ok(!rows("")[0][0].startsWith("情境"));
 });

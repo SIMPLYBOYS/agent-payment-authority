@@ -185,7 +185,7 @@
       {"key": "x-office-top-l", "x": 0, "y": 9.875},
       {"key": "x-office-top", "x": 0.5, "y": 9.875, "w": 11, "h": 0.5},
       {"key": "x-office-top-r", "x": 11.5, "y": 9.875}]},
-    {"layout": "cafe", "number": "02", "name": "街角咖啡", "x": 36, "y": 26, "door": {"x": 9.55, "y": -0.9}, "doorway": {"key": "x-door-cafe", "x": 8, "y": 0, "frames": 14}, "exterior": [
+    {"layout": "cafe", "number": "02", "name": "街角烘焙咖啡", "x": 36, "y": 26, "door": {"x": 9.55, "y": -0.9}, "doorway": {"key": "x-door-cafe", "x": 8, "y": 0, "frames": 14}, "exterior": [
       {"key": "x-front-win", "x": 0, "y": 0},
       {"key": "x-upper", "x": 0, "y": 3},
       {"key": "x-upper-end", "x": 9, "y": 3},

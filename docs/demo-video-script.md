@@ -41,7 +41,7 @@
 | 0–20 | 問題 | 字卡；城鎮 | Agent 替人付錢時，錢包只知道花多少，不知道為了哪個任務、誰同意的。 | When an agent pays, the wallet knows how much, not for which task or with whose consent. |
 | 20–45 | 誰握有什麼權力 | `docs/architecture.md` 的角色圖 | Agent 只能提出；Host 沒有私鑰；Signer 在另一個系統帳號裡，只簽本人確認過的委託；checker 只讀證據和鏈。 | The agent proposes. The host holds no key. The signer, in its own OS account, signs only within a mandate the person confirmed. The checker reads only the evidence and the chain. |
 | 45–95 | 資料研究室 | 委託 PIN；選購；700 KRW；這間店看到；A 的核准（語音）；可信度 tx#1、tx#2；收據 | 委託；跨境報價；只揭露企業身分與國家；超過範圍時本人核准；ZK 預留、鏈上結算、收據。B 的 0.06 在範圍內自動付款。 | Mandate; a cross-border quote; only business status and country disclosed; the person approves above the limit; ZK reservation, on-chain settlement, a receipt. B's 0.06 is within the limit and pays on its own. |
-| 95–115 | 街角咖啡 | 「這間店看到：沒有任何個人資料」；B 的 0.42 核准 | 買咖啡不需要知道你是誰：這間店什麼個資都看不到。 | Buying coffee needs nothing about you: this shop sees no personal data at all. |
+| 95–115 | 街角烘焙咖啡 | 「這間店看到：沒有任何個人資料」；B 的 0.42 核准 | 買咖啡不需要知道你是誰：這間店什麼個資都看不到。 | Buying coffee needs nothing about you: this shop sees no personal data at all. |
 | 115–140 | 便利商店 | A、B 都想買啤酒；「已滿 18 歲」／「未滿 18 歲」；B 被擋下 | 同一份憑證，在這裡只揭露「是否已滿 18 歲」，不揭露生日。B 未滿，付款前就被擋下。 | The same credential reveals only "over 18", never a birth date. B isn't, so it stops before payment. |
 | 140–165 | 查證 | 終端機 `verify-demo`；E1～E10 逐條 PASS；區塊瀏覽器 | checker 不用相信這個系統：它只讀證據包，向鏈重算，十項全部通過。 | The checker trusts none of this system: it reads the evidence, recomputes against the chain, and all ten checks pass. |
 | 165–180 | 照實說與結尾 | 字卡：限制；名字 | 這是測試鏈與測試幣；兩位客人其實是同一個人示範；還沒做抗合成語音。下一步是…… | This runs on a test network with test USDC; both customers are played by one person; synthetic-voice defense is not built yet. |
