@@ -124,8 +124,6 @@ x-office-top	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32
 x-office-top-r	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/16_Office_Singles_32x32/ME_Singles_Office_32x32_Example_1.png	336,40,16,16
 x-front-win	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/5_Floor_Modular_Buildings_32x32.png	608,1184,96,96
 x-front-bakery	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/5_Floor_Modular_Buildings_32x32.png	0,1840,288,144
-x-front-awning	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/5_Floor_Modular_Buildings_32x32.png	0,2656,288,96
-x-cafe-seats	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/5_Floor_Modular_Buildings_32x32.png	70,2850,84,54
 x-upper	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/5_Floor_Modular_Buildings_32x32.png	0,960,288,128
 x-upper-end	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/5_Floor_Modular_Buildings_32x32.png	288,960,96,128
 x-cafe-roof-top-l	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/5_Floor_Modular_Buildings_32x32.png	32,504,32,32

@@ -30,8 +30,7 @@ public class LayoutTests
     // Composited as drawn: no half-clear pixel of a venue's piece or shut door lies over a half-clear one drawn before it,
     // a shadow drawn twice (review of 67461a1: the mart's door carried the facade's shadow again, a darker strip; their
     // values match, alpha over them doesn't; over an opaque roof it is shading, as the cafe's AC's); and a shut door is its
-    // front exactly, but for the mart's, which adds an awning (Aaron 10/28), and the cafe's, the bakery's glass double door
-    // over the awning shop's single one (Aaron 11/2: the cafe looks like a cafe; LimeZu has no cafe door that opens).
+    // front exactly, but for the mart's, which adds an awning (Aaron 10/28).
     [Test]
     public void NoDoorwayDoublesItsFacadesShadow()
     {
@@ -68,7 +67,7 @@ public class LayoutTests
                     foreach (var (e, c) in pieces) under = Over(At(c, e, X, Y), under);
                     float a = Pixel(door, x, y).w;
                     Assert.IsFalse(a > 0f && a < 1f && under.w > 0f && under.w < 1f, v.layout + ": its shut door's half-clear pixel over a half-clear one at " + X + "," + Y);
-                    if (v.layout != "mart" && v.layout != "cafe") Assert.Less((Over(Pixel(door, x, y), under) - under).magnitude, 2f / 255f, v.layout + ": its shut door changes the front at " + X + "," + Y);
+                    if (v.layout != "mart") Assert.Less((Over(Pixel(door, x, y), under) - under).magnitude, 2f / 255f, v.layout + ": its shut door changes the front at " + X + "," + Y);
                 }
             checkedDoors++;
         }
