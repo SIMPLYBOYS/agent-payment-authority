@@ -273,13 +273,17 @@ test("why trustworthy: each item only what a record says, links only on a public
   const ev = A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { purchase: p }), {});
   assert.deepEqual(ev.map((x) => x.label), ["1 委託", "2 選購", "3 核准", "4 付款・預留", "4 付款・結算", "5 交付"]); // the five steps (10/30)
   assert.equal(ev[0].text, "客人已交代 Agent 預算與範圍"); // no DELEGATION_BOUND in these events
-  assert.equal(ev[1].text, "Agent 出示了客人的 BBS+ 憑證，檢查通過（測試發行者）");
+  assert.equal(ev[1].text, "出示客人的憑證，檢查通過（測試發行者）");
   // 10/30: the list says who confirmed, as step 1 does (it said the host's always, against step 1's person's device).
   assert.equal(A.showEvidence(snap(boundEvents("webauthn")), { authenticator: "device" })[0].text, "本人以已登記的裝置確認了委託");
   assert.equal(A.showEvidence(snap(boundEvents("")), {})[0].text, "主持人代為確認委託（示範，不是本人）");
   assert.equal(ev[3].href, "https://sepolia.basescan.org/tx/" + TX1);
   assert.equal(ev[3].text, "0x11111111…111111");
-  assert.match(ev[4].note, /和第 1 筆不是同一筆/);
+  assert.equal(ev[4].note, "第 2 筆・EIP-3009"); // that the two are not one: the receipt card's row
+  // Aaron 11/2: the mechanisms by name, as notes (never a claim the page verified them).
+  assert.equal(ev[1].note, "x402・BBS+");
+  assert.equal(ev[3].note, "第 1 筆・Groth16 ZK 預算證明");
+  assert.equal(ev[5].note, "x402・記錄了交付內容的 sha256");
   assert.ok(!/驗證通過|已驗證|ZK 已/.test(JSON.stringify(ev)), "no 'verified' claim of the page's own");
   const local = A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { cap: "local_anvil", purchase: p }), {});
   assert.equal(local[3].href, "");
