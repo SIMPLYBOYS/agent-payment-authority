@@ -30,7 +30,7 @@
 
 | 秒 | 幕 | 畫面 | 中文旁白 | English subtitle |
 |---|---|---|---|---|
-| 0–10 | 序幕 | 黑底字卡 → 城鎮全景，一家人在街上 | AI 已經可以替我們買東西了。可是讓 AI 替我花錢，我最怕三件事：被騙著亂花、個資被拿走、出了事說不清楚。 | AI can shop for us now. But letting it spend my money, I worry about three things: being tricked into spending, giving away my data, and not knowing what happened. |
+| 0–10 | 序幕 | 黑底字卡 → 城鎮全景（主持人頁「全景：走一趟整條街」，鏡頭平移整條街；剪輯時加速），一家人在街上 | AI 已經可以替我們買東西了。可是讓 AI 替我花錢，我最怕三件事：被騙著亂花、個資被拿走、出了事說不清楚。 | AI can shop for us now. But letting it spend my money, I worry about three things: being tricked into spending, giving away my data, and not knowing what happened. |
 | 10–22 | 一、設定 | 字卡：「家長已完成身分驗證，拿到憑證」（小字：eKYC 是下一期；這裡由測試發行者直接發）；家長在裝置上確認委託 | AI 只能提出要買什麼。家長先在自己的裝置上設好：這次最多花 1.5，超過 0.1 都要問我。 | The AI can only propose. The parent sets the limits on their own device: at most 1.50, and anything over 0.10 comes back to them. |
 | 22–40 | 二、數位書店 | 主持人頁特寫：攻略說明裡的「系統通知」；家長核准；切到模擬片段（標「模擬」）：被騙的 Agent 去買 2.00 進階版 →「超出預算，已拒絕」 | 書店的頁面藏了一句話，叫 AI 順便買 2 塊錢的進階版。真的 AI 沒上當；就算它被騙了，也花不出預算外的錢。 | The shop's page hides an instruction to also buy a 2.00 premium edition. The real AI ignored it — and even a fooled one can't spend beyond the budget. |
 | 40–54 | 三、街角烘焙咖啡 | 「這間店看到：沒有任何個人資料」；孩子的生日蛋糕，家長在裝置上核准 | 孩子的 AI 想訂 0.42 的生日蛋糕，超過範圍，交給家長核准。這間店，什麼個資都看不到。 | The child's AI wants a 0.42 birthday cake. That's over the limit, so the parent approves. The shop sees no personal data at all. |

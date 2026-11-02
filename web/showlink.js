@@ -61,6 +61,7 @@ export function createRelay(onStatus, { channel = new BroadcastChannel(CHANNEL),
     cam(mode, safe) { if (owned) post("cam", { mode, safe: safe || null }); },
     play(consumer) { if (owned) post("play", { consumer: consumer || "" }); },
     steer(x, y) { if (owned) post("steer", { x, y }); },
+    tour() { if (owned) post("tour"); },
     // view: what the audience window shows beside the scene; sent when it changed.
     view(v) {
       const key = JSON.stringify(v);
@@ -72,7 +73,7 @@ export function createRelay(onStatus, { channel = new BroadcastChannel(CHANNEL),
 }
 
 // listen is the audience window's side. handlers: own(on), send2(msg),
-// select2(msg), view(v), and (T4) cam(mode, safe), play(consumer), steer(x, y). It returns report(kind, r) for Unity's reports and
+// select2(msg), view(v), and (T4) cam(mode, safe), play(consumer), steer(x, y), (town v2 V4) tour(). It returns report(kind, r) for Unity's reports and
 // status(s) for this window's Unity state ({ ready, supports2, select }).
 export function listen(handlers, { channel = new BroadcastChannel(CHANNEL), setTimer = setInterval, onLeave = (f) => addEventListener("pagehide", f), now = () => Date.now() } = {}) {
   const id = newId();
@@ -94,6 +95,7 @@ export function listen(handlers, { channel = new BroadcastChannel(CHANNEL), setT
     else if (m.kind === "view" && m.view) handlers.view(m.view);
     else if (m.kind === "cam" && (m.mode === "town" || m.mode === "venue") && handlers.cam) handlers.cam(m.mode, m.safe || null);
     else if (m.kind === "play" && typeof m.consumer === "string" && handlers.play) handlers.play(m.consumer);
+    else if (m.kind === "tour" && handlers.tour) handlers.tour();
     else if (m.kind === "steer" && handlers.steer) handlers.steer(Math.sign(Number(m.x) || 0), Math.sign(Number(m.y) || 0));
   };
   setTimer(() => post("status", state), BEAT_MS);

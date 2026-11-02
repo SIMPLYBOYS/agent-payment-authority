@@ -154,6 +154,14 @@ export class UnityHost {
     this.instance.SendMessage("Bridge", "Steer", JSON.stringify({ x, y }));
   }
 
+  // tour pans the town's camera along the whole street once (town v2 V4): the
+  // video's prologue. Now or never: a tour asked before Unity is ready is dropped.
+  tour() {
+    if (!(this.bridge && this.bridge.pan) || !this.ready || !this.instance) return false;
+    this.instance.SendMessage("Bridge", "Pan", JSON.stringify({ to: "tour" }));
+    return true;
+  }
+
   flush() {
     if (!this.ready || !this.instance) return;
     if (this.pendingPlay) {

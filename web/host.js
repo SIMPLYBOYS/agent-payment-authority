@@ -750,6 +750,7 @@ addEventListener("resize", () => requestAnimationFrame(() => renderPresent())); 
 $("present-toggle").addEventListener("click", () => setPresenting(true));
 $("present-exit").addEventListener("click", () => setPresenting(false));
 $("present-town").addEventListener("click", () => { inTown = true; renderPresent(); });
+$("present-tour").addEventListener("click", () => town().tour());
 
 // ---- 沉浸模式 (Aaron 10/28: "圖卡能夠選擇最小化成按鈕") ----
 // Each card folds into a small button with its name (its own "－"), or all at once by 沉浸模式; the scene
@@ -906,6 +907,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
     return li;
   })));
   $("present-town").hidden = !(hasTown() && !inTown);
+  $("present-tour").hidden = !(hasTown() && inTown && shop().bridge.pan); // town v2 V4: the prologue's pan
   $("present-status").textContent = $("run-status").textContent;
   const steps = $("present-steps");
   steps.hidden = !custs.models.length;

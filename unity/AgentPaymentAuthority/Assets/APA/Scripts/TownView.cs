@@ -71,7 +71,7 @@ namespace APA
         public const string Accent = "#e0582f"; // the page's accent (web/style.css), for the venue numbers
         public const int PPU = ShopView.PPU;
         public const float RoomW = 15f, RoomH = 10f, RoomCX = 5f, RoomCY = 4.5f; // what a venue view shows of its room (ShopBuilder's old camera)
-        public static readonly Vector2 Interior = new Vector2(120f, 0f); // where the room stands, away from the map
+        public static readonly Vector2 Interior = new Vector2(200f, 0f); // where the room stands, away from the map (98 wide, its ground to x 114; V3)
         public static readonly Vector2 RoomDoor = new Vector2(1.5f, 1.2f); // the room's door (every layout's), from the room's origin
         public const float Half = 0.35f; // seconds for the circle to close, and again to open
 
@@ -784,7 +784,7 @@ namespace APA
             Vector2 at;
             // As large as the uncovered part allows (Aaron 10/27, as pixel-office: a fraction where it must be); the
             // town never below one screen pixel per art pixel (a narrow window crops it rather than shrink it).
-            if (shown == "town") { k = Mathf.Max(1f, Fit(s, town.frame.x, town.frame.y)); at = town.focus; }
+            if (shown == "town") { k = Mathf.Max(1f, Fit(s, town.frame.x, town.frame.y)); at = new Vector2(Pan(float.IsNaN(lookX) ? town.focus.x : lookX, k), town.focus.y); }
             else { k = Fit(s, RoomW, RoomH); at = Interior + new Vector2(RoomCX, RoomCY); }
             // The target at the safe part's centre, not the canvas's.
             c = at - (s.center - new Vector2(Screen.width, Screen.height) / 2f) / (k * PPU);
@@ -882,6 +882,44 @@ namespace APA
             return null;
         }
         public Vector2 Focus => town != null ? town.focus : Vector2.zero; // tests
+
+        // The pan (V4, docs/town-v2.md): the town view's centre x. At rest on focus (the three shops); in the
+        // game it follows the walked customer; a tour (the video's prologue) runs from the west end to the
+        // east end and back to focus. Never past the map's ends.
+        float lookX = float.NaN; // NaN: focus
+        readonly Queue<float> tour = new Queue<float>();
+        public static float PanSpeed = 3.5f; // tiles a second on a tour (a test runs it faster)
+        public float LookX => town == null ? 0f : Pan(float.IsNaN(lookX) ? town.focus.x : lookX, Scale); // tests
+        public bool Touring => tour.Count > 0; // tests
+
+        public bool Tour()
+        {
+            if (!HasTown) return false;
+            tour.Clear();
+            lookX = 0f; // from the west end (a cut), then an even pan
+            tour.Enqueue(town.w);
+            tour.Enqueue(town.focus.x);
+            return true;
+        }
+
+        // Pan: x kept so the uncovered part shows nothing past the map's ends; a map narrower than it: its middle.
+        float Pan(float x, float k)
+        {
+            float half = Safe().width / (2f * PPU * k);
+            return town.w <= 2f * half ? town.w / 2f : Mathf.Clamp(x, half, town.w - half);
+        }
+
+        void Follow(float dt)
+        {
+            float k = Scale, now = LookX;
+            float want = Pan(tour.Count > 0 ? tour.Peek() : Player != "" ? PlayerAt.x : town.focus.x, k);
+            // A tour at an even pace; else catching up, quicker the further off (the customer walks at PlayerSpeed).
+            float next = Mathf.MoveTowards(now, want, (tour.Count > 0 ? PanSpeed : Mathf.Max(PanSpeed, 3f * Mathf.Abs(want - now))) * dt);
+            if (tour.Count > 0 && next == want) tour.Dequeue();
+            if (next == lookX) return;
+            lookX = next;
+            Retarget();
+        }
         public float Top(string layout) => venues.TryGetValue(layout ?? "", out var e) ? e.top : 0f; // tests
 
         void LateUpdate()
@@ -907,6 +945,7 @@ namespace APA
                             stands[Player].body.transform.localPosition = DoorOf(left.v) - new Vector2(0f, 0.8f); // out on its step, facing the street
                             pFacing = 3;
                             stands[Player].body.sprite = playerIdle[3];
+                            lookX = PlayerAt.x; // the circle opens on them
                         }
                         Retarget();
                         Cover(true, shown == "town" ? Door() : Inside());
@@ -920,6 +959,7 @@ namespace APA
                 }
                 if (phase != 0) Circle(radius);
             }
+            if (shown == "town" && phase == 0 && town != null) Follow(Time.unscaledDeltaTime);
             if (stands.Count > 0) PlaceStands();
             foreach (var (plate, text) in plates)
             {

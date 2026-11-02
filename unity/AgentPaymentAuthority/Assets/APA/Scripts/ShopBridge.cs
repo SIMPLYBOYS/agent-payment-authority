@@ -16,7 +16,8 @@
 // T2 (docs/commercial-town.md): "View" takes {mode: town | venue, safe} from
 // the page and moves the camera (TownView); in the town view a click on a
 // venue is reported as "venue" with its layout. The page decides what a
-// click starts; the town only shows.
+// click starts; the town only shows. V4 (docs/town-v2.md): "Pan" takes
+// {to: "tour"}: the town's camera from the west end to the east end and back.
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -55,7 +56,7 @@ namespace APA
             if (hasTown) town.Clicked = layout => Report("venue", scene.Scene, 0, layout);
             var rooms = new List<string>(view.LayoutKeys);
             rooms.Sort(System.StringComparer.Ordinal);
-            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers) + ";select=1;layouts=" + string.Join(",", rooms) + (hasTown ? ";town=1;play=1" : ""));
+            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers) + ";select=1;layouts=" + string.Join(",", rooms) + (hasTown ? ";town=1;play=1;pan=1" : ""));
             Report("ready", -1, -1, view.UsingPlaceholders ? "placeholder" : "limezu");
         }
 
@@ -144,6 +145,18 @@ namespace APA
             try { m = JsonUtility.FromJson<PlayMessage>(json); } catch (System.Exception) { }
             bool ok = m != null && town != null && town.Play(m.consumer);
             Report("play", 0, 0, (m != null ? m.consumer ?? "" : "") + "|" + (ok ? "Applied" : "Invalid"));
+        }
+
+        // Pan: {to: "tour"}, the video's prologue: the town's camera pans the whole street once (V4).
+        [System.Serializable]
+        public class PanMessage { public string to; }
+
+        public void Pan(string json)
+        {
+            PanMessage m = null;
+            try { m = JsonUtility.FromJson<PanMessage>(json); } catch (System.Exception) { }
+            bool ok = m != null && m.to == "tour" && town != null && town.Tour();
+            Report("pan", 0, 0, (m != null ? m.to ?? "" : "") + "|" + (ok ? "Applied" : "Invalid"));
         }
 
         public void Steer(string json)

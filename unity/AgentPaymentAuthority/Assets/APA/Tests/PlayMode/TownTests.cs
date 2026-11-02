@@ -278,6 +278,44 @@ public class TownTests
         Assert.IsTrue(tag.enabled && tag.sortingOrder > body.sortingOrder, "its label too");
     }
 
+    // V4 (docs/town-v2.md): the camera pans. A tour runs from the west end to the east end and back to the shops,
+    // on the pixel grid and never past the map's ends; in the game it follows the walked customer.
+    [UnityTest]
+    public IEnumerator TheCameraPansTheStreet()
+    {
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        Assert.AreEqual(town.Focus.x, town.LookX, 0.01f, "at rest on the shops");
+        float half = Screen.width / (2f * TownView.PPU * town.Scale), w = 98f;
+        float speed = TownView.PanSpeed;
+        TownView.PanSpeed = 40f;
+        try
+        {
+            bridge.Pan("{\"to\":\"tour\"}");
+            Assert.AreEqual("pan:0:0:tour|Applied", bridge.reports.Last());
+            Assert.AreEqual(half, town.LookX, 0.01f, "a cut to the west end");
+            float max = float.MinValue;
+            for (float end = Time.realtimeSinceStartup + 20f; town.Touring && Time.realtimeSinceStartup < end;)
+            {
+                yield return null;
+                max = Mathf.Max(max, town.LookX);
+                Crisp();
+            }
+            Assert.IsFalse(town.Touring, "the tour ends");
+            Assert.AreEqual(w - half, max, 0.01f, "to the east end");
+            Assert.AreEqual(town.Focus.x, town.LookX, 0.01f, "and back on the shops");
+        }
+        finally { TownView.PanSpeed = speed; }
+        bridge.Pan("{\"to\":\"north\"}");
+        Assert.AreEqual("pan:0:0:north|Invalid", bridge.reports.Last());
+        // The game: the camera keeps the walked customer in the middle (but at the ends).
+        bridge.Play("{\"consumer\":\"consumer-a\"}");
+        Assert.IsTrue(town.GoTo(town.DoorAt("mart"), "mart"));
+        for (float end = Time.realtimeSinceStartup + 25f; town.RouteLeft > 0 && Time.realtimeSinceStartup < end;) yield return null;
+        for (float end = Time.realtimeSinceStartup + 3f; Mathf.Abs(town.LookX - Mathf.Clamp(town.PlayerAt.x, half, w - half)) > 0.05f && Time.realtimeSinceStartup < end;) yield return null;
+        Assert.AreEqual(Mathf.Clamp(town.PlayerAt.x, half, w - half), town.LookX, 0.05f, "on the customer");
+    }
+
     [UnityTest]
     public IEnumerator TheTownViewAndBack()
     {

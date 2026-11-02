@@ -45,6 +45,7 @@ const link = listen({
   },
   play: (c) => { if (!link.otherWindow) { walking = c; unity.play(c); render(); } },
   steer: (x, y) => { if (!link.otherWindow) unity.steer(x, y); },
+  tour: () => { if (!link.otherWindow) unity.tour(); },
 });
 const tell = () => link.status({ ready: unity.ready, supports2: unity.supports2, select: !!(unity.bridge && unity.bridge.select) });
 unity = new UnityHost($("unity-canvas"), (s, d) => {
