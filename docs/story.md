@@ -1,7 +1,7 @@
 # 故事架構：讓 AI 替我花錢
 
 > 2026-11-02，Claude Code。Aaron 11/2：「舊的企業採購故事，我覺得可以移除掉，我們需要新的故事架構」。前一步的決定見 `docs/commercial-consumer.md`（一家人、三種怕、數位書店、被騙的 Agent）。
-> 本文是展示、影片與文件共用的故事；第 5、6 節要 Aaron 決定。
+> 本文是展示、影片與文件共用的故事。**Aaron 11/2：第 5 節「照建議」**（S1 改三份 fake 情境、停用 E1-a 入口；S2 加身分憑證的字卡；S3 testnet 再跑一次一家人）。
 
 ## 1 一句話
 
@@ -59,3 +59,12 @@
 2. 影片腳本照第 3 節的五幕重寫（已有的 90 秒與 3 分鐘表格改成五幕的順序），錄影計畫改成本機版。
 3. README 與主持人手冊對齊五幕。
 4. （S3）testnet 一家人的實跑與證據包。
+
+## 7 實作（11/2）
+
+- **S1**：`scenarios-p2.json`（`make demo-local`）、`scenarios-testnet.json`（`make demo-testnet`，另保留 test402）、`scenarios-ux3.json`（`make present-ux3`）都換成一家人的七個場次（六個加「被誘導的 Agent」），apa.pay.v2；`present-p2`、`present-testnet` 開啟憑證（`APA_PRESENT_CREDENTIALS=1`）。新的 fake 腳本：`books-guide`、`books-math`、`cafe-cake`。`demo-testnet.sh live L`（E1-a）停用，只剩 `live L town`。舊的 ux3 情境另存為 `scenarios-checks.json`，只給 show-ui、ux3-ui 當固定的測試情境，不在展示中出現。
+- fake testnet 一場要結算 5 筆，多於 P2 host 的商店上限 4（情境檔說明照實寫）；真實 Agent 的城鎮有自己的上限 6。
+- **S2**：影片腳本一、設定加身分憑證的字卡（eKYC 是下一期，這裡由測試發行者直接發）。
+- 影片腳本照五幕重寫；錄影改為本機（`demo-local.sh live`），testnet（S3）另跑給面試現場查證。
+- 驗證：Go 全部、頁面 150、show-ui 33、ux3-ui 38、c2-ui 23。
+- **還沒做**：S3 的 testnet 實跑（Aaron）；以新的 fake 目錄跑一次 `make demo-local`（要 Signer 的密語，Aaron）。

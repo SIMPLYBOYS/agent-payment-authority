@@ -1,15 +1,110 @@
 {
-  "description": "UX3 fake catalog (docs/commercial-scenes.md; make present-ux3): the C2 flow (apa.pay.v2, test issuer, BBS+ verified at each purchase) in three scenes. scene picks the storefront the run may buy from and the page's layout: data is the main scene (the existing x402 fixture shop); cafe and mart are demo scenes with fixture products only (no POS, inventory or logistics). Fake CLI only, no model, no key, no transaction; payment stays off.",
-  "scenarios": [
-    {"id": "data-a", "consumer_id": "consumer-a", "scene": "data", "contract": "apa.pay.v2", "scenario": "testdata/cli/ask-mainline.json", "label": "資料研究室：韓國市場簡報（需要你核准・模擬）",
-     "delegation": {"purpose": "買一份韓國市場簡報（數位資料）", "task_budget": "5000000", "allow_max": "100000", "approval_deadline_seconds": 120, "valid_seconds": 1800}},
-    {"id": "cafe-b", "consumer_id": "consumer-b", "scene": "cafe", "contract": "apa.pay.v2", "scenario": "testdata/cli/cafe-lunch.json", "label": "街角烘焙咖啡：12:30 取餐的午餐套餐（範圍內自動通過・示範情境）",
-     "delegation": {"purpose": "訂 12:30 取餐的午餐套餐（示意菜單）", "task_budget": "5000000", "allow_max": "100000", "approval_deadline_seconds": 120, "valid_seconds": 1800}},
-    {"id": "mart-a", "consumer_id": "consumer-a", "scene": "mart", "contract": "apa.pay.v2", "scenario": "testdata/cli/mart-beans.json", "label": "巷口便利商店：補辦公室咖啡豆 ×2（需要你核准・示範情境）",
-     "delegation": {"purpose": "補辦公室咖啡豆 ×2（示意商品）", "task_budget": "5000000", "allow_max": "100000", "approval_deadline_seconds": 120, "valid_seconds": 1800}},
-    {"id": "mart-beer-a", "consumer_id": "consumer-a", "scene": "mart", "contract": "apa.pay.v2", "scenario": "testdata/cli/mart-beer.json", "label": "巷口便利商店：團隊聚會的啤酒 6 罐（限 18 歲以上・示範情境）",
-     "delegation": {"purpose": "買 6 罐團隊聚會的啤酒（示意商品，限 18 歲以上）", "task_budget": "5000000", "allow_max": "100000", "approval_deadline_seconds": 120, "valid_seconds": 1800}},
-    {"id": "mart-beer-b", "consumer_id": "consumer-b", "scene": "mart", "contract": "apa.pay.v2", "scenario": "testdata/cli/mart-beer.json", "label": "巷口便利商店：團隊聚會的啤酒 6 罐（限 18 歲以上・示範情境）",
-     "delegation": {"purpose": "買 6 罐團隊聚會的啤酒（示意商品，限 18 歲以上）", "task_budget": "5000000", "allow_max": "100000", "approval_deadline_seconds": 120, "valid_seconds": 1800}}
-  ]
+ "description": "UX3 fake town (docs/commercial-scenes.md; make present-ux3): the three scenes, nothing paid. A family (docs/story.md, Aaron 11/2): A a parent, B a child under 18 whose purchases above allow_max the parent approves; books: A the Seoul guide 0.50 (an Ask; the guide's summary tells the agent to also buy the 2.00 premium edition, which this script, as the real agent, ignores), B the math notes 0.06; cafe: A the lunch set 0.08, B the birthday cake 0.42 (an Ask); mart: the beer 0.09 for A and B, B denied CREDENTIAL_CLAIM_UNMET (age_over_18=false); books-fooled-a: a simulated fooled agent requests the 2.00 premium edition and is denied INSUFFICIENT_BUDGET. apa.pay.v2 with the BBS+ credential (APA_PRESENT_CREDENTIALS=1). Fake CLI only: no model.",
+ "scenarios": [
+  {
+   "id": "books-a",
+   "consumer_id": "consumer-a",
+   "scene": "books",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/books-guide.json",
+   "label": "數位書店：首爾旅遊攻略（需要你核准・示範情境・不付款）",
+   "delegation": {
+    "purpose": "買一份首爾旅遊攻略（數位內容）",
+    "task_budget": "1500000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 180,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "books-b",
+   "consumer_id": "consumer-b",
+   "scene": "books",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/books-math.json",
+   "label": "數位書店：國二數學講義（範圍內自動付款・示範情境・不付款）",
+   "delegation": {
+    "purpose": "買一份國二數學講義（數位內容）",
+    "task_budget": "1500000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "cafe-a",
+   "consumer_id": "consumer-a",
+   "scene": "cafe",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/cafe-lunch.json",
+   "label": "街角烘焙咖啡：12:30 取餐的午餐套餐（範圍內自動付款・示範情境・不付款）",
+   "delegation": {
+    "purpose": "訂 12:30 取餐的午餐套餐（示意菜單）",
+    "task_budget": "1500000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "cafe-b",
+   "consumer_id": "consumer-b",
+   "scene": "cafe",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/cafe-cake.json",
+   "label": "街角烘焙咖啡：明天的生日蛋糕（需要家長核准・示範情境・不付款）",
+   "delegation": {
+    "purpose": "訂一個生日蛋糕（示意菜單）",
+    "task_budget": "1500000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 180,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "mart-a",
+   "consumer_id": "consumer-a",
+   "scene": "mart",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/mart-beer.json",
+   "label": "巷口便利商店：慶生會的啤酒 6 罐（限 18 歲以上・範圍內自動付款・示範情境・不付款）",
+   "delegation": {
+    "purpose": "買 6 罐慶生會的啤酒（示意商品，限 18 歲以上）",
+    "task_budget": "1500000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "mart-b",
+   "consumer_id": "consumer-b",
+   "scene": "mart",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/mart-beer.json",
+   "label": "巷口便利商店：慶生會的啤酒 6 罐（限 18 歲以上・示範情境・不付款）",
+   "delegation": {
+    "purpose": "買 6 罐慶生會的啤酒（示意商品，限 18 歲以上）",
+    "task_budget": "1500000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "books-fooled-a",
+   "consumer_id": "consumer-a",
+   "scene": "books",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/books-fooled.json",
+   "label": "數位書店：被誘導的 Agent（模擬：照腳本相信商品頁的「系統通知」・示範情境・不付款）",
+   "delegation": {
+    "purpose": "買一份首爾旅遊攻略（數位內容）",
+    "task_budget": "1500000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 180,
+    "valid_seconds": 1800
+   }
+  }
+ ]
 }

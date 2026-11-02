@@ -119,7 +119,7 @@ present-a2:
 # chain is the local anvil, the keys test keys.
 present-p2:
 	@test -n "$(SIGNER)" || { echo "usage: make present-p2 SIGNER=/path/of/signer.sock AUTH=device|virtual [PAYMENTS=var/p2-local/payments.json] [REGISTRY=var/p2-local/registry.json] (docs/commercial-p2-host.md 12.8)" >&2; exit 2; }
-	@APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$(or $(REGISTRY),var/p2-local/registry.json)" APA_PRESENT_PAYMENTS="$(or $(PAYMENTS),var/p2-local/payments.json)" APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p2.json sh scripts/demo/present.sh fake
+	@APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$(or $(REGISTRY),var/p2-local/registry.json)" APA_PRESENT_PAYMENTS="$(or $(PAYMENTS),var/p2-local/payments.json)" APA_PRESENT_CREDENTIALS=1 APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p2.json sh scripts/demo/present.sh fake
 
 # present-testnet: P2 on the Base Sepolia testnet (docs/commercial-p2b.md 6):
 # SIGNER is the socket of the running apa-signer serve (on /opt, P2b-D2);
@@ -130,7 +130,7 @@ present-p2:
 # new Host database, not the one kept for this Signer socket in var/).
 present-testnet:
 	@test -n "$(SIGNER)" || { echo "usage: make present-testnet SIGNER=/path/of/signer.sock AUTH=device|virtual [HOST=var/p2-testnet/host] (docs/commercial-p2b.md 6)" >&2; exit 2; }
-	@h="$(or $(HOST),var/p2-testnet/host)"; mkdir -p var/p2-testnet/present && chmod 700 var/p2-testnet/present; APA_PRESENT_DIR="$(CURDIR)/var/p2-testnet/present" APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$$h/registry.json" APA_PRESENT_PAYMENTS="$$h/payments.json" APA_PRESENT_PROFILE="$$h/profile.json" APA_PRESENT_SCENARIOS=testdata/demo/scenarios-testnet.json sh scripts/demo/present.sh fake
+	@h="$(or $(HOST),var/p2-testnet/host)"; mkdir -p var/p2-testnet/present && chmod 700 var/p2-testnet/present; APA_PRESENT_DIR="$(CURDIR)/var/p2-testnet/present" APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$$h/registry.json" APA_PRESENT_PAYMENTS="$$h/payments.json" APA_PRESENT_PROFILE="$$h/profile.json" APA_PRESENT_CREDENTIALS=1 APA_PRESENT_SCENARIOS=testdata/demo/scenarios-testnet.json sh scripts/demo/present.sh fake
 
 # E1-a (docs/commercial-e1a.md 6): the live Claude Code Agent on a host
 # that pays on Base Sepolia, from a host directory p2-testnet e1a-host wrote

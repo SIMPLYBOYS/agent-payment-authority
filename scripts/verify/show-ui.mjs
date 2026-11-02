@@ -40,7 +40,7 @@ for (const c of ["demo", "fake-claude", "apa-issuer"]) execFileSync("go", ["buil
 const cred = join(tmp, "cred");
 log(execFileSync(join(bin, "apa-issuer"), ["init", "--dir", cred, "--issuer", "issuer-demo", "--consumers", "consumer-a,consumer-b"]).toString().trim());
 log(execFileSync(join(bin, "apa-issuer"), ["subjects", "--dir", cred, "--subjects", SUBJECTS]).toString().trim()); // docs/commercial-venues.md
-const catalog = join(repo, "testdata/demo/scenarios-ux3.json");
+const catalog = join(repo, "testdata/demo/scenarios-checks.json");
 
 let demo, b, s;
 const showApi = [];

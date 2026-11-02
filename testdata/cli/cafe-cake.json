@@ -1,0 +1,8 @@
+{"description":"The family's bakery cafe (docs/story.md act 3): the child's AI orders the birthday cake 0.42, above allow_max: an Ask the parent approves. The closing text claims a pickup number, which the host must ignore.",
+ "steps":[
+  {"do":"tool","tool":"list_products"},
+  {"do":"tool","tool":"get_quote","args":{"product_id":"cafe-birthday-cake"}},
+  {"do":"tool","tool":"request_purchase","args":{"product_id":"cafe-birthday-cake"}},
+  {"do":"text","text":"Paid. Pickup number 17."},
+  {"do":"result","text":"Ordered tomorrow's birthday cake."}
+ ]}

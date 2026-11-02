@@ -23,7 +23,7 @@ func TestUX3ShippedCatalog(t *testing.T) {
 	}
 	reg, _ := contracts.NewRegistry(regCfg)
 	scs, err := loadScenarios("testdata/demo/scenarios-ux3.json", reg, regCfg, false, false)
-	if err != nil || len(scs) != 5 || scs["mart-beer-b"].Scene != "mart" || scs["data-a"].Scene != "" || scs["cafe-b"].Scene != "cafe" || scs["mart-a"].Scene != "mart" {
+	if err != nil || len(scs) != 7 || scs["mart-b"].Scene != "mart" || scs["books-a"].Scene != "books" || scs["cafe-b"].Scene != "cafe" || scs["mart-a"].Scene != "mart" { // the family (docs/story.md)
 		t.Fatalf("catalog: %v %v", scs, err)
 	}
 	raw, _ := os.ReadFile("testdata/policy/m1-demo-profile.json")
@@ -55,8 +55,8 @@ func TestUX3ShippedCatalog(t *testing.T) {
 	}
 }
 
-// Each scene's run buys its own storefront's product: the cafe's within
-// allow_max is an Allow, the mart's an Ask; the page sees the scene.
+// Each scene's run buys its own storefront's product (the family, docs/story.md): the cafe's lunch and the
+// mart's beer, within allow_max, are Allows; the page sees the scene.
 func TestUX3ScenesEndToEnd(t *testing.T) {
 	path, _ := credDir(t, "consumer-a", "consumer-b")
 	h := controlHost(t, hostOpts{expiryEvery: time.Hour, scenarios: "testdata/demo/scenarios-ux3.json", args: []string{"--credential-dir", path}})
@@ -73,12 +73,12 @@ func TestUX3ScenesEndToEnd(t *testing.T) {
 	for _, s := range st.Runs.Scenarios {
 		scenes[s["id"].(string)] = s["scene"]
 	}
-	if scenes["data-a"] != "data" || scenes["cafe-b"] != "cafe" || scenes["mart-a"] != "mart" {
+	if scenes["books-a"] != "books" || scenes["cafe-b"] != "cafe" || scenes["mart-a"] != "mart" {
 		t.Fatalf("status scenes: %v", scenes)
 	}
 	for i, c := range []struct{ id, sim, product, verdict string }{
-		{"cafe-b", "consumer-b", "cafe-lunch-set", "Allow"},
-		{"mart-a", "consumer-a", "mart-coffee-beans", "Ask"},
+		{"cafe-a", "consumer-a", "cafe-lunch-set", "Allow"},
+		{"mart-a", "consumer-a", "mart-beer-6", "Allow"},
 	} {
 		run := h.delegateAndRunAs(h.simulate(c.sim), c.id, "0"+string(rune('1'+i)), "apa.pay.v2")
 		task := run["task_id"].(string)

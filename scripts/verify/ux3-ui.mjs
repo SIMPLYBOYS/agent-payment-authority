@@ -1,5 +1,5 @@
 // Real-browser check of UX3 (docs/commercial-scenes.md): the host page with
-// the shipped three-scene catalog (testdata/demo/scenarios-ux3.json) and a
+// the shipped three-scene catalog (testdata/demo/scenarios-checks.json) and a
 // credential directory of test keys. The scene is chosen first; each scene
 // shows its own room (Unity's "layout" report), only its scenarios and only
 // its runs' customers. The cafe's lunch set is within the delegation: Allow,
@@ -46,7 +46,7 @@ const cred = join(tmp, "cred");
 const issuer = (...a) => execFileSync(join(bin, "apa-issuer"), [a[0], "--dir", cred, ...a.slice(1)]).toString().trim();
 log(issuer("init", "--issuer", "issuer-demo", "--consumers", "consumer-a,consumer-b"));
 log(issuer("subjects", "--subjects", SUBJECTS)); // the data shop asks for a business buyer (docs/commercial-venues.md)
-const catalog = join(repo, "testdata/demo/scenarios-ux3.json");
+const catalog = join(repo, "testdata/demo/scenarios-checks.json");
 
 let demo, b;
 const missing = new Set();

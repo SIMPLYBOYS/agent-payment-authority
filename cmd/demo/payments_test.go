@@ -244,7 +244,8 @@ func TestP2ShippedCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	scs, err := loadScenarios("testdata/demo/scenarios-p2.json", reg, regCfg, false, false)
-	if err != nil || len(scs) != 5 || scs["books-fooled-a"].Scene != "books" || scs["cafe-a"].Scene != "cafe" || scs["data-b"].Scene != "" || scs["cafe-b"].version() != paycontract.Version {
+	// The family (docs/story.md): three venues, a parent and a child, and the fooled agent; apa.pay.v2.
+	if err != nil || len(scs) != 7 || scs["books-fooled-a"].Scene != "books" || scs["cafe-a"].Scene != "cafe" || scs["books-b"].Scene != "books" || scs["cafe-b"].version() != paycontract.V2 {
 		t.Fatalf("catalog: %v %v", scs, err)
 	}
 	// The shop's prices against the delegations' allow_max, by the product each script buys (Aaron 10/27:
@@ -275,12 +276,12 @@ func TestP2ShippedCatalog(t *testing.T) {
 		if _, ok := price[product]; !ok || scene[product] != sc.Scene {
 			t.Fatalf("%s buys %s, not an offer of its scene %q", id, product, sc.Scene)
 		}
-		if want := map[string]bool{"data-a": false, "data-b": true, "cafe-a": true, "cafe-b": false}[id]; (price[product] <= allow) != want {
+		if want := map[string]bool{"books-a": false, "books-b": true, "cafe-a": true, "cafe-b": false, "mart-a": true, "mart-b": true, "books-fooled-a": false}[id]; (price[product] <= allow) != want {
 			t.Fatalf("%s: %s at %d, allow_max %d: want Allow %v", id, product, price[product], allow, want)
 		}
 		bought[id] = product
 	}
-	if bought["data-a"] == bought["data-b"] || bought["cafe-a"] == bought["cafe-b"] {
+	if bought["books-a"] == bought["books-b"] || bought["cafe-a"] == bought["cafe-b"] { // the mart's two both try the beer
 		t.Fatalf("the two customers of a scene buy the same: %v", bought)
 	}
 	raw, _ := os.ReadFile("testdata/policy/m1-demo-profile.json")
@@ -512,7 +513,7 @@ func TestTestnetShippedCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	scs, err := loadScenarios("testdata/demo/scenarios-testnet.json", reg, regCfg, false, false)
-	if err != nil || len(scs) != 5 {
+	if err != nil || len(scs) != 8 { // the family's seven (docs/story.md) and test402
 		t.Fatalf("catalog: %v %v", scs, err)
 	}
 	x := scs["t402-b"]

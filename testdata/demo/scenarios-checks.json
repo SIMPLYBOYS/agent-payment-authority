@@ -1,0 +1,80 @@
+{
+ "description": "The browser checks' fixed catalog (show-ui, ux3-ui): the three scenes as UX3 had them, kept as a test fixture so the checks test the page, not the story; never presented (docs/story.md §4). UX3 fake catalog (docs/commercial-scenes.md; make present-ux3): the C2 flow (apa.pay.v2, test issuer, BBS+ verified at each purchase) in three scenes. scene picks the storefront the run may buy from and the page's layout: data is the main scene (the existing x402 fixture shop); cafe and mart are demo scenes with fixture products only (no POS, inventory or logistics). Fake CLI only, no model, no key, no transaction; payment stays off.",
+ "scenarios": [
+  {
+   "id": "data-a",
+   "consumer_id": "consumer-a",
+   "scene": "data",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/ask-mainline.json",
+   "label": "資料研究室：韓國市場簡報（需要你核准・模擬）",
+   "delegation": {
+    "purpose": "買一份韓國市場簡報（數位資料）",
+    "task_budget": "5000000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "cafe-b",
+   "consumer_id": "consumer-b",
+   "scene": "cafe",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/cafe-lunch.json",
+   "label": "街角烘焙咖啡：12:30 取餐的午餐套餐（範圍內自動通過・示範情境）",
+   "delegation": {
+    "purpose": "訂 12:30 取餐的午餐套餐（示意菜單）",
+    "task_budget": "5000000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "mart-a",
+   "consumer_id": "consumer-a",
+   "scene": "mart",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/mart-beans.json",
+   "label": "巷口便利商店：補辦公室咖啡豆 ×2（需要你核准・示範情境）",
+   "delegation": {
+    "purpose": "補辦公室咖啡豆 ×2（示意商品）",
+    "task_budget": "5000000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "mart-beer-a",
+   "consumer_id": "consumer-a",
+   "scene": "mart",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/mart-beer.json",
+   "label": "巷口便利商店：團隊聚會的啤酒 6 罐（限 18 歲以上・示範情境）",
+   "delegation": {
+    "purpose": "買 6 罐團隊聚會的啤酒（示意商品，限 18 歲以上）",
+    "task_budget": "5000000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "mart-beer-b",
+   "consumer_id": "consumer-b",
+   "scene": "mart",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/mart-beer.json",
+   "label": "巷口便利商店：團隊聚會的啤酒 6 罐（限 18 歲以上・示範情境）",
+   "delegation": {
+    "purpose": "買 6 罐團隊聚會的啤酒（示意商品，限 18 歲以上）",
+    "task_budget": "5000000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  }
+ ]
+}
