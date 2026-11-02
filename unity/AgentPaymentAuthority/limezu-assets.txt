@@ -174,3 +174,13 @@ x-pose-18-sit-left	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Pre
 x-pose-15-left	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_15.png	384,64,192,64
 x-pose-13-down	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_13.png	576,64,192,64
 x-pose-12-phone	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_12.png	128,384,192,64
+# town v2, the street (docs/town-v2.md V2, Aaron 11/2 "走甲方案"): one row of shop fronts on the north side, a bus stop,
+# a car park and billboards off the road
+x-hardware	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/4_Generic_Building_Singles_32x32/ME_Singles_Generic_Building_32x32_Hardware_Store_Example.png	-
+x-post-1	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/22_Post_Office_Singles_32x32/22_Post_Office_32x32_Building_1.png	-
+x-condo-6	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/4_Generic_Building_Singles_32x32/ME_Singles_Generic_Building_32x32_Condo_6_Example.png	-
+x-terraced-1	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/24_Additional_Houses_Singles_32x32/24_Additional_Houses_Terraced_House_1_32x32.png	-
+x-bus-stop	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Bus_Stop_1.png	-
+x-billboard-5	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Billboard_5.png	-
+x-billboard-8	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Billboard_8.png	-
+x-parking	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/2_City_Terrains_32x32.png	0,256,288,160
