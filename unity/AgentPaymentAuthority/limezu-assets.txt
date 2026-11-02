@@ -186,7 +186,6 @@ x-billboard-8	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x3
 x-hotel	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/12_Hotel_and_Hospital_Singles_32x32/ME_Singles_Hotel_and_Hospital_32x32_Hotel_1.png	-
 x-hotel-sign	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/12_Hotel_and_Hospital_Singles_32x32/ME_Singles_Hotel_and_Hospital_32x32_Hotel_Signboard_1.png	-
 x-gas	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Gas_Station_2.png	-
-x-gas-car	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Gas_Station_Car_1.png	-
 x-gas-price	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Gas_Station_Price_Signboard_1.png	-
 x-camp-sign	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/11_Camping_Singles_32x32/ME_Singles_Camping_32x32_Signboard_1.png	-
 x-tent	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/11_Camping_Singles_32x32/ME_Singles_Camping_32x32_Tent_1.png	-
@@ -198,3 +197,18 @@ x-bay	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/2_City
 x-car-left-2	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Car_Left_2.png	-
 x-car-right-4	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Car_Right_4.png	-
 x-car-left-5	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Car_Left_5.png	-
+# town v2 V5 (docs/town-v2.md): the north-south road's cars (their up and down driving frames) and the east side's passers-by
+x-car-grey-up	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_grey_complete_32x32.png	960,140,64,130;1024,140,64,130;1088,140,64,130;1152,140,64,130;1216,140,64,130;1280,140,64,130
+x-car-green-down	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_green_complete_32x32.png	2272,154,64,134;2336,154,64,134;2400,154,64,134;2464,154,64,134;2528,154,64,134;2592,154,64,134
+x-walk-01	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_01.png	0,128,768,64
+x-walk-03	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_03.png	0,128,768,64
+x-walk-05	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_05.png	0,128,768,64
+# the gas station's callers (town v2 V5, Aaron 11/2: the road's cars call there): westbound, and nose up and down to pull in and out
+x-car-blue-left	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_blue_complete_32x32.png	1344,150,122,74;1504,150,122,74;1664,150,122,74;1824,150,122,74;1984,150,122,74;2144,150,122,74
+x-car-orange-tilt-up	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_orange_complete_32x32.png	132,454,124,84
+x-car-orange-tilt-down	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_orange_complete_32x32.png	128,578,120,90
+x-car-green-tilt-up	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_green_complete_32x32.png	132,454,124,84
+x-car-green-tilt-down	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_green_complete_32x32.png	128,578,120,90
+x-car-blue-left-tilt-up	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_blue_complete_32x32.png	132,454,124,84
+x-car-blue-left-tilt-down	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_blue_complete_32x32.png	128,578,120,90
+x-walk-19	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_19.png	0,128,768,64

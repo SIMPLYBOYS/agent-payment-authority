@@ -154,7 +154,8 @@ public class LayoutTests
         var town = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
         var pieces = town.ground.Concat(town.props).Concat(town.venues.SelectMany(v => v.exterior)).Concat(town.venues.Where(v => v.doorway != null && !string.IsNullOrEmpty(v.doorway.key)).Select(v => v.doorway)).Select(p => p.key)
             .Concat(town.walkers.Concat(town.inside.SelectMany(g => g.people)).Select(w => w.key))
-            .Concat(town.traffic != null ? town.traffic.cars.Select(c => c.key).Concat(town.traffic.lights) : Enumerable.Empty<string>());
+            .Concat(town.traffic != null ? town.traffic.cars.Select(c => c.key).Concat(town.traffic.lights) : Enumerable.Empty<string>())
+            .Concat(town.traffic != null && town.traffic.visit.from > 0f ? town.traffic.cars.Where(c => !c.vertical && c.speed < 0f && c.y == town.traffic.visit.lane).SelectMany(c => new[] { c.key + "-tilt-up", c.key + "-tilt-down" }).Append(town.traffic.visit.attendant) : Enumerable.Empty<string>()); // the gas station's callers turn their noses; its attendant (V5)
         foreach (var k in pieces) CollectionAssert.Contains(keys, k, "town: " + k + " not in limezu-assets.txt");
         // Traffic (review of 54435f5): a crossing walker makes it over within the red; the cars of a lane start apart.
         if (town.traffic != null && town.traffic.cycle.Length == 3)
@@ -166,10 +167,16 @@ public class LayoutTests
                     Vector2 a = w.path[i - 1], b = w.path[i];
                     if (a.x == b.x && a.x >= t.from && a.x <= t.to && Mathf.Min(a.y, b.y) <= t.bottom && Mathf.Max(a.y, b.y) >= t.top)
                         Assert.Less((b - a).magnitude / w.speed + 0.5f, t.cycle[2], "town: " + w.key + " can't cross within the red");
+                    // Over the north-south road at the junction (V5): within the east-west green, the other road's red.
+                    var j = t.junction;
+                    if (j.w > 0f && a.y == b.y && a.y >= j.y && a.y <= j.y + j.h && Mathf.Min(a.x, b.x) <= j.x && Mathf.Max(a.x, b.x) >= j.x + j.w)
+                        Assert.Less((b - a).magnitude / w.speed + 0.5f, t.cycle[0], "town: " + w.key + " can't cross the junction within the green");
                 }
+            float Length(Town.Car c) => c.vertical ? CutSize(c.key).y : CutSize(c.key).x / Mathf.Max(1, c.frames); // along its road
             foreach (var a in t.cars)
                 foreach (var b in t.cars)
-                    if (a != b && a.y == b.y) Assert.GreaterOrEqual(Mathf.Abs(a.x - b.x), (CutSize(a.key).x / Mathf.Max(1, a.frames) + CutSize(b.key).x / Mathf.Max(1, b.frames)) / 2f + 0.8f, "town: " + a.key + " and " + b.key + " start on each other");
+                    if (a != b && a.vertical == b.vertical && (a.vertical ? a.x == b.x : a.y == b.y))
+                        Assert.GreaterOrEqual(a.vertical ? Mathf.Abs(a.y - b.y) : Mathf.Abs(a.x - b.x), (Length(a) + Length(b)) / 2f + 0.8f, "town: " + a.key + " and " + b.key + " start on each other");
             foreach (var c in t.cars)
                 if (HasCut(c.key)) Assert.AreEqual(0, Mathf.RoundToInt(CutSize(c.key).x * 32f) % Mathf.Max(1, c.frames), "town: " + c.key + "'s " + c.frames + " frames don't split its width");
         }
@@ -217,8 +224,8 @@ public class LayoutTests
                 }
     }
 
-    // The game's pavement (Aaron 10/29): in the view's frame, off the buildings, over the road only at the
-    // crossing; the start on it, every door on it, and every door reachable from the start in half-tile steps.
+    // The game's pavement (Aaron 10/29): on the map (the camera follows the customer since town v2 V4), off the
+    // buildings, over the road only at the crossing; the start on it, every door on it, and every door reachable from the start in half-tile steps.
     [Test]
     public void TheGameWalksThePavementToEveryDoor()
     {
@@ -228,7 +235,7 @@ public class LayoutTests
         var t = town.traffic;
         foreach (var a in town.walk)
         {
-            Assert.IsTrue(a.x >= town.focus.x - town.frame.x / 2f && a.x + a.w <= town.focus.x + town.frame.x / 2f && a.y >= town.focus.y - town.frame.y / 2f && a.y + a.h <= town.focus.y + town.frame.y / 2f, "walk " + a.x + "," + a.y + " outside the frame");
+            Assert.IsTrue(a.x >= 0f && a.x + a.w <= town.w && a.y >= 0f && a.y + a.h <= town.h, "walk " + a.x + "," + a.y + " off the map");
             bool road = a.y < t.top && a.y + a.h > t.bottom;
             Assert.IsFalse(road && (a.x < t.from || a.x + a.w > t.to), "walk " + a.x + "," + a.y + " on the road off the crossing");
             foreach (var v in town.venues)

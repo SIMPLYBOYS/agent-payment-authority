@@ -171,7 +171,7 @@ public class TownTests
         for (float end = Time.realtimeSinceStartup + 0.6f; Time.realtimeSinceStartup < end;) yield return null;
         var after = town.WalkerPositions.ToList();
         Assert.IsTrue(before.Zip(after, (a, b) => (a - b).magnitude > 0.05f).Any(m => m), "someone walked");
-        foreach (var p in after) Assert.IsTrue(p.x >= 0f && p.x <= 64f && p.y >= 0f && p.y <= 48f, "on the map: " + p);
+        foreach (var p in after) Assert.IsTrue(p.x >= 0f && p.x <= 98f && p.y >= 0f && p.y <= 48f, "on the map: " + p); // 98: town v2 (V3)
     }
 
     // Aaron 10/27: a clerk and other customers in each shop (illustrative): only that shop's, and never under A or B, who
@@ -500,6 +500,130 @@ public class TownTests
         Assert.IsTrue(moved, "the cars drive");
         Assert.AreEqual(t.cars[0].frames, turned.Count, "their wheels turn: every driving frame shows");
         Assert.IsTrue(crossed, "the walker went over in a cycle");
+    }
+
+    // V5 (docs/town-v2.md): the crossroads. The north-south cars go over it on the east-west red; the east-west ones
+    // stop before it on their red; a walker crosses the north-south road there only on the east-west green; never two
+    // ways at once, never a car onto someone crossing. Two cycles of the lights.
+    [UnityTest]
+    public IEnumerator TheCrossroadsTakesTurns()
+    {
+        var t = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text).traffic;
+        var j = t.junction;
+        Assert.Greater(j.w, 0f, "the town has a junction");
+        Assert.AreEqual(2, town.CrossCars.Count(), "two north-south cars");
+        var start = town.CrossCars.Select(c => c.y).ToList();
+        bool moved = false, crossed = false;
+        var lights = new HashSet<string>();
+        float t0 = Time.time;
+        for (float end = Time.realtimeSinceStartup + 90f; Time.time - t0 < 2f * t.cycle.Sum() && Time.realtimeSinceStartup < end;)
+        {
+            yield return null;
+            var ns = town.CrossCars.ToList();
+            moved |= ns.Select(c => c.y).Zip(start, (a, b) => Mathf.Abs(a - b) > 1f).Any(m => m);
+            bool nsOnRoad = ns.Any(c => c.y + c.half > t.bottom && c.y - c.half < t.top);
+            bool ewOnJunction = town.Cars.Any(c => c.x + c.half > j.x && c.x - c.half < j.x + j.w);
+            Assert.IsFalse(nsOnRoad && ewOnJunction, "both ways on the crossroads at once");
+            lights.Add(town.CrossLight);
+            if (town.Light != "red") Assert.AreEqual("red", town.CrossLight, "the north-south light is red while the east-west one is not");
+            if (nsOnRoad) Assert.AreNotEqual("red", town.CrossLight, "a north-south car on the road only on its green or amber");
+            var w = town.Passer("x-walk-01").at;
+            if (w.x > j.x && w.x < j.x + j.w)
+            {
+                Assert.AreEqual("green", town.Light, "over the north-south road only on the east-west green: " + w);
+                Assert.IsFalse(ns.Any(c => c.y + c.half > j.y && c.y - c.half < j.y + j.h), "no car on the junction while someone crosses it");
+                crossed = true;
+            }
+        }
+        Assert.IsTrue(moved, "the north-south cars drive");
+        CollectionAssert.AreEquivalent(new[] { "green", "amber", "red" }, lights, "the junction's lights go round");
+        Assert.IsTrue(crossed, "a walker went over the north-south road");
+    }
+
+    // V5 (Aaron 11/2: the road's cars call at the gas station): one at a time, a westbound car pulls in to the
+    // pump, the attendant comes over and fills it, and only then it pulls back out into its lane; not always the
+    // same car. Faster than real time.
+    [UnityTest]
+    public IEnumerator CarsCallAtTheGasStation()
+    {
+        var v = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text).traffic.visit;
+        Assert.Greater(v.from, 0f, "the town has the gas station's visits");
+        var called = new HashSet<string>();
+        bool atPump = false, backInLane = false, filled = false;
+        int backs = 0;
+        float scale = Time.timeScale;
+        Time.timeScale = 4f;
+        try
+        {
+            for (float end = Time.realtimeSinceStartup + 150f; (called.Count < 3 || backs < 3) && Time.realtimeSinceStartup < end;) // every westbound car, and three times back into the lane
+            {
+                var before = town.Visitors.ToList();
+                yield return null;
+                var now = town.Visitors.ToList();
+                Assert.LessOrEqual(now.Count, 1, "one at a time");
+                foreach (var (key, at, visit) in now)
+                {
+                    called.Add(key);
+                    Assert.IsTrue(at.x >= v.to - 1e-3f && at.x <= v.from + 1e-3f && at.y >= v.lane - 1e-3f && at.y <= v.y + 1e-3f, "between the lane and the pump: " + at);
+                    atPump |= visit == 2 && Mathf.Abs(at.x - v.at) < 1e-3f && Mathf.Abs(at.y - v.y) < 1e-3f;
+                }
+                bool back = before.Any(b => b.visit == 3) && !now.Any() && town.Cars.Any(c => Mathf.Abs(c.x - v.to) < 0.5f && c.y == v.lane);
+                backInLane |= back;
+                if (back) backs++;
+                // Aaron 11/2: one back from the gas station ran onto another. In a lane, never two on each other.
+                var road = town.Cars.ToList();
+                foreach (var a in road)
+                    foreach (var b in road)
+                        if (a.x < b.x && a.y == b.y) Assert.GreaterOrEqual(b.x - b.half - (a.x + a.half), 0f, "two cars on each other at " + a.x + ", " + b.x);
+                foreach (var (key, at, visit) in now)
+                    if (visit == 3 && at.y < v.lane + 1.2f)
+                        foreach (var b in road) if (b.y == v.lane) Assert.GreaterOrEqual(Mathf.Abs(b.x - at.x) - b.half, 1.5f, key + " pulling out onto " + b.x);
+                var (who, phase) = town.Attendant;
+                if (phase == 2)
+                {
+                    Assert.Less((who - v.side).magnitude, 1e-3f, "filling at the car's side");
+                    Assert.IsTrue(now.Any(n => n.visit == 2), "filling a car that is there");
+                    filled = true;
+                }
+                if (now.Any(n => n.visit == 3) && before.Any(b => b.visit == 2)) Assert.IsTrue(phase == 3 || phase == 0, "it leaves once it has been filled");
+            }
+        }
+        finally { Time.timeScale = scale; }
+        Assert.IsTrue(atPump, "a car stopped at the pump");
+        Assert.IsTrue(filled, "the attendant filled it");
+        Assert.IsTrue(backInLane, "and went back into its lane");
+        Assert.AreEqual(3, called.Count, "not always the same car: " + string.Join(",", called));
+        Assert.GreaterOrEqual(backs, 3, "three times back into the lane");
+    }
+
+    // Aaron 11/2: the cars wait for people. Someone standing on the way in: the car calling stops short of them.
+    [UnityTest]
+    public IEnumerator ACallerWaitsForPeople()
+    {
+        var v = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text).traffic.visit;
+        var them = new Vector2((v.from + v.at) / 2f, v.y + 0.4f);
+        town.AddWalker(new Town.Walker { key = "x-walk-07", speed = 0f, path = new[] { them } });
+        float nearest = float.MaxValue;
+        bool reached = false;
+        float scale = Time.timeScale;
+        Time.timeScale = 4f;
+        try
+        {
+            for (float end = Time.realtimeSinceStartup + 40f; Time.realtimeSinceStartup < end;)
+            {
+                yield return null;
+                foreach (var (_, at, visit) in town.Visitors)
+                {
+                    nearest = Mathf.Min(nearest, at.x);
+                    reached |= visit == 2;
+                    // Its body on the ground: half a car either side, from its wheels up three quarters of its height.
+                    Assert.IsFalse(Mathf.Abs(at.x - them.x) < 1.9f && them.y >= at.y && them.y <= at.y + 1.7f, "its body reached them at " + at);
+                }
+            }
+        }
+        finally { Time.timeScale = scale; }
+        Assert.Less(nearest, v.from, "a car came to call");
+        Assert.IsFalse(reached, "it waited for them rather than go round");
     }
 
     // The game (Aaron 10/29): the person walks A or B; the keys and a click move it over the pavement only; at a

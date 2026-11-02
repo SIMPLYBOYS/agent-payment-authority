@@ -53,9 +53,20 @@ namespace APA
         // Traffic (Aaron 10/28: the signals change, the cars drive): the crossing's x from..to over the road's
         // y bottom..top; the lights' seconds green, amber, red and a prop key for each (the props of the first are
         // the signals); cars along a lane at y, at speed (tiles a second, + east, - west), wrapping round off the map.
-        [System.Serializable] public class Traffic { public float from, to, bottom, top; public float[] cycle = new float[0]; public string[] lights = new string[0]; public Car[] cars = new Car[0]; }
-        // frames: its sheet's driving frames (the wheels turn, Aaron 10/28), played as it goes.
-        [System.Serializable] public class Car { public string key; public float x, y, speed; public int frames; }
+        // junction (town v2 V5, docs/town-v2.md): the crossroads with its two crossings, x over the north-south road,
+        // y from the south crossing to the north one. The east-west cars stop before it as at the crossing; the
+        // north-south cars go over it on their red; a walker crosses the north-south road there on their green.
+        [System.Serializable] public class Traffic { public float from, to, bottom, top; public float[] cycle = new float[0]; public string[] lights = new string[0]; public Car[] cars = new Car[0]; public Area junction = new Area(); public Visit visit = new Visit(); }
+        // frames: its sheet's driving frames (the wheels turn, Aaron 10/28), played as it goes. vertical: along the
+        // north-south road, its lane at x, from y, at speed (+ north, - south).
+        [System.Serializable] public class Car { public string key; public float x, y, speed; public int frames; public bool vertical; }
+        // Visit (town v2 V5, Aaron 11/2: the road's cars call at the gas station): of the cars of the lane at y lane
+        // going west, every so many that come by x from while no one is in pull in, nose up, to the stop at x at,
+        // y; stay; and pull out, nose down, back into the lane at x to once it is clear. The noses are each car
+        // key's "-tilt-up" and "-tilt-down" pieces (drawn facing east: flipped). attendant (a premade's walk row, Aaron
+        // 11/2: someone fills it up): waits at post facing the street; when a car stops, walks to its side, fills it
+        // for fill seconds facing it, and walks back; the car leaves once they are done. None: it stays stay seconds.
+        [System.Serializable] public class Visit { public float lane, from, at, y, to, stay, fill = 4f; public int every = 2; public string attendant; public Vector2 post, side; }
         [System.Serializable] public class Area { public float x, y, w, h; public bool Holds(Vector2 p) => p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h; }
     }
 
@@ -425,6 +436,7 @@ namespace APA
                 int next = s.leg + s.dir;
                 // At the kerb of the crossing: over only on red, with the time to reach the other side.
                 if (p == path[s.leg] && Crosses(path[s.leg], path[next]) && !MayCross((path[next] - p).magnitude / Mathf.Max(0.1f, s.w.speed))) { wait = true; d = path[next] - p; break; }
+                if (p == path[s.leg] && CrossesSide(path[s.leg], path[next]) && !MaySide((path[next] - p).magnitude / Mathf.Max(0.1f, s.w.speed))) { wait = true; d = path[next] - p; break; }
                 bool skip = s.doorOf[next] != null && Busy(s.doorOf[next]); // A or B at that door: on past it, from where it is
                 if (!skip)
                 {
@@ -454,7 +466,7 @@ namespace APA
         }
 
         // ---- traffic ----
-        class CarState { public Town.Car c; public SpriteRenderer r; public Sprite[] frames; public float x, half, rolled; }
+        class CarState { public Town.Car c; public SpriteRenderer r; public Sprite[] frames; public float x, half, rolled; public int visit; public float vy, wait; public bool called, served; public Sprite noseUp, noseDown; } // x: its centre along its road (y for a vertical one); visit: 0 on the road, 1 pulling in, 2 at the stop, 3 pulling out
         readonly List<CarState> cars = new List<CarState>();
         readonly List<SpriteRenderer> signals = new List<SpriteRenderer>();
         Sprite[] lightSprites = new Sprite[0];
@@ -462,7 +474,60 @@ namespace APA
         const float Gap = 0.8f, Line = 0.3f, WheelFrames = 4f; // between cars; the stop line before the crossing; driving frames a tile
         float roadFrom, roadTo; // where the ground ends: a car goes round there, a half car past it (review of 54435f5: a wide view shows -12.7..77)
         public string Light => LightNames[LightState(out _)]; // tests
-        public IEnumerable<(float x, float half, float y, float speed, int frame)> Cars { get { foreach (var c in cars) yield return (c.x, c.half, c.c.y, c.c.speed, System.Array.IndexOf(c.frames, c.r.sprite)); } } // tests
+        readonly List<SpriteRenderer> crossSignals = new List<SpriteRenderer>();
+        const float CrossAmber = 2f;
+        // CrossState: the north-south cars' light: green on the east-west red but for its last seconds, amber then; else red.
+        int CrossState() { int st = LightState(out var left); return st != 2 ? 2 : left > CrossAmber ? 0 : 1; }
+        public string CrossLight => LightNames[CrossState()]; // tests
+        public IEnumerable<(float x, float half, float y, float speed, int frame)> Cars { get { foreach (var c in cars) if (!c.c.vertical && c.visit == 0) yield return (c.x, c.half, c.c.y, c.c.speed, System.Array.IndexOf(c.frames, c.r.sprite)); } } // tests: the east-west ones on the road
+        public IEnumerable<(string key, Vector2 at, int visit)> Visitors { get { foreach (var c in cars) if (c.visit != 0) yield return (c.c.key, new Vector2(c.x, c.vy), c.visit); } } // tests
+        int arrivals; // lane cars come by the gas station: every so many call
+        // The attendant: 0 at the post, 1 on the way to the car, 2 filling it, 3 on the way back.
+        SpriteRenderer att;
+        Sprite[] attFrames;
+        int attPhase, attFrame;
+        float attTick, attLeft;
+        Vector2 attAt;
+        public (Vector2 at, int phase) Attendant => (attAt, attPhase); // tests
+
+        void MakeAttendant(Town.Visit v)
+        {
+            var tex = string.IsNullOrEmpty(v.attendant) ? null : Tex(v.attendant);
+            if (tex == null) return;
+            attFrames = new Sprite[tex.width / 32];
+            for (int i = 0; i < attFrames.Length; i++) attFrames[i] = UnityEngine.Sprite.Create(tex, new Rect(i * 32, 0, 32, tex.height), new Vector2(0.5f, 0f), PPU);
+            att = new GameObject(v.attendant).AddComponent<SpriteRenderer>();
+            att.transform.SetParent(transform, false);
+            attAt = v.post;
+            Tend(0f);
+        }
+
+        // Tend: the attendant's walk: from the post along to the car's side (over, then across) and back.
+        void Tend(float dt)
+        {
+            var v = town.traffic.visit;
+            int facing = 3; // right, up, left, down: at the post, facing the street
+            if (attPhase == 1 || attPhase == 3)
+            {
+                var corner = new Vector2(v.post.x, v.side.y);
+                var to = attPhase == 1 ? (attAt.y != v.side.y ? corner : v.side) : (attAt.x != v.post.x ? corner : v.post);
+                var d = to - attAt;
+                float go = 1.4f * dt;
+                facing = Mathf.Abs(d.x) >= Mathf.Abs(d.y) ? (d.x > 0f ? 0 : 2) : (d.y > 0f ? 1 : 3);
+                attAt = d.magnitude <= go ? to : attAt + d.normalized * go;
+                attTick += dt;
+                if (attTick > 0.1f) { attTick = 0f; attFrame = (attFrame + 1) % 6; }
+                if (attAt == v.side && attPhase == 1) { attPhase = 2; attLeft = v.fill; }
+                if (attAt == v.post && attPhase == 3) attPhase = 0;
+            }
+            if (attPhase == 2) { facing = 2; attLeft -= dt; if (attLeft <= 0f) attPhase = 3; } // facing the car, filling it
+            bool walking = attPhase == 1 || attPhase == 3;
+            att.sprite = attFrames[Mathf.Min(attFrames.Length - 1, facing * 6 + (walking ? attFrame : 0))];
+            att.transform.localPosition = attAt;
+            att.sortingOrder = Order(attAt.y);
+        }
+        public IEnumerable<(float x, float y, float half, float speed)> CrossCars { get { foreach (var c in cars) if (c.c.vertical) yield return (c.c.x, c.x, c.half, c.c.speed); } } // tests: the north-south ones, y their centre
+        float roadBottom, roadTop;
 
         void MakeTraffic()
         {
@@ -470,13 +535,20 @@ namespace APA
             if (t == null || t.cycle.Length != 3 || t.lights.Length != 3) return;
             lightSprites = new Sprite[3];
             for (int i = 0; i < 3; i++) lightSprites[i] = Sprite(t.lights[i], new Vector2(0.5f, 0f));
-            foreach (Transform c in transform) if (c.name == t.lights[0] && c.TryGetComponent<SpriteRenderer>(out var r)) signals.Add(r);
+            foreach (Transform c in transform)
+                if (c.name == t.lights[0] && c.TryGetComponent<SpriteRenderer>(out var r))
+                    (t.junction.w > 0f && c.localPosition.x > t.junction.x - 1.5f && c.localPosition.x < t.junction.x + t.junction.w + 1.5f ? crossSignals : signals).Add(r); // at the junction: the north-south road's
             roadFrom = float.MaxValue; roadTo = float.MinValue;
-            foreach (var g in town.ground) { roadFrom = Mathf.Min(roadFrom, g.x); roadTo = Mathf.Max(roadTo, g.x + g.w); }
+            roadBottom = float.MaxValue; roadTop = float.MinValue;
+            foreach (var g in town.ground) { roadFrom = Mathf.Min(roadFrom, g.x); roadTo = Mathf.Max(roadTo, g.x + g.w); roadBottom = Mathf.Min(roadBottom, g.y); roadTop = Mathf.Max(roadTop, g.y + g.h); }
+            if (t.visit.from > 0f) MakeAttendant(t.visit);
             foreach (var car in t.cars)
             {
                 var r = Piece(transform, new Town.Piece { key = car.key, x = car.x, y = car.y, frames = car.frames }, Order(car.y), new Vector2(0.5f, 0f));
-                if (r != null) cars.Add(new CarState { c = car, r = r, x = car.x, half = r.sprite.bounds.size.x / 2f, frames = Frames(car.key, Mathf.Max(1, car.frames), new Vector2(0.5f, 0f)) });
+                if (r == null) continue;
+                var size = r.sprite.bounds.size;
+                cars.Add(new CarState { c = car, r = r, half = (car.vertical ? size.y : size.x) / 2f, frames = Frames(car.key, Mathf.Max(1, car.frames), new Vector2(0.5f, 0f)), noseUp = Sprite(car.key + "-tilt-up", new Vector2(0.5f, 0f)), noseDown = Sprite(car.key + "-tilt-down", new Vector2(0.5f, 0f)) });
+                cars[cars.Count - 1].x = car.vertical ? car.y + cars[cars.Count - 1].half : car.x;
             }
         }
 
@@ -497,11 +569,30 @@ namespace APA
             return t != null && t.cycle.Length == 3 && a.x == b.x && a.x >= t.from && a.x <= t.to && Mathf.Min(a.y, b.y) <= t.bottom && Mathf.Max(a.y, b.y) >= t.top;
         }
 
+        bool HasJunction => town != null && town.traffic != null && town.traffic.junction.w > 0f;
+        // Over the north-south road at the junction: a level leg from one side of it to the other.
+        bool CrossesSide(Vector2 a, Vector2 b)
+        {
+            if (!HasJunction || a.y != b.y) return false;
+            var j = town.traffic.junction;
+            return a.y >= j.y && a.y <= j.y + j.h && Mathf.Min(a.x, b.x) <= j.x && Mathf.Max(a.x, b.x) >= j.x + j.w;
+        }
+
+        // MaySide: green for the east-west cars (so the north-south ones wait) with the time to cross left, and none of those on the junction.
+        bool MaySide(float seconds)
+        {
+            if (LightState(out var left) != 0 || left < seconds + 0.5f) return false;
+            foreach (var c in cars) if (c.c.vertical && OnJunction(c)) return false;
+            return true;
+        }
+
+        bool OnJunction(CarState c) { var j = town.traffic.junction; return c.x + c.half > j.y && c.x - c.half < j.y + j.h; } // a vertical one
+
         // MayCross: red for the cars with the time to cross left, and no car on the crossing.
         bool MayCross(float seconds)
         {
             if (LightState(out var left) != 2 || left < seconds + 0.5f) return false;
-            foreach (var c in cars) if (c.x + c.half > town.traffic.from && c.x - c.half < town.traffic.to) return false;
+            foreach (var c in cars) if (!c.c.vertical && c.x + c.half > town.traffic.from && c.x - c.half < town.traffic.to) return false;
             return true;
         }
 
@@ -509,6 +600,8 @@ namespace APA
         {
             int st = LightState(out var left);
             foreach (var r in signals) r.sprite = lightSprites[st];
+            foreach (var r in crossSignals) r.sprite = lightSprites[CrossState()];
+            if (att != null) Tend(dt);
             if (cars.Count == 0) return;
             var t = town.traffic;
             bool someoneOn = false; // a walker on the crossing: every car waits at the line
@@ -519,29 +612,125 @@ namespace APA
                 if (p.x > t.from - Line && p.x < t.to + Line && p.y > t.bottom && p.y < t.top) someoneOn = true;
             }
             if (Player != "" && PlayerAt.x > t.from - Line && PlayerAt.x < t.to + Line && PlayerAt.y > t.bottom && PlayerAt.y < t.top) someoneOn = true; // the person's customer crosses when it likes: the cars wait
+            var j = t.junction;
+            bool junction = HasJunction, crossBusy = false, sideOn = false, eastWestOn = false;
+            if (junction)
+            {
+                foreach (var c in cars) if (c.c.vertical ? OnJunction(c) : c.x + c.half > j.x && c.x - c.half < j.x + j.w) { if (c.c.vertical) crossBusy = true; else eastWestOn = true; }
+                foreach (var w in walkers)
+                {
+                    if (w.room || w.inside >= 0f) continue;
+                    var p = (Vector2)w.r.transform.localPosition;
+                    if (j.Holds(p) && p.x > j.x && p.x < j.x + j.w) sideOn = true;
+                }
+                if (Player != "" && j.Holds(PlayerAt)) sideOn = true;
+            }
             foreach (var c in cars)
             {
+                if (c.visit != 0) { Call(c, dt); continue; }
                 float dir = Mathf.Sign(c.c.speed), front = c.x + dir * c.half;
-                float toLine = ((dir > 0 ? t.from - Line : t.to + Line) - front) * dir;
                 float room = float.MaxValue; // how far its front may go
-                // Amber: one that would be over the crossing before red goes on; red, or someone on the crossing: it stops at the line.
-                bool over = (toLine + t.to - t.from + 2f * c.half + Line) / Mathf.Abs(c.c.speed) < left;
-                if (toLine > -0.01f && (someoneOn || st == 2 || st == 1 && !over)) room = Mathf.Max(0f, toLine); // -0.01: one stopped on the line is still before it (float error)
+                if (c.c.vertical)
+                {
+                    // Over the junction only on the east-west red, with the time to be over it; never onto someone crossing.
+                    float toEdge = ((dir > 0 ? j.y - Line : j.y + j.h + Line) - front) * dir;
+                    bool clears = (toEdge + j.h + 2f * c.half + Line) / Mathf.Abs(c.c.speed) < left;
+                    if (toEdge > -0.01f && (st != 2 || !clears || sideOn || eastWestOn)) room = Mathf.Max(0f, toEdge);
+                }
+                else
+                {
+                    // The crossing, or the junction if it comes first: the nearest line ahead.
+                    float toLine = ((dir > 0 ? t.from - Line : t.to + Line) - front) * dir, len = t.to - t.from;
+                    bool blocked = someoneOn;
+                    if (junction)
+                    {
+                        float toJ = ((dir > 0 ? j.x - Line : j.x + j.w + Line) - front) * dir;
+                        if (toJ > -0.01f && (toLine <= -0.01f || toJ < toLine)) { toLine = toJ; len = j.w; blocked = crossBusy; }
+                    }
+                    // Amber: one that would be over before red goes on; red, or someone on it: it stops at the line.
+                    bool over = (toLine + len + 2f * c.half + Line) / Mathf.Abs(c.c.speed) < left;
+                    if (toLine > -0.01f && (blocked || st == 2 || st == 1 && !over)) room = Mathf.Max(0f, toLine); // -0.01: one stopped on the line is still before it (float error)
+                }
                 foreach (var o in cars)
                 {
-                    if (o == c || o.c.y != c.c.y) continue;
+                    if (o == c || o.c.vertical != c.c.vertical || (c.c.vertical ? o.c.x != c.c.x : o.c.y != c.c.y)) continue;
+                    if ((o.visit == 1 || o.visit == 2) && o.vy > o.c.y + 1.2f) continue; // off the lane, at the gas station; one pulling out is in the way
+                    // Ahead by its centre: so one caught alongside (review, Aaron 11/2: a car back from the gas station on another) waits till it is clear.
                     float back = (o.x - dir * o.half - front) * dir;
-                    if (back >= 0f) room = Mathf.Min(room, back - Gap);
+                    if ((o.x - c.x) * dir > 0f) room = Mathf.Min(room, Mathf.Max(0f, back - Gap));
                 }
                 float go = Mathf.Abs(c.c.speed) * dt * Mathf.Clamp(room / 1.5f, 0.3f, 1f); // slows to a stop
                 go = Mathf.Clamp(go, 0f, Mathf.Max(0f, room));
+                float was = c.x;
                 c.x += dir * go;
+                var v = t.visit;
+                if (v.from > 0f && !c.c.vertical && dir < 0f && c.c.y == v.lane && was > v.from && c.x <= v.from && ++arrivals % Mathf.Max(1, v.every) == 0 && !cars.Exists(o => o.visit != 0))
+                    { c.visit = 1; c.vy = v.lane; }
                 c.rolled = (c.rolled + go) % (c.frames.Length / WheelFrames); // round and round: a float that only grows would freeze the wheels after days
                 c.r.sprite = c.frames[(int)(c.rolled * WheelFrames) % c.frames.Length]; // the wheels turn as far as it goes: still when it stops
-                if (dir > 0f && c.x > roadTo + c.half) c.x = roadFrom - c.half;
-                if (dir < 0f && c.x < roadFrom - c.half) c.x = roadTo + c.half;
-                c.r.transform.localPosition = new Vector2(c.x, c.c.y);
+                float lo = c.c.vertical ? roadBottom : roadFrom, hi = c.c.vertical ? roadTop : roadTo;
+                if (dir > 0f && c.x > hi + c.half) c.x = lo - c.half;
+                if (dir < 0f && c.x < lo - c.half) c.x = hi + c.half;
+                if (!c.c.vertical) { c.r.transform.localPosition = new Vector2(c.x, c.c.y); continue; }
+                c.r.transform.localPosition = new Vector2(c.c.x, c.x - c.half);
+                c.r.sortingOrder = Order(c.x - c.half);
             }
+        }
+
+        // Call: a car at the gas station: in, nose up, slowing to the stop; there a while; out, nose down, once
+        // the lane is clear behind and ahead; then on its way again. People in its way: it waits.
+        void Call(CarState c, float dt)
+        {
+            var v = town.traffic.visit;
+            Sprite nose = null;
+            float go = 0f;
+            if (c.visit == 2)
+            {
+                // With an attendant: they come over and fill it; it goes when they have done (and stepped back a moment).
+                if (att != null && !c.served)
+                {
+                    if (!c.called && attPhase == 0) { attPhase = 1; c.called = true; }
+                    if (c.called && attPhase == 3) { c.served = true; c.wait = 0.6f; } else c.wait = 1f;
+                }
+                c.wait -= dt;
+                // The lane clear ahead, and behind as far as a car comes while it pulls out (about 4 seconds).
+                bool clear = !cars.Exists(o => o != c && !o.c.vertical && o.visit == 0 && o.c.y == v.lane && o.x > v.to - 5f && o.x < v.to + 20f);
+                if (c.wait <= 0f && clear) { c.visit = 3; c.called = c.served = false; }
+            }
+            else
+            {
+                bool @in = c.visit == 1;
+                float end = @in ? v.at : v.to;
+                // Where it is on the way at x, and how far along (0..1): in, it reaches the pump's row by three quarters of the way.
+                float U(float x) => @in ? (v.from - x) / (v.from - v.at) : (v.at - x) / (v.at - v.to);
+                float Y(float x) => @in ? Mathf.SmoothStep(v.lane, v.y, U(x) / 0.75f) : Mathf.SmoothStep(v.y, v.lane, U(x));
+                go = Mathf.Abs(c.c.speed) * dt * (@in ? Mathf.Clamp((c.x - end) / 2f, 0.25f, 1f) : 0.6f); // slows to the stop; out gently
+                // Someone where it is or a little further along its way: it waits.
+                var size = c.r.sprite.bounds.size;
+                float ahead = Mathf.Max(end, c.x - 1.2f);
+                Rect a = Footprint(new Vector2(c.x, c.vy), size), b = Footprint(new Vector2(ahead, Y(ahead)), size);
+                if (InTheWay(Rect.MinMaxRect(Mathf.Min(a.xMin, b.xMin), Mathf.Min(a.yMin, b.yMin), Mathf.Max(a.xMax, b.xMax), Mathf.Max(a.yMax, b.yMax)))) go = 0f;
+                c.x = Mathf.Max(end, c.x - go);
+                c.vy = Y(c.x);
+                float u = U(c.x);
+                if (@in ? u > 0.06f && u < 0.68f : u > 0.12f && u < 0.85f) nose = @in ? c.noseUp : c.noseDown;
+                if (c.x <= end) { if (@in) { c.visit = 2; c.wait = v.stay; } else { c.visit = 0; c.vy = v.lane; } }
+            }
+            c.rolled = (c.rolled + go) % (c.frames.Length / WheelFrames);
+            c.r.sprite = nose != null ? nose : c.frames[(int)(c.rolled * WheelFrames) % c.frames.Length];
+            c.r.flipX = nose != null; // the turn's pieces face east
+            c.r.transform.localPosition = new Vector2(c.x, c.vy);
+            c.r.sortingOrder = Order(c.visit == 0 ? c.c.y : c.vy);
+        }
+
+        // Footprint: a car's body at p as drawn, from its wheels up three quarters of its height, and a little room.
+        static Rect Footprint(Vector2 p, Vector2 size) => new Rect(p.x - size.x / 2f - 0.3f, p.y - 0.3f, size.x + 0.6f, size.y * 0.75f + 0.3f);
+
+        // InTheWay: a passer-by, or the person's customer, in that box (Aaron 11/2: the car waits for people).
+        bool InTheWay(Rect box)
+        {
+            foreach (var w in walkers) if (!w.room && w.inside < 0f && box.Contains(w.r.transform.localPosition)) return true;
+            return Player != "" && box.Contains(PlayerAt);
         }
 
         // ---- A and B at their venue's door, while they are in it (Aaron 10/27: gone once the task ends) ----

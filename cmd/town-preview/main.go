@@ -98,7 +98,7 @@ func load(limezu, key string, frames int) image.Image {
 	}
 	if a[1] != "-" && a[1] != "" {
 		var r [4]int
-		for i, s := range strings.Split(a[1], ",") {
+		for i, s := range strings.Split(strings.Split(a[1], ";")[0], ",") { // a strip of frames: its first
 			r[i], _ = strconv.Atoi(strings.TrimSpace(s))
 		}
 		sub := image.NewRGBA(image.Rect(0, 0, r[2], r[3]))
