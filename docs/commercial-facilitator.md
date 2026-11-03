@@ -74,4 +74,12 @@ Agent → Host（付款流程）→ 商店：PAYMENT-SIGNATURE
 - Host：付款設定多 `facilitator_url`，只接受本機迴路位址上的 `apa-facilitator`（`http://127.0.0.1:PORT`）或 Base Sepolia 上的 `https://x402.org/facilitator`。有設定時，Host 不載入商店金鑰、不問它的密語；啟動前 `GET /supported` 必須列出這條鏈的 v2 `exact`，否則不啟動；開場前檢查的「商店今天送了幾筆」改問 `apa-facilitator` 的 `GET /health`（x402.org 沒有，不顯示）。沒有設定時照舊在 Host 裡結算。
 - `cmd/apa-facilitator serve --payments FILE [--listen 127.0.0.1:8403]`：讀 Host 同一份付款設定檔裡需要的欄位；testnet 的規則與 Host 相同（https 的公開節點、至少 2 個確認、每日上限、`shop_key_dir`）；只聽本機迴路位址；金鑰在 testnet 是 `shop_key_dir`（密語從終端機問），本機是 `anvil_keys.shop_gas`；結算資料庫是設定檔 `dir` 裡的 `settle.db`（0600）；`GET /health` 回今天送了幾筆與每日上限。
 - 測試：`TestPaidOnAnvil` 分成兩條，同一筆付款在本機 anvil 上，一條商店自己結算、一條經 facilitator 結算，都交付；商店端 3 項（facilitator 沒回應、`/verify` 拒絕、確認數夠了才交付且只呼叫一次 `/settle`）；Host 的設定規則（5 種 `facilitator_url`）與經 facilitator 啟動（不問商店密語、facilitator 不支援這條鏈或沒回應時不啟動、額度來自 facilitator）；`apa-facilitator` 在本機 anvil 上啟動與 6 種拒絕啟動。相關套件 270 項全過。
-- **還沒做（FA2 之二）**：腳本。`demo-local.sh`、`make demo-local`、`demo-testnet.sh` 要先啟動 `apa-facilitator`、在付款設定寫入 `facilitator_url`；testnet 上「商店金鑰的密語」改在 facilitator 那一步輸入。
+
+**FA2（二）腳本（11/3）**
+- `present.sh`：付款設定的 `facilitator_url` 是 `http://127.0.0.1:PORT` 時，先建置並啟動 `apa-facilitator`（同一份設定檔、那個位址；輸出寫到場次目錄的 `facilitator.log`），`/supported` 回應了才啟動 Host；那個位址已有程式在回應就不啟動。Host 停了、或按 Ctrl-C，facilitator 一起停。`facilitator_url` 是 x402.org 或沒有設定時，什麼都不多啟動。
+- 新寫的付款設定都帶 `facilitator_url: http://127.0.0.1:8403`：`p2-local`、`p2-testnet deploy`、`p2-testnet e1a-host`（新的場次標籤，`make demo-local` 的 live 也是用它建 `live-標籤`）。`demo-local.sh` 的 fake 每次另寫一份 `場次/host/payments.json`（鏈的檔加上 `facilitator_url`，0600），所以沿用保留的鏈也經 facilitator；鏈自己的檔不動。
+- **保留下來的設定檔照舊在 Host 裡結算**：`var/p2-testnet/host`（`make demo-testnet` 的 fake）、已有的 `testnet-town-t1`～`t4`、之前建好的 `live-標籤`。它們的證據包是那時候的做法，不改寫；要經 facilitator 就用新的標籤。
+- testnet 上經 facilitator 時，商店金鑰的密語在 Host 啟動前、由 `apa-facilitator` 問（`apa-facilitator shop key passphrase:`），Host 不再問。
+- 啟動前檢查：`demo-local.sh`、`demo-testnet.sh` 多查 8403 有沒有被占用。
+- `apa-facilitator` 只在有 `shop_key_dir` 時要求金鑰等於 `pay_to`：本機的 `pay_to`（`0x3333…`）沒有金鑰，gas 由 anvil 的 key 4 付，與原本 Host 裡結算相同。
+- 驗證：本機新鏈上跑一次 `p2-local` 與 `apa-facilitator`：設定檔帶 `facilitator_url`；`/supported` 列出 `eip155:84532` 的 `exact`；`/health` 就緒、今天 0 筆；錯誤的 `/settle` 回 400；`settle.db` 是 0600。相關 8 個套件全過。**還沒跑**：完整的 `make demo-local`（要 Signer 的密語，Aaron）。

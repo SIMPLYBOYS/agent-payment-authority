@@ -97,7 +97,8 @@ func run(ctx context.Context, args []string, out io.Writer, pass func() ([]byte,
 	if err != nil {
 		return err
 	}
-	if key.Addr != sc.PayTo {
+	// The shop's key file is the payee's (P2b-D3: it pays its own gas and is paid); anvil's gas key is not (local pay_to has no key).
+	if c.ShopKeyDir != "" && key.Addr != sc.PayTo {
 		return fmt.Errorf("the shop key is %s, not pay_to %s (the shop pays its own gas and is paid; P2b-D3)", key.Addr.Hex(), sc.PayTo.Hex())
 	}
 	st, err := merchant.OpenSettler(ctx, sc, key, rpc, filepath.Join(c.Dir, "settle.db"), func() uint64 { return uint64(time.Now().Unix()) })

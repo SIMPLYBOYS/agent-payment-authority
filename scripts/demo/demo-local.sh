@@ -40,7 +40,7 @@ live) echo "$label" | grep -Eq '^[a-z0-9]{1,12}$' || stuck "參數：live 要一
 esac
 
 # Before anything starts: the ports free and no Signer left over.
-for p in 8545 8402; do
+for p in 8545 8402 8403; do # 8403: apa-facilitator (FA2)
   if lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null 2>&1; then stuck "啟動前：127.0.0.1:$p 已有程式在用（上一次沒停乾淨？lsof -nP -iTCP:$p 看是誰）"; fi
 done
 if [ -e "$sock" ]; then
@@ -104,7 +104,13 @@ say "1/3 本機鏈就緒：$(grep -E '^p2-local: (resumed|wrote)' "$logs/chain.l
       { say "卡在第 3 步：Host 停了（上面是它的訊息）；全部停下"; kill -TERM 0; }
   else
     say "3/3 Host 啟動中（fake Agent；頁面會自動打開；配對碼在下面）"
-    APA_PRESENT_DIR=$base/host make present-p2 SIGNER="$sock" AUTH=device PAYMENTS="$chain/payments.json" REGISTRY="$chain/registry.json" ||
+    # FA2 (docs/commercial-facilitator.md): the kept chain's file, with the shop settling through apa-facilitator
+    # (present.sh starts it first); the chain's own file is left as it is.
+    mkdir -p -m 700 "$base/host"
+    python3 -I -c 'import json,sys; p=json.load(open(sys.argv[1])); p["facilitator_url"]="http://127.0.0.1:8403"; open(sys.argv[2],"w").write(json.dumps(p,indent=2)+"\n")' \
+      "$chain/payments.json" "$base/host/payments.json" && chmod 600 "$base/host/payments.json" ||
+      { say "卡在第 3 步：寫不出 Host 的付款設定（$base/host/payments.json）；全部停下"; kill -TERM 0; }
+    APA_PRESENT_DIR=$base/host make present-p2 SIGNER="$sock" AUTH=device PAYMENTS="$base/host/payments.json" REGISTRY="$chain/registry.json" ||
       { say "卡在第 3 步：Host 停了（上面是它的訊息）；全部停下"; kill -TERM 0; }
   fi
 ) &

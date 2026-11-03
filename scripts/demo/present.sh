@@ -138,6 +138,35 @@ if [ -n "$creds" ]; then
 		stop "憑證的客人屬性寫入失敗；沒有啟動任何程式"
 	echo "present: 撤銷某個 task 的憑證：${w}/apa-issuer revoke --dir ${cred} --task <task_id>（測試金鑰；host 每 300 秒自動更新清單）" >&2
 fi
+# FA2 (docs/commercial-facilitator.md): a payments file naming our own facilitator (http://127.0.0.1:PORT)
+# runs apa-facilitator first, from the same file, on that address; the Host settles through it and holds no
+# shop key. On the testnet it asks the shop key's passphrase here, before the Host starts.
+fac=
+fpid=
+if [ -n "$payments" ]; then
+	fac=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("facilitator_url", ""))' "$payments") ||
+		stop "讀不出 ${payments} 的 facilitator_url"
+	case $fac in
+	http://127.0.0.1:[0-9]*) ;;
+	*) fac= ;; # none (the Host settles itself), or another facilitator (x402.org's): nothing to start here
+	esac
+fi
+if [ -n "$fac" ]; then
+	"$GO" build -o "$w/apa-facilitator" ./cmd/apa-facilitator || stop "apa-facilitator 建置失敗；沒有啟動任何程式"
+	curl -s -m 2 "$fac/supported" >/dev/null 2>&1 && stop "${fac} 已經有程式在回應（另一個 apa-facilitator？）；先停下它"
+	grep -q '"shop_key_dir"' "$payments" && echo "present: facilitator：請輸入商店金鑰的密語" >&2
+	# Its passphrase prompt is on the terminal itself (/dev/tty); what it prints goes to its log.
+	"$w/apa-facilitator" serve --payments "$payments" --listen "${fac#http://}" >"$w/facilitator.log" 2>&1 &
+	fpid=$!
+	i=0
+	until curl -s -m 2 "$fac/supported" >/dev/null 2>&1; do
+		kill -0 "$fpid" 2>/dev/null || { tail -3 "$w/facilitator.log" >&2; stop "apa-facilitator 在就緒前結束（密語不對、或上面的訊息；${w}/facilitator.log）"; }
+		i=$((i + 1))
+		[ "$i" -lt 3000 ] || { kill "$fpid" 2>/dev/null; stop "apa-facilitator 5 分鐘內沒有就緒"; }
+		sleep 0.1
+	done
+	echo "present: facilitator 就緒 ${fac}（tx#2 由它送出；Host 不持有商店金鑰）" >&2
+fi
 # What the binary says of its source, as Go recorded it (a modified tree says so).
 "$GO" version -m "$w/demo" 2>/dev/null | grep -E 'vcs\.(revision|modified|time)' | tr -s '\t ' ' ' >"$w/build.txt"
 echo "present: 場次 ${w}；建置：$(tr '\n' ' ' <"$w/build.txt")" >&2
@@ -169,7 +198,9 @@ else
 		--trace-dir "$runs" --unity-build "$proj/Build/WebGL/Build" --pairing --ready-file "$w/ready.json" "$@" &
 fi
 pid=$!
-trap 'kill -INT "$pid" 2>/dev/null' INT TERM
+# The facilitator goes with the Host: stopped when it is, or when this is.
+stopfac() { [ -z "$fpid" ] || kill -INT "$fpid" 2>/dev/null; }
+trap 'kill -INT "$pid" 2>/dev/null; stopfac' INT TERM
 
 # Ready means this process says so: its ready file, with its own pid.
 # With payments the host may first ask the shop key's passphrase on this
@@ -180,7 +211,9 @@ i=0
 while :; do
 	if ! kill -0 "$pid" 2>/dev/null; then
 		wait "$pid"
-		stop "host 在就緒前結束（exit $?）；沒有開啟頁面，也沒有重試（場次目錄 ${w} 保留）"
+		rc=$?
+		stopfac
+		stop "host 在就緒前結束（exit ${rc}）；沒有開啟頁面，也沒有重試（場次目錄 ${w} 保留）"
 	fi
 	if [ -f "$w/ready.json" ] && grep -q "\"pid\":${pid}[,}]" "$w/ready.json"; then
 		break
@@ -189,6 +222,7 @@ while :; do
 	if [ "$i" -ge "$limit" ]; then
 		kill -INT "$pid" 2>/dev/null
 		wait "$pid"
+		stopfac
 		stop "$((limit / 10)) 秒內沒有就緒；已停止本次啟動的 host"
 	fi
 	sleep 0.1
@@ -205,4 +239,5 @@ while kill -0 "$pid" 2>/dev/null; do
 	wait "$pid"
 	rc=$?
 done
+stopfac
 exit "$rc"

@@ -809,6 +809,9 @@ func (f hostFiles) write(budget eth.Address, from uint64, out io.Writer) error {
 		"token_name": f.tok.name, "token_version": f.tok.version, "token_from_block": from, "pay_to": f.shop.Hex(), "budget_contract": budget.Hex(),
 		"policy_ttl": policyTTL, "zkbudget": o.zkbudget, "zk_setup_dir": f.zk, "relayer_socket": sock,
 		"shop_key_dir": o.dir, "shop_daily_tx_cap": shopCap, "dir": host,
+		// FA2 (docs/commercial-facilitator.md): the shop settles through apa-facilitator, which present.sh
+		// starts first (the shop key's passphrase asked there); the Host holds no shop key.
+		"facilitator_url": "http://127.0.0.1:8403",
 		// By consumer and payee (B5): a purchase from a payee no line names starts
 		// no payment. New IDs: /opt's signer.db may know dlg-a/dlg-b (P2b-D5).
 		"delegations": f.delegations()}
@@ -1115,6 +1118,8 @@ func e1aHost(args []string, out io.Writer) error {
 	if *shopCap > 0 { // the town's three venues settle 5 (docs/commercial-venues.md D5, Aaron 10/30)
 		pay["shop_daily_tx_cap"] = *shopCap
 	}
+	// FA2: a new run set settles through apa-facilitator (present.sh starts it), whatever its source's file says.
+	pay["facilitator_url"] = "http://127.0.0.1:8403"
 	files := map[string]any{"payments.json": pay, "registry.json": t}
 	if prof != nil {
 		files["profile.json"] = prof

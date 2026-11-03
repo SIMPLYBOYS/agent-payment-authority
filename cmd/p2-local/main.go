@@ -148,9 +148,11 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	pay := map[string]any{"rpc": *rpcURL, "chain_id": chainID, "confirmations": 1, "token": asset.Hex(), "token_name": reg.Assets[0].EIP712Name,
 		"token_version": reg.Assets[0].EIP712Version, "token_from_block": 0, "pay_to": reg.MerchantPayTo, "budget_contract": budget.Hex(),
 		"policy_ttl": 600, "zkbudget": abs(root, *zkbudget), "zk_setup_dir": filepath.Join(root, "zk/setup"),
-		"anvil_keys":  map[string]int{"relayer_gas": 3, "issuer": 1, "policy": 2, "shop_gas": 4},
-		"dir":         abs(root, *outDir),
-		"delegations": map[string]string{"consumer-a": "dlg-a@1", "consumer-b": "dlg-b@1"}}
+		"anvil_keys": map[string]int{"relayer_gas": 3, "issuer": 1, "policy": 2, "shop_gas": 4},
+		// FA2 (docs/commercial-facilitator.md): the shop settles through apa-facilitator, which present.sh starts first.
+		"facilitator_url": "http://127.0.0.1:8403",
+		"dir":             abs(root, *outDir),
+		"delegations":     map[string]string{"consumer-a": "dlg-a@1", "consumer-b": "dlg-b@1"}}
 	reg.Wallets[ia].From, reg.Wallets[ib].From = a.Hex(), b.Hex()
 	if _, err := contracts.NewRegistry(reg); err != nil {
 		return fmt.Errorf("the written registry: %w", err)

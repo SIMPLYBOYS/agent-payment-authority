@@ -42,6 +42,7 @@ esac
 
 # Before anything starts.
 if lsof -nP -iTCP:8402 -sTCP:LISTEN >/dev/null 2>&1; then stuck "啟動前：127.0.0.1:8402 已有程式在用（上一個 Host？）"; fi
+if lsof -nP -iTCP:8403 -sTCP:LISTEN >/dev/null 2>&1; then stuck "啟動前：127.0.0.1:8403 已有程式在用（上一個 apa-facilitator？）"; fi # FA2
 [ -f "$tn/relayer.json" ] || stuck "啟動前：沒有 $tn/relayer.json（P2-b 的部署）"
 if [ -S "$ssock" ]; then
   if answers "$ssock"; then stuck "啟動前：/opt 的 Signer 已在跑（$ssock）"; fi

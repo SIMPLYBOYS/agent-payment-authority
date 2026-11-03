@@ -47,7 +47,8 @@ func TestServesOnALocalAnvil(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "p2")
 	os.Mkdir(dir, 0o700)
 	path := payments(t, map[string]any{"environment": "local_anvil", "rpc": rpc.URL, "chain_id": ethtest.Chain, "confirmations": 1,
-		"token": usdc.Hex(), "token_name": "USDC", "token_version": "2", "pay_to": shop.Addr.Hex(), "anvil_keys": map[string]int{"shop_gas": 4},
+		// As p2-local writes it: the registry's payee (no key) paid, anvil's key 4 paying the gas.
+		"token": usdc.Hex(), "token_name": "USDC", "token_version": "2", "pay_to": "0x3333333333333333333333333333333333333333", "anvil_keys": map[string]int{"shop_gas": 4},
 		"shop_daily_tx_cap": 5, "dir": dir})
 	ctx, cancel := context.WithCancel(context.Background())
 	out := &lines{}

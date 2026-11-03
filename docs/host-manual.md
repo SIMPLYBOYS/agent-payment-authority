@@ -50,7 +50,7 @@
    3. `apa-relayer passphrase:`：relayer 的密語；
    4. **開場前檢查**（自動）：印出 `preflight:` 開頭的幾行，今天的筆數與餘額。不夠時會停下並說哪一項不夠（第 6.1 節）；
    5. `Password:` 若再問一次，還是登入密碼；然後 `apa-signer passphrase:`：錢包的密語；
-   6. `demo shop key passphrase:`：商店金鑰的密語。
+   6. `demo shop key passphrase:`：商店金鑰的密語。新的場次（經 `apa-facilitator` 結算）改在 Host 啟動前問，先印 `present: facilitator：請輸入商店金鑰的密語`，再出現 `apa-facilitator shop key passphrase:`；是同一組密語。
 2. 頁面打開後配對。
 
 ### 配對
