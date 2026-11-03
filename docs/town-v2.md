@@ -1,7 +1,7 @@
 # 城鎮 v2：更大的城鎮、旅館與加油站、更精緻的街道
 
 > 2026-11-02，Claude Code。Aaron 11/2：「希望能夠再擴充整個 demo 城鎮的規模，需要再增加像是 hotel，加油站等，另外道路與商店的風格也希望能夠部份類似截圖，目前的道路與人行道與路樹的佈局還是有些不精緻」；附 LimeZu 範例地圖四張（旅館、披薩與冰淇淋街區、市集街角、加油站與露營區）。
-> 本文是設計與草圖，還沒改程式；第 6 節要 Aaron 決定。
+> 第 1～6 節是設計與草圖（Aaron 11/2：T1～T4「照建議」）；第 7 節是實作，V1～V6 已完成。
 
 ## 1 素材
 
@@ -128,3 +128,8 @@
   - 北側人行道那位路人改從停著的車前面走過（不再穿過車子）；車道往東延伸到加油站東緣，那段人行道的路燈與樹穴拿掉。
 - 預覽工具：多影格素材畫第一格。
 - 驗證：Unity EditMode 24／PlayMode 52（新增 `TheCrossroadsTakesTurns`、`CarsCallAtTheGasStation`、`ACallerWaitsForPeople`）、WebGL。
+
+**V6 收尾（11/3）**
+- 截圖腳本 `scripts/verify/town-shots.mjs`：fake 主機（不付款）、Unity Web build、headless Chrome 的 1920×1080 展示視窗：三間店（靜止）、全景平移沿路、遊戲模式客人 A 往東走過旅館與十字路口到加油站，在加油站停一分鐘每 5 秒一張。輸出在 `artifacts/town-v2/shots-<commit>/`（git 不追蹤）。
+- headless Chrome 只在截圖時讓 Unity 跑一格，平移的速度在截圖裡不準（比實際快好幾倍）；全景的那幾張只是沿路的畫面。實際速度由 PlayMode `TheCameraPansTheStreet` 驗證。
+- 截圖看到：加油員在車尾加油、車貼著油槍島；東西向紅燈時東行車停在路口前、南北向車通行；剛轉紅時，還在路口裡的東西向車會先開出去（南北向車等它）。
