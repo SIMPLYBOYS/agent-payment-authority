@@ -2,7 +2,11 @@ package verification
 
 import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
@@ -89,13 +93,64 @@ func TestDelegationsByDevice(t *testing.T) {
 
 // The checker knows the town's live entries too (docs/commercial-live-town.md L4), each with its task and v2.
 func TestE1aCatalogHasTheTown(t *testing.T) {
-	c, err := e1aCatalog("../..")
+	c, err := e1aCatalog("../..", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"e1a-ask", "e1a-deny", "e1a-inject", "town-data-a", "town-data-b", "town-cafe-a", "town-cafe-b"} {
 		if e, ok := c[id]; !ok || e.Task == "" || e.Contract != "apa.pay.v2" {
 			t.Errorf("%s: %+v %v", id, e, ok)
+		}
+	}
+}
+
+// A pack is checked against the catalogs as they were at its commit (Aaron 11/3: the family's wording failed
+// the S5 pack's E6): a task changed since keeps its older text; a commit this repository lacks, or no commit,
+// reads them as they are now; a catalog not yet there at the commit has no entries.
+func TestE1aCatalogAtThePacksCommit(t *testing.T) {
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(task string) {
+		dir := filepath.Join(repo, "testdata/demo")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		raw := `{"scenarios":[{"id":"town-data-a","task":"` + task + `","contract":"apa.pay.v2"}]}`
+		if err := os.WriteFile(filepath.Join(dir, "scenarios-town-live.json"), []byte(raw), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init", "-q")
+	write("買一份韓國市場簡報。")
+	git("add", ".")
+	git("commit", "-q", "-m", "s5")
+	old := git("rev-parse", "HEAD")
+	write("幫我買一份首爾旅遊攻略。")
+	git("commit", "-q", "-am", "family")
+	write("working tree")
+	if err := os.WriteFile(filepath.Join(repo, "testdata/demo/scenarios-e1a.json"), []byte(`{"scenarios":[]}`), 0o644); err != nil { // the other live catalog: never committed here
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ commit, want string }{
+		{old, "買一份韓國市場簡報。"},
+		{git("rev-parse", "HEAD"), "幫我買一份首爾旅遊攻略。"},
+		{strings.Repeat("0", 40), "working tree"}, // not in this repository
+		{"", "working tree"},
+		{"--output=x", "working tree"}, // never an option to git
+	} {
+		c, err := e1aCatalog(repo, tc.commit)
+		if err != nil {
+			t.Fatalf("%q: %v", tc.commit, err)
+		}
+		if got := c["town-data-a"].Task; got != tc.want {
+			t.Errorf("%q: task %q, want %q", tc.commit, got, tc.want)
 		}
 	}
 }

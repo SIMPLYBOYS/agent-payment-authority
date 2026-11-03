@@ -419,3 +419,9 @@ E1-a 的範圍外仍是 `not_evaluated`：checker 自行重驗 BBS+ proof、語�
 **E1a-2 的 review**：REQUEST CHANGES，沒有 Critical；已確認 live 主機上模擬核准不能決定 Ask（兩道檢查：只能確認委託的模擬者、有 Signer 時 `simResolve` 一律拒絕）。修正：live 各模式允許什麼集中在 `hostRoles`（有測試與 mutation）；live 啟動紀錄寫實際的標籤與付款狀態；兩個新的拒絕啟動條件有測試；頁面上按鈕寫「確認委託（模擬）」，只能確認委託時不讀核准清單（第二輪 review 發現頁面沒有收到 `delegation_only`，`web/hostcreds.js` 已改為傳遞並加測試）；`present.sh` 的說明與 live 目錄（不付款的 live 主機仍只用 `scenarios-live.json`）。
 
 **要在本機彩排確認的**：v2 的 Ask 經本人核准再付款（見 E1a-3）。live 付款主機沒有 profile 時，目前會用預設的 demo profile（Policy 之後會因商家不符而拒絕，不會付錯）；`make present-e1a` 一定帶 profile。提示詞的 SHA 由 E1a-5 的證據包記錄。這些需要一個同時有 live CLI、Signer 與鏈的 Host，單元測試做不到。
+
+**checker e1a.4（11/3）：情境檔讀證據包那個 commit 的版本**
+- 問題：E6 用 `buyer.PayingTaskPrompt` 重算付款 Agent 的提示，情境檔原本讀 checker 的工作目錄。11/2 改成一家人的故事（`b419d99`）時，同一批情境 ID 的任務文字換掉了，S5 的 `testnet-town-t4` 在 Base Sepolia 上重新查證時 E6 FAIL（另外九項 PASS）；README「自己查證」與面試現場的查證都會失敗。
+- 修正：manifest 的 `code_commit` 在這個 repo 的 git 歷史裡時，兩份可信的 live 情境檔（`scenarios-e1a.json`、`scenarios-town-live.json`）改讀**那個 commit 的版本**（`git show`）；那時還沒有的情境檔就沒有項目；repo 裡沒有那個 commit 或沒有 commit 時，照舊讀工作目錄。commit 只接受 40 位十六進位，不會被 git 當成選項。情境檔仍然只從 checker 自己的 repo 讀，不採信證據包。
+- 驗證：`TestE1aCatalogAtThePacksCommit`（暫存 repo：舊 commit 讀舊任務、新 commit 讀新任務、未知 commit 與空字串讀工作目錄、`--output=x` 不當選項）；`testnet-town-t4` 對 Base Sepolia **E1～E10 全部 PASS**；`rehearsal-town2`、`town3`、`town4` 的 E6 PASS。
+- 限制：要有完整的 git 歷史（淺層 clone 沒有舊 commit，就會退回讀工作目錄）；`Verifier.json` 仍讀工作目錄（`var/contracts/out/`），合約若改了，舊證據包的 E4 會遇到同樣的問題。

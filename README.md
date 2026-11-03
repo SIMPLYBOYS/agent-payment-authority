@@ -29,7 +29,7 @@ Base Sepolia 上的一場實跑（2026-10-31，真實 Claude Code Agent、兩位
 go run ./cmd/verify-demo --mode e1a --run-dir artifacts/e1a/testnet-town-t4 --rpc https://sepolia.base.org
 ```
 
-E1～E10 全部 PASS。證據包不進版控（`artifacts/`），要的話向作者索取。
+E1～E10 全部 PASS（checker e1a.4，11/3 重新查證）。證據包不進版控（`artifacts/`），要的話向作者索取。checker 會讀證據包記錄的那個 commit 的情境檔，所以要用完整的 git clone，不能用淺層 clone。
 
 ## 現況
 

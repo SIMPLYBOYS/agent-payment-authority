@@ -16,6 +16,7 @@ import (
 	"maps"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -33,7 +34,7 @@ import (
 // E1aVersion is the pack's version; E1aChecker this checker's rules.
 const (
 	E1aVersion = "apa.e1a.v1"
-	E1aChecker = "e1a.3"
+	E1aChecker = "e1a.4"
 )
 
 // E1aClaims are §4.5's claims.
@@ -153,6 +154,7 @@ var e1aLimits = []string{
 	"event and intent hashes and registry bindings use the pay contract's own pure functions: a fault there is shared",
 	"tx#2 is tied to its intent only through the Store's records and the EIP-3009 nonce, not by the chain",
 	"the paying host's prompt is buyer.PayingTaskPrompt, the host's own function: a change to it moves the host and this check together",
+	"the live catalogs are this repository's at the pack's code_commit (as they are now when the repository has no such commit): the pack names the commit its runs ran",
 	"the secret scan finds key shapes (hex) and fields never whitelisted; a base64 secret is not recognized",
 }
 
@@ -183,7 +185,7 @@ func VerifyE1a(dir, repo string, chain Chain) (*E1aReport, error) {
 	if !ok {
 		return r, nil
 	}
-	catalog, err := e1aCatalog(repo)
+	catalog, err := e1aCatalog(repo, m.Commit)
 	if err != nil {
 		return nil, err
 	}
@@ -763,15 +765,37 @@ func walkJSON(key string, v any, leaf func(key, val string)) {
 // and the town on the real Agent (docs/commercial-live-town.md L4).
 var liveCatalogs = []string{"testdata/demo/scenarios-e1a.json", "testdata/demo/scenarios-town-live.json"}
 
-// e1aCatalog is the trusted live catalogs' entries by ID; an ID in two of
-// them is refused, as a run's entry would be either.
-func e1aCatalog(repo string) (map[string]e1aEntry, error) {
+// e1aCatalog is the trusted live catalogs' entries by ID, as they were at
+// the pack's commit when this repository has it: a later story keeps an
+// older pack's tasks (Aaron 11/3: the family's wording failed the S5 pack's
+// E6); else as they are now. A catalog not yet there at that commit has no
+// entries. An ID in two of them is refused, as a run's entry would be either.
+func e1aCatalog(repo, commit string) (map[string]e1aEntry, error) {
+	git := func(args ...string) ([]byte, error) {
+		return exec.Command("git", append([]string{"-C", repo}, args...)...).Output()
+	}
+	atCommit := false
+	if commitPattern.MatchString(commit) { // hex only: never an option to git
+		_, err := git("cat-file", "-e", commit+"^{commit}")
+		atCommit = err == nil
+	}
 	out := map[string]e1aEntry{}
 	for _, file := range liveCatalogs {
 		var c struct {
 			Scenarios []e1aEntry `json:"scenarios"`
 		}
-		if err := readTrustedJSON(repo, file, &c); err != nil {
+		if atCommit {
+			if _, err := git("cat-file", "-e", commit+":"+file); err != nil {
+				continue
+			}
+			raw, err := git("show", commit+":"+file)
+			if err != nil {
+				return nil, fmt.Errorf("live catalog %s at %s: %w", file, commit, err)
+			}
+			if err := json.Unmarshal(raw, &c); err != nil {
+				return nil, fmt.Errorf("live catalog %s at %s: %w", file, commit, err)
+			}
+		} else if err := readTrustedJSON(repo, file, &c); err != nil {
 			return nil, err
 		}
 		for _, e := range c.Scenarios {
