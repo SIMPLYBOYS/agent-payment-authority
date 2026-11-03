@@ -17,6 +17,8 @@ Agent 開始替人花錢了。錢包知道「花多少」，卻不知道「為�
 - **付款** 是兩筆 Base Sepolia 交易：Groth16 證明預留預算，再以 EIP-3009 結算 test USDC。
 - **checker** 只讀證據包與鏈，獨立判定 E1～E10。
 
+**這是什麼**：一個場域模擬，讓商業決策者在幾分鐘內親身看到 web3 結合 AI Agent 的付款場景；付款、核准與證據都是真的，但它不是產品。**定位**：x402 處理報價、付款與結算；這一層證明這筆錢是為了哪個任務、依哪份委託、經過哪條規則與哪一次本人核准才付出去的。跟 Coinbase CDP／AP2／ERC-8366 等的差別、能說與不能說：[docs/positioning.md](docs/positioning.md)。
+
 架構、一筆付款怎麼走、威脅模型與限制：[docs/architecture.md](docs/architecture.md)。
 
 ## 自己查證
@@ -33,7 +35,7 @@ E1～E10 全部 PASS。證據包不進版控（`artifacts/`），要的話向作
 
 - 真實 Agent 在 Base Sepolia 上完成付款與交付；本人以裝置確認委託、以裝置加語音核准；ZK 預算預留；checker 向鏈查證通過。
 - 一家人的城鎮（家長與未滿 18 歲的孩子；數位書店、街角烘焙咖啡、巷口便利商店）：每間店只看到它要的資料，孩子的 AI 買酒在付款前被擋下，被商品頁誘導的 Agent 花不到預算外的錢（`docs/commercial-consumer.md`）。
-- 照實說的限制（issuer／holder／verifier 同一程序、兩位核准人同一人、沒有抗合成語音、只在測試鏈）：[docs/architecture.md](docs/architecture.md#照實說的限制)。
+- 照實說的限制（issuer／holder／verifier 同一程序、兩位核准人同一人、沒有抗合成語音、只在測試鏈、x402 只做 `exact` 且商店自己結算、Policy 沒有頻率限制）：[docs/architecture.md](docs/architecture.md#照實說的限制)。
 - 進度與完成清單：[docs/commercial-gap-review.md](docs/commercial-gap-review.md) §9；過去的里程碑紀錄：[docs/status-history.md](docs/status-history.md)。
 
 ---

@@ -36,7 +36,7 @@
 | 40–54 | 三、街角烘焙咖啡 | 「這間店看到：沒有任何個人資料」；孩子的生日蛋糕，家長在裝置上核准 | 孩子的 AI 想訂 0.42 的生日蛋糕，超過範圍，交給家長核准。這間店，什麼個資都看不到。 | The child's AI wants a 0.42 birthday cake. That's over the limit, so the parent approves. The shop sees no personal data at all. |
 | 54–66 | 四、巷口便利商店 | 家長的啤酒交付；孩子的卡片「不符合這間店的要求」 | 便利商店賣酒，只問一件事：滿 18 歲了嗎？孩子的 AI 想買，付款前就被擋下，錢沒有動。 | At the corner store, beer needs one fact: over 18? The child's AI tries, and it stops before any money moves. |
 | 66–80 | 終幕 | 可信度區逐步亮起（Groth16 ZK、EIP-3009 的標籤）；收據卡 | 每一步都留下證據：零知識證明預留預算、鏈上結算、交付留下收據。 | Every step leaves evidence: a zero-knowledge proof reserves the budget, settlement lands on chain, delivery leaves a receipt. |
-| 80–90 | 終幕 | 終端機 E1～E10 PASS → 結尾字卡（名字、repo） | 出了事，任何人都能自己查證。 | And if anything goes wrong, anyone can check for themselves. |
+| 80–90 | 終幕 | 終端機 E1～E10 PASS → 結尾字卡：定位句（`docs/positioning.md` §1）、名字、repo | 出了事，任何人都能自己查證。 | And if anything goes wrong, anyone can check for themselves. |
 
 ## 4 3 分鐘完整版
 
@@ -48,8 +48,8 @@
 | 60–105 | 二、數位書店：被騙著亂花 | 攻略報價（x402）與藏起來的「系統通知」；這間店看到「國家 台灣」；家長核准；tx#1、tx#2、收據；模擬：被騙的 Agent 被拒 | 書店只知道你在哪個國家；超過範圍由本人核准；誘導文字騙不倒真實的 AI，就算騙倒了也花不出預算外的錢。孩子的講義 0.06 在範圍內，自動付款。 | The bookshop learns only your country; the person approves above the limit; the trap didn't fool the real AI, and a fooled one still can't overspend. The child's 0.06 notes pay on their own. |
 | 105–130 | 三、烘焙咖啡：個資 | 「這間店看到：沒有任何個人資料」；孩子的蛋糕由家長核准；家長的午餐自動付款 | 買蛋糕不需要知道你是誰。孩子的大額購買，由家長核准。 | Buying a cake needs nothing about you. The child's bigger purchase goes to the parent. |
 | 130–150 | 四、便利商店：個資＋安全 | 家長「已滿 18 歲」交付；孩子「未滿 18 歲」被擋下 | 同一份憑證，在這裡只說「滿不滿 18 歲」，不給生日。孩子的 AI 買酒，付款前就被擋下。 | The same credential says only "over 18 or not", never a birth date. The child's AI is stopped before paying. |
-| 150–168 | 終幕：說得清楚 | 終端機 `verify-demo`；E1～E10 逐條 PASS | 查帳不用相信這個系統：只讀證據、向鏈重算，十項全部通過。 | The check trusts none of this system: it reads the evidence, recomputes against the chain, and all ten pass. |
-| 168–180 | 照實說與結尾 | 字卡：限制；名字 | 這段在本機鏈與測試幣上錄；被騙那一段是模擬；身分憑證由測試發行者發，eKYC 是下一期；語音挑戰只在 testnet 版。下一步是…… | Recorded on a local chain with test coins; the fooled agent is a simulation; the credential comes from a test issuer, eKYC is next; the voice challenge is in the testnet version only. |
+| 150–168 | 終幕：說得清楚 | 終端機 `verify-demo`；E1～E10 逐條 PASS；字卡：「也會在付款前擋下：商家不在名單、委託或授權過期、重放用過的授權」 | 查帳不用相信這個系統：只讀證據、向鏈重算，十項全部通過。影片演了兩種被擋下的情況；商家不在名單、授權過期、重放用過的授權，也都會在付款前被擋下，都有自動測試。 | The check trusts none of this system: it reads the evidence, recomputes against the chain, and all ten pass. Beyond the two refusals shown, an unlisted shop, an expired authorization and a replayed one are all stopped before paying, and each is covered by tests. |
+| 168–180 | 照實說與結尾 | 字卡：限制；定位句（`docs/positioning.md` §1）；名字 | x402 處理付款；這一層證明這筆錢是為了哪個任務、經過誰的同意才付出去的。這段在本機鏈與測試幣上錄；被騙那一段是模擬；身分憑證由測試發行者發，eKYC 是下一期；語音挑戰只在 testnet 版。下一步是…… | x402 moves the money; this layer proves who allowed it, for what, and within which limits. Recorded on a local chain with test coins; the fooled agent is a simulation; the credential comes from a test issuer, eKYC is next; the voice challenge is in the testnet version only. |
 
 結尾的「下一步」由 Aaron 決定。
 
