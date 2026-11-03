@@ -64,7 +64,9 @@ function anchor(text, href) {
   a.rel = "noopener noreferrer";
   return a;
 }
-const wrap = (x) => { const dd = el("dd", ""); dd.append(x); return dd; };
+const wrap = (...x) => { const dd = el("dd", ""); dd.append(...x); return dd; };
+// parts: a row of named addresses, each its explorer page where it has one.
+const parts = (r) => r.parts.flatMap((x, i) => [...(i ? [r.sep] : []), x.name + " ", x.href ? anchor(x.text, x.href) : x.text]);
 
 function render() {
   const v = lastView;
@@ -75,7 +77,7 @@ function render() {
   $("show-title").textContent = phase === "town" ? "城鎮" : v.venue ? A.venue(v.venue).name : "示範商店";
   $("show-network").textContent = A.networkText(v.payments) + (there ? "" : "・主持人頁未連線（停在最後狀態）");
   const queue = A.showQueue((v.customers || []).map((c) => ({ ...A.showCustomer(c.consumer, c.snapshot, c.delegation, v),
-    evidence: A.showEvidence(c.snapshot, v, c.chain), receipt: A.showReceipt(c.snapshot, v) })), v.payments);
+    evidence: A.showEvidence(c.snapshot, v, c.chain), receipt: A.showReceipt(c.snapshot, v, c.chain) })), v.payments);
   const shown = queue.models;
   // Redrawn only when something changed: the captions are a live region.
   const chk = A.showChecker(v.checker);
@@ -134,7 +136,7 @@ function render() {
     card.dataset.consumer = m.consumer;
     card.append(el("h3", "", m.name + "・" + m.receipt.title));
     const dl = el("dl", "");
-    for (const r of m.receipt.rows) dl.append(el("dt", "", r.label), r.href ? wrap(anchor(r.text, r.href)) : el("dd", "", r.text));
+    for (const r of m.receipt.rows) dl.append(el("dt", "", r.label), r.parts ? wrap(...parts(r)) : r.href ? wrap(anchor(r.text, r.href)) : el("dd", "", r.text));
     card.append(dl);
     return card;
   }));

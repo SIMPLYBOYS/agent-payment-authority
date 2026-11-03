@@ -313,6 +313,22 @@ test("the receipt card: only once delivered with a receipt; two transactions, no
   assert.equal(rows["付款"].href, "https://sepolia.basescan.org/tx/" + TX2);
   assert.equal(rows["兩筆交易"].text, "不是同一筆，也不是一次完成");
   assert.equal(rows["內容摘要"].text, "sha256 cccccccccccc…");
+  assert.equal(rows["錢包"], undefined, "no address known: no row");
+  // Aaron 11/3: the wallets and the contracts on the explorer too: the payer and the budget contract from the Host's chain read.
+  const PAYER = "0x" + "A1".repeat(20), SHOP = "0x" + "b2".repeat(20), USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e", BUDGET = "0x" + "c3".repeat(20);
+  const chain = { payer: PAYER, contract: BUDGET };
+  const withAddr = { purchase: { ...p, pay_to: SHOP, asset_contract: USDC } };
+  const a = Object.fromEntries(A.showReceipt(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], withAddr), {}, chain).rows.map((x) => [x.label, x]));
+  assert.deepEqual(a["錢包"].parts.map((x) => [x.name, x.text, x.href]), [["客人", "0xA1A1…A1A1", "https://sepolia.basescan.org/address/" + PAYER.toLowerCase()],
+    ["商店", "0xb2b2…b2b2", "https://sepolia.basescan.org/address/" + SHOP]]);
+  assert.equal(a["錢包"].text, "客人 0xA1A1…A1A1 → 商店 0xb2b2…b2b2");
+  assert.deepEqual(a["合約"].parts.map((x) => [x.name, x.href]), [["USDC", "https://sepolia.basescan.org/address/" + USDC.toLowerCase()], ["預算", "https://sepolia.basescan.org/address/" + BUDGET]]);
+  const local = Object.fromEntries(A.showReceipt(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { ...withAddr, cap: "local_anvil" }), {}, chain).rows.map((x) => [x.label, x]));
+  assert.ok(local["錢包"].parts.every((x) => x.href === ""), "a local chain has no explorer page");
+  const noChain = Object.fromEntries(A.showReceipt(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], withAddr), {}).rows.map((x) => [x.label, x]));
+  assert.deepEqual(noChain["錢包"].parts.map((x) => x.name), ["商店"], "before the chain read: the shop only");
+  assert.deepEqual(noChain["合約"].parts.map((x) => x.name), ["USDC"]);
+  assert.equal(A.addressLink("base_sepolia", "0x12"), null);
   assert.equal(A.productName("https://x/scenes/cafe/lunch-set"), "午餐套餐（12:30 取餐）");
   assert.equal(A.productName("https://x/eval/q-17?v=1"), "評測資料（q-17）");
   assert.equal(A.productName("not a url"), "商品");

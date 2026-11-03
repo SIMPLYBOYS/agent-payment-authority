@@ -141,6 +141,10 @@ func TestChainViewUsesTheTasksPayerAndEachShop(t *testing.T) {
 	if tr := out.Purchases["po-1"].Settle.Transfer; tr == nil || !tr.ToShop || out.Purchases["po-1"].Reserve != nil {
 		t.Fatalf("po-1: %+v", out.Purchases["po-1"])
 	}
+	// The addresses to look up: the task's payer as 0x hex (lower case), the token; no budget contract known, none said.
+	if out.Payer != payer.Hex() || out.Token != token.Hex() || out.Contract != "" {
+		t.Fatalf("addresses: payer %q token %q contract %q", out.Payer, out.Token, out.Contract)
+	}
 	rec.Task.Purchases[0].PayTo = eth.Address{0x44}.Hex() // another shop than the transfer's
 	c.kept = map[string]chainTx{}
 	if out, _ := c.view(context.Background(), "local_anvil", rec); out.Purchases["po-1"].Settle.Transfer.ToShop {

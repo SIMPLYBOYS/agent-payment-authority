@@ -11,6 +11,8 @@ export const UNKNOWN = "未知／未提供";
 export const PAYING = { local_anvil: "本機 anvil", base_sepolia: "Base Sepolia testnet" };
 // EXPLORER (E1-a): a public chain's transaction page; a local anvil has none.
 export const EXPLORER = { base_sepolia: "https://sepolia.basescan.org/tx/" };
+// EXPLORER_ADDRESS: an address's page there (Aaron 11/3: the wallets and the contracts too).
+export const EXPLORER_ADDRESS = { base_sepolia: "https://sepolia.basescan.org/address/" };
 const txRef = (cap, hash) => str(hash) + (Object.hasOwn(EXPLORER, cap) ? " · " + EXPLORER[cap] + hash : cap === "local_anvil" ? "（本機鏈，沒有 explorer）" : "");
 const RUN = { agent: { live: "真實 Agent（live CLI）", fake: "fake Agent" }, chain: { base_sepolia: "Base Sepolia", local_anvil: "本機 anvil", none: "不付款" },
   authenticator: { device: "實體裝置（主持人宣告）", virtual: "virtual authenticator", none: "沒有 Signer" } };
@@ -1202,6 +1204,20 @@ export function txLink(cap, hash) {
   return Object.hasOwn(EXPLORER, cap) ? { text, href: EXPLORER[cap] + hash } : { text: text + "（本機鏈，無法公開查詢）", href: "" };
 }
 
+// addressLink: an address for the audience, short, with its public explorer page on a public testnet; null for
+// one that is not an address. A local chain's is the short form only (the network row says it is local).
+export function addressLink(cap, addr) {
+  if (typeof addr !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(addr)) return null;
+  const text = addr.slice(0, 6) + "…" + addr.slice(-4);
+  return { text, href: Object.hasOwn(EXPLORER_ADDRESS, cap) ? EXPLORER_ADDRESS[cap] + addr.toLowerCase() : "" };
+}
+
+// addressRow: a receipt row of named addresses (parts: name, text, href), its text the same in words; null when none is one.
+function addressRow(label, sep, named) {
+  const parts = named.map(([name, link]) => link && { name, ...link }).filter(Boolean);
+  return parts.length ? { label, sep, parts, text: parts.map((x) => x.name + " " + x.text).join(sep) } : null;
+}
+
 const approvalWords = (p, traits) => {
   const g = p && p.approval && p.approval.grant;
   if (!byDevice(p)) return "主持人代為核准（示範，不是本人）";
@@ -1265,8 +1281,9 @@ export function showEvidence(snapshot, traits = {}, chain = null) {
 }
 
 // showReceipt (gap review B6): the receipt card once the Store says the
-// purchase was delivered with a receipt; null before.
-export function showReceipt(snapshot, traits = {}) {
+// purchase was delivered with a receipt; null before. chain: the Host's read
+// of the task's payments (its payer wallet and the budget contract).
+export function showReceipt(snapshot, traits = {}, chain = null) {
   const task = snapshot && snapshot.task;
   const sc = scene(snapshot);
   const p = task && sc.po ? (task.purchases || []).find((x) => x.purchase_order_id === sc.po) : null;
@@ -1281,9 +1298,11 @@ export function showReceipt(snapshot, traits = {}) {
     { label: "預算預留", ...txLink(cap, pv.reserve_tx) },
     { label: "付款", ...txLink(cap, pv.settle_tx) },
     { label: "兩筆交易", text: pv.reserve_tx && pv.settle_tx && pv.reserve_tx !== pv.settle_tx ? "不是同一筆，也不是一次完成" : "未確認" },
+    addressRow("錢包", " → ", [["客人", addressLink(cap, chain && chain.payer)], ["商店", addressLink(cap, p.pay_to)]]),
+    addressRow("合約", "・", [["USDC", addressLink(cap, p.asset_contract)], ["預算", addressLink(cap, chain && chain.contract)]]),
     { label: "收據編號", text: String(pv.receipt_id) },
     { label: "內容摘要", text: typeof pv.content_sha256 === "string" && pv.content_sha256 ? "sha256 " + pv.content_sha256.replace(/^sha256:/, "").slice(0, 12) + "…" : "未提供" },
-  ] };
+  ].filter(Boolean) };
 }
 
 // ---- the checker's report on the audience window (docs/commercial-gap2.md GD4-A) ----

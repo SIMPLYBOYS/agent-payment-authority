@@ -872,7 +872,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
   });
   const slots = scene.started ? scene.slots().filter((s) => s.task) : [];
   const custs = A.showQueue(slots.map((s) => ({ ...A.showCustomer(s.consumer, scene.snapshot(s.consumer), delegationOf(s.task), traits),
-    receipt: A.showReceipt(scene.snapshot(s.consumer), traits), task: s.task,
+    receipt: A.showReceipt(scene.snapshot(s.consumer), traits, chainOf(s)), task: s.task,
     // The screen plays the steps in order: when it trails, where the real task already is.
     ahead: scene.behind(s.consumer) ? A.showCustomer(s.consumer, scene.latest(s.consumer), delegationOf(s.task), traits).caption : "" })), traits.payments);
   renderCaption(custs.models);
@@ -928,7 +928,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
     box.append(ol);
     if (m.receipt) {
       const r = el("div", "present-receipt");
-      for (const row of m.receipt.rows) {
+      for (const row of m.receipt.rows.flatMap((x) => (x.parts ? x.parts.map((y) => ({ label: y.name + (x.label === "錢包" ? "錢包" : "合約"), text: y.text, href: y.href })) : [x]))) {
         const chip = row.href ? el("a", "", row.label + " ↗") : el("span", "", row.label + "：" + row.text);
         if (row.href) { chip.href = row.href; chip.target = "_blank"; chip.rel = "noopener noreferrer"; }
         r.append(chip);

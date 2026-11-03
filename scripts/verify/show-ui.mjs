@@ -161,11 +161,12 @@ try {
   await s.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
   await s.waitFor(`document.getElementById("unity-status").dataset.state === "ready"`, 90000);
   const tx1 = "0x" + "a1".repeat(32), tx2 = "0x" + "b2".repeat(32);
-  const chain = { chain: "base_sepolia", head: 48979140, purchases: { "po-1": { reserve: { hash: tx1, status: "success", block: 48979110, time: 1790726400, spent: "500000" },
+  const payer = "0x833405a796c3300afcc582a3e251adf1a4d3c477", shop = "0x" + "33".repeat(20), usdc = "0x036cbd53842c5426634e7929541ec2318f3dcf7e", budget = "0x" + "c3".repeat(20);
+  const chain = { chain: "base_sepolia", head: 48979140, payer, contract: budget, purchases: { "po-1": { reserve: { hash: tx1, status: "success", block: 48979110, time: 1790726400, spent: "500000" },
     settle: { hash: tx2, status: "success", block: 48979135, time: 1790726450, transfer: { from: "0x833405a796c3300afcc582a3e251adf1a4d3c477", to: "0x" + "33".repeat(20), amount: "500000", to_shop: true } } } } };
   const view = { payments: "base_sepolia", authenticator: "device", venue: "data", customers: [{ consumer: "consumer-a", delegation: { task_budget: "5000000", allow_max: "100000" }, chain,
     snapshot: { task: { task_id: "show-a-09", consumer_id: "consumer-a", status: "running", as_of_sequence: 12, served_at: 1, contract_version: "apa.pay.v2", payment_capability: "base_sepolia",
-      purchases: [{ purchase_order_id: "po-1", amount: "500000", resource_url: "https://shop.example/resources/kr-market", credential: { result: "valid" },
+      purchases: [{ purchase_order_id: "po-1", amount: "500000", resource_url: "https://shop.example/resources/kr-market", pay_to: shop, asset_contract: usdc, credential: { result: "valid" },
         approval: { state: "approved", resolved_by: "webauthn:approver-a", grant: { authorization_method: "webauthn", voice: "verified" } },
         payment: { status: "paid", state: "delivered", reserve_tx: tx1, settle_tx: tx2, settle_block: 48979135, content_sha256: "sha256:" + "c".repeat(64), receipt_id: "rcpt-show-a-09" } }] },
     events: ["TASK_STARTED", "PURCHASE_PROPOSED", "POLICY_DECIDED", "APPROVED", "PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "RESOURCE_DELIVERED", "RECEIPT_ISSUED"]
@@ -198,6 +199,12 @@ try {
   check("the receipt card: 韓國市場簡報, 0.50 USDC, two transactions, not one", await s.evaluate(`(() => { const r = document.querySelector("#show-receipts .show-receipt"); return !!r
     && r.textContent.includes("韓國市場簡報") && r.textContent.includes("0.50 USDC") && r.textContent.includes("不是同一筆，也不是一次完成"); })()`),
     await s.evaluate(`document.getElementById("show-receipts").textContent`));
+  // Aaron 11/3: the wallets and the contracts on the explorer too.
+  const addrPage = (a) => "https://sepolia.basescan.org/address/" + a;
+  check("the receipt card: the customer's wallet, the shop, USDC and the budget contract linked to basescan", await s.evaluate(`(() => {
+    const hrefs = [...document.querySelectorAll("#show-receipts .show-receipt a")].map((a) => a.href);
+    return ${JSON.stringify([addrPage(payer), addrPage(shop), addrPage(usdc), addrPage(budget)])}.every((h) => hrefs.includes(h)); })()`),
+    await s.evaluate(`[...document.querySelectorAll("#show-receipts .show-receipt a")].map((a) => a.href).join(" ")`));
   await shot(s, "show-1920x1080-3-paid-synthetic", 1920, 1080);
   await shot(s, "show-1280x720-3-paid-synthetic", 1280, 720);
   // The scene at a whole multiple of 480 x 320 art pixels (Aaron 10/23: never blurred; zoom on demand).

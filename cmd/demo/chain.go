@@ -62,6 +62,19 @@ type chainReply struct {
 	Chain     string                   `json:"chain"` // the host's payment capability
 	Head      uint64                   `json:"head"`  // the latest block now
 	Purchases map[string]chainPurchase `json:"purchases"`
+	// The addresses the audience may look up (Aaron 11/3: the wallets and the contracts on the explorer too):
+	// the task's payer wallet, the budget contract (tx#1) and the token (tx#2); none when unknown.
+	Payer    string `json:"payer,omitempty"`
+	Contract string `json:"contract,omitempty"`
+	Token    string `json:"token,omitempty"`
+}
+
+// hexOrNone: an address as 0x hex, "" for the zero address (not known).
+func hexOrNone(a eth.Address) string {
+	if a == (eth.Address{}) {
+		return ""
+	}
+	return a.Hex()
 }
 
 // chainReader reads and keeps the receipts (a final one never changes).
@@ -149,8 +162,8 @@ func (c *chainReader) view(ctx context.Context, capability string, rec store.Tas
 	if err != nil {
 		return chainReply{}, err
 	}
-	out := chainReply{Chain: capability, Head: head, Purchases: map[string]chainPurchase{}}
 	payer, _ := eth.ParseAddress(rec.Binding.Payer) // a zero address matches no transfer
+	out := chainReply{Chain: capability, Head: head, Purchases: map[string]chainPurchase{}, Payer: hexOrNone(payer), Contract: hexOrNone(c.contract), Token: hexOrNone(c.token)}
 	for _, p := range rec.Task.Purchases {
 		if p.Payment == nil || (p.Payment.ReserveTx == "" && p.Payment.SettleTx == "") {
 			continue

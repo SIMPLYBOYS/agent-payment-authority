@@ -33,6 +33,7 @@ make demo-local
 - `GET /api/tasks/{task_id}/chain`（與讀 task 同一套權限）：Host 用自己的節點，只查 Store 為這個 task 記下的交易：區塊、時間、成功或失敗；tx#1 由預算合約記下的金額（`Spent`）；tx#2 的代幣轉帳（`Transfer`）。夠深的收據留在記憶體，不重複問。
 - 主持人頁在展示視窗開著時，以該客人的 viewer token 每 5 秒讀一次並轉過去；展示視窗兩張交易卡多一行，例如「鏈上：區塊 #9・4 個確認・合約記下 0.50 USDC」「鏈上：區塊 #10・3 個確認・0.50 USDC 客人錢包→商店」。本機鏈沒有 explorer 也看得到；Base Sepolia 另有 basescan 連結。
 - 只顯示交易編號與 Store 紀錄相同的那一筆；查不到寫「還查不到」，失敗寫「執行失敗」。
+- **錢包與合約（11/3，Aaron：「錢包與合約也連 Basescan」）**：回應另帶這個 task 的付款錢包（`payer`）、預算合約（`contract`）與代幣（`token`），不知道的就不帶。收據卡多兩列：「錢包：客人 0x…→ 商店 0x…」「合約：USDC 0x…・預算 0x…」；Base Sepolia 上每個位址連到 Basescan 的位址頁（`sepolia.basescan.org/address/`），本機鏈只顯示縮短的位址。商店與 USDC 取自請購單（`pay_to`、`asset_contract`），客人錢包與預算合約取自 Host 的這份回應，回應還沒到之前只有前兩者。主持人頁的收據列成四個連結。驗證：`TestChainViewUsesTheTasksPayerAndEachShop`、頁面 150、show-ui（新增：收據卡的四個位址連到 Basescan）、present-ui、ux3-ui、c2-ui。
 
 ## O3 Base Sepolia 一鍵啟動
 
