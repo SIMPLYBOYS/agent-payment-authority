@@ -12,15 +12,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,6 +72,12 @@ type payConfig struct {
 	// keygen --role shop), opened with a passphrase asked at start.
 	ShopKeyDir     string `json:"shop_key_dir,omitempty"`
 	ShopDailyTxCap uint64 `json:"shop_daily_tx_cap,omitempty"`
+	// FacilitatorURL (docs/commercial-facilitator.md FA2): the shop settles
+	// through this x402 facilitator, apa-facilitator on this machine
+	// (http://127.0.0.1:PORT) or, on base_sepolia, x402.org's
+	// (https://x402.org/facilitator); the Host then holds no shop key.
+	// Empty: the shop settles in this process, as before.
+	FacilitatorURL string `json:"facilitator_url,omitempty"`
 	// ShopEval (E1-a, docs/commercial-e1a.md 4.8): the shop sells this AE1
 	// catalog, or this case's catalog with its patch, from evalCorpus
 	// instead of its products. Not with test402_offer.
@@ -79,6 +88,14 @@ type payConfig struct {
 	Test402Offer string            `json:"test402_offer,omitempty"`
 	Dir          string            `json:"dir"`         // relayer.db and settle.db, a private directory
 	Delegations  map[string]string `json:"delegations"` // consumer ID -> its Signer delegation, id@version
+}
+
+// x402orgFacilitator is x402.org's public facilitator (Base Sepolia, exact; read 2026-11-03).
+const x402orgFacilitator = "https://x402.org/facilitator"
+
+// shopQuota is the shop's transfers today and its daily cap (C4): its settler's, or apa-facilitator's.
+type shopQuota interface {
+	Quota(ctx context.Context) (sent, cap uint64, err error)
 }
 
 // BaseSepolia is the payment capability on the Base Sepolia testnet
@@ -108,7 +125,8 @@ type payments struct {
 	rpc     *eth.Client
 	relayer hostRelayer
 	closeR  func() error
-	settler *merchant.Settler
+	closeS  func() error  // the shop's settlement: its settler's database, or nothing
+	quota   shopQuota     // the shop's transfers today; nil without
 	shopFor time.Duration // the worker's wait for the shop: above the settler's own wait
 	out     io.Writer
 }
@@ -156,6 +174,13 @@ func checkEnvironment(c *payConfig) error {
 	}
 	if c.PolicyTTL == 0 || c.PolicyTTL > 600 {
 		return errors.New("policy_ttl is 1 to 600 seconds (a reservation's authorization expires within it)")
+	}
+	if f := c.FacilitatorURL; f != "" {
+		u, err := url.Parse(f)
+		own := err == nil && u.Scheme == "http" && u.User == nil && (u.Path == "" || u.Path == "/") && u.Port() != "" && net.ParseIP(u.Hostname()).IsLoopback()
+		if !own && !(c.Environment == BaseSepolia && f == x402orgFacilitator) {
+			return fmt.Errorf("facilitator_url is apa-facilitator on this machine (http://127.0.0.1:PORT) or, on base_sepolia, %s", x402orgFacilitator)
+		}
 	}
 	return nil
 }
@@ -256,7 +281,7 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 	if err := checkChain(ctx, c, rpc); err != nil {
 		return nil, nil, fmt.Errorf("payments: %w", err)
 	}
-	if c.ShopKeyDir != "" {
+	if c.ShopKeyDir != "" && c.FacilitatorURL == "" { // with a facilitator, its key: the Host holds none
 		pass, err := shopPass()
 		if err != nil {
 			return nil, nil, fmt.Errorf("payments: the shop key's passphrase: %w", err)
@@ -287,7 +312,7 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 		sc.Poll, sc.Wait = time.Second, 2*time.Minute
 		shopFor = sc.Wait + 15*time.Second // the worker waits out the settler's wait, not the other way
 	}
-	settler, err := merchant.OpenSettler(ctx, sc, keys[3], rpc, filepath.Join(c.Dir, "settle.db"), clock)
+	settle, closeS, quota, err := openSettlement(ctx, c, sc, keys[3], rpc, clock, shopFor)
 	if err != nil {
 		closeR()
 		return nil, nil, err
@@ -295,14 +320,14 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 	var ext []merchant.External
 	if c.ShopEval != "" && c.Test402Offer != "" {
 		closeR()
-		settler.Close()
+		closeS()
 		return nil, nil, errors.New("payments: shop_eval or test402_offer, not both")
 	}
 	if c.Test402Offer != "" {
 		x, err := test402Product(c.Test402Offer)
 		if err != nil {
 			closeR()
-			settler.Close()
+			closeS()
 			return nil, nil, fmt.Errorf("payments: test402_offer: %w", err)
 		}
 		ext = append(ext, x)
@@ -312,21 +337,78 @@ func openPayments(ctx context.Context, path, baseURL string, clock func() uint64
 		var items []merchant.EvalItem
 		var sha string
 		if items, sha, err = evalItems(evalCorpus, c.ShopEval); err == nil {
-			shop, err = merchant.NewSettledEval(baseURL, settler, items)
+			shop, err = merchant.NewSettledEval(baseURL, settle, items)
 			fmt.Fprintf(out, "demo: the shop sells AE1's %s (%d items) from %s, sha256 %s\n", c.ShopEval, len(items), evalCorpus, sha)
 		}
 	} else {
-		shop, err = merchant.NewSettled(baseURL, settler, ext...)
+		shop, err = merchant.NewSettled(baseURL, settle, ext...)
 	}
 	if err != nil {
 		closeR()
-		settler.Close()
+		closeS()
 		return nil, nil, err
 	}
-	return &payments{cfg: c, rpc: rpc, relayer: relayer, closeR: closeR, settler: settler, shopFor: shopFor, out: out}, shop, nil
+	return &payments{cfg: c, rpc: rpc, relayer: relayer, closeR: closeR, closeS: closeS, quota: quota, shopFor: shopFor, out: out}, shop, nil
 }
 
-func (p *payments) Close() error { return errors.Join(p.closeR(), p.settler.Close()) }
+func (p *payments) Close() error { return errors.Join(p.closeR(), p.closeS()) }
+
+// openSettlement is the shop's settlement: in this process with the shop's
+// key (P2-D3), or through c.FacilitatorURL (FA2), which must settle exact on
+// this chain before anything is started.
+func openSettlement(ctx context.Context, c payConfig, sc merchant.SettleConfig, shopKey *eth.Key, rpc *eth.Client, clock func() uint64,
+	shopFor time.Duration) (merchant.Settlement, func() error, shopQuota, error) {
+	if c.FacilitatorURL == "" {
+		st, err := merchant.OpenSettler(ctx, sc, shopKey, rpc, filepath.Join(c.Dir, "settle.db"), clock)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		var q shopQuota
+		if sc.DailyTxCap > 0 {
+			q = st
+		}
+		return st, st.Close, q, nil
+	}
+	client := &http.Client{Timeout: shopFor} // above the facilitator's own wait for a transfer
+	via, err := merchant.NewFacilitated(c.FacilitatorURL, sc, rpc, client)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	hctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := supports(hctx, client, c.FacilitatorURL, sc.ChainID); err != nil {
+		return nil, nil, nil, fmt.Errorf("payments: the facilitator at %s: %w; nothing was started", c.FacilitatorURL, err)
+	}
+	var q shopQuota
+	if c.FacilitatorURL != x402orgFacilitator {
+		q = via // apa-facilitator says its transfers today
+	}
+	return via, func() error { return nil }, q, nil
+}
+
+// supports: the facilitator settles x402 v2 exact on chainID (GET /supported).
+func supports(ctx context.Context, client *http.Client, base string, chainID uint64) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimSuffix(base, "/")+"/supported", nil)
+	if err != nil {
+		return err
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("it does not answer (%v)", err)
+	}
+	defer res.Body.Close()
+	var s x402.SupportedResponse
+	if res.StatusCode != 200 || json.NewDecoder(io.LimitReader(res.Body, 1<<16)).Decode(&s) != nil {
+		return fmt.Errorf("its /supported answered %d", res.StatusCode)
+	}
+	want := x402.SupportedKind{X402Version: x402.Version, Scheme: "exact", Network: "eip155:" + strconv.FormatUint(chainID, 10)}
+	for _, k := range s.Kinds {
+		if k == want {
+			return nil
+		}
+	}
+	return fmt.Errorf("it does not settle %s", want.Network+" exact v2")
+}
 
 // paymentSigner: with --payments the Signer must sign payments (health
 // ready: apa-signer serve with a reservation section). A Signer for

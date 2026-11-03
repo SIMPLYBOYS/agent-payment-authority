@@ -332,6 +332,12 @@ func TestTestnetConfigRefused(t *testing.T) {
 		"a line with no payee":      {func(c map[string]any) { c["delegations"] = map[string]string{"consumer-a/": "dlg-ta@1"} }, "by consumer and payee"},
 		"otherwise good":            {func(c map[string]any) {}, "apa-relayer on"}, // the rules pass: the relayer is asked next
 		"a shared socket directory": {func(c map[string]any) { c["relayer_socket"] = "/private/tmp/r.sock" }, "relayer_socket's directory"},
+		// FA2: our apa-facilitator on this machine, or x402.org's on base_sepolia; nothing else.
+		"a facilitator elsewhere":       {func(c map[string]any) { c["facilitator_url"] = "https://facilitator.example" }, "facilitator_url is apa-facilitator"},
+		"a facilitator over https here": {func(c map[string]any) { c["facilitator_url"] = "https://127.0.0.1:8403" }, "facilitator_url is apa-facilitator"},
+		"a facilitator with no port":    {func(c map[string]any) { c["facilitator_url"] = "http://127.0.0.1" }, "facilitator_url is apa-facilitator"},
+		"a facilitator with a path":     {func(c map[string]any) { c["facilitator_url"] = "http://127.0.0.1:8403/x" }, "facilitator_url is apa-facilitator"},
+		"x402.org's":                    {func(c map[string]any) { c["facilitator_url"] = "https://x402.org/facilitator" }, "apa-relayer on"}, // allowed: the relayer is asked next
 	} {
 		c := testnetConfig(priv, filepath.Join(priv, "none.sock"), dir, "https://sepolia.base.org")
 		cs.change(c)
@@ -432,6 +438,45 @@ func TestTestnetPaymentsOpen(t *testing.T) {
 	}
 	if pay.cfg.Environment != BaseSepolia {
 		t.Fatalf("environment %q", pay.cfg.Environment)
+	}
+	pay.Close()
+	// FA2: through apa-facilitator, the Host holds no shop key (its passphrase never asked) and starts only
+	// once the facilitator settles exact on this chain; its transfers today are the facilitator's.
+	facilitator := func(network string) string {
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /supported", func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(x402.SupportedResponse{Kinds: []x402.SupportedKind{{X402Version: 2, Scheme: "exact", Network: network}}, Extensions: []string{}, Signers: map[string][]string{}})
+		})
+		mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"state":"ready","sent_today":3,"daily_tx_cap":4}`))
+		})
+		srv := httptest.NewServer(mux)
+		t.Cleanup(srv.Close)
+		return srv.URL
+	}
+	asked := func() ([]byte, error) { t.Fatal("the shop key's passphrase asked with a facilitator"); return nil, nil }
+	via := func(url string) (*payments, error) {
+		c := testnetConfig(priv, sock, keys, geth)
+		c["pay_to"], c["facilitator_url"] = shopAddr, url
+		raw, _ := json.Marshal(c)
+		os.WriteFile(path, raw, 0o600)
+		pay, _, err := openPayments(t.Context(), path, "http://127.0.0.1:2", wallClock, asked, io.Discard)
+		return pay, err
+	}
+	if _, err := via(facilitator("eip155:1")); err == nil || !strings.Contains(err.Error(), "does not settle eip155:84532") {
+		t.Fatalf("a facilitator for another chain: %v", err)
+	}
+	dead := httptest.NewServer(http.NotFoundHandler())
+	dead.Close()
+	if _, err := via(dead.URL); err == nil || !strings.Contains(err.Error(), "nothing was started") {
+		t.Fatalf("no facilitator: %v", err)
+	}
+	pay, err = via(facilitator("eip155:84532"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent, cap, err := pay.quota.Quota(t.Context()); err != nil || sent != 3 || cap != 4 {
+		t.Fatalf("the facilitator's quota: %d %d %v", sent, cap, err)
 	}
 	pay.Close()
 	// B5: with test402's saved 402 the data shop also offers test402, at test402.

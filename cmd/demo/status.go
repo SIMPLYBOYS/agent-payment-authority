@@ -144,9 +144,9 @@ func (a *api) services(ctx context.Context) *services {
 			relayerC <- relayerHealth{"unavailable", nil}
 		}()
 	}
-	if a.settler != nil && a.settler.DailyTxCap() > 0 {
-		if n, err := a.settler.SentToday(ctx); err == nil {
-			s.ShopToday = &quota{Sent: n, Cap: a.settler.DailyTxCap()}
+	if a.shopQuota != nil {
+		if n, c, err := a.shopQuota.Quota(ctx); err == nil && c > 0 {
+			s.ShopToday = &quota{Sent: n, Cap: c}
 		}
 	}
 	for ; pending > 0; pending-- {

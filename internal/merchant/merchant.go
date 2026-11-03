@@ -219,7 +219,7 @@ type Merchant struct {
 	products []product
 	catalogs map[string][]byte // scene => catalog
 	offers   map[string]offer  // path + "?" + raw query
-	settle   *Settler          // P2: nil is M1's shop, which never settles
+	settle   Settlement        // P2: nil is M1's shop, which never settles
 	external []External        // B5: listed in the data shop's catalog, sold elsewhere
 }
 
@@ -259,11 +259,12 @@ func New(baseURL string) (*Merchant, error) { return build(baseURL, products) }
 // approve an Ask. M1's shop keeps 60.
 const SettledTimeout = 300
 
-// NewSettled builds the shop that verifies and settles payments itself
-// (P2-D3): the same products, offered in the settler's token on its chain
+// NewSettled builds the shop that settles its payments, itself (a *Settler,
+// P2-D3) or through a facilitator (a *Facilitated, docs/commercial-
+// facilitator.md FA2): the same products, offered in its token on its chain
 // to its payTo for SettledTimeout, delivered only once their transfer is
 // confirmed.
-func NewSettled(baseURL string, st *Settler, ext ...External) (*Merchant, error) {
+func NewSettled(baseURL string, st Settlement, ext ...External) (*Merchant, error) {
 	return settled(baseURL, st, products, ext...)
 }
 
@@ -271,7 +272,7 @@ func NewSettled(baseURL string, st *Settler, ext ...External) (*Merchant, error)
 // instead of its products (E1-a, docs/commercial-e1a.md 4.8): the data shop
 // only, at the items' amounts, settled as NewSettled settles. It pays its
 // own payTo only: an item naming another merchant is refused.
-func NewSettledEval(baseURL string, st *Settler, items []EvalItem) (*Merchant, error) {
+func NewSettledEval(baseURL string, st Settlement, items []EvalItem) (*Merchant, error) {
 	for _, it := range items {
 		if it.PayTo != "" {
 			return nil, fmt.Errorf("eval item %s: a settled shop sells to its own pay_to only", it.ID)
@@ -284,13 +285,14 @@ func NewSettledEval(baseURL string, st *Settler, items []EvalItem) (*Merchant, e
 	return settled(baseURL, st, ps)
 }
 
-func settled(baseURL string, st *Settler, src []product, ext ...External) (*Merchant, error) {
+func settled(baseURL string, st Settlement, src []product, ext ...External) (*Merchant, error) {
+	cfg := st.config()
 	ps := make([]product, len(src))
 	for i, p := range src {
 		r := p.Requirement
-		r.Network = "eip155:" + strconv.FormatUint(st.cfg.ChainID, 10)
-		r.Asset, r.PayTo = st.cfg.Token.Hex(), st.cfg.PayTo.Hex()
-		r.Extra = map[string]string{"name": st.cfg.TokenName, "version": st.cfg.TokenVersion}
+		r.Network = "eip155:" + strconv.FormatUint(cfg.ChainID, 10)
+		r.Asset, r.PayTo = cfg.Token.Hex(), cfg.PayTo.Hex()
+		r.Extra = map[string]string{"name": cfg.TokenName, "version": cfg.TokenVersion}
 		r.MaxTimeoutSeconds = SettledTimeout
 		p.Requirement = r
 		ps[i] = p

@@ -420,7 +420,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	if pay != nil {
 		ui.payContract = pay.cfg.BudgetContract
 		ui.relayer, _ = pay.relayer.(*budget.Client)
-		ui.settler = pay.settler
+		ui.shopQuota = pay.quota
 		contract, _ := eth.ParseAddress(pay.cfg.BudgetContract) // both parsed at start (openPayments)
 		token, _ := eth.ParseAddress(pay.cfg.Token)
 		ui.chainRead = &chainReader{node: pay.rpc, contract: contract, token: token, depth: pay.cfg.Confirmations, kept: map[string]chainTx{}}

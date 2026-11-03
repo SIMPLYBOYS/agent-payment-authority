@@ -68,3 +68,10 @@ Agent → Host（付款流程）→ 商店：PAYMENT-SIGNATURE
 - `internal/facilitator`：`POST /verify`、`POST /settle`、`GET /supported`。只結算 `exact`、自己這條鏈、這個代幣、這一個收款人；`paymentPayload.accepted` 必須與 `paymentRequirements` 完全相同（canonical JSON）；兩處的 `x402Version` 都要是 2。結果的對應：確認數夠了 `success: true`（帶 `amount`）；送出了還沒確認 `settlement_pending`（帶交易編號，同一個請求再來就接著查）；什麼都沒送出又是節點的問題回 503；拒絕帶規格的原因、什麼都不送。「付的是什麼」的鍵：payload 的 `resource.url`，沒有就用報價的雜湊；同一份授權換了鍵就是重放（`nonce_used`）。
 - 測試（本機 anvil，`internal/facilitator` 5 項）：`/supported` 的內容；`/verify` 不送任何東西（gas nonce 與餘額不變，之後照樣能結算）；七種不結算的請求在兩個端點都被拒絕、什麼都不送；同一份授權只付一次、同一個請求再來是同一筆交易、換資源是重放；確認數不夠時 `settlement_pending`，夠了同一筆交易成功。反向驗證：拿掉「accepted 必須等於報價」或讓 `/verify` 去結算，測試都會失敗。商店、x402、Host 原有的測試（234 項）全過。
 - 還沒做（FA2）：可執行的 `apa-facilitator`、商店改走 HTTP 呼叫它、腳本與設定。
+
+**FA2（一）程式（11/3）**
+- 商店：`merchant.Facilitated`（`internal/merchant/facilitated.go`）先 `POST /verify`，有效才 `POST /settle`；結算成功後，商店自己用唯讀 RPC 查交易的確認數，夠了才交付（P2-D6 不變）。同一筆付款再來，只重查確認數，不會再呼叫 `/settle`。facilitator 沒回應：pending、什麼都不送；`/verify` 拒絕：402 帶它的原因。商店建立報價時讀的鏈、代幣、收款人，由 `merchant.Settlement` 介面提供（商店自己的 `Settler` 或 `Facilitated`）。
+- Host：付款設定多 `facilitator_url`，只接受本機迴路位址上的 `apa-facilitator`（`http://127.0.0.1:PORT`）或 Base Sepolia 上的 `https://x402.org/facilitator`。有設定時，Host 不載入商店金鑰、不問它的密語；啟動前 `GET /supported` 必須列出這條鏈的 v2 `exact`，否則不啟動；開場前檢查的「商店今天送了幾筆」改問 `apa-facilitator` 的 `GET /health`（x402.org 沒有，不顯示）。沒有設定時照舊在 Host 裡結算。
+- `cmd/apa-facilitator serve --payments FILE [--listen 127.0.0.1:8403]`：讀 Host 同一份付款設定檔裡需要的欄位；testnet 的規則與 Host 相同（https 的公開節點、至少 2 個確認、每日上限、`shop_key_dir`）；只聽本機迴路位址；金鑰在 testnet 是 `shop_key_dir`（密語從終端機問），本機是 `anvil_keys.shop_gas`；結算資料庫是設定檔 `dir` 裡的 `settle.db`（0600）；`GET /health` 回今天送了幾筆與每日上限。
+- 測試：`TestPaidOnAnvil` 分成兩條，同一筆付款在本機 anvil 上，一條商店自己結算、一條經 facilitator 結算，都交付；商店端 3 項（facilitator 沒回應、`/verify` 拒絕、確認數夠了才交付且只呼叫一次 `/settle`）；Host 的設定規則（5 種 `facilitator_url`）與經 facilitator 啟動（不問商店密語、facilitator 不支援這條鏈或沒回應時不啟動、額度來自 facilitator）；`apa-facilitator` 在本機 anvil 上啟動與 6 種拒絕啟動。相關套件 270 項全過。
+- **還沒做（FA2 之二）**：腳本。`demo-local.sh`、`make demo-local`、`demo-testnet.sh` 要先啟動 `apa-facilitator`、在付款設定寫入 `facilitator_url`；testnet 上「商店金鑰的密語」改在 facilitator 那一步輸入。

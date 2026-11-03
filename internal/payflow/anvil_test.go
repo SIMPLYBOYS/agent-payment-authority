@@ -27,6 +27,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth/ethtest"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/facilitator"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
@@ -66,7 +67,11 @@ type anvilWorld struct {
 	now          uint64
 }
 
-func newAnvilWorld(t *testing.T) *anvilWorld {
+func newAnvilWorld(t *testing.T) *anvilWorld { return newAnvilWorldVia(t, false) }
+
+// newAnvilWorldVia: with facilitator, the shop settles through the x402 facilitator over HTTP
+// (docs/commercial-facilitator.md FA2) on the same settlement, instead of in its own process.
+func newAnvilWorldVia(t *testing.T, facilitated bool) *anvilWorld {
 	rpc := ethtest.Anvil(t)
 	verifier := ethtest.Deploy(t, rpc, "Verifier.sol/Verifier")
 	ctor, _ := eth.Encode(verifier, ethtest.Key(t, 1).Addr, ethtest.Key(t, 2).Addr)
@@ -143,8 +148,8 @@ func newAnvilWorld(t *testing.T) *anvilWorld {
 	}()
 	t.Cleanup(func() { rstop(); <-rserved })
 	host := budget.NewClient(filepath.Join(sockDir, "r"))
-	settler, err := merchant.OpenSettler(bg, merchant.SettleConfig{ChainID: ethtest.Chain, Token: usdc, TokenName: "USDC", TokenVersion: "2", PayTo: payTo,
-		Confirmations: 1}, ethtest.Key(t, 4), rpc, filepath.Join(t.TempDir(), "settle.db"), clock)
+	scfg2 := merchant.SettleConfig{ChainID: ethtest.Chain, Token: usdc, TokenName: "USDC", TokenVersion: "2", PayTo: payTo, Confirmations: 1}
+	settler, err := merchant.OpenSettler(bg, scfg2, ethtest.Key(t, 4), rpc, filepath.Join(t.TempDir(), "settle.db"), clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +157,20 @@ func newAnvilWorld(t *testing.T) *anvilWorld {
 	mux := http.NewServeMux()
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	shop, err := merchant.NewSettled(srv.URL, settler)
+	var shop *merchant.Merchant
+	if facilitated {
+		fmux := http.NewServeMux()
+		facilitator.New(settler, scfg2, ethtest.Key(t, 4).Addr).Register(fmux)
+		fsrv := httptest.NewServer(fmux)
+		t.Cleanup(fsrv.Close)
+		via, ferr := merchant.NewFacilitated(fsrv.URL, scfg2, rpc, fsrv.Client())
+		if ferr != nil {
+			t.Fatal(ferr)
+		}
+		shop, err = merchant.NewSettled(srv.URL, via)
+	} else {
+		shop, err = merchant.NewSettled(srv.URL, settler)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,8 +184,14 @@ func reconcileToken(w *anvilWorld) reconcile.Token {
 	return reconcile.Token{RPC: w.rpc, Address: w.usdc, Confirmations: 1}
 }
 
+// The shop's own settlement, and through the x402 facilitator (FA2): the same payment, end to end.
 func TestPaidOnAnvil(t *testing.T) {
-	w := newAnvilWorld(t)
+	for _, via := range []bool{false, true} {
+		t.Run(map[bool]string{false: "settler", true: "facilitator"}[via], func(t *testing.T) { paidOnAnvil(t, newAnvilWorldVia(t, via)) })
+	}
+}
+
+func paidOnAnvil(t *testing.T, w *anvilWorld) {
 	rpc, usdc, payer, payTo, addrs, socket, host, srv, offer, clock, now := w.rpc, w.usdc, w.payer, w.payTo, w.addrs, w.socket, w.host, w.srv, w.offer, w.clock, w.now
 
 	// The Store: the registry's wallet-a is the test payer, its asset the

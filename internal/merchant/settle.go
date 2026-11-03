@@ -475,6 +475,12 @@ func (s *Settler) SentToday(ctx context.Context) (uint64, error) {
 // DailyTxCap is the configured cap on transfers a UTC day (0: none).
 func (s *Settler) DailyTxCap() uint64 { return s.cfg.DailyTxCap }
 
+// Quota is the transfers sent today and the daily cap (Facilitated's, for the same question).
+func (s *Settler) Quota(ctx context.Context) (sent, cap uint64, err error) {
+	n, err := s.SentToday(ctx)
+	return n, s.cfg.DailyTxCap, err
+}
+
 // settleOpen sends every unfinished transfer again (the same ones) and
 // decides each it can without waiting, before a new one takes a nonce.
 func (s *Settler) settleOpen(ctx context.Context) error {
