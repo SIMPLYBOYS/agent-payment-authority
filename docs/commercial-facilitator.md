@@ -1,0 +1,70 @@
+# 獨立的 facilitator（x402 v2 `/verify`、`/settle`）
+
+> 2026-11-03，Claude Code。Aaron 11/3：FUTUREMODE 筆記裡還沒處理的項目「依照建議順序進行」，這是第 1 項。筆記 §3.2：facilitator 的 verify 唯讀、settle 才改變狀態；§5.4：VALIDATE→MATCH→RESERVE→SETTLE。
+> **Aaron 11/3 的決定**：F1 A（主路徑用自己的 `apa-facilitator`，x402.org 可切換）；F2 做一次（一筆經 x402.org 結算的相容性證明，不是每場 demo 都走它；真的送出前再核准一次）；F3 不需要（不跑 S3，面試現場用 S5 的 `testnet-town-t4`）。「從 FA1 開始」。
+
+## 1 現況
+
+P2-D3 選 A：商店自己驗證並結算（`internal/merchant/settle.go` 的 `Settler`，與商店同一個程序）：
+
+- 驗證：嚴格解析 exact-EVM payload；重算 EIP-712 簽章；查餘額、`authorizationState`（nonce 沒用過）；`eth_call` 先模擬一次。
+- 結算：先寫進自己的資料庫（以付款人＋授權 nonce 為鍵）再送出 `transferWithAuthorization`；同一份 payload 再來，回同一筆交易，不會送第二筆；同一個 nonce 換了內容，回 `nonce_used`；結果不明時回 pending，之後接著查。
+- 確認數夠了才交付（P2-D6）；每日交易上限（P2b-D5）；gas 金鑰在商店。
+- **查證不看誰送出 tx#2**：checker 的 E4、E8 與對帳程式看的是代幣自己的事件（`Transfer`、`AuthorizationUsed`），所以改由 facilitator 送出不影響它們。
+
+缺的是 x402 的分工：沒有獨立的 facilitator 服務，也沒有分開的 `/verify` 與 `/settle`；從來沒有經過外部 facilitator 結算（test402.com 那一筆只驗證 wire 相容，它不結算）。
+
+## 2 x402 v2 的 facilitator 介面（11/3 查證）
+
+來源：[x402 v2 規格](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v2.md)。
+
+| | 請求 | 回應 |
+|---|---|---|
+| `POST /verify`（唯讀，不改任何狀態） | `x402Version`（2）、`paymentPayload`、`paymentRequirements` | `isValid`；`invalidReason`（無效時）；`payer` |
+| `POST /settle`（改變狀態） | 同上 | `success`；`errorReason`（失敗時）；`payer`；`transaction`（沒送出就是空字串）；`network`（CAIP-2）；`amount` |
+| `GET /supported` | — | `kinds`（`x402Version`、`scheme`、`network`）、`extensions`、`signers` |
+
+- `errorReason` 是 `settlement_pending` 時，`transaction` 一定要有值：正好是我們現在「結果不明，接著查」的做法。
+- **x402.org 公開 facilitator**（`https://x402.org/facilitator/supported`，11/3 讀取）：支援 v2 `exact` 在 `eip155:84532`（Base Sepolia），送交易的是它自己的地址 `0xd407…f1bf`。
+
+## 3 做法
+
+```text
+Agent → Host（付款流程）→ 商店：PAYMENT-SIGNATURE
+                              │
+                              ├─ POST /verify   ──→ facilitator（唯讀）
+                              ├─ POST /settle   ──→ facilitator ──→ transferWithAuthorization（tx#2）
+                              └─ 自己查確認數（唯讀 RPC）→ 交付＋收據
+```
+
+- **新的 `apa-facilitator`**（`cmd/apa-facilitator`，程式在 `internal/facilitator`）：把 `Settler` 的驗證與結算搬過去，照第 2 節的介面提供 `/verify`、`/settle`、`/supported`；它持有 gas 金鑰與結算資料庫（0600）；只聽本機。
+- **商店**：不再持有 gas 金鑰。收到 `PAYMENT-SIGNATURE` 後，以這個商品的報價當 `paymentRequirements`，先 `/verify`，通過才 `/settle`；`/settle` 成功後，商店用自己的唯讀 RPC 查確認數，夠了才交付（P2-D6 不變）。
+- **設定**：每個環境一個 `facilitator_url`。本機指向自己的 `apa-facilitator`；testnet 預設也是，改成 `https://x402.org/facilitator` 就走公開的。
+- **不重複付款**：自己的 facilitator 以付款人＋nonce 去重（同現在）。走 x402.org 時，同一份授權的 nonce 上鏈只能用一次；`/settle` 逾時當成結果不明（不重送新的授權），由對帳程式看鏈上的 `AuthorizationUsed` 決定。
+- **查證**：E4、E8 不變；證據包多記一項「這一場用的 facilitator」（網址與它送交易的地址），checker 照實列出。
+
+## 4 規模
+
+| 切片 | 內容 |
+|---|---|
+| FA1 | `internal/facilitator`：三個端點，建在商店原本的 `Settler` 上；本機 anvil 測試（驗證唯讀、結算去重、pending 後接著查） |
+| FA2 | `cmd/apa-facilitator`（金鑰載入、只聽本機）；商店改呼叫 facilitator；設定 `facilitator_url`；`demo-local.sh`、`demo-testnet.sh` 多啟動一個 `apa-facilitator`（gas 金鑰從商店移過去）；開場前檢查加一項 |
+| FA3 | x402.org：`/supported` 檢查；**一筆**真的經 x402.org 結算的 testnet 付款（要 Aaron 核准） |
+| FA4 | 證據包記 facilitator；文件、瀏覽器檢查、本機彩排一次 |
+
+## 5 要 Aaron 決定
+
+| # | 問題 | 建議 |
+|---|---|---|
+| F1 | 主路徑用誰的 facilitator | **A** 本機與 testnet 都用自己的 `apa-facilitator`（主路徑不依賴外部服務，保留 P2-D3 的理由），x402.org 可以切換；**B** testnet 主路徑改用 x402.org。建議 **A** |
+| F2 | 要不要做一筆真的經 x402.org 結算的 testnet 付款 | 要：取代 test402「只驗證 wire、不結算」，證明跟官方 facilitator 真的相容。只做一筆自動放行的小額（例如孩子的講義 0.06 test USDC），gas 由 x402.org 付 |
+| F3 | 跟 testnet 一家人那場（S3）的先後 | `signer-4.json` 的委派 **11/6 台北 13:23** 到期。**A** 先跑 S3（現在的程式），facilitator 在另一個 worktree 開發，不影響 S3；之後用新的委派做 FA3；**B** 先做完 facilitator 再跑 S3，S3 的證據就有 facilitator，但時間很趕，而且付款主路徑剛改完就上 testnet。建議 **A** |
+
+## 6 實作
+
+**FA1（11/3）**
+- `merchant.Settler` 拆出兩個公開方法：`Check`（只做結算前的所有檢查，不讀寫自己的資料庫、不送交易：`/verify`）與 `Settle`（以報價與「付的是什麼」的鍵結算：`/settle`）；商店原本的 `Pay` 改為呼叫 `Settle`，行為不變。`merchant.SettlementResponse` 改成 `x402.SettleResponse` 的別名（PAYMENT-RESPONSE 本來就是 facilitator 的 SettleResponse）。
+- `internal/x402`：facilitator 的請求與回應型別（`FacilitatorRequest`、`VerifyResponse`、`SettleResponse`、`SupportedResponse`），照第 2 節。
+- `internal/facilitator`：`POST /verify`、`POST /settle`、`GET /supported`。只結算 `exact`、自己這條鏈、這個代幣、這一個收款人；`paymentPayload.accepted` 必須與 `paymentRequirements` 完全相同（canonical JSON）；兩處的 `x402Version` 都要是 2。結果的對應：確認數夠了 `success: true`（帶 `amount`）；送出了還沒確認 `settlement_pending`（帶交易編號，同一個請求再來就接著查）；什麼都沒送出又是節點的問題回 503；拒絕帶規格的原因、什麼都不送。「付的是什麼」的鍵：payload 的 `resource.url`，沒有就用報價的雜湊；同一份授權換了鍵就是重放（`nonce_used`）。
+- 測試（本機 anvil，`internal/facilitator` 5 項）：`/supported` 的內容；`/verify` 不送任何東西（gas nonce 與餘額不變，之後照樣能結算）；七種不結算的請求在兩個端點都被拒絕、什麼都不送；同一份授權只付一次、同一個請求再來是同一筆交易、換資源是重放；確認數不夠時 `settlement_pending`，夠了同一筆交易成功。反向驗證：拿掉「accepted 必須等於報價」或讓 `/verify` 去結算，測試都會失敗。商店、x402、Host 原有的測試（234 項）全過。
+- 還沒做（FA2）：可執行的 `apa-facilitator`、商店改走 HTTP 呼叫它、腳本與設定。

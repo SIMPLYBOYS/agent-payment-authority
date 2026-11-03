@@ -66,6 +66,48 @@ type PaymentPayload struct {
 	Extensions  json.RawMessage `json:"extensions,omitempty"`
 }
 
+// The facilitator's HTTP API (docs/commercial-facilitator.md 2; checked
+// against specs/x402-specification-v2.md on 2026-11-03): POST /verify (read
+// only) and POST /settle take a FacilitatorRequest; GET /supported.
+type FacilitatorRequest struct {
+	X402Version         uint64          `json:"x402Version"`
+	PaymentPayload      PaymentPayload  `json:"paymentPayload"`
+	PaymentRequirements json.RawMessage `json:"paymentRequirements"`
+}
+
+type VerifyResponse struct {
+	IsValid       bool   `json:"isValid"`
+	InvalidReason string `json:"invalidReason,omitempty"`
+	Payer         string `json:"payer,omitempty"`
+}
+
+// SettleResponse is /settle's answer, and the PAYMENT-RESPONSE a resource
+// server sends on. Transaction is "" when nothing was broadcast; with
+// ErrorReason settlement_pending it is never "".
+type SettleResponse struct {
+	Success     bool   `json:"success"`
+	ErrorReason string `json:"errorReason,omitempty"`
+	Payer       string `json:"payer,omitempty"`
+	Transaction string `json:"transaction"`
+	Network     string `json:"network"`
+	Amount      string `json:"amount,omitempty"`
+}
+
+type SupportedKind struct {
+	X402Version uint64 `json:"x402Version"`
+	Scheme      string `json:"scheme"`
+	Network     string `json:"network"`
+}
+
+type SupportedResponse struct {
+	Kinds      []SupportedKind     `json:"kinds"`
+	Extensions []string            `json:"extensions"`
+	Signers    map[string][]string `json:"signers"`
+}
+
+// ErrSettlementPending: the transfer is sent and not yet confirmed.
+const ErrSettlementPending = "settlement_pending"
+
 // Encode returns padded standard base64 of v's canonical JSON.
 func Encode(v any) (string, error) {
 	raw, err := json.Marshal(v)

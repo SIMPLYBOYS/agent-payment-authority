@@ -20,6 +20,7 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 
 	_ "modernc.org/sqlite"
 )
@@ -137,14 +138,8 @@ type Outcome struct {
 }
 
 // SettlementResponse is the PAYMENT-RESPONSE header (x402 transports-v2
-// HTTP: base64 JSON).
-type SettlementResponse struct {
-	Success     bool   `json:"success"`
-	ErrorReason string `json:"errorReason,omitempty"`
-	Transaction string `json:"transaction"`
-	Network     string `json:"network"`
-	Payer       string `json:"payer"`
-}
+// HTTP: base64 JSON): a facilitator's SettleResponse.
+type SettlementResponse = x402.SettleResponse
 
 // HeaderPaymentResponse carries the settlement result.
 const HeaderPaymentResponse = "PAYMENT-RESPONSE"
@@ -161,6 +156,25 @@ type verified struct {
 // only then, the content due only once it is confirmed. The same payload
 // again answers the same settlement; one authorization pays once.
 func (s *Settler) Pay(ctx context.Context, o offer, payload json.RawMessage) Outcome {
+	return s.Settle(ctx, o.Requirement, o.url, payload)
+}
+
+// Check is Settle's checks alone, reading and writing nothing of its own
+// (a facilitator's /verify, docs/commercial-facilitator.md): the payer, and
+// "" or why it would not be settled. settlement_node_unavailable is the
+// node, not the payment.
+func (s *Settler) Check(ctx context.Context, req x402.Requirement, payload json.RawMessage) (payer, reason string) {
+	v, reason := parse(payload)
+	if reason != "" {
+		return "", reason
+	}
+	return v.payer.Hex(), s.verify(ctx, req, v)
+}
+
+// Settle settles one payload against requirement req (a facilitator's
+// /settle; Pay for the shop's own offers). key names what it pays for: the
+// same authorization for another key is a replay.
+func (s *Settler) Settle(ctx context.Context, req x402.Requirement, key string, payload json.RawMessage) Outcome {
 	network := "eip155:" + strconv.FormatUint(s.cfg.ChainID, 10)
 	v, reason := parse(payload)
 	if reason != "" {
@@ -198,14 +212,14 @@ func (s *Settler) Pay(ctx context.Context, o offer, payload json.RawMessage) Out
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
 		return Outcome{Kind: "pending", Reason: "settlement_store_unavailable", Response: resp}
-	case have.payloadHash != hex.EncodeToString(sum[:]) || have.url != o.url:
+	case have.payloadHash != hex.EncodeToString(sum[:]) || have.url != key:
 		// The same authorization in another payload or for another resource: a replay.
 		resp.ErrorReason = "invalid_exact_evm_payload_authorization_nonce_used"
 		return Outcome{Kind: "failed", Reason: resp.ErrorReason, Response: resp}
 	default:
 		return unlockThen(func() Outcome { return s.resume(ctx, v.payer.Hex(), nonceHex, resp) })
 	}
-	if r := s.verify(ctx, o, v); r == "settlement_node_unavailable" {
+	if r := s.verify(ctx, req, v); r == "settlement_node_unavailable" {
 		return Outcome{Kind: "pending", Reason: r, Response: resp} // the node, not the payment: nothing written
 	} else if r != "" {
 		resp.ErrorReason = r
@@ -224,7 +238,7 @@ func (s *Settler) Pay(ctx context.Context, o offer, payload json.RawMessage) Out
 	}
 	// Written before it is sent: a retry resends this transfer, never a new one.
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO settlements (payer, auth_nonce, payload_hash, resource_url, amount, valid_before, raw_tx, tx_hash, tx_nonce, tip, fee_cap, state, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sent', ?)`, v.payer.Hex(), nonceHex, hex.EncodeToString(sum[:]), o.url, v.value, v.before,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sent', ?)`, v.payer.Hex(), nonceHex, hex.EncodeToString(sum[:]), key, v.value, v.before,
 		hex.EncodeToString(raw), hex.EncodeToString(hash), txNonce, fees.Tip.String(), fees.Cap.String(), s.clock()); err != nil {
 		return Outcome{Kind: "pending", Reason: "settlement_store_unavailable", Response: resp}
 	}
@@ -282,10 +296,10 @@ func parse(payload json.RawMessage) (verified, string) {
 // verify is the shop's own verification (P2-D3): recipient, amount, window,
 // the EIP-712 signer, the nonce unused and the balance on chain, and a
 // simulation of the transfer. Any failure: nothing is sent.
-func (s *Settler) verify(ctx context.Context, o offer, v verified) string {
+func (s *Settler) verify(ctx context.Context, req x402.Requirement, v verified) string {
 	now := s.clock()
-	amount, err := o.Requirement.Amount.Units()
-	payTo, err2 := eth.ParseAddress(o.Requirement.PayTo)
+	amount, err := req.Amount.Units()
+	payTo, err2 := eth.ParseAddress(req.PayTo)
 	switch {
 	case errors.Join(err, err2) != nil:
 		return "invalid_payment_requirements"
@@ -295,7 +309,7 @@ func (s *Settler) verify(ctx context.Context, o offer, v verified) string {
 		return "invalid_exact_evm_payload_authorization_value"
 	case now <= v.validAfter:
 		return "invalid_exact_evm_payload_authorization_valid_after"
-	case now+settleMargin >= v.before || v.before > now+o.Requirement.MaxTimeoutSeconds+clockSkew:
+	case now+settleMargin >= v.before || v.before > now+req.MaxTimeoutSeconds+clockSkew:
 		// Too close to expiry to be mined in time, or longer than the offer
 		// allows: a transfer that could sit unmined for long holds the
 		// shop's gas nonce that long.
