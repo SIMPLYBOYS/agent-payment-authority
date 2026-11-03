@@ -1074,10 +1074,13 @@ namespace APA
 
         // The pan (V4, docs/town-v2.md): the town view's centre x. At rest on focus (the three shops); in the
         // game it follows the walked customer; a tour (the video's prologue) runs from the west end to the
-        // east end and back to focus. Never past the map's ends.
+        // east end, stays there a moment, and goes back to focus; each leg eases in and out (Aaron 11/3). Never
+        // past the map's ends.
         float lookX = float.NaN; // NaN: focus
-        readonly Queue<float> tour = new Queue<float>();
-        public static float PanSpeed = 3.5f; // tiles a second on a tour (a test runs it faster)
+        readonly Queue<(float to, float hold)> tour = new Queue<(float, float)>();
+        float legFrom = float.NaN, legT; // the tour's leg now: where it set off, seconds since
+        public static float PanSpeed = 3.5f; // tiles a second on a tour, on average (a test runs it faster)
+        public const float TourHold = 2f;    // seconds at the east end: the hotel and the gas station
         public float LookX => town == null ? 0f : Pan(float.IsNaN(lookX) ? town.focus.x : lookX, Scale); // tests
         public bool Touring => tour.Count > 0; // tests
 
@@ -1085,9 +1088,10 @@ namespace APA
         {
             if (!HasTown) return false;
             tour.Clear();
-            lookX = 0f; // from the west end (a cut), then an even pan
-            tour.Enqueue(town.w);
-            tour.Enqueue(town.focus.x);
+            lookX = 0f; // from the west end (a cut)
+            legFrom = float.NaN;
+            tour.Enqueue((town.w, TourHold));
+            tour.Enqueue((town.focus.x, 0f));
             return true;
         }
 
@@ -1100,11 +1104,24 @@ namespace APA
 
         void Follow(float dt)
         {
-            float k = Scale, now = LookX;
-            float want = Pan(tour.Count > 0 ? tour.Peek() : Player != "" ? PlayerAt.x : town.focus.x, k);
-            // A tour at an even pace; else catching up, quicker the further off (the customer walks at PlayerSpeed).
-            float next = Mathf.MoveTowards(now, want, (tour.Count > 0 ? PanSpeed : Mathf.Max(PanSpeed, 3f * Mathf.Abs(want - now))) * dt);
-            if (tour.Count > 0 && next == want) tour.Dequeue();
+            float k = Scale, now = LookX, next;
+            if (tour.Count > 0)
+            {
+                // A leg of the tour: eased in and out over the time an even pan would take, then its hold.
+                var (target, hold) = tour.Peek();
+                float to = Pan(target, k);
+                if (float.IsNaN(legFrom)) { legFrom = now; legT = 0f; }
+                legT += dt;
+                float dur = Mathf.Abs(to - legFrom) / PanSpeed;
+                next = dur <= 0f ? to : Mathf.Lerp(legFrom, to, Mathf.SmoothStep(0f, 1f, legT / dur));
+                if (legT >= dur + hold) { tour.Dequeue(); legFrom = float.NaN; }
+            }
+            else
+            {
+                // Catching up, quicker the further off (the customer walks at PlayerSpeed).
+                float want = Pan(Player != "" ? PlayerAt.x : town.focus.x, k);
+                next = Mathf.MoveTowards(now, want, Mathf.Max(PanSpeed, 3f * Mathf.Abs(want - now)) * dt);
+            }
             if (next == lookX) return;
             lookX = next;
             Retarget();

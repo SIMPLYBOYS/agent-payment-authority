@@ -294,15 +294,20 @@ public class TownTests
             bridge.Pan("{\"to\":\"tour\"}");
             Assert.AreEqual("pan:0:0:tour|Applied", bridge.reports.Last());
             Assert.AreEqual(half, town.LookX, 0.01f, "a cut to the west end");
-            float max = float.MinValue;
+            float max = float.MinValue, t0 = Time.realtimeSinceStartup, tenth = -1f, held = 0f, d = w - 2f * half;
             for (float end = Time.realtimeSinceStartup + 20f; town.Touring && Time.realtimeSinceStartup < end;)
             {
                 yield return null;
                 max = Mathf.Max(max, town.LookX);
+                if (tenth < 0f && town.LookX >= half + 0.1f * d) tenth = Time.realtimeSinceStartup - t0;
+                if (Mathf.Abs(town.LookX - (w - half)) < 0.01f) held += Time.unscaledDeltaTime;
                 Crisp();
             }
             Assert.IsFalse(town.Touring, "the tour ends");
             Assert.AreEqual(w - half, max, 0.01f, "to the east end");
+            // Aaron 11/3: it eases in (a tenth of the way takes longer than an even pan's tenth) and stays at the east end.
+            Assert.Greater(tenth, 0.15f * d / TownView.PanSpeed, "it eases in");
+            Assert.GreaterOrEqual(held, TownView.TourHold - 0.1f, "it stays at the east end a moment");
             Assert.AreEqual(town.Focus.x, town.LookX, 0.01f, "and back on the shops");
         }
         finally { TownView.PanSpeed = speed; }
