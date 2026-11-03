@@ -83,3 +83,16 @@ Agent → Host（付款流程）→ 商店：PAYMENT-SIGNATURE
 - 啟動前檢查：`demo-local.sh`、`demo-testnet.sh` 多查 8403 有沒有被占用。
 - `apa-facilitator` 只在有 `shop_key_dir` 時要求金鑰等於 `pay_to`：本機的 `pay_to`（`0x3333…`）沒有金鑰，gas 由 anvil 的 key 4 付，與原本 Host 裡結算相同。
 - 驗證：本機新鏈上跑一次 `p2-local` 與 `apa-facilitator`：設定檔帶 `facilitator_url`；`/supported` 列出 `eip155:84532` 的 `exact`；`/health` 就緒、今天 0 筆；錯誤的 `/settle` 回 400；`settle.db` 是 0600。相關 8 個套件全過。**還沒跑**：完整的 `make demo-local`（要 Signer 的密語，Aaron）。
+
+**FA4 程式：證據包記 facilitator（11/4）**
+- 證據包的 start（`e1-evidence start`，跑之前記錄）多一項 `facilitator`：host 目錄付款設定裡的 `facilitator_url`。沒有這一項，就是 Host 裡的商店自己結算（之前的證據包都是）。`e1-evidence start` 印出的那一行也寫出「由誰結算」。
+- checker（`verify-demo --mode e1a`）的報告多兩項，只列事實，不影響任何 claim：
+  - `facilitator`：照 start 的記錄列出。
+  - `settlements`：每一筆 tx#2 的購買單、交易編號，以及鏈上 `eth_getTransactionByHash` 讀到的送出者（`sent_by`），也就是這一筆的 gas 是誰付的。沒有 `--rpc` 時是空的。
+- 送出者的地址不在 start 裡記錄，而是讀鏈：start 記錄時本機的 `apa-facilitator` 還沒啟動，而且鏈上的送出者比 facilitator 自己的 `/supported` 更可信。checker 不比對兩者，這一點寫進了報告的 limits。
+- checker 版本仍是 `e1a.4`：判定規則沒有改，只是多列兩項。
+- 測試：
+  - `TestE1aSettlementSenders`：讀得到送出者、節點沒有這筆交易、地址格式不對，三種情況都列出那一筆，E4、E8 不變。
+  - `TestV2PaidOnAnvil`：本機 anvil 上從 start、付款、打包到查證走一遍，報告的 `facilitator` 等於 host 目錄的設定，`sent_by` 等於實際送出 tx#2 的金鑰（anvil key 4）。
+- 用新的 checker 重查 S5 的 `testnet-town-t4`（Base Sepolia）：**E1～E10 全部 PASS**，沒有 findings。`facilitator` 是空的（那時 Host 裡的商店自己結算）；4 筆 tx#2 的送出者都是 `0x6bbe…773e`，也就是商店的 `pay_to`（P2b-D3：商店自己付 gas）。`artifacts/e1a/testnet-town-t4.report.json` 沒有改寫。`settlements` 依購買單排序，同一份證據包每次的報告相同。
+- 還沒做：瀏覽器檢查與本機彩排一次（要 Signer 的密語），以及 FA3 那一筆經 x402.org 的付款（要 Aaron 核准）。那一場的 `settlements` 應該列出 x402.org 的 `0xd407…f1bf`。

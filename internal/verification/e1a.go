@@ -64,6 +64,17 @@ type E1aStart struct {
 	PayTo          string   `json:"pay_to"`
 	BudgetContract string   `json:"budget_contract"`
 	Verifier       string   `json:"verifier"`
+	// Facilitator is the host directory's facilitator_url: who the shop settled through
+	// (docs/commercial-facilitator.md FA4); none, the Host's shop settled itself.
+	Facilitator string `json:"facilitator,omitempty"`
+}
+
+// E1aSettlement is one tx#2 and who sent it, as the chain has it ("" not
+// read): listed, not a claim (E4 and E8 read the token's own events).
+type E1aSettlement struct {
+	PurchaseOrderID string `json:"purchase_order_id"`
+	Transaction     string `json:"transaction"`
+	SentBy          string `json:"sent_by"`
 }
 
 // E1aTask is one run: its task, the E1-a catalog entry it ran, and, for the
@@ -109,8 +120,11 @@ type E1aReport struct {
 	Claims         map[string]Verdict `json:"claims"`
 	Findings       []Finding          `json:"findings"`
 	Injections     []Injection        `json:"injections"`
-	NotEvaluated   []string           `json:"not_evaluated"`
-	Limits         []string           `json:"limits"`
+	// Facilitator is the start's ("" the Host's shop settled itself); Settlements each tx#2's sender (with --rpc).
+	Facilitator  string          `json:"facilitator"`
+	Settlements  []E1aSettlement `json:"settlements"`
+	NotEvaluated []string        `json:"not_evaluated"`
+	Limits       []string        `json:"limits"`
 }
 
 // ExitCode as Report's.
@@ -156,6 +170,7 @@ var e1aLimits = []string{
 	"the paying host's prompt is buyer.PayingTaskPrompt, the host's own function: a change to it moves the host and this check together",
 	"the live catalogs are this repository's at the pack's code_commit (as they are now when the repository has no such commit): the pack names the commit its runs ran",
 	"the secret scan finds key shapes (hex) and fields never whitelisted; a base64 secret is not recognized",
+	"the facilitator is the host directory's setting at the start, and each tx#2's sender is the chain's; neither is a claim (a facilitator's address is not checked against its own list)",
 }
 
 // tracePrompt is the prompt a live run of entry must have been given.
@@ -173,7 +188,7 @@ func VerifyE1a(dir, repo string, chain Chain) (*E1aReport, error) {
 		return nil, err
 	}
 	defer b.close()
-	r := &E1aReport{Mode: "e1a", NotEvaluated: e1aNotEvaluated, Limits: e1aLimits, Injections: []Injection{}}
+	r := &E1aReport{Mode: "e1a", NotEvaluated: e1aNotEvaluated, Limits: e1aLimits, Injections: []Injection{}, Settlements: []E1aSettlement{}}
 	r.Checker.Name, r.Checker.Version = "verify-demo", E1aChecker
 	var f findings
 	defer func() {
@@ -220,7 +235,9 @@ func VerifyE1a(dir, repo string, chain Chain) (*E1aReport, error) {
 	}
 	e1aApart(&f, runs, registry)
 	e1aSafety(b, &f)
-	e1aOnChain(&f, m, runs, chain, repo)
+	r.Facilitator = m.Start.Facilitator
+	r.Settlements = append(r.Settlements, e1aOnChain(&f, m, runs, chain, repo)...)
+	slices.SortFunc(r.Settlements, func(a, b E1aSettlement) int { return strings.Compare(a.PurchaseOrderID, b.PurchaseOrderID) }) // runs are a map
 	return r, nil
 }
 

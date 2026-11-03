@@ -186,3 +186,25 @@ func TestE1aChainClaims(t *testing.T) {
 		}
 	}
 }
+
+// Each tx#2 is listed with its sender as the chain has it (a facilitator's, FA4); one the node
+// cannot give is listed without, and neither changes E4 or E8.
+func TestE1aSettlementSenders(t *testing.T) {
+	tx2 := "0x" + strings.Repeat("2", 64)
+	for name, c := range map[string]struct{ from, want string }{
+		"read":      {"0xD407E409E34E0B9AFB99ECCEB609BDBCD5E7F1BF", "0xd407e409e34e0b9afb99ecceb609bdbcd5e7f1bf"},
+		"not on it": {"", ""},
+		"not one":   {"0x12", ""},
+	} {
+		cc := newChainCase(t)
+		if c.from != "" {
+			cc.chain.txs[tx2] = map[string]string{"from": c.from}
+		}
+		var f findings
+		sent := e1aOnChain(&f, cc.m, map[string]*e1aRun{"task-a": cc.run}, cc.chain, "../..")
+		if v := f.verdicts(E1aClaims); v["E4"] != Pass || v["E8"] != Pass ||
+			len(sent) != 1 || sent[0].Transaction != tx2 || sent[0].PurchaseOrderID != cc.run.orders[0].Intent.PurchaseOrderID || sent[0].SentBy != c.want {
+			t.Errorf("%s: %+v %v", name, sent, v)
+		}
+	}
+}

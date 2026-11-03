@@ -103,7 +103,7 @@ func TestV2PaidOnAnvil(t *testing.T) {
 	// E1-a's start, before anything is registered or paid (§4.7).
 	hostDir := t.TempDir()
 	os.WriteFile(filepath.Join(hostDir, "payments.json"), []byte(`{"environment":"local_anvil","chain_id":`+strconv.FormatUint(ethtest.Chain, 10)+
-		`,"token":"`+w.usdc.Hex()+`","pay_to":"`+w.payTo.Hex()+`","budget_contract":"`+w.budget.Hex()+`"}`), 0o600)
+		`,"token":"`+w.usdc.Hex()+`","pay_to":"`+w.payTo.Hex()+`","budget_contract":"`+w.budget.Hex()+`","facilitator_url":"http://127.0.0.1:8403"}`), 0o600)
 	regRaw, _ := json.Marshal(reg)
 	os.WriteFile(filepath.Join(hostDir, "registry.json"), regRaw, 0o600)
 	start, err := e1evidence.Start(bg, w.rpc, hostDir)
@@ -169,6 +169,11 @@ func TestV2PaidOnAnvil(t *testing.T) {
 	rep, err := verification.VerifyE1a(packDir, ethtest.Root(), w.rpc)
 	if err != nil || rep.Verdict != verification.Pass {
 		t.Fatalf("the pack: %v %+v", err, rep)
+	}
+	// FA4: the facilitator the host directory named, and who sent tx#2 on the chain (the shop's gas key here).
+	if rep.Facilitator != "http://127.0.0.1:8403" || len(rep.Settlements) != 1 || !strings.EqualFold(rep.Settlements[0].Transaction, pay.SettleTx) ||
+		rep.Settlements[0].SentBy != ethtest.Key(t, 4).Addr.Hex() {
+		t.Fatalf("the settlement's facilitator and sender: %q %+v", rep.Facilitator, rep.Settlements)
 	}
 	// What the chain alone can catch: another start, and a spend the Host never made.
 	restart := func(change func(*verification.E1aStart)) string {

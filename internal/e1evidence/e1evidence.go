@@ -110,12 +110,14 @@ func Start(ctx context.Context, chain verification.Chain, hostDir string) (verif
 		Token          string `json:"token"`
 		PayTo          string `json:"pay_to"`
 		BudgetContract string `json:"budget_contract"`
+		FacilitatorURL string `json:"facilitator_url"`
 	}
 	var reg contracts.RegistryConfig
 	if err := errors.Join(readJSON(filepath.Join(hostDir, "payments.json"), &pay), readJSON(filepath.Join(hostDir, "registry.json"), &reg)); err != nil {
 		return s, err
 	}
 	s.Chain, s.ChainID, s.Token, s.PayTo, s.BudgetContract = pay.Environment, pay.ChainID, pay.Token, pay.PayTo, pay.BudgetContract
+	s.Facilitator = pay.FacilitatorURL
 	if s.Chain == "" {
 		s.Chain = "local_anvil"
 	}

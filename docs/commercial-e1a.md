@@ -425,3 +425,5 @@ E1-a 的範圍外仍是 `not_evaluated`：checker 自行重驗 BBS+ proof、語�
 - 修正：manifest 的 `code_commit` 在這個 repo 的 git 歷史裡時，兩份可信的 live 情境檔（`scenarios-e1a.json`、`scenarios-town-live.json`）改讀**那個 commit 的版本**（`git show`）；那時還沒有的情境檔就沒有項目；repo 裡沒有那個 commit 或沒有 commit 時，照舊讀工作目錄。commit 只接受 40 位十六進位，不會被 git 當成選項。情境檔仍然只從 checker 自己的 repo 讀，不採信證據包。
 - 驗證：`TestE1aCatalogAtThePacksCommit`（暫存 repo：舊 commit 讀舊任務、新 commit 讀新任務、未知 commit 與空字串讀工作目錄、`--output=x` 不當選項）；`testnet-town-t4` 對 Base Sepolia **E1～E10 全部 PASS**；`rehearsal-town2`、`town3`、`town4` 的 E6 PASS。
 - 限制：要有完整的 git 歷史（淺層 clone 沒有舊 commit，就會退回讀工作目錄）；`Verifier.json` 仍讀工作目錄（`var/contracts/out/`），合約若改了，舊證據包的 E4 會遇到同樣的問題。
+
+**證據包記 facilitator（FA4，11/4）**：start 多一項 `facilitator`；報告多 `facilitator` 與 `settlements`（每筆 tx#2 在鏈上的送出者）。只列事實，不是 claim，checker 仍是 `e1a.4`。見 [commercial-facilitator.md](commercial-facilitator.md) 第 6 節。

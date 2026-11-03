@@ -40,8 +40,9 @@ var (
 	confirmationsOf = map[string]uint64{"base_sepolia": 2, "local_anvil": 1}
 )
 
-// e1aOnChain is E4 and E8; without a chain both are INCONCLUSIVE.
-func e1aOnChain(f *findings, m E1aManifest, runs map[string]*e1aRun, chain Chain, repo string) {
+// e1aOnChain is E4 and E8, and each tx#2's sender; without a chain both are
+// INCONCLUSIVE and no sender is read.
+func e1aOnChain(f *findings, m E1aManifest, runs map[string]*e1aRun, chain Chain, repo string) (sent []E1aSettlement) {
 	both := func(miss bool, format string, a ...any) {
 		for _, c := range []string{"E4", "E8"} {
 			if miss {
@@ -142,6 +143,7 @@ func e1aOnChain(f *findings, m E1aManifest, runs map[string]*e1aRun, chain Chain
 				continue
 			}
 			seen(e1aSettlement(ctx, f, chain, latest, s, token, tx2, o.PaymentBinding.From, o.PaymentBinding.PayTo, o.PaymentBinding.Nonce, amount))
+			sent = append(sent, E1aSettlement{PurchaseOrderID: po, Transaction: tx2, SentBy: sentBy(ctx, chain, tx2)})
 			k := strings.ToLower(tx2)
 			if claimed[k] {
 				f.fail("E4", nil, "tx#2 %s is claimed by two purchases", tx2)
@@ -155,6 +157,22 @@ func e1aOnChain(f *findings, m E1aManifest, runs map[string]*e1aRun, chain Chain
 		}
 	}
 	e1aTransfers(ctx, f, chain, s, token, latest, low, high, allowed)
+	return sent
+}
+
+// sentBy is who sent h, as the chain has it: "" when it cannot be read.
+func sentBy(ctx context.Context, chain Chain, h string) string {
+	var tx *struct {
+		From string `json:"from"`
+	}
+	if chain.Raw(ctx, "eth_getTransactionByHash", &tx, h) != nil || tx == nil {
+		return ""
+	}
+	a, err := eth.ParseAddress(tx.From)
+	if err != nil {
+		return ""
+	}
+	return a.Hex()
 }
 
 // allowance is the one transfer a settlement may carry: to its payee, its

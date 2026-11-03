@@ -78,7 +78,12 @@ func run(args []string, out io.Writer) error {
 		if err := os.WriteFile(*dst, append(raw, '\n'), 0o600); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "e1-evidence: start recorded in %s: %s chain %d from block %d, %d wallets; no task of the registry is registered yet\n", *dst, s.Chain, s.ChainID, s.FromBlock, len(s.Wallets))
+		via := "the Host's shop itself"
+		if s.Facilitator != "" {
+			via = "the facilitator " + s.Facilitator
+		}
+		fmt.Fprintf(out, "e1-evidence: start recorded in %s: %s chain %d from block %d, %d wallets, settled by %s; no task of the registry is registered yet\n",
+			*dst, s.Chain, s.ChainID, s.FromBlock, len(s.Wallets), via)
 		return nil
 	case "pack":
 		var in e1evidence.PackInput
