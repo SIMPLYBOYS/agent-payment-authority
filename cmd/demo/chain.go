@@ -67,6 +67,9 @@ type chainReply struct {
 	Payer    string `json:"payer,omitempty"`
 	Contract string `json:"contract,omitempty"`
 	Token    string `json:"token,omitempty"`
+	// Agent: the task's consumer's Agent identity (ERC-8004, CAIP-19) as the trusted registry names it
+	// (docs/commercial-8004.md I2); the audience looks it up on the explorer, the checker reads it on chain.
+	Agent string `json:"agent,omitempty"`
 }
 
 // hexOrNone: an address as 0x hex, "" for the zero address (not known).
@@ -80,9 +83,10 @@ func hexOrNone(a eth.Address) string {
 // chainReader reads and keeps the receipts (a final one never changes).
 type chainReader struct {
 	node     chainNode
-	contract eth.Address // the budget contract (tx#1's Spent)
-	token    eth.Address // the token (tx#2's Transfer)
-	depth    uint64      // a receipt this deep is kept
+	contract eth.Address       // the budget contract (tx#1's Spent)
+	token    eth.Address       // the token (tx#2's Transfer)
+	depth    uint64            // a receipt this deep is kept
+	agents   map[string]string // consumer -> its Agent's agent_registry_ref (the trusted registry's)
 	mu       sync.Mutex
 	kept     map[string]chainTx
 }
@@ -163,7 +167,8 @@ func (c *chainReader) view(ctx context.Context, capability string, rec store.Tas
 		return chainReply{}, err
 	}
 	payer, _ := eth.ParseAddress(rec.Binding.Payer) // a zero address matches no transfer
-	out := chainReply{Chain: capability, Head: head, Purchases: map[string]chainPurchase{}, Payer: hexOrNone(payer), Contract: hexOrNone(c.contract), Token: hexOrNone(c.token)}
+	out := chainReply{Chain: capability, Head: head, Purchases: map[string]chainPurchase{}, Payer: hexOrNone(payer), Contract: hexOrNone(c.contract), Token: hexOrNone(c.token),
+		Agent: c.agents[rec.Binding.ConsumerID]}
 	for _, p := range rec.Task.Purchases {
 		if p.Payment == nil || (p.Payment.ReserveTx == "" && p.Payment.SettleTx == "") {
 			continue

@@ -13,6 +13,9 @@ import (
 
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 var addressPattern = regexp.MustCompile(`^0x[0-9a-f]{40}$`)
+
+// agentRefPattern is an ERC-8004 agentId as CAIP-19 (Consumer.AgentRegistryRef).
+var agentRefPattern = regexp.MustCompile(`^eip155:[0-9]{1,20}/erc721:0x[0-9a-fA-F]{40}/[0-9]{1,78}$`)
 var noncePattern = regexp.MustCompile(`^0x[0-9a-f]{64}$`)
 var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 var decimalPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
@@ -90,6 +93,12 @@ type Consumer struct {
 	ConsumerID string `json:"consumer_id"`
 	AgentID    string `json:"agent_id"`
 	WalletID   string `json:"wallet_id"`
+	// AgentRegistryRef is the Agent's on-chain identity, set by the host
+	// (p2-testnet agents), never by the model or a purchase: ERC-8004's
+	// agentId as CAIP-19, eip155:84532/erc721:<registry>/<agentId>
+	// (docs/contracts.md 207, docs/commercial-8004.md). Display and evidence
+	// only: Policy does not read it.
+	AgentRegistryRef string `json:"agent_registry_ref,omitempty"`
 }
 type WalletRef struct {
 	WalletID     string `json:"wallet_id"`

@@ -74,7 +74,8 @@ func NewRegistry(c RegistryConfig) (*Registry, error) {
 	for _, consumer := range c.Consumers {
 		_, duplicate := r.consumers[consumer.ConsumerID]
 		_, exists := r.wallets[consumer.WalletID]
-		if !ids(consumer.ConsumerID, consumer.AgentID, consumer.WalletID) || duplicate || !exists || agents[consumer.AgentID] || owners[consumer.WalletID] {
+		ref := consumer.AgentRegistryRef == "" || agentRefPattern.MatchString(consumer.AgentRegistryRef)
+		if !ids(consumer.ConsumerID, consumer.AgentID, consumer.WalletID) || duplicate || !exists || agents[consumer.AgentID] || owners[consumer.WalletID] || !ref {
 			return nil, fmt.Errorf("duplicate or invalid consumer binding")
 		}
 		r.consumers[consumer.ConsumerID] = consumer

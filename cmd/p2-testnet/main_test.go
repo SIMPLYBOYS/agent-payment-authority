@@ -410,6 +410,7 @@ func TestE1aHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg.Wallets[0].From = "0x245664a4bfb21a9e9d47f232f6d691223b833554"
+	reg.Consumers[1].AgentRegistryRef = "eip155:84532/erc721:0x8004A818BFB912233c491871b3d84c89A494BD9e/10570"
 	pay := map[string]any{"environment": "base_sepolia", "dir": host, "test402_offer": "x.json", "chain_id": 84532, "token_from_block": 48374723,
 		"delegations": map[string]any{"consumer-a/0xshop": "dlg-ta@1", "consumer-b/0xshop": "dlg-tb@1", "consumer-b/0x0402": "dlg-t402@1"}}
 	for name, v := range map[string]any{"payments.json": pay, "registry.json": reg, "profile.json": map[string]any{"p": 1}} {
@@ -436,7 +437,8 @@ func TestE1aHost(t *testing.T) {
 	if got["dir"] != host || got["test402_offer"] != nil || got["shop_eval"] != "i-summary-premium" || len(d) != 2 || d["consumer-b/0x0402"] != nil {
 		t.Fatalf("payments %v", got)
 	}
-	if r.Wallets[0].From != reg.Wallets[0].From || len(r.Tasks) != 10 || r.Tasks[0].TaskID != "show-e1a-1021-a-01" {
+	if r.Wallets[0].From != reg.Wallets[0].From || len(r.Tasks) != 10 || r.Tasks[0].TaskID != "show-e1a-1021-a-01" ||
+		r.Consumers[0].AgentRegistryRef != "" || r.Consumers[1].AgentRegistryRef != reg.Consumers[1].AgentRegistryRef {
 		t.Fatalf("registry %+v", r)
 	}
 	if after, _ := os.ReadFile(filepath.Join(host, "payments.json")); string(after) != string(before) {

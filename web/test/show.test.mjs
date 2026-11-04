@@ -329,6 +329,19 @@ test("the receipt card: only once delivered with a receipt; two transactions, no
   assert.deepEqual(noChain["錢包"].parts.map((x) => x.name), ["商店"], "before the chain read: the shop only");
   assert.deepEqual(noChain["合約"].parts.map((x) => x.name), ["USDC"]);
   assert.equal(A.addressLink("base_sepolia", "0x12"), null);
+  // docs/commercial-8004.md I2: the Agent's ERC-8004 identity, the registry's ref the Host's chain read carries; on Base Sepolia only.
+  const REF = "eip155:84532/erc721:0x8004A818BFB912233c491871b3d84c89A494BD9e/10569";
+  const id = Object.fromEntries(A.showReceipt(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], withAddr), {}, { ...chain, agent: REF }).rows.map((x) => [x.label, x]));
+  assert.deepEqual([id["Agent 身分"].text, id["Agent 身分"].href], ["ERC-8004 #10569", "https://sepolia.basescan.org/nft/0x8004A818BFB912233c491871b3d84c89A494BD9e/10569"]);
+  assert.equal(a["Agent 身分"], undefined, "no identity in the chain read: no row");
+  const localId = Object.fromEntries(A.showReceipt(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { ...withAddr, cap: "local_anvil" }), {}, { ...chain, agent: REF }).rows.map((x) => [x.label, x]));
+  assert.equal(localId["Agent 身分"], undefined, "a local chain shows none (E6 A)");
+  const trust = A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], withAddr), {}, { ...chain, agent: REF });
+  assert.deepEqual([trust[0].label, trust[0].text, trust[0].note], ["Agent 身分", "ERC-8004 #10569", "ERC-8004・平台代為註冊"]);
+  assert.equal(trust[1].label, "1 委託");
+  assert.equal(A.agentLink("base_sepolia", "eip155:1/erc721:0x8004A818BFB912233c491871b3d84c89A494BD9e/1"), null, "another chain's");
+  assert.equal(A.agentLink("base_sepolia", "eip155:84532:0x8004A818BFB912233c491871b3d84c89A494BD9e#1"), null);
+  assert.equal(A.agentLink("base_sepolia", undefined), null);
   assert.equal(A.productName("https://x/scenes/cafe/lunch-set"), "午餐套餐（12:30 取餐）");
   assert.equal(A.productName("https://x/eval/q-17?v=1"), "評測資料（q-17）");
   assert.equal(A.productName("not a url"), "商品");

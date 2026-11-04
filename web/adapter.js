@@ -13,6 +13,8 @@ export const PAYING = { local_anvil: "本機 anvil", base_sepolia: "Base Sepolia
 export const EXPLORER = { base_sepolia: "https://sepolia.basescan.org/tx/" };
 // EXPLORER_ADDRESS: an address's page there (Aaron 11/3: the wallets and the contracts too).
 export const EXPLORER_ADDRESS = { base_sepolia: "https://sepolia.basescan.org/address/" };
+// EXPLORER_NFT: an ERC-8004 agentId's page there, the registry's NFT (docs/commercial-8004.md I2).
+export const EXPLORER_NFT = { base_sepolia: ["84532", "https://sepolia.basescan.org/nft/"] };
 const txRef = (cap, hash) => str(hash) + (Object.hasOwn(EXPLORER, cap) ? " · " + EXPLORER[cap] + hash : cap === "local_anvil" ? "（本機鏈，沒有 explorer）" : "");
 const RUN = { agent: { live: "真實 Agent（live CLI）", fake: "fake Agent" }, chain: { base_sepolia: "Base Sepolia", local_anvil: "本機 anvil", none: "不付款" },
   authenticator: { device: "實體裝置（主持人宣告）", virtual: "virtual authenticator", none: "沒有 Signer" } };
@@ -1212,6 +1214,14 @@ export function addressLink(cap, addr) {
   return { text, href: Object.hasOwn(EXPLORER_ADDRESS, cap) ? EXPLORER_ADDRESS[cap] + addr.toLowerCase() : "" };
 }
 
+// agentLink: an Agent's ERC-8004 identity (CAIP-19, eip155:<chain>/erc721:<registry>/<agentId>, the trusted registry's) for
+// the audience: its number and its explorer page, on a public testnet of that chain only (E6 A: a local chain shows none).
+export function agentLink(cap, ref) {
+  const m = typeof ref === "string" && /^eip155:([0-9]+)\/erc721:(0x[0-9a-fA-F]{40})\/([0-9]+)$/.exec(ref);
+  if (!m || !Object.hasOwn(EXPLORER_NFT, cap) || EXPLORER_NFT[cap][0] !== m[1]) return null;
+  return { text: "ERC-8004 #" + m[3], href: EXPLORER_NFT[cap][1] + m[2] + "/" + m[3] };
+}
+
 // addressRow: a receipt row of named addresses (parts: name, text, href), its text the same in words; null when none is one.
 function addressRow(label, sep, named) {
   const parts = named.map(([name, link]) => link && { name, ...link }).filter(Boolean);
@@ -1260,7 +1270,9 @@ export function showEvidence(snapshot, traits = {}, chain = null) {
   // Labelled by the five steps (10/30, docs/commercial-gap-review.md §9 item 3): the evidence of each step beside it.
   // The notes name the mechanism, as short tags (Aaron 11/2: x402, ZK, EIP-3009 seen on screen; the scene keeps its 2x); never that the page verified it.
   const bound = ((snapshot && snapshot.events) || []).find((e) => e.event_type === "DELEGATION_BOUND");
-  const items = [{ label: "1 委託", text: confirmedBy(snapshot, traits) || "客人已交代 Agent 預算與範圍",
+  // The Agent's on-chain identity first: who is buying (registered by the demo platform, E1 A; the payer wallet in it is declared, E3 A).
+  const agent = agentLink(task.payment_capability, chain && chain.agent);
+  const items = [...(agent ? [{ label: "Agent 身分", ...agent, note: "ERC-8004・平台代為註冊" }] : []), { label: "1 委託", text: confirmedBy(snapshot, traits) || "客人已交代 Agent 預算與範圍",
     ...(bound && bound.authorization_method === "webauthn" ? { note: "WebAuthn" } : {}) }];
   if (!p) return items;
   if (p.credential) items.push({ label: "2 選購", text: p.credential.result === "valid" ? "出示客人的憑證，檢查通過（測試發行者）" : "憑證檢查沒通過",
@@ -1290,6 +1302,7 @@ export function showReceipt(snapshot, traits = {}, chain = null) {
   const pv = p && p.payment;
   if (sc.phase !== "delivered" || !pv || !pv.receipt_id) return null;
   const cap = task.payment_capability;
+  const agent = agentLink(cap, chain && chain.agent);
   return { title: "收據", rows: [
     { label: "商品", text: productName(p.resource_url) },
     { label: "金額", text: usdc(p.amount) + "（測試幣）" },
@@ -1299,6 +1312,7 @@ export function showReceipt(snapshot, traits = {}, chain = null) {
     { label: "付款", ...txLink(cap, pv.settle_tx) },
     { label: "兩筆交易", text: pv.reserve_tx && pv.settle_tx && pv.reserve_tx !== pv.settle_tx ? "不是同一筆，也不是一次完成" : "未確認" },
     addressRow("錢包", " → ", [["客人", addressLink(cap, chain && chain.payer)], ["商店", addressLink(cap, p.pay_to)]]),
+    agent && { label: "Agent 身分", ...agent },
     addressRow("合約", "・", [["USDC", addressLink(cap, p.asset_contract)], ["預算", addressLink(cap, chain && chain.contract)]]),
     { label: "收據編號", text: String(pv.receipt_id) },
     { label: "內容摘要", text: typeof pv.content_sha256 === "string" && pv.content_sha256 ? "sha256 " + pv.content_sha256.replace(/^sha256:/, "").slice(0, 12) + "…" : "未提供" },

@@ -128,8 +128,9 @@ func TestChainViewUsesTheTasksPayerAndEachShop(t *testing.T) {
 	n := &stubNode{head: 20, receipts: map[string]*eth.Receipt{
 		tx2: {Status: 1, BlockNumber: 10, Logs: []eth.Log{{Address: token, Topics: [][32]byte{chainTransferTopic, w32(payer[:]), w32(shop[:])}, Data: amount[:]}}},
 	}}
-	c := &chainReader{node: n, token: token, depth: 2, kept: map[string]chainTx{}}
-	rec := store.TaskRecord{Binding: store.TaskBinding{Payer: strings.ToUpper(payer.Hex()[2:])}, Task: store.TaskView{Purchases: []store.PurchaseView{
+	ref := "eip155:84532/erc721:0x8004A818BFB912233c491871b3d84c89A494BD9e/10569"
+	c := &chainReader{node: n, token: token, depth: 2, kept: map[string]chainTx{}, agents: map[string]string{"consumer-a": ref}}
+	rec := store.TaskRecord{Binding: store.TaskBinding{ConsumerID: "consumer-a", Payer: strings.ToUpper(payer.Hex()[2:])}, Task: store.TaskView{Purchases: []store.PurchaseView{
 		{PurchaseOrderID: "po-1", PayTo: shop.Hex(), Payment: &store.PaymentView{SettleTx: tx2}},
 		{PurchaseOrderID: "po-2", PayTo: shop.Hex()}, // no payment: not asked
 	}}}
@@ -145,6 +146,15 @@ func TestChainViewUsesTheTasksPayerAndEachShop(t *testing.T) {
 	if out.Payer != payer.Hex() || out.Token != token.Hex() || out.Contract != "" {
 		t.Fatalf("addresses: payer %q token %q contract %q", out.Payer, out.Token, out.Contract)
 	}
+	// The task's own consumer's Agent identity, the registry's; another consumer's task says none of it.
+	if out.Agent != ref {
+		t.Fatalf("agent %q", out.Agent)
+	}
+	rec.Binding.ConsumerID = "consumer-b"
+	if out, _ := c.view(context.Background(), "local_anvil", rec); out.Agent != "" {
+		t.Fatalf("consumer-b's task names %q", out.Agent)
+	}
+	rec.Binding.ConsumerID = "consumer-a"
 	rec.Task.Purchases[0].PayTo = eth.Address{0x44}.Hex() // another shop than the transfer's
 	c.kept = map[string]chainTx{}
 	if out, _ := c.view(context.Background(), "local_anvil", rec); out.Purchases["po-1"].Settle.Transfer.ToShop {

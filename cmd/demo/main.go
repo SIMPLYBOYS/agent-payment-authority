@@ -423,7 +423,12 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		ui.shopQuota = pay.quota
 		contract, _ := eth.ParseAddress(pay.cfg.BudgetContract) // both parsed at start (openPayments)
 		token, _ := eth.ParseAddress(pay.cfg.Token)
-		ui.chainRead = &chainReader{node: pay.rpc, contract: contract, token: token, depth: pay.cfg.Confirmations, kept: map[string]chainTx{}}
+		ui.chainRead = &chainReader{node: pay.rpc, contract: contract, token: token, depth: pay.cfg.Confirmations, kept: map[string]chainTx{}, agents: map[string]string{}}
+		for _, c := range regCfg.Consumers {
+			if c.AgentRegistryRef != "" {
+				ui.chainRead.agents[c.ConsumerID] = c.AgentRegistryRef
+			}
+		}
 	}
 	if pay != nil {
 		var wallets []eth.Address

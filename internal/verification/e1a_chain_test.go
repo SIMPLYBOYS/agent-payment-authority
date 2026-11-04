@@ -2,6 +2,7 @@ package verification
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,7 @@ type stubChain struct {
 	proofFails bool
 	proofErr   int // the RPC error code when the proof call fails (0: 3, a revert)
 	logs       []eth.Log
+	calls      map[string][]byte // calldata (hex) -> its return
 }
 
 func (c *stubChain) ChainID(context.Context) (*big.Int, error) {
@@ -38,6 +40,9 @@ func (c *stubChain) Receipt(_ context.Context, h []byte) (*eth.Receipt, error) {
 	return c.receipts["0x"+hex.EncodeToString(h)], nil
 }
 func (c *stubChain) Call(_ context.Context, m eth.Msg) ([]byte, error) {
+	if b, ok := c.calls[hex.EncodeToString(m.Data)]; ok {
+		return b, nil
+	}
 	switch {
 	case strings.HasPrefix(hex.EncodeToString(m.Data), hex.EncodeToString(eth.Selector("verifier()"))):
 		w := make([]byte, 32)
@@ -205,6 +210,53 @@ func TestE1aSettlementSenders(t *testing.T) {
 		if v := f.verdicts(E1aClaims); v["E4"] != Pass || v["E8"] != Pass ||
 			len(sent) != 1 || sent[0].Transaction != tx2 || sent[0].PurchaseOrderID != cc.run.orders[0].Intent.PurchaseOrderID || sent[0].SentBy != c.want {
 			t.Errorf("%s: %+v %v", name, sent, v)
+		}
+	}
+}
+
+// I3 (docs/commercial-8004.md): each consumer the registry names an Agent for
+// is listed with what its registry answers: the owner, no agentWallet, the
+// file's sha256 and its declared wallet, the consumer's own or not. On
+// another chain, or without --rpc, only the ref.
+func TestE1aAgents(t *testing.T) {
+	var reg contracts.RegistryConfig
+	if raw, err := os.ReadFile("../../testdata/demo/registry.json"); err != nil || json.Unmarshal(raw, &reg) != nil {
+		t.Fatal(err)
+	}
+	ref := "eip155:84532/erc721:0x8004A818BFB912233c491871b3d84c89A494BD9e/10569"
+	reg.Consumers[0].AgentRegistryRef = ref
+	owner := "0xccd7bec96111b217ccc92632e6e0173878ab4c6a"
+	file := func(wallet string) []byte {
+		uri := "data:application/json;base64," + base64.StdEncoding.EncodeToString([]byte(`{"apa":{"payment_wallet":"`+wallet+`"}}`))
+		b, _ := eth.Encode(uri)
+		return b
+	}
+	call := func(sig string) string { d, _ := eth.Call(sig, uint64(10569)); return hex.EncodeToString(d) }
+	ow, _ := eth.ParseAddress(owner)
+	ownerWord := word(ow[:])
+	for name, c := range map[string]struct {
+		chain    uint64
+		wallet   string
+		rpc      bool
+		read, is bool
+	}{
+		"read":             {84532, reg.Wallets[0].From, true, true, true},
+		"another wallet":   {84532, reg.Wallets[1].From, true, true, false},
+		"on another chain": {31337, reg.Wallets[0].From, true, false, false},
+		"no --rpc":         {84532, reg.Wallets[0].From, false, false, false},
+	} {
+		sc := &stubChain{id: c.chain, calls: map[string][]byte{call("ownerOf(uint256)"): ownerWord[:], call("getAgentWallet(uint256)"): make([]byte, 32), call("tokenURI(uint256)"): file(c.wallet)}}
+		var chain Chain
+		if c.rpc {
+			chain = sc
+		}
+		got := e1aAgents(chain, reg)
+		if len(got) != 1 || got[0].ConsumerID != "consumer-a" || got[0].Ref != ref {
+			t.Fatalf("%s: %+v", name, got)
+		}
+		a := got[0]
+		if read := a.Owner == owner && a.AgentWallet == "0x"+strings.Repeat("0", 40) && len(a.URISHA256) == 64 && a.DeclaredWallet == c.wallet; read != c.read || a.DeclaredIsConsumers != c.is {
+			t.Errorf("%s: %+v", name, a)
 		}
 	}
 }

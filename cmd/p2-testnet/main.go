@@ -7,6 +7,14 @@
 //	p2-testnet test402    URL [--save FILE]
 //	p2-testnet opt-signer --dir DIR --base SIGNER.JSON [--voice SIGNER.JSON] --out NEW.JSON
 //	p2-testnet e1a-host   --dir DIR | --from SRCDIR --out NEWDIR [--registry TEMPLATE] [--label L] [--shop-eval NAME] [--shop-cap N] [--facilitator URL]
+//	p2-testnet agents     --dir DIR [--rpc URL]
+//
+// agents (docs/commercial-8004.md I1) registers the family's two Agents in
+// ERC-8004's identity registry on Base Sepolia from the issuer, after "yes"
+// and the issuer key's passphrase, with apa-relayer stopped: each a
+// register, its registration file as a data: URI, and its agentWallet
+// unset; then writes DIR/host/agents.json and each consumer's
+// agent_registry_ref in DIR/host/registry.json.
 //
 // e1a-host (E1-a, docs/commercial-e1a.md 4.7, 4.8) writes a new host
 // directory for one set of E1-a runs from deploy's DIR/host: the same chain,
@@ -167,6 +175,9 @@ func run(ctx context.Context, args []string, out io.Writer, ask asker) error {
 	}
 	if len(args) > 0 && args[0] == "e1a-host" {
 		return e1aHost(args[1:], out)
+	}
+	if len(args) > 0 && args[0] == "agents" {
+		return agents(ctx, args[1:], out, ask)
 	}
 	if len(args) > 0 && args[0] == "test402" {
 		save := ""
@@ -348,14 +359,17 @@ func usdc(ctx context.Context, rpc *eth.Client, raw string, out io.Writer) (toke
 }
 
 // abiString decodes one ABI-encoded string return value.
-func abiString(b []byte) (string, error) {
+func abiString(b []byte) (string, error) { return abiText(b, 256) }
+
+// abiText is an ABI string of at most max bytes (a token URI is longer than a name).
+func abiText(b []byte, max uint64) (string, error) {
 	off, err := eth.Uint(b, 0)
 	if err != nil || !off.IsUint64() || off.Uint64()%32 != 0 || off.Uint64()+32 > uint64(len(b)) {
 		return "", errors.New("not an ABI string")
 	}
 	o := off.Uint64()
 	n := new(big.Int).SetBytes(b[o : o+32])
-	if !n.IsUint64() || n.Uint64() > 256 || o+32+n.Uint64() > uint64(len(b)) {
+	if !n.IsUint64() || n.Uint64() > max || o+32+n.Uint64() > uint64(len(b)) {
 		return "", errors.New("not an ABI string")
 	}
 	return string(b[o+32 : o+32+n.Uint64()]), nil
@@ -1096,6 +1110,13 @@ func e1aHost(args []string, out io.Writer) error {
 		}
 	}
 	t.Wallets, t.Assets, t.MerchantPayTo = reg.Wallets, reg.Assets, reg.MerchantPayTo
+	for i := range t.Consumers { // each Agent's identity, as p2-testnet agents set it (docs/commercial-8004.md)
+		for _, c := range reg.Consumers {
+			if c.ConsumerID == t.Consumers[i].ConsumerID {
+				t.Consumers[i].AgentRegistryRef = c.AgentRegistryRef
+			}
+		}
+	}
 	if _, err := contracts.NewRegistry(t); err != nil {
 		return fmt.Errorf("e1a-host: the registry to write: %w", err)
 	}

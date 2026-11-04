@@ -332,6 +332,20 @@ func TestC5TrustedAssets(t *testing.T) {
 	edge.Assets = []Asset{func() Asset { a := good; a.Decimals = 77; return a }()}
 	_, err := NewRegistry(edge)
 	mustPass(t, err)
+	// An Agent's on-chain identity (docs/commercial-8004.md): optional, CAIP-19 when given.
+	for ref, ok := range map[string]bool{
+		"eip155:84532/erc721:0x8004A818BFB912233c491871b3d84c89A494BD9e/10569": true,
+		"eip155:84532:0x8004A818BFB912233c491871b3d84c89A494BD9e#10569":        false,
+		"eip155:84532/erc721:0x8004/10569":                                     false,
+		"eip155:84532/erc721:0x8004A818BFB912233c491871b3d84c89A494BD9e/":      false,
+	} {
+		named := c
+		named.Consumers = slices.Clone(c.Consumers)
+		named.Consumers[0].AgentRegistryRef = ref
+		if _, err := NewRegistry(named); (err == nil) != ok {
+			t.Fatalf("agent ref %q: %v", ref, err)
+		}
+	}
 
 	var m CaseManifest
 	fixture(t, "cases.json", &m)

@@ -121,10 +121,12 @@ type E1aReport struct {
 	Findings       []Finding          `json:"findings"`
 	Injections     []Injection        `json:"injections"`
 	// Facilitator is the start's ("" the Host's shop settled itself); Settlements each tx#2's sender (with --rpc).
-	Facilitator  string          `json:"facilitator"`
-	Settlements  []E1aSettlement `json:"settlements"`
-	NotEvaluated []string        `json:"not_evaluated"`
-	Limits       []string        `json:"limits"`
+	Facilitator string          `json:"facilitator"`
+	Settlements []E1aSettlement `json:"settlements"`
+	// Agents: each consumer's ERC-8004 identity the registry names, as the chain has it (with --rpc).
+	Agents       []E1aAgent `json:"agents"`
+	NotEvaluated []string   `json:"not_evaluated"`
+	Limits       []string   `json:"limits"`
 }
 
 // ExitCode as Report's.
@@ -171,6 +173,7 @@ var e1aLimits = []string{
 	"the live catalogs are this repository's at the pack's code_commit (as they are now when the repository has no such commit): the pack names the commit its runs ran",
 	"the secret scan finds key shapes (hex) and fields never whitelisted; a base64 secret is not recognized",
 	"the facilitator is the host directory's setting at the start, and each tx#2's sender is the chain's; neither is a claim (a facilitator's address is not checked against its own list)",
+	"an Agent's ERC-8004 identity is the registry's ref and what its registry answers, listed, not a claim: the payment wallet in its registration file is a declaration (its agentWallet is unset), and ERC-8004 is a draft whose registry its owner can upgrade",
 }
 
 // tracePrompt is the prompt a live run of entry must have been given.
@@ -188,7 +191,7 @@ func VerifyE1a(dir, repo string, chain Chain) (*E1aReport, error) {
 		return nil, err
 	}
 	defer b.close()
-	r := &E1aReport{Mode: "e1a", NotEvaluated: e1aNotEvaluated, Limits: e1aLimits, Injections: []Injection{}, Settlements: []E1aSettlement{}}
+	r := &E1aReport{Mode: "e1a", NotEvaluated: e1aNotEvaluated, Limits: e1aLimits, Injections: []Injection{}, Settlements: []E1aSettlement{}, Agents: []E1aAgent{}}
 	r.Checker.Name, r.Checker.Version = "verify-demo", E1aChecker
 	var f findings
 	defer func() {
@@ -238,6 +241,7 @@ func VerifyE1a(dir, repo string, chain Chain) (*E1aReport, error) {
 	r.Facilitator = m.Start.Facilitator
 	r.Settlements = append(r.Settlements, e1aOnChain(&f, m, runs, chain, repo)...)
 	slices.SortFunc(r.Settlements, func(a, b E1aSettlement) int { return strings.Compare(a.PurchaseOrderID, b.PurchaseOrderID) }) // runs are a map
+	r.Agents = e1aAgents(chain, reg)
 	return r, nil
 }
 
