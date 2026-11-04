@@ -219,7 +219,7 @@
       {"key": "x-pose-12-phone", "speed": 0, "path": [{"x": 3.9, "y": 0.2}]}]}
   ],
   "venues": [
-    {"layout": "books", "number": "01", "name": "數位書店", "x": 18, "y": 28, "door": {"x": 7.4, "y": -0.9}, "doorway": {"key": "x-door-data", "x": 6, "y": 0, "frames": 14}, "exterior": [
+    {"layout": "books", "number": "01", "name": "複合式書店", "x": 18, "y": 28, "door": {"x": 7.4, "y": -0.9}, "doorway": {"key": "x-door-data", "x": 6, "y": 0, "frames": 14}, "exterior": [
       {"key": "x-office-ground", "x": 0, "y": 0},
       {"key": "x-office-ground-rest", "x": 2, "y": 0},
       {"key": "x-office-sign", "x": 0, "y": 2.4375},

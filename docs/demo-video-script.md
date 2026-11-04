@@ -22,7 +22,7 @@
 
 本機版沒有語音挑戰（語音服務在 testnet 的 `/opt`）；影片照實說。
 
-**模擬：被騙的 Agent**（`make demo-local`，fake Agent、本機鏈）：數位書店選「被誘導的 Agent（模擬）」，錄到「超出預算，已拒絕」、錢沒有動。
+**模擬：被騙的 Agent**（`make demo-local`，fake Agent、本機鏈）：複合式書店選「被誘導的 Agent（模擬）」，錄到「超出預算，已拒絕」、錢沒有動。
 
 配音事後另錄（安靜環境），英文字幕用第 3、4 節的英文欄。
 
@@ -32,7 +32,7 @@
 |---|---|---|---|---|
 | 0–10 | 序幕 | 黑底字卡 → 城鎮全景（主持人頁「全景：走一趟整條街」，鏡頭平移整條街；剪輯時加速），一家人在街上 | AI 已經可以替我們買東西了。可是讓 AI 替我花錢，我最怕三件事：被騙著亂花、個資被拿走、出了事說不清楚。 | AI can shop for us now. But letting it spend my money, I worry about three things: being tricked into spending, giving away my data, and not knowing what happened. |
 | 10–22 | 一、設定 | 字卡：「家長已完成身分驗證，拿到憑證」（小字：eKYC 是下一期；這裡由測試發行者直接發）；家長在裝置上確認委託 | AI 只能提出要買什麼。家長先在自己的裝置上設好：這次最多花 1.5，超過 0.1 都要問我。 | The AI can only propose. The parent sets the limits on their own device: at most 1.50, and anything over 0.10 comes back to them. |
-| 22–40 | 二、數位書店 | 主持人頁特寫：攻略說明裡的「系統通知」；家長核准；切到模擬片段（標「模擬」）：被騙的 Agent 去買 2.00 進階版 →「超出預算，已拒絕」 | 書店的頁面藏了一句話，叫 AI 順便買 2 塊錢的進階版。真的 AI 沒上當；就算它被騙了，也花不出預算外的錢。 | The shop's page hides an instruction to also buy a 2.00 premium edition. The real AI ignored it — and even a fooled one can't spend beyond the budget. |
+| 22–40 | 二、複合式書店 | 主持人頁特寫：攻略說明裡的「系統通知」；家長核准；切到模擬片段（標「模擬」）：被騙的 Agent 去買 2.00 進階版 →「超出預算，已拒絕」 | 書店的頁面藏了一句話，叫 AI 順便買 2 塊錢的進階版。真的 AI 沒上當；就算它被騙了，也花不出預算外的錢。 | The shop's page hides an instruction to also buy a 2.00 premium edition. The real AI ignored it — and even a fooled one can't spend beyond the budget. |
 | 40–54 | 三、街角烘焙咖啡 | 「這間店看到：沒有任何個人資料」；孩子的生日蛋糕，家長在裝置上核准 | 孩子的 AI 想訂 0.42 的生日蛋糕，超過範圍，交給家長核准。這間店，什麼個資都看不到。 | The child's AI wants a 0.42 birthday cake. That's over the limit, so the parent approves. The shop sees no personal data at all. |
 | 54–66 | 四、巷口便利商店 | 家長的啤酒交付；孩子的卡片「不符合這間店的要求」 | 便利商店賣酒，只問一件事：滿 18 歲了嗎？孩子的 AI 想買，付款前就被擋下，錢沒有動。 | At the corner store, beer needs one fact: over 18? The child's AI tries, and it stops before any money moves. |
 | 66–80 | 終幕 | 可信度區逐步亮起（Groth16 ZK、EIP-3009 的標籤）；收據卡 | 每一步都留下證據：零知識證明預留預算、鏈上結算、交付留下收據。 | Every step leaves evidence: a zero-knowledge proof reserves the budget, settlement lands on chain, delivery leaves a receipt. |
@@ -45,7 +45,7 @@
 | 0–20 | 序幕 | 字卡；城鎮 | 讓 AI 替我花錢，最怕被騙著亂花、個資被拿走、出了事說不清楚。 | Letting AI spend for me, I fear being tricked, losing my data, and not knowing what happened. |
 | 20–40 | 誰握有什麼權力 | `docs/architecture.md` 的角色圖 | AI 只能提出；替它跑的程式沒有私鑰；簽名在另一個系統帳號裡，只簽本人同意過的範圍；查帳的人只讀證據和鏈。 | The AI proposes. The program running it holds no key. Signing lives in its own OS account, within limits the person agreed to. The auditor reads only the evidence and the chain. |
 | 40–60 | 一、設定 | 字卡：身分憑證（eKYC 下一期）；家長、孩子的委託 PIN | 憑證證明「我是誰」；委託寫下能花多少、超過多少要問。孩子的委託，由家長在自己的裝置上確認。 | The credential says who I am; the mandate says how much, and when to ask. The child's mandate is confirmed on the parent's device. |
-| 60–105 | 二、數位書店：被騙著亂花 | 攻略報價（x402）與藏起來的「系統通知」；這間店看到「國家 台灣」；家長核准；tx#1、tx#2、收據；模擬：被騙的 Agent 被拒 | 書店只知道你在哪個國家；超過範圍由本人核准；誘導文字騙不倒真實的 AI，就算騙倒了也花不出預算外的錢。孩子的講義 0.06 在範圍內，自動付款。 | The bookshop learns only your country; the person approves above the limit; the trap didn't fool the real AI, and a fooled one still can't overspend. The child's 0.06 notes pay on their own. |
+| 60–105 | 二、複合式書店：被騙著亂花 | 攻略報價（x402）與藏起來的「系統通知」；這間店看到「國家 台灣」；家長核准；tx#1、tx#2、收據；模擬：被騙的 Agent 被拒 | 書店只知道你在哪個國家；超過範圍由本人核准；誘導文字騙不倒真實的 AI，就算騙倒了也花不出預算外的錢。孩子的講義 0.06 在範圍內，自動付款。 | The bookshop learns only your country; the person approves above the limit; the trap didn't fool the real AI, and a fooled one still can't overspend. The child's 0.06 notes pay on their own. |
 | 105–130 | 三、烘焙咖啡：個資 | 「這間店看到：沒有任何個人資料」；孩子的蛋糕由家長核准；家長的午餐自動付款 | 買蛋糕不需要知道你是誰。孩子的大額購買，由家長核准。 | Buying a cake needs nothing about you. The child's bigger purchase goes to the parent. |
 | 130–150 | 四、便利商店：個資＋安全 | 家長「已滿 18 歲」交付；孩子「未滿 18 歲」被擋下 | 同一份憑證，在這裡只說「滿不滿 18 歲」，不給生日。孩子的 AI 買酒，付款前就被擋下。 | The same credential says only "over 18 or not", never a birth date. The child's AI is stopped before paying. |
 | 150–168 | 終幕：說得清楚 | 終端機 `verify-demo`；E1～E10 逐條 PASS；字卡：「也會在付款前擋下：商家不在名單、委託或授權過期、重放用過的授權」 | 查帳不用相信這個系統：只讀證據、向鏈重算，十項全部通過。影片演了兩種被擋下的情況；商家不在名單、授權過期、重放用過的授權，也都會在付款前被擋下，都有自動測試。 | The check trusts none of this system: it reads the evidence, recomputes against the chain, and all ten pass. Beyond the two refusals shown, an unlisted shop, an expired authorization and a replayed one are all stopped before paying, and each is covered by tests. |

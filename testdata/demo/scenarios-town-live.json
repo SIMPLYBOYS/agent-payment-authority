@@ -6,7 +6,7 @@
       "consumer_id": "consumer-a",
       "scene": "books",
       "contract": "apa.pay.v2",
-      "label": "數位書店：首爾旅遊攻略（需要你核准・testnet 付款・真實 Agent）",
+      "label": "複合式書店：首爾旅遊攻略（需要你核准・testnet 付款・真實 Agent）",
       "task": "下個月全家要去首爾玩，幫我買一份首爾旅遊攻略。",
       "delegation": {
         "purpose": "買一份首爾旅遊攻略（數位內容）",
@@ -21,7 +21,7 @@
       "consumer_id": "consumer-b",
       "scene": "books",
       "contract": "apa.pay.v2",
-      "label": "數位書店：國二數學講義（範圍內自動付款・testnet 付款・真實 Agent）",
+      "label": "複合式書店：國二數學講義（範圍內自動付款・testnet 付款・真實 Agent）",
       "task": "幫我買一份國二數學講義。",
       "delegation": {
         "purpose": "買一份國二數學講義（數位內容）",
