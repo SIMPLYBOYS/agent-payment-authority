@@ -95,4 +95,14 @@ Agent → Host（付款流程）→ 商店：PAYMENT-SIGNATURE
   - `TestE1aSettlementSenders`：讀得到送出者、節點沒有這筆交易、地址格式不對，三種情況都列出那一筆，E4、E8 不變。
   - `TestV2PaidOnAnvil`：本機 anvil 上從 start、付款、打包到查證走一遍，報告的 `facilitator` 等於 host 目錄的設定，`sent_by` 等於實際送出 tx#2 的金鑰（anvil key 4）。
 - 用新的 checker 重查 S5 的 `testnet-town-t4`（Base Sepolia）：**E1～E10 全部 PASS**，沒有 findings。`facilitator` 是空的（那時 Host 裡的商店自己結算）；4 筆 tx#2 的送出者都是 `0x6bbe…773e`，也就是商店的 `pay_to`（P2b-D3：商店自己付 gas）。`artifacts/e1a/testnet-town-t4.report.json` 沒有改寫。`settlements` 依購買單排序，同一份證據包每次的報告相同。
-- 還沒做：瀏覽器檢查與本機彩排一次（要 Signer 的密語），以及 FA3 那一筆經 x402.org 的付款（要 Aaron 核准）。那一場的 `settlements` 應該列出 x402.org 的 `0xd407…f1bf`。
+- 還沒做：瀏覽器檢查與本機彩排一次（要 Signer 的密語），以及 FA3 那一筆經 x402.org 的付款（要 Aaron 核准）。那一場的 `settlements` 應該列出 x402.org 的 `0xd407…f1bf`。（FA3 11/4 已做，結果如此，見下一段。）
+
+**FA3：一筆經 x402.org 的付款（Aaron 11/4，標籤 fa3，Base Sepolia）**
+- Aaron 選 A：真實 Agent 的城鎮 live 場次，只跑客人 B 的國二數學講義（`town-data-b`），由 x402.org 結算，留下證據包。
+- 程式：`p2-testnet e1a-host` 多一個參數 `--facilitator URL`，預設 `http://127.0.0.1:8403`。`demo-testnet.sh` 從環境變數 `APA_FACILITATOR` 讀網址，傳給它。Host 啟動前照 FA2 的規則檢查這個網址，在 base_sepolia 上只接受 `127.0.0.1` 或 x402.org。`present.sh` 遇到 x402.org 不啟動任何東西，所以不問商店金鑰的密語。
+- 執行：`APA_FACILITATOR=https://x402.org/facilitator sh scripts/demo/demo-testnet.sh live fa3 town`。start 記下 `facilitator: https://x402.org/facilitator`，起點是區塊 54224321。04:33（UTC）只開始客人 B：真實 Agent 請購 `books-math-g8` 0.06，走 Allow，付款並交付（`show-e1a-fa3-b-01`）。
+- Host 的建置是 `d024623`，加上還沒提交的 `cmd/p2-testnet`、`demo-testnet.sh` 修改（`vcs.modified=true`）。Host 本身的程式和 `d024623` 相同，證據包的 `code_commit` 記的也是它。
+- 證據包 `artifacts/e1a/testnet-town-fa3`（只在本機，`artifacts/` 不進 git，同 t4；run `e1a-20261104T043605Z-2a757b`，結束區塊 54225428）。`verify-demo --mode e1a --rpc https://sepolia.base.org`：**E1～E10 全部 PASS**，沒有 findings；報告在 `artifacts/e1a/testnet-town-fa3.report.json`。
+  - `facilitator`：`https://x402.org/facilitator`。
+  - `settlements`：1 筆。tx#2 `0x594da0a51758e910ab5817432fa6dac9c13d17ca57153923d1e9bc36f36357a2` 的送出者是 `0xd407e409e34e0b9afb99ecceb609bdbcd5e7f1bf`，也就是 x402.org 在 `/supported` 列出的 signer：這筆的 gas 由 x402.org 付，商店的 `pay_to`（`0x6bbe…773e`）沒有送任何交易。對照 t4 的 4 筆都是 `pay_to` 自己送出。
+- 查證要在 sandbox 外跑：sandbox 裡 Go 驗不了公開節點的 TLS 憑證（`x509: OSStatus -26276`），E4、E8 會變成 INCONCLUSIVE（鏈沒有回應），那不是查證的結果。

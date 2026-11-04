@@ -447,8 +447,16 @@ func TestE1aHost(t *testing.T) {
 	if err := e1aHost([]string{"--dir", dir, "--out", town, "--registry", "../../testdata/demo/registry-e1a.json", "--shop-cap", "6"}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if err := readJSON(filepath.Join(town, "payments.json"), &got); err != nil || got["shop_daily_tx_cap"] != float64(6) {
-		t.Fatalf("the town's shop cap: %v %v", got["shop_daily_tx_cap"], err)
+	if err := readJSON(filepath.Join(town, "payments.json"), &got); err != nil || got["shop_daily_tx_cap"] != float64(6) || got["facilitator_url"] != "http://127.0.0.1:8403" {
+		t.Fatalf("the town's shop cap and facilitator: %v %v %v", got["shop_daily_tx_cap"], got["facilitator_url"], err)
+	}
+	// FA3: one run set settles through x402.org.
+	x := filepath.Join(dir, "town-x")
+	if err := e1aHost([]string{"--dir", dir, "--out", x, "--registry", "../../testdata/demo/registry-e1a.json", "--facilitator", "https://x402.org/facilitator"}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if err := readJSON(filepath.Join(x, "payments.json"), &got); err != nil || got["facilitator_url"] != "https://x402.org/facilitator" {
+		t.Fatalf("--facilitator: %v %v", got["facilitator_url"], err)
 	}
 	if after, _ := os.ReadFile(filepath.Join(host, "payments.json")); string(after) != string(before) {
 		t.Error("deploy's payments.json changed")

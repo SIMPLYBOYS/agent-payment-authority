@@ -6,7 +6,7 @@
 //	p2-testnet deploy     --dir DIR --wallet-a 0x... --wallet-b 0x... [--rpc URL]
 //	p2-testnet test402    URL [--save FILE]
 //	p2-testnet opt-signer --dir DIR --base SIGNER.JSON [--voice SIGNER.JSON] --out NEW.JSON
-//	p2-testnet e1a-host   --dir DIR | --from SRCDIR --out NEWDIR [--registry TEMPLATE] [--label L] [--shop-eval NAME] [--shop-cap N]
+//	p2-testnet e1a-host   --dir DIR | --from SRCDIR --out NEWDIR [--registry TEMPLATE] [--label L] [--shop-eval NAME] [--shop-cap N] [--facilitator URL]
 //
 // e1a-host (E1-a, docs/commercial-e1a.md 4.7, 4.8) writes a new host
 // directory for one set of E1-a runs from deploy's DIR/host: the same chain,
@@ -14,7 +14,10 @@
 // (show-e1a-…, never on chain yet) with deploy's wallets, asset and payee;
 // the shop's database still deploy's (its daily cap is the key's); no
 // test402 line; and, with
-// --shop-eval, the AE1 catalog or case the shop sells. DIR/host is left as
+// --shop-eval, the AE1 catalog or case the shop sells; the shop settles
+// through --facilitator (default apa-facilitator's http://127.0.0.1:8403;
+// FA3: https://x402.org/facilitator, which the Host takes on base_sepolia
+// only). DIR/host is left as
 // it is. --from takes the host files from SRCDIR instead (a local anvil's
 // p2-local directory, for the local rehearsal; its profile is optional).
 // It reads no key and reaches no node.
@@ -1052,6 +1055,7 @@ func e1aHost(args []string, out io.Writer) error {
 	eval := fs.String("shop-eval", "", "the AE1 catalog or case the shop sells (payments.json shop_eval)")
 	label := fs.String("label", "", "this run set's label in the task IDs (show-e1a-<label>-a-01), instead of the template's")
 	shopCap := fs.Uint64("shop-cap", 0, "the shop's daily settlements for this host, instead of deploy's (0: deploy's)")
+	fac := fs.String("facilitator", "http://127.0.0.1:8403", "who the shop settles through (the Host checks it before anything starts)")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || (*dir == "") == (*from == "") || *dst == "" {
 		return errors.New("usage: p2-testnet e1a-host --dir DIR | --from SRCDIR --out NEWDIR [--registry TEMPLATE] [--shop-eval NAME]")
 	}
@@ -1118,8 +1122,9 @@ func e1aHost(args []string, out io.Writer) error {
 	if *shopCap > 0 { // the town's three venues settle 5 (docs/commercial-venues.md D5, Aaron 10/30)
 		pay["shop_daily_tx_cap"] = *shopCap
 	}
-	// FA2: a new run set settles through apa-facilitator (present.sh starts it), whatever its source's file says.
-	pay["facilitator_url"] = "http://127.0.0.1:8403"
+	// FA2: a new run set settles through a facilitator, whatever its source's file says: apa-facilitator
+	// (present.sh starts it) or, FA3, x402.org.
+	pay["facilitator_url"] = *fac
 	files := map[string]any{"payments.json": pay, "registry.json": t}
 	if prof != nil {
 		files["profile.json"] = prof
