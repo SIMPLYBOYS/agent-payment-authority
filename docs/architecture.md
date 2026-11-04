@@ -106,8 +106,8 @@ Base Sepolia 上的實跑（10/31，`artifacts/e1a/testnet-town-t4`）E1～E10 �
 - 只在 Base Sepolia 測試鏈與 test USDC 上跑過，沒有 mainnet、法幣或真實商店。
 - 預算的 ZK setup 是單方產生的，信任它等同信任主持人。
 - ZK 預算只對鏈上隱藏：鏈上只看得到承諾值；relayer 在自己的資料庫裡保存每個任務的預算餘額與隨機數，看得到上限與剩餘。
-- x402 只做了 `exact`（沒有 `upto`、`batch`）。商店在同一個程序裡自己驗證並結算（P2-D3 選 A），沒有獨立的 facilitator 服務，也沒有分開的 `/verify` 與 `/settle`；從來沒有經過外部 facilitator（x402.org、CDP）結算，test402.com 那一筆只驗證 wire 相容（test402 不結算）。對外只說「採用 x402 v2 的 HTTP 支付協商」，不說「符合 x402」（`docs/positioning.md` §5）。
+- x402 只做了 `exact`（沒有 `upto`、`batch`）。結算經過獨立的 `apa-facilitator`（x402 v2 的 `/verify`、`/settle`、`/supported`；只聽本機，金鑰是商店的），但它和 Host 是同一位主持人在同一台電腦上跑的。外部的 facilitator 只用過一次：11/4 一筆 0.06 經 x402.org 結算（FA3，`docs/commercial-facilitator.md`），沒有用過 CDP。對外只說「採用 x402 v2 的 HTTP 支付協商」，不說「符合 x402」（`docs/positioning.md` §5）。
 - 付款金鑰只有一層：客人的錢包私鑰在 Signer，加上有總額與期限的委派；沒有金庫、資金錢包、session key 的分層（relayer 另有送交易、登記任務、授權預留三把測試金鑰，商店有自己的結算金鑰）。
 - 政策在鏈下由 Signer 執行：它先到鏈上確認預算已預留才簽，但 test USDC 合約本身不認預留；沒有錢包層的強制執行（ERC-8196、ERC-7710，見 `docs/adr/payment-account-model.md`）。
-- Policy 沒有頻率限制（每分鐘幾筆）：自動範圍內的小額連續付款，只靠每筆上限與任務預算擋。
-- 商家是固定名單，沒有身分與信譽（ERC-8004）；沒有爭議與退款流程；沒有交易監控（KYT）。
+- Policy 沒有頻率限制（一段時間內最多幾筆）：自動範圍內的小額付款，只靠每筆上限與任務預算擋。在這個展示裡，一個 task 對同一件商品只會成立一筆請購、也只買得到自己場景的商品，所以單一 task 能買的筆數受限於場景的商品數；跨 task 的累積沒有上限。列為下一期，屆時 Host 的 Policy 與 Signer 一起做（Aaron 11/4，`docs/commercial-velocity.md`）。
+- 兩位 Agent 在 Base Sepolia 的 ERC-8004 registry 有身分（agent 10573、10574），但由展示平台代為註冊；註冊檔裡的付款錢包是宣告，不是證明（`agentWallet` 已清空）；ERC-8004 仍是 Draft，registry 可以被它的擁有者升級（`docs/commercial-8004.md`）。商家是固定名單，沒有身分與信譽；沒有爭議與退款流程；沒有交易監控（KYT）。

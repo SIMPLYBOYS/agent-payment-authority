@@ -35,7 +35,7 @@ E1～E10 全部 PASS（checker e1a.4，11/3 重新查證）。證據包不進版
 
 - 真實 Agent 在 Base Sepolia 上完成付款與交付；本人以裝置確認委託、以裝置加語音核准；ZK 預算預留；checker 向鏈查證通過。
 - 一家人的城鎮（家長與未滿 18 歲的孩子；複合式書店、街角烘焙咖啡、巷口便利商店）：每間店只看到它要的資料，孩子的 AI 買酒在付款前被擋下，被商品頁誘導的 Agent 花不到預算外的錢（`docs/commercial-consumer.md`）。
-- 照實說的限制（issuer／holder／verifier 同一程序、兩位核准人同一人、沒有抗合成語音、只在測試鏈、x402 只做 `exact` 且商店自己結算、Policy 沒有頻率限制）：[docs/architecture.md](docs/architecture.md#照實說的限制)。
+- 照實說的限制（issuer／holder／verifier 同一程序、兩位核准人同一人、沒有抗合成語音、只在測試鏈、x402 只做 `exact`、facilitator 與 Host 同一位主持人、Agent 的鏈上身分由平台代為註冊、Policy 沒有頻率限制）：[docs/architecture.md](docs/architecture.md#照實說的限制)。
 - 進度與完成清單：[docs/commercial-gap-review.md](docs/commercial-gap-review.md) §9；過去的里程碑紀錄：[docs/status-history.md](docs/status-history.md)。
 
 ---
