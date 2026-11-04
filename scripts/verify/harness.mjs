@@ -63,7 +63,8 @@ async function connect(url) {
     if (m.method && listeners.has(m.method)) for (const fn of listeners.get(m.method)) fn(m.params);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
     if (m.method === "Runtime.exceptionThrown") consoleText.push("EXCEPTION " + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
-    if (m.method === "Log.entryAdded" && m.params.entry.level === "error") consoleText.push("LOG " + m.params.entry.text);
+    // With its URL: a resource's 404 names only its status, so a check's /favicon/ filter needs the URL.
+    if (m.method === "Log.entryAdded" && m.params.entry.level === "error") consoleText.push("LOG " + m.params.entry.text + (m.params.entry.url ? " " + m.params.entry.url : ""));
     // Unity's own errors come through console.error, not the log domain.
     if (m.method === "Runtime.consoleAPICalled" && ["error", "assert"].includes(m.params.type)) consoleText.push("CONSOLE " + m.params.args.map((x) => x.value ?? x.description ?? "").join(" "));
   });
