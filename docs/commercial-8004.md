@@ -120,4 +120,10 @@
 - limits 加一條：付款錢包是宣告、不是證明；ERC-8004 是 Draft，registry 可以被它的擁有者升級。
 - 測試：`TestE1aAgents`，4 種情況：讀得到、宣告的不是這位客人的錢包、另一條鏈、沒有 `--rpc`。反向檢查：讓「是這位客人的錢包」永遠回答是，測試失敗。
 
-- 還沒做：I4（真的註冊，要 Aaron 核准並在終端機執行）；註冊之後，用一場 testnet（或 fake 的 testnet）在瀏覽器確認身分列，再用 checker 讀一次。
+
+**I4 Base Sepolia 註冊（Aaron 11/4）**
+- Aaron 核准了兩份註冊檔，在終端機執行 `p2-testnet agents --dir var/p2-testnet`：6 筆交易都由 issuer `0xccd7…4c6a` 送出。
+- 家長（`consumer-a`）是 **agent 10573**：`eip155:84532/erc721:0x8004A818BFB912233c491871b3d84c89A494BD9e/10573`（https://sepolia.basescan.org/nft/0x8004A818BFB912233c491871b3d84c89A494BD9e/10573）。三筆交易：register `0x984c…a407`、URI `0x5e0a…5330`、清掉 agentWallet `0xb3f6…2b06`。
+- 孩子（`consumer-b`）是 **agent 10574**：`…/10574`。三筆交易：register `0x7000…1c86`、URI `0xb9b6…5e1a`、清掉 agentWallet `0xa7bb…20ed`。
+- 另外用一份獨立的 Python 腳本唯讀核對鏈上（不經過專案的 Go 程式）：兩位的擁有者都是 issuer，`agentWallet` 都是 0；`tokenURI` 解出來就是核准的那兩份，`registrations` 寫著各自的號碼，付款錢包是 `0x2456…3554`、`0xba5f…8667`，標明未證明。sha256 與 `var/p2-testnet/host/agents.json` 相同，`registry.json` 兩位客人的 `agent_registry_ref` 已寫入。
+- 還沒做：畫面上的身分列和 checker 的 `agents`，要一場新的 testnet 才看得到（頁面只在有付款之後讀 `/chain`；舊的證據包 registry 沒有這個欄位）。**Aaron 11/4：不單獨跑（原本提議的 id1），併進錄影前的 testnet 彩排**，同一場也驗證 apa-facilitator 在 testnet 上結算與頻率限制。
