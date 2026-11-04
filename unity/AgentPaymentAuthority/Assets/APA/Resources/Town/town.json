@@ -205,9 +205,12 @@
     {"key": "x-car-green-down", "x": 76, "y": 40, "speed": -2.8, "frames": 6, "vertical": true}]},
   "inside": [
     {"layout": "books", "people": [
-      {"key": "x-pose-19-down", "speed": 0, "path": [{"x": 11.4, "y": 2.4}]},
-      {"key": "x-pose-20-read", "speed": 0, "path": [{"x": 0.5, "y": 5.2}]},
-      {"key": "x-pose-10-phone", "speed": 0, "path": [{"x": 11.4, "y": 5.4}]}]},
+      {"key": "x-walk-02", "speed": 1.2, "path": [{"x": 2.6, "y": 7.75}, {"x": 5.0, "y": 7.75}, {"x": 9.6, "y": 7.75}, {"x": 14.0, "y": 7.75}], "wait": [0, 2, 2, 0]},
+      {"key": "x-walk-06", "speed": 1.2, "path": [{"x": 8.1, "y": 5.05}, {"x": 10.0, "y": 5.05}, {"x": 12.6, "y": 5.05}, {"x": 12.6, "y": 7.75}, {"x": 11.0, "y": 7.75}], "wait": [0, 1.5, 0, 0, 1.5]},
+      {"key": "x-pose-03-sit-right", "speed": 0, "path": [{"x": 7.0, "y": 0.65}]},
+      {"key": "x-pose-06-sit-left", "speed": 0, "path": [{"x": 8.4, "y": 0.65}]},
+      {"key": "x-pose-20-read", "speed": 0, "path": [{"x": 15.5, "y": 6.65}]},
+      {"key": "x-pose-19-down", "speed": 0, "path": [{"x": 17.7, "y": 1.7}]}]},
     {"layout": "cafe", "people": [
       {"key": "x-pose-17-down", "speed": 0, "path": [{"x": 6.4, "y": 6.3}]},
       {"key": "x-pose-03-sit-right", "speed": 0, "path": [{"x": 2.9, "y": 0.55}]},

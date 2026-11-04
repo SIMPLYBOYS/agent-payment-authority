@@ -3,6 +3,7 @@
 # limezu-assets.txt from LIMEZU_DIR (the folder holding
 # Modern_Interiors_v41.4/ and, for the town, Modern_Exteriors_v42.3/) into
 # the Unity project's Assets/LimeZu/, which git ignores, and records each
+# (entries under _cut/ are made by scripts/unity/rooms.py instead)
 # copy's sha256 in Assets/LimeZu/IMPORTED.txt. A file already there with
 # the same bytes is left as it is. Nothing else is read or copied. Usage:
 #   LIMEZU_DIR=/path/to/limezu sh scripts/unity/import-limezu.sh
@@ -17,6 +18,7 @@ record="$dest/IMPORTED.txt"
 missing=0
 grep -v '^#' "$proj/limezu-assets.txt" | while IFS="$(printf '\t')" read -r key rel rect; do
 	[ -n "$key" ] || continue
+	case $rel in _cut/*) continue ;; esac # made here (scripts/unity/rooms.py), not copied
 	src="$LIMEZU_DIR/$rel"
 	if [ ! -f "$src" ]; then
 		echo "missing: $key $rel" >&2

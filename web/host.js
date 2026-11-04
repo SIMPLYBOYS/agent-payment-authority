@@ -737,7 +737,7 @@ function steer() {
   town().steer(Math.sign(x), Math.sign(y));
 }
 addEventListener("keydown", (e) => {
-  if (!KEYS[e.code] || !sentPlay || !inTown || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (!KEYS[e.code] || !sentPlay || e.altKey || e.ctrlKey || e.metaKey) return; // in the town, and inside a shop (interiors v2)
   if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable]")) return;
   e.preventDefault(); // the arrows walk; the page does not scroll
   held.add(e.code);

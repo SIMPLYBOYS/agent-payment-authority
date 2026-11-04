@@ -56,7 +56,9 @@ namespace APA
             if (hasTown) town.Clicked = layout => Report("venue", scene.Scene, 0, layout);
             var rooms = new List<string>(view.LayoutKeys);
             rooms.Sort(System.StringComparer.Ordinal);
-            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers) + ";select=1;layouts=" + string.Join(",", rooms) + (hasTown ? ";town=1;play=1;pan=1" : ""));
+            // rooms: each room's venue view in tiles (TownView.RoomView), so the page sizes the canvas to whole multiples of it.
+            var sizes = rooms.ConvertAll(k => { var v = TownView.RoomView(view.SizeOf(k)); return k + ":" + Mathf.RoundToInt(v.x * 2f) / 2f + "x" + Mathf.RoundToInt(v.y); });
+            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers) + ";select=1;layouts=" + string.Join(",", rooms) + (hasTown ? ";town=1;play=1;pan=1" : "") + ";rooms=" + string.Join(",", sizes));
             Report("ready", -1, -1, view.UsingPlaceholders ? "placeholder" : "limezu");
         }
 

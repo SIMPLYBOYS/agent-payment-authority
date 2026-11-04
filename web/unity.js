@@ -59,6 +59,7 @@ export class UnityHost {
       this.bridge = parseBridge(detail);
     } else if (kind === "layout") {
       this.room = { scene: gen, key: detail }; // UX3: the room a new scene shows (display only)
+      if (this.onRoom) this.onRoom(this.room); // interiors v2: the page sizes the canvas to that room
     } else if (kind === "ready") {
       this.ready = true;
       this.art = detail === "limezu" ? "limezu" : "placeholder";

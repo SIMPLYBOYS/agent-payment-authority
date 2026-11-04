@@ -147,7 +147,13 @@ public class LayoutTests
             Assert.AreEqual(1.5f, l.aisle.x, name + " aisle (joined to the door row)");
             for (int i = 1; i < pts.Length; i++)
                 Assert.IsTrue(pts[i - 1].x == pts[i].x || pts[i - 1].y == pts[i].y, name + ": " + pts[i - 1] + " -> " + pts[i] + " is not horizontal or vertical");
-            foreach (var p in pts.Append(l.pickup).Append(new Vector2(l.bend.x, l.pickupRow != 0f ? l.pickupRow : l.bend.y))) Assert.IsTrue(p.x > 0f && p.x < 12f && p.y > 0f && p.y < 7f, name + ": " + p + " outside the room");
+            foreach (var p in pts.Append(l.pickup).Append(new Vector2(l.bend.x, l.pickupRow != 0f ? l.pickupRow : l.bend.y))) Assert.IsTrue(p.x > 0f && p.x < l.size.x && p.y > 0f && p.y < l.FloorTop, name + ": " + p + " outside the room");
+            if (!string.IsNullOrEmpty(l.backdrop))
+            {
+                CollectionAssert.Contains(keys, l.backdrop, name + ": its backdrop not in limezu-assets.txt");
+                // Its walls (interiors v2): A comes in along y 3.0 and B along y 0.6 (ShopView.Point), both through the entrance.
+                Assert.IsTrue(l.entrance.x <= 0.6f && l.entrance.y >= 3f + ShopView.FeetHigh && l.entrance.y < l.FloorTop, name + ": the customers come in through its entrance " + l.entrance);
+            }
             Assert.AreNotEqual(l.counter, l.pickup, name + ": the delivery zone is its own place (gap review B6)");
         }
         // The town too: a key missing from the manifest just doesn't draw (review of 7c71cfd).

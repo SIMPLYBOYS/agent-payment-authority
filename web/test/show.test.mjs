@@ -395,6 +395,10 @@ test("the scene's whole multiples: the largest that fits, at most six; a phone g
   assert.equal(fitScale(800, 400), 1);
   assert.equal(fitScale(360, 600), 0.75); // a phone: the fraction of its width, never cut off at the side
   assert.equal(fitScale(1000, 200), 1); // a short screen keeps its own pixels
+  assert.equal(fitScale(1600, 900, 736, 384), 2, "a larger room (interiors v2): whole multiples of its own pixels");
+  const { roomPixels } = await import("../pixelscale.js");
+  assert.deepEqual(roomPixels({ room: { key: "books" }, bridge: { rooms: { books: { w: 23, h: 12 } } } }), { w: 736, h: 384 });
+  assert.deepEqual(roomPixels({ room: { key: "cafe" }, bridge: { rooms: {} } }), { w: 480, h: 320 }, "a room the build does not size: the old view");
   assert.equal(fitScale(5000, 5000), 6);
 });
 

@@ -12,13 +12,23 @@ using UnityEngine;
 namespace APA
 {
     // Layout: one room, as Resources/Layouts/<key>.json gives it. Units are
-    // 32 px tiles; the room is 12 x 8. The corridor's eight points are joined
-    // as ShopView.Lines says, so each joined pair must share an x or a y.
+    // 32 px tiles; the room is size (12 x 10 unless it says: the floor to y 7, the
+    // wall above it). The corridor's eight points are joined as ShopView.Lines
+    // says, so each joined pair must share an x or a y.
     [System.Serializable]
     public class Layout
     {
         public string key, title;      // title: the banner's name for the room (the scene's font has its characters)
         public string floor = "floor", wall = "wall";
+        // size: the room's art in tiles, x 0..w, y -0.5..h-0.5 (the town's pavement is to its left). backdrop: a
+        // manifest key of the whole room as one image, drawn in place of the floor and wall tiles (a shell made
+        // by scripts/unity/rooms.py from the layout's "shell", docs/commercial-interiors-v2.md): its back wall's
+        // foot is at y h-3.5.
+        public Vector2 size = new Vector2(12f, 10f);
+        public string backdrop = "";
+        // entrance: the left wall's opening, y from x to y (a backdrop's room; rooms.py draws it); the customers come in there.
+        public Vector2 entrance = new Vector2(0.5f, 4.5f);
+        public float FloorTop => string.IsNullOrEmpty(backdrop) ? 7f : size.y - 3.5f;
         public Color floorTint = Color.white, wallTint = Color.white;
         public Vector2 door, aisle, shelf, bend, front, counter;
         public Vector2 pickup;         // the delivery zone (gap review B6): from bend up or down to pickupRow, along it, then to pickup
@@ -26,10 +36,13 @@ namespace APA
         public string facing = "right"; // where a customer faces at the counter and the delivery zone: right | up (a bar along the back wall)
         public Prop[] props = new Prop[0];
         public Note[] notes = new Note[0]; // zone labels; the delivery zone's says 付款後才交付
+        public Sign[] signs = new Sign[0]; // a section's small wooden sign (interiors v2): on the prop at depth, in front of it
 
-        // lift: drawn that much higher but in front as if at y (an item on a counter).
-        [System.Serializable] public class Prop { public string key; public float x, y, lift; }
+        // lift: drawn that much higher but in front as if at y (an item on a counter);
+        // under: on the floor, under every other prop (a rug).
+        [System.Serializable] public class Prop { public string key; public float x, y, lift; public bool under; }
         [System.Serializable] public class Note { public string text; public float x, y; }
+        [System.Serializable] public class Sign { public string text; public float x, y, depth; }
     }
 
     public class ShopView : MonoBehaviour
@@ -49,9 +62,11 @@ namespace APA
         GameObject room;
         readonly List<(SpriteRenderer plate, TextMesh text)> notePlates = new List<(SpriteRenderer, TextMesh)>();
         public string LayoutKey => layout != null ? layout.key : null;
+        public Vector2 RoomSize => layout != null ? layout.size : new Vector2(12f, 10f);
+        public Vector2 SizeOf(string key) => layouts.TryGetValue(key ?? "", out var l) ? l.size : new Vector2(12f, 10f);
         public IEnumerable<string> LayoutKeys => layouts.Keys;
         public bool HasLayout(string key) => key != null && layouts.ContainsKey(key);
-        // The props as placed, for the PlayMode tests: key, where, sprite.
+        // The props that stand, as placed, for the PlayMode tests: key, where, sprite (a rug is floor: walked over).
         public readonly List<(string key, Vector2 at, Sprite sprite)> Placed = new List<(string, Vector2, Sprite)>();
 
         public const int PPU = 32;
@@ -167,6 +182,7 @@ namespace APA
             public float wait, speed, pauseScale, deadline, tick;
             public string seg = "final";
             public System.Action<int> done;
+            public bool free; // walked off the corridor by the person (the game): its next run walks back to the door first
         }
 
         static readonly string[] Facings = { "right", "up", "left", "down" };
@@ -226,6 +242,8 @@ namespace APA
         void Banner()
         {
             if (banner == null) return;
+            banner.transform.localPosition = new Vector3(-2.05f, layout.size.y - 1.2f, banner.transform.localPosition.z); // the view's top left
+            if (status != null) status.transform.localPosition = new Vector3(layout.size.x / 2f, -0.35f, status.transform.localPosition.z);
             banner.text = (payments == "base_sepolia" ? "Base Sepolia 測試網路付款・" : payments == "local_anvil" ? "本機測試鏈付款・" : "這場不付款・") + layout.title + (UsingPlaceholders ? "　（素材未匯入：簡易圖形）" : "　像素素材：LimeZu（limezu.itch.io）");
         }
 
@@ -300,14 +318,20 @@ namespace APA
             room = new GameObject("room-" + layout.key);
             room.transform.SetParent(transform, false);
             Placed.Clear();
+            feetOfProps.Clear();
             notePlates.Clear();
             UsingPlaceholders = customerA == null || customerB == null;
-            var floor = Art(layout.floor, new Color(0.78f, 0.8f, 0.84f), 32, 32);
-            var wall = Art(layout.wall, new Color(0.85f, 0.85f, 0.9f), 32, 64);
-            for (int x = 0; x < 12; x++)
+            if (!string.IsNullOrEmpty(layout.backdrop))
+                Put("backdrop", Art(layout.backdrop, new Color(0.78f, 0.8f, 0.84f), (int)(layout.size.x * PPU), (int)(layout.size.y * PPU)), new Vector2(layout.size.x / 2f, -0.5f), -100);
+            else
             {
-                for (int y = 0; y < 7; y++) Put("floor", floor, new Vector2(x + 0.5f, y), -100).color = layout.floorTint;
-                Put("wall", wall, new Vector2(x + 0.5f, 7f), -90).color = layout.wallTint;
+                var floor = Art(layout.floor, new Color(0.78f, 0.8f, 0.84f), 32, 32);
+                var wall = Art(layout.wall, new Color(0.85f, 0.85f, 0.9f), 32, 64);
+                for (int x = 0; x < 12; x++)
+                {
+                    for (int y = 0; y < 7; y++) Put("floor", floor, new Vector2(x + 0.5f, y), -100).color = layout.floorTint;
+                    Put("wall", wall, new Vector2(x + 0.5f, 7f), -90).color = layout.wallTint;
+                }
             }
             // Outside the door, where a customer waits and leaves to, is
             // TownView's pavement by the room (T2), no longer a strip of the room's.
@@ -316,8 +340,10 @@ namespace APA
                 var at = new Vector2(p.x, p.y);
                 var s = Art(p.key, new Color(0.6f, 0.5f, 0.4f), 32, 48);
                 var drawn = at + new Vector2(0f, p.lift); // an item on a counter: drawn on its top, in front of it
-                Put(p.key, s, drawn, -(int)(at.y * 10));
-                Placed.Add((p.key, drawn, s));
+                Put(p.key, s, drawn, p.under ? -95 : -(int)(at.y * 10)); // a rug: over the floor (-100), under the wall (-90) and the props
+                if (!p.under) Placed.Add((p.key, drawn, s));
+                if (!p.under && p.lift == 0f) // its foot: its lowest rows, the width of its cut (a little in from its edges)
+                    feetOfProps.Add(Rect.MinMaxRect(at.x - s.rect.width / 64f + 0.06f, at.y, at.x + s.rect.width / 64f - 0.06f, at.y + Mathf.Min(Foot, s.rect.height / 32f)));
             }
             // The zone notes, each on a dark plate (readable on a light
             // wall): over the props, under the customers' labels.
@@ -328,6 +354,17 @@ namespace APA
                 t.text = n.text;
                 t.GetComponent<MeshRenderer>().sortingOrder = 61;
                 notePlates.Add((Child(room, "note-plate", pixel, 60, new Color(0.08f, 0.08f, 0.12f, 0.7f)), t));
+            }
+            // The sections' signs: drawn as the shelf they hang on (its depth), just in front of it, so whoever
+            // walks behind that shelf is behind its sign too.
+            foreach (var g in layout.signs)
+            {
+                int o = -(int)((g.depth != 0f ? g.depth : g.y) * 10f) + 2;
+                var t = MakeText("sign", new Vector2(g.x, g.y), 0.035f, new Color(1f, 0.96f, 0.84f, 1f));
+                t.transform.SetParent(room.transform, true);
+                t.text = g.text;
+                t.GetComponent<MeshRenderer>().sortingOrder = o + 1;
+                notePlates.Add((Child(room, "sign-plate", pixel, o, new Color(0.59f, 0.38f, 0.24f, 1f)), t));
             }
         }
 
@@ -432,6 +469,7 @@ namespace APA
             c.seg = "final"; // a dropped walk's （動畫） label goes too (review of d7070af)
             c.target = new Target();
             c.from = c.to = Out;
+            c.free = false;
             c.go.transform.localPosition = P(c.id, Out);
             c.body.color = new Color(1f, 1f, 1f, Multi ? 1f : 0.45f);
             Idle(c);
@@ -483,6 +521,98 @@ namespace APA
             pts.Add(c.go.transform.localPosition);
             if (c.route != null) for (int i = c.at; i < c.route.Count; i++) pts.Add(c.route[i].to);
             return pts;
+        }
+
+        // ---- the game inside (Aaron 11/5: the game walks a customer freely in a shop too) ----
+        // The person walks its customer round the room while its task does not hold it (no transition running, at
+        // no station of a task: before its run or after it ended); a run then walks it back to the door first.
+        public const float FeetHalf = 14f / 32f, FeetHigh = 8f / 32f, Foot = 0.75f; // a LimeZu frame's feet; a prop's foot, its lowest rows
+        readonly List<Rect> feetOfProps = new List<Rect>();
+        public bool CanWalk(string consumer) => customers.TryGetValue(consumer, out var c) && c.route == null && !Transacting(consumer);
+
+        // Walkable: feet at p stand on the floor, in the entrance or on the pavement outside, clear of every
+        // standing prop's foot (a rug is floor; an item on a counter is the counter's).
+        public bool Walkable(Vector2 p)
+        {
+            bool shell = !string.IsNullOrEmpty(layout.backdrop);
+            float x0 = shell ? 1f : 0f, x1 = shell ? layout.size.x - 1f : 12f, y0 = shell ? 0.55f : 0.2f, y1 = layout.FloorTop - 0.35f;
+            bool room = p.x >= x0 + FeetHalf && p.x <= x1 - FeetHalf && p.y >= y0 && p.y <= y1;
+            bool pavement = p.x >= -2.4f && p.x <= -FeetHalf && p.y >= 0.2f && p.y <= y1;
+            bool door = p.x > -2.4f && p.x < x0 + FeetHalf + 0.1f && (!shell || p.y >= layout.entrance.x && p.y + FeetHigh <= layout.entrance.y);
+            if (!room && !pavement && !door) return false;
+            var feet = Rect.MinMaxRect(p.x - FeetHalf, p.y, p.x + FeetHalf, p.y + FeetHigh);
+            foreach (var f in feetOfProps) if (f.Overlaps(feet)) return false;
+            return true;
+        }
+
+        // WalkFree: the person's step d (tiles) for its customer, an axis at a time (along a shelf, not stuck at
+        // it); false, nothing moved, when its task holds it.
+        public bool WalkFree(string consumer, Vector2 d, float dt)
+        {
+            if (!customers.TryGetValue(consumer, out var c) || !CanWalk(consumer)) return false;
+            Activate(consumer);
+            var p = (Vector2)c.go.transform.localPosition;
+            var q = p;
+            if (Walkable(new Vector2(q.x + d.x, q.y))) q.x += d.x;
+            if (Walkable(new Vector2(q.x, q.y + d.y))) q.y += d.y;
+            if (d != Vector2.zero)
+            {
+                c.facing = Mathf.Abs(d.x) >= Mathf.Abs(d.y) ? (d.x > 0 ? 0 : 2) : (d.y > 0 ? 1 : 3); // as it means to go, even against a shelf
+                c.tick += dt;
+                if (c.tick > 0.1f) { c.tick = 0f; c.frame = (c.frame + 1) % 6; }
+            }
+            c.body.sprite = q != p ? c.walk[c.facing][c.frame] : c.facing == 1 ? c.idleUp : c.facing == 3 ? c.idleDown : c.walk[c.facing][0];
+            c.go.transform.localPosition = q;
+            if (q != p) c.free = true;
+            ShowLabel(c);
+            return true;
+        }
+
+        // FreeWay: from one place to another over walkable cells (a quarter tile, breadth first), then
+        // straightened (each point on to the farthest one in a clear line); the nearest walkable cell to a place
+        // that is not. Null when there is none.
+        public List<Vector2> FreeWay(Vector2 from, Vector2 to)
+        {
+            const float C = 0.25f, X0 = -2.5f, Y0 = 0f;
+            int W = Mathf.CeilToInt((layout.size.x + 2.5f) / C), H = Mathf.CeilToInt(layout.size.y / C);
+            Vector2 At(int i) => new Vector2(X0 + (i % W + 0.5f) * C, Y0 + (i / W + 0.5f) * C);
+            int Of(Vector2 p) => Mathf.Clamp((int)((p.x - X0) / C), 0, W - 1) + Mathf.Clamp((int)((p.y - Y0) / C), 0, H - 1) * W;
+            var ok = new bool[W * H];
+            for (int i = 0; i < ok.Length; i++) ok[i] = Walkable(At(i));
+            int b = Of(to);
+            if (!ok[b]) { int best = -1; for (int i = 0; i < ok.Length; i++) if (ok[i] && (best < 0 || (At(i) - to).sqrMagnitude < (At(best) - to).sqrMagnitude)) best = i; if (best < 0) return null; b = best; to = At(b); }
+            int a = Of(from);
+            var prev = new int[W * H];
+            for (int i = 0; i < prev.Length; i++) prev[i] = -1;
+            prev[a] = a;
+            var queue = new Queue<int>();
+            queue.Enqueue(a);
+            while (queue.Count > 0 && prev[b] < 0)
+            {
+                int i = queue.Dequeue(), x = i % W;
+                foreach (int n in new[] { x + 1 < W ? i + 1 : -1, x > 0 ? i - 1 : -1, i + W < W * H ? i + W : -1, i - W })
+                    if (n >= 0 && prev[n] < 0 && ok[n]) { prev[n] = i; queue.Enqueue(n); }
+            }
+            if (prev[b] < 0) return null;
+            var cells = new List<Vector2> { to };
+            for (int i = prev[b]; i != a; i = prev[i]) cells.Insert(0, At(i));
+            var way = new List<Vector2>();
+            for (var at = from; way.Count == 0 || way[way.Count - 1] != to;)
+            {
+                int j = cells.Count - 1;
+                while (j > 0 && !ClearLine(at, cells[j])) j--;
+                way.Add(cells[j]);
+                at = cells[j];
+                cells.RemoveRange(0, j + 1);
+            }
+            return way;
+        }
+
+        bool ClearLine(Vector2 a, Vector2 b)
+        {
+            int n = Mathf.CeilToInt((b - a).magnitude / 0.05f);
+            for (int i = 1; i <= n; i++) if (!Walkable(Vector2.Lerp(a, b, i / (float)n))) return false;
+            return true;
         }
 
         void Activate(string consumer)
@@ -541,6 +671,16 @@ namespace APA
             var steps = new List<Step>();
             var p = (Vector2)c.go.transform.localPosition;
             int a = c.from, b = c.to;
+            if (c.free)
+            {
+                // Walked off the corridor (the game): round the props back to the door, then the corridor as ever.
+                var back = FreeWay(p, P(c.id, Door));
+                if (back != null) foreach (var q in back) steps.Add(new Step { to = q, node = Door, seg = "final" });
+                steps.Add(new Step { to = P(c.id, Door), node = Door, seg = "final" });
+                p = P(c.id, Door);
+                a = b = Door;
+                c.free = false;
+            }
             if (browse)
             {
                 Leg(c.id, ref p, ref a, ref b, Shelf, "browse", steps);

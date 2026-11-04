@@ -6,7 +6,7 @@
 import { UnityHost } from "./unity.js";
 import * as A from "./adapter.js";
 import { listen } from "./showlink.js";
-import { attachZoom } from "./pixelscale.js";
+import { attachZoom, roomPixels } from "./pixelscale.js";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -143,8 +143,9 @@ function render() {
 }
 // The scene at whole multiples of its pixels (pixelscale.js): what fits above the caption and the evidence.
 const frame = document.querySelector(".show-frame");
-const zoom = attachZoom({ canvas: $("unity-canvas"), frame, controls: $("scene-zoom"), key: "apa-zoom-show", fill: () => phase === "town",
+const zoom = attachZoom({ canvas: $("unity-canvas"), frame, controls: $("scene-zoom"), key: "apa-zoom-show", fill: () => phase === "town", native: () => roomPixels(unity),
   avail: () => ({ w: frame.parentElement.clientWidth, h: innerHeight - frame.getBoundingClientRect().top - $("show-captions").offsetHeight - $("show-trust").offsetHeight - 12 }) });
+unity.onRoom = () => { zoom.apply(); place(); }; // interiors v2: another room may be another size
 // place: the receipt over the scene when the scene is big enough (2× and up),
 // else in the side column; the side column never makes the row taller than the scene.
 function place() {

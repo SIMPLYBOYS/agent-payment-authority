@@ -98,7 +98,7 @@ public class TownTests
     [UnityTest]
     public IEnumerator TurningBackWhileItCloses()
     {
-        var room = TownView.Interior + new Vector2(TownView.RoomCX, TownView.RoomCY);
+        var room = TownView.Interior + TownView.RoomCentre(view.RoomSize);
         bridge.View("{\"mode\":\"town\"}");
         yield return null;
         Assert.IsTrue(town.Moving && !town.Opening, "closing");
@@ -127,7 +127,7 @@ public class TownTests
             yield return Settle();
             Assert.AreEqual("cafe", view.LayoutKey);
             var c = (Vector2)Camera.main.transform.position;
-            Assert.Less((c - (TownView.Interior + new Vector2(TownView.RoomCX, TownView.RoomCY))).magnitude, 1f, "the camera on the room: " + c);
+            Assert.Less((c - (TownView.Interior + TownView.RoomCentre(view.RoomSize))).magnitude, 1f, "the camera on the room: " + c);
             Assert.IsFalse(town.CoverOn, "the circle is gone");
             Crisp();
             Assert.IsTrue(view.UseLayout(ShopView.DefaultLayout));
@@ -151,7 +151,7 @@ public class TownTests
         Assert.AreEqual("venue", town.Mode, "the page's usual view: the room, as before");
         Assert.AreEqual(TownView.Interior, (Vector2)view.transform.position, "away from the map");
         var c = (Vector2)Camera.main.transform.position;
-        Assert.Less((c - (TownView.Interior + new Vector2(TownView.RoomCX, TownView.RoomCY))).magnitude, 1f);
+        Assert.Less((c - (TownView.Interior + TownView.RoomCentre(view.RoomSize))).magnitude, 1f);
         Crisp();
         Assert.IsTrue(view.UseLayout("cafe"));
         yield return null;
@@ -339,7 +339,7 @@ public class TownTests
         Assert.Less(((Vector2)Camera.main.transform.position - town.Focus).magnitude, 1f, "still the town while it closes");
         yield return Settle();
         c = (Vector2)Camera.main.transform.position;
-        Assert.Less((c - (TownView.Interior + new Vector2(TownView.RoomCX, TownView.RoomCY))).magnitude, 1f, "then the room: " + c);
+        Assert.Less((c - (TownView.Interior + TownView.RoomCentre(view.RoomSize))).magnitude, 1f, "then the room: " + c);
         Assert.IsFalse(town.CoverOn);
         Crisp();
         bridge.View("{\"mode\":\"street\"}");

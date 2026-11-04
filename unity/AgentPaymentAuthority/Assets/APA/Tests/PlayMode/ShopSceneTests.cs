@@ -189,6 +189,57 @@ public class ShopSceneTests
         return rects;
     }
 
+    // The game inside (interiors v2, Aaron 11/5: the game walks a customer freely in a shop too): the person's customer walks the
+    // bookshop from the pavement, through its entrance, round its props, never onto a prop's foot or a wall; a click's
+    // way is clear all along; once its task holds it, nothing moves it, and its run walks back round the props to the
+    // door first, every leg clear.
+    [UnityTest]
+    public IEnumerator TheGameWalksACustomerRoundTheShop()
+    {
+        Assert.IsTrue(view.UseLayout("books"));
+        const string b = "consumer-b";
+        Assert.IsTrue(view.CanWalk(b), "no task: the person may walk it");
+        Assert.IsTrue(view.Walkable(view.PositionOf(b)), "outside, on the pavement");
+        Assert.IsTrue(view.Walkable(view.P(b, ShopView.Door)), "the door");
+        Assert.IsFalse(view.Walkable(new Vector2(0.5f, 7f)), "the left wall above the entrance");
+        Assert.IsFalse(view.Walkable(new Vector2(5f, 5.7f)), "an island's foot");
+        Assert.IsFalse(view.Walkable(new Vector2(10f, 9f)), "the back wall");
+        Assert.IsTrue(view.Walkable(new Vector2(16.5f, 6f)), "the reading corner's rug is floor");
+        var start = view.PositionOf(b);
+        foreach (var (d, n) in new[] { (Vector2.right, 20), (Vector2.up, 25), (Vector2.right, 60), (Vector2.up, 20) })
+            for (int i = 0; i < n; i++)
+            {
+                Assert.IsTrue(view.WalkFree(b, d * 0.1f, 0.03f));
+                Assert.IsTrue(view.Walkable(view.PositionOf(b)), "its feet on the floor at " + view.PositionOf(b));
+            }
+        Assert.Greater(view.PositionOf(b).x - start.x, 5f, "in, well past the entrance");
+        var here = view.PositionOf(b);
+        var way = view.FreeWay(here, new Vector2(16f, 6.2f));
+        Assert.IsNotNull(way, "a click's way to the reading corner");
+        Clear(here, way);
+        bridge.Receive(D2(1, b, 1, "entered", 1));
+        Assert.IsFalse(view.CanWalk(b), "its task holds it");
+        Assert.IsFalse(view.WalkFree(b, Vector2.right * 0.1f, 0.03f));
+        var route = view.RouteOf(b);
+        int door = route.FindIndex(p => (p - view.P(b, ShopView.Door)).sqrMagnitude < 1e-4f);
+        Assert.Greater(door, 1, "round the props back to the door: " + string.Join(" ", route));
+        Clear(route[0], route.GetRange(1, door));
+        yield return Arrive(b);
+        Assert.AreEqual(view.Point(b, ShopView.Door), view.PositionOf(b));
+        Assert.IsTrue(view.UseLayout(ShopView.DefaultLayout));
+    }
+
+    // Clear: every point along the way's lines stands on walkable feet.
+    void Clear(Vector2 from, List<Vector2> way)
+    {
+        var at = from;
+        foreach (var p in way)
+        {
+            for (int i = 1; i <= 40; i++) Assert.IsTrue(view.Walkable(Vector2.Lerp(at, p, i / 40f)), "the way crosses a prop or a wall near " + Vector2.Lerp(at, p, i / 40f));
+            at = p;
+        }
+    }
+
     // UX3: in every room, each customer's corridor (with B's version 2 step
     // aside too) is horizontal or vertical and its feet never touch a prop.
     [Test]

@@ -486,15 +486,18 @@ export const sameShown2 = (sent, rep) => !!sent && !!rep && Number.isInteger(rep
 // parseBridge: Unity's bridge report: the versions and customers the build
 // can show; null when malformed. A build without it shows one customer.
 export function parseBridge(detail) {
-  const m = /^versions=([0-9,]+);customers=([a-z0-9,-]*)(;select=1)?(;layouts=([a-z0-9,-]*))?(;town=1(;play=1)?(;pan=1)?)?$/.exec(String(detail));
+  const m = /^versions=([0-9,]+);customers=([a-z0-9,-]*)(;select=1)?(;layouts=([a-z0-9,-]*))?(;town=1(;play=1)?(;pan=1)?)?(;rooms=([a-z0-9-]+:[0-9.]+x[0-9]+(?:,[a-z0-9-]+:[0-9.]+x[0-9]+)*))?$/.exec(String(detail));
   if (!m) return null;
   // select: the build takes the page's Select and reports clicks (UX1,
   // docs/commercial-ux1.md); layouts: the rooms it has (UX3); town: it takes
   // View and reports venue clicks (T2, docs/commercial-town.md); play: it
   // takes Play and Steer, the game (Aaron 10/29); pan: it takes Pan, the
-  // street's tour (town v2 V4, docs/town-v2.md). An older build says nothing
-  // of them.
-  return { versions: new Set(m[1].split(",").map(Number)), customers: m[2] ? m[2].split(",") : [], select: !!m[3], layouts: m[5] ? m[5].split(",") : [], town: !!m[6], play: !!m[7], pan: !!m[8] };
+  // street's tour (town v2 V4, docs/town-v2.md); rooms: each room's venue
+  // view in tiles (interiors v2, docs/commercial-interiors-v2.md), for the
+  // canvas. An older build says nothing of them.
+  const rooms = {};
+  for (const r of m[10] ? m[10].split(",") : []) { const [k, wh] = r.split(":"); const [w, h] = wh.split("x").map(Number); rooms[k] = { w, h }; }
+  return { versions: new Set(m[1].split(",").map(Number)), customers: m[2] ? m[2].split(",") : [], select: !!m[3], layouts: m[5] ? m[5].split(",") : [], town: !!m[6], play: !!m[7], pan: !!m[8], rooms };
 }
 
 // sceneTasks: each consumer's scene task, the task of its newest run (the

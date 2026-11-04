@@ -46,7 +46,8 @@ namespace APA
         // legs; a path that ends where it starts loops, any other goes back.
         // A path of one point is a pose there: its piece's frames (sitting,
         // reading, a clerk standing) play in a loop.
-        [System.Serializable] public class Walker { public string key; public float speed = 1.2f; public Vector2[] path = new Vector2[0]; }
+        // wait: seconds a walker stands at each point of its path, facing up (in a shop: at a shelf; interiors v2); none: on.
+        [System.Serializable] public class Walker { public string key; public float speed = 1.2f; public Vector2[] path = new Vector2[0]; public float[] wait = new float[0]; }
         // The people in a shop (Aaron 10/27: a clerk, other customers; illustrative,
         // never A or B), in its room's coordinates, shown with that room only.
         [System.Serializable] public class Inside { public string layout; public Walker[] people = new Walker[0]; }
@@ -81,7 +82,10 @@ namespace APA
 
         public const string Accent = "#e0582f"; // the page's accent (web/style.css), for the venue numbers
         public const int PPU = ShopView.PPU;
-        public const float RoomW = 15f, RoomH = 10f, RoomCX = 5f, RoomCY = 4.5f; // what a venue view shows of its room (ShopBuilder's old camera)
+        // What a venue view shows of a room of size (ShopView.Layout): the pavement's 2.5 tiles on its left, half a
+        // tile on its right; its art from y -0.5 (a 12 x 10 room: ShopBuilder's old camera, 15 x 10 centred at 5, 4.5).
+        public static Vector2 RoomView(Vector2 size) => new Vector2(size.x + 3f, size.y);
+        public static Vector2 RoomCentre(Vector2 size) => new Vector2((size.x - 2f) / 2f, (size.y - 1f) / 2f);
         public static readonly Vector2 Interior = new Vector2(200f, 0f); // where the room stands, away from the map (98 wide, its ground to x 114; V3)
         public static readonly Vector2 RoomDoor = new Vector2(1.5f, 1.2f); // the room's door (every layout's), from the room's origin
         public const float Half = 0.35f; // seconds for the circle to close, and again to open
@@ -176,7 +180,7 @@ namespace APA
             dark.sortingOrder = -1100;
             dark.transform.localPosition = Interior + new Vector2(6f, 4.5f);
             dark.transform.localScale = new Vector3(44f, 30f, 1f); // a venue view is at most 30 x 20 units; the town's widest view stops short of it
-            Piece(transform, new Town.Piece { key = "x-pave", x = Interior.x - 4f, y = Interior.y, w = 4f, h = 8f }, -1050, Vector2.zero);
+            Piece(transform, new Town.Piece { key = "x-pave", x = Interior.x - 4f, y = Interior.y, w = 4f, h = 13f }, -1050, Vector2.zero); // the tallest room's height
         }
 
         static Sprite pixel, circle, rounded;
@@ -348,7 +352,7 @@ namespace APA
 
         // ---- passers-by (illustrative) ----
         // doorOf: for each point of its path, the venue whose door it is (null for the street); inside: seconds in that shop, or -1.
-        class WalkerState { public Town.Walker w; public SpriteRenderer r; public Sprite[] frames; public bool room; public int leg; public int dir = 1; public float tick; public int frame; public string[] doorOf; public float inside = -1f; }
+        class WalkerState { public Town.Walker w; public SpriteRenderer r; public Sprite[] frames; public bool room; public int leg; public int dir = 1; public float tick; public int frame; public string[] doorOf; public float inside = -1f; public float rest; }
         readonly List<WalkerState> walkers = new List<WalkerState>();
         readonly Dictionary<string, GameObject> insides = new Dictionary<string, GameObject>();
         public IEnumerable<Vector2> WalkerPositions { get { foreach (var s in walkers) if (!s.room) yield return s.r.transform.localPosition; } } // tests
@@ -410,6 +414,12 @@ namespace APA
                 s.inside = -1f;
                 s.r.color = Color.white;
             }
+            if (s.rest > 0f)
+            {
+                s.rest -= dt; // at a point it waits at: standing, facing up (a walk sheet's up frames start at 6)
+                if (s.frames.Length > 6) s.r.sprite = s.frames[6];
+                return;
+            }
             if (path.Length == 1)
             {
                 // A pose: its frames in a loop, in place.
@@ -448,9 +458,11 @@ namespace APA
                 }
                 s.leg = next;
                 bool enter = !skip && s.doorOf[s.leg] != null;
+                float rest = !skip && s.leg < s.w.wait.Length ? s.w.wait[s.leg] : 0f;
                 if (loop && s.leg == path.Length - 1) { s.leg = 0; if (!skip) p = path[0]; }
                 else if (!loop && (s.leg == path.Length - 1 || s.leg == 0)) s.dir = -s.dir;
                 if (enter) { s.inside = 0f; break; }
+                if (rest > 0f) { s.rest = rest; break; }
             }
             s.r.transform.localPosition = p;
             s.r.sortingOrder = Depth(s, p.y);
@@ -884,8 +896,10 @@ namespace APA
             return true;
         }
 
+        readonly List<Vector2> roomRoute = new List<Vector2>(); // a click's walk inside the room shown (the game, interiors v2)
         void Move(float dt)
         {
+            if (Player != "" && shown == "venue" && phase == 0 && shop != null) { MoveInside(dt); return; }
             if (Player == "" || shown != "town" || phase != 0) return;
             var body = stands[Player].body;
             var p = (Vector2)body.transform.localPosition;
@@ -918,6 +932,34 @@ namespace APA
                 routeTo = null;
                 Clicked?.Invoke(door);
             }
+        }
+
+        // MoveInside: the keys held, or a click's walk, for the person's customer in the room; nothing while its
+        // task holds it (ShopView.CanWalk).
+        void MoveInside(float dt)
+        {
+            if (!shop.CanWalk(Player)) { roomRoute.Clear(); return; }
+            float go = PlayerSpeed * dt;
+            var p = shop.PositionOf(Player);
+            var d = steer != Vector2.zero ? steer.normalized * go : Vector2.zero;
+            if (steer != Vector2.zero) roomRoute.Clear();
+            else if (roomRoute.Count > 0)
+            {
+                d = Vector2.ClampMagnitude(roomRoute[0] - p, go);
+                if ((roomRoute[0] - p).magnitude <= go) roomRoute.RemoveAt(0);
+            }
+            shop.WalkFree(Player, d, dt);
+        }
+
+        // GoInside: walk the person's customer to a place in the room shown (a click there). False: none, or no way.
+        public bool GoInside(Vector2 to)
+        {
+            roomRoute.Clear();
+            if (Player == "" || shown != "venue" || shop == null || !shop.CanWalk(Player)) return false;
+            var way = shop.FreeWay(shop.PositionOf(Player), to);
+            if (way == null) return false;
+            roomRoute.AddRange(way);
+            return true;
         }
 
         // ---- views ----
@@ -974,7 +1016,7 @@ namespace APA
             // As large as the uncovered part allows (Aaron 10/27, as pixel-office: a fraction where it must be); the
             // town never below one screen pixel per art pixel (a narrow window crops it rather than shrink it).
             if (shown == "town") { k = Mathf.Max(1f, Fit(s, town.frame.x, town.frame.y)); at = new Vector2(Pan(float.IsNaN(lookX) ? town.focus.x : lookX, k), town.focus.y); }
-            else { k = Fit(s, RoomW, RoomH); at = Interior + new Vector2(RoomCX, RoomCY); }
+            else { var z = shop.RoomSize; var v = RoomView(z); k = Fit(s, v.x, v.y); at = Interior + RoomCentre(z); }
             // The target at the safe part's centre, not the canvas's.
             c = at - (s.center - new Vector2(Screen.width, Screen.height) / 2f) / (k * PPU);
         }
@@ -1052,6 +1094,11 @@ namespace APA
             Play(Time.deltaTime);
             Drive(Time.deltaTime);
             Move(Time.deltaTime);
+            if (HasTown && shown == "venue" && phase == 0 && Player != "" && Input.GetMouseButtonDown(0) && cam != null)
+            {
+                GoInside((Vector2)transform.InverseTransformPoint(cam.ScreenToWorldPoint(Input.mousePosition)) - Interior); // the room's own coordinates
+                return;
+            }
             if (!HasTown || shown != "town" || phase != 0 || !Input.GetMouseButtonDown(0) || cam == null) return;
             var p = (Vector2)transform.InverseTransformPoint(cam.ScreenToWorldPoint(Input.mousePosition));
             var hit = VenueAt(p);

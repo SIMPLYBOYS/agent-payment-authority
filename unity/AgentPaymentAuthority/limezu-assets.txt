@@ -49,6 +49,26 @@ wood-table	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/12_Kitche
 chair-right	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/12_Kitchen_32x32.png	128,352,32,48
 chair-left	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/12_Kitchen_32x32.png	128,416,32,48
 pastry-plate	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/12_Kitchen_32x32.png	64,1280,32,32
+# Interiors v2 (docs/commercial-interiors-v2.md, Aaron 11/5): the bookshop enlarged, 20 x 12. Its shell is one image made by
+# scripts/unity/rooms.py from the layout's "shell" (Room_Builder's 3D walls, a wallpaper strip, a floor tile) into _cut/,
+# which import-limezu.sh leaves alone. Its pieces are cut from theme sheets already imported (no new file): the seamless
+# low bookcase strip in three woods (back wall, islands), tables of books, a lectern, a globe, a ladder, a reading corner.
+room-books	_cut/room-books.png	-
+shelf-pair-orange	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/5_Classroom_and_library_32x32.png	128,224,128,80
+shelf-pair-beige	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/5_Classroom_and_library_32x32.png	256,224,128,80
+shelf-pair-light	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/5_Classroom_and_library_32x32.png	384,224,128,80
+book-table	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/5_Classroom_and_library_32x32.png	240,112,64,48
+book-pile	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/5_Classroom_and_library_32x32.png	384,544,64,64
+lectern	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/5_Classroom_and_library_32x32.png	464,560,48,48
+ladder	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/5_Classroom_and_library_32x32.png	64,240,32,48
+globe	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/2_LivingRoom_32x32.png	384,704,32,48
+map-poster	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/2_LivingRoom_32x32.png	320,720,64,48
+big-plant	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/2_LivingRoom_32x32.png	416,688,64,64
+floor-lamp	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/2_LivingRoom_32x32.png	384,400,32,80
+frame-a	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/1_Generic_32x32.png	0,432,64,32
+rug-red	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/1_Generic_32x32.png	288,128,128,96
+mat	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/1_Generic_32x32.png	288,336,64,48
+sofa-red	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/1_Generic_32x32.png	192,352,96,64
 # T2 (docs/commercial-town.md): the town, LimeZu Modern Exteriors v42.3 (32x32; the pack Aaron downloaded). The
 # builder cuts each x-* piece into its own file (Assets/LimeZu/_cut), read by TownView by key. Round 2 (Aaron 10/27:
 # as fine as the pack's own samples): singles for curbs, beds, street furniture; the LIME CORP office and the mall cut down.

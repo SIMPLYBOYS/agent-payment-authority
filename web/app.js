@@ -28,7 +28,7 @@
 import * as A from "./adapter.js";
 import { renderInspector, renderTimeline, renderSceneText, renderCard, renderEvidence } from "./render.js";
 import { UnityHost } from "./unity.js";
-import { attachZoom } from "./pixelscale.js";
+import { attachZoom, roomPixels } from "./pixelscale.js";
 
 const $ = (id) => document.getElementById(id);
 const POLL_MS = 1000;   // a target, not a latency promise
@@ -828,11 +828,12 @@ forget();
 // The scene at whole multiples of its pixels, zoom on demand (pixelscale.js).
 {
   const canvas = $("unity-canvas"), frame = canvas.parentElement, host = document.body.dataset.page === "host";
-  attachZoom({ canvas, frame, controls: $("scene-zoom"), key: "apa-zoom-" + (host ? "host" : "viewer"),
+  const zoom = attachZoom({ canvas, frame, controls: $("scene-zoom"), key: "apa-zoom-" + (host ? "host" : "viewer"), native: () => roomPixels(unity),
     // 簡報模式 (docs/commercial-town.md T1): the whole window is the scene's.
     avail: () => (document.body.dataset.present === "on" ? { w: innerWidth, h: innerHeight }
       : { w: frame.parentElement.clientWidth, h: Math.max(320, innerHeight - (host ? 150 : 520)) }),
     // T2: a build with the town fills the window and keeps its own whole multiples.
     fill: () => document.body.dataset.present === "on" && !!(unity.bridge && unity.bridge.town) });
+  unity.onRoom = () => zoom.apply(); // interiors v2: another room may be another size
 }
 unity.load();

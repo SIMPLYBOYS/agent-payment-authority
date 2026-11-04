@@ -349,6 +349,10 @@ test("UX3: bridge layouts, rooms in messages, the scenes in order", () => {
   assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=data;town=1;play=1;pan=1").pan, true);
   assert.equal(b.play, false);
   assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=data;play=1"), null, "no game without the town");
+  // Interiors v2: each room's venue view in tiles, last; an older build: none.
+  assert.deepEqual(A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=books,cafe;town=1;play=1;pan=1;rooms=books:23x12,cafe:15x10").rooms, { books: { w: 23, h: 12 }, cafe: { w: 15, h: 10 } });
+  assert.deepEqual(b.rooms, {});
+  assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;rooms=books:23"), null);
   assert.deepEqual(A.sceneClear2(4, "cafe"), { v: 2, scene: 4, clear: true, layout: "cafe" });
   assert.deepEqual(A.slotClear2(4, "consumer-a", 2, "mart"), { v: 2, scene: 4, consumer: "consumer-a", slot: 2, clear: true, layout: "mart" });
   assert.deepEqual(A.venues([{ scene: "mart" }, { scene: "zoo" }, {}, { scene: "cafe" }, { scene: "mart" }]), ["data", "cafe", "mart", "zoo"]);
