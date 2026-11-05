@@ -25,7 +25,8 @@ import { startChrome, sleep } from "../verify/harness.mjs";
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const sock = join(repo, "var/v1-dev/run/voice.sock");
-const PHRASE = "核准 0.5 USDC，付給測試商店，代碼 3 5 4 0";
+// The phrase to read; another one as the first argument (B2: how an amount such as 0.42 is recognised).
+const PHRASE = process.argv[2] || "核准 0.5 USDC，付給測試商店，代碼 3 5 4 0";
 const SECONDS = 8;
 
 const tmp = mkdtempSync(join(tmpdir(), "v1-mic-"));
