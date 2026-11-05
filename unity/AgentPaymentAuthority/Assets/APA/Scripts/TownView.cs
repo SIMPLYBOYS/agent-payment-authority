@@ -97,7 +97,8 @@ namespace APA
         public bool HasTown => town != null && System.Array.Exists(art, t => t != null); // a build without the pack has no town (the room keeps its old camera)
         public string Mode { get; private set; } = "venue"; // venue | town: what the page asked for
         string shown = "venue";                               // what the camera shows (they differ during a transition)
-        public System.Action<string> Clicked; // town view: a click on a venue, with its layout
+        public System.Action<string> Clicked; // town view: a click on a venue, with its layout; ToTown: walked out of a room
+        public const string ToTown = "town";  // Clicked's name for the town: the walked customer stepped out onto the pavement
         Rect safe;                            // the part of the canvas the page leaves uncovered, in Screen pixels from its top left; empty: all of it
         Vector2Int screen;
         public float Scale { get; private set; } = 1f; // screen pixels per art pixel now (tests)
@@ -811,6 +812,7 @@ namespace APA
             consumer = consumer ?? "";
             if (!HasTown || consumer != "" && !stands.ContainsKey(consumer)) return false;
             route.Clear(); routeTo = null; steer = Vector2.zero;
+            outside = true; // a customer that stands out on a room's pavement is not reported until it steps in and out
             if (consumer == Player) return true;
             if (Player != "") stands[Player].body.sprite = playerIdle[3]; // back to standing
             Player = consumer;
@@ -897,6 +899,8 @@ namespace APA
         }
 
         readonly List<Vector2> roomRoute = new List<Vector2>(); // a click's walk inside the room shown (the game, interiors v2)
+        public const float LeaveAt = -2f; // a room's x out on its pavement, past the customers' place outside (x -1.3)
+        bool outside = true;              // the walked customer stands out there already: reported once until it steps back
         void Move(float dt)
         {
             if (Player != "" && shown == "venue" && phase == 0 && shop != null) { MoveInside(dt); return; }
@@ -949,6 +953,12 @@ namespace APA
                 if ((roomRoute[0] - p).magnitude <= go) roomRoute.RemoveAt(0);
             }
             shop.WalkFree(Player, d, dt);
+            // Out of the entrance and along the pavement (Aaron 11/5: back to the town by walking): reported as the
+            // town, the page's to decide (as its back-to-town button); the town then has it on the door step (Show).
+            // Once until it steps back.
+            bool onPavement = shop.PositionOf(Player).x <= LeaveAt;
+            if (onPavement && !outside) { roomRoute.Clear(); Clicked?.Invoke(ToTown); }
+            outside = onPavement;
         }
 
         // GoInside: walk the person's customer to a place in the room shown (a click there). False: none, or no way.

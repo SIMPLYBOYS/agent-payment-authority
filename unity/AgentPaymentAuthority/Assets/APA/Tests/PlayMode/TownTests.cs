@@ -682,4 +682,38 @@ public class TownTests
         Assert.AreEqual("play:0:0:|Applied", bridge.reports.Last());
         Assert.AreEqual(Vector2.zero, town.PlayerAt, "no one walked");
     }
+
+    // Out by walking (Aaron 11/5): in a room, the person's customer walked out of the entrance and along the pavement is
+    // reported as the town, as a click on a venue is (the page goes back, as its button does); once while it stays out
+    // there, again after it steps back in and out.
+    [UnityTest]
+    public IEnumerator ThePersonWalksACustomerOutToTheTown()
+    {
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        bridge.Play("{\"consumer\":\"consumer-b\"}");
+        Assert.IsTrue(view.UseLayout("mart"));
+        bridge.View("{\"mode\":\"venue\"}");
+        yield return Settle();
+        string toTown = "venue:" + bridge.scene.Scene + ":0:" + TownView.ToTown;
+        int Out() => bridge.reports.Count(r => r == toTown);
+        Assert.Greater(view.PositionOf("consumer-b").x, TownView.LeaveAt, "it waits outside the door, short of the pavement's far side");
+        Assert.AreEqual(0, Out());
+        bridge.Steer("{\"x\":1,\"y\":0}");
+        for (float end = Time.realtimeSinceStartup + 0.6f; Time.realtimeSinceStartup < end;) yield return null;
+        Assert.AreEqual(0, Out(), "walking in is no way out");
+        bridge.Steer("{\"x\":-1,\"y\":0}");
+        yield return Until(() => Out() > 0, 5f, _ => { });
+        Assert.AreEqual(1, Out(), "out on the pavement: the town");
+        for (float end = Time.realtimeSinceStartup + 0.5f; Time.realtimeSinceStartup < end;) yield return null;
+        Assert.AreEqual(1, Out(), "once, while it stays out there");
+        bridge.Steer("{\"x\":1,\"y\":0}");
+        for (float end = Time.realtimeSinceStartup + 0.6f; Time.realtimeSinceStartup < end;) yield return null;
+        bridge.Steer("{\"x\":-1,\"y\":0}");
+        yield return Until(() => Out() > 1, 5f, _ => { });
+        Assert.AreEqual(2, Out(), "in and out again");
+        bridge.Steer("{\"x\":0,\"y\":0}");
+        bridge.Play("{\"consumer\":\"\"}");
+        Assert.IsTrue(view.UseLayout(ShopView.DefaultLayout));
+    }
 }

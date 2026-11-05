@@ -680,7 +680,12 @@ function enterVenue(k) {
   if (venue !== k) { venue = k; shownControl = ""; renderControl(); refreshPanels(); }
   renderPresent();
 }
-function venuePicked(k) { if (presenting && inTown && A.venues(allScenarios()).includes(k)) enterVenue(k); }
+// "town": the walked customer stepped out of the room onto its pavement (Aaron 11/5: back by walking), as 回到城鎮.
+function venuePicked(k) {
+  if (k === "town") { if (presenting && !inTown) toTown(); return; }
+  if (presenting && inTown && A.venues(allScenarios()).includes(k)) enterVenue(k);
+}
+function toTown() { inTown = true; renderPresent(); }
 onVenuePick((k) => { if (sceneUnity.target !== relay) venuePicked(k); });
 // sendView: the camera Unity should show, and the canvas's part the cards
 // leave uncovered (between the two columns); sent when either changes.
@@ -749,7 +754,7 @@ addEventListener("blur", () => { held.clear(); steer(); });
 addEventListener("resize", () => requestAnimationFrame(() => renderPresent())); // renderPresent sends the view; on ready the list learns of the town too
 $("present-toggle").addEventListener("click", () => setPresenting(true));
 $("present-exit").addEventListener("click", () => setPresenting(false));
-$("present-town").addEventListener("click", () => { inTown = true; renderPresent(); });
+$("present-town").addEventListener("click", toTown);
 $("present-tour").addEventListener("click", () => town().tour());
 
 // ---- 沉浸模式 (Aaron 10/28: "圖卡能夠選擇最小化成按鈕") ----
