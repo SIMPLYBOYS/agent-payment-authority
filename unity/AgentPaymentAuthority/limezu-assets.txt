@@ -69,6 +69,48 @@ frame-a	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/1_Generic_32
 rug-red	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/1_Generic_32x32.png	288,128,128,96
 mat	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/1_Generic_32x32.png	288,336,64,48
 sofa-red	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/1_Generic_32x32.png	192,352,96,64
+# Interiors v2, the cafe and the mart (Aaron 11/5 "兩間的方向可以"): 20 x 12 as the bookshop, their shells by rooms.py
+# (the cafe's bar side and the mart's checkout on floors of their own, the shell's "zones"). The cafe: a bakery (the
+# Grocery sheet's bread shelf, glass case and bar, its trays of bread), a coffee bench, cups; the mart: rows of goods
+# shelves, drink fridges, crates and flowers, the cafe's back counter as a self-serve coffee corner. New singles files.
+room-cafe	_cut/room-cafe.png	-
+room-mart	_cut/room-mart.png	-
+bakery-glass	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/16_Grocery_store_32x32.png	0,992,160,64
+bar-l	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/16_Grocery_store_32x32.png	32,864,32,64
+bar-m	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/16_Grocery_store_32x32.png	64,864,96,64
+bar-r	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/16_Grocery_store_32x32.png	160,864,32,64
+bread-shelf	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/16_Grocery_store_32x32.png	336,880,160,80
+tray-buns	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/16_Grocery_store_32x32.png	256,864,32,32
+tray-croissant	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/16_Grocery_store_32x32.png	224,896,32,32
+tray-baguette	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/16_Grocery_store_32x32.png	288,864,32,32
+tray-sticks	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/16_Grocery_store_32x32.png	224,864,32,32
+tray-toast	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/16_Grocery_store_32x32.png	256,896,32,32
+bun-rack	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_250.png	-
+bun-rack-s	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_252.png	-
+oven	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_253.png	-
+menu-orange	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/24_Ice_Cream_Shop_32x32.png	320,16,64,64
+back-counter	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/12_Kitchen_Singles_32x32/Kitchen_Singles_32x32_121.png	-
+back-counter-cups	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/12_Kitchen_Singles_32x32/Kitchen_Singles_32x32_122.png	-
+coffee-machine	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/12_Kitchen_Singles_32x32/Kitchen_Singles_32x32_179.png	-
+mixer	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/12_Kitchen_Singles_32x32/Kitchen_Singles_32x32_185.png	-
+till	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/12_Kitchen_Singles_32x32/Kitchen_Singles_32x32_134.png	-
+cup-coffee	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/12_Kitchen_32x32.png	448,224,16,32
+cup-red	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/12_Kitchen_32x32.png	416,240,32,16
+cup-blue	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/12_Kitchen_32x32.png	480,240,32,16
+goods-c	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_102.png	-
+goods-d	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_105.png	-
+goods-e	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_100.png	-
+goods-f	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_103.png	-
+fridge-c	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_65.png	-
+fridge-d	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_71.png	-
+crate-low	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_359.png	-
+crate-low-b	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_360.png	-
+crate-red	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_358.png	-
+sale	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_95.png	-
+sale-strip	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_89.png	-
+baskets	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_123.png	-
+flowers	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_422.png	-
+flowers-b	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_Singles_32x32/16_Grocery_Store_Singles_32x32/Grocery_Store_Singles_32x32_424.png	-
 # T2 (docs/commercial-town.md): the town, LimeZu Modern Exteriors v42.3 (32x32; the pack Aaron downloaded). The
 # builder cuts each x-* piece into its own file (Assets/LimeZu/_cut), read by TownView by key. Round 2 (Aaron 10/27:
 # as fine as the pack's own samples): singles for curbs, beds, street furniture; the LIME CORP office and the mall cut down.

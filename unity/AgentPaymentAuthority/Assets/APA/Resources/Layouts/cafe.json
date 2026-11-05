@@ -1,165 +1,395 @@
 {
-  "key": "cafe",
-  "title": "街角烘焙咖啡（示範情境）",
-  "floor": "floor-wood",
-  "wall": "wall-brick",
-  "floorTint": {
-    "r": 1,
-    "g": 1,
-    "b": 1,
-    "a": 1
-  },
-  "wallTint": {
-    "r": 1,
-    "g": 1,
-    "b": 1,
-    "a": 1
-  },
-  "door": {
-    "x": 1.5,
-    "y": 1.2
-  },
-  "aisle": {
-    "x": 1.5,
-    "y": 3.2
-  },
-  "shelf": {
-    "x": 4.5,
-    "y": 3.2
-  },
-  "bend": {
-    "x": 7.5,
-    "y": 3.2
-  },
-  "front": {
-    "x": 10.0,
-    "y": 3.2
-  },
-  "counter": {
-    "x": 10.0,
-    "y": 4.0
-  },
-  "pickup": {
-    "x": 11.3,
-    "y": 4.0
-  },
-  "props": [
-    {
-      "key": "sign-open",
-      "x": 1.5,
-      "y": 7.3
-    },
-    {
-      "key": "chalkboard",
-      "x": 4.5,
-      "y": 7.2
-    },
-    {
-      "key": "window",
-      "x": 8.5,
-      "y": 7.3
-    },
-    {
-      "key": "pastry-case",
-      "x": 4.5,
-      "y": 4.2
-    },
-    {
-      "key": "plant",
-      "x": 2.5,
-      "y": 4.6
-    },
-    {
-      "key": "wood-counter",
-      "x": 7.0,
-      "y": 4.5
-    },
-    {
-      "key": "wood-counter",
-      "x": 9.0,
-      "y": 4.5
-    },
-    {
-      "key": "wood-counter",
-      "x": 11.0,
-      "y": 4.5
-    },
-    {
-      "key": "espresso-machine",
-      "x": 7.0,
-      "y": 4.45,
-      "lift": 1.3
-    },
-    {
-      "key": "pastry-case",
-      "x": 8.7,
-      "y": 4.45,
-      "lift": 1.3
-    },
-    {
-      "key": "pastry-plate",
-      "x": 11.6,
-      "y": 4.45,
-      "lift": 1.35
-    },
-    {
-      "key": "cake-fridge",
-      "x": 5.6,
-      "y": 4.6
-    },
-    {
-      "key": "chair-right",
-      "x": 2.9,
-      "y": 0.5
-    },
-    {
-      "key": "wood-table",
-      "x": 3.6,
-      "y": 0.6
-    },
-    {
-      "key": "chair-left",
-      "x": 4.3,
-      "y": 0.5
-    },
-    {
-      "key": "chair-right",
-      "x": 5.6,
-      "y": 0.5
-    },
-    {
-      "key": "wood-table",
-      "x": 6.3,
-      "y": 0.6
-    },
-    {
-      "key": "chair-left",
-      "x": 7.0,
-      "y": 0.5
-    },
-    {
-      "key": "plant",
-      "x": 8.3,
-      "y": 0.3
-    }
+ "key": "cafe",
+ "title": "街角烘焙咖啡（示範情境）",
+ "size": {
+  "x": 20,
+  "y": 12
+ },
+ "backdrop": "room-cafe",
+ "shell": {
+  "floor": [
+   0,
+   384
   ],
-  "notes": [
-    {
-      "text": "菜單・選購與報價",
-      "x": 4.5,
-      "y": 6.55
-    },
-    {
-      "text": "櫃台・點餐",
-      "x": 10.0,
-      "y": 1.9
-    },
-    {
-      "text": "取餐區・付款後才交付",
-      "x": 11.0,
-      "y": 1.3
-    }
+  "wall": [
+   0,
+   512
   ],
-  "pickupRow": 3.2,
-  "facing": "up"
+  "wall_keep": [
+   14,
+   8
+  ],
+  "shadow": 30,
+  "colours": {
+   "75,153,156": [
+    222,
+    196,
+    156
+   ],
+   "76,137,157": [
+    204,
+    176,
+    138
+   ],
+   "81,128,153": [
+    150,
+    106,
+    76
+   ]
+  },
+  "zones": [
+   {
+    "floor": [
+     128,
+     640
+    ],
+    "rect": [
+     10,
+     5.0,
+     19,
+     8.5
+    ]
+   }
+  ]
+ },
+ "door": {
+  "x": 1.5,
+  "y": 1.2
+ },
+ "aisle": {
+  "x": 1.5,
+  "y": 3.2
+ },
+ "shelf": {
+  "x": 5.0,
+  "y": 3.2
+ },
+ "bend": {
+  "x": 9.5,
+  "y": 3.2
+ },
+ "front": {
+  "x": 11.5,
+  "y": 3.2
+ },
+ "counter": {
+  "x": 11.5,
+  "y": 4.0
+ },
+ "pickup": {
+  "x": 17.3,
+  "y": 4.0
+ },
+ "pickupRow": 3.2,
+ "facing": "up",
+ "entrance": {
+  "x": 0.5,
+  "y": 5.0
+ },
+ "props": [
+  {
+   "key": "mat",
+   "x": 0.9,
+   "y": 1.3,
+   "under": true
+  },
+  {
+   "key": "sign-open",
+   "x": 1.0,
+   "y": 9.4
+  },
+  {
+   "key": "big-plant",
+   "x": 1.75,
+   "y": 8.4
+  },
+  {
+   "key": "bread-shelf",
+   "x": 4.6,
+   "y": 8.45
+  },
+  {
+   "key": "tray-buns",
+   "x": 3.6,
+   "y": 8.45,
+   "lift": 1.25
+  },
+  {
+   "key": "tray-croissant",
+   "x": 4.6,
+   "y": 8.45,
+   "lift": 1.25
+  },
+  {
+   "key": "tray-baguette",
+   "x": 5.6,
+   "y": 8.45,
+   "lift": 1.25
+  },
+  {
+   "key": "tray-sticks",
+   "x": 3.6,
+   "y": 8.45,
+   "lift": 0.5
+  },
+  {
+   "key": "tray-toast",
+   "x": 4.6,
+   "y": 8.45,
+   "lift": 0.5
+  },
+  {
+   "key": "tray-buns",
+   "x": 5.6,
+   "y": 8.45,
+   "lift": 0.5
+  },
+  {
+   "key": "bun-rack",
+   "x": 8.0,
+   "y": 8.45
+  },
+  {
+   "key": "cake-fridge",
+   "x": 9.55,
+   "y": 8.45
+  },
+  {
+   "key": "menu-orange",
+   "x": 11.1,
+   "y": 9.25
+  },
+  {
+   "key": "back-counter",
+   "x": 13.0,
+   "y": 8.45
+  },
+  {
+   "key": "back-counter-cups",
+   "x": 15.0,
+   "y": 8.45
+  },
+  {
+   "key": "coffee-machine",
+   "x": 12.6,
+   "y": 8.45,
+   "lift": 1.0
+  },
+  {
+   "key": "mixer",
+   "x": 13.5,
+   "y": 8.45,
+   "lift": 1.0
+  },
+  {
+   "key": "oven",
+   "x": 17.1,
+   "y": 8.45
+  },
+  {
+   "key": "bun-rack-s",
+   "x": 18.55,
+   "y": 8.45
+  },
+  {
+   "key": "bakery-glass",
+   "x": 5.5,
+   "y": 4.5
+  },
+  {
+   "key": "tray-croissant",
+   "x": 3.9,
+   "y": 4.5,
+   "lift": 0.75
+  },
+  {
+   "key": "tray-buns",
+   "x": 4.9,
+   "y": 4.5,
+   "lift": 0.75
+  },
+  {
+   "key": "tray-toast",
+   "x": 5.9,
+   "y": 4.5,
+   "lift": 0.75
+  },
+  {
+   "key": "tray-sticks",
+   "x": 6.9,
+   "y": 4.5,
+   "lift": 0.75
+  },
+  {
+   "key": "plant",
+   "x": 9.0,
+   "y": 4.9
+  },
+  {
+   "key": "plant",
+   "x": 2.4,
+   "y": 4.9
+  },
+  {
+   "key": "bar-l",
+   "x": 10.5,
+   "y": 4.5
+  },
+  {
+   "key": "bar-m",
+   "x": 12.5,
+   "y": 4.5
+  },
+  {
+   "key": "bar-m",
+   "x": 15.5,
+   "y": 4.5
+  },
+  {
+   "key": "bar-r",
+   "x": 17.5,
+   "y": 4.5
+  },
+  {
+   "key": "till",
+   "x": 12.4,
+   "y": 4.45,
+   "lift": 1.05
+  },
+  {
+   "key": "coffee-machine",
+   "x": 14.4,
+   "y": 4.45,
+   "lift": 1.0
+  },
+  {
+   "key": "pastry-case",
+   "x": 15.9,
+   "y": 4.45,
+   "lift": 0.95
+  },
+  {
+   "key": "cup-coffee",
+   "x": 17.1,
+   "y": 4.45,
+   "lift": 1.25
+  },
+  {
+   "key": "cup-red",
+   "x": 17.5,
+   "y": 4.45,
+   "lift": 1.2
+  },
+  {
+   "key": "cup-blue",
+   "x": 17.9,
+   "y": 4.45,
+   "lift": 1.05
+  },
+  {
+   "key": "chair-right",
+   "x": 2.9,
+   "y": 0.6
+  },
+  {
+   "key": "wood-table",
+   "x": 3.6,
+   "y": 0.6
+  },
+  {
+   "key": "chair-left",
+   "x": 4.3,
+   "y": 0.6
+  },
+  {
+   "key": "plant",
+   "x": 5.6,
+   "y": 0.5
+  },
+  {
+   "key": "chair-right",
+   "x": 7.2,
+   "y": 0.6
+  },
+  {
+   "key": "wood-table",
+   "x": 7.9,
+   "y": 0.6
+  },
+  {
+   "key": "chair-left",
+   "x": 8.6,
+   "y": 0.6
+  },
+  {
+   "key": "plant",
+   "x": 10.4,
+   "y": 0.5
+  },
+  {
+   "key": "chair-right",
+   "x": 12.4,
+   "y": 0.6
+  },
+  {
+   "key": "wood-table",
+   "x": 13.1,
+   "y": 0.6
+  },
+  {
+   "key": "chair-left",
+   "x": 13.8,
+   "y": 0.6
+  },
+  {
+   "key": "plant",
+   "x": 15.0,
+   "y": 0.5
+  },
+  {
+   "key": "chair-right",
+   "x": 16.2,
+   "y": 0.6
+  },
+  {
+   "key": "wood-table",
+   "x": 16.9,
+   "y": 0.6
+  },
+  {
+   "key": "chair-left",
+   "x": 17.6,
+   "y": 0.6
+  },
+  {
+   "key": "big-plant",
+   "x": 18.6,
+   "y": 0.5
+  }
+ ],
+ "notes": [
+  {
+   "text": "甜點櫃・選購與報價",
+   "x": 5.5,
+   "y": 6.75
+  },
+  {
+   "text": "櫃台・點餐",
+   "x": 12.0,
+   "y": 10.95
+  },
+  {
+   "text": "取餐區・付款後才交付",
+   "x": 16.8,
+   "y": 10.95
+  }
+ ],
+ "signs": [
+  {
+   "text": "現烤麵包",
+   "x": 4.6,
+   "y": 10.7,
+   "depth": 8.45
+  }
+ ]
 }

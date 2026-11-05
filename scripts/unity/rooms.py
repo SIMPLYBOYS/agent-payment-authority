@@ -73,6 +73,18 @@ def build(spec, pack):
     for r in range(6, B, 2):
         for c in range(0, W, 2):
             im.alpha_composite(fl, (c * 16, r * 16))
+    # floor zones (a kitchen's tiles, a seating area's): "zones" [{"floor": [x, y], "rect": [x0, y0, x1, y1]}] in
+    # room tiles, y up; the zone's tile is laid on the room's own 32 px grid, so its pattern lines up across zones
+    for z in spec.get("zones", []):
+        zx, zy = z["floor"]
+        zt = floors.crop((zx, zy, zx + 32, zy + 32))
+        x0, y0, x1, y1 = z["rect"]
+        box = (int(x0 * 32), int((h - 0.5 - y1) * 32), int(x1 * 32), int((h - 0.5 - y0) * 32))
+        tiled = Image.new("RGBA", im.size)
+        for yy in range(96, B * 16, 32):
+            for xx in range(0, W * 16, 32):
+                tiled.alpha_composite(zt, (xx, yy))
+        im.paste(tiled.crop(box), box[:2])
     # the top border; the back wall: the set's face and baseboard, under the wallpaper when there is one
     put(0, 0, t(32, 64)); put(R, 0, t(208, 64))
     for c in range(1, R): put(c, 0, t(16, 0))
