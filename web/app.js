@@ -68,8 +68,9 @@ let chosenPo = null;
 let replayPos = null;
 let sent = null;
 let lastReport = null;
-let catalog = null;   // the shop's /catalog (fixture prices), read once, no token
-let catalogAt = "";   // the browser's time of that read
+let catalog = null;   // the shop's catalogs read so far (fixture prices), their products merged; no token
+let catalogAt = "";   // the browser's time of the last read
+const catalogsRead = new Set(); // each catalog path read once: /catalog, and a venue's when its purchase shows (readCatalog)
 let shownCard = "";   // what the card and the evidence panel last showed
 let shownEvidence = "";
 // D2 (16.4, 16.5): target is what the shop was last given in this
@@ -320,6 +321,7 @@ function renderPanels() {
   const snap = state.snapshot;
   const rp = mode === "replay" ? replayPos : null;
   const view = snap ? (rp ? A.stepView(snap, rp.n) : snap) : null;
+  for (const p of (snap && snap.task && snap.task.purchases) || []) readCatalog(A.catalogPathOf(p.resource_url));
   const ctx = { mode: rp ? "replay" : "live", n: rp && rp.n, m: rp && rp.m, catalog, catalogAt, history, live,
     trace: live && liveTrace && liveTrace.gen === state.gen ? liveTrace.reply : null, traceFailed: !!(live && liveTrace && liveTrace.gen === state.gen && liveTrace.failed) };
   const c = A.card(view, rp ? null : chosenPo, ctx);
@@ -816,13 +818,20 @@ async function queryMode() {
 }
 queryMode();
 
-// The shop's catalog: fixture prices, informational, read once without a
-// token; shown with the time of this read, never as the bound quote.
-fetch("/catalog", { cache: "no-store", credentials: "omit" }).then((r) => (r.ok ? r.json() : null)).then((c) => {
-  catalog = c;
-  catalogAt = c ? new Date().toTimeString().slice(0, 8) : "";
-  renderPanels();
-}).catch(() => {});
+// The shop's catalogs: fixture prices, informational, each read once without
+// a token; shown with the time of the read, never as the bound quote. A
+// venue's (/scenes/<scene>/catalog) is read when a purchase of it shows.
+function readCatalog(path) {
+  if (catalogsRead.has(path)) return;
+  catalogsRead.add(path);
+  fetch(path, { cache: "no-store", credentials: "omit" }).then((r) => (r.ok ? r.json() : null)).then((c) => {
+    if (!c || !Array.isArray(c.products)) return;
+    catalog = { ...c, products: [...(catalog ? catalog.products : []), ...c.products] };
+    catalogAt = new Date().toTimeString().slice(0, 8);
+    renderPanels();
+  }).catch(() => {});
+}
+readCatalog("/catalog");
 
 forget();
 // The scene at whole multiples of its pixels, zoom on demand (pixelscale.js).

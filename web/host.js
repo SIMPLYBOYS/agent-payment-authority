@@ -165,8 +165,14 @@ function chainOf(s) {
   // By the step on screen's own events, as the evidence lines (A.recorded): a paced step does not read the chain ahead of itself.
   const pays = snap && (snap.task.purchases || []).some((p) => p.payment && ((p.payment.reserve_tx && A.recorded(snap, p.purchase_order_id, "BUDGET_RESERVED"))
     || (p.payment.settle_tx && A.recorded(snap, p.purchase_order_id, "PAYMENT_SETTLED"))));
-  if (!pays) return null;
   const c = chains.get(s.task);
+  // Before a payment shows (B2, 11/5: B, denied before any, showed no identity): the Agent's identity only, read once;
+  // the payments wait for their step.
+  if (!pays) {
+    if (!snap || !Object.hasOwn(A.EXPLORER_NFT, snap.task.payment_capability)) return null; // a chain that shows no identity (E6 A)
+    if (!c || c.gen !== creds.gen || (!c.data && !c.busy && Date.now() - c.at > CHAIN_MS)) readChain(s.consumer, s.task);
+    return c && c.gen === creds.gen && c.data && c.data.agent ? { agent: c.data.agent } : null;
+  }
   // New credentials (a Host started again) read again at once (review).
   if (!c || c.gen !== creds.gen || (Date.now() - c.at > CHAIN_MS && !c.busy)) readChain(s.consumer, s.task);
   return c && c.gen === creds.gen ? c.data : null;

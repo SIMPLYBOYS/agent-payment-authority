@@ -685,6 +685,20 @@ function catalogFor(catalog, p) {
   return list.find((x) => x && p && x.resource_url === p.resource_url && x.price) || null;
 }
 
+// catalogPathOf: the catalog that lists a resource (merchant.CatalogPath): a venue's /scenes/<scene>/catalog for its
+// /scenes/<scene>/<item>, else the data shop's /catalog (B2: the page read only that one, so a venue's said 目錄未取得).
+export function catalogPathOf(url) {
+  const m = typeof url === "string" && /\/scenes\/([a-z0-9-]{1,32})\/[^/?#]+(?:[?#].*)?$/.exec(url);
+  return m ? "/scenes/" + m[1] + "/catalog" : "/catalog";
+}
+
+// catalogPrice: a catalog entry's price as shown, and its FX; a venue's lists the test token only (no fiat, no FX).
+function catalogPrice(cat) {
+  const pr = cat.price, fiat = typeof pr.fiat_amount === "string" && pr.fiat_amount !== "";
+  return { price: str(pr.asset_display) + (fiat ? "；" + str(pr.fiat_amount) + " " + str(pr.fiat_currency) : ""),
+    fx: fiat ? str(pr.fx_rate) + "（" + str(pr.fx_source) + "）" : "目錄沒有標示（只有測試幣價格）" };
+}
+
 // P2 (docs/commercial-p2-host.md 5): a purchase's payment as the page
 // says it, from the Store's payment view (status, state, code).
 const NOT_PAID = { RESERVE_FAILED: "預算預留失敗，沒有花錢", NOT_PAID_EXPIRED: "已過付款期限，沒有花錢", TASK_ENDED: "task 已結束，沒有花錢" };
@@ -831,7 +845,7 @@ export function card(view, chosen, ctx) {
   const rows = [];
   if (p) {
     rows.push(["402 綁定金額", amount(p.amount) + "（基本單位，" + str(p.asset_id) + "）", "Store"]);
-    rows.push(["目錄標示", cat ? str(cat.price.asset_display) + "；" + str(cat.price.fiat_amount) + " " + str(cat.price.fiat_currency) + "（FX " + str(cat.price.fx_rate) + "，" + str(cat.price.fx_source) + "）" : "目錄未取得",
+    rows.push(["目錄標示", cat ? catalogPrice(cat).price + (cat.price.fiat_amount ? "（FX " + str(cat.price.fx_rate) + "，" + str(cat.price.fx_source) + "）" : "") : "目錄未取得",
       "商店 HTTP /catalog（fixture，不綁定此請購" + (ctx.catalogAt ? "；瀏覽器讀取 " + ctx.catalogAt : "") + "）"]);
     if (p.decision) {
       rows.push(["裁決", str(p.decision.policy_verdict), live ? "Store" : "Store 事件（回放）"]);
@@ -926,8 +940,8 @@ export function evidence(snapshot, po, ctx) {
       ["資源", str(p.http_method) + " " + str(p.resource_url), "Store"], ["amount（基本單位）", amount(p.amount), "Store"],
       ["asset", str(p.asset_id), "Store"], ["network（chain）", str(p.chain_id), "Store"], ["payTo", str(p.pay_to), "Store"],
       ["payment_requirement_hash", str(p.payment_requirement_hash), "Store"],
-      ["目錄價格", cat ? str(cat.price.asset_display) + "；" + str(cat.price.fiat_amount) + " " + str(cat.price.fiat_currency) : "目錄未取得", "商店 HTTP /catalog" + (ctx.catalogAt ? "（瀏覽器讀取 " + ctx.catalogAt + "）" : "")],
-      ["FX", cat ? str(cat.price.fx_rate) + "（" + str(cat.price.fx_source) + "）" : "目錄未取得", "商店 HTTP /catalog"],
+      ["目錄價格", cat ? catalogPrice(cat).price : "目錄未取得", "商店 HTTP /catalog" + (ctx.catalogAt ? "（瀏覽器讀取 " + ctx.catalogAt + "）" : "")],
+      ["FX", cat ? catalogPrice(cat).fx : "目錄未取得", "商店 HTTP /catalog"],
       ["完整 402 內容", "未提供（API 未開放；D4 暫緩）", "—"],
     ] : [] },
     { title: "請購", note: pay(t) ? str(t.contract_version) + "：intent_hash 一起涵蓋業務意圖與付款綁定（EIP-3009：收款人、金額、網路、資產、nonce、時間窗；agent-payment-authority/pay/" + (t.contract_version === V2 ? "v2" : "v1") + "）" + (paysOn(t.payment_capability) ? "；付款與交付見付款列。" : "；不會付款。")

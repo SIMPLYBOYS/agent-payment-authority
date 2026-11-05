@@ -296,6 +296,25 @@ test("D1 evidence: the full record in a replay says so and marks what is not rea
   assert.ok(!/付款成功|已付款|通過|已驗證/.test(JSON.stringify(c) + JSON.stringify(e)));
 });
 
+// B2 (11/5): a venue's purchase is listed in its own catalog, not the data shop's /catalog the page used to read alone
+// (every town purchase said 目錄未取得); a venue's price is in the test token only, so no empty fiat or FX is shown.
+test("a venue purchase finds its price in the venue's catalog, without fiat or FX", () => {
+  assert.equal(A.catalogPathOf("http://127.0.0.1:8402/scenes/books/seoul-guide"), "/scenes/books/catalog");
+  assert.equal(A.catalogPathOf("http://127.0.0.1:8402/scenes/cafe/lunch-set?size=1"), "/scenes/cafe/catalog");
+  assert.equal(A.catalogPathOf("http://127.0.0.1:1/resources/kr-market?edition=1"), "/catalog", "the data shop's");
+  assert.equal(A.catalogPathOf(undefined), "/catalog");
+  const url = "http://127.0.0.1:8402/scenes/books/seoul-guide";
+  const evs = [ev(1, "TASK_STARTED"), ev(2, "PURCHASE_PROPOSED", { purchase_order_id: "po-1", intent_hash: "sha256:i-po-1" })];
+  const snap = { task: { ...snapshot("task-a", evs, [P("po-1", { resource_url: url })]).task, status: "running" }, events: evs };
+  const catalog = { products: [{ resource_url: url, price: { asset_amount: "500000", asset_display: "0.50 test USDC" } }] };
+  const quote = A.evidence(snap, "po-1", { mode: "live", catalog, catalogAt: "16:50:51" }).sections.find((x) => x.title === "報價").rows;
+  const row = (k) => quote.find(([name]) => name === k);
+  assert.deepEqual(row("目錄價格").slice(0, 2), ["目錄價格", "0.50 test USDC"]);
+  assert.equal(row("FX")[1], "目錄沒有標示（只有測試幣價格）");
+  assert.equal(A.card(snap, null, { mode: "live", catalog }).rows.find(([k]) => k === "目錄標示")[1], "0.50 test USDC");
+  assert.equal(A.evidence(snap, "po-1", { mode: "live", catalog: null }).sections.find((x) => x.title === "報價").rows.find(([k]) => k === "目錄價格")[1], "目錄未取得");
+});
+
 test("D1 project derives the status by the Store's rule: a Deny stays after a cancel", () => {
   const evs = [ev(1, "TASK_STARTED"), ev(2, "PURCHASE_PROPOSED", { purchase_order_id: "po-1" }), decided(3, "Deny", "INSUFFICIENT_BUDGET", "not_requested"), ev(4, "TASK_CANCELLED")];
   assert.deepEqual(A.project(evs), { status: "denied", reason: "INSUFFICIENT_BUDGET" });

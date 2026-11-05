@@ -339,6 +339,9 @@ test("the receipt card: only once delivered with a receipt; two transactions, no
   const trust = A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], withAddr), {}, { ...chain, agent: REF });
   assert.deepEqual([trust[0].label, trust[0].text, trust[0].note], ["Agent 身分", "ERC-8004 #10569", "ERC-8004・平台代為註冊"]);
   assert.equal(trust[1].label, "1 委託");
+  // B2 (11/5): before any payment (B's beer, denied) the host page passes the identity alone (chainOf): shown first all the same.
+  const denied = A.showEvidence(snap(base("Deny", "CREDENTIAL_CLAIM_UNMET"), withAddr), {}, { agent: REF });
+  assert.deepEqual([denied[0].label, denied[0].text], ["Agent 身分", "ERC-8004 #10569"]);
   assert.equal(A.agentLink("base_sepolia", "eip155:1/erc721:0x8004A818BFB912233c491871b3d84c89A494BD9e/1"), null, "another chain's");
   assert.equal(A.agentLink("base_sepolia", "eip155:84532:0x8004A818BFB912233c491871b3d84c89A494BD9e#1"), null);
   assert.equal(A.agentLink("base_sepolia", undefined), null);
