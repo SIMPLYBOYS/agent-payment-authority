@@ -149,12 +149,20 @@ LIMEZU_DIR=/Users/mac/Documents/OpenSourceProjects/pixel-office/limezu:var/limez
   - 飯店的 HOTEL 立牌原本在人行道上，會遮住門，改掛到飯店正面的入口上方。
   - 郵局門口旁的路燈拿掉（旁邊還有一盞），公車亭移到郵局門口右邊，另一盞路燈往右移。
   - 兩條路人的路線從飯店門口正前方經過，往下移到人行道靠街的一側。
-- 兩間的門是外觀圖的一部分，素材包裡沒有對應的開門動畫，所以沒有會開的門；進店的轉場照常有。
+- 會開的門（Aaron 11/6 試玩：「經過郵局，門沒有打開」）：
+  - 一開始以為素材包裡沒有對應的動畫門。後來把外觀素材包裡每一扇動畫門的第一格，拿去和兩棟的外觀逐像素比對，找到完全吻合的門：
+    - 郵局：`Post_Office_Door_1`（左邊那組玻璃門）、`Post_Office_Door_2`（右邊那組）。
+    - 飯店：`Metropolis_Building_2_Door_1`（入口的青綠色雙開門）。
+  - Unity 一個場域只有一扇會動的門。郵局用左邊那組（`x-door-post`），客人進出的門口移到它正前方（x 2.8），右邊那組不動。飯店用 `x-door-hotel`。
+  - HOTEL 招牌往上移到 4.1，不和門的動畫範圍重疊。
+  - 合成檢查：門關著時和外觀一模一樣（差 0），也沒有半透明像素疊在半透明像素上（LayoutTests 的規則）。
+- 素材包裡其實有飯店的行李車（外觀素材包的 `Luggage_Trolley`），但它有 2 × 3 格大，店內的空位都會碰到客人的路線或擋住人物，先不放。
 
 **字型**：`font-subset.py` 補了 18 個字（代單國型城寄局房早板看碼秤窗裹訂郵飯），共 329 字。fontTools 裝在暫存的 venv（Aaron 11/6 同意下載）。
 
 **測試**（`scripts/unity/unity.sh test`）：
-- EditMode 24、PlayMode 54，全部通過。
+- EditMode 24、PlayMode 55，全部通過。
+- 新增 `EveryDoorOpens`：五個場域都有會開的門；遊戲模式下客人走到郵局門口，門會打開；路人走進每個場域時，門都會打開。
 - 「店內人物不擋 A、B」與房間清單的測試，都加上了 `post`、`hotel`。
 - 客人路線不碰家具的測試涵蓋六個房間：books、cafe、data、hotel、mart、post。
 

@@ -408,6 +408,31 @@ public class TownTests
         Assert.Greater(shut + after, 3.5f, "after a while in there");
     }
 
+    // Every venue's door opens (Aaron 11/6: walking past the post office, its door did not): for the person's
+    // customer on its step, and wide for a passer-by going in.
+    [UnityTest]
+    public IEnumerator EveryDoorOpens()
+    {
+        var withDoors = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text).venues
+            .Where(v => v.doorway != null && !string.IsNullOrEmpty(v.doorway.key)).Select(v => v.layout).ToList();
+        CollectionAssert.AreEquivalent(new[] { "books", "cafe", "mart", "post", "hotel" }, withDoors, "every venue has a door that opens");
+        bridge.View("{\"mode\":\"town\"}"); // the game walks the town, as the page's game mode shows it
+        yield return Settle();
+        bridge.Play("{\"consumer\":\"consumer-a\"}");
+        Assert.AreEqual(0, town.DoorFrame("post"), "the post office's door shut");
+        Assert.IsTrue(town.GoTo(town.DoorAt("post")));
+        float took = 0f;
+        yield return Until(() => town.RouteLeft == 0, 20f, t => took = t);
+        yield return Until(() => town.DoorFrame("post") == 7, 2f, t => took = t);
+        Assert.AreEqual(7, town.DoorFrame("post"), "it opens for the customer on its step");
+        foreach (var l in withDoors)
+        {
+            town.AddWalker(Visit("x-walk-11", DoorOf(l)));
+            yield return Until(() => town.DoorFrame(l) == 7, 2f, t => took = t);
+            Assert.AreEqual(7, town.DoorFrame(l), l + "'s door opens wide for a passer-by going in");
+        }
+    }
+
     [UnityTest]
     public IEnumerator NoOneGoesInOrComesOutOverAAndB()
     {

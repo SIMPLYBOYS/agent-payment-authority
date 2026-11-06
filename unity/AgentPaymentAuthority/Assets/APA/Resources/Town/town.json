@@ -269,10 +269,10 @@
       {"key": "x-mart-ac", "x": 17, "y": 3.5},
       {"key": "x-mart-sign", "x": 10, "y": 3.5},
       {"key": "x-mart-door-2", "x": 13, "y": -0.5}]},
-    {"layout": "post", "number": "05", "name": "城中郵局", "x": 48, "y": 28, "pill": 10.5, "door": {"x": 4.0, "y": -0.9}, "exterior": [
+    {"layout": "post", "number": "05", "name": "城中郵局", "x": 48, "y": 28, "pill": 10.5, "door": {"x": 2.8, "y": -0.9}, "doorway": {"key": "x-door-post", "x": 1.8125, "y": 0, "frames": 14}, "exterior": [
       {"key": "x-post-1", "x": 0, "y": 0}]},
-    {"layout": "hotel", "number": "04", "name": "城中飯店", "x": 56.5, "y": 28, "pill": 10.5, "door": {"x": 8.5, "y": -0.9}, "exterior": [
+    {"layout": "hotel", "number": "04", "name": "城中飯店", "x": 56.5, "y": 28, "pill": 10.5, "door": {"x": 8.5, "y": -0.9}, "doorway": {"key": "x-door-hotel", "x": 7.0, "y": 1.0, "frames": 14}, "exterior": [
       {"key": "x-hotel", "x": 0, "y": 0},
-      {"key": "x-hotel-sign", "x": 4.0, "y": 3.6}]}
+      {"key": "x-hotel-sign", "x": 4.0, "y": 4.1}]}
   ]
 }

@@ -307,3 +307,7 @@ hotel-frame	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/22_Museu
 hotel-frame-s	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/22_Museum_32x32.png	130,624,28,40
 hotel-rug	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/1_Generic_32x32.png	292,136,120,80
 hotel-phone	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/1_Generic_32x32.png	334,1266,32,26
+# Their doors (Aaron 11/6: the post office's door did not open), 14 frames each: the post office's left glass pair
+# (its right pair stays shut), the hotel's entrance; each shut frame is the front exactly (LayoutTests).
+x-door-post	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Animated_sheets_32x32/Post_Office_Door_1_32x32.png	-
+x-door-hotel	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Animated_sheets_32x32/Metropolis_Building_2_Door_1_32x32.png	-
