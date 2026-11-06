@@ -46,7 +46,7 @@
 |---|---|---|---|
 | 0 | Claude Code | 開始前一刻唯讀再查：委託的剩餘時間、錢包餘額、8402／8403 空著 | — |
 | 1 | 你 | `sh scripts/demo/demo-testnet.sh live b1 town`（不設 `APA_FACILITATOR`，就是 `apa-facilitator`）：依序輸入 sudo 的密碼、relayer 的密語、Signer 的密語；接著出現 `present: facilitator：請輸入商店金鑰的密語`，在 `apa-facilitator shop key passphrase:` 輸入商店金鑰的密語 | 開場前檢查的結果、`e1-evidence: start recorded …` 那一行（應該寫 `settled by the facilitator http://127.0.0.1:8403`） |
-| 2 | 你 | 主持人頁按「開啟展示視窗」。這個按鈕只在簡報模式外出現：先開好展示視窗，再進簡報模式 | — |
+| 2 | 你 | 主持人頁按「開啟展示視窗」。這個按鈕只在簡報模式外出現：先開好展示視窗，再進簡報模式（場景移到展示視窗播放，主持人頁的簡報模式中間只寫「場景在展示視窗播放；這一頁只用來操作。」，Aaron 11/6） | — |
 | 3～5 | 你 | 同 B1 的 2～4，三個場域各按一次「一起開始」 | 每個場域兩位的最後狀態 |
 | 6 | 你 | 付款之後看展示視窗：「為什麼可信」第一項，以及收據卡上的「Agent 身分 ERC-8004 #10573」（家長）、「#10574」（孩子），點了會開 Basescan | 看到或沒看到 |
 | 7 | 你 | **先不要停**，告訴我做完了 | — |

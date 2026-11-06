@@ -863,6 +863,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
   const on = presenting && v.hasHost;
   document.body.dataset.present = on ? "on" : "off";
   $("present").hidden = !on;
+  $("present-elsewhere").hidden = sceneUnity.target !== relay; // the scene plays in the audience window: this page only steers
   // The approval panel stacks under the venues while presenting, and goes back to its side after.
   const ap = $("approval"), right = document.querySelector(".present-right"), side = document.querySelector(".side");
   if (on && ap.parentElement !== right) right.append(ap);
