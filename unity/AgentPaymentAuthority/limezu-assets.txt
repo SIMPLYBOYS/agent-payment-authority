@@ -321,3 +321,8 @@ x-fire-truck-left	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/V
 # shutting), and its stop's sign on the south pavement (the other stops at the shelter by the post office).
 x-bus-red-doors	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Buses_32x32/Buses_32x32_1.png	32,452,4480,124
 x-bus-stop-sign	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Bus_Stop_Sign_1.png	-
+# Newer cars (Aaron 11/6: 好像少了這種): a taxi, a white car and a white sports car, six wheel frames each, cut
+# frame by frame (the taxi's 192 px apart, the others' 160).
+x-taxi	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_3_32x32_4.png	20,304,172,80;212,304,172,80;404,304,172,80;596,304,172,80;788,304,172,80;980,304,172,80
+x-sports-white	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_5_32x32_1.png	4,242,156,78;164,242,156,78;324,242,156,78;484,242,156,78;644,242,156,78;804,242,156,78
+x-car-white-left	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_4_32x32_1.png	1924,246,152,74;2084,246,152,74;2244,246,152,74;2404,246,152,74;2564,246,152,74;2724,246,152,74
