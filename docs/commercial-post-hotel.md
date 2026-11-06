@@ -156,6 +156,7 @@ LIMEZU_DIR=/Users/mac/Documents/OpenSourceProjects/pixel-office/limezu:var/limez
   - Unity 一個場域只有一扇會動的門。郵局用左邊那組（`x-door-post`），客人進出的門口移到它正前方（x 2.8），右邊那組不動。飯店用 `x-door-hotel`。
   - HOTEL 招牌往上移到 4.1，不和門的動畫範圍重疊。
   - 合成檢查：門關著時和外觀一模一樣（差 0），也沒有半透明像素疊在半透明像素上（LayoutTests 的規則）。
+- 路人進出（Aaron 11/6：「郵局與 hotel 並不會有人進出」）：城鎮的路人只有路線經過某個門口時才會進店。從書店那頭走來的路人（`x-walk-02`）多進一次郵局；在飯店前來回走的路人（`x-walk-05`）每趟都進飯店。`TownTests.APasserByGoesInAndComesOut` 改成五個場域都要有路人進出。
 - 素材包裡其實有飯店的行李車（外觀素材包的 `Luggage_Trolley`），但它有 2 × 3 格大，店內的空位都會碰到客人的路線或擋住人物，先不放。
 
 **字型**：`font-subset.py` 補了 18 個字（代單國型城寄局房早板看碼秤窗裹訂郵飯），共 329 字。fontTools 裝在暫存的 venv（Aaron 11/6 同意下載）。

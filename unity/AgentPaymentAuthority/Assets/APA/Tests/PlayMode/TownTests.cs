@@ -392,7 +392,9 @@ public class TownTests
     [UnityTest]
     public IEnumerator APasserByGoesInAndComesOut()
     {
-        Assert.IsTrue(JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text).walkers.Count(w => w.path.Any(p => new[] { "books", "cafe", "mart" }.Any(l => (p - DoorOf(l)).sqrMagnitude < 0.01f))) >= 3, "the town's own passers-by visit the shops");
+        var own = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text).walkers;
+        foreach (var l in new[] { "books", "cafe", "mart", "post", "hotel" }) // Aaron 11/6: no one went in or out of the post office or the hotel
+            Assert.IsTrue(own.Any(w => w.path.Any(p => (p - DoorOf(l)).sqrMagnitude < 0.01f)), "the town's own passers-by visit " + l);
         town.AddWalker(Visit("x-walk-11", DoorOf("mart")));
         float took = 0f, after = 0f;
         Assert.AreEqual(0, town.DoorFrame("mart"), "the mart's door shut");
