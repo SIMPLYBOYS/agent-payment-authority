@@ -433,6 +433,46 @@ public class TownTests
         }
     }
 
+    // Aaron 11/6: the buses call at their stops: each halts with its centre at its stop for its seconds (the red one's
+    // doors opening, open, shutting), the cars of its lane never on it, and it goes on. Faster than real time.
+    [UnityTest]
+    public IEnumerator TheBusesCallAtTheirStops()
+    {
+        var buses = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text).traffic.cars.Where(c => c.stopFor > 0f).ToList();
+        CollectionAssert.AreEquivalent(new[] { "x-bus-red", "x-bus-blue-left" }, buses.Select(b => b.key));
+        float scale = Time.timeScale;
+        Time.timeScale = 4f;
+        try
+        {
+            foreach (var b in buses)
+            {
+                (string key, float x, float halt, int door) Now() => town.Buses.First(x => x.key == b.key);
+                float took = 0f;
+                yield return Until(() => Now().halt > 0f, 120f, t => took = t);
+                Assert.Greater(Now().halt, 0f, b.key + " halts at its stop");
+                Assert.AreEqual(b.stopAt, Now().x, 0.02f, b.key + " with its centre at its stop");
+                float t0 = Time.time;
+                var doors = new HashSet<int>();
+                while (Now().halt > 0f && Time.time - t0 < b.stopFor + 2f)
+                {
+                    doors.Add(Now().door);
+                    var lane = town.Cars.Where(c => c.y == b.y).ToList();
+                    foreach (var p in lane)
+                        foreach (var q in lane)
+                            if (p.x < q.x) Assert.GreaterOrEqual(q.x - q.half - (p.x + p.half), 0f, "two on each other at " + p.x + ", " + q.x + " while " + b.key + " waits");
+                    yield return null;
+                }
+                Assert.GreaterOrEqual(Time.time - t0, b.stopFor - 0.2f, b.key + " stays its seconds");
+                int open = b.doorFrames / 2;
+                if (!string.IsNullOrEmpty(b.doors))
+                    Assert.IsTrue(doors.Any(d => d >= 0 && d < open) && doors.Contains(open) && doors.Any(d => d > open), b.key + "'s doors open, stay open and shut: " + string.Join(",", doors));
+                yield return Until(() => Mathf.Abs(Now().x - b.stopAt) > 1f, 10f, t => took = t);
+                Assert.Greater(Mathf.Abs(Now().x - b.stopAt), 1f, b.key + " goes on");
+            }
+        }
+        finally { Time.timeScale = scale; }
+    }
+
     [UnityTest]
     public IEnumerator NoOneGoesInOrComesOutOverAAndB()
     {

@@ -138,6 +138,7 @@
     {"key": "x-bollard", "x": 28.4, "y": 16.25},
     {"key": "x-bollard", "x": 35.6, "y": 16.25},
     {"key": "x-bus-stop", "x": 55.8, "y": 24.15},
+    {"key": "x-bus-stop-sign", "x": 45.0, "y": 17.6},
     {"key": "x-hardware", "x": 8, "y": 28},
     {"key": "x-terraced-1", "x": -2, "y": 28},
     {"key": "x-billboard-5", "x": 7, "y": 5.6},
@@ -197,6 +198,10 @@
     {"key": "x-car-green", "x": 56, "y": 21.3, "speed": -2.6, "frames": 6},
     {"key": "x-car-grey", "x": 86, "y": 19.2, "speed": 3, "frames": 6},
     {"key": "x-car-blue-left", "x": 100, "y": 21.3, "speed": -2.8, "frames": 6},
+      {"key": "x-bus-red", "x": 24, "y": 19.2, "speed": 2.4, "frames": 6, "passes": true, "stopAt": 44, "stopFor": 6, "doors": "x-bus-red-doors", "doorFrames": 20},
+      {"key": "x-trash-truck", "x": 65, "y": 19.2, "speed": 2.2, "frames": 6, "passes": true},
+      {"key": "x-bus-blue-left", "x": 40, "y": 21.3, "speed": -2.4, "frames": 6, "passes": true, "stopAt": 55.8, "stopFor": 5},
+      {"key": "x-fire-truck-left", "x": 88, "y": 21.3, "speed": -3.2, "frames": 6, "passes": true},
     {"key": "x-car-grey-up", "x": 78, "y": 2, "speed": 2.6, "frames": 6, "vertical": true},
     {"key": "x-car-green-down", "x": 76, "y": 40, "speed": -2.8, "frames": 6, "vertical": true}]},
   "inside": [

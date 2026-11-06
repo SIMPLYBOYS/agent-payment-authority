@@ -61,8 +61,11 @@ namespace APA
         // north-south cars go over it on their red; a walker crosses the north-south road there on their green.
         [System.Serializable] public class Traffic { public float from, to, bottom, top; public float[] cycle = new float[0]; public string[] lights = new string[0]; public Car[] cars = new Car[0]; public Area junction = new Area(); public Visit visit = new Visit(); }
         // frames: its sheet's driving frames (the wheels turn, Aaron 10/28), played as it goes. vertical: along the
-        // north-south road, its lane at x, from y, at speed (+ north, - south).
-        [System.Serializable] public class Car { public string key; public float x, y, speed; public int frames; public bool vertical; }
+        // north-south road, its lane at x, from y, at speed (+ north, - south). passes: it drives by the gas station
+        // (Aaron 11/6: buses and trucks among the cars; they have no nose pieces to pull in with).
+        // stopAt (Aaron 11/6: the buses call at their stops): it halts there, its centre at that x (y for a vertical one),
+        // stopFor seconds, once each time round; doors: its pieces for it (doorFrames of them: opening, open, shutting).
+        [System.Serializable] public class Car { public string key, doors; public float x, y, speed, stopAt, stopFor; public int frames, doorFrames; public bool vertical, passes; }
         // Visit (town v2 V5, Aaron 11/2: the road's cars call at the gas station): of the cars of the lane at y lane
         // going west, every so many that come by x from while no one is in pull in, nose up, to the stop at x at,
         // y; stay; and pull out, nose down, back into the lane at x to once it is clear. The noses are each car
@@ -481,20 +484,26 @@ namespace APA
         }
 
         // ---- traffic ----
-        class CarState { public Town.Car c; public SpriteRenderer r; public Sprite[] frames; public float x, half, rolled; public int visit; public float vy, wait; public bool called, served; public Sprite noseUp, noseDown; } // x: its centre along its road (y for a vertical one); visit: 0 on the road, 1 pulling in, 2 at the stop, 3 pulling out
+        class CarState { public Town.Car c; public SpriteRenderer r; public Sprite[] frames; public float x, half, rolled; public int visit; public float vy, wait; public bool called, served; public Sprite noseUp, noseDown; public Sprite[] doors; public float halt; public bool halted; } // halt: seconds left at its stop; halted: this time round. x: its centre along its road (y for a vertical one); visit: 0 on the road, 1 pulling in, 2 at the stop, 3 pulling out
         readonly List<CarState> cars = new List<CarState>();
         readonly List<SpriteRenderer> signals = new List<SpriteRenderer>();
         Sprite[] lightSprites = new Sprite[0];
         static readonly string[] LightNames = { "green", "amber", "red" };
         const float Gap = 0.8f, Line = 0.3f, WheelFrames = 4f; // between cars; the stop line before the crossing; driving frames a tile
         float roadFrom, roadTo; // where the ground ends: a car goes round there, a half car past it (review of 54435f5: a wide view shows -12.7..77)
+        // A lane is a ring (Aaron 11/6: buses among the cars): round past the longest one's half, every car jumps
+        // the same length, so the gaps hold; and the one just round is ahead of the one about to go.
+        float edgeX, edgeY;
+        float RingLength(bool vertical) => vertical ? roadTop - roadBottom + 2f * edgeY : roadTo - roadFrom + 2f * edgeX;
         public string Light => LightNames[LightState(out _)]; // tests
         readonly List<SpriteRenderer> crossSignals = new List<SpriteRenderer>();
         const float CrossAmber = 2f;
         // CrossState: the north-south cars' light: green on the east-west red but for its last seconds, amber then; else red.
         int CrossState() { int st = LightState(out var left); return st != 2 ? 2 : left > CrossAmber ? 0 : 1; }
         public string CrossLight => LightNames[CrossState()]; // tests
-        public IEnumerable<(float x, float half, float y, float speed, int frame)> Cars { get { foreach (var c in cars) if (!c.c.vertical && c.visit == 0) yield return (c.x, c.half, c.c.y, c.c.speed, System.Array.IndexOf(c.frames, c.r.sprite)); } } // tests: the east-west ones on the road
+        public IEnumerable<(float x, float half, float y, float speed, int frame)> Cars { get { foreach (var c in cars) if (!c.c.vertical && c.visit == 0) yield return (c.x, c.half, c.c.y, c.c.speed, Wheel(c)); } } // tests: the east-west ones on the road, frame its wheels
+        public IEnumerable<(string key, float x, float halt, int door)> Buses { get { foreach (var c in cars) if (c.c.stopFor > 0f) yield return (c.c.key, c.x, c.halt, c.doors != null ? System.Array.IndexOf(c.doors, c.r.sprite) : -1); } } // tests
+        static int Wheel(CarState c) => (int)(c.rolled * WheelFrames) % c.frames.Length;
         public IEnumerable<(string key, Vector2 at, int visit)> Visitors { get { foreach (var c in cars) if (c.visit != 0) yield return (c.c.key, new Vector2(c.x, c.vy), c.visit); } } // tests
         int arrivals; // lane cars come by the gas station: every so many call
         // The attendant: 0 at the post, 1 on the way to the car, 2 filling it, 3 on the way back.
@@ -562,8 +571,10 @@ namespace APA
                 var r = Piece(transform, new Town.Piece { key = car.key, x = car.x, y = car.y, frames = car.frames }, Order(car.y), new Vector2(0.5f, 0f));
                 if (r == null) continue;
                 var size = r.sprite.bounds.size;
-                cars.Add(new CarState { c = car, r = r, half = (car.vertical ? size.y : size.x) / 2f, frames = Frames(car.key, Mathf.Max(1, car.frames), new Vector2(0.5f, 0f)), noseUp = Sprite(car.key + "-tilt-up", new Vector2(0.5f, 0f)), noseDown = Sprite(car.key + "-tilt-down", new Vector2(0.5f, 0f)) });
+                cars.Add(new CarState { c = car, r = r, half = (car.vertical ? size.y : size.x) / 2f, frames = Frames(car.key, Mathf.Max(1, car.frames), new Vector2(0.5f, 0f)), noseUp = Sprite(car.key + "-tilt-up", new Vector2(0.5f, 0f)), noseDown = Sprite(car.key + "-tilt-down", new Vector2(0.5f, 0f)),
+                    doors = string.IsNullOrEmpty(car.doors) ? null : Frames(car.doors, Mathf.Max(1, car.doorFrames), new Vector2(0.5f, 0f)) });
                 cars[cars.Count - 1].x = car.vertical ? car.y + cars[cars.Count - 1].half : car.x;
+                if (car.vertical) edgeY = Mathf.Max(edgeY, cars[cars.Count - 1].half); else edgeX = Mathf.Max(edgeX, cars[cars.Count - 1].half);
             }
         }
 
@@ -643,8 +654,19 @@ namespace APA
             foreach (var c in cars)
             {
                 if (c.visit != 0) { Call(c, dt); continue; }
+                if (c.halt > 0f) { Halt(c, dt); continue; }
                 float dir = Mathf.Sign(c.c.speed), front = c.x + dir * c.half;
                 float room = float.MaxValue; // how far its front may go
+                float ahead = float.MaxValue; // to the one ahead in its lane, a gap short of it
+                foreach (var o in cars)
+                {
+                    if (o == c || o.c.vertical != c.c.vertical || (c.c.vertical ? o.c.x != c.c.x : o.c.y != c.c.y)) continue;
+                    if ((o.visit == 1 || o.visit == 2) && o.vy > o.c.y + 1.2f) continue; // off the lane, at the gas station; one pulling out is in the way
+                    // Ahead by its centre: so one caught alongside (review, Aaron 11/2: a car back from the gas station on another) waits till it is clear.
+                    float ox = (o.x - c.x) * dir > 0f ? o.x : o.x + dir * RingLength(c.c.vertical); // behind by its centre: ahead round the ring
+                    float back = (ox - dir * o.half - front) * dir;
+                    ahead = Mathf.Min(ahead, Mathf.Max(0f, back - Gap));
+                }
                 if (c.c.vertical)
                 {
                     // Over the junction only on the east-west red, with the time to be over it; never onto someone crossing.
@@ -662,34 +684,51 @@ namespace APA
                         float toJ = ((dir > 0 ? j.x - Line : j.x + j.w + Line) - front) * dir;
                         if (toJ > -0.01f && (toLine <= -0.01f || toJ < toLine)) { toLine = toJ; len = j.w; blocked = crossBusy; }
                     }
-                    // Amber: one that would be over before red goes on; red, or someone on it: it stops at the line.
-                    bool over = (toLine + len + 2f * c.half + Line) / Mathf.Abs(c.c.speed) < left;
-                    if (toLine > -0.01f && (blocked || st == 2 || st == 1 && !over)) room = Mathf.Max(0f, toLine); // -0.01: one stopped on the line is still before it (float error)
+                    // Green or amber: one that would be over before red goes on (a bus on at green's end is not, Aaron 11/6: the
+                    // walker waits for it); red, or someone on it: it stops at the line.
+                    // And only with room past it (a queue back from a bus at its stop): never left standing on it.
+                    float toRed = st == 0 ? left + t.cycle[1] : left, past = toLine + len + 2f * c.half + Line;
+                    bool over = past / Mathf.Abs(c.c.speed) < toRed && ahead >= past;
+                    if (toLine > -0.01f && (blocked || st == 2 || !over)) room = Mathf.Max(0f, toLine); // -0.01: one stopped on the line is still before it (float error)
                 }
-                foreach (var o in cars)
+                if (c.c.stopFor > 0f && !c.halted) // its stop ahead: it slows to it
                 {
-                    if (o == c || o.c.vertical != c.c.vertical || (c.c.vertical ? o.c.x != c.c.x : o.c.y != c.c.y)) continue;
-                    if ((o.visit == 1 || o.visit == 2) && o.vy > o.c.y + 1.2f) continue; // off the lane, at the gas station; one pulling out is in the way
-                    // Ahead by its centre: so one caught alongside (review, Aaron 11/2: a car back from the gas station on another) waits till it is clear.
-                    float back = (o.x - dir * o.half - front) * dir;
-                    if ((o.x - c.x) * dir > 0f) room = Mathf.Min(room, Mathf.Max(0f, back - Gap));
+                    float toStop = (c.c.stopAt - c.x) * dir;
+                    if (toStop > -0.01f) room = Mathf.Min(room, Mathf.Max(0f, toStop));
                 }
+                room = Mathf.Min(room, ahead);
                 float go = Mathf.Abs(c.c.speed) * dt * Mathf.Clamp(room / 1.5f, 0.3f, 1f); // slows to a stop
                 go = Mathf.Clamp(go, 0f, Mathf.Max(0f, room));
                 float was = c.x;
                 c.x += dir * go;
                 var v = t.visit;
-                if (v.from > 0f && !c.c.vertical && dir < 0f && c.c.y == v.lane && was > v.from && c.x <= v.from && ++arrivals % Mathf.Max(1, v.every) == 0 && !cars.Exists(o => o.visit != 0))
+                if (v.from > 0f && !c.c.vertical && !c.c.passes && dir < 0f && c.c.y == v.lane && was > v.from && c.x <= v.from && ++arrivals % Mathf.Max(1, v.every) == 0 && !cars.Exists(o => o.visit != 0))
                     { c.visit = 1; c.vy = v.lane; }
-                c.rolled = (c.rolled + go) % (c.frames.Length / WheelFrames); // round and round: a float that only grows would freeze the wheels after days
-                c.r.sprite = c.frames[(int)(c.rolled * WheelFrames) % c.frames.Length]; // the wheels turn as far as it goes: still when it stops
+                // As far as it went: a creep too small to move x (queued behind one stopped, far out on the map) turns no wheel.
+                c.rolled = (c.rolled + Mathf.Abs(c.x - was)) % (c.frames.Length / WheelFrames); // round and round: a float that only grows would freeze the wheels after days
+                c.r.sprite = c.frames[Wheel(c)]; // the wheels turn as far as it goes: still when it stops
+                if (c.c.stopFor > 0f && !c.halted && Mathf.Abs(c.c.stopAt - c.x) < 0.01f) c.halt = c.c.stopFor; // at its stop
                 float lo = c.c.vertical ? roadBottom : roadFrom, hi = c.c.vertical ? roadTop : roadTo;
-                if (dir > 0f && c.x > hi + c.half) c.x = lo - c.half;
-                if (dir < 0f && c.x < lo - c.half) c.x = hi + c.half;
+                float edge = c.c.vertical ? edgeY : edgeX;
+                if (dir > 0f && c.x > hi + edge) { c.x -= RingLength(c.c.vertical); c.halted = false; }
+                if (dir < 0f && c.x < lo - edge) { c.x += RingLength(c.c.vertical); c.halted = false; }
                 if (!c.c.vertical) { c.r.transform.localPosition = new Vector2(c.x, c.c.y); continue; }
                 c.r.transform.localPosition = new Vector2(c.c.x, c.x - c.half);
                 c.r.sortingOrder = Order(c.x - c.half);
             }
+        }
+
+        // Halt: a bus at its stop: its doors open in the first second, stay open, and shut in the last (none: it just
+        // waits there); then it drives on, its wheels as they were. The cars behind wait for it as for any car.
+        void Halt(CarState c, float dt)
+        {
+            c.halt -= dt;
+            if (c.halt <= 0f) { c.halt = 0f; c.halted = true; c.r.sprite = c.frames[Wheel(c)]; return; }
+            if (c.doors == null) return;
+            int n = c.doors.Length, open = n / 2;
+            float since = c.c.stopFor - c.halt;
+            int k = since < 1f ? (int)(since * open) : c.halt > 1f ? open : open + (int)((1f - c.halt) * (n - open));
+            c.r.sprite = c.doors[Mathf.Clamp(k, 0, n - 1)];
         }
 
         // Call: a car at the gas station: in, nose up, slowing to the stop; there a while; out, nose down, once

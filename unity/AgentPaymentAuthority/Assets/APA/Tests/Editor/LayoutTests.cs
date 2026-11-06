@@ -161,7 +161,8 @@ public class LayoutTests
         var pieces = town.ground.Concat(town.props).Concat(town.venues.SelectMany(v => v.exterior)).Concat(town.venues.Where(v => v.doorway != null && !string.IsNullOrEmpty(v.doorway.key)).Select(v => v.doorway)).Select(p => p.key)
             .Concat(town.walkers.Concat(town.inside.SelectMany(g => g.people)).Select(w => w.key))
             .Concat(town.traffic != null ? town.traffic.cars.Select(c => c.key).Concat(town.traffic.lights) : Enumerable.Empty<string>())
-            .Concat(town.traffic != null && town.traffic.visit.from > 0f ? town.traffic.cars.Where(c => !c.vertical && c.speed < 0f && c.y == town.traffic.visit.lane).SelectMany(c => new[] { c.key + "-tilt-up", c.key + "-tilt-down" }).Append(town.traffic.visit.attendant) : Enumerable.Empty<string>()); // the gas station's callers turn their noses; its attendant (V5)
+            .Concat(town.traffic != null ? town.traffic.cars.Where(c => !string.IsNullOrEmpty(c.doors)).Select(c => c.doors) : Enumerable.Empty<string>()) // a bus's doors (Aaron 11/6)
+            .Concat(town.traffic != null && town.traffic.visit.from > 0f ? town.traffic.cars.Where(c => !c.vertical && !c.passes && c.speed < 0f && c.y == town.traffic.visit.lane).SelectMany(c => new[] { c.key + "-tilt-up", c.key + "-tilt-down" }).Append(town.traffic.visit.attendant) : Enumerable.Empty<string>()); // the gas station's callers turn their noses; its attendant (V5)
         foreach (var k in pieces) CollectionAssert.Contains(keys, k, "town: " + k + " not in limezu-assets.txt");
         // Traffic (review of 54435f5): a crossing walker makes it over within the red; the cars of a lane start apart.
         if (town.traffic != null && town.traffic.cycle.Length == 3)
@@ -185,6 +186,15 @@ public class LayoutTests
                         Assert.GreaterOrEqual(a.vertical ? Mathf.Abs(a.y - b.y) : Mathf.Abs(a.x - b.x), (Length(a) + Length(b)) / 2f + 0.8f, "town: " + a.key + " and " + b.key + " start on each other");
             foreach (var c in t.cars)
                 if (HasCut(c.key)) Assert.AreEqual(0, Mathf.RoundToInt(CutSize(c.key).x * 32f) % Mathf.Max(1, c.frames), "town: " + c.key + "'s " + c.frames + " frames don't split its width");
+            // None starts on the crossing or the junction (Aaron 11/6: a bus begun over its line drove on into the red).
+            foreach (var c in t.cars.Where(c => !c.vertical))
+            {
+                float half = Length(c) / 2f;
+                Assert.IsFalse(c.x + half > t.from - 0.3f && c.x - half < t.to + 0.3f, "town: " + c.key + " starts on the crossing at " + c.x);
+                Assert.IsFalse(t.junction.w > 0f && c.x + half > t.junction.x - 0.3f && c.x - half < t.junction.x + t.junction.w + 0.3f, "town: " + c.key + " starts on the junction at " + c.x);
+            }
+            foreach (var c in t.cars.Where(c => !string.IsNullOrEmpty(c.doors)))
+                if (HasCut(c.doors)) Assert.AreEqual(0, Mathf.RoundToInt(CutSize(c.doors).x * 32f) % Mathf.Max(1, c.doorFrames), "town: " + c.doors + "'s " + c.doorFrames + " frames don't split its width");
         }
         // A prop over a building never takes one of its orders (review of 3fa65e3: a SALE rack tied with the wall behind it).
         foreach (var v in town.venues)

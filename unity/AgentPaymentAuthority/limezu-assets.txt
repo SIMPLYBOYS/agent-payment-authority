@@ -311,3 +311,13 @@ hotel-phone	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/1_Generi
 # (its right pair stays shut), the hotel's entrance; each shut frame is the front exactly (LayoutTests).
 x-door-post	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Animated_sheets_32x32/Post_Office_Door_1_32x32.png	-
 x-door-hotel	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Animated_sheets_32x32/Metropolis_Building_2_Door_1_32x32.png	-
+# Buses and trucks among the cars (Aaron 11/6: 不要只有小型汽車): six wheel frames each; a bus's frames are cut one
+# by one from its sheet (each 240 x 124 in its 288 px cell; the last cell's edge holds the next view's bus).
+x-bus-red	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Buses_32x32/Buses_32x32_1.png	20,228,240,124;308,228,240,124;596,228,240,124;884,228,240,124;1172,228,240,124;1460,228,240,124
+x-bus-blue-left	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Buses_32x32/Buses_32x32_5.png	2272,228,240,124;2560,228,240,124;2848,228,240,124;3136,228,240,124;3424,228,240,124;3712,228,240,124
+x-trash-truck	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Trash_Truck_32x32/Trash_Truck_Going_Right_32x32.png	-
+x-fire-truck-left	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Fire_Truck_32x32/Fire_Truck_Going_Left_32x32.png	-
+# The buses call at their stops (Aaron 11/6): the red one's doors (its sheet's 20 frames, 224 px apart: opening,
+# shutting), and its stop's sign on the south pavement (the other stops at the shelter by the post office).
+x-bus-red-doors	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Buses_32x32/Buses_32x32_1.png	32,452,4480,124
+x-bus-stop-sign	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Bus_Stop_Sign_1.png	-

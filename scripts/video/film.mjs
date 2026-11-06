@@ -103,7 +103,7 @@ im.save(sys.argv[2])`, LABEL, label]);
 // office's A pays and gets no label (docs/commercial-post-hotel.md). --venues: which, in order (default the three).
 const ENDS = { books: 2, cafe: 2, mart: 1, hotel: 1, post: 1 };
 async function full(b, unityUp, demo) {
-  const venues = arg("--venues", "books,cafe,mart").split(",");
+  const venues = arg("--venues", "books,cafe,mart").split(",").filter(Boolean); // "": the town only
   const click = (sel) => b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e || e.disabled) return false; e.click(); return true; })()`);
   const view = arg("--view", "present");
   let s = b;
@@ -122,6 +122,8 @@ async function full(b, unityUp, demo) {
   const receipts = () => view === "show" ? s.evaluate(`document.querySelectorAll("#show-receipts > *").length`) : b.evaluate(`document.querySelectorAll(".present-receipt").length`);
   await sleep(1500);
   mark("tour"); await click("#present-tour"); await sleep(9000);
+  const town = +arg("--town", "0"); // seconds in the town before any venue (Aaron 11/6: the buses at their stops)
+  if (town > 0) { mark("town"); await sleep(town * 1000); }
   for (const venue of venues) {
     mark(venue + "-enter");
     await b.evaluate(`(() => { const x = document.querySelector('button.venue-item[data-venue="${venue}"]'); if (x) x.click(); return !!x; })()`);
