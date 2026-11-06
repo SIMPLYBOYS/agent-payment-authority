@@ -40,7 +40,9 @@ namespace APA
         // map, its outside, and its door (from its origin): where the
         // transition closes and A and B stand.
         // doorway: its door's frames (closed, opening, open at the middle, closing), over the door in its outside.
-        [System.Serializable] public class Venue { public string layout, number, name; public float x, y; public Vector2 door; public Piece[] exterior = new Piece[0]; public Piece doorway; }
+        // pill: its name's height over the origin; 0: just above its top (a building taller than the view, the post
+        // office's or the hotel's, has it over its front).
+        [System.Serializable] public class Venue { public string layout, number, name; public float x, y, pill; public Vector2 door; public Piece[] exterior = new Piece[0]; public Piece doorway; }
         // A passer-by (illustrative): a premade character's walk row (24 frames of 32 x
         // 64: right, up, left, down), along a path of horizontal and vertical
         // legs; a path that ends where it starts loops, any other goes back.
@@ -327,7 +329,7 @@ namespace APA
         // over its roof, as the page's venue list numbers them.
         void Pill(Transform root, Town.Venue v, float top, float right)
         {
-            var text = Words(root, "pill", new Vector2(right / 2f, top + 0.5f), 0.085f, Ink, Labels);
+            var text = Words(root, "pill", new Vector2(right / 2f, v.pill > 0f ? v.pill : top + 0.5f), 0.085f, Ink, Labels);
             text.text = "<color=" + Accent + ">" + v.number + "</color>  " + v.name;
             Plate(root, text, Rounded(), Color.white, Labels);
         }

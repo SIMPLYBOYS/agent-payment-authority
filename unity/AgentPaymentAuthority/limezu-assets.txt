@@ -274,3 +274,36 @@ x-car-green-tilt-down	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x
 x-car-blue-left-tilt-up	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_blue_complete_32x32.png	132,454,124,84
 x-car-blue-left-tilt-down	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_blue_complete_32x32.png	128,578,120,90
 x-walk-19	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_19.png	0,128,768,64
+# The post office and the hotel (docs/commercial-post-hotel.md), cut from the Hospital, Museum, Condominium, Living Room
+# and Generic theme sheets: the post office's white desks, parcel shelves, scale, notice boards, mailboxes and boxes; the
+# hotel's wood desks, lifts, sofa, lamps, key boxes, frames and rug. Their shells are made by scripts/unity/rooms.py.
+room-post	_cut/room-post.png	-
+room-hotel	_cut/room-hotel.png	-
+post-desk	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/19_Hospital_32x32.png	160,302,128,58
+post-shelf	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/19_Hospital_32x32.png	388,294,58,68
+post-scale	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/19_Hospital_32x32.png	36,1044,26,30
+notice-board	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/19_Hospital_32x32.png	396,1358,40,66
+notice-board-s	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/19_Hospital_32x32.png	448,1358,32,66
+post-chair	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/19_Hospital_32x32.png	226,592,28,42
+post-rope	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/19_Hospital_32x32.png	422,608,86,30
+post-vending	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/19_Hospital_32x32.png	136,1362,46,66
+post-mailbank	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/26_Condominium_32x32.png	334,512,70,64
+post-mail-red	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/26_Condominium_32x32.png	450,400,62,42
+post-box-a	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/26_Condominium_32x32.png	96,522,30,32
+post-box-b	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/26_Condominium_32x32.png	160,534,30,20
+post-box-pile	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/1_Generic_32x32.png	388,1888,60,64
+hotel-desk	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/19_Hospital_32x32.png	160,14,128,78
+hotel-lift	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/19_Hospital_32x32.png	224,1582,64,50
+hotel-lift-panel	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/19_Hospital_32x32.png	290,1600,12,20
+hotel-sofa	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/2_LivingRoom_32x32.png	32,906,96,54
+hotel-armchair	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/2_LivingRoom_32x32.png	162,66,60,62
+hotel-table	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/2_LivingRoom_32x32.png	66,16,60,36
+hotel-palm	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/2_LivingRoom_32x32.png	426,0,46,62
+hotel-plant	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/2_LivingRoom_32x32.png	384,16,32,62
+hotel-lamp	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/2_LivingRoom_32x32.png	386,400,26,66
+hotel-keys	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/26_Condominium_32x32.png	450,336,62,42
+hotel-rope	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/22_Museum_32x32.png	12,560,76,34
+hotel-frame	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/22_Museum_32x32.png	194,622,60,46
+hotel-frame-s	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/22_Museum_32x32.png	130,624,28,40
+hotel-rug	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/1_Generic_32x32.png	292,136,120,80
+hotel-phone	Modern_Interiors_v41.4/1_Interiors/32x32/Theme_Sorter_32x32/1_Generic_32x32.png	334,1266,32,26

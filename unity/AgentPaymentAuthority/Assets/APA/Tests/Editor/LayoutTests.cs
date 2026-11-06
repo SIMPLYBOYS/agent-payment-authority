@@ -126,7 +126,7 @@ public class LayoutTests
     {
         var keys = new HashSet<string>(File.ReadAllLines("limezu-assets.txt").Where(l => !l.StartsWith("#") && l.Trim() != "").Select(l => l.Split('\t')[0]));
         var all = All();
-        CollectionAssert.IsSupersetOf(all.Select(x => x.name), new[] { ShopView.DefaultLayout, "cafe", "mart" });
+        CollectionAssert.IsSupersetOf(all.Select(x => x.name), new[] { ShopView.DefaultLayout, "cafe", "mart", "post", "hotel" });
         foreach (var (name, l) in all)
         {
             Assert.AreEqual(name, l.key, "a layout's key is its file name");

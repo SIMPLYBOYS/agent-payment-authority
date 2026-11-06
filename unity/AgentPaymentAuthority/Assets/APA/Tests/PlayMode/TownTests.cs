@@ -182,7 +182,7 @@ public class TownTests
         var data = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
         bridge.Receive("{\"v\":2,\"scene\":1,\"clear\":true}"); // the two-customer scene: B's points stand aside (ShopView.P)
         int sc = 1;
-        foreach (var layout in new[] { "books", "cafe", "mart" }) // the town's venues (docs/commercial-consumer.md: the bookshop)
+        foreach (var layout in new[] { "books", "cafe", "mart", "post", "hotel" }) // the town's venues (docs/commercial-consumer.md: the bookshop)
         {
             Assert.IsTrue(view.UseLayout(layout));
             yield return null;
