@@ -325,4 +325,24 @@ x-bus-stop-sign	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32
 # frame by frame (the taxi's 192 px apart, the others' 160).
 x-taxi	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_3_32x32_4.png	20,304,172,80;212,304,172,80;404,304,172,80;596,304,172,80;788,304,172,80;980,304,172,80
 x-sports-white	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_5_32x32_1.png	4,242,156,78;164,242,156,78;324,242,156,78;484,242,156,78;644,242,156,78;804,242,156,78
-x-car-white-left	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_4_32x32_1.png	1924,246,152,74;2084,246,152,74;2244,246,152,74;2404,246,152,74;2564,246,152,74;2724,246,152,74
+x-car-white	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_4_32x32_1.png	4,246,152,74;164,246,152,74;324,246,152,74;484,246,152,74;644,246,152,74;804,246,152,74
+# The food trucks in place of the camping area (Aaron 11/7): the trucks, carts, tables, chairs and menus.
+x-food-tacos	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Tacos_Truck_1.png	-
+x-food-icecream	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Ice_Cream_Truck_1.png	-
+x-food-pizza	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Pizza_Tuk_Tuk_1.png	-
+x-food-hotdog	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Hot_Dog_Cart_1.png	-
+x-food-cart-fries	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Cart_2.png	-
+x-food-cart-cook	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Cart_4.png	-
+x-food-cart-cupcake	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Cart_6.png	-
+x-food-round-l	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Hot_Dog_Cart_Props_3.png	-
+x-food-round-r	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Hot_Dog_Cart_Props_4.png	-
+x-food-chair-r	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Hot_Dog_Cart_Props_1.png	-
+x-food-chair-l	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Hot_Dog_Cart_Props_2.png	-
+x-food-table-a	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Table_3.png	-
+x-food-table-b	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Table_4.png	-
+x-food-table-c	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Table_9.png	-
+x-food-table-d	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Table_7.png	-
+x-food-stool	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Chair_1.png	-
+x-food-menu	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Sign_1.png	-
+x-food-menu-2	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Sign_2.png	-
+x-food-fruit	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Fruit_Flowers_Cart_2.png	-

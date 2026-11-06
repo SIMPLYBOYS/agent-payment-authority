@@ -11,6 +11,12 @@ already imported into Assets/LimeZu/ is read from there. Writes OUT_DIR/mock-<ke
 art), with the pavement to the left. It prints what the Unity tests would refuse, with their rules
 (ShopSceneTests, TownTests): A's and B's feet on a prop's drawn pixels along their corridor; a person's body over
 A's or B's along it; a person's face under A's or B's label where they wait (the labels' boxes are estimates).
+
+    python3 scripts/unity/mock.py OUT_DIR town:78,0,100,20
+
+draws a part of the town (x0,y0,x1,y1 in tiles) as TownView does (Aaron 11/7: the camping area as food trucks): the
+ground in file order, tiled from its bottom left; the props by their bottom centre and the venues' pieces by their
+bottom left, by depth (Order: lower y in front); the passers-by where their paths start; no cars. OUT_DIR/mock-town.png.
 """
 import json
 import os
@@ -52,9 +58,55 @@ def art(m, key):
     else:
         raise SystemExit("not found in LIMEZU_DIR or Assets/LimeZu: %s %s" % (key, rel))
     if rect not in ("-", "sheet"):
-        x, y, w, h = map(int, rect.split(","))
+        x, y, w, h = map(int, rect.split(";")[0].split(","))  # frames cut one by one: the first
         im = im.crop((x, y, x + w, y + h))
     return im
+
+
+def order(y):
+    return 2000 - round(y * 20)  # TownView.Order
+
+
+def render_town(out_dir, m, town, x0, y0, x1, y1):
+    W, H = int((x1 - x0) * 32), int((y1 - y0) * 32)
+    im = Image.new("RGBA", (W, H), (40, 40, 50, 255))
+    px = lambda x, y: (int(round((x - x0) * 32)), int(round((y1 - y) * 32)))
+    draws = []  # (order, seq, image, left, top)
+
+    def piece(p, ox, oy, o, seq, centre):
+        s = art(m, p["key"])
+        if p.get("frames", 0) > 1:
+            s = s.crop((0, 0, s.width // p["frames"], s.height))
+        if p.get("w", 0) > 0:  # tiled from its bottom left over w x h
+            tw, th = int(p["w"] * 32), int((p.get("h") or s.height / 32) * 32)
+            t = Image.new("RGBA", (tw, th))
+            for yy in range(th - s.height, -s.height, -s.height):
+                for xx in range(0, tw, s.width):
+                    t.alpha_composite(s, (xx, yy))
+            s = t
+        x, y = px(ox + p["x"], oy + p["y"])
+        draws.append((o, seq, s, x - (s.width // 2 if centre else 0), y - s.height))
+
+    for i, g in enumerate(town["ground"]):
+        piece(g, 0, 0, -1000 + i, i, False)
+    for i, p in enumerate(town["props"]):
+        piece(p, 0, 0, order(p["y"]), 1000 + i, True)
+    for v in town["venues"]:
+        bottom = min(e["y"] for e in v["exterior"])
+        for i, e in enumerate(v["exterior"]):
+            piece(e, v["x"], v["y"], order(v["y"] + bottom) + i, 2000 + i, False)
+        if v.get("doorway", {}).get("key"):
+            piece(v["doorway"], v["x"], v["y"], order(v["y"] + bottom) + len(v["exterior"]), 3000, False)
+    for j, w in enumerate(town["walkers"]):
+        s = art(m, w["key"]); s = s.crop((0, 0, 32, s.height))
+        x, y = px(w["path"][0]["x"], w["path"][0]["y"])
+        draws.append((order(w["path"][0]["y"]), 4000 + j, s, x - 16, y - s.height))
+    for o, _, s, x, y in sorted(draws, key=lambda d: (d[0], d[1])):
+        if x < W and y < H and x + s.width > 0 and y + s.height > 0:
+            im.alpha_composite(s, (x, y)) if x >= 0 and y >= 0 else im.paste(s, (x, y), s)
+    out = os.path.join(out_dir, "mock-town.png")
+    im.resize((W * S, H * S), Image.NEAREST).convert("RGB").save(out)
+    print(out)
 
 
 def P(l, who, n):
@@ -180,6 +232,9 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     m = manifest()
     town = json.load(open(os.path.join(rooms.APA, "Resources/Town/town.json"), encoding="utf-8"))
+    if keys[0].startswith("town:"):
+        render_town(out_dir, m, town, *map(float, keys[0][5:].split(",")))
+        return
     ok = [render(k, out_dir, m, town) for k in keys]
     sys.exit(0 if all(ok) else 1)
 
