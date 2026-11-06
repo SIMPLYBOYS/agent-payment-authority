@@ -96,6 +96,85 @@ im.save(sys.argv[2])`, LABEL, label]);
     "-filter_complex", "[0:v]scale=1920:1080,fps=30[v];[v][1:v]overlay=28:H-h-28", "-c:v", "libx264", "-pix_fmt", "yuv420p", file], { stdio: "inherit" });
 }
 
+// full: the whole round filmed as sample films the bookshop: the tour, then each venue (entered from its row,
+// started once, an Ask approved when it shows, held until its customers end), back to the town between them;
+// full.mp4 and marks.json (each moment's second in it, for the cut).
+const ENDS = { books: 2, cafe: 2, mart: 1 }; // receipts a venue ends with (the mart's B is denied before paying)
+async function full(b, unityUp) {
+  const click = (sel) => b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e || e.disabled) return false; e.click(); return true; })()`);
+  const view = arg("--view", "present");
+  let s = b;
+  if (view === "show") {
+    s = await b.openPage(ORIGIN + "/show");
+    await s.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
+    log("film: window unity " + (await unityUp(s)));
+  }
+  log("film: presenting " + (await click("#present-toggle")));
+  await sleep(4000);
+  const frames = join(out, "full-frames");
+  const stop = capture(s, frames);
+  const t0 = Date.now() / 1000;
+  const marks = {};
+  const mark = (k) => { marks[k] = +(Date.now() / 1000 - t0).toFixed(2); log("film: " + k + " at " + marks[k] + " s"); };
+  const receipts = () => view === "show" ? s.evaluate(`document.querySelectorAll("#show-receipts > *").length`) : b.evaluate(`document.querySelectorAll(".present-receipt").length`);
+  await sleep(1500);
+  mark("tour"); await click("#present-tour"); await sleep(9000);
+  for (const venue of ["books", "cafe", "mart"]) {
+    mark(venue + "-enter");
+    await b.evaluate(`(() => { const x = document.querySelector('button.venue-item[data-venue="${venue}"]'); if (x) x.click(); return !!x; })()`);
+    await sleep(3500);
+    mark(venue + "-start");
+    if (!(await click("button.venue-go"))) throw new Error(venue + ": no start button");
+    const end = Date.now() + 150000;
+    while (Date.now() < end) {
+      // 需要你處理 follows the customer chosen: another's Ask is a line with 切換到客人 X (the cafe: B's cake while A is chosen).
+      if (await b.evaluate(`(() => { const x = [...document.querySelectorAll("#approval button")].find((e) => e.textContent.startsWith("切換到客人")); if (!x) return false; x.click(); return true; })()`)) {
+        mark(venue + "-switch");
+        await sleep(1500);
+      }
+      if (await b.evaluate(`!!document.querySelector("#approval .approval-head[data-state=pending]") && !!document.querySelector("#approval .approval-approve:not([disabled])")`)) {
+        mark(venue + "-ask");
+        await sleep(3000); // the audience sees the ask before it is approved
+        if (await click("#approval .approval-approve")) mark(venue + "-approved");
+      }
+      if ((await receipts()) >= ENDS[venue]) break;
+      await sleep(400);
+    }
+    mark(venue + "-done");
+    await sleep(6000); // the ends held a moment
+    if (venue !== "mart") { await click("#present-town"); await sleep(4000); }
+  }
+  mark("end");
+  const got = await stop();
+  writeFileSync(join(out, "marks.json"), JSON.stringify(marks, null, 1));
+  log("film: " + got.length + " frames");
+  encode(got, frames, join(out, "full.mp4"));
+  log("film: " + join(out, "full.mp4"));
+}
+
+// fooled: the simulation of a fooled Agent (books-fooled-a: it believes the guide's 系統通知 and asks for the 2.00
+// premium edition), started from A's card as the presenter does (a venue's start takes its first scenarios
+// only), filmed presenting in the bookshop until its Deny (over the task budget, nothing paid); fooled.mp4.
+async function fooled(b) {
+  const click = (sel) => b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e || e.disabled) return false; e.click(); return true; })()`);
+  log("film: presenting " + (await click("#present-toggle")));
+  await sleep(4000);
+  await b.evaluate(`(() => { const x = document.querySelector('button.venue-item[data-venue="books"]'); if (x) x.click(); return !!x; })()`);
+  await sleep(4000);
+  const frames = join(out, "fooled-frames");
+  const stop = capture(b, frames);
+  await sleep(2000);
+  log("film: fooled delegate " + (await click(`.agent-card[data-consumer="consumer-a"] .agent-delegate[data-scenario="books-fooled-a"]`)));
+  await sleep(500);
+  log("film: fooled confirm " + (await click(`.delegation[data-scenario="books-fooled-a"] .delegation-confirm`)));
+  const denied = await b.waitFor(`/超出|預算不足|已拒絕/.test((document.querySelector(".present-steps") || document.body).innerText)`, 90000);
+  log("film: denied " + denied);
+  await sleep(8000);
+  const got = await stop();
+  encode(got, frames, join(out, "fooled.mp4"));
+  log("film: " + join(out, "fooled.mp4"));
+}
+
 // sample: the town and the bookshop filmed while the host page presents. --view present (default): the host
 // page itself, its scene filling the screen under the cards (the main picture); --view show: the audience
 // window (/show), for 為什麼可信 and the receipts (its scene stays at whole multiples: 1x at 1920x1080).
@@ -228,6 +307,8 @@ try {
   writeFileSync(join(out, "up-host.png"), Buffer.from(png.data, "base64"));
   log("film: up done; " + join(out, "up-host.png"));
   if (stage === "sample") await sample(b, unityUp);
+  else if (stage === "full") await full(b, unityUp);
+  else if (stage === "fooled") await fooled(b);
   else if (stage !== "up") throw new Error("stage " + stage + " is not written yet");
 } finally {
   if (b) b.close();

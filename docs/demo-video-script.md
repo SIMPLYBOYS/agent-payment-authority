@@ -139,10 +139,29 @@ go run ./cmd/verify-demo --mode e1a --run-dir artifacts/e1a/<錄影那一場的�
 
 **不在這次的範圍**：中文配音（Aaron 另外錄）、配樂。
 
-**要 Aaron 決定**：
+**Aaron 的決定（11/6，照建議）**：
+- V1 旁白：Aaron 之後另外錄中文配音；先放字幕。
+- V2 字幕：另外輸出 SRT，也做一版燒進畫面的。
+- V3「被誘導的 Agent」：保留，它本來就是模擬。
+- 書店的樣片（`artifacts/video/sample-books.mp4`）：「方向可以」。
 
-| # | 問題 | 建議 |
-|---|---|---|
-| V1 | 旁白 | Aaron 之後另外錄中文配音；樣片先放字幕 |
-| V2 | 字幕 | 另外輸出 SRT，也做一版燒進畫面的，方便直接播放 |
-| V3 | 「被誘導的 Agent」那段 | 保留，它本來就是模擬 |
+**做好的（11/6）**：都在 `artifacts/video/`，git 不收。
+- 拍攝（`scripts/video/film.mjs`）：
+  - `--stage full --view present`：主持人頁的簡報模式，全景加三個場域。核准時，如果請購屬於另一位客人，先按「切換到客人 X」。
+  - `--stage full --view show`：同一輪從展示視窗拍，給「為什麼可信」與收據用。
+  - `--stage fooled`：被誘導的 Agent，超出預算被拒絕。
+  - 每一輪都寫 `marks.json`，記下每個時間點的秒數，剪接照它裁。
+  - WebGL 改用顯示卡（Metal）算：檢查工具用的 CPU 算法每秒只有 2～4 格，改了之後約 25 格。
+- 剪接（`scripts/video/cut.py --cut 90|180`）：
+  - 照第 3、4 節的每一行裁片段、調速度。
+  - 畫面在上，下方一條黑帶放中英字幕。字幕太長時自動縮小字級。
+  - 另外輸出 `.zh.srt`、`.en.srt`。
+  - 字卡由程式畫：三種怕、身分憑證、誰握有什麼權力、照實說、定位句。
+  - checker 那一格用 11/6 那場證據包重新跑一次的真實輸出排版，標明出處。
+  - 3 分鐘版插入 11/6 真實的書店核准，從錄影裁出頁面範圍，標「Base Sepolia 實跑（11/6）」。
+  - 這版 ffmpeg 沒有 drawtext 和 libass，所以文字都先畫成圖再疊上去。字幕帶用上下拼接：直接疊加會多出一列像素，H.264 不接受。
+- 成品：`apa-demo-90s.mp4`（90 秒）、`apa-demo-180s.mp4`（180 秒），1920×1080、30 fps，各附兩份 SRT。
+
+**重做一次**：
+1. 依序跑 `node scripts/video/film.mjs --stage full --view present --out artifacts/video/full-present2`、`--view show --out artifacts/video/full-show2`、`--stage fooled --out artifacts/video/fooled`，大約各 3 分鐘。
+2. 再跑 `python3 -I scripts/video/cut.py --cut 90` 與 `--cut 180`。
