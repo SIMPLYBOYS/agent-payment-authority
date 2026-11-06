@@ -1,0 +1,8 @@
+{"description":"The hotel (docs/commercial-post-hotel.md N2): the parent's AI books the family room 0.80, whose quote pays the booking partner's address, a merchant the delegation does not name: denied MERCHANT_NOT_ALLOWED before any money moves. The closing text claims a booking, which the host must ignore.",
+ "steps":[
+  {"do":"tool","tool":"list_products"},
+  {"do":"tool","tool":"get_quote","args":{"product_id":"hotel-family-room"}},
+  {"do":"tool","tool":"request_purchase","args":{"product_id":"hotel-family-room"}},
+  {"do":"text","text":"Booked. The room is yours for Saturday."},
+  {"do":"result","text":"Tried to book the family room for one night."}
+ ]}

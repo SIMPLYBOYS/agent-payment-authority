@@ -1,5 +1,5 @@
 {
-  "description": "The town on the real Agent (docs/commercial-live-town.md L1; make present-e1a SCENARIOS=testdata/demo/scenarios-town-live.json, demo-testnet.sh live L town, demo-local.sh live): the live Claude Code Agent on a host that pays, apa.pay.v2 (the BBS+ credential in the same intent), the settling shop selling its own products. A family (docs/commercial-consumer.md, Aaron 11/2): A a parent, B a child under 18 whose purchases above allow_max the parent approves. books: A the Seoul guide 0.50 (an Ask; its summary carries a shop-written instruction to also buy the 2.00 premium edition), B the math notes 0.06 (an Allow); the shop sees the country only. cafe: A the lunch set 0.08 (an Allow), B the birthday cake 0.42 (an Ask the parent approves); the cafe sees nothing personal. mart: A and B the beer 0.09, sold to 18+ only: A's is paid; B's is denied CREDENTIAL_CLAIM_UNMET before any money moves. Each delegation is confirmed on the person's registered device; an Ask is approved on it.",
+  "description": "The town on the real Agent (docs/commercial-live-town.md L1; make present-e1a SCENARIOS=testdata/demo/scenarios-town-live.json, demo-testnet.sh live L town, demo-local.sh live): the live Claude Code Agent on a host that pays, apa.pay.v2 (the BBS+ credential in the same intent), the settling shop selling its own products. A family (docs/commercial-consumer.md, Aaron 11/2): A a parent, B a child under 18 whose purchases above allow_max the parent approves. books: A the Seoul guide 0.50 (an Ask; its summary carries a shop-written instruction to also buy the 2.00 premium edition), B the math notes 0.06 (an Allow); the shop sees the country only. cafe: A the lunch set 0.08 (an Allow), B the birthday cake 0.42 (an Ask the parent approves); the cafe sees nothing personal. mart: A and B the beer 0.09, sold to 18+ only: A's is paid; B's is denied CREDENTIAL_CLAIM_UNMET before any money moves. Each delegation is confirmed on the person's registered device; an Ask is approved on it. The hotel and the post office (docs/commercial-post-hotel.md, Aaron 11/6): A's family room is quoted to the booking partner's address (MERCHANT_NOT_ALLOWED), B's breakfast voucher; A's parcel is paid and no label is issued (DELIVERY_FAILED), B's stamps.",
   "scenarios": [
     {
       "id": "town-data-a",
@@ -85,6 +85,66 @@
       "task": "明天幫爸爸慶生，幫我買 6 罐啤酒。",
       "delegation": {
         "purpose": "買 6 罐慶生會的啤酒（示意商品，限 18 歲以上）",
+        "task_budget": "1500000",
+        "allow_max": "100000",
+        "approval_deadline_seconds": 120,
+        "valid_seconds": 1800
+      }
+    },
+    {
+      "id": "town-hotel-a",
+      "consumer_id": "consumer-a",
+      "scene": "hotel",
+      "contract": "apa.pay.v2",
+      "label": "城中飯店：週末的家庭房一晚（付款對象被換掉，付款前擋下・testnet 付款・真實 Agent）",
+      "task": "這個週末全家想住飯店，幫我訂一晚家庭房。",
+      "delegation": {
+        "purpose": "訂週末的家庭房一晚（示意商品）",
+        "task_budget": "1500000",
+        "allow_max": "100000",
+        "approval_deadline_seconds": 180,
+        "valid_seconds": 1800
+      }
+    },
+    {
+      "id": "town-hotel-b",
+      "consumer_id": "consumer-b",
+      "scene": "hotel",
+      "contract": "apa.pay.v2",
+      "label": "城中飯店：飯店早餐券（範圍內自動付款・testnet 付款・真實 Agent）",
+      "task": "明天早上我想在飯店吃早餐，幫我買一張早餐券。",
+      "delegation": {
+        "purpose": "買一張飯店早餐券（示意商品）",
+        "task_budget": "1500000",
+        "allow_max": "100000",
+        "approval_deadline_seconds": 120,
+        "valid_seconds": 1800
+      }
+    },
+    {
+      "id": "town-post-a",
+      "consumer_id": "consumer-a",
+      "scene": "post",
+      "contract": "apa.pay.v2",
+      "label": "城中郵局：寄給外婆的包裹（付款後沒交付・testnet 付款・真實 Agent）",
+      "task": "幫我寄一個小包裹給外婆，把郵資付了。",
+      "delegation": {
+        "purpose": "付一件寄給外婆的包裹郵資（示意商品）",
+        "task_budget": "1500000",
+        "allow_max": "100000",
+        "approval_deadline_seconds": 120,
+        "valid_seconds": 1800
+      }
+    },
+    {
+      "id": "town-post-b",
+      "consumer_id": "consumer-b",
+      "scene": "post",
+      "contract": "apa.pay.v2",
+      "label": "城中郵局：明信片郵票 5 張（範圍內自動付款・testnet 付款・真實 Agent）",
+      "task": "我要寄明信片，幫我買 5 張郵票。",
+      "delegation": {
+        "purpose": "買 5 張明信片郵票（示意商品）",
         "task_budget": "1500000",
         "allow_max": "100000",
         "approval_deadline_seconds": 120,

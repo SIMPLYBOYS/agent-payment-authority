@@ -509,9 +509,10 @@ func (w *Worker) submit(ctx context.Context, p store.Payment, o paycontract.Purc
 		return w.byChain(ctx, p, ra, &ans)
 	case ans.Status == 202:
 		return w.byChain(ctx, p, ra, nil)
-	case ans.Status == 402 && ans.Response != nil && (ans.Response.ErrorReason == "settlement_failed" || ans.Response.ErrorReason == "invalid_exact_evm_payload_authorization_nonce_used"):
-		// Failed in settlement (a front-run, say), or a nonce the shop says is used:
-		// whether it was paid is the chain's to say.
+	case ans.Status == 402 && ans.Response != nil && (ans.Response.Success || ans.Response.ErrorReason == "settlement_failed" || ans.Response.ErrorReason == "invalid_exact_evm_payload_authorization_nonce_used"):
+		// Settled by the shop's word and nothing delivered (the post office's parcel,
+		// docs/commercial-post-hotel.md N3), failed in settlement (a front-run, say),
+		// or a nonce the shop says is used: whether it was paid is the chain's to say.
 		return w.byChain(ctx, p, ra, &ShopAnswer{Status: ans.Status})
 	case (ans.Status == 402 || ans.Status == 400) && p.State == "unknown":
 		// An earlier send's result is not known: tx#2 may be on chain, whatever

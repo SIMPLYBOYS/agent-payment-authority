@@ -99,8 +99,11 @@ im.save(sys.argv[2])`, LABEL, label]);
 // full: the whole round filmed as sample films the bookshop: the tour, then each venue (entered from its row,
 // started once, an Ask approved when it shows, held until its customers end), back to the town between them;
 // full.mp4 and marks.json (each moment's second in it, for the cut).
-const ENDS = { books: 2, cafe: 2, mart: 1 }; // receipts a venue ends with (the mart's B is denied before paying)
-async function full(b, unityUp) {
+// Receipts a venue ends with: the mart's B is denied before paying; the hotel's A too (its partner's payee); the post
+// office's A pays and gets no label (docs/commercial-post-hotel.md). --venues: which, in order (default the three).
+const ENDS = { books: 2, cafe: 2, mart: 1, hotel: 1, post: 1 };
+async function full(b, unityUp, demo) {
+  const venues = arg("--venues", "books,cafe,mart").split(",");
   const click = (sel) => b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e || e.disabled) return false; e.click(); return true; })()`);
   const view = arg("--view", "present");
   let s = b;
@@ -119,7 +122,7 @@ async function full(b, unityUp) {
   const receipts = () => view === "show" ? s.evaluate(`document.querySelectorAll("#show-receipts > *").length`) : b.evaluate(`document.querySelectorAll(".present-receipt").length`);
   await sleep(1500);
   mark("tour"); await click("#present-tour"); await sleep(9000);
-  for (const venue of ["books", "cafe", "mart"]) {
+  for (const venue of venues) {
     mark(venue + "-enter");
     await b.evaluate(`(() => { const x = document.querySelector('button.venue-item[data-venue="${venue}"]'); if (x) x.click(); return !!x; })()`);
     await sleep(3500);
@@ -142,9 +145,20 @@ async function full(b, unityUp) {
     }
     mark(venue + "-done");
     await sleep(6000); // the ends held a moment
-    if (venue !== "mart") { await click("#present-town"); await sleep(4000); }
+    if (venue !== venues[venues.length - 1]) { await click("#present-town"); await sleep(4000); }
   }
   mark("end");
+  // What the Store says of each run: the decision and the payment (the check of a new venue's rule, not a picture).
+  const host = demo.tokens().host;
+  const get = async (path) => (await fetch("http://" + HOST + path, { headers: { Authorization: "Bearer " + host } })).json();
+  const runs = await get("/api/host/runs");
+  for (const r of (runs.runs || runs || [])) {
+    const t = await get("/api/tasks/" + r.task_id);
+    for (const p of t.purchases || []) {
+      const d = p.decision || {}, pay = p.payment || {};
+      log("film: outcome " + r.scenario + " " + r.task_id + " " + (p.resource_url || "").replace(/^.*\/scenes\//, "") + ": " + (d.policy_verdict || "-") + " " + (d.reason || "") + "; payment " + (pay.state || pay.status || "-") + (pay.code ? " " + pay.code : ""));
+    }
+  }
   const got = await stop();
   writeFileSync(join(out, "marks.json"), JSON.stringify(marks, null, 1));
   log("film: " + got.length + " frames");
@@ -307,7 +321,7 @@ try {
   writeFileSync(join(out, "up-host.png"), Buffer.from(png.data, "base64"));
   log("film: up done; " + join(out, "up-host.png"));
   if (stage === "sample") await sample(b, unityUp);
-  else if (stage === "full") await full(b, unityUp);
+  else if (stage === "full") await full(b, unityUp, demo);
   else if (stage === "fooled") await fooled(b);
   else if (stage !== "up") throw new Error("stage " + stage + " is not written yet");
 } finally {

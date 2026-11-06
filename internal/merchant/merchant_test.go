@@ -1,6 +1,7 @@
 package merchant
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
 
@@ -229,8 +231,8 @@ func TestFixtureMatchesRegistry(t *testing.T) {
 	reg := registry(t)
 	for _, p := range products {
 		q := p.Requirement
-		if q.PayTo != c.MerchantPayTo {
-			t.Errorf("%s payTo %s, registry merchant %s", p.ID, q.PayTo, c.MerchantPayTo)
+		if want := map[bool]string{false: c.MerchantPayTo, true: OtherPayee}[p.otherPayee]; q.PayTo != want {
+			t.Errorf("%s payTo %s, want %s (the registry merchant, or the hotel partner's for otherPayee)", p.ID, q.PayTo, want)
 		}
 		asset, ok := reg.TrustedAsset(strings.TrimPrefix(q.Network, "eip155:"), q.Asset)
 		if !ok || q.Extra["name"] != asset.EIP712Name || q.Extra["version"] != asset.EIP712Version {
@@ -517,5 +519,73 @@ func TestNewSettledEval(t *testing.T) {
 	}
 	if _, err := NewSettledEval("http://127.0.0.1:9", st, []EvalItem{{ID: "elsewhere", Amount: "1", PayTo: "0x5555555555555555555555555555555555555555"}}); err == nil {
 		t.Error("an item for another merchant was offered for settling")
+	}
+}
+
+// stubSettlement: a settling shop's chain and payee, and the one outcome every payment gets (no chain).
+type stubSettlement struct {
+	cfg SettleConfig
+	out Outcome
+}
+
+func (s stubSettlement) config() SettleConfig                                 { return s.cfg }
+func (s stubSettlement) Pay(context.Context, offer, json.RawMessage) Outcome { return s.out }
+
+func settledStub(t *testing.T, out Outcome) (*Merchant, eth.Address) {
+	t.Helper()
+	shop, _ := eth.ParseAddress("0x6bbe84371eab1a980ba862b90474a7e8e9bb773e")
+	token, _ := eth.ParseAddress("0x036cbd53842c5426634e7929541ec2318f3dcf7e")
+	m, err := NewSettled("http://127.0.0.1:8402", stubSettlement{cfg: SettleConfig{ChainID: 84532, Token: token, TokenName: "USDC", TokenVersion: "2", PayTo: shop, Confirmations: 2}, out: out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m, shop
+}
+
+func offerOf(t *testing.T, m *Merchant, id string) offer {
+	t.Helper()
+	for _, o := range m.offers {
+		if o.ID == id {
+			return o
+		}
+	}
+	t.Fatalf("no offer %s", id)
+	return offer{}
+}
+
+// docs/commercial-post-hotel.md N2: the settling shop offers every product to its own payee but the hotel's room,
+// whose 402 names its booking partner's (OtherPayee): a payee no delegation names, so the policy denies it.
+func TestSettledShopKeepsTheHotelPartnersPayee(t *testing.T) {
+	m, shop := settledStub(t, Outcome{})
+	others := 0
+	for _, o := range m.offers {
+		want := shop.Hex()
+		if o.otherPayee {
+			want, others = OtherPayee, others+1
+		}
+		if o.Requirement.PayTo != want || !strings.Contains(string(o.accepts), want) {
+			t.Errorf("%s pays %s (accepts %s), want %s", o.ID, o.Requirement.PayTo, o.accepts, want)
+		}
+	}
+	if others != 1 || !offerOf(t, m, "hotel-family-room").otherPayee {
+		t.Fatalf("%d offers name another payee; want the hotel's room only", others)
+	}
+}
+
+// N3: once its transfer is confirmed the post office's parcel is not delivered: 402 with the settlement in
+// PAYMENT-RESPONSE (the worker records DELIVERY_FAILED: paid, needs review); the stamps deliver as ever.
+func TestThePostOfficeSettlesAndDeliversNothing(t *testing.T) {
+	settled := SettlementResponse{Success: true, Transaction: "0xab", Network: "eip155:84532"}
+	m, _ := settledStub(t, Outcome{Kind: "delivered", Response: settled})
+	for id, want := range map[string]int{"post-parcel": http.StatusPaymentRequired, "post-stamps": http.StatusOK} {
+		rec := httptest.NewRecorder()
+		m.settled(rec, offerOf(t, m, id), Outcome{Kind: "delivered", Response: settled})
+		var got SettlementResponse
+		if rec.Code != want || x402.Decode(rec.Header().Get(HeaderPaymentResponse), &got) != nil || !got.Success {
+			t.Fatalf("%s: %d (want %d), PAYMENT-RESPONSE %q", id, rec.Code, want, rec.Header().Get(HeaderPaymentResponse))
+		}
+		if delivered := strings.Contains(rec.Body.String(), "APA-PROTECTED-"+id); delivered != (want == http.StatusOK) {
+			t.Fatalf("%s: content delivered %v with %d", id, delivered, rec.Code)
+		}
 	}
 }

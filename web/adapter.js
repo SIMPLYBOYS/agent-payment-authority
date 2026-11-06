@@ -457,6 +457,10 @@ export const VENUES = {
   data: { name: "資料研究室", demo: false, goods: "數位資料", delivery: "下載終端（付款後才交付）" },
   cafe: { name: "街角烘焙咖啡", demo: true, goods: "餐點・示意菜單", delivery: "出餐口叫號（付款後才交付）" },
   mart: { name: "巷口便利商店", demo: true, goods: "商品・示意商品", delivery: "取貨櫃（付款後才交付）" },
+  // docs/commercial-post-hotel.md (Aaron 11/6): the hotel's room is quoted to a booking partner (denied before paying);
+  // the post office's parcel is paid and no label is issued (delivery failed, the payment needs review).
+  hotel: { name: "城中飯店", demo: true, goods: "住宿・示意商品", delivery: "櫃台交付訂房代碼（付款後才交付）" },
+  post: { name: "城中郵局", demo: true, goods: "郵務・示意商品", delivery: "櫃台交付寄件單（付款後才交付）" },
 };
 export const venue = (key) => VENUES[key] || { name: "情境 " + String(key || "未知"), demo: true, goods: "商品", delivery: "付款後才交付" };
 // venues: the scenes a catalog offers, the main one first, then as listed above, then by name.
@@ -621,6 +625,7 @@ export const REASONS_V1 = {
   CREDENTIAL_INVALID: "憑證驗證未通過", CREDENTIAL_REVOKED: "憑證已撤銷", CREDENTIAL_STATUS_UNAVAILABLE: "憑證狀態無法確認",
   AUTHORIZATION_EXPIRED: "憑證已過期", CONFIG_MISSING: "缺少設定（沒有憑證）",
   CREDENTIAL_CLAIM_UNMET: "憑證有效，但不符合這間店的要求", // the venue matrix (docs/commercial-venues.md)
+  MERCHANT_NOT_ALLOWED: "收款人不在委託允許的商店名單，付款前已拒絕", // the hotel's booking partner (docs/commercial-post-hotel.md)
 };
 
 // V1: the voice outcome codes, in words. A failure denies the purchase; an
@@ -1206,7 +1211,11 @@ export const networkText = (cap) => (cap === "base_sepolia" ? "Base Sepolia 測�
 // productName: the item a purchase names, by its resource path; the
 // catalog's titles are English fixtures, so the audience's words are here.
 const PRODUCTS = { "/resources/kr-market": "韓國市場簡報", "/resources/tw-semis-note": "台灣半導體週報摘要", "/scenes/cafe/lunch-set": "午餐套餐（12:30 取餐）",
-  "/scenes/cafe/meeting-coffee": "會議咖啡 6 杯（15:00 取餐）", "/scenes/mart/coffee-beans": "辦公室咖啡豆 ×2" };
+  "/scenes/cafe/meeting-coffee": "會議咖啡 6 杯（15:00 取餐）", "/scenes/mart/coffee-beans": "辦公室咖啡豆 ×2",
+  "/scenes/books/seoul-guide": "首爾旅遊攻略", "/scenes/books/seoul-premium": "首爾旅遊攻略進階版", "/scenes/books/math-g8": "國二數學講義",
+  "/scenes/cafe/birthday-cake": "生日蛋糕（明天 17:00 取餐）", "/scenes/mart/beer-6": "啤酒 ×6（限 18 歲以上）",
+  "/scenes/hotel/family-room": "週末的家庭房一晚", "/scenes/hotel/breakfast": "飯店早餐券", "/scenes/post/parcel": "寄給外婆的包裹郵資",
+  "/scenes/post/stamps": "明信片郵票 ×5" };
 export function productName(url) {
   let path = "";
   try { path = new URL(url).pathname; } catch { return "商品"; }

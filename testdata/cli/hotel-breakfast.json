@@ -1,0 +1,8 @@
+{"description":"The hotel: the child's AI buys a breakfast voucher 0.05, within allow_max: an Allow, paid to the hotel itself.",
+ "steps":[
+  {"do":"tool","tool":"list_products"},
+  {"do":"tool","tool":"get_quote","args":{"product_id":"hotel-breakfast"}},
+  {"do":"tool","tool":"request_purchase","args":{"product_id":"hotel-breakfast"}},
+  {"do":"text","text":"Paid. The voucher is in your messages."},
+  {"do":"result","text":"Bought one breakfast voucher."}
+ ]}

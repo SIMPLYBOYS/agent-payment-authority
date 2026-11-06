@@ -1,0 +1,8 @@
+{"description":"The post office: the child's AI buys five postcard stamps 0.03, within allow_max: an Allow, delivered.",
+ "steps":[
+  {"do":"tool","tool":"list_products"},
+  {"do":"tool","tool":"get_quote","args":{"product_id":"post-stamps"}},
+  {"do":"tool","tool":"request_purchase","args":{"product_id":"post-stamps"}},
+  {"do":"text","text":"Paid. The stamps are in your messages."},
+  {"do":"result","text":"Bought five postcard stamps."}
+ ]}

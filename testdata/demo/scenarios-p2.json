@@ -1,5 +1,5 @@
 {
- "description": "The local paying town (make demo-local, make present-p2; docs/commercial-p2-host.md 12.8): a local anvil with test keys, the person's approval on a registered device or a virtual authenticator, the host paying through apa-signer serve. A family (docs/story.md, Aaron 11/2): A a parent, B a child under 18 whose purchases above allow_max the parent approves; books: A the Seoul guide 0.50 (an Ask; the guide's summary tells the agent to also buy the 2.00 premium edition, which this script, as the real agent, ignores), B the math notes 0.06; cafe: A the lunch set 0.08, B the birthday cake 0.42 (an Ask); mart: the beer 0.09 for A and B, B denied CREDENTIAL_CLAIM_UNMET (age_over_18=false); books-fooled-a: a simulated fooled agent requests the 2.00 premium edition and is denied INSUFFICIENT_BUDGET. apa.pay.v2 with the BBS+ credential (APA_PRESENT_CREDENTIALS=1). Fake CLI only: no model.",
+ "description": "The local paying town (make demo-local, make present-p2; docs/commercial-p2-host.md 12.8): a local anvil with test keys, the person's approval on a registered device or a virtual authenticator, the host paying through apa-signer serve. A family (docs/story.md, Aaron 11/2): A a parent, B a child under 18 whose purchases above allow_max the parent approves; books: A the Seoul guide 0.50 (an Ask; the guide's summary tells the agent to also buy the 2.00 premium edition, which this script, as the real agent, ignores), B the math notes 0.06; cafe: A the lunch set 0.08, B the birthday cake 0.42 (an Ask); mart: the beer 0.09 for A and B, B denied CREDENTIAL_CLAIM_UNMET (age_over_18=false); hotel (docs/commercial-post-hotel.md, Aaron 11/6): A's family room 0.80 is quoted to the booking partner's address, denied MERCHANT_NOT_ALLOWED; B's breakfast voucher 0.05; post: A's parcel 0.08 settles and the post office issues no label (DELIVERY_FAILED, the payment needs review), B's stamps 0.03; books-fooled-a: a simulated fooled agent requests the 2.00 premium edition and is denied INSUFFICIENT_BUDGET. apa.pay.v2 with the BBS+ credential (APA_PRESENT_CREDENTIALS=1). Fake CLI only: no model.",
  "scenarios": [
   {
    "id": "books-a",
@@ -85,6 +85,66 @@
    "label": "巷口便利商店：慶生會的啤酒 6 罐（限 18 歲以上・本機付款）",
    "delegation": {
     "purpose": "買 6 罐慶生會的啤酒（示意商品，限 18 歲以上）",
+    "task_budget": "1500000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "hotel-a",
+   "consumer_id": "consumer-a",
+   "scene": "hotel",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/hotel-room.json",
+   "label": "城中飯店：週末的家庭房一晚（付款對象被換掉，付款前擋下・本機付款）",
+   "delegation": {
+    "purpose": "訂週末的家庭房一晚（示意商品）",
+    "task_budget": "1500000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 180,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "hotel-b",
+   "consumer_id": "consumer-b",
+   "scene": "hotel",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/hotel-breakfast.json",
+   "label": "城中飯店：飯店早餐券（範圍內自動付款・本機付款）",
+   "delegation": {
+    "purpose": "買一張飯店早餐券（示意商品）",
+    "task_budget": "1500000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "post-a",
+   "consumer_id": "consumer-a",
+   "scene": "post",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/post-parcel.json",
+   "label": "城中郵局：寄給外婆的包裹（付款後沒交付・本機付款）",
+   "delegation": {
+    "purpose": "付一件寄給外婆的包裹郵資（示意商品）",
+    "task_budget": "1500000",
+    "allow_max": "100000",
+    "approval_deadline_seconds": 120,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "post-b",
+   "consumer_id": "consumer-b",
+   "scene": "post",
+   "contract": "apa.pay.v2",
+   "scenario": "testdata/cli/post-stamps.json",
+   "label": "城中郵局：明信片郵票 5 張（範圍內自動付款・本機付款）",
+   "delegation": {
+    "purpose": "買 5 張明信片郵票（示意商品）",
     "task_budget": "1500000",
     "allow_max": "100000",
     "approval_deadline_seconds": 120,

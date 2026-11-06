@@ -84,6 +84,24 @@
     },
     {
       "version": "apa.m1.v2",
+      "task_id": "show-e1a-1021-a-06",
+      "consumer_id": "consumer-a",
+      "agent_id": "agent-a",
+      "wallet_id": "wallet-a",
+      "status": "created",
+      "created_at": 1790727005
+    },
+    {
+      "version": "apa.m1.v2",
+      "task_id": "show-e1a-1021-a-07",
+      "consumer_id": "consumer-a",
+      "agent_id": "agent-a",
+      "wallet_id": "wallet-a",
+      "status": "created",
+      "created_at": 1790727005
+    },
+    {
+      "version": "apa.m1.v2",
       "task_id": "show-e1a-1021-b-01",
       "consumer_id": "consumer-b",
       "agent_id": "agent-b",
@@ -121,6 +139,24 @@
     {
       "version": "apa.m1.v2",
       "task_id": "show-e1a-1021-b-05",
+      "consumer_id": "consumer-b",
+      "agent_id": "agent-b",
+      "wallet_id": "wallet-b",
+      "status": "created",
+      "created_at": 1790728005
+    },
+    {
+      "version": "apa.m1.v2",
+      "task_id": "show-e1a-1021-b-06",
+      "consumer_id": "consumer-b",
+      "agent_id": "agent-b",
+      "wallet_id": "wallet-b",
+      "status": "created",
+      "created_at": 1790728005
+    },
+    {
+      "version": "apa.m1.v2",
+      "task_id": "show-e1a-1021-b-07",
       "consumer_id": "consumer-b",
       "agent_id": "agent-b",
       "wallet_id": "wallet-b",

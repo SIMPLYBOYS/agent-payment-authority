@@ -487,6 +487,21 @@ func TestUnknownMovedByTheChain(t *testing.T) {
 	}
 }
 
+// Settled, the PAYMENT-RESPONSE says so, and a 402 with no content (the post
+// office's parcel, N3): paid on chain and not delivered, never VERIFICATION_FAILED.
+func TestSettledAndNotDelivered(t *testing.T) {
+	w := newWorld(t, 1)
+	w.start("po-1")
+	w.shop.answers = []ShopAnswer{{Status: 402, Response: paid.Response}}
+	w.chain.state = "settled"
+	if p, _ := w.step("po-1"); p.State != "needs_review" || p.Code != "DELIVERY_FAILED" || p.SettleTx == "" {
+		t.Fatalf("settled, not delivered: %+v", p)
+	}
+	if v := statusOf(t, w, "po-1"); v != "paid" {
+		t.Fatalf("payment_status %s", v)
+	}
+}
+
 func statusOf(t *testing.T, w *world, po string) string {
 	v, err := w.s.Task(contracts.Session{ConsumerID: "consumer-a", AgentID: "agent-a", TaskID: "task-a"})
 	if err != nil {

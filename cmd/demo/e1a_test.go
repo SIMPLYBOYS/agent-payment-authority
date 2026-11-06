@@ -61,7 +61,7 @@ func TestTownLiveCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	live, err := loadScenarios("testdata/demo/scenarios-town-live.json", reg, regCfg, true, true)
-	if err != nil || len(live) != 6 || live["town-mart-b"].Scene != "mart" { // the mart's beer (docs/commercial-venues.md)
+	if err != nil || len(live) != 10 || live["town-mart-b"].Scene != "mart" || live["town-hotel-a"].Scene != "hotel" { // the mart's beer; the hotel and the post office (docs/commercial-post-hotel.md)
 		t.Fatalf("live, paying: %v %v", live, err)
 	}
 	if _, err := loadScenarios("testdata/demo/scenarios-town-live.json", reg, regCfg, true, false); err == nil {
@@ -69,9 +69,9 @@ func TestTownLiveCatalog(t *testing.T) {
 	}
 	// The family's town (docs/commercial-consumer.md): each venue has both customers' runs, each a v2 entry with
 	// the person's task and a whole delegation.
-	for _, scene := range []string{"books", "cafe", "mart"} {
+	for _, scene := range []string{"books", "cafe", "mart", "hotel", "post"} {
 		for _, c := range []string{"a", "b"} {
-			id := "town-" + map[string]string{"books": "data", "cafe": "cafe", "mart": "mart"}[scene] + "-" + c
+			id := "town-" + map[string]string{"books": "data", "cafe": "cafe", "mart": "mart", "hotel": "hotel", "post": "post"}[scene] + "-" + c
 			l := live[id]
 			if l == nil || l.Scene != scene || l.ConsumerID != "consumer-"+c || l.Contract != "apa.pay.v2" || l.Task == "" || l.Delegation == nil {
 				t.Errorf("%s: %+v", id, l)

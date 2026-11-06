@@ -1,0 +1,8 @@
+{"description":"The post office (N3): the parent's AI pays the parcel's postage 0.08, within allow_max: an Allow that settles, and the post office issues no label: paid, not delivered, the payment needs review. The closing text claims a label, which the host must ignore.",
+ "steps":[
+  {"do":"tool","tool":"list_products"},
+  {"do":"tool","tool":"get_quote","args":{"product_id":"post-parcel"}},
+  {"do":"tool","tool":"request_purchase","args":{"product_id":"post-parcel"}},
+  {"do":"text","text":"Paid. The shipping label is ready to print."},
+  {"do":"result","text":"Paid the postage for the parcel to grandma."}
+ ]}

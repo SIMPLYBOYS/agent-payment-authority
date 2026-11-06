@@ -244,8 +244,9 @@ func TestP2ShippedCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	scs, err := loadScenarios("testdata/demo/scenarios-p2.json", reg, regCfg, false, false)
-	// The family (docs/story.md): three venues, a parent and a child, and the fooled agent; apa.pay.v2.
-	if err != nil || len(scs) != 7 || scs["books-fooled-a"].Scene != "books" || scs["cafe-a"].Scene != "cafe" || scs["books-b"].Scene != "books" || scs["cafe-b"].version() != paycontract.V2 {
+	// The family (docs/story.md): five venues (the post office and the hotel, docs/commercial-post-hotel.md), a parent
+	// and a child, and the fooled agent; apa.pay.v2.
+	if err != nil || len(scs) != 11 || scs["books-fooled-a"].Scene != "books" || scs["cafe-a"].Scene != "cafe" || scs["books-b"].Scene != "books" || scs["cafe-b"].version() != paycontract.V2 {
 		t.Fatalf("catalog: %v %v", scs, err)
 	}
 	// The shop's prices against the delegations' allow_max, by the product each script buys (Aaron 10/27:
@@ -276,12 +277,13 @@ func TestP2ShippedCatalog(t *testing.T) {
 		if _, ok := price[product]; !ok || scene[product] != sc.Scene {
 			t.Fatalf("%s buys %s, not an offer of its scene %q", id, product, sc.Scene)
 		}
-		if want := map[string]bool{"books-a": false, "books-b": true, "cafe-a": true, "cafe-b": false, "mart-a": true, "mart-b": true, "books-fooled-a": false}[id]; (price[product] <= allow) != want {
+		if want := map[string]bool{"books-a": false, "books-b": true, "cafe-a": true, "cafe-b": false, "mart-a": true, "mart-b": true, "books-fooled-a": false,
+			"hotel-a": false, "hotel-b": true, "post-a": true, "post-b": true}[id]; (price[product] <= allow) != want {
 			t.Fatalf("%s: %s at %d, allow_max %d: want Allow %v", id, product, price[product], allow, want)
 		}
 		bought[id] = product
 	}
-	if bought["books-a"] == bought["books-b"] || bought["cafe-a"] == bought["cafe-b"] { // the mart's two both try the beer
+	if bought["books-a"] == bought["books-b"] || bought["cafe-a"] == bought["cafe-b"] || bought["hotel-a"] == bought["hotel-b"] || bought["post-a"] == bought["post-b"] { // the mart's two both try the beer
 		t.Fatalf("the two customers of a scene buy the same: %v", bought)
 	}
 	raw, _ := os.ReadFile("testdata/policy/m1-demo-profile.json")

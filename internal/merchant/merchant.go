@@ -37,7 +37,16 @@ type product struct {
 	// Requires is what the venue asks of the buyer's credential (docs/commercial-venues.md 3.2, Aaron
 	// 10/30: set by the host): attribute -> required value ("" any, disclosed only). Nil asks nothing.
 	Requires map[string]string
+	// otherPayee: the product's 402 names another merchant than the shop's, kept by the settling shop too
+	// (docs/commercial-post-hotel.md N2: the hotel's partner page; the policy denies MERCHANT_NOT_ALLOWED).
+	otherPayee bool
+	// noDelivery: once its transfer is confirmed the shop delivers nothing and answers 402 (N3: the post
+	// office's label is never issued; the worker records DELIVERY_FAILED, the payment needs review).
+	noDelivery bool
 }
+
+// OtherPayee is the hotel's partner page's pay-to: a merchant no delegation names (AE1's mart-gift-card's).
+const OtherPayee = "0x5555555555555555555555555555555555555555"
 
 // region: the data shop and the bookshop license digital content by region, so they learn the buyer's
 // country only (docs/commercial-consumer.md D4, Aaron 11/2: no shop asks for buyer_type any more).
@@ -179,7 +188,65 @@ var products = []product{{
 	Requirement:  fixtureRequirement("420000"),
 	AssetDisplay: "0.42 test USDC",
 	content:      `{"canary":"APA-PROTECTED-cafe-birthday-cake","body":"Synthetic fixture pickup number. Seeing this in any response is a leak."}`,
+}, {
+	// docs/commercial-post-hotel.md (Aaron 11/6): the hotel's room is paid through a partner page whose payee is
+	// another merchant (a fake booking site): denied MERCHANT_NOT_ALLOWED before any money moves.
+	Scene:        "hotel",
+	ID:           "hotel-family-room",
+	Title:        "Family room, one night this weekend (fixture; paid through a booking partner)",
+	Summary:      "Synthetic sample: a family room, paid through the hotel's booking partner page. No booking system is connected.",
+	MimeType:     "application/json",
+	Path:         "/scenes/hotel/family-room",
+	Query:        "nights=1",
+	Requirement:  otherPayeeRequirement("800000"),
+	AssetDisplay: "0.80 test USDC",
+	content:      `{"canary":"APA-PROTECTED-hotel-family-room","body":"Synthetic fixture booking code. Seeing this in any response is a leak."}`,
+	Requires:     region,
+	otherPayee:   true,
+}, {
+	Scene:        "hotel",
+	ID:           "hotel-breakfast",
+	Title:        "Hotel breakfast voucher (fixture)",
+	Summary:      "Synthetic sample: one breakfast at the hotel. No booking system is connected.",
+	MimeType:     "application/json",
+	Path:         "/scenes/hotel/breakfast",
+	Query:        "days=1",
+	Requirement:  fixtureRequirement("50000"),
+	AssetDisplay: "0.05 test USDC",
+	content:      `{"canary":"APA-PROTECTED-hotel-breakfast","body":"Synthetic fixture voucher code. Seeing this in any response is a leak."}`,
+}, {
+	// N3: paid, and the post office issues no label: the payment needs review, nothing is delivered.
+	Scene:        "post",
+	ID:           "post-parcel",
+	Title:        "Parcel to grandma, domestic postage (fixture)",
+	Summary:      "Synthetic sample: postage for one small parcel. No postal system is connected.",
+	MimeType:     "application/json",
+	Path:         "/scenes/post/parcel",
+	Query:        "size=s",
+	Requirement:  fixtureRequirement("80000"),
+	AssetDisplay: "0.08 test USDC",
+	content:      `{"canary":"APA-PROTECTED-post-parcel","body":"Synthetic fixture shipping label. Seeing this in any response is a leak."}`,
+	Requires:     region,
+	noDelivery:   true,
+}, {
+	Scene:        "post",
+	ID:           "post-stamps",
+	Title:        "Postcard stamps x5 (fixture)",
+	Summary:      "Synthetic sample: five stamps for postcards. No postal system is connected.",
+	MimeType:     "application/json",
+	Path:         "/scenes/post/stamps",
+	Query:        "qty=5",
+	Requirement:  fixtureRequirement("30000"),
+	AssetDisplay: "0.03 test USDC",
+	content:      `{"canary":"APA-PROTECTED-post-stamps","body":"Synthetic fixture stamp codes. Seeing this in any response is a leak."}`,
 }}
+
+// otherPayeeRequirement is a fixture requirement paying OtherPayee.
+func otherPayeeRequirement(amount contracts.Amount) x402.Requirement {
+	r := fixtureRequirement(amount)
+	r.PayTo = OtherPayee
+	return r
+}
 
 // fixtureRequirement is kr-market's requirement at another amount.
 func fixtureRequirement(amount contracts.Amount) x402.Requirement {
@@ -292,6 +359,9 @@ func settled(baseURL string, st Settlement, src []product, ext ...External) (*Me
 		r := p.Requirement
 		r.Network = "eip155:" + strconv.FormatUint(cfg.ChainID, 10)
 		r.Asset, r.PayTo = cfg.Token.Hex(), cfg.PayTo.Hex()
+		if p.otherPayee {
+			r.PayTo = OtherPayee // the hotel's partner: not this shop's, so no delegation names it
+		}
 		r.Extra = map[string]string{"name": cfg.TokenName, "version": cfg.TokenVersion}
 		r.MaxTimeoutSeconds = SettledTimeout
 		p.Requirement = r
@@ -513,6 +583,10 @@ func (m *Merchant) settled(w http.ResponseWriter, o offer, out Outcome) {
 			return
 		}
 		w.Header().Set(HeaderPaymentResponse, h)
+		if o.noDelivery { // settled, and nothing delivered: the settlement in PAYMENT-RESPONSE, 402 (DELIVERY_FAILED)
+			m.paymentRequired(w, o, http.StatusPaymentRequired, problem{"delivery_failed", "the payment was settled, but the post office issued no shipping label: nothing was delivered"})
+			return
+		}
 		w.Header().Set("Content-Type", o.MimeType)
 		w.Write([]byte(o.content))
 	case "pending":

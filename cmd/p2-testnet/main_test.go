@@ -437,7 +437,8 @@ func TestE1aHost(t *testing.T) {
 	if got["dir"] != host || got["test402_offer"] != nil || got["shop_eval"] != "i-summary-premium" || len(d) != 2 || d["consumer-b/0x0402"] != nil {
 		t.Fatalf("payments %v", got)
 	}
-	if r.Wallets[0].From != reg.Wallets[0].From || len(r.Tasks) != 10 || r.Tasks[0].TaskID != "show-e1a-1021-a-01" ||
+	// Seven tasks a customer a label (docs/commercial-post-hotel.md N4: five venues, room for a run again).
+	if r.Wallets[0].From != reg.Wallets[0].From || len(r.Tasks) != 14 || r.Tasks[0].TaskID != "show-e1a-1021-a-01" ||
 		r.Consumers[0].AgentRegistryRef != "" || r.Consumers[1].AgentRegistryRef != reg.Consumers[1].AgentRegistryRef {
 		t.Fatalf("registry %+v", r)
 	}
