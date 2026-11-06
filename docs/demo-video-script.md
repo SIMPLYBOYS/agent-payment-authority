@@ -140,7 +140,7 @@ go run ./cmd/verify-demo --mode e1a --run-dir artifacts/e1a/<錄影那一場的�
 **不在這次的範圍**：中文配音（Aaron 另外錄）、配樂。
 
 **Aaron 的決定（11/6，照建議）**：
-- V1 旁白：Aaron 之後另外錄中文配音；先放字幕。
+- V1 旁白：Aaron 之後另外錄中文配音；先放字幕。**Aaron 11/6 看過兩個版本：「目前的影片效果已相當不錯，我並不打算進行錄音」**：不錄配音，燒進畫面的字幕就是旁白。
 - V2 字幕：另外輸出 SRT，也做一版燒進畫面的。
 - V3「被誘導的 Agent」：保留，它本來就是模擬。
 - 書店的樣片（`artifacts/video/sample-books.mp4`）：「方向可以」。
