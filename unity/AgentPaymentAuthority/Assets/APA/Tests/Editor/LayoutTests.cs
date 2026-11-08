@@ -281,10 +281,13 @@ public class LayoutTests
             var cell = new Vector2Int((int)(d.x / c), (int)(d.y / c));
             Assert.IsTrue(seen.Contains(cell) || seen.Contains(cell + Vector2Int.down) || seen.Contains(cell + Vector2Int.up), "door " + d + " unreachable from the start");
         }
-        // Both ends of the street, north and south (Aaron 11/8: past the hospital's door; the map had widened, the pavement not).
-        foreach (var x in new[] { town.x0 + 1.5f, town.w - 1.5f })
-            foreach (var y in new[] { 25.6f, 16.8f })
-                Assert.IsTrue(seen.Contains(new Vector2Int(Mathf.FloorToInt(x / c), Mathf.FloorToInt(y / c))), "the pavement at " + x + "," + y + " unreachable from the start");
+        // Both ends of the street, north and south (Aaron 11/8: past the hospital's door; the map had widened, the pavement not),
+        // and up round the hospital (its west side, the passage east of it) and the fire station (its east side, behind it).
+        var far = new List<Vector2>();
+        foreach (var x in new[] { town.x0 + 1.5f, town.w - 1.5f }) foreach (var y in new[] { 25.6f, 16.8f }) far.Add(new Vector2(x, y));
+        far.AddRange(new[] { new Vector2(-50f, 46f), new Vector2(-12.5f, 46f), new Vector2(135f, 40f), new Vector2(122f, 46.5f) });
+        foreach (var p in far)
+            Assert.IsTrue(seen.Contains(new Vector2Int(Mathf.FloorToInt(p.x / c), Mathf.FloorToInt(p.y / c))), "the pavement at " + p + " unreachable from the start");
     }
 
     // Every scene the host's UX3 catalog names has its room.

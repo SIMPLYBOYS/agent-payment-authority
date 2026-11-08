@@ -1068,7 +1068,7 @@ namespace APA
             Vector2 at;
             // As large as the uncovered part allows (Aaron 10/27, as pixel-office: a fraction where it must be); the
             // town never below one screen pixel per art pixel (a narrow window crops it rather than shrink it).
-            if (shown == "town") { k = Mathf.Max(1f, Fit(s, town.frame.x, town.frame.y)); at = new Vector2(Pan(float.IsNaN(lookX) ? town.focus.x : lookX, k), town.focus.y); }
+            if (shown == "town") { k = Mathf.Max(1f, Fit(s, town.frame.x, town.frame.y)); at = new Vector2(Pan(float.IsNaN(lookX) ? town.focus.x : lookX, k), LookY); }
             else { var z = shop.RoomSize; var v = RoomView(z); k = Fit(s, v.x, v.y); at = Interior + RoomCentre(z); }
             // The target at the safe part's centre, not the canvas's.
             c = at - (s.center - new Vector2(Screen.width, Screen.height) / 2f) / (k * PPU);
@@ -1184,6 +1184,10 @@ namespace APA
         public static float PanSpeed = 8f;
         public const float TourHold = 2f;    // seconds at the east end: the gas station and the fire station
         public float LookX => town == null ? 0f : Pan(float.IsNaN(lookX) ? town.focus.x : lookX, Scale); // tests
+        // The view's centre y (Aaron 11/8: up past the hospital and the fire station after the walked customer): at
+        // rest on focus; in the game, up or down only as far as keeping the customer in sight needs (Tilt).
+        float lookY = float.NaN; // NaN: focus
+        public float LookY => town == null ? 0f : float.IsNaN(lookY) ? town.focus.y : lookY;
         public bool Touring => tour.Count > 0; // tests
 
         public bool Tour()
@@ -1204,9 +1208,19 @@ namespace APA
             return town.w - town.x0 <= 2f * half ? (town.x0 + town.w) / 2f : Mathf.Clamp(x, town.x0 + half, town.w - half);
         }
 
+        // Tilt: the centre y nearest focus that shows a customer standing at y whole: its head (2 tiles up) and a
+        // tile and a half over it, its feet and a tile under them.
+        float Tilt(float y, float k)
+        {
+            float half = Safe().height / (2f * PPU * k), lo = y + 3.5f - half;
+            return Mathf.Clamp(town.focus.y, lo, Mathf.Max(lo, y - 1f + half));
+        }
+
         void Follow(float dt)
         {
-            float k = Scale, now = LookX, next;
+            float k = Scale, now = LookX, next, nowY = LookY;
+            float wantY = Player != "" && tour.Count == 0 ? Tilt(PlayerAt.y, k) : town.focus.y;
+            float nextY = Mathf.MoveTowards(nowY, wantY, Mathf.Max(PanSpeed, 3f * Mathf.Abs(wantY - nowY)) * dt);
             if (tour.Count > 0)
             {
                 // A leg of the tour: eased in and out over the time an even pan would take, then its hold.
@@ -1224,8 +1238,8 @@ namespace APA
                 float want = Pan(Player != "" ? PlayerAt.x : town.focus.x, k);
                 next = Mathf.MoveTowards(now, want, Mathf.Max(PanSpeed, 3f * Mathf.Abs(want - now)) * dt);
             }
-            if (next == lookX) return;
-            lookX = next;
+            if (next == lookX && nextY == lookY) return;
+            lookX = next; lookY = nextY;
             Retarget();
         }
         public float Top(string layout) => venues.TryGetValue(layout ?? "", out var e) ? e.top : 0f; // tests

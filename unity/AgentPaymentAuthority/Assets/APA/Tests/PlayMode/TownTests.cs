@@ -457,6 +457,35 @@ public class TownTests
         finally { Time.timeScale = scale; }
     }
 
+    // Aaron 11/8 (option B): the customer walks up past the fire station, behind it; the view rises with it, its
+    // head in sight, and comes back down to rest on focus once it is back on the pavement.
+    [UnityTest]
+    public IEnumerator TheViewRisesWithTheCustomer()
+    {
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        Assert.AreEqual(town.Focus.y, town.LookY, 1e-3f, "at rest on focus");
+        bridge.Play("{\"consumer\":\"consumer-a\"}");
+        float scale = Time.timeScale, half = Screen.height / (2f * TownView.PPU * town.Scale);
+        Time.timeScale = 4f;
+        try
+        {
+            Assert.IsTrue(town.GoTo(new Vector2(122f, 46.5f)), "a way behind the fire station");
+            yield return Until(() => town.RouteLeft == 0, 20f, _ => { });
+            Assert.AreEqual(46.5f, town.PlayerAt.y, 0.5f, "behind it");
+            yield return Until(() => town.LookY + half >= town.PlayerAt.y + 2f, 3f, _ => { });
+            Assert.GreaterOrEqual(town.LookY + half, town.PlayerAt.y + 2f, "its head in sight");
+            Assert.Greater(town.LookY, town.Focus.y, "the view rose");
+            Assert.IsTrue(town.GoTo(new Vector2(122f, 26f)));
+            yield return Until(() => town.RouteLeft == 0, 20f, _ => { });
+            float rest = Mathf.Max(town.Focus.y, 26f + 3.5f - half); // focus, unless a short window needs the head in sight
+            yield return Until(() => Mathf.Abs(town.LookY - rest) < 1e-3f, 3f, _ => { });
+            Assert.AreEqual(rest, town.LookY, 1e-3f, "back down to rest");
+        }
+        finally { Time.timeScale = scale; }
+        Crisp();
+    }
+
     // Aaron 11/6: the buses call at their stops: each halts with its centre at its stop for its seconds (the red one's
     // doors opening, open, shutting), the cars of its lane never on it, and it goes on. Faster than real time.
     [UnityTest]
