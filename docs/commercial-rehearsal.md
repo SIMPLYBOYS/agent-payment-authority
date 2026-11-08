@@ -148,7 +148,7 @@
 
 | 上限 | 這一場要 | 現在 | 要做的 |
 |---|---|---|---|
-| relayer 每日 | 18 筆（10 次登記、8 次預留） | `var/p2-testnet/relayer.json` 的 `daily_tx_cap` 12 | **Aaron 決定**是否調到 18 以上（11/5 曾調到 18） |
+| relayer 每日 | 18 筆（10 次登記、8 次預留） | `var/p2-testnet/relayer.json` 的 `daily_tx_cap` 已改成 18（Aaron 11/8；relayer 下次啟動時生效） | — |
 | 商店每日結算 | 8 筆（退款不算） | `demo-testnet.sh` 的城鎮已改成 `--shop-cap 9` | — |
 | 錢包餘額 | 家長 0.75、孩子 0.56 | 開場前檢查（`testnet-preflight.py town`，已改成五個場域） | — |
 | 委派總額 | 家長 Allow 0.25、孩子 0.14（每場） | `dlg-ta`、`dlg-tb` 各 1.00，跨場次累計（Signer 的紀錄在 `/opt`，我沒有讀） | 不夠時 Signer 會回 `OVER_TOTAL_CAP` |
@@ -169,3 +169,10 @@
 | 9 | Claude Code | `e1-evidence pack`＋`verify-demo --mode e1a --rpc https://sepolia.base.org`（sandbox 外），回報 E1～E10、`agents`、`settlements` 的 `refund` |
 
 回滾：停掉 Signer，把第 4 步的備份放回原位。testnet 上已送出的交易不能撤回。
+
+**進度**
+- 11/8 第 1 步：提交 `6b7a025`。
+- 11/8 第 2 步：`var/reopen-opt/apa-signer`，SHA-256 `70287db42049fa1c0adda679d669bfaac2d70badee9fea12c6bacb2931dc7736`，從 `6b7a025` 的乾淨 worktree 建置（sandbox 裡建置，執行檔沒有記下 vcs 資訊）。
+- 11/8 第 3 步：`var/reopen-opt/signer.json`，SHA-256 `875f61c9aecf927fa03628bbb0ce9bbed7902106c75536358422e163c6a9bb2f`：`wallet-a` 對 agent 10573、`wallet-b` 對 10574（擁有者 issuer `0xccd7…4c6a`），velocity 5 筆／600 秒，委派到台北 11/15 12:25。
+- 11/8 第 4～7 步：Aaron 備份、安裝、只啟動 Signer（`serving on /opt/apa-signer/run/signer.sock`）；`/opt/apa-signer/bin/apa-signer` 的 SHA-256 我核對過等於第 2 步的（signer.json 我讀不到）。`agent-wallet` 送出兩筆 `setAgentWallet`，`cast` 獨立核對兩位的 `agentWallet` 都是自己的付款錢包（`docs/commercial-8004.md` §8）。第 1 項在鏈上完成；第 8、9 步待做。
+- Aaron 11/8：第 8、9 步的 testnet 彩排延到 11/9。開場前我先唯讀檢查委派期限（到台北 11/15 12:25）、餘額、當天 UTC 日已用的 relayer 與商店筆數、連接埠。

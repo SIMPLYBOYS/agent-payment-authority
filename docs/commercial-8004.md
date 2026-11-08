@@ -157,4 +157,10 @@
 - `TestOptSigner`、`TestChainViewUsesTheTasksPayerAndEachShop`、`TestE1aAgents`、`show.test.mjs` 各加了對應的情況。
 - 本機鏈沒有官方 registry（E6 A），畫面不顯示身分列；真正的 domain 要在 Base Sepolia 上由模擬確認。
 
-**還沒做（要 Aaron）**：提交；`/opt` 換新的 Signer 與 signer.json（sudo）；在 Base Sepolia 送兩筆 `setAgentWallet`（issuer 付 gas，要 Aaron 核准）；之後的 testnet 場次才看得到畫面上的「已證明」與 checker 的新欄位。
+**Base Sepolia（Aaron 11/8）**：提交 `6b7a025`；Aaron 以 sudo 把新的 Signer 與 signer.json 裝進 `/opt`（`docs/commercial-rehearsal.md` §5 第 2～6 步），核准後執行 `p2-testnet agent-wallet --dir var/p2-testnet`，issuer 送出兩筆 `setAgentWallet`：
+- 家長 agent 10573 的 `agentWallet` 是 wallet-a `0x2456…3554`：交易 `0x27a33a6a797f88986493238ece23adae364f1ea48ba5fd4fc76d5e8dd202f108`，區塊 55955056。
+- 孩子 agent 10574 的 `agentWallet` 是 wallet-b `0xba5f…8667`：交易 `0x5a66c197c0066ca20282e162aca69bbd4986311cad0e0bedf85d2e38b2c57007`，區塊 55955078。
+- 另外用 Foundry 的 `cast`（不經過專案的 Go 程式）唯讀核對：兩筆都成功、由 issuer `0xccd7…4c6a` 送出；`getAgentWallet` 各是自己的付款錢包，`ownerOf` 仍是 issuer。registry 只在錢包的簽章驗得過時才設定，所以這也確認了 domain（`ERC8004IdentityRegistry`／`1`、鏈 84532、registry 地址）與官方合約一致。
+- 鏈上的註冊檔照舊（`payment_wallet_proven: false` 是註冊時的事實）；證明是 `agentWallet`。
+
+還沒看到：畫面上的「付款錢包已由錢包簽章證明」與 checker 的 `agent_wallet_is_consumer_wallet`，要下一場 testnet 場次（§5 第 8、9 步）。
