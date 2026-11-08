@@ -375,3 +375,20 @@ x-food-stool	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32
 x-food-menu	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Sign_1.png	-
 x-food-menu-2	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Sign_2.png	-
 x-food-fruit	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Fruit_Flowers_Cart_2.png	-
+
+# the south side's lawns, homes as LimeZu's samples (Aaron 11/8: "在餐車區這一邊的空白綠地處，填充類似截圖中的房子", the coffee and tea
+# kiosk's side too): the three-storey condos, two brown ones, a narrow townhouse (at most 11 tiles: the lawn is 10 deep),
+# a playground among cone trees
+x-condo-blue	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/4_Generic_Building_Singles_32x32/ME_Singles_Generic_Building_32x32_Condo_5_1.png	-
+x-condo-gray	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/4_Generic_Building_Singles_32x32/ME_Singles_Generic_Building_32x32_Condo_5_2.png	-
+x-condo-yellow	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/4_Generic_Building_Singles_32x32/ME_Singles_Generic_Building_32x32_Condo_5_3.png	-
+x-condo-brown-2	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/4_Generic_Building_Singles_32x32/ME_Singles_Generic_Building_32x32_Condo_3_44.png	-
+x-condo-brown-3	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/4_Generic_Building_Singles_32x32/ME_Singles_Generic_Building_32x32_Condo_3_45.png	-
+x-townhouse	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/4_Generic_Building_Singles_32x32/ME_Singles_Generic_Building_32x32_Condo_7_Example_1.png	-
+x-cone-tree	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Tree_5.png	-
+x-cone-tree-pot	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Tree_8.png	-
+x-flower-bed	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Flower_Bush_4.png	-
+x-slide	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/13_School_Singles_32x32/ME_Singles_School_32x32_School_Yard_Toy_1.png	-
+x-swing	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/13_School_Singles_32x32/ME_Singles_School_32x32_School_Yard_Toy_3.png	-
+x-seesaw	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/7_Villas_Singles_32x32/ME_Singles_Villas_32x32_Villa_Yard_Toy_Rocking_1.png	-
+x-sandbox	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/7_Villas_Singles_32x32/ME_Singles_Villas_32x32_Villa_Yard_Toy_Sand_Box_1.png	-
