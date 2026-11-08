@@ -34,6 +34,17 @@ namespace APA
         public Traffic traffic;
         public Area[] walk = new Area[0]; // the game (Aaron 10/29): where the person's customer may stand, by its feet: the pavement, the crossing
         public Vector2 start;             // and where they start
+        // Aaron 11/8: a beach reached by the subway. apart: the map's other parts (x from, x to), east of w, no road
+        // between: the view keeps inside the part it looks at (the town is x0 to w). subway: its stairs in pairs (0 and
+        // 1, 2 and 3): the walked customer goes down one's mouth and comes up on the other's step.
+        public Vector2[] apart = new Vector2[0];
+        public Stairs[] subway = new Stairs[0];
+        [System.Serializable] public class Stairs { public Vector2 at, step; }
+        // A train at a platform (Aaron 11/8): its cars west to east from x, bottom y, shown open (LimeZu's cut-away cars,
+        // their door on the platform's side); inside: where one stands in it (its aisle, a walk area too); to: the train
+        // it rides to (the other station's); from: the west tunnel's mouth, whence it comes in (TownView.Ride).
+        public Train[] trains = new Train[0];
+        [System.Serializable] public class Train { public float x, y, from; public string[] cars = new string[0]; public Area inside = new Area(); public int to = -1; }
 
         // frames: the file is that many frames side by side (Aaron 10/28: a fountain that plays, doors that open).
         [System.Serializable] public class Piece { public string key; public float x, y, w, h; public int frames; }
@@ -134,6 +145,21 @@ namespace APA
             {
                 var r = Piece(transform, p, Order(p.y), new Vector2(0.5f, 0f));
                 if (r != null && p.frames > 1) loops.Add((r, Frames(p.key, p.frames, new Vector2(0.5f, 0f))));
+            }
+            trains.Clear();
+            foreach (var tr in town.trains)
+            {
+                var s = new TrainState { t = tr, root = new GameObject("train").transform };
+                s.root.SetParent(transform, false);
+                float x = tr.x;
+                foreach (var car in tr.cars)
+                {
+                    float w = Width(car);
+                    Piece(s.root, new Town.Piece { key = car, x = x + w / 2f, y = tr.y }, Order(tr.y) - 1, new Vector2(0.5f, 0f));
+                    x += w;
+                }
+                s.length = x - tr.x;
+                trains.Add(s);
             }
             foreach (var v in town.venues)
             {
@@ -565,7 +591,11 @@ namespace APA
                     (t.junction.w > 0f && c.localPosition.x > t.junction.x - 1.5f && c.localPosition.x < t.junction.x + t.junction.w + 1.5f ? crossSignals : signals).Add(r); // at the junction: the north-south road's
             roadFrom = float.MaxValue; roadTo = float.MinValue;
             roadBottom = float.MaxValue; roadTop = float.MinValue;
-            foreach (var g in town.ground) { roadFrom = Mathf.Min(roadFrom, g.x); roadTo = Mathf.Max(roadTo, g.x + g.w); roadBottom = Mathf.Min(roadBottom, g.y); roadTop = Mathf.Max(roadTop, g.y + g.h); }
+            foreach (var g in town.ground)
+            {
+                if (g.x > town.w) continue; // the beach's ground (apart): no road there
+                roadFrom = Mathf.Min(roadFrom, g.x); roadTo = Mathf.Max(roadTo, g.x + g.w); roadBottom = Mathf.Min(roadBottom, g.y); roadTop = Mathf.Max(roadTop, g.y + g.h);
+            }
             if (t.visit.from > 0f) MakeAttendant(t.visit);
             foreach (var car in t.cars)
             {
@@ -856,6 +886,7 @@ namespace APA
             route.Clear(); routeTo = null; steer = Vector2.zero;
             outside = true; // a customer that stands out on a room's pavement is not reported until it steps in and out
             if (consumer == Player) return true;
+            if (phase == 0) { Halt(); hopTo = -1; } // another customer, or none: no ride left half done
             if (Player != "") stands[Player].body.sprite = playerIdle[3]; // back to standing
             Player = consumer;
             if (Player == "") return true;
@@ -896,8 +927,9 @@ namespace APA
         // straightened (each point on to the farthest one in a clear line). Null when none.
         List<Vector2> Way(Vector2 from, Vector2 to)
         {
-            float x0 = town.x0; // the cells from the map's west end (the hospital's side is below x 0)
-            int W = Mathf.CeilToInt((town.w - x0) / Cell), H = Mathf.CeilToInt(town.h / Cell);
+            float x0 = town.x0, x1 = town.w; // the cells from the map's west end (the hospital's side is below x 0) to its east one (the beach's)
+            foreach (var s in town.apart) x1 = Mathf.Max(x1, s.y);
+            int W = Mathf.CeilToInt((x1 - x0) / Cell), H = Mathf.CeilToInt(town.h / Cell);
             Vector2 C(int i) => new Vector2(x0 + (i % W + 0.5f) * Cell, (i / W + 0.5f) * Cell);
             int Of(Vector2 p) => Mathf.Clamp(Mathf.FloorToInt((p.x - x0) / Cell), 0, W - 1) + Mathf.Clamp((int)(p.y / Cell), 0, H - 1) * W;
             if (!Walkable(to))
@@ -947,7 +979,7 @@ namespace APA
         void Move(float dt)
         {
             if (Player != "" && shown == "venue" && phase == 0 && shop != null) { MoveInside(dt); return; }
-            if (Player == "" || shown != "town" || phase != 0) return;
+            if (Player == "" || shown != "town" || phase != 0 || riding >= 0) return; // on a train: it carries the customer (Ride)
             var body = stands[Player].body;
             var p = (Vector2)body.transform.localPosition;
             float go = PlayerSpeed * dt;
@@ -961,7 +993,8 @@ namespace APA
             if (Walkable(new Vector2(q.x + d.x, q.y))) q.x += d.x; // an axis at a time: along a kerb, not stuck at it
             if (Walkable(new Vector2(q.x, q.y + d.y))) q.y += d.y;
             body.transform.localPosition = q;
-            body.sortingOrder = Order(q.y) + 1;
+            int car = trains.FindIndex(s => q.x >= s.t.x && q.x <= s.t.x + s.length && q.y >= s.t.y && q.y <= s.t.y + 4f);
+            body.sortingOrder = car >= 0 ? Order(trains[car].t.y) + 1 : Order(q.y) + 1; // in a car: over it, in its aisle
             if (d != Vector2.zero)
             {
                 pFacing = Mathf.Abs(d.x) >= Mathf.Abs(d.y) ? (d.x > 0 ? 0 : 2) : (d.y > 0 ? 1 : 3); // as it means to go, even against a wall
@@ -979,7 +1012,97 @@ namespace APA
                 routeTo = null;
                 Clicked?.Invoke(door);
             }
+            // The subway's stairs: walked into, or the end of a click's walk to them: down, and up the other's (Hop).
+            for (int i = 0; i < town.subway.Length; i++)
+                if ((q - town.subway[i].at).magnitude < DoorReach && (steer != Vector2.zero || route.Count == 0 && routeTo == Subway))
+                {
+                    route.Clear(); routeTo = null;
+                    hopTo = i ^ 1;
+                    Cover(true, town.subway[i].at);
+                    radius = Full();
+                    phase = 1;
+                    break;
+                }
         }
+
+        // ---- the trains (Aaron 11/8: the customer walks into the car and waits for it to start; it pulls in and out) ----
+        class TrainState { public Town.Train t; public Transform root; public float length, shift; }
+        readonly List<TrainState> trains = new List<TrainState>();
+        int riding = -1, boarded = -1, hopTrain = -1; // the train the customer rides; the one it stands in, waiting; the one it comes in on
+        bool arriving;                                // riding in (else out)
+        float rideT, boardT;                          // seconds riding (this way); standing in it
+        public const float DoorsClose = 3f, Leave = 2.6f, Pull = 8f, Arrive = 3f; // seconds in it, then out; tiles/s/s; seconds coming in
+        public float TrainShift(int i) => trains[i].shift; // tests: how far it is off its platform (- coming in, + going)
+        public bool Riding => riding >= 0;                 // tests
+        public int Departures { get; private set; }        // tests
+        public int Arrivals { get; private set; }          // tests
+
+        // Ride: a train waits at its platform, open; the walked customer walks in by its door. Standing in its aisle for
+        // DoorsClose seconds (out again: no), it pulls off east with the customer into the tunnel, the circle closes
+        // there, and the other station's train comes in from its west tunnel with the customer in it, slowing to a stop
+        // at the platform; off it they walk.
+        void Ride(float dt)
+        {
+            if (Player == "" || shown != "town") return;
+            if (riding < 0)
+            {
+                int on = phase == 0 ? trains.FindIndex(s => s.t.inside.w > 0f && s.t.inside.Holds(PlayerAt)) : -1;
+                if (on != boarded) { boarded = on; boardT = 0f; }
+                if (on < 0 || (boardT += dt) < DoorsClose) return;
+                riding = on; boarded = -1; rideT = 0f; arriving = false;
+                route.Clear(); routeTo = null;
+            }
+            var t = trains[riding];
+            rideT += dt;
+            float come = t.t.x + t.length - t.t.from;
+            float shift = arriving ? -come * Mathf.Pow(1f - Mathf.Clamp01(rideT / Arrive), 2f) : 0.5f * Pull * rideT * rideT;
+            var body = stands[Player].body;
+            body.transform.localPosition += new Vector3(shift - t.shift, 0f, 0f);
+            body.sortingOrder = Order(t.t.y) + 1;
+            t.shift = shift;
+            t.root.localPosition = new Vector3(shift, 0f, 0f);
+            if (arriving)
+            {
+                if (rideT >= Arrive) { riding = -1; arriving = false; Arrivals++; } // stopped: off they walk
+            }
+            else if (rideT >= Leave && phase == 0 && t.t.to >= 0 && t.t.to < trains.Count)
+            {
+                Departures++;
+                hopTrain = t.t.to;
+                Cover(true, PlayerAt);
+                radius = Full();
+                phase = 1;
+            }
+        }
+
+        // Change: the circle closed on the train going into the tunnel: it is back at its platform, and the customer is
+        // in the same place in the other station's train, that one in its west tunnel, coming in (Ride). Where the
+        // circle opens: that tunnel's mouth.
+        Vector2 Change()
+        {
+            var a = trains[riding];
+            var b = trains[hopTrain];
+            var rel = PlayerAt - new Vector2(a.t.x + a.shift, a.t.y);
+            a.shift = 0f; a.root.localPosition = Vector3.zero;
+            float come = b.t.x + b.length - b.t.from;
+            b.shift = -come; b.root.localPosition = new Vector3(-come, 0f, 0f);
+            var body = stands[Player].body;
+            body.transform.localPosition = new Vector2(b.t.x - come, b.t.y) + rel;
+            body.sortingOrder = Order(b.t.y) + 1;
+            riding = hopTrain; hopTrain = -1; arriving = true; rideT = 0f;
+            lookX = b.t.from; lookY = float.NaN;
+            return new Vector2(b.t.from, b.t.y + 2f);
+        }
+
+        void Halt() // another customer, or none: no ride half done; the trains back at their platforms
+        {
+            foreach (var s in trains) { s.shift = 0f; s.root.localPosition = Vector3.zero; }
+            riding = boarded = hopTrain = -1; arriving = false;
+        }
+
+        public const string Subway = "subway"; // GoTo's venue for the subway's stairs: down them on arrival
+        int hopTo = -1;                        // the stairs the walked customer comes up, while the circle runs; -1 none
+        public int Mouth(Vector2 p) { if (town != null) for (int i = 0; i < town.subway.Length; i++) if ((p - town.subway[i].at).magnitude < 1.5f) return i; return -1; } // the stairs a click at p means
 
         // MoveInside: the keys held, or a click's walk, for the person's customer in the room; nothing while its
         // task holds it (ShopView.CanWalk).
@@ -1147,6 +1270,7 @@ namespace APA
             Play(Time.deltaTime);
             Drive(Time.deltaTime);
             Move(Time.deltaTime);
+            if (HasTown) Ride(Time.deltaTime);
             if (HasTown && shown == "venue" && phase == 0 && Player != "" && Input.GetMouseButtonDown(0) && cam != null)
             {
                 GoInside((Vector2)transform.InverseTransformPoint(cam.ScreenToWorldPoint(Input.mousePosition)) - Interior); // the room's own coordinates
@@ -1155,7 +1279,9 @@ namespace APA
             if (!HasTown || shown != "town" || phase != 0 || !Input.GetMouseButtonDown(0) || cam == null) return;
             var p = (Vector2)transform.InverseTransformPoint(cam.ScreenToWorldPoint(Input.mousePosition));
             var hit = VenueAt(p);
-            if (Player != "") GoTo(hit != null ? DoorOf(venues[hit].v) : p, hit); // the game: it walks there; at a building, to its door and in
+            int m = Mouth(p);
+            if (Player != "" && hit == null && m >= 0) GoTo(town.subway[m].at, Subway); // the subway's stairs: there, and down
+            else if (Player != "") GoTo(hit != null ? DoorOf(venues[hit].v) : p, hit); // the game: it walks there; at a building, to its door and in
             else if (hit != null && Clicked != null) Clicked(hit);
         }
 
@@ -1201,12 +1327,15 @@ namespace APA
             return true;
         }
 
-        // Pan: x kept so the uncovered part shows nothing past the map's ends (x0 and w); a map narrower than it: its middle.
+        // Pan: x kept so the uncovered part shows nothing past the ends (x0 and w) of the part of the map it is in (the
+        // town, or one apart: the beach); a part narrower than it: its middle.
         float Pan(float x, float k)
         {
-            float half = Safe().width / (2f * PPU * k);
-            return town.w - town.x0 <= 2f * half ? (town.x0 + town.w) / 2f : Mathf.Clamp(x, town.x0 + half, town.w - half);
+            float half = Safe().width / (2f * PPU * k), a = town.x0, b = town.w;
+            foreach (var s in town.apart) if (x >= s.x && x <= s.y) { a = s.x; b = s.y; }
+            return b - a <= 2f * half ? (a + b) / 2f : Mathf.Clamp(x, a + half, b - half);
         }
+        int Part(float x) { for (int i = 0; i < town.apart.Length; i++) if (x >= town.apart[i].x && x <= town.apart[i].y) return i; return -1; } // -1: the town
 
         // Tilt: the centre y nearest focus that shows a customer standing at y whole: its head (2 tiles up) and a
         // tile and a half over it, its feet and a tile under them.
@@ -1235,8 +1364,11 @@ namespace APA
             else
             {
                 // Catching up, quicker the further off (the customer walks at PlayerSpeed).
-                float want = Pan(Player != "" ? PlayerAt.x : town.focus.x, k);
-                next = Mathf.MoveTowards(now, want, Mathf.Max(PanSpeed, 3f * Mathf.Abs(want - now)) * dt);
+                float x = Player != "" ? PlayerAt.x : town.focus.x;
+                if (riding >= 0 && Part(trains[riding].t.x) is int pi && pi >= 0) x = Mathf.Clamp(x, town.apart[pi].x, town.apart[pi].y); // in a tunnel: still that station
+                float want = Pan(x, k);
+                // Another part of the map (back from the beach with no one walked): a cut, not a pan over the gap.
+                next = Part(want) != Part(now) ? want : Mathf.MoveTowards(now, want, Mathf.Max(PanSpeed, 3f * Mathf.Abs(want - now)) * dt);
             }
             if (next == lookX && nextY == lookY) return;
             lookX = next; lookY = nextY;
@@ -1257,20 +1389,35 @@ namespace APA
                 float step = Full() / Half * Time.unscaledDeltaTime;
                 if (phase == 1)
                 {
-                    if (shown == "town") irisAt = Door(); // the room may change after the View (the scene's message comes later): close on the door being entered
+                    if (shown == "town" && hopTo < 0 && hopTrain < 0) irisAt = Door(); // the room may change after the View (the scene's message comes later): close on the door being entered
                     radius = Mathf.Max(0f, radius - step);
                     if (radius <= 0f)
                     {
                         shown = Mode; // closed: the other side
-                        if (shown == "town" && Player != "" && venues.TryGetValue(shop != null ? shop.LayoutKey ?? "" : "", out var left))
+                        Vector2 openAt = shown == "town" ? Door() : Inside();
+                        if (hopTo >= 0 && shown == "town" && Player != "")
+                        {
+                            // Up the other stairs: on their step, facing away from them; the view cuts there (Pan keeps it in that part).
+                            var s = town.subway[hopTo];
+                            stands[Player].body.transform.localPosition = s.step;
+                            stands[Player].body.sortingOrder = Order(s.step.y) + 1;
+                            var away = s.step - s.at;
+                            pFacing = Mathf.Abs(away.x) >= Mathf.Abs(away.y) ? (away.x > 0 ? 0 : 2) : (away.y > 0 ? 1 : 3);
+                            stands[Player].body.sprite = playerIdle[pFacing];
+                            lookX = s.step.x; lookY = float.NaN;
+                            openAt = s.at;
+                        }
+                        else if (hopTrain >= 0 && riding >= 0 && shown == "town" && Player != "") openAt = Change(); // the train: into the other station
+                        else if (shown == "town" && Player != "" && venues.TryGetValue(shop != null ? shop.LayoutKey ?? "" : "", out var left))
                         {
                             stands[Player].body.transform.localPosition = DoorOf(left.v) - new Vector2(0f, 0.8f); // out on its step, facing the street
                             pFacing = 3;
                             stands[Player].body.sprite = playerIdle[3];
                             lookX = PlayerAt.x; // the circle opens on them
                         }
+                        hopTo = -1;
                         Retarget();
-                        Cover(true, shown == "town" ? Door() : Inside());
+                        Cover(true, openAt);
                         phase = 2;
                     }
                 }

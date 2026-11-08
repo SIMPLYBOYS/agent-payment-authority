@@ -251,8 +251,8 @@ public class LayoutTests
         var t = town.traffic;
         foreach (var a in town.walk)
         {
-            Assert.IsTrue(a.x >= town.x0 && a.x + a.w <= town.w && a.y >= 0f && a.y + a.h <= town.h, "walk " + a.x + "," + a.y + " off the map");
-            bool road = a.y < t.top && a.y + a.h > t.bottom;
+            Assert.IsTrue((a.x >= town.x0 && a.x + a.w <= town.w || town.apart.Any(s => a.x >= s.x && a.x + a.w <= s.y)) && a.y >= 0f && a.y + a.h <= town.h, "walk " + a.x + "," + a.y + " off the map");
+            bool road = a.x < town.w && a.y < t.top && a.y + a.h > t.bottom; // the town's road (the beach apart has none)
             Assert.IsFalse(road && (a.x < t.from || a.x + a.w > t.to), "walk " + a.x + "," + a.y + " on the road off the crossing");
             foreach (var v in town.venues)
             {
@@ -288,6 +288,14 @@ public class LayoutTests
         far.AddRange(new[] { new Vector2(-50f, 46f), new Vector2(-12.5f, 46f), new Vector2(135f, 40f), new Vector2(122f, 46.5f) });
         foreach (var p in far)
             Assert.IsTrue(seen.Contains(new Vector2Int(Mathf.FloorToInt(p.x / c), Mathf.FloorToInt(p.y / c))), "the pavement at " + p + " unreachable from the start");
+        Assert.AreEqual(0, town.subway.Length % 2, "the subway's stairs in pairs");
+        foreach (var st in town.subway)
+        {
+            Assert.IsTrue(On(st.at) && On(st.step), "the stairs at " + st.at + " and their step on the walk");
+            Assert.Greater((st.step - st.at).magnitude, TownView.DoorReach, "the step " + st.step + " out of the stairs' reach");
+        }
+        if (town.subway.Length > 0)
+            Assert.IsTrue(seen.Contains(new Vector2Int(Mathf.FloorToInt(town.subway[0].at.x / c), Mathf.FloorToInt(town.subway[0].at.y / c))), "the town's subway stairs unreachable from the start");
     }
 
     // Every scene the host's UX3 catalog names has its room.

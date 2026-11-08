@@ -85,12 +85,18 @@ def render_town(out_dir, m, town, x0, y0, x1, y1):
                     t.alpha_composite(s, (xx, yy))
             s = t
         x, y = px(ox + p["x"], oy + p["y"])
-        draws.append((o, seq, s, x - (s.width // 2 if centre else 0), y - s.height))
+        draws.append((o, seq, s, x - (s.width // 2 if centre and not p.get("w") else 0), y - s.height))  # tiled: from its bottom left, as TownView
 
     for i, g in enumerate(town["ground"]):
         piece(g, 0, 0, -1000 + i, i, False)
     for i, p in enumerate(town["props"]):
         piece(p, 0, 0, order(p["y"]), 1000 + i, True)
+    for tr in town.get("trains", []):  # the cars' outsides, west to east from x (TownView: the trains)
+        x = tr["x"]
+        for k in tr["cars"]:
+            w = art(m, k).width / 32
+            piece({"key": k, "x": x + w / 2, "y": tr["y"]}, 0, 0, order(tr["y"]) - 1, 1900, True)
+            x += w
     for v in town["venues"]:
         bottom = min(e["y"] for e in v["exterior"])
         for i, e in enumerate(v["exterior"]):
