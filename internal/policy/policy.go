@@ -23,6 +23,15 @@ type Profile struct {
 	TaskCap      contracts.Amount `json:"task_cap"`
 	Merchants    []string         `json:"merchants"` // allowed payTo addresses
 	Mode         string           `json:"mode"`      // interactive | unattended
+	// Velocity (docs/commercial-velocity.md): at most Max purchases decided Allow or Ask for one consumer,
+	// across its tasks and shops, within WindowSeconds; the next is Deny VELOCITY_LIMIT. Absent: no limit.
+	Velocity *Velocity `json:"velocity,omitempty"`
+}
+
+// Velocity is a profile's rate limit (docs/commercial-velocity.md Z1-Z3).
+type Velocity struct {
+	Max           uint64 `json:"max"`
+	WindowSeconds uint64 `json:"window_seconds"`
 }
 
 // Credential is a consumer's authorization condition. In M1 it is a fixture:
@@ -72,6 +81,8 @@ func (p Profile) Validate() error {
 		return fmt.Errorf("merchants must be a list of lowercase 0x addresses")
 	case p.Mode != "interactive" && p.Mode != "unattended":
 		return fmt.Errorf("mode must be interactive or unattended")
+	case p.Velocity != nil && (p.Velocity.Max == 0 || p.Velocity.WindowSeconds == 0 || p.Velocity.WindowSeconds > 86400):
+		return fmt.Errorf("velocity is at least one purchase within 1 to 86400 seconds")
 	}
 	return nil
 }
@@ -106,6 +117,9 @@ type RuleInput struct {
 	Amount, Remaining       uint64
 	ValidAfter, ValidBefore uint64
 	Now                     uint64
+	// Recent: the consumer's purchases decided Allow or Ask within the profile's velocity window, before this
+	// one (trusted state, the Store's count in the same transaction); 0 without a velocity.
+	Recent uint64
 }
 
 // RuleOutcome is a kind and a reason code: Denied with the first failing
@@ -115,7 +129,8 @@ type RuleOutcome struct{ Kind, Reason string }
 
 // Rules is the contract-neutral judgement both decision entries share, in
 // this order: CONFIG_MISSING, ASSET_NOT_ALLOWED, MERCHANT_NOT_ALLOWED,
-// AUTHORIZATION_EXPIRED, INSUFFICIENT_BUDGET; then within allow_max; then
+// AUTHORIZATION_EXPIRED, INSUFFICIENT_BUDGET, VELOCITY_LIMIT (a profile with a
+// velocity, the consumer's recent purchases at its max); then within allow_max; then
 // an unattended profile is APPROVER_UNAVAILABLE; else a human must approve.
 // It parses nothing, hashes nothing, decides no payment capability and
 // reads no clock.
@@ -137,6 +152,8 @@ func Rules(in RuleInput) RuleOutcome {
 		return RuleOutcome{Denied, "AUTHORIZATION_EXPIRED"}
 	case in.Amount > in.Remaining:
 		return RuleOutcome{Denied, "INSUFFICIENT_BUDGET"}
+	case p.Velocity != nil && in.Recent >= p.Velocity.Max:
+		return RuleOutcome{Denied, "VELOCITY_LIMIT"}
 	case in.Amount <= allowMax:
 		return RuleOutcome{WithinAllowMax, "WITHIN_ALLOW_MAX"}
 	case p.Mode == "unattended":

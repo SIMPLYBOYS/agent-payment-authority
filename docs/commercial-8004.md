@@ -127,3 +127,34 @@
 - 孩子（`consumer-b`）是 **agent 10574**：`…/10574`。三筆交易：register `0x7000…1c86`、URI `0xb9b6…5e1a`、清掉 agentWallet `0xa7bb…20ed`。
 - 另外用一份獨立的 Python 腳本唯讀核對鏈上（不經過專案的 Go 程式）：兩位的擁有者都是 issuer，`agentWallet` 都是 0；`tokenURI` 解出來就是核准的那兩份，`registrations` 寫著各自的號碼，付款錢包是 `0x2456…3554`、`0xba5f…8667`，標明未證明。sha256 與 `var/p2-testnet/host/agents.json` 相同，`registry.json` 兩位客人的 `agent_registry_ref` 已寫入。
 - 還沒做：畫面上的身分列和 checker 的 `agents`，要一場新的 testnet 才看得到（頁面只在有付款之後讀 `/chain`；舊的證據包 registry 沒有這個欄位）。**Aaron 11/4：不單獨跑（原本提議的 id1），併進錄影前的 testnet 彩排**，同一場也驗證 apa-facilitator 在 testnet 上結算與頻率限制。
+
+## 8 由 Signer 證明付款錢包（E3 B，Aaron 11/7 重開 A）
+
+> Aaron 11/7：「請重開 A 並按照排序完成任務」，這是第 1 項（另外兩項是退款與頻率限制）。原本 E3 選 A：註冊檔只宣告付款錢包，`agentWallet` 清空。這次改成 B：付款錢包自己簽一份同意，registry 才把它設成這位 Agent 的 `agentWallet`。
+
+**規格**（官方合約 `IdentityRegistryUpgradeable` 2.0.0，11/7 讀原始碼）：
+- `setAgentWallet(agentId, newWallet, deadline, signature)`：只有擁有者（或被授權的 operator）能送。
+- 簽章是 `newWallet` 對 EIP-712 `AgentWalletSet(uint256 agentId,address newWallet,address owner,uint256 deadline)` 的簽章，domain 是 `ERC8004IdentityRegistry`、版本 `1`、鏈號與 registry（proxy）的地址；合約錢包走 ERC-1271。
+- `deadline` 不能已過，也不能超過 5 分鐘之後。NFT 轉手時 `agentWallet` 會被清掉。
+
+**做法**：
+- **Signer**（`internal/signer/agentwallet.go`）：多一條路徑 `POST /v1/agent-wallet`，請求只寫錢包 ID 與期限。
+  - Signer 只替 `/opt` 的 signer.json 裡 `agents` 登記的那一位 Agent 簽：哪條鏈、哪個 registry、哪個號碼、擁有者是誰，都由管理者寫死，請求改不了。所以 Host 就算被攻破，也不能讓錢包同意別的 Agent，或同意轉手後的新擁有者。
+  - 期限必須在 Signer 的時間之後、5 分鐘之內；什麼都不記，期限過了 registry 自己會拒絕，重設同一個錢包也不會改變任何東西。
+  - 簽的 domain 是 registry 的，不是任何代幣的，所以這份簽章不能拿去當付款授權。這是 Signer 除了 EIP-3009 之外唯一會簽的東西。
+- **`p2-testnet agent-wallet --dir DIR`**：讀 `agents.json`，鏈上已經是付款錢包的就跳過；印出計畫、要打 `yes`、輸入 issuer 的密語（relayer 要停著，理由同 I1）。每一位：向 Signer 要同意（期限是最新區塊時間加 4 分鐘），核對 Signer 簽的正是這位 Agent、這個錢包與擁有者；先模擬（簽章不對就在模擬時被拒，什麼都不送），交易先寫進 `agents.json`（`agent_wallet_tx`）再送出；送完向鏈上讀回 `getAgentWallet`。
+- **`p2-testnet opt-signer`**：有 `agents.json` 時，替 `wallet-a`、`wallet-b` 各寫一筆 `agents`。
+- **Host**（`cmd/demo/chain.go`）：`/chain` 多回 `agent_wallet`，是 Host 向鏈讀到的 `getAgentWallet`（設定了就記住）。
+- **畫面**：`agent_wallet` 等於這個 task 的付款錢包時，「為什麼可信」寫「ERC-8004・平台代為註冊・付款錢包已由錢包簽章證明」，收據寫「ERC-8004 #N（付款錢包已證明）」。
+- **checker**：`agents` 每一筆多一欄 `agent_wallet_is_consumer_wallet`，只列事實，不影響 claim。
+- 註冊檔不改：鏈上那份仍寫 `payment_wallet_proven: false`（當時的事實）；證明是 `agentWallet`，不是註冊檔。要改註冊檔得多兩筆 `setAgentURI`，而且內容永久公開，所以先不做。
+
+**驗證（11/7，本機）**：
+- `TestAgentConfig`：`agents` 一個錢包只能一筆、要在錢包的鏈上、號碼不為 0、地址小寫。
+- `TestAgentWallet`（Signer）：只簽登記的那一位；簽章的確是錢包的；domain 與型別都不是 EIP-3009 的；期限是現在、超過 5 分鐘、別的錢包、沒登記的錢包都拒絕；紀錄不含簽章。
+- `TestAgentWallet`（`p2-testnet`，本機 anvil）：`contracts/src/TestAgentRegistry.sol` 照 2.0.0 加上 `setAgentWallet` 與 EIP-712 驗章。沒有 `yes` 不送；Signer 同意的是別的號碼，就不送；兩筆都先記錄再送出，送完兩位的 `agentWallet` 都是自己客人的錢包；再跑一次什麼都不問、不送。
+- 反向檢查：把 Go 這邊的 domain 名稱改錯，模擬時合約回 `invalid wallet sig`，測試失敗、什麼都沒送。
+- `TestOptSigner`、`TestChainViewUsesTheTasksPayerAndEachShop`、`TestE1aAgents`、`show.test.mjs` 各加了對應的情況。
+- 本機鏈沒有官方 registry（E6 A），畫面不顯示身分列；真正的 domain 要在 Base Sepolia 上由模擬確認。
+
+**還沒做（要 Aaron）**：提交；`/opt` 換新的 Signer 與 signer.json（sudo）；在 Base Sepolia 送兩筆 `setAgentWallet`（issuer 付 gas，要 Aaron 核准）；之後的 testnet 場次才看得到畫面上的「已證明」與 checker 的新欄位。

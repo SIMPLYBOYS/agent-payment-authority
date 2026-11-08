@@ -292,3 +292,29 @@ test("the services' readiness rows", () => {
   assert.deepEqual(A.serviceRows({ signer: "timeout", voice: "unknown", relayer: "timeout" }).map(([k, s]) => k + ":" + s), ["Signer:error", "語音服務:unconfirmed", "relayer:error"]); // a hung service is an error
   assert.equal(A.voiceText(""), "原因未回報");
 });
+
+test("refund (docs/commercial-refund.md): a failed delivery refunded is its own phase, worded on the card, the window and Unity's label", () => {
+  const paid = [...allowed(), ev(4, "PAYMENT_REQUESTED"), ev(5, "BUDGET_RESERVED"), ev(6, "PAYMENT_SIGNED"), ev(7, "PAYMENT_SUBMITTED"), ev(8, "PAYMENT_SETTLED"),
+    ev(9, "PAYMENT_NEEDS_REVIEW", { code: "DELIVERY_FAILED" })];
+  const evs = [...paid, ev(10, "PAYMENT_REFUNDED")];
+  const sc = A.scene(view(evs, undefined));
+  assert.equal(sc.phase, "refunded");
+  assert.equal(sc.cause, 10);
+  assert.equal(A.projection({ snapshot: view(evs, undefined), gen: 1 }, false).phase, "refunded");
+  assert.equal(A.scene(view([...allowed(), ev(4, "PAYMENT_REFUNDED")], undefined)).phase, "allowed_unpaid", "a refund of nothing paid changes nothing");
+  const pv = { status: "refunded", state: "needs_review", code: "DELIVERY_FAILED", settle_tx: tx2, settle_block: 12, refund_tx: "0x" + "3".repeat(64), refund_block: 15 };
+  assert.equal(A.paymentText(pv), "已付款（區塊 12），交付失敗；商店已退款（區塊 15）");
+  assert.equal(A.paymentNext(pv), "");
+  assert.match(A.paymentNext({ status: "paid", state: "needs_review", code: "DELIVERY_FAILED" }), /按「商店退款」/);
+  // The window's customer: the delivery step says the refund; the host page offers the button only before it, on a paying host.
+  const snap = (events, payment, cap) => { const v = view(events, payment); v.task.payment_capability = cap; return v; };
+  const failed = A.showCustomer("consumer-a", snap(paid, { status: "paid", state: "needs_review", code: "DELIVERY_FAILED", settle_tx: tx2 }, "local_anvil"), null, {});
+  assert.deepEqual(failed.refund, { task: "show-a-01", po: "po-1" });
+  assert.equal(A.showCustomer("consumer-a", snap(paid, { status: "paid", state: "needs_review", code: "DELIVERY_FAILED" }, ""), null, {}).refund, null, "a host that does not pay");
+  const done = A.showCustomer("consumer-a", snap(evs, pv, "local_anvil"), null, {});
+  assert.equal(done.refund, null);
+  assert.deepEqual([done.steps[4].state, done.steps[4].text], ["fail", "交付失敗；商店已退款（第 3 筆鏈上交易），錢回到客人的錢包"]);
+  const items = A.showEvidence(snap(evs, pv, "local_anvil"), {}, null);
+  const refund = items.find((x) => x.label === "6 退款");
+  assert.ok(refund && refund.text.startsWith("0x3333") && refund.note.includes("第 3 筆"), JSON.stringify(items));
+});

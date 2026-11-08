@@ -87,13 +87,14 @@ class Preflight(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("relayer 今天已送 8／12 筆", out)
 
-    def test_town_needs_three_venues(self):
-        # The town on the real Agent with the mart (docs/commercial-venues.md): 11 relayer transactions, 0.67 a wallet.
-        code, out = run({**READY, "sent_today": 2}, 660000, 9 * 10**13, town=True)
+    def test_town_needs_five_venues(self):
+        # The town on the real Agent with the hotel and the post office (docs/commercial-post-hotel.md, Aaron 11/7):
+        # 18 relayer transactions, 0.75 a wallet; the relayer's cap raised for it.
+        code, out = run({**READY, "daily_tx_cap": 20, "sent_today": 3}, 740000, 9 * 10**13, town=True)
         self.assertEqual(code, 1, out)
-        self.assertIn("relayer 今天只剩 10 筆，三個場域、每場兩位客人要 11 筆", out)
-        self.assertIn("只有 0.66 test USDC，三個場域、每場兩位客人要 0.67", out)
-        code, out = run({**READY, "sent_today": 1}, 670000, 9 * 10**13, town=True)
+        self.assertIn("relayer 今天只剩 17 筆，五個場域、每場兩位客人要 18 筆", out)
+        self.assertIn("只有 0.74 test USDC，五個場域、每場兩位客人要 0.75", out)
+        code, out = run({**READY, "daily_tx_cap": 20, "sent_today": 2}, 750000, 2 * 10**14, town=True)  # five venues: five times the gas
         self.assertEqual(code, 0, out)
 
     def test_short_says_each(self):

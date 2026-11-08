@@ -214,6 +214,51 @@ func TestE1aSettlementSenders(t *testing.T) {
 	}
 }
 
+// docs/commercial-refund.md: a refund is E4's too: confirmed, the purchase's whole amount back to its payer
+// from its own sender, listed with the settlement; E8 does not count it (nothing leaves a payer wallet).
+func TestE1aRefund(t *testing.T) {
+	tx3 := "0x" + strings.Repeat("3", 64)
+	refunded := func(change func(c *chainCase, shop, payer eth.Address)) *chainCase {
+		cc := newChainCase(t)
+		shop, _ := eth.ParseAddress("0x6bbe84371eab1a980ba862b90474a7e8e9bb773e")
+		payer, _ := eth.ParseAddress(cc.run.orders[0].PaymentBinding.From)
+		amount := word(big.NewInt(500000).Bytes())
+		cc.run.events = append(cc.run.events, contracts.AuditEvent{EventType: "PAYMENT_REFUNDED", Scope: cc.run.events[2].Scope,
+			Payload: contracts.EventPayload{Payment: &contracts.PaymentRecord{TxHash: tx3}}})
+		cc.chain.txs[tx3] = map[string]string{"from": shop.Hex()}
+		cc.chain.receipts[tx3] = &eth.Receipt{Status: 1, BlockNumber: 20, Logs: []eth.Log{{Address: eth.Address{0x36}, Topics: [][32]byte{transferTopic, word(shop[:]), word(payer[:])}, Data: amount[:]}}}
+		if change != nil {
+			change(cc, shop, payer)
+		}
+		return cc
+	}
+	cc := refunded(nil)
+	var f findings
+	sent := e1aOnChain(&f, cc.m, map[string]*e1aRun{"task-a": cc.run}, cc.chain, "../..")
+	if v := f.verdicts(E1aClaims); v["E4"] != Pass || v["E8"] != Pass || len(sent) != 1 || sent[0].Refund == nil || sent[0].Refund.Transaction != tx3 ||
+		sent[0].Refund.SentBy != "0x6bbe84371eab1a980ba862b90474a7e8e9bb773e" {
+		t.Fatalf("a refund: %+v %v", sent, v)
+	}
+	for name, c := range map[string]struct {
+		change   func(c *chainCase, shop, payer eth.Address)
+		want, e8 Verdict
+	}{
+		"reverted":     {func(c *chainCase, _, _ eth.Address) { c.chain.receipts[tx3].Status = 0 }, Fail, Pass},
+		"not deep yet": {func(c *chainCase, _, _ eth.Address) { c.chain.latest = 20 }, Inconclusive, Inconclusive}, // the node is before the pack's end too
+		"part of the amount": {func(c *chainCase, _, _ eth.Address) {
+			one := word(big.NewInt(1).Bytes())
+			c.chain.receipts[tx3].Logs[0].Data = one[:]
+		}, Fail, Pass},
+		"to another wallet":   {func(c *chainCase, _, _ eth.Address) { c.chain.receipts[tx3].Logs[0].Topics[2][31] ^= 1 }, Fail, Pass},
+		"not from its sender": {func(c *chainCase, _, payer eth.Address) { c.chain.txs[tx3] = map[string]string{"from": payer.Hex()} }, Fail, Pass},
+	} {
+		cc := refunded(c.change)
+		if v := cc.check(); v["E4"] != c.want || v["E8"] != c.e8 {
+			t.Errorf("%s: E4 %s, want %s; E8 %s, want %s", name, v["E4"], c.want, v["E8"], c.e8)
+		}
+	}
+}
+
 // I3 (docs/commercial-8004.md): each consumer the registry names an Agent for
 // is listed with what its registry answers: the owner, no agentWallet, the
 // file's sha256 and its declared wallet, the consumer's own or not. On
@@ -256,6 +301,21 @@ func TestE1aAgents(t *testing.T) {
 		}
 		a := got[0]
 		if read := a.Owner == owner && a.AgentWallet == "0x"+strings.Repeat("0", 40) && len(a.URISHA256) == 64 && a.DeclaredWallet == c.wallet; read != c.read || a.DeclaredIsConsumers != c.is {
+			t.Errorf("%s: %+v", name, a)
+		}
+		if a.AgentWalletIsConsumers {
+			t.Errorf("%s: no agentWallet reads as the consumer's", name)
+		}
+	}
+	// §8 (11/7): the registry's agentWallet, set on the wallet's own signature: the consumer's, or another's.
+	for name, c := range map[string]struct {
+		wallet string
+		is     bool
+	}{"the consumer's wallet": {reg.Wallets[0].From, true}, "another wallet": {reg.Wallets[1].From, false}} {
+		w, _ := eth.ParseAddress(c.wallet)
+		ww := word(w[:])
+		sc := &stubChain{id: 84532, calls: map[string][]byte{call("ownerOf(uint256)"): ownerWord[:], call("getAgentWallet(uint256)"): ww[:], call("tokenURI(uint256)"): file(reg.Wallets[0].From)}}
+		if a := e1aAgents(sc, reg)[0]; a.AgentWalletIsConsumers != c.is || !strings.EqualFold(a.AgentWallet, c.wallet) {
 			t.Errorf("%s: %+v", name, a)
 		}
 	}

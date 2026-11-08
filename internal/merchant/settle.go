@@ -97,7 +97,7 @@ func OpenSettler(ctx context.Context, cfg SettleConfig, gas *eth.Key, rpc *eth.C
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.ExecContext(ctx, settleSchema); err != nil {
+	if _, err := db.ExecContext(ctx, settleSchema+refundSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -406,9 +406,12 @@ func (s *Settler) prepare(ctx context.Context, data []byte) (raw, hash []byte, n
 		return unavailable()
 	}
 	var floor, stale sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `SELECT (SELECT max(tx_nonce) + 1 FROM settlements WHERE state = 'sent'),
+	// A refund (refund.go) takes the gas key's nonces as a settlement does: its unfinished ones count, and a
+	// failed settlement's nonce a refund took is not taken again.
+	if err := s.db.QueryRowContext(ctx, `SELECT (SELECT max(n) + 1 FROM (SELECT tx_nonce AS n FROM settlements WHERE state = 'sent' UNION ALL SELECT tx_nonce FROM refunds WHERE state = 'sent')),
 		(SELECT min(tx_nonce) FROM settlements f WHERE state = 'failed' AND tx_nonce >= ?
-			AND NOT EXISTS (SELECT 1 FROM settlements o WHERE o.state <> 'failed' AND o.tx_nonce = f.tx_nonce))`, mined).Scan(&floor, &stale); err != nil {
+			AND NOT EXISTS (SELECT 1 FROM settlements o WHERE o.state <> 'failed' AND o.tx_nonce = f.tx_nonce)
+			AND NOT EXISTS (SELECT 1 FROM refunds r WHERE r.state <> 'failed' AND r.tx_nonce = f.tx_nonce))`, mined).Scan(&floor, &stale); err != nil {
 		return nil, nil, 0, fees, "settlement_store_unavailable"
 	}
 	var replace *eth.Fees
@@ -504,6 +507,28 @@ func (s *Settler) settleOpen(ctx context.Context) error {
 		raw, _ := hex.DecodeString(x[2])
 		s.rpc.SendRaw(ctx, raw) // known, mined or dropped: its check says
 		s.decide(ctx, x[0], x[1], false)
+	}
+	// Unfinished refunds the same way: sent again, decided when they can be without waiting.
+	refunds, err := s.db.QueryContext(ctx, `SELECT settle_tx, raw_tx FROM refunds WHERE state = 'sent'`)
+	if err != nil {
+		return err
+	}
+	var sent [][2]string
+	for refunds.Next() {
+		var x [2]string
+		if err := refunds.Scan(&x[0], &x[1]); err != nil {
+			refunds.Close()
+			return err
+		}
+		sent = append(sent, x)
+	}
+	if err := errors.Join(refunds.Err(), refunds.Close()); err != nil {
+		return err
+	}
+	for _, x := range sent {
+		raw, _ := hex.DecodeString(x[1])
+		s.rpc.SendRaw(ctx, raw)
+		s.refunding(ctx, x[0], false)
 	}
 	return nil
 }

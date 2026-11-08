@@ -339,6 +339,14 @@ test("the receipt card: only once delivered with a receipt; two transactions, no
   const trust = A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], withAddr), {}, { ...chain, agent: REF });
   assert.deepEqual([trust[0].label, trust[0].text, trust[0].note], ["Agent 身分", "ERC-8004 #10569", "ERC-8004・平台代為註冊"]);
   assert.equal(trust[1].label, "1 委託");
+  // §8 (11/7): the registry's agentWallet is the task's payer wallet, read on chain: proven, on both; another wallet's is not.
+  const bound = { ...chain, agent: REF, agent_wallet: PAYER.toLowerCase() };
+  assert.equal(A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], withAddr), {}, bound)[0].note, "ERC-8004・平台代為註冊・付款錢包已由錢包簽章證明");
+  const proven = Object.fromEntries(A.showReceipt(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], withAddr), {}, bound).rows.map((x) => [x.label, x]));
+  assert.equal(proven["Agent 身分"].text, "ERC-8004 #10569（付款錢包已證明）");
+  const other = { ...bound, agent_wallet: SHOP };
+  assert.equal(A.showEvidence(snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], withAddr), {}, other)[0].note, "ERC-8004・平台代為註冊", "another wallet: not proven");
+  assert.equal(A.walletProven({ agent_wallet: PAYER }), false, "no payer: not proven");
   // B2 (11/5): before any payment (B's beer, denied) the host page passes the identity alone (chainOf): shown first all the same.
   const denied = A.showEvidence(snap(base("Deny", "CREDENTIAL_CLAIM_UNMET"), withAddr), {}, { agent: REF });
   assert.deepEqual([denied[0].label, denied[0].text], ["Agent 身分", "ERC-8004 #10569"]);

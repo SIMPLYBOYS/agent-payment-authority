@@ -2,6 +2,7 @@
 
 > 2026-11-04，Claude Code。Aaron 11/3：「就依照這個順序把剩下的功能做完」的第 5 項，也是 A 階段的最後一項；做完就不再加功能（Aaron 11/4 同意 A～D 的方向）。FUTUREMODE 筆記列的確定性檢查有五項：task、asset、network、expiry、**velocity**，前四項都有了。
 > **Aaron 11/4 的決定：不做，列進 D（下一期）。** 先前「照建議」（Z1～Z4 A）之後，查程式發現第 1 節的更正與 Z4 做不到；再看過長期的負面影響（第 7 節）後改為不做。屆時 Host 的 Policy 與 Signer 一起做。
+> **Aaron 11/7：重開 A，照建議做，Host 與 Signer 都加**（Z1 A、Z2 A、Z3 A；第 3 項，另外兩項是付款錢包證明與退款）。做法與驗證在第 8 節。
 
 ## 1 現況
 
@@ -71,3 +72,19 @@
 6. **testnet 設定要另外寫進新場次**；以及時間成本。
 
 在這個展示裡，單一 task 能買的筆數本來就受限於場景的商品數（第 1 節），做了擋不到實際的風險，卻多了現場被誤擋的可能。下一期要做時，Host 與 Signer 一起做，說法才完整。照實說的限制已更新（`docs/architecture.md`）。
+
+## 8 實作（Aaron 11/7 重開 A）
+
+照第 2 節與 Z1～Z3 A：
+- **Policy**（`internal/policy`）：profile 多一個可選的 `velocity: {max, window_seconds}`；`policy.Rules` 多一個可信的輸入 `Recent`，在 `INSUFFICIENT_BUDGET` 之後、判 Allow 或 Ask 之前：`Recent >= max` 就 Deny `VELOCITY_LIMIT`。沒有設定就不檢查，舊的 profile 照舊。
+- **Store**（`internal/store/pay.go`）：決定的同一個交易裡，算這位客人所有 task 在時間窗內被判 Allow 或 Ask 的請購（Deny 不算），交給 Policy。
+- **契約**：`apa.pay.v1`、`v2` 的原因清單多 `VELOCITY_LIMIT`，契約版本號不變。
+- **Signer 備援**（`internal/signer/core.go`）：signer.json 多一個可選的 `velocity`；接受一筆付款前，算這個錢包時間窗內已接受或已簽的筆數，滿了就拒絕 `VELOCITY_LIMIT`，什麼都不保留。Host 算的是 Allow 與 Ask 的決定，永遠不少於 Signer 簽的筆數，所以正常情況下 Host 先擋；Signer 這道是 Host 被攻破時的備援。它在 tx#1 預留之後才會遇到，所以真的遇到時畫面是「預算已預留、付款沒有送出」，主持人頁的下一步寫「Signer 的頻率上限……停下這一場，找開發者」。
+- **在哪裡啟用**：`p2-testnet e1a-host` 寫的每一個 run set 的 profile（`--velocity`，預設 `5/600`；來源沒有 profile 時用 Host 預設的那份加上 velocity），也就是真實 Agent 的城鎮（本機彩排與 testnet）。`opt-signer` 寫的 `/opt` signer.json 與本機開發用 Signer（`scripts/demo/p2-signer-config.py`）都是 5 筆／600 秒。fake 的展示與拍影片的 harness 沒有，所以畫面上不會出現（Z4 B）。
+- **文字**：頁面與 Unity 寫「短時間內請購太多次」（Unity 的字型補了「短間太多次」5 個字）。
+
+**驗證（本機）**：
+- `TestRulesOrder`：`VELOCITY_LIMIT` 排在 `INSUFFICIENT_BUDGET` 之後；第 5 筆照常、第 6 筆擋下；profile 沒有 velocity 就不檢查；`max` 0、時間窗 0 或超過一天都不接受。
+- `TestVelocityLimit`（Store）：同一位客人兩個 task 合計到上限後，下一筆被擋；另一位客人不受影響；被擋的那筆不算；最早那筆離開時間窗後又可以買；重新開啟資料庫的完整性檢查接受這個 Deny。
+- `TestSignerVelocity`：同一個錢包時間窗內第 3 筆（上限 2）拒絕，什麼都沒保留；別的錢包不受影響；時間窗過了又可以簽；設定格式。
+- `TestE1aHost`、`TestOptSigner`：run set 的 profile 與 `/opt` signer.json 都帶 5 筆／600 秒。

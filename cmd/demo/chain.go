@@ -13,6 +13,7 @@ import (
 	"errors"
 	"math/big"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,7 @@ var (
 type chainNode interface {
 	BlockNumber(ctx context.Context) (uint64, error)
 	Receipt(ctx context.Context, hash []byte) (*eth.Receipt, error)
+	Call(ctx context.Context, m eth.Msg) ([]byte, error)
 }
 
 // chainTx is one transaction as the chain has it.
@@ -70,6 +72,9 @@ type chainReply struct {
 	// Agent: the task's consumer's Agent identity (ERC-8004, CAIP-19) as the trusted registry names it
 	// (docs/commercial-8004.md I2); the audience looks it up on the explorer, the checker reads it on chain.
 	Agent string `json:"agent,omitempty"`
+	// AgentWallet: that Agent's agentWallet as its registry has it on chain, which the registry sets only on
+	// the wallet's own signature (docs/commercial-8004.md §8); none when unset or not read.
+	AgentWallet string `json:"agent_wallet,omitempty"`
 }
 
 // hexOrNone: an address as 0x hex, "" for the zero address (not known).
@@ -89,6 +94,42 @@ type chainReader struct {
 	agents   map[string]string // consumer -> its Agent's agent_registry_ref (the trusted registry's)
 	mu       sync.Mutex
 	kept     map[string]chainTx
+	wallets  map[string]string // ref -> its agentWallet, once set (a transfer of the Agent would unset it: ponytail, a host runs one session)
+}
+
+var chainAgentRef = regexp.MustCompile(`^eip155:[0-9]+/erc721:(0x[0-9a-fA-F]{40})/([0-9]+)$`)
+
+// agentWallet: the ref's agentWallet on chain, "" when unset or the node does not answer (the payments still show).
+func (c *chainReader) agentWallet(ctx context.Context, ref string) string {
+	m := chainAgentRef.FindStringSubmatch(ref)
+	if m == nil {
+		return ""
+	}
+	c.mu.Lock()
+	w, ok := c.wallets[ref]
+	c.mu.Unlock()
+	if ok {
+		return w
+	}
+	registry, _ := eth.ParseAddress(strings.ToLower(m[1]))
+	id, _ := new(big.Int).SetString(m[2], 10)
+	data, _ := eth.Call("getAgentWallet(uint256)", id)
+	b, err := c.node.Call(ctx, eth.Msg{To: registry, Data: data})
+	word, err2 := eth.Word(b, 0)
+	if errors.Join(err, err2) != nil {
+		return ""
+	}
+	a, err := eth.WordAddress(word)
+	if err != nil || a == (eth.Address{}) {
+		return ""
+	}
+	c.mu.Lock()
+	if c.wallets == nil {
+		c.wallets = map[string]string{}
+	}
+	c.wallets[ref] = a.Hex()
+	c.mu.Unlock()
+	return a.Hex()
 }
 
 // tx: one recorded transaction. A node that does not answer is an error
@@ -169,6 +210,9 @@ func (c *chainReader) view(ctx context.Context, capability string, rec store.Tas
 	payer, _ := eth.ParseAddress(rec.Binding.Payer) // a zero address matches no transfer
 	out := chainReply{Chain: capability, Head: head, Purchases: map[string]chainPurchase{}, Payer: hexOrNone(payer), Contract: hexOrNone(c.contract), Token: hexOrNone(c.token),
 		Agent: c.agents[rec.Binding.ConsumerID]}
+	if out.Agent != "" {
+		out.AgentWallet = c.agentWallet(ctx, out.Agent)
+	}
 	for _, p := range rec.Task.Purchases {
 		if p.Payment == nil || (p.Payment.ReserveTx == "" && p.Payment.SettleTx == "") {
 			continue

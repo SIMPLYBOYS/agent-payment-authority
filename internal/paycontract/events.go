@@ -21,11 +21,12 @@ var EventTypes = []string{"TASK_STARTED", "DELEGATION_BOUND", "PURCHASE_PROPOSED
 	"TASK_CANCELLED", "TASK_TIMED_OUT", "CLI_EXITED",
 	"VOICE_CHALLENGE_VERIFIED", "VOICE_CHALLENGE_FAILED", "VOICE_UNAVAILABLE", // V1: a voice outcome, just before the closure it leads to
 	"PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED",
-	"PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED"}
+	"PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED", "PAYMENT_REFUNDED"}
 
-// PaymentEvents are P2's payment events, in their order.
+// PaymentEvents are P2's payment events, in their order; PAYMENT_REFUNDED is the shop's refund of a payment
+// settled and not delivered, which a person asked for (docs/commercial-refund.md).
 var PaymentEvents = []string{"PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED",
-	"PAYMENT_NOT_SETTLED", "PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED"}
+	"PAYMENT_NOT_SETTLED", "PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED", "PAYMENT_REFUNDED"}
 
 // Ended: the stream has stopped taking new purchases or payments, as the
 // order rules see it (a Deny, a cancellation, a CLI timeout). A payment
@@ -232,7 +233,7 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 		}
 		return credentialCheck(p.Credential)
 	case "PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED",
-		"PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED":
+		"PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED", "PAYMENT_REFUNDED":
 		if !purchase {
 			return errf("%s needs a purchase", e.EventType)
 		}
@@ -363,6 +364,7 @@ func paymentEvent(e contracts.AuditEvent, order *PurchaseOrder) error {
 		"PAYMENT_SETTLED":    {"tx", "block"},
 		"RESOURCE_DELIVERED": {"content"},
 		"RECEIPT_ISSUED":     {"content", "receipt"},
+		"PAYMENT_REFUNDED":   {"amount", "tx", "block"}, // the whole amount back, in its own transaction
 	}[e.EventType]
 	codes := map[string][]string{"PAYMENT_NOT_SETTLED": NotSettledCodes, "PAYMENT_NEEDS_REVIEW": NeedsReviewCodes}[e.EventType]
 	switch {
@@ -387,7 +389,7 @@ func paymentEvent(e contracts.AuditEvent, order *PurchaseOrder) error {
 		r.ReceiptID != "" && !ids(r.ReceiptID):
 		return errf("%s: malformed payment record", e.EventType)
 	case r.Amount != "" && (order == nil || r.Amount != order.PaymentBinding.Amount):
-		return errf("the reservation is the purchase's amount")
+		return errf("%s: the amount is the purchase's", e.EventType)
 	}
 	return nil
 }
@@ -521,7 +523,7 @@ func (st *chain) apply(e contracts.AuditEvent) error {
 		st.granted[po] = true
 		st.grantMethod[po] = e.Payload.AuthorizationMethod
 	case "PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED",
-		"PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED":
+		"PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED", "PAYMENT_REFUNDED":
 		return st.payment(e, po)
 	case "TASK_CANCELLED", "TASK_TIMED_OUT":
 		if st.lifecycleEnded {
@@ -539,7 +541,11 @@ func (st *chain) apply(e contracts.AuditEvent) error {
 // in order, also after the task ended (a payment in flight is carried
 // through: its tx#1 may already be on chain). NOT_SETTLED ends one never
 // reserved; NEEDS_REVIEW one reserved and not settled, or settled and not
-// delivered (DELIVERY_FAILED). Nothing follows an end.
+// delivered (DELIVERY_FAILED). Nothing follows an end but one refund of a
+// payment settled and not delivered (PAYMENT_REFUNDED).
+// undelivered is the last payment step of one settled and not delivered: the one end a refund may follow.
+const undelivered = "PAYMENT_NEEDS_REVIEW DELIVERY_FAILED"
+
 func (st *chain) payment(e contracts.AuditEvent, po string) error {
 	last := st.paid[po]
 	method := map[string]string{"Allow": "delegation"}[st.verdict[po]]
@@ -569,6 +575,14 @@ func (st *chain) payment(e contracts.AuditEvent, po string) error {
 		reserved := slices.Contains([]string{"BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED"}, last)
 		if e.Payload.Code == "DELIVERY_FAILED" && last != "PAYMENT_SETTLED" || e.Payload.Code != "DELIVERY_FAILED" && !reserved {
 			return errors.New("NEEDS_REVIEW follows a reservation not settled, or a settlement not delivered (DELIVERY_FAILED)")
+		}
+		if e.Payload.Code == "DELIVERY_FAILED" {
+			st.paid[po] = undelivered
+			return nil
+		}
+	case t == "PAYMENT_REFUNDED":
+		if last != undelivered {
+			return errors.New("a refund follows a payment settled and not delivered (DELIVERY_FAILED), once")
 		}
 	default:
 		if last != after[t] {

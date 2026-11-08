@@ -938,6 +938,14 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
       ol.append(li);
     });
     box.append(ol);
+    if (m.refund) { // docs/commercial-refund.md: a person has the shop refund a failed delivery
+      const b = el("button", "present-refund", refunding === m.refund.po ? "退款中…" : "商店退款");
+      b.type = "button";
+      b.disabled = !!refunding;
+      b.title = "請商店把這一筆退回客人的錢包；Host 向鏈上確認後才記下";
+      b.addEventListener("click", () => refundPurchase(m.refund.task, m.refund.po));
+      box.append(b);
+    }
     if (m.receipt) {
       const r = el("div", "present-receipt");
       for (const row of m.receipt.rows.flatMap((x) => (x.parts ? x.parts.map((y) => ({ label: y.name + (x.label === "錢包" ? "錢包" : "合約"), text: y.text, href: y.href })) : [x]))) {
@@ -950,6 +958,27 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
     return box;
   }), ...(custs.note ? [el("p", "present-queue", custs.note)] : []));
   decorateCards(); // the steps card was rebuilt: its fold button again
+}
+
+// refunding: the purchase whose refund the Host is asked for (one at a time); "" none.
+let refunding = "";
+async function refundPurchase(taskId, po) {
+  if (refunding) return;
+  const g = creds.gen;
+  refunding = po;
+  shownPresent = "";
+  renderPresent();
+  setRunStatus("請商店退款中（等鏈上確認）…", "busy");
+  const r = await creds.refund(taskId, po);
+  refunding = "";
+  shownPresent = "";
+  if (g !== creds.gen || !r) return renderPresent();
+  if (r.error) setRunStatus("退款：沒有收到回覆，結果未確認；再按一次會問同一筆（商店只退一次）", "warn");
+  else if (r.status === 200) setRunStatus("商店已退款：錢已退回客人的錢包（鏈上確認）", "ok");
+  else if (r.status === 202) setRunStatus("退款已送出，鏈上還沒確認；稍後再按一次確認", "warn");
+  else setRunStatus("退款沒有完成（" + String((r.body && (r.body.reason || r.body.detail || r.body.error)) || r.status) + "）", "warn");
+  refreshNow();
+  renderPresent();
 }
 
 function renderControl() {

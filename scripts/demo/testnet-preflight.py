@@ -6,11 +6,13 @@ the Signer's delegations for the shop still run, from its signer.json.
 
     python3 -I scripts/demo/testnet-preflight.py RELAYER_SOCK HOST_DIR [--signer SIGNER.JSON] [town]
 
-town: the town on the real Agent (docs/commercial-live-town.md), three venues of two customers
-(docs/commercial-venues.md, Aaron 10/30): the relayer 11 (6 registrations, 5 reservations: B's
-beer is denied before any), three times the gas keys' transactions, and a wallet pays up to 0.67
-(A: the brief 0.50, the lunch 0.08, the beer 0.09; B: 0.06 and 0.42). The shop settles 5; the
-town's host has a daily cap of 6 (e1a-host --shop-cap; its count is in the Host's readiness table).
+town: the town on the real Agent (docs/commercial-live-town.md), five venues of two customers
+(docs/commercial-venues.md, Aaron 10/30; the hotel and the post office, docs/commercial-post-hotel.md,
+on the testnet too, Aaron 11/7): the relayer 18 (10 registrations, 8 reservations: B's beer and A's
+hotel room are denied before any), five times the gas keys' transactions, and a wallet pays up to
+0.75 (A: the brief 0.50, the lunch 0.08, the beer 0.09, the parcel 0.08; B: 0.06, 0.42, 0.05, 0.03).
+The shop settles 8 and refunds the parcel (not counted); the town's host has a daily cap of 9
+(e1a-host --shop-cap; its count is in the Host's readiness table).
 
 Prints one line per check. Exit 0: enough for one show of two customers
 (the relayer 4: two registrations, two reservations; each wallet one 0.50
@@ -100,9 +102,9 @@ def delegations(pay, signer, now):
 
 
 def check(sock, host, town=False, signer=None):
-    scenes = 3 if town else 1
-    need_relayer, need_usdc = (11, 670000) if town else (NEED_RELAYER, NEED_USDC)
-    show = "三個場域、每場兩位客人" if town else "一場兩位客人"
+    scenes = 5 if town else 1
+    need_relayer, need_usdc = (18, 750000) if town else (NEED_RELAYER, NEED_USDC)
+    show = "五個場域、每場兩位客人" if town else "一場兩位客人"
     h = health(sock)
     pay = json.load(open(host + "/payments.json"))
     reg = json.load(open(host + "/registry.json"))

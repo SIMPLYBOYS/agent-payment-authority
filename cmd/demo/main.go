@@ -424,6 +424,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		contract, _ := eth.ParseAddress(pay.cfg.BudgetContract) // both parsed at start (openPayments)
 		token, _ := eth.ParseAddress(pay.cfg.Token)
 		ui.chainRead = &chainReader{node: pay.rpc, contract: contract, token: token, depth: pay.cfg.Confirmations, kept: map[string]chainTx{}, agents: map[string]string{}}
+		ui.refunds = &refunder{shop: shop, node: pay.rpc, token: token, depth: pay.cfg.Confirmations, wait: pay.shopFor}
 		for _, c := range regCfg.Consumers {
 			if c.AgentRegistryRef != "" {
 				ui.chainRead.agents[c.ConsumerID] = c.AgentRegistryRef

@@ -26,6 +26,7 @@ type Input struct {
 	Check           *contracts.CredentialCheck // apa.pay.v2: the verifier's record of this purchase's presentation
 	Budget          policy.Budget
 	Now             uint64
+	Recent          uint64 // the consumer's purchases decided Allow or Ask within the profile's velocity window (policy.RuleInput)
 }
 
 // Decide returns the decision for one pay-family purchase, or an error
@@ -85,7 +86,7 @@ func Decide(reg *contracts.Registry, in Input) (contracts.PolicyDecision, error)
 	amount, _ := b.Amount.Units() // Validate checked it
 	asset, trusted := reg.TrustedAsset(b.ChainID, b.AssetContract)
 	out := policy.Rules(policy.RuleInput{Profile: in.Profile, Credential: in.Credential, AssetTrusted: trusted, AssetID: asset.AssetID, PayTo: b.PayTo,
-		Amount: amount, Remaining: remaining, ValidAfter: b.ValidAfter, ValidBefore: b.ValidBefore, Now: in.Now})
+		Amount: amount, Remaining: remaining, ValidAfter: b.ValidAfter, ValidBefore: b.ValidBefore, Now: in.Now, Recent: in.Recent})
 	d := contracts.PolicyDecision{Version: in.ContractVersion, IntentHash: hash, PaymentStatus: paycontract.PaymentNotEnabled,
 		PolicyVerdict: "Deny", ApprovalStatus: "not_requested", Reason: out.Reason}
 	switch {

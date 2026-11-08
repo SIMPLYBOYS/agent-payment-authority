@@ -90,7 +90,8 @@ func Evidence(r *RunConditions, e contracts.AuditEvent) (mode, source string, ok
 			return auth()
 		}
 		return "fixture", "host", true
-	case "PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED", "PAYMENT_NEEDS_REVIEW":
+	case "PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SIGNED", "PAYMENT_SUBMITTED", "PAYMENT_SETTLED", "PAYMENT_NOT_SETTLED", "PAYMENT_NEEDS_REVIEW",
+		"PAYMENT_REFUNDED":
 		return chain("")
 	case "RESOURCE_DELIVERED", "RECEIPT_ISSUED": // the host's shop delivers, not the chain
 		return chain("host_merchant")

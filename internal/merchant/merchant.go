@@ -9,6 +9,7 @@ package merchant
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -325,6 +326,15 @@ func New(baseURL string) (*Merchant, error) { return build(baseURL, products) }
 // docs/commercial-p2-host.md 9): the approval TTL, so a person has time to
 // approve an Ask. M1's shop keeps 60.
 const SettledTimeout = 300
+
+// Refund refunds the payment the shop settled in settleTx and did not deliver (docs/commercial-refund.md), by
+// its settlement; a shop that does not settle has none to refund.
+func (m *Merchant) Refund(ctx context.Context, settleTx string) RefundOutcome {
+	if m.settle == nil {
+		return RefundOutcome{Kind: "invalid", Reason: "refund_unavailable"}
+	}
+	return m.settle.Refund(ctx, settleTx)
+}
 
 // NewSettled builds the shop that settles its payments, itself (a *Settler,
 // P2-D3) or through a facilitator (a *Facilitated, docs/commercial-

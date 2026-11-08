@@ -564,3 +564,43 @@ func TestKeyVersionMismatch(t *testing.T) {
 		t.Fatalf("signed with another key: %+v %v", r, err)
 	}
 }
+
+// docs/commercial-velocity.md: the Signer's own rate limit, a backup to the Host's Policy: at most Max payments
+// of one wallet within the window, the next refused VELOCITY_LIMIT with nothing reserved; another wallet's do
+// not count; once the window has passed the wallet pays again.
+func TestSignerVelocity(t *testing.T) {
+	e := newEnv(t)
+	e.cfg.Velocity = &Velocity{Max: 2, WindowSeconds: 600}
+	c := e.core()
+	small := func(n int) spec { s := a(n); s.amount = "100000"; return s }
+	for i := 1; i <= 2; i++ {
+		if r, err := c.Sign(bg, e.req(fmt.Sprintf("request-%010d", i), small(i))); err != nil || r.State != "signed" {
+			t.Fatalf("payment %d: %+v %v", i, r, err)
+		}
+	}
+	before := count(t, c, "1 = 1")
+	if _, err := c.Sign(bg, e.req("request-0000000003", small(3))); code(err) != "VELOCITY_LIMIT" || count(t, c, "1 = 1") != before {
+		t.Fatalf("the 3rd within the window: %v (attempts %d -> %d)", err, before, count(t, c, "1 = 1"))
+	}
+	b := spec{"consumer-b", "agent-b", "wallet-b", keyB, merchant, "100000", 4, 60}
+	if r, err := c.Sign(bg, e.req("request-0000000004", b)); err != nil || r.State != "signed" {
+		t.Fatalf("another wallet: %+v %v", r, err)
+	}
+	e.now.Add(601)
+	if r, err := c.Sign(bg, e.req("request-0000000005", small(5))); err != nil || r.State != "signed" {
+		t.Fatalf("after the window: %+v %v", r, err)
+	}
+	bad := *e.cfg
+	for _, c := range []struct {
+		v  Velocity
+		ok bool
+	}{{Velocity{2, 600}, true}, {Velocity{0, 600}, false}, {Velocity{2, 0}, false}, {Velocity{2, 86401}, false}} {
+		raw, _ := json.Marshal(struct {
+			*Config
+			Velocity Velocity `json:"velocity"`
+		}{&bad, c.v})
+		if _, err := ParseConfig(raw); (err == nil) != c.ok {
+			t.Errorf("velocity %+v: %v", c.v, err)
+		}
+	}
+}

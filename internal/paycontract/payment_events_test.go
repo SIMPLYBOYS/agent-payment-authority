@@ -36,6 +36,7 @@ func TestPaymentEventOrder(t *testing.T) {
 	delivered, receipt := pay("RESOURCE_DELIVERED", &contracts.PaymentRecord{}, ""), pay("RECEIPT_ISSUED", &contracts.PaymentRecord{}, "")
 	notSettled, review := pay("PAYMENT_NOT_SETTLED", nil, "RESERVE_FAILED"), pay("PAYMENT_NEEDS_REVIEW", nil, "RESERVED_NOT_PAID")
 	deliveryFailed := pay("PAYMENT_NEEDS_REVIEW", nil, "DELIVERY_FAILED")
+	refunded := pay("PAYMENT_REFUNDED", &contracts.PaymentRecord{}, "") // docs/commercial-refund.md
 	cancelled := step{"TASK_CANCELLED", contracts.EventPayload{Code: "HOST_CANCELLED"}, false}
 	then := func(base []step, s ...step) []step { return append(append([]step{}, base...), s...) }
 	d := "delegation"
@@ -50,6 +51,12 @@ func TestPaymentEventOrder(t *testing.T) {
 		"reserved, not paid":                 {then(allowed, requested(d), reserved(d), signed(d), review), true},
 		"paid, not delivered":                {then(allowed, line[:5]...), true},
 		"paid, delivery failed":              {then(allowed, append(line[:5:5], deliveryFailed)...), true},
+		"paid, delivery failed, refunded":    {then(allowed, append(line[:5:5], deliveryFailed, refunded)...), true},
+		"refunded twice":                     {then(allowed, append(line[:5:5], deliveryFailed, refunded, refunded)...), false},
+		"refunded when delivered":            {then(allowed, append(line, refunded)...), false},
+		"refunded when settled, no review":   {then(allowed, append(line[:5:5], refunded)...), false},
+		"refunded when not paid":             {then(allowed, requested(d), reserved(d), signed(d), review, refunded), false},
+		"anything after a refund":            {then(allowed, append(line[:5:5], deliveryFailed, refunded, delivered)...), false},
 		"requested, then the task cancelled": {then(allowed, requested(d), cancelled, reserved(d), signed(d), submitted), true},
 		"reserved, then the task cancelled":  {then(allowed, requested(d), reserved(d), cancelled, signed(d), submitted), true},
 		"an open Ask requested":              {then(ask, requested("webauthn")), false},
@@ -117,6 +124,10 @@ func TestPaymentEventShape(t *testing.T) {
 		{"delivered, a malformed hash", "RESOURCE_DELIVERED", contracts.EventPayload{Payment: r(contracts.PaymentRecord{ContentSHA256: "xyz"})}, false},
 		{"receipt", "RECEIPT_ISSUED", contracts.EventPayload{Payment: r(contracts.PaymentRecord{ContentSHA256: sum, ReceiptID: "rcpt-1"})}, true},
 		{"receipt, no ID", "RECEIPT_ISSUED", contracts.EventPayload{Payment: r(contracts.PaymentRecord{ContentSHA256: sum})}, false},
+		{"refunded", "PAYMENT_REFUNDED", contracts.EventPayload{Payment: r(contracts.PaymentRecord{Amount: amount, TxHash: tx, Block: 12})}, true},
+		{"refunded, part of it", "PAYMENT_REFUNDED", contracts.EventPayload{Payment: r(contracts.PaymentRecord{Amount: "1", TxHash: tx, Block: 12})}, false},
+		{"refunded, no transaction", "PAYMENT_REFUNDED", contracts.EventPayload{Payment: r(contracts.PaymentRecord{Amount: amount, Block: 12})}, false},
+		{"refunded with a code", "PAYMENT_REFUNDED", contracts.EventPayload{Code: "DELIVERY_FAILED", Payment: r(contracts.PaymentRecord{Amount: amount, TxHash: tx, Block: 12})}, false},
 	} {
 		es := chainOf(t, o, step{"TASK_STARTED", contracts.EventPayload{}, false}, step{"DELEGATION_BOUND", contracts.EventPayload{DelegationID: "dlg-1"}, false}, step{c.typ, c.p, true})
 		if err := ValidateEvent(reg, es[2], &o); (err == nil) != c.ok {

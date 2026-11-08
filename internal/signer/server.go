@@ -166,6 +166,31 @@ func Handler(core *Core, log func(string)) http.Handler {
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, req *http.Request) {
 		answer(w, req, "health", Reply{State: "unlocked"}, nil)
 	})
+	mux.HandleFunc("POST /v1/agent-wallet", func(w http.ResponseWriter, req *http.Request) {
+		var ar AgentWalletRequest
+		var r AgentWalletReply
+		status := http.StatusOK
+		body, err := io.ReadAll(http.MaxBytesReader(w, req.Body, maxBody))
+		if err != nil || json.Unmarshal(body, &ar) != nil {
+			err = Refusal("BAD_REQUEST")
+		} else {
+			r, err = core.SignAgentWallet(ar)
+		}
+		var ref Refusal
+		switch {
+		case errors.As(err, &ref):
+			r, status = AgentWalletReply{Error: string(ref)}, http.StatusConflict
+			if ref == "BAD_REQUEST" {
+				status = http.StatusBadRequest
+			}
+		case err != nil:
+			r, status = AgentWalletReply{Error: "SIGNER_ERROR"}, http.StatusServiceUnavailable
+		}
+		log("agent-wallet " + r.Error + " " + ar.WalletID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(r)
+	})
 	return callers(core.cfg, timeout, mux, func(w http.ResponseWriter, req *http.Request) {
 		answer(w, req, "caller", Reply{}, Refusal("CALLER_NOT_ALLOWED"))
 	})

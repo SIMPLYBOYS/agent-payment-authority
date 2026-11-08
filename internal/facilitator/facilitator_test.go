@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -247,5 +248,42 @@ func TestSettlementPendingThenSettled(t *testing.T) {
 	var done x402.SettleResponse
 	if f.post("/settle", f.request(pl, nil, ""), &done); !done.Success || done.Transaction != s.Transaction {
 		t.Fatalf("settled: %+v (pending %s)", done, s.Transaction)
+	}
+}
+
+// POST /refund (docs/commercial-refund.md): the facilitator's own settlement refunded to its payer, the whole
+// amount, once, from its gas key; a body that names anything else is refused and sends nothing.
+func TestRefund(t *testing.T) {
+	f := newFixture(t, 1)
+	gas := ethtest.Key(t, 4).Addr
+	data, _ := eth.Call("mint(address,uint256)", gas, uint64(1_000_000))
+	ethtest.Mine(t, f.rpc, ethtest.Key(t, 0), &eth.Tx{To: &f.usdc, Gas: 200_000, Data: data})
+	var s x402.SettleResponse
+	if f.post("/settle", f.request(f.payload(500000, nil), nil, "http://shop/r"), &s); !s.Success {
+		t.Fatalf("settle: %+v", s)
+	}
+	n := f.gasNonce()
+	for name, c := range map[string]struct {
+		body any
+		code int
+		kind string
+	}{
+		"another transaction": {map[string]string{"transaction": "0x" + strings.Repeat("cd", 32)}, 200, "invalid"},
+		"no transaction":      {map[string]string{}, 400, "invalid"},
+		"another field":       {map[string]string{"transaction": s.Transaction, "to": f.payer.Addr.Hex()}, 400, "invalid"},
+	} {
+		var o merchant.RefundOutcome
+		if code := f.post("/refund", c.body, &o); code != c.code || o.Kind != c.kind || f.gasNonce() != n {
+			t.Errorf("%s: %d %+v", name, code, o)
+		}
+	}
+	var o merchant.RefundOutcome
+	if code := f.post("/refund", map[string]string{"transaction": s.Transaction}, &o); code != 200 || o.Kind != "refunded" || o.Amount != "500000" ||
+		!strings.EqualFold(o.Payer, f.payer.Addr.Hex()) || f.gasNonce() != n+1 || f.balance(f.payer.Addr) != 5_000_000 {
+		t.Fatalf("refund: %d %+v, payer %d", code, o, f.balance(f.payer.Addr))
+	}
+	var again merchant.RefundOutcome
+	if f.post("/refund", map[string]string{"transaction": s.Transaction}, &again); again != o || f.gasNonce() != n+1 {
+		t.Fatalf("again: %+v", again)
 	}
 }

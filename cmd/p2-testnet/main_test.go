@@ -16,6 +16,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth/ethtest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/keytool"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer/signertest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
@@ -343,6 +344,24 @@ func TestOptSigner(t *testing.T) {
 	if !strings.Contains(out.String(), "SHA-256 ") {
 		t.Fatalf("output %s", out.String())
 	}
+	if len(cfg.Agents) != 0 {
+		t.Fatalf("agents before any registration: %+v", cfg.Agents)
+	}
+	if v := cfg.Velocity; v == nil || *v != (signer.Velocity{Max: 5, WindowSeconds: 600}) { // docs/commercial-velocity.md: the Signer's own
+		t.Fatalf("velocity %+v", v)
+	}
+	// docs/commercial-8004.md §8: once agents registered the two Agents, each wallet's own is the only consent the Signer signs.
+	owner := "0x" + strings.Repeat("C", 40)
+	writeJSON(filepath.Join(host, "agents.json"), agentsFile{ChainID: chainID, Registry: identityRegistry, Owner: owner, Agents: []agentEntry{
+		{ConsumerID: "consumer-a", PaymentWallet: wa, AgentID: 10573}, {ConsumerID: "consumer-b", PaymentWallet: wb, AgentID: 10574}}})
+	if err := run(context.Background(), []string{"opt-signer", "--dir", dir, "--base", base, "--voice", v1, "--out", dst + "5"}, &out, &answers{}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(dst + "5")
+	if c5, err := signer.ParseConfig(raw); err != nil || len(c5.Agents) != 2 || c5.Agents[1].WalletID != "wallet-b" || c5.Agents[1].AgentID != 10574 ||
+		c5.Agents[0] != (signer.Agent{WalletID: "wallet-a", ChainID: "84532", Registry: strings.ToLower(identityRegistry), AgentID: 10573, Owner: strings.ToLower(owner)}) {
+		t.Fatalf("agents: %v %+v", err, c5)
+	}
 	if err := run(context.Background(), args, &out, &answers{}); err == nil || !strings.Contains(err.Error(), "exists") {
 		t.Fatalf("written over: %v", err)
 	}
@@ -413,7 +432,12 @@ func TestE1aHost(t *testing.T) {
 	reg.Consumers[1].AgentRegistryRef = "eip155:84532/erc721:0x8004A818BFB912233c491871b3d84c89A494BD9e/10570"
 	pay := map[string]any{"environment": "base_sepolia", "dir": host, "test402_offer": "x.json", "chain_id": 84532, "token_from_block": 48374723,
 		"delegations": map[string]any{"consumer-a/0xshop": "dlg-ta@1", "consumer-b/0xshop": "dlg-tb@1", "consumer-b/0x0402": "dlg-t402@1"}}
-	for name, v := range map[string]any{"payments.json": pay, "registry.json": reg, "profile.json": map[string]any{"p": 1}} {
+	defaultProfile = "../../testdata/policy/m1-demo-profile.json"
+	defer func() { defaultProfile = "testdata/policy/m1-demo-profile.json" }()
+	var deployed map[string]any
+	readJSON(defaultProfile, &deployed)
+	deployed["profile_id"] = "deployed"
+	for name, v := range map[string]any{"payments.json": pay, "registry.json": reg, "profile.json": deployed} {
 		if err := writeJSON(filepath.Join(host, name), v); err != nil {
 			t.Fatal(err)
 		}
@@ -444,6 +468,11 @@ func TestE1aHost(t *testing.T) {
 	}
 	if after, _ := os.ReadFile(filepath.Join(host, "payments.json")); string(after) != string(before) {
 		t.Error("deploy's payments.json changed")
+	}
+	// docs/commercial-velocity.md: the run set's profile is deploy's with a velocity (5 in 10 minutes).
+	var prof policy.Profile
+	if err := readJSON(filepath.Join(dst, "profile.json"), &prof); err != nil || prof.ProfileID != "deployed" || prof.Velocity == nil || *prof.Velocity != (policy.Velocity{Max: 5, WindowSeconds: 600}) {
+		t.Fatalf("profile %+v %v", prof, err)
 	}
 	// The town's three venues (docs/commercial-venues.md D5): its own host's shop cap; deploy's stays.
 	town := filepath.Join(dir, "town-1")
@@ -483,8 +512,19 @@ func TestE1aHost(t *testing.T) {
 	if readJSON(filepath.Join(out, "registry.json"), &lr); lr.Tasks[0].TaskID != "show-e1a-r2-a-01" {
 		t.Errorf("--label: %s", lr.Tasks[0].TaskID)
 	}
-	if _, err := os.Stat(filepath.Join(out, "profile.json")); !os.IsNotExist(err) {
-		t.Errorf("a profile written from none: %v", err)
+	// No profile there: the Host's default one, with the velocity; --velocity "" leaves it out.
+	if err := readJSON(filepath.Join(out, "profile.json"), &prof); err != nil || prof.ProfileID != "m1-demo-v1" || prof.Velocity == nil || prof.Velocity.Max != 5 {
+		t.Errorf("the local run set's profile: %+v %v", prof, err)
+	}
+	none := filepath.Join(dir, "e1a-local-none")
+	if err := e1aHost([]string{"--from", local, "--out", none, "--registry", "../../testdata/demo/registry-e1a.json", "--velocity", ""}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(none, "profile.json")); !os.IsNotExist(err) {
+		t.Errorf("a profile written without a velocity from none: %v", err)
+	}
+	if err := e1aHost([]string{"--from", local, "--out", filepath.Join(dir, "e1a-bad"), "--registry", "../../testdata/demo/registry-e1a.json", "--velocity", "5"}, io.Discard); err == nil {
+		t.Error("--velocity 5 taken")
 	}
 	if err := e1aHost([]string{"--dir", dir, "--from", local, "--out", filepath.Join(dir, "x")}, io.Discard); err == nil {
 		t.Error("--dir and --from both taken")

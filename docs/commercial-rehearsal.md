@@ -129,3 +129,43 @@
 - 要學到的：
   - 語音核准時，金額與代碼要分開念，並且等「錄音中」出現再念。
   - 估商店額度時，要把當天同一把商店金鑰的所有結算都算進去，不只是這個標籤的。
+
+## 5 重開 A 之後：`/opt` 與 testnet（11/8 起，待做）
+
+> Aaron 11/7 重開 A 的三項（付款錢包證明 `docs/commercial-8004.md` §8、退款 `docs/commercial-refund.md`、頻率限制 `docs/commercial-velocity.md` §8）都已在本機完成。testnet 照 memory 的原則只彩排**一場**，一起看所有還沒在真實鏈上看過的東西；第 1 項與第 3 項都要換 `/opt` 的 Signer，所以只裝一次。
+
+**這一場要看到的**
+
+| 項目 | 怎麼看 |
+|---|---|
+| 兩位 Agent 的 `agentWallet` 是自己的付款錢包 | `agent-wallet` 之後鏈上讀回；展示視窗的「Agent 身分」寫「付款錢包已由錢包簽章證明」；checker 的 `agents` 兩筆 `agent_wallet_is_consumer_wallet: true` |
+| 郵局與飯店上 Base Sepolia | 飯店 A 付款前被拒（`MERCHANT_NOT_ALLOWED`）、B 交付；郵局 A 交付失敗、B 交付 |
+| 退款 | 郵局 A 按「商店退款」，`apa-facilitator` 用商店金鑰送出，Host 向鏈上確認後記下；checker E4 查退款、報告列 `refund` |
+| 頻率限制 | 正常場次不會碰到（每位客人最多 4 筆 Allow 或 Ask）；`/opt` 的 signer.json 與 run set 的 profile 都帶 5 筆／600 秒 |
+| E1～E10 | 全部 PASS |
+
+**額度**（UTC 日，台北 08:00 歸零；同一天的所有標籤共用，見 memory）：
+
+| 上限 | 這一場要 | 現在 | 要做的 |
+|---|---|---|---|
+| relayer 每日 | 18 筆（10 次登記、8 次預留） | `var/p2-testnet/relayer.json` 的 `daily_tx_cap` 12 | **Aaron 決定**是否調到 18 以上（11/5 曾調到 18） |
+| 商店每日結算 | 8 筆（退款不算） | `demo-testnet.sh` 的城鎮已改成 `--shop-cap 9` | — |
+| 錢包餘額 | 家長 0.75、孩子 0.56 | 開場前檢查（`testnet-preflight.py town`，已改成五個場域） | — |
+| 委派總額 | 家長 Allow 0.25、孩子 0.14（每場） | `dlg-ta`、`dlg-tb` 各 1.00，跨場次累計（Signer 的紀錄在 `/opt`，我沒有讀） | 不夠時 Signer 會回 `OVER_TOTAL_CAP` |
+| 委派期限 | — | 重新產生 signer.json 就有 7 天 | 下面第 3 步 |
+
+**步驟**
+
+| # | 誰 | 做什麼 |
+|---|---|---|
+| 1 | 你 | 看過程式與文件後說「請提交」 |
+| 2 | Claude Code | 從提交後的乾淨 worktree 建置 `apa-signer`（`GOFLAGS=-mod=readonly GOPROXY=off GOTOOLCHAIN=local`）到 `var/reopen-opt/apa-signer`，記下 SHA-256 |
+| 3 | 你 | `sudo cat /opt/apa-signer/data/signer.json > var/reopen-opt/signer.base.json`（`var/reopen-opt` 是 0700）；Claude Code 執行 `go run ./cmd/p2-testnet opt-signer --dir var/p2-testnet --base var/reopen-opt/signer.base.json --out var/reopen-opt/signer.json`（帶上兩位 Agent 的登記、頻率上限、新的 7 天委派），印出新檔的 SHA-256 |
+| 4 | 你 | 停下 `/opt` 的服務（`pgrep -fl '/opt/apa-signer/'` 應無輸出），備份（留著，不刪）：`sudo -u apa-signer /bin/cp -p /opt/apa-signer/data/signer.json /opt/apa-signer/data/signer.json.reopen`、`sudo /bin/cp -p /opt/apa-signer/bin/apa-signer /opt/apa-signer/bin/apa-signer.reopen` |
+| 5 | 你 | 安裝：`sudo install -o root -g wheel -m 0755 var/reopen-opt/apa-signer /opt/apa-signer/bin/apa-signer`、`sudo -u apa-signer /bin/sh -c 'umask 077; cat > /opt/apa-signer/data/signer.json' < var/reopen-opt/signer.json`；`sudo shasum -a 256 /opt/apa-signer/bin/apa-signer /opt/apa-signer/data/signer.json` 要等於第 2、3 步的 |
+| 6 | 你 | 只啟動 Signer（relayer 不要開，它也拿著 issuer 的金鑰）：`cd /; sudo -u apa-signer /opt/apa-signer/bin/apa-signer serve --dir /opt/apa-signer/data`，輸入錢包的密語 |
+| 7 | 你 | 另一個終端機：`go run ./cmd/p2-testnet agent-wallet --dir var/p2-testnet`。它印出計畫（兩筆 `setAgentWallet`，issuer 付 gas），打 `yes`、輸入 issuer 的密語；**這是兩筆 testnet 交易，要你核准**。完成後印出兩位的 `agentWallet`，那幾行可以貼回。然後 Ctrl-C 停掉 Signer |
+| 8 | 你 | （第 1 項就算完成）決定 relayer 的上限；之後挑一個 UTC 日開場：`sh scripts/demo/demo-testnet.sh live <新標籤> town`，五個場域各按一次「一起開始」；郵局 A 交付失敗後按交易卡上的「商店退款」 |
+| 9 | Claude Code | `e1-evidence pack`＋`verify-demo --mode e1a --rpc https://sepolia.base.org`（sandbox 外），回報 E1～E10、`agents`、`settlements` 的 `refund` |
+
+回滾：停掉 Signer，把第 4 步的備份放回原位。testnet 上已送出的交易不能撤回。

@@ -87,6 +87,7 @@ type agentEntry struct {
 	URITx         string `json:"uri_tx,omitempty"`
 	UnsetTx       string `json:"unset_wallet_tx,omitempty"`
 	URISHA256     string `json:"agent_uri_sha256,omitempty"` // of the agentURI string, as tokenURI returns it
+	WalletTx      string `json:"agent_wallet_tx,omitempty"`  // agent-wallet's setAgentWallet (docs/commercial-8004.md §8)
 }
 
 // agents is p2-testnet agents (docs/commercial-8004.md I1).
@@ -238,36 +239,8 @@ func agents(ctx context.Context, args []string, out io.Writer, ask asker) error 
 			return errors.New("the issuer key is not its file's address")
 		}
 	}
-	// send journals the transaction, sends it and waits until it is deep enough.
 	send := func(slot *string, data []byte) (*eth.Receipt, error) {
-		gas, err := estimateTo(ctx, rpc, key.Addr, registry, data)
-		if err != nil {
-			return nil, fmt.Errorf("estimate (nothing was sent): %w", err)
-		}
-		n, err1 := rpc.PendingNonce(ctx, key.Addr)
-		h, err2 := rpc.LatestHeader(ctx)
-		tip, err3 := rpc.MaxPriorityFee(ctx)
-		if err := errors.Join(err1, err2, err3); err != nil {
-			return nil, err
-		}
-		fee := new(big.Int).Add(new(big.Int).Mul(h.BaseFee, big.NewInt(2)), tip)
-		tx := &eth.Tx{ChainID: big.NewInt(chainID), Nonce: n, MaxPriorityFeePerGas: tip, MaxFeePerGas: fee, Gas: gas + gas/5, To: &registry, Value: new(big.Int), Data: data}
-		raw, hash, err := tx.Sign(key)
-		if err != nil {
-			return nil, err
-		}
-		*slot = "0x" + hex.EncodeToString(hash)
-		if err := writeJSON(jpath, j); err != nil { // before it is sent: never sent twice
-			return nil, err
-		}
-		fmt.Fprintf(out, "p2-testnet: sending %s\n", *slot)
-		if beforeSend != nil {
-			beforeSend(*slot)
-		}
-		if _, err := rpc.SendRaw(ctx, raw); err != nil {
-			return nil, fmt.Errorf("sending %s: %w (unknown: look it up before anything else; agents will not send it again)", *slot, err)
-		}
-		return confirmed(ctx, rpc, hash)
+		return sendJournaled(ctx, rpc, key, registry, data, slot, func() error { return writeJSON(jpath, j) }, out)
 	}
 	wait := func(tx string) (*eth.Receipt, error) {
 		h, err := hex.DecodeString(strings.TrimPrefix(tx, "0x"))
@@ -373,6 +346,39 @@ func agents(ctx context.Context, args []string, out io.Writer, ask asker) error 
 	}
 	fmt.Fprintf(out, "p2-testnet: wrote %s and the refs in %s\n", jpath, filepath.Join(host, "registry.json"))
 	return nil
+}
+
+// sendJournaled estimates the call (a revert sends nothing), puts its hash in slot and has journal write it
+// before it is sent (never sent twice), sends it and waits until it is deep enough.
+func sendJournaled(ctx context.Context, rpc *eth.Client, key *eth.Key, to eth.Address, data []byte, slot *string, journal func() error, out io.Writer) (*eth.Receipt, error) {
+	gas, err := estimateTo(ctx, rpc, key.Addr, to, data)
+	if err != nil {
+		return nil, fmt.Errorf("estimate (nothing was sent): %w", err)
+	}
+	n, err1 := rpc.PendingNonce(ctx, key.Addr)
+	h, err2 := rpc.LatestHeader(ctx)
+	tip, err3 := rpc.MaxPriorityFee(ctx)
+	if err := errors.Join(err1, err2, err3); err != nil {
+		return nil, err
+	}
+	fee := new(big.Int).Add(new(big.Int).Mul(h.BaseFee, big.NewInt(2)), tip)
+	tx := &eth.Tx{ChainID: big.NewInt(chainID), Nonce: n, MaxPriorityFeePerGas: tip, MaxFeePerGas: fee, Gas: gas + gas/5, To: &to, Value: new(big.Int), Data: data}
+	raw, hash, err := tx.Sign(key)
+	if err != nil {
+		return nil, err
+	}
+	*slot = "0x" + hex.EncodeToString(hash)
+	if err := journal(); err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(out, "p2-testnet: sending %s\n", *slot)
+	if beforeSend != nil {
+		beforeSend(*slot)
+	}
+	if _, err := rpc.SendRaw(ctx, raw); err != nil {
+		return nil, fmt.Errorf("sending %s: %w (unknown: look it up before anything else; it will not be sent again)", *slot, err)
+	}
+	return confirmed(ctx, rpc, hash)
 }
 
 // estimateTo is a call's gas (estimate is a contract creation's).

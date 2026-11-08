@@ -406,6 +406,15 @@ func (s *Store) submitPay(t *taskTx, sess contracts.Session, po paycontract.Purc
 	if in.Profile, in.Credential, err = t.settings(); err != nil {
 		return err
 	}
+	// docs/commercial-velocity.md (Z1 A, Z2 A): this consumer's purchases decided Allow or Ask within the
+	// window, across its tasks and shops, counted in this transaction; a Deny counts for nothing.
+	if v := in.Profile; v != nil && v.Velocity != nil {
+		since := int64(t.now) - int64(v.Velocity.WindowSeconds)
+		if err := t.tx.QueryRow(`SELECT count(*) FROM purchases p JOIN tasks k ON k.task_id = p.task_id
+			WHERE k.consumer_id = ? AND p.policy_verdict IN ('Allow', 'Ask') AND p.decided_at > ?`, t.row.ConsumerID, since).Scan(&in.Recent); err != nil {
+			return err
+		}
+	}
 	if (t.row.ContractVersion == paycontract.V2) != (pr != nil) {
 		return errors.New("an apa.pay.v2 purchase, and only one, goes with its presentation")
 	}

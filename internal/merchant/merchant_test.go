@@ -530,6 +530,9 @@ type stubSettlement struct {
 
 func (s stubSettlement) config() SettleConfig                                 { return s.cfg }
 func (s stubSettlement) Pay(context.Context, offer, json.RawMessage) Outcome { return s.out }
+func (s stubSettlement) Refund(context.Context, string) RefundOutcome {
+	return RefundOutcome{Kind: "invalid", Reason: "not_a_settlement"}
+}
 
 func settledStub(t *testing.T, out Outcome) (*Merchant, eth.Address) {
 	t.Helper()

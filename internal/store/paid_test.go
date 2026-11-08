@@ -473,6 +473,33 @@ func TestPaymentFailures(t *testing.T) {
 			if again, err := s.PaymentFailed(intent, c.code); err != nil || again.State != c.state {
 				t.Fatalf("the same end again: %+v %v", again, err)
 			}
+			// docs/commercial-refund.md: only a payment settled and not delivered is refunded, once; its state and the
+			// budget stay; the recovery check (open) takes the refund after the review.
+			tx3 := "0x" + strings.Repeat("3", 64)
+			if c.code != "DELIVERY_FAILED" {
+				if _, err := s.PaymentRefunded(intent, tx3, 11); Code(err) != "INVALID_PAYMENT_TRANSITION" {
+					t.Fatalf("refunded after %s: %v", c.code, err)
+				}
+				return
+			}
+			left := e.budgetLeft()
+			if p, err := s.PaymentRefunded(intent, tx3, 11); err != nil || p.State != "needs_review" || p.Code != "DELIVERY_FAILED" {
+				t.Fatalf("refund: %+v %v", p, err)
+			}
+			if v := e.view(s, po); v == nil || v.Status != "refunded" || v.RefundTx != tx3 || v.RefundBlock != 11 || v.SettleTx != tx2 || v.Code != "DELIVERY_FAILED" {
+				t.Fatalf("refunded view %+v", v)
+			}
+			if _, err := s.PaymentRefunded(intent, tx3, 11); err != nil {
+				t.Fatalf("the same refund again: %v", err)
+			}
+			if _, err := s.PaymentRefunded(intent, "0x"+strings.Repeat("4", 64), 12); Code(err) != "IDEMPOTENCY_CONFLICT" {
+				t.Fatalf("another refund: %v", err)
+			}
+			s.Close()
+			s = e.open()
+			if v := e.view(s, po); v == nil || v.Status != "refunded" || e.budgetLeft() != left {
+				t.Fatalf("after reopening: %+v, budget %s (was %s)", v, e.budgetLeft(), left)
+			}
 		})
 	}
 	e := newEnv(t)

@@ -178,6 +178,9 @@ export function scene(snapshot) {
           p.paySeq = e.sequence;
         }
         break;
+      case "PAYMENT_REFUNDED": // docs/commercial-refund.md: the shop refunded a failed delivery, a person asked
+        if (po && of(po).pay === "delivery_failed") Object.assign(of(po), { pay: "refunded", paySeq: e.sequence });
+        break;
       case "TASK_CANCELLED": end = "cancelled"; firstEnd = firstEnd || end; break;
       case "TASK_TIMED_OUT": end = "timed_out"; firstEnd = firstEnd || end; break;
     }
@@ -218,7 +221,7 @@ export function scene(snapshot) {
     // P2: the payment.
     allowed: "Allow：在委託範圍內，尚未付款",
     paying: "付款中：預算預留與簽名", confirming: "已送出，等待鏈上確認（不會自動再付）", paid: "已付款，準備交付", delivered: "已付款、已交付",
-    delivery_failed: "已付款，交付失敗：待人工處理", not_paid: "未付款（沒有花錢）：離店", payment_review: "待人工處理：預算已預留但未付款",
+    delivery_failed: "已付款，交付失敗：待人工處理", refunded: "已付款，交付失敗：商店已退款", not_paid: "未付款（沒有花錢）：離店", payment_review: "待人工處理：預算已預留但未付款",
   };
   if (pay(task)) labels.waiting = simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；" + (pays ? "核准後由 Host 付款）" : "不會付款）");
   if (pay(task) && (end || denied([...purchases.values()].map((x) => x.decision)))) labels.waiting = ENDED_ASK;
@@ -383,6 +386,7 @@ export function shopLabel(phase, cause, end, reason) {
     case "paid": return "已付款，在交付區等交付";
     case "delivered": return "已交付，帶著收據離店";
     case "delivery_failed": return "已付款，交付失敗（待人工處理）";
+    case "refunded": return "交付失敗，商店已退款，離店";
     case "not_paid": return "沒有付款（沒有花錢），離店";
     case "payment_review": return "付款沒有照預期完成，待主持人確認"; // true of every review code (the label has none)
     case "expired": return "核准期限已過，離店";
@@ -392,7 +396,7 @@ export function shopLabel(phase, cause, end, reason) {
 }
 
 const BASIS = { entered: "進店事件", quoted: "請購", waiting: "裁決", denied: "裁決", allowed_unpaid: "裁決", expired: "到期", withdrawn: "撤回",
-  allowed: "裁決", approved: "本人核准", paying: "付款", confirming: "付款送出", paid: "鏈上確認", delivered: "交付與收據", delivery_failed: "交付失敗",
+  allowed: "裁決", approved: "本人核准", paying: "付款", confirming: "付款送出", paid: "鏈上確認", delivered: "交付與收據", delivery_failed: "交付失敗", refunded: "退款",
   not_paid: "未付款", payment_review: "付款待人工處理" };
 
 // transition compares a projection m with the target t the shop was last
@@ -721,12 +725,13 @@ const NEXT = {
 };
 // SIGNER_NEXT: what the host does about the Signer's refusal of a reserved payment (pv.signer_code, 10/30).
 const SIGNER_NEXT = { DELEGATION_EXPIRED: "/opt 的 signer.json 裡的委派已過期：停下這一場，重產並安裝 signer.json 後換一個標籤再開場",
-  OVER_TOTAL_CAP: "委派的總額或核准人 24 小時內的額度已用完：今天不要再開這位客人的場次" };
+  OVER_TOTAL_CAP: "委派的總額或核准人 24 小時內的額度已用完：今天不要再開這位客人的場次",
+  VELOCITY_LIMIT: "Signer 的頻率上限：這個錢包短時間內已簽滿上限（Host 的 Policy 應該先擋下）：停下這一場，找開發者" };
 export function paymentNext(pv) {
   if (!pv) return "";
   if (pv.code === "RESERVED_NOT_PAID" && pv.signer_code)
     return "下一步：錢沒有動；Signer 拒絕的原因：" + str(pv.signer_code) + "；" + (SIGNER_NEXT[pv.signer_code] || "記下代碼與時間找開發者") + "；不要重試這一筆。";
-  if (pv.status === "paid" && pv.code === "DELIVERY_FAILED") return "下一步：錢已付；記下時間找開發者處理交付，不要重新購買。";
+  if (pv.status === "paid" && pv.code === "DELIVERY_FAILED") return "下一步：錢已付、沒有交付；在交易卡按「商店退款」，請商店把這一筆退回客人的錢包（Host 向鏈上確認後才記下）；不要重新購買。";
   const t = NEXT[pv.status] && (NEXT[pv.status][pv.code] || (pv.status === "needs_review" ? "記下代碼 " + str(pv.code) + " 與時間，找開發者" : ""));
   return t ? "下一步：" + t + "。" : "";
 }
@@ -740,6 +745,7 @@ export function paymentText(pv) {
       return pv.state === "delivered" ? "已付款、已交付" + block + "，附收據" : "已付款" + block + "，準備交付";
     case "not_paid": return "未付款：" + (NOT_PAID[pv.code] || str(pv.code));
     case "needs_review": return "待人工處理：" + (REVIEW[pv.code] || str(pv.code)) + "（預算的預留與付款是兩筆交易）";
+    case "refunded": return "已付款" + block + "，交付失敗；商店已退款" + (typeof pv.refund_block === "number" ? "（區塊 " + pv.refund_block + "）" : "");
   }
   return "付款狀態不明：" + str(pv.status);
 }
@@ -1087,6 +1093,7 @@ export const PLAIN = {
   OWNERSHIP_MISMATCH: "不是這位客人的請購", PAYMENT_CAPABILITY_UNAVAILABLE: "這場展示不能付款", APPROVER_UNAVAILABLE: "沒有可核准的人",
   VOICE_CHALLENGE_FAILED: "唸的內容或聲音不符", APPROVER_DENIED: "核准者拒絕",
   CREDENTIAL_CLAIM_UNMET: "不符合這間店的要求",
+  VELOCITY_LIMIT: "短時間內請購太多次", // docs/commercial-velocity.md
 };
 // claimsText (the venue matrix, docs/commercial-venues.md): what a venue saw of the buyer, in plain words; the
 // mandatory fields are always there and never named. "" claims: nothing about the person.
@@ -1103,7 +1110,7 @@ export function claimsText(claims) {
 export const plainReason = (code) => PLAIN[code] || "其他原因（主持人頁有細節）";
 // usdc: base units (6 decimals) as USDC, never rounded: at least two decimals, more when they matter.
 export const usdc = (v) => (typeof v === "string" && /^[0-9]+$/.test(v) ? (Number(v) / 1e6).toFixed(6).replace(/(\.\d\d\d*?)0+$/, "$1") + " USDC" : "金額未提供");
-const PAID = ["paying", "confirming", "paid", "delivered", "delivery_failed", "not_paid", "payment_review"];
+const PAID = ["paying", "confirming", "paid", "delivered", "delivery_failed", "refunded", "not_paid", "payment_review"];
 // UNMOVED: the review codes whose result is known: no payment was made (payflow: never sent, or expired unused on chain).
 // Not VERIFICATION_FAILED (review): that is the shop's word only, and a shop the Host does not run could still send it.
 const UNMOVED = { RESERVED_NOT_PAID: "預算已預留，但付款沒有送出", NOT_SETTLED_EXPIRED: "付款授權已過期，鏈上沒有用過" };
@@ -1173,6 +1180,7 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
     if (ph === "paid") set(4, "now", "付款完成，正在交付");
     else if (ph === "delivered") set(4, "done", "已交付，附收據");
     else if (ph === "delivery_failed") set(4, "fail", "已付款，交付失敗，待人工處理");
+    else if (ph === "refunded") set(4, "fail", "交付失敗；商店已退款（第 3 筆鏈上交易），錢回到客人的錢包");
   }
   // A task's end stops what had not started; a payment already reserved goes on (payflow).
   if (sc.end) {
@@ -1183,7 +1191,9 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
   }
   const name = customerName(consumer);
   const last = [...steps].reverse().find((s) => s.state !== "todo" && s.state !== "off") || steps[0];
-  return { consumer, name, steps, caption: name + "・" + last.label + "：" + last.text, amount: p ? usdc(p.amount) : "" };
+  // A failed delivery a person may have the shop refund (docs/commercial-refund.md): the host page's button.
+  const refund = ph === "delivery_failed" && pays && p ? { task: task.task_id, po: p.purchase_order_id } : null;
+  return { consumer, name, steps, caption: name + "・" + last.label + "：" + last.text, amount: p ? usdc(p.amount) : "", refund };
 }
 
 const READY = "準備付款";
@@ -1248,6 +1258,13 @@ export function agentLink(cap, ref) {
   return { text: "ERC-8004 #" + m[3], href: EXPLORER_NFT[cap][1] + m[2] + "/" + m[3] };
 }
 
+// walletProven: the Host read the Agent's agentWallet on chain and it is the task's own payer wallet, which the
+// registry sets only on that wallet's signature (docs/commercial-8004.md §8); not the platform's word.
+export function walletProven(chain) {
+  const w = chain && chain.agent_wallet, p = chain && chain.payer;
+  return typeof w === "string" && typeof p === "string" && /^0x[0-9a-fA-F]{40}$/.test(w) && w.toLowerCase() === p.toLowerCase();
+}
+
 // addressRow: a receipt row of named addresses (parts: name, text, href), its text the same in words; null when none is one.
 function addressRow(label, sep, named) {
   const parts = named.map(([name, link]) => link && { name, ...link }).filter(Boolean);
@@ -1298,7 +1315,7 @@ export function showEvidence(snapshot, traits = {}, chain = null) {
   const bound = ((snapshot && snapshot.events) || []).find((e) => e.event_type === "DELEGATION_BOUND");
   // The Agent's on-chain identity first: who is buying (registered by the demo platform, E1 A; the payer wallet in it is declared, E3 A).
   const agent = agentLink(task.payment_capability, chain && chain.agent);
-  const items = [...(agent ? [{ label: "Agent 身分", ...agent, note: "ERC-8004・平台代為註冊" }] : []), { label: "1 委託", text: confirmedBy(snapshot, traits) || "客人已交代 Agent 預算與範圍",
+  const items = [...(agent ? [{ label: "Agent 身分", ...agent, note: "ERC-8004・平台代為註冊" + (walletProven(chain) ? "・付款錢包已由錢包簽章證明" : "") }] : []), { label: "1 委託", text: confirmedBy(snapshot, traits) || "客人已交代 Agent 預算與範圍",
     ...(bound && bound.authorization_method === "webauthn" ? { note: "WebAuthn" } : {}) }];
   if (!p) return items;
   if (p.credential) items.push({ label: "2 選購", text: p.credential.result === "valid" ? "出示客人的憑證，檢查通過（測試發行者）" : "憑證檢查沒通過",
@@ -1315,6 +1332,7 @@ export function showEvidence(snapshot, traits = {}, chain = null) {
     note: pv.settle_tx !== pv.reserve_tx ? "第 2 筆・EIP-3009" : "第 2 筆・EIP-3009（交易編號和第 1 筆相同，未確認）", // two transactions: the receipt card says so
     chain: onChain && onChain.settle && onChain.settle.hash === pv.settle_tx ? chainLine(onChain.settle, chain.head, "settle") : "" });
   if (pv.receipt_id && has("RECEIPT_ISSUED")) items.push({ label: "5 交付", text: "收據 " + String(pv.receipt_id), note: "x402・記錄了交付內容的 sha256" });
+  if (pv.refund_tx && has("PAYMENT_REFUNDED")) items.push({ label: "6 退款", ...txLink(task.payment_capability, pv.refund_tx), note: "交付失敗・商店退回全額（第 3 筆）" });
   return items;
 }
 
@@ -1338,7 +1356,7 @@ export function showReceipt(snapshot, traits = {}, chain = null) {
     { label: "付款", ...txLink(cap, pv.settle_tx) },
     { label: "兩筆交易", text: pv.reserve_tx && pv.settle_tx && pv.reserve_tx !== pv.settle_tx ? "不是同一筆，也不是一次完成" : "未確認" },
     addressRow("錢包", " → ", [["客人", addressLink(cap, chain && chain.payer)], ["商店", addressLink(cap, p.pay_to)]]),
-    agent && { label: "Agent 身分", ...agent },
+    agent && { label: "Agent 身分", ...agent, ...(walletProven(chain) ? { text: agent.text + "（付款錢包已證明）" } : {}) },
     addressRow("合約", "・", [["USDC", addressLink(cap, p.asset_contract)], ["預算", addressLink(cap, chain && chain.contract)]]),
     { label: "收據編號", text: String(pv.receipt_id) },
     { label: "內容摘要", text: typeof pv.content_sha256 === "string" && pv.content_sha256 ? "sha256 " + pv.content_sha256.replace(/^sha256:/, "").slice(0, 12) + "…" : "未提供" },

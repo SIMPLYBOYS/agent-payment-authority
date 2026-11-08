@@ -242,7 +242,7 @@ public class TownTests
         bridge.View("{\"mode\":\"town\"}");
         yield return Settle();
         int sc = 0;
-        foreach (var (phase, seq, end) in new[] { ("delivered", 9, ""), ("denied", 6, ""), ("expired", 6, ""), ("allowed_unpaid", 6, ""), ("delivery_failed", 9, ""), ("waiting", 6, "cancelled"), ("waiting", 6, "timed_out") })
+        foreach (var (phase, seq, end) in new[] { ("delivered", 9, ""), ("denied", 6, ""), ("expired", 6, ""), ("allowed_unpaid", 6, ""), ("delivery_failed", 9, ""), ("refunded", 10, ""), ("waiting", 6, "cancelled"), ("waiting", 6, "timed_out") })
         {
             sc++; // each case a scene of its own: a new scene starts every slot over
             bridge.Receive(V2(sc, "consumer-a", "waiting"));

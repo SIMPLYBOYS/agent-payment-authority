@@ -165,3 +165,9 @@ go run ./cmd/verify-demo --mode e1a --run-dir artifacts/e1a/<錄影那一場的�
 **重做一次**：
 1. 依序跑 `node scripts/video/film.mjs --stage full --view present --out artifacts/video/full-present2`、`--view show --out artifacts/video/full-show2`、`--stage fooled --out artifacts/video/fooled`，大約各 3 分鐘。
 2. 再跑 `python3 -I scripts/video/cut.py --cut 90` 與 `--cut 180`。
+
+**加演短片（11/7，`docs/commercial-post-hotel.md` N6）**：郵局與飯店各一段，不改 90 秒與 3 分鐘版。
+- 拍攝：`node scripts/video/film.mjs --stage full --view present --venues hotel,post --out artifacts/video/addon-present2`（約 1 分半）。郵局在交付失敗之後，腳本按交易卡上的「商店退款」，等到「商店已退款」再停 6 秒（11/8，`docs/commercial-refund.md`）。
+- 剪接：`python3 -I scripts/video/cut.py --cut addon`。每段先放 3 秒字卡（場域與示範的保護，標「示意動畫」），再放兩句字幕。
+- 成品：`apa-addon-hotel.mp4`（24.5 秒：收款人被換掉，付款前就被拒絕；孩子的早餐券照常付款）、`apa-addon-post.mp4`（31 秒，11/8 重拍：已付款、交付失敗，不再付一次；主持人按「商店退款」，錢退回客人的錢包，鏈上確認後才記下），1920×1080、30 fps，各附兩份 SRT。
+- 剪接點寫在 `cut.py` 的 `HOTEL`、`POST`，是看 11/8 那次拍攝（`addon-present2`）定的；重拍之後要重新對一次。

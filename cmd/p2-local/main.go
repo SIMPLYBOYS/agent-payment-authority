@@ -127,7 +127,13 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if err := rpc.Raw(ctx, "anvil_setCode", nil, asset.Hex(), code); err != nil {
 		return err
 	}
-	for _, w := range []eth.Address{a, b} {
+	// The shop's gas key too (anvil_keys.shop_gas, key 4): the local pay_to has no key, so the shop's refunds
+	// (docs/commercial-refund.md) come from the key that sends its transfers, as on the testnet (there it is pay_to).
+	shopGas, err := eth.AnvilKey(4)
+	if err != nil {
+		return err
+	}
+	for _, w := range []eth.Address{a, b, shopGas.Addr} {
 		data, _ := eth.Call("mint(address,uint256)", w, *mint)
 		if _, err := send(ctx, rpc, keys[0], &eth.Tx{To: &asset, Gas: 200_000, Data: data}); err != nil {
 			return fmt.Errorf("mint (start a fresh anvil to set up again): %w", err)

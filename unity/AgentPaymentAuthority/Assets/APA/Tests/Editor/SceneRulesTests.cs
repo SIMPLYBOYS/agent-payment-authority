@@ -110,7 +110,7 @@ public class SceneRulesTests
     [Test]
     public void PaymentPhasesAreKnownAndTrue()
     {
-        string[] phases = { "allowed", "approved", "paying", "confirming", "paid", "delivered", "delivery_failed", "not_paid", "payment_review" };
+        string[] phases = { "allowed", "approved", "paying", "confirming", "paid", "delivered", "delivery_failed", "refunded", "not_paid", "payment_review" };
         foreach (var p in phases)
         {
             CollectionAssert.Contains(ProjectionState.Phases, p);

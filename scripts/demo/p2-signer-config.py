@@ -40,7 +40,9 @@ cfg = {"version": 1, "socket": os.environ["SSOCK"], "callers": [int(os.environ["
        "delegations": [delegation("a"), delegation("b")],
        "approvers": [approver("a"), approver("b")],
        "webauthn": {"rp_id": "localhost", "origins": ["http://localhost:8402"], "challenge_ttl_seconds": 120, "approval_ttl_seconds": 300},
-       "reservation": {"rpc": pay["rpc"], "chain_id": chain, "budget_contract": pay["budget_contract"], "confirmations": pay["confirmations"]}}
+       "reservation": {"rpc": pay["rpc"], "chain_id": chain, "budget_contract": pay["budget_contract"], "confirmations": pay["confirmations"]},
+       # docs/commercial-velocity.md: the Signer's own rate limit, as the run sets' profiles (e1a-host --velocity)
+       "velocity": {"max": 5, "window_seconds": 600}}
 fd = os.open(os.environ["OUT"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
 os.fchmod(fd, 0o600)  # an existing file keeps its mode otherwise
 os.write(fd, json.dumps(cfg, indent=1).encode())

@@ -109,7 +109,7 @@
 | post-a 包裹 | Allow | 待人工處理 `DELIVERY_FAILED` | 「已付款，交付失敗，待人工處理」 |
 | post-b 郵票 | Allow | 已交付 | 已交付，附收據 |
 
-Unity 的兩間店在第 8 節。還沒做：加演短片。
+Unity 的兩間店在第 8 節。加演短片（N6）11/7 做好：`apa-addon-hotel.mp4`、`apa-addon-post.mp4`（`artifacts/video/`，git 不收；做法見 `docs/demo-video-script.md` 第 7 節）。
 
 ## 8 Unity：兩間店（11/6）
 

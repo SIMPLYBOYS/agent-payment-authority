@@ -75,6 +75,15 @@ type E1aSettlement struct {
 	PurchaseOrderID string `json:"purchase_order_id"`
 	Transaction     string `json:"transaction"`
 	SentBy          string `json:"sent_by"`
+	// Refund: the shop's refund of this payment, settled and not delivered (docs/commercial-refund.md), as E4
+	// read it on chain: its transaction and sender.
+	Refund *E1aRefund `json:"refund,omitempty"`
+}
+
+// E1aRefund is a refund's transaction and who sent it ("" when it cannot be read).
+type E1aRefund struct {
+	Transaction string `json:"transaction"`
+	SentBy      string `json:"sent_by"`
 }
 
 // E1aTask is one run: its task, the E1-a catalog entry it ran, and, for the
@@ -173,7 +182,7 @@ var e1aLimits = []string{
 	"the live catalogs are this repository's at the pack's code_commit (as they are now when the repository has no such commit): the pack names the commit its runs ran",
 	"the secret scan finds key shapes (hex) and fields never whitelisted; a base64 secret is not recognized",
 	"the facilitator is the host directory's setting at the start, and each tx#2's sender is the chain's; neither is a claim (a facilitator's address is not checked against its own list)",
-	"an Agent's ERC-8004 identity is the registry's ref and what its registry answers, listed, not a claim: the payment wallet in its registration file is a declaration (its agentWallet is unset), and ERC-8004 is a draft whose registry its owner can upgrade",
+	"an Agent's ERC-8004 identity is the registry's ref and what its registry answers, listed, not a claim: the payment wallet in its registration file is a declaration, and agent_wallet_is_consumer_wallet says whether the registry holds that wallet's own signed consent (setAgentWallet); ERC-8004 is a draft whose registry its owner can upgrade",
 }
 
 // tracePrompt is the prompt a live run of entry must have been given.

@@ -113,7 +113,7 @@ func PaymentStatus(state, code string) string {
 		return "not_paid"
 	case "needs_review":
 		if code == "DELIVERY_FAILED" {
-			return "paid" // paid, and its delivery failed: a person handles it
+			return "paid" // paid, and its delivery failed: a person handles it (a refund: refunded, paymentView)
 		}
 		return "needs_review"
 	}
@@ -481,6 +481,45 @@ func (s *Store) PaymentFailed(intent, code string) (Payment, error) {
 	return Payment{}, refuse("INVALID_PAYMENT_UPDATE", "unknown payment failure code")
 }
 
+// PaymentRefunded records the shop's refund of a payment settled and not delivered (DELIVERY_FAILED), its
+// transaction confirmed on chain (docs/commercial-refund.md): PAYMENT_REFUNDED, once. The payment's state stays
+// as it is and the task's budget too (its reservation on chain is not undone). The same refund again is
+// answered as it stands; another one is IDEMPOTENCY_CONFLICT.
+func (s *Store) PaymentRefunded(intent, tx string, block uint64) (Payment, error) {
+	var out Payment
+	err := s.write(func(dtx *sql.Tx, now uint64) error {
+		p, err := scanPaid(dtx.QueryRow(paidWhere(`p.intent_hash = ?`), intent))
+		if errors.Is(err, sql.ErrNoRows) {
+			return refuse("UNKNOWN_PAYMENT", "no such payment")
+		} else if err != nil {
+			return err
+		}
+		if p.State != "needs_review" || p.Code != "DELIVERY_FAILED" {
+			return refuse("INVALID_PAYMENT_TRANSITION", "only a payment settled and not delivered is refunded")
+		}
+		t, err := s.openTask(dtx, now, p.TaskID)
+		if err != nil {
+			return err
+		}
+		if v := t.paymentView(p.PurchaseOrderID); v != nil && v.RefundTx != "" {
+			if v.RefundTx != tx || v.RefundBlock != block {
+				return refuse("IDEMPOTENCY_CONFLICT", "this payment was refunded in another transaction")
+			}
+			out = p
+			return nil
+		}
+		if err := t.emit("PAYMENT_REFUNDED", t.purchases[p.PurchaseOrderID], contracts.EventPayload{Payment: &contracts.PaymentRecord{Amount: p.Amount, TxHash: tx, Block: block}}); err != nil {
+			return err
+		}
+		if err := t.finish(); err != nil {
+			return err
+		}
+		out = p
+		return nil
+	})
+	return out, err
+}
+
 // TaskEnded: the task has stopped taking new payments as the order rules
 // see it (paycontract.Ended). The payment worker asks before its first
 // call to the relayer for a payment (docs/commercial-p2-host.md 7).
@@ -654,6 +693,10 @@ type PaymentView struct {
 	SettleBlock   uint64 `json:"settle_block,omitempty"`
 	ContentSHA256 string `json:"content_sha256,omitempty"`
 	ReceiptID     string `json:"receipt_id,omitempty"`
+	// RefundTx, RefundBlock: the shop's refund of a payment settled and not delivered (docs/commercial-refund.md);
+	// the payment stays needs_review DELIVERY_FAILED, its status refunded.
+	RefundTx    string `json:"refund_tx,omitempty"`
+	RefundBlock uint64 `json:"refund_block,omitempty"`
 }
 
 var eventState = map[string]string{"PAYMENT_REQUESTED": "requested", "BUDGET_RESERVED": "reserved", "PAYMENT_SIGNED": "signed", "PAYMENT_SUBMITTED": "submitted",
@@ -668,6 +711,10 @@ func (t *taskTx) paymentView(po string) *PaymentView {
 		}
 		if v == nil {
 			v = &PaymentView{}
+		}
+		if e.EventType == "PAYMENT_REFUNDED" { // after the review it ends: the state stays
+			v.RefundTx, v.RefundBlock = e.Payload.Payment.TxHash, e.Payload.Payment.Block
+			continue
 		}
 		v.State, v.Code = eventState[e.EventType], e.Payload.Code
 		if e.EventType == "PAYMENT_NOT_SETTLED" {
@@ -688,6 +735,9 @@ func (t *taskTx) paymentView(po string) *PaymentView {
 	}
 	if v != nil {
 		v.Status = PaymentStatus(v.State, v.Code)
+		if v.RefundTx != "" {
+			v.Status = "refunded"
+		}
 		if v.Code == "RESERVED_NOT_PAID" { // a view: no attempt (or no row) leaves it empty
 			t.tx.QueryRow(`SELECT coalesce(error_code, '') FROM payment_attempts WHERE task_id = ? AND purchase_order_id = ?`, t.row.TaskID, po).Scan(&v.SignerCode)
 		}
@@ -724,7 +774,9 @@ func (t *taskTx) verifyPaid(initial contracts.Amount) string {
 	}
 	last := map[string]string{}
 	for _, e := range t.events {
-		if slices.Contains(paycontract.PaymentEvents, e.EventType) {
+		// A refund follows the review of a payment settled and not delivered (the event order's rule); the payment's
+		// state stays that review's.
+		if slices.Contains(paycontract.PaymentEvents, e.EventType) && e.EventType != "PAYMENT_REFUNDED" {
 			last[e.Scope.PurchaseOrderID] = e.EventType
 		}
 	}

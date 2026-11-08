@@ -8,6 +8,12 @@
 //	p2-testnet opt-signer --dir DIR --base SIGNER.JSON [--voice SIGNER.JSON] --out NEW.JSON
 //	p2-testnet e1a-host   --dir DIR | --from SRCDIR --out NEWDIR [--registry TEMPLATE] [--label L] [--shop-eval NAME] [--shop-cap N] [--facilitator URL]
 //	p2-testnet agents     --dir DIR [--rpc URL]
+//	p2-testnet agent-wallet --dir DIR [--rpc URL] [--signer SOCKET]
+//
+// agent-wallet (docs/commercial-8004.md §8) sets each Agent's agentWallet to
+// its consumer's payment wallet, on that wallet's own EIP-712 consent from
+// the Signer (the agent /opt's signer.json names for it), sent by the issuer
+// after "yes" and its passphrase, with apa-relayer stopped.
 //
 // agents (docs/commercial-8004.md I1) registers the family's two Agents in
 // ERC-8004's identity registry on Base Sepolia from the issuer, after "yes"
@@ -178,6 +184,9 @@ func run(ctx context.Context, args []string, out io.Writer, ask asker) error {
 	}
 	if len(args) > 0 && args[0] == "agents" {
 		return agents(ctx, args[1:], out, ask)
+	}
+	if len(args) > 0 && args[0] == "agent-wallet" {
+		return agentWallet(ctx, args[1:], out, ask)
 	}
 	if len(args) > 0 && args[0] == "test402" {
 		save := ""
@@ -1034,6 +1043,23 @@ func optSigner(args []string, out io.Writer) error {
 	v.Decimals = 6                                        // Circle's USDC (deploy read it)
 	cfg.MaxWindowSeconds = max(cfg.MaxWindowSeconds, 600) // the settling shop's 300 s window fits
 	cfg.Reservation = &signer.Reservation{RPC: pay.RPC, ChainID: chain, BudgetContract: strings.ToLower(pay.BudgetContract), Confirmations: pay.Confirmations}
+	// docs/commercial-velocity.md: the Signer's own rate limit, as the run sets' profiles (e1a-host --velocity).
+	cfg.Velocity = &signer.Velocity{Max: 5, WindowSeconds: 600}
+	// Each wallet's ERC-8004 agent, once agents registered them (docs/commercial-8004.md §8): the only consent
+	// to an agent the Signer signs, for that agent, registry and owner.
+	cfg.Agents = nil
+	var j agentsFile
+	if err := readJSON(filepath.Join(host, "agents.json"), &j); err == nil {
+		for _, e := range j.Agents {
+			for _, w := range cfg.Wallets {
+				if w.ConsumerID == e.ConsumerID && e.AgentID != 0 && strings.EqualFold(w.Address, e.PaymentWallet) {
+					cfg.Agents = append(cfg.Agents, signer.Agent{WalletID: w.WalletID, ChainID: chain, Registry: strings.ToLower(j.Registry), AgentID: e.AgentID, Owner: strings.ToLower(j.Owner)})
+				}
+			}
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	b, err := json.MarshalIndent(cfg, "", " ")
 	if err != nil {
 		return err
@@ -1053,12 +1079,15 @@ func optSigner(args []string, out io.Writer) error {
 		return err
 	}
 	sum := sha256.Sum256(append(b, '\n'))
-	fmt.Fprintf(out, "p2-testnet: wrote %s (SHA-256 %x): wallets %s and %s, delegations %d, approvers %d, reservation on chain %s at %s; voice socket %q, models %q and %q\n",
-		*dst, sum, cfg.Wallets[0].Address, cfg.Wallets[1].Address, len(cfg.Delegations), len(cfg.Approvers), chain, cfg.Reservation.BudgetContract, v.Socket, v.ASRModel, v.SpeakerModel)
+	fmt.Fprintf(out, "p2-testnet: wrote %s (SHA-256 %x): wallets %s and %s, delegations %d, approvers %d, ERC-8004 agents %d, velocity 5 in 600 s, reservation on chain %s at %s; voice socket %q, models %q and %q\n",
+		*dst, sum, cfg.Wallets[0].Address, cfg.Wallets[1].Address, len(cfg.Delegations), len(cfg.Approvers), len(cfg.Agents), chain, cfg.Reservation.BudgetContract, v.Socket, v.ASRModel, v.SpeakerModel)
 	return nil
 }
 
 // e1aHost is p2-testnet e1a-host (see the command's doc).
+// defaultProfile is the Host's default profile (cmd/demo --profile), from the repository's root (tests: theirs).
+var defaultProfile = "testdata/policy/m1-demo-profile.json"
+
 func e1aHost(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("e1a-host", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -1070,6 +1099,7 @@ func e1aHost(args []string, out io.Writer) error {
 	label := fs.String("label", "", "this run set's label in the task IDs (show-e1a-<label>-a-01), instead of the template's")
 	shopCap := fs.Uint64("shop-cap", 0, "the shop's daily settlements for this host, instead of deploy's (0: deploy's)")
 	fac := fs.String("facilitator", "http://127.0.0.1:8403", "who the shop settles through (the Host checks it before anything starts)")
+	vel := fs.String("velocity", "5/600", `the profile's rate limit, MAX/SECONDS (docs/commercial-velocity.md: 5 in 10 minutes); "" none`)
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || (*dir == "") == (*from == "") || *dst == "" {
 		return errors.New("usage: p2-testnet e1a-host --dir DIR | --from SRCDIR --out NEWDIR [--registry TEMPLATE] [--shop-eval NAME]")
 	}
@@ -1147,6 +1177,31 @@ func e1aHost(args []string, out io.Writer) error {
 	// (present.sh starts it) or, FA3, x402.org.
 	pay["facilitator_url"] = *fac
 	files := map[string]any{"payments.json": pay, "registry.json": t}
+	// docs/commercial-velocity.md: a new run set's profile limits each consumer's purchases in a short time;
+	// a source without a profile (p2-local's) takes the Host's default one, the demo profile.
+	if *vel != "" {
+		var max, window uint64
+		if n, err := fmt.Sscanf(*vel, "%d/%d", &max, &window); err != nil || n != 2 {
+			return errors.New("e1a-host: --velocity is MAX/SECONDS, e.g. 5/600")
+		}
+		if prof == nil {
+			raw, err := os.ReadFile(defaultProfile)
+			if err != nil {
+				return fmt.Errorf("e1a-host: the default profile: %w", err)
+			}
+			prof = raw
+		}
+		var m map[string]any
+		if err := json.Unmarshal(prof, &m); err != nil {
+			return fmt.Errorf("e1a-host: profile.json: %w", err)
+		}
+		m["velocity"] = policy.Velocity{Max: max, WindowSeconds: window}
+		raw, _ := json.Marshal(m)
+		if _, err := policy.LoadProfile(raw); err != nil {
+			return fmt.Errorf("e1a-host: the profile with its velocity: %w", err)
+		}
+		prof = raw
+	}
 	if prof != nil {
 		files["profile.json"] = prof
 	}

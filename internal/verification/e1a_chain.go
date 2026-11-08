@@ -106,7 +106,7 @@ func e1aOnChain(f *findings, m E1aManifest, runs map[string]*e1aRun, chain Chain
 				f.fail("E8", []string{"manifest.json"}, "%s's payer %s is not among the start's wallets: its transfers would go uncounted", po, o.PaymentBinding.From)
 			}
 			es := by[po]
-			var tx1, tx2 string
+			var tx1, tx2, tx3 string
 			var reserved, settledEv bool
 			for _, e := range es {
 				switch e.EventType {
@@ -119,6 +119,10 @@ func e1aOnChain(f *findings, m E1aManifest, runs map[string]*e1aRun, chain Chain
 					settledEv = true
 					if e.Payload.Payment != nil {
 						tx2 = e.Payload.Payment.TxHash
+					}
+				case "PAYMENT_REFUNDED": // the event order puts it after a settlement not delivered
+					if e.Payload.Payment != nil {
+						tx3 = e.Payload.Payment.TxHash
 					}
 				}
 			}
@@ -143,7 +147,13 @@ func e1aOnChain(f *findings, m E1aManifest, runs map[string]*e1aRun, chain Chain
 				continue
 			}
 			seen(e1aSettlement(ctx, f, chain, latest, s, token, tx2, o.PaymentBinding.From, o.PaymentBinding.PayTo, o.PaymentBinding.Nonce, amount))
-			sent = append(sent, E1aSettlement{PurchaseOrderID: po, Transaction: tx2, SentBy: sentBy(ctx, chain, tx2)})
+			st := E1aSettlement{PurchaseOrderID: po, Transaction: tx2, SentBy: sentBy(ctx, chain, tx2)}
+			if tx3 != "" {
+				block, by := e1aRefundTx(ctx, f, chain, latest, s, token, tx3, o.PaymentBinding.From, amount)
+				seen(block)
+				st.Refund = &E1aRefund{Transaction: tx3, SentBy: by}
+			}
+			sent = append(sent, st)
 			k := strings.ToLower(tx2)
 			if claimed[k] {
 				f.fail("E4", nil, "tx#2 %s is claimed by two purchases", tx2)
@@ -377,6 +387,30 @@ func e1aSettlement(ctx context.Context, f *findings, chain Chain, latest uint64,
 }
 
 func topicIs(t [32]byte, a eth.Address) bool { return bytes.Equal(t[12:], a[:]) }
+
+// e1aRefundTx is E4 of a refund (docs/commercial-refund.md): confirmed, its token Transfer of the purchase's
+// whole amount back to its payer, from the transaction's own sender (the shop's key: on the testnet its
+// pay_to). Its block and sender; a refund moves nothing out of a payer wallet, so E8 does not count it.
+func e1aRefundTx(ctx context.Context, f *findings, chain Chain, latest uint64, s E1aStart, token eth.Address, h, payer string, amount *big.Int) (uint64, string) {
+	r := confirmed(ctx, f, chain, latest, s, "E4", h)
+	by := sentBy(ctx, chain, h)
+	if r == nil {
+		return 0, by
+	}
+	to, err1 := eth.ParseAddress(strings.ToLower(payer))
+	from, err2 := eth.ParseAddress(strings.ToLower(by))
+	moved := false
+	for _, l := range r.Logs {
+		if errors.Join(err1, err2) == nil && l.Address == token && len(l.Topics) == 3 && l.Topics[0] == transferTopic && topicIs(l.Topics[1], from) &&
+			topicIs(l.Topics[2], to) && new(big.Int).SetBytes(l.Data).Cmp(amount) == 0 {
+			moved = true
+		}
+	}
+	if !moved {
+		f.fail("E4", nil, "refund %s: no transfer of %s from its sender %q back to the payer %s", h, amount, by, payer)
+	}
+	return r.BlockNumber, by
+}
 
 // e1aTransfers is E8: every transfer out of the start's wallets in the
 // pack's blocks (its start to its end, which hold every one of its

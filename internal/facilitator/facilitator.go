@@ -27,6 +27,7 @@ import (
 type Settler interface {
 	Check(ctx context.Context, req x402.Requirement, payload json.RawMessage) (payer, reason string)
 	Settle(ctx context.Context, req x402.Requirement, key string, payload json.RawMessage) merchant.Outcome
+	Refund(ctx context.Context, settleTx string) merchant.RefundOutcome
 }
 
 // Server answers the three endpoints for one chain, token and payee.
@@ -48,6 +49,27 @@ func (f *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /verify", f.verify)
 	mux.HandleFunc("POST /settle", f.settle)
 	mux.HandleFunc("GET /supported", f.supported)
+	mux.HandleFunc("POST /refund", f.refund)
+}
+
+// refund is not x402's: the shop's refund of one of its own settlements, paid and not delivered
+// (docs/commercial-refund.md), back to its payer, the whole amount, once. The body names the settlement's
+// transaction only; the payer and the amount are the settler's record.
+func (f *Server) refund(w http.ResponseWriter, r *http.Request) {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<10+1))
+	var in struct {
+		Transaction string `json:"transaction"`
+	}
+	if err != nil || len(raw) > 1<<10 || contracts.Decode(raw, &in) != nil {
+		reply(w, http.StatusBadRequest, merchant.RefundOutcome{Kind: "invalid", Reason: "invalid_request"})
+		return
+	}
+	o := f.st.Refund(r.Context(), in.Transaction)
+	status := http.StatusOK
+	if o.Kind == "pending" && o.Transaction == "" {
+		status = http.StatusServiceUnavailable // nothing sent: ask again
+	}
+	reply(w, status, o)
 }
 
 func (f *Server) supported(w http.ResponseWriter, _ *http.Request) {

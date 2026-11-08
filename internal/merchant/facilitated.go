@@ -23,6 +23,8 @@ import (
 type Settlement interface {
 	config() SettleConfig
 	Pay(ctx context.Context, o offer, payload json.RawMessage) Outcome
+	// Refund refunds a payment settled in settleTx and not delivered (docs/commercial-refund.md).
+	Refund(ctx context.Context, settleTx string) RefundOutcome
 }
 
 func (s *Settler) config() SettleConfig { return s.cfg }
@@ -156,6 +158,21 @@ func (f *Facilitated) post(ctx context.Context, path string, body, out any) (int
 		return res.StatusCode, err // an answer that is no answer
 	}
 	return res.StatusCode, nil
+}
+
+// Refund asks the facilitator to refund its settlement in settleTx (our apa-facilitator's POST /refund; another
+// facilitator has none: invalid, refund_unavailable). Nothing it answered: pending, asked again it answers the
+// same refund. The Host reads the refund's transfer on its own node before it records it.
+func (f *Facilitated) Refund(ctx context.Context, settleTx string) RefundOutcome {
+	var o RefundOutcome
+	code, err := f.post(ctx, "/refund", map[string]string{"transaction": settleTx}, &o)
+	switch {
+	case err != nil && code == 0, code >= 500 && o.Kind == "":
+		return RefundOutcome{Kind: "pending", Reason: "facilitator_unavailable"}
+	case code == http.StatusNotFound || code == http.StatusMethodNotAllowed || err != nil || o.Kind == "":
+		return RefundOutcome{Kind: "invalid", Reason: "refund_unavailable"}
+	}
+	return o
 }
 
 // Quota is the facilitator's transfers today and its daily cap (our

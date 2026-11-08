@@ -42,6 +42,44 @@ contract TestAgentRegistry {
         wallets[agentId] = address(0);
     }
 
+    /// @notice As the registry's 2.0.0 (docs/commercial-8004.md §8): the owner sets the wallet on the new
+    /// wallet's EIP-712 signature over AgentWalletSet, in the domain ERC8004IdentityRegistry/1, its deadline
+    /// at most 5 minutes ahead. EOA signatures only (no ERC-1271 here).
+    bytes32 internal constant AGENT_WALLET_SET_TYPEHASH =
+        keccak256("AgentWalletSet(uint256 agentId,address newWallet,address owner,uint256 deadline)");
+    uint256 internal constant MAX_DEADLINE_DELAY = 5 minutes;
+
+    function setAgentWallet(uint256 agentId, address newWallet, uint256 deadline, bytes calldata signature)
+        external
+        onlyOwner(agentId)
+    {
+        require(newWallet != address(0), "bad wallet");
+        require(block.timestamp <= deadline, "expired");
+        require(deadline <= block.timestamp + MAX_DEADLINE_DELAY, "deadline too far");
+        bytes32 domain = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256("ERC8004IdentityRegistry"),
+                keccak256("1"),
+                block.chainid,
+                address(this)
+            )
+        );
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                domain,
+                keccak256(abi.encode(AGENT_WALLET_SET_TYPEHASH, agentId, newWallet, owners[agentId], deadline))
+            )
+        );
+        require(signature.length == 65, "invalid wallet sig");
+        bytes32 r = bytes32(signature[0:32]);
+        bytes32 s = bytes32(signature[32:64]);
+        uint8 v = uint8(signature[64]);
+        require(ecrecover(digest, v, r, s) == newWallet, "invalid wallet sig");
+        wallets[agentId] = newWallet;
+    }
+
     function ownerOf(uint256 agentId) external view returns (address owner) {
         owner = owners[agentId];
         require(owner != address(0), "no such agent");

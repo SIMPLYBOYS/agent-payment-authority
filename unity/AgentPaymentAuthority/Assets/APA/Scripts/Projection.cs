@@ -113,6 +113,7 @@ namespace APA
                 case "PAYMENT_CAPABILITY_UNAVAILABLE": return "這場展示不能付款";
                 case "APPROVER_UNAVAILABLE": return "沒有可核准的人";
                 case "VOICE_CHALLENGE_FAILED": return "唸的內容或聲音不符";
+                case "VELOCITY_LIMIT": return "短時間內請購太多次"; // docs/commercial-velocity.md
                 case "APPROVER_DENIED": return "核准者拒絕";
                 default: return "";
             }
@@ -143,6 +144,7 @@ namespace APA
                 case "paid": return "已付款，在交付區等交付";
                 case "delivered": return "已交付，帶著收據離店";
                 case "delivery_failed": return "已付款，交付失敗（待人工處理）";
+                case "refunded": return "交付失敗，商店已退款，離店"; // docs/commercial-refund.md
                 case "not_paid": return "沒有付款（沒有花錢），離店";
                 case "payment_review": return "付款沒有照預期完成，待主持人確認"; // true of every review code
                 case "expired": return "核准期限已過，離店";
@@ -160,7 +162,7 @@ namespace APA
     {
         public const int Version = 1;
         public static readonly string[] Phases = { "empty", "entered", "quoted", "waiting", "denied", "allowed_unpaid", "expired", "withdrawn", "unknown",
-            "allowed", "approved", "paying", "confirming", "paid", "delivered", "delivery_failed", "not_paid", "payment_review" };
+            "allowed", "approved", "paying", "confirming", "paid", "delivered", "delivery_failed", "refunded", "not_paid", "payment_review" };
         public static readonly string[] Consumers = { "consumer-a", "consumer-b" };
 
         public int Gen { get; private set; } = -1;

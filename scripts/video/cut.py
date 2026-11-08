@@ -3,7 +3,9 @@
 Base Sepolia clip of 11/6 (rec1) and title cards, cut row by row as the script's tables time them; each row's
 narration as subtitles (Chinese over English) in a band under the picture, also as two SRT files.
 
-    python3 -I scripts/video/cut.py --cut 90|180 [--out artifacts/video]
+    python3 -I scripts/video/cut.py --cut 90|180|addon [--out artifacts/video]
+
+--cut addon: the hotel's and the post office's add-on clips (apa-addon-hotel, apa-addon-post), from addon-present/.
 
 Inputs (artifacts/video/, git-ignored): full-present2/ and full-show2/ (full.mp4, marks.json: film.mjs --stage full,
 --view present and show), fooled/fooled.mp4 (--stage fooled), rec1/rec1-cforce.mov (the 11/6 recording: only the
@@ -138,11 +140,79 @@ def srt_time(t):
     return "%02d:%02d:%02d,%03d" % (ms // 3600000, ms // 60000 % 60, ms // 1000 % 60, ms % 1000)
 
 
+def render(rows, work, name):
+    """rows as one file and its two SRTs: each row's parts in turn, its narration under all of them."""
+    segs, zh_srt, en_srt, t = [], [], [], 0.0
+    for k, (zh, en, parts) in enumerate(rows):
+        row = sum(d for _, d in parts)
+        zh_srt.append("%d\n%s --> %s\n%s\n" % (k + 1, srt_time(t), srt_time(t + row), zh))
+        en_srt.append("%d\n%s --> %s\n%s\n" % (k + 1, srt_time(t), srt_time(t + row), en))
+        for part, d in parts:
+            segs.append(segment(len(segs), part, d, zh, en, work))
+        t += row
+    lst = os.path.join(work, "segments.txt")
+    open(lst, "w").write("".join("file '%s'\n" % s for s in segs))
+    ff("-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", name + ".mp4")
+    open(name + ".zh.srt", "w", encoding="utf-8").write("\n".join(zh_srt))
+    open(name + ".en.srt", "w", encoding="utf-8").write("\n".join(en_srt))
+    print("cut: %s.mp4 (%.1f s, %d segments), %s.zh.srt, %s.en.srt" % (name, t, len(segs), name, name))
+
+
+def addon(out):
+    """The two add-on clips (docs/commercial-post-hotel.md N6): the hotel and the post office, each on its own,
+    from film.mjs --stage full --view present --venues hotel,post (addon-present2/: the post office's refund, 11/8)."""
+    P = os.path.join(V, "addon-present2/full.mp4")
+    if not os.path.exists(P):
+        sys.exit("cut: missing " + P + " (film.mjs --stage full --view present --venues hotel,post --out " + os.path.dirname(P) + ")")
+    m = json.load(open(os.path.join(V, "addon-present2/marks.json")))
+
+    def clip(start, length):
+        return dict(kind="clip", src=P, start=start, len=length)
+
+    for venue, title, lead, rows in [
+        ("hotel", "加演：飯店", "訂房頁的收款人被換掉", [
+            ("家長的 AI 訂首爾的飯店。訂房頁的付款對象被換成另一個地址，就像假的訂房網站。",
+             "The parent's AI books a hotel in Seoul. The booking page's payee has been swapped, like a fake booking site.",
+             [(clip(m["hotel-start"] - 1.0, HOTEL[0]), HOTEL[1])]),
+            ("收款人不在允許的商店名單，付款前就被拒絕，錢沒有動。孩子的早餐券在範圍內，照常付款。",
+             "The payee is not on the allowed list, so it is refused before paying: no money moves. The child's breakfast voucher goes through.",
+             [(clip(m["hotel-start"] - 1.0 + HOTEL[0], HOTEL[2]), HOTEL[3])]),
+        ]),
+        ("post", "加演：郵局", "付了錢，卻沒拿到東西", [
+            ("家長的 AI 付郵資，寄包裹給外婆。付款完成了，郵局卻沒有交出寄件單。",
+             "The parent's AI pays the postage for a parcel to grandma. The payment goes through, but no label is issued.",
+             [(clip(m["post-start"] - 1.0, POST[0]), POST[1])]),
+            ("系統以鏈上的結果為準：記下「已付款、交付失敗」，不會再付一次。",
+             "The chain decides: paid, not delivered, and never paid twice.",
+             [(clip(m["post-start"] - 1.0 + POST[0], POST[2]), POST[3])]),
+            ("該不該退由人判斷：主持人按「商店退款」，錢退回客人的錢包，鏈上確認後才記下。",
+             "A person decides: the host asks the shop to refund, and it is recorded once the chain shows the money back.",
+             [(clip(m["post-start"] - 1.0 + POST[0] + POST[2], POST[4]), POST[5])]),
+        ]),
+    ]:
+        work = os.path.join(out, "cut-addon-%s-work" % venue)
+        os.makedirs(work, exist_ok=True)
+        p = os.path.join(work, "title.png")
+        card(p, title, [lead], ["示意動畫：fake Agent・本機測試鏈"])
+        rows[0][2].insert(0, (dict(kind="card", png=p), 3.0))
+        render(rows, work, os.path.join(out, "apa-addon-%s" % venue))
+
+
+# The add-ons' rows, in film seconds from a second before each venue's start: each row's film and its length on
+# screen (faster when shorter), read off addon-present2/full.mp4 (11/8): the hotel's Deny shows 8.5 s in, the
+# child's receipt 20.9 s; the post office's failed delivery 20.4 s in, the refund pressed 26.7 s in and recorded
+# 0.4 s later (a local chain), the film ending 6 s after.
+HOTEL = (8.5, 8.5, 16.7, 13.0)
+POST = (18.8, 12.5, 7.7, 8.0, 6.3, 7.5)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cut", choices=["90", "180"], required=True)
+    ap.add_argument("--cut", choices=["90", "180", "addon"], required=True)
     ap.add_argument("--out", default=V)
     a = ap.parse_args()
+    if a.cut == "addon":
+        return addon(a.out)
     work = os.path.join(a.out, "cut-%s-work" % a.cut)
     os.makedirs(work, exist_ok=True)
     P = os.path.join(V, "full-present2/full.mp4")
@@ -229,23 +299,7 @@ def main():
              "x402 moves the money; this layer proves who allowed it, for what, and within which limits.",
              [(limits, 7.0), (ending, 5.0)]),
         ]
-    segs, zh_srt, en_srt, t = [], [], [], 0.0
-    n = 0
-    for k, (zh, en, parts) in enumerate(rows):
-        row = sum(d for _, d in parts)
-        zh_srt.append("%d\n%s --> %s\n%s\n" % (k + 1, srt_time(t), srt_time(t + row), zh))
-        en_srt.append("%d\n%s --> %s\n%s\n" % (k + 1, srt_time(t), srt_time(t + row), en))
-        for part, d in parts:
-            segs.append(segment(n, part, d, zh, en, work))
-            n += 1
-        t += row
-    lst = os.path.join(work, "segments.txt")
-    open(lst, "w").write("".join("file '%s'\n" % s for s in segs))
-    name = os.path.join(a.out, "apa-demo-%ss" % a.cut)
-    ff("-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", name + ".mp4")
-    open(name + ".zh.srt", "w", encoding="utf-8").write("\n".join(zh_srt))
-    open(name + ".en.srt", "w", encoding="utf-8").write("\n".join(en_srt))
-    print("cut: %s.mp4 (%.1f s, %d segments), %s.zh.srt, %s.en.srt" % (name, t, len(segs), name, name))
+    render(rows, work, os.path.join(a.out, "apa-demo-%ss" % a.cut))
 
 
 if __name__ == "__main__":

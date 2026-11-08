@@ -534,6 +534,17 @@ func (c *Core) accept(ctx context.Context, s *snapshot, d *Delegation, amount ui
 			return "", Refusal(q.code)
 		}
 	}
+	// docs/commercial-velocity.md: the Signer's own rate limit, the Host's Policy or not: at most Max payments
+	// accepted or signed for this wallet within the window. The Host counts its Allows and Asks, never fewer
+	// than the Signer's payments, so in a working demo the Host's limit refuses first.
+	if v := c.cfg.Velocity; v != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM attempts WHERE wallet_id = ? AND state IN ('accepted', 'signed') AND accepted_at > ?`,
+			s.WalletID, now-min(now, v.WindowSeconds)).Scan(&n); err != nil {
+			return "", err
+		} else if uint64(n) >= v.Max {
+			return "", Refusal("VELOCITY_LIMIT")
+		}
+	}
 	var delegationID, approvalID any // exactly one is set
 	if d != nil {
 		var spent uint64

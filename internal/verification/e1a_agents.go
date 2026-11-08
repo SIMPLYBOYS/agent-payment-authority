@@ -16,8 +16,9 @@ import (
 
 // E1aAgent is one consumer's Agent identity (ERC-8004, docs/commercial-8004.md
 // I3): the pack registry's ref and what the chain answers for it ("" not
-// read), listed, not a claim. Its payment wallet is the registration file's
-// declaration (the agentWallet is unset, E3 A), not a proof.
+// read), listed, not a claim. The registration file's payment wallet is a
+// declaration; the agentWallet is the registry's record of that wallet's
+// own signature (setAgentWallet, docs/commercial-8004.md §8), or none.
 type E1aAgent struct {
 	ConsumerID     string `json:"consumer_id"`
 	Ref            string `json:"agent_registry_ref"`
@@ -27,6 +28,9 @@ type E1aAgent struct {
 	DeclaredWallet string `json:"declared_payment_wallet"`
 	// DeclaredIsConsumers: the declared wallet is the registry's wallet for this consumer.
 	DeclaredIsConsumers bool `json:"declared_is_consumer_wallet"`
+	// AgentWalletIsConsumers: the chain's agentWallet is the registry's wallet for this consumer, which the
+	// registry set only on that wallet's signature: the wallet's proof, not the platform's word.
+	AgentWalletIsConsumers bool `json:"agent_wallet_is_consumer_wallet"`
 }
 
 var agentRef = regexp.MustCompile(`^eip155:([0-9]+)/erc721:(0x[0-9a-fA-F]{40})/([0-9]+)$`)
@@ -76,6 +80,7 @@ func e1aAgents(chain Chain, reg contracts.RegistryConfig) []E1aAgent {
 			return o.Hex()
 		}
 		a.Owner, a.AgentWallet = address("ownerOf(uint256)"), address("getAgentWallet(uint256)")
+		a.AgentWalletIsConsumers = a.AgentWallet != "" && a.AgentWallet != (eth.Address{}).Hex() && strings.EqualFold(a.AgentWallet, wallets[c.WalletID])
 		if uri, ok := abiStringOf(call("tokenURI(uint256)")); ok {
 			sum := sha256.Sum256([]byte(uri))
 			a.URISHA256 = hex.EncodeToString(sum[:])

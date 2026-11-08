@@ -147,6 +147,15 @@ async function full(b, unityUp, demo) {
     }
     mark(venue + "-done");
     await sleep(6000); // the ends held a moment
+    if (venue === "post") { // docs/commercial-refund.md: the presenter, a person, has the shop refund A's parcel
+      const shows = (js) => b.evaluate(js);
+      for (const t = Date.now() + 60000; Date.now() < t && !(await shows(`!!document.querySelector("button.present-refund:not([disabled])")`));) await sleep(300);
+      mark("post-refund");
+      if (!(await click("button.present-refund"))) throw new Error("post: no refund button");
+      for (const t = Date.now() + 120000; Date.now() < t && !(await shows(`[...document.querySelectorAll(".present-step-list small")].some((e) => e.textContent.includes("商店已退款"))`));) await sleep(300);
+      mark("post-refunded");
+      await sleep(6000);
+    }
     if (venue !== venues[venues.length - 1]) { await click("#present-town"); await sleep(4000); }
   }
   mark("end");
@@ -158,7 +167,7 @@ async function full(b, unityUp, demo) {
     const t = await get("/api/tasks/" + r.task_id);
     for (const p of t.purchases || []) {
       const d = p.decision || {}, pay = p.payment || {};
-      log("film: outcome " + r.scenario + " " + r.task_id + " " + (p.resource_url || "").replace(/^.*\/scenes\//, "") + ": " + (d.policy_verdict || "-") + " " + (d.reason || "") + "; payment " + (pay.state || pay.status || "-") + (pay.code ? " " + pay.code : ""));
+      log("film: outcome " + r.scenario + " " + r.task_id + " " + (p.resource_url || "").replace(/^.*\/scenes\//, "") + ": " + (d.policy_verdict || "-") + " " + (d.reason || "") + "; payment " + (pay.state || pay.status || "-") + (pay.code ? " " + pay.code : "") + (pay.refund_tx ? "; refunded " + pay.refund_tx : ""));
     }
   }
   const got = await stop();

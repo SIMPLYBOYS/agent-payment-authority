@@ -92,6 +92,23 @@ type WebAuthn struct {
 	ApprovalTTLSeconds  uint64   `json:"approval_ttl_seconds"`
 }
 
+// Agent is the ERC-8004 identity one wallet may consent to (docs/commercial-8004.md §8): the Signer signs
+// AgentWalletSet for exactly this agent, registry, chain and owner, naming the wallet's own address, and
+// nothing else. The administrator sets it, as a delegation; a request names the wallet only.
+type Agent struct {
+	WalletID string `json:"wallet_id"`
+	ChainID  string `json:"chain_id"`
+	Registry string `json:"registry"`
+	AgentID  uint64 `json:"agent_id"`
+	Owner    string `json:"owner"`
+}
+
+// Velocity is the Signer's rate limit: at most Max payments of one wallet within WindowSeconds.
+type Velocity struct {
+	Max           uint64 `json:"max"`
+	WindowSeconds uint64 `json:"window_seconds"`
+}
+
 type Config struct {
 	Version          int          `json:"version"` // 1
 	Socket           string       `json:"socket"`  // absolute path of the Unix socket
@@ -104,6 +121,8 @@ type Config struct {
 	WebAuthn         *WebAuthn    `json:"webauthn,omitempty"`
 	Voice            *Voice       `json:"voice,omitempty"`       // V1: approvals ask for a voice challenge
 	Reservation      *Reservation `json:"reservation,omitempty"` // P2: without it nothing is signed
+	Agents           []Agent      `json:"agents,omitempty"`      // ERC-8004: without one a wallet consents to no agent
+	Velocity         *Velocity    `json:"velocity,omitempty"`    // docs/commercial-velocity.md: without it no rate limit
 
 	hash string // sha256 of the canonical configuration, in each snapshot
 }
@@ -136,6 +155,17 @@ func ParseConfig(raw []byte) (*Config, error) {
 			return nil, fmt.Errorf("config: wallet %q chain", w.WalletID)
 		}
 		wallets[w.WalletID], owners[w.Address] = w, w.ConsumerID
+	}
+	if v := c.Velocity; v != nil && (v.Max == 0 || v.WindowSeconds == 0 || v.WindowSeconds > 86400) {
+		return nil, errors.New("config: velocity is at least one payment within 1 to 86400 seconds")
+	}
+	bound := map[string]bool{}
+	for _, a := range c.Agents {
+		w, ok := wallets[a.WalletID]
+		if !ok || bound[a.WalletID] || w.ChainID != a.ChainID || a.AgentID == 0 || !addressPattern.MatchString(a.Registry) || !addressPattern.MatchString(a.Owner) {
+			return nil, fmt.Errorf("config: agent of wallet %q (one per wallet, on its chain)", a.WalletID)
+		}
+		bound[a.WalletID] = true
 	}
 	for _, a := range c.Assets {
 		if _, ok := units(contracts.Amount(a.ChainID)); !ok || !addressPattern.MatchString(a.AssetContract) || a.EIP712Name == "" || a.EIP712Version == "" {

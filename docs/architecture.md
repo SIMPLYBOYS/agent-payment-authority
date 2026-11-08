@@ -64,7 +64,7 @@ flowchart LR
 4. **付款**：兩筆鏈上交易（Base Sepolia）。
    - tx#1：relayer 送出 **Groth16 證明**，預算合約驗證「扣完不為負、對應這個 task、nullifier 沒用過」，再預留預算。
    - tx#2：Signer 簽 EIP-3009 授權，商店驗證後結算 test USDC。
-5. **交付**：商店交付內容並開收據，收據記下內容的 sha256。
+5. **交付**：商店交付內容並開收據，收據記下內容的 sha256。商店結算了卻沒交付時，由鏈判斷：鏈上已付款就記 `DELIVERY_FAILED`、待人工處理，不會再付一次（郵局示範這種情況，`docs/commercial-post-hotel.md`）。
 
 事件存在 Store，形成每個 task 一條雜湊鏈；場次結束後打包成證據包，由 checker 對鏈查證。
 
@@ -90,6 +90,8 @@ Base Sepolia 上的實跑（10/31，`artifacts/e1a/testnet-town-t4`）E1～E10 �
 | 威脅 | 擋法 | 還剩下的風險 |
 |---|---|---|
 | Agent 被提示注入，想多買或付給別人 | Agent 只能提出請購；金額、收款人來自可信報價；Policy 確定性裁決；超過自動範圍要本人核准；Signer 只簽委託內的商家與金額 | 在自動範圍內（每筆 ≤ 0.10）買了不該買的東西，仍會成交；靠上限與任務預算限制損失 |
+| 付款頁的收款人被換掉（像假的訂房網站；飯店示範） | 收款人不在 Policy 的商店名單就 Deny `MERCHANT_NOT_ALLOWED`，付款前就擋下，錢沒有動；Signer 的委託也沒有這個收款人 | 名單上的商家自己作假或被入侵，仍然收得到錢；名單由主持人設定，沒有商家身分與信譽 |
+| 付了款，商店沒交付（郵局示範） | 由鏈判斷，不信商店的說法：鏈上已付款就記 `DELIVERY_FAILED`、待人工處理，不再付一次；付了多少、付給誰都在紀錄裡。主持人按「商店退款」，商店把全額退回付款錢包，Host 自己向鏈上確認後才記 `PAYMENT_REFUNDED`，checker 也查（`docs/commercial-refund.md`） | 該不該退由人判斷；商店不肯退，系統沒有辦法強制（沒有託管）；沒有爭議流程與部分退款 |
 | Host 被入侵 | Host 沒有私鑰；Signer 自己驗本人的裝置與聲音，並檢查委託確認、每筆上限、總額與核准人 24 小時上限 | Host 可以拒絕服務或延遲，也可以把錯的摘要拿給本人看；本人在裝置上確認的是 Signer 綁定的內容 |
 | 重放舊的核准或付款 | 每次核准都是一次性 challenge；EIP-3009 nonce；ZK nullifier；Store 以 request ID 去重 | — |
 | 錄音冒充本人 | 每次唸的句子含一次性值；聲紋比對；還要裝置簽章 | **沒有做抗合成語音**（V1 的決定）；聲紋只是一個訊號，裝置才是主要的持有證明 |
@@ -104,10 +106,11 @@ Base Sepolia 上的實跑（10/31，`artifacts/e1a/testnet-town-t4`）E1～E10 �
 - `age_over_18` 是 issuer 簽好的布林值，不是範圍證明（憑證裡沒有生日）。
 - 付款依序處理，不是同時付款。
 - 只在 Base Sepolia 測試鏈與 test USDC 上跑過，沒有 mainnet、法幣或真實商店。
+- 郵局與飯店（11/6）只在本機跑過，沒有上 Base Sepolia：五個場域會超過測試網的每日上限（`docs/commercial-post-hotel.md` §4，N5）。郵局的「沒交付」與飯店的「收款人被換掉」都是刻意設定的示範商品，不是真的故障或攻擊。
 - 預算的 ZK setup 是單方產生的，信任它等同信任主持人。
 - ZK 預算只對鏈上隱藏：鏈上只看得到承諾值；relayer 在自己的資料庫裡保存每個任務的預算餘額與隨機數，看得到上限與剩餘。
 - x402 只做了 `exact`（沒有 `upto`、`batch`）。結算經過獨立的 `apa-facilitator`（x402 v2 的 `/verify`、`/settle`、`/supported`；只聽本機，金鑰是商店的），但它和 Host 是同一位主持人在同一台電腦上跑的。外部的 facilitator 只用過一次：11/4 一筆 0.06 經 x402.org 結算（FA3，`docs/commercial-facilitator.md`），沒有用過 CDP。對外只說「採用 x402 v2 的 HTTP 支付協商」，不說「符合 x402」（`docs/positioning.md` §5）。
 - 付款金鑰只有一層：客人的錢包私鑰在 Signer，加上有總額與期限的委派；沒有金庫、資金錢包、session key 的分層（relayer 另有送交易、登記任務、授權預留三把測試金鑰，商店有自己的結算金鑰）。
 - 政策在鏈下由 Signer 執行：它先到鏈上確認預算已預留才簽，但 test USDC 合約本身不認預留；沒有錢包層的強制執行（ERC-8196、ERC-7710，見 `docs/adr/payment-account-model.md`）。
-- Policy 沒有頻率限制（一段時間內最多幾筆）：自動範圍內的小額付款，只靠每筆上限與任務預算擋。在這個展示裡，一個 task 對同一件商品只會成立一筆請購、也只買得到自己場景的商品，所以單一 task 能買的筆數受限於場景的商品數；跨 task 的累積沒有上限。列為下一期，屆時 Host 的 Policy 與 Signer 一起做（Aaron 11/4，`docs/commercial-velocity.md`）。
-- 兩位 Agent 在 Base Sepolia 的 ERC-8004 registry 有身分（agent 10573、10574），但由展示平台代為註冊；註冊檔裡的付款錢包是宣告，不是證明（`agentWallet` 已清空）；ERC-8004 仍是 Draft，registry 可以被它的擁有者升級（`docs/commercial-8004.md`）。商家是固定名單，沒有身分與信譽；沒有爭議與退款流程；沒有交易監控（KYT）。
+- 頻率限制（11/7 重開 A，`docs/commercial-velocity.md` §8）：同一位客人跨所有 task 與店，十分鐘內被判 Allow 或 Ask 的請購最多 5 筆，第 6 筆在付款前就 Deny `VELOCITY_LIMIT`；Signer 另有一道同樣的上限（同一個錢包十分鐘內最多簽 5 筆），Host 被攻破也還在。只在真實 Agent 的場次（`e1a-host` 產生的設定）啟用；fake 的展示與影片沒有。彩排或錄影時同一位客人十分鐘內重開很多次，可能在現場被擋（Aaron 11/7 接受這個代價）。只算筆數，不算金額；金額由每筆上限、任務預算與 Signer 的累計上限負責。
+- 兩位 Agent 在 Base Sepolia 的 ERC-8004 registry 有身分（agent 10573、10574），但由展示平台代為註冊；註冊檔裡的付款錢包是宣告，不是證明（`agentWallet` 已清空）。由付款錢包自己簽章、設成 `agentWallet` 的程式 11/7 已做好（`docs/commercial-8004.md` §8），但還沒在 Base Sepolia 送出，在那之前仍是宣告；ERC-8004 仍是 Draft，registry 可以被它的擁有者升級（`docs/commercial-8004.md`）。商家是固定名單，沒有身分與信譽；退款只有「交付失敗、主持人按下、全額退回」這一種（`docs/commercial-refund.md`），沒有爭議流程；沒有交易監控（KYT）。

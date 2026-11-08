@@ -1,9 +1,11 @@
 package signer
 
 // EIP-712 typed data for EIP-3009 TransferWithAuthorization
-// (docs/commercial-p1b-design.md 4.3): the only thing this Signer signs. The
+// (docs/commercial-p1b-design.md 4.3): the only payment this Signer signs. The
 // domain and message are rebuilt from a validated apa.pay.v1 payment binding
-// and the trusted asset registry; no digest is taken from a caller.
+// and the trusted asset registry; no digest is taken from a caller. The one
+// other thing it signs is a wallet's ERC-8004 consent (AgentWalletSet,
+// agentwallet.go), in the registry's domain, for the configured agent only.
 
 import (
 	"encoding/hex"
@@ -94,6 +96,27 @@ func TransferHash(m Transfer) ([]byte, error) {
 	after, _ := uintWord(new(big.Int).SetUint64(m.ValidAfter).String())
 	before, _ := uintWord(new(big.Int).SetUint64(m.ValidBefore).String())
 	return keccak(keccak([]byte(transferType)), word(from), word(to), value, after, before, nonce), nil
+}
+
+// agentWalletType is ERC-8004's AgentWalletSet (IdentityRegistryUpgradeable 2.0.0, setAgentWallet), in the
+// registry's own domain: ERC8004IdentityRegistry, version 1, its chain and address. No token's domain is
+// that, so the signature authorizes no transfer.
+const agentWalletType = "AgentWalletSet(uint256 agentId,address newWallet,address owner,uint256 deadline)"
+
+// AgentWalletDigest is the typed digest of the consent of wallet to be a's agent's wallet until deadline.
+func AgentWalletDigest(a Agent, wallet string, deadline uint64) ([]byte, error) {
+	sep, err := DomainSeparator(Domain{Name: "ERC8004IdentityRegistry", Version: "1", ChainID: a.ChainID, VerifyingContract: a.Registry})
+	if err != nil {
+		return nil, err
+	}
+	w, err1 := hexBytes(wallet, 20)
+	owner, err2 := hexBytes(a.Owner, 20)
+	if err := errors.Join(err1, err2); err != nil {
+		return nil, err
+	}
+	id, _ := uintWord(new(big.Int).SetUint64(a.AgentID).String())
+	dl, _ := uintWord(new(big.Int).SetUint64(deadline).String())
+	return TypedDigest(sep, keccak(keccak([]byte(agentWalletType)), id, word(w), word(owner), dl)), nil
 }
 
 // TypedDigest is keccak256(0x19 0x01 ‖ domainSeparator ‖ structHash).
