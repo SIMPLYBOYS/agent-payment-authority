@@ -171,7 +171,7 @@ public class TownTests
         for (float end = Time.realtimeSinceStartup + 0.6f; Time.realtimeSinceStartup < end;) yield return null;
         var after = town.WalkerPositions.ToList();
         Assert.IsTrue(before.Zip(after, (a, b) => (a - b).magnitude > 0.05f).Any(m => m), "someone walked");
-        foreach (var p in after) Assert.IsTrue(p.x >= 0f && p.x <= 98f && p.y >= 0f && p.y <= 48f, "on the map: " + p); // 98: town v2 (V3)
+        foreach (var p in after) Assert.IsTrue(p.x >= -59f && p.x <= 143f && p.y >= 0f && p.y <= 48f, "on the map: " + p); // -59 to 143: the hospital and the fire station (Aaron 11/8)
     }
 
     // Aaron 10/27: a clerk and other customers in each shop (illustrative): only that shop's, and never under A or B, who
@@ -286,20 +286,20 @@ public class TownTests
         bridge.View("{\"mode\":\"town\"}");
         yield return Settle();
         Assert.AreEqual(town.Focus.x, town.LookX, 0.01f, "at rest on the shops");
-        float half = Screen.width / (2f * TownView.PPU * town.Scale), w = 98f;
+        float half = Screen.width / (2f * TownView.PPU * town.Scale), x0 = -59f, w = 143f; // the map's ends (Aaron 11/8: the hospital and the fire station)
         float speed = TownView.PanSpeed;
         TownView.PanSpeed = 40f;
         try
         {
             bridge.Pan("{\"to\":\"tour\"}");
             Assert.AreEqual("pan:0:0:tour|Applied", bridge.reports.Last());
-            Assert.AreEqual(half, town.LookX, 0.01f, "a cut to the west end");
-            float max = float.MinValue, t0 = Time.realtimeSinceStartup, tenth = -1f, held = 0f, d = w - 2f * half;
+            Assert.AreEqual(x0 + half, town.LookX, 0.01f, "a cut to the west end");
+            float max = float.MinValue, t0 = Time.realtimeSinceStartup, tenth = -1f, held = 0f, d = w - x0 - 2f * half;
             for (float end = Time.realtimeSinceStartup + 20f; town.Touring && Time.realtimeSinceStartup < end;)
             {
                 yield return null;
                 max = Mathf.Max(max, town.LookX);
-                if (tenth < 0f && town.LookX >= half + 0.1f * d) tenth = Time.realtimeSinceStartup - t0;
+                if (tenth < 0f && town.LookX >= x0 + half + 0.1f * d) tenth = Time.realtimeSinceStartup - t0;
                 if (Mathf.Abs(town.LookX - (w - half)) < 0.01f) held += Time.unscaledDeltaTime;
                 Crisp();
             }
@@ -433,6 +433,28 @@ public class TownTests
             yield return Until(() => town.DoorFrame(l) == 7, 2f, t => took = t);
             Assert.AreEqual(7, town.DoorFrame(l), l + "'s door opens wide for a passer-by going in");
         }
+    }
+
+    // Aaron 11/8: the person's customer could not walk past the hospital's door (the map had widened, the pavement
+    // not, and the way's cells began at x 0). A click there walks it along the pavement, and on to the fire station.
+    [UnityTest]
+    public IEnumerator TheCustomerWalksToBothEnds()
+    {
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        bridge.Play("{\"consumer\":\"consumer-a\"}");
+        float scale = Time.timeScale;
+        Time.timeScale = 4f;
+        try
+        {
+            foreach (var x in new[] { -28f, 122f }) // the hospital's door, the fire station's
+            {
+                Assert.IsTrue(town.GoTo(new Vector2(x, 25.6f)), "a way to x " + x);
+                yield return Until(() => town.RouteLeft == 0, 20f, _ => { });
+                Assert.AreEqual(x, town.PlayerAt.x, 0.5f, "it walked to x " + x);
+            }
+        }
+        finally { Time.timeScale = scale; }
     }
 
     // Aaron 11/6: the buses call at their stops: each halts with its centre at its stop for its seconds (the red one's

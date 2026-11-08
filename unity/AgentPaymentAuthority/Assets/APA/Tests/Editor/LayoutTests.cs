@@ -251,7 +251,7 @@ public class LayoutTests
         var t = town.traffic;
         foreach (var a in town.walk)
         {
-            Assert.IsTrue(a.x >= 0f && a.x + a.w <= town.w && a.y >= 0f && a.y + a.h <= town.h, "walk " + a.x + "," + a.y + " off the map");
+            Assert.IsTrue(a.x >= town.x0 && a.x + a.w <= town.w && a.y >= 0f && a.y + a.h <= town.h, "walk " + a.x + "," + a.y + " off the map");
             bool road = a.y < t.top && a.y + a.h > t.bottom;
             Assert.IsFalse(road && (a.x < t.from || a.x + a.w > t.to), "walk " + a.x + "," + a.y + " on the road off the crossing");
             foreach (var v in town.venues)
@@ -281,6 +281,10 @@ public class LayoutTests
             var cell = new Vector2Int((int)(d.x / c), (int)(d.y / c));
             Assert.IsTrue(seen.Contains(cell) || seen.Contains(cell + Vector2Int.down) || seen.Contains(cell + Vector2Int.up), "door " + d + " unreachable from the start");
         }
+        // Both ends of the street, north and south (Aaron 11/8: past the hospital's door; the map had widened, the pavement not).
+        foreach (var x in new[] { town.x0 + 1.5f, town.w - 1.5f })
+            foreach (var y in new[] { 25.6f, 16.8f })
+                Assert.IsTrue(seen.Contains(new Vector2Int(Mathf.FloorToInt(x / c), Mathf.FloorToInt(y / c))), "the pavement at " + x + "," + y + " unreachable from the start");
     }
 
     // Every scene the host's UX3 catalog names has its room.

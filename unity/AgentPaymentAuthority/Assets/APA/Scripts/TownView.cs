@@ -24,7 +24,8 @@ namespace APA
     public class Town
     {
         public string key;
-        public int w, h;               // the map
+        public int w, h;               // the map: x from x0 to w, y from 0 to h
+        public float x0;               // its west end (Aaron 11/8: a hospital west of the first street; 0 before)
         public Vector2 focus, frame;   // the town view: its centre, and the box it must show whole
         public Piece[] ground = new Piece[0], props = new Piece[0];
         public Walker[] walkers = new Walker[0];
@@ -895,9 +896,10 @@ namespace APA
         // straightened (each point on to the farthest one in a clear line). Null when none.
         List<Vector2> Way(Vector2 from, Vector2 to)
         {
-            int W = Mathf.CeilToInt(town.w / Cell), H = Mathf.CeilToInt(town.h / Cell);
-            Vector2 C(int i) => new Vector2((i % W + 0.5f) * Cell, (i / W + 0.5f) * Cell);
-            int Of(Vector2 p) => Mathf.Clamp((int)(p.x / Cell), 0, W - 1) + Mathf.Clamp((int)(p.y / Cell), 0, H - 1) * W;
+            float x0 = town.x0; // the cells from the map's west end (the hospital's side is below x 0)
+            int W = Mathf.CeilToInt((town.w - x0) / Cell), H = Mathf.CeilToInt(town.h / Cell);
+            Vector2 C(int i) => new Vector2(x0 + (i % W + 0.5f) * Cell, (i / W + 0.5f) * Cell);
+            int Of(Vector2 p) => Mathf.Clamp(Mathf.FloorToInt((p.x - x0) / Cell), 0, W - 1) + Mathf.Clamp((int)(p.y / Cell), 0, H - 1) * W;
             if (!Walkable(to))
             {
                 int best = -1;
@@ -1177,8 +1179,10 @@ namespace APA
         float lookX = float.NaN; // NaN: focus
         readonly Queue<(float to, float hold)> tour = new Queue<(float, float)>();
         float legFrom = float.NaN, legT; // the tour's leg now: where it set off, seconds since
-        public static float PanSpeed = 3.5f; // tiles a second on a tour, on average (a test runs it faster)
-        public const float TourHold = 2f;    // seconds at the east end: the hotel and the gas station
+        // Tiles a second on a tour, on average (a test runs it faster): 8 since the hospital and the fire station
+        // widened the map from 98 tiles to 202 (Aaron 11/8), so the tour takes about as long as before.
+        public static float PanSpeed = 8f;
+        public const float TourHold = 2f;    // seconds at the east end: the gas station and the fire station
         public float LookX => town == null ? 0f : Pan(float.IsNaN(lookX) ? town.focus.x : lookX, Scale); // tests
         public bool Touring => tour.Count > 0; // tests
 
@@ -1186,18 +1190,18 @@ namespace APA
         {
             if (!HasTown) return false;
             tour.Clear();
-            lookX = 0f; // from the west end (a cut)
+            lookX = town.x0; // from the west end (a cut)
             legFrom = float.NaN;
             tour.Enqueue((town.w, TourHold));
             tour.Enqueue((town.focus.x, 0f));
             return true;
         }
 
-        // Pan: x kept so the uncovered part shows nothing past the map's ends; a map narrower than it: its middle.
+        // Pan: x kept so the uncovered part shows nothing past the map's ends (x0 and w); a map narrower than it: its middle.
         float Pan(float x, float k)
         {
             float half = Safe().width / (2f * PPU * k);
-            return town.w <= 2f * half ? town.w / 2f : Mathf.Clamp(x, half, town.w - half);
+            return town.w - town.x0 <= 2f * half ? (town.x0 + town.w) / 2f : Mathf.Clamp(x, town.x0 + half, town.w - half);
         }
 
         void Follow(float dt)
