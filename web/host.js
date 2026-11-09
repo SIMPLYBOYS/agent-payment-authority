@@ -811,6 +811,11 @@ async function atmReached(id) {
       setRunStatus("ATM 沒有完成（" + (r.error ? "沒有收到回覆" : (b.error || r.status)) + "）", "error");
       return;
     }
+    if (b.mode === "limit") { // Aaron 11/9: 每位客人每天最多領 20
+      say("limit", { balance: units(b.balance) });
+      setRunStatus("客人 " + short(c) + " 今天已在 ATM 領滿 " + units(b.limit) + " test USDC（每人每天的上限），UTC 隔天（台北 08:00）再領；錢包餘額 " + units(b.balance), "error");
+      return;
+    }
     if (b.mode === "mint") {
       say("minted", { amount: units(b.minted), balance: units(b.balance) });
       setRunStatus("客人 " + short(c) + " 在 ATM 領到 " + units(b.minted) + " test USDC（本機鏈鑄造），錢包餘額 " + units(b.balance), "ok");

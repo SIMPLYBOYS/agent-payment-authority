@@ -1209,6 +1209,7 @@ namespace APA
                 case "minted": return "領到 +" + Num(amount) + "\n餘額 " + Num(balance);
                 case "watch": return "到 Circle faucet 領取\n" + a + "\n餘額 " + Num(balance);
                 case "arrived": return "入帳 +" + Num(amount) + "\n餘額 " + Num(balance);
+                case "limit": return "今日已達提領上限\n餘額 " + Num(balance);
                 case "stopped": return "沒有等到入帳";
                 default: return "暫時無法使用";
             }

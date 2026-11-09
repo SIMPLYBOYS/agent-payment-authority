@@ -596,6 +596,8 @@ public class TownTests
             Assert.AreEqual("入帳 +10\n餘額 15", town.AtmWords("street"));
             yield return new WaitForSeconds(TownView.AtmNote + 0.5f);
             Assert.AreEqual("", town.AtmWords("street"), "an answer goes");
+            bridge.Atm("{\"id\":\"street\",\"code\":\"limit\",\"balance\":\"20.00\"}");
+            Assert.AreEqual("今日已達提領上限\n餘額 20.00", town.AtmWords("street"), "the day's most taken (Aaron 11/9)");
             bridge.Atm("{\"id\":\"nowhere\",\"code\":\"minted\"}");
             Assert.AreEqual("atmsay:0:0:nowhere|Invalid", bridge.reports.Last());
         }

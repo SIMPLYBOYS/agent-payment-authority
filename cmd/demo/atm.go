@@ -22,10 +22,13 @@ import (
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 )
 
-// atmMint is what one visit mints on the local chain: 10 test USDC.
-const atmMint = 10_000_000
+// atmMint is what one visit mints on the local chain: 10 test USDC; atmDaily
+// the most a customer takes a UTC day (Aaron 11/9: 每位客人每天最多領 20), then
+// the ATM says so and mints nothing until the next. The testnet's is Circle's.
+const atmMint, atmDaily = 10_000_000, 20_000_000
 
 type atm struct {
 	node    *eth.Client
@@ -34,13 +37,17 @@ type atm struct {
 	owner   *eth.Key               // TestUSDC's owner, local only; nil on the testnet: it reads
 	wallets map[string]eth.Address // consumer -> its wallet (the registry's)
 	out     io.Writer
+	clock   store.Clock               // unix seconds: the UTC day the daily limit counts
 	mu      sync.Mutex                // ponytail: one visit at a time (a mint waits for its receipt); one ATM, a few visits
 	done    map[string]map[string]any // request ID -> its mint's reply: a resend mints once
+	day     uint64                    // the UTC day taken counts
+	taken   map[string]uint64         // consumer -> minted that day; ponytail: in memory, a restart starts the day again
 }
 
 // atmVisit is POST /api/host/atm. Its reply: the wallet's address, its
 // balance (base units) after any mint, and mode "mint" (with minted and tx)
-// or "watch". 404 no_atm on a host that does not pay.
+// or "watch", or "limit" (with limit: the customer took the day's most). 404
+// no_atm on a host that does not pay.
 func (a *api) atmVisit(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RequestID  string `json:"request_id"`
@@ -74,13 +81,19 @@ func (m *atm) visit(ctx context.Context, requestID, consumer string) (int, map[s
 		return http.StatusOK, v
 	}
 	v := map[string]any{"consumer_id": consumer, "address": wallet.Hex(), "mode": "watch"}
-	if m.owner != nil {
+	if day := m.clock() / 86400; day != m.day {
+		m.day, m.taken = day, map[string]uint64{}
+	}
+	if m.owner != nil && m.taken[consumer]+atmMint > atmDaily {
+		v["mode"], v["limit"] = "limit", fmt.Sprint(atmDaily)
+	} else if m.owner != nil {
 		tx, err := m.mint(ctx, wallet)
 		if err != nil {
 			fmt.Fprintf(m.out, "demo: atm: the mint to %s failed: %v\n", consumer, err)
 			return http.StatusServiceUnavailable, map[string]any{"error": "mint_failed"}
 		}
 		fmt.Fprintf(m.out, "demo: atm: minted %d to %s (%s) in %s\n", atmMint, consumer, wallet.Hex(), tx)
+		m.taken[consumer] += atmMint
 		v["mode"], v["minted"], v["tx"] = "mint", fmt.Sprint(atmMint), tx
 	}
 	bal, err := m.balance(ctx, wallet)
@@ -88,7 +101,7 @@ func (m *atm) visit(ctx context.Context, requestID, consumer string) (int, map[s
 		return http.StatusServiceUnavailable, map[string]any{"error": "chain_unavailable"}
 	}
 	v["balance"] = bal.String()
-	if m.owner != nil {
+	if v["mode"] == "mint" {
 		m.done[requestID] = v
 	}
 	return http.StatusOK, v

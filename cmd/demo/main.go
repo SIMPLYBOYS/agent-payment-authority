@@ -446,7 +446,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		})
 		// docs/commercial-atm.md: the street's ATM reads each consumer's wallet; it mints on the local chain only.
 		token, _ := eth.ParseAddress(pay.cfg.Token)
-		ui.atm = &atm{node: pay.rpc, chainID: pay.cfg.ChainID, token: token, wallets: map[string]eth.Address{}, out: d.out, done: map[string]map[string]any{}}
+		ui.atm = &atm{node: pay.rpc, chainID: pay.cfg.ChainID, token: token, wallets: map[string]eth.Address{}, out: d.out, clock: d.clock, done: map[string]map[string]any{}}
 		for _, c := range regCfg.Consumers {
 			for _, w := range regCfg.Wallets {
 				if w.WalletID == c.WalletID {
