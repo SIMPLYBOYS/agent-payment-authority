@@ -267,6 +267,8 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
   }
   const openTransit = (scenario, delegationId) => transit("/api/host/transit", { scenario, delegation_id: delegationId });
   const fare = (consumer, station) => transit("/api/host/transit/fare", { consumer_id: consumer, station });
+  // docs/commercial-atm.md: the street's ATM, the same way (a resent mint mints once).
+  const atm = (consumer) => transit("/api/host/atm", { consumer_id: consumer });
 
   // stopRun stops a running run's process; the reply counts only in its
   // own generation. No resend: a lost reply shows in the runs list.
@@ -404,7 +406,7 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
   const resolve = (sessionId, intentHash, decision) => once("/api/sim/approvals/" + encodeURIComponent(sessionId), { intent_hash: intentHash, decision });
 
   return {
-    load, pair, clearAll, manual, unauthorized, readiness, startRun, stopRun, cancelTask, refund, hostRead, runs, openTransit, fare,
+    load, pair, clearAll, manual, unauthorized, readiness, startRun, stopRun, cancelTask, refund, hostRead, runs, openTransit, fare, atm,
     simulate, approvals, confirmDelegation, resolve,
     viewerToken: (consumer) => (held ? held.viewers.get(consumer) || null : null),
     get gen() { return gen; },

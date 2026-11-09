@@ -22,6 +22,9 @@
 // Host takes subway fares; the walked customer stopped at a shut gate going in
 // is reported as "gate" with its station; "OpenGate" takes the page's answer
 // {station, open, code, amount}. The page decides; the gate only shows.
+// ATM (docs/commercial-atm.md): the walked customer at the street's ATM is
+// reported as "atm" with its id; "Atm" takes the page's answer {id, code,
+// amount, balance, address}. The Host decides; the ATM only shows.
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -59,6 +62,7 @@ namespace APA
             bool hasTown = town != null && town.HasTown;
             if (hasTown) town.Clicked = layout => Report("venue", scene.Scene, 0, layout);
             if (hasTown) town.Gated = station => Report("gate", scene.Scene, 0, station);
+            if (hasTown) town.AtAtm = id => Report("atm", scene.Scene, 0, id);
             var rooms = new List<string>(view.LayoutKeys);
             rooms.Sort(System.StringComparer.Ordinal);
             // rooms: each room's venue view in tiles (TownView.RoomView), so the page sizes the canvas to whole multiples of it.
@@ -186,6 +190,17 @@ namespace APA
             try { m = JsonUtility.FromJson<GateMessage>(json); } catch (System.Exception) { }
             bool ok = m != null && town != null && town.OpenGate(m.station, m.open, m.code, m.amount);
             Report("opengate", 0, 0, (m != null ? m.station ?? "" : "") + "|" + (ok ? "Applied" : "Invalid"));
+        }
+
+        [System.Serializable]
+        public class AtmMessage { public string id, code, amount, balance, address; }
+
+        public void Atm(string json)
+        {
+            AtmMessage m = null;
+            try { m = JsonUtility.FromJson<AtmMessage>(json); } catch (System.Exception) { }
+            bool ok = m != null && town != null && town.AtmSay(m.id, m.code, m.amount, m.balance, m.address);
+            Report("atmsay", 0, 0, (m != null ? m.id ?? "" : "") + "|" + (ok ? "Applied" : "Invalid"));
         }
 
         public void Steer(string json)

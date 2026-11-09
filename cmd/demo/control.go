@@ -57,14 +57,14 @@ type control struct {
 	ctx       context.Context // ends with the host
 	wg        *sync.WaitGroup // the host waits for every run before closing the Store
 	out       io.Writer
-	active    map[string]*liveRun // runs whose process is running or stopping, by consumer
-	ended     map[string]*liveRun // runs that ended in this process, by run_id
+	active    map[string]*liveRun     // runs whose process is running or stopping, by consumer
+	ended     map[string]*liveRun     // runs that ended in this process, by run_id
 	transit   map[string]*transitPass // open subway passes, by consumer: no process, not runs' places (transit.go)
-	maxRuns   int                 // the effective --max-runs: running or stopping runs at most
-	consumers int                 // consumers in the scenario catalog
-	instance  string              // this host process: the timing records' host_instance
-	profile   policy.Profile      // the host's profile: a delegation's merchants and asset
-	started   time.Time           // this host's start: the timing records' clock zero (monotonic)
+	maxRuns   int                     // the effective --max-runs: running or stopping runs at most
+	consumers int                     // consumers in the scenario catalog
+	instance  string                  // this host process: the timing records' host_instance
+	profile   policy.Profile          // the host's profile: a delegation's merchants and asset
+	started   time.Time               // this host's start: the timing records' clock zero (monotonic)
 }
 
 // find is the running or stopping run with this ID, or nil. c.mu is held.

@@ -129,6 +129,7 @@ type api struct {
 	registry  contracts.RegistryConfig
 	chainRead *chainReader // O2: the payments read from the chain; nil without --payments
 	refunds   *refunder    // docs/commercial-refund.md: the shop's refunds; nil without --payments
+	atm       *atm         // docs/commercial-atm.md: the street's ATM; nil without --payments
 
 	recon func(context.Context) (reconcile.Report, error) // P2-a: the reconciliation; nil without --payments
 }
@@ -140,6 +141,7 @@ func (a *api) register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tasks/{task_id}/events", a.events)
 	mux.HandleFunc("GET /api/host/reconciliation", a.reconciliation)
 	mux.HandleFunc("POST /api/host/tasks/{task_id}/purchases/{purchase_order_id}/refund", a.refund) // docs/commercial-refund.md
+	mux.HandleFunc("POST /api/host/atm", a.atmVisit)                                                // docs/commercial-atm.md
 }
 
 // reconciliation is GET /api/host/reconciliation (host or operator): the

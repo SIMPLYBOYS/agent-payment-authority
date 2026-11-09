@@ -51,6 +51,10 @@ namespace APA
         // east going in (paid while the page has the gates on) and west going out (free); its station, as the page names
         // it; its arm's two looks, up (open) and down across the way (shut).
         public Gate[] gates = new Gate[0];
+        // The street's ATM (docs/commercial-atm.md, Aaron 11/9): spot, where the walked customer stands at it (on the
+        // walk), reported once until it steps off; note, the height of the words shown over it. Its look is a prop.
+        public Atm[] atms = new Atm[0];
+        [System.Serializable] public class Atm { public string id; public Area spot = new Area(); public float note; }
         [System.Serializable] public class Gate { public string station; public float line, y0, y1; public Piece open = new Piece(), shut = new Piece(); }
         // name, en: its station's name, shown as it comes in (Aaron 11/9).
         [System.Serializable] public class Train { public float x, y, from; public string name, en; public string[] cars = new string[0], open = new string[0]; public Area inside = new Area(); public int to = -1; }
@@ -187,6 +191,17 @@ namespace APA
                 s.root.gameObject.SetActive(false);
                 gates.Add(s);
                 Look(s);
+            }
+            atms.Clear();
+            foreach (var a in town.atms)
+            {
+                var s = new AtmState { a = a, root = new GameObject("atm-" + a.id).transform };
+                s.root.SetParent(transform, false);
+                s.root.localPosition = new Vector2(a.spot.x + a.spot.w / 2f, a.note);
+                s.note = Words(s.root, "atm-note", Vector2.zero, 0.085f, Color.white, Labels + 20);
+                s.plate = Plate(s.root, s.note, Rounded(), GateWait, Labels + 20);
+                s.root.gameObject.SetActive(false);
+                atms.Add(s);
             }
             foreach (var v in town.venues)
             {
@@ -928,7 +943,7 @@ namespace APA
             if (phase == 0) { Halt(); hopTo = -1; } // another customer, or none: no ride left half done
             if (Player != "") stands[Player].body.sprite = playerIdle[3]; // back to standing
             Player = consumer;
-            atGate = null;
+            atGate = atAtm = null;
             if (Player == "") return true;
             var sheet = Player == "consumer-a" ? shop.customerA : shop.customerB;
             // The premade sheet (ShopView's rows): idle at 64 from the top, walk at 128; right 0, up 6, left 12, down 18.
@@ -1033,6 +1048,7 @@ namespace APA
             if (Walkable(new Vector2(q.x + d.x, q.y))) q.x += d.x; // an axis at a time: along a kerb, not stuck at it
             if (Walkable(new Vector2(q.x, q.y + d.y))) q.y += d.y;
             q = PastGates(p, q, dt);
+            AtAtms(q, dt);
             body.transform.localPosition = q;
             int car = trains.FindIndex(s => q.x >= s.t.x && q.x <= s.t.x + s.length && q.y >= s.t.y && q.y <= s.t.y + 4f);
             body.sortingOrder = car >= 0 ? Order(trains[car].t.y) + 1 : Order(q.y) + 1; // in a car: over it, in its aisle
@@ -1074,7 +1090,8 @@ namespace APA
         public System.Action<string> Gated;
         public bool GatesOn { get; private set; }
         public bool HasGates => gates.Count > 0; // the bridge says so (gates=1): built in Awake, before its report
-        class GateState { public Town.Gate g; public SpriteRenderer open, shut, plate; public TextMesh note; public Transform root; public bool letIn, waiting; public float outT, noteT = -1f; }
+        class Sign { public SpriteRenderer plate; public TextMesh note; public Transform root; public bool waiting; public float noteT = -1f; } // words over a gate or an ATM
+        class GateState : Sign { public Town.Gate g; public SpriteRenderer open, shut; public bool letIn; public float outT; }
         readonly List<GateState> gates = new List<GateState>();
         string atGate; // the station whose gate the walked customer was reported at, until it steps away from it
         public const float GateStop = 0.45f, GateNote = 4f; // short of the line it waits; seconds an answer stays shown
@@ -1118,7 +1135,7 @@ namespace APA
             }
         }
 
-        void Note(GateState s, string text, Color plate)
+        void Note(Sign s, string text, Color plate)
         {
             s.note.text = text;
             s.plate.color = plate;
@@ -1158,6 +1175,55 @@ namespace APA
                 if (s == null || (q - new Vector2(s.g.line - GateStop, (s.g.y0 + s.g.y1) / 2f)).magnitude > 1.2f) atGate = null; // asked again when it comes back
             }
             return q;
+        }
+
+        // ---- the street's ATM (docs/commercial-atm.md, Aaron 11/9: test USDC claimed in the town) ----
+        // The walked customer stopping on an ATM's spot is reported (AtAtm, with its id) once until it steps off; the
+        // page asks the Host and answers (AtmSay): minted (the local chain), watching for the faucet's (the testnet), or
+        // arrived, with the words over the ATM. No answer (no Host that pays): nothing shown. The town only shows.
+        public System.Action<string> AtAtm;
+        class AtmState : Sign { public Town.Atm a; }
+        readonly List<AtmState> atms = new List<AtmState>();
+        string atAtm; // the ATM the walked customer was reported at, until it steps off its spot
+        public const float AtmNote = 6f; // seconds an answer stays shown (watching stays)
+        public string AtmWords(string id) { var s = atms.Find(x => x.a.id == id); return s != null && s.root.gameObject.activeSelf ? s.note.text : ""; } // tests
+
+        // AtmSay: the page's answer for an ATM. False: no such ATM.
+        public bool AtmSay(string id, string code, string amount, string balance, string address)
+        {
+            var s = atms.Find(x => x.a.id == id);
+            if (s == null) return false;
+            s.waiting = code == "watch"; // until the faucet's arrives, or the page stops watching
+            Note(s, AtmText(code, amount, balance, address), code == "minted" || code == "arrived" ? GatePaid : s.waiting ? GateWait : GateRefused);
+            return true;
+        }
+
+        // The words over an ATM, by the page's code: amounts only digits and a point, the address only hex, shortened.
+        static string AtmText(string code, string amount, string balance, string address)
+        {
+            string Num(string v) => new string((v ?? "").Where(c => char.IsDigit(c) || c == '.').Take(12).ToArray());
+            var a = new string((address ?? "").Where(c => c == 'x' || System.Uri.IsHexDigit(c)).Take(42).ToArray());
+            if (a.Length > 12) a = a.Substring(0, 6) + "…" + a.Substring(a.Length - 4);
+            switch (code)
+            {
+                case "minted": return "領到 +" + Num(amount) + "\n餘額 " + Num(balance);
+                case "watch": return "到 Circle faucet 領取\n" + a + "\n餘額 " + Num(balance);
+                case "arrived": return "入帳 +" + Num(amount) + "\n餘額 " + Num(balance);
+                case "stopped": return "沒有等到入帳";
+                default: return "暫時無法使用";
+            }
+        }
+
+        void AtAtms(Vector2 q, float dt)
+        {
+            foreach (var s in atms)
+            {
+                bool on = s.a.spot.Holds(q);
+                // stopped on it, or walked up into it: not passing along the pavement
+                if (on && atAtm != s.a.id && (steer.y > 0f || steer == Vector2.zero && route.Count == 0)) { atAtm = s.a.id; AtAtm?.Invoke(s.a.id); }
+                else if (!on && atAtm == s.a.id) atAtm = null;
+                if (s.noteT >= 0f && !s.waiting && (s.noteT += dt) > AtmNote) { s.noteT = -1f; s.root.gameObject.SetActive(false); }
+            }
         }
 
         // ---- the trains (Aaron 11/8: the customer walks into the car and waits for it to start; it pulls in and out) ----

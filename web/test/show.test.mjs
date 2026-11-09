@@ -222,6 +222,25 @@ test("transit: the gates go to the window's Unity while it has the scene; a shut
   assert.notDeepEqual(got.at(-1), ["gate", "beach"], "not owned: a gate on the window is not this page's");
 });
 
+test("ATM: the window's ATM reached comes back; the answer goes to its Unity while it has the scene", () => {
+  const make = channels();
+  const got = [];
+  const relay = createRelay((k, d) => got.push([k, d]), { channel: make(), setTimer: () => {} });
+  const seen = [];
+  const show = listen({ own() {}, send2() {}, select2() {}, view() {}, atm: (m) => seen.push(m) }, { channel: make(), setTimer: () => {}, onLeave: () => {} });
+  const answer = { id: "street", code: "minted", amount: "10.00", balance: "30.00" };
+  relay.atm(answer);
+  assert.deepEqual(seen, [], "not owned: nothing goes");
+  relay.own(true);
+  show.report("atm", "street");
+  assert.deepEqual(got.at(-1), ["atm", "street"]);
+  relay.atm(answer);
+  assert.deepEqual(seen, [answer]);
+  relay.own(false);
+  show.report("atm", "street");
+  assert.equal(got.filter(([k]) => k === "atm").length, 1, "not owned: the window's ATM is not this page's");
+});
+
 test("T4: the town's camera and walk go to the window's Unity while it has the scene; a door it reaches comes back", () => {
   const make = channels();
   const got = [];

@@ -91,4 +91,4 @@ T1 約 400～600 行 Go（含測試），T2 約 150 行 C#（含測試），T3 �
 
 ## 8 之後：領取 USDC 的場域
 
-Aaron 11/9：「應該可以設計一個場域是可以與 faucet 互動去領取 usdc 的」，testnet 選真的 Circle faucet。本機鏈：場域裡按一下就鑄造測試幣（`mint`，`cmd/p2-local` 已用它）。testnet：Circle 的 USDC 不能鑄造、faucet 要真人驗證，所以 Aaron 自己在 Circle faucet 領，場域顯示客人的錢包地址並盯著鏈上，入帳時演出。閘門做完再寫它的設計。
+Aaron 11/9：「應該可以設計一個場域是可以與 faucet 互動去領取 usdc 的」，testnet 選真的 Circle faucet。本機鏈：場域裡按一下就鑄造測試幣（`mint`，`cmd/p2-local` 已用它）。testnet：Circle 的 USDC 不能鑄造、faucet 要真人驗證，所以 Aaron 自己在 Circle faucet 領，場域顯示客人的錢包地址並盯著鏈上，入帳時演出。**已做成街上的 ATM（11/9），見 [commercial-atm.md](commercial-atm.md)。**

@@ -253,6 +253,8 @@ x-hardware	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/4
 x-post-1	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/22_Post_Office_Singles_32x32/22_Post_Office_32x32_Building_1.png	-
 x-terraced-1	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/24_Additional_Houses_Singles_32x32/24_Additional_Houses_Terraced_House_1_32x32.png	-
 x-bus-stop	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Bus_Stop_1.png	-
+# the street's ATM (docs/commercial-atm.md, Aaron 11/9), across from the subway's stairs
+x-atm	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_ATM_1.png	-
 # the billboards turning through their ads (scripts/unity/billboards.py, Aaron 11/9), 24 frames each
 x-billboard-a	_cut/x-billboard-a.png	-
 x-billboard-b	_cut/x-billboard-b.png	-

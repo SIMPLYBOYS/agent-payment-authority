@@ -76,6 +76,9 @@ export class UnityHost {
     } else if (kind === "gate" && this.bridge && this.bridge.gates) {
       // transit: the walked customer at a shut gate going in, with its station; the page decides.
       if (/^[a-z0-9-]{1,32}$/.test(detail)) this.onStatus("gate", detail);
+    } else if (kind === "atm" && this.bridge && this.bridge.town) {
+      // ATM (docs/commercial-atm.md): the walked customer stopped at the street's ATM, with its id; the page asks the Host.
+      if (/^[a-z0-9-]{1,32}$/.test(detail)) this.onStatus("atm", detail);
     } else if (kind === "rendered" && this.sceneOwned) {
       // version 2: the scene matches it to the one customer and slot it names
       const r = parseReport2(gen, seq, detail);
@@ -165,6 +168,13 @@ export class UnityHost {
     if (!(this.bridge && this.bridge.gates)) return;
     this.pendingGates = { on: !!on };
     this.flush();
+  }
+
+  // atm is the answer to an "atm" report, { id, code, amount, balance, address }: a build that reports one takes it.
+  atm(msg) {
+    if (!this.ready || !this.instance) return false;
+    this.instance.SendMessage("Bridge", "Atm", JSON.stringify(msg));
+    return true;
   }
 
   openGate(msg) {

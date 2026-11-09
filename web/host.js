@@ -34,7 +34,7 @@
 // action. An approval leaves a simulated grant and enables no payment.
 
 import { nextModeSeq, confirmMode, setStatus, forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, currentConsumer, setAlert,
-  shop, onSceneReport, onScenePick, onVenuePick, onGatePick, setSceneView, setVenueOf, onReplayMode, refreshPanels } from "./app.js";
+  shop, onSceneReport, onScenePick, onVenuePick, onGatePick, onAtmPick, setSceneView, setVenueOf, onReplayMode, refreshPanels } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
 import { createScene } from "./scene.js";
 import { createRelay } from "./showlink.js";
@@ -101,6 +101,7 @@ const relay = createRelay((kind, d) => {
   else if (kind === "show") useShow(!!(d && d.ready && d.supports2));
   else if (kind === "venue") venuePicked(d);
   else if (kind === "gate") gateReached(d);
+  else if (kind === "atm") atmReached(d);
 });
 // town (T4): where the town's camera and walk go: the audience window's Unity while it has the scene, else this page's.
 const town = () => (sceneUnity.target === relay ? relay : shop());
@@ -787,6 +788,54 @@ async function gateReached(station) {
   } finally { gateBusy = false; }
 }
 onGatePick((s) => { if (sceneUnity.target !== relay) gateReached(s); });
+// ---- ATM (docs/commercial-atm.md, Aaron 11/9: 與 faucet 互動去領取 USDC) ----
+// The walked customer stopped at the street's ATM: the Host reads its wallet. On the local chain it mints test USDC
+// there and then; on the testnet it only reads (Circle's faucet asks a person): Aaron claims there, and this page asks
+// again every few seconds until the balance rises. A Host that does not pay answers 404: nothing is shown.
+const ATM_EVERY_MS = 5000, ATM_ASKS = 60; // ponytail: 5 minutes of asking, then it stops; the customer can come back
+let atmBusy = false;
+async function atmReached(id) {
+  const c = sentPlay;
+  if (!c || atmBusy) return;
+  atmBusy = true;
+  const g = creds.gen;
+  const say = (code, more) => town().atm({ id, code, ...more });
+  const balanceOf = (r) => (r && r.status === 200 && r.body && /^[0-9]+$/.test(r.body.balance) ? BigInt(r.body.balance) : null);
+  try {
+    let r = await creds.atm(c);
+    if (g !== creds.gen || !r || (r.status === 404 && r.body && r.body.error === "no_atm")) return;
+    const b = (r && r.body) || {};
+    const start = balanceOf(r);
+    if (start === null) {
+      say("error");
+      setRunStatus("ATM 沒有完成（" + (r.error ? "沒有收到回覆" : (b.error || r.status)) + "）", "error");
+      return;
+    }
+    if (b.mode === "mint") {
+      say("minted", { amount: units(b.minted), balance: units(b.balance) });
+      setRunStatus("客人 " + short(c) + " 在 ATM 領到 " + units(b.minted) + " test USDC（本機鏈鑄造），錢包餘額 " + units(b.balance), "ok");
+      return;
+    }
+    say("watch", { address: b.address, balance: units(b.balance) });
+    setRunStatus("客人 " + short(c) + " 的錢包 " + b.address + "：到 Circle faucet 領取 Base Sepolia 的 USDC，入帳後 ATM 會顯示（餘額 " + units(b.balance) + "）", "busy");
+    for (let i = 0; i < ATM_ASKS; i++) {
+      await new Promise((res) => setTimeout(res, ATM_EVERY_MS));
+      if (g !== creds.gen) return;
+      if (sentPlay !== c) return say("stopped"); // another customer walked: the ATM stops watching for this one
+      r = await creds.atm(c);
+      const now = balanceOf(r);
+      if (g !== creds.gen) return;
+      if (now !== null && now > start) {
+        say("arrived", { amount: units(String(now - start)), balance: units(String(now)) });
+        setRunStatus("客人 " + short(c) + " 的錢包入帳 " + units(String(now - start)) + " test USDC，餘額 " + units(String(now)), "ok");
+        return;
+      }
+    }
+    say("stopped");
+    setRunStatus("ATM 五分鐘內沒有看到客人 " + short(c) + " 的錢包入帳；領取後再走到 ATM 一次", "error");
+  } finally { atmBusy = false; }
+}
+onAtmPick((s) => { if (sceneUnity.target !== relay) atmReached(s); });
 // The keys: arrows or WASD while a customer is walked; never while typing in a field.
 const KEYS = { ArrowUp: [0, 1], KeyW: [0, 1], ArrowDown: [0, -1], KeyS: [0, -1], ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0] };
 function steer() {

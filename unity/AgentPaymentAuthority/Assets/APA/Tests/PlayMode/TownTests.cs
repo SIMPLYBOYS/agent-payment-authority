@@ -557,6 +557,51 @@ public class TownTests
         finally { Time.timeScale = scale; }
     }
 
+    // docs/commercial-atm.md (Aaron 11/9): the walked customer stopping at the street's ATM is reported once; walking
+    // past it along the pavement is not a visit. The page's answers show over it: watching stays, others go.
+    [UnityTest]
+    public IEnumerator TheAtmAnswersTheCustomerAtIt()
+    {
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        bridge.Play("{\"consumer\":\"consumer-a\"}");
+        var t = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
+        var a = t.atms[0];
+        Assert.AreEqual("street", a.id);
+        string asked = "atm:" + bridge.scene.Scene + ":0:street";
+        float y = a.spot.y + a.spot.h / 2f, scale = Time.timeScale;
+        Time.timeScale = 4f;
+        try
+        {
+            Assert.IsTrue(town.GoTo(new Vector2(a.spot.x - 2f, y)));
+            yield return Until(() => town.RouteLeft == 0, 40f, _ => { });
+            Assert.IsTrue(town.GoTo(new Vector2(a.spot.x + a.spot.w + 2f, y)), "along the pavement, past it");
+            yield return Until(() => town.RouteLeft == 0, 20f, _ => { });
+            Assert.That(bridge.reports, Has.None.EqualTo(asked), "passing is not a visit");
+
+            Assert.IsTrue(town.GoTo(new Vector2(a.spot.x + a.spot.w / 2f, y + 1.5f)), "a click on the ATM itself");
+            yield return Until(() => bridge.reports.Contains(asked), 20f, _ => { });
+            Assert.IsTrue(a.spot.Holds(town.PlayerAt), "stopped at it: " + town.PlayerAt);
+            Assert.That(bridge.reports, Has.Exactly(1).EqualTo(asked), "reported once");
+            Assert.AreEqual("", town.AtmWords("street"), "nothing shown until the page answers");
+
+            bridge.Atm("{\"id\":\"street\",\"code\":\"watch\",\"address\":\"0x1234567890abcdef1234567890abcdef12345678\",\"balance\":\"5\"}");
+            Assert.AreEqual("atmsay:0:0:street|Applied", bridge.reports.Last());
+            Assert.AreEqual("到 Circle faucet 領取\n0x1234…5678\n餘額 5", town.AtmWords("street"));
+            yield return new WaitForSeconds(TownView.AtmNote + 0.5f);
+            Assert.AreNotEqual("", town.AtmWords("street"), "watching stays");
+            Assert.That(bridge.reports, Has.Exactly(1).EqualTo(asked), "not asked again while it stands there");
+
+            bridge.Atm("{\"id\":\"street\",\"code\":\"arrived\",\"amount\":\"10\",\"balance\":\"15\"}");
+            Assert.AreEqual("入帳 +10\n餘額 15", town.AtmWords("street"));
+            yield return new WaitForSeconds(TownView.AtmNote + 0.5f);
+            Assert.AreEqual("", town.AtmWords("street"), "an answer goes");
+            bridge.Atm("{\"id\":\"nowhere\",\"code\":\"minted\"}");
+            Assert.AreEqual("atmsay:0:0:nowhere|Invalid", bridge.reports.Last());
+        }
+        finally { Time.timeScale = scale; }
+    }
+
     // Aaron 11/8 (option B): the customer walks up past the fire station, behind it; the view rises with it, its
     // head in sight, and comes back down to rest on focus once it is back on the pavement.
     [UnityTest]
