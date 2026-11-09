@@ -8,8 +8,8 @@ narration as subtitles (Chinese over English) in a band under the picture, also 
 --cut addon: the hotel's and the post office's add-on clips (apa-addon-hotel, apa-addon-post), from addon-present/.
 --cut transit: the ATM and the subway's gate (apa-addon-transit), from transit-present/ (film.mjs --stage transit).
 
-Inputs (artifacts/video/, git-ignored): full-present2/ and full-show2/ (full.mp4, marks.json: film.mjs --stage full,
---view present and show), fooled/fooled.mp4 (--stage fooled), rec1/rec1-cforce.mov (the 11/6 recording: only the
+Inputs (artifacts/video/, git-ignored): full-present3/ and full-show3/ (full.mp4, marks.json: film.mjs --stage full,
+--view present and show), fooled2/fooled.mp4 (--stage fooled; 11/9, the new town), rec1/rec1-cforce.mov (the 11/6 recording: only the
 browser's page is cropped from it, never the screen around it) and checker-rec1.json (verify-demo on that run's
 evidence pack). The simulation's frames carry their own label (film.mjs); the real clip gets its own here.
 This ffmpeg has no drawtext and no libass: every text is a PNG drawn here and overlaid.
@@ -259,15 +259,15 @@ def main():
         return transit(a.out)
     work = os.path.join(a.out, "cut-%s-work" % a.cut)
     os.makedirs(work, exist_ok=True)
-    P = os.path.join(V, "full-present2/full.mp4")
-    S = os.path.join(V, "full-show2/full.mp4")
-    F = os.path.join(V, "fooled/fooled.mp4")
+    P = os.path.join(V, "full-present3/full.mp4")  # the town as of 11/9 (Aaron: 主片用新城鎮重新拍攝); 11/6's: -present2, -show2, fooled
+    S = os.path.join(V, "full-show3/full.mp4")
+    F = os.path.join(V, "fooled2/fooled.mp4")
     R = os.path.join(V, "rec1/rec1-cforce.mov")
     for f in (P, S, F, R, os.path.join(V, "checker-rec1.json")):
         if not os.path.exists(f):
             sys.exit("cut: missing " + f + " (film.mjs, the 11/6 recording, verify-demo)")
-    pm = json.load(open(os.path.join(V, "full-present2/marks.json")))
-    sm = json.load(open(os.path.join(V, "full-show2/marks.json")))
+    pm = json.load(open(os.path.join(V, "full-present3/marks.json")))
+    sm = json.load(open(os.path.join(V, "full-show3/marks.json")))
     rep = json.load(open(os.path.join(V, "checker-rec1.json")))
     PAGE = (0, 176, 3840, 1984)  # the browser's page in rec1-cforce.mov (its tabs, address bar and bookmarks above y 176)
 
