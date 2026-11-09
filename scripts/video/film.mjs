@@ -4,7 +4,7 @@
 // in a new 0700 temporary directory, removed at the end; nothing under var/ is read or written but the Foundry
 // tools (var/tools); the chain is a fresh anvil on its own port; the approver is a CDP virtual authenticator.
 //
-//   node scripts/video/film.mjs [--stage up|sample] [--out DIR]
+//   node scripts/video/film.mjs [--stage up|sample|full|fooled|transit] [--out DIR]
 //
 // Stage up: the local paying stack (chain, Signer, facilitator, Host), both approvers enrolled, the host page
 // with its tokens; a screenshot, then everything stopped. Stage sample (the 20-30 s sample Aaron sees first):
@@ -200,6 +200,56 @@ async function fooled(b) {
   log("film: " + join(out, "fooled.mp4"));
 }
 
+// transit (docs/commercial-transit.md, docs/commercial-atm.md, Aaron 11/9): customer A walked in game mode, each walk
+// a click there (Unity's Walk): to the street's ATM (test USDC minted), down the subway's stairs, on through the
+// shopping street's gate to the train (the first time the pass is opened on the device, then the first fare), the
+// train to the beach, out through its gate (free) and back in (the second fare, nothing to confirm); full.mp4 and
+// marks.json, each moment as the host's status line tells it.
+async function transit(b) {
+  const click = (sel) => b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e || e.disabled) return false; e.click(); return true; })()`);
+  const says = (text, s) => b.waitFor(`document.getElementById("run-status").textContent.includes(${JSON.stringify(text)})`, s * 1000);
+  // Unity's walk reports, kept for this script (the page ignores the kind).
+  await b.evaluate(`(() => { const f = window.apaUnityReport; window.apaWalks = []; window.apaUnityReport = (k, g, q, d) => { if (k === "walk") window.apaWalks.push(d); return f(k, g, q, d); }; return true; })()`);
+  log("film: presenting " + (await click("#present-toggle")));
+  await sleep(4000);
+  log("film: walking A " + (await click('#present-play button[data-play="consumer-a"]') && await b.waitFor(`document.getElementById("present-play-hint").hidden === false`, 10000)));
+  await sleep(3000);
+  const frames = join(out, "full-frames");
+  const stop = capture(b, frames);
+  const t0 = Date.now() / 1000;
+  const marks = {};
+  const mark = (k) => { marks[k] = +(Date.now() / 1000 - t0).toFixed(2); log("film: " + k + " at " + marks[k] + " s"); };
+  // walk: a click at (x, y), tried again until Unity has a way there (none while the stairs or a train move it).
+  const walk = async (k, x, y, to, s = 30) => {
+    const msg = JSON.stringify(JSON.stringify({ x, y, to: to || "" }));
+    for (const end = Date.now() + s * 1000; Date.now() < end; await sleep(500)) {
+      if (await b.evaluate(`import("/ui/app.js").then((m) => { m.shop().instance.SendMessage("Bridge", "Walk", ${msg}); return window.apaWalks.at(-1) === "Applied"; })`)) return mark(k);
+    }
+    throw new Error(k + ": no way to " + x + "," + y + " in " + s + " s");
+  };
+  const step = async (k, text, s) => { if (!(await says(text, s))) throw new Error(k + ": the status line never said " + text); mark(k); };
+  await sleep(1500);
+  mark("start");
+  await walk("atm-go", 18, 18.6); // a click on the ATM itself: A stops on the pavement in front of it
+  await step("atm", "在 ATM 領到", 60);
+  await sleep(5000); // the ATM's words held
+  await walk("stairs", 15.6, 15.5, "subway");
+  await walk("gate-go", 814.5, 24.15, "", 30); // the car's aisle, through the gate: tried until A is down in the station
+  await step("opening", "開通捷運自動扣款", 60);
+  await step("ride1", "（第 1 趟", 90);
+  await walk("out", 1122.5, 13.1, "", 90); // the beach's hall, out through its gate: tried until the train has stopped there
+  await sleep(11000); // out through the gate (free), to the hall
+  await walk("in-go", 1114.5, 24.15); // back in, to the car's aisle
+  await step("ride2", "（第 2 趟", 60);
+  await sleep(7000);
+  mark("end");
+  const got = await stop();
+  writeFileSync(join(out, "marks.json"), JSON.stringify(marks, null, 1));
+  log("film: " + got.length + " frames");
+  encode(got, frames, join(out, "full.mp4"));
+  log("film: " + join(out, "full.mp4"));
+}
+
 // sample: the town and the bookshop filmed while the host page presents. --view present (default): the host
 // page itself, its scene filling the screen under the cards (the main picture); --view show: the audience
 // window (/show), for 為什麼可信 and the receipts (its scene stays at whole multiples: 1x at 1920x1080).
@@ -334,6 +384,7 @@ try {
   if (stage === "sample") await sample(b, unityUp);
   else if (stage === "full") await full(b, unityUp, demo);
   else if (stage === "fooled") await fooled(b);
+  else if (stage === "transit") await transit(b);
   else if (stage !== "up") throw new Error("stage " + stage + " is not written yet");
 } finally {
   if (b) b.close();

@@ -966,13 +966,15 @@ namespace APA
             if (d != Vector2.zero) { route.Clear(); routeTo = null; }
         }
 
-        // GoTo: walk to a point (the nearest pavement to it), and in at a venue's door when one is named. False: no way there.
+        // GoTo: walk to a point (the nearest pavement to it), and in at a venue's door when one is named. False: no way
+        // there, or none now: down the stairs (phase) or on a train that moves (riding), a click does not walk it off.
+        // Either way the walk it is on goes on: only a way found replaces it.
         public bool GoTo(Vector2 to, string venue = null)
         {
-            route.Clear(); routeTo = null;
-            if (Player == "") return false;
+            if (Player == "" || phase != 0 || riding >= 0) return false;
             var way = Way(PlayerAt, to);
             if (way == null) return false;
+            route.Clear();
             route.AddRange(way);
             routeTo = venue;
             return true;

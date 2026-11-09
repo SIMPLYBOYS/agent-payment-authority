@@ -485,16 +485,19 @@ public class TownTests
             {
                 int left = town.Departures, came = town.Arrivals;
                 float off = 0f, cover = 1f;
+                bool walkedOff = false;
                 Assert.IsTrue(town.GoTo(to, stairs ? TownView.Subway : null), "a way to " + to);
                 yield return Until(() =>
                 {
                     if (train >= 0) { off = Mathf.Max(off, town.TrainShift(train)); cover = Mathf.Min(cover, town.TrainCover(train)); }
+                    if (town.Riding && town.GoTo(to)) walkedOff = true; // a click while it moves
                     return In(part, town.PlayerAt.x) && !town.Moving && !town.Riding;
                 }, 40f, _ => { });
                 Assert.IsTrue(In(part, town.PlayerAt.x), "came into " + part + ": " + town.PlayerAt);
                 Assert.IsTrue(In(part, town.LookX), "the view in that part: " + town.LookX);
                 if (train < 0) continue;
                 var other = t.trains[train].to;
+                Assert.IsFalse(walkedOff, "no walk off a moving train");
                 Assert.Less(cover, 0.05f, "its outside faded as the customer came to its door (Aaron 11/9)");
                 Assert.Greater(off, 5f, "the train pulled off with the customer in it");
                 Assert.AreEqual(left + 1, town.Departures, "it left once");
@@ -574,12 +577,15 @@ public class TownTests
         try
         {
             Assert.IsTrue(town.GoTo(new Vector2(a.spot.x - 2f, y)));
+            Assert.IsFalse(town.GoTo(new Vector2(t.trains[1].inside.x + 1f, t.trains[1].inside.y)), "no way from the street to the beach's car");
+            Assert.Greater(town.RouteLeft, 0, "a click with no way there: the walk it was on goes on");
             yield return Until(() => town.RouteLeft == 0, 40f, _ => { });
             Assert.IsTrue(town.GoTo(new Vector2(a.spot.x + a.spot.w + 2f, y)), "along the pavement, past it");
             yield return Until(() => town.RouteLeft == 0, 20f, _ => { });
             Assert.That(bridge.reports, Has.None.EqualTo(asked), "passing is not a visit");
 
-            Assert.IsTrue(town.GoTo(new Vector2(a.spot.x + a.spot.w / 2f, y + 1.5f)), "a click on the ATM itself");
+            bridge.Walk(System.FormattableString.Invariant($"{{\"x\":{a.spot.x + a.spot.w / 2f},\"y\":{y + 1.5f}}}")); // a click on the ATM itself
+            Assert.AreEqual("walk:0:0:Applied", bridge.reports.Last());
             yield return Until(() => bridge.reports.Contains(asked), 20f, _ => { });
             Assert.IsTrue(a.spot.Holds(town.PlayerAt), "stopped at it: " + town.PlayerAt);
             Assert.That(bridge.reports, Has.Exactly(1).EqualTo(asked), "reported once");

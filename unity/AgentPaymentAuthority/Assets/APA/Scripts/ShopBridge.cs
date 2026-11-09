@@ -25,6 +25,9 @@
 // ATM (docs/commercial-atm.md): the walked customer at the street's ATM is
 // reported as "atm" with its id; "Atm" takes the page's answer {id, code,
 // amount, balance, address}. The Host decides; the ATM only shows.
+// "Walk" takes {x, y, to}: the walked customer to a point, as a click there
+// does (to: "subway" down the stairs, or a venue's layout in at its door);
+// the video's director (scripts/video/film.mjs) uses it. Reported as "walk".
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -201,6 +204,17 @@ namespace APA
             try { m = JsonUtility.FromJson<AtmMessage>(json); } catch (System.Exception) { }
             bool ok = m != null && town != null && town.AtmSay(m.id, m.code, m.amount, m.balance, m.address);
             Report("atmsay", 0, 0, (m != null ? m.id ?? "" : "") + "|" + (ok ? "Applied" : "Invalid"));
+        }
+
+        [System.Serializable]
+        public class WalkMessage { public float x, y; public string to; }
+
+        public void Walk(string json)
+        {
+            WalkMessage m = null;
+            try { m = JsonUtility.FromJson<WalkMessage>(json); } catch (System.Exception) { }
+            bool ok = m != null && town != null && town.HasTown && town.GoTo(new Vector2(m.x, m.y), string.IsNullOrEmpty(m.to) ? null : m.to);
+            Report("walk", 0, 0, ok ? "Applied" : "Invalid");
         }
 
         public void Steer(string json)

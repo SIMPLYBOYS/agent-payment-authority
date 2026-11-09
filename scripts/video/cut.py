@@ -3,9 +3,10 @@
 Base Sepolia clip of 11/6 (rec1) and title cards, cut row by row as the script's tables time them; each row's
 narration as subtitles (Chinese over English) in a band under the picture, also as two SRT files.
 
-    python3 -I scripts/video/cut.py --cut 90|180|addon [--out artifacts/video]
+    python3 -I scripts/video/cut.py --cut 90|180|addon|transit [--out artifacts/video]
 
 --cut addon: the hotel's and the post office's add-on clips (apa-addon-hotel, apa-addon-post), from addon-present/.
+--cut transit: the ATM and the subway's gate (apa-addon-transit), from transit-present/ (film.mjs --stage transit).
 
 Inputs (artifacts/video/, git-ignored): full-present2/ and full-show2/ (full.mp4, marks.json: film.mjs --stage full,
 --view present and show), fooled/fooled.mp4 (--stage fooled), rec1/rec1-cforce.mov (the 11/6 recording: only the
@@ -16,6 +17,7 @@ This ffmpeg has no drawtext and no libass: every text is a PNG drawn here and ov
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -198,6 +200,46 @@ def addon(out):
         render(rows, work, os.path.join(out, "apa-addon-%s" % venue))
 
 
+def transit(out):
+    """The ATM and the subway's gate (docs/commercial-atm.md, docs/commercial-transit.md): one add-on clip, cut at the
+    moments film.mjs --stage transit marked (no seconds read off by hand); the walks faster, the answers at speed."""
+    P = os.path.join(V, "transit-present/full.mp4")
+    if not os.path.exists(P):
+        sys.exit("cut: missing " + P + " (film.mjs --stage transit --out " + os.path.dirname(P) + ")")
+    m = json.load(open(os.path.join(V, "transit-present/marks.json")))
+
+    def span(a, b, speed=1.0):  # the film from mark a to mark b ("name", "name+s", "name-s"), shown speed times as fast
+        def t(k):
+            name, off = re.match(r"^([a-z0-9-]+?)([+-][0-9.]+)?$", k).groups()
+            return m[name] + float(off or 0)
+        return (dict(kind="clip", src=P, start=t(a), len=t(b) - t(a)), (t(b) - t(a)) / speed)
+
+    rows = [
+        ("錢包裡的測試 USDC 從哪來？家長走到街上的 ATM：本機鏈當場鑄造，每人每天最多 20；testnet 則到 Circle 的 faucet 領。",
+         "Where does the test USDC come from? The parent stops at the street's ATM: minted on the local chain, at most 20 a day; on the testnet, Circle's faucet.",
+         [span("start", "atm", 2.0), span("atm", "atm+4.5")]),
+        ("第一次進站，閘門關著：家長在裝置上確認一份捷運委託，每趟最多 0.02，總共 0.20。",
+         "At the first gate, the parent confirms a transit delegation on the device: at most 0.02 a ride, 0.20 in all.",
+         # the device's confirmation is instant here (a virtual authenticator): the gate's words slowed to be read
+         [span("stairs", "opening-0.5", 1.5), span("opening-0.5", "ride1+0.5", 0.35)]),
+        ("Policy 一核准，閘門就開、扣 0.02；鏈上結算在背景完成，人不必停下來付錢。",
+         "The gate opens on the Policy's approval and takes 0.02; settlement completes on chain in the background, with no stop to pay.",
+         [span("ride1+0.5", "ride1+3"), span("ride1+3", "out", 2.0)]),
+        ("到了海灘站，出站不收費。",
+         "At the beach, going out is free.",
+         [span("out", "in-go", 2.0)]),
+        ("再進站，不用再確認：第二趟自動扣款。超過額度或次數，閘門就不開。",
+         "Going in again needs no confirmation: the second fare is taken at once. Past its budget or its rate, the gate stays shut.",
+         [span("in-go", "ride2"), span("ride2", "end")]),
+    ]
+    work = os.path.join(out, "cut-addon-transit-work")
+    os.makedirs(work, exist_ok=True)
+    p = os.path.join(work, "title.png")
+    card(p, "加演：地下鐵", ["邊走邊付：過閘門自動扣款"], ["示意動畫：fake Agent・本機測試鏈"])
+    rows[0][2].insert(0, (dict(kind="card", png=p), 3.0))
+    render(rows, work, os.path.join(out, "apa-addon-transit"))
+
+
 # The add-ons' rows, in film seconds from a second before each venue's start: each row's film and its length on
 # screen (faster when shorter), read off addon-present2/full.mp4 (11/8): the hotel's Deny shows 8.5 s in, the
 # child's receipt 20.9 s; the post office's failed delivery 20.4 s in, the refund pressed 26.7 s in and recorded
@@ -208,11 +250,13 @@ POST = (18.8, 12.5, 7.7, 8.0, 6.3, 7.5)
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cut", choices=["90", "180", "addon"], required=True)
+    ap.add_argument("--cut", choices=["90", "180", "addon", "transit"], required=True)
     ap.add_argument("--out", default=V)
     a = ap.parse_args()
     if a.cut == "addon":
         return addon(a.out)
+    if a.cut == "transit":
+        return transit(a.out)
     work = os.path.join(a.out, "cut-%s-work" % a.cut)
     os.makedirs(work, exist_ok=True)
     P = os.path.join(V, "full-present2/full.mp4")
