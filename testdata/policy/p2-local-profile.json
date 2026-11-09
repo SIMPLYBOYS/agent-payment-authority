@@ -1,0 +1,15 @@
+{
+  "profile_id": "p2-local-v1",
+  "evidence_mode": "fixture",
+  "asset_id": "fixture-usdc",
+  "allow_max": "100000",
+  "task_cap": "5000000",
+  "merchants": [
+    "0x3333333333333333333333333333333333333333"
+  ],
+  "mode": "interactive",
+  "velocity": {
+    "max": 5,
+    "window_seconds": 600
+  }
+}

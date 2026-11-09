@@ -227,19 +227,9 @@ func (f *cliRunner) runOne(ctx context.Context, st *store.Store, bridge *toolbri
 	h := &buyer.Host{Registry: f.reg, Bridge: bridge, CLI: f.cli, BridgeCmd: []string{f.d.self, "mcp-bridge"}, Env: env, Limits: limits,
 		Gate: gate, TraceDir: f.traceDir, Bound: r.bound, Scene: r.scene}
 	prepare := func() (*store.Store, error) {
-		setup := store.TaskSetup{TaskID: task.TaskID, Profile: &f.profile, BudgetInitial: r.BudgetInitial, ContractVersion: r.contract, DelegationID: r.delegation}
-		if paycontract.Supported(r.contract) {
-			setup.Run = f.cond
-		}
-		if r.contract == paycontract.V2 {
-			// C2: the BBS+ credential, issued now; verified at each purchase.
-			if err := taskCredential(f.creds, &setup, task.ConsumerID, f.d.clock()); err != nil {
-				return nil, err
-			}
-		} else {
-			// The credential is an M1 fixture made at start, valid for a day of
-			// host time; nothing verifies a BBS+ proof.
-			setup.Credential = &policy.Credential{ConsumerID: task.ConsumerID, ValidUntil: f.d.clock() + 86400, EvidenceMode: "fixture"}
+		setup, err := f.taskSetup(task.TaskID, task.ConsumerID, r, f.cond)
+		if err != nil {
+			return nil, err
 		}
 		if err := st.StartTask(setup); err != nil {
 			return nil, err
@@ -259,6 +249,24 @@ func (f *cliRunner) runOne(ctx context.Context, st *store.Store, bridge *toolbri
 		o.Detail = "prepare_failed:" + store.CodeOf(res.PrepareError) // STORE_ERROR without a code; never its text
 	}
 	return o
+}
+
+// taskSetup is the task a run starts: the host's profile, the run's budget,
+// contract and delegation, a pay task's run conditions (cond) and the
+// consumer's credential.
+func (f *cliRunner) taskSetup(taskID, consumer string, r planRun, cond *paycontract.RunConditions) (store.TaskSetup, error) {
+	setup := store.TaskSetup{TaskID: taskID, Profile: &f.profile, BudgetInitial: r.BudgetInitial, ContractVersion: r.contract, DelegationID: r.delegation}
+	if paycontract.Supported(r.contract) {
+		setup.Run = cond
+	}
+	if r.contract == paycontract.V2 {
+		// C2: the BBS+ credential, issued now; verified at each purchase.
+		return setup, taskCredential(f.creds, &setup, consumer, f.d.clock())
+	}
+	// The credential is an M1 fixture made at start, valid for a day of
+	// host time; nothing verifies a BBS+ proof.
+	setup.Credential = &policy.Credential{ConsumerID: consumer, ValidUntil: f.d.clock() + 86400, EvidenceMode: "fixture"}
+	return setup, nil
 }
 
 // promptFor is a run's prompt: the fixed one, or a live pay entry's task in

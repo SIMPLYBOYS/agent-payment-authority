@@ -12,6 +12,7 @@
 // 10/27, as pixel-office; the page renders at the screen's own density, so
 // a fraction is fine-grained). It shows; it never decides.
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace APA
@@ -46,6 +47,11 @@ namespace APA
         // in it (its aisle, a walk area too); to: the train it rides to (the other station's); from: the west tunnel's
         // mouth, whence it comes in (TownView.Ride).
         public Train[] trains = new Train[0];
+        // A subway gate (docs/commercial-transit.md, Aaron 11/9): its line (x) across its way in (y from y0 to y1), crossed
+        // east going in (paid while the page has the gates on) and west going out (free); its station, as the page names
+        // it; its arm's two looks, up (open) and down across the way (shut).
+        public Gate[] gates = new Gate[0];
+        [System.Serializable] public class Gate { public string station; public float line, y0, y1; public Piece open = new Piece(), shut = new Piece(); }
         // name, en: its station's name, shown as it comes in (Aaron 11/9).
         [System.Serializable] public class Train { public float x, y, from; public string name, en; public string[] cars = new string[0], open = new string[0]; public Area inside = new Area(); public int to = -1; }
 
@@ -168,6 +174,19 @@ namespace APA
                 s.outside = outs.ToArray();
                 s.length = x - tr.x;
                 trains.Add(s);
+            }
+            gates.Clear();
+            foreach (var g in town.gates)
+            {
+                var s = new GateState { g = g, open = Piece(transform, g.open, Order(g.open.y), new Vector2(0.5f, 0f)), shut = Piece(transform, g.shut, Order(g.shut.y), new Vector2(0.5f, 0f)) };
+                s.root = new GameObject("gate-" + g.station).transform;
+                s.root.SetParent(transform, false);
+                s.root.localPosition = new Vector2(g.line + 0.9f, g.y1 + 1.9f); // over its machine
+                s.note = Words(s.root, "gate-note", Vector2.zero, 0.085f, Color.white, Labels + 20);
+                s.plate = Plate(s.root, s.note, Rounded(), GateWait, Labels + 20);
+                s.root.gameObject.SetActive(false);
+                gates.Add(s);
+                Look(s);
             }
             foreach (var v in town.venues)
             {
@@ -909,6 +928,7 @@ namespace APA
             if (phase == 0) { Halt(); hopTo = -1; } // another customer, or none: no ride left half done
             if (Player != "") stands[Player].body.sprite = playerIdle[3]; // back to standing
             Player = consumer;
+            atGate = null;
             if (Player == "") return true;
             var sheet = Player == "consumer-a" ? shop.customerA : shop.customerB;
             // The premade sheet (ShopView's rows): idle at 64 from the top, walk at 128; right 0, up 6, left 12, down 18.
@@ -1012,6 +1032,7 @@ namespace APA
             var q = p;
             if (Walkable(new Vector2(q.x + d.x, q.y))) q.x += d.x; // an axis at a time: along a kerb, not stuck at it
             if (Walkable(new Vector2(q.x, q.y + d.y))) q.y += d.y;
+            q = PastGates(p, q, dt);
             body.transform.localPosition = q;
             int car = trains.FindIndex(s => q.x >= s.t.x && q.x <= s.t.x + s.length && q.y >= s.t.y && q.y <= s.t.y + 4f);
             body.sortingOrder = car >= 0 ? Order(trains[car].t.y) + 1 : Order(q.y) + 1; // in a car: over it, in its aisle
@@ -1043,6 +1064,100 @@ namespace APA
                     phase = 1;
                     break;
                 }
+        }
+
+        // ---- the subway's gates (docs/commercial-transit.md, Aaron 11/9: the fare taken as the customer walks in) ----
+        // With the page's gates on (Gates: it has a Host that takes fares), the walked customer stops at a shut gate going
+        // in and it is reported (Gated, with its station); the page answers (OpenGate): open, the fare taken, or not, and
+        // a code for the words shown over the gate. Going out is free. Off (no Host: the video, a page without one): open,
+        // as before. The page decides; the town only shows.
+        public System.Action<string> Gated;
+        public bool GatesOn { get; private set; }
+        public bool HasGates => gates.Count > 0; // the bridge says so (gates=1): built in Awake, before its report
+        class GateState { public Town.Gate g; public SpriteRenderer open, shut, plate; public TextMesh note; public Transform root; public bool letIn, waiting; public float outT, noteT = -1f; }
+        readonly List<GateState> gates = new List<GateState>();
+        string atGate; // the station whose gate the walked customer was reported at, until it steps away from it
+        public const float GateStop = 0.45f, GateNote = 4f; // short of the line it waits; seconds an answer stays shown
+        static readonly Color GateWait = new Color(0.18f, 0.18f, 0.22f, 0.92f), GatePaid = new Color(0.12f, 0.42f, 0.24f, 0.92f), GateRefused = new Color(0.58f, 0.14f, 0.14f, 0.92f);
+        public bool GateShut(string station) => gates.Exists(s => s.g.station == station && s.shut != null && s.shut.enabled); // tests
+        public string GateWords(string station) { var s = gates.Find(x => x.g.station == station); return s != null && s.root.gameObject.activeSelf ? s.note.text : ""; } // tests
+
+        public void Gates(bool on)
+        {
+            GatesOn = on;
+            atGate = null;
+            foreach (var s in gates) { s.letIn = s.waiting = false; Look(s); }
+        }
+
+        // OpenGate: the page's answer for a station's gate. False: no such gate, or the gates are off.
+        public bool OpenGate(string station, bool open, string code, string amount)
+        {
+            var s = gates.Find(x => x.g.station == station);
+            if (s == null || !GatesOn) return false;
+            s.letIn = open;
+            s.waiting = code == "opening"; // the pass is being opened: an answer is still to come
+            Note(s, GateText(code, amount), open ? GatePaid : s.waiting ? GateWait : GateRefused);
+            Look(s);
+            return true;
+        }
+
+        // The words over a gate, by the page's code; the amount only digits and a point.
+        static string GateText(string code, string amount)
+        {
+            amount = new string((amount ?? "").Where(c => char.IsDigit(c) || c == '.').Take(8).ToArray());
+            switch (code)
+            {
+                case "sensing": return "感應中…";
+                case "opening": return "開通捷運自動扣款…";
+                case "paid": return "自動扣款 " + amount;
+                case "VELOCITY_LIMIT": return "次數太多，請稍後再搭";
+                case "INSUFFICIENT_BUDGET": return "捷運額度已用完";
+                case "AUTHORIZATION_EXPIRED": return "授權已過期";
+                case "declined": return "未開通自動扣款";
+                default: return "無法扣款";
+            }
+        }
+
+        void Note(GateState s, string text, Color plate)
+        {
+            s.note.text = text;
+            s.plate.color = plate;
+            s.noteT = 0f;
+            s.root.gameObject.SetActive(true);
+        }
+
+        void Look(GateState s)
+        {
+            bool up = !GatesOn || s.letIn || s.outT > 0f;
+            if (s.open != null) s.open.enabled = up;
+            if (s.shut != null) s.shut.enabled = !up;
+        }
+
+        // PastGates: where the walked customer gets to from p toward q: short of a shut gate going in (reported once),
+        // through an open one (shut behind it), out freely (the arm up as it passes).
+        Vector2 PastGates(Vector2 p, Vector2 q, float dt)
+        {
+            foreach (var s in gates)
+            {
+                var g = s.g;
+                if (s.outT > 0f && (s.outT -= dt) <= 0f) Look(s);
+                if (s.noteT >= 0f && !s.waiting && (s.noteT += dt) > GateNote && !(atGate == g.station && !s.letIn && s.note.text == GateText("sensing", ""))) { s.noteT = -1f; s.root.gameObject.SetActive(false); }
+                if (q.y < g.y0 || q.y > g.y1 || Mathf.Abs(q.x - g.line) > 3f) continue;
+                float stop = g.line - GateStop;
+                if (q.x > p.x && p.x <= stop + 1e-3f && q.x > stop && GatesOn && !s.letIn) // going in, shut: wait, and ask once
+                {
+                    q.x = stop;
+                    if (atGate != g.station) { atGate = g.station; Note(s, GateText("sensing", ""), GateWait); Gated?.Invoke(g.station); }
+                }
+                else if (q.x < p.x && p.x > g.line && q.x <= g.line + GateStop) { s.outT = 1.2f; Look(s); } // going out: free
+                if (s.letIn && q.x > g.line + 0.6f) { s.letIn = false; Look(s); } // through: shut behind
+            }
+            if (atGate != null)
+            {
+                var s = gates.Find(x => x.g.station == atGate);
+                if (s == null || (q - new Vector2(s.g.line - GateStop, (s.g.y0 + s.g.y1) / 2f)).magnitude > 1.2f) atGate = null; // asked again when it comes back
+            }
+            return q;
         }
 
         // ---- the trains (Aaron 11/8: the customer walks into the car and waits for it to start; it pulls in and out) ----

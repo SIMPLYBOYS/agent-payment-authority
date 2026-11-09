@@ -27,6 +27,7 @@ export class UnityHost {
     this.pendingSelect = null;      // UX1: the latest Select, sent after the scene's messages
     this.pendingView = null;        // T2: the latest View, for a build with the town
     this.pendingPlay = null;        // the game (Aaron 10/29): the latest Play, for a build that walks a customer
+    this.pendingGates = null;       // transit (docs/commercial-transit.md): the latest Gates, for a build that has them
     window.apaUnityReport = (kind, gen, seq, detail) => this.report(String(kind), Number(gen), Number(seq), String(detail));
   }
 
@@ -72,6 +73,9 @@ export class UnityHost {
     } else if (kind === "venue" && this.bridge && this.bridge.town) {
       // T2: a click on a venue in the town view; the page decides.
       if (/^[a-z0-9-]{1,32}$/.test(detail)) this.onStatus("venue", detail);
+    } else if (kind === "gate" && this.bridge && this.bridge.gates) {
+      // transit: the walked customer at a shut gate going in, with its station; the page decides.
+      if (/^[a-z0-9-]{1,32}$/.test(detail)) this.onStatus("gate", detail);
     } else if (kind === "rendered" && this.sceneOwned) {
       // version 2: the scene matches it to the one customer and slot it names
       const r = parseReport2(gen, seq, detail);
@@ -155,6 +159,20 @@ export class UnityHost {
     this.instance.SendMessage("Bridge", "Steer", JSON.stringify({ x, y }));
   }
 
+  // gates turns the subway's paid gates on (a page whose Host takes fares) or off. openGate is the answer to one
+  // "gate" report, { station, open, code, amount }: now or never (a customer waits at the gate for it).
+  gates(on) {
+    if (!(this.bridge && this.bridge.gates)) return;
+    this.pendingGates = { on: !!on };
+    this.flush();
+  }
+
+  openGate(msg) {
+    if (!(this.bridge && this.bridge.gates) || !this.ready || !this.instance) return false;
+    this.instance.SendMessage("Bridge", "OpenGate", JSON.stringify(msg));
+    return true;
+  }
+
   // tour pans the town's camera along the whole street once (town v2 V4): the
   // video's prologue. Now or never: a tour asked before Unity is ready is dropped.
   tour() {
@@ -168,6 +186,10 @@ export class UnityHost {
     if (this.pendingPlay) {
       this.instance.SendMessage("Bridge", "Play", JSON.stringify(this.pendingPlay));
       this.pendingPlay = null;
+    }
+    if (this.pendingGates) {
+      this.instance.SendMessage("Bridge", "Gates", JSON.stringify(this.pendingGates));
+      this.pendingGates = null;
     }
     if (this.pendingView) {
       this.instance.SendMessage("Bridge", "View", JSON.stringify(this.pendingView));

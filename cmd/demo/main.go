@@ -387,8 +387,9 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	}
 
 	var bridge *toolbridge.Server
+	var tools *toolbridge.Shop
 	if runner != nil {
-		tools := &toolbridge.Shop{Store: st, CatalogURL: "http://" + addr + "/catalog", Scenes: scenes, Products: products, Client: toolbridge.NewClient(), Now: d.clock,
+		tools = &toolbridge.Shop{Store: st, CatalogURL: "http://" + addr + "/catalog", Scenes: scenes, Products: products, Client: toolbridge.NewClient(), Now: d.clock,
 			Credentials: creds}
 		runner.creds = creds
 		cond := runConditions(live, pay, *authSource)
@@ -457,8 +458,8 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		mux.HandleFunc("GET /api/tasks/{task_id}/trace", ui.taskTrace)
 	}
 	if scenarios != nil {
-		ui.control = &control{st: st, runner: runner, bridge: bridge, scenarios: scenarios, ctx: runCtx, wg: &runs, out: d.out,
-			active: map[string]*liveRun{}, ended: map[string]*liveRun{}, maxRuns: effMaxRuns, consumers: nConsumers, instance: instance, started: hostStart, profile: profile}
+		ui.control = &control{st: st, runner: runner, bridge: bridge, shop: tools, scenarios: scenarios, ctx: runCtx, wg: &runs, out: d.out,
+			active: map[string]*liveRun{}, ended: map[string]*liveRun{}, transit: map[string]*transitPass{}, maxRuns: effMaxRuns, consumers: nConsumers, instance: instance, started: hostStart, profile: profile}
 		ui.control.register(mux, ui)
 		if roles.sim {
 			var ids []string

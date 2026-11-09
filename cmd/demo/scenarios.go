@@ -41,6 +41,10 @@ type scenario struct {
 	// Task is a live pay entry's task, the person's words the model is
 	// given (E1-a: buyer.PayingTaskPrompt); live pay entries only.
 	Task string `json:"task,omitempty"`
+	// Transit is a subway pass (docs/commercial-transit.md): no Agent and no run of its own; the
+	// consumer confirms its delegation once, then the host asks for each ride's fare at the gate
+	// (POST /api/host/transit). A pay-family entry of the subway scene, with no scenario file or task.
+	Transit bool `json:"transit,omitempty"`
 
 	digest     string   // sha256 of this entry and its scenario file's bytes
 	candidates []string // the consumer's demo tasks (show-*), in registry order
@@ -120,7 +124,10 @@ func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.Regist
 		default:
 			return nil, fmt.Errorf("scenarios %s: %s: unknown contract %q", path, sc.ID, sc.Contract)
 		}
-		if (sc.Task != "") != (live && sc.Contract != "" && sc.Contract != contracts.Version) {
+		if sc.Transit && (sc.Scene != "subway" || sc.Delegation == nil || sc.Scenario != "" || sc.Task != "") {
+			return nil, fmt.Errorf("scenarios %s: %s: a transit entry is a pay-family entry of the subway scene, with no scenario file or task", path, sc.ID)
+		}
+		if !sc.Transit && (sc.Task != "") != (live && sc.Contract != "" && sc.Contract != contracts.Version) {
 			return nil, fmt.Errorf("scenarios %s: %s: a live pay entry, and only one, has its task's words", path, sc.ID)
 		}
 		if sc.Task != "" {
@@ -133,6 +140,7 @@ func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.Regist
 		}
 		var body []byte
 		switch {
+		case sc.Transit: // nothing runs: no file
 		case live && sc.Scenario != "":
 			return nil, fmt.Errorf("scenarios %s: %s: a live catalog names no scenario file (the real CLI runs)", path, sc.ID)
 		case !live && sc.Scenario == "":
@@ -153,7 +161,8 @@ func loadScenarios(path string, reg *contracts.Registry, regCfg contracts.Regist
 			Delegation                    *delegationTerms `json:",omitempty"`
 			Scene                         string           `json:",omitempty"`
 			Task                          string           `json:",omitempty"`
-		}{sc.ID, sc.ConsumerID, string(sc.BudgetInitial), sc.Contract, sc.Delegation, sc.Scene, sc.Task})
+			Transit                       bool             `json:",omitempty"`
+		}{sc.ID, sc.ConsumerID, string(sc.BudgetInitial), sc.Contract, sc.Delegation, sc.Scene, sc.Task, sc.Transit})
 		h := sha256.New()
 		h.Write(entry)
 		h.Write([]byte{0})

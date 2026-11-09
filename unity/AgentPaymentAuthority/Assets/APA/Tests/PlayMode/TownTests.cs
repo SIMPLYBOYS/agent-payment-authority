@@ -508,6 +508,55 @@ public class TownTests
         finally { Time.timeScale = scale; }
     }
 
+    // docs/commercial-transit.md (Aaron 11/9): with the page's gates on, the customer walking in stops at the shut gate
+    // and it is reported with its station; a refusal keeps it shut and says why; an Allow lets it through, shut behind.
+    [UnityTest]
+    public IEnumerator TheGateWaitsForTheFare()
+    {
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        bridge.Play("{\"consumer\":\"consumer-a\"}");
+        var t = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
+        var g = t.gates[0];
+        Assert.AreEqual("shop-street", g.station);
+        Assert.IsFalse(town.GateShut(g.station), "off: open, as before");
+        float scale = Time.timeScale;
+        Time.timeScale = 4f;
+        try
+        {
+            Assert.IsTrue(town.GoTo(t.subway[0].at, TownView.Subway));
+            yield return Until(() => town.PlayerAt.x > t.apart[1].x && !town.Moving, 40f, _ => { });
+            bridge.Gates("{\"on\":true}");
+            Assert.AreEqual("gates:0:0:on|Applied", bridge.reports.Last());
+            Assert.IsTrue(town.GateShut(g.station), "on: shut");
+            var aisle = new Vector2(t.trains[0].inside.x + 1f, t.trains[0].inside.y + t.trains[0].inside.h / 2f);
+            Assert.IsTrue(town.GoTo(aisle), "a way through the gate");
+            string asked = "gate:" + bridge.scene.Scene + ":0:" + g.station;
+            yield return Until(() => bridge.reports.Contains(asked), 20f, _ => { });
+            Assert.That(bridge.reports, Has.Exactly(1).EqualTo(asked), "reported once");
+            Assert.AreEqual(g.line - TownView.GateStop, town.PlayerAt.x, 0.01f, "waits short of the line");
+            Assert.AreEqual("感應中…", town.GateWords(g.station));
+
+            bridge.OpenGate("{\"station\":\"shop-street\",\"open\":false,\"code\":\"VELOCITY_LIMIT\"}");
+            Assert.AreEqual("opengate:0:0:shop-street|Applied", bridge.reports.Last());
+            yield return new WaitForSeconds(1f);
+            Assert.Less(town.PlayerAt.x, g.line, "refused: still outside");
+            Assert.IsTrue(town.GateShut(g.station));
+            Assert.AreEqual("次數太多，請稍後再搭", town.GateWords(g.station));
+            Assert.That(bridge.reports, Has.Exactly(1).EqualTo(asked), "not asked again while it waits there");
+
+            bridge.OpenGate("{\"station\":\"shop-street\",\"open\":true,\"code\":\"paid\",\"amount\":\"0.02\"}");
+            Assert.IsFalse(town.GateShut(g.station), "open");
+            Assert.AreEqual("自動扣款 0.02", town.GateWords(g.station));
+            yield return Until(() => t.trains[0].inside.Holds(town.PlayerAt), 20f, _ => { });
+            Assert.IsTrue(t.trains[0].inside.Holds(town.PlayerAt), "through, on to the train: " + town.PlayerAt);
+            Assert.IsTrue(town.GateShut(g.station), "shut behind");
+            bridge.OpenGate("{\"station\":\"nowhere\",\"open\":true}");
+            Assert.AreEqual("opengate:0:0:nowhere|Invalid", bridge.reports.Last());
+        }
+        finally { Time.timeScale = scale; }
+    }
+
     // Aaron 11/8 (option B): the customer walks up past the fire station, behind it; the view rises with it, its
     // head in sight, and comes back down to rest on focus once it is back on the pavement.
     [UnityTest]

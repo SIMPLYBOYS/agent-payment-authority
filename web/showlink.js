@@ -44,6 +44,7 @@ export function createRelay(onStatus, { channel = new BroadcastChannel(CHANNEL),
     if (m.kind === "rendered2" && owned) onStatus("rendered2", m.r);
     else if (m.kind === "select2" && owned) onStatus("select2", m.r);
     else if (m.kind === "venue" && owned && typeof m.r === "string") onStatus("venue", m.r); // T4: a door reached on the window's Unity
+    else if (m.kind === "gate" && owned && typeof m.r === "string") onStatus("gate", m.r); // transit: a shut gate reached there
   };
   setTimer(() => {
     if (show && now() - show.seen > GONE_MS) { show = null; onStatus("show", null); }
@@ -62,6 +63,9 @@ export function createRelay(onStatus, { channel = new BroadcastChannel(CHANNEL),
     play(consumer) { if (owned) post("play", { consumer: consumer || "" }); },
     steer(x, y) { if (owned) post("steer", { x, y }); },
     tour() { if (owned) post("tour"); },
+    // transit (docs/commercial-transit.md): the paid gates on or off, and the answer to a gate reached.
+    gates(on) { if (owned) post("gates", { on: !!on }); },
+    openGate(msg) { if (owned) post("opengate", { msg }); },
     // view: what the audience window shows beside the scene; sent when it changed.
     view(v) {
       const key = JSON.stringify(v);
@@ -96,6 +100,8 @@ export function listen(handlers, { channel = new BroadcastChannel(CHANNEL), setT
     else if (m.kind === "cam" && (m.mode === "town" || m.mode === "venue") && handlers.cam) handlers.cam(m.mode, m.safe || null);
     else if (m.kind === "play" && typeof m.consumer === "string" && handlers.play) handlers.play(m.consumer);
     else if (m.kind === "tour" && handlers.tour) handlers.tour();
+    else if (m.kind === "gates" && handlers.gates) handlers.gates(!!m.on);
+    else if (m.kind === "opengate" && m.msg && handlers.openGate) handlers.openGate(m.msg);
     else if (m.kind === "steer" && handlers.steer) handlers.steer(Math.sign(Number(m.x) || 0), Math.sign(Number(m.y) || 0));
   };
   setTimer(() => post("status", state), BEAT_MS);

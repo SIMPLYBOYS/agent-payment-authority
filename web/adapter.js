@@ -465,6 +465,8 @@ export const VENUES = {
   // the post office's parcel is paid and no label is issued (delivery failed, the payment needs review).
   hotel: { name: "城中飯店", demo: true, goods: "住宿・示意商品", delivery: "櫃台交付訂房代碼（付款後才交付）" },
   post: { name: "城中郵局", demo: true, goods: "郵務・示意商品", delivery: "櫃台交付寄件單（付款後才交付）" },
+  // docs/commercial-transit.md (Aaron 11/9): no room; the fare is taken at the gate as the customer walks in.
+  subway: { name: "地下鐵", demo: true, goods: "車資・示意", delivery: "進站時自動扣款（閘門依 Policy 的核准打開）" },
 };
 export const venue = (key) => VENUES[key] || { name: "情境 " + String(key || "未知"), demo: true, goods: "商品", delivery: "付款後才交付" };
 // venues: the scenes a catalog offers, the main one first, then as listed above, then by name.
@@ -494,7 +496,7 @@ export const sameShown2 = (sent, rep) => !!sent && !!rep && Number.isInteger(rep
 // parseBridge: Unity's bridge report: the versions and customers the build
 // can show; null when malformed. A build without it shows one customer.
 export function parseBridge(detail) {
-  const m = /^versions=([0-9,]+);customers=([a-z0-9,-]*)(;select=1)?(;layouts=([a-z0-9,-]*))?(;town=1(;play=1)?(;pan=1)?)?(;rooms=([a-z0-9-]+:[0-9.]+x[0-9]+(?:,[a-z0-9-]+:[0-9.]+x[0-9]+)*))?$/.exec(String(detail));
+  const m = /^versions=([0-9,]+);customers=([a-z0-9,-]*)(;select=1)?(;layouts=([a-z0-9,-]*))?(;town=1(;play=1)?(;pan=1)?(;gates=1)?)?(;rooms=([a-z0-9-]+:[0-9.]+x[0-9]+(?:,[a-z0-9-]+:[0-9.]+x[0-9]+)*))?$/.exec(String(detail));
   if (!m) return null;
   // select: the build takes the page's Select and reports clicks (UX1,
   // docs/commercial-ux1.md); layouts: the rooms it has (UX3); town: it takes
@@ -502,10 +504,11 @@ export function parseBridge(detail) {
   // takes Play and Steer, the game (Aaron 10/29); pan: it takes Pan, the
   // street's tour (town v2 V4, docs/town-v2.md); rooms: each room's venue
   // view in tiles (interiors v2, docs/commercial-interiors-v2.md), for the
-  // canvas. An older build says nothing of them.
+  // canvas; gates: it takes Gates and OpenGate and reports a customer at a
+  // shut gate (docs/commercial-transit.md). An older build says nothing of them.
   const rooms = {};
-  for (const r of m[10] ? m[10].split(",") : []) { const [k, wh] = r.split(":"); const [w, h] = wh.split("x").map(Number); rooms[k] = { w, h }; }
-  return { versions: new Set(m[1].split(",").map(Number)), customers: m[2] ? m[2].split(",") : [], select: !!m[3], layouts: m[5] ? m[5].split(",") : [], town: !!m[6], play: !!m[7], pan: !!m[8], rooms };
+  for (const r of m[11] ? m[11].split(",") : []) { const [k, wh] = r.split(":"); const [w, h] = wh.split("x").map(Number); rooms[k] = { w, h }; }
+  return { versions: new Set(m[1].split(",").map(Number)), customers: m[2] ? m[2].split(",") : [], select: !!m[3], layouts: m[5] ? m[5].split(",") : [], town: !!m[6], play: !!m[7], pan: !!m[8], gates: !!m[9], rooms };
 }
 
 // sceneTasks: each consumer's scene task, the task of its newest run (the

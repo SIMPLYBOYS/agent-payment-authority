@@ -117,9 +117,11 @@ present-a2:
 # by scripts/demo/p2-dev.sh), PAYMENTS and REGISTRY the files
 # scripts/demo/p2-local.sh wrote (default var/p2-local/). Fake CLI only; the
 # chain is the local anvil, the keys test keys.
+# The profile is the demo's with the Signer's rate limit, 5 in 10 minutes
+# (docs/commercial-transit.md R3): the Host refuses the sixth itself.
 present-p2:
 	@test -n "$(SIGNER)" || { echo "usage: make present-p2 SIGNER=/path/of/signer.sock AUTH=device|virtual [PAYMENTS=var/p2-local/payments.json] [REGISTRY=var/p2-local/registry.json] (docs/commercial-p2-host.md 12.8)" >&2; exit 2; }
-	@APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$(or $(REGISTRY),var/p2-local/registry.json)" APA_PRESENT_PAYMENTS="$(or $(PAYMENTS),var/p2-local/payments.json)" APA_PRESENT_CREDENTIALS=1 APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p2.json sh scripts/demo/present.sh fake
+	@APA_ADDR=127.0.0.1:8402 APA_APPROVALS_SIGNER="$(SIGNER)" APA_AUTHENTICATOR_SOURCE="$(AUTH)" APA_PRESENT_REGISTRY="$(or $(REGISTRY),var/p2-local/registry.json)" APA_PRESENT_PAYMENTS="$(or $(PAYMENTS),var/p2-local/payments.json)" APA_PRESENT_CREDENTIALS=1 APA_PRESENT_SCENARIOS=testdata/demo/scenarios-p2.json APA_PRESENT_PROFILE=testdata/policy/p2-local-profile.json sh scripts/demo/present.sh fake
 
 # present-testnet: P2 on the Base Sepolia testnet (docs/commercial-p2b.md 6):
 # SIGNER is the socket of the running apa-signer serve (on /opt, P2b-D2);

@@ -343,6 +343,12 @@ test("UX3: bridge layouts, rooms in messages, the scenes in order", () => {
   assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=cafe,data;town=1").town, true);
   assert.equal(b.town, false);
   assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=data;town=2"), null);
+  // transit (docs/commercial-transit.md): a build with the subway's paid gates says so after pan; an older one does not.
+  const g = A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=data;town=1;play=1;pan=1;gates=1;rooms=data:12x8");
+  assert.equal(g.gates, true);
+  assert.deepEqual(g.rooms, { data: { w: 12, h: 8 } }, "the rooms still read after it");
+  assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=data;town=1;play=1;pan=1;rooms=data:12x8").gates, false);
+  assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;town=1;play=1;pan=1;gates=2"), null);
   // The game (Aaron 10/29): after the town; only with it.
   assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=data;town=1;play=1").play, true);
   assert.equal(A.parseBridge("versions=1,2;customers=consumer-a;select=1;layouts=data;town=1;play=1").pan, false, "an older build: no tour");

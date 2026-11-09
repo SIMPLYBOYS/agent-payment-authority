@@ -110,6 +110,10 @@ const unity = new UnityHost($("unity-canvas"), (s, detail) => {
     if (venuePick) venuePick(detail);
     return;
   }
+  if (s === "gate") { // transit: the walked customer at a shut gate; /host decides
+    if (gatePick) gatePick(detail);
+    return;
+  }
   if (s === "rendered") {
     // detail: what the shop says it shows, for the generation last sent
     // (unity.js drops older reports, so a late one cannot bring back a
@@ -156,9 +160,11 @@ let sceneView = null;
 let replayMode = null;
 let scenePick = null;
 let venuePick = null;
+let gatePick = null;
 export function onSceneReport(fn) { sceneReport = fn; }
 export function onScenePick(fn) { scenePick = fn; }
 export function onVenuePick(fn) { venuePick = fn; }
+export function onGatePick(fn) { gatePick = fn; }
 export function setSceneView(fn) { sceneView = fn; }
 // UX3: the host page tells the evidence panel a task's scene ("" none).
 let venueOf = null;

@@ -18,6 +18,10 @@
 // venue is reported as "venue" with its layout. The page decides what a
 // click starts; the town only shows. V4 (docs/town-v2.md): "Pan" takes
 // {to: "tour"}: the town's camera from the west end to the east end and back.
+// Transit (docs/commercial-transit.md): "Gates" takes {on} from a page whose
+// Host takes subway fares; the walked customer stopped at a shut gate going in
+// is reported as "gate" with its station; "OpenGate" takes the page's answer
+// {station, open, code, amount}. The page decides; the gate only shows.
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -54,11 +58,12 @@ namespace APA
             view.Picked = Picked;
             bool hasTown = town != null && town.HasTown;
             if (hasTown) town.Clicked = layout => Report("venue", scene.Scene, 0, layout);
+            if (hasTown) town.Gated = station => Report("gate", scene.Scene, 0, station);
             var rooms = new List<string>(view.LayoutKeys);
             rooms.Sort(System.StringComparer.Ordinal);
             // rooms: each room's venue view in tiles (TownView.RoomView), so the page sizes the canvas to whole multiples of it.
             var sizes = rooms.ConvertAll(k => { var v = TownView.RoomView(view.SizeOf(k)); return k + ":" + Mathf.RoundToInt(v.x * 2f) / 2f + "x" + Mathf.RoundToInt(v.y); });
-            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers) + ";select=1;layouts=" + string.Join(",", rooms) + (hasTown ? ";town=1;play=1;pan=1" : "") + ";rooms=" + string.Join(",", sizes));
+            Report("bridge", 0, 0, "versions=1,2;customers=" + string.Join(",", ProjectionState.Consumers) + ";select=1;layouts=" + string.Join(",", rooms) + (hasTown ? ";town=1;play=1;pan=1" + (town.HasGates ? ";gates=1" : "") : "") + ";rooms=" + string.Join(",", sizes));
             Report("ready", -1, -1, view.UsingPlaceholders ? "placeholder" : "limezu");
         }
 
@@ -159,6 +164,28 @@ namespace APA
             try { m = JsonUtility.FromJson<PanMessage>(json); } catch (System.Exception) { }
             bool ok = m != null && m.to == "tour" && town != null && town.Tour();
             Report("pan", 0, 0, (m != null ? m.to ?? "" : "") + "|" + (ok ? "Applied" : "Invalid"));
+        }
+
+        [System.Serializable]
+        public class GatesMessage { public bool on; }
+        [System.Serializable]
+        public class GateMessage { public string station, code, amount; public bool open; }
+
+        public void Gates(string json)
+        {
+            GatesMessage m = null;
+            try { m = JsonUtility.FromJson<GatesMessage>(json); } catch (System.Exception) { }
+            bool ok = m != null && town != null && town.HasTown;
+            if (ok) town.Gates(m.on);
+            Report("gates", 0, 0, (m != null && m.on ? "on" : "off") + "|" + (ok ? "Applied" : "Invalid"));
+        }
+
+        public void OpenGate(string json)
+        {
+            GateMessage m = null;
+            try { m = JsonUtility.FromJson<GateMessage>(json); } catch (System.Exception) { }
+            bool ok = m != null && town != null && town.OpenGate(m.station, m.open, m.code, m.amount);
+            Report("opengate", 0, 0, (m != null ? m.station ?? "" : "") + "|" + (ok ? "Applied" : "Invalid"));
         }
 
         public void Steer(string json)

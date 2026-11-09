@@ -240,6 +240,19 @@ var products = []product{{
 	Requirement:  fixtureRequirement("30000"),
 	AssetDisplay: "0.03 test USDC",
 	content:      `{"canary":"APA-PROTECTED-post-stamps","body":"Synthetic fixture stamp codes. Seeing this in any response is a leak."}`,
+}, {
+	// docs/commercial-transit.md (Aaron 11/9): the subway's flat fare, paid as the customer walks in
+	// through a gate; the host asks for it (no Agent), under the customer's transit delegation.
+	Scene:        "subway",
+	ID:           "subway-fare",
+	Title:        "Subway ride, flat fare (fixture)",
+	Summary:      "Synthetic sample: one ride on the town's subway. No transit system is connected.",
+	MimeType:     "application/json",
+	Path:         "/scenes/subway/fare",
+	Query:        "ride=1",
+	Requirement:  fixtureRequirement("20000"),
+	AssetDisplay: "0.02 test USDC",
+	content:      `{"canary":"APA-PROTECTED-subway-fare","body":"Synthetic fixture ride record. Seeing this in any response is a leak."}`,
 }}
 
 // otherPayeeRequirement is a fixture requirement paying OtherPayee.

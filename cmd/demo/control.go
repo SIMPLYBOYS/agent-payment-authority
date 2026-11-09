@@ -52,12 +52,14 @@ type control struct {
 	st        *store.Store
 	runner    *cliRunner
 	bridge    *toolbridge.Server
+	shop      *toolbridge.Shop // the subway passes ask it for each ride's fare (transit.go)
 	scenarios map[string]*scenario
 	ctx       context.Context // ends with the host
 	wg        *sync.WaitGroup // the host waits for every run before closing the Store
 	out       io.Writer
 	active    map[string]*liveRun // runs whose process is running or stopping, by consumer
 	ended     map[string]*liveRun // runs that ended in this process, by run_id
+	transit   map[string]*transitPass // open subway passes, by consumer: no process, not runs' places (transit.go)
 	maxRuns   int                 // the effective --max-runs: running or stopping runs at most
 	consumers int                 // consumers in the scenario catalog
 	instance  string              // this host process: the timing records' host_instance
@@ -119,6 +121,7 @@ type runView struct {
 	RecordError   string `json:"record_error,omitempty"` // the run's end could not be recorded (code)
 	ToolCalls     *int   `json:"tool_calls,omitempty"`   // calls the host has answered so far, while running or stopping (a count only)
 	Timing        string `json:"timing,omitempty"`       // the run's timing record: written | not_written
+	Transit       bool   `json:"transit,omitempty"`      // a subway pass (transit.go): no process; live "open" while it takes fares
 }
 
 // view merges the stored run with what this process knows. c.mu is held,
@@ -129,6 +132,10 @@ func (c *control) view(r store.Run) runView {
 		Contract: r.ContractVersion, DelegationID: r.DelegationID, State: r.State, AcceptedAt: r.AcceptedAt, InterruptedAt: r.InterruptedAt, EndedAt: r.EndedAt}
 	if sc := c.scenarios[r.Scenario]; sc != nil && sc.digest == r.ScenarioDigest {
 		v.Scene = sceneName(sc.Scene) // the entry the run was accepted with, not a later edit
+		v.Transit = sc.Transit
+	}
+	if p := c.transit[r.ConsumerID]; p != nil && p.run.RunID == r.RunID {
+		v.Live = "open"
 	}
 	if r.State == "ended" {
 		started := r.TaskStarted
@@ -158,6 +165,8 @@ func (c *control) register(mux *http.ServeMux, a *api) {
 	mux.HandleFunc("POST /api/host/runs", func(w http.ResponseWriter, r *http.Request) { c.start(w, r, a) })
 	mux.HandleFunc("POST /api/host/runs/{run_id}/stop", func(w http.ResponseWriter, r *http.Request) { c.stop(w, r, a) })
 	mux.HandleFunc("POST /api/host/tasks/{task_id}/cancel", func(w http.ResponseWriter, r *http.Request) { c.cancelTask(w, r, a) })
+	mux.HandleFunc("POST /api/host/transit", func(w http.ResponseWriter, r *http.Request) { c.openTransit(w, r, a) })
+	mux.HandleFunc("POST /api/host/transit/fare", func(w http.ResponseWriter, r *http.Request) { c.fare(w, r, a) })
 }
 
 // reader admits the host (read only) and the operator.
@@ -265,6 +274,10 @@ func (c *control) start(w http.ResponseWriter, r *http.Request, a *api) {
 	sc := c.scenarios[req.Scenario]
 	if sc == nil {
 		fail(w, http.StatusBadRequest, "unknown_scenario")
+		return
+	}
+	if sc.Transit { // opened at a gate, not run (transit.go)
+		fail(w, http.StatusBadRequest, "transit_scenario")
 		return
 	}
 	// The catalog, not the request, says which contract the run gets; a
@@ -466,6 +479,9 @@ func (c *control) summary() map[string]any {
 	var scs []map[string]any
 	for _, sc := range c.scenarios {
 		m := map[string]any{"id": sc.ID, "consumer_id": sc.ConsumerID, "label": sc.Label, "scene": sceneName(sc.Scene)}
+		if sc.Transit {
+			m["transit"] = true
+		}
 		if d := sc.Delegation; d != nil { // apa.pay.v1: the terms the page shows before the consumer confirms
 			m["contract"] = sc.Contract
 			m["delegation"] = map[string]any{"purpose": d.Purpose, "task_budget": d.TaskBudget, "allow_max": d.AllowMax,

@@ -202,6 +202,26 @@ test("the host page's relay follows one audience window; reports only while it o
   assert.equal(show.hostThere, false);
 });
 
+test("transit: the gates go to the window's Unity while it has the scene; a shut gate it reaches comes back", () => {
+  const make = channels();
+  const got = [];
+  const relay = createRelay((k, d) => got.push([k, d]), { channel: make(), setTimer: () => {} });
+  const seen = [];
+  const show = listen({ own() {}, send2() {}, select2() {}, view() {}, gates: (on) => seen.push(["gates", on]), openGate: (m) => seen.push(["openGate", m]) },
+    { channel: make(), setTimer: () => {}, onLeave: () => {} });
+  relay.gates(true);
+  assert.deepEqual(seen, [], "not owned: nothing goes");
+  relay.own(true);
+  relay.gates(true);
+  relay.openGate({ station: "shop-street", open: true, code: "paid", amount: "0.02" });
+  assert.deepEqual(seen, [["gates", true], ["openGate", { station: "shop-street", open: true, code: "paid", amount: "0.02" }]]);
+  show.report("gate", "shop-street");
+  assert.deepEqual(got.at(-1), ["gate", "shop-street"]);
+  relay.own(false);
+  show.report("gate", "beach");
+  assert.notDeepEqual(got.at(-1), ["gate", "beach"], "not owned: a gate on the window is not this page's");
+});
+
 test("T4: the town's camera and walk go to the window's Unity while it has the scene; a door it reaches comes back", () => {
   const make = channels();
   const got = [];

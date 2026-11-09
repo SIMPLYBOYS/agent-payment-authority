@@ -40,7 +40,7 @@ type EventPayload struct {
 // here proves a physical device. internal/paycontract.Evidence maps them to
 // each event's evidence_mode and source.
 type RunConditions struct {
-	Agent         string `json:"agent"`         // live | fake
+	Agent         string `json:"agent"`         // live | fake | none (no Agent: the host asks, docs/commercial-transit.md)
 	Chain         string `json:"chain"`         // base_sepolia | local_anvil | none
 	Authenticator string `json:"authenticator"` // device | virtual | none
 }

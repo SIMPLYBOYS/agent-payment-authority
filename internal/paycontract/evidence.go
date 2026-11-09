@@ -13,7 +13,7 @@ import (
 type RunConditions = contracts.RunConditions
 
 var (
-	runAgents         = []string{"live", "fake"}
+	runAgents         = []string{"live", "fake", "none"} // none: no Agent, the host asks (the subway gate, docs/commercial-transit.md)
 	runChains         = []string{"base_sepolia", "local_anvil", "none"}
 	runAuthenticators = []string{"device", "virtual", "none"}
 )
@@ -21,7 +21,7 @@ var (
 // ValidRun checks r's values.
 func ValidRun(r RunConditions) error {
 	if !slices.Contains(runAgents, r.Agent) || !slices.Contains(runChains, r.Chain) || !slices.Contains(runAuthenticators, r.Authenticator) {
-		return fmt.Errorf("run conditions %+v: agent live|fake, chain base_sepolia|local_anvil|none, authenticator device|virtual|none", r)
+		return fmt.Errorf("run conditions %+v: agent live|fake|none, chain base_sepolia|local_anvil|none, authenticator device|virtual|none", r)
 	}
 	return nil
 }
@@ -36,7 +36,7 @@ func Evidence(r *RunConditions, e contracts.AuditEvent) (mode, source string, ok
 	if r == nil {
 		return "fixture", "host", true
 	}
-	agent := map[string]string{"live": "live", "fake": "fixture"}[r.Agent]
+	agent := map[string]string{"live": "live", "fake": "fixture", "none": "fixture"}[r.Agent]
 	auth := func() (string, string, bool) {
 		switch r.Authenticator {
 		case "device":
@@ -60,8 +60,11 @@ func Evidence(r *RunConditions, e contracts.AuditEvent) (mode, source string, ok
 	}
 	switch e.EventType {
 	case "PURCHASE_PROPOSED":
-		if r.Agent == "live" {
+		switch r.Agent {
+		case "live":
 			return "live", "live_cli", true
+		case "none": // the host proposed it for a gate the simulated customer walked through
+			return "fixture", "host", true
 		}
 		return "fixture", "fake_cli", true
 	case "TASK_STARTED", "POLICY_DECIDED", "TASK_CANCELLED", "TASK_TIMED_OUT", "CLI_EXITED":

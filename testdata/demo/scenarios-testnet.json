@@ -120,6 +120,36 @@
     "approval_deadline_seconds": 120,
     "valid_seconds": 1800
    }
+  },
+  {
+   "id": "transit-a",
+   "consumer_id": "consumer-a",
+   "scene": "subway",
+   "contract": "apa.pay.v2",
+   "transit": true,
+   "label": "地下鐵：進站自動扣款（每趟 0.02）",
+   "delegation": {
+    "purpose": "搭地下鐵時，進站自動付車資：每趟最多 0.02，總共最多 0.20（10 趟）",
+    "task_budget": "200000",
+    "allow_max": "20000",
+    "approval_deadline_seconds": 60,
+    "valid_seconds": 1800
+   }
+  },
+  {
+   "id": "transit-b",
+   "consumer_id": "consumer-b",
+   "scene": "subway",
+   "contract": "apa.pay.v2",
+   "transit": true,
+   "label": "地下鐵：進站自動扣款（每趟 0.02）",
+   "delegation": {
+    "purpose": "搭地下鐵時，進站自動付車資：每趟最多 0.02，總共最多 0.20（10 趟）",
+    "task_budget": "200000",
+    "allow_max": "20000",
+    "approval_deadline_seconds": 60,
+    "valid_seconds": 1800
+   }
   }
  ]
 }

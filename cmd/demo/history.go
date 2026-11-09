@@ -315,7 +315,8 @@ func registerReadOnly(mux *http.ServeMux, a *api) {
 			fail(w, http.StatusNotFound, "not_found")
 		}
 	})
-	for _, route := range []string{"POST /api/host/runs", "POST /api/host/runs/{run_id}/stop", "POST /api/host/tasks/{task_id}/cancel"} {
+	for _, route := range []string{"POST /api/host/runs", "POST /api/host/runs/{run_id}/stop", "POST /api/host/tasks/{task_id}/cancel",
+		"POST /api/host/transit", "POST /api/host/transit/fare"} {
 		mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
 			if _, ok := a.authorize(w, r); ok {
 				fail(w, http.StatusConflict, "history_read_only")

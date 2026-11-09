@@ -246,6 +246,28 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
     return g === gen ? { gen: g, requestId, error: "unreachable" } : null;
   }
 
+  // transit is one operator operation (docs/commercial-transit.md): opening a
+  // subway pass, or one ride's fare; one request ID, resent unchanged on a
+  // network error within its generation only (a resent fare is the same ride).
+  async function transit(path, body) {
+    if (!held) return null;
+    const g = gen;
+    const request = { ...body, request_id: newId() };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (g !== gen) return null;
+      try {
+        const r = await operatorCall(g, path, { body: request }, 8000);
+        return r && { gen: g, status: r.status, body: r.body };
+      } catch {
+        if (g !== gen) return null;
+        await wait(500);
+      }
+    }
+    return g === gen ? { gen: g, error: "unreachable" } : null;
+  }
+  const openTransit = (scenario, delegationId) => transit("/api/host/transit", { scenario, delegation_id: delegationId });
+  const fare = (consumer, station) => transit("/api/host/transit/fare", { consumer_id: consumer, station });
+
   // stopRun stops a running run's process; the reply counts only in its
   // own generation. No resend: a lost reply shows in the runs list.
   async function stopRun(runId) {
@@ -382,7 +404,7 @@ export function createHostCreds({ call, onChange, newId = () => crypto.randomUUI
   const resolve = (sessionId, intentHash, decision) => once("/api/sim/approvals/" + encodeURIComponent(sessionId), { intent_hash: intentHash, decision });
 
   return {
-    load, pair, clearAll, manual, unauthorized, readiness, startRun, stopRun, cancelTask, refund, hostRead, runs,
+    load, pair, clearAll, manual, unauthorized, readiness, startRun, stopRun, cancelTask, refund, hostRead, runs, openTransit, fare,
     simulate, approvals, confirmDelegation, resolve,
     viewerToken: (consumer) => (held ? held.viewers.get(consumer) || null : null),
     get gen() { return gen; },

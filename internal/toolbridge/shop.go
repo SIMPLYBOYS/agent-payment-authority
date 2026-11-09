@@ -115,18 +115,53 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 	// request_purchase. One logical purchase per task and product, with
 	// stable identifiers: if the Store already has it, report it and submit
 	// nothing; a retry never mints a new request or nonce.
-	po := PurchaseOrderID(b.Session.TaskID, p.ID)
+	v, replay, code := s.request(ctx, b, p, PurchaseOrderID(b.Session.TaskID, p.ID))
+	if code != "" {
+		return fail(code, refusalText[code])
+	}
+	rec.Outcome = v.Decision.PolicyVerdict
+	return textResult(projection(p.ID, v, replay), false), rec
+}
+
+// refusalText is what the model is told for request's refusal codes; any
+// other code is the Store's.
+var refusalText = map[string]string{
+	"QUOTE_REFUSED":    "the shop quote failed a host check",
+	"PURCHASE_REFUSED": "the purchase could not be assembled from trusted data",
+	"RUN_NOT_ACTIVE":   "this run has ended",
+	"RUN_NOT_READY":    "the host has not finished starting this run",
+}
+
+// Fare is the host's own request for one ride's fare (docs/commercial-transit.md): the run has no Agent;
+// the host asks when the customer walks in through a subway gate. Each ride is its own purchase
+// (po-<task>-<product>-<ride>); asking again for a ride reports it. code is "" or a refusal code.
+func (s *Shop) Fare(ctx context.Context, b *Binding, product string, ride int) (v store.PurchaseView, replay bool, code string) {
+	p, ok := s.Products[product]
+	if !ok || p.Scene != b.Scene || ride < 1 {
+		return v, false, "UNKNOWN_PRODUCT"
+	}
+	return s.request(ctx, b, p, fmt.Sprintf("%s-%d", PurchaseOrderID(b.Session.TaskID, p.ID), ride))
+}
+
+// request is one purchase of p as po for b's task: the stored one if the Store has it, else the shop's
+// quote assembled and submitted. code is "" or a refusal code (refusalText's, or the Store's).
+func (s *Shop) request(ctx context.Context, b *Binding, p Product, po string) (store.PurchaseView, bool, string) {
+	refused := func(code string) (store.PurchaseView, bool, string) {
+		if b.Stopped() { // the run stopped mid-call: that, not the symptom, is the outcome
+			code = "RUN_NOT_ACTIVE"
+		}
+		return store.PurchaseView{}, false, code
+	}
 	// A failed read (the task may not exist yet) is no stored purchase: the
 	// Store decides below, as before. An apa.pay.v1 task read as "" builds an
 	// M1 order, which its Submit refuses (CONTRACT_VERSION_MISMATCH).
 	task, _ := s.Store.Task(b.Session)
 	if v, ok := stored(task, po); ok {
-		rec.Outcome = v.Decision.PolicyVerdict
-		return textResult(projection(p.ID, v, true), false), rec
+		return v, true, ""
 	}
 	quote, req, err := s.quote(ctx, p)
 	if err != nil {
-		return fail("QUOTE_REFUSED", "the shop quote failed a host check")
+		return refused("QUOTE_REFUSED")
 	}
 	// The stored task's contract version picks the purchase to build; the
 	// model and the request never name it.
@@ -137,7 +172,7 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 		order, err = s.assemble(b, p, po, quote, req)
 	}
 	if err != nil {
-		return fail("PURCHASE_REFUSED", "the purchase could not be assembled from trusted data")
+		return refused("PURCHASE_REFUSED")
 	}
 	raw, _ := json.Marshal(order)
 	var res store.Result
@@ -149,17 +184,15 @@ func (s *Shop) Call(ctx context.Context, b *Binding, tool, product string) (Tool
 		}
 		return err
 	})
-	if errors.Is(err, ErrRunEnded) {
-		return fail("RUN_NOT_ACTIVE", "this run has ended")
+	switch {
+	case errors.Is(err, ErrRunEnded):
+		return refused("RUN_NOT_ACTIVE")
+	case errors.Is(err, ErrNotReady):
+		return refused("RUN_NOT_READY")
+	case err != nil:
+		return refused(store.Code(err))
 	}
-	if errors.Is(err, ErrNotReady) {
-		return fail("RUN_NOT_READY", "the host has not finished starting this run")
-	}
-	if err != nil {
-		return fail(store.Code(err), "the host refused the purchase request")
-	}
-	rec.Outcome = res.Purchase.Decision.PolicyVerdict
-	return textResult(projection(p.ID, res.Purchase, res.Replay), false), rec
+	return res.Purchase, res.Replay, ""
 }
 
 // submitV2 is an apa.pay.v2 purchase inside Commit's lock (design 7):
@@ -337,9 +370,13 @@ func (s *Shop) assemblePay(b *Binding, p Product, po string, q contracts.Quote, 
 		window = 60
 	}
 	label := map[string]string{paycontract.Version: "apa-pay-v1", paycontract.V2: "apa-pay-v2"}[version] // v1's as it always was
-	nonce := sha256.Sum256([]byte(label + "/eip3009-nonce\x00" + b.Session.TaskID + "\x00" + p.ID))
+	key, rid := b.Session.TaskID+"\x00"+p.ID, "req-"+p.ID
+	if ride, ok := strings.CutPrefix(po, PurchaseOrderID(b.Session.TaskID, p.ID)+"-"); ok { // a ride (Fare): its own request and nonce
+		key, rid = key+"\x00"+ride, rid+"-"+ride
+	}
+	nonce := sha256.Sum256([]byte(label + "/eip3009-nonce\x00" + key))
 	order := paycontract.PurchaseOrder{
-		Version: version, RequestID: "req-" + p.ID, Quote: q,
+		Version: version, RequestID: rid, Quote: q,
 		Intent: paycontract.Intent{
 			Version: version, Domain: sp.Domain,
 			ConsumerID: b.Session.ConsumerID, AgentID: b.Session.AgentID, WalletID: b.WalletID, TaskID: b.Session.TaskID,

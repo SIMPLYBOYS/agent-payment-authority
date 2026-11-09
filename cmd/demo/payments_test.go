@@ -246,7 +246,7 @@ func TestP2ShippedCatalog(t *testing.T) {
 	scs, err := loadScenarios("testdata/demo/scenarios-p2.json", reg, regCfg, false, false)
 	// The family (docs/story.md): five venues (the post office and the hotel, docs/commercial-post-hotel.md), a parent
 	// and a child, and the fooled agent; apa.pay.v2.
-	if err != nil || len(scs) != 11 || scs["books-fooled-a"].Scene != "books" || scs["cafe-a"].Scene != "cafe" || scs["books-b"].Scene != "books" || scs["cafe-b"].version() != paycontract.V2 {
+	if err != nil || len(scs) != 13 || scs["books-fooled-a"].Scene != "books" || scs["cafe-a"].Scene != "cafe" || scs["books-b"].Scene != "books" || scs["cafe-b"].version() != paycontract.V2 {
 		t.Fatalf("catalog: %v %v", scs, err)
 	}
 	// The shop's prices against the delegations' allow_max, by the product each script buys (Aaron 10/27:
@@ -267,6 +267,12 @@ func TestP2ShippedCatalog(t *testing.T) {
 	buys := regexp.MustCompile(`"request_purchase","args":\{"product_id":"([a-z0-9-]+)"\}`)
 	bought := map[string]string{}
 	for id, sc := range scs {
+		if sc.Transit { // the subway passes (docs/commercial-transit.md): the fare, an Allow under each, no script
+			if allow, _ := sc.Delegation.AllowMax.Units(); sc.Scene != "subway" || scene["subway-fare"] != "subway" || price["subway-fare"] > allow {
+				t.Fatalf("%s: the fare %d is not an Allow under %d", id, price["subway-fare"], allow)
+			}
+			continue
+		}
 		raw, err := os.ReadFile(sc.Scenario)
 		m := buys.FindSubmatch(raw)
 		allow, aerr := sc.Delegation.AllowMax.Units()
@@ -289,6 +295,11 @@ func TestP2ShippedCatalog(t *testing.T) {
 	raw, _ := os.ReadFile("testdata/policy/m1-demo-profile.json")
 	if p, err := policy.LoadProfile(raw); err != nil || checkDelegations(scs, p) != nil {
 		t.Fatalf("profile: %v", err)
+	}
+	// make present-p2's profile: the same with the Signer's rate limit (docs/commercial-transit.md R3).
+	raw, _ = os.ReadFile("testdata/policy/p2-local-profile.json")
+	if p, err := policy.LoadProfile(raw); err != nil || checkDelegations(scs, p) != nil || p.Velocity == nil || p.Velocity.Max != 5 || p.Velocity.WindowSeconds != 600 {
+		t.Fatalf("present-p2's profile: %v", err)
 	}
 }
 
@@ -560,7 +571,7 @@ func TestTestnetShippedCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	scs, err := loadScenarios("testdata/demo/scenarios-testnet.json", reg, regCfg, false, false)
-	if err != nil || len(scs) != 8 { // the family's seven (docs/story.md) and test402
+	if err != nil || len(scs) != 10 || !scs["transit-a"].Transit { // the family's seven (docs/story.md), test402 and the subway passes
 		t.Fatalf("catalog: %v %v", scs, err)
 	}
 	x := scs["t402-b"]

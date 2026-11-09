@@ -34,7 +34,7 @@
 // action. An approval leaves a simulated grant and enables no payment.
 
 import { nextModeSeq, confirmMode, setStatus, forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, currentConsumer, setAlert,
-  shop, onSceneReport, onScenePick, onVenuePick, setSceneView, setVenueOf, onReplayMode, refreshPanels } from "./app.js";
+  shop, onSceneReport, onScenePick, onVenuePick, onGatePick, setSceneView, setVenueOf, onReplayMode, refreshPanels } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
 import { createScene } from "./scene.js";
 import { createRelay } from "./showlink.js";
@@ -100,6 +100,7 @@ const relay = createRelay((kind, d) => {
   else if (kind === "select2") pick(d);
   else if (kind === "show") useShow(!!(d && d.ready && d.supports2));
   else if (kind === "venue") venuePicked(d);
+  else if (kind === "gate") gateReached(d);
 });
 // town (T4): where the town's camera and walk go: the audience window's Unity while it has the scene, else this page's.
 const town = () => (sceneUnity.target === relay ? relay : shop());
@@ -223,7 +224,8 @@ setSceneView((c) => scene.view(c));
 // (UX2-D3); the customers' cards and the shop follow it. null until the
 // catalog is known; only a catalog of more than one scene offers a choice.
 let venue = null;
-const allScenarios = () => (lastReady && lastReady.status && lastReady.status.runs && lastReady.status.runs.scenarios) || [];
+// The venues' scenarios: a subway pass (transit) is opened at a gate, never started from a venue (docs/commercial-transit.md).
+const allScenarios = () => ((lastReady && lastReady.status && lastReady.status.runs && lastReady.status.runs.scenarios) || []).filter((x) => !x.transit);
 const multiVenue = () => A.venues(allScenarios()).length > 1;
 // runVenue: a task's scene: the catalog's only one ("" for the data shop
 // alone, as before UX3), else its run's; null when there is a choice and
@@ -735,8 +737,56 @@ function sendPlay() {
   held.clear();
   steered = "0,0";
   town().play(want);
+  town().gates(!!transitOf(want)); // a walked customer with a subway pass entry: going in is paid (below)
 }
 for (const b of document.querySelectorAll("#present-play button")) b.addEventListener("click", () => { playAs = b.dataset.play; renderPresent(); });
+// ---- 地下鐵閘門 (docs/commercial-transit.md, Aaron 11/9: 通過閘門時自動扣款) ----
+// While the page walks a customer whose catalog has a subway pass entry, the gates are on: at a shut gate going in
+// Unity reports its station; the page asks the Host for the ride's fare, first opening the pass (the customer confirms
+// its delegation, on the device or simulated, as a venue's) when there is none, and answers the gate: open on an
+// Allow, else shut with the reason's code. The Host decides; Unity only shows; this page only carries the answer.
+const transitOf = (c) => (c && ((lastReady && lastReady.status && lastReady.status.runs && lastReady.status.runs.scenarios) || []).find((x) => x.transit && x.consumer_id === c)) || null;
+let gateBusy = false;
+async function gateReached(station) {
+  const c = sentPlay, sc = transitOf(c);
+  const answer = (open, code, amount) => town().openGate({ station, open, code, amount: amount || "" });
+  if (!sc) return answer(false, "error");
+  if (gateBusy) return;
+  gateBusy = true;
+  const g = creds.gen;
+  try {
+    let r = await creds.fare(c, station);
+    if (g !== creds.gen || !r) return;
+    if (r.status === 409 && r.body && r.body.error === "no_transit_pass") {
+      answer(false, "opening");
+      setRunStatus("客人 " + short(c) + "：開通捷運自動扣款（" + ((sc.delegation && sc.delegation.purpose) || sc.label) + "），請確認委託…", "busy");
+      const d = await asCustomer(sc, g);
+      if (g !== creds.gen || !d) return;
+      if (d.fail) { answer(false, "declined"); setRunStatus("客人 " + short(c) + " 的捷運自動扣款沒有開通：" + d.fail, "error"); return; }
+      const o = await creds.openTransit(sc.id, d.id);
+      if (g !== creds.gen || !o) return;
+      if (o.error || !(o.status === 201 || o.status === 200)) {
+        answer(false, "error");
+        setRunStatus("捷運自動扣款沒有開通（" + (o.error ? "沒有收到回覆" : (o.body && (ERRORS[o.body.error] || o.body.error)) || o.status) + "）", "error");
+        return;
+      }
+      r = await creds.fare(c, station);
+      if (g !== creds.gen || !r) return;
+    }
+    const b = r.body || {};
+    if (r.status === 200 && b.decision === "Allow") {
+      answer(true, "paid", units(b.amount));
+      setRunStatus("客人 " + short(c) + "：進站自動扣款 " + units(b.amount) + " test USDC（第 " + b.ride + " 趟，Policy 核准；鏈上結算在背景進行）", "ok");
+    } else if (r.status === 200) {
+      answer(false, b.reason);
+      setRunStatus("客人 " + short(c) + " 進站扣款被擋下（" + b.reason + "）：這張捷運自動扣款已停用，下一次進站要重新開通", "error");
+    } else {
+      answer(false, "error");
+      setRunStatus("進站扣款沒有完成（" + (r.error ? "沒有收到回覆" : (b.code || b.error || r.status)) + "）", "error");
+    }
+  } finally { gateBusy = false; }
+}
+onGatePick((s) => { if (sceneUnity.target !== relay) gateReached(s); });
 // The keys: arrows or WASD while a customer is walked; never while typing in a field.
 const KEYS = { ArrowUp: [0, 1], KeyW: [0, 1], ArrowDown: [0, -1], KeyS: [0, -1], ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0] };
 function steer() {
