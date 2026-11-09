@@ -171,7 +171,7 @@ public class TownTests
         for (float end = Time.realtimeSinceStartup + 0.6f; Time.realtimeSinceStartup < end;) yield return null;
         var after = town.WalkerPositions.ToList();
         Assert.IsTrue(before.Zip(after, (a, b) => (a - b).magnitude > 0.05f).Any(m => m), "someone walked");
-        foreach (var p in after) Assert.IsTrue((p.x >= -59f && p.x <= 143f || p.x >= 176f && p.x <= 256f || p.x >= 268f && p.x <= 362f) && p.y >= 0f && p.y <= 48f, "on the map: " + p); // -59 to 143: the hospital and the fire station; 176 to 256: the beach; 268 to 362: the two stations (Aaron 11/8)
+        foreach (var p in after) Assert.IsTrue((p.x >= -59f && p.x <= 143f || p.x >= 400f && p.x <= 480f || p.x >= 800f && p.x <= 842f || p.x >= 1100f && p.x <= 1142f) && p.y >= 0f && p.y <= 48f, "on the map: " + p); // -59 to 143: the hospital and the fire station; then, far apart (Aaron 11/9: one part alone on a wide screen), the beach and the two stations
     }
 
     // Aaron 10/27: a clerk and other customers in each shop (illustrative): only that shop's, and never under A or B, who
@@ -484,23 +484,25 @@ public class TownTests
             foreach (var (to, stairs, train, part) in legs)
             {
                 int left = town.Departures, came = town.Arrivals;
-                float off = 0f;
+                float off = 0f, cover = 1f;
                 Assert.IsTrue(town.GoTo(to, stairs ? TownView.Subway : null), "a way to " + to);
                 yield return Until(() =>
                 {
-                    if (train >= 0) off = Mathf.Max(off, town.TrainShift(train));
+                    if (train >= 0) { off = Mathf.Max(off, town.TrainShift(train)); cover = Mathf.Min(cover, town.TrainCover(train)); }
                     return In(part, town.PlayerAt.x) && !town.Moving && !town.Riding;
                 }, 40f, _ => { });
                 Assert.IsTrue(In(part, town.PlayerAt.x), "came into " + part + ": " + town.PlayerAt);
                 Assert.IsTrue(In(part, town.LookX), "the view in that part: " + town.LookX);
                 if (train < 0) continue;
                 var other = t.trains[train].to;
+                Assert.Less(cover, 0.05f, "its outside faded as the customer came to its door (Aaron 11/9)");
                 Assert.Greater(off, 5f, "the train pulled off with the customer in it");
                 Assert.AreEqual(left + 1, town.Departures, "it left once");
                 Assert.AreEqual(came + 1, town.Arrivals, "the other came in once");
                 Assert.AreEqual(0f, town.TrainShift(train), "back at its platform");
                 Assert.AreEqual(0f, town.TrainShift(other), "the other stopped at its platform");
                 Assert.IsTrue(t.trains[other].inside.Holds(town.PlayerAt), "in the other train's aisle: " + town.PlayerAt);
+                StringAssert.StartsWith(t.trains[other].name, town.Caption, "its station's name shown as it came in (Aaron 11/9)");
             }
         }
         finally { Time.timeScale = scale; }

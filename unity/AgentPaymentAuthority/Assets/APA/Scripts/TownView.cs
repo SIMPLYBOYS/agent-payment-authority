@@ -40,11 +40,14 @@ namespace APA
         public Vector2[] apart = new Vector2[0];
         public Stairs[] subway = new Stairs[0];
         [System.Serializable] public class Stairs { public Vector2 at, step; }
-        // A train at a platform (Aaron 11/8): its cars west to east from x, bottom y, shown open (LimeZu's cut-away cars,
-        // their door on the platform's side); inside: where one stands in it (its aisle, a walk area too); to: the train
-        // it rides to (the other station's); from: the west tunnel's mouth, whence it comes in (TownView.Ride).
+        // A train at a platform (Aaron 11/8): its cars west to east from x, bottom y, each an outside over the same car
+        // cut away (open: LimeZu's cut-away cars, their door on the platform's side); the outside fades only while the
+        // walked customer is near its door or in it (Aaron 11/9: so one sees where to get in). inside: where one stands
+        // in it (its aisle, a walk area too); to: the train it rides to (the other station's); from: the west tunnel's
+        // mouth, whence it comes in (TownView.Ride).
         public Train[] trains = new Train[0];
-        [System.Serializable] public class Train { public float x, y, from; public string[] cars = new string[0]; public Area inside = new Area(); public int to = -1; }
+        // name, en: its station's name, shown as it comes in (Aaron 11/9).
+        [System.Serializable] public class Train { public float x, y, from; public string name, en; public string[] cars = new string[0], open = new string[0]; public Area inside = new Area(); public int to = -1; }
 
         // frames: the file is that many frames side by side (Aaron 10/28: a fountain that plays, doors that open).
         [System.Serializable] public class Piece { public string key; public float x, y, w, h; public int frames; }
@@ -152,12 +155,16 @@ namespace APA
                 var s = new TrainState { t = tr, root = new GameObject("train").transform };
                 s.root.SetParent(transform, false);
                 float x = tr.x;
-                foreach (var car in tr.cars)
+                var outs = new List<SpriteRenderer>();
+                for (int i = 0; i < tr.cars.Length; i++)
                 {
-                    float w = Width(car);
-                    Piece(s.root, new Town.Piece { key = car, x = x + w / 2f, y = tr.y }, Order(tr.y) - 1, new Vector2(0.5f, 0f));
+                    float w = Width(tr.cars[i]);
+                    if (i < tr.open.Length) Piece(s.root, new Town.Piece { key = tr.open[i], x = x + w / 2f, y = tr.y }, Order(tr.y) - 2, new Vector2(0.5f, 0f));
+                    var r = Piece(s.root, new Town.Piece { key = tr.cars[i], x = x + w / 2f, y = tr.y }, Order(tr.y) - 1, new Vector2(0.5f, 0f));
+                    if (r != null) outs.Add(r);
                     x += w;
                 }
+                s.outside = outs.ToArray();
                 s.length = x - tr.x;
                 trains.Add(s);
             }
@@ -1026,13 +1033,14 @@ namespace APA
         }
 
         // ---- the trains (Aaron 11/8: the customer walks into the car and waits for it to start; it pulls in and out) ----
-        class TrainState { public Town.Train t; public Transform root; public float length, shift; }
+        class TrainState { public Town.Train t; public Transform root; public SpriteRenderer[] outside = new SpriteRenderer[0]; public float length, shift, cover = 1f; }
         readonly List<TrainState> trains = new List<TrainState>();
         int riding = -1, boarded = -1, hopTrain = -1; // the train the customer rides; the one it stands in, waiting; the one it comes in on
         bool arriving;                                // riding in (else out)
         float rideT, boardT;                          // seconds riding (this way); standing in it
-        public const float DoorsClose = 3f, Leave = 2.6f, Pull = 8f, Arrive = 3f; // seconds in it, then out; tiles/s/s; seconds coming in
+        public const float DoorsClose = 3f, Leave = 2.6f, Pull = 8f, Arrive = 3f, RevealReach = 3f; // seconds in it, then out; tiles/s/s; seconds coming in; tiles from its door
         public float TrainShift(int i) => trains[i].shift; // tests: how far it is off its platform (- coming in, + going)
+        public float TrainCover(int i) => trains[i].cover; // tests: its outside's opacity
         public bool Riding => riding >= 0;                 // tests
         public int Departures { get; private set; }        // tests
         public int Arrivals { get; private set; }          // tests
@@ -1043,6 +1051,18 @@ namespace APA
         // at the platform; off it they walk.
         void Ride(float dt)
         {
+            // Each train's outside: faded while the walked customer is near its door, in it, or riding it; else whole.
+            for (int i = 0; i < trains.Count; i++)
+            {
+                var s = trains[i];
+                var door = new Vector2(s.t.inside.x + 0.9f + s.shift, s.t.y);
+                bool near = Player != "" && shown == "town" && (riding == i || boarded == i || (PlayerAt - door).magnitude < RevealReach
+                    || PlayerAt.x >= s.t.x + s.shift && PlayerAt.x <= s.t.x + s.shift + s.length && PlayerAt.y >= s.t.y && PlayerAt.y <= s.t.y + 4f);
+                float c = Mathf.MoveTowards(s.cover, near ? 0f : 1f, 4f * dt);
+                if (c == s.cover) continue;
+                s.cover = c;
+                foreach (var r in s.outside) r.color = new Color(1f, 1f, 1f, c);
+            }
             if (Player == "" || shown != "town") return;
             if (riding < 0)
             {
@@ -1091,7 +1111,46 @@ namespace APA
             body.sortingOrder = Order(b.t.y) + 1;
             riding = hopTrain; hopTrain = -1; arriving = true; rideT = 0f;
             lookX = b.t.from; lookY = float.NaN;
+            ShowCaption(b.t.name, b.t.en);
             return new Vector2(b.t.from, b.t.y + 2f);
+        }
+
+        // ---- the station's name as the train comes in (Aaron 11/9): a plate at the top of the view, sliding down into
+        // place and fading in, held while the train slows to a stop, then fading out ----
+        Transform captionRoot;
+        TextMesh captionText;
+        SpriteRenderer captionPlate;
+        float captionT = -1f; // seconds since shown (real time); -1 none
+        public const float CaptionIn = 0.5f, CaptionHold = 3.5f, CaptionOut = 0.7f;
+        public string Caption => captionT >= 0f && captionText != null ? captionText.text : ""; // tests
+
+        void ShowCaption(string name, string en)
+        {
+            if (string.IsNullOrEmpty(name)) return;
+            if (captionRoot == null)
+            {
+                captionRoot = new GameObject("caption").transform;
+                captionRoot.SetParent(transform, false);
+                captionText = Words(captionRoot, "caption", Vector2.zero, 0.16f, Color.white, Transition + 10);
+                captionPlate = Plate(captionRoot, captionText, Rounded(), new Color(0.11f, 0.1f, 0.13f, 0.85f), Transition + 10);
+            }
+            captionText.text = string.IsNullOrEmpty(en) ? name : name + "\n<size=26>" + en + "</size>";
+            captionT = 0f;
+            captionRoot.gameObject.SetActive(true);
+        }
+
+        void Captioning(float dt)
+        {
+            if (captionT < 0f || captionRoot == null || cam == null) return;
+            captionT += dt;
+            float a = captionT < CaptionIn ? captionT / CaptionIn : captionT < CaptionIn + CaptionHold ? 1f : 1f - (captionT - CaptionIn - CaptionHold) / CaptionOut;
+            if (a <= 0f && captionT > CaptionIn || shown != "town") { captionT = -1f; captionRoot.gameObject.SetActive(false); return; }
+            var s = Safe();
+            var top = cam.ScreenToWorldPoint(new Vector3(s.center.x, s.yMax - s.height * 0.14f, 0f));
+            float drop = (1f - Mathf.Clamp01(captionT / CaptionIn)) * 0.6f;
+            captionRoot.position = new Vector3(top.x, top.y + drop, 0f);
+            var c = captionText.color; c.a = a; captionText.color = c;
+            var pc = captionPlate.color; pc.a = 0.85f * a; captionPlate.color = pc;
         }
 
         void Halt() // another customer, or none: no ride half done; the trains back at their platforms
@@ -1430,6 +1489,7 @@ namespace APA
             }
             if (shown == "town" && phase == 0 && town != null) Follow(Time.unscaledDeltaTime);
             if (stands.Count > 0) PlaceStands();
+            Captioning(Time.unscaledDeltaTime);
             foreach (var (plate, text) in plates)
             {
                 var b = text.GetComponent<MeshRenderer>().bounds;
