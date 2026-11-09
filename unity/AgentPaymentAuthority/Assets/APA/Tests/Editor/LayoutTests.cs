@@ -308,4 +308,17 @@ public class LayoutTests
         var names = All().Select(x => x.name).ToList();
         foreach (var s in scenes) CollectionAssert.Contains(names, s);
     }
+
+    // A timed loop (Aaron 11/9, the billboards): each frame for its time, the times cycled over the frames, round again.
+    [Test]
+    public void TimedLoopsHoldEachFrameForItsTime()
+    {
+        var times = new[] { 4f, 0.1f };
+        Assert.AreEqual(0, TownView.FrameAt(3.9f, 4, times), "the ad holds");
+        Assert.AreEqual(1, TownView.FrameAt(4.05f, 4, times), "then flicks");
+        Assert.AreEqual(2, TownView.FrameAt(4.15f, 4, times), "the next holds");
+        Assert.AreEqual(3, TownView.FrameAt(8.15f, 4, times));
+        Assert.AreEqual(0, TownView.FrameAt(8.25f, 4, times), "round again");
+        Assert.AreEqual(3, TownView.FrameAt(0.4f, 6, null), "untimed: 8 a second");
+    }
 }

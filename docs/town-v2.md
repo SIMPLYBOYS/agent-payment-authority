@@ -287,6 +287,7 @@ Aaron 11/7（附上 LimeZu 餐車範例的截圖）：「希望可以把街道�
   - **海灘**（`21_Beach` 主題）：由上到下是海（`Grass_Water_1_22`，浮球、礁石、東端礁石上的燈塔）、岸線（自動圖塊 8 的一排浪花）、沙灘（自動圖塊 9；陽傘、毛巾、沙堡、排球網、海星、海鷗、坐著的人）、步道（路燈、指示牌、Beach 招牌、來回走的人）、步道南側（地下鐵出口、船形酒吧、竹子吧台、小舞台與喇叭、棕櫚樹）。
   - **模擬圖**：`mock.py` 以前把有 `w` 的道具置中畫，Unity 是從左下角鋪；改成跟 Unity 一樣（院子的欄杆、排球網在模擬圖上才對得上）。
   - **測試**：`LayoutTests` 檢查樓梯成對、樓梯口與台階都在走道上、台階在樓梯口的範圍外、town 的樓梯從起點走得到；PlayMode 的 `TheSubwayGoesToTheBeach` 讓客人走完一趟：咖啡茶亭下樓 → 咖啡茶亭站 → 走進車廂、列車開走 → 海灘站的列車進站停好 → 走出車廂、上樓到海灘 → 再一路回到咖啡茶亭；每段搭車都檢查列車有載著客人開走、另一台有進站停好，每一段都檢查出來的位置與相機所在的區。
+- **看板輪播（11/9）**：Aaron：「可以參考 limezu 的範例，這個大型看板是可以動態變換內容的」。LimeZu 的動畫看板（`Animated_sheets_32x32/Billboard_32x32_1.png`）是漢堡與黃車兩則廣告，中間百葉翻過去、空白一下、再翻開。`scripts/unity/billboards.py` 從它量出每一格每個像素被百葉蓋住多少，套到單張看板的廣告上（`Billboard_2`～`8`：三種漢堡、紅綠黃三台車、特賣），做成兩張 24 格的輪播：西邊那塊紅車 → 漢堡 → 特賣，東邊那塊特賣 → 綠車 → 漢堡（`_cut/x-billboard-a.png`、`x-billboard-b.png`，不進 git）。道具多了 `times`（每格停幾秒，循環套用）：廣告停 4 秒，百葉每格 0.1 秒、空白 0.3 秒；兩塊依位置錯開，不會同時翻。`LayoutTests.TimedLoopsHoldEachFrameForItsTime` 檢查每格停的時間。
 - **車流**：道路變長，加了 3 輛車（東向灰車、西向綠車與橘車），畫面裡的車不會變少。
 - **測試**：`TheCameraPansTheStreet`、`PassersByWalk` 的地圖兩端改成 -59 與 143；`LayoutTests` 的走道範圍以 `x0` 為西界。
 - 模擬圖：`LIMEZU_DIR=var/limezu-both python3 scripts/unity/mock.py OUT town:-76,0,159,48`。

@@ -253,8 +253,9 @@ x-hardware	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/4
 x-post-1	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/22_Post_Office_Singles_32x32/22_Post_Office_32x32_Building_1.png	-
 x-terraced-1	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/24_Additional_Houses_Singles_32x32/24_Additional_Houses_Terraced_House_1_32x32.png	-
 x-bus-stop	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Bus_Stop_1.png	-
-x-billboard-5	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Billboard_5.png	-
-x-billboard-8	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Billboard_8.png	-
+# the billboards turning through their ads (scripts/unity/billboards.py, Aaron 11/9), 24 frames each
+x-billboard-a	_cut/x-billboard-a.png	-
+x-billboard-b	_cut/x-billboard-b.png	-
 # town v2, the east screen (docs/town-v2.md V3, Aaron 11/2 "這版可以"): the hotel, a crossroads, the gas station, a car park, a camping entrance
 x-hotel	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/12_Hotel_and_Hospital_Singles_32x32/ME_Singles_Hotel_and_Hospital_32x32_Hotel_1.png	-
 x-hotel-sign	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/12_Hotel_and_Hospital_Singles_32x32/ME_Singles_Hotel_and_Hospital_32x32_Hotel_Signboard_1.png	-

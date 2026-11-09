@@ -50,7 +50,8 @@ namespace APA
         [System.Serializable] public class Train { public float x, y, from; public string name, en; public string[] cars = new string[0], open = new string[0]; public Area inside = new Area(); public int to = -1; }
 
         // frames: the file is that many frames side by side (Aaron 10/28: a fountain that plays, doors that open).
-        [System.Serializable] public class Piece { public string key; public float x, y, w, h; public int frames; }
+        // times: seconds each frame shows, over and over (Aaron 11/9: a billboard's ad holds, its louvres flick); none: 8 a second.
+        [System.Serializable] public class Piece { public string key; public float x, y, w, h; public int frames; public float[] times; }
         // A venue: the room (layout) it holds, its number and name on the
         // map, its outside, and its door (from its origin): where the
         // transition closes and A and B stand.
@@ -147,7 +148,7 @@ namespace APA
             foreach (var p in town.props)
             {
                 var r = Piece(transform, p, Order(p.y), new Vector2(0.5f, 0f));
-                if (r != null && p.frames > 1) loops.Add((r, Frames(p.key, p.frames, new Vector2(0.5f, 0f))));
+                if (r != null && p.frames > 1) loops.Add((r, Frames(p.key, p.frames, new Vector2(0.5f, 0f)), p.times));
             }
             trains.Clear();
             foreach (var tr in town.trains)
@@ -271,7 +272,18 @@ namespace APA
         }
 
         // ---- what plays: a prop's frames in a loop; a door opening for whoever goes in or comes out ----
-        readonly List<(SpriteRenderer r, Sprite[] frames)> loops = new List<(SpriteRenderer, Sprite[])>();
+        readonly List<(SpriteRenderer r, Sprite[] frames, float[] times)> loops = new List<(SpriteRenderer, Sprite[], float[])>();
+
+        // The frame of n a loop shows at time t: 8 a second, or each for its times (cycled over the frames).
+        public static int FrameAt(float t, int n, float[] times)
+        {
+            if (times == null || times.Length == 0) return (int)(t * 8f) % n;
+            float total = 0f;
+            for (int i = 0; i < n; i++) total += times[i % times.Length];
+            t = Mathf.Repeat(t, total);
+            for (int i = 0; i < n; i++) if ((t -= times[i % times.Length]) < 0f) return i;
+            return n - 1;
+        }
         class DoorState { public SpriteRenderer r; public Sprite[] frames; public float open; }
         readonly Dictionary<string, DoorState> doors = new Dictionary<string, DoorState>();
         public int DoorFrame(string layout) => doors.TryGetValue(layout, out var d) ? System.Array.IndexOf(d.frames, d.r.sprite) : -1; // tests
@@ -296,7 +308,8 @@ namespace APA
 
         void Play(float dt)
         {
-            foreach (var (r, f) in loops) r.sprite = f[(int)(Time.time * 8f) % f.Length];
+            // timed loops start apart by where they stand, so two billboards don't turn together
+            foreach (var (r, f, ts) in loops) r.sprite = f[FrameAt(Time.time + (ts != null && ts.Length > 0 ? r.transform.position.x * 0.1f : 0f), f.Length, ts)];
             foreach (var kv in doors)
             {
                 var d = kv.Value;
