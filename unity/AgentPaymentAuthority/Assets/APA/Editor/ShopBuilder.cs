@@ -69,7 +69,7 @@ namespace APA.EditorTools
                 ti.textureCompression = TextureImporterCompression.Uncompressed;
                 ti.mipmapEnabled = false;
                 ti.npotScale = TextureImporterNPOTScale.None;
-                ti.maxTextureSize = 4096;
+                ti.maxTextureSize = 8192; // never scaled down: TownView's sprites are 32 px a unit of the imported width (4096 halved the food trucks' 8064 px strips)
                 ti.SaveAndReimport();
             }
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);

@@ -28,6 +28,25 @@ public class PngTests
             }
     }
 
+    // Aaron 11/10 (the food trucks at half their size): a cut wider than the importer's maxTextureSize was
+    // imported scaled down, and TownView draws a texture at 32 px a unit of its imported width.
+    [Test]
+    public void TheTownsCutsKeepTheirSize()
+    {
+        int n = 0;
+        foreach (var line in File.ReadAllLines("limezu-assets.txt"))
+        {
+            var p = "Assets/LimeZu/_cut/" + line.Split('\t')[0] + ".png"; // what ShopBuilder cuts a town key to, and TownView draws
+            if (!line.StartsWith("x-") || !File.Exists(p)) continue;
+            n++;
+            var b = File.ReadAllBytes(p);
+            int Be(int o) => (b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3];
+            var t = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>(p);
+            Assert.AreEqual((Be(16), Be(20)), (t.width, t.height), p); // IHDR's width and height
+        }
+        if (n == 0) Assert.Ignore("no LimeZu cuts here");
+    }
+
     [Test]
     public void RefusesATruncatedFile()
     {
