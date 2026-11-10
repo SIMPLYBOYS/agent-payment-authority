@@ -89,8 +89,13 @@ def render_town(out_dir, m, town, x0, y0, x1, y1):
 
     for i, g in enumerate(town["ground"]):
         piece(g, 0, 0, -1000 + i, i, False)
+    on_top = {}  # TownView: a prop over a building (its roof, its wall) just in front of it, in the order listed
     for i, p in enumerate(town["props"]):
-        piece(p, 0, 0, order(p["y"]), 1000 + i, True)
+        o = order(p["y"])
+        if p.get("over"):
+            on_top[p["over"]] = on_top.get(p["over"], 0) + 1
+            o = order(p["over"]) + on_top[p["over"]]
+        piece(p, 0, 0, o, 1000 + i, True)
     for i, g in enumerate(town.get("gates", [])):  # a subway gate's arm as with the page's gates off: up (TownView.Look)
         piece(g["open"], 0, 0, order(g["open"]["y"]), 1900 + i, True)
     for tr in town.get("trains", []):  # the cars' outsides, west to east from x (TownView: the trains)
@@ -108,7 +113,7 @@ def render_town(out_dir, m, town, x0, y0, x1, y1):
     for j, w in enumerate(town["walkers"]):
         s = art(m, w["key"]); s = s.crop((0, 0, 32, s.height))
         x, y = px(w["path"][0]["x"], w["path"][0]["y"])
-        draws.append((order(w["path"][0]["y"]), 4000 + j, s, x - 16, y - s.height))
+        draws.append((order(w["over"]) + 10 if w.get("over") else order(w["path"][0]["y"]), 4000 + j, s, x - 16, y - s.height))  # TownView.Depth
     for o, _, s, x, y in sorted(draws, key=lambda d: (d[0], d[1])):
         if x < W and y < H and x + s.width > 0 and y + s.height > 0:
             im.alpha_composite(s, (x, y)) if x >= 0 and y >= 0 else im.paste(s, (x, y), s)

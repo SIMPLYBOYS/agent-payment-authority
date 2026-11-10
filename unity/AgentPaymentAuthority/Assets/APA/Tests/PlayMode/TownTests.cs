@@ -560,6 +560,61 @@ public class TownTests
         finally { Time.timeScale = scale; }
     }
 
+    // Aaron 11/9 (the homes as fine as LimeZu's sample): a home's roof things and wall air conditioners (props with over)
+    // are drawn over the home they stand on, not behind it by their own y.
+    [UnityTest]
+    public IEnumerator ThingsOnAHomeAreDrawnOverIt()
+    {
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        var t = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
+        var drawn = town.GetComponentsInChildren<SpriteRenderer>(true);
+        SpriteRenderer At(Town.Piece p) => System.Array.Find(drawn, r => r.name == p.key && Mathf.Abs(r.transform.localPosition.x - p.x) < 0.01f && Mathf.Abs(r.transform.localPosition.y - p.y) < 0.01f);
+        // The building a thing stands on: drawn at that y, its picture over the thing's x (the hospital is 27 wide).
+        Town.Piece Under(float y, float x) => System.Array.Find(t.props, h =>
+        {
+            if (h.over != 0f || h.y != y) return false;
+            var r = At(h);
+            return r != null && x >= h.x + r.sprite.bounds.min.x && x <= h.x + r.sprite.bounds.max.x;
+        });
+        int n = 0;
+        foreach (var p in t.props)
+        {
+            if (p.over == 0f) continue;
+            var home = Under(p.over, p.x);
+            Assert.IsNotNull(home, p.key + " at " + p.x + ": no home under it");
+            var r = At(p);
+            Assert.IsNotNull(r, p.key + " at " + p.x + " is not drawn");
+            Assert.Greater(r.sortingOrder, At(home).sortingOrder, p.key + " at " + p.x + " over " + home.key);
+            n++;
+        }
+        Assert.Greater(n, 10, "the homes' things");
+        // Aaron 11/9 ("這個頂樓的人不會動？"): the resident at the laundry walks on the roof, over the home, and moves.
+        // Aaron 11/10 (the hospital's people hidden or standing still): the companion and the visitor go to its doors,
+        // over it, and move.
+        var walking = System.Array.FindAll(t.walkers, w => w.over != 0f);
+        Assert.GreaterOrEqual(walking.Length, 3, "the resident, the hospital's companion and visitor");
+        var bodies = new SpriteRenderer[walking.Length];
+        var from = new Vector3[walking.Length];
+        for (int i = 0; i < walking.Length; i++)
+        {
+            var w = walking[i];
+            var under = Under(w.over, w.path[0].x);
+            Assert.IsNotNull(under, w.key + ": no building under it");
+            float x0 = float.MaxValue, x1 = float.MinValue, y0 = float.MaxValue, y1 = float.MinValue;
+            foreach (var q in w.path) { x0 = Mathf.Min(x0, q.x); x1 = Mathf.Max(x1, q.x); y0 = Mathf.Min(y0, q.y); y1 = Mathf.Max(y1, q.y); }
+            bodies[i] = System.Array.Find(drawn, d => { var at = d.transform.localPosition; return d.name == w.key && at.x >= x0 - 0.01f && at.x <= x1 + 0.01f && at.y >= y0 - 0.01f && at.y <= y1 + 0.01f; });
+            Assert.IsNotNull(bodies[i], w.key + " is not drawn along its way");
+            Assert.Greater(bodies[i].sortingOrder, At(under).sortingOrder, w.key + " over " + under.key);
+            from[i] = bodies[i].transform.localPosition;
+        }
+        float scale = Time.timeScale;
+        Time.timeScale = 4f; // the longest wait at a door is 6 s
+        try { yield return new WaitForSeconds(10f); }
+        finally { Time.timeScale = scale; }
+        for (int i = 0; i < walking.Length; i++) Assert.AreNotEqual(from[i], bodies[i].transform.localPosition, walking[i].key + " moves");
+    }
+
     // docs/commercial-atm.md (Aaron 11/9): the walked customer stopping at the street's ATM is reported once; walking
     // past it along the pavement is not a visit. The page's answers show over it: watching stays, others go.
     [UnityTest]

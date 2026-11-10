@@ -61,7 +61,9 @@ namespace APA
 
         // frames: the file is that many frames side by side (Aaron 10/28: a fountain that plays, doors that open).
         // times: seconds each frame shows, over and over (Aaron 11/9: a billboard's ad holds, its louvres flick); none: 8 a second.
-        [System.Serializable] public class Piece { public string key; public float x, y, w, h; public int frames; public float[] times; }
+        // over (a prop): the y of the building it stands on, its roof or its wall (Aaron 11/9: the homes as fine as LimeZu's
+        // sample): drawn just in front of that building, in the order listed, not by its own y; 0: it stands on the ground.
+        [System.Serializable] public class Piece { public string key; public float x, y, w, h; public int frames; public float[] times; public float over; }
         // A venue: the room (layout) it holds, its number and name on the
         // map, its outside, and its door (from its origin): where the
         // transition closes and A and B stand.
@@ -75,7 +77,9 @@ namespace APA
         // A path of one point is a pose there: its piece's frames (sitting,
         // reading, a clerk standing) play in a loop.
         // wait: seconds a walker stands at each point of its path, facing up (in a shop: at a shelf; interiors v2); none: on.
-        [System.Serializable] public class Walker { public string key; public float speed = 1.2f; public Vector2[] path = new Vector2[0]; public float[] wait = new float[0]; }
+        // over: the y of the building it walks on (Aaron 11/9: the resident at the laundry on a roof): drawn over that
+        // building and the things on it, not by its own y; 0: on the ground.
+        [System.Serializable] public class Walker { public string key; public float speed = 1.2f; public Vector2[] path = new Vector2[0]; public float[] wait = new float[0]; public float over; }
         // The people in a shop (Aaron 10/27: a clerk, other customers; illustrative,
         // never A or B), in its room's coordinates, shown with that room only.
         [System.Serializable] public class Inside { public string layout; public Walker[] people = new Walker[0]; }
@@ -155,9 +159,12 @@ namespace APA
             Backdrop();
             if (town == null) return;
             for (int i = 0; i < town.ground.Length; i++) Piece(transform, town.ground[i], -1000 + i, Vector2.zero); // in file order: a later piece over an earlier one
+            var onTop = new Dictionary<float, int>(); // a building's y -> the things on it so far
             foreach (var p in town.props)
             {
-                var r = Piece(transform, p, Order(p.y), new Vector2(0.5f, 0f));
+                int order = Order(p.y);
+                if (p.over != 0f) { onTop.TryGetValue(p.over, out int n); onTop[p.over] = n + 1; order = Order(p.over) + 1 + n; }
+                var r = Piece(transform, p, order, new Vector2(0.5f, 0f));
                 if (r != null && p.frames > 1) loops.Add((r, Frames(p.key, p.frames, new Vector2(0.5f, 0f)), p.times));
             }
             trains.Clear();
@@ -475,7 +482,7 @@ namespace APA
 
         // Depth: on the street, the town's scale; in a room, the room's own (ShopView: a prop at y draws at
         // -(y * 10)), just in front of a prop on the same row; always under A and B (50).
-        static int Depth(WalkerState s, float y) => s.room ? -(int)(y * 10f) + 1 : Order(y);
+        static int Depth(WalkerState s, float y) => s.room ? -(int)(y * 10f) + 1 : s.w.over != 0f ? Order(s.w.over) + 10 : Order(y);
 
         const float Stay = 5f, Fade = 0.35f; // seconds in a shop; to go in or come out
         // Busy: A or B stands at that venue's door (they transact there; PlaceStands' rule, this frame): no one else goes in or comes out over them.

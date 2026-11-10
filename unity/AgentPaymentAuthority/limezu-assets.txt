@@ -239,14 +239,14 @@ x-mart-sale-2	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x3
 x-carts	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Shopping_Carts_3.png	-
 x-pose-19-down	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_19.png	576,64,192,64
 x-pose-20-read	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_20.png	32,448,192,64
-x-pose-10-phone	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_10.png	128,384,192,64
+x-pose-10-phone	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_10.png	96,384,192,64
 x-pose-17-down	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_17.png	576,64,192,64
 x-pose-03-sit-right	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_03.png	0,256,192,64
 x-pose-06-sit-left	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_06.png	192,256,192,64
 x-pose-18-sit-left	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_18.png	192,256,192,64
 x-pose-15-left	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_15.png	384,64,192,64
 x-pose-13-down	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_13.png	576,64,192,64
-x-pose-12-phone	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_12.png	128,384,192,64
+x-pose-12-phone	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_12.png	96,384,192,64
 # town v2, the street (docs/town-v2.md V2, Aaron 11/2 "走甲方案"): one row of shop fronts on the north side, a bus stop,
 # billboards off the road
 x-hardware	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/4_Generic_Building_Singles_32x32/ME_Singles_Generic_Building_32x32_Hardware_Store_Example.png	-
@@ -305,6 +305,7 @@ x-car-green-tilt-up	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32
 x-car-green-tilt-down	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_green_complete_32x32.png	128,578,120,90
 x-car-blue-left-tilt-up	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_blue_complete_32x32.png	132,454,124,84
 x-car-blue-left-tilt-down	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_classic_blue_complete_32x32.png	128,578,120,90
+x-walk-15	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_15.png	0,128,768,64
 x-walk-19	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_19.png	0,128,768,64
 # The post office and the hotel (docs/commercial-post-hotel.md), cut from the Hospital, Museum, Condominium, Living Room
 # and Generic theme sheets: the post office's white desks, parcel shelves, scale, notice boards, mailboxes and boxes; the
@@ -359,10 +360,10 @@ x-taxi	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x
 x-sports-white	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_5_32x32_1.png	4,242,156,78;164,242,156,78;324,242,156,78;484,242,156,78;644,242,156,78;804,242,156,78
 x-car-white	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/Animated_32x32/Vehicles_32x32/Cars_32x32/Car_4_32x32_1.png	4,246,152,74;164,246,152,74;324,246,152,74;484,246,152,74;644,246,152,74;804,246,152,74
 # The food trucks in place of the camping area (Aaron 11/7): the trucks, carts, tables, chairs and menus.
-x-food-tacos	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Tacos_Truck_1.png	-
-x-food-icecream	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Ice_Cream_Truck_1.png	-
-x-food-pizza	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Pizza_Tuk_Tuk_1.png	-
-x-food-hotdog	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Hot_Dog_Cart_1.png	-
+x-food-tacos	_cut/x-food-tacos.png	-
+x-food-icecream	_cut/x-food-icecream.png	-
+x-food-pizza	_cut/x-food-pizza.png	-
+x-food-hotdog	_cut/x-food-hotdog.png	-
 x-food-cart-fries	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Cart_2.png	-
 x-food-cart-cook	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Cart_4.png	-
 x-food-cart-cupcake	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/10_Vehicles_Singles_32x32/ME_Singles_Vehicles_32x32_Street_Food_Cart_6.png	-
@@ -510,3 +511,21 @@ x-pillar-small	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x
 x-vase-tall	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/20_Subway_and_Train_Station_Singles_32x32/ME_Singles_Subway_and_Train_Station_32x32_Vase_2.png	-
 x-stop-sign	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/20_Subway_and_Train_Station_Singles_32x32/ME_Singles_Subway_and_Train_Station_32x32_Stop_Sign.png	-
 x-booth	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/20_Subway_and_Train_Station_Singles_32x32/ME_Singles_Subway_and_Train_Station_32x32_Control_PC.png	-
+# the homes as fine as LimeZu's sample (Aaron 11/9): their roofs' things and their walls' air conditioners (town.json props with "over")
+x-roof-vent	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/5_Floor_Modular_Building_Singles_32x32/ME_Singles_Floor_Modular_Building_32x32_Roof_Props_2.png	-
+x-roof-chimney	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/5_Floor_Modular_Building_Singles_32x32/ME_Singles_Floor_Modular_Building_32x32_Roof_Props_3.png	-
+x-roof-ac	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/5_Floor_Modular_Building_Singles_32x32/ME_Singles_Floor_Modular_Building_32x32_Roof_Props_8.png	-
+x-roof-ac-row	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/5_Floor_Modular_Building_Singles_32x32/ME_Singles_Floor_Modular_Building_32x32_Roof_Props_10.png	-
+x-clothes-pink	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Hanging_Clothes_3.png	-
+x-clothes-whites	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Hanging_Clothes_6.png	-
+x-clothes-kids	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Hanging_Clothes_7.png	-
+x-tire	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/3_City_Props_Singles_32x32/ME_Singles_City_Props_32x32_Tire_1.png	-
+x-solar	_cut/x-solar.png	-
+x-antenna	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/6_Garage_Sales_Singles_32x32/ME_Singles_Garage_Sales_32x32_Antenna_1.png	-
+x-wall-ac	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/24_Additional_Houses_Singles_32x32/24_Additional_Houses_Terraced_House_AC_Unit_32x32.png	-
+x-wall-ac-s	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/9_Shopping_Center_and_Markets_Singles_32x32/ME_Singles_Shopping_Center_and_Markets_32x32_Air_Conditioner_Unit_5.png	-
+# the food carts' vendors (Aaron 11/9: 餐車內應該都要有會動的店員): idle, looking along the cart and back to the front (12 frames)
+x-pose-02-vend	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_02.png	384,64,384,64
+x-pose-09-vend	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_09.png	384,64,384,64
+x-pose-11-vend	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_11.png	384,64,384,64
+x-pose-13-vend	Modern_Interiors_v41.4/2_Characters/Character_Generator/0_Premade_Characters/32x32/Premade_Character_32x32_13.png	384,64,384,64
