@@ -417,7 +417,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	}
 	mux := newMux(shop, capability)
 	roles := hostRoles(live, pay != nil)
-	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: runner != nil && !live, out: d.out, payCap: payCap}
+	ui := &api{st: st, tokens: tokens, addr: addr, clock: d.clock, expiry: health, fake: runner != nil && !live, out: d.out, payCap: payCap, creds: creds}
 	if pay != nil {
 		ui.payContract = pay.cfg.BudgetContract
 		ui.relayer, _ = pay.relayer.(*budget.Client)

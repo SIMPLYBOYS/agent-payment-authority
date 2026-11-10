@@ -9,6 +9,9 @@
 //	apa-issuer subjects --dir D --subjects 'consumer-a:buyer_type=business,country=TW,age_over_18=true;consumer-b:…'
 //	                                                      the consumers' attributes: the directory then issues apa.credential.v2
 //	                                                      (docs/commercial-venues.md 3.1; replaces subjects.json whole)
+//	apa-issuer ekyc --dir D --consumer C --key-file F [--dependents C2,…] [--session ID | --scenario S] [--wait SECONDS]
+//	                                                      C's country and age from an identity verification at Didit
+//	                                                      (docs/commercial-ekyc.md); the dependents as C's children under 18
 //
 // Every write goes through the directory's lock: a revocation is never
 // overwritten. Nothing secret is printed.
@@ -33,7 +36,7 @@ func main() {
 	}
 }
 
-const usage = "usage: apa-issuer init|revoke|refresh|subjects --dir D ..."
+const usage = "usage: apa-issuer init|revoke|refresh|subjects|ekyc --dir D ..."
 
 func run(args []string, out io.Writer, now func() int64) error {
 	if len(args) == 0 {
@@ -47,6 +50,18 @@ func run(args []string, out io.Writer, now func() int64) error {
 	task := fs.String("task", "", "revoke: the task whose credential is revoked")
 	status := fs.String("status", "", "revoke: the status index revoked")
 	subjects := fs.String("subjects", "", "subjects: consumer:name=value,… for each consumer, ';'-separated")
+	var e ekycOptions
+	var dependents string
+	var wait int
+	fs.StringVar(&e.consumer, "consumer", "", "ekyc: the consumer verified")
+	fs.StringVar(&e.keyFile, "key-file", "", "ekyc: the file (0600) holding Didit's API key")
+	fs.StringVar(&dependents, "dependents", "", "ekyc: the consumers the verified one declares as its children under 18, comma-separated")
+	fs.StringVar(&e.buyerType, "buyer-type", "individual", "ekyc: the verified consumer's buyer_type (no verification shows it)")
+	fs.StringVar(&e.session, "session", "", "ekyc: a session already made, instead of a new one")
+	fs.StringVar(&e.scenario, "scenario", "", "ekyc: a new sandbox session's scenario (approve, decline_document_expired, …)")
+	fs.StringVar(&e.workflow, "workflow", "", "ekyc: a new session's workflow (default: the application's default KYC workflow)")
+	fs.StringVar(&e.url, "ekyc-url", "https://verification.didit.me", "ekyc: Didit's API")
+	fs.IntVar(&wait, "wait", 600, "ekyc: seconds to wait for the decision")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || *dir == "" {
 		return errors.New(usage)
 	}
@@ -65,6 +80,12 @@ func run(args []string, out io.Writer, now func() int64) error {
 		return err
 	}
 	switch args[0] {
+	case "ekyc":
+		if dependents != "" {
+			e.dependents = strings.Split(dependents, ",")
+		}
+		e.wait = time.Duration(wait) * time.Second
+		return ekyc(d, e, out, now)
 	case "subjects":
 		m := map[string]map[string]string{}
 		for _, one := range strings.Split(*subjects, ";") {

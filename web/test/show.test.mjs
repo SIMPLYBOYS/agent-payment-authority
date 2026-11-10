@@ -313,6 +313,13 @@ test("why trustworthy: each item only what a record says, links only on a public
   assert.deepEqual(ev.map((x) => x.label), ["1 委託", "2 選購", "3 核准", "4 付款・預留", "4 付款・結算", "5 交付"]); // the five steps (10/30)
   assert.equal(ev[0].text, "客人已交代 Agent 預算與範圍"); // no DELEGATION_BOUND in these events
   assert.equal(ev[1].text, "出示客人的憑證，檢查通過（測試發行者）");
+  // docs/commercial-ekyc.md: the Host's identity_source names the verification; a sandbox is said so, a dependent as declared by the guardian.
+  const withSource = (src) => { const s = snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid], { purchase: p }); s.task.identity_source = src; return A.showEvidence(s, {})[1]; };
+  const didit = { provider: "didit", environment: "sandbox", session_id: "3466f016", verified: true };
+  assert.deepEqual(withSource(didit), { label: "2 選購", text: "出示客人的憑證，檢查通過（身分經 Didit eKYC 驗證・沙盒）", note: "x402・BBS+・eKYC" });
+  assert.equal(withSource({ ...didit, verified: false }).text, "出示客人的憑證，檢查通過（由通過 Didit eKYC 的家長代為申請・沙盒）");
+  assert.equal(withSource({ ...didit, environment: "live" }).text, "出示客人的憑證，檢查通過（身分經 Didit eKYC 驗證・live）");
+  assert.deepEqual(withSource({ ...didit, provider: "someone" }), { label: "2 選購", text: "出示客人的憑證，檢查通過（測試發行者）", note: "x402・BBS+" }); // an unknown vendor is not named
   // 10/30: the list says who confirmed, as step 1 does (it said the host's always, against step 1's person's device).
   assert.equal(A.showEvidence(snap(boundEvents("webauthn")), { authenticator: "device" })[0].text, "本人以已登記的裝置確認了委託");
   assert.equal(A.showEvidence(snap(boundEvents("")), {})[0].text, "主持人代為確認委託（示範，不是本人）");
@@ -486,6 +493,12 @@ test("the venue matrix: what a venue saw of the buyer, in plain words (docs/comm
   const p = { purchase_order_id: "po-1", amount: "90000", credential: { result: "valid", credential_schema: "apa.credential.v2", claims: "age_over_18=true" } };
   const m = A.showCustomer("consumer-a", snap(base("Allow", "WITHIN_ALLOW_MAX"), { purchase: p }), null, {});
   assert.match(m.steps[1].text, /；這間店看到：已滿 18 歲$/);
+  // docs/commercial-ekyc.md (Aaron 11/11): step 2 says where what the venue saw came from; nothing seen, nothing said of it.
+  const src = { provider: "didit", environment: "sandbox", session_id: "3466f016-4c1c", verified: true };
+  const withSource = (purchase, identity_source) => { const s = snap(base("Allow", "WITHIN_ALLOW_MAX"), { purchase }); s.task.identity_source = identity_source; return A.showCustomer("consumer-a", s, null, {}).steps[1].text; };
+  assert.match(withSource(p, src), /；這間店看到：已滿 18 歲（身分經 Didit eKYC 驗證・沙盒）$/);
+  assert.match(withSource({ ...p, credential: { ...p.credential, claims: "age_over_18=false" } }, { ...src, verified: false }), /；這間店看到：未滿 18 歲（由通過 Didit eKYC 的家長代為申請・沙盒）$/);
+  assert.match(withSource({ ...p, credential: { ...p.credential, claims: "" } }, src), /；這間店看到：沒有任何個人資料$/);
   const v1 = A.showCustomer("consumer-a", snap(base("Allow", "WITHIN_ALLOW_MAX"), { purchase: { ...p, credential: { result: "valid", credential_schema: "apa.credential.v1" } } }), null, {});
   assert.ok(!v1.steps[1].text.includes("這間店看到"), "a v1 credential says nothing of a venue");
 });

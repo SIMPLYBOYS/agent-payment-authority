@@ -258,6 +258,49 @@ func TestVenueBeer(t *testing.T) {
 	}
 }
 
+// A task's identity source (docs/commercial-ekyc.md): attributes written with an eKYC record name it in the task's
+// reply, the verified consumer as verified and its dependent as declared; attributes set by hand name none, and
+// a task issued under the record keeps it after the attributes are set by hand.
+func TestTaskIdentitySource(t *testing.T) {
+	path, dir := credDir(t, "consumer-a", "consumer-b")
+	adult, minor := map[string]string{"buyer_type": "individual", "country": "BR", "age_over_18": "true"}, map[string]string{"buyer_type": "individual", "country": "BR", "age_over_18": "false"}
+	subjects := map[string]map[string]string{"consumer-a": adult, "consumer-b": minor}
+	rec := credential.EKYC{Provider: "didit", Environment: "sandbox", SessionID: "3466f016-4c1c-4f1f-9ff8-0bee1be446b2", Consumer: "consumer-a", Dependents: []string{"consumer-b"},
+		Derived: map[string]string{"country": "BR", "age_over_18": "true"}}
+	if err := dir.SetVerifiedSubjects(subjects, rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := dir.SetVerifiedSubjects(subjects, credential.EKYC{Provider: "didit", Environment: "sandbox", SessionID: "s", Consumer: "consumer-a", Derived: map[string]string{"country": "TW"}}); err == nil {
+		t.Fatal("a record whose derived country is not the subject's was written")
+	}
+	d := map[string]any{"purpose": "買 6 罐團隊聚會的啤酒", "task_budget": "5000000", "allow_max": "100000", "approval_deadline_seconds": 60, "valid_seconds": 1800}
+	raw, _ := json.Marshal(map[string]any{"description": "test", "scenarios": []map[string]any{
+		{"id": "beer-a", "consumer_id": "consumer-a", "scene": "mart", "contract": "apa.pay.v2", "scenario": "testdata/cli/mart-beer.json", "label": "beer A", "delegation": d},
+		{"id": "beer-b", "consumer_id": "consumer-b", "scene": "mart", "contract": "apa.pay.v2", "scenario": "testdata/cli/mart-beer.json", "label": "beer B", "delegation": d},
+	}})
+	catalog := filepath.Join(t.TempDir(), "scenarios.json")
+	os.WriteFile(catalog, raw, 0o600)
+	h := controlHost(t, hostOpts{expiryEvery: time.Hour, scenarios: catalog, args: []string{"--credential-dir", path}})
+	defer h.stop()
+	a := h.delegateAndRunAs(h.simulate("consumer-a"), "beer-a", "01", "apa.pay.v2")["task_id"].(string)
+	b := h.delegateAndRunAs(h.simulate("consumer-b"), "beer-b", "02", "apa.pay.v2")["task_id"].(string)
+	for task, verified := range map[string]bool{a: true, b: false} {
+		if src := h.task(task).IdentitySource; src == nil || src.Provider != "didit" || src.Environment != "sandbox" || src.SessionID != rec.SessionID || src.Verified != verified {
+			t.Fatalf("%s: identity source %+v, want verified %v", task, src, verified)
+		}
+	}
+	if err := dir.SetSubjects(subjects); err != nil {
+		t.Fatal(err)
+	}
+	byHand := h.delegateAndRunAs(h.simulate("consumer-a"), "beer-a", "03", "apa.pay.v2")["task_id"].(string)
+	if src := h.task(byHand).IdentitySource; src != nil {
+		t.Fatalf("attributes set by hand: identity source %+v", src)
+	}
+	if src := h.task(a).IdentitySource; src == nil || !src.Verified {
+		t.Fatalf("the earlier task lost its identity source: %+v", src)
+	}
+}
+
 // The family's fooled agent (docs/commercial-consumer.md D1, a simulation): it believes the guide's
 // shop-written notice and requests the 2.00 premium edition; beyond the 1.50 task budget, the Policy denies it
 // INSUFFICIENT_BUDGET and nothing is paid.

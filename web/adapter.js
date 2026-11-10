@@ -294,6 +294,7 @@ export function inspector(snapshot) {
     );
     const seen = p.credential && p.credential.credential_schema === "apa.credential.v2" ? claimsText(p.credential.claims) : "";
     if (seen) rows.push(["這間店看到", seen + (p.credential.detail === "CLAIM_UNMET" ? "（不符合這間店的要求）" : "")]);
+    if (seen) rows.push(["身分來源", identityWords(t.identity_source) + (t.identity_source && identityWords(t.identity_source, true) ? "（session " + short(t.identity_source.session_id) + "；docs/commercial-ekyc.md）" : "（屬性由主持人啟動時填寫）")]);
     const pv = p.payment;
     if (pv && pv.reserve_tx) rows.push(["tx#1 預留（Z2）", txRef(t.payment_capability, pv.reserve_tx) + (typeof pv.reserve_block === "number" ? " · 區塊 " + pv.reserve_block : "")],
       ["ZK proof", "在 tx#1 的 calldata 裡，由預算合約呼叫 verifier 驗證；本頁不自行宣稱已驗證（要宣稱已驗證，須看獨立 checker 的結果）"]);
@@ -1101,7 +1102,7 @@ export const PLAIN = {
 // claimsText (the venue matrix, docs/commercial-venues.md): what a venue saw of the buyer, in plain words; the
 // mandatory fields are always there and never named. "" claims: nothing about the person.
 const CLAIM_WORDS = { buyer_type: { business: "企業買方", individual: "個人買方" }, age_over_18: { true: "已滿 18 歲", false: "未滿 18 歲" } };
-const COUNTRY = { TW: "台灣", KR: "韓國", JP: "日本" };
+const COUNTRY = { TW: "台灣", KR: "韓國", JP: "日本", BR: "巴西" }; // BR: Didit's sandbox document (docs/commercial-ekyc.md 5)
 export function claimsText(claims) {
   if (typeof claims !== "string" || claims === "") return "沒有任何個人資料";
   return claims.split(",").map((kv) => {
@@ -1144,7 +1145,7 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
     const who = confirmedBy(snapshot, traits);
     set(0, "done", who ? who + "：" + terms : d && d.task_budget ? "客人交代 Agent：" + terms : "客人已交代 Agent 預算與範圍");
     if (ph === "empty" || ph === "entered") set(1, "now", "Agent 正在挑選商品");
-    else set(1, "done", "Agent 選好商品，報價 " + usdc(p && p.amount) + (p && p.credential && p.credential.credential_schema === "apa.credential.v2" ? "；這間店看到：" + claimsText(p.credential.claims) : ""));
+    else set(1, "done", "Agent 選好商品，報價 " + usdc(p && p.amount) + (p && p.credential && p.credential.credential_schema === "apa.credential.v2" ? "；這間店看到：" + claimsText(p.credential.claims) + sourceNote(task, p) : ""));
   }
   const g = p && p.approval && p.approval.grant;
   // approved: by the record's own method; a simulated approval is the host's, never the person's.
@@ -1307,6 +1308,19 @@ function confirmedBy(snapshot, traits = {}) {
     : "主持人代為確認委託（示範，不是本人）";
 }
 
+// identityWords (docs/commercial-ekyc.md): where the credential's attributes came from, as the Host's
+// identity_source says: a vendor's identity verification of this customer, or of the guardian who declared this
+// customer; without one, the test issuer's own word. A sandbox is said so: no real person was checked there.
+// known: "" without a known vendor's verification.
+// sourceNote (Aaron 11/11: a run with eKYC showed nothing of it): beside what a venue saw, where that came from,
+// when a known vendor verified it and the venue saw something of the person.
+const sourceNote = (task, p) => (p.credential.claims && identityWords(task.identity_source, true) ? "（" + identityWords(task.identity_source, true) + "）" : "");
+function identityWords(src, known = false) {
+  const vendor = src && { didit: "Didit" }[src.provider];
+  if (!vendor) return known ? "" : "測試發行者";
+  return (src.verified ? "身分經 " + vendor + " eKYC 驗證" : "由通過 " + vendor + " eKYC 的家長代為申請") + "・" + (src.environment === "sandbox" ? "沙盒" : String(src.environment)) // the vendor's own name of any other environment, never left unsaid;
+}
+
 export function showEvidence(snapshot, traits = {}, chain = null) {
   const task = snapshot && snapshot.task;
   if (!task) return [];
@@ -1321,8 +1335,8 @@ export function showEvidence(snapshot, traits = {}, chain = null) {
   const items = [...(agent ? [{ label: "Agent 身分", ...agent, note: "ERC-8004・平台代為註冊" + (walletProven(chain) ? "・付款錢包已由錢包簽章證明" : "") }] : []), { label: "1 委託", text: confirmedBy(snapshot, traits) || "客人已交代 Agent 預算與範圍",
     ...(bound && bound.authorization_method === "webauthn" ? { note: "WebAuthn" } : {}) }];
   if (!p) return items;
-  if (p.credential) items.push({ label: "2 選購", text: p.credential.result === "valid" ? "出示客人的憑證，檢查通過（測試發行者）" : "憑證檢查沒通過",
-    note: "x402・BBS+" });
+  if (p.credential) items.push({ label: "2 選購", text: p.credential.result === "valid" ? "出示客人的憑證，檢查通過（" + identityWords(task.identity_source) + "）" : "憑證檢查沒通過",
+    note: "x402・BBS+" + (identityWords(task.identity_source, true) ? "・eKYC" : "") });
   if (sc.verdict === "Allow") items.push({ label: "3 核准", text: "在委託範圍內，自動放行" }); // the events' verdict, as the five steps
   else if (sc.verdict === "Deny") items.push({ label: "3 核准", text: plainReason(sc.reason) + "，已拒絕" });
   else if (p.approval && p.approval.state === "approved" && has("APPROVED")) items.push({ label: "3 核准", text: approvalWords(p, traits),

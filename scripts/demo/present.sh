@@ -57,6 +57,9 @@
 # APA_PRESENT_CREDENTIALS=1 (fake, or a live host that pays; make present-c2): build apa-issuer,
 # make a credential directory of test keys in the session directory (holders
 # for consumer-a and consumer-b) and start the host with --credential-dir.
+# APA_PRESENT_EKYC_SESSION (with APA_PRESENT_CREDENTIALS; docs/commercial-ekyc.md): a finished Didit verification
+# of consumer-a; the customers' attributes then come from it (apa-issuer ekyc), with the API key file
+# APA_PRESENT_EKYC_KEY (default var/ekyc/didit-sandbox.key, 0600).
 set -u
 stop() { echo "present: STOP（未啟動）：$1" >&2; exit 2; }
 
@@ -134,8 +137,21 @@ if [ -n "$creds" ]; then
 	fi
 	# The venue matrix (docs/commercial-venues.md; docs/commercial-consumer.md, Aaron 11/2): a family in TW, A the
 	# parent, B the child under 18, so the mart's beer is denied for B. Written every start (a kept directory gets it too): new tasks get apa.credential.v2.
-	"$w/apa-issuer" subjects --dir "$cred" --subjects "consumer-a:buyer_type=individual,country=TW,age_over_18=true;consumer-b:buyer_type=individual,country=TW,age_over_18=false" >&2 ||
-		stop "憑證的客人屬性寫入失敗；沒有啟動任何程式"
+	# docs/commercial-ekyc.md: APA_PRESENT_EKYC_SESSION names a finished Didit verification of consumer-a (the
+	# parent): the parent's country and age come from its decision and the child is declared by the parent, not
+	# written by this script. A kept directory already holding that session's record is not asked again (no
+	# network at start); any failure stops before anything starts, never falls back to the attributes below.
+	ekyc=${APA_PRESENT_EKYC_SESSION:-}
+	case "$ekyc" in *[!0-9a-f-]*) stop "APA_PRESENT_EKYC_SESSION 不是 session ID（小寫十六進位與 -）" ;; esac
+	if [ -n "$ekyc" ] && grep -q "\"session_id\":\"$ekyc\"" "$cred/ekyc.json" 2>/dev/null; then
+		echo "present: 客人屬性沿用 Didit 驗證 ${ekyc} 的紀錄（${cred}/ekyc.json；沒有連線）" >&2
+	elif [ -n "$ekyc" ]; then
+		"$w/apa-issuer" ekyc --dir "$cred" --consumer consumer-a --dependents consumer-b --key-file "${APA_PRESENT_EKYC_KEY:-var/ekyc/didit-sandbox.key}" --session "$ekyc" --wait 0 >&2 ||
+			stop "eKYC：Didit 的驗證 ${ekyc} 讀不到或不被接受（網路、金鑰檔、session）；沒有啟動任何程式。不用 eKYC 就不要設 APA_PRESENT_EKYC_SESSION"
+	else
+		"$w/apa-issuer" subjects --dir "$cred" --subjects "consumer-a:buyer_type=individual,country=TW,age_over_18=true;consumer-b:buyer_type=individual,country=TW,age_over_18=false" >&2 ||
+			stop "憑證的客人屬性寫入失敗；沒有啟動任何程式"
+	fi
 	echo "present: 撤銷某個 task 的憑證：${w}/apa-issuer revoke --dir ${cred} --task <task_id>（測試金鑰；host 每 300 秒自動更新清單）" >&2
 fi
 # FA2 (docs/commercial-facilitator.md): a payments file naming our own facilitator (http://127.0.0.1:PORT)

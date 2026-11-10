@@ -16,6 +16,7 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/reconcile"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
@@ -112,18 +113,19 @@ type api struct {
 	clock       store.Clock
 	unity       *os.Root // the Unity Web build's Build/ directory; nil without a build
 	expiry      *expiryHealth
-	fake        bool           // a fake CLI passed its --version check at start
-	control     *control       // host-started runs (--scenarios); nil otherwise
-	history     *historyInfo   // history mode (--history-db); nil otherwise
-	live        *liveInfo      // live mode (--live-cli); nil otherwise
-	traceDir    string         // live mode: where the run traces are
-	pairing     *pairing       // --pairing: the host page's one-time code; nil otherwise
-	sim         *simulator     // fake mode with --scenarios: the simulated approver (P1-a); nil otherwise
-	out         io.Writer      // the host's log (fixed lines only)
-	payContract string         // E1-a: --payments' budget contract
-	payCap      string         // P2: --payments' environment (LocalAnvil, BaseSepolia); "" without
-	relayer     *budget.Client // P2-b: apa-relayer's socket, for its health; nil in process or without --payments
-	shopQuota   shopQuota      // C4: the shop's transfers today (its settler or apa-facilitator); nil without
+	fake        bool            // a fake CLI passed its --version check at start
+	control     *control        // host-started runs (--scenarios); nil otherwise
+	history     *historyInfo    // history mode (--history-db); nil otherwise
+	live        *liveInfo       // live mode (--live-cli); nil otherwise
+	traceDir    string          // live mode: where the run traces are
+	pairing     *pairing        // --pairing: the host page's one-time code; nil otherwise
+	sim         *simulator      // fake mode with --scenarios: the simulated approver (P1-a); nil otherwise
+	out         io.Writer       // the host's log (fixed lines only)
+	payContract string          // E1-a: --payments' budget contract
+	payCap      string          // P2: --payments' environment (LocalAnvil, BaseSepolia); "" without
+	creds       *credential.Dir // C2: --credential-dir, for a task's identity source; nil without
+	relayer     *budget.Client  // P2-b: apa-relayer's socket, for its health; nil in process or without --payments
+	shopQuota   shopQuota       // C4: the shop's transfers today (its settler or apa-facilitator); nil without
 	// Gap 4: the registry, for a delegation's terms as the Signer names them
 	// (the consumer's wallet, its chain, the profile's asset contract).
 	registry  contracts.RegistryConfig
@@ -268,6 +270,29 @@ type taskReply struct {
 	PaymentCapability  string               `json:"payment_capability"`
 	// BudgetContract (E1-a): the Z2 budget contract tx#1 calls, with --payments.
 	BudgetContract string `json:"budget_contract,omitempty"`
+	// IdentitySource (docs/commercial-ekyc.md): the identity verification this task's credential attributes came
+	// from, as the issuer noted when it issued the credential. Absent: the test issuer's own word.
+	IdentitySource *identitySource `json:"identity_source,omitempty"`
+}
+
+type identitySource struct {
+	Provider    string `json:"provider"`
+	Environment string `json:"environment"` // "sandbox": no real person was checked
+	SessionID   string `json:"session_id"`
+	// Verified: this task's consumer is the one the session verified; false: a dependent that consumer declared.
+	Verified bool `json:"verified"`
+}
+
+// identityOf: the task's identity source from its stored credential; nil without one.
+func (a *api) identityOf(taskID, consumer string) *identitySource {
+	if a.creds == nil {
+		return nil
+	}
+	s, err := a.creds.ReadCredential(taskID)
+	if err != nil || s.EKYC == nil {
+		return nil
+	}
+	return &identitySource{Provider: s.EKYC.Provider, Environment: s.EKYC.Environment, SessionID: s.EKYC.SessionID, Verified: s.EKYC.Consumer == consumer}
 }
 
 func (a *api) task(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +305,8 @@ func (a *api) task(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, taskReply{TaskID: b.TaskID, ContractVersion: v.ContractVersion, DelegationID: v.DelegationID, ConsumerID: b.ConsumerID,
 		AgentID: b.AgentID, WalletID: b.WalletID, Payer: b.Payer,
 		WalletEvidenceMode: b.WalletEvidenceMode, Status: v.Status, DenyReason: v.DenyReason, AsOfSequence: v.AsOfSequence,
-		AsOfObservedAt: v.AsOfObservedAt, ServedAt: a.clock(), Purchases: v.Purchases, PaymentCapability: capability, BudgetContract: contract})
+		AsOfObservedAt: v.AsOfObservedAt, ServedAt: a.clock(), Purchases: v.Purchases, PaymentCapability: capability, BudgetContract: contract,
+		IdentitySource: a.identityOf(b.TaskID, b.ConsumerID)})
 }
 
 // payOf is a task's payment capability and, when the host pays, the budget

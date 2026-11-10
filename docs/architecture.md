@@ -104,6 +104,7 @@ Base Sepolia 上的實跑（10/31，`artifacts/e1a/testnet-town-t4`）E1～E10 �
 - issuer、holder、verifier 在同一個程序裡：證明的是格式、綁定與撤銷的接線，不是三方互相獨立。
 - 兩位核准人其實是同一個人、同一台裝置；身分是固定的測試資料。
 - `age_over_18` 是 issuer 簽好的布林值，不是範圍證明（憑證裡沒有生日）。
+- 憑證的身分來源（11/11，`docs/commercial-ekyc.md`）：預設仍是測試發行者自己填的屬性。啟動時設了 `APA_PRESENT_EKYC_SESSION`，家長的國家與是否滿 18 歲才由 Didit 的身分驗證結果算出，孩子的由家長代為申請。接的是 Didit 的**沙盒**：沒有驗任何真人，回傳固定的範例證件（巴西護照），所以國家是 BR；自拍那一步是主持人本人的臉。發行者只接受「Didit 自動決定、帶證件資料、活體與人臉比對都通過」的結果，但它和 Host 仍在同一台電腦、同一位主持人手上。checker 沒有 Didit 的金鑰，證據包裡的 `ekyc.json` 只是紀錄在案，不是 checker 驗過的主張。影片是用測試發行者拍的。
 - 付款依序處理，不是同時付款。
 - 只在 Base Sepolia 測試鏈與 test USDC 上跑過，沒有 mainnet、法幣或真實商店。
 - 郵局與飯店（11/6）只在本機跑過，沒有上 Base Sepolia：五個場域會超過測試網的每日上限（`docs/commercial-post-hotel.md` §4，N5）。郵局的「沒交付」與飯店的「收款人被換掉」都是刻意設定的示範商品，不是真的故障或攻擊。

@@ -31,8 +31,12 @@ import (
 // last block (E8 counts to it); 0 takes the reconciliation report's.
 type PackInput struct {
 	DB, Traces, Reconciliation, Commit string
-	Start                              verification.E1aStart
-	Tasks                              []verification.E1aTask
+	// EKYC (docs/commercial-ekyc.md): the credential directory's ekyc.json ("" none), copied as it is: the issuer's
+	// note of the identity verification the customers' attributes came from. On record only: no claim checks it
+	// (the checker holds no key of the vendor's).
+	EKYC  string
+	Start verification.E1aStart
+	Tasks []verification.E1aTask
 }
 
 // Pack writes the pack into dst, a new directory, and returns its run ID.
@@ -73,6 +77,20 @@ func Pack(in PackInput, dst string) (string, error) {
 			m.Start.ToBlock = rep.ToBlock
 		}
 		files["reconciliation.json"] = raw
+	}
+	if in.EKYC != "" {
+		raw, err := os.ReadFile(in.EKYC)
+		if err != nil {
+			return "", err
+		}
+		var rec struct {
+			Provider  string `json:"provider"`
+			SessionID string `json:"session_id"`
+		}
+		if json.Unmarshal(raw, &rec) != nil || rec.Provider == "" || rec.SessionID == "" {
+			return "", errors.New("the eKYC file is not a record")
+		}
+		files["ekyc.json"] = raw
 	}
 	if err := os.Mkdir(dst, 0o700); err != nil {
 		return "", fmt.Errorf("the pack's directory must be new: %w", err)

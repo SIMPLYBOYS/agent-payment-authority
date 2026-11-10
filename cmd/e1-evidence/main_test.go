@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -185,6 +186,32 @@ func index(es []contracts.AuditEvent, typ string) int {
 // E1-a (docs/commercial-e1a.md 4.5): a whole pack passes every claim the
 // pack alone can decide (E4 and E8 need the chain); each single change,
 // with every digest made again, is caught by the claim about its meaning.
+// docs/commercial-ekyc.md: pack --ekyc copies the issuer's record into the pack and indexes it; the checker's
+// claims are as without it (the record is no claim's evidence), and a file that is no record is refused.
+func TestPackEKYC(t *testing.T) {
+	db := paidStore(t, "fake")
+	start := filepath.Join(t.TempDir(), "start.json")
+	os.WriteFile(start, []byte(`{"chain":"local_anvil","chain_id":31337,"from_block":1,"wallets":["0x1111111111111111111111111111111111111111"]}`), 0o600)
+	rec := filepath.Join(t.TempDir(), "ekyc.json")
+	const record = `{"version":"apa.ekyc.v1","provider":"didit","environment":"sandbox","session_id":"3466f016-4c1c-4f1f-9ff8-0bee1be446b2","consumer":"consumer-a"}`
+	os.WriteFile(rec, []byte(record), 0o600)
+	out := filepath.Join(t.TempDir(), "pack")
+	if err := run([]string{"pack", "--db", db, "--start", start, "--out", out, "--task", "task-a=e1a-ask", "--ekyc", rec}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(out, "ekyc.json")); err != nil || string(raw) != record {
+		t.Fatalf("ekyc.json in the pack: %s %v", raw, err)
+	}
+	with, without := check(t, out), check(t, pack(t, db, "task-a=e1a-ask"))
+	if with.Verdict != without.Verdict || !reflect.DeepEqual(with.Claims, without.Claims) {
+		t.Errorf("claims with the record %v, without %v", with.Claims, without.Claims)
+	}
+	os.WriteFile(rec, []byte(`{"provider":"didit"}`), 0o600)
+	if err := run([]string{"pack", "--db", db, "--start", start, "--out", filepath.Join(t.TempDir(), "pack"), "--task", "task-a=e1a-ask", "--ekyc", rec}, io.Discard); err == nil {
+		t.Error("a file without a session was packed as a record")
+	}
+}
+
 func TestPackAndCheck(t *testing.T) {
 	db := paidStore(t, "fake")
 	good := check(t, pack(t, db, "task-a=e1a-ask"))

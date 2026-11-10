@@ -160,13 +160,75 @@ func (d *Dir) Subjects() (subjects map[string]map[string]string, ok bool, err er
 	return f.Subjects, true, nil
 }
 
-// SetSubjects writes subjects.json: every consumer with exactly the v2 attributes, each well formed.
+// SetSubjects writes subjects.json: every consumer with exactly the v2 attributes, each well formed. The
+// attributes are the caller's word: an eKYC record of earlier ones (ekyc.json) is removed, never left to vouch
+// for these.
 func (d *Dir) SetSubjects(subjects map[string]map[string]string) error {
+	return d.setSubjects(subjects, nil)
+}
+
+// EKYC records where the subjects' attributes came from (docs/commercial-ekyc.md 3): the vendor's session and
+// what was derived from its decision. Never the person's name, birth date, document number or images: those
+// stay with the vendor.
+type EKYC struct {
+	Version     string            `json:"version"`
+	Provider    string            `json:"provider"`
+	Environment string            `json:"environment"` // "sandbox": no real person was checked
+	SessionID   string            `json:"session_id"`
+	DecidedAt   string            `json:"decided_at"`
+	Consumer    string            `json:"consumer"`   // who was verified
+	Dependents  []string          `json:"dependents"` // whose attributes the verified consumer declared (a guardian's children)
+	Derived     map[string]string `json:"derived"`    // the attributes taken from the decision
+}
+
+const ekycVersion = "apa.ekyc.v1"
+
+// SetVerifiedSubjects writes subjects.json and, after it, ekyc.json: the attributes with the record of the
+// verification they came from.
+func (d *Dir) SetVerifiedSubjects(subjects map[string]map[string]string, e EKYC) error {
+	if e.Provider == "" || e.Environment == "" || e.SessionID == "" || subjects[e.Consumer] == nil || len(e.Derived) == 0 {
+		return errors.New("ekyc: provider, environment, session and a verified consumer among the subjects")
+	}
+	for a, v := range e.Derived {
+		if subjects[e.Consumer][a] != v {
+			return fmt.Errorf("ekyc: %s's %s is not the derived one", e.Consumer, a)
+		}
+	}
+	e.Version = ekycVersion
+	return d.setSubjects(subjects, &e)
+}
+
+// EKYC reads ekyc.json; nil when the directory has none (the subjects are the caller's word).
+func (d *Dir) EKYC() (*EKYC, error) {
+	if _, err := os.Lstat(d.file("ekyc.json")); errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	raw, err := d.read("ekyc.json")
+	if err != nil {
+		return nil, err
+	}
+	var e EKYC
+	if json.Unmarshal(raw, &e) != nil || e.Version != ekycVersion || e.Provider == "" || e.SessionID == "" || e.Consumer == "" {
+		return nil, errors.New("ekyc.json: format")
+	}
+	return &e, nil
+}
+
+func (d *Dir) setSubjects(subjects map[string]map[string]string, e *EKYC) error {
 	if err := checkSubjects(subjects); err != nil {
 		return err
 	}
-	raw, _ := json.Marshal(subjectsFile{Version: fileVersion, Subjects: subjects})
-	return d.write("subjects.json", raw)
+	return d.locked(func() error {
+		if err := os.Remove(d.file("ekyc.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		raw, _ := json.Marshal(subjectsFile{Version: fileVersion, Subjects: subjects})
+		if err := d.write("subjects.json", raw); err != nil || e == nil {
+			return err
+		}
+		raw, _ = json.Marshal(e)
+		return d.write("ekyc.json", raw)
+	})
 }
 
 func checkSubjects(subjects map[string]map[string]string) error {
@@ -340,6 +402,10 @@ type Stored struct {
 	Version    string     `json:"version"`
 	Credential Credential `json:"credential"`
 	Signature  []byte     `json:"signature"`
+	// EKYC: the verification the attributes came from when this was issued (ekyc.json then; the consumer it
+	// verified or one of its dependents). Beside the credential, not in it: the issuer's note of its own source,
+	// which no verifier checks. Absent: the attributes were the issuer's own word.
+	EKYC *EKYC `json:"ekyc,omitempty"`
 }
 
 // WriteCredential stores a task's issued credential (atomically).
@@ -414,6 +480,11 @@ func (d *Dir) IssueTask(task, consumer string, expiry int64) (s Stored, ok bool,
 		return s, false, err
 	}
 	s = Stored{Credential: c, Signature: sig}
+	if e, err := d.EKYC(); err != nil {
+		return s, false, err
+	} else if e != nil && v2 && (consumer == e.Consumer || slices.Contains(e.Dependents, consumer)) {
+		s.EKYC = e
+	}
 	return s, true, d.WriteCredential(task, s)
 }
 
