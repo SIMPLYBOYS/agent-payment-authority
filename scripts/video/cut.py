@@ -8,8 +8,8 @@ narration as subtitles (Chinese over English) in a band under the picture, also 
 --cut addon: the hotel's and the post office's add-on clips (apa-addon-hotel, apa-addon-post), from addon-present/.
 --cut transit: the ATM and the subway's gate (apa-addon-transit), from transit-present/ (film.mjs --stage transit).
 
-Inputs (artifacts/video/, git-ignored): full-present3/ and full-show3/ (full.mp4, marks.json: film.mjs --stage full,
---view present and show), fooled2/fooled.mp4 (--stage fooled; 11/9, the new town), rec1/rec1-cforce.mov (the 11/6 recording: only the
+Inputs (artifacts/video/, git-ignored): full-present4/ and full-show5/ (full.mp4, marks.json: film.mjs --stage full,
+--view present and show), fooled3/fooled.mp4 (--stage fooled; 11/10, the town with its homes, food trucks and hospital done), rec1/rec1-cforce.mov (the 11/6 recording: only the
 browser's page is cropped from it, never the screen around it) and checker-rec1.json (verify-demo on that run's
 evidence pack). The simulation's frames carry their own label (film.mjs); the real clip gets its own here.
 This ffmpeg has no drawtext and no libass: every text is a PNG drawn here and overlaid.
@@ -259,20 +259,22 @@ def main():
         return transit(a.out)
     work = os.path.join(a.out, "cut-%s-work" % a.cut)
     os.makedirs(work, exist_ok=True)
-    P = os.path.join(V, "full-present3/full.mp4")  # the town as of 11/9 (Aaron: 主片用新城鎮重新拍攝); 11/6's: -present2, -show2, fooled
-    S = os.path.join(V, "full-show3/full.mp4")
-    F = os.path.join(V, "fooled2/fooled.mp4")
+    P = os.path.join(V, "full-present4/full.mp4")  # the town as of 11/10 (Aaron: 主片請再重拍); 11/9's: -present3, -show3, fooled2; 11/6's: -present2, -show2, fooled
+    S = os.path.join(V, "full-show5/full.mp4")  # its tour waited 20 s: the food court and the east end (film.mjs)
+    F = os.path.join(V, "fooled3/fooled.mp4")
     R = os.path.join(V, "rec1/rec1-cforce.mov")
     for f in (P, S, F, R, os.path.join(V, "checker-rec1.json")):
         if not os.path.exists(f):
             sys.exit("cut: missing " + f + " (film.mjs, the 11/6 recording, verify-demo)")
-    pm = json.load(open(os.path.join(V, "full-present3/marks.json")))
-    sm = json.load(open(os.path.join(V, "full-show3/marks.json")))
+    pm = json.load(open(os.path.join(V, "full-present4/marks.json")))
+    sm = json.load(open(os.path.join(V, "full-show5/marks.json")))
     rep = json.load(open(os.path.join(V, "checker-rec1.json")))
     PAGE = (0, 176, 3840, 1984)  # the browser's page in rec1-cforce.mov (its tabs, address bar and bookmarks above y 176)
 
     def clip(src, start, length, **kw):
         return dict(kind="clip", src=src, start=start, len=length, **kw)
+
+    FOOD = 13.0  # S's tour this far in: the hotel leaving, the food court's trucks, clerks and customers, then the east end (Aaron 11/10)
 
     def png(name, *args, **kw):
         p = os.path.join(work, name + ".png")
@@ -293,7 +295,7 @@ def main():
         rows = [
             ("AI 已經可以替我們買東西了。可是讓 AI 替我花錢，我最怕三件事：被騙著亂花、個資被拿走、出了事說不清楚。",
              "AI can shop for us now. But letting it spend my money, I worry about three things.",
-             [(fears, 3.5), (clip(P, pm["tour"], 8.0), 6.5)]),
+             [(fears, 3.5), (clip(P, pm["tour"], 4.0), 3.0), (clip(S, sm["tour"] + FOOD, 4.5), 3.5)]),
             ("AI 只能提出要買什麼。家長先在自己的裝置上設好：這次最多花 1.5，超過 0.1 都要問我。",
              "The AI can only propose. The parent sets the limits on their own device: at most 1.50, over 0.10 comes back to them.",
              [(credential, 4.0), (clip(P, pm["books-start"] - 1.0, 8.0), 8.0)]),
@@ -319,7 +321,7 @@ def main():
         rows = [
             ("讓 AI 替我花錢，最怕被騙著亂花、個資被拿走、出了事說不清楚。",
              "Letting AI spend for me, I fear being tricked, losing my data, and not knowing what happened.",
-             [(fears, 4.0), (clip(P, pm["tour"], 8.5), 9.0), (clip(S, sm["tour"], 7.0), 7.0)]),
+             [(fears, 4.0), (clip(P, pm["tour"], 8.5), 9.0), (clip(S, sm["tour"] + FOOD - 2.0, 7.0), 7.0)]),
             ("AI 只能提出；替它跑的程式沒有私鑰；簽名在另一個系統帳號裡，只簽本人同意過的範圍；查帳的人只讀證據和鏈。",
              "The AI proposes; the program running it holds no key; signing lives apart, within the person's limits; the auditor reads only evidence and chain.",
              [(roles, 20.0)]),

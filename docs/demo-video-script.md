@@ -162,8 +162,8 @@ go run ./cmd/verify-demo --mode e1a --run-dir artifacts/e1a/<錄影那一場的�
   - 這版 ffmpeg 沒有 drawtext 和 libass，所以文字都先畫成圖再疊上去。字幕帶用上下拼接：直接疊加會多出一列像素，H.264 不接受。
 - 成品：`apa-demo-90s.mp4`（90 秒）、`apa-demo-180s.mp4`（180 秒），1920×1080、30 fps，各附兩份 SRT。
 
-**重做一次**（11/9 Aaron：「主片用新城鎮重新拍攝」，拍到新資料夾；11/6 的素材在 `full-present2`、`full-show2`、`fooled`，成品備份為 `apa-demo-90s-1106.*`、`apa-demo-180s-1106.*`）：
-1. 依序跑 `node scripts/video/film.mjs --stage full --view present --out artifacts/video/full-present3`、`--view show --out artifacts/video/full-show3`、`--stage fooled --out artifacts/video/fooled2`，大約各 3 分鐘。
+**重做一次**（11/9 Aaron：「主片用新城鎮重新拍攝」；11/10 住宅、餐車區與醫院改完後：「主片請再重拍」。每次拍到新資料夾：11/6 的素材在 `full-present2`、`full-show2`、`fooled`，成品備份為 `apa-demo-90s-1106.*`、`apa-demo-180s-1106.*`；11/9 的在 `full-present3`、`full-show3`、`fooled2`，成品備份為 `apa-demo-90s-1109.*`、`apa-demo-180s-1109.*`。11/10 起 `film.mjs` 的全景等 20 秒：地圖 11/8 加寬到 202 格後，原本的 9 秒在餐車區之前就進書店了；序幕前半是主持人頁的西段（醫院、住宅），後半是展示視窗的餐車區到東端）：
+1. 依序跑 `node scripts/video/film.mjs --stage full --view present --out artifacts/video/full-present4`、`--view show --out artifacts/video/full-show5`、`--stage fooled --out artifacts/video/fooled3`，大約各 3 分鐘。
 2. 再跑 `python3 -I scripts/video/cut.py --cut 90` 與 `--cut 180`。
 
 **加演短片（11/7，`docs/commercial-post-hotel.md` N6）**：郵局與飯店各一段，不改 90 秒與 3 分鐘版。

@@ -121,7 +121,9 @@ async function full(b, unityUp, demo) {
   const mark = (k) => { marks[k] = +(Date.now() / 1000 - t0).toFixed(2); log("film: " + k + " at " + marks[k] + " s"); };
   const receipts = () => view === "show" ? s.evaluate(`document.querySelectorAll("#show-receipts > *").length`) : b.evaluate(`document.querySelectorAll(".present-receipt").length`);
   await sleep(1500);
-  mark("tour"); await click("#present-tour"); await sleep(9000);
+  // 20 s: the tour reaches the food court about 11 s in and the east end about 20 s in (202 tiles at 8 a second since
+  // 11/8); at 9 s it stopped short of it (Aaron 11/10: 主片請再重拍, the food court's clerks and customers to be seen).
+  mark("tour"); await click("#present-tour"); await sleep(20000);
   const town = +arg("--town", "0"); // seconds in the town before any venue (Aaron 11/6: the buses at their stops)
   if (town > 0) { mark("town"); await sleep(town * 1000); }
   for (const venue of venues) {
