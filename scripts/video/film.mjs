@@ -4,7 +4,13 @@
 // in a new 0700 temporary directory, removed at the end; nothing under var/ is read or written but the Foundry
 // tools (var/tools); the chain is a fresh anvil on its own port; the approver is a CDP virtual authenticator.
 //
-//   node scripts/video/film.mjs [--stage up|sample|full|fooled|transit] [--out DIR]
+//   node scripts/video/film.mjs [--stage up|sample|full|fooled|transit|ekyc] [--ekyc SESSION] [--out DIR]
+//
+// --ekyc SESSION (docs/commercial-ekyc.md): the customers' attributes from that finished Didit verification
+// (apa-issuer ekyc --session, the key file var/ekyc/didit-sandbox.key: the one thing read under var/ besides the
+// tools, and it asks Didit) instead of the script's own. Stage ekyc films Didit's hosted sandbox page alone, as far
+// as its selfie's instructions (the camera wants a face; none is filmed): a new sandbox session, placeholder
+// cards drawn here, no stack; ekyc.mp4.
 //
 // Stage up: the local paying stack (chain, Signer, facilitator, Host), both approvers enrolled, the host page
 // with its tokens; a screenshot, then everything stopped. Stage sample (the 20-30 s sample Aaron sees first):
@@ -22,6 +28,7 @@ const repo = resolve(new URL("../..", import.meta.url).pathname);
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const stage = arg("--stage", "up");
 const out = resolve(arg("--out", join(repo, "artifacts/video/film-" + new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z"))));
+const EKYC_KEY = join(repo, "var/ekyc/didit-sandbox.key"); // Didit's sandbox API key (0600; never printed)
 const CHAIN_PORT = 8546; // its own anvil: a kept local chain (8545) is never touched
 const HOST = "127.0.0.1:8402", ORIGIN = "http://localhost:8402", FAC = "127.0.0.1:8403"; // the Signer's WebAuthn origin is localhost:8402
 mkdirSync(out, { recursive: true });
@@ -74,9 +81,10 @@ function capture(page, dir) {
   return async () => { on = false; await page.send("Page.stopScreencast").catch(() => {}); return frames; };
 }
 const LABEL = "示意動畫：fake Agent・本機測試鏈（不是實跑）";
+const EKYC_LABEL = "Didit 的沙盒驗證頁：測試資料，沒有驗證真人";
 // encode: the frames at their own times as a 30 fps H.264 file, the simulation's label on every frame (this
 // ffmpeg has no drawtext: the label is a PNG drawn here, overlaid).
-function encode(frames, dir, file) {
+function encode(frames, dir, file, text = LABEL) {
   const list = join(dir, "frames.txt");
   const lines = [];
   frames.forEach((x, i) => { lines.push("file '" + x.f + "'"); lines.push("duration " + Math.max(0.001, ((frames[i + 1] || x).t - x.t) || 1 / 30).toFixed(4)); });
@@ -91,7 +99,7 @@ t = sys.argv[1]
 w = int(ImageDraw.Draw(Image.new("RGBA", (1, 1))).textlength(t, font=f)) + 28
 im = Image.new("RGBA", (w, 46), (0, 0, 0, 140))
 ImageDraw.Draw(im).text((14, 6), t, font=f, fill=(255, 255, 255, 255))
-im.save(sys.argv[2])`, LABEL, label]);
+im.save(sys.argv[2])`, text, label]);
   execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", list, "-i", label,
     "-filter_complex", "[0:v]scale=1920:1080,fps=30[v];[v][1:v]overlay=28:H-h-28", "-c:v", "libx264", "-pix_fmt", "yuv420p", file], { stdio: "inherit" });
 }
@@ -293,8 +301,75 @@ async function sample(b, unityUp) {
   log("film: " + join(out, "sample.mp4"));
 }
 
+// ekyc: Didit's hosted sandbox page, filmed from its first screen to the selfie's instructions: the document
+// chosen (Taiwan's ID card), two placeholder cards uploaded (the sandbox takes any picture and answers with its
+// own sample document). The page is zoomed to 1.6 times its size: its card fills the 1920 x 1080 frame.
+async function ekyc() {
+  const key = readFileSync(EKYC_KEY, "utf8").trim();
+  const api = async (method, path, body) => {
+    const r = await fetch("https://verification.didit.me" + path, { method, headers: { "x-api-key": key, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    if (!r.ok) throw new Error("didit " + method + " " + path + ": " + r.status);
+    return r.json();
+  };
+  const wf = (await api("GET", "/v3/workflows/")).results.find((w) => w.is_default && w.workflow_type === "kyc");
+  if (!wf) throw new Error("didit: no default KYC workflow");
+  const made = await api("POST", "/v3/session/", { workflow_id: wf.workflow_id, vendor_data: "film-" + Date.now(), language: "zh-TW", sandbox_scenario: "approve" });
+  const cards = ["front", "back"].map((n) => join(tmp, "card-" + n + ".png"));
+  execFileSync("python3", ["-I", "-c", `
+import sys
+from PIL import Image, ImageDraw, ImageFont
+f = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", 44)
+for path in sys.argv[1:]:
+    im = Image.new("RGB", (1012, 638), (235, 238, 245))
+    d = ImageDraw.Draw(im)
+    d.rectangle((8, 8, 1003, 629), outline=(90, 100, 130), width=6)
+    d.text((70, 280), "SANDBOX TEST CARD - NOT A REAL ID", font=f, fill=(40, 50, 90))
+    im.save(path)`, ...cards]);
+  b = await startChrome(join(tmp, "chrome"));
+  await b.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
+  const has = (t) => `[...document.querySelectorAll("button")].some((x) => x.innerText.includes(${JSON.stringify(t)}) && !x.disabled)`;
+  const at = (t) => b.evaluate(`(() => { const e = [...document.querySelectorAll("button")].find((x) => x.innerText.includes(${JSON.stringify(t)}) && !x.disabled); if (!e) return null; e.scrollIntoView({ block: "center" }); const q = e.getBoundingClientRect(); return [q.x + q.width / 2, q.y + q.height / 2]; })()`); // in sight first: the page scrolls
+  // press: a trusted click (a script's click() opens no file chooser).
+  const press = async (t) => {
+    if (!(await b.waitFor(has(t), 30000))) throw new Error("didit's page shows no " + t);
+    await at(t); await sleep(500);
+    const [x, y] = await at(t);
+    for (const type of ["mousePressed", "mouseReleased"]) await b.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+  };
+  await b.send("Page.navigate", { url: made.url });
+  if (!(await b.waitFor(has("繼續"), 40000))) throw new Error("didit's page did not start");
+  await b.evaluate(`document.documentElement.style.zoom = "1.6"`); // the screencast is in CSS pixels: the page's card larger in the frame, its SANDBOX line in sight
+  await sleep(800);
+  const frames = join(out, "ekyc-frames");
+  const stop = capture(b, frames);
+  await sleep(2500);
+  await press("繼續"); await sleep(400);
+  await b.waitFor(has("國民身份證"), 20000); await sleep(1800);
+  await press("國民身份證"); await sleep(400);
+  await b.waitFor(has("上傳證件照片"), 20000); await sleep(1500);
+  await press("上傳證件照片");
+  await b.send("Page.setInterceptFileChooserDialog", { enabled: true });
+  for (const f of cards) {
+    const opened = new Promise((res) => b.on("Page.fileChooserOpened", res));
+    await press("從電腦中選擇");
+    const ev = await Promise.race([opened, sleep(8000).then(() => null)]);
+    if (!ev) throw new Error("didit's page opened no file chooser");
+    await b.send("DOM.setFileInputFiles", { files: [f], backendNodeId: ev.backendNodeId });
+    await sleep(1800);
+  }
+  await b.send("Page.setInterceptFileChooserDialog", { enabled: false });
+  await press("繼續");
+  if (!(await b.waitFor(has("拍攝自拍照"), 40000))) throw new Error("didit's page did not reach the selfie");
+  await sleep(3500);
+  const got = await stop();
+  log("film: ekyc " + got.length + " frames; session " + made.session_id + " (sandbox, left unfinished)");
+  encode(got, frames, join(out, "ekyc.mp4"), EKYC_LABEL);
+  log("film: " + join(out, "ekyc.mp4"));
+}
+
 let demo, b;
-try {
+try { stack: {
+  if (stage === "ekyc") { await ekyc(); break stack; } // Didit's page alone: no chain, Signer or Host
   for (const p of [CHAIN_PORT, 8402, 8403]) if (!free(p)) throw new Error("127.0.0.1:" + p + " is in use: stop it first");
   log("film: building");
   for (const c of ["demo", "fake-claude", "apa-issuer", "apa-signer", "apa-facilitator"]) execFileSync("go", ["build", "-o", join(bin, c), "./cmd/" + c], { cwd: repo, env, stdio: "inherit" });
@@ -340,7 +415,9 @@ try {
   // 5 the credentials (a family: B under 18) and the Host with the fake Agent, paying through the Signer.
   const cred = join(tmp, "cred");
   execFileSync(join(bin, "apa-issuer"), ["init", "--dir", cred, "--issuer", "issuer-demo", "--consumers", "consumer-a,consumer-b"]);
-  execFileSync(join(bin, "apa-issuer"), ["subjects", "--dir", cred, "--subjects", SUBJECTS]);
+  const session = arg("--ekyc", "");
+  if (session) log("film: " + execFileSync(join(bin, "apa-issuer"), ["ekyc", "--dir", cred, "--consumer", "consumer-a", "--dependents", "consumer-b", "--key-file", EKYC_KEY, "--session", session, "--wait", "0"]).toString().trim());
+  else execFileSync(join(bin, "apa-issuer"), ["subjects", "--dir", cred, "--subjects", SUBJECTS]);
   const state = join(tmp, "state");
   demo = startDemo({ repo, bin, catalog: join(repo, "testdata/demo/scenarios-p2.json"), unityBuild: join(repo, "unity/AgentPaymentAuthority/Build/WebGL/Build"), state, home, addr: HOST,
     extra: ["--registry", join(chain, "registry.json"), "--payments", payments, "--approvals-signer", sock, "--authenticator-source", "virtual", "--credential-dir", cred] });
@@ -388,7 +465,7 @@ try {
   else if (stage === "fooled") await fooled(b);
   else if (stage === "transit") await transit(b);
   else if (stage !== "up") throw new Error("stage " + stage + " is not written yet");
-} finally {
+} } finally {
   if (b) b.close();
   if (demo) await demo.stop().catch(() => {});
   for (const p of procs.reverse()) { try { p.kill("SIGINT"); } catch { /* gone */ } }

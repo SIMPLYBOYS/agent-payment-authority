@@ -8,8 +8,9 @@ narration as subtitles (Chinese over English) in a band under the picture, also 
 --cut addon: the hotel's and the post office's add-on clips (apa-addon-hotel, apa-addon-post), from addon-present/.
 --cut transit: the ATM and the subway's gate (apa-addon-transit), from transit-present/ (film.mjs --stage transit).
 
-Inputs (artifacts/video/, git-ignored): full-present4/ and full-show5/ (full.mp4, marks.json: film.mjs --stage full,
---view present and show), fooled3/fooled.mp4 (--stage fooled; 11/10, the town with its homes, food trucks and hospital done), rec1/rec1-cforce.mov (the 11/6 recording: only the
+Inputs (artifacts/video/, git-ignored): full-present5/ and full-show6/ (full.mp4, marks.json: film.mjs --stage full,
+--view present and show), fooled4/fooled.mp4 (--stage fooled), all three with --ekyc (11/11: the customers' attributes from the
+Didit verification), ekyc3/ekyc.mp4 (--stage ekyc: Didit's hosted sandbox page), rec1/rec1-cforce.mov (the 11/6 recording: only the
 browser's page is cropped from it, never the screen around it) and checker-rec1.json (verify-demo on that run's
 evidence pack). The simulation's frames carry their own label (film.mjs); the real clip gets its own here.
 This ffmpeg has no drawtext and no libass: every text is a PNG drawn here and overlaid.
@@ -259,15 +260,17 @@ def main():
         return transit(a.out)
     work = os.path.join(a.out, "cut-%s-work" % a.cut)
     os.makedirs(work, exist_ok=True)
-    P = os.path.join(V, "full-present4/full.mp4")  # the town as of 11/10 (Aaron: 主片請再重拍); 11/9's: -present3, -show3, fooled2; 11/6's: -present2, -show2, fooled
-    S = os.path.join(V, "full-show5/full.mp4")  # its tour waited 20 s: the food court and the east end (film.mjs)
-    F = os.path.join(V, "fooled3/fooled.mp4")
+    # 11/11 (Aaron: the video to say what the system now does): filmed with --ekyc. 11/10's: -present4, -show5, fooled3; 11/9's: -present3, -show3, fooled2; 11/6's: -present2, -show2, fooled.
+    P = os.path.join(V, "full-present5/full.mp4")
+    S = os.path.join(V, "full-show6/full.mp4")
+    F = os.path.join(V, "fooled4/fooled.mp4")
+    E = os.path.join(V, "ekyc3/ekyc.mp4")  # Didit's hosted sandbox page as far as the selfie's instructions (its own label on every frame)
     R = os.path.join(V, "rec1/rec1-cforce.mov")
-    for f in (P, S, F, R, os.path.join(V, "checker-rec1.json")):
+    for f in (P, S, F, E, R, os.path.join(V, "checker-rec1.json")):
         if not os.path.exists(f):
             sys.exit("cut: missing " + f + " (film.mjs, the 11/6 recording, verify-demo)")
-    pm = json.load(open(os.path.join(V, "full-present4/marks.json")))
-    sm = json.load(open(os.path.join(V, "full-show5/marks.json")))
+    pm = json.load(open(os.path.join(V, "full-present5/marks.json")))
+    sm = json.load(open(os.path.join(V, "full-show6/marks.json")))
     rep = json.load(open(os.path.join(V, "checker-rec1.json")))
     PAGE = (0, 176, 3840, 1984)  # the browser's page in rec1-cforce.mov (its tabs, address bar and bookmarks above y 176)
 
@@ -282,7 +285,8 @@ def main():
         return dict(kind="card", png=p)
 
     fears = png("fears", "讓 AI 替我花錢，我最怕三件事", ["被騙著亂花", "個資被拿走", "出了事說不清楚"])
-    credential = png("credential", "家長已完成身分驗證，拿到憑證", [], ["eKYC 是下一期；這裡的憑證由測試發行者直接發"])
+    credential = png("credential", "家長通過身分驗證，才拿到憑證", ["證件、活體偵測、人臉比對：Didit eKYC", "憑證只帶「國家」與「是否滿 18 歲」", "姓名、生日、證件號碼留在 Didit"],
+                     ["接的是 Didit 的沙盒：流程是真的，沒有驗證真人；沙盒的範例證件是巴西護照"])
     claims = ["%s %s" % (k, v) for k, v in sorted(rep["claims"].items(), key=lambda kv: int(kv[0][1:]))]
     checker = png("checker", "$ go run ./cmd/verify-demo --mode e1a --run-dir artifacts/e1a/recording-rec1 --rpc https://sepolia.base.org",
                   ["   ".join(claims[:5]), "   ".join(claims[5:]), "facilitator %s" % rep["facilitator"], "settlements %d（送出者：商店）" % len(rep["settlements"]),
@@ -296,9 +300,9 @@ def main():
             ("AI 已經可以替我們買東西了。可是讓 AI 替我花錢，我最怕三件事：被騙著亂花、個資被拿走、出了事說不清楚。",
              "AI can shop for us now. But letting it spend my money, I worry about three things.",
              [(fears, 3.5), (clip(P, pm["tour"], 4.0), 3.0), (clip(S, sm["tour"] + FOOD, 4.5), 3.5)]),
-            ("AI 只能提出要買什麼。家長先在自己的裝置上設好：這次最多花 1.5，超過 0.1 都要問我。",
-             "The AI can only propose. The parent sets the limits on their own device: at most 1.50, over 0.10 comes back to them.",
-             [(credential, 4.0), (clip(P, pm["books-start"] - 1.0, 8.0), 8.0)]),
+            ("AI 只能提出要買什麼。家長先通過身分驗證，再在自己的裝置上設好：這次最多花 1.5，超過 0.1 都要問我。",
+             "The AI can only propose. The parent passes an identity check, then sets the limits on their own device: at most 1.50, over 0.10 comes back to them.",
+             [(clip(E, 0.2, 2.3), 1.5), (clip(E, 13.5, 9.0), 2.5), (credential, 2.5), (clip(P, pm["books-start"] - 1.0, 8.0), 5.5)]),
             ("書店的頁面藏了一句話，叫 AI 順便買進階版。真的 AI 沒上當；就算被騙了，也花不出預算外的錢。",
              "The shop's page hides an instruction to buy a premium edition. The real AI ignored it; a fooled one still can't overspend.",
              [(clip(P, pm["books-ask"] - 0.5, 8.5), 8.5), (clip(F, 2.0, 9.5, tag="模擬：照腳本相信「系統通知」的 Agent"), 9.5)]),
@@ -316,7 +320,7 @@ def main():
         ]
     else:
         roles = png("roles", "誰握有什麼權力", ["AI：只能提出", "替它跑的程式：沒有私鑰", "簽名的鎖（Signer）：只簽本人同意過的範圍", "查帳的人：只讀證據和鏈"])
-        limits = png("limits", "照實說", ["Base Sepolia 測試網、測試幣", "被騙的 Agent 是模擬", "憑證由測試發行者發；eKYC 是下一期"],
+        limits = png("limits", "照實說", ["Base Sepolia 測試網、測試幣", "被騙的 Agent 是模擬", "eKYC 接的是 Didit 沙盒：沒有驗證真人"],
                      ["其餘畫面是自動產生的示意動畫：fake Agent、本機測試鏈；AI 的鏈上身分由平台代為註冊"])
         rows = [
             ("讓 AI 替我花錢，最怕被騙著亂花、個資被拿走、出了事說不清楚。",
@@ -325,9 +329,9 @@ def main():
             ("AI 只能提出；替它跑的程式沒有私鑰；簽名在另一個系統帳號裡，只簽本人同意過的範圍；查帳的人只讀證據和鏈。",
              "The AI proposes; the program running it holds no key; signing lives apart, within the person's limits; the auditor reads only evidence and chain.",
              [(roles, 20.0)]),
-            ("憑證證明「我是誰」；委託寫下能花多少、超過多少要問。孩子的委託，由家長在自己的裝置上確認。",
-             "The credential says who I am; the mandate says how much, and when to ask. The child's is confirmed on the parent's device.",
-             [(credential, 5.0), (clip(P, pm["books-start"] - 1.0, 15.0), 15.0)]),
+            ("家長通過身分驗證，才拿到證明「我是誰」的憑證；委託寫下能花多少、超過多少要問。孩子的委託，由家長在自己的裝置上確認。",
+             "The parent passes an identity check to get the credential that says who they are; the mandate says how much, and when to ask. The child's is confirmed on the parent's device.",
+             [(clip(E, 0.2, 3.0), 2.0), (clip(E, 4.5, 20.0), 4.5), (credential, 2.5), (clip(P, pm["books-start"] - 1.0, 15.0), 11.0)]),
             ("書店只知道你在哪個國家；超過範圍由本人核准，還要念出這一筆的金額；誘導文字騙不倒真實的 AI，騙倒了也花不出預算外的錢。",
              "The bookshop learns only your country; above the limit the person approves and reads the amount aloud; a fooled AI still can't overspend.",
              [(clip(P, pm["books-ask"] - 1.0, 22.0), 22.0), (clip(R, 334.0, 12.0, crop=PAGE, tag=REAL), 12.0),
