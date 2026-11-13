@@ -66,7 +66,16 @@ type approvals struct {
 	agent  string // fake | live (E1-a): the host's Agent
 	payCap string // P2: --payments' environment, a person's approval is paid (sources say it); "" without
 	out    io.Writer
-	mu     sync.Mutex // ponytail: one approval operation at a time on this host; per-session locks if it ever matters
+	// locks: one approval operation at a time for each consumer (every attempt is one consumer's);
+	// another consumer's approval never waits for this one's device or voice check.
+	locks sync.Map // consumer -> *sync.Mutex
+}
+
+// lock takes the consumer's approval lock.
+func (h *approvals) lock(consumer string) (unlock func()) {
+	m, _ := h.locks.LoadOrStore(consumer, new(sync.Mutex))
+	m.(*sync.Mutex).Lock()
+	return m.(*sync.Mutex).Unlock
 }
 
 // sources are the three origins every answer names apart (design 2).
@@ -212,8 +221,7 @@ func (a *api) approvalChallenge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h := a.approve
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	defer h.lock(g.ConsumerID)()
 	status, out := h.challenge(g.ConsumerID, r.PathValue("session_id"), req.RequestID, req.Decision)
 	h.answer(w, "challenge", g.ConsumerID, r.PathValue("session_id"), status, out)
 }
@@ -230,8 +238,7 @@ func (a *api) approvalAssertion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h := a.approve
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	defer h.lock(g.ConsumerID)()
 	status, out := h.assertion(g.ConsumerID, r.PathValue("session_id"), req.RequestID, req.VerifyRequestID, req.Assertion, req.Voice)
 	h.answer(w, "assertion", g.ConsumerID, r.PathValue("session_id"), status, out)
 }
@@ -243,8 +250,7 @@ func (a *api) approvalCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h := a.approve
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	defer h.lock(g.ConsumerID)()
 	status, out := h.cancel(g.ConsumerID, r.PathValue("session_id"), r.PathValue("request_id"))
 	h.answer(w, "cancel", g.ConsumerID, r.PathValue("session_id"), status, out)
 }
@@ -255,8 +261,7 @@ func (a *api) approvalStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h := a.approve
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	defer h.lock(g.ConsumerID)()
 	status, out := h.status(g.ConsumerID, r.PathValue("session_id"), r.PathValue("request_id"))
 	h.answer(w, "status", g.ConsumerID, r.PathValue("session_id"), status, out)
 }

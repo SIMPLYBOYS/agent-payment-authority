@@ -1,5 +1,6 @@
 // Package payflow is the Host's payment worker (P2, docs/commercial-p2-host.md
-// 3, 7): one payment at a time (decision 7), each moved by its Store state
+// 3, 7): each payment moved on its own, beside the others (decision 7 as
+// revised 11/14: no consumer's payment waits for another's), by its Store state
 // through reserve (the budget relayer, tx#1), sign (the payment Signer),
 // submit (the shop, tx#2), settle and deliver. Every step is recorded in
 // the Store before its outside call, and every outside call is one the
@@ -137,9 +138,10 @@ var (
 // Worker moves payments. Margin is the seconds before valid_before after
 // which nothing new is started for a payment (a reservation, a signature):
 // more than the shop's own margin (5 s) plus the time to sign, or the shop
-// refuses a payment already reserved and signed. Step is not called while
-// Run runs (one payment at a time; a second caller is still safe, every
-// outside call being idempotent). Log, when set, gets each payment error
+// refuses a payment already reserved and signed. Run moves each payment in
+// its own goroutine and never one payment twice at once (a second caller of
+// Step is still safe, every outside call being idempotent). Log, when set,
+// gets each payment error
 // other than ErrPending (intent "" for the Store's list). Before, when set,
 // runs in Run's goroutine before each round: the Host's payment starter.
 type Worker struct {
@@ -157,6 +159,27 @@ type Worker struct {
 	kick    chan struct{}
 	mu      sync.Mutex
 	asked   map[string][2]uint64 // intent -> the next time the shop is asked again, the wait before it
+	moving  map[string]bool      // intents a goroutine of Run is moving now
+}
+
+// claim marks intent as being moved; false when it already is.
+func (w *Worker) claim(intent string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.moving == nil {
+		w.moving = map[string]bool{}
+	}
+	if w.moving[intent] {
+		return false
+	}
+	w.moving[intent] = true
+	return true
+}
+
+func (w *Worker) release(intent string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.moving, intent)
 }
 
 // shopDue: a payment sent and not yet seen settled asks the shop again (the
@@ -209,9 +232,11 @@ func (w *Worker) Kick() {
 	}
 }
 
-// Run recovers, then moves every open payment, one at a time, every Every
-// or when kicked, until ctx ends. A payment's error stays with it: the
-// next round asks again.
+// Run recovers, then, every Every or when kicked until ctx ends, starts
+// moving each open payment not being moved already, each in its own
+// goroutine: one payment waiting for its chain or its shop never holds up
+// another. It returns once the moves under way have. A payment's error
+// stays with it: the next round asks again.
 func (w *Worker) Run(ctx context.Context) error {
 	kick, every := w.kicks(), w.Every
 	if every == 0 {
@@ -220,6 +245,8 @@ func (w *Worker) Run(ctx context.Context) error {
 	if err := w.Recover(ctx); err != nil {
 		return err
 	}
+	var moves sync.WaitGroup
+	defer moves.Wait()
 	for {
 		if w.Before != nil {
 			w.Before(ctx)
@@ -228,10 +255,21 @@ func (w *Worker) Run(ctx context.Context) error {
 		if err != nil {
 			w.log("", err)
 		}
-		for _, p := range ps {
-			if _, err := w.Step(ctx, p); err != nil && !errors.Is(err, ErrPending) {
-				w.log(p.IntentHash, err)
+		for _, q := range ps {
+			if !w.claim(q.IntentHash) {
+				continue
 			}
+			moves.Go(func() {
+				defer w.release(q.IntentHash)
+				// Read again: the round's list may be older than a move that just ended.
+				p, err := w.Store.PaymentOf(q.ConsumerID, q.TaskID, q.PurchaseOrderID)
+				if err == nil && slices.Contains(open, p.State) {
+					_, err = w.Step(ctx, p)
+				}
+				if err != nil && !errors.Is(err, ErrPending) {
+					w.log(q.IntentHash, err)
+				}
+			})
 		}
 		select {
 		case <-ctx.Done():
@@ -574,51 +612,76 @@ func (w *Worker) delivered(p store.Payment, ans ShopAnswer) (store.Payment, erro
 // (Delegations, id@version: "consumer/payee" first, then the consumer's
 // own; docs/commercial-p2b.md B5), an approved Ask under its grant,
 // once the task's registration has succeeded (or was refused for good: the
-// payment then fails where it is seen). A Store refusal is logged, not
-// asked again until a restart; a registration not refused (a node, or one
-// still pending), or a start that failed without a code, is asked again
-// next round.
+// payment then fails where it is seen). Each registration runs in its own
+// goroutine (it waits for its transaction): Start never waits for one, and
+// a task's payments start as soon as its own has. A Store refusal is
+// logged, not asked again until a restart; a registration not refused (a
+// node, or one still pending), or a start that failed without a code, is
+// asked again next round.
 type Starter struct {
 	Store       *store.Store
 	Register    func(ctx context.Context, taskID, consumerID string, budget uint64) error
 	Delegations map[string]string
 	Log         func(what string, err error)
+	mu          sync.Mutex
 	tried       map[string]bool
 	registered  map[string]bool
+	registering map[string]bool
+	wg          sync.WaitGroup // the registrations under way (tests wait for them)
 }
 
 func (s *Starter) Start(ctx context.Context) {
-	if s.tried == nil {
-		s.tried, s.registered = map[string]bool{}, map[string]bool{}
-	}
 	ts, err := s.Store.PayTasks()
 	if err != nil {
 		s.log("payments", err)
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tried == nil {
+		s.tried, s.registered, s.registering = map[string]bool{}, map[string]bool{}, map[string]bool{}
+	}
 	for _, t := range ts {
-		if !s.registered[t.TaskID] {
-			b, err := t.BudgetInitial.Units()
-			if err == nil {
-				err = s.Register(ctx, t.TaskID, t.ConsumerID, b)
-			}
-			r, refused := refusal(err)
-			if err == nil || refused && r != "TASK_REGISTRATION_PENDING" && r != "RELAYER_NONCE_BLOCKED" {
-				s.registered[t.TaskID] = true
-			}
-			if err != nil && ctx.Err() == nil {
-				s.log("registration "+t.TaskID, err)
-			}
+		switch {
+		case s.registered[t.TaskID]:
+			s.beginAll(t)
+		case !s.registering[t.TaskID]:
+			// not registered yet: a payment now would end TASK_NOT_REGISTERED
+			s.registering[t.TaskID] = true
+			s.wg.Add(1)
+			go s.register(ctx, t)
 		}
-		if !s.registered[t.TaskID] {
-			continue // not registered yet: a payment now would end TASK_NOT_REGISTERED
+	}
+}
+
+func (s *Starter) register(ctx context.Context, t store.PayTask) {
+	defer s.wg.Done()
+	b, err := t.BudgetInitial.Units()
+	if err == nil {
+		err = s.Register(ctx, t.TaskID, t.ConsumerID, b)
+	}
+	if err != nil && ctx.Err() == nil {
+		s.log("registration "+t.TaskID, err)
+	}
+	r, refused := refusal(err)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.registering, t.TaskID)
+	if err == nil || refused && r != "TASK_REGISTRATION_PENDING" && r != "RELAYER_NONCE_BLOCKED" {
+		s.registered[t.TaskID] = true
+		if ctx.Err() == nil {
+			s.beginAll(t)
 		}
-		for _, po := range t.Allowed {
-			s.begin(t, po, s.delegation(t.ConsumerID, t.PayTo[po]))
-		}
-		for _, po := range t.Approved {
-			s.begin(t, po, "")
-		}
+	}
+}
+
+// beginAll starts the task's decided purchases (under s.mu).
+func (s *Starter) beginAll(t store.PayTask) {
+	for _, po := range t.Allowed {
+		s.begin(t, po, s.delegation(t.ConsumerID, t.PayTo[po]))
+	}
+	for _, po := range t.Approved {
+		s.begin(t, po, "")
 	}
 }
 

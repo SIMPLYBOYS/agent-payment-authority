@@ -19,7 +19,7 @@
 | A1 | **委託一律是模擬**：主持人扮演客人按確認（`cmd/demo/sim.go`）；記錄寫死 `ConfirmMethod: simulated`（`internal/store/pay.go:295`），證據標 `fixture/simulated`。真實的只有每一筆付款的 Ask 核准（裝置＋語音）。§7 的最終條件表其實沒有「本人確認委託」這一列 | 觀眾會問「客人在哪裡授權的？」：故事的第一步是假的 | 本人以已登記的裝置（可加語音）確認委託：Signer 新增綁定委託內容的 challenge（可沿用核准的流程與語音），Host 以核准路由取代模擬路由，契約與證據對照表允許 `webauthn`，checker 增加對應的 claim；`/opt` 的 Signer 要重新部署 | 中（約 600～1,200 行含測試）＋本機彩排＋一次 testnet |
 | A2 | **付款的 live 情境只有 consumer-a**（`testdata/demo/scenarios-e1a.json`），所以同時執行上限算出來是 1。registry、委託 `dlg-tb`、approver-b 都已經有 B 的 | 「多位客人」只出現在沒付款的 M-C 和 fake 的 M-B | 加入 consumer-b 的付款情境，上限變 2；確認 approver-b 在 `/opt` 的裝置與語音、B 的測試幣、每日上限 | 小（多半是設定）＋彩排＋testnet |
 | A3 | **主持人一次只能扮演一位客人**；「一起開始」會排除付款情境（`web/host.js:576-580`）；核准面板只顯示選取的客人 | 就算有兩位客人，操作上也是一個一個來，看不出「同時」 | 讓兩位客人的委託可以先後確認、一起開始；核准面板同時列出兩位的待核准 | 小到中 |
-| A4 | **付款是依序處理**：付款工作一次一筆、relayer 一把鎖、一把 gas 金鑰（`internal/budget/relayer.go:57`）；決定第 7 項「P2 先設 1」 | A2＋A3 做完，兩位客人可以同時購物，但兩筆付款會排隊。roadmap 明說流程重疊不能稱為高併發付款 | 真正同時付款：relayer 的 nonce 管理或逐 task 鎖、商店結算金鑰的 nonce、付款工作的並行設定、證明付款步驟真的重疊的測試 | 中到大 |
+| A4 | **（11/14 已做：付款同時進行，`docs/commercial-p2-host.md` §12.2）** **付款是依序處理**：付款工作一次一筆、relayer 一把鎖、一把 gas 金鑰（`internal/budget/relayer.go:57`）；決定第 7 項「P2 先設 1」 | A2＋A3 做完，兩位客人可以同時購物，但兩筆付款會排隊。roadmap 明說流程重疊不能稱為高併發付款 | 真正同時付款：relayer 的 nonce 管理或逐 task 鎖、商店結算金鑰的 nonce、付款工作的並行設定、證明付款步驟真的重疊的測試 | 中到大 |
 | A5 | 身分與憑證都是固定的測試資料：consumer-a／b、測試 issuer（issuer、holder、verifier 都在同一個程序裡）、兩位核准人其實是同一人同一台裝置 | 懂的觀眾會看出來，但不影響主線 | 展示時照實說明；必要時讓 B 用另一台裝置或另一個人 | 小（說明）／中（換人換裝置） |
 
 ## 3 畫面呈現

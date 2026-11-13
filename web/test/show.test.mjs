@@ -49,26 +49,6 @@ test("in flight: paying, then confirming; never paid before the chain says so", 
   assert.equal(at(5).steps[4].text, "付款完成，正在交付");
 });
 
-test("two customers: a payment ready while another is in progress is behind it; the window says payments go in order", () => {
-  const at = (c, k) => A.showCustomer(c, snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid.slice(0, k)]), DLG);
-  const q = A.showQueue([at("consumer-a", 2), at("consumer-b", 0)], "local_anvil");
-  assert.equal(q.note, "客人同時選購；付款由 Host 依序處理，一次處理一筆；一筆等鏈上確認太久時，會先處理下一筆。");
-  assert.equal(q.models[0].steps[3].text, "預留預算中（第 1 筆鏈上交易）");
-  assert.equal(q.models[1].steps[3].text, "排在前一筆付款之後（Host 依序處理付款）");
-  assert.equal(q.models[1].caption, "客人 B・付款：排在前一筆付款之後（Host 依序處理付款）");
-  // A confirming, or A delivering: B is started only at the worker's next round (reviews 2, 3).
-  assert.equal(A.showQueue([at("consumer-a", 4), at("consumer-b", 0)], "local_anvil").models[1].steps[3].text, "排在前一筆付款之後（Host 依序處理付款）");
-  assert.equal(A.showQueue([at("consumer-a", 5), at("consumer-b", 0)], "local_anvil").models[1].steps[3].text, "排在前一筆付款之後（Host 依序處理付款）");
-  // Nothing on its way (the other one is paid, or both only ready): "準備付款" as it is.
-  assert.equal(A.showQueue([at("consumer-a", 7), at("consumer-b", 0)], "local_anvil").models[1].steps[3].text, "準備付款");
-  assert.equal(A.showQueue([at("consumer-a", 0), at("consumer-b", 0)], "local_anvil").models[1].steps[3].text, "準備付款");
-  // One customer shopping (the other's slot has no task yet), or a host that does not pay: no note, nothing changed.
-  assert.deepEqual(A.showQueue([at("consumer-b", 0)], "local_anvil"), { models: [at("consumer-b", 0)], note: "" });
-  const idle = A.showCustomer("consumer-b", null, DLG);
-  assert.deepEqual(A.showQueue([at("consumer-a", 2), idle], "local_anvil"), { models: [at("consumer-a", 2), idle], note: "" });
-  assert.equal(A.showQueue([at("consumer-a", 2), at("consumer-b", 0)], "unavailable").note, "");
-});
-
 test("an Ask: waiting, approved by device with the voice, a virtual authenticator as such", () => {
   const ask = base("Ask", "HUMAN_APPROVAL_REQUIRED");
   const w = A.showCustomer("consumer-a", snap(ask), DLG, { authenticator: "device" });

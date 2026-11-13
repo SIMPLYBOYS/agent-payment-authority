@@ -54,9 +54,28 @@ type Relayer struct {
 	clock func() uint64
 	poll  time.Duration
 	wait  time.Duration // the longest one call waits for a receipt
-	// ponytail: one lock for every task and each key's nonce; per-task locks
-	// and a nonce manager if two consumers' reservations must overlap.
-	mu sync.Mutex
+	// mu covers the keys' nonces: the open transactions settled, and a new
+	// one prepared, written and sent, so the next one's pending nonce is
+	// past it. Proving and waiting for a receipt hold only the task's own
+	// lock (taskLock): one consumer's reservation never waits for another's.
+	mu    sync.Mutex
+	tasks sync.Map // task ID -> *sync.Mutex
+}
+
+// taskLock serializes one task's registration and reservations: its
+// commitment is spent one order at a time.
+// ponytail: never removed; a host has a few tasks.
+func (r *Relayer) taskLock(taskID string) (unlock func()) {
+	m, _ := r.tasks.LoadOrStore(taskID, new(sync.Mutex))
+	m.(*sync.Mutex).Lock()
+	return m.(*sync.Mutex).Unlock
+}
+
+// settle is settleOpen under the nonce lock.
+func (r *Relayer) settle(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.settleOpen(ctx)
 }
 
 const schema = `
@@ -399,10 +418,9 @@ func (r *Relayer) settleOpen(ctx context.Context) error {
 // finishes a registration left unconfirmed, and refuses another consumer
 // or balance.
 func (r *Relayer) RegisterTask(ctx context.Context, taskID, consumerID string, balance uint64) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.taskLock(taskID)()
 	// First: this task's own open registration may be decided, or signed again.
-	if err := r.settleOpen(ctx); err != nil {
+	if err := r.settle(ctx); err != nil {
 		return err
 	}
 	var have struct {
@@ -424,9 +442,6 @@ func (r *Relayer) RegisterTask(ctx context.Context, taskID, consumerID string, b
 	default:
 		return r.finishRegistration(ctx, taskID, have.raw, have.hash, have.nonce, true)
 	}
-	if err := r.capped(ctx); err != nil {
-		return err
-	}
 	rv, err := r.random(ctx)
 	if err != nil {
 		return err
@@ -443,26 +458,48 @@ func (r *Relayer) RegisterTask(ctx context.Context, taskID, consumerID string, b
 	if err != nil {
 		return err
 	}
-	floor, err := r.floor(ctx, `SELECT max(register_nonce) FROM tasks WHERE state = 'registering'`)
+	raw, hash, nonce, err := r.send(ctx, r.keys.Issuer, data, `SELECT max(register_nonce) FROM tasks WHERE state = 'registering'`, "after-register-write",
+		func(raw, hash []byte, nonce uint64) error {
+			_, err := r.db.ExecContext(ctx, `INSERT INTO tasks (task_id, consumer_id, balance, r, commitment, register_raw, register_hash, register_nonce, state)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'registering')`, taskID, consumerID, balance, rv, c0.String(), hex.EncodeToString(raw), hex.EncodeToString(hash), nonce)
+			return err
+		})
 	if err != nil {
-		return err
-	}
-	raw, hash, nonce, err := r.prepare(ctx, r.keys.Issuer, data, floor)
-	if err != nil {
-		return err
-	}
-	if err := r.count(ctx, r.keys.Issuer, nonce); err != nil {
-		return err
-	}
-	// Written before it is sent: a restart resends this transaction, never a new one.
-	if _, err := r.db.ExecContext(ctx, `INSERT INTO tasks (task_id, consumer_id, balance, r, commitment, register_raw, register_hash, register_nonce, state)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'registering')`, taskID, consumerID, balance, rv, c0.String(), hex.EncodeToString(raw), hex.EncodeToString(hash), nonce); err != nil {
-		return err
-	}
-	if err := at("after-register-write"); err != nil {
 		return err
 	}
 	return r.finishRegistration(ctx, taskID, hex.EncodeToString(raw), hex.EncodeToString(hash), nonce, true)
+}
+
+// send takes key's next nonce under the nonce lock: today's cap checked,
+// the call prepared at or above floor (floorQuery: the key's written,
+// unfinished transactions' last), counted, written by write before it is
+// sent (a restart resends this transaction, never a new one), then sent,
+// so the next caller's pending nonce is past it. stage is the test hook
+// between the write and the send.
+func (r *Relayer) send(ctx context.Context, key *eth.Key, data []byte, floorQuery, stage string, write func(raw, hash []byte, nonce uint64) error) (raw, hash []byte, nonce uint64, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.capped(ctx); err != nil {
+		return nil, nil, 0, err
+	}
+	floor, err := r.floor(ctx, floorQuery)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if raw, hash, nonce, err = r.prepare(ctx, key, data, floor); err != nil {
+		return nil, nil, 0, err
+	}
+	if err := r.count(ctx, key, nonce); err != nil {
+		return nil, nil, 0, err
+	}
+	if err := write(raw, hash, nonce); err != nil {
+		return nil, nil, 0, err
+	}
+	if err := at(stage); err != nil {
+		return nil, nil, 0, err
+	}
+	r.rpc.SendRaw(ctx, raw) // refused or not: the wait that follows sends it again and decides it
+	return raw, hash, nonce, nil
 }
 
 // finishRegistration decides a registration: waiting, or checking once.
@@ -529,8 +566,8 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 	if po.PaymentBinding.ChainID != strconv.FormatUint(r.cfg.ChainID, 10) {
 		return Evidence{}, signer.Refusal("CHAIN_MISMATCH")
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	taskID := po.Intent.TaskID
+	defer r.taskLock(taskID)()
 	if ev, done, err := r.resume(ctx, intent, true); done || err != nil {
 		return ev, err
 	}
@@ -538,10 +575,9 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 	if po.PaymentBinding.ValidBefore <= now {
 		return Evidence{}, signer.Refusal("ORDER_EXPIRED") // the Signer would refuse it: spend nothing on it
 	}
-	if err := r.settleOpen(ctx); err != nil {
+	if err := r.settle(ctx); err != nil {
 		return Evidence{}, err
 	}
-	taskID := po.Intent.TaskID
 	var consumer, rv, cOldS, state string
 	var balance uint64
 	err = r.db.QueryRowContext(ctx, `SELECT consumer_id, balance, r, commitment, state FROM tasks WHERE task_id = ?`, taskID).
@@ -563,9 +599,6 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 		return Evidence{}, err
 	} else if open > 0 {
 		return Evidence{}, signer.Refusal("TASK_BUSY") // the commitment is being spent by another order
-	}
-	if err := r.capped(ctx); err != nil {
-		return Evidence{}, err
 	}
 	rNew, err := r.random(ctx)
 	if err != nil {
@@ -617,24 +650,13 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 	if err != nil {
 		return Evidence{}, err
 	}
-	floor, err := r.floor(ctx, `SELECT max(nonce) FROM reservations WHERE state = 'sent'`)
-	if err != nil {
-		return Evidence{}, err
-	}
-	raw, hash, nonce, err := r.prepare(ctx, r.keys.Gas, data, floor)
-	if err != nil {
-		return Evidence{}, err
-	}
-	if err := r.count(ctx, r.keys.Gas, nonce); err != nil {
-		return Evidence{}, err
-	}
-	// Written before it is sent: a restart resends this transaction, never a new one.
-	if _, err := r.db.ExecContext(ctx, `INSERT INTO reservations (intent_hash, task_id, amount, c_old, c_new, r_new, nullifier, raw_tx, tx_hash, nonce, deadline, state, created_at)
+	if _, _, _, err := r.send(ctx, r.keys.Gas, data, `SELECT max(nonce) FROM reservations WHERE state = 'sent'`, "after-write",
+		func(raw, hash []byte, nonce uint64) error {
+			_, err := r.db.ExecContext(ctx, `INSERT INTO reservations (intent_hash, task_id, amount, c_old, c_new, r_new, nullifier, raw_tx, tx_hash, nonce, deadline, state, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sent', ?)`, intent, taskID, amount, cOld.String(), cNew.String(), rNew, nullifier.String(),
-		hex.EncodeToString(raw), hex.EncodeToString(hash), nonce, deadline, now); err != nil {
-		return Evidence{}, err
-	}
-	if err := at("after-write"); err != nil {
+				hex.EncodeToString(raw), hex.EncodeToString(hash), nonce, deadline, now)
+			return err
+		}); err != nil {
 		return Evidence{}, err
 	}
 	ev, _, err := r.resume(ctx, intent, true)
@@ -646,8 +668,6 @@ func (r *Relayer) Reserve(ctx context.Context, order json.RawMessage) (Evidence,
 // "" (none), "sent" (written, not yet decided), "reserved" (with its
 // evidence) or "failed". A sent one is checked once on the way.
 func (r *Relayer) Lookup(ctx context.Context, intent string) (Evidence, string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	ev, done, err := r.resume(ctx, intent, false)
 	var ref signer.Refusal
 	switch {
@@ -722,7 +742,11 @@ func (r *Relayer) resume(ctx context.Context, intent string, wait bool) (Evidenc
 		return ev, true, err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return ev, true, errors.New("budget: the reservation was finished meanwhile")
+		// Decided meanwhile by another check of the same receipt (a Lookup, or
+		// another task's settleOpen): its answer is the row's now. The one
+		// connection is released first.
+		tx.Rollback()
+		return r.resume(ctx, intent, false)
 	}
 	res, err = tx.ExecContext(ctx, `UPDATE tasks SET balance = balance - (SELECT amount FROM reservations WHERE intent_hash = ?),
 		r = (SELECT r_new FROM reservations WHERE intent_hash = ?), commitment = (SELECT c_new FROM reservations WHERE intent_hash = ?)

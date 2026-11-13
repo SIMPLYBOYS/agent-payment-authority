@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -152,6 +153,8 @@ func (w *world) payment(po string) store.Payment {
 // fakeRelayer reserves once per intent; reserveErr is its next Reserve's
 // error; lose makes the next Reserve reserve and lose the answer.
 type fakeRelayer struct {
+	mu         sync.Mutex
+	hold       map[string]chan struct{} // an intent's Reserve waits for its channel to close
 	state      map[string]string
 	reserves   int // reservations made (tx#1 sent)
 	calls      int
@@ -164,11 +167,23 @@ func (r *fakeRelayer) evidence(intent string) budget.Evidence {
 	return budget.Evidence{ChainID: 84532, IntentHash: intent, Amount: 50000, TxHash: "0x" + strings.Repeat("1", 64), BlockNumber: 7}
 }
 
-func (r *fakeRelayer) Reserve(_ context.Context, order json.RawMessage) (budget.Evidence, error) {
-	r.calls++
+func (r *fakeRelayer) Reserve(ctx context.Context, order json.RawMessage) (budget.Evidence, error) {
 	var o paycontract.PurchaseOrder
 	contracts.Decode(order, &o)
 	intent, _ := o.IntentHash()
+	r.mu.Lock()
+	hold := r.hold[intent]
+	r.mu.Unlock()
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-ctx.Done():
+			return budget.Evidence{}, ctx.Err()
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
 	if err := r.reserveErr; err != nil {
 		r.reserveErr = nil
 		return budget.Evidence{}, err
@@ -185,6 +200,8 @@ func (r *fakeRelayer) Reserve(_ context.Context, order json.RawMessage) (budget.
 }
 
 func (r *fakeRelayer) Lookup(_ context.Context, intent string) (budget.Evidence, string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.lookupErr; err != nil {
 		r.lookupErr = nil
 		return budget.Evidence{}, "", err
@@ -201,6 +218,7 @@ func (r *fakeRelayer) Lookup(_ context.Context, intent string) (budget.Evidence,
 // its next answer's error, state its next answer's state (unsigned), tamper
 // changes what it signs.
 type fakeSigner struct {
+	mu          sync.Mutex
 	st          *store.Store
 	calls       map[string]int // request ID -> calls
 	last        store.PaymentRequest
@@ -212,6 +230,8 @@ type fakeSigner struct {
 }
 
 func (f *fakeSigner) Pay(req store.PaymentRequest, reservation json.RawMessage) (signerclient.Result, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	a, _, err := f.st.BeginPayment(req)
 	if err != nil {
 		return signerclient.Result{}, err
@@ -246,12 +266,15 @@ func (f *fakeSigner) authorization(order json.RawMessage) *signer.SignedAuthoriz
 // fakeShop answers from a script, then repeats its last answer; it keeps
 // every PAYMENT-SIGNATURE it was sent.
 type fakeShop struct {
+	mu      sync.Mutex
 	answers []ShopAnswer
 	err     error
 	sent    []string
 }
 
 func (f *fakeShop) Pay(_ context.Context, _, sig string) (ShopAnswer, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.sent = append(f.sent, sig)
 	if err := f.err; err != nil {
 		f.err = nil
@@ -580,6 +603,44 @@ func TestRun(t *testing.T) {
 	}
 }
 
+// Each payment moves on its own (docs/commercial-p2-host.md decision 7, revised 11/14): one
+// waiting for its reservation (a slow chain, say) never holds up another,
+// which is delivered meanwhile; the waiting one then finishes, reserved once.
+func TestRunNeverWaitsForAnother(t *testing.T) {
+	w := newWorld(t, 2)
+	w.start("po-1")
+	w.start("po-2")
+	w.shop.answers = []ShopAnswer{paid}
+	w.chain.state = "settled"
+	slow := make(chan struct{})
+	w.relayer.hold = map[string]chan struct{}{w.payment("po-1").IntentHash: slow}
+	wk := w.worker()
+	wk.Every = 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(bg)
+	done := make(chan error, 1)
+	go func() { done <- wk.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	until := func(what string, ok func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); !ok(); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: po-1 %s, po-2 %s", what, w.payment("po-1").State, w.payment("po-2").State)
+			}
+		}
+	}
+	until("po-2 while po-1 waits", func() bool { return w.payment("po-2").State == "delivered" })
+	if s := w.payment("po-1").State; s != "requested" {
+		t.Fatalf("po-1 moved while its reservation was held: %s", s)
+	}
+	close(slow)
+	until("po-1 once released", func() bool { return w.payment("po-1").State == "delivered" })
+	w.relayer.mu.Lock()
+	defer w.relayer.mu.Unlock()
+	if w.relayer.reserves != 2 {
+		t.Fatalf("reserves %d", w.relayer.reserves)
+	}
+}
+
 // The PAYMENT-SIGNATURE is one the real shop reads: for its offer (M1's
 // shop answers 402 M1_PAYMENT_UNAVAILABLE, never 400), with a payload the
 // settling shop parses.
@@ -821,19 +882,20 @@ func TestStarter(t *testing.T) {
 			return err
 		},
 		Log: func(what string, err error) { logged = append(logged, what) }}
-	s.Start(bg) // still registering
-	s.Start(bg) // a nonce gap: transient as well
+	start := func(s *Starter) { s.Start(bg); s.wg.Wait() } // registrations run in their own goroutines
+	start(s) // still registering
+	start(s) // a nonce gap: transient as well
 	if _, err := w.s.PaymentOf("consumer-a", "task-a", "po-1"); err == nil {
 		t.Fatal("a payment started before its task's registration")
 	}
-	s.Start(bg) // registered: the payments start
+	start(s) // registered: the payments start
 	if p := w.payment("po-1"); p.State != "requested" || p.Method != "delegation" || p.GrantRef != "dlg-a@1" {
 		t.Fatalf("the Allow: %+v", p)
 	}
 	if p := w.payment(w.askPO); p.Method != "webauthn" || p.GrantRef != "hap-1" {
 		t.Fatalf("the approved Ask: %+v", p)
 	}
-	s.Start(bg) // registered on the third: not asked a fourth time
+	start(s) // registered on the third: not asked a fourth time
 	if len(registered) != 3 || registered[0] != "task-a consumer-a 5000000" {
 		t.Fatalf("registrations %v", registered)
 	}
@@ -851,8 +913,8 @@ func TestStarter(t *testing.T) {
 				starts++
 			}
 		}}
-	s2.Start(bg)
-	s2.Start(bg)
+	start(s2)
+	start(s2)
 	if _, err := w2.s.PaymentOf("consumer-a", "task-a", "po-1"); err == nil || tries != 1 || starts != 1 {
 		t.Fatalf("refused: started %v, registrations %d, start refusals %d", err, tries, starts)
 	}
@@ -860,7 +922,7 @@ func TestStarter(t *testing.T) {
 		t.Fatal(err)
 	}
 	s3 := &Starter{Store: w2.s, Register: func(context.Context, string, string, uint64) error { t.Fatal("an ended task registered"); return nil }}
-	s3.Start(bg)
+	start(s3)
 }
 
 // The Store's and the client's answers to a request: an unknown outcome
@@ -903,12 +965,14 @@ func TestStarterByPayee(t *testing.T) {
 	s := &Starter{Store: w.s, Register: ok, Log: func(string, error) {},
 		Delegations: map[string]string{"consumer-a": "dlg-a@1", "consumer-a/" + payee: "dlg-shop@2", "consumer-a/0x" + strings.Repeat("9", 40): "dlg-other@1"}}
 	s.Start(bg)
+	s.wg.Wait()
 	if p := w.payment("po-1"); p.GrantRef != "dlg-shop@2" {
 		t.Fatalf("by payee: %+v", p)
 	}
 	w2 := newWorld(t, 1)
 	s2 := &Starter{Store: w2.s, Register: ok, Log: func(string, error) {}, Delegations: map[string]string{"consumer-a/0x" + strings.Repeat("9", 40): "dlg-other@1"}}
 	s2.Start(bg)
+	s2.wg.Wait()
 	if _, err := w2.s.PaymentOf("consumer-a", "task-a", "po-1"); err == nil {
 		t.Fatal("a payment started under another payee's delegation, or none")
 	}

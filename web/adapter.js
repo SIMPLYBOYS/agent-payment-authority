@@ -1201,22 +1201,6 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
 }
 
 const READY = "準備付款";
-const QUEUED = "排在前一筆付款之後（Host 依序處理付款）";
-// showQueue (batch 3, Aaron 10/24): customers shop at once, but the Host's
-// payment worker is one loop (internal/payflow Run; docs/commercial-gap-review.md
-// A4): it waits for each confirmation itself, moving on only once a wait gives
-// up, and starts a payment at the top of a round (Before). So a payment still
-// ready while another's is in progress is behind it, and the window says so
-// (review 2); with one customer shopping, or no payment, nothing changes.
-export function showQueue(models, cap) {
-  if (models.filter((m) => m.steps[0].state === "done").length < 2 || !paysOn(cap)) return { models, note: "" };
-  const ready = (m) => m.steps[3].state === "now" && m.steps[3].text === READY;
-  const going = models.some((m) => (m.steps[3].state === "now" && !ready(m)) || m.steps[4].state === "now"); // delivering is the worker's too (review 3)
-  return {
-    note: "客人同時選購；付款由 Host 依序處理，一次處理一筆；一筆等鏈上確認太久時，會先處理下一筆。",
-    models: models.map((m) => (going && ready(m) ? { ...m, steps: m.steps.map((s, i) => (i === 3 ? { ...s, text: QUEUED } : s)), caption: m.name + "・" + m.steps[3].label + "：" + QUEUED } : m)),
-  };
-}
 
 // networkText: what the audience is told of the money, from the host's own capability.
 export const networkText = (cap) => (cap === "base_sepolia" ? "Base Sepolia 測試網路・測試 USDC（不是真錢）"

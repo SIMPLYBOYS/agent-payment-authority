@@ -987,11 +987,11 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
       sub: first ? String(first.label || "").replace(/^[^：]*：/, "") : "", busy: active.some((r) => (r.scene || "data") === k) };
   });
   const slots = scene.started ? scene.slots().filter((s) => s.task) : [];
-  const custs = A.showQueue(slots.map((s) => ({ ...A.showCustomer(s.consumer, scene.snapshot(s.consumer), delegationOf(s.task), traits),
+  const custs = slots.map((s) => ({ ...A.showCustomer(s.consumer, scene.snapshot(s.consumer), delegationOf(s.task), traits),
     receipt: A.showReceipt(scene.snapshot(s.consumer), traits, chainOf(s)), task: s.task,
     // The screen plays the steps in order: when it trails, where the real task already is.
-    ahead: scene.behind(s.consumer) ? A.showCustomer(s.consumer, scene.latest(s.consumer), delegationOf(s.task), traits).caption : "" })), traits.payments);
-  renderCaption(custs.models);
+    ahead: scene.behind(s.consumer) ? A.showCustomer(s.consumer, scene.latest(s.consumer), delegationOf(s.task), traits).caption : "" }));
+  renderCaption(custs);
   const town = hasTown() && inTown;
   const key = JSON.stringify([venues, venue, town, hasTown(), sentPlay, custs, starting, simulating, $("run-status").textContent]);
   if (key === shownPresent) return;
@@ -1026,8 +1026,8 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
   $("present-tour").hidden = !(hasTown() && inTown && shop().bridge.pan); // town v2 V4: the prologue's pan
   $("present-status").textContent = $("run-status").textContent;
   const steps = $("present-steps");
-  steps.hidden = !custs.models.length;
-  steps.replaceChildren(el("p", "eyebrow", "THE TRANSACTION"), ...custs.models.map((m) => {
+  steps.hidden = !custs.length;
+  steps.replaceChildren(el("p", "eyebrow", "THE TRANSACTION"), ...custs.map((m) => {
     const box = el("div", "present-cust");
     box.dataset.consumer = m.consumer;
     box.append(el("h3", "", m.name + " 的 Agent" + (m.amount ? "・" + m.amount : "")));
@@ -1060,7 +1060,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
       box.append(r);
     }
     return box;
-  }), ...(custs.note ? [el("p", "present-queue", custs.note)] : []));
+  }));
   decorateCards(); // the steps card was rebuilt: its fold button again
 }
 

@@ -53,7 +53,7 @@ request_purchase ─→ Store：POLICY_DECIDED
    Allow ─────────────────────────────┐
    Ask ─→ 本人核准 ─→ GRANT_ISSUED ────┤
                                       ▼
-                  付款工作（Host，一次一筆，決策 7）
+                  付款工作（Host，每筆各自進行，決策 7，11/14 修訂）
   ① 建 payments 列（intent_hash 為鍵，requested）  PAYMENT_REQUESTED
   ② relayer.Reserve(order)      tx#1 → reserved   BUDGET_RESERVED
   ③ signer /v1/sign {授權, order, reservation}
@@ -262,7 +262,7 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查�
 
 ### 12.2 H2 付款工作（`internal/payflow`）
 
-- **`Worker`**：一次處理一筆付款（決策 7），依 Store 的狀態推進。四個外部元件都是介面，H3 再接上真的：
+- **`Worker`**：依 Store 的狀態推進每一筆付款（決策 7；11/14 起每筆各自進行，見下面的「11/14 同時付款」）。四個外部元件都是介面，H3 再接上真的：
   - `Relayer`：`Reserve` 對同一張請購冪等；`Lookup` 只查不建；
   - `Signer`：Host 的 Signer client（`signerclient.Pay`）：請求先記入 `payment_attempts`（request ID 由 Store 產生並提交），再送 `/v1/sign`；再問時用同一個 request ID（§3）；
   - `Shop`：送出帶 `PAYMENT-SIGNATURE` 的請求；
@@ -287,7 +287,14 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。審查�
     - 其他狀態（408、429、代理的 404）：不算商店對這筆付款的回答，交給鏈上判定。
     - 由鏈上判定時：settled 就記下結算；之後商店交付就記為已交付，商店拒絕就是 `DELIVERY_FAILED`（已付款、未交付）。`not_settled_expired` 轉 `NOT_SETTLED_EXPIRED`；`needs_review` 轉 `RECONCILE_NEEDS_REVIEW`；pending 就等待，絕不重付。已經 `settled` 的付款只認 settled：鏈上回別的答案就等待（那是節點的問題）。
 - **`Recover`**（啟動時）：`submitted` 一律轉 `unknown`（決策 5）。
-- **`Run`**：先恢復，再每隔一段時間（`Every`，0 時為 1 秒；或被 `Kick` 喚醒）把所有未完成的付款各推進一次，一次一筆。`ErrPending` 以外的錯誤交給 `Log`。`Run` 執行時不另外呼叫 `Step`（一次一筆；即使另外呼叫也安全，因為每個外部呼叫都是冪等的）。
+- **`Run`**：先恢復，再每隔一段時間（`Every`，0 時為 1 秒；或被 `Kick` 喚醒）把所有未完成、而且沒有正在推進的付款，各開一個 goroutine 推進（推進前從 Store 重讀一次）。同一筆付款同時只有一個 goroutine；另外呼叫 `Step` 也安全，因為每個外部呼叫都是冪等的。`Run` 結束前等推進中的付款收尾。`ErrPending` 以外的錯誤交給 `Log`。
+- **11/14 同時付款**（Aaron：「實務上每個 agent 都應該是各自獨立的，沒有交易需要互相等待的狀況」）：
+  - 付款工作：每筆付款各自推進（上面）。`Starter` 的任務登記也各開一個 goroutine，登記好就開始該任務的付款；一位客人的登記不擋另一位的付款。
+  - relayer（`internal/budget`）：原本一把鎖連證明與等鏈上確認都包住。現在 nonce 的鎖只包「結清未完成的交易、準備、計數、寫下、送出」，送出才放開，下一筆的 pending nonce 就在它之後；證明與等確認只鎖該任務（同一任務的預算承諾一次只花一筆）。同一筆收據被兩邊同時判定時，後到的改讀已寫下的結果。
+  - 商店結算（`internal/merchant`）：本來就在等確認前放鎖；現在寫下之後、放鎖之前先送出，下一位付款人不會因為 pending nonce 還沒看到它而拿到 `settlement_busy`。
+  - Host 的核准：原本整台一把鎖（語音判定時其他客人的核准都要等），改成每位客人一把。
+  - 公開節點可能負載平衡：剛送出的交易另一台節點還沒看到時，下一筆拿到 `RELAYER_NONCE_BLOCKED`／`settlement_busy`，下一輪重試，不會用錯 nonce。
+  - 測試：`TestReservationsOverlap`（本機鏈停止出塊，A 等確認時 B 照樣證明、寫下、送出，同一個區塊兩筆都預留）、`TestRunNeverWaitsForAnother`（一筆的預留卡住時，另一筆照樣交付）。反向檢查：relayer 退回一把鎖、付款工作退回一次一筆，兩個測試都失敗。
 - **`Margin`**：距離 `valid_before` 多少秒以內就不再開始新的一步。必須大於商店自己的 5 秒，再加上簽名的時間，否則已預留、已簽名的付款會被商店以期限拒絕。
 - **已知限制**：`late` 只看 `valid_before`。本人核准的 grant 或委派如果比它早到期，tx#1 會先花掉，再由 Signer 拒絕（`APPROVAL_EXPIRED`／`DELEGATION_EXPIRED`），轉 `RESERVED_NOT_PAID`。H3 接上 Signer 時再考慮在預留前檢查。
 - 新增：`budget.Relayer.Lookup`（anvil 測試確認：預留前回空、預留後回同一份證據）、`store.Store.TaskEnded`、`merchant.ParsePayment`（照商店的方式讀 exact-EVM payload，不做判定）。`budget.Relayer.Reserve` 對還在登記中的 task 改回 `TASK_REGISTRATION_PENDING`。

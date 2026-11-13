@@ -287,7 +287,6 @@ body[data-page="show"] #unity-canvas { background: #10131a; border-radius: 6px; 
 .show-step[data-state="fail"] { border-color: #d9534f; color: var(--text); }
 .show-step[data-state="off"] { opacity: 0.6; }
 .show-wait { color: var(--muted); }
-.show-queue { color: var(--muted); margin: 0 0 16px; }
 @media (max-width: 1100px) { .show-main { grid-template-columns: 1fr; } }
 /* T4 (Aaron 10/30: 依階段切換): the town fills the window under one big line; the steps and evidence come back in a venue. */
 body[data-page="show"][data-phase="town"] .show-main { grid-template-columns: 1fr; }
@@ -341,7 +340,6 @@ body[data-present="on"] .side { display: contents; }
 .present-step-list small { display: block; font-size: 12px; font-weight: 400; color: var(--soft, #6e675b); }
 .present-receipt { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
 .present-receipt span, .present-receipt a { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: #f4ece0; color: var(--ink, #1d1a15); text-decoration: none; }
-.present-queue { margin: 10px 0 0; font-size: 12px; color: var(--soft, #6e675b); }
 /* docs/commercial-refund.md: a person has the shop refund a failed delivery */
 .present-refund { margin-top: 10px; padding: 7px 14px; border: 0; border-radius: 999px; background: #b4321b; color: #fff; font: 600 13px/1.2 inherit; cursor: pointer; }
 .present-refund:disabled { opacity: .6; cursor: default; }

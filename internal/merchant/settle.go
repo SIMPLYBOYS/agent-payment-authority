@@ -54,8 +54,8 @@ type Settler struct {
 	clock func() uint64
 	poll  time.Duration
 	wait  time.Duration // the longest one request waits for its transfer
-	// ponytail: one lock for every payment and the gas key's nonce; per-payer
-	// locks and a nonce manager if settlements must overlap.
+	// mu covers the gas key's nonce: deciding, writing and sending a transfer.
+	// Waiting for its confirmations does not hold it, so settlements overlap.
 	mu sync.Mutex
 }
 
@@ -245,6 +245,9 @@ func (s *Settler) Settle(ctx context.Context, req x402.Requirement, key string, 
 	if err := at("after-write"); err != nil {
 		return Outcome{Kind: "pending", Reason: "settlement_pending", Response: resp}
 	}
+	// Sent before the lock is let go: another payer's transfer, prepared next,
+	// sees this one in the pending nonce instead of settlement_busy.
+	s.rpc.SendRaw(ctx, raw)
 	return unlockThen(func() Outcome { return s.resume(ctx, v.payer.Hex(), nonceHex, resp) })
 }
 

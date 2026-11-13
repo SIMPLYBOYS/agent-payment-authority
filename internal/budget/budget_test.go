@@ -603,6 +603,68 @@ func TestResendBeforeANewNonce(t *testing.T) {
 	}
 }
 
+// Two consumers' reservations overlap (docs/commercial-p2-host.md decision
+// 7, revised 11/14): with the chain not mining, A's waits for its receipt
+// while B's is proven, written and sent at the next nonce; one block then
+// holds both, and each is reserved once.
+func TestReservationsOverlap(t *testing.T) {
+	w := newWorld(t)
+	ctx, cancel := context.WithTimeout(bg, 90*time.Second)
+	defer cancel()
+	r := w.relayer(t, filepath.Join(t.TempDir(), "budget.db"))
+	r.wait = 60 * time.Second
+	for _, c := range []string{"a", "b"} {
+		if err := r.RegisterTask(ctx, "show-"+c+"-01", "consumer-"+c, 1_000_000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gas := key(t, 3).Addr
+	before, _ := w.rpc.PendingNonce(bg, gas)
+	w.call(t, "evm_setAutomine", false)
+	defer w.call(t, "evm_setAutomine", true)
+	type result struct {
+		ev  Evidence
+		err error
+	}
+	reserve := func(raw json.RawMessage) chan result {
+		ch := make(chan result, 1)
+		go func() {
+			ev, err := r.Reserve(ctx, raw)
+			ch <- result{ev, err}
+		}()
+		return ch
+	}
+	sent := func(n uint64, what string) {
+		t.Helper()
+		for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+			if got, _ := w.rpc.PendingNonce(bg, gas); got >= n {
+				return
+			} else if time.Now().After(deadline) {
+				t.Fatalf("%s: the gas key's pending nonce %d, want %d", what, got, n)
+			}
+		}
+	}
+	rawA, _, intentA := w.order("consumer-a", "show-a-01", 1, "500000")
+	rawB, _, intentB := w.order("consumer-b", "show-b-01", 2, "300000")
+	a := reserve(rawA)
+	sent(before+1, "A sent")
+	b := reserve(rawB)
+	sent(before+2, "B sent while A waits for its receipt")
+	select {
+	case got := <-a:
+		t.Fatalf("A answered with nothing mined: %+v %v", got.ev, got.err)
+	default:
+	}
+	w.call(t, "evm_mine")
+	ra, rb := <-a, <-b
+	if ra.err != nil || rb.err != nil || ra.ev.IntentHash != intentA || rb.ev.IntentHash != intentB || ra.ev.BlockNumber != rb.ev.BlockNumber {
+		t.Fatalf("A %+v %v; B %+v %v", ra.ev, ra.err, rb.ev, rb.err)
+	}
+	if n, _ := w.rpc.PendingNonce(bg, gas); n != before+2 {
+		t.Fatalf("gas nonce %d -> %d", before, n)
+	}
+}
+
 // A written reservation whose nonce another transaction used can never be
 // mined: it is failed, not pending forever, and the task takes the next.
 func TestDroppedReservationFails(t *testing.T) {

@@ -79,12 +79,11 @@ function render() {
   if (!v) return;
   $("show-title").textContent = phase === "town" ? "城鎮" : v.venue ? A.venue(v.venue).name : "示範商店";
   $("show-network").textContent = A.networkText(v.payments) + (there ? "" : "・主持人頁未連線（停在最後狀態）");
-  const queue = A.showQueue((v.customers || []).map((c) => ({ ...A.showCustomer(c.consumer, c.snapshot, c.delegation, v),
-    evidence: A.showEvidence(c.snapshot, v, c.chain), receipt: A.showReceipt(c.snapshot, v, c.chain) })), v.payments);
-  const shown = queue.models;
+  const shown = (v.customers || []).map((c) => ({ ...A.showCustomer(c.consumer, c.snapshot, c.delegation, v),
+    evidence: A.showEvidence(c.snapshot, v, c.chain), receipt: A.showReceipt(c.snapshot, v, c.chain) }));
   // Redrawn only when something changed: the captions are a live region.
   const chk = A.showChecker(v.checker);
-  const key = JSON.stringify([shown, queue.note, owned, chk, phase, walking]);
+  const key = JSON.stringify([shown, owned, chk, phase, walking]);
   if (key === shownKey) return;
   shownKey = key;
   if (!owned) $("show-captions").replaceChildren(el("p", "", "場景暫停：主持人頁正在回放或切換"));
@@ -104,7 +103,7 @@ function render() {
     });
     card.append(ol);
     return card;
-  }), ...(queue.note ? [el("p", "show-queue", queue.note)] : []));
+  }));
   if (owned && phase !== "town") $("show-captions").replaceChildren(...shown.map((m) => el("p", "", m.caption)));
   queueMicrotask(() => { zoom.apply(); place(); }); // the evidence below may have changed the room the scene has
   $("show-trust").replaceChildren(...shown.filter((m) => m.evidence.length).map((m) => {

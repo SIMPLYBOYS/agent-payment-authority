@@ -1119,7 +1119,7 @@ const Gaps: Page = () => (
     <Gap title="發行、持有、驗證在同一個程序" text="證明了格式與接線，還不是三方互相獨立" />
     <Gap title="沒有爭議流程與託管" text="商店不肯退款時，系統沒有辦法強制" />
     <Gap title="商家沒有身分與信譽" text="名單上的商家自己作假，仍然收得到錢" />
-    <Gap title="付款依序處理" text="不是同時付款；流量大時要另外設計" />
+    <Gap title="送交易的金鑰各只有一把" text="每位客人的付款各自進行，但同一把金鑰的 nonce 一筆一筆給；流量大時要多把" />
   </Frame>
 );
 
@@ -1149,7 +1149,7 @@ const Order: Page = () => (
       <Phase now n="01" title="沙盒整合" a="測試網、eKYC 沙盒" b="三個場域通過獨立查證（現況）" />
       <Phase n="02" title="測試網試點" a="商店自己的 x402 端點" b="本人用手機核准" />
       <Phase n="03" title="小額正式" a="eKYC 正式環境、HSM 或 MPC" b="多方產生的 ZK setup" />
-      <Phase n="04" title="擴大" a="爭議流程與退款規則" b="監控、對帳與同時付款" />
+      <Phase n="04" title="擴大" a="爭議流程與退款規則" b="監控、對帳與高流量付款" />
     </div>
     <p style={{ fontSize: 30, color: muted, marginTop: 50, lineHeight: 1.5 }}>
       每一階段都用同一個 checker 驗收：證據包能不能被第三方向鏈重算，是能不能往下走的條件。
