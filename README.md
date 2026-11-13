@@ -1,391 +1,393 @@
 # agent-payment-authority
 
-**AI Agent 可以替人提出付款，但不能自己批准，也不能自己簽名；每一步都留下任何人都能向鏈上查證的證據。**
+**English** | [繁體中文](README.zh-TW.md)
 
-*An authorization and evidence layer for AI agent payments on x402: the agent may propose a payment, never approve or sign it; every step leaves evidence anyone can verify against the chain.*
+**An AI agent may propose a payment for a person. It may not approve it, and it may not sign it. Every step leaves evidence that anyone can check against the chain.**
 
-這是一個場域模擬：一座像素城鎮裡有書店、咖啡店、便利商店、飯店與郵局，一家人的 AI Agent 在裡面替他們買東西。付款、本人核准與證據都是真的（測試網與測試幣），但它是展示，不是產品。
+This is a scenario simulation. A pixel-art town has a bookshop, a café, a convenience store, a hotel and a post office, and a family's AI agents shop there for them. The payments, the person's approvals and the evidence are real (testnet, test tokens). It is a demonstration, not a product.
 
-- [它解決什麼問題](#它解決什麼問題)
-- [你會看到的介面](#你會看到的介面)
-- [背後的基礎設施](#背後的基礎設施)
-- [一筆付款怎麼走](#一筆付款怎麼走)
-- [交易是怎麼簽出來的](#交易是怎麼簽出來的)
-- [自己查證](#自己查證)
-- [現況與限制](#現況與限制)
-- [跑起來](#跑起來)
-- [目錄與文件](#目錄與文件)
-- [授權](#授權)
+- [What problem it solves](#what-problem-it-solves)
+- [The screens you see](#the-screens-you-see)
+- [The infrastructure behind them](#the-infrastructure-behind-them)
+- [How one payment goes](#how-one-payment-goes)
+- [How a payment gets signed](#how-a-payment-gets-signed)
+- [Check it yourself](#check-it-yourself)
+- [Status and limits](#status-and-limits)
+- [Running it](#running-it)
+- [Layout and documents](#layout-and-documents)
+- [License](#license)
 
-## 它解決什麼問題
+## What problem it solves
 
-> 讓 AI 替我花錢，我最怕三件事：**被騙著亂花、個資被拿走、出了事說不清楚。**
+> If I let an AI spend my money, I worry about three things: **being tricked into spending, giving away my personal data, and not being able to say what happened afterwards.**
 
-錢包知道「花多少」，不知道「為了哪個任務、誰同意的」。這個專案補的是後者。
+A wallet knows how much was spent. It does not know which task the money was for, or who agreed to it. This project supplies that part.
 
-| | 負責什麼 |
+| | What it handles |
 |---|---|
-| **x402** | 怎麼付：商店用 HTTP 402 報價，付款方簽一份授權，facilitator 上鏈結算 |
-| **這一層** | 能不能付：這筆錢屬於哪個任務、依哪份委託、經過哪條規則與哪一次本人核准 |
+| **x402** | How to pay: the shop quotes a price with HTTP 402, the payer signs an authorization, a facilitator settles it on chain |
+| **This layer** | Whether to pay: which task the money belongs to, under which mandate, by which rule, and with which approval from the person |
 
-做法是把權力拆給互不相通的角色，並把任務、請購、本人授權、預算、付款與交付綁在同一個 `intent_hash` 上。
+It splits power between roles that cannot reach into each other, and binds the task, the purchase request, the person's authorization, the budget, the payment and the delivery to one `intent_hash`.
 
-## 你會看到的介面
+## The screens you see
 
-展示在一台電腦的瀏覽器裡進行，有三個畫面，各給不同的人看。
+The demo runs in a browser on one computer. There are three screens, each for a different viewer.
 
 ```mermaid
 flowchart LR
-  OP["主持人"]
-  AU["觀眾"]
-  ME["本人（客人）"]
+  OP["Operator"]
+  AU["Audience"]
+  ME["The person (customer)"]
 
-  subgraph browser["瀏覽器"]
-    HP["主持人頁 /host<br/>場景、Agent 卡、核准面板、查看證據"]
-    SW["展示視窗 /show<br/>城鎮與店內、五步、為什麼可信"]
-    DV["裝置驗證視窗<br/>WebAuthn：PIN 或 passkey"]
+  subgraph browser["Browser"]
+    HP["Host page /host<br/>scene, agent cards, approval panel, evidence drawer"]
+    SW["Audience window /show<br/>town and shops, five steps, why to trust it"]
+    DV["Device prompt<br/>WebAuthn: PIN or passkey"]
   end
 
   HOST["Host<br/>127.0.0.1:8402"]
-  SIGNER["Signer<br/>另一個系統帳號"]
+  SIGNER["Signer<br/>a separate OS account"]
 
   OP --> HP
   AU --> SW
   ME --> DV
-  HP -- "HTTP API，帶 token" --> HOST
-  HP -- "只送場景與已讀到的資料<br/>不含 token" --> SW
-  DV -- "裝置簽章" --> HP
-  HOST -- "只轉送，不能代簽" --> SIGNER
+  HP -- "HTTP API, with a token" --> HOST
+  HP -- "scene and data already read<br/>never a token" --> SW
+  DV -- "device signature" --> HP
+  HOST -- "relays only, cannot sign for the person" --> SIGNER
 ```
 
-| 畫面 | 給誰 | 上面有什麼 |
+| Screen | For | What is on it |
 |---|---|---|
-| **主持人頁** `/host` | 操作展示的人 | 像素城鎮與店內場景（Unity）；每位客人一張 Agent 卡，可以開始、停止；「需要你處理」的核准面板；「查看證據」抽屜；簡報模式 |
-| **展示視窗** `/show` | 觀眾 | 同一個場景，加上每位客人的五步（委託、選購、核准、付款、交付）、「為什麼可信」與收據。它沒有 token，也不呼叫任何 API |
-| **裝置驗證視窗** | 本人 | 瀏覽器的 WebAuthn 視窗。確認委託、核准超過上限的那一筆時跳出來 |
+| **Host page** `/host` | Whoever runs the demo | The town and the shops (Unity); one agent card per customer, with start and stop; the approval panel; the evidence drawer; a presentation mode |
+| **Audience window** `/show` | The audience | The same scene, with each customer's five steps (mandate, selection, approval, payment, delivery), a "why to trust it" list and the receipt. It holds no token and calls no API |
+| **Device prompt** | The person | The browser's WebAuthn prompt. It appears when the person confirms a mandate or approves a purchase over the limit |
 
-幾個設計上的重點：
+A few points of the design:
 
-- **展示視窗拿不到任何權限。** 主持人頁保有所有 token 與讀取；它只把場景訊息和已經讀到的資料送給展示視窗（同一個瀏覽器的 BroadcastChannel）。把展示視窗投到大螢幕，不會洩漏任何憑證。
-- **畫面上的每一句話都對應一筆紀錄。** 五步的狀態來自 Store 的事件，沒有事件就不會顯示「完成」；結果不明就寫不明。
-- **Agent 看不到這些畫面。** 它只能透過三個工具做事：看商品目錄、取報價、提出請購。
-- **城鎮裡可以走動。** 遊戲模式下可以帶客人走進店裡、到街上的 ATM 領測試 USDC、走進地鐵閘門自動扣車資。
+- **The audience window has no authority.** The host page keeps every token and does every read. It sends the audience window only scene messages and data it has already read, over a BroadcastChannel in the same browser. Putting the audience window on a big screen leaks no credential.
+- **Every sentence on screen stands for a record.** The five steps come from the Store's events. With no event, a step is not shown as done; an unknown result is shown as unknown.
+- **The agent sees none of these screens.** It works through three tools only: read the catalog, get a quote, submit a purchase request.
+- **You can walk around the town.** In game mode a customer can walk into a shop, draw test USDC from an ATM on the street, or pass a subway gate that charges the fare automatically.
 
-五步是整個介面的骨幹，每一步都說明這間店看到了什麼、誰核准的：
+The five steps are the backbone of the interface. Each one says what the shop saw and who approved:
 
-| 步 | 畫面上的例子 |
+| Step | An example of what the screen says |
 |---|---|
-| 01 委託 | 本人以已登記的裝置確認了委託：預算 1.50 USDC，超過 0.10 USDC 要問本人 |
-| 02 選購 | Agent 選好商品，報價 0.50 USDC；這間店看到：國家（身分經 eKYC 驗證） |
-| 03 核准 | 超過自動範圍，等本人核准 |
-| 04 付款 | 預留預算（第 1 筆鏈上交易）；結算（第 2 筆） |
-| 05 交付 | 已交付，附收據 |
+| 01 Mandate | The person confirmed the mandate on a registered device: budget 1.50 USDC, ask above 0.10 USDC |
+| 02 Selection | The agent chose an item, quoted 0.50 USDC; this shop saw: country (identity verified by eKYC) |
+| 03 Approval | Above the automatic range, waiting for the person |
+| 04 Payment | Budget reserved (first transaction); settled (second transaction) |
+| 05 Delivery | Delivered, with a receipt |
 
-## 背後的基礎設施
+## The infrastructure behind them
 
-畫面背後是幾個各自獨立的程序。重點是誰握有什麼，以及誰碰不到什麼。
+Behind the screens are several separate processes. What matters is what each one holds, and what it cannot touch.
 
 ```mermaid
 flowchart TB
-  subgraph user["使用者端"]
-    PERSON["本人的裝置<br/>WebAuthn"]
-    AGENT["Agent（不受信任）<br/>Claude Code CLI 或 fake Agent"]
+  subgraph user["User side"]
+    PERSON["The person's device<br/>WebAuthn"]
+    AGENT["Agent (untrusted)<br/>Claude Code CLI or a fake agent"]
   end
 
-  subgraph hostp["Host 程序（cmd/demo）"]
-    BRIDGE["toolbridge<br/>三個工具：目錄、報價、請購"]
+  subgraph hostp["Host process (cmd/demo)"]
+    BRIDGE["toolbridge<br/>three tools: catalog, quote, purchase request"]
     POLICY["Policy<br/>Deny / Ask / Allow"]
-    STORE["Store<br/>SQLite，事件雜湊鏈"]
-    CRED["憑證驗證<br/>BBS+ 選擇性揭露"]
-    PAY["付款流程"]
+    STORE["Store<br/>SQLite, hash-chained events"]
+    CRED["Credential check<br/>BBS+ selective disclosure"]
+    PAY["Payment flow"]
   end
 
-  subgraph keys["金鑰域"]
-    SIGNER["Signer（apa-signer）<br/>錢包私鑰，另一個系統帳號"]
+  subgraph keys["Key domain"]
+    SIGNER["Signer (apa-signer)<br/>wallet keys, a separate OS account"]
   end
 
-  subgraph idp["身分"]
-    EKYC["eKYC 廠商<br/>Didit 沙盒"]
-    ISSUER["發行者（apa-issuer）"]
+  subgraph idp["Identity"]
+    EKYC["eKYC vendor<br/>Didit sandbox"]
+    ISSUER["Issuer (apa-issuer)"]
   end
 
-  subgraph paynet["付款網路"]
-    RELAYER["Relayer（apa-relayer）"]
-    SHOP["商店<br/>x402 端點"]
-    FAC["Facilitator（apa-facilitator）"]
+  subgraph paynet["Payment network"]
+    RELAYER["Relayer (apa-relayer)"]
+    SHOP["Shop<br/>x402 endpoint"]
+    FAC["Facilitator (apa-facilitator)"]
   end
 
-  subgraph chain["鏈（Base Sepolia 或本機測試鏈）"]
-    BUDGET["預算合約<br/>Groth16 驗證"]
-    USDC["測試 USDC<br/>EIP-3009"]
+  subgraph chain["Chain (Base Sepolia or a local test chain)"]
+    BUDGET["Budget contract<br/>Groth16 verifier"]
+    USDC["Test USDC<br/>EIP-3009"]
   end
 
-  CHECKER["Checker（verify-demo）<br/>只讀證據包與鏈"]
+  CHECKER["Checker (verify-demo)<br/>reads only the evidence pack and the chain"]
 
-  AGENT -- "工具呼叫" --> BRIDGE --> POLICY --> STORE
+  AGENT -- "tool calls" --> BRIDGE --> POLICY --> STORE
   CRED --> POLICY
-  PERSON -- "確認委託、核准單筆" --> SIGNER
+  PERSON -- "confirms mandates, approves single purchases" --> SIGNER
   EKYC --> ISSUER --> CRED
-  PAY -- "請求簽名" --> SIGNER
+  PAY -- "asks for a signature" --> SIGNER
   PAY --> RELAYER --> BUDGET
-  PAY -- "付款授權" --> SHOP --> FAC --> USDC
-  STORE -. "證據包" .-> CHECKER
-  BUDGET -. "鏈上紀錄" .-> CHECKER
-  USDC -. "鏈上紀錄" .-> CHECKER
+  PAY -- "payment authorization" --> SHOP --> FAC --> USDC
+  STORE -. "evidence pack" .-> CHECKER
+  BUDGET -. "on-chain records" .-> CHECKER
+  USDC -. "on-chain records" .-> CHECKER
 ```
 
-| 角色 | 握有什麼 | 能做 | 不能做 |
+| Role | Holds | Can | Cannot |
 |---|---|---|---|
-| **Agent** | 什麼都沒有 | 看商品、取報價、提出請購 | 碰金鑰、改金額或收款人、自己核准 |
-| **Host** | 任務、規則、紀錄 | 組請購單、依 Policy 裁決、記錄、送去付款 | 簽名（沒有私鑰）、偽造本人核准 |
-| **Signer** | 客人錢包的私鑰 | 驗本人的裝置，在委託範圍內簽付款授權 | 簽委託外的付款 |
-| **本人** | 已登記的裝置 | 確認委託；超過上限時核准單筆 | — |
-| **發行者** | 憑證的簽發金鑰 | 依 eKYC 的結果簽發憑證 | 把自己改出來的「通過」當成驗證結果 |
-| **Relayer** | 送交易的金鑰 | 送出 ZK 預算證明，預留預算 | 動客人的錢 |
-| **Facilitator** | 商店的結算金鑰 | 驗證並送出結算；退款 | 送出沒有客人簽章的轉帳 |
-| **Checker** | 什麼都沒有 | 只讀證據包與鏈，獨立判定十項主張 | 呼叫 Host、Policy 或 Signer 的程式 |
+| **Agent** | Nothing | Read the catalog, get a quote, submit a purchase request | Touch a key, change the amount or the payee, approve anything |
+| **Host** | Tasks, rules, records | Build the purchase order, decide by Policy, record, send for payment | Sign (it has no key), forge the person's approval |
+| **Signer** | The customers' wallet keys | Verify the person's device, sign a payment authorization within the mandate | Sign a payment outside the mandate |
+| **The person** | A registered device | Confirm a mandate; approve a single purchase above the limit | — |
+| **Issuer** | The credential signing key | Issue a credential from the eKYC result | Treat an approval it set by hand as a verification |
+| **Relayer** | A transaction-sending key | Submit the ZK budget proof and reserve the budget | Move the customer's money |
+| **Facilitator** | The shop's settlement key | Verify and submit the settlement; refund | Submit a transfer the customer did not sign |
+| **Checker** | Nothing | Read the evidence pack and the chain, and judge ten claims on its own | Call any code of the Host, the Policy or the Signer |
 
-三條資料各走各的路：
+Three kinds of data take three separate paths:
 
-- **錢**只在鏈上移動：從客人的錢包到商店的錢包。它不經過 Agent，也不經過 Host。
-- **身分資料**只到 eKYC 廠商。之後傳的是憑證，每間店只拿到它要求的屬性：書店只看國家，咖啡店什麼都不看，便利商店只看是否滿 18 歲。
-- **證據**從 Store 與鏈流向 Checker。Checker 不相信系統自己的說法，向鏈重算。
+- **Money** moves only on chain, from the customer's wallet to the shop's wallet. It never passes through the agent or the Host.
+- **Identity data** stops at the eKYC vendor. After that, what travels is a credential, and each shop gets only the attributes it asks for: the bookshop sees the country, the café sees nothing, the convenience store sees only whether the buyer is 18 or over.
+- **Evidence** flows from the Store and the chain to the Checker. The Checker does not take the system's word; it recomputes against the chain.
 
-## 一筆付款怎麼走
+## How one payment goes
 
-以一筆超過自動上限、需要本人核准的請購為例。
+Take a purchase above the automatic limit, which needs the person's approval.
 
 ```mermaid
 sequenceDiagram
   autonumber
-  actor P as 本人
+  actor P as Person
   participant A as Agent
   participant H as Host
   participant S as Signer
-  participant M as 商店
-  participant C as 鏈
+  participant M as Shop
+  participant C as Chain
 
-  P->>S: 用裝置確認委託（預算、自動上限、商家、期限）
-  A->>H: 取報價
-  H->>M: GET 商品
-  M-->>H: 402 與報價（金額、收款人、幣別）
-  A->>H: 提出請購
-  H->>H: 出示憑證，Policy 裁決
-  Note over H: 範圍內 Allow，超過 Ask，不符 Deny
-  H->>P: 需要你處理：這一筆的摘要
-  P->>S: 用裝置核准這一筆
-  H->>C: 第 1 筆交易：ZK 證明，預留預算
-  H->>S: 請求簽名
-  S-->>H: EIP-3009 付款授權
-  H->>M: GET 商品，帶付款授權
-  M->>C: 第 2 筆交易：結算
-  M-->>H: 200，內容與收據
+  P->>S: Confirms the mandate on a device (budget, automatic limit, merchants, expiry)
+  A->>H: Gets a quote
+  H->>M: GET the item
+  M-->>H: 402 with the quote (amount, payee, asset)
+  A->>H: Submits a purchase request
+  H->>H: Presents the credential, Policy decides
+  Note over H: Allow within range, Ask above it, Deny on a mismatch
+  H->>P: Needs your attention, with a summary of this purchase
+  P->>S: Approves this purchase on the device
+  H->>C: Transaction 1, a ZK proof that reserves the budget
+  H->>S: Asks for a signature
+  S-->>H: EIP-3009 payment authorization
+  H->>M: GET the item, with the payment authorization
+  M->>C: Transaction 2, the settlement
+  M-->>H: 200, the content and a receipt
 ```
 
-結果有三種：
+There are three outcomes:
 
-| Policy 的裁決 | 什麼時候 | 接下來 |
+| Policy's decision | When | What follows |
 |---|---|---|
-| **Allow** | 金額在自動範圍內，規則都符合 | 不問本人，直接走付款 |
-| **Ask** | 超過自動上限 | 本人用裝置核准這一筆，才走付款 |
-| **Deny** | 超出預算、商家不在名單、憑證不符、頻率超限 | 付款前就停下，沒有任何鏈上交易 |
+| **Allow** | The amount is within the automatic range and every rule holds | Payment goes ahead without asking the person |
+| **Ask** | The amount is above the automatic limit | The person approves this purchase on a device, then payment goes ahead |
+| **Deny** | Over budget, merchant not on the list, credential mismatch, rate limit reached | It stops before payment; there is no transaction on chain |
 
-規則是確定性的，模型沒有裁量空間。Agent 說「已經付款了」也不會改變任何紀錄。
+The rules are deterministic. The model has no discretion. If the agent says "it has been paid", no record changes.
 
-## 交易是怎麼簽出來的
+## How a payment gets signed
 
-這是整個系統最關鍵的一段：私鑰只在 Signer，而 Signer 不相信 Host。
+This is the part that matters most: the private key lives only in the Signer, and the Signer does not trust the Host.
 
 ```mermaid
 sequenceDiagram
   autonumber
   participant H as Host
   participant R as Relayer
-  participant C as 鏈
+  participant C as Chain
   participant S as Signer
-  participant M as 商店
+  participant M as Shop
   participant F as Facilitator
 
-  H->>R: 預留這一筆的預算
-  R->>C: 第 1 筆交易：Groth16 證明
-  Note over C: 預算合約確認：扣完不為負、對應這個任務、沒有重放
-  C-->>R: 預留成功
-  H->>S: 請求簽名：授權內容、請購單、預留紀錄
-  S->>S: 檢查委託、商家、金額、上限、頻率
-  S->>C: 自己確認預算已經預留
-  S-->>H: EIP-3009 簽章
-  H->>M: GET 商品，帶 PAYMENT-SIGNATURE
-  M->>F: 驗證並結算
-  F->>C: 第 2 筆交易：transferWithAuthorization
-  C-->>F: 結算成功
-  M-->>H: 200，內容與收據
+  H->>R: Reserve the budget for this purchase
+  R->>C: Transaction 1, a Groth16 proof
+  Note over C: The budget contract checks that the balance stays non-negative, the proof is bound to this task, and it is not a replay
+  C-->>R: Reserved
+  H->>S: Asks for a signature, sending the authorization, the order and the reservation
+  S->>S: Checks the mandate, merchant, amount, limits and rate
+  S->>C: Confirms the reservation on chain itself
+  S-->>H: EIP-3009 signature
+  H->>M: GET the item, with PAYMENT-SIGNATURE
+  M->>F: Verify and settle
+  F->>C: Transaction 2, transferWithAuthorization
+  C-->>F: Settled
+  M-->>H: 200, the content and a receipt
 ```
 
-**Signer 簽之前，自己檢查這些事**（全部通過才簽）：
+**Before it signs, the Signer checks all of this itself** (it signs only if every check passes):
 
-| 檢查 | 目的 |
+| Check | Why |
 |---|---|
-| 本人用裝置確認過這份委託 | 沒有本人同意，Host 開不出委託 |
-| 收款人在委託的商家名單裡 | 付款頁的收款人被換掉時，簽不出來 |
-| 金額不超過每筆上限與委託總額 | Host 被入侵也花不出範圍外的錢 |
-| 超過自動上限的那一筆，有本人對這一筆的核准，而且沒用過 | 核准只能用一次，不能重放 |
-| 同一個錢包在時間窗內的簽名次數沒有超限 | 頻率上限在 Host 與 Signer 各有一道 |
-| 鏈上已經為這一筆預留預算 | 自己向鏈查，不聽 Host 說 |
+| The person confirmed this mandate on a device | Without the person's consent, the Host cannot create a mandate |
+| The payee is on the mandate's merchant list | If the payee on a payment page is swapped, no signature comes out |
+| The amount is within the per-payment limit and the mandate's total | A compromised Host still cannot spend outside the range |
+| For a purchase above the automatic limit, there is the person's approval of this purchase, and it has not been used | An approval works once; it cannot be replayed |
+| The wallet has not signed too many times within the time window | The rate limit exists once in the Host and once in the Signer |
+| The budget for this purchase is already reserved on chain | It asks the chain, not the Host |
 
-**一份 EIP-3009 授權寫明了什麼**：
+**What an EIP-3009 authorization states:**
 
-| 欄位 | 內容 |
+| Field | Content |
 |---|---|
-| `from` | 客人的錢包 |
-| `to` | 商店的收款地址 |
-| `value` | 這一筆的金額 |
-| `validAfter`、`validBefore` | 有效期限；過期就不能用 |
-| `nonce` | 一次性值；同一份授權不能用第二次 |
+| `from` | The customer's wallet |
+| `to` | The shop's receiving address |
+| `value` | The amount of this purchase |
+| `validAfter`, `validBefore` | The validity window; it cannot be used after it expires |
+| `nonce` | A one-time value; the same authorization cannot be used twice |
 
-簽出來的不是空白支票，只對這一筆、這個收款人、這個金額、這段時間有效。
+What gets signed is not a blank cheque. It is valid for this purchase, this payee, this amount and this time window only.
 
-**本人核准是怎麼綁上去的**：
+**How the person's approval is bound to it:**
 
-1. Signer 發一個一次性的 challenge，內容綁定這一筆請購的摘要。
-2. 本人的裝置對它簽章（WebAuthn）。Host 只負責轉送，沒辦法替本人簽。
-3. Signer 驗證裝置簽章，保存這一次核准。
-4. 簽付款授權時，Signer 引用並消耗這一次核准。
+1. The Signer issues a one-time challenge bound to a summary of this purchase.
+2. The person's device signs it (WebAuthn). The Host only relays; it cannot sign for the person.
+3. The Signer verifies the device signature and stores this approval.
+4. When it signs the payment authorization, the Signer refers to this approval and consumes it.
 
-所以畫面上那句「本人以已登記的裝置核准」，對應的是 Signer 驗過的一次裝置簽章，不是 Host 的說法。
+So the line on screen that says "the person approved on a registered device" stands for one device signature the Signer verified. It is not the Host's claim.
 
-**出事的時候**：
+**When something goes wrong:**
 
-- **結果不明**（逾時、重啟、可能已上鏈）：先向鏈對帳，確認已結算就用同一份簽章重取內容；絕不重付。
-- **付了款，商店沒交付**：由鏈判斷已付款，記為交付失敗、待人工處理。主持人按下「商店退款」後，商店送出第 3 筆交易把全額退回客人的錢包，Host 向鏈確認後才記退款。
+- **Unknown result** (a timeout, a restart, possibly already on chain): the Host reconciles against the chain first. If it settled, the Host fetches the content again with the same signature. It never pays twice.
+- **Paid, but the shop did not deliver:** the chain shows it was paid, so it is recorded as a failed delivery waiting for a person. When the operator presses "shop refund", the shop sends a third transaction returning the full amount to the customer's wallet, and the Host records the refund only after confirming it on chain.
 
-## 自己查證
+## Check it yourself
 
-Checker 是一支獨立的程式：只讀證據包與鏈，不呼叫系統裡的任何程式。
+The Checker is a separate program. It reads only the evidence pack and the chain, and calls no code of the system.
 
-**現在就能跑的**（只需要這個 repo，不連網）：
+**What you can run right now** (this repository only, no network):
 
 ```sh
 go run ./cmd/verify-demo --run-dir testdata/verification/m1-fixture-20261009T162703Z-4ddb7a
 ```
 
-會印出一份 JSON 報告，`"verdict": "PASS"`。這是早期階段的一份證據包：fake Agent、沒有付款。它示範的是「證據包加上獨立檢查器」這個做法，不是測試網付款的證明。
+It prints a JSON report with `"verdict": "PASS"`. This is an evidence bundle from an early stage: a fake agent and no payment. It demonstrates the practice of an evidence bundle checked by an independent program. It is not proof of the testnet payments.
 
-**測試網的那一場**（Base Sepolia，2026-10-31，真實 Claude Code Agent、兩位客人、本人裝置確認）是這樣查的：
+**The testnet run** (Base Sepolia, 2026-10-31, a real Claude Code agent, two customers, the person confirming on a device) was checked like this:
 
 ```sh
 go run ./cmd/verify-demo --mode e1a --run-dir artifacts/e1a/testnet-town-t4 --rpc https://sepolia.base.org
 ```
 
-結果是十項主張 E1～E10 全部 PASS。這一場的證據包不在 repo 裡（`artifacts/` 不進版控），所以這行指令你現在跑不了；要證據包的話向作者索取。Checker 會讀證據包記錄的那個 commit 的情境檔，所以要用完整的 git clone，不能用淺層 clone。
+All ten claims, E1 to E10, passed. That run's evidence pack is not in this repository (`artifacts/` is not versioned), so you cannot run this command as it stands; ask the author for the pack. The Checker reads the scenario files of the commit the pack records, so it needs a full git clone, not a shallow one.
 
-| | Checker 確認什麼 |
+| | What the Checker confirms |
 |---|---|
-| E1 | 證據檔案完整、沒有被改動 |
-| E2 | 每一步都對到同一筆請購；每間店看到的正好是它要求的屬性 |
-| E3 | 事件紀錄前後相連、順序正確 |
-| E4 | 兩筆鏈上交易與 ZK 預算證明（向鏈查證） |
-| E5 | 結果未知時沒有重複付款 |
-| E6 | 每筆紀錄如實標示是模擬還是真實 |
-| E7 | 兩位客人的身分與錢包互不混用 |
-| E8 | 期間沒有未經授權的付款（向鏈重算） |
-| E9 | 證據只含允許的欄位，祕密掃描通過 |
-| E10 | 商店頁面裡的誘導文字沒有讓付款越權 |
+| E1 | The evidence files are complete and unchanged |
+| E2 | Every step refers to the same purchase; each shop saw exactly the attributes it asked for |
+| E3 | The event records link to each other in the right order |
+| E4 | The two on-chain transactions and the ZK budget proof (checked against the chain) |
+| E5 | No payment was repeated when a result was unknown |
+| E6 | Every record says truthfully whether it was simulated or real |
+| E7 | The two customers' identities and wallets were not mixed |
+| E8 | No unauthorized payment happened in the period (recomputed from the chain) |
+| E9 | The evidence holds only permitted fields, and a secret scan passes |
+| E10 | Persuasive text on a shop's page did not push a payment past its authority |
 
-## 現況與限制
+## Status and limits
 
-**做到的**
+**Done**
 
-- 真實 Agent 在 Base Sepolia 上完成付款與交付；本人以裝置確認委託、核准單筆；ZK 預算預留；Checker 向鏈查證通過。
-- 一家人的城鎮：家長與未滿 18 歲的孩子，書店、咖啡店、便利商店。每間店只看到它要的資料；孩子的 AI 買酒在付款前被擋下；被商品頁誘導的 Agent 花不到預算外的錢。
-- 飯店（收款人被換掉，付款前擋下）、郵局（付了款沒交付，商店退款）、街上的 ATM、地鐵閘門的自動扣款、頻率上限。
-- 憑證的身分來源接上 eKYC 廠商 Didit 的沙盒。
+- A real agent completed payment and delivery on Base Sepolia. The person confirmed mandates and approved single purchases on a device. The budget was reserved with a ZK proof. The Checker verified it against the chain.
+- A family's town: a parent and a child under 18; a bookshop, a café and a convenience store. Each shop sees only the data it needs. The child's agent is stopped before payment when it tries to buy beer. An agent persuaded by a product page cannot spend beyond the budget.
+- The hotel (the payee is swapped, stopped before payment), the post office (paid and not delivered, refunded by the shop), an ATM on the street, automatic fares at the subway gate, and a rate limit.
+- The credential's identity source is connected to the sandbox of Didit, an eKYC vendor.
 
-**照實說的限制**
+**Limits, stated plainly**
 
-- 只在測試鏈與測試幣上跑過，沒有 mainnet、真實資金或真實商店。
-- 飯店、郵局與退款目前只在本機測試鏈跑過，還沒上 Base Sepolia。
-- eKYC 接的是沙盒：流程是真的，沒有驗證真人。
-- 發行者、持有人與驗證者在同一個程序裡；兩位核准人是同一個人、同一台裝置。
-- 政策在鏈下由 Policy 與 Signer 執行，合約與錢包層不強制。
-- ZK 的 setup 是單方產生的；ZK 預算只對鏈上隱藏，Relayer 看得到上限與餘額。
-- x402 只做了 `exact`；Facilitator 與 Host 由同一位主持人在同一台電腦上跑。
-- 沒有爭議流程與託管：商店不肯退款時，系統沒有辦法強制。
+- It has run only on test chains with test tokens. There is no mainnet, no real money and no real shop.
+- The hotel, the post office and the refund have run only on a local test chain, not yet on Base Sepolia.
+- The eKYC connection is a sandbox: the flow is real, and no real person was verified.
+- The issuer, the holder and the verifier run in one process. The two approvers are the same person on the same device.
+- The policy is enforced off chain by the Policy and the Signer. Neither the contract nor the wallet enforces it.
+- The ZK setup was generated by one party. The ZK budget is hidden from the chain only; the Relayer sees the cap and the balance.
+- Only the x402 `exact` scheme is implemented. The Facilitator and the Host are run by the same operator on the same computer.
+- There is no dispute process and no escrow. If a shop refuses to refund, the system cannot force it.
 
-完整的威脅模型與限制：[docs/architecture.md](docs/architecture.md)。跟 Coinbase CDP、AP2、ERC-8196、ERC-8366 等的分工：[docs/positioning.md](docs/positioning.md)。
+The full threat model and limits: [docs/architecture.md](docs/architecture.md). How this divides the work with Coinbase CDP, AP2, ERC-8196, ERC-8366 and others: [docs/positioning.md](docs/positioning.md).
 
-## 跑起來
+## Running it
 
-需要 Go 1.26 以上與 make；瀏覽器檢查另需 Node.js 20 以上與 Google Chrome。預設的 fake 模式與所有測試不需要 Claude Code CLI、模型服務、RPC 或測試網帳戶。
+You need Go 1.26 or later and make. Browser checks also need Node.js 20 or later and Google Chrome. The default fake mode and every test need no Claude Code CLI, model service, RPC or testnet account.
 
 ```sh
 cp .env.example .env
-make check          # go vet、測試、建置；不呼叫模型、不連測試網
+make check          # go vet, tests, build; calls no model and no testnet
 ```
 
-| 想做什麼 | 指令 | 說明 |
+| To do this | Command | Notes |
 |---|---|---|
-| 只跑測試 | `make check` | 只需要這個 repo |
-| 不付款的展示 | `make demo` | fake Agent，沒有付款；開 `http://127.0.0.1:8402/host` |
-| 本機付款的展示 | `make demo-local` | 本機測試鏈、Signer、Host 一次啟動；會問 Signer 的密語 |
-| 測試網的展示 | `make demo-testnet` | Base Sepolia；步驟見 [docs/host-manual.md](docs/host-manual.md) |
-| 用 eKYC 的身分來源 | `APA_PRESENT_EKYC_SESSION=<session> make demo-local` | 見 [docs/commercial-ekyc.md](docs/commercial-ekyc.md) |
+| Run the tests | `make check` | Needs only this repository |
+| A demo without payment | `make demo` | Fake agent, no payment; open `http://127.0.0.1:8402/host` |
+| A demo paying on a local chain | `make demo-local` | Starts a local test chain, the Signer and the Host together; asks for the Signer's passphrase |
+| A demo on the testnet | `make demo-testnet` | Base Sepolia; steps in [docs/host-manual.md](docs/host-manual.md) |
+| Use eKYC as the identity source | `APA_PRESENT_EKYC_SESSION=<session> make demo-local` | See [docs/commercial-ekyc.md](docs/commercial-ekyc.md) |
 
-兩件事要先知道：
+Two things to know first:
 
-- **畫面需要 Unity 的 Web 建置，它不在 Git 裡。** 像素美術是 LimeZu 的授權素材，不能隨 repo 散布。要先匯入本機已取得授權的素材再建置，步驟見 [docs/developer-guide.md](docs/developer-guide.md)。沒有建置時，API 與測試照常可用。
-- **真實 Agent 與測試網付款都要明確開啟。** 預設不會啟動模型，也不會送出任何交易。
+- **The screens need Unity's Web build, which is not in Git.** The pixel art is licensed from LimeZu and cannot be distributed with the repository. Import assets you have licensed yourself, then build; the steps are in [docs/developer-guide.md](docs/developer-guide.md). Without the build, the API and the tests still work.
+- **A real agent and testnet payments must be switched on explicitly.** By default no model is started and no transaction is sent.
 
-各階段的啟動方式、設定、證據包與檢查器、驗收腳本：[docs/developer-guide.md](docs/developer-guide.md)。
+Commands for each stage, settings, evidence bundles, the checker and the acceptance scripts: [docs/developer-guide.md](docs/developer-guide.md).
 
-## 目錄與文件
+## Layout and documents
 
 ```text
 cmd/
-  demo/              Host：商店、Policy、Store、付款流程、網頁與 API
-  apa-signer/        Signer：錢包私鑰、裝置驗證、簽付款授權
-  apa-relayer/       Relayer：送出 ZK 預算預留
-  apa-facilitator/   Facilitator：x402 v2 的驗證、結算與退款
-  apa-issuer/        發行者：憑證目錄、撤銷、eKYC
-  verify-demo/       Checker：唯讀檢查證據包與鏈
-  e1-evidence/       把一場實跑打包成證據包
-  apa-buyer/ fake-claude/   buyer host 與不跑模型的 fake Agent
+  demo/              Host: shops, Policy, Store, payment flow, web pages and API
+  apa-signer/        Signer: wallet keys, device verification, signing authorizations
+  apa-relayer/       Relayer: submits the ZK budget reservation
+  apa-facilitator/   Facilitator: x402 v2 verify, settle and refund
+  apa-issuer/        Issuer: credential directory, revocation, eKYC
+  verify-demo/       Checker: read-only check of an evidence pack and the chain
+  e1-evidence/       Packs one run into an evidence pack
+  apa-buyer/ fake-claude/   the buyer host, and a fake agent that runs no model
 internal/
-  policy/ paypolicy/ 確定性 Policy：Deny / Ask / Allow
-  store/             SQLite、事件雜湊鏈、恢復驗證
-  signer/            Signer 的檢查、EIP-712 與 EIP-3009 簽章、WebAuthn
-  credential/        BBS+ 憑證、狀態清單、eKYC 紀錄
-  budget/            ZK 預算：證明與預算合約
-  merchant/ x402/ facilitator/   商店、x402 header、結算
-  toolbridge/        Agent 的三個工具與請購組裝
-  payflow/ reconcile/            付款步驟與對帳
-  verification/      Checker 的十項主張
-web/                 主持人頁、展示視窗、Dashboard（原生 HTML／CSS／JS）
-unity/               像素城鎮與店內場景（素材與建置不進 Git）
-slides/              付款架構簡報（open-slide）
-scripts/             展示啟動、Unity 建置、影片、驗證腳本
-docs/                設計文件
+  policy/ paypolicy/ deterministic Policy: Deny / Ask / Allow
+  store/             SQLite, hash-chained events, recovery checks
+  signer/            the Signer's checks, EIP-712 and EIP-3009 signing, WebAuthn
+  credential/        BBS+ credentials, the status list, the eKYC record
+  budget/            ZK budget: the proof and the budget contract
+  merchant/ x402/ facilitator/   shops, x402 headers, settlement
+  toolbridge/        the agent's three tools and purchase order assembly
+  payflow/ reconcile/            payment steps and reconciliation
+  verification/      the Checker's ten claims
+web/                 host page, audience window, dashboard (plain HTML, CSS and JS)
+unity/               the town and shop scenes (assets and builds are not in Git)
+slides/              the payment architecture deck (open-slide)
+scripts/             demo start-up, Unity builds, video, verification scripts
+docs/                design documents
 ```
 
-| 想了解 | 看這份 |
+The design documents under `docs/` are written in Traditional Chinese.
+
+| To learn about | Read |
 |---|---|
-| 架構、威脅模型、限制 | [docs/architecture.md](docs/architecture.md) |
-| 跟其他方案的分工，能說與不能說 | [docs/positioning.md](docs/positioning.md) |
-| 現場怎麼操作 | [docs/host-manual.md](docs/host-manual.md) |
-| 每間店看到什麼資料 | [docs/commercial-venues.md](docs/commercial-venues.md) |
-| 付款流程與對帳 | [docs/commercial-p2-host.md](docs/commercial-p2-host.md) |
-| Signer 與本人核准 | [docs/commercial-p1b-design.md](docs/commercial-p1b-design.md)、[docs/commercial-human-approval-design.md](docs/commercial-human-approval-design.md) |
+| Architecture, threat model, limits | [docs/architecture.md](docs/architecture.md) |
+| How it divides the work with other projects; what may and may not be claimed | [docs/positioning.md](docs/positioning.md) |
+| Operating the demo | [docs/host-manual.md](docs/host-manual.md) |
+| What data each shop sees | [docs/commercial-venues.md](docs/commercial-venues.md) |
+| The payment flow and reconciliation | [docs/commercial-p2-host.md](docs/commercial-p2-host.md) |
+| The Signer and the person's approval | [docs/commercial-p1b-design.md](docs/commercial-p1b-design.md), [docs/commercial-human-approval-design.md](docs/commercial-human-approval-design.md) |
 | eKYC | [docs/commercial-ekyc.md](docs/commercial-ekyc.md) |
-| 退款、頻率上限 | [docs/commercial-refund.md](docs/commercial-refund.md)、[docs/commercial-velocity.md](docs/commercial-velocity.md) |
-| 展示影片的腳本 | [docs/demo-video-script.md](docs/demo-video-script.md) |
-| 過去的里程碑紀錄 | [docs/status-history.md](docs/status-history.md) |
+| Refunds, the rate limit | [docs/commercial-refund.md](docs/commercial-refund.md), [docs/commercial-velocity.md](docs/commercial-velocity.md) |
+| The demo video's script | [docs/demo-video-script.md](docs/demo-video-script.md) |
+| Earlier milestones | [docs/status-history.md](docs/status-history.md) |
 
-**不進版控的東西**：`.env`、`bin/`、`var/`（執行資料與金鑰）、`artifacts/`（證據包與影片）、憑證與金鑰檔、Claude Code CLI 的原始輸出、音檔、LimeZu 授權素材。規則在 `.gitignore`。
+**Not versioned:** `.env`, `bin/`, `var/` (runtime data and keys), `artifacts/` (evidence packs and videos), credential and key files, raw Claude Code CLI output, audio, and LimeZu's licensed assets. The rules are in `.gitignore`.
 
-## 授權
+## License
 
-程式碼與文件以 [MIT License](LICENSE) 授權。下面這些不在 MIT 的範圍內：
+Code and documents are under the [MIT License](LICENSE). These are outside it:
 
-- **像素美術**：城鎮與店內的圖是 [LimeZu](https://limezu.itch.io) 的授權素材，不在這個 repo 裡，也不能隨它散布。repo 只有檔名清單與匯入腳本；要建置畫面，請自行取得素材。
-- **字型**：`unity/AgentPaymentAuthority/Assets/APA/Resources/NotoSansTC-APA.ttf` 是 Noto Sans TC 的子集，依 SIL Open Font License 1.1 授權，授權全文在同一個資料夾的 `NotoSansTC-OFL.txt`。
-- **第三方 Go 模組**：各自的授權見 [docs/third-party.md](docs/third-party.md)。
-- **簡報工作區**：`slides/` 由 [open-slide](https://github.com/open-slide/open-slide) 產生，其中的範例簡報與 skills 來自該專案。
+- **Pixel art:** the town and shop images are licensed assets from [LimeZu](https://limezu.itch.io). They are not in this repository and may not be distributed with it. The repository holds only a list of file names and an import script; to build the screens, obtain the assets yourself.
+- **Font:** `unity/AgentPaymentAuthority/Assets/APA/Resources/NotoSansTC-APA.ttf` is a subset of Noto Sans TC under the SIL Open Font License 1.1. The license text is in the same folder as `NotoSansTC-OFL.txt`.
+- **Third-party Go modules:** see [docs/third-party.md](docs/third-party.md) for each license.
+- **The slide workspace:** `slides/` was scaffolded by [open-slide](https://github.com/open-slide/open-slide); its sample deck and skills come from that project.
