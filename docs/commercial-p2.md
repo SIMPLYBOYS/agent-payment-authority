@@ -260,7 +260,7 @@ Claude Code 獨立 context 的 code-reviewer，結論 REQUEST CHANGES。全部�
 | Important | 「永遠不會成功」用最新區塊判定，reorg 可能把之後又上鏈並花掉預算的交易誤判為 failed，使 DB 與鏈不一致 | 改用已確認深度的區塊（nonce 與時間）判定 |
 | Important | 沒人再來續的 sent 預留讓 task 永遠 `TASK_BUSY`，也讓 floor 一直偏高 | 準備新交易前，先對所有未完成的交易各檢查一次並收尾（`settleOpen`） |
 | 建議 | 被判定 failed 的登記（nonce 被別筆用掉）使該 task ID 永遠無法登記 | 不改：demo 的 task 很多，改用新的 task ID；寫在這裡 |
-| 建議 | 多個呼叫者排隊時，最長可能等「人數 × 2 分鐘」 | 已在 ponytail 註解；兩位客人並行時再改 |
+| 建議 | 多個呼叫者排隊時，最長可能等「人數 × 2 分鐘」 | 已在 ponytail 註解；兩位客人並行時再改（11/14 已改：只有同一個任務的呼叫互相等，`docs/commercial-p2-host.md` §12.2） |
 
 ### 9.9 第三段的第三輪 review（03d126f）與修正
 

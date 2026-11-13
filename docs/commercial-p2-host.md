@@ -158,7 +158,7 @@ request_purchase ─→ Store：POLICY_DECIDED
 
 | # | 問題 | 選項 | 建議 |
 |---|---|---|---|
-| H-D1 | 誰觸發付款 | **A** Host 自動：Allow 後、或 `GRANT_ISSUED` 後，由付款工作一次一筆處理；<br>**B** 新增 Agent 工具，讓 Agent 自己按「付款」；<br>**C** 主持人在畫面上按鈕 | **A**：付款權限留在 Host 與 Signer，Agent 只能請購（交易流程的信任邊界）；也符合決策 4、7、8 |
+| H-D1 | 誰觸發付款 | **A** Host 自動：Allow 後、或 `GRANT_ISSUED` 後，由付款工作一次一筆處理（11/14 起每筆各自進行，§12.2）；<br>**B** 新增 Agent 工具，讓 Agent 自己按「付款」；<br>**C** 主持人在畫面上按鈕 | **A**：付款權限留在 Host 與 Signer，Agent 只能請購（交易流程的信任邊界）；也符合決策 4、7、8 |
 | H-D2 | 交付的內容給誰 | **A** Host 收下內容，只保存它的 hash 並在畫面上顯示收據；`request_purchase` 只回付款與交付狀態；<br>**B** 已付款後把內容交給 Agent（新增工具或在回應中附上） | **A**：商店內容是不可信的，直接送進 Agent 會多一個 prompt injection 的入口（AE1 量過的那種）；要交給 Agent 時，比照目錄文字做清理與截斷，另開一片 |
 | H-D3 | 付款時間窗（目前 60 秒） | **A** 會結算的商店報價 `maxTimeoutSeconds` 改為 300，與核准的有效期（`approval_ttl_seconds` 300）一致；M1 商店維持 60；<br>**B** 維持 60：Ask 超過 60 秒才核准就付不出去，要重新請購並再核准一次；<br>**C** 600（Signer 的上限） | **A**：讓本人核准有實際可用的時間；代價是一筆上不了鏈的轉帳最多占住商店的 gas nonce 5 分鐘（§9.11 會自動取代） |
 | H-D4 | Z2 預算何時登記上鏈 | **A** task 開始時，以 `budget_initial` 登記（每個 task 一筆 tx#0，在背景進行、不擋 run 開始；登記完成前付款會等待）；<br>**B** 第一次付款前才登記 | **A**：付款時少一段等待；demo 的 task 數量不多 |

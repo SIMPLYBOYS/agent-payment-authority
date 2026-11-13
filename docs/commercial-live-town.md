@@ -34,7 +34,7 @@
 
    11/2 起是一家人的六個情境（`docs/commercial-consumer.md`）；10/29 原本是資料研究室與街角咖啡的四個（`kr-market`、`tw-semis-note`、`cafe-lunch-set`、`cafe-meeting-coffee`），下面 S4、S5 的紀錄是那四個。id 沿用舊名：`town-data-*` 的場景是 `books`。
 
-   一個場域按「開始」＝兩位真實 Agent 同時執行（兩次模型呼叫）；付款仍依序處理。
+   一個場域按「開始」＝兩位真實 Agent 同時執行（兩次模型呼叫）；付款仍依序處理（11/14 起付款同時進行，見 `docs/commercial-p2-host.md` §12.2）。
 2. **L2 host 檔**：沿用 `p2-testnet e1a-host`，但不帶 `--shop-eval`，商店就賣自己的商品（城鎮那五樣）。task ID 照 E1-a 的 `show-e1a-<標籤>-a/b-NN`（範本 `registry-e1a.json` 已有 A、B 各 5 個），每組實跑換標籤。
 3. **L3 啟動**：
    - testnet：`sh scripts/demo/demo-testnet.sh live <標籤> town`（多一個參數選城鎮目錄；不帶是原本的 E1-a）。
@@ -75,7 +75,7 @@ S5 之前要先確認（testnet 的量是兩個場域的）：
 - 只多一個目錄與啟動選項；付款、核准、Signer 的信任邊界不變（批次 4 的本人確認委託照常）。
 - fake 的城鎮路線不變，仍是預設。
 - 真實 Agent 只在按「開始」時執行；不在測試或我的驗證裡呼叫模型。
-- 兩位核准人仍是同一個人同一台裝置；付款依序處理；身分是測試資料（照實說）。
+- 兩位核准人仍是同一個人同一台裝置；付款依序處理（11/14 起付款同時進行，見 `docs/commercial-p2-host.md` §12.2）；身分是測試資料（照實說）。
 
 ## 6 進度
 

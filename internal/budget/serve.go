@@ -52,8 +52,9 @@ type Health struct {
 
 const (
 	maxBody = 64 << 10
-	// answerLimit: longer than Relayer.wait; a call queued behind another's
-	// wait may pass it, and is then pending to the Host (Lookup decides).
+	// answerLimit: longer than Relayer.wait; a call waiting behind its own
+	// task's other call (never another task's) may pass it, and is then
+	// pending to the Host (Lookup decides).
 	answerLimit = 4 * time.Minute
 )
 

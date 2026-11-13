@@ -118,4 +118,4 @@ Review 兩輪（`9ce0813` 與其後的修正）：viewer 登入後頁首不再�
 | 5 | 穩定：連續 3 次本機彩排通過，加上 1 次 testnet 一次跑完；開場前檢查全部通過 | 進行中。自動化（11/1，`a03eb61`）：Go、頁面 150、show-ui 33、ux3-ui 38、c2-ui 23 全過。本機彩排 1/3：`town2`（Aaron 11/1「皆符合預期結果」）三個場域六個場次，證據包 `artifacts/e1a/rehearsal-town2`（run `e1a-20261101T152742Z-596183`）e1a.3 E1～E10 全部 PASS；B 的啤酒 `age_over_18=false`／`CLAIM_UNMET`，Deny `CREDENTIAL_CLAIM_UNMET`，沒有付款。本機彩排 2/3：`town3`（Aaron 11/1「結果符合預期」），證據包 `artifacts/e1a/rehearsal-town3`（run `e1a-20261101T153307Z-21560e`）e1a.3 E1～E10 全部 PASS，六個場次與 `town2` 相同。第 3 次（`town4`）Aaron 11/1 決定略過：「我覺得可以忽略，直接進入正式錄影前的準備」。11/2 改為一家人的故事（`docs/commercial-consumer.md`）後再彩排一次 `town4`：E1～E10 全部 PASS，真實 Agent 沒理會書店的誘導文字；fake 的「被騙的 Agent」Aaron 看過符合預期。testnet 的那一次併入正式錄影那一場（三個場域；先裝 `signer-4.json`：`dlg-ta` 在 S5 後已用 0.25，舊上限 0.30 不夠 A 的午餐與啤酒） |
 | 6 | README 開頭、一頁架構與威脅模型 | 完成（11/1）：README 開頭改為問題、做法、自己查證、現況（舊的狀態段原文搬到 `docs/status-history.md`）；`docs/architecture.md`：角色與權力、一筆付款怎麼走、E1～E10、威脅模型、照實說的限制 |
 
-照實寫成已知限制、不在清單內：真正同時付款（A4，現在排隊）、抗合成語音、兩位核准人其實是同一人同一台裝置（A5）、E1-b、遊戲模式的限制。
+照實寫成已知限制、不在清單內：真正同時付款（A4，當時排隊；11/14 已做）、抗合成語音、兩位核准人其實是同一人同一台裝置（A5）、E1-b、遊戲模式的限制。
