@@ -260,13 +260,23 @@ sequenceDiagram
 
 ## 自己查證
 
-Base Sepolia 上的一場實跑（2026-10-31，真實 Claude Code Agent、兩位客人、本人裝置確認）：
+Checker 是一支獨立的程式：只讀證據包與鏈，不呼叫系統裡的任何程式。
+
+**現在就能跑的**（只需要這個 repo，不連網）：
+
+```sh
+go run ./cmd/verify-demo --run-dir testdata/verification/m1-fixture-20261009T162703Z-4ddb7a
+```
+
+會印出一份 JSON 報告，`"verdict": "PASS"`。這是早期階段的一份證據包：fake Agent、沒有付款。它示範的是「證據包加上獨立檢查器」這個做法，不是測試網付款的證明。
+
+**測試網的那一場**（Base Sepolia，2026-10-31，真實 Claude Code Agent、兩位客人、本人裝置確認）是這樣查的：
 
 ```sh
 go run ./cmd/verify-demo --mode e1a --run-dir artifacts/e1a/testnet-town-t4 --rpc https://sepolia.base.org
 ```
 
-十項主張 E1～E10 全部 PASS。Checker 只讀證據包與鏈，不呼叫系統裡的任何程式。
+結果是十項主張 E1～E10 全部 PASS。這一場的證據包不在 repo 裡（`artifacts/` 不進版控），所以這行指令你現在跑不了；要證據包的話向作者索取。Checker 會讀證據包記錄的那個 commit 的情境檔，所以要用完整的 git clone，不能用淺層 clone。
 
 | | Checker 確認什麼 |
 |---|---|
@@ -280,8 +290,6 @@ go run ./cmd/verify-demo --mode e1a --run-dir artifacts/e1a/testnet-town-t4 --rp
 | E8 | 期間沒有未經授權的付款（向鏈重算） |
 | E9 | 證據只含允許的欄位，祕密掃描通過 |
 | E10 | 商店頁面裡的誘導文字沒有讓付款越權 |
-
-證據包不進版控（`artifacts/`），要的話向作者索取。Checker 會讀證據包記錄的那個 commit 的情境檔，所以要用完整的 git clone，不能用淺層 clone。
 
 ## 現況與限制
 
