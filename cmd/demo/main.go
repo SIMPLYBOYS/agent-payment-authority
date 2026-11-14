@@ -474,7 +474,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	}
 	if scenarios != nil {
 		ui.control = &control{st: st, runner: runner, bridge: bridge, shop: tools, scenarios: scenarios, ctx: runCtx, wg: &runs, out: d.out,
-			active: map[string]*liveRun{}, ended: map[string]*liveRun{}, transit: map[string]*transitPass{}, maxRuns: effMaxRuns, consumers: nConsumers, instance: instance, started: hostStart, profile: profile}
+			active: map[string]*liveRun{}, ended: map[string]*liveRun{}, transit: map[string]*transitPass{}, maxRuns: effMaxRuns, consumers: nConsumers, instance: instance, started: hostStart, since: d.clock(), profile: profile}
 		ui.control.register(mux, ui)
 		if roles.sim {
 			var ids []string

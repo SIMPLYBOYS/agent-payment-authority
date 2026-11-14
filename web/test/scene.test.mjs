@@ -372,6 +372,9 @@ test("UX3: bridge layouts, rooms in messages, the scenes in order", () => {
   assert.equal(cafe.get("consumer-b").task, "show-b-01");
   assert.equal(A.sceneTasks(rs, "data").size, 0, "a run that names no scene is in none");
   assert.equal(A.sceneTasks(rs).get("consumer-a").task, "show-a-02", "no venue: every run, as before");
+  const old = rs.map((r) => (r.task_id === "show-a-01" ? { ...r, earlier: true } : r));
+  assert.equal(A.sceneTasks(old, "cafe").has("consumer-a"), false, "an earlier host's run is in no scene");
+  assert.equal(A.sceneTasks(old, "cafe").get("consumer-b").task, "show-b-01");
 });
 
 test("UX3: a scene change is a new scene with its room, and only its runs", async () => {

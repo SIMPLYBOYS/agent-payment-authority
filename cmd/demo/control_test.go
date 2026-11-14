@@ -300,10 +300,14 @@ func TestControlFailuresAndRestart(t *testing.T) {
 	if v := h.waitRun(hang2["run_id"].(string), ended); v["record_error"] != "RUN_NOT_OPEN" || v["store_end"] != "TASK_CANCELLED" {
 		t.Fatalf("T4 failure: %v", v)
 	}
+	if v := h.run(a["run_id"].(string)); v["earlier"] != nil {
+		t.Fatalf("this host's own run marked earlier: %v", v)
+	}
 	h.stop()
 
 	// Restart: the run whose end was not recorded is interrupted; its
-	// request ID returns it, nothing reruns.
+	// request ID returns it, nothing reruns. Every run before it is earlier.
+	now.Add(1)
 	h = controlHost(t, hostOpts{dir: h.dir, expiryEvery: time.Hour, clock: now.Load, scenarios: cat})
 	defer h.stop()
 	op = h.tokens["operator"]
@@ -314,8 +318,8 @@ func TestControlFailuresAndRestart(t *testing.T) {
 		t.Fatalf("resend after restart: %d %v", code, v)
 	}
 	// Ask expired after a run ended: the task is running again, the run is not interrupted.
-	if v := h.run(a["run_id"].(string)); v["state"] != "ended" {
-		t.Fatalf("an ended run changed on restart: %v", v)
+	if v := h.run(a["run_id"].(string)); v["state"] != "ended" || v["earlier"] != true {
+		t.Fatalf("an ended run changed on restart, or is not marked earlier: %v", v)
 	}
 }
 

@@ -515,11 +515,13 @@ export function parseBridge(detail) {
 // sceneTasks: each consumer's scene task, the task of its newest run (the
 // runs list is newest first). An older task stays out of the scene. With a
 // venue (UX3), only that scene's runs count; a run that names no scene (its
-// catalog entry changed since) is in none.
+// catalog entry changed since) is in none. A run of an earlier host (Aaron
+// 11/14: the kept database's old endings showed on a fresh start) is in none.
 export function sceneTasks(runs, venue) {
   const out = new Map();
   for (const r of runs || []) {
-    if (venue && (!r || r.scene !== venue)) continue;
+    if (!r || r.earlier) continue;
+    if (venue && r.scene !== venue) continue;
     if (r && r.consumer_id && r.task_id && !out.has(r.consumer_id)) out.set(r.consumer_id, { task: r.task_id, run: r.run_id, live: r.live || "" });
   }
   return out;

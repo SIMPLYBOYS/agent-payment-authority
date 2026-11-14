@@ -65,6 +65,7 @@ type control struct {
 	instance  string                  // this host process: the timing records' host_instance
 	profile   policy.Profile          // the host's profile: a delegation's merchants and asset
 	started   time.Time               // this host's start: the timing records' clock zero (monotonic)
+	since     uint64                  // the Store's clock at this host's start: a run accepted before it is an earlier host's
 }
 
 // find is the running or stopping run with this ID, or nil. c.mu is held.
@@ -122,6 +123,7 @@ type runView struct {
 	ToolCalls     *int   `json:"tool_calls,omitempty"`   // calls the host has answered so far, while running or stopping (a count only)
 	Timing        string `json:"timing,omitempty"`       // the run's timing record: written | not_written
 	Transit       bool   `json:"transit,omitempty"`      // a subway pass (transit.go): no process; live "open" while it takes fares
+	Earlier       bool   `json:"earlier,omitempty"`      // accepted before this host started (the database is kept): the town shows none of them
 }
 
 // view merges the stored run with what this process knows. c.mu is held,
@@ -129,7 +131,8 @@ type runView struct {
 // c.mu too, so a view never mixes an older row with a newer end.
 func (c *control) view(r store.Run) runView {
 	v := runView{RunID: r.RunID, RequestID: r.RequestID, Scenario: r.Scenario, TaskID: r.TaskID, ConsumerID: r.ConsumerID,
-		Contract: r.ContractVersion, DelegationID: r.DelegationID, State: r.State, AcceptedAt: r.AcceptedAt, InterruptedAt: r.InterruptedAt, EndedAt: r.EndedAt}
+		Contract: r.ContractVersion, DelegationID: r.DelegationID, State: r.State, AcceptedAt: r.AcceptedAt, InterruptedAt: r.InterruptedAt, EndedAt: r.EndedAt,
+		Earlier: r.AcceptedAt < c.since}
 	if sc := c.scenarios[r.Scenario]; sc != nil && sc.digest == r.ScenarioDigest {
 		v.Scene = sceneName(sc.Scene) // the entry the run was accepted with, not a later edit
 		v.Transit = sc.Transit
