@@ -110,7 +110,22 @@ say "1/3 本機鏈就緒：$(grep -E '^p2-local: (resumed|wrote)' "$logs/chain.l
     python3 -I -c 'import json,sys; p=json.load(open(sys.argv[1])); p["facilitator_url"]="http://127.0.0.1:8403"; open(sys.argv[2],"w").write(json.dumps(p,indent=2)+"\n")' \
       "$chain/payments.json" "$base/host/payments.json" && chmod 600 "$base/host/payments.json" ||
       { say "卡在第 3 步：寫不出 Host 的付款設定（$base/host/payments.json）；全部停下"; kill -TERM 0; }
-    APA_PRESENT_DIR=$base/host make present-p2 SIGNER="$sock" AUTH=device PAYMENTS="$base/host/payments.json" REGISTRY="$chain/registry.json" ||
+    # The kept Host database never reuses a task, so each customer's 20 show-* run out (Aaron 11/14: A's on 11/11):
+    # the chain's registry plus show-a/b-21..100, as v1-dev.sh does; the chain's own file is left as it is.
+    python3 -I -c '
+import json, sys
+r = json.load(open(sys.argv[1]))
+have = {t["task_id"] for t in r["tasks"]}
+for c in ("a", "b"):
+    last = next(t for t in r["tasks"] if t["task_id"] == "show-" + c + "-20")
+    for n in range(21, 101):  # ponytail: 80 more each; the Host reads at most 64 KiB of registry
+        t = dict(last, task_id=f"show-{c}-{n:02d}", created_at=last["created_at"] + (n - 20) * 30)
+        if t["task_id"] not in have:
+            r["tasks"].append(t)
+json.dump(r, open(sys.argv[2], "w"), separators=(",", ":"))
+' "$chain/registry.json" "$base/host/registry.json" && chmod 600 "$base/host/registry.json" ||
+      { say "卡在第 3 步：寫不出 Host 的 registry（$base/host/registry.json）；全部停下"; kill -TERM 0; }
+    APA_PRESENT_DIR=$base/host make present-p2 SIGNER="$sock" AUTH=device PAYMENTS="$base/host/payments.json" REGISTRY="$base/host/registry.json" ||
       { say "卡在第 3 步：Host 停了（上面是它的訊息）；全部停下"; kill -TERM 0; }
   fi
 ) &
