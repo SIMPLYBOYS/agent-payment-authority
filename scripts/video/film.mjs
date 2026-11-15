@@ -244,12 +244,14 @@ async function transit(b) {
   await step("atm", "在 ATM 領到", 60);
   await sleep(5000); // the ATM's words held
   await walk("stairs", 15.6, 15.5, "subway");
-  await walk("gate-go", 814.5, 24.15, "", 30); // the car's aisle, through the gate: tried until A is down in the station
+  // 11/16: the stations wider (Aaron 11/15), the train in the middle (its aisle from x 823.5), the way up to the
+  // platform at the hall's east end: the walks are longer.
+  await walk("gate-go", 824.5, 24.15, "", 30); // the car's aisle, through the gate: tried until A is down in the station
   await step("opening", "開通捷運自動扣款", 60);
   await step("ride1", "（第 1 趟", 90);
   await walk("out", 1122.5, 13.1, "", 90); // the beach's hall, out through its gate: tried until the train has stopped there
-  await sleep(11000); // out through the gate (free), to the hall
-  await walk("in-go", 1114.5, 24.15); // back in, to the car's aisle
+  await sleep(24000); // off the train, east along the platform, down the way at the hall's end, west out through the gate (free), to the hall
+  await walk("in-go", 1124.5, 24.15); // back in, to the car's aisle
   await step("ride2", "（第 2 趟", 60);
   await sleep(7000);
   mark("end");

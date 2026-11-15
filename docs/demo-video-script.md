@@ -166,6 +166,8 @@ go run ./cmd/verify-demo --mode e1a --run-dir artifacts/e1a/<錄影那一場的�
 1. 依序跑 `node scripts/video/film.mjs --stage full --view present --ekyc <Didit session> --out artifacts/video/full-present5`、`--view show --ekyc <session> --out artifacts/video/full-show6`、`--stage fooled --ekyc <session> --out artifacts/video/fooled4`，大約各 3 分鐘；`--stage ekyc --out artifacts/video/ekyc3` 拍 Didit 的沙盒驗證頁（約 1 分鐘，要網路與 `var/ekyc/didit-sandbox.key`）。
 2. 再跑 `python3 -I scripts/video/cut.py --cut 90` 與 `--cut 180`。
 
+**11/16 再重拍**（Aaron：「主片、地鐵加演、eKYC 都可以重新拍攝」：城鎮加了和店員、嚮導說話，地下鐵兩站重排並加寬）：`full-present6`、`full-show7`、`fooled5`（帶同一個 Didit session）、`ekyc4`、`transit-present2`；`cut.py` 改讀這幾個資料夾。11/11 的成品備份為 `apa-demo-90s-1111.*`、`apa-demo-180s-1111.*`，11/9 的地下鐵加演為 `apa-addon-transit-1109.*`。錄影的整套環境（本機鏈、Signer、核准用的虛擬裝置）由 `film.mjs` 自己起，不用 `/opt` 的 Signer，也不受 testnet 委派到期影響；要先停掉 demo-local（同樣用 8402）。
+
 **加演短片（11/7，`docs/commercial-post-hotel.md` N6）**：郵局與飯店各一段，不改 90 秒與 3 分鐘版。
 - 拍攝：`node scripts/video/film.mjs --stage full --view present --venues hotel,post --out artifacts/video/addon-present2`（約 1 分半）。郵局在交付失敗之後，腳本按交易卡上的「商店退款」，等到「商店已退款」再停 6 秒（11/8，`docs/commercial-refund.md`）。
 - 剪接：`python3 -I scripts/video/cut.py --cut addon`。每段先放 3 秒字卡（場域與示範的保護，標「示意動畫」），再放兩句字幕。
@@ -175,6 +177,6 @@ go run ./cmd/verify-demo --mode e1a --run-dir artifacts/e1a/<錄影那一場的�
 **加演短片：地下鐵（11/9，`docs/commercial-transit.md`、`docs/commercial-atm.md`）**：Aaron 11/9：「請提交，並加演短片」。邊走邊付，不改 90 秒與 3 分鐘版。
 - 拍攝：`node scripts/video/film.mjs --stage transit --out artifacts/video/transit-present`。遊戲模式走客人 A，每一步等於在地圖上點一下（Unity 的 `Walk` 指令）：走到 ATM 領測試 USDC → 下樓到商店街站 → 往車廂走，在閘門停下，第一次用裝置確認捷運委託，扣第 1 趟 → 搭到海灘站 → 出站（免費）→ 再進站，扣第 2 趟，不用再確認。每個時間點照主持人頁狀態列的字記進 `marks.json`。
 - 剪接：`python3 -I scripts/video/cut.py --cut transit`。照 `marks.json` 裁，不用手讀秒數；走路的片段加快，ATM 與閘門的回答照原速。先放 3 秒字卡（「加演：地下鐵」，標「示意動畫」），再放五句字幕。
-- 成品：`apa-addon-transit.mp4`（39 秒），1920×1080、30 fps，附兩份 SRT。五句：ATM 領錢（本機鑄造、每人每天最多 20；testnet 用 Circle faucet）→ 第一次進站在裝置上確認捷運委託 → Policy 一核准就開閘、扣 0.02、鏈上結算在背景 → 海灘站出站免費 → 再進站自動扣第二趟，不用再確認。
+- 成品：`apa-addon-transit.mp4`（39 秒），1920×1080、30 fps，附兩份 SRT。11/16 重拍（`transit-present2`）：車站加寬、列車在中間、上月台的通道在大廳東端，走的路變長：`film.mjs` 走進車廂的點改成 x 824.5、1124.5，海灘站下車到出閘門改等 24 秒；成品 52.5 秒。走近 ATM 時，銀行行員的招呼（「要領測試幣嗎？」）也拍進去了。五句：ATM 領錢（本機鑄造、每人每天最多 20；testnet 用 Circle faucet）→ 第一次進站在裝置上確認捷運委託 → Policy 一核准就開閘、扣 0.02、鏈上結算在背景 → 海灘站出站免費 → 再進站自動扣第二趟，不用再確認。
 - 虛擬驗證器是瞬間確認的，閘門上「開通捷運自動扣款…」只停 0.3 秒；剪接把那一段放慢到約三分之一速度，讓字讀得到。
 - 為了拍這段，Unity 加了 `Walk` 指令（等於在地圖上點一下），也修了兩件事：點到走不到的地方不再讓客人停下（原本的路線照走）；列車行進中點地圖不會讓客人走下車。
