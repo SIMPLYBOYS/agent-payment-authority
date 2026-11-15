@@ -34,7 +34,7 @@
 // action. An approval leaves a simulated grant and enables no payment.
 
 import { nextModeSeq, confirmMode, setStatus, forget, useViewer, onUnauthorized, onTypedSignIn, unityInfo, openTask, viewKey, refreshNow, currentTask, currentConsumer, setAlert,
-  shop, onSceneReport, onScenePick, onVenuePick, onGatePick, onAtmPick, setSceneView, setVenueOf, onReplayMode, refreshPanels } from "./app.js";
+  shop, onSceneReport, onScenePick, onVenuePick, onGatePick, onAtmPick, onCounterPick, onNearPick, setSceneView, setVenueOf, onReplayMode, refreshPanels } from "./app.js";
 import { createHostCreds } from "./hostcreds.js";
 import { createScene } from "./scene.js";
 import { createRelay } from "./showlink.js";
@@ -102,6 +102,8 @@ const relay = createRelay((kind, d) => {
   else if (kind === "venue") venuePicked(d);
   else if (kind === "gate") gateReached(d);
   else if (kind === "atm") atmReached(d);
+  else if (kind === "counter") counterReached(d);
+  else if (kind === "near") nearReached(d);
 });
 // town (T4): where the town's camera and walk go: the audience window's Unity while it has the scene, else this page's.
 const town = () => (sceneUnity.target === relay ? relay : shop());
@@ -131,7 +133,7 @@ onScenePick((r) => { if (sceneUnity.target !== relay) pick(r); });
 function useShow(on) {
   const want = on ? relay : shop();
   if (sceneUnity.target === want) { // the window loaded again
-    if (on) { restartScene(); sentView = sentPlay = ""; renderPresent(); }
+    if (on) { restartScene(); sentView = sentPlay = sentSay = ""; renderPresent(); }
     return;
   }
   if (scene.started) scene.stop();
@@ -140,7 +142,7 @@ function useShow(on) {
   document.querySelector(".canvas-frame").hidden = on;
   $("unity-status").hidden = on; // it speaks of this page's own (hidden) shop
   ensureScene();
-  sentView = sentPlay = ""; // the town's camera and walk again, on the scene's new Unity (T4)
+  sentView = sentPlay = sentSay = ""; // the town's camera, walk and talk again, on the scene's new Unity (T4)
   renderPresent();
 }
 function restartScene() {
@@ -670,6 +672,8 @@ function renderVenues(vs) {
 // venue roofed); a venue's row or a click on its building enters it (its
 // roof lifts, the camera steps in) and 回到城鎮 goes back. Unity only shows.
 let playAs = "", sentPlay = ""; // 遊戲模式 (below): the customer picked, and the one Unity walks now
+let talk = null, sentSay = ""; // 和人說話 (below): the open talk, { kind: "clerk", venue, consumer } or { kind: "person", id, n, consumer }; the speech sent
+let nearBy = "";                 // the guide the walked customer is near in the town (its talk id), "" none
 const held = new Set();          // its keys held
 let steered = "0,0";
 let presenting = (() => { try { return localStorage.getItem("apa-present") === "1"; } catch { return false; } })();
@@ -841,6 +845,74 @@ async function atmReached(id) {
   } finally { atmBusy = false; }
 }
 onAtmPick((s) => { if (sceneUnity.target !== relay) atmReached(s); });
+// ---- 和人說話 (Aaron 11/14: in free roam the customer talks to the clerk at the counter, and to a guide in the town) ----
+// The clerk: the walked customer reached its counter in the room shown; the clerk asks (A.clerkTalk); "start" runs
+// what the venue's button runs for it (startAll: its delegation confirmed first). The button stays as the fallback.
+// A guide: the town says who the walked customer is near (its dots show there); the space key starts the talk, its
+// fixed lines one by one (A.personTalk). The scene draws the talk (renderTalk below), in the audience window too.
+function counterReached(room) {
+  if (!presenting || inTown || !sentPlay || room !== venue) return;
+  talk = { kind: "clerk", venue: room, consumer: sentPlay };
+  renderTalk();
+}
+function nearReached(id) {
+  nearBy = id;
+  renderTalk();
+}
+// talkTo: the space key near a guide; false when there is nobody to talk to.
+function talkTo() {
+  if (!presenting || !inTown || !sentPlay || talk || !A.PEOPLE[nearBy]) return false;
+  talk = { kind: "person", id: nearBy, n: 0, consumer: sentPlay };
+  renderTalk();
+  return true;
+}
+// talkNow: the open talk's words (t), and the clerk's start (st); null once the customer, the room, the mode or the
+// guide it was near changed (the talk then closes).
+function talkNow() {
+  if (talk && (!presenting || sentPlay !== talk.consumer || (talk.kind === "clerk" ? inTown || venue !== talk.venue : !inTown || nearBy !== talk.id))) talk = null;
+  if (!talk) return null;
+  if (talk.kind === "person") return { t: A.personTalk(talk.id, talk.n) };
+  const runs = (lastRuns && lastRuns.gen === creds.gen && lastRuns.runs) || [];
+  const st = A.venueStart(pairFor(talk.venue).filter((sc) => sc.consumer_id === talk.consumer), runs, true);
+  return { st, t: A.clerkTalk(A.venue(talk.venue).name, st, deviceDelegations()) };
+}
+// talkAt: who the talk's speech is over ("guide:<id>", "clerk").
+const talkAt = () => (talk ? (talk.kind === "person" ? "guide:" + talk.id : "clerk") : "");
+// greeting: the guide the walked customer is near says hello while no talk is open (the space key starts one).
+const greeting = () => (!talk && presenting && inTown && sentPlay && A.PEOPLE[nearBy] ? A.PEOPLE[nearBy] : null);
+// The talk is drawn in the scene as pixel-office draws speech (Aaron 11/15): the line in a speech panel over the
+// speaker's head, the customer's answer in one over its own (town().say: this page's Unity, or the audience
+// window's). The keys answer: space for one answer, a number for several.
+function renderTalk() {
+  const now = talkNow(), t = now && now.t, g = !t && greeting();
+  const msg = t ? { at: talkAt(), line: t.line, reply: A.talkReply(t.choices) } : g ? { at: "guide:" + nearBy, line: g.hello, reply: A.TALK_KEY } : { at: "", line: "", reply: "" };
+  const key = JSON.stringify([msg, sceneUnity.target === relay]);
+  if (key === sentSay) return;
+  sentSay = key;
+  town().say(msg);
+}
+// answer: the customer's answer i of the open talk; false when there is none (or a start already under way).
+function answer(i) {
+  const now = talkNow(), t = now && now.t, c = t && t.choices[i];
+  if (!c || (c.key === "start" && (starting || simulating))) return false;
+  if (c.key === "next") talk.n += 1;
+  else talk = null;
+  renderTalk();
+  if (c.key === "start") startAll(now.st.pair);
+  return true;
+}
+onCounterPick((s) => { if (sceneUnity.target !== relay) counterReached(s); });
+onNearPick((s) => { if (sceneUnity.target !== relay) nearReached(s); });
+// The talk's keys: space starts a guide's talk or gives the one answer; a number gives that answer. Only typing in a
+// field keeps them; a focused button (the 走客人 B just pressed) does not take the space key from the talk.
+addEventListener("keydown", (e) => {
+  if (!sentPlay || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable]")) return;
+  const now = talkNow(), t = now && now.t;
+  const done = e.code === "Space" ? (t ? t.choices.length === 1 && answer(0) : talkTo())
+    : t && /^(Digit|Numpad)[1-9]$/.test(e.code) ? answer(Number(e.code.slice(-1)) - 1) : false;
+  if (done) e.preventDefault();
+});
 // The keys: arrows or WASD while a customer is walked; never while typing in a field.
 const KEYS = { ArrowUp: [0, 1], KeyW: [0, 1], ArrowDown: [0, -1], KeyS: [0, -1], ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0] };
 function steer() {
@@ -974,6 +1046,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
   else if (!on && ap.parentElement !== side) side.prepend(ap);
   sendView();
   sendPlay();
+  renderTalk(); // closes when the customer, the room or the mode changed
   if (!on) return;
   const st = (lastReady && lastReady.status) || {};
   const ha = st.human_approval;
@@ -993,7 +1066,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
     ahead: scene.behind(s.consumer) ? A.showCustomer(s.consumer, scene.latest(s.consumer), delegationOf(s.task), traits).caption : "" }));
   renderCaption(custs);
   const town = hasTown() && inTown;
-  const key = JSON.stringify([venues, venue, town, hasTown(), sentPlay, custs, starting, simulating, $("run-status").textContent]);
+  const key = JSON.stringify([venues, venue, town, hasTown(), sentPlay, custs, starting, simulating, $("run-status").textContent, active.map((r) => r.consumer_id)]);
   if (key === shownPresent) return;
   shownPresent = key;
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -1012,12 +1085,12 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
     li.append(b);
     if (x.k === venue && !town) {
       // The game: only the customer the person walks (Aaron 10/29); the show's A and B together otherwise.
-      const pair = sentPlay ? pairFor(x.k).filter((sc) => sc.consumer_id === sentPlay) : pairFor(x.k);
+      const st = A.venueStart(sentPlay ? pairFor(x.k).filter((sc) => sc.consumer_id === sentPlay) : pairFor(x.k), runs, !!sentPlay);
       const go = el("button", "venue-go", sentPlay ? "開始客人 " + short(sentPlay) + " 的交易" : "開始這個場域的交易");
       go.type = "button";
-      go.disabled = starting || simulating || x.busy || !pair.length;
-      go.title = x.busy ? "這個場域的交易還在進行" : !pair.length ? "這位客人在這個場域沒有情境" : sentPlay ? "先確認這位客人的委託，再開始" : "每位客人先確認委託，再各自開始";
-      go.addEventListener("click", () => startAll(pair));
+      go.disabled = starting || simulating || !st.pair.length;
+      go.title = st.title;
+      go.addEventListener("click", () => startAll(st.pair));
       li.append(go);
     }
     return li;

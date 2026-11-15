@@ -1,0 +1,6 @@
+OfficeFont.otf: the talk's speech panels (Aaron 11/15, after pixel-office).
+A subset of Noto Sans CJK TC Regular (Big5 common characters, punctuation, ASCII), made by
+pixel-office's tools/subset_font.py from https://github.com/notofonts/noto-cjk ; copied unchanged.
+Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
+Licensed under the SIL Open Font License, Version 1.1: the full text is NotoSansTC-OFL.txt beside this file.
+The speech panel and dots sprites under UI/ are pixel-office's own (Aaron's), copied unchanged.

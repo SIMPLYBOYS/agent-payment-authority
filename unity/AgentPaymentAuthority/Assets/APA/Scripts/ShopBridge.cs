@@ -66,6 +66,8 @@ namespace APA
             if (hasTown) town.Clicked = layout => Report("venue", scene.Scene, 0, layout);
             if (hasTown) town.Gated = station => Report("gate", scene.Scene, 0, station);
             if (hasTown) town.AtAtm = id => Report("atm", scene.Scene, 0, id);
+            if (hasTown) town.AtCounter = room => Report("counter", scene.Scene, 0, room);
+            if (hasTown) town.Near = id => Report("near", scene.Scene, 0, id); // a guide's talk id, "" none
             var rooms = new List<string>(view.LayoutKeys);
             rooms.Sort(System.StringComparer.Ordinal);
             // rooms: each room's venue view in tiles (TownView.RoomView), so the page sizes the canvas to whole multiples of it.
@@ -159,6 +161,22 @@ namespace APA
             try { m = JsonUtility.FromJson<PlayMessage>(json); } catch (System.Exception) { }
             bool ok = m != null && town != null && town.Play(m.consumer);
             Report("play", 0, 0, (m != null ? m.consumer ?? "" : "") + "|" + (ok ? "Applied" : "Invalid"));
+        }
+
+        // Say (Aaron 11/15: the talk as pixel-office draws it): {at: "guide:<id>" | "clerk" | "", line, reply}, who
+        // speaks, the line over their head and the walked customer's answer over its own; "" at: none.
+        [System.Serializable]
+        public class SayMessage { public string at, line, reply; }
+
+        public void Say(string json)
+        {
+            SayMessage m = null;
+            try { m = JsonUtility.FromJson<SayMessage>(json); } catch (System.Exception) { }
+            string at = m != null ? m.at ?? "" : null;
+            bool ok = at != null && town != null && town.HasTown && System.Text.RegularExpressions.Regex.IsMatch(at, "^(guide:[a-z0-9-]{1,32}|clerk)?$")
+                && (m.line ?? "").Length <= 120 && (m.reply ?? "").Length <= 200;
+            if (ok) town.Say(at, m.line, m.reply);
+            Report("say", 0, 0, (at ?? "") + "|" + (ok ? "Applied" : "Invalid"));
         }
 
         // Pan: {to: "tour"}, the video's prologue: the town's camera pans the whole street once (V4).

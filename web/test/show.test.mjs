@@ -221,6 +221,21 @@ test("ATM: the window's ATM reached comes back; the answer goes to its Unity whi
   assert.equal(got.filter(([k]) => k === "atm").length, 1, "not owned: the window's ATM is not this page's");
 });
 
+test("counter (Aaron 11/14): the window's customer at a room's counter comes back while it has the scene", () => {
+  const make = channels();
+  const got = [];
+  const relay = createRelay((k, d) => got.push([k, d]), { channel: make(), setTimer: () => {} });
+  const show = listen({ own() {}, send2() {}, select2() {}, view() {} }, { channel: make(), setTimer: () => {}, onLeave: () => {} });
+  show.report("counter", "books");
+  assert.equal(got.filter(([k]) => k === "counter").length, 0, "not owned: not this page's");
+  relay.own(true);
+  show.report("counter", "books");
+  assert.deepEqual(got.at(-1), ["counter", "books"]);
+  show.report("near", "atm-guide"); // a guide near the walked customer there, and none again
+  show.report("near", "");
+  assert.deepEqual(got.slice(-2), [["near", "atm-guide"], ["near", ""]]);
+});
+
 test("T4: the town's camera and walk go to the window's Unity while it has the scene; a door it reaches comes back", () => {
   const make = channels();
   const got = [];
@@ -481,4 +496,17 @@ test("the venue matrix: what a venue saw of the buyer, in plain words (docs/comm
   assert.match(withSource({ ...p, credential: { ...p.credential, claims: "" } }, src), /；這間店看到：沒有任何個人資料$/);
   const v1 = A.showCustomer("consumer-a", snap(base("Allow", "WITHIN_ALLOW_MAX"), { purchase: { ...p, credential: { result: "valid", credential_schema: "apa.credential.v1" } } }), null, {});
   assert.ok(!v1.steps[1].text.includes("這間店看到"), "a v1 credential says nothing of a venue");
+});
+
+test("say (Aaron 11/15): the talk goes to the window's Unity while it has the scene", () => {
+  const make = channels();
+  const relay = createRelay(() => {}, { channel: make(), setTimer: () => {} });
+  const seen = [];
+  listen({ own() {}, send2() {}, select2() {}, view() {}, say: (m) => seen.push(m) }, { channel: make(), setTimer: () => {}, onLeave: () => {} });
+  const msg = { at: "guide:atm-guide", line: "要領測試幣嗎？", reply: "（空白鍵）說話" };
+  relay.say(msg);
+  assert.deepEqual(seen, [], "not owned: nothing goes");
+  relay.own(true);
+  relay.say(msg);
+  assert.deepEqual(seen, [msg]);
 });

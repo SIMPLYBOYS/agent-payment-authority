@@ -79,7 +79,8 @@ namespace APA
         // wait: seconds a walker stands at each point of its path, facing up (in a shop: at a shelf; interiors v2); none: on.
         // over: the y of the building it walks on (Aaron 11/9: the resident at the laundry on a roof): drawn over that
         // building and the things on it, not by its own y; 0: on the ground.
-        [System.Serializable] public class Walker { public string key; public float speed = 1.2f; public Vector2[] path = new Vector2[0]; public float[] wait = new float[0]; public float over; }
+        // talk (Aaron 11/14): a guide the walked customer may talk to, by its id (the page has its lines); "" none.
+        [System.Serializable] public class Walker { public string key; public float speed = 1.2f; public Vector2[] path = new Vector2[0]; public float[] wait = new float[0]; public float over; public string talk; }
         // The people in a shop (Aaron 10/27: a clerk, other customers; illustrative,
         // never A or B), in its room's coordinates, shown with that room only.
         [System.Serializable] public class Inside { public string layout; public Walker[] people = new Walker[0]; }
@@ -478,6 +479,47 @@ namespace APA
                     if ((w.path[i] - (new Vector2(e.v.x, e.v.y) + e.v.door)).sqrMagnitude < 0.01f) s.doorOf[i] = e.v.layout;
             s.r.sortingOrder = Depth(s, w.path[0].y);
             walkers.Add(s);
+            if (room || string.IsNullOrEmpty(w.talk)) return;
+            // A guide (Aaron 11/14): pixel-office's dots bubble over its head while the walked customer is near (Talkers).
+            var t = new TalkerState { s = s, dots = new GameObject("talk-" + w.talk).AddComponent<SpriteRenderer>() };
+            t.dots.transform.SetParent(r.transform, false);
+            t.dots.transform.localPosition = new Vector2(0.1f, 2.15f);
+            t.dots.sprite = Resources.Load<Sprite>("UI/bubble");
+            t.dots.sortingOrder = Labels + 20;
+            t.dots.gameObject.SetActive(false);
+            talkers.Add(t);
+        }
+
+        // ---- talking to a guide (Aaron 11/14: near a person, a key starts the talk) ----
+        // The walked customer within TalkReach of a guide (the nearest) is reported (Near, with its talk id), and ""
+        // once it is near none, or no longer walked in the town: each change once. The page shows the lines and takes
+        // the key; the town only shows the bubble over the guide it is near.
+        public System.Action<string> Near;
+        public const float TalkReach = 1.5f;
+        class TalkerState { public WalkerState s; public SpriteRenderer dots; }
+        readonly List<TalkerState> talkers = new List<TalkerState>();
+        string nearTalk = "";
+        public string NearBy => nearTalk; // tests
+        public Vector2 GuideAt(string id) { var t = talkers.Find(x => x.s.w.talk == id); return t != null ? (Vector2)t.s.r.transform.localPosition : Vector2.zero; } // tests
+
+        void Talkers(Vector2 q)
+        {
+            TalkerState best = null;
+            foreach (var t in talkers)
+            {
+                float d = ((Vector2)t.s.r.transform.localPosition - q).magnitude;
+                if (d < TalkReach && (best == null || d < ((Vector2)best.s.r.transform.localPosition - q).magnitude)) best = t;
+            }
+            SetNear(best);
+        }
+
+        void SetNear(TalkerState best)
+        {
+            string id = best != null ? best.s.w.talk : "";
+            if (id == nearTalk) return;
+            foreach (var t in talkers) t.dots.gameObject.SetActive(t == best && sayAt != "guide:" + id);
+            nearTalk = id;
+            Near?.Invoke(id);
         }
 
         // Depth: on the street, the town's scale; in a room, the room's own (ShopView: a prop at y draws at
@@ -1040,8 +1082,15 @@ namespace APA
         readonly List<Vector2> roomRoute = new List<Vector2>(); // a click's walk inside the room shown (the game, interiors v2)
         public const float LeaveAt = -2f; // a room's x out on its pavement, past the customers' place outside (x -1.3)
         bool outside = true;              // the walked customer stands out there already: reported once until it steps back
+        // At the counter (Aaron 11/14: the customer talks to the clerk): the walked customer standing by its counter
+        // point (where a task's customer stands to pay) is reported (AtCounter, with the room), once until it steps
+        // away. Never while its task moves it (CanWalk). The page holds the talk; the town only reports.
+        public System.Action<string> AtCounter;
+        public const float CounterReach = 0.8f;
+        bool atCounter;
         void Move(float dt)
         {
+            if (Player == "" || shown != "town" || phase != 0 || riding >= 0) SetNear(null); // talks are the town's, walked
             if (Player != "" && shown == "venue" && phase == 0 && shop != null) { MoveInside(dt); return; }
             if (Player == "" || shown != "town" || phase != 0 || riding >= 0) return; // on a train: it carries the customer (Ride)
             var body = stands[Player].body;
@@ -1058,6 +1107,7 @@ namespace APA
             if (Walkable(new Vector2(q.x, q.y + d.y))) q.y += d.y;
             q = PastGates(p, q, dt);
             AtAtms(q, dt);
+            Talkers(q);
             body.transform.localPosition = q;
             int car = trains.FindIndex(s => q.x >= s.t.x && q.x <= s.t.x + s.length && q.y >= s.t.y && q.y <= s.t.y + 4f);
             body.sortingOrder = car >= 0 ? Order(trains[car].t.y) + 1 : Order(q.y) + 1; // in a car: over it, in its aisle
@@ -1388,6 +1438,9 @@ namespace APA
             bool onPavement = shop.PositionOf(Player).x <= LeaveAt;
             if (onPavement && !outside) { roomRoute.Clear(); Clicked?.Invoke(ToTown); }
             outside = onPavement;
+            bool counter = (shop.PositionOf(Player) - shop.P(Player, ShopView.Counter)).magnitude < CounterReach;
+            if (counter && !atCounter) AtCounter?.Invoke(shop.LayoutKey);
+            atCounter = counter;
         }
 
         // GoInside: walk the person's customer to a place in the room shown (a click there). False: none, or no way.
@@ -1702,6 +1755,142 @@ namespace APA
                 if (plate.drawMode == SpriteDrawMode.Sliced) plate.size = size;
                 else plate.transform.localScale = new Vector3(size.x / plate.transform.parent.lossyScale.x, size.y / plate.transform.parent.lossyScale.y, 1f);
             }
+            Speak();
         }
+
+        // ---- the talk (Aaron 11/15: speech as pixel-office draws it) ----
+        // The page says who speaks and what (Say: "guide:<id>" or "clerk", the room's own; the line; the walked
+        // customer's answer; "" none). Each is a pixel-office speech panel over the head: Resources/UI/speech_panel,
+        // a 9-slice white panel sized to the words, in Resources/OfficeFont (a CJK subset). The two open away from each
+        // other, and the speaker's goes over the answer when they still meet. The town only draws; the page holds the
+        // words and the keys.
+        class Speech { public Transform root; public SpriteRenderer panel; public TextMesh text; }
+        Speech said, answer;
+        string sayAt = "";
+        // SpeechOver: the panel's bottom over the head; OverTag: in the town, the walked customer's over its name tag too.
+        // SpeechRef: the camera size the words are sized at (the town in a 640 px view, a screen pixel an art pixel); the
+        // panels scale with the camera, so they show the same size in the town and in a room, and grow with the canvas.
+        public const float SpeechOver = 0.25f, OverTag = 0.5f, SpeechRef = 10f;
+
+        Speech MakeSpeech(string name)
+        {
+            var s = new Speech { root = new GameObject(name).transform };
+            s.root.SetParent(transform, false);
+            s.panel = new GameObject(name + "-panel").AddComponent<SpriteRenderer>();
+            s.panel.transform.SetParent(s.root, false);
+            s.panel.sprite = Resources.Load<Sprite>("UI/speech_panel");
+            s.panel.drawMode = SpriteDrawMode.Sliced;
+            s.panel.sortingOrder = Labels + 30;
+            s.text = new GameObject(name + "-text").AddComponent<TextMesh>();
+            s.text.transform.SetParent(s.root, false);
+            var font = Resources.Load<Font>("OfficeFont") ?? Resources.Load<Font>(ShopView.FontName);
+            s.text.font = font;
+            s.text.GetComponent<MeshRenderer>().sharedMaterial = font.material;
+            s.text.GetComponent<MeshRenderer>().sortingOrder = Labels + 31;
+            s.text.fontSize = 64;
+            s.text.characterSize = 0.09f; // pixel-office's 0.045 reads too small at our camera (Aaron 11/15)
+            s.text.anchor = TextAnchor.MiddleCenter;
+            s.text.alignment = TextAlignment.Center;
+            s.text.color = new Color32(45, 50, 68, 255);
+            s.root.gameObject.SetActive(false);
+            return s;
+        }
+
+        public bool Say(string at, string line, string reply)
+        {
+            if (said == null)
+            {
+                said = MakeSpeech("talk-said");
+                answer = MakeSpeech("talk-answer");
+                answer.text.alignment = TextAlignment.Left; // numbered answers read down a left edge
+            }
+            sayAt = at ?? "";
+            said.text.text = sayAt == "" ? "" : line ?? "";
+            answer.text.text = sayAt == "" ? "" : reply ?? "";
+            foreach (var t in talkers) t.dots.gameObject.SetActive(t.s.w.talk == nearTalk && sayAt != "guide:" + nearTalk);
+            Speak();
+            return true;
+        }
+
+        // Speak: each frame, both panels over their heads (hidden when who it is over is not shown), opened away from
+        // each other, kept in the part of the view the page leaves uncovered, and never covering each other.
+        void Speak()
+        {
+            if (said == null) return;
+            SpriteRenderer a = null, b = null;
+            if (sayAt != "")
+            {
+                foreach (var s in walkers)
+                    if (s.r.gameObject.activeInHierarchy && (s.room ? sayAt == "clerk" && s.w.talk == "clerk" : sayAt == "guide:" + s.w.talk)) a = s.r;
+                b = Player == "" ? null : shown == "venue" ? (shop != null ? shop.BodyOf(Player) : null) : stands.TryGetValue(Player, out var st) ? st.body : null;
+            }
+            bool sa = Over(said, a, 0f), sb = Over(answer, b, shown == "town" ? OverTag : 0f);
+            if (sa && sb)
+            {
+                float dir = a.bounds.center.x <= b.bounds.center.x ? -1f : 1f; // the speaker's opens to its own side, the answer to the other
+                said.root.position += new Vector3(dir * Mathf.Max(0f, Box(said).width / 2f - 0.4f), 0f, 0f);
+                answer.root.position -= new Vector3(dir * Mathf.Max(0f, Box(answer).width / 2f - 0.4f), 0f, 0f);
+            }
+            var seen = Seen();
+            if (sa) Inside(said, seen);
+            if (sb) Inside(answer, seen);
+            if (!sa || !sb || !Box(said).Overlaps(Box(answer))) return;
+            // Still meeting (close together, or held in at a side): the speaker's over the answer, else the answer under it.
+            Rect ra = Box(said), rb = Box(answer);
+            float up = rb.yMax + 0.1f + ra.height / 2f;
+            if (up + ra.height / 2f <= seen.yMax) said.root.position = new Vector3(said.root.position.x, up, 0f);
+            else answer.root.position = new Vector3(answer.root.position.x, ra.yMin - 0.1f - rb.height / 2f, 0f);
+        }
+
+        // Over: the speech's panel sized to its words, its bottom just over r's head (and lift more); false, hidden, for
+        // no words or no r.
+        bool Over(Speech s, SpriteRenderer r, float lift)
+        {
+            bool on = r != null && r.gameObject.activeInHierarchy && s.text.text != "";
+            if (s.root.gameObject.activeSelf != on) s.root.gameObject.SetActive(on);
+            if (!on) return false;
+            float u = cam.orthographicSize / SpeechRef;
+            s.root.localScale = new Vector3(u, u, 1f);
+            var size = s.text.GetComponent<MeshRenderer>().bounds.size / u;
+            s.panel.size = new Vector2(size.x + 0.5f, size.y + 0.35f);
+            var head = r.bounds;
+            s.root.position = new Vector3(head.center.x, head.max.y + SpeechOver + lift + s.panel.size.y * u / 2f, 0f);
+            return true;
+        }
+
+        // Box: a speech's panel in the world.
+        Rect Box(Speech s)
+        {
+            var w = s.panel.size * s.root.localScale.x;
+            return new Rect((Vector2)s.root.position - w / 2f, w);
+        }
+
+        // Seen: the part of the view the page leaves uncovered (safe), in the world.
+        Rect Seen()
+        {
+            var r = safe.width > 0f && safe.height > 0f ? safe : new Rect(0f, 0f, Screen.width, Screen.height);
+            Vector2 lo = cam.ScreenToWorldPoint(new Vector3(r.xMin, Screen.height - r.yMax, 0f)), hi = cam.ScreenToWorldPoint(new Vector3(r.xMax, Screen.height - r.yMin, 0f));
+            return Rect.MinMaxRect(lo.x, lo.y, hi.x, hi.y);
+        }
+
+        // Inside: the panel moved into seen, a little in from its sides (as far as it fits).
+        void Inside(Speech s, Rect seen)
+        {
+            const float m = 0.15f;
+            var box = Box(s);
+            float x = Mathf.Clamp(s.root.position.x, seen.xMin + m + box.width / 2f, Mathf.Max(seen.xMin + m + box.width / 2f, seen.xMax - m - box.width / 2f));
+            float y = Mathf.Min(s.root.position.y, seen.yMax - m - box.height / 2f);
+            s.root.position = new Vector3(x, y, 0f);
+        }
+
+        // Tests: a speech's words, whether it shows, and its panel in the world (centre and size).
+        public (bool shown, string words, Vector2 at, Vector2 size) SpeechOf(bool customer)
+        {
+            var s = customer ? answer : said;
+            return s == null ? (false, "", Vector2.zero, Vector2.zero) : (s.root.gameObject.activeSelf, s.text.text, (Vector2)s.root.position, Box(s).size);
+        }
+
+        // Tests: whether a guide's dots show.
+        public bool DotsOver(string id) { var t = talkers.Find(x => x.s.w.talk == id); return t != null && t.dots.gameObject.activeSelf; }
     }
 }

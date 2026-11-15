@@ -454,11 +454,16 @@ namespace APA
         }
 
         // Reset: one customer only (version 2: that customer's slot changed);
-        // the others keep their place, walk and done.
+        // the others keep their place, walk and done. A customer the person
+        // walked in the room keeps its place too (Aaron 11/14: it asked the
+        // clerk where it stands; its new task goes on from there, Plan).
         public void Reset(string consumer)
         {
             if (!customers.TryGetValue(consumer, out var c)) return;
+            var at = c.go.transform.localPosition;
+            bool free = c.free;
             Clear(c);
+            if (free) { c.go.transform.localPosition = at; c.free = true; ShowLabel(c); }
             if (status != null && Multi) status.text = StatusLines();
         }
 
@@ -507,6 +512,7 @@ namespace APA
 
         public string PhaseOf(string consumer) => customers.TryGetValue(consumer, out var c) ? c.target.Phase : null;
         public Vector2 PositionOf(string consumer) => customers.TryGetValue(consumer, out var c) ? (Vector2)c.go.transform.localPosition : Vector2.zero;
+        public SpriteRenderer BodyOf(string consumer) => customers.TryGetValue(consumer, out var c) ? c.body : null; // the talk's bubble (TownView)
         public bool Moving(string consumer) => customers.TryGetValue(consumer, out var c) && c.route != null;
         public string LabelOf(string consumer) => customers.TryGetValue(consumer, out var c) ? LabelNow(c) : null;
         public string FacingOf(string consumer) => customers.TryGetValue(consumer, out var c) ? Facings[c.facing] : null;
@@ -673,13 +679,21 @@ namespace APA
             int a = c.from, b = c.to;
             if (c.free)
             {
-                // Walked off the corridor (the game): round the props back to the door, then the corridor as ever.
-                var back = FreeWay(p, P(c.id, Door));
-                if (back != null) foreach (var q in back) steps.Add(new Step { to = q, node = Door, seg = "final" });
-                steps.Add(new Step { to = P(c.id, Door), node = Door, seg = "final" });
-                p = P(c.id, Door);
-                a = b = Door;
+                // Walked off the corridor (the game; Aaron 11/14: it started its task talking to the clerk where it
+                // stands): the task goes on from there, with no way back to the door and no browse at the shelf. A
+                // phase of the door or the shelf leaves it where it is; any other station is walked to round the
+                // props, and the corridor as ever from there.
+                int first = SceneRules.Counter(t.Phase) ? Counter : t.Phase == "delivered" ? Pickup : Station(t.Phase);
+                ahead = false;
+                if (first == Door || first == Shelf) return steps;
+                var way = FreeWay(p, P(c.id, first));
+                string seg = first == Counter ? "counter" : "final";
+                if (way != null) foreach (var q in way) steps.Add(new Step { to = q, node = first, seg = seg });
+                steps.Add(new Step { to = P(c.id, first), node = first, seg = seg });
+                p = P(c.id, first);
+                a = b = first;
                 c.free = false;
+                browse = false;
             }
             if (browse)
             {

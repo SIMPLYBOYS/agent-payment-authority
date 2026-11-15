@@ -1042,4 +1042,132 @@ public class TownTests
         bridge.Play("{\"consumer\":\"\"}");
         Assert.IsTrue(view.UseLayout(ShopView.DefaultLayout));
     }
+
+    // At the counter (Aaron 11/14: the customer talks to the clerk): in a room, the person's customer walked up to its
+    // counter point is reported with the room, once while it stays there, again after it steps away and back.
+    [UnityTest]
+    public IEnumerator ThePersonWalksACustomerToTheCounter()
+    {
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        bridge.Play("{\"consumer\":\"consumer-b\"}");
+        Assert.IsTrue(view.UseLayout("books"));
+        bridge.View("{\"mode\":\"venue\"}");
+        yield return Settle();
+        string at = "counter:" + bridge.scene.Scene + ":0:books";
+        int Talks() => bridge.reports.Count(r => r == at);
+        Assert.AreEqual(0, Talks(), "not at the door");
+        var counter = view.P("consumer-b", ShopView.Counter);
+        Assert.IsTrue(town.GoInside(counter), "a way to the counter");
+        yield return Until(() => Talks() > 0, 15f, _ => { });
+        Assert.AreEqual(1, Talks(), "at the counter: the room");
+        Assert.Less((view.PositionOf("consumer-b") - counter).magnitude, TownView.CounterReach);
+        for (float end = Time.realtimeSinceStartup + 0.5f; Time.realtimeSinceStartup < end;) yield return null;
+        Assert.AreEqual(1, Talks(), "once, while it stays there");
+        var shelf = view.P("consumer-b", ShopView.Shelf);
+        Assert.IsTrue(town.GoInside(shelf));
+        yield return Until(() => (view.PositionOf("consumer-b") - shelf).magnitude < 0.3f, 15f, _ => { });
+        Assert.Greater((view.PositionOf("consumer-b") - counter).magnitude, TownView.CounterReach, "stepped away");
+        Assert.IsTrue(town.GoInside(counter));
+        yield return Until(() => Talks() > 1, 15f, _ => { });
+        Assert.AreEqual(2, Talks(), "away and back");
+        bridge.Play("{\"consumer\":\"\"}");
+        Assert.IsTrue(view.UseLayout(ShopView.DefaultLayout));
+    }
+
+    // Aaron 11/14: a run started at the counter (the talk with the clerk) goes on where the customer stands: its new
+    // slot does not put it back outside, and it neither walks back to the door nor browses at the shelf; it waits at
+    // the counter, its task holding it.
+    [UnityTest]
+    public IEnumerator ARunStartedAtTheCounterGoesOnThere()
+    {
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        bridge.Play("{\"consumer\":\"consumer-b\"}");
+        int sc = bridge.scene.Scene + 1;
+        bridge.Receive("{\"v\":2,\"scene\":" + sc + ",\"clear\":true,\"layout\":\"books\"}");
+        Assert.AreEqual("books", view.LayoutKey);
+        bridge.View("{\"mode\":\"venue\"}");
+        yield return Settle();
+        var counter = view.P("consumer-b", ShopView.Counter);
+        Assert.IsTrue(town.GoInside(counter));
+        yield return Until(() => (view.PositionOf("consumer-b") - counter).magnitude < 0.3f, 15f, _ => { });
+        var here = view.PositionOf("consumer-b");
+        Assert.Less((here - counter).magnitude, 0.3f, "walked up to the counter");
+        bridge.Receive(V2(sc, "consumer-b", "entered", 1, "", "books"));
+        Assert.AreEqual(here, view.PositionOf("consumer-b"), "its new slot keeps it where it stands");
+        Assert.IsFalse(view.CanWalk("consumer-b"), "its task holds it");
+        bridge.Receive(V2(sc, "consumer-b", "quoted", 2, "", "books"));
+        Assert.AreEqual(here, view.PositionOf("consumer-b"), "no browse at the shelf");
+        bridge.Receive(V2(sc, "consumer-b", "waiting", 3, "", "books"));
+        Assert.Less((view.PositionOf("consumer-b") - counter).magnitude, 0.3f, "it waits at the counter");
+        Assert.IsFalse(view.CanWalk("consumer-b"));
+        // Aaron 11/15: the clerk speaks over its own head, right of the customer at the counter.
+        bridge.Say("{\"at\":\"clerk\",\"line\":\"Welcome!\",\"reply\":\"1 buy\\n2 later\"}");
+        Assert.AreEqual("say:0:0:clerk|Applied", bridge.reports.Last());
+        yield return null;
+        Assert.IsTrue(town.SpeechOf(false).shown && town.SpeechOf(true).shown, "the clerk and the customer speak");
+        Assert.Greater(town.SpeechOf(false).at.x, town.SpeechOf(true).at.x, "the clerk stands right of the customer, and its panel");
+        Assert.AreEqual("1 buy\n2 later", town.SpeechOf(true).words);
+        Vector2 lo = Camera.main.ViewportToWorldPoint(Vector3.zero), hi = Camera.main.ViewportToWorldPoint(Vector3.one);
+        var seen = Rect.MinMaxRect(lo.x, lo.y, hi.x, hi.y);
+        foreach (var sp in new[] { town.SpeechOf(false), town.SpeechOf(true) })
+            Assert.IsTrue(seen.Contains(sp.at - sp.size / 2f) && seen.Contains(sp.at + sp.size / 2f), "kept in the view: " + sp.at + " " + sp.size + " in " + seen);
+        bridge.Say("{\"at\":\"\"}");
+        bridge.Play("{\"consumer\":\"\"}");
+        Assert.IsTrue(view.UseLayout(ShopView.DefaultLayout));
+    }
+
+    // Aaron 11/14: the guides. Each stands on the pavement; walked near one in the town, its id is reported once and
+    // a bubble shows over it; away from every guide, "" once. The page shows the lines and takes the key.
+    [UnityTest]
+    public IEnumerator TheWalkedCustomerComesNearAGuide()
+    {
+        bridge.View("{\"mode\":\"town\"}");
+        yield return Settle();
+        bridge.Play("{\"consumer\":\"consumer-b\"}");
+        yield return null;
+        foreach (var id in new[] { "atm-guide", "subway-guide", "town-guide" })
+        {
+            var at = town.GuideAt(id);
+            Assert.AreNotEqual(Vector2.zero, at, id + " is in the town");
+            Assert.IsTrue(town.Walkable(at), id + " stands on the pavement: " + at);
+        }
+        Assert.AreEqual("", town.NearBy, "near no one at the start");
+        string Near(string id) => "near:" + bridge.scene.Scene + ":0:" + id;
+        var guide = town.GuideAt("town-guide");
+        Assert.IsTrue(town.GoTo(guide + new Vector2(1f, 0f)), "a way to the guide");
+        yield return Until(() => town.NearBy == "town-guide", 20f, _ => { });
+        Assert.AreEqual("town-guide", town.NearBy);
+        for (int i = 0; i < 10; i++) yield return null;
+        Assert.AreEqual(1, bridge.reports.Count(r => r == Near("town-guide")), "once, while it stays near");
+        // Aaron 11/15: the talk as pixel-office draws it. The page says who speaks, the line and the answer; the town
+        // draws each in a speech panel, the line over the guide and the answer over the customer, opened away from each
+        // other; while the guide speaks its dots wait. Anyone else is refused; "" ends it.
+        Assert.IsTrue(town.DotsOver("town-guide"), "near: the guide's dots");
+        bridge.Say("{\"at\":\"someone\",\"line\":\"x\",\"reply\":\"y\"}");
+        Assert.AreEqual("say:0:0:someone|Invalid", bridge.reports.Last());
+        bridge.Say("{\"at\":\"guide:town-guide\",\"line\":\"First time here?\",\"reply\":\"[space] talk\"}");
+        Assert.AreEqual("say:0:0:guide:town-guide|Applied", bridge.reports.Last());
+        yield return null;
+        var said = town.SpeechOf(false);
+        var me = town.SpeechOf(true);
+        Assert.IsTrue(said.shown && me.shown, "both speak");
+        Assert.AreEqual("First time here?", said.words);
+        Assert.AreEqual("[space] talk", me.words);
+        Assert.IsFalse(town.DotsOver("town-guide"), "its dots wait while it speaks");
+        var feet = (Vector2)town.transform.TransformPoint(town.GuideAt("town-guide"));
+        Assert.Greater(said.at.y - said.size.y / 2f, feet.y + 1.5f, "the line's panel over the guide's head");
+        Assert.Greater(said.size.x, 1f, "sized to its words");
+        Assert.Less(said.at.x, me.at.x, "the guide stands left: its panel opens left, the answer right");
+        Assert.IsFalse(new Rect(said.at - said.size / 2f, said.size).Overlaps(new Rect(me.at - me.size / 2f, me.size)), "not covering each other");
+        bridge.Say("{\"at\":\"\"}");
+        yield return null;
+        Assert.IsFalse(town.SpeechOf(false).shown || town.SpeechOf(true).shown, "none: both gone");
+        Assert.IsTrue(town.DotsOver("town-guide"), "its dots again");
+        Assert.IsTrue(town.GoTo(guide + new Vector2(6f, 0f)));
+        yield return Until(() => town.NearBy == "", 20f, _ => { });
+        Assert.AreEqual(Near(""), bridge.reports.Last(r => r.StartsWith("near:")), "away: none, once");
+        bridge.Play("{\"consumer\":\"\"}");
+    }
 }

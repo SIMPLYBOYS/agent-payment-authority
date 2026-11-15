@@ -118,6 +118,14 @@ const unity = new UnityHost($("unity-canvas"), (s, detail) => {
     if (atmPick) atmPick(detail);
     return;
   }
+  if (s === "counter") { // the walked customer at a room's counter; /host holds the talk with the clerk
+    if (counterPick) counterPick(detail);
+    return;
+  }
+  if (s === "near") { // the guide the walked customer is near ("" none); /host takes the key and shows the talk
+    if (nearPick) nearPick(detail);
+    return;
+  }
   if (s === "rendered") {
     // detail: what the shop says it shows, for the generation last sent
     // (unity.js drops older reports, so a late one cannot bring back a
@@ -166,11 +174,15 @@ let scenePick = null;
 let venuePick = null;
 let gatePick = null;
 let atmPick = null;
+let counterPick = null;
+let nearPick = null;
 export function onSceneReport(fn) { sceneReport = fn; }
 export function onScenePick(fn) { scenePick = fn; }
 export function onVenuePick(fn) { venuePick = fn; }
 export function onGatePick(fn) { gatePick = fn; }
 export function onAtmPick(fn) { atmPick = fn; }
+export function onCounterPick(fn) { counterPick = fn; }
+export function onNearPick(fn) { nearPick = fn; }
 export function setSceneView(fn) { sceneView = fn; }
 // UX3: the host page tells the evidence panel a task's scene ("" none).
 let venueOf = null;

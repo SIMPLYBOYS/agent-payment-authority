@@ -629,3 +629,54 @@ test("V1 evidence: the voice row", () => {
   assert.ok(!A.evidence(snap, "po-1", { mode: "live", catalog: null }).sections.find((x) => x.title === "裁決").rows.some(([k]) => k === "語音挑戰"));
   assert.equal(A.voiceEventText({ event_type: "VOICE_CHALLENGE_FAILED", code: "VOICE_REPLAY" }), "未通過：錄音是重播（這段錄音已用過）；這筆已拒絕，不發授權");
 });
+
+test("venueStart: another customer's run never holds one back (Aaron 11/14)", () => {
+  const a = { id: "books-a", consumer_id: "consumer-a" }, b = { id: "books-b", consumer_id: "consumer-b" };
+  const runs = [{ consumer_id: "consumer-a", live: "running", scene: "books" }, { consumer_id: "consumer-b", live: "ended", scene: "books" }];
+  assert.deepEqual(A.venueStart([b], runs, true), { pair: [b], title: "先確認這位客人的委託，再開始" }, "B starts while A's run in the same venue runs");
+  assert.deepEqual(A.venueStart([a], runs, true).pair, [], "A's own run holds A");
+  assert.equal(A.venueStart([a], runs, true).title, "這位客人的交易還在進行");
+  assert.deepEqual(A.venueStart([a, b], runs, false).pair, [b], "together: the running one is not started again");
+  assert.deepEqual(A.venueStart([a, b], [], false).pair, [a, b]);
+  assert.equal(A.venueStart([a], [{ consumer_id: "consumer-a", live: "stopping", scene: "cafe" }], true).pair.length, 0, "a run elsewhere holds its customer too");
+  assert.equal(A.venueStart([], runs, true).title, "這位客人在這個場域沒有情境");
+});
+
+test("clerkTalk: the clerk asks; the talk starts only what the button starts (Aaron 11/14)", () => {
+  const b = { id: "books-b", consumer_id: "consumer-b", label: "複合式書店：國二數學講義", delegation: { purpose: "買一份國二數學講義（數位內容）" } };
+  const t = A.clerkTalk("複合式書店", A.venueStart([b], [], true), true);
+  assert.equal(t.line, "歡迎光臨複合式書店！\n要請 Agent 幫你買什麼？");
+  assert.deepEqual(t.choices, [{ key: "start", text: "請 Agent 幫我買一份國二數學講義" }, { key: "later", text: "先不用" }], "the customer's words, no catalog note");
+  assert.match(t.note, /用你的裝置確認委託/, "the talk confirms nothing itself");
+  assert.match(A.clerkTalk("複合式書店", A.venueStart([b], [], true), false).note, /模擬，不是本人驗證/);
+  const busy = A.clerkTalk("複合式書店", A.venueStart([b], [{ consumer_id: "consumer-b", live: "running" }], true), true);
+  assert.deepEqual(busy.choices, [{ key: "later", text: "好" }], "its own run still going: nothing to start");
+  assert.match(busy.line, /還在忙/);
+  assert.deepEqual(A.clerkTalk("街角烘焙咖啡", A.venueStart([], [], true), true).choices.map((c) => c.key), ["later"]);
+});
+
+test("personTalk: a guide's fixed lines, one answer each, then the end (Aaron 11/14)", () => {
+  const town = JSON.parse(readFileSync(new URL("../../unity/AgentPaymentAuthority/Assets/APA/Resources/Town/town.json", import.meta.url)));
+  const guides = town.walkers.filter((w) => w.talk).map((w) => w.talk).sort();
+  assert.deepEqual(Object.keys(A.PEOPLE).sort(), guides, "every guide in the town has lines, and every line a guide");
+  const first = A.personTalk("subway-guide", 0);
+  assert.equal(first.who, "捷運站務員");
+  assert.match(first.line, /裝置確認/);
+  assert.deepEqual(first.choices, [{ key: "next", text: "然後呢？" }]);
+  const last = A.personTalk("subway-guide", A.PEOPLE["subway-guide"].lines.length - 1);
+  assert.deepEqual(last.choices, [{ key: "later", text: "謝謝！" }]);
+  for (const p of Object.values(A.PEOPLE)) {
+    assert.ok(p.hello && p.hello.length <= 10, p.name + " says hello as the customer comes near");
+    for (const l of p.lines) assert.ok(l.split("\n").every((x) => x.length <= 14), "comic-length lines: " + l);
+  }
+  assert.equal(A.personTalk("subway-guide", A.PEOPLE["subway-guide"].lines.length), null);
+  assert.equal(A.personTalk("nobody", 0), null);
+  assert.equal(A.clerkTalk("複合式書店", A.venueStart([], [], true), true).who, "店員");
+});
+
+test("talkReply: the customer's answer in its own panel: space for one, numbers for several (Aaron 11/15)", () => {
+  assert.equal(A.talkReply([{ key: "next", text: "然後呢？" }]), "（空白鍵）然後呢？");
+  assert.equal(A.talkReply([{ key: "start", text: "請 Agent 幫我買一份國二數學講義" }, { key: "later", text: "先不用" }]), "1 請 Agent 幫我買一份國二數學講義\n2 先不用");
+  assert.equal(A.talkReply([]), "");
+  assert.equal(A.TALK_KEY, "（空白鍵）說話");
+});

@@ -390,6 +390,6 @@ docs/                設計文件
 程式碼與文件以 [MIT License](LICENSE) 授權。下面這些不在 MIT 的範圍內：
 
 - **像素美術**：城鎮與店內的圖是 [LimeZu](https://limezu.itch.io) 的授權素材，不在這個 repo 裡，也不能隨它散布。repo 只有檔名清單與匯入腳本；要建置畫面，請自行取得素材。
-- **字型**：`unity/AgentPaymentAuthority/Assets/APA/Resources/NotoSansTC-APA.ttf` 是 Noto Sans TC 的子集，依 SIL Open Font License 1.1 授權，授權全文在同一個資料夾的 `NotoSansTC-OFL.txt`。
+- **字型**：`unity/AgentPaymentAuthority/Assets/APA/Resources/NotoSansTC-APA.ttf` 是 Noto Sans TC 的子集，依 SIL Open Font License 1.1 授權，授權全文在同一個資料夾的 `NotoSansTC-OFL.txt`。同一個資料夾的 `OfficeFont.otf` 是對話框用的字型，是 Noto Sans CJK TC 的子集，授權相同（說明見 `OfficeFont-NOTICE.txt`）。
 - **第三方 Go 模組**：各自的授權見 [docs/third-party.md](docs/third-party.md)。
 - **簡報工作區**：`slides/` 由 [open-slide](https://github.com/open-slide/open-slide) 產生，其中的範例簡報與 skills 來自該專案。

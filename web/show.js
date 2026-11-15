@@ -49,10 +49,11 @@ const link = listen({
   gates: (on) => { if (!link.otherWindow) unity.gates(on); },
   openGate: (msg) => { if (!link.otherWindow) unity.openGate(msg); },
   atm: (msg) => { if (!link.otherWindow) unity.atm(msg); },
+  say: (msg) => { if (!link.otherWindow) unity.say(msg); }, // Aaron 11/15: the talk, drawn in this window's scene
 });
 const tell = () => link.status({ ready: unity.ready, supports2: unity.supports2, select: !!(unity.bridge && unity.bridge.select) });
 unity = new UnityHost($("unity-canvas"), (s, d) => {
-  if (s === "rendered2" || s === "select2" || s === "venue" || s === "gate" || s === "atm") return link.report(s, d); // venue: a door reached (T4); gate: a shut gate (transit); atm: the ATM
+  if (s === "rendered2" || s === "select2" || s === "venue" || s === "gate" || s === "atm" || s === "counter" || s === "near") return link.report(s, d); // venue: a door reached (T4); gate: a shut gate (transit); atm: the ATM; counter: a room's counter; near: a guide
   const box = $("unity-status");
   box.dataset.state = s;
   box.textContent = s === "ready" ? "" : s === "loading" ? "場景載入中…" : "場景未就緒";

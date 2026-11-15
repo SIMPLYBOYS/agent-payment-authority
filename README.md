@@ -390,6 +390,6 @@ The design documents under `docs/` are written in Traditional Chinese.
 Code and documents are under the [MIT License](LICENSE). These are outside it:
 
 - **Pixel art:** the town and shop images are licensed assets from [LimeZu](https://limezu.itch.io). They are not in this repository and may not be distributed with it. The repository holds only a list of file names and an import script; to build the screens, obtain the assets yourself.
-- **Font:** `unity/AgentPaymentAuthority/Assets/APA/Resources/NotoSansTC-APA.ttf` is a subset of Noto Sans TC under the SIL Open Font License 1.1. The license text is in the same folder as `NotoSansTC-OFL.txt`.
+- **Font:** `unity/AgentPaymentAuthority/Assets/APA/Resources/NotoSansTC-APA.ttf` is a subset of Noto Sans TC under the SIL Open Font License 1.1. The license text is in the same folder as `NotoSansTC-OFL.txt`. `OfficeFont.otf` beside it, the speech panels' font, is a subset of Noto Sans CJK TC under the same license (`OfficeFont-NOTICE.txt`).
 - **Third-party Go modules:** see [docs/third-party.md](docs/third-party.md) for each license.
 - **The slide workspace:** `slides/` was scaffolded by [open-slide](https://github.com/open-slide/open-slide); its sample deck and skills come from that project.

@@ -46,6 +46,8 @@ export function createRelay(onStatus, { channel = new BroadcastChannel(CHANNEL),
     else if (m.kind === "venue" && owned && typeof m.r === "string") onStatus("venue", m.r); // T4: a door reached on the window's Unity
     else if (m.kind === "gate" && owned && typeof m.r === "string") onStatus("gate", m.r); // transit: a shut gate reached there
     else if (m.kind === "atm" && owned && typeof m.r === "string") onStatus("atm", m.r); // the street's ATM reached there
+    else if (m.kind === "counter" && owned && typeof m.r === "string") onStatus("counter", m.r); // a room's counter reached there
+    else if (m.kind === "near" && owned && typeof m.r === "string") onStatus("near", m.r); // a guide near the customer there
   };
   setTimer(() => {
     if (show && now() - show.seen > GONE_MS) { show = null; onStatus("show", null); }
@@ -68,6 +70,7 @@ export function createRelay(onStatus, { channel = new BroadcastChannel(CHANNEL),
     gates(on) { if (owned) post("gates", { on: !!on }); },
     openGate(msg) { if (owned) post("opengate", { msg }); },
     atm(msg) { if (owned) post("atm", { msg }); }, // docs/commercial-atm.md: the answer to the ATM reached
+    say(msg) { if (owned) post("say", { msg }); }, // Aaron 11/15: the talk, drawn by the window's Unity
     // view: what the audience window shows beside the scene; sent when it changed.
     view(v) {
       const key = JSON.stringify(v);
@@ -105,6 +108,7 @@ export function listen(handlers, { channel = new BroadcastChannel(CHANNEL), setT
     else if (m.kind === "gates" && handlers.gates) handlers.gates(!!m.on);
     else if (m.kind === "opengate" && m.msg && handlers.openGate) handlers.openGate(m.msg);
     else if (m.kind === "atm" && m.msg && handlers.atm) handlers.atm(m.msg);
+    else if (m.kind === "say" && m.msg && handlers.say) handlers.say(m.msg);
     else if (m.kind === "steer" && handlers.steer) handlers.steer(Math.sign(Number(m.x) || 0), Math.sign(Number(m.y) || 0));
   };
   setTimer(() => post("status", state), BEAT_MS);

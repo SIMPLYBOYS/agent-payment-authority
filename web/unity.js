@@ -79,6 +79,12 @@ export class UnityHost {
     } else if (kind === "atm" && this.bridge && this.bridge.town) {
       // ATM (docs/commercial-atm.md): the walked customer stopped at the street's ATM, with its id; the page asks the Host.
       if (/^[a-z0-9-]{1,32}$/.test(detail)) this.onStatus("atm", detail);
+    } else if (kind === "counter" && this.bridge && this.bridge.town) {
+      // Aaron 11/14: the walked customer at its counter in a room, with the room; the page holds the talk with the clerk.
+      if (/^[a-z0-9-]{1,32}$/.test(detail)) this.onStatus("counter", detail);
+    } else if (kind === "near" && this.bridge && this.bridge.town) {
+      // Aaron 11/14: the guide the walked customer is near in the town (its talk id), "" none; the page takes the key.
+      if (/^[a-z0-9-]{0,32}$/.test(detail)) this.onStatus("near", detail);
     } else if (kind === "rendered" && this.sceneOwned) {
       // version 2: the scene matches it to the one customer and slot it names
       const r = parseReport2(gen, seq, detail);
@@ -174,6 +180,14 @@ export class UnityHost {
   atm(msg) {
     if (!this.ready || !this.instance) return false;
     this.instance.SendMessage("Bridge", "Atm", JSON.stringify(msg));
+    return true;
+  }
+
+  // say (Aaron 11/15: the talk as pixel-office draws it): { at: "guide:<id>" | "clerk" | "", line, reply }, who
+  // speaks, the line over their head and the walked customer's answer over its own; "" at: none.
+  say(msg) {
+    if (!(this.bridge && this.bridge.town) || !this.ready || !this.instance) return false;
+    this.instance.SendMessage("Bridge", "Say", JSON.stringify({ at: msg.at || "", line: msg.line || "", reply: msg.reply || "" }));
     return true;
   }
 

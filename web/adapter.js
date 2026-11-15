@@ -527,6 +527,65 @@ export function sceneTasks(runs, venue) {
   return out;
 }
 
+// venueStart (Aaron 11/14: each customer on its own): a venue's start takes
+// the customers of pair whose own run is not running or stopping, in any
+// venue (the Host runs one per customer); another's run never holds one back.
+// single: the game's one walked customer. title: what the button says.
+export function venueStart(pair, runs, single) {
+  const busy = new Set((runs || []).filter((r) => r && (r.live === "running" || r.live === "stopping")).map((r) => r.consumer_id));
+  const free = pair.filter((sc) => !busy.has(sc.consumer_id));
+  const title = !pair.length ? "這位客人在這個場域沒有情境"
+    : !free.length ? (single ? "這位客人的交易還在進行" : "這個場域的客人都還在交易中")
+    : single ? "先確認這位客人的委託，再開始"
+    : free.length < pair.length ? "交易中的客人不重開；其他客人先確認委託，再開始" : "每位客人先確認委託，再各自開始";
+  return { pair: free, title };
+}
+
+// clerkTalk (Aaron 11/14: free roam, the walked customer talks to the clerk at
+// the counter): what the clerk says and the customer's choices, from
+// venueStart's answer for that customer. "start" starts what the venue's
+// button starts; the talk authorises nothing: the delegation is still
+// confirmed (device: by the customer's own), and an Ask still approved.
+// Aaron 11/15 (speech panels, as pixel-office draws them): short lines, "\n"
+// where the panel breaks them; the choices are what the customer answers, in
+// a panel of its own (talkReply).
+export function clerkTalk(venueName, st, device) {
+  const sc = st.pair[0];
+  if (!sc) return { who: "店員", line: st.title === "這位客人的交易還在進行" ? "你的 Agent 還在忙，\n等一下再來喔！" : "這裡沒有你的 Agent\n能買的東西喔。",
+    choices: [{ key: "later", text: "好" }], note: "" };
+  const want = ((sc.delegation && sc.delegation.purpose) || sc.label || sc.id).replace(/（[^）]*）$/, "");
+  return { who: "店員", line: "歡迎光臨" + venueName + "！\n要請 Agent 幫你買什麼？", choices: [{ key: "start", text: "請 Agent 幫我" + want }, { key: "later", text: "先不用" }],
+    note: device ? "接著用你的裝置確認委託" : "接著確認委託（模擬，不是本人驗證）" };
+}
+
+// PEOPLE (Aaron 11/14: near a person, a key starts the talk): the town's
+// guides by their talk id (town.json), a few with a purpose, fixed lines
+// (no generated talk): hello as the customer comes near, then the lines.
+// The town only says who is near; the page shows these.
+export const PEOPLE = {
+  "atm-guide": { name: "銀行行員", hello: "要領測試幣嗎？", lines: ["這台 ATM 可以領\n測試用的 USDC！", "不是真錢，\n放心試試看。", "站到 ATM 前面就行，\n每天有上限喔。"] },
+  "subway-guide": { name: "捷運站務員", hello: "要搭捷運嗎？", lines: ["第一次進站，\n要用你的裝置確認委託。", "之後每趟進站\n自動扣 0.02！", "總共最多 0.20，\n用完就不能刷囉。"] },
+  "town-guide": { name: "街頭導覽員", hello: "第一次來嗎？", lines: ["每間店都能\n請 Agent 幫你買！", "走到櫃台，\n跟店員說就好。", "超過自動範圍的，\n要你本人核准喔。"] },
+};
+
+// talkReply (Aaron 11/15: the customer's answer, in its own speech panel as
+// pixel-office draws it): one answer by the space key, several by number;
+// none, the key that starts a guide's talk. Characters of Resources/OfficeFont only.
+export const TALK_KEY = "（空白鍵）說話";
+export function talkReply(choices) {
+  if (!choices || !choices.length) return "";
+  return choices.length === 1 ? "（空白鍵）" + choices[0].text : choices.map((c, i) => i + 1 + " " + c.text).join("\n");
+}
+
+// personTalk: a guide's line n and the customer's one answer (on to the
+// next line, or the end); null for no such guide or line.
+export function personTalk(id, n) {
+  const p = PEOPLE[id];
+  if (!p || !(n >= 0 && n < p.lines.length)) return null;
+  const last = n + 1 === p.lines.length;
+  return { who: p.name, line: p.lines[n], choices: [{ key: last ? "later" : "next", text: last ? "謝謝！" : "然後呢？" }], note: "" };
+}
+
 // notShown: the consumers whose runs the scene cannot show (not in the
 // build's customers), and whether the host's cap is above what it shows.
 export function notShown(consumers, customers, maxRuns) {

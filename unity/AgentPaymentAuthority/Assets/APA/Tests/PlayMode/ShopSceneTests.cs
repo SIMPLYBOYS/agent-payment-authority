@@ -191,8 +191,9 @@ public class ShopSceneTests
 
     // The game inside (interiors v2, Aaron 11/5: the game walks a customer freely in a shop too): the person's customer walks the
     // bookshop from the pavement, through its entrance, round its props, never onto a prop's foot or a wall; a click's
-    // way is clear all along; once its task holds it, nothing moves it, and its run walks back round the props to the
-    // door first, every leg clear.
+    // way is clear all along; once its task holds it, nothing moves it. A version 1 run is a new generation: every
+    // customer back outside, then the corridor to the door, every leg clear. (Version 2, the town's: the run goes on
+    // where the walked customer stands, TownTests.ARunStartedAtTheCounterGoesOnThere.)
     [UnityTest]
     public IEnumerator TheGameWalksACustomerRoundTheShop()
     {
@@ -222,7 +223,7 @@ public class ShopSceneTests
         Assert.IsFalse(view.WalkFree(b, Vector2.right * 0.1f, 0.03f));
         var route = view.RouteOf(b);
         int door = route.FindIndex(p => (p - view.P(b, ShopView.Door)).sqrMagnitude < 1e-4f);
-        Assert.Greater(door, 1, "round the props back to the door: " + string.Join(" ", route));
+        Assert.Greater(door, 1, "to the door: " + string.Join(" ", route));
         Clear(route[0], route.GetRange(1, door));
         yield return Arrive(b);
         Assert.AreEqual(view.Point(b, ShopView.Door), view.PositionOf(b));
