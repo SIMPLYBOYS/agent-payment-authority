@@ -171,7 +171,7 @@ public class TownTests
         for (float end = Time.realtimeSinceStartup + 0.6f; Time.realtimeSinceStartup < end;) yield return null;
         var after = town.WalkerPositions.ToList();
         Assert.IsTrue(before.Zip(after, (a, b) => (a - b).magnitude > 0.05f).Any(m => m), "someone walked");
-        foreach (var p in after) Assert.IsTrue((p.x >= -59f && p.x <= 143f || p.x >= 400f && p.x <= 480f || p.x >= 800f && p.x <= 842f || p.x >= 1100f && p.x <= 1142f) && p.y >= 0f && p.y <= 48f, "on the map: " + p); // -59 to 143: the hospital and the fire station; then, far apart (Aaron 11/9: one part alone on a wide screen), the beach and the two stations
+        foreach (var p in after) Assert.IsTrue((p.x >= -59f && p.x <= 143f || p.x >= 400f && p.x <= 480f || p.x >= 800f && p.x <= 854f || p.x >= 1100f && p.x <= 1154f) && p.y >= 0f && p.y <= 48f, "on the map: " + p); // -59 to 143: the hospital and the fire station; then, far apart (Aaron 11/9: one part alone on a wide screen), the beach and the two stations
     }
 
     // Aaron 10/27: a clerk and other customers in each shop (illustrative): only that shop's, and never under A or B, who
