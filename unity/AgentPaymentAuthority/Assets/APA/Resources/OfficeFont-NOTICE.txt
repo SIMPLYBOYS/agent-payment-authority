@@ -4,3 +4,4 @@ pixel-office's tools/subset_font.py from https://github.com/notofonts/noto-cjk ;
 Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
 Licensed under the SIL Open Font License, Version 1.1: the full text is NotoSansTC-OFL.txt beside this file.
 The speech panel and dots sprites under UI/ are pixel-office's own (Aaron's), copied unchanged.
+UI/speech_tail.png was drawn for this project in the speech panel's two colours (Aaron 11/15).

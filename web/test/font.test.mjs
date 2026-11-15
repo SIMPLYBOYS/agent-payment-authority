@@ -30,7 +30,7 @@ function cmap(buf) {
 test("OfficeFont has every character the talk can say", () => {
   const have = cmap(readFileSync(new URL("../../unity/AgentPaymentAuthority/Assets/APA/Resources/OfficeFont.otf", import.meta.url)));
   assert.ok(have.size > 5000, "a CJK subset");
-  const words = [A.TALK_KEY];
+  const words = [];
   for (const p of Object.values(A.PEOPLE)) {
     words.push(p.hello, ...p.lines);
     p.lines.forEach((_, n) => words.push(A.talkReply(A.personTalk(Object.keys(A.PEOPLE).find((k) => A.PEOPLE[k] === p), n).choices)));

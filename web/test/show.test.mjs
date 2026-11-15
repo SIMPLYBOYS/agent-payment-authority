@@ -503,7 +503,7 @@ test("say (Aaron 11/15): the talk goes to the window's Unity while it has the sc
   const relay = createRelay(() => {}, { channel: make(), setTimer: () => {} });
   const seen = [];
   listen({ own() {}, send2() {}, select2() {}, view() {}, say: (m) => seen.push(m) }, { channel: make(), setTimer: () => {}, onLeave: () => {} });
-  const msg = { at: "guide:atm-guide", line: "要領測試幣嗎？", reply: "（空白鍵）說話" };
+  const msg = { at: "guide:atm-guide", line: "要領測試幣嗎？", reply: "" };
   relay.say(msg);
   assert.deepEqual(seen, [], "not owned: nothing goes");
   relay.own(true);

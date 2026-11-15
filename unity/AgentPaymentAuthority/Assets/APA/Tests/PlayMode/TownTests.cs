@@ -1113,6 +1113,15 @@ public class TownTests
         var seen = Rect.MinMaxRect(lo.x, lo.y, hi.x, hi.y);
         foreach (var sp in new[] { town.SpeechOf(false), town.SpeechOf(true) })
             Assert.IsTrue(seen.Contains(sp.at - sp.size / 2f) && seen.Contains(sp.at + sp.size / 2f), "kept in the view: " + sp.at + " " + sp.size + " in " + seen);
+        // Each panel's tail points down from under it, the clerk's right of the customer's.
+        foreach (var who in new[] { false, true })
+        {
+            var tail = town.TailOf(who);
+            var sp = town.SpeechOf(who);
+            Assert.IsTrue(tail.shown, "a tail: " + who);
+            Assert.Less(tail.tip.y, sp.at.y - sp.size.y / 2f, "under its panel: " + who);
+        }
+        Assert.Greater(town.TailOf(false).tip.x, town.TailOf(true).tip.x, "the clerk's tail right of the customer's");
         bridge.Say("{\"at\":\"\"}");
         bridge.Play("{\"consumer\":\"\"}");
         Assert.IsTrue(view.UseLayout(ShopView.DefaultLayout));
@@ -1147,20 +1156,29 @@ public class TownTests
         Assert.IsTrue(town.DotsOver("town-guide"), "near: the guide's dots");
         bridge.Say("{\"at\":\"someone\",\"line\":\"x\",\"reply\":\"y\"}");
         Assert.AreEqual("say:0:0:someone|Invalid", bridge.reports.Last());
-        bridge.Say("{\"at\":\"guide:town-guide\",\"line\":\"First time here?\",\"reply\":\"[space] talk\"}");
+        bridge.Say("{\"at\":\"guide:town-guide\",\"line\":\"First time here?\",\"reply\":\"Yes!\"}");
         Assert.AreEqual("say:0:0:guide:town-guide|Applied", bridge.reports.Last());
         yield return null;
         var said = town.SpeechOf(false);
         var me = town.SpeechOf(true);
         Assert.IsTrue(said.shown && me.shown, "both speak");
         Assert.AreEqual("First time here?", said.words);
-        Assert.AreEqual("[space] talk", me.words);
+        Assert.AreEqual("Yes!", me.words);
         Assert.IsFalse(town.DotsOver("town-guide"), "its dots wait while it speaks");
         var feet = (Vector2)town.transform.TransformPoint(town.GuideAt("town-guide"));
         Assert.Greater(said.at.y - said.size.y / 2f, feet.y + 1.5f, "the line's panel over the guide's head");
         Assert.Greater(said.size.x, 1f, "sized to its words");
         Assert.Less(said.at.x, me.at.x, "the guide stands left: its panel opens left, the answer right");
         Assert.IsFalse(new Rect(said.at - said.size / 2f, said.size).Overlaps(new Rect(me.at - me.size / 2f, me.size)), "not covering each other");
+        // Aaron 11/15: as in a comic, each panel's tail points down at who says it, its tip just over the head.
+        var mine = (Vector2)town.transform.TransformPoint(town.PlayerAt);
+        var tg = town.TailOf(false);
+        var tm = town.TailOf(true);
+        Assert.IsTrue(tg.shown && tm.shown, "both point");
+        Assert.Less(Mathf.Abs(tg.tip.x - feet.x), 0.2f, "the line's tail at the guide: " + tg.tip + " " + feet);
+        Assert.Less(Mathf.Abs(tm.tip.x - mine.x), 0.2f, "the answer's tail at the customer: " + tm.tip + " " + mine);
+        Assert.Less(tg.tip.y, said.at.y - said.size.y / 2f, "under its panel");
+        Assert.Greater(tg.tip.y, feet.y + 1.5f, "over the guide's head");
         bridge.Say("{\"at\":\"\"}");
         yield return null;
         Assert.IsFalse(town.SpeechOf(false).shown || town.SpeechOf(true).shown, "none: both gone");

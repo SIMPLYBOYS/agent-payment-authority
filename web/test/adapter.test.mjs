@@ -674,9 +674,8 @@ test("personTalk: a guide's fixed lines, one answer each, then the end (Aaron 11
   assert.equal(A.clerkTalk("複合式書店", A.venueStart([], [], true), true).who, "店員");
 });
 
-test("talkReply: the customer's answer in its own panel: space for one, numbers for several (Aaron 11/15)", () => {
-  assert.equal(A.talkReply([{ key: "next", text: "然後呢？" }]), "（空白鍵）然後呢？");
+test("talkReply: the customer's answer in its own panel: one as said, several numbered, no key hints (Aaron 11/15)", () => {
+  assert.equal(A.talkReply([{ key: "next", text: "然後呢？" }]), "然後呢？");
   assert.equal(A.talkReply([{ key: "start", text: "請 Agent 幫我買一份國二數學講義" }, { key: "later", text: "先不用" }]), "1 請 Agent 幫我買一份國二數學講義\n2 先不用");
   assert.equal(A.talkReply([]), "");
-  assert.equal(A.TALK_KEY, "（空白鍵）說話");
 });

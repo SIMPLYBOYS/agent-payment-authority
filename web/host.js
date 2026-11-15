@@ -882,10 +882,10 @@ const talkAt = () => (talk ? (talk.kind === "person" ? "guide:" + talk.id : "cle
 const greeting = () => (!talk && presenting && inTown && sentPlay && A.PEOPLE[nearBy] ? A.PEOPLE[nearBy] : null);
 // The talk is drawn in the scene as pixel-office draws speech (Aaron 11/15): the line in a speech panel over the
 // speaker's head, the customer's answer in one over its own (town().say: this page's Unity, or the audience
-// window's). The keys answer: space for one answer, a number for several.
+// window's). The keys answer: space for one answer, a number for several. A guide's hello has no answer yet.
 function renderTalk() {
   const now = talkNow(), t = now && now.t, g = !t && greeting();
-  const msg = t ? { at: talkAt(), line: t.line, reply: A.talkReply(t.choices) } : g ? { at: "guide:" + nearBy, line: g.hello, reply: A.TALK_KEY } : { at: "", line: "", reply: "" };
+  const msg = t ? { at: talkAt(), line: t.line, reply: A.talkReply(t.choices) } : g ? { at: "guide:" + nearBy, line: g.hello, reply: "" } : { at: "", line: "", reply: "" };
   const key = JSON.stringify([msg, sceneUnity.target === relay]);
   if (key === sentSay) return;
   sentSay = key;

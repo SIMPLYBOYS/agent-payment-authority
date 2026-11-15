@@ -569,12 +569,12 @@ export const PEOPLE = {
 };
 
 // talkReply (Aaron 11/15: the customer's answer, in its own speech panel as
-// pixel-office draws it): one answer by the space key, several by number;
-// none, the key that starts a guide's talk. Characters of Resources/OfficeFont only.
-export const TALK_KEY = "（空白鍵）說話";
+// pixel-office draws it, its tail pointing at the customer): one answer as it
+// is said (the space key says it), several numbered (a number key says one).
+// No key hints in the panels (Aaron 11/15). Characters of Resources/OfficeFont only.
 export function talkReply(choices) {
   if (!choices || !choices.length) return "";
-  return choices.length === 1 ? "（空白鍵）" + choices[0].text : choices.map((c, i) => i + 1 + " " + c.text).join("\n");
+  return choices.length === 1 ? choices[0].text : choices.map((c, i) => i + 1 + " " + c.text).join("\n");
 }
 
 // personTalk: a guide's line n and the customer's one answer (on to the

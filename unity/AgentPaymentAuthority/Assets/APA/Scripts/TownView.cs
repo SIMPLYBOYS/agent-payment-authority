@@ -1762,15 +1762,17 @@ namespace APA
         // The page says who speaks and what (Say: "guide:<id>" or "clerk", the room's own; the line; the walked
         // customer's answer; "" none). Each is a pixel-office speech panel over the head: Resources/UI/speech_panel,
         // a 9-slice white panel sized to the words, in Resources/OfficeFont (a CJK subset). The two open away from each
-        // other, and the speaker's goes over the answer when they still meet. The town only draws; the page holds the
-        // words and the keys.
-        class Speech { public Transform root; public SpriteRenderer panel; public TextMesh text; }
+        // other, and the speaker's goes over the answer when they still meet. Aaron 11/15: each panel's tail points down
+        // at who says it, as in a comic (Resources/UI/speech_tail, drawn in the panel's pixels). The town only draws;
+        // the page holds the words and the keys.
+        class Speech { public Transform root; public SpriteRenderer panel, tail; public TextMesh text; }
         Speech said, answer;
         string sayAt = "";
-        // SpeechOver: the panel's bottom over the head; OverTag: in the town, the walked customer's over its name tag too.
-        // SpeechRef: the camera size the words are sized at (the town in a 640 px view, a screen pixel an art pixel); the
-        // panels scale with the camera, so they show the same size in the town and in a room, and grow with the canvas.
-        public const float SpeechOver = 0.25f, OverTag = 0.5f, SpeechRef = 10f;
+        // SpeechOver: the panel's bottom over the head, the tail's length (8 art pixels, at the panel's scale); OverTag:
+        // in the town, the walked customer's over its name tag too. SpeechRef: the camera size the words are sized at
+        // (the town in a 640 px view, a screen pixel an art pixel); the panels scale with the camera, so they show the
+        // same size in the town and in a room, and grow with the canvas.
+        public const float SpeechOver = 8f / 16f, OverTag = 0.5f, SpeechRef = 10f;
 
         Speech MakeSpeech(string name)
         {
@@ -1781,6 +1783,10 @@ namespace APA
             s.panel.sprite = Resources.Load<Sprite>("UI/speech_panel");
             s.panel.drawMode = SpriteDrawMode.Sliced;
             s.panel.sortingOrder = Labels + 30;
+            s.tail = new GameObject(name + "-tail").AddComponent<SpriteRenderer>();
+            s.tail.transform.SetParent(s.root, false);
+            s.tail.sprite = Resources.Load<Sprite>("UI/speech_tail");
+            s.tail.sortingOrder = Labels + 31; // its top row opens the panel's bottom edge
             s.text = new GameObject(name + "-text").AddComponent<TextMesh>();
             s.text.transform.SetParent(s.root, false);
             var font = Resources.Load<Font>("OfficeFont") ?? Resources.Load<Font>(ShopView.FontName);
@@ -1834,12 +1840,38 @@ namespace APA
             var seen = Seen();
             if (sa) Inside(said, seen);
             if (sb) Inside(answer, seen);
-            if (!sa || !sb || !Box(said).Overlaps(Box(answer))) return;
-            // Still meeting (close together, or held in at a side): the speaker's over the answer, else the answer under it.
-            Rect ra = Box(said), rb = Box(answer);
-            float up = rb.yMax + 0.1f + ra.height / 2f;
-            if (up + ra.height / 2f <= seen.yMax) said.root.position = new Vector3(said.root.position.x, up, 0f);
-            else answer.root.position = new Vector3(answer.root.position.x, ra.yMin - 0.1f - rb.height / 2f, 0f);
+            bool ta = sa, tb = sb;
+            if (sa && sb && Box(said).Overlaps(Box(answer)))
+            {
+                // Still meeting (close together, or held in at a side): the speaker's over the answer, else the answer
+                // under it; the one moved has no tail (it would cross the other).
+                Rect ra = Box(said), rb = Box(answer);
+                float up = rb.yMax + 0.1f + ra.height / 2f;
+                if (up + ra.height / 2f <= seen.yMax) { said.root.position = new Vector3(said.root.position.x, up, 0f); ta = false; }
+                else { answer.root.position = new Vector3(answer.root.position.x, ra.yMin - 0.1f - rb.height / 2f, 0f); tb = false; }
+            }
+            if (sa) Point(said, a, ta);
+            if (sb) Point(answer, b, tb);
+        }
+
+        // Point: the tail from the panel's bottom edge down to over r's head, its tip (the outer pixel column) over the
+        // head's middle and its base on the panel's straight edge; leaning to the side the panel opens to. Hidden when
+        // off (the panel moved), or when the panel, held in at the top of the view, is pushed down so far that the tip
+        // would be under the middle of who speaks.
+        void Point(Speech s, SpriteRenderer r, bool on)
+        {
+            var box = Box(s);
+            float px = s.root.localScale.x / 16f; // an art pixel in the world
+            var size = s.tail.sprite.bounds.size * s.root.localScale.x;
+            on = on && box.yMin + px - size.y > r.bounds.center.y;
+            if (s.tail.gameObject.activeSelf != on) s.tail.gameObject.SetActive(on);
+            if (!on) return;
+            float x = r.bounds.center.x;
+            bool left = box.center.x >= x; // the panel right of the head: the tail leans left, down to it
+            s.tail.flipX = !left;
+            float lo = box.xMin + 2f * px + size.x / 2f, cx = x + (left ? 1f : -1f) * (size.x / 2f - px);
+            cx = Mathf.Clamp(cx, lo, Mathf.Max(lo, box.xMax - 2f * px - size.x / 2f));
+            s.tail.transform.position = new Vector3(cx, box.yMin + px - size.y / 2f, 0f);
         }
 
         // Over: the speech's panel sized to its words, its bottom just over r's head (and lift more); false, hidden, for
@@ -1854,7 +1886,7 @@ namespace APA
             var size = s.text.GetComponent<MeshRenderer>().bounds.size / u;
             s.panel.size = new Vector2(size.x + 0.5f, size.y + 0.35f);
             var head = r.bounds;
-            s.root.position = new Vector3(head.center.x, head.max.y + SpeechOver + lift + s.panel.size.y * u / 2f, 0f);
+            s.root.position = new Vector3(head.center.x, head.max.y + SpeechOver * u + lift + s.panel.size.y * u / 2f, 0f);
             return true;
         }
 
@@ -1888,6 +1920,16 @@ namespace APA
         {
             var s = customer ? answer : said;
             return s == null ? (false, "", Vector2.zero, Vector2.zero) : (s.root.gameObject.activeSelf, s.text.text, (Vector2)s.root.position, Box(s).size);
+        }
+
+        // Tests: whether a speech's tail shows, and its tip in the world.
+        public (bool shown, Vector2 tip) TailOf(bool customer)
+        {
+            var s = customer ? answer : said;
+            if (s == null || !s.tail.gameObject.activeInHierarchy) return (false, Vector2.zero);
+            var b = s.tail.bounds;
+            float px = s.root.localScale.x / 16f;
+            return (true, new Vector2(s.tail.flipX ? b.max.x - px : b.min.x + px, b.min.y));
         }
 
         // Tests: whether a guide's dots show.
