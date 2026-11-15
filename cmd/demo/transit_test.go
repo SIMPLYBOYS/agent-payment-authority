@@ -177,3 +177,21 @@ func TestTransitVelocityAndHostEnd(t *testing.T) {
 		t.Fatalf("the pass after the host's end: %v", v)
 	}
 }
+
+// The shipped catalog's pass is apa.pay.v2 (Aaron 11/14: the gate said 無法扣款): each fare presents the
+// customer's credential to the Store before the Policy, as a shop's purchase does.
+func TestTransitPassV2(t *testing.T) {
+	path, _ := credDir(t, "consumer-a", "consumer-b")
+	cat := transitCatalog(t, "60000", "20000")
+	raw, _ := os.ReadFile(cat)
+	os.WriteFile(cat, []byte(strings.ReplaceAll(string(raw), "apa.pay.v1", "apa.pay.v2")), 0o600)
+	h := controlHost(t, hostOpts{expiryEvery: time.Hour, scenarios: cat, args: []string{"--credential-dir", path}})
+	defer h.stop()
+	sim := h.simulate("consumer-a")
+	if code, pass := h.openPass(sim, "01"); code != 201 || pass["contract_version"] != "apa.pay.v2" {
+		t.Fatalf("open: %d %v", code, pass)
+	}
+	if code, r := h.ride("01"); code != 200 || r["decision"] != "Allow" || r["pass"] != "open" {
+		t.Fatalf("ride 1: %d %v", code, r)
+	}
+}
