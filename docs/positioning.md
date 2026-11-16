@@ -49,7 +49,8 @@
 | Coinbase CDP x402 client | 單筆與滾動時間窗的累計上限；資產、鏈、收款人白名單；付款前預留 | 任務脈絡（哪個任務、哪一步）與本人同意的證據 |
 | Cloudflare Agents SDK | x402 付款的人工核准回呼 | 核准綁在 Signer 要簽的確切條款上；事後獨立查證 |
 | Crossmint | 支出上限、商家白名單、門檻式人工核准、稽核 | 跨多筆付款的私密預算；只讀證據與鏈的獨立查證 |
-| Google AP2 | Intent／Cart Mandate 與可驗證憑證串起意圖到付款的證據 | 跟 x402 結算、獨立 signer、ZK 預算綁在同一個 `intent_hash` |
+| Google AP2 | 委託（mandate）串起意圖到付款的證據。v0.2 改成 Checkout／Payment 兩種，各分 open（事前的範圍）與 closed（確切的一筆）；2026/4 交給 FIDO 標準化（欄位對照見 §4.1） | 跟 x402 結算、獨立 signer、ZK 預算綁在同一個 `intent_hash` |
+| Mastercard Verifiable Intent（Draft v0.1） | 和 Google 共同開發、建在 AP2 的委託上：發卡機構、本人、Agent 三層 SD-JWT 委託鏈；限制有收款方、金額範圍、總額、週期等；2026/4 交給 FIDO（§4.1） | 私密的預算（它的累計由支付網路追蹤）；Agent 不持任何金鑰；事後只讀證據與鏈的獨立查證 |
 | ERC-8196（Final） | 把 owner policy 下沉到錢包層執行 | 以 USDC 與店家計的限制（8196 的限額以 wei 計）；本人核准與任務脈絡 |
 | ERC-8366（Draft） | **用 Groth16 證明付款符合私密的支出政策**，經 ERC-3009 接進 x402 | 同一個任務的多筆付款共用一份預算（8366 是一份 policy 對一筆付款） |
 | x402 Signed Offers & Receipts | 商家以 DID 簽報價與交付收據 | 人的身分與授權（那份 DID 是商家的） |
@@ -64,6 +65,39 @@
 - **獨立查證**：checker 只讀證據包與鏈，判定 E1～E10。
 
 **互補，不是取代**：這一層可以疊在 CDP 這類錢包上面、接 AP2 的 mandate，或在商家端換成任何 x402 facilitator；Agent、Policy、本人核准、ZK 預算與 Signer 都不必改。
+
+### 4.1 和 AP2 v0.2、Verifiable Intent v0.1 的欄位對照（11/17）
+
+「Agent 代表誰、被授權做什麼」這一層還沒有定案的標準：FIDO 2026/4/28 成立 Agentic Authentication 與 Payments 兩個工作組，AP2 v0.2 與 Mastercard 的 Verifiable Intent 都交給它審。這個專案的委託與請購是自己的格式（`apa.pay.v2`），下表對照兩份草案的欄位，說明「設計對齊、格式不同」。依據是 11/17 讀的規格頁（第 8 節）；兩份都是草案，欄位名稱可能再改。兩份共用 AP2 的委託名稱（`mandate.checkout.*`、`mandate.payment.*`），Verifiable Intent 在上面多了發卡機構那一層與 Agent 簽的那一層。
+
+| 概念 | 本專案 | AP2 v0.2 | Verifiable Intent v0.1 |
+|---|---|---|---|
+| 誰的錢、用什麼付 | 客人自己的錢包（`wallet_id`、`from`；私鑰在 Signer），資產是 `chain_id`＋`asset_contract` | Payment Mandate 的 `payment_instrument`；open 階段可限 `payment.allowed_payment_instruments` | L1：發卡機構簽的卡憑證（`pan_last_four`、`scheme`，`cnf.jwk` 是本人的公鑰）；L2／L3 的 `payment_instrument` |
+| 本人事前給 Agent 的範圍 | 委託條款 `DelegationTerms`，本人用已登記的裝置確認（WebAuthn），Signer 保存它的雜湊 | open mandate（`mandate.checkout.open.1`、`mandate.payment.open.1`），本人在受信任的畫面上核准 | L2 Autonomous：本人簽的 open mandate |
+| 可以付給誰 | `merchants`（收款地址名單） | `payment.allowed_payees`、`checkout.allowed_merchants` | `mandate.payment.allowed_payees`、`mandate.checkout.allowed_merchants` |
+| 單筆金額 | `allow_max`：以下自動放行（Allow），以上逐筆交本人核准（Ask）；**是核准門檻，不是硬上限** | `payment.amount_range`（硬上限） | `mandate.payment.amount_range`（硬上限） |
+| 總額 | `task_budget`：ZK 預算，付款前在鏈上預留；鏈上看不到上限與餘額 | `payment.budget` | `mandate.payment.budget`：由支付網路追蹤已授權的累計 |
+| 次數與週期 | 頻率限制（同一位客人十分鐘內最多 5 筆，Policy 與 Signer 各一道）；捷運通行（每趟 0.02、總額 0.20） | `payment.agent_recurrence` | `mandate.payment.agent_recurrence`（`frequency`、`max_occurrences`、起訖日）、`mandate.payment.recurrence` |
+| 買什麼 | `purpose`：一句自然語言，不限定商品 | `checkout.line_items`（可接受的商品 ID 與數量） | `mandate.checkout.line_items`；選填的 `prompt_summary` |
+| 期限 | `valid_seconds`（確認後多久內可以開始任務）；Ask 的等待時間 `approval_deadline_seconds` | `exp` | `exp` |
+| Agent 的身分與金鑰 | `agent_id`＋ERC-8004 身分（付款錢包由錢包簽章證明）；**Agent 沒有任何簽章金鑰** | open mandate 的 `cnf` 綁 Agent 的金鑰，Agent 用它簽 closed mandate | L2 的 `cnf.jwk` 是 Agent 的公鑰，L3 由 Agent 簽 |
+| 這一筆的確切條款 | `PurchaseOrder`：`intent`（任務、請購、資源、x402 版本、報價雜湊）＋`payment_binding`（收款人、金額、時間窗、nonce）＋`quote`；Agent 提出但不簽，`intent_hash` 綁住全部 | closed mandate：`mandate.checkout.1`（`checkout_jwt`、`checkout_hash`）＋`mandate.payment.1`（`payee`、`payment_amount`、`payment_instrument`、`transaction_id`） | L3a（給支付網路）、L3b（給商家），Agent 簽 |
+| 商家的報價 | x402 `PAYMENT-REQUIRED` 選中的那一項，完整內容算進 `payment_requirement_hash`；**商家沒有簽** | `checkout_jwt`：商家簽的購物車 | 同 AP2 |
+| 超出範圍時本人逐筆核准 | `AuthorizationGrant`：Signer 驗過本人裝置的 WebAuthn 簽章（`amr: ["webauthn"]`，可加語音）才發，綁 `intent_hash`，用一次（`jti`） | 本人在場（human-present）時，本人確認 closed mandate | Immediate 模式：本人直接簽 closed mandate（確切的金額與收款人），沒有 L3 |
+| 本人的金鑰 | passkey（WebAuthn） | 可驗證的數位憑證（OpenID4VP，建議 Digital Credentials API），或 Agent 提供者的受信任畫面；passkey 只列為「之後可能」 | L1 `cnf.jwk` 綁的本人金鑰 |
+| 防重放 | EIP-3009 nonce、預算 nullifier、核准的 `jti` | key binding 的 `nonce`、`sd_hash` | L2、L3 各自的 `nonce`；L3 的 `exp` 建議 5 分鐘 |
+| 最少揭露 | BBS+ 憑證：店家只看到要求的屬性（國家、是否滿 18 歲），不同店家之間無法串連 | SD-JWT 的 disclosure | SD-JWT；`allowed`、`line_items` 的個別項目可以選擇揭露 |
+| 結果 | x402 `PAYMENT-RESPONSE`＋鏈上交易＋事件雜湊鏈＋證據包，checker 只讀證據與鏈重算 | Mandate Receipt（`iss`、`result`、`reference`） | 規格頁沒寫 |
+| 格式 | JSON 加上分領域的雜湊（`apa.pay.v2`）；憑證是自訂信封的舊版 BBS+ | SD-JWT（`vct`：`mandate.*`） | SD-JWT 委託鏈（L1 `sd+jwt`；L2、L3 `kb-sd-jwt`） |
+
+讀表的重點：
+
+- **模式對得上**：本專案的 Allow（`allow_max` 以下）就是它們的 autonomous；Ask（本人逐筆核准）就是它們的 human-present／Immediate。差別在本專案用同一份委託依金額切換，它們用兩種委託。
+- **最大的結構差異在 Agent 有沒有金鑰**：它們給 Agent 一把金鑰，由 Agent 簽這一筆；本專案的 Agent 什麼金鑰都沒有，請購不簽名，由 Policy 檢查、Signer 簽付款。後者更貼近「Agent 不能碰 custody」；代價是「這筆請購是哪個 Agent 送出的」沒有密碼學證明，靠的是 Host 的紀錄與 `agent_id`。
+- **商家報價沒有簽名**：它們要商家簽購物車；本專案綁住報價的完整雜湊，但商家沒簽。x402 的 Signed Offers & Receipts 擴充可以補上。
+- **預算看得到的人不同**：它們的累計由支付網路追蹤；本專案在鏈上以 ZK 預留，鏈上看不到上限與餘額（中繼與主持人那一側看得到，見 architecture.md 的限制）。
+- **本專案沒有商品層級的限制**：它們有 `line_items`；本專案只有自然語言的 `purpose`，靠商店清單與憑證屬性要求來限制。
+- **要互通的話**：委託條款可以包成 open mandate、請購包成 closed mandate；本人逐筆核准（Signer 驗過 WebAuthn 才發的 grant）在 AP2 裡沒有現成的位置，AP2 只把 passkey 列為之後可能的做法。
 
 ## 5 能說與不能說
 
@@ -106,3 +140,13 @@
 [ERC-8366](https://ethereum-magicians.org/t/erc-8366-zero-knowledge-spending-policies/29281)、
 [ERC-8196](https://eips.ethereum.org/EIPS/eip-8196)。
 錢包層執行路徑的比較：[adr/payment-account-model.md](adr/payment-account-model.md)。
+
+§4.1 的欄位對照，11/17 讀的規格頁：
+[AP2 首頁（v0.2、交給 FIDO）](https://ap2-protocol.org/)、
+[AP2 Agent Authorization](https://ap2-protocol.org/ap2/agent_authorization/)、
+[AP2 Checkout Mandate](https://ap2-protocol.org/ap2/checkout_mandate/)、
+[AP2 Payment Mandate](https://ap2-protocol.org/ap2/payment_mandate/)、
+[Verifiable Intent](https://verifiableintent.dev)、
+[Verifiable Intent Credential Format](https://verifiableintent.dev/spec/credential-format/)、
+[Verifiable Intent Constraints](https://verifiableintent.dev/spec/constraints/)、
+[FIDO 4/28 公告](https://fidoalliance.org/fido-alliance-to-develop-standards-for-trusted-ai-agent-interactions/)。
