@@ -163,8 +163,44 @@ const Split: Page = () => (
       />
     </div>
     <p style={{ fontSize: 30, color: muted, marginTop: 44, lineHeight: 1.5 }}>
-      x402 本身沒有預算、上限、本人核准或身分的概念；換成別的付款方式，這一層的規則照樣成立。
+      x402 本身沒有預算、上限、本人核准或本人身分的概念；換成別的付款方式，這一層的規則照樣成立。
     </p>
+  </Frame>
+);
+
+// ---------- 04 standards: which layers follow one, which are still being written (docs/positioning.md §4.1) ----------
+const Std = ({ layer, std, here, own }: { layer: string; std: string; here: string; own?: boolean }) => (
+  <tr>
+    <td style={{ ...cell, fontWeight: 800, width: 250 }}>{layer}</td>
+    <td style={{ ...cell, width: 820 }}>{std}</td>
+    <td style={{ ...cell, fontWeight: own ? 800 : 400, color: own ? 'var(--osd-accent)' : ink }}>{here}</td>
+  </tr>
+);
+
+const Standards: Page = () => (
+  <Frame eyebrow="標準" title="能用標準的地方都用標準，委託這一層還在制定">
+    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <thead>
+        <tr>
+          <th style={head}>層</th>
+          <th style={head}>標準與現況</th>
+          <th style={head}>這裡用的</th>
+        </tr>
+      </thead>
+      <tbody>
+        <Std layer="付款協商" std="x402 v2，由 Linux Foundation 的 x402 Foundation 治理" here="照用（exact）" />
+        <Std layer="簽名與結算" std="EIP-3009＋EIP-712，USDC 有實作" here="照用" />
+        <Std layer="本人核准" std="WebAuthn／FIDO2，W3C 與 FIDO 的標準" here="照用（passkey）" />
+        <Std layer="Agent 身分" std="ERC-8004，仍是草案，2026/1 上以太坊主網" here="照用（Base Sepolia）" />
+        <Std layer="選擇性揭露" std="W3C VC 2.0；SD-JWT 或 BBS（bbs-2023）" here="自訂信封、舊版 BBS+" own />
+        <Std layer="委託與核准" std="AP2 v0.2、Verifiable Intent v0.1，都在 FIDO 審" here="自訂格式，設計對齊" own />
+      </tbody>
+    </table>
+    <div style={{ marginTop: 30, background: ink, color: '#fbf7ee', borderRadius: 'var(--osd-radius)', padding: '24px 40px', fontSize: 28, lineHeight: 1.5 }}>
+      模式對得上：Allow 就是草案裡的 autonomous，Ask 就是本人在場的核准。
+      <br />
+      最大的差別：草案給 Agent 一把金鑰簽這一筆；這裡的 Agent 什麼金鑰都沒有。
+    </div>
   </Frame>
 );
 
@@ -412,6 +448,9 @@ const Identity: Page = () => (
       <Sees shop="咖啡店" sees="什麼都沒有" />
       <Sees shop="便利商店（賣酒）" sees="是否滿 18 歲" />
     </div>
+    <p style={{ fontSize: 28, color: muted, marginTop: 44, lineHeight: 1.5 }}>
+      三層對照：KYH 確認真人＝eKYC；KYA 確認 Agent 與授權＝委託憑證與 ERC-8004；KYT 交易監控＝還沒做。
+    </p>
   </Frame>
 );
 
@@ -1092,7 +1131,7 @@ const Replace: Page = () => (
         <Swap part="鏈與資產" now="Base Sepolia、測試 USDC" real="正式鏈與正式穩定幣，換設定與合約地址" />
         <Swap part="Signer 的金鑰" now="另一個系統帳號裡的金鑰檔" real="HSM 或 MPC，放在獨立的主機" />
         <Swap part="身分來源" now="Didit 沙盒，沒有驗證真人" real="eKYC 正式環境；發行者獨立部署" />
-        <Swap part="本人核准" now="同一台筆電上的裝置驗證" real="本人自己的手機（passkey）" />
+        <Swap part="本人核准" now="同一台筆電、同步的 passkey" real="本人的手機；大額改用綁裝置、不同步的金鑰" />
         <Swap part="結算" now="自架 facilitator，與 Host 同機" real="自營或第三方的 x402 facilitator" />
         <Swap part="商店" now="固定名單，由主持人代管" real="商店自己的 x402 端點與接入流程" />
       </tbody>
@@ -1105,7 +1144,7 @@ const Replace: Page = () => (
 
 // ---------- 18 gaps ----------
 const Gap = ({ title, text }: { title: string; text: string }) => (
-  <div style={{ display: 'flex', gap: 28, alignItems: 'baseline', borderTop: `2px solid ${line}`, padding: '19px 0' }}>
+  <div style={{ display: 'flex', gap: 28, alignItems: 'baseline', borderTop: `2px solid ${line}`, padding: '13px 0' }}>
     <span style={{ fontSize: 31, fontWeight: 800, width: 520, flexShrink: 0 }}>{title}</span>
     <span style={{ fontSize: 29, lineHeight: 1.45, color: muted }}>{text}</span>
   </div>
@@ -1119,6 +1158,8 @@ const Gaps: Page = () => (
     <Gap title="發行、持有、驗證在同一個程序" text="證明了格式與接線，還不是三方互相獨立" />
     <Gap title="沒有爭議流程與託管" text="商店不肯退款時，系統沒有辦法強制" />
     <Gap title="商家沒有身分與信譽" text="名單上的商家自己作假，仍然收得到錢" />
+    <Gap title="沒有交易監控（KYT）" text="付款前不查收款方的風險，只靠商家名單" />
+    <Gap title="委託與核准是自訂的格式" text="對應的標準草案（AP2、Verifiable Intent）還在 FIDO 制定" />
     <Gap title="送交易的金鑰各只有一把" text="每位客人的付款各自進行，但同一把金鑰的 nonce 一筆一筆給；流量大時要多把" />
   </Frame>
 );
@@ -1149,7 +1190,7 @@ const Order: Page = () => (
       <Phase now n="01" title="沙盒整合" a="測試網、eKYC 沙盒" b="三個場域通過獨立查證（現況）" />
       <Phase n="02" title="測試網試點" a="商店自己的 x402 端點" b="本人用手機核准" />
       <Phase n="03" title="小額正式" a="eKYC 正式環境、HSM 或 MPC" b="多方產生的 ZK setup" />
-      <Phase n="04" title="擴大" a="爭議流程與退款規則" b="監控、對帳與高流量付款" />
+      <Phase n="04" title="擴大" a="爭議流程與退款規則" b="KYT、對帳與高流量付款" />
     </div>
     <p style={{ fontSize: 30, color: muted, marginTop: 50, lineHeight: 1.5 }}>
       每一階段都用同一個 checker 驗收：證據包能不能被第三方向鏈重算，是能不能往下走的條件。
@@ -1185,14 +1226,17 @@ export const meta: SlideMeta = {
 export const notes: (string | undefined)[] = [
   '開場只講一句：AI 可以提出付款，但不能自己批准，也不能自己簽名。這份簡報分兩部分：架構，以及落地要換什麼。',
   '三個擔心是整個設計的出發點，後面每一頁都對得回其中一個。',
-  '先把分工講清楚：x402 是付款的管道，這一層是授權與證據。兩者互補，不是取代。',
+  '先把分工講清楚：x402 是付款的管道，這一層是授權與證據。兩者互補，不是取代。x402 在 2026 年 4 月交給 Linux Foundation，Visa、Mastercard、Circle、Google 都是成員。',
+  `被問「有沒有照標準」就停在這頁。下面四層都照標準；委託這一層業界還沒有定案，AP2 和 Mastercard 的 Verifiable Intent 都在 FIDO 審，所以用自訂格式，欄位對照在 docs/positioning.md 4.1。
+選擇性揭露那一列要照實說：用的是舊版 BBS+，不是 W3C 的 bbs-2023。
+底下兩句是重點：模式對得上；差別在 Agent 有沒有金鑰。這裡的 Agent 什麼都簽不了，代價是「這筆是哪個 Agent 送的」靠紀錄，不是密碼學證明。`,
   `從左到右看：本人與 Agent 在左邊，Host 居中，私鑰只在 Signer。
 橘色箭頭是付款的路，灰色虛線是事後查證的路。`,
   '重點是「不能做」那一欄：Agent 碰不到金鑰，Host 沒有私鑰，Signer 簽不出委託外的付款。',
   '五步對應展示畫面右側的五步。底下那條是關鍵：所有步驟綁在同一個 intent_hash 上。',
   '規則都是確定性的，模型沒有裁量空間。注意商家名單與頻率上限各擋兩次：Host 被攻破，Signer 那一道還在。',
   '為什麼是兩筆：預留先證明預算夠，結算才動錢。分開追蹤，結果不明時先對帳。',
-  '身分只驗一次。之後每間店只拿到它宣告要求的屬性，查帳的第二項會驗「不多不少」。',
+  '身分只驗一次。之後每間店只拿到它宣告要求的屬性，查帳的第二項會驗「不多不少」。最後一行是台灣業界現在用的 KYH／KYA／KYT 三層：前兩層有，KYT 還沒做。',
   '最後一行很重要：照實說擋不住的部分。自動範圍內的誤購靠上限限制損失。',
   '十項主張可以逐項念，也可以只講 E4 與 E8：向鏈重算，不相信系統自己的紀錄。',
   '進入第二部分：目前是測試網與沙盒，接下來講要換什麼。',
@@ -1215,8 +1259,8 @@ export const notes: (string | undefined)[] = [
 第五步是對照：家長買同一件商品就放行，這時 ZK 預算才上場。
 最後一步收在兩項技術：eKYC 讓年齡不是自己說的；零知識證明讓店家只知道一個是或否，鏈上只看到承諾值。
 要照實說的限制：是否滿 18 歲是發行者簽好的一個是或否，不是對生日做範圍證明；ZK 預算只對鏈上隱藏，Relayer 看得到上限與餘額；eKYC 目前接的是沙盒。`,
-  '右欄是建議，不是已經做完的事。介面不變，換的是背後的環境。',
-  '這一頁是老實話。每一項在 docs/architecture.md 的限制裡都有對應的說明。',
+  '右欄是建議，不是已經做完的事。介面不變，換的是背後的環境。本人核准那列：同步的 passkey 屬 NIST 的 AAL2，大額要綁裝置、不同步的金鑰才到 AAL3。',
+  '這一頁是老實話。每一項在 docs/architecture.md 的限制裡都有對應的說明。最後兩項是 11 月新補的：沒有交易監控，以及委託格式是自訂的。',
   '順序的原則：先把信任的起點（身分、金鑰、商店）換成真的，再擴大。每一階段用同一個 checker 驗收。',
   '收在定位句。想看細節的人，三份文件都在 repo 裡。',
 ];
@@ -1225,6 +1269,7 @@ export default [
   Cover,
   Worries,
   Split,
+  Standards,
   Roles,
   Powers,
   FiveSteps,
