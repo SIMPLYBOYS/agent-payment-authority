@@ -410,6 +410,22 @@ public class TownTests
         Assert.Greater(shut + after, 3.5f, "after a while in there");
     }
 
+    // Aaron 11/18: someone goes into the phone booth to make a call: its door opens for them, and they show in it,
+    // over it, at the phone.
+    [UnityTest]
+    public IEnumerator ThePhoneBoothOpensForTheOneInIt()
+    {
+        var data = JsonUtility.FromJson<Town>(Resources.Load<TextAsset>("Town/town").text);
+        var booth = data.booths[0];
+        Assert.IsTrue(data.walkers.Any(w => w.path.Any(p => (p - booth.at).sqrMagnitude < 0.01f)), "one of the town's passers-by calls from it");
+        town.AddWalker(new Town.Walker { key = "x-walk-11", speed = 4f, path = new[] { booth.at - 2f * Vector2.up, booth.at }, wait = new[] { 0f, 30f } });
+        float took = 0f;
+        yield return Until(() => (town.Passer("x-walk-11").at - booth.at).sqrMagnitude < 0.01f, 3f, t => took = t);
+        Assert.Less(took, 3f, "in it");
+        Assert.IsTrue(town.BoothOpen(0), "its door open while they call");
+        Assert.Greater(town.PasserOrder("x-walk-11"), town.BoothOrder(0), "drawn over the booth, not hidden behind it");
+    }
+
     // Every venue's door opens (Aaron 11/6: walking past the post office, its door did not): for the person's
     // customer on its step, and wide for a passer-by going in.
     [UnityTest]

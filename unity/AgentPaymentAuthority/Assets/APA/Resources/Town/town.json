@@ -3,6 +3,7 @@
   "start": {"x": 32, "y": 25.6},
   "apart": [{"x": 400, "y": 480}, {"x": 800, "y": 854}, {"x": 1100, "y": 1154}],
   "gates": [{"station": "shop-street", "line": 826.0, "y0": 13.38, "y1": 14.07, "open": {"key": "x-gate-open", "x": 826.906, "y": 14.07}, "shut": {"key": "x-gate", "x": 826.906, "y": 13.383}}, {"station": "beach", "line": 1126.0, "y0": 13.38, "y1": 14.07, "open": {"key": "x-gate-open", "x": 1126.906, "y": 14.07}, "shut": {"key": "x-gate", "x": 1126.906, "y": 13.383}}],
+  "booths": [{"at": {"x": 70.5, "y": 27.65}, "shut": {"key": "x-phone", "x": 70.5, "y": 27.4}, "open": {"key": "x-phone-open", "x": 70.5, "y": 26.4}}],
   "atms": [{"id": "street", "spot": {"x": 17.3, "y": 16.95, "w": 1.4, "h": 0.4}, "note": 21.2}],
   "trains": [{"x": 816, "y": 22.9, "from": 802, "name": "商店街站", "en": "Shopping Street", "cars": ["x-train-l", "x-train-m", "x-train-r"], "open": ["x-train-in-l", "x-train-in-m", "x-train-in-r"], "inside": {"x": 823.5, "y": 23.7, "w": 8.2, "h": 0.9}, "to": 1},
              {"x": 1116, "y": 22.9, "from": 1102, "name": "海灘站", "en": "Beach", "cars": ["x-train-l", "x-train-m", "x-train-r"], "open": ["x-train-in-l", "x-train-in-m", "x-train-in-r"], "inside": {"x": 1123.5, "y": 23.7, "w": 8.2, "h": 0.9}, "to": 0}],
@@ -279,7 +280,7 @@
     {"key": "x-food-stool", "x": 101.5, "y": 7.3},
     {"key": "x-food-menu-2", "x": 108.6, "y": 6.4},
     {"key": "x-tree-small", "x": -5, "y": 16.25},
-    {"key": "x-phone", "x": -13.0, "y": 16.3},
+    {"key": "x-tree-pine", "x": -13, "y": 16.25},
     {"key": "x-tree-round", "x": -21, "y": 16.25},
     {"key": "x-flowers-box-2", "x": -29.0, "y": 16.35},
     {"key": "x-tree-small", "x": -37, "y": 16.25},
@@ -1123,6 +1124,7 @@
     {"key": "x-candy-cart", "x": 15.4, "y": 7.9}
   ],
   "walkers": [
+    {"key": "x-walk-04", "speed": 1.0, "path": [{"x": 58.5, "y": 25.9}, {"x": 70.5, "y": 25.9}, {"x": 70.5, "y": 27.65}], "wait": [3, 0, 8]},
     {"key": "x-pose-03-sit-right", "speed": 0, "path": [{"x": -29.8, "y": 7.6}], "over": 6.95},
     {"key": "x-pose-06-sit-left", "speed": 0, "path": [{"x": -27.2, "y": 7.6}], "over": 6.95},
     {"key": "x-pose-18-sit-left", "speed": 0, "path": [{"x": -27.2, "y": 8.7}], "over": 6.96},

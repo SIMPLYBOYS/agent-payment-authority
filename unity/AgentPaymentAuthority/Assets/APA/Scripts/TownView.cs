@@ -55,6 +55,11 @@ namespace APA
         // walk), reported once until it steps off; note, the height of the words shown over it. Its look is a prop.
         public Atm[] atms = new Atm[0];
         [System.Serializable] public class Atm { public string id; public Area spot = new Area(); public float note; }
+        // A phone booth (Aaron 11/18: someone goes in to make a call): its door open while a passer-by stands before it
+        // or in it (at: the spot inside, at the phone; from a tile below it), shut otherwise, the one in it drawn over
+        // it. open: its look with the door open (LimeZu's is the same booth, its open door a tile lower).
+        public Booth[] booths = new Booth[0];
+        [System.Serializable] public class Booth { public Vector2 at; public Piece shut = new Piece(), open = new Piece(); }
         [System.Serializable] public class Gate { public string station; public float line, y0, y1; public Piece open = new Piece(), shut = new Piece(); }
         // name, en: its station's name, shown as it comes in (Aaron 11/9).
         [System.Serializable] public class Train { public float x, y, from; public string name, en; public string[] cars = new string[0], open = new string[0]; public Area inside = new Area(); public int to = -1; }
@@ -210,6 +215,13 @@ namespace APA
                 s.plate = Plate(s.root, s.note, Rounded(), GateWait, Labels + 20);
                 s.root.gameObject.SetActive(false);
                 atms.Add(s);
+            }
+            booths.Clear();
+            foreach (var b in town.booths) // both looks at the shut one's depth; shut till someone comes
+            {
+                var s = new BoothState { b = b, shut = Piece(transform, b.shut, Order(b.shut.y), new Vector2(0.5f, 0f)), open = Piece(transform, b.open, Order(b.shut.y), new Vector2(0.5f, 0f)) };
+                if (s.open != null) s.open.enabled = false;
+                booths.Add(s);
             }
             foreach (var v in town.venues)
             {
@@ -610,6 +622,28 @@ namespace APA
                 if (s.tick > 0.1f) { s.tick = 0f; s.frame = (s.frame + 1) % 6; }
                 int i = facing * 6 + s.frame;
                 if (i < s.frames.Length) s.r.sprite = s.frames[i];
+            }
+        }
+
+        // ---- phone booths (Aaron 11/18) ----
+        class BoothState { public Town.Booth b; public SpriteRenderer shut, open; }
+        readonly List<BoothState> booths = new List<BoothState>();
+        public bool BoothOpen(int i) => booths[i].open != null && booths[i].open.enabled; // tests
+        public int BoothOrder(int i) => booths[i].shut.sortingOrder; // tests
+        public int PasserOrder(string key) => walkers.FindLast(s => !s.room && s.w.key == key).r.sortingOrder; // tests
+
+        // At a booth: within half a tile of its spot across, from a tile below it up to it.
+        static bool AtBooth(Town.Booth b, Vector2 p) => Mathf.Abs(p.x - b.at.x) < 0.5f && p.y > b.at.y - 1f && p.y < b.at.y + 0.1f;
+
+        void Booths()
+        {
+            foreach (var b in booths)
+            {
+                if (b.shut == null || b.open == null) continue;
+                var user = walkers.Find(s => !s.room && AtBooth(b.b, s.r.transform.localPosition));
+                b.open.enabled = user != null;
+                b.shut.enabled = user == null;
+                if (user != null) user.r.sortingOrder = b.shut.sortingOrder + 1; // in it: over it, at the phone
             }
         }
 
@@ -1583,6 +1617,7 @@ namespace APA
         void Update()
         {
             foreach (var s in walkers) Walk(s, Time.deltaTime);
+            Booths();
             Play(Time.deltaTime);
             Drive(Time.deltaTime);
             Move(Time.deltaTime);

@@ -98,6 +98,8 @@ def render_town(out_dir, m, town, x0, y0, x1, y1):
         piece(p, 0, 0, o, 1000 + i, True)
     for i, g in enumerate(town.get("gates", [])):  # a subway gate's arm as with the page's gates off: up (TownView.Look)
         piece(g["open"], 0, 0, order(g["open"]["y"]), 1900 + i, True)
+    for i, b in enumerate(town.get("booths", [])):  # a phone booth, shut (TownView.Booths: open while someone is at it)
+        piece(b["shut"], 0, 0, order(b["shut"]["y"]), 1950 + i, True)
     for tr in town.get("trains", []):  # the cars' outsides, west to east from x (TownView: the trains)
         x = tr["x"]
         for k in tr["cars"]:
