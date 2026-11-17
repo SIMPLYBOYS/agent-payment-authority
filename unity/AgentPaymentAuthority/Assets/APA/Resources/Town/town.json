@@ -686,7 +686,7 @@
       {"key": "x-office-ground", "x": 0, "y": 0},
       {"key": "x-office-ground-rest", "x": 2, "y": 0},
       {"key": "x-office-sign", "x": 0, "y": 2.4375},
-      {"key": "x-office-sign-rest", "x": 2, "y": 2.4375},
+      {"key": "x-books-sign", "x": 2, "y": 2.4375},
       {"key": "x-office-roof", "x": 0, "y": 5.9375},
       {"key": "x-office-roof-col", "x": 10, "y": 5.9375},
       {"key": "x-office-roof-end", "x": 11, "y": 5.9375},
