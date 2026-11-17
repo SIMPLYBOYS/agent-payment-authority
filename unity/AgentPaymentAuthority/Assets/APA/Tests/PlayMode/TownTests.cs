@@ -592,7 +592,8 @@ public class TownTests
         // Aaron 11/9 ("這個頂樓的人不會動？"): the resident at the laundry walks on the roof, over the home, and moves.
         // Aaron 11/10 (the hospital's people hidden or standing still): the companion and the visitor go to its doors,
         // over it, and move.
-        var walking = System.Array.FindAll(t.walkers, w => w.over != 0f);
+        // (People seated on a park bench use over too, only to sit in front of it: they stay put.)
+        var walking = System.Array.FindAll(t.walkers, w => w.over != 0f && w.speed > 0f);
         Assert.GreaterOrEqual(walking.Length, 3, "the resident, the hospital's companion and visitor");
         var bodies = new SpriteRenderer[walking.Length];
         var from = new Vector3[walking.Length];
