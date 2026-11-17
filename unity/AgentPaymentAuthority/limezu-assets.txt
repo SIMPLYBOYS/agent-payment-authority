@@ -402,6 +402,8 @@ x-sandbox	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/7_
 # the homes' lots, as the sample Aaron sent (11/8: "這些房屋似乎質感有待加強，需要達到截圖的水平"): a paved yard, a railing with its gate,
 # a dumpster and bags, an old lamp, a tree in a planter, weeds. The sample's cobbles and its ruined house are not in our packs.
 x-yard	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/2_City_Terrains_Singles_32x32/ME_Singles_City_Terrains_32x32_Sidewalk_6_25.png	-
+# The back lots (Aaron 11/17: LimeZu's examples pave a city's ground; grass only in parks): the light grey sidewalk.
+x-lot	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/2_City_Terrains_Singles_32x32/ME_Singles_City_Terrains_32x32_Sidewalk_4_25.png	-
 x-fence-bl	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/24_Additional_Houses_Singles_32x32/24_Additional_Houses_Fence_2_Bottom_Left_32x32.png	-
 x-fence-b	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/24_Additional_Houses_Singles_32x32/24_Additional_Houses_Fence_2_Bottom_Middle_32x32.png	-
 x-fence-br	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/24_Additional_Houses_Singles_32x32/24_Additional_Houses_Fence_2_Bottom_Right_32x32.png	-
