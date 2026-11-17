@@ -194,6 +194,9 @@ x-office-sign-rest	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter
 # The bookshop's sign (Aaron 11/17): the office's sign row reads LIME CORP, LimeZu's own name; scripts/unity/books_sign.py
 # redraws its panel in the pack's pixels as BOOK STORE with an open book, into _cut/ (the same rect as x-office-sign-rest).
 x-books-sign	_cut/x-books-sign.png	-
+# The shade beside a building (Aaron 11/17; the pack has none): scripts/unity/shade.py, in the pack's shadow colour.
+x-shade	_cut/x-shade.png	-
+x-shade-top	_cut/x-shade-top.png	-
 x-office-ground	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/16_Office_Singles_32x32/ME_Singles_Office_32x32_Example_1.png	0,530,64,78
 x-office-ground-rest	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/16_Office_Singles_32x32/ME_Singles_Office_32x32_Example_1.png	32,530,320,78
 x-office-top-l	Modern_Exteriors_v42.3/Modern_Exteriors_32x32/ME_Theme_Sorter_32x32/16_Office_Singles_32x32/ME_Singles_Office_32x32_Example_1.png	0,40,16,16
