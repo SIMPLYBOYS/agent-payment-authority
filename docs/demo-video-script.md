@@ -168,6 +168,8 @@ go run ./cmd/verify-demo --mode e1a --run-dir artifacts/e1a/<錄影那一場的�
 
 **11/16 再重拍**（Aaron：「主片、地鐵加演、eKYC 都可以重新拍攝」：城鎮加了和店員、嚮導說話，地下鐵兩站重排並加寬）：`full-present6`、`full-show7`、`fooled5`（帶同一個 Didit session）、`ekyc4`、`transit-present2`；`cut.py` 改讀這幾個資料夾。11/11 的成品備份為 `apa-demo-90s-1111.*`、`apa-demo-180s-1111.*`，11/9 的地下鐵加演為 `apa-addon-transit-1109.*`。錄影的整套環境（本機鏈、Signer、核准用的虛擬裝置）由 `film.mjs` 自己起，不用 `/opt` 的 Signer，也不受 testnet 委派到期影響；要先停掉 demo-local（同樣用 8402）。
 
+**11/19 主片再重拍**（Aaron：「請將主片重拍，並更新至作品集中」：街景改了，書店招牌改成 BOOK STORE、建築連成一排、南側支路、店門口的桌椅與攤車、電話亭）：`full-present7`、`full-show8`、`fooled6`（帶同一個 Didit session）；Didit 的驗證頁沒有城鎮，沿用 `ekyc4`；地下鐵加演不在這次範圍，仍是 11/16 的 `transit-present2`。11/16 的成品備份為 `apa-demo-90s-1116.*`、`apa-demo-180s-1116.*`。作品集（agent-portfolio-starter 的 `public/assets/payment-authority/`）的素材從同一次拍攝取：封面 `town.jpg` 是 `full-show8` 第 6.5 秒、8 秒預覽 `town-preview.mp4` 從第 13.75 秒起（11/11 的封面與預覽對過 `full-show5`，是同樣的位置），兩支海報取成品的第 47 秒與第 142 秒。
+
 **加演短片（11/7，`docs/commercial-post-hotel.md` N6）**：郵局與飯店各一段，不改 90 秒與 3 分鐘版。
 - 拍攝：`node scripts/video/film.mjs --stage full --view present --venues hotel,post --out artifacts/video/addon-present2`（約 1 分半）。郵局在交付失敗之後，腳本按交易卡上的「商店退款」，等到「商店已退款」再停 6 秒（11/8，`docs/commercial-refund.md`）。
 - 剪接：`python3 -I scripts/video/cut.py --cut addon`。每段先放 3 秒字卡（場域與示範的保護，標「示意動畫」），再放兩句字幕。

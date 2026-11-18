@@ -8,9 +8,9 @@ narration as subtitles (Chinese over English) in a band under the picture, also 
 --cut addon: the hotel's and the post office's add-on clips (apa-addon-hotel, apa-addon-post), from addon-present/.
 --cut transit: the ATM and the subway's gate (apa-addon-transit), from transit-present2/ (film.mjs --stage transit; 11/16, the wider stations).
 
-Inputs (artifacts/video/, git-ignored): full-present6/ and full-show7/ (full.mp4, marks.json: film.mjs --stage full,
---view present and show), fooled5/fooled.mp4 (--stage fooled), all three with --ekyc (the customers' attributes from the
-Didit verification), ekyc4/ekyc.mp4 (--stage ekyc: Didit's hosted sandbox page), all filmed 11/16, rec1/rec1-cforce.mov (the 11/6 recording: only the
+Inputs (artifacts/video/, git-ignored): full-present7/ and full-show8/ (full.mp4, marks.json: film.mjs --stage full,
+--view present and show), fooled6/fooled.mp4 (--stage fooled), all three with --ekyc (the customers' attributes from the
+Didit verification), ekyc4/ekyc.mp4 (--stage ekyc: Didit's hosted sandbox page), filmed 11/16 (the rest again 11/19, the town's streets joined), rec1/rec1-cforce.mov (the 11/6 recording: only the
 browser's page is cropped from it, never the screen around it) and checker-rec1.json (verify-demo on that run's
 evidence pack). The simulation's frames carry their own label (film.mjs); the real clip gets its own here.
 This ffmpeg has no drawtext and no libass: every text is a PNG drawn here and overlaid.
@@ -262,16 +262,16 @@ def main():
     os.makedirs(work, exist_ok=True)
     # 11/16 (Aaron: the main cuts, the subway and eKYC filmed again, the town as it is now), with --ekyc. 11/11's: -present5,
     # -show6, fooled4, ekyc3; 11/10's: -present4, -show5, fooled3; 11/9's: -present3, -show3, fooled2; 11/6's: -present2, -show2, fooled.
-    P = os.path.join(V, "full-present6/full.mp4")
-    S = os.path.join(V, "full-show7/full.mp4")
-    F = os.path.join(V, "fooled5/fooled.mp4")
+    P = os.path.join(V, "full-present7/full.mp4")
+    S = os.path.join(V, "full-show8/full.mp4")
+    F = os.path.join(V, "fooled6/fooled.mp4")
     E = os.path.join(V, "ekyc4/ekyc.mp4")  # Didit's hosted sandbox page as far as the selfie's instructions (its own label on every frame)
     R = os.path.join(V, "rec1/rec1-cforce.mov")
     for f in (P, S, F, E, R, os.path.join(V, "checker-rec1.json")):
         if not os.path.exists(f):
             sys.exit("cut: missing " + f + " (film.mjs, the 11/6 recording, verify-demo)")
-    pm = json.load(open(os.path.join(V, "full-present6/marks.json")))
-    sm = json.load(open(os.path.join(V, "full-show7/marks.json")))
+    pm = json.load(open(os.path.join(V, "full-present7/marks.json")))
+    sm = json.load(open(os.path.join(V, "full-show8/marks.json")))
     rep = json.load(open(os.path.join(V, "checker-rec1.json")))
     PAGE = (0, 176, 3840, 1984)  # the browser's page in rec1-cforce.mov (its tabs, address bar and bookmarks above y 176)
 
