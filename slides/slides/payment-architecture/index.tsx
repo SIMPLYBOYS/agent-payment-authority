@@ -172,7 +172,7 @@ const Split: Page = () => (
 const Std = ({ layer, std, here, own }: { layer: string; std: string; here: string; own?: boolean }) => (
   <tr>
     <td style={{ ...cell, fontWeight: 800, width: 250 }}>{layer}</td>
-    <td style={{ ...cell, width: 820 }}>{std}</td>
+    <td style={{ ...cell, width: 900 }}>{std}</td>
     <td style={{ ...cell, fontWeight: own ? 800 : 400, color: own ? 'var(--osd-accent)' : ink }}>{here}</td>
   </tr>
 );
@@ -188,7 +188,7 @@ const Standards: Page = () => (
         </tr>
       </thead>
       <tbody>
-        <Std layer="付款協商" std="x402 v2，由 Linux Foundation 的 x402 Foundation 治理" here="照用（exact）" />
+        <Std layer="付款協商" std="x402 v2，Linux Foundation 治理；另有 Stripe 與 Tempo 的 MPP" here="照用 x402（exact）" />
         <Std layer="簽名與結算" std="EIP-3009＋EIP-712，USDC 有實作" here="照用" />
         <Std layer="本人核准" std="WebAuthn／FIDO2，W3C 與 FIDO 的標準" here="照用（passkey）" />
         <Std layer="Agent 身分" std="ERC-8004，仍是草案，2026/1 上以太坊主網" here="照用（Base Sepolia）" />
@@ -485,6 +485,39 @@ const Threats: Page = () => (
   </Frame>
 );
 
+// ---------- 11b OWASP Agentic Top 10 (docs/architecture.md, 11/18) ----------
+const asiCell: CSSProperties = { fontSize: 28, lineHeight: 1.3, padding: '11px 20px 11px 0', verticalAlign: 'middle', borderTop: `2px solid ${line}` };
+
+const Asi = ({ id, risk, control, status, tone }: { id: string; risk: string; control: string; status: string; tone: string }) => (
+  <tr>
+    <td style={{ ...asiCell, width: 120, fontFamily: 'var(--osd-font-display)', fontStyle: 'italic', color: 'var(--osd-accent)' }}>{id}</td>
+    <td style={{ ...asiCell, width: 400, fontWeight: 800 }}>{risk}</td>
+    <td style={{ ...asiCell, color: muted }}>{control}</td>
+    <td style={{ ...asiCell, width: 150, padding: '11px 0' }}>
+      <span style={{ fontSize: 24, fontWeight: 800, color: '#fff', background: tone, borderRadius: 8, padding: '5px 14px' }}>{status}</span>
+    </td>
+  </tr>
+);
+
+const Owasp: Page = () => (
+  <Frame eyebrow="威脅" title="對照 OWASP Agentic Top 10：十項各擋到哪裡">
+    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <tbody>
+        <Asi id="ASI01" risk="目標被劫持" control="只能提出請購；超出預算就拒絕，範圍外要本人核准" status="有上限" tone={amber} />
+        <Asi id="ASI02" risk="工具被濫用" control="只有三個工具，沒有付款工具；收款人要在商家名單上" status="做到" tone={green} />
+        <Asi id="ASI03" risk="身分與權限濫用" control="Agent 沒有私鑰；Signer 只在委託範圍內簽" status="做到" tone={green} />
+        <Asi id="ASI04" risk="供應鏈" control="CLI 版本寫死，只連自己的工具；沒有 SBOM" status="部分" tone={amber} />
+        <Asi id="ASI05" risk="意外執行程式碼" control="沒有內建工具；就算執行了，也碰不到私鑰" status="做到" tone={green} />
+        <Asi id="ASI06" risk="記憶與上下文污染" control="Policy 不讀推理，只讀請購單；沒有記憶驗證" status="部分" tone={amber} />
+        <Asi id="ASI07" risk="Agent 之間的通訊" control="兩位 Agent 互不通訊" status="不適用" tone={muted} />
+        <Asi id="ASI08" risk="連鎖失敗" control="結果未知不重付；nonce、nullifier、請購去重" status="做到" tone={green} />
+        <Asi id="ASI09" risk="人對 Agent 的信任被利用" control="裝置上是 Signer 綁定的摘要，不是模型的說法" status="做到" tone={green} />
+        <Asi id="ASI10" risk="失控的 Agent" control="委託有總額與期限；十分鐘內最多 5 筆" status="有上限" tone={amber} />
+      </tbody>
+    </table>
+  </Frame>
+);
+
 // ---------- 11 the checker ----------
 const Claim = ({ id, text }: { id: string; text: string }) => (
   <div style={{ display: 'flex', gap: 22, alignItems: 'baseline', borderTop: `2px solid ${line}`, padding: '17px 0' }}>
@@ -514,6 +547,9 @@ const Checker: Page = () => (
         <Claim id="E10" text="誘導文字沒有讓付款越權" />
       </div>
     </div>
+    <p style={{ fontSize: 28, color: muted, marginTop: 30, lineHeight: 1.5 }}>
+      查不到的：Agent 有沒有理解本人、這筆買得合不合理、商家可不可信。鏈證明的是結算，不是意圖。
+    </p>
   </Frame>
 );
 
@@ -1190,7 +1226,7 @@ const Order: Page = () => (
       <Phase now n="01" title="沙盒整合" a="測試網、eKYC 沙盒" b="三個場域通過獨立查證（現況）" />
       <Phase n="02" title="測試網試點" a="商店自己的 x402 端點" b="本人用手機核准" />
       <Phase n="03" title="小額正式" a="eKYC 正式環境、HSM 或 MPC" b="多方產生的 ZK setup" />
-      <Phase n="04" title="擴大" a="爭議流程與退款規則" b="KYT、對帳與高流量付款" />
+      <Phase n="04" title="擴大" a="爭議流程、結算備援" b="KYT、對帳與高流量付款" />
     </div>
     <p style={{ fontSize: 30, color: muted, marginTop: 50, lineHeight: 1.5 }}>
       每一階段都用同一個 checker 驗收：證據包能不能被第三方向鏈重算，是能不能往下走的條件。
@@ -1229,7 +1265,9 @@ export const notes: (string | undefined)[] = [
   '先把分工講清楚：x402 是付款的管道，這一層是授權與證據。兩者互補，不是取代。x402 在 2026 年 4 月交給 Linux Foundation，Visa、Mastercard、Circle、Google 都是成員。',
   `被問「有沒有照標準」就停在這頁。下面四層都照標準；委託這一層業界還沒有定案，AP2 和 Mastercard 的 Verifiable Intent 都在 FIDO 審，所以用自訂格式，欄位對照在 docs/positioning.md 4.1。
 選擇性揭露那一列要照實說：用的是舊版 BBS+，不是 W3C 的 bbs-2023。
-底下兩句是重點：模式對得上；差別在 Agent 有沒有金鑰。這裡的 Agent 什麼都簽不了，代價是「這筆是哪個 Agent 送的」靠紀錄，不是密碼學證明。`,
+底下兩句是重點：模式對得上；差別在 Agent 有沒有金鑰。這裡的 Agent 什麼都簽不了，代價是「這筆是哪個 Agent 送的」靠紀錄，不是密碼學證明。
+x402 那一列被追問時：FUTUREMODE 筆記列的五條相容邊界，四條做到並有測試；憑證沒有走 x402 的 extensions 欄位，所以只說「採用」，不說「符合」（docs/positioning.md 5.1）。
+被問 MPP：Stripe 與 Tempo 提的另一個 HTTP 402 協議。授權這一層不綁協議；要改的是請購單綁的報價、Signer 的證明格式，以及預算合約和付款在不同鏈。沒有實作。`,
   `從左到右看：本人與 Agent 在左邊，Host 居中，私鑰只在 Signer。
 橘色箭頭是付款的路，灰色虛線是事後查證的路。`,
   '重點是「不能做」那一欄：Agent 碰不到金鑰，Host 沒有私鑰，Signer 簽不出委託外的付款。',
@@ -1238,7 +1276,12 @@ export const notes: (string | undefined)[] = [
   '為什麼是兩筆：預留先證明預算夠，結算才動錢。分開追蹤，結果不明時先對帳。',
   '身分只驗一次。之後每間店只拿到它宣告要求的屬性，查帳的第二項會驗「不多不少」。最後一行是台灣業界現在用的 KYH／KYA／KYT 三層：前兩層有，KYT 還沒做。',
   '最後一行很重要：照實說擋不住的部分。自動範圍內的誤購靠上限限制損失。',
-  '十項主張可以逐項念，也可以只講 E4 與 E8：向鏈重算，不相信系統自己的紀錄。',
+  `這一頁給懂資安的聽眾：OWASP 2025 年 12 月發布的 Agentic Top 10，十項逐一對照。
+綠色是做到；黃色是只做到一部分，或損失有上限但擋不住；灰色是不適用，因為沒有 Agent 對 Agent 的付款。
+要主動講的兩項：ASI01，自動範圍內仍可能買錯；ASI06，Agent 沒有長期記憶，所以也沒做記憶驗證。
+每一列對應的測試在 docs/architecture.md。`,
+  `十項主張可以逐項念，也可以只講 E4 與 E8：向鏈重算，不相信系統自己的紀錄。
+最後一行要講：checker 查不到 Agent 是否理解本人、買得合不合理、商家可不可信。鏈證明結算，不證明意圖；這些交給本人核准與上限。`,
   '進入第二部分：目前是測試網與沙盒，接下來講要換什麼。',
   `這張圖畫的是正式環境，橘黃小字是目前 PoC 的做法。
 先看粗橘線：錢只在鏈上從客人的錢包走到商店的錢包，不經過 Agent，也不經過 Host。
@@ -1261,7 +1304,8 @@ export const notes: (string | undefined)[] = [
 要照實說的限制：是否滿 18 歲是發行者簽好的一個是或否，不是對生日做範圍證明；ZK 預算只對鏈上隱藏，Relayer 看得到上限與餘額；eKYC 目前接的是沙盒。`,
   '右欄是建議，不是已經做完的事。介面不變，換的是背後的環境。本人核准那列：同步的 passkey 屬 NIST 的 AAL2，大額要綁裝置、不同步的金鑰才到 AAL3。',
   '這一頁是老實話。每一項在 docs/architecture.md 的限制裡都有對應的說明。最後兩項是 11 月新補的：沒有交易監控，以及委託格式是自訂的。',
-  '順序的原則：先把信任的起點（身分、金鑰、商店）換成真的，再擴大。每一階段用同一個 checker 驗收。',
+  `順序的原則：先把信任的起點（身分、金鑰、商店）換成真的，再擴大。每一階段用同一個 checker 驗收。
+第四階段的「結算備援」指 facilitator 的備援：現在只有一個，與 Host 同機。被問「之後呢」，也可以照 x402 講者的三格答：信任（商家身分與信譽）、權利（爭議、KYT）、營運（結算備援、金鑰分層）。`,
   '收在定位句。想看細節的人，三份文件都在 repo 裡。',
 ];
 
@@ -1277,6 +1321,7 @@ export default [
   TwoTx,
   Identity,
   Threats,
+  Owasp,
   Checker,
   Section,
   Deploy,
