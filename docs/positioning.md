@@ -109,7 +109,21 @@
 | 完整的金鑰分層（金庫、資金錢包、session key） | Agent 沒有私鑰；簽名在獨立的 Signer，只簽本人確認過的委託範圍，委託有總額與期限 |
 | 安全、不會被騙 | 不假設 AI 不會被騙；就算被騙，也花不出委託範圍外的錢 |
 
-其他照實說的限制：[architecture.md](architecture.md#照實說的限制)。
+其他照實說的限制：[architecture.md](architecture.md#照實說的限制)。威脅對照 OWASP Agentic Top 10：[architecture.md](architecture.md#owasp-agentic-top-10-對照1118)。
+
+### 5.1 x402 v2 的五條邊界（11/18）
+
+FUTUREMODE 筆記在 9/23 審查時列出五條邊界：做到才能說「通過本專案定義的 x402 v2 相容性測試」。11/18 逐條對照程式與測試：
+
+| 邊界 | 程式 | 測試 | 狀態 |
+|---|---|---|---|
+| 1 報價完整綁定：`AuthorizationIntent` 帶 HTTP method、完整網址、`x402Version`、scheme，以及選中那份報價的雜湊 `payment_requirement_hash` | `internal/toolbridge/shop.go` 算雜湊；`PurchaseOrder.Validate` 重算，對不上就拒絕 | `internal/contracts/contracts_test.go`：改任何一個欄位，雜湊都會變；`Test402Tampering`：網址、版本、多份報價、轉址都拒絕 | 做到 |
+| 2 `accepted` 必須完全相同：付款裡的 `accepted` 要和商店給的那份一模一樣 | `internal/merchant/merchant.go` 逐位元比對；`apa-facilitator` 轉成標準格式後比對 | `TestPaymentSignatureNeverDelivers`：金額、收款人、scheme、網路、只差大小寫的鍵都拒絕；facilitator 的 `accepted not the requirements` | 做到 |
+| 3 驗證與結算分開：`/verify` 唯讀；驗證失敗就不結算；確認到設定的區塊深度前不交付 | `internal/facilitator`、`internal/merchant` | `TestVerifyIsReadOnly`、`TestVerificationFailuresSendNothing`、`TestNothingDeliveredBeforeConfirmations`；checker E4 向鏈核對兩筆交易 | 做到 |
+| 4 擴充欄位放對位置：憑證的要求放在 `PAYMENT-REQUIRED` 的 `extensions`，證明放在 `PaymentPayload` 的 `extensions` | 兩邊的 `extensions` 都是空的 `{}`；BBS+ 證明在 Host 組請購單時驗證 | checker E2：每間店看到的屬性不多不少 | **沒做**。也沒有另外加 HTTP header，所以不違反這條；但不能說憑證走 x402 |
+| 5 三種「預留」不混稱 | ZK 預算預留的事件一律叫 `BUDGET_RESERVED`；結算防重靠 EIP-3009 nonce；沒有用 CDP 的付款前預留 | — | 做到 |
+
+所以能說的是「採用 x402 v2 的 HTTP 支付協商，五條邊界有四條做到並有測試」；不能說「符合 x402」或「通過認證」。
 
 ## 6 面試常見追問（短答）
 
@@ -120,7 +134,16 @@
 - **付了錢沒拿到東西怎麼辦？**（郵局那一幕）系統以鏈上的結果為準，記下「已付款、交付失敗、待人工處理」，不會再付一次。該不該退要有人判斷：主持人按「商店退款」，商店把全額退回客人的錢包，Host 自己向鏈上確認後才記下，checker 也查得到。鏈看不到交付，所以判斷留給人；商店不肯退的話系統沒辦法強制（沒有託管），爭議流程是下一步。
 - **出事怎麼查？** 證據包加 checker：只讀證據與鏈，不呼叫系統本身。
 - **這要賣給誰？** 這個專案不賣東西，是讓決策者親身體驗的場域模擬；銀行、企業財務、Agent 平台各自可能怎麼用，由看的人判斷（第 3 節）。
-- **下一步？** eKYC 的正式環境（11/11 已接 Didit 沙盒，`docs/commercial-ekyc.md`）、按用量計費（x402 `upto`）、商家身分與信譽、爭議流程與託管。
+- **下一步？** 用 FUTUREMODE 講者列的三格來答（11/18）：
+  - **信任**：Agent 身分與委託已經有（ERC-8004、BBS+ 憑證、本人確認的委託），但身分是展示平台代為註冊的；商家的身分與信譽還沒有。
+  - **權利**：eKYC 只接了 Didit 沙盒（`docs/commercial-ekyc.md`）；退款只有全額一種，沒有爭議流程，也沒有託管；沒有交易監控（KYT）。
+  - **營運**：只有一個 facilitator，沒有備援；金鑰只有一層，沒有金庫、資金錢包、session key 的分層；只做 `exact`，沒有按用量計費的 `upto`。
+- **換成 MPP 還成立嗎？**（11/18）授權這一層成立，結算的接法要改。MPP 是 Stripe 與 Tempo 提出的 HTTP 402 協議：報價放在 `WWW-Authenticate`，付款證明放在 `Authorization`；它的 `charge` 對應 x402 的 `exact`，另外有 `session`（先存一筆，再按用量付）。Agent 只能提出、Policy 裁決、本人核准、Signer 獨立簽名、證據與 checker，都和用哪個協議無關。要改的有三處：
+  - 請購單綁的是 x402 的報價雜湊，以及 `x402Version`、`scheme` 欄位，要改成綁 MPP 的報價。
+  - Signer 現在只簽 EIP-3009，MPP 的每種付款方式（Tempo、Stripe 的卡）各有自己的證明格式。
+  - ZK 預算合約在 Base Sepolia；付款若改在 Tempo 上，就跨了兩條鏈。
+
+  這些都沒有實作，也沒有測過。
 
 ## 7 要 Aaron 決定
 
@@ -150,3 +173,9 @@
 [Verifiable Intent Credential Format](https://verifiableintent.dev/spec/credential-format/)、
 [Verifiable Intent Constraints](https://verifiableintent.dev/spec/constraints/)、
 [FIDO 4/28 公告](https://fidoalliance.org/fido-alliance-to-develop-standards-for-trusted-ai-agent-interactions/)。
+
+11/18 補的：
+[OWASP Top 10 for Agentic Applications（2025-12-09）](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/)、
+[MPP 協議](https://mpp.dev/protocol)、
+[MPP 與 x402 的比較（MPP 官方）](https://mpp.dev/mpp-vs-x402)、
+[Stripe：Introducing the Machine Payments Protocol](https://stripe.com/blog/machine-payments-protocol)。

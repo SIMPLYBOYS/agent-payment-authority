@@ -85,6 +85,17 @@ flowchart LR
 
 Base Sepolia 上的實跑（10/31，`artifacts/e1a/testnet-town-t4`）E1～E10 全部 PASS。
 
+### checker 查不到的事（11/18）
+
+鏈證明的是結算，不是意圖。E1～E10 回答的是：證據有沒有被改、付款有沒有超出授權、和鏈上的結果對不對得上。下面這些不在範圍內：
+
+| 查不到 | 為什麼 | 這裡怎麼處理 |
+|---|---|---|
+| Agent 有沒有理解本人要什麼 | 鏈上只有簽章、nonce 與轉帳 | 超過自動範圍的每一筆，都要本人在裝置上核准；範圍內的，靠每筆上限與任務預算限制損失 |
+| 這筆買得合不合理 | 這是判斷，不是密碼學能驗的事 | 同上。E10 只確認誘導文字沒有讓付款越權，不確認買的東西有沒有用 |
+| 商家可不可信、交付的內容對不對 | 鏈看不到交付；收據只記下內容的 sha256 | 商家是固定名單；付了款沒交付，由人判斷要不要退 |
+| 本人是不是真的本人 | 身分來自 eKYC 沙盒與測試資料 | 見下方「照實說的限制」 |
+
 ## 威脅模型
 
 | 威脅 | 擋法 | 還剩下的風險 |
@@ -98,6 +109,23 @@ Base Sepolia 上的實跑（10/31，`artifacts/e1a/testnet-town-t4`）E1～E10 �
 | 商店要求過多個資 | 每項商品宣告要求的屬性；BBS+ 只揭露那些；checker E2 驗「不多不少」 | 要求表現在由 Host 設定，不是商店宣告後由 Policy 設上限 |
 | 憑證被撤銷或過期 | 每次驗證、核准與付款前都重新讀簽章的狀態清單 | 狀態清單的防回捲只對 Store 看過的版本有效 |
 | 有人事後竄改紀錄 | 事件雜湊鏈；證據包 manifest；checker 向鏈重算 | — |
+
+## OWASP Agentic Top 10 對照（11/18）
+
+OWASP GenAI Security Project 在 2025-12-09 發布 Top 10 for Agentic Applications（2026 年版）。FUTUREMODE 的講者挑了其中六項來談 Agent 支付的威脅；這裡十項全列，並照實標出做到哪裡。
+
+| 風險 | 落在付款上會怎樣 | 這裡的控制 | 查證或測試 | 狀態 |
+|---|---|---|---|---|
+| ASI01 Agent Goal Hijack | 替攻擊者指定的東西付錢 | Agent 只能提出請購；金額與收款人來自可信的報價；超過自動範圍要本人核准；超出任務預算 Policy 就拒絕（書店的「系統通知」那一幕） | E10；`internal/ae1` 的評測；`internal/policy` 的 `INSUFFICIENT_BUDGET` 測試 | 越權的付款會被擋下；自動範圍內（每筆 ≤ 0.10）仍可能買錯 |
+| ASI02 Tool Misuse and Exploitation | 付款工具被拿去做範圍外的事 | Agent 只有三個工具：看商品、取報價、提出請購，沒有付款工具。收款人不在名單上就 Deny `MERCHANT_NOT_ALLOWED`（飯店那一幕） | `internal/buyer/host.go` 的 CLI 參數；`internal/policy` 與 `internal/signer` 的 `MERCHANT_NOT_ALLOWED` 測試 | 做到 |
+| ASI03 Identity and Privilege Abuse | 被入侵的 Agent 超支 | Agent 沒有私鑰。Signer 在另一個 OS 帳號，只在本人確認過的委託內簽名（總額、期限、每筆上限）。Agent 的鏈上身分（ERC-8004）綁定付款錢包 | E7、E8；`TestTotalCap`、`TestConcurrentCap` | 做到；身分由展示平台代為註冊 |
+| ASI04 Agentic Supply Chain Vulnerabilities | 工具或模型被換掉，付款行為跟著變 | 實跑時，CLI 回報的版本不是核准的版本（`buyer.ApprovedCLIVersion`）就中止（`internal/buyer/gate.go`）；只連自己的工具伺服器（`--strict-mcp-config`）；不讀使用者與專案設定（`--restricted`） | 實跑前的檢查 | 部分做到：沒有 SBOM，也沒有驗套件簽章 |
+| ASI05 Unexpected Code Execution | Agent 執行程式碼去動錢 | Agent 沒有任何內建工具（`--tools ""`）；凡是需要詢問權限的動作一律拒絕 | `internal/buyer/host.go` | 做到；就算執行了程式碼，也碰不到私鑰 |
+| ASI06 Memory and Context Poisoning | 被污染的上下文改變之後的付款 | Policy 與 Signer 不讀 Agent 的推理，只讀 Host 依可信報價組出的請購單；每次執行都不保留對話（`--no-session-persistence`） | — | 部分做到：Agent 沒有長期記憶，所以也沒有記憶驗證 |
+| ASI07 Insecure Inter-Agent Communication | Agent 之間互傳假指令 | 兩位 Agent 互不通訊，各自只對 Host 提出請購 | E7 | 不適用：沒有 Agent 對 Agent 的付款 |
+| ASI08 Cascading Failures | 重試造成重複扣款 | 結果未知不等於可以再付一次；EIP-3009 nonce、ZK nullifier、Store 以 request ID 去重；頻率上限 | E5；`TestSlowSettlementIsNotRepaid`、`TestSettleOncePerAuthorization`、`TestUnknownThenResume` | 做到 |
+| ASI09 Human-Agent Trust Exploitation | 誤導的摘要騙本人按下核准 | 本人在裝置上看到的是 Signer 綁定的結構化摘要，不是模型的說法；要唸出含一次性值的句子；請購在核准前被改，核准就失效 | `TestHumanApprovalChangesBeforeAccept`；`internal/signer/voice_test.go` | 做到；沒有做抗合成語音 |
+| ASI10 Rogue Agents | 失控的 Agent 一直花錢 | 委託有總額與期限；同一位客人十分鐘內最多 5 筆（Policy 與 Signer 各擋一道） | `VELOCITY_LIMIT` 的測試（`internal/policy`、`internal/signer`、`internal/store`） | 損失有上限；沒有在偵測到異常時自動停權 |
 
 ## 照實說的限制
 
