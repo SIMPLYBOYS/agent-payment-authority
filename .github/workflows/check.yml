@@ -1,0 +1,42 @@
+# The checks that need nothing but this repository: go vet, the Go tests, the
+# build, the contract vectors and the page's tests. It calls no paid model
+# and touches no testnet (Makefile: check, check-contracts).
+#
+# Not here: the tests that need the local chain (anvil and the compiled
+# contracts under var/, which is not in git) skip themselves; the Unity
+# scene's tests need the editor and the LimeZu pack (scripts/unity/unity.sh).
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: go vet, go test, go build
+        run: make check
+      - name: contract vectors and the page's adapter
+        run: make check-contracts
+      - name: the page's tests
+        run: |
+          for t in web/test/*.test.mjs; do
+            node --test "$t"
+          done

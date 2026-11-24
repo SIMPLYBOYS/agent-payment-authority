@@ -1,5 +1,7 @@
 # agent-payment-authority
 
+[![check](https://github.com/SIMPLYBOYS/agent-payment-authority/actions/workflows/check.yml/badge.svg)](https://github.com/SIMPLYBOYS/agent-payment-authority/actions/workflows/check.yml)
+
 [English](README.md) | **繁體中文**
 
 **AI Agent 可以替人提出付款，但不能自己批准，也不能自己簽名；每一步都留下任何人都能向鏈上查證的證據。**

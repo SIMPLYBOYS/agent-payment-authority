@@ -1,5 +1,7 @@
 # agent-payment-authority
 
+[![check](https://github.com/SIMPLYBOYS/agent-payment-authority/actions/workflows/check.yml/badge.svg)](https://github.com/SIMPLYBOYS/agent-payment-authority/actions/workflows/check.yml)
+
 **English** | [繁體中文](README.zh-TW.md)
 
 **An AI agent may propose a payment for a person. It may not approve it, and it may not sign it. Every step leaves evidence that anyone can check against the chain.**
