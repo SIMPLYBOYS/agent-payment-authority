@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/shtest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -35,7 +36,7 @@ func newLiveCLI(t *testing.T) *liveCLI {
 		t.Fatal(err)
 	}
 	l.setVersion(t, "2.1.301 (Claude Code)")
-	os.WriteFile(l.cli, []byte("#!/bin/sh\nif [ \"$*\" = --version ]; then exec /bin/cat '"+l.version+"'; fi\nexec '"+l.fake+"' \"$@\"\n"), 0o755)
+	shtest.Script(t, l.cli, "if [ \"$*\" = --version ]; then exec /bin/cat '"+l.version+"'; fi\nexec '"+l.fake+"' \"$@\"\n", 0o755)
 	if l.home, err = os.MkdirTemp(testRoot, "live-home-"); err != nil {
 		t.Fatal(err)
 	}

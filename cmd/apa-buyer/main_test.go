@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer/fakecli"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/shtest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/toolbridge"
 )
@@ -158,7 +158,7 @@ func TestFakeMainLine(t *testing.T) {
 func TestRefusals(t *testing.T) {
 	f := newFixture(t)
 	real := filepath.Join(t.TempDir(), "claude")
-	os.WriteFile(real, []byte("#!/bin/sh\necho '"+approvedCLIVersion+"'\n"), 0o755)
+	shtest.Script(t, real, "echo '"+approvedCLIVersion+"'\n", 0o755)
 	for name, c := range map[string]struct {
 		args []string
 		want string
@@ -211,7 +211,7 @@ func TestShutdownMidRun(t *testing.T) {
 func TestVersionCheckCancelled(t *testing.T) {
 	f := newFixture(t)
 	slow := filepath.Join(t.TempDir(), "fake-claude")
-	os.WriteFile(slow, []byte("#!/bin/sh\nsleep 5\necho fake-claude\n"), 0o755)
+	shtest.Script(t, slow, "sleep 5\necho fake-claude\n", 0o755)
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	start := time.Now()
@@ -244,7 +244,7 @@ func dirState(t *testing.T, dir string) map[string]string {
 func marker(t *testing.T, version string) (path, ran string) {
 	dir := t.TempDir()
 	path, ran = filepath.Join(dir, "claude"), filepath.Join(dir, "ran")
-	os.WriteFile(path, []byte("#!/bin/sh\ntouch "+ran+"\necho '"+version+"'\n"), 0o755)
+	shtest.Script(t, path, "touch "+ran+"\necho '"+version+"'\n", 0o755)
 	return path, ran
 }
 
@@ -294,7 +294,7 @@ func TestLiveOptIn(t *testing.T) {
 	}
 	// A cancelled or timed-out version check stops too.
 	slow := filepath.Join(t.TempDir(), "claude")
-	os.WriteFile(slow, []byte("#!/bin/sh\nsleep 5\necho '"+approvedCLIVersion+"'\n"), 0o755)
+	shtest.Script(t, slow, "sleep 5\necho '"+approvedCLIVersion+"'\n", 0o755)
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	start := time.Now()
@@ -339,25 +339,10 @@ func TestLiveEnvDisablesBuiltinAgents(t *testing.T) {
 		dir := t.TempDir()
 		seen := filepath.Join(dir, "seen")
 		cli := filepath.Join(dir, "claude")
-		// APA_WARM is not in the CLI's allowlist, so only the readiness run
-		// below carries it; the paths under test cannot.
-		body := "#!/bin/sh\n[ \"$APA_WARM\" = 1 ] && exit 0\nprintf '%s\\n' \"${CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS-unset}\" >> '" + seen + "'\n" +
-			"printf '%s\\n' \"${CLAUDE_CONFIG_DIR-unset}\" >> '" + seen + ".cfg'\nexec '" + fake + "' \"$@\"\n"
-		if err := os.WriteFile(cli, []byte(body), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		// Ready first: a script created a moment ago can take seconds to
-		// start once under a loaded go test run (docs/cli-poc.md 34.2), and
-		// the version check has a 5 s limit. This test is about the
-		// environment, so the script first runs once in a warm-up capped at
-		// 60 s, without the formal version check's 5 s limit.
-		ready, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
-		warm := exec.CommandContext(ready, cli)
-		warm.Env = append(os.Environ(), "APA_WARM=1")
-		if err := warm.Run(); err != nil {
-			t.Fatalf("the wrapper does not start: %v", err)
-		}
+		// shtest.Script runs it once first (docs/cli-poc.md 34.2); that run
+		// ends before these lines, so seen holds only the runs under test.
+		shtest.Script(t, cli, "printf '%s\\n' \"${CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS-unset}\" >> '"+seen+"'\n"+
+			"printf '%s\\n' \"${CLAUDE_CONFIG_DIR-unset}\" >> '"+seen+".cfg'\nexec '"+fake+"' \"$@\"\n", 0o755)
 		return cli, seen
 	}
 	values := func(t *testing.T, seen string) []string {
@@ -581,7 +566,7 @@ func TestProbeOptIn(t *testing.T) {
 		}
 	}
 	slow := filepath.Join(t.TempDir(), "claude")
-	os.WriteFile(slow, []byte("#!/bin/sh\nsleep 5\necho '"+approvedCLIVersion+"'\n"), 0o755)
+	shtest.Script(t, slow, "sleep 5\necho '"+approvedCLIVersion+"'\n", 0o755)
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	if _, err := f.probeExec(ctx, []string{"--cli", slow}, map[string]string{"APA_LIVE_CLI": "true"}, deps{}); err == nil || !strings.Contains(err.Error(), "version check") {
@@ -716,7 +701,7 @@ func TestApprovedVersionInit(t *testing.T) {
 		f := newFixture(t)
 		os.WriteFile(f.fake+".scenario.json", []byte(`{"manual_init":true,"steps":[{"do":"init","init":{"claude_code_version":"`+v+`"}},{"do":"hang"}]}`), 0o600)
 		cli := filepath.Join(t.TempDir(), "claude")
-		os.WriteFile(cli, []byte("#!/bin/sh\nif [ \"$*\" = --version ]; then echo '"+approvedCLIVersion+"'; exit 0; fi\nexec "+f.fake+" \"$@\"\n"), 0o755)
+		shtest.Script(t, cli, "if [ \"$*\" = --version ]; then echo '"+approvedCLIVersion+"'; exit 0; fi\nexec "+f.fake+" \"$@\"\n", 0o755)
 		out, err := f.probeExec(context.Background(), []string{"--cli", cli}, map[string]string{"APA_LIVE_CLI": "true"}, deps{})
 		if want == "" {
 			if err != nil || !strings.Contains(out, `"status": "observed"`) || !strings.Contains(out, `"cli_version": "approved"`) {

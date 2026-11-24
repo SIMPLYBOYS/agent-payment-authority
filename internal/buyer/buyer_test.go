@@ -22,6 +22,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/shtest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/toolbridge"
 )
@@ -250,16 +251,6 @@ func TestArgvAndEnv(t *testing.T) {
 // the parent environment says (the parent's value is not allowlisted).
 func TestCLIEnvReachesChild(t *testing.T) {
 	cli := script(t, `printf '%s|%s\n' "${CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS-unset}" "${CLAUDE_CODE_OAUTH_TOKEN-unset}"`)
-	// Ready first: a script created a moment ago can take seconds to start
-	// once under a loaded go test run (docs/cli-poc.md 34.2). This test is
-	// about the environment, not about that limit, so the script first runs
-	// once in a warm-up capped at 60 s, without the 10 s test limit of the
-	// limited call below.
-	ready, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	if err := exec.CommandContext(ready, cli).Run(); err != nil {
-		t.Fatalf("the script does not start: %v", err)
-	}
 	parent := map[string]string{"PATH": os.Getenv("PATH"), "HOME": t.TempDir(), "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS": "0", "CLAUDE_CODE_OAUTH_TOKEN": "o"}
 	out, err := Version(context.Background(), cli, CLIEnv(func(k string) string { return parent[k] }), testLimits)
 	if err != nil || out != "1|unset\n" {
@@ -942,9 +933,7 @@ func TestHostNotInstalled(t *testing.T) {
 func script(t *testing.T, body string) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "cli")
-	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	shtest.Script(t, p, body+"\n", 0o755) // run once already: its first run is slow on macOS (docs/cli-poc.md 34.2)
 	return p
 }
 
@@ -971,10 +960,11 @@ func TestVersion(t *testing.T) {
 	// The same with a 150 ms context (the review's reproduction): whichever
 	// way it ends, it ends at once and leaves no holder behind.
 	pidFile2 := filepath.Join(t.TempDir(), "pid")
+	holder2 := script(t, "sleep 30 & echo $! > "+pidFile2+"\necho fake-claude") // written before the clock starts: script runs it once
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	start = time.Now()
-	v, err = Version(ctx, script(t, "sleep 30 & echo $! > "+pidFile2+"\necho fake-claude"), env, lim)
+	v, err = Version(ctx, holder2, env, lim)
 	t.Logf("150 ms holder check: %q %v after %v", v, err, time.Since(start))
 	if time.Since(start) > time.Second {
 		t.Errorf("150 ms holder check took %v", time.Since(start))
@@ -986,10 +976,11 @@ func TestVersion(t *testing.T) {
 	}
 
 	// A check that outlives its context fails promptly.
+	slow := script(t, "sleep 5\necho fake-claude")
 	ctx, cancel = context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	start = time.Now()
-	if v, err := Version(ctx, script(t, "sleep 5\necho fake-claude"), env, lim); err == nil || time.Since(start) > 1500*time.Millisecond {
+	if v, err := Version(ctx, slow, env, lim); err == nil || time.Since(start) > 1500*time.Millisecond {
 		t.Errorf("slow: %q %v after %v", v, err, time.Since(start))
 	}
 

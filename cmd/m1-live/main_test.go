@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/shtest"
 )
 
 // These tests run the producer with a stand-in for the Claude Code CLI: a
@@ -88,12 +89,11 @@ func setup(t *testing.T, version string, steps []map[string]any) env {
 	sc, _ := json.Marshal(map[string]any{"description": "M1-E3 test", "manual_init": true, "steps": steps})
 	scen := filepath.Join(root, "scenario.json")
 	os.WriteFile(scen, sc, 0o600)
-	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = \"--version\" ]; then echo version >> " + e.count + "; echo \"" + version + "\"; exit 0; fi\n" +
+	script := "if [ \"$1\" = \"--version\" ]; then echo version >> " + e.count + "; echo \"" + version + "\"; exit 0; fi\n" +
 		"echo run >> " + e.count + "\n" +
 		"echo $$ > " + e.count + ".pid\n" +
 		"APA_FAKE_CLI_SCENARIO=" + scen + " exec " + fakeCLI(t) + " \"$@\"\n"
-	os.WriteFile(e.cli, []byte(script), 0o700)
+	shtest.Script(t, e.cli, script, 0o700)
 	return e
 }
 
@@ -598,6 +598,7 @@ func holdOnTerm(t *testing.T, e env) {
 	run := strings.Replace(strings.TrimSpace(script[i:]), " exec ", " ", 1)
 	script = script[:i] + "trap 'echo > " + e.count + ".term; while [ ! -f " + e.count + ".release ]; do sleep 0.02; done; exit 143' TERM\n" + run + " &\nwait\n"
 	os.WriteFile(e.cli, []byte(script), 0o700)
+	shtest.Warm(t, e.cli) // rewritten: a new file to macOS again (it keeps shtest.Script's first lines)
 }
 
 // until polls cond (a readiness condition, not a fixed sleep) for up to

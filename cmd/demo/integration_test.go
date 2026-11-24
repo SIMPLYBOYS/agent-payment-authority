@@ -28,6 +28,7 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/buyer/fakecli"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/shtest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
@@ -736,7 +737,7 @@ func TestIntegrationStartRefusals(t *testing.T) {
 	os.WriteFile(planFile, []byte(`{"runs":[{"task_id":"task-a","scenario":"testdata/cli/ask-mainline.json"}]}`), 0o600)
 	notFake := filepath.Join(t.TempDir(), "claude")
 	ran := filepath.Join(t.TempDir(), "ran")
-	os.WriteFile(notFake, []byte("#!/bin/sh\necho \"$@\" >> "+ran+"\necho '2.1.301 (Claude Code)'\n"), 0o755)
+	shtest.Script(t, notFake, "echo \"$@\" >> "+ran+"\necho '2.1.301 (Claude Code)'\n", 0o755)
 	if _, err := try(newDir(), "--fake-cli", notFake, "--plan", planFile); err == nil || !strings.Contains(err.Error(), "not the fake CLI") {
 		t.Errorf("not the fake: %v", err)
 	}
