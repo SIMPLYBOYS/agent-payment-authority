@@ -285,6 +285,16 @@ try {
     && await b.waitFor(`document.getElementById("approval-body").textContent.includes("客人 B 的 Agent") && !document.querySelector("#approval .approval-others")`, 30000), await text("#approval-body"));
   const s5 = await signs();
   check("B approved on B's own panel", await click("#approval .approval-approve") && await headIs("approved", "本人核准已驗證，付款未啟用。") && (await signs()) === s5 + 1, await text("#approval-body"));
+
+  // ---- 9 A takes the delegation back with A's own device (docs/commercial-gap4.md 7) ----
+  mark("revoke");
+  const s6 = await signs();
+  check("A's card offers 收回委託（本人裝置）", await b.waitFor(`!!${card("consumer-a")}.querySelector(".agent-revoke:not([disabled])")`, 30000),
+    await b.evaluate(`${card("consumer-a")}.textContent`));
+  check("收回委託: the device asked once, the Signer kept it, the card says so", await click(`.agent-card[data-consumer="consumer-a"] .agent-revoke`)
+    && await b.waitFor(`document.getElementById("run-status").textContent.includes("已用本人裝置收回委託")`, 30000) && (await signs()) === s6 + 1
+    && await b.waitFor(`${card("consumer-a")}.querySelector(".agent-revoke").textContent === "委託已收回"`, 10000), await text("#run-status"));
+  await shot("a2-1440x900-6-revoked");
 } catch (e) {
   check("the run completed", false, e.message);
 } finally {

@@ -258,6 +258,8 @@ type ApprovalReply struct {
 	Voice             string          `json:"voice,omitempty"`        // health: the voice sidecar, off | ready | unavailable
 	Delegations       string          `json:"delegations,omitempty"`  // health (gap 4): "device", the person's confirmation is required to pay
 	Terms             json.RawMessage `json:"terms,omitempty"`        // gap 4: a delegation challenge's terms, as the Signer read them
+	RevocationID      string          `json:"revocation_id,omitempty"` // a delegation's: the person's revocation, if any
+	RevokedAt         uint64          `json:"revoked_at,omitempty"`
 	Error             string          `json:"error,omitempty"`        // a fixed code
 }
 
@@ -652,7 +654,7 @@ func (c *ApprovalCore) answerChallenge(ctx context.Context, a challengeRow) (App
 	}
 	r := ApprovalReply{ChallengeID: a.id, RequestID: a.requestID, State: a.state, ApprovalSessionID: a.sessionID, Decision: a.decision,
 		ConsumerID: a.consumer, WalletID: a.wallet, IntentHash: a.intent, ApproverID: a.approver, ExpiresAt: a.expiresAt}
-	if strings.HasPrefix(a.jti, delegationJTI) { // gap 4: a delegation's challenge keeps its terms where a purchase keeps its display
+	if strings.HasPrefix(a.jti, delegationJTI) || strings.HasPrefix(a.jti, revokeJTI) { // gap 4: a delegation's challenge keeps its terms where a purchase keeps its display
 		r.Terms = json.RawMessage(a.display)
 	} else if d := (Display{}); json.Unmarshal([]byte(a.display), &d) == nil {
 		r.Display = &d

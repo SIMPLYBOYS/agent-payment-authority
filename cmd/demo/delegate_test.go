@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 )
 
 func TestDelegationByDevice(t *testing.T) {
@@ -52,5 +54,41 @@ func TestDelegationByDevice(t *testing.T) {
 	_, raw, _ := f.h.get("/api/tasks/"+run["task_id"].(string)+"/events", viewer)
 	if !strings.Contains(string(raw), `"event_type":"DELEGATION_BOUND"`) || !strings.Contains(string(raw), `"authorization_method":"webauthn","version":"apa.pay.v1","evidence_mode":"fixture","source":"virtual_authenticator"`) {
 		t.Fatalf("DELEGATION_BOUND without the person's confirmation: %s", raw)
+	}
+	// The person takes it back with the same device (section 7): only their own, once.
+	id := dl["delegation_id"].(string)
+	rbody := map[string]string{"request_id": "rreq-000000000001", "delegation_id": id}
+	if code, r := f.post("/api/delegations/revoke/challenge", f.h.tokens["viewer:consumer-b"], map[string]string{"request_id": "rreq-000000000002", "delegation_id": id}); code != 409 || r["code"] != "CONSUMER_MISMATCH" {
+		t.Fatalf("B revoking A's: %d %v", code, r)
+	}
+	code, c = f.post("/api/delegations/revoke/challenge", viewer, rbody)
+	ch, _ = c["challenge"].(map[string]any)
+	if code != 200 || ch == nil || ch["decision"] != "deny" || ch["approval_session_id"] != id || c["terms"] == nil {
+		t.Fatalf("revoke challenge %d %v", code, c)
+	}
+	opts, _ = json.Marshal(ch["options"])
+	rv := map[string]any{"delegation_id": id, "challenge_id": ch["challenge_id"], "verify_request_id": "rver-000000000001", "assertion": json.RawMessage(f.auth.Get(opts, f.origin))}
+	code, rr := f.post("/api/delegations/revoke/assertion", viewer, rv)
+	if rk, _ := rr["revoked"].(map[string]any); code != 200 || rk == nil || rk["delegation_id"] != id || !strings.HasPrefix(rk["revocation_id"].(string), "hap-") || rr["stopped_run"] != "" {
+		t.Fatalf("revoke %d %v", code, rr)
+	}
+	if code, r := f.post("/api/delegations/revoke/challenge", viewer, map[string]string{"request_id": "rreq-000000000003", "delegation_id": id}); code != 409 || r["code"] != "DELEGATION_REVOKED" {
+		t.Fatalf("again: %d %v", code, r)
+	}
+}
+
+// A revocation stops only the running run under that delegation, once.
+func TestStopDelegation(t *testing.T) {
+	stopped := 0
+	lr := &liveRun{run: store.Run{RunID: "run-1", ConsumerID: "consumer-a", DelegationID: "dlg-1"}, state: "running", cancel: func() { stopped++ }}
+	c := &control{active: map[string]*liveRun{"consumer-a": lr}}
+	if id := c.stopDelegation("dlg-2"); id != "" || stopped != 0 {
+		t.Fatalf("another delegation stopped %q", id)
+	}
+	if id := c.stopDelegation("dlg-1"); id != "run-1" || stopped != 1 || lr.state != "stopping" || lr.stopAt.IsZero() {
+		t.Fatalf("stop %q %d %+v", id, stopped, lr)
+	}
+	if id := c.stopDelegation("dlg-1"); id != "" || stopped != 1 {
+		t.Fatalf("a stopping run stopped again %q", id)
 	}
 }

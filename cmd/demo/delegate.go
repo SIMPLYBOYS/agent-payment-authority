@@ -74,6 +74,63 @@ func (a *api) registryNames(consumer, assetID string) (wallet, chain, asset stri
 func (a *api) registerDelegations(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/delegations/challenge", a.delegationChallenge)
 	mux.HandleFunc("POST /api/delegations/assertion", a.delegationAssertion)
+	mux.HandleFunc("POST /api/delegations/revoke/challenge", a.revokeChallenge)
+	mux.HandleFunc("POST /api/delegations/revoke/assertion", a.revokeAssertion)
+}
+
+// revokeChallenge is POST /api/delegations/revoke/challenge {request_id,
+// delegation_id} (docs/commercial-gap4.md 7): the Signer's challenge to
+// take back one of the consumer's own delegations; the Signer refuses
+// another consumer's. Asked once, as a confirmation's is.
+func (a *api) revokeChallenge(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RequestID    string `json:"request_id"`
+		DelegationID string `json:"delegation_id"`
+	}
+	g, ok := a.approvalGuard(w, r, true, true, 1024, &req)
+	if !ok {
+		return
+	}
+	if !requestIDFormat.MatchString(req.RequestID) || !paycontract.ValidID(req.DelegationID) {
+		fail(w, http.StatusBadRequest, "bad_request")
+		return
+	}
+	ans := a.approve.signer.DelegationRevokeChallenge(signer.DelegationRevokeRequest{RequestID: req.RequestID, DelegationID: req.DelegationID,
+		ConsumerID: g.ConsumerID, HostDeadline: a.clock() + delegationHold})
+	a.delegationAnswer(w, "revoke-challenge", ans, func(rep signer.ApprovalReply) any {
+		return map[string]any{"challenge": challengeView{ChallengeID: rep.ChallengeID, ConsumerID: rep.ConsumerID, ApprovalSessionID: rep.ApprovalSessionID,
+			IntentHash: rep.IntentHash, Decision: rep.Decision, ApproverID: rep.ApproverID, ExpiresAt: rep.ExpiresAt, Options: rep.Options}, "terms": rep.Terms}
+	})
+}
+
+// revokeAssertion is POST /api/delegations/revoke/assertion {delegation_id,
+// challenge_id, verify_request_id, assertion}: the Signer verifies and
+// keeps the revocation, then a run still going under the delegation is
+// stopped as 停止 Agent stops it. A resend answers what the Signer kept.
+func (a *api) revokeAssertion(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DelegationID    string          `json:"delegation_id"`
+		ChallengeID     string          `json:"challenge_id"`
+		VerifyRequestID string          `json:"verify_request_id"`
+		Assertion       json.RawMessage `json:"assertion"`
+	}
+	g, ok := a.approvalGuard(w, r, true, true, 64<<10, &req)
+	if !ok {
+		return
+	}
+	ans := a.approve.signer.DelegationRevokeVerify(signer.DelegationRevokeVerifyRequest{VerifyRequestID: req.VerifyRequestID, ChallengeID: req.ChallengeID,
+		DelegationID: req.DelegationID, Assertion: req.Assertion})
+	if ans.Kind != signerclient.KindOK || ans.Reply.State != "verified" || ans.Reply.Decision != "deny" || ans.Reply.ApprovalSessionID != req.DelegationID {
+		a.delegationAnswer(w, "revoke-assertion", ans, nil)
+		return
+	}
+	stopped := ""
+	if a.control != nil {
+		stopped = a.control.stopDelegation(req.DelegationID)
+	}
+	fmt.Fprintf(a.out, "demo: delegation revoked by the person's device: %s %s stopped_run=%q\n", g.ConsumerID, req.DelegationID, stopped)
+	reply(w, http.StatusOK, map[string]any{"revoked": map[string]any{"delegation_id": req.DelegationID, "revocation_id": ans.Reply.ApprovalID,
+		"revoked_at": ans.Reply.VerifiedAt}, "stopped_run": stopped})
 }
 
 func termsRefused(w http.ResponseWriter, code string) {

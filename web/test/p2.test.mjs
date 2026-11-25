@@ -53,6 +53,7 @@ test("P2: an ending replaces the steps it cut off, with its code", () => {
   assert.match(refused.next, /^下一步：看終端機上這一筆的 shop 原因與就緒表的「商店今天」/);
   assert.equal(A.paymentNext({ status: "needs_review", code: "NOT_SETTLED_EXPIRED" }), "下一步：錢沒有動（授權已過期、鏈上確認沒有被用掉）；不用處理。");
   // 10/30: the Signer's reason, when the Store has it.
+  assert.match(A.paymentNext({ status: "needs_review", code: "RESERVED_NOT_PAID", signer_code: "DELEGATION_REVOKED" }), /Signer 拒絕的原因：DELEGATION_REVOKED；客人已用本人裝置收回這份委託/);
   assert.match(A.paymentNext({ status: "needs_review", code: "RESERVED_NOT_PAID", signer_code: "DELEGATION_EXPIRED" }), /^下一步：錢沒有動；Signer 拒絕的原因：DELEGATION_EXPIRED；\/opt 的 signer\.json 裡的委派已過期/);
   assert.equal(A.paymentNext({ status: "needs_review", code: "RESERVED_NOT_PAID", signer_code: "OVER_PER_TX" }), "下一步：錢沒有動；Signer 拒絕的原因：OVER_PER_TX；記下代碼與時間找開發者；不要重試這一筆。");
   assert.equal(A.paymentNext({ status: "needs_review", code: "SOMETHING_NEW" }), "下一步：記下代碼 SOMETHING_NEW 與時間，找開發者。");

@@ -324,6 +324,25 @@ func ApprovalsHandler(core *ApprovalCore, log func(string)) http.Handler {
 		r, err := core.DelegationVerify(req.Context(), dv)
 		answer(w, req, "delegation-verify", &r, err)
 	})
+	// The person's revocation of a delegation they confirmed.
+	mux.HandleFunc("POST /v1/approvals/delegations/revoke/challenge", func(w http.ResponseWriter, req *http.Request) {
+		var dr DelegationRevokeRequest
+		if !read(w, req, &dr) {
+			answer(w, req, "revoke-challenge", &ApprovalReply{}, Refusal("BAD_REQUEST"))
+			return
+		}
+		r, err := core.DelegationRevokeChallenge(req.Context(), dr)
+		answer(w, req, "revoke-challenge", &r, err)
+	})
+	mux.HandleFunc("POST /v1/approvals/delegations/revoke/verify", func(w http.ResponseWriter, req *http.Request) {
+		var dv DelegationRevokeVerifyRequest
+		if !read(w, req, &dv) {
+			answer(w, req, "revoke-verify", &ApprovalReply{}, Refusal("BAD_REQUEST"))
+			return
+		}
+		r, err := core.DelegationRevokeVerify(req.Context(), dv)
+		answer(w, req, "revoke-verify", &r, err)
+	})
 	mux.HandleFunc("GET /v1/approvals/delegations/{delegation_id}", approval("delegation-get", func(ctx context.Context, req *http.Request) (ApprovalReply, error) {
 		return core.DelegationConfirmation(ctx, req.PathValue("delegation_id"))
 	}))

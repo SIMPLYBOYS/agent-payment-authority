@@ -247,6 +247,6 @@ test("C3: every Signer refusal and ended approval says the host's next step (10/
   for (const [s, b] of [[200, { outcome: "denied", code: AP.VOICE_FAILURES[0] }], [409, { error: "task_ended" }], [200, { error: "signer_mismatch" }]])
     assert.match(AP.outcomeText(s, b, "approve")[1], /下一步：/, JSON.stringify(b));
   // Gap 4's codes on a delegation's confirmation are worded, never a bare code; the developer is the one to call.
-  for (const c of ["DELEGATION_EXPIRED", "DELEGATION_NOT_CONFIRMED", "OVER_TOTAL_CAP", "TERMS_INVALID", "MERCHANT_NOT_ALLOWED"]) assert.ok(AP.CODES[c], c);
+  for (const c of ["DELEGATION_EXPIRED", "DELEGATION_REVOKED", "DELEGATION_NOT_CONFIRMED", "OVER_TOTAL_CAP", "TERMS_INVALID", "MERCHANT_NOT_ALLOWED"]) assert.ok(AP.CODES[c], c);
   assert.ok(!Object.values(AP.CODES).some((v) => v.includes("找管理者")), "the manual says 找開發者");
 });

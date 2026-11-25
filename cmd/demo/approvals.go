@@ -57,6 +57,8 @@ type approvalSigner interface {
 	EnrollRelay(id string, body map[string]any) (int, json.RawMessage)
 	DelegationChallenge(signer.DelegationChallengeRequest) signerclient.Answer // gap 4
 	DelegationVerify(signer.DelegationVerifyRequest) signerclient.Answer
+	DelegationRevokeChallenge(signer.DelegationRevokeRequest) signerclient.Answer // the person takes one back (section 7)
+	DelegationRevokeVerify(signer.DelegationRevokeVerifyRequest) signerclient.Answer
 }
 
 type approvals struct {

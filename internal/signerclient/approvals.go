@@ -126,6 +126,15 @@ func (c *Approvals) DelegationVerify(r signer.DelegationVerifyRequest) Answer {
 	return c.do("POST", "/v1/approvals/delegations/verify", r)
 }
 
+// The person's revocation of one (section 7).
+func (c *Approvals) DelegationRevokeChallenge(r signer.DelegationRevokeRequest) Answer {
+	return c.do("POST", "/v1/approvals/delegations/revoke/challenge", r)
+}
+
+func (c *Approvals) DelegationRevokeVerify(r signer.DelegationRevokeVerifyRequest) Answer {
+	return c.do("POST", "/v1/approvals/delegations/revoke/verify", r)
+}
+
 func (c *Approvals) DelegationConfirmation(delegationID string) Answer {
 	return c.do("GET", "/v1/approvals/delegations/"+url.PathEscape(delegationID), nil)
 }

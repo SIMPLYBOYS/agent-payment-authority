@@ -133,3 +133,32 @@
 - **預算對上限**：委託的任務預算降到 1.50（資料研究室、街角咖啡，本機與 testnet），和 testnet 核准人每 24 小時 1.50 的上限一致；客人確認的數字就是實際能花的上限。
 - **一起開始**：按一次，依序跳出 A、B 各自的裝置驗證（每位客人確認自己的委託），兩位都確認後各自開始。
 - 其餘照第 4 節的預設。
+
+## 7 本人收回委託（11/25）
+
+之前委託只能等到期（確認後 2 小時）：任務可以在 Host 取消，但萬一 Host 出錯或被入侵，Signer 那一側沒有辦法讓委託立刻停止。
+
+**做法**
+
+- **Signer**（`internal/signer/delegation.go`）：
+  - 新增「收回」的 WebAuthn 驗證。挑戰綁同一份條款的雜湊，決定是 `deny`，用自己的 tag 與 jti（`drev-`）；確認與收回互相不能代替，也不能當成購買的核准。
+  - 只有確認那份委託的核准人能收回，另一位客人的委託會被拒（`CONSUMER_MISMATCH`）。每份委託只能收回一次。
+  - 驗證通過後，在同一個交易裡記下收回（新表 `delegation_revocations`，Signer 啟動時自動建立），並把這份委託下「已受理、還沒簽」的付款改成 `abandoned`。
+  - 之後每一筆付款，不論 Allow 或 Ask，都會被拒絕（`DELEGATION_REVOKED`）。收回剛好落在簽章與寫回之間時，算好的簽章會被丟掉，不會送出（`TestDelegationRevoke`）。
+  - `GET /v1/approvals/delegations/{id}` 會帶出 `revocation_id` 與 `revoked_at`。
+- **Host**（`cmd/demo/delegate.go`）：
+  - `POST /api/delegations/revoke/challenge` 與 `/revoke/assertion`，只接受客人自己的 viewer token。
+  - Signer 記下收回後，這份委託下還在執行的場次會照「停止 Agent」的方式停下，Store 照舊記 `TASK_CANCELLED`。
+- **頁面**：本人裝置模式下，Agent 卡片多一個「收回委託（本人裝置）」按鈕，完成後顯示「委託已收回」。付款被拒時，下一步說明會寫「客人已收回這份委託」。
+
+**驗證**
+
+- Go 測試：`TestDelegationRevoke`、`TestDelegationRoutes`（Signer），`TestDelegationByDevice`、`TestStopDelegation`（Host）。
+- 瀏覽器：`scripts/verify/a2-ui.mjs` 第 9 段，用 CDP virtual authenticator 測試（測試用，不是實機結果）。
+
+**界線（照實說）**
+
+- **收回仍經過 Host 轉送**：Host 擋得住，但造不出來。一個被入侵的 Host 可以不轉送，但沒有本人的裝置，就做不出收回，也撤不掉已記下的收回。Signer 機器上的管理者命令（`apa-signer approver revoke`）停用整個裝置，它確認過的委託會一起失效；那是 Host 之外的另一條路。
+- **checker 看不到收回本身**：證據包的事件裡只有停下場次的 `TASK_CANCELLED`（代碼仍是 `HOST_CANCELLED`），以及被拒那一筆 Store 記下的 `signer_code`。要讓 checker 驗「收回之後沒有付款」，需要在付款合約加一個事件並更新契約測試向量，這次沒做。
+- **還沒開始的委託**：頁面不會用舊委託開場，所以 Host 開場時不再問 Signer；若真的用一份已收回的委託開場，第一筆付款就會被 Signer 拒絕（在 testnet 上預算已預留，記為 `RESERVED_NOT_PAID`，錢沒有動）。
+- **`/opt` 的 Signer** 要換成新版才有這個功能：舊版不認得這兩個路徑，收回會失敗，頁面說「委託未收回」，委託照舊有效。

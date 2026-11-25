@@ -789,7 +789,8 @@ const NEXT = {
     NOT_SETTLED_EXPIRED: "錢沒有動（授權已過期、鏈上確認沒有被用掉）；不用處理", RECONCILE_NEEDS_REVIEW: "停下這一場，不要重試，找開發者" },
 };
 // SIGNER_NEXT: what the host does about the Signer's refusal of a reserved payment (pv.signer_code, 10/30).
-const SIGNER_NEXT = { DELEGATION_EXPIRED: "/opt 的 signer.json 裡的委派已過期：停下這一場，重產並安裝 signer.json 後換一個標籤再開場",
+const SIGNER_NEXT = { DELEGATION_REVOKED: "客人已用本人裝置收回這份委託，Signer 不再替它簽付款；這是預期的結果",
+  DELEGATION_EXPIRED: "/opt 的 signer.json 裡的委派已過期：停下這一場，重產並安裝 signer.json 後換一個標籤再開場",
   OVER_TOTAL_CAP: "委派的總額或核准人 24 小時內的額度已用完：今天不要再開這位客人的場次",
   VELOCITY_LIMIT: "Signer 的頻率上限：這個錢包短時間內已簽滿上限（Host 的 Policy 應該先擋下）：停下這一場，找開發者" };
 export function paymentNext(pv) {

@@ -183,8 +183,20 @@ func TestDelegationRoutes(t *testing.T) {
 	if status, r := do("POST", "/v1/approvals/delegations/verify", string(vb)); status != 200 || r.State != "verified" {
 		t.Fatalf("verify %d %+v", status, r)
 	}
-	if status, r := do("GET", "/v1/approvals/delegations/dlg-1", ""); status != 200 || r.State != "verified" || r.ApprovalSessionID != "dlg-1" {
+	if status, r := do("GET", "/v1/approvals/delegations/dlg-1", ""); status != 200 || r.State != "verified" || r.ApprovalSessionID != "dlg-1" || r.RevokedAt != 0 {
 		t.Fatalf("after %d %+v", status, r)
+	}
+	rb, _ := json.Marshal(DelegationRevokeRequest{RequestID: "rreq-1", DelegationID: "dlg-1", ConsumerID: "consumer-a", HostDeadline: f.now + 600})
+	status, rc := do("POST", "/v1/approvals/delegations/revoke/challenge", string(rb))
+	if status != 200 || rc.State != "issued" || rc.Decision != "deny" {
+		t.Fatalf("revoke challenge %d %+v", status, rc)
+	}
+	rv, _ := json.Marshal(DelegationRevokeVerifyRequest{VerifyRequestID: "rver-1", ChallengeID: rc.ChallengeID, DelegationID: "dlg-1", Assertion: a.Get(rc.Options, origin)})
+	if status, r := do("POST", "/v1/approvals/delegations/revoke/verify", string(rv)); status != 200 || r.State != "verified" || r.Decision != "deny" {
+		t.Fatalf("revoke verify %d %+v", status, r)
+	}
+	if status, r := do("GET", "/v1/approvals/delegations/dlg-1", ""); status != 200 || r.RevokedAt == 0 || r.RevocationID == "" {
+		t.Fatalf("revoked %d %+v", status, r)
 	}
 }
 
@@ -358,5 +370,89 @@ func TestMigrateConfirmation(t *testing.T) {
 	var n int
 	if err := db.QueryRow(`SELECT count(*) FROM attempts WHERE attempt_id = 'att-old' AND confirmation_id IS NULL`).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("the old row %d %v", n, err)
+	}
+}
+
+func (f *afx) rchallenge(req, id, consumer string) (ApprovalReply, error) {
+	return f.core.DelegationRevokeChallenge(bgA, DelegationRevokeRequest{RequestID: req, DelegationID: id, ConsumerID: consumer, HostDeadline: f.now + 600})
+}
+
+func (f *afx) rverify(vid, challengeID, id string, assertion json.RawMessage) (ApprovalReply, error) {
+	return f.core.DelegationRevokeVerify(bgA, DelegationRevokeVerifyRequest{VerifyRequestID: vid, ChallengeID: challengeID, DelegationID: id, Assertion: assertion})
+}
+
+// The person takes a delegation back with the device that confirmed it
+// (docs/commercial-gap4.md 7): the Signer signs nothing more under it,
+// an attempt it accepted and has not yet signed is dropped, and neither
+// ceremony stands for the other.
+func TestDelegationRevoke(t *testing.T) {
+	f := newHFX(t)
+	a := f.enroll("approver-a", nil)
+	terms := f.terms("a", "dlg-1")
+	dc, err := f.dchallenge("dreq-1", terms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.rchallenge("rreq-0", "dlg-1", "consumer-a"); refusal(err) != "DELEGATION_NOT_CONFIRMED" {
+		t.Fatalf("before the confirmation: %v", err)
+	}
+	conf, err := f.dverify("dver-1", dc.ChallengeID, terms, a.Get(dc.Options, origin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	allow := Authorization{Method: "delegation", DelegationID: "dlg-a", DelegationVersion: 1, DelegationConfirmationID: conf.ApprovalID}
+	n := 0
+	sign := func(order json.RawMessage) (Reply, error) {
+		n++
+		return f.pay.Sign(bg, SignRequest{RequestID: fmt.Sprintf("request-%010d", 700+n), Authorization: allow, Order: order})
+	}
+	if _, err := sign(f.orderA("50000")); err != nil {
+		t.Fatalf("before: %v", err)
+	}
+	if _, err := f.rchallenge("rreq-1", "dlg-1", "consumer-b"); refusal(err) != "CONSUMER_MISMATCH" {
+		t.Fatalf("another consumer's: %v", err)
+	}
+	rc, err := f.rchallenge("rreq-2", "dlg-1", "consumer-a")
+	if err != nil || rc.State != "issued" || rc.Decision != "deny" || rc.ApprovalSessionID != "dlg-1" || rc.IntentHash != dc.IntentHash || len(rc.Terms) == 0 {
+		t.Fatalf("challenge %+v %v", rc, err)
+	}
+	if again, err := f.rchallenge("rreq-2", "dlg-1", "consumer-a"); err != nil || again.ChallengeID != rc.ChallengeID {
+		t.Fatalf("resend %+v %v", again, err)
+	}
+	// Neither ceremony stands for the other (two refusals; three close the challenge).
+	if _, err := f.dverify("dver-2", rc.ChallengeID, terms, a.Get(rc.Options, origin)); refusal(err) != "INTENT_MISMATCH" {
+		t.Fatalf("a revocation's challenge as a confirmation: %v", err)
+	}
+	if _, err := f.rverify("rver-0", rc.ChallengeID, "dlg-2", a.Get(rc.Options, origin)); refusal(err) != "INTENT_MISMATCH" {
+		t.Fatalf("another delegation's ID: %v", err)
+	}
+	// The revocation lands between a payment's acceptance and its signature:
+	// the signature computed is dropped.
+	var rev ApprovalReply
+	hook = func(s, _ string) error {
+		if s == "after-sign" {
+			hook = nil
+			rev, err = f.rverify("rver-1", rc.ChallengeID, "dlg-1", a.Get(rc.Options, origin))
+		}
+		return nil
+	}
+	defer func() { hook = nil }()
+	if r, err := sign(f.orderA("50000")); refusal(err) != "ATTEMPT_ABANDONED" || r.Authorization != nil {
+		t.Fatalf("signed after the revocation: %+v %v", r, err)
+	}
+	if err != nil || rev.State != "verified" || rev.Decision != "deny" || rev.ApprovalSessionID != "dlg-1" {
+		t.Fatalf("revocation %+v %v", rev, err)
+	}
+	if again, err := f.rverify("rver-1", rc.ChallengeID, "dlg-1", a.Get(rc.Options, origin)); err == nil && again.ApprovalID != rev.ApprovalID {
+		t.Fatalf("resend answered another: %+v", again)
+	}
+	if _, err := sign(f.orderA("50000")); refusal(err) != "DELEGATION_REVOKED" {
+		t.Fatalf("after: %v", err)
+	}
+	if _, err := f.rchallenge("rreq-3", "dlg-1", "consumer-a"); refusal(err) != "DELEGATION_REVOKED" {
+		t.Fatalf("a second revocation: %v", err)
+	}
+	if q, err := f.core.DelegationConfirmation(bgA, "dlg-1"); err != nil || q.ApprovalID != conf.ApprovalID || q.RevocationID != rev.ApprovalID || q.RevokedAt != f.now {
+		t.Fatalf("the confirmation says %+v %v", q, err)
 	}
 }

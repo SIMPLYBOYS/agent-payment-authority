@@ -70,6 +70,7 @@ export const CODES = {
   DELEGATION_UNKNOWN: "Signer 沒有這份委派的設定",
   DELEGATION_VERSION: "委派的版本和 Signer 的設定不符",
   DELEGATION_OTHER_TASK: "這份委託已經用在另一個 task",
+  DELEGATION_REVOKED: "這份委託已由本人收回",
   TERMS_INVALID: "委託的條款不正確",
   OVER_TASK_BUDGET: "超過委託的任務預算",
   OVER_TOTAL_CAP: "委派的總額或核准人 24 小時內的額度已用完",

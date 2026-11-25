@@ -435,6 +435,21 @@ func (c *control) stop(w http.ResponseWriter, r *http.Request, a *api) {
 	}
 }
 
+// stopDelegation stops the running run under a delegation the person just
+// took back, as stop does; its run ID, or "" when none is running.
+func (c *control) stopDelegation(id string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, lr := range c.active {
+		if lr.run.DelegationID == id && lr.state == "running" && !lr.reaped {
+			lr.state, lr.stopAt = "stopping", time.Now()
+			lr.cancel()
+			return lr.run.RunID
+		}
+	}
+	return ""
+}
+
 func (c *control) get(w http.ResponseWriter, r *http.Request, a *api) {
 	if !reader(w, r, a) {
 		return

@@ -40,6 +40,11 @@ CREATE TABLE IF NOT EXISTS delegation_confirmations (
   valid_until      INTEGER NOT NULL,
   task_id          TEXT
 ) STRICT;
+CREATE TABLE IF NOT EXISTS delegation_revocations (
+  revocation_id TEXT PRIMARY KEY REFERENCES human_approvals (approval_id),
+  delegation_id TEXT NOT NULL UNIQUE REFERENCES delegation_confirmations (delegation_id),
+  revoked_at    INTEGER NOT NULL
+) STRICT;
 `
 
 const (
@@ -126,44 +131,59 @@ func (c *ApprovalCore) DelegationChallenge(ctx context.Context, r DelegationChal
 	case ap == nil || !containsString(ap.WalletIDs, w.WalletID):
 		return ApprovalReply{}, Refusal("APPROVER_UNKNOWN")
 	}
-	u, allow, err := c.allowed(ctx, ap.ApproverID)
+	rec := challengeRecord{Version: 1, Kind: "delegation", ApprovalSessionID: t.DelegationID, Decision: "approve",
+		ConsumerID: t.ConsumerID, WalletID: w.WalletID, IntentHash: hash, JTI: delegationJTIOf(t.DelegationID),
+		ApproverID: ap.ApproverID, ApproverVersion: ap.Version, ConfigHash: c.cfg.hash}
+	id, err := c.issue(ctx, delegationTag, rec, r.RequestID, fp, r.HostDeadline, terms, "DELEGATION_CONFIRMED") // one confirmation per delegation, ever
+	if errors.Is(err, Refusal("REQUEST_ID_RACE")) {
+		return c.DelegationChallenge(ctx, r)
+	}
 	if err != nil {
 		return ApprovalReply{}, err
 	}
+	return c.challengeQuery(ctx, "challenge_id", id)
+}
+
+// issue keeps a new challenge of one of a delegation's two ceremonies (its
+// confirmation, its revocation) under tag: none while another of the same
+// jti is open, none once one was verified (done). It returns its ID.
+func (c *ApprovalCore) issue(ctx context.Context, tag string, rec challengeRecord, requestID, fp string, hostDeadline uint64, display []byte, done Refusal) (string, error) {
+	u, allow, err := c.allowed(ctx, rec.ApproverID)
+	if err != nil {
+		return "", err
+	}
 	now := c.clock()
-	expires := min(now+c.cfg.WebAuthn.ChallengeTTLSeconds, r.HostDeadline)
+	expires := min(now+c.cfg.WebAuthn.ChallengeTTLSeconds, hostDeadline)
 	if expires <= now {
-		return ApprovalReply{}, Refusal("AUTHORIZATION_EXPIRED")
+		return "", Refusal("AUTHORIZATION_EXPIRED")
 	}
 	id, err := newID("chl-")
 	if err != nil {
-		return ApprovalReply{}, err
+		return "", err
 	}
 	rnd := make([]byte, 32)
 	if _, err := rand.Read(rnd); err != nil {
-		return ApprovalReply{}, err
+		return "", err
 	}
-	rec := challengeRecord{Version: 1, Kind: "delegation", ChallengeID: id, Random: b64(rnd), ApprovalSessionID: t.DelegationID, Decision: "approve",
-		ConsumerID: t.ConsumerID, WalletID: w.WalletID, IntentHash: hash, JTI: delegationJTIOf(t.DelegationID),
-		ApproverID: ap.ApproverID, ApproverVersion: ap.Version, ConfigHash: c.cfg.hash, ExpiresAt: expires}
-	_, canon, err := digestOf(delegationTag, rec)
+	rec.ChallengeID, rec.Random, rec.ExpiresAt = id, b64(rnd), expires
+	_, canon, err := digestOf(tag, rec)
 	if err != nil {
-		return ApprovalReply{}, err
+		return "", err
 	}
 	h := sha256.New()
-	h.Write([]byte(delegationTag + "\x00"))
+	h.Write([]byte(tag + "\x00"))
 	h.Write(canon)
 	value := h.Sum(nil)
 	opts, session, err := c.rp.BeginLogin(u, webauthn.WithChallenge(value), webauthn.WithAllowedCredentials(allow),
 		webauthn.WithUserVerification(protocol.VerificationRequired))
 	if err != nil {
-		return ApprovalReply{}, err
+		return "", err
 	}
 	sess, _ := json.Marshal(session)
 	optsJSON, _ := json.Marshal(opts)
-	err = c.inTx(ctx, func(tx *sql.Tx, now uint64) error {
+	return id, c.inTx(ctx, func(tx *sql.Tx, now uint64) error {
 		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM approval_challenges WHERE request_id = ?`, r.RequestID).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM approval_challenges WHERE request_id = ?`, requestID).Scan(&n); err != nil {
 			return err
 		} else if n > 0 {
 			return Refusal("REQUEST_ID_RACE")
@@ -171,7 +191,7 @@ func (c *ApprovalCore) DelegationChallenge(ctx context.Context, r DelegationChal
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM human_approvals WHERE jti = ?`, rec.JTI).Scan(&n); err != nil {
 			return err
 		} else if n > 0 {
-			return Refusal("DELEGATION_CONFIRMED") // one confirmation per delegation, ever
+			return done
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE approval_challenges SET state = 'expired', closed_at = ? WHERE jti = ? AND state = 'issued' AND ? >= expires_at`, now, rec.JTI, now); err != nil {
 			return err
@@ -186,18 +206,11 @@ func (c *ApprovalCore) DelegationChallenge(ctx context.Context, r DelegationChal
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO approval_challenges (challenge_id, request_id, fingerprint, challenge, record, approval_session_id, decision,
 			consumer_id, wallet_id, intent_hash, jti, approver_id, approver_version, config_hash, session, options, display, expires_at, state, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, 'approve', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'issued', ?)`,
-			id, r.RequestID, fp, b64(value), string(canon), t.DelegationID, t.ConsumerID, w.WalletID, hash, rec.JTI,
-			ap.ApproverID, ap.Version, c.cfg.hash, string(sess), string(optsJSON), string(terms), expires, now)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'issued', ?)`,
+			id, requestID, fp, b64(value), string(canon), rec.ApprovalSessionID, rec.Decision, rec.ConsumerID, rec.WalletID, rec.IntentHash, rec.JTI,
+			rec.ApproverID, rec.ApproverVersion, c.cfg.hash, string(sess), string(optsJSON), string(display), expires, now)
 		return err
 	})
-	if errors.Is(err, Refusal("REQUEST_ID_RACE")) {
-		return c.DelegationChallenge(ctx, r)
-	}
-	if err != nil {
-		return ApprovalReply{}, err
-	}
-	return c.challengeQuery(ctx, "challenge_id", id)
 }
 
 // DelegationVerify verifies the person's assertion over a delegation's
@@ -264,7 +277,159 @@ func (c *ApprovalCore) DelegationConfirmation(ctx context.Context, delegationID 
 	} else if err != nil {
 		return ApprovalReply{}, err
 	}
-	return c.approvalBy(ctx, "approval_id", id)
+	r, err := c.approvalBy(ctx, "approval_id", id)
+	if err != nil {
+		return r, err
+	}
+	err = c.db.QueryRowContext(ctx, `SELECT revocation_id, revoked_at FROM delegation_revocations WHERE delegation_id = ?`, delegationID).Scan(&r.RevocationID, &r.RevokedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = nil
+	}
+	return r, err
+}
+
+// The person taking a delegation back before it ends (docs/commercial-gap4.md
+// 7): a second WebAuthn ceremony over the same terms, decision deny,
+// under its own tag and jti. Once verified the Signer signs nothing more
+// under that delegation, and an attempt it accepted and has not signed is
+// abandoned in the same transaction. A Host can relay it or not, but never
+// make one: only the person's device signs it.
+const (
+	revokeTag    = "agent-payment-authority/pay/v1/delegation-revoke-challenge"
+	revokeReq    = "agent-payment-authority/pay/v1/delegation-revoke-request"
+	revokeVerify = "agent-payment-authority/pay/v1/delegation-revoke-verify-request"
+	revokeJTI    = "drev-"
+)
+
+// DelegationRevokeRequest is POST /v1/approvals/delegations/revoke/challenge.
+type DelegationRevokeRequest struct {
+	RequestID    string `json:"request_id"`
+	DelegationID string `json:"delegation_id"`
+	ConsumerID   string `json:"consumer_id"` // the Host's caller: another consumer's delegation is refused
+	HostDeadline uint64 `json:"host_deadline"`
+}
+
+// DelegationRevokeVerifyRequest is POST /v1/approvals/delegations/revoke/verify.
+type DelegationRevokeVerifyRequest struct {
+	VerifyRequestID string          `json:"verify_request_id"`
+	ChallengeID     string          `json:"challenge_id"`
+	DelegationID    string          `json:"delegation_id"`
+	Assertion       json.RawMessage `json:"assertion"`
+}
+
+func revokeJTIOf(delegationID string) string {
+	s := sha256.Sum256([]byte(delegationID))
+	return revokeJTI + hex.EncodeToString(s[:16])
+}
+
+type confirmedRow struct {
+	consumer, wallet, approver, hash, terms string
+	revoked                                 bool
+}
+
+func (c *ApprovalCore) confirmed(ctx context.Context, delegationID string) (confirmedRow, error) {
+	var d confirmedRow
+	err := c.db.QueryRowContext(ctx, `SELECT d.consumer_id, d.wallet_id, d.approver_id, d.terms_hash, d.terms, r.delegation_id IS NOT NULL
+		FROM delegation_confirmations d LEFT JOIN delegation_revocations r ON r.delegation_id = d.delegation_id WHERE d.delegation_id = ?`, delegationID).
+		Scan(&d.consumer, &d.wallet, &d.approver, &d.hash, &d.terms, &d.revoked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return d, Refusal("DELEGATION_NOT_CONFIRMED")
+	}
+	return d, err
+}
+
+// DelegationRevokeChallenge is the challenge of a delegation's revocation,
+// to the approver who confirmed it: one per Host request ID, one verified
+// revocation per delegation, ever.
+func (c *ApprovalCore) DelegationRevokeChallenge(ctx context.Context, r DelegationRevokeRequest) (ApprovalReply, error) {
+	if !requestIDPattern.MatchString(r.RequestID) || !paycontract.ValidID(r.DelegationID) || !paycontract.ValidID(r.ConsumerID) || r.HostDeadline == 0 {
+		return ApprovalReply{}, Refusal("BAD_REQUEST")
+	}
+	fp, _, err := digestOf(revokeReq, map[string]any{"delegation_id": r.DelegationID, "consumer_id": r.ConsumerID, "host_deadline": r.HostDeadline})
+	if err != nil {
+		return ApprovalReply{}, Refusal("BAD_REQUEST")
+	}
+	if a, found, err := c.challengeBy(ctx, "request_id", r.RequestID); err != nil {
+		return ApprovalReply{}, err
+	} else if found {
+		if a.fingerprint != fp {
+			return ApprovalReply{}, Refusal("REQUEST_ID_CONFLICT")
+		}
+		return c.answerChallenge(ctx, a)
+	}
+	d, err := c.confirmed(ctx, r.DelegationID)
+	switch {
+	case err != nil:
+		return ApprovalReply{}, err
+	case d.consumer != r.ConsumerID:
+		return ApprovalReply{}, Refusal("CONSUMER_MISMATCH")
+	case d.revoked:
+		return ApprovalReply{}, Refusal("DELEGATION_REVOKED")
+	}
+	ap := c.cfg.approver(d.approver)
+	if ap == nil {
+		return ApprovalReply{}, Refusal("APPROVER_CHANGED") // and so it pays nothing already (confirmation)
+	}
+	rec := challengeRecord{Version: 1, Kind: "delegation-revoke", ApprovalSessionID: r.DelegationID, Decision: "deny",
+		ConsumerID: d.consumer, WalletID: d.wallet, IntentHash: d.hash, JTI: revokeJTIOf(r.DelegationID),
+		ApproverID: ap.ApproverID, ApproverVersion: ap.Version, ConfigHash: c.cfg.hash}
+	id, err := c.issue(ctx, revokeTag, rec, r.RequestID, fp, r.HostDeadline, []byte(d.terms), "DELEGATION_REVOKED")
+	if errors.Is(err, Refusal("REQUEST_ID_RACE")) {
+		return c.DelegationRevokeChallenge(ctx, r)
+	}
+	if err != nil {
+		return ApprovalReply{}, err
+	}
+	return c.challengeQuery(ctx, "challenge_id", id)
+}
+
+// DelegationRevokeVerify verifies the person's assertion over the
+// revocation and keeps it, as DelegationVerify keeps a confirmation.
+func (c *ApprovalCore) DelegationRevokeVerify(ctx context.Context, r DelegationRevokeVerifyRequest) (ApprovalReply, error) {
+	if !requestIDPattern.MatchString(r.VerifyRequestID) || !requestIDPattern.MatchString(r.ChallengeID) || !paycontract.ValidID(r.DelegationID) || len(r.Assertion) == 0 {
+		return ApprovalReply{}, Refusal("BAD_REQUEST")
+	}
+	as := sha256.Sum256(r.Assertion)
+	fp, _, err := digestOf(revokeVerify, map[string]string{"challenge_id": r.ChallengeID, "delegation_id": r.DelegationID, "assertion_sha256": hex.EncodeToString(as[:])})
+	if err != nil {
+		return ApprovalReply{}, Refusal("BAD_REQUEST")
+	}
+	if rep, found, err := c.verifyAnswer(ctx, r.VerifyRequestID, fp); err != nil || found {
+		return rep, err
+	}
+	vr := VerifyRequest{VerifyRequestID: r.VerifyRequestID, ChallengeID: r.ChallengeID, Assertion: r.Assertion}
+	a, found, err := c.challengeBy(ctx, "challenge_id", r.ChallengeID)
+	if err != nil {
+		return ApprovalReply{}, err
+	}
+	if !found {
+		return c.refuse(ctx, vr, fp, nil, "CHALLENGE_UNKNOWN", false)
+	}
+	hash := "" // a confirmation's challenge, a purchase's, or another delegation's: never a revocation here
+	if a.jti == revokeJTIOf(a.sessionID) && a.sessionID == r.DelegationID {
+		d, err := c.confirmed(ctx, r.DelegationID)
+		if err != nil {
+			return ApprovalReply{}, err
+		}
+		hash = d.hash
+	}
+	code, cred, parsed := c.check(ctx, a, hash, r.Assertion)
+	if code != "" {
+		return c.refuse(ctx, vr, fp, &a, code, true)
+	}
+	return c.commit(ctx, vr, fp, a, cred, parsed, nil, func(now uint64) uint64 { return now },
+		func(tx *sql.Tx, now uint64, approvalID, _ string) error {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO delegation_revocations (revocation_id, delegation_id, revoked_at) VALUES (?, ?, ?)`, approvalID, a.sessionID, now); err != nil {
+				return err
+			}
+			var pays int // an approvals-only database has no attempts
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'attempts'`).Scan(&pays); err != nil || pays == 0 {
+				return err
+			}
+			_, err := tx.ExecContext(ctx, `UPDATE attempts SET state = 'abandoned', closed_at = ? WHERE state = 'accepted'
+				AND confirmation_id = (SELECT confirmation_id FROM delegation_confirmations WHERE delegation_id = ?)`, now, a.sessionID)
+			return err
+		})
 }
 
 // confirms: this Signer takes the person's approvals (webauthn), so it pays
@@ -287,11 +452,12 @@ func (c *Core) confirmation(ctx context.Context, q querier, au Authorization, po
 	var termsJSON, consumer, wallet, approverID, cred string
 	var version, allowMax, budget, validUntil uint64
 	var task sql.NullString
+	var revoked bool
 	// Only a confirmation still verified (review: an abandoned one is gone).
 	err := q.QueryRowContext(ctx, `SELECT d.terms, d.consumer_id, d.wallet_id, d.approver_id, d.approver_version, d.allow_max, d.task_budget, d.valid_until, d.task_id,
-		coalesce(cr.state, '') FROM delegation_confirmations d JOIN human_approvals h ON h.approval_id = d.confirmation_id AND h.state = 'verified'
-		LEFT JOIN credentials cr ON cr.credential_id = d.credential_id WHERE d.confirmation_id = ?`, id).
-		Scan(&termsJSON, &consumer, &wallet, &approverID, &version, &allowMax, &budget, &validUntil, &task, &cred)
+		coalesce(cr.state, ''), rv.delegation_id IS NOT NULL FROM delegation_confirmations d JOIN human_approvals h ON h.approval_id = d.confirmation_id AND h.state = 'verified'
+		LEFT JOIN credentials cr ON cr.credential_id = d.credential_id LEFT JOIN delegation_revocations rv ON rv.delegation_id = d.delegation_id WHERE d.confirmation_id = ?`, id).
+		Scan(&termsJSON, &consumer, &wallet, &approverID, &version, &allowMax, &budget, &validUntil, &task, &cred, &revoked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Refusal("DELEGATION_NOT_CONFIRMED")
 	} else if err != nil {
@@ -306,6 +472,8 @@ func (c *Core) confirmation(ctx context.Context, q querier, au Authorization, po
 	switch {
 	case consumer != i.ConsumerID || wallet != i.WalletID:
 		return Refusal("CONSUMER_MISMATCH")
+	case revoked: // the person took it back (DelegationRevokeVerify)
+		return Refusal("DELEGATION_REVOKED")
 	case now >= validUntil:
 		return Refusal("DELEGATION_EXPIRED")
 	case cred != "active": // a device revoked takes its confirmations with it

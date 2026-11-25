@@ -613,6 +613,7 @@ function agentModel(c, runs, slots, ctx) {
     c, state, stateText: rc.text, calls, callsKind: rc.kind, business, sync, selected: ctx.chosen === c,
     task: run ? run.task_id + (slot && slot.task === run.task_id && slot.seq >= 0 ? " #" + slot.seq : "") : "",
     run: run && run.run_id, stoppable: rc.stoppable, cancel: run && cancellable(run) ? run.task_id : "",
+    delegation: (run && run.delegation_id) || "",
     taskStatus: t ? t.status : "",
   };
 }
@@ -1290,7 +1291,7 @@ function renderControl() {
 // never to another task's cancel, and nothing is clicked. A focus the user
 // moved elsewhere stays where it is.
 const FOCUS_KINDS = ["cancel-confirm", "cancel-back", "row-cancel", "task-cancel", "row-stop", "run-stop", "agent-select", "agent-start",
-  "agent-sim", "agent-delegate", "delegation-confirm", "delegation-back"];
+  "agent-sim", "agent-delegate", "agent-revoke", "delegation-confirm", "delegation-back"];
 function keepFocus(el, rebuild) {
   const a = document.activeElement;
   const kind = a && el.contains(a) ? FOCUS_KINDS.find((k) => a.classList.contains(k)) : null;
@@ -1385,6 +1386,17 @@ function agentCard(m, scs, { live, busy, full, simC }) {
     b.disabled = !m.stoppable;
     b.title = m.stoppable ? "停止這位客人執行中的場次（只停這一場）" : m.state === "stopping" ? "停止請求已受理，等待程序結束" : "場次已結束，沒有可停止的執行";
     b.addEventListener("click", () => stop(m.run));
+    acts.append(b);
+  }
+  if (m.delegation && deviceDelegations()) {
+    // The person takes the delegation back with their own device (docs/commercial-gap4.md 7).
+    const done = revoked.has(m.delegation);
+    const b = el("button", "agent-revoke", done ? "委託已收回" : "收回委託（本人裝置）");
+    b.type = "button";
+    b.dataset.delegation = m.delegation;
+    b.disabled = done || simulating;
+    b.title = done ? "Signer 已記下本人的收回；這份委託不會再付任何一筆" : "客人用已登記的裝置收回這份委託：Signer 之後拒簽它的每一筆付款，執行中的場次會停下";
+    b.addEventListener("click", () => revokeDelegation(m.c, m.delegation));
     acts.append(b);
   }
   if (m.cancel) acts.append(cancelButton(m.cancel, "row-cancel", "取消請購／task"));
@@ -1596,6 +1608,56 @@ async function deviceDelegation(sc, g) {
     if (v.status !== 0 && v.status !== 503 || v.body && v.body.error === "no_viewer") break;
   }
   return { fail: delegationFail(v) + "（不會自動開始）" };
+}
+
+// revoked: the delegations this page saw the Signer revoke (the Signer's record is the authority).
+const revoked = new Set();
+
+// revokeDelegation: the customer takes a delegation back with their device,
+// as deviceDelegation confirms one: the challenge is checked to be this
+// one's revocation (the consumer, the delegation, deny) before the device is
+// asked; a verify left without an answer is sent again as it was.
+async function revokeDelegation(c, id) {
+  if (simulating) return;
+  if (!a2OnOrigin()) return setRunStatus("要從 " + a2Info().origin + "/host 開啟這個頁面才能用裝置收回委託", "error");
+  const g = creds.gen;
+  simulating = true;
+  renderControl();
+  setRunStatus("客人 " + short(c) + "：請用已登記的裝置收回委託…", "busy");
+  let fail = "", body = null;
+  try {
+    const r = await a2Call(c, "/api/delegations/revoke/challenge", { request_id: "rrev-" + crypto.randomUUID(), delegation_id: id });
+    if (g !== creds.gen) return;
+    const ch = r.body && r.body.challenge;
+    if (r.status === 409 && r.body && r.body.code === "DELEGATION_REVOKED") body = { already: true }; // revoked before (a reload forgot it here)
+    else if (r.status !== 200) fail = delegationFail(r);
+    else if (!ch || ch.consumer_id !== c || ch.approval_session_id !== id || ch.decision !== "deny" || !ch.options || !ch.options.publicKey)
+      fail = "回傳的資料和這次收回不一致，已停止，沒有要求裝置驗證。下一步：按「停止 Agent」，記下時間找開發者";
+    else {
+      let cred;
+      try { cred = await navigator.credentials.get({ publicKey: AP.requestOptions(ch.options) }); }
+      catch (e) { fail = e && e.name === "NotAllowedError" ? "裝置驗證沒有完成（取消、逾時或沒有可用的裝置）；委託仍有效。下一步：再按一次「收回委託」" : "瀏覽器拒絕這次驗證（" + (e && e.name) + "）；委託仍有效"; }
+      if (g !== creds.gen) return;
+      if (cred) {
+        const req = { delegation_id: id, challenge_id: ch.challenge_id, verify_request_id: "rver-" + crypto.randomUUID(), assertion: AP.assertionJSON(cred) };
+        let v;
+        for (let i = 0; i < 4; i++) { // the same verify again on no answer
+          if (i) await new Promise((res) => setTimeout(res, 1000 * 2 ** (i - 1)));
+          v = await a2Call(c, "/api/delegations/revoke/assertion", req);
+          if (g !== creds.gen) return;
+          if (v.status === 200 && v.body && v.body.revoked) { body = v.body; break; }
+          if (v.status !== 0 && v.status !== 503 || v.body && v.body.error === "no_viewer") break;
+        }
+        if (!body) fail = delegationFail(v);
+      }
+    }
+  } finally { if (g === creds.gen) { simulating = false; renderControl(); } }
+  if (fail) return setRunStatus("客人 " + short(c) + " 的委託未收回：" + fail, "error");
+  revoked.add(id);
+  renderControl();
+  if (body.already) setRunStatus("客人 " + short(c) + " 的這份委託先前已收回（Signer 的紀錄）：不會再付任何一筆", "ok");
+  else setRunStatus("客人 " + short(c) + " 已用本人裝置收回委託：Signer 不會再替它簽任何一筆付款" + (body.stopped_run ? "；執行中的場次 " + body.stopped_run + " 已要求停止" : ""), "ok");
+  pollRuns();
 }
 
 // delegationFail: a refused confirmation in the host's words.
