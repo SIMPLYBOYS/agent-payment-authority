@@ -252,3 +252,51 @@ func TestVoiceEventShape(t *testing.T) {
 		}
 	}
 }
+
+// The person's revocation (docs/commercial-gap4.md 7): one, of the bound
+// delegation, by device; nothing proposed or requested after it, a payment
+// already requested carried through, and it may follow the task's end.
+func TestRevocation(t *testing.T) {
+	_, o := base(t)
+	var cfg contracts.RegistryConfig
+	fixture(t, "testdata/contracts/registry.json", &cfg)
+	reg, err := contracts.NewRegistry(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev := func(id, signer string) step {
+		return step{"DELEGATION_REVOKED", contracts.EventPayload{DelegationID: id, AuthorizationMethod: "webauthn", SignerApprovalID: signer}, false}
+	}
+	start := []step{{"TASK_STARTED", contracts.EventPayload{}, false}, {"DELEGATION_BOUND", contracts.EventPayload{DelegationID: "dlg-1"}, false}}
+	proposed := step{"PURCHASE_PROPOSED", contracts.EventPayload{}, true}
+	cancelled := step{"TASK_CANCELLED", contracts.EventPayload{Code: "HOST_CANCELLED"}, false}
+	for name, c := range map[string]struct {
+		steps []step
+		ok    bool
+	}{
+		"revoked, then cancelled":       {append(append([]step{}, start...), rev("dlg-1", "hap-1"), cancelled), true},
+		"cancelled, then revoked":       {append(append([]step{}, start...), cancelled, rev("dlg-1", "hap-1")), true},
+		"a proposal after it":           {append(append([]step{}, start...), rev("dlg-1", "hap-1"), proposed), false},
+		"another delegation's":          {append(append([]step{}, start...), rev("dlg-2", "hap-1")), false},
+		"twice":                         {append(append([]step{}, start...), rev("dlg-1", "hap-1"), rev("dlg-1", "hap-2")), false},
+		"before the delegation's bound": {[]step{start[0], rev("dlg-1", "hap-1")}, false},
+	} {
+		if err := ValidateEventOrder(chainOf(t, o, c.steps...)); (err == nil) != c.ok {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if !Ended(chainOf(t, o, append(append([]step{}, start...), rev("dlg-1", "hap-1"))...)) {
+		t.Error("a revoked task still takes purchases")
+	}
+	es := chainOf(t, o, append(append([]step{}, start...), rev("dlg-1", "hap-1"))...)
+	if err := ValidateEvent(reg, es[2], nil); err != nil {
+		t.Errorf("a revocation: %v", err)
+	}
+	for _, c := range [][2]string{{"webauthn", ""}, {"simulated", "hap-1"}, {"", "hap-1"}} {
+		x := es[2]
+		x.Payload.AuthorizationMethod, x.Payload.SignerApprovalID = c[0], c[1]
+		if ValidateEvent(reg, x, nil) == nil {
+			t.Errorf("DELEGATION_REVOKED took method %q with Signer %q", c[0], c[1])
+		}
+	}
+}

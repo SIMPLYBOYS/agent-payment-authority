@@ -171,3 +171,40 @@ func TestProductOfEveryOffer(t *testing.T) {
 		t.Errorf("an AE1 item: %q", got)
 	}
 }
+
+// E3 and the person's revocation (docs/commercial-gap4.md 7): nothing is
+// proposed or requested after it, and it is one, of the task's delegation,
+// by the person's device.
+func TestE1aChainAfterARevocation(t *testing.T) {
+	const task = "show-a-01"
+	sp, _ := paycontract.SpecOf(paycontract.Version)
+	chain := func(steps ...contracts.AuditEvent) *e1aRun {
+		prev, _ := sp.GenesisHash(task)
+		for i := range steps {
+			e := &steps[i]
+			e.Version, e.EventID, e.Sequence, e.PrevEventHash = paycontract.Version, "evt-"+strings.Repeat("0", 10)+string(rune('a'+i)), uint64(i+1), prev
+			e.Scope = &contracts.EventScope{TaskID: task}
+			prev, _ = sp.EventHash(*e)
+		}
+		return &e1aRun{task: E1aTask{TaskID: task}, events: steps}
+	}
+	ev := func(typ string, p contracts.EventPayload) contracts.AuditEvent { return contracts.AuditEvent{EventType: typ, Payload: p} }
+	started, bound := ev("TASK_STARTED", contracts.EventPayload{}), ev("DELEGATION_BOUND", contracts.EventPayload{DelegationID: "dlg-1"})
+	rev := ev("DELEGATION_REVOKED", contracts.EventPayload{DelegationID: "dlg-1", AuthorizationMethod: "webauthn", SignerApprovalID: "hap-1"})
+	for name, c := range map[string]struct {
+		run  *e1aRun
+		pass bool
+	}{
+		"revoked, then cancelled": {chain(started, bound, rev, ev("TASK_CANCELLED", contracts.EventPayload{Code: "HOST_CANCELLED"})), true},
+		"a proposal after it":     {chain(started, bound, rev, ev("PURCHASE_PROPOSED", contracts.EventPayload{})), false},
+		"a payment after it":      {chain(started, bound, rev, ev("PAYMENT_REQUESTED", contracts.EventPayload{})), false},
+		"another delegation's":    {chain(started, bound, ev("DELEGATION_REVOKED", contracts.EventPayload{DelegationID: "dlg-2", AuthorizationMethod: "webauthn", SignerApprovalID: "hap-1"})), false},
+		"not by the device":       {chain(started, bound, ev("DELEGATION_REVOKED", contracts.EventPayload{DelegationID: "dlg-1"})), false},
+	} {
+		var f findings
+		e1aChain(&f, c.run)
+		if (f.verdicts(E1aClaims)["E3"] != Fail) != c.pass {
+			t.Errorf("%s: %+v", name, f)
+		}
+	}
+}

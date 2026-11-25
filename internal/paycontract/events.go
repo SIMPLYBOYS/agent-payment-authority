@@ -16,7 +16,7 @@ import (
 // EventTypes: M1's task events plus the delegation, approval session,
 // approval closures and the grant, and P2's payment events
 // (docs/commercial-p2-host.md 4).
-var EventTypes = []string{"TASK_STARTED", "DELEGATION_BOUND", "PURCHASE_PROPOSED", "POLICY_DECIDED", "APPROVAL_SESSION_OPENED",
+var EventTypes = []string{"TASK_STARTED", "DELEGATION_BOUND", "DELEGATION_REVOKED", "PURCHASE_PROPOSED", "POLICY_DECIDED", "APPROVAL_SESSION_OPENED",
 	"APPROVAL_EXPIRED", "APPROVAL_WITHDRAWN", "APPROVED", "APPROVAL_DENIED", "APPROVAL_SUPERSEDED", "GRANT_ISSUED",
 	"TASK_CANCELLED", "TASK_TIMED_OUT", "CLI_EXITED",
 	"VOICE_CHALLENGE_VERIFIED", "VOICE_CHALLENGE_FAILED", "VOICE_UNAVAILABLE", // V1: a voice outcome, just before the closure it leads to
@@ -29,12 +29,13 @@ var PaymentEvents = []string{"PAYMENT_REQUESTED", "BUDGET_RESERVED", "PAYMENT_SI
 	"PAYMENT_NOT_SETTLED", "PAYMENT_NEEDS_REVIEW", "RESOURCE_DELIVERED", "RECEIPT_ISSUED", "PAYMENT_REFUNDED"}
 
 // Ended: the stream has stopped taking new purchases or payments, as the
-// order rules see it (a Deny, a cancellation, a CLI timeout). A payment
-// is requested only before; one requested is carried through after.
+// order rules see it (a Deny, a cancellation, a CLI timeout, the person's
+// revocation of the delegation). A payment is requested only before; one
+// requested is carried through after.
 func Ended(events []contracts.AuditEvent) bool {
 	for _, e := range events {
 		switch {
-		case e.EventType == "TASK_CANCELLED" || e.EventType == "TASK_TIMED_OUT":
+		case e.EventType == "TASK_CANCELLED" || e.EventType == "TASK_TIMED_OUT" || e.EventType == "DELEGATION_REVOKED":
 			return true
 		case e.EventType == "POLICY_DECIDED" && e.Payload.Decision != nil && e.Payload.Decision.PolicyVerdict == "Deny":
 			return true
@@ -155,6 +156,14 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 			return only("delegation", "method", "signer")
 		}
 		return only("delegation")
+	case "DELEGATION_REVOKED": // the person took it back with their device; the Signer's revocation named (docs/commercial-gap4.md 7)
+		if purchase {
+			return errf("a revocation is of the task's delegation, not a purchase")
+		}
+		if p.AuthorizationMethod != "webauthn" || !ids(p.SignerApprovalID) {
+			return errf("a revocation is webauthn with the Signer's revocation")
+		}
+		return only("delegation", "method", "signer")
 	case "PURCHASE_PROPOSED":
 		if !purchase {
 			return errf("invalid purchase event")
@@ -335,6 +344,8 @@ type chain struct {
 	next                    uint64
 	prev                    string
 	bound                   bool
+	delegation              string // DELEGATION_BOUND's; DELEGATION_REVOKED names it, once
+	revoked                 bool
 	stopped, lifecycleEnded bool
 	proposed                map[string]bool
 	verdict, intent         map[string]string
@@ -464,6 +475,13 @@ func (st *chain) apply(e contracts.AuditEvent) error {
 		return coded("PURCHASE_INTENT_CHANGED", fmt.Sprintf("purchase %s was proposed with %s, not %s", po, pinned, e.Scope.IntentHash))
 	}
 	switch e.EventType {
+	case "DELEGATION_BOUND":
+		st.delegation = e.Payload.DelegationID
+	case "DELEGATION_REVOKED": // also after the task ended: the Signer would still have paid under it
+		if st.revoked || e.Payload.DelegationID != st.delegation {
+			return errors.New("one revocation, of the delegation bound to the task")
+		}
+		st.revoked, st.stopped = true, true
 	case "PURCHASE_PROPOSED":
 		if st.stopped || st.proposed[po] {
 			return errors.New("one proposal per purchase, none after the task ended")

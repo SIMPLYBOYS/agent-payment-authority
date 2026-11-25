@@ -510,3 +510,11 @@ test("say (Aaron 11/15): the talk goes to the window's Unity while it has the sc
   relay.say(msg);
   assert.deepEqual(seen, [msg]);
 });
+
+// The person's revocation shows beside the delegation it ends (docs/commercial-gap4.md 7).
+test("a revoked delegation is said under 1 委託", () => {
+  const events = [...boundEvents("webauthn"), ev(3, "DELEGATION_REVOKED", { purchase_order_id: "", authorization_method: "webauthn" })];
+  const items = A.showEvidence({ task: { task_id: "t", purchases: [] }, events }, { authenticator: "virtual" });
+  const r = items.find((x) => x.label === "1 委託・收回");
+  assert.ok(r && r.text.endsWith("收回了委託；之後不再請購或付款") && r.note === "WebAuthn", JSON.stringify(items));
+});

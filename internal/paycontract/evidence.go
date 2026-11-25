@@ -74,6 +74,8 @@ func Evidence(r *RunConditions, e contracts.AuditEvent) (mode, source string, ok
 			return auth()
 		}
 		return "fixture", "simulated", true
+	case "DELEGATION_REVOKED": // the person's device, always
+		return auth()
 	case "CREDENTIAL_VERIFIED": // a test issuer's credential
 		return "fixture", "test_issuer", true
 	case "APPROVED", "APPROVAL_DENIED", "GRANT_ISSUED": // decided: by the resolver's method

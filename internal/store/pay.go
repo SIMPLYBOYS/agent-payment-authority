@@ -334,6 +334,50 @@ func (s *Store) ConfirmDelegation(req DelegationRequest) (DelegationView, bool, 
 	return out, replay, err
 }
 
+// RevokeDelegation records the person's revocation of a delegation, as the
+// Signer verified and keeps it (docs/commercial-gap4.md 7), in the task it
+// is bound to: DELEGATION_REVOKED, after which the task takes no new
+// purchase or payment (paycontract.Ended); a payment already requested is
+// carried through, and the Signer signs it only if it did before. It
+// returns the task, or "" for a delegation bound to none (the Signer's
+// record is then the only one). Recording the same revocation again
+// writes nothing.
+func (s *Store) RevokeDelegation(delegationID, signerRevocationID string) (string, error) {
+	var taskID string
+	err := s.write(func(tx *sql.Tx, now uint64) error {
+		taskID = ""
+		var task sql.NullString
+		err := tx.QueryRow(`SELECT task_id FROM delegations WHERE delegation_id = ?`, delegationID).Scan(&task)
+		if errors.Is(err, sql.ErrNoRows) {
+			return refuse("DELEGATION_UNAVAILABLE", "no such delegation")
+		} else if err != nil || !task.Valid {
+			return err
+		}
+		taskID = task.String
+		t, err := s.openTask(tx, now, taskID)
+		if err != nil {
+			return err
+		}
+		for _, e := range t.events {
+			if e.EventType == "DELEGATION_REVOKED" {
+				if e.Payload.SignerApprovalID != signerRevocationID {
+					return refuse("IDEMPOTENCY_CONFLICT", "the delegation was revoked under another Signer revocation")
+				}
+				return nil
+			}
+		}
+		if err := t.expire(); err != nil {
+			return err
+		}
+		if err := t.emit("DELEGATION_REVOKED", nil, contracts.EventPayload{DelegationID: delegationID, AuthorizationMethod: "webauthn",
+			SignerApprovalID: signerRevocationID}); err != nil {
+			return err
+		}
+		return t.finish()
+	})
+	return taskID, err
+}
+
 // consumers are the trusted registry's consumer IDs.
 func (s *Store) consumers() []string {
 	var cfg contracts.RegistryConfig

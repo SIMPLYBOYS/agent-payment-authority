@@ -1380,6 +1380,9 @@ export function showEvidence(snapshot, traits = {}, chain = null) {
   const agent = agentLink(task.payment_capability, chain && chain.agent);
   const items = [...(agent ? [{ label: "Agent 身分", ...agent, note: "ERC-8004・平台代為註冊" + (walletProven(chain) ? "・付款錢包已由錢包簽章證明" : "") }] : []), { label: "1 委託", text: confirmedBy(snapshot, traits) || "客人已交代 Agent 預算與範圍",
     ...(bound && bound.authorization_method === "webauthn" ? { note: "WebAuthn" } : {}) }];
+  // The person took it back (docs/commercial-gap4.md 7): nothing is requested after it, the Signer signs nothing more.
+  if (((snapshot && snapshot.events) || []).some((e) => e.event_type === "DELEGATION_REVOKED"))
+    items.push({ label: "1 委託・收回", text: approverText(traits.authenticator) + "收回了委託；之後不再請購或付款", note: "WebAuthn" });
   if (!p) return items;
   if (p.credential) items.push({ label: "2 選購", text: p.credential.result === "valid" ? "出示客人的憑證，檢查通過（" + identityWords(task.identity_source) + "）" : "憑證檢查沒通過",
     note: "x402・BBS+" + (identityWords(task.identity_source, true) ? "・eKYC" : "") });

@@ -69,8 +69,23 @@ func TestDelegationByDevice(t *testing.T) {
 	opts, _ = json.Marshal(ch["options"])
 	rv := map[string]any{"delegation_id": id, "challenge_id": ch["challenge_id"], "verify_request_id": "rver-000000000001", "assertion": json.RawMessage(f.auth.Get(opts, f.origin))}
 	code, rr := f.post("/api/delegations/revoke/assertion", viewer, rv)
-	if rk, _ := rr["revoked"].(map[string]any); code != 200 || rk == nil || rk["delegation_id"] != id || !strings.HasPrefix(rk["revocation_id"].(string), "hap-") || rr["stopped_run"] != "" {
+	rk, _ := rr["revoked"].(map[string]any)
+	if code != 200 || rk == nil || rk["delegation_id"] != id || !strings.HasPrefix(rk["revocation_id"].(string), "hap-") || rr["stopped_run"] != "" ||
+		rr["task_id"] != run["task_id"] || rr["store_error"] != nil {
 		t.Fatalf("revoke %d %v", code, rr)
+	}
+	// The task's chain records it, by the person's (virtual) device; a resend adds nothing.
+	revoked := `"event_type":"DELEGATION_REVOKED"`
+	_, raw, _ = f.h.get("/api/tasks/"+run["task_id"].(string)+"/events", viewer)
+	// (The view leaves the Signer's ID out, as for DELEGATION_BOUND; the contract requires it in the record.)
+	if !strings.Contains(string(raw), revoked+`,"sequence":6`) || !strings.Contains(string(raw), `"delegation_id":"`+id+`","authorization_method":"webauthn","version":"apa.pay.v1","evidence_mode":"fixture","source":"virtual_authenticator"`) {
+		t.Fatalf("no DELEGATION_REVOKED in the task: %s", raw)
+	}
+	if code, again := f.post("/api/delegations/revoke/assertion", viewer, rv); code != 200 || again["task_id"] != run["task_id"] {
+		t.Fatalf("resend %d %v", code, again)
+	}
+	if _, raw, _ = f.h.get("/api/tasks/"+run["task_id"].(string)+"/events", viewer); strings.Count(string(raw), revoked) != 1 {
+		t.Fatalf("recorded twice: %s", raw)
 	}
 	if code, r := f.post("/api/delegations/revoke/challenge", viewer, map[string]string{"request_id": "rreq-000000000003", "delegation_id": id}); code != 409 || r["code"] != "DELEGATION_REVOKED" {
 		t.Fatalf("again: %d %v", code, r)

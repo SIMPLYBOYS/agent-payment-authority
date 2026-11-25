@@ -176,6 +176,7 @@ const delegationNotEvaluated = "the delegation confirmed by the person (E1a-D1 A
 var e1aLimits = []string{
 	"a device or virtual authenticator is the host's declaration (--authenticator-source); the checker checks it is consistent, not that a device was physical",
 	"a delegation confirmed by the person is read from its DELEGATION_BOUND (method webauthn, the Signer's confirmation named); the Signer's own record of it is not in the pack",
+	"a revocation by the person is read from its DELEGATION_REVOKED (the Signer's revocation named): E3 checks nothing is requested after it; a payment requested before it may still settle if the Signer signed it first, which the pack cannot order (the Signer's own record is not in the pack)",
 	"event and intent hashes and registry bindings use the pay contract's own pure functions: a fault there is shared",
 	"tx#2 is tied to its intent only through the Store's records and the EIP-3009 nonce, not by the chain",
 	"the paying host's prompt is buyer.PayingTaskPrompt, the host's own function: a change to it moves the host and this check together",
@@ -313,10 +314,14 @@ func e1aManifest(b *bundle, f *findings, r *E1aReport) (E1aManifest, bool) {
 }
 
 // e1aChain is E3: each task's events in sequence, each naming the previous
-// one's hash, a delivery never before its settlement.
+// one's hash, a delivery never before its settlement; once the person
+// revoked the delegation (docs/commercial-gap4.md 7), no purchase or
+// payment is requested after it, and it names the task's delegation and the
+// Signer's revocation.
 func e1aChain(f *findings, run *e1aRun) {
 	ev := "tasks/" + run.task.TaskID + "/events.json"
 	settled := map[string]bool{}
+	bound, revoked := "", false
 	for i, e := range run.events {
 		sp, ok := paycontract.SpecOf(e.Version)
 		if !ok {
@@ -336,6 +341,17 @@ func e1aChain(f *findings, run *e1aRun) {
 			intent = e.Scope.IntentHash
 		}
 		switch e.EventType {
+		case "DELEGATION_BOUND":
+			bound = e.Payload.DelegationID
+		case "DELEGATION_REVOKED":
+			if revoked || bound == "" || e.Payload.DelegationID != bound || e.Payload.AuthorizationMethod != "webauthn" || e.Payload.SignerApprovalID == "" {
+				f.fail("E3", []string{ev}, "DELEGATION_REVOKED (event %d) is not one revocation of the task's delegation by the person's device", i+1)
+			}
+			revoked = true
+		case "PURCHASE_PROPOSED", "PAYMENT_REQUESTED":
+			if revoked {
+				f.fail("E3", []string{ev}, "%s (event %d) after the person revoked the delegation", e.EventType, i+1)
+			}
 		case "PAYMENT_SETTLED":
 			settled[intent] = true
 		case "RESOURCE_DELIVERED", "RECEIPT_ISSUED":
@@ -535,6 +551,8 @@ func e1aMode(r contracts.RunConditions, e contracts.AuditEvent) (string, string)
 			return auth()
 		}
 		return "fixture", "simulated"
+	case "DELEGATION_REVOKED": // the person's device, always
+		return auth()
 	case "CREDENTIAL_VERIFIED":
 		return "fixture", "test_issuer"
 	case "APPROVED", "APPROVAL_DENIED", "GRANT_ISSUED":

@@ -105,8 +105,9 @@ func (a *api) revokeChallenge(w http.ResponseWriter, r *http.Request) {
 
 // revokeAssertion is POST /api/delegations/revoke/assertion {delegation_id,
 // challenge_id, verify_request_id, assertion}: the Signer verifies and
-// keeps the revocation, then a run still going under the delegation is
-// stopped as 停止 Agent stops it. A resend answers what the Signer kept.
+// keeps the revocation, the Store records it in the delegation's task, then
+// a run still going under it is stopped as 停止 Agent stops it. A resend
+// answers what the Signer kept and writes nothing new.
 func (a *api) revokeAssertion(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		DelegationID    string          `json:"delegation_id"`
@@ -124,13 +125,22 @@ func (a *api) revokeAssertion(w http.ResponseWriter, r *http.Request) {
 		a.delegationAnswer(w, "revoke-assertion", ans, nil)
 		return
 	}
+	// The task's own record first (its DELEGATION_REVOKED, for the checker),
+	// then the stop, whose TASK_CANCELLED follows it. The Signer already
+	// refuses either way: a Store not written is said, not retried here
+	// (the same request again writes it).
+	task, err := a.st.RevokeDelegation(req.DelegationID, ans.Reply.ApprovalID)
 	stopped := ""
 	if a.control != nil {
 		stopped = a.control.stopDelegation(req.DelegationID)
 	}
-	fmt.Fprintf(a.out, "demo: delegation revoked by the person's device: %s %s stopped_run=%q\n", g.ConsumerID, req.DelegationID, stopped)
-	reply(w, http.StatusOK, map[string]any{"revoked": map[string]any{"delegation_id": req.DelegationID, "revocation_id": ans.Reply.ApprovalID,
-		"revoked_at": ans.Reply.VerifiedAt}, "stopped_run": stopped})
+	fmt.Fprintf(a.out, "demo: delegation revoked by the person's device: %s %s task=%q store=%s stopped_run=%q\n", g.ConsumerID, req.DelegationID, task, store.CodeOf(err), stopped)
+	out := map[string]any{"revoked": map[string]any{"delegation_id": req.DelegationID, "revocation_id": ans.Reply.ApprovalID,
+		"revoked_at": ans.Reply.VerifiedAt}, "stopped_run": stopped, "task_id": task}
+	if err != nil {
+		out["store_error"] = store.CodeOf(err)
+	}
+	reply(w, http.StatusOK, out)
 }
 
 func termsRefused(w http.ResponseWriter, code string) {

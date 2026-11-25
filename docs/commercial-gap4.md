@@ -148,17 +148,30 @@
   - `GET /v1/approvals/delegations/{id}` 會帶出 `revocation_id` 與 `revoked_at`。
 - **Host**（`cmd/demo/delegate.go`）：
   - `POST /api/delegations/revoke/challenge` 與 `/revoke/assertion`，只接受客人自己的 viewer token。
-  - Signer 記下收回後，這份委託下還在執行的場次會照「停止 Agent」的方式停下，Store 照舊記 `TASK_CANCELLED`。
+  - Signer 記下收回後，Store 在這份委託綁定的 task 記一筆 `DELEGATION_REVOKED`，帶 Signer 的收回 ID。接著，這份委託下還在執行的場次會照「停止 Agent」的方式停下，Store 照舊記 `TASK_CANCELLED`。
+- **付款合約**（`internal/paycontract`）：新增 `DELEGATION_REVOKED` 事件。它必須是 webauthn、帶 Signer 的收回 ID、指向這個 task 綁定的委託，每個 task 最多一筆；task 結束後也可以記，因為 Signer 在委託期限內本來還會付款。
+  - 記下之後，Store 不再接受新的請購或付款請求，待核准的請購也不能再核准。
+  - 已經提出的付款照舊走完：Signer 在收回前已簽的會結算，還沒簽的會被拒。
+  - Store 的資料庫結構不變，事件表本來就接受新的事件種類。
+- **checker**（`internal/verification/e1a.go`）：
+  - E3 檢查三件事：`DELEGATION_REVOKED` 是本人裝置做的、指向這個 task 的委託、只有一筆；它之後沒有任何 `PURCHASE_PROPOSED` 或 `PAYMENT_REQUESTED`。
+  - E6 照 run 的條件標它的來源：實機是 `signer_webauthn`，virtual authenticator 是 `virtual_authenticator`。
+  - 「收回前提出、收回後才簽完」的付款，證據包分不出先後，所以寫在 checker 的限制清單裡。
 - **頁面**：本人裝置模式下，Agent 卡片多一個「收回委託（本人裝置）」按鈕，完成後顯示「委託已收回」。付款被拒時，下一步說明會寫「客人已收回這份委託」。
 
 **驗證**
 
-- Go 測試：`TestDelegationRevoke`、`TestDelegationRoutes`（Signer），`TestDelegationByDevice`、`TestStopDelegation`（Host）。
+- Go 測試：
+  - Signer：`TestDelegationRevoke`、`TestDelegationRoutes`
+  - Host：`TestDelegationByDevice`、`TestStopDelegation`
+  - 付款合約：`TestRevocation`
+  - checker：`TestE1aChainAfterARevocation`
+- 網頁：`show.test.mjs` 確認「為什麼可信」清單在「1 委託」下多一行「收回」。
 - 瀏覽器：`scripts/verify/a2-ui.mjs` 第 9 段，用 CDP virtual authenticator 測試（測試用，不是實機結果）。
 
 **界線（照實說）**
 
 - **收回仍經過 Host 轉送**：Host 擋得住，但造不出來。一個被入侵的 Host 可以不轉送，但沒有本人的裝置，就做不出收回，也撤不掉已記下的收回。Signer 機器上的管理者命令（`apa-signer approver revoke`）停用整個裝置，它確認過的委託會一起失效；那是 Host 之外的另一條路。
-- **checker 看不到收回本身**：證據包的事件裡只有停下場次的 `TASK_CANCELLED`（代碼仍是 `HOST_CANCELLED`），以及被拒那一筆 Store 記下的 `signer_code`。要讓 checker 驗「收回之後沒有付款」，需要在付款合約加一個事件並更新契約測試向量，這次沒做。
-- **還沒開始的委託**：頁面不會用舊委託開場，所以 Host 開場時不再問 Signer；若真的用一份已收回的委託開場，第一筆付款就會被 Signer 拒絕（在 testnet 上預算已預留，記為 `RESERVED_NOT_PAID`，錢沒有動）。
+- **checker 查得到的範圍**：checker 確認收回之後沒有新的請購或付款請求。收回前已提出、在收回之前已由 Signer 簽好的那一筆，仍會走完結算；證據包排不出 Signer 簽章與收回的先後（Signer 自己的紀錄不在證據包裡）。
+- **還沒綁 task 的委託**：收回只記在 Signer。頁面不會用舊委託開場，所以 Host 開場時不再問 Signer；若真的用一份已收回的委託開場，第一筆付款會被 Signer 拒絕。在 testnet 上預算已經預留，記為 `RESERVED_NOT_PAID`，錢沒有動。
 - **`/opt` 的 Signer** 要換成新版才有這個功能：舊版不認得這兩個路徑，收回會失敗，頁面說「委託未收回」，委託照舊有效。
