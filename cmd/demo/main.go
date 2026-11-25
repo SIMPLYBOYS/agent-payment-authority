@@ -324,6 +324,14 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	} else if shop, err = merchant.New("http://" + addr); err != nil {
 		return err
 	}
+	if pay != nil && creds != nil { // boundary 4: the paying shop verifies the presentation itself, the worker presents it
+		id, pk, err := creds.IssuerPublic()
+		if err != nil {
+			return err
+		}
+		shop.TrustIssuer(id, pk)
+		pay.creds = creds
+	}
 	offers := store.OfferBook{}
 	products, scenes := map[string]toolbridge.Product{}, map[string]string{}
 	for _, o := range shop.Offers() {

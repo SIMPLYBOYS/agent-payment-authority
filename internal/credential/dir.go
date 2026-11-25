@@ -499,30 +499,40 @@ var ErrHolderMaterial = errors.New("credential: holder material unavailable")
 // error is a transient failure to build the proof (C2-D12: nothing is
 // submitted, the challenge stays issued).
 func (d *Dir) Present(task, consumer string, r Request) (Presentation, error) {
+	c, sig, pk, k, err := d.material(task, consumer)
+	if err != nil {
+		return Presentation{}, err
+	}
+	return Present(c, sig, pk, k, r)
+}
+
+// material is task's stored credential, its signature, the issuer's key and
+// consumer's holder key, checked to be the registered holder's and sound.
+func (d *Dir) material(task, consumer string) (Credential, []byte, []byte, ed25519.PrivateKey, error) {
 	s, err := d.ReadCredential(task)
 	if err != nil {
-		return Presentation{}, fmt.Errorf("%w: %v", ErrHolderMaterial, err)
+		return nil, nil, nil, nil, fmt.Errorf("%w: %v", ErrHolderMaterial, err)
 	}
 	k, err := d.HolderKey(consumer)
 	if err != nil {
-		return Presentation{}, fmt.Errorf("%w: %v", ErrHolderMaterial, err)
+		return nil, nil, nil, nil, fmt.Errorf("%w: %v", ErrHolderMaterial, err)
 	}
 	holders, err := d.Holders()
 	if err != nil {
-		return Presentation{}, fmt.Errorf("%w: %v", ErrHolderMaterial, err)
+		return nil, nil, nil, nil, fmt.Errorf("%w: %v", ErrHolderMaterial, err)
 	}
 	_, pk, err := d.IssuerPublic()
 	if err != nil {
-		return Presentation{}, fmt.Errorf("%w: %v", ErrHolderMaterial, err)
+		return nil, nil, nil, nil, fmt.Errorf("%w: %v", ErrHolderMaterial, err)
 	}
 	c := s.Credential
 	if h := HolderField(k.Public().(ed25519.PublicKey)); h != holders[consumer] || h != c["holder"] || c["consumer_id"] != consumer || c["task_id"] != task {
-		return Presentation{}, fmt.Errorf("%w: the key or credential is not this consumer's registered holder's", ErrHolderMaterial)
+		return nil, nil, nil, nil, fmt.Errorf("%w: the key or credential is not this consumer's registered holder's", ErrHolderMaterial)
 	}
 	if err := bbs.New(curve).Verify(c.messages(), bytes.Clone(s.Signature), pk); err != nil { // a corrupt credential, not a failed proof
-		return Presentation{}, fmt.Errorf("%w: the stored signature does not verify", ErrHolderMaterial)
+		return nil, nil, nil, nil, fmt.Errorf("%w: the stored signature does not verify", ErrHolderMaterial)
 	}
-	return Present(c, s.Signature, pk, k, r)
+	return c, s.Signature, pk, k, nil
 }
 
 const statusVersion = "apa.status-list.v1"

@@ -311,7 +311,22 @@ type Merchant struct {
 	// shop signs nothing: its quotes are fixed in the contract vectors.
 	key *secp256k1.PrivateKey
 	did []byte // the did:web document
+	// issuer: the credential issuer this shop trusts, set by TrustIssuer; the
+	// shop then verifies the buyer's presentation itself (boundary 4).
+	issuer *trustedIssuer
 }
+
+type trustedIssuer struct {
+	id string
+	pk []byte
+}
+
+// TrustIssuer makes the shop verify, before it settles, the presentation of
+// the credential each of its venues asks for (boundary 4,
+// docs/commercial-credential-ext.md 4): issued by id under its BBS+ public
+// key pk, bound to this payment, disclosing what the 402 asks. Without it
+// the shop declares what it asks and the Host alone checks the credential.
+func (m *Merchant) TrustIssuer(id string, pk []byte) { m.issuer = &trustedIssuer{id: id, pk: pk} }
 
 // External is a product another x402 server sells (B5: test402.com,
 // docs/commercial-p2b.md): the data shop's catalog lists it with its
@@ -650,10 +665,50 @@ func (m *Merchant) serveResource(w http.ResponseWriter, r *http.Request) {
 		status, body, payload = o.judge(sig)
 	}
 	if payload != nil && m.settle != nil {
+		if why := m.credentialRefused(o, r.Header.Get(x402.HeaderPaymentSignature), payload); why != "" {
+			m.paymentRequired(w, o, http.StatusPaymentRequired, problem{"invalid_credential", "the payment carries no valid presentation of the credential this resource asks for (" + why + "); nothing was settled"})
+			return
+		}
 		m.settled(w, o, m.settle.Pay(r.Context(), o, payload))
 		return
 	}
 	m.paymentRequired(w, o, status, body)
+}
+
+// credentialRefused is why the payment's presentation does not hold for a
+// venue that asks for a credential, when the shop trusts an issuer; "" when
+// it holds or nothing is asked. It is bound to what the shop sees: its own
+// did:web, the resource, its accepts entry and the authorization's nonce.
+func (m *Merchant) credentialRefused(o offer, header string, payload json.RawMessage) string {
+	if m.issuer == nil || o.Requires == nil {
+		return ""
+	}
+	var p x402.PaymentPayload
+	if err := x402.Decode(header, &p); err != nil {
+		return "unreadable"
+	}
+	raw, err := x402.PresentationIn(p.Extensions)
+	if err != nil || raw == nil {
+		return "none"
+	}
+	var pr credential.ShopPresentation
+	var auth struct {
+		Authorization struct {
+			Nonce string `json:"nonce"`
+		} `json:"authorization"`
+	}
+	if json.Unmarshal(raw, &pr) != nil || json.Unmarshal(payload, &auth) != nil {
+		return "unreadable"
+	}
+	did, err := x402.DIDWeb(m.base)
+	if err != nil {
+		return "unreadable"
+	}
+	b := credential.ShopBinding{Verifier: did, ResourceURL: o.url, Accepted: o.accepts, PaymentNonce: auth.Authorization.Nonce}
+	if err := credential.VerifyAtShop(pr, b, m.issuer.id, m.issuer.pk, o.Requires); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 // settled answers a settlement outcome (P2): the content and

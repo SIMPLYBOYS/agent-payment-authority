@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -24,6 +26,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signerclient"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/store"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/verification"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
 
 // E1a-3 (docs/commercial-e1a.md 4.3): an apa.pay.v2 purchase, its BBS+
@@ -39,6 +42,15 @@ func TestV2PaidOnAnvil(t *testing.T) {
 	creds, err := credential.OpenDir(credDir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Boundary 4: the shop verifies the buyer's presentation itself, which the worker derives for the payment.
+	issuer, issuerPK, err := creds.IssuerPublic()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.shop.TrustIssuer(issuer, issuerPK)
+	if err := creds.SetSubjects(map[string]map[string]string{"consumer-a": {"buyer_type": "individual", "country": "KR", "age_over_18": "true"}}); err != nil {
+		t.Fatal(err) // a v2 credential: attributes to show the shop
 	}
 	var reg contracts.RegistryConfig
 	readJSON(t, "testdata/contracts/registry.json", &reg)
@@ -82,7 +94,11 @@ func TestV2PaidOnAnvil(t *testing.T) {
 	po.Intent.PaymentRequirementHash, _ = sp.RequirementHash(w.offer.Quote)
 	order, _ := json.Marshal(po)
 	sess := contracts.Session{ConsumerID: "consumer-a", AgentID: "agent-a", TaskID: "task-a"}
-	ch, ok, err := s.IssueChallenge(sess, order, nil)
+	asked, err := x402.CredentialIn(w.offer.Quote.Extensions) // what the shop's 402 asks, as the Host's bridge reads it (venueRequires)
+	if err != nil || asked == nil {
+		t.Fatalf("the 402 asks for no credential: %v", err)
+	}
+	ch, ok, err := s.IssueChallenge(sess, order, slices.Collect(maps.Keys(asked.Requires)))
 	if err != nil || !ok {
 		t.Fatalf("challenge: %v %v", ok, err)
 	}
@@ -95,7 +111,7 @@ func TestV2PaidOnAnvil(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := s.SubmitV2(sess, order, store.Presented{Presentation: &pres})
+	r, err := s.SubmitV2(sess, order, store.Presented{Presentation: &pres, Require: asked.Requires})
 	if err != nil || r.Purchase.Decision.PolicyVerdict != "Allow" || r.Purchase.Credential == nil || r.Purchase.Credential.Result != "valid" {
 		t.Fatalf("submit: %+v %+v %v", r.Purchase.Decision, r.Purchase.Credential, err)
 	}
@@ -118,7 +134,7 @@ func TestV2PaidOnAnvil(t *testing.T) {
 		t.Fatal(err)
 	}
 	wk := &Worker{Store: s, Relayer: w.host, Signer: signerclient.New(w.socket, s), Shop: HTTPShop{Client: w.srv.Client()},
-		Chain: reconcileToken(w), Clock: w.clock, Margin: 30}
+		Chain: reconcileToken(w), Clock: w.clock, Margin: 30, Credentials: creds}
 	deadline := time.Now().Add(90 * time.Second)
 	for pay.State != "delivered" && time.Now().Before(deadline) {
 		if pay, err = wk.Step(bg, pay); err != nil && !errors.Is(err, ErrPending) {

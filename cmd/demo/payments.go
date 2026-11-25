@@ -29,6 +29,7 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/ae1"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/keytool"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
@@ -129,6 +130,7 @@ type payments struct {
 	quota   shopQuota     // the shop's transfers today; nil without
 	shopFor time.Duration // the worker's wait for the shop: above the settler's own wait
 	out     io.Writer
+	creds   *credential.Dir // the holder's: a presentation to a shop that asks (boundary 4); nil sends none
 }
 
 // checkEnvironment is the file's environment rules, before anything is opened.
@@ -517,7 +519,8 @@ func (p *payments) run(ctx context.Context, st *store.Store, socket string, cloc
 		Shop:  payflow.HTTPShop{Client: &http.Client{Timeout: p.shopFor, Transport: &http.Transport{Proxy: nil, MaxResponseHeaderBytes: 64 << 10, IdleConnTimeout: 90 * time.Second}}},
 		Chain: reconcile.Token{RPC: p.rpc, Address: token, Confirmations: p.cfg.Confirmations, FromBlock: p.cfg.TokenFromBlock},
 		Clock: clock, Margin: payMargin, Before: starter.Start,
-		Log: func(intent string, err error) { fmt.Fprintln(p.out, "demo: payment", intent, logged(err)) }}
+		Log:         func(intent string, err error) { fmt.Fprintln(p.out, "demo: payment", intent, logged(err)) },
+		Credentials: p.creds}
 	for { // Run returns only when its recovery failed (or ctx ended): try again
 		err := w.Run(ctx)
 		if err == nil || ctx.Err() != nil {

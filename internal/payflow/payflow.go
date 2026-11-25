@@ -17,6 +17,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/budget"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
@@ -155,11 +157,14 @@ type Worker struct {
 	Every   time.Duration // Run's interval; a second when 0
 	Log     func(intent string, err error)
 	Before  func(context.Context)
-	once    sync.Once
-	kick    chan struct{}
-	mu      sync.Mutex
-	asked   map[string][2]uint64 // intent -> the next time the shop is asked again, the wait before it
-	moving  map[string]bool      // intents a goroutine of Run is moving now
+	// Credentials presents the buyer's credential to a shop whose 402 asks
+	// for one (boundary 4, docs/commercial-credential-ext.md 4); nil sends none.
+	Credentials *credential.Dir
+	once        sync.Once
+	kick        chan struct{}
+	mu          sync.Mutex
+	asked       map[string][2]uint64 // intent -> the next time the shop is asked again, the wait before it
+	moving      map[string]bool      // intents a goroutine of Run is moving now
 }
 
 // claim marks intent as being moved; false when it already is.
@@ -373,7 +378,7 @@ func (w *Worker) reserve(ctx context.Context, p store.Payment, o paycontract.Pur
 		case "RESERVATION_PENDING", "TASK_BUSY", "RELAYER_NONCE_BLOCKED", "TASK_REGISTRATION_PENDING":
 			return p, ErrPending
 		}
-		w.log(p.IntentHash, err) // the relayer's reason (RELAYER_DAILY_CAP, ...) is said on the Host's terminal (10/24: it was found only from the chain)
+		w.log(p.IntentHash, err)                                     // the relayer's reason (RELAYER_DAILY_CAP, ...) is said on the Host's terminal (10/24: it was found only from the chain)
 		return w.Store.PaymentFailed(p.IntentHash, "RESERVE_FAILED") // refused before a transaction, or reverted: nothing spent
 	} else if err != nil {
 		return p, ErrPending // a node or the relayer itself: Lookup decides next time
@@ -419,7 +424,7 @@ func (w *Worker) sign(ctx context.Context, p store.Payment, o paycontract.Purcha
 		if slices.Contains(signerRetry, signer.Refusal(r)) && !w.late(o) {
 			return p, ErrPending
 		}
-		w.log(p.IntentHash, err) // the Signer's reason on the terminal (10/30: DELEGATION_EXPIRED was found only in the Store)
+		w.log(p.IntentHash, err)                                        // the Signer's reason on the terminal (10/30: DELEGATION_EXPIRED was found only in the Store)
 		return w.Store.PaymentFailed(p.IntentHash, "RESERVED_NOT_PAID") // tx#1 spent: a person's to look at (decision 6)
 	case slices.Contains(storeRetry, store.Code(err)) && !w.late(o):
 		return p, ErrPending
@@ -452,9 +457,41 @@ func (w *Worker) sign(ctx context.Context, p store.Payment, o paycontract.Purcha
 	return w.Store.PaymentSigned(p.IntentHash, raw)
 }
 
+// presentation is the PaymentPayload's extensions: {} unless the quote's 402
+// asks for a credential, then a presentation to that shop derived for this
+// payment (a new proof each time it is sent: the shop keys its settlement on
+// the transfer, not on the header). Holder material missing is sent as no
+// presentation, which the shop refuses.
+func (w *Worker) presentation(o paycontract.PurchaseOrder, a signer.SignedAuthorization) (json.RawMessage, error) {
+	asked, err := x402.CredentialIn(o.Quote.Extensions)
+	if err != nil || asked == nil || w.Credentials == nil {
+		return json.RawMessage(`{}`), err
+	}
+	u, err := url.Parse(o.Intent.ResourceURL)
+	if err != nil {
+		return nil, err
+	}
+	did, err := x402.DIDWeb(u.Scheme + "://" + u.Host)
+	if err != nil {
+		return nil, err
+	}
+	pr, err := w.Credentials.PresentToShop(o.Intent.TaskID, o.Intent.ConsumerID,
+		credential.ShopBinding{Verifier: did, ResourceURL: o.Intent.ResourceURL, Accepted: o.Quote.SelectedRequirement, PaymentNonce: a.Nonce}, asked.Requires)
+	if errors.Is(err, credential.ErrHolderMaterial) || errors.Is(err, credential.ErrNoAttributes) {
+		return json.RawMessage(`{}`), nil
+	} else if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(pr)
+	if err != nil {
+		return nil, err
+	}
+	return x402.PresentationExtensions(raw)
+}
+
 // paymentSignature is the x402 PAYMENT-SIGNATURE of the signed authorization
-// for the order's quote: always the same for a payment.
-func paymentSignature(o paycontract.PurchaseOrder, a signer.SignedAuthorization) (string, error) {
+// for the order's quote, with ext as its extensions.
+func paymentSignature(o paycontract.PurchaseOrder, a signer.SignedAuthorization, ext json.RawMessage) (string, error) {
 	// `to` as the quote writes payTo (a 402 may use EIP-55's case, B5-D1): a
 	// server comparing the two strings as they are finds them equal; the
 	// signature covers the address, not its case.
@@ -472,7 +509,7 @@ func paymentSignature(o paycontract.PurchaseOrder, a signer.SignedAuthorization)
 		return "", err
 	}
 	return x402.Encode(x402.PaymentPayload{X402Version: x402.Version, Resource: &x402.ResourceInfo{URL: o.Intent.ResourceURL},
-		Accepted: o.Quote.SelectedRequirement, Payload: payload, Extensions: json.RawMessage(`{}`)})
+		Accepted: o.Quote.SelectedRequirement, Payload: payload, Extensions: ext})
 }
 
 func authorization(a signer.SignedAuthorization) (reconcile.Authorization, error) {
@@ -516,7 +553,11 @@ func (w *Worker) submit(ctx context.Context, p store.Payment, o paycontract.Purc
 	if err != nil {
 		return p, err
 	}
-	sig, err := paymentSignature(o, a)
+	ext, err := w.presentation(o, a)
+	if err != nil {
+		return p, err
+	}
+	sig, err := paymentSignature(o, a, ext)
 	if err != nil {
 		return p, err
 	}

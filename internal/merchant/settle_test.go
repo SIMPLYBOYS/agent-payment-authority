@@ -1,6 +1,7 @@
 package merchant
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -17,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth/ethtest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
@@ -86,6 +88,11 @@ func (s *chainShop) offer(id string) Offer {
 // header is the PAYMENT-SIGNATURE of a for the product's offer; tamper
 // may change the signature.
 func (s *chainShop) header(id string, a auth, tamper func([]byte)) string {
+	return s.headerWith(id, a, tamper, json.RawMessage(`{}`))
+}
+
+// headerWith is header with ext as the payload's extensions (boundary 4: the buyer's presentation).
+func (s *chainShop) headerWith(id string, a auth, tamper func([]byte), ext json.RawMessage) string {
 	o := s.offer(id)
 	dom := signer.Domain{Name: "USDC", Version: "2", ChainID: strconv.Itoa(ethtest.Chain), VerifyingContract: s.usdc.Hex()}
 	nonce := "0x" + hex.EncodeToString(a.nonce[:])
@@ -104,7 +111,7 @@ func (s *chainShop) header(id string, a auth, tamper func([]byte)) string {
 		"from": a.from.Hex(), "to": a.to.Hex(), "value": strconv.FormatUint(a.value, 10),
 		"validAfter": strconv.FormatUint(a.after, 10), "validBefore": strconv.FormatUint(a.till, 10), "nonce": nonce}})
 	h, err := x402.Encode(x402.PaymentPayload{X402Version: 2, Resource: &x402.ResourceInfo{URL: o.URL}, Accepted: o.Quote.SelectedRequirement,
-		Payload: payload, Extensions: json.RawMessage(`{}`)})
+		Payload: payload, Extensions: ext})
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -569,5 +576,46 @@ func TestSignedOfferAndReceipt(t *testing.T) {
 	_, sr := s.get("kr-market", s.header("kr-market", s.auth(500000), nil))
 	if signed, err := x402.ShopReceipt(o.Quote.Extensions, sr.Extensions, o.URL, sr.Network, s.payer.Addr.Hex(), sr.Transaction); !signed || err != nil {
 		t.Fatalf("receipt %s: %v %v", sr.Extensions, signed, err)
+	}
+}
+
+// Boundary 4 (docs/commercial-credential-ext.md 4): a shop that trusts an
+// issuer settles a venue's payment only with a presentation of the asked
+// attributes bound to that payment; without one, or with another payment's,
+// nothing is sent.
+func TestCredentialPresentedToTheShop(t *testing.T) {
+	s := newChainShop(t, 1)
+	is, err := credential.NewIssuerKey("issuer-test", bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.m.TrustIssuer(is.ID, is.PK)
+	cred := credential.Credential{"schema": credential.SchemaV2, "issuer": is.ID, "task_id": "task-a", "consumer_id": "consumer-a", "c0": credential.C0Placeholder,
+		"expiry": "1891903600", "holder": "ed25519:" + strings.Repeat("1", 64), "status": "3", "buyer_type": "individual", "country": "KR", "age_over_18": "true"}
+	sig, err := is.Issue(cred)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := s.offer("kr-market")
+	present := func(a auth) json.RawMessage {
+		b := credential.ShopBinding{Verifier: "did:web:127.0.0.1%3A8402", ResourceURL: o.URL, Accepted: o.Quote.SelectedRequirement, PaymentNonce: "0x" + hex.EncodeToString(a.nonce[:])}
+		p, err := credential.PresentToShop(cred, sig, is.PK, b, map[string]string{"country": ""})
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(p)
+		ext, _ := x402.PresentationExtensions(raw)
+		return ext
+	}
+	before := s.gasNonce()
+	a := s.auth(500000)
+	for name, ext := range map[string]json.RawMessage{"none": json.RawMessage(`{}`), "another payment's": present(s.auth(500000))} {
+		rec, _ := s.get("kr-market", s.headerWith("kr-market", a, nil, ext))
+		if rec.Code != 402 || !strings.Contains(rec.Body.String(), "invalid_credential") || s.gasNonce() != before {
+			t.Fatalf("%s: %d %s, gas nonce %d -> %d", name, rec.Code, rec.Body, before, s.gasNonce())
+		}
+	}
+	if rec, sr := s.get("kr-market", s.headerWith("kr-market", a, nil, present(a))); rec.Code != 200 || !sr.Success {
+		t.Fatalf("with its presentation: %d %s", rec.Code, rec.Body)
 	}
 }

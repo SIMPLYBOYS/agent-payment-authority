@@ -63,6 +63,7 @@ type anvilWorld struct {
 	host         *budget.Client
 	srv          *httptest.Server
 	offer        merchant.Offer
+	shop         *merchant.Merchant
 	clock        func() uint64
 	now          uint64
 }
@@ -176,7 +177,7 @@ func newAnvilWorldVia(t *testing.T, facilitated bool) *anvilWorld {
 	}
 	shop.Register(mux)
 	return &anvilWorld{rpc: rpc, usdc: usdc, budget: contract, verify: verifier, payer: payer, payTo: payTo, addrs: addrs, socket: socket, host: host, srv: srv,
-		offer: shop.Offers()[0], clock: clock, now: now} // the offer: kr-market, 500000
+		offer: shop.Offers()[0], shop: shop, clock: clock, now: now} // the offer: kr-market, 500000
 }
 
 // reconcileToken reads w's test USDC, one block deep.

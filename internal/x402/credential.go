@@ -67,3 +67,39 @@ func WithinCap(asked, allowed map[string]string) error {
 	}
 	return nil
 }
+
+// The buyer's answer, in its PaymentPayload: extensions["apa-credential"].info.presentation,
+// a presentation the shop verifies itself (credential.VerifyAtShop), opaque here.
+type presentationExt struct {
+	Info struct {
+		Presentation json.RawMessage `json:"presentation"`
+	} `json:"info"`
+}
+
+// PresentationExtensions is a PaymentPayload's extensions carrying p.
+func PresentationExtensions(p json.RawMessage) (json.RawMessage, error) {
+	var e presentationExt
+	e.Info.Presentation = p
+	return json.Marshal(map[string]presentationExt{CredentialKey: e})
+}
+
+// PresentationIn reads the presentation out of a PaymentPayload's
+// extensions: nil (no error) when there is none.
+func PresentationIn(ext json.RawMessage) (json.RawMessage, error) {
+	var all map[string]json.RawMessage
+	if len(ext) == 0 || string(ext) == "null" {
+		return nil, nil
+	}
+	if err := json.Unmarshal(ext, &all); err != nil {
+		return nil, errors.New("extensions is not an object")
+	}
+	raw, ok := all[CredentialKey]
+	if !ok {
+		return nil, nil
+	}
+	var e presentationExt
+	if err := json.Unmarshal(raw, &e); err != nil || len(e.Info.Presentation) == 0 {
+		return nil, errors.New("the apa-credential extension carries no presentation")
+	}
+	return e.Info.Presentation, nil
+}

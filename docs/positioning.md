@@ -86,7 +86,7 @@
 | 超出範圍時本人逐筆核准 | `AuthorizationGrant`：Signer 驗過本人裝置的 WebAuthn 簽章（`amr: ["webauthn"]`，可加語音）才發，綁 `intent_hash`，用一次（`jti`） | 本人在場（human-present）時，本人確認 closed mandate | Immediate 模式：本人直接簽 closed mandate（確切的金額與收款人），沒有 L3 |
 | 本人的金鑰 | passkey（WebAuthn） | 可驗證的數位憑證（OpenID4VP，建議 Digital Credentials API），或 Agent 提供者的受信任畫面；passkey 只列為「之後可能」 | L1 `cnf.jwk` 綁的本人金鑰 |
 | 防重放 | EIP-3009 nonce、預算 nullifier、核准的 `jti` | key binding 的 `nonce`、`sd_hash` | L2、L3 各自的 `nonce`；L3 的 `exp` 建議 5 分鐘 |
-| 最少揭露 | BBS+ 憑證：店家只看到要求的屬性（國家、是否滿 18 歲），不同店家之間無法串連 | SD-JWT 的 disclosure | SD-JWT；`allowed`、`line_items` 的個別項目可以選擇揭露 |
+| 最少揭露 | BBS+ 憑證：店家只看到要求的屬性（國家、是否滿 18 歲），憑證這一層不同店家之間無法串連；付款錢包地址每間店都看得到，付款層仍可串連 | SD-JWT 的 disclosure | SD-JWT；`allowed`、`line_items` 的個別項目可以選擇揭露 |
 | 結果 | x402 `PAYMENT-RESPONSE`＋鏈上交易＋事件雜湊鏈＋證據包，checker 只讀證據與鏈重算 | Mandate Receipt（`iss`、`result`、`reference`） | 規格頁沒寫 |
 | 格式 | JSON 加上分領域的雜湊（`apa.pay.v2`）；憑證是自訂信封的舊版 BBS+ | SD-JWT（`vct`：`mandate.*`） | SD-JWT 委託鏈（L1 `sd+jwt`；L2、L3 `kb-sd-jwt`） |
 
@@ -120,10 +120,10 @@ FUTUREMODE 筆記在 9/23 審查時列出五條邊界：做到才能說「通過
 | 1 報價完整綁定：`AuthorizationIntent` 帶 HTTP method、完整網址、`x402Version`、scheme，以及選中那份報價的雜湊 `payment_requirement_hash` | `internal/toolbridge/shop.go` 算雜湊；`PurchaseOrder.Validate` 重算，對不上就拒絕 | `internal/contracts/contracts_test.go`：改任何一個欄位，雜湊都會變；`Test402Tampering`：網址、版本、多份報價、轉址都拒絕 | 做到 |
 | 2 `accepted` 必須完全相同：付款裡的 `accepted` 要和商店給的那份一模一樣 | `internal/merchant/merchant.go` 逐位元比對；`apa-facilitator` 轉成標準格式後比對 | `TestPaymentSignatureNeverDelivers`：金額、收款人、scheme、網路、只差大小寫的鍵都拒絕；facilitator 的 `accepted not the requirements` | 做到 |
 | 3 驗證與結算分開：`/verify` 唯讀；驗證失敗就不結算；確認到設定的區塊深度前不交付 | `internal/facilitator`、`internal/merchant` | `TestVerifyIsReadOnly`、`TestVerificationFailuresSendNothing`、`TestNothingDeliveredBeforeConfirmations`；checker E4 向鏈核對兩筆交易 | 做到 |
-| 4 擴充欄位放對位置：憑證的要求放在 `PAYMENT-REQUIRED` 的 `extensions`，證明放在 `PaymentPayload` 的 `extensions` | 要求：付款商店在 402 的 `extensions["apa-credential"]` 宣告，Host 只接受場景設定範圍內的（11/25，`docs/commercial-credential-ext.md`）。證明：仍在 Host 組請購單時驗，`PaymentPayload` 的 `extensions` 是空的 `{}` | `TestVenueRequires`、`TestCredentialRequirement`；checker E2 從報價讀要求，驗揭露不多不少 | **前半做到**。證明交給商店驗牽涉隱私取捨，還沒做；不能說憑證完整走 x402 |
+| 4 擴充欄位放對位置：憑證的要求放在 `PAYMENT-REQUIRED` 的 `extensions`，證明放在 `PaymentPayload` 的 `extensions` | 要求：付款商店在 402 的 `extensions["apa-credential"]` 宣告，Host 只接受場景設定範圍內的。證明：付款時另外產生一份只揭露 schema、發行者與要求屬性的 BBS+ 證明，綁商店的 did:web、資源、報價與 EIP-3009 nonce，放進 `PaymentPayload` 的 `extensions`，商店自己驗過才結算（11/25，`docs/commercial-credential-ext.md`） | `TestVenueRequires`、`TestPresentToShop`、`TestCredentialPresentedToTheShop`、`TestV2PaidOnAnvil`；checker E2 從報價讀要求 | 做到。商店驗不到 holder 綁定，撤銷與期限仍由 Host 判斷 |
 | 5 三種「預留」不混稱 | ZK 預算預留的事件一律叫 `BUDGET_RESERVED`；結算防重靠 EIP-3009 nonce；沒有用 CDP 的付款前預留 | — | 做到 |
 
-所以能說的是「採用 x402 v2 的 HTTP 支付協商，五條邊界有四條做到、第 4 條做到一半（要求在 `extensions`，證明還沒有），都有測試」；不能說「符合 x402」或「通過認證」。
+所以能說的是「採用 x402 v2 的 HTTP 支付協商，本專案定義的五條邊界都做到並有測試」；不能說「符合 x402」或「通過認證」。
 
 ## 6 面試常見追問（短答）
 

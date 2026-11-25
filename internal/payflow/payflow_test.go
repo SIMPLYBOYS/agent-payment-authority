@@ -657,7 +657,7 @@ func TestPaymentSignatureTheShopReads(t *testing.T) {
 	o := paycontract.PurchaseOrder{Quote: offer.Quote, Intent: paycontract.Intent{ResourceURL: offer.URL}}
 	a := signer.SignedAuthorization{Transfer: signer.Transfer{From: "0x" + strings.Repeat("1", 40), To: signertest.Merchant, Value: "50000",
 		ValidAfter: t0 - 1, ValidBefore: t0 + 300, Nonce: "0x" + strings.Repeat("0", 63) + "1"}, Signature: "0x" + strings.Repeat("ab", 65)}
-	sig, err := paymentSignature(o, a)
+	sig, err := paymentSignature(o, a, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -986,7 +986,7 @@ func TestPaymentSignatureKeepsTheQuotesCase(t *testing.T) {
 	o.Intent.ResourceURL = "https://test402.com/api/x402"
 	o.Quote.SelectedRequirement = json.RawMessage(`{"payTo":"` + payee55 + `"}`)
 	a := signer.SignedAuthorization{Transfer: signer.Transfer{From: "0x" + strings.Repeat("1", 40), To: payee, Value: "100", Nonce: "0x" + strings.Repeat("0", 64)}}
-	h, err := paymentSignature(o, a)
+	h, err := paymentSignature(o, a, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1001,7 +1001,7 @@ func TestPaymentSignatureKeepsTheQuotesCase(t *testing.T) {
 	}
 	// Another address in the quote than the one signed: the signed one goes out.
 	o.Quote.SelectedRequirement = json.RawMessage(`{"payTo":"0x` + strings.Repeat("9", 40) + `"}`)
-	h, _ = paymentSignature(o, a)
+	h, _ = paymentSignature(o, a, json.RawMessage(`{}`))
 	x402.Decode(h, &p)
 	json.Unmarshal(p.Payload, &pl)
 	if pl.Authorization["to"] != payee {
