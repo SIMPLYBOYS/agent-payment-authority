@@ -48,6 +48,7 @@ func newHFX(t *testing.T) *hfx {
 	if f.pay, err = NewCoreDB(bg, cfg, map[string]*secp256k1.PrivateKey{a: keyA, b: keyB}, f.db, clock, reserved{}); err != nil {
 		t.Fatal(err)
 	}
+	f.core.keys = f.pay.keys // as Core.Approvals wires them: a revocation's receipt is signed with the wallet's key
 	return f
 }
 

@@ -176,7 +176,7 @@ const delegationNotEvaluated = "the delegation confirmed by the person (E1a-D1 A
 var e1aLimits = []string{
 	"a device or virtual authenticator is the host's declaration (--authenticator-source); the checker checks it is consistent, not that a device was physical",
 	"a delegation confirmed by the person is read from its DELEGATION_BOUND (method webauthn, the Signer's confirmation named); the Signer's own record of it is not in the pack",
-	"a revocation by the person is read from its DELEGATION_REVOKED (the Signer's revocation named): E3 checks nothing is requested after it; a payment requested before it may still settle if the Signer signed it first, which the pack cannot order (the Signer's own record is not in the pack)",
+	"a revocation by the person is read from its DELEGATION_REVOKED (the Signer's revocation named): E3 checks nothing is requested after it; with the Signer's receipt, signed by the task's wallet, E2 checks every signed payment is one the Signer had signed before it; a Signer without the wallet's key gives no receipt, and then the order of a payment signed around the revocation is not evaluated",
 	"event and intent hashes and registry bindings use the pay contract's own pure functions: a fault there is shared",
 	"tx#2 is tied to its intent only through the Store's records and the EIP-3009 nonce, not by the chain",
 	"the paying host's prompt is buyer.PayingTaskPrompt, the host's own function: a change to it moves the host and this check together",
@@ -235,6 +235,7 @@ func VerifyE1a(dir, repo string, chain Chain) (*E1aReport, error) {
 		}
 		runs[t.TaskID] = run
 		e1aChain(&f, run)
+		e1aRevocation(&f, run, registry)
 		e1aIntents(&f, run)
 		e1aOnce(&f, run)
 		e1aModes(b, &f, run, catalog)
@@ -358,6 +359,43 @@ func e1aChain(f *findings, run *e1aRun) {
 			if !settled[intent] {
 				f.fail("E3", []string{ev}, "%s (event %d) before the payment settled", e.EventType, i+1)
 			}
+		}
+	}
+}
+
+// e1aRevocation is E2 for a delegation the person revoked, when the Signer
+// gave its receipt (docs/commercial-gap4.md 7.1): the receipt is signed by
+// the task's own wallet and names the event's delegation and revocation,
+// and every payment signed in the task is one the Signer lists as signed
+// before the revocation. Without a receipt (a Signer without the wallet's
+// key) the order of the two is not evaluated: the limits say so.
+func e1aRevocation(f *findings, run *e1aRun, reg *contracts.Registry) {
+	ev := []string{"tasks/" + run.task.TaskID + "/events.json"}
+	i := slices.IndexFunc(run.events, func(e contracts.AuditEvent) bool { return e.EventType == "DELEGATION_REVOKED" })
+	if i < 0 || run.events[i].Payload.Receipt == nil {
+		return
+	}
+	p, r := run.events[i].Payload, *run.events[i].Payload.Receipt
+	_, wallet, err := reg.Binding(run.task.TaskID)
+	by, serr := paycontract.ReceiptSigner(r)
+	switch {
+	case err != nil || serr != nil || by != strings.ToLower(wallet.From) || r.Wallet != by || r.ChainID != wallet.ChainID:
+		f.fail("E2", ev, "the revocation's receipt is not signed by the task's wallet %s on chain %s (%v %v)", wallet.From, wallet.ChainID, err, serr)
+		return
+	case r.DelegationID != p.DelegationID || r.RevocationID != p.SignerApprovalID:
+		f.fail("E2", ev, "the revocation's receipt names another delegation or revocation")
+		return
+	}
+	for _, e := range run.events {
+		if e.EventType != "PAYMENT_SIGNED" {
+			continue
+		}
+		intent := ""
+		if e.Scope != nil {
+			intent = e.Scope.IntentHash
+		}
+		if !slices.Contains(r.SignedIntents, intent) {
+			f.fail("E2", ev, "intent %s was signed and is not among what the Signer had signed when the person revoked the delegation", intent)
 		}
 	}
 }

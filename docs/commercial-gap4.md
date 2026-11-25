@@ -156,7 +156,7 @@
 - **checker**（`internal/verification/e1a.go`）：
   - E3 檢查三件事：`DELEGATION_REVOKED` 是本人裝置做的、指向這個 task 的委託、只有一筆；它之後沒有任何 `PURCHASE_PROPOSED` 或 `PAYMENT_REQUESTED`。
   - E6 照 run 的條件標它的來源：實機是 `signer_webauthn`，virtual authenticator 是 `virtual_authenticator`。
-  - 「收回前提出、收回後才簽完」的付款，證據包分不出先後，所以寫在 checker 的限制清單裡。
+  - E2 用 Signer 的收回收據排出先後，見 7.1。
 - **頁面**：本人裝置模式下，Agent 卡片多一個「收回委託（本人裝置）」按鈕，完成後顯示「委託已收回」。付款被拒時，下一步說明會寫「客人已收回這份委託」。
 
 **驗證**
@@ -172,6 +172,30 @@
 **界線（照實說）**
 
 - **收回仍經過 Host 轉送**：Host 擋得住，但造不出來。一個被入侵的 Host 可以不轉送，但沒有本人的裝置，就做不出收回，也撤不掉已記下的收回。Signer 機器上的管理者命令（`apa-signer approver revoke`）停用整個裝置，它確認過的委託會一起失效；那是 Host 之外的另一條路。
-- **checker 查得到的範圍**：checker 確認收回之後沒有新的請購或付款請求。收回前已提出、在收回之前已由 Signer 簽好的那一筆，仍會走完結算；證據包排不出 Signer 簽章與收回的先後（Signer 自己的紀錄不在證據包裡）。
+- **checker 查得到的範圍**：checker 確認收回之後沒有新的請購或付款請求；有收回收據時（7.1），也確認每一筆簽過的付款都是 Signer 在收回前簽的。只負責核准、手上沒有錢包金鑰的 Signer 不出收據，這時簽章與收回的先後不判定。
 - **還沒綁 task 的委託**：收回只記在 Signer。頁面不會用舊委託開場，所以 Host 開場時不再問 Signer；若真的用一份已收回的委託開場，第一筆付款會被 Signer 拒絕。在 testnet 上預算已經預留，記為 `RESERVED_NOT_PAID`，錢沒有動。
 - **`/opt` 的 Signer** 要換成新版才有這個功能：舊版不認得這兩個路徑，收回會失敗，頁面說「委託未收回」，委託照舊有效。
+
+### 7.1 收回收據（11/25）
+
+**問題**：Store 記下「付款已簽」和「委託已收回」的順序，可能和 Signer 實際的順序相反；真正的先後只在 Signer 的資料庫裡，而它不在證據包裡。另建一個監看全局的系統可以排出順序，但它會變成新的、要被信任的一方。
+
+**做法**：讓本來就在排序的 Signer 出具證明。
+
+- **Signer**：收回的同一個寫入交易裡（這段時間不會有別的簽章），讀出這份委託下已簽的付款（依 intent，排序），用該錢包的金鑰簽一份 EIP-712 收據。
+  - 收據有自己的網域 `AgentPaymentAuthority Signer`，驗證合約是零地址。沒有任何代幣或 registry 用這個網域，所以這個簽章不能拿來轉帳，也不是 ERC-8004 的同意。
+  - 收據存在 `delegation_revocations.receipt`（舊表啟動時自動加欄位），收回的回覆與 `GET /v1/approvals/delegations/{id}` 都帶著它。
+- **Host 與 Store**：收據原樣放進 `DELEGATION_REVOKED` 的 `receipt`。付款合約要求它指向這個事件的委託與收回、這個 task 的錢包與鏈，intent 排序且不重複。
+- **checker（E2）**：
+  - 收據的簽章必須還原成這個 task 的付款錢包地址。這個地址 checker 本來就信任：它在 registry 裡，也是鏈上的付款人。
+  - 任務裡每一筆 `PAYMENT_SIGNED` 的 intent，都必須在收據的名單裡；名單外的就是收回後才簽的，E2 判失敗。
+- **純函式**：`internal/paycontract/revocation.go` 的 `RevocationDigest` 與 `ReceiptSigner`，Signer 用來簽、checker 用來驗。
+
+**驗證**：`TestRevocationReceipt`（付款合約）、`TestDelegationRevoke`（Signer：收據只列收回前已簽的那筆，被丟掉的不在裡面，簽章還原成錢包 A）、`TestE1aRevocationReceipt`（checker：名單外的簽章、別把金鑰簽的、簽完再加的 intent 都判失敗）。
+
+**界線**
+
+- 信任的仍是 Signer：它本來就是替這個錢包簽付款的一方，收據沒有增加要信任的對象。
+- 只負責核准的 Signer（A2 不付款模式）手上沒有錢包金鑰，不出收據；那時本來也沒有付款可以簽。
+- 收據證明的是「收回時 Signer 簽過哪些」，不證明那些付款本身合不合理；那仍由 E2 其他檢查與本人核准負責。
+

@@ -16,6 +16,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
@@ -43,9 +44,21 @@ CREATE TABLE IF NOT EXISTS delegation_confirmations (
 CREATE TABLE IF NOT EXISTS delegation_revocations (
   revocation_id TEXT PRIMARY KEY REFERENCES human_approvals (approval_id),
   delegation_id TEXT NOT NULL UNIQUE REFERENCES delegation_confirmations (delegation_id),
-  revoked_at    INTEGER NOT NULL
+  revoked_at    INTEGER NOT NULL,
+  receipt       TEXT
 ) STRICT;
 `
+
+// migrateReceipt adds the receipt column to a delegation_revocations table
+// from before 7.1 (its rows keep none).
+func migrateReceipt(ctx context.Context, db *sql.DB) error {
+	var n int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('delegation_revocations') WHERE name = 'receipt'`).Scan(&n); err != nil || n > 0 {
+		return err
+	}
+	_, err := db.ExecContext(ctx, `ALTER TABLE delegation_revocations ADD COLUMN receipt TEXT`)
+	return err
+}
 
 const (
 	delegationTag    = "agent-payment-authority/pay/v1/delegation-challenge"
@@ -281,11 +294,23 @@ func (c *ApprovalCore) DelegationConfirmation(ctx context.Context, delegationID 
 	if err != nil {
 		return r, err
 	}
-	err = c.db.QueryRowContext(ctx, `SELECT revocation_id, revoked_at FROM delegation_revocations WHERE delegation_id = ?`, delegationID).Scan(&r.RevocationID, &r.RevokedAt)
+	var receipt sql.NullString
+	err = c.db.QueryRowContext(ctx, `SELECT revocation_id, revoked_at, receipt FROM delegation_revocations WHERE delegation_id = ?`, delegationID).Scan(&r.RevocationID, &r.RevokedAt, &receipt)
 	if errors.Is(err, sql.ErrNoRows) {
-		err = nil
+		return r, nil
+	} else if err != nil {
+		return r, err
 	}
+	r.Receipt, err = readReceipt(receipt)
 	return r, err
+}
+
+func readReceipt(s sql.NullString) (*contracts.RevocationReceipt, error) {
+	if !s.Valid {
+		return nil, nil
+	}
+	var r contracts.RevocationReceipt
+	return &r, json.Unmarshal([]byte(s.String), &r)
 }
 
 // The person taking a delegation back before it ends (docs/commercial-gap4.md
@@ -395,7 +420,10 @@ func (c *ApprovalCore) DelegationRevokeVerify(ctx context.Context, r DelegationR
 		return ApprovalReply{}, Refusal("BAD_REQUEST")
 	}
 	if rep, found, err := c.verifyAnswer(ctx, r.VerifyRequestID, fp); err != nil || found {
-		return rep, err
+		if err != nil {
+			return rep, err
+		}
+		return c.withReceipt(ctx, rep)
 	}
 	vr := VerifyRequest{VerifyRequestID: r.VerifyRequestID, ChallengeID: r.ChallengeID, Assertion: r.Assertion}
 	a, found, err := c.challengeBy(ctx, "challenge_id", r.ChallengeID)
@@ -417,19 +445,76 @@ func (c *ApprovalCore) DelegationRevokeVerify(ctx context.Context, r DelegationR
 	if code != "" {
 		return c.refuse(ctx, vr, fp, &a, code, true)
 	}
-	return c.commit(ctx, vr, fp, a, cred, parsed, nil, func(now uint64) uint64 { return now },
+	rep, err := c.commit(ctx, vr, fp, a, cred, parsed, nil, func(now uint64) uint64 { return now },
 		func(tx *sql.Tx, now uint64, approvalID, _ string) error {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO delegation_revocations (revocation_id, delegation_id, revoked_at) VALUES (?, ?, ?)`, approvalID, a.sessionID, now); err != nil {
-				return err
-			}
 			var pays int // an approvals-only database has no attempts
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'attempts'`).Scan(&pays); err != nil || pays == 0 {
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'attempts'`).Scan(&pays); err != nil {
 				return err
 			}
-			_, err := tx.ExecContext(ctx, `UPDATE attempts SET state = 'abandoned', closed_at = ? WHERE state = 'accepted'
-				AND confirmation_id = (SELECT confirmation_id FROM delegation_confirmations WHERE delegation_id = ?)`, now, a.sessionID)
+			var signed []string
+			if pays > 0 {
+				if _, err := tx.ExecContext(ctx, `UPDATE attempts SET state = 'abandoned', closed_at = ? WHERE state = 'accepted'
+					AND confirmation_id = (SELECT confirmation_id FROM delegation_confirmations WHERE delegation_id = ?)`, now, a.sessionID); err != nil {
+					return err
+				}
+				// What it had signed under the delegation, read in the same write transaction: nothing signs meanwhile.
+				rows, err := tx.QueryContext(ctx, `SELECT intent_hash FROM attempts WHERE state = 'signed'
+					AND confirmation_id = (SELECT confirmation_id FROM delegation_confirmations WHERE delegation_id = ?) ORDER BY intent_hash`, a.sessionID)
+				if err != nil {
+					return err
+				}
+				defer rows.Close()
+				for rows.Next() {
+					var h string
+					if err := rows.Scan(&h); err != nil {
+						return err
+					}
+					signed = append(signed, h)
+				}
+				if err := rows.Err(); err != nil {
+					return err
+				}
+			}
+			receipt, err := c.receipt(a.wallet, a.sessionID, approvalID, now, signed)
+			if err != nil {
+				return err
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO delegation_revocations (revocation_id, delegation_id, revoked_at, receipt) VALUES (?, ?, ?, ?)`, approvalID, a.sessionID, now, receipt)
 			return err
 		})
+	if err != nil {
+		return rep, err
+	}
+	return c.withReceipt(ctx, rep)
+}
+
+// receipt is the revocation's receipt (7.1), as stored: signed with the
+// wallet's key when this Signer holds it (a payment Signer), else none.
+func (c *ApprovalCore) receipt(walletID, delegationID, revocationID string, now uint64, signed []string) (any, error) {
+	w := c.cfg.wallet(walletID)
+	if w == nil || c.keys[w.Address] == nil {
+		return nil, nil
+	}
+	r := contracts.RevocationReceipt{DelegationID: delegationID, RevocationID: revocationID, RevokedAt: now, ChainID: w.ChainID, Wallet: strings.ToLower(w.Address),
+		SignedIntents: append([]string{}, signed...)}
+	d, err := paycontract.RevocationDigest(r)
+	if err != nil {
+		return nil, err
+	}
+	r.Signature = "0x" + hex.EncodeToString(signDigest(c.keys[w.Address], d))
+	b, err := json.Marshal(r)
+	return string(b), err
+}
+
+// withReceipt adds a verified revocation's receipt to its answer.
+func (c *ApprovalCore) withReceipt(ctx context.Context, rep ApprovalReply) (ApprovalReply, error) {
+	var receipt sql.NullString
+	if err := c.db.QueryRowContext(ctx, `SELECT receipt FROM delegation_revocations WHERE revocation_id = ?`, rep.ApprovalID).Scan(&receipt); err != nil {
+		return rep, err
+	}
+	var err error
+	rep.Receipt, err = readReceipt(receipt)
+	return rep, err
 }
 
 // confirms: this Signer takes the person's approvals (webauthn), so it pays

@@ -27,6 +27,7 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 )
@@ -124,10 +125,11 @@ type ApprovalCore struct {
 	rp     *webauthn.WebAuthn
 	db     *sql.DB
 	clock  Clock
-	dir    string   // the Signer's directory: the voice template key's
-	voice  *sidecar // V1, when configured
-	ownsDB bool     // opened by NewApprovalCore (not the shared database)
-	pays   bool     // P2: the same process signs payments (a reservation verifier is configured)
+	dir    string                           // the Signer's directory: the voice template key's
+	voice  *sidecar                         // V1, when configured
+	ownsDB bool                             // opened by NewApprovalCore (not the shared database)
+	pays   bool                             // P2: the same process signs payments (a reservation verifier is configured)
+	keys   map[string]*secp256k1.PrivateKey // P2: the payment core's, by address: a revocation's receipt is signed with its wallet's (gap 4, 7.1)
 }
 
 // challengeFailures closes a challenge after this many refused assertions.
@@ -173,6 +175,9 @@ func NewApprovalCoreDB(ctx context.Context, cfg *Config, db *sql.DB, dir string,
 
 func newApprovalCore(ctx context.Context, cfg *Config, rp *webauthn.WebAuthn, db *sql.DB, dir string, clock Clock) (*ApprovalCore, error) {
 	if _, err := db.ExecContext(ctx, approvalsSchema+voiceSchema); err != nil {
+		return nil, err
+	}
+	if err := migrateReceipt(ctx, db); err != nil {
 		return nil, err
 	}
 	c := &ApprovalCore{cfg: cfg, rp: rp, db: db, clock: clock, dir: dir}
@@ -236,31 +241,32 @@ type VerifyRequest struct {
 // closed); on the approval routes it is the verified decision's (verified
 // | abandoned ...). Options are given while the challenge is issued.
 type ApprovalReply struct {
-	ChallengeID       string          `json:"challenge_id,omitempty"`
-	RequestID         string          `json:"request_id,omitempty"`
-	State             string          `json:"state,omitempty"`
-	ApprovalSessionID string          `json:"approval_session_id,omitempty"`
-	Decision          string          `json:"decision,omitempty"`
-	ConsumerID        string          `json:"consumer_id,omitempty"`
-	WalletID          string          `json:"wallet_id,omitempty"`
-	IntentHash        string          `json:"intent_hash,omitempty"`
-	ApproverID        string          `json:"approver_id,omitempty"`
-	ExpiresAt         uint64          `json:"expires_at,omitempty"`
-	Options           json.RawMessage `json:"options,omitempty"`
-	Display           *Display        `json:"display,omitempty"`
-	ApprovalID        string          `json:"approval_id,omitempty"`
-	VerifyRequestID   string          `json:"verify_request_id,omitempty"`
-	CredentialRef     string          `json:"credential_ref,omitempty"` // sha256 of the credential ID
-	Flags             string          `json:"flags,omitempty"`
-	VerifiedAt        uint64          `json:"verified_at,omitempty"`
-	VoiceResult       *VoiceResult    `json:"voice_result,omitempty"` // V1: an approval's, or a voice refusal's
-	Payment           string          `json:"payment,omitempty"`      // health
-	Voice             string          `json:"voice,omitempty"`        // health: the voice sidecar, off | ready | unavailable
-	Delegations       string          `json:"delegations,omitempty"`  // health (gap 4): "device", the person's confirmation is required to pay
-	Terms             json.RawMessage `json:"terms,omitempty"`        // gap 4: a delegation challenge's terms, as the Signer read them
-	RevocationID      string          `json:"revocation_id,omitempty"` // a delegation's: the person's revocation, if any
-	RevokedAt         uint64          `json:"revoked_at,omitempty"`
-	Error             string          `json:"error,omitempty"`        // a fixed code
+	ChallengeID       string                       `json:"challenge_id,omitempty"`
+	RequestID         string                       `json:"request_id,omitempty"`
+	State             string                       `json:"state,omitempty"`
+	ApprovalSessionID string                       `json:"approval_session_id,omitempty"`
+	Decision          string                       `json:"decision,omitempty"`
+	ConsumerID        string                       `json:"consumer_id,omitempty"`
+	WalletID          string                       `json:"wallet_id,omitempty"`
+	IntentHash        string                       `json:"intent_hash,omitempty"`
+	ApproverID        string                       `json:"approver_id,omitempty"`
+	ExpiresAt         uint64                       `json:"expires_at,omitempty"`
+	Options           json.RawMessage              `json:"options,omitempty"`
+	Display           *Display                     `json:"display,omitempty"`
+	ApprovalID        string                       `json:"approval_id,omitempty"`
+	VerifyRequestID   string                       `json:"verify_request_id,omitempty"`
+	CredentialRef     string                       `json:"credential_ref,omitempty"` // sha256 of the credential ID
+	Flags             string                       `json:"flags,omitempty"`
+	VerifiedAt        uint64                       `json:"verified_at,omitempty"`
+	VoiceResult       *VoiceResult                 `json:"voice_result,omitempty"`  // V1: an approval's, or a voice refusal's
+	Payment           string                       `json:"payment,omitempty"`       // health
+	Voice             string                       `json:"voice,omitempty"`         // health: the voice sidecar, off | ready | unavailable
+	Delegations       string                       `json:"delegations,omitempty"`   // health (gap 4): "device", the person's confirmation is required to pay
+	Terms             json.RawMessage              `json:"terms,omitempty"`         // gap 4: a delegation challenge's terms, as the Signer read them
+	RevocationID      string                       `json:"revocation_id,omitempty"` // a delegation's: the person's revocation, if any
+	RevokedAt         uint64                       `json:"revoked_at,omitempty"`
+	Receipt           *contracts.RevocationReceipt `json:"receipt,omitempty"` // a revocation's, signed with the wallet's key (7.1)
+	Error             string                       `json:"error,omitempty"`   // a fixed code
 }
 
 // rpUser is an approver as the WebAuthn library sees it.

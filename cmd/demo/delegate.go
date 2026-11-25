@@ -129,7 +129,7 @@ func (a *api) revokeAssertion(w http.ResponseWriter, r *http.Request) {
 	// then the stop, whose TASK_CANCELLED follows it. The Signer already
 	// refuses either way: a Store not written is said, not retried here
 	// (the same request again writes it).
-	task, err := a.st.RevokeDelegation(req.DelegationID, ans.Reply.ApprovalID)
+	task, err := a.st.RevokeDelegation(req.DelegationID, ans.Reply.ApprovalID, ans.Reply.Receipt)
 	stopped := ""
 	if a.control != nil {
 		stopped = a.control.stopDelegation(req.DelegationID)

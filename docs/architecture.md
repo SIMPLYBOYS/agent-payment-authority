@@ -125,7 +125,7 @@ OWASP GenAI Security Project 在 2025-12-09 發布 Top 10 for Agentic Applicatio
 | ASI07 Insecure Inter-Agent Communication | Agent 之間互傳假指令 | 兩位 Agent 互不通訊，各自只對 Host 提出請購 | E7 | 不適用：沒有 Agent 對 Agent 的付款 |
 | ASI08 Cascading Failures | 重試造成重複扣款 | 結果未知不等於可以再付一次；EIP-3009 nonce、ZK nullifier、Store 以 request ID 去重；頻率上限 | E5；`TestSlowSettlementIsNotRepaid`、`TestSettleOncePerAuthorization`、`TestUnknownThenResume` | 做到 |
 | ASI09 Human-Agent Trust Exploitation | 誤導的摘要騙本人按下核准 | 本人在裝置上看到的是 Signer 綁定的結構化摘要，不是模型的說法；要唸出含一次性值的句子；請購在核准前被改，核准就失效 | `TestHumanApprovalChangesBeforeAccept`；`internal/signer/voice_test.go` | 做到；沒有做抗合成語音 |
-| ASI10 Rogue Agents | 失控的 Agent 一直花錢 | 委託有總額與期限；同一位客人十分鐘內最多 5 筆（Policy 與 Signer 各擋一道）；本人可隨時用裝置收回委託，Signer 之後拒簽它的每一筆（11/25，`docs/commercial-gap4.md` 第 7 節） | `VELOCITY_LIMIT` 的測試（`internal/policy`、`internal/signer`、`internal/store`）；`TestDelegationRevoke`；checker E3 確認收回之後沒有新的付款請求 | 損失有上限；本人可以叫停；沒有在偵測到異常時自動停權 |
+| ASI10 Rogue Agents | 失控的 Agent 一直花錢 | 委託有總額與期限；同一位客人十分鐘內最多 5 筆（Policy 與 Signer 各擋一道）；本人可隨時用裝置收回委託，Signer 之後拒簽它的每一筆（11/25，`docs/commercial-gap4.md` 第 7 節） | `VELOCITY_LIMIT` 的測試（`internal/policy`、`internal/signer`、`internal/store`）；`TestDelegationRevoke`；checker E3 確認收回之後沒有新的付款請求，E2 用 Signer 簽的收回收據確認沒有收回後才簽的付款 | 損失有上限；本人可以叫停；沒有在偵測到異常時自動停權 |
 
 ## 照實說的限制
 

@@ -338,11 +338,12 @@ func (s *Store) ConfirmDelegation(req DelegationRequest) (DelegationView, bool, 
 // Signer verified and keeps it (docs/commercial-gap4.md 7), in the task it
 // is bound to: DELEGATION_REVOKED, after which the task takes no new
 // purchase or payment (paycontract.Ended); a payment already requested is
-// carried through, and the Signer signs it only if it did before. It
+// carried through, and the Signer signs it only if it did before; the
+// Signer's receipt (7.1), when it gave one, lists what it had signed. It
 // returns the task, or "" for a delegation bound to none (the Signer's
 // record is then the only one). Recording the same revocation again
 // writes nothing.
-func (s *Store) RevokeDelegation(delegationID, signerRevocationID string) (string, error) {
+func (s *Store) RevokeDelegation(delegationID, signerRevocationID string, receipt *contracts.RevocationReceipt) (string, error) {
 	var taskID string
 	err := s.write(func(tx *sql.Tx, now uint64) error {
 		taskID = ""
@@ -370,7 +371,7 @@ func (s *Store) RevokeDelegation(delegationID, signerRevocationID string) (strin
 			return err
 		}
 		if err := t.emit("DELEGATION_REVOKED", nil, contracts.EventPayload{DelegationID: delegationID, AuthorizationMethod: "webauthn",
-			SignerApprovalID: signerRevocationID}); err != nil {
+			SignerApprovalID: signerRevocationID, Receipt: receipt}); err != nil {
 			return err
 		}
 		return t.finish()

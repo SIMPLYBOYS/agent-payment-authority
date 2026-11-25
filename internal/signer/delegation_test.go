@@ -406,7 +406,8 @@ func TestDelegationRevoke(t *testing.T) {
 		n++
 		return f.pay.Sign(bg, SignRequest{RequestID: fmt.Sprintf("request-%010d", 700+n), Authorization: allow, Order: order})
 	}
-	if _, err := sign(f.orderA("50000")); err != nil {
+	before, err := sign(f.orderA("50000"))
+	if err != nil {
 		t.Fatalf("before: %v", err)
 	}
 	if _, err := f.rchallenge("rreq-1", "dlg-1", "consumer-b"); refusal(err) != "CONSUMER_MISMATCH" {
@@ -429,22 +430,33 @@ func TestDelegationRevoke(t *testing.T) {
 	// The revocation lands between a payment's acceptance and its signature:
 	// the signature computed is dropped.
 	var rev ApprovalReply
+	revAs := a.Get(rc.Options, origin)
 	hook = func(s, _ string) error {
 		if s == "after-sign" {
 			hook = nil
-			rev, err = f.rverify("rver-1", rc.ChallengeID, "dlg-1", a.Get(rc.Options, origin))
+			rev, err = f.rverify("rver-1", rc.ChallengeID, "dlg-1", revAs)
 		}
 		return nil
 	}
 	defer func() { hook = nil }()
-	if r, err := sign(f.orderA("50000")); refusal(err) != "ATTEMPT_ABANDONED" || r.Authorization != nil {
-		t.Fatalf("signed after the revocation: %+v %v", r, err)
+	dropped, err := sign(f.orderA("50000"))
+	if refusal(err) != "ATTEMPT_ABANDONED" || dropped.Authorization != nil {
+		t.Fatalf("signed after the revocation: %+v %v", dropped, err)
 	}
-	if err != nil || rev.State != "verified" || rev.Decision != "deny" || rev.ApprovalSessionID != "dlg-1" {
-		t.Fatalf("revocation %+v %v", rev, err)
+	if rev.State != "verified" || rev.Decision != "deny" || rev.ApprovalSessionID != "dlg-1" {
+		t.Fatalf("revocation %+v", rev)
 	}
-	if again, err := f.rverify("rver-1", rc.ChallengeID, "dlg-1", a.Get(rc.Options, origin)); err == nil && again.ApprovalID != rev.ApprovalID {
-		t.Fatalf("resend answered another: %+v", again)
+	// 7.1: the receipt lists what was signed before it (not the dropped one), signed with wallet A's key.
+	rc2 := rev.Receipt
+	if rc2 == nil || rc2.DelegationID != "dlg-1" || rc2.RevocationID != rev.ApprovalID || rc2.RevokedAt != f.now || rc2.Wallet != Address(keyA.PubKey()) ||
+		len(rc2.SignedIntents) != 1 || rc2.SignedIntents[0] != before.IntentHash || dropped.IntentHash == before.IntentHash {
+		t.Fatalf("receipt %+v (before %s, dropped %s)", rc2, before.IntentHash, dropped.IntentHash)
+	}
+	if by, err := paycontract.ReceiptSigner(*rc2); err != nil || by != Address(keyA.PubKey()) {
+		t.Fatalf("the receipt is signed by %s %v", by, err)
+	}
+	if again, err := f.rverify("rver-1", rc.ChallengeID, "dlg-1", revAs); err != nil || again.ApprovalID != rev.ApprovalID || again.Receipt == nil || again.Receipt.Signature != rc2.Signature {
+		t.Fatalf("resend: %+v %v", again, err)
 	}
 	if _, err := sign(f.orderA("50000")); refusal(err) != "DELEGATION_REVOKED" {
 		t.Fatalf("after: %v", err)
@@ -452,7 +464,8 @@ func TestDelegationRevoke(t *testing.T) {
 	if _, err := f.rchallenge("rreq-3", "dlg-1", "consumer-a"); refusal(err) != "DELEGATION_REVOKED" {
 		t.Fatalf("a second revocation: %v", err)
 	}
-	if q, err := f.core.DelegationConfirmation(bgA, "dlg-1"); err != nil || q.ApprovalID != conf.ApprovalID || q.RevocationID != rev.ApprovalID || q.RevokedAt != f.now {
+	if q, err := f.core.DelegationConfirmation(bgA, "dlg-1"); err != nil || q.ApprovalID != conf.ApprovalID || q.RevocationID != rev.ApprovalID || q.RevokedAt != f.now ||
+		q.Receipt == nil || q.Receipt.Signature != rc2.Signature {
 		t.Fatalf("the confirmation says %+v %v", q, err)
 	}
 }

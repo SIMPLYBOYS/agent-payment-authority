@@ -1,6 +1,8 @@
 package verification
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"os"
 	"os/exec"
@@ -11,6 +13,9 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"golang.org/x/crypto/sha3"
 )
 
 // The checker's copy of the E1a-D4 table is its own (e1aMode never asks
@@ -188,7 +193,9 @@ func TestE1aChainAfterARevocation(t *testing.T) {
 		}
 		return &e1aRun{task: E1aTask{TaskID: task}, events: steps}
 	}
-	ev := func(typ string, p contracts.EventPayload) contracts.AuditEvent { return contracts.AuditEvent{EventType: typ, Payload: p} }
+	ev := func(typ string, p contracts.EventPayload) contracts.AuditEvent {
+		return contracts.AuditEvent{EventType: typ, Payload: p}
+	}
 	started, bound := ev("TASK_STARTED", contracts.EventPayload{}), ev("DELEGATION_BOUND", contracts.EventPayload{DelegationID: "dlg-1"})
 	rev := ev("DELEGATION_REVOKED", contracts.EventPayload{DelegationID: "dlg-1", AuthorizationMethod: "webauthn", SignerApprovalID: "hap-1"})
 	for name, c := range map[string]struct {
@@ -207,4 +214,75 @@ func TestE1aChainAfterARevocation(t *testing.T) {
 			t.Errorf("%s: %+v", name, f)
 		}
 	}
+}
+
+// E2 with the Signer's receipt (docs/commercial-gap4.md 7.1): signed by the
+// task's wallet, and every signed payment among what it lists.
+func TestE1aRevocationReceipt(t *testing.T) {
+	key, _ := secp256k1.GeneratePrivateKey()
+	addr := "0x" + hex.EncodeToString(sha3Keccak(key.PubKey().SerializeUncompressed()[1:])[12:])
+	other, _ := secp256k1.GeneratePrivateKey()
+	raw, err := os.ReadFile("../../testdata/contracts/registry.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg contracts.RegistryConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	for i := range cfg.Wallets {
+		if cfg.Wallets[i].WalletID == "wallet-a" {
+			cfg.Wallets[i].From = addr // wallet A is this test's key
+		}
+	}
+	reg, err := contracts.NewRegistry(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := func(c string) string { return "sha256:" + strings.Repeat(c, 64) }
+	sign := func(k *secp256k1.PrivateKey, intents ...string) *contracts.RevocationReceipt {
+		r := contracts.RevocationReceipt{DelegationID: "dlg-1", RevocationID: "hap-1", RevokedAt: 1, ChainID: "84532", Wallet: addr, SignedIntents: intents}
+		d, err := paycontract.RevocationDigest(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := ecdsa.SignCompact(k, d, false)
+		r.Signature = "0x" + hex.EncodeToString(append(append([]byte{}, c[1:65]...), c[0]))
+		return &r
+	}
+	run := func(receipt *contracts.RevocationReceipt, signed ...string) *e1aRun {
+		es := []contracts.AuditEvent{{EventType: "TASK_STARTED"}, {EventType: "DELEGATION_BOUND", Payload: contracts.EventPayload{DelegationID: "dlg-1"}}}
+		for _, s := range signed {
+			es = append(es, contracts.AuditEvent{EventType: "PAYMENT_SIGNED", Scope: &contracts.EventScope{IntentHash: s}})
+		}
+		es = append(es, contracts.AuditEvent{EventType: "DELEGATION_REVOKED", Payload: contracts.EventPayload{DelegationID: "dlg-1", AuthorizationMethod: "webauthn",
+			SignerApprovalID: "hap-1", Receipt: receipt}})
+		return &e1aRun{task: E1aTask{TaskID: "task-a"}, events: es}
+	}
+	for name, c := range map[string]struct {
+		run  *e1aRun
+		pass bool
+	}{
+		"all it signed listed":        {run(sign(key, in("a"), in("b")), in("a"), in("b")), true},
+		"no receipt: not evaluated":   {run(nil, in("a")), true},
+		"one signed it does not list": {run(sign(key, in("a")), in("a"), in("b")), false},
+		"signed by another key":       {run(sign(other, in("a")), in("a")), false},
+		"an intent added after signing": {func() *e1aRun {
+			r := sign(key, in("a"))
+			r.SignedIntents = []string{in("a"), in("b")}
+			return run(r, in("a"), in("b"))
+		}(), false},
+	} {
+		var f findings
+		e1aRevocation(&f, c.run, reg)
+		if (f.verdicts(E1aClaims)["E2"] != Fail) != c.pass {
+			t.Errorf("%s: %+v", name, f)
+		}
+	}
+}
+
+func sha3Keccak(b []byte) []byte {
+	h := sha3.NewLegacyKeccak256()
+	h.Write(b)
+	return h.Sum(nil)
 }

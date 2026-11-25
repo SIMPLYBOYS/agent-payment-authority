@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 )
@@ -97,7 +98,7 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 		}
 	}
 	s := e.Scope
-	t, _, err := reg.Binding(s.TaskID)
+	t, wallet, err := reg.Binding(s.TaskID)
 	if err != nil {
 		return err
 	}
@@ -125,7 +126,7 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 	only := func(want ...string) error { // the payload fields this type carries, all present; no other
 		have := map[string]bool{"code": p.Code != "", "decision": d != nil, "delegation": p.DelegationID != "", "session": p.ApprovalSessionID != "",
 			"grant": p.GrantID != "", "method": p.AuthorizationMethod != "", "signer": p.SignerApprovalID != "", "credential": p.Credential != nil,
-			"payment": p.Payment != nil, "conditions": p.RunConditions != nil}
+			"payment": p.Payment != nil, "conditions": p.RunConditions != nil, "receipt": p.Receipt != nil}
 		for k, v := range have {
 			if v != slices.Contains(want, k) {
 				return errf("%s: payload field %s must %s", e.EventType, k, map[bool]string{true: "be absent", false: "be present"}[v])
@@ -162,6 +163,15 @@ func ValidateEvent(reg *contracts.Registry, e contracts.AuditEvent, order *Purch
 		}
 		if p.AuthorizationMethod != "webauthn" || !ids(p.SignerApprovalID) {
 			return errf("a revocation is webauthn with the Signer's revocation")
+		}
+		if r := p.Receipt; r != nil { // the Signer's signed list of what it had signed (7.1); a Signer without the wallet's key gives none
+			if _, err := RevocationDigest(*r); err != nil {
+				return errf("%v", err)
+			}
+			if r.DelegationID != p.DelegationID || r.RevocationID != p.SignerApprovalID || r.ChainID != wallet.ChainID || r.Wallet != strings.ToLower(wallet.From) {
+				return errf("a revocation's receipt names its delegation, its revocation and the task's wallet")
+			}
+			return only("delegation", "method", "signer", "receipt")
 		}
 		return only("delegation", "method", "signer")
 	case "PURCHASE_PROPOSED":

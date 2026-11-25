@@ -174,7 +174,7 @@ func (c *Core) Approvals(ctx context.Context, dir string, clock Clock) (*Approva
 	ac, err := NewApprovalCoreDB(ctx, c.cfg, c.db, dir, clock)
 	if err == nil {
 		_, off := c.res.(Unavailable)
-		ac.pays = !off
+		ac.pays, ac.keys = !off, c.keys
 	}
 	return ac, err
 }

@@ -20,16 +20,33 @@ type EventScope struct {
 // The last four fields came with apa.pay.v1 (internal/paycontract validates
 // them); an M1 event never carries them and ValidateEvent refuses one that does.
 type EventPayload struct {
-	Code                string           `json:"code,omitempty"`
-	Decision            *PolicyDecision  `json:"decision,omitempty"`
-	DelegationID        string           `json:"delegation_id,omitempty"`
-	ApprovalSessionID   string           `json:"approval_session_id,omitempty"`
-	GrantID             string           `json:"grant_id,omitempty"`
-	AuthorizationMethod string           `json:"authorization_method,omitempty"`
-	SignerApprovalID    string           `json:"signer_approval_id,omitempty"` // apa.pay.v1, A2: the Signer's verified decision
-	Credential          *CredentialCheck `json:"credential,omitempty"`         // apa.pay.v2 (C2): CREDENTIAL_VERIFIED only
-	Payment             *PaymentRecord   `json:"payment,omitempty"`            // pay family, P2: a payment event's record
-	RunConditions       *RunConditions   `json:"run_conditions,omitempty"`     // pay family, E1-a: TASK_STARTED only
+	Code                string             `json:"code,omitempty"`
+	Decision            *PolicyDecision    `json:"decision,omitempty"`
+	DelegationID        string             `json:"delegation_id,omitempty"`
+	ApprovalSessionID   string             `json:"approval_session_id,omitempty"`
+	GrantID             string             `json:"grant_id,omitempty"`
+	AuthorizationMethod string             `json:"authorization_method,omitempty"`
+	SignerApprovalID    string             `json:"signer_approval_id,omitempty"` // apa.pay.v1, A2: the Signer's verified decision
+	Credential          *CredentialCheck   `json:"credential,omitempty"`         // apa.pay.v2 (C2): CREDENTIAL_VERIFIED only
+	Payment             *PaymentRecord     `json:"payment,omitempty"`            // pay family, P2: a payment event's record
+	RunConditions       *RunConditions     `json:"run_conditions,omitempty"`     // pay family, E1-a: TASK_STARTED only
+	Receipt             *RevocationReceipt `json:"receipt,omitempty"`            // pay family: DELEGATION_REVOKED only, when the Signer holds the wallet's key
+}
+
+// RevocationReceipt is the Signer's own signed word on a delegation's
+// revocation (docs/commercial-gap4.md 7.1): the payments it had signed under
+// the delegation when it revoked it, by intent, sorted, signed with the
+// payer wallet's key under its own EIP-712 domain
+// (internal/paycontract.RevocationDigest). Nothing else signed under the
+// delegation can then pass as signed before the revocation.
+type RevocationReceipt struct {
+	DelegationID  string   `json:"delegation_id"`
+	RevocationID  string   `json:"revocation_id"`
+	RevokedAt     uint64   `json:"revoked_at"`
+	ChainID       string   `json:"chain_id"`
+	Wallet        string   `json:"wallet"`
+	SignedIntents []string `json:"signed_intents"`
+	Signature     string   `json:"signature"`
 }
 
 // RunConditions are what a pay task's events come from, fixed when the task
