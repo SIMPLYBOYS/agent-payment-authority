@@ -76,11 +76,43 @@ type presentationExt struct {
 	} `json:"info"`
 }
 
-// PresentationExtensions is a PaymentPayload's extensions carrying p.
-func PresentationExtensions(p json.RawMessage) (json.RawMessage, error) {
-	var e presentationExt
-	e.Info.Presentation = p
-	return json.Marshal(map[string]presentationExt{CredentialKey: e})
+// Echo is a PaymentPayload's extensions for a 402's (v2 5.1.2: a client
+// includes at least the info it received, adds to it, deletes or overwrites
+// nothing): the 402's as they are, and, when p is not nil, the
+// presentation added to apa-credential's info beside what the shop asked.
+func Echo(required, p json.RawMessage) (json.RawMessage, error) {
+	all := map[string]json.RawMessage{}
+	if len(required) > 0 && string(required) != "null" {
+		if err := json.Unmarshal(required, &all); err != nil {
+			return nil, errors.New("extensions is not an object")
+		}
+	}
+	if p != nil {
+		member := map[string]json.RawMessage{}
+		if raw, ok := all[CredentialKey]; ok {
+			if err := json.Unmarshal(raw, &member); err != nil {
+				return nil, errors.New("the apa-credential extension is malformed")
+			}
+		}
+		info := map[string]json.RawMessage{}
+		if raw, ok := member["info"]; ok {
+			if err := json.Unmarshal(raw, &info); err != nil {
+				return nil, errors.New("the apa-credential extension is malformed")
+			}
+		}
+		if _, ok := info["presentation"]; ok {
+			return nil, errors.New("the 402 already carries a presentation")
+		}
+		info["presentation"] = p
+		var err error
+		if member["info"], err = json.Marshal(info); err != nil {
+			return nil, err
+		}
+		if all[CredentialKey], err = json.Marshal(member); err != nil {
+			return nil, err
+		}
+	}
+	return json.Marshal(all)
 }
 
 // PresentationIn reads the presentation out of a PaymentPayload's

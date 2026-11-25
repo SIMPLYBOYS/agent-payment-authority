@@ -457,15 +457,18 @@ func (w *Worker) sign(ctx context.Context, p store.Payment, o paycontract.Purcha
 	return w.Store.PaymentSigned(p.IntentHash, raw)
 }
 
-// presentation is the PaymentPayload's extensions: {} unless the quote's 402
-// asks for a credential, then a presentation to that shop derived for this
-// payment (a new proof each time it is sent: the shop keys its settlement on
-// the transfer, not on the header). Holder material missing is sent as no
-// presentation, which the shop refuses.
+// presentation is the PaymentPayload's extensions: the quote's 402's, echoed
+// (v2 5.1.2), and, when the 402 asks for a credential, a presentation to that
+// shop derived for this payment added to it (a new proof each time it is
+// sent: the shop keys its settlement on the transfer, not on the header).
+// Holder material missing is sent as no presentation, which the shop refuses.
 func (w *Worker) presentation(o paycontract.PurchaseOrder, a signer.SignedAuthorization) (json.RawMessage, error) {
 	asked, err := x402.CredentialIn(o.Quote.Extensions)
 	if err != nil || asked == nil || w.Credentials == nil {
-		return json.RawMessage(`{}`), err
+		if err != nil {
+			return nil, err
+		}
+		return x402.Echo(o.Quote.Extensions, nil)
 	}
 	u, err := url.Parse(o.Intent.ResourceURL)
 	if err != nil {
@@ -478,7 +481,7 @@ func (w *Worker) presentation(o paycontract.PurchaseOrder, a signer.SignedAuthor
 	pr, err := w.Credentials.PresentToShop(o.Intent.TaskID, o.Intent.ConsumerID,
 		credential.ShopBinding{Verifier: did, ResourceURL: o.Intent.ResourceURL, Accepted: o.Quote.SelectedRequirement, PaymentNonce: a.Nonce}, asked.Requires)
 	if errors.Is(err, credential.ErrHolderMaterial) || errors.Is(err, credential.ErrNoAttributes) {
-		return json.RawMessage(`{}`), nil
+		return x402.Echo(o.Quote.Extensions, nil)
 	} else if err != nil {
 		return nil, err
 	}
@@ -486,7 +489,7 @@ func (w *Worker) presentation(o paycontract.PurchaseOrder, a signer.SignedAuthor
 	if err != nil {
 		return nil, err
 	}
-	return x402.PresentationExtensions(raw)
+	return x402.Echo(o.Quote.Extensions, raw)
 }
 
 // paymentSignature is the x402 PAYMENT-SIGNATURE of the signed authorization

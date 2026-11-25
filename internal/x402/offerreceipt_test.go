@@ -85,3 +85,18 @@ func TestOfferReceipt(t *testing.T) {
 		t.Error("the document authorizes the wrong key or DID")
 	}
 }
+
+// An offer signed in a format this client does not read (JWS, which the spec
+// allows) is as if unsigned: it is skipped, never a refusal.
+func TestOtherFormatsAreUnsigned(t *testing.T) {
+	ext := json.RawMessage(`{"offer-receipt":{"info":{"offers":[{"format":"jws","signature":"a.b.c"}],"receipt":{"format":"jws","signature":"a.b.c"}}}}`)
+	if offers, err := OffersIn(ext); err != nil || len(offers) != 0 {
+		t.Errorf("offers %v %v", offers, err)
+	}
+	if r, err := ReceiptIn(ext); err != nil || r != nil {
+		t.Errorf("receipt %v %v", r, err)
+	}
+	if signed, err := ShopReceipt(ext, ext, "u", "n", "p", "t"); signed || err != nil {
+		t.Errorf("a JWS offer asks for an EIP-712 receipt: %v %v", signed, err)
+	}
+}

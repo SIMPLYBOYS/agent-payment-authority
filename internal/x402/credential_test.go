@@ -38,3 +38,56 @@ func TestCredentialRequirement(t *testing.T) {
 		}
 	}
 }
+
+// v2 5.1.2: the payment payload echoes the 402's extensions, adding the
+// presentation inside apa-credential's info and deleting nothing.
+func TestEcho(t *testing.T) {
+	asked, _ := CredentialMember(CredentialRequirement{Schema: "apa.credential.v2", Requires: map[string]string{"country": ""}})
+	required, _ := json.Marshal(map[string]json.RawMessage{CredentialKey: asked, OfferReceiptKey: json.RawMessage(`{"info":{"offers":[]}}`), "bazaar": json.RawMessage(`{"info":{"x":1}}`)})
+	out, err := Echo(required, json.RawMessage(`{"version":"p"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all map[string]map[string]json.RawMessage
+	if err := json.Unmarshal(out, &all); err != nil {
+		t.Fatal(err)
+	}
+	var info map[string]json.RawMessage
+	json.Unmarshal(all[CredentialKey]["info"], &info)
+	if string(info["schema"]) != `"apa.credential.v2"` || string(info["requires"]) != `{"country":""}` || string(info["presentation"]) != `{"version":"p"}` ||
+		all[OfferReceiptKey] == nil || string(all["bazaar"]["info"]) != `{"x":1}` {
+		t.Fatalf("echo %s", out)
+	}
+	if p, err := PresentationIn(out); err != nil || string(p) != `{"version":"p"}` {
+		t.Fatalf("read back %s %v", p, err)
+	}
+	again, err := Echo(required, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := PresentationIn(again); p != nil {
+		t.Errorf("no presentation added, yet one read: %s", p)
+	}
+	if out, err := Echo(nil, nil); err != nil || string(out) != `{}` {
+		t.Errorf("no extensions: %s %v", out, err)
+	}
+	if _, err := Echo(out, json.RawMessage(`{"version":"q"}`)); err == nil {
+		t.Error("a presentation overwritten")
+	}
+}
+
+// v2 6.1: only a payment this client can make, under a flow it knows.
+func TestPayable(t *testing.T) {
+	for extra, ok := range map[string]bool{
+		``: true, `{"paymentFlow":"authorization"}`: true, `{"paymentFlow":"upfront"}`: true, `{"assetTransferMethod":"eip3009"}`: true,
+		`{"paymentFlow":"escrow"}`: false, `{"paymentFlow":"subscription"}`: false, `{"assetTransferMethod":"permit2"}`: false, `{"assetTransferMethod":"erc7710"}`: false,
+	} {
+		var r Requirement
+		if extra != "" {
+			json.Unmarshal([]byte(extra), &r.Extra)
+		}
+		if err := r.Payable(); (err == nil) != ok {
+			t.Errorf("%s: %v", extra, err)
+		}
+	}
+}

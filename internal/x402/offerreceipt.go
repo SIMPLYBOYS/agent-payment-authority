@@ -181,6 +181,8 @@ type extension struct {
 	} `json:"info"`
 }
 
+// A JWS artifact has no payload member: Signed's Payload stays empty.
+
 // OfferExtensions is a 402's extensions carrying one signed offer.
 func OfferExtensions(s Signed) (json.RawMessage, error) {
 	var e extension
@@ -197,17 +199,25 @@ func ReceiptExtensions(s Signed) (json.RawMessage, error) {
 
 // OffersIn and ReceiptIn read the extension out of extensions: none (nil,
 // no error) when it is absent; an error when it is there and malformed.
+// Only EIP-712 artifacts are read: one in another format the spec allows
+// (JWS) is as if the shop had signed nothing, never a refusal of its offer.
 func OffersIn(ext json.RawMessage) ([]Signed, error) {
 	e, ok, err := extOf(ext)
 	if !ok || err != nil {
 		return nil, err
 	}
-	return e.Info.Offers, nil
+	var out []Signed
+	for _, s := range e.Info.Offers {
+		if s.Format == "eip712" {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
 
 func ReceiptIn(ext json.RawMessage) (*Signed, error) {
 	e, ok, err := extOf(ext)
-	if !ok || err != nil {
+	if !ok || err != nil || e.Info.Receipt == nil || e.Info.Receipt.Format != "eip712" {
 		return nil, err
 	}
 	return e.Info.Receipt, nil

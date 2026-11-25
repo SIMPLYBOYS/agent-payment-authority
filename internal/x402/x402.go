@@ -134,6 +134,24 @@ func Decode(header string, dst any) error {
 	return contracts.Decode(raw, dst)
 }
 
+// Payable: the accepts entry's protocol-reserved extra keys (v2 6.1) name a
+// payment this client can make: an EIP-3009 transfer (assetTransferMethod
+// absent or eip3009, as the Signer signs nothing else) settled once for its
+// amount (paymentFlow absent, authorization or upfront). escrow settles a
+// ceiling, then a final charge: not the exact amount the Policy decided.
+// An unknown flow is never paid (v2 6.1: MUST NOT).
+func (r Requirement) Payable() error {
+	switch r.Extra["paymentFlow"] {
+	case "", "authorization", "upfront":
+	default:
+		return fmt.Errorf("payment flow %q is not one this client pays under", r.Extra["paymentFlow"])
+	}
+	if m := r.Extra["assetTransferMethod"]; m != "" && m != "eip3009" {
+		return fmt.Errorf("asset transfer method %q is not EIP-3009", m)
+	}
+	return nil
+}
+
 // Validate checks what M1 relies on. Whether the offer is acceptable is for
 // the buyer and Policy to decide, not this package.
 func (p PaymentRequired) Validate() error {

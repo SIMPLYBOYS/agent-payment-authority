@@ -326,6 +326,9 @@ func (s *Shop) quote(ctx context.Context, p Product) (contracts.Quote, x402.Requ
 	if err := json.Unmarshal(q.SelectedRequirement, &req); err != nil {
 		return contracts.Quote{}, req, err
 	}
+	if err := req.Payable(); err != nil {
+		return contracts.Quote{}, req, err
+	}
 	offers, err := x402.OffersIn(pr.Extensions)
 	if err != nil {
 		return contracts.Quote{}, req, err

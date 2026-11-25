@@ -23,6 +23,8 @@ func TestSignedOfferChecked(t *testing.T) {
 	var srv *httptest.Server
 	var signWith, docFor *secp256k1.PrivateKey
 	var amount string
+	var jws bool
+	var extra map[string]string
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		did, _ := x402.DIDWeb(srv.URL)
 		if r.URL.Path == "/.well-known/did.json" {
@@ -31,8 +33,16 @@ func TestSignedOfferChecked(t *testing.T) {
 		}
 		url := srv.URL + "/resources/kr-market?edition=1"
 		s, _ := x402.SignOffer(signWith, x402.OfferPayload{Version: 1, ResourceURL: url, Scheme: req.Scheme, Network: req.Network, Asset: req.Asset, PayTo: req.PayTo, Amount: amount})
+		if jws {
+			s = x402.Signed{Format: "jws", Signature: "e30.e30.c2ln"}
+		}
 		ext, _ := x402.OfferExtensions(s)
-		accepts, _ := json.Marshal(req)
+		entry := req
+		entry.Extra = map[string]string{"name": "USDC", "version": "2"}
+		for k, v := range extra {
+			entry.Extra[k] = v
+		}
+		accepts, _ := json.Marshal(entry)
 		h, _ := x402.Encode(x402.PaymentRequired{X402Version: 2, Resource: x402.ResourceInfo{URL: url}, Accepts: []json.RawMessage{accepts}, Extensions: ext})
 		w.Header().Set(x402.HeaderPaymentRequired, h)
 		w.WriteHeader(http.StatusPaymentRequired)
@@ -43,13 +53,20 @@ func TestSignedOfferChecked(t *testing.T) {
 	for name, c := range map[string]struct {
 		sign, doc *secp256k1.PrivateKey
 		amount    string
+		jws       bool
+		extra     map[string]string
 		ok        bool
 	}{
-		"the shop's key, the 402's terms":  {key, key, "500000", true},
-		"a key the document does not name": {other, key, "500000", false},
-		"another amount than the 402's":    {key, key, "1", false},
+		"the shop's key, the 402's terms":         {key, key, "500000", false, nil, true},
+		"a key the document does not name":        {other, key, "500000", false, nil, false},
+		"another amount than the 402's":           {key, key, "1", false, nil, false},
+		"a JWS offer: as if unsigned":             {key, key, "500000", true, nil, true},
+		"the authorization flow, named":           {key, key, "500000", false, map[string]string{"paymentFlow": "authorization"}, true},
+		"an escrow flow":                          {key, key, "500000", false, map[string]string{"paymentFlow": "escrow"}, false},
+		"a flow it does not know":                 {key, key, "500000", false, map[string]string{"paymentFlow": "later"}, false},
+		"a Permit2 transfer the Signer cannot do": {key, key, "500000", false, map[string]string{"assetTransferMethod": "permit2"}, false},
 	} {
-		signWith, docFor, amount = c.sign, c.doc, c.amount
+		signWith, docFor, amount, jws, extra = c.sign, c.doc, c.amount, c.jws, c.extra
 		if _, _, err := shop.quote(context.Background(), p); (err == nil) != c.ok {
 			t.Errorf("%s: %v", name, err)
 		}

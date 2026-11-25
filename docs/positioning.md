@@ -82,7 +82,7 @@
 | 期限 | `valid_seconds`（確認後多久內可以開始任務）；Ask 的等待時間 `approval_deadline_seconds` | `exp` | `exp` |
 | Agent 的身分與金鑰 | `agent_id`＋ERC-8004 身分（付款錢包由錢包簽章證明）；**Agent 沒有任何簽章金鑰** | open mandate 的 `cnf` 綁 Agent 的金鑰，Agent 用它簽 closed mandate | L2 的 `cnf.jwk` 是 Agent 的公鑰，L3 由 Agent 簽 |
 | 這一筆的確切條款 | `PurchaseOrder`：`intent`（任務、請購、資源、x402 版本、報價雜湊）＋`payment_binding`（收款人、金額、時間窗、nonce）＋`quote`；Agent 提出但不簽，`intent_hash` 綁住全部 | closed mandate：`mandate.checkout.1`（`checkout_jwt`、`checkout_hash`）＋`mandate.payment.1`（`payee`、`payment_amount`、`payment_instrument`、`transaction_id`） | L3a（給支付網路）、L3b（給商家），Agent 簽 |
-| 商家的報價 | x402 `PAYMENT-REQUIRED` 選中的那一項，完整內容算進 `payment_requirement_hash`；**商家沒有簽** | `checkout_jwt`：商家簽的購物車 | 同 AP2 |
+| 商家的報價 | x402 `PAYMENT-REQUIRED` 選中的那一項，完整內容算進 `payment_requirement_hash`；付款商店以 x402 Signed Offers & Receipts 簽報價與收據（11/25） | `checkout_jwt`：商家簽的購物車 | 同 AP2 |
 | 超出範圍時本人逐筆核准 | `AuthorizationGrant`：Signer 驗過本人裝置的 WebAuthn 簽章（`amr: ["webauthn"]`，可加語音）才發，綁 `intent_hash`，用一次（`jti`） | 本人在場（human-present）時，本人確認 closed mandate | Immediate 模式：本人直接簽 closed mandate（確切的金額與收款人），沒有 L3 |
 | 本人的金鑰 | passkey（WebAuthn） | 可驗證的數位憑證（OpenID4VP，建議 Digital Credentials API），或 Agent 提供者的受信任畫面；passkey 只列為「之後可能」 | L1 `cnf.jwk` 綁的本人金鑰 |
 | 防重放 | EIP-3009 nonce、預算 nullifier、核准的 `jti` | key binding 的 `nonce`、`sd_hash` | L2、L3 各自的 `nonce`；L3 的 `exp` 建議 5 分鐘 |
@@ -124,6 +124,34 @@ FUTUREMODE 筆記在 9/23 審查時列出五條邊界：做到才能說「通過
 | 5 三種「預留」不混稱 | ZK 預算預留的事件一律叫 `BUDGET_RESERVED`；結算防重靠 EIP-3009 nonce；沒有用 CDP 的付款前預留 | — | 做到 |
 
 所以能說的是「採用 x402 v2 的 HTTP 支付協商，本專案定義的五條邊界都做到並有測試」；不能說「符合 x402」或「通過認證」。
+
+### 5.2 和 x402 v2 規格的其他差異（11/26）
+
+對照 x402-foundation 的 `x402-specification-v2.md` 與 EVM `exact` 的 scheme 文件。
+
+**規格的 MUST 規則**（11/26 修好，沒有已知違反的）：
+
+| 規則 | 做法 | 測試 |
+|---|---|---|
+| 客戶端要在付款內容回傳 402 公告的擴充資訊，只能增加、不能刪改（§5.1.2） | Host 的付款內容帶上 402 的全部 `extensions`；憑證證明加進 `apa-credential` 原有的 `info` | `TestEcho`；`TestV2PaidOnAnvil` |
+| 不認得的 `paymentFlow` 不得付款（§6.1） | 只付 `authorization`、`upfront` 或沒寫的（單筆、金額固定）；`escrow` 與不認得的拒絕；`assetTransferMethod` 只接受 `eip3009` 或沒寫，因為 Signer 只簽 EIP-3009 | `TestPayable`、`TestSignedOfferChecked` |
+| 簽章報價可以是 EIP-712 或 JWS | 只讀 EIP-712；JWS 簽的報價當作沒簽，照常買，不拒絕整筆 | `TestOtherFormatsAreUnsigned` |
+
+商店轉給 facilitator 時，刻意不帶客人的擴充資訊：facilitator（例如 x402.org）結算用不到憑證證明，帶過去等於把客人的屬性多給一個第三方。
+
+**刻意從嚴、會擋掉一些合法商店的**：
+
+- 402 只能有一個付款選項；提供多條鏈或多種資產的商店，Host 不買。之後可改成挑出符合自己鏈與資產的那一項。
+- 402 最外層或 `resource` 有不認得的欄位就拒絕（防禦用，代價是對規格新增的欄位不寬容）。
+- 只認 x402 v2；v1 的 `X-PAYMENT` 不支援。
+- `offer-receipt` 的 EIP-712 型別字串照規格文字組，沒和官方 SDK 比對。
+
+**規格有、本專案沒做的**：
+
+- scheme 只做 `exact`；沒有 `upto`（先授權上限、依用量結算）、`batch-settlement`、`auth-capture`。
+- 只有 EVM＋EIP-3009（USDC）；沒有 Permit2、ERC-7710、Solana 與其他鏈。
+- 傳輸只有 HTTP；沒有 MCP、A2A。
+- 擴充只做 `offer-receipt`；`apa-credential` 是本專案自訂的。沒有 `bazaar`（探索）、`sign-in-with-x`、`payment_identifier`、gas 代付等；facilitator 沒有 `/discovery` API。Agent 只能買固定清單上的商品，是刻意的安全選擇。
 
 ## 6 面試常見追問（短答）
 

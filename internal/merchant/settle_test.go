@@ -604,12 +604,13 @@ func TestCredentialPresentedToTheShop(t *testing.T) {
 			t.Fatal(err)
 		}
 		raw, _ := json.Marshal(p)
-		ext, _ := x402.PresentationExtensions(raw)
+		ext, _ := x402.Echo(o.Quote.Extensions, raw)
 		return ext
 	}
 	before := s.gasNonce()
 	a := s.auth(500000)
-	for name, ext := range map[string]json.RawMessage{"none": json.RawMessage(`{}`), "another payment's": present(s.auth(500000))} {
+	echoed, _ := x402.Echo(o.Quote.Extensions, nil)
+	for name, ext := range map[string]json.RawMessage{"none": json.RawMessage(`{}`), "the 402's echoed, no presentation": echoed, "another payment's": present(s.auth(500000))} {
 		rec, _ := s.get("kr-market", s.headerWith("kr-market", a, nil, ext))
 		if rec.Code != 402 || !strings.Contains(rec.Body.String(), "invalid_credential") || s.gasNonce() != before {
 			t.Fatalf("%s: %d %s, gas nonce %d -> %d", name, rec.Code, rec.Body, before, s.gasNonce())
