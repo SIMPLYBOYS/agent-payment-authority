@@ -527,18 +527,30 @@ func e1aIntents(f *findings, run *e1aRun) {
 		}
 		by[want] = append(by[want], e)
 	}
-	paths := map[string]string{} // intent -> the order's resource path
+	requires := map[string]map[string]string{} // intent -> what its venue asks: the shop's 402 (boundary 4), else the fixture's
 	for _, o := range run.orders {
 		if h, err := o.IntentHash(); err == nil {
-			if u, err := url.Parse(o.Intent.ResourceURL); err == nil {
-				paths[h] = u.Path
+			u, uerr := url.Parse(o.Intent.ResourceURL)
+			fixture := map[string]string(nil)
+			if uerr == nil {
+				fixture = merchant.RequiresAt(u.Path)
+			}
+			switch asked, err := x402.CredentialIn(o.Quote.Extensions); {
+			case err != nil:
+				f.fail("E2", ev, "purchase %s: %v", o.Intent.PurchaseOrderID, err)
+			case asked == nil:
+				requires[h] = fixture
+			case x402.WithinCap(asked.Requires, fixture) != nil: // the shop asked more than the venue allows: the Host should have refused the quote
+				f.fail("E2", ev, "purchase %s: the shop's 402 asks for more than its venue allows: %v", o.Intent.PurchaseOrderID, x402.WithinCap(asked.Requires, fixture))
+			default:
+				requires[h] = asked.Requires
 			}
 		}
 	}
 	for intent, es := range by {
 		has := func(t string) *contracts.AuditEvent { return eventOf(es, t) }
 		if c := has("CREDENTIAL_VERIFIED"); c != nil && c.Payload.Credential != nil {
-			if why := venueClaims(c.Payload.Credential, merchant.RequiresAt(paths[intent])); why != "" {
+			if why := venueClaims(c.Payload.Credential, requires[intent]); why != "" {
 				f.fail("E2", ev, "intent %s: %s", intent, why)
 			}
 		}

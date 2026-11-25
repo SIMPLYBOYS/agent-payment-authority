@@ -545,6 +545,10 @@ func TestSignedOfferAndReceipt(t *testing.T) {
 	if err != nil || x402.MatchesOffer(p, o.URL, req, 0) != nil {
 		t.Fatalf("offer %+v %v", p, err)
 	}
+	// Boundary 4: the venue's credential requirement is in the same 402.
+	if r, err := x402.CredentialIn(o.Quote.Extensions); err != nil || r == nil || r.Schema != "apa.credential.v2" || len(r.Requires) != 1 || r.Requires["country"] != "" {
+		t.Fatalf("credential requirement %+v %v", r, err)
+	}
 	for range 2 { // the 402 is the book's, request after request
 		rec := httptest.NewRecorder()
 		s.mux.ServeHTTP(rec, httptest.NewRequest("GET", strings.TrimPrefix(o.URL, "http://127.0.0.1:8402"), nil))

@@ -106,7 +106,7 @@ Base Sepolia 上的實跑（10/31，`artifacts/e1a/testnet-town-t4`）E1～E10 �
 | Host 被入侵 | Host 沒有私鑰；Signer 自己驗本人的裝置與聲音，並檢查委託確認、每筆上限、總額與核准人 24 小時上限 | Host 可以拒絕服務或延遲，也可以把錯的摘要拿給本人看；本人在裝置上確認的是 Signer 綁定的內容 |
 | 重放舊的核准或付款 | 每次核准都是一次性 challenge；EIP-3009 nonce；ZK nullifier；Store 以 request ID 去重 | — |
 | 錄音冒充本人 | 每次唸的句子含一次性值；聲紋比對；還要裝置簽章 | **沒有做抗合成語音**（V1 的決定）；聲紋只是一個訊號，裝置才是主要的持有證明 |
-| 商店要求過多個資 | 每項商品宣告要求的屬性；BBS+ 只揭露那些；checker E2 驗「不多不少」 | 要求表現在由 Host 設定，不是商店宣告後由 Policy 設上限 |
+| 商店要求過多個資 | 付款商店在 402 的 `extensions` 宣告要求的屬性，Host 只接受落在場景設定範圍內的（`docs/commercial-credential-ext.md`）；BBS+ 只揭露那些；checker E2 驗宣告沒超出範圍、揭露「不多不少」 | 範圍由 Host 設定；證明仍在 Host 驗，商店只看到結果 |
 | 憑證被撤銷或過期 | 每次驗證、核准與付款前都重新讀簽章的狀態清單 | 狀態清單的防回捲只對 Store 看過的版本有效 |
 | 有人事後竄改紀錄 | 事件雜湊鏈；證據包 manifest；checker 向鏈重算 | — |
 

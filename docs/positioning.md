@@ -120,10 +120,10 @@ FUTUREMODE 筆記在 9/23 審查時列出五條邊界：做到才能說「通過
 | 1 報價完整綁定：`AuthorizationIntent` 帶 HTTP method、完整網址、`x402Version`、scheme，以及選中那份報價的雜湊 `payment_requirement_hash` | `internal/toolbridge/shop.go` 算雜湊；`PurchaseOrder.Validate` 重算，對不上就拒絕 | `internal/contracts/contracts_test.go`：改任何一個欄位，雜湊都會變；`Test402Tampering`：網址、版本、多份報價、轉址都拒絕 | 做到 |
 | 2 `accepted` 必須完全相同：付款裡的 `accepted` 要和商店給的那份一模一樣 | `internal/merchant/merchant.go` 逐位元比對；`apa-facilitator` 轉成標準格式後比對 | `TestPaymentSignatureNeverDelivers`：金額、收款人、scheme、網路、只差大小寫的鍵都拒絕；facilitator 的 `accepted not the requirements` | 做到 |
 | 3 驗證與結算分開：`/verify` 唯讀；驗證失敗就不結算；確認到設定的區塊深度前不交付 | `internal/facilitator`、`internal/merchant` | `TestVerifyIsReadOnly`、`TestVerificationFailuresSendNothing`、`TestNothingDeliveredBeforeConfirmations`；checker E4 向鏈核對兩筆交易 | 做到 |
-| 4 擴充欄位放對位置：憑證的要求放在 `PAYMENT-REQUIRED` 的 `extensions`，證明放在 `PaymentPayload` 的 `extensions` | 憑證不在 `extensions`：`PAYMENT-REQUIRED` 的 `extensions` 只有付款商店簽好的報價（`offer-receipt`，11/25），`PaymentPayload` 的是空的 `{}`；BBS+ 證明在 Host 組請購單時驗證 | checker E2：每間店看到的屬性不多不少 | **沒做**。也沒有另外加 HTTP header，所以不違反這條；但不能說憑證走 x402 |
+| 4 擴充欄位放對位置：憑證的要求放在 `PAYMENT-REQUIRED` 的 `extensions`，證明放在 `PaymentPayload` 的 `extensions` | 要求：付款商店在 402 的 `extensions["apa-credential"]` 宣告，Host 只接受場景設定範圍內的（11/25，`docs/commercial-credential-ext.md`）。證明：仍在 Host 組請購單時驗，`PaymentPayload` 的 `extensions` 是空的 `{}` | `TestVenueRequires`、`TestCredentialRequirement`；checker E2 從報價讀要求，驗揭露不多不少 | **前半做到**。證明交給商店驗牽涉隱私取捨，還沒做；不能說憑證完整走 x402 |
 | 5 三種「預留」不混稱 | ZK 預算預留的事件一律叫 `BUDGET_RESERVED`；結算防重靠 EIP-3009 nonce；沒有用 CDP 的付款前預留 | — | 做到 |
 
-所以能說的是「採用 x402 v2 的 HTTP 支付協商，五條邊界有四條做到並有測試」；不能說「符合 x402」或「通過認證」。
+所以能說的是「採用 x402 v2 的 HTTP 支付協商，五條邊界有四條做到、第 4 條做到一半（要求在 `extensions`，證明還沒有），都有測試」；不能說「符合 x402」或「通過認證」。
 
 ## 6 面試常見追問（短答）
 

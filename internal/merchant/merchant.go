@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
@@ -406,7 +407,7 @@ func settled(baseURL string, st Settlement, src []product, ext ...External) (*Me
 	return m, m.signOffers()
 }
 
-// signOffers gives the shop a signing key of its own for this process
+// signOffers (also the 402's credential requirement, boundary 4) gives the shop a signing key of its own for this process
 // (ponytail: one per start; a shop kept across restarts would keep its key
 // and publish its rotation in did.json), signs each offer's 402 with it, and
 // writes its did:web document. The signature is deterministic (RFC 6979)
@@ -435,6 +436,16 @@ func (m *Merchant) signOffers() error {
 		ext, err := x402.OfferExtensions(s)
 		if err != nil {
 			return err
+		}
+		if o.Requires != nil { // boundary 4: what the venue asks of the buyer's credential, in the 402 (docs/commercial-credential-ext.md)
+			var all map[string]json.RawMessage
+			json.Unmarshal(ext, &all)
+			if all[x402.CredentialKey], err = x402.CredentialMember(x402.CredentialRequirement{Schema: credential.SchemaV2, Requires: o.Requires}); err != nil {
+				return err
+			}
+			if ext, err = json.Marshal(all); err != nil {
+				return err
+			}
 		}
 		if o.required.Extensions, err = contracts.Canonical(ext); err != nil {
 			return err

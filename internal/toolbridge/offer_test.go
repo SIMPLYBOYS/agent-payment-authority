@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
@@ -52,5 +53,28 @@ func TestSignedOfferChecked(t *testing.T) {
 		if _, _, err := shop.quote(context.Background(), p); (err == nil) != c.ok {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+}
+
+// Boundary 4: the credential discloses what the shop's 402 asks, inside what
+// the host allows the venue; the host's own when the shop asks nothing.
+func TestVenueRequires(t *testing.T) {
+	allowed := map[string]string{"country": "", "age_over_18": "true"}
+	quote := func(schema string, req map[string]string) contracts.Quote {
+		m, _ := x402.CredentialMember(x402.CredentialRequirement{Schema: schema, Requires: req})
+		ext, _ := json.Marshal(map[string]json.RawMessage{x402.CredentialKey: m})
+		return contracts.Quote{Extensions: ext}
+	}
+	if got, err := venueRequires(contracts.Quote{Extensions: json.RawMessage(`{}`)}, allowed); err != nil || len(got) != 2 {
+		t.Errorf("none declared: %v %v", got, err)
+	}
+	if got, err := venueRequires(quote("apa.credential.v2", map[string]string{"country": ""}), allowed); err != nil || len(got) != 1 || got["country"] != "" {
+		t.Errorf("the shop's, narrower: %v %v", got, err)
+	}
+	if _, err := venueRequires(quote("apa.credential.v2", map[string]string{"birth_date": ""}), allowed); err == nil {
+		t.Error("an attribute the host does not allow was disclosed")
+	}
+	if _, err := venueRequires(quote("other.schema", map[string]string{"country": ""}), allowed); err == nil {
+		t.Error("another schema accepted")
 	}
 }

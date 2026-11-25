@@ -164,6 +164,10 @@ func (s *Shop) request(ctx context.Context, b *Binding, p Product, po string) (s
 	if err != nil {
 		return refused("QUOTE_REFUSED")
 	}
+	require, err := venueRequires(quote, p.Require)
+	if err != nil {
+		return refused("QUOTE_REFUSED")
+	}
 	// The stored task's contract version picks the purchase to build; the
 	// model and the request never name it.
 	var order any
@@ -179,7 +183,7 @@ func (s *Shop) request(ctx context.Context, b *Binding, p Product, po string) (s
 	var res store.Result
 	err = b.Commit(func() (err error) {
 		if task.ContractVersion == paycontract.V2 {
-			res, err = s.submitV2(b, raw, p.Require)
+			res, err = s.submitV2(b, raw, require)
 		} else {
 			res, err = s.Store.Submit(b.Session, raw)
 		}
@@ -194,6 +198,23 @@ func (s *Shop) request(ctx context.Context, b *Binding, p Product, po string) (s
 		return refused(store.Code(err))
 	}
 	return res.Purchase, res.Replay, ""
+}
+
+// venueRequires is what the buyer's credential discloses for a quote: the
+// shop's requirement in its 402 (boundary 4, docs/commercial-credential-ext.md)
+// within what the host allows the venue (allowed); the host's own when the
+// shop declares none (M1's and the fake shops, an external one).
+func venueRequires(q contracts.Quote, allowed map[string]string) (map[string]string, error) {
+	asked, err := x402.CredentialIn(q.Extensions)
+	switch {
+	case err != nil:
+		return nil, err
+	case asked == nil:
+		return allowed, nil
+	case asked.Schema != credential.SchemaV2:
+		return nil, errors.New("the shop asks for a credential schema the host does not hold")
+	}
+	return asked.Requires, x402.WithinCap(asked.Requires, allowed)
 }
 
 // submitV2 is an apa.pay.v2 purchase inside Commit's lock (design 7):
