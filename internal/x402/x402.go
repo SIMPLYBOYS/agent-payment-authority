@@ -91,6 +91,8 @@ type SettleResponse struct {
 	Transaction string `json:"transaction"`
 	Network     string `json:"network"`
 	Amount      string `json:"amount,omitempty"`
+	// Extensions: a shop's signed receipt (offer-receipt, offerreceipt.go) on a delivered payment's PAYMENT-RESPONSE.
+	Extensions json.RawMessage `json:"extensions,omitempty"`
 }
 
 type SupportedKind struct {

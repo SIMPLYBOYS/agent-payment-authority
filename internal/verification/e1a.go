@@ -29,6 +29,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 )
 
 // E1aVersion is the pack's version; E1aChecker this checker's rules.
@@ -176,6 +177,7 @@ const delegationNotEvaluated = "the delegation confirmed by the person (E1a-D1 A
 var e1aLimits = []string{
 	"a device or virtual authenticator is the host's declaration (--authenticator-source); the checker checks it is consistent, not that a device was physical",
 	"a delegation confirmed by the person is read from its DELEGATION_BOUND (method webauthn, the Signer's confirmation named); the Signer's own record of it is not in the pack",
+	"a shop's signed offer and receipt are checked to be one key's, and to say what the purchase and its settlement say; that the key is the shop's (its did:web document) was the Host's check when it took the quote: the pack has no copy of the document",
 	"a revocation by the person is read from its DELEGATION_REVOKED (the Signer's revocation named): E3 checks nothing is requested after it; with the Signer's receipt, signed by the task's wallet, E2 checks every signed payment is one the Signer had signed before it; a Signer without the wallet's key gives no receipt, and then the order of a payment signed around the revocation is not evaluated",
 	"event and intent hashes and registry bindings use the pay contract's own pure functions: a fault there is shared",
 	"tx#2 is tied to its intent only through the Store's records and the EIP-3009 nonce, not by the chain",
@@ -233,8 +235,12 @@ func VerifyE1a(dir, repo string, chain Chain) (*E1aReport, error) {
 		if !e1aJSON(b, &f, "E1", base+"events.json", &run.events) || !e1aJSON(b, &f, "E1", base+"purchases.json", &run.orders) {
 			continue
 		}
+		if _, ok := b.files[base+"responses.json"]; ok && !e1aJSON(b, &f, "E1", base+"responses.json", &run.responses) {
+			continue
+		}
 		runs[t.TaskID] = run
 		e1aChain(&f, run)
+		e1aShopSigned(&f, run)
 		e1aRevocation(&f, run, registry)
 		e1aIntents(&f, run)
 		e1aOnce(&f, run)
@@ -257,9 +263,15 @@ func VerifyE1a(dir, repo string, chain Chain) (*E1aReport, error) {
 }
 
 type e1aRun struct {
-	task   E1aTask
-	events []contracts.AuditEvent
-	orders []paycontract.PurchaseOrder
+	task      E1aTask
+	events    []contracts.AuditEvent
+	orders    []paycontract.PurchaseOrder
+	responses []e1aResponse // the shop's PAYMENT-RESPONSE of each delivered payment (a pack from before 11/25 has none)
+}
+
+type e1aResponse struct {
+	IntentHash      string              `json:"intent_hash"`
+	PaymentResponse x402.SettleResponse `json:"payment_response"`
 }
 
 func e1aJSON(b *bundle, f *findings, claim, rel string, dst any) bool {
@@ -426,6 +438,68 @@ func venueClaims(c *contracts.CredentialCheck, require map[string]string) string
 		return fmt.Sprintf("claims %q against the venue's %v, recorded %q", c.Claims, require, c.Detail)
 	}
 	return ""
+}
+
+// e1aShopSigned is E2 for a shop that signs (x402 offer-receipt,
+// docs/commercial-offer-receipt.md): a purchase's signed offer recovers a
+// key and says what the order's quote and resource say, and a payment
+// delivered on it carries the shop's receipt, signed by the same key, for
+// its resource, network, payer and tx#2. Whose key that is (the shop's
+// did:web document) the Host checked when it took the quote; the pack has
+// no copy of the document.
+func e1aShopSigned(f *findings, run *e1aRun) {
+	ev := []string{"tasks/" + run.task.TaskID + "/purchases.json", "tasks/" + run.task.TaskID + "/responses.json"}
+	settled, delivered := map[string]string{}, map[string]bool{}
+	for _, e := range run.events {
+		if e.Scope == nil {
+			continue
+		}
+		switch e.EventType {
+		case "PAYMENT_SETTLED":
+			if e.Payload.Payment != nil {
+				settled[e.Scope.IntentHash] = e.Payload.Payment.TxHash
+			}
+		case "RESOURCE_DELIVERED":
+			delivered[e.Scope.IntentHash] = true
+		}
+	}
+	responses := map[string]x402.SettleResponse{}
+	for _, r := range run.responses {
+		responses[r.IntentHash] = r.PaymentResponse
+	}
+	for _, o := range run.orders {
+		offers, err := x402.OffersIn(o.Quote.Extensions)
+		if err != nil || len(offers) == 0 {
+			if err != nil {
+				f.fail("E2", ev, "purchase %s: %v", o.Intent.PurchaseOrderID, err)
+			}
+			continue
+		}
+		var req x402.Requirement
+		p, _, err := x402.OpenOffer(offers[0])
+		if err == nil {
+			err = json.Unmarshal(o.Quote.SelectedRequirement, &req)
+		}
+		if err == nil {
+			err = x402.MatchesOffer(p, o.Intent.ResourceURL, req, 0) // the expiry is the Host's to check when it took the quote
+		}
+		if len(offers) != 1 || err != nil {
+			f.fail("E2", ev, "purchase %s: the shop's signed offer does not hold (%v)", o.Intent.PurchaseOrderID, err)
+			continue
+		}
+		intent, err := o.IntentHash()
+		if err != nil || !delivered[intent] {
+			continue
+		}
+		r, ok := responses[intent]
+		if !ok {
+			f.fail("E2", ev, "intent %s was delivered on a signed offer and the pack has no PAYMENT-RESPONSE for it", intent)
+			continue
+		}
+		if _, err := x402.ShopReceipt(o.Quote.Extensions, r.Extensions, o.Intent.ResourceURL, "eip155:"+o.PaymentBinding.ChainID, o.PaymentBinding.From, settled[intent]); err != nil {
+			f.fail("E2", ev, "intent %s: the shop's receipt does not hold (%v)", intent, err)
+		}
+	}
 }
 
 // e1aIntents is E2: every purchase's events name its intent, recomputed from
@@ -787,7 +861,7 @@ func hexAllowed(key, v string) bool {
 	case strings.HasPrefix(v, "sha256:"), strings.HasPrefix(v, "ed25519:"):
 		return true
 	case strings.HasPrefix(v, "0x"):
-		return key == "tx_hash" || key == "nonce" || key == "eip3009_nonce" || key == "transaction_hash"
+		return key == "tx_hash" || key == "nonce" || key == "eip3009_nonce" || key == "transaction_hash" || key == "transaction" // x402's settlement response
 	}
 	return key == "sha256" || strings.HasSuffix(key, "_sha256")
 }
@@ -816,34 +890,57 @@ func e1aSafety(b *bundle, f *findings) {
 				f.fail("E9", []string{p}, "not JSON: its values cannot be told apart")
 				break
 			}
-			walkJSON("", v, func(key, val string) {
-				if slices.Contains(forbiddenKeys, key) {
-					f.fail("E9", []string{p}, "a field never whitelisted: %q", key)
-				}
-				if hexValue.MatchString(val) && !hexAllowed(key, val) && (keyShape.MatchString(val) || !strings.Contains(val, " ")) {
-					f.fail("E9", []string{p}, "field %q holds a 64-hex value where none belongs (a key's shape)", key)
-				}
-			})
+			for _, why := range e1aUnsafe(v) {
+				f.fail("E9", []string{p}, "%s", why)
+			}
 		}
 	}
 }
 
+// e1aUnsafe is what E9 finds in one JSON document. A shop's signed offer or
+// receipt (x402 offer-receipt) carries its public signature; a payment's
+// signature (EIP-3009, a bearer authorization) never belongs anywhere, nor
+// any other.
+func e1aUnsafe(v any) []string {
+	var out []string
+	walkJSON("", false, v, func(key, val string, signed bool) {
+		if signed && key == "signature" && offerSig.MatchString(val) {
+			return
+		}
+		if slices.Contains(forbiddenKeys, key) {
+			out = append(out, fmt.Sprintf("a field never whitelisted: %q", key))
+		}
+		if hexValue.MatchString(val) && !hexAllowed(key, val) && (keyShape.MatchString(val) || !strings.Contains(val, " ")) {
+			out = append(out, fmt.Sprintf("field %q holds a 64-hex value where none belongs (a key's shape)", key))
+		}
+	})
+	return out
+}
+
+// offerSig is a signed offer's or receipt's signature: r, s and v, nothing else.
+var offerSig = regexp.MustCompile(`^0x[0-9a-f]{130}$`)
+
 // walkJSON calls leaf with every string value and its key (an array's items
 // take the array's key); every key is reported, with "" when it is not a
-// string.
-func walkJSON(key string, v any, leaf func(key, val string)) {
+// string. signed: the value is inside an "offer-receipt" extension.
+func walkJSON(key string, signed bool, v any, leaf func(key, val string, signed bool)) {
 	switch x := v.(type) {
 	case map[string]any:
 		for k, y := range x {
-			leaf(k, "")
-			walkJSON(k, y, leaf)
+			if k == "signature" && signed { // judged with its value: a string of r, s and v only
+				str, _ := y.(string)
+				leaf(k, str, signed)
+				continue
+			}
+			leaf(k, "", signed)
+			walkJSON(k, signed || k == "offer-receipt", y, leaf)
 		}
 	case []any:
 		for _, y := range x {
-			walkJSON(key, y, leaf)
+			walkJSON(key, signed, y, leaf)
 		}
 	case string:
-		leaf(key, x)
+		leaf(key, x, signed)
 	}
 }
 

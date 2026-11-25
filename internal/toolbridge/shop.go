@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -304,7 +305,51 @@ func (s *Shop) quote(ctx context.Context, p Product) (contracts.Quote, x402.Requ
 	if err := json.Unmarshal(q.SelectedRequirement, &req); err != nil {
 		return contracts.Quote{}, req, err
 	}
+	offers, err := x402.OffersIn(pr.Extensions)
+	if err != nil {
+		return contracts.Quote{}, req, err
+	}
+	if len(offers) > 0 { // a signed offer (offer-receipt) is checked before anything is bought on it
+		if err := s.signedOffer(ctx, p.URL, req, offers); err != nil {
+			return contracts.Quote{}, req, err
+		}
+	}
 	return q, req, nil
+}
+
+// signedOffer checks a 402's signed offer (docs/commercial-offer-receipt.md):
+// one, for this resource and these terms, not expired, signed by a key the
+// shop's did:web document at the resource's origin names. A shop that signs
+// nothing is not asked (an external one, M1's).
+func (s *Shop) signedOffer(ctx context.Context, resourceURL string, req x402.Requirement, offers []x402.Signed) error {
+	if len(offers) != 1 {
+		return errors.New("one signed offer for the one accepts entry")
+	}
+	p, by, err := x402.OpenOffer(offers[0])
+	if err != nil {
+		return err
+	}
+	if err := x402.MatchesOffer(p, resourceURL, req, s.Now()); err != nil {
+		return err
+	}
+	u, err := url.Parse(resourceURL)
+	if err != nil {
+		return err
+	}
+	origin := u.Scheme + "://" + u.Host
+	did, err := x402.DIDWeb(origin)
+	if err != nil {
+		return err
+	}
+	resp, body, err := s.get(ctx, origin+"/.well-known/did.json")
+	if err != nil {
+		return err
+	}
+	var doc x402.DIDDocument
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &doc) != nil || !doc.Authorizes(did, by) {
+		return errors.New("the offer's key is not the shop's did:web key")
+	}
+	return nil
 }
 
 // assemble builds the whole purchase from trusted data: identity from the

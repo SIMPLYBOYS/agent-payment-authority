@@ -94,7 +94,7 @@
 
 - **模式對得上**：本專案的 Allow（`allow_max` 以下）就是它們的 autonomous；Ask（本人逐筆核准）就是它們的 human-present／Immediate。差別在本專案用同一份委託依金額切換，它們用兩種委託。
 - **最大的結構差異在 Agent 有沒有金鑰**：它們給 Agent 一把金鑰，由 Agent 簽這一筆；本專案的 Agent 什麼金鑰都沒有，請購不簽名，由 Policy 檢查、Signer 簽付款。後者更貼近「Agent 不能碰 custody」；代價是「這筆請購是哪個 Agent 送出的」沒有密碼學證明，靠的是 Host 的紀錄與 `agent_id`。
-- **商家報價沒有簽名**：它們要商家簽購物車；本專案綁住報價的完整雜湊，但商家沒簽。x402 的 Signed Offers & Receipts 擴充可以補上。
+- **商家簽報價與收據**：它們要商家簽購物車；本專案綁住報價的完整雜湊，11/25 起付款商店也用 x402 的 Signed Offers & Receipts 簽每一筆報價與交付收據，金鑰公布在商店的 did:web 文件（`docs/commercial-offer-receipt.md`）。簽的是單一資源的報價，不是購物車。
 - **預算看得到的人不同**：它們的累計由支付網路追蹤；本專案在鏈上以 ZK 預留，鏈上看不到上限與餘額（中繼與主持人那一側看得到，見 architecture.md 的限制）。
 - **本專案沒有商品層級的限制**：它們有 `line_items`；本專案只有自然語言的 `purpose`，靠商店清單與憑證屬性要求來限制。
 - **要互通的話**：委託條款可以包成 open mandate、請購包成 closed mandate；本人逐筆核准（Signer 驗過 WebAuthn 才發的 grant）在 AP2 裡沒有現成的位置，AP2 只把 passkey 列為之後可能的做法。
@@ -120,7 +120,7 @@ FUTUREMODE 筆記在 9/23 審查時列出五條邊界：做到才能說「通過
 | 1 報價完整綁定：`AuthorizationIntent` 帶 HTTP method、完整網址、`x402Version`、scheme，以及選中那份報價的雜湊 `payment_requirement_hash` | `internal/toolbridge/shop.go` 算雜湊；`PurchaseOrder.Validate` 重算，對不上就拒絕 | `internal/contracts/contracts_test.go`：改任何一個欄位，雜湊都會變；`Test402Tampering`：網址、版本、多份報價、轉址都拒絕 | 做到 |
 | 2 `accepted` 必須完全相同：付款裡的 `accepted` 要和商店給的那份一模一樣 | `internal/merchant/merchant.go` 逐位元比對；`apa-facilitator` 轉成標準格式後比對 | `TestPaymentSignatureNeverDelivers`：金額、收款人、scheme、網路、只差大小寫的鍵都拒絕；facilitator 的 `accepted not the requirements` | 做到 |
 | 3 驗證與結算分開：`/verify` 唯讀；驗證失敗就不結算；確認到設定的區塊深度前不交付 | `internal/facilitator`、`internal/merchant` | `TestVerifyIsReadOnly`、`TestVerificationFailuresSendNothing`、`TestNothingDeliveredBeforeConfirmations`；checker E4 向鏈核對兩筆交易 | 做到 |
-| 4 擴充欄位放對位置：憑證的要求放在 `PAYMENT-REQUIRED` 的 `extensions`，證明放在 `PaymentPayload` 的 `extensions` | 兩邊的 `extensions` 都是空的 `{}`；BBS+ 證明在 Host 組請購單時驗證 | checker E2：每間店看到的屬性不多不少 | **沒做**。也沒有另外加 HTTP header，所以不違反這條；但不能說憑證走 x402 |
+| 4 擴充欄位放對位置：憑證的要求放在 `PAYMENT-REQUIRED` 的 `extensions`，證明放在 `PaymentPayload` 的 `extensions` | 憑證不在 `extensions`：`PAYMENT-REQUIRED` 的 `extensions` 只有付款商店簽好的報價（`offer-receipt`，11/25），`PaymentPayload` 的是空的 `{}`；BBS+ 證明在 Host 組請購單時驗證 | checker E2：每間店看到的屬性不多不少 | **沒做**。也沒有另外加 HTTP header，所以不違反這條；但不能說憑證走 x402 |
 | 5 三種「預留」不混稱 | ZK 預算預留的事件一律叫 `BUDGET_RESERVED`；結算防重靠 EIP-3009 nonce；沒有用 CDP 的付款前預留 | — | 做到 |
 
 所以能說的是「採用 x402 v2 的 HTTP 支付協商，五條邊界有四條做到並有測試」；不能說「符合 x402」或「通過認證」。

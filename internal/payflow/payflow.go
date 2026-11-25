@@ -600,9 +600,24 @@ func (w *Worker) byChain(ctx context.Context, p store.Payment, ra reconcile.Auth
 	return p, ErrPending // pending: it may yet settle; never paid again
 }
 
+// delivered records the content, keeping the answer's PAYMENT-RESPONSE with
+// the shop's signed receipt in it; a receipt that does not match the
+// purchase's signed offer is said on the terminal and recorded as it came:
+// the content was delivered, and the checker fails it (E2).
 func (w *Worker) delivered(p store.Payment, ans ShopAnswer) (store.Payment, error) {
 	sum := sha256.Sum256(ans.Body)
-	return w.Store.PaymentDelivered(p.IntentHash, hex.EncodeToString(sum[:]), len(ans.Body))
+	var resp, ext json.RawMessage
+	if ans.Response != nil {
+		resp, _ = json.Marshal(ans.Response)
+		ext = ans.Response.Extensions
+	}
+	var o paycontract.PurchaseOrder
+	if err := json.Unmarshal(p.Order, &o); err == nil {
+		if _, err := x402.ShopReceipt(o.Quote.Extensions, ext, o.Intent.ResourceURL, "eip155:"+o.PaymentBinding.ChainID, o.PaymentBinding.From, p.SettleTx); err != nil && w.Log != nil {
+			w.Log(p.IntentHash, errors.New("shop receipt: "+err.Error()))
+		}
+	}
+	return w.Store.PaymentDeliveredWith(p.IntentHash, hex.EncodeToString(sum[:]), len(ans.Body), resp)
 }
 
 // Starter starts payments (H-D1 A, docs/commercial-p2-host.md 12.3), as

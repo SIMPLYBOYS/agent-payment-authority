@@ -204,6 +204,9 @@ func export(path string, tasks []verification.E1aTask) (map[string][]byte, []byt
 		for name, q := range map[string]string{
 			"events.json":    `SELECT body FROM events WHERE task_id = ? ORDER BY sequence`,
 			"purchases.json": `SELECT body FROM purchases WHERE task_id = ? ORDER BY decided_at, purchase_order_id`,
+			// The shop's PAYMENT-RESPONSE of each delivered payment, its signed receipt in it (docs/commercial-offer-receipt.md).
+			"responses.json": `SELECT json_object('intent_hash', r.intent_hash, 'payment_response', json(r.payment_response)) FROM receipts r
+				JOIN payments p ON p.intent_hash = r.intent_hash WHERE p.task_id = ? AND r.payment_response <> '' ORDER BY r.intent_hash`,
 		} {
 			rows, err := db.Query(q, t.TaskID)
 			if err != nil {

@@ -93,7 +93,7 @@ Base Sepolia 上的實跑（10/31，`artifacts/e1a/testnet-town-t4`）E1～E10 �
 |---|---|---|
 | Agent 有沒有理解本人要什麼 | 鏈上只有簽章、nonce 與轉帳 | 超過自動範圍的每一筆，都要本人在裝置上核准；範圍內的，靠每筆上限與任務預算限制損失 |
 | 這筆買得合不合理 | 這是判斷，不是密碼學能驗的事 | 同上。E10 只確認誘導文字沒有讓付款越權，不確認買的東西有沒有用 |
-| 商家可不可信、交付的內容對不對 | 鏈看不到交付；收據只記下內容的 sha256 | 商家是固定名單；付了款沒交付，由人判斷要不要退 |
+| 商家可不可信、交付的內容對不對 | 鏈看不到交付；收據只記下內容的 sha256 | 商家是固定名單；付款商店簽報價與交付收據（x402 Signed Offers & Receipts，金鑰在 did:web 文件），checker 驗兩者出自同一把金鑰、對得上這筆付款（`docs/commercial-offer-receipt.md`）；內容本身對不對仍不判斷；付了款沒交付，由人判斷要不要退 |
 | 本人是不是真的本人 | 身分來自 eKYC 沙盒與測試資料 | 見下方「照實說的限制」 |
 
 ## 威脅模型
@@ -143,4 +143,4 @@ OWASP GenAI Security Project 在 2025-12-09 發布 Top 10 for Agentic Applicatio
 - 政策在鏈下由 Signer 執行：它先到鏈上確認預算已預留才簽，但 test USDC 合約本身不認預留；沒有錢包層的強制執行（ERC-8196、ERC-7710，見 `docs/adr/payment-account-model.md`）。
 - 頻率限制（11/7 重開 A，`docs/commercial-velocity.md` §8）：同一位客人跨所有 task 與店，十分鐘內被判 Allow 或 Ask 的請購最多 5 筆，第 6 筆在付款前就 Deny `VELOCITY_LIMIT`；Signer 另有一道同樣的上限（同一個錢包十分鐘內最多簽 5 筆），Host 被攻破也還在。只在真實 Agent 的場次（`e1a-host` 產生的設定）與本機的 `make present-p2`（`testdata/policy/p2-local-profile.json`，11/9）啟用；其他 fake 的展示與影片沒有。彩排或錄影時同一位客人十分鐘內重開很多次，可能在現場被擋（Aaron 11/7 接受這個代價）。只算筆數，不算金額；金額由每筆上限、任務預算與 Signer 的累計上限負責。
 - 地下鐵閘門的自動扣款（11/9，`docs/commercial-transit.md`）：沒有 Agent，是 Host 在客人進站時替捷運委託送出車資請購；閘門依 Policy 的核准就開，鏈上結算在背景完成，所以 Policy 之後才碰到的限制（Signer、餘額、當日上限）會讓已經開過閘的那一趟付款失敗（紀錄照實寫）。一筆被拒就結束整張捷運通行（付款合約的規則），要本人重新開通。客人走路與閘門是像素城鎮裡的模擬，事件照實標 `fixture/host`；checker 這一輪不檢查捷運任務。
-- 兩位 Agent 在 Base Sepolia 的 ERC-8004 registry 有身分（agent 10573、10574），但由展示平台代為註冊（身分的擁有者是平台的 issuer，不是客人）。付款錢包：註冊檔只是宣告，11/8 起兩位的 `agentWallet` 由付款錢包自己簽章設定（`docs/commercial-8004.md` §8），registry 驗過錢包的簽章，所以是錢包本身同意的；ERC-8004 仍是 Draft，registry 可以被它的擁有者升級（`docs/commercial-8004.md`）。商家是固定名單，沒有身分與信譽；退款只有「交付失敗、主持人按下、全額退回」這一種（`docs/commercial-refund.md`），沒有爭議流程；沒有交易監控（KYT）。
+- 兩位 Agent 在 Base Sepolia 的 ERC-8004 registry 有身分（agent 10573、10574），但由展示平台代為註冊（身分的擁有者是平台的 issuer，不是客人）。付款錢包：註冊檔只是宣告，11/8 起兩位的 `agentWallet` 由付款錢包自己簽章設定（`docs/commercial-8004.md` §8），registry 驗過錢包的簽章，所以是錢包本身同意的；ERC-8004 仍是 Draft，registry 可以被它的擁有者升級（`docs/commercial-8004.md`）。商家是固定名單；付款商店的報價與收據有簽章，金鑰公布在它的 did:web 文件，但沒有信譽，did:web 也只走 http（`docs/commercial-offer-receipt.md`）；退款只有「交付失敗、主持人按下、全額退回」這一種（`docs/commercial-refund.md`），沒有爭議流程；沒有交易監控（KYT）。

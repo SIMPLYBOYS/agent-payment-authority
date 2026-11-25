@@ -17,9 +17,12 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 type product struct {
@@ -302,6 +305,11 @@ type Merchant struct {
 	offers   map[string]offer  // path + "?" + raw query
 	settle   Settlement        // P2: nil is M1's shop, which never settles
 	external []External        // B5: listed in the data shop's catalog, sold elsewhere
+	// key signs the settling shop's offers and receipts (x402 offer-receipt,
+	// docs/commercial-offer-receipt.md); did.json at its origin names it. M1's
+	// shop signs nothing: its quotes are fixed in the contract vectors.
+	key *secp256k1.PrivateKey
+	did []byte // the did:web document
 }
 
 // External is a product another x402 server sells (B5: test402.com,
@@ -395,7 +403,46 @@ func settled(baseURL string, st Settlement, src []product, ext ...External) (*Me
 		return nil, err
 	}
 	m.settle = st
-	return m, nil
+	return m, m.signOffers()
+}
+
+// signOffers gives the shop a signing key of its own for this process
+// (ponytail: one per start; a shop kept across restarts would keep its key
+// and publish its rotation in did.json), signs each offer's 402 with it, and
+// writes its did:web document. The signature is deterministic (RFC 6979)
+// and the offer has no validUntil, so the 402, its quote and the Host's
+// offer book stay the same for every request.
+func (m *Merchant) signOffers() error {
+	key, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		return err
+	}
+	did, err := x402.DIDWeb(m.base)
+	if err != nil {
+		return err
+	}
+	if m.did, err = json.Marshal(x402.ShopDocument(did, x402.Address(key.PubKey()))); err != nil {
+		return err
+	}
+	for k, o := range m.offers {
+		r := o.Requirement
+		s, err := x402.SignOffer(key, x402.OfferPayload{Version: 1, ResourceURL: o.url, Scheme: r.Scheme, Network: r.Network, Asset: r.Asset, PayTo: r.PayTo, Amount: string(r.Amount)})
+		if err != nil {
+			return err
+		}
+		zero := 0
+		s.AcceptIndex = &zero
+		ext, err := x402.OfferExtensions(s)
+		if err != nil {
+			return err
+		}
+		if o.required.Extensions, err = contracts.Canonical(ext); err != nil {
+			return err
+		}
+		m.offers[k] = o
+	}
+	m.key = key
+	return nil
 }
 
 // EvalItem is one product of an AE1 evaluation catalog (docs/commercial-ae1.md
@@ -559,6 +606,12 @@ func (m *Merchant) Register(mux *http.ServeMux) {
 			w.Write(body)
 		})
 	}
+	if m.did != nil { // the settling shop's did:web document: the key its offers and receipts are signed with
+		mux.HandleFunc("GET /.well-known/did.json", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/did+json")
+			w.Write(m.did)
+		})
+	}
 	paths := map[string]bool{}
 	for _, o := range m.offers {
 		if !paths[o.Path] {
@@ -600,6 +653,18 @@ func (m *Merchant) settled(w http.ResponseWriter, o offer, out Outcome) {
 	w.Header().Set("Cache-Control", "no-store") // paid content, or a state that changes
 	switch out.Kind {
 	case "delivered":
+		if m.key != nil && !o.noDelivery { // a receipt only with the content (offer-receipt: 200 only)
+			r := out.Response
+			s, err := x402.SignReceipt(m.key, x402.ReceiptPayload{Version: 1, Network: r.Network, ResourceURL: o.url, Payer: strings.ToLower(r.Payer),
+				IssuedAt: uint64(time.Now().Unix()), Transaction: r.Transaction})
+			if err == nil {
+				out.Response.Extensions, err = x402.ReceiptExtensions(s)
+			}
+			if err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+		}
 		h, err := x402.Encode(out.Response)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)

@@ -430,6 +430,14 @@ func ReceiptID(intent string) string {
 // receipt (RECEIPT_ISSUED, a receipts row) of a settled payment: the
 // content's SHA-256 and size only, never the content.
 func (s *Store) PaymentDelivered(intent, contentSHA256 string, size int) (Payment, error) {
+	return s.PaymentDeliveredWith(intent, contentSHA256, size, nil)
+}
+
+// PaymentDeliveredWith is PaymentDelivered keeping the delivering answer's
+// PAYMENT-RESPONSE in the receipt (the shop's signed receipt is in it,
+// docs/commercial-offer-receipt.md): a settlement recorded from the chain
+// alone had none. nil keeps the one recorded at settlement.
+func (s *Store) PaymentDeliveredWith(intent, contentSHA256 string, size int, paymentResponse json.RawMessage) (Payment, error) {
 	if size < 0 {
 		return Payment{}, refuse("INVALID_PAYMENT_UPDATE", "content size")
 	}
@@ -456,6 +464,9 @@ func (s *Store) PaymentDelivered(intent, contentSHA256 string, size int) (Paymen
 				return err
 			}
 			resp := string(p.PaymentResponse)
+			if paymentResponse != nil {
+				resp = string(paymentResponse)
+			}
 			_, err := tx.Exec(`INSERT INTO receipts VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, id, intent, reserveTx, p.SettleTx, resp, contentSHA256, size, now)
 			return err
 		}})

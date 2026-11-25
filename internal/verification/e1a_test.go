@@ -13,6 +13,8 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer/signertest"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/x402"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"golang.org/x/crypto/sha3"
@@ -285,4 +287,90 @@ func sha3Keccak(b []byte) []byte {
 	h := sha3.NewLegacyKeccak256()
 	h.Write(b)
 	return h.Sum(nil)
+}
+
+// E2 for a shop that signs (docs/commercial-offer-receipt.md): the offer
+// holds for the order, and a delivery carries the receipt of the offer's key
+// for this payer and tx#2; a shop that signs nothing is not asked.
+func TestE1aShopSigned(t *testing.T) {
+	key, _ := secp256k1.GeneratePrivateKey()
+	other, _ := secp256k1.GeneratePrivateKey()
+	tx2 := "0x" + strings.Repeat("2", 64)
+	build := func(signOffer *secp256k1.PrivateKey, amount string, receipt *secp256k1.PrivateKey, receiptTx string, delivered bool) *e1aRun {
+		po := signertest.Order{Consumer: "consumer-a", Agent: "agent-a", Wallet: "wallet-a", Task: "task-a", From: "0x1111111111111111111111111111111111111111",
+			PayTo: signertest.Merchant, Amount: "500000", N: 1, Now: 1790726400, Window: 300}.PO()
+		var req x402.Requirement
+		json.Unmarshal(po.Quote.SelectedRequirement, &req)
+		if signOffer != nil {
+			s, _ := x402.SignOffer(signOffer, x402.OfferPayload{Version: 1, ResourceURL: po.Intent.ResourceURL, Scheme: req.Scheme, Network: req.Network, Asset: req.Asset,
+				PayTo: req.PayTo, Amount: amount})
+			po.Quote.Extensions, _ = x402.OfferExtensions(s)
+			po.Intent.PaymentRequirementHash, _ = paycontract.RequirementHash(po.Quote) // the order binds its quote, extensions included
+		}
+		intent, err := po.IntentHash()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ev := func(typ string, p *contracts.PaymentRecord) contracts.AuditEvent {
+			return contracts.AuditEvent{EventType: typ, Scope: &contracts.EventScope{PurchaseOrderID: po.Intent.PurchaseOrderID, IntentHash: intent},
+				Payload: contracts.EventPayload{Payment: p}}
+		}
+		run := &e1aRun{task: E1aTask{TaskID: "task-a"}, orders: []paycontract.PurchaseOrder{po}, events: []contracts.AuditEvent{ev("PAYMENT_SETTLED", &contracts.PaymentRecord{TxHash: tx2})}}
+		if delivered {
+			run.events = append(run.events, ev("RESOURCE_DELIVERED", &contracts.PaymentRecord{ContentSHA256: strings.Repeat("c", 64)}))
+		}
+		resp := x402.SettleResponse{Success: true, Transaction: tx2, Network: req.Network, Payer: po.PaymentBinding.From}
+		if receipt != nil {
+			s, _ := x402.SignReceipt(receipt, x402.ReceiptPayload{Version: 1, Network: req.Network, ResourceURL: po.Intent.ResourceURL, Payer: po.PaymentBinding.From,
+				IssuedAt: 1790726450, Transaction: receiptTx})
+			resp.Extensions, _ = x402.ReceiptExtensions(s)
+		}
+		run.responses = []e1aResponse{{IntentHash: intent, PaymentResponse: resp}}
+		return run
+	}
+	for name, c := range map[string]struct {
+		run  *e1aRun
+		pass bool
+	}{
+		"signed offer, its key's receipt":        {build(key, "500000", key, tx2, true), true},
+		"an unsigned shop":                       {build(nil, "", nil, "", true), true},
+		"settled, not delivered: no receipt yet": {build(key, "500000", nil, "", false), true},
+		"an offer for another amount":            {build(key, "1", key, tx2, true), false},
+		"delivered without a receipt":            {build(key, "500000", nil, "", true), false},
+		"a receipt by another key":               {build(key, "500000", other, tx2, true), false},
+		"a receipt for another transaction":      {build(key, "500000", key, "0x"+strings.Repeat("3", 64), true), false},
+	} {
+		var f findings
+		e1aShopSigned(&f, c.run)
+		if (f.verdicts(E1aClaims)["E2"] != Fail) != c.pass {
+			t.Errorf("%s: %+v", name, f)
+		}
+	}
+}
+
+// E9 lets a shop's signed offer or receipt keep its signature, and nothing
+// else: a payment's signature, one outside offer-receipt, or one that is
+// not r, s and v is still found.
+func TestE1aUnsafeSignatures(t *testing.T) {
+	sig := "0x" + strings.Repeat("ab", 65)
+	for name, c := range map[string]struct {
+		doc  string
+		safe bool
+	}{
+		"an offer's":             {`{"extensions":{"offer-receipt":{"info":{"offers":[{"format":"eip712","payload":{"payTo":"0x33"},"signature":"` + sig + `"}]}}}}`, true},
+		"a receipt's":            {`{"payment_response":{"transaction":"0x` + strings.Repeat("2", 64) + `","extensions":{"offer-receipt":{"info":{"receipt":{"signature":"` + sig + `"}}}}}}`, true},
+		"a payment's":            {`{"authorization":{"signature":"` + sig + `"}}`, false},
+		"beside offer-receipt":   {`{"extensions":{"offer-receipt":{},"other":{"signature":"` + sig + `"}}}`, false},
+		"not r, s and v":         {`{"offer-receipt":{"signature":"0x` + strings.Repeat("1", 64) + `"}}`, false},
+		"an object as signature": {`{"offer-receipt":{"signature":{"r":"1"}}}`, false},
+		"a private key's shape":  {`{"offer-receipt":{"payload":{"amount":"0x` + strings.Repeat("1", 64) + `"}}}`, false},
+	} {
+		var v any
+		if err := json.Unmarshal([]byte(c.doc), &v); err != nil {
+			t.Fatal(name, err)
+		}
+		if got := e1aUnsafe(v); (len(got) == 0) != c.safe {
+			t.Errorf("%s: %v", name, got)
+		}
+	}
 }

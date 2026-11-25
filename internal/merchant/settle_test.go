@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -158,7 +159,7 @@ func TestSettleAndDeliver(t *testing.T) {
 		t.Fatal("balances")
 	}
 	rec2, sr2 := s.get("kr-market", h)
-	if rec2.Code != 200 || sr2 != sr || s.gasNonce() != before+1 || s.balance(payTo) != 500000 {
+	if rec2.Code != 200 || !sameSettlement(sr2, sr) || s.gasNonce() != before+1 || s.balance(payTo) != 500000 {
 		t.Fatalf("again: %d %+v, gas nonce %d -> %d", rec2.Code, sr2, before, s.gasNonce())
 	}
 	// The same authorization serialized otherwise (indented, upper-case
@@ -351,7 +352,7 @@ func TestConcurrentSamePayment(t *testing.T) {
 	}
 	wg.Wait()
 	for i := range out {
-		if codes[i] != 200 || out[i] != out[0] {
+		if codes[i] != 200 || !sameSettlement(out[i], out[0]) {
 			t.Fatalf("%d: %d %+v", i, codes[i], out[i])
 		}
 	}
@@ -517,5 +518,52 @@ func TestDailyTxCap(t *testing.T) {
 	}
 	if rec, _ := s.get("kr-market", h); rec.Code != 200 {
 		t.Fatalf("the first again: %d", rec.Code)
+	}
+}
+
+// sameSettlement: the same settlement, its receipt aside (signed again with each answer, at its own time).
+func sameSettlement(a, b SettlementResponse) bool {
+	a.Extensions, b.Extensions = nil, nil
+	return reflect.DeepEqual(a, b)
+}
+
+// The settling shop signs its offers and receipts (x402 offer-receipt,
+// docs/commercial-offer-receipt.md): the 402 carries the offer its Offers()
+// gives the Host's book, the same for every request; did.json names the key;
+// the delivery's PAYMENT-RESPONSE carries a receipt by that key for this
+// payer and transfer.
+func TestSignedOfferAndReceipt(t *testing.T) {
+	s := newChainShop(t, 1)
+	o := s.offer("kr-market")
+	var req x402.Requirement
+	json.Unmarshal(o.Quote.SelectedRequirement, &req)
+	offers, err := x402.OffersIn(o.Quote.Extensions)
+	if err != nil || len(offers) != 1 {
+		t.Fatalf("offers %v %v", offers, err)
+	}
+	p, key, err := x402.OpenOffer(offers[0])
+	if err != nil || x402.MatchesOffer(p, o.URL, req, 0) != nil {
+		t.Fatalf("offer %+v %v", p, err)
+	}
+	for range 2 { // the 402 is the book's, request after request
+		rec := httptest.NewRecorder()
+		s.mux.ServeHTTP(rec, httptest.NewRequest("GET", strings.TrimPrefix(o.URL, "http://127.0.0.1:8402"), nil))
+		var pr x402.PaymentRequired
+		if err := x402.Decode(rec.Header().Get(x402.HeaderPaymentRequired), &pr); err != nil {
+			t.Fatal(err)
+		}
+		if q, _ := pr.Quote(0); string(q.Extensions) != string(o.Quote.Extensions) {
+			t.Fatalf("the 402's extensions changed: %s", q.Extensions)
+		}
+	}
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, httptest.NewRequest("GET", "/.well-known/did.json", nil))
+	var doc x402.DIDDocument
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil || !doc.Authorizes("did:web:127.0.0.1%3A8402", key) {
+		t.Fatalf("did.json %d %s %v", rec.Code, rec.Body, err)
+	}
+	_, sr := s.get("kr-market", s.header("kr-market", s.auth(500000), nil))
+	if signed, err := x402.ShopReceipt(o.Quote.Extensions, sr.Extensions, o.URL, sr.Network, s.payer.Addr.Hex(), sr.Transaction); !signed || err != nil {
+		t.Fatalf("receipt %s: %v %v", sr.Extensions, signed, err)
 	}
 }
