@@ -188,7 +188,7 @@ const Standards: Page = () => (
         </tr>
       </thead>
       <tbody>
-        <Std layer="付款協商" std="x402 v2，Linux Foundation 治理；另有 Stripe 與 Tempo 的 MPP" here="照用 x402（exact）" />
+        <Std layer="付款協商" std="x402 v2，Linux Foundation 治理；另有 Stripe 與 Tempo 的 MPP" here="照用 x402（exact、簽章報價）" />
         <Std layer="簽名與結算" std="EIP-3009＋EIP-712，USDC 有實作" here="照用" />
         <Std layer="本人核准" std="WebAuthn／FIDO2，W3C 與 FIDO 的標準" here="照用（passkey）" />
         <Std layer="Agent 身分" std="ERC-8004，仍是草案，2026/1 上以太坊主網" here="照用（Base Sepolia）" />
@@ -374,8 +374,9 @@ const PolicyPage: Page = () => (
         <Rule rule="這個任務最多花多少" by="委託 ＋ 鏈上的 ZK 預算合約" />
         <Rule rule="單筆超過多少要問本人" by="Policy 裁決，本人用裝置核准" />
         <Rule rule="只能付給名單內的商家" by="Policy ＋ Signer（各擋一次）" />
+        <Rule rule="收款方不在風險名單上" by="Policy ＋ Signer（各擋一次）" />
         <Rule rule="十分鐘內最多幾筆" by="Policy ＋ Signer（各擋一次）" />
-        <Rule rule="這間店要求的身分屬性" by="BBS+ 憑證驗證" />
+        <Rule rule="這間店要求的身分屬性" by="BBS+ 憑證，由商店自己驗證" />
       </tbody>
     </table>
   </Frame>
@@ -440,7 +441,7 @@ const Identity: Page = () => (
       <div style={{ alignSelf: 'center', fontSize: 44, color: 'var(--osd-accent)' }}>→</div>
       <Stage title="發行者" text="只接受廠商自動判定、帶證件資料的通過，算出國家與是否滿 18 歲。" />
       <div style={{ alignSelf: 'center', fontSize: 44, color: 'var(--osd-accent)' }}>→</div>
-      <Stage title="BBS+ 憑證" text="出示時選擇性揭露：只給這間店要求的屬性。" />
+      <Stage title="BBS+ 憑證" text="店家在 402 裡宣告要什麼，自己驗。每筆重新出示，店與店串不起來。" />
     </div>
     <div style={{ fontSize: 26, letterSpacing: '0.14em', color: muted, fontWeight: 700, marginTop: 52 }}>每間店看到的</div>
     <div style={{ display: 'flex', gap: 36, marginTop: 18 }}>
@@ -449,7 +450,7 @@ const Identity: Page = () => (
       <Sees shop="便利商店（賣酒）" sees="是否滿 18 歲" />
     </div>
     <p style={{ fontSize: 28, color: muted, marginTop: 44, lineHeight: 1.5 }}>
-      三層對照：KYH 確認真人＝eKYC；KYA 確認 Agent 與授權＝委託憑證與 ERC-8004；KYT 交易監控＝還沒做。
+      三層對照：KYH 確認真人＝eKYC；KYA 確認 Agent 與授權＝委託憑證與 ERC-8004；KYT 交易監控＝示範用的風險名單。
     </p>
   </Frame>
 );
@@ -475,6 +476,7 @@ const Threats: Page = () => (
         <Threat threat="Agent 被頁面裡的文字誘導" stop="它只能提出；金額與收款人來自報價，超出預算就拒絕" />
         <Threat threat="付款頁的收款人被換掉" stop="不在商家名單，付款前就拒絕，錢沒有動" />
         <Threat threat="付了款，商店沒交付" stop="由鏈判斷已付款，不重付；商店退回全額後才記退款" />
+        <Threat threat="Agent 失控，要馬上停" stop="本人用裝置收回委託，Signer 之後一律拒簽" />
         <Threat threat="Host 被入侵" stop="Host 沒有私鑰；Signer 自己驗裝置與委託上限" />
         <Threat threat="重放舊的核准或付款" stop="一次性 challenge、EIP-3009 nonce、ZK nullifier" />
       </tbody>
@@ -512,7 +514,7 @@ const Owasp: Page = () => (
         <Asi id="ASI07" risk="Agent 之間的通訊" control="兩位 Agent 互不通訊" status="不適用" tone={muted} />
         <Asi id="ASI08" risk="連鎖失敗" control="結果未知不重付；nonce、nullifier、請購去重" status="做到" tone={green} />
         <Asi id="ASI09" risk="人對 Agent 的信任被利用" control="裝置上是 Signer 綁定的摘要，不是模型的說法" status="做到" tone={green} />
-        <Asi id="ASI10" risk="失控的 Agent" control="委託有總額與期限；十分鐘內最多 5 筆" status="有上限" tone={amber} />
+        <Asi id="ASI10" risk="失控的 Agent" control="總額、期限、十分鐘 5 筆；本人隨時可收回委託" status="有上限" tone={amber} />
       </tbody>
     </table>
   </Frame>
@@ -1169,7 +1171,7 @@ const Replace: Page = () => (
         <Swap part="身分來源" now="Didit 沙盒，沒有驗證真人" real="eKYC 正式環境；發行者獨立部署" />
         <Swap part="本人核准" now="同一台筆電、同步的 passkey" real="本人的手機；大額改用綁裝置、不同步的金鑰" />
         <Swap part="結算" now="自架 facilitator，與 Host 同機" real="自營或第三方的 x402 facilitator" />
-        <Swap part="商店" now="固定名單，由主持人代管" real="商店自己的 x402 端點與接入流程" />
+        <Swap part="商店" now="固定名單、主持人代管；報價與收據有簽章" real="商店自己的 x402 端點與接入流程" />
       </tbody>
     </table>
     <p style={{ fontSize: 27, color: muted, marginTop: 24, lineHeight: 1.5 }}>
@@ -1188,13 +1190,13 @@ const Gap = ({ title, text }: { title: string; text: string }) => (
 
 const Gaps: Page = () => (
   <Frame eyebrow="落地" title="部署前還沒做到的事">
-    <Gap title="沒有在正式鏈上跑過" text="只有測試網與測試幣；飯店、郵局、退款只在本機鏈跑過" />
+    <Gap title="沒有在正式鏈上跑過" text="只有測試網；飯店、退款、收回委託、商店簽章只在本機鏈跑過" />
     <Gap title="政策在鏈下執行" text="靠 Signer 只簽合規的授權；合約與錢包層不強制" />
     <Gap title="ZK 的 setup 是單方產生的" text="信任它等於信任產生的人；正式使用要多方儀式" />
     <Gap title="發行、持有、驗證在同一個程序" text="證明了格式與接線，還不是三方互相獨立" />
     <Gap title="沒有爭議流程與託管" text="商店不肯退款時，系統沒有辦法強制" />
-    <Gap title="商家沒有身分與信譽" text="名單上的商家自己作假，仍然收得到錢" />
-    <Gap title="沒有交易監控（KYT）" text="付款前不查收款方的風險，只靠商家名單" />
+    <Gap title="商家沒有信譽" text="報價與收據有商店簽章，但名單上的商家作假仍收得到錢" />
+    <Gap title="KYT 只有示範名單" text="收款方命中名單就拒絕；沒有接真的交易監控服務" />
     <Gap title="委託與核准是自訂的格式" text="對應的標準草案（AP2、Verifiable Intent）還在 FIDO 制定" />
     <Gap title="送交易的金鑰各只有一把" text="每位客人的付款各自進行，但同一把金鑰的 nonce 一筆一筆給；流量大時要多把" />
   </Frame>
@@ -1226,7 +1228,7 @@ const Order: Page = () => (
       <Phase now n="01" title="沙盒整合" a="測試網、eKYC 沙盒" b="三個場域通過獨立查證（現況）" />
       <Phase n="02" title="測試網試點" a="商店自己的 x402 端點" b="本人用手機核准" />
       <Phase n="03" title="小額正式" a="eKYC 正式環境、HSM 或 MPC" b="多方產生的 ZK setup" />
-      <Phase n="04" title="擴大" a="爭議流程、結算備援" b="KYT、對帳與高流量付款" />
+      <Phase n="04" title="擴大" a="爭議流程、結算備援" b="正式 KYT、高流量付款" />
     </div>
     <p style={{ fontSize: 30, color: muted, marginTop: 50, lineHeight: 1.5 }}>
       每一階段都用同一個 checker 驗收：證據包能不能被第三方向鏈重算，是能不能往下走的條件。
@@ -1266,16 +1268,16 @@ export const notes: (string | undefined)[] = [
   `被問「有沒有照標準」就停在這頁。下面四層都照標準；委託這一層業界還沒有定案，AP2 和 Mastercard 的 Verifiable Intent 都在 FIDO 審，所以用自訂格式，欄位對照在 docs/positioning.md 4.1。
 選擇性揭露那一列要照實說：用的是舊版 BBS+，不是 W3C 的 bbs-2023。
 底下兩句是重點：模式對得上；差別在 Agent 有沒有金鑰。這裡的 Agent 什麼都簽不了，代價是「這筆是哪個 Agent 送的」靠紀錄，不是密碼學證明。
-x402 那一列被追問時：FUTUREMODE 筆記列的五條相容邊界，四條做到並有測試；憑證沒有走 x402 的 extensions 欄位，所以只說「採用」，不說「符合」（docs/positioning.md 5.1）。
+x402 那一列被追問時：FUTUREMODE 筆記列的五條相容邊界都做到並有測試，憑證也走 402 的 extensions、由商店自己驗；商店的報價與收據有簽章（offer-receipt）。仍然只說「採用」，不說「符合」：只做了 exact，402 只能有一個付款選項（docs/positioning.md 5.1、5.2）。
 被問 MPP：Stripe 與 Tempo 提的另一個 HTTP 402 協議。授權這一層不綁協議；要改的是請購單綁的報價、Signer 的證明格式，以及預算合約和付款在不同鏈。沒有實作。`,
   `從左到右看：本人與 Agent 在左邊，Host 居中，私鑰只在 Signer。
 橘色箭頭是付款的路，灰色虛線是事後查證的路。`,
   '重點是「不能做」那一欄：Agent 碰不到金鑰，Host 沒有私鑰，Signer 簽不出委託外的付款。',
   '五步對應展示畫面右側的五步。底下那條是關鍵：所有步驟綁在同一個 intent_hash 上。',
-  '規則都是確定性的，模型沒有裁量空間。注意商家名單與頻率上限各擋兩次：Host 被攻破，Signer 那一道還在。',
+  '規則都是確定性的，模型沒有裁量空間。注意商家名單、風險名單與頻率上限各擋兩次：Host 被攻破，Signer 那一道還在。風險名單是示範用的，不是真的交易監控服務。',
   '為什麼是兩筆：預留先證明預算夠，結算才動錢。分開追蹤，結果不明時先對帳。',
-  '身分只驗一次。之後每間店只拿到它宣告要求的屬性，查帳的第二項會驗「不多不少」。最後一行是台灣業界現在用的 KYH／KYA／KYT 三層：前兩層有，KYT 還沒做。',
-  '最後一行很重要：照實說擋不住的部分。自動範圍內的誤購靠上限限制損失。',
+  '身分只驗一次。之後每間店只拿到它在 402 裡宣告要求的屬性，由店家自己驗；每筆都重新出示，店與店之間對不起來是同一個人。查帳的第二項會驗「不多不少」。最後一行是台灣業界現在用的 KYH／KYA／KYT 三層：三層都有，但 KYT 只是示範名單。',
+  '「Agent 失控」那一列回答最常被問的「AI 亂來怎麼辦」：本人用裝置收回，Signer 從此拒簽，還會簽一張收回收據，列出收回前簽過的付款，checker 據此排出先後。最後一行很重要：照實說擋不住的部分。自動範圍內的誤購靠上限限制損失。',
   `這一頁給懂資安的聽眾：OWASP 2025 年 12 月發布的 Agentic Top 10，十項逐一對照。
 綠色是做到；黃色是只做到一部分，或損失有上限但擋不住；灰色是不適用，因為沒有 Agent 對 Agent 的付款。
 要主動講的兩項：ASI01，自動範圍內仍可能買錯；ASI06，Agent 沒有長期記憶，所以也沒做記憶驗證。
@@ -1303,7 +1305,7 @@ x402 那一列被追問時：FUTUREMODE 筆記列的五條相容邊界，四條�
 最後一步收在兩項技術：eKYC 讓年齡不是自己說的；零知識證明讓店家只知道一個是或否，鏈上只看到承諾值。
 要照實說的限制：是否滿 18 歲是發行者簽好的一個是或否，不是對生日做範圍證明；ZK 預算只對鏈上隱藏，Relayer 看得到上限與餘額；eKYC 目前接的是沙盒。`,
   '右欄是建議，不是已經做完的事。介面不變，換的是背後的環境。本人核准那列：同步的 passkey 屬 NIST 的 AAL2，大額要綁裝置、不同步的金鑰才到 AAL3。',
-  '這一頁是老實話。每一項在 docs/architecture.md 的限制裡都有對應的說明。最後兩項是 11 月新補的：沒有交易監控，以及委託格式是自訂的。',
+  '這一頁是老實話。每一項在 docs/architecture.md 的限制裡都有對應的說明。11 月底補了商店簽章與示範的 KYT，所以那兩列改成「還差什麼」：商家仍沒有信譽，KYT 沒有接真的服務。',
   `順序的原則：先把信任的起點（身分、金鑰、商店）換成真的，再擴大。每一階段用同一個 checker 驗收。
 第四階段的「結算備援」指 facilitator 的備援：現在只有一個，與 Host 同機。被問「之後呢」，也可以照 x402 講者的三格答：信任（商家身分與信譽）、權利（爭議、KYT）、營運（結算備援、金鑰分層）。`,
   '收在定位句。想看細節的人，三份文件都在 repo 裡。',
