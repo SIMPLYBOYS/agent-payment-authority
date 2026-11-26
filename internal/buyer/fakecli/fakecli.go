@@ -390,19 +390,29 @@ func (r *run) step(s Step) (code int, done bool) {
 	return 0, false
 }
 
+// writeWhole replaces a file in one step (a new file renamed over it): a test
+// reading it never sees the moment os.WriteFile has emptied it and not yet
+// written (docs/cli-poc.md 34.2: "fake received" with nothing, under load).
+func writeWhole(path, body string) {
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, []byte(body), 0o600) == nil {
+		os.Rename(tmp, path)
+	}
+}
+
 // watchStdin reads stdin for the whole run, counting bytes into file (if
 // set) after every read, starting with 0.
 func watchStdin(file, msgFile string) (<-chan struct{}, <-chan struct{}, <-chan struct{}) {
 	first, firstLine, end := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	record := func(n int) {
 		if file != "" {
-			os.WriteFile(file, []byte(fmt.Sprint(n)), 0o600)
+			writeWhole(file, fmt.Sprint(n))
 		}
 	}
 	lines, users, digest := 0, 0, ""
 	recordLines := func() {
 		if msgFile != "" {
-			os.WriteFile(msgFile, []byte(fmt.Sprintf("lines=%d user_messages=%d content_sha256=%s", lines, users, digest)), 0o600)
+			writeWhole(msgFile, fmt.Sprintf("lines=%d user_messages=%d content_sha256=%s", lines, users, digest))
 		}
 	}
 	record(0)
@@ -412,11 +422,12 @@ func watchStdin(file, msgFile string) (<-chan struct{}, <-chan struct{}, <-chan 
 		for {
 			n, err := os.Stdin.Read(buf)
 			if n > 0 {
-				if total == 0 {
-					close(first)
-				}
+				firstRead := total == 0
 				total += n
 				record(total)
+				if firstRead { // only once its bytes are recorded: a test reading the file after the signal finds them
+					close(first)
+				}
 				pending = append(pending, buf[:n]...)
 				for {
 					i := strings.IndexByte(string(pending), '\n')
@@ -425,9 +436,6 @@ func watchStdin(file, msgFile string) (<-chan struct{}, <-chan struct{}, <-chan 
 					}
 					line := pending[:i]
 					pending = pending[i+1:]
-					if lines == 0 {
-						close(firstLine)
-					}
 					lines++
 					if content, ok := userMessage(line); ok {
 						if users == 0 {
@@ -437,6 +445,9 @@ func watchStdin(file, msgFile string) (<-chan struct{}, <-chan struct{}, <-chan 
 						users++
 					}
 					recordLines()
+					if lines == 1 { // recorded first, then signalled (the 11/26 "lines=0" under load)
+						close(firstLine)
+					}
 				}
 			}
 			if err != nil {
