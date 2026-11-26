@@ -123,6 +123,9 @@ type Config struct {
 	Reservation      *Reservation `json:"reservation,omitempty"` // P2: without it nothing is signed
 	Agents           []Agent      `json:"agents,omitempty"`      // ERC-8004: without one a wallet consents to no agent
 	Velocity         *Velocity    `json:"velocity,omitempty"`    // docs/commercial-velocity.md: without it no rate limit
+	// BlockedPayees: the Signer's own payee screening (docs/commercial-kyt.md), the Host's Policy or not:
+	// nothing is signed to these addresses (PAYEE_FLAGGED). A demo list, not a monitoring service.
+	BlockedPayees []string `json:"blocked_payees,omitempty"`
 
 	hash string // sha256 of the canonical configuration, in each snapshot
 }
@@ -155,6 +158,11 @@ func ParseConfig(raw []byte) (*Config, error) {
 			return nil, fmt.Errorf("config: wallet %q chain", w.WalletID)
 		}
 		wallets[w.WalletID], owners[w.Address] = w, w.ConsumerID
+	}
+	for i, a := range c.BlockedPayees {
+		if !addressPattern.MatchString(a) || slices.Contains(c.BlockedPayees[:i], a) {
+			return nil, fmt.Errorf("config: blocked payee %q (a lower-case address, once)", a)
+		}
 	}
 	if v := c.Velocity; v != nil && (v.Max == 0 || v.WindowSeconds == 0 || v.WindowSeconds > 86400) {
 		return nil, errors.New("config: velocity is at least one payment within 1 to 86400 seconds")

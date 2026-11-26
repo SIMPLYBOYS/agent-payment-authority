@@ -604,3 +604,27 @@ func TestSignerVelocity(t *testing.T) {
 		}
 	}
 }
+
+// docs/commercial-kyt.md: the Signer's own screening, the Host's Policy or not: nothing is signed to a
+// blocked payee (PAYEE_FLAGGED) and nothing is recorded; the configuration takes lower-case addresses, once.
+func TestSignerBlockedPayee(t *testing.T) {
+	e := newEnv(t)
+	e.cfg.BlockedPayees = []string{strings.ToLower(merchant)}
+	c := e.core()
+	if _, err := c.Sign(bg, e.req("request-0000000001", a(1))); code(err) != "PAYEE_FLAGGED" || count(t, c, "1 = 1") != 0 {
+		t.Fatalf("signed to a blocked payee: %v", err)
+	}
+	for list, ok := range map[string]bool{`["0x6666666666666666666666666666666666666666"]`: true, `["0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"]`: false,
+		`["0x6666666666666666666666666666666666666666","0x6666666666666666666666666666666666666666"]`: false} {
+		var m map[string]any
+		raw, _ := json.Marshal(e.cfg)
+		json.Unmarshal(raw, &m)
+		var l any
+		json.Unmarshal([]byte(list), &l)
+		m["blocked_payees"] = l
+		raw, _ = json.Marshal(m)
+		if _, err := ParseConfig(raw); (err == nil) != ok {
+			t.Errorf("%s: %v", list, err)
+		}
+	}
+}

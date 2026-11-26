@@ -695,6 +695,7 @@ export const REASONS_V1 = {
   AUTHORIZATION_EXPIRED: "憑證已過期", CONFIG_MISSING: "缺少設定（沒有憑證）",
   CREDENTIAL_CLAIM_UNMET: "憑證有效，但不符合這間店的要求", // the venue matrix (docs/commercial-venues.md)
   MERCHANT_NOT_ALLOWED: "收款人不在委託允許的商店名單，付款前已拒絕", // the hotel's booking partner (docs/commercial-post-hotel.md)
+  PAYEE_FLAGGED: "收款人在風險名單上（示範名單），付款前已拒絕", // docs/commercial-kyt.md
 };
 
 // V1: the voice outcome codes, in words. A failure denies the purchase; an
@@ -789,7 +790,8 @@ const NEXT = {
     NOT_SETTLED_EXPIRED: "錢沒有動（授權已過期、鏈上確認沒有被用掉）；不用處理", RECONCILE_NEEDS_REVIEW: "停下這一場，不要重試，找開發者" },
 };
 // SIGNER_NEXT: what the host does about the Signer's refusal of a reserved payment (pv.signer_code, 10/30).
-const SIGNER_NEXT = { DELEGATION_REVOKED: "客人已用本人裝置收回這份委託，Signer 不再替它簽付款；這是預期的結果",
+const SIGNER_NEXT = { PAYEE_FLAGGED: "Signer 自己的風險名單擋下了這個收款人（示範名單）：不要重試這一筆，確認 Host 的名單是否也列了它",
+  DELEGATION_REVOKED: "客人已用本人裝置收回這份委託，Signer 不再替它簽付款；這是預期的結果",
   DELEGATION_EXPIRED: "/opt 的 signer.json 裡的委派已過期：停下這一場，重產並安裝 signer.json 後換一個標籤再開場",
   OVER_TOTAL_CAP: "委派的總額或核准人 24 小時內的額度已用完：今天不要再開這位客人的場次",
   VELOCITY_LIMIT: "Signer 的頻率上限：這個錢包短時間內已簽滿上限（Host 的 Policy 應該先擋下）：停下這一場，找開發者" };
@@ -1153,7 +1155,7 @@ export const unb64u = (s) => Uint8Array.from(atob(String(s).replace(/-/g, "+").r
 export const SHOW_STEPS = ["委託", "選購", "核准", "付款", "交付"]; // GD2
 // PLAIN: a reason as the audience reads it; the codes stay on the host page.
 export const PLAIN = {
-  INSUFFICIENT_BUDGET: "超出預算", MERCHANT_NOT_ALLOWED: "不在允許的商店", ASSET_NOT_ALLOWED: "不是允許的幣別",
+  INSUFFICIENT_BUDGET: "超出預算", MERCHANT_NOT_ALLOWED: "不在允許的商店", ASSET_NOT_ALLOWED: "不是允許的幣別", PAYEE_FLAGGED: "收款人在風險名單上",
   CREDENTIAL_INVALID: "憑證檢查沒通過", CREDENTIAL_REVOKED: "憑證已撤銷", CREDENTIAL_STATUS_UNAVAILABLE: "憑證狀態無法確認",
   AUTHORIZATION_EXPIRED: "授權或報價已過期", CONFIG_MISSING: "缺少設定或憑證", TASK_NOT_ACTIVE: "任務已結束", CONTRACT_VERSION_MISMATCH: "版本不符",
   OWNERSHIP_MISMATCH: "不是這位客人的請購", PAYMENT_CAPABILITY_UNAVAILABLE: "這場展示不能付款", APPROVER_UNAVAILABLE: "沒有可核准的人",

@@ -77,6 +77,7 @@ export const CODES = {
   OVER_PER_TX: "超過每筆上限",
   OVER_ALLOW_MAX: "超過自動放行的範圍",
   MERCHANT_NOT_ALLOWED: "收款人不在委託的商家內",
+  PAYEE_FLAGGED: "收款人在 Signer 的風險名單上（示範名單）",
   ASSET_NOT_ALLOWED: "資產不在委託內",
   WALLET_NOT_REGISTERED: "這位客人的錢包沒有在 Signer 登記",
   CONSUMER_MISMATCH: "客人或錢包和委託不符",

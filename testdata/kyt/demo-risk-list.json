@@ -1,0 +1,8 @@
+{
+  "version": "apa.kyt-demo-list.v1",
+  "source": "Demo list kept in this repository (docs/commercial-kyt.md). Not a transaction-monitoring service: the addresses are placeholders, no real entity is named or screened.",
+  "updated_at": "2026-11-26",
+  "addresses": [
+    {"address": "0x6666666666666666666666666666666666666666", "reason": "demo: stands in for an address a screening provider flagged"}
+  ]
+}

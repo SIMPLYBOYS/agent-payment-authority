@@ -395,6 +395,8 @@ func (c *Core) verify(ctx context.Context, r SignRequest, fp string, now uint64)
 	}
 	amount, ok := units(b.Amount)
 	switch {
+	case containsString(c.cfg.BlockedPayees, strings.ToLower(b.PayTo)): // screening first, whoever authorized it (docs/commercial-kyt.md)
+		return nil, nil, 0, Refusal("PAYEE_FLAGGED")
 	case d != nil && !containsString(d.Merchants, b.PayTo): // a human approved this payee
 		return nil, nil, 0, Refusal("MERCHANT_NOT_ALLOWED")
 	case !ok || amount > per:

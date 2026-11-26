@@ -25,6 +25,7 @@ import (
 
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/contracts"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/kyt"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
 	_ "modernc.org/sqlite" // CGo-free SQLite; pinned with modernc.org/libc in go.mod
@@ -67,6 +68,9 @@ type Config struct {
 	// Host in each presentation's nonce. Without them no v2 task starts.
 	Credentials *credential.Dir
 	VerifierID  string
+	// RiskList is the Host's payee screening (--risk-list, docs/commercial-kyt.md):
+	// a pay-family purchase to a flagged payee is denied PAYEE_FLAGGED. nil screens nothing.
+	RiskList *kyt.List
 }
 
 // Error is a refused operation. Code is the contract reason when a contract
@@ -153,6 +157,7 @@ type Store struct {
 	clock    Clock
 	creds    *credential.Dir
 	verifier string
+	risk     *kyt.List
 	hook     func(stage string) error // tests only; nil in production
 }
 
@@ -176,7 +181,7 @@ func Open(cfg Config) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{path: path, registry: reg, regBody: regBody, offers: map[OfferKey][][]byte{}, clock: cfg.Clock, creds: cfg.Credentials, verifier: cfg.VerifierID}
+	s := &Store{path: path, registry: reg, regBody: regBody, offers: map[OfferKey][][]byte{}, clock: cfg.Clock, creds: cfg.Credentials, verifier: cfg.VerifierID, risk: cfg.RiskList}
 	for k, quotes := range cfg.Offers {
 		for _, q := range quotes {
 			if _, err := q.Hash(); err != nil {

@@ -164,7 +164,7 @@ FUTUREMODE 筆記在 9/23 審查時列出五條邊界：做到才能說「通過
 - **這要賣給誰？** 這個專案不賣東西，是讓決策者親身體驗的場域模擬；銀行、企業財務、Agent 平台各自可能怎麼用，由看的人判斷（第 3 節）。
 - **下一步？** 用 FUTUREMODE 講者列的三格來答（11/18）：
   - **信任**：Agent 身分與委託已經有（ERC-8004、BBS+ 憑證、本人確認的委託），但身分是展示平台代為註冊的；商家的身分與信譽還沒有。
-  - **權利**：eKYC 只接了 Didit 沙盒（`docs/commercial-ekyc.md`）；退款只有全額一種，沒有爭議流程，也沒有託管；沒有交易監控（KYT）。
+  - **權利**：eKYC 只接了 Didit 沙盒（`docs/commercial-ekyc.md`）；退款只有全額一種，沒有爭議流程，也沒有託管；只有最小版的收款方篩檢（示範名單，Policy 與 Signer 各擋一道，`docs/commercial-kyt.md`），沒有真的交易監控。
   - **營運**：只有一個 facilitator，沒有備援；金鑰只有一層，沒有金庫、資金錢包、session key 的分層；只做 `exact`，沒有按用量計費的 `upto`。
 - **換成 MPP 還成立嗎？**（11/18）授權這一層成立，結算的接法要改。MPP 是 Stripe 與 Tempo 提出的 HTTP 402 協議：報價放在 `WWW-Authenticate`，付款證明放在 `Authorization`；它的 `charge` 對應 x402 的 `exact`，另外有 `session`（先存一筆，再按用量付）。Agent 只能提出、Policy 裁決、本人核准、Signer 獨立簽名、證據與 checker，都和用哪個協議無關。要改的有三處：
   - 請購單綁的是 x402 的報價雜湊，以及 `x402Version`、`scheme` 欄位，要改成綁 MPP 的報價。

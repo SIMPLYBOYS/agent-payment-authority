@@ -460,6 +460,7 @@ func (s *Store) submitPay(t *taskTx, sess contracts.Session, po paycontract.Purc
 			return err
 		}
 	}
+	in.PayeeFlagged = s.risk.Flagged(po.PaymentBinding.PayTo)
 	if (t.row.ContractVersion == paycontract.V2) != (pr != nil) {
 		return errors.New("an apa.pay.v2 purchase, and only one, goes with its presentation")
 	}

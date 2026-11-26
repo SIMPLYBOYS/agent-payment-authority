@@ -36,6 +36,7 @@ import (
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/credential"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/keytool"
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/kyt"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/merchant"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/policy"
@@ -124,6 +125,7 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 	maxRuns := fs.Int("max-runs", 0, "with --scenarios: running or stopping runs at most (a deployment setting; default 2, at most one per consumer)")
 	readyFile := fs.String("ready-file", "", "write {addr, pid} here once serving (for scripts/demo/present.sh)")
 	approvalsSigner := fs.String("approvals-signer", "", "A2: the Unix socket of apa-signer serve-approvals (approvals only), or of apa-signer serve (P2: approvals and, with --payments, payments); the person's approval then runs on http://localhost:<port> (fake mode with --scenarios only)")
+	riskList := fs.String("risk-list", "", "docs/commercial-kyt.md: a demo risk list (testdata/kyt/demo-risk-list.json); a pay-family purchase to a flagged payee is denied PAYEE_FLAGGED")
 	credentialDir := fs.String("credential-dir", "", "C2: the credential directory (apa-issuer init) for apa.pay.v2 scenarios: test issuer, status list, holders")
 	authSource := fs.String("authenticator-source", "", "A2: device or virtual, the authenticator's source as shown and logged (a label, not evidence); required with --approvals-signer (E1-a: it sets the approvals' evidence mode)")
 	paymentsPath := fs.String("payments", "", "P2: the payment configuration, a local anvil or the Base Sepolia testnet (docs/commercial-p2-host.md 12.3, docs/commercial-p2b.md B3); with --approvals-signer, whose Signer then signs payments too")
@@ -348,8 +350,15 @@ func serve(ctx context.Context, args []string, d deps) (err error) {
 		return err
 	}
 	defer unlock()
+	var risk *kyt.List
+	if *riskList != "" {
+		if risk, err = kyt.Load(*riskList); err != nil {
+			return err
+		}
+		fmt.Fprintf(d.out, "demo: payee screening: %d addresses from %s (sha256 %s; a demo list, not a monitoring service)\n", len(risk.Addresses), *riskList, risk.SHA256())
+	}
 	st, err := store.Open(store.Config{Path: dbPath, Registry: regCfg, Offers: offers, Clock: d.clock, UpgradeDB: *upgradeDB,
-		Credentials: creds, VerifierID: verifierID})
+		Credentials: creds, VerifierID: verifierID, RiskList: risk})
 	if err != nil {
 		// Recovery failed: nothing is served, repaired or rebuilt.
 		return fmt.Errorf("store %s: %w", dbPath, err)

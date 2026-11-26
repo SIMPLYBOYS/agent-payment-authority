@@ -27,6 +27,7 @@ type Input struct {
 	Budget          policy.Budget
 	Now             uint64
 	Recent          uint64 // the consumer's purchases decided Allow or Ask within the profile's velocity window (policy.RuleInput)
+	PayeeFlagged    bool   // the payee is on the Host's risk list (docs/commercial-kyt.md)
 }
 
 // Decide returns the decision for one pay-family purchase, or an error
@@ -90,6 +91,8 @@ func Decide(reg *contracts.Registry, in Input) (contracts.PolicyDecision, error)
 	d := contracts.PolicyDecision{Version: in.ContractVersion, IntentHash: hash, PaymentStatus: paycontract.PaymentNotEnabled,
 		PolicyVerdict: "Deny", ApprovalStatus: "not_requested", Reason: out.Reason}
 	switch {
+	case in.PayeeFlagged: // screening first: a flagged payee is paid nothing, whatever else holds (docs/commercial-kyt.md)
+		d.Reason = "PAYEE_FLAGGED"
 	case credentialDeny != "": // the credential decides before the rules (design 3.3)
 		d.Reason = credentialDeny
 	case out.Kind == policy.WithinAllowMax: // an Allow is not a payment: no grant, no capability

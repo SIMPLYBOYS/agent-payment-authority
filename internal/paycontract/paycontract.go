@@ -66,10 +66,11 @@ var ReasonCodes = []string{
 	"WEBAUTHN_APPROVAL",      // A2: approved by a Signer-verified assertion
 	"VOICE_CHALLENGE_FAILED", // V1: denied by a failed voice challenge (docs/commercial-v1.md)
 	"VELOCITY_LIMIT",         // too many purchases of one consumer in a short time (docs/commercial-velocity.md)
+	"PAYEE_FLAGGED",          // the payee is on the risk list (docs/commercial-kyt.md)
 }
 
 var denyReasons = []string{"INSUFFICIENT_BUDGET", "MERCHANT_NOT_ALLOWED", "AUTHORIZATION_EXPIRED", "CONFIG_MISSING", "APPROVER_UNAVAILABLE", "ASSET_NOT_ALLOWED",
-	"VELOCITY_LIMIT"}
+	"VELOCITY_LIMIT", "PAYEE_FLAGGED"}
 
 // Intent is the business intent: who buys what from which resource, under
 // which quote. The payment fields live once, in PaymentBinding.
