@@ -5,15 +5,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"math/big"
-	"net"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/anviltest"
 )
 
 // anvil's first documented test key (public; local chains only).
@@ -97,34 +93,10 @@ func TestRefusals(t *testing.T) {
 	}
 }
 
-// anvil starts the repository's local foundry anvil on a free loopback
-// port, or skips the test when it is not there (var/ is not in git).
+// anvil starts the repository's local foundry anvil on a loopback port of
+// its own, or skips the test when it is not there (var/ is not in git).
 func anvil(t *testing.T) *Client {
-	_, file, _, _ := runtime.Caller(0)
-	bin := filepath.Join(filepath.Dir(file), "../../var/tools/foundry-v1.8.3/bin/anvil")
-	if _, err := os.Stat(bin); err != nil {
-		t.Skip("no local anvil (var/tools/foundry-v1.8.3)")
-	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Skip("no loopback listening here:", err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
-	cmd := exec.Command(bin, "--port", strconv.Itoa(port), "--silent")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
-	c := NewClient("http://127.0.0.1:" + strconv.Itoa(port))
-	for range 100 {
-		if _, err := c.ChainID(context.Background()); err == nil {
-			return c
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatal("anvil did not answer")
-	return nil
+	return NewClient(anviltest.Start(t))
 }
 
 // Our own signed transaction on a local anvil: mined, the value moved, the

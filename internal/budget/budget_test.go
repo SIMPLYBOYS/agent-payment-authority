@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -17,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/anviltest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/paycontract"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/signer"
@@ -67,26 +67,7 @@ func newWorld(t *testing.T) *world {
 			t.Skip("no local anvil or contract build (var/ is not in git):", p)
 		}
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Skip("no loopback listening here:", err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
-	cmd := exec.Command(bin, "--port", strconv.Itoa(port), "--chain-id", signertest.Chain, "--silent")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
-	w := &world{rpc: eth.NewClient("http://127.0.0.1:" + strconv.Itoa(port))}
-	for i := 0; ; i++ {
-		if _, err := w.rpc.ChainID(bg); err == nil {
-			break
-		} else if i == 100 {
-			t.Fatal("anvil did not answer")
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	w := &world{rpc: eth.NewClient(anviltest.Start(t, "--chain-id", signertest.Chain))}
 	w.zkb = filepath.Join(t.TempDir(), "zkbudget")
 	build := exec.Command("go", "build", "-o", w.zkb, "./cmd/zkbudget")
 	build.Dir = filepath.Join(root(), "zk")

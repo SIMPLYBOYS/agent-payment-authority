@@ -9,16 +9,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"math/big"
-	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/SIMPLYBOYS/agent-payment-authority/internal/anviltest"
 	"github.com/SIMPLYBOYS/agent-payment-authority/internal/eth"
 )
 
@@ -40,33 +39,10 @@ func Root() string {
 	return filepath.Join(filepath.Dir(file), "../../..")
 }
 
-// Anvil starts a local anvil on a free loopback port, or skips the test.
+// Anvil starts a local anvil on a loopback port of its own, or skips the test.
 func Anvil(t testing.TB) *eth.Client {
 	t.Helper()
-	bin := filepath.Join(Root(), "var/tools/foundry-v1.8.3/bin/anvil")
-	if _, err := os.Stat(bin); err != nil {
-		t.Skip("no local anvil (var/tools/foundry-v1.8.3)")
-	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Skip("no loopback listening here:", err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
-	cmd := exec.Command(bin, "--port", strconv.Itoa(port), "--chain-id", strconv.Itoa(Chain), "--silent")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
-	c := eth.NewClient("http://127.0.0.1:" + strconv.Itoa(port))
-	for i := 0; ; i++ {
-		if _, err := c.ChainID(context.Background()); err == nil {
-			return c
-		} else if i == 100 {
-			t.Fatal("anvil did not answer")
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	return eth.NewClient(anviltest.Start(t, "--chain-id", strconv.Itoa(Chain)))
 }
 
 // Deploy deploys the contract build's artifact (e.g. "TestUSDC.sol/TestUSDC")
