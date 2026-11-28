@@ -3,10 +3,14 @@
 Base Sepolia clip of 11/6 (rec1) and title cards, cut row by row as the script's tables time them; each row's
 narration as subtitles (Chinese over English) in a band under the picture, also as two SRT files.
 
-    python3 -I scripts/video/cut.py --cut 90|180|addon|transit [--out artifacts/video]
+    python3 -I scripts/video/cut.py --cut 90|180|addon|transit|scenes [--out artifacts/video]
 
 --cut addon: the hotel's and the post office's add-on clips (apa-addon-hotel, apa-addon-post), from addon-present/.
 --cut transit: the ATM and the subway's gate (apa-addon-transit), from transit-present2/ (film.mjs --stage transit; 11/16, the wider stations).
+--cut scenes: the three scenes of docs/demo-video-script.md §8, each on its own for Aaron to see before they join the main
+cuts: the control group without this layer (apa-scene-control, cards only), the quiet Allows (apa-scene-quiet, from
+quiet-present1/: film.mjs --stage full --view present, its receipt marks) and the revocation (apa-scene-revoke, from
+revoke2/: film.mjs --stage revoke).
 
 Inputs (artifacts/video/, git-ignored): full-present7/ and full-show8/ (full.mp4, marks.json: film.mjs --stage full,
 --view present and show), fooled6/fooled.mp4 (--stage fooled), all three with --ekyc (the customers' attributes from the
@@ -241,6 +245,104 @@ def transit(out):
     render(rows, work, os.path.join(out, "apa-addon-transit"))
 
 
+# DAY: the town's one day as the main cut shows it, each purchase as the bill would list it without this layer: the
+# fooled Agent's 2.00 premium edition and the child's beer paid too (the layer refuses both). The amounts are the shop's
+# (internal/merchant); the 2.00 is the premium edition's.
+DAY = [("0.50", ""), ("2.00", "書店頁面藏的指令，騙它買的進階版"), ("0.06", ""), ("0.08", ""), ("0.42", ""), ("0.09", ""), ("0.09", "孩子的 AI 買的啤酒")]
+
+
+def bill(path, notes):
+    """The control group's month-end bill (an illustration, not the product): one line per payment, every line the same
+    payee, the total; notes: the lines' annotations shown (the second card)."""
+    im = Image.new("RGB", (VW, VH), BG)
+    d = ImageDraw.Draw(im)
+    d.text((VW // 2, 70), "月底的帳單", font=font(56), fill=INK, anchor="mm")
+    x0, x1, y = 200, 1000, 150  # left: the notes beside the lines
+    d.line((x0, y, x1, y), fill=SOFT, width=2)
+    for amount, note in DAY:
+        y += 74
+        d.text((x0, y), "AI 助理　代付", font=font(38), fill=INK, anchor="lm")
+        d.text((x1, y), amount + " USDC", font=font(38), fill=INK, anchor="rm")
+        if notes and note:
+            d.text((x1 + 30, y), "← " + note, font=font(28), fill=ACCENT, anchor="lm")
+    y += 60
+    d.line((x0, y, x1, y), fill=SOFT, width=2)
+    total = "%.2f" % sum(float(a) for a, _ in DAY)
+    d.text((x0, y + 50), "合計", font=font(40), fill=INK, anchor="lm")
+    d.text((x1, y + 50), total + " USDC", font=font(40), fill=INK, anchor="rm")
+    if notes:
+        d.text((VW // 2, y + 140), "哪一筆是哪個任務、誰同意的、有沒有被騙，帳單上都看不出來", font=font(32), fill=ACCENT, anchor="mm")
+    d.text((VW // 2, VH - 50), "示意：沒有授權層的對照組（不是產品畫面）", font=font(26), fill=SOFT, anchor="mm")
+    im.save(path)
+
+
+def scenes(out):
+    """docs/demo-video-script.md §8: the three scenes, each a clip of its own."""
+    Q, R = os.path.join(V, "quiet-present1"), os.path.join(V, "revoke2")
+    for d, how in ((Q, "--stage full --view present"), (R, "--stage revoke")):
+        if not os.path.exists(os.path.join(d, "marks.json")):
+            sys.exit("cut: missing " + d + " (film.mjs " + how + " --out " + d + ")")
+
+    def spans(d):
+        m = json.load(open(os.path.join(d, "marks.json")))
+
+        def span(a, b, speed=1.0):  # as transit's: mark a to mark b ("name", "name+s", "name-s"), speed times as fast
+            def t(k):
+                name, off = re.match(r"^([a-z0-9-]+?)([+-][0-9.]+)?$", k).groups()
+                return m[name] + float(off or 0)
+            return (dict(kind="clip", src=os.path.join(d, "full.mp4"), start=t(a), len=t(b) - t(a)), (t(b) - t(a)) / speed)
+        return span
+
+    def title(work, *args):
+        p = os.path.join(work, "title.png")
+        card(p, *args)
+        return (dict(kind="card", png=p), 3.0)
+
+    # The control group: no film, two cards (the bill, then what it hides).
+    work = os.path.join(out, "cut-scene-control-work")
+    os.makedirs(work, exist_ok=True)
+    plain, noted = os.path.join(work, "bill.png"), os.path.join(work, "bill-noted.png")
+    bill(plain, False)
+    bill(noted, True)
+    render([
+        ("先看沒有這一層的話：AI 拿著一張卡，看到什麼就付什麼。月底的帳單，只有一行行「AI 助理代付」和一個總數。",
+         "First, without this layer: the AI holds a card and pays for whatever it is shown. The bill is lines of \"AI assistant\" and a total.",
+         [(dict(kind="card", png=plain), 6.0)]),
+        ("其中 2.00 是書店頁面騙它買的，0.09 是孩子的 AI 買的啤酒。帳單上看不出是哪個任務、誰同意的。",
+         "The 2.00 was a shop page's trick; one 0.09 was beer bought by the child's AI. Nothing on it says which task, or who agreed.",
+         [(dict(kind="card", png=noted), 7.0)]),
+    ], work, os.path.join(out, "apa-scene-control"))
+
+    # The quiet Allows: three in-range payments, nobody asked; then the one above the limit, the person asked.
+    q = spans(Q)
+    work = os.path.join(out, "cut-scene-quiet-work")
+    os.makedirs(work, exist_ok=True)
+    render([
+        ("範圍內的小額，安靜放行：孩子的講義 0.06、家長的午餐 0.08、家長的啤酒 0.09，都自動付款，沒有人被打擾。",
+         "Small payments within the limits go through quietly: the child's notes, the parent's lunch and beer. Nobody is interrupted.",
+         [title(work, "上限內，安靜放行", ["人不看每一筆，只在例外時被找"], ["示意動畫：fake Agent・本機測試鏈"]),
+          q("books-paid-consumer-b-4", "books-paid-consumer-b+1"), q("cafe-paid-consumer-a-4", "cafe-paid-consumer-a+1"),
+          q("mart-paid-consumer-a-4", "mart-paid-consumer-a+1")]),
+        ("超過 0.10 的那一筆，才走到本人面前：首爾攻略 0.50，家長在裝置上核准這一筆。",
+         "Only the one above 0.10 reaches the person: the 0.50 Seoul guide, approved by the parent on the device.",
+         [q("books-ask-0.5", "books-approved+3")]),
+    ], work, os.path.join(out, "apa-scene-quiet"))
+
+    # The revocation: A's Ask waiting, A takes the delegation back with the device; B's own delegation goes on.
+    r = spans(R)
+    work = os.path.join(out, "cut-scene-revoke-work")
+    os.makedirs(work, exist_ok=True)
+    render([
+        ("家長的 AI 正在等核准。家長決定不讓它再花錢：在自己的裝置上收回這份委託。",
+         "The parent's AI is waiting for approval. The parent stops it: they take the delegation back on their own device.",
+         [title(work, "Agent 失控，要馬上停", ["本人用裝置收回委託"], ["示意動畫：fake Agent・本機測試鏈"]),
+          r("ask-0.5", "revoked+2.5")]),
+        ("收回之後，Signer 一律拒簽這份委託，等著的這一筆不會付款。孩子的委託不受影響，講義照常付款。",
+         "After that the Signer refuses everything under it, and the waiting purchase is never paid. The child's delegation goes on.",
+         [r("revoked+2.5", "b-paid+3", 1.5)]),
+    ], work, os.path.join(out, "apa-scene-revoke"))
+
+
 # The add-ons' rows, in film seconds from a second before each venue's start: each row's film and its length on
 # screen (faster when shorter), read off addon-present2/full.mp4 (11/8): the hotel's Deny shows 8.5 s in, the
 # child's receipt 20.9 s; the post office's failed delivery 20.4 s in, the refund pressed 26.7 s in and recorded
@@ -251,13 +353,15 @@ POST = (18.8, 12.5, 7.7, 8.0, 6.3, 7.5)
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cut", choices=["90", "180", "addon", "transit"], required=True)
+    ap.add_argument("--cut", choices=["90", "180", "addon", "transit", "scenes"], required=True)
     ap.add_argument("--out", default=V)
     a = ap.parse_args()
     if a.cut == "addon":
         return addon(a.out)
     if a.cut == "transit":
         return transit(a.out)
+    if a.cut == "scenes":
+        return scenes(a.out)
     work = os.path.join(a.out, "cut-%s-work" % a.cut)
     os.makedirs(work, exist_ok=True)
     # 11/16 (Aaron: the main cuts, the subway and eKYC filmed again, the town as it is now), with --ekyc. 11/11's: -present5,

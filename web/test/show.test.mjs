@@ -98,6 +98,13 @@ test("a task's end stops what had not started; a payment under way goes on", () 
   assert.equal(delivering.steps[4].text, "付款完成，正在交付（任務已結束，交付照常進行）");
   const before = A.showCustomer("consumer-a", snap([...base("Allow", "WITHIN_ALLOW_MAX"), end()]), DLG);
   assert.deepEqual([before.steps[3].state, before.steps[3].text], ["fail", "任務逾時結束"]);
+  // The person's revocation (docs/commercial-gap4.md 7) ends a waiting Ask as such; a payment under way still goes on.
+  const revoke = ev(20, "DELEGATION_REVOKED", { purchase_order_id: "", authorization_method: "webauthn" });
+  const asked = A.showCustomer("consumer-a", snap([...base("Ask", "HUMAN_APPROVAL_REQUIRED"), revoke]), DLG, { authenticator: "device" });
+  assert.deepEqual([steps(asked), asked.steps[2].text], ["done done fail todo todo", "本人已收回委託，不再付款"]);
+  assert.equal(A.scene(snap([...base("Ask", "HUMAN_APPROVAL_REQUIRED"), revoke])).label, "本人已收回委託：這筆不能核准，到期後關閉；不會付款");
+  const going = A.showCustomer("consumer-a", snap([...base("Allow", "WITHIN_ALLOW_MAX"), ...paid.slice(0, 4), revoke]), DLG);
+  assert.equal(going.steps[3].text, "已送出付款，等鏈上確認（第 2 筆）（任務已結束，付款照常完成）");
 });
 
 test("amounts are never rounded; any consumer has a name", () => {

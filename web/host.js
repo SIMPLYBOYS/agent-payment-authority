@@ -2047,7 +2047,7 @@ const a2Target = (item) => A.approvalTarget(creds.gen, "a2", item);
 
 // ENDED: a pending Ask of a task that ended (a CLI timeout, or another
 // purchase denied): not decided by anyone now; it expires at its deadline.
-const ENDED = ["closed", "task 已結束：這筆不能核准", "這個 task 已結束（CLI 逾時，或另一筆請購被拒絕），這一筆不能再核准，也不會付款；到期後由後端記錄。下一步：" + A.AGAIN + "。"];
+const ENDED = ["closed", "task 已結束：這筆不能核准", "這個 task 已結束（CLI 逾時、另一筆請購被拒絕，或本人收回了委託），這一筆不能再核准，也不會付款；到期後由後端記錄。下一步：" + A.AGAIN + "。"];
 
 const A2_RESULT = {
   // Review N-b, C: a closed session's heading never says "not approved"

@@ -4,7 +4,7 @@
 // in a new 0700 temporary directory, removed at the end; nothing under var/ is read or written but the Foundry
 // tools (var/tools); the chain is a fresh anvil on its own port; the approver is a CDP virtual authenticator.
 //
-//   node scripts/video/film.mjs [--stage up|sample|full|fooled|transit|ekyc] [--ekyc SESSION] [--out DIR]
+//   node scripts/video/film.mjs [--stage up|sample|full|fooled|transit|revoke|ekyc] [--ekyc SESSION] [--out DIR]
 //
 // --ekyc SESSION (docs/commercial-ekyc.md): the customers' attributes from that finished Didit verification
 // (apa-issuer ekyc --session, the key file var/ekyc/didit-sandbox.key: the one thing read under var/ besides the
@@ -152,6 +152,9 @@ async function full(b, unityUp, demo) {
         await sleep(3000); // the audience sees the ask before it is approved
         if (await click("#approval .approval-approve")) mark(venue + "-approved");
       }
+      // Each customer's receipt as it shows (the quiet Allows' moments, docs/demo-video-script.md §8).
+      for (const c of await b.evaluate(`[...document.querySelectorAll(".present-cust")].filter((x) => x.querySelector(".present-receipt")).map((x) => x.dataset.consumer)`))
+        if (!((venue + "-paid-" + c) in marks)) mark(venue + "-paid-" + c);
       if ((await receipts()) >= ENDS[venue]) break;
       await sleep(400);
     }
@@ -208,6 +211,45 @@ async function fooled(b) {
   const got = await stop();
   encode(got, frames, join(out, "fooled.mp4"));
   log("film: " + join(out, "fooled.mp4"));
+}
+
+// revoke (docs/commercial-gap4.md 7; docs/demo-video-script.md §8, an Agent to stop at once): the bookshop started
+// together, A's Ask left waiting; A takes the delegation back with the device (the card's 收回委託, out of sight while
+// presenting: clicked as the host does it from the control); held until the Signer's record shows on A's steps and
+// B's in-range notes are delivered; full.mp4 and marks.json.
+async function revoke(b) {
+  const click = (sel) => b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e || e.disabled) return false; e.click(); return true; })()`);
+  log("film: presenting " + (await click("#present-toggle")));
+  await sleep(4000);
+  await b.evaluate(`(() => { const x = document.querySelector('button.venue-item[data-venue="books"]'); if (x) x.click(); return !!x; })()`);
+  await sleep(3500);
+  const frames = join(out, "full-frames");
+  const stop = capture(b, frames);
+  const t0 = Date.now() / 1000;
+  const marks = {};
+  const mark = (k) => { marks[k] = +(Date.now() / 1000 - t0).toFixed(2); log("film: " + k + " at " + marks[k] + " s"); };
+  await sleep(1500);
+  mark("start");
+  if (!(await click("button.venue-go"))) throw new Error("books: no start button");
+  if (!(await b.waitFor(`!!document.querySelector("#approval .approval-head[data-state=pending]")`, 90000))) throw new Error("revoke: A's Ask never showed");
+  mark("ask");
+  await sleep(5000); // the Ask seen waiting
+  if (!(await b.waitFor(`!!document.querySelector('.agent-card[data-consumer="consumer-a"] .agent-revoke:not([disabled])')`, 30000))) throw new Error("revoke: A's card offers no 收回委託");
+  mark("revoke");
+  await click(`.agent-card[data-consumer="consumer-a"] .agent-revoke`);
+  if (!(await b.waitFor(`document.getElementById("run-status").textContent.includes("已用本人裝置收回委託")`, 30000)))
+    throw new Error("revoke: " + (await b.evaluate(`document.getElementById("run-status").textContent`)));
+  mark("revoked");
+  log("film: " + (await b.evaluate(`document.getElementById("run-status").textContent`)));
+  await b.waitFor(`!!document.querySelector('.present-cust[data-consumer="consumer-b"] .present-receipt')`, 90000);
+  mark("b-paid");
+  await sleep(8000);
+  mark("end");
+  log("film: A's steps: " + (await b.evaluate(`(document.querySelector('.present-cust[data-consumer="consumer-a"]') || {}).innerText`)));
+  const got = await stop();
+  writeFileSync(join(out, "marks.json"), JSON.stringify(marks, null, 1));
+  encode(got, frames, join(out, "full.mp4"));
+  log("film: " + join(out, "full.mp4"));
 }
 
 // transit (docs/commercial-transit.md, docs/commercial-atm.md, Aaron 11/9): customer A walked in game mode, each walk
@@ -466,6 +508,7 @@ try { stack: {
   else if (stage === "full") await full(b, unityUp, demo);
   else if (stage === "fooled") await fooled(b);
   else if (stage === "transit") await transit(b);
+  else if (stage === "revoke") await revoke(b);
   else if (stage !== "up") throw new Error("stage " + stage + " is not written yet");
 } } finally {
   if (b) b.close();

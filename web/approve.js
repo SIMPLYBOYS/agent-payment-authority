@@ -124,7 +124,7 @@ export function outcomeText(status, body, decision, pays = false) {
   if (b.error === "signer_refused") return ["error", "驗證沒有通過（" + codeText(b.code) + "）；沒有" + (DECISION[decision] || "決定") + "。" + codeNext(b.code)];
   if (b.error === "result_unknown") return ["warn", "結果確認中，請不要重複操作。"];
   if (b.error === "store_unavailable" && b.state_not_saved) return ["warn", "後端已收到，但這次結果還沒有存好；畫面會以同一個編號確認。"];
-  if (b.error === "task_ended") return ["closed", "task 已結束（CLI 逾時，或另一筆請購被拒絕）：這筆不能核准，也不會付款。下一步：" + AGAIN + "。"];
+  if (b.error === "task_ended") return ["closed", "task 已結束（CLI 逾時、另一筆請購被拒絕，或本人收回了委託）：這筆不能核准，也不會付款。下一步：" + AGAIN + "。"];
   if (b.error === "session_closed") return ["closed", "這筆已經結束，不能再" + (DECISION[decision] || "處理") + "。"];
   if (b.error === "signer_mismatch") return ["error", "回傳的資料和你這次的操作不一致，已停止，沒有要求裝置驗證。下一步：記下時間找開發者。"];
   if (b.error === "not_found") return ["error", "找不到這一筆（可能不是這位客人的）"];

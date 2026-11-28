@@ -156,6 +156,7 @@ export function scene(snapshot) {
   let startedSeq = 0;
   let end = null;
   let firstEnd = "";
+  let revoked = false; // the person took the delegation back (docs/commercial-gap4.md 7): the task takes nothing new
   let orphanDecision = false;
   for (const e of events) {
     const po = typeof e.purchase_order_id === "string" && e.purchase_order_id !== "" ? e.purchase_order_id : null;
@@ -183,6 +184,7 @@ export function scene(snapshot) {
         break;
       case "TASK_CANCELLED": end = "cancelled"; firstEnd = firstEnd || end; break;
       case "TASK_TIMED_OUT": end = "timed_out"; firstEnd = firstEnd || end; break;
+      case "DELEGATION_REVOKED": revoked = true; break;
     }
   }
   // The shown purchase: latest decision; else latest proposal.
@@ -211,6 +213,7 @@ export function scene(snapshot) {
   if (phase === "allowed_unpaid") notes.push("M1 無付款能力");
   if (end === "cancelled") notes.push(phase === "denied" ? "之後 task 已取消（不改變原 Deny）" : "task 已取消");
   if (end === "timed_out") notes.push(phase === "denied" ? "之後 CLI 逾時（不改變原 Deny）" : "CLI 逾時");
+  if (revoked) notes.push("本人已收回委託");
   if (purchases.size > 1) notes.push("此 task 有 " + purchases.size + " 筆請購；場景顯示最近裁決的 " + shown);
   const labels = {
     empty: "尚無事件", entered: "進店", quoted: "取得報價", waiting: "Ask：等待人工核准（M1 無法核准）",
@@ -224,7 +227,7 @@ export function scene(snapshot) {
     delivery_failed: "已付款，交付失敗：待人工處理", refunded: "已付款，交付失敗：商店已退款", not_paid: "未付款（沒有花錢）：離店", payment_review: "待人工處理：預算已預留但未付款",
   };
   if (pay(task)) labels.waiting = simulated() ? "等你核准（模擬核准；不會付款）" : "等你核准（本人以已登記的裝置；" + (pays ? "核准後由 Host 付款）" : "不會付款）");
-  if (pay(task) && (end || denied([...purchases.values()].map((x) => x.decision)))) labels.waiting = ENDED_ASK;
+  if (pay(task) && (end || revoked || denied([...purchases.values()].map((x) => x.decision)))) labels.waiting = revoked ? REVOKED_ASK : ENDED_ASK;
   if (cur && CREDENTIAL_CLOSED[cur.closedReason]) labels.withdrawn = CREDENTIAL_CLOSED[cur.closedReason] + "：離店"; // C2: not the task's cancellation
   if (cur && cur.method === "webauthn") labels.approved = pays ? "本人核准已驗證：尚未付款" : "本人核准已驗證：未啟用付款，不會取貨"; // the record's own method (review R4)
   const d = cur && cur.decision ? cur.decision : null;
@@ -233,7 +236,7 @@ export function scene(snapshot) {
     approved: cur && cur.closedSeq, approval_denied: cur && cur.closedSeq, superseded: cur && cur.closedSeq };
   const cause = cur && cur.pay ? cur.paySeq : causeOf[phase];
   return { phase, label: labels[phase] || UNKNOWN, notes, po: shown, verdict: d ? d.policy_verdict || "" : "", reason: d ? d.reason || null : null,
-    cause: Number.isInteger(cause) && cause > 0 ? cause : 0, end: firstEnd, unity: cur && cur.pay ? phase : paidApproval ? "approved" : UNITY_PHASE[phase] || phase };
+    cause: Number.isInteger(cause) && cause > 0 ? cause : 0, end: firstEnd, revoked, unity: cur && cur.pay ? phase : paidApproval ? "approved" : UNITY_PHASE[phase] || phase };
 }
 
 // fresh returns the sequences not seen before and marks them seen: an event
@@ -822,6 +825,7 @@ export function paymentText(pv) {
 // of another purchase): nobody decides it now; it expires at its deadline
 // (accepted case cli-timeout-pending).
 const ENDED_ASK = "task 已結束：這筆不能核准，到期後關閉；不會付款";
+const REVOKED_ASK = "本人已收回委託：這筆不能核准，到期後關閉；不會付款";
 const denied = (decisions) => decisions.some((d) => d && d.policy_verdict === "Deny");
 
 // reconciliationRow is the host page's reconciliation row (P2,
@@ -1250,12 +1254,12 @@ export function showCustomer(consumer, snapshot, delegation, traits = {}) {
     else if (ph === "delivery_failed") set(4, "fail", "已付款，交付失敗，待人工處理");
     else if (ph === "refunded") set(4, "fail", "交付失敗；商店已退款（第 3 筆鏈上交易），錢回到客人的錢包");
   }
-  // A task's end stops what had not started; a payment already reserved goes on (payflow).
-  if (sc.end) {
+  // A task's end (or the person's revocation) stops what had not started; a payment already reserved goes on (payflow).
+  if (sc.end || sc.revoked) {
     const i = steps.findIndex((s) => s.state === "now");
     const going = i >= 3 && !(i === 3 && (ph === "allowed" || ph === "approved"));
     if (i >= 0 && going) steps[i].text += i === 4 ? "（任務已結束，交付照常進行）" : "（任務已結束，付款照常完成）";
-    else if (i >= 0) Object.assign(steps[i], { state: "fail", text: sc.end === "cancelled" ? "任務已取消" : "任務逾時結束" });
+    else if (i >= 0) Object.assign(steps[i], { state: "fail", text: sc.revoked ? "本人已收回委託，不再付款" : sc.end === "cancelled" ? "任務已取消" : "任務逾時結束" });
   }
   const name = customerName(consumer);
   const last = [...steps].reverse().find((s) => s.state !== "todo" && s.state !== "off") || steps[0];
