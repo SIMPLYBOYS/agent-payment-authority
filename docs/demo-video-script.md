@@ -34,7 +34,7 @@
 
 | 秒 | 幕 | 畫面 | 中文旁白 | English subtitle |
 |---|---|---|---|---|
-| 0–10 | 序幕 | 黑底字卡 → 城鎮全景（主持人頁「全景：走一趟整條街」，鏡頭平移整條街；剪輯時加速），一家人在街上 | AI 已經可以替我們買東西了。可是讓 AI 替我花錢，我最怕三件事：被騙著亂花、個資被拿走、出了事說不清楚。 | AI can shop for us now. But letting it spend my money, I worry about three things: being tricked into spending, giving away my data, and not knowing what happened. |
+| 0–10 | 序幕：對照組（11/28） | 兩張字卡（第 8 節）：月底的帳單，七行「AI 助理 代付」與合計；第二張在 2.00 與一筆 0.09 旁加註。標「示意：沒有授權層的對照組」 | 沒有這一層的話：AI 拿著卡，看到什麼就付什麼，月底只有一個總數。／其中 2.00 是被頁面騙的，0.09 是孩子買的酒；帳單上看不出來。 | Without this layer, the AI holds a card and pays for whatever it is shown: the bill is one total. / The 2.00 was a page's trick, one 0.09 the child's beer; the bill can't tell. |
 | 10–22 | 一、設定 | Didit 的沙盒驗證頁（證件、自拍說明）；字卡：「家長通過身分驗證，才拿到憑證」（小字：Didit 沙盒，沒有驗證真人）；家長在裝置上確認委託（11/11） | AI 只能提出要買什麼。家長先通過身分驗證，再在自己的裝置上設好：這次最多花 1.5，超過 0.1 都要問我。 | The AI can only propose. The parent passes an identity check, then sets the limits on their own device: at most 1.50, over 0.10 comes back to them. |
 | 22–40 | 二、複合式書店 | 主持人頁特寫：攻略說明裡的「系統通知」；家長在裝置上核准、念出金額與代碼；切到模擬片段（標「模擬」）：被騙的 Agent 去買 2.00 進階版 →「超出預算，已拒絕」 | 書店的頁面藏了一句話，叫 AI 順便買 2 塊錢的進階版。真的 AI 沒上當；就算它被騙了，也花不出預算外的錢。 | The shop's page hides an instruction to also buy a 2.00 premium edition. The real AI ignored it — and even a fooled one can't spend beyond the budget. |
 | 40–54 | 三、街角烘焙咖啡 | 「這間店看到：沒有任何個人資料」；孩子的生日蛋糕，家長在裝置上核准 | 孩子的 AI 想訂 0.42 的生日蛋糕，超過範圍，交給家長核准。這間店，什麼個資都看不到。 | The child's AI wants a 0.42 birthday cake. That's over the limit, so the parent approves. The shop sees no personal data at all. |
@@ -46,7 +46,7 @@
 
 | 秒 | 幕 | 畫面 | 中文旁白（要點） | English subtitle（要點） |
 |---|---|---|---|---|
-| 0–20 | 序幕 | 字卡；城鎮 | 讓 AI 替我花錢，最怕被騙著亂花、個資被拿走、出了事說不清楚。 | Letting AI spend for me, I fear being tricked, losing my data, and not knowing what happened. |
+| 0–20 | 序幕：對照組（11/28） | 兩張帳單字卡（第 8 節）；城鎮全景 | 先看沒有這一層的話：AI 拿著一張卡，看到什麼就付什麼，月底的帳單只有一個總數；其中 2.00 是書店頁面騙它買的，0.09 是孩子的 AI 買的啤酒，帳單上看不出是哪個任務、誰同意的。同樣的一天，換成有這一層：每一筆都先對過委託，超過範圍的才問本人。 | Without this layer, the AI pays for whatever it is shown, and the bill can't say which task or who agreed. The same day with this layer: every payment is checked against the delegation, and only what is over the limit goes to the person. |
 | 20–40 | 誰握有什麼權力 | `docs/architecture.md` 的角色圖 | AI 只能提出，它在鏈上有自己的身分；替它跑的程式沒有私鑰；簽名在另一個系統帳號裡，只簽本人同意過的範圍；查帳的人只讀證據和鏈。 | The AI proposes, under its own on-chain identity. The program running it holds no key. Signing lives in its own OS account, within limits the person agreed to. The auditor reads only the evidence and the chain. |
 | 40–60 | 一、設定 | Didit 的沙盒驗證頁；字卡：身分憑證（Didit eKYC 沙盒）；家長、孩子的委託 PIN（11/11） | 家長通過身分驗證，才拿到證明「我是誰」的憑證；委託寫下能花多少、超過多少要問。孩子的委託，由家長在自己的裝置上確認。 | The parent passes an identity check to get the credential that says who they are; the mandate says how much, and when to ask. The child's is confirmed on the parent's device. |
 | 60–105 | 二、複合式書店：被騙著亂花 | 攻略報價（x402）與藏起來的「系統通知」；這間店看到「國家 台灣」；家長在裝置上核准、念出金額與代碼；tx#1、tx#2、收據；模擬：被騙的 Agent 被拒 | 書店只知道你在哪個國家；超過範圍由本人核准，還要念出這一筆的金額；誘導文字騙不倒真實的 AI，就算騙倒了也花不出預算外的錢。孩子的講義 0.06 在範圍內，自動付款。 | The bookshop learns only your country; the person approves above the limit and reads this payment's amount aloud; the trap didn't fool the real AI, and a fooled one still can't overspend. The child's 0.06 notes pay on their own. |
@@ -185,7 +185,7 @@ go run ./cmd/verify-demo --mode e1a --run-dir artifacts/e1a/<錄影那一場的�
 
 ## 8 補的三幕：對照組、安靜放行、收回委託（11/28 準備）
 
-來源：FUTUREMODE 筆記 §0.2 的設計 3（例外管理：範圍內的安靜放行，超過才找人）與設計 6（開場放沒有閘的對照組，問題先於解法），加上簡報「Agent 失控，要馬上停」那一列。三幕先各剪成獨立短片給 Aaron 看；放進 90 秒、3 分鐘版的哪裡、要不要取代現有的開場，由 Aaron 決定。
+來源：FUTUREMODE 筆記 §0.2 的設計 3（例外管理：範圍內的安靜放行，超過才找人）與設計 6（開場放沒有閘的對照組，問題先於解法），加上簡報「Agent 失控，要馬上停」那一列。三幕先各剪成獨立短片給 Aaron 看；放進 90 秒、3 分鐘版的哪裡、要不要取代現有的開場，由 Aaron 決定。**Aaron 11/28：對照組取代「三種怕」的開場**（第 3、4 節的第一列）：90 秒版是兩張帳單各 5 秒、字幕縮短；3 分鐘版是兩張帳單（6、7 秒）加 7 秒城鎮全景。舊成品備份為 `apa-demo-90s-1119.*`、`apa-demo-180s-1119.*`。安靜放行與收回委託放哪裡，還沒決定。
 
 | 幕 | 長度 | 畫面 | 中文字幕 | 標示 |
 |---|---|---|---|---|

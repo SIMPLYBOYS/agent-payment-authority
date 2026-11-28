@@ -389,7 +389,10 @@ def main():
         card(p, *args, **kw)
         return dict(kind="card", png=p)
 
-    fears = png("fears", "讓 AI 替我花錢，我最怕三件事", ["被騙著亂花", "個資被拿走", "出了事說不清楚"])
+    # The opening is the control group (Aaron 11/28: it replaces the three fears): the bill without this layer (§8).
+    bill(os.path.join(work, "bill.png"), False)
+    bill(os.path.join(work, "bill-noted.png"), True)
+    plain, noted = dict(kind="card", png=os.path.join(work, "bill.png")), dict(kind="card", png=os.path.join(work, "bill-noted.png"))
     credential = png("credential", "家長通過身分驗證，才拿到憑證", ["證件、活體偵測、人臉比對：Didit eKYC", "憑證只帶「國家」與「是否滿 18 歲」", "姓名、生日、證件號碼留在 Didit"],
                      ["接的是 Didit 的沙盒：流程是真的，沒有驗證真人；沙盒的範例證件是巴西護照"])
     claims = ["%s %s" % (k, v) for k, v in sorted(rep["claims"].items(), key=lambda kv: int(kv[0][1:]))]
@@ -402,9 +405,12 @@ def main():
                  ["Agent Payment Authority"], ["x402 moves the money. This layer proves who allowed it, for what, and within which limits."])
     if a.cut == "90":
         rows = [
-            ("AI 已經可以替我們買東西了。可是讓 AI 替我花錢，我最怕三件事：被騙著亂花、個資被拿走、出了事說不清楚。",
-             "AI can shop for us now. But letting it spend my money, I worry about three things.",
-             [(fears, 3.5), (clip(P, pm["tour"], 4.0), 3.0), (clip(S, sm["tour"] + FOOD, 4.5), 3.5)]),
+            ("沒有這一層的話：AI 拿著卡，看到什麼就付什麼，月底只有一個總數。",
+             "Without this layer, the AI holds a card and pays for whatever it is shown: the bill is one total.",
+             [(plain, 5.0)]),
+            ("其中 2.00 是被頁面騙的，0.09 是孩子買的酒；帳單上看不出來。",
+             "The 2.00 was a page's trick, one 0.09 the child's beer; the bill can't tell.",
+             [(noted, 5.0)]),
             ("AI 只能提出要買什麼。家長先通過身分驗證，再在自己的裝置上設好：這次最多花 1.5，超過 0.1 都要問我。",
              "The AI can only propose. The parent passes an identity check, then sets the limits on their own device: at most 1.50, over 0.10 comes back to them.",
              [(clip(E, 0.2, 2.3), 1.5), (clip(E, 13.5, 9.0), 2.5), (credential, 2.5), (clip(P, pm["books-start"] - 1.0, 8.0), 5.5)]),
@@ -428,9 +434,15 @@ def main():
         limits = png("limits", "照實說", ["Base Sepolia 測試網、測試幣", "被騙的 Agent 是模擬", "eKYC 接的是 Didit 沙盒：沒有驗證真人"],
                      ["其餘畫面是自動產生的示意動畫：fake Agent、本機測試鏈；AI 的鏈上身分由平台代為註冊"])
         rows = [
-            ("讓 AI 替我花錢，最怕被騙著亂花、個資被拿走、出了事說不清楚。",
-             "Letting AI spend for me, I fear being tricked, losing my data, and not knowing what happened.",
-             [(fears, 4.0), (clip(P, pm["tour"], 8.5), 9.0), (clip(S, sm["tour"] + FOOD - 2.0, 7.0), 7.0)]),
+            ("先看沒有這一層的話：AI 拿著一張卡，看到什麼就付什麼。月底的帳單，只有一行行「AI 助理代付」和一個總數。",
+             "First, without this layer: the AI holds a card and pays for whatever it is shown. The bill is lines of \"AI assistant\" and a total.",
+             [(plain, 6.0)]),
+            ("其中 2.00 是書店頁面騙它買的，0.09 是孩子的 AI 買的啤酒。帳單上看不出是哪個任務、誰同意的。",
+             "The 2.00 was a shop page's trick; one 0.09 was beer bought by the child's AI. Nothing on it says which task, or who agreed.",
+             [(noted, 7.0)]),
+            ("同樣的一天，換成有這一層：每一筆都先對過委託，超過範圍的才問本人。",
+             "The same day with this layer: every payment is checked against the delegation, and only what is over the limit goes to the person.",
+             [(clip(P, pm["tour"], 4.0), 4.0), (clip(S, sm["tour"] + FOOD - 2.0, 3.0), 3.0)]),
             ("AI 只能提出；替它跑的程式沒有私鑰；簽名在另一個系統帳號裡，只簽本人同意過的範圍；查帳的人只讀證據和鏈。",
              "The AI proposes; the program running it holds no key; signing lives apart, within the person's limits; the auditor reads only evidence and chain.",
              [(roles, 20.0)]),
