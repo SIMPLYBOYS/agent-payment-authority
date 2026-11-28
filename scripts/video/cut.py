@@ -276,27 +276,41 @@ def bill(path, notes):
     im.save(path)
 
 
+# The §8 scenes' films: the quiet Allows (a full round with its receipt marks) and the revocation.
+QUIET, REVOKE = os.path.join(V, "quiet-present1"), os.path.join(V, "revoke2")
+
+
+def spans(d, how):
+    """span(a, b, speed, dur): d's film from mark a to mark b ("name", "name+s", "name-s"), speed times as fast, or in
+    dur seconds; how: the film.mjs stage that films d, said when it is missing."""
+    if not os.path.exists(os.path.join(d, "marks.json")):
+        sys.exit("cut: missing " + d + " (film.mjs " + how + " --out " + d + ")")
+    m = json.load(open(os.path.join(d, "marks.json")))
+
+    def span(a, b, speed=1.0, dur=None):
+        def t(k):
+            name, off = re.match(r"^([a-z0-9-]+?)([+-][0-9.]+)?$", k).groups()
+            return m[name] + float(off or 0)
+        return (dict(kind="clip", src=os.path.join(d, "full.mp4"), start=t(a), len=t(b) - t(a)), dur or (t(b) - t(a)) / speed)
+    return span
+
+
+def title(work, name, *args, dur=3.0):
+    p = os.path.join(work, name + ".png")
+    card(p, *args)
+    return (dict(kind="card", png=p), dur)
+
+
+QUIET_TITLE = ("上限內，安靜放行", ["人不看每一筆，只在例外時被找"], ["示意動畫：fake Agent・本機測試鏈"])
+REVOKE_TITLE = ("Agent 失控，要馬上停", ["本人用裝置收回委託"], ["示意動畫：fake Agent・本機測試鏈"])
+REVOKE_ZH = ("家長的 AI 正在等核准。家長決定不讓它再花錢：在自己的裝置上收回這份委託。",
+             "收回之後，Signer 一律拒簽這份委託，等著的這一筆不會付款。孩子的委託不受影響，講義照常付款。")
+REVOKE_EN = ("The parent's AI is waiting for approval. The parent stops it: they take the delegation back on their own device.",
+             "After that the Signer refuses everything under it, and the waiting purchase is never paid. The child's delegation goes on.")
+
+
 def scenes(out):
     """docs/demo-video-script.md §8: the three scenes, each a clip of its own."""
-    Q, R = os.path.join(V, "quiet-present1"), os.path.join(V, "revoke2")
-    for d, how in ((Q, "--stage full --view present"), (R, "--stage revoke")):
-        if not os.path.exists(os.path.join(d, "marks.json")):
-            sys.exit("cut: missing " + d + " (film.mjs " + how + " --out " + d + ")")
-
-    def spans(d):
-        m = json.load(open(os.path.join(d, "marks.json")))
-
-        def span(a, b, speed=1.0):  # as transit's: mark a to mark b ("name", "name+s", "name-s"), speed times as fast
-            def t(k):
-                name, off = re.match(r"^([a-z0-9-]+?)([+-][0-9.]+)?$", k).groups()
-                return m[name] + float(off or 0)
-            return (dict(kind="clip", src=os.path.join(d, "full.mp4"), start=t(a), len=t(b) - t(a)), (t(b) - t(a)) / speed)
-        return span
-
-    def title(work, *args):
-        p = os.path.join(work, "title.png")
-        card(p, *args)
-        return (dict(kind="card", png=p), 3.0)
 
     # The control group: no film, two cards (the bill, then what it hides).
     work = os.path.join(out, "cut-scene-control-work")
@@ -314,13 +328,13 @@ def scenes(out):
     ], work, os.path.join(out, "apa-scene-control"))
 
     # The quiet Allows: three in-range payments, nobody asked; then the one above the limit, the person asked.
-    q = spans(Q)
+    q = spans(QUIET, "--stage full --view present")
     work = os.path.join(out, "cut-scene-quiet-work")
     os.makedirs(work, exist_ok=True)
     render([
         ("範圍內的小額，安靜放行：孩子的講義 0.06、家長的午餐 0.08、家長的啤酒 0.09，都自動付款，沒有人被打擾。",
          "Small payments within the limits go through quietly: the child's notes, the parent's lunch and beer. Nobody is interrupted.",
-         [title(work, "上限內，安靜放行", ["人不看每一筆，只在例外時被找"], ["示意動畫：fake Agent・本機測試鏈"]),
+         [title(work, "title", *QUIET_TITLE),
           q("books-paid-consumer-b-4", "books-paid-consumer-b+1"), q("cafe-paid-consumer-a-4", "cafe-paid-consumer-a+1"),
           q("mart-paid-consumer-a-4", "mart-paid-consumer-a+1")]),
         ("超過 0.10 的那一筆，才走到本人面前：首爾攻略 0.50，家長在裝置上核准這一筆。",
@@ -329,17 +343,12 @@ def scenes(out):
     ], work, os.path.join(out, "apa-scene-quiet"))
 
     # The revocation: A's Ask waiting, A takes the delegation back with the device; B's own delegation goes on.
-    r = spans(R)
+    r = spans(REVOKE, "--stage revoke")
     work = os.path.join(out, "cut-scene-revoke-work")
     os.makedirs(work, exist_ok=True)
     render([
-        ("家長的 AI 正在等核准。家長決定不讓它再花錢：在自己的裝置上收回這份委託。",
-         "The parent's AI is waiting for approval. The parent stops it: they take the delegation back on their own device.",
-         [title(work, "Agent 失控，要馬上停", ["本人用裝置收回委託"], ["示意動畫：fake Agent・本機測試鏈"]),
-          r("ask-0.5", "revoked+2.5")]),
-        ("收回之後，Signer 一律拒簽這份委託，等著的這一筆不會付款。孩子的委託不受影響，講義照常付款。",
-         "After that the Signer refuses everything under it, and the waiting purchase is never paid. The child's delegation goes on.",
-         [r("revoked+2.5", "b-paid+3", 1.5)]),
+        (REVOKE_ZH[0], REVOKE_EN[0], [title(work, "title", *REVOKE_TITLE), r("ask-0.5", "revoked+2.5")]),
+        (REVOKE_ZH[1], REVOKE_EN[1], [r("revoked+2.5", "b-paid+3", 1.5)]),
     ], work, os.path.join(out, "apa-scene-revoke"))
 
 
@@ -430,6 +439,7 @@ def main():
              [(checker, 6.0), (ending, 4.0)]),
         ]
     else:
+        q, rv = spans(QUIET, "--stage full --view present"), spans(REVOKE, "--stage revoke")  # §8, filmed 11/28 without --ekyc
         roles = png("roles", "誰握有什麼權力", ["AI：只能提出", "替它跑的程式：沒有私鑰", "簽名的鎖（Signer）：只簽本人同意過的範圍", "查帳的人：只讀證據和鏈"])
         limits = png("limits", "照實說", ["Base Sepolia 測試網、測試幣", "被騙的 Agent 是模擬", "eKYC 接的是 Didit 沙盒：沒有驗證真人"],
                      ["其餘畫面是自動產生的示意動畫：fake Agent、本機測試鏈；AI 的鏈上身分由平台代為註冊"])
@@ -442,26 +452,32 @@ def main():
              [(noted, 7.0)]),
             ("同樣的一天，換成有這一層：每一筆都先對過委託，超過範圍的才問本人。",
              "The same day with this layer: every payment is checked against the delegation, and only what is over the limit goes to the person.",
-             [(clip(P, pm["tour"], 4.0), 4.0), (clip(S, sm["tour"] + FOOD - 2.0, 3.0), 3.0)]),
+             [(clip(P, pm["tour"], 4.0), 2.5), (clip(S, sm["tour"] + FOOD - 2.0, 3.0), 2.5)]),
             ("AI 只能提出；替它跑的程式沒有私鑰；簽名在另一個系統帳號裡，只簽本人同意過的範圍；查帳的人只讀證據和鏈。",
              "The AI proposes; the program running it holds no key; signing lives apart, within the person's limits; the auditor reads only evidence and chain.",
-             [(roles, 20.0)]),
+             [(roles, 14.0)]),
             ("家長通過身分驗證，才拿到證明「我是誰」的憑證；委託寫下能花多少、超過多少要問。孩子的委託，由家長在自己的裝置上確認。",
              "The parent passes an identity check to get the credential that says who they are; the mandate says how much, and when to ask. The child's is confirmed on the parent's device.",
-             [(clip(E, 0.2, 3.0), 2.0), (clip(E, 4.5, 20.0), 4.5), (credential, 2.5), (clip(P, pm["books-start"] - 1.0, 15.0), 11.0)]),
+             [(clip(E, 0.2, 3.0), 2.0), (clip(E, 4.5, 20.0), 4.5), (credential, 2.5), (clip(P, pm["books-start"] - 1.0, 15.0), 8.0)]),
             ("書店只知道你在哪個國家；超過範圍由本人核准，還要念出這一筆的金額；誘導文字騙不倒真實的 AI，騙倒了也花不出預算外的錢。",
              "The bookshop learns only your country; above the limit the person approves and reads the amount aloud; a fooled AI still can't overspend.",
-             [(clip(P, pm["books-ask"] - 1.0, 22.0), 22.0), (clip(R, 334.0, 12.0, crop=PAGE, tag=REAL), 12.0),
+             [(clip(P, pm["books-ask"] - 1.0, 22.0), 18.0), (clip(R, 334.0, 12.0, crop=PAGE, tag=REAL), 12.0),
               (clip(F, 1.0, 11.0, tag="模擬：照腳本相信「系統通知」的 Agent"), 11.0)]),
             ("買蛋糕不需要知道你是誰。孩子的大額購買，由家長核准。",
              "Buying a cake needs nothing about you. The child's bigger purchase goes to the parent.",
-             [(clip(P, pm["cafe-start"], 25.0), 25.0)]),
+             [(clip(P, pm["cafe-start"], 25.0), 18.0)]),
             ("同一份憑證，在這裡只說「滿不滿 18 歲」，不給生日。孩子的 AI 買酒，付款前就被擋下。",
              "The same credential says only over 18 or not, never a birth date. The child's AI is stopped before paying.",
-             [(clip(P, pm["mart-start"], 20.0), 20.0)]),
+             [(clip(P, pm["mart-start"], 20.0), 16.0)]),
+            ("範圍內的小額，安靜放行：講義 0.06、午餐 0.08、啤酒 0.09 都自動付款，沒有人被打擾；只有超過 0.10 的才找本人。",
+             "Small payments within the limits go through quietly: notes, lunch, beer. Nobody is interrupted; only what is over 0.10 goes to the person.",
+             [title(work, "quiet", *QUIET_TITLE), q("books-paid-consumer-b-4", "books-paid-consumer-b+1", dur=4.0),
+              q("cafe-paid-consumer-a-4", "cafe-paid-consumer-a+1", dur=4.0), q("mart-paid-consumer-a-4", "mart-paid-consumer-a+1", dur=4.0)]),
+            (REVOKE_ZH[0], REVOKE_EN[0], [title(work, "revoke", *REVOKE_TITLE), rv("ask-0.5", "revoked+2.5", dur=7.0)]),
+            (REVOKE_ZH[1], REVOKE_EN[1], [rv("revoked+2.5", "b-paid+3", dur=7.0)]),
             ("查帳不用相信這個系統：只讀證據、向鏈重算，十項全部通過。",
              "The check trusts none of this system: it reads the evidence, recomputes against the chain, and all ten pass.",
-             [(clip(S, sm["books-done"] - 4.0, 10.0), 10.0), (checker, 8.0)]),
+             [(clip(S, sm["books-done"] - 4.0, 10.0), 6.0), (checker, 6.0)]),
             ("x402 處理付款；這一層證明這筆錢是為了哪個任務、經過誰的同意才付出去的。",
              "x402 moves the money; this layer proves who allowed it, for what, and within which limits.",
              [(limits, 7.0), (ending, 5.0)]),
