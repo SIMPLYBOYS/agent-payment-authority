@@ -47,6 +47,7 @@ test("OfficeFont has every character the talk can say", () => {
   }
   const busy = A.clerkTalk("x", A.venueStart([{ id: "b", consumer_id: "consumer-b" }], [{ consumer_id: "consumer-b", live: "running" }], true), true);
   words.push(busy.line, A.talkReply(busy.choices), A.clerkTalk("x", A.venueStart([], [], true), true).line);
+  words.push(...Object.values(A.CLERK_STEP), A.talkReply(A.clerkStep(null).choices), "謝謝！");
   const missing = [...new Set(words.join("").replace(/\s/g, ""))].filter((c) => !have.has(c.codePointAt(0)));
   assert.deepEqual(missing, [], "drawn blank in Unity: " + missing.join(""));
 });

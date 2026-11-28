@@ -673,7 +673,7 @@ function renderVenues(vs) {
 // venue roofed); a venue's row or a click on its building enters it (its
 // roof lifts, the camera steps in) and 回到城鎮 goes back. Unity only shows.
 let playAs = "", sentPlay = ""; // 遊戲模式 (below): the customer picked, and the one Unity walks now
-let talk = null, sentSay = ""; // 和人說話 (below): the open talk, { kind: "clerk", venue, consumer } or { kind: "person", id, n, consumer }; the speech sent
+let talk = null, sentSay = ""; // 和人說話 (below): the open talk, { kind: "clerk", venue, consumer, follow } or { kind: "person", id, n, consumer }; the speech sent
 let nearBy = "";                 // the guide the walked customer is near in the town (its talk id), "" none
 const held = new Set();          // its keys held
 let steered = "0,0";
@@ -875,8 +875,17 @@ function talkNow() {
   if (talk.kind === "person") return { t: A.personTalk(talk.id, talk.n) };
   const runs = (lastRuns && lastRuns.gen === creds.gen && lastRuns.runs) || [];
   const st = A.venueStart(pairFor(talk.venue).filter((sc) => sc.consumer_id === talk.consumer), runs, true);
+  // The clerk follows the steps (CLERK_STEP): of the customer's transaction here until it is over, and of the one this
+  // talk started (a task other than the one before it) until the customer answers; a counter reached after it was
+  // over greets again. A start that fails leaves the clerk at the delegation; the status line says why, the answer closes it.
+  const slot = scene.started && scene.slots().find((x) => x.consumer === talk.consumer && x.task);
+  const run = slot && slot.task !== talk.prev && runs.find((r) => r.consumer_id === talk.consumer && (r.scene || "data") === talk.venue && r.task_id === slot.task);
+  const t = run || talk.follow ? A.clerkStep(run ? A.showCustomer(talk.consumer, scene.snapshot(talk.consumer), delegationOf(slot.task), presentTraits()) : null) : null;
+  if (t && (talk.follow || !t.ended)) return { st, t };
   return { st, t: A.clerkTalk(A.venue(talk.venue).name, st, deviceDelegations()) };
 }
+// sceneTask: the customer's task the scene shows, "" none.
+const sceneTask = (c) => (scene.started && (scene.slots().find((x) => x.consumer === c) || {}).task) || "";
 // talkAt: who the talk's speech is over ("guide:<id>", "clerk").
 const talkAt = () => (talk ? (talk.kind === "person" ? "guide:" + talk.id : "clerk") : "");
 // greeting: the guide the walked customer is near says hello while no talk is open (the space key starts one).
@@ -886,17 +895,33 @@ const greeting = () => (!talk && presenting && inTown && sentPlay && A.PEOPLE[ne
 // window's). The keys answer: space for one answer, a number for several. A guide's hello has no answer yet.
 function renderTalk() {
   const now = talkNow(), t = now && now.t, g = !t && greeting();
-  const msg = t ? { at: talkAt(), line: t.line, reply: A.talkReply(t.choices) } : g ? { at: "guide:" + nearBy, line: g.hello, reply: "" } : { at: "", line: "", reply: "" };
+  const msg = t ? { at: talkAt(), line: t.line, reply: A.talkReply(t.choices) } : g ? { at: "guide:" + nearBy, line: g.hello, reply: "" }
+    : autoClerk() || { at: "", line: "", reply: "" };
   const key = JSON.stringify([msg, sceneUnity.target === relay]);
   if (key === sentSay) return;
   sentSay = key;
   town().say(msg);
+}
+// autoClerk (Aaron 11/28: the clerk talks in 一起開始 too): with no customer walked, the clerk of the room shown says
+// the step of the customer whose step changed last, by name (no answer: nobody is walked to give one), while that
+// customer's line is under the scene (renderCaption: until CAPTION_KEEP after its end); null otherwise.
+let clerkFor = "";
+const clerkSaid = new Map(); // consumer -> its task and line last said
+function autoClerk() {
+  if (sentPlay || !presenting || inTown || !hasTown()) return null;
+  for (const m of captionShown) {
+    const k = m.task + "|" + A.clerkStep(m).line;
+    if (clerkSaid.get(m.consumer) !== k) { clerkSaid.set(m.consumer, k); clerkFor = m.consumer; }
+  }
+  const m = captionShown.find((x) => x.consumer === clerkFor) || captionShown[captionShown.length - 1];
+  return m ? { at: "clerk", line: m.name + "，\n" + A.clerkStep(m).line, reply: "" } : null;
 }
 // answer: the customer's answer i of the open talk; false when there is none (or a start already under way).
 function answer(i) {
   const now = talkNow(), t = now && now.t, c = t && t.choices[i];
   if (!c || (c.key === "start" && (starting || simulating))) return false;
   if (c.key === "next") talk.n += 1;
+  else if (c.key === "start") Object.assign(talk, { follow: true, prev: sceneTask(talk.consumer) }); // the clerk stays, following the transaction
   else talk = null;
   renderTalk();
   if (c.key === "start") startAll(now.st.pair);
@@ -993,6 +1018,7 @@ addEventListener("keydown", (e) => { if (e.key === "Escape" && presenting && !do
 // its line CAPTION_KEEP ms, then leaves the scene to the next (Aaron 10/27: it lingered in the town).
 const CAPTION_KEEP = 6000;
 let shownCaption = "";
+let captionShown = []; // the models whose lines are under the scene (autoClerk follows one)
 const captionDone = new Map(); // consumer -> [its task and final caption, when it was first shown]
 function renderCaption(models) {
   const box = $("present-caption");
@@ -1005,6 +1031,7 @@ function renderCaption(models) {
     return now - d[1] < CAPTION_KEEP;
   }) : [];
   box.hidden = !lines.length;
+  captionShown = lines;
   const key = JSON.stringify(lines.map((m) => [m.caption, !!m.ahead]));
   if (key === shownCaption) return;
   shownCaption = key;
@@ -1033,6 +1060,12 @@ function pairFor(k) {
     .map((c) => scs.find((x) => x.consumer_id === c && !A.isPay(x.contract)) || scs.find((x) => x.consumer_id === c)).filter(Boolean);
 }
 
+// presentTraits: the host's, as the five steps take them.
+function presentTraits() {
+  const st = (lastReady && lastReady.status) || {};
+  const ha = st.human_approval;
+  return { payments: A.paysOn(st.payment_capability) ? st.payment_capability : "", authenticator: (ha && ha.sources && ha.sources.authenticator) || "" };
+}
 let shownPresent = "";
 function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRuns.runs) || []) {
   const v = creds.view();
@@ -1049,9 +1082,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
   sendPlay();
   renderTalk(); // closes when the customer, the room or the mode changed
   if (!on) return;
-  const st = (lastReady && lastReady.status) || {};
-  const ha = st.human_approval;
-  const traits = { payments: A.paysOn(st.payment_capability) ? st.payment_capability : "", authenticator: (ha && ha.sources && ha.sources.authenticator) || "" };
+  const traits = presentTraits();
   const vs = A.venues(allScenarios());
   const active = runs.filter((r) => r.live === "running" || r.live === "stopping");
   const venues = vs.map((k, i) => {
@@ -1066,6 +1097,7 @@ function renderPresent(runs = (lastRuns && lastRuns.gen === creds.gen && lastRun
     // The screen plays the steps in order: when it trails, where the real task already is.
     ahead: scene.behind(s.consumer) ? A.showCustomer(s.consumer, scene.latest(s.consumer), delegationOf(s.task), traits).caption : "" }));
   renderCaption(custs);
+  renderTalk(); // the clerk of 一起開始 follows the lines just shown
   const town = hasTown() && inTown;
   const key = JSON.stringify([venues, venue, town, hasTown(), sentPlay, custs, starting, simulating, $("run-status").textContent, active.map((r) => r.consumer_id)]);
   if (key === shownPresent) return;

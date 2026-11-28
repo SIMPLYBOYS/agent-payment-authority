@@ -655,6 +655,33 @@ test("clerkTalk: the clerk asks; the talk starts only what the button starts (Aa
   assert.deepEqual(A.clerkTalk("街角烘焙咖啡", A.venueStart([], [], true), true).choices.map((c) => c.key), ["later"]);
 });
 
+test("clerkStep: the clerk says where the customer's transaction is, by its five steps", () => {
+  const m = (...st) => ({ steps: st.map(([state, text = ""]) => ({ state, text })) });
+  const say = (x) => Object.entries(A.CLERK_STEP).find(([, v]) => v === A.clerkStep(x).line)[0];
+  assert.equal(say(null), "confirm", "no task yet: the delegation is being confirmed");
+  assert.equal(say(m(["now", "等待開始"], ["todo"], ["todo"], ["todo"], ["todo"])), "confirm");
+  assert.equal(say(m(["done"], ["now"], ["todo"], ["todo"], ["todo"])), "choosing");
+  assert.equal(say(m(["done"], ["done"], ["todo"], ["todo"], ["todo"])), "quoted");
+  assert.equal(say(m(["done"], ["done"], ["now"], ["todo"], ["todo"])), "ask");
+  assert.equal(say(m(["done"], ["done"], ["done", "在委託範圍內，自動放行"], ["now"], ["todo"])), "paying");
+  assert.equal(say(m(["done"], ["done"], ["done", "在委託範圍內，自動放行"], ["off"], ["off"])), "allowed");
+  assert.equal(say(m(["done"], ["done"], ["done", "本人核准了"], ["off"], ["off"])), "approved");
+  assert.equal(say(m(["done"], ["done"], ["fail", "不符合這間店的要求，已拒絕"], ["off"], ["todo"])), "refused");
+  assert.equal(say(m(["done"], ["done"], ["fail", "本人已收回委託，不再付款"], ["off"], ["todo"])), "revoked");
+  assert.equal(say(m(["done"], ["fail", "任務已取消"], ["todo"], ["todo"], ["todo"])), "notpaid");
+  assert.equal(say(m(["done"], ["done"], ["done"], ["unknown", "付款結果未確認"], ["todo"])), "unknown");
+  assert.equal(say(m(["done"], ["done"], ["done"], ["done"], ["now"])), "delivering");
+  assert.equal(say(m(["done"], ["done"], ["done"], ["done"], ["done"])), "delivered");
+  assert.equal(say(m(["done"], ["done"], ["done"], ["done"], ["fail", "交付失敗；商店已退款（第 3 筆鏈上交易）"])), "refunded");
+  assert.equal(say(m(["done"], ["done"], ["done"], ["done"], ["fail", "已付款，交付失敗，待人工處理"])), "undelivered");
+  assert.deepEqual([A.clerkStep(null).choices, A.clerkStep(null).ended], [[{ key: "later", text: "好" }], false], "the answer only closes the talk");
+  const done = A.clerkStep(m(["done"], ["done"], ["done"], ["done"], ["done"]));
+  assert.deepEqual([done.choices, done.ended], [[{ key: "later", text: "謝謝！" }], true], "over: thanks");
+  assert.equal(A.clerkStep(m(["done"], ["done"], ["now"], ["todo"], ["todo"])).ended, false, "an Ask waiting is not over, though the Agent's process ended");
+  assert.equal(A.clerkStep(m(["done"], ["done"], ["done", "本人核准了"], ["now"], ["todo"])).ended, false, "paying is not over");
+  for (const l of Object.values(A.CLERK_STEP)) assert.ok(l.split("\n").every((x) => x.length <= 14), "comic-length lines: " + l);
+});
+
 test("personTalk: a guide's fixed lines, one answer each, then the end (Aaron 11/14)", () => {
   const town = JSON.parse(readFileSync(new URL("../../unity/AgentPaymentAuthority/Assets/APA/Resources/Town/town.json", import.meta.url)));
   const guides = town.walkers.filter((w) => w.talk).map((w) => w.talk).sort();

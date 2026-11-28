@@ -4,7 +4,7 @@
 // in a new 0700 temporary directory, removed at the end; nothing under var/ is read or written but the Foundry
 // tools (var/tools); the chain is a fresh anvil on its own port; the approver is a CDP virtual authenticator.
 //
-//   node scripts/video/film.mjs [--stage up|sample|full|fooled|transit|revoke|ekyc] [--ekyc SESSION] [--out DIR]
+//   node scripts/video/film.mjs [--stage up|sample|full|fooled|transit|revoke|clerk|ekyc] [--ekyc SESSION] [--out DIR]
 //
 // --ekyc SESSION (docs/commercial-ekyc.md): the customers' attributes from that finished Didit verification
 // (apa-issuer ekyc --session, the key file var/ekyc/didit-sandbox.key: the one thing read under var/ besides the
@@ -122,6 +122,7 @@ async function full(b, unityUp, demo) {
   }
   log("film: presenting " + (await click("#present-toggle")));
   await sleep(4000);
+  await b.evaluate(SAY_HOOK); // the clerk's lines (autoClerk), logged at the end
   const frames = join(out, "full-frames");
   const stop = capture(s, frames);
   const t0 = Date.now() / 1000;
@@ -172,6 +173,7 @@ async function full(b, unityUp, demo) {
     if (venue !== venues[venues.length - 1]) { await click("#present-town"); await sleep(4000); }
   }
   mark("end");
+  for (const m of await b.evaluate(`window.apaSaid`)) if (m.line) log("film: say " + JSON.stringify(m.line));
   // What the Store says of each run: the decision and the payment (the check of a new venue's rule, not a picture).
   const host = demo.tokens().host;
   const get = async (path) => (await fetch("http://" + HOST + path, { headers: { Authorization: "Bearer " + host } })).json();
@@ -250,6 +252,45 @@ async function revoke(b) {
   writeFileSync(join(out, "marks.json"), JSON.stringify(marks, null, 1));
   encode(got, frames, join(out, "full.mp4"));
   log("film: " + join(out, "full.mp4"));
+}
+
+// SAY_HOOK: every talk the host page sends its Unity (Say), kept in window.apaSaid.
+const SAY_HOOK = `import("/ui/app.js").then((m) => { const u = m.shop().instance, f = u.SendMessage.bind(u); window.apaSaid = [];
+  u.SendMessage = (o, k, v) => { if (k === "Say") window.apaSaid.push(JSON.parse(v)); return f(o, k, v); }; return true; })`;
+
+// clerk (the clerk follows the steps, web/adapter.js CLERK_STEP): customer A walked in game mode, in the bookshop at
+// its counter (the report Unity sends there), the clerk asked and answered 1; the Ask approved when it shows; every
+// line sent to Unity's Say kept, a screenshot each time it changes, until the receipt and the answer "謝謝！".
+async function clerk(b) {
+  const click = (sel) => b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e || e.disabled) return false; e.click(); return true; })()`);
+  log("film: presenting " + (await click("#present-toggle")));
+  await sleep(4000);
+  log("film: walking A " + (await click('#present-play button[data-play="consumer-a"]')));
+  await sleep(2000);
+  await b.evaluate(SAY_HOOK);
+  log("film: books " + (await click('button.venue-item[data-venue="books"]')));
+  await sleep(4000);
+  await b.evaluate(`window.apaUnityReport("counter", 0, 0, "books")`);
+  const key = (code, n) => b.send("Input.dispatchKeyEvent", { type: "keyDown", code, key: n, windowsVirtualKeyCode: n.charCodeAt(0) })
+    .then(() => b.send("Input.dispatchKeyEvent", { type: "keyUp", code, key: n, windowsVirtualKeyCode: n.charCodeAt(0) }));
+  let seen = 0, shots = 0, answered = false;
+  for (const end = Date.now() + 150000; Date.now() < end;) {
+    const said = await b.evaluate(`window.apaSaid`);
+    for (; seen < said.length; seen++) {
+      const m = said[seen];
+      log("film: say " + JSON.stringify(m));
+      if (m.line) { await sleep(600); const png = await b.send("Page.captureScreenshot", { format: "jpeg", quality: 80 }); writeFileSync(join(out, "say-" + String(++shots).padStart(2, "0") + ".jpg"), Buffer.from(png.data, "base64")); }
+    }
+    const last = said[said.length - 1] || {};
+    if (!answered && /要請 Agent 幫你買什麼/.test(last.line || "")) { await sleep(1500); await key("Digit1", "1"); answered = true; }
+    if (await b.evaluate(`!!document.querySelector("#approval .approval-head[data-state=pending]") && !!document.querySelector("#approval .approval-approve:not([disabled])")`)) {
+      await sleep(2000); await click("#approval .approval-approve");
+    }
+    if (last.reply === "謝謝！") { await sleep(1500); await key("Space", " "); await sleep(1000); }
+    if (answered && last.line === "" && said.length > 2) break;
+    await sleep(300);
+  }
+  log("film: clerk " + seen + " lines sent, " + shots + " screenshots in " + out);
 }
 
 // transit (docs/commercial-transit.md, docs/commercial-atm.md, Aaron 11/9): customer A walked in game mode, each walk
@@ -509,6 +550,7 @@ try { stack: {
   else if (stage === "fooled") await fooled(b);
   else if (stage === "transit") await transit(b);
   else if (stage === "revoke") await revoke(b);
+  else if (stage === "clerk") await clerk(b);
   else if (stage !== "up") throw new Error("stage " + stage + " is not written yet");
 } } finally {
   if (b) b.close();

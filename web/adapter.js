@@ -561,6 +561,45 @@ export function clerkTalk(venueName, st, device) {
     note: device ? "接著用你的裝置確認委託" : "接著確認委託（模擬，不是本人驗證）" };
 }
 
+// CLERK_STEP: what the clerk says of the customer's transaction, by its five steps (showCustomer): the step reached and
+// its state. Fixed lines only (OfficeFont has every one); a step's own words stay on the transaction card.
+export const CLERK_STEP = {
+  confirm: "好的！\n先確認你的委託喔。",
+  choosing: "Agent 正在\n幫你挑商品…",
+  quoted: "報價好了，\n正在看要不要問你。",
+  ask: "這筆超過自動範圍，\n要你本人核准喔！",
+  allowed: "在你給的範圍內，\n直接幫你結帳！",
+  approved: "收到你的核准，\n幫你結帳！",
+  revoked: "委託收回了，\n這筆不結帳囉。",
+  refused: "這筆被擋下了，\n錢沒有動。",
+  notpaid: "這筆沒有付款，\n錢沒有動。",
+  paying: "付款處理中，\n等鏈上確認…",
+  unknown: "付款結果\n還在確認中…",
+  delivering: "收到款了，\n馬上交給你！",
+  delivered: "交付好了！\n收據給你。",
+  refunded: "沒交到東西，\n錢已經退給你了。",
+  undelivered: "抱歉沒交到，\n會有人來處理。",
+};
+// clerkStep (the clerk follows the steps): m is the walked customer's showCustomer in this venue (null: its task not
+// started yet, the delegation being confirmed). ended: nothing more will happen to it, by its steps (the Agent's own
+// process ends at its request, long before the payment).
+const CLERK_END = new Set(["revoked", "refused", "notpaid", "delivered", "refunded", "undelivered", "allowed", "approved"]);
+export function clerkStep(m) {
+  const s = m ? m.steps : [];
+  let i = s.length - 1;
+  while (i > 0 && (s[i].state === "todo" || s[i].state === "off")) i--;
+  const st = i >= 0 ? s[i] : null;
+  const key = !st || (i === 0 && st.state !== "done") ? "confirm"
+    : st.state === "fail" ? (i === 4 ? (/退款/.test(st.text) ? "refunded" : "undelivered") : /收回/.test(st.text) ? "revoked" : i === 2 ? "refused" : "notpaid")
+    : st.state === "unknown" ? "unknown"
+    : i === 1 ? (st.state === "done" ? "quoted" : "choosing")
+    : i === 2 ? (st.state === "now" ? "ask" : /自動放行/.test(st.text) ? "allowed" : "approved")
+    : i === 3 ? "paying"
+    : st.state === "done" ? "delivered" : "delivering";
+  const ended = CLERK_END.has(key); // allowed, approved: only when no payment follows (step 4 off)
+  return { who: "店員", line: CLERK_STEP[key], choices: [{ key: "later", text: ended ? "謝謝！" : "好" }], note: "", ended };
+}
+
 // PEOPLE (Aaron 11/14: near a person, a key starts the talk): the town's
 // guides by their talk id (town.json), a few with a purpose, fixed lines
 // (no generated talk): hello as the customer comes near, then the lines.
